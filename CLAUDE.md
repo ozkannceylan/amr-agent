@@ -120,6 +120,7 @@ graph TD
 |---|---|---|
 | safety-spec | Safety requirements spec, one acceptance criterion per function | docs/safety/ |
 | interface | VDA 5050 message subset, OPC UA node model, handshake tables | docs/interfaces/ |
+| arch-docs | Architecture decision records, roadmap and plan upkeep | docs/adr/, docs/roadmap.md, docs/PLAN.md |
 | plc | Standard and safety program, TIA exports | plc/ |
 | fleet | Fleet manager service, MQTT and OPC UA clients | fleet/ |
 | agv-ros2 | VDA 5050 client node, Nav2 bridge | agv/ |
