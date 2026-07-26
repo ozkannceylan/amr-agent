@@ -1,7 +1,10 @@
 # TODO
 
-## interface
-- m1-05 handshake revision — done when DoorwayClear/ChargerVehicleDocked and operatingMode/errors rows are in the §6 map and §7/step 8 reference the resolved nodes.
+## safety-spec
+- m2-01 SRS — done when every safety function in docs/safety/SRS.md has a trigger, a reaction and an acceptance test.
 
 ## verifier
-- m1-04 review M1 — done when a pass verdict is filed in docs/reports/.
+- m2-02 review SRS — done when a pass verdict is filed in docs/reports/.
+
+## fleet (carried forward)
+- Confirm handshake timeout constants when the fleet manager is specified (M5).

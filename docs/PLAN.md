@@ -1,20 +1,19 @@
 # PLAN
 
-## Current gate: M1 — Interface contracts (in progress)
+## Current gate: M2 — Safety requirements spec (in progress)
 
-Exit criterion: VDA 5050 subset and OPC UA node model documented in
-docs/interfaces/ and reviewed (verifier pass), every shared data item
-with exactly one owner (invariant 10).
+Exit criterion: every safety function has a trigger, a reaction and an
+acceptance test (CLAUDE.md section 6), consistent with invariants 1, 2,
+7 and the section 9 conventions; verifier pass.
 
-## Briefs to close M1
+## Briefs to close M2
 
-1. m1-01 interface — docs/interfaces/vda5050-subset.md (message subset
-   traceable to the official VDA 5050 v2 schema).
-2. m1-02 interface — docs/interfaces/opcua-nodes.md (node model
-   mirroring PLC tag names).
-3. m1-03 interface — docs/interfaces/handshake-tables.md (station
-   handshakes + single-owner data map; depends on 01 and 02).
-4. m1-04 verifier — read-only review of all three.
+1. m2-01 safety-spec — docs/safety/SRS.md.
+2. m2-02 verifier — read-only review.
 
-Session mode: owner-approved autonomous run through the gates; only
-TIA Portal implementation remains with the owner at the end.
+M0 closed 2026-07-26 (reports m0-04, m0-07, m0-09).
+M1 closed 2026-07-26 (report m1-04).
+Session mode: owner-approved autonomous run; only TIA Portal
+implementation remains with the owner at the end. M3 feasibility is
+proven in-container (ROS 2 Jazzy + Gazebo Harmonic + Robotnik stack
+build and run headless).

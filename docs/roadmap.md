@@ -1,8 +1,9 @@
 # Roadmap
 
-Current gate: M1 — in progress.
+Current gate: M2 — in progress.
 
 M0 closed 2026-07-26, verified in docs/reports/m0-04-verify.md.
+M1 closed 2026-07-26, verified in docs/reports/m1-04-verify.md.
 
 | Gate | Deliverable | Closes when |
 |---|---|---|
