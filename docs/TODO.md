@@ -1,4 +1,4 @@
 # TODO
 
-## verifier
-- m0-07 verify platform addendum — done when a pass verdict is filed in docs/reports/.
+## owner
+- Decide the ROS 2 distribution (Jazzy vs Humble) before M3 — done when recorded as an accepted ADR.
