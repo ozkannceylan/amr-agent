@@ -241,3 +241,38 @@ Naming. PLC tags use PascalCase and describe the physical thing plus its meaning
 - If a library or tool would introduce a new dependency, propose it in the report and wait.
 - If a gate criterion cannot be met as written, say so instead of redefining the criterion.
 - Prefer a short document over a long one, and a diagram over prose. This project is judged on clarity of architecture, not volume of code.
+
+---
+
+## 11. Tracking files
+
+Three files carry state between sessions. They are part of the
+deliverable, not scratch notes. Update them as part of the work,
+never in advance of it.
+
+### docs/PLAN.md
+Current gate, its exit criterion, and the ordered list of briefs
+required to close it. Rewritten only when the plan actually changes.
+One screen long at most.
+
+### docs/TODO.md
+Open items only, grouped by agent, each with a one line definition of
+done. Closed items are deleted, not struck through. This file is a
+work queue, not a history.
+
+### docs/LESSONS.md
+Append only. One entry per correction, dead end or surprise:
+
+  date | what was attempted | what went wrong | the rule now
+
+Read this file at the start of every session, before issuing any
+brief. Its purpose is to prevent the same mistake twice across
+sessions and across agents.
+
+### Orchestrator obligations
+- Read LESSONS.md before the first delegation of a session.
+- Update PLAN.md when a gate opens or its brief list changes.
+- Update TODO.md when a brief is issued and when a report closes it.
+- Append to LESSONS.md whenever a report contains a correction, a
+  blocked status, or an ADR proposal.
+- Never let these three files disagree with docs/roadmap.md.
