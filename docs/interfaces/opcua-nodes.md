@@ -94,6 +94,7 @@ client reads these nodes (invariants 1, 7). No client decision may substitute fo
 | DoorOpen | Bool | Boolean | R | on-change | PLC | Door at open end position (PLC sensor) |
 | DoorClosed | Bool | Boolean | R | on-change | PLC | Door at closed end position (PLC sensor) |
 | DoorFault | Bool | Boolean | R | on-change | PLC | Door drive or sequence fault |
+| DoorwayClear | Bool | Boolean | R | on-change | PLC | Doorway clearance measured by a PLC-side sensor. Informational input to handshake sequencing (m1-03); not a safety path — safety clearance monitoring belongs to the F-CPU (invariant 1) |
 
 ### Door/Handshake/
 
@@ -122,6 +123,7 @@ logic formed from interlocks (including the F-CPU-mirrored safety state).
 | ChargerContactorClosed | Bool | Boolean | R | on-change | PLC | Charge contactor closed (informational; the closing decision is PLC interlock logic) |
 | ChargerOutputCurrent | Real | Float | R | cyclic | PLC | Measured charge current, A |
 | ChargerFault | Bool | Boolean | R | on-change | PLC | Charger fault |
+| ChargerVehicleDocked | Bool | Boolean | R | on-change | PLC | Diagnostic: vehicle detected in the docked position by the PLC's own sensor |
 
 ### Charger/Handshake/
 

@@ -7,3 +7,7 @@ open_questions:
   - Door handshake uses PassageRequest (passage semantics) rather than DoorOpenRequest, to keep the client away from actuator vocabulary. Confirm the m1-03 sequence spec adopts the same wording.
   - Suggested sampling/publish intervals (100/250 ms) are advisory; final values belong to the PLC and fleet agents.
 next_suggested:      m1-03 handshake sequence tables, using the Request/Ready/Busy/Done/Fault + token + Seq node set defined here.
+
+revision 1 (per m1-03 section 7 "additions required"):
+  - Added Door/DoorwayClear (Bool, R, on-change, PLC-owned): doorway clearance from a PLC-side sensor, needed by the m1-03 passage sequence; informational only, not a safety path (safety clearance is F-CPU responsibility).
+  - Added Charger/ChargerVehicleDocked (Bool, R, on-change, PLC-owned): diagnostic vehicle-docked detection from the PLC's own sensor, needed for charge sequencing diagnostics.
