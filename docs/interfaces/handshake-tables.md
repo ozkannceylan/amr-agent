@@ -61,7 +61,7 @@ Preconditions: handshake idle, `DoorFault` = 0.
 | 5 | PLC | Open and hold door | OPC `PassageBusy` (moving), then `PassageReady`, `DoorOpen` | `PassageReady` = 1 and `DoorOpen` = 1 | 15 s | `PassageFault`/`DoorFault` or timeout → §5; vehicle was never released, stays at hold node |
 | 6 | Fleet manager | Extend base through doorway to exit node; keep `PassageRequest` = 1 for the whole transit | VDA order | `state` shows extended base; vehicle moving | next `state` ≤ 30 s | Rejected update: withdraw passage request after vehicle confirmed still at hold node |
 | 7 | AGV | Traverse doorway | VDA state | `lastNodeId` = exit node | 120 s transit | Vehicle stalled in doorway: do **not** withdraw request (door stays held); report, operator intervention |
-| 8 | PLC | Detect doorway clear (PLC-side clearance detection — see §7 item 1), close door | OPC `PassageBusy` (closing), then `PassageDone`, `DoorClosed` | `PassageDone` = 1 and `DoorClosed` = 1 | 30 s after clear | `PassageFault`/`DoorFault`: door state unknown → block further passages, report; vehicle already through, may continue |
+| 8 | PLC | Detect doorway clear (`DoorwayClear` = 1), close door | OPC `Door/DoorwayClear`, `PassageBusy` (closing), then `PassageDone`, `DoorClosed` | `PassageDone` = 1 and `DoorClosed` = 1 | 30 s after `DoorwayClear` = 1 | `PassageFault`/`DoorFault`: door state unknown → block further passages, report; vehicle already through, may continue |
 | 9 | Fleet manager | Verify **both** `lastNodeId` = exit node and `PassageDone` = 1, then withdraw: `PassageRequest` = 0, clear token | OPC `Door/Handshake/` | PLC clears `PassageDone` and `PassageTokenAck` | 5 s | PLC stuck non-idle: report, door out of service until resync |
 
 The door's anti-crush protection is not this handshake: it is the F-CPU /
@@ -126,11 +126,15 @@ recompute. "Wins" states which value is authoritative where a second party
 | Order execution progress (lastNodeId, nodeStates, edgeStates, actionStates, driving, paused, newBaseRequest) | VDA `state` | AGV | Fleet manager | Fleet manager must not mark a node reached from pose or timers — **AGV wins** |
 | Vehicle connection state | VDA `connection` | AGV (+ broker last will) | Fleet manager | Protocol-level only; vehicle health comes from `state`, not from this |
 | Vehicle capabilities and limits | VDA `factsheet` | AGV | Fleet manager | Concrete numerics owned by agv layer (m1-01 §8) |
+| Vehicle operating mode | VDA `state.operatingMode` | AGV | Fleet manager (only AUTOMATIC vehicles receive orders) | — |
+| Vehicle errors | VDA `state.errors[]` (errorType, errorLevel, errorReferences) | AGV | Fleet manager | Fleet manager must not synthesize vehicle errors from timeouts — its own timeouts are fleet-side faults, a distinct item; **AGV wins** for vehicle errors |
 | Vehicle safety status | VDA `state.safetyState` (eStop, fieldViolation) | AGV (onboard safety) | Fleet manager (report/alert only) | Report-only mirror of what onboard safety already did |
 | Cell safety status | OPC `Safety/` (EStopActive, ProtectiveStopActive, SafetyDoorClosed, SafetyResetRequired) | F-CPU (PLC mirrors, read-only) | Fleet manager (report/alert only) | Never merged with vehicle safetyState into a computed "cell safe" flag used for control — each safety layer acts only on its own inputs (invariants 1, 7) |
 | Zone A physical occupancy | OPC `Cell/ZoneAOccupied` | PLC (its sensors) | Fleet manager | Fleet manager could derive occupancy from vehicle poses — for the *physical* zone the **PLC wins**; the derived view is only the input to reservations |
 | Zone reservations / traffic state | none (fleet-internal) | Fleet manager | — | Never exposed on the PLC (m1-02 §8) and not expressed as VDA zone sets (m1-01 §2) |
 | Station equipment state | OPC status nodes (ConveyorRunning, ConveyorFault, ConveyorPalletPresent, DoorOpen, DoorClosed, DoorFault, ChargerAvailable, ChargerContactorClosed, ChargerFault) | PLC | Fleet manager | Fleet manager must not infer door/conveyor position from elapsed time — **PLC wins** |
+| Doorway clearance | OPC `Door/DoorwayClear` | PLC (its sensor) | Fleet manager (door step 8 supervision, diagnostics) | Fleet manager could infer clearance from `lastNodeId` past the door — for closing the door the **PLC wins**; the AGV value is only the fleet's own transit check (step 9 requires both) |
+| Vehicle docked at charger (physical) | OPC `Charger/ChargerVehicleDocked` | PLC (its sensor) | Fleet manager (diagnostic: mis-dock vs charger fault at step 5) | Logical arrival (`lastNodeId` = bay node) stays AGV-owned; neither value substitutes for the other |
 | Handshake request side (TransferRequest, TransferDirection, PassageRequest, ChargeRequest) | OPC `*/Handshake/` | Fleet manager | PLC | — |
 | Handshake tokens (TransferToken, PassageToken, ChargeToken) | OPC `*/Handshake/` | Fleet manager | PLC (opaque echo only, never parsed) | — |
 | Token acks (`*TokenAck`) | OPC `*/Handshake/` | PLC | Fleet manager | — |
@@ -139,12 +143,11 @@ recompute. "Wins" states which value is authoritative where a second party
 | Heartbeats | `CellHeartbeatFleet`: Fleet manager; `CellHeartbeatPlc`: PLC | each its own | the other side | Loss = degraded mode only (invariant 2) |
 | Cell mode and alarms (CellOperatingMode, CellAlarmActive) | OPC `Cell/` | PLC | Fleet manager | — |
 | Load-on-vehicle bookkeeping | none (fleet-internal, derived from completed conveyor handshakes) | Fleet manager | — | No sensor exists (m1-01 omits `loads`; `ConveyorPalletPresent` is station-side only). Single owner is the fleet manager; nobody else may keep a copy |
-| Physical docking at charger | PLC-internal interlock (not exposed) | PLC | — | Logical arrival (`lastNodeId` = bay node) is AGV-owned; each side acts only on its own item, neither republishes the other's |
 
 ## 7. Additions required (addressed to m1-01 / m1-02 — nothing invented here)
 
-| # | Addressed to | Needed item | Why |
+| # | Addressed to | Item | Status |
 |---|---|---|---|
-| 1 | m1-02 opcua-nodes.md | Door passage clearance detection. `PassageDone` semantics ("passage complete, door closed again") require the PLC to know the doorway is clear before closing (door table step 8), but m1-02 defines no such input or status node. Required: the PLC-side clearance sensor as a design assumption of the Door sequence, and recommended: a read-only `DoorwayClear` (Bool, owner PLC) status node so the fleet manager can diagnose a door that never closes. | Without it, step 8 has no defined trigger |
-| 2 | m1-02 opcua-nodes.md (optional) | Read-only `ChargerVehicleDocked` (Bool, owner PLC). Lets the fleet manager distinguish "mis-docked" from "charger unhealthy" when `ChargeReady` stays false (charger table step 5). Diagnostic only; the handshake works without it. | Better fault triage |
+| 1 | m1-02 opcua-nodes.md | Door passage clearance detection: `PassageDone` semantics require the PLC to know the doorway is clear before closing (door table step 8). | **Resolved** — m1-02 now defines read-only `Door/DoorwayClear` (Bool, owner PLC); step 8 and the §6 map reference it directly |
+| 2 | m1-02 opcua-nodes.md | Diagnostic to distinguish "mis-docked" from "charger unhealthy" when `ChargeReady` stays false (charger table step 5). | **Resolved** — m1-02 now defines read-only `Charger/ChargerVehicleDocked` (Bool, owner PLC); diagnostic only, the handshake works without it |
 | 3 | m1-01 vda5050-subset.md | **None.** Arrival and hold at every station use end-of-base mechanics (`released` flags) plus `state` reporting; the vehicle is passive during conveyor transfer, so the omitted pick/drop actions stay omitted. If a future vehicle must actively drive its load deck, pick/drop enter scope — that is an m1-01 change, not a silent extension here. | Recorded so the omission is a decision, not an oversight |

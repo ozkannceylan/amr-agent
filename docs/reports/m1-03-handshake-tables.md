@@ -13,3 +13,15 @@ open_questions:
     fleet-layer configuration and should be confirmed when the fleet manager
     is specified (M5).
 next_suggested:      Revise m1-02 to resolve addition 1 (door clearance), then M1 review of all three interface documents together.
+
+revision 1 (2026-07-26, per M1 review):
+  - §6 map: added rows for Door/DoorwayClear and Charger/ChargerVehicleDocked
+    (owner PLC, consumer fleet manager, diagnostic/status), now that m1-02
+    defines both; removed the superseded "PLC-internal, not exposed" docking
+    row so no item appears twice.
+  - §6 map: added explicit rows for VDA state.operatingMode and state.errors[]
+    (owner AGV, consumer fleet manager).
+  - §7 items 1 and 2 marked resolved against the revised m1-02.
+  - Door table step 8 now references DoorwayClear directly.
+  - First two open_questions above are thereby closed; the timeout-constants
+    question remains open for M5.
