@@ -1,0 +1,294 @@
+<?xml version="1.0" ?>
+<!--
+  warehouse.sdf - M3 warehouse world for the amr-agent project.
+
+  Layout (top view, metres, origin at floor centre):
+
+    x in [-15, +15], y in [-10, +10], walls 0.2 thick, 2.5 high.
+
+        +y (north)
+         ^
+         |   WallNorth
+         |   [RackA1]   [RackA2]   [RackA3]      ConveyorStation (east wall)
+         |        --- Aisle A (y ~ +1.5) ---
+         |   [RackB1]   [RackB2]   [RackB3]
+         |        --- Aisle B (y ~ -5)  ---
+         |   ChargerStation (west wall)      DoorGap (south wall, x ~ +6)
+         +-----------------------------------------------> +x (east)
+
+  Sensor note: the RB-KAIROS lidars are gz "gpu_lidar" sensors, so this
+  world MUST load gz-sim-sensors-system (with a render engine) in addition
+  to physics / user-commands / scene-broadcaster. The IMU system is loaded
+  for the onboard vectornav IMU.
+-->
+<sdf version="1.8">
+  <world name="warehouse">
+
+    <physics type="ode">
+      <max_step_size>0.02</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>50</real_time_update_rate>
+    </physics>
+
+    <plugin name="gz::sim::systems::Physics" filename="libgz-sim-physics-system.so"/>
+    <plugin name="gz::sim::systems::UserCommands" filename="libgz-sim-user-commands-system.so"/>
+    <plugin name="gz::sim::systems::SceneBroadcaster" filename="libgz-sim-scene-broadcaster-system.so"/>
+    <plugin name="gz::sim::systems::Sensors" filename="libgz-sim-sensors-system.so">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin name="gz::sim::systems::Imu" filename="libgz-sim-imu-system.so"/>
+
+    <scene>
+      <ambient>1 1 1 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <shadows>false</shadows>
+      <grid>false</grid>
+    </scene>
+
+    <light name="sun" type="directional">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>1.0 1.0 1.0 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.3 0.3 -1.0</direction>
+    </light>
+
+    <gravity>0 0 -9.8</gravity>
+
+    <!-- ============================ Floor ============================ -->
+    <model name="Floor">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>30 20</size></plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>30 20</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.55 0.55 0.55 1</ambient>
+            <diffuse>0.55 0.55 0.55 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ======================= Perimeter walls ======================= -->
+    <!-- North wall: full width at y=+10 -->
+    <model name="WallNorth">
+      <static>true</static>
+      <pose>0 10.1 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>30.6 0.2 2.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>30.6 0.2 2.5</size></box></geometry>
+          <material><ambient>0.8 0.8 0.75 1</ambient><diffuse>0.8 0.8 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- South wall in two segments leaving a 4 m door opening
+         centred at x=+6 (opening spans x in [4, 8]). -->
+    <model name="WallSouthWest">
+      <static>true</static>
+      <pose>-5.65 -10.1 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>19.3 0.2 2.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>19.3 0.2 2.5</size></box></geometry>
+          <material><ambient>0.8 0.8 0.75 1</ambient><diffuse>0.8 0.8 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WallSouthEast">
+      <static>true</static>
+      <pose>11.65 -10.1 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>7.3 0.2 2.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>7.3 0.2 2.5</size></box></geometry>
+          <material><ambient>0.8 0.8 0.75 1</ambient><diffuse>0.8 0.8 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- East / west walls at x=+-15 -->
+    <model name="WallEast">
+      <static>true</static>
+      <pose>15.1 0 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.2 20 2.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.2 20 2.5</size></box></geometry>
+          <material><ambient>0.8 0.8 0.75 1</ambient><diffuse>0.8 0.8 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WallWest">
+      <static>true</static>
+      <pose>-15.1 0 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.2 20 2.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.2 20 2.5</size></box></geometry>
+          <material><ambient>0.8 0.8 0.75 1</ambient><diffuse>0.8 0.8 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ========================= Door marker ========================= -->
+    <!-- DoorGap: two posts and a lintel marking the 4 m opening in the
+         south wall (x in [4, 8]). The opening itself stays free so the
+         vehicle can drive through; the PLC-controlled door will act here
+         in later gates. -->
+    <model name="DoorGap">
+      <static>true</static>
+      <pose>6 -10.1 0 0 0 0</pose>
+      <link name="post_west">
+        <pose>-2.1 0 1.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.2 0.3 2.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.2 0.3 2.5</size></box></geometry>
+          <material><ambient>0.9 0.6 0.1 1</ambient><diffuse>0.9 0.6 0.1 1</diffuse></material>
+        </visual>
+      </link>
+      <link name="post_east">
+        <pose>2.1 0 1.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.2 0.3 2.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.2 0.3 2.5</size></box></geometry>
+          <material><ambient>0.9 0.6 0.1 1</ambient><diffuse>0.9 0.6 0.1 1</diffuse></material>
+        </visual>
+      </link>
+      <link name="lintel">
+        <pose>0 0 2.35 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>4.4 0.3 0.3</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.4 0.3 0.3</size></box></geometry>
+          <material><ambient>0.9 0.6 0.1 1</ambient><diffuse>0.9 0.6 0.1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ========================= Rack rows =========================== -->
+    <!-- Row A at y=+4, row B at y=-1. Each rack 4.0 x 1.2 x 2.0.
+         Aisle A runs between the rows (y ~ +1.5, ~3.8 m clear).
+         Aisle B runs south of row B (y < -1.6).
+         2 m cross-gaps between racks at x ~ -3 and x ~ +3. -->
+    <model name="RackA1">
+      <static>true</static>
+      <pose>-6 4 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>4.0 1.2 2.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>4.0 1.2 2.0</size></box></geometry>
+          <material><ambient>0.2 0.35 0.7 1</ambient><diffuse>0.2 0.35 0.7 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackA2">
+      <static>true</static>
+      <pose>0 4 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>4.0 1.2 2.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>4.0 1.2 2.0</size></box></geometry>
+          <material><ambient>0.2 0.35 0.7 1</ambient><diffuse>0.2 0.35 0.7 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackA3">
+      <static>true</static>
+      <pose>6 4 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>4.0 1.2 2.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>4.0 1.2 2.0</size></box></geometry>
+          <material><ambient>0.2 0.35 0.7 1</ambient><diffuse>0.2 0.35 0.7 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackB1">
+      <static>true</static>
+      <pose>-6 -1 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>4.0 1.2 2.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>4.0 1.2 2.0</size></box></geometry>
+          <material><ambient>0.2 0.35 0.7 1</ambient><diffuse>0.2 0.35 0.7 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackB2">
+      <static>true</static>
+      <pose>0 -1 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>4.0 1.2 2.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>4.0 1.2 2.0</size></box></geometry>
+          <material><ambient>0.2 0.35 0.7 1</ambient><diffuse>0.2 0.35 0.7 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackB3">
+      <static>true</static>
+      <pose>6 -1 1.0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>4.0 1.2 2.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>4.0 1.2 2.0</size></box></geometry>
+          <material><ambient>0.2 0.35 0.7 1</ambient><diffuse>0.2 0.35 0.7 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ====================== Fixed stations ========================= -->
+    <!-- ConveyorStation: transfer station block against the east wall.
+         The S7-1500 owns this equipment in later gates. -->
+    <model name="ConveyorStation">
+      <static>true</static>
+      <pose>13.4 5 0.4 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>3.0 1.0 0.8</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>3.0 1.0 0.8</size></box></geometry>
+          <material><ambient>0.15 0.6 0.25 1</ambient><diffuse>0.15 0.6 0.25 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ChargerStation: charging dock block against the west wall.
+         Charger interlocks belong to the PLC in later gates. -->
+    <model name="ChargerStation">
+      <static>true</static>
+      <pose>-14.5 -6 0.6 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.8 0.8 1.2</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.8 0.8 1.2</size></box></geometry>
+          <material><ambient>0.75 0.15 0.15 1</ambient><diffuse>0.75 0.15 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>
