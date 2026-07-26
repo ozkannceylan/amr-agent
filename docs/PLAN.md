@@ -18,7 +18,7 @@ session; expected shape, subject to owner approval:
 
 M0 closed 2026-07-26; see docs/reports/m0-04-verify.md.
 
-M0 addendum (platform decision) closed 2026-07-26: ADR 0002 records
-RB-KAIROS, roadmap carries gate M9; verified in
-docs/reports/m0-07-verify-platform.md. Open owner decision queued in
-TODO.md: pin the ROS 2 distribution before M3.
+M0 addenda closed 2026-07-26: ADR 0002 (RB-KAIROS platform), roadmap
+gate M9, ADR 0003 (ROS 2 Jazzy + Gazebo Harmonic, vendor branches
+verified and SHA-pinned), arch-docs agent added to the roster. Verified
+in docs/reports/m0-07 and m0-09.

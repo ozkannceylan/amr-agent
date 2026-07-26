@@ -1,4 +1,4 @@
 # TODO
 
-## verifier
-- m0-09 verify roster change and ADR 0003 — done when a pass verdict is filed in docs/reports/.
+No open items. M0 and its addenda are closed; M1 briefs are issued after
+owner approval.
