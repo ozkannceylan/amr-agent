@@ -15,5 +15,6 @@ M0 closed 2026-07-26, verified in docs/reports/m0-04-verify.md.
 | M6 | PLC integration | PLC serves OPC UA, fleet manager subscribes, station handshake works end to end |
 | M7 | Safety layer | F-CPU implements the spec, e-stop chain and zone monitoring verified against acceptance tests |
 | M8 | Demonstration | Recorded end to end run, validation report, README with architecture narrative |
+| M9 | Arm integration | Arm motion is gated by a base-stationary interlock, arm work is carried as a VDA 5050 action, and the safety zone model distinguishes base and arm |
 
 A gate closes only when its criterion is observable behavior, not written code.
