@@ -1,7 +1,7 @@
 # TODO
 
 ## interface
-- m1-03 handshake tables — done when docs/interfaces/handshake-tables.md covers conveyor/door/charger handshakes and a single-owner map for every shared data item.
+- m1-05 handshake revision — done when DoorwayClear/ChargerVehicleDocked and operatingMode/errors rows are in the §6 map and §7/step 8 reference the resolved nodes.
 
 ## verifier
 - m1-04 review M1 — done when a pass verdict is filed in docs/reports/.

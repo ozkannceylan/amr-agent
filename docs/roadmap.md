@@ -1,6 +1,6 @@
 # Roadmap
 
-Current gate: M1 — not started.
+Current gate: M1 — in progress.
 
 M0 closed 2026-07-26, verified in docs/reports/m0-04-verify.md.
 
