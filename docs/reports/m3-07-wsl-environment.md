@@ -3,22 +3,29 @@ status:              done
 files_changed:       [sim/setup/WSL_ENVIRONMENT.md, docs/reports/m3-07-wsl-environment.md]
 invariants_touched:  none
 open_questions:
-  - The venv is at `/home/ozkan/amr-bridge-venv`, not the documented
-    `/opt/amr-bridge-venv`, because `/opt` needs root. Either recreate it at
-    `/opt` with an elevated shell or `bridge/README.md` is wrong on this
-    machine. Not changed — `bridge/` is outside this brief's write access.
-  - `bridge/config/bridge.yaml` `evidence.csv_path` still points at
-    `/home/user/amr-agent/...`, a container path that does not exist here.
-    m3-08 needs `--evidence-csv` or a config change. Flagged, not changed.
-  - The Windows Time service is stopped (`w32tm /query /status` ->
-    `0x80070426`); the WSL wall clock steps ~2.73 s every ~30 s. The bridge
-    timestamps with `time.monotonic_ns()`, so m3-08's latency numbers are NOT
-    invalidated — but any WSL-to-PLCSIM-Advanced timestamp correlation is
-    meaningless until an elevated `Start-Service w32time; w32tm /resync` runs.
-    This is the one open item that can silently corrupt M3 gate evidence.
-  - DDS was proven only between two `ros2` CLI processes. The full runtime
-    topology (gz server + `ros_gz_bridge` + bridge) belongs to m3-08.
-next_suggested:      m3-08 can proceed; fix w32time first if any evidence will correlate bridge and PLCSIM timestamps.
+  - RESOLVED in `994a929` — venv path. `bridge/README.md` and
+    `requirements.txt` now document the location as a per-machine choice
+    (container `/opt/amr-bridge-venv`, WSL `$HOME/amr-bridge-venv`); the
+    binding requirement is the `--system-site-packages` mechanism, not the
+    path. Verified against the committed files.
+  - RESOLVED in `994a929` — `evidence.csv_path`. The committed default is now
+    the machine-neutral `evidence/latency-latest.csv`, anchored to `bridge/`,
+    with `~`/`$VARS` expanded and absolute paths honoured. Verified resolving
+    live here to
+    `/mnt/c/Users/ozkan/projects/amr-agent/bridge/evidence/latency-latest.csv`
+    with the parent directory present.
+  - OPEN, mitigated — clock. After the owner's resync plus `wsl --shutdown`,
+    guest/host skew is down from 3.7-4.6 s to inside a ~250 ms measurement
+    bracket. But the mechanism persists, only ~220x smaller: `systemd-timesyncd`
+    still steps `CLOCK_REALTIME` every ~30 s, now by ~12 ms (measured
+    +0.024466 s over 70 s). And `w32time` is **still `Stopped`**, so the resync
+    was one-shot, not maintained — at ~350 ppm the skew re-accumulates to tens
+    of seconds per day. Re-measure immediately before any run whose evidence
+    correlates bridge and PLCSIM timestamps. Intra-process latency is
+    unaffected regardless, because the bridge uses `time.monotonic_ns()`.
+  - OPEN — DDS was proven only between two `ros2` CLI processes. The full
+    runtime topology (gz server + `ros_gz_bridge` + bridge) belongs to m3-08.
+next_suggested:      m3-08 can proceed; re-measure guest/host clock skew first if its evidence will correlate bridge and PLCSIM timestamps, and consider starting w32time so the fix is durable.
 
 ## Investigations 1 and 7 — now answered
 

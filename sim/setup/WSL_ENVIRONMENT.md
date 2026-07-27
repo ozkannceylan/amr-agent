@@ -35,7 +35,7 @@ to the deferred M5 vehicle work and the cell does not use them (§3.1).
 | asyncua | 2.0.1 | `2.0.1` | match |
 | cryptography | 49.0.0 | `49.0.0` | match |
 | pyOpenSSL | 26.3.0 | `26.3.0` | match |
-| venv | `/opt/amr-bridge-venv` | `/home/ozkan/amr-bridge-venv` | **deviation, see §3.2** |
+| venv | `--system-site-packages` venv, container uses `/opt/amr-bridge-venv` | `/home/ozkan/amr-bridge-venv` | supported per-machine location, see §3.2 |
 | CPU / RAM | — | 20 cores, 15 GiB | — |
 | `/dev/shm` | — | 7.8 G, tmpfs, writable | ok |
 
@@ -155,11 +155,13 @@ touch: cannot touch '/opt/.writetest': Permission denied
 /opt NOT writable by ozkan
 ```
 
-so the venv was created at `$HOME/amr-bridge-venv` instead of the documented
-`/opt/amr-bridge-venv`. **This is a deviation**: it is a stand-in that proves
-the dependency set resolves on this machine, not a replacement for the
-documented path. When the owner runs the elevated step, the venv should be
-recreated at `/opt/amr-bridge-venv` so `bridge/README.md` stays literally true.
+so the venv was created at `$HOME/amr-bridge-venv` instead of the
+`/opt/amr-bridge-venv` used in the container. This was originally recorded here
+as a deviation to be reconciled; `994a929` reconciled it the other way, by
+making the location explicitly per-machine in `bridge/README.md` and
+`requirements.txt`. **The binding requirement is the mechanism, not the path**:
+a venv created with `--system-site-packages`, in a directory the operator can
+write, with `/opt/ros/jazzy/setup.bash` sourced in every shell that uses it.
 
 ```
 $ python3 -m venv --system-site-packages $HOME/amr-bridge-venv
@@ -512,19 +514,15 @@ Two qualifications, offered as findings rather than changes:
 2. If m3-08 wants the tightest possible latency distribution, pointing
    `evidence.csv_path` at a native path (e.g. `~/amr-evidence/`) and copying
    the CSV into the repo afterwards removes the 4.25 ms flush spikes entirely.
-   This is an option, not a necessity.
+   This is an option, not a necessity. Since `994a929` the config expands `~`
+   and `$VARS` and honours an absolute path as written, so this needs no code
+   change — only a different value.
 
-Separately, the configured evidence path is a container path that does not
-exist here:
-
-```
-bridge/config/bridge.yaml:95:  csv_path: "/home/user/amr-agent/bridge/evidence/latency-2026-07-27.csv"
-$ ls -l /home/user/amr-agent/bridge/evidence/
-ls: cannot access '/home/user/amr-agent/bridge/evidence/': No such file or directory
-```
-
-m3-08 will need `--evidence-csv` or a config change. Flagged, not changed —
-`bridge/` is outside this brief's write access.
+When this section was first written the configured evidence path was a
+container path that did not exist here. That was fixed in `994a929`: the
+committed default is now the machine-neutral `evidence/latency-latest.csv`,
+anchored to the `bridge/` directory, and it resolves on this machine
+(§5 item 2).
 
 ### 4.7 Graphics — headless works, RTF ~1.0, and WSLg does NOT give you a GPU
 
@@ -735,13 +733,16 @@ the symptom is gone; see §3.0 for the verification.
 
 ## 5. Known-unresolved
 
-1. **The venv is at `/home/ozkan/amr-bridge-venv`, not `/opt/amr-bridge-venv`.**
-   Every other document says `/opt`, which needs root. Either recreate it at
-   `/opt/amr-bridge-venv` with the elevated shell, or `bridge/README.md` is
-   wrong on this machine. Unchanged — `bridge/` is outside this brief's write
-   access.
-2. **`bridge/config/bridge.yaml` still points at a container path** for its
-   evidence file:
+1. **Venv location (RESOLVED, `994a929`).** As observed: the venv is at
+   `/home/ozkan/amr-bridge-venv`, not the `/opt/amr-bridge-venv` every other
+   document named, because `/opt` needs root. Resolved not by moving the venv
+   but by correcting the documents: `bridge/README.md` and `requirements.txt`
+   now record the location as a per-machine choice, with the container
+   `/opt/amr-bridge-venv` and this machine's `$HOME/amr-bridge-venv` as the two
+   worked examples. The requirement that survives is the *mechanism*, not the
+   path — a `--system-site-packages` venv in a directory the operator can write.
+2. **Evidence CSV path (RESOLVED, `994a929`).** As observed, the configured
+   path was a container path that did not exist here:
 
    ```
    bridge/config/bridge.yaml:95:  csv_path: "/home/user/amr-agent/bridge/evidence/latency-2026-07-27.csv"
@@ -749,13 +750,48 @@ the symptom is gone; see §3.0 for the verification.
    ls: cannot access '/home/user/amr-agent/bridge/evidence/': No such file or directory
    ```
 
-   m3-08 needs `--evidence-csv` or a config change. Flagged, not changed.
-3. **Clock: diagnosed, not fixed.** The Windows Time service is stopped and the
-   guest wall clock steps ~2.73 s every 30 s (§4.5). The bridge timestamps with
-   `time.monotonic_ns()`, so intra-process latency is unaffected — but any
-   WSL-to-PLCSIM-Advanced timestamp correlation is meaningless until the owner
-   runs an elevated `Start-Service w32time; w32tm /resync`. This is the one
-   open item that can silently corrupt M3 gate evidence.
+   The committed default is now the machine-neutral
+   `evidence/latency-latest.csv`, expanded for `~` and `$VARS`, absolute paths
+   honoured as written, and anything still relative anchored to the `bridge/`
+   directory. No `--evidence-csv` override is needed. Confirmed resolving on
+   this machine:
+
+   ```
+   evidence_csv_path : /mnt/c/Users/ozkan/projects/amr-agent/bridge/evidence/latency-latest.csv
+   parent exists     : True
+   ```
+3. **Clock: mitigated, not fixed — re-check before the PLCSIM run.** The
+   original diagnosis stands (§4.5): the guest wall clock stepped ~2.73 s every
+   ~30 s. After an owner resync plus `wsl --shutdown`, the guest/host skew is
+   down to a few hundred milliseconds — in three bracketed samples the WSL
+   timestamp now lands *inside* the Windows bracket, where before it sat 3.7–4.6 s
+   outside it.
+
+   **The mechanism has not gone away, only shrunk.** `systemd-timesyncd` still
+   steps `CLOCK_REALTIME` on its 32 s poll; the step is simply ~220x smaller:
+
+   ```
+   t= 0s  drift +0.000000 s
+   t=30s  drift +0.012166 s
+   t=60s  drift +0.024465 s
+   total drift over 70 s: +0.024466 s
+   ```
+
+   ~12 ms per step instead of ~2.73 s. And the underlying cause is untreated —
+   `w32time` is **still `Stopped`**, so the resync was one-shot, not maintained:
+
+   ```
+   $ (Get-Service w32time).Status
+   Stopped
+   $ w32tm /query /source
+   The following error occurred: The service has not been started. (0x80070426)
+   ```
+
+   At the observed ~350 ppm the skew re-accumulates to tens of seconds per day,
+   so this must be re-measured immediately before any run whose evidence
+   correlates bridge and PLCSIM timestamps. Intra-process latency remains
+   unaffected either way, because the bridge timestamps with
+   `time.monotonic_ns()`.
 4. **DDS was proven only between two `ros2` CLI processes** (§4.3). The full
    runtime topology — gz server, `ros_gz_bridge`, bridge process — belongs to
    m3-08.

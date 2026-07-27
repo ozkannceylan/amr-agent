@@ -3,7 +3,7 @@
 ## owner (blocking)
 - PLC: implement the TIA Portal program and run PLCSIM Advanced; capture watch-table evidence for gate items (a) and (b) and fill Section B of bridge/EVIDENCE_LATENCY.md. Do not start before m3-12 lands — SPEC.md still specifies the superseded conflated reset.
 - Hermes: define the component (which repo, how Telegram reaches it, what it may write over OPC UA) before M4 can be briefed.
-- Clock: resolved 2026-07-27. w32tm /resync run elevated and wsl --shutdown performed; measured host-guest skew fell from ~3.7 s to ~0.3 s. Re-check with a fresh measurement immediately before the PLCSIM gate run.
+- Clock: mitigated 2026-07-27, not durable. The resync + wsl --shutdown brought skew from ~3.7 s to inside the measurement bracket, but w32time is Stopped again — the fix was one-shot with nothing maintaining it, and the residual ~350 ppm re-accumulates to tens of seconds per day. Before the PLCSIM run either re-run the resync or, better, set the service to start: elevated `Set-Service w32time -StartupType Automatic; Start-Service w32time; w32tm /resync`.
 
 ## infra
 - m3-07 WSL environment rebuild — in progress, unblocked. Gazebo Sim 8.11.0 is installed via the ROS vendor packages, so investigations 1 and 7 can now be answered. Done when the gz version and the headless behaviour are recorded against a real install.
