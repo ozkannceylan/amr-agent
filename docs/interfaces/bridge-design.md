@@ -79,7 +79,7 @@ Permitted, and exhaustive: field selection/addressing (§4.5), `bool` ↔ `Boole
 | Concurrency | rclpy executor in one thread, OPC UA client on an asyncio loop; they meet only at the latest-value slots, guarded by a lock | Keeps ROS callback latency independent of OPC UA round-trip time, so a slow server cannot distort the measured receive timestamps |
 | Buffering | **Slots, not queues.** Each input signal has exactly one slot: `(value, monotonic_receive_time, sim_time)`, overwritten by every callback | A queue would accumulate samples the bridge is then tempted to summarise. A slot makes latest-sample decimation the only possible behaviour (§4.3) |
 | Cycle overrun | Logged and counted, never compensated | No catch-up bursts, no skipped-cycle logic. Compensation would be a timer that changes behaviour (invariant 9, §1.1) |
-| Config | One file: endpoint URL, namespace URI, node BrowseNames, topic names, joint name, cycle period, security settings, evidence path, plus session and reconnect housekeeping (§8.1) and the diagnostics poll rate. **No thresholds, no limits, no tolerances, no timers** — a config key for any of those would be logic wearing a disguise | |
+| Config | One file: endpoint URL, **both namespace URIs** (§3.1), node BrowseNames, topic names, joint name, cycle period, security settings, evidence path, plus session and reconnect housekeeping (§8.1) — including the *requested* session timeout, which is a request the server may revise and never a value the bridge may rely on (§3.2) — and the diagnostics poll rate. **No thresholds, no limits, no tolerances, no timers** — a config key for any of those would be logic wearing a disguise. The keep-alive period is **derived** from the granted session timeout (§3.2), never configured | |
 | Secrets | Endpoint credentials and certificates live outside the repository and are referenced by path (invariant 13) | |
 
 ---
@@ -89,11 +89,65 @@ Permitted, and exhaustive: field selection/addressing (§4.5), `bool` ↔ `Boole
 | Rule | Statement |
 |---|---|
 | Direction | The bridge connects **out** to the PLC's endpoint. Never inverted (invariant 4) |
-| Namespace | Resolve namespace index at session establishment by browsing for URI `http://DemoCell`. **Never hardcode the index** (§2 of the node model). The rule is unchanged; only the URI value is — TIA derives it from the server interface name and the field is not editable (ADR 0006) |
-| Node resolution | Resolve NodeIds by BrowseName path (`DemoCell/Input/...`) once per session, cache for the session, re-resolve on reconnect |
+| Namespaces | The bridge's browse path crosses **two** namespaces. Both indices are resolved by URI at every session establishment and **neither is ever hardcoded** (§2 of the node model; §3.1 below). The browse-by-URI rule is unchanged; what changed at commissioning is that there are two URIs and that the interface's URI is TIA-derived from the server interface name, a field that is not editable (ADR 0006) |
+| Node resolution | Resolve NodeIds by browse path from `Objects`, through the commissioned `ServerInterfaces` → `DemoCell` parents (§3.1), once per session; cache for the session; re-resolve on reconnect |
+| Path shorthand | `DemoCell/Input/…` and every other `DemoCell/…` name in this document is a path **relative to the interface node**, never relative to `Objects` (§3.1 N1) |
+| Session parameters | Every session parameter the bridge sends is a **request**. The values in force are the ones the server returns. The bridge reads them back and uses those (§3.2) |
 | Writable set | The bridge writes **only** the seven `DemoCell/Input/` nodes and `DemoCell/Link/BridgeHeartbeat` (§9.1). Any other write is a defect. m3-04 enforces this with a single write helper that rejects a NodeId outside the allowlist |
 | Read set | `DemoCell/Output/ConveyorSpeedCommand` (applied to the cell), and `DemoCell/Status/*` + `DemoCell/Link/BridgeLinkOk` (logging only, never applied to anything) |
 | Startup check | On every connect, verify that each resolved node's DataType matches the expected type below. A mismatch is a fatal configuration error, not something to coerce around |
+
+### 3.1 Namespaces and the commissioned browse path — normative
+
+Owner-verified in TIA Portal and independently with an `asyncua` client from Windows,
+commissioning phase 0, 2026-07-27:
+
+```
+Objects
+  +- ServerInterfaces      ns http://www.siemens.com/simatic-s7-opcua   (Siemens, vendor-fixed)
+       +- DemoCell         ns http://DemoCell                          (= interface name, ADR 0006)
+            +- Input/  Output/  Status/  Link/   and their variables   (same ns as DemoCell)
+```
+
+| # | Rule |
+|---|---|
+| N1 | `DemoCell` does **not** hang directly under `Objects`. It is a child of the `ServerInterfaces` folder the S7-1500 publishes. A browse path that starts at `Objects` and looks for `DemoCell` finds nothing, on every connect, forever |
+| N2 | The bridge resolves **both** namespace indices by URI at every session establishment: `http://www.siemens.com/simatic-s7-opcua` for `ServerInterfaces`, `http://DemoCell` for the interface node and everything beneath it. Neither index is hardcoded, and neither is derived from the other |
+| N3 | The bridge **never assumes the parent folder shares the interface namespace**. Each element of the browse path is qualified with the index of the namespace *that element* belongs to. Phase 0 observed `ServerInterfaces` at index 3 and `DemoCell` at a different index; those numbers are evidence that the indices differ, not values to configure |
+| N4 | Either URI missing presents as **namespace not found** at connect — the intended failure mode (ADR 0006 D4). It is a connect failure, retried per §8.1. The bridge never browses around it, never scans the namespace array for a likely-looking entry, and never falls back to an index |
+| N5 | Both URIs are config values (§2): one is vendor-fixed, the other follows the interface name, and that name is contract. Renaming the server interface changes its namespace URI and breaks every browse until the config follows (ADR 0006) |
+| N6 | Nothing above is a signal decision. Namespace resolution happens once per session, before any value moves, and its outcome is connect or fail — never a substituted, defaulted or held value (§1.1, §6 R1) |
+
+### 3.2 Session timeout and keep-alive — normative
+
+The S7-1500 **clamps the session timeout**. Phase 0, same date: a requested 3600000 ms was
+granted as 30000 ms.
+
+| # | Rule |
+|---|---|
+| S1 | The session timeout in the config (§2) is a **requested** value. It is what the bridge asks for and nothing more |
+| S2 | On connect the bridge **reads the granted (revised) session timeout from the CreateSession response** and logs the requested and granted values together. From that point the granted value is the only session timeout any bridge behaviour may use. The bridge never assumes its request was honored |
+| S3 | The keep-alive interval is **derived from the granted value**, never configured and never derived from the request. The derivation: a fixed fraction of the granted timeout small enough that at least three keep-alive exchanges fall inside the granted window (i.e. period ≤ granted / 3), so two consecutive lost exchanges cannot by themselves expire the session. At the commissioned grant of 30000 ms that is ≤ 10000 ms |
+| S4 | Both values are re-read and the keep-alive re-derived on **every** new session, including every reconnect (§8.1). A grant is a property of one session, not of the server |
+| S5 | The granted value also bounds the PLC-side observation in §7.3 case A: it is how long the server may hold a session whose client vanished without a FIN/RST |
+| S6 | The same discipline applies to **every** negotiated parameter, not only this one — the secure channel lifetime is revised by the same mechanism, and were a subscription ever added (§5.1 rejects one) its publishing interval and keep-alive count would be too. Requested is not granted, anywhere |
+
+Why the derivation matters even though the bridge is never idle: the 50 ms cycle touches the
+server ~20 times a second, so in a healthy run the keep-alive is not what holds the session
+open. It matters when the cycle is stalled — and it matters that it is derived, because a
+keep-alive computed from an un-granted 3600000 ms would never fire inside a 30 s window, so
+the session would expire while the bridge believed it had an hour.
+
+This is **connection housekeeping, not a signal gate** — the same standing as §8.1's retry
+timing. It never delays or suppresses a value that could be sent, and it applies no process
+decision to any signal (§1.1).
+
+Library note, `asyncua==2.0.1` (the pin in §11), verified 2026-07-27: the client already
+overwrites its own `session_timeout` with `RevisedSessionTimeout` from the CreateSession
+response, logs a warning when the two differ, and derives its health-probe timeout from the
+resulting value. S2 and S3 therefore mostly forbid *undoing* that — re-reading the config
+value afterwards, or computing anything from the requested number — and require that both
+numbers reach the log and the evidence file.
 
 ---
 
@@ -179,7 +233,7 @@ the choice more than efficiency does.
 | Measurement attribution | With a poll, the bridge knows exactly when it asked and when the answer arrived; the interval it reports is a service round trip it originated. With a monitored item, the notification time is the sum of the server's sampling phase, its publishing interval, the queue occupancy and the network — none of which the client can separate. A "latency" measured that way is mostly a measurement of the server's own configuration |
 | One cadence | Read, publish, write, heartbeat in a single 50 ms cycle gives one number to report and one ordering guarantee to hand the PLC (§7). Two independent cadences would make the ordering guarantee unprovable |
 | Server independence | The fifteen-node `DemoCell/` address space of `opcua-nodes.md` §9 does not need server-side sampling. Polling avoids depending on the S7-1500's monitored-item limits, sampling granularity and publish-interval negotiation, which differ between PLCSIM Advanced and hardware |
-| Failure visibility | A failed read is visible every cycle. A silent subscription (no notifications because nothing changed) is indistinguishable from a dead one without a keep-alive whose semantics are again server-configured |
+| Failure visibility | A failed read is visible every cycle. A silent subscription (no notifications because nothing changed) is indistinguishable from a dead one without a keep-alive whose semantics are again server-configured — and, as §3.2 S6 records, whose requested parameters the server is free to revise |
 | Honest cost, stated | Polling adds up to one cycle (0–50 ms, ~uniform) of phase latency on the output path and aliases changes faster than 50 ms. This is **reported, not hidden**: §9 requires the poll-phase component to be shown separately, and m3-04 may run a subscription-based comparison as supplementary evidence. The primary path stays poll |
 
 Note that the input direction has no such choice: the bridge *writes* the PLC's input image;
@@ -287,7 +341,7 @@ mode, not a safety event** (invariant 2), and no safety function is involved (in
 
 | # | Failure | Heartbeat | Input nodes | OPC UA session | PLC-observable difference |
 |---|---|---|---|---|---|
-| A | Bridge crash (SIGKILL, unhandled exception, host loss) | stops advancing at an arbitrary value | frozen at their last written values | depends on how the process died: a `SIGKILL` on a live host closes the TCP socket at OS level, so the server sees the drop at once (`EVIDENCE_SIGNAL_LOSS.md` §A.4, where the double saw `sessions 1 → 0` within 2 s); only a host or network loss, where no FIN/RST arrives, leaves the server holding the session until the session/subscription timeout | **Heartbeat stale.** Session-state may lag by seconds, so it is not a faster indicator |
+| A | Bridge crash (SIGKILL, unhandled exception, host loss) | stops advancing at an arbitrary value | frozen at their last written values | depends on how the process died: a `SIGKILL` on a live host closes the TCP socket at OS level, so the server sees the drop at once (`EVIDENCE_SIGNAL_LOSS.md` §A.4, where the double saw `sessions 1 → 0` within 2 s); only a host or network loss, where no FIN/RST arrives, leaves the server holding the session until the **granted** session timeout expires — the value the server returned, not the one the bridge requested (§3.2 S5); the commissioned S7-1500 granted 30 s | **Heartbeat stale.** Session-state may lag by up to the granted session timeout, so it is never the faster indicator |
 | B | Bridge clean shutdown (SIGINT/SIGTERM) | stops advancing; **the bridge writes no farewell value and does not zero anything** | frozen at their last written values | session closed immediately and cleanly | **Heartbeat stale**, plus an immediate, clean session close. This is the only PLC-visible difference from A, and it is a difference in *how fast the session disappears*, not in the input image. **A program that behaves differently for A and B is wrong** |
 | C | OPC UA connection loss (network, server restart, PLCSIM stopped) while the bridge lives | stops advancing (the bridge cannot write) | frozen at their last written values, or lost entirely if the server restarted with DB start values | session broken; bridge enters reconnect (§8) | **Heartbeat stale.** From the PLC side, indistinguishable from A. From the bridge side it is fully distinguishable and is logged |
 | D | **Sim stopped, bridge alive** | **keeps advancing** — the bridge is still writing | **frozen at the last real sample**, because the slots are never cleared and the cyclic write repeats the last value | healthy | **No difference at all: the input image looks live.** A frozen belt position with a non-zero speed command is the only clue, and detecting that is `ConveyorDriveFault` — PLC content (§9.5) |
@@ -326,9 +380,9 @@ For `plc/demo-cell/SPEC.md`, so the PLC program can be written against this docu
 
 | Step | Behaviour |
 |---|---|
-| Detection | A failed read or write, or a session/keep-alive failure, marks the session broken |
+| Detection | A failed read or write, or a session/keep-alive failure, marks the session broken. The keep-alive period is the one derived from the **granted** session timeout of the session that is failing (§3.2 S3) |
 | Retry | Reconnect attempts at a fixed interval with a bounded backoff, forever. Retry timing is bridge housekeeping, not a signal gate — it never delays or suppresses a value that could be sent |
-| On reconnect | Re-resolve the namespace index and all NodeIds (never reuse cached NodeIds across sessions), re-verify data types, then **refresh all seven inputs from the current slots** (§9.2), then resume the heartbeat per R4 |
+| On reconnect | Re-resolve **both namespace indices** by URI (§3.1 N2) and all NodeIds through the `ServerInterfaces` → `DemoCell` path — never reuse a cached index or NodeId across sessions — then re-read the granted session timeout and re-derive the keep-alive from it (§3.2 S4), re-verify data types, then **refresh all seven inputs from the current slots** (§9.2), then resume the heartbeat per R4 |
 | Heartbeat continuity | The counter **is not reset** across a reconnect and **is not reset** across a process restart if it can be avoided; either way the PLC must treat any *change* as liveness (§7.1), so a discontinuity is harmless and no rule depends on continuity |
 | Empty slots | If a signal has produced no sample since bridge start, its node is not written and the heartbeat stays stopped (R3/R4). A reconnect does not lower that bar |
 
@@ -424,7 +478,7 @@ the first; the second is owner-executed (PLAN.md).
 | Not measurable in-container | Why |
 |---|---|
 | PLC scan-cycle contribution to L7 | The test double has no scan cycle. Its L7 is a transport floor, not the loop time |
-| S7-1500 OPC UA server behaviour | Its sampling of the process image, its write handling relative to the scan, its session and monitored-item limits — a Python server reproduces none of them |
+| S7-1500 OPC UA server behaviour | Its sampling of the process image, its write handling relative to the scan, its session and monitored-item limits — a Python server reproduces none of them. **One exception, deliberate:** the double clamps the session timeout below the request as the S7-1500 does (§10), so that the client's derivation of §3.2 is testable. The clamp's *shape* is imitated; its value is still not the PLC's |
 | PLCSIM Advanced vs hardware timing fidelity | PLCSIM's own timing is not the hardware's; the owner's run records which was used |
 | L4 (output poll phase) in absolute terms | Requires observing the PLC's internal output change, which no client can see |
 | Network path | The in-container run is loopback: no switch, no VPN, no PROFINET load. Numbers are a lower bound |
@@ -437,6 +491,7 @@ the first; the second is owner-executed (PLAN.md).
 | L1, L2, L3, L5, R1, R2 as **bridge-side** figures — genuinely the bridge's own cost | |
 | L6, which involves no PLC at all | |
 | The startup rule (§6), the liveness behaviour (§7.3 A–D) and the no-auto-resume rule (§8.3), all as reproducible tests | |
+| The connect requirements: both namespaces resolved by URI under `ServerInterfaces` (§3.1) and the keep-alive derived from a granted timeout the double clamps below the request (§3.2) | |
 
 ---
 
@@ -444,10 +499,12 @@ the first; the second is owner-executed (PLAN.md).
 
 | Item | Statement |
 |---|---|
-| What it is | A minimal OPC UA **server** that stands in for the S7-1500 on PLCSIM Advanced, exposing namespace `http://DemoCell` (the URI TIA derives from the interface name, ADR 0006) with the `DemoCell/` address space of §9 — same BrowseNames, same folder paths, same data types, same access levels. The double matches the URI so the bridge's browse-by-URI resolves identically against it and against PLCSIM |
+| What it is | A minimal OPC UA **server** that stands in for the S7-1500 on PLCSIM Advanced, exposing the `DemoCell/` address space of §9 — same BrowseNames, same folder paths, same data types, same access levels |
+| Shape it must reproduce | The **commissioned two-namespace path of §3.1**: a `ServerInterfaces` folder in namespace `http://www.siemens.com/simatic-s7-opcua` under `Objects`, with the `DemoCell` interface node and everything beneath it in `http://DemoCell` (the URI TIA derives from the interface name, ADR 0006). The double matches both URIs so the bridge's browse-by-URI resolves identically against it and against PLCSIM. It deliberately registers the two namespaces so their **indices differ from PLCSIM's**: a bridge that hardcoded either index must fail against the double |
+| Negotiation fidelity | The double **grants a session timeout below the requested one**, as the S7-1500 does (§3.2). This is the one server behaviour it copies deliberately rather than by accident, because it is the only way to test that the keep-alive is derived from the granted value. It is scaffolding and is labelled as such |
 | Why it exists | So the bridge and the loop mechanics can be verified automatically on any machine that can run the cell, and so m3-04's tests do not need the owner's TIA/PLCSIM environment |
 | Invariant 4 | **Preserved.** The server role belongs to the PLC; the double merely plays that role. The bridge is a client against the double and against PLCSIM, with no code path difference and no server mode (§1) |
-| What it proves | The bridge: signal traversal both ways, types, polarity, decimation, startup rule, liveness behaviour, reconnect, no-auto-resume, and the bridge-side latency figures of §9.5 |
+| What it proves | The bridge: signal traversal both ways, types, polarity, decimation, startup rule, liveness behaviour, reconnect, no-auto-resume, the connect requirements of §3.1 and §3.2 (both namespaces resolved by URI under `ServerInterfaces`, keep-alive derived from a clamped grant), and the bridge-side latency figures of §9.5 |
 | What it does **not** prove | **The PLC program.** It runs no standard program, has no scan cycle, no process image, no interlocks, no cycle-running flag and no reset. Nothing observed against the double is evidence for `plc/demo-cell/SPEC.md` |
 | Scaffolding is labelled | Anything the double does beyond storing values — echoing a nominated input for L7, or driving `ConveyorSpeedCommand` from a script to exercise the output path — is **test scaffolding**, marked as such in code and in the evidence file, and is not a model of PLC behaviour |
 | ADR 0004 | The ADR rejected proving the loop against a mock *only*. The double is for automated regression; the gate's four exit items close against PLCSIM, owner-run |
@@ -494,3 +551,4 @@ to the repository (invariant 13).
 | 6 | m3-02b open question 1 (a Real output means the cycle-running flag gates a setpoint, not a coil) | Unchanged by this design. **Closed** by `plc/demo-cell/SPEC.md` §6.4: the setpoint is gated by driving it to zero in a mandatory, unconditional `ELSE`, never by a conditional write |
 | 7 | 20 Hz cycle period | **Closed** by m3-04's measurement, `bridge/EVIDENCE_LATENCY.md` §A.4: the expectation is met — median cycle period 50.003 ms, 0 cycle overruns — so the item closes without a revision and §9.2 stands unchanged |
 | 8 | m3-01 open question 6 (stale "Navigation scenario (M3)" heading in `sim/README.md`) | **Corrected in `sim/`**: the heading now reads "Navigation scenario (M5, deferred)" |
+| 9 | Conformance of the running bridge and test double to §3.1 and §3.2 | **Open, owned by m3-21.** This document is the specification; the client code and the double were written against the pre-commissioning assumptions (one namespace, `DemoCell` resolved directly under `Objects`, the configured session timeout used as if granted). The config key holding the requested timeout is a request under S1 whatever its name suggests. Nothing here changes bridge code — the two facts of §3.1 and §3.2 are owner-verified and this revision states them; m3-21 makes the code match and records the run |
