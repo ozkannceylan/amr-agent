@@ -17,7 +17,7 @@ Section B and alongside the four cases of `bridge/EVIDENCE_SIGNAL_LOSS.md`.
 
 | Document | What it fixes | Relation to this one |
 |---|---|---|
-| `docs/interfaces/opcua-nodes.md` §9 | The 14 nodes: names, types, direction, ownership | **Contract.** If this document disagrees, §9 wins and this one is corrected |
+| `docs/interfaces/opcua-nodes.md` §9 | The 15 nodes: names, types, direction, ownership | **Contract.** If this document disagrees, §9 wins and this one is corrected |
 | `docs/interfaces/bridge-design.md` | What the bridge does and what the PLC can therefore observe | Input. §6.3, §7.4 state expectations *on* this document |
 | `bridge/EVIDENCE_SIGNAL_LOSS.md` | What the input image and the session actually did in the four failure modes | Measured input to §8 |
 | `sim/README.md` § *Demonstration cell (M3)* | The physical cell: geometry, speeds, nominal sensor levels | Input to the constants of §3.3 |
@@ -28,15 +28,17 @@ Section B and alongside the four cases of `bridge/EVIDENCE_SIGNAL_LOSS.md`.
 
 ## 1. What the program does
 
-One conveyor, one photo-eye, one three-button panel, all of it simulated in
-Gazebo and reaching the CPU as OPC UA nodes written by the bridge. The program:
+One conveyor, one photo-eye, one four-button panel — start, reset, stop, process
+stop — all of it simulated in Gazebo and reaching the CPU as OPC UA nodes written
+by the bridge. The program:
 
 - forms a **presence verdict** from the raw photo-eye range,
 - runs a **transport cycle**: forward until the product reaches the beam, dwell,
   return to home,
 - supervises the **bridge heartbeat**, the **drive** and the **sensor**,
-- latches every stop, and requires a **monitored, edge-triggered reset** followed
-  by a **separate** start command before anything moves again.
+- latches every stop, and requires a **monitored, edge-triggered reset** on the
+  panel's own reset button, followed by a **separate** start press on a
+  **different** button, before anything moves again.
 
 All of the logic is here. None of it is in the bridge and none of it is in
 Gazebo — that separation is the entire point of the gate (ADR 0004).
@@ -70,7 +72,7 @@ not because they confer safety integrity. They do not.
 
 ## 3. Tags
 
-### 3.1 Server-visible tags — exactly the 14 nodes of `opcua-nodes.md` §9
+### 3.1 Server-visible tags — exactly the 15 nodes of `opcua-nodes.md` §9
 
 The PLC symbol's leaf name **is** the OPC UA BrowseName, character for character,
 so the two documents diff (CLAUDE.md §9). The DB name is a container, not part of
@@ -84,16 +86,30 @@ which DB holds it.
 | 2 | `DemoCell/Input/ConveyorBeltSpeed` | `"DemoCellInput".ConveyorBeltSpeed` | Real | bridge | `0.0` |
 | 3 | `DemoCell/Input/ProductSensorRange` | `"DemoCellInput".ProductSensorRange` | Real | bridge | `0.0` |
 | 4 | `DemoCell/Input/PanelStartPressed` | `"DemoCellInput".PanelStartPressed` | Bool | bridge | `FALSE` |
-| 5 | `DemoCell/Input/PanelStopCircuitClosed` | `"DemoCellInput".PanelStopCircuitClosed` | Bool | bridge | `FALSE` |
-| 6 | `DemoCell/Input/PanelProcessStopCircuitClosed` | `"DemoCellInput".PanelProcessStopCircuitClosed` | Bool | bridge | `FALSE` |
-| 7 | `DemoCell/Output/ConveyorSpeedCommand` | `"DemoCellOutput".ConveyorSpeedCommand` | Real | **program** | `0.0` |
-| 8 | `DemoCell/Status/CellCycleRunning` | `"DemoCellStatus".CellCycleRunning` | Bool | program | `FALSE` |
-| 9 | `DemoCell/Status/CellProcessStopActive` | `"DemoCellStatus".CellProcessStopActive` | Bool | program | `FALSE` |
-| 10 | `DemoCell/Status/CellResetRequired` | `"DemoCellStatus".CellResetRequired` | Bool | program | `FALSE` |
-| 11 | `DemoCell/Status/ProductPresentAtSensor` | `"DemoCellStatus".ProductPresentAtSensor` | Bool | program | `FALSE` |
-| 12 | `DemoCell/Status/ConveyorDriveFault` | `"DemoCellStatus".ConveyorDriveFault` | Bool | program | `FALSE` |
-| 13 | `DemoCell/Link/BridgeHeartbeat` | `"DemoCellLink".BridgeHeartbeat` | UInt | bridge | `0` |
-| 14 | `DemoCell/Link/BridgeLinkOk` | `"DemoCellLink".BridgeLinkOk` | Bool | program | `FALSE` |
+| 5 | `DemoCell/Input/PanelResetPressed` | `"DemoCellInput".PanelResetPressed` | Bool | bridge | `FALSE` |
+| 6 | `DemoCell/Input/PanelStopCircuitClosed` | `"DemoCellInput".PanelStopCircuitClosed` | Bool | bridge | `FALSE` |
+| 7 | `DemoCell/Input/PanelProcessStopCircuitClosed` | `"DemoCellInput".PanelProcessStopCircuitClosed` | Bool | bridge | `FALSE` |
+| 8 | `DemoCell/Output/ConveyorSpeedCommand` | `"DemoCellOutput".ConveyorSpeedCommand` | Real | **program** | `0.0` |
+| 9 | `DemoCell/Status/CellCycleRunning` | `"DemoCellStatus".CellCycleRunning` | Bool | program | `FALSE` |
+| 10 | `DemoCell/Status/CellProcessStopActive` | `"DemoCellStatus".CellProcessStopActive` | Bool | program | `FALSE` |
+| 11 | `DemoCell/Status/CellResetRequired` | `"DemoCellStatus".CellResetRequired` | Bool | program | `FALSE` |
+| 12 | `DemoCell/Status/ProductPresentAtSensor` | `"DemoCellStatus".ProductPresentAtSensor` | Bool | program | `FALSE` |
+| 13 | `DemoCell/Status/ConveyorDriveFault` | `"DemoCellStatus".ConveyorDriveFault` | Bool | program | `FALSE` |
+| 14 | `DemoCell/Link/BridgeHeartbeat` | `"DemoCellLink".BridgeHeartbeat` | UInt | bridge | `0` |
+| 15 | `DemoCell/Link/BridgeLinkOk` | `"DemoCellLink".BridgeLinkOk` | Bool | program | `FALSE` |
+
+Row order follows `opcua-nodes.md` §9.3, which groups the panel inputs **by
+failure direction rather than by panel layout**: the two `…Pressed` contacts are
+normally open, the two `…CircuitClosed` contacts are normally closed.
+
+> **`PanelResetPressed` fails to `FALSE`, the opposite polarity to the two stop
+> inputs, and this is deliberate.** The reset is wired **normally open**, so a cut
+> wire, a welded-open contact, a stopped bridge and an absent publisher all read
+> `FALSE` — *not reset*. A stop must fail to *stopped* (wire NC, program NO); a
+> reset must fail to *not reset*, because a reset that asserted itself would clear
+> latches with no operator present, which is the automatic resume CLAUDE.md §9
+> forbids. Do not carry the convention of the two rows below it across to this
+> one. The start value `FALSE` above is the same statement at cold start.
 
 The start values are the fail-safe pre-connection state that `bridge-design.md`
 §6.3 places in the PLC precisely because the bridge is forbidden to invent
@@ -114,10 +130,9 @@ interface. All live in the instance DB `"DemoCellControl_DB"`.
 |---|---|---|---|
 | `LastBridgeHeartbeat` | UInt | `0` | Value of `BridgeHeartbeat` at the previous OB call. Compared for **inequality** only — never subtracted, never tested for `+1`, never assumed monotonic (§7.1 of the design; the counter wraps and restarts per bridge process) |
 | `HeartbeatStaleTimer` | IEC_TIMER (TON) | — | Runs while the heartbeat is unchanged |
-| `StartEdgeMemory` | Bool | **`TRUE`** | Previous state of `PanelStartPressed`. Start value `TRUE` so a contact already closed at the first scan produces **no** edge — a stuck or bridged start button can neither reset nor start |
-| `ResetHoldTimer` | IEC_TIMER (TON) | — | Measures how long the start contact is held, for the monitored reset window |
-| `ResetHoldValid` | Bool | `FALSE` | **Latched** while the current press is held ≥ `RESET_HOLD_MIN`, so it survives to the falling edge on which the reset acts. Re-armed (cleared) on the next rising edge. It must be a latch, not a live comparison: a TON's `ET` returns to 0 in the same call in which `IN` goes false, so a comparison evaluated at the release would always read 0 |
-| `ResetDeviceFault` | Bool | `FALSE` | Press held longer than `RESET_HOLD_MAX`, or held at first scan. Blocks reset **and** start until the contact returns to 0 |
+| `StartEdgeMemory` | Bool | **`TRUE`** | Previous state of `PanelStartPressed`. Start value `TRUE` so a contact already closed at the first scan produces **no** edge — a stuck or bridged start button cannot start the cell |
+| `ResetEdgeMemory` | Bool | **`TRUE`** | Previous state of `PanelResetPressed`, for the rising edge the reset acts on. Start value `TRUE` for the same reason and with the same effect: a reset contact already closed at the first scan produces **no** edge, so a held, bridged or welded-closed reset can never clear a latch |
+| `ResetDeviceFault` | Bool | **`TRUE`** | *The reset contact has not yet been observed open.* Starts `TRUE` and is cleared — permanently, for this program run — the first time `PanelResetPressed` reads `FALSE` while `BridgeLinkOk` is `TRUE`. A welded, bridged or held-at-startup reset therefore stays flagged and is visible in the watch table instead of failing silently. It blocks the reset (§6.7) and nothing else; it never blocks start, which is a different device |
 | `SeqStep` | Int | `0` | 0 Idle, 10 Transport, 20 Dwell, 30 Return, 40 Complete |
 | `DwellTimer`, `StepTimer` | IEC_TIMER (TON) | — | Dwell at the beam; per-step watchdog |
 | `PresenceOnTimer`, `PresenceOffTimer` | IEC_TIMER (TON) | — | Filter time on the presence verdict, both directions |
@@ -161,7 +176,6 @@ that the node model and the bridge design deliberately refused to make
 | `DRIVE_FAULT_DELAY` | `T#1s` | Covers start transients and the direction reversal at step 30 |
 | `POSITION_FREEZE_BAND` | `0.005` m | Travel expected in 1 s at the tolerance speed is 0.02 m; 0.005 m is comfortably below it |
 | `HEARTBEAT_STALE_TIME` | `T#500ms` | Heartbeat nominal period 50 ms; the in-container run showed a 79 ms worst-case cycle. 500 ms ≈ 10 missed beats: tolerant of jitter, fast enough to be seen live. **Re-check against the PLCSIM run** and raise it only with evidence |
-| `RESET_HOLD_MIN` / `RESET_HOLD_MAX` | `T#200ms` / `T#3s` | Monitored reset window (§6.7) |
 
 ---
 
@@ -194,9 +208,9 @@ address is needed anywhere.
 
 | DB | Contents | *Accessible from HMI/OPC UA* | *Writable from HMI/OPC UA* |
 |---|---|---|---|
-| `DemoCellInput` | tags 1–6 | ✔ | **✔** |
-| `DemoCellOutput` | tag 7 | ✔ | **✘** |
-| `DemoCellStatus` | tags 8–12 | ✔ | **✘** |
+| `DemoCellInput` | tags 1–7 | ✔ | **✔** |
+| `DemoCellOutput` | tag 8 | ✔ | **✘** |
+| `DemoCellStatus` | tags 9–13 | ✔ | **✘** |
 | `DemoCellLink` | `BridgeHeartbeat` ✔/**✔**, `BridgeLinkOk` ✔/**✘** | ✔ | per tag |
 | `DemoCellControl_DB` (instance) | §3.2 internals | **✘** | ✘ |
 
@@ -220,7 +234,8 @@ nothing: the leaf name must remain the BrowseName of §3.1.
 ```
 DemoCell/
   Input/   ConveyorBeltPosition  ConveyorBeltSpeed  ProductSensorRange
-           PanelStartPressed  PanelStopCircuitClosed  PanelProcessStopCircuitClosed
+           PanelStartPressed  PanelResetPressed
+           PanelStopCircuitClosed  PanelProcessStopCircuitClosed
   Output/  ConveyorSpeedCommand
   Status/  CellCycleRunning  CellProcessStopActive  CellResetRequired
            ProductPresentAtSensor  ConveyorDriveFault
@@ -284,7 +299,7 @@ arbitrary value when the bridge process restarts. Any *change* is liveness
 (§7.1 of the design).
 
 > **The qualification rule, stated once and applied everywhere below.**
-> While `BridgeLinkOk` is `FALSE`, the six input values are **not attributable to
+> While `BridgeLinkOk` is `FALSE`, the seven input values are **not attributable to
 > the cell** — they are DB start values, or values left over from a previous
 > bridge session (§6.2 of the design). Therefore **no input-derived verdict is
 > evaluated and no input-derived fault is latched while the link is stale.**
@@ -492,34 +507,59 @@ layer; the three alternatives were considered and rejected in `bridge-design.md`
 
 ### 6.7 Latches, the monitored reset, and no auto-resume
 
-**The reset device.** The demonstration panel has three contacts — Start, Stop,
-process stop — and there is no reset contact in the node model. This program
-therefore uses **`PanelStartPressed` as both the reset device and the start
-device, distinguished by gesture and by state**, and never conflates the two
-actions:
+**The reset device.** The panel has a dedicated reset button, `PanelResetPressed`
+(§3.1, node 5). Reset and start are **two separate physical devices**, so the two
+actions are told apart by which contact closed and by nothing else:
 
-| Gesture | Condition | Effect |
-|---|---|---|
-| **Reset**: press, hold 0.2–3 s, release | `CellResetRequired` is TRUE **and** `CauseGone` (§6.3) — the live world agrees, the latches need not | On the **falling** edge: clear all latches, `CellResetRequired := FALSE`. **Nothing energizes.** `CellCycleRunning` stays FALSE, the setpoint stays `0.0` |
-| **Start**: press | `CellResetRequired` is FALSE at the **rising** edge, `RunPermissive` true, `SeqStep` = 0 | `CellCycleRunning := TRUE`, `SeqStep := 10` if the belt is home, `30` if it is not (§6.3) |
+| Action | Device and edge | Condition | Effect |
+|---|---|---|---|
+| **Reset** | **rising** edge of `PanelResetPressed` | a latch is pending **and** `CauseGone` (§6.3) — the live world agrees, the latches need not — **and** `NOT ResetDeviceFault` | Clear all latches, `CellResetRequired := FALSE`. **Nothing energizes.** `CellCycleRunning` stays FALSE, `SeqStep` stays 0, the setpoint stays `0.0` |
+| **Start** | **rising** edge of `PanelStartPressed` | no latch pending, `RunPermissive` true, `SeqStep` = 0 | `CellCycleRunning := TRUE`, `SeqStep := 10` if the belt is home, `30` if it is not (§6.3) |
 
-Because the latch is cleared on the *falling* edge of the reset press, the
-*rising* edge of that same press saw `CellResetRequired` still TRUE and was
-ignored. **A reset and a start are always two separate, deliberate presses.**
-Evaluate the reset before the start within the OB so this ordering is explicit.
+**A reset and a start are always two separate, deliberate actions, now on two
+separate buttons.** Pressing reset can never start the cell: the reset branch
+assigns no cycle flag, no step and no setpoint, and the start branch is reached
+only by an edge on the *other* contact. Evaluate the reset before the start within
+the OB, and note the consequence: `latchPending` is computed once, ahead of both
+(§7 part 5), so a start edge arriving in the *same* 20 ms call as a reset still
+sees the latch and is refused. `CellResetRequired` therefore reads `TRUE` for one
+further OB call after the clearing reset. The start press that follows must be its
+own new edge — the two actions cannot be collapsed into one even by pressing both
+buttons together.
+
+**Why `CellResetRequired` gates the start edge, and why that is not redundant.**
+`RunPermissive` (§6.3) carries only `ConveyorDriveFault`, `SensorFaultLatch` and
+`SequenceFaultLatch`. It does **not** carry `ProcessStopLatch` or `LinkLostLatch`,
+whose *live* conditions clear the instant the button is released or the heartbeat
+returns. So without `NOT latchPending` on the start edge, releasing a process stop
+and pressing start would run the cell with the stop still latched and no reset
+ever given — exactly the automatic resume CLAUDE.md §9 forbids. **The gate is
+therefore kept**: it is the "a monitored reset is required before the machine may
+run again" half of the domain rule, and it is independent of which device the
+reset lives on. It agrees with `opcua-nodes.md` §9.5: no *client* may clear
+`CellResetRequired` by writing a node — only the operator's contact, through this
+program, does.
 
 Monitoring, per CLAUDE.md §9 ("the reset is edge triggered so a stuck button does
 not count as a reset"):
 
-- `StartEdgeMemory` starts at `TRUE`, so a contact already closed at the first
-  scan produces no edge at all. A bridged or stuck button cannot reset and cannot
-  start.
-- Held longer than `RESET_HOLD_MAX` (3 s) → `ResetDeviceFault := TRUE`: the press
-  is rejected, and both reset and start stay blocked until the contact returns to
-  0. Released sooner than `RESET_HOLD_MIN` (0.2 s) → not a valid reset (it is
-  still a valid *start* press when no latch is pending).
+- **The rising edge is the whole mechanism.** `ResetEdgeMemory` starts at `TRUE`,
+  so a contact already closed at the first scan produces no edge at all. A held,
+  bridged or welded-closed reset button therefore never resets — not after one
+  second, not after an hour — and a reset held down across a later stop cannot
+  clear that stop's latch either, because the edge happened before the latch did.
+- **`ResetDeviceFault` makes that failure visible rather than silent.** It starts
+  `TRUE` — *the contact has not been observed open* — and clears permanently the
+  first time `PanelResetPressed` reads `FALSE` while the link is OK. It is belt
+  and braces beside the edge, and it is what a fault-finder reads in the watch
+  table when pressing reset appears to do nothing. It blocks only the reset; start
+  is a different device and is never blocked by it.
+- **The reset input is qualified by the link** like every other input (§6.1): the
+  reset condition contains `CauseGone`, which contains `BridgeLinkOk`, so a reset
+  cannot be honoured from a frozen or start-value input image.
 - A reset attempted while a latch cause is still present is ignored; the latch
-  stays and `CellResetRequired` stays TRUE.
+  stays and `CellResetRequired` stays TRUE. Release the button and press again
+  once the cause is gone.
 
 **No auto-resume, by construction.** Nothing sets `CellCycleRunning` except a
 start rising edge. No returning signal — heartbeat, closing stop circuit, clearing
@@ -534,7 +574,7 @@ Structure and the load-bearing statements only. Not compilable as written:
 declarations, timer instances and the constant block are per §3. Identifiers not
 listed in §3.2 (`#hbChanged`, `#linkOk`, `#rangeValid`, `#cmdMoving`,
 `#beltMoving`, `#d1`, `#d2`, `#worldOk`, `#runPermissive`, `#causeGone`,
-`#latchPending`, `#startRise`, `#startFall`) are **Temp**, computed and consumed
+`#latchPending`, `#startRise`, `#resetRise`) are **Temp**, computed and consumed
 within one call. Everything in
 §3.2 is **Static** and must survive the scan.
 
@@ -623,32 +663,26 @@ END_IF;
 "DemoCellStatus".CellResetRequired := #latchPending;
 
 // ---- 6. Monitored reset, then a SEPARATE start (order matters) ----------
+// Two devices, two rising edges. Both edge memories start TRUE, so a contact
+// already closed at the first scan yields no edge: nothing stuck can act.
+#resetRise := "DemoCellInput".PanelResetPressed AND NOT #ResetEdgeMemory;
 #startRise := "DemoCellInput".PanelStartPressed AND NOT #StartEdgeMemory;
-#startFall := NOT "DemoCellInput".PanelStartPressed AND #StartEdgeMemory;
+#ResetEdgeMemory := "DemoCellInput".PanelResetPressed;   // start value TRUE
 #StartEdgeMemory := "DemoCellInput".PanelStartPressed;   // start value TRUE
 
-#ResetHoldTimer(IN := "DemoCellInput".PanelStartPressed, PT := #RESET_HOLD_MAX);
-IF #startRise THEN
-    #ResetHoldValid := FALSE;                          // re-arm for this press
-END_IF;
-IF "DemoCellInput".PanelStartPressed AND (#ResetHoldTimer.ET >= #RESET_HOLD_MIN) THEN
-    #ResetHoldValid := TRUE;                           // LATCHED: ET is gone at release
-END_IF;
-IF #ResetHoldTimer.Q THEN                              // held > 3 s: stuck / bridged
-    #ResetDeviceFault := TRUE;  #ResetHoldValid := FALSE;
-END_IF;
-IF NOT "DemoCellInput".PanelStartPressed THEN
-    #ResetDeviceFault := FALSE;                        // clears only on return to 0
+IF #linkOk AND NOT "DemoCellInput".PanelResetPressed THEN
+    #ResetDeviceFault := FALSE;      // start value TRUE: contact now seen open
 END_IF;
 
-IF #startFall AND #ResetHoldValid AND #latchPending AND #causeGone THEN
+IF #resetRise AND NOT #ResetDeviceFault AND #latchPending AND #causeGone THEN
     #ProcessStopLatch := FALSE;  #LinkLostLatch := FALSE;
     #SensorFaultLatch := FALSE;  #SequenceFaultLatch := FALSE;
     "DemoCellStatus".ConveyorDriveFault := FALSE;
-    // Reset clears latches. It energizes NOTHING: no step change, no cycle flag.
+    // Reset clears latches. It energizes NOTHING: no step change, no cycle flag,
+    // no setpoint. Starting the cell is the OTHER button, below.
 END_IF;
 
-IF #startRise AND NOT #latchPending AND NOT #ResetDeviceFault
+IF #startRise AND NOT #latchPending
    AND #runPermissive AND (#SeqStep = 0) THEN
     "DemoCellStatus".CellCycleRunning := TRUE;
     // Re-read where the belt IS; never resume from stale sequence state.
@@ -749,6 +783,7 @@ the bridge's 20 Hz cyclic write.
 | Tag | Format | Expected |
 |---|---|---|
 | `"DemoCellInput".PanelStartPressed` | Bool | `FALSE` idle; `TRUE` while `/cell/panel/start` publishes `true` (NO contact) |
+| `"DemoCellInput".PanelResetPressed` | Bool | `FALSE` idle; `TRUE` while `/cell/panel/reset` publishes `true` (NO contact, **fails to `FALSE` = not reset**, opposite to the two rows below) |
 | `"DemoCellInput".PanelStopCircuitClosed` | Bool | `TRUE` when not actuated; `FALSE` when pressed **or on a broken/absent signal** |
 | `"DemoCellInput".PanelProcessStopCircuitClosed` | Bool | `TRUE` when not actuated; `FALSE` when pressed. **Process stop** |
 | `"DemoCellInput".ProductSensorRange` | Floating-point | ≈ `1.440` beam clear, ≈ `0.540` product in the beam |
@@ -778,7 +813,11 @@ the bridge's 20 Hz cyclic write.
 `"DemoCellControl_DB".SeqStep`, `.SpeedRequest`, `.LastBridgeHeartbeat`,
 `.ProcessStopLatch`, `.LinkLostLatch`, `.SensorFaultLatch`,
 `.SequenceFaultLatch`, `.ResetDeviceFault`, `.StartEdgeMemory`,
-`.HeartbeatStaleTimer.ET`, `.DriveFaultTimer.ET`.
+`.ResetEdgeMemory`, `.HeartbeatStaleTimer.ET`, `.DriveFaultTimer.ET`.
+
+`ResetDeviceFault` reads `TRUE` from power-up until the reset contact has been
+seen open once with the link up; if it is still `TRUE`, the reset button is held,
+bridged or welded and no press of it will ever clear a latch (§6.7).
 
 `SpeedRequest` beside `ConveyorSpeedCommand` is the clearest single view of §6.4:
 during an interlock loss the request may still read `+0.15` while the command
@@ -800,9 +839,9 @@ click path verified on your installation, and the author cannot run TIA Portal.
 | 4 | **Runtime licence.** CPU properties → **Runtime licences → OPC UA** → select the licence type matching the CPU (Siemens sells it as SIMATIC OPC UA S7-1500 *small* / *medium* / *large*, banded by CPU size) | Compilation is not clean until a type is selected, even in simulation. Whether PLCSIM Advanced *enforces* the licence at runtime is version-dependent — set it either way, and check the figure against your CPU's manual rather than against this table |
 | 5 | **Security.** For the demonstration, allow **"No security (none)"** as a server endpoint and permit **anonymous / guest** user access. Otherwise generate or import the bridge's client certificate and enable "automatically accept client certificates during runtime" | Must match `bridge.yaml` → `opcua.security_policy` (default `"none"`), and `certificate_path` / `private_key_path` / `username`, which are **absolute paths to files outside this repository** (invariant 13). Default S7-1500 settings are stricter than the default bridge settings, so one side must move — change the config, never the bridge code |
 | 6 | **Server interface.** CPU → *OPC UA communication* → *Server interfaces* → add one; set its **namespace URI to `urn:amr-agent:cell:plc`**; build the `DemoCell/Input|Output|Status|Link` tree of §4.3 and drag in the DB tags | If the URI is left at the CPU default, the bridge's browse-by-URI fails at every connect and never falls back to an index — by design (`opcua-nodes.md` §2). Do not rename any leaf: the BrowseName is the diff key against `opcua-nodes.md` |
-| 7 | **Per-tag access.** In each DB's declaration table set *Accessible from HMI/OPC UA* and *Writable from HMI/OPC UA* per §4.2 | Leaving `ConveyorSpeedCommand` writable would let a client write an actuator output — the one thing invariant 6 forbids. Leaving the six inputs **not** writable makes every bridge write fail with `BadNotWritable`, and the heartbeat never starts (startup rule R3) |
+| 7 | **Per-tag access.** In each DB's declaration table set *Accessible from HMI/OPC UA* and *Writable from HMI/OPC UA* per §4.2 | Leaving `ConveyorSpeedCommand` writable would let a client write an actuator output — the one thing invariant 6 forbids. Leaving the seven inputs **not** writable makes every bridge write fail with `BadNotWritable`, and the heartbeat never starts (startup rule R3) |
 | 8 | **Compile, download, RUN.** Download to the running PLCSIM instance and put the CPU in RUN | The server starts with the CPU. In STOP there is no server, so the bridge sees a connection refusal, not a bad session |
-| 9 | **Verify the address space independently** — UaExpert (or `opcua-client`) against the endpoint: browse the namespace, confirm **14 nodes**, the four folders and the data types | Do this before involving the bridge, so a naming or access mistake is not diagnosed as a bridge defect. The bridge logs `session established, N nodes resolved`; N must be 14 |
+| 9 | **Verify the address space independently** — UaExpert (or `opcua-client`) against the endpoint: browse the namespace, confirm **15 nodes**, the four folders and the data types | Do this before involving the bridge, so a naming or access mistake is not diagnosed as a bridge defect. The bridge logs `session established, N nodes resolved`; N must be 15 |
 | 10 | **Firewall and host networking.** Allow inbound TCP **4840** on the PLCSIM virtual adapter profile | If the bridge runs under WSL and PLCSIM on Windows, the endpoint must be an address reachable *from WSL*; mirrored networking or a port proxy may be needed. That work is m3-07/m3-08's, not this document's — but it is the second most common reason "the bridge cannot connect" |
 
 Finally: **the test double must not be running during any PLCSIM run**, and never
@@ -819,6 +858,14 @@ in RUN on PLCSIM Advanced, `bridge/config/bridge.yaml` pointed at the PLCSIM
 endpoint **by configuration only — no code change**, the bridge running, the test
 double **not** running, and the watch table of §9 open in *Monitor* mode.
 
+> **One prerequisite outside this document.** `PanelResetPressed` reaches the CPU
+> only if `bridge/config/bridge.yaml` carries the reset node and its topic —
+> `bridge/` work, requested by m3-10 and m3-11. **Confirm it before T1**: if the
+> entry is absent, the node never leaves its start value `FALSE`, no reset is
+> possible, and `CellResetRequired` stays `TRUE` after the first latch. The same
+> applies to `bridge/tools/cell_stimulus.py` if the reset is driven from it rather
+> than by `ros2 topic pub`.
+
 Panel contacts are driven exactly as `sim/README.md` shows, e.g.
 `ros2 topic pub -1 /cell/panel/start std_msgs/msg/Bool "{data: true}"`.
 
@@ -827,12 +874,13 @@ Panel contacts are driven exactly as `sim/README.md` shows, e.g.
 | Step | Action | Pass |
 |---|---|---|
 | 1.1 | Publish `start` `true`, then `false` | Group 1 `PanelStartPressed` follows `TRUE` → `FALSE` |
+| 1.1b | Publish `reset` `true`, then `false` | `PanelResetPressed` follows `TRUE` → `FALSE`. **Confirm the opposite polarity to 1.2/1.3**: this tag is `TRUE` only while the button is held, and `FALSE` on a broken or absent signal. `ResetDeviceFault` (Group 4) goes `FALSE` on the first `false` sample |
 | 1.2 | Publish `stop` `false`, then `true` | `PanelStopCircuitClosed` follows `FALSE` → `TRUE`. **Confirm the polarity reads the way a broken wire would**: the tag is false when the button is pressed |
 | 1.3 | Publish `process_stop` `false`, then `true` | `PanelProcessStopCircuitClosed` follows. Record it as a **process stop** |
 | 1.4 | With the belt clear, read `ProductSensorRange`; then run the cycle until the product blocks the beam | ≈1.440 → ≈0.540, and `ProductPresentAtSensor` follows ~100 ms later |
 | 1.5 | Screenshot the watch table with the belt moving | `ConveyorBeltPosition` and `ConveyorBeltSpeed` change live |
 
-**Pass: all five.** Evidence: watch-table screenshots plus a note of the
+**Pass: all six.** Evidence: watch-table screenshots plus a note of the
 corresponding `ros2 topic echo` output.
 
 ### T2 — PLC output driving the Gazebo actuator *(exit item b)*
@@ -845,8 +893,8 @@ corresponding `ros2 topic echo` output.
 | 2.4 | Let it return home | `SeqStep` → 40 → 0, command → `0.0`, `CellCycleRunning` → `FALSE` |
 | 2.5 | Start again, and mid-transport publish `process_stop` `false` | Command snaps to `0.0` **in the same watch-table update**, belt stops, `CellProcessStopActive` and `CellResetRequired` → `TRUE`, `SpeedRequest` may still read `+0.15` — that is §6.4 working |
 | 2.6 | Publish `process_stop` `true` again and wait 30 s **without touching start** | **Nothing moves.** No auto-resume |
-| 2.7 | Press and hold start 1 s, release | Latches clear, `CellResetRequired` → `FALSE`, **and nothing moves** |
-| 2.8 | Press start again (short press) | The cycle starts. Two deliberate presses, never one |
+| 2.7 | Publish `reset` `true`, then `false` | Latches clear on the `true` edge, `CellResetRequired` → `FALSE`, **and nothing moves**: `ConveyorSpeedCommand` stays `0.0`, `CellCycleRunning` stays `FALSE`, `SeqStep` stays 0 |
+| 2.8 | Publish `start` `true`, then `false` | The cycle starts. **Two deliberate actions on two different buttons**, never one |
 
 **Pass: all eight.** Evidence: screen recording of Gazebo beside the watch table.
 
@@ -883,16 +931,17 @@ definition is §8 of this document; this is its test.
 |---|---|---|
 | 4.1 **(A)** | With the cycle running, `kill -9` the bridge | `BridgeHeartbeat` freezes; `BridgeLinkOk` → `FALSE` within ~500 ms; `CellCycleRunning` → `FALSE`; `ConveyorSpeedCommand` → `0.0`; `CellResetRequired` → `TRUE`. Note in the evidence that **the belt keeps running in Gazebo** until the bridge returns (§8 residual) |
 | 4.2 | Restart the bridge, wait for the heartbeat to advance, and **do nothing else for 30 s** | `BridgeLinkOk` → `TRUE`, and **the cycle does not restart**. The first command delivered is `0.0` and the belt stops |
-| 4.3 | Monitored reset, then a separate start press | Latches clear on the release; the cycle runs only after the second press |
+| 4.3 | Publish `reset` `true`/`false`, then `start` `true`/`false` | Latches clear on the reset's rising edge and **nothing moves**; the cycle runs only after the separate start press on the other button |
 | 4.4 **(B)** | Repeat 4.1 with `SIGTERM` | **Identical PLC behaviour to 4.1.** Any difference is a defect |
 | 4.5 **(C)** | With the cycle running, break the link (stop PLCSIM's adapter, or the CPU to STOP and back) | Same reaction where a program is running; where the CPU stopped, confirm that on restart the non-permissive start values apply and nothing runs until the bridge supplies real samples and a reset+start is given |
 | 4.6 **(D)** | With the belt transporting, `kill -9` the Gazebo server, leaving the bridge alive | `BridgeHeartbeat` **keeps advancing**, `BridgeLinkOk` stays `TRUE`, the input image freezes, and within `DRIVE_FAULT_DELAY` `ConveyorDriveFault` latches, `CellCycleRunning` → `FALSE`, command → `0.0` |
 | 4.7 | Attempt a reset and start with the simulation still stopped | The fault re-latches within 1 s. No auto-resume, and no way to run a dead cell |
-| 4.8 | **Startup rule against the real DB start values**: cold-start the CPU with the bridge stopped | The six inputs read the start values of §3.1, `BridgeLinkOk` is `FALSE`, and start presses do nothing. Then start the bridge and confirm the heartbeat only begins after all six inputs carry real samples |
-| 4.9 | **Stuck reset device**: publish `start` `true` and leave it | No start, no reset. After 3 s `ResetDeviceFault` sets, and it clears only when the contact returns to `false` |
+| 4.8 | **Startup rule against the real DB start values**: cold-start the CPU with the bridge stopped | The seven inputs read the start values of §3.1, `BridgeLinkOk` is `FALSE`, and start presses do nothing. Then start the bridge and confirm the heartbeat only begins after all seven inputs carry real samples |
+| 4.9 | **Stuck reset device**: publish `reset` `true` and **leave it published**, then latch a stop (publish `process_stop` `false`, then `true` again) | The still-held reset **never clears the latch**: `CellResetRequired` stays `TRUE` and the cell stays stopped for as long as the button is held. There is no edge to act on, and no elapsed time makes one appear. Release `reset` (`false`) and publish `true` again — *now* the latch clears |
+| 4.9b | **Reset held from before the program ran**: cold-start the CPU with `reset` already publishing `true` | `ResetDeviceFault` stays `TRUE`, no reset is possible, and the watch table says why. It clears only after the contact has been seen `false` once with the link up |
 | 4.10 | **Session behaviour on a real server**: time how long the S7-1500 holds the session after a bridge `SIGKILL` | Recorded as a number. This is the one in-container result known not to transfer (`EVIDENCE_SIGNAL_LOSS.md` A.4) — and it must **not** be used as an input to the program |
 
-**Pass: all ten.** Evidence appended to `bridge/EVIDENCE_SIGNAL_LOSS.md` as a
+**Pass: all eleven.** Evidence appended to `bridge/EVIDENCE_SIGNAL_LOSS.md` as a
 PLCSIM section beside the container run, per `EVIDENCE_LATENCY.md` Section B
 item 6.
 
@@ -912,8 +961,15 @@ item 6.
 
 | # | Item | Status |
 |---|---|---|
-| 1 | **There is no reset contact in the cell.** `PanelStartPressed` doubles as the reset device (§6.7), distinguished from start by gesture and by state. It works and is honest, but a dedicated reset device is better practice and would be one topic in `sim/` and one node in `opcua-nodes.md` §9.3 | Requested in `docs/reports/m3-05-plc-program-spec.md`, **not** invented here. The program as specified requires no such node |
-| 2 | `IS_VALID` mnemonic and its availability in the owner's TIA version | Confirm at implementation (§6.2). The two range comparisons alone are sufficient if it is absent |
-| 3 | `HEARTBEAT_STALE_TIME` = 500 ms is derived from the in-container 20 Hz run | Re-check against the PLCSIM run (T3) and raise only with evidence |
-| 4 | The OB30 period of 20 ms assumes the bridge's 50 ms cadence | If m3-04's 20 Hz expectation is revised with evidence (`bridge-design.md` §12.7), revise this together with it |
-| 5 | Whether PLCSIM Advanced enforces the OPC UA runtime licence | Owner observes at step 4 of §10 and records it |
+| 1 | `IS_VALID` mnemonic and its availability in the owner's TIA version | Confirm at implementation (§6.2). The two range comparisons alone are sufficient if it is absent |
+| 2 | `HEARTBEAT_STALE_TIME` = 500 ms is derived from the in-container 20 Hz run | Re-check against the PLCSIM run (T3) and raise only with evidence |
+| 3 | The OB30 period of 20 ms assumes the bridge's 50 ms cadence | If m3-04's 20 Hz expectation is revised with evidence (`bridge-design.md` §12.7), revise this together with it |
+| 4 | Whether PLCSIM Advanced enforces the OPC UA runtime licence | Owner observes at step 4 of §10 and records it |
+| 5 | The bridge must carry the reset node and its topic (`bridge/config/bridge.yaml`, and `bridge/tools/cell_stimulus.py` if it drives the contact) | `bridge/` work, requested by m3-10 and m3-11. Until it lands, `PanelResetPressed` never leaves its start value and no reset is possible (§11 preconditions) |
+
+The item that stood here first — *"there is no reset contact in the cell"*, which
+forced the start button to double as the reset device — is **closed**. `m3-10`
+added `/cell/panel/reset` to the cell and verified against a running cell that it
+energizes nothing; `m3-11` added `DemoCell/Input/PanelResetPressed` to the node
+model. §6.7 is written against that contact, and the gesture separation it
+replaced is gone from this document.
