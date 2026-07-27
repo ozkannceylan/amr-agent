@@ -9,9 +9,10 @@ container path in `sim/README.md`, which remains the reference recipe and the
 environment all committed M3 evidence (`sim/worlds/CELL_EVIDENCE.md`,
 `bridge/EVIDENCE_LATENCY.md`, `bridge/EVIDENCE_SIGNAL_LOSS.md`) was captured
 in. Every command below was executed by the author and its real output is
-quoted. **The rebuild is incomplete**: Gazebo Harmonic and the remaining ROS 2
-packages could not be installed because `apt` requires a sudo password this
-agent cannot supply. What that blocks is stated in §4.1, §4.7 and §5.
+quoted. The toolchain needed for the M3 demonstration cell — ROS 2 Jazzy,
+Gazebo Harmonic and asyncua 2.0.1 — is installed and verified here. The
+ros2_control and Nav2 packages from `install.sh` are still absent; they belong
+to the deferred M5 vehicle work and the cell does not use them (§3.1).
 
 ## 2. Verified environment table
 
@@ -23,10 +24,14 @@ agent cannot supply. What that blocks is stated in §4.1, §4.7 and §5.
 | `/usr/bin/python3` target | python3.12 (via update-alternatives) | `/usr/bin/python3.12` | already correct, no alternatives step needed |
 | ROS 2 | Jazzy | `/opt/ros/jazzy`, `ros-jazzy-ros-base 0.11.0-1noble.20260126.203129` | present |
 | RMW | rmw_fastrtps_cpp | `middleware name    : rmw_fastrtps_cpp` | match |
-| Gazebo | Harmonic via `ros-jazzy-gz-sim-vendor` | **NOT INSTALLED** (`gz`: not found) | **blocked, needs sudo** |
-| `ros-jazzy-ros-gz` | installed | **MISSING** | **blocked, needs sudo** |
-| ros2_control stack | installed | **MISSING** | **blocked, needs sudo** |
-| Nav2 | installed | **MISSING** | blocked (not needed for the M3 cell) |
+| Gazebo | Harmonic (gz sim 8) via `ros-jazzy-gz-sim-vendor` | `Gazebo Sim, version 8.11.0` | match |
+| `gz` binary location | system-wide `/usr/bin/gz` | `/opt/ros/jazzy/opt/gz_tools_vendor/bin/gz` | **deviation, see §4.1** |
+| `ros-jazzy-gz-sim-vendor` | installed | `0.0.10-1noble.20260604.111001` | match |
+| `ros-jazzy-ros-gz` | installed | `1.0.22-1noble.20260616.074726` | match |
+| Render backend | ogre2 on llvmpipe (container) | ogre2 on `llvmpipe (LLVM 20.1.2, 256 bits)` | match, see §4.7 |
+| Headless RTF (cell) | ~1.0 | `0.99984`, `0.99994` | match |
+| ros2_control stack | installed | **MISSING** | not needed for the M3 cell (M5 work) |
+| Nav2 | installed | **MISSING** | not needed for the M3 cell (M5 work) |
 | asyncua | 2.0.1 | `2.0.1` | match |
 | cryptography | 49.0.0 | `49.0.0` | match |
 | pyOpenSSL | 26.3.0 | `26.3.0` | match |
@@ -38,11 +43,11 @@ Package survey against the `ROS_PKGS` list in `install.sh`:
 
 ```
 OK   ros-jazzy-ros-base  0.11.0-1noble.20260126.203129
-MISS ros-jazzy-xacro
+OK   ros-jazzy-xacro  2.1.1-1noble.20260519.011123
 OK   ros-jazzy-robot-state-publisher  3.3.3-3noble.20260126.180730
 MISS ros-jazzy-joint-state-publisher
-MISS ros-jazzy-gz-sim-vendor
-MISS ros-jazzy-ros-gz
+OK   ros-jazzy-gz-sim-vendor  0.0.10-1noble.20260604.111001
+OK   ros-jazzy-ros-gz  1.0.22-1noble.20260616.074726
 MISS ros-jazzy-ros2-control
 MISS ros-jazzy-gz-ros2-control
 MISS ros-jazzy-controller-manager
@@ -66,45 +71,38 @@ no-op here:
 -rw-r--r-- 1 root root 1167 Feb 26 20:42 /usr/share/keyrings/ros-archive-keyring.gpg
 ```
 
-The missing packages are all available from that source:
-
-```
-ros-jazzy-gz-sim-vendor:
-  Installed: (none)
-  Candidate: 0.0.10-1noble.20260604.111001
-ros-jazzy-ros-gz:
-  Installed: (none)
-  Candidate: 1.0.22-1noble.20260616.074726
-```
+The remaining packages are all available from that source.
 
 ## 3. Step-by-step setup
 
-### 3.0 Normalise line endings first — `install.sh` will not run otherwise
+### 3.0 Line endings — fixed, no operator action needed
 
-This is the first thing a WSL operator hits. See §4.8 for the diagnosis.
-
-```
-$ bash -n /mnt/c/Users/ozkan/projects/amr-agent/sim/setup/install.sh
-install.sh: line 102: syntax error near unexpected token `$'do\r''
-install.sh: line 102: `for p in "${ROS_PKGS[@]}"; do'
-
-$ ./install.sh
-/usr/bin/env: 'bash\r': No such file or directory
-/usr/bin/env: use -[v]S to pass options in shebang lines
-```
-
-Workaround, verified on a scratch copy (do **not** commit the result; the
-blob in git is already LF-clean):
+Historically the first thing a WSL operator hit: the working tree was checked
+out CRLF and `install.sh` would not run. That is now fixed in the repository by
+a root `.gitattributes` (commit `7d3ee4c`). Verified here:
 
 ```
-$ sed 's/\r$//' sim/setup/install.sh > /tmp/install_lf.sh
-$ file -b /tmp/install_lf.sh
+$ file -b sim/setup/install.sh
 Bourne-Again shell script, ASCII text executable
-$ bash -n /tmp/install_lf.sh && echo "SYNTAX OK"
+$ grep -c $'\r' sim/setup/install.sh
+0
+$ bash -n sim/setup/install.sh && echo "SYNTAX OK"
 SYNTAX OK
-$ bash /tmp/install_lf.sh
+$ ./sim/setup/install.sh
 Run as root (sudo).
 ```
+
+WSL-side `git status` is clean again — the phantom whole-tree modification is
+gone:
+
+```
+$ git status --porcelain | grep -c '^ M'
+1
+```
+
+(the one remaining entry is unrelated in-flight work by another agent). The
+full diagnosis is kept in §4.8 because the failure mode is worth recognising if
+it ever recurs on a fresh clone.
 
 The script's own preconditions pass on this system:
 
@@ -117,24 +115,20 @@ VERSION_CODENAME            : noble
 so the `update-alternatives` block in `install.sh` §1 is a no-op — the
 python3.11-default quirk is a container artifact and does not exist in WSL.
 
-### 3.1 The apt step — NOT COMPLETED
+### 3.1 The apt step — COMPLETED by the owner
+
+`apt` needs elevation, and this environment has no passwordless sudo:
 
 ```
 $ sudo -n true
 sudo: a password is required
 ```
 
-This agent stopped here rather than guessing. The exact command the owner must
-run, from the repo root, is:
-
-```
-sudo bash -c "sed 's/\r$//' sim/setup/install.sh > /tmp/install_lf.sh && bash /tmp/install_lf.sh"
-```
-
-For the **M3 demonstration cell only**, the Robotnik workspace (`install.sh`
-§4–§6) is not required — `sim/README.md` states the cell needs only
-`/opt/ros/jazzy`, and `sim/launch/cell_bringup.launch.py` references only
-`ros_gz_sim` and `ros_gz_bridge`:
+The owner ran the elevated install. For the **M3 demonstration cell only**, the
+Robotnik workspace (`install.sh` §4–§6) is not required — `sim/README.md`
+states the cell needs only `/opt/ros/jazzy`, and
+`sim/launch/cell_bringup.launch.py` references only `ros_gz_sim` and
+`ros_gz_bridge`:
 
 ```
 101:        get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')
@@ -142,11 +136,15 @@ For the **M3 demonstration cell only**, the Robotnik workspace (`install.sh`
 126:        executable='parameter_bridge',
 ```
 
-so the minimum elevated command to unblock brief m3-08 is:
+so the minimum elevated command for the cell is:
 
 ```
 sudo apt-get update && sudo apt-get install -y ros-jazzy-gz-sim-vendor ros-jazzy-ros-gz
 ```
+
+The ros2_control and Nav2 entries in the `install.sh` package list remain
+uninstalled. That is deliberate: they belong to the deferred M5 vehicle work
+(`sim/scenarios/DEFERRED.md`), and nothing in the M3 cell loads them.
 
 ### 3.2 Python venv and asyncua — COMPLETED
 
@@ -222,26 +220,57 @@ in one interpreter" reduces to rclpy + asyncua, which is proven above.
 
 ## 4. WSL-specific findings
 
-### 4.1 Gazebo Harmonic install — BLOCKED
+### 4.1 Gazebo Harmonic — INSTALLED, but `gz` is only on PATH after sourcing ROS 2
 
-Symptom: `gz` is absent both before and after sourcing ROS 2, and the vendor
-directory set under `/opt/ros/jazzy/opt` contains no `gz_sim_vendor`:
+Version, observed:
 
 ```
---- gz after sourcing ---
-gz still not found
---- vendor dirs ---
-/opt/ros/jazzy/opt/gz_cmake_vendor
-/opt/ros/jazzy/opt/gz_math_vendor
-/opt/ros/jazzy/opt/gz_utils_vendor
-/opt/ros/jazzy/opt/rviz_ogre_vendor
+$ gz sim --version
+Gazebo Sim, version 8.11.0
+Copyright (C) 2018 Open Source Robotics Foundation.
+Released under the Apache 2.0 License.
 ```
 
-Resolution: none applied. `apt-get install` needs elevation (§3.1). **No
-`gz sim --version` string could be recorded**, so the brief's investigation 1
-is unanswered. The package is present and installable from the already
-configured repo (candidate `0.0.10-1noble.20260604.111001`), so this is a
-permission blocker, not an availability one.
+**The WSL-specific trap is where the binary lives.** Because Harmonic comes
+from the ROS vendor packages rather than from
+`packages.osrfoundation.org`, there is no `/usr/bin/gz`, and `gz` does not
+exist on PATH until `/opt/ros/jazzy/setup.bash` is sourced:
+
+```
+=== BEFORE sourcing ROS 2 ===
+gz NOT on PATH before sourcing
+
+=== AFTER sourcing /opt/ros/jazzy/setup.bash ===
+which gz : /opt/ros/jazzy/opt/gz_tools_vendor/bin/gz
+```
+
+There is no system-wide Harmonic to fall back on:
+
+```
+$ ls -l /usr/bin/gz
+(no /usr/bin/gz -> no system-wide Harmonic)
+$ dpkg -s gz-harmonic
+gz-harmonic deb installed? : no
+$ grep -rs "packages.osrfoundation.org" /etc/apt/sources.list.d/
+(no osrfoundation apt source)
+```
+
+Consequence for anyone following this document or writing a script against it:
+**every shell that runs `gz` must source `/opt/ros/jazzy/setup.bash` first**, and
+a bare `gz` in a systemd unit, cron job or non-login shell will fail with
+"command not found" rather than with a Gazebo error. This differs from most
+Gazebo Harmonic documentation, which assumes the osrfoundation packages and a
+system-wide `/usr/bin/gz`.
+
+The vendor package set backing it:
+
+```
+OK   ros-jazzy-gz-sim-vendor    0.0.10-1noble.20260604.111001
+OK   ros-jazzy-gz-tools-vendor  0.0.7-1noble.20260225.231255
+OK   ros-jazzy-ros-gz           1.0.22-1noble.20260616.074726
+OK   ros-jazzy-ros-gz-sim       1.0.22-1noble.20260615.173223
+OK   ros-jazzy-ros-gz-bridge    1.0.22-1noble.20260615.142443
+```
 
 ### 4.2 Interpreter unification — RESOLVED, no WSL deviation
 
@@ -291,9 +320,12 @@ Resolution: **no XML profile, no `ROS_LOCALHOST_ONLY`, no custom
               Use ROS_AUTOMATIC_DISCOVERY_RANGE and ROS_STATIC_PEERS instead.
 ```
 
-so it should not be added to any launch or doc. Caveat: this was tested
-between two plain `ros2` CLI processes, not between the Gazebo server, the
-`ros_gz_bridge` and the bridge process, because Gazebo is not installed.
+so it should not be added to any launch or doc. Caveat: this was tested between
+two plain `ros2` CLI processes. The full runtime topology — Gazebo server plus
+`ros_gz_bridge` plus the bridge process — is m3-08's to exercise. Note that
+Gazebo's own transport does **not** use DDS or `ROS_DOMAIN_ID`; it is isolated
+with `GZ_PARTITION` instead, which is what the §4.7 runs used to stay clear of
+a concurrent simulation.
 
 ### 4.4 /dev/shm — ADEQUATE, but segments are not cleaned up on exit
 
@@ -494,7 +526,7 @@ ls: cannot access '/home/user/amr-agent/bridge/evidence/': No such file or direc
 m3-08 will need `--evidence-csv` or a config change. Flagged, not changed —
 `bridge/` is outside this brief's write access.
 
-### 4.7 Graphics — WSLg IS present; headless not verifiable without Gazebo
+### 4.7 Graphics — headless works, RTF ~1.0, and WSLg does NOT give you a GPU
 
 WSLg is running, contrary to the "must run headless" assumption:
 
@@ -522,16 +554,120 @@ need a display at all:
 119:        condition=IfCondition(gui),
 ```
 
-**Not verified.** Gazebo is not installed, so no headless run was attempted.
-The specific risk that remains open: the cell's photo-eye is a `gpu_lidar`,
-which needs a rendering context inside the *server* process even with `-s`.
-Whether that context comes up on WSLg's `/dev/dri`, falls back to llvmpipe, or
-fails is exactly what could not be tested. See §5.
+The open risk was that the cell's photo-eye is a `gpu_lidar`, which needs a
+rendering context inside the *server* process even with `-s`. It was tested
+directly: `gz sim -s -r -v 4 sim/worlds/cell.sdf` was run for 30 s under five
+configurations, isolated from any concurrent simulation with
+`ROS_DOMAIN_ID=77` and `GZ_PARTITION=m307probe`.
 
-### 4.8 Line endings — the checkout is CRLF and breaks shell scripts
+| Config | DISPLAY | Extra | Result | GL_RENDERER |
+|---|---|---|---|---|
+| A | `:0` (WSLg) | — | works | `llvmpipe (LLVM 20.1.2, 256 bits)` |
+| B | unset | — | works | `llvmpipe (LLVM 20.1.2, 256 bits)` |
+| C | unset | `LIBGL_ALWAYS_SOFTWARE=1` | **SEGFAULT** | — |
+| D | `:0` (WSLg) | `--headless-rendering` | works | `llvmpipe (LLVM 20.1.2, 256 bits)` |
+| E | unset | — | works | `llvmpipe (LLVM 20.1.2, 256 bits)` |
 
-Not in the brief's investigation list, but it blocks step one, so it is
-recorded here.
+**Answer 1: headless genuinely works, and the `gpu_lidar` renders.** In every
+non-crashing case a real scan was received:
+
+```
+photo-eye sample : RECEIVED (gpu_lidar rendered)
+```
+
+with the expected frame:
+
+```
+    key: "frame_id"
+    value: "ProductSensor::post::beam"
+```
+
+**Answer 2: real-time factor is ~1.0**, matching the container and far better
+than the ~0.1 the warehouse world managed there:
+
+```
+D: real_time_factor: 0.99984002559590468
+E: real_time_factor: 0.99994150342204979
+```
+
+**Answer 3: WSLg's presence changes the code path but buys nothing.** Despite
+`/dev/dri/card0` existing, and despite OGRE successfully enumerating and
+binding it via EGL —
+
+```
+Found Num EGL Devices: 2
+EGL Device: EGL_EXT_device_drm ... #0 /dev/dri/card0
+Created GL 4.5 context for device EGL_EXT_device_drm ... #0 /dev/dri/card0
+```
+
+— Mesa then falls back to software rasterisation:
+
+```
+libEGL warning: egl: failed to create dri2 screen
+libEGL warning: NEEDS EXTENSION: falling back to kms_swrast
+GL_VERSION = 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2
+GL_VENDOR = Mesa
+GL_RENDERER = llvmpipe (LLVM 20.1.2, 256 bits)
+GPU Vendor: unknown
+```
+
+So the container's llvmpipe path is effectively reproduced. **No rendering
+result here should be attributed to GPU acceleration**, and no future
+performance difference between this machine and the container should be
+explained by "WSL has a GPU" — measured, it does not.
+
+What DISPLAY actually changes is which windowing path OGRE tries first. With
+DISPLAY set it takes GLX and attaches to WSLg's X server. With DISPLAY unset it
+throws, and Gazebo catches it and proceeds:
+
+```
+OGRE EXCEPTION(3:RenderingAPIException): Couldn`t open X display  in
+  GLXGLSupport::getGLDisplay at .../OgreGLXGLSupport.cpp (line 808)
+[Wrn] [Ogre2RenderEngine.cc:551] Unable to open display: . Trying to run in headless mode.
+```
+
+Both end on llvmpipe with identical RTF, so this is cosmetic — but it means a
+log full of X-display exceptions is *normal* for a headless run here and is not
+a fault to chase.
+
+**Answer 4: what a reader must set to force headless.** Either works:
+
+```
+# preferred — explicit, no X exceptions in the log
+gz sim -s --headless-rendering -r <world>
+
+# equivalent — what a CI/systemd context gets for free
+env -u DISPLAY -u WAYLAND_DISPLAY gz sim -s -r <world>
+```
+
+`-s` alone is *not* sufficient to avoid touching the X server: config A shows
+`-s` still opening a GLX connection when DISPLAY is set. It is harmless here,
+but `--headless-rendering` is the honest flag.
+
+**Do not set `LIBGL_ALWAYS_SOFTWARE=1`.** With DISPLAY unset it makes Mesa
+refuse the already-selected EGL device and Gazebo dies:
+
+```
+libEGL warning: Not allowed to force software rendering when API explicitly selects a hardware device.
+#8    Object ".../RenderSystem_GL3Plus.so", ... in Ogre::GL3PlusPlugin::install(...)
+Segmentation fault
+```
+
+Crash attribution, confirmed by log inspection rather than by inference:
+
+```
+case A: crash-trace lines=0   'Rendering Thread initialized'=1
+case B: crash-trace lines=0   'Rendering Thread initialized'=1
+case C: crash-trace lines=2   'Rendering Thread initialized'=0
+```
+
+The variable is pointless anyway — rendering is already software.
+
+### 4.8 Line endings — CRLF checkout broke shell scripts (RESOLVED, `7d3ee4c`)
+
+Not in the brief's investigation list, but it blocked step one. Kept here
+because the failure mode is easy to misdiagnose if it recurs on a fresh clone
+or a machine whose Git lacks the repository's `.gitattributes`.
 
 Symptom: `install.sh` will not parse or execute (§3.0). The cause is the
 checkout, not the file. The blob in git is clean:
@@ -594,45 +730,54 @@ $ git status --porcelain | head
 Resolution: **none applied, deliberately.** `install.sh` was *not* edited —
 its committed content is already correct, and rewriting it would fix nothing
 durably because the next checkout re-applies CRLF. The correct fix is a
-`.gitattributes` at the repo root, which is outside this brief's write access
-and is requested in the report. Until then, WSL operators should use the
-`sed 's/\r$//'` copy from §3.0 and should run git from Windows, not from WSL.
+`.gitattributes` at the repo root. That file now exists (commit `7d3ee4c`) and
+the symptom is gone; see §3.0 for the verification.
 
 ## 5. Known-unresolved
 
-1. **Gazebo Harmonic is not installed and no version string was observed.**
-   Investigation 1 of the brief is unanswered. Needs
-   `sudo apt-get install -y ros-jazzy-gz-sim-vendor ros-jazzy-ros-gz`.
-2. **Headless Gazebo was never run.** Investigation 7 is unanswered. The open
-   question is specifically whether the `gpu_lidar` photo-eye acquires a
-   rendering context in a `-s` server under WSLg, and whether it uses
-   `/dev/dri` or llvmpipe. Real-time factor under WSL is therefore also
-   unknown; the container's ~1.0 headless RTF for the cell must not be assumed
-   to carry over.
-3. **The venv is at `/home/ozkan/amr-bridge-venv`, not `/opt/amr-bridge-venv`.**
-   Every other document says `/opt`. This must be reconciled when the elevated
-   step runs, or `bridge/README.md` becomes wrong on this machine.
-4. **DDS was proven only between two `ros2` CLI processes.** The real topology
-   — gz server, `ros_gz_bridge`, and the bridge process — was not exercised,
-   because Gazebo is absent.
-5. **Clock: not fixed, only diagnosed.** The Windows Time service is stopped
-   and the guest wall clock steps ~2.73 s every 30 s. Monotonic-derived
-   latency is unaffected, but any WSL-to-PLCSIM timestamp correlation is
-   currently meaningless.
-6. **`sim/worlds/cell.sdf` is not strict-XML parseable**, and this is *not* a
-   WSL or CRLF issue. Its header comment contains an ASCII-art diagram with
-   `--` sequences, which XML forbids inside comments:
+1. **The venv is at `/home/ozkan/amr-bridge-venv`, not `/opt/amr-bridge-venv`.**
+   Every other document says `/opt`, which needs root. Either recreate it at
+   `/opt/amr-bridge-venv` with the elevated shell, or `bridge/README.md` is
+   wrong on this machine. Unchanged — `bridge/` is outside this brief's write
+   access.
+2. **`bridge/config/bridge.yaml` still points at a container path** for its
+   evidence file:
+
+   ```
+   bridge/config/bridge.yaml:95:  csv_path: "/home/user/amr-agent/bridge/evidence/latency-2026-07-27.csv"
+   $ ls -l /home/user/amr-agent/bridge/evidence/
+   ls: cannot access '/home/user/amr-agent/bridge/evidence/': No such file or directory
+   ```
+
+   m3-08 needs `--evidence-csv` or a config change. Flagged, not changed.
+3. **Clock: diagnosed, not fixed.** The Windows Time service is stopped and the
+   guest wall clock steps ~2.73 s every 30 s (§4.5). The bridge timestamps with
+   `time.monotonic_ns()`, so intra-process latency is unaffected — but any
+   WSL-to-PLCSIM-Advanced timestamp correlation is meaningless until the owner
+   runs an elevated `Start-Service w32time; w32tm /resync`. This is the one
+   open item that can silently corrupt M3 gate evidence.
+4. **DDS was proven only between two `ros2` CLI processes** (§4.3). The full
+   runtime topology — gz server, `ros_gz_bridge`, bridge process — belongs to
+   m3-08.
+5. **`sim/worlds/cell.sdf` is not strict-XML parseable, but Gazebo does not
+   care.** Its header comment contains an ASCII-art diagram with `--`
+   sequences, which XML forbids inside comments, so `xml.etree` rejects it:
 
    ```
    $ python3 -c "import xml.etree.ElementTree as ET; ET.parse('sim/worlds/cell.sdf')"
    xml.etree.ElementTree.ParseError: not well-formed (invalid token): line 15, column 8
-   $ sed -n '15p' sim/worlds/cell.sdf
-      ---+---[ConveyorFrame 8.0 x 1.0]------------------------> +x
    ```
 
-   Confirmed with a minimal case: `<r><!-- a b c --><x/></r>` parses,
-   `<r><!-- a --- b --><x/></r>` is `REJECTED`. Gazebo parses SDF with
-   TinyXML2, which is more permissive, and `sim/worlds/CELL_EVIDENCE.md`
-   records the world loading in the container — so this is very likely
-   harmless. **It was not verified against libsdformat here** because Gazebo
-   is not installed. Recorded so it is not rediscovered as a WSL problem.
+   Confirmed as a comment-syntax issue with a minimal case:
+   `<r><!-- a b c --><x/></r>` parses, `<r><!-- a --- b --><x/></r>` is
+   `REJECTED`. **Now settled in practice**: the §4.7 runs loaded this exact
+   file five times without complaint —
+
+   ```
+   [Msg] Loading SDF world file[/mnt/c/Users/ozkan/projects/amr-agent/sim/worlds/cell.sdf].
+   ```
+
+   — because libsdformat uses TinyXML2, which permits it. Recorded only so the
+   `xml.etree` failure is not rediscovered and mistaken for file corruption.
+   Any *tooling* the project writes that parses SDF with `xml.etree` will need
+   the comment cleaned up first; nothing does today.
