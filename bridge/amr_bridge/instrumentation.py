@@ -90,6 +90,10 @@ class Counters:
         self.publishes = 0
         self.heartbeat_writes = 0
         self.heartbeat_suppressed_cycles = 0
+        # Session housekeeping (§3.2 S3): exchanges that held an idle session
+        # open, and exchanges that failed. Neither counts a transported value.
+        self.keepalive_probes = 0
+        self.keepalive_failures = 0
 
     def as_rows(self) -> list[tuple[str, int]]:
         return [(key, value) for key, value in sorted(vars(self).items())]

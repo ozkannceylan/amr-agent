@@ -5,7 +5,7 @@
 # config key for any of those would be logic wearing a disguise."
 #
 # Everything below is one of:
-#   - an address (endpoint, namespace URI, BrowseName path, topic name),
+#   - an address (endpoint, namespace URIs, BrowseName path, topic name),
 #   - a cadence (cycle period — an expectation, not a deadline, §9.2/§12.7),
 #   - housekeeping (reconnect retry interval, log level, evidence paths).
 #
@@ -17,12 +17,21 @@ opcua:
   # The bridge connects OUT to this endpoint. It never listens (invariant 4).
   endpoint: "opc.tcp://127.0.0.1:4840/amr-agent/celldouble/"
 
-  # Resolved to an index by browsing at every session establishment.
-  # The index is NEVER hardcoded (opcua-nodes.md §2).
-  # TIA Portal derives this URI from the server interface name as
-  # http://<interface name> and the field is not editable, so the demonstration
-  # cell's interface `DemoCell` gives http://DemoCell (ADR 0006).
-  namespace_uri: "http://DemoCell"
+  # The browse path crosses TWO namespaces (bridge-design.md §3.1 N2). Both are
+  # resolved to an index by URI at every session establishment; neither index
+  # appears here, neither is hardcoded, and neither is derived from the other.
+  # A URI that is missing on the server is a connect failure, retried per §8.1 —
+  # the bridge never scans the namespace array for a likely-looking entry and
+  # never falls back to an index (§3.1 N4).
+  namespace_uris:
+    # Vendor-fixed. The S7-1500 publishes its ServerInterfaces folder here.
+    server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
+    # TIA Portal derives this URI from the server interface name as
+    # http://<interface name> and the field is not editable, so the
+    # demonstration cell's interface `DemoCell` gives http://DemoCell
+    # (ADR 0006). Renaming the interface changes this URI and breaks every
+    # browse until this line follows it (§3.1 N5).
+    interface: "http://DemoCell"
 
   # Security. "none" is the in-container test-double setting. For PLCSIM /
   # hardware set policy/certificate/private_key; the files live OUTSIDE this
@@ -31,7 +40,14 @@ opcua:
   certificate_path: null         # absolute path, outside the repo
   private_key_path: null         # absolute path, outside the repo
   username: null                 # absolute path to a secret file, or null
-  session_timeout_ms: 10000
+
+  # A REQUEST, never a value the bridge may rely on (§3.2 S1). The server
+  # revises it and the granted value is the only one any behaviour uses: the
+  # commissioned S7-1500 granted 30 000 ms against a 3 600 000 ms request, so a
+  # grant may land either side of this number. The keep-alive interval is
+  # DERIVED from the granted value at every session establishment and is
+  # deliberately absent from this file (§3.2 S3).
+  requested_session_timeout_ms: 10000
   session_name: "amr-agent-bridge"
 
   # Reconnect housekeeping (§8.1). This is retry timing for a broken session,
@@ -40,10 +56,19 @@ opcua:
   reconnect_interval_s: 1.0
   reconnect_backoff_max_s: 5.0
 
-# BrowseName paths under the resolved namespace, relative to the Objects
-# folder. These mirror opcua-nodes.md §9.2 exactly.
 nodes:
-  root: "DemoCell"
+  # Objects -> the server interface node, one element per level, each carrying
+  # the namespace THAT element belongs to (§3.1 N3). `DemoCell` does not hang
+  # directly under `Objects`: it is a child of the ServerInterfaces folder the
+  # S7-1500 publishes, and that folder is Siemens-owned, so a single index
+  # cannot qualify both elements (§3.1 N1).
+  interface_path:
+    - namespace: server_interfaces
+      browse_name: "ServerInterfaces"
+    - namespace: interface
+      browse_name: "DemoCell"
+  # Everything below is relative to the interface node (§3.1 N1) and lives in
+  # the interface namespace, mirroring opcua-nodes.md §9.2 exactly.
   # WRITABLE by the bridge — the PLC input image (§9.3).
   inputs:
     ConveyorBeltPosition:          ["Input", "ConveyorBeltPosition"]

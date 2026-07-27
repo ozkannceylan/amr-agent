@@ -372,24 +372,28 @@ network path under PROFINET load, and nothing about the four signal-loss cases.
    so `security_policy: "none"` with `certificate_path`, `private_key_path` and
    `username` null is the correct setting for this endpoint — invariant 13 is
    untouched because there is no secret to place.
-2. **The requested session timeout is inside the server's clamp.**
-   `session_timeout_ms` is 10 000 in config, below the 30 000 ms this server
-   granted for a 3 600 000 ms request, so no clamp is expected on the bridge's
-   request; the **granted** value is what the run should report, not the
-   requested one.
+2. **The requested session timeout is a request, and what the CPU grants for it
+   is unknown.** The config asks for 10 000 ms
+   (`requested_session_timeout_ms`). This server granted 30 000 ms for a
+   3 600 000 ms request — i.e. it revises in the *upward* direction too — so the
+   grant for a 10 000 ms request may land either side of it. The **granted**
+   value is what the run must report, together with the keep-alive derived from
+   it (`bridge-design.md` §3.2; `EVIDENCE_CONNECT.md` records both directions
+   against the test double, and states that a 30 000 ms grant must log a
+   10.000 s keep-alive).
 3. **The browse root is not the same as the test double's, and this is not an
-   endpoint-only change.** `bridge/config/bridge.yaml` resolves
-   `[DemoCell, Input, <name>]` from the `Objects` folder with every element in
-   the `DemoCell` namespace index. On this server `DemoCell` is nested one level
-   deeper, under `ServerInterfaces`, and `ServerInterfaces` belongs to the
-   **Siemens** namespace, not to `http://DemoCell` — so a single-namespace path
-   from `Objects` cannot address it (`opcua-nodes.md` §2.1: two indices are
-   resolved by URI at connect, neither is hardcoded, and the parent folder never
-   shares the interface's namespace). No client change is made in this file;
-   brief m3-21 owns it. It is recorded here because it qualifies the sentence
-   above that only `opcua.endpoint` and the security fields change: against this
-   server the *addressing* changes too, and until m3-21 lands, Section B cannot
-   be captured.
+   endpoint-only change.** On this server `DemoCell` is nested one level deeper,
+   under `ServerInterfaces`, and `ServerInterfaces` belongs to the **Siemens**
+   namespace, not to `http://DemoCell` — so a single-namespace path from
+   `Objects`, which is what `bridge/config/bridge.yaml` resolved before m3-21,
+   cannot address it (`opcua-nodes.md` §2.1: two indices are resolved by URI at
+   connect, neither is hardcoded, and the parent folder never shares the
+   interface's namespace). **Closed by m3-21**: the config now carries both URIs
+   and an `interface_path` whose elements each name their own namespace, and the
+   client resolves both indices at every session establishment. The recorded
+   test-double run is `EVIDENCE_CONNECT.md`; the sentence above about
+   `opcua.endpoint` and the security fields therefore holds again for this run,
+   and Section B is no longer blocked on a client change.
 
 Sections A and C are unaffected: each remains qualified by the environment that
 produced it, and neither is re-run or edited here.
@@ -422,9 +426,17 @@ What the owner must capture:
    alone does **not** restart the conveyor).
 7. **Session behaviour on a real server**: how long the S7-1500 holds a session
    after a bridge SIGKILL, which is the one place the in-container result is
-   known not to transfer (see `EVIDENCE_SIGNAL_LOSS.md` §A).
+   known not to transfer (see `EVIDENCE_SIGNAL_LOSS.md` §A) — bounded above by
+   the **granted** session timeout, so record that value next to the measurement
+   (`bridge-design.md` §3.2 S5).
 8. **A note on which server produced each number**, per `bridge-design.md` §10:
    the test double must never be running on the same endpoint during this run.
+9. **The connect lines**, which are new since m3-21: both namespace indices as
+   PLCSIM presents them, the resolved
+   `browse path: Objects/<n>:ServerInterfaces/<m>:DemoCell`, and the requested /
+   granted session timeout with the keep-alive derived from the granted value.
+   `EVIDENCE_CONNECT.md` § "What the owner should check in the PLCSIM run" is the
+   checklist; the conformance harness itself stays off this endpoint.
 
 ---
 

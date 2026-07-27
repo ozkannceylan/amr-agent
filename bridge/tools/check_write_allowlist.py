@@ -33,7 +33,11 @@ from amr_bridge.config import WRITE_ALLOWLIST  # noqa: E402
 from amr_bridge.opcua_side import PlcClient, WriteNotPermitted  # noqa: E402
 
 ENDPOINT = os.environ.get("BRIDGE_ENDPOINT", "opc.tcp://127.0.0.1:4840/amr-agent/celldouble/")
-NAMESPACE = "http://DemoCell"          # TIA-derived, not editable — ADR 0006
+# Both namespaces of the commissioned browse path (bridge-design.md §3.1).
+# Resolved by URI here for the same reason the bridge resolves them: the indices
+# differ between PLCSIM and the test double, so neither may be written down.
+INTERFACE_NAMESPACE = "http://DemoCell"                        # TIA-derived, ADR 0006
+SERVER_INTERFACES_NAMESPACE = "http://www.siemens.com/simatic-s7-opcua"  # vendor-fixed
 
 FORBIDDEN = [
     ("Output", "ConveyorSpeedCommand"),
@@ -61,10 +65,12 @@ async def main() -> int:
 
     print("\n2. server-side check — the double refuses a direct write to a read-only node")
     async with Client(ENDPOINT) as opc:
-        idx = await opc.get_namespace_index(NAMESPACE)
+        idx = await opc.get_namespace_index(INTERFACE_NAMESPACE)
+        idx_si = await opc.get_namespace_index(SERVER_INTERFACES_NAMESPACE)
         for folder, name in FORBIDDEN:
             node = await opc.nodes.objects.get_child(
-                [f"{idx}:DemoCell", f"{idx}:{folder}", f"{idx}:{name}"])
+                [f"{idx_si}:ServerInterfaces", f"{idx}:DemoCell",
+                 f"{idx}:{folder}", f"{idx}:{name}"])
             try:
                 await node.write_value(ua.DataValue(ua.Variant(False, ua.VariantType.Boolean)))
                 print(f"   FAIL DemoCell/{folder}/{name}: the server ACCEPTED the write")

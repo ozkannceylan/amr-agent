@@ -16,16 +16,23 @@ import yaml
 # Keys the loader accepts, per section. Anything else is a configuration error.
 _SCHEMA: dict[str, set[str]] = {
     "opcua": {
-        "endpoint", "namespace_uri", "security_policy", "certificate_path",
-        "private_key_path", "username", "session_timeout_ms", "session_name",
-        "reconnect_interval_s", "reconnect_backoff_max_s",
+        "endpoint", "namespace_uris", "security_policy", "certificate_path",
+        "private_key_path", "username", "requested_session_timeout_ms",
+        "session_name", "reconnect_interval_s", "reconnect_backoff_max_s",
     },
-    "nodes": {"root", "inputs", "heartbeat", "output", "diagnostics"},
+    "nodes": {"interface_path", "inputs", "heartbeat", "output", "diagnostics"},
     "ros": {"node_name", "topics", "joint_name", "analog_reliability"},
     "cycle": {"period_s", "status_poll_period_s"},
     "evidence": {"csv_path", "flush_interval_s"},
     "logging": {"level"},
 }
+
+# The two namespaces the browse path crosses (bridge-design.md §3.1 N2). Both
+# are resolved to an index by URI at every session establishment; neither index
+# is ever configured, hardcoded or derived from the other.
+NS_SERVER_INTERFACES = "server_interfaces"   # vendor-fixed Siemens namespace
+NS_INTERFACE = "interface"                   # = the TIA server interface name (ADR 0006)
+NAMESPACE_KEYS: tuple[str, ...] = (NS_SERVER_INTERFACES, NS_INTERFACE)
 
 # The seven input nodes of opcua-nodes.md §9.3, in the order they are
 # documented — panel contacts grouped by failure direction (NO, NO, NC, NC),
@@ -82,14 +89,45 @@ class Config:
 
     # --- addressing helpers (translation, never logic) ---------------------
 
-    def browse_path(self, key: str) -> list[str]:
-        """BrowseName path for a node key, relative to the Objects folder."""
-        root = self.nodes["root"]
+    @property
+    def namespace_uris(self) -> dict[str, str]:
+        """The two namespace URIs of §3.1, keyed by NAMESPACE_KEYS. URIs only —
+        an index never appears in configuration (§3.1 N2, N5)."""
+        return self.opcua["namespace_uris"]
+
+    @property
+    def interface_path(self) -> list[tuple[str, str]]:
+        """`Objects` → … → the server interface node, as
+        `(namespace key, BrowseName)` pairs.
+
+        Each element carries the namespace **that element** belongs to (§3.1
+        N3): on the commissioned server `ServerInterfaces` is Siemens-owned and
+        `DemoCell` is not, so one index cannot qualify both.
+        """
+        return [(el["namespace"], el["browse_name"]) for el in self.nodes["interface_path"]]
+
+    @property
+    def interface_namespace(self) -> str:
+        """Namespace key of the interface node. `Input/`, `Output/`, `Status/`,
+        `Link/` and their variables live in it too (§3.1)."""
+        return self.interface_path[-1][0]
+
+    def browse_path(self, key: str) -> list[tuple[str, str]]:
+        """Full `(namespace key, BrowseName)` path for a node key, from the
+        `Objects` folder: the interface path of §3.1, then the node's own
+        elements relative to the interface node (§3.1 N1)."""
         for section in ("inputs", "heartbeat", "output", "diagnostics"):
             table = self.nodes.get(section) or {}
             if key in table:
-                return [root, *table[key]]
+                ns = self.interface_namespace
+                return [*self.interface_path, *((ns, name) for name in table[key])]
         raise ConfigError(f"no BrowseName path configured for node {key!r}")
+
+    @property
+    def requested_session_timeout_ms(self) -> int:
+        """What the bridge **asks** for. §3.2 S1: a request and nothing more —
+        the value in force is the one the server grants, read back at connect."""
+        return int(self.opcua["requested_session_timeout_ms"])
 
     @property
     def diagnostic_keys(self) -> tuple[str, ...]:
@@ -157,4 +195,82 @@ def load(path: str) -> Config:
         raise ConfigError(f"{path}: [nodes.heartbeat] must contain {HEARTBEAT_KEY}")
     if OUTPUT_KEY not in (cfg.nodes.get("output") or {}):
         raise ConfigError(f"{path}: [nodes.output] must contain {OUTPUT_KEY}")
+
+    _check_namespaces(path, cfg)
+    _check_interface_path(path, cfg)
+    _check_browse_names(path, cfg)
     return cfg
+
+
+def _check_namespaces(path: str, cfg: Config) -> None:
+    """Both URIs of §3.1 N2 must be present, and only those two."""
+    uris = cfg.opcua.get("namespace_uris")
+    if not isinstance(uris, dict):
+        raise ConfigError(f"{path}: [opcua.namespace_uris] must be a mapping of two URIs")
+    if set(uris) != set(NAMESPACE_KEYS):
+        raise ConfigError(
+            f"{path}: [opcua.namespace_uris] must have exactly the keys "
+            f"{list(NAMESPACE_KEYS)} — the browse path crosses two namespaces "
+            "(bridge-design.md §3.1 N2), got " + str(sorted(uris))
+        )
+    for key, uri in uris.items():
+        if not isinstance(uri, str) or not uri.strip():
+            raise ConfigError(f"{path}: [opcua.namespace_uris.{key}] must be a non-empty URI string")
+        if uri.strip().isdigit():
+            raise ConfigError(
+                f"{path}: [opcua.namespace_uris.{key}] is {uri!r}, a namespace *index*. "
+                "Indices are resolved by URI at every session establishment and are "
+                "never configured (bridge-design.md §3.1 N2/N4)."
+            )
+
+
+def _check_interface_path(path: str, cfg: Config) -> None:
+    """§3.1 N1/N3: the interface node is reached through the `ServerInterfaces`
+    folder, and every element names the namespace it belongs to."""
+    elements = cfg.nodes.get("interface_path")
+    if not isinstance(elements, list) or not elements:
+        raise ConfigError(
+            f"{path}: [nodes.interface_path] must be a non-empty list of "
+            "{namespace, browse_name} elements: DemoCell does not hang directly "
+            "under Objects (bridge-design.md §3.1 N1)"
+        )
+    for position, element in enumerate(elements):
+        if not isinstance(element, dict) or set(element) != {"namespace", "browse_name"}:
+            raise ConfigError(
+                f"{path}: [nodes.interface_path][{position}] must have exactly the "
+                "keys {namespace, browse_name}"
+            )
+        if element["namespace"] not in NAMESPACE_KEYS:
+            raise ConfigError(
+                f"{path}: [nodes.interface_path][{position}].namespace is "
+                f"{element['namespace']!r}, not one of {list(NAMESPACE_KEYS)}"
+            )
+    if elements[-1]["namespace"] != NS_INTERFACE:
+        raise ConfigError(
+            f"{path}: the last element of [nodes.interface_path] is the server "
+            f"interface node and must sit in the {NS_INTERFACE!r} namespace "
+            "(bridge-design.md §3.1 N2)"
+        )
+
+
+def _check_browse_names(path: str, cfg: Config) -> None:
+    """A BrowseName carries no namespace index. A configured `4:DemoCell` would
+    hardcode an index that §3.1 N2 forbids, so it is rejected here."""
+    named: list[tuple[str, str]] = [
+        (f"nodes.interface_path[{position}]", element["browse_name"])
+        for position, element in enumerate(cfg.nodes["interface_path"])
+    ]
+    for section in ("inputs", "heartbeat", "output", "diagnostics"):
+        for key, elements in (cfg.nodes.get(section) or {}).items():
+            if not isinstance(elements, list) or not elements:
+                raise ConfigError(f"{path}: [nodes.{section}.{key}] must be a non-empty list")
+            named += [(f"nodes.{section}.{key}", name) for name in elements]
+    for where, name in named:
+        if not isinstance(name, str) or not name.strip():
+            raise ConfigError(f"{path}: [{where}] contains an empty BrowseName")
+        if ":" in name:
+            raise ConfigError(
+                f"{path}: [{where}] is {name!r}. A BrowseName is configured without a "
+                "namespace index; the index is resolved by URI at every session "
+                "establishment (bridge-design.md §3.1 N2)."
+            )

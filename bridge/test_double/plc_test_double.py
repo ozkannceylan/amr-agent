@@ -5,11 +5,27 @@
     #  THIS IS NOT A PLC AND IT IS NOT A MODEL OF ONE.          #
     ############################################################
 
-What it is (bridge-design.md §10): a minimal OPC UA *server* that exposes
-namespace `http://DemoCell` (ADR 0006) with the `DemoCell/` address space of
-docs/interfaces/opcua-nodes.md §9 — same BrowseNames, same folder paths, same
-data types, same access levels — so the bridge and the loop mechanics can be
-verified in a container without TIA Portal or PLCSIM Advanced.
+What it is (bridge-design.md §10): a minimal OPC UA *server* that exposes the
+commissioned two-namespace shape of §3.1 —
+
+    Objects
+      +- ServerInterfaces   ns http://www.siemens.com/simatic-s7-opcua
+           +- DemoCell      ns http://DemoCell                (ADR 0006)
+                +- Input/ Output/ Status/ Link/  and their variables
+
+— with the `DemoCell/` address space of docs/interfaces/opcua-nodes.md §9: same
+BrowseNames, same folder paths, same data types, same access levels, so the
+bridge and the loop mechanics can be verified in a container without TIA Portal
+or PLCSIM Advanced.
+
+Two server behaviours are copied **deliberately**, and they are the only two:
+
+* the two namespace URIs are the real server's, so browse-by-URI resolves
+  identically here and against PLCSIM — but they are registered behind filler
+  namespaces so the **indices differ from PLCSIM's** (§10). A bridge that
+  hardcoded either index must fail against this double;
+* the session timeout is **revised**, as the S7-1500 revises it (§3.2). This is
+  the only way to test that the keep-alive is derived from the granted value.
 
 What it is NOT, and what nothing observed against it proves:
 
@@ -34,6 +50,12 @@ files, exist only to exercise the loop:
                             ConveyorSpeedCommand, for the closed-loop L7
                             interval of §9.2. Off by default. Still NOT PLC
                             logic — it is a wire, not a decision.
+  S4  --min/--max-session-timeout-ms
+                            The window this double grants session timeouts
+                            within, so a client's request is revised in one
+                            direction or the other. Session housekeeping in a
+                            server, not a process decision, and not the PLC's
+                            values.
 
 Operational rule (§10): never start this double as part of a demonstration
 run, and never on the same endpoint as PLCSIM Advanced. Every evidence file
@@ -64,7 +86,34 @@ LOG = logging.getLogger("plc-double")
 # interface name as http://<interface name> and does not let anyone edit
 # (ADR 0006). The double must register the same URI as the server it stands in
 # for, or the bridge's browse-by-URI resolution would fail against it alone.
-NAMESPACE_URI = "http://DemoCell"
+INTERFACE_NAMESPACE_URI = "http://DemoCell"
+# Vendor-fixed namespace of the ServerInterfaces folder every S7-1500 publishes.
+# The interface node hangs under that folder, and the folder is NOT in the
+# interface's namespace (bridge-design.md §3.1 N1/N3).
+SERVER_INTERFACES_NAMESPACE_URI = "http://www.siemens.com/simatic-s7-opcua"
+
+# TEST SCAFFOLDING — deliberate index shift (§10). Registered before the two
+# real URIs so neither lands on the index PLCSIM Advanced happens to use
+# (phase 0 observed ServerInterfaces at index 3). asyncua's own namespaces
+# occupy 0 and 1, so these take 2, 3, 4 and the two real URIs follow at 5 and 6.
+# The numbers are not a contract: the point is only that they differ from the
+# real server's, so no hardcoded index can survive both.
+INDEX_SHIFT_NAMESPACE_URIS = (
+    "urn:amr-agent:test-double:index-shift:1",
+    "urn:amr-agent:test-double:index-shift:2",
+    "urn:amr-agent:test-double:index-shift:3",
+)
+
+# TEST SCAFFOLDING — the session-timeout window this double grants within.
+# asyncua's server revises a client's RequestedSessionTimeout to
+# min(max(requested, min), max), which is the shape of the S7-1500's own
+# revision. The default max is below the bridge's configured request (10 000 ms),
+# so the default run is granted LESS than it asked for; --min-session-timeout-ms
+# above the request reproduces the other direction, which is what the
+# commissioned CPU did (30 000 ms granted against a 3 600 000 ms request).
+# It is scaffolding: the clamp's *shape* is imitated, its value is not the PLC's.
+DEFAULT_MIN_SESSION_TIMEOUT_MS = 5000.0
+DEFAULT_MAX_SESSION_TIMEOUT_MS = 8000.0
 
 # opcua-nodes.md §9.3 — client-WRITABLE input image.
 INPUTS = [
@@ -102,10 +151,15 @@ LINK = [
 ]
 
 
-async def build(server: Server, idx: int) -> dict:
+async def build(server: Server, idx_server_interfaces: int, idx: int) -> dict:
+    """Build the commissioned shape: the ServerInterfaces folder in the Siemens
+    namespace, the interface node and everything below it in the interface
+    namespace (§3.1). `idx` is the interface namespace index; every node under
+    `DemoCell` uses it."""
     nodes: dict[str, object] = {}
     objects = server.nodes.objects
-    demo = await objects.add_folder(idx, "DemoCell")
+    server_interfaces = await objects.add_folder(idx_server_interfaces, "ServerInterfaces")
+    demo = await server_interfaces.add_folder(idx, "DemoCell")
     folders = {
         "Input": await demo.add_folder(idx, "Input"),
         "Output": await demo.add_folder(idx, "Output"),
@@ -201,9 +255,29 @@ async def run(args: argparse.Namespace) -> None:
     server.set_endpoint(args.endpoint)
     server.set_server_name("amr-agent PLC TEST DOUBLE (not a PLC)")
     server.set_security_policy([ua.SecurityPolicyType.NoSecurity])
-    idx = await server.register_namespace(NAMESPACE_URI)
-    nodes = await build(server, idx)
-    LOG.info("namespace %s registered at index %d", NAMESPACE_URI, idx)
+
+    # SCAFFOLDING: shift the indices away from the real server's before
+    # registering the two URIs the bridge resolves (§10).
+    for filler in INDEX_SHIFT_NAMESPACE_URIS:
+        LOG.info("SCAFFOLD: index-shift namespace %s at index %d",
+                 filler, await server.register_namespace(filler))
+    idx_server_interfaces = await server.register_namespace(SERVER_INTERFACES_NAMESPACE_URI)
+    idx = await server.register_namespace(INTERFACE_NAMESPACE_URI)
+    nodes = await build(server, idx_server_interfaces, idx)
+    LOG.info("namespace %s registered at index %d (ServerInterfaces folder)",
+             SERVER_INTERFACES_NAMESPACE_URI, idx_server_interfaces)
+    LOG.info("namespace %s registered at index %d (DemoCell interface and below)",
+             INTERFACE_NAMESPACE_URI, idx)
+    LOG.info("browse path: Objects/%d:ServerInterfaces/%d:DemoCell — two namespaces, "
+             "indices deliberately unlike PLCSIM's", idx_server_interfaces, idx)
+
+    # SCAFFOLDING: revise every client's requested session timeout into this
+    # window, as the S7-1500 does (§3.2). Not a model of the PLC's value.
+    server.iserver.min_session_timeout_ms = args.min_session_timeout_ms
+    server.iserver.max_session_timeout_ms = args.max_session_timeout_ms
+    LOG.info("SCAFFOLD: session timeout granted within [%.0f, %.0f] ms — a request "
+             "outside it is revised, in either direction",
+             args.min_session_timeout_ms, args.max_session_timeout_ms)
 
     tasks = [asyncio.create_task(log_sessions())]
     if args.command_file:
@@ -231,6 +305,16 @@ def main() -> None:
     parser.add_argument("--observe-csv", default=None, help="S2 scaffolding: server-side observation log")
     parser.add_argument("--echo-input", default=None,
                         help="S3 scaffolding: copy this input into ConveyorSpeedCommand (L7 only)")
+    parser.add_argument("--min-session-timeout-ms", type=float,
+                        default=DEFAULT_MIN_SESSION_TIMEOUT_MS,
+                        help="S4 scaffolding: shortest session timeout this double grants; "
+                             "set it above the bridge's request to reproduce a grant ABOVE "
+                             "the request, as the commissioned CPU did")
+    parser.add_argument("--max-session-timeout-ms", type=float,
+                        default=DEFAULT_MAX_SESSION_TIMEOUT_MS,
+                        help="S4 scaffolding: longest session timeout this double grants; "
+                             "the default is below the bridge's configured request, so the "
+                             "grant is clamped down")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),

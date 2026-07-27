@@ -68,10 +68,10 @@ else. Its whole job is to carry each signal of `docs/interfaces/opcua-nodes.md`
 | `amr_bridge/ros_side.py` | subscriptions, one publisher, field addressing |
 | `amr_bridge/opcua_side.py` | session, node resolution, type verification, the 50 ms cycle, the write allowlist, reconnect |
 | `amr_bridge/instrumentation.py` | per-event CSV recording (always on) |
-| `config/bridge.yaml` | endpoint, namespace URI, BrowseName paths, topic names, cycle period, evidence paths — no thresholds, no tolerances, no timers |
+| `config/bridge.yaml` | endpoint, **both** namespace URIs, BrowseName paths, topic names, cycle period, evidence paths — no thresholds, no tolerances, no timers, and no namespace index |
 | `test_double/` | TEST SCAFFOLDING: an OPC UA server standing in for the S7-1500 |
-| `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check |
-| `EVIDENCE_LATENCY.md`, `EVIDENCE_SIGNAL_LOSS.md`, `evidence/` | dated captures from this container |
+| `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check, connect-conformance check |
+| `EVIDENCE_LATENCY.md`, `EVIDENCE_SIGNAL_LOSS.md`, `EVIDENCE_CONNECT.md`, `evidence/` | dated captures, each qualified by the environment that produced it |
 
 Where the no-logic rule is visible in the code:
 
@@ -160,7 +160,11 @@ every start, so a capture worth keeping is given its own dated name with
 
 Pointing it at PLCSIM Advanced or real hardware is a **configuration** change
 only: `opcua.endpoint`, and the security fields if the server requires them.
-The code path is identical.
+The code path is identical. The two namespace URIs are the same for the test
+double and for the CPU — only the *indices* differ, and no index is written down
+anywhere. Renaming the TIA server interface is the one change that also requires
+editing `opcua.namespace_uris.interface`, because that name **is** the URI
+(ADR 0006).
 
 Summarise a run:
 
@@ -171,11 +175,22 @@ Summarise a run:
 
 ### What the bridge logs at startup
 
-`namespace ... resolved to index N` (browsed by URI, never hardcoded),
+Two `namespace ... resolved to index N` lines — the browse path crosses **two**
+namespaces (`bridge-design.md` §3.1) and both are browsed by URI, never
+hardcoded — then the resolved `browse path: Objects/<n>:ServerInterfaces/
+<m>:DemoCell`, the requested and **granted** session timeout side by side with
+the keep-alive derived from the granted value (§3.2),
 `all node DataTypes match opcua-nodes.md §9`, the publisher-side QoS of every
 subscribed topic (mismatched QoS is silent in ROS 2), and
 `heartbeat withheld: no real sample yet for ...` until every input has carried
 a real cell sample.
+
+Every one of those lines is re-emitted on every reconnect, because a new session
+re-resolves both indices and every NodeId, and re-reads what the server granted
+(§8.1, §3.2 S4). Note that `asyncua`'s own
+`Requested session timeout to be 3600000ms, got …` warning prints its *secure
+channel* default rather than the requested session timeout — the bridge's own
+line is the one to read.
 
 ## How to run the test double
 
@@ -199,6 +214,17 @@ never on the same endpoint as PLCSIM Advanced. Details and its limits:
   evidence files.
 * `--echo-input <NodeKey>` — optional wire from one input to
   `ConveyorSpeedCommand`, for the closed-loop L7 interval only. Off by default.
+* `--min-session-timeout-ms` / `--max-session-timeout-ms` — the window the double
+  grants session timeouts within. The default `[5000, 8000]` is **below** the
+  bridge's 10 000 ms request, so the grant is clamped down; passing
+  `--min-session-timeout-ms 30000` reproduces the other direction, which is what
+  the commissioned CPU did. Either way the keep-alive is derived from what was
+  granted.
+
+The double registers the real server's two namespace URIs behind three filler
+namespaces, so its indices (`5` and `6`) differ from PLCSIM's. That is
+deliberate: a bridge that hardcoded an index would fail against one server or
+the other.
 
 Panel contacts have no physics in the cell, so an unattended run needs a
 stand-in for the human at the panel — all four of them, because the heartbeat
@@ -220,6 +246,20 @@ Check the write allowlist against a running double:
 ```
 "$VENV/bin/python" "$REPO/bridge/tools/check_write_allowlist.py"
 ```
+
+Check the connect logic — both namespaces resolved by URI, the granted session
+timeout read back and the keep-alive derived from it (`bridge-design.md` §3.1,
+§3.2) — against a running double:
+
+```
+"$VENV/bin/python" "$REPO/bridge/tools/check_connect_conformance.py"
+```
+
+It drives the bridge's own session establishment, and it idles a session for
+longer than the granted timeout to measure the keep-alive cadence, so it takes
+longer than the grant (`--skip-idle` omits that part). Run it against the double
+only, never against PLCSIM: `bridge-design.md` §10. The recorded run is
+`EVIDENCE_CONNECT.md`.
 
 ## What the test double does not prove
 

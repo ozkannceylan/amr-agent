@@ -72,8 +72,12 @@ questions for the re-run rather than answers from it:
 One precondition, recorded so the re-run is not attempted too early: on this
 server the interface sits under `ServerInterfaces` in a *second* namespace, which
 the client must resolve by URI before any of the four cases can be provoked
-against it (`opcua-nodes.md` §2.1, brief m3-21; see
-`EVIDENCE_LATENCY.md` §B.0.3).
+against it (`opcua-nodes.md` §2.1; see `EVIDENCE_LATENCY.md` §B.0.3). **Met by
+m3-21**: the client resolves both namespaces by URI at every session
+establishment, and the recorded test-double run is `EVIDENCE_CONNECT.md`. Case
+A's re-run should also record the **granted** session timeout, because that is
+the bound on how long the server may hold a session whose client vanished
+without a FIN/RST (`bridge-design.md` §3.2 S5).
 
 Nothing in the four cases is re-run, re-measured or edited here: each remains
 qualified by the environment that produced it.

@@ -11,6 +11,21 @@ The 50 ms cycle, in the order fixed by §2:
 
 No step of that cycle consults a process value to decide whether to perform
 another step. There is no interlock here.
+
+Two connect-time rules of bridge-design.md are load-bearing and are implemented
+in `_connect` and the methods it calls:
+
+* §3.1 — the browse path crosses **two** namespaces
+  (`Objects` → `ServerInterfaces` → `DemoCell` → …). Both indices are resolved
+  by URI at every session establishment, each path element is qualified with
+  the index of the namespace *that element* belongs to, and a missing URI is a
+  connect failure — never a fallback index and never a scan of the namespace
+  array for a likely-looking entry.
+* §3.2 — every session parameter the bridge sends is a **request**. The granted
+  session timeout is read back from the session on every connect and the
+  keep-alive period is derived from it, never from the request. A grant may land
+  either side of the request: the commissioned S7-1500 granted 30 000 ms against
+  a 3 600 000 ms request.
 """
 
 from __future__ import annotations
@@ -51,6 +66,23 @@ _DIAGNOSTIC_TYPE_DEFAULT = ua.VariantType.Boolean
 
 _SESSION_ERRORS = (ua.UaError, ConnectionError, OSError, asyncio.TimeoutError, TimeoutError)
 
+#: §3.2 S3 — the keep-alive period is a fixed fraction of the **granted**
+#: session timeout, small enough that at least this many keep-alive exchanges
+#: fall inside the granted window, so two consecutive lost exchanges cannot by
+#: themselves expire the session. It is a property of the derivation, not a
+#: tunable: it is deliberately not a config key (§2, §3.2 S3).
+KEEPALIVE_EXCHANGES_PER_TIMEOUT = 3
+
+
+def derive_keepalive_period_s(granted_session_timeout_ms: float) -> float:
+    """Keep-alive period from the GRANTED session timeout (§3.2 S3).
+
+    Never from the requested value: a period computed from an un-granted
+    3 600 000 ms would never fire inside a granted 30 s window, and the session
+    would expire while the bridge believed it had an hour.
+    """
+    return (float(granted_session_timeout_ms) / KEEPALIVE_EXCHANGES_PER_TIMEOUT) / 1000.0
+
 
 class WriteNotPermitted(Exception):
     """A write was attempted on a node outside the §9.1 allowlist. This is a
@@ -65,6 +97,16 @@ class SessionBroken(Exception):
 class TypeMismatch(Exception):
     """A resolved node's DataType is not the documented one. A fatal
     configuration error, never something to coerce around (§3)."""
+
+
+class NamespaceNotFound(Exception):
+    """A configured namespace URI is not in the server's namespace array.
+
+    §3.1 N4: this is the intended failure mode (ADR 0006 D4). It is a connect
+    failure, retried per §8.1. The bridge does not browse around it, does not
+    scan the namespace array for a likely-looking entry, and never falls back
+    to an index.
+    """
 
 
 class PlcClient:
@@ -84,7 +126,16 @@ class PlcClient:
 
         self._client: Optional[Client] = None
         self._nodes: dict[str, object] = {}
-        self._ns_index: Optional[int] = None
+        # Namespace index per namespace key, resolved by URI at every session
+        # establishment and dropped with the session (§3.1 N2, §8.1).
+        self._ns_index: dict[str, int] = {}
+        # §3.2: the granted session timeout and the keep-alive derived from it.
+        # Both are properties of ONE session and are re-read on every new one.
+        self._granted_session_timeout_ms: Optional[float] = None
+        self._keepalive_period_s: Optional[float] = None
+        self._keepalive_task: Optional[asyncio.Task] = None
+        self._keepalive_error: Optional[str] = None
+        self._last_server_touch_ns = 0
 
         # Heartbeat state. §8.1: the counter is NOT reset across a reconnect.
         self._heartbeat = 0
@@ -105,9 +156,18 @@ class PlcClient:
 
     async def _connect(self) -> None:
         opc = self._cfg.opcua
-        client = Client(url=opc["endpoint"], timeout=4)
+        requested_session_ms = self._cfg.requested_session_timeout_ms
+        # auto_reconnect stays OFF deliberately. Every new session must be
+        # established by THIS method, because a new session is where both
+        # namespace indices are re-resolved, every NodeId is re-resolved, the
+        # granted timeout is re-read and the keep-alive re-derived (§3.1 N2,
+        # §3.2 S4, §8.1). A library that silently re-created the session
+        # underneath would skip all of that.
+        client = Client(url=opc["endpoint"], timeout=4, auto_reconnect=False)
         client.name = opc["session_name"]
-        client.session_timeout = int(opc["session_timeout_ms"])
+        # S1: a REQUEST. The value in force is whatever the server returns.
+        client.session_timeout = requested_session_ms
+        requested_channel_ms = client.secure_channel_timeout
         if opc.get("security_policy") and opc["security_policy"] != "none":
             # Certificates live outside the repository (invariant 13).
             await client.set_security_string(
@@ -115,19 +175,12 @@ class PlcClient:
             )
         await client.connect()
         self._client = client
+        self._keepalive_error = None
+        self._touch()
 
-        # Namespace index is resolved by URI at every session establishment and
-        # is NEVER hardcoded (opcua-nodes.md §2).
-        self._ns_index = await client.get_namespace_index(opc["namespace_uri"])
-        LOG.info("namespace %s resolved to index %d", opc["namespace_uri"], self._ns_index)
-
-        # NodeIds are resolved by BrowseName path once per session and never
-        # reused across sessions (§3, §8.1).
-        self._nodes = {}
-        for key in list(INPUT_KEYS) + [HEARTBEAT_KEY, OUTPUT_KEY] + list(self._cfg.diagnostic_keys):
-            path = [f"{self._ns_index}:{name}" for name in self._cfg.browse_path(key)]
-            self._nodes[key] = await client.nodes.objects.get_child(path)
-
+        self._read_back_session_parameters(requested_session_ms, requested_channel_ms)
+        await self._resolve_namespaces(client)
+        await self._resolve_nodes(client)
         await self._verify_types()
 
         # R4: a new session starts with nothing written and no heartbeat.
@@ -135,8 +188,96 @@ class PlcClient:
         self._last_bool_written.clear()
         self._last_missing_logged = []
         self._connected = True
+        self._start_keepalive()
         self._recorder.row("session", "connect", clock="-", note=opc["endpoint"])
         LOG.info("session established, %d nodes resolved", len(self._nodes))
+
+    def _read_back_session_parameters(
+        self, requested_session_ms: int, requested_channel_ms: float
+    ) -> None:
+        """§3.2 S2/S4/S6 — every session parameter the bridge sent was a request;
+        the values in force are the ones the server returned, read back here on
+        every new session and used from this point on.
+
+        `asyncua` overwrites `Client.session_timeout` with the CreateSession
+        response's `RevisedSessionTimeout` (and `secure_channel_timeout` with the
+        channel's `RevisedLifetime`), so reading the attributes back after
+        `connect()` reads the granted values. The requested numbers come from the
+        config and from before the connect, never from these attributes.
+        """
+        client = self._client
+        assert client is not None
+        granted_ms = float(client.session_timeout)
+        self._granted_session_timeout_ms = granted_ms
+        if granted_ms < requested_session_ms:
+            verdict = "clamped BELOW the request"
+        elif granted_ms > requested_session_ms:
+            verdict = "raised ABOVE the request"
+        else:
+            verdict = "granted as requested"
+        LOG.info(
+            "session timeout: requested %d ms, granted %d ms — %s; the granted "
+            "value is the only one in force (§3.2 S2)",
+            requested_session_ms, granted_ms, verdict,
+        )
+        granted_channel_ms = float(client.secure_channel_timeout)
+        LOG.info(
+            "secure channel lifetime: requested %d ms, granted %d ms — revised by "
+            "the same mechanism (§3.2 S6)",
+            requested_channel_ms, granted_channel_ms,
+        )
+
+        # S3: the keep-alive period is derived from the GRANTED value only.
+        self._keepalive_period_s = derive_keepalive_period_s(granted_ms)
+        LOG.info(
+            "keep-alive interval %.3f s = granted %d ms / %d (§3.2 S3); derived "
+            "from the request it would have been %.3f s, which is not used",
+            self._keepalive_period_s, granted_ms, KEEPALIVE_EXCHANGES_PER_TIMEOUT,
+            derive_keepalive_period_s(requested_session_ms),
+        )
+        self._recorder.row(
+            "session", "session_timeout_ms", clock="-", value=granted_ms,
+            note=f"granted; requested {requested_session_ms} ({verdict})",
+        )
+        self._recorder.row(
+            "session", "secure_channel_lifetime_ms", clock="-", value=granted_channel_ms,
+            note=f"granted; requested {requested_channel_ms:.0f}",
+        )
+        self._recorder.row(
+            "session", "keepalive_period_s", clock="-",
+            value=round(self._keepalive_period_s, 4),
+            note=f"derived from the granted timeout / {KEEPALIVE_EXCHANGES_PER_TIMEOUT} (§3.2 S3)",
+        )
+
+    async def _resolve_namespaces(self, client: Client) -> None:
+        """§3.1 N2/N3/N4 — both indices resolved by URI, every session, no
+        fallback and no scanning."""
+        self._ns_index = {}
+        for ns_key, uri in self._cfg.namespace_uris.items():
+            try:
+                index = await client.get_namespace_index(uri)
+            except ValueError as exc:
+                raise NamespaceNotFound(
+                    f"namespace {uri!r} ({ns_key}) is not published by "
+                    f"{self._cfg.opcua['endpoint']}. Not browsed around, not guessed "
+                    "from the namespace array and not replaced by an index "
+                    "(bridge-design.md §3.1 N4)."
+                ) from exc
+            self._ns_index[ns_key] = index
+            LOG.info("namespace %s (%s) resolved to index %d", uri, ns_key, index)
+            self._recorder.row(
+                "session", f"namespace_index:{ns_key}", clock="-", value=index, note=uri)
+
+    async def _resolve_nodes(self, client: Client) -> None:
+        """NodeIds are resolved by qualified BrowseName path once per session and
+        never reused across sessions (§3, §8.1). Each element carries the index
+        of the namespace *that element* belongs to (§3.1 N3)."""
+        self._nodes = {}
+        for key in list(INPUT_KEYS) + [HEARTBEAT_KEY, OUTPUT_KEY] + list(self._cfg.diagnostic_keys):
+            path = [f"{self._ns_index[ns_key]}:{name}" for ns_key, name in self._cfg.browse_path(key)]
+            self._nodes[key] = await client.nodes.objects.get_child(path)
+        LOG.info("browse path: Objects/%s", "/".join(
+            f"{self._ns_index[ns_key]}:{name}" for ns_key, name in self._cfg.interface_path))
 
     async def _verify_types(self) -> None:
         for key, expected in _EXPECTED_TYPE.items():
@@ -151,10 +292,81 @@ class PlcClient:
                 raise TypeMismatch(f"{key}: server DataType {actual} != documented Boolean")
         LOG.info("all node DataTypes match opcua-nodes.md §9")
 
+    # ------------------------------------------------------------------ #
+    # Keep-alive — connection housekeeping, never a signal gate (§3.2)
+    # ------------------------------------------------------------------ #
+
+    def _touch(self) -> None:
+        """Note that this session was exercised. Housekeeping only: it records
+        no value, and nothing transported depends on it."""
+        self._last_server_touch_ns = time.monotonic_ns()
+
+    def _start_keepalive(self) -> None:
+        self._keepalive_task = asyncio.ensure_future(self._keepalive_loop())
+
+    async def _cancel_keepalive(self) -> None:
+        task, self._keepalive_task = self._keepalive_task, None
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):  # pragma: no cover - teardown
+            pass
+
+    async def _keepalive_loop(self) -> None:
+        """One session-activity exchange per derived period while the session is
+        idle (§3.2 S3).
+
+        In a healthy run this loop does nothing: the 50 ms cycle touches the
+        server ~20 times a second, so the session is never idle for a whole
+        period. It matters when the cycle is stalled — which is exactly why the
+        period must come from the granted timeout and not from the request.
+
+        It is **not** a signal gate: it reads the standard `Server/ServerStatus/
+        State` node, applies it to nothing, and can neither delay nor suppress a
+        transported value (§3.2, §1.1).
+        """
+        period_s = self._keepalive_period_s
+        client = self._client
+        if period_s is None or client is None:  # pragma: no cover - defensive
+            return
+        period_ns = int(period_s * 1e9)
+        try:
+            while self._connected:
+                await asyncio.sleep(period_s)
+                if not self._connected or self._client is not client:
+                    return
+                if (time.monotonic_ns() - self._last_server_touch_ns) < period_ns:
+                    continue  # the cycle already exercised the session
+                try:
+                    await client.nodes.server_state.read_value()
+                except Exception as exc:
+                    self._counters.keepalive_failures += 1
+                    self._keepalive_error = f"keep-alive exchange failed: {exc}"
+                    LOG.warning("%s — degraded mode, no signal invented", self._keepalive_error)
+                    self._recorder.row("session", "keepalive_failed", clock="-", note=str(exc))
+                    return
+                self._counters.keepalive_probes += 1
+                touched = time.monotonic_ns()
+                self._recorder.row(
+                    "session", "keepalive", t_end_ns=touched,
+                    interval_ns=touched - self._last_server_touch_ns,
+                    note=f"idle session held open; period {period_s:.3f}s derived from the grant",
+                )
+                self._last_server_touch_ns = touched
+        except asyncio.CancelledError:
+            return
+
     async def _disconnect(self, reason: str) -> None:
         """§7.3 B: on a clean shutdown the bridge writes no farewell value and
         zeroes nothing. It just stops."""
         self._connected = False
+        await self._cancel_keepalive()
+        # A grant belongs to one session (§3.2 S4); it does not survive it.
+        self._granted_session_timeout_ms = None
+        self._keepalive_period_s = None
+        self._ns_index = {}
         if self._client is not None:
             try:
                 await self._client.disconnect()
@@ -190,6 +402,11 @@ class PlcClient:
     # ------------------------------------------------------------------ #
 
     async def _cycle(self, cycle_start: int) -> None:
+        # A failed keep-alive exchange marks the session broken, like a failed
+        # read or write (§8.1, detection row).
+        if self._keepalive_error is not None:
+            raise SessionBroken(self._keepalive_error)
+
         # 1. read the PLC output and 2. apply it to the cell, unchanged.
         await self._output_path()
 
@@ -199,6 +416,10 @@ class PlcClient:
         # 4. heartbeat, last, and only once every input has carried a real
         #    sample (R3/R4).
         await self._heartbeat_path()
+
+        # The session was exercised by this cycle, so the keep-alive has nothing
+        # to do (§3.2). Housekeeping bookkeeping, no value involved.
+        self._touch()
 
     async def _output_path(self) -> None:
         node = self._nodes[OUTPUT_KEY]
@@ -323,6 +544,7 @@ class PlcClient:
             except _SESSION_ERRORS as exc:
                 self._counters.read_errors += 1
                 raise SessionBroken(f"read {key}: {exc}") from exc
+        self._touch()
         LOG.info("PLC diagnostics (logged only): %s", values)
         self._recorder.row("diagnostics", "Status/*", clock="-", value=str(values))
 
@@ -353,6 +575,12 @@ class PlcClient:
                 except Exception as exc:
                     LOG.warning("connect failed: %s; retrying in %.1fs", exc, backoff)
                     self._recorder.row("session", "connect_failed", clock="-", note=str(exc))
+                    if self._client is not None:
+                        # The socket and session may already be open — a missing
+                        # namespace (§3.1 N4) or an unresolvable NodeId fails
+                        # AFTER CreateSession. Close it, or every retry would
+                        # leave a session behind on a server that limits them.
+                        await self._disconnect("connect failed after the session opened")
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2.0, retry_max)
                     continue
@@ -403,3 +631,36 @@ class PlcClient:
     @property
     def heartbeat(self) -> int:
         return self._heartbeat
+
+    # --- session facts, for logging and for the conformance harness ---------
+    # Read-only views of what THIS session negotiated and resolved. Nothing
+    # transported depends on them; they exist so a run can be checked and
+    # recorded (tools/check_connect_conformance.py).
+
+    @property
+    def namespace_indices(self) -> dict[str, int]:
+        return dict(self._ns_index)
+
+    @property
+    def opcua_client(self) -> Optional[Client]:
+        return self._client
+
+    @property
+    def nodes(self) -> dict[str, object]:
+        return dict(self._nodes)
+
+    @property
+    def counters(self) -> Counters:
+        return self._counters
+
+    @property
+    def granted_session_timeout_ms(self) -> Optional[float]:
+        return self._granted_session_timeout_ms
+
+    @property
+    def keepalive_period_s(self) -> Optional[float]:
+        return self._keepalive_period_s
+
+    @property
+    def resolved_node_keys(self) -> tuple[str, ...]:
+        return tuple(self._nodes)
