@@ -1,12 +1,22 @@
 # TODO
 
 ## sim
-- m3-01 world + bringup — done when a headless Gazebo Harmonic warehouse world with the RB-KAIROS spawns via one launch file and the setup is reproducible from sim/README.
-- m3-02 nav scenario — done when the AGV localizes and reaches a commanded pose headless, with captured run evidence.
+- m3-01 fixed equipment world — done when conveyor, product sensor and operator panel run headless in Gazebo with a documented ROS 2 signal table and captured evidence.
+
+## interface
+- m3-02 cell I/O nodes — done when every m3-01 signal has an OPC UA node mirroring its PLC tag, with direction and single owner, and the demo e-stop is labelled a process stop.
+
+## fleet
+- m3-03 bridge design — done when docs/interfaces/bridge-design.md defines signal map, update model, liveness and the no-logic rule.
+- m3-04 bridge implementation — done when signals traverse both directions against the world and an OPC UA test double, with measured latency and liveness behaviour.
+
+## plc
+- m3-05 TIA implementation spec — done when the owner can build the program from plc/demo-cell/SPEC.md, including watch table and PLCSIM notes.
 
 ## verifier
-- m3-03 verify M3 — done when the scenario re-runs clean and a pass verdict is filed in docs/reports/.
+- m3-06 verify M3 — done when the container-side loop is independently re-run and the owner-executed remainder is stated explicitly.
 
 ## carried forward
-- fleet (M5): confirm handshake timeout constants.
-- plc (M7): AT-08 STOP sub-case, SF-03 latch-list wording, explicit no-auto-resume of interrupted handshakes, honor dedicated F-I/O assumption for SF-05/06/07.
+- fleet (M7): confirm handshake timeout constants.
+- plc (M9): AT-08 STOP sub-case, SF-03 latch-list wording, no-auto-resume of interrupted handshakes, dedicated F-I/O for SF-05/06/07.
+- sim (M5): resume the parked navigation scenario (sim/scenarios/DEFERRED.md).
