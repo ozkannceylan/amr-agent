@@ -56,12 +56,12 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
     under ServerInterfaces, §9.8 scoped, environment record). Closed
     2026-07-27.
 16. m3-19 interface — bridge-design.md commissioning corrections (dual
-    namespace resolution by URI, granted session-timeout keep-alive). Issued.
+    namespace resolution by URI, granted session-timeout keep-alive). Closed
+    2026-07-27.
 17. m3-20 bridge — commissioned-environment record in both EVIDENCE files.
     Closed 2026-07-27; found that bridge.yaml still browses DemoCell from
     Objects with one namespace index, so Section B waits on m3-21.
-18. m3-21 bridge — connect conformance against the test double. Queued,
-    blocked on m3-19.
+18. m3-21 bridge — connect conformance against the test double. Issued.
 
 Container evidence (briefs 3 and 4) is retained beside the WSL evidence, not
 replaced by it.
