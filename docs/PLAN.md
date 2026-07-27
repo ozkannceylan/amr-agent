@@ -65,8 +65,8 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
     2026-07-27, evidenced in bridge/EVIDENCE_CONNECT.md (both clamp
     directions, 22/22 checks, 800-cycle loop at 20.0 Hz).
 19. m3-22 interface — bridge-design.md sync (§12 item 9, §9.4 evidence
-    table). Issued.
-20. m3-23 verifier — M3 agent-side verification pass. Queued, after m3-22.
+    table). Closed 2026-07-27.
+20. m3-23 verifier — commissioning-chain verification pass. Issued.
 
 Container evidence (briefs 3 and 4) is retained beside the WSL evidence, not
 replaced by it.

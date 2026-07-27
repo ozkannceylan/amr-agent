@@ -6,14 +6,11 @@
 - Hermes: define the component (which repo, how Telegram reaches it, what it may write over OPC UA) before M4 can be briefed.
 - Clock: mitigated 2026-07-27, not durable. The resync + wsl --shutdown brought skew from ~3.7 s to inside the measurement bracket, but w32time is Stopped again — the fix was one-shot with nothing maintaining it, and the residual ~350 ppm re-accumulates to tens of seconds per day. Before the PLCSIM run either re-run the resync or, better, set the service to start: elevated `Set-Service w32time -StartupType Automatic; Start-Service w32time; w32tm /resync`.
 
-## interface
-- m3-22 bridge-design conformance sync — done when §12 item 9 is marked resolved by m3-21, §9.4's evidence table lists bridge/EVIDENCE_CONNECT.md, and no statement still describes the single-namespace client as current.
-
 ## infra (fold into the next infra brief, do not issue alone)
-- The root .gitattributes comment states a shebang-file count that is stale after m3-21 added bridge/tools/check_connect_conformance.py — correct the count or drop the number from the comment.
+- The root .gitattributes comment states a shebang-file count that is stale after m3-21 added bridge/tools/check_connect_conformance.py (7 should be 8, confirmed by m3-22) — correct the count or drop the number from the comment.
 
-## verifier (queue for the M3 pass)
-- m3-18 §2.1 and m3-19 §3.1 wrote the browse-path rules concurrently from the same brief text — diff the two sections for contradiction.
+## verifier
+- m3-23 commissioning-chain verification (issued) — done when every check in the brief carries a pass/fail with evidence, including the m3-18 §2.1 vs m3-19 §3.1 browse-path diff and a re-run of the connect-conformance harness, and the owner-executed remainder is stated explicitly.
 
 ## safety-spec
 - m2-04 SRS reconciliation — not yet issued, from m2-03's findings. Done when the SRS §4 gate references match the ADR 0004 order (M9 safety, M5/M6 vehicle, M10 demonstration, M11 arm); SF-08 carries an architecture claim beside its PL c or states the inheritance; SF-03's bumper latch appears in §2's no-auto-resume list; and AT-01 gains the at-rest sub-test SC-02 observes (transfer refused with the latch set). One brief — the four items are one document's consistency.
