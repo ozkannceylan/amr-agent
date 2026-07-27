@@ -25,33 +25,37 @@ Exit criterion — all four demonstrated and recorded:
 3. m3-03 fleet — bridge design document, written and reviewed before any
    bridge code.
 4. m3-04 fleet — bridge implementation against that design.
-5. m3-05 plc — PLC program specification for the owner's TIA Portal
-   implementation.
-6. m3-06 verifier — verification scenario covering the four exit items.
-7. m3-07 infra — rebuild the toolchain in WSL and record the WSL-specific
-   deviations (sim/setup/WSL_ENVIRONMENT.md).
-8. m3-08 infra — re-run the cell, test double and bridge loop under WSL and
-   append WSL evidence sections alongside the container evidence.
-9. m3-09 infra — root .gitattributes so shell scripts check out LF and WSL
-   and Windows git agree. Closed 2026-07-27.
+5. m3-05 plc — PLC program specification. Closed 2026-07-27, with correction
+   briefs m3-03c/d/e (bridge-design paths, residuals, staleness sweep).
+6. m3-06 verifier — verification of the four exit items. Closed 2026-07-27:
+   pass-with-findings, 25 of 26 checks, loop re-run live under WSL.
+7. m3-07 infra — WSL toolchain rebuild and deviations. Closed 2026-07-27.
+8. m3-08 infra — WSL loop re-run with evidence. Closed as satisfied
+   2026-07-27 without its own brief: m3-13 delivered a dated WSL Section C in
+   EVIDENCE_LATENCY.md, and the m3-06 verification re-ran the full loop live
+   under WSL from committed instructions with the measurements recorded in
+   its report. A separate re-run would have re-measured the same thing.
+9. m3-09 infra — root .gitattributes. Closed 2026-07-27.
 10. m3-10 sim — /cell/panel/reset contact. Closed 2026-07-27.
 11. m3-11 interface — DemoCell/Input/PanelResetPressed. Closed 2026-07-27.
-12. m3-12 plc — move SPEC.md's monitored reset onto the real contact.
+12. m3-12 plc — SPEC.md reset retargeted onto the real contact. Closed
+    2026-07-27.
+13. m3-13 bridge — reset bridged, machine-neutral paths. Closed 2026-07-27.
 
-Briefs 10 to 12 exist because m3-05 found the cell had no reset device and had
+Briefs 10 to 13 exist because m3-05 found the cell had no reset device and had
 to conflate the monitored reset onto the start button. The owner ruled on
 2026-07-27 that the cell gets a real reset contact, which is why the sim, the
-node model and the spec each need one brief. CLAUDE.md §9 requires a separate
-monitored reset; a conflated one satisfied it only in spirit.
+node model, the spec and the bridge each took one brief. CLAUDE.md §9 requires
+a separate monitored reset; a conflated one satisfied it only in spirit.
 
-Briefs 3 and 4 were delivered and evidenced inside an Ubuntu 24.04 container.
-Briefs 7 and 8 exist because that evidence has never been reproduced on the
-owner's machine. They do not change the exit criterion; they establish that
-the criterion is met on the platform the demonstration will actually run on.
-Container evidence is retained, not replaced.
+Container evidence (briefs 3 and 4) is retained beside the WSL evidence, not
+replaced by it.
 
-Correction brief m3-03c (interface) precedes m3-05: bridge-design.md is an
-input to the PLC spec and still carries pre-ADR-0005 paths.
+Remaining before the gate can close: the owner's TIA Portal + PLCSIM run
+(exit items 1 and 2, plus Section B of EVIDENCE_LATENCY.md and the PLCSIM
+section of EVIDENCE_SIGNAL_LOSS.md), and the m3-06 residual cleanups issued
+as follow-ups (stale hold-time wording in five places, the L6
+scenario-dependence note).
 
 The TIA Portal implementation and the PLCSIM Advanced run are owner-executed.
 The four exit items are therefore demonstrated by the owner against the
