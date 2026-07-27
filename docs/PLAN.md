@@ -73,8 +73,18 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
     described one-directionally in the evidence files, bridge.yaml endpoint
     comment, non-reproducible check count). Closed 2026-07-27.
 
-The agent-side work of M3 is complete as of 2026-07-27. Everything still
-open is owner-executed or verification of owner-produced evidence.
+22. m3-25 plc — SPEC.md reconciled with the commissioned implementation
+    (§7 dwell-timer defect, §6.2 open item 1). Issued.
+
+The agent-side work of M3 is complete as of 2026-07-27 apart from m3-25,
+which corrects the specification against the program the owner built from
+it. Everything else still open is owner-executed or verification of
+owner-produced evidence.
+
+The PLC program was built and verified running on PLCSIM on 2026-07-27:
+FB_DemoCellControl from OB30 at 20 ms, CPU in RUN, cold-start state read
+independently and matching the specification. The gate's remaining
+demonstration is T1 to T4 end to end.
 
 Container evidence (briefs 3 and 4) is retained beside the WSL evidence, not
 replaced by it.
