@@ -7,8 +7,7 @@
 - Clock: mitigated 2026-07-27, not durable. The resync + wsl --shutdown brought skew from ~3.7 s to inside the measurement bracket, but w32time is Stopped again — the fix was one-shot with nothing maintaining it, and the residual ~350 ppm re-accumulates to tens of seconds per day. Before the PLCSIM run either re-run the resync or, better, set the service to start: elevated `Set-Service w32time -StartupType Automatic; Start-Service w32time; w32tm /resync`.
 
 ## interface
-- m3-18 opcua-nodes commissioning corrections — done when the ServerInterfaces browse path with both namespace URIs is stated, §9.8's node-count claim is scoped to the DemoCell interface with the DataBlocksGlobal open item recorded, the dated commissioned-environment facts are in the document, and no "times the hold" phrasing survives.
-- m3-19 bridge-design commissioning corrections — done when the connect sequence normatively requires resolving both namespaces by URI and deriving keep-alive from the granted (clamped) session timeout.
+- m3-19 bridge-design commissioning corrections — done when the connect sequence normatively requires resolving both namespaces by URI and deriving keep-alive from the granted (clamped) session timeout. Also resolves the dangling forward reference opcua-nodes.md now makes to the observed clamp values (m3-18 open question).
 
 ## bridge
 - m3-21 connect conformance (blocked on m3-19) — done when a recorded test-double run shows both namespaces resolved by URI under ServerInterfaces and keep-alive derived from a deliberately clamped granted session timeout. m3-20 confirmed the need: bridge.yaml still resolves DemoCell from Objects with a single namespace index, so Section B of EVIDENCE_LATENCY.md is blocked until this lands.
@@ -18,7 +17,8 @@
 
 
 ## carried forward
-- interface (M6): the fleet-facing server interface's NAME is now a contract decision — ADR 0006 derives the URI from it, so it must be chosen deliberately when M6 is briefed, not discovered in TIA.
+- interface (M6): the fleet-facing server interface's NAME is now a contract decision — ADR 0006 derives the URI from it, so it must be chosen deliberately when M6 is briefed, not discovered in TIA. Until then opcua-nodes.md §2 still heads the fleet-facing folder tree with http://DemoCell (m3-18 open question); fix it in the same brief that fixes the name.
+- plc/owner (later gate): suppress DataBlocksGlobal DB-level exposure by clearing each DB's "Accessible from HMI/OPC UA" attribute; recorded as an open item in opcua-nodes.md §9.8.
 - fleet (M7): confirm handshake timeout constants.
 - plc (M9): AT-08 STOP sub-case, SF-03 latch-list wording, no-auto-resume of interrupted handshakes, dedicated F-I/O for SF-05/06/07.
 - sim (M5): resume the parked navigation scenario (sim/scenarios/DEFERRED.md).

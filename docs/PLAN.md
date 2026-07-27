@@ -53,7 +53,8 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
     2026-07-27, with the m3-06 residual cleanups (hold-time wording, L6
     scenario-dependence note).
 15. m3-18 interface — opcua-nodes.md commissioning corrections (browse path
-    under ServerInterfaces, §9.8 scoped, environment record). Issued.
+    under ServerInterfaces, §9.8 scoped, environment record). Closed
+    2026-07-27.
 16. m3-19 interface — bridge-design.md commissioning corrections (dual
     namespace resolution by URI, granted session-timeout keep-alive). Issued.
 17. m3-20 bridge — commissioned-environment record in both EVIDENCE files.
