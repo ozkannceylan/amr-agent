@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# Machine-local overrides. .claude/settings.json is tracked on purpose (CLAUDE.md section 7).
+.claude/*.local.json
