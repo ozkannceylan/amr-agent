@@ -446,3 +446,21 @@ at least once, or the heartbeat never starts. The default `--script` in
 `tools/cell_stimulus.py` publishes `reset=false` at t=0 for exactly this
 reason, and publishing FALSE asserts nothing — it is the resting level of a
 normally open contact.
+
+## C.4 L6 is scenario-dependent — added 2026-07-27, from m3-06
+
+Not measured here. `docs/reports/m3-06-verify.md` ("One measurement divergence,
+reported not smoothed") records a live WSL re-run in which **the verifier**
+measured L6 (`cmd_speed → belt velocity ≥ 50 %`, sim time) at **2.000 ms** — one
+physics step — for a 0.15 m/s command from rest mid-travel, and at
+**1384.000 ms** for a −0.15 m/s command issued while the belt was pressed
+against its +2.50 m mechanical stop (pose log `sim 52.8 belt_pos 2.5
+belt_vel 0.0`), with nothing in the bridge different between the two.
+
+The mechanism: **L6 depends on the belt's mechanical state at the instant the
+command changes** — a `JointController` unwinding against a joint limit takes
+orders of magnitude longer to reach half speed than one starting from rest — so
+a single L6 figure quoted without its scenario is incomplete. §A.4's
+`4.000 ms in all four command changes` remains correct for the container run it
+describes and is unchanged above; it is not a general property of the cell, and
+it is not a bridge latency in either case (§A.5: L6 is the simulator's).

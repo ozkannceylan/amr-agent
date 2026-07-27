@@ -139,3 +139,15 @@ for the first 15 s**. Full capture: `bridge/EVIDENCE_LATENCY.md` Section C.
 2026-07-27 | Asked "what does the bridge write for a contact before its first publish" | The right answer was "it never addresses the node", not "it writes a safe default": the fail-safe value is the PLC's DB start value, so the bridge's correct contribution is silence | A layer that carries values proves a startup property by showing it wrote nothing, not by showing it wrote the right thing; the evidence is an absent row, so make the absence observable (a withheld heartbeat, a named node in the log)
 
 2026-07-27 | Ran WSL commands as `wsl.exe -- bash -lc '<command with $VAR>'` from the agent's shell | The `$VAR` references were consumed before reaching WSL, so the command ran with empty variables and failed with a bare exit code and no output | Put multi-line or variable-using WSL work in a script file and run the file; and never put `set -u` above `source /opt/ros/jazzy/setup.bash`, which exits the shell silently on an unbound ROS variable
+
+---
+
+**Addendum, 2026-07-27 (m3-06 follow-up).** Appended `C.4` to
+`bridge/EVIDENCE_LATENCY.md` Section C recording that L6 is scenario-dependent:
+the two figures (2.000 ms from rest, 1384.000 ms reversing off the +2.50 m
+mechanical stop) are **cited as the verifier's**, from
+`docs/reports/m3-06-verify.md`, not re-measured here — L6 is a simulator
+property and a second run would add nothing. No existing number was altered and
+Sections A and B were not touched. Separately, `open_questions` item 4 above is
+closed: m3-06 check 24 confirms `.gitignore:9` already carries
+`bridge/evidence/*-latest.csv`.
