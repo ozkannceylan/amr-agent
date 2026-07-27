@@ -10,7 +10,7 @@
 - m3-08 WSL loop re-run — not yet issued, blocked on m3-07. Done when the cell, test double and bridge loop from bridge/README.md is re-run under WSL and WSL evidence sections are appended without disturbing the container evidence.
 
 ## safety-spec
-- m2-03 ISO 13849 scenario document — issued 2026-07-27, in progress. Owner ruled this the presentation centrepiece. Done when docs/safety/PL-SCENARIOS.md carries at least 10 scenarios, each with hazard, S/F/P risk-graph derivation to PLr, covering SF, category claim, 13849-2-style validation test and AT mapping, under the SRS §5 honesty frame.
+- m2-04 SRS reconciliation — not yet issued, from m2-03's findings. Done when the SRS §4 gate references match the ADR 0004 order (M9 safety, M5/M6 vehicle, M10 demonstration, M11 arm); SF-08 carries an architecture claim beside its PL c or states the inheritance; SF-03's bumper latch appears in §2's no-auto-resume list; and AT-01 gains the at-rest sub-test SC-02 observes (transfer refused with the latch set). One brief — the four items are one document's consistency.
 
 ## interface
 - opcua-nodes.md §9.3 reset row still says the PLC "times the hold" — one stale phrase from the superseded gesture design, found by m3-12. Done when the phrase matches the delivered edge-triggered reset. Fold into the next interface brief rather than issuing alone.

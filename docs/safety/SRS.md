@@ -172,6 +172,9 @@ that feeds them, never as part of any safety path.
 | SF-09 | Supervision watchdog *(not a safety function)* | VDA `connection`, `Cell/CellHeartbeatFleet` | AT-09 | M4 |
 | SF-20…29 | *Reserved: arm safety* | — | — | M9 |
 
+Worked hazard-to-PLr derivations for these functions, and the validation tests
+behind each acceptance test above, are in `docs/safety/PL-SCENARIOS.md`.
+
 ## 5. Honesty — what a simulated portfolio project can and cannot claim
 
 This project runs in PLCSIM Advanced and Gazebo. Therefore:
