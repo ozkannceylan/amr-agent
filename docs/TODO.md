@@ -6,8 +6,11 @@
 - Hermes: define the component (which repo, how Telegram reaches it, what it may write over OPC UA) before M4 can be briefed.
 - Clock: mitigated 2026-07-27, not durable. The resync + wsl --shutdown brought skew from ~3.7 s to inside the measurement bracket, but w32time is Stopped again — the fix was one-shot with nothing maintaining it, and the residual ~350 ppm re-accumulates to tens of seconds per day. Before the PLCSIM run either re-run the resync or, better, set the service to start: elevated `Set-Service w32time -StartupType Automatic; Start-Service w32time; w32tm /resync`.
 
-## bridge
-- m3-21 connect conformance (issued) — done when a recorded test-double run shows both namespaces resolved by URI under ServerInterfaces and keep-alive derived from the granted session timeout in both clamp directions (the config requests 10000 ms, below the observed 30000 ms grant). m3-20 confirmed the need: bridge.yaml still resolves DemoCell from Objects with a single namespace index, so Section B of EVIDENCE_LATENCY.md is blocked until this lands.
+## interface
+- m3-22 bridge-design conformance sync — done when §12 item 9 is marked resolved by m3-21, §9.4's evidence table lists bridge/EVIDENCE_CONNECT.md, and no statement still describes the single-namespace client as current.
+
+## infra (fold into the next infra brief, do not issue alone)
+- The root .gitattributes comment states a shebang-file count that is stale after m3-21 added bridge/tools/check_connect_conformance.py — correct the count or drop the number from the comment.
 
 ## verifier (queue for the M3 pass)
 - m3-18 §2.1 and m3-19 §3.1 wrote the browse-path rules concurrently from the same brief text — diff the two sections for contradiction.
