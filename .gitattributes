@@ -1,0 +1,26 @@
+# Line ending policy.
+#
+# Windows Git ships with core.autocrlf = true at system level
+# (C:/Program Files/Git/etc/gitconfig). With no .gitattributes the working tree
+# is checked out CRLF, which breaks shebangs when the same checkout is driven
+# from WSL and makes WSL-side git report every tracked file as modified. The
+# policy belongs to the repository, not to a developer's machine config.
+
+# Store every text file with LF in the object store. Git's own text/binary
+# detection decides what counts as text; the rules below cover the cases where
+# that detection, or the platform-native checkout, must not be trusted.
+* text=auto
+
+# Executed through a shebang. A CR at the end of the shebang line becomes part
+# of the interpreter name (/usr/bin/env: 'bash\r'), so these must be LF in the
+# working tree on every platform, not only in the index. Tracked shebang files
+# today: 1 *.sh, 7 *.py.
+*.sh text eol=lf
+*.py text eol=lf
+
+# Binary. Both are correctly detected by text=auto today, but map.pgm is a
+# regenerated artifact (sim/scenarios/tools/make_map.py) whose leading bytes are
+# not guaranteed to contain the NUL the heuristic looks for, and a misdetected
+# binary is silently corrupted by normalization rather than merely inconvenient.
+*.pgm -text
+*.gz -text
