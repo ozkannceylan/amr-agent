@@ -118,10 +118,15 @@ Objects
 | N5 | Both URIs are config values (§2): one is vendor-fixed, the other follows the interface name, and that name is contract. Renaming the server interface changes its namespace URI and breaks every browse until the config follows (ADR 0006) |
 | N6 | Nothing above is a signal decision. Namespace resolution happens once per session, before any value moves, and its outcome is connect or fail — never a substituted, defaulted or held value (§1.1, §6 R1) |
 
+Conformance of the running client and the test double to N1–N6 was delivered by
+m3-21 and is recorded in `bridge/EVIDENCE_CONNECT.md` §1–§2 (§12 item 9).
+
 ### 3.2 Session timeout and keep-alive — normative
 
-The S7-1500 **clamps the session timeout**. Phase 0, same date: a requested 3600000 ms was
-granted as 30000 ms.
+The S7-1500 **revises the session timeout**. Phase 0, same date: a requested 3600000 ms was
+granted as 30000 ms — a clamp downwards there, but the rules below hold in whichever
+direction the grant lands, because the request the bridge now sends is smaller than that
+observed grant.
 
 | # | Rule |
 |---|---|
@@ -145,9 +150,16 @@ decision to any signal (§1.1).
 Library note, `asyncua==2.0.1` (the pin in §11), verified 2026-07-27: the client already
 overwrites its own `session_timeout` with `RevisedSessionTimeout` from the CreateSession
 response, logs a warning when the two differ, and derives its health-probe timeout from the
-resulting value. S2 and S3 therefore mostly forbid *undoing* that — re-reading the config
-value afterwards, or computing anything from the requested number — and require that both
-numbers reach the log and the evidence file.
+resulting value. That warning is not a substitute for S2's log line — m3-21 found it prints
+the library's *secure channel* default as the requested value, not the session timeout the
+bridge asked for (`bridge/EVIDENCE_CONNECT.md` §3). S2 and S3 therefore mostly forbid
+*undoing* the library's behaviour — re-reading the config value afterwards, or computing
+anything from the requested number — and require that both numbers reach the bridge's own
+log and the evidence file.
+
+Conformance of the running client and the test double to S1–S6 was delivered by m3-21 and is
+recorded in `bridge/EVIDENCE_CONNECT.md` §1–§3 and §5, with the grant landing below the
+request in one run and above it in the other (§12 item 9).
 
 ---
 
@@ -468,6 +480,8 @@ last commanded speed until the bridge returns and delivers the PLC's current com
 | `bridge/EVIDENCE_LATENCY.md` | Dated, human-readable capture: configuration, run duration, the statistics table, the caveats of §9.5, and the raw-file reference. Follows the `sim/worlds/CELL_EVIDENCE.md` precedent |
 | `bridge/evidence/latency-<YYYY-MM-DD>.csv.gz` | Raw per-event rows behind the table |
 | `bridge/EVIDENCE_SIGNAL_LOSS.md` | Dated capture of the four failure modes of §7.3, delivered by m3-04 alongside the latency file. The delivered capture is test-double, in-container; its repetition against PLCSIM is item 6 of the latency file's owner-run section |
+| `bridge/EVIDENCE_CONNECT.md` | Dated capture of **session establishment**: the two-namespace browse path of §3.1 (N1–N6) and the granted-timeout / derived-keep-alive rules of §3.2 (S1–S6), each check named against the rule it tests, plus a re-run of the full loop and of a reconnect against the commissioned address space. Delivered by m3-21; test-double, in-container, and its repetition against PLCSIM is item 9 of the latency file's owner-run section |
+| `bridge/evidence/connect-conformance-<YYYY-MM-DD>.csv` | Raw per-event rows behind that capture, including the keep-alive exchanges whose spacing is what proves the derivation |
 
 The latency evidence file has **two clearly separated sections**: *test double, in-container,
 agent-run* and *PLCSIM Advanced, owner-run*. The gate closes on the second. m3-04 produces
@@ -478,7 +492,7 @@ the first; the second is owner-executed (PLAN.md).
 | Not measurable in-container | Why |
 |---|---|
 | PLC scan-cycle contribution to L7 | The test double has no scan cycle. Its L7 is a transport floor, not the loop time |
-| S7-1500 OPC UA server behaviour | Its sampling of the process image, its write handling relative to the scan, its session and monitored-item limits — a Python server reproduces none of them. **One exception, deliberate:** the double clamps the session timeout below the request as the S7-1500 does (§10), so that the client's derivation of §3.2 is testable. The clamp's *shape* is imitated; its value is still not the PLC's |
+| S7-1500 OPC UA server behaviour | Its sampling of the process image, its write handling relative to the scan, its session and monitored-item limits — a Python server reproduces none of them. **One exception, deliberate:** the double revises the session timeout away from the request as the S7-1500 does (§10), so that the client's derivation of §3.2 is testable. The revision's *shape* is imitated; its value is still not the PLC's |
 | PLCSIM Advanced vs hardware timing fidelity | PLCSIM's own timing is not the hardware's; the owner's run records which was used |
 | L4 (output poll phase) in absolute terms | Requires observing the PLC's internal output change, which no client can see |
 | Network path | The in-container run is loopback: no switch, no VPN, no PROFINET load. Numbers are a lower bound |
@@ -491,7 +505,7 @@ the first; the second is owner-executed (PLAN.md).
 | L1, L2, L3, L5, R1, R2 as **bridge-side** figures — genuinely the bridge's own cost | |
 | L6, which involves no PLC at all | |
 | The startup rule (§6), the liveness behaviour (§7.3 A–D) and the no-auto-resume rule (§8.3), all as reproducible tests | |
-| The connect requirements: both namespaces resolved by URI under `ServerInterfaces` (§3.1) and the keep-alive derived from a granted timeout the double clamps below the request (§3.2) | |
+| The connect requirements: both namespaces resolved by URI under `ServerInterfaces` (§3.1) and the keep-alive derived from a granted timeout the double revises away from the request, in either direction (§3.2). **Established** — `bridge/EVIDENCE_CONNECT.md` | |
 
 ---
 
@@ -501,10 +515,10 @@ the first; the second is owner-executed (PLAN.md).
 |---|---|
 | What it is | A minimal OPC UA **server** that stands in for the S7-1500 on PLCSIM Advanced, exposing the `DemoCell/` address space of §9 — same BrowseNames, same folder paths, same data types, same access levels |
 | Shape it must reproduce | The **commissioned two-namespace path of §3.1**: a `ServerInterfaces` folder in namespace `http://www.siemens.com/simatic-s7-opcua` under `Objects`, with the `DemoCell` interface node and everything beneath it in `http://DemoCell` (the URI TIA derives from the interface name, ADR 0006). The double matches both URIs so the bridge's browse-by-URI resolves identically against it and against PLCSIM. It deliberately registers the two namespaces so their **indices differ from PLCSIM's**: a bridge that hardcoded either index must fail against the double |
-| Negotiation fidelity | The double **grants a session timeout below the requested one**, as the S7-1500 does (§3.2). This is the one server behaviour it copies deliberately rather than by accident, because it is the only way to test that the keep-alive is derived from the granted value. It is scaffolding and is labelled as such |
+| Negotiation fidelity | The double **grants a session timeout other than the requested one**, as the S7-1500 does (§3.2): below the request in its default configuration, and above it when configured to, because S2 and S3 must hold in both directions and the commissioned CPU's grant may land either side of the bridge's request. This is the one server behaviour it copies deliberately rather than by accident, because it is the only way to test that the keep-alive is derived from the granted value. It is scaffolding and is labelled as such |
 | Why it exists | So the bridge and the loop mechanics can be verified automatically on any machine that can run the cell, and so m3-04's tests do not need the owner's TIA/PLCSIM environment |
 | Invariant 4 | **Preserved.** The server role belongs to the PLC; the double merely plays that role. The bridge is a client against the double and against PLCSIM, with no code path difference and no server mode (§1) |
-| What it proves | The bridge: signal traversal both ways, types, polarity, decimation, startup rule, liveness behaviour, reconnect, no-auto-resume, the connect requirements of §3.1 and §3.2 (both namespaces resolved by URI under `ServerInterfaces`, keep-alive derived from a clamped grant), and the bridge-side latency figures of §9.5 |
+| What it proves | The bridge: signal traversal both ways, types, polarity, decimation, startup rule, liveness behaviour, reconnect, no-auto-resume, the connect requirements of §3.1 and §3.2 (both namespaces resolved by URI under `ServerInterfaces`, keep-alive derived from a revised grant — recorded in `bridge/EVIDENCE_CONNECT.md`), and the bridge-side latency figures of §9.5 |
 | What it does **not** prove | **The PLC program.** It runs no standard program, has no scan cycle, no process image, no interlocks, no cycle-running flag and no reset. Nothing observed against the double is evidence for `plc/demo-cell/SPEC.md` |
 | Scaffolding is labelled | Anything the double does beyond storing values — echoing a nominated input for L7, or driving `ConveyorSpeedCommand` from a script to exercise the output path — is **test scaffolding**, marked as such in code and in the evidence file, and is not a model of PLC behaviour |
 | ADR 0004 | The ADR rejected proving the loop against a mock *only*. The double is for automated regression; the gate's four exit items close against PLCSIM, owner-run |
@@ -551,4 +565,4 @@ to the repository (invariant 13).
 | 6 | m3-02b open question 1 (a Real output means the cycle-running flag gates a setpoint, not a coil) | Unchanged by this design. **Closed** by `plc/demo-cell/SPEC.md` §6.4: the setpoint is gated by driving it to zero in a mandatory, unconditional `ELSE`, never by a conditional write |
 | 7 | 20 Hz cycle period | **Closed** by m3-04's measurement, `bridge/EVIDENCE_LATENCY.md` §A.4: the expectation is met — median cycle period 50.003 ms, 0 cycle overruns — so the item closes without a revision and §9.2 stands unchanged |
 | 8 | m3-01 open question 6 (stale "Navigation scenario (M3)" heading in `sim/README.md`) | **Corrected in `sim/`**: the heading now reads "Navigation scenario (M5, deferred)" |
-| 9 | Conformance of the running bridge and test double to §3.1 and §3.2 | **Open, owned by m3-21.** This document is the specification; the client code and the double were written against the pre-commissioning assumptions (one namespace, `DemoCell` resolved directly under `Objects`, the configured session timeout used as if granted). The config key holding the requested timeout is a request under S1 whatever its name suggests. Nothing here changes bridge code — the two facts of §3.1 and §3.2 are owner-verified and this revision states them; m3-21 makes the code match and records the run |
+| 9 | Conformance of the running bridge and test double to §3.1 and §3.2 | **Closed by m3-21**, recorded in `bridge/EVIDENCE_CONNECT.md`. The client carries both URIs in config, resolves both indices by URI at every session establishment with each path element qualified by its own namespace, and reads the granted session timeout back to derive the keep-alive from it (N1–N6, S1–S6). The double serves the `ServerInterfaces` → `DemoCell` shape on indices deliberately unlike PLCSIM's and revises the request in both directions, so the rules are falsifiable rather than merely satisfied. The pre-commissioning shape — one namespace, `DemoCell` resolved directly under `Objects`, the configured session timeout used as if granted — is gone from the tree and is rejected by the config loader if a stale checkout reintroduces it. What remains is the owner's repetition of the same checks against PLCSIM: item 9 of `EVIDENCE_LATENCY.md` Section B, with the checklist at the end of `bridge/EVIDENCE_CONNECT.md` |
