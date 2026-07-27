@@ -20,6 +20,14 @@ sim/
   worlds/BRINGUP_EVIDENCE.md        dated verification record of the headless run
   launch/warehouse_bringup.launch.py  one-command headless bringup
   setup/install.sh                  idempotent environment setup (run as root)
+  scenarios/
+    tools/make_map.py               deterministic map generator (world -> map)
+    maps/map.yaml, map.pgm          occupancy grid of warehouse.sdf (generated)
+    config/nav2_params.yaml         Nav2 parameters for the RB-KAIROS bringup
+    nav_scenario.launch.py          Nav2 stack (map_server, AMCL, planner,
+                                    DWB controller, behaviors, bt_navigator)
+    run_scenario.py                 scripted NavigateToPose run + evidence
+    EVIDENCE_NAV.md                 dated capture of a successful headless run
 ```
 
 ## Reproducible setup
@@ -147,6 +155,65 @@ absorb the slow headless startup.
 
 The dated capture of exactly these checks from this container is in
 `worlds/BRINGUP_EVIDENCE.md`.
+
+## Navigation scenario (M3)
+
+Localization + Nav2 goal navigation on top of the bringup above. Three
+steps, three terminals, all with both setups sourced
+(`/opt/ros/jazzy/setup.bash` then `/opt/m3-feasibility/ws/install/setup.bash`):
+
+```
+# 1. world + robot (as above)
+ros2 launch /home/user/amr-agent/sim/launch/warehouse_bringup.launch.py
+
+# 2. Nav2 stack against the running bringup
+ros2 launch /home/user/amr-agent/sim/scenarios/nav_scenario.launch.py
+
+# 3. scripted run: initial pose -> AMCL localized -> NavigateToPose goal
+python3 /home/user/amr-agent/sim/scenarios/run_scenario.py
+```
+
+Step 3 exits 0 only if the action result is STATUS_SUCCEEDED, and rewrites
+`scenarios/EVIDENCE_NAV.md` with the captured initial `/amcl_pose`, pose
+samples, result status, distance and durations. The committed file is the
+record of the verified run in this container.
+
+### Map: generated, not SLAM-mapped
+
+`scenarios/maps/` is produced by `scenarios/tools/make_map.py`, which
+rasterizes the known static geometry of `worlds/warehouse.sdf` (every
+rectangle in the script is copied from the SDF model poses). This was
+chosen over slam_toolbox mapping because it is deterministic, reproducible
+in seconds, and diffable against the world file; at the container's ~0.1
+real-time factor a SLAM mapping drive would take an hour and produce a
+slightly different map every time. The overhead DoorGap lintel is
+deliberately excluded (the lidar never sees it; the vehicle drives under
+it). If the world changes, re-run the script.
+
+### Nav2 configuration notes
+
+- All nodes run on sim time; tolerances in `config/nav2_params.yaml` are
+  sim seconds.
+- Frames come from the vendor stack: `map -> robot_odom ->
+  robot_base_footprint`. AMCL consumes `/robot/front_laser/scan` (omni
+  motion model, since the base is mecanum).
+- The controller is DWB in a diff-drive-style configuration (vy locked to
+  0) even though the base is holonomic: it is the configuration verified
+  to reach goals here. Nav2's `cmd_vel` (Twist, `enable_stamped_cmd_vel:
+  false`) is remapped to the vendor controller's
+  `/robot/robotnik_base_control/cmd_vel_unstamped`.
+- `lifecycle_manager` runs with `bond_timeout: 0.0`; bond heartbeats
+  starve at RTF ~0.1 and would otherwise take the servers down.
+- Speeds are capped at 0.45 m/s so the slow headless sim tracks commands.
+
+### Expected output
+
+Nav2 activation takes a few minutes wall-clock. `run_scenario.py` then
+logs `AMCL localized`, `goal accepted`, periodic pose samples, and finally
+`result: status 4 (SUCCEEDED)`. The default goal (-6.0, 1.5) is in Aisle A;
+from the spawn at (-10, -6) the planned path runs north past the west end
+of rack row B and turns east between the rack rows (~11 m). Expect roughly
+10x the sim duration in wall-clock time.
 
 ### Known behavior
 
