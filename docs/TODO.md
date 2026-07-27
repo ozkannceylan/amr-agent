@@ -1,5 +1,6 @@
 # TODO
 
+
 ## owner (blocking)
 - PLC: implement the TIA Portal program and run PLCSIM Advanced; capture watch-table evidence for gate items (a) and (b) and fill Section B of bridge/EVIDENCE_LATENCY.md. Do not start before m3-12 lands — SPEC.md still specifies the superseded conflated reset.
 - Hermes: define the component (which repo, how Telegram reaches it, what it may write over OPC UA) before M4 can be briefed.
@@ -19,6 +20,7 @@
 
 
 ## carried forward
+- interface (M6): the fleet-facing server interface's NAME is now a contract decision — ADR 0006 derives the URI from it, so it must be chosen deliberately when M6 is briefed, not discovered in TIA.
 - fleet (M7): confirm handshake timeout constants.
 - plc (M9): AT-08 STOP sub-case, SF-03 latch-list wording, no-auto-resume of interrupted handshakes, dedicated F-I/O for SF-05/06/07.
 - sim (M5): resume the parked navigation scenario (sim/scenarios/DEFERRED.md).
