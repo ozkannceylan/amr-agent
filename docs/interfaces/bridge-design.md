@@ -1,7 +1,7 @@
 # Bridge design — Gazebo cell ↔ S7-1500 (M3)
 
-Gate M3, ADR 0004. This document is written **before any bridge code** and is the
-specification `bridge/` (m3-04) is implemented against.
+Gate M3, ADR 0004. This document was written **before any bridge code** and is the
+specification `bridge/` (m3-04) was implemented against.
 
 Authority. `docs/interfaces/opcua-nodes.md` §9 is the node contract and
 `sim/README.md` § "Demonstration cell (M3)" is the ROS 2 signal contract. This document
@@ -50,7 +50,7 @@ Everything below is a violation **in this cell**, with the owner of the decision
 | Re-writing a command it saw before an outage, after reconnect | Auto-resume of equipment (CLAUDE.md §9, §8 below) | PLC |
 | Clamping range to `range_min` / `range_max` | A filter, and it would hide a sensor fault | Nobody |
 
-Permitted, and exhaustive: field selection/addressing (§4.2), `bool` ↔ `Boolean` and
+Permitted, and exhaustive: field selection/addressing (§4.5), `bool` ↔ `Boolean` and
 `float64` → `Float` marshalling, and incrementing the bridge's **own** heartbeat counter
 (its own value, not a cell signal).
 
@@ -79,7 +79,7 @@ Permitted, and exhaustive: field selection/addressing (§4.2), `bool` ↔ `Boole
 | Concurrency | rclpy executor in one thread, OPC UA client on an asyncio loop; they meet only at the latest-value slots, guarded by a lock | Keeps ROS callback latency independent of OPC UA round-trip time, so a slow server cannot distort the measured receive timestamps |
 | Buffering | **Slots, not queues.** Each input signal has exactly one slot: `(value, monotonic_receive_time, sim_time)`, overwritten by every callback | A queue would accumulate samples the bridge is then tempted to summarise. A slot makes latest-sample decimation the only possible behaviour (§4.3) |
 | Cycle overrun | Logged and counted, never compensated | No catch-up bursts, no skipped-cycle logic. Compensation would be a timer that changes behaviour (invariant 9, §1.1) |
-| Config | One file: endpoint URL, namespace URI, node BrowseNames, topic names, joint name, cycle period, security settings, evidence path. **No thresholds, no limits, no tolerances, no timers** — a config key for any of those would be logic wearing a disguise | |
+| Config | One file: endpoint URL, namespace URI, node BrowseNames, topic names, joint name, cycle period, security settings, evidence path, plus session and reconnect housekeeping (§8.1) and the diagnostics poll rate. **No thresholds, no limits, no tolerances, no timers** — a config key for any of those would be logic wearing a disguise | |
 | Secrets | Endpoint credentials and certificates live outside the repository and are referenced by path (invariant 13) | |
 
 ---
@@ -91,7 +91,7 @@ Permitted, and exhaustive: field selection/addressing (§4.2), `bool` ↔ `Boole
 | Direction | The bridge connects **out** to the PLC's endpoint. Never inverted (invariant 4) |
 | Namespace | Resolve namespace index at session establishment by browsing for URI `urn:amr-agent:cell:plc`. **Never hardcode the index** (§2 of the node model) |
 | Node resolution | Resolve NodeIds by BrowseName path (`DemoCell/Input/...`) once per session, cache for the session, re-resolve on reconnect |
-| Writable set | The bridge writes **only** the six `DemoCell/Input/` nodes and `DemoCell/Link/BridgeHeartbeat` (§9.1). Any other write is a defect. m3-04 enforces this with a single write helper that rejects a NodeId outside the allowlist |
+| Writable set | The bridge writes **only** the seven `DemoCell/Input/` nodes and `DemoCell/Link/BridgeHeartbeat` (§9.1). Any other write is a defect. m3-04 enforces this with a single write helper that rejects a NodeId outside the allowlist |
 | Read set | `DemoCell/Output/ConveyorSpeedCommand` (applied to the cell), and `DemoCell/Status/*` + `DemoCell/Link/BridgeLinkOk` (logging only, never applied to anything) |
 | Startup check | On every connect, verify that each resolved node's DataType matches the expected type below. A mismatch is a fatal configuration error, not something to coerce around |
 
@@ -99,7 +99,7 @@ Permitted, and exhaustive: field selection/addressing (§4.2), `bool` ↔ `Boole
 
 ## 4. Signal map
 
-Derived directly from `opcua-nodes.md` §9.9. Six nodes the bridge writes, one it reads and
+Derived directly from `opcua-nodes.md` §9.9. Seven nodes the bridge writes, one it reads and
 applies, one heartbeat it writes, plus read-only diagnostics.
 
 ### 4.1 Cell → PLC (bridge writes into the PLC input image)
@@ -110,20 +110,24 @@ applies, one heartbeat it writes, plus read-only diagnostics.
 | 2 | `/cell/conveyor/joint_state` | `sensor_msgs/JointState` | `velocity[i]`, same `i` | `Input/ConveyorBeltSpeed` | Real / `Float` | `float64 → Float`, m/s unchanged | cyclic 20 Hz, latest sample |
 | 3 | `/cell/product_sensor/scan` | `sensor_msgs/LaserScan` | `ranges[0]` | `Input/ProductSensorRange` | Real / `Float` | `float32 → Float` (already single on the wire), metres unchanged, **no threshold** | cyclic 20 Hz, latest sample |
 | 4 | `/cell/panel/start` | `std_msgs/Bool` | `data` | `Input/PanelStartPressed` | Bool / `Boolean` | none (NO contact, `true` = pressed) | on-change + refresh on connect |
-| 5 | `/cell/panel/stop` | `std_msgs/Bool` | `data` | `Input/PanelStopCircuitClosed` | Bool / `Boolean` | none (NC circuit state, `true` = closed) | on-change + refresh on connect |
-| 6 | `/cell/panel/process_stop` | `std_msgs/Bool` | `data` | `Input/PanelProcessStopCircuitClosed` | Bool / `Boolean` | none (NC circuit state, `true` = closed) | on-change + refresh on connect |
+| 5 | `/cell/panel/reset` | `std_msgs/Bool` | `data` | `Input/PanelResetPressed` | Bool / `Boolean` | none (NO contact, `true` = held). The rising edge, the hold time and which latches clear are PLC program content | on-change + refresh on connect |
+| 6 | `/cell/panel/stop` | `std_msgs/Bool` | `data` | `Input/PanelStopCircuitClosed` | Bool / `Boolean` | none (NC circuit state, `true` = closed) | on-change + refresh on connect |
+| 7 | `/cell/panel/process_stop` | `std_msgs/Bool` | `data` | `Input/PanelProcessStopCircuitClosed` | Bool / `Boolean` | none (NC circuit state, `true` = closed) | on-change + refresh on connect |
+
+Row order follows `opcua-nodes.md` §9.3, which groups the panel inputs by failure direction
+(NO, NO, NC, NC) rather than by panel layout.
 
 ### 4.2 PLC → cell (bridge reads and republishes)
 
 | # | OPC UA node | S7 / OPC UA type | → ROS 2 topic | Msg type | Field | Conversion | Cadence |
 |---|---|---|---|---|---|---|---|
-| 7 | `DemoCell/Output/ConveyorSpeedCommand` | Real / `Float` | `/cell/conveyor/cmd_speed` | `std_msgs/Float64` | `data` | `Float → float64` widening, m/s unchanged. **No ramp, clamp, interlock or zeroing** | polled 20 Hz; published every cycle in which a value was read |
+| 8 | `DemoCell/Output/ConveyorSpeedCommand` | Real / `Float` | `/cell/conveyor/cmd_speed` | `std_msgs/Float64` | `data` | `Float → float64` widening, m/s unchanged. **No ramp, clamp, interlock or zeroing** | polled 20 Hz; published every cycle in which a value was read |
 
 ### 4.3 Bridge's own node
 
 | # | Node | S7 / OPC UA type | Direction | Cadence |
 |---|---|---|---|---|
-| 8 | `DemoCell/Link/BridgeHeartbeat` | UInt / `UInt16` | bridge writes | 20 Hz, **after** the cycle's input writes are acknowledged (§7) |
+| 9 | `DemoCell/Link/BridgeHeartbeat` | UInt / `UInt16` | bridge writes | 20 Hz, **after** the cycle's input writes are acknowledged (§7) |
 
 ### 4.4 Read-only, applied to nothing
 
@@ -160,9 +164,9 @@ endpoint compatibility at startup and logs the result.
 | Path | Mechanism | Rate | Rationale |
 |---|---|---|---|
 | Cell → PLC, analogs (1, 2, 3) | Cyclic **write** of the slot's latest value | 20 Hz / 50 ms | §9.2 expectation. ~2× the intended PLC scan, far below the ~500 Hz source, so measured latency is dominated by the OPC UA path and not by decimation |
-| Cell → PLC, contacts (4, 5, 6) | **Write on change** of the subscribed value, plus a full refresh of all six inputs on every (re)connect | event | §9.2. Contacts are level signals with no fixed publish rate; writing an unchanged bool cyclically would duplicate the heartbeat's job (proving liveness) on a node whose meaning is a circuit state |
-| PLC → cell (7) | **Cyclic read (poll)**, not an OPC UA subscription | 20 Hz / 50 ms, phase-locked to the write cycle | See below |
-| Heartbeat (8) | Cyclic write, last operation of each cycle | 20 Hz / 50 ms | §7 |
+| Cell → PLC, contacts (4, 5, 6, 7) | **Write on change** of the subscribed value, plus a full refresh of all seven inputs on every (re)connect | event | §9.2. Contacts are level signals with no fixed publish rate; writing an unchanged bool cyclically would duplicate the heartbeat's job (proving liveness) on a node whose meaning is a circuit state |
+| PLC → cell (8) | **Cyclic read (poll)**, not an OPC UA subscription | 20 Hz / 50 ms, phase-locked to the write cycle | See below |
+| Heartbeat (9) | Cyclic write, last operation of each cycle | 20 Hz / 50 ms | §7 |
 | `Status/*`, `BridgeLinkOk` | Cyclic read | 1 Hz | Diagnostics only; a low rate keeps them visibly out of the measured loop |
 
 ### 5.1 Why poll rather than subscribe on the output path
@@ -174,7 +178,7 @@ the choice more than efficiency does.
 |---|---|
 | Measurement attribution | With a poll, the bridge knows exactly when it asked and when the answer arrived; the interval it reports is a service round trip it originated. With a monitored item, the notification time is the sum of the server's sampling phase, its publishing interval, the queue occupancy and the network — none of which the client can separate. A "latency" measured that way is mostly a measurement of the server's own configuration |
 | One cadence | Read, publish, write, heartbeat in a single 50 ms cycle gives one number to report and one ordering guarantee to hand the PLC (§7). Two independent cadences would make the ordering guarantee unprovable |
-| Server independence | An eight-node address space does not need server-side sampling. Polling avoids depending on the S7-1500's monitored-item limits, sampling granularity and publish-interval negotiation, which differ between PLCSIM Advanced and hardware |
+| Server independence | The fifteen-node `DemoCell/` address space of `opcua-nodes.md` §9 does not need server-side sampling. Polling avoids depending on the S7-1500's monitored-item limits, sampling granularity and publish-interval negotiation, which differ between PLCSIM Advanced and hardware |
 | Failure visibility | A failed read is visible every cycle. A silent subscription (no notifications because nothing changed) is indistinguishable from a dead one without a keep-alive whose semantics are again server-configured |
 | Honest cost, stated | Polling adds up to one cycle (0–50 ms, ~uniform) of phase latency on the output path and aliases changes faster than 50 ms. This is **reported, not hidden**: §9 requires the poll-phase component to be shown separately, and m3-04 may run a subscription-based comparison as supplementary evidence. The primary path stays poll |
 
@@ -189,7 +193,7 @@ Closes m3-01 open question 2, and refines the wording in `sim/README.md` § "The
 initial value".
 
 ROS topics are not retained. Before the first publish, the bridge has **no value** for the
-three panel contacts, and no value for the belt or the range until the cell's first sample.
+four panel contacts, and no value for the belt or the range until the cell's first sample.
 The tempting fix — write a "safe" default such as *contacts read as pressed, command 0.0* —
 means the bridge invents a value the cell never produced. That value is then
 indistinguishable, in the PLC's input image, from a real measurement. The bridge would be
@@ -201,8 +205,8 @@ asserting a process state, which is exactly §1.1's violation.
 |---|---|
 | R1 | The bridge **writes no `DemoCell/Input/` node until it has received a real sample** for that node's source signal. There is no default, no placeholder and no "safe value" written by the bridge, ever |
 | R2 | Each input node is written as soon as its own source has produced a sample (they arrive at different times) |
-| R3 | The bridge **writes no heartbeat** until **all six** input nodes have been written at least once from a real sample and the writes were acknowledged. Only then does the heartbeat begin advancing |
-| R4 | The same rule applies after every reconnect: on a new session the bridge first refreshes all six inputs from its current slots and only then resumes the heartbeat. If any slot is still empty (that signal has never published), the heartbeat stays stopped |
+| R3 | The bridge **writes no heartbeat** until **all seven** input nodes have been written at least once from a real sample and the writes were acknowledged. Only then does the heartbeat begin advancing |
+| R4 | The same rule applies after every reconnect: on a new session the bridge first refreshes all seven inputs from its current slots and only then resumes the heartbeat. If any slot is still empty (that signal has never published), the heartbeat stays stopped |
 | R5 | The bridge publishes nothing on `/cell/conveyor/cmd_speed` until it has read a value from the server (§8.3) |
 
 ### 6.2 What the PLC program can rely on
@@ -211,7 +215,7 @@ asserting a process state, which is exactly §1.1's violation.
 > attributable to the cell.** They are the PLC's own DB start values, or values left over
 > from a previous bridge session.
 >
-> **Once `BridgeHeartbeat` has advanced at least once, every one of the six input nodes has
+> **Once `BridgeHeartbeat` has advanced at least once, every one of the seven input nodes has
 > carried at least one real sample from the running cell**, and continues to be refreshed
 > per §5.
 
@@ -229,6 +233,7 @@ the start values of the input-image data block. Interface expectation for
 | `PanelStopCircuitClosed` | `FALSE` | circuit open = actuated or broken wire = not permitted to run (wire NC, program NO) |
 | `PanelProcessStopCircuitClosed` | `FALSE` | same |
 | `PanelStartPressed` | `FALSE` | NO contact open = not pressed. Never start on a start value |
+| `PanelResetPressed` | `FALSE` | NO contact open = not pressed (`opcua-nodes.md` §9.3: this node's fail state is 0, the opposite of the two stop nodes). `TRUE` would assert a reset no operator pressed and clear a latch at startup — the automatic resume CLAUDE.md §9 forbids. R1 gives the same answer before the first publish: the bridge writes nothing, so the node holds this start value |
 | `ConveyorBeltSpeed` | `0.0` | belt not known to be moving |
 | `ConveyorBeltPosition` | `0.0` | a position with no meaning until the heartbeat runs; the program must not treat it as homed |
 | `ProductSensorRange` | `0.0` | below any plausible threshold, i.e. reads as "beam blocked", the non-permissive interpretation |
@@ -282,7 +287,7 @@ mode, not a safety event** (invariant 2), and no safety function is involved (in
 
 | # | Failure | Heartbeat | Input nodes | OPC UA session | PLC-observable difference |
 |---|---|---|---|---|---|
-| A | Bridge crash (SIGKILL, unhandled exception, host loss) | stops advancing at an arbitrary value | frozen at their last written values | session times out server-side after the session/subscription timeout; until then the server still holds the session | **Heartbeat stale.** Session-state may lag by seconds, so it is not a faster indicator |
+| A | Bridge crash (SIGKILL, unhandled exception, host loss) | stops advancing at an arbitrary value | frozen at their last written values | depends on how the process died: a `SIGKILL` on a live host closes the TCP socket at OS level, so the server sees the drop at once (`EVIDENCE_SIGNAL_LOSS.md` §A.4, where the double saw `sessions 1 → 0` within 2 s); only a host or network loss, where no FIN/RST arrives, leaves the server holding the session until the session/subscription timeout | **Heartbeat stale.** Session-state may lag by seconds, so it is not a faster indicator |
 | B | Bridge clean shutdown (SIGINT/SIGTERM) | stops advancing; **the bridge writes no farewell value and does not zero anything** | frozen at their last written values | session closed immediately and cleanly | **Heartbeat stale**, plus an immediate, clean session close. This is the only PLC-visible difference from A, and it is a difference in *how fast the session disappears*, not in the input image. **A program that behaves differently for A and B is wrong** |
 | C | OPC UA connection loss (network, server restart, PLCSIM stopped) while the bridge lives | stops advancing (the bridge cannot write) | frozen at their last written values, or lost entirely if the server restarted with DB start values | session broken; bridge enters reconnect (§8) | **Heartbeat stale.** From the PLC side, indistinguishable from A. From the bridge side it is fully distinguishable and is logged |
 | D | **Sim stopped, bridge alive** | **keeps advancing** — the bridge is still writing | **frozen at the last real sample**, because the slots are never cleared and the cyclic write repeats the last value | healthy | **No difference at all: the input image looks live.** A frozen belt position with a non-zero speed command is the only clue, and detecting that is `ConveyorDriveFault` — PLC content (§9.5) |
@@ -304,7 +309,7 @@ owns. Recorded here as an observation, not as a requirement this document can im
 
 For `plc/demo-cell/SPEC.md`, so the PLC program can be written against this document:
 
-1. Qualify the six input values with "heartbeat advancing" (§6.2). Do not act on the input
+1. Qualify the seven input values with "heartbeat advancing" (§6.2). Do not act on the input
    image while the heartbeat is stale.
 2. On heartbeat stale, drop the cycle-running flag and command `0.0` — noting that this
    command **cannot reach the cell while the bridge is down** (§8.4). It takes effect on
@@ -323,7 +328,7 @@ For `plc/demo-cell/SPEC.md`, so the PLC program can be written against this docu
 |---|---|
 | Detection | A failed read or write, or a session/keep-alive failure, marks the session broken |
 | Retry | Reconnect attempts at a fixed interval with a bounded backoff, forever. Retry timing is bridge housekeeping, not a signal gate — it never delays or suppresses a value that could be sent |
-| On reconnect | Re-resolve the namespace index and all NodeIds (never reuse cached NodeIds across sessions), re-verify data types, then **refresh all six inputs from the current slots** (§9.2), then resume the heartbeat per R4 |
+| On reconnect | Re-resolve the namespace index and all NodeIds (never reuse cached NodeIds across sessions), re-verify data types, then **refresh all seven inputs from the current slots** (§9.2), then resume the heartbeat per R4 |
 | Heartbeat continuity | The counter **is not reset** across a reconnect and **is not reset** across a process restart if it can be avoided; either way the PLC must treat any *change* as liveness (§7.1), so a discontinuity is harmless and no rule depends on continuity |
 | Empty slots | If a signal has produced no sample since bridge start, its node is not written and the heartbeat stays stopped (R3/R4). A reconnect does not lower that bar |
 
@@ -408,8 +413,9 @@ last commanded speed until the bridge returns and delivers the PLC's current com
 |---|---|
 | `bridge/EVIDENCE_LATENCY.md` | Dated, human-readable capture: configuration, run duration, the statistics table, the caveats of §9.5, and the raw-file reference. Follows the `sim/worlds/CELL_EVIDENCE.md` precedent |
 | `bridge/evidence/latency-<YYYY-MM-DD>.csv.gz` | Raw per-event rows behind the table |
+| `bridge/EVIDENCE_SIGNAL_LOSS.md` | Dated capture of the four failure modes of §7.3, delivered by m3-04 alongside the latency file. The delivered capture is test-double, in-container; its repetition against PLCSIM is item 6 of the latency file's owner-run section |
 
-The evidence file has **two clearly separated sections**: *test double, in-container,
+The latency evidence file has **two clearly separated sections**: *test double, in-container,
 agent-run* and *PLCSIM Advanced, owner-run*. The gate closes on the second. m3-04 produces
 the first; the second is owner-executed (PLAN.md).
 
@@ -439,7 +445,7 @@ the first; the second is owner-executed (PLAN.md).
 | Item | Statement |
 |---|---|
 | What it is | A minimal OPC UA **server** that stands in for the S7-1500 on PLCSIM Advanced, exposing namespace `urn:amr-agent:cell:plc` with the `DemoCell/` address space of §9 — same BrowseNames, same folder paths, same data types, same access levels |
-| Why it exists | So the bridge and the loop mechanics can be verified automatically in this container, and so m3-04's tests do not need the owner's TIA/PLCSIM environment |
+| Why it exists | So the bridge and the loop mechanics can be verified automatically on any machine that can run the cell, and so m3-04's tests do not need the owner's TIA/PLCSIM environment |
 | Invariant 4 | **Preserved.** The server role belongs to the PLC; the double merely plays that role. The bridge is a client against the double and against PLCSIM, with no code path difference and no server mode (§1) |
 | What it proves | The bridge: signal traversal both ways, types, polarity, decimation, startup rule, liveness behaviour, reconnect, no-auto-resume, and the bridge-side latency figures of §9.5 |
 | What it does **not** prove | **The PLC program.** It runs no standard program, has no scan cycle, no process image, no interlocks, no cycle-running flag and no reset. Nothing observed against the double is evidence for `plc/demo-cell/SPEC.md` |
@@ -450,23 +456,29 @@ the first; the second is owner-executed (PLAN.md).
 
 ---
 
-## 11. Dependencies (require owner approval — see the report)
+## 11. Dependencies (approved and pinned — `bridge/requirements.txt`)
 
-| Dependency | Status in this container | Purpose | Note |
+| Dependency | Status | Purpose | Note |
 |---|---|---|---|
 | `rclpy`, `std_msgs`, `sensor_msgs`, `rosgraph_msgs` | present (`ros-jazzy-ros-base`) | ROS 2 node side | **Not new** |
 | `python3-yaml` | present (ROS 2 dependency) | config file | **Not new** |
 | Python stdlib: `asyncio`, `time`, `statistics`, `csv`, `logging`, `dataclasses`, `threading` | present | cycle, timing, percentiles, evidence | **Not new**; `statistics.quantiles` covers p95, so **numpy is deliberately not requested** |
-| **`asyncua`** | **absent** — no apt candidate for `python3-asyncua` in this container; `pip 24.0` is available | OPC UA client, and the test double's server | **NEW — needs owner approval.** Pure-Python, async, actively maintained, LGPL-3.0; the same package provides both client and server, so the double adds no second dependency. Pull-in: `cryptography` (already commonly present) for secure channels |
+| **`asyncua`** | **approved and installed** — pinned `asyncua==2.0.1` in `bridge/requirements.txt` (ADR 0005 D2) | OPC UA client, and the test double's server | The one new dependency, scoped to the `bridge/` layer. Pure-Python, async, actively maintained, LGPL-3.0, imported unmodified as a library and not vendored; the same package provides both client and server, so the double adds no second dependency. Pull-in: `cryptography` for secure channels, resolved transitively and recorded in the requirements file |
 
 Alternatives considered: `python-opcua` / `opcua` (the deprecated predecessor of `asyncua`,
 not recommended for new work) and `open62541` via bindings (a C toolchain dependency for no
-benefit at eight nodes). If the owner declines `asyncua`, the bridge cannot be implemented
-as designed and m3-04 must be re-briefed.
+benefit at this address-space size).
 
-Install path, subject to approval: `pip install asyncua==<pinned version>` through the
-container proxy, pinned in a requirements file under `bridge/`. No credentials or
-certificates are added to the repository (invariant 13).
+**Install mechanism, not a machine's path.** The pin is installed into a Python virtual
+environment created with `--system-site-packages`, so the one interpreter can import both
+`rclpy` from the sourced ROS 2 installation and `asyncua` from the venv. The
+`--system-site-packages` flag is the load-bearing part: a plain system-wide `pip install`
+fails because pip tries to replace the distribution-packaged `cryptography`, which has no
+`RECORD` file and cannot be uninstalled (LESSONS 2026-07-27). The venv is created wherever
+the user can write — under `/opt` in the container, under `$HOME` on WSL, where `/opt`
+needs root — and its location is an environment fact, not a property of this design.
+`bridge/README.md` carries the worked commands. No credentials or certificates are added
+to the repository (invariant 13).
 
 ---
 
@@ -476,9 +488,9 @@ certificates are added to the repository (invariant 13).
 |---|---|---|
 | 1 | Whether `fleet/README.md`'s "must not access ROS 2 internals" needed an exception for the bridge, which is by definition a ROS 2 node | **Resolved by ADR 0005**: the bridge is its own top-level layer, `bridge/`, not part of `fleet/`. No exception is needed and the earlier request for one is withdrawn; `fleet/README.md` stays absolute |
 | 2 | m3-01 open question 2 (no initial value) | **Resolved** here: §6. The `sim/README.md` phrasing "the safe choice is contacts read as pressed and belt command reads as zero" is honoured, but as **PLC DB start values** (§6.3), not as values the bridge writes |
-| 3 | `NaN` / `inf` on `ProductSensorRange` | Bridge behaviour fixed (§4.5: pass through, log, count). The PLC-side consequence — a `NaN` makes `range < 1.00` false, i.e. "no product" — must be handled explicitly in `plc/demo-cell/SPEC.md` (m3-05) |
-| 4 | §7.3 case D — sim stopped, bridge alive, input image looks live | Bridge cannot detect it without adding logic. Recommendation to m3-05: `ConveyorDriveFault` already covers it. Carried |
+| 3 | `NaN` / `inf` on `ProductSensorRange` | Bridge behaviour fixed (§4.5: pass through, log, count). The PLC-side consequence is **closed** by `plc/demo-cell/SPEC.md` §6.2 (m3-05): the range is tested against its physical window before any process comparison, so `NaN` and `inf` are treated as a sensor fault rather than resolving to "no product" |
+| 4 | §7.3 case D — sim stopped, bridge alive, input image looks live | Bridge cannot detect it without adding logic, and does not. **Closed** on the PLC side: `plc/demo-cell/SPEC.md` §6.6 takes the recommendation and latches `ConveyorDriveFault` on a non-zero command with a near-zero measured speed |
 | 5 | m3-02b open question 3 (float64 → Real narrowing vs measurement) | **Honoured**: all timestamping and differencing happens on the ROS side before narrowing (§4.5) |
-| 6 | m3-02b open question 1 (a Real output means the cycle-running flag gates a setpoint, not a coil) | Unchanged by this design; still m3-05's to state |
+| 6 | m3-02b open question 1 (a Real output means the cycle-running flag gates a setpoint, not a coil) | Unchanged by this design. **Closed** by `plc/demo-cell/SPEC.md` §6.4: the setpoint is gated by driving it to zero in a mandatory, unconditional `ELSE`, never by a conditional write |
 | 7 | 20 Hz cycle period | **Closed** by m3-04's measurement, `bridge/EVIDENCE_LATENCY.md` §A.4: the expectation is met — median cycle period 50.003 ms, 0 cycle overruns — so the item closes without a revision and §9.2 stands unchanged |
-| 8 | m3-01 open question 6 (stale "Navigation scenario (M3)" heading in `sim/README.md`) | Still uncorrected; `sim/`'s file, not this one's |
+| 8 | m3-01 open question 6 (stale "Navigation scenario (M3)" heading in `sim/README.md`) | **Corrected in `sim/`**: the heading now reads "Navigation scenario (M5, deferred)" |
