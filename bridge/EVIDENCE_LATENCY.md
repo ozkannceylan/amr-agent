@@ -9,7 +9,9 @@ This file has three clearly separated sections. **Section A** is the
 in-container run against the test double, produced by m3-04. **Section B** is
 the run against PLCSIM Advanced, which the owner executes and on which the M3
 gate closes (`bridge-design.md` §9.4). **Section C** is a short WSL run added
-by m3-13.
+by m3-13. Section B carries no measurement yet; its **§B.0** records the
+commissioned target environment (commissioning phase 0, 2026-07-27) that those
+measurements will run against.
 
 **Scope of Section A.** It was captured before the panel reset existed, so its
 input image is the six nodes of the day and every "all six" in it is a true
@@ -314,6 +316,83 @@ standard program of `plc/demo-cell/SPEC.md` (m3-05) loaded into PLCSIM
 Advanced and the bridge pointed at it by configuration only
 (`opcua.endpoint`, plus the security fields if the server requires them — no
 code change).
+
+## B.0 Commissioned target environment — commissioning phase 0, owner-verified in tool 2026-07-27
+
+This subsection is an **environment record, not a measurement**. It states the
+stack that phase 0 of commissioning brought up and that the owner-executed
+capture list below will run against. Every figure Section B asks for is still
+outstanding. It answers **item 1** of that list for the stack *as commissioned*;
+confirming it at measurement time stays with the owner, together with the two
+elements phase 0 did not fix — the CPU's configured scan cycle, and the network
+path in use at that moment with the confirmation that Tailscale is not in it
+(invariant 8).
+
+**What phase 0 proves: the endpoint and the node exposure, and nothing else.**
+No PLC program logic ran, and the bridge was not involved in any part of it —
+so no statement about the standard program, about bridge latency or about the
+signal-loss reactions is made or implied here.
+
+| Item | Value (owner-verified in the tool, 2026-07-27) |
+|---|---|
+| Engineering tool | TIA Portal **V21** |
+| Simulator | **S7-PLCSIM Advanced V7.0**. V3.0 was removed: broken virtual adapter service, and not supported with TIA V21 |
+| Target | Simulated, **not hardware**: a PLCSIM Advanced instance |
+| CPU | **CPU 1513-1 PN**, firmware **V3.1** |
+| OPC UA runtime license | **large**. The compiler demanded large after the firmware change; small was not accepted |
+| Instance networking | TCP/IP **Single Adapter**, `<Local>`; instance IP **192.168.53.1/24**, host virtual adapter **192.168.53.241/24** |
+| OPC UA endpoint | **`opc.tcp://192.168.53.1:4840`** |
+| Security | policy **None**, **anonymous** access via the CPU-level *Disable access control* setting (V3.x firmware exposes no guest-authentication checkbox) |
+| Browse path | `Objects` → `ServerInterfaces` (Siemens namespace `http://www.siemens.com/simatic-s7-opcua`) → `DemoCell` (namespace **`http://DemoCell`**, ADR 0006) |
+| Session timeout | requested **3 600 000 ms**, granted **30 000 ms** — the server clamps it |
+
+### B.0.1 Independent verification, 2026-07-27
+
+**15 `DemoCell` nodes were read with an `asyncua` client from Windows, all at
+their start values. The bridge was not involved.** 15 is exactly the node set
+`bridge/config/bridge.yaml` resolves today: 7 `Input/`, `Link/BridgeHeartbeat`,
+`Output/ConveyorSpeedCommand`, 5 `Status/` and `Link/BridgeLinkOk`. Section A
+and the runs of `EVIDENCE_SIGNAL_LOSS.md` log "14 nodes resolved" because they
+predate `Input/PanelResetPressed` (§C); the exposed interface therefore matches
+`opcua-nodes.md` §9 as it stands, with no node missing and none extra.
+
+### B.0.2 What this subsection does not establish
+
+Reading a node at its start value is not evidence about a program. In phase 0
+every `DemoCell/Status/` node was at its start value **because nothing had run**,
+not because a program formed it — the distinction that `§A.7` and
+`EVIDENCE_SIGNAL_LOSS.md` ("What none of this establishes") already draw for the
+test double applies here for a different reason. Phase 0 adds **no** measurement:
+no scan-cycle contribution, no OPC UA server timing under load, no L4/L7, no
+network path under PROFINET load, and nothing about the four signal-loss cases.
+
+### B.0.3 Consequences for the pending run, as facts
+
+1. **The security fields stay as configured.** The server is `None` + anonymous,
+   so `security_policy: "none"` with `certificate_path`, `private_key_path` and
+   `username` null is the correct setting for this endpoint — invariant 13 is
+   untouched because there is no secret to place.
+2. **The requested session timeout is inside the server's clamp.**
+   `session_timeout_ms` is 10 000 in config, below the 30 000 ms this server
+   granted for a 3 600 000 ms request, so no clamp is expected on the bridge's
+   request; the **granted** value is what the run should report, not the
+   requested one.
+3. **The browse root is not the same as the test double's, and this is not an
+   endpoint-only change.** `bridge/config/bridge.yaml` resolves
+   `[DemoCell, Input, <name>]` from the `Objects` folder with every element in
+   the `DemoCell` namespace index. On this server `DemoCell` is nested one level
+   deeper, under `ServerInterfaces`, and `ServerInterfaces` belongs to the
+   **Siemens** namespace, not to `http://DemoCell` — so a single-namespace path
+   from `Objects` cannot address it (`opcua-nodes.md` §2.1: two indices are
+   resolved by URI at connect, neither is hardcoded, and the parent folder never
+   shares the interface's namespace). No client change is made in this file;
+   brief m3-21 owns it. It is recorded here because it qualifies the sentence
+   above that only `opcua.endpoint` and the security fields change: against this
+   server the *addressing* changes too, and until m3-21 lands, Section B cannot
+   be captured.
+
+Sections A and C are unaffected: each remains qualified by the environment that
+produced it, and neither is re-run or edited here.
 
 What the owner must capture:
 

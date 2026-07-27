@@ -21,6 +21,65 @@ at its last written value on a loss, and never defaulted. The four cases were
 **not** re-run for it, and m3-08 (or the owner's PLCSIM run) captures them
 against the seven-node image.
 
+---
+
+## Target environment for the PLCSIM re-run — commissioning phase 0, owner-verified in tool 2026-07-27
+
+The four cases below were run **in the container, against the test double**, and
+are unchanged. The PLCSIM repeat they call for — "What none of this establishes",
+below, and `EVIDENCE_LATENCY.md` Section B item 6 — will run against the stack
+recorded here, which phase 0 of commissioning brought up on the owner's
+engineering workstation.
+
+**What phase 0 proves: the endpoint and the node exposure, and nothing else.**
+No PLC program logic ran, and the bridge was not involved — so phase 0 says
+nothing about any of the four failure modes below, and nothing about the
+*reaction* to them, which is `plc/demo-cell/SPEC.md` content.
+
+| Item | Value (owner-verified in the tool, 2026-07-27) |
+|---|---|
+| Engineering tool | TIA Portal **V21** |
+| Simulator | **S7-PLCSIM Advanced V7.0**. V3.0 was removed: broken virtual adapter service, and not supported with TIA V21 |
+| Target | Simulated, **not hardware**: a PLCSIM Advanced instance |
+| CPU | **CPU 1513-1 PN**, firmware **V3.1** |
+| OPC UA runtime license | **large**. The compiler demanded large after the firmware change; small was not accepted |
+| Instance networking | TCP/IP **Single Adapter**, `<Local>`; instance IP **192.168.53.1/24**, host virtual adapter **192.168.53.241/24** |
+| OPC UA endpoint | **`opc.tcp://192.168.53.1:4840`** |
+| Security | policy **None**, **anonymous** access via the CPU-level *Disable access control* setting (V3.x firmware exposes no guest-authentication checkbox) |
+| Browse path | `Objects` → `ServerInterfaces` (Siemens namespace `http://www.siemens.com/simatic-s7-opcua`) → `DemoCell` (namespace **`http://DemoCell`**, ADR 0006) |
+| Session timeout | requested **3 600 000 ms**, granted **30 000 ms** — the server clamps it |
+
+Independent verification the same day: **15 `DemoCell` nodes read with an
+`asyncua` client from Windows, all at their start values, with the bridge not
+involved.** That is the full node set of `opcua-nodes.md` §9 as it now stands —
+the seven-node input image included — against the 14 nodes these container runs
+log, which predate `Input/PanelResetPressed`.
+
+Two facts of this environment bear directly on the cases below, and both are
+questions for the re-run rather than answers from it:
+
+- **Case A's session timing is the one result known not to transfer.** The
+  double dropped the session within ~2 s of a `SIGKILL` (§A.4). This server
+  clamps session timeout to 30 000 ms and the bridge requests 10 000 ms, so how
+  long the S7-1500 holds a session after a bridge kill is a property of *this*
+  stack and must be measured on it (`EVIDENCE_LATENCY.md` Section B item 7).
+- **Case C's "server restarted with start values" now has real start values.**
+  In phase 0 every node read its DB start value because nothing had run; against
+  a *running* program the same reconnect is a different event, and `Status/`
+  nodes will carry program-formed values rather than the constant `False` of
+  these runs.
+
+One precondition, recorded so the re-run is not attempted too early: on this
+server the interface sits under `ServerInterfaces` in a *second* namespace, which
+the client must resolve by URI before any of the four cases can be provoked
+against it (`opcua-nodes.md` §2.1, brief m3-21; see
+`EVIDENCE_LATENCY.md` §B.0.3).
+
+Nothing in the four cases is re-run, re-measured or edited here: each remains
+qualified by the environment that produced it.
+
+---
+
 Summary of §7.3 as measured:
 
 | # | Failure | Heartbeat | Input nodes | Session | Matches the design? |
