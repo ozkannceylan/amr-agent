@@ -28,6 +28,19 @@ Exit criterion — all four demonstrated and recorded:
 5. m3-05 plc — PLC program specification for the owner's TIA Portal
    implementation.
 6. m3-06 verifier — verification scenario covering the four exit items.
+7. m3-07 infra — rebuild the toolchain in WSL and record the WSL-specific
+   deviations (sim/setup/WSL_ENVIRONMENT.md).
+8. m3-08 infra — re-run the cell, test double and bridge loop under WSL and
+   append WSL evidence sections alongside the container evidence.
+
+Briefs 3 and 4 were delivered and evidenced inside an Ubuntu 24.04 container.
+Briefs 7 and 8 exist because that evidence has never been reproduced on the
+owner's machine. They do not change the exit criterion; they establish that
+the criterion is met on the platform the demonstration will actually run on.
+Container evidence is retained, not replaced.
+
+Correction brief m3-03c (interface) precedes m3-05: bridge-design.md is an
+input to the PLC spec and still carries pre-ADR-0005 paths.
 
 The TIA Portal implementation and the PLCSIM Advanced run are owner-executed.
 The four exit items are therefore demonstrated by the owner against the
