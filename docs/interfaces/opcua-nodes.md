@@ -153,7 +153,7 @@ logic formed from interlocks (including the F-CPU-mirrored safety state).
 
 Added by ADR 0004, which proves the Gazebo-to-PLC signal loop before any mobile robot work.
 The demonstration cell is **fixed equipment only**: one conveyor, one product sensor, one operator
-panel (Start, Stop, process stop). The client here is the **bridge** — a ROS 2 node and
+panel (Start, Stop, Reset, process stop). The client here is the **bridge** — a ROS 2 node and
 OPC UA client that translates between Gazebo and the PLC, and nothing else.
 
 The authoritative signal list is the **signal table in `sim/README.md` § "Demonstration cell (M3)"**
@@ -226,13 +226,17 @@ input image: the standard program reads them exactly as it would read wired fiel
 | ConveyorBeltSpeed | Real | Float | R/W | cyclic | Gazebo cell (via bridge) | Measured belt velocity, m/s, signed, from `/cell/conveyor/joint_state` `velocity[0]`. Drive read-back: the PLC compares it with its own `ConveyorSpeedCommand`, the cell does not |
 | ProductSensorRange | Real | Float | R/W | cyclic | Gazebo cell (via bridge) | Photo-eye beam distance, m, from `/cell/product_sensor/scan` `ranges[0]`. **Raw analog value, not a bit** — nominally 1.440 m beam clear, 0.540 m product in the beam; sensor range 0.05 … 3.0 m. The presence decision is made in the PLC (§9.5) |
 | PanelStartPressed | Bool | Boolean | R/W | on-change | Gazebo cell (via bridge) | Start pushbutton contact from `/cell/panel/start`. Start devices are wired **NO**: 1 = contact closed = pressed. Momentary level; the PLC forms any edge it needs, the bridge never latches or stretches it |
+| PanelResetPressed | Bool | Boolean | R/W | on-change | Gazebo cell (via bridge) | Monitored reset pushbutton contact from `/cell/panel/reset`. **Its fail state is 0, the opposite of the two stop nodes below**: a stop device must fail to *stopped* and so is wired NC, while a reset must fail to *not reset* and so is wired **NO** — a cut wire, a welded-open contact or nothing publishing all read 0, because a reset that asserted itself would clear latches with no operator present, the automatic resume CLAUDE.md §9 forbids. 1 = contact closed = button held. Momentary level: the PLC forms the rising edge and times the hold, the bridge never latches, stretches or debounces it. It resets **process** latches in the standard program — not a safety function, no safety integrity (§9.6, invariant 1) |
 | PanelStopCircuitClosed | Bool | Boolean | R/W | on-change | Gazebo cell (via bridge) | Stop pushbutton contact from `/cell/panel/stop`. **Wire NC, program NO** (CLAUDE.md §9): 1 = circuit closed, button not actuated; 0 = actuated, or wire broken, or signal absent |
 | PanelProcessStopCircuitClosed | Bool | Boolean | R/W | on-change | Gazebo cell (via bridge) | **Process stop** mushroom contact from `/cell/panel/process_stop` (§9.6). Wire NC, program NO: 1 = closed, 0 = actuated. Not an emergency stop, not a safety function, no safety integrity |
 
 Stop devices are named for the **circuit state**, not for the button, so that the tag reads true when
 the machine is permitted to run and false in every failure case. A tag named `…Pressed` would invert
 the NC convention and make a dead signal look healthy. This matches the cell, which publishes both
-stop contacts as NC contact state (`sim/README.md`, *Polarity: wire NC, program NO*).
+stop contacts as NC contact state (`sim/README.md`, *Polarity: wire NC, program NO*). The suffix is
+therefore the polarity: a `…CircuitClosed` node is an NC device that fails to 0 = actuated, a
+`…Pressed` node is an NO device that fails to 0 = not actuated. One convention does not govern all
+four panel inputs, and the four rows above are grouped by polarity rather than by panel layout.
 
 **Where the photo-eye becomes a bit.** The raw range is carried to the PLC and the PLC thresholds it;
 the bridge holds no threshold. Choosing the distance below which a product counts as present depends
@@ -260,7 +264,7 @@ distinct node from `ConveyorSpeedCommand`.
 |---|---|---|---|---|---|---|
 | CellCycleRunning | Bool | Boolean | R | on-change | PLC | Standard-program cycle-running flag: the cell is enabled. Level, survives a restart of the bridge |
 | CellProcessStopActive | Bool | Boolean | R | on-change | PLC | A **process** stop is latched in the standard program (panel Stop or panel process stop). Not a safety state; no SF of docs/safety/SRS.md is represented here |
-| CellResetRequired | Bool | Boolean | R | on-change | PLC | A monitored, edge-triggered local reset is pending before the cycle may run again. No reset is performed over OPC UA; no node in this section can clear it |
+| CellResetRequired | Bool | Boolean | R | on-change | PLC | A monitored, edge-triggered local reset is pending before the cycle may run again. No client may clear it by writing a node: the only reset input is `PanelResetPressed` (§9.3), which carries the operator's field contact level, and the edge, the hold time and which latches clear are PLC program content |
 | ProductPresentAtSensor | Bool | Boolean | R | on-change | PLC | The PLC's presence verdict, formed inside the program by thresholding `ProductSensorRange` (§9.3). Published so the watch table and the recording show the conversion result next to its raw input. Derived, never written by the bridge — the bridge has no threshold |
 | ConveyorDriveFault | Bool | Boolean | R | on-change | PLC | PLC verdict on disagreement between `ConveyorSpeedCommand` and the measured `ConveyorBeltSpeed` (§9.3). Both inputs exist, so this node is derivable; the tolerance and delay are PLC program content and are not defined here |
 
@@ -306,7 +310,7 @@ Node kinds that do not exist:
 | A client-writable conveyor command node, or a run/stop bit alongside `ConveyorSpeedCommand` | The bridge may never write an actuator output (invariant 6). The cell accepts one signed velocity and nothing else; a separate run bit would duplicate information already carried by the sign and magnitude of the command, breaking single ownership (invariant 10) |
 | A `ProductPresent` bit in the input image | The presence threshold is a process decision and lives in the PLC (§9.3). The bridge writes the raw range only |
 | A belt home or travel-limit signal | The cell has no such transducer; `ConveyorBeltPosition` carries the raw travel and the ±2.50 m limit is a constant in the PLC program (m3-01 open question 5) |
-| Any safety node, mirror or reset | Safety never traverses the network (invariant 1); the demonstration cell has no F-CPU and no SF |
+| Any safety node, safety mirror, or reset of a safety function | Safety never traverses the network (invariant 1); the demonstration cell has no F-CPU and no SF. `PanelResetPressed` (§9.3) is not an exception: it is a process device whose contact level resets standard-program latches only |
 | Timers, step numbers, latch state exposed for the bridge | Logic and sequencing belong to the PLC; exposing them would invite the bridge to act on them (ADR 0004) |
 | Vehicle, order or fleet data | No vehicle exists in M3 (ADR 0004); fleet data never lives on the PLC (invariants 3, 5) |
 
@@ -323,6 +327,7 @@ BrowseNames here, which are the authoritative PLC tag names (m3-01 open question
 | `ConveyorBeltSpeed` | `/cell/conveyor/joint_state` → `velocity[0]` | cell → PLC | `DemoCell/Input/ConveyorBeltSpeed` |
 | `ProductSensorRange` | `/cell/product_sensor/scan` → `ranges[0]` | cell → PLC | `DemoCell/Input/ProductSensorRange` |
 | `PanelStartContact` | `/cell/panel/start` → `data` | cell → PLC | `DemoCell/Input/PanelStartPressed` |
+| `PanelResetContact` | `/cell/panel/reset` → `data` | cell → PLC | `DemoCell/Input/PanelResetPressed` |
 | `PanelStopContact` | `/cell/panel/stop` → `data` | cell → PLC | `DemoCell/Input/PanelStopCircuitClosed` |
 | `PanelProcessStopContact` | `/cell/panel/process_stop` → `data` | cell → PLC | `DemoCell/Input/PanelProcessStopCircuitClosed` |
 | *(diagnostic)* `/cell/product_box/pose` | — | cell → observer | **none, by design** (§9.8) |
