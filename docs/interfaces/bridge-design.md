@@ -407,7 +407,7 @@ last commanded speed until the bridge returns and delivers the PLC's current com
 | File | Content |
 |---|---|
 | `bridge/EVIDENCE_LATENCY.md` | Dated, human-readable capture: configuration, run duration, the statistics table, the caveats of §9.5, and the raw-file reference. Follows the `sim/worlds/CELL_EVIDENCE.md` precedent |
-| `bridge/evidence/latency-<YYYY-MM-DD>.csv` | Raw per-event rows behind the table |
+| `bridge/evidence/latency-<YYYY-MM-DD>.csv.gz` | Raw per-event rows behind the table |
 
 The evidence file has **two clearly separated sections**: *test double, in-container,
 agent-run* and *PLCSIM Advanced, owner-run*. The gate closes on the second. m3-04 produces
@@ -480,5 +480,5 @@ certificates are added to the repository (invariant 13).
 | 4 | §7.3 case D — sim stopped, bridge alive, input image looks live | Bridge cannot detect it without adding logic. Recommendation to m3-05: `ConveyorDriveFault` already covers it. Carried |
 | 5 | m3-02b open question 3 (float64 → Real narrowing vs measurement) | **Honoured**: all timestamping and differencing happens on the ROS side before narrowing (§4.5) |
 | 6 | m3-02b open question 1 (a Real output means the cycle-running flag gates a setpoint, not a coil) | Unchanged by this design; still m3-05's to state |
-| 7 | 20 Hz cycle period | An expectation from §9.2, not logic. m3-04 measures what is achieved and may revise it **with evidence**; a revision updates §9.2 and this section together |
+| 7 | 20 Hz cycle period | **Closed** by m3-04's measurement, `bridge/EVIDENCE_LATENCY.md` §A.4: the expectation is met — median cycle period 50.003 ms, 0 cycle overruns — so the item closes without a revision and §9.2 stands unchanged |
 | 8 | m3-01 open question 6 (stale "Navigation scenario (M3)" heading in `sim/README.md`) | Still uncorrected; `sim/`'s file, not this one's |
