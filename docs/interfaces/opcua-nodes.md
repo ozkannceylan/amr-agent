@@ -153,8 +153,12 @@ logic formed from interlocks (including the F-CPU-mirrored safety state).
 
 Added by ADR 0004, which proves the Gazebo-to-PLC signal loop before any mobile robot work.
 The demonstration cell is **fixed equipment only**: one conveyor, one product sensor, one operator
-panel equivalent (Start, Stop, process E-stop). The client here is the **bridge** — a ROS 2 node and
+panel (Start, Stop, process stop). The client here is the **bridge** — a ROS 2 node and
 OPC UA client that translates between Gazebo and the PLC, and nothing else.
+
+The authoritative signal list is the **signal table in `sim/README.md` § "Demonstration cell (M3)"**
+(m3-01). Sections 9.3 and 9.4 below are in exact one-to-one correspondence with its PLC rows;
+§9.9 records that reconciliation and §9.8 records what the cell publishes but the PLC does not receive.
 
 Sections 3–7 above describe the target cell served to the **fleet manager**. This section describes
 the M3 demonstration cell served to the **bridge**. Both live on the same server under the same
@@ -170,26 +174,46 @@ No logic, sequencing, latching or timer is defined here, and none belongs in the
 |---|---|
 | Server/client | The PLC is the OPC UA server. The bridge is a client. Never inverted (invariant 4). |
 | What the bridge writes | **Only** the `DemoCell/Input/` nodes (the PLC's input image) and `DemoCell/Link/BridgeHeartbeat`. Nothing else on the server is client-writable. |
-| No actuator writes | The bridge **never** writes an actuator output node. `ConveyorRunCommand` and every other output is formed inside the PLC from its cycle-running flag and interlocks (invariant 6). The bridge reads it and applies it to the simulated actuator unchanged. |
+| No actuator writes | The bridge **never** writes an actuator output node. `ConveyorSpeedCommand` and every other output is formed inside the PLC from its cycle-running flag and interlocks (invariant 6). The bridge reads it and applies it to the simulated actuator unchanged. |
 | No logic in the bridge | The bridge is a signal translator: no sequencing, interlocks, timers, latching or debounce that changes meaning (ADR 0004). If logic appears to be needed, it belongs in the PLC (invariants 5, 6). |
-| Single owner | Every input bit is owned by the Gazebo cell and only ever written by the bridge; every output and status bit is owned by the PLC. Neither side recomputes the other's value (invariant 10). |
-| Not a safety path | Every node in this section is process data. The demonstration E-stop is a **process stop** (§9.6). No safety function traverses OPC UA (invariant 1, SRS B1). |
+| Single owner | Every input value is owned by the Gazebo cell and only ever written by the bridge; every output and status value is owned by the PLC. Neither side recomputes the other's value (invariant 10). |
+| Not a safety path | Every node in this section is process data. The panel's red mushroom is a **process stop**, never an emergency stop (§9.6). No safety function traverses OPC UA (invariant 1, SRS B1). |
 
 ### 9.2 Folder layout and conventions
 
 ```
 DemoCell/            demonstration cell (M3), served to the bridge
-DemoCell/Input/      cell → PLC: input-image bits written by the bridge
-DemoCell/Output/     PLC → cell: output bits the bridge applies to simulated actuators
+DemoCell/Input/      cell → PLC: input-image values written by the bridge (bits and analogs)
+DemoCell/Output/     PLC → cell: outputs the bridge applies to simulated actuators
 DemoCell/Status/     PLC → bridge: read-only status for diagnostics and the watch table
 DemoCell/Link/       bridge liveness
 ```
 
-Column conventions are those of section 2. Two additions for this section:
+Column conventions are those of section 2. Three additions for this section:
 
 - **Access** is from the **bridge's** view (the client), not the fleet manager's.
 - For client-written nodes, `on-change` means: written when the source ROS 2 signal changes value,
   plus a full refresh of all `DemoCell/Input/` nodes on every (re)connect.
+- Numeric conversion is **type narrowing only**: ROS `float64` → S7 `Real`. Units are carried
+  unchanged (metres, metres per second). No scaling, offset, filtering, averaging or threshold is
+  applied anywhere in the bridge.
+
+Update-rate expectation, per signal class. The cell publishes at its own rates and cannot rate-limit
+without putting policy in the simulation layer (m3-01 open question 3), so decimation is an
+**interface expectation on the bridge**:
+
+| Signal class | Cell publish rate | Expected OPC UA update | Rule |
+|---|---|---|---|
+| Belt position and speed (`/cell/conveyor/joint_state`) | ~500 Hz (physics rate) | cyclic, **20 Hz (50 ms)** | **Latest-sample decimation**: write the most recent sample at the write cycle and discard the rest. No averaging, no interpolation, no min/max hold — those would be filters, and a filter changes meaning (ADR 0004). Nothing may be derived from the discarded samples (no edge counting, no travel integration). |
+| Photo-eye range (`/cell/product_sensor/scan`) | 30 Hz | cyclic, 20 Hz (50 ms) | Latest sample, same rule. |
+| Panel contacts | on publish (no fixed rate) | on-change + refresh on reconnect | Each publish is written through unchanged; never latched, stretched or debounced. |
+| `ConveyorSpeedCommand` (PLC → cell) | — | cyclic, 20 Hz (50 ms) | Read at the write cycle and republished to the cell unchanged. |
+
+20 Hz is chosen as roughly twice the intended PLC scan and well inside the ~500 Hz source rate, so
+the loop latency measured at M3 is dominated by the OPC UA path rather than by decimation. m3-04
+measures what is actually achieved and may revise this number with evidence; it is an expectation,
+not logic. ROS topics are not retained, so the values the PLC sees before the first publish are a
+bridge startup decision (m3-01 open question 2, resolved in m3-04), not a node property.
 
 ### 9.3 DemoCell/Input/ — cell → PLC input image (bridge writes)
 
@@ -198,41 +222,55 @@ input image: the standard program reads them exactly as it would read wired fiel
 
 | BrowseName | S7 type | OPC UA type | Access | Update | Owner | Meaning |
 |---|---|---|---|---|---|---|
-| ProductPresentAtSensor | Bool | Boolean | R/W | on-change | Gazebo cell (via bridge) | Product detected at the conveyor's product sensor. Presence sensor, NO analogue: 1 = product present |
-| ConveyorMotorRunningFeedback | Bool | Boolean | R/W | on-change | Gazebo cell (via bridge) | The simulated drive reports it is actually turning. Feedback, never a command; the PLC compares it with its own output. Present only if the m3-01 world publishes it — if the sim provides no drive feedback, this node is omitted rather than synthesized by the bridge |
-| PanelStartPressed | Bool | Boolean | R/W | on-change | Gazebo cell (via bridge) | Start pushbutton actuated. Start devices are wired NO: 1 = pressed. Momentary level; the PLC forms any edge it needs, the bridge never latches or stretches it |
-| PanelStopCircuitClosed | Bool | Boolean | R/W | on-change | Gazebo cell (via bridge) | Process stop pushbutton. **Wire NC, program NO** (CLAUDE.md §9): 1 = circuit closed, button not actuated; 0 = actuated, or wire broken, or signal absent |
-| PanelEmergencyStopCircuitClosed | Bool | Boolean | R/W | on-change | Gazebo cell (via bridge) | Demonstration panel E-stop mushroom, **process stop only** (§9.6). Wire NC, program NO: 1 = closed, 0 = actuated. Not a safety function and carries no SIL/PL claim |
+| ConveyorBeltPosition | Real | Float | R/W | cyclic | Gazebo cell (via bridge) | Belt travel from home, m, signed. Raw encoder value from `/cell/conveyor/joint_state` `position[0]`. Mechanical stops at ±2.50 m; the limit and any homing decision are PLC program content, not a node (closes m3-01 open question 5 — no separate home or limit signal exists or is invented) |
+| ConveyorBeltSpeed | Real | Float | R/W | cyclic | Gazebo cell (via bridge) | Measured belt velocity, m/s, signed, from `/cell/conveyor/joint_state` `velocity[0]`. Drive read-back: the PLC compares it with its own `ConveyorSpeedCommand`, the cell does not |
+| ProductSensorRange | Real | Float | R/W | cyclic | Gazebo cell (via bridge) | Photo-eye beam distance, m, from `/cell/product_sensor/scan` `ranges[0]`. **Raw analog value, not a bit** — nominally 1.440 m beam clear, 0.540 m product in the beam; sensor range 0.05 … 3.0 m. The presence decision is made in the PLC (§9.5) |
+| PanelStartPressed | Bool | Boolean | R/W | on-change | Gazebo cell (via bridge) | Start pushbutton contact from `/cell/panel/start`. Start devices are wired **NO**: 1 = contact closed = pressed. Momentary level; the PLC forms any edge it needs, the bridge never latches or stretches it |
+| PanelStopCircuitClosed | Bool | Boolean | R/W | on-change | Gazebo cell (via bridge) | Stop pushbutton contact from `/cell/panel/stop`. **Wire NC, program NO** (CLAUDE.md §9): 1 = circuit closed, button not actuated; 0 = actuated, or wire broken, or signal absent |
+| PanelProcessStopCircuitClosed | Bool | Boolean | R/W | on-change | Gazebo cell (via bridge) | **Process stop** mushroom contact from `/cell/panel/process_stop` (§9.6). Wire NC, program NO: 1 = closed, 0 = actuated. Not an emergency stop, not a safety function, no safety integrity |
 
 Stop devices are named for the **circuit state**, not for the button, so that the tag reads true when
 the machine is permitted to run and false in every failure case. A tag named `…Pressed` would invert
-the NC convention and make a dead signal look healthy.
+the NC convention and make a dead signal look healthy. This matches the cell, which publishes both
+stop contacts as NC contact state (`sim/README.md`, *Polarity: wire NC, program NO*).
+
+**Where the photo-eye becomes a bit.** The raw range is carried to the PLC and the PLC thresholds it;
+the bridge holds no threshold. Choosing the distance below which a product counts as present depends
+on product geometry, beam alignment and the hysteresis the process wants — that is a process
+decision, not a unit conversion, and ADR 0004 puts every process decision in the PLC. Interface
+expectation for the PLC program: a named constant at **1.00 m** (midway between the 1.440 m clear and
+0.540 m blocked levels, ≈0.45 m margin either side), product present when `ProductSensorRange` is
+below it; any hysteresis or filter time is PLC program content specified in `plc/demo-cell/SPEC.md`.
 
 ### 9.4 DemoCell/Output/ — PLC → cell (bridge reads, never writes)
 
 | BrowseName | S7 type | OPC UA type | Access | Update | Owner | Meaning |
 |---|---|---|---|---|---|---|
-| ConveyorRunCommand | Bool | Boolean | R | on-change | PLC | Conveyor drive command. Formed inside the PLC from its cycle-running flag combined with interlocks — never driven directly from a sensor (CLAUDE.md §9). The bridge applies it to the simulated conveyor actuator unchanged, with no added condition |
+| ConveyorSpeedCommand | Real | Float | R | cyclic | PLC | Belt surface velocity command, m/s, signed: positive transports the product towards +x, negative reverses, 0.0 stops. Formed inside the PLC from its cycle-running flag combined with interlocks — never driven directly from a sensor (CLAUDE.md §9). The bridge republishes it to `/cell/conveyor/cmd_speed` unchanged: no ramp, no clamp, no interlock, no zeroing of its own (invariant 6, ADR 0004). The cell applies it as given, including while a stop contact reads pressed — stopping the belt is the PLC's job, and that is exactly what M3 demonstrates |
 
 ### 9.5 DemoCell/Status/ — PLC state, read-only diagnostics
 
-Read by the bridge for logging and by the owner in the TIA watch table. Not applied to any simulated
-actuator. Machine state and actuator command are separate layers (CLAUDE.md §9), which is why
-`CellCycleRunning` is a distinct node from `ConveyorRunCommand`.
+These are **PLC-derived values with no corresponding cell signal**, deliberately outside the
+one-to-one correspondence of §9.3 and §9.4 (full accounting in §9.9). They are read by the bridge for
+logging and by the owner in the TIA watch table, and are applied to no simulated actuator. Machine
+state and actuator command are separate layers (CLAUDE.md §9), which is why `CellCycleRunning` is a
+distinct node from `ConveyorSpeedCommand`.
 
 | BrowseName | S7 type | OPC UA type | Access | Update | Owner | Meaning |
 |---|---|---|---|---|---|---|
 | CellCycleRunning | Bool | Boolean | R | on-change | PLC | Standard-program cycle-running flag: the cell is enabled. Level, survives a restart of the bridge |
-| CellProcessStopActive | Bool | Boolean | R | on-change | PLC | A **process** stop is latched in the standard program (panel Stop or panel E-stop). Not a safety state; no SF of docs/safety/SRS.md is represented here |
+| CellProcessStopActive | Bool | Boolean | R | on-change | PLC | A **process** stop is latched in the standard program (panel Stop or panel process stop). Not a safety state; no SF of docs/safety/SRS.md is represented here |
 | CellResetRequired | Bool | Boolean | R | on-change | PLC | A monitored, edge-triggered local reset is pending before the cycle may run again. No reset is performed over OPC UA; no node in this section can clear it |
-| ConveyorDriveFault | Bool | Boolean | R | on-change | PLC | PLC verdict on command-versus-feedback disagreement. The criterion is PLC logic and is not defined here |
+| ProductPresentAtSensor | Bool | Boolean | R | on-change | PLC | The PLC's presence verdict, formed inside the program by thresholding `ProductSensorRange` (§9.3). Published so the watch table and the recording show the conversion result next to its raw input. Derived, never written by the bridge — the bridge has no threshold |
+| ConveyorDriveFault | Bool | Boolean | R | on-change | PLC | PLC verdict on disagreement between `ConveyorSpeedCommand` and the measured `ConveyorBeltSpeed` (§9.3). Both inputs exist, so this node is derivable; the tolerance and delay are PLC program content and are not defined here |
 
-### 9.6 The demonstration E-stop is a PROCESS stop
+### 9.6 The red mushroom is a PROCESS stop
 
 | Statement | Detail |
 |---|---|
-| What it is | `PanelEmergencyStopCircuitClosed` is a **process stop input** to the S7-1500 **standard** program. It stops the demonstration conveyor by ordinary program logic. |
-| What it is not | It is **not a safety function**. It appears nowhere in docs/safety/SRS.md §3, carries no SIL/PL claim, and must be labelled a process stop in every document, tag name, watch table and recording (ADR 0004). |
+| What it is | `PanelProcessStopCircuitClosed` is a **process stop input** to the S7-1500 **standard** program. It stops the demonstration conveyor by ordinary program logic. |
+| What it is not | It is **not a safety function** and **not an emergency stop**. It appears nowhere in docs/safety/SRS.md §3, carries no SIL/PL claim, and must never be labelled, demonstrated or recorded as an emergency stop (ADR 0004). |
+| Naming | The word "emergency" appears in no tag, node, topic or heading for this device. The node name, the PLC tag and the cell's `/cell/panel/process_stop` all carry "process stop" (m3-01 open question 1 — confirmed, the ADR wording governs and no ADR revisit is needed). |
 | SF-01 is unaffected | The real cell e-stop chain (SRS SF-01) is executed by the F-CPU on two-channel NC F-I/O over PROFIsafe and hardwired channels. It never travels over OPC UA and is not represented by any node in this section (invariant 1, SRS B1, B3). The demonstration cell has no F-CPU. |
 | No mirror either | Unlike §4, this section carries no safety mirror. `Safety/EStopActive` in §4 remains the only informational mirror of SF-01, and remains read-only and outside every causal chain. |
 
@@ -254,9 +292,50 @@ not a safety event (invariant 2), and nothing about it is a safety function.
 
 ### 9.8 Deliberately absent from DemoCell/
 
+Cell signals that exist but reach no node:
+
+| Cell signal | Why it is not a node |
+|---|---|
+| `/cell/product_box/pose` (ground-truth product pose, 10 Hz) | **Ground truth, not a transducer.** A real conveyor has no product-position sensor; modelling one would give the PLC information the real cell cannot provide and would let the program cheat the demonstration. It exists so belt transport is observable headless (m3-01 open question 7 — upheld). |
+| `/clock` (simulation time) | Simulator infrastructure, not a cell signal. The bridge consumes it as a ROS node; the PLC has its own time base. |
+
+Node kinds that do not exist:
+
 | Not on the server | Why |
 |---|---|
-| A client-writable conveyor command node | The bridge may never write an actuator output; the PLC forms outputs from interlocks (invariant 6) |
+| A client-writable conveyor command node, or a run/stop bit alongside `ConveyorSpeedCommand` | The bridge may never write an actuator output (invariant 6). The cell accepts one signed velocity and nothing else; a separate run bit would duplicate information already carried by the sign and magnitude of the command, breaking single ownership (invariant 10) |
+| A `ProductPresent` bit in the input image | The presence threshold is a process decision and lives in the PLC (§9.3). The bridge writes the raw range only |
+| A belt home or travel-limit signal | The cell has no such transducer; `ConveyorBeltPosition` carries the raw travel and the ±2.50 m limit is a constant in the PLC program (m3-01 open question 5) |
 | Any safety node, mirror or reset | Safety never traverses the network (invariant 1); the demonstration cell has no F-CPU and no SF |
 | Timers, step numbers, latch state exposed for the bridge | Logic and sequencing belong to the PLC; exposing them would invite the bridge to act on them (ADR 0004) |
 | Vehicle, order or fleet data | No vehicle exists in M3 (ADR 0004); fleet data never lives on the PLC (invariants 3, 5) |
+
+### 9.9 Reconciliation with the sim signal table
+
+One node per cell signal, one cell signal per node, checked in both directions against
+`sim/README.md` § "Demonstration cell (M3)". The proposed names in that table are superseded by the
+BrowseNames here, which are the authoritative PLC tag names (m3-01 open question 4).
+
+| Sim signal | ROS 2 topic → field | Direction (PLC view) | Node |
+|---|---|---|---|
+| `ConveyorSpeedCmd` | `/cell/conveyor/cmd_speed` → `data` | PLC → cell | `DemoCell/Output/ConveyorSpeedCommand` |
+| `ConveyorBeltPosition` | `/cell/conveyor/joint_state` → `position[0]` | cell → PLC | `DemoCell/Input/ConveyorBeltPosition` |
+| `ConveyorBeltSpeed` | `/cell/conveyor/joint_state` → `velocity[0]` | cell → PLC | `DemoCell/Input/ConveyorBeltSpeed` |
+| `ProductSensorRange` | `/cell/product_sensor/scan` → `ranges[0]` | cell → PLC | `DemoCell/Input/ProductSensorRange` |
+| `PanelStartContact` | `/cell/panel/start` → `data` | cell → PLC | `DemoCell/Input/PanelStartPressed` |
+| `PanelStopContact` | `/cell/panel/stop` → `data` | cell → PLC | `DemoCell/Input/PanelStopCircuitClosed` |
+| `PanelProcessStopContact` | `/cell/panel/process_stop` → `data` | cell → PLC | `DemoCell/Input/PanelProcessStopCircuitClosed` |
+| *(diagnostic)* `/cell/product_box/pose` | — | cell → observer | **none, by design** (§9.8) |
+| *(infrastructure)* `/clock` | — | cell → observer | **none, by design** (§9.8) |
+
+Nodes with no cell signal, and why each is legitimate rather than an orphan:
+
+| Node | Source |
+|---|---|
+| `DemoCell/Status/*` (5 nodes) | PLC-derived program state, published for diagnostics and the watch table (§9.5). Read-only for the bridge; none is applied to a simulated actuator |
+| `DemoCell/Link/BridgeHeartbeat` | Generated by the bridge itself, not by the cell (§9.7) |
+| `DemoCell/Link/BridgeLinkOk` | PLC-derived verdict on the heartbeat (§9.7) |
+
+The operational signal map — including the conversion, decimation and reconnect detail the bridge
+implements — is `docs/interfaces/bridge-design.md` (m3-03), derived from this table. If the two ever
+disagree, this document is the contract and the bridge design is corrected to match.
