@@ -15,8 +15,13 @@ Handshake **sequencing** (who sets which bit when) is specified in m1-03; this d
 
 ## 2. Namespace and folder layout
 
-Server interface exported from TIA Portal. Namespace URI: `urn:amr-agent:cell:plc`
+Server interface exported from TIA Portal. Namespace URI: `http://DemoCell`
 (namespace index is assigned at session establishment; the client browses by URI, never hardcodes the index).
+
+The URI is **not chosen here**: TIA Portal derives a server interface's namespace URI as
+`http://<interface name>` and the field is not editable, so naming the interface `DemoCell` is what
+produces `http://DemoCell`. There is **one namespace per server interface** — a second interface
+carries its own derived URI and none is shared (ADR 0006).
 
 ```
 Cell/                cell-level status and supervision heartbeats
@@ -161,8 +166,11 @@ The authoritative signal list is the **signal table in `sim/README.md` § "Demon
 §9.9 records that reconciliation and §9.8 records what the cell publishes but the PLC does not receive.
 
 Sections 3–7 above describe the target cell served to the **fleet manager**. This section describes
-the M3 demonstration cell served to the **bridge**. Both live on the same server under the same
-namespace URI `urn:amr-agent:cell:plc`; no node is shared between the two sets and they are never merged.
+the M3 demonstration cell served to the **bridge**. The nodes below live on the `DemoCell` server
+interface, namespace URI `http://DemoCell` (§2). A fleet-facing interface is a **separate server
+interface** and carries its own URI, derived the same way from its own name: each server interface
+has exactly one namespace and the two sets cannot share one (ADR 0006). No node is shared between the
+two sets and they are never merged.
 
 This section defines **nodes only**. Conveyor control, reset behaviour, fault detection and the
 reaction to a stale bridge heartbeat are PLC standard-program content (`plc/demo-cell/SPEC.md`).

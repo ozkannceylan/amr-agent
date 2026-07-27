@@ -89,7 +89,7 @@ Permitted, and exhaustive: field selection/addressing (§4.5), `bool` ↔ `Boole
 | Rule | Statement |
 |---|---|
 | Direction | The bridge connects **out** to the PLC's endpoint. Never inverted (invariant 4) |
-| Namespace | Resolve namespace index at session establishment by browsing for URI `urn:amr-agent:cell:plc`. **Never hardcode the index** (§2 of the node model) |
+| Namespace | Resolve namespace index at session establishment by browsing for URI `http://DemoCell`. **Never hardcode the index** (§2 of the node model). The rule is unchanged; only the URI value is — TIA derives it from the server interface name and the field is not editable (ADR 0006) |
 | Node resolution | Resolve NodeIds by BrowseName path (`DemoCell/Input/...`) once per session, cache for the session, re-resolve on reconnect |
 | Writable set | The bridge writes **only** the seven `DemoCell/Input/` nodes and `DemoCell/Link/BridgeHeartbeat` (§9.1). Any other write is a defect. m3-04 enforces this with a single write helper that rejects a NodeId outside the allowlist |
 | Read set | `DemoCell/Output/ConveyorSpeedCommand` (applied to the cell), and `DemoCell/Status/*` + `DemoCell/Link/BridgeLinkOk` (logging only, never applied to anything) |
@@ -444,7 +444,7 @@ the first; the second is owner-executed (PLAN.md).
 
 | Item | Statement |
 |---|---|
-| What it is | A minimal OPC UA **server** that stands in for the S7-1500 on PLCSIM Advanced, exposing namespace `urn:amr-agent:cell:plc` with the `DemoCell/` address space of §9 — same BrowseNames, same folder paths, same data types, same access levels |
+| What it is | A minimal OPC UA **server** that stands in for the S7-1500 on PLCSIM Advanced, exposing namespace `http://DemoCell` (the URI TIA derives from the interface name, ADR 0006) with the `DemoCell/` address space of §9 — same BrowseNames, same folder paths, same data types, same access levels. The double matches the URI so the bridge's browse-by-URI resolves identically against it and against PLCSIM |
 | Why it exists | So the bridge and the loop mechanics can be verified automatically on any machine that can run the cell, and so m3-04's tests do not need the owner's TIA/PLCSIM environment |
 | Invariant 4 | **Preserved.** The server role belongs to the PLC; the double merely plays that role. The bridge is a client against the double and against PLCSIM, with no code path difference and no server mode (§1) |
 | What it proves | The bridge: signal traversal both ways, types, polarity, decimation, startup rule, liveness behaviour, reconnect, no-auto-resume, and the bridge-side latency figures of §9.5 |
