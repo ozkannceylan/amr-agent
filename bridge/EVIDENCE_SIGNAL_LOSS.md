@@ -47,7 +47,7 @@ nothing about any of the four failure modes below, and nothing about the
 | OPC UA endpoint | **`opc.tcp://192.168.53.1:4840`** |
 | Security | policy **None**, **anonymous** access via the CPU-level *Disable access control* setting (V3.x firmware exposes no guest-authentication checkbox) |
 | Browse path | `Objects` → `ServerInterfaces` (Siemens namespace `http://www.siemens.com/simatic-s7-opcua`) → `DemoCell` (namespace **`http://DemoCell`**, ADR 0006) |
-| Session timeout | requested **3 600 000 ms**, granted **30 000 ms** — the server clamps it |
+| Session timeout | requested **3 600 000 ms**, granted **30 000 ms** — the server **revises** the request; a revision downwards in this instance, and the grant for the bridge's own request may land either side of it (`EVIDENCE_LATENCY.md` §B.0.3) |
 
 Independent verification the same day: **15 `DemoCell` nodes read with an
 `asyncua` client from Windows, all at their start values, with the bridge not
@@ -60,9 +60,12 @@ questions for the re-run rather than answers from it:
 
 - **Case A's session timing is the one result known not to transfer.** The
   double dropped the session within ~2 s of a `SIGKILL` (§A.4). This server
-  clamps session timeout to 30 000 ms and the bridge requests 10 000 ms, so how
-  long the S7-1500 holds a session after a bridge kill is a property of *this*
-  stack and must be measured on it (`EVIDENCE_LATENCY.md` Section B item 7).
+  **revises** the session timeout rather than capping it — it granted 30 000 ms
+  for a 3 600 000 ms request, so the grant for the bridge's 10 000 ms request
+  may land either side of that request and is not known until the run reads it
+  back. How long the S7-1500 holds a session after a bridge kill is bounded by
+  the **granted** value, is a property of *this* stack, and must be measured on
+  it (`EVIDENCE_LATENCY.md` Section B item 7, and §B.0.3 for the direction).
 - **Case C's "server restarted with start values" now has real start values.**
   In phase 0 every node read its DB start value because nothing had run; against
   a *running* program the same reconnect is a different event, and `Status/`

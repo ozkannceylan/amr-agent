@@ -344,7 +344,7 @@ signal-loss reactions is made or implied here.
 | OPC UA endpoint | **`opc.tcp://192.168.53.1:4840`** |
 | Security | policy **None**, **anonymous** access via the CPU-level *Disable access control* setting (V3.x firmware exposes no guest-authentication checkbox) |
 | Browse path | `Objects` → `ServerInterfaces` (Siemens namespace `http://www.siemens.com/simatic-s7-opcua`) → `DemoCell` (namespace **`http://DemoCell`**, ADR 0006) |
-| Session timeout | requested **3 600 000 ms**, granted **30 000 ms** — the server clamps it |
+| Session timeout | requested **3 600 000 ms**, granted **30 000 ms** — the server **revises** the request; a revision downwards in this instance, and the grant for the bridge's own request may land either side of it (§B.0.3) |
 
 ### B.0.1 Independent verification, 2026-07-27
 
