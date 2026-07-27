@@ -1,0 +1,99 @@
+# bridge configuration — the ONLY file that varies between the test double and
+# PLCSIM Advanced / real hardware.
+#
+# bridge-design.md §2: "No thresholds, no limits, no tolerances, no timers — a
+# config key for any of those would be logic wearing a disguise."
+#
+# Everything below is one of:
+#   - an address (endpoint, namespace URI, BrowseName path, topic name),
+#   - a cadence (cycle period — an expectation, not a deadline, §9.2/§12.7),
+#   - housekeeping (reconnect retry interval, log level, evidence paths).
+#
+# There is deliberately no threshold, no tolerance, no clamp, no scale, no
+# offset, no debounce time and no "hold last value for X ms" key anywhere in
+# this file, and the loader rejects any key it does not know (config.py).
+
+opcua:
+  # The bridge connects OUT to this endpoint. It never listens (invariant 4).
+  endpoint: "opc.tcp://127.0.0.1:4840/amr-agent/celldouble/"
+
+  # Resolved to an index by browsing at every session establishment.
+  # The index is NEVER hardcoded (opcua-nodes.md §2).
+  namespace_uri: "urn:amr-agent:cell:plc"
+
+  # Security. "none" is the in-container test-double setting. For PLCSIM /
+  # hardware set policy/certificate/private_key; the files live OUTSIDE this
+  # repository and are referenced by absolute path (invariant 13).
+  security_policy: "none"        # "none" | e.g. "Basic256Sha256,SignAndEncrypt"
+  certificate_path: null         # absolute path, outside the repo
+  private_key_path: null         # absolute path, outside the repo
+  username: null                 # absolute path to a secret file, or null
+  session_timeout_ms: 10000
+  session_name: "amr-agent-bridge"
+
+  # Reconnect housekeeping (§8.1). This is retry timing for a broken session,
+  # not a gate on any signal: it never delays or suppresses a value that could
+  # be sent.
+  reconnect_interval_s: 1.0
+  reconnect_backoff_max_s: 5.0
+
+# BrowseName paths under the resolved namespace, relative to the Objects
+# folder. These mirror opcua-nodes.md §9.2 exactly.
+nodes:
+  root: "DemoCell"
+  # WRITABLE by the bridge — the PLC input image (§9.3).
+  inputs:
+    ConveyorBeltPosition:          ["Input", "ConveyorBeltPosition"]
+    ConveyorBeltSpeed:             ["Input", "ConveyorBeltSpeed"]
+    ProductSensorRange:            ["Input", "ProductSensorRange"]
+    PanelStartPressed:             ["Input", "PanelStartPressed"]
+    PanelStopCircuitClosed:        ["Input", "PanelStopCircuitClosed"]
+    PanelProcessStopCircuitClosed: ["Input", "PanelProcessStopCircuitClosed"]
+  # WRITABLE by the bridge — its own liveness counter (§9.7).
+  heartbeat:
+    BridgeHeartbeat:               ["Link", "BridgeHeartbeat"]
+  # READ and applied to the cell unchanged (§9.4).
+  output:
+    ConveyorSpeedCommand:          ["Output", "ConveyorSpeedCommand"]
+  # READ for logging only. Applied to nothing, used in no decision (§4.4).
+  diagnostics:
+    CellCycleRunning:              ["Status", "CellCycleRunning"]
+    CellProcessStopActive:         ["Status", "CellProcessStopActive"]
+    CellResetRequired:             ["Status", "CellResetRequired"]
+    ProductPresentAtSensor:        ["Status", "ProductPresentAtSensor"]
+    ConveyorDriveFault:            ["Status", "ConveyorDriveFault"]
+    BridgeLinkOk:                  ["Link", "BridgeLinkOk"]
+
+ros:
+  node_name: "cell_plc_bridge"
+  # Subscriptions (cell → PLC).
+  topics:
+    joint_state:   "/cell/conveyor/joint_state"
+    product_scan:  "/cell/product_sensor/scan"
+    panel_start:   "/cell/panel/start"
+    panel_stop:    "/cell/panel/stop"
+    panel_process_stop: "/cell/panel/process_stop"
+    # Publication (PLC → cell).
+    cmd_speed:     "/cell/conveyor/cmd_speed"
+  # Addressing, not logic (§4.5): the joint whose position/velocity is the
+  # belt encoder, matched by name in every message.
+  joint_name: "belt_joint"
+  # Subscription reliability for the two analog topics, matched to the
+  # publisher (ros_gz_bridge publishes RELIABLE — verified with
+  # `ros2 topic info -v`, logged again at every startup).
+  analog_reliability: "reliable"     # "reliable" | "best_effort"
+
+cycle:
+  # 20 Hz. An interface expectation (opcua-nodes.md §9.2), NOT a deadline and
+  # NOT a control parameter. The bridge is best effort (invariant 9).
+  period_s: 0.05
+  # Diagnostics are read at a low rate so they stay visibly out of the
+  # measured loop (§5).
+  status_poll_period_s: 1.0
+
+evidence:
+  csv_path: "/home/user/amr-agent/bridge/evidence/latency-2026-07-27.csv"
+  flush_interval_s: 2.0
+
+logging:
+  level: "INFO"

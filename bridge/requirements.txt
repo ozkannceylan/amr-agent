@@ -1,0 +1,37 @@
+# bridge layer runtime dependencies — ADR 0005 D2.
+#
+# One new dependency enters the project, scoped to this layer only. It is
+# pinned to an exact version and imported unmodified as a library (LGPL-3.0,
+# not vendored, not statically linked). The same package supplies both the
+# OPC UA client (the bridge) and the OPC UA server used by the test double, so
+# the double adds no second dependency.
+asyncua==2.0.1
+
+# Resolved transitively by the pin above. Recorded, not pinned: these are
+# asyncua's own dependencies and are listed here so the verified environment
+# can be reproduced exactly if a resolution ever differs.
+#   cryptography==49.0.0
+#   pyOpenSSL==26.3.0
+#   aiosqlite, anyio, sortedcontainers, cffi, pycparser (indirect)
+#
+# NOT listed here, because they are not new (bridge-design.md §11):
+#   rclpy, std_msgs, sensor_msgs, rosgraph_msgs   from ros-jazzy-ros-base
+#   PyYAML                                        from python3-yaml
+#   asyncio, csv, statistics, threading, logging  Python standard library
+#
+# numpy is deliberately NOT requested: statistics/percentiles are computed
+# after the run by tools/summarize_latency.py with the standard library.
+#
+# Install (verified 2026-07-27 in this container, python 3.12.3, pip 24.0):
+#
+#   python3 -m venv --system-site-packages /opt/amr-bridge-venv
+#   /opt/amr-bridge-venv/bin/pip install -r bridge/requirements.txt
+#
+# The venv is created with --system-site-packages so the same interpreter can
+# import rclpy from the sourced ROS 2 installation. A plain
+# `pip install --break-system-packages` fails in this container: pip tries to
+# replace the Debian-packaged cryptography 41.0.7, which has no RECORD file
+# and cannot be uninstalled. The venv leaves the system Python untouched.
+#
+# No credentials, certificates or keys are added to the repository
+# (invariant 13).

@@ -1,0 +1,9 @@
+gate:                M3 (reordering)
+agent:               arch-docs
+goal:                Record the gate reordering that puts the Gazebo-to-PLC loop first as an accepted ADR.
+invariants_touched:  none
+inputs:              [CLAUDE.md sections 2, 6, 8, docs/adr/0001..0003, docs/roadmap.md, owner scope correction of 2026-07-27]
+deliverable:         docs/adr/0004-gate-reordering-plc-loop-first.md
+content:             Decision: gates are reordered so the fixed-equipment Gazebo-to-PLC signal loop is proven before any mobile robot work; the bridge process becomes a first class component. Context: the closed loop between Gazebo and the PLC is the project's core claim and everything else is built on top of it; proving it first de-risks the whole architecture. Consequences: mobile robot, Nav2, VDA 5050 and fleet work are deferred (existing verified world and bringup retained, navigation scenario parked unverified); the bridge is a new first class component with its own design document preceding code; arm integration stays last. Alternatives rejected: keeping the original order (defers the core claim behind three gates of vehicle work); folding the bridge into the fleet manager (violates the layer split and invariant 6); proving the loop with a mocked PLC only (would not demonstrate the actual claim).
+done_when:           ADR follows the section 8 format, status accepted, states the new gate order M3..M11 by name, and restates the three constraints that still hold (invariant 4 direction, bridge carries signals not logic, no safety function over OPC UA — a demonstration e-stop is a process stop in the standard program and must be labelled as such).
+forbidden:           [changing any invariant, editing ADR 0001-0003, writing code, editing directories other than docs/adr/ and the report]

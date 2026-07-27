@@ -84,6 +84,7 @@ amr-agent/
   plc/                    TIA Portal exports, standard and safety program
   fleet/                  fleet manager service, MQTT and OPC UA clients
   agv/                    ROS 2 workspace, VDA 5050 client node
+  bridge/                 ROS 2 to OPC UA signal translator and its test double
   sim/                    Gazebo worlds, launch files, scenarios
   .claude/settings.json   attribution and permission settings
 
@@ -124,6 +125,7 @@ graph TD
 | plc | Standard and safety program, TIA exports | plc/ |
 | fleet | Fleet manager service, MQTT and OPC UA clients | fleet/ |
 | agv-ros2 | VDA 5050 client node, Nav2 bridge | agv/ |
+| bridge | Gazebo/PLC signal bridge and its test double | bridge/ |
 | sim | Gazebo worlds, launch files, test scenarios | sim/ |
 | verifier | Checks invariants, gate criteria, layer boundaries | none, read only |
 

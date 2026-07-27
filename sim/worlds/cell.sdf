@@ -1,0 +1,357 @@
+<?xml version="1.0" ?>
+<!--
+  cell.sdf - M3 fixed-equipment demonstration cell for the amr-agent project.
+
+  Fixed equipment ONLY. There is no vehicle in this world and none belongs
+  here (ADR 0004: the Gazebo-to-PLC signal loop is proven before any mobile
+  robot work).
+
+  Layout (top view, metres, origin at the middle of the conveyor):
+
+        +y
+         ^
+         |            [ProductSensor]  emitter post, y = +0.75
+         |                  |  single beam, z = 0.60, pointing -y
+      ---+---[ConveyorFrame 8.0 x 1.0]------------------------> +x
+         |            [belt slab, prismatic along x]
+         |                  |
+         |            [SensorReflector] post, y = -0.80
+         |
+      [OperatorPanel] at (-2.6, -1.4)      beam crosses the belt at x = +0.50
+
+  What this world exposes, and nothing more:
+
+    actuator (raw command in)   belt joint velocity, gz JointController
+    encoder  (raw state out)    belt joint position and velocity
+    sensor   (raw state out)    single-beam range across the belt
+    diagnostic                  product box pose
+
+  The operator panel Start / Stop / process-stop contacts are NOT modelled
+  in physics. They are pure ROS -> gz transport signals created by the
+  bridge in launch/cell_bringup.launch.py; the panel model below is
+  geometry only, so the cell has a visible place where those contacts sit.
+
+  NO CONTROL LOGIC LIVES HERE. There is no sequencing, no interlock, no
+  timer, no latch and no debounce in this file. The belt turns whenever a
+  velocity is commanded and the beam reports a raw distance whatever is in
+  front of it. Deciding what any of that means is the PLC's job
+  (invariants 5, 6 and 9).
+
+  Sensor note: ProductSensor is a gz "gpu_lidar", so this world MUST load
+  gz-sim-sensors-system with a render engine, as warehouse.sdf does.
+-->
+<sdf version="1.8">
+  <world name="cell">
+
+    <!-- Small fixed step: the product box is carried by belt friction and a
+         coarse step makes that contact jittery. The world is tiny, so this
+         still runs faster than real time headless. -->
+    <physics type="ode">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>500</real_time_update_rate>
+    </physics>
+
+    <plugin name="gz::sim::systems::Physics" filename="libgz-sim-physics-system.so"/>
+    <plugin name="gz::sim::systems::UserCommands" filename="libgz-sim-user-commands-system.so"/>
+    <plugin name="gz::sim::systems::SceneBroadcaster" filename="libgz-sim-scene-broadcaster-system.so"/>
+    <plugin name="gz::sim::systems::Sensors" filename="libgz-sim-sensors-system.so">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <scene>
+      <ambient>1 1 1 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <shadows>false</shadows>
+      <grid>false</grid>
+    </scene>
+
+    <light name="sun" type="directional">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>1.0 1.0 1.0 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.3 0.3 -1.0</direction>
+    </light>
+
+    <gravity>0 0 -9.8</gravity>
+
+    <!-- ============================ Floor ============================ -->
+    <model name="Floor">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>20 20</size></plane>
+          </geometry>
+          <surface>
+            <friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>20 20</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.55 0.55 0.55 1</ambient>
+            <diffuse>0.55 0.55 0.55 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ========================== Conveyor ============================ -->
+    <!--
+      Two links:
+        frame - the fixed structure, bolted to the world by a fixed joint.
+        belt  - the moving belt surface, a prismatic slide along +x.
+
+      The belt is driven as a raw velocity command. Travel is limited to
+      +-2.5 m, which is the mechanical stop, not a control decision: the
+      product rides the belt by friction and the PLC decides when to stop.
+    -->
+    <model name="Conveyor">
+      <static>false</static>
+      <pose>0 0 0 0 0 0</pose>
+
+      <link name="frame">
+        <pose>0 0 0.20 0 0 0</pose>
+        <inertial>
+          <mass>200.0</mass>
+          <inertia>
+            <ixx>19.3333</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>1069.3333</iyy><iyz>0</iyz><izz>1083.3333</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry><box><size>8.0 1.0 0.40</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.0 1.0 0.40</size></box></geometry>
+          <material><ambient>0.30 0.32 0.35 1</ambient><diffuse>0.30 0.32 0.35 1</diffuse></material>
+        </visual>
+      </link>
+
+      <link name="belt">
+        <pose>0 0 0.43 0 0 0</pose>
+        <inertial>
+          <mass>20.0</mass>
+          <inertia>
+            <ixx>1.0727</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>15.0060</iyy><iyz>0</iyz><izz>16.0667</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry><box><size>3.0 0.80 0.06</size></box></geometry>
+          <surface>
+            <friction><ode><mu>1.2</mu><mu2>1.2</mu2></ode></friction>
+            <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>3.0 0.80 0.06</size></box></geometry>
+          <material><ambient>0.12 0.12 0.14 1</ambient><diffuse>0.12 0.12 0.14 1</diffuse></material>
+        </visual>
+      </link>
+
+      <!-- Conveyor frame is fixed equipment: bolted to the floor. -->
+      <joint name="frame_anchor" type="fixed">
+        <parent>world</parent>
+        <child>frame</child>
+      </joint>
+
+      <!-- The belt drive axis. +velocity transports product towards +x. -->
+      <joint name="belt_joint" type="prismatic">
+        <parent>frame</parent>
+        <child>belt</child>
+        <axis>
+          <xyz>1 0 0</xyz>
+          <limit>
+            <lower>-2.5</lower>
+            <upper>2.5</upper>
+            <effort>2000</effort>
+            <velocity>2.0</velocity>
+          </limit>
+          <dynamics><damping>0.0</damping><friction>0.0</friction></dynamics>
+        </axis>
+      </joint>
+
+      <!-- Raw actuator: belt surface velocity command, m/s, signed.
+           No ramp, no interlock, no timer - the command is applied as given. -->
+      <plugin filename="libgz-sim-joint-controller-system.so"
+              name="gz::sim::systems::JointController">
+        <joint_name>belt_joint</joint_name>
+        <topic>/cell/conveyor/cmd_speed</topic>
+        <initial_velocity>0.0</initial_velocity>
+      </plugin>
+
+      <!-- Raw encoder: belt joint position [m] and velocity [m/s]. -->
+      <plugin filename="libgz-sim-joint-state-publisher-system.so"
+              name="gz::sim::systems::JointStatePublisher">
+        <joint_name>belt_joint</joint_name>
+        <topic>/cell/conveyor/joint_state</topic>
+      </plugin>
+    </model>
+
+    <!-- ========================= Product box ========================== -->
+    <!-- The transported product. Starts on the belt, upstream of the beam. -->
+    <model name="ProductBox">
+      <pose>-1.0 0 0.61 0 0 0</pose>
+      <link name="link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia>
+            <ixx>0.03</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>0.03</iyy><iyz>0</iyz><izz>0.03</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry><box><size>0.30 0.30 0.30</size></box></geometry>
+          <surface>
+            <friction><ode><mu>1.2</mu><mu2>1.2</mu2></ode></friction>
+            <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.30 0.30 0.30</size></box></geometry>
+          <material><ambient>0.80 0.55 0.20 1</ambient><diffuse>0.80 0.55 0.20 1</diffuse></material>
+        </visual>
+      </link>
+
+      <!-- Diagnostic only. Not a cell signal and not offered to the PLC:
+           a real conveyor has no product-position transducer. It exists so
+           that belt transport can be evidenced without a camera. -->
+      <plugin filename="libgz-sim-pose-publisher-system.so"
+              name="gz::sim::systems::PosePublisher">
+        <publish_link_pose>false</publish_link_pose>
+        <publish_collision_pose>false</publish_collision_pose>
+        <publish_visual_pose>false</publish_visual_pose>
+        <publish_model_pose>true</publish_model_pose>
+        <publish_nested_model_pose>false</publish_nested_model_pose>
+        <use_pose_vector_msg>true</use_pose_vector_msg>
+        <static_publisher>false</static_publisher>
+        <update_frequency>10</update_frequency>
+      </plugin>
+    </model>
+
+    <!-- ======================= Product sensor ========================= -->
+    <!--
+      Retro-reflective photo-eye modelled as a single-beam gpu_lidar.
+      Emitter post at y = +0.75 looking along -y; reflector post at
+      y = -0.80. Beam height z = 0.60 sits inside the product box, which
+      spans z = 0.46 .. 0.76 while riding the belt (belt top = 0.46).
+
+      Clear beam reads about 1.50 m (to the reflector).
+      Product in the beam reads about 0.60 m (to the box face at y = +0.15).
+
+      The world publishes the RANGE, not a detected/not-detected bit. The
+      switching threshold is a process parameter and belongs to the PLC.
+    -->
+    <model name="ProductSensor">
+      <static>true</static>
+      <pose>0.50 0.75 0 0 0 0</pose>
+      <link name="post">
+        <collision name="collision">
+          <pose>0 0 0.35 0 0 0</pose>
+          <geometry><box><size>0.10 0.10 0.70</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <pose>0 0 0.35 0 0 0</pose>
+          <geometry><box><size>0.10 0.10 0.70</size></box></geometry>
+          <material><ambient>0.85 0.15 0.10 1</ambient><diffuse>0.85 0.15 0.10 1</diffuse></material>
+        </visual>
+
+        <!-- Beam origin sits on the inner face of the post, aimed at -y. -->
+        <sensor name="beam" type="gpu_lidar">
+          <pose>0 -0.06 0.60 0 0 -1.5707963</pose>
+          <always_on>1</always_on>
+          <update_rate>30</update_rate>
+          <visualize>false</visualize>
+          <topic>/cell/product_sensor/scan</topic>
+          <lidar>
+            <scan>
+              <horizontal>
+                <samples>1</samples>
+                <resolution>1</resolution>
+                <min_angle>0.0</min_angle>
+                <max_angle>0.0</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>1</samples>
+                <resolution>1</resolution>
+                <min_angle>0.0</min_angle>
+                <max_angle>0.0</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>0.05</min>
+              <max>3.0</max>
+              <resolution>0.001</resolution>
+            </range>
+          </lidar>
+        </sensor>
+      </link>
+    </model>
+
+    <!-- Reflector the photo-eye beam terminates on when the belt is clear. -->
+    <model name="SensorReflector">
+      <static>true</static>
+      <pose>0.50 -0.80 0 0 0 0</pose>
+      <link name="post">
+        <collision name="collision">
+          <pose>0 0 0.35 0 0 0</pose>
+          <geometry><box><size>0.10 0.10 0.70</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <pose>0 0 0.35 0 0 0</pose>
+          <geometry><box><size>0.10 0.10 0.70</size></box></geometry>
+          <material><ambient>0.90 0.90 0.35 1</ambient><diffuse>0.90 0.90 0.35 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ======================= Operator panel ========================= -->
+    <!--
+      Geometry only. The Start / Stop / process-stop contacts this pedestal
+      represents are ROS topics created by the bridge, because a pushbutton
+      has no simulated physics worth modelling. See the signal table in
+      sim/README.md.
+
+      The red mushroom head below is the panel's PROCESS stop. It is not a
+      safety function and must never be presented as one: the safety e-stop
+      chain is hardwired to the F-CPU and never crosses the network
+      (invariant 1, ADR 0004).
+    -->
+    <model name="OperatorPanel">
+      <static>true</static>
+      <pose>-2.60 -1.40 0 0 0 0</pose>
+      <link name="link">
+        <collision name="pedestal_collision">
+          <pose>0 0 0.55 0 0 0</pose>
+          <geometry><box><size>0.30 0.20 1.10</size></box></geometry>
+        </collision>
+        <visual name="pedestal_visual">
+          <pose>0 0 0.55 0 0 0</pose>
+          <geometry><box><size>0.30 0.20 1.10</size></box></geometry>
+          <material><ambient>0.35 0.35 0.38 1</ambient><diffuse>0.35 0.35 0.38 1</diffuse></material>
+        </visual>
+        <visual name="start_button_visual">
+          <pose>-0.09 -0.11 1.00 1.5707963 0 0</pose>
+          <geometry><cylinder><radius>0.035</radius><length>0.02</length></cylinder></geometry>
+          <material><ambient>0.15 0.65 0.20 1</ambient><diffuse>0.15 0.65 0.20 1</diffuse></material>
+        </visual>
+        <visual name="stop_button_visual">
+          <pose>0.00 -0.11 1.00 1.5707963 0 0</pose>
+          <geometry><cylinder><radius>0.035</radius><length>0.02</length></cylinder></geometry>
+          <material><ambient>0.10 0.10 0.10 1</ambient><diffuse>0.10 0.10 0.10 1</diffuse></material>
+        </visual>
+        <visual name="process_stop_button_visual">
+          <pose>0.09 -0.11 1.00 1.5707963 0 0</pose>
+          <geometry><cylinder><radius>0.055</radius><length>0.03</length></cylinder></geometry>
+          <material><ambient>0.80 0.10 0.10 1</ambient><diffuse>0.80 0.10 0.10 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>
