@@ -11,7 +11,11 @@
 - The root .gitattributes comment states a shebang-file count that is stale after m3-21 added bridge/tools/check_connect_conformance.py (7 should be 8, confirmed by m3-22) — correct the count or drop the number from the comment.
 
 ## plc
-- m3-25 SPEC reconcile (issued, from the owner's commissioning feedback) — done when §7's dwell timer is specified with a released IN, §6.2 open item 1 is closed by stating the affirmative plausibility form as normative rather than by dropping IS_VALID, and no other timer in the document is specified with a literal TRUE input.
+- m3-27 belt plausibility windows (issued, from m3-25's new finding) — done when ConveyorBeltPosition and ConveyorBeltSpeed carry affirmative-form plausibility windows, an implausible value faults instead of being consumed, and §12 open item 5 is closed.
+
+## owner (from m3-25, affects the running program)
+- The dwell timer's corrected form differs from the implementation: SPEC now calls it unconditionally outside the CASE with IN := (SeqStep = 20), because a call site inside branch 20 stops executing at step exit. The reported fix (IN := FALSE on leaving step 20) works only if that release executes in the same scan as the exit — confirm it does, or adopt the spec's form, so program and spec do not drift.
+- A NaN belt position currently disarms both soft-limit aborts in the built program. m3-27 specifies the fix; the change will need re-implementing in TIA.
 
 ## sim (deferred, after M3 closes — do not start before the owner's evidence lands)
 - Cell reskin from harvested assets. Research (2026-07-27, scratchpad sim-research.md) recommends harvesting ARIAC 2025 conveyor/break-beam visuals onto the existing joints, optionally placing the cell inside Fuel Depot (CC-BY 4.0). Visual only: the /cell/... topic contract and the node model must not change. Blocker to resolve first — ariac_gz, the package holding every mesh, declares "TODO: License declaration" and the repo has no top-level LICENSE; NIST's only terms statement is a US-only §105 non-copyright note, so clarify terms with the maintainers before any mesh enters this repository. Adopting ARIAC's own plugins is out of scope: it would add ariac_interfaces and change the signal contract, which needs an ADR.
