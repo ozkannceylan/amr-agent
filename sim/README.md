@@ -15,8 +15,13 @@ Owns: Gazebo warehouse worlds, launch files, and end-to-end test scenarios.
 
 ```
 sim/
-  worlds/warehouse.sdf              M3 warehouse world (walls, racks, DoorGap,
-                                    ConveyorStation, ChargerStation)
+  worlds/cell.sdf                   M3 fixed-equipment demonstration cell
+                                    (conveyor, product, photo-eye, panel)
+  worlds/CELL_EVIDENCE.md           dated verification record of the cell run
+  launch/cell_bringup.launch.py     one-command headless cell bringup + bridge
+  worlds/warehouse.sdf              warehouse world for the vehicle work, now M5
+                                    (walls, racks, DoorGap, ConveyorStation,
+                                    ChargerStation)
   worlds/BRINGUP_EVIDENCE.md        dated verification record of the headless run
   launch/warehouse_bringup.launch.py  one-command headless bringup
   setup/install.sh                  idempotent environment setup (run as root)
@@ -227,3 +232,180 @@ of rack row B and turns east between the rack rows (~11 m). Expect roughly
   posts/lintel; the PLC-controlled door and the conveyor/charger handshakes
   act there in later gates (M6/M7). The blocks are geometry only — no
   fleet, PLC or safety behavior is simulated here (see the first section).
+
+---
+
+# Demonstration cell (M3)
+
+`worlds/cell.sdf` + `launch/cell_bringup.launch.py` are the M3 gate work
+under ADR 0004: prove the Gazebo-to-PLC signal loop with **fixed equipment
+only**, before any mobile robot. There is no vehicle in this world and
+none belongs in it. The warehouse world and its navigation scenario above
+are the deferred M5 vehicle work and are untouched by this.
+
+## What is in the cell
+
+```
+        +y
+         ^
+         |            [ProductSensor]   emitter post at y = +0.75
+         |                   :          single beam, z = 0.60, aimed at -y
+      ---+---[ Conveyor frame 8.0 x 1.0 x 0.4, belt top z = 0.46 ]----> +x
+         |            [ProductBox]      0.3 m cube, starts at x = -1.00
+         |                   :
+         |            [SensorReflector] post at y = -0.80
+         |
+      [OperatorPanel] pedestal at (-2.60, -1.40), geometry only
+```
+
+- **Conveyor** — a belt slab on a prismatic joint, driven by gz
+  `JointController` as a raw signed velocity. Mechanical travel is
+  ±2.50 m. The product rides the belt by friction; it is transported, not
+  teleported (the evidence file shows `boxX` tracking `beltPos` with a
+  constant offset).
+- **ProductBox** — the transported product, 0.30 m cube, 2 kg.
+- **ProductSensor** — a retro-reflective photo-eye, modelled as a
+  single-beam `gpu_lidar` firing across the belt at x = +0.50 towards a
+  reflector post. It publishes a **distance**, not a detected bit.
+- **OperatorPanel** — a pedestal with a green Start, a black Stop and a
+  red process-stop mushroom. Geometry only: the contacts themselves are
+  ROS topics created by the bridge, because a pushbutton has no physics
+  worth simulating.
+
+## Signal table
+
+This table is the I/O list for the cell. It is the direct input to the
+m3-02 OPC UA node model; the names in the first column are *proposed*
+signal names in the project's PascalCase tag style, and m3-02 owns the
+authoritative tag and node naming.
+
+Direction is written from the PLC's point of view, because the PLC is the
+owner of every process decision in this cell:
+
+- **cell → PLC (PLC input)** — raw device state the program reads.
+- **PLC → cell (PLC output)** — raw actuator command the program writes.
+
+| Signal | ROS 2 topic | Message type | Field | Direction | Physical meaning |
+|---|---|---|---|---|---|
+| `ConveyorSpeedCmd` | `/cell/conveyor/cmd_speed` | `std_msgs/msg/Float64` | `data` | PLC → cell | Belt surface velocity command, m/s, signed. Positive transports the product towards +x, negative reverses, `0.0` stops. Applied as given: no ramp, no limit, no interlock in the cell. Verified at ±0.15 m/s. |
+| `ConveyorBeltPosition` | `/cell/conveyor/joint_state` | `sensor_msgs/msg/JointState` | `position[0]` | cell → PLC | Belt travel from home, m. Raw encoder value. Range −2.50 … +2.50 (mechanical stops). `name[0]` is `belt_joint`. |
+| `ConveyorBeltSpeed` | `/cell/conveyor/joint_state` | `sensor_msgs/msg/JointState` | `velocity[0]` | cell → PLC | Measured belt velocity, m/s, signed. The read-back of `ConveyorSpeedCmd`; the PLC compares the two, the cell does not. |
+| `ProductSensorRange` | `/cell/product_sensor/scan` | `sensor_msgs/msg/LaserScan` | `ranges[0]` | cell → PLC | Photo-eye beam distance, m. **1.440** with the belt clear (beam reaches the reflector), **0.540** with the product in the beam. `range_min` 0.05, `range_max` 3.0, `frame_id` `ProductSensor/post/beam`. **No threshold is applied in the cell** — converting this range into a `ProductPresent` bit is a process decision and belongs to the PLC. |
+| `PanelStartContact` | `/cell/panel/start` | `std_msgs/msg/Bool` | `data` | cell → PLC | Start pushbutton contact, wired **NO**. `true` = contact closed = button pressed. |
+| `PanelStopContact` | `/cell/panel/stop` | `std_msgs/msg/Bool` | `data` | cell → PLC | Stop pushbutton contact, wired **NC**. `true` = contact closed = button *not* pressed. `false` = pressed, or broken wire. |
+| `PanelProcessStopContact` | `/cell/panel/process_stop` | `std_msgs/msg/Bool` | `data` | cell → PLC | **Process** stop mushroom contact, wired **NC**. `true` = closed = not pressed. `false` = pressed, or broken wire. See the warning below. |
+| *(diagnostic)* | `/cell/product_box/pose` | `geometry_msgs/msg/PoseArray` | `poses[0]` | cell → observer | Ground-truth product pose in the `cell` frame. **Not a PLC signal** — a real conveyor has no product-position transducer. It exists so belt transport is observable headless. Do not model it as an OPC UA node. |
+| *(infrastructure)* | `/clock` | `rosgraph_msgs/msg/Clock` | `clock` | cell → observer | Simulation time. Not a PLC signal. |
+
+### Polarity: wire NC, program NO
+
+The two stop contacts are published as **NC contact state**, matching how
+they are wired on real equipment, so that a lost signal reads as "stopped"
+rather than "running" (see *Domain conventions* in `CLAUDE.md`). The cell
+publishes the contact; it does not invert, latch, debounce or edge-detect
+it. All of that is PLC work.
+
+### Update rates measured in this container
+
+| Topic | Rate | Why |
+|---|---|---|
+| `/cell/product_sensor/scan` | 30 Hz | sensor `update_rate` in the SDF |
+| `/cell/conveyor/joint_state` | ~500 Hz | physics rate; gz's `JointStatePublisher` has no rate parameter, so the bridge decides how to decimate to the PLC scan rate |
+| `/cell/product_box/pose` | 10 Hz | `PosePublisher` `update_frequency` |
+
+### There is no initial value
+
+ROS topics are not retained. Until something publishes, the three panel
+contacts and the conveyor command have **no** value on the wire. Choosing
+the value the PLC sees before the first publish is a bridge decision
+(m3-04), and it must be the safe one: contacts read as pressed, belt
+command reads as zero.
+
+### The red button is a PROCESS stop
+
+`/cell/panel/process_stop` is a process stop implemented in the standard
+program. It is **not** a safety function, it carries no safety integrity,
+and it must never be labelled, demonstrated or recorded as an emergency
+stop. The safety e-stop chain is hardwired to the F-CPU and never crosses
+the network (invariant 1, ADR 0004). Nothing in `docs/safety/SRS.md`
+depends on this topic.
+
+## Running it
+
+```
+source /opt/ros/jazzy/setup.bash
+ros2 launch /home/user/amr-agent/sim/launch/cell_bringup.launch.py
+```
+
+Headless by default. Options: `gui:=true` (Gazebo GUI client),
+`world:=<abs path>`. The Robotnik vendor workspace is **not** needed for
+this cell — only `/opt/ros/jazzy`.
+
+Drive the cell from a second terminal:
+
+```
+# run the belt forward, then stop, then reverse
+ros2 topic pub -1 /cell/conveyor/cmd_speed std_msgs/msg/Float64 "{data: 0.15}"
+ros2 topic pub -1 /cell/conveyor/cmd_speed std_msgs/msg/Float64 "{data: 0.0}"
+ros2 topic pub -1 /cell/conveyor/cmd_speed std_msgs/msg/Float64 "{data: -0.15}"
+
+# watch the photo-eye (1.440 clear, 0.540 blocked)
+ros2 topic echo /cell/product_sensor/scan --field ranges
+
+# watch the belt encoder and the product
+ros2 topic echo /cell/conveyor/joint_state
+ros2 topic echo /cell/product_box/pose
+
+# press and release panel contacts
+ros2 topic pub -1 /cell/panel/start        std_msgs/msg/Bool "{data: true}"
+ros2 topic pub -1 /cell/panel/stop         std_msgs/msg/Bool "{data: false}"
+ros2 topic pub -1 /cell/panel/process_stop std_msgs/msg/Bool "{data: false}"
+
+# confirm a contact crossed the bridge into Gazebo
+stdbuf -oL gz topic -e -t /cell/panel/start
+```
+
+At 0.15 m/s the product needs about 9 s of belt travel to reach the beam
+and about 2 s to pass through it. Real time factor is ~1.0 headless.
+
+## Expected evidence after bringup
+
+- `gz model --list` shows exactly `Floor`, `Conveyor`, `ProductBox`,
+  `ProductSensor`, `SensorReflector`, `OperatorPanel` — and no vehicle.
+- `ros2 topic list` shows the seven `/cell/*` topics plus `/clock`.
+- `/cell/product_sensor/scan` reads 1.440 m clear and 0.540 m blocked.
+- Commanding 0.15 m/s moves both `beltPos` and the product box; the box
+  keeps a constant offset from the belt, so it is carried, not slipping.
+- The launch log has zero error and zero warning lines.
+
+The dated capture of exactly these checks from this container is in
+`worlds/CELL_EVIDENCE.md`.
+
+## Design notes
+
+- **Why a prismatic belt rather than a velocity-controlled box.** Setting
+  the product's velocity directly would make the "conveyor" a fiction that
+  only works when a product happens to exist. A driven belt with the
+  product carried by friction fails the way the real thing fails — the
+  belt can run with nothing on it, and a product can be placed anywhere on
+  it — which is what makes the PLC handshake worth testing. The cost is a
+  finite ±2.50 m travel, which is a mechanical stop, not a control limit.
+- **Why 2 ms physics steps.** Friction transport is contact-driven and
+  jitters at coarse steps. The cell is small enough that 500 Hz still runs
+  at real time headless, which keeps M3's latency measurements honest.
+- **Why a lidar for a photo-eye.** A contact sensor would need the product
+  to touch the sensor, which a real non-contact photo-eye does not. A
+  one-sample `gpu_lidar` across the belt to a reflector reproduces the
+  real device's geometry, including the fact that the switching distance
+  is a commissioning parameter rather than a property of the sensor.
+- **Why the panel has no physics.** A modelled pushbutton would need a
+  simulated finger. The contacts are ROS signals so a human, a test script
+  or the m3-04 bridge drives them exactly as it will drive real wired
+  contacts.
+- **What is deliberately absent.** No sequencing, no interlock, no timer,
+  no latch, no debounce, no threshold, no start/stop behaviour. The belt
+  turns whenever a velocity is commanded, including while the process-stop
+  contact reads pressed. That is not an oversight: making the cell refuse
+  a command would put process logic in the simulation layer, and the whole
+  point of M3 is that the logic lives in the TIA Portal program
+  (invariants 5, 6 and 9).
