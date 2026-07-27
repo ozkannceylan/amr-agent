@@ -83,6 +83,12 @@ class CellInterface(Node):
         self.create_subscription(
             Bool, topics["panel_start"],
             lambda m: self._on_contact("PanelStartPressed", m), contact_qos)
+        # The reset is a momentary LEVEL like the other three, carried through
+        # unchanged. The rising edge, the hold time and which latches clear are
+        # PLC program content (opcua-nodes.md §9.3); none of them exist here.
+        self.create_subscription(
+            Bool, topics["panel_reset"],
+            lambda m: self._on_contact("PanelResetPressed", m), contact_qos)
         self.create_subscription(
             Bool, topics["panel_stop"],
             lambda m: self._on_contact("PanelStopCircuitClosed", m), contact_qos)
@@ -159,6 +165,7 @@ class CellInterface(Node):
             self._cfg.ros["topics"]["joint_state"],
             self._cfg.ros["topics"]["product_scan"],
             self._cfg.ros["topics"]["panel_start"],
+            self._cfg.ros["topics"]["panel_reset"],
             self._cfg.ros["topics"]["panel_stop"],
             self._cfg.ros["topics"]["panel_process_stop"],
         ):

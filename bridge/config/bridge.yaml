@@ -47,6 +47,11 @@ nodes:
     ConveyorBeltSpeed:             ["Input", "ConveyorBeltSpeed"]
     ProductSensorRange:            ["Input", "ProductSensorRange"]
     PanelStartPressed:             ["Input", "PanelStartPressed"]
+    # Normally open like PanelStartPressed, unlike the two NC rows below: its
+    # fail state is FALSE (opcua-nodes.md §9.3). The bridge writes it only from
+    # a real publish, so before the first one the node keeps the server's own
+    # FALSE start value — it is never asserted by this process (§6.1 R1).
+    PanelResetPressed:             ["Input", "PanelResetPressed"]
     PanelStopCircuitClosed:        ["Input", "PanelStopCircuitClosed"]
     PanelProcessStopCircuitClosed: ["Input", "PanelProcessStopCircuitClosed"]
   # WRITABLE by the bridge — its own liveness counter (§9.7).
@@ -71,6 +76,7 @@ ros:
     joint_state:   "/cell/conveyor/joint_state"
     product_scan:  "/cell/product_sensor/scan"
     panel_start:   "/cell/panel/start"
+    panel_reset:   "/cell/panel/reset"
     panel_stop:    "/cell/panel/stop"
     panel_process_stop: "/cell/panel/process_stop"
     # Publication (PLC → cell).
@@ -92,7 +98,13 @@ cycle:
   status_poll_period_s: 1.0
 
 evidence:
-  csv_path: "/home/user/amr-agent/bridge/evidence/latency-2026-07-27.csv"
+  # Housekeeping. Names no machine: a relative path is resolved against the
+  # bridge directory (the parent of config/), so this default works from any
+  # checkout, in the container and in WSL alike. `~` and `$VARS` are expanded,
+  # and an absolute path is used as written. A measurement run gives its
+  # capture its own dated name with --evidence-csv; this default is the
+  # scratch file of an ordinary run and is truncated at every start.
+  csv_path: "evidence/latency-latest.csv"
   flush_interval_s: 2.0
 
 logging:

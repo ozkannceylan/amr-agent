@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """TEST SCAFFOLDING — operator-panel stimulus and product-pose observer.
 
-The demonstration cell has no physics for the three pushbuttons: they are ROS
+The demonstration cell has no physics for the four pushbuttons: they are ROS
 topics that "a human, a test script or the m3-04 bridge drives exactly as it
 will drive real wired contacts" (sim/README.md). Nothing in the cell publishes
 them on its own, so an evidence run needs a stand-in for the human at the
@@ -9,7 +9,7 @@ panel. That is all this file is.
 
 It is stimulus, not part of the bridge and not part of the cell:
 
-* it publishes the three `/cell/panel/*` contacts on a scripted timeline,
+* it publishes the four `/cell/panel/*` contacts on a scripted timeline,
   exactly as `ros2 topic pub` would;
 * it logs `/cell/product_box/pose` (ground truth, deliberately NOT a PLC
   signal — opcua-nodes.md §9.8) so that "the belt actually moved the product"
@@ -19,8 +19,14 @@ It writes no OPC UA node, holds no bridge state, and applies no logic to any
 cell signal.
 
     python3 bridge/tools/cell_stimulus.py \
-        --script "0:stop=true,0:process_stop=true,0:start=false,20:start=true" \
+        --script "0:stop=true,0:process_stop=true,0:start=false,0:reset=false,20:start=true" \
         --duration 120 --pose-log /tmp/pose.csv
+
+A note on `reset`, because it is the one contact whose resting level is worth
+stating: it is normally open, so its resting level is `false` and a press is
+`t:reset=true` followed by a later `t:reset=false` — a level held and then
+released, exactly as the hand does it. This file times nothing and latches
+nothing; the hold and the edge are read by the PLC.
 """
 
 from __future__ import annotations
@@ -38,6 +44,7 @@ from std_msgs.msg import Bool
 
 CONTACTS = {
     "start": "/cell/panel/start",
+    "reset": "/cell/panel/reset",
     "stop": "/cell/panel/stop",
     "process_stop": "/cell/panel/process_stop",
 }
@@ -123,13 +130,26 @@ def parse_script(text: str) -> list[tuple[float, str, bool]]:
             continue
         when, assignment = item.split(":", 1)
         name, value = assignment.split("=", 1)
-        out.append((float(when), name.strip(), value.strip().lower() == "true"))
+        name = name.strip()
+        if name not in CONTACTS:
+            raise SystemExit(
+                f"unknown contact {name!r}; the panel has {', '.join(CONTACTS)}")
+        out.append((float(when), name, value.strip().lower() == "true"))
     return out
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="panel stimulus + pose observer (TEST SCAFFOLDING)")
-    parser.add_argument("--script", default="0:stop=true,0:process_stop=true,0:start=false")
+    # The default is the panel at rest: both stop circuits closed, both NO
+    # buttons released. `reset=false` is in it because the bridge writes no
+    # input node until that node's topic has published at least once, and its
+    # heartbeat waits for all of them (bridge-design.md §6.1 R1/R3) — an
+    # unattended run that never publishes the reset would leave the heartbeat
+    # stopped. Publishing FALSE asserts nothing: it is the resting level of a
+    # normally open contact and the value the node already holds.
+    parser.add_argument(
+        "--script",
+        default="0:stop=true,0:process_stop=true,0:start=false,0:reset=false")
     parser.add_argument("--duration", type=float, default=60.0)
     parser.add_argument("--pose-log", default=None)
     args = parser.parse_args()

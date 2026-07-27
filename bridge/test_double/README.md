@@ -47,6 +47,10 @@ evidence for `plc/demo-cell/SPEC.md`.
 Start values are those of `bridge-design.md` §6.3 — the fail-safe
 pre-connection state, which belongs to the PLC's data block and never to the
 bridge (`PanelStopCircuitClosed` `FALSE`, `ProductSensorRange` `0.0`, …).
+`PanelResetPressed` starts `FALSE` too, for the opposite reason: a stop must
+fail to *stopped*, a reset to *not reset* (`opcua-nodes.md` §9.3). "No reset"
+above means no reset **logic** — the double holds the input node, and forms no
+edge, no hold time and no latch from it.
 
 ## Operational rules
 
@@ -57,7 +61,7 @@ bridge (`PanelStopCircuitClosed` `FALSE`, `ProductSensorRange` `0.0`, …).
 ## Run
 
 ```
-/opt/amr-bridge-venv/bin/python plc_test_double.py \
+"$VENV/bin/python" plc_test_double.py \
     --endpoint opc.tcp://127.0.0.1:4840/amr-agent/celldouble/ \
     --command-file /tmp/scaffold_speed --observe-csv /tmp/double_observe.csv
 ```

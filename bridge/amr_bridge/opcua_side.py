@@ -172,7 +172,8 @@ class PlcClient:
         if key not in WRITE_ALLOWLIST:
             raise WriteNotPermitted(
                 f"{key} is not client-writable (opcua-nodes.md §9.1). The bridge "
-                "writes only the six DemoCell/Input/ nodes and BridgeHeartbeat."
+                f"writes only the {len(INPUT_KEYS)} DemoCell/Input/ nodes and "
+                "BridgeHeartbeat."
             )
         node = self._nodes[key]
         start = time.monotonic_ns()
@@ -232,7 +233,7 @@ class PlcClient:
 
         # Contacts: write on change, plus a full refresh on every (re)connect
         # (the per-session dict is empty after a connect, so the first cycle
-        # with a sample writes all three).
+        # with a sample writes all four).
         for key in BOOL_INPUT_KEYS:
             take_ns = time.monotonic_ns()
             sample = self._slots[key].get()
@@ -301,8 +302,9 @@ class PlcClient:
         if not self._heartbeat_started:
             self._heartbeat_started = True
             LOG.info(
-                "startup rule satisfied: all six DemoCell/Input nodes carry a real "
-                "cell sample; heartbeat begins advancing at %d", self._heartbeat + 1)
+                "startup rule satisfied: all %d DemoCell/Input nodes carry a real "
+                "cell sample; heartbeat begins advancing at %d",
+                len(INPUT_KEYS), self._heartbeat + 1)
             self._recorder.row("startup", "heartbeat_start", clock="-", value=self._heartbeat + 1)
         self._heartbeat = (self._heartbeat + 1) % 65536
         start, end = await self._write(HEARTBEAT_KEY, self._heartbeat, ua.VariantType.UInt16)

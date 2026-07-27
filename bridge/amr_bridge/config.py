@@ -27,12 +27,15 @@ _SCHEMA: dict[str, set[str]] = {
     "logging": {"level"},
 }
 
-# The six input nodes of opcua-nodes.md §9.3, in the order they are documented.
+# The seven input nodes of opcua-nodes.md §9.3, in the order they are
+# documented — panel contacts grouped by failure direction (NO, NO, NC, NC),
+# not by panel layout.
 INPUT_KEYS: tuple[str, ...] = (
     "ConveyorBeltPosition",
     "ConveyorBeltSpeed",
     "ProductSensorRange",
     "PanelStartPressed",
+    "PanelResetPressed",
     "PanelStopCircuitClosed",
     "PanelProcessStopCircuitClosed",
 )
@@ -48,6 +51,7 @@ ANALOG_INPUT_KEYS: tuple[str, ...] = (
 # every (re)connect.
 BOOL_INPUT_KEYS: tuple[str, ...] = (
     "PanelStartPressed",
+    "PanelResetPressed",
     "PanelStopCircuitClosed",
     "PanelProcessStopCircuitClosed",
 )
@@ -91,6 +95,24 @@ class Config:
     def diagnostic_keys(self) -> tuple[str, ...]:
         return tuple((self.nodes.get("diagnostics") or {}).keys())
 
+    @property
+    def evidence_csv_path(self) -> str:
+        """Absolute path of the raw evidence file.
+
+        Housekeeping, not logic: nothing about a transported value depends on
+        where the CSV lands. The committed default names no machine. `~` and
+        `$VARS` are expanded; a path that is still relative afterwards is
+        resolved against the bridge directory (the parent of `config/`), which
+        is the same anchor `main._parse_args` already uses to find the default
+        config file. An absolute path is used as written, so a PLCSIM run can
+        still point at any location the operator wants.
+        """
+        raw = os.path.expandvars(os.path.expanduser(str(self.evidence["csv_path"])))
+        if os.path.isabs(raw):
+            return raw
+        bridge_dir = os.path.dirname(os.path.dirname(self.path))
+        return os.path.abspath(os.path.join(bridge_dir, raw))
+
 
 def load(path: str) -> Config:
     with open(path, "r", encoding="utf-8") as handle:
@@ -128,7 +150,7 @@ def load(path: str) -> Config:
     configured_inputs = tuple((cfg.nodes.get("inputs") or {}).keys())
     if set(configured_inputs) != set(INPUT_KEYS):
         raise ConfigError(
-            f"{path}: [nodes.inputs] must name exactly the six §9.3 nodes, got "
+            f"{path}: [nodes.inputs] must name exactly the seven §9.3 nodes, got "
             f"{sorted(configured_inputs)}"
         )
     if HEARTBEAT_KEY not in (cfg.nodes.get("heartbeat") or {}):

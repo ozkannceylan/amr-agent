@@ -22,10 +22,13 @@ asyncua==2.0.1
 # numpy is deliberately NOT requested: statistics/percentiles are computed
 # after the run by tools/summarize_latency.py with the standard library.
 #
-# Install (verified 2026-07-27 in this container, python 3.12.3, pip 24.0):
+# Install (verified 2026-07-27 in the container and in WSL2 Ubuntu 24.04,
+# python 3.12.3, pip 24.0). $VENV is any location the account can write —
+# /opt/amr-bridge-venv in the container, $HOME/amr-bridge-venv in WSL, where
+# /opt needs root (bridge/README.md, sim/setup/WSL_ENVIRONMENT.md §3.2):
 #
-#   python3 -m venv --system-site-packages /opt/amr-bridge-venv
-#   /opt/amr-bridge-venv/bin/pip install -r bridge/requirements.txt
+#   python3 -m venv --system-site-packages "$VENV"
+#   "$VENV/bin/pip" install -r bridge/requirements.txt
 #
 # The venv is created with --system-site-packages so the same interpreter can
 # import rclpy from the sourced ROS 2 installation. A plain

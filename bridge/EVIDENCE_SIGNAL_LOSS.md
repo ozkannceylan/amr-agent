@@ -12,6 +12,15 @@ content (`plc/demo-cell/SPEC.md`).
 (`--observe-csv`): wall clock, monotonic seconds, **active OPC UA sessions**,
 `BridgeHeartbeat`, the six `DemoCell/Input/` values, `ConveyorSpeedCommand`.
 
+**Scope.** These runs predate the panel reset, so the input image they observe
+is six nodes. It has been seven since `DemoCell/Input/PanelResetPressed`
+(m3-10/m3-11, bridged in m3-13); every "six" below is a true statement about
+*these* runs, and each of the four failure modes applies to the seventh node
+identically — it is a contact like the other three, written on change, frozen
+at its last written value on a loss, and never defaulted. The four cases were
+**not** re-run for it, and m3-08 (or the owner's PLCSIM run) captures them
+against the seven-node image.
+
 Summary of §7.3 as measured:
 
 | # | Failure | Heartbeat | Input nodes | Session | Matches the design? |

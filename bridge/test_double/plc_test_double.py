@@ -68,11 +68,16 @@ INPUTS = [
     ("ConveyorBeltSpeed", ua.VariantType.Float, 0.0),
     ("ProductSensorRange", ua.VariantType.Float, 0.0),
     ("PanelStartPressed", ua.VariantType.Boolean, False),
+    ("PanelResetPressed", ua.VariantType.Boolean, False),
     ("PanelStopCircuitClosed", ua.VariantType.Boolean, False),
     ("PanelProcessStopCircuitClosed", ua.VariantType.Boolean, False),
 ]
 # Start values are those of bridge-design.md §6.3 — the fail-safe pre-connection
 # state, which belongs to the PLC's data block and NOT to the bridge.
+# PanelResetPressed starts FALSE for the opposite reason to the two stop nodes:
+# a stop fails to *stopped*, a reset fails to *not reset* (opcua-nodes.md §9.3,
+# §3.1). Because the bridge writes no input before its first real sample, FALSE
+# is also what a client reads for as long as nothing publishes /cell/panel/reset.
 
 # §9.4 — PLC-owned output, read-only for the client.
 OUTPUTS = [("ConveyorSpeedCommand", ua.VariantType.Float, 0.0)]

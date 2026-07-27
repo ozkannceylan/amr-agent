@@ -2,7 +2,7 @@
 """Launcher: run the bridge without touching PYTHONPATH.
 
     source /opt/ros/jazzy/setup.bash
-    /opt/amr-bridge-venv/bin/python bridge/run_bridge.py --config bridge/config/bridge.yaml
+    "$VENV/bin/python" bridge/run_bridge.py --config bridge/config/bridge.yaml
 
 The interpreter must be one that can import BOTH rclpy (from the ROS 2
 installation, via the sourced setup.bash) and asyncua (pinned in

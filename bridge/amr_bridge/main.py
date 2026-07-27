@@ -49,7 +49,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     logging.getLogger("asyncua").setLevel(logging.WARNING)
 
-    csv_path = args.evidence_csv or cfg.evidence["csv_path"]
+    # --evidence-csv is taken as given (an operator path, CWD-relative like any
+    # CLI path); the configured default is resolved against the bridge
+    # directory so no machine's home directory is baked into the repository.
+    csv_path = args.evidence_csv or cfg.evidence_csv_path
     recorder = Recorder(csv_path, float(cfg.evidence["flush_interval_s"]))
     counters = Counters()
     probe = ActuationProbe(recorder)

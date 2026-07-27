@@ -5,10 +5,21 @@ Host: Linux 6.18.5 x86_64, container, CPU only, no display
 ROS 2 Jazzy, Gazebo Sim 8.11.0 (Harmonic), Python 3.12.3, `asyncua` 2.0.1
 Raw per-event rows: **`evidence/latency-2026-07-27.csv.gz`** (76 191 rows)
 
-This file has two clearly separated sections. **Section A** is the
+This file has three clearly separated sections. **Section A** is the
 in-container run against the test double, produced by m3-04. **Section B** is
 the run against PLCSIM Advanced, which the owner executes and on which the M3
-gate closes (`bridge-design.md` §9.4).
+gate closes (`bridge-design.md` §9.4). **Section C** is a short WSL run added
+by m3-13.
+
+**Scope of Section A.** It was captured before the panel reset existed, so its
+input image is the six nodes of the day and every "all six" in it is a true
+statement about that run. The cell has carried `/cell/panel/reset` since
+`adc9cd0` and the node model has carried `DemoCell/Input/PanelResetPressed`
+since `79a7f1e`, which makes the input image **seven** nodes from m3-13 onward.
+Section A is not re-run or edited here (LESSONS 2026-07-27: evidence is
+qualified by the environment that produced it); Section C records the seven-node
+behaviour on its own date and platform. Section B item 5 is written against six
+inputs and should be read as "all inputs".
 
 ---
 
@@ -335,3 +346,103 @@ What the owner must capture:
    known not to transfer (see `EVIDENCE_SIGNAL_LOSS.md` §A).
 8. **A note on which server produced each number**, per `bridge-design.md` §10:
    the test double must never be running on the same endpoint during this run.
+
+---
+
+# Section C — WSL2, test double, agent-run, 2026-07-27 (m3-13)
+
+Date of run: **2026-07-27** (14:56:38 – 14:57:23 local, `CLOCK_MONOTONIC`
+9299–9347 s). Host: WSL2 Ubuntu 24.04, kernel
+`5.15.167.4-microsoft-standard-WSL2`, headless, llvmpipe. Repo on `/mnt/c`.
+Server: `bridge/test_double/plc_test_double.py` — **not a PLC**; §A.7 applies
+here unchanged. Isolation: `ROS_DOMAIN_ID=88`, `GZ_PARTITION=m313bridge`.
+
+**This is not a measurement run and it does not restate §A.4.** It exists to
+show one property of the new seventh input, `PanelResetPressed`: that the
+bridge never asserts it. The four measured signal-loss cases and the full
+statistics table remain m3-08's and Section B's.
+
+Run: `sim/launch/cell_bringup.launch.py` (headless), the test double, the
+bridge for 45 s, and `tools/cell_stimulus.py` with a script that **deliberately
+does not publish the reset for the first 15 s**:
+
+```
+0:stop=true,0:process_stop=true,0:start=false,15:reset=false,20:reset=true,22:reset=false
+```
+
+## C.1 Pre-first-publish: the node reads FALSE, because nothing writes it
+
+Bridge log:
+
+```
+14:56:38,217 namespace urn:amr-agent:cell:plc resolved to index 2
+14:56:38,236 all node DataTypes match opcua-nodes.md §9
+14:56:38,242 heartbeat withheld: no real sample yet for ProductSensorRange, PanelStartPressed,
+             PanelResetPressed, PanelStopCircuitClosed, PanelProcessStopCircuitClosed (R3)
+14:56:38,744 heartbeat withheld: no real sample yet for PanelResetPressed (startup rule R3)
+14:56:41,208 QoS /cell/panel/reset: publisher reliability=RELIABLE durability=VOLATILE
+14:56:52,758 startup rule satisfied: all 7 DemoCell/Input nodes carry a real cell sample;
+             heartbeat begins advancing at 1
+```
+
+For 14.0 s the bridge held an established session, wrote the other six inputs,
+and wrote `PanelResetPressed` **not at all** (R1: no sample, no write). What
+the server saw in that window, from the double's own observation log
+(`--observe-csv`, 5 Hz, 84 samples before the first publish):
+
+```
+monotonic_s=9299.879  BridgeHeartbeat=0  StartPressed=False  ResetPressed=False  Stop=False  ProcessStop=False
+monotonic_s=9300.084  BridgeHeartbeat=0  StartPressed=False  ResetPressed=False  Stop=False  ProcessStop=False
+monotonic_s=9317.015  BridgeHeartbeat=4  StartPressed=False  ResetPressed=False  Stop=True   ProcessStop=True
+```
+
+The set of distinct `PanelResetPressed` values observed while
+`BridgeHeartbeat == 0` is exactly `{False}`. That FALSE is the **server's own
+start value**, not a bridge write: the bridge contributed nothing to it. The
+same holds against the PLC, whose DB start value for this node is FALSE
+(`opcua-nodes.md` §3.1) — so a bridge that starts, connects and finds nobody at
+the panel cannot assert a reset, and cannot clear a latch (CLAUDE.md §9).
+
+## C.2 The press traverses, as a level, on change only
+
+Server-side transitions, from the same log:
+
+```
+row 108  monotonic_s=9321.920  BridgeHeartbeat=102  ResetPressed=True
+row 118  monotonic_s=9323.967  BridgeHeartbeat=143  ResetPressed=False
+```
+
+Bridge-side rows for the node (`L2` = write start → server acknowledgement,
+`L3` = ROS callback → acknowledgement), all three writes of the run:
+
+```
+L2   value=False start_ns=9316826185902  interval_ns=1 460 686
+L3   value=False start_ns=9316779050089  interval_ns=48 596 499
+L2   value=True  start_ns=9321828715949  interval_ns=1 394 253
+L3   value=True  start_ns=9321779227547  interval_ns=50 882 655
+L2   value=False start_ns=9323830541544  interval_ns=1 672 320
+L3   value=False start_ns=9323779480525  interval_ns=52 733 339
+```
+
+Decimation for the run (`R3`, received/written): `PanelResetPressed 32/3`. The
+stimulus republished the held level once a second, as a wired contact would be
+re-read every scan; the bridge wrote three times, once per actual change. The
+other three contacts show `43/1` — one write each, one level each, unchanged
+for the whole run.
+
+## C.3 The heartbeat now waits for seven
+
+`heartbeat_suppressed_cycles = 290` (14.5 s at 50 ms) against `cycles = 900`,
+`heartbeat_writes = 610`, `write_errors = 0`, `read_errors = 0`,
+`reconnects = 0`, `cycle_overruns = 0`. The first heartbeat write
+(`t_start_ns = 9316828172801`) is 2.0 ms after the first `PanelResetPressed`
+write (`9316826185902`) — the same cycle, in the §2 order: inputs, then
+heartbeat. The §6.2 predicate is therefore unchanged in meaning and stronger in
+coverage: while the heartbeat advances, all **seven** inputs are attributable to
+the running cell.
+
+Consequence for any unattended run: the panel stimulus must publish the reset
+at least once, or the heartbeat never starts. The default `--script` in
+`tools/cell_stimulus.py` publishes `reset=false` at t=0 for exactly this
+reason, and publishing FALSE asserts nothing — it is the resting level of a
+normally open contact.

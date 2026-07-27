@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Check that the bridge cannot write a node it is not allowed to write.
 
-opcua-nodes.md §9.1: the bridge writes ONLY the six `DemoCell/Input/` nodes
-and `DemoCell/Link/BridgeHeartbeat`. bridge-design.md §3 requires m3-04 to
+opcua-nodes.md §9.1: the bridge writes ONLY the `DemoCell/Input/` nodes (seven
+since `PanelResetPressed`, m3-11) and `DemoCell/Link/BridgeHeartbeat`.
+bridge-design.md §3 requires m3-04 to
 enforce that "with a single write helper that rejects a NodeId outside the
 allowlist".
 
@@ -13,8 +14,9 @@ Two independent checks:
   2. Server side — a direct OPC UA write to a read-only node is refused by
      the server's access level (the test double mirrors §9's access levels).
 
-Run with the test double up:
-    /opt/amr-bridge-venv/bin/python bridge/tools/check_write_allowlist.py
+Run with the test double up ($VENV is the --system-site-packages venv, wherever
+the account can write it — see bridge/README.md):
+    "$VENV/bin/python" bridge/tools/check_write_allowlist.py
 """
 
 from __future__ import annotations
@@ -45,7 +47,7 @@ FORBIDDEN = [
 async def main() -> int:
     failures = 0
     print("write allowlist =", sorted(WRITE_ALLOWLIST))
-    print(f"  {len(WRITE_ALLOWLIST)} nodes: the six DemoCell/Input/ nodes + BridgeHeartbeat\n")
+    print(f"  {len(WRITE_ALLOWLIST)} nodes: every DemoCell/Input/ node + BridgeHeartbeat\n")
 
     print("1. client-side check — PlcClient._write refuses a non-allowlisted key")
     client = PlcClient.__new__(PlcClient)          # no session needed: the guard is first

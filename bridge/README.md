@@ -29,8 +29,9 @@ Per ADR 0005 D1. Every item is a hard boundary, not a preference.
   client, and that direction is never inverted (invariant 4). The bridge never
   listens on a socket, in any configuration — including against the test
   double.
-- **Nodes it is not allowed to write.** Only the six `DemoCell/Input/` nodes
-  and `DemoCell/Link/BridgeHeartbeat` (opcua-nodes.md §9.1). Every write goes
+- **Nodes it is not allowed to write.** Only the `DemoCell/Input/` nodes (seven
+  since `PanelResetPressed`, opcua-nodes.md §9.3) and
+  `DemoCell/Link/BridgeHeartbeat` (opcua-nodes.md §9.1). Every write goes
   through one helper that rejects anything else; see
   `tools/check_write_allowlist.py`.
 - **Secrets.** Endpoint credentials, certificates and keys live outside this
@@ -50,7 +51,7 @@ else. Its whole job is to carry each signal of `docs/interfaces/opcua-nodes.md`
 ```
    Gazebo cell (ROS 2)                          S7-1500 / PLCSIM (OPC UA server)
             |                                                    ^
-   7 /cell/* topics                                               | client session
+   8 signals, 7 /cell/* topics                                    | client session
             v                                                    |
    +-------------------------------------------------------------------+
    |  bridge process                                                   |
@@ -83,38 +84,79 @@ Where the no-logic rule is visible in the code:
 * every write passes `PlcClient._write`, which raises `WriteNotPermitted` for
   any node outside the §9.1 allowlist;
 * `inf`/`NaN` range samples are written through unchanged, logged and counted;
+* the reset contact is carried as a **level**, exactly like the other three:
+  no edge detection, no hold timer, no latch and no pre-first-publish default
+  anywhere in this process — before `/cell/panel/reset` first publishes, the
+  bridge writes the node not at all and it keeps the PLC's own `FALSE` start
+  value (R1);
 * nothing is published on `/cell/conveyor/cmd_speed` unless it was read from
   the server in the same cycle — no default, no replay, no zero on shutdown.
 
 ## How to run it
 
-Install once (see `requirements.txt` for why it is a venv):
+### The venv — the mechanism, not one machine's path
+
+`requirements.txt` explains why a venv is needed at all: `pip` will not replace
+Debian's `cryptography`, so `asyncua` is installed beside it rather than over
+it. What the bridge actually requires is only this:
+
+* a venv created with **`--system-site-packages`**, so `rclpy` from
+  `/opt/ros/jazzy` still imports inside it;
+* created **anywhere the account running the bridge can write**. The path is
+  not a project constant. `/opt` needs root on an ordinary Linux install, so
+  outside a container it is usually the wrong choice;
+* `/opt/ros/jazzy/setup.bash` sourced in **every** shell that runs the bridge,
+  the cell or `gz`.
+
+Set the two locations once per shell and the commands below are identical
+everywhere:
 
 ```
-python3 -m venv --system-site-packages /opt/amr-bridge-venv
-/opt/amr-bridge-venv/bin/pip install -r /home/user/amr-agent/bridge/requirements.txt
+REPO=<repo checkout>          # the directory containing this README's parent
+VENV=<venv location>          # writable by the account running the bridge
+
+python3 -m venv --system-site-packages "$VENV"
+"$VENV/bin/pip" install -r "$REPO/bridge/requirements.txt"
 ```
 
-Then, in three terminals:
+The two worked examples this project has actually used:
+
+| Environment | `REPO` | `VENV` | Why |
+|---|---|---|---|
+| Development container (all committed evidence) | `/home/user/amr-agent` | `/opt/amr-bridge-venv` | runs as root, `/opt` is writable, nothing else shares the image |
+| WSL2 Ubuntu 24.04 on the owner's machine | `/mnt/c/Users/ozkan/projects/amr-agent` | `/home/ozkan/amr-bridge-venv` | no passwordless sudo, so `/opt` is not writable (`sim/setup/WSL_ENVIRONMENT.md` §3.2) |
+
+Both resolve the same dependency set — `asyncua 2.0.1` inside the venv,
+Debian's `cryptography` left in place under `/usr/lib/python3/dist-packages`.
+
+### Running
+
+Three terminals:
 
 ```
 # 1. the cell
 source /opt/ros/jazzy/setup.bash
-ros2 launch /home/user/amr-agent/sim/launch/cell_bringup.launch.py
+ros2 launch "$REPO/sim/launch/cell_bringup.launch.py"
 
 # 2. an OPC UA server on the configured endpoint
 #    - in production: the S7-1500 / PLCSIM Advanced
-#    - in this container: the test double, see below
+#    - for development: the test double, see below
 
 # 3. the bridge
 source /opt/ros/jazzy/setup.bash
-/opt/amr-bridge-venv/bin/python /home/user/amr-agent/bridge/run_bridge.py \
-    --config /home/user/amr-agent/bridge/config/bridge.yaml
+"$VENV/bin/python" "$REPO/bridge/run_bridge.py" \
+    --config "$REPO/bridge/config/bridge.yaml"
 ```
 
 Options: `--duration <s>` (stop after N seconds; used for measurement runs),
 `--evidence-csv <path>` (override the raw evidence file). Stop it with
 SIGINT/SIGTERM — it closes the session and writes nothing on the way out.
+
+`evidence.csv_path` in the config is **relative to the `bridge/` directory** and
+therefore names no machine; `~` and `$VARS` are expanded and an absolute path is
+honoured as written. The default (`evidence/latency-latest.csv`) is truncated at
+every start, so a capture worth keeping is given its own dated name with
+`--evidence-csv`.
 
 Pointing it at PLCSIM Advanced or real hardware is a **configuration** change
 only: `opcua.endpoint`, and the security fields if the server requires them.
@@ -123,8 +165,8 @@ The code path is identical.
 Summarise a run:
 
 ```
-/opt/amr-bridge-venv/bin/python /home/user/amr-agent/bridge/tools/summarize_latency.py \
-    /home/user/amr-agent/bridge/evidence/latency-2026-07-27.csv
+"$VENV/bin/python" "$REPO/bridge/tools/summarize_latency.py" \
+    "$REPO/bridge/evidence/latency-latest.csv"
 ```
 
 ### What the bridge logs at startup
@@ -142,7 +184,7 @@ never on the same endpoint as PLCSIM Advanced. Details and its limits:
 `test_double/README.md`.
 
 ```
-/opt/amr-bridge-venv/bin/python /home/user/amr-agent/bridge/test_double/plc_test_double.py \
+"$VENV/bin/python" "$REPO/bridge/test_double/plc_test_double.py" \
     --endpoint opc.tcp://127.0.0.1:4840/amr-agent/celldouble/ \
     --command-file /tmp/scaffold_speed \
     --observe-csv /tmp/double_observe.csv
@@ -159,18 +201,24 @@ never on the same endpoint as PLCSIM Advanced. Details and its limits:
   `ConveyorSpeedCommand`, for the closed-loop L7 interval only. Off by default.
 
 Panel contacts have no physics in the cell, so an unattended run needs a
-stand-in for the human at the panel:
+stand-in for the human at the panel — all four of them, because the heartbeat
+does not start until every input node has carried a real sample (§6.1 R3):
 
 ```
-/opt/amr-bridge-venv/bin/python /home/user/amr-agent/bridge/tools/cell_stimulus.py \
-    --script "0:stop=true,0:process_stop=true,0:start=false,20:start=true,21:start=false" \
+"$VENV/bin/python" "$REPO/bridge/tools/cell_stimulus.py" \
+    --script "0:stop=true,0:process_stop=true,0:start=false,0:reset=false,\
+20:start=true,21:start=false,60:reset=true,61:reset=false" \
     --duration 200 --pose-log /tmp/pose.csv
 ```
+
+`reset` is normally open: `false` is the resting level and a press is a `true`
+held for as long as the hand is on the button, then `false`. The stimulus times
+nothing — the hold and the edge are the PLC's to read.
 
 Check the write allowlist against a running double:
 
 ```
-/opt/amr-bridge-venv/bin/python /home/user/amr-agent/bridge/tools/check_write_allowlist.py
+"$VENV/bin/python" "$REPO/bridge/tools/check_write_allowlist.py"
 ```
 
 ## What the test double does not prove

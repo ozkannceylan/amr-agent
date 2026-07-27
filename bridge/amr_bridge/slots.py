@@ -81,7 +81,7 @@ class Slot:
 
 
 class SlotSet:
-    """The six input slots, addressed by their §9.3 node key."""
+    """The input slots, one per §9.3 node, addressed by node key."""
 
     def __init__(self, keys: tuple[str, ...]) -> None:
         self._slots = {key: Slot(key) for key in keys}
