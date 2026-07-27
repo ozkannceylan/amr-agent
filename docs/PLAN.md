@@ -32,6 +32,17 @@ Exit criterion — all four demonstrated and recorded:
    deviations (sim/setup/WSL_ENVIRONMENT.md).
 8. m3-08 infra — re-run the cell, test double and bridge loop under WSL and
    append WSL evidence sections alongside the container evidence.
+9. m3-09 infra — root .gitattributes so shell scripts check out LF and WSL
+   and Windows git agree. Closed 2026-07-27.
+10. m3-10 sim — /cell/panel/reset contact. Closed 2026-07-27.
+11. m3-11 interface — DemoCell/Input/PanelResetPressed. Closed 2026-07-27.
+12. m3-12 plc — move SPEC.md's monitored reset onto the real contact.
+
+Briefs 10 to 12 exist because m3-05 found the cell had no reset device and had
+to conflate the monitored reset onto the start button. The owner ruled on
+2026-07-27 that the cell gets a real reset contact, which is why the sim, the
+node model and the spec each need one brief. CLAUDE.md §9 requires a separate
+monitored reset; a conflated one satisfied it only in spirit.
 
 Briefs 3 and 4 were delivered and evidenced inside an Ubuntu 24.04 container.
 Briefs 7 and 8 exist because that evidence has never been reproduced on the

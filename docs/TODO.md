@@ -1,30 +1,27 @@
 # TODO
 
+## owner (blocking)
+- Elevated `w32tm /resync`, before any PLCSIM correlation. Correction to the earlier entry: w32time is running, startup type Manual, so Start-Service was never needed; only /resync requires elevation and a non-elevated run fails with 0x80070005. Separately the WSL guest is ~3.7 s ahead of the host and hwclock is not installed in the distro, so closing that gap needs `wsl --shutdown` once no agent is working inside WSL. Bridge latency uses monotonic_ns and is unaffected; WSL-to-PLCSIM timestamp correlation is not.
+- PLC: implement the TIA Portal program and run PLCSIM Advanced; capture watch-table evidence for gate items (a) and (b) and fill Section B of bridge/EVIDENCE_LATENCY.md. Do not start before m3-12 lands — SPEC.md still specifies the superseded conflated reset.
+- Hermes: define the component (which repo, how Telegram reaches it, what it may write over OPC UA) before M4 can be briefed.
+
 ## infra
-- m3-07 WSL environment rebuild — BLOCKED on owner elevation. ROS 2 Jazzy and asyncua 2.0.1 verified; Gazebo Harmonic absent and apt needs a sudo password the agent cannot supply, so investigations 1 (gz version) and 7 (headless run) are unanswered. Done when those two are answered against a real Gazebo install.
-- m3-09 repo line-ending policy — not yet issued, held until m3-05 stops writing plc/ so a renormalize cannot stage another agent's work in progress. Done when a root .gitattributes checks *.sh out as LF on Windows, install.sh executes in WSL, and WSL-side git reports the tree clean.
-- m3-08 WSL loop re-run — not yet issued, blocked on m3-07 elevation and m3-09. Done when the cell, test double and bridge loop from bridge/README.md is re-run under WSL and WSL evidence sections are appended without disturbing the container evidence.
+- m3-07 WSL environment rebuild — in progress, unblocked. Gazebo Sim 8.11.0 is installed via the ROS vendor packages, so investigations 1 and 7 can now be answered. Done when the gz version and the headless behaviour are recorded against a real install.
+- m3-08 WSL loop re-run — not yet issued, blocked on m3-07. Done when the cell, test double and bridge loop from bridge/README.md is re-run under WSL and WSL evidence sections are appended without disturbing the container evidence.
 
-## owner (blocking, this session)
-- Elevated apt, unblocks m3-07/m3-08: sudo apt-get update && sudo apt-get install -y ros-jazzy-gz-sim-vendor ros-jazzy-ros-gz
-- Elevated w32time, before any PLCSIM correlation: Start-Service w32time; w32tm /resync. Host time service is stopped; the WSL wall clock steps ~2.73 s every 30 s. Bridge latency uses monotonic_ns and is unaffected, but WSL-to-PLCSIM timestamp correlation is currently meaningless.
-
-## bridge (queued, found by m3-07)
-- bridge/config/bridge.yaml evidence.csv_path points at the container path /home/user/amr-agent/...; m3-08 needs it parameterised or overridden. Done when the path is not machine-specific.
-- bridge/README.md states the venv is /opt/amr-bridge-venv; on WSL /opt needs root and it landed at /home/ozkan/amr-bridge-venv. Done when the documented path matches what a non-root WSL user actually gets.
+## plc
+- m3-12 spec reset retarget — brief written, deliberately not issued (owner paused new work). Done when plc/demo-cell/SPEC.md reads 15 server-visible tags rather than 14 everywhere, PanelResetPressed is the reset device throughout, and no trace of the gesture-based start/reset conflation remains, with the reset still edge triggered and non-auto-resuming.
 
 ## interface
-- m3-03d bridge-design residual staleness — not yet issued, deliberately held until m3-05 stops reading the file. Done when §9.4 names the delivered artefact latency-<date>.csv.gz rather than .csv, and §12 open item 7 (20 Hz cadence) is marked closed to match EVIDENCE_LATENCY.md §A.4, which records the expectation met with 0 overruns.
+- m3-03e bridge-design staleness sweep — not yet issued. Three separate briefs have each found the document describing a pre-delivery state, so the remaining work is an audit rather than another single correction. Known: §11 records asyncua as absent and pending approval with a bare pip install path though it is approved and pinned at 2.0.1; and m3-11 reports six inputs becoming seven in five places, plus a signal-map row and a FALSE pre-first-publish default for the reset. Done when every section is checked against the delivered bridge/ artefacts and either corrected or confirmed, with the confirmation list in the report.
 
-## sim + interface (queued, blocked on an owner decision)
-- Reset device for the demonstration cell. The panel has Start, Stop and process stop only, so m3-05 had to conflate reset onto PanelStartPressed, separated by gesture and by state. CLAUDE.md §9 requires a separate monitored reset. Done when either the owner accepts the conflation in writing, or sim/ adds a /cell/panel/reset NO contact, docs/interfaces/opcua-nodes.md §9.3 adds PanelResetPressed, and plc/demo-cell/SPEC.md is amended to use it. Do not start before the owner rules.
+## bridge
+- Reset contact bridge entry, found by m3-10. bridge/config/bridge.yaml has no /cell/panel/reset mapping and bridge/tools/cell_stimulus.py still drives three contacts. Done when the reset is bridged and stimulable with its pre-first-publish default false. A default of true would clear a latch at startup, the auto-resume CLAUDE.md §9 forbids.
+- bridge/config/bridge.yaml evidence.csv_path points at the container path /home/user/amr-agent/..., found by m3-07. Done when the path is not machine-specific.
+- bridge/README.md states the venv is /opt/amr-bridge-venv; on WSL /opt needs root and it landed at /home/ozkan/amr-bridge-venv. Done when the documented path matches what a non-root WSL user actually gets.
 
 ## verifier
-- m3-06 verify M3 — done when the container-side loop is independently re-run from committed instructions and the owner-executed remainder is stated explicitly.
-
-## owner (open points, not delegated)
-- PLC: implement the TIA Portal program and run PLCSIM Advanced; capture watch-table evidence for gate items (a) and (b) and the PLCSIM latency section of bridge/EVIDENCE_LATENCY.md.
-- Hermes: define the component (repo, Telegram path, OPC UA client role) before M4 can be briefed.
+- m3-06 verify M3 — done when the loop is independently re-run from committed instructions and the owner-executed remainder is stated explicitly. Run last, after m3-12 and m3-03e.
 
 ## carried forward
 - fleet (M7): confirm handshake timeout constants.
