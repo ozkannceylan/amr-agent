@@ -26,9 +26,9 @@
     sensor   (raw state out)    single-beam range across the belt
     diagnostic                  product box pose
 
-  The operator panel Start / Stop / process-stop contacts are NOT modelled
-  in physics. They are pure ROS -> gz transport signals created by the
-  bridge in launch/cell_bringup.launch.py; the panel model below is
+  The operator panel Start / Stop / Reset / process-stop contacts are NOT
+  modelled in physics. They are pure ROS -> gz transport signals created by
+  the bridge in launch/cell_bringup.launch.py; the panel model below is
   geometry only, so the cell has a visible place where those contacts sit.
 
   NO CONTROL LOGIC LIVES HERE. There is no sequencing, no interlock, no
@@ -312,15 +312,25 @@
 
     <!-- ======================= Operator panel ========================= -->
     <!--
-      Geometry only. The Start / Stop / process-stop contacts this pedestal
-      represents are ROS topics created by the bridge, because a pushbutton
-      has no simulated physics worth modelling. See the signal table in
-      sim/README.md.
+      Geometry only. The Start / Stop / Reset / process-stop contacts this
+      pedestal represents are ROS topics created by the bridge, because a
+      pushbutton has no simulated physics worth modelling. See the signal
+      table in sim/README.md.
 
       The red mushroom head below is the panel's PROCESS stop. It is not a
       safety function and must never be presented as one: the safety e-stop
       chain is hardwired to the F-CPU and never crosses the network
       (invariant 1, ADR 0004).
+
+      The blue head on the lower row is the monitored RESET, wired NO: the
+      contact reads closed only while a hand is on it, so a broken or
+      welded-closed reset cannot clear a latch by itself. "Wire NC, program
+      NO" governs stop and safety devices, which must fail to the stopped
+      state; a reset must fail to the *not reset* state, which is the
+      opposite wiring. The reset energizes nothing in this world: it drives
+      no actuator, clears no simulated fault and does not touch belt state.
+      Deciding what a reset means, including its edge detection and its hold
+      time, is PLC work (invariants 5, 6 and 9).
     -->
     <model name="OperatorPanel">
       <static>true</static>
@@ -349,6 +359,11 @@
           <pose>0.09 -0.11 1.00 1.5707963 0 0</pose>
           <geometry><cylinder><radius>0.055</radius><length>0.03</length></cylinder></geometry>
           <material><ambient>0.80 0.10 0.10 1</ambient><diffuse>0.80 0.10 0.10 1</diffuse></material>
+        </visual>
+        <visual name="reset_button_visual">
+          <pose>-0.09 -0.11 0.88 1.5707963 0 0</pose>
+          <geometry><cylinder><radius>0.035</radius><length>0.02</length></cylinder></geometry>
+          <material><ambient>0.15 0.30 0.75 1</ambient><diffuse>0.15 0.30 0.75 1</diffuse></material>
         </visual>
       </link>
     </model>

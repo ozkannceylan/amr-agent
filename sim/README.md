@@ -272,9 +272,9 @@ are the deferred M5 vehicle work and are untouched by this.
   single-beam `gpu_lidar` firing across the belt at x = +0.50 towards a
   reflector post. It publishes a **distance**, not a detected bit.
 - **OperatorPanel** — a pedestal with a green Start, a black Stop and a
-  red process-stop mushroom. Geometry only: the contacts themselves are
-  ROS topics created by the bridge, because a pushbutton has no physics
-  worth simulating.
+  red process-stop mushroom on the upper row, and a blue Reset on the
+  lower row. Geometry only: the contacts themselves are ROS topics created
+  by the bridge, because a pushbutton has no physics worth simulating.
 
 ## Signal table
 
@@ -297,6 +297,7 @@ owner of every process decision in this cell:
 | `ProductSensorRange` | `/cell/product_sensor/scan` | `sensor_msgs/msg/LaserScan` | `ranges[0]` | cell → PLC | Photo-eye beam distance, m. **1.440** with the belt clear (beam reaches the reflector), **0.540** with the product in the beam. `range_min` 0.05, `range_max` 3.0, `frame_id` `ProductSensor/post/beam`. **No threshold is applied in the cell** — converting this range into a `ProductPresent` bit is a process decision and belongs to the PLC. |
 | `PanelStartContact` | `/cell/panel/start` | `std_msgs/msg/Bool` | `data` | cell → PLC | Start pushbutton contact, wired **NO**. `true` = contact closed = button pressed. |
 | `PanelStopContact` | `/cell/panel/stop` | `std_msgs/msg/Bool` | `data` | cell → PLC | Stop pushbutton contact, wired **NC**. `true` = contact closed = button *not* pressed. `false` = pressed, or broken wire. |
+| `PanelResetContact` | `/cell/panel/reset` | `std_msgs/msg/Bool` | `data` | cell → PLC | Monitored reset pushbutton contact, wired **NO**. `true` = contact closed = button held. `false` = released, or broken wire. Momentary: the cell publishes the level while the button is held and does **not** latch, stretch, debounce or edge-detect it. **The reset energizes nothing in the cell** — it is an input only, and every reset decision (rising edge, hold time, which latches clear) is PLC logic. |
 | `PanelProcessStopContact` | `/cell/panel/process_stop` | `std_msgs/msg/Bool` | `data` | cell → PLC | **Process** stop mushroom contact, wired **NC**. `true` = closed = not pressed. `false` = pressed, or broken wire. See the warning below. |
 | *(diagnostic)* | `/cell/product_box/pose` | `geometry_msgs/msg/PoseArray` | `poses[0]` | cell → observer | Ground-truth product pose in the `cell` frame. **Not a PLC signal** — a real conveyor has no product-position transducer. It exists so belt transport is observable headless. Do not model it as an OPC UA node. |
 | *(infrastructure)* | `/clock` | `rosgraph_msgs/msg/Clock` | `clock` | cell → observer | Simulation time. Not a PLC signal. |
@@ -309,6 +310,20 @@ rather than "running" (see *Domain conventions* in `CLAUDE.md`). The cell
 publishes the contact; it does not invert, latch, debounce or edge-detect
 it. All of that is PLC work.
 
+Start and **Reset** are the other case, and the difference is deliberate.
+`CLAUDE.md` §9's "wire NC, program NO" is a rule about *stop and safety*
+devices: they are wired closed so a broken wire fails to the stopped state.
+A reset has the opposite fail-safe direction — it must fail to *not reset* —
+so it is wired **NO** and reads `true` only while a hand is on it. Wiring a
+reset NC would mean a cut wire, a welded contact or an absent publisher
+continuously asserted "reset", which is precisely the automatic resume §9
+forbids after a stop.
+
+The reset is a button, not a state: the cell offers the contact and nothing
+else. It clears no fault here, drives no actuator and never touches belt
+state. The monitored, edge-triggered reset behaviour §9 requires lives in
+the PLC program, which owns the edge and the hold time.
+
 ### Update rates measured in this container
 
 | Topic | Rate | Why |
@@ -319,11 +334,13 @@ it. All of that is PLC work.
 
 ### There is no initial value
 
-ROS topics are not retained. Until something publishes, the three panel
+ROS topics are not retained. Until something publishes, the four panel
 contacts and the conveyor command have **no** value on the wire. Choosing
 the value the PLC sees before the first publish is a bridge decision
 (m3-04), and it must be the safe one: contacts read as pressed, belt
-command reads as zero.
+command reads as zero. For the NO reset that safe value is `false` —
+**not** pressed — because a reset that defaults to asserted would clear a
+latch the instant the bridge started.
 
 ### The red button is a PROCESS stop
 
@@ -365,6 +382,10 @@ ros2 topic pub -1 /cell/panel/start        std_msgs/msg/Bool "{data: true}"
 ros2 topic pub -1 /cell/panel/stop         std_msgs/msg/Bool "{data: false}"
 ros2 topic pub -1 /cell/panel/process_stop std_msgs/msg/Bool "{data: false}"
 
+# press the reset (NO: true = held), then release it
+ros2 topic pub -1 /cell/panel/reset        std_msgs/msg/Bool "{data: true}"
+ros2 topic pub -1 /cell/panel/reset        std_msgs/msg/Bool "{data: false}"
+
 # confirm a contact crossed the bridge into Gazebo
 stdbuf -oL gz topic -e -t /cell/panel/start
 ```
@@ -376,14 +397,19 @@ and about 2 s to pass through it. Real time factor is ~1.0 headless.
 
 - `gz model --list` shows exactly `Floor`, `Conveyor`, `ProductBox`,
   `ProductSensor`, `SensorReflector`, `OperatorPanel` — and no vehicle.
-- `ros2 topic list` shows the seven `/cell/*` topics plus `/clock`.
+- `ros2 topic list` shows the eight `/cell/*` topics plus `/clock`.
 - `/cell/product_sensor/scan` reads 1.440 m clear and 0.540 m blocked.
 - Commanding 0.15 m/s moves both `beltPos` and the product box; the box
   keeps a constant offset from the belt, so it is carried, not slipping.
+- Publishing `true` then `false` on `/cell/panel/reset` is visible on the
+  gz side and changes **nothing** in the cell: belt position, belt velocity
+  and the beam range are the same before, during and after the press,
+  whether the belt is idle or running.
 - The launch log has zero error and zero warning lines.
 
 The dated capture of exactly these checks from this container is in
-`worlds/CELL_EVIDENCE.md`.
+`worlds/CELL_EVIDENCE.md`. The reset contact was added after that capture
+and is evidenced separately, from WSL, in its Appendix A.
 
 ## Design notes
 
@@ -407,9 +433,11 @@ The dated capture of exactly these checks from this container is in
   or the m3-04 bridge drives them exactly as it will drive real wired
   contacts.
 - **What is deliberately absent.** No sequencing, no interlock, no timer,
-  no latch, no debounce, no threshold, no start/stop behaviour. The belt
-  turns whenever a velocity is commanded, including while the process-stop
-  contact reads pressed. That is not an oversight: making the cell refuse
+  no latch, no debounce, no threshold, no start/stop/reset behaviour. The
+  belt turns whenever a velocity is commanded, including while the
+  process-stop contact reads pressed, and pressing the reset does nothing
+  observable in the cell because there is no latch here for it to clear.
+  That is not an oversight: making the cell refuse
   a command would put process logic in the simulation layer, and the whole
   point of M3 is that the logic lives in the TIA Portal program
   (invariants 5, 6 and 9).

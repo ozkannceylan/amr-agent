@@ -1,5 +1,13 @@
 # CELL_EVIDENCE.md — verified headless run of the M3 demonstration cell
 
+> **Sections 1 to 7 predate `/cell/panel/reset`.** The reset contact was
+> added later on 2026-07-27 (brief m3-10), so the topic lists and the panel
+> round-trip below cover three panel contacts, not four. Nothing else in
+> those sections is affected: the reset drives no actuator and changes no
+> belt, sensor or encoder behaviour. The reset was verified in its own run
+> on a **different machine** — see **Appendix A**, which is WSL evidence and
+> does not replace the container evidence above.
+
 Date of run: **2026-07-27** (08:09:33 UTC)
 Host: Linux 6.18.5 x86_64, container, CPU only, **no display**
 ROS 2 Jazzy, Gazebo Sim 8.11.0 (Harmonic, `ros-jazzy-gz-sim-vendor`), Python 3.12.3
@@ -302,3 +310,148 @@ warning lines in the launch log: 0
 ```
 
 Clean start, no SDF warnings, no missing-plugin messages.
+
+---
+
+# Appendix A — `/cell/panel/reset`, verified run (m3-10)
+
+Date of run: **2026-07-27** (09:48 UTC, from the guest clock, which is
+known to run fast on this host — see `sim/setup/WSL_ENVIRONMENT.md` §4.5).
+Host: **WSL2 Ubuntu 24.04** on the owner's machine, repo mounted at
+`/mnt/c`, ROS 2 Jazzy, **Gazebo Sim 8.11.0** (installed shortly before this
+run; `WSL_ENVIRONMENT.md` records the state before that install).
+
+This is a **different environment** from sections 1 to 7 and does not
+replace them. It covers the reset contact only; the belt, photo-eye and
+product behaviour recorded above were not re-measured here beyond what the
+reset test needed.
+
+```
+$ ros2 launch /mnt/c/Users/ozkan/projects/amr-agent/sim/launch/cell_bringup.launch.py
+```
+
+## A.1 The contact exists, with the type and direction the others have
+
+```
+$ ros2 topic list | sort
+/cell/conveyor/cmd_speed
+/cell/conveyor/joint_state
+/cell/panel/process_stop
+/cell/panel/reset
+/cell/panel/start
+/cell/panel/stop
+/cell/product_box/pose
+/cell/product_sensor/scan
+/clock
+/parameter_events
+/rosout
+
+$ ros2 topic info /cell/panel/reset       $ ros2 topic info /cell/panel/start
+Type: std_msgs/msg/Bool                   Type: std_msgs/msg/Bool
+Publisher count: 0                        Publisher count: 0
+Subscription count: 1                     Subscription count: 1
+```
+
+Identical to `/cell/panel/start`: the bridge is the *subscriber*, so this
+is a cell → PLC input, not something the cell drives.
+
+The launch log shows all four panel contacts bridged the same way, so the
+three existing contacts are unchanged by the addition:
+
+```
+[cell_bridge]: Creating ROS->GZ Bridge: [/cell/panel/start (std_msgs/msg/Bool) -> /cell/panel/start (gz.msgs.Boolean)] (Lazy 0)
+[cell_bridge]: Creating ROS->GZ Bridge: [/cell/panel/stop (std_msgs/msg/Bool) -> /cell/panel/stop (gz.msgs.Boolean)] (Lazy 0)
+[cell_bridge]: Creating ROS->GZ Bridge: [/cell/panel/reset (std_msgs/msg/Bool) -> /cell/panel/reset (gz.msgs.Boolean)] (Lazy 0)
+[cell_bridge]: Creating ROS->GZ Bridge: [/cell/panel/process_stop (std_msgs/msg/Bool) -> /cell/panel/process_stop (gz.msgs.Boolean)] (Lazy 0)
+```
+
+`gz model --list` is unchanged (`Floor`, `Conveyor`, `ProductBox`,
+`ProductSensor`, `SensorReflector`, `OperatorPanel`); the reset is a button
+on the existing panel model, not a new model.
+
+## A.2 ROS → gz round trip
+
+A gz-side listener was attached **before** any publish:
+
+```
+$ stdbuf -oL gz topic -e -t /cell/panel/reset      (background)
+```
+
+Three `true` publishes crossed the bridge. As in section 4, gz prints an
+empty message for a `false` proto3 field, so each press appears as
+`data: true` followed by a blank message:
+
+```
+data: true
+
+data: true
+
+data: true
+
+```
+
+## A.3 Momentary, normally open, and it energizes nothing
+
+One scripted pass with a persistent publisher on `/cell/panel/reset`, a
+readback subscriber on the same topic, and subscribers on the belt encoder
+and the photo-eye. `reset_rx` is the level read back on the ROS side.
+
+```
+A. IDLE: belt stopped, nothing commanded
+  before any reset press             reset_rx=None  beltPos= 0.0000  beltVel=-0.0000  range=1.440
+  reset HELD (published true)        reset_rx=True  beltPos= 0.0000  beltVel= 0.0000  range=1.440
+  reset RELEASED (published false)   reset_rx=False beltPos= 0.0000  beltVel=-0.0000  range=1.440
+  reset tapped true->false           reset_rx=False beltPos= 0.0000  beltVel= 0.0000  range=1.440
+
+B. RUNNING: belt commanded 0.15 m/s, reset pressed mid-run
+  running, before reset press        reset_rx=False beltPos= 0.4503  beltVel= 0.1500  range=1.440
+  running, reset HELD                reset_rx=True  beltPos= 0.6006  beltVel= 0.1500  range=1.440
+  running, reset RELEASED            reset_rx=False beltPos= 0.7509  beltVel= 0.1500  range=1.440
+  belt commanded 0.0                 reset_rx=False beltPos= 0.7509  beltVel= 0.0000  range=1.440
+
+VERDICTS
+  contact follows publish (true while held) : True
+  idle: reset changed no belt/sensor state  : True
+  running: reset neither stopped nor started: True
+```
+
+What this shows:
+
+- **Normally open.** Before anything publishes there is no value on the
+  wire (`reset_rx=None`), and the level is `true` only while `true` is
+  being published. It is never `true` at rest, which is the whole point of
+  wiring a reset NO.
+- **Momentary, not latching.** The level returns to `false` on release and
+  the tap leaves nothing behind. The cell does not stretch, hold or
+  edge-detect it.
+- **It energizes nothing.** With the belt idle, a hold, a release and a tap
+  left `beltPos`, `beltVel` and the beam range bit-for-bit where they were.
+  With the belt running, pressing reset neither stopped it nor changed its
+  speed: velocity stayed at the commanded 0.150 m/s and position kept
+  advancing 0.1503 m per second across the press. There is no latch in the
+  cell for a reset to clear, and that is deliberate — the monitored,
+  edge-triggered reset is PLC logic.
+
+## A.4 Two environment notes from this run
+
+Recorded because `sim/setup/WSL_ENVIRONMENT.md` §5 left both open, not
+because m3-10 set out to answer them:
+
+1. The `gpu_lidar` photo-eye **does** acquire a rendering context in a
+   headless `-s` server under WSLg, by software fallback, and publishes a
+   correct 1.440 m clear range. The launch log carries three EGL lines,
+   which are informational and are the only non-INFO lines during the run:
+
+   ```
+   [gazebo-1] libEGL warning: egl: failed to create dri2 screen
+   [gazebo-1] libEGL warning: egl: failed to create dri2 screen
+   [gazebo-1] libEGL warning: NEEDS EXTENSION: falling back to kms_swrast
+   ```
+
+2. Real-time factor was **not** degraded by that fallback in this run: the
+   belt advanced 0.1503 m per wall-clock second under a 0.150 m/s command,
+   so the cell tracks real time on WSL as it did in the container.
+
+The only `[ERROR]` line in the log is the teardown at the end of the run
+(`gz sim` killed with SIGTERM, exit code -15) after every measurement above
+had been captured. Startup was clean, and there were no SDF warnings.

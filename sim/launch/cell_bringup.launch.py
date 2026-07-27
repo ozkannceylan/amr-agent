@@ -22,16 +22,23 @@
 #     /cell/product_sensor/scan     sensor_msgs/LaserScan   photo-eye range [m]
 #     /cell/panel/start             std_msgs/Bool           Start contact (NO)
 #     /cell/panel/stop              std_msgs/Bool           Stop contact (NC)
+#     /cell/panel/reset             std_msgs/Bool           Reset contact (NO)
 #     /cell/panel/process_stop      std_msgs/Bool           process-stop contact (NC)
 #
 #   diagnostic only, not a PLC signal
 #     /cell/product_box/pose        geometry_msgs/PoseArray product pose
 #     /clock                        rosgraph_msgs/Clock     sim time
 #
-# The three panel contacts have no simulated physics. They are created by
+# The four panel contacts have no simulated physics. They are created by
 # this bridge as ROS -> gz signals so a human, a test script or (later) the
 # m3-04 bridge process can drive them exactly as it will drive a real
 # panel's wired contacts.
+#
+# NOTE ON THE RESET: /cell/panel/reset is an INPUT and nothing else. It is
+# wired NO (true only while held), so a broken or welded-closed reset cannot
+# clear a latch on its own, and it energizes nothing here: no actuator, no
+# fault clear, no belt state. The monitored, edge-triggered reset behaviour
+# CLAUDE.md §9 requires is PLC logic, not simulation logic.
 #
 # NOTE ON THE RED BUTTON: /cell/panel/process_stop is a PROCESS stop. It is
 # not a safety function, carries no safety integrity, and must never be
@@ -77,6 +84,7 @@ _BRIDGE_ARGS = [
     # operator panel contacts (raw contact state, no debounce, no latch)
     '/cell/panel/start@std_msgs/msg/Bool]gz.msgs.Boolean',
     '/cell/panel/stop@std_msgs/msg/Bool]gz.msgs.Boolean',
+    '/cell/panel/reset@std_msgs/msg/Bool]gz.msgs.Boolean',
     '/cell/panel/process_stop@std_msgs/msg/Bool]gz.msgs.Boolean',
 
     # diagnostic: product pose, so belt transport is observable without a GUI
