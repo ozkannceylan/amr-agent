@@ -48,14 +48,32 @@ to conflate the monitored reset onto the start button. The owner ruled on
 node model, the spec and the bridge each took one brief. CLAUDE.md §9 requires
 a separate monitored reset; a conflated one satisfied it only in spirit.
 
+14. m3-14 to m3-17 — ADR 0006 and the namespace correction (URN could not
+    exist on a TIA server interface; live URI is http://DemoCell). Closed
+    2026-07-27, with the m3-06 residual cleanups (hold-time wording, L6
+    scenario-dependence note).
+15. m3-18 interface — opcua-nodes.md commissioning corrections (browse path
+    under ServerInterfaces, §9.8 scoped, environment record). Issued.
+16. m3-19 interface — bridge-design.md commissioning corrections (dual
+    namespace resolution by URI, granted session-timeout keep-alive). Issued.
+17. m3-20 bridge — commissioned-environment record in both EVIDENCE files.
+    Issued.
+18. m3-21 bridge — connect conformance against the test double. Queued,
+    blocked on m3-19.
+
 Container evidence (briefs 3 and 4) is retained beside the WSL evidence, not
 replaced by it.
 
-Remaining before the gate can close: the owner's TIA Portal + PLCSIM run
-(exit items 1 and 2, plus Section B of EVIDENCE_LATENCY.md and the PLCSIM
-section of EVIDENCE_SIGNAL_LOSS.md), and the m3-06 residual cleanups issued
-as follow-ups (stale hold-time wording in five places, the L6
-scenario-dependence note).
+Owner phase 0 closed 2026-07-27: TIA Portal V21 + PLCSIM Advanced V7.0,
+CPU 1513-1 PN FW V3.1, endpoint opc.tcp://192.168.53.1:4840 verified by an
+independent asyncua client reading all 15 DemoCell nodes. Phase 0 proves
+endpoint and node exposure only, no program logic.
+
+Remaining before the gate can close: briefs m3-18 to m3-21, then the owner's
+OB30 program build per plc/demo-cell/SPEC.md (tags §3.2, logic §6.1 onward)
+and the PLCSIM run with the bridge on the verified endpoint (exit items 1
+and 2, Section B of EVIDENCE_LATENCY.md, PLCSIM section of
+EVIDENCE_SIGNAL_LOSS.md), then a verifier pass.
 
 The TIA Portal implementation and the PLCSIM Advanced run are owner-executed.
 The four exit items are therefore demonstrated by the owner against the
