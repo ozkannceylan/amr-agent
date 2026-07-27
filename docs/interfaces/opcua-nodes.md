@@ -13,7 +13,7 @@ Handshake **sequencing** (who sets which bit when) is specified in m1-03; this d
 | No fleet data on the PLC | No order IDs, traffic state or zone reservations live on the PLC (invariant 5). The only fleet-originated identifier is the opaque handshake token per station. |
 | Not a safety path | Every node here is process data. Safety functions run onboard the vehicle and in the F-CPU over PROFIsafe (invariant 1). Loss of this OPC UA link is a degraded mode, not a safety event (invariant 2). |
 
-## 2. Namespace and folder layout
+## 2. Namespace, browse path and folder layout
 
 Server interface exported from TIA Portal. Namespace URI: `http://DemoCell`
 (namespace index is assigned at session establishment; the client browses by URI, never hardcodes the index).
@@ -22,6 +22,31 @@ The URI is **not chosen here**: TIA Portal derives a server interface's namespac
 `http://<interface name>` and the field is not editable, so naming the interface `DemoCell` is what
 produces `http://DemoCell`. There is **one namespace per server interface** — a second interface
 carries its own derived URI and none is shared (ADR 0006).
+
+### 2.1 Browse path — a server interface is not a child of Objects
+
+Owner-verified in the tool at commissioning phase 0, 2026-07-27 (full environment record in §9.10).
+The interface node does **not** hang directly under `Objects`. The S7-1500 places every server
+interface inside a folder that belongs to a *Siemens* namespace, not to the interface's own:
+
+```
+Objects                        standard OPC UA namespace
+  ServerInterfaces             namespace http://www.siemens.com/simatic-s7-opcua
+    DemoCell                   namespace http://DemoCell
+      Input/ Output/ Status/ Link/      the M3 nodes (§9.2)
+```
+
+| Rule | Statement |
+|---|---|
+| Resolve **both** namespaces by URI | A client resolves two indices at connect time: `http://www.siemens.com/simatic-s7-opcua` for the `ServerInterfaces` folder and `http://DemoCell` for the interface node and everything below it. Both are resolved by URI at session establishment; neither index is ever hardcoded (ADR 0006 D4). |
+| The parent folder does not share the interface namespace | Reusing the interface's index for `ServerInterfaces` fails to browse. The two indices are unrelated and must be kept distinct. |
+| Paths in this document are relative to the interface node | A path written `DemoCell/Input/ConveyorBeltPosition` is `Objects/ServerInterfaces/DemoCell/Input/ConveyorBeltPosition` in full. The folder trees below (§2.2, §9.2) start at the interface node, never at `Objects`. |
+| A second interface is a sibling, not a child | The future fleet-facing interface (§9, ADR 0006 D3) appears in the same `ServerInterfaces` folder under its own name, carrying its own derived URI. Resolving one interface's namespace never yields the other's. |
+
+A wrong or absent interface still presents as "namespace not found" at every connect, which remains
+the intended failure mode. What changes is that there are now two lookups that can fail that way.
+
+### 2.2 Folder layout
 
 ```
 Cell/                cell-level status and supervision heartbeats
@@ -39,7 +64,8 @@ Conventions for all tables below:
 - **BrowseName** is PascalCase, physical thing + meaning, and mirrors the PLC tag name exactly (CLAUDE.md section 9) so this document and the TIA export can be diffed.
 - **Access** is from the client's (fleet manager's) view: `R` or `R/W`.
 - **Owner** is the single source of truth (invariant 10). Only the owner writes the value; the other side never recomputes it locally.
-- **Update**: `on-change` = subscribed monitored item, report on value change; `cyclic` = subscribed with fixed sampling (heartbeats, analog values). Suggested sampling interval 100 ms, publish interval 250 ms.
+- **Update**: `on-change` = subscribed monitored item, report on value change; `cyclic` = subscribed with fixed sampling (heartbeats, analog values). Requested sampling interval 100 ms, requested publish interval 250 ms.
+- **A requested session parameter is a request, not a setting.** `CreateSession` returns a *revised* session timeout, `CreateSubscription` a revised publishing interval and `CreateMonitoredItems` a revised sampling interval, and the server is free to grant less than was asked for. Every interval in this document is therefore what a client **asks** for. The client reads the granted value out of the response and derives its own timing — keep-alive, staleness limits, supervision windows — from **that** value, never from the value it requested. The bridge's connect sequence and the keep-alive it derives from the granted session timeout are specified in `docs/interfaces/bridge-design.md` (m3-19), which is where the observed granted values are recorded.
 
 ## 3. Cell/
 
@@ -146,7 +172,12 @@ logic formed from interlocks (including the F-CPU-mirrored safety state).
 
 ## 8. Deliberately absent
 
-| Not on the server | Why |
+Each row below means "no such node **on this server interface**". The S7-1500 also auto-publishes its
+global data blocks under a separate `DataBlocksGlobal` folder in its own namespace, which is outside
+this contract and does not contradict these rows — see §9.8, where the same scoping is stated for the
+commissioned demonstration interface.
+
+| Not on this interface | Why |
 |---|---|
 | Order IDs, order state, transport assignments | Fleet manager data; VDA 5050 over MQTT carries it (invariants 3, 5) |
 | Zone reservation / traffic nodes | Fleet manager logic; the PLC only reports what its own sensors measure (ZoneAOccupied) |
@@ -167,7 +198,8 @@ The authoritative signal list is the **signal table in `sim/README.md` § "Demon
 
 Sections 3–7 above describe the target cell served to the **fleet manager**. This section describes
 the M3 demonstration cell served to the **bridge**. The nodes below live on the `DemoCell` server
-interface, namespace URI `http://DemoCell` (§2). A fleet-facing interface is a **separate server
+interface, namespace URI `http://DemoCell`, reached at `Objects/ServerInterfaces/DemoCell`
+(§2.1 — the interface is not a child of `Objects`). A fleet-facing interface is a **separate server
 interface** and carries its own URI, derived the same way from its own name: each server interface
 has exactly one namespace and the two sets cannot share one (ADR 0006). No node is shared between the
 two sets and they are never merged.
@@ -181,7 +213,7 @@ No logic, sequencing, latching or timer is defined here, and none belongs in the
 | Rule | Statement |
 |---|---|
 | Server/client | The PLC is the OPC UA server. The bridge is a client. Never inverted (invariant 4). |
-| What the bridge writes | **Only** the `DemoCell/Input/` nodes (the PLC's input image) and `DemoCell/Link/BridgeHeartbeat`. Nothing else on the server is client-writable. |
+| What the bridge writes | **Only** the `DemoCell/Input/` nodes (the PLC's input image) and `DemoCell/Link/BridgeHeartbeat`. Nothing else **on the `DemoCell` interface** is client-writable, and the bridge writes nothing outside that interface — in particular nothing under the auto-published `DataBlocksGlobal` folder, which is not part of this contract and, at the commissioned access settings (§9.10), is not write-protected by the server either. The restriction is the bridge's contract, honoured by the client; it is not enforced by the server today (§9.8 open item). |
 | No actuator writes | The bridge **never** writes an actuator output node. `ConveyorSpeedCommand` and every other output is formed inside the PLC from its cycle-running flag and interlocks (invariant 6). The bridge reads it and applies it to the simulated actuator unchanged. |
 | No logic in the bridge | The bridge is a signal translator: no sequencing, interlocks, timers, latching or debounce that changes meaning (ADR 0004). If logic appears to be needed, it belongs in the PLC (invariants 5, 6). |
 | Single owner | Every input value is owned by the Gazebo cell and only ever written by the bridge; every output and status value is owned by the PLC. Neither side recomputes the other's value (invariant 10). |
@@ -197,7 +229,13 @@ DemoCell/Status/     PLC → bridge: read-only status for diagnostics and the wa
 DemoCell/Link/       bridge liveness
 ```
 
-Column conventions are those of section 2. Three additions for this section:
+This tree starts at the **interface node**, whose full browse path is
+`Objects/ServerInterfaces/DemoCell` (§2.1). `DemoCell/Input/ConveyorBeltPosition` below is shorthand
+for `Objects/ServerInterfaces/DemoCell/Input/ConveyorBeltPosition`, with `ServerInterfaces` in the
+Siemens namespace and everything from `DemoCell` down in `http://DemoCell`.
+
+Column conventions are those of section 2, including the rule that a requested session parameter is a
+request and the granted value is what a client times against. Three additions for this section:
 
 - **Access** is from the **bridge's** view (the client), not the fleet manager's.
 - For client-written nodes, `on-change` means: written when the source ROS 2 signal changes value,
@@ -304,6 +342,28 @@ not a safety event (invariant 2), and nothing about it is a safety function.
 
 ### 9.8 Deliberately absent from DemoCell/
 
+**Scope of every claim in this subsection: the `DemoCell` server interface, not the server's whole
+address space.** The interface carries **exactly 15 nodes** — 7 in `Input/`, 1 in `Output/`, 5 in
+`Status/`, 2 in `Link/`. It is *not* true that the server exposes only those 15 nodes: the S7-1500
+auto-publishes every global data block under `Objects/DataBlocksGlobal` in its own namespace, so the
+DBs backing these nodes are reachable by that second path as well, under their DB and member names
+rather than the BrowseNames of §9.3–§9.7 (commissioning phase 0, §9.10).
+
+| Consequence | Statement |
+|---|---|
+| Node-count checks are interface-scoped | "15 nodes" always means 15 nodes **under `DemoCell`**. A client browsing from `Objects` sees more than 15, and that is not a defect and not a naming error. The independent verification of §9.10, and the bridge's `session established, N nodes resolved` log, both count `DemoCell` nodes only |
+| The interface is the contract; the DB path is not | Nothing in this project reads or writes a value through `DataBlocksGlobal`. Clients resolve BrowseName paths under `DemoCell` only (§9.1). A value reached by any other path is outside this contract, whatever it happens to be worth |
+| "Deliberately absent" is an interface statement | Each row of the two tables below means "no such node on the `DemoCell` interface". A DB member visible via `DataBlocksGlobal` does not contradict them: it is the same storage under a different, uncontracted path, not a second node in this model |
+
+**Open item, later gate — suppress DB-level exposure.** Clear the per-DB *Accessible from HMI/OPC UA*
+attribute on the demonstration cell's data blocks so that the `DemoCell` interface becomes the only
+path to these values, and the read-only access levels of §9.4, §9.5 and §9.7 can no longer be
+circumvented through the DB path. Not done at M3: phase 0 commissioned the endpoint with default DB
+visibility and with CPU access control disabled (§9.10), and both are demonstration settings. The
+natural place to close it is the gate that creates the fleet-facing interface and configures access
+control and user rights for a real client, so visibility and rights are set in one pass rather than
+two.
+
 Cell signals that exist but reach no node:
 
 | Cell signal | Why it is not a node |
@@ -313,7 +373,7 @@ Cell signals that exist but reach no node:
 
 Node kinds that do not exist:
 
-| Not on the server | Why |
+| Not on the DemoCell interface | Why |
 |---|---|
 | A client-writable conveyor command node, or a run/stop bit alongside `ConveyorSpeedCommand` | The bridge may never write an actuator output (invariant 6). The cell accepts one signed velocity and nothing else; a separate run bit would duplicate information already carried by the sign and magnitude of the command, breaking single ownership (invariant 10) |
 | A `ProductPresent` bit in the input image | The presence threshold is a process decision and lives in the PLC (§9.3). The bridge writes the raw range only |
@@ -352,3 +412,37 @@ Nodes with no cell signal, and why each is legitimate rather than an orphan:
 The operational signal map — including the conversion, decimation and reconnect detail the bridge
 implements — is `docs/interfaces/bridge-design.md` (m3-03), derived from this table. If the two ever
 disagree, this document is the contract and the bridge design is corrected to match.
+
+### 9.10 Commissioned environment — phase 0, 2026-07-27
+
+Owner-verified **in the tool**, on the machine that will run the demonstration. Every value here was
+read back from the tool or off the wire; none was chosen in a document (LESSONS 2026-07-27, on
+tool-derived identifiers). This record exists so the addressing rules of §2.1 and the scoping of §9.8
+can be traced to the system that produced them.
+
+| Item | Commissioned value |
+|---|---|
+| Engineering tool | TIA Portal V21 |
+| Simulator | S7-PLCSIM Advanced V7.0. V3.0 was removed: broken virtual adapter service, and unsupported with TIA V21 |
+| CPU | 1513-1 PN, firmware V3.1 |
+| OPC UA runtime license | "large" — the compiler demanded large after the firmware change |
+| PLCSIM network mode | TCP/IP Single Adapter, `<Local>` |
+| PLCSIM instance address | 192.168.53.1/24 |
+| Host virtual adapter | 192.168.53.241/24 |
+| Endpoint | `opc.tcp://192.168.53.1:4840` |
+| Message security | None |
+| Authentication | Anonymous, granted by the CPU-level *Disable access control* setting. V3.x firmware offers no guest-authentication checkbox; disabling access control grants the Anonymous user full rights, OPC UA included |
+| Browse path | `Objects` → `ServerInterfaces` (`http://www.siemens.com/simatic-s7-opcua`) → `DemoCell` (`http://DemoCell`), per §2.1 |
+| Independent verification | 2026-07-27: an `asyncua` client running on Windows read all 15 `DemoCell` nodes at their start values. **The bridge was not involved** |
+
+**What phase 0 proves, and what it does not.** It proves the endpoint, the security and
+authentication configuration, the browse path and the exposure of the 15 nodes with their data types.
+It proves **no PLC program behaviour** — no logic was running — and **nothing about the bridge**,
+which was not part of the verification. Loop evidence remains the responsibility of
+`plc/demo-cell/SPEC.md` §10 and the bridge evidence files.
+
+**These are demonstration settings, not production ones.** Security `None` plus anonymous full rights
+plus default DB visibility is the minimum that gets a first session established. Hardening — message
+security, user authentication, and the DB-visibility item of §9.8 — is carried to the gate that
+configures the server for a real client, and none of it changes a node, a name or a direction in this
+document.
