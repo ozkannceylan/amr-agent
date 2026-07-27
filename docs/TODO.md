@@ -6,9 +6,8 @@
 ## interface
 - m3-02 cell I/O nodes — done when every m3-01 signal has an OPC UA node mirroring its PLC tag, with direction and single owner, and the demo e-stop is labelled a process stop.
 
-## fleet
-- m3-03 bridge design — done when docs/interfaces/bridge-design.md defines signal map, update model, liveness and the no-logic rule.
-- m3-04 bridge implementation — done when signals traverse both directions against the world and an OPC UA test double, with measured latency and liveness behaviour.
+## bridge
+- m3-04 bridge implementation — done when signals traverse both directions against the cell and an OPC UA test double, with measured latency and exercised signal-loss cases.
 
 ## plc
 - m3-05 TIA implementation spec — done when the owner can build the program from plc/demo-cell/SPEC.md, including watch table and PLCSIM notes.
