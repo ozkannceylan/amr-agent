@@ -62,11 +62,16 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
     Closed 2026-07-27; found that bridge.yaml still browses DemoCell from
     Objects with one namespace index, so Section B waits on m3-21.
 18. m3-21 bridge — connect conformance against the test double. Closed
-    2026-07-27, evidenced in bridge/EVIDENCE_CONNECT.md (both clamp
-    directions, 22/22 checks, 800-cycle loop at 20.0 Hz).
+    2026-07-27, evidenced in bridge/EVIDENCE_CONNECT.md (grants below and
+    above the request, 800-cycle loop at 20.0 Hz).
 19. m3-22 interface — bridge-design.md sync (§12 item 9, §9.4 evidence
     table). Closed 2026-07-27.
-20. m3-23 verifier — commissioning-chain verification pass. Issued.
+20. m3-23 verifier — commissioning-chain verification. Closed 2026-07-27,
+    pass-with-findings; the harness re-run reproduced the committed
+    evidence value for value.
+21. m3-24 bridge — wording corrections from the m3-23 findings (clamp
+    described one-directionally in the evidence files, bridge.yaml endpoint
+    comment, non-reproducible check count). Issued.
 
 Container evidence (briefs 3 and 4) is retained beside the WSL evidence, not
 replaced by it.
@@ -76,11 +81,13 @@ CPU 1513-1 PN FW V3.1, endpoint opc.tcp://192.168.53.1:4840 verified by an
 independent asyncua client reading all 15 DemoCell nodes. Phase 0 proves
 endpoint and node exposure only, no program logic.
 
-Remaining before the gate can close: briefs m3-18 to m3-21, then the owner's
-OB30 program build per plc/demo-cell/SPEC.md (tags §3.2, logic §6.1 onward)
-and the PLCSIM run with the bridge on the verified endpoint (exit items 1
-and 2, Section B of EVIDENCE_LATENCY.md, PLCSIM section of
-EVIDENCE_SIGNAL_LOSS.md), then a verifier pass.
+Remaining before the gate can close: brief m3-24, then the owner's OB30
+program build per plc/demo-cell/SPEC.md (tags §3.2, logic §6.1 onward) and
+the PLCSIM run with the bridge on the verified endpoint — exit items 1 and
+2 plus EVIDENCE_LATENCY.md Section B in full (item 5 covers all seven
+inputs; item 6 is the signal-loss repeat against the seven-node image —
+EVIDENCE_SIGNAL_LOSS.md has no separate PLCSIM section, per m3-23) — then
+verification of the owner evidence.
 
 The TIA Portal implementation and the PLCSIM Advanced run are owner-executed.
 The four exit items are therefore demonstrated by the owner against the
