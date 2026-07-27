@@ -78,7 +78,8 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
     third defect, recorded as §12 open item 5.
 23. m3-26 bridge — live loop against the commissioned PLC. Issued.
 24. m3-27 plc — plausibility windows for the belt feedback signals, from
-    m3-25's finding. Issued.
+    m3-25's finding. Closed 2026-07-27; recorded §12 open item 6, a
+    fault-injection request against bridge/.
 
 The agent-side work of M3 is complete as of 2026-07-27 apart from m3-25,
 which corrects the specification against the program the owner built from

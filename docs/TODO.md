@@ -10,12 +10,15 @@
 ## infra (fold into the next infra brief, do not issue alone)
 - The root .gitattributes comment states a shebang-file count that is stale after m3-21 added bridge/tools/check_connect_conformance.py (7 should be 8, confirmed by m3-22) — correct the count or drop the number from the comment.
 
-## plc
-- m3-27 belt plausibility windows (issued, from m3-25's new finding) — done when ConveyorBeltPosition and ConveyorBeltSpeed carry affirmative-form plausibility windows, an implausible value faults instead of being consumed, and §12 open item 5 is closed.
+## owner (spec changes landed after the program was built — re-implement in TIA)
+- Dwell timer: SPEC now calls it unconditionally outside the CASE with IN := (SeqStep = 20), because a call site inside branch 20 stops executing at step exit. The reported fix (IN := FALSE on leaving step 20) works only if that release executes in the same scan as the exit — confirm it does, or adopt the spec's form, so program and spec do not drift.
+- Belt feedback plausibility (m3-27, SPEC §6.2.2): five constants, two statics, one temp, seven code sites. A NaN belt position currently disarms both soft-limit aborts in the built program. Adding statics reinitialises the instance DB, so ResetDeviceFault starts TRUE again and the reset contact must be seen open once. A healthy run should look identical after the change — anything faulting during a normal cycle means the constants are wrong, not the logic. Nothing in the bridge, the DBs, the 15 nodes or the server interface changes.
 
-## owner (from m3-25, affects the running program)
-- The dwell timer's corrected form differs from the implementation: SPEC now calls it unconditionally outside the CASE with IN := (SeqStep = 20), because a call site inside branch 20 stops executing at step exit. The reported fix (IN := FALSE on leaving step 20) works only if that release executes in the same scan as the exit — confirm it does, or adopt the spec's form, so program and spec do not drift.
-- A NaN belt position currently disarms both soft-limit aborts in the built program. m3-27 specifies the fix; the change will need re-implementing in TIA.
+## plc (carried, needs a measurement not a decision)
+- BELT_SPEED_MIN/MAX are design values at ±1.00 m/s with no measured drive maximum behind them. Confirm against the drive or the cell's achievable speed and record the source.
+
+## bridge (from m3-27, SPEC §12 open item 6)
+- Opt-in fault-injection mode: a genuine NaN cannot currently be injected from the cell, so SPEC §11 step 4.11 has to exercise the belt-feedback path by narrowing a constant instead. Done when the bridge can inject an implausible or NaN belt sample under an explicit opt-in that cannot be enabled by accident in an evidence run.
 
 ## sim (deferred, after M3 closes — do not start before the owner's evidence lands)
 - Cell reskin from harvested assets. Research (2026-07-27, scratchpad sim-research.md) recommends harvesting ARIAC 2025 conveyor/break-beam visuals onto the existing joints, optionally placing the cell inside Fuel Depot (CC-BY 4.0). Visual only: the /cell/... topic contract and the node model must not change. Blocker to resolve first — ariac_gz, the package holding every mesh, declares "TODO: License declaration" and the repo has no top-level LICENSE; NIST's only terms statement is a US-only §105 non-copyright note, so clarify terms with the maintainers before any mesh enters this repository. Adopting ARIAC's own plugins is out of scope: it would add ariac_interfaces and change the signal contract, which needs an ADR.
