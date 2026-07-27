@@ -1,7 +1,7 @@
 # Bridge design — Gazebo cell ↔ S7-1500 (M3)
 
 Gate M3, ADR 0004. This document is written **before any bridge code** and is the
-specification `fleet/bridge/` (m3-04) is implemented against.
+specification `bridge/` (m3-04) is implemented against.
 
 Authority. `docs/interfaces/opcua-nodes.md` §9 is the node contract and
 `sim/README.md` § "Demonstration cell (M3)" is the ROS 2 signal contract. This document
@@ -18,7 +18,7 @@ startup, liveness, reconnect and measurement. **If this document ever disagrees 
 | It is | One OS process that is **an OPC UA client** (invariant 4) **and a ROS 2 node**, and nothing else. |
 | Its whole job | Carry each signal in the §9.9 map from one side to the other, unchanged, plus write its own heartbeat. |
 | It is not | A controller, a sequencer, an interlock, a filter, a safety device, a fleet component, an HMI, or an OPC UA **server**. |
-| It is not | Part of the fleet manager. ADR 0004 rejected folding the bridge into it. The two are separate processes that share no state and call no code of each other's, even though m3-04 places the bridge under `fleet/bridge/` (see §12, open item). |
+| It is not | Part of the fleet manager. ADR 0004 rejected folding the bridge into it. The two are separate processes that share no state and call no code of each other's, and m3-04 places the bridge in its own top-level layer `bridge/` (ADR 0005; see §12, open item 1). |
 | It never | Listens on a socket, accepts a connection, or exposes a server endpoint of any kind. Client only, in every configuration, including the test-double configuration (§10). |
 | Layer position | Cell (ROS 2 / Gazebo) ↔ bridge ↔ PLC (OPC UA server). It touches no other layer: no MQTT, no VDA 5050, no Nav2, no vehicle (invariant 11). |
 | Timing class | **Best effort. Not a real-time component** (invariant 9). Its cadence is a target, not a deadline. No correctness in this cell depends on the bridge meeting a deadline; every timing decision that matters is a PLC timer in the PLC's own time base. |
@@ -380,7 +380,7 @@ last commanded speed until the bridge returns and delivers the PLC's current com
 
 | ID | Interval | Start | End | Clock | What it contains |
 |---|---|---|---|---|---|
-| **L1** | Input hold | subscriber callback entry (sample received) | start of the cycle that writes it | monotonic | Decimation/queue age. Expected ~uniform 0–50 ms. Reported separately so the 20 Hz cadence is not mistaken for latency |
+| **L1** | Input hold | subscriber callback entry (sample received) | the cycle takes that sample out of its slot | monotonic | Slot hold time: decimation/queue age. Ending at the *slot take* rather than at the cycle start is deliberate — callbacks run on their own thread, so a sample can arrive after the cycle start and still be the one written, which would make a cycle-start-referenced interval negative. Expected ~uniform 0–50 ms. Reported separately so the 20 Hz cadence is not mistaken for latency |
 | **L2** | Input write | start of the write | server write-response received | monotonic | Serialisation + OPC UA round trip + server-side write handling |
 | **L3** | Bridge input path | callback entry | write response | monotonic | `L1 + L2`. The full cell → PLC-input-image time attributable to the bridge |
 | **L4** | Output poll phase | value change occurs in the PLC | read that observes it | — | **Not measurable from the bridge.** Bounded above by the cycle period + server sampling. Reported as a bound, never as a measurement |
@@ -406,8 +406,8 @@ last commanded speed until the bridge returns and delivers the PLC's current com
 
 | File | Content |
 |---|---|
-| `fleet/bridge/EVIDENCE_LATENCY.md` | Dated, human-readable capture: configuration, run duration, the statistics table, the caveats of §9.5, and the raw-file reference. Follows the `sim/worlds/CELL_EVIDENCE.md` precedent |
-| `fleet/bridge/evidence/latency-<YYYY-MM-DD>.csv` | Raw per-event rows behind the table |
+| `bridge/EVIDENCE_LATENCY.md` | Dated, human-readable capture: configuration, run duration, the statistics table, the caveats of §9.5, and the raw-file reference. Follows the `sim/worlds/CELL_EVIDENCE.md` precedent |
+| `bridge/evidence/latency-<YYYY-MM-DD>.csv` | Raw per-event rows behind the table |
 
 The evidence file has **two clearly separated sections**: *test double, in-container,
 agent-run* and *PLCSIM Advanced, owner-run*. The gate closes on the second. m3-04 produces
@@ -446,7 +446,7 @@ the first; the second is owner-executed (PLAN.md).
 | Scaffolding is labelled | Anything the double does beyond storing values — echoing a nominated input for L7, or driving `ConveyorSpeedCommand` from a script to exercise the output path — is **test scaffolding**, marked as such in code and in the evidence file, and is not a model of PLC behaviour |
 | ADR 0004 | The ADR rejected proving the loop against a mock *only*. The double is for automated regression; the gate's four exit items close against PLCSIM, owner-run |
 | Operational rule | The double is never started as part of a demonstration run, and never on the same endpoint as PLCSIM. The evidence file always states which server produced each number |
-| Location | `fleet/bridge/` (m3-04's scope), in a subdirectory whose name says it is a test double |
+| Location | `bridge/` (m3-04's scope), in a subdirectory whose name says it is a test double |
 
 ---
 
@@ -465,7 +465,7 @@ benefit at eight nodes). If the owner declines `asyncua`, the bridge cannot be i
 as designed and m3-04 must be re-briefed.
 
 Install path, subject to approval: `pip install asyncua==<pinned version>` through the
-container proxy, pinned in a requirements file under `fleet/bridge/`. No credentials or
+container proxy, pinned in a requirements file under `bridge/`. No credentials or
 certificates are added to the repository (invariant 13).
 
 ---
@@ -474,7 +474,7 @@ certificates are added to the repository (invariant 13).
 
 | # | Item | Status |
 |---|---|---|
-| 1 | `fleet/README.md`'s "must not access ROS 2 internals" is written for the fleet **manager**. m3-04 places the bridge under `fleet/bridge/`, and the bridge is by definition a ROS 2 node | Needs a one-line exception in `fleet/README.md`, stating that `fleet/bridge/` is a separate process that shares no code or state with the fleet manager. **Not this document's file to edit** — raised in the report |
+| 1 | Whether `fleet/README.md`'s "must not access ROS 2 internals" needed an exception for the bridge, which is by definition a ROS 2 node | **Resolved by ADR 0005**: the bridge is its own top-level layer, `bridge/`, not part of `fleet/`. No exception is needed and the earlier request for one is withdrawn; `fleet/README.md` stays absolute |
 | 2 | m3-01 open question 2 (no initial value) | **Resolved** here: §6. The `sim/README.md` phrasing "the safe choice is contacts read as pressed and belt command reads as zero" is honoured, but as **PLC DB start values** (§6.3), not as values the bridge writes |
 | 3 | `NaN` / `inf` on `ProductSensorRange` | Bridge behaviour fixed (§4.5: pass through, log, count). The PLC-side consequence — a `NaN` makes `range < 1.00` false, i.e. "no product" — must be handled explicitly in `plc/demo-cell/SPEC.md` (m3-05) |
 | 4 | §7.3 case D — sim stopped, bridge alive, input image looks live | Bridge cannot detect it without adding logic. Recommendation to m3-05: `ConveyorDriveFault` already covers it. Carried |
