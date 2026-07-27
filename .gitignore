@@ -3,3 +3,7 @@ __pycache__/
 
 # Machine-local overrides. .claude/settings.json is tracked on purpose (CLAUDE.md section 7).
 .claude/*.local.json
+
+# Run artefacts, overwritten every run. Dated captures in bridge/evidence/ are
+# committed measured evidence and must stay visible.
+bridge/evidence/*-latest.csv

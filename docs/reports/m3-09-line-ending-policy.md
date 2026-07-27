@@ -206,6 +206,32 @@ ending churn presents as a whole-file rewrite; none is present.
 Only `.gitignore` was staged by this task. No `git rm --cached` was run,
 `.gitattributes` was not touched, and nothing was committed here.
 
+### Second follow-up: bridge run artefact
+
+A further orchestrator ruling added a third rule, for the bridge's default
+evidence output (`bridge/config/bridge.yaml:107`, set in `994a929`), which is
+regenerated on every run and would otherwise pollute `git status` on both
+platforms:
+
+    # Run artefacts, overwritten every run. Dated captures in bridge/evidence/ are
+    # committed measured evidence and must stay visible.
+    bridge/evidence/*-latest.csv
+
+**Scope choice.** `*-latest.csv` rather than the literal
+`bridge/evidence/latency-latest.csv`, because the `-latest` suffix is the naming
+convention that marks a per-run overwritten file, so a future slot's
+`*-latest.csv` is covered without a second rule. Deliberately *not*
+`bridge/evidence/*.csv`: `EVIDENCE_LATENCY.md:326` shows dated plain-CSV
+captures (`latency-<date>-plcsim.csv`) are produced and summarised before being
+gzipped and committed, and hiding one of those would make measured evidence
+silently invisible — the expensive direction of this trade-off. The rule cannot
+touch the committed artefact either way, since `*.csv` does not match a name
+ending `.csv.gz`. Verified on both platforms: `check-ignore` resolves to
+`.gitignore:9`; the committed `latency-2026-07-27.csv.gz` is confirmed not
+ignored and still listed by `git ls-files`; a dated `latency-2026-07-28-plcsim.csv`
+is confirmed not ignored; and a real artefact written to the path is invisible
+to `git status` from Windows and WSL alike, then removed.
+
 ### Incident: the rule was swept into an unrelated commit
 
 While this edit sat staged, another process committed with a full-index commit.
