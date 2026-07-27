@@ -19,7 +19,10 @@ opcua:
 
   # Resolved to an index by browsing at every session establishment.
   # The index is NEVER hardcoded (opcua-nodes.md §2).
-  namespace_uri: "urn:amr-agent:cell:plc"
+  # TIA Portal derives this URI from the server interface name as
+  # http://<interface name> and the field is not editable, so the demonstration
+  # cell's interface `DemoCell` gives http://DemoCell (ADR 0006).
+  namespace_uri: "http://DemoCell"
 
   # Security. "none" is the in-container test-double setting. For PLCSIM /
   # hardware set policy/certificate/private_key; the files live OUTSIDE this

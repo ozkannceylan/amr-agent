@@ -6,7 +6,7 @@
     ############################################################
 
 What it is (bridge-design.md §10): a minimal OPC UA *server* that exposes
-namespace `urn:amr-agent:cell:plc` with the `DemoCell/` address space of
+namespace `http://DemoCell` (ADR 0006) with the `DemoCell/` address space of
 docs/interfaces/opcua-nodes.md §9 — same BrowseNames, same folder paths, same
 data types, same access levels — so the bridge and the loop mechanics can be
 verified in a container without TIA Portal or PLCSIM Advanced.
@@ -60,7 +60,11 @@ from asyncua.server.internal_session import InternalSession
 
 LOG = logging.getLogger("plc-double")
 
-NAMESPACE_URI = "urn:amr-agent:cell:plc"
+# The real S7-1500 server interface's URI, which TIA Portal derives from the
+# interface name as http://<interface name> and does not let anyone edit
+# (ADR 0006). The double must register the same URI as the server it stands in
+# for, or the bridge's browse-by-URI resolution would fail against it alone.
+NAMESPACE_URI = "http://DemoCell"
 
 # opcua-nodes.md §9.3 — client-WRITABLE input image.
 INPUTS = [

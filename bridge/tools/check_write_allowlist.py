@@ -33,7 +33,7 @@ from amr_bridge.config import WRITE_ALLOWLIST  # noqa: E402
 from amr_bridge.opcua_side import PlcClient, WriteNotPermitted  # noqa: E402
 
 ENDPOINT = os.environ.get("BRIDGE_ENDPOINT", "opc.tcp://127.0.0.1:4840/amr-agent/celldouble/")
-NAMESPACE = "urn:amr-agent:cell:plc"
+NAMESPACE = "http://DemoCell"          # TIA-derived, not editable — ADR 0006
 
 FORBIDDEN = [
     ("Output", "ConveyorSpeedCommand"),

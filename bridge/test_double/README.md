@@ -8,9 +8,15 @@
 
 `plc_test_double.py` is a minimal OPC UA **server** that stands in for the
 S7-1500 on PLCSIM Advanced (`docs/interfaces/bridge-design.md` §10). It exposes
-namespace `urn:amr-agent:cell:plc` with the `DemoCell/` address space of
+namespace `http://DemoCell` with the `DemoCell/` address space of
 `docs/interfaces/opcua-nodes.md` §9 — same BrowseNames, same folder paths, same
 data types, same access levels.
+
+The URI is `http://DemoCell` and not a chosen URN because TIA Portal derives a
+server interface's namespace URI from the interface name as
+`http://<interface name>` and the field is not editable (**ADR 0006**). The
+double registers the URI the real server will present, so the bridge resolves
+the namespace by browsing identically against both.
 
 It exists so the bridge and the loop mechanics can be verified automatically in
 this container, without the owner's TIA Portal / PLCSIM environment.
