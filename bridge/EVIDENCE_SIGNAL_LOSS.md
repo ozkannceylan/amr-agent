@@ -23,13 +23,28 @@ against the seven-node image.
 
 ---
 
+> **The PLCSIM repeat has since been performed — it is in
+> `EVIDENCE_LATENCY.md` §B.7, not here.** Brief `m3-26` (2026-07-27) ran cases
+> **A**, **B** and **D** against the live CPU with the standard program in RUN,
+> on the seven-node input image. Headline results, so this file is not silently
+> stale: A and B were **indistinguishable to the program**, with
+> `BridgeLinkOk → False` **0.50 s** after the last heartbeat change in both;
+> case **D was NOT detected** — the frozen read-back held a **non-zero**
+> `ConveyorBeltSpeed`, which blinds term D1, and term D2 could not fire either
+> (§B.13 F2). Case **C was not performed**: it requires stopping the CPU. The
+> session-hold figure of "What none of this establishes" is now measured:
+> **11.79 s** after SIGKILL, **0.0 s** after SIGTERM (§B.8).
+>
+> Nothing below is re-run or edited by that work; each record stays qualified by
+> the environment that produced it.
+
 ## Target environment for the PLCSIM re-run — commissioning phase 0, owner-verified in tool 2026-07-27
 
 The four cases below were run **in the container, against the test double**, and
-are unchanged. The PLCSIM repeat they call for — "What none of this establishes",
-below, and `EVIDENCE_LATENCY.md` Section B item 6 — will run against the stack
-recorded here, which phase 0 of commissioning brought up on the owner's
-engineering workstation.
+are unchanged. The PLCSIM repeat they called for — "What none of this
+establishes", below, and `EVIDENCE_LATENCY.md` Section B item 6 — ran against
+the stack recorded here, which phase 0 of commissioning brought up on the
+owner's engineering workstation.
 
 **What phase 0 proves: the endpoint and the node exposure, and nothing else.**
 No PLC program logic ran, and the bridge was not involved — so phase 0 says

@@ -70,7 +70,7 @@ else. Its whole job is to carry each signal of `docs/interfaces/opcua-nodes.md`
 | `amr_bridge/instrumentation.py` | per-event CSV recording (always on) |
 | `config/bridge.yaml` | endpoint, **both** namespace URIs, BrowseName paths, topic names, cycle period, evidence paths — no thresholds, no tolerances, no timers, and no namespace index |
 | `test_double/` | TEST SCAFFOLDING: an OPC UA server standing in for the S7-1500 |
-| `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check, connect-conformance check |
+| `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check, connect-conformance check, read-only PLC observer (scaffolding) |
 | `EVIDENCE_LATENCY.md`, `EVIDENCE_SIGNAL_LOSS.md`, `EVIDENCE_CONNECT.md`, `evidence/` | dated captures, each qualified by the environment that produced it |
 
 Where the no-logic rule is visible in the code:
@@ -268,4 +268,24 @@ process image, no interlocks, no cycle-running flag, no reset, no threshold.
 `DemoCell/Status/*` and `BridgeLinkOk` are PLC verdicts and stay at their start
 values for a whole run against the double. Nothing observed against it is
 evidence for `plc/demo-cell/SPEC.md`, and the M3 gate closes against PLCSIM
-Advanced, owner-run (`EVIDENCE_LATENCY.md`, second section).
+Advanced — run on 2026-07-27 and recorded in `EVIDENCE_LATENCY.md` Section B,
+which is also where the two program defects that run found are written down.
+
+## Observing the PLC during a PLCSIM run
+
+`plc/demo-cell/SPEC.md` §9 makes the **TIA watch table** the instrument for gate
+exit items (a) and (b). Where that is unavailable, `tools/observe_plc.py` opens
+a **second, read-only** OPC UA session and samples the 15 `DemoCell` nodes plus
+`Server/ServerDiagnosticsSummary/CurrentSessionCount` to CSV:
+
+```
+"$VENV/bin/python" "$REPO/bridge/tools/observe_plc.py" \
+    --endpoint opc.tcp://192.168.53.1:4840 \
+    --out "$REPO/bridge/evidence/plc-observe.csv" --period 0.1 --duration 300
+```
+
+It writes no node and forms no verdict. **It is not the watch table and does not
+substitute for it**: it sees what the server published rather than what the
+program held, and none of the §9 Group 4 internals (`SeqStep`, `SpeedRequest`,
+the latches, `ResetDeviceFault`, timer `ET`s) are on the server at all. Every
+figure it produces is qualified that way in `EVIDENCE_LATENCY.md` §B.1.

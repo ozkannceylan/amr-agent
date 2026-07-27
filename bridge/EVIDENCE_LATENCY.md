@@ -7,11 +7,13 @@ Raw per-event rows: **`evidence/latency-2026-07-27.csv.gz`** (76 191 rows)
 
 This file has three clearly separated sections. **Section A** is the
 in-container run against the test double, produced by m3-04. **Section B** is
-the run against PLCSIM Advanced, which the owner executes and on which the M3
-gate closes (`bridge-design.md` §9.4). **Section C** is a short WSL run added
-by m3-13. Section B carries no measurement yet; its **§B.0** records the
-commissioned target environment (commissioning phase 0, 2026-07-27) that those
-measurements will run against.
+the run against **PLCSIM Advanced with the standard program in RUN**, on which
+the M3 gate closes (`bridge-design.md` §9.4); it was executed on 2026-07-27
+under brief `m3-26` and now carries measurements. **Section C** is a short WSL
+run added by m3-13.
+
+Each section stays qualified by the environment that produced it and none is
+re-run or edited by a later one (LESSONS 2026-07-27).
 
 **Scope of Section A.** It was captured before the panel reset existed, so its
 input image is the six nodes of the day and every "all six" in it is a true
@@ -307,26 +309,38 @@ claimed (invariant 1).
 
 ---
 
-# Section B — PLCSIM Advanced, owner-run
+# Section B — PLCSIM Advanced, live run with the program in RUN
 
-**Not yet performed. The M3 gate closes on this section, not on Section A.**
+**Performed 2026-07-27, 23:10–23:37 local (UTC+02:00), under brief `m3-26`,
+against the owner's running PLCSIM Advanced instance** with the S7-1500
+standard program of `plc/demo-cell/SPEC.md` (m3-05) in RUN, at the owner's
+explicit request. The bridge was pointed at it by **configuration only** —
+one line, `opcua.endpoint` — with no code change and no change to the security
+fields, exactly as §B.0.3 item 1 predicted.
 
-To be captured by the owner, on the engineering workstation, with the S7-1500
-standard program of `plc/demo-cell/SPEC.md` (m3-05) loaded into PLCSIM
-Advanced and the bridge pointed at it by configuration only
-(`opcua.endpoint`, plus the security fields if the server requires them — no
-code change).
+> **Two gate items are NOT claimed here.** Exit items **(a)** and **(b)** of
+> `plc/demo-cell/SPEC.md` §11 are defined against the **TIA watch table** of
+> that document's §9, which is a GUI artifact this run could not produce. What
+> §B.2–§B.5 give instead is the **OPC UA-side equivalent**: the same tags read
+> from the server by a second, read-only client. That is a strictly weaker
+> instrument — it sees what the server published, not what the program held,
+> and it cannot see any §9 Group 4 internal (`SeqStep`, `SpeedRequest`, the
+> latches, `ResetDeviceFault`, timer `ET`s). **It is not the watch table and
+> does not close (a) or (b).** Both remain owner-outstanding (§B.12).
+
+> **This run also found two defects in the PLC program**, both recorded in
+> §B.13 rather than worked around: the **presence verdict never asserted**, so
+> no transport cycle ever reached its dwell; and **signal-loss case D was not
+> detected** for 26 s. Nothing was adjusted to make anything pass.
 
 ## B.0 Commissioned target environment — commissioning phase 0, owner-verified in tool 2026-07-27
 
 This subsection is an **environment record, not a measurement**. It states the
-stack that phase 0 of commissioning brought up and that the owner-executed
-capture list below will run against. Every figure Section B asks for is still
-outstanding. It answers **item 1** of that list for the stack *as commissioned*;
-confirming it at measurement time stays with the owner, together with the two
-elements phase 0 did not fix — the CPU's configured scan cycle, and the network
-path in use at that moment with the confirmation that Tailscale is not in it
-(invariant 8).
+stack that phase 0 of commissioning brought up, and that the m3-26 run of
+§B.1 onwards was then executed against. It answers **item 1** for the stack *as
+commissioned*; the two elements phase 0 did not fix are picked up later — the
+network path with the Tailscale confirmation is **measured in §B.9**, and the
+CPU's configured scan cycle remains **owner-outstanding** (§B.12).
 
 **What phase 0 proves: the endpoint and the node exposure, and nothing else.**
 No PLC program logic ran, and the bridge was not involved in any part of it —
@@ -366,21 +380,23 @@ test double applies here for a different reason. Phase 0 adds **no** measurement
 no scan-cycle contribution, no OPC UA server timing under load, no L4/L7, no
 network path under PROFINET load, and nothing about the four signal-loss cases.
 
-### B.0.3 Consequences for the pending run, as facts
+### B.0.3 Consequences for the run, as facts
 
 1. **The security fields stay as configured.** The server is `None` + anonymous,
    so `security_policy: "none"` with `certificate_path`, `private_key_path` and
    `username` null is the correct setting for this endpoint — invariant 13 is
    untouched because there is no secret to place.
 2. **The requested session timeout is a request, and what the CPU grants for it
-   is unknown.** The config asks for 10 000 ms
-   (`requested_session_timeout_ms`). This server granted 30 000 ms for a
-   3 600 000 ms request — i.e. it revises in the *upward* direction too — so the
-   grant for a 10 000 ms request may land either side of it. The **granted**
-   value is what the run must report, together with the keep-alive derived from
-   it (`bridge-design.md` §3.2; `EVIDENCE_CONNECT.md` records both directions
-   against the test double, and states that a 30 000 ms grant must log a
-   10.000 s keep-alive).
+   was unknown.** The config asks for 10 000 ms
+   (`requested_session_timeout_ms`). Phase 0 saw this server grant 30 000 ms
+   for a 3 600 000 ms request, so the grant for a 10 000 ms request could land
+   either side of it. **Measured in the m3-26 run (§B.2): granted 10 000 ms —
+   the request as made, not revised at all**, giving a derived keep-alive of
+   **3.333 s**, not the 10.000 s that a 30 000 ms grant would have produced.
+   The two observations are consistent: 30 000 ms is this CPU's **cap**, and a
+   request below the cap is honoured unchanged. The **granted** value is the
+   only one any behaviour uses (`bridge-design.md` §3.2), and this run confirms
+   the bridge derives from it rather than from the request.
 3. **The browse root is not the same as the test double's, and this is not an
    endpoint-only change.** On this server `DemoCell` is nested one level deeper,
    under `ServerInterfaces`, and `ServerInterfaces` belongs to the **Siemens**
@@ -398,45 +414,433 @@ network path under PROFINET load, and nothing about the four signal-loss cases.
 Sections A and C are unaffected: each remains qualified by the environment that
 produced it, and neither is re-run or edited here.
 
-What the owner must capture:
+## B.1 What was run, and how it was instrumented
 
-1. **Environment** — PLCSIM Advanced version, TIA Portal version, CPU type and
-   firmware, whether hardware or PLCSIM, the network path between the bridge
-   host and the PLC (adapter, switch, any VPN — and confirmation that Tailscale
-   is *not* in that path, invariant 8), and the PLC's configured scan cycle /
-   OPC UA server settings.
-2. **The same statistics table as §A.4**, produced by the same command:
-   `tools/summarize_latency.py evidence/latency-<date>-plcsim.csv`. Same
-   intervals, same statistics: count, min, median, p95, max — never a bare
-   mean.
-3. **L4 as a bound, plus the PLC's own view.** With the program running, the
-   TIA watch table can timestamp the output change on the PLC side; report the
-   poll phase as the bound it is, and say what the watch table showed.
-4. **L7, the closed loop**, now that a real program responds to an input:
-   bridge writes a nominated `DemoCell/Input/` value → PLC scan → the resulting
-   `ConveyorSpeedCommand` read back. This is the only end-to-end number, and it
-   includes one PLC scan.
-5. **The startup rule against the real DB start values** — that
-   `BridgeHeartbeat` does not advance until all six inputs carry real samples,
-   and that the DB start values of §6.3 are what the program sees before that.
-6. **The four signal-loss cases of `EVIDENCE_SIGNAL_LOSS.md` repeated against
-   PLCSIM**, including what the standard program *does* in each (the reaction
-   is PLC content: drop the cycle-running flag, command 0.0, require a
-   monitored edge-triggered reset — and confirmation that a returning heartbeat
-   alone does **not** restart the conveyor).
-7. **Session behaviour on a real server**: how long the S7-1500 holds a session
-   after a bridge SIGKILL, which is the one place the in-container result is
-   known not to transfer (see `EVIDENCE_SIGNAL_LOSS.md` §A) — bounded above by
-   the **granted** session timeout, so record that value next to the measurement
-   (`bridge-design.md` §3.2 S5).
-8. **A note on which server produced each number**, per `bridge-design.md` §10:
-   the test double must never be running on the same endpoint during this run.
-9. **The connect lines**, which are new since m3-21: both namespace indices as
-   PLCSIM presents them, the resolved
-   `browse path: Objects/<n>:ServerInterfaces/<m>:DemoCell`, and the requested /
-   granted session timeout with the keep-alive derived from the granted value.
-   `EVIDENCE_CONNECT.md` § "What the owner should check in the PLCSIM run" is the
-   checklist; the conformance harness itself stays off this endpoint.
+Four bridge sessions across two Gazebo sessions, all against the one live
+endpoint. The panel was driven only by `tools/cell_stimulus.py` on a fixed
+timeline; no input node was ever forced or written by hand.
+
+| Session | Evidence CSV (gzipped) | Span | Ended by | Purpose |
+|---|---|---|---|---|
+| bridge #1 | `evidence/latency-2026-07-27-plcsim-main.csv.gz` | 225.1 s | **SIGKILL** (case A) | T1, T2, the L7 demand, T4.9 |
+| bridge #2 | `evidence/latency-2026-07-27-plcsim-caseA2.csv.gz` | 68.1 s | **SIGTERM** (case B) | T4.2, T4.3 |
+| bridge #3 | `evidence/latency-2026-07-27-plcsim-caseD.csv.gz` | 64.2 s | SIGTERM | T4.6, T4.7 |
+| bridge #4 | `evidence/latency-2026-07-27-plcsim-l7.csv.gz` | 144.9 s | `--duration` | supplementary L7 samples |
+
+Because the watch table was unavailable, the PLC side was observed instead by
+**`tools/observe_plc.py`** (added by this brief), a **read-only** second OPC UA
+client sampling all 15 `DemoCell` nodes plus the standard
+`Server/ServerDiagnosticsSummary/CurrentSessionCount` at **10 Hz**:
+
+* `evidence/plc-observe-2026-07-27-plcsim-main.csv.gz` — 3 907 rows, 394 s
+* `evidence/plc-observe-2026-07-27-plcsim-l7.csv.gz` — the supplementary run
+
+Every timing in §B.8 is quantised by that 0.1 s period and is an observation of
+**what the server published**, never of the OB call in which the program acted.
+`CurrentSessionCount` read **1** before the bridge connected, confirming that no
+other client (and in particular **no test double**, `bridge-design.md` §10) was
+on this endpoint at any point.
+
+## B.2 Connect lines, as logged (item 9)
+
+Identical on all four sessions, re-emitted at every session establishment:
+
+```
+session timeout: requested 10000 ms, granted 10000 ms - granted as requested;
+                 the granted value is the only one in force (§3.2 S2)
+secure channel lifetime: requested 3600000 ms, granted 3600000 ms
+keep-alive interval 3.333 s = granted 10000 ms / 3 (§3.2 S3)
+namespace http://www.siemens.com/simatic-s7-opcua (server_interfaces) -> index 3
+namespace http://DemoCell (interface)                                 -> index 4
+browse path: Objects/3:ServerInterfaces/4:DemoCell
+all node DataTypes match opcua-nodes.md §9
+session established, 15 nodes resolved
+```
+
+Four things this settles, none of which Section A could:
+
+1. **Both namespaces resolve by URI on the real CPU**, to **3** and **4** —
+   different from the double's 5 and 6, which is exactly why no index is
+   hardcoded (§3.1 N4). ADR 0006's derived URI `http://DemoCell` is present on
+   the server as specified.
+2. **15 nodes**, matching `opcua-nodes.md` §9 and §B.0.1, with every DataType
+   verified against the document.
+3. **The granted session timeout is 10 000 ms, not 30 000 ms** — see §B.0.3
+   item 2. The derived keep-alive is therefore **3.333 s**. The brief's
+   expectation of a 10.000 s keep-alive against a 30 000 ms grant did **not**
+   hold, and the measured value is reported instead.
+4. **`reconnects = 0` in every session.** No session was lost in 502 s of
+   connected time other than by the deliberate kills.
+
+## B.3 Cycle rate and overruns (item 2)
+
+| Session | cycles | achieved rate | period min / med / p95 / max (ms) | `cycle_overruns` |
+|---|---|---|---|---|
+| #1 main | 4 503 | **20.00 Hz** | 42.236 / 50.015 / 51.439 / 57.162 | **0** |
+| #2 caseA2 | 1 362 | 20.01 Hz | 45.344 / 50.007 / 51.403 / 55.117 | **0** |
+| #3 caseD | 1 284 | 20.02 Hz | 45.784 / 49.996 / 51.305 / 54.516 | **0** |
+| #4 l7 | 2 899 | 20.01 Hz | 48.177 / 49.987 / 50.931 / 51.671 | **0** |
+
+The 20 Hz expectation of `opcua-nodes.md` §9.2 is met against the real CPU.
+`cycle_overruns` is the bridge's own definition — the cycle's *work* overran the
+50 ms deadline — so an R1 above 50 ms is scheduling jitter and is not counted as
+one; there were 0 of the former and a long tail of the latter, and the bridge
+never compensates for either.
+
+Session #1 was SIGKILLed, so `main.py`'s `finally` block never ran and its CSV
+carries **no** `run`/`counter`/`R3` tail. That is case A behaving correctly, not
+a lost measurement: the rate above is derived from the `R1` rows that are
+present, and the counters below are quoted from the sessions that ended
+cleanly. Session #1's file also carries **no `session,disconnect` row**, where
+#2, #3 and #4 all carry `clean shutdown` — the sharpest artefact of A versus B
+anywhere in this evidence.
+
+Counters, session #4 (145.0 s, clean exit):
+
+| counter | value |  | counter | value |
+|---|---|---|---|---|
+| cycles | 2 900 | | write_errors | **0** |
+| cycle_overruns | **0** | | read_errors | **0** |
+| publishes | 2 900 | | reconnects | **0** |
+| heartbeat_writes | 2 892 | | nonfinite_range_samples | 0 |
+| heartbeat_suppressed_cycles | 8 | | missing_joint_name / empty_scan | 0 / 0 |
+
+## B.4 Statistics — count, min, median, p95, max (item 2)
+
+Milliseconds, `CLOCK_MONOTONIC`, produced by `tools/summarize_latency.py`.
+**All seven inputs appear**, which Section A could not do (it predates
+`PanelResetPressed`). Session #1, the main run:
+
+| ID | signal | count | min | median | p95 | max |
+|---|---|---|---|---|---|---|
+| L1 | `ConveyorBeltPosition` | 4504 | 0.374 | 1.252 | 5.919 | 11.334 |
+| L1 | `ConveyorBeltSpeed` | 4504 | 0.246 | 0.829 | 5.389 | 10.461 |
+| L1 | `ProductSensorRange` | 4504 | 0.330 | 19.022 | 37.608 | 50.126 |
+| L1 | `PanelStartPressed` | 19 | 4.905 | 27.110 | 50.389 | 50.389 |
+| L1 | `PanelResetPressed` | 15 | 5.353 | 17.796 | 45.895 | 45.895 |
+| L1 | `PanelStopCircuitClosed` | 5 | 11.427 | 19.355 | 23.834 | 23.834 |
+| L1 | `PanelProcessStopCircuitClosed` | 9 | 4.937 | 31.232 | 49.246 | 49.246 |
+| L2 | `ConveyorBeltPosition` | 4504 | 0.520 | 1.307 | 3.044 | 8.135 |
+| L2 | `ConveyorBeltSpeed` | 4504 | 0.441 | 1.128 | 2.937 | 7.601 |
+| L2 | `ProductSensorRange` | 4504 | 0.424 | 1.069 | 2.758 | 37.524 |
+| L2 | `PanelStartPressed` | 19 | 0.469 | 0.931 | 2.653 | 2.653 |
+| L2 | `PanelResetPressed` | 15 | 0.579 | 1.165 | 2.615 | 2.615 |
+| L2 | `PanelStopCircuitClosed` | 5 | 0.595 | 1.170 | 1.710 | 1.710 |
+| L2 | `PanelProcessStopCircuitClosed` | 9 | 0.493 | 1.092 | 1.942 | 1.942 |
+| L2 | `BridgeHeartbeat` | 4500 | 0.406 | 1.039 | 2.751 | 7.963 |
+| L3 | `ConveyorBeltPosition` | 4504 | 0.970 | 2.760 | 7.788 | 13.035 |
+| L3 | `ConveyorBeltSpeed` | 4504 | 0.755 | 2.316 | 7.097 | 11.527 |
+| L3 | `ProductSensorRange` | 4504 | 0.848 | 20.368 | 38.906 | 64.703 |
+| L3 | `PanelStartPressed` | 19 | 5.791 | 27.826 | 51.209 | 51.209 |
+| L3 | `PanelResetPressed` | 15 | 7.969 | 18.963 | 47.631 | 47.631 |
+| L3 | `PanelStopCircuitClosed` | 5 | 12.369 | 19.952 | 25.006 | 25.006 |
+| L3 | `PanelProcessStopCircuitClosed` | 9 | 5.798 | 33.178 | 50.280 | 50.280 |
+| L5 | `cmd_speed` | 4504 | 0.053 | 0.120 | 0.261 | 1.862 |
+| L6 | `cmd_speed → belt_velocity ≥ 50 %` (**sim**) | 5 | 2.000 | 4.000 | 4.000 | 4.000 |
+| R1 | cycle period | 4503 | 42.236 | 50.015 | 51.439 | 57.162 |
+| — | OPC UA read round trip (`ConveyorSpeedCommand`) | 4504 | 0.605 | 1.723 | 3.830 | 9.483 |
+
+Reading them against Section A, which is the point of having both:
+
+* **L2 is the number Section A could not honestly produce**, because a Python
+  server over loopback is not an S7-1500 over a virtual adapter. The real CPU's
+  write handling costs a median of **1.07–1.31 ms** and a p95 of **2.8–3.0 ms**
+  — the same order as the double's 0.9–1.0 ms, so the double was not
+  flattering. §A.7's "every number here is a lower bound" is confirmed, and the
+  margin is small.
+* **L1 is unchanged in character**: decimation age, not cost. The photo-eye's
+  median 19.0 ms is still roughly half its 33 ms source period.
+* **The panel-contact counts are small on purpose.** Contacts are written on
+  change (§5), so 19 / 15 / 5 / 9 writes in 225 s is one per commanded
+  transition plus the connect refresh, and the 1 Hz republished identical levels
+  produce nothing. The decimation ratios (session #4) run from 8.4 : 1 for
+  `PanelStartPressed` to 47.7 : 1 for `PanelStopCircuitClosed`, and 25.01 : 1
+  for the belt encoder — 72 326 samples received, 2 892 written, the other
+  69 434 overwritten in a depth-1 slot and contributing to nothing.
+* **L3's `ProductSensorRange` maximum of 64.7 ms** is the one figure materially
+  worse than Section A's, and it is an L1 tail (a late scan sample), not an
+  L2 tail.
+
+## B.5 L7 — the closed loop, now that a real program answers (item 4)
+
+This is the number Section A could not produce at all (§A.6): it requires a
+program that *reacts*, not a server that echoes. **The bridge does not emit an
+L7 row**; the value below is derived after the run from rows the bridge already
+recorded, all on one clock:
+
+> **start** = `t_end_ns` of the `L2` row for the nominated input write — the
+> instant the **server acknowledged** it.
+> **end** = `t_end_ns` of the first `read_rt` row for `ConveyorSpeedCommand`
+> whose value differs from the one in force before.
+
+The nominated input is the one `plc/demo-cell/SPEC.md` §11 T3 names: a stop
+circuit **opening while the belt runs**, whose answer is
+`ConveyorSpeedCommand → 0.0` — a real program reaction, not an echo.
+
+| # | nominated input | cmd before | cmd after | L7 (ms) | session |
+|---|---|---|---|---|---|
+| 1 | `PanelProcessStopCircuitClosed` | −0.150 | 0.000 | **36.4** | #1 main |
+| 2 | `PanelProcessStopCircuitClosed` | +0.150 | 0.000 | **46.6** | #4 l7 |
+| 3 | `PanelProcessStopCircuitClosed` | +0.150 | 0.000 | **47.4** | #4 l7 |
+| 4 | `PanelStopCircuitClosed` | +0.150 | 0.000 | **46.9** | #4 l7 |
+| 5 | `PanelProcessStopCircuitClosed` | +0.150 | 0.000 | **47.7** | #4 l7 |
+| 6 | `PanelProcessStopCircuitClosed` | +0.150 | 0.000 | **46.4** | #4 l7 |
+
+**count 6, min 36.4, median 46.8, p95 47.7, max 47.7 ms.**
+
+What that interval does and does not contain, stated so the number is not
+over-read:
+
+* it **contains** the server's transfer of the written value into the process
+  image, **at least one OB30 scan**, the server's sampling of the program's
+  output, and **the bridge's own poll phase of 0–50 ms**, because the output is
+  read once per 50 ms cycle;
+* it is therefore **quantised by the 50 ms poll** and is an **upper bound** on
+  the PLC's reaction, never a measurement of it. The clustering at 46–48 ms
+  with a single 36.4 ms outlier is the poll phase showing through, not the
+  program varying;
+* **L4 cannot be separated out from the client side** (§A.6), so it is not.
+
+Only session #1's single event fell inside the main run: the timeline's later
+interlock drops all landed while the command was already `0.0`, for the reason
+in §B.13 F1, so they produced no observable reaction and are correctly absent
+from the table. Session #4 was run afterwards for the sole purpose of
+collecting the remaining five, with the same code and the same config.
+
+## B.6 Startup rule against the real DB start values (item 5)
+
+Now with **seven** inputs, not the six of Section A. From the bridge log, at
+every one of the four connects:
+
+```
+heartbeat withheld: no real sample yet for ConveyorBeltPosition,
+  ConveyorBeltSpeed, ProductSensorRange, PanelStartPressed, PanelResetPressed,
+  PanelStopCircuitClosed, PanelProcessStopCircuitClosed (startup rule R3)
+...
+startup rule satisfied: all 7 DemoCell/Input nodes carry a real cell sample;
+  heartbeat begins advancing at 1
+```
+
+`heartbeat_suppressed_cycles` = 8 (#4), 11 (#2), 17 (#3) — i.e. the heartbeat
+was withheld for 0.4–0.85 s while the seven inputs filled, and `BridgeLinkOk`
+went `True` **0.8 s** after process start in the main run. Before that the
+observer read the program's own start values through the server, and
+`BridgeLinkOk` was `False`, exactly as `SPEC.md` §3.1/§6.1 require.
+
+**A cold start of the CPU was not part of this run** and could not be — it means
+stopping the owner's CPU. T4.8 and T4.9b stay owner-outstanding (§B.12).
+
+One observation that bears on the cold start anyway. Before any bridge had ever
+connected, the owner read `CellProcessStopActive` **True** and
+`CellResetRequired` **True**, and the independent probe at the start of this
+brief read the same. `CellResetRequired` is explained by `LinkLostLatch`.
+`CellProcessStopActive` requires `ProcessStopLatch`, which §7 part 4 gates on
+`linkOk` — and `linkOk` **is** `True` for the first ~25 OB calls, because
+`HeartbeatStaleTimer.Q` is still `False` in the scan the timer starts. During
+that 500 ms window the stop circuits still read their non-permissive start value
+`FALSE`, so the latch sets. **This is an inference from the specification, not
+an observation of the cold start** — the CPU was already running when this brief
+began — but it is consistent with everything measured and needs no defect to
+explain it.
+
+## B.7 Signal-loss cases against PLCSIM (item 6)
+
+Repeating `EVIDENCE_SIGNAL_LOSS.md`'s four cases against a CPU that is actually
+running a program. Timings from the 10 Hz observer, so ±0.1 s.
+
+| Case | How it was produced | What the program did | Verdict |
+|---|---|---|---|
+| **A** — bridge SIGKILL | `kill -9` bridge #1 at t=227.6 s | heartbeat froze at **4537**; `BridgeLinkOk → False` **0.50 s** later; `CellResetRequired → True` in the same sample; command already `0.0` | **as specified** |
+| **B** — bridge SIGTERM | `kill -15` bridge #2 at t=311.4 s | heartbeat froze at **1352**; `BridgeLinkOk → False` **0.51 s** later; `CellResetRequired → True` | **identical to A at the program**, as §8 requires |
+| **C** — link loss / CPU stop | **not performed** | — | **owner-outstanding**: it requires stopping the CPU or its adapter, which this brief is forbidden to do |
+| **D** — simulation killed, bridge alive | `kill -9` the gz server at t≈363 s | heartbeat **kept advancing** (767 → 1251), `BridgeLinkOk` stayed **True**, input image froze bit-identically — and **`ConveyorDriveFault` never latched** for 26 s | **FAILED — see §B.13 F2** |
+
+The 0.50 / 0.51 s figures are `HEARTBEAT_STALE_TIME` = 500 ms measured three
+times independently (a third instance at t=389.2 gave 0.50 s), so that constant
+needs no revision: `SPEC.md` open item 1 closes at **500 ms**, and the worst
+cycle period seen here was 57.2 ms, about 9 missed beats of margin.
+
+**No auto-resume, three times.** After each link restoration the cycle stayed
+down until a *separate* start press: +36.0 s, +39.0 s and +8.9 s, each after a
+reset. A returning heartbeat restarted nothing, and the first command delivered
+after every reconnect was `0.0`.
+
+**T4.9, the stuck reset — passes exactly.** With `reset` published `true` and
+**left published**, a process stop was latched at t=194.8 (`CellProcessStopActive`
+and `CellResetRequired → True`) and stayed latched for the whole 18 s the button
+was held. Releasing at t=212.7 changed nothing; the *new* rising edge at t=214.8
+cleared both in the same 0.1 s sample. There is no edge to act on while the
+contact is held, and no elapsed time makes one appear.
+
+**T4.7 could not be executed**: it presupposes a latched `ConveyorDriveFault`,
+which §B.13 F2 explains never occurred. The reset and start pressed at t=372.8
+and t=376.8 therefore acted on a cell with no latch pending and a cycle already
+running, and changed nothing.
+
+## B.8 Session behaviour on a real server (item 7)
+
+The one in-container result known not to transfer (`EVIDENCE_SIGNAL_LOSS.md`
+§A.4), now measured on the CPU via `CurrentSessionCount`:
+
+| Event | Session dropped after | Against a granted timeout of |
+|---|---|---|
+| bridge **SIGKILL** (case A) | **11.79 s** | 10 000 ms |
+| bridge **SIGTERM** (case B) | **0.0 s** — closed in the same sample | 10 000 ms |
+
+The killed client's session outlives it by roughly the granted timeout plus the
+server's reaping granularity, which is the expected shape (§3.2 S5). **This is
+the only measurable difference between A and B**, it lives at the session layer,
+and the standard program neither sees it nor should: §8 requires A and B to be
+indistinguishable to the program, and §B.7 confirms they were.
+
+## B.9 Environment and the network path (item 1)
+
+| Item | Value |
+|---|---|
+| Engineering tool / simulator | TIA Portal V21 / S7-PLCSIM Advanced V7.0 (§B.0) |
+| CPU | CPU 1513-1 PN, firmware V3.1, **simulated, not hardware** |
+| Endpoint / security | `opc.tcp://192.168.53.1:4840`, policy **None**, anonymous |
+| Bridge host | WSL2 Ubuntu 24.04, kernel 5.15.167.4-microsoft-standard-WSL2, headless GUI via WSLg (llvmpipe), repo on `/mnt/c` |
+| Runtime | ROS 2 Jazzy, Gazebo Sim 8.11.0, Python 3.12, `asyncua` 2.0.1 in `/home/ozkan/amr-bridge-venv` |
+| Isolation | `ROS_DOMAIN_ID=93`, `GZ_PARTITION=m326live` |
+
+**The network path, measured rather than asserted (invariant 8).** The bridge
+runs in WSL2 and the PLCSIM adapter is Windows-side, so whether WSL2's NAT
+reaches it was the first thing tested, before anything else:
+
+```
+WSL:  ping 192.168.53.1        -> 3/3, rtt 0.510/0.650/0.835 ms, ttl 254
+WSL:  TCP connect to :4840     -> open
+WSL:  asyncua connect + read   -> 15 nodes, ns 3 and 4 resolved
+WSL:  ip route                 -> default via 172.19.176.1 dev eth0 (172.19.180.72/20)
+Win:  Find-NetRoute 192.168.53.1 -> InterfaceAlias "Ethernet 2", NextHop 0.0.0.0 (on-link)
+Win:  Get-NetRoute 192.168.53.0/24 -> "Ethernet 2" only, metric 256
+```
+
+So the path is: **WSL2 `eth0` 172.19.180.72 → Hyper-V `vEthernet (WSL)`
+172.19.176.1 → host route → `Ethernet 2` (PLCSIM virtual adapter)
+192.168.53.241 → instance 192.168.53.1.** One router hop, consistent with
+TTL 254. There is **no switch and no VPN in it**.
+
+**Tailscale is not in that path.** Its adapter exists and is `Up`, but
+`Get-NetRoute` shows the only route to `192.168.53.0/24` is the on-link route on
+`Ethernet 2`; Tailscale carries none. Invariant 8 holds for this measurement,
+and the evidence is the routing table rather than a statement of intent. (Its
+IPv4 is an APIPA `169.254.83.107`, i.e. no tailnet address was even assigned.)
+
+**The CPU's configured scan cycle is not recorded here** — the OB30 period is a
+TIA project setting and the CPU's cycle-time diagnostics are not on the
+`DemoCell` interface. It stays owner-outstanding (§B.12).
+
+## B.10 Which server produced each number (item 8)
+
+Every figure in Section B came from `opc.tcp://192.168.53.1:4840`, the PLCSIM
+Advanced instance with the program in RUN. **The test double was not running at
+any point during this run**, on this endpoint or any other, and
+`CurrentSessionCount` = 1 before the bridge connected corroborates it. The
+connect-conformance harness was likewise kept off this endpoint
+(`bridge-design.md` §10); `EVIDENCE_CONNECT.md` remains a test-double record.
+
+## B.11 The one configuration change, and nothing else
+
+`bridge/config/bridge.yaml` → `opcua.endpoint` was changed from the test
+double's loopback URL to `opc.tcp://192.168.53.1:4840`. **No other file in
+`bridge/` was edited to make this run work**, no security field moved (the
+server is None + anonymous, so the configured nulls were already correct), no
+namespace index was hardcoded, and no code path differs from the one Sections A
+and C exercised. `tools/observe_plc.py` was **added** for the observation
+described in §B.1; it writes nothing and is not in the transport path.
+
+## B.12 What this run did not establish — owner-outstanding
+
+| # | Item | Why it is still open |
+|---|---|---|
+| 1 | **Gate exit item (a)** — Gazebo sensor state as PLC inputs *in the watch table* | The instrument is the TIA watch table of `SPEC.md` §9. §B.4 and the observer show the same tags over OPC UA, which is a weaker view and **is not the watch table** |
+| 2 | **Gate exit item (b)** — PLC output driving the actuator *in the watch table* | Same. The OPC UA-side equivalent is in §B.4/§B.7 and the loop demonstrably ran (§B.5), but (b) as written is not met by it |
+| 3 | **The CPU's configured scan cycle** and the CPU's max cycle time | TIA/CPU diagnostics, not on the `DemoCell` interface (§B.9) |
+| 4 | **L4 on the PLC side** | Needs the watch table to timestamp the output change inside the CPU; from the client it stays the bound of §A.6 |
+| 5 | **Signal-loss case C** | Requires stopping the CPU or its adapter (§B.7) |
+| 6 | **T4.8 / T4.9b — cold start of the CPU** | Requires cold-starting the owner's CPU; see the inference in §B.6 |
+| 7 | **T4.10 for hardware** | §B.8 measures PLCSIM Advanced; real S7-1500 hardware may reap differently |
+| 8 | **T2.2–T2.4, the dwell at the beam** | Not reachable while §B.13 F1 stands |
+
+## B.13 Findings that belong to the PLC program
+
+Both were found by running the specification, are recorded exactly as observed,
+and **nothing was changed to work around either**. Neither is a bridge defect:
+the bridge carried the correct values in both cases, which is how they became
+visible.
+
+### F1 — the presence verdict never asserted, so no cycle ever reached its dwell
+
+The photo-eye works and the bridge carries it faithfully. During the first
+transport, the PLC's own `ProductSensorRange` node went **1.4401 → 0.5400 m at
+t=47.10 s and stayed there until t=48.92 s** — 1.8 s, against a
+`PRESENCE_FILTER` of 100 ms — and `0.540` is precisely the "product in the beam"
+value `SPEC.md` §9 predicts. `RANGE_MIN`/`RANGE_MAX` are 0.05/3.00, so
+`RangeValid` was true throughout.
+
+**`ProductPresentAtSensor` stayed `False` for the entire 394 s run** — it never
+once changed state. Consequently `SeqStep` never advanced 10 → 20, there was no
+dwell, no reversal at the beam, and the transport step instead ran on to the
+soft limit: at **t=54.96 s, position 2.4123 m ≥ `SOFT_LIMIT` 2.40**, the step
+aborted, `SequenceFaultLatch` set, `CellCycleRunning → False`,
+`ConveyorSpeedCommand → 0.0` and `CellResetRequired → True`. The same thing
+happened on every subsequent transport.
+
+Two things worth separating:
+
+* **The soft-limit abort of §6.5 works, and is what kept the cell safe** — the
+  program stopped the belt 0.09 m before the ±2.50 m mechanical stop, every
+  time, and required a monitored reset afterwards.
+* **The presence verdict of §6.2 did not run.** The evidence cannot say which
+  half is at fault (the filter timers, the hysteresis, or the verdict never
+  being written), because none of §9 Group 4 is on the server. **The watch table
+  is the instrument that would distinguish them**, and this is the strongest
+  reason to run T1/T2 with it open.
+
+The re-home branch of §6.3 was exercised **six times** and worked correctly on
+every one: with the belt off home, start selected `SeqStep` 30 at −0.15 m/s and
+completed at `ABS(pos) ≤ HOME_WINDOW`. Every instance began from the **positive**
+side of home; the branch's behaviour from the negative side was not exercised.
+
+### F2 — signal-loss case D was not detected for 26 s
+
+The gz server was killed at t≈363 s with the belt transporting. The case D
+signature appeared exactly as §8 predicts: heartbeat **kept advancing** (767 →
+1251), `BridgeLinkOk` stayed **True**, and the input image froze bit-identically
+at `position = 0.9273`, `speed = 0.1500`. From the PLC's side the link looked
+perfect.
+
+`ConveyorDriveFault` **stayed `False`**. For **26 s** the program commanded
+`+0.15 m/s` into a cell that no longer existed. The cycle was finally dropped
+only at t=389.7, by `LinkLostLatch`, when bridge #3 was stopped — i.e. by the
+heartbeat mechanism, not by the drive-fault mechanism that §8 nominates for
+this case.
+
+The reason is visible in the specification itself:
+
+* **D1 cannot fire.** It needs `ABS(ConveyorBeltSpeed) ≤ SPEED_TOLERANCE`, but
+  the frozen read-back is **0.1500**, not zero. The in-container case D froze at
+  `3.2e-28` because the belt was nearly stopped then; freeze the image *while
+  the belt is moving* and D1 is blind by construction. `SPEC.md` §8 already
+  anticipates this — it is why D2 exists.
+* **D2 cannot fire either, and this is the defect.** In §7 part 3,
+  `PosWindowArmed` latches `TRUE` on the first scan of motion and is cleared
+  only by `NOT beltMoving`. So `PositionRef` is sampled **once, at the start of
+  the motion, and never re-armed while motion continues** — the window never
+  slides. By the time of the freeze the belt had travelled from 0.3093 to
+  0.9273, so `ABS(position − PositionRef)` was ≈ **0.62 m** against a
+  `POSITION_FREEZE_BAND` of **0.005 m**, and stayed there. D2's comparison can
+  only be satisfied if the freeze happens within roughly the first 33 ms of a
+  motion.
+
+**Net effect: a simulation frozen at any non-zero speed after the first fraction
+of a second of travel is undetectable by either term.** The honest limit
+`SPEC.md` §6.6 already states for the *idle* sub-case turns out to extend to the
+moving case as well. Fixing it is a change to `plc/demo-cell/SPEC.md` §6.6/§7 —
+a re-arming window, not a bridge change — and belongs to the `plc` agent, not
+here.
 
 ---
 

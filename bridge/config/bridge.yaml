@@ -15,12 +15,13 @@
 
 opcua:
   # The bridge connects OUT to this endpoint. It never listens (invariant 4).
-  # The value below is the test double. For the PLCSIM run, swap it for the
-  # commissioned endpoint  opc.tcp://192.168.53.1:4840  (commissioning phase 0,
-  # EVIDENCE_LATENCY.md §B.0) — that swap is the only edit this file needs
-  # between the double and PLCSIM, and the double must not be running on the
-  # same endpoint (bridge-design.md §10).
-  endpoint: "opc.tcp://127.0.0.1:4840/amr-agent/celldouble/"
+  # The value below is the commissioned PLCSIM Advanced instance
+  # (EVIDENCE_LATENCY.md §B.0), and it is what the m3-26 run of Section B was
+  # measured against. The test double lives on
+  #   opc.tcp://127.0.0.1:4840/amr-agent/celldouble/
+  # and must not be running while this endpoint is in use — swapping this one
+  # line is the whole difference between the two (bridge-design.md §10).
+  endpoint: "opc.tcp://192.168.53.1:4840"
 
   # The browse path crosses TWO namespaces (bridge-design.md §3.1 N2). Both are
   # resolved to an index by URI at every session establishment; neither index
