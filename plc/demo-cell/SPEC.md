@@ -134,7 +134,7 @@ interface. All live in the instance DB `"DemoCellControl_DB"`.
 | `ResetEdgeMemory` | Bool | **`TRUE`** | Previous state of `PanelResetPressed`, for the rising edge the reset acts on. Start value `TRUE` for the same reason and with the same effect: a reset contact already closed at the first scan produces **no** edge, so a held, bridged or welded-closed reset can never clear a latch |
 | `ResetDeviceFault` | Bool | **`TRUE`** | *The reset contact has not yet been observed open.* Starts `TRUE` and is cleared — permanently, for this program run — the first time `PanelResetPressed` reads `FALSE` while `BridgeLinkOk` is `TRUE`. A welded, bridged or held-at-startup reset therefore stays flagged and is visible in the watch table instead of failing silently. It blocks the reset (§6.7) and nothing else; it never blocks start, which is a different device |
 | `SeqStep` | Int | `0` | 0 Idle, 10 Transport, 20 Dwell, 30 Return, 40 Complete |
-| `DwellTimer`, `StepTimer` | IEC_TIMER (TON) | — | Dwell at the beam; per-step watchdog |
+| `DwellTimer`, `StepTimer` | IEC_TIMER (TON) | — | Dwell at the beam; per-step watchdog. Both are **called unconditionally, outside the `CASE`**, with `IN` set to the "this step is active" condition, so leaving the step releases the timer (§6.5). Neither is ever called with `IN := TRUE` |
 | `PresenceOnTimer`, `PresenceOffTimer` | IEC_TIMER (TON) | — | Filter time on the presence verdict, both directions |
 | `RangeInvalidTimer` | IEC_TIMER (TON) | — | Delay before a bad range becomes a fault |
 | `DriveFaultTimer` | IEC_TIMER (TON) | — | Delay on the drive-disagreement condition |
@@ -329,23 +329,51 @@ tags to have come from the same bridge cycle.
 and passes `NaN` and `inf` through unchanged, by design (`bridge-design.md`
 §4.5). A naive `range < 1.00` returns **FALSE for `NaN`**, i.e. "no product",
 which is the wrong direction for a stop condition — so the program tests
-plausibility *first* and never relies on the comparison alone:
+plausibility *first*, against the physical window, and never relies on the
+process comparison alone:
 
 ```
-RangeValid := IS_VALID(ProductSensorRange)                     -- see note
-              AND ProductSensorRange >= RANGE_MIN
-              AND ProductSensorRange <= RANGE_MAX
+RangeValid :=     ProductSensorRange >= RANGE_MIN      -- affirmative AND of two
+              AND ProductSensorRange <= RANGE_MAX      -- window comparisons
+-- the fault is taken in the ELSE, i.e. from NOT RangeValid. See below.
 ```
 
-Both range comparisons are false for `NaN` and for `+inf`, so the explicit range
-test already rejects them; `IS_VALID` is belt and braces and documents the
-intent. *Note: in TIA the instruction is under Basic instructions → Comparator
-operations → "OK — Check validity" (SCL `IS_VALID`); confirm the mnemonic in your
-TIA version, and if it is unavailable the two range comparisons alone are
-sufficient.*
+> **Normative — the affirmative form is the mechanism, not a matter of taste.**
+> Every plausibility test in this program is written as an **affirmative `AND`
+> of comparisons against the physical window**, with the **fault taken in the
+> `ELSE` branch** — that is, from `NOT RangeValid`, never from a comparison that
+> is itself negated. It is never written as a negated out-of-window test such as
+> `NOT (x < RANGE_MIN OR x > RANGE_MAX)`.
+>
+> The two forms are equivalent for every real number and **opposite for `NaN`**,
+> because every comparison against `NaN` returns `FALSE`:
+>
+> | Form | `NaN` evaluates to | Verdict | Consequence |
+> |---|---|---|---|
+> | Affirmative `(x >= MIN) AND (x <= MAX)` | `FALSE AND FALSE` | **not valid** | `SensorFaultLatch` — a broken sensor is rejected |
+> | Negated `NOT (x < MIN OR x > MAX)` | `NOT (FALSE OR FALSE)` | **valid** | `NaN` passes downstream **as a measurement** |
+>
+> A later rewrite that inverts this test therefore silently converts a
+> fault-detecting program into one that trusts a dead photo-eye. If the test is
+> ever expressed in negated form, the explicit validity check **must** be added
+> back in the same edit.
+
+**On `IS_VALID`: optional and redundant *given the form above*, not in general.**
+Both window comparisons are false for `NaN` and for `+inf`, so the affirmative
+test already rejects them and the instruction adds documentation of intent
+rather than behaviour. Write it if you want the intent on the face of the code —
+`RangeValid := IS_VALID(ProductSensorRange) AND …` — and omit it if your TIA
+version does not offer it. *In TIA the instruction is under Basic instructions →
+Comparator operations → "OK — Check validity" (SCL `IS_VALID`); the mnemonic is
+version-dependent.* **What is not optional is the affirmative form that makes
+the omission safe.** Omitting the explicit check under any other form is a
+defect, not a simplification.
 
 `RangeValid` false continuously for `RANGE_FAULT_DELAY`, **while the link is
-OK**, sets `SensorFaultLatch`.
+OK**, sets `SensorFaultLatch`. That is the `ELSE` side of the test doing the
+work: the fault is raised by the *absence* of an affirmative validity verdict,
+so anything the window comparisons cannot affirm — including `NaN` and `inf` —
+ends up here.
 
 Presence, evaluated only while `BridgeLinkOk AND RangeValid`:
 
@@ -473,13 +501,44 @@ expiry sets `SequenceFaultLatch`.
 |---|---|---|---|
 | 0 Idle | `0.0` | start rising edge, `RunPermissive`, no latch → **10 if the belt is home, 30 if it is not** (§6.3) | — |
 | 10 Transport | `TRANSPORT_SPEED` | `ProductPresentAtSensor` → 20 | `ConveyorBeltPosition ≥ SOFT_LIMIT` → `SequenceFaultLatch` |
-| 20 Dwell | `0.0` | `DwellTimer` done → 30 | — |
+| 20 Dwell | `0.0` | `DwellTimer` done → 30 (the timer is released on step exit — see below) | — |
 | 30 Return | `RETURN_SPEED` | `ABS(ConveyorBeltPosition) ≤ HOME_WINDOW` → 40 | `ConveyorBeltPosition ≤ -SOFT_LIMIT` → `SequenceFaultLatch` |
 | 40 Complete | `0.0` | always → 0, and `CellCycleRunning := FALSE` | — |
 
 Any loss of `RunPermissive` in steps 10–30 forces `SeqStep := 0` and drops
 `CellCycleRunning`. There is no "hold the step and continue where we left off":
 the next cycle starts from Idle and re-reads the world (CLAUDE.md §9).
+
+**Normative — a step timer's `IN` is the step's own activity, and the step exit
+is what releases it.** Both step timers are called **unconditionally, once per
+OB call, after the `CASE`** (§7 part 7), with `IN` set to the condition "this
+step is active":
+
+| Timer | `IN` | `PT` | Released when |
+|---|---|---|---|
+| `DwellTimer` | `SeqStep = 20` | `DWELL_TIME` | the dwell step is left, or aborted, or the cell drops |
+| `StepTimer` | `(SeqStep = 10) OR (SeqStep = 30)` | `STEP_TIMEOUT` | no travelling step is active |
+
+Two forms are forbidden, and they are the same mistake twice:
+
+1. **`IN := TRUE`.** A TON whose `IN` is a literal can never be called with `IN`
+   false, so `ET` never returns to zero and `Q` never drops.
+2. **A call placed *inside* the step's own `CASE` branch.** That branch stops
+   executing the moment the step is left, so the release call is never made
+   either — even if `IN` is written as an expression.
+
+Either way the timer is armed once and stays done: the step is *entered* with
+`Q` already `TRUE` on every subsequent visit and is skipped in the same scan.
+Such a timer is correct exactly once, on the first cycle, which is precisely why
+it survives a casual reading. The `IN` of a TON is its release, so it must be an
+expression that can go false **evaluated at a call site that still runs after
+the step has been left**.
+
+The same reasoning does not apply to the timers of §6.2 and §6.6
+(`PresenceOnTimer`, `PresenceOffTimer`, `RangeInvalidTimer`,
+`PositionWindowTimer`, `DriveFaultTimer`, `HeartbeatStaleTimer`): each is driven
+by a level condition that genuinely goes false, and each is re-evaluated on the
+first call after its enclosing condition returns.
 
 ### 6.6 Drive fault — and how case D is caught
 
@@ -600,10 +659,16 @@ IF NOT #linkOk THEN
 END_IF;
 
 // ---- 2. Sensor validity and presence (qualified by the link) -------------
+// Affirmative AND of two window comparisons; the fault is the ELSE of this.
+// NaN and inf make BOTH comparisons false, so they land in the fault branch.
+// NEVER invert this into NOT(x < MIN OR x > MAX): that form returns TRUE for
+// NaN and passes a dead photo-eye downstream as a measurement (§6.2).
 #rangeValid := #linkOk
-    AND IS_VALID("DemoCellInput".ProductSensorRange)          // NaN / inf out
     AND ("DemoCellInput".ProductSensorRange >= #RANGE_MIN)
     AND ("DemoCellInput".ProductSensorRange <= #RANGE_MAX);
+// IS_VALID(...) may be ANDed in as documentation of intent. It is redundant
+// ONLY because the test above is affirmative, and is omitted here on that
+// ground alone (§6.2).
 
 #RangeInvalidTimer(IN := #linkOk AND NOT #rangeValid, PT := #RANGE_FAULT_DELAY);
 IF #RangeInvalidTimer.Q THEN #SensorFaultLatch := TRUE; END_IF;
@@ -712,7 +777,9 @@ CASE #SeqStep OF
         IF "DemoCellInput".ConveyorBeltPosition >= #SOFT_LIMIT THEN
             #SequenceFaultLatch := TRUE; END_IF;
     20: #SpeedRequest := 0.0;
-        #DwellTimer(IN := TRUE, PT := #DWELL_TIME);
+        // The dwell TON is CALLED BELOW, not here: a call inside this branch
+        // would never run again once the step is left, so it could never be
+        // released (§6.5).
         IF #DwellTimer.Q THEN #SeqStep := 30; END_IF;
     30: #SpeedRequest := #RETURN_SPEED;
         IF ABS("DemoCellInput".ConveyorBeltPosition) <= #HOME_WINDOW THEN
@@ -724,6 +791,12 @@ CASE #SeqStep OF
 ELSE
     #SeqStep := 0;  #SpeedRequest := 0.0;
 END_CASE;
+
+// Step timers: called UNCONDITIONALLY, once per OB call, outside the CASE.
+// IN is the step's own activity, so leaving the step is what releases the TON:
+// ET returns to 0 and Q drops, and the next visit to the step dwells again.
+// Never IN := TRUE, and never a call inside the branch it times (§6.5).
+#DwellTimer(IN := (#SeqStep = 20), PT := #DWELL_TIME);
 #StepTimer(IN := (#SeqStep = 10) OR (#SeqStep = 30), PT := #STEP_TIMEOUT);
 IF #StepTimer.Q THEN #SequenceFaultLatch := TRUE; END_IF;
 
@@ -968,15 +1041,46 @@ item 6.
 
 | # | Item | Status |
 |---|---|---|
-| 1 | `IS_VALID` mnemonic and its availability in the owner's TIA version | Confirm at implementation (§6.2). The two range comparisons alone are sufficient if it is absent |
-| 2 | `HEARTBEAT_STALE_TIME` = 500 ms is derived from the in-container 20 Hz run | Re-check against the PLCSIM run (T3) and raise only with evidence |
-| 3 | The OB30 period of 20 ms assumes the bridge's 50 ms cadence | If m3-04's 20 Hz expectation is revised with evidence (`bridge-design.md` §12.7), revise this together with it |
-| 4 | Whether PLCSIM Advanced enforces the OPC UA runtime licence | Owner observes at step 4 of §10 and records it |
-| 5 | The bridge must carry the reset node and its topic (`bridge/config/bridge.yaml`, and `bridge/tools/cell_stimulus.py` if it drives the contact) | `bridge/` work, requested by m3-10 and m3-11. Until it lands, `PanelResetPressed` never leaves its start value and no reset is possible (§11 preconditions) |
+| 1 | `HEARTBEAT_STALE_TIME` = 500 ms is derived from the in-container 20 Hz run | Re-check against the PLCSIM run (T3) and raise only with evidence |
+| 2 | The OB30 period of 20 ms assumes the bridge's 50 ms cadence | If m3-04's 20 Hz expectation is revised with evidence (`bridge-design.md` §12.7), revise this together with it |
+| 3 | Whether PLCSIM Advanced enforces the OPC UA runtime licence | Owner observes at step 4 of §10 and records it |
+| 4 | The bridge must carry the reset node and its topic (`bridge/config/bridge.yaml`, and `bridge/tools/cell_stimulus.py` if it drives the contact) | `bridge/` work, requested by m3-10 and m3-11. Until it lands, `PanelResetPressed` never leaves its start value and no reset is possible (§11 preconditions) |
+| 5 | No plausibility window is specified for `ConveyorBeltPosition` or `ConveyorBeltSpeed`, only for `ProductSensorRange` | Open. Closing it adds an interlock and a constant, so it needs its own decision rather than an edit in passing. See the note below for which comparisons this actually affects and in which direction |
 
-The item that stood here first — *"there is no reset contact in the cell"*, which
-forced the start button to double as the reset device — is **closed**. `m3-10`
-added `/cell/panel/reset` to the cell and verified against a running cell that it
-energizes nothing; `m3-11` added `DemoCell/Input/PanelResetPressed` to the node
-model. §6.7 is written against that contact, and the gesture separation it
-replaced is gone from this document.
+Two items that stood here have been **closed**.
+
+*"There is no reset contact in the cell"*, which forced the start button to
+double as the reset device: `m3-10` added `/cell/panel/reset` to the cell and
+verified against a running cell that it energizes nothing; `m3-11` added
+`DemoCell/Input/PanelResetPressed` to the node model. §6.7 is written against
+that contact, and the gesture separation it replaced is gone from this document.
+
+*"The `IS_VALID` mnemonic and its availability in the owner's TIA version"*: the
+instruction is now stated as **optional and redundant**, and §6.2 states the
+condition under which that is true — the plausibility test is an affirmative
+`AND` of window comparisons with the fault taken in the `ELSE`. The open item was
+never really about the mnemonic; it was about whether the check could be dropped,
+and the answer is that it can be dropped **only** in that form. That condition is
+now normative rather than incidental, so there is nothing left to confirm at
+implementation: write `IS_VALID` or do not, but do not invert the test.
+
+**On new item 5.** `ProductSensorRange` is tested against `[RANGE_MIN,
+RANGE_MAX]` before any process comparison uses it. The two other bridge-written
+Reals are not tested at all, and the bridge passes `NaN` through unchanged for
+them too (`bridge-design.md` §4.5). The consequences are not uniform and should
+be weighed before anything is added:
+
+| Comparison | Where | A `NaN` input gives | Direction |
+|---|---|---|---|
+| `ConveyorBeltPosition >= SOFT_LIMIT` | §6.5 step 10 | `FALSE` → **no abort** | permissive — the soft limit stops protecting |
+| `ConveyorBeltPosition <= -SOFT_LIMIT` | §6.5 step 30 | `FALSE` → **no abort** | permissive — same |
+| `ABS(ConveyorBeltPosition - PositionRef) < POSITION_FREEZE_BAND` | §6.6 D2 | `FALSE` → no D2 | permissive |
+| `ABS(ConveyorBeltPosition) <= HOME_WINDOW` | §6.5 step 30, §6.7 start | `FALSE` → never completes / re-homes | restrictive; the step watchdog catches it |
+| `ABS(ConveyorBeltSpeed) > SPEED_TOLERANCE` | §6.6 D1/D2 | `FALSE` → `beltMoving` false → **D1 trips** under a non-zero command | restrictive; already correct |
+
+So a `NaN` belt speed is already handled the safe way by the affirmative form of
+§6.6, but a `NaN` belt position silently disarms both soft-limit aborts. The
+remedy would follow §6.2 exactly — an affirmative window test on the position,
+its failure treated as a fault rather than as a value — but it adds a latch
+condition and a constant, and that is a control-behaviour decision for its own
+brief, not a correction to be slipped into a reconciliation.
