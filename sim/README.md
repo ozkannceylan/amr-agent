@@ -297,7 +297,7 @@ owner of every process decision in this cell:
 | `ProductSensorRange` | `/cell/product_sensor/scan` | `sensor_msgs/msg/LaserScan` | `ranges[0]` | cell → PLC | Photo-eye beam distance, m. **1.440** with the belt clear (beam reaches the reflector), **0.540** with the product in the beam. `range_min` 0.05, `range_max` 3.0, `frame_id` `ProductSensor/post/beam`. **No threshold is applied in the cell** — converting this range into a `ProductPresent` bit is a process decision and belongs to the PLC. |
 | `PanelStartContact` | `/cell/panel/start` | `std_msgs/msg/Bool` | `data` | cell → PLC | Start pushbutton contact, wired **NO**. `true` = contact closed = button pressed. |
 | `PanelStopContact` | `/cell/panel/stop` | `std_msgs/msg/Bool` | `data` | cell → PLC | Stop pushbutton contact, wired **NC**. `true` = contact closed = button *not* pressed. `false` = pressed, or broken wire. |
-| `PanelResetContact` | `/cell/panel/reset` | `std_msgs/msg/Bool` | `data` | cell → PLC | Monitored reset pushbutton contact, wired **NO**. `true` = contact closed = button held. `false` = released, or broken wire. Momentary: the cell publishes the level while the button is held and does **not** latch, stretch, debounce or edge-detect it. **The reset energizes nothing in the cell** — it is an input only, and every reset decision (rising edge, hold time, which latches clear) is PLC logic. |
+| `PanelResetContact` | `/cell/panel/reset` | `std_msgs/msg/Bool` | `data` | cell → PLC | Monitored reset pushbutton contact, wired **NO**. `true` = contact closed = button held. `false` = released, or broken wire. Momentary: the cell publishes the level while the button is held and does **not** latch, stretch, debounce or edge-detect it. **The reset energizes nothing in the cell** — it is an input only, and every reset decision (the rising edge, which latches clear) is PLC logic. |
 | `PanelProcessStopContact` | `/cell/panel/process_stop` | `std_msgs/msg/Bool` | `data` | cell → PLC | **Process** stop mushroom contact, wired **NC**. `true` = closed = not pressed. `false` = pressed, or broken wire. See the warning below. |
 | *(diagnostic)* | `/cell/product_box/pose` | `geometry_msgs/msg/PoseArray` | `poses[0]` | cell → observer | Ground-truth product pose in the `cell` frame. **Not a PLC signal** — a real conveyor has no product-position transducer. It exists so belt transport is observable headless. Do not model it as an OPC UA node. |
 | *(infrastructure)* | `/clock` | `rosgraph_msgs/msg/Clock` | `clock` | cell → observer | Simulation time. Not a PLC signal. |
@@ -321,8 +321,8 @@ forbids after a stop.
 
 The reset is a button, not a state: the cell offers the contact and nothing
 else. It clears no fault here, drives no actuator and never touches belt
-state. The monitored, edge-triggered reset behaviour §9 requires lives in
-the PLC program, which owns the edge and the hold time.
+state. The monitored reset behaviour §9 requires lives in the PLC program,
+which triggers on the **rising edge** of this contact.
 
 ### Update rates measured in this container
 

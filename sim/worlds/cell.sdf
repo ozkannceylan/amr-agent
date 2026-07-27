@@ -329,8 +329,8 @@
       state; a reset must fail to the *not reset* state, which is the
       opposite wiring. The reset energizes nothing in this world: it drives
       no actuator, clears no simulated fault and does not touch belt state.
-      Deciding what a reset means, including its edge detection and its hold
-      time, is PLC work (invariants 5, 6 and 9).
+      Deciding what a reset means, and detecting its rising edge, is PLC
+      work (invariants 5, 6 and 9).
     -->
     <model name="OperatorPanel">
       <static>true</static>

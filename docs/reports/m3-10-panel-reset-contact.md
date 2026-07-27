@@ -157,3 +157,98 @@ repository and deleted after the run.
 2026-07-27 | Applied CLAUDE.md §9's "wire NC, program NO" to a reset device | The rule is about stop and safety devices, which must fail to *stopped*; a reset must fail to *not reset*, so NC would make a cut wire, a welded contact or an absent publisher read as a continuous reset request | Fail-safe direction is per device, not per project: wire a device so its failure produces the state that is safe *for that device*, and write the reasoning next to the polarity so the next reader does not copy the neighbouring row
 
 2026-07-27 | Added a signal to a cell whose verification record is a dated capture | The capture silently became an incomplete topic list, readable as "these are all the cell's signals" | When a signal is added after an evidence file is written, mark the old capture's scope in place and append the new evidence as its own dated, environment-qualified section rather than editing the original run
+
+---
+
+# Follow-up, 2026-07-27 — stale hold-time wording removed (m3-06 verify, finding 2)
+
+The verifier found `sim/README.md` still describing the superseded
+gesture-based reset. `plc/demo-cell/SPEC.md` §6.7 was read before editing to
+confirm what replaced it: reset and start are now two separate contacts, the
+reset is a **plain rising edge with no timer at all**, and `ResetEdgeMemory`
+starts `TRUE` so a contact already closed at the first scan produces no edge.
+There is no hold anywhere in the mechanism.
+
+**The verifier's count of two was right; its description was not.** No text
+in `sim/README.md` ever said "0.2–3 s", "gesture", or "the start button
+held" — a grep for those terms returns nothing. The actual defect was
+narrower and is mine, not inherited: two places where I attributed a **hold
+time** to the PLC, which implies a timer §6.7 does not have. I corrected the
+substance rather than hunting for wording that was not there.
+
+**A third occurrence existed, in a different file.** Per LESSONS 2026-07-27
+(an enumerated list is a starting point, verified by independent search) I
+swept `sim/` rather than stopping at two. The first pass missed it because
+the phrase was split across a line break as `hold` / `time`; a
+whitespace-normalised sweep found it. It is now fixed too. A final sweep for
+`hold time`, `held <n>`, `0.2–3`, `gesture`, `times the hold` and
+`hold duration`, with line wrapping neutralised across every `.md`, `.sdf`
+and `.py` in `sim/`, returns nothing.
+
+### Spot 1 — `sim/README.md`, signal table row (line 300)
+
+before:
+```
+... **The reset energizes nothing in the cell** — it is an input only, and every
+reset decision (rising edge, hold time, which latches clear) is PLC logic. |
+```
+after:
+```
+... **The reset energizes nothing in the cell** — it is an input only, and every
+reset decision (the rising edge, which latches clear) is PLC logic. |
+```
+
+### Spot 2 — `sim/README.md`, "Polarity: wire NC, program NO" (lines 322-325)
+
+before:
+```
+The reset is a button, not a state: the cell offers the contact and nothing
+else. It clears no fault here, drives no actuator and never touches belt
+state. The monitored, edge-triggered reset behaviour §9 requires lives in
+the PLC program, which owns the edge and the hold time.
+```
+after:
+```
+The reset is a button, not a state: the cell offers the contact and nothing
+else. It clears no fault here, drives no actuator and never touches belt
+state. The monitored reset behaviour §9 requires lives in the PLC program,
+which triggers on the **rising edge** of this contact.
+```
+
+### Spot 3 — `sim/worlds/cell.sdf`, OperatorPanel comment (lines 332-333)
+
+Not in the verifier's finding; found by the sweep.
+
+before:
+```
+      Deciding what a reset means, including its edge detection and its hold
+      time, is PLC work (invariants 5, 6 and 9).
+```
+after:
+```
+      Deciding what a reset means, and detecting its rising edge, is PLC
+      work (invariants 5, 6 and 9).
+```
+
+### Unchanged, deliberately
+
+The other `held` occurrences in `sim/README.md` describe the **contact
+level** while a button is physically pressed ("`true` = contact closed =
+button held", "the cell publishes the level while the button is held"), not
+a timed gesture. They are correct for an NO momentary contact and were left
+alone. The remaining `hold` matches in the file are inside the word
+*threshold*.
+
+The four attributes the contact must carry are all still stated in the file
+and unaffected by these edits: **normally open**, **momentary**,
+**rising-edge triggered in the PLC**, **energizes nothing**, fail state
+**`false`**.
+
+files_changed (follow-up): sim/README.md (2 lines of prose, 1 table cell),
+sim/worlds/cell.sdf (1 comment sentence). Six lines changed in total, no
+behaviour touched. `cell.sdf` still parses and the edited comment contains
+no double hyphen. Nothing was committed.
+
+lessons_candidates (follow-up):
+
+2026-07-27 | Swept a file for stale wording with a single-line grep for `hold time` | The third occurrence was wrapped as `hold` / newline / `time` and the grep passed the file clean; only a whitespace-normalised search found it | Grep for prose in a wrapped document by normalising whitespace first, because a line break sits inside any phrase long enough to be worth searching for
