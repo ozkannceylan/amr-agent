@@ -35,7 +35,8 @@ by the bridge. The program:
 - forms a **presence verdict** from the raw photo-eye range,
 - runs a **transport cycle**: forward until the product reaches the beam, dwell,
   return to home,
-- supervises the **bridge heartbeat**, the **drive** and the **sensor**,
+- supervises the **bridge heartbeat**, the **drive**, the **photo-eye** and the
+  **belt feedback**,
 - latches every stop, and requires a **monitored, edge-triggered reset** on the
   panel's own reset button, followed by a **separate** start press on a
   **different** button, before anything moves again.
@@ -136,14 +137,16 @@ interface. All live in the instance DB `"DemoCellControl_DB"`.
 | `SeqStep` | Int | `0` | 0 Idle, 10 Transport, 20 Dwell, 30 Return, 40 Complete |
 | `DwellTimer`, `StepTimer` | IEC_TIMER (TON) | — | Dwell at the beam; per-step watchdog. Both are **called unconditionally, outside the `CASE`**, with `IN` set to the "this step is active" condition, so leaving the step releases the timer (§6.5). Neither is ever called with `IN := TRUE` |
 | `PresenceOnTimer`, `PresenceOffTimer` | IEC_TIMER (TON) | — | Filter time on the presence verdict, both directions |
-| `RangeInvalidTimer` | IEC_TIMER (TON) | — | Delay before a bad range becomes a fault |
+| `RangeInvalidTimer` | IEC_TIMER (TON) | — | Delay before an implausible `ProductSensorRange` becomes a fault |
+| `BeltFeedbackInvalidTimer` | IEC_TIMER (TON) | — | Delay before an implausible `ConveyorBeltPosition` **or** `ConveyorBeltSpeed` becomes a fault. One timer for both: the two values arrive in the same `/cell/conveyor/joint_state` sample from one publisher, so they fail together and there is nothing to tell apart at this level (§6.2.2) |
 | `DriveFaultTimer` | IEC_TIMER (TON) | — | Delay on the drive-disagreement condition |
 | `PositionRef` | Real | `0.0` | Belt position sampled at the start of each drive-fault window |
 | `PositionWindowTimer` | IEC_TIMER (TON) | — | Window over which belt travel is checked against `PositionRef` |
 | `PosWindowArmed` | Bool | `FALSE` | `PositionRef` has been sampled for the current window. Static, not temp — it spans scans |
 | `ProcessStopLatch` | Bool | `FALSE` | Panel stop or process stop has opened |
 | `LinkLostLatch` | Bool | `FALSE` | Heartbeat went stale |
-| `SensorFaultLatch` | Bool | `FALSE` | Range implausible for longer than the delay |
+| `SensorFaultLatch` | Bool | `FALSE` | `ProductSensorRange` implausible for longer than the delay |
+| `BeltFeedbackFaultLatch` | Bool | `FALSE` | Belt position or belt speed implausible for longer than the delay. Separate from `SensorFaultLatch` so the watch table names the failed transducer rather than reporting "a sensor is bad" |
 | `SequenceFaultLatch` | Bool | `FALSE` | Soft travel limit reached, or step watchdog expired |
 | `SpeedRequest` | Real | `0.0` | The **requested** setpoint from the sequence. Never written to the output tag directly (§6.4) |
 
@@ -164,8 +167,11 @@ that the node model and the bridge design deliberately refused to make
 | `PRESENT_THRESHOLD` | `1.00` m | Interface expectation, `opcua-nodes.md` §9.3: midway between 1.440 m clear and 0.540 m blocked, ≈0.45 m margin either side |
 | `PRESENT_CLEAR` | `1.10` m | Hysteresis band of 0.10 m so a jittering beam cannot chatter the verdict |
 | `PRESENCE_FILTER` | `T#100ms` | Both directions. Two bridge write cycles (50 ms), five OB calls |
-| `RANGE_MIN` / `RANGE_MAX` | `0.05` / `3.00` m | The sensor's physical window (`sim/README.md`). Anything outside it, including `NaN` and `inf`, is not a measurement |
+| `RANGE_MIN` / `RANGE_MAX` | `0.05` / `3.00` m | The photo-eye's physical window (`sim/README.md`). Anything outside it, including `NaN` and `inf`, is not a measurement |
+| `BELT_POSITION_MIN` / `BELT_POSITION_MAX` | `-2.60` / `+2.60` m | The belt encoder's physical window. Mechanical travel is ±2.50 m (`sim/README.md`, `opcua-nodes.md` §9.3), widened by 0.10 m so a belt resting **on** a stop is never called implausible. **Deliberately wider than `SOFT_LIMIT`**, which is a process decision about where to stop; this pair is a statement about what the encoder can physically report |
+| `BELT_SPEED_MIN` / `BELT_SPEED_MAX` | `-1.00` / `+1.00` m/s | The belt drive's physical window. The belt moves only under `ConveyorSpeedCommand`, which this program never sets outside ±`TRANSPORT_SPEED`, and the cell applies the command as given with no ramp (`sim/README.md`). ±1.00 m/s is ≈6.7× the transport speed: no legitimate transient reaches it, and `NaN`, `inf` and a grossly corrupt sample are all rejected. **Not a tight range check** — a window's job is to reject what is not a measurement, not to second-guess the drive |
 | `RANGE_FAULT_DELAY` | `T#200ms` | Tolerates one dropped sample without faulting |
+| `BELT_FAULT_DELAY` | `T#200ms` | Same basis as `RANGE_FAULT_DELAY`, and its own constant rather than a shared one: the two windows watch different transducers, so retuning one must not silently retune the other (invariant 10) |
 | `TRANSPORT_SPEED` | `+0.15` m/s | Verified belt speed in the cell; ≈9 s from the product's start position to the beam |
 | `RETURN_SPEED` | `-0.15` m/s | Return stroke. Negative = towards −x |
 | `HOME_WINDOW` | `0.05` m | Belt is home when `ABS(position) ≤ 0.05` |
@@ -323,14 +329,24 @@ program, and the bridge's write ordering guarantee (heartbeat written last) is a
 *ordering* guarantee, not atomicity. Do not write logic that requires two input
 tags to have come from the same bridge cycle.
 
-### 6.2 Range validity and the presence verdict
+### 6.2 Analogue plausibility, and the presence verdict
 
-`ProductSensorRange` is a raw analogue in metres. The bridge holds no threshold
-and passes `NaN` and `inf` through unchanged, by design (`bridge-design.md`
-§4.5). A naive `range < 1.00` returns **FALSE for `NaN`**, i.e. "no product",
-which is the wrong direction for a stop condition — so the program tests
-plausibility *first*, against the physical window, and never relies on the
-process comparison alone:
+**Three** bridge-written Reals reach this program — `ProductSensorRange`,
+`ConveyorBeltPosition` and `ConveyorBeltSpeed` — and the bridge passes `NaN` and
+`inf` through unchanged for all three, by design (`bridge-design.md` §4.5).
+**Every one of them is tested against its physical window before any process
+comparison consumes it.** There is no fourth: `ConveyorSpeedCommand` is written
+by this program, so it is a value the program already knows to be a number and
+carries no window.
+
+#### 6.2.1 `ProductSensorRange`
+
+A raw analogue in metres; the bridge holds no threshold, because the presence
+decision is a process decision and lives here. A naive `range < 1.00` returns
+**FALSE for `NaN`**,
+i.e. "no product", which is the wrong direction for a stop condition — so the
+program tests plausibility *first*, against the physical window, and never
+relies on the process comparison alone:
 
 ```
 RangeValid :=     ProductSensorRange >= RANGE_MIN      -- affirmative AND of two
@@ -339,11 +355,12 @@ RangeValid :=     ProductSensorRange >= RANGE_MIN      -- affirmative AND of two
 ```
 
 > **Normative — the affirmative form is the mechanism, not a matter of taste.**
-> Every plausibility test in this program is written as an **affirmative `AND`
-> of comparisons against the physical window**, with the **fault taken in the
-> `ELSE` branch** — that is, from `NOT RangeValid`, never from a comparison that
-> is itself negated. It is never written as a negated out-of-window test such as
-> `NOT (x < RANGE_MIN OR x > RANGE_MAX)`.
+> Every plausibility test in this program — **this one and the belt-feedback
+> test of §6.2.2, and any that is ever added** — is written as an **affirmative
+> `AND` of comparisons against the physical window**, with the **fault taken in
+> the `ELSE` branch** — that is, from `NOT RangeValid`, never from a comparison
+> that is itself negated. It is never written as a negated out-of-window test
+> such as `NOT (x < RANGE_MIN OR x > RANGE_MAX)`.
 >
 > The two forms are equivalent for every real number and **opposite for `NaN`**,
 > because every comparison against `NaN` returns `FALSE`:
@@ -375,6 +392,71 @@ work: the fault is raised by the *absence* of an affirmative validity verdict,
 so anything the window comparisons cannot affirm — including `NaN` and `inf` —
 ends up here.
 
+#### 6.2.2 `ConveyorBeltPosition` and `ConveyorBeltSpeed` — one verdict
+
+The same treatment, same form, and for the same reason: a `NaN`
+`ConveyorBeltPosition` makes `position >= SOFT_LIMIT` and
+`position <= -SOFT_LIMIT` **both false**, so the two soft-limit aborts of §6.5
+stop protecting *precisely when the feedback is broken*. An abort that disarms
+itself on a bad input is worse than no abort, because the reasoning that
+justified it is still written down.
+
+```
+BeltFeedbackValid :=     ConveyorBeltPosition >= BELT_POSITION_MIN   -- affirmative AND
+                     AND ConveyorBeltPosition <= BELT_POSITION_MAX   -- of four window
+                     AND ConveyorBeltSpeed    >= BELT_SPEED_MIN      -- comparisons
+                     AND ConveyorBeltSpeed    <= BELT_SPEED_MAX
+-- the fault is taken in the ELSE, i.e. from NOT BeltFeedbackValid.
+```
+
+**One verdict and one latch for the two signals, deliberately.** Both are fields
+of the same `/cell/conveyor/joint_state` sample, published by one publisher and
+written by one bridge mapping (`sim/README.md`, `opcua-nodes.md` §9.9): they are
+one transducer's output in two numbers, they fail together, and a program that
+distinguished them would be claiming a distinction the source does not offer.
+Which of the four comparisons failed is read off the two raw values in watch
+table Group 1 (§9), not off a second latch.
+
+`BeltFeedbackValid` false continuously for `BELT_FAULT_DELAY`, **while the link
+is OK**, sets `BeltFeedbackFaultLatch`, exactly as `SensorFaultLatch` is set. The
+reaction is a **fault**, not a permissive and not a substitution:
+
+- the instantaneous verdict is condition **C5** of `WorldOk` (§6.3), so the cycle
+  drops and the setpoint is driven to `0.0` in the **same OB call** in which the
+  feedback goes implausible — before the sequence of §6.5 or the start branch of
+  §6.7 can read the bad value;
+- the latch holds the cell stopped afterwards and is cleared **only** by the
+  monitored reset of §6.7, which cannot fire until the feedback is plausible
+  again (the reset tests `CauseGone`, which contains `WorldOk`, which contains
+  C5);
+- **no last-known-good value is substituted, ever.** The program does not hold,
+  extrapolate or filter a broken feedback into a usable number. An input that is
+  not a measurement is not turned into one; it stops the cell.
+
+Two consequences worth stating rather than discovering:
+
+- **The cold-start values are plausible, and that is not a hole.** Unlike
+  `ProductSensorRange`, whose start value `0.0` is outside `[RANGE_MIN,
+  RANGE_MAX]`, both belt start values of `0.0` sit inside their windows. Nothing
+  is lost: the window is not what holds a freshly started CPU — `BridgeLinkOk` is
+  (§6.1, §8 case C), and C5 carries `BridgeLinkOk` like every other input-derived
+  verdict.
+- **A `NaN` belt speed now latches a belt-feedback fault instead of a drive
+  fault.** Before this window existed, `ABS(ConveyorBeltSpeed) > SPEED_TOLERANCE`
+  returned false for `NaN`, so under a non-zero command term D1 tripped and the
+  cell stopped — the safe direction, but by luck of which way that one comparison
+  happened to point rather than by design, under the wrong name, and **only under
+  a non-zero command**: a
+  `NaN` speed while the cell was idle was not detected at all. The reaction is
+  unchanged in kind (latched fault → cycle drops → setpoint `0.0` → reset
+  required). What changes is that it is raised deliberately rather than as a side
+  effect, the cycle drops in the *same* OB call instead of after
+  `DRIVE_FAULT_DELAY`, the latch follows `BELT_FAULT_DELAY` rather than a second
+  later, it is raised whatever the command is doing, and it accuses the encoder
+  instead of the drive.
+
+#### 6.2.3 Presence
+
 Presence, evaluated only while `BridgeLinkOk AND RangeValid`:
 
 - `ProductSensorRange < PRESENT_THRESHOLD` stable for `PRESENCE_FILTER`
@@ -404,13 +486,14 @@ possible at all.
 | C1 | `PanelStopCircuitClosed` | Stop circuit closed. **Wire NC, program NO**: the tag is used as a plain NO contact, so a pressed button, a broken wire and an absent signal all read `FALSE` and all stop the cell |
 | C2 | `PanelProcessStopCircuitClosed` | Process stop circuit closed, same polarity, same reasoning |
 | C3 | `BridgeLinkOk` | The input image is attributable to the cell |
-| C4 | `RangeValid` | Photo-eye is delivering a plausible value right now |
+| C4 | `RangeValid` | Photo-eye is delivering a plausible value right now (§6.2.1) |
+| C5 | `BeltFeedbackValid` | Belt position **and** belt speed are inside their physical windows right now (§6.2.2). A belt whose position cannot be read cannot be run: every travelling decision in §6.5 is a comparison against that number |
 
 Then:
 
 | Set | Definition | Used for |
 |---|---|---|
-| `RunPermissive` | `WorldOk` **and** no latch pending: `NOT ConveyorDriveFault`, `NOT SensorFaultLatch`, `NOT SequenceFaultLatch` | May the cell run, and may the setpoint pass (§6.4) |
+| `RunPermissive` | `WorldOk` **and** no latch pending: `NOT ConveyorDriveFault`, `NOT SensorFaultLatch`, `NOT BeltFeedbackFaultLatch`, `NOT SequenceFaultLatch` | May the cell run, and may the setpoint pass (§6.4) |
 | `CauseGone` | `WorldOk` **and** `NOT (D1 OR D2)` — the drive is not disagreeing with its command *at this instant* (§6.6) | May a reset clear the latches (§6.7) |
 
 Why the two differ:
@@ -432,6 +515,14 @@ the limit is violated. Instead the limit aborts the *travelling step* in the
 direction that would make it worse (§6.5), and recovery is the re-home branch
 below.
 
+**C5 *is* a blanket permissive, and the difference from the soft limit is what
+clears it.** A soft-limit violation is escaped only by moving, so making it a
+permissive strands the belt. An implausible feedback value is escaped by the
+*signal* becoming a number again — the belt need not move, and indeed must not.
+C5 therefore blocks running without ever blocking its own recovery, and the
+window is set wide enough (±2.60 m, beyond the ±2.50 m stops) that a belt parked
+anywhere it can physically be still reads plausible.
+
 Transitions:
 
 - `CellCycleRunning` is set **only** by a start rising edge (§6.7) with
@@ -445,7 +536,12 @@ Transitions:
 - `CellCycleRunning` is reset by **any** permissive going false, immediately, in
   the same OB call, and by reaching step 40.
 - Losing C1 or C2 also sets `ProcessStopLatch` and therefore
-  `CellProcessStopActive`; losing C3 sets `LinkLostLatch`. Every latch sets
+  `CellProcessStopActive`; losing C3 sets `LinkLostLatch`; losing C4 for
+  `RANGE_FAULT_DELAY` sets `SensorFaultLatch`, and losing C5 for
+  `BELT_FAULT_DELAY` sets `BeltFeedbackFaultLatch`. The two delayed ones drop the
+  cycle immediately through `WorldOk` and latch a moment later, so a single
+  corrupt sample stops the belt without requiring a reset — it still requires a
+  new start press, because nothing auto-resumes (§6.7). Every latch sets
   `CellResetRequired := TRUE`.
 
 Never drive an actuator from a sensor: no step condition, no photo-eye value and
@@ -509,6 +605,15 @@ Any loss of `RunPermissive` in steps 10–30 forces `SeqStep := 0` and drops
 `CellCycleRunning`. There is no "hold the step and continue where we left off":
 the next cycle starts from Idle and re-reads the world (CLAUDE.md §9).
 
+**Every comparison in this table reads a position that has already been affirmed
+plausible.** C5 (§6.2.2, §6.3) is evaluated before the permissive set, and the
+permissive drop of §7 part 6 runs before the `CASE` of part 7 in the *same* OB
+call — so an implausible `ConveyorBeltPosition` leaves `SeqStep` at 0 and the
+soft-limit and home comparisons are never reached with it. The failure this
+prevents is specific: `NaN >= SOFT_LIMIT` and `NaN <= -SOFT_LIMIT` are **both
+false**, so without C5 a broken encoder would silently disarm both aborts while
+leaving the belt running.
+
 **Normative — a step timer's `IN` is the step's own activity, and the step exit
 is what releases it.** Both step timers are called **unconditionally, once per
 OB call, after the `CASE`** (§7 part 7), with `IN` set to the condition "this
@@ -536,7 +641,8 @@ the step has been left**.
 
 The same reasoning does not apply to the timers of §6.2 and §6.6
 (`PresenceOnTimer`, `PresenceOffTimer`, `RangeInvalidTimer`,
-`PositionWindowTimer`, `DriveFaultTimer`, `HeartbeatStaleTimer`): each is driven
+`BeltFeedbackInvalidTimer`, `PositionWindowTimer`, `DriveFaultTimer`,
+`HeartbeatStaleTimer`): each is driven
 by a level condition that genuinely goes false, and each is re-evaluated on the
 first call after its enclosing condition returns.
 
@@ -544,7 +650,12 @@ first call after its enclosing condition returns.
 
 Evaluated only while `BridgeLinkOk` is TRUE, so a frozen input image during a
 bridge outage cannot raise a spurious drive fault (that case is already latched
-by C3).
+by C3) — **and only while `BeltFeedbackValid` is TRUE**, for the same reason one
+step further: both terms below compare belt feedback against the command, and an
+implausible feedback value is not evidence about the drive. `BeltFeedbackValid`
+is therefore a conjunct of `#beltMoving` and of `D1` (§7 part 3), which makes
+both terms false while the feedback is bad and leaves the accusation where it
+belongs, with `BeltFeedbackFaultLatch`.
 
 Two independent terms, either one arms `DriveFaultTimer` (`DRIVE_FAULT_DELAY`):
 
@@ -558,6 +669,11 @@ ConveyorBeltPosition` and start `PositionWindowTimer`; on expiry compare
 `ABS(ConveyorBeltPosition - PositionRef)`. D2 therefore trips after its own
 window **plus** `DRIVE_FAULT_DELAY` — about 2 s. That is intentional: D2 accuses
 the encoder of lying, and it should be the slower of the two verdicts.
+
+Because `#beltMoving` now carries `BeltFeedbackValid`, the window is **armed only
+from a plausible position**: `PositionRef` — a static that survives the scan —
+can never be loaded with `NaN`, and it is re-armed on the next start of motion
+after the feedback recovers.
 
 On `DriveFaultTimer.Q`: `ConveyorDriveFault := TRUE` (latched), which drops
 `RunPermissive`, which drops `CellCycleRunning`, which drives the setpoint to
@@ -594,7 +710,8 @@ own new edge — the two actions cannot be collapsed into one even by pressing b
 buttons together.
 
 **Why `CellResetRequired` gates the start edge, and why that is not redundant.**
-`RunPermissive` (§6.3) carries only `ConveyorDriveFault`, `SensorFaultLatch` and
+`RunPermissive` (§6.3) carries only `ConveyorDriveFault`, `SensorFaultLatch`,
+`BeltFeedbackFaultLatch` and
 `SequenceFaultLatch`. It does **not** carry `ProcessStopLatch` or `LinkLostLatch`,
 whose *live* conditions clear the instant the button is released or the heartbeat
 returns. So without `NOT latchPending` on the start edge, releasing a process stop
@@ -638,10 +755,10 @@ fault, reconnecting session — sets it. A permissive returning restores the
 
 Structure and the load-bearing statements only. Not compilable as written:
 declarations, timer instances and the constant block are per §3. Identifiers not
-listed in §3.2 (`#hbChanged`, `#linkOk`, `#rangeValid`, `#cmdMoving`,
-`#beltMoving`, `#d1`, `#d2`, `#worldOk`, `#runPermissive`, `#causeGone`,
-`#latchPending`, `#startRise`, `#resetRise`) are **Temp**, computed and consumed
-within one call. Everything in
+listed in §3.2 (`#hbChanged`, `#linkOk`, `#rangeValid`, `#beltFeedbackValid`,
+`#cmdMoving`, `#beltMoving`, `#d1`, `#d2`, `#worldOk`, `#runPermissive`,
+`#causeGone`, `#latchPending`, `#startRise`, `#resetRise`) are **Temp**, computed
+and consumed within one call. Everything in
 §3.2 is **Static** and must survive the scan.
 
 ```pascal
@@ -658,7 +775,7 @@ IF NOT #linkOk THEN
     #LinkLostLatch := TRUE;                      // degraded mode, not a safety event
 END_IF;
 
-// ---- 2. Sensor validity and presence (qualified by the link) -------------
+// ---- 2. Photo-eye validity and presence (§6.2.1, qualified by the link) --
 // Affirmative AND of two window comparisons; the fault is the ELSE of this.
 // NaN and inf make BOTH comparisons false, so they land in the fault branch.
 // NEVER invert this into NOT(x < MIN OR x > MAX): that form returns TRUE for
@@ -685,9 +802,33 @@ ELSE
     "DemoCellStatus".ProductPresentAtSensor := FALSE;   // not attributable
 END_IF;
 
+// ---- 2b. Belt feedback plausibility (same form, same gating, §6.2.2) -----
+// Position and speed are two fields of ONE joint_state sample, so one verdict
+// and one latch. Affirmative AND of four window comparisons: NaN and inf make
+// every one of them false and land in the fault branch. NEVER invert this.
+// This is what keeps the soft-limit aborts of part 7 armed: NaN >= SOFT_LIMIT
+// and NaN <= -SOFT_LIMIT are BOTH false, so without this verdict a broken
+// encoder disarms both aborts while the belt keeps running.
+#beltFeedbackValid := #linkOk
+    AND ("DemoCellInput".ConveyorBeltPosition >= #BELT_POSITION_MIN)
+    AND ("DemoCellInput".ConveyorBeltPosition <= #BELT_POSITION_MAX)
+    AND ("DemoCellInput".ConveyorBeltSpeed    >= #BELT_SPEED_MIN)
+    AND ("DemoCellInput".ConveyorBeltSpeed    <= #BELT_SPEED_MAX);
+
+#BeltFeedbackInvalidTimer(IN := #linkOk AND NOT #beltFeedbackValid,
+                          PT := #BELT_FAULT_DELAY);
+IF #BeltFeedbackInvalidTimer.Q THEN #BeltFeedbackFaultLatch := TRUE; END_IF;
+// No last-known-good substitution anywhere: an implausible feedback is a fault,
+// never a value. Nothing below holds, filters or extrapolates these two Reals.
+
 // ---- 3. Drive fault, incl. signal-loss case D ----------------------------
+// ConveyorSpeedCommand is written by THIS program, so it needs no window.
 #cmdMoving  := ABS("DemoCellOutput".ConveyorSpeedCommand) > #SPEED_TOLERANCE;
-#beltMoving := ABS("DemoCellInput".ConveyorBeltSpeed)     > #SPEED_TOLERANCE;
+// #beltFeedbackValid carries through into #beltMoving, and from there into #d2
+// and into the PositionRef sampling below, so no belt Real is consumed as a
+// value unless it has been affirmed to be one.
+#beltMoving := #beltFeedbackValid
+               AND (ABS("DemoCellInput".ConveyorBeltSpeed) > #SPEED_TOLERANCE);
 
 #PositionWindowTimer(IN := #linkOk AND #beltMoving, PT := #DRIVE_FAULT_DELAY);
 IF #linkOk AND #beltMoving AND NOT #PosWindowArmed THEN
@@ -695,7 +836,10 @@ IF #linkOk AND #beltMoving AND NOT #PosWindowArmed THEN
 ELSIF NOT #beltMoving THEN
     #PosWindowArmed := FALSE;
 END_IF;
-#d1 := #cmdMoving  AND NOT #beltMoving;                          // stalled / case D
+// #d1 needs the validity conjunct explicitly: NOT #beltMoving is TRUE while the
+// feedback is implausible, so without it a NaN speed under a non-zero command
+// would be reported as a DRIVE fault instead of the encoder fault it is.
+#d1 := #beltFeedbackValid AND #cmdMoving AND NOT #beltMoving;    // stalled / case D
 #d2 := #beltMoving AND #PositionWindowTimer.Q
        AND (ABS("DemoCellInput".ConveyorBeltPosition - #PositionRef) < #POSITION_FREEZE_BAND);
 
@@ -714,11 +858,13 @@ END_IF;
        "DemoCellInput".PanelStopCircuitClosed                              // C1
    AND "DemoCellInput".PanelProcessStopCircuitClosed                       // C2
    AND #linkOk                                                             // C3
-   AND #rangeValid;                                                        // C4
+   AND #rangeValid                                                         // C4
+   AND #beltFeedbackValid;                                                 // C5
 
 #runPermissive := #worldOk                           // may the cell RUN
    AND NOT "DemoCellStatus".ConveyorDriveFault       // the DELAYED verdict...
    AND NOT #SensorFaultLatch
+   AND NOT #BeltFeedbackFaultLatch
    AND NOT #SequenceFaultLatch;
 // ...not #d1/#d2: D1 is momentarily true at every start of motion, so an
 // instantaneous term here would drop the cycle the scan after it started.
@@ -729,8 +875,13 @@ END_IF;
 // limit permissive would strand a belt sitting on the limit, since returning
 // requires running. It aborts the travelling step instead (part 7), and the
 // re-home branch below recovers it.
+// #beltFeedbackValid IS in both, and that is not the same case: an implausible
+// reading is cleared by the SIGNAL recovering, not by the belt moving, and the
+// ±2.60 m window lies beyond the ±2.50 m stops, so a belt can never park
+// outside it. Never tighten that window towards SOFT_LIMIT (§6.3).
 
 #latchPending := #ProcessStopLatch OR #LinkLostLatch OR #SensorFaultLatch
+                 OR #BeltFeedbackFaultLatch
                  OR #SequenceFaultLatch OR "DemoCellStatus".ConveyorDriveFault;
 "DemoCellStatus".CellResetRequired := #latchPending;
 
@@ -749,6 +900,7 @@ END_IF;
 IF #resetRise AND NOT #ResetDeviceFault AND #latchPending AND #causeGone THEN
     #ProcessStopLatch := FALSE;  #LinkLostLatch := FALSE;
     #SensorFaultLatch := FALSE;  #SequenceFaultLatch := FALSE;
+    #BeltFeedbackFaultLatch := FALSE;
     "DemoCellStatus".ConveyorDriveFault := FALSE;
     // Reset clears latches. It energizes NOTHING: no step change, no cycle flag,
     // no setpoint. Starting the cell is the OTHER button, below.
@@ -892,8 +1044,16 @@ the bridge's 20 Hz cyclic write.
 
 `"DemoCellControl_DB".SeqStep`, `.SpeedRequest`, `.LastBridgeHeartbeat`,
 `.ProcessStopLatch`, `.LinkLostLatch`, `.SensorFaultLatch`,
-`.SequenceFaultLatch`, `.ResetDeviceFault`, `.StartEdgeMemory`,
-`.ResetEdgeMemory`, `.HeartbeatStaleTimer.ET`, `.DriveFaultTimer.ET`.
+`.BeltFeedbackFaultLatch`, `.SequenceFaultLatch`, `.ResetDeviceFault`,
+`.StartEdgeMemory`, `.ResetEdgeMemory`, `.HeartbeatStaleTimer.ET`,
+`.DriveFaultTimer.ET`.
+
+`BeltFeedbackFaultLatch` says only *that* the belt feedback is not a
+measurement. **Which of it is bad is read from Group 1**: compare
+`ConveyorBeltPosition` against ±2.60 m and `ConveyorBeltSpeed` against ±1.00 m/s.
+A watch table shows `NaN` and `inf` as such in *Floating-point* format, so the
+common case is visible at a glance. This split is deliberate — one latch for one
+transducer, the diagnosis read off the raw values (§6.2.2).
 
 `ResetDeviceFault` reads `TRUE` from power-up until the reset contact has been
 seen open once with the link up; if it is still `TRUE`, the reset button is held,
@@ -1020,10 +1180,57 @@ definition is §8 of this document; this is its test.
 | 4.9 | **Stuck reset device**: publish `reset` `true` and **leave it published**, then latch a stop (publish `process_stop` `false`, then `true` again) | The still-held reset **never clears the latch**: `CellResetRequired` stays `TRUE` and the cell stays stopped for as long as the button is held. There is no edge to act on, and no elapsed time makes one appear. Release `reset` (`false`) and publish `true` again — *now* the latch clears |
 | 4.9b | **Reset held from before the program ran**: cold-start the CPU with `reset` already publishing `true` | `ResetDeviceFault` stays `TRUE`, no reset is possible, and the watch table says why. It clears only after the contact has been seen `false` once with the link up |
 | 4.10 | **Session behaviour on a real server**: time how long the S7-1500 holds the session after a bridge `SIGKILL` | Recorded as a number. This is the one in-container result known not to transfer (`EVIDENCE_SIGNAL_LOSS.md` A.4) — and it must **not** be used as an input to the program |
+| 4.11 | **Belt feedback plausibility** (§6.2.2), by the narrowed-constant method below | `BeltFeedbackFaultLatch` latches, `CellCycleRunning` → `FALSE`, `ConveyorSpeedCommand` → `0.0`, `CellResetRequired` → `TRUE`; reset clears it and start re-runs the cell once the constant is restored |
 
-**Pass: all eleven.** Evidence appended to `bridge/EVIDENCE_SIGNAL_LOSS.md` as a
+**Pass: all twelve.** Evidence appended to `bridge/EVIDENCE_SIGNAL_LOSS.md` as a
 PLCSIM section beside the container run, per `EVIDENCE_LATENCY.md` Section B
 item 6.
+
+#### How 4.11 is run, and what it does and does not prove
+
+**The cell cannot produce an implausible belt value.** Gazebo publishes a real
+joint state, the bridge passes it through without inventing anything
+(`bridge-design.md` §4.5), and a watch-table *Modify* is overwritten by the
+bridge's next cyclic write within ~50 ms — which is also why §9 forbids *Modify*
+on `DemoCellInput` outright. There is no `NaN` to inject and no supported way to
+inject one.
+
+What *is* testable is the whole reaction path, by temporarily narrowing the
+window until real values fall outside it:
+
+1. Set `BELT_SPEED_MAX` to `0.10` m/s (and `BELT_SPEED_MIN` to `-0.10`), compile,
+   download. **Note in the evidence that the constant was narrowed** — this is a
+   modified program, not the gate build.
+2. Belt at home, no latch pending, press start. The belt accelerates towards
+   `TRANSPORT_SPEED` = 0.15 m/s.
+3. **Pass:** as the read-back passes 0.10 m/s, `CellCycleRunning` drops and
+   `ConveyorSpeedCommand` snaps to `0.0` in the same watch-table update;
+   `BeltFeedbackFaultLatch` and `CellResetRequired` go `TRUE` about 200 ms later.
+   The belt stops, the speed read-back returns to ≈0 and therefore becomes
+   plausible again, so reset is possible.
+4. **Pass:** `reset` `true`/`false` clears the latch and moves nothing; `start`
+   re-runs the cell and it faults again at the same speed. No auto-resume, and
+   the fault re-proves itself.
+5. **Restore `BELT_SPEED_MIN`/`BELT_SPEED_MAX` to ±1.00, recompile, re-download,
+   and confirm a full clean cycle before any gate evidence is recorded.**
+
+> **Use the speed constant, not the position constant, for this test.** Narrowing
+> `BELT_POSITION_MAX` parks the belt *outside* its own window, and a belt that
+> reads implausible cannot be moved back — C5 blocks running, and running is the
+> only way to return. The cell would be stuck until the constant was restored.
+> That is an artefact of the test, not of the program: the real
+> `BELT_POSITION_MIN`/`MAX` of ±2.60 m lie **beyond the ±2.50 m mechanical
+> stops**, so a real belt can never park outside its window. This is exactly what
+> makes C5 safe as a blanket permissive (§6.3), and it is why the constant is not
+> tightened to the soft limit.
+
+This exercises the verdict, the delay, the latch, the permissive drop, the
+setpoint gate and the reset — everything except the `NaN` literal itself. That
+last step is covered by argument rather than by test: all four comparisons are
+affirmative, and every comparison against `NaN` is false, so `NaN` reaches the
+same fault branch that 0.15 m/s reaches here (§6.2). Injecting a genuine `NaN`
+would need a bridge-side fault-injection facility, which does not exist and is
+requested as open item 6 of §12.
 
 ---
 
@@ -1045,9 +1252,13 @@ item 6.
 | 2 | The OB30 period of 20 ms assumes the bridge's 50 ms cadence | If m3-04's 20 Hz expectation is revised with evidence (`bridge-design.md` §12.7), revise this together with it |
 | 3 | Whether PLCSIM Advanced enforces the OPC UA runtime licence | Owner observes at step 4 of §10 and records it |
 | 4 | The bridge must carry the reset node and its topic (`bridge/config/bridge.yaml`, and `bridge/tools/cell_stimulus.py` if it drives the contact) | `bridge/` work, requested by m3-10 and m3-11. Until it lands, `PanelResetPressed` never leaves its start value and no reset is possible (§11 preconditions) |
-| 5 | No plausibility window is specified for `ConveyorBeltPosition` or `ConveyorBeltSpeed`, only for `ProductSensorRange` | Open. Closing it adds an interlock and a constant, so it needs its own decision rather than an edit in passing. See the note below for which comparisons this actually affects and in which direction |
+| 6 | There is no way to present the CPU with a genuine `NaN` or `inf` on any input: Gazebo publishes real values, the bridge invents none, and a watch-table *Modify* is overwritten within one bridge cycle. §6.2 is therefore verified by a narrowed-constant test (§11, 4.11) plus argument, never by injection | Requested of `bridge/`: an explicitly opt-in fault-injection mode that can write a nominated `DemoCell/Input/` Real as `NaN`, `inf` or an out-of-window value, refusing to arm unless asked. `bridge/` work — **not** a change to this program, which must behave identically whether or not it exists |
 
-Two items that stood here have been **closed**.
+Item 5 is absent from the table because it is closed, not because it was
+renumbered: **numbers are never reused**, so a report or a lesson that cites
+"open item 5" still points at the item described below.
+
+Three items that stood here have been **closed**.
 
 *"There is no reset contact in the cell"*, which forced the start button to
 double as the reset device: `m3-10` added `/cell/panel/reset` to the cell and
@@ -1064,23 +1275,26 @@ and the answer is that it can be dropped **only** in that form. That condition i
 now normative rather than incidental, so there is nothing left to confirm at
 implementation: write `IS_VALID` or do not, but do not invert the test.
 
-**On new item 5.** `ProductSensorRange` is tested against `[RANGE_MIN,
-RANGE_MAX]` before any process comparison uses it. The two other bridge-written
-Reals are not tested at all, and the bridge passes `NaN` through unchanged for
-them too (`bridge-design.md` §4.5). The consequences are not uniform and should
-be weighed before anything is added:
+*"No plausibility window for `ConveyorBeltPosition` or `ConveyorBeltSpeed`"*,
+raised by `m3-25` as item 5 and left open because closing it changes control
+behaviour: closed by `m3-27`. §6.2.2 adds `BeltFeedbackValid`, an affirmative
+`AND` of four window comparisons against `BELT_POSITION_MIN`/`MAX` and
+`BELT_SPEED_MIN`/`MAX`; it is condition **C5** of `WorldOk`, and
+`BeltFeedbackFaultLatch` is set when it stays false for `BELT_FAULT_DELAY`. All
+three bridge-written Reals now carry a window, which is the point — a rule
+applied only to the input that taught it is half a rule.
 
-| Comparison | Where | A `NaN` input gives | Direction |
+**Coverage of the m3-25 comparison table.** Every comparison that item 5
+enumerated, and how it is covered now:
+
+| Comparison | Where | Was, on a `NaN` | Is now |
 |---|---|---|---|
-| `ConveyorBeltPosition >= SOFT_LIMIT` | §6.5 step 10 | `FALSE` → **no abort** | permissive — the soft limit stops protecting |
-| `ConveyorBeltPosition <= -SOFT_LIMIT` | §6.5 step 30 | `FALSE` → **no abort** | permissive — same |
-| `ABS(ConveyorBeltPosition - PositionRef) < POSITION_FREEZE_BAND` | §6.6 D2 | `FALSE` → no D2 | permissive |
-| `ABS(ConveyorBeltPosition) <= HOME_WINDOW` | §6.5 step 30, §6.7 start | `FALSE` → never completes / re-homes | restrictive; the step watchdog catches it |
-| `ABS(ConveyorBeltSpeed) > SPEED_TOLERANCE` | §6.6 D1/D2 | `FALSE` → `beltMoving` false → **D1 trips** under a non-zero command | restrictive; already correct |
+| `ConveyorBeltPosition >= SOFT_LIMIT` | §6.5 step 10 | `FALSE` → **no abort** (permissive) | Never reached with an implausible position: C5 drops `RunPermissive`, §7 part 6 forces `SeqStep := 0` **before** the `CASE` in the same OB call, and the setpoint is zeroed by §6.4 — a stronger reaction than the abort it replaces |
+| `ConveyorBeltPosition <= -SOFT_LIMIT` | §6.5 step 30 | `FALSE` → **no abort** (permissive) | As above, same scan, same mechanism |
+| `ABS(ConveyorBeltPosition - PositionRef) < POSITION_FREEZE_BAND` | §6.6 D2 | `FALSE` → no D2 (permissive) | `#d2` is conjoined with `#beltMoving`, which now carries `BeltFeedbackValid`, so D2 is false by construction rather than by accident; and `PositionRef` can no longer be *sampled* from an implausible position, which the old form allowed into a static |
+| `ABS(ConveyorBeltPosition) <= HOME_WINDOW` | §6.5 step 30, §6.7 start | `FALSE` → never completes / re-homes (restrictive) | Never reached: the step is exited by C5, and the start branch is gated by `RunPermissive`. The step watchdog is no longer the thing that catches it |
+| `ABS(ConveyorBeltSpeed) > SPEED_TOLERANCE` | §6.6 D1/D2 | `FALSE` → `beltMoving` false → D1 trips (restrictive, correct by luck) | Same reaction class, correctly named and faster: `#beltMoving` and `#d1` both carry `BeltFeedbackValid`, so an implausible speed raises `BeltFeedbackFaultLatch` immediately instead of `ConveyorDriveFault` after `DRIVE_FAULT_DELAY` |
 
-So a `NaN` belt speed is already handled the safe way by the affirmative form of
-§6.6, but a `NaN` belt position silently disarms both soft-limit aborts. The
-remedy would follow §6.2 exactly — an affirmative window test on the position,
-its failure treated as a fault rather than as a value — but it adds a latch
-condition and a constant, and that is a control-behaviour decision for its own
-brief, not a correction to be slipped into a reconciliation.
+No comparison in this table now consumes a value that has not been affirmed to
+be a measurement, and no window failure is answered by a permissive or by a
+substituted last-known-good value.
