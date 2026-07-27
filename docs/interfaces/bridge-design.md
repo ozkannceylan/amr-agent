@@ -110,7 +110,7 @@ applies, one heartbeat it writes, plus read-only diagnostics.
 | 2 | `/cell/conveyor/joint_state` | `sensor_msgs/JointState` | `velocity[i]`, same `i` | `Input/ConveyorBeltSpeed` | Real / `Float` | `float64 → Float`, m/s unchanged | cyclic 20 Hz, latest sample |
 | 3 | `/cell/product_sensor/scan` | `sensor_msgs/LaserScan` | `ranges[0]` | `Input/ProductSensorRange` | Real / `Float` | `float32 → Float` (already single on the wire), metres unchanged, **no threshold** | cyclic 20 Hz, latest sample |
 | 4 | `/cell/panel/start` | `std_msgs/Bool` | `data` | `Input/PanelStartPressed` | Bool / `Boolean` | none (NO contact, `true` = pressed) | on-change + refresh on connect |
-| 5 | `/cell/panel/reset` | `std_msgs/Bool` | `data` | `Input/PanelResetPressed` | Bool / `Boolean` | none (NO contact, `true` = held). The rising edge, the hold time and which latches clear are PLC program content | on-change + refresh on connect |
+| 5 | `/cell/panel/reset` | `std_msgs/Bool` | `data` | `Input/PanelResetPressed` | Bool / `Boolean` | none (NO contact, `true` = held, fail state `FALSE`). The rising edge the PLC acts on and which latches clear are PLC program content; there is no hold time and no timer | on-change + refresh on connect |
 | 6 | `/cell/panel/stop` | `std_msgs/Bool` | `data` | `Input/PanelStopCircuitClosed` | Bool / `Boolean` | none (NC circuit state, `true` = closed) | on-change + refresh on connect |
 | 7 | `/cell/panel/process_stop` | `std_msgs/Bool` | `data` | `Input/PanelProcessStopCircuitClosed` | Bool / `Boolean` | none (NC circuit state, `true` = closed) | on-change + refresh on connect |
 

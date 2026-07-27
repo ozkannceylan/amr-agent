@@ -112,3 +112,43 @@ Status folder and is unchanged), so the count obligation in `done_when` falls en
 2026-07-27 | Added one node to a contract document and treated the job as the new row plus the reconciliation table | The document's "deliberately absent" section (§9.8) and a neighbouring node's description both asserted the absence of what had just been added, so the file contradicted itself in two places while every changed line looked correct | Adding an item to a contract document means grepping that document for statements of its absence — the absent-by-design list and any "no node can…" clause — before the change is done
 
 2026-07-27 | Considered listing the panel inputs in the order the cell publishes them (start, stop, reset, process stop) | That order puts the one NO-failing contact between the two NC-failing ones, which is the exact adjacency that makes a reader generalise the wrong convention | Order rows in a signal table by failure direction, not by physical panel layout, when the table mixes both; adjacency is documentation
+
+---
+
+# Follow-up — stale hold-time prose (m3-06 verification, finding 2)
+
+Three spots corrected. The delivered mechanism is `plc/demo-cell/SPEC.md` §6.7:
+`ResetEdgeMemory` starts `TRUE`, the rising edge is the whole mechanism, a held,
+bridged or welded-closed contact produces no edge at all, and there is no timer
+anywhere in it. The prose I wrote said the PLC "times the hold" — that was the
+superseded gesture-reset, in which a hold distinguished a reset from a start on
+the shared start button. With a dedicated contact there is no gesture to time.
+
+| # | File and line | Before | After |
+|---|---|---|---|
+| 1 | `docs/interfaces/opcua-nodes.md:229` (§9.3 `PanelResetPressed`) | "Momentary level: the PLC forms the rising edge **and times the hold**, the bridge never latches, stretches or debounces it." | "Momentary level: the PLC acts on its **rising edge** — **no hold time, no timer** — and the bridge never latches, stretches or debounces it." |
+| 2 | `docs/interfaces/opcua-nodes.md:267` (§9.5 `CellResetRequired`) | "…and the edge, **the hold time** and which latches clear are PLC program content" | "…and **the rising edge the PLC acts on** and which latches clear are PLC program content" |
+| 3 | `docs/interfaces/bridge-design.md:113` (§5 map row 5) | "none (NO contact, `true` = held). The rising edge, **the hold time** and which latches clear are PLC program content" | "none (NO contact, `true` = held, **fail state `FALSE`**). The rising edge the PLC acts on and which latches clear are PLC program content; **there is no hold time and no timer**" |
+
+Row 3 also gained the fail state, which the §5 map did not carry — it was stated
+only in §6.3's start-value table. Same value, no new claim.
+
+Swept both files for the rest of the pattern (`hold`, `times`, `timer`, `0.2`).
+Everything remaining is unrelated: decimation's "no min/max hold" (§9.2), "the
+bridge holds no threshold" (§9.3), the heartbeat's "no timer, threshold or
+reaction" (§9.7), bridge-design §1.1's forbidden gating timers, and §4.5's
+~0.2 µm narrowing resolution. The two surviving uses of "held" are the NO contact
+state (`true` = button held) and "the node holds this start value", neither of
+which is a duration. `bridge-design.md:318` already said "monitored,
+edge-triggered local reset" and needed no change.
+
+`sim/README.md` was not touched — the verifier's other two occurrences are there
+and belong to the sim agent.
+
+files_changed (follow-up):
+  - docs/interfaces/opcua-nodes.md    (lines 229, 267)
+  - docs/interfaces/bridge-design.md  (line 113)
+
+Nothing else touched, nothing committed. `bridge-design.md`'s queued sweep still
+owns its six→seven input-count updates; I changed one row of its §5 map only,
+as instructed, and left the counts alone.
