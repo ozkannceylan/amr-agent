@@ -161,7 +161,11 @@ absorb the slow headless startup.
 The dated capture of exactly these checks from this container is in
 `worlds/BRINGUP_EVIDENCE.md`.
 
-## Navigation scenario (M3)
+## Navigation scenario (M5, deferred)
+
+This is not current work. Under ADR 0004 the vehicle and navigation gates
+move behind the fixed-equipment loop; this scenario is parked unverified
+and its status is recorded in `sim/scenarios/DEFERRED.md`.
 
 Localization + Nav2 goal navigation on top of the bringup above. Three
 steps, three terminals, all with both setups sourced
