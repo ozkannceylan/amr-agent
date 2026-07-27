@@ -224,9 +224,14 @@ address is needed anywhere.
 ### 4.3 Server interface
 
 Create **one** server interface (CPU → *OPC UA communication* → *Server
-interfaces*). Set its namespace URI to **`urn:amr-agent:cell:plc`** — the bridge
-browses for that URI and never hardcodes an index (`opcua-nodes.md` §2), so a
-mismatch here presents as "namespace not found" at every connect.
+interfaces*) and **name it `DemoCell`**. The name is the whole decision: TIA
+Portal **derives** the namespace URI as `http://<interface name>` and the field
+is **not editable**, so naming the interface `DemoCell` is what produces the URI
+`http://DemoCell`. Nothing is entered — read the derived value back and confirm
+it reads `http://DemoCell` (ADR 0006, from the owner's commissioning finding of
+2026-07-27 at the tool). The bridge browses for `http://DemoCell` and never
+hardcodes an index (`opcua-nodes.md` §2), so an interface named anything else
+presents as "namespace not found" at every connect.
 
 Build the folder tree exactly as below and drag each DB tag into it. Rename
 nothing: the leaf name must remain the BrowseName of §3.1.
@@ -244,8 +249,10 @@ DemoCell/
 
 Nothing else goes into the interface. The M1 nodes of `opcua-nodes.md` §3–§7
 (`Cell/`, `Safety/`, `Conveyor/`, `Door/`, `Charger/`) belong to the target cell
-served to the *fleet manager* and are **not** part of M3; they share the
-namespace URI but no node, and the two sets are never merged.
+served to the *fleet manager* and are **not** part of M3; they live on a
+**separate server interface**, which carries its own URI derived the same way
+from its own name — one namespace per interface, none shared (ADR 0006) — and
+the two sets are never merged.
 
 ---
 
@@ -838,7 +845,7 @@ click path verified on your installation, and the author cannot run TIA Portal.
 | 3 | **Activate the server.** CPU properties → **OPC UA → Server → "Activate OPC UA server"** | Off by default. The port is 4840 and the endpoint shown is `opc.tcp://<CPU IP>:4840`; that string goes into `bridge/config/bridge.yaml` → `opcua.endpoint` |
 | 4 | **Runtime licence.** CPU properties → **Runtime licences → OPC UA** → select the licence type matching the CPU (Siemens sells it as SIMATIC OPC UA S7-1500 *small* / *medium* / *large*, banded by CPU size) | Compilation is not clean until a type is selected, even in simulation. Whether PLCSIM Advanced *enforces* the licence at runtime is version-dependent — set it either way, and check the figure against your CPU's manual rather than against this table |
 | 5 | **Security.** For the demonstration, allow **"No security (none)"** as a server endpoint and permit **anonymous / guest** user access. Otherwise generate or import the bridge's client certificate and enable "automatically accept client certificates during runtime" | Must match `bridge.yaml` → `opcua.security_policy` (default `"none"`), and `certificate_path` / `private_key_path` / `username`, which are **absolute paths to files outside this repository** (invariant 13). Default S7-1500 settings are stricter than the default bridge settings, so one side must move — change the config, never the bridge code |
-| 6 | **Server interface.** CPU → *OPC UA communication* → *Server interfaces* → add one; set its **namespace URI to `urn:amr-agent:cell:plc`**; build the `DemoCell/Input|Output|Status|Link` tree of §4.3 and drag in the DB tags | If the URI is left at the CPU default, the bridge's browse-by-URI fails at every connect and never falls back to an index — by design (`opcua-nodes.md` §2). Do not rename any leaf: the BrowseName is the diff key against `opcua-nodes.md` |
+| 6 | **Server interface.** CPU → *OPC UA communication* → *Server interfaces* → add one and **name it `DemoCell`**; its **namespace URI is derived as `http://DemoCell` and the field is not editable** — read it back rather than looking for somewhere to type it (ADR 0006); build the `DemoCell/Input|Output|Status|Link` tree of §4.3 and drag in the DB tags | The interface name *is* the URI. Name the interface anything else and the bridge's browse for `http://DemoCell` fails at every connect and never falls back to an index — by design (`opcua-nodes.md` §2). Do not rename any leaf: the BrowseName is the diff key against `opcua-nodes.md` |
 | 7 | **Per-tag access.** In each DB's declaration table set *Accessible from HMI/OPC UA* and *Writable from HMI/OPC UA* per §4.2 | Leaving `ConveyorSpeedCommand` writable would let a client write an actuator output — the one thing invariant 6 forbids. Leaving the seven inputs **not** writable makes every bridge write fail with `BadNotWritable`, and the heartbeat never starts (startup rule R3) |
 | 8 | **Compile, download, RUN.** Download to the running PLCSIM instance and put the CPU in RUN | The server starts with the CPU. In STOP there is no server, so the bridge sees a connection refusal, not a bad session |
 | 9 | **Verify the address space independently** — UaExpert (or `opcua-client`) against the endpoint: browse the namespace, confirm **15 nodes**, the four folders and the data types | Do this before involving the bridge, so a naming or access mistake is not diagnosed as a bridge defect. The bridge logs `session established, N nodes resolved`; N must be 15 |
