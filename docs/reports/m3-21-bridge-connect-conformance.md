@@ -27,7 +27,7 @@ Nothing outside `bridge/` was touched. Nothing was committed.
 
 | Run | Result |
 |---|---|
-| Conformance harness, double granting **8000 ms** for a 10 000 ms request | PASS, 22/22. Indices 5 and 6 resolved by URI; the pre-m3-21 paths all return `BadNoMatch`; keep-alive 2.667 s = granted/3; measured exchange spacing 2.668 s, excluding the 3.333 s the request would have implied; both wrong-URI cases raise `NamespaceNotFound` |
+| Conformance harness, double granting **8000 ms** for a 10 000 ms request | PASS. (Correction, m3-23 F5: this row originally read "22/22"; the harness prints no total, and both the verifier's re-run and m3-24's confirm 18 `ok` lines and a bare `RESULT: PASS`.) Indices 5 and 6 resolved by URI; the pre-m3-21 paths all return `BadNoMatch`; keep-alive 2.667 s = granted/3; measured exchange spacing 2.668 s, excluding the 3.333 s the request would have implied; both wrong-URI cases raise `NamespaceNotFound` |
 | Same harness, double granting **30 000 ms** (above the request, as the CPU did) | PASS. Keep-alive 10.000 s, measured spacing 10.003 s — the number the owner's PLCSIM run should log if the CPU grants 30 000 ms |
 | `run_bridge.py`, unmodified config | Logs both namespaces, the resolved `Objects/5:ServerInterfaces/6:DemoCell`, requested vs granted timeout, and the derived keep-alive |
 | Full loop (headless cell + stimulus + bridge, 40 s) | 800 cycles at 20.0 Hz, 792 heartbeat writes, 0 write/read errors, 0 reconnects, `keepalive_probes = 0` — the keep-alive adds no traffic to a healthy run |

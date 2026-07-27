@@ -9,8 +9,8 @@
 ## infra (fold into the next infra brief, do not issue alone)
 - The root .gitattributes comment states a shebang-file count that is stale after m3-21 added bridge/tools/check_connect_conformance.py (7 should be 8, confirmed by m3-22) — correct the count or drop the number from the comment.
 
-## bridge
-- m3-24 evidence and config wording (issued, from m3-23 findings F3/F4/F5/F6) — done when no bridge/ file describes the session-timeout revision as clamp-only, bridge.yaml's endpoint comment names opc.tcp://192.168.53.1:4840 as the commissioned value the owner swaps in, and any check count in bridge/ matches what the harness prints or is removed.
+## sim (deferred, after M3 closes — do not start before the owner's evidence lands)
+- Cell reskin from harvested assets. Research (2026-07-27, scratchpad sim-research.md) recommends harvesting ARIAC 2025 conveyor/break-beam visuals onto the existing joints, optionally placing the cell inside Fuel Depot (CC-BY 4.0). Visual only: the /cell/... topic contract and the node model must not change. Blocker to resolve first — ariac_gz, the package holding every mesh, declares "TODO: License declaration" and the repo has no top-level LICENSE; NIST's only terms statement is a US-only §105 non-copyright note, so clarify terms with the maintainers before any mesh enters this repository. Adopting ARIAC's own plugins is out of scope: it would add ariac_interfaces and change the signal contract, which needs an ADR.
 
 ## safety-spec
 - m2-04 SRS reconciliation — not yet issued, from m2-03's findings. Done when the SRS §4 gate references match the ADR 0004 order (M9 safety, M5/M6 vehicle, M10 demonstration, M11 arm); SF-08 carries an architecture claim beside its PL c or states the inheritance; SF-03's bumper latch appears in §2's no-auto-resume list; and AT-01 gains the at-rest sub-test SC-02 observes (transfer refused with the latch set). One brief — the four items are one document's consistency.

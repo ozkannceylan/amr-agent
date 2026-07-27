@@ -71,7 +71,10 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
     evidence value for value.
 21. m3-24 bridge — wording corrections from the m3-23 findings (clamp
     described one-directionally in the evidence files, bridge.yaml endpoint
-    comment, non-reproducible check count). Issued.
+    comment, non-reproducible check count). Closed 2026-07-27.
+
+The agent-side work of M3 is complete as of 2026-07-27. Everything still
+open is owner-executed or verification of owner-produced evidence.
 
 Container evidence (briefs 3 and 4) is retained beside the WSL evidence, not
 replaced by it.
@@ -81,7 +84,7 @@ CPU 1513-1 PN FW V3.1, endpoint opc.tcp://192.168.53.1:4840 verified by an
 independent asyncua client reading all 15 DemoCell nodes. Phase 0 proves
 endpoint and node exposure only, no program logic.
 
-Remaining before the gate can close: brief m3-24, then the owner's OB30
+Remaining before the gate can close: the owner's OB30
 program build per plc/demo-cell/SPEC.md (tags §3.2, logic §6.1 onward) and
 the PLCSIM run with the bridge on the verified endpoint — exit items 1 and
 2 plus EVIDENCE_LATENCY.md Section B in full (item 5 covers all seven
