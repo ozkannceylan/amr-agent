@@ -2,7 +2,7 @@
 
 brief:               docs/briefs/m3-36-rebuild-rerun-evidence.md
 status:              done
-files_changed:       bridge/EVIDENCE_LATENCY.md (+497 / −0), bridge/EVIDENCE_SIGNAL_LOSS.md (+101 / −6) — one logical change, not committed
+files_changed:       bridge/EVIDENCE_LATENCY.md (+497 / −0), bridge/EVIDENCE_SIGNAL_LOSS.md (+101 / −6), committed as `80e6cc4`; plus this session's two corrections to §B3.0 and §B3.4 (+15 / −4) and this report
 invariants_touched:  none
 
 ---
@@ -76,6 +76,37 @@ Each is stated in the section rather than silently applied.
    permissive window and outside build G's. It is labelled an inference over a
    window no instrument sampled.
 
+## Re-checked against the committed artifacts, and two corrections
+
+The writing session ended at its commit, so every load-bearing figure of part 3 was
+re-derived here from the committed artifacts alone. All reproduce exactly as
+printed: the log's `19:25:43,501 → ,511` (**10 ms**, 7 of 7 nodes, and it is the
+file's only `WARNING` line); the CSV's **9.704 ms** detection-to-last-write and
+**11.492 ms** from the read's start, its containing `R1,cycle` of **50.789 ms** and
+the `overrun,cycle` row of `905524` ns; the seven `L1` ages (**177.473** /
+**176.224** / **144.310** / **29.894** s and **26.850** / **3.761** / **2.644** ms);
+the **158.270 µs** and **118.233 µs** heartbeat-after-seventh-write gaps; the
+session row counts **37 325** / **199 851** and spans **94.959** / **498.978** s;
+and the observer's **1 196** rows / **239.994** s, period min 0.2001 / median
+0.2008 / max 0.2031 s, heartbeat 2 763 → 7 563 at 20.0005 counts/s, **zero**
+decreasing samples, **zero** `BridgeLinkOk FALSE` samples, `CurrentSessionCount`
+constant at 2, and the bracketing samples t = 36.7452 / 36.9459 (200.7 ms).
+
+Two statements did not hold up, and both are corrected in this commit. No figure is
+altered by either.
+
+1. **§B3.0 said "both processes were killed rather than shut down".** Session 2's
+   process was not killed. It was still running when its CSV was archived and was
+   **still appending at 22:04 the same evening** — 2 h 41 min after it started,
+   ~39 kB/s, 356 MB — into the gitignored working file, which begins **without a
+   header** at the monotonic instant the archive ends (session 1, already dead,
+   left no such file). The committed session-2 CSV is a snapshot of a live session;
+   its span is the window it covers, not the session's length.
+2. **§B3.4 row 14 said "no `PanelResetPressed` write"** in the gap containing the
+   CPU restart. §B3.2's own rewrite wrote that node inside that gap, with value
+   `False`. The claim now reads "no *change-driven* write", which is what the
+   artifacts support and all the argument needs.
+
 ## Disposition, as written into §B3.4
 
 | Row | Verdict |
@@ -95,6 +126,16 @@ instrument in this run can see, and **no watch-table capture was taken at all**.
 Those conditions are recorded as unread, never inferred silently.
 
 open_questions:
+- **A bridge session from this run is still live.** The session-2 process has held
+  an OPC UA session against PLCSIM since 19:22:41 and was still writing at 22:04,
+  356 MB and growing. Nothing here stopped it — stopping it is the owner's call,
+  not a `bridge/` deliverable — but the next run must not be started beside it, and
+  the counter block it will flush on a clean shutdown is the only route to build G's
+  R1/R2/R3 ratios.
+- **The archive step needs a rule.** Compressing a live session's CSV in place
+  removes the file underneath the writer, which re-creates it headerless; archive
+  after the session ends, or copy first and compress the copy. That is a
+  `docs/LESSONS.md` row and is not mine to write.
 - `docs/interfaces/bridge-design.md` §8.1 does **not** describe restart detection —
   its *Detection* row is a failed read, write or keep-alive, and §7.3 case C
   assumes the session breaks. The implemented path cites "§8.1" in its own log

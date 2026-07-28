@@ -1940,9 +1940,20 @@ converted to a wall time anywhere in this section. Where the brief's transcript
 timestamp and the artifact disagree, the artifact is quoted and the transcript
 figure is named beside it.
 
-Neither CSV carries a `run` summary row: both processes were killed rather than
-shut down, so **no counter block was flushed** and the R1/R2/R3 received-versus-
-written ratios this file usually quotes are unavailable for build G. The per-event
+Neither CSV carries a `run` summary row, and the two have **different reasons**.
+Session 1's process was `kill -9`'d (§B3.1 4.9b), so nothing was flushed. Session
+2's process was **still running when its CSV was archived**, and still running
+long afterwards: the committed file ends mid-cycle, and the working file on disk —
+excluded from the record by `bridge/.gitignore` (`evidence/*-pid*.csv`) — was
+observed **still growing at 22:04 the same evening**, 2 h 41 min after that
+session began, at ~39 kB/s. That working file **restarts without a header row** at
+the monotonic instant the archive ends, which is what a still-appending writer
+produces when the original is moved or removed underneath it; session 1, whose
+process was already dead, left no such file. So the committed session-2 CSV is a
+**snapshot of a live session, not the record of a finished one** — treat its span
+as the window it covers, never as the session's length. Either way **no counter
+block reached either committed file**, so the R1/R2/R3 received-versus-written
+ratios this file usually quotes are unavailable for build G. The per-event
 `R1`/`R2` rows are all present, so cycle rate could be recomputed from them — but
 this section does not do so and claims no rate or statistics figure. **§B2.3 and
 §B2.4 stand as the last measured set**, and the only two timing figures taken from
@@ -2295,7 +2306,7 @@ support.**
 
 | §B2.12 # | Now | Where |
 |---|---|---|
-| **14** — T4.9b re-run, two preconditions | **precondition (i) met, form (a) CLOSED, form (b) still open.** The §6.8 rebuild is downloaded and its provenance recorded (§B3.0). Variant **(a)**, fresh bridge with the reset held — the variant part 2 ran and failed — **passed on build G**, and the pass is a reading. Variant **(b)**, CPU start with `reset` already publishing, **did not run**: 4.5's restart *is* a CPU start, but no reset was held across it (no `PanelResetPressed` write between session-2 rel 37.307 s and rel 389.106 s, with the restart at rel 181.6 s inside that gap and the last written value `False`). §11 4.9b is one step that must hold for **both** forms, so **the step is not yet a pass** | §B3.1 4.9b |
+| **14** — T4.9b re-run, two preconditions | **precondition (i) met, form (a) CLOSED, form (b) still open.** The §6.8 rebuild is downloaded and its provenance recorded (§B3.0). Variant **(a)**, fresh bridge with the reset held — the variant part 2 ran and failed — **passed on build G**, and the pass is a reading. Variant **(b)**, CPU start with `reset` already publishing, **did not run**: 4.5's restart *is* a CPU start, but no reset was held across it — no *change-driven* `PanelResetPressed` write occurs between session-2 rel 37.307 s and rel 389.106 s, and the only write of that node inside the gap is the restart rewrite of §B3.2 (rel 181.601–181.612 s), which sent `False`. The restart therefore fell inside a **released** reset. §11 4.9b is one step that must hold for **both** forms, so **the step is not yet a pass** | §B3.1 4.9b |
 | **15** — T4.11's reaction path, re-recorded | **still open, and deliberately not attempted here.** T4.11 is not in §6.8's re-run list, and build G carries `BELT_SPEED_MIN`/`MAX` at ±1.00 — the CSV shows full ±0.15 strokes with no C5 intervention — so the narrowed-constant method was not in force. What *has* changed is the instrument the step nominates: the per-session CSV exists and is demonstrated (§B3.0), so the re-run is now possible without reproducing LIMITATION 1. The measurement itself is still uncorroborated by any committed file | §B2.13 F4; §B3.0 |
 | **16** — T4.11b, the latch and its reset | **still open and still BLOCKED.** `SPEC.md` §12 item 6's hold-until-disarmed fault-injection facility does not exist; nothing in this run builds or approaches it. Not runnable, not a pass by default | §B2.13 F4 |
 | **17** — 4.2, 4.3, 4.5 and 4.8 re-run against the corrected build | **4.3 CLOSED in full. 4.2 and 4.5 closed on their server-visible halves; their Group 4 halves are not read. 4.8 half re-run** — its R3 half is measured, its **cold start did not happen**. The one reading that would discriminate build G's boot polarity from build C's — `ProcessStopLatch`/`BridgeLinkOk` inside the first `HEARTBEAT_STALE_TIME` of a CPU run with the bridge **down** — is still owed, and §B2.12a's "cheapest available before/after test" is therefore still not performed | §B3.1, §B3.0 |
