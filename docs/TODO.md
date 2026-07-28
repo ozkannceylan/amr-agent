@@ -22,9 +22,11 @@
 ## owner (m3-34 delta — SPEC §6.8, re-implement in TIA)
 - Add static HeartbeatSeenAlive : Bool := FALSE; latch it on the first observed heartbeat change; AND it into the BridgeLinkOk verdict. Replace ResetDeviceFault's single-branch clear with the per-link-session re-arm form (re-armed whenever BridgeLinkOk is FALSE). Add the new static to watch-table Group 4. Then verify green diff circles and the in-force PTs BEFORE testing, and re-run §11 4.2, 4.3, 4.5, 4.8 and 4.9b against the rebuild — the corrected cold-start signature reads CellProcessStopActive FALSE at boot (deliberate change, documented in SPEC).
 
-## bridge (from the live run)
-- Rewrite-on-restart: detect a server restart (heartbeat node reverted / session loss) and rewrite every slot; the write-on-change cache left stop circuits at start values after a CPU warm restart.
-- Evidence CSV: unique per bridge session; --evidence-csv truncation across restarts wiped a day of 20 Hz data.
+## bridge
+- m3-35 session-lifecycle conformance (issued) — done when a recorded double run proves reconnect-on-in-flight-failure, full slot rewrite on server restart, and per-session evidence CSVs.
+
+## owner (M4 pre-gate feasibility, ADR 0007's tool question — do in TIA while M3 closes)
+- Does this install run an F-CPU on PLCSIM Advanced V7? Check: STEP 7 Safety Advanced V21 license present; 1513F-1 PN addable from the catalogue; an empty F-project compiles and downloads to a PLCSIM instance and reaches RUN with the F-runtime group executing; what F-I/O the catalogue offers and whether PLCSIM accepts it. The answers are the input to M4's first brief — the tool rules, not the spec (phase-0 lesson).
 
 ## owner (spec changes landed after the program was built — re-implement in TIA)
 - Case-D re-arm (m3-29, SPEC §6.6/§7 part 3): add static PositionFrozen (Bool, FALSE) and constant POSITION_WINDOW_TIME (T#1s); add temps windowRunning/windowExpired; change PositionWindowTimer PT to the new constant and add PosWindowArmed to its IN; replace the §7 part 3 window block so the verdict forms at expiry and PositionRef re-samples on the release call, both statics cleared in the ELSE; d2 := beltMoving AND PositionFrozen; add .PositionRef, .PositionFrozen, .PositionWindowTimer.ET to watch-table Group 4; do NOT add PositionFrozen to the reset clear list. Detection bound ≤3.2 s from freeze. Note: T4.7 is inverted — the monitored reset is now refused while the image still claims motion; restart the simulation first.
