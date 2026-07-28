@@ -23,7 +23,11 @@
 - Add static HeartbeatSeenAlive : Bool := FALSE; latch it on the first observed heartbeat change; AND it into the BridgeLinkOk verdict. Replace ResetDeviceFault's single-branch clear with the per-link-session re-arm form (re-armed whenever BridgeLinkOk is FALSE). Add the new static to watch-table Group 4. Then verify green diff circles and the in-force PTs BEFORE testing, and re-run §11 4.2, 4.3, 4.5, 4.8 and 4.9b against the rebuild — the corrected cold-start signature reads CellProcessStopActive FALSE at boot (deliberate change, documented in SPEC).
 
 ## bridge
-- m3-35 session-lifecycle conformance (issued) — done when a recorded double run proves reconnect-on-in-flight-failure, full slot rewrite on server restart, and per-session evidence CSVs.
+- m3-35 session-lifecycle conformance (issued) — done when a recorded double run proves reconnect-on-in-flight-failure, full slot rewrite on server restart, and per-session evidence CSVs. When it lands, reconcile EVIDENCE_LATENCY §B2.12 rows 20-21 (written as open requests) in the same commit.
+- Fault injection (SPEC §12 item 6, blocks T4.11b) — opt-in mode that writes a nominated DemoCell/Input Real as NaN/inf/out-of-window; cannot be enabled by accident in an evidence run. Brief after m3-35 lands (same files).
+
+## plc (fold into the next plc brief)
+- F6 (m3-33, §B2.12 row 22): PresenceOnTimer.PT reads T#100MS before a CPU restart and T#0MS after, in five captures. Likely the §6.5-blessed conditional call site: at boot range=0.0 is implausible, rangeValid is FALSE, the presence call never executes, so PT shows the DB start value until the first valid range — diagnose against §6.5 and close or escalate.
 
 ## owner (M4 pre-gate feasibility, ADR 0007's tool question — do in TIA while M3 closes)
 - Does this install run an F-CPU on PLCSIM Advanced V7? Check: STEP 7 Safety Advanced V21 license present; 1513F-1 PN addable from the catalogue; an empty F-project compiles and downloads to a PLCSIM instance and reaches RUN with the F-runtime group executing; what F-I/O the catalogue offers and whether PLCSIM accepts it. The answers are the input to M4's first brief — the tool rules, not the spec (phase-0 lesson).

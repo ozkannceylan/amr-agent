@@ -99,10 +99,20 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
     m3-25's finding. Closed 2026-07-27; recorded §12 open item 6, a
     fault-injection request against bridge/.
 
-The agent-side work of M3 is complete as of 2026-07-27 apart from m3-25,
-which corrects the specification against the program the owner built from
-it. Everything else still open is owner-executed or verification of
-owner-produced evidence.
+30. m3-33 bridge — the 2026-07-28 owner session written into the evidence
+    (Section B part 2, signal-loss PLCSIM section, 4.6 = 2.301 s from the
+    20 Hz CSV). Closed 2026-07-28.
+31. m3-34 plc — link boot polarity, per-link-session reset guard, T4.11b
+    split (T4 denominator 14). Closed 2026-07-28; owner delta is SPEC §6.8.
+32. m3-35 bridge — session-lifecycle conformance (reconnect, rewrite-on-
+    restart, per-session CSVs). Issued.
+33. pub-01/pub-02 — publication audit and public README (owner-directed,
+    not gate work). Issued.
+
+Remaining to close M3: m3-35; the owner's §6.8 rebuild and the re-runs of
+§11 4.2/4.3/4.5/4.8/4.9b plus T4.11's reaction re-record; then the gate
+verifier. T4.11b stays outstanding on the fault-injection facility and does
+not block the gate decision — the verifier rules on it explicitly.
 
 The PLC program was built and verified running on PLCSIM on 2026-07-27:
 FB_DemoCellControl from OB30 at 20 ms, CPU in RUN, cold-start state read
