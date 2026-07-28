@@ -16,6 +16,17 @@
 ## bridge (new finding, 2026-07-28 live session)
 - Reconnect path does not catch exceptions from in-flight requests: when the CPU download dropped the session mid-read, run_bridge died on an unhandled exception in _output_path instead of reconnecting. Done when an in-flight request failure routes into the §8.1 reconnect path and a bounce-during-read test proves it against the test double.
 
+## live run 2026-07-28 — COMPLETE (agent-drivable part)
+- T1 6/6 rerun with the real 100 ms filter; T2 8/8; T4: 4.1-4.4 ✓, 4.5 ✓ (STOP/RUN, plus the write-cache finding), 4.6 ✓ re-measured 2.79 s freeze-to-fault (inside the 2.1-3.2 s bound, 20 Hz CSV), 4.6b ✓ (D1 ~1 s), 4.7 ✓ (reset refused while image claims motion, honoured after revive), 4.8 ✓ (R3 proven input by input), 4.9 ✓, 4.9b FAILED with finding (link boot polarity), 4.10 ✓ (SIGKILL ~22 s hold vs SIGTERM immediate), 4.11 reaction path ✓ / latch step untestable as specified (finding). Cycle times: 1.004/1.023/2.556 ms on a 20 ms OB30. Rebuild baseline SPEC @ 39a21b6 + the three-delta and PT-fix downloads. Raw artifacts committed in bridge/evidence/*2026-07-28*.
+
+## plc (spec corrections from the live run, one brief)
+- Link boot polarity + RDF: BridgeLinkOk must be FALSE until the heartbeat is seen changing; ResetDeviceFault's clear must ride the corrected verdict (T4.9b failure). Re-specify §6.1/§6.7, then the owner re-implements.
+- T4.11 procedure: replace the narrowed-window method with bridge-side fault injection (§12 item 6) as the latch test; keep the reaction-path demonstration as run.
+
+## bridge (from the live run)
+- Rewrite-on-restart: detect a server restart (heartbeat node reverted / session loss) and rewrite every slot; the write-on-change cache left stop circuits at start values after a CPU warm restart.
+- Evidence CSV: unique per bridge session; --evidence-csv truncation across restarts wiped a day of 20 Hz data.
+
 ## owner (spec changes landed after the program was built — re-implement in TIA)
 - Case-D re-arm (m3-29, SPEC §6.6/§7 part 3): add static PositionFrozen (Bool, FALSE) and constant POSITION_WINDOW_TIME (T#1s); add temps windowRunning/windowExpired; change PositionWindowTimer PT to the new constant and add PosWindowArmed to its IN; replace the §7 part 3 window block so the verdict forms at expiry and PositionRef re-samples on the release call, both statics cleared in the ELSE; d2 := beltMoving AND PositionFrozen; add .PositionRef, .PositionFrozen, .PositionWindowTimer.ET to watch-table Group 4; do NOT add PositionFrozen to the reset clear list. Detection bound ≤3.2 s from freeze. Note: T4.7 is inverted — the monitored reset is now refused while the image still claims motion; restart the simulation first.
 - Dwell timer: SPEC now calls it unconditionally outside the CASE with IN := (SeqStep = 20), because a call site inside branch 20 stops executing at step exit. The reported fix (IN := FALSE on leaving step 20) works only if that release executes in the same scan as the exit — confirm it does, or adopt the spec's form, so program and spec do not drift.
