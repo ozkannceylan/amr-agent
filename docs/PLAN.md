@@ -2,60 +2,54 @@
 
 ## M3 — Fixed equipment I/O loop: CLOSED 2026-07-28
 
-Verified in `docs/reports/m3-37-gate-verification.md`, **pass-with-findings**.
-All four exit criteria met as `docs/roadmap.md` writes them. Twelve findings
-recorded; none unmeets an exit item. The gate did **not** close on
-`plc/demo-cell/SPEC.md` §11's step list and was not asked to: §11 T4 is not a
-14/14 pass, and no document claims it is.
+Verified in docs/reports/m3-37-gate-verification.md, pass-with-findings: all
+four exit criteria met as roadmap.md writes them; twelve findings, none
+unmeeting an item; §11 T4 is not a 14/14 pass and no document claims it is.
+The carried residue (T4.11/T4.11b, 4.9b's cold-start form, the findings
+queue) lives in docs/TODO.md.
 
-What the gate rests on:
+## Current gate: M4 — Forklift commissioning cell (ADR 0008)
 
-| Item | Met by |
-|---|---|
-| (a) Gazebo sensor state visible as PLC input bits in a TIA watch table | `plc/demo-cell/evidence/watch-table/Screenshot 2026-07-28 135105.png`, provenance closed by the `171656`/`171727` pair |
-| (b) PLC output bits drive the Gazebo actuator, verified visually | `assets/plc-drives-cell.gif`, with causality from §B2.5/§B2.6a and `ConveyorSpeedCommand` at access level RD (no client can write it) |
-| (c) Latency and update rate measured and written down | `bridge/EVIDENCE_LATENCY.md` Sections A–C; 14 244 cycles at 20.00 Hz, one sized overrun, full statistics for all seven inputs, CPU cycle 1.004/1.023/2.556 ms |
-| (d) Signal-loss behaviour defined and tested | `bridge/EVIDENCE_SIGNAL_LOSS.md` with §8 as the definition; cases A, B, C in both bridge states, D(i) and D(ii) at 2.301 s inside the specified [2.1, 3.2] s, no-auto-resume proven four times |
+Opened 2026-07-28. Criterion: the M4 row of docs/roadmap.md — five observable
+behaviours through HMI → PLC standard program → bridge → Gazebo, plus the
+recorded commissioning showcase naming every reaction as process logic. TIA
+Portal and PLCSIM work is owner-executed; agents deliver everything up to the
+live loop. No SRS function is implemented at this gate (ADR 0008 D3).
 
-The gate was demonstrated across several program builds in one day and the
-verifier ruled that assembly legitimate: every figure names its build, no
-figure was amended, and all five steps the §6.8 correction affected were
-**re-run** against the corrected build rather than reasoned across.
+## Briefs to close M4
 
-## M4 — Safety layer on the fixed cell (F-CPU): NOT OPENED
+Contract wave, closed 2026-07-28: m4r2-01 ADR 0008 (ccd867e); m4r2-02 roadmap
+renumber (3b86b1c); m4r2-03 CLAUDE.md + hmi bootstrap (2e6bf48). m4r2-04
+public README gate order + m3-37 finding-12 residue: issued.
 
-The owner is continuing M4 in a later session. **No M4 brief has been issued
-and none should be inferred from this file.** Its criterion is the M4 row of
-`docs/roadmap.md`; ADR 0007 §2 holds the per-function cell/vehicle split
-(SF-01, SF-07, SF-08 at M4; SF-05 and SF-06 at M8; the vehicle chain at M5/M6).
+Implementation wave, dependency-ordered:
 
-Entry work, in order:
+1. m4f-01 interface — forklift node group + signal table. In flight.
+2. m4f-02 agv — in-house forklift SDF + vehicle nodes. In flight.
+3. m4f-03 sim — commissioning arena + bringup. Opens when m4f-02 lands.
+4. m4f-04 plc — plc/forklift/SPEC.md, owner-buildable. Opens when m4f-01 lands.
+5. m4f-05 interface — bridge-design addendum, plus the two carried
+   bridge-design rows. Opens when m4f-01 lands.
+6. m4f-06 bridge — forklift slots proven on the test double. After m4f-05.
+7. m4f-07 hmi — backend + UI against the double. Opens when m4f-06's double
+   serves the forklift nodes (roster prerequisite closed by m4r2-03).
+8. m4f-08 sim — scenario procedure + evidence checklist. After m4f-03/04/07.
+9. m4f-09 verifier — gate verification, last, after the owner evidence.
 
-1. **The tool question, ADR 0007's own precondition** — does this install run
-   an F-CPU on PLCSIM Advanced V7? STEP 7 Safety Advanced V21 licence, a
-   1513F-1 PN addable from the catalogue, an empty F-project reaching RUN with
-   its F-runtime group executing, and what F-I/O the catalogue offers. Owner
-   work in TIA; the answers are the input to the first brief, not something a
-   document may assume (the phase-0 lesson).
-2. Only then the first M4 brief.
+m4f-01 and m4f-02 run in parallel on an orchestrator-fixed signal contract;
+deltas reconcile via their reports (LESSONS 2026-07-27 contract-document rule,
+accepted knowingly).
 
-Three verifier findings (1, 2, 9) name watch-table readings that belong at the
-head of M4's owner queue, because M4 performs CPU restarts anyway: **one
-capture at a CPU cold start with the bridge down**, showing all seven Group 1
-inputs at their DB start values, closes findings 1, 2, 8 and 9 at once.
+Owner queue for this gate: docs/TODO.md "owner — M4 queue", starting with the
+m3-37 finding-9 cold-start capture at the first PLCSIM session.
 
-## Carried out of M3, none blocking
+## M5 — Safety layer on the fixed cell: NOT OPENED
 
-- `plc/demo-cell/SPEC.md` §11 T4.11 needs its reaction path re-recorded with a
-  per-session CSV (the facility now exists), and **T4.11b is blocked** on the
-  bridge fault-injection facility of §12 item 6, which does not exist. Both
-  concern belt-feedback plausibility — a defence added during the gate, absent
-  from all four exit criteria.
-- §11 4.9b's CPU-cold-start form has not run. Its bridge-restart form — the
-  form item (d)'s own sentence names — passed with 28.202 s of refusal.
-- The remaining queue is `docs/TODO.md`.
+Entry work carried unchanged from ADR 0007, re-attached by m4r2-02: the
+F-CPU-on-PLCSIM tool question is owner work in TIA and feeds M5's first
+brief. No M5 brief until it is answered.
 
 M0 closed 2026-07-26 (m0-04/07/09), M1 2026-07-26 (m1-04), M2 2026-07-26
-(m2-02), M3 2026-07-28 (m3-37). Brief and report filenames are kept as
-written: `m4-00-hermes-survey.*` belongs to what is now M11, and the older
-`m3-*` sim files belong to M5.
+(m2-02), M3 2026-07-28 (m3-37). Filenames are kept as written:
+m4-00-hermes-survey.* belongs to M12, m4r-* to the ADR 0007 round,
+m4r2-*/m4f-* to this gate, the older m3-* sim files to M6.
