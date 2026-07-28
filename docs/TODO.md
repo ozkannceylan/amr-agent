@@ -14,6 +14,7 @@
 - ProductPresentAtSensor never formed in the TIA build: the beam blocked six times at a constant 0.5400 m (inside the detect window) with the link and cycle up, yet the verdict stayed False in all 3,907 observer rows. Top hypotheses: PRESENT_THRESHOLD mis-entered, or a dead presence call site. ONE watch-table observation discriminates: block the beam and watch PresenceOnTimer.ET — if it counts up, the threshold path is fine and the verdict latch is dead; if it stays 0, the comparison never goes true (check the constant as entered).
 
 ## owner (spec changes landed after the program was built — re-implement in TIA)
+- Case-D re-arm (m3-29, SPEC §6.6/§7 part 3): add static PositionFrozen (Bool, FALSE) and constant POSITION_WINDOW_TIME (T#1s); add temps windowRunning/windowExpired; change PositionWindowTimer PT to the new constant and add PosWindowArmed to its IN; replace the §7 part 3 window block so the verdict forms at expiry and PositionRef re-samples on the release call, both statics cleared in the ELSE; d2 := beltMoving AND PositionFrozen; add .PositionRef, .PositionFrozen, .PositionWindowTimer.ET to watch-table Group 4; do NOT add PositionFrozen to the reset clear list. Detection bound ≤3.2 s from freeze. Note: T4.7 is inverted — the monitored reset is now refused while the image still claims motion; restart the simulation first.
 - Dwell timer: SPEC now calls it unconditionally outside the CASE with IN := (SeqStep = 20), because a call site inside branch 20 stops executing at step exit. The reported fix (IN := FALSE on leaving step 20) works only if that release executes in the same scan as the exit — confirm it does, or adopt the spec's form, so program and spec do not drift.
 - Belt feedback plausibility (m3-27, SPEC §6.2.2): five constants, two statics, one temp, seven code sites. A NaN belt position currently disarms both soft-limit aborts in the built program. Adding statics reinitialises the instance DB, so ResetDeviceFault starts TRUE again and the reset contact must be seen open once. A healthy run should look identical after the change — anything faulting during a normal cycle means the constants are wrong, not the logic. Nothing in the bridge, the DBs, the 15 nodes or the server interface changes.
 
@@ -21,10 +22,10 @@
 - BELT_SPEED_MIN/MAX are design values at ±1.00 m/s with no measured drive maximum behind them. Confirm against the drive or the cell's achievable speed and record the source.
 
 ## plc
-- m3-29 case-D re-spec (issued, from m3-28 F2) — done when §6.6 detects the recorded mid-motion freeze within a stated bound, §8 and §11 promise exactly what the logic guarantees, and the owner delta is stated.
+- m3-31 pass-string accounting (issued, from m3-30's open questions) — done when every §11 pass criterion counts the steps the section currently defines and none counts a failed or outstanding step by default.
 
 ## bridge
-- m3-30 evidence accounting (issued, from m3-28 secondary findings) — done when T4.11 is accounted for and the two unproven §B.13 figures carry provenance or are restated as uncommitted observations.
+- m3-32 outstanding rows (issued, from m3-29's request) — done when §B.12 carries rows for the revised T4.6/T4.6b/T4.7 with the rebuild-baseline note, and the superseded roster rows are annotated, not renumbered.
 
 ## bridge (from m3-27, SPEC §12 open item 6)
 - Opt-in fault-injection mode: a genuine NaN cannot currently be injected from the cell, so SPEC §11 step 4.11 has to exercise the belt-feedback path by narrowing a constant instead. Done when the bridge can inject an implausible or NaN belt sample under an explicit opt-in that cannot be enabled by accident in an evidence run.

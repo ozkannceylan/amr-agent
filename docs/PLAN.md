@@ -84,9 +84,13 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
     Closed 2026-07-28: F1 is a program defect (SPEC exonerated, one
     watch-table observation discriminates), F2 is a spec defect (§6.6's
     one-shot D2 window, generalised from a parked-belt capture).
-26. m3-29 plc — case-D detection re-specified to work mid-motion. Issued.
-27. m3-30 bridge — Section B accounting corrections (T4.11, two figure
-    provenances). Issued.
+26. m3-29 plc — case-D detection re-specified to work mid-motion (re-armed
+    freeze window, ≤3.2 s bound). Closed 2026-07-28.
+27. m3-30 bridge — Section B accounting corrections. Closed 2026-07-28;
+    found three more unproven figures and fixed them in the same pass.
+28. m3-31 plc — §11 pass-string accounting. Issued.
+29. m3-32 bridge — outstanding rows for the re-specified case-D tests.
+    Issued.
 24. m3-27 plc — plausibility windows for the belt feedback signals, from
     m3-25's finding. Closed 2026-07-27; recorded §12 open item 6, a
     fault-injection request against bridge/.
