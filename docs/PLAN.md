@@ -109,10 +109,29 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
 33. pub-01/pub-02 — publication audit and public README (owner-directed,
     not gate work). Issued.
 
-Remaining to close M3: m3-35; the owner's §6.8 rebuild and the re-runs of
-§11 4.2/4.3/4.5/4.8/4.9b plus T4.11's reaction re-record; then the gate
-verifier. T4.11b stays outstanding on the fault-injection facility and does
-not block the gate decision — the verifier rules on it explicitly.
+34. m3-35 bridge — session-lifecycle conformance. Closed 2026-07-28: all
+    three behaviours proven against the double (in-flight reconnect,
+    7-of-7 slot rewrite on server restart, per-session evidence files).
+35. m3-36 bridge — the §6.8 rebuild re-runs written into the evidence.
+    Issued 2026-07-28, interrupted by an API session limit and resumed.
+
+The owner's §6.8 rebuild landed 2026-07-28 and all five re-runs passed
+against it: 4.8 (R3 input by input), 4.2 (30 s hands-off, no resume), 4.3
+(reset moves nothing, separate start runs), 4.9b **in its bridge-restart
+form** — the form m3-34 predicted the defect would relocate to — where a
+reset held from before link-up no longer clears any latch, and 4.5 where the
+bridge detected a restart under a live session and rewrote 7 of 7 inputs in
+milliseconds against build C's 4 min 31 s, with `CellProcessStopActive`
+staying FALSE as the corrected signature requires.
+
+Remaining to close M3, in order:
+1. m3-36 lands (in flight).
+2. The gate verifier runs. It has not run against this state and the gate is
+   NOT closed until it does — including its ruling on the two items that
+   stay outstanding: T4.11's reaction re-record with a per-session CSV, and
+   T4.11b, which needs the fault-injection facility of SPEC §12 item 6.
+3. Only then may M4 open (ADR 0007), whose first brief must settle the
+   F-CPU-on-PLCSIM question in the tool.
 
 The PLC program was built and verified running on PLCSIM on 2026-07-27:
 FB_DemoCellControl from OB30 at 20 ms, CPU in RUN, cold-start state read
