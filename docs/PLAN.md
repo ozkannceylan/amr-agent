@@ -90,7 +90,7 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
     found three more unproven figures and fixed them in the same pass.
 28. m3-31 plc — §11 pass-string accounting. Issued.
 29. m3-32 bridge — outstanding rows for the re-specified case-D tests.
-    Issued.
+    Closed 2026-07-28; noted T4.6b additionally depends on the F1 fix.
 24. m3-27 plc — plausibility windows for the belt feedback signals, from
     m3-25's finding. Closed 2026-07-27; recorded §12 open item 6, a
     fault-injection request against bridge/.

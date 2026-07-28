@@ -11,7 +11,7 @@
 - The root .gitattributes comment states a shebang-file count that is stale after m3-21 added bridge/tools/check_connect_conformance.py (7 should be 8, confirmed by m3-22) — correct the count or drop the number from the comment.
 
 ## owner (F1 — program defect, SPEC exonerated by m3-28)
-- ProductPresentAtSensor never formed in the TIA build: the beam blocked six times at a constant 0.5400 m (inside the detect window) with the link and cycle up, yet the verdict stayed False in all 3,907 observer rows. Top hypotheses: PRESENT_THRESHOLD mis-entered, or a dead presence call site. ONE watch-table observation discriminates: block the beam and watch PresenceOnTimer.ET — if it counts up, the threshold path is fine and the verdict latch is dead; if it stays 0, the comparison never goes true (check the constant as entered).
+- ProductPresentAtSensor never formed in the TIA build: the beam blocked six times at a constant 0.5400 m (inside the detect window) with the link and cycle up, yet the verdict stayed False in all 3,907 observer rows. Top hypotheses: PRESENT_THRESHOLD mis-entered, or a dead presence call site. ONE watch-table observation discriminates: block the beam and watch PresenceOnTimer.ET — if it counts up, the threshold path is fine and the verdict latch is dead; if it stays 0, the comparison never goes true (check the constant as entered). Note: T4.6b also depends on this fix — the step-20 dwell it freezes during is unreachable until presence detection works, so the m3-29 rebuild alone does not make it runnable.
 
 ## owner (spec changes landed after the program was built — re-implement in TIA)
 - Case-D re-arm (m3-29, SPEC §6.6/§7 part 3): add static PositionFrozen (Bool, FALSE) and constant POSITION_WINDOW_TIME (T#1s); add temps windowRunning/windowExpired; change PositionWindowTimer PT to the new constant and add PosWindowArmed to its IN; replace the §7 part 3 window block so the verdict forms at expiry and PositionRef re-samples on the release call, both statics cleared in the ELSE; d2 := beltMoving AND PositionFrozen; add .PositionRef, .PositionFrozen, .PositionWindowTimer.ET to watch-table Group 4; do NOT add PositionFrozen to the reset clear list. Detection bound ≤3.2 s from freeze. Note: T4.7 is inverted — the monitored reset is now refused while the image still claims motion; restart the simulation first.
@@ -24,8 +24,6 @@
 ## plc
 - m3-31 pass-string accounting (issued, from m3-30's open questions) — done when every §11 pass criterion counts the steps the section currently defines and none counts a failed or outstanding step by default.
 
-## bridge
-- m3-32 outstanding rows (issued, from m3-29's request) — done when §B.12 carries rows for the revised T4.6/T4.6b/T4.7 with the rebuild-baseline note, and the superseded roster rows are annotated, not renumbered.
 
 ## bridge (from m3-27, SPEC §12 open item 6)
 - Opt-in fault-injection mode: a genuine NaN cannot currently be injected from the cell, so SPEC §11 step 4.11 has to exercise the belt-feedback path by narrowing a constant instead. Done when the bridge can inject an implausible or NaN belt sample under an explicit opt-in that cannot be enabled by accident in an evidence run.
