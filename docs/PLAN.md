@@ -2,7 +2,9 @@
 
 ## Current gate: M3 — Fixed equipment I/O loop (in progress)
 
-Gate order follows ADR 0004. A Gazebo world of fixed equipment only
+Gate order follows ADR 0007, which supersedes ADR 0004's order (safety layer
+moved to M4, demonstration to M9, arm to M10, Hermes to M11 and parked; M5 to
+M8 unchanged). A Gazebo world of fixed equipment only
 (conveyor, product sensor, operator panel equivalent), a bridge process
 translating between Gazebo (ROS 2) and the PLC as an OPC UA client to the
 S7-1500 OPC UA server on PLCSIM Advanced, and all control logic in the TIA
@@ -130,7 +132,20 @@ delivered artifacts, not by an agent.
 Filename note: existing brief and report filenames are kept as written. The
 older m3-* sim briefs and reports (warehouse world, headless bringup,
 navigation scenario) belong to what is now M5 — Simulated vehicle, despite
-their m3 prefix.
+their m3 prefix. m4-00-hermes-survey.* belongs to what is now M11, the parked
+Hermes gate, not to M4.
+
+## Next gate: M4 — Safety layer on the fixed cell (F-CPU)
+
+Not open. It opens when M3 is verified closed. Its exit criterion is the M4 row
+of docs/roadmap.md: AT-01, AT-07 and AT-08 passing on PLCSIM Advanced with
+their standard-program-in-STOP sub-cases, the same reactions with the bridge
+stopped and the OPC UA session down, read-only `Safety/` mirrors, and a
+recorded cell + safety showcase. Brief list to be written when the gate opens;
+per ADR 0007 the first brief settles in TIA Portal and PLCSIM Advanced whether
+an F-CPU safety program can be executed with simulated F-I/O and PROFIsafe,
+before any safety logic is written. M4 delivers cell-scope functions only —
+SF-05 and SF-06 land at M8 and the vehicle chain at M5 and M6.
 
 M0–M2 closed 2026-07-26 (reports m0-04/07/09, m1-04, m2-02).
 Session mode: owner-approved autonomous run; TIA Portal implementation and
