@@ -60,12 +60,15 @@ model.
 ## open_questions
 
 1. **The three tracking files now disagree with this ADR, by design of the brief
-   split.** `docs/roadmap.md` still reads M4 = safety layer and M11 = Hermes;
-   `docs/PLAN.md` and `docs/TODO.md` carry the same numbering. Editing them was
-   forbidden here and belongs to m4r2-02. Until that lands the disagreement is
-   real and this ADR is the newer statement — it should not be left open across
-   a verifier run, since "never let PLAN, TODO and roadmap disagree" is a
-   standing rule and ADR 0007's own renumbering already produced one such gap.
+   split — and the disagreement is in the live pointer, not only in the table.**
+   `docs/roadmap.md` reads "Current gate: M4 — Safety layer on the fixed cell",
+   which under ADR 0008 is M5; the table still carries M4 = safety and M11 =
+   Hermes, and `docs/PLAN.md` and `docs/TODO.md` carry the same numbering.
+   Editing them was forbidden here and belongs to m4r2-02. Until that lands the
+   disagreement is real and this ADR is the newer statement — it should not be
+   left open across a verifier run, since "never let PLAN, TODO and roadmap
+   disagree" is a standing rule and ADR 0007's own renumbering already produced
+   one such gap.
 2. **CLAUDE.md needs three edits and they are the owner's**, requested here on
    the ADR 0005 precedent: §3's topology gains an operator/HMI box, §4's layout
    gains `hmi/`, §5's roster gains an agent owning it with write access to
