@@ -5,12 +5,32 @@ client, and that direction is never inverted. This module opens an outbound
 session; it never listens on a socket and there is no server mode anywhere in
 this package — including against the test double (bridge-design.md §1, §10).
 
-The 50 ms cycle, in the order fixed by §2:
+The 50 ms cycle, in the order fixed by §2, with one connection-management step
+in front of it:
 
-    read Output -> publish to cell -> write Inputs -> write Heartbeat
+    verify own heartbeat -> read Output -> publish to cell -> write Inputs
+                                                           -> write Heartbeat
 
 No step of that cycle consults a process value to decide whether to perform
-another step. There is no interlock here.
+another step. There is no interlock here. The leading step reads back the one
+node the bridge wrote itself and compares it with what it wrote; it is session
+bookkeeping (a restarted server holds a different value), it transports nothing
+and it applies nothing to any signal.
+
+Two live-run failures of 2026-07-28 are fixed here and are the reason for the
+breadth of the exception handling below (LESSONS):
+
+* a CPU download dropped the session while a read was in flight. `asyncua`'s
+  `send_request` re-raises an in-flight failure as a **bare `Exception`** when
+  the socket state has not yet flipped to CLOSED, so a narrow `except` on UA and
+  OS error types missed it and the process died instead of reconnecting. Every
+  await that touches the session now routes *any* exception into the same
+  `SessionBroken` path a failed connect uses, and `run` carries a last-resort
+  guard for a step that forgets to;
+* a CPU warm restart reverted every input to its start value **under a
+  surviving session**, and write-on-change never repaired the contacts whose
+  slot values had not changed. The heartbeat read-back detects that and
+  invalidates the write cache, so the next input path rewrites every slot.
 
 Two connect-time rules of bridge-design.md are load-bearing and are implemented
 in `_connect` and the methods it calls:
@@ -64,6 +84,11 @@ _EXPECTED_DATATYPE_NODEID = {
 }
 _DIAGNOSTIC_TYPE_DEFAULT = ua.VariantType.Boolean
 
+#: Error types a broken session was *expected* to raise. This tuple is no longer
+#: the filter — anything raised by an await that touches the session is treated
+#: as a broken session (§8.1) — it is kept only to tell an anticipated failure
+#: from an unanticipated one in the counters, because the 2026-07-28 crash came
+#: out as a type that is not in this list.
 _SESSION_ERRORS = (ua.UaError, ConnectionError, OSError, asyncio.TimeoutError, TimeoutError)
 
 #: §3.2 S3 — the keep-alive period is a fixed fraction of the **granted**
@@ -109,6 +134,14 @@ class NamespaceNotFound(Exception):
     """
 
 
+#: Exceptions that mean *this process is wrong*, not *the link is broken*. They
+#: are never routed into the reconnect path: reconnecting cannot fix a
+#: mis-addressed node or a write to a node the bridge may not write, and a retry
+#: loop would hide the defect behind one warning per second. §8.1 is a path for
+#: a lost link, not a way to survive a defect.
+_BRIDGE_DEFECTS = (WriteNotPermitted, TypeMismatch, NamespaceNotFound)
+
+
 class PlcClient:
     def __init__(
         self,
@@ -142,13 +175,52 @@ class PlcClient:
         self._heartbeat_started = False
         self._last_missing_logged: list[str] = []
 
-        # Per-session state, cleared on every (re)connect (R4).
+        # Per-session state, cleared on every (re)connect (R4) and whenever the
+        # server is found to have restarted underneath a surviving session.
         self._written_this_session: set[str] = set()
         self._last_bool_written: dict[str, bool] = {}
         self._last_write_start: dict[str, int] = {}
+        # The heartbeat value THIS session last wrote, or None if it has written
+        # none yet. The bridge is the only client permitted to write that node
+        # (opcua-nodes.md §9.1), so a server holding anything else is a server
+        # that restarted. None also means "no comparison is possible yet", which
+        # is the state right after a connect.
+        self._last_heartbeat_written: Optional[int] = None
+        # Set when the write cache has just been invalidated, so the next input
+        # path can record how much of the image it rewrote. Evidence only.
+        self._rewrite_pending = False
 
         self._running = True
         self._connected = False
+
+    # ------------------------------------------------------------------ #
+    # Session failure routing (§8.1 detection row)
+    # ------------------------------------------------------------------ #
+
+    def _session_broken(self, what: str, exc: BaseException) -> SessionBroken:
+        """Convert any failure of an await that touched the session into the one
+        exception the run loop reconnects on.
+
+        The breadth is deliberate and is the 2026-07-28 fix: `asyncua`'s
+        `UASocketProtocol.send_request` re-raises an in-flight request failure as
+        ``Exception("Unhandled exception while sending request to OPC UA server")``
+        when the socket state has not yet flipped to CLOSED, and that type is in
+        no error list a caller would think to write. A session failure the
+        anticipated list does not name is still a session failure; it is counted
+        separately so the evidence says which kind was seen.
+        """
+        if not isinstance(exc, _SESSION_ERRORS):
+            self._counters.unexpected_session_errors += 1
+            LOG.warning(
+                "%s raised %s, which is not one of the anticipated session error "
+                "types; routed into the §8.1 reconnect path anyway",
+                what, type(exc).__name__,
+            )
+            self._recorder.row(
+                "session", "unexpected_error", clock="-", value=type(exc).__name__,
+                note=f"{what}: {exc}",
+            )
+        return SessionBroken(f"{what}: {type(exc).__name__}: {exc}")
 
     # ------------------------------------------------------------------ #
     # Session
@@ -183,10 +255,9 @@ class PlcClient:
         await self._resolve_nodes(client)
         await self._verify_types()
 
-        # R4: a new session starts with nothing written and no heartbeat.
-        self._written_this_session.clear()
-        self._last_bool_written.clear()
-        self._last_missing_logged = []
+        # R4: a new session starts with nothing written and no heartbeat, so the
+        # first cycle of it writes every input slot that carries a real sample.
+        self._invalidate_write_cache("new session")
         self._connected = True
         self._start_keepalive()
         self._recorder.row("session", "connect", clock="-", note=opc["endpoint"])
@@ -358,6 +429,89 @@ class PlcClient:
         except asyncio.CancelledError:
             return
 
+    # ------------------------------------------------------------------ #
+    # Write cache — per-session, invalidated by a server restart (§8.1)
+    # ------------------------------------------------------------------ #
+
+    def _invalidate_write_cache(self, reason: str) -> None:
+        """Forget what this session has written, so the next input path writes
+        **every** slot that carries a real sample.
+
+        This is what write-on-change costs and how it is paid for: the cache is
+        an optimisation over the wire, and it is only ever correct while the
+        server still holds what the bridge wrote. A reverted server holds start
+        values, so the cache has to go.
+
+        R1 is untouched: a slot that has never carried a real sample is still not
+        written, and no value is invented here. Nothing is latched, timed or
+        thresholded — a dict is emptied.
+        """
+        self._written_this_session.clear()
+        self._last_bool_written.clear()
+        self._last_missing_logged = []
+        self._last_heartbeat_written = None
+        self._rewrite_pending = True
+        LOG.info("write cache invalidated (%s): every input slot with a real sample "
+                 "is rewritten in the next cycle", reason)
+
+    async def _verify_own_heartbeat(self) -> None:
+        """Detect a server that restarted underneath a surviving session (§8.1).
+
+        The signal it keys on is `DemoCell/Link/BridgeHeartbeat` — the one node
+        the bridge writes for itself. The bridge is the only client permitted to
+        write it (opcua-nodes.md §9.1), so if the server holds anything other
+        than the value this session last wrote, the server's copy of the whole
+        input image is not the one this session established: a CPU warm restart
+        reinitialised the data block. That is the 2026-07-28 failure, in which
+        the PLC read open stop circuits for minutes because write-on-change saw
+        nothing change.
+
+        The test is an exact inequality against the last value written in this
+        session. Not "lower than", because the counter wraps at 65536 and a wrap
+        is not a restart; and not a tolerance or a timer, because there is none
+        to choose. Session bookkeeping, not process logic: the value read is
+        applied to nothing and transported nowhere.
+
+        Residual, stated rather than patched: a revert that happens while the
+        last written value was exactly the value the server reverts to (0) is
+        invisible to this test. It is one heartbeat value in 65536 and the next
+        restart is still caught. A session loss is caught by the reconnect path
+        instead, which invalidates the same cache.
+        """
+        last = self._last_heartbeat_written
+        if last is None:
+            return  # nothing written in this session yet; nothing to compare
+        start = time.monotonic_ns()
+        try:
+            value = int(await self._nodes[HEARTBEAT_KEY].read_value())
+        except _BRIDGE_DEFECTS:
+            raise
+        except Exception as exc:
+            self._counters.read_errors += 1
+            raise self._session_broken(f"read {HEARTBEAT_KEY}", exc) from exc
+        end = time.monotonic_ns()
+        self._counters.heartbeat_readbacks += 1
+        # The step's own cost, recorded as the read round trip it is, so what it
+        # adds to the 50 ms cycle is measurable rather than asserted.
+        self._recorder.row(
+            "read_rt", HEARTBEAT_KEY, t_start_ns=start, t_end_ns=end,
+            interval_ns=end - start, value=value,
+            note="restart-detection read-back; transports nothing",
+        )
+        if value == last:
+            return
+        self._counters.server_restarts_detected += 1
+        LOG.warning(
+            "%s reads %d but this session last wrote %d: the server restarted "
+            "under a live session, so its input image is stale. Invalidating the "
+            "write cache (§8.1).", HEARTBEAT_KEY, value, last,
+        )
+        self._recorder.row(
+            "session", "server_restart_detected", clock="-", value=value,
+            note=f"this session last wrote {last}; write cache invalidated",
+        )
+        self._invalidate_write_cache(f"{HEARTBEAT_KEY} reverted to {value}")
+
     async def _disconnect(self, reason: str) -> None:
         """§7.3 B: on a clean shutdown the bridge writes no farewell value and
         zeroes nothing. It just stops."""
@@ -367,6 +521,8 @@ class PlcClient:
         self._granted_session_timeout_ms = None
         self._keepalive_period_s = None
         self._ns_index = {}
+        # The heartbeat value in the server belongs to the session that wrote it.
+        self._last_heartbeat_written = None
         if self._client is not None:
             try:
                 await self._client.disconnect()
@@ -391,9 +547,12 @@ class PlcClient:
         start = time.monotonic_ns()
         try:
             await node.write_value(ua.DataValue(ua.Variant(value, variant_type)))
-        except _SESSION_ERRORS as exc:
+        except _BRIDGE_DEFECTS:
+            raise
+        except Exception as exc:
+            # Any failure of a write in flight, not only the anticipated types.
             self._counters.write_errors += 1
-            raise SessionBroken(f"write {key}: {exc}") from exc
+            raise self._session_broken(f"write {key}", exc) from exc
         end = time.monotonic_ns()
         return start, end
 
@@ -406,6 +565,11 @@ class PlcClient:
         # read or write (§8.1, detection row).
         if self._keepalive_error is not None:
             raise SessionBroken(self._keepalive_error)
+
+        # 0. is the server still the one this session wrote to? Connection
+        #    management: it reads back the bridge's own heartbeat and transports
+        #    nothing (§8.1).
+        await self._verify_own_heartbeat()
 
         # 1. read the PLC output and 2. apply it to the cell, unchanged.
         await self._output_path()
@@ -426,9 +590,14 @@ class PlcClient:
         start = time.monotonic_ns()
         try:
             value = await node.read_value()
-        except _SESSION_ERRORS as exc:
+        except _BRIDGE_DEFECTS:
+            raise
+        except Exception as exc:
+            # THE 2026-07-28 CRASH SITE. A download dropped the session while
+            # this read was in flight; the exception asyncua raised was not one
+            # of the anticipated types and it left the process through `run`.
             self._counters.read_errors += 1
-            raise SessionBroken(f"read {OUTPUT_KEY}: {exc}") from exc
+            raise self._session_broken(f"read {OUTPUT_KEY}", exc) from exc
         read_end = time.monotonic_ns()
         self._recorder.row(
             "read_rt", OUTPUT_KEY, t_start_ns=start, t_end_ns=read_end,
@@ -443,6 +612,9 @@ class PlcClient:
         )
 
     async def _input_path(self, cycle_start: int) -> None:
+        rewriting = self._rewrite_pending
+        written: list[str] = []
+
         # Analogs: cyclic write of the slot's latest value (§5).
         for key in ANALOG_INPUT_KEYS:
             take_ns = time.monotonic_ns()
@@ -451,10 +623,11 @@ class PlcClient:
                 continue  # R1: no sample, no write. No default, ever.
             start, end = await self._write(key, sample.value, ua.VariantType.Float)
             self._record_write(key, sample, cycle_start, take_ns, start, end)
+            written.append(key)
 
-        # Contacts: write on change, plus a full refresh on every (re)connect
-        # (the per-session dict is empty after a connect, so the first cycle
-        # with a sample writes all four).
+        # Contacts: write on change, plus a full refresh whenever the per-session
+        # write cache is empty — after every (re)connect, and after a server
+        # restart was detected under a surviving session (§8.1).
         for key in BOOL_INPUT_KEYS:
             take_ns = time.monotonic_ns()
             sample = self._slots[key].get()
@@ -465,6 +638,25 @@ class PlcClient:
             start, end = await self._write(key, sample.value, ua.VariantType.Boolean)
             self._last_bool_written[key] = bool(sample.value)
             self._record_write(key, sample, cycle_start, take_ns, start, end)
+            written.append(key)
+
+        if rewriting:
+            # Evidence for the repair, recorded once per invalidation. A slot with
+            # no real sample is absent here because R1 forbids writing it, not
+            # because the repair skipped it.
+            self._rewrite_pending = False
+            self._counters.inputs_rewritten_after_restart += len(written)
+            skipped = [key for key in INPUT_KEYS if key not in written]
+            LOG.info(
+                "input image rewritten after cache invalidation: %d of %d nodes (%s)%s",
+                len(written), len(INPUT_KEYS), ", ".join(written),
+                f"; no real sample yet for {', '.join(skipped)} (R1)" if skipped else "",
+            )
+            self._recorder.row(
+                "session", "input_image_rewritten", clock="-",
+                value=f"{len(written)}/{len(INPUT_KEYS)}",
+                note="written in one cycle" + (f"; R1 withheld {','.join(skipped)}" if skipped else ""),
+            )
 
     def _record_write(
         self, key: str, sample, cycle_start: int, take_ns: int, start: int, end: int
@@ -529,6 +721,10 @@ class PlcClient:
             self._recorder.row("startup", "heartbeat_start", clock="-", value=self._heartbeat + 1)
         self._heartbeat = (self._heartbeat + 1) % 65536
         start, end = await self._write(HEARTBEAT_KEY, self._heartbeat, ua.VariantType.UInt16)
+        # What the next cycle's read-back is compared against (§8.1). Recorded
+        # only after the write returned, so a failed write leaves the previous
+        # expectation in force rather than an unwritten one.
+        self._last_heartbeat_written = self._heartbeat
         self._counters.heartbeat_writes += 1
         self._recorder.row(
             "L2", HEARTBEAT_KEY, t_start_ns=start, t_end_ns=end,
@@ -541,9 +737,11 @@ class PlcClient:
         for key in self._cfg.diagnostic_keys:
             try:
                 values[key] = await self._nodes[key].read_value()
-            except _SESSION_ERRORS as exc:
+            except _BRIDGE_DEFECTS:
+                raise
+            except Exception as exc:
                 self._counters.read_errors += 1
-                raise SessionBroken(f"read {key}: {exc}") from exc
+                raise self._session_broken(f"read {key}", exc) from exc
         self._touch()
         LOG.info("PLC diagnostics (logged only): %s", values)
         self._recorder.row("diagnostics", "Status/*", clock="-", value=str(values))
@@ -563,6 +761,9 @@ class PlcClient:
         next_deadline = time.monotonic()
         last_status = 0.0
         last_cycle_start: Optional[int] = None
+        #: When the session broke, so the resumed session can state the size of
+        #: the hole it left in the evidence.
+        broken_at_ns: Optional[int] = None
 
         while self._running:
             if duration_s is not None and (time.monotonic() - started) >= duration_s:
@@ -570,6 +771,9 @@ class PlcClient:
             if not self._connected:
                 try:
                     await self._connect()
+                    if broken_at_ns is not None:
+                        self._note_outage(broken_at_ns)
+                        broken_at_ns = None
                     backoff = retry
                     next_deadline = time.monotonic()
                 except Exception as exc:
@@ -594,15 +798,41 @@ class PlcClient:
                 )
             last_cycle_start = cycle_start
 
+            broken: Optional[SessionBroken] = None
             try:
                 await self._cycle(cycle_start)
                 if (time.monotonic() - last_status) >= status_period:
                     last_status = time.monotonic()
                     await self._poll_diagnostics()
             except SessionBroken as exc:
+                broken = exc
+            except _BRIDGE_DEFECTS:
+                # A defect in this process. Reconnecting cannot fix it and
+                # retrying would hide it, so it leaves the loop.
+                raise
+            except Exception as exc:
+                # LAST RESORT (2026-07-28). A cycle step that touches the session
+                # without routing its own failure would otherwise leave the
+                # process — which is exactly how the bridge died mid-run. The
+                # reconnect is the same one; the counter says a site was missed,
+                # which is a defect to find, not a runtime condition.
+                self._counters.unrouted_cycle_errors += 1
+                LOG.error(
+                    "unrouted %s escaped the cycle: %s. Treated as a broken session "
+                    "so the process survives; the raising step should route it itself",
+                    type(exc).__name__, exc,
+                )
+                self._recorder.row(
+                    "session", "unrouted_cycle_error", clock="-",
+                    value=type(exc).__name__, note=str(exc),
+                )
+                broken = SessionBroken(f"unrouted {type(exc).__name__}: {exc}")
+
+            if broken is not None:
                 self._counters.reconnects += 1
-                LOG.warning("session broken: %s — degraded mode, no signal invented", exc)
-                self._recorder.row("session", "broken", clock="-", note=str(exc))
+                broken_at_ns = time.monotonic_ns()
+                LOG.warning("session broken: %s — degraded mode, no signal invented", broken)
+                self._recorder.row("session", "broken", clock="-", note=str(broken))
                 await self._disconnect("session broken")
                 # N3: nothing is published on cmd_speed while disconnected.
                 await asyncio.sleep(backoff)
@@ -624,6 +854,23 @@ class PlcClient:
                 await asyncio.sleep(next_deadline - now)
 
         await self._disconnect("clean shutdown")
+
+    def _note_outage(self, broken_at_ns: int) -> None:
+        """Record the hole the outage left in the evidence.
+
+        The instrumentation is only honest if it says where it stopped: a 20 Hz
+        file with a 26 s gap and no gap row reads like 26 s of steady data.
+        """
+        gap_ns = time.monotonic_ns() - broken_at_ns
+        self._counters.session_outages += 1
+        self._counters.session_outage_total_ns += gap_ns
+        self._counters.session_outage_max_ns = max(self._counters.session_outage_max_ns, gap_ns)
+        LOG.info("session resumed after %.3f s without a link; no rows exist for that "
+                 "interval and none are invented", gap_ns / 1e9)
+        self._recorder.row(
+            "session", "resumed", t_start_ns=broken_at_ns, t_end_ns=broken_at_ns + gap_ns,
+            interval_ns=gap_ns, note="gap in the evidence: no cycle ran in this interval",
+        )
 
     def stop(self) -> None:
         self._running = False

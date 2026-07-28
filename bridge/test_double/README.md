@@ -71,9 +71,16 @@ evidence for `plc/demo-cell/SPEC.md`.
 | ID | Flag | What it does | Why it is not logic |
 |---|---|---|---|
 | S1 | `--command-file PATH` | copies a hand-written float from a file into `DemoCell/Output/ConveyorSpeedCommand` | A human writing a setpoint through a back door. No input value is consulted; there is no condition, sequence or interlock |
-| S2 | `--observe-csv PATH` | server-side log of session count, heartbeat and the whole input image at 5 Hz | Pure observation |
+| S2 | `--observe-csv PATH` | server-side log of session count, heartbeat and the whole input image at 5 Hz. The path is a **stem**: one file per double session, never a truncation of the last one | Pure observation |
 | S3 | `--echo-input KEY` | copies one nominated input into `ConveyorSpeedCommand` so the closed-loop L7 interval has something to measure. Off by default | A wire, not a decision. A real PLC does nothing like it |
 | S4 | `--min-session-timeout-ms`, `--max-session-timeout-ms` | the window this double grants session timeouts within, so a request is revised in one direction or the other | Session housekeeping in a *server*, applied to no signal. It decides nothing about any value in the address space |
+| S5 | `--warm-restart-file PATH` | touching that file assigns **every** node its declared start value, in place, with the server and every open session left up; the file is removed, so each touch is one restart | A bulk assignment of the start values listed at the top of `plc_test_double.py`. Nothing is sequenced, nothing is derived from anything, and no restart *logic* is modelled — a real CPU warm restart also re-runs startup OBs, reloads retained data and may drop the session, and none of that is here |
+
+S5 exists because the failure of 2026-07-28 is invisible to a double that can
+only be killed and relaunched: a CPU warm restart reinitialises the data block
+**underneath a surviving session**, so a client that writes on change never
+repairs the values it believes it already wrote. The bridge's answer is to read
+its own heartbeat back; `../EVIDENCE_LIFECYCLE.md` §2.4 is the recorded run.
 
 Start values are those of `bridge-design.md` §6.3 — the fail-safe
 pre-connection state, which belongs to the PLC's data block and never to the
@@ -94,7 +101,8 @@ edge, no hold time and no latch from it.
 ```
 "$VENV/bin/python" plc_test_double.py \
     --endpoint opc.tcp://127.0.0.1:4840/amr-agent/celldouble/ \
-    --command-file /tmp/scaffold_speed --observe-csv /tmp/double_observe.csv
+    --command-file /tmp/scaffold_speed --observe-csv /tmp/double_observe.csv \
+    --warm-restart-file /tmp/double_warm_restart      # optional, S5
 ```
 
 It logs the two registered indices and the granted-timeout window at startup, so

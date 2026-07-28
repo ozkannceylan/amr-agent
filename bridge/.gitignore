@@ -1,2 +1,9 @@
 __pycache__/
 *.pyc
+
+# Per-session run artefacts. Every evidence file the code writes ends in
+# -pid<number>.csv (instrumentation.session_csv_path), so one rule covers the
+# bridge's own capture, the conformance harnesses and the double's observation
+# log. Dated captures in evidence/ are committed measured evidence and stay
+# visible: none of them carries a pid.
+evidence/*-pid*.csv

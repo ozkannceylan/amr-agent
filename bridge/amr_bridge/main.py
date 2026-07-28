@@ -52,8 +52,13 @@ def main(argv: list[str] | None = None) -> int:
     # --evidence-csv is taken as given (an operator path, CWD-relative like any
     # CLI path); the configured default is resolved against the bridge
     # directory so no machine's home directory is baked into the repository.
+    # Either way it is a STEM: the Recorder writes one file per session, so two
+    # starts given the same argument produce two files and never one truncated
+    # one (LESSONS 2026-07-28).
     csv_path = args.evidence_csv or cfg.evidence_csv_path
     recorder = Recorder(csv_path, float(cfg.evidence["flush_interval_s"]))
+    LOG.info("evidence for this session: %s (stem %s; the previous session's file is "
+             "not touched)", recorder.path, csv_path)
     counters = Counters()
     probe = ActuationProbe(recorder)
     slots = SlotSet(config_mod.INPUT_KEYS)
@@ -106,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         ros_thread.join(timeout=5.0)
         node.destroy_node()
         rclpy.shutdown()
-        LOG.info("stopped after %.1fs; evidence written to %s", duration, csv_path)
+        LOG.info("stopped after %.1fs; evidence written to %s", duration, recorder.path)
     return 0
 
 

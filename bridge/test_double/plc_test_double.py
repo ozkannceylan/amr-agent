@@ -56,6 +56,18 @@ files, exist only to exercise the loop:
                             direction or the other. Session housekeeping in a
                             server, not a process decision, and not the PLC's
                             values.
+  S5  --warm-restart-file PATH
+                            Touch that file and every node in the address space
+                            goes back to its start value, in place, with the
+                            server and every open session left alone. It stands
+                            in for a CPU warm restart, which reinitialises the
+                            data block underneath a surviving OPC UA session —
+                            the 2026-07-28 failure in which the PLC read open
+                            stop circuits for minutes because the bridge's
+                            write-on-change cache saw nothing change. It is a
+                            bulk assignment of start values and nothing else: no
+                            program runs, no value is computed from another and
+                            no restart logic of any kind is modelled.
 
 Operational rule (§10): never start this double as part of a demonstration
 run, and never on the same endpoint as PLCSIM Advanced. Every evidence file
@@ -74,11 +86,20 @@ import asyncio
 import csv
 import logging
 import os
+import sys
 import time
 from datetime import datetime, timezone
 
 from asyncua import Server, ua
 from asyncua.server.internal_session import InternalSession
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# One rule for evidence-file naming in the whole bridge tree: the observation log
+# is written once per double session and never truncated either (LESSONS
+# 2026-07-28). The import is one function; the double still holds no bridge state
+# and imports nothing else from the package.
+from amr_bridge.instrumentation import session_csv_path  # noqa: E402
 
 LOG = logging.getLogger("plc-double")
 
@@ -214,16 +235,65 @@ async def scaffold_echo(nodes: dict, key: str, period: float = 0.02) -> None:
         await asyncio.sleep(period)
 
 
+#: Every node in the address space with its start value, in one list, so the
+#: warm-restart scaffolding can assign them all without knowing which folder
+#: each one lives in.
+def _start_values() -> list[tuple[str, ua.VariantType, object]]:
+    return (
+        [(name, vtype, start) for name, vtype, start in INPUTS]
+        + [(name, vtype, start) for name, vtype, start in OUTPUTS]
+        + [(name, vtype, start) for name, vtype, start in STATUS]
+        + [(name, vtype, start) for name, vtype, start, _ in LINK]
+    )
+
+
+async def scaffold_warm_restart(nodes: dict, path: str, period: float = 0.05) -> None:
+    """S5 — TEST SCAFFOLDING. Touch `path` and every node goes back to its start
+    value, in place, while the server and every open session stay up.
+
+    This is what a CPU warm restart looks like from a client that survives it:
+    the data block is reinitialised, the OPC UA session is not dropped, and a
+    client that writes only on change never repairs the values it believes it
+    already wrote (LESSONS 2026-07-28).
+
+    It is a bulk assignment of the start values declared at the top of this file.
+    No program runs, no value is derived from another, nothing is sequenced and
+    no restart *logic* is modelled — a real CPU does far more, and none of it is
+    here. The trigger file is removed afterwards, so each touch is one restart.
+    """
+    while True:
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            for name, vtype, start in _start_values():
+                await nodes[name].write_value(ua.DataValue(ua.Variant(start, vtype)))
+            LOG.warning(
+                "SCAFFOLD S5: WARM RESTART — every node reset to its start value in "
+                "place; sessions untouched (%d client connection(s) still open). "
+                "This is a bulk assignment, not a PLC restart sequence.",
+                InternalSession._current_connections,
+            )
+        await asyncio.sleep(period)
+
+
 async def observe(nodes: dict, path: str, period: float = 0.2) -> None:
     """S2 — TEST SCAFFOLDING. Server-side record of what the "PLC" sees:
-    session count, the heartbeat and the whole input image."""
+    session count, the heartbeat and the whole input image.
+
+    One file per double session, like the bridge's own evidence file: the path
+    given is a stem and the suffix names the session, so restarting the double
+    cannot erase what the previous run observed (LESSONS 2026-07-28)."""
+    path = session_csv_path(path)
     columns = (
         ["wall_utc", "monotonic_s", "active_sessions", "BridgeHeartbeat"]
         + [name for name, _, _ in INPUTS]
         + ["ConveyorSpeedCommand"]
     )
-    with open(path, "w", newline="", encoding="utf-8") as handle:
+    with open(path, "x", newline="", encoding="utf-8") as handle:
         csv.writer(handle).writerow(columns)
+    LOG.info("SCAFFOLD S2: observing to %s (one file per double session)", path)
     while True:
         row = [
             datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
@@ -286,6 +356,13 @@ async def run(args: argparse.Namespace) -> None:
         tasks.append(asyncio.create_task(observe(nodes, args.observe_csv)))
     if args.echo_input:
         tasks.append(asyncio.create_task(scaffold_echo(nodes, args.echo_input)))
+    if args.warm_restart_file:
+        # Start clean: a leftover trigger file would fire a restart at startup.
+        if os.path.exists(args.warm_restart_file):
+            os.remove(args.warm_restart_file)
+        LOG.info("SCAFFOLD S5: touch %s to revert every node to its start value "
+                 "in place, sessions left up", args.warm_restart_file)
+        tasks.append(asyncio.create_task(scaffold_warm_restart(nodes, args.warm_restart_file)))
 
     async with server:
         LOG.info("TEST DOUBLE listening on %s — this is scaffolding, not a PLC", args.endpoint)
@@ -302,7 +379,13 @@ def main() -> None:
     parser.add_argument("--endpoint", default="opc.tcp://127.0.0.1:4840/amr-agent/celldouble/")
     parser.add_argument("--command-file", default=None,
                         help="S1 scaffolding: file whose float contents drive ConveyorSpeedCommand")
-    parser.add_argument("--observe-csv", default=None, help="S2 scaffolding: server-side observation log")
+    parser.add_argument("--observe-csv", default=None,
+                        help="S2 scaffolding: server-side observation log; the path is a "
+                             "stem and one file per double session is written")
+    parser.add_argument("--warm-restart-file", default=None,
+                        help="S5 scaffolding: touching this file reverts every node to its "
+                             "start value in place, with sessions left up — a stand-in for "
+                             "a CPU warm restart under a surviving session")
     parser.add_argument("--echo-input", default=None,
                         help="S3 scaffolding: copy this input into ConveyorSpeedCommand (L7 only)")
     parser.add_argument("--min-session-timeout-ms", type=float,

@@ -10,6 +10,11 @@ Rules honoured here:
   tools/summarize_latency.py.
 * §9.3 — the instrumentation is always on. There is no "measurement mode" that
   behaves differently from the production path.
+* One file per session, never a shared file. `--evidence-csv` used to truncate
+  at every start, and on 2026-07-28 seven bridge restarts erased a day of 20 Hz
+  data (LESSONS). The path given on the command line is now a *stem*: the file
+  actually written carries a per-session suffix, and it is created with `"x"`
+  so that even a name collision refuses rather than truncates.
 
 Nothing in this module can change, delay or suppress a transported value. It
 observes and writes rows.
@@ -25,19 +30,56 @@ from typing import Optional
 
 COLUMNS = ["event", "name", "clock", "t_start_ns", "t_end_ns", "interval_ns", "value", "note"]
 
+#: Session suffix format: UTC start second, then the pid. Deterministic (it is
+#: derivable from the run's own log line, not random) and unique per start, since
+#: two processes in the same second still differ by pid.
+SESSION_SUFFIX_FORMAT = "%Y%m%dT%H%M%SZ"
+
+
+class EvidenceFileExists(Exception):
+    """The per-session evidence file already exists. Refusing to write is the
+    whole point: an evidence file is never truncated (LESSONS 2026-07-28)."""
+
+
+def session_csv_path(path: str, when: Optional[float] = None, pid: Optional[int] = None) -> str:
+    """Turn an evidence path into this session's own file name.
+
+    ``evidence/latency-session.csv`` becomes
+    ``evidence/latency-session-20260728T174233Z-pid8412.csv``.
+
+    Housekeeping, not logic: nothing about a transported value depends on the
+    file name. The rule exists because a shared path is how a day of 20 Hz data
+    was lost, and because a suffix makes two consecutive starts produce two
+    files instead of one truncated one.
+    """
+    stem, ext = os.path.splitext(path)
+    stamp = time.strftime(SESSION_SUFFIX_FORMAT, time.gmtime(when))
+    return f"{stem}-{stamp}-pid{os.getpid() if pid is None else pid}{ext or '.csv'}"
+
 
 class Recorder:
-    """Append-only per-event CSV recorder."""
+    """Append-only per-event CSV recorder. One file per session."""
 
     def __init__(self, path: str, flush_interval_s: float = 2.0) -> None:
-        self.path = path
+        #: What the operator asked for — kept so the log can show both.
+        self.requested_path = path
+        #: What is actually written: the per-session file.
+        self.path = session_csv_path(path)
         self.flush_interval_s = flush_interval_s
         self._rows: list[list] = []
         self._lock = threading.Lock()
         self._last_flush = time.monotonic()
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        with open(self.path, "w", newline="", encoding="utf-8") as handle:
-            csv.writer(handle).writerow(COLUMNS)
+        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
+        try:
+            # "x", never "w": a truncating open is the defect being fixed here.
+            with open(self.path, "x", newline="", encoding="utf-8") as handle:
+                csv.writer(handle).writerow(COLUMNS)
+        except FileExistsError as exc:
+            raise EvidenceFileExists(
+                f"{self.path} already exists; refusing to truncate it. Evidence files "
+                "are written once per session and never reused (LESSONS 2026-07-28). "
+                "Start the run again, or pass a different --evidence-csv stem."
+            ) from exc
 
     def row(
         self,
@@ -84,6 +126,26 @@ class Counters:
         self.write_errors = 0
         self.read_errors = 0
         self.reconnects = 0
+        # Session failures the anticipated error-type list did not name. asyncua
+        # wraps an in-flight request failure as a bare `Exception` when the socket
+        # state has not yet flipped (ua_client.send_request), and on 2026-07-28
+        # that killed the process instead of reconnecting. Counted separately so
+        # the evidence says how the session was lost, not just that it was.
+        self.unexpected_session_errors = 0
+        # Exceptions that escaped a cycle step without being routed by the step
+        # itself. They are still reconnected, and a non-zero value here is a
+        # missing except clause to find, not a runtime condition.
+        self.unrouted_cycle_errors = 0
+        # The gap in the evidence: outages between a broken session and the next
+        # established one. An evidence file with a hole must say so.
+        self.session_outages = 0
+        self.session_outage_total_ns = 0
+        self.session_outage_max_ns = 0
+        # Server restarts detected by reading back the bridge's own heartbeat,
+        # and input nodes rewritten because of one (§8.1).
+        self.heartbeat_readbacks = 0
+        self.server_restarts_detected = 0
+        self.inputs_rewritten_after_restart = 0
         self.nonfinite_range_samples = 0
         self.missing_joint_name = 0
         self.empty_scan = 0

@@ -278,9 +278,11 @@ async def run(args: argparse.Namespace) -> int:
     print("bridge connect conformance — bridge-design.md §3.1 / §3.2")
     print(f"  config   {cfg.path}")
     print(f"  endpoint {cfg.opcua['endpoint']}")
-    print(f"  evidence {args.evidence_csv}")
 
+    # The path given is a stem; one file per run, never a truncation of the last
+    # one (LESSONS 2026-07-28, instrumentation.session_csv_path).
     recorder = Recorder(args.evidence_csv, flush_interval_s=1.0)
+    print(f"  evidence {recorder.path}")
     client = _client(cfg, recorder)
     try:
         await client._connect()   # the bridge's own session establishment

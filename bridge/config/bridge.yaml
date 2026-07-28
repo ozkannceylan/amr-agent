@@ -135,10 +135,14 @@ evidence:
   # Housekeeping. Names no machine: a relative path is resolved against the
   # bridge directory (the parent of config/), so this default works from any
   # checkout, in the container and in WSL alike. `~` and `$VARS` are expanded,
-  # and an absolute path is used as written. A measurement run gives its
-  # capture its own dated name with --evidence-csv; this default is the
-  # scratch file of an ordinary run and is truncated at every start.
-  csv_path: "evidence/latency-latest.csv"
+  # and an absolute path is used as written.
+  #
+  # This is a STEM, not the file name. The recorder appends a per-session suffix
+  # (UTC second + pid) and creates the file exclusively, so no start can ever
+  # truncate an earlier session's capture: sharing one path across seven bridge
+  # restarts is how a day of 20 Hz data was lost on 2026-07-28. A measurement run
+  # still gives its capture its own name with --evidence-csv, which is a stem too.
+  csv_path: "evidence/latency-session.csv"
   flush_interval_s: 2.0
 
 logging:

@@ -66,12 +66,12 @@ else. Its whole job is to carry each signal of `docs/interfaces/opcua-nodes.md`
 | `amr_bridge/config.py` | config loading; **rejects unknown keys** so a threshold cannot be smuggled in through configuration |
 | `amr_bridge/slots.py` | the depth-1 latest-value slots — the only buffering that exists, so nothing can be derived from discarded samples |
 | `amr_bridge/ros_side.py` | subscriptions, one publisher, field addressing |
-| `amr_bridge/opcua_side.py` | session, node resolution, type verification, the 50 ms cycle, the write allowlist, reconnect |
-| `amr_bridge/instrumentation.py` | per-event CSV recording (always on) |
+| `amr_bridge/opcua_side.py` | session, node resolution, type verification, the 50 ms cycle, the write allowlist, reconnect, and the heartbeat read-back that notices a restarted server |
+| `amr_bridge/instrumentation.py` | per-event CSV recording (always on), one file per session |
 | `config/bridge.yaml` | endpoint, **both** namespace URIs, BrowseName paths, topic names, cycle period, evidence paths — no thresholds, no tolerances, no timers, and no namespace index |
 | `test_double/` | TEST SCAFFOLDING: an OPC UA server standing in for the S7-1500 |
-| `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check, connect-conformance check, read-only PLC observer (scaffolding) |
-| `EVIDENCE_LATENCY.md`, `EVIDENCE_SIGNAL_LOSS.md`, `EVIDENCE_CONNECT.md`, `evidence/` | dated captures, each qualified by the environment that produced it |
+| `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check, connect-conformance check, session-lifecycle check, read-only PLC observer (scaffolding) |
+| `EVIDENCE_LATENCY.md`, `EVIDENCE_SIGNAL_LOSS.md`, `EVIDENCE_CONNECT.md`, `EVIDENCE_LIFECYCLE.md`, `evidence/` | dated captures, each qualified by the environment that produced it |
 
 Where the no-logic rule is visible in the code:
 
@@ -154,9 +154,66 @@ SIGINT/SIGTERM — it closes the session and writes nothing on the way out.
 
 `evidence.csv_path` in the config is **relative to the `bridge/` directory** and
 therefore names no machine; `~` and `$VARS` are expanded and an absolute path is
-honoured as written. The default (`evidence/latency-latest.csv`) is truncated at
-every start, so a capture worth keeping is given its own dated name with
-`--evidence-csv`.
+honoured as written.
+
+### One evidence file per session — never a truncation
+
+Both `evidence.csv_path` and `--evidence-csv` are **stems**, not file names. The
+recorder appends a per-session suffix and creates the file with `"x"`:
+
+```
+--evidence-csv bridge/evidence/latency-session.csv
+  ->            bridge/evidence/latency-session-20260728T165131Z-pid35575.csv
+```
+
+The suffix is the UTC second the session started plus the pid, so it is derivable
+from the run's own first log line (`evidence for this session: …`) rather than
+random, and two starts in the same second still differ. Two consecutive starts
+given the same argument therefore produce **two files**, and if a name ever does
+collide the recorder refuses to start rather than overwrite — `"x"`, never `"w"`.
+
+Because every file the code writes ends in `-pid<number>.csv`, one line in
+`bridge/.gitignore` (`evidence/*-pid*.csv`) keeps ordinary runs out of `git
+status` while leaving every dated, committed capture visible — none of those
+carries a pid.
+
+This replaces the old behaviour, in which the path was truncated at every start:
+on 2026-07-28 seven bridge restarts sharing one dated path erased a day of 20 Hz
+data and a measurement had to be repeated (`docs/LESSONS.md`). Nothing needs to be
+remembered at run time any more; a run cannot destroy an earlier one.
+`EVIDENCE_LIFECYCLE.md` §3 is the recorded two-start run. The same rule applies to
+the double's `--observe-csv` and to the two conformance harnesses in `tools/`.
+
+### What happens when the link or the server goes away
+
+Both are connection management, and neither invents or withholds a signal
+(`bridge-design.md` §8.1):
+
+* **any** exception from an await that touches the session breaks the session and
+  reconnects — not only the error types a broken link was expected to raise.
+  `asyncua` re-raises an in-flight request failure as a bare `Exception` when the
+  socket state has not yet flipped, and on 2026-07-28 that ended the process
+  mid-run instead of reconnecting. Unanticipated types are counted
+  (`unexpected_session_errors`) so a run still says how the session was lost, and
+  `unrouted_cycle_errors` counts anything the last-resort guard in `run()` had to
+  catch, which is a missing `except` to go and fix rather than a runtime
+  condition. The two exceptions to the breadth are deliberate:
+  `WriteNotPermitted` and `TypeMismatch` mean this process is wrong, and a
+  reconnect loop would hide them;
+* the bridge **reads its own `BridgeHeartbeat` back** at the top of every cycle.
+  It is the only node outside `Input/` the bridge may write, so a value it did not
+  write means the server restarted underneath a surviving session — a CPU warm
+  restart reinitialising the data block. The per-session write cache is then
+  dropped and every slot holding a real sample is rewritten in the next cycle,
+  because write-on-change otherwise leaves a reverted contact reverted: on
+  2026-07-28 the PLC read open stop circuits for minutes for exactly that reason.
+  The test is an exact inequality against the last value written, not a threshold
+  or a timer, and the value read is applied to nothing. It costs one read per
+  cycle (0.79 ms median against the double) and is recorded as a `read_rt` row so
+  the cost is measurable rather than asserted.
+
+An outage is written into the evidence file as a `session,resumed` row carrying
+its length, so a 20 Hz capture with a hole in it says so.
 
 Pointing it at PLCSIM Advanced or real hardware is a **configuration** change
 only: `opcua.endpoint`, and the security fields if the server requires them.
@@ -166,11 +223,11 @@ anywhere. Renaming the TIA server interface is the one change that also requires
 editing `opcua.namespace_uris.interface`, because that name **is** the URI
 (ADR 0006).
 
-Summarise a run:
+Summarise a run (the file, not the stem — the path the startup line printed):
 
 ```
 "$VENV/bin/python" "$REPO/bridge/tools/summarize_latency.py" \
-    "$REPO/bridge/evidence/latency-latest.csv"
+    "$REPO/bridge/evidence/latency-session-<UTC>-pid<pid>.csv"
 ```
 
 ### What the bridge logs at startup
@@ -214,6 +271,11 @@ never on the same endpoint as PLCSIM Advanced. Details and its limits:
   evidence files.
 * `--echo-input <NodeKey>` — optional wire from one input to
   `ConveyorSpeedCommand`, for the closed-loop L7 interval only. Off by default.
+* `--warm-restart-file <path>` — touching that file reverts **every** node to its
+  start value in place, with the server and every open session left up. It stands
+  in for a CPU warm restart, which is the one server event a double that can only
+  be killed cannot reproduce. Scaffolding, and not a model of a CPU restart:
+  `test_double/README.md` S5.
 * `--min-session-timeout-ms` / `--max-session-timeout-ms` — the window the double
   grants session timeouts within. The default `[5000, 8000]` is **below** the
   bridge's 10 000 ms request, so the grant is clamped down; passing
@@ -260,6 +322,21 @@ longer than the granted timeout to measure the keep-alive cadence, so it takes
 longer than the grant (`--skip-idle` omits that part). Run it against the double
 only, never against PLCSIM: `bridge-design.md` §10. The recorded run is
 `EVIDENCE_CONNECT.md`.
+
+Check the session lifecycle — an in-flight request failure reconnecting instead of
+ending the process, a restarted server getting its whole input image rewritten,
+and the evidence-file naming (`bridge-design.md` §8.1, `docs/LESSONS.md`
+2026-07-28):
+
+```
+"$VENV/bin/python" "$REPO/bridge/tools/check_session_lifecycle.py"
+```
+
+It **starts, kills and relaunches its own test double**, so it must never be
+pointed at PLCSIM Advanced — it refuses an endpoint that looks like the
+commissioned instance. It drives the bridge's own `PlcClient.run()` with the slots
+filled by the harness rather than by ROS, since all three behaviours sit on the
+OPC UA side of the slots. The recorded run is `EVIDENCE_LIFECYCLE.md`.
 
 ## What the test double does not prove
 
