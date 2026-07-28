@@ -13,8 +13,8 @@
 
 # Executed through a shebang. A CR at the end of the shebang line becomes part
 # of the interpreter name (/usr/bin/env: 'bash\r'), so these must be LF in the
-# working tree on every platform, not only in the index. Tracked shebang files
-# today: 1 *.sh, 7 *.py.
+# working tree on every platform, not only in the index. Every tracked *.sh and
+# *.py is covered by the two rules below, so no count needs maintaining here.
 *.sh text eol=lf
 *.py text eol=lf
 
@@ -24,3 +24,8 @@
 # binary is silently corrupted by normalization rather than merely inconvenient.
 *.pgm -text
 *.gz -text
+
+# Media in assets/ and the committed watch-table captures. Detection is correct
+# today, but the rule costs one line and a misdetected binary is corruption.
+*.png -text
+*.gif -text

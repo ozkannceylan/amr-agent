@@ -12,9 +12,9 @@ forbidden:           [editing anything outside README.md and assets/, editing do
 ## Media sources
 
 Copy into `assets/` (rename sensibly):
-- `C:\Users\ozkan\AppData\Local\Temp\claude\C--Users-ozkan-projects-amr-agent\96ed9196-53d1-466d-b9c4-05bd13397dcc\scratchpad\plc-drives-cell.gif`
-  — 28 s, T1→T4, the S7-1500 program driving the Gazebo belt live. Hero.
-- `...\scratchpad\cell.png` — the cell, three-quarter view.
+- `plc-drives-cell.gif` from the session scratchpad — 28 s, T1→T4, the
+  S7-1500 program driving the Gazebo belt live. Hero.
+- `cell.png` from the same scratchpad — the cell, three-quarter view.
 - Optionally one watch-table capture from `plc/demo-cell/evidence/watch-table/`
   (reference in place, do not duplicate) to show the PLC side.
 

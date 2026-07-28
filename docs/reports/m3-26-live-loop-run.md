@@ -92,9 +92,8 @@ observer, T1 → T4 in ascending complexity.
 
 ## Video — operational artifact, NOT in the repo
 
-```
-C:\Users\ozkan\AppData\Local\Temp\claude\C--Users-ozkan-projects-amr-agent\96ed9196-53d1-466d-b9c4-05bd13397dcc\scratchpad\plc-drives-cell.gif
-```
+Written to the session scratchpad at capture time; later published in the
+repository as `assets/plc-drives-cell.gif` (pub-02).
 
 Animated GIF, **4.5 MB, 820×471, 406 frames, 28.4 s playback** (captured at
 2 fps over 415 s, every 2nd frame kept, so playback is ≈7× real time). A single

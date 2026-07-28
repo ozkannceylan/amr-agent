@@ -35,7 +35,7 @@ forbidden:           [editing roadmap.md or PLAN.md (that is the next brief), ed
 
 - ADR 0004 put Hermes at M4 on the premise of "a Hermes agent running on
   the same server"; the m4-00 survey showed the deployment contradicts
-  that premise (Hermes on a Hetzner VPS, the PLC on the owner's machine),
+  that premise (Hermes on a rented remote VPS, the PLC on the owner's machine),
   and the owner has parked the component. The Hermes gate keeps the m4-00
   decision list as its entry condition.
 - Closed gates (M0-M2) and the in-progress M3 keep their numbers and
