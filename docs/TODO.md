@@ -1,5 +1,14 @@
 # TODO
 
+## publication — BLOCKED, owner decisions required (pub-01, 2026-07-28)
+The repository is still PRIVATE on GitHub with 53 commits unpushed, so nothing
+has leaked. Verdict is no-go until these are settled; full detail and ten
+decisions in docs/reports/pub-01-public-readiness-audit.md.
+- BLOCKER 1: docs/reports/m4-00-hermes-survey.md details the owner's other private infrastructure (provider, region, host and tailnet node names, co-tenant stacks, deploy chain, a table of where each secret lives, GitHub Secret names, which controls are untested, fail-open mechanisms, a route-to-the-PLC checklist). Present in two committed revisions (58718d2, c7d1b29), so deleting it at HEAD is not enough. Decide: history rewrite (filter-repo + force-push, safe while private and unpushed) or a fresh-history public repo. Identifiers have also spread to docs/TODO.md, docs/briefs/m4r-01 and — immutably — docs/adr/0007.
+- BLOCKER 2: no LICENSE at any path. Choose MIT (portfolio default) or Apache-2.0 (better if employer adoption is likely).
+- BLOCKER 3: plc/demo-cell/evidence/watch-table/"Screenshot 2026-07-28 144116.png" is a full-desktop capture including the personal taskbar; only 3 of 71 captures were sampled, so the set is not certified clean.
+- BLOCKER 4 (owner call): §7's spirit — two committed absolute paths into a named tool's scratch directory with a session UUID (docs/reports/m3-26:96, docs/briefs/pub-02:15), plus the structural disclosure of CLAUDE.md, .claude/settings.json and ten agent files carrying a vendor model id. Decide whether the agentic working model is part of the portfolio story or is stripped before publication.
+
 
 ## owner (blocking)
 - PLC program: BUILT AND VERIFIED 2026-07-27. FB_DemoCellControl (SCL) from OB30 at 20 ms, instance DB DemoCellControl_DB, CPU in RUN. Cold start read via asyncua without the bridge — BridgeLinkOk False, CellProcessStopActive True, CellResetRequired True, ConveyorSpeedCommand 0.0 — the specified behaviour, confirming wire-NC/program-NO and both latches before a bridge exists. This observation belongs in the gate evidence; capture it there rather than losing it to the chat log.
