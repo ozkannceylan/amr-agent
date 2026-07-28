@@ -5,8 +5,9 @@
 ![The S7-1500 standard program driving the Gazebo conveyor](assets/plc-drives-cell.gif)
 
 *A Siemens S7-1500 standard program, in RUN on PLCSIM Advanced, driving the
-Gazebo belt through the four M3 exit scenarios T1–T4. 28 s of a live run — no
-scripted animation, no replay.*
+Gazebo belt. 28 s of the first live PLCSIM loop run, ordered simplest-first —
+no scripted animation, no replay. The belt moves because the program wrote
+`ConveyorSpeedCommand`; nothing else can write it.*
 
 ---
 
@@ -78,11 +79,12 @@ inversion, no latch, no debounce, no threshold. All of that is PLC work.
 
 ### The PLC side of the same loop
 
-![TIA Portal watch table, CPU in RUN, live cell input values](plc/demo-cell/evidence/watch-table/Screenshot%202026-07-28%20171656.png)
+![TIA Portal watch table beside the running cell, CPU in RUN](plc/demo-cell/evidence/watch-table/Screenshot%202026-07-28%20135105.png)
 
-*Gazebo's photo-eye reaching the PLC's process image as
-`DemoCellInput.ProductSensorRange = 1.440088`, beside the program's own
-latches and timers. CPU 1513-1 PN in RUN.*
+*Both halves of exit item (a) in one frame: the Gazebo cell on the left, and on
+the right the TIA watch table monitoring `"DemoCellInput".ProductSensorRange`
+at **1.440088** — the photo-eye's clear-path distance, arrived from the
+simulation into the PLC's process image. CPU 1513-1 PN in RUN.*
 
 ---
 
@@ -113,15 +115,18 @@ scope until M10. It joins the demonstration at **M5**.
 
 ## Milestones
 
-Current gate: **M3**, closing. Tracked in [docs/roadmap.md](docs/roadmap.md);
-a gate closes only on observable behaviour, never on written code.
+M3 closed 2026-07-28, verified in
+[docs/reports/m3-37-gate-verification.md](docs/reports/m3-37-gate-verification.md)
+(pass-with-findings). Next gate: **M4**. Tracked in
+[docs/roadmap.md](docs/roadmap.md); a gate closes only on observable
+behaviour, never on written code.
 
 | Gate | Deliverable | Status |
 |---|---|---|
 | M0 | Repo skeleton, ADR 0001 recording the invariants | **done** |
 | M1 | Interface contracts | **done** |
 | M2 | Safety requirements spec | **done** |
-| M3 | Fixed equipment I/O loop | **closing** |
+| M3 | Fixed equipment I/O loop | **done** |
 | M4 | Safety layer on the fixed cell (F-CPU) | next |
 | M5 | Simulated vehicle | planned |
 | M6 | VDA 5050 client | planned |
