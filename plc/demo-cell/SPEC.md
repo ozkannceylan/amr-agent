@@ -114,8 +114,13 @@ normally open, the two `…CircuitClosed` contacts are normally closed.
 
 The start values are the fail-safe pre-connection state that `bridge-design.md`
 §6.3 places in the PLC precisely because the bridge is forbidden to invent
-values. Note that they only apply at a **cold** restart, which is why §6.1
-qualifies the inputs with the heartbeat rather than with the start values.
+values. **They are not what protects the program, and the program never reasons
+from them:** §6.1 qualifies every input with the heartbeat instead. That is the
+robust statement whichever restart type applies — and it has to be, because the
+one restart actually recorded (a CPU STOP → RUN under a surviving bridge
+session, 2026-07-28) reverted **all seven** inputs to these values, so the
+earlier hedge that they "only apply at a cold restart" is not what was observed
+(§8 case C).
 
 **No other tag is server-visible.** No timer, step number, latch, tolerance or
 edge memory is exported (§9.8 of the node model). Exposing them would invite the
@@ -131,9 +136,10 @@ interface. All live in the instance DB `"DemoCellControl_DB"`.
 |---|---|---|---|
 | `LastBridgeHeartbeat` | UInt | `0` | Value of `BridgeHeartbeat` at the previous OB call. Compared for **inequality** only — never subtracted, never tested for `+1`, never assumed monotonic (§7.1 of the design; the counter wraps and restarts per bridge process) |
 | `HeartbeatStaleTimer` | IEC_TIMER (TON) | — | Runs while the heartbeat is unchanged |
+| `HeartbeatSeenAlive` | Bool | `FALSE` | *The heartbeat has been observed to change at least once since CPU start.* One-shot: set by the first inequality and never cleared while the CPU runs. It is the **first term** of `BridgeLinkOk` (§6.1), and it is what makes the verdict `FALSE` — rather than "not yet proven stale" — for the whole boot window. Non-retain like everything else, so any restart re-arms it |
 | `StartEdgeMemory` | Bool | **`TRUE`** | Previous state of `PanelStartPressed`. Start value `TRUE` so a contact already closed at the first scan produces **no** edge — a stuck or bridged start button cannot start the cell |
 | `ResetEdgeMemory` | Bool | **`TRUE`** | Previous state of `PanelResetPressed`, for the rising edge the reset acts on. Start value `TRUE` for the same reason and with the same effect: a reset contact already closed at the first scan produces **no** edge, so a held, bridged or welded-closed reset can never clear a latch |
-| `ResetDeviceFault` | Bool | **`TRUE`** | *The reset contact has not yet been observed open.* Starts `TRUE` and is cleared — permanently, for this program run — the first time `PanelResetPressed` reads `FALSE` while `BridgeLinkOk` is `TRUE`. A welded, bridged or held-at-startup reset therefore stays flagged and is visible in the watch table instead of failing silently. It blocks the reset (§6.7) and nothing else; it never blocks start, which is a different device |
+| `ResetDeviceFault` | Bool | **`TRUE`** | *The reset contact has not been observed open **in the current link session**.* Set `TRUE` whenever `BridgeLinkOk` is `FALSE` — at CPU start, and again at every link loss — and cleared while `BridgeLinkOk` is `TRUE` and `PanelResetPressed` reads `FALSE`. A welded, bridged or held reset therefore stays flagged and is visible in the watch table instead of failing silently, and a reset held across **any** restart — of the CPU or of the bridge — cannot clear a latch at link-up (§6.7). It blocks the reset and nothing else; it never blocks start, which is a different device. It is a **level** verdict about the present link session, not a run-long latch: returning to `TRUE` after an outage is the mechanism working, not a device fault |
 | `SeqStep` | Int | `0` | 0 Idle, 10 Transport, 20 Dwell, 30 Return, 40 Complete |
 | `DwellTimer`, `StepTimer` | IEC_TIMER (TON) | — | Dwell at the beam; per-step watchdog. Both are **called unconditionally, outside the `CASE`**, with `IN` set to the "this step is active" condition, so leaving the step releases the timer (§6.5). Neither is ever called with `IN := TRUE` |
 | `PresenceOnTimer`, `PresenceOffTimer` | IEC_TIMER (TON) | — | Filter time on the presence verdict, both directions |
@@ -183,7 +189,7 @@ that the node model and the bridge design deliberately refused to make
 | `DRIVE_FAULT_DELAY` | `T#1s` | Covers start transients and the direction reversal at step 30 |
 | `POSITION_WINDOW_TIME` | `T#1s` | Length of one freeze window (§6.6). The same value as `DRIVE_FAULT_DELAY` today, and deliberately **its own constant**, for the reason `BELT_FAULT_DELAY` is: the two tune different things — how long a disagreement must persist, versus how often the freeze test re-arms — and retuning one must not silently retune the other (invariant 10). A window repeats every `POSITION_WINDOW_TIME` **plus two OB calls** (1.04 s at a 20 ms OB30), the two extra calls being the expiry call and the single release call that restarts the TON |
 | `POSITION_FREEZE_BAND` | `0.005` m | Travel over one 1.04 s window at the slowest speed that still counts as motion (`SPEED_TOLERANCE` 0.02 m/s → 0.0208 m) is **4.2×** the band; at `TRANSPORT_SPEED` it is **31×**. The band detects a freeze, it does not second-guess a speed |
-| `HEARTBEAT_STALE_TIME` | `T#500ms` | Heartbeat nominal period 50 ms; the in-container run showed a 79 ms worst-case cycle. 500 ms ≈ 10 missed beats: tolerant of jitter, fast enough to be seen live. **Re-check against the PLCSIM run** and raise it only with evidence |
+| `HEARTBEAT_STALE_TIME` | `T#500ms` | Heartbeat nominal period 50 ms; the in-container run showed a 79 ms worst-case cycle. 500 ms ≈ 10 missed beats: tolerant of jitter, fast enough to be seen live. **Re-check against the PLCSIM run** and raise it only with evidence. It sets how fast a **live** link is declared lost and nothing else: it no longer governs any window in which the program trusts start values, because `BridgeLinkOk` carries `HeartbeatSeenAlive` and is `FALSE` from the first scan whatever this value is (§6.1) |
 
 ---
 
@@ -303,15 +309,57 @@ of every decision.
 
 ```
 IF BridgeHeartbeat <> LastBridgeHeartbeat THEN  reset the stale timer
+                                                and latch HeartbeatSeenAlive
 ELSE                                            run the stale timer
 LastBridgeHeartbeat := BridgeHeartbeat          -- after the comparison
-BridgeLinkOk := NOT HeartbeatStaleTimer.Q
+BridgeLinkOk := HeartbeatSeenAlive AND NOT HeartbeatStaleTimer.Q
 ```
 
 Inequality only. Never `BridgeHeartbeat - LastBridgeHeartbeat`, never a test for
 `+1`: the counter is `UInt16`, wraps every ~55 minutes, and restarts from an
 arbitrary value when the bridge process restarts. Any *change* is liveness
 (§7.1 of the design).
+
+**Two terms, and the first one is the one that was missing.** `NOT
+HeartbeatStaleTimer.Q` on its own reads *"the heartbeat has not yet been proven
+stale"*, which at CPU start is not the same statement as *"the heartbeat is
+alive"*. At the first scan `BridgeHeartbeat` and `LastBridgeHeartbeat` are both
+`0`, so the TON begins counting and its `Q` stays `FALSE` until
+`HEARTBEAT_STALE_TIME` has elapsed: a verdict formed from that term alone reads
+**`TRUE` for the first 500 ms of every CPU run**, before a single bridge sample
+has ever arrived. `HeartbeatSeenAlive` (§3.2, start value `FALSE`, non-retain) is
+set by the first observed change and conjoined into the verdict, which makes the
+boot polarity pessimistic: **`BridgeLinkOk` is `FALSE` from the first scan and
+stays `FALSE` until the heartbeat has actually moved.** "Not yet proven stale" is
+not "alive", and every guard that rides on link-up inherits this polarity
+(LESSONS 2026-07-28).
+
+What the boot window let through is recorded, not hypothesised — the 2026-07-28
+owner run, T4.9b, `bridge/EVIDENCE_LATENCY.md` Section B:
+
+- `ResetDeviceFault` cleared on the **first scan**, because the reset input's
+  start value `FALSE` satisfied "contact seen open *while the link is OK*"
+  against a link that was not OK. Where instead the guard had been cleared
+  legitimately earlier in the program run, the run-long form of the clearing rule
+  left it clear straight through the outage and admitted the same edge — two
+  routes to one failure, both closed in §6.7;
+- with that guard gone, a reset contact **held from before link-up** registered
+  as a rising edge the moment the bridge's first real samples arrived, and
+  cleared every latch with no operator action at the moment of clearing — the
+  automatic resume CLAUDE.md §9 forbids;
+- and the same window evaluated *every* input-derived verdict against DB start
+  values, so the §7 part 4 stop latch formed from start-value contacts and a
+  freshly started CPU accused the panel of a process stop it had never seen.
+
+The correction is made in the **verdict**, not as a special case inside the reset
+logic, because the second and third items above are the same defect reached by
+two different consumers.
+
+**A first heartbeat write equal to the start value is invisible for exactly one
+bridge cycle.** The counter is arbitrary at bridge process start (§7.1 of the
+design); if its first written value happens to be `0`, the inequality sees no
+change until the next write 50 ms later. The verdict is then late by one bridge
+cycle — never wrong in direction.
 
 > **The qualification rule, stated once and applied everywhere below.**
 > While `BridgeLinkOk` is `FALSE`, the seven input values are **not attributable to
@@ -321,10 +369,46 @@ arbitrary value when the bridge process restarts. Any *change* is liveness
 > Presence, range validity, drive fault, soft limits and the panel contacts are
 > all gated by `BridgeLinkOk`.
 
-This falls out correctly at power-up with no special case: `BridgeHeartbeat` and
-`LastBridgeHeartbeat` both start at 0, so the stale timer runs from the first
-scan and `BridgeLinkOk` is `FALSE` until the bridge has been writing for
-`HEARTBEAT_STALE_TIME`. Nothing can start before then.
+Nothing can start before the first heartbeat change — and unlike the earlier
+form, that is now true of the **first scan** as well as of the 500th millisecond.
+
+**The side effect, stated deliberately rather than discovered.** Because part 4
+of §7 is gated on `BridgeLinkOk` like every other input consumer, a pessimistic
+boot verdict means the stop latch is **no longer formed at CPU start from the
+start-value contacts**. A cold-started CPU with the bridge stopped reads:
+
+| Tag | Old build (`NOT staleTimer.Q`) | Corrected |
+|---|---|---|
+| `BridgeLinkOk` | `TRUE` for 500 ms, then `FALSE` | **`FALSE` from the first scan** |
+| `CellProcessStopActive` | `TRUE`, latched from start-value contacts | **`FALSE`** — no attributable contact has been seen |
+| `CellResetRequired` | `TRUE` | `TRUE`, from `LinkLostLatch` |
+| `ConveyorSpeedCommand` | `0.0` | `0.0` |
+| a start press | inert | inert |
+
+**Nothing is weakened.** The cell still cannot run — C1, C2 and C3 all read
+`FALSE` — a monitored reset is still required before it can, and the reason the
+program now gives is the true one: the link, not the panel. What changes is a
+**recorded observation**: the owner's cold-start reading of 2026-07-27, which
+m3-26's first read reproduced exactly (`BridgeLinkOk FALSE`,
+`CellProcessStopActive TRUE`, `CellResetRequired TRUE`,
+`ConveyorSpeedCommand 0.0`), was a property of the boot-`TRUE` build. `TRUE` on
+`CellProcessStopActive` is **not** the cold-start signature of the corrected
+build and must not be carried forward as the expected one; §8 case C and §11 T4.8
+are written to the corrected signature. The reading is not void — it confirmed
+wire-NC/program-NO and that both latch consumers worked before a bridge existed —
+but its process-stop half was formed from values the program itself declares
+unattributable, and that is the half this correction removes.
+
+This also settles what a **warm** restart under a live bridge session does not
+get: the corrected verdict closes the cold-start case, where the bridge is absent
+and `BridgeLinkOk` therefore never becomes `TRUE` at all. It does **not** close
+the case recorded on 2026-07-28, in which the CPU restarted under a surviving
+session: the bridge's heartbeat writes resume immediately, so the link is
+honestly alive within one bridge cycle while the *level* inputs still hold the
+values the restart reverted them to. Those reverted values are then inside a live
+link and are latched on, correctly by this program's rules and wrongly in fact.
+Only a bridge that rewrites every slot after a server restart fixes it (§12 open
+item 7).
 
 **Consistency caveat.** The server samples the DBs asynchronously from the
 program, and the bridge's write ordering guarantee (heartbeat written last) is an
@@ -440,9 +524,10 @@ Two consequences worth stating rather than discovering:
 - **The cold-start values are plausible, and that is not a hole.** Unlike
   `ProductSensorRange`, whose start value `0.0` is outside `[RANGE_MIN,
   RANGE_MAX]`, both belt start values of `0.0` sit inside their windows. Nothing
-  is lost: the window is not what holds a freshly started CPU — `BridgeLinkOk` is
-  (§6.1, §8 case C), and C5 carries `BridgeLinkOk` like every other input-derived
-  verdict.
+  is lost: the window is not what holds a freshly started CPU — `BridgeLinkOk`
+  is, **from the first scan** and not merely from the expiry of
+  `HEARTBEAT_STALE_TIME` (§6.1, §8 case C) — and C5 carries `BridgeLinkOk` like
+  every other input-derived verdict.
 - **A `NaN` belt speed now latches a belt-feedback fault instead of a drive
   fault.** Before this window existed, `ABS(ConveyorBeltSpeed) > SPEED_TOLERANCE`
   returned false for `NaN`, so under a non-zero command term D1 tripped and the
@@ -487,7 +572,7 @@ possible at all.
 |---|---|---|
 | C1 | `PanelStopCircuitClosed` | Stop circuit closed. **Wire NC, program NO**: the tag is used as a plain NO contact, so a pressed button, a broken wire and an absent signal all read `FALSE` and all stop the cell |
 | C2 | `PanelProcessStopCircuitClosed` | Process stop circuit closed, same polarity, same reasoning |
-| C3 | `BridgeLinkOk` | The input image is attributable to the cell |
+| C3 | `BridgeLinkOk` | The input image is attributable to the cell: the heartbeat has been **seen to change** and has not since gone stale (§6.1). `FALSE` from the first scan of every CPU run |
 | C4 | `RangeValid` | Photo-eye is delivering a plausible value right now (§6.2.1) |
 | C5 | `BeltFeedbackValid` | Belt position **and** belt speed are inside their physical windows right now (§6.2.2). A belt whose position cannot be read cannot be run: every travelling decision in §6.5 is a comparison against that number |
 
@@ -553,6 +638,19 @@ Transitions:
   corrupt sample stops the belt without requiring a reset — it still requires a
   new start press, because nothing auto-resumes (§6.7). Every latch sets
   `CellResetRequired := TRUE`.
+- **C3 is `FALSE` at the first scan of every CPU run** (§6.1), so `LinkLostLatch`
+  is set before any input-derived verdict can be formed and `CellResetRequired`
+  reads `TRUE` from power-up. Two consequences worth naming. A fresh CPU normally
+  requires a monitored reset before it can run. And **any link-up preceded by a
+  scan with the link down is reached with a latch already pending**, which is what
+  refuses a start contact held across an outage the instant the image becomes
+  attributable. The exception is narrow and worth stating so it is not mistaken
+  for the rule: if the bridge is already running and writes a heartbeat different
+  from the DB start value `0` before the CPU's *first* OB call, that scan sees a
+  change and the link is up with no staleness ever recorded, so no `LinkLostLatch`
+  forms. Nothing auto-resumes even then — both edge memories start `TRUE`
+  (§3.2), so a contact already closed at the first scan yields no edge — but the
+  guarantee in that corner is the edge memories', not the latch's.
 
 Never drive an actuator from a sensor: no step condition, no photo-eye value and
 no panel contact reaches the output tag except through `CellCycleRunning` and the
@@ -850,15 +948,53 @@ not count as a reset"):
   bridged or welded-closed reset button therefore never resets — not after one
   second, not after an hour — and a reset held down across a later stop cannot
   clear that stop's latch either, because the edge happened before the latch did.
-- **`ResetDeviceFault` makes that failure visible rather than silent.** It starts
-  `TRUE` — *the contact has not been observed open* — and clears permanently the
-  first time `PanelResetPressed` reads `FALSE` while the link is OK. It is belt
-  and braces beside the edge, and it is what a fault-finder reads in the watch
-  table when pressing reset appears to do nothing. It blocks only the reset; start
-  is a different device and is never blocked by it.
+- **`ResetDeviceFault` makes that failure visible rather than silent, and it is
+  re-armed at every link loss.** It is `TRUE` — *the contact has not been observed
+  open in this link session* — whenever `BridgeLinkOk` is `FALSE`, and it clears
+  while the link is OK and `PanelResetPressed` reads `FALSE`. It is belt and
+  braces beside the edge, and it is what a fault-finder reads in the watch table
+  when pressing reset appears to do nothing. It blocks only the reset; start is a
+  different device and is never blocked by it.
+
+  **Why per-link-session and not once per program run.** The edge memories are
+  what make a *stuck* contact harmless at the first scan of a CPU run
+  (start value `TRUE`, §3.2). They do nothing at a **link-up**, which is the other
+  boundary at which the program starts believing the reset input: during an outage
+  the contact's image freezes, typically at `FALSE`, so `ResetEdgeMemory` sits at
+  `FALSE` and the first attributable `TRUE` is a genuine rising edge in the input
+  image. A `ResetDeviceFault` cleared once and kept clear for the whole program
+  run would let that edge through — so a reset button held down across a bridge
+  restart would clear every latch the moment the link formed, which is exactly
+  T4.9b's recorded failure moved from CPU start to bridge restart. Re-arming the
+  guard whenever `BridgeLinkOk` is `FALSE` closes both with one statement: **the
+  contact must be seen open, with the link up, after the last outage**, and the
+  operator must then produce a fresh press. That is the same requirement as T4.9's
+  within a live session, applied to the link boundary as well.
+
+  **In normal operation the re-arm costs nothing.** Startup rule R3 has the bridge
+  write all seven inputs *before* the heartbeat begins, so at a normal link-up the
+  reset node already carries a real `FALSE` and the guard clears within one OB
+  call — the operator's next press is honoured, and T4.3 needs only its one press
+  pair. The re-arm bites only when the contact is genuinely closed at link-up,
+  which is the case it exists for.
+
+  **Its guarantee is conditional on the input image being truthful, and the PLC
+  cannot make it so.** The guard reads `PanelResetPressed`; if a server restart
+  under a live bridge session leaves that node holding a stale `FALSE` while the
+  button is physically held (the write-on-change cache recorded on 2026-07-28),
+  the guard clears from a value that is not a measurement of the contact, and the
+  later republish supplies a rising edge no operator produced. No PLC-side test
+  distinguishes a stale `FALSE` from a real one. That hole is closed in the bridge
+  (§12 open item 7), and it is stated here rather than left as an implied
+  guarantee.
 - **The reset input is qualified by the link** like every other input (§6.1): the
   reset condition contains `CauseGone`, which contains `BridgeLinkOk`, so a reset
-  cannot be honoured from a frozen or start-value input image.
+  cannot be honoured from a frozen or start-value input image. **That sentence
+  became true when the verdict did.** Under `BridgeLinkOk := NOT
+  HeartbeatStaleTimer.Q` this clause was decoration for the first 500 ms of every
+  CPU run: `CauseGone` carried a `BridgeLinkOk` that was `TRUE`, so the start-value
+  image satisfied it. The corrected verdict is what makes the qualification real,
+  and it is why the fix belongs in §6.1.
 - A reset attempted while a latch cause is still present is ignored; the latch
   stays and `CellResetRequired` stays TRUE. Release the button and press again
   once the cause is gone.
@@ -867,6 +1003,38 @@ not count as a reset"):
 start rising edge. No returning signal — heartbeat, closing stop circuit, clearing
 fault, reconnecting session — sets it. A permissive returning restores the
 *permission*, never the *motion*.
+
+### 6.8 Implementation delta against the build in RUN
+
+The build that produced the 2026-07-28 evidence implements `BridgeLinkOk := NOT
+HeartbeatStaleTimer.Q` and clears `ResetDeviceFault` once per program run. This
+is the complete list of edits that brings it to this specification — **one
+declaration and two statements in `FB_DemoCellControl`, no new block, no new
+node, no interface change, and no change to the heartbeat mechanism or to
+anything bridge-side.**
+
+| # | Where | Edit |
+|---|---|---|
+| 1 | FB static declarations | Add `HeartbeatSeenAlive : Bool := FALSE;`. Non-retain, like every other tag (§3.2) |
+| 2 | §7 part 1, after the `LastBridgeHeartbeat` assignment | Add `IF #hbChanged THEN #HeartbeatSeenAlive := TRUE; END_IF;` |
+| 3 | §7 part 1, the verdict | `"DemoCellLink".BridgeLinkOk := #HeartbeatSeenAlive AND NOT #HeartbeatStaleTimer.Q;` — the `AND` is the whole fix |
+| 4 | §7 part 6, the guard | Replace the single `IF #linkOk AND NOT PanelResetPressed THEN #ResetDeviceFault := FALSE; END_IF;` with the two-branch form: re-arm to `TRUE` while `NOT #linkOk`, clear in the `ELSIF` |
+| 5 | Watch table `DemoCell M3 gate`, Group 4 | Add `"DemoCellControl_DB".HeartbeatSeenAlive` (§9) |
+
+After the download, and **before** any re-run: confirm the block diff circles are
+solid green, then check in the watch table that `HeartbeatSeenAlive` is `TRUE` and
+`BridgeLinkOk` is `TRUE` with the bridge running, and that
+`HeartbeatStaleTimer.PT` still reads `T#500ms` in force — a download without
+reinitialisation preserves an instance DB's stale values, and a new static is
+exactly the kind of edit that shifts DB offsets (LESSONS 2026-07-28).
+
+**Which recorded results survive the change.** Behaviour differs from the old
+build only at CPU start and at link-up, so the steps to re-run are those that
+cross one of those boundaries — §11 **4.2, 4.3, 4.5, 4.8 and 4.9b**. Everything
+whose behaviour lies wholly inside one live link session is unaffected in kind:
+T1, T2, T3, 4.1, 4.4, 4.6, 4.6b, 4.7, 4.9, 4.10 and 4.11. Nothing in §6.2 to
+§6.6 — presence, plausibility, the freeze window, the setpoint gate, the sequence
+— changes at all.
 
 ---
 
@@ -888,7 +1056,14 @@ and consumed within one call. Everything in
 #hbChanged := ("DemoCellLink".BridgeHeartbeat <> #LastBridgeHeartbeat);
 #HeartbeatStaleTimer(IN := NOT #hbChanged, PT := #HEARTBEAT_STALE_TIME);
 #LastBridgeHeartbeat := "DemoCellLink".BridgeHeartbeat;   // never subtract
-"DemoCellLink".BridgeLinkOk := NOT #HeartbeatStaleTimer.Q;
+IF #hbChanged THEN
+    #HeartbeatSeenAlive := TRUE;   // one-shot, start value FALSE, non-retain
+END_IF;
+// BOTH terms. NOT staleTimer.Q alone reads "not YET proven stale", which is TRUE
+// for the first HEARTBEAT_STALE_TIME of every CPU run, before any bridge sample
+// has arrived — that is the boot window T4.9b failed in (§6.1). NEVER write
+// BridgeLinkOk := NOT #HeartbeatStaleTimer.Q.
+"DemoCellLink".BridgeLinkOk := #HeartbeatSeenAlive AND NOT #HeartbeatStaleTimer.Q;
 #linkOk := "DemoCellLink".BridgeLinkOk;
 
 IF NOT #linkOk THEN
@@ -995,6 +1170,9 @@ END_IF;
 IF #DriveFaultTimer.Q THEN "DemoCellStatus".ConveyorDriveFault := TRUE; END_IF;
 
 // ---- 4. Stops (wire NC, program NO: plain NO contacts) -------------------
+// The #linkOk conjunct is what keeps this out of the boot window: with the
+// corrected verdict no latch forms here from DB start values, so a cold-started
+// CPU reports CellProcessStopActive FALSE and LinkLostLatch instead (§6.1).
 IF #linkOk AND (NOT "DemoCellInput".PanelStopCircuitClosed
              OR NOT "DemoCellInput".PanelProcessStopCircuitClosed) THEN
     #ProcessStopLatch := TRUE;                    // PROCESS stop. Not a safety function.
@@ -1041,8 +1219,17 @@ END_IF;
 #ResetEdgeMemory := "DemoCellInput".PanelResetPressed;   // start value TRUE
 #StartEdgeMemory := "DemoCellInput".PanelStartPressed;   // start value TRUE
 
-IF #linkOk AND NOT "DemoCellInput".PanelResetPressed THEN
-    #ResetDeviceFault := FALSE;      // start value TRUE: contact now seen open
+// The guard is a LEVEL verdict about the CURRENT link session, re-armed at every
+// link loss — not a once-per-run latch. Cleared only by seeing the contact open
+// with the link up AFTER the last outage, so a reset held across a CPU restart or
+// a bridge restart cannot clear a latch at link-up (§6.7). R3 makes this free in
+// normal operation: the bridge writes all seven inputs before the heartbeat, so
+// at a normal link-up the node already reads FALSE and the guard clears in one
+// call.
+IF NOT #linkOk THEN
+    #ResetDeviceFault := TRUE;       // re-arm; start value is TRUE for the same reason
+ELSIF NOT "DemoCellInput".PanelResetPressed THEN
+    #ResetDeviceFault := FALSE;      // contact seen open, in THIS link session
 END_IF;
 
 IF #resetRise AND NOT #ResetDeviceFault AND #latchPending AND #causeGone THEN
@@ -1125,9 +1312,9 @@ table.
 
 | Case | What happened | What the PLC detects it with | Reaction | Restart |
 |---|---|---|---|---|
-| **A** — bridge crash (SIGKILL) | Heartbeat froze at 376; the six inputs froze at their last written values, `ConveyorBeltSpeed` reading a plausible 0.05 m/s **forever** | **`BridgeHeartbeat` unchanged for `HEARTBEAT_STALE_TIME`** (§6.1). Session state is deliberately **not** used: it is not exposed to the standard program as a supervisable input, and the evidence (A.4) shows it is not a faster or more reliable indicator | `BridgeLinkOk := FALSE` → C3 drops and `LinkLostLatch` sets → `CellCycleRunning := FALSE` → setpoint driven to `0.0` (§6.4) → `CellResetRequired := TRUE`. All input-derived evaluation suspended (§6.1) | Monitored reset (§6.7), then a **separate** start press. A returning heartbeat alone does nothing |
+| **A** — bridge crash (SIGKILL) | Heartbeat froze at 376; the six inputs froze at their last written values, `ConveyorBeltSpeed` reading a plausible 0.05 m/s **forever** | **`BridgeHeartbeat` unchanged for `HEARTBEAT_STALE_TIME`** (§6.1). Session state is deliberately **not** used: it is not exposed to the standard program as a supervisable input, and the evidence (A.4) shows it is not a faster or more reliable indicator | `BridgeLinkOk := FALSE` → C3 drops and `LinkLostLatch` sets → `CellCycleRunning := FALSE` → setpoint driven to `0.0` (§6.4) → `CellResetRequired := TRUE`. All input-derived evaluation suspended (§6.1) | Monitored reset (§6.7), then a **separate** start press. A returning heartbeat alone does nothing. The outage also **re-armed `ResetDeviceFault`**: a fresh bridge writes all seven inputs before its heartbeat (R3), so the guard clears within one OB call of link-up and the operator's press is honoured as usual — unless the reset contact is genuinely held across the outage, in which case the press is refused until it is released (§6.7, T4.9b) |
 | **B** — clean shutdown (SIGTERM) | Identical input image to A; only the session closed more tidily | **The same mechanism, and deliberately no other.** | **Identical to A — no additional action, by design.** The program must not distinguish A from B: it has no mechanism that could, and `bridge-design.md` §7.3 states that a program which behaves differently for A and B is wrong. The bridge writes no farewell value and zeroes nothing, so the two are identical where it matters | As A |
-| **C** — OPC UA link loss, bridge alive (server stopped / network) | Heartbeat stopped; inputs froze, then were **lost entirely** to DB start values when the server restarted; bridge reconnected and refreshed all six inputs within ~200 ms | Same mechanism. Two sub-cases: **(i) network or session loss with the CPU running** — indistinguishable from A at the PLC, same reaction. **(ii) the CPU itself stopped (PLCSIM stopped)** — **no program action is possible or required, because no program is running.** On restart, cold start applies the non-permissive start values of §3.1 and warm start leaves the previous session's values, which is exactly why §6.1 qualifies inputs with the heartbeat and not with the start values | As A. Additionally, the non-permissive start values (`PanelStopCircuitClosed := FALSE`, `ProductSensorRange := 0.0`, which is also outside `[RANGE_MIN, RANGE_MAX]`) mean a freshly cold-started CPU cannot run before the bridge is supplying real samples | As A |
+| **C** — OPC UA link loss, bridge alive (server stopped / network) | Heartbeat stopped; inputs froze, then were **lost entirely** to DB start values when the server restarted; bridge reconnected and refreshed all six inputs within ~200 ms | Same mechanism. Two sub-cases: **(i) network or session loss with the CPU running** — indistinguishable from A at the PLC, same reaction. **(ii) the CPU itself stopped (PLCSIM stopped)** — **no program action is possible or required, because no program is running.** On restart the program starts from the start values of §3.1 and from `HeartbeatSeenAlive := FALSE`, so `BridgeLinkOk` is `FALSE` from the first scan and no input-derived verdict is formed from those values at all (§6.1). The recorded restart of 2026-07-28 reverted **all seven** inputs, so this is the case that matters and not a cold-only special case | As A, and the **restart signature is now the corrected one** (§6.1): `BridgeLinkOk FALSE`, `LinkLostLatch` set at the first scan, `CellResetRequired TRUE`, `ConveyorSpeedCommand 0.0`, start presses inert — and `CellProcessStopActive` **`FALSE`**, because the start-value stop contacts are not attributable and are not latched on. The cell cannot run: C1, C2 and C3 all read `FALSE`. **Two sub-cases part company here.** With the **bridge stopped**, that state simply persists — nothing can be latched about the panel until real samples arrive. With a **bridge session surviving the restart**, the heartbeat resumes within one bridge cycle, so `BridgeLinkOk` returns `TRUE` while the level inputs still hold the reverted start values; the program then latches a process stop from them, correctly by its own rules and wrongly in fact. That was the 2026-07-28 finding, it is a **bridge** defect (write-on-change never repaired the reverted slots), and it is §12 open item 7. Until it lands, force-republish every level after any CPU restart | As A |
 | **D (i)** — simulation stopped **while the belt was at rest**, bridge alive | **Heartbeat kept advancing** (326 → 628 → 929, exactly 20 Hz). The input image froze bit-identically for 30 s under a `ConveyorSpeedCommand` of 0.05. Session healthy. From the PLC's side the link looks perfect. **This capture is the at-rest variant and nothing more**: `BeltPos` held at 2.5 m, a belt sitting on its mechanical stop, so its frozen speed of 3.2e-28 is what a *stationary* belt reads. It is not a model of a freeze during transport | **`ConveyorDriveFault`, term D1** (§6.6): a non-zero command with `ABS(ConveyorBeltSpeed) ≤ SPEED_TOLERANCE`, for `DRIVE_FAULT_DELAY`. The captured values satisfy it after **1 s** | `ConveyorDriveFault := TRUE` (latched) → `RunPermissive` drops → `CellCycleRunning := FALSE` → setpoint `0.0` → `CellResetRequired := TRUE` | Monitored reset, then a separate start press. D1 is false once the setpoint is zeroed, so the reset is honoured; the fault then **re-latches within `DRIVE_FAULT_DELAY`** of the start press if the simulation is still stopped |
 | **D (ii)** — simulation stopped **mid-motion**, bridge alive | Recorded on PLCSIM, m3-26: the image froze at **position 0.9273 m / speed 0.1500 m/s** under a `+0.15` command while the belt was transporting; heartbeat advanced throughout. The frozen speed is *plausible and non-zero*, which is what makes this case different in kind from (i) | **`ConveyorDriveFault`, term D2** (§6.6.1). D1 is blind here by construction — 0.1500 is far above `SPEED_TOLERANCE`. The re-arming freeze window references the frozen position, measures 0.0000 m of travel and sets `PositionFrozen`; `DriveFaultTimer` then runs. **Detection bound ≤ 3.2 s** from the freeze, and never sooner than ≈2.1 s — the spread is one freeze window (§6.6.2) | Identical reaction to (i), one to three seconds later | **The reset is refused while the image is still stale**, and that is correct: D2 does not clear when the setpoint is zeroed, because the read-back still claims 0.15 m/s (§6.3). Restart the simulation first — the read-back falls below `SPEED_TOLERANCE`, D2 clears, and only then does the monitored reset take, followed by a separate start press |
 | **D (iii)** — idle sub-case | Simulation stopped while the program is commanding `0.0` **and the frozen speed read-back is inside ±`SPEED_TOLERANCE`** — i.e. the image froze on a cell that was genuinely doing nothing. (If instead the frozen read-back claims motion, this is case D (ii): D2 fires with the cell idle, because a speed of 0.15 m/s beside a static position is a transducer lying whatever the sequence is doing) | **Nothing.** No detector exists and none is added | **No action, and the reason is stated rather than papered over**: a frozen input image under a zero command is indistinguishable from a genuinely idle cell. The three bridge-side fixes were considered and rejected in `bridge-design.md` §7.3 (each puts a timer that gates a signal into the transport layer). The cell is stopped either way, so the undetected state is also the harmless one | Not applicable |
@@ -1187,11 +1374,12 @@ the bridge's 20 Hz cyclic write.
 | `"DemoCellStatus".ConveyorDriveFault` | Bool | Latched `TRUE` in signal-loss case D: within `DRIVE_FAULT_DELAY` if the image froze at rest (D1), within **3.2 s** if it froze mid-motion (D2, §6.6.2) |
 | `"DemoCellStatus".CellResetRequired` | Bool | `TRUE` while any latch is pending |
 | `"DemoCellLink".BridgeHeartbeat` | Decimal | Advancing ~20/s; frozen in cases A, B, C; **advancing in case D** |
-| `"DemoCellLink".BridgeLinkOk` | Bool | `TRUE` while the heartbeat changes; `FALSE` 500 ms after it stops |
+| `"DemoCellLink".BridgeLinkOk` | Bool | `TRUE` while the heartbeat changes; `FALSE` 500 ms after it stops; **`FALSE` from the first scan of every CPU run until the heartbeat has been seen to change at least once** — it never reads `TRUE` before the first change, whatever `HEARTBEAT_STALE_TIME` is (§6.1) |
 
 ### Group 4 — internal, not on the server
 
 `"DemoCellControl_DB".SeqStep`, `.SpeedRequest`, `.LastBridgeHeartbeat`,
+`.HeartbeatSeenAlive`,
 `.ProcessStopLatch`, `.LinkLostLatch`, `.SensorFaultLatch`,
 `.BeltFeedbackFaultLatch`, `.SequenceFaultLatch`, `.ResetDeviceFault`,
 `.StartEdgeMemory`, `.ResetEdgeMemory`, `.HeartbeatStaleTimer.ET`,
@@ -1213,9 +1401,18 @@ A watch table shows `NaN` and `inf` as such in *Floating-point* format, so the
 common case is visible at a glance. This split is deliberate — one latch for one
 transducer, the diagnosis read off the raw values (§6.2.2).
 
-`ResetDeviceFault` reads `TRUE` from power-up until the reset contact has been
-seen open once with the link up; if it is still `TRUE`, the reset button is held,
-bridged or welded and no press of it will ever clear a latch (§6.7).
+`ResetDeviceFault` reads `TRUE` from power-up, and again from every link loss,
+until the reset contact has been seen open with the link up **in the current link
+session**; while it is `TRUE`, no press of the reset button will clear a latch. So
+`TRUE` immediately after an outage means only that the guard has re-armed — it
+should clear within one OB call of link-up, because R3 delivers the reset node
+before the heartbeat. `TRUE` that *persists* after link-up is the diagnosis: the
+reset button is held, bridged or welded (§6.7).
+
+`HeartbeatSeenAlive` beside `BridgeLinkOk` separates "never seen alive" from "seen
+alive and now stale", which the verdict alone cannot tell you. `FALSE` with the
+heartbeat visibly advancing in Group 3 would mean the build predates §6.8's
+delta.
 
 `SpeedRequest` beside `ConveyorSpeedCommand` is the clearest single view of §6.4:
 during an interlock loss the request may still read `+0.15` while the command
@@ -1273,8 +1470,8 @@ Three rules govern every pass claim in this section. They exist because a count
 written once outlives the run it was written for.
 
 1. **A count is the number of rows in that scenario's own step table, and
-   nothing else.** Sub-lettered steps — 1.1b, 4.6b, 4.9b — are steps and count
-   as such. A scenario with no numbered table carries no count; T3 is one.
+   nothing else.** Sub-lettered steps — 1.1b, 4.6b, 4.9b, 4.11b — are steps and
+   count as such. A scenario with no numbered table carries no count; T3 is one.
    The counts are stated once, on each scenario's own **Pass** line, and are
    re-derived from the table whenever that table changes.
 2. **A count here is the specified denominator, never a claim about a run.**
@@ -1293,7 +1490,7 @@ written once outlives the run it was written for.
 | Step | Action | Pass |
 |---|---|---|
 | 1.1 | Publish `start` `true`, then `false` | Group 1 `PanelStartPressed` follows `TRUE` → `FALSE` |
-| 1.1b | Publish `reset` `true`, then `false` | `PanelResetPressed` follows `TRUE` → `FALSE`. **Confirm the opposite polarity to 1.2/1.3**: this tag is `TRUE` only while the button is held, and `FALSE` on a broken or absent signal. `ResetDeviceFault` (Group 4) goes `FALSE` on the first `false` sample |
+| 1.1b | Publish `reset` `true`, then `false` | `PanelResetPressed` follows `TRUE` → `FALSE`. **Confirm the opposite polarity to 1.2/1.3**: this tag is `TRUE` only while the button is held, and `FALSE` on a broken or absent signal. `ResetDeviceFault` (Group 4) goes `FALSE` on the first `false` sample taken with the link up |
 | 1.2 | Publish `stop` `false`, then `true` | `PanelStopCircuitClosed` follows `FALSE` → `TRUE`. **Confirm the polarity reads the way a broken wire would**: the tag is false when the button is pressed |
 | 1.3 | Publish `process_stop` `false`, then `true` | `PanelProcessStopCircuitClosed` follows. Record it as a **process stop** |
 | 1.4 | With the belt clear, read `ProductSensorRange`; then run the cycle until the product blocks the beam | ≈1.440 → ≈0.540, and `ProductPresentAtSensor` follows ~100 ms later |
@@ -1368,34 +1565,46 @@ definition is §8 of this document; this is its test.
 | Step | Action | Pass |
 |---|---|---|
 | 4.1 **(A)** | With the cycle running, `kill -9` the bridge | `BridgeHeartbeat` freezes; `BridgeLinkOk` → `FALSE` within ~500 ms; `CellCycleRunning` → `FALSE`; `ConveyorSpeedCommand` → `0.0`; `CellResetRequired` → `TRUE`. Note in the evidence that **the belt keeps running in Gazebo** until the bridge returns (§8 residual) |
-| 4.2 | Restart the bridge, wait for the heartbeat to advance, and **do nothing else for 30 s** | `BridgeLinkOk` → `TRUE`, and **the cycle does not restart**. The first command delivered is `0.0` and the belt stops |
+| 4.2 | Restart the bridge, wait for the heartbeat to advance, and **do nothing else for 30 s**. Watch `HeartbeatSeenAlive` and `ResetDeviceFault` (Group 4) across the link-up | `BridgeLinkOk` → `TRUE` (and `HeartbeatSeenAlive` was already `TRUE` from before the outage — it is not cleared by staleness), and **the cycle does not restart**. The first command delivered is `0.0` and the belt stops. `ResetDeviceFault` read `TRUE` throughout the outage — the re-arm of §6.7 — and **clears within one watch-table update of link-up**, because R3 wrote the reset node before the heartbeat began. If it stays `TRUE` with the button not held, the input image is stale rather than the button stuck (§12 item 7) |
 | 4.3 | Publish `reset` `true`/`false`, then `start` `true`/`false` | Latches clear on the reset's rising edge and **nothing moves**; the cycle runs only after the separate start press on the other button |
 | 4.4 **(B)** | Repeat 4.1 with `SIGTERM` | **Identical PLC behaviour to 4.1.** Any difference is a defect |
-| 4.5 **(C)** | With the cycle running, break the link (stop PLCSIM's adapter, or the CPU to STOP and back) | Same reaction where a program is running; where the CPU stopped, confirm that on restart the non-permissive start values apply and nothing runs until the bridge supplies real samples and a reset+start is given |
+| 4.5 **(C)** | With the cycle running, break the link (stop PLCSIM's adapter, or the CPU to STOP and back) | Same reaction where a program is running. Where the **CPU** stopped, read the restart signature off the watch table and confirm it is §6.1's corrected one: `HeartbeatSeenAlive` `FALSE` and `BridgeLinkOk` `FALSE` at the first scan, `LinkLostLatch` set, `CellResetRequired` `TRUE`, command `0.0`, start presses inert, and **`CellProcessStopActive` `FALSE`** while the inputs stand at start values — the panel is not accused of a stop that was never seen. Nothing runs until real samples arrive and a reset plus a separate start is given. **If the bridge session survived the restart**, expect the reverted levels to be latched on within a bridge cycle of the heartbeat resuming, and record that as the write-cache finding it is (§8 case C, §12 item 7) — not as a program defect. Also record the STOP residual: the frozen command leaves the belt running in Gazebo (§8 residual) |
 | 4.6 **(D ii — mid-motion, the one that matters)** | With the belt **transporting and at least 3 s into the stroke** — position clearly away from home, `ConveyorSpeedCommand` reading `+0.15` — `kill -9` the Gazebo server, leaving the bridge alive. Note the wall-clock instant, and read `ConveyorBeltPosition`/`ConveyorBeltSpeed` off Group 1 as they freeze | `BridgeHeartbeat` **keeps advancing** and `BridgeLinkOk` stays `TRUE` throughout — the heartbeat cannot see this failure and is not expected to. The image freezes at a plausible non-zero speed, so **D1 does not fire**. `PositionRef` (Group 4) re-samples at the frozen position, `PositionFrozen` → `TRUE` at the next window expiry, and `ConveyorDriveFault` latches **within 3.2 s of the freeze**, and no sooner than ≈2.1 s (§6.6.2), with `CellCycleRunning` → `FALSE`, command → `0.0`, `CellResetRequired` → `TRUE`. **Record the elapsed time as a number**, from the last changing sample of `ConveyorBeltPosition` to `ConveyorDriveFault` going `TRUE`; the bound, not the average, is what passes |
 | 4.6b **(D i — at rest)** | Repeat with the belt **stationary but commanded**: start the cycle, let the belt reach the beam so step 20 commands `0.0`, and `kill -9` Gazebo during the dwell; when the dwell ends, step 30 commands `-0.15` against a dead cell | The frozen speed read-back is ≈0, so this is **D1's** path: `ConveyorDriveFault` latches within `DRIVE_FAULT_DELAY` (1 s) of the command going non-zero. Same reaction, faster verdict, different term — record which term fired by reading `PositionFrozen`, which stays `FALSE` here |
 | 4.7 | With the simulation **still stopped after 4.6**, attempt a reset (`reset` `true`/`false`), then a start | **The reset is refused, and that is the pass.** `CellResetRequired` stays `TRUE`, `ConveyorDriveFault` stays `TRUE`, nothing moves, and the start press does nothing. The read-back still claims 0.15 m/s, so D2 holds `CauseGone` false (§6.3, §6.6.2). Then **restart the simulation**: the speed read-back returns to ≈0, `PositionFrozen` → `FALSE`, and *now* the reset clears the latch and a separate start press re-runs the cycle. After 4.6b the reset is honoured immediately instead, because D1 clears with the setpoint — and the fault re-latches within 1 s of the start press if the cell is still dead. **No auto-resume in either path, and no way to run a dead cell** |
-| 4.8 | **Startup rule against the real DB start values**: cold-start the CPU with the bridge stopped | The seven inputs read the start values of §3.1, `BridgeLinkOk` is `FALSE`, and start presses do nothing. Then start the bridge and confirm the heartbeat only begins after all seven inputs carry real samples |
+| 4.8 | **Startup rule against the real DB start values**: cold-start the CPU with the bridge stopped | The seven inputs read the start values of §3.1; `HeartbeatSeenAlive` and `BridgeLinkOk` are **`FALSE` from the first scan** (not `TRUE` for 500 ms first — that is the corrected verdict, and this step is where it is read); `LinkLostLatch` and `CellResetRequired` are `TRUE`; `ResetDeviceFault` is `TRUE`; **`CellProcessStopActive` is `FALSE`**; and start presses do nothing. Then start the bridge and confirm the heartbeat only begins after all seven inputs carry real samples — and that `HeartbeatSeenAlive` goes `TRUE` on the first advancing beat, not before |
 | 4.9 | **Stuck reset device**: publish `reset` `true` and **leave it published**, then latch a stop (publish `process_stop` `false`, then `true` again) | The still-held reset **never clears the latch**: `CellResetRequired` stays `TRUE` and the cell stays stopped for as long as the button is held. There is no edge to act on, and no elapsed time makes one appear. Release `reset` (`false`) and publish `true` again — *now* the latch clears |
-| 4.9b | **Reset held from before the program ran**: cold-start the CPU with `reset` already publishing `true` | `ResetDeviceFault` stays `TRUE`, no reset is possible, and the watch table says why. It clears only after the contact has been seen `false` once with the link up |
+| 4.9b | **Reset held from before the link came up.** One step, and it must hold for **both** ways of creating that precondition, because the program treats them identically — link-down is link-down (§6.7): **(a) fresh bridge** — with a latch pending, stop the bridge, publish `reset` `true` and keep it published, then start a fresh bridge and let the heartbeat begin. *This is the variant the 2026-07-28 run actually used, and the one it failed.* **(b) CPU start** — cold-start the CPU with `reset` already publishing `true` | In both: `ResetDeviceFault` reads `TRUE` **before, through and after link-up** — re-armed by the outage in (a), at its start value in (b) — so the rising edge that arrives with the first attributable sample is **refused**, `CellResetRequired` stays `TRUE`, every latch stays set and nothing moves. The watch table says why: `ResetDeviceFault TRUE` beside `BridgeLinkOk TRUE`. Then publish `reset` `false` — the guard clears within one update — and `true` again: *that* fresh edge clears the latches, and a separate start press is still required. **This step failed as specified against the pre-§6.8 build** (2026-07-28 17:02:19–36: every latch clear by link-up + 6 s), which is what §6.1 and §6.7 were corrected for; it is re-run against the corrected build, and a pass is only claimable there |
 | 4.10 | **Session behaviour on a real server**: time how long the S7-1500 holds the session after a bridge `SIGKILL` | Recorded as a number. This is the one in-container result known not to transfer (`EVIDENCE_SIGNAL_LOSS.md` A.4) — and it must **not** be used as an input to the program |
-| 4.11 | **Belt feedback plausibility** (§6.2.2), by the narrowed-constant method below | `BeltFeedbackFaultLatch` latches, `CellCycleRunning` → `FALSE`, `ConveyorSpeedCommand` → `0.0`, `CellResetRequired` → `TRUE`; reset clears it and start re-runs the cell once the constant is restored |
+| 4.11 | **Belt feedback plausibility — the reaction path** (§6.2.2), by the narrowed-constant method below | C5 drops within one OB call of the read-back leaving the window: `CellCycleRunning` → `FALSE` and `ConveyorSpeedCommand` → `0.0` in the same scan. **The latch is not expected here and its absence is not a failure** — zeroing the setpoint returns the read-back inside the window in ~100–150 ms, below `BELT_FAULT_DELAY`, so `BeltFeedbackFaultLatch` can never form by this method (see below). Read the pass off the **20 Hz evidence CSV**, not the watch table: the whole event is shorter than one watch-table update, and it appears there as a brief speed excursion followed by the command going to `0.0` |
+| 4.11b | **Belt feedback plausibility — the latch, the permissive hold and the reset** (§6.2.2), by holding an implausible value at the source with the fault-injection facility of §12 open item 6 | With an out-of-window value (or `NaN`) held on `ConveyorBeltPosition` or `ConveyorBeltSpeed` for longer than `BELT_FAULT_DELAY`: `BeltFeedbackFaultLatch` → `TRUE` ~200 ms after injection, `CellResetRequired` → `TRUE`, command stays `0.0`, and **a reset is refused while the injection is held** — C5 is in `WorldOk` and therefore in `CauseGone` (§6.3). Disarm the injection: C5 returns, the reset then clears the latch and moves nothing, and a separate start press re-runs the cell. **BLOCKED**: the facility does not exist (§12 item 6). Not runnable, and not a pass by default (rule 3) |
 
-**Pass: all thirteen steps of the table above.** Evidence appended to
+**Pass: all fourteen steps of the table above** — 4.1 to 4.11 with 4.6b, 4.9b and
+4.11b, counted per rule 1. Evidence appended to
 `bridge/EVIDENCE_SIGNAL_LOSS.md` as a PLCSIM section beside the container run,
 per `EVIDENCE_LATENCY.md` Section B item 6.
 
-> **Thirteen is the specified list, not a claim about a run** (rule 2). The
-> recorded run in `EVIDENCE_LATENCY.md` Section B covered the twelve steps the
-> list then held: seven ran, one of those **failed** (the then-4.6, §B.13 F2),
-> one was attempted and found **not executable** (the then-4.7), and four did
-> not run — 4.5, 4.8, 4.9b and 4.11 (§B.7 roster). Since that run, 4.6b was
-> added and 4.6 and 4.7 were re-specified, so **no step of case D carries a
-> valid as-run result** and no pass over all thirteen is available from that
-> evidence. What is missing is tracked as outstanding rows in §B.12, never as a
-> smaller denominator here.
+> **Fourteen is the specified list, not a claim about a run** (rule 2). The
+> as-run roster with a verdict per step is `EVIDENCE_LATENCY.md` §B.7 and this
+> document does not mirror it. What this revision changes about it:
+>
+> - **4.9b failed** as specified against the pre-§6.8 build, and the failure is
+>   answered in §6.1 and §6.7 rather than in the test. It is re-run against the
+>   corrected build, and it now carries **two** preconditions where it carried
+>   one.
+> - **4.11's latch step was not testable by the method the step named**, so the
+>   step is now the reaction path alone — which the run did demonstrate — and
+>   the latch has moved to the new step **4.11b**, blocked on §12 item 6. The
+>   denominator grows by one; the evidence gains an outstanding row. The
+>   denominator of a run that already happened does not grow: what ran, ran.
+> - **4.2, 4.3, 4.5 and 4.8** cross a CPU start or a link-up, so their observable
+>   behaviour changes with §6.8's delta and their earlier results do not carry
+>   over (§6.8, *which recorded results survive*).
+>
+> A pass over all fourteen therefore requires the corrected build, and no pass
+> over all fourteen is available from evidence recorded before it.
 
-#### How 4.11 is run, and what it does and does not prove
+#### How 4.11 and 4.11b are run, and what each does and does not prove
 
 **The cell cannot produce an implausible belt value.** Gazebo publishes a real
 joint state, the bridge passes it through without inventing anything
@@ -1404,24 +1613,45 @@ bridge's next cyclic write within ~50 ms — which is also why §9 forbids *Modi
 on `DemoCellInput` outright. There is no `NaN` to inject and no supported way to
 inject one.
 
-What *is* testable is the whole reaction path, by temporarily narrowing the
-window until real values fall outside it:
+**Why the latch step had to move, measured rather than argued.** Narrowing the
+window makes the *plant's own values* implausible, so the offending condition is
+extinguished by the reaction it triggers: C5 drops `RunPermissive`, §6.4 drives
+the setpoint to `0.0`, and the belt — which follows the command with no ramp —
+brings the read-back back inside the narrowed window in ~100–150 ms. That is
+**below `BELT_FAULT_DELAY` (200 ms)**, so `BeltFeedbackInvalidTimer` is released
+before `Q` and `BeltFeedbackFaultLatch` can never form by this method. The
+recorded run of 2026-07-28 is the proof in both directions: with `±0.10`
+downloaded, the five start presses each produced a ~100–150 ms excursion to
+0.15 m/s in the 20 Hz CSV with the command going to `0.0` inside it, and no latch
+(LESSONS 2026-07-28). At the panel they looked like silent refusals; they were
+five correct C5 interventions, visible only in the CSV. **A latch test must hold
+the offending condition longer than the delay independently of the reaction it
+triggers** — which means injecting at the source, not narrowing the window. That
+is 4.11b, and it is blocked on §12 item 6.
+
+What the narrowed-constant method *does* test, and what 4.11 is now reduced to,
+is the reaction path — the verdict, the permissive drop and the setpoint gate:
 
 1. Set `BELT_SPEED_MAX` to `0.10` m/s (and `BELT_SPEED_MIN` to `-0.10`), compile,
    download. **Note in the evidence that the constant was narrowed** — this is a
    modified program, not the gate build.
-2. Belt at home, no latch pending, press start. The belt accelerates towards
-   `TRANSPORT_SPEED` = 0.15 m/s.
-3. **Pass:** as the read-back passes 0.10 m/s, `CellCycleRunning` drops and
-   `ConveyorSpeedCommand` snaps to `0.0` in the same watch-table update;
-   `BeltFeedbackFaultLatch` and `CellResetRequired` go `TRUE` about 200 ms later.
-   The belt stops, the speed read-back returns to ≈0 and therefore becomes
-   plausible again, so reset is possible.
-4. **Pass:** `reset` `true`/`false` clears the latch and moves nothing; `start`
-   re-runs the cell and it faults again at the same speed. No auto-resume, and
-   the fault re-proves itself.
+2. Belt at home, no latch pending, press start with the bridge's 20 Hz evidence
+   CSV running. The belt accelerates towards `TRANSPORT_SPEED` = 0.15 m/s.
+3. **Pass:** in the CSV, `ConveyorBeltSpeed` crosses 0.10 m/s and
+   `ConveyorSpeedCommand` goes to `0.0` within one OB call of the crossing, with
+   `CellCycleRunning` dropping in the same scan. The whole excursion lasts
+   ~100–150 ms. **Expect no latch**, and record the excursion duration as the
+   reason: the condition cleared before `BELT_FAULT_DELAY` elapsed. The cell is
+   left with no latch pending, so no reset is required and the cycle can simply be
+   started again — each press reproduces the same intervention.
+4. **Not a step of 4.11.** The latch, the refusal of a reset while the condition
+   holds, and the reset that clears it afterwards are **4.11b**, and they are not
+   demonstrable here: there is nothing latched to clear. Do not record step 3 as
+   evidence for §6.2.2's latch or for its reset behaviour.
 5. **Restore `BELT_SPEED_MIN`/`BELT_SPEED_MAX` to ±1.00, recompile, re-download,
-   and confirm a full clean cycle before any gate evidence is recorded.**
+   and confirm a full clean cycle before any gate evidence is recorded.** Note in
+   the evidence which build each observation was taken against — this one is not
+   the gate build.
 
 > **Use the speed constant, not the position constant, for this test.** Narrowing
 > `BELT_POSITION_MAX` parks the belt *outside* its own window, and a belt that
@@ -1433,13 +1663,16 @@ window until real values fall outside it:
 > makes C5 safe as a blanket permissive (§6.3), and it is why the constant is not
 > tightened to the soft limit.
 
-This exercises the verdict, the delay, the latch, the permissive drop, the
-setpoint gate and the reset — everything except the `NaN` literal itself. That
-last step is covered by argument rather than by test: all four comparisons are
-affirmative, and every comparison against `NaN` is false, so `NaN` reaches the
-same fault branch that 0.15 m/s reaches here (§6.2). Injecting a genuine `NaN`
-would need a bridge-side fault-injection facility, which does not exist and is
-requested as open item 6 of §12.
+So 4.11 exercises the **verdict, the permissive drop and the setpoint gate**, and
+those only. Three claims of §6.2.2 are left to 4.11b — the delay, the latch and
+the reset behaviour — and one is left to argument in either case: that a genuine
+`NaN` lands in the same branch. That last one is argued, not tested, because all
+four comparisons are affirmative and every comparison against `NaN` is false, so
+`NaN` reaches the same fault branch that 0.15 m/s reaches here (§6.2). Both the
+`NaN` literal and the held out-of-window value need the same bridge-side
+fault-injection facility, which does not exist and is requested as open item 6 of
+§12. **Until it exists, §6.2.2's latch is specified and unverified, and it is
+recorded that way rather than inferred from 4.11.**
 
 ---
 
@@ -1461,7 +1694,8 @@ requested as open item 6 of §12.
 | 2 | The OB30 period of 20 ms assumes the bridge's 50 ms cadence | If m3-04's 20 Hz expectation is revised with evidence (`bridge-design.md` §12.7), revise this together with it |
 | 3 | Whether PLCSIM Advanced enforces the OPC UA runtime licence | Owner observes at step 4 of §10 and records it |
 | 4 | The bridge must carry the reset node and its topic (`bridge/config/bridge.yaml`, and `bridge/tools/cell_stimulus.py` if it drives the contact) | `bridge/` work, requested by m3-10 and m3-11. Until it lands, `PanelResetPressed` never leaves its start value and no reset is possible (§11 preconditions) |
-| 6 | There is no way to present the CPU with a genuine `NaN` or `inf` on any input: Gazebo publishes real values, the bridge invents none, and a watch-table *Modify* is overwritten within one bridge cycle. §6.2 is therefore verified by a narrowed-constant test (§11, 4.11) plus argument, never by injection | Requested of `bridge/`: an explicitly opt-in fault-injection mode that can write a nominated `DemoCell/Input/` Real as `NaN`, `inf` or an out-of-window value, refusing to arm unless asked. `bridge/` work — **not** a change to this program, which must behave identically whether or not it exists |
+| 6 | There is no way to present the CPU with a genuine `NaN` or `inf` on any input, **nor to hold any implausible value for longer than the program takes to react**: Gazebo publishes real values, the bridge invents none, and a watch-table *Modify* is overwritten within one bridge cycle. The narrowed-constant test of §11 4.11 reaches the verdict, the permissive drop and the setpoint gate; it **cannot** reach the delay, the latch or the reset, because zeroing the setpoint returns the plant inside the narrowed window in ~100–150 ms, under `BELT_FAULT_DELAY` (measured, 2026-07-28). So §6.2.2's latch is specified and **unverified** | Requested of `bridge/`: an explicitly opt-in fault-injection mode that can write a nominated `DemoCell/Input/` Real as `NaN`, `inf` or an out-of-window value **and hold it until disarmed**, refusing to arm unless asked. §11 **4.11b is blocked on it**. `bridge/` work — **not** a change to this program, which must behave identically whether or not it exists |
+| 7 | The reset guard's guarantee assumes the input image tells the truth about the contact. A CPU restart under a surviving bridge session reverts the input DB, and a bridge that writes only on change never repairs the reverted slots (recorded 2026-07-28): the PLC then reads a stale `FALSE` reset contact — which clears `ResetDeviceFault` — and a later republish supplies a rising edge no operator produced. The same staleness latches a process stop from reverted stop circuits (§8 case C). **No PLC-side test distinguishes a stale `FALSE` from a real one**, so this cannot be closed here | Requested of `bridge/`: detect a server restart (the heartbeat node reverting, or session/subscription loss) and **rewrite every slot**, not only changed ones. Until it lands, force-republish every level after any CPU restart. `bridge/` work — no change to this program follows from it |
 
 Item 5 is absent from the table because it is closed, not because it was
 renumbered: **numbers are never reused**, so a report or a lesson that cites
