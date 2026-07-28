@@ -675,7 +675,10 @@ contact is held, and no elapsed time makes one appear.
 **T4.7 could not be executed**: it presupposes a latched `ConveyorDriveFault`,
 which §B.13 F2 explains never occurred. The reset and start pressed at t=372.8
 and t=376.8 therefore acted on a cell with no latch pending and a cycle already
-running, and changed nothing.
+running, and changed nothing. m3-29 has since **inverted** the step — its pass
+is now that the reset is *refused* while the frozen image still claims motion —
+so what is recorded here is the non-execution of the old step, and the inverted
+one is outstanding (§B.12 item 12).
 
 ### T4 as-run accounting — seven of the twelve steps ran
 
@@ -690,8 +693,8 @@ count taken from this evidence has a denominator that matches the record.
 | 4.3 | ran, as specified | §B.7, same paragraph |
 | 4.4 **(B)** | ran, identical to A at the program | §B.7 case B |
 | 4.5 **(C)** | **not run** | §B.7 case C; §B.12 item 5 |
-| 4.6 **(D)** | ran — **failed** | §B.7 case D; §B.13 F2 |
-| 4.7 | attempted, **not executable** — no latch to re-latch | §B.7, above |
+| 4.6 **(D)** | ran — **failed**; the step as written then is **superseded** by m3-29's mid-motion T4.6 (§B.12 item 10) | §B.7 case D; §B.13 F2 |
+| 4.7 | attempted, **not executable** — no latch to re-latch; the step as written then is **superseded** by m3-29's inverted T4.7 (§B.12 item 12) | §B.7, above |
 | 4.8 | **not run** — cold start of the CPU | §B.12 item 6 |
 | 4.9 | ran, passes exactly | §B.7, above |
 | 4.9b | **not run** — cold start of the CPU | §B.12 item 6 |
@@ -704,12 +707,29 @@ recompile in TIA and a program built to the m3-27 specification — where the
 build in RUN here was the m3-05 one this section's header names. It is
 owner-outstanding (§B.12 item 9).
 
+**T4.6b did not exist either, and T4.6 and T4.7 no longer mean what this run
+tested.** m3-29 re-specified case-D detection after this run: T4.6 became the
+**mid-motion** test, with the freeze-to-latch elapsed time recorded as a number
+against a ≤ 3.2 s bound; T4.6b was **added** for the at-rest D1 path; and T4.7
+was **inverted** — the monitored reset is now *refused* while the frozen image
+still claims motion, where the step this run attempted promised a re-latch
+within 1 s. All three postdate the recorded run, and all three need a program
+rebuilt to the m3-29 `SPEC.md` §6.6/§7 form. They are owner-outstanding
+(§B.12 items 10–12).
+
+**The rows above are therefore annotated, not renumbered, and no as-run figure
+is restated.** What ran, ran, against the m3-05 build. The twelve rows are the
+§11 T4 list as it stood when this accounting was written; the list now has
+**thirteen** steps, and the revised or added ones appear as outstanding rows
+rather than as a larger denominator (LESSONS 2026-07-28).
+
 **No pass claim over all twelve T4 steps is therefore supported by this
 evidence**: seven steps ran, one of those failed, one was attempted and found
-not executable, and four did not run. `SPEC.md` §11 T4 carries a *"Pass: all
-twelve"* line that points at the `bridge/` evidence for its backing; that line
-needs the same accounting, and since it lives in `plc/` it is **requested here,
-not made here**.
+not executable, and four did not run. The accounting this section asked of
+`plc/` is now in place: `SPEC.md` §11 T4 reads *"Pass: all thirteen"* and states
+in the same place that thirteen is the specified list and not a claim about a
+run, and that a step added after a run gains an outstanding row rather than a
+larger denominator.
 
 ## B.8 Session behaviour on a real server (item 7)
 
@@ -798,6 +818,10 @@ described in §B.1; it writes nothing and is not in the transport path.
 | 7 | **T4.10 for hardware** | §B.8 measures PLCSIM Advanced; real S7-1500 hardware may reap differently |
 | 8 | **T2.2–T2.4, the dwell at the beam** | Not reachable while §B.13 F1 stands |
 | 9 | **T4.11 — belt-feedback plausibility by the narrowed-constant method** | It postdates this run: m3-27 added it to `SPEC.md` §11 afterwards. It needs a TIA recompile with a narrowed constant, and a program built to the m3-27 spec at all — the build in RUN here was m3-05 |
+| 10 | **T4.6 as re-specified (D ii, mid-motion)** — `ConveyorDriveFault` latching within 3.2 s of the freeze, with the **elapsed time recorded as a number** from the last changing `ConveyorBeltPosition` sample | The step postdates this run: m3-29 rewrote it after the fact, and what this evidence records against the old step is a **failure** on the m3-05 build (§B.13 F2, 26 s undetected). It needs the **m3-29 rebuild** — the re-armed `PositionRef` window and `PositionFrozen` of §6.6/§7 — downloaded to the CPU, plus the §9 Group 4 watch table to read `PositionRef`, `PositionFrozen` and `PositionWindowTimer.ET` |
+| 11 | **T4.6b (D i, at rest)** — the D1 path: Gazebo killed during the step-20 dwell, latch within `DRIVE_FAULT_DELAY`, `PositionFrozen` staying `FALSE` | The step did not exist when this run was made; m3-29 added it. Same **m3-29 rebuild** required. It additionally needs the dwell to be reachable at all, which item 8 above (§B.13 F1) still blocks — a cell that never asserts presence never enters step 20 |
+| 12 | **T4.7 as inverted** — the monitored reset **refused** while the frozen image still claims motion, then honoured once the simulation is restarted | m3-29 inverted the pass condition after this run; the old step was attempted here and found not executable at all, because no latch was ever raised (§B.7). It needs the **m3-29 rebuild** and can only follow a T4.6 that actually latches |
+| 13 | **Rebuild baseline for the next run** — which `SPEC.md` revision the downloaded program was built to, captured **with** the evidence | Every figure in Section B was taken against the **m3-05** build, named in this section's header. The m3-29 download changes that baseline, and items 9–12 are all defined against it, so the program version at the next download (SPEC revision and TIA compile) is recorded at the time of the run rather than inferred afterwards; without it no later figure can be attributed to a specification |
 
 ## B.13 Findings that belong to the PLC program
 
