@@ -653,7 +653,7 @@ running a program. Timings from the 10 Hz observer, so ±0.1 s.
 | **A** — bridge SIGKILL | `kill -9` bridge #1 at t=227.6 s | heartbeat froze at **4537**; `BridgeLinkOk → False` **0.50 s** later; `CellResetRequired → True` in the same sample; command already `0.0` | **as specified** |
 | **B** — bridge SIGTERM | `kill -15` bridge #2 at t=311.4 s | heartbeat froze at **1352**; `BridgeLinkOk → False` **0.51 s** later; `CellResetRequired → True` | **identical to A at the program**, as §8 requires |
 | **C** — link loss / CPU stop | **not performed** | — | **owner-outstanding**: it requires stopping the CPU or its adapter, which this brief is forbidden to do |
-| **D** — simulation killed, bridge alive | `kill -9` the gz server at t≈363 s | heartbeat **kept advancing** (767 → 1251), `BridgeLinkOk` stayed **True**, input image froze bit-identically — and **`ConveyorDriveFault` never latched** for 26 s | **FAILED — see §B.13 F2** |
+| **D** — simulation killed, bridge alive | `kill -9` the gz server at t≈363 s | heartbeat **kept advancing** (**750** at the freeze to **1268** at the drop, §B.13 F2), `BridgeLinkOk` stayed **True**, input image froze bit-identically — and **`ConveyorDriveFault` never latched** for 26 s | **FAILED — see §B.13 F2** |
 
 The 0.50 / 0.51 s figures are `HEARTBEAT_STALE_TIME` = 500 ms measured three
 times independently (a third instance at t=389.2 gave 0.50 s), so that constant
@@ -676,6 +676,40 @@ contact is held, and no elapsed time makes one appear.
 which §B.13 F2 explains never occurred. The reset and start pressed at t=372.8
 and t=376.8 therefore acted on a cell with no latch pending and a cycle already
 running, and changed nothing.
+
+### T4 as-run accounting — seven of the twelve steps ran
+
+`SPEC.md` §11 T4 lists **twelve** steps. The table below is derived from what
+this run executed, not from the scenario table as it stands today, so that any
+count taken from this evidence has a denominator that matches the record.
+
+| Step | As run | Recorded in |
+|---|---|---|
+| 4.1 **(A)** | ran, as specified | §B.7 case A |
+| 4.2 | ran, as specified | §B.7, "No auto-resume, three times" |
+| 4.3 | ran, as specified | §B.7, same paragraph |
+| 4.4 **(B)** | ran, identical to A at the program | §B.7 case B |
+| 4.5 **(C)** | **not run** | §B.7 case C; §B.12 item 5 |
+| 4.6 **(D)** | ran — **failed** | §B.7 case D; §B.13 F2 |
+| 4.7 | attempted, **not executable** — no latch to re-latch | §B.7, above |
+| 4.8 | **not run** — cold start of the CPU | §B.12 item 6 |
+| 4.9 | ran, passes exactly | §B.7, above |
+| 4.9b | **not run** — cold start of the CPU | §B.12 item 6 |
+| 4.10 | ran, measured | §B.8 |
+| 4.11 | **not run — it postdates this run** | §B.12 item 9 |
+
+**T4.11 did not exist when this run was executed.** It was added to `SPEC.md`
+§11 by m3-27, after the fact, and running it needs both a narrowed-constant
+recompile in TIA and a program built to the m3-27 specification — where the
+build in RUN here was the m3-05 one this section's header names. It is
+owner-outstanding (§B.12 item 9).
+
+**No pass claim over all twelve T4 steps is therefore supported by this
+evidence**: seven steps ran, one of those failed, one was attempted and found
+not executable, and four did not run. `SPEC.md` §11 T4 carries a *"Pass: all
+twelve"* line that points at the `bridge/` evidence for its backing; that line
+needs the same accounting, and since it lives in `plc/` it is **requested here,
+not made here**.
 
 ## B.8 Session behaviour on a real server (item 7)
 
@@ -763,6 +797,7 @@ described in §B.1; it writes nothing and is not in the transport path.
 | 6 | **T4.8 / T4.9b — cold start of the CPU** | Requires cold-starting the owner's CPU; see the inference in §B.6 |
 | 7 | **T4.10 for hardware** | §B.8 measures PLCSIM Advanced; real S7-1500 hardware may reap differently |
 | 8 | **T2.2–T2.4, the dwell at the beam** | Not reachable while §B.13 F1 stands |
+| 9 | **T4.11 — belt-feedback plausibility by the narrowed-constant method** | It postdates this run: m3-27 added it to `SPEC.md` §11 afterwards. It needs a TIA recompile with a narrowed constant, and a program built to the m3-27 spec at all — the build in RUN here was m3-05 |
 
 ## B.13 Findings that belong to the PLC program
 
@@ -774,19 +809,38 @@ visible.
 ### F1 — the presence verdict never asserted, so no cycle ever reached its dwell
 
 The photo-eye works and the bridge carries it faithfully. During the first
-transport, the PLC's own `ProductSensorRange` node went **1.4401 → 0.5400 m at
-t=47.10 s and stayed there until t=48.92 s** — 1.8 s, against a
-`PRESENCE_FILTER` of 100 ms — and `0.540` is precisely the "product in the beam"
-value `SPEC.md` §9 predicts. `RANGE_MIN`/`RANGE_MAX` are 0.05/3.00, so
-`RangeValid` was true throughout.
+transport, the PLC's own `ProductSensorRange` node went **1.4401 → 0.5400 m and
+held there for 2.11 s** — 21× the `PRESENCE_FILTER` of 100 ms — and `0.540` is
+precisely the "product in the beam" value `SPEC.md` §9 predicts.
+`RANGE_MIN`/`RANGE_MAX` are 0.05/3.00, so `RangeValid` was true throughout.
 
 **`ProductPresentAtSensor` stayed `False` for the entire 394 s run** — it never
 once changed state. Consequently `SeqStep` never advanced 10 → 20, there was no
 dwell, no reversal at the beam, and the transport step instead ran on to the
-soft limit: at **t=54.96 s, position 2.4123 m ≥ `SOFT_LIMIT` 2.40**, the step
+soft limit: at **t=54.7600, position 2.4123 m ≥ `SOFT_LIMIT` 2.40**, the step
 aborted, `SequenceFaultLatch` set, `CellCycleRunning → False`,
 `ConveyorSpeedCommand → 0.0` and `CellResetRequired → True`. The same thing
 happened on every subsequent transport.
+
+**Provenance of the two timings above.** Both come from
+`evidence/plc-observe-2026-07-27-plcsim-main.csv.gz`, on that file's own
+`t_mono_s` clock — the observer's relative clock, quantised to its 0.1 s
+sampling period, and *not* the bridge sessions' clock. Taking "blocked" as a
+sample of `Input/ProductSensorRange` below 1.0 m, the first block runs from
+**t=47.0044** to a last blocked sample at **t=49.1175**, with the first clear
+sample at **t=49.2179**: 22 consecutive rows at `0.5400331616401672`, i.e.
+**2.11 s** first-to-last blocked and 2.21 s to the first clear reading. The
+soft-limit abort is the single row **t=54.7600**, in which
+`Input/ConveyorBeltPosition` reads `2.4123001098632812` — the run's maximum —
+and `Status/CellCycleRunning` goes True→False, `Status/CellResetRequired`
+False→True and `Output/ConveyorSpeedCommand` +0.15→0.0 together.
+
+The readings this finding carried when it was first written — *47.10 → 48.92,
+1.8 s* for the block and *t=54.96* for the abort — **reproduce from no
+committed file**, on either clock; they were run observations, not figures
+taken from the record. Both were conservative: the block was longer than
+stated, so the gap between "beam blocked" and "verdict never asserted" is
+wider, and nothing downstream of either number changes.
 
 Two things worth separating:
 
@@ -807,10 +861,10 @@ side of home; the branch's behaviour from the negative side was not exercised.
 ### F2 — signal-loss case D was not detected for 26 s
 
 The gz server was killed at t≈363 s with the belt transporting. The case D
-signature appeared exactly as §8 predicts: heartbeat **kept advancing** (767 →
-1251), `BridgeLinkOk` stayed **True**, and the input image froze bit-identically
-at `position = 0.9273`, `speed = 0.1500`. From the PLC's side the link looked
-perfect.
+signature appeared exactly as §8 predicts: heartbeat **kept advancing** (**750**
+at the freeze to **1268** at the drop), `BridgeLinkOk` stayed **True**, and the
+input image froze bit-identically at `position = 0.9273`, `speed = 0.1500`. From
+the PLC's side the link looked perfect.
 
 `ConveyorDriveFault` **stayed `False`**. For **26 s** the program commanded
 `+0.15 m/s` into a cell that no longer existed. The cycle was finally dropped
@@ -829,11 +883,40 @@ The reason is visible in the specification itself:
   `PosWindowArmed` latches `TRUE` on the first scan of motion and is cleared
   only by `NOT beltMoving`. So `PositionRef` is sampled **once, at the start of
   the motion, and never re-armed while motion continues** — the window never
-  slides. By the time of the freeze the belt had travelled from 0.3093 to
-  0.9273, so `ABS(position − PositionRef)` was ≈ **0.62 m** against a
+  slides. The reference D2 arms on is therefore the **motion-start** position,
+  which this run puts between **0.0477 m** (the row in which the command
+  changes to +0.15) and **0.0618 m** (the first row whose speed read-back
+  exceeds `SPEED_TOLERANCE`); the freeze is at **0.9273 m**, so
+  `ABS(position − PositionRef)` was ≈ **0.87 m** against a
   `POSITION_FREEZE_BAND` of **0.005 m**, and stayed there. D2's comparison can
   only be satisfied if the freeze happens within roughly the first 33 ms of a
   motion.
+
+**Provenance of the F2 figures.** Same file and clock as F1
+(`evidence/plc-observe-2026-07-27-plcsim-main.csv.gz`, `t_mono_s`), corroborated
+on the bridge side by `evidence/latency-2026-07-27-plcsim-caseD.csv.gz`. The
+command goes to +0.15 at **t=356.8557** (position `0.047700002789497375`); the
+first row with `ABS(Input/ConveyorBeltSpeed)` above `SPEED_TOLERANCE` is
+**t=356.9566** (position `0.06180000305175781`) — the 0.1 s sampling is why the
+armed reference is bracketed rather than exact. The last row in which the image
+changes is **t=363.3057**, at `0.9273000359535217` / `0.15000000596046448`; every
+later row repeats it bit for bit, and `Status/CellCycleRunning` and
+`Link/BridgeLinkOk` drop at **t=389.7431**, 26.4 s after that.
+`Status/ConveyorDriveFault` has exactly one distinct value in all 3 907 rows of
+the file: `False`. `Link/BridgeHeartbeat` reads **750** in the freezing row and
+**1268** in the drop row, 1268 also being bridge #3's `heartbeat_writes` counter,
+i.e. its last write.
+
+Two figures this finding carried when it was first written are corrected above
+rather than left standing. The heartbeat pair *767 → 1251* quoted two samples
+from inside the window instead of its endpoints — and **767 is not a heartbeat
+value at all**: it is the index of the freezing `ConveyorBeltPosition` write in
+the caseD session file. The travel *from 0.3093* quoted a real value —
+`Input/ConveyorBeltPosition` at t=358.7713 — but a mid-motion one, ≈1.9 s after
+motion start, not the reference D2 arms on; the ≈0.62 m it produced was the
+wrong difference of two right numbers. Both corrections are attribution only:
+the delta is two orders of magnitude outside the band either way, and the
+finding is unchanged.
 
 **Net effect: a simulation frozen at any non-zero speed after the first fraction
 of a second of travel is undetectable by either term.** The honest limit
