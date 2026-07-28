@@ -1,6 +1,8 @@
 # Roadmap
 
-Current gate: M3 — in progress.
+Current gate: M4 — Safety layer on the fixed cell (F-CPU). Not yet opened: the
+owner is continuing it in a later session, and ADR 0007 requires its first brief
+to settle F-CPU-on-PLCSIM feasibility in the tool before any safety logic.
 
 Gate order follows ADR 0007
 (docs/adr/0007-safety-first-gate-order.md), which supersedes the gate order
@@ -12,6 +14,7 @@ integration comes last and the Hermes command path is parked.
 M0 closed 2026-07-26, verified in docs/reports/m0-04-verify.md.
 M1 closed 2026-07-26, verified in docs/reports/m1-04-verify.md.
 M2 closed 2026-07-26, verified in docs/reports/m2-02-verify.md.
+M3 closed 2026-07-28, verified in docs/reports/m3-37-gate-verification.md (pass-with-findings).
 
 | Gate | Deliverable | Closes when |
 |---|---|---|
