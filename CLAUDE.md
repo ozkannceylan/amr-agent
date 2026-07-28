@@ -60,6 +60,9 @@ graph TD
         NAV["ROS 2 / Nav2"]
     end
 
+    HMI["Commissioning HMI<br/>teleop setpoints and status<br/>process data only"]
+
+    HMI -->|OPC UA client to server| PLC
     PLC -->|OPC UA server to client| FM
     FCPU -.->|PROFIsafe| PLC
     FM <--> MQ
@@ -67,7 +70,7 @@ graph TD
     CL --> NAV
     SAFE ==>|hardwired inhibit| NAV
 
-Legend: thick arrow is the safety path, dashed arrow is the safety fieldbus, thin arrows are process data.
+Legend: thick arrow is the safety path, dashed arrow is the safety fieldbus, thin arrows are process data, including the commissioning HMI edge, which carries process setpoints only (ADR 0008).
 
 ---
 
@@ -85,6 +88,7 @@ amr-agent/
   fleet/                  fleet manager service, MQTT and OPC UA clients
   agv/                    ROS 2 workspace, VDA 5050 client node
   bridge/                 ROS 2 to OPC UA signal translator and its test double
+  hmi/                    commissioning HMI, OPC UA client of the PLC, process data only
   sim/                    Gazebo worlds, launch files, scenarios
   .claude/settings.json   attribution and permission settings
 
@@ -126,6 +130,7 @@ graph TD
 | fleet | Fleet manager service, MQTT and OPC UA clients | fleet/ |
 | agv-ros2 | VDA 5050 client node, Nav2 bridge | agv/ |
 | bridge | Gazebo/PLC signal bridge and its test double | bridge/ |
+| hmi | Commissioning HMI backend and UI | hmi/ |
 | sim | Gazebo worlds, launch files, test scenarios | sim/ |
 | verifier | Checks invariants, gate criteria, layer boundaries | none, read only |
 
