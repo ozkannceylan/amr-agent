@@ -88,7 +88,9 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
     freeze window, ≤3.2 s bound). Closed 2026-07-28.
 27. m3-30 bridge — Section B accounting corrections. Closed 2026-07-28;
     found three more unproven figures and fixed them in the same pass.
-28. m3-31 plc — §11 pass-string accounting. Issued.
+28. m3-31 plc — §11 pass-string accounting. Closed 2026-07-28; every pass
+    count now derives from its own step table and every caveat terminates
+    in F1, the owner-side presence defect.
 29. m3-32 bridge — outstanding rows for the re-specified case-D tests.
     Closed 2026-07-28; noted T4.6b additionally depends on the F1 fix.
 24. m3-27 plc — plausibility windows for the belt feedback signals, from

@@ -21,9 +21,6 @@
 ## plc (carried, needs a measurement not a decision)
 - BELT_SPEED_MIN/MAX are design values at ±1.00 m/s with no measured drive maximum behind them. Confirm against the drive or the cell's achievable speed and record the source.
 
-## plc
-- m3-31 pass-string accounting (issued, from m3-30's open questions) — done when every §11 pass criterion counts the steps the section currently defines and none counts a failed or outstanding step by default.
-
 
 ## bridge (from m3-27, SPEC §12 open item 6)
 - Opt-in fault-injection mode: a genuine NaN cannot currently be injected from the cell, so SPEC §11 step 4.11 has to exercise the belt-feedback path by narrowing a constant instead. Done when the bridge can inject an implausible or NaN belt sample under an explicit opt-in that cannot be enabled by accident in an evidence run.
