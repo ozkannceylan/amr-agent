@@ -7,3 +7,7 @@ __pycache__/
 # Run artefacts, overwritten every run. Dated captures in bridge/evidence/ are
 # committed measured evidence and must stay visible.
 bridge/evidence/*-latest.csv
+
+# Owner's local scratch, deliberately outside the deliverable.
+HANDOVER.local.md
+check_nodes.py
