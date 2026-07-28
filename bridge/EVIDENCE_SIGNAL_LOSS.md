@@ -23,17 +23,24 @@ against the seven-node image.
 
 ---
 
-> **The PLCSIM repeat has since been performed — it is in
-> `EVIDENCE_LATENCY.md` §B.7, not here.** Brief `m3-26` (2026-07-27) ran cases
-> **A**, **B** and **D** against the live CPU with the standard program in RUN,
-> on the seven-node input image. Headline results, so this file is not silently
-> stale: A and B were **indistinguishable to the program**, with
-> `BridgeLinkOk → False` **0.50 s** after the last heartbeat change in both;
-> case **D was NOT detected** — the frozen read-back held a **non-zero**
-> `ConveyorBeltSpeed`, which blinds term D1, and term D2 could not fire either
-> (§B.13 F2). Case **C was not performed**: it requires stopping the CPU. The
-> session-hold figure of "What none of this establishes" is now measured:
-> **11.79 s** after SIGKILL, **0.0 s** after SIGTERM (§B.8).
+> **The PLCSIM repeat has been performed twice, and now has its own section in
+> this file — see "The PLCSIM Advanced repeat" below.** Brief `m3-26`
+> (2026-07-27) ran cases **A**, **B** and **D** against the live CPU with the
+> standard program in RUN, on the seven-node input image. Headline results, so
+> this file is not silently stale: A and B were **indistinguishable to the
+> program**, with `BridgeLinkOk → False` **0.50 s** after the last heartbeat
+> change in both; case **D was NOT detected** — the frozen read-back held a
+> **non-zero** `ConveyorBeltSpeed`, which blinds term D1, and term D2 could not
+> fire either (`EVIDENCE_LATENCY.md` §B.13 F2). Case **C was not performed**: it
+> requires stopping the CPU. The session-hold figure of "What none of this
+> establishes" is now measured: **11.79 s** after SIGKILL, **0.0 s** after
+> SIGTERM (§B.8).
+>
+> The 2026-07-28 owner session then ran **all four cases** against a rebuilt
+> program, including case C and a case D **mid-motion** that the program caught in
+> **2.301 s**. Both runs are summarised below with the day and the build that
+> produced each figure; the full accounting stays in `EVIDENCE_LATENCY.md`
+> Section B, part 1 and part 2.
 >
 > Nothing below is re-run or edited by that work; each record stays qualified by
 > the environment that produced it.
@@ -116,6 +123,8 @@ are nearly indistinguishable in the session state too. A program that behaves
 differently for A and B is wrong (§7.3).
 
 ---
+
+# The container run — test double, 2026-07-27 (m3-04)
 
 ## A — bridge crash (SIGKILL)
 
@@ -293,16 +302,235 @@ PLC program content. Recommendation carried to `plc/demo-cell/SPEC.md` (m3-05).
 
 ---
 
+# The PLCSIM Advanced repeat — the same four cases against a CPU running a program
+
+**This section is `EVIDENCE_LATENCY.md` Section B item 6, delivered here as
+`plc/demo-cell/SPEC.md` §11 T4 requires: beside the container run, not instead of
+it.** The four cases above stay exactly as recorded against the test double; what
+follows is what the same four failures do when a **program** is on the other side.
+
+Two runs contribute, and every figure below names which:
+
+| | Date | Brief | Program build | Instruments |
+|---|---|---|---|---|
+| **run 1** | 2026-07-27 | `m3-26` | m3-05 | 20 Hz bridge CSV + a 10 Hz read-only OPC UA observer |
+| **run 2** | 2026-07-28 | `m3-33` (owner session) | rebuilt — three deltas, then the `PRESENCE_FILTER` fix; the case-D re-measure was taken after a further re-download (`EVIDENCE_LATENCY.md` §B2.9) | 20 Hz bridge CSV for the last 12 min, 1 Hz bridge diagnostics logs, a 5 Hz read-only observer |
+
+Run 2's 20 Hz CSV covers **17:49–18:01 only** — the bridge truncates its evidence
+CSV at every start and the path was reused across seven restarts, so earlier
+windows survive only as 1 Hz diagnostics. Figures that exist only in the
+orchestrator's session transcript are marked **[transcript]** with their
+timestamp. Neither run could see `plc/demo-cell/SPEC.md` §9 Group 4 — `SeqStep`,
+`PositionRef`, `PositionFrozen`, `ResetDeviceFault` and the timer `ET`s are not on
+the server, and exist only in the owner's watch-table captures.
+
+## A — bridge crash (SIGKILL), against the program
+
+| | run 1 (m3-05 build) | run 2 (rebuilt) |
+|---|---|---|
+| heartbeat | froze at **4537** | froze at **11873** |
+| `BridgeLinkOk → False` | **0.50 s** after the freeze | **0.60 s** after the last heartbeat change (bracket 0.40–0.80 s at 0.2 s sampling) |
+| in the same sample | `CellResetRequired → True`; command already `0.0` | `CellCycleRunning → False`, `CellResetRequired → True`, command `0.0` — all four together |
+| session | held **11.79 s** | still counted **20.10 s** after the last heartbeat change |
+
+**The heartbeat is the only indicator, and it is enough.** `HEARTBEAT_STALE_TIME`
+= 500 ms is confirmed by both runs and needs no revision. The reaction is the
+program's: drop the cycle, command `0.0`, latch `CellResetRequired`, and require a
+monitored reset. **The belt keeps running in Gazebo** until the bridge returns —
+§A.3's residual, unchanged, and stated again because a PLC on the other side does
+not remove it: no command can reach the cell while the bridge is down.
+
+**No auto-resume, and it was tested three times in run 1 and again in run 2.**
+After the link came back the cycle stayed down until a *separate* start press on
+the other button: in run 2 the restarted bridge's heartbeat first appears at
+observer t = 41.789 — at **3**, because the counter is per process, which is why
+the program must test for *change* and never subtract (§A.1, §A.5) — and
+**nothing moved for the next 36.97 s**, with the command at `0.0`, until a reset
+at t = 78.7596 and a start at t = 85.5945.
+
+## B — clean shutdown (SIGTERM), against the program
+
+Run 2, `SIGTERM` logged 15:14:04.723: heartbeat froze at **1377**, and the
+identical four-way transition followed **0.60 s** later — the same figure, the
+same set of bits, in the same order as case A.
+
+**The only measurable difference between A and B is at the session layer**, where
+the program cannot see it and should not: run 2's SIGTERM session was gone in the
+**next 0.2 s sample**, against 20.10 s for the SIGKILL. §7.3's rule holds against
+a real program on a real CPU: *a program that behaves differently for A and B is
+wrong*, and neither run found one that does.
+
+## C — link loss with the CPU itself stopped, bridge session surviving
+
+**Not performed in run 1** (it requires stopping the owner's CPU). **Performed in
+run 2**, in the form that matters most and is not in the container set: the owner
+put the CPU to **STOP and back to RUN at ~16:51:30 [transcript]** while a live
+bridge session was held.
+
+What happened is the container case C with the roles reversed — here it is the
+*server* that came back with start values while the *client* never noticed:
+
+* **the restart reverted every input to its start value.** The program then did
+  exactly what its rules say: the stop circuits read open, so
+  `CellProcessStopActive` and `CellResetRequired` latched, the command stayed
+  `0.0` and nothing ran;
+* **the latches held for 4 min 31.1 s** (1 Hz log, 16:52:08.875 → 16:56:40.008)
+  and the monitored reset was **correctly refused** throughout, because the cause
+  had not gone. The owner cleared it by force-toggling the panel levels
+  **[transcript, ~17:05]**, after which the reset behaved normally;
+* **the bridge never noticed.** The same log carries **no `session broken`, no
+  `connect failed`, no reconnect and no read or write error** for the whole
+  1 h 43 m of that process. The session survived the STOP → RUN, so nothing was
+  re-established — and because the bridge writes **on change** (§5), the slots
+  whose values had not changed were never rewritten.
+
+**That last point is a bridge defect, and it is recorded as one.** §C.1 above
+shows the bridge detecting a *lost* server on the first failed service call; a
+server that **restarts under a surviving session** produces no failed call at all,
+and the write-on-change rule then leaves the PLC reading a stale image
+indefinitely. The fix is not a timer and not a threshold — it is *detect the
+restart and rewrite every slot* (`plc/demo-cell/SPEC.md` §12 open item 7,
+LESSONS 2026-07-28). Until it lands, force-republish every level after any CPU
+restart. Full record: `EVIDENCE_LATENCY.md` §B2.13 F5.
+
+**One residual, recorded because it is a real limit and not a defect:** while the
+CPU was in STOP the server held its last command, `+0.15`, and the belt kept
+running in Gazebo **[transcript]** — §A.3 again. No safety function is involved
+and none is claimed (invariants 1 and 2).
+
+### The same case with the bridge **stopped** — and the only watch-table record of a restart
+
+A second CPU STOP → RUN was performed at 17:16:56 – 17:17:27 with the bridge down
+since 17:14:07, and the owner captured the §9 Group 4 watch table before, during
+and after it (`plc/demo-cell/evidence/watch-table/Screenshot 2026-07-28 171656.png`,
+`171712.png`, `171727.png`). It is the only committed record of a restart from
+inside the CPU, and it shows the container case C's "lost entirely when the server
+restarts with DB start values" as a reading rather than an inference:
+
+| Tag | before (RUN) | during (STOP) | after (RUN) |
+|---|---|---|---|
+| `"DemoCellInput".ProductSensorRange` | **1.440088** | 1.440088 | **0.0** |
+| `ProcessStopLatch` | **FALSE** | FALSE | **TRUE** |
+| `SensorFaultLatch` | **FALSE** | FALSE | **TRUE** |
+| `LinkLostLatch` / `"DemoCellLink".BridgeLinkOk` | TRUE / FALSE | TRUE / FALSE | TRUE / FALSE |
+
+The 1.440088 standing on the left is **case A's frozen input image**, two and a
+half minutes after the bridge stopped and still plausible — §A.2's "the PLC's input
+image says the beam is clear, forever" seen from the PLC side. The 0.0 on the right
+is the DB's own start value, and because it is below `RANGE_MIN` it is rejected as
+implausible rather than believed, which is the affirmative-window rule doing its
+job. The full reading, including what the latch transition says about the program's
+boot window, is `EVIDENCE_LATENCY.md` §B2.7c.
+
+**Neither sub-case is a safety event** (invariant 2): both end with the cell
+stopped, latched and requiring a monitored reset.
+
+## D — simulation stopped, bridge alive: two sub-cases, and only one of them is in the container set
+
+The container capture of §D above froze a belt that was already **parked on its
+mechanical stop**, so its frozen speed read-back was ~0 and the drive-fault
+condition it demonstrates is the **at-rest** one. That distinction is the whole of
+this case, and it cost run 1 a defect: generalising the at-rest capture produced a
+detection that was blind mid-motion (LESSONS 2026-07-28).
+
+### D (i) — frozen while the belt was at rest but commanded
+
+Run 2, 16:33 (1 Hz log; kill at 16:33:32.399 **[transcript]** during the dwell,
+with presence `True`). The dwell commands `0.0`, so nothing was owed while it ran;
+when the dwell ended, step 30 commanded **−0.150 into a cell that no longer
+existed**. `ConveyorDriveFault`, `CellCycleRunning → False` and
+`CellResetRequired → True` appear together at **16:33:35.486** — one
+`DRIVE_FAULT_DELAY` (1 s) after the setpoint went non-zero. This is term **D1**:
+a non-zero command against a read-back below `SPEED_TOLERANCE`.
+
+The same path was demonstrated a second time by accident, with the cell idle: a
+start press against an already-dead simulation raised the fault within **1.004 s**
+(cycle at 16:32:44.616, fault at 16:32:45.620), which is also the "no way to run a
+dead cell" half of `SPEC.md` §11 T4.7.
+
+`PositionFrozen` staying `FALSE` here — the reading that names which term fired —
+is **[transcript, owner capture 16:33:32]** and that capture is not in the
+committed set.
+
+### D (ii) — frozen **mid-motion**: the case the heartbeat cannot see
+
+Run 1, m3-05 build: **not detected at all.** The image froze at position
+0.9273 m / speed 0.1500 m/s under a `+0.15` command; `ConveyorDriveFault` was
+`False` in every one of 3 907 observer samples, and the cycle was finally dropped
+26.3 s later by an unrelated link loss (`EVIDENCE_LATENCY.md` §B.13 F2).
+
+Run 2, rebuilt program, ~17:59:36: **detected in 2.301 s.**
+
+```
+last ConveyorBeltPosition write carrying a NEW value   rel 628.0022  0.9636000372489671
+                              (previous value          rel 627.9543  0.9630000372251254)
+ConveyorSpeedCommand 0.15 -> 0.0, server acknowledged  rel 630.3028
+                                              elapsed  2.301 s
+```
+
+* the freeze landed **6.25 s into the stroke**, 0.9285 m from where the belt
+  started — i.e. nowhere near the ~33 ms window the old one-shot reference could
+  see;
+* the **heartbeat kept advancing in every one of the 891 observer samples**,
+  `BridgeLinkOk` stayed `True` and the session count never moved. From the PLC's
+  side the link was perfect for the whole event, which is the point of this case;
+* the frozen speed read-back was **0.1500000059** — plausible and non-zero — so
+  **term D1 was blind by construction**, exactly as the specification says it is;
+* the 5 Hz observer reproduces the event independently at **2.207 s** (both of its
+  endpoints may be up to one 0.2 s sample late), and the 1 Hz diagnostics bracket
+  `ConveyorDriveFault` going `True` between rel 629.655 and rel 630.705, which
+  places the latch and the zeroed command in the same event;
+* 2.301 s lies inside the specified detection window of **[≈2.1 s, 3.2 s]**, which
+  is the strongest available statement about *which* term fired, since Group 4's
+  `PositionFrozen` was not captured for this event.
+
+**What the bridge did during the freeze, and what it did not do.** It kept
+writing. The frozen sample's age is visible in the bridge's own statistics as an
+`L1` maximum of **4 998 ms** for `ConveyorBeltPosition` — the 4.981 s the freeze
+lasted before the revived simulator published again — and the bridge **acted on
+none of it**: no timeout, no substituted value, no fault, no farewell (§1.1, and
+§D above: "the bridge cannot detect it without adding a timer that gates a signal,
+which is control"). The detection is the PLC's, and it is the PLC's alone.
+
+## Reset behaviour after a case-D fault, which the container run has no program to show
+
+Run 2, 16:38, after a mid-motion case-D fault on the rebuilt program: a reset
+attempted at 16:38:23 **[transcript]** while the simulation was **still dead** was
+**refused** — `CellResetRequired` and `ConveyorDriveFault` read `True` in every
+1 Hz poll from 16:38:17.014 to **16:38:52.035, 35.0 s** — because the frozen
+read-back still claimed 0.15 m/s and so the cause had not gone. Only after the
+simulation was revived did the reset clear the latch, and a **separate** start
+press then re-ran the cycle (16:38:59.241 → clean end 16:39:19.958). After the
+at-rest D (i) the reset was honoured immediately instead, because D1 clears the
+moment the setpoint is zeroed.
+
+That is the difference a program makes to this file: the container run can show
+the input image and the session, and nothing about recovery. Two deliberate
+actions on two different buttons, no auto-resume, and no way to run a dead cell.
+
+---
+
 ## What none of this establishes
 
-The **reaction**. The double has no program, so `CellCycleRunning`,
-`CellProcessStopActive`, `CellResetRequired`, `ProductPresentAtSensor`,
-`ConveyorDriveFault` and `BridgeLinkOk` stayed `False` in every case above.
-What the equipment does when the heartbeat goes stale — drop the cycle-running
-flag, command `0.0`, require a monitored edge-triggered reset before the cycle
-may run again, and never restart on a returning heartbeat alone — is
-`plc/demo-cell/SPEC.md` content and must be re-run against PLCSIM Advanced
-(`EVIDENCE_LATENCY.md`, Section B, item 6).
+The **reaction** — which is why the PLCSIM section above exists. The double has no
+program, so `CellCycleRunning`, `CellProcessStopActive`, `CellResetRequired`,
+`ProductPresentAtSensor`, `ConveyorDriveFault` and `BridgeLinkOk` stayed `False`
+in every one of the four container cases. What the equipment does when the
+heartbeat goes stale — drop the cycle-running flag, command `0.0`, require a
+monitored edge-triggered reset before the cycle may run again, and never restart
+on a returning heartbeat alone — is `plc/demo-cell/SPEC.md` content, and it is
+recorded in "The PLCSIM Advanced repeat" above rather than here. **Nothing in the
+four container cases is amended by it**: each stays a true statement about a
+Python server with no program, and the reaction figures stay qualified by the day
+and the program build that produced them.
+
+Three things the PLCSIM section still does not establish, carried as
+owner-outstanding rows in `EVIDENCE_LATENCY.md` §B2.12: case C as a **network or
+adapter** break with the CPU still running (CPU STOP → RUN was performed in both
+of its bridge states, but the adapter was never broken under a running program),
+the §9 **Group 4** readings that name which drive-fault term fired in D (i) and
+D (ii) — no capture covers either moment — and a **cold start of the CPU**
+(T4.8/T4.9b), which no run has yet done.
 
 Loss of the bridge is a **degraded mode, not a safety event** (invariant 2), and
 no safety function appears anywhere in these four cases (invariant 1).

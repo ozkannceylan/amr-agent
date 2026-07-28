@@ -5,15 +5,25 @@ Host: Linux 6.18.5 x86_64, container, CPU only, no display
 ROS 2 Jazzy, Gazebo Sim 8.11.0 (Harmonic), Python 3.12.3, `asyncua` 2.0.1
 Raw per-event rows: **`evidence/latency-2026-07-27.csv.gz`** (76 191 rows)
 
-This file has three clearly separated sections. **Section A** is the
-in-container run against the test double, produced by m3-04. **Section B** is
-the run against **PLCSIM Advanced with the standard program in RUN**, on which
-the M3 gate closes (`bridge-design.md` §9.4); it was executed on 2026-07-27
-under brief `m3-26` and now carries measurements. **Section C** is a short WSL
-run added by m3-13.
+This file has three clearly separated sections, one of which now has two parts.
+**Section A** is the in-container run against the test double, produced by
+m3-04. **Section B** is the run against **PLCSIM Advanced with the standard
+program in RUN**, on which the M3 gate closes (`bridge-design.md` §9.4); it has
+**two parts**, each a different day, a different program build and a different
+set of artifacts:
 
-Each section stays qualified by the environment that produced it and none is
-re-run or edited by a later one (LESSONS 2026-07-27).
+* **part 1** — 2026-07-27, brief `m3-26`, against the m3-05 build;
+* **part 2** — 2026-07-28, the owner session, brief `m3-33`, against the
+  rebuilt program of §B2.9. Part 2 does not re-run, re-measure, restate or
+  correct a single figure of part 1. Where the two disagree in *character* it is
+  because the build changed, and part 2 says which build each of its own figures
+  was taken against.
+
+**Section C** is a short WSL run added by m3-13.
+
+Each section — and each part of Section B — stays qualified by the environment
+and the program build that produced it, and none is re-run or edited by a later
+one (LESSONS 2026-07-27).
 
 **Scope of Section A.** It was captured before the panel reset existed, so its
 input image is the six nodes of the day and every "all six" in it is a true
@@ -309,7 +319,7 @@ claimed (invariant 1).
 
 ---
 
-# Section B — PLCSIM Advanced, live run with the program in RUN
+# Section B, part 1 — PLCSIM Advanced, live run with the program in RUN
 
 **Performed 2026-07-27, 23:10–23:37 local (UTC+02:00), under brief `m3-26`,
 against the owner's running PLCSIM Advanced instance** with the S7-1500
@@ -682,6 +692,13 @@ one is outstanding (§B.12 item 12).
 
 ### T4 as-run accounting — seven of the twelve steps ran
 
+> **Forward pointer, added by m3-33 (no figure below is changed).** This
+> accounting is part 1's, against the **m3-05** build, and it stays as recorded.
+> The 2026-07-28 owner session re-ran most of T4 against a rebuilt program; its
+> roster, with a verdict per step, is **§B2.7**, and the disposition of the
+> thirteen outstanding rows of §B.12 is **§B2.12**. Where a step appears in both,
+> part 2's result is the later one and part 1's is not amended to match.
+
 `SPEC.md` §11 T4 lists **twelve** steps. The table below is derived from what
 this run executed, not from the scenario table as it stands today, so that any
 count taken from this evidence has a denominator that matches the record.
@@ -806,6 +823,12 @@ and C exercised. `tools/observe_plc.py` was **added** for the observation
 described in §B.1; it writes nothing and is not in the transport path.
 
 ## B.12 What this run did not establish — owner-outstanding
+
+> **Forward pointer, added by m3-33.** The thirteen rows below are part 1's list
+> as it stood on 2026-07-27. Several were addressed by the 2026-07-28 owner
+> session and several were not; **§B2.12 dispositions every one of them by number**
+> and carries part 2's own outstanding list. No row below is edited or deleted —
+> a closed row is recorded as closed in §B2.12, in the run that closed it.
 
 | # | Item | Why it is still open |
 |---|---|---|
@@ -948,6 +971,876 @@ of a second of travel is undetectable by either term.** The honest limit
 moving case as well. Fixing it is a change to `plc/demo-cell/SPEC.md` §6.6/§7 —
 a re-arming window, not a bridge change — and belongs to the `plc` agent, not
 here.
+
+---
+
+# Section B, part 2 — PLCSIM Advanced, the owner session of 2026-07-28
+
+**Performed 2026-07-28, 15:01–18:01 local (UTC+02:00), by the owner at the
+engineering workstation, against the same PLCSIM Advanced instance and the same
+endpoint as part 1**, with a **rebuilt** standard program in RUN (§B2.9 lists the
+five downloads of the day and names the build behind every figure below). Written
+up under brief `m3-33` from the artifacts the session committed. Nothing was
+re-run to produce this section, and no figure of part 1 is altered by it.
+
+> **What is new here, in one paragraph.** Part 1 recorded two program defects
+> (§B.13): the presence verdict never asserted, and signal-loss case D went 26 s
+> undetected. **Both are answered by this run**: the presence verdict asserted
+> three times and the dwell was reached (§B2.6a), and case D mid-motion was
+> caught in **2.301 s** against a 3.2 s bound (§B2.7a). Two new results are
+> failures and are recorded as such: **T4.9b failed** — a reset held from before
+> link-up cleared every latch the moment the link came up (§B2.13 F3) — and
+> **T4.11's latch step is not testable by the method §11 named for it**
+> (§B2.13 F4). One bridge defect was found: after a CPU restart the bridge never
+> repaired the reverted input image (§B2.13 F5).
+
+## B2.0 The artifacts, the windows they cover, and three limitations
+
+Every figure in this section is labelled with the artifact it comes from. Where
+only the orchestrator's session transcript carries a value, it is marked
+**[transcript]** with its wall-clock timestamp and is never presented as a
+measurement.
+
+| Artifact (all gzipped, in `evidence/`) | Rate | Window it covers |
+|---|---|---|
+| `latency-2026-07-28-plcsim-t1t4.csv.gz` | **20 Hz** per-event | **17:49:06 – 18:01:00 only** — one bridge session, 712.255 s, clean shutdown |
+| `bridgelog-2026-07-28-sessionA-t4-era.log.gz` | 1 Hz diagnostics | 15:01:10 – 16:57:31, three bridge processes appended into one file |
+| `bridgelog-2026-07-28-sessionB-t48.log.gz` | 1 Hz | 17:00:11 – 17:01:06 (T4.8) |
+| `bridgelog-2026-07-28-sessionC-t49b.log.gz` | 1 Hz | 17:02:20 – 17:14:07 (T4.9b) |
+| `bridgelog-2026-07-28-sessionD-final.log.gz` | 1 Hz | 17:49:06 – 18:01:00, the same session as the 20 Hz CSV |
+| `plc-observe-2026-07-28-t4a-caseAB.csv.gz` | **5 Hz** read-only observer, 1 992 rows / 400.0 s | T4.1, T4.2, T4.3, T4.4 and T4.10 |
+| `plc-observe-2026-07-28-capstone.csv.gz` | 5 Hz, 891 rows / 178.7 s | the three capstone rounds and the T4.6 re-measure |
+| `plc-observe-2026-07-28-final-cycle-press.csv.gz` | 5 Hz, 45 rows | the final cycle's start press |
+| `cmdlog-2026-07-28-*.log.gz` | — | **LIMITATION 2**: both contain `data: 0.0` and nothing else. Treated as absent; no figure here rests on them |
+| `plc/demo-cell/evidence/watch-table/` | owner captures | 71 files named by timestamp, **24 of them from 2026-07-28** (13:40 – 17:41). Read-only and outside this file's scope to edit. **Six are read and cited by content below** — `171656`, `171712`, `171727`, `173247`, `173615` and `174127`; the rest are referenced by filename only, and a filename timestamp is treated as a *candidate* for an event, never as coverage of it |
+
+**LIMITATION 1 — the 20 Hz record exists for the last twelve minutes only.**
+`--evidence-csv` truncates its file at every bridge start, and the day used one
+path across every restart, so each restart wiped the earlier 20 Hz rows
+(LESSONS 2026-07-28). What survives is the final session. The 1 Hz diagnostics
+logs were salvaged beside it and cover most of the rest — but not all of it:
+there is **no committed bridge artifact of any kind for 17:14:07 – 17:49:06**,
+because the log path in use there was truncated three further times. Two things
+fall in that hole, and both are marked [transcript] wherever they appear below:
+the **T1.4 re-run** (17:14:37 – 17:15:06) and the whole of **T4.11**.
+
+**LIMITATION 3 — the observer sees the server, not Group 4.** Both instruments
+here are OPC UA clients, so `SeqStep`, `SpeedRequest`, `PositionRef`,
+`PositionFrozen`, `ResetDeviceFault` and every timer `ET` are invisible to them.
+They exist only in the owner's watch-table captures — of which **five cover
+2026-07-28 events this section describes** (§B2.7c and §B2.13 F4) and **none
+covers the T4.6 re-measure or T4.6b**. Where a `SPEC.md` §11 pass condition names
+a Group 4 tag and no capture covers the moment, this section says so and does not
+substitute an inference for it.
+
+**A fourth limitation, found while writing and stated because it bounds every
+wall-clock figure derived from the CSV.** The CSV is timestamped on
+`CLOCK_MONOTONIC`; the logs are timestamped on the wall clock. Over the final
+session the wall clock advanced **1.767 s more** than monotonic (log span
+17:49:06.101 → 18:01:00.123 = 714.022 s against `run,duration_s` = 712.255 s),
+so a wall time obtained by adding a monotonic offset to a single anchor is good
+to no better than ±2 s across the session (LESSONS 2026-07-27: verify which clock
+the code samples). **Every CSV figure below is therefore quoted on the CSV's own
+clock** — seconds relative to the first cycle, whose `t_start_ns` is
+`78927973078344` and which the log independently places at 17:49:06.101 — and
+wall-clock times are quoted only from the logs or from the transcript.
+
+## B2.1 What was run, and how the two clocks were tied together
+
+Seven bridge processes across the afternoon, all against the one live endpoint,
+all driven by `ros2 topic pub` on `/cell/panel/*` and by the committed
+`tools/observe_plc.py` as a **read-only** second client at 5 Hz (part 1 used
+10 Hz; the period is in the CSVs' own `t_mono_s` column and is 0.2 s here).
+
+Two cross-clock alignments are used, and each is stated with its residual rather
+than asserted:
+
+* **`plc-observe-…-t4a-caseAB.csv` ↔ `sessionA` log.** `CurrentSessionCount`
+  rises 1 → 2 at observer `t_mono_s` = 118.1373, which is the restarted bridge's
+  session; the log times that establishment at 15:14:12.330. That puts observer
+  t = 0 at **15:12:14.19**. Cross-check: the observer's heartbeat stops changing
+  at t = 110.504, which maps to 15:14:04.69, **0.03 s** from the log's
+  `signal 15: stopping` at 15:14:04.723.
+* **`plc-observe-…-capstone.csv` ↔ the 20 Hz CSV.** The observer's
+  `ConveyorSpeedCommand` 0.15 → 0.0 at t = 98.1821 is the CSV's read at rel
+  630.3028; the offset is **532.121 s**, and the capstone's start press
+  (observer 4.4193, CSV write 536.5556) reproduces it to **0.016 s**.
+
+## B2.2 Connect lines, as logged (item 9) — **filled**
+
+Identical in all four committed logs and in the CSV's own `session` rows:
+
+```
+session timeout: requested 10000 ms, granted 10000 ms - granted as requested
+secure channel lifetime: requested 3600000 ms, granted 3600000 ms
+keep-alive interval 3.333 s = granted 10000 ms / 3 (§3.2 S3)
+namespace http://www.siemens.com/simatic-s7-opcua (server_interfaces) -> index 3
+namespace http://DemoCell (interface)                                 -> index 4
+browse path: Objects/3:ServerInterfaces/4:DemoCell
+all node DataTypes match opcua-nodes.md §9
+session established, 15 nodes resolved
+```
+
+Seven independent session establishments across two hours reproduce part 1's
+result unchanged: both namespaces resolve **by URI** to 3 and 4, the browse path
+crosses the Siemens namespace into `http://DemoCell`, 15 nodes resolve with every
+DataType checked, and the granted session timeout is **10 000 ms — the request as
+made** (so `min(request, cap)` again, not the 30 000 ms cap; LESSONS 2026-07-28).
+`reconnects = 0` in the final session, and the `sessionA` log carries **no
+`session broken`, no `connect failed` and no reconnect line at all** between
+15:14:24 and 16:57:31 — a fact §B2.13 F5 needs.
+
+## B2.3 Cycle rate and overruns (item 2) — **filled**
+
+Final session, 712.255 s, from `tools/summarize_latency.py`:
+
+| cycles | achieved rate | period min / med / p95 / max (ms) | `cycle_overruns` |
+|---|---|---|---|
+| 14 244 | **20.00 Hz** | 40.095 / 50.003 / 50.978 / 61.394 | **1** |
+
+The single overrun is recorded with its size: the `overrun` row gives
+`interval_ns = 3 927 528`, i.e. the cycle's work passed its 50 ms deadline by
+**3.93 ms**, once in 14 244 cycles. It is not compensated for, and the next
+period is not shortened to catch up. `opcua-nodes.md` §9.2's 20 Hz expectation is
+met against the real CPU for the third time (Section A, part 1, part 2).
+
+Counters, whole session:
+
+| counter | value | | counter | value |
+|---|---|---|---|---|
+| cycles | 14 244 | | write_errors | **0** |
+| cycle_overruns | **1** | | read_errors | **0** |
+| publishes | 14 244 | | reconnects | **0** |
+| heartbeat_writes | 14 012 | | keepalive_probes / failures | 0 / 0 |
+| heartbeat_suppressed_cycles | 232 | | nonfinite_range_samples | 0 |
+| missing_joint_name / empty_scan | 0 / 0 | | | |
+
+R3 decimation, same session: `ConveyorBeltPosition` and `ConveyorBeltSpeed`
+352 380 / 14 243 = **24.74 : 1**, `ProductSensorRange` 21 403 / 14 243 =
+**1.50 : 1**, and the four contacts 14/13, 11/11, 2/1, 7/5 — written on change,
+so their counts are transitions and not a cadence. The two unwritten contact
+samples are **the two lost publishes of §B2.14**, and the R3 ratio is how they
+were found.
+
+## B2.4 Statistics — count, min, median, p95, max (item 2) — **filled**
+
+Milliseconds, `CLOCK_MONOTONIC`, `tools/summarize_latency.py`, final session.
+All seven inputs appear. `PanelStopCircuitClosed` has a single write for the
+whole session because the contact was closed once at startup and never opened
+again — its row is a count of 1 and is shown as such rather than omitted.
+
+| ID | signal | count | min | median | p95 | max |
+|---|---|---|---|---|---|---|
+| L1 | `ConveyorBeltPosition` | 14243 | 0.367 | 1.259 | 2.255 | **4998.110** |
+| L1 | `ConveyorBeltSpeed` | 14243 | 0.251 | 0.537 | 2.368 | **4999.814** |
+| L1 | `ProductSensorRange` | 14243 | 0.282 | 16.569 | 32.090 | **5401.180** |
+| L1 | `PanelStartPressed` | 13 | 6.670 | 27.837 | 43.230 | 43.230 |
+| L1 | `PanelResetPressed` | 11 | 3.488 | 25.518 | 38.381 | 38.381 |
+| L1 | `PanelStopCircuitClosed` | 1 | 39.724 | 39.724 | 39.724 | 39.724 |
+| L1 | `PanelProcessStopCircuitClosed` | 5 | 0.913 | 12.625 | 37.883 | 37.883 |
+| L2 | `ConveyorBeltPosition` | 14243 | 0.470 | 1.028 | 1.804 | 7.043 |
+| L2 | `ConveyorBeltSpeed` | 14243 | 0.353 | 0.834 | 1.695 | 27.469 |
+| L2 | `ProductSensorRange` | 14243 | 0.310 | 0.860 | 1.689 | 8.775 |
+| L2 | `PanelStartPressed` | 13 | 0.531 | 0.885 | 1.490 | 1.490 |
+| L2 | `PanelResetPressed` | 11 | 0.572 | 1.048 | 1.764 | 1.764 |
+| L2 | `PanelStopCircuitClosed` | 1 | 0.886 | 0.886 | 0.886 | 0.886 |
+| L2 | `PanelProcessStopCircuitClosed` | 5 | 0.469 | 0.521 | 1.718 | 1.718 |
+| L2 | `BridgeHeartbeat` | 14012 | 0.297 | 0.820 | 1.689 | 6.781 |
+| L3 | `ConveyorBeltPosition` | 14243 | 0.927 | 2.350 | 3.674 | 4999.802 |
+| L3 | `ConveyorBeltSpeed` | 14243 | 0.765 | 1.627 | 3.478 | 5000.617 |
+| L3 | `ProductSensorRange` | 14243 | 0.819 | 17.485 | 33.101 | 5402.518 |
+| L3 | `PanelStartPressed` | 13 | 7.559 | 28.477 | 43.781 | 43.781 |
+| L3 | `PanelResetPressed` | 11 | 4.143 | 27.189 | 39.670 | 39.670 |
+| L3 | `PanelStopCircuitClosed` | 1 | 40.614 | 40.614 | 40.614 | 40.614 |
+| L3 | `PanelProcessStopCircuitClosed` | 5 | 1.781 | 13.149 | 38.393 | 38.393 |
+| L5 | `cmd_speed` | 14244 | 0.055 | 0.101 | 0.184 | 1.640 |
+| L6 | `cmd_speed → belt_velocity ≥ 50 %` (**sim**) | 7 | 2.000 | 4.000 | 4.000 | 4.000 |
+| R1 | cycle period | 14243 | 40.095 | 50.003 | 50.978 | 61.394 |
+| R2 | `ConveyorBeltPosition` | 14242 | 38.304 | 49.994 | 51.487 | 63.489 |
+| R2 | `ConveyorBeltSpeed` | 14242 | 32.714 | 50.004 | 51.799 | 69.478 |
+| R2 | `ProductSensorRange` | 14242 | 24.762 | 50.004 | 52.058 | 76.685 |
+| — | OPC UA read round trip (`ConveyorSpeedCommand`) | 14244 | 0.532 | 1.149 | 2.169 | 9.093 |
+
+Reading them against part 1, which is the point of having both:
+
+* **L2 — the bridge's own cost against the real CPU — is unchanged in character
+  and slightly better**: median 0.83–1.03 ms against part 1's 1.07–1.31 ms, p95
+  1.69–1.80 ms against 2.76–3.04 ms, over 3.2× as many samples. Nothing in the
+  bridge changed between the two runs, so this is the CPU and the host on a
+  different afternoon, not an improvement.
+* **The three L1 maxima of ~5.0 s are not outliers or jitter — they are
+  signal-loss case D, measured by accident.** L1 is the age of the sample in its
+  slot when the cycle takes it, so when Gazebo dies the same sample is re-taken
+  every 50 ms and its age grows without bound. The freeze of §B2.7a lasted from
+  rel 628.0015 to rel 632.9823, **4.981 s**, and `ConveyorBeltPosition`'s L1
+  maximum is 4 998.110 ms. This is worth stating plainly for what it is *not*: the
+  bridge **records** the growing age and **acts on none of it** — no timeout, no
+  substituted value, no fault (`bridge-design.md` §1.1). The detection is the
+  PLC's, and it is §B2.7a.
+* **L1cs is still negative for part of the belt traffic** (min −14.598 ms for
+  `ConveyorBeltSpeed`, −28.299 ms for `ProductSensorRange`), reproducing the
+  measurement-definition correction of §A.5 on a third dataset. Nothing is
+  clipped.
+* **L6 is 2.000 ms on three of the seven command changes and 4.000 ms on four**,
+  i.e. one or two 2 ms physics steps, confirming §C.4: L6 is a property of the
+  belt's mechanical state at the instant the command changes, not a constant.
+
+## B2.5 L7 — the closed loop (item 4) — **filled, on a different input than §11 T3 nominates**
+
+The derivation is §B.5's, unchanged: **start** = `t_end_ns` of the `L2` row for
+the nominated input write, the instant the server acknowledged it; **end** =
+`t_end_ns` of the first `read_rt` row for `ConveyorSpeedCommand` whose value
+differs from the one in force.
+
+**The input §11 T3 nominates produced no L7 in this run, and the reason is worth
+recording rather than working around.** A process stop opening while the belt
+runs answers with `ConveyorSpeedCommand → 0.0`. The capstone script pressed
+process stop 6 s after each start press — but the product reaches the beam
+**8.85 s** after the start press, and at the beam step 20 commands `0.0` on its
+own. Both delivered presses therefore landed *during the dwell*, **0.75 s** and
+**0.76 s** after the command had already reached `0.0`, so there was no command
+change left for them to cause. This is the same shape part 1 hit (§B.5, "the
+timeline's later interlock drops all landed while the command was already 0.0"),
+arrived at from the opposite direction: there the cell never reached the beam, here
+it reached it too soon.
+
+What the run does give, at the same 20 Hz and by the same derivation, is the
+**start press**, whose answer is `0.0 → ±0.15` and is equally a program reaction
+rather than an echo:
+
+| # | `PanelStartPressed` write ack (rel s) | cmd before → after | L7 (ms) |
+|---|---|---|---|
+| 1 | 164.2068 | 0.0 → +0.150 | **45.643** |
+| 2 | 536.5556 | 0.0 → +0.150 | **45.922** |
+| 3 | 560.0063 | 0.0 → −0.150 | **46.404** |
+| 4 | 583.3557 | 0.0 → +0.150 | **46.882** |
+| 5 | 606.9543 | 0.0 → −0.150 | **47.690** |
+| 6 | 621.7071 | 0.0 → +0.150 | **45.447** |
+
+**count 6, min 45.447, median 46.163, p95 47.690, max 47.690 ms.**
+
+The caveats are part 1's and are not weakened by the change of input: the
+interval **contains** the transfer into the process image, at least one OB30 scan,
+the server's sampling of the output and **the bridge's own 0–50 ms poll phase**,
+so it is an **upper bound** on the PLC's reaction and never a measurement of it.
+The 2.2 ms spread across six events is the poll phase showing through, not the
+program varying — and the cluster sits where part 1's did (median 46.8 ms), which
+is the useful comparison.
+
+For the nominated input the run gives a **bound from the 5 Hz observer instead of
+a measurement**: the process-stop write was acknowledged at rel 546.2562 and
+`CellProcessStopActive`, `CellResetRequired` and `CellCycleRunning → FALSE` were
+all present in the **first observer sample after it**, 0.12 s later; the third
+round repeats it at 593.0566 with 0.11 s. So the whole reaction completed inside
+one 200 ms observer period, twice — which is consistent with the 46 ms figure
+above and is not a substitute for it.
+
+## B2.6 Startup rule against the real DB start values (item 5) — **filled**
+
+The R3 startup rule was exercised at **seven** session establishments. The
+sharpest record is `sessionB` (T4.8), where the panel levels were published one
+at a time and the withheld list shrinks by one input per publish:
+
+```
+17:00:11,374 heartbeat withheld: ... ProductSensorRange, PanelStartPressed, PanelResetPressed,
+             PanelStopCircuitClosed, PanelProcessStopCircuitClosed (startup rule R3)
+17:00:11,432 heartbeat withheld: ... PanelStartPressed, PanelResetPressed,
+             PanelStopCircuitClosed, PanelProcessStopCircuitClosed (R3)
+17:00:19,043 heartbeat withheld: ... PanelStartPressed, PanelResetPressed,
+             PanelProcessStopCircuitClosed (R3)
+17:00:23,541 heartbeat withheld: ... PanelStartPressed, PanelResetPressed (R3)
+17:00:27,842 heartbeat withheld: ... PanelResetPressed (R3)
+17:00:32,143 startup rule satisfied: all 7 DemoCell/Input nodes carry a real cell
+             sample; heartbeat begins advancing at 1
+```
+
+**20.84 s of held session with no heartbeat**, one input at a time, and the
+heartbeat begins on the seventh and not on the sixth. `BridgeLinkOk` first reads
+`True` in the very next diagnostics poll (17:00:33,096); the first poll of the
+session, 17:00:11,380, read `BridgeLinkOk False` with `CellProcessStopActive` and
+`CellResetRequired` both `True`. In the final session the same rule gives
+`heartbeat_suppressed_cycles = 232`, i.e. **11.6 s** withheld while the seven
+filled, with `BridgeLinkOk` going `True` at the 17:49:18,413 poll — 12.3 s after
+process start.
+
+### B2.6a The presence verdict now asserts, and the dwell is reached — §B.13 F1 is answered
+
+Part 1's F1 was that `ProductPresentAtSensor` never changed state in 394 s. In
+this run it changed state **six times** (three assertions and three releases,
+1 Hz log and 5 Hz observer), and the reaction is measurable at 20 Hz:
+
+| Event | first blocked `ProductSensorRange` write ack (rel s) | `ConveyorSpeedCommand → 0.0` ack (rel s) | interval |
+|---|---|---|---|
+| final clean cycle | 173.0059 (0.540033) | 173.1515 (from +0.150) | **145.6 ms** |
+| capstone round 1 | 545.3552 (0.540033) | 545.5060 (from +0.150) | **150.8 ms** |
+| capstone round 3 | 592.1554 (0.540033) | 592.3023 (from +0.150) | **146.9 ms** |
+
+That interval contains `PRESENCE_FILTER` = 100 ms, at least one OB30 scan and the
+bridge's 0–50 ms read poll, so **145.6–150.8 ms is exactly what a working 100 ms
+filter looks like from a client** — and it is the figure `SPEC.md` §11 T1.4 asks
+for ("`ProductPresentAtSensor` follows ~100 ms later"). The beam values are the
+same 1.440088 / 0.540033 pair every earlier run recorded.
+
+**The in-force filter time is confirmed at the watch table, which is the
+instrument LESSONS 2026-07-28 requires for it.** F1's root cause was an instance
+DB holding a stale `PT` of `T#1M_40S` where the interface default read `T#100ms`,
+and the rule that came out of it is to read the *in-force* value online rather
+than the default. Capture `plc/demo-cell/evidence/watch-table/Screenshot 2026-07-28 171656.png`
+shows `"FB_DemoCellControl_DB".PresenceOnTimer.PT` monitoring at **`T#100MS`**,
+beside `.ET T#0MS` and `.IN FALSE` on an idle cell. That is the fix, read from the
+CPU, on a committed artifact — and it is the reason the three intervals above are
+what they are.
+
+Downstream of the verdict, in the final clean cycle: the command held `0.0` from
+rel 173.1506 to rel 175.2007 — a dwell of **2.050 s** against `DWELL_TIME` =
+`T#2s` — then reversed to −0.150, the beam cleared at rel 175.4533, the command
+returned to `0.0` at rel 184.1017 and `CellCycleRunning` dropped. Forward stroke
+**8.899 s**, return stroke **8.899 s**, position 0.0414 m → 1.3743 m → 0.0393 m.
+**`SeqStep` 10 → 20 → 30 → 40 → 0 therefore ran end to end** — the sequence part 1
+could never enter. `SeqStep` itself is Group 4 and is not on the server
+(LIMITATION 3); what is recorded here is the setpoint and the timing the steps
+produce.
+
+## B2.7 Signal-loss cases and the T4 roster (item 6)
+
+Case A, B and D were produced against the rebuilt program; case C was produced in
+a form part 1 could not attempt. `EVIDENCE_SIGNAL_LOSS.md` now carries the PLCSIM
+section this item requires, with the same figures and the four cases in its own
+A/B/C/D order; what follows here is the T4 accounting.
+
+| Case | How it was produced | What the program did | Verdict |
+|---|---|---|---|
+| **A** — bridge SIGKILL | `kill -9` the bridge mid-cycle, 15:12:27.385 **[transcript]** | heartbeat froze at **11873**; `BridgeLinkOk → False`, `CellCycleRunning → False`, `CellResetRequired → True` and command `0.0` **all in the same 0.2 s observer sample**, 0.60 s after the last heartbeat change (bracket 0.40–0.80 s, consistent with `HEARTBEAT_STALE_TIME` 500 ms) | **as specified** |
+| **B** — bridge SIGTERM | `kill -15`, logged 15:14:04.723 | heartbeat froze at **1377**; the identical four-way transition 0.60 s later | **indistinguishable from A at the program**, as §8 requires |
+| **C** — CPU STOP → RUN under a **surviving** bridge session | owner pressed STOP, then RUN, ~16:51:30 **[transcript]** | the restart reverted the inputs to start values; `CellProcessStopActive` and `CellResetRequired` latched and **stayed latched for 4 min 31.1 s** (16:52:08.875 → 16:56:40.008, 1 Hz log), because the bridge never repaired the reverted image | **program correct, bridge defective** — §B2.13 F5 |
+| **C** — CPU STOP → RUN with the bridge **stopped** | a second STOP → RUN at 17:16:56 – 17:17:27, captured in the watch table before / during / after | `ProductSensorRange` reverted **1.440088 → 0.0**; `ProcessStopLatch` went **FALSE → TRUE** and `SensorFaultLatch` **FALSE → TRUE**, with `BridgeLinkOk` reading `FALSE` and `LinkLostLatch` `TRUE` on both sides | **as specified**, and it is the only Group 4 record of a restart — §B2.7c |
+| **D (ii)** — Gazebo killed **mid-motion**, bridge alive | `kill -9 gz sim` 6.25 s into a forward stroke | heartbeat **kept advancing in every one of the 891 observer samples**, `BridgeLinkOk` stayed `True` and `CurrentSessionCount` stayed 2 throughout; the image froze at position **0.9636 m** and speed **0.1500 m/s**; `ConveyorDriveFault` latched, cycle dropped, command → `0.0`, `CellResetRequired → True` | **detected in 2.301 s** — §B2.7a |
+| **D (i)** — Gazebo killed **during the dwell** | `kill -9 gz sim` 16:33:32.399 **[transcript]**, presence `True` | step 30 commanded −0.150 into a dead cell at the end of the 2 s dwell; fault, cycle drop and `CellResetRequired` first seen together at 16:33:35.486 (1 Hz log) — `DRIVE_FAULT_DELAY` = 1 s after the setpoint went non-zero | **as specified**, on the D1 path |
+
+### B2.7a T4.6, the re-measure — the number the step asks for
+
+`SPEC.md` §11 T4.6 asks for the elapsed time **from the last changing sample of
+`ConveyorBeltPosition` to `ConveyorDriveFault` going `TRUE`**, recorded as a
+number, against a bound of **≤ 3.2 s** and a floor of **≈ 2.1 s** (§6.6.2).
+
+The 20 Hz CSV carries the freeze exactly. The last write that carried a **new**
+position value is
+
+```
+L2 ConveyorBeltPosition  t_start_ns=79555974575410  t_end_ns=79555975237383
+                         value=0.9636000372489671        (rel 628.0015 / 628.0022)
+      preceding write    value=0.9630000372251254        (rel 627.9543)
+```
+
+and the next 99 writes repeat `0.9636000372489671` bit for bit. `ConveyorDriveFault`
+is not itself timestamped in the CSV — it appears only in the 1 Hz `diagnostics`
+rows — so the reaction is timed by the thing the fault causes and the CSV does
+timestamp at 20 Hz, `ConveyorSpeedCommand` leaving `+0.15`:
+
+```
+read_rt ConveyorSpeedCommand  t_start_ns=79558274098549  t_end_ns=79558275899123
+                              0.15000000596046448 -> 0.0     (rel 630.3010 / 630.3028)
+```
+
+> **Freeze to reaction = (79558275899123 − 79555975237383) / 1e9 = 2.301 s.**
+
+Three things corroborate it, from two other instruments:
+
+* the 1 Hz diagnostics bracket the fault itself: `ConveyorDriveFault` reads
+  `False` in the poll following rel 629.655 and `True` in the poll following rel
+  630.705, so the latch and the zeroed command are the same event;
+* the 5 Hz observer reproduces the whole sequence independently — last changing
+  position sample at its t = 95.9752 (0.9636000394), and
+  `ConveyorDriveFault True` with `CellCycleRunning False`, command `0.0` and
+  `CellResetRequired True` together at t = 98.1821: **2.207 s** at 0.2 s
+  granularity, where both endpoints may be up to one sample late;
+* 2.301 s lies **inside** §6.6.2's specified window [≈2.1 s, 3.2 s]. That is
+  itself evidence about *which term fired*: D1 would have latched about 1 s after
+  the freeze, and the frozen speed read-back was **0.1500000059**, not zero, so D1
+  was blind by construction. The re-armed D2 window of §6.6.1 is the only term
+  that can produce a verdict in this window.
+
+**What is not established, and is not inferred away.** T4.6's pass also names
+Group 4: `PositionRef` re-sampling at the frozen position and `PositionFrozen →
+TRUE` at the next window expiry. **No owner capture covers this event.** The
+2026-07-28 captures were swept by filename and then opened: the last **watch
+table** of the day is `Screenshot 2026-07-28 173615.png` at 17:36:15, and the only
+later capture, `174127.png` at 17:41:27, is the CPU's *Cycle time* panel and
+carries no tag at all (§B2.9). The re-measure was at ~17:59:36, twenty-three
+minutes after the last watch table. So the *term* is a reasoned inference from the
+elapsed time and the non-zero frozen speed, not a reading. It is carried as an
+outstanding row (§B2.12 row 18). The same is true of T4.6b at 16:33 — the
+2026-07-28 captures jump from 14:41:16 to 17:09:20, so nothing covers it either.
+
+The freeze was well inside the stroke, as the step requires: the command went to
+`+0.150` at rel 621.7526 and the freeze is at rel 628.0015 — **6.25 s in** — with
+the belt 0.9285 m from where it started (0.0351 m at rest). The transcript's
+run-time figure for the same event was **2.79 s** at the shell's 0.25 s poll
+granularity plus the 1 Hz diagnostics lag **[transcript, kill at 17:59:35.618]**;
+it is the same event seen through a coarser instrument and **2.301 s is the
+measurement**.
+
+For comparison and not as a claim, part 1's D-mid-motion figure on the m3-05 build
+was `ConveyorDriveFault` **`False` in every one of 3 907 samples, 26.3 s
+undetected** (§B.13 F2). The m3-29 re-arm is what changed between the two.
+
+### B2.7b The T4 roster of this run, step by step
+
+`SPEC.md` §11 T4 defined **thirteen** steps when this session ran, and defines
+**fourteen** at the time of writing (m3-34 split the belt-plausibility latch out
+as **4.11b**). The rows below are the **thirteen-step table the run was made
+against**; 4.11b is listed as an outstanding row and **not** as a fourteenth
+as-run row, because the denominator of a run that already happened does not grow
+(`SPEC.md` §11 rule 2, LESSONS 2026-07-28).
+
+| Step | Build | As run | Verdict |
+|---|---|---|---|
+| 4.1 **(A)** | C | `kill -9` mid-cycle; four-way reaction one 0.2 s sample after the heartbeat froze | **pass** — §B2.7 case A. The belt kept running in Gazebo **[transcript]**; the §8 residual is unchanged |
+| 4.2 | C | fresh bridge session at observer t = 20.8926; its heartbeat first appears (at **3**, a new process's counter) in the sample at t = 41.789, the same sample in which `BridgeLinkOk` returns `True`; **nothing moved for the next 36.97 s** until the reset at 78.7596, command `0.0` throughout | **pass on what the step then asked**; `HeartbeatSeenAlive` and `ResetDeviceFault` are Group 4 and were not read, and m3-34 added both to the step — see §B2.12 |
+| 4.3 | C | reset rising edge 78.7596 cleared `CellResetRequired` in the same sample and **moved nothing**; the separate start at 85.5945 started the cycle (at −0.150: the re-home branch, belt off home) | **pass on what the step then asked**; re-run needed against the corrected build (§B2.12) |
+| 4.4 **(B)** | C | `SIGTERM` logged 15:14:04.723; heartbeat froze at 1377; identical transition 0.60 s later | **pass — identical to 4.1 at the program** |
+| 4.5 **(C)** | C | CPU STOP → RUN with the bridge session surviving; latches held 4 min 31.1 s and no reset could clear them | **ran; program correct, and a bridge defect found** (§B2.13 F5). Not a clean pass: the step's second half needs the bridge to supply real samples, which it did not |
+| 4.6 **(D ii)** | **F** | freeze at rel 628.0015 → reaction at rel 630.3028 | **pass on the elapsed-time bound: 2.301 s against ≤ 3.2 s, ≥ 2.1 s.** `PositionFrozen` not read (no capture) |
+| 4.6b **(D i)** | C | Gazebo killed during the dwell; fault 1 s after step 30 commanded −0.150 into a dead cell (16:33:35.486) | **pass on the reaction and the timing.** `PositionFrozen` staying `FALSE` is **[transcript, owner capture 16:33:32]** and that capture is **not** in the committed directory |
+| 4.7 (inverted) | C | after the 16:38 case-D fault, the reset attempted at 16:38:23 **[transcript]** was **refused** — `CellResetRequired` and `ConveyorDriveFault` read `True` in every 1 Hz poll from 16:38:17.014 to 16:38:52.035, **35.0 s** — and cleared only after the simulation was revived; a **separate** start press then re-ran the cycle (16:38:59.241 → clean end 16:39:19.958) | **pass, in the inverted form m3-29 specified.** The "re-latches within 1 s of a start press against a dead cell" half is separately shown by the accidental idle variant: cycle at 16:32:44.616, fault at 16:32:45.620 |
+| 4.8 | C | the R3 half ran and is recorded in §B2.6 | **partial.** The **cold start of the CPU was not performed** — the CPU stayed in RUN all afternoon. The pre-check reading of all seven inputs at their §3.1 start values with the bridge down is **[transcript, 17:00:07]**; the log corroborates only `BridgeLinkOk False` with both latches set |
+| 4.9 | C | `reset` published `true` and left published; a stop latched at 16:40:29.177 and stayed latched for **20.56 s** of continuous hold; a fresh edge cleared it at 16:40:49.737 | **pass exactly.** Repeated a second time in the same log (16:41:09.235 → 16:41:16.651) |
+| 4.9b | C | fresh bridge 17:02:20.941 with `reset` held `true` from before link-up | **FAILED** — every latch clear within 0.655 s of the heartbeat starting. §B2.13 F3 |
+| 4.10 | C | `CurrentSessionCount` sampled at 5 Hz across both kills | **measured**, §B2.8 |
+| 4.11 | **E** | reaction path **demonstrated [transcript]** at 17:30:45 and 17:36:50; latch step **not testable by the specified method** | **partial, and the instrument the step now names did not survive.** §B2.13 F4 |
+
+**No pass over T4 is claimed from this evidence, and the arithmetic is stated
+rather than implied.** Of the thirteen steps the run was made against: **eight
+pass** (4.1, 4.4, 4.6, 4.6b, 4.7, 4.9, and 4.2/4.3 against the step as it then
+read), **one is measured with no pass/fail to give** (4.10), **two are partial**
+(4.8, 4.11), **one ran and exposed a bridge defect instead of completing**
+(4.5), and **one FAILED** (4.9b). Against the **fourteen**-step table as it stands
+now, five of those results additionally do not carry over, because m3-34's §6.8
+delta changes the observable behaviour of every step that crosses a CPU start or a
+link-up — 4.2, 4.3, 4.5, 4.8 and 4.9b — and 4.11b did not exist. All of that is
+§B2.12; none of it is absorbed into a larger as-run denominator.
+
+### B2.7c The one Group 4 record of a CPU restart — the 17:16:56 / 17:17:12 / 17:17:27 triple
+
+Three owner captures of the §9 Group 4 watch table, before / during / after a
+second CPU STOP → RUN, **with the bridge stopped** (it had been down since
+17:14:07). They are the only committed watch-table record of a restart, and they
+carry readings no OPC UA client in this run could reach. All three show the same
+16-row table; only the changing cells are given.
+
+| Tag | `171656.png` — before, CPU **RUN** | `171712.png` — CPU **STOP** | `171727.png` — after, CPU **RUN** |
+|---|---|---|---|
+| `"DemoCellInput".ProductSensorRange` | **1.440088** | 1.440088 | **0.0** |
+| `PresenceOnTimer.PT` | **T#100MS** | T#100MS | **T#0MS** |
+| `"DemoCellLink".BridgeLinkOk` | FALSE | FALSE | FALSE |
+| `ProcessStopLatch` | **FALSE** | FALSE | **TRUE** |
+| `LinkLostLatch` | TRUE | TRUE | TRUE |
+| `SensorFaultLatch` | **FALSE** | FALSE | **TRUE** |
+| `SeqStep` / `ResetDeviceFault` / `PositionFrozen` | 0 / FALSE / FALSE | 0 / FALSE / FALSE | 0 / FALSE / FALSE |
+| `PositionRef` | 0.1995 | 0.1995 | **0.0** |
+| CPU operator panel | RUN/STOP **green** | RUN/STOP **yellow** | RUN/STOP **green** |
+
+Four things this settles that nothing else in the run does:
+
+1. **The restart reverts the input image to the DB start values of §3.1, and the
+   captures show it happening**: `ProductSensorRange` 1.440088 → **0.0**. The
+   1.440088 on the left is the bridge's last written value, still standing two and
+   a half minutes after the bridge stopped — the freeze of `EVIDENCE_SIGNAL_LOSS.md`
+   case A — and 0.0 on the right is the DB's own start value. §8 case C's "lost
+   entirely when the server restarts" is now a reading rather than an inference.
+2. **The reverted start value is caught by §6.2's plausibility window, not passed
+   as a measurement.** `0.0` is below `RANGE_MIN` = 0.05, so `RangeValid` is false
+   and `SensorFaultLatch` sets after `RANGE_FAULT_DELAY`. That is the affirmative
+   window doing exactly the job LESSONS 2026-07-27 asked of it.
+3. **`ProcessStopLatch` went TRUE across the restart while `BridgeLinkOk` reads
+   `FALSE` and the inputs stand at start values.** §7 part 4 gates that latch on
+   `linkOk`, so on this build the latch can only have formed inside the **500 ms
+   boot window** in which `NOT HeartbeatStaleTimer.Q` is still `TRUE` — and by the
+   time of the capture the timer had expired, leaving a set latch beside a `FALSE`
+   verdict. **This is the old-build cold-start signature, captured**, and it is
+   precisely the reading m3-34's §6.1 changes to `ProcessStopLatch FALSE`. See
+   §B2.12a: it is recorded as correct for the build that produced it, and is not
+   reconciled to the corrected expectation.
+4. **`PositionRef` was reinitialised** 0.1995 → 0.0, i.e. the restart cleared the
+   instance DB as §3.1's "no tag is declared Retain" requires. `PositionFrozen`
+   stayed `FALSE` throughout, which is the correct verdict for a belt that is not
+   claiming motion.
+
+**One reading is not explained here and is handed to `plc/` rather than
+diagnosed** — see §B2.13 F6: `PresenceOnTimer.PT` reads `T#100MS` before the
+restart and `T#0MS` after it.
+
+## B2.8 Session behaviour on a real server (item 7) — **filled**
+
+`CurrentSessionCount` from `plc-observe-2026-07-28-t4a-caseAB.csv.gz`, raw
+transitions on the observer's own clock, with the observer itself always one of
+the counted clients:
+
+```
+t = 0        count 2   bridge #1 + observer
+t = 13.4576  (last heartbeat change of bridge #1 — the SIGKILL)
+t = 20.8926  count 3   bridge #2 connects; the killed session is still counted
+t = 33.5542  count 2   the killed session is reaped
+t = 110.504  (last heartbeat write of bridge #2 — the SIGTERM)
+t = 110.705  count 1   closed in the next 0.2 s sample
+t = 118.1373 count 2   bridge #3 connects
+```
+
+| Event | Session still counted for | Against a granted timeout of |
+|---|---|---|
+| bridge **SIGKILL** | **20.10 s** after the last heartbeat change (13.4576 → 33.5542) | 10 000 ms |
+| bridge **SIGTERM** | **≤ 0.2 s** — gone in the next sample | 10 000 ms |
+
+**Reported raw, with no interpretation offered.** The SIGKILL hold is twice the
+granted timeout and 1.7× part 1's 11.79 s for the same granted value on the same
+instance; this evidence does not say why, and nothing in the program or the bridge
+consumes the figure (`SPEC.md` §11 4.10 forbids it as an input). The transcript's
+run-time estimate was **≈22 s** **[transcript]**, measured from the shell's kill
+instant rather than from the last heartbeat, which accounts for the difference. As
+in part 1, this is the **only** measurable difference between A and B, it lives at
+the session layer, and §B2.7 confirms the program saw none of it.
+
+## B2.9 Environment, the program builds of the day, and the network path (item 1) — **filled**
+
+The stack is **§B.0's, unchanged**: TIA Portal V21, S7-PLCSIM Advanced V7.0, a
+simulated CPU 1513-1 PN at firmware V3.1, endpoint `opc.tcp://192.168.53.1:4840`,
+security `None` + anonymous, browse path through `ServerInterfaces` into
+`http://DemoCell`. Bridge host: WSL2 Ubuntu 24.04, ROS 2 Jazzy, Gazebo Sim
+8.11.0, Python 3.12, `asyncua` 2.0.1 in `/home/ozkan/amr-bridge-venv`, repo on
+`/mnt/c`.
+
+**The network path is part 1's measurement (§B.9) and is not re-measured here.**
+Same host, same adapters, same instance: WSL2 `eth0` → Hyper-V `vEthernet (WSL)`
+→ `Ethernet 2` (the PLCSIM virtual adapter) → the instance, one router hop, no
+switch and no VPN. **Tailscale is not in it** — invariant 8 held by routing table
+in §B.9 and nothing in this run changed a route.
+
+**The program was rebuilt five times during the session**, and this is what each
+letter above means. Rebuild baseline: `plc/demo-cell/SPEC.md` @ `39a21b6`.
+
+| Build | Downloaded | Content |
+|---|---|---|
+| **A** | before 2026-07-28 | the m3-05 program part 1 measured |
+| **B** | ~13:00 **[transcript]** | the three-delta build: the released dwell timer, the belt plausibility window, the re-armed case-D window |
+| **C** | ~14:38, in force **[transcript]** | + the `PRESENCE_FILTER` fix. **Every 1 Hz-log figure in this section, 15:01 – 17:14, is build C** |
+| **D** | ~17:33 **[transcript]** | a full re-download restoring project/CPU consistency; same source as C |
+| **E** | ~17:35 **[transcript]** | `BELT_SPEED_MIN`/`MAX` narrowed to ±0.10 — the **modified** program T4.11 requires, not a gate build |
+| **F** | ~17:45 **[transcript]** | ±1.00 restored. **Every 20 Hz-CSV figure in this section, 17:49 – 18:01, is build F** |
+
+**The CPU's cycle time is recorded, from a committed artifact.** It is not on the
+`DemoCell` interface and no client in this run could read it — but the owner
+captured TIA's *Cycle time* panel, and the capture is committed at
+`plc/demo-cell/evidence/watch-table/Screenshot 2026-07-28 174127.png` (17:41:27).
+The panel reads:
+
+| | |
+|---|---|
+| Shortest | **1.004 ms** |
+| Current/last | **1.023 ms** |
+| Longest | **2.556 ms** |
+| bar-chart axis | 1.023 → **150** ms |
+
+**§B.12 item 3 closes on this**, and it is the figure `SPEC.md` §11 T3's second
+PLC-side obligation asks for. Two limits on what the capture shows, stated so it
+is not over-read: the panel is TIA's **CPU cycle-time** panel, so it does not
+itself name the OB30 period — the 20 ms is `SPEC.md` §3.3's configured value
+standing beside this reading, not something the capture proves — and the `150` at
+the right of the axis is an unlabelled axis limit, not a value the panel attributes
+to anything. **No decomposition of L7 is derived from these numbers**; what they
+establish is only that the CPU was running its program in ~1 ms with a worst case
+of 2.556 ms, i.e. two orders of magnitude inside the 20 ms interrupt period it is
+called from, and that the OB30 contribution to §B2.5's 45–48 ms is therefore small
+rather than dominant.
+
+## B2.10 Which server produced each number (item 8) — **filled**
+
+Every figure in this section came from `opc.tcp://192.168.53.1:4840`, the PLCSIM
+Advanced instance with the standard program in RUN. **The test double was not
+running at any point**, on this endpoint or any other, and the
+connect-conformance harness was kept off it (`bridge-design.md` §10).
+`CurrentSessionCount` corroborates it directly: across 400 s of observation the
+count took the values **1, 2 and 3 only**, and each transition is accounted for by
+a bridge process starting or a killed session being reaped (§B2.8) — with the
+count reaching **1** at t = 110.705, when the observer was demonstrably the only
+client on the endpoint. There was no room for a fourth client and none appeared.
+
+## B2.11 Configuration and code changes — **none**
+
+`bridge/config/bridge.yaml` was already pointed at the PLCSIM endpoint by part 1.
+**No file in `bridge/` was edited to make this run work**: no code change, no
+security field, no hardcoded namespace index, no new tool. `tools/observe_plc.py`
+and `tools/cell_stimulus.py` are the committed ones. The one operational change
+was the `--evidence-csv` path, which was **not** varied per session — and that is
+LIMITATION 1, i.e. the change that should have been made and was not.
+
+## B2.12 Disposition of every outstanding row, and this run's own list
+
+**Part 1's thirteen rows (§B.12), by number.** No row of §B.12 is edited; this is
+where each one stands after 2026-07-28.
+
+| §B.12 # | Now | Where |
+|---|---|---|
+| 1 | **still open** — gate exit item (a) in the *watch table*. This run's instrument is again OPC UA-side | owner captures exist for 2026-07-28 (24 files) and are the owner's to interpret; this file does not |
+| 2 | **still open** — gate exit item (b), same reason | as above |
+| 3 | **CLOSED.** The CPU's cycle times are recorded — 1.004 / 1.023 / 2.556 ms — from the owner's committed capture of TIA's *Cycle time* panel, `watch-table/Screenshot 2026-07-28 174127.png` | §B2.9 |
+| 4 | **still open** — L4 on the PLC side needs the watch table to timestamp the output change inside the CPU | §A.6 bound stands |
+| 5 | **ran, in one of its two forms.** Case C as a **CPU STOP → RUN** was performed; a *network/adapter* break with the CPU running was not | §B2.7 case C, §B2.13 F5 |
+| 6 | **split.** T4.9b **ran and failed** — no longer untested, and no longer a cold-start-only question. T4.8's R3 half ran; its **cold start did not** | §B2.7b, §B2.13 F3 |
+| 7 | **still open** — T4.10 on real hardware. §B2.8 measures PLCSIM Advanced, and the two PLCSIM figures (11.79 s, 20.10 s) already differ by 1.7× for the same granted timeout | §B2.8 |
+| 8 | **CLOSED.** The dwell at the beam was reached: presence asserted in 145.6–150.8 ms and the dwell ran 2.050 s | §B2.6a |
+| 9 | **superseded and re-opened as two rows.** m3-34 reduced 4.11 to the reaction path — demonstrated **[transcript]** — and moved the latch to the new **4.11b** | rows 15 and 16 below |
+| 10 | **CLOSED.** T4.6 as re-specified ran on build F: **2.301 s**, inside [2.1, 3.2] s | §B2.7a |
+| 11 | **CLOSED for the reaction, open for the term.** 4.6b ran on build C with the correct D1 timing; `PositionFrozen FALSE` is transcript-only | §B2.7b |
+| 12 | **CLOSED.** 4.7 in its inverted form ran and passed: 35.0 s of refusal across a reset attempt, then honoured after the revive | §B2.7b |
+| 13 | **CLOSED.** The build behind every figure in part 2 is named in §B2.9 and carried per figure | §B2.9 |
+
+**Part 2's own outstanding rows.**
+
+| # | Item | Why it is open, and what it needs |
+|---|---|---|
+| 14 | **T4.9b re-run — two preconditions, not one** | (i) the owner's **§6.8 rebuild** (`HeartbeatSeenAlive` as the first term of `BridgeLinkOk`, and `ResetDeviceFault` re-armed per **link session** rather than per program run), and (ii) the step re-run against that build in **both** of its forms — (a) fresh bridge with the reset held, which is the form this run used and failed, and (b) CPU start with the reset held. Neither the failure nor the fix is a bridge change; see `docs/reports/m3-34-link-polarity-spec.md`. A pass is claimable only against the corrected build |
+| 15 | **T4.11 — the reaction path, re-recorded** | The step now says to read the pass **off the 20 Hz evidence CSV, not the watch table** — and the CSV that carried it was overwritten by a later bridge start (LIMITATION 1). The reaction is demonstrated **[transcript, 17:30:45 and 17:36:50]** and is corroborated by no committed file. Needs one short re-run on build E with a **per-session CSV name**, which is also the fix for LIMITATION 1 |
+| 16 | **T4.11b — the latch, the reset refusal, the reset that clears it** | **BLOCKED on a facility that does not exist**: `SPEC.md` §12 item 6 asks `bridge/` for an explicitly opt-in fault-injection mode that writes a nominated `DemoCell/Input/` Real as `NaN`, `inf` or an out-of-window value **and holds it until disarmed**. Not blocked on any rebuild. Requested here, not built: it is a `bridge/` deliverable and needs its own brief |
+| 17 | **4.2, 4.3, 4.5 and 4.8 re-run against the corrected build** | Each crosses a CPU start or a link-up, so §6.8 changes its observable signature (`SPEC.md` §6.8, *which recorded results survive*). Their results above are correct **for build C** and are labelled as such |
+| 18 | **The Group 4 reading of `PositionFrozen` / `PositionRef` for T4.6 and T4.6b** | No capture covers either moment: the day's last watch table is 17:36:15 and the 17:41:27 capture is the cycle-time panel, against a re-measure at ~17:59:36; and the captures jump 14:41:16 → 17:09:20 across T4.6b at 16:33. Which term fired is inferred in §B2.7a, not read |
+| 19 | **Case C as a link break with the CPU running** | STOP → RUN was performed in **both** of its bridge states — session surviving (§B2.13 F5) and bridge stopped (§B2.7c) — but stopping the adapter with the program still running was not |
+| 22 | **Why `PresenceOnTimer.PT` reads `T#0MS` after a CPU restart** | §B2.13 F6. An observation of five committed captures, handed to `plc/` undiagnosed. If the `PT` is not re-asserted at the call site every scan, `PRESENCE_FILTER` is 0 after any restart until something rewrites it — which is the failure mode LESSONS 2026-07-28 already recorded once, from the other direction |
+| 20 | **A bridge that repairs the input image after a server restart** | §B2.13 F5, carried as `SPEC.md` §12 open item 7. A `bridge/` deliverable, requested here rather than written |
+| 21 | **The 17:14:07 – 17:49:06 window has no committed bridge artifact at all** | The T1.4 re-run of 17:14:37 – 17:15:06 and all of T4.11 fall in it, and neither the CSV nor a 1 Hz log survives. Both are transcript-only above. Nothing needs re-running to *fix the past*; the rule is one CSV and one log per bridge session, uniquely named |
+
+### B2.12a The cold-start signature is now a moving target, deliberately
+
+Every process-stop reading in this section is **correct for build C**, whose
+`BridgeLinkOk` is `NOT HeartbeatStaleTimer.Q` and therefore boots `TRUE` for the
+first 500 ms of every CPU run. m3-34 changed that on purpose: with
+`HeartbeatSeenAlive` conjoined, `BridgeLinkOk` is `FALSE` from the first scan and
+the expected reading becomes `CellProcessStopActive` / `ProcessStopLatch`
+**`FALSE`** (`SPEC.md` §6.1, §11 4.5 and 4.8). **The readings are not reconciled
+to the new expectation and must not be.** Three of them, and what each actually
+shows, because they are not the same observation three times:
+
+* **`sessionB` 17:00:11,380 and `sessionC` 17:02:21,015** read
+  `CellProcessStopActive True` in their first diagnostics poll. Both are **held**
+  latches: a latch is a level bit, and this evidence does not time when either was
+  formed. They say nothing about the boot window either way.
+* **T4.5's first restart (16:52:08.875)** formed its latch because a *surviving*
+  bridge session's heartbeat resumed over a reverted input image — the F5
+  mechanism, and nothing to do with the boot polarity.
+* **T4.5's second restart (§B2.7c, 17:17:27)** is the one that does read the boot
+  window, and it reads it unambiguously: `ProcessStopLatch` **`TRUE`** beside
+  `BridgeLinkOk` **`FALSE`** with the inputs at start values and the bridge
+  stopped. §7 part 4 gates that latch on `linkOk`, so the only scan in which it
+  could have formed is one inside the 500 ms window. **That capture is the
+  old-build signature, and after the §6.8 rebuild the same three captures should
+  read `ProcessStopLatch FALSE`.** It is the cheapest available before/after test
+  of the fix, and re-run row 14 is where the "after" belongs.
+
+`LinkLostLatch` and `CellResetRequired` are `TRUE` in every one of these readings
+and are expected to stay `TRUE` after the rebuild; nothing about the required
+monitored reset is weakened by the correction.
+
+## B2.13 Findings
+
+Four new findings — F3 and F4 against the program, F5 against the bridge, F6 an
+observation handed on undiagnosed. F1 and F2 are part 1's and are **answered**
+rather than restated (§B2.6a, §B2.7a). Nothing was adjusted to make anything pass.
+
+### F3 — T4.9b failed: a reset held from before link-up cleared every latch
+
+`bridgelog-2026-07-28-sessionC-t49b.log.gz`, in full, four lines:
+
+```
+17:02:20,941 bridge ROS 2 node cell_plc_bridge spinning
+17:02:21,015 PLC diagnostics: {... CellProcessStopActive: True, CellResetRequired: True,
+                                   ConveyorDriveFault: False, BridgeLinkOk: False}
+17:02:30,610 startup rule satisfied: all 7 DemoCell/Input nodes carry a real cell sample;
+             heartbeat begins advancing at 1
+17:02:31,265 PLC diagnostics: {... CellProcessStopActive: False, CellResetRequired: False,
+                                   ConveyorDriveFault: False, BridgeLinkOk: True}
+```
+
+The bridge was started fresh with `/cell/panel/reset` already publishing `true`
+and latches pending. `SPEC.md` §11 4.9b requires that no reset be possible: the
+guard should read `TRUE` before, through and after link-up, and the edge that
+arrives with the first attributable sample should be **refused**. Instead
+**every latch was clear in the first diagnostics poll after the heartbeat
+started**, 0.655 s later, in the same poll in which `BridgeLinkOk` first read
+`True`. The transcript's run-time reading was "by 17:02:36" **[transcript]**; the
+log puts it 5 s earlier.
+
+**Root cause, code-confirmed and now fixed in the specification.** The build
+implements `BridgeLinkOk := NOT HeartbeatStaleTimer.Q`, which reads "not *yet*
+proven stale" and is therefore `TRUE` for the first `HEARTBEAT_STALE_TIME` of
+every CPU run. In that window the reset input's start value `FALSE` satisfied
+"seen open with the link up", so `ResetDeviceFault` cleared on the first scan;
+the held `true` then registered as a genuine rising edge the moment real samples
+arrived. LESSONS 2026-07-28 states the rule this became: *a link verdict is FALSE
+until the heartbeat has been seen to change at least once; "not yet proven stale"
+is not "alive", and every guard that rides on link-up inherits the boot polarity.*
+The correction is `SPEC.md` §6.1, §6.7 and the §6.8 implementation delta, recorded
+in `docs/reports/m3-34-link-polarity-spec.md`. **It is a PLC change; nothing
+bridge-side is implicated, and the bridge's behaviour in this capture was
+correct** — it withheld the heartbeat until all seven inputs were real, exactly as
+R3 requires, which is *why* the link-up instant is so sharply visible.
+
+### F4 — T4.11's latch cannot form by the method the step named, and the CSV that showed it is gone
+
+`BELT_SPEED_MIN`/`MAX` were narrowed to ±0.10 (build E) and start pressed. The
+run's own record is that the reaction path worked and the latch never formed:
+C5 dropped the cycle and zeroed the setpoint within one scan, the plant then
+recovered *inside* the narrowed window in ~100–150 ms — under `BELT_FAULT_DELAY`
+= 200 ms — so `BeltFeedbackFaultLatch` was released before `Q` could be reached.
+**The test is extinguished by the reaction it triggers.** LESSONS 2026-07-28
+records it, m3-34 acted on it: §11 4.11 is now the reaction path alone with the
+latch explicitly not expected, and the latch moved to the new **4.11b** on a
+fault-injection facility that does not exist (§12 item 6).
+
+**Two figures here do not reproduce, and that is the second half of the finding.**
+The brief for this write-up expected the ~100–150 ms speed blips to be citable
+from the 20 Hz CSV — the very instrument §11 4.11 now nominates. They are not in
+it. The committed CSV contains **seven** contiguous episodes of
+`|ConveyorBeltSpeed| > 0.05`, and every one is a full stroke of 8.85–11.15 s;
+there is no episode of any length near 100–150 ms anywhere in the file, because
+the file begins at 17:49:06 and the presses were at **17:30:45 and 17:36:50**
+**[transcript]** — before the bridge restart that truncated it. LESSONS 2026-07-28
+records **five** such presses; the two above are the two the transcript
+timestamps.
+
+**The two owner captures nearest in time were opened, and they corroborate weakly
+and non-contemporaneously — which is all that can honestly be claimed of them.**
+Both are the §9 Group 4 watch table:
+
+| | `173247.png` (17:32:47) | `173615.png` (17:36:15) |
+|---|---|---|
+| relation to a press | **2:02 after** the 17:30:45 press | **0:35 before** the 17:36:50 press |
+| `BeltFeedbackFaultLatch` | **FALSE** | **FALSE** |
+| `BridgeLinkOk` | TRUE | TRUE |
+| `SeqStep` | 0 | 0 |
+| `ProcessStopLatch` / `LinkLostLatch` / `SensorFaultLatch` | FALSE / FALSE / FALSE | **TRUE / TRUE / TRUE** |
+| `ResetDeviceFault` / `PositionFrozen` | FALSE / FALSE | FALSE / FALSE |
+
+`BeltFeedbackFaultLatch` reading `FALSE` in both is consistent with the latch never
+forming, and that is the whole of the corroboration. **Neither capture is
+contemporaneous with a press**: the event is shorter than one watch-table update,
+which is exactly why §11 4.11 now nominates the CSV instead. The second capture
+additionally shows **three latches already pending 35 s before the second press**,
+so unless a reset intervened in those 35 s that press could not have started a
+cycle at all — and this evidence cannot say which happened.
+
+**One inconsistency the sweep exposed, which no committed artifact resolves.** The
+first press is timestamped **17:30:45** while the ±0.10 download is timestamped
+**~17:35**, with a full re-download at ~17:33 between them (§B2.9, all
+**[transcript]**) — so on those timestamps the first press predates the narrowed
+constant it is supposed to have exercised. Either the download times are loose or
+the two presses were against different builds. It is left standing rather than
+resolved by choosing, and it is a second reason outstanding row 15 wants a short
+re-run whose build and CSV are recorded together.
+
+**So: the finding stands on the transcript and on the code, and the measurement it
+rests on has no committed artifact.** Outstanding row 15.
+
+### F5 — the bridge does not repair a reverted input image, so a CPU restart cannot be recovered from
+
+This is a **bridge** defect, found by the program behaving correctly. The owner
+put the CPU to STOP and back to RUN at ~16:51:30 **[transcript]** while a bridge
+session was live. The restart reverted every input to its start value. The
+program then did exactly what its rules say: the stop circuits read open, so
+`CellProcessStopActive` and `CellResetRequired` latched, the command stayed `0.0`
+and nothing ran.
+
+The 1 Hz log measures how long that lasted: the latches first appear at
+**16:52:08.875** and clear at **16:56:40.008** — **4 min 31.1 s** — and the
+monitored reset was correctly refused throughout, because the cause had not gone.
+The owner cleared it by force-toggling the levels **[transcript, ~17:05]**, after
+which the reset behaved normally.
+
+**The mechanism, from the same artifact.** The `sessionA` log carries **no
+`session broken`, no `connect failed`, no reconnect and no read or write error**
+between 15:14:24 and 16:57:31. The session survived the STOP → RUN; the bridge
+therefore never re-established anything, and because it writes **on change**, the
+slots whose values had not changed were never rewritten. The PLC read open stop
+circuits for four and a half minutes from a bridge that believed it had already
+sent the closed ones. LESSONS 2026-07-28 states the rule: *the bridge must detect
+a server restart — the heartbeat node reverting, or session/subscription loss —
+and rewrite every slot; until then, force-republish every level with a toggle
+after any CPU restart.* `SPEC.md` §12 open item 7 now names it as a dependency of
+the reset guard's guarantee and of §8 case C. It is **`bridge/` work and is
+requested here rather than written**, because this brief's deliverable is the
+evidence, not the fix (outstanding row 20).
+
+One residual of the same event, recorded because it is a real limit and not a
+defect: while the CPU was in STOP the server held the last command, `+0.15`, and
+the belt kept running in Gazebo **[transcript]**. That is §A.7's residual again —
+on real equipment the drive is dropped by a wired enable, not by an OPC UA value.
+No safety function is involved and none is claimed (invariants 1 and 2).
+
+### F6 — `PresenceOnTimer.PT` reads `T#100MS` before a CPU restart and `T#0MS` after it
+
+Recorded because it is what the committed captures show, and **handed to `plc/`
+undiagnosed** — it is a timer inside `FB_DemoCellControl` and nothing bridge-side
+reaches it.
+
+| Capture | `PresenceOnTimer.PT` |
+|---|---|
+| `171656.png`, 17:16:56, CPU in RUN before the restart | **`T#100MS`** |
+| `171712.png`, 17:17:12, CPU in STOP | `T#100MS` |
+| `171727.png`, 17:17:27, CPU in RUN after the restart | **`T#0MS`** |
+| `173247.png`, 17:32:47 | `T#0MS` |
+| `173615.png`, 17:36:15 | `T#0MS` |
+
+The restart reinitialised the instance DB, which §3.1 requires — `PositionRef`
+went 0.1995 → 0.0 in the same triple, and no tag in this program is `Retain`. The
+question is why the `PT` did not come straight back: a TON called with
+`PT := #PRESENCE_FILTER` at its call site every scan has that value in its
+instance from the first call, so a `PT` of `T#0MS` on a running CPU says the
+constant is not reaching the call every scan. If that reading is what it appears to
+be, then **after any CPU restart `PRESENCE_FILTER` is effectively 0 until something
+rewrites it** — the same class of failure as LESSONS 2026-07-28's stale
+`T#1M_40S`, reached from the opposite direction, and the reason that lesson says to
+verify the in-force value online rather than trusting a default.
+
+**Three reasons this is a question and not a finding of fact.** It rests on
+monitor values in screenshots and not on a code reading; a `PT` of `T#0MS` with
+`IN` false and `ET` `T#0MS` may be how this CPU reports an instance whose timer has
+not yet been enabled since reinitialisation; and the presence verdict demonstrably
+worked afterwards — the three 145.6–150.8 ms intervals of §B2.6a were measured at
+17:51 and 17:58, after all of these captures, and are consistent with a 100 ms
+filter and not with a 0 ms one. That last point is the strongest argument that
+nothing is broken in the delivered behaviour, and it is also why this is worth one
+watch-table row at the next download rather than a brief of its own.
+Outstanding row 22.
+
+## B2.14 Two publishes that never arrived — tooling, not program
+
+Both were suspected at run time as program refusals and both are settled by the
+CSV, in the order LESSONS 2026-07-28 requires: **verify delivery before
+interpreting a refusal.**
+
+* **A start press at 17:49:38 [transcript] never reached the bridge.** The CSV
+  carries no `PanelStartPressed` write between rel 27.6058 and rel 164.2057, and
+  R3 reports `PanelStartPressed 14/13` — thirteen writes, all accounted for by
+  transitions elsewhere, and only one received sample unwritten. A received
+  `true` at that moment would have been a change and would have been written. It
+  was not received.
+* **One of the three capstone process-stop presses never reached the bridge.**
+  The transcript records presses at 17:58:12, 17:58:36 and 17:58:59
+  **[transcript]**; the CSV carries `PanelProcessStopCircuitClosed` writes for two
+  of them (rel 546.2544 and 593.0557, each with its release) and R3 reports
+  `7/5`. The level before the missing press was `True`, so a received `false`
+  would have been a change and would have been written. The program was never
+  presented with that press, and the 1 Hz log shows no `CellProcessStopActive`
+  transition anywhere near it — the cycle that ended at that moment ended
+  **cleanly**, its command having already reached `0.0` at rel 568.9518.
+
+Both are the `ros2 topic pub --once` race of LESSONS 2026-07-28: `--once` exits
+on the first matched subscriber, and this cell has more than one. Neither is a
+program defect and neither is a bridge defect.
+
+One further run-time misreading is recorded so it is not mistaken for an event: a
+"wedged bridge" reported at 17:41–17:46 was a **stale log artifact on the
+orchestrator's side** — a live process whose log's last line was minutes old —
+and not a PLC event **[transcript]**. LESSONS 2026-07-28 carries the rule (a
+polled log line is evidence only together with its age).
 
 ---
 
