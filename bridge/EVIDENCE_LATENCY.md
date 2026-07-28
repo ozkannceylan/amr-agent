@@ -1575,6 +1575,12 @@ LIMITATION 1, i.e. the change that should have been made and was not.
 
 ## B2.12 Disposition of every outstanding row, and this run's own list
 
+> **Rows 14–22 below were dispositioned again after the §6.8 rebuild re-run of the
+> same evening — see §B3.4.** Closed there: row **20**, row **21**'s rule, row
+> **14**'s failing form, and 4.3 of row **17**. Partly closed: the rest of rows
+> **14** and **17**. Still open: rows **15**, **16**, **18**, **19** and **22**.
+> Nothing in this subsection is edited.
+
 **Part 1's thirteen rows (§B.12), by number.** No row of §B.12 is edited; this is
 where each one stands after 2026-07-28.
 
@@ -1841,6 +1847,497 @@ One further run-time misreading is recorded so it is not mistaken for an event: 
 orchestrator's side** — a live process whose log's last line was minutes old —
 and not a PLC event **[transcript]**. LESSONS 2026-07-28 carries the rule (a
 polled log line is evidence only together with its age).
+
+---
+
+# Section B, part 3 — the §6.8 rebuild re-run, 2026-07-28 19:15–19:31
+
+**Performed 2026-07-28, ~19:15–19:31 local (UTC+02:00), by the owner at the same
+workstation, against the same PLCSIM Advanced instance and endpoint as parts 1
+and 2**, with the `plc/demo-cell/SPEC.md` §6.8 delta implemented and downloaded.
+Written up under brief `m3-36` from the artifacts the session committed. **No
+figure of part 1 or part 2 is altered by this section**, and nothing was re-run to
+produce it.
+
+> **What this section is.** §6.8 says behaviour differs from the earlier build
+> only at CPU start and at link-up, and names the five steps that cross one of
+> those boundaries: §11 **4.8, 4.2, 4.3, 4.9b and 4.5**. All five were re-run.
+> Four pass on their server-visible conditions, one passes and is the reversal of
+> part 2's **F3**, and the bridge defect **F5** is fixed and measured. What does
+> *not* close is stated as plainly as what does: three of the five carry a
+> `SPEC.md` §9 **Group 4** condition that no instrument in this run can see, and
+> the one direct reading that would settle the boot polarity — 4.8's cold start
+> with the bridge **down** — was again not taken.
+
+## B3.0 The build letter, the provenance, and the artifacts
+
+**Naming correction, made here so nothing collides.** The `m3-36` brief calls the
+§6.8 rebuild "**build E**". §B2.9 already uses **E** for the ±0.10 narrowed
+program of T4.11 and **F** for the ±1.00 restored one. The §6.8 rebuild is
+therefore **build G** throughout this section, and every occurrence of "build E"
+in the `m3-36` brief means **build G** here. Nothing in §B2.9's table is edited.
+
+| Build | Downloaded | Content |
+|---|---|---|
+| **G** | ~19:15 **[transcript]** | build F + the five edits of `SPEC.md` §6.8 as committed at `0080bff` — `HeartbeatSeenAlive` declared and latched, `BridgeLinkOk := HeartbeatSeenAlive AND NOT HeartbeatStaleTimer.Q`, and `ResetDeviceFault` re-armed per **link session** rather than per program run. **Every figure in this section is build G** |
+
+**The owner's pre-run verification, recorded as the build's provenance.** Taken in
+the watch table with the bridge **down**, before any step below **[transcript]**:
+
+| Read | Value | Why it is the check §6.8 asks for |
+|---|---|---|
+| block comparison circles | solid green | the stale-build tell of LESSONS 2026-07-28; project and CPU consistent |
+| `HeartbeatStaleTimer.PT` | `T#500MS` **in force** | a new static shifts DB offsets, and a download without reinitialisation preserves stale instance values (LESSONS 2026-07-28, F1) |
+| `HeartbeatSeenAlive` | **TRUE** | the new static exists and latches — *but see the qualification below* |
+| `BridgeLinkOk` | **FALSE** | the verdict is false with no bridge writing |
+| `ResetDeviceFault` | **TRUE** | the per-link-session re-arm working; it was cleared-and-stuck under build C/D |
+| `LinkLostLatch` | TRUE | unchanged by the correction, as §6.1 says it should be |
+| `ProcessStopLatch` | **FALSE** | the corrected cold-start signature: the panel is not accused of a stop never seen |
+
+**One qualification on that reading, because it changes what it proves.**
+`HeartbeatSeenAlive` reads `TRUE` **because the bridge had already written briefly
+after the download** — so this is a reading taken *after* a link session, not at
+the first scan of a CPU run. `ProcessStopLatch FALSE` beside `BridgeLinkOk FALSE`
+is therefore consistent with build G and **does not discriminate it from build
+C**: under build C the same standing state (heartbeat static long enough for
+`HeartbeatStaleTimer.Q`) also yields `BridgeLinkOk FALSE` and no part-4 latch.
+The reading that discriminates is one taken **inside** the first
+`HEARTBEAT_STALE_TIME` of a CPU run with the bridge down, and it is still owed —
+see §B3.4 row 17 and §B3.5.
+
+**Artifacts.** Two bridge sessions, one appended 1 Hz log, one observer file.
+
+| Artifact (all gzipped, in `evidence/`) | Rate | Window it covers |
+|---|---|---|
+| `bridgelog-2026-07-28-rerun68.log.gz` | 1 Hz diagnostics | **19:20:58.718 – 19:31:02.312**, two bridge processes appended into one file. Session 1 ends at 19:22:35.985 (`kill -9`); session 2 begins 19:22:41.168 |
+| `latency-2026-07-28-plcsim-rerun68-20260728T172058Z-pid36542.csv.gz` | **20 Hz** per-event | session 1, 37 325 event rows, first cycle `t_start_ns` `84425710159621`, span **94.959 s** |
+| `latency-2026-07-28-plcsim-rerun68-20260728T172241Z-pid37442.csv.gz` | **20 Hz** per-event | session 2, 199 851 event rows, first cycle `t_start_ns` `84527737630835`, span **498.978 s** |
+| `plc-observe-2026-07-28-t45-rerun.csv.gz` | **5 Hz** read-only observer, **1 196 rows / 239.994 s** | **4.5 only** — it begins at session-2 rel ≈ 144.63 s and ends at rel ≈ 384.63 s |
+
+**LIMITATION 1 of part 2 is gone, and this run is its proof.** `--evidence-csv`
+now derives a unique per-session path — the log records it at every start ("the
+previous session's file is not touched") — and the two CSVs above are the two
+sessions of one run, **neither truncating the other**. That is the rule §B2.12
+row 21 asked for, in force and demonstrated.
+
+**What the observer does not cover, said rather than glossed.** The 4.8 pre-check
+of 19:20:5x was observed into a file the session did **not** commit (`o68_pre`).
+The committed observer file starts ~144 s into session 2, so **4.8, 4.2, 4.3 and
+4.9b have no observer coverage at all** — their record is the 1 Hz log and the
+20 Hz CSV. It also **ends 4.478 s before 4.5's recovery reset**, so the recovery
+is likewise log-and-CSV only.
+
+**Clock discipline is part 2's, unchanged (§B2.0's fourth limitation), and the
+divergence recurs.** Neither CSV carries a `run,duration_s` row to compare against
+(see below), so the check here is coarser than part 2's: session 1's log spans
+97.267 s against 94.959 s between its first cycle and its last row, and session
+2's spans 501.144 s against 498.978 s. The endpoints are not the same instants, so
+this is a ~2 s indication rather than part 2's measured 1.767 s — but it points the
+same way, and it is enough to keep the same rule. **Every duration below is quoted
+on the CSV's monotonic clock as seconds relative to that session's first cycle**,
+and wall-clock times are quoted **only from the log**. No monotonic figure is
+converted to a wall time anywhere in this section. Where the brief's transcript
+timestamp and the artifact disagree, the artifact is quoted and the transcript
+figure is named beside it.
+
+Neither CSV carries a `run` summary row: both processes were killed rather than
+shut down, so **no counter block was flushed** and the R1/R2/R3 received-versus-
+written ratios this file usually quotes are unavailable for build G. The per-event
+`R1`/`R2` rows are all present, so cycle rate could be recomputed from them — but
+this section does not do so and claims no rate or statistics figure. **§B2.3 and
+§B2.4 stand as the last measured set**, and the only two timing figures taken from
+these CSVs are the rewrite interval (§B3.2) and the individual event timestamps
+quoted per step.
+
+## B3.1 The five re-runs, step by step, with a verdict each
+
+### 4.8 — startup rule against the real DB start values — **PASS on its R3 half; its cold-start half did not run**
+
+The bridge was started at 19:20:58.718 with the PLC standing at start values and
+`BridgeLinkOk FALSE`, and the seven inputs were then published one at a time.
+
+Session-1 CSV, the write of each input and the first heartbeat:
+
+| Node | first write (session-1 rel) | gap |
+|---|---|---|
+| `PanelStopCircuitClosed` `True` | **7.856 s** | — |
+| `PanelProcessStopCircuitClosed` `True` | **12.106 s** | +4.249 s |
+| `PanelStartPressed` `False` | **16.405 s** | +4.299 s |
+| `PanelResetPressed` `False` | **20.655 s** | +4.250 s |
+| `BridgeHeartbeat` = **1** | **20.656 s** | **+158 µs** after the seventh write completed |
+
+The three analogues were already real at connect: the log's connect line reads
+`input image rewritten after cache invalidation: 3 of 7 nodes` and names the four
+panel contacts as withheld under **R1**, and the R3 line shrank in step with the
+table above — four withheld, then three, then two, then one, then
+`startup rule satisfied: all 7 DemoCell/Input nodes carry a real cell sample;
+heartbeat begins advancing at 1` at **19:21:19,657**. `BridgeLinkOk` first reads
+`True` in the next poll, **19:21:20,563**.
+
+**The 158 µs is the sharpest measurement of R3 this project has.** The heartbeat's
+very first write followed the seventh input's write by 158 µs, in the same bridge
+cycle: the bar is "all seven real", not "seven real and a wait".
+
+**Two corrections to the brief's account of this step, from the artifacts.** The
+publishes were **~4.25 s apart, not 3 s** — the CSV's write spacing is 4.249 /
+4.299 / 4.250 s and the log's R3 lines are spaced to match. And the *order* is as
+the brief has it: stop, process stop, start, reset.
+
+**What did not run.** §11 4.8's first clause is "**cold-start the CPU** with the
+bridge stopped", and its pass conditions are Group 4 reads at the first scan —
+`HeartbeatSeenAlive` and `BridgeLinkOk` `FALSE` from the first scan, `LinkLostLatch`
+and `ResetDeviceFault` `TRUE`, `CellProcessStopActive` `FALSE`. No CPU cold start
+was performed in this run, and the one committed instrument that saw the pre-run
+state is the bridge's own first diagnostics poll at **19:20:58,919** —
+`CellProcessStopActive` **`False`**, `CellResetRequired` `True`, `BridgeLinkOk`
+`False`, with the input image not yet real. **That is consistent with build G and
+does not discriminate it from build C**, for the reason given in §B3.0: by
+19:20:58 the heartbeat had been static long enough that both builds' verdicts read
+`FALSE`. §11 4.8 is therefore **half re-run**: its R3 half is measured above, its
+cold-start half is untested and stays outstanding.
+
+### 4.2 — 30 s hands-off after link-up — **PASS on its server-visible half**
+
+From the log: after `BridgeLinkOk` went `True` at **19:21:20,563** the diagnostics
+dictionary was **byte-identical in every poll until 19:21:58,703** — 38.140 s with
+`CellCycleRunning` `False`, `CellResetRequired` **`True`** (the `LinkLostLatch`
+from the outage) and the command at `0.0`. The CSV bounds the hands-off
+independently: **no panel input was written at all between session-1 rel 20.655 s
+and rel 58.906 s — 38.251 s** — so the 30 s the step asks for is measured, not
+asserted. **No auto-resume**: the cycle did not restart on a returning heartbeat,
+and the first command delivered after link-up was `0.0`.
+
+**What is missing.** 4.2's other three pass conditions are Group 4:
+`HeartbeatSeenAlive` already `TRUE` from before the outage, `ResetDeviceFault`
+`TRUE` throughout the outage, and `ResetDeviceFault` **clearing within one
+watch-table update of link-up**. All three are internal statics (§3.2), invisible
+to any OPC UA client, and **no watch-table capture covers 19:21:20**. The owner's
+pre-run reading (§B3.0) gives `ResetDeviceFault TRUE` at one instant while the
+bridge was down; the clearing at link-up has no committed capture. Recorded as
+missing, not inferred.
+
+### 4.3 — reset clears, and nothing moves until a separate start — **PASS, in full**
+
+Every condition of this step is server-visible, and all of them hold.
+
+| | log | session-1 CSV rel |
+|---|---|---|
+| `reset` rising edge published | — | **58.906 s** (`True`), released 61.357 s |
+| latches clear | `CellResetRequired` `True → False` **19:21:58,703** | — |
+| **and nothing moved** | `CellCycleRunning` stayed `False`; command `0.0` | — |
+| separate `start` on the other button | — | **66.554 s** (`True`), released 69.008 s |
+| cycle runs | `CellCycleRunning` `False → True` **19:22:05,996** | — |
+| presence asserts | `ProductPresentAtSensor` `True` **19:22:15,294**, `False` 19:22:18,344 | — |
+| clean end | `CellCycleRunning` `True → False` **19:22:26,546** | — |
+
+Two deliberate actions on two different buttons, the reset moving nothing, and a
+full clean cycle: CLAUDE.md §9's "after a safety stop the machine never resumes
+automatically" read off the artifacts rather than argued.
+
+### 4.9b — reset held from before link-up, **bridge-restart form** — **PASS. This is the reversal of F3**
+
+The form that matters, and the reason it is the form that matters, is LESSONS
+2026-07-28: the §6.8 boot-polarity fix closes 4.9b at CPU start and **relocates**
+it to bridge restart, where the reset image freezes and the first attributable
+`TRUE` is a genuine rising edge. Only the bridge-restart form exercises the
+per-link-session re-arm. It is also §11 4.9b variant **(a)**, the variant part 2
+ran and failed.
+
+Setup and result, on the artifacts:
+
+| | source | value |
+|---|---|---|
+| process stop pressed, to latch | session-1 CSV | `PanelProcessStopCircuitClosed` `False` at rel **90.356 s**, closed again rel 93.608 s |
+| latch formed | log | `CellProcessStopActive` `False → True`, `CellResetRequired` `False → True`, **19:22:29,644** |
+| bridge `kill -9` | log | session 1's last poll **19:22:35,985** |
+| bridge restarted | log | session 2 spinning **19:22:41,168**; `BridgeLinkOk` still `False`, both latches still `True` |
+| **the held reset arrives as the new session's first reset sample** | session-2 CSV | `PanelResetPressed` **`True`** written at rel **2.904 s** |
+| heartbeat begins | log / CSV | **19:22:47,956**, `heartbeat begins advancing at 1`; CSV rel **6.655 s**, 118 µs after the seventh write |
+| **the reset stood `TRUE` at the PLC before the link could exist** | session-2 CSV | **3.751 s** before the first heartbeat write |
+| link up | log | `BridgeLinkOk` `False → True` **19:22:48,467** |
+| **the latches did not clear** | log | `CellProcessStopActive` and `CellResetRequired` `True` in **every** poll from 19:22:41,310 to 19:23:15,407 — 34 consecutive polls, 27 of them after link-up |
+| release alone does not clear | session-2 CSV | `PanelResetPressed` `False` at rel **30.607 s** = **+23.952 s** after the heartbeat began — latches still `True` |
+| a **fresh** edge clears them | session-2 CSV | `PanelResetPressed` `True` at rel **34.857 s** = **+28.202 s** after the heartbeat began, and **+4.250 s** after the release |
+| cleared | log | `CellProcessStopActive` **and** `CellResetRequired` `True → False`, **19:23:16,409** |
+
+**So the held reset was refused for 28.202 s across a link-up, and the release
+that ended it bought a further 4.250 s of refusal — because a release is not an
+edge.** Set against part 2's **F3** on build C, the same step, same instruments:
+
+| | build C (F3, `sessionC-t49b`) | **build G** (here) |
+|---|---|---|
+| heartbeat begins | 17:02:30,610 | 19:22:47,956 |
+| `BridgeLinkOk` first `True` | 17:02:31,265 | 19:22:48,467 |
+| latches at that moment | **all clear** — in the same poll | **all still set** |
+| interval from heartbeat start to latches clearing | **0.655 s**, unbidden | **28.202 s**, and only on a fresh edge |
+
+That is the pass build C could not produce, and it is a pass on a reading rather
+than on an argument: the *only* thing that cleared the latches was a rising edge
+that began after the link was up.
+
+**One condition of the step is still not read.** 4.9b's pass line says "the watch
+table says why: `ResetDeviceFault TRUE` beside `BridgeLinkOk TRUE`".
+`ResetDeviceFault` is Group 4 and no capture covers 19:22:48–19:23:16. The
+*behaviour* the guard produces is measured above; the guard's own bit is inferred
+from it. The brief's transcript places `PanelResetPressed TRUE` at the PLC through
+19:23:10 and the clearing edge at 19:23:16 — the CSV puts the release at rel
+30.607 s and the fresh edge at rel 34.857 s, consistent with it.
+
+### 4.5 — link loss with the CPU stopped, bridge session surviving — **PASS on its server-visible half; the corrected signature confirmed where it can be seen**
+
+A cycle was started at **19:25:12,069** (start press at session-2 rel 149.207 s,
+command read back at `+0.15` at rel 149.253 s) and ran for **32.349 s** of
+transport. The owner then took the CPU to STOP and back to RUN **[transcript,
+~19:25:43]**.
+
+**1. The bridge detected the restart under a live session and repaired the image.**
+Measured in §B3.2 below; the headline is that it did, in **10 ms**, rewriting
+**7 of 7** input nodes, and that this closes **F5** and §B2.12 row 20.
+
+**2. The PLC's reaction, and the corrected signature.**
+
+| | source | value |
+|---|---|---|
+| cycle down, and the link-lost latch appears | log | `CellCycleRunning` `True → False` **and** `CellResetRequired` `False → True`, together, **19:25:44,065** |
+| the same three transitions, at 5 Hz | observer | one sample, t = **36.9459**: command `0.15 → 0.0`, `CellCycleRunning` `True → False`, `CellResetRequired` `False → True` |
+| **`CellProcessStopActive` stayed `FALSE`** | observer **and** log | **zero** `True` samples in all 1 196 observer rows; `False` in every 1 Hz poll from 19:23:16,409 to 19:31:02,312 |
+| `ConveyorDriveFault` | observer and log | `False` throughout |
+
+**This is the corrected signature, and the contrast with build C is the point.**
+Part 2's **F5** recorded the same event — CPU STOP → RUN under a surviving bridge
+session — producing `CellProcessStopActive` **`True`** and a process stop latched
+from reverted stop contacts (§B2.12a's first and second bullets, 16:52:08.875). On
+build G the same event latched **no** process stop. `CellResetRequired` still went
+`TRUE`, still required a monitored reset, and still refused to auto-resume:
+nothing about the required reset is weakened, and the reason the program now gives
+is the true one.
+
+**The attribution, with its arithmetic, because two changes landed together.** The
+bridge's rewrite (§B3.2) removes F5's mechanism on its own, so it is fair to ask
+whether the boot-polarity fix is doing any work here. It is, and the timings say
+so: the CPU's first OB call follows RUN by **1.004–2.556 ms** (§B2.9's cycle-time
+capture, taken on build F — the nearest measurement, standing beside the argument
+rather than proving it for build G), while the bridge's repair lands **10 ms after
+it detects the revert**, and detection can be up to one 50 ms bridge cycle after
+RUN. So the stop contacts stood at their start values for roughly 10–60 ms of
+program execution — **inside** build C's 500 ms boot window, where
+`BridgeLinkOk` read `TRUE` and §7 part 4 would latch, and **outside** build G's,
+where `HeartbeatSeenAlive` is still `FALSE` because no heartbeat *change* has been
+seen. **That is an inference over a window no instrument sampled, and it is
+recorded as one.** The direct reading remains 4.8's cold start with the bridge
+down, where no rewrite can mask anything.
+
+**Which latch set `CellResetRequired` is likewise inferred, not read.**
+`CellResetRequired` is `latchPending` (§6.7). `CellProcessStopActive` and
+`ConveyorDriveFault` both read `False` across the event, so the pending latch is
+`LinkLostLatch` or `SensorFaultLatch`, and only `LinkLostLatch` has a cause at
+that instant. No watch-table capture covers 19:25:43 — the same gap as §B2.12
+row 18, one event later.
+
+**3. Recovery: a reset that moved nothing, then a separate start.**
+
+| | source | value |
+|---|---|---|
+| the cell sat latched | log | `CellResetRequired` `True`, `CellCycleRunning` `False`, command `0.0`, **19:25:44,065 → 19:29:11,709 (3 min 27.6 s)** |
+| reset | session-2 CSV | `PanelResetPressed` `True` rel **389.106 s**, released rel 391.606 s |
+| latch clears, **and nothing moves** | log | `CellResetRequired` `True → False` **19:29:11,709**, `CellCycleRunning` still `False` |
+| separate start | session-2 CSV | `PanelStartPressed` `True` rel **395.907 s**, released rel 398.458 s |
+| full clean cycle | log | `CellCycleRunning` `True` **19:29:18,909**; presence `True` **19:29:25,112**, `False` 19:29:27,210; clean end **19:29:35,462** |
+| the return stroke ran | session-2 CSV | command read `−0.15` at rel 395.953 s, back to `0.0` at rel 412.404 s |
+
+The 3 min 27.6 s of latched idle is **the owner's own gap, not a refusal**, and is
+not comparable to F5's 4 min 31.1 s — there the reset was *attempted and correctly
+refused* because the image was still stale. Here the image had been truthful since
+10 ms after the restart, and the first reset attempted was honoured.
+
+**What 4.5 still does not establish.** Its pass line asks for the restart
+signature **off the watch table** — `HeartbeatSeenAlive` `FALSE` and `BridgeLinkOk`
+`FALSE` at the first scan, `LinkLostLatch` set. `HeartbeatSeenAlive` is not on the
+server at all; `BridgeLinkOk` was never sampled `FALSE` (§B3.3); no capture covers
+the moment. And the step's **STOP residual** — the frozen command leaving the belt
+running in Gazebo — has **no committed sample in this run**: see §B3.3.
+
+## B3.2 The rewrite on restart, measured — F5 is fixed
+
+The committed log carries the detection and the repair as two lines, and the
+interval between them is the figure:
+
+```
+19:25:43,501 WARNING BridgeHeartbeat reads 0 but this session last wrote 3499: the server
+                     restarted under a live session, so its input image is stale.
+                     Invalidating the write cache (§8.1).
+19:25:43,501 INFO    write cache invalidated (BridgeHeartbeat reverted to 0): every input slot
+                     with a real sample is rewritten in the next cycle
+19:25:43,511 INFO    input image rewritten after cache invalidation: 7 of 7 nodes
+                     (ConveyorBeltPosition, ConveyorBeltSpeed, ProductSensorRange,
+                      PanelStartPressed, PanelResetPressed, PanelStopCircuitClosed,
+                      PanelProcessStopCircuitClosed)
+```
+
+**Detection to a repaired input image: 10 ms** — 19:25:43,501 → 19:25:43,511, at
+the log's 1 ms resolution, and **7 of 7** nodes, not a subset. It is the only
+`WARNING` line in the whole file, and the log carries no `session broken`, no
+`connect failed` and no reconnect: **the session survived the restart**, exactly
+as in F5. What changed is that surviving it is no longer the same as missing it.
+
+**The 20 Hz CSV measures the same interval finer, and agrees.** Session-2 rows, in
+file order:
+
+| row | monotonic | rel |
+|---|---|---|
+| `L2,BridgeHeartbeat` = **3499** — the last write of the pre-restart image | 84709294837340 | 181.557 s |
+| `read_rt,BridgeHeartbeat` = **0**, `restart-detection read-back; transports nothing` | starts 84709338274975, completes 84709340062831 | 181.601 → **181.602 s** |
+| `session,server_restart_detected`, note `this session last wrote 3499; write cache invalidated` | — | — |
+| seven `L2` writes, `ConveyorBeltPosition` first … `PanelProcessStopCircuitClosed` last | last completes 84709349766834 | **181.612 s** |
+| `session,input_image_rewritten` = **`7/7`**, note **`written in one cycle`** | — | — |
+| `L2,BridgeHeartbeat` = **3500** — the counter continues, it does not restart | 84709350446952 | 181.613 s |
+
+* **detection read complete → last of the seven writes complete: 9.704 ms.**
+* from the *start* of the detecting read: **11.492 ms**.
+* the whole repair fell inside **one** bridge cycle — the containing `R1,cycle` is
+  **50.789 ms** — and the CSV's own row says so: `written in one cycle`.
+* its cost was **one** cycle overrun of **0.906 ms** past the deadline.
+
+**The mechanism F5 named is what the L1 ages prove was repaired.** F5's defect was
+that a bridge writing **on change** never rewrites a slot whose value has not
+changed. At the rewrite, the seven `L1` intervals — time since that value's last
+ROS-side sample — were:
+
+| Node | last ROS-side change before the rewrite |
+|---|---|
+| `PanelStopCircuitClosed` | **177.473 s** |
+| `PanelProcessStopCircuitClosed` | **176.224 s** |
+| `PanelResetPressed` | **144.310 s** |
+| `PanelStartPressed` | **29.894 s** |
+| `ProductSensorRange` | 26.850 ms |
+| `ConveyorBeltSpeed` | 3.761 ms |
+| `ConveyorBeltPosition` | 2.644 ms |
+
+The four contacts are precisely the slots F5 left stale — and the two stop
+circuits, unchanged for nearly three minutes, are the two whose start values
+latched a process stop in part 2. **Under the write-on-change rule alone none of
+the four would have been written at all.**
+
+**So: F5's comparable figure was 4 min 31.1 s of a stale image, ended by hand with
+a force-toggle. Build G's is 10 ms, ended by the bridge.** More than four orders
+of magnitude, and the difference between a manual recovery procedure and none.
+`SPEC.md` §12 open item 7 — the requirement the reset guard's guarantee and §8
+case C both depend on — is satisfied by behaviour; the note in that document is
+`plc/`'s to make and is requested in §B3.5, not written here.
+
+## B3.3 The observer's blind spots, stated rather than glossed
+
+The 5 Hz observer file is continuous across the restart — **1 196 rows over
+239.994 s, sample period min 0.2001 s / median 0.2008 s / max 0.2031 s, no gap and
+no failed read** — and across the whole of it:
+
+* **no heartbeat decrease.** `BridgeHeartbeat` rises monotonically 2 763 → 7 563 at
+  20.0005 counts/s, with **zero** decreasing samples.
+* **no `BridgeLinkOk` `FALSE` sample.** Zero, in 1 196 rows. The 1 Hz log agrees:
+  `True` in every poll from 19:22:48,467 to 19:31:02,312.
+* **no `CurrentSessionCount` change.** Constant at 2.
+
+**None of that means the link did not drop, and it must not be read that way.**
+The two samples that bracket the entire event are 200.7 ms apart:
+
+| observer t | `BridgeHeartbeat` | `BridgeLinkOk` | `CellCycleRunning` | `CellResetRequired` | command |
+|---|---|---|---|---|---|
+| **36.7452** | 3498 | True | True | False | +0.15 |
+| **36.9459** | 3502 | True | **False** | **True** | **0.0** |
+
+Counts 3 499, 3 500 and 3 501 were never sampled — and 3 499 is the value the
+bridge says it last wrote before reading 0. The revert to 0 and the repair
+occupied **9.704 ms** (§B3.2) inside that 200.7 ms interval, so a 200 ms sampler
+had roughly a 5 % chance of catching it and did not. **The observer's silence on
+the heartbeat is a sampling artefact of a transient shorter than its period.**
+
+The `BridgeLinkOk` silence has the same cause and a bound to go with it. On the
+RUN transition the DB reinitialises, so `BridgeLinkOk` starts at `FALSE` and
+`HeartbeatSeenAlive` at `FALSE`; the verdict can return `TRUE` only once a
+heartbeat *change* has been seen, which is one bridge cycle after the repair
+wrote 3 500. **The `FALSE` window is therefore bounded at roughly one OB call plus
+one 50 ms bridge cycle — a quarter of the observer's period at most.** Neither
+instrument could have sampled it.
+
+**Why a naive reader might also expect a heartbeat *plateau* during the STOP, and
+why there is none.** `BridgeHeartbeat` is written by the **bridge**, not by the
+program. A halted CPU does not stop it advancing: the server accepts the writes
+and the observer reads a smooth ramp for as long as the STOP lasts. The heartbeat
+is blind to a CPU STOP by construction — which is the same property §7.3 case D
+already records from the other direction.
+
+**Two consequences, recorded because they are what the artifacts can and cannot
+support.**
+
+1. **The evidence that the link dropped is the PLC's own latch, not a sampled
+   verdict.** `CellResetRequired` went `TRUE` in the same 200 ms sample as the
+   cycle dropping, and `LinkLostLatch` can only set from `BridgeLinkOk FALSE`.
+   A latch is a **level**, so a 200 ms sampler catches it; the transient that set
+   it, it cannot. *The brief describes this reaction as "20 ms-resolution": there
+   is no 20 ms instrument in this run.* The finest sampler of any `Status/` node
+   here is the **5 Hz observer**, and the 1 Hz log is the only other one. The
+   argument stands on the latch being a level, not on resolution.
+2. **The STOP residual has no committed sample.** §11 4.5 asks that the frozen
+   command leaving the belt running in Gazebo be recorded. It cannot be, from
+   these artifacts: while the CPU is in STOP the program writes nothing, so
+   `ConveyorSpeedCommand` **holds** `+0.15`, and a held value is indistinguishable
+   from a live one. The command read `+0.15` in the bridge's last read before the
+   event and `0.0` in the first read after it, 50 ms apart on the CSV's clock. The
+   residual is real, its mechanism is §A.7's and unchanged, and **its duration is
+   not measured by anything in this run** — nor, therefore, is how long the CPU
+   was actually in STOP. The transcript records the action; the artifacts record
+   only its effect.
+
+## B3.4 Disposition of §B2.12's rows after this run
+
+§B2.12 is not edited; this is where each of its rows 14–22 stands after build G.
+**Nothing here is a gate ruling.**
+
+| §B2.12 # | Now | Where |
+|---|---|---|
+| **14** — T4.9b re-run, two preconditions | **precondition (i) met, form (a) CLOSED, form (b) still open.** The §6.8 rebuild is downloaded and its provenance recorded (§B3.0). Variant **(a)**, fresh bridge with the reset held — the variant part 2 ran and failed — **passed on build G**, and the pass is a reading. Variant **(b)**, CPU start with `reset` already publishing, **did not run**: 4.5's restart *is* a CPU start, but no reset was held across it (no `PanelResetPressed` write between session-2 rel 37.307 s and rel 389.106 s, with the restart at rel 181.6 s inside that gap and the last written value `False`). §11 4.9b is one step that must hold for **both** forms, so **the step is not yet a pass** | §B3.1 4.9b |
+| **15** — T4.11's reaction path, re-recorded | **still open, and deliberately not attempted here.** T4.11 is not in §6.8's re-run list, and build G carries `BELT_SPEED_MIN`/`MAX` at ±1.00 — the CSV shows full ±0.15 strokes with no C5 intervention — so the narrowed-constant method was not in force. What *has* changed is the instrument the step nominates: the per-session CSV exists and is demonstrated (§B3.0), so the re-run is now possible without reproducing LIMITATION 1. The measurement itself is still uncorroborated by any committed file | §B2.13 F4; §B3.0 |
+| **16** — T4.11b, the latch and its reset | **still open and still BLOCKED.** `SPEC.md` §12 item 6's hold-until-disarmed fault-injection facility does not exist; nothing in this run builds or approaches it. Not runnable, not a pass by default | §B2.13 F4 |
+| **17** — 4.2, 4.3, 4.5 and 4.8 re-run against the corrected build | **4.3 CLOSED in full. 4.2 and 4.5 closed on their server-visible halves; their Group 4 halves are not read. 4.8 half re-run** — its R3 half is measured, its **cold start did not happen**. The one reading that would discriminate build G's boot polarity from build C's — `ProcessStopLatch`/`BridgeLinkOk` inside the first `HEARTBEAT_STALE_TIME` of a CPU run with the bridge **down** — is still owed, and §B2.12a's "cheapest available before/after test" is therefore still not performed | §B3.1, §B3.0 |
+| **18** — Group 4 `PositionFrozen`/`PositionRef` for T4.6 and T4.6b | **unchanged.** No case-D step was re-run and no watch table was captured in this run. The same gap recurs one event later: no capture covers 19:25:43 either, so which latch set `CellResetRequired` at 4.5 is inferred, not read | §B3.1 4.5 |
+| **19** — case C as a link break with the CPU running | **unchanged.** STOP → RUN was performed a third time; the adapter was again never stopped under a running program | — |
+| **20** — a bridge that repairs the input image after a server restart | **CLOSED.** The facility exists and is measured: restart detected under a surviving session, **7 of 7** nodes rewritten, **10 ms** from the log's own two timestamps, **9.704 ms** on the CSV's clock, inside one 50.789 ms cycle, on slots whose last ROS-side change was up to **177.473 s** earlier. F5 is fixed. `SPEC.md` §12 item 7 is satisfied by behaviour; the note in that document is requested, not written | **§B3.2** |
+| **21** — the 17:14:07 – 17:49:06 hole, and the one-CSV-per-session rule | **the rule is CLOSED; the hole is permanent.** Two uniquely named CSVs, one per session, neither truncating the other, and the log names the path at every start. Part 2's hole is a fact about a past run and nothing here changes it | §B3.0 |
+| **22** — why `PresenceOnTimer.PT` reads `T#0MS` after a CPU restart | **not advanced, and one coarse datum added.** A **full clean cycle ran after the CPU restart** — presence asserted 19:29:25,112, released 19:29:27,210, clean end 19:29:35,462 — so the presence verdict works post-restart. That is the same class of argument F6 already makes for itself and is **not** a resolution: at 1 Hz (the observer had stopped) nothing here can measure a 100 ms filter, and `PresenceOnTimer.PT` is Group 4. Still one watch-table row at the next download | §B2.13 F6 |
+
+## B3.5 What part 3 does not establish, and what it requests elsewhere
+
+**Not established, in one list.** A CPU **cold start** with the bridge down, which
+is 4.8's other half and the only direct test of the boot polarity; **4.9b variant
+(b)**; any **Group 4** value whatsoever — no watch-table capture was taken in this
+run, so `HeartbeatSeenAlive`, `ResetDeviceFault`, `LinkLostLatch`,
+`ProcessStopLatch`, `SeqStep`, `PositionRef`, `PositionFrozen` and every timer `ET`
+are unread and appear above only as inferences that are labelled as such; the
+duration of the CPU's STOP and hence the **STOP residual**; an **adapter** break
+under a running program; **T4.11**'s reaction re-record; and **T4.11b**, which has
+no facility to run on. Cycle-rate and R3 statistics for build G are absent because
+neither process was shut down cleanly.
+
+**Requested outside `bridge/`, not written here.**
+
+1. **`docs/interfaces/bridge-design.md`** — §8.1's *Detection* row defines a broken
+   session as "a failed read or write, or a session/keep-alive failure". A server
+   that **restarts under a surviving session** produces none of those, and §7.3
+   case C assumes the session breaks. The implemented behaviour — detect
+   `BridgeHeartbeat` reverting below what this session last wrote, invalidate the
+   write cache, rewrite every slot with a real sample — is in the code and now in
+   this evidence, and the design document does not carry it. It needs a row, and
+   the bridge's own log cites "§8.1" for a rule that is not yet there.
+2. **`plc/demo-cell/SPEC.md`** — §12 open item 7 is satisfied by behaviour (§B3.2)
+   and should record it; §6.7's guarantee, which is conditional on a truthful
+   input image, can now name the mechanism that makes it so. §11 4.9b's as-run
+   status is variant (a) passed, variant (b) outstanding. `plc/`'s to write.
+3. **Build letters** — the `m3-36` brief's "build E" is this section's **build G**,
+   because §B2.9 already spends E and F. Any tracking file that adopted the
+   brief's letter should be corrected to G.
+4. **A watch-table capture at the next CPU cold start with the bridge down.** It is
+   one capture, it is the only direct test of the §6.8 boot polarity, and it is the
+   single highest-value reading still missing from this file.
 
 ---
 

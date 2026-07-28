@@ -42,6 +42,14 @@ against the seven-node image.
 > produced each figure; the full accounting stays in `EVIDENCE_LATENCY.md`
 > Section B, part 1 and part 2.
 >
+> A third session the same evening, **19:15–19:31**, re-ran the five `SPEC.md` §11
+> steps that cross a CPU start or a link-up against the **§6.8 rebuild**. Two
+> results belong to this file: case **C** with the session surviving now ends in a
+> **repaired** input image — **10 ms**, 7 of 7 nodes — instead of a stale one held
+> for four and a half minutes, and the same restart no longer latches a process
+> stop from reverted contacts. See **"The same case on the §6.8 rebuild"** under
+> case C below, and `EVIDENCE_LATENCY.md` **Section B, part 3**.
+>
 > Nothing below is re-run or edited by that work; each record stays qualified by
 > the environment that produced it.
 
@@ -393,6 +401,12 @@ restart and rewrite every slot* (`plc/demo-cell/SPEC.md` §12 open item 7,
 LESSONS 2026-07-28). Until it lands, force-republish every level after any CPU
 restart. Full record: `EVIDENCE_LATENCY.md` §B2.13 F5.
 
+> **That fix has since landed and been measured**, later the same evening against
+> the §6.8 rebuild — **10 ms** from detection to a repaired image, 7 of 7 nodes.
+> The record above is not amended: it stays a true statement about the build and
+> the bridge of 16:51. See **"The same case on the §6.8 rebuild"** below, and
+> `EVIDENCE_LATENCY.md` §B3.2.
+
 **One residual, recorded because it is a real limit and not a defect:** while the
 CPU was in STOP the server held its last command, `+0.15`, and the belt kept
 running in Gazebo **[transcript]** — §A.3 again. No safety function is involved
@@ -424,6 +438,76 @@ boot window, is `EVIDENCE_LATENCY.md` §B2.7c.
 
 **Neither sub-case is a safety event** (invariant 2): both end with the cell
 stopped, latched and requiring a monitored reset.
+
+### The same case on the §6.8 rebuild — the bridge now repairs the image, and the PLC no longer accuses the panel
+
+A **third** CPU STOP → RUN was performed at **~19:25:43 [transcript]** in the
+re-run of 2026-07-28 19:15–19:31, again with a live bridge session, this time
+against the §6.8 rebuild (**build G**; `EVIDENCE_LATENCY.md` §B3.0 explains why it
+is not called E) and against a bridge that now carries a restart-detection path.
+That path cites `bridge-design.md` §8.1 in its own log line, but **§8.1 does not
+yet describe it** — its *Detection* row defines a broken session as a failed read,
+write or keep-alive, and a server that restarts under a surviving session produces
+none of those. The row is requested in `EVIDENCE_LATENCY.md` §B3.5 and is
+`docs/interfaces/`' to write. Artifacts:
+`bridgelog-2026-07-28-rerun68.log.gz`,
+`latency-2026-07-28-plcsim-rerun68-20260728T172241Z-pid37442.csv.gz`,
+`plc-observe-2026-07-28-t45-rerun.csv.gz`. Full accounting:
+`EVIDENCE_LATENCY.md` **Section B, part 3**.
+
+**What the bridge did, which is the whole difference.** The session survived the
+restart exactly as before — no `session broken`, no `connect failed`, no
+reconnect — but the bridge now notices for a different reason: it compares the
+heartbeat it reads against the value **this session** last wrote.
+
+```
+19:25:43,501 WARNING BridgeHeartbeat reads 0 but this session last wrote 3499: the server
+                     restarted under a live session, so its input image is stale.
+                     Invalidating the write cache (§8.1).
+19:25:43,511 INFO    input image rewritten after cache invalidation: 7 of 7 nodes
+```
+
+* **10 ms** from detection to a repaired image, on the log's own two timestamps;
+  **9.704 ms** on the CSV's monotonic clock, inside **one** 50.789 ms bridge cycle,
+  which the CSV states in its own row: `input_image_rewritten 7/7`,
+  `written in one cycle`.
+* **7 of 7**, not a subset — and the four that mattered are the ones write-on-change
+  could never have sent: at the moment of the rewrite, `PanelStopCircuitClosed` had
+  not changed on the ROS side for **177.473 s** and
+  `PanelProcessStopCircuitClosed` for **176.224 s**. Those are the two whose start
+  values latched a process stop in §C above.
+* the heartbeat **continued** at 3500 rather than restarting, per §8.1's continuity
+  rule; the PLC needs only *change*, so this is harmless either way.
+
+**What the PLC did, and the signature that changed with it.** The cycle dropped and
+the link-lost latch appeared together — `CellCycleRunning True → False` and
+`CellResetRequired False → True` in the same 1 Hz poll at **19:25:44,065**, and in
+the same 200 ms observer sample as the command going `0.15 → 0.0` — while
+**`CellProcessStopActive` stayed `FALSE`**: zero `True` samples in all 1 196
+observer rows and `False` in every 1 Hz poll of the session. Against §C above,
+where the same failure produced a latched process stop held for 4 min 31.1 s, this
+is the corrected signature of `SPEC.md` §6.1: the panel is no longer accused of a
+stop that was never seen. Nothing is weakened — `CellResetRequired` still latched,
+the command still went to `0.0`, and recovery still took a reset that **moved
+nothing** (19:29:11,709) followed by a **separate** start press (19:29:18,909 →
+clean end 19:29:35,462).
+
+**Two things this sub-case does not show, said here rather than left to be
+assumed.**
+
+* **The `BridgeLinkOk FALSE` window was never sampled**, by either client. The 5 Hz
+  observer is continuous across the event with no gap and no failed read, and it
+  recorded **no** heartbeat decrease and **no** `BridgeLinkOk FALSE` sample —
+  because the revert-and-repair transient is 9.704 ms inside a 200.7 ms sampling
+  interval, and because `BridgeHeartbeat` is written by the *bridge*, so a halted
+  CPU does not stop it advancing at all. **That silence is a sampling artefact, not
+  evidence that the link held.** The evidence that it dropped is the PLC's latch,
+  which is a level and therefore survives to be sampled.
+* **The STOP residual has no committed sample in this run.** While the CPU is in
+  STOP the program writes nothing, so `ConveyorSpeedCommand` *holds* its last
+  value and a held value is indistinguishable from a live one. §A.3's residual is
+  unchanged and undisputed; its duration, and hence how long the CPU was actually
+  in STOP, is not measured by anything here.
 
 ## D — simulation stopped, bridge alive: two sub-cases, and only one of them is in the container set
 
@@ -525,12 +609,23 @@ Python server with no program, and the reaction figures stay qualified by the da
 and the program build that produced them.
 
 Three things the PLCSIM section still does not establish, carried as
-owner-outstanding rows in `EVIDENCE_LATENCY.md` §B2.12: case C as a **network or
-adapter** break with the CPU still running (CPU STOP → RUN was performed in both
-of its bridge states, but the adapter was never broken under a running program),
-the §9 **Group 4** readings that name which drive-fault term fired in D (i) and
-D (ii) — no capture covers either moment — and a **cold start of the CPU**
-(T4.8/T4.9b), which no run has yet done.
+owner-outstanding rows in `EVIDENCE_LATENCY.md` §B2.12 and re-dispositioned in
+§B3.4: case C as a **network or adapter** break with the CPU still running (CPU
+STOP → RUN has now been performed three times and in both of its bridge states,
+but the adapter was never broken under a running program), the §9 **Group 4**
+readings that name which drive-fault term fired in D (i) and D (ii) — no capture
+covers either moment, and none covers the 19:25:43 restart either — and a **cold
+start of the CPU**, which no run has yet done.
+
+That last one wants splitting now that the §6.8 rebuild has been exercised.
+**T4.9b's fresh-bridge form no longer needs a cold start and has passed** on build
+G: a reset held from before link-up was refused for 28.202 s across the link-up and
+only a fresh rising edge cleared the latches (`EVIDENCE_LATENCY.md` §B3.1). What
+still needs a cold start is **T4.8's first clause** — and with it the only direct
+reading of the corrected boot polarity, `ProcessStopLatch` and `BridgeLinkOk`
+inside the first `HEARTBEAT_STALE_TIME` of a CPU run **with the bridge down**,
+where no rewrite can mask the answer — and **T4.9b's second form**, a CPU start
+with `reset` already publishing. Neither has been done.
 
 Loss of the bridge is a **degraded mode, not a safety event** (invariant 2), and
 no safety function appears anywhere in these four cases (invariant 1).
