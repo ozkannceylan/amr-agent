@@ -1267,6 +1267,27 @@ double **not** running, and the watch table of §9 open in *Monitor* mode.
 Panel contacts are driven exactly as `sim/README.md` shows, e.g.
 `ros2 topic pub -1 /cell/panel/start std_msgs/msg/Bool "{data: true}"`.
 
+### How the **Pass** lines below are counted
+
+Three rules govern every pass claim in this section. They exist because a count
+written once outlives the run it was written for.
+
+1. **A count is the number of rows in that scenario's own step table, and
+   nothing else.** Sub-lettered steps — 1.1b, 4.6b, 4.9b — are steps and count
+   as such. A scenario with no numbered table carries no count; T3 is one.
+   The counts are stated once, on each scenario's own **Pass** line, and are
+   re-derived from the table whenever that table changes.
+2. **A count here is the specified denominator, never a claim about a run.**
+   When this document adds or re-specifies a step after a run, the count here
+   grows and the evidence document gains an **outstanding row**. The denominator
+   of a run that already happened never grows: what ran, ran.
+3. **A step recorded as failed, not run or not executable is not a pass by
+   default.** The as-run record is `bridge/EVIDENCE_LATENCY.md` §B.7 (the
+   roster), §B.12 (owner-outstanding) and §B.13 (findings that belong to this
+   program). A scenario passes when every step in its table has been executed
+   against the program build in RUN and recorded there — so a pass claim always
+   names the build it was taken against.
+
 ### T1 — Gazebo sensor state visible as PLC input bits *(exit item a)*
 
 | Step | Action | Pass |
@@ -1278,8 +1299,17 @@ Panel contacts are driven exactly as `sim/README.md` shows, e.g.
 | 1.4 | With the belt clear, read `ProductSensorRange`; then run the cycle until the product blocks the beam | ≈1.440 → ≈0.540, and `ProductPresentAtSensor` follows ~100 ms later |
 | 1.5 | Screenshot the watch table with the belt moving | `ConveyorBeltPosition` and `ConveyorBeltSpeed` change live |
 
-**Pass: all six.** Evidence: watch-table screenshots plus a note of the
-corresponding `ros2 topic echo` output.
+**Pass: all six steps of the table above.** Evidence: watch-table screenshots
+plus a note of the corresponding `ros2 topic echo` output.
+
+> **1.4 is recorded as failed and is not passed by default** (rule 3). In the
+> run of `bridge/EVIDENCE_LATENCY.md` Section B, the first half of 1.4 happened
+> exactly as written — `ProductSensorRange` fell to the beam-blocked value and
+> held there far longer than `PRESENCE_FILTER` — but `ProductPresentAtSensor`
+> **never changed state for the whole run**, so the second half did not happen
+> (§B.13 F1). Six of six therefore requires 1.4 re-run against a build that
+> answers F1, with §9 Group 4 in the watch table: that is the only instrument
+> that separates a filter fault from a verdict that is never written.
 
 ### T2 — PLC output driving the Gazebo actuator *(exit item b)*
 
@@ -1294,7 +1324,15 @@ corresponding `ros2 topic echo` output.
 | 2.7 | Publish `reset` `true`, then `false` | Latches clear on the `true` edge, `CellResetRequired` → `FALSE`, **and nothing moves**: `ConveyorSpeedCommand` stays `0.0`, `CellCycleRunning` stays `FALSE`, `SeqStep` stays 0 |
 | 2.8 | Publish `start` `true`, then `false` | The cycle starts. **Two deliberate actions on two different buttons**, never one |
 
-**Pass: all eight.** Evidence: screen recording of Gazebo beside the watch table.
+**Pass: all eight steps of the table above.** Evidence: screen recording of
+Gazebo beside the watch table.
+
+> **2.2–2.4 have never been reached** (rule 3). They sit downstream of the
+> presence verdict, so the same F1 that fails T1.4 makes them unreachable, and
+> the recorded run supports no claim over them (`EVIDENCE_LATENCY.md` §B.12
+> item 8). Eight of eight needs the same rebuild T1.4 needs. The re-home branch
+> of 2.1 is the part of this scenario that *did* run, repeatedly (§B.13 F1),
+> and only from the positive side of home.
 
 ### T3 — Latency and update rate measured and written down *(exit item c)*
 
@@ -1318,7 +1356,9 @@ list:
 **Pass:** the statistics table is filled in with count / min / median / p95 / max
 (never a bare mean), the achieved cycle rate is stated, and the environment
 (TIA version, PLCSIM version, CPU, firmware, network path, and confirmation that
-Tailscale is **not** in that path — invariant 8) is recorded.
+Tailscale is **not** in that path — invariant 8) is recorded. **T3 has no
+numbered steps and therefore no count** (rule 1): its checklist is Section B's
+own item list, plus the two PLC-side obligations above.
 
 ### T4 — Signal-loss behaviour defined and tested *(exit item d)*
 
@@ -1341,15 +1381,19 @@ definition is §8 of this document; this is its test.
 | 4.10 | **Session behaviour on a real server**: time how long the S7-1500 holds the session after a bridge `SIGKILL` | Recorded as a number. This is the one in-container result known not to transfer (`EVIDENCE_SIGNAL_LOSS.md` A.4) — and it must **not** be used as an input to the program |
 | 4.11 | **Belt feedback plausibility** (§6.2.2), by the narrowed-constant method below | `BeltFeedbackFaultLatch` latches, `CellCycleRunning` → `FALSE`, `ConveyorSpeedCommand` → `0.0`, `CellResetRequired` → `TRUE`; reset clears it and start re-runs the cell once the constant is restored |
 
-**Pass: all thirteen.** Evidence appended to `bridge/EVIDENCE_SIGNAL_LOSS.md` as
-a PLCSIM section beside the container run, per `EVIDENCE_LATENCY.md` Section B
-item 6.
+**Pass: all thirteen steps of the table above.** Evidence appended to
+`bridge/EVIDENCE_SIGNAL_LOSS.md` as a PLCSIM section beside the container run,
+per `EVIDENCE_LATENCY.md` Section B item 6.
 
-> **Thirteen is the specified list, not a claim about a run.** A pass count in an
-> evidence document is derived from the steps that were actually executed at the
-> time it is written. When this specification adds a step after a run — 4.6b and
-> 4.11 both are — the evidence gains an **outstanding row**, never a larger
-> denominator.
+> **Thirteen is the specified list, not a claim about a run** (rule 2). The
+> recorded run in `EVIDENCE_LATENCY.md` Section B covered the twelve steps the
+> list then held: seven ran, one of those **failed** (the then-4.6, §B.13 F2),
+> one was attempted and found **not executable** (the then-4.7), and four did
+> not run — 4.5, 4.8, 4.9b and 4.11 (§B.7 roster). Since that run, 4.6b was
+> added and 4.6 and 4.7 were re-specified, so **no step of case D carries a
+> valid as-run result** and no pass over all thirteen is available from that
+> evidence. What is missing is tracked as outstanding rows in §B.12, never as a
+> smaller denominator here.
 
 #### How 4.11 is run, and what it does and does not prove
 
