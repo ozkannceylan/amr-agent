@@ -28,8 +28,11 @@ decisions in docs/reports/pub-01-public-readiness-audit.md.
 ## live run 2026-07-28 — COMPLETE (agent-drivable part)
 - T1 6/6 rerun with the real 100 ms filter; T2 8/8; T4: 4.1-4.4 ✓, 4.5 ✓ (STOP/RUN, plus the write-cache finding), 4.6 ✓ re-measured 2.79 s freeze-to-fault (inside the 2.1-3.2 s bound, 20 Hz CSV), 4.6b ✓ (D1 ~1 s), 4.7 ✓ (reset refused while image claims motion, honoured after revive), 4.8 ✓ (R3 proven input by input), 4.9 ✓, 4.9b FAILED with finding (link boot polarity), 4.10 ✓ (SIGKILL ~22 s hold vs SIGTERM immediate), 4.11 reaction path ✓ / latch step untestable as specified (finding). Cycle times: 1.004/1.023/2.556 ms on a 20 ms OB30. Rebuild baseline SPEC @ 39a21b6 + the three-delta and PT-fix downloads. Raw artifacts committed in bridge/evidence/*2026-07-28*.
 
-## bridge
-- m3-36 rebuild re-run evidence (issued) — done when the five re-runs against build E are recorded with verdicts, the §B2.12 rows they close are closed, and the rewrite-on-restart interval is derived from the committed log.
+## verifier
+- m3-37 M3 gate verification (issued) — done when each of the four exit items carries a met/not-met ruling against the roadmap's own text, the two knowingly-open belt-plausibility items and 4.9b's partial status are ruled on by name, and the report ends with one verdict plus the sentence roadmap.md should carry if it closes.
+
+## interface (fold together, from m3-35 and m3-36)
+- bridge-design.md §8.1 has no restart-detection row although the shipped code's log line cites it; §2's cycle description predates the once-per-cycle heartbeat read-back. Also SPEC §12 item 7 is now satisfied by behaviour (plc/ to close).
 
 ## bridge
 - m3-35 session-lifecycle conformance (issued) — done when a recorded double run proves reconnect-on-in-flight-failure, full slot rewrite on server restart, and per-session evidence CSVs. When it lands, reconcile EVIDENCE_LATENCY §B2.12 rows 20-21 (written as open requests) in the same commit.
