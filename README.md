@@ -71,7 +71,7 @@ are enough to make every signal in the loop observable.
 | Grey cube | The transported product | None. Its ground-truth pose is a diagnostic topic and deliberately **not** a PLC node — a real conveyor has no product-position transducer. |
 | Post + reflector across the belt | Retro-reflective through-beam photo-eye | `ProductSensorRange` — a raw analogue **distance**, 1.440 m clear / 0.540 m blocked. The threshold is program logic, published back as `ProductPresentAtSensor`. |
 | Pedestal, four buttons | Operator panel field contacts | `PanelStartPressed`, `PanelResetPressed` (wired **NO**) · `PanelStopCircuitClosed`, `PanelProcessStopCircuitClosed` (wired **NC**) |
-| Red mushroom | A **process** stop in the standard program | Deliberately not an emergency stop and carrying no safety integrity. The e-stop chain is hardwired to the F-CPU and arrives at M4; it never crosses the network. |
+| Red mushroom | A **process** stop in the standard program | Deliberately not an emergency stop and carrying no safety integrity. The e-stop chain is hardwired to the F-CPU and arrives at M5; it never crosses the network. |
 
 Wire NC, program NO: stop devices are wired closed so a broken wire drops the
 signal and stops the machine. The cell publishes the raw contact — no
@@ -95,7 +95,7 @@ Every figure reproduces from a committed artifact.
 | | | |
 |---|---|---|
 | Bridge cycle | **20.00 Hz** over 14 244 cycles, 1 overrun of 3.93 ms, 0 read or write errors | [`bridge/EVIDENCE_LATENCY.md`](bridge/EVIDENCE_LATENCY.md) §B2.3 |
-| Closed loop, input write → PLC output change | median **46.8 ms** — an *upper bound*, quantised by the bridge's own 50 ms poll | [`bridge/EVIDENCE_LATENCY.md`](bridge/EVIDENCE_LATENCY.md) §B.6; §B2.5 finds the same cluster on a later build |
+| Closed loop, input write → PLC output change | median **46.8 ms** — an *upper bound*, quantised by the bridge's own 50 ms poll | [`bridge/EVIDENCE_LATENCY.md`](bridge/EVIDENCE_LATENCY.md) §B.5; §B2.5 finds the same cluster on a later build |
 | Gazebo killed mid-motion → drive fault latched, setpoint zeroed | **2.301 s**, inside the specified [2.1, 3.2] s window | [`bridge/EVIDENCE_SIGNAL_LOSS.md`](bridge/EVIDENCE_SIGNAL_LOSS.md) |
 | CPU cycle time, shortest / last / longest | **1.004 / 1.023 / 2.556 ms**, against the program's configured 20 ms OB30 period | [watch-table capture](plc/demo-cell/evidence/watch-table/Screenshot%202026-07-28%20174127.png) |
 
@@ -109,7 +109,7 @@ Every figure reproduces from a committed artifact.
 rendered here from the manufacturer's own BSD-3-Clause ROS 2 description
 (see [assets/CREDITS.md](assets/CREDITS.md)), not a marketing image. A mobile
 manipulator, so the arm exists in the model from the start and stays out of
-scope until M10. It joins the demonstration at **M5**.
+scope until M11. It joins the demonstration at **M6**.
 
 ---
 
@@ -117,7 +117,7 @@ scope until M10. It joins the demonstration at **M5**.
 
 M3 closed 2026-07-28, verified in
 [docs/reports/m3-37-gate-verification.md](docs/reports/m3-37-gate-verification.md)
-(pass-with-findings). Next gate: **M4**. Tracked in
+(pass-with-findings). Next gate: **M4 — Forklift commissioning cell**. Tracked in
 [docs/roadmap.md](docs/roadmap.md); a gate closes only on observable
 behaviour, never on written code.
 
@@ -127,17 +127,21 @@ behaviour, never on written code.
 | M1 | Interface contracts | **done** |
 | M2 | Safety requirements spec | **done** |
 | M3 | Fixed equipment I/O loop | **done** |
-| M4 | Safety layer on the fixed cell (F-CPU) | next |
-| M5 | Simulated vehicle | planned |
-| M6 | VDA 5050 client | planned |
-| M7 | Fleet manager | planned |
-| M8 | PLC integration | planned |
-| M9 | Demonstration | planned |
-| M10 | Arm integration | planned |
-| M11 | Command path from Hermes | parked |
+| M4 | Forklift commissioning cell | next |
+| M5 | Safety layer on the fixed cell (F-CPU) | planned |
+| M6 | Simulated vehicle | planned |
+| M7 | VDA 5050 client | planned |
+| M8 | Fleet manager | planned |
+| M9 | PLC integration | planned |
+| M10 | Demonstration | planned |
+| M11 | Arm integration | planned |
+| M12 | Command path from Hermes | parked |
 
-Gate order follows [ADR 0007](docs/adr/0007-safety-first-gate-order.md): the
-Gazebo-to-PLC signal loop is proven first, then the safety layer on that same
+Gate order follows
+[ADR 0008](docs/adr/0008-forklift-commissioning-gate-and-hmi-layer.md), which
+extends [ADR 0007](docs/adr/0007-safety-first-gate-order.md) rather than
+superseding it: the fixed-equipment Gazebo-to-PLC signal loop is proven first,
+then the same cell gains a teleoperated forklift, then the safety layer on that
 cell, before any mobile robot, broker or fleet work.
 
 ---
