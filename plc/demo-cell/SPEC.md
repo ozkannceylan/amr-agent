@@ -140,9 +140,10 @@ interface. All live in the instance DB `"DemoCellControl_DB"`.
 | `RangeInvalidTimer` | IEC_TIMER (TON) | — | Delay before an implausible `ProductSensorRange` becomes a fault |
 | `BeltFeedbackInvalidTimer` | IEC_TIMER (TON) | — | Delay before an implausible `ConveyorBeltPosition` **or** `ConveyorBeltSpeed` becomes a fault. One timer for both: the two values arrive in the same `/cell/conveyor/joint_state` sample from one publisher, so they fail together and there is nothing to tell apart at this level (§6.2.2) |
 | `DriveFaultTimer` | IEC_TIMER (TON) | — | Delay on the drive-disagreement condition |
-| `PositionRef` | Real | `0.0` | Belt position sampled at the start of each drive-fault window |
-| `PositionWindowTimer` | IEC_TIMER (TON) | — | Window over which belt travel is checked against `PositionRef` |
-| `PosWindowArmed` | Bool | `FALSE` | `PositionRef` has been sampled for the current window. Static, not temp — it spans scans |
+| `PositionRef` | Real | `0.0` | Belt position at the start of the **current** freeze window. **Re-sampled at every window expiry** for as long as motion is claimed — not once per motion segment (§6.6) |
+| `PositionWindowTimer` | IEC_TIMER (TON) | — | The freeze window. Runs for `POSITION_WINDOW_TIME`, is released for exactly one OB call at expiry so that it restarts, and keeps re-arming while motion is claimed (§6.6) |
+| `PosWindowArmed` | Bool | `FALSE` | A freeze window is running: `PositionRef` holds this window's reference and the timer is counting. Cleared for one call at expiry — which is what restarts the TON — and cleared while no motion is claimed. Static, not temp: it spans scans |
+| `PositionFrozen` | Bool | `FALSE` | Verdict of the **last completed** freeze window: motion was claimed and the belt did not travel. A **level** condition, re-evaluated at every window expiry and cleared the moment motion is no longer claimed. It is **not** a latch and is **not** cleared by the monitored reset (§6.6) |
 | `ProcessStopLatch` | Bool | `FALSE` | Panel stop or process stop has opened |
 | `LinkLostLatch` | Bool | `FALSE` | Heartbeat went stale |
 | `SensorFaultLatch` | Bool | `FALSE` | `ProductSensorRange` implausible for longer than the delay |
@@ -180,7 +181,8 @@ that the node model and the bridge design deliberately refused to make
 | `STEP_TIMEOUT` | `T#60s` | Watchdog on any moving step |
 | `SPEED_TOLERANCE` | `0.02` m/s | 13 % of the transport speed. Measured belt speed tracks the command closely and reads ~1e-28 at rest (`EVIDENCE_SIGNAL_LOSS.md`), so this is generous |
 | `DRIVE_FAULT_DELAY` | `T#1s` | Covers start transients and the direction reversal at step 30 |
-| `POSITION_FREEZE_BAND` | `0.005` m | Travel expected in 1 s at the tolerance speed is 0.02 m; 0.005 m is comfortably below it |
+| `POSITION_WINDOW_TIME` | `T#1s` | Length of one freeze window (§6.6). The same value as `DRIVE_FAULT_DELAY` today, and deliberately **its own constant**, for the reason `BELT_FAULT_DELAY` is: the two tune different things — how long a disagreement must persist, versus how often the freeze test re-arms — and retuning one must not silently retune the other (invariant 10). A window repeats every `POSITION_WINDOW_TIME` **plus two OB calls** (1.04 s at a 20 ms OB30), the two extra calls being the expiry call and the single release call that restarts the TON |
+| `POSITION_FREEZE_BAND` | `0.005` m | Travel over one 1.04 s window at the slowest speed that still counts as motion (`SPEED_TOLERANCE` 0.02 m/s → 0.0208 m) is **4.2×** the band; at `TRANSPORT_SPEED` it is **31×**. The band detects a freeze, it does not second-guess a speed |
 | `HEARTBEAT_STALE_TIME` | `T#500ms` | Heartbeat nominal period 50 ms; the in-container run showed a 79 ms worst-case cycle. 500 ms ≈ 10 missed beats: tolerant of jitter, fast enough to be seen live. **Re-check against the PLCSIM run** and raise it only with evidence |
 
 ---
@@ -494,7 +496,7 @@ Then:
 | Set | Definition | Used for |
 |---|---|---|
 | `RunPermissive` | `WorldOk` **and** no latch pending: `NOT ConveyorDriveFault`, `NOT SensorFaultLatch`, `NOT BeltFeedbackFaultLatch`, `NOT SequenceFaultLatch` | May the cell run, and may the setpoint pass (§6.4) |
-| `CauseGone` | `WorldOk` **and** `NOT (D1 OR D2)` — the drive is not disagreeing with its command *at this instant* (§6.6) | May a reset clear the latches (§6.7) |
+| `CauseGone` | `WorldOk` **and** `NOT (D1 OR D2)` — the drive is not disagreeing with its command *now*: D1 at this instant, D2 as of the last completed freeze window (§6.6) | May a reset clear the latches (§6.7) |
 
 Why the two differ:
 
@@ -505,8 +507,16 @@ Why the two differ:
   scan before the belt does — so a permissive containing it would drop the cycle
   the instant it started. The *delayed* verdict `ConveyorDriveFault` is what gates
   running; the instantaneous terms only answer "is the drive still misbehaving
-  right now", which is the question a reset asks. With the command at `0.0` they
-  are false, which is what lets a drive fault be reset and then re-prove itself.
+  right now", which is the question a reset asks. **The two terms clear by
+  different means, and that difference is deliberate.** D1 carries the command,
+  so it is false as soon as the cycle drops and the setpoint is zeroed — a
+  stalled drive can therefore be reset and then re-prove itself on the next
+  start. D2 carries only the *feedback*: it stays true while the read-back
+  still claims motion the position does not support, whatever the command is
+  doing. So a reset is **refused** for as long as a frozen image keeps claiming
+  0.15 m/s, and becomes possible the moment the read-back is live again
+  (§6.6, §8 case D). That is `CauseGone` doing exactly its job — the cause of a
+  stale-data fault is the stale data, not the command.
 
 **The ±2.40 m soft limit is a step-level abort, not a blanket permissive.** If
 "belt inside the limits" were a run permissive, a belt sitting on the limit could
@@ -646,6 +656,13 @@ The same reasoning does not apply to the timers of §6.2 and §6.6
 by a level condition that genuinely goes false, and each is re-evaluated on the
 first call after its enclosing condition returns.
 
+`PositionWindowTimer` goes one step further and **releases itself on purpose**:
+its `IN` carries `PosWindowArmed`, which is cleared for exactly one OB call at
+every expiry (§6.6). That is not the forbidden pattern wearing a disguise — it
+is the opposite of it. A TON is restarted only by `IN` going false, so a window
+that must repeat *while its enabling condition stays true* has to drop `IN` for
+one call; the call site is still unconditional and outside every branch.
+
 ### 6.6 Drive fault — and how case D is caught
 
 Evaluated only while `BridgeLinkOk` is TRUE, so a frozen input image during a
@@ -661,31 +678,133 @@ Two independent terms, either one arms `DriveFaultTimer` (`DRIVE_FAULT_DELAY`):
 
 | Term | Condition | What it catches |
 |---|---|---|
-| **D1 — commanded but not moving** | `ABS(ConveyorSpeedCommand) > SPEED_TOLERANCE` **and** `ABS(ConveyorBeltSpeed) ≤ SPEED_TOLERANCE` | A stalled or unresponsive drive; the belt sitting on its mechanical stop; **and signal-loss case D**, where the simulation was stopped under a live bridge and the frozen input image reads speed ≈ 0 against a non-zero command |
-| **D2 — moving on paper only** | `ABS(ConveyorBeltSpeed) > SPEED_TOLERANCE` **and** belt travel over the window `< POSITION_FREEZE_BAND` | A read-back frozen at a *non-zero* value: speed claims motion while position does not move. Physics and the encoder disagree, so one of them is stale |
+| **D1 — commanded but not moving** | `ABS(ConveyorSpeedCommand) > SPEED_TOLERANCE` **and** `ABS(ConveyorBeltSpeed) ≤ SPEED_TOLERANCE` | A stalled or unresponsive drive; a belt sitting on its mechanical stop; and the **at-rest** variant of signal-loss case D, where the image froze while the belt was already stationary, so the frozen speed read-back is ≈0 against a non-zero command. **D1 is blind to a freeze that happens while the belt is moving**, because the frozen read-back then holds a plausible non-zero speed. That case belongs to D2 and to nothing else |
+| **D2 — moving on paper only** | motion claimed — `BeltFeedbackValid` **and** `ABS(ConveyorBeltSpeed) > SPEED_TOLERANCE` — **and** travel over the **last completed freeze window** `< POSITION_FREEZE_BAND` | A read-back frozen at a *non-zero* value: speed claims motion while position does not move. Physics and the encoder disagree, so one of them is stale. This is the **mid-motion** variant of case D — the one the heartbeat cannot see, because the bridge is alive and counting |
 
-D2's window: on the rising edge of the condition, sample `PositionRef :=
-ConveyorBeltPosition` and start `PositionWindowTimer`; on expiry compare
-`ABS(ConveyorBeltPosition - PositionRef)`. D2 therefore trips after its own
-window **plus** `DRIVE_FAULT_DELAY` — about 2 s. That is intentional: D2 accuses
-the encoder of lying, and it should be the slower of the two verdicts.
+#### 6.6.1 The freeze window re-arms; it is not one shot per motion segment
 
-Because `#beltMoving` now carries `BeltFeedbackValid`, the window is **armed only
-from a plausible position**: `PositionRef` — a static that survives the scan —
-can never be loaded with `NaN`, and it is re-armed on the next start of motion
-after the feedback recovers.
+**This is the correction of a real defect, not a refinement.** The earlier form
+sampled `PositionRef` once, on the rising edge of motion, and never again while
+motion continued. Travel was therefore measured from the *start of the stroke*,
+so a freeze that began after the belt had already moved further than
+`POSITION_FREEZE_BAND` could never satisfy the comparison — the window detected a
+freeze only inside the first `POSITION_FREEZE_BAND / speed` ≈ **33 ms** of
+motion, and was blind for the rest of the stroke. The m3-26 PLCSIM run is the
+proof: the image froze mid-transport at position **0.9273 m** / speed
+**0.1500 m/s** under a `+0.15` command, and `ConveyorDriveFault` was `FALSE` in
+every sample of the 394 s run — **26.3 s undetected**, ended by an unrelated
+link loss.
+
+The window now **repeats for as long as motion is claimed**:
+
+1. On the first call with motion claimed, sample `PositionRef :=
+   ConveyorBeltPosition`, set `PosWindowArmed`, and let `PositionWindowTimer`
+   count `POSITION_WINDOW_TIME` from the next call.
+2. At expiry, form the verdict once: `PositionFrozen :=
+   ABS(ConveyorBeltPosition - PositionRef) < POSITION_FREEZE_BAND`, and clear
+   `PosWindowArmed` — which releases the TON for exactly one call so that it can
+   restart (§6.5).
+3. On that release call, re-sample `PositionRef` at the *current* position and
+   re-arm. Steps 2–3 repeat every `POSITION_WINDOW_TIME` + 2 OB calls = **1.04 s**.
+4. When motion is no longer claimed — the read-back drops below
+   `SPEED_TOLERANCE`, the feedback goes implausible, or the link goes stale —
+   `PosWindowArmed` **and** `PositionFrozen` are both cleared.
+
+`PositionFrozen` is a **level** verdict, in CLAUDE.md §9's sense: it states a
+condition that is re-derived from the world at every expiry, it is not Retain,
+and it survives no restart. `D2` is `PositionFrozen` conjoined with motion still
+being claimed, so it holds continuously from the first window that confirms the
+freeze until travel resumes or the claim of motion goes away. **That level-ness
+is load-bearing:** `DriveFaultTimer` is a TON, so a verdict that pulsed for one
+call per window would reset it every time and could never reach
+`DRIVE_FAULT_DELAY`.
+
+Because `#beltMoving` carries `BeltFeedbackValid`, every reference is **sampled
+from a position already affirmed to be a measurement**: `PositionRef` can never
+be loaded with `NaN`.
+
+#### 6.6.2 The detection bound
+
+Worst case, from the instant the input image stops being refreshed to
+`ConveyorDriveFault := TRUE`, with `POSITION_WINDOW_TIME` and
+`DRIVE_FAULT_DELAY` at `T#1s` and OB30 at 20 ms:
+
+| Contribution | Worst case |
+|---|---|
+| The window already in progress. It may report *travel*, because the belt was genuinely moving for part of it — that happens whenever the freeze lands more than `POSITION_FREEZE_BAND / speed` ≈ 33 ms after a re-sample | ≤ 1.04 s |
+| The next window, which is referenced to the frozen position and measures exactly 0.0000 m of travel, so it sets `PositionFrozen` | 1.04 s |
+| `DriveFaultTimer` on the now-steady verdict | 1.00 s |
+| One bridge cycle between the physical event and the last fresh sample in the image (50 ms), plus OB30 quantisation on the two expiries (2 × 20 ms) | ≤ 0.09 s |
+| **Detection bound** | **≤ 3.2 s** |
+
+Best case ≈ **2.1 s**: a freeze landing within 33 ms of a re-sample is confirmed
+by the window already in progress, so only one window elapses. There is no
+longer any part of a stroke in which the freeze is undetectable — the old
+33 ms-from-motion-start hole is closed, not narrowed.
+
+Against the recorded failure: the window re-samples `PositionRef := 0.9273`,
+measures 0.0000 m over the next 1.04 s, sets `PositionFrozen`, and
+`ConveyorDriveFault` latches by **t ≈ 366.6 s** at the latest, against a freeze
+at t = 363.41 s — in place of the 26.3 s that were never detected at all.
+
+**No false positive at the boundary.** The slowest read-back that still counts
+as motion, `SPEED_TOLERANCE` = 0.02 m/s, travels 0.0208 m in one window — 4.2×
+the band. At `TRANSPORT_SPEED` the margin is 31×. D2 still trips after a window
+**plus** `DRIVE_FAULT_DELAY`, and remains the slower of the two verdicts by
+design: it accuses the encoder of lying, and D1 only accuses the drive of being
+slow.
+
+**Why a re-armed reference rather than a travel accumulator.** Summing
+`ABS(Δposition)` per OB call over a rolling window measures *path length* instead
+of net displacement and would be marginally stronger, but it needs a rolling sum,
+a previous-position static and a per-call subtraction, and it re-derives at 50 Hz
+a verdict that is only consumed once per second. The re-armed reference reuses
+the statics that already exist, adds one Bool and one constant, and is the
+minimal change that makes the promise true. **What it gives up is stated rather
+than hidden:** net displacement cannot distinguish "did not move" from "moved out
+and back within one window". In this program that cannot arise — the only
+direction reversal is step 20 → 30, and step 20 commands `0.0` and holds the
+belt below `SPEED_TOLERANCE` for `DWELL_TIME`, which disarms the window and
+clears the verdict before the return stroke begins. Any future step that
+reverses **without** passing through a stationary dwell must move this test to
+the accumulator form.
 
 On `DriveFaultTimer.Q`: `ConveyorDriveFault := TRUE` (latched), which drops
 `RunPermissive`, which drops `CellCycleRunning`, which drives the setpoint to
 `0.0` via §6.4. `CellResetRequired := TRUE`.
 
-**Honest limit, stated here rather than discovered later.** While the program is
-commanding `0.0`, a stopped simulation is *not* detectable by this or any other
-mechanism in the PLC: a frozen input image under a zero command is
-indistinguishable from a genuinely idle cell. The bridge cannot detect it either
-without adding a timer that gates a signal, which would be control in the wrong
-layer; the three alternatives were considered and rejected in `bridge-design.md`
-§7.3. This program adds no detector for the idle case and claims none.
+**And the fault does not clear itself when the setpoint goes to zero.** Zeroing
+the command clears D1, but a frozen image keeps claiming 0.15 m/s, so
+`#beltMoving` stays true, the window keeps expiring with zero travel, and D2
+stays true. `CauseGone` is therefore false and the monitored reset is **refused**
+for as long as the data is stale — see §6.3. Recovery is: make the data live
+again, at which point the read-back falls below `SPEED_TOLERANCE`, D2 clears
+within one call, and the reset is honoured. Nothing about this is a timeout;
+nothing auto-resumes.
+
+#### 6.6.3 Honest limits, stated here rather than discovered later
+
+- **A freeze under a zero command is not detectable, by this or any other
+  mechanism in the PLC.** A frozen input image while the program commands `0.0`
+  is indistinguishable from a genuinely idle cell. The bridge cannot detect it
+  either without adding a timer that gates a signal, which would be control in
+  the wrong layer; the three alternatives were considered and rejected in
+  `bridge-design.md` §7.3. This program adds no detector for the idle case and
+  claims none. The cell is stopped either way, so the undetected state is also
+  the harmless one.
+- **A freeze whose frozen speed read-back happens to sit inside
+  ±`SPEED_TOLERANCE` is D1's, not D2's**, and needs a non-zero command to be
+  seen at all. That is the at-rest variant above, detected in
+  `DRIVE_FAULT_DELAY`.
+- **D2 does fire with the cell idle** if the read-back claims motion the position
+  does not support — a stale image alone is enough, no command is required. That
+  is intended: a speed read-back of 0.15 m/s beside a static position is a
+  transducer lying, whatever the sequence is doing.
+- **The heartbeat is untouched and remains the supervision backstop.** Case D is
+  precisely the case in which the heartbeat is *correct* — the bridge is alive
+  and counting — so D1/D2 supplement it and replace nothing. Every other loss
+  case (A, B, C) is still caught by §6.1 alone, and D1/D2 are both suspended
+  while `BridgeLinkOk` is false, like every other input-derived verdict.
 
 ### 6.7 Latches, the monitored reset, and no auto-resume
 
@@ -756,7 +875,8 @@ fault, reconnecting session — sets it. A permissive returning restores the
 Structure and the load-bearing statements only. Not compilable as written:
 declarations, timer instances and the constant block are per §3. Identifiers not
 listed in §3.2 (`#hbChanged`, `#linkOk`, `#rangeValid`, `#beltFeedbackValid`,
-`#cmdMoving`, `#beltMoving`, `#d1`, `#d2`, `#worldOk`, `#runPermissive`,
+`#cmdMoving`, `#beltMoving`, `#windowRunning`, `#windowExpired`, `#d1`, `#d2`,
+`#worldOk`, `#runPermissive`,
 `#causeGone`, `#latchPending`, `#startRise`, `#resetRise`) are **Temp**, computed
 and consumed within one call. Everything in
 §3.2 is **Static** and must survive the scan.
@@ -830,18 +950,46 @@ IF #BeltFeedbackInvalidTimer.Q THEN #BeltFeedbackFaultLatch := TRUE; END_IF;
 #beltMoving := #beltFeedbackValid
                AND (ABS("DemoCellInput".ConveyorBeltSpeed) > #SPEED_TOLERANCE);
 
-#PositionWindowTimer(IN := #linkOk AND #beltMoving, PT := #DRIVE_FAULT_DELAY);
-IF #linkOk AND #beltMoving AND NOT #PosWindowArmed THEN
-    #PositionRef := "DemoCellInput".ConveyorBeltPosition;  #PosWindowArmed := TRUE;
-ELSIF NOT #beltMoving THEN
-    #PosWindowArmed := FALSE;
+// The freeze window RE-ARMS for as long as motion is claimed (§6.6.1). A
+// one-shot reference sampled at the start of the stroke measures travel from
+// there, so it can only ever catch a freeze in the first ~33 ms of motion —
+// that was the m3-26 defect, 26.3 s undetected mid-transport.
+// The TON's IN carries #PosWindowArmed, which is dropped for exactly ONE call
+// at each expiry: that release is what restarts a TON whose enabling condition
+// has not gone away. The call site stays unconditional and outside every branch.
+#windowRunning := #linkOk AND #beltMoving AND #PosWindowArmed;
+#PositionWindowTimer(IN := #windowRunning, PT := #POSITION_WINDOW_TIME);
+#windowExpired := #windowRunning AND #PositionWindowTimer.Q;
+
+IF #windowExpired THEN                                  // one verdict per window
+    #PositionFrozen := ABS("DemoCellInput".ConveyorBeltPosition - #PositionRef)
+                       < #POSITION_FREEZE_BAND;
 END_IF;
+
+IF #linkOk AND #beltMoving THEN
+    IF NOT #PosWindowArmed THEN
+        // Arm, or RE-arm on the release call: the reference is the position NOW,
+        // never the position at the start of the stroke. #beltMoving carries
+        // #beltFeedbackValid, so PositionRef can never be loaded with NaN.
+        #PositionRef := "DemoCellInput".ConveyorBeltPosition;
+        #PosWindowArmed := TRUE;
+    ELSIF #windowExpired THEN
+        #PosWindowArmed := FALSE;       // release the TON for exactly one call
+    END_IF;
+ELSE
+    #PosWindowArmed  := FALSE;          // motion no longer claimed, or link stale:
+    #PositionFrozen  := FALSE;          // the verdict is a LEVEL, so it clears too
+END_IF;
+
 // #d1 needs the validity conjunct explicitly: NOT #beltMoving is TRUE while the
 // feedback is implausible, so without it a NaN speed under a non-zero command
 // would be reported as a DRIVE fault instead of the encoder fault it is.
-#d1 := #beltFeedbackValid AND #cmdMoving AND NOT #beltMoving;    // stalled / case D
-#d2 := #beltMoving AND #PositionWindowTimer.Q
-       AND (ABS("DemoCellInput".ConveyorBeltPosition - #PositionRef) < #POSITION_FREEZE_BAND);
+#d1 := #beltFeedbackValid AND #cmdMoving AND NOT #beltMoving;  // stalled / case D at rest
+// #d2 is a LEVEL, held between window expiries. A verdict that pulsed for one
+// call per window would reset #DriveFaultTimer every window and could never
+// reach DRIVE_FAULT_DELAY. #beltMoving carries #beltFeedbackValid, which carries
+// #linkOk, so #d2 is link-gated like every other input-derived verdict.
+#d2 := #beltMoving AND #PositionFrozen;                        // case D mid-motion
 
 #DriveFaultTimer(IN := #linkOk AND (#d1 OR #d2), PT := #DRIVE_FAULT_DELAY);
 IF #DriveFaultTimer.Q THEN "DemoCellStatus".ConveyorDriveFault := TRUE; END_IF;
@@ -980,8 +1128,9 @@ table.
 | **A** — bridge crash (SIGKILL) | Heartbeat froze at 376; the six inputs froze at their last written values, `ConveyorBeltSpeed` reading a plausible 0.05 m/s **forever** | **`BridgeHeartbeat` unchanged for `HEARTBEAT_STALE_TIME`** (§6.1). Session state is deliberately **not** used: it is not exposed to the standard program as a supervisable input, and the evidence (A.4) shows it is not a faster or more reliable indicator | `BridgeLinkOk := FALSE` → C3 drops and `LinkLostLatch` sets → `CellCycleRunning := FALSE` → setpoint driven to `0.0` (§6.4) → `CellResetRequired := TRUE`. All input-derived evaluation suspended (§6.1) | Monitored reset (§6.7), then a **separate** start press. A returning heartbeat alone does nothing |
 | **B** — clean shutdown (SIGTERM) | Identical input image to A; only the session closed more tidily | **The same mechanism, and deliberately no other.** | **Identical to A — no additional action, by design.** The program must not distinguish A from B: it has no mechanism that could, and `bridge-design.md` §7.3 states that a program which behaves differently for A and B is wrong. The bridge writes no farewell value and zeroes nothing, so the two are identical where it matters | As A |
 | **C** — OPC UA link loss, bridge alive (server stopped / network) | Heartbeat stopped; inputs froze, then were **lost entirely** to DB start values when the server restarted; bridge reconnected and refreshed all six inputs within ~200 ms | Same mechanism. Two sub-cases: **(i) network or session loss with the CPU running** — indistinguishable from A at the PLC, same reaction. **(ii) the CPU itself stopped (PLCSIM stopped)** — **no program action is possible or required, because no program is running.** On restart, cold start applies the non-permissive start values of §3.1 and warm start leaves the previous session's values, which is exactly why §6.1 qualifies inputs with the heartbeat and not with the start values | As A. Additionally, the non-permissive start values (`PanelStopCircuitClosed := FALSE`, `ProductSensorRange := 0.0`, which is also outside `[RANGE_MIN, RANGE_MAX]`) mean a freshly cold-started CPU cannot run before the bridge is supplying real samples | As A |
-| **D** — simulation stopped, bridge alive | **Heartbeat kept advancing** (326 → 628 → 929, exactly 20 Hz). The input image froze bit-identically for 30 s under a `ConveyorSpeedCommand` of 0.05. Session healthy. From the PLC's side the link looks perfect | **`ConveyorDriveFault`, term D1** (§6.6): a non-zero command with `ABS(ConveyorBeltSpeed) ≤ SPEED_TOLERANCE` for `DRIVE_FAULT_DELAY`. The captured values (cmd 0.05, speed 3.2e-28, constant) satisfy it after 1 s. Term D2 additionally covers a read-back frozen at a non-zero value | `ConveyorDriveFault := TRUE` (latched) → `RunPermissive` drops → `CellCycleRunning := FALSE` → setpoint `0.0` → `CellResetRequired := TRUE` | Monitored reset, then a separate start press. The fault will re-latch within `DRIVE_FAULT_DELAY` of the next attempt if the simulation is still stopped |
-| **D, idle sub-case** | Simulation stopped while the program is commanding `0.0` | **Nothing.** No detector exists and none is added | **No action, and the reason is stated rather than papered over**: a frozen input image under a zero command is indistinguishable from a genuinely idle cell. The three bridge-side fixes were considered and rejected in `bridge-design.md` §7.3 (each puts a timer that gates a signal into the transport layer). The cell is stopped either way, so the undetected state is also the harmless one | Not applicable |
+| **D (i)** — simulation stopped **while the belt was at rest**, bridge alive | **Heartbeat kept advancing** (326 → 628 → 929, exactly 20 Hz). The input image froze bit-identically for 30 s under a `ConveyorSpeedCommand` of 0.05. Session healthy. From the PLC's side the link looks perfect. **This capture is the at-rest variant and nothing more**: `BeltPos` held at 2.5 m, a belt sitting on its mechanical stop, so its frozen speed of 3.2e-28 is what a *stationary* belt reads. It is not a model of a freeze during transport | **`ConveyorDriveFault`, term D1** (§6.6): a non-zero command with `ABS(ConveyorBeltSpeed) ≤ SPEED_TOLERANCE`, for `DRIVE_FAULT_DELAY`. The captured values satisfy it after **1 s** | `ConveyorDriveFault := TRUE` (latched) → `RunPermissive` drops → `CellCycleRunning := FALSE` → setpoint `0.0` → `CellResetRequired := TRUE` | Monitored reset, then a separate start press. D1 is false once the setpoint is zeroed, so the reset is honoured; the fault then **re-latches within `DRIVE_FAULT_DELAY`** of the start press if the simulation is still stopped |
+| **D (ii)** — simulation stopped **mid-motion**, bridge alive | Recorded on PLCSIM, m3-26: the image froze at **position 0.9273 m / speed 0.1500 m/s** under a `+0.15` command while the belt was transporting; heartbeat advanced throughout. The frozen speed is *plausible and non-zero*, which is what makes this case different in kind from (i) | **`ConveyorDriveFault`, term D2** (§6.6.1). D1 is blind here by construction — 0.1500 is far above `SPEED_TOLERANCE`. The re-arming freeze window references the frozen position, measures 0.0000 m of travel and sets `PositionFrozen`; `DriveFaultTimer` then runs. **Detection bound ≤ 3.2 s** from the freeze, and never sooner than ≈2.1 s — the spread is one freeze window (§6.6.2) | Identical reaction to (i), one to three seconds later | **The reset is refused while the image is still stale**, and that is correct: D2 does not clear when the setpoint is zeroed, because the read-back still claims 0.15 m/s (§6.3). Restart the simulation first — the read-back falls below `SPEED_TOLERANCE`, D2 clears, and only then does the monitored reset take, followed by a separate start press |
+| **D (iii)** — idle sub-case | Simulation stopped while the program is commanding `0.0` **and the frozen speed read-back is inside ±`SPEED_TOLERANCE`** — i.e. the image froze on a cell that was genuinely doing nothing. (If instead the frozen read-back claims motion, this is case D (ii): D2 fires with the cell idle, because a speed of 0.15 m/s beside a static position is a transducer lying whatever the sequence is doing) | **Nothing.** No detector exists and none is added | **No action, and the reason is stated rather than papered over**: a frozen input image under a zero command is indistinguishable from a genuinely idle cell. The three bridge-side fixes were considered and rejected in `bridge-design.md` §7.3 (each puts a timer that gates a signal into the transport layer). The cell is stopped either way, so the undetected state is also the harmless one | Not applicable |
 
 ### Residual, stated honestly
 
@@ -1035,7 +1184,7 @@ the bridge's 20 Hz cyclic write.
 | `"DemoCellStatus".CellCycleRunning` | Bool | `TRUE` only between start and step 40 |
 | `"DemoCellStatus".ProductPresentAtSensor` | Bool | `TRUE` when the range group shows ≈0.540 for ≥100 ms |
 | `"DemoCellStatus".CellProcessStopActive` | Bool | Latched `TRUE` after either stop contact opens |
-| `"DemoCellStatus".ConveyorDriveFault` | Bool | Latched `TRUE` in signal-loss case D |
+| `"DemoCellStatus".ConveyorDriveFault` | Bool | Latched `TRUE` in signal-loss case D: within `DRIVE_FAULT_DELAY` if the image froze at rest (D1), within **3.2 s** if it froze mid-motion (D2, §6.6.2) |
 | `"DemoCellStatus".CellResetRequired` | Bool | `TRUE` while any latch is pending |
 | `"DemoCellLink".BridgeHeartbeat` | Decimal | Advancing ~20/s; frozen in cases A, B, C; **advancing in case D** |
 | `"DemoCellLink".BridgeLinkOk` | Bool | `TRUE` while the heartbeat changes; `FALSE` 500 ms after it stops |
@@ -1046,7 +1195,16 @@ the bridge's 20 Hz cyclic write.
 `.ProcessStopLatch`, `.LinkLostLatch`, `.SensorFaultLatch`,
 `.BeltFeedbackFaultLatch`, `.SequenceFaultLatch`, `.ResetDeviceFault`,
 `.StartEdgeMemory`, `.ResetEdgeMemory`, `.HeartbeatStaleTimer.ET`,
-`.DriveFaultTimer.ET`.
+`.DriveFaultTimer.ET`, `.PositionRef`, `.PositionFrozen`,
+`.PositionWindowTimer.ET`.
+
+The last three are the whole of §6.6's freeze detector on one screen, and T4.6
+is read off them. With the belt transporting normally, `PositionRef` **steps to
+a new value about once a second** and `PositionWindowTimer.ET` sawtooths 0 →
+1000 ms: a `PositionRef` that sits still while the belt moves means the window
+is not re-arming, which is exactly the defect §6.6.1 corrects. `PositionFrozen`
+goes `TRUE` one window after a freeze and stays `TRUE`;
+`DriveFaultTimer.ET` then runs to `DRIVE_FAULT_DELAY` beside it.
 
 `BeltFeedbackFaultLatch` says only *that* the belt feedback is not a
 measurement. **Which of it is bad is read from Group 1**: compare
@@ -1174,17 +1332,24 @@ definition is §8 of this document; this is its test.
 | 4.3 | Publish `reset` `true`/`false`, then `start` `true`/`false` | Latches clear on the reset's rising edge and **nothing moves**; the cycle runs only after the separate start press on the other button |
 | 4.4 **(B)** | Repeat 4.1 with `SIGTERM` | **Identical PLC behaviour to 4.1.** Any difference is a defect |
 | 4.5 **(C)** | With the cycle running, break the link (stop PLCSIM's adapter, or the CPU to STOP and back) | Same reaction where a program is running; where the CPU stopped, confirm that on restart the non-permissive start values apply and nothing runs until the bridge supplies real samples and a reset+start is given |
-| 4.6 **(D)** | With the belt transporting, `kill -9` the Gazebo server, leaving the bridge alive | `BridgeHeartbeat` **keeps advancing**, `BridgeLinkOk` stays `TRUE`, the input image freezes, and within `DRIVE_FAULT_DELAY` `ConveyorDriveFault` latches, `CellCycleRunning` → `FALSE`, command → `0.0` |
-| 4.7 | Attempt a reset and start with the simulation still stopped | The fault re-latches within 1 s. No auto-resume, and no way to run a dead cell |
+| 4.6 **(D ii — mid-motion, the one that matters)** | With the belt **transporting and at least 3 s into the stroke** — position clearly away from home, `ConveyorSpeedCommand` reading `+0.15` — `kill -9` the Gazebo server, leaving the bridge alive. Note the wall-clock instant, and read `ConveyorBeltPosition`/`ConveyorBeltSpeed` off Group 1 as they freeze | `BridgeHeartbeat` **keeps advancing** and `BridgeLinkOk` stays `TRUE` throughout — the heartbeat cannot see this failure and is not expected to. The image freezes at a plausible non-zero speed, so **D1 does not fire**. `PositionRef` (Group 4) re-samples at the frozen position, `PositionFrozen` → `TRUE` at the next window expiry, and `ConveyorDriveFault` latches **within 3.2 s of the freeze**, and no sooner than ≈2.1 s (§6.6.2), with `CellCycleRunning` → `FALSE`, command → `0.0`, `CellResetRequired` → `TRUE`. **Record the elapsed time as a number**, from the last changing sample of `ConveyorBeltPosition` to `ConveyorDriveFault` going `TRUE`; the bound, not the average, is what passes |
+| 4.6b **(D i — at rest)** | Repeat with the belt **stationary but commanded**: start the cycle, let the belt reach the beam so step 20 commands `0.0`, and `kill -9` Gazebo during the dwell; when the dwell ends, step 30 commands `-0.15` against a dead cell | The frozen speed read-back is ≈0, so this is **D1's** path: `ConveyorDriveFault` latches within `DRIVE_FAULT_DELAY` (1 s) of the command going non-zero. Same reaction, faster verdict, different term — record which term fired by reading `PositionFrozen`, which stays `FALSE` here |
+| 4.7 | With the simulation **still stopped after 4.6**, attempt a reset (`reset` `true`/`false`), then a start | **The reset is refused, and that is the pass.** `CellResetRequired` stays `TRUE`, `ConveyorDriveFault` stays `TRUE`, nothing moves, and the start press does nothing. The read-back still claims 0.15 m/s, so D2 holds `CauseGone` false (§6.3, §6.6.2). Then **restart the simulation**: the speed read-back returns to ≈0, `PositionFrozen` → `FALSE`, and *now* the reset clears the latch and a separate start press re-runs the cycle. After 4.6b the reset is honoured immediately instead, because D1 clears with the setpoint — and the fault re-latches within 1 s of the start press if the cell is still dead. **No auto-resume in either path, and no way to run a dead cell** |
 | 4.8 | **Startup rule against the real DB start values**: cold-start the CPU with the bridge stopped | The seven inputs read the start values of §3.1, `BridgeLinkOk` is `FALSE`, and start presses do nothing. Then start the bridge and confirm the heartbeat only begins after all seven inputs carry real samples |
 | 4.9 | **Stuck reset device**: publish `reset` `true` and **leave it published**, then latch a stop (publish `process_stop` `false`, then `true` again) | The still-held reset **never clears the latch**: `CellResetRequired` stays `TRUE` and the cell stays stopped for as long as the button is held. There is no edge to act on, and no elapsed time makes one appear. Release `reset` (`false`) and publish `true` again — *now* the latch clears |
 | 4.9b | **Reset held from before the program ran**: cold-start the CPU with `reset` already publishing `true` | `ResetDeviceFault` stays `TRUE`, no reset is possible, and the watch table says why. It clears only after the contact has been seen `false` once with the link up |
 | 4.10 | **Session behaviour on a real server**: time how long the S7-1500 holds the session after a bridge `SIGKILL` | Recorded as a number. This is the one in-container result known not to transfer (`EVIDENCE_SIGNAL_LOSS.md` A.4) — and it must **not** be used as an input to the program |
 | 4.11 | **Belt feedback plausibility** (§6.2.2), by the narrowed-constant method below | `BeltFeedbackFaultLatch` latches, `CellCycleRunning` → `FALSE`, `ConveyorSpeedCommand` → `0.0`, `CellResetRequired` → `TRUE`; reset clears it and start re-runs the cell once the constant is restored |
 
-**Pass: all twelve.** Evidence appended to `bridge/EVIDENCE_SIGNAL_LOSS.md` as a
-PLCSIM section beside the container run, per `EVIDENCE_LATENCY.md` Section B
+**Pass: all thirteen.** Evidence appended to `bridge/EVIDENCE_SIGNAL_LOSS.md` as
+a PLCSIM section beside the container run, per `EVIDENCE_LATENCY.md` Section B
 item 6.
+
+> **Thirteen is the specified list, not a claim about a run.** A pass count in an
+> evidence document is derived from the steps that were actually executed at the
+> time it is written. When this specification adds a step after a run — 4.6b and
+> 4.11 both are — the evidence gains an **outstanding row**, never a larger
+> denominator.
 
 #### How 4.11 is run, and what it does and does not prove
 
@@ -1291,7 +1456,7 @@ enumerated, and how it is covered now:
 |---|---|---|---|
 | `ConveyorBeltPosition >= SOFT_LIMIT` | §6.5 step 10 | `FALSE` → **no abort** (permissive) | Never reached with an implausible position: C5 drops `RunPermissive`, §7 part 6 forces `SeqStep := 0` **before** the `CASE` in the same OB call, and the setpoint is zeroed by §6.4 — a stronger reaction than the abort it replaces |
 | `ConveyorBeltPosition <= -SOFT_LIMIT` | §6.5 step 30 | `FALSE` → **no abort** (permissive) | As above, same scan, same mechanism |
-| `ABS(ConveyorBeltPosition - PositionRef) < POSITION_FREEZE_BAND` | §6.6 D2 | `FALSE` → no D2 (permissive) | `#d2` is conjoined with `#beltMoving`, which now carries `BeltFeedbackValid`, so D2 is false by construction rather than by accident; and `PositionRef` can no longer be *sampled* from an implausible position, which the old form allowed into a static |
+| `ABS(ConveyorBeltPosition - PositionRef) < POSITION_FREEZE_BAND` | §6.6 D2, now evaluated once per re-armed window | `FALSE` → no D2 (permissive) | `#d2` is conjoined with `#beltMoving`, which now carries `BeltFeedbackValid`, so D2 is false by construction rather than by accident; and `PositionRef` can no longer be *sampled* from an implausible position, which the old form allowed into a static. The comparison itself is now made at every window expiry rather than once per stroke (§6.6.1) |
 | `ABS(ConveyorBeltPosition) <= HOME_WINDOW` | §6.5 step 30, §6.7 start | `FALSE` → never completes / re-homes (restrictive) | Never reached: the step is exited by C5, and the start branch is gated by `RunPermissive`. The step watchdog is no longer the thing that catches it |
 | `ABS(ConveyorBeltSpeed) > SPEED_TOLERANCE` | §6.6 D1/D2 | `FALSE` → `beltMoving` false → D1 trips (restrictive, correct by luck) | Same reaction class, correctly named and faster: `#beltMoving` and `#d1` both carry `BeltFeedbackValid`, so an implausible speed raises `BeltFeedbackFaultLatch` immediately instead of `ConveyorDriveFault` after `DRIVE_FAULT_DELAY` |
 
