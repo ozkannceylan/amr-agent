@@ -76,7 +76,12 @@ a separate monitored reset; a conflated one satisfied it only in spirit.
 22. m3-25 plc — SPEC.md reconciled with the commissioned implementation
     (§7 dwell-timer defect, §6.2 open item 1). Closed 2026-07-27; found a
     third defect, recorded as §12 open item 5.
-23. m3-26 bridge — live loop against the commissioned PLC. Issued.
+23. m3-26 bridge — live loop against the commissioned PLC. Closed
+    2026-07-27: end to end over 502 s, 20 Hz, 0 overruns; Section B filled
+    for what a bridge can measure; found program defects F1 (product
+    detection never asserts) and F2 (signal-loss case D blind mid-motion).
+25. m3-28 verifier — independent review of T1-T4 as specified vs as run,
+    with root-cause analysis of F1 and F2. Issued 2026-07-28.
 24. m3-27 plc — plausibility windows for the belt feedback signals, from
     m3-25's finding. Closed 2026-07-27; recorded §12 open item 6, a
     fault-injection request against bridge/.
