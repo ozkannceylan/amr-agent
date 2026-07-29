@@ -830,9 +830,11 @@ Plant signals that exist and deliberately reach no node:
 | `/clock` | Simulator infrastructure, not a plant signal, as in §9.8 |
 
 The bridge's operational detail for these rows — slots, QoS, reconnect, the write allowlist and the
-measurement method — lives in `docs/interfaces/bridge-design.md`, which is **M3-scope today and does
-not yet describe the forklift path**. Until it is extended by its own brief, this section is the
-contract and `bridge-design.md` describes the demonstration cell only (§10.12).
+measurement method — lives in `docs/interfaces/bridge-design.md`, which **now carries the forklift
+signal group** (m4f-05, 2026-07-29): its §4.7–§4.10 hold this table's operational half, §2.1 defines
+the configured signal set that scopes every per-signal rule to the groups a run actually carries, and
+§4.10 states as a design rule that the bridge never reads or writes the `Forklift/Hmi/` group. This
+section remains the contract; where the two disagree, this one wins and the design is corrected.
 
 ### 10.11 Deliberately absent from the forklift subtree
 
@@ -855,7 +857,7 @@ Each row means "no such node under `DemoCell/Forklift/`".
 | # | Item | Owner |
 |---|---|---|
 | 1 | Every value in this section is a **design value until read back out of the tool** (§10.2 step 6): the folder tree, the per-tag rights, the node count and the browse path. Phase-0-style verification with a client that is not the bridge, recorded with its date | Owner, at commissioning |
-| 2 | `bridge-design.md` is M3-scope and does not describe the forklift path: the writable set of its §3, the signal map of its §4, the startup rule R3 ("all seven inputs") and the QoS table all need the forklift signal set added. R3 in particular must become "every input in the **configured** signal set", so a demonstration-cell-only run is unaffected and a forklift run does not stall the heartbeat waiting for conveyor topics | A `bridge-design.md` brief, before any bridge work on this gate |
+| 2 | `bridge-design.md` had to describe the forklift path before any bridge work on this gate: the writable set of its §3, the signal map of its §4, the startup rule R3 ("all seven inputs") and the QoS table all needed the forklift signal set | **Closed by m4f-05, 2026-07-29.** §3's writable set and read set are now scoped per group with the `Forklift/Hmi/` group named as never touched; §4.7–§4.10 carry the signal map; §4.6 carries the QoS rows; and **R3 now reads "every input in the *configured* signal set"** (§2.1, §6.1), so a cell-only run counts 7, a forklift-only run counts 4, both count 11, and no run stalls the heartbeat waiting for topics it was never configured to carry |
 | 3 | No `ForkliftDriveFault` node exists, so case D of `bridge-design.md` §7.3 has no PLC-visible verdict on this plant (§10.11). One status node would carry it; the detection is PLC content | Owner decision, then the PLC forklift FB specification |
 | 4 | `TRACTION_SPEED_MAX` and `FORK_SPEED_MAX` are PLC constants this document does not set. The interface constraint is that `ForkliftLinearSpeed`'s plausibility window stays **at least twice** `TRACTION_SPEED_MAX`; at the ±2.00 m/s window that bounds the cap at 1.00 m/s, and raising the cap re-derives the window rather than tightening the margin | PLC forklift FB specification |
 | 5 | The lidar field geometry — sector and stop distance — is configured in the vehicle layer and reaches the PLC as one bit (§10.5). If the owner prefers the PLC to own that threshold, `ForkliftObstacleInStopZone` is deleted and the PLC forms its verdict from `ForkliftObstacleMinDistance` alone: a one-node change here and a polarity change in the vehicle layer, not a redesign | Owner decision |
