@@ -1,0 +1,126 @@
+# config.yaml - named constants for the vehicle side forklift nodes.
+#
+# Rule for this directory: NO behavioural constant is written inline in a
+# Python file. Every rate, limit, threshold, timeout, joint name and topic
+# name the nodes use is read from here, so that a value can be changed and
+# reviewed without reading code, and so that the contract table in
+# README.md has exactly one source.
+#
+# Authority. model.sdf owns the geometry. The values under `model:` below
+# are a MIRROR of numbers that also appear in model.sdf, because SDF cannot
+# be read as YAML and the nodes need them. If the two ever disagree,
+# model.sdf is right and this file is wrong. EVIDENCE_MODEL.md records the
+# diff that shows they agree.
+#
+# Nothing here is a safety parameter. `obstacle.stop_distance_m` is a
+# process comfort zone evaluated in Python over a network carried scan; the
+# protective stop and safe torque off are onboard and hardwired and appear
+# nowhere in this file (invariant 1).
+
+model:
+  # Spawned model name. The gz topic names below do NOT depend on it: every
+  # gz system in model.sdf states its topic explicitly for that reason.
+  name: Forklift
+
+  # Mirrors of model.sdf geometry.
+  wheel_radius_m: 0.12          # drive_wheel cylinder radius
+  steer_limit_rad: 1.31         # steer_joint mechanical stop, symmetric
+  fork_travel_min_m: 0.0        # mast_joint lower limit
+  fork_travel_max_m: 1.6        # mast_joint upper limit
+
+  # Name of the mast joint as it appears in the bridged JointState message.
+  # This is the only joint name a node needs, because the nodes address
+  # joints through topics and not by name. The full joint list is a
+  # contract and its home is the table in README.md.
+  mast_joint_name: mast_joint
+
+limits:
+  # Largest traction speed this node will pass on. A request beyond it is
+  # clamped, not rejected: the vehicle keeps moving at the limit.
+  traction_speed_max_mps: 1.50
+
+  # Largest carriage travel rate the node will integrate. Also the slew
+  # limit on the position target, which is what actually makes the lift
+  # ramp rather than step.
+  fork_speed_max_mps: 0.15
+
+rates:
+  # State publication rate for /forklift/fork_height and
+  # /forklift/linear_speed.
+  io_publish_hz: 10.0
+  # Rate at which the fork position target is integrated and republished.
+  # Faster than the state rate so the target ramp is smooth.
+  io_command_hz: 20.0
+  # Publication rate for both /forklift/obstacle/* topics.
+  obstacle_publish_hz: 10.0
+
+obstacle:
+  # Half width of the sector examined about straight ahead. 0.5236 rad is
+  # 30 deg, so the sector is 60 deg wide and centred on the driving
+  # direction.
+  sector_half_angle_rad: 0.5236
+
+  # A valid sample at or below this range sets in_stop_zone. This is a
+  # process threshold and it is not a protective field.
+  stop_distance_m: 1.20
+
+  # A scan older than this counts as no scan at all. The evaluator then
+  # reports the obstacle present state, never the clear state.
+  scan_timeout_s: 0.50
+
+  # Distance reported when there is no usable measurement. Zero is chosen
+  # deliberately: it is the most pessimistic distance the topic can carry,
+  # so a consumer that only reads the distance still sees the worst case.
+  unknown_distance_m: 0.0
+
+logging:
+  # Period for throttled "waiting for data" messages, so a missing source
+  # is visible in the log without flooding it.
+  throttle_s: 5.0
+
+qos:
+  # Depth of every publisher and subscriber queue in these two nodes.
+  # Sensor and state data are latest value wins, so the queue is short.
+  depth: 10
+
+# Default spawn pose used by launch/vehicle.launch.py. Overridable on the
+# command line; a scenario that wants a different start pose passes it
+# rather than editing this file.
+spawn:
+  x_m: 0.0
+  y_m: 0.0
+  z_m: 0.05
+  yaw_rad: 0.0
+
+topics:
+  # Simulation clock, bridged one to one.
+  clock: /clock
+
+  # ---- written by forklift_io.py, carried by the bridge into gz ----
+  # Same name on both sides of the bridge: these ARE the model's raw
+  # command inputs and the identity is the point.
+  gz_steer_cmd: /forklift/gz/steer_cmd
+  gz_traction_cmd: /forklift/gz/traction_cmd
+  gz_fork_cmd: /forklift/gz/fork_cmd
+
+  # ---- produced by gz, renamed by the bridge onto the ROS names below --
+  # The gz name keeps the /forklift/gz/ prefix so that a gz side topic list
+  # reads as one namespace; the ROS name is the one vehicle software uses.
+  gz_joint_state: /forklift/gz/joint_state
+  gz_odom: /forklift/gz/odom
+  gz_scan: /forklift/gz/scan
+
+  joint_states: /forklift/joint_states
+  odom: /forklift/odom
+  scan: /forklift/scan
+
+  # ---- vehicle side command inputs, engineering units ----
+  cmd_traction_speed: /forklift/cmd/traction_speed
+  cmd_steer_angle: /forklift/cmd/steer_angle
+  cmd_fork_speed: /forklift/cmd/fork_speed
+
+  # ---- vehicle side derived state ----
+  fork_height: /forklift/fork_height
+  linear_speed: /forklift/linear_speed
+  obstacle_in_stop_zone: /forklift/obstacle/in_stop_zone
+  obstacle_min_distance: /forklift/obstacle/min_distance

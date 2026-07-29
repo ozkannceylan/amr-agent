@@ -1,0 +1,644 @@
+<?xml version="1.0" ?>
+<!--
+  model.sdf . In house tricycle forklift for the amr-agent project.
+
+  This file is GEOMETRY, ACTUATION AND SENSING. It contains no control
+  logic: no sequencing, no interlock, no timer, no latch, no threshold and
+  no zone decision. A joint moves when a command topic says so, and the
+  scanner reports raw ranges whatever stands in front of it. Deciding what
+  any of that means belongs to the vehicle nodes, to the fleet manager or
+  to the PLC, never here (invariants 5, 6 and 9).
+
+  It is also NOT a safety device. The scanner below is a process sensor
+  used for a comfort stop zone. The protective stop, the e stop chain and
+  safe torque off are onboard, hardwired and independent of anything in
+  this file or on any network (invariant 1).
+
+  Original geometry, primitives only, no external mesh.
+
+  ============================ FRAMES ============================
+
+  Model origin: on the floor, at the centre of the chassis footprint.
+    +x  forward, the driving direction, the steer and drive end
+    +y  left
+    +z  up
+
+  Three wheels. The single steered wheel is also the driven wheel and it
+  leads; the two passive wheels trail. The load is therefore carried at
+  the .x end and the counterweight sits over the drive wheel, opposite
+  the load, which is what a counterweight is for.
+
+  TOP VIEW (metres)
+
+                            +y
+                             ^
+      fork tines             |            counterweight
+     .......                 |               [====]
+     |     |            [rear wheel L]           |
+     |     |    [mast]  .............            |
+   . | . . | . .[||||]. |  chassis  | . [steer + drive wheel] . . > +x
+     |     |            |1.4 x 0.9  |            |
+     |     |            .............            |
+     .......            [rear wheel R]     [safety scanner]
+                                            180 deg forward
+
+  SIDE VIEW (metres)
+
+          overhead guard roof z = 1.71
+          ._______________________.
+          |                       |
+     [||] |                       |          mast rails to z = 2.05
+     [||] |       chassis         |[ CW ]
+     [||] |_______________________|
+    [carriage]                    |
+   ==========                     |
+   forks     (o)             (o)  (o)   wheels r = 0.12
+   ================================================ floor z = 0
+
+  ========================= COMMAND TOPICS =========================
+
+  Every gz system below names its topic EXPLICITLY. The model scoped
+  defaults (/model/<name>/joint/<joint>/cmd_*) are deliberately not used:
+  they change if the model is spawned under another name, and the ROS
+  bridge, the launch file and agv/forklift/README.md all quote these
+  names as a contract.
+
+    /forklift/gz/steer_cmd     gz.msgs.Double   steer angle      [rad]
+    /forklift/gz/traction_cmd  gz.msgs.Double   wheel spin rate  [rad/s]
+    /forklift/gz/fork_cmd      gz.msgs.Double   carriage travel  [m]
+
+    /forklift/gz/joint_state   gz.msgs.Model    joint positions and rates
+    /forklift/gz/odom          gz.msgs.Odometry pose and body twist
+    /forklift/gz/scan          gz.msgs.LaserScan  planar ranges  [m]
+
+  The numeric values a node needs (wheel radius, steer limit, fork travel)
+  are mirrored in config.yaml because SDF cannot be read as YAML. THIS
+  FILE IS THE AUTHORITY for the geometry; config.yaml records the same
+  numbers for the Python side and is diffed against the values below.
+
+  Sensor note: the scanner is a gz "gpu_lidar", so the world that spawns
+  this model MUST load gz-sim-sensors-system with a render engine. gz's
+  stock empty.sdf does not; sim/worlds/cell.sdf does. See README.md.
+-->
+<sdf version="1.8">
+  <model name="Forklift">
+    <static>false</static>
+    <self_collide>false</self_collide>
+
+    <!-- ========================= Chassis ========================= -->
+    <!--
+      One rigid body carrying the body shell, the counterweight, the
+      overhead guard and the safety scanner. The guard is visual only:
+      nothing in this project drives under an obstruction, and four thin
+      collision posts would cost solver time for no observable behaviour.
+    -->
+    <link name="base_link">
+      <inertial>
+        <pose>0.10 0 0.55 0 0 0</pose>
+        <mass>900.0</mass>
+        <inertia>
+          <ixx>277.5</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>363.75</iyy><iyz>0</iyz><izz>207.75</izz>
+        </inertia>
+      </inertial>
+
+      <collision name="chassis_collision">
+        <pose>0 0 0.45 0 0 0</pose>
+        <geometry><box><size>1.40 0.90 0.50</size></box></geometry>
+        <surface>
+          <friction><ode><mu>0.6</mu><mu2>0.6</mu2></ode></friction>
+        </surface>
+      </collision>
+      <visual name="chassis_visual">
+        <pose>0 0 0.45 0 0 0</pose>
+        <geometry><box><size>1.40 0.90 0.50</size></box></geometry>
+        <material>
+          <ambient>0.90 0.42 0.05 1</ambient>
+          <diffuse>0.90 0.42 0.05 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Counterweight, over the drive wheel and opposite the load. -->
+      <collision name="counterweight_collision">
+        <pose>0.74 0 0.51 0 0 0</pose>
+        <geometry><box><size>0.24 0.80 0.42</size></box></geometry>
+      </collision>
+      <visual name="counterweight_visual">
+        <pose>0.74 0 0.51 0 0 0</pose>
+        <geometry><box><size>0.24 0.80 0.42</size></box></geometry>
+        <material>
+          <ambient>0.62 0.28 0.04 1</ambient>
+          <diffuse>0.62 0.28 0.04 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Overhead guard: four posts and a roof plate, visual only. -->
+      <visual name="guard_post_fl">
+        <pose>0.55 0.38 1.175 0 0 0</pose>
+        <geometry><box><size>0.07 0.07 0.95</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="guard_post_fr">
+        <pose>0.55 -0.38 1.175 0 0 0</pose>
+        <geometry><box><size>0.07 0.07 0.95</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="guard_post_rl">
+        <pose>-0.55 0.38 1.175 0 0 0</pose>
+        <geometry><box><size>0.07 0.07 0.95</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="guard_post_rr">
+        <pose>-0.55 -0.38 1.175 0 0 0</pose>
+        <geometry><box><size>0.07 0.07 0.95</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="guard_roof">
+        <pose>0 0 1.68 0 0 0</pose>
+        <geometry><box><size>1.24 0.88 0.06</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+
+      <!-- Scanner housing, so the sensor has a visible place to sit. -->
+      <visual name="scanner_visual">
+        <pose>0.71 0 0.25 0 0 0</pose>
+        <geometry><box><size>0.10 0.16 0.14</size></box></geometry>
+        <material><ambient>0.10 0.10 0.12 1</ambient><diffuse>0.10 0.10 0.12 1</diffuse></material>
+      </visual>
+
+      <!--
+        Planar scanner looking along the driving direction. 181 samples
+        across 180 deg is exactly one sample per degree. The budget is
+        deliberate: rendering here is llvmpipe software rasterisation
+        (sim/setup/WSL_ENVIRONMENT.md 4.7), so sample count and update
+        rate are held down and must not be raised without re measuring.
+
+        RAW RANGES ONLY. No zone, no threshold and no stop decision is
+        taken in this file; scripts/obstacle_zone.py does that, and even
+        then only as a process function, never as a safety function.
+      -->
+      <sensor name="safety_scanner" type="gpu_lidar">
+        <pose>0.72 0 0.25 0 0 0</pose>
+        <always_on>1</always_on>
+        <update_rate>10</update_rate>
+        <visualize>false</visualize>
+        <topic>/forklift/gz/scan</topic>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>181</samples>
+              <resolution>1</resolution>
+              <min_angle>-1.5707963</min_angle>
+              <max_angle>1.5707963</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0.0</min_angle>
+              <max_angle>0.0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.10</min>
+            <max>8.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </lidar>
+      </sensor>
+    </link>
+
+    <!-- ========================== Mast ========================== -->
+    <!-- Fixed structure. The carriage slides on it, see mast_joint. -->
+    <link name="mast">
+      <inertial>
+        <pose>-0.78 0 1.05 0 0 0</pose>
+        <mass>120.0</mass>
+        <inertia>
+          <ixx>45.63</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>40.40</iyy><iyz>0</iyz><izz>6.03</izz>
+        </inertia>
+      </inertial>
+      <collision name="mast_collision">
+        <pose>-0.78 0 1.05 0 0 0</pose>
+        <geometry><box><size>0.10 0.72 2.00</size></box></geometry>
+      </collision>
+      <visual name="mast_rail_left">
+        <pose>-0.78 0.30 1.05 0 0 0</pose>
+        <geometry><box><size>0.09 0.09 2.00</size></box></geometry>
+        <material><ambient>0.14 0.15 0.18 1</ambient><diffuse>0.14 0.15 0.18 1</diffuse></material>
+      </visual>
+      <visual name="mast_rail_right">
+        <pose>-0.78 -0.30 1.05 0 0 0</pose>
+        <geometry><box><size>0.09 0.09 2.00</size></box></geometry>
+        <material><ambient>0.14 0.15 0.18 1</ambient><diffuse>0.14 0.15 0.18 1</diffuse></material>
+      </visual>
+      <visual name="mast_crossmember">
+        <pose>-0.78 0 2.00 0 0 0</pose>
+        <geometry><box><size>0.09 0.69 0.10</size></box></geometry>
+        <material><ambient>0.14 0.15 0.18 1</ambient><diffuse>0.14 0.15 0.18 1</diffuse></material>
+      </visual>
+    </link>
+
+    <!-- ==================== Steer and drive ===================== -->
+    <!--
+      Tricycle front assembly. The steer axis passes through the wheel
+      centre, so there is no castor trail to model and the steer angle is
+      the wheel heading exactly.
+    -->
+    <link name="steer_link">
+      <pose>0.55 0 0.24 0 0 0</pose>
+      <inertial>
+        <mass>18.0</mass>
+        <inertia>
+          <ixx>0.0768</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0768</iyy><iyz>0</iyz><izz>0.0768</izz>
+        </inertia>
+      </inertial>
+      <visual name="steer_yoke_visual">
+        <geometry><box><size>0.16 0.18 0.22</size></box></geometry>
+        <material><ambient>0.22 0.23 0.26 1</ambient><diffuse>0.22 0.23 0.26 1</diffuse></material>
+      </visual>
+    </link>
+
+    <link name="drive_wheel">
+      <pose>0.55 0 0.12 0 0 0</pose>
+      <inertial>
+        <mass>12.0</mass>
+        <inertia>
+          <ixx>0.0532</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0864</iyy><iyz>0</iyz><izz>0.0532</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.10</length></cylinder></geometry>
+        <surface>
+          <friction><ode><mu>1.0</mu><mu2>0.9</mu2></ode></friction>
+          <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.10</length></cylinder></geometry>
+        <material><ambient>0.09 0.09 0.10 1</ambient><diffuse>0.09 0.09 0.10 1</diffuse></material>
+      </visual>
+    </link>
+
+    <!-- ======================= Rear wheels ====================== -->
+    <!-- Passive. No controller is attached to either joint. -->
+    <link name="rear_wheel_left">
+      <pose>-0.50 0.36 0.12 0 0 0</pose>
+      <inertial>
+        <mass>10.0</mass>
+        <inertia>
+          <ixx>0.0443</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0720</iyy><iyz>0</iyz><izz>0.0443</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.10</length></cylinder></geometry>
+        <surface>
+          <friction><ode><mu>0.9</mu><mu2>0.4</mu2></ode></friction>
+          <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.10</length></cylinder></geometry>
+        <material><ambient>0.09 0.09 0.10 1</ambient><diffuse>0.09 0.09 0.10 1</diffuse></material>
+      </visual>
+    </link>
+
+    <link name="rear_wheel_right">
+      <pose>-0.50 -0.36 0.12 0 0 0</pose>
+      <inertial>
+        <mass>10.0</mass>
+        <inertia>
+          <ixx>0.0443</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0720</iyy><iyz>0</iyz><izz>0.0443</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.10</length></cylinder></geometry>
+        <surface>
+          <friction><ode><mu>0.9</mu><mu2>0.4</mu2></ode></friction>
+          <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.10</length></cylinder></geometry>
+        <material><ambient>0.09 0.09 0.10 1</ambient><diffuse>0.09 0.09 0.10 1</diffuse></material>
+      </visual>
+    </link>
+
+    <!-- ==================== Carriage and forks =================== -->
+    <!-- Link poses below are the carriage at travel zero, fully lowered. -->
+    <link name="carriage">
+      <pose>-0.80 0 0.35 0 0 0</pose>
+      <inertial>
+        <mass>40.0</mass>
+        <inertia>
+          <ixx>2.708</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.867</iyy><iyz>0</iyz><izz>1.908</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><box><size>0.10 0.75 0.50</size></box></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.10 0.75 0.50</size></box></geometry>
+        <material><ambient>0.30 0.32 0.36 1</ambient><diffuse>0.30 0.32 0.36 1</diffuse></material>
+      </visual>
+    </link>
+
+    <link name="fork_left">
+      <pose>-1.35 0.28 0.075 0 0 0</pose>
+      <inertial>
+        <mass>25.0</mass>
+        <inertia>
+          <ixx>0.0352</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>2.302</iyy><iyz>0</iyz><izz>2.327</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><box><size>1.05 0.12 0.05</size></box></geometry>
+        <surface>
+          <friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>1.05 0.12 0.05</size></box></geometry>
+        <material><ambient>0.58 0.60 0.64 1</ambient><diffuse>0.58 0.60 0.64 1</diffuse></material>
+      </visual>
+    </link>
+
+    <link name="fork_right">
+      <pose>-1.35 -0.28 0.075 0 0 0</pose>
+      <inertial>
+        <mass>25.0</mass>
+        <inertia>
+          <ixx>0.0352</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>2.302</iyy><iyz>0</iyz><izz>2.327</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><box><size>1.05 0.12 0.05</size></box></geometry>
+        <surface>
+          <friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>1.05 0.12 0.05</size></box></geometry>
+        <material><ambient>0.58 0.60 0.64 1</ambient><diffuse>0.58 0.60 0.64 1</diffuse></material>
+      </visual>
+    </link>
+
+    <!-- ========================== Joints ========================= -->
+
+    <joint name="mast_anchor" type="fixed">
+      <parent>base_link</parent>
+      <child>mast</child>
+    </joint>
+
+    <!-- Steer axis, vertical. Limit is the mechanical stop of the
+         assembly, not a control decision. -->
+    <joint name="steer_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>steer_link</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-1.31</lower>
+          <upper>1.31</upper>
+          <effort>800</effort>
+          <velocity>2.0</velocity>
+        </limit>
+        <dynamics><damping>80.0</damping><friction>0.5</friction></dynamics>
+      </axis>
+    </joint>
+
+    <!-- Traction axis. Spin is unlimited; the bounds below are the
+         continuous rotation idiom, not a travel limit. -->
+    <joint name="drive_wheel_joint" type="revolute">
+      <parent>steer_link</parent>
+      <child>drive_wheel</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-1e16</lower>
+          <upper>1e16</upper>
+          <effort>500</effort>
+          <velocity>40.0</velocity>
+        </limit>
+        <dynamics><damping>0.05</damping><friction>0.0</friction></dynamics>
+      </axis>
+    </joint>
+
+    <joint name="rear_wheel_left_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rear_wheel_left</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-1e16</lower>
+          <upper>1e16</upper>
+          <effort>200</effort>
+          <velocity>40.0</velocity>
+        </limit>
+        <dynamics><damping>0.05</damping><friction>0.0</friction></dynamics>
+      </axis>
+    </joint>
+
+    <joint name="rear_wheel_right_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rear_wheel_right</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-1e16</lower>
+          <upper>1e16</upper>
+          <effort>200</effort>
+          <velocity>40.0</velocity>
+        </limit>
+        <dynamics><damping>0.05</damping><friction>0.0</friction></dynamics>
+      </axis>
+    </joint>
+
+    <!--
+      Mast lift. ONE prismatic joint carries the carriage and both tines.
+      Travel 0 to 1.6 m is the mechanical stop.
+
+      Two separate things shape the motion, and it is worth being clear
+      about which does what, because they are easy to confuse:
+
+        <velocity>0.15</velocity> is the RATE LIMIT and it is enforced by
+        the physics engine on the way UP, measured exactly. A raw step on
+        /forklift/gz/fork_cmd therefore ramps at 0.15 m/s instead of
+        slamming to the target.
+
+        <damping> is the hydraulic flow restriction, and it is what governs
+        the way DOWN. The rate limit was measured NOT to bind against a
+        gravity assisted descent: with the controller allowed to push down
+        hard the carriage came down at 0.170 m/s, through a limit that
+        says 0.15. So the descent is not allowed to be a push. cmd_min is
+        set so low that lowering is gravity through the restriction, which
+        is both how a lift cylinder behaves and the only version of it
+        that stays under the declared rate.
+    -->
+    <joint name="mast_joint" type="prismatic">
+      <parent>mast</parent>
+      <child>carriage</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>0.0</lower>
+          <upper>1.6</upper>
+          <effort>12000</effort>
+          <velocity>0.15</velocity>
+        </limit>
+        <dynamics><damping>8000.0</damping><friction>50.0</friction></dynamics>
+      </axis>
+    </joint>
+
+    <joint name="fork_left_joint" type="fixed">
+      <parent>carriage</parent>
+      <child>fork_left</child>
+    </joint>
+
+    <joint name="fork_right_joint" type="fixed">
+      <parent>carriage</parent>
+      <child>fork_right</child>
+    </joint>
+
+    <!-- ====================== gz systems ========================= -->
+    <!--
+      Every topic below is stated explicitly. None of these systems is
+      allowed to fall back on its model scoped default topic, because the
+      default embeds the spawned model name and this project treats the
+      names as an interface (README.md contract table).
+    -->
+
+    <!--
+      Steer angle command [rad].
+
+      i_max is sized deliberately, and it is bounded from both sides.
+
+      Too low and the angle never arrives: steering a loaded wheel that is
+      standing still scrubs against the floor, a resisting moment measured
+      at roughly 400 N m for this vehicle, and an integral clamp under that
+      leaves a permanent error no proportional gain can remove.
+
+      Too high and it oscillates: once the vehicle rolls, the scrub
+      disappears, the accumulated surplus has nothing left to push against
+      and the joint hunts at its rate limit. Both were observed. The clamp
+      is therefore set just above the measured scrub moment.
+
+      WHERE THE DAMPING LIVES, AND WHY IT IS NOT d_gain. The controller's
+      derivative term is an EXPLICIT force evaluated once per physics step,
+      so it is stable only while d_gain stays well under inertia / step,
+      which for this assembly is about 0.13 / 0.002 = 65. Larger values
+      were tried and do not damp: they chatter, and at d_gain 1200 the
+      joint stopped responding to its topic altogether. The damping that
+      actually holds this joint steady is <dynamics><damping> on the joint
+      itself, which the physics engine integrates implicitly. d_gain here
+      is a trim term, nothing more.
+
+      Joint damping has its own ceiling, found the same way. At 80 the
+      joint slews to a commanded angle and settles; raised to 400 against
+      this joint's 800 N m effort limit it stopped moving altogether while
+      still reporting a live command. Neither number was predicted; both
+      were measured, and the working value is the one below.
+    -->
+    <plugin filename="gz-sim-joint-position-controller-system"
+            name="gz::sim::systems::JointPositionController">
+      <joint_name>steer_joint</joint_name>
+      <topic>/forklift/gz/steer_cmd</topic>
+      <p_gain>6000.0</p_gain>
+      <i_gain>1500.0</i_gain>
+      <d_gain>30.0</d_gain>
+      <i_max>800.0</i_max>
+      <i_min>-800.0</i_min>
+      <cmd_max>4000.0</cmd_max>
+      <cmd_min>-4000.0</cmd_min>
+    </plugin>
+
+    <!-- Traction command [rad/s] at the wheel. Raw velocity, no ramp. -->
+    <plugin filename="gz-sim-joint-controller-system"
+            name="gz::sim::systems::JointController">
+      <joint_name>drive_wheel_joint</joint_name>
+      <topic>/forklift/gz/traction_cmd</topic>
+      <initial_velocity>0.0</initial_velocity>
+    </plugin>
+
+    <!--
+      Carriage travel command [m], measured from fully lowered.
+
+      The clamps are ASYMMETRIC, and deliberately so: gravity is. A lift
+      needs a large integral in the LIFTING direction, because holding the
+      carriage still is the integral's job once the position error has
+      gone to nothing, and it needs almost none in the lowering direction,
+      because lowering is what gravity does for free.
+
+      WHICH CLAMP IS WHICH IS NOT WHAT IT LOOKS LIKE. gz's PID forms its
+      error as (position minus target) and negates the sum, so while the
+      carriage sits BELOW its target the integral term is NEGATIVE and it
+      is i_min, the seemingly downward clamp, that bounds how hard the
+      lift can push UP. Sized the intuitive way round, with i_min small,
+      the carriage was measured to stop and hold 15.7 mm short of an
+      0.80 m target, because the integral was allowed only 200 N of the
+      882 N the assembly weighs and the rest had to come out of position
+      error. The pairing below is the corrected one.
+
+      p_gain is large for the reason a lift needs it: the last centimetre
+      of an approach is where the proportional term has to overcome the
+      whole weight to stop the carriage, and a soft gain buys that
+      stopping distance back in overshoot.
+    -->
+    <plugin filename="gz-sim-joint-position-controller-system"
+            name="gz::sim::systems::JointPositionController">
+      <joint_name>mast_joint</joint_name>
+      <topic>/forklift/gz/fork_cmd</topic>
+      <p_gain>60000.0</p_gain>
+      <i_gain>2500.0</i_gain>
+      <d_gain>9000.0</d_gain>
+      <i_max>200.0</i_max>
+      <i_min>-1500.0</i_min>
+      <cmd_max>3000.0</cmd_max>
+      <cmd_min>-100.0</cmd_min>
+    </plugin>
+
+    <!--
+      Joint feedback. Position and rate of the three driven joints.
+
+      This system has NO rate parameter and publishes once per physics
+      iteration; an <update_rate> child was tried and measured to change
+      nothing. The rate is therefore the world's, about 493 Hz in a 500 Hz
+      world, and a world that bridges this topic into ROS is choosing that
+      traffic. The vehicle nodes do not need it: they consume it at their
+      own timer rate and drop the rest.
+    -->
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>/forklift/gz/joint_state</topic>
+      <joint_name>steer_joint</joint_name>
+      <joint_name>drive_wheel_joint</joint_name>
+      <joint_name>mast_joint</joint_name>
+    </plugin>
+
+    <!-- Ground truth odometry. This is simulation feedback, not a
+         localisation solution; AMCL and Nav2 remain the vehicle's real
+         localisation path. -->
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <odom_topic>/forklift/gz/odom</odom_topic>
+      <odom_frame>forklift/odom</odom_frame>
+      <robot_base_frame>forklift/base_link</robot_base_frame>
+      <dimensions>2</dimensions>
+      <odom_publish_frequency>20</odom_publish_frequency>
+    </plugin>
+
+  </model>
+</sdf>
