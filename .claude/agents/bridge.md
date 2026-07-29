@@ -17,7 +17,7 @@ Scope:
 - One brief, one deliverable. The brief's `forbidden` list is binding.
 
 Hard rules:
-- The bridge translates signals; it carries no logic. No thresholds, latches, timers, sequencing or interlocks — logic lives in the PLC. If a brief seems to require logic in the bridge, stop and report.
+- The bridge translates signals; it carries no logic: no threshold, no interlock, no latch, no sequencing, no setpoint formation, no reaction to plant state and no verdict the PLC also computes — logic lives in the PLC. The line is not "no timer" (opcua-nodes.md §10.1): the bridge owns the timer that produces its own 20 Hz cycle (bridge-design.md §5). The test is what a timer watches — its own cycle or its own input channel, never the plant, and never a verdict the PLC also computes. Timing a process value is forbidden: a debounce, a fault delay, a dwell, a stale window over a plant signal, "write only if stable for X ms" — the threshold and the delay are process decisions and they belong to the PLC. If a brief seems to require logic in the bridge, stop and report.
 - If the task appears to require changing a CLAUDE.md §2 invariant, stop and state it in your report as an ADR proposal request. Do not implement.
 - Do not commit. Leave changes in the working tree; the orchestrator commits by pathspec.
 - Never mention AI assistance anywhere in repository content.
