@@ -803,10 +803,36 @@ class HmiClient:
         return node
 
     async def _write(self, values: dict[str, Any]) -> None:
+        """THE single write helper, together with `_writable` above: every one
+        of the six HMI-writable nodes passes through here, split into two
+        calls per cycle (the five requests, then the heartbeat).
+
+        S7-COMPATIBLE DATAVALUES ONLY (first real-CPU contact, 2026-07-29):
+        `BadWriteNotSupported: The server does not support writing the
+        combination of value, status and timestamps provided.` A real
+        S7-1500 refuses a write whose `DataValue` carries a timestamp.
+
+        `Client.write_values` accepts a bare `ua.Variant` per node and hands
+        each one to `asyncua`'s own `value_to_datavalue`, which — for
+        anything that is not already a `ua.DataValue` — stamps
+        `SourceTimestamp=datetime.now(timezone.utc)` onto it. That stamp was
+        the defect: every write this backend made carried a source timestamp
+        the double never objected to and the real CPU does.
+
+        `value_to_datavalue` returns an already-built `ua.DataValue`
+        UNCHANGED (`isinstance(val, ua.DataValue)` short-circuits it before
+        the timestamp branch), so building the `DataValue` here — the
+        `Variant` and nothing else, `SourceTimestamp`/`ServerTimestamp`
+        left at their `None` default — keeps both timestamps off the wire.
+        This is exactly `bridge/amr_bridge/opcua_side.py`'s `PlcClient._write`
+        (`ua.DataValue(ua.Variant(value, variant_type))`, read-only reference,
+        not imported), which has written to this same CPU since M3.
+        """
         names = list(values)
         nodes = [self._writable(name) for name in names]
-        variants = [ua.Variant(values[name], WRITE_VARIANT[name]) for name in names]
-        await self.client.write_values(nodes, variants)
+        datavalues = [ua.DataValue(ua.Variant(values[name], WRITE_VARIANT[name]))
+                      for name in names]
+        await self.client.write_values(nodes, datavalues)
 
     # -- session ------------------------------------------------------------ #
 

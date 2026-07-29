@@ -1,9 +1,10 @@
 # EVIDENCE_HMI — the commissioning HMI against two doubles
 
-Briefs `docs/briefs/m4f-07-hmi-backend-ui.md` (sections A–D) and
+Briefs `docs/briefs/m4f-07-hmi-backend-ui.md` (sections A–D),
 `docs/briefs/m4f-07b-h6-and-holdable-reset.md` (section E, and the two amendments
-marked as such in A.5 and D). Every figure below is quoted as the harness or the
-process printed it; nothing here is arithmetic done while writing.
+marked as such in A.5 and D), and `docs/briefs/m4f-07c-s7-write-compat.md`
+(section F). Every figure below is quoted as the harness or the process printed
+it; nothing here is arithmetic done while writing.
 
 **Neither server in this file is a PLC, and the live PLCSIM Advanced instance was
 never contacted.** Both harnesses refuse a non-loopback endpoint outright, and
@@ -775,3 +776,165 @@ the whole process gone — is still caught faster, by the PLC, in 600 ms, and st
 latches; B.8 is that case and it is unchanged, measured again in the pass B re-run
 at *"HmiLinkOk went FALSE 597 ms after the HMI stopped"*. The two reactions are
 proportional on purpose.
+
+---
+
+# F. S7-compatible writes — the `m4f-07c` DataValue fix
+
+Brief `docs/briefs/m4f-07c-s7-write-compat.md`. First contact with the real CPU
+(2026-07-29) refused every write this backend made:
+
+```
+BadWriteNotSupported: The server does not support writing the combination of
+value, status and timestamps provided.
+```
+
+— session established (6 writable, 12 read-only resolved), first write refused,
+deadman fired correctly, reconnect loop correct. Neither double below has ever
+raised this: **the double accepts both the pre-fix and post-fix DataValue, so a
+harness pass proves the write path is unchanged in every other respect, not that
+the real S7-1500 accepts the new form.** That contact is the orchestrator's,
+against the endpoint in `hmi/config.yaml`, after this fix is committed. Nothing
+in this section is evidence about it.
+
+## F.1 The defect, isolated
+
+`HmiClient._write` built its call as `self.client.write_values(nodes, variants)`,
+handing `asyncua`'s `Client.write_values` a bare `ua.Variant` per node.
+`write_values` runs every item that is not already a `ua.DataValue` through
+`asyncua.common.ua_utils.value_to_datavalue`, which stamps
+`SourceTimestamp=datetime.now(timezone.utc)` onto it. `bridge/amr_bridge/opcua_side.py`'s
+`PlcClient._write` (read-only reference, not imported) never reaches that branch:
+it builds the `ua.DataValue` itself — `ua.DataValue(ua.Variant(value, variant_type))`
+— and `value_to_datavalue` returns an already-built `DataValue` UNCHANGED
+(`isinstance(val, ua.DataValue)` short-circuits before the timestamp branch). That
+is the whole of the difference, confirmed against the installed library rather
+than assumed: both forms of the *same* value, serialised with
+`asyncua.ua.ua_binary.struct_to_binary` and read back as a wire encoding-mask byte
+(venv `/home/ozkan/amr-hmi-venv`, asyncua `2.0.1`, `hmi_server` imported directly
+so the post-fix line is the shipped code, not a hand-typed copy of it):
+
+```
+post-fix HmiClient._write DataValue for HmiTractionRequest = 0.62
+  StatusCode=StatusCode(value=0) SourceTimestamp=None ServerTimestamp=None
+  encoding_mask_byte=0b00000011 (0x03)  raw=030a52b81e3f00000000
+
+pre-fix path -- value_to_datavalue() on the same bare Variant (what
+write_values(nodes, variants) did internally):
+  StatusCode=StatusCode(value=0) SourceTimestamp=datetime.datetime(2026, 7, 29, 16, 40, 4, 821688, tzinfo=datetime.timezone.utc) ServerTimestamp=None
+  encoding_mask_byte=0b00000111 (0x07)  raw=070a52b81e3f0000000030eb7fe8781fdd01
+```
+
+Bit 2 of the mask (`SourceTimestamp` present) is the only difference between the
+two, and a client-supplied source timestamp is exactly what the live failure's
+"value, status **and** timestamps" wording names.
+
+## F.2 The fix
+
+`HmiClient._write` now builds one `ua.DataValue` per node before handing the list
+to `write_values` — `ua.DataValue(ua.Variant(values[name], WRITE_VARIANT[name]))`
+in place of the bare `ua.Variant(...)`. This is still the single write helper
+`hmi/README.md` and A.1 describe: `_writable` (which node) and `_write` (how it
+is written) remain the one choke point every one of the six nodes passes through,
+split into the same two calls per cycle as before — the five requests, then the
+heartbeat. Nothing else in `hmi_server.py` changed; there is no second write path
+to change.
+
+## F.3 A wire-level fact worth stating precisely
+
+`ua.DataValue`'s `StatusCode` field defaults to `StatusCode()` (Good) through a
+dataclass `default_factory`, not to `None`. Passing only a `Variant` into
+`DataValue(...)` — this fix, and the bridge pattern it mirrors — therefore still
+asserts `StatusCode` present on the wire (mask bit 1, `raw=03…` above), alongside
+`Value`. Only `SourceTimestamp` and `ServerTimestamp` are actually absent. The
+bridge's identical construction has written to the commissioned CPU since M3
+carrying that same Good `StatusCode`, so a default Good status is evidently not
+what the CPU's `BadWriteNotSupported` names; the failure text is the OPC UA
+specification's fixed wording for the status code and does not itself say which
+of "value, status and timestamps" was the one this CPU objected to. This fix
+reproduces the bridge's exact, already-proven wire form (mask `0x03`) rather than
+the stricter all-`None` form (`StatusCode=None` too, mask `0x01`) a literal
+reading of "no StatusCode" would imply — the stricter form has never been written
+to the real CPU and this brief forbids contacting it to find out. Flagged for the
+orchestrator rather than silently narrowed or silently widened.
+
+## F.4 Both existing kernel harnesses, re-run against a fresh double instance
+
+Neither harness contacted PLCSIM Advanced or the commissioned CPU; both refuse a
+non-loopback endpoint outright, and `hmi/config.yaml` was not run. Own ports —
+4897 and 8189 for pass A, 4898 and 8190 for pass B — checked clear with `ss -ltn`
+immediately before each double started and confirmed clear again after both
+processes had exited, distinct from every port either double has ever used
+before (4840 PLCSIM, 4842–4846 the bridge's, 4847 and 4850 the earlier HMI
+evidence's own).
+
+| Item | Value |
+|---|---|
+| Date | 2026-07-29. Pass A started `18:36:28`, pass B `18:37:39`, guest local (UTC+2) |
+| Host | WSL2 Ubuntu 24.04.4 LTS, `/mnt/c` checkout, headless |
+| venv | `/home/ozkan/amr-hmi-venv`, unchanged since the original evidence — plain venv, not `--system-site-packages` |
+| Python | `3.12.3` |
+| asyncua | `2.0.1`, both venvs |
+| Pass A server | `bridge/test_double/plc_test_double.py`, own instance, `opc.tcp://127.0.0.1:4897/amr-agent/celldouble/` |
+| Pass B server | `plc/forklift/double/server.py --port 4898`, own instance, `opc.tcp://127.0.0.1:4898/` |
+| Configs | scratch copies of `hmi/config-double.yaml` / `hmi/config-logic-double.yaml` with only the endpoint and HTTP ports changed; not committed, kept outside the repository |
+| Raw evidence | `evidence/harness-2026-07-29-m4f07c-passA.log`, `evidence/harness-2026-07-29-m4f07c-passB.log`, `evidence/hmi-cycles-2026-07-29-m4f07c-passA-20260729T163628Z-pid116112.csv`, `evidence/hmi-cycles-2026-07-29-m4f07c-passB-20260729T163739Z-pid116383.csv` — present in the working tree; not part of this fix's commit |
+
+**Pass A**, `hmi/tools/check_hmi_writes.py` against the bridge test double — the
+harness's own summary line:
+
+```
+no failures
+```
+
+42 `ok` lines appear in this run's transcript against 0 `FAIL` (the harness
+prints no total, so this is a hand count of the transcript, done because a
+number is being stated at all, not read off the tool — `docs/LESSONS.md`
+2026-07-27). Every check from A's original run (§A) reappears with the same
+verdicts against the S7-compatible write path: the allowlist refusal (J), every
+node written every cycle regardless of change including the repair-after-overwrite
+(A), both Bools as levels including the held reset and the sub-cycle tap (D, E),
+the heartbeat advancing every cycle (F), session loss and regain with the counter
+surviving the reconnect (G), both stop paths (H, I), and the six-and-only-six
+write-set check (K). From this run's own CSV:
+
+```
+hmi/evidence/hmi-cycles-2026-07-29-m4f07c-passA-20260729T163628Z-pid116112.csv
+  cycles n=78  write RTT median 1.050 ms  p95 1.459 ms  max 1.916 ms
+  cycle period median 100.10 ms  p95 100.94 ms  max 4121.60 ms
+  heartbeat 1 -> 78, distinct consecutive changes 77 of 77 intervals
+```
+
+77 of 77 — the counter changed at every cycle boundary in the file, unaffected by
+carrying a `DataValue` instead of a bare `Variant`. The `max 4121.60 ms` period is
+check G's own reconnect gap, the same shape §A.4 recorded before.
+
+**Pass B**, `hmi/tools/check_hmi_teleop_loop.py` against the PLC logic double —
+the same `no failures` summary line, 33 `ok` lines in this run's transcript
+against 0 `FAIL`. Every check from B's original run (§B) reappears: the boot
+polarity of the link verdict (P0), the monitored reset clearing latches and
+energising nothing (P1), the enable's own edge (P2), the joystick reaching the
+plant only through PLC logic (P3), the fork-height speed cap (P4), the obstacle
+latch overriding a live command (P5, P6), the release-and-reassert conflation
+(P7), the fork jog (P8), and the HMI watchdog's controlled stop (P9) — this time
+at `HmiLinkOk went FALSE 607 ms after the HMI stopped`, inside the same `T#600ms`
+stale window B.8 (`650 ms`) and the `m4f-07b` re-run (`597 ms`) also measured.
+From this run's own CSV:
+
+```
+hmi/evidence/hmi-cycles-2026-07-29-m4f07c-passB-20260729T163739Z-pid116383.csv
+  cycles n=47  write RTT median 0.925 ms  p95 1.308 ms  max 1.447 ms
+  cycle period median 100.00 ms  p95 100.70 ms  max 101.00 ms
+  heartbeat 1 -> 47, distinct consecutive changes 46 of 46 intervals
+```
+
+46 of 46 again.
+
+## F.5 What is deliberately not shown here
+
+Same as §D, restated for this fix specifically: nothing here is evidence that the
+commissioned S7-1500 accepts the new write form. Both doubles accepted the old,
+timestamped `DataValue` just as readily as the new one throughout the original
+evidence (§A–E) and this re-run — the defect this brief fixes is invisible to
+either double and was found only on first contact with the real CPU. F.1's
+byte-level comparison is what stands in its place until that contact is made.
