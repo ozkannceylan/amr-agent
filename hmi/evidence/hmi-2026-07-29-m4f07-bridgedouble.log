@@ -1,0 +1,15 @@
+2026-07-29 08:16:31,591 INFO    hmi evidence CSV: /mnt/c/Users/ozkan/projects/amr-agent/hmi/evidence/hmi-cycles-2026-07-29-m4f07-bridgedouble-20260729T061631Z-pid60432.csv (one file per session; never truncated)
+2026-07-29 08:16:31,596 INFO    hmi HMI UI on http://127.0.0.1:8089/ — loopback only, one operator, local cell (ADR 0008 D2.7)
+2026-07-29 08:16:31,600 WARNING asyncua.client.client Requested session timeout to be 3600000ms, got 8000ms instead
+2026-07-29 08:16:31,609 INFO    hmi session established with opc.tcp://127.0.0.1:4847/amr-agent/celldouble/ — 6 writable node(s), 12 read-only node(s); browse prefix 5:ServerInterfaces/6:DemoCell
+2026-07-29 08:16:31,609 INFO    hmi session timeout requested 10000 ms, granted 8000 ms (the granted value is the only one any behaviour uses)
+2026-07-29 08:16:37,210 WARNING hmi session lost: ConnectionError: client is disconnected
+2026-07-29 08:16:37,210 INFO    hmi controls returned to rest (deadman: ConnectionError: client is disconnected)
+2026-07-29 08:16:37,210 WARNING hmi final zeros write attempt FAILED (ConnectionError: client is disconnected): ConnectionError: client is disconnected
+2026-07-29 08:16:37,210 WARNING asyncua.client.ua_session.UaSession close_session was called but connection is closed
+2026-07-29 08:16:37,210 WARNING asyncua.client.ua_client.UaClient close_secure_channel was called but connection is closed
+2026-07-29 08:16:38,221 WARNING hmi connect failed: ConnectionRefusedError: [Errno 111] Connect call failed ('127.0.0.1', 4847) (retry in 1.0 s)
+2026-07-29 08:16:39,228 WARNING asyncua.client.client Requested session timeout to be 3600000ms, got 8000ms instead
+2026-07-29 08:16:39,239 INFO    hmi session established with opc.tcp://127.0.0.1:4847/amr-agent/celldouble/ — 6 writable node(s), 12 read-only node(s); browse prefix 5:ServerInterfaces/6:DemoCell
+2026-07-29 08:16:39,239 INFO    hmi session timeout requested 10000 ms, granted 8000 ms (the granted value is the only one any behaviour uses)
+2026-07-29 08:16:41,488 INFO    hmi shutting down cleanly: no farewell value written, nothing zeroed on the server (§10.8 H5). The heartbeat stops here and the link verdict is the PLC's.

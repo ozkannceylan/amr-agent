@@ -1,0 +1,78 @@
+HMI write harness — server opc.tcp://127.0.0.1:4847/amr-agent/celldouble/, HMI http://127.0.0.1:8089
+The server is the BRIDGE TEST DOUBLE. It runs no standard program, so every Forklift/Status/ node and HmiLinkOk hold their start values for the whole run: that is the honest answer, not a defect. The second evidence pass, against the PLC logic double, is where the lamps move.
+
+J. the write allowlist refuses a configuration naming anything else
+   ok   the HMI refuses to start on that configuration — exit 2
+   ok   and says why — 2026-07-29 08:16:29,141 ERROR   hmi ConfigError: /tmp/amr-hmi/hmi-config-doctored.yaml: the write set must be exactly the six HMI-writable nodes (HmiForkRequest, HmiHeartbeat, HmiResetRequest, HmiSteerRequest, HmiTeleopRequest, HmiTractionRequest); this file names ForkliftTractionSpeedRef, HmiForkRequest, HmiHeartbeat, HmiSteerRequest, HmiTeleopRequest, HmiTractionRequest
+Requested session timeout to be 3600000ms, got 8000ms instead
+   ok   the HMI reached CONNECTED against the double
+        session timeout requested 10000 ms, granted 8000 ms
+
+UI. the page is served and references nothing outside itself
+   ok   GET / serves the operator page — 20626 bytes
+   ok   no external stylesheet, font, image, script or @import in the page — none of the eight tokens found
+
+B. the joystick and the fork buttons map to the three Real requests (§10.4)
+   ok   HmiTractionRequest is the joystick's Y as a fraction — 0.6200000047683716
+   ok   HmiSteerRequest is the joystick's X in rad, X * 1.31 — -0.6549999713897705
+   ok   HmiForkRequest is the fork button as a fraction — 1.0
+
+A. all six nodes are written EVERY cycle regardless of change (§10.4, H1)
+   ok   another client overwrote HmiTractionRequest on the server — -0.8999999761581421
+   ok   the HMI rewrote its own value with no operator action — 0.6200000047683716 after 98 ms; a write-on-change client would have left the overwrite standing
+   ok   and the heartbeat advanced across the same window — 5 -> 6
+
+C. release writes zeros immediately (the deadman)
+   ok   all three Real requests read zero — 0.0, 0.0, 0.0
+
+D. HmiTeleopRequest is a level, asserted and withdrawn (§10.4)
+   ok   asserted — True
+   ok   and still asserted half a second later with no operator action — a level, not an edge — True
+   ok   withdrawn by writing FALSE — False
+
+E. HmiResetRequest is momentary: TRUE for one write cycle, then FALSE
+   ok   the pulse was observed TRUE on the server — 9 of 90 samples over 1.0 s
+   ok   and it spanned 1 heartbeat value(s) — one write cycle, sampled across a 100 ms cycle boundary
+   ok   and it reads FALSE again afterwards, so the PLC sees the node low between presses and can arm its edge per link session (§10.8 P6) — False
+
+F. the heartbeat advances every cycle (H1)
+   ok   the counter changed over 2.0 s — 30 -> 50, 20 increments
+        HMI-reported write RTT last 1.01 ms, median of 10 1.302 ms; measured cycle period 100.0 ms (target 100.0 ms)
+        heartbeat 50 after 50 write cycles; last good write 28.3 ms ago
+
+M. the metrics panel reads Input/Output/Status/Link and nothing else
+   ok   ForkliftForkHeight reached the panel — 1.2300000190734863
+   ok   ForkliftLinearSpeed — -0.4399999976158142
+   ok   ForkliftObstacleMinDistance — 2.75
+   ok   ForkliftTractionSpeedRef is on the panel beside the measured speed — 0.0
+   ok   the four status lamps and HmiLinkOk are on the panel — ForkliftTeleopActive=False, ForkliftObstacleStopActive=False, ForkliftSpeedLimitActive=False, ForkliftResetRequired=False, HmiLinkOk=False
+   ok   and no Forklift/Hmi/ node is read back into the display — the requests are this client's output, not its state
+   ok   the panel is polled at 5 Hz — age 30.7 ms
+
+G. session lost and regained (§10.8 H4, H5 on reconnect)
+   ok   a full traction demand is standing before the loss — 1.0
+   ok   the HMI reports RECONNECTING while the server is gone — ConnectionError: client is disconnected
+   ok   and the heartbeat is not advancing, because there is nowhere to write it
+   ok   the HMI reconnected on its own, with no operator action
+Requested session timeout to be 3600000ms, got 8000ms instead
+   ok   and the requests come back AT REST, not at the standing demand — 0.0, 0.0, 0.0, teleop=False
+   ok   the counter is NOT reset across the reconnect (H4) — 56 before the loss, 74 after, and the double came back up with its own start value 0
+
+I. clean shutdown writes NO farewell value; the heartbeat stops (H5)
+   ok   the heartbeat is frozen after the kill — 79, then 79 1.5 s later
+   ok   and the requests RETAIN their last written values — HmiTractionRequest 0.3499999940395355, HmiTeleopRequest True. That is exactly why §10.8 exists: a stopped HMI is not detectable from the requests alone
+
+H. backend fault: one final zeros write attempt lands, then the heartbeat stops
+   ok   a demand is standing when the fault is injected — -0.800000011920929
+   ok   the HMI reports DOWN — injected backend fault (TEST SCAFFOLDING)
+   ok   the final zeros write LANDED on the server — 0.0, 0.0, 0.0, teleop=False
+   ok   and the heartbeat stopped and stayed stopped — 50, then 50 2.0 s later
+   ok   the HMI says so itself, on the banner the operator is looking at
+
+K. the HMI touched the six HMI-writable nodes and nothing else
+   ok   no Forklift/Input/, Output/ or Status/ node name appears anywhere in the HMI's log — none of the twelve
+        (the read set is resolved by browse path from config; the write set is the code-side allowlist in hmi_server.py, and check J shows the process refuses to start when a config names anything else)
+
+no failures
+HMI stdout/stderr:      /tmp/amr-hmi/hmi-run.log
+fault run stdout/stderr: /tmp/amr-hmi/hmi-fault.log

@@ -1,0 +1,5 @@
+2026-07-29 08:17:05,534 INFO    hmi evidence CSV: /mnt/c/Users/ozkan/projects/amr-agent/hmi/evidence/hmi-cycles-2026-07-29-m4f07-logicdouble-20260729T061705Z-pid60582.csv (one file per session; never truncated)
+2026-07-29 08:17:05,537 INFO    hmi HMI UI on http://127.0.0.1:8090/ — loopback only, one operator, local cell (ADR 0008 D2.7)
+2026-07-29 08:17:05,551 INFO    hmi session established with opc.tcp://127.0.0.1:4850/ — 6 writable node(s), 12 read-only node(s); browse prefix 2:ServerInterfaces/3:DemoCell
+2026-07-29 08:17:05,551 INFO    hmi session timeout requested 10000 ms, granted 10000 ms (the granted value is the only one any behaviour uses)
+2026-07-29 08:17:10,103 INFO    hmi shutting down cleanly: no farewell value written, nothing zeroed on the server (§10.8 H5). The heartbeat stops here and the link verdict is the PLC's.

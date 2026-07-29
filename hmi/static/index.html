@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<!--
+  amr-agent commissioning HMI — operator page.
+
+  One file, offline: no framework, no CDN, no web font, no image, no external
+  request of any kind. Everything the page needs is in this document, which is
+  why it works on a commissioning laptop with no route off the cell.
+
+  What the operator produces here are REQUESTS. The PLC standard program forms
+  every actuator setpoint from them, applies its interlocks and owns the
+  outcome (ADR 0008 D2.2). Nothing on this page is a safety device and nothing
+  on it carries safety integrity.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>amr-agent forklift commissioning HMI</title>
+<style>
+  :root {
+    --bg:        #0b0d10;
+    --panel:     #15191e;
+    --panel-2:   #1d232a;
+    --edge:      #2c343d;
+    --ink:       #e9eef4;
+    --ink-dim:   #93a1b0;
+    --ok:        #14b866;
+    --warn:      #e5a50a;
+    --stop:      #e0403f;
+    --live:      #37b6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--ink);
+    font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px; -webkit-text-size-adjust: 100%;
+  }
+  body { padding: 0 0 24px; touch-action: manipulation; }
+  .mono { font-family: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+          font-variant-numeric: tabular-nums; }
+
+  /* ---- persistent PLC connection banner -------------------------------- */
+  #link {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 18px;
+    padding: 10px 16px; border-bottom: 2px solid #000;
+    background: var(--panel-2); color: var(--ink);
+    font-weight: 600; letter-spacing: .02em;
+  }
+  #link.CONNECTED    { background: #0d3a24; border-bottom-color: var(--ok); }
+  #link.RECONNECTING { background: #3d2f04; border-bottom-color: var(--warn); }
+  #link.DOWN         { background: #3d1414; border-bottom-color: var(--stop); }
+  #link .state {
+    font-size: 20px; padding: 2px 12px; border-radius: 3px;
+    background: #000a; border: 1px solid var(--edge);
+  }
+  #link.CONNECTED    .state { color: var(--ok);   border-color: var(--ok); }
+  #link.RECONNECTING .state { color: var(--warn); border-color: var(--warn); }
+  #link.DOWN         .state { color: var(--stop); border-color: var(--stop); }
+  .k { color: var(--ink-dim); font-weight: 400; }
+
+  /* ---- latched process stop banner ------------------------------------- */
+  #stopbanner {
+    display: none; margin: 0; padding: 18px 16px;
+    background: var(--stop); color: #fff;
+    border-bottom: 4px solid #000;
+  }
+  #stopbanner.on { display: block; }
+  #stopbanner.reset-only { background: var(--warn); color: #1a1400; }
+  #stopbanner h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: .04em; }
+  #stopbanner p  { margin: 0; font-size: 15px; font-weight: 600; }
+  #stopbanner .fine { font-weight: 400; opacity: .85; margin-top: 6px; }
+
+  /* ---- layout ----------------------------------------------------------- */
+  main {
+    display: grid; gap: 14px; padding: 14px;
+    grid-template-columns: minmax(300px, 380px) minmax(220px, 260px) minmax(320px, 1fr);
+  }
+  @media (max-width: 1080px) { main { grid-template-columns: 1fr; } }
+  section {
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 4px;
+    padding: 12px;
+  }
+  h2 {
+    margin: 0 0 10px; font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-dim); font-weight: 700;
+  }
+
+  /* ---- joystick --------------------------------------------------------- */
+  #pad {
+    position: relative; width: 100%; aspect-ratio: 1 / 1; margin: 0 auto;
+    background:
+      linear-gradient(var(--edge), var(--edge)) center/2px 100% no-repeat,
+      linear-gradient(var(--edge), var(--edge)) center/100% 2px no-repeat,
+      var(--panel-2);
+    border: 2px solid var(--edge); border-radius: 6px;
+    touch-action: none; cursor: crosshair; overflow: hidden;
+  }
+  #pad.live { border-color: var(--live); }
+  #knob {
+    position: absolute; left: 50%; top: 50%; width: 74px; height: 74px;
+    margin: -37px 0 0 -37px; border-radius: 50%;
+    background: #33404d; border: 3px solid var(--ink-dim);
+    box-shadow: 0 0 0 2px #000 inset;
+  }
+  #pad.live #knob { background: #14506e; border-color: var(--live); }
+  .padlabel {
+    position: absolute; color: var(--ink-dim); font-size: 11px; letter-spacing: .1em;
+  }
+  .padlabel.n { top: 6px; left: 50%; transform: translateX(-50%); }
+  .padlabel.s { bottom: 6px; left: 50%; transform: translateX(-50%); }
+  .padlabel.w { left: 6px; top: 50%; transform: translateY(-50%); }
+  .padlabel.e { right: 6px; top: 50%; transform: translateY(-50%); }
+
+  /* ---- buttons ---------------------------------------------------------- */
+  button {
+    display: block; width: 100%; padding: 16px 10px; margin-bottom: 10px;
+    font-size: 17px; font-weight: 700; letter-spacing: .06em;
+    color: var(--ink); background: var(--panel-2);
+    border: 2px solid var(--edge); border-radius: 4px; cursor: pointer;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  button:active, button.held { background: #14506e; border-color: var(--live); }
+  button#enable.on { background: #0d3a24; border-color: var(--ok); color: #b7f5d6; }
+  button#reset { background: #2c2306; border-color: #6a5410; }
+  button:focus-visible { outline: 3px solid var(--live); outline-offset: 2px; }
+
+  /* ---- lamps ------------------------------------------------------------ */
+  .lamps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .lamp {
+    display: flex; align-items: center; gap: 9px; padding: 9px 10px;
+    background: var(--panel-2); border: 1px solid var(--edge); border-radius: 3px;
+    font-size: 12.5px; font-weight: 600; color: var(--ink-dim);
+  }
+  .lamp .bulb {
+    width: 15px; height: 15px; border-radius: 50%; flex: 0 0 auto;
+    background: #263039; border: 2px solid #3a4753;
+  }
+  .lamp.on { color: var(--ink); }
+  .lamp.on.ok   .bulb { background: var(--ok);   border-color: #7df3b8; }
+  .lamp.on.warn .bulb { background: var(--warn); border-color: #ffdd80; }
+  .lamp.on.stop .bulb { background: var(--stop); border-color: #ff9b9a; }
+  .lamp.on.live .bulb { background: var(--live); border-color: #b3e4ff; }
+
+  /* ---- metrics ---------------------------------------------------------- */
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--edge); }
+  th { color: var(--ink-dim); font-weight: 600; font-size: 12px; }
+  td.v { text-align: right; font-size: 15px; }
+  td.u { width: 3.2em; color: var(--ink-dim); font-size: 12px; }
+  tr.pair td { border-bottom: none; }
+  tr.pair + tr td { border-top: 1px solid var(--edge); }
+  .stale td { opacity: .45; }
+  .note { color: var(--ink-dim); font-size: 12px; line-height: 1.5; margin: 10px 0 0; }
+  .hint {
+    margin: 0 0 10px; padding: 9px 10px; border-radius: 3px; font-size: 12.5px;
+    background: #2c2306; border: 1px solid #6a5410; color: #f0dca5; display: none;
+  }
+  .hint.on { display: block; }
+  footer { padding: 4px 16px; color: var(--ink-dim); font-size: 12px; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<div id="link" class="DOWN">
+  <span class="state" id="linkstate">DOWN</span>
+  <span><span class="k">endpoint</span> <span class="mono" id="endpoint">-</span></span>
+  <span><span class="k">last good write</span> <span class="mono" id="lastwrite">-</span></span>
+  <span><span class="k">HmiHeartbeat</span> <span class="mono" id="hb">-</span></span>
+  <span><span class="k">write RTT</span> <span class="mono" id="rtt">-</span></span>
+  <span class="k mono" id="linkreason"></span>
+</div>
+
+<div id="stopbanner">
+  <h1 id="stoptitle">PROCESS STOP LATCHED</h1>
+  <p id="stoptext"></p>
+  <p class="fine">Standard-program process logic in the PLC. Not a safety function, and this
+    page is not a safety device.</p>
+</div>
+
+<main>
+  <section>
+    <h2>Traction and steer &mdash; drag to drive, release to centre</h2>
+    <div id="pad">
+      <div id="knob"></div>
+      <span class="padlabel n">FORWARD</span>
+      <span class="padlabel s">REVERSE</span>
+      <span class="padlabel w">LEFT</span>
+      <span class="padlabel e">RIGHT</span>
+    </div>
+    <table style="margin-top:12px">
+      <tr><th>HmiTractionRequest</th><td class="v mono" id="q_traction">0.000</td><td class="u">frac</td></tr>
+      <tr><th>HmiSteerRequest</th><td class="v mono" id="q_steer">0.000</td><td class="u">rad</td></tr>
+      <tr><th>HmiForkRequest</th><td class="v mono" id="q_fork">0.000</td><td class="u">frac</td></tr>
+      <tr><th>HmiTeleopRequest</th><td class="v mono" id="q_teleop">false</td><td class="u"></td></tr>
+    </table>
+    <p class="note">Release &rArr; zeros are written on the next cycle. The controls also
+      return to rest when this page loses focus or is hidden. A request is not a
+      command: the PLC scales it, interlocks it and owns what the machine does.</p>
+  </section>
+
+  <section>
+    <h2>Fork jog, enable, reset</h2>
+    <button id="forkup" data-fork="1">FORK UP &mdash; HOLD</button>
+    <button id="forkdown" data-fork="-1">FORK DOWN &mdash; HOLD</button>
+    <button id="enable">ENABLE TELEOP</button>
+    <p class="hint" id="resethint">A latch is standing. Sequence: <b>release ENABLE</b>,
+      press <b>RESET</b>, then assert <b>ENABLE</b> again. An enable left asserted through
+      the reset produces no rising edge and the machine stays stopped.</p>
+    <button id="reset">RESET</button>
+    <p class="note">RESET is momentary: the backend writes <span class="mono">TRUE</span> for
+      one write cycle and <span class="mono">FALSE</span> in every other. The PLC acts on the
+      rising edge and arms that edge per link session. No client clears a latch by writing
+      a node.</p>
+  </section>
+
+  <section>
+    <h2>PLC state &mdash; read only, polled at 5 Hz</h2>
+    <div class="lamps">
+      <div class="lamp live" id="l_teleop"><span class="bulb"></span>ForkliftTeleopActive</div>
+      <div class="lamp stop" id="l_obstacle"><span class="bulb"></span>ForkliftObstacleStopActive</div>
+      <div class="lamp warn" id="l_speed"><span class="bulb"></span>ForkliftSpeedLimitActive</div>
+      <div class="lamp warn" id="l_resetreq"><span class="bulb"></span>ForkliftResetRequired</div>
+      <div class="lamp ok" id="l_linkok"><span class="bulb"></span>HmiLinkOk</div>
+      <div class="lamp stop" id="l_zone"><span class="bulb"></span>ForkliftObstacleInStopZone</div>
+    </div>
+    <table id="metrics">
+      <tr class="pair">
+        <th>ForkliftTractionSpeedRef</th><td class="v mono" id="m_tref">-</td><td class="u">m/s</td>
+      </tr>
+      <tr>
+        <th>ForkliftLinearSpeed <span class="k">measured</span></th>
+        <td class="v mono" id="m_speed">-</td><td class="u">m/s</td>
+      </tr>
+      <tr><th>ForkliftForkHeight</th><td class="v mono" id="m_height">-</td><td class="u">m</td></tr>
+      <tr><th>ForkliftObstacleMinDistance</th><td class="v mono" id="m_dist">-</td><td class="u">m</td></tr>
+      <tr><th>ForkliftSteerAngleRef</th><td class="v mono" id="m_sref">-</td><td class="u">rad</td></tr>
+      <tr><th>ForkliftForkSpeedRef</th><td class="v mono" id="m_fref">-</td><td class="u">m/s</td></tr>
+      <tr><th>write round-trip, last</th><td class="v mono" id="m_rtt">-</td><td class="u">ms</td></tr>
+      <tr><th>write round-trip, median of 10</th><td class="v mono" id="m_rttmed">-</td><td class="u">ms</td></tr>
+      <tr><th>write cycle, measured period</th><td class="v mono" id="m_period">-</td><td class="u">ms</td></tr>
+      <tr><th>metrics age</th><td class="v mono" id="m_age">-</td><td class="u">ms</td></tr>
+    </table>
+    <p class="note">Setpoint beside measurement: the reference is what the PLC decided, the
+      speed is what the plant reported back through the bridge. The HMI displays both and
+      recomputes neither.</p>
+  </section>
+</main>
+
+<footer>
+  Local commissioning HMI. OPC UA client of the PLC; it holds no server and exposes no
+  endpoint. Requests only &mdash; teleop routing, the fork-height speed cap, the fork soft
+  travel limits and the obstacle stop are process logic in the standard program.
+  Loss of this page or of this link is a degraded mode with a PLC-owned controlled stop,
+  never a safety event.
+</footer>
+
+<script>
+"use strict";
+
+// The operator's control positions. Normalised axes in [-1, 1]; the backend
+// expresses the steer axis in the unit HmiSteerRequest declares.
+var ctl = { traction: 0, steer: 0, fork: 0, teleop: false };
+var pendingReset = false;
+var dirty = true;
+
+function post(useBeacon) {
+  var body = JSON.stringify({
+    traction: ctl.traction, steer: ctl.steer, fork: ctl.fork,
+    teleop: ctl.teleop, reset: pendingReset
+  });
+  pendingReset = false;
+  dirty = false;
+  if (useBeacon && navigator.sendBeacon) {
+    navigator.sendBeacon("/control", new Blob([body], { type: "application/json" }));
+    return;
+  }
+  fetch("/control", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: body
+  }).catch(function () { dirty = true; });
+}
+
+function touch() { dirty = true; }
+
+// Pointer capture keeps a drag alive when the pointer leaves the element. It is
+// not available for every pointer in every browser, and a control that throws
+// here would stop responding, so the failure is contained rather than fatal.
+function capture(el, id) {
+  try { el.setPointerCapture(id); } catch (e) { /* drag still works */ }
+}
+
+// The control stream. The backend writes all six nodes every 100 ms cycle
+// whatever arrives here, so this loop only has to keep the latest positions
+// current; it is not itself the write cadence.
+setInterval(function () { if (dirty) post(false); }, 50);
+
+/* ---- joystick: pointer events, mouse and touch alike -------------------- */
+var pad = document.getElementById("pad");
+var knob = document.getElementById("knob");
+var dragging = null;
+
+function padUpdate(ev) {
+  var r = pad.getBoundingClientRect();
+  var x = ((ev.clientX - r.left) / r.width) * 2 - 1;
+  var y = ((ev.clientY - r.top) / r.height) * 2 - 1;
+  ctl.steer = Math.max(-1, Math.min(1, x));
+  ctl.traction = Math.max(-1, Math.min(1, -y));   // up is forwards
+  knob.style.left = (50 + ctl.steer * 50) + "%";
+  knob.style.top = (50 - ctl.traction * 50) + "%";
+  touch();
+}
+
+function padRelease() {
+  dragging = null;
+  ctl.steer = 0; ctl.traction = 0;
+  knob.style.left = "50%"; knob.style.top = "50%";
+  pad.classList.remove("live");
+  post(false);                       // deadman: zeros go out immediately
+}
+
+pad.addEventListener("pointerdown", function (ev) {
+  dragging = ev.pointerId;
+  capture(pad, ev.pointerId);
+  pad.classList.add("live");
+  padUpdate(ev);
+  ev.preventDefault();
+});
+pad.addEventListener("pointermove", function (ev) {
+  if (dragging === ev.pointerId) { padUpdate(ev); ev.preventDefault(); }
+});
+["pointerup", "pointercancel", "lostpointercapture"].forEach(function (name) {
+  pad.addEventListener(name, function (ev) {
+    if (dragging === ev.pointerId) { padRelease(); }
+  });
+});
+
+/* ---- fork jog: hold to move -------------------------------------------- */
+["forkup", "forkdown"].forEach(function (id) {
+  var b = document.getElementById(id);
+  var value = parseFloat(b.dataset.fork);
+  b.addEventListener("pointerdown", function (ev) {
+    capture(b, ev.pointerId);
+    b.classList.add("held");
+    ctl.fork = value; post(false); ev.preventDefault();
+  });
+  ["pointerup", "pointercancel", "lostpointercapture", "pointerleave"].forEach(function (n) {
+    b.addEventListener(n, function () {
+      if (!b.classList.contains("held")) { return; }
+      b.classList.remove("held");
+      ctl.fork = 0; post(false);     // deadman: release writes zero
+    });
+  });
+});
+
+/* ---- enable (a level) and reset (momentary) ----------------------------- */
+var enableBtn = document.getElementById("enable");
+enableBtn.addEventListener("click", function () {
+  ctl.teleop = !ctl.teleop;
+  enableBtn.classList.toggle("on", ctl.teleop);
+  enableBtn.textContent = ctl.teleop ? "ENABLE TELEOP - ASSERTED" : "ENABLE TELEOP";
+  post(false);
+});
+document.getElementById("reset").addEventListener("click", function () {
+  pendingReset = true;
+  post(false);
+});
+
+/* ---- the deadman on anything that means "the operator let go" ----------- */
+function releaseAll(useBeacon) {
+  ctl.traction = 0; ctl.steer = 0; ctl.fork = 0; ctl.teleop = false;
+  dragging = null;
+  knob.style.left = "50%"; knob.style.top = "50%";
+  pad.classList.remove("live");
+  enableBtn.classList.remove("on");
+  enableBtn.textContent = "ENABLE TELEOP";
+  post(useBeacon);
+}
+window.addEventListener("blur", function () { releaseAll(false); });
+window.addEventListener("pagehide", function () { releaseAll(true); });
+document.addEventListener("visibilitychange", function () {
+  if (document.visibilityState === "hidden") { releaseAll(true); }
+});
+
+/* ---- display ------------------------------------------------------------ */
+function num(v, dp) {
+  return (v === null || v === undefined || typeof v !== "number") ? "-" : v.toFixed(dp);
+}
+function setLamp(id, on) {
+  document.getElementById(id).classList.toggle("on", on === true);
+}
+function setText(id, text) { document.getElementById(id).textContent = text; }
+
+function render(s) {
+  var link = document.getElementById("link");
+  link.className = s.session.state;
+  setText("linkstate", s.session.state);
+  setText("endpoint", s.session.endpoint);
+  setText("lastwrite", s.session.since_last_good_write_ms === null
+    ? "never" : num(s.session.since_last_good_write_ms, 0) + " ms ago");
+  setText("hb", s.heartbeat.value === null ? "-"
+    : s.heartbeat.value + (s.heartbeat.running ? "" : "  STOPPED"));
+  setText("rtt", num(s.write.rtt_last_ms, 1) + " / " + num(s.write.rtt_median10_ms, 1) + " ms");
+  setText("linkreason", s.session.reason ? s.session.reason : "");
+
+  var q = s.requests || {};
+  setText("q_traction", num(q.HmiTractionRequest, 3));
+  setText("q_steer", num(q.HmiSteerRequest, 3));
+  setText("q_fork", num(q.HmiForkRequest, 3));
+  setText("q_teleop", q.HmiTeleopRequest === true ? "true" : "false");
+
+  var m = s.metrics;
+  var stale = s.metrics_age_ms === null || s.metrics_age_ms > 1500;
+  document.getElementById("metrics").classList.toggle("stale", stale);
+  setLamp("l_teleop", m && m.ForkliftTeleopActive);
+  setLamp("l_obstacle", m && m.ForkliftObstacleStopActive);
+  setLamp("l_speed", m && m.ForkliftSpeedLimitActive);
+  setLamp("l_resetreq", m && m.ForkliftResetRequired);
+  setLamp("l_linkok", m && m.HmiLinkOk);
+  setLamp("l_zone", m && m.ForkliftObstacleInStopZone);
+  if (m) {
+    setText("m_tref", num(m.ForkliftTractionSpeedRef, 3));
+    setText("m_speed", num(m.ForkliftLinearSpeed, 3));
+    setText("m_height", num(m.ForkliftForkHeight, 3));
+    setText("m_dist", num(m.ForkliftObstacleMinDistance, 3));
+    setText("m_sref", num(m.ForkliftSteerAngleRef, 3));
+    setText("m_fref", num(m.ForkliftForkSpeedRef, 3));
+  }
+  setText("m_rtt", num(s.write.rtt_last_ms, 2));
+  setText("m_rttmed", num(s.write.rtt_median10_ms, 2));
+  setText("m_period", num(s.write.period_ms_measured, 1));
+  setText("m_age", s.metrics_age_ms === null ? "-" : num(s.metrics_age_ms, 0));
+
+  var stopped = !!(m && m.ForkliftObstacleStopActive);
+  var resetReq = !!(m && m.ForkliftResetRequired);
+  var banner = document.getElementById("stopbanner");
+  banner.classList.toggle("on", stopped || resetReq);
+  banner.classList.toggle("reset-only", !stopped && resetReq);
+  if (stopped) {
+    setText("stoptitle", "PROCESS STOP LATCHED");
+    setText("stoptext", "ForkliftObstacleStopActive is TRUE. Every setpoint is held at zero "
+      + "by the PLC. The field clearing does not release the latch; a monitored reset does.");
+  } else if (resetReq) {
+    setText("stoptitle", "RESET REQUIRED");
+    setText("stoptext", "ForkliftResetRequired is TRUE. Release ENABLE, press RESET, then "
+      + "assert ENABLE again. This machine does not resume by itself.");
+  }
+  document.getElementById("resethint").classList.toggle("on", stopped || resetReq);
+}
+
+function poll() {
+  fetch("/state", { cache: "no-store" })
+    .then(function (r) { return r.json(); })
+    .then(render)
+    .catch(function () {
+      var link = document.getElementById("link");
+      link.className = "DOWN";
+      setText("linkstate", "DOWN");
+      setText("linkreason", "the HMI backend is not answering on this machine");
+    });
+}
+setInterval(poll, 200);
+poll();
+post(false);
+</script>
+</body>
+</html>

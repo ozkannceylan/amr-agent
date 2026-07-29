@@ -1,0 +1,65 @@
+# hmi/config-double.yaml — the same HMI against the BRIDGE TEST DOUBLE.
+#
+# Identical to `config.yaml` except for the endpoint and the HTTP port. It
+# exists so that no evidence run can reach the commissioned PLCSIM Advanced
+# instance by accident: the endpoint below is loopback, and
+# `tools/check_hmi_writes.py` refuses to run against anything that is not.
+#
+# The double is `bridge/test_double/plc_test_double.py`. It is TEST SCAFFOLDING
+# and it is not a PLC: it runs no standard program, forms no verdict and holds
+# no interlock, so `Forklift/Status/*` and `Forklift/Link/HmiLinkOk` keep their
+# start values for a whole run against it. That is the honest answer and not a
+# defect — it is also why a second evidence pass against a logic double is worth
+# having (EVIDENCE_HMI.md §B).
+#
+# Port 4847 is this layer's own. m4f-06 used 4842–4846 for the bridge's doubles;
+# nothing here shares a port with them, and nothing here is ever PLCSIM's 4840.
+
+opcua:
+  endpoint: "opc.tcp://127.0.0.1:4847/amr-agent/celldouble/"
+  namespace_uris:
+    server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
+    interface: "http://DemoCell"
+  security_policy: "none"
+  requested_session_timeout_ms: 10000
+  session_name: "amr-agent-hmi-double"
+  reconnect_interval_s: 1.0
+  reconnect_backoff_max_s: 5.0
+
+cycle:
+  write_period_s: 0.100
+  floor_period_s: 0.200
+  metrics_period_s: 0.200
+
+http:
+  host: "127.0.0.1"
+  port: 8089
+
+nodes:
+  interface_path:
+    - "server_interfaces:ServerInterfaces"
+    - "interface:DemoCell"
+  write:
+    HmiTractionRequest:          ["Forklift", "Hmi", "HmiTractionRequest"]
+    HmiSteerRequest:             ["Forklift", "Hmi", "HmiSteerRequest"]
+    HmiForkRequest:              ["Forklift", "Hmi", "HmiForkRequest"]
+    HmiTeleopRequest:            ["Forklift", "Hmi", "HmiTeleopRequest"]
+    HmiResetRequest:             ["Forklift", "Hmi", "HmiResetRequest"]
+  heartbeat:
+    HmiHeartbeat:                ["Forklift", "Link", "HmiHeartbeat"]
+  read:
+    ForkliftForkHeight:          ["Forklift", "Input",  "ForkliftForkHeight"]
+    ForkliftLinearSpeed:         ["Forklift", "Input",  "ForkliftLinearSpeed"]
+    ForkliftObstacleInStopZone:  ["Forklift", "Input",  "ForkliftObstacleInStopZone"]
+    ForkliftObstacleMinDistance: ["Forklift", "Input",  "ForkliftObstacleMinDistance"]
+    ForkliftTractionSpeedRef:    ["Forklift", "Output", "ForkliftTractionSpeedRef"]
+    ForkliftSteerAngleRef:       ["Forklift", "Output", "ForkliftSteerAngleRef"]
+    ForkliftForkSpeedRef:        ["Forklift", "Output", "ForkliftForkSpeedRef"]
+    ForkliftTeleopActive:        ["Forklift", "Status", "ForkliftTeleopActive"]
+    ForkliftObstacleStopActive:  ["Forklift", "Status", "ForkliftObstacleStopActive"]
+    ForkliftSpeedLimitActive:    ["Forklift", "Status", "ForkliftSpeedLimitActive"]
+    ForkliftResetRequired:       ["Forklift", "Status", "ForkliftResetRequired"]
+    HmiLinkOk:                   ["Forklift", "Link",   "HmiLinkOk"]
+
+logging:
+  level: "INFO"

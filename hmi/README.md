@@ -107,9 +107,18 @@ request/`Ready`/`Busy`/`Done`/`Fault` handshake sketched for a remote
 originator in `docs/reports/m4-00-hermes-survey.md` §5. The two are different
 contracts and neither substitutes for the other (ADR 0008 D2.4).
 
-The layer exists as a boundary statement first; its implementation lands with
+The layer existed as a boundary statement first. The implementation landed with
 the forklift commissioning gate of ADR 0008 D1, whose live number is carried by
-`docs/roadmap.md`.
+`docs/roadmap.md`:
+
+| File | What it is |
+|---|---|
+| `hmi_server.py` | the whole backend — the OPC UA client session, the 10 Hz write cycle, the 5 Hz read-only poll, and a loopback HTTP server for one operator's browser. `asyncua` and the standard library, nothing else |
+| `static/index.html` | the operator page. One file, offline: no framework, no CDN, no web font, no image |
+| `config.yaml` | addresses and cadences for the **commissioned CPU**. Owner-run |
+| `config-double.yaml`, `config-logic-double.yaml` | the same, against `bridge/test_double/` on 4847 and `plc/forklift/double/` on 4850 |
+| `tools/` | the two evidence harnesses. Instruments, not part of the HMI; each refuses a non-loopback endpoint |
+| `EVIDENCE_HMI.md` | the recorded runs, with every figure quoted as it was printed |
 
 ## Known limitation, recorded rather than discovered later
 
@@ -121,6 +130,28 @@ security `None` as a deliberate demonstration setting
 is therefore policy honoured by the client, exactly as the bridge's allowlist
 is, and two writing clients instead of one make that gap materially wider. It
 is not closed by ADR 0008 (D2.5).
+
+## Running it
+
+The environment is a plain venv, deliberately **not** `--system-site-packages`:
+this layer must not be able to import `rclpy` at all, and a plain venv makes that
+a property of the environment rather than a promise in a document.
+
+```bash
+python3 -m venv ~/amr-hmi-venv
+~/amr-hmi-venv/bin/pip install asyncua==2.0.1     # the pin in bridge/requirements.txt
+
+# against the PLC logic double (a rehearsal stand-in, not a PLC)
+~/amr-bridge-venv/bin/python plc/forklift/double/server.py      # port 4850
+~/amr-hmi-venv/bin/python hmi/hmi_server.py --config hmi/config-logic-double.yaml
+
+# then open http://127.0.0.1:8090/
+```
+
+`hmi/config.yaml` addresses the commissioned PLCSIM Advanced instance and is the
+owner's to run. Never point this process at a server the bridge is also driving
+from a test double, and never at two servers at once: every recorded number states
+which server produced it.
 
 ## What this layer does not decide
 

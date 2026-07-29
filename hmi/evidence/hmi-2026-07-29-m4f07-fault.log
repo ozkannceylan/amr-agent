@@ -1,0 +1,9 @@
+2026-07-29 08:16:44,973 INFO    hmi HMI UI on http://127.0.0.1:8089/ — loopback only, one operator, local cell (ADR 0008 D2.7)
+2026-07-29 08:16:44,977 WARNING asyncua.client.client Requested session timeout to be 3600000ms, got 8000ms instead
+2026-07-29 08:16:44,986 INFO    hmi session established with opc.tcp://127.0.0.1:4847/amr-agent/celldouble/ — 6 writable node(s), 12 read-only node(s); browse prefix 5:ServerInterfaces/6:DemoCell
+2026-07-29 08:16:44,986 INFO    hmi session timeout requested 10000 ms, granted 8000 ms (the granted value is the only one any behaviour uses)
+2026-07-29 08:16:49,986 INFO    hmi controls returned to rest (deadman: injected backend fault (TEST SCAFFOLDING))
+2026-07-29 08:16:49,987 WARNING hmi final zeros write attempt LANDED (injected backend fault (TEST SCAFFOLDING)); heartbeat stopped
+2026-07-29 08:16:49,988 ERROR   hmi HMI has STOPPED WRITING: injected backend fault (TEST SCAFFOLDING). The link verdict is the PLC's and it will go FALSE; restarting this process is the operator's action. The UI stays up so the banner can say DOWN and why.
+2026-07-29 08:16:49,988 ERROR   hmi UI still served on http://127.0.0.1:8089/ with the banner reading DOWN. No node is being written; the PLC owns what the machine does from here.
+2026-07-29 08:16:51,997 INFO    hmi exiting after a stopped write cycle: injected backend fault (TEST SCAFFOLDING)

@@ -1,0 +1,121 @@
+# hmi/config.yaml — the commissioning HMI's addresses and cadences.
+#
+# THIS FILE ADDRESSES THE COMMISSIONED PLCSIM ADVANCED INSTANCE. It is the
+# owner-run configuration. Every run recorded in EVIDENCE_HMI.md used
+# `config-double.yaml` beside it, which names a loopback test double; the
+# harness `tools/check_hmi_writes.py` refuses a non-loopback endpoint outright.
+#
+# What may live in this file, following `bridge/config/bridge.yaml`'s rule:
+#   - an address (endpoint, namespace URI, browse path, HTTP bind),
+#   - a cadence (write period, metrics period — expectations, not deadlines),
+#   - housekeeping (reconnect retry, log level).
+# There is deliberately no threshold, no limit, no scale, no clamp, no offset
+# and no debounce time here. Those are process decisions and they belong to the
+# PLC standard program (ADR 0008 D3). The one number that looks like a scale —
+# the steer request's engineering range — is an INTERFACE FACT from
+# `docs/interfaces/opcua-nodes.md` §10.4 and lives in `hmi_server.py` as a named
+# constant beside its citation, not here, so it cannot be retuned as if it were
+# a deployment setting.
+#
+# The loader is a strict subset of YAML implemented in `hmi_server.py` (no
+# PyYAML: this layer depends on `asyncua` and the standard library and on
+# nothing else). It accepts comments, `key: value`, block nesting by two-space
+# indent, block lists of scalars (`- item`) and JSON-style inline lists
+# (`["a", "b"]`). Anything else is a hard error naming the line.
+
+opcua:
+  # The HMI connects OUT to this endpoint. It never listens: the PLC is the
+  # server, this process is a client, and that direction is never inverted
+  # (invariant 4, ADR 0008 D2.1).
+  endpoint: "opc.tcp://192.168.53.1:4840"
+
+  # Resolved by URI at EVERY session establishment, never hardcoded as an index
+  # and never derived from one another (`bridge-design.md` §3.1 N2/N3). The
+  # interface URI is derived by TIA Portal from the interface name and is not
+  # editable (ADR 0006); if the interface is ever renamed, this value follows or
+  # every browse fails at connect (N5).
+  namespace_uris:
+    server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
+    interface: "http://DemoCell"
+
+  # The commissioned CPU runs security `None` with access control disabled as a
+  # deliberate demonstration setting (`opcua-nodes.md` §9.10). Per-client write
+  # scoping is therefore POLICY, not enforcement (ADR 0008 D2.5): this client
+  # honours its own allowlist, exactly as the bridge honours its own.
+  security_policy: "none"
+
+  # A REQUESTED value. The server revises it and the revised value is what the
+  # session actually runs under (`bridge-design.md` §3.2 S1/S2); the HMI reads
+  # the grant back and logs both.
+  requested_session_timeout_ms: 10000
+  session_name: "amr-agent-hmi"
+
+  reconnect_interval_s: 1.0
+  reconnect_backoff_max_s: 5.0
+
+cycle:
+  # 10 Hz nominal (`opcua-nodes.md` §10.8 H2). All six HMI nodes are written
+  # every cycle regardless of change (§10.4, H1) — the stream is self-repairing,
+  # so a CPU restart that reverts the DB is corrected by the next cycle.
+  write_period_s: 0.100
+
+  # The 5 Hz CONTRACTUAL FLOOR of H2, as a period. Below it the HMI is not a
+  # supervision source and must stop writing rather than write slowly. This is
+  # the client's rule about its OWN cycle, not a process threshold.
+  floor_period_s: 0.200
+
+  # Read-only display poll: Input/, Output/, Status/ and Link/HmiLinkOk.
+  metrics_period_s: 0.200
+
+http:
+  # Loopback only. The operator stands at this machine (ADR 0008 D2.7: the local
+  # case, and only the local case). Nothing here is reachable from the cell
+  # network or from the tailnet (invariant 8).
+  host: "127.0.0.1"
+  port: 8088
+
+nodes:
+  # `DemoCell` does NOT hang under `Objects`: it is a child of the
+  # `ServerInterfaces` folder the S7-1500 publishes, and each element carries the
+  # index of the namespace THAT element belongs to (`bridge-design.md` §3.1
+  # N1/N3). Written as `<namespace key>:<BrowseName>`.
+  interface_path:
+    - "server_interfaces:ServerInterfaces"
+    - "interface:DemoCell"
+
+  # The five requests of `opcua-nodes.md` §10.4. Written every cycle, in this
+  # order, as one batched write. `hmi_server.py` holds the same five paths as a
+  # code-side allowlist and refuses to start if this table names anything else,
+  # so widening the write set needs a code change and not a config edit.
+  write:
+    HmiTractionRequest:          ["Forklift", "Hmi", "HmiTractionRequest"]
+    HmiSteerRequest:             ["Forklift", "Hmi", "HmiSteerRequest"]
+    HmiForkRequest:              ["Forklift", "Hmi", "HmiForkRequest"]
+    HmiTeleopRequest:            ["Forklift", "Hmi", "HmiTeleopRequest"]
+    HmiResetRequest:             ["Forklift", "Hmi", "HmiResetRequest"]
+
+  # Written LAST, after the five above are acknowledged (§10.8 H3). An advanced
+  # heartbeat therefore implies that cycle's requests landed first. That is an
+  # ordering guarantee and not atomicity.
+  heartbeat:
+    HmiHeartbeat:                ["Forklift", "Link", "HmiHeartbeat"]
+
+  # Read-only, for the operator's display. `Forklift/Input/`, `Forklift/Output/`
+  # and `Forklift/Status/` plus the PLC's own verdict on this link. The HMI
+  # recomputes none of them (invariant 10) and applies none of them to anything.
+  read:
+    ForkliftForkHeight:          ["Forklift", "Input",  "ForkliftForkHeight"]
+    ForkliftLinearSpeed:         ["Forklift", "Input",  "ForkliftLinearSpeed"]
+    ForkliftObstacleInStopZone:  ["Forklift", "Input",  "ForkliftObstacleInStopZone"]
+    ForkliftObstacleMinDistance: ["Forklift", "Input",  "ForkliftObstacleMinDistance"]
+    ForkliftTractionSpeedRef:    ["Forklift", "Output", "ForkliftTractionSpeedRef"]
+    ForkliftSteerAngleRef:       ["Forklift", "Output", "ForkliftSteerAngleRef"]
+    ForkliftForkSpeedRef:        ["Forklift", "Output", "ForkliftForkSpeedRef"]
+    ForkliftTeleopActive:        ["Forklift", "Status", "ForkliftTeleopActive"]
+    ForkliftObstacleStopActive:  ["Forklift", "Status", "ForkliftObstacleStopActive"]
+    ForkliftSpeedLimitActive:    ["Forklift", "Status", "ForkliftSpeedLimitActive"]
+    ForkliftResetRequired:       ["Forklift", "Status", "ForkliftResetRequired"]
+    HmiLinkOk:                   ["Forklift", "Link",   "HmiLinkOk"]
+
+logging:
+  level: "INFO"
