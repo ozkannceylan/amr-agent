@@ -15,18 +15,33 @@ inputs:              [docs/adr/0008-forklift-commissioning-gate-and-hmi-layer.md
 deliverable:         hmi/ — hmi_server.py, static/index.html, config.yaml,
                      EVIDENCE_HMI.md (README exists from m4r2-03)
 done_when:           hmi_server.py (stdlib http.server + asyncua only, one file)
-                     serves the UI and writes the six HMI nodes: joystick maps to
-                     HmiDriveCommand/HmiSteerCommand with return-to-center-on-release
-                     (deadman: release ⇒ zeros written immediately); fork up/down
-                     hold buttons map to HmiForkCommand; enable toggle; reset
-                     momentary (backend writes TRUE for one write cycle then FALSE —
-                     the PLC edge-detects); HmiHeartbeat increments at 10 Hz and
-                     STOPS on any backend fault or OPC UA disconnect after one final
-                     zeros write attempt; status lamps poll the four status nodes at
-                     5 Hz; endpoint and namespace URI come from config.yaml, nodes
-                     resolved by browse path per the interface doc; a recorded run
-                     against the bridge test double shows every write landing and
-                     the heartbeat stopping on kill, transcribed into
+                     serves the UI and writes the six HMI nodes every 100 ms
+                     cycle regardless of change (the §10.4 write policy):
+                     joystick maps to HmiDriveRequest/HmiSteerRequest with
+                     return-to-center-on-release (deadman: release ⇒ zeros
+                     written immediately); fork up/down hold buttons map to
+                     HmiForkRequest; HmiTeleopRequest toggle (release-and-
+                     reassert after a reset — the §10.7 conflation); reset
+                     momentary (backend writes TRUE for one write cycle then
+                     FALSE — the PLC edge-detects); HmiHeartbeat increments at
+                     10 Hz and STOPS on any backend fault or OPC UA disconnect
+                     after one final zeros write attempt; a persistent
+                     PLC-connection banner shows the backend's OPC UA session
+                     state (CONNECTED / RECONNECTING / DOWN, with time since
+                     the last good write); a real-time metrics panel polls at
+                     5 Hz showing ForkliftLinearSpeed, ForkliftForkHeight,
+                     ForkliftObstacleMinDistance, ForkliftTractionSpeedRef
+                     beside the measured speed, the four status lamps,
+                     HmiLinkOk, and the backend's write round-trip time in ms
+                     (last and median-of-10) — metrics reads are
+                     Input/Output/Status/Link only, writes stay Hmi-only;
+                     endpoint and namespace URI come from config.yaml, nodes
+                     resolved by browse path per the interface doc; a recorded
+                     run against the bridge test double (and, if
+                     plc/forklift/double is committed by then, a second run
+                     against the logic double showing the lamps and metrics
+                     actually changing) shows every write landing and the
+                     heartbeat stopping on kill, transcribed into
                      EVIDENCE_HMI.md with figures quoted as printed; the venv recipe
                      (python3 -m venv ~/amr-hmi-venv && pip install asyncua==<the
                      version the bridge venv uses, read it there>) is recorded in

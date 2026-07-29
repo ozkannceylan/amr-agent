@@ -9,7 +9,9 @@ goal:                The five gate scenarios exist as an executable, owner-runna
 invariants_touched:  none
 inputs:              [docs/roadmap.md M4 row, plc/forklift/SPEC.md section 11,
                       agv/forklift/README.md, sim/launch/forklift_bringup.launch.py,
-                      hmi/EVIDENCE_HMI.md, bridge/EVIDENCE_CONNECT.md patterns]
+                      hmi/EVIDENCE_HMI.md, bridge/EVIDENCE_CONNECT.md patterns,
+                      plc/forklift/double/ (the PLC logic double, m4f-04c),
+                      bridge/config/rehearsal-forklift.yaml (m4f-06b)]
 deliverable:         sim/scenarios/forklift_commissioning.md (procedure + evidence
                      checklist), plus any stimulus helper script under
                      sim/scenarios/ it needs
@@ -20,10 +22,16 @@ done_when:           each roadmap criterion (a)-(e) has a scenario with: exact
                      which topic, which watch-table row), and the evidence artifact
                      to capture (per-session bridge CSV, watch-table PNG, screen
                      recording segment); stimulus fallbacks avoid --once publishes
-                     (LESSONS delivery entry); a dry rehearsal of whatever runs
-                     without PLCSIM (sim + vehicle nodes + a scripted command
-                     sequence) is recorded in the file with figures as printed;
-                     owner-executed steps are marked owner explicitly.
+                     (LESSONS delivery entry); ALL FIVE scenarios are rehearsed
+                     agent-side through the full loop — HMI (m4f-07) → PLC
+                     logic double (plc/forklift/double, 20 ms loop per SPEC §7)
+                     → bridge with rehearsal-forklift.yaml → arena (m4f-03) and
+                     back — with per-session bridge CSVs and the UI metrics
+                     panel named among the observables, recorded in the file
+                     with figures as printed and labelled REHEARSAL EVIDENCE
+                     throughout: the gate closes on the owner's PLCSIM run and
+                     recording, never on the double; owner-executed steps are
+                     marked owner explicitly.
 forbidden:           [running against live PLCSIM (owner-run), editing agv/ bridge/
                       hmi/ plc/ files, redefining any gate criterion, mentioning
                       any deadline]
