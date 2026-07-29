@@ -24,16 +24,19 @@ public README gate order + m3-37 finding-12 residue: issued.
 
 Implementation wave, dependency-ordered:
 
-1. m4f-01 interface — forklift node group + signal table. In flight.
-2. m4f-02 agv — in-house forklift SDF + vehicle nodes. In flight.
-3. m4f-03 sim — commissioning arena + bringup. Opens when m4f-02 lands.
-4. m4f-04 plc — plc/forklift/SPEC.md, owner-buildable. Opens when m4f-01 lands.
-5. m4f-05 interface — bridge-design addendum, plus the two carried
-   bridge-design rows. Opens when m4f-01 lands.
-6. m4f-06 bridge — forklift slots proven on the test double. After m4f-05.
-7. m4f-07 hmi — backend + UI against the double. Opens when m4f-06's double
-   serves the forklift nodes (roster prerequisite closed by m4r2-03).
-8. m4f-08 sim — scenario procedure + evidence checklist. After m4f-03/04/07.
+1. m4f-01 interface — node group + signal table. Closed (d341fa8; steer
+   ruling and closures m4f-01b ae93667).
+2. m4f-02 agv — forklift SDF + vehicle nodes. Closed (03aa9e7).
+3. m4f-03 sim — commissioning arena + bringup. In flight.
+4. m4f-04 plc — plc/forklift/SPEC.md. Closed (9c158ce; prose alignment
+   m4f-04b 4d5df6d).
+5. m4f-05 interface — bridge-design addendum. Closed (fc2e545; steer-reason
+   corrections m4f-05b 5797e17, m4f-05c 44e5fc3; residual-row correction
+   m4f-05d issued).
+6. m4f-06 bridge — forklift slots proven on the double. Closed (71d3b76;
+   live bridge.yaml deliberately cell-only until the owner's TIA read-back).
+7. m4f-07 hmi — backend + UI against the double. In flight.
+8. m4f-08 sim — scenario procedure + evidence checklist. After m4f-03/07.
 9. m4f-09 verifier — gate verification, last, after the owner evidence.
 
 m4f-01 and m4f-02 run in parallel on an orchestrator-fixed signal contract;

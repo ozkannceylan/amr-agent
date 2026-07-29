@@ -15,12 +15,15 @@ is the open gate and its brief queue lives in docs/PLAN.md.
 - Stop the still-live m3-26-era bridge session with SIGTERM before new bridge
   work: its clean shutdown prints the build-G R1/R2/R3 ratio set m3-36 wants,
   and its CSV is archived only after the process is gone (LESSONS 2026-07-28).
-- Build FB_ForkliftTeleop in TIA from plc/forklift/SPEC.md once m4f-04 lands:
-  DBs, tags into the server interface per docs/interfaces/opcua-nodes.md §10,
-  second OB30 call, download with the solid-green check, watch table
-  "Forklift M4 gate". At that download also check m3-37 finding 7: the built
-  program declares ResetEdgeMemory_1 where SPEC §3.2 says ResetEdgeMemory —
-  align one of them.
+- Build FB_ForkliftTeleop in TIA from plc/forklift/SPEC.md: DBs, tags into
+  the server interface per docs/interfaces/opcua-nodes.md §10, second OB30
+  call, download with the solid-green check, watch table "Forklift M4 gate".
+  At that download also check m3-37 finding 7: the built program declares
+  ResetEdgeMemory_1 where SPEC §3.2 says ResetEdgeMemory — align one of them.
+- After the TIA read-back: point bridge/config/bridge.yaml at the Forklift
+  groups (one edit per bridge-design §2.1). Until then the live config is
+  deliberately cell-only — browsing nodes the CPU does not publish would
+  error (m4f-06).
 - Run the five commissioning scenarios per
   sim/scenarios/forklift_commissioning.md and record the showcase — the
   recording is gate evidence.
@@ -28,53 +31,60 @@ is the open gate and its brief queue lives in docs/PLAN.md.
   convenient; not gate work.
 
 ## interface
-- m4f-01 (in flight) — done when opcua-nodes.md §10 defines the forklift node
-  group, §9.8 is scoped, and the server-interface ruling is stated.
-- m4f-05 (queued, after m4f-01) — done when bridge-design.md carries the
-  plural output section and the forklift groups with the HMI-group exclusion.
-  Fold in the two carried rows: §8.1 has no restart-detection row although the
-  shipped code's log line cites it, and §2's cycle description predates the
-  once-per-cycle heartbeat read-back.
+- m4f-05d (issued) — done when bridge-design.md §8.1's restart-residual row
+  states the measured masked-revert window (~5.255 ms of a 50.015 ms cycle;
+  one masked revert held an open stop circuit and ObstacleInStopZone TRUE for
+  4.0 s under an advancing heartbeat — m4f-06) and §12 items 11/13/14 reflect
+  the m4f-06 closures.
 
 ## agv
-- m4f-02 (in flight) — done when agv/forklift/ spawns headless, all three
-  joints respond, both nodes publish at declared rates, evidence recorded.
+- Carried, low: wheel_radius_m, steer_limit_rad and the fork travel exist in
+  both model.sdf and config.yaml (SDF cannot be read as YAML); model.sdf is
+  the named authority with a mechanical agreement check in the evidence. If
+  invariant 10 is ever read strictly here, generate one file from the other.
 
 ## sim
-- m4f-03 (queued, after m4f-02) — done when the arena + bringup run headless
-  with every bridged topic at rate and cell.sdf untouched.
-- m4f-08 (queued, after m4f-03/04/07) — done when the five scenarios are an
+- m4f-03 (in flight) — done when the arena + bringup run headless with every
+  bridged topic at rate and cell.sdf untouched.
+- m4f-08 (queued, after m4f-03/07) — done when the five scenarios are an
   owner-runnable procedure with an evidence checklist and a double rehearsal.
 - Cell reskin (deferred, visual only, ARIAC licence blocker unchanged).
 - M6 carried: resume the parked navigation scenario (sim/scenarios/DEFERRED.md).
 
 ## plc
-- m4f-04 (queued, after m4f-01) — done when plc/forklift/SPEC.md §1–§12 is
-  owner-buildable from its SCL sketch alone.
 - Fold into the next demo-cell plc brief: F6 (PresenceOnTimer.PT reads T#0MS
   after a CPU restart, likely §6.5's conditional call — diagnose, close or
   escalate); close SPEC §12 item 7 (rewrite-on-restart now delivered); T4.11
   reaction re-record with a per-session CSV; the §B2.9 "build B" three-delta
   label that three owner captures contradict (label only, no figure moves —
-  shared with bridge); the §4.3 sentence "Nothing else goes into the
-  interface." is scope-stale now that opcua-nodes.md §10 extends DemoCell
-  (m4f-01 report).
+  shared with bridge); the demo-cell §4.3 "Nothing else goes into the
+  interface." sentence, scope-stale after opcua-nodes §10.
+- m4f-04c (issued) — done when plc/forklift/double/ runs SPEC §7
+  statement-for-statement at 20 ms behind the §10 node surface, the four T5
+  kernels demonstrated against it, spec ambiguities reported not fixed.
+- Fold into the next forklift plc brief: SPEC §12 item 4's missing
+  cross-reference to opcua-nodes §10.12 item 7 (cosmetic, m4f-04b).
 - T4.11b stays blocked on bridge fault injection (below).
 - M5/M9 carried: AT-08 STOP sub-case, SF-03 latch-list wording, no-auto-resume
   of interrupted handshakes, dedicated F-I/O for SF-05/06/07.
 
 ## bridge
-- m4f-06 (queued, after m4f-05) — done when a double run proves every slot
-  both ways, the HMI-group negative test, rewrite-on-restart over the full
-  slot set, and the cell conformance unchanged.
+- Second witness for the masked-revert window (owner design decision,
+  post-gate): a revert landing between the cycle's step-0 heartbeat read-back
+  and step-4 write is erased and the restart goes undetected (~10 % of the
+  cycle); both restart harnesses now trigger until one is caught and report
+  the masked count (m4f-06). §8.1 rules that closing it needs a second
+  witness; choosing one is the owner's.
+- m4f-06b (issued) — done when bridge/config/rehearsal-forklift.yaml is
+  committed, loader-validated, bridge.yaml byte-identical.
 - Fault injection (SPEC §12 item 6; unblocks T4.11b): opt-in NaN/inf/
   out-of-window write that cannot be armed by accident in an evidence run.
 
 ## hmi
-- m4f-07 (queued, after m4f-06's double serves the forklift nodes; roster
-  landed with m4r2-03) — done when the
-  backend + UI run against the double, every write lands, and the heartbeat
-  stops on kill.
+- m4f-07 (in flight; amended by owner direction) — done when the backend + UI
+  run against the double with every write landing and the heartbeat stopping
+  on kill, the UI carries the PLC-connection banner and the 5 Hz real-time
+  metrics panel, and writes stay Hmi-only.
 
 ## verifier
 - m4f-09 (queued, last) — done when every M4 criterion has a cited-artifact
@@ -95,10 +105,13 @@ is the open gate and its brief queue lives in docs/PLAN.md.
   brief. No M5 brief until they exist.
 
 ## docs sweep (post-gate, one brief)
-- Stale gate numbers across README.md (m4r2-04 covers the README), SRS.md,
-  PL-SCENARIOS.md, plc/demo-cell/SPEC.md, sim/README.md, WSL_ENVIRONMENT.md,
-  CREDITS.md, DEFERRED.md, bridge-design.md — inventory in
-  docs/reports/m4r2-02-roadmap-renumber.md §3.
+- Stale gate numbers across SRS.md, PL-SCENARIOS.md, plc/demo-cell/SPEC.md,
+  sim/README.md, WSL_ENVIRONMENT.md, CREDITS.md, DEFERRED.md,
+  bridge-design.md — inventory in docs/reports/m4r2-02-roadmap-renumber.md §3
+  (README done by m4r2-04).
+- README residue from m4r2-04: the architecture diagram and layer table
+  predate the hmi/ layer; nothing distinguishes the M4 forklift plant from
+  the RB-KAIROS vehicle (ADR 0008 D5); the M12 row keeps its short text.
 - M12 Hermes: ADR 0008 D2.7 rules the operator layer for the local case only;
   the remaining m4-00 decisions stay open.
 
@@ -106,7 +119,8 @@ is the open gate and its brief queue lives in docs/PLAN.md.
 - Repository is public-ready and pushed; visibility is the owner's to flip.
   Residual, low: ADR 0007 names a hosting provider and region — an accepted
   ADR is never edited, so closing it needs a superseding ADR or owner
-  acceptance as-is. README gate table is stale until m4r2-04 lands.
+  acceptance as-is. Local commits since the push are unpushed until the owner
+  pushes.
 
 ## carried forward, by gate
 - interface (M9): the fleet-facing server interface's name is a contract
