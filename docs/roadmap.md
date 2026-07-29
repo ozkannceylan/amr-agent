@@ -2,6 +2,11 @@
 
 Current gate: M4 — Forklift commissioning cell (ADR 0008).
 
+M4 remains the current gate with its criteria unchanged. M5's cell-scope
+functions (SF-01, SF-08, SF-07 pattern) are opened early on the forklift twin
+per ADR 0009 (docs/adr/0009-early-cell-scope-safety-on-the-forklift-twin.md,
+accepted), under its fallback rule.
+
 M5, the safety layer, keeps the entry condition ADR 0007 set for it: its first
 brief settles F-CPU-on-PLCSIM feasibility in the tool before any safety logic is
 written.
