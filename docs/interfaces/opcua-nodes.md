@@ -323,7 +323,7 @@ distinct node from `ConveyorSpeedCommand`.
 | What it is not | It is **not a safety function** and **not an emergency stop**. It appears nowhere in docs/safety/SRS.md §3, carries no SIL/PL claim, and must never be labelled, demonstrated or recorded as an emergency stop (ADR 0004). |
 | Naming | The word "emergency" appears in no tag, node, topic or heading for this device. The node name, the PLC tag and the cell's `/cell/panel/process_stop` all carry "process stop" (m3-01 open question 1 — confirmed, the ADR wording governs and no ADR revisit is needed). |
 | SF-01 is unaffected | The real cell e-stop chain (SRS SF-01) is executed by the F-CPU on two-channel NC F-I/O over PROFIsafe and hardwired channels. It never travels over OPC UA and is not represented by any node in this section (invariant 1, SRS B1, B3). The demonstration cell has no F-CPU. |
-| No mirror either | Unlike §4, this section carries no safety mirror. `Safety/EStopActive` in §4 remains the only informational mirror of SF-01, and remains read-only and outside every causal chain. |
+| No mirror either | Unlike §4, this section carries no safety mirror. `Safety/EStopActive` in §4 remains the only informational mirror of **the fixed cell's** SF-01, and remains read-only and outside every causal chain; the twin's own instantiation of that logic is mirrored separately, on a different machine, at `Forklift/Safety/EStopDemand` (§11). |
 
 ### 9.7 DemoCell/Link/ — bridge liveness
 
@@ -556,6 +556,7 @@ DemoCell/                          the commissioned server interface, ns http://
     Output/   PLC → plant: setpoints the bridge reads and republishes
     Status/   PLC → both clients: read-only verdicts
     Link/     HMI liveness
+    Safety/   read-only F-safety mirrors (§11, M5 early)
 ```
 
 Paths are relative to the interface node, as everywhere in this document:
@@ -566,7 +567,10 @@ Paths are relative to the interface node, as everywhere in this document:
 `DemoCellInput` and its siblings would move the offsets of tags that current evidence, watch tables
 and test records depend on, and a download that leaves project and CPU inconsistent shows up as
 monitoring errors on exactly the rows whose offsets moved (LESSONS 2026-07-28). Separate DBs leave
-the M3 cell byte-identical, so its evidence stays reproducible while this gate is commissioned.
+the M3 cell byte-identical, so its evidence stays reproducible while this gate is commissioned. A
+sixth subfolder, `Safety/`, appears in the tree above: it is a later, separate addition under ADR
+0009, with its own DB (`ForkliftSafetyMirror`, §11.3) rather than a sixth member of this delta, and
+this paragraph's five is unchanged.
 
 | DB | Folder | Contents | *Accessible from HMI/OPC UA* | *Writable from HMI/OPC UA* |
 |---|---|---|---|---|
@@ -612,7 +616,10 @@ consumer this contract admits.
 
 **18 nodes** — 5 in `Hmi/`, 4 in `Input/`, 3 in `Output/`, 4 in `Status/`, 2 in `Link/`. The count is
 subtree-scoped in the sense §9.8 fixes: the `DemoCell` interface carries these 18 **and** the 15 of
-§9, and a client browsing from `Objects` sees more than either number.
+§9, and a client browsing from `Objects` sees more than either number. **This count is silent about
+`Forklift/Safety/`**, a sixth subfolder added later by ADR 0009 with its own 4 nodes (§11): with it,
+the `DemoCell` interface carries 15 (§9) + 18 (§10) + 4 (§11) = 37, still fewer than a client
+browsing from `Objects` sees.
 
 An `Hmi` prefix on every HMI-written tag is deliberate redundancy inside a folder already named
 `Hmi/`: it survives into the PLC program and into any export, so "which client may write this tag"
@@ -1004,7 +1011,7 @@ Each row means "no such node under `DemoCell/Forklift/`".
 
 | Not in this subtree | Why |
 |---|---|
-| Any safety node, safety mirror, e-stop, protective stop, STO or safety reset | Safety never traverses the network (invariant 1). This plant has no F-CPU, no safety-rated device and no SRS function; the obstacle stop is process logic and is named as such everywhere (ADR 0008 D3) |
+| Any safety node other than the read-only mirrors of §11 — a safety command, e-stop input, protective stop, STO or safety reset | Safety never traverses the network (invariant 1): no node in this subtree is a safety path, carries a demand, or can affect one — that is what this row has always meant, and it is unchanged. **What has expired is the premise, not the claim** (analysed in §11.8): this row was written under ADR 0008 for a plant whose CPU had no F-runtime group; ADR 0009 replaced that CPU with a 1513F-1 PN that now instantiates SF-01, SF-08 and the SF-07 pattern, still with no safety-rated device — simulated F-input stand-ins only (ADR 0009 D5). What that CPU exposes on this interface is bounded to the four read-only `Forklift/Safety/` mirrors of §11: diagnostics only, never a reaction channel, and no route by which a client can create, prevent or clear a safety reaction (§11.4). The rest of this row stands word for word (§11.7). The obstacle stop remains process logic, named as such everywhere (ADR 0008 D3) |
 | A second bridge heartbeat or a second bridge-link verdict | One session serves both function blocks; `DemoCell/Link/BridgeLinkOk` remains the single owner of "the bridge is alive" and the forklift FB consumes it as a shared DB bit (invariant 10, §10.1) |
 | A fork **height** request, or any position or pose target | The operator jogs a speed. A height target would make the PLC a positioner running a profile, which is a sequencer this gate does not need and did not brief; the fork's soft limits already own the ends of travel |
 | An HMI-writable output or status node | The HMI requests and displays. Making a verdict writable would give it two owners (invariant 10) and would let a client clear a latch by writing a node, which §10.7 forbids |
