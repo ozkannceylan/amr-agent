@@ -753,3 +753,251 @@ refusal on the program, and never during a recorded scenario.
 | 3 | **The HMI's reset cannot be held from the page.** One click is one write cycle, and §11 5.4.4–5.4.7 need it standing across the moment the zone clears. It is producible only by re-posting to `/control` above the write rate. A hold-capable RESET control would let the gate step be run entirely from the operator's screen | `hmi/` | **Closed by `7675960`.** RESET is press-and-hold, with keyboard down/up, writing `HmiResetRequest` `TRUE` every cycle while held and `FALSE` from the cycle after release, and a tap shorter than one write cycle still lands exactly one `TRUE` cycle. **T5.4 now runs entirely from the operator's screen.** The helper remains for T5.5.5, whose reset must stand before the page exists. The same commit added the H6 liveness deadman, whose interaction with the helper is recorded in §9 |
 | 4 | **No bridge configuration exists for the gate run**: `bridge.yaml` is cell-only by choice and `rehearsal-forklift.yaml` points at the double. The forklift group against the commissioned endpoint is a one-file addition after the TIA read-back, and it is a precondition of T5.1 | `bridge/` | **Open, queued to the owner**: `docs/TODO.md`, *owner — M4 queue*, the step "after the TIA read-back: point `bridge/config/bridge.yaml` at the `Forklift` groups". It is one edit per `bridge-design.md` §2.1 and it is deliberately not made before the read-back, because browsing nodes the CPU does not publish would error |
 | 5 | **An empty forward sector is a no-data condition, not a clear path** — the scanner's 8 m range against a 24 m hall. It shapes how the T5.4 stimulus must be written and is recorded in `sim/README.md` with the arena | `sim/` | **Superseded by `74c7d5f`** (`agv/`, outside this file): the behaviour this finding recorded was the teleop false-stop defect, not a feature worth a permanent workaround. §6 above and `sim/README.md` now state the corrected rule — an empty forward sector reads clear at `range_max` — and no longer carry the crate-placement workaround; the original closure by `aa593ed` recorded the pre-fix behaviour faithfully at the time it was written |
+
+---
+
+## 12. T6 (M5, early) — the F-layer safety demonstration on the twin
+
+> **This section runs only when the F-program exists.** If the F-layer is not
+> ready, every item below is dropped and the five scenarios of sections 3 to 7
+> stand alone, their criteria unchanged (`docs/adr/0009-early-cell-scope-safety-on-the-forklift-twin.md`
+> D4; `docs/safety/TWIN-DEMO-MAP.md` R6; `plc/forklift-safety/SPEC.md` §9).
+> Taking the fallback means not running T6. It edits nothing above and nothing
+> in this file's own record of the five M4 scenarios.
+
+**Not one of the five roadmap criteria**, the same way section 8 is not. T6 is
+the cell-scope core of M5 opened early on this cell
+(`docs/adr/0009-early-cell-scope-safety-on-the-forklift-twin.md`), and nothing
+recorded here closes M5, passes an acceptance test, or is cited as M4 evidence
+(ADR 0009 D2.2, D2.3; `docs/safety/TWIN-DEMO-MAP.md` N5, N6).
+
+**Authority.** `plc/forklift-safety/SPEC.md` §9 owns the T6 steps, their Pass
+line and the F-collective-signature discipline; `docs/safety/TWIN-DEMO-MAP.md`
+§3 owns which AT sub-cases are in scope and which are deferred, and the
+wording of its §5.1 and §5.3; `docs/adr/0009-early-cell-scope-safety-on-the-forklift-twin.md`
+owns the ruling and its bounds. This section does not restate any of that as
+an alternative. What it adds is what those documents leave to the simulation
+layer: which processes to start, the isolation values, the arena's marked
+zone, and what to capture — the same role section 2's Authority note
+describes for the five M4 scenarios, extended here to a procedure most of
+which needs no simulation asset at all.
+
+### What T6 needs, and what it does not
+
+Eighteen of the table's twenty-six rows are marked **F** below: they read and
+modify only `SafetyInputStandIn` and `InstF_Forklift_Safety` at the TIA Portal
+watch table `Forklift F gate` (`plc/forklift-safety/SPEC.md` §8), and need
+nothing this repository launches — no Gazebo, no bridge, no HMI. **PLCSIM
+Advanced and the two watch tables are enough for those rows.** The eight rows
+marked **std** additionally need the whole M4 stack of section 1, because
+their observable is the process consequence of a demand — the model stopping
+in Gazebo, the setpoints and `ForkliftTeleopActive` read at the HMI — which
+only exists once the standard program, the bridge and the arena are running.
+
+Preconditions, carried from `plc/forklift-safety/SPEC.md` §9 and restated only
+where this file is the authority for them:
+
+- **F-side (owner, in TIA Portal, not controlled from this file):** the
+  F-program of `plc/forklift-safety/SPEC.md` §5 in RUN; safety mode reading
+  **activated** throughout (§4.4, §7.1 — a step that ever needed it
+  deactivated would not be a T6 step, and none here do); the F-collective
+  signature read back and recorded beside the evidence (§4.2 step 15); the
+  watch table `Forklift F gate` open in *Monitor*, `Forklift M4 gate` open
+  beside it.
+- **std-side (this file's own stack):** section 1's full start order,
+  `GZ_PARTITION`/`ROS_DOMAIN_ID` isolation with a **fresh pair for this run**,
+  and the three prerequisites of section 1 confirmed (bridge and HMI pointed
+  at the commissioned endpoint). Nothing about that start order changes for
+  T6.
+- **The standard program's own permissive delta must be applied, separately
+  from the F-program.** `plc/forklift-safety/SPEC.md` §9's own preconditions
+  require it for every **std** row, and as of this writing
+  `plc/forklift/SPEC.md` carries no reference to `EStopDemand` or
+  `ZoneStopDemand` — checked directly, not inferred: the one affirmative term
+  of §6.1 (`docs/briefs/m5a-05-teleop-permissive-delta.md`) has not landed
+  there yet. Without it, `ForkliftTeleopActive` and the three setpoints do not
+  react to any F-demand at all, and every **std** row below would read exactly
+  as the D4 fallback even with the F-program in RUN and both circuits proven
+  open at T6.0.1 — a false negative this precondition exists to rule out.
+- **The stimulus stays at the engineering interface.** Every F-input in the
+  table below — `EStopCircuitClosed`, `ZoneDeviceCircuitClosed`,
+  `ResetButtonPressed` — is driven by *Modify* from the TIA watch table, by
+  the owner, exactly as `plc/forklift-safety/SPEC.md` §7.1 specifies.
+  **`sim/scenarios/forklift_stimulus.py` plays no part in any F-only row**: it
+  is a bridge/HMI-side tool, and `docs/safety/TWIN-DEMO-MAP.md` R2 requires
+  the F-inputs to enter at the engineering interface, never through a node
+  this file's tooling can reach. It is used exactly as sections 3–7 already
+  use it, and only for the **std** rows that drive or read the standard side
+  (joystick, ENABLE) — T6 never moves `AisleCrate`, and the `obstacle`
+  subcommand plays no part here either.
+
+### The marked zone, and why it needs no interaction with the M4 obstacle scenario
+
+`sim/worlds/forklift_arena.sdf` now carries `SafetyZoneMarking`, a painted
+outline on open floor, same technique as the existing
+`AisleMarking`/`PalletZoneMarking`: visual only, no collision. It sits on the
+drive aisle centred at `x = -2.00`, spanning `x = -3.50` to `x = -0.50`:
+reachable from the spawn pose `(-6.00, 0.00)` after about 2.5 m of straight
+travel, and a further 2.05 m clear of `AisleCrate`'s near face at `x = 1.55`.
+**No sensor watches it** (`plc/forklift-safety/SPEC.md` §7.1) — the observable
+"crossing" in T6.4.2 below is the owner watching the model in Gazebo and
+*Modifying* the zone circuit by hand at the instant it looks crossed, the same
+stand-in mechanism as the e-stop and the reset. Because the outline sits well
+short of `AisleCrate`, driving into and back out of it never approaches the
+obstacle prop, so T6.4 and the M4 obstacle scenario of section 6 never
+interact.
+
+### The instrument gap this section does not close
+
+**The mirror nodes exist; the HMI display of them does not, not yet.**
+`docs/interfaces/opcua-nodes.md` §11 has since resolved the decision
+`plc/forklift-safety/SPEC.md` §6.4 left open: four read-only nodes at
+`Forklift/Safety/` on the `DemoCell` interface — `EStopDemand`,
+`ZoneStopDemand`, `SafetyResetRequired`, `SafetyResetFault` — each mirroring
+the F-instance flag of the same name, no prefix. `CauseGone` is deliberately
+**not** a node (`opcua-nodes.md` §11.7): whether a reset would be *accepted
+now* stays a TIA-only question, exactly as `plc/forklift-safety/SPEC.md` §8's
+Group 3 already has it.
+
+**As of this writing, `hmi/static/index.html` and `hmi/hmi_server.py` carry no
+reference to any of the four mirror names, no `SAFETY DEMAND` banner and no
+F-layer lamp** — checked directly in the files, not inferred.
+`docs/briefs/m5a-07-hmi-safety-lamps.md` asks for exactly that: a banner
+captioned "F-CPU safety demand (mirror, read-only)", visually distinct from
+the existing process-stop banner, and three lamps (e-stop demand, zone demand,
+safety reset required). **Until that brief's deliverable lands, the TIA watch
+table `Forklift F gate` is the only instrument for every F-side value in the
+table below**, exactly as `plc/forklift-safety/SPEC.md` §8 specifies, and the
+existing HMI banner and its six lamps (`ForkliftTeleopActive`,
+`ForkliftObstacleStopActive`, `ForkliftSpeedLimitActive`,
+`ForkliftResetRequired`, `HmiLinkOk`, `ForkliftObstacleInStopZone`) are read in
+this section only for what they actually are — the standard-program
+**process** consequence, captioned on the page itself as "Not a safety
+function," never a safety indication (`docs/safety/TWIN-DEMO-MAP.md` R4). If
+`hmi/` lands that brief before this section is run, its banner and three
+lamps become additional real-time observables for the **std** rows below,
+without changing any stimulus or any Pass criterion; `SafetyResetFault`, the
+fourth mirror, has a node but sits outside that brief's three-lamp ask and
+stays a watch-table-only observable regardless, unless a later HMI brief adds
+it.
+
+### No rehearsal exists for this section
+
+Sections 3–7 rehearse against `plc/forklift/double/`, a Python transliteration
+of the **standard** program's logic. **No equivalent exists for the F-program,
+and none is built here**: the F-program's own stimulus enters at a TIA Portal
+watch table, which is not a socket a Python double can stand behind, and the
+whole reason the demonstration is credible is that safety mode stays
+activated throughout (`plc/forklift-safety/SPEC.md` §7.2) — a property no
+double could reproduce or falsify. This section carries no REHEARSAL EVIDENCE
+block, and none is implied.
+
+### The steps
+
+Numbered exactly as `plc/forklift-safety/SPEC.md` §9.1; if that table changes,
+this one is re-derived from it, never edited independently. The **AT** column
+cites the sub-case identifiers `docs/safety/TWIN-DEMO-MAP.md` §3 scopes as
+in-scope-as-logic on this twin; that section stays the authority for what each
+sub-case does and does not demonstrate, and a dash means the step supports the
+sequence but is not itself an AT sub-case.
+
+| Step | Needs | Stimulus (owner) | Observable | AT |
+|---|---|---|---|---|
+| T6.0.1 | F | None — read Group 2 of `Forklift F gate` before touching any control | `EStopDemand` `TRUE`, `ZoneStopDemand` `TRUE`, `SafetyResetRequired` `TRUE`, `SafetyResetFault` `FALSE`, `CauseGone` `FALSE`. The machine starts stopped: both stand-in circuits start open | — |
+| T6.0.2 | F | *Modify* `EStopCircuitClosed` and `ZoneDeviceCircuitClosed` both to `TRUE` | `CauseGone` → `TRUE`. Both demands stay latched — closing the circuits restores the *permission*, never the *motion* | AT-01 (d) shape |
+| T6.0.3 | F | *Modify* `ResetButtonPressed` to `TRUE`, hold ≈1 s, *Modify* back to `FALSE` | `ResetPressArmed` `TRUE` while held, `ResetHoldValid` `TRUE` after 200 ms, then on release both demands clear and `SafetyResetRequired` → `FALSE` | AT-08 (d) |
+| T6.0.4 | std | Press ENABLE at the HMI page and drive | The machine drives normally — the baseline: with no demand standing, the safety layer is invisible in the process behaviour | — |
+| T6.1.1 | std | Driving at a steady traction demand, *Modify* `EStopCircuitClosed` to `FALSE` | Same F-cycle: `EStopDemand` → `TRUE`, `SafetyResetRequired` → `TRUE`. Same standard-program call: `ForkliftTeleopActive` → `FALSE`, all three setpoints → `0.0`; the model stops in Gazebo. `HmiTractionRequest` is still standing at its driving value — the demand overrides a live command | AT-01 (a), logic and ordering only; no output de-energised and the 100 ms figure is not measured |
+| T6.1.2 | F | *Modify* `EStopCircuitClosed` back to `TRUE` — released, no reset performed | `EStopDemand` stays `TRUE`, `SafetyResetRequired` stays `TRUE`, setpoints stay `0.0`. `CauseGone` → `TRUE`. The latch survives its cause | AT-01 (d) |
+| T6.2.1 | F | Re-open `EStopCircuitClosed`; *Modify* `ResetButtonPressed` to `TRUE` and hold — do not release until T6.2.4 | `ResetPressArmed` reads `FALSE` while the device is visibly held; `ResetHoldMinTimer.ET` stays `0`. The press was never armed: `CauseGone` was false at its rising edge | AT-08 (c) |
+| T6.2.2 | F | With the reset stand-in still held, *Modify* `EStopCircuitClosed` to `TRUE` | `CauseGone` → `TRUE` while `ResetButtonPressed` still reads `TRUE`. `EStopDemand` stays `TRUE`. Two properties in one observation: the cause clearing releases no latch, and the held device supplies no edge — the edge it did produce happened while the cause was still standing | AT-08 (c) |
+| T6.2.3 | F | Keep the reset stand-in held a further 10 s (nothing modified) | `ResetHoldMaxTimer.ET` reaches `T#3s` and `SafetyResetFault` → `TRUE`. `ResetHoldValid` stays `FALSE` throughout — it was never armed, so there is nothing here for the upper bound to clear. The latch never clears, for as long as it is held | AT-08 (a), both halves |
+| T6.2.4 | F | *Modify* `ResetButtonPressed` to `FALSE` | `SafetyResetFault` → `FALSE`. `EStopDemand` still `TRUE`: the release produced a falling edge, but `ResetHoldValid` was `FALSE`, so no pulse formed. A press that began under a standing demand clears nothing, whenever the cause goes away | AT-08 (a), AT-08 (c) |
+| T6.3.1 | F | Confirm `ResetButtonPressed` reads `FALSE`; *Modify* it to `TRUE` and hold ≈1 s, circuits closed | `ResetPressArmed` → `TRUE` this time; `ResetHoldValid` → `TRUE` after 200 ms | AT-08 (d) |
+| T6.3.2 | F | *Modify* `ResetButtonPressed` to `FALSE` | `EStopDemand` → `FALSE`, `SafetyResetRequired` → `FALSE`, on the falling edge | AT-08 (d) |
+| T6.3.3 | std | Touch nothing for 30 s, enable held throughout | Nothing moves. All three setpoints stay `0.0` and `ForkliftTeleopActive` stays `FALSE`, even with the enable held throughout — a level that never fell produces no edge. "Nothing energizes" is the load-bearing observation | AT-08 (d) |
+| T6.3.4 | std | Release ENABLE, confirm `FALSE`, assert it again | Teleop returns on that fresh edge and the machine is driveable. Reset and enable are two separate, deliberate actions | AT-08 (d) |
+| T6.3.5 | F | With no demand standing, *Modify* `ResetButtonPressed` to `TRUE` and hold. After ≈1 s, *Modify* `EStopCircuitClosed` to `FALSE` and back to `TRUE` without releasing the reset stand-in. Then release it | `EStopDemand` latches on the opening and is still latched after the release. While still held, `ResetPressArmed` and `ResetHoldValid` both read `FALSE` — the demand that appeared during the hold disarmed the press, and it cannot re-arm without a fresh rising edge. Clear it with a fresh press | AT-08 (c) |
+| T6.4.1 | std | Drive from the spawn pose toward `SafetyZoneMarking` | Nothing changes as it approaches. No sensor watches the marking | — |
+| T6.4.2 | std | At the moment the model is seen crossing the outline's near edge (`x = -3.50`, ≈2.5 m from spawn), *Modify* `ZoneDeviceCircuitClosed` to `FALSE` | Same F-cycle: `ZoneStopDemand` → `TRUE`, `SafetyResetRequired` → `TRUE`; standard side: `ForkliftTeleopActive` → `FALSE`, all three setpoints → `0.0`, the model stops. `EStopDemand` stays `FALSE` — the watch table names which demand stands | AT-07 (a), logic and ordering only; no ramp, no power removal, no stop category demonstrated, no timing claimed |
+| T6.4.3 | F | Reverse back through the outline; *Modify* `ZoneDeviceCircuitClosed` back to `TRUE` | `ZoneStopDemand` stays `TRUE`, setpoints stay `0.0`. No restart without a monitored reset | AT-07 (b) |
+| T6.4.4 | std | Release ENABLE and assert it again — a fresh enable edge | Refused. `ForkliftTeleopActive` stays `FALSE` and every setpoint stays `0.0`. The inhibiting duty, the half most easily left untested | AT-07 (c) |
+| T6.4.5 | F | *Modify* `ResetButtonPressed` to `TRUE`, hold ≈1 s, release | `ZoneStopDemand` → `FALSE`, `SafetyResetRequired` → `FALSE`. Nothing moves | AT-08 (d) |
+| T6.4.6 | std | Release ENABLE, assert it again | Driveable. No auto-resume at any point in T6.1–T6.4 | — |
+| T6.5.1 | F | *Modify* both circuits to `FALSE`; *Modify* `ZoneDeviceCircuitClosed` back to `TRUE` only; attempt a valid reset | Refused, and the watch table says exactly why: `CauseGone` `FALSE` because the e-stop circuit is still open, so `ResetPressArmed` reads `FALSE` while the device is held and `ResetHoldMinTimer.ET` stays `0`. Both latches hold. One reset clears every latch, only when the whole live world is clear | AT-08 (c) |
+| T6.5.2 | F | *Modify* `EStopCircuitClosed` to `TRUE` as well; a valid reset | Both demands clear together on one pulse | AT-08 (d) |
+| T6.6.1 | F | With `ResetButtonPressed` *Modified* to `TRUE`, restart the CPU (PLCSIM Advanced) and let the F-runtime group start with it held | `ResetSeenOpen` `FALSE`, `SafetyResetFault` `TRUE` from the first F-cycle, both demands latched. Close both circuits: `CauseGone` `TRUE`, and the held device still clears nothing | AT-08 (a), second half |
+| T6.6.2 | F | *Modify* `ResetButtonPressed` to `FALSE` | `ResetSeenOpen` → `TRUE`, `SafetyResetFault` → `FALSE`. Nothing clears on that release — the press was never armed | AT-08 (a) |
+| T6.6.3 | F | *Modify* `ResetButtonPressed` to `TRUE`, hold ≈1 s, release | Both demands clear. The rejection lasted exactly as long as the stuck condition | AT-08 (d) |
+
+### What to capture, and the ISO 13849 naming discipline the recording must carry
+
+What to capture, per the pattern of section 2:
+
+1. The F-collective signature, read back and dated, beside the evidence
+   (`plc/forklift-safety/SPEC.md` §4.2 step 15) — the T6 equivalent of section
+   2's per-session bridge CSV name.
+2. A watch-table PNG at every step whose Observable above names a transition,
+   framed to show Group 1 beside Group 2 (`plc/forklift-safety/SPEC.md` §8),
+   and for **std** rows, the same frame beside `Forklift M4 gate` Group 4 and
+   the HMI page.
+3. Bridge session CSV and recording segment for the **std** rows only, exactly
+   as sections 3–7 capture them; **F**-only rows touch neither the bridge nor
+   the OPC UA session (`plc/forklift-safety/SPEC.md` §7.2) and need no bridge
+   CSV.
+4. The recording segment speaking the three statements of
+   `docs/safety/TWIN-DEMO-MAP.md` §5.1 word for word — **on the demand**, **on
+   the numbers**, and **on the inputs** (the stand-in sentence, quoted below)
+   — on a step where a viewer can see both an F-side transition and its
+   process consequence at once, e.g. T6.1.1 or T6.4.2.
+
+**The stand-in sentence** (`docs/safety/TWIN-DEMO-MAP.md` §5.1, to be used as
+written):
+
+> "The inputs that trip this demand are engineering stand-ins. In a simulated
+> cell there is no wiring, so the value a safety-rated device would put on a
+> hardwired two-channel F-input — the e-stop, the zone device, the reset — is
+> written into the F-input image from outside the CPU over a software
+> interface. What is demonstrated is what the safety program does with the
+> input, never how the input arrives; the stand-in carries no category, no
+> performance level and no claim."
+
+**Say / never say**, carried from `docs/safety/TWIN-DEMO-MAP.md` §5.3 and
+binding on every sentence spoken over this recording:
+
+| Say | Never say |
+|---|---|
+| "F-CPU safety demand", "the logic of SF-01", "the SF-07 **pattern**" | "SF-07" bare for the marked zone |
+| "e-stop" only for the F-side stand-in device and its demand | "emergency stop" or "e-stop" for the M3 panel mushroom or the lidar obstacle stop |
+| "the obstacle stop is standard-program process logic, not a safety function" | "protective stop" for the lidar latch |
+| "design target", "derived floor", "instantiates the acceptance-test logic" | "PL d achieved", "SIL", "certified", "validated", "safety-rated" |
+| "the demand formed inside the CPU; the network carried the consequence" | "the safety signal came over the network" |
+| "a reset is required, and it starts nothing" | "the reset restarts the machine" |
+
+**Pass-count discipline**, carried from `plc/forklift-safety/SPEC.md` §9's own
+rule and section 2's: a count is the number of rows in the table above and
+nothing else, re-derived whenever that table changes; a count is the
+specified denominator, never a claim about a run; a step recorded as failed,
+not run or not executable is not a pass by default; and a pass claim names the
+F-collective signature it was taken against.
+
+**Never absorbed into that count** — the outstanding rows of
+`plc/forklift-safety/SPEC.md` §9.2, restated here because R5 requires them
+wherever this demonstration is recorded:
+
+| Sub-case | Why it is not in the table above | Where it lands |
+|---|---|---|
+| AT-01 (b) — repeat T6.1 with the standard program in STOP | The twin's observable consequence is produced by the standard program; halting it removes the observable instead of testing it | M5 proper |
+| AT-01 (c) — open one of two channels → trip plus discrepancy fault | One stand-in channel, no second channel, no discrepancy monitoring; no Category is demonstrated | M5 proper |
+| AT-07 (d) — standard program in STOP, repeat T6.4 | Same reason as AT-01 (b) | M5 proper |
+| AT-08 (b) — pulse shorter than 0.2 s → rejected | A hand-driven watch-table *Modify* has no sub-0.2 s timing guarantee; the logic is built and untested, not absent | Moves into scope only if a timed injection facility is built (`plc/forklift-safety/SPEC.md` §7.3, §10 open item 3) |
+
+**Non-claims that apply to every row above, said once rather than per row**:
+no achieved PL, no Category demonstrated, no safety-rated input, no safety
+reaction path, no acceptance test passed, nothing that closes M5, and the
+2026-07-29 F-run is not counted here (`docs/safety/TWIN-DEMO-MAP.md` §4 NC-1
+through NC-9; `plc/forklift-safety/SPEC.md` §1.2 N1 through N9). The recording
+states which of the two stops a viewer is looking at, every time
+(`plc/forklift-safety/SPEC.md` §1.3): the lidar obstacle stop is
+standard-program process logic, never a safety function; the zone stand-in's
+demand is the F-CPU's, formed and held entirely inside it.

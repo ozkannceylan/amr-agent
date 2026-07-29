@@ -297,6 +297,63 @@
       </link>
     </model>
 
+    <!-- =============== Safety zone marking (SF-07 pattern) =============== -->
+    <!--
+      A 3.00 x 3.00 painted outline on open floor along the drive aisle,
+      west of AisleCrate and independent of it: 2.5 m of clear travel from
+      the spawn pose (-6.00, 0) to this outline's near edge at x = -3.50,
+      and a further 2.05 m of clear floor from its far edge at x = -0.50 to
+      AisleCrate's near face at x = 1.55. Its north and south edges sit at
+      y = +-1.45, 0.55 m inside the aisle edge lines at y = +-2.00. Same
+      technique as AisleMarking and PalletZoneMarking above: four visual
+      only strips, no collision, 6 mm proud of the floor, invisible to the
+      horizontal scanner plane at z = 0.25.
+
+      THIS IS PAINT, NOT A SENSOR. Nothing in this file watches whether the
+      vehicle is inside this outline, and no crossing is detected here. The
+      zone F-input this outline stands for is an engineering stand-in,
+      latched by the F-CPU safety program from a value the owner writes at
+      the TIA Portal watch table by hand, at the moment a viewer sees the
+      model cross this line (plc/forklift-safety/SPEC.md section 7). That
+      program implements the SF-07 pattern, never SF-07 itself, and never
+      shares a tag, a node, a lamp or a sentence with the lidar obstacle
+      stop that AisleCrate exercises a few metres east of here
+      (plc/forklift-safety/SPEC.md section 1.3; docs/safety/TWIN-DEMO-MAP.md
+      rule R4). Crossing this outline needs no interaction with AisleCrate
+      and trips no lidar logic; the two scenarios are independent by
+      placement, not by a rule enforced in code.
+
+      Adding this model changes what `gz model --list` reports: thirteen
+      arena models instead of twelve. worlds/FORKLIFT_ARENA_EVIDENCE.md was
+      captured before this marking existed and is not re-measured here.
+    -->
+    <model name="SafetyZoneMarking">
+      <static>true</static>
+      <pose>-2.00 0.00 0 0 0 0</pose>
+      <link name="link">
+        <visual name="edge_north">
+          <pose>0 1.45 0.003 0 0 0</pose>
+          <geometry><box><size>3.00 0.10 0.006</size></box></geometry>
+          <material><ambient>0.80 0.12 0.12 1</ambient><diffuse>0.80 0.12 0.12 1</diffuse></material>
+        </visual>
+        <visual name="edge_south">
+          <pose>0 -1.45 0.003 0 0 0</pose>
+          <geometry><box><size>3.00 0.10 0.006</size></box></geometry>
+          <material><ambient>0.80 0.12 0.12 1</ambient><diffuse>0.80 0.12 0.12 1</diffuse></material>
+        </visual>
+        <visual name="edge_west">
+          <pose>-1.45 0 0.003 0 0 0</pose>
+          <geometry><box><size>0.10 2.80 0.006</size></box></geometry>
+          <material><ambient>0.80 0.12 0.12 1</ambient><diffuse>0.80 0.12 0.12 1</diffuse></material>
+        </visual>
+        <visual name="edge_east">
+          <pose>1.45 0 0.003 0 0 0</pose>
+          <geometry><box><size>0.10 2.80 0.006</size></box></geometry>
+          <material><ambient>0.80 0.12 0.12 1</ambient><diffuse>0.80 0.12 0.12 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
     <!-- ============================ Pallet =========================== -->
     <!--
       In house primitive pallet: three deck boards on two blocks, all in
