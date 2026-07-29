@@ -666,7 +666,7 @@ the PLC's input image for the forklift and are read as wired field inputs would 
 |---|---|---|---|---|---|
 | `ForkliftForkHeight` | Real | Float | m | travel 0.00 … 1.60; window **−0.05 … 1.70** | Carriage height above the mast's bottom stop, derived by the vehicle layer from the mast prismatic joint. The window is widened past both mechanical stops so a carriage resting **on** a stop is never called implausible — the `BELT_POSITION_MIN/MAX` reasoning of `plc/demo-cell/SPEC.md` §3.3 |
 | `ForkliftLinearSpeed` | Real | Float | m/s | window **−2.00 … +2.00** | Measured chassis speed along its heading, signed, positive forwards, derived from the plant's odometry. The window is a statement about what the transducer can report, **not** a process cap: the cap is `TRACTION_SPEED_MAX` and is a different decision in a different layer |
-| `ForkliftObstacleInStopZone` | Bool | Boolean | — | — | The lidar's **field-violation output**: an object inside the configured forward stop field. **`TRUE` is the non-permissive state**, and the vehicle layer publishes `TRUE` whenever the scan is invalid, non-finite or stale — absence of data is an obstacle. See the polarity note below |
+| `ForkliftObstacleInStopZone` | Bool | Boolean | — | — | The lidar's **field-violation output**: an object inside the configured forward stop field. **`TRUE` is the non-permissive state.** The vehicle layer sorts every sample into three classes: **clear** — `+inf`, or a finite range at or beyond `range_max`, the sensor reporting no echo inside its window and counting as a valid measurement at `range_max`; **distance** — a finite range inside `[range_min, range_max)`; **invalid** — `NaN`, `-inf`, or a range below `range_min`. `TRUE` is published as a fail-safe only when there is no scan, when the newest one is older than 0.50 s, when the scan is structurally unusable, or when the sector holds no sample in **either** valid class — never on a beyond-range, clear scan (`74c7d5f`). See the polarity note below |
 | `ForkliftObstacleMinDistance` | Real | Float | m | sensor window 0.10 … 8.00; plausibility **0.05 … 8.10** | Smallest valid range in the same forward sector, published for the operator display and for diagnostics. **`0.0` is the vehicle layer's no-data sentinel and sits deliberately outside the plausibility window**, so the PLC's affirmative window test reads it as a sensor fault at the same moment the field bit reads as an obstacle — two independent signals pointing the same, non-permissive way |
 
 **Polarity, stated because it is the one input here that inverts §9.3's convention.** §9.3 names stop
@@ -678,8 +678,10 @@ way on purpose and the conflation is written out rather than left to be discover
   a signal** — inverting is listed as a violation of the no-logic rule (`bridge-design.md` §1.1), so
   a permissive-polarity node would require the inversion to happen in the transport.
 - Fail-safety is therefore carried by three independent things instead of by the name: the vehicle
-  layer publishes `TRUE` on invalid, non-finite or stale scans; the DB start value is `TRUE`
-  (§10.9); and no input-derived verdict is evaluated at all while `BridgeLinkOk` is `FALSE` (§10.9).
+  layer publishes `TRUE` as a fail-safe on a missing, stale or structurally unusable scan, or a
+  sector with no sample in either valid class — never on a beyond-range, clear scan (`74c7d5f`); the
+  DB start value is `TRUE` (§10.9); and no input-derived verdict is evaluated at all while
+  `BridgeLinkOk` is `FALSE` (§10.9).
 - Anyone renaming this node must move the polarity of the ROS topic with it, in the vehicle layer,
   in the same change. Changing one end alone silently inverts a stop.
 
@@ -976,7 +978,7 @@ the bridge's conversion stays what §9.2 permits: unit-preserving narrowing and 
 | `Output/ForkliftForkSpeedRef` | PLC → plant | `/forklift/cmd/fork_speed` | `std_msgs/Float64` | `data` | as above, m/s unchanged | polled 20 Hz |
 | `Input/ForkliftForkHeight` | plant → PLC | `/forklift/fork_height` | `std_msgs/Float64` | `data` | `float64 → Float` narrowing, m unchanged | cyclic 20 Hz, latest sample (source 10 Hz) |
 | `Input/ForkliftLinearSpeed` | plant → PLC | `/forklift/linear_speed` | `std_msgs/Float64` | `data` | as above, m/s unchanged | cyclic 20 Hz, latest sample (source 10 Hz) |
-| `Input/ForkliftObstacleInStopZone` | plant → PLC | `/forklift/obstacle/in_stop_zone` | `std_msgs/Bool` | `data` | none — `TRUE` = object in the field, or the scan is invalid or stale | on change + refresh on (re)connect and after a detected server restart |
+| `Input/ForkliftObstacleInStopZone` | plant → PLC | `/forklift/obstacle/in_stop_zone` | `std_msgs/Bool` | `data` | none — `TRUE` = object in the field, or the fail-safe of §10.5 — never on a beyond-range, clear scan (`74c7d5f`) | on change + refresh on (re)connect and after a detected server restart |
 | `Input/ForkliftObstacleMinDistance` | plant → PLC | `/forklift/obstacle/min_distance` | `std_msgs/Float64` | `data` | `float64 → Float` narrowing, m unchanged, **no threshold** | cyclic 20 Hz, latest sample (source 10 Hz) |
 
 Plant signals that exist and deliberately reach no node:

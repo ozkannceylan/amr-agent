@@ -370,7 +370,7 @@ same way, per configured group.
 |---|---|---|---|---|---|---|---|
 | 10 | `/forklift/fork_height` | `std_msgs/Float64` | `data` | `Input/ForkliftForkHeight` | Real / `Float` | `float64 → Float` narrowing, metres unchanged | cyclic 20 Hz, latest sample (source 10 Hz) |
 | 11 | `/forklift/linear_speed` | `std_msgs/Float64` | `data` | `Input/ForkliftLinearSpeed` | Real / `Float` | `float64 → Float`, m/s unchanged, sign preserved | cyclic 20 Hz, latest sample (source 10 Hz) |
-| 12 | `/forklift/obstacle/in_stop_zone` | `std_msgs/Bool` | `data` | `Input/ForkliftObstacleInStopZone` | Bool / `Boolean` | none — **no inversion** (`TRUE` = object in the field, or the scan is invalid, non-finite or stale) | on-change + refresh on every (re)connect **and after a detected server restart** (§8.1) |
+| 12 | `/forklift/obstacle/in_stop_zone` | `std_msgs/Bool` | `data` | `Input/ForkliftObstacleInStopZone` | Bool / `Boolean` | none — **no inversion** (`TRUE` = object in the field, or a missing, stale or structurally unusable scan, or a sector with no sample in either valid class; a beyond-range return is `CLEAR` evidence at `range_max` and never sets `TRUE` on its own — `74c7d5f`) | on-change + refresh on every (re)connect **and after a detected server restart** (§8.1) |
 | 13 | `/forklift/obstacle/min_distance` | `std_msgs/Float64` | `data` | `Input/ForkliftObstacleMinDistance` | Real / `Float` | `float64 → Float`, metres unchanged, **no threshold**; the `0.0` no-data sentinel is passed through as `0.0` | cyclic 20 Hz, latest sample (source 10 Hz) |
 
 Row order follows `opcua-nodes.md` §10.5. Two properties of this group differ from the
