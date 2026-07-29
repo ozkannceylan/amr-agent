@@ -69,10 +69,10 @@ m3-37 finding-9 cold-start capture at the first PLCSIM session.
 Owner ruling 2026-07-29: the safety gate's cell-scope core (SF-01, SF-08,
 SF-07 pattern) opens early on the forklift twin, fallback-safe — the M4
 demonstration stands alone if the F-layer is not ready, and M4's criteria are
-unchanged. The owner has already swapped the CPU to a 1513F-1 PN
-(6ES7 513-1FM03-0AB0) with PLCSIM communication verified; the remaining
-feasibility checkpoint (Safety licence compile, F-runtime RUN) is the
-abort-to-fallback trigger.
+unchanged. The feasibility checkpoint is substantially closed (ADR 0009
+context, verified live 2026-07-29: F-runtime compiled, downloaded, CPU RUN,
+two-way bridge round trip, F-latch executing end to end); the
+abort-to-fallback trigger has narrowed to the formal acceptance procedure.
 
 Early wave, briefs issued, dispatch when the agent limit resets:
 1. m5a-01 arch-docs — ADR 0009 (opus).

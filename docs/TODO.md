@@ -115,12 +115,13 @@ is the open gate and its brief queue lives in docs/PLAN.md.
   SF-03's bumper latch appears in §2's no-auto-resume list; AT-01 gains the
   at-rest sub-test SC-02 observes. One brief.
 
-## owner — M5 entry, carried (was the M4 entry before ADR 0008)
-- The ADR 0007 tool question, unchanged: does this install run an F-CPU on
-  PLCSIM Advanced V7 (STEP 7 Safety Advanced V21 licence; 1513F-1 PN in the
-  catalogue; an empty F-project reaching RUN with the F-runtime group
-  executing; what F-I/O the catalogue offers)? The answers feed M5's first
-  brief. No M5 brief until they exist.
+## M5 early opening (ADR 0009) — feasibility substantially closed 2026-07-29
+- Observed live and recorded in ADR 0009: 1513F-1 PN project with F-runtime
+  group compiled, downloaded, CPU RUN; two-way bridge round trip verified;
+  the F-latch executed end to end (held after the signal cleared,
+  reset-required rose). Remaining from the old tool question: the formal
+  acceptance procedure and the F-I/O catalogue survey (full M5 scope, not
+  the early opening).
 
 ## docs sweep (post-gate, one brief)
 - Stale gate numbers across SRS.md, PL-SCENARIOS.md, plc/demo-cell/SPEC.md,
