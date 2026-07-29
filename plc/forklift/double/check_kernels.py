@@ -265,7 +265,8 @@ async def k2_speed_cap(h: Harness) -> None:
     print("    fork still raised, demand 0.2 -> TractionSpeedRef=%.3f "
           "SpeedLimitActive=%s" % (s["ForkliftTractionSpeedRef"],
                                    s["ForkliftSpeedLimitActive"]))
-    check("the cap LIMITS, it does not command (0.2 x 0.30 = 0.06)",
+    check("the cap SCALES the request, it does not clamp the full-scale product "
+          "(0.2 x 0.30 = 0.060, not 0.20)",
           abs(s["ForkliftTractionSpeedRef"] - 0.06) < 1e-6)
     check("SpeedLimitActive stays TRUE -- 'in force', not 'biting'",
           s["ForkliftSpeedLimitActive"] is True)
