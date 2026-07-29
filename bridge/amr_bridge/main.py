@@ -24,7 +24,7 @@ from rclpy.executors import SingleThreadedExecutor
 from . import config as config_mod
 from .instrumentation import ActuationProbe, Counters, Recorder
 from .opcua_side import PlcClient
-from .ros_side import CellInterface
+from .ros_side import PlantInterface
 from .slots import SlotSet
 
 LOG = logging.getLogger("bridge")
@@ -61,17 +61,22 @@ def main(argv: list[str] | None = None) -> int:
              "not touched)", recorder.path, csv_path)
     counters = Counters()
     probe = ActuationProbe(recorder)
-    slots = SlotSet(config_mod.INPUT_KEYS)
+    # One slot per input of the CONFIGURED signal set (§2.1): a group absent
+    # from the config has no slot at all, so it can hold nothing back.
+    slots = SlotSet(cfg.input_keys)
+    LOG.info("%s", cfg.describe())
+    recorder.row("startup", "configured_signal_set", clock="-",
+                 value="+".join(cfg.groups), note=cfg.describe())
 
     rclpy.init(args=None)
-    node = CellInterface(cfg, slots, recorder, counters, probe)
+    node = PlantInterface(cfg, slots, recorder, counters, probe)
     executor = SingleThreadedExecutor()
     executor.add_node(node)
     ros_thread = threading.Thread(target=executor.spin, name="rclpy", daemon=True)
     ros_thread.start()
     LOG.info("ROS 2 node %s spinning; config %s", cfg.ros["node_name"], cfg.path)
 
-    client = PlcClient(cfg, slots, recorder, counters, node.publish_cmd_speed)
+    client = PlcClient(cfg, slots, recorder, counters, node.publish_output)
 
     def _handle_signal(signum, _frame):
         # §7.3 B / §8.3 N5: a clean shutdown writes no farewell value, zeroes

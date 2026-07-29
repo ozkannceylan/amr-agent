@@ -62,9 +62,13 @@ from amr_bridge.slots import SlotSet  # noqa: E402
 #: between the two servers, never a value to configure (§3.1 N3).
 PLCSIM_SERVER_INTERFACES_INDEX = 3
 
-#: `opcua-nodes.md` §9: 7 Input/, BridgeHeartbeat, ConveyorSpeedCommand,
-#: 5 Status/ and BridgeLinkOk.
-EXPECTED_NODE_COUNT = 15
+#: How many nodes a run resolves is a property of its **configured signal set**,
+#: not a constant (`bridge-design.md` §2.1): 15 for the cell group alone (7
+#: Input/, BridgeHeartbeat, ConveyorSpeedCommand, 5 Status/ and BridgeLinkOk),
+#: 13 for the forklift group alone, 27 for both. The expectation is therefore
+#: derived from the config under test, and this table is the design's own, kept
+#: here so a configuration that produces some other number fails loudly.
+NODES_TOUCHED_BY_CONFIGURATION = {("cell",): 15, ("forklift",): 13, ("cell", "forklift"): 27}
 
 
 class Checks:
@@ -88,10 +92,10 @@ def _client(cfg: config_mod.Config, recorder: Recorder) -> PlcClient:
     neither the slots nor the publisher."""
     return PlcClient(
         cfg,
-        SlotSet(config_mod.INPUT_KEYS),
+        SlotSet(cfg.input_keys),
         recorder,
         Counters(),
-        lambda value: time.monotonic_ns(),
+        lambda node_key, value: time.monotonic_ns(),
     )
 
 
@@ -113,10 +117,17 @@ async def check_namespaces(checks: Checks, client: PlcClient, cfg: config_mod.Co
         f"{si} here vs {PLCSIM_SERVER_INTERFACES_INDEX} on PLCSIM — a hardcoded index "
         "could not resolve on both servers",
     )
+    expected = cfg.touched_node_count
     checks.ok(
-        len(client.resolved_node_keys) == EXPECTED_NODE_COUNT,
-        f"all {EXPECTED_NODE_COUNT} §9 nodes resolved through Objects/ServerInterfaces/DemoCell",
-        f"{len(client.resolved_node_keys)} nodes",
+        len(client.resolved_node_keys) == expected,
+        f"all {expected} nodes of the configured set resolved through "
+        "Objects/ServerInterfaces/DemoCell",
+        f"{len(client.resolved_node_keys)} nodes for group(s) {'+'.join(cfg.groups)}",
+    )
+    checks.ok(
+        NODES_TOUCHED_BY_CONFIGURATION.get(tuple(sorted(cfg.groups))) == expected,
+        "the node count matches bridge-design.md §2.1's table for this configuration",
+        f"{'+'.join(cfg.groups)} -> {expected}",
     )
     path = "/".join(f"{indices[ns]}:{name}" for ns, name in cfg.interface_path)
     print(f"        interface path in force this session: Objects/{path}")
@@ -238,10 +249,11 @@ async def check_keepalive_in_force(
         checks.ok(False, "keep-alive exchanges were recorded in the evidence file")
 
     # The session must still be usable: the point of the keep-alive.
+    output_key = cfg.output_keys[0]
     try:
-        value = await client.nodes[config_mod.OUTPUT_KEY].read_value()
+        value = await client.nodes[output_key].read_value()
         checks.ok(True, "the session outlived the granted timeout while idle",
-                  f"ConveyorSpeedCommand read back as {value}")
+                  f"{output_key} read back as {value}")
     except Exception as exc:
         checks.ok(False, "the session outlived the granted timeout while idle", repr(exc))
 

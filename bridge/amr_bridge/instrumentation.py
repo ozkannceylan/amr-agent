@@ -146,7 +146,11 @@ class Counters:
         self.heartbeat_readbacks = 0
         self.server_restarts_detected = 0
         self.inputs_rewritten_after_restart = 0
-        self.nonfinite_range_samples = 0
+        # inf / NaN samples on any Real input of the configured set, written
+        # through unchanged and counted here (§4.5). One counter for every Real
+        # rather than one per signal: the per-signal detail is in the CSV's
+        # `nonfinite` rows, which carry the node name.
+        self.nonfinite_real_samples = 0
         self.missing_joint_name = 0
         self.empty_scan = 0
         self.publishes = 0

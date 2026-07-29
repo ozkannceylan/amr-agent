@@ -73,6 +73,16 @@ stop circuit **open** — until something changes it. The bridge now reads its o
 write is not a process fact to interpret but a session fact: this is not the
 server this session wrote to.
 
+> **Confirmed against the two-client write set, 2026-07-29** (`bridge-design.md`
+> §12 item 14, m4f-06). The sentence still holds with the forklift group
+> configured: the write set is the `Input/` nodes of the configured groups plus
+> this one heartbeat, so `BridgeHeartbeat` remains the only node outside an
+> `Input/` folder that the bridge writes. It also remains a valid *witness*,
+> because the second client's counter is `Forklift/Link/HmiHeartbeat` — a node
+> the bridge never touches — and the two writable sets are disjoint by BrowseName
+> prefix (`opcua-nodes.md` §10.1). What this run did **not** know is how wide the
+> witness's blind spot is; that is measured in `EVIDENCE_CONNECT.md` § m4f-06.4.
+
 ### 1.3 The evidence file that truncated
 
 `Recorder.__init__` opened its file with `"w"`. Now the path is a stem,

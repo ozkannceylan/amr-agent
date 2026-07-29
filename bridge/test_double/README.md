@@ -9,15 +9,21 @@
 `plc_test_double.py` is a minimal OPC UA **server** that stands in for the
 S7-1500 on PLCSIM Advanced (`docs/interfaces/bridge-design.md` §10). It exposes
 the commissioned two-namespace shape of §3.1 with the `DemoCell/` address space
-of `docs/interfaces/opcua-nodes.md` §9 — same BrowseNames, same folder paths,
-same data types, same access levels:
+of `docs/interfaces/opcua-nodes.md` §9 **and the `Forklift/` subtree of §10** —
+same BrowseNames, same folder paths, same data types, same access levels:
 
 ```
 Objects
   +- ServerInterfaces   ns http://www.siemens.com/simatic-s7-opcua   (vendor-fixed)
        +- DemoCell      ns http://DemoCell                           (ADR 0006)
             +- Input/ Output/ Status/ Link/   and their variables
+            +- Forklift/  Hmi/ Input/ Output/ Status/ Link/
 ```
+
+**All 33 nodes, including the six the bridge never touches** (§4.10): a node
+absent from the double cannot be proven untouched. The forklift group adds a
+*level*, not a namespace — `DemoCell/Forklift/…` sits under the same interface
+node, so the browse path still crosses exactly two namespaces (§3.1 N7).
 
 The interface URI is `http://DemoCell` and not a chosen URN because TIA Portal
 derives a server interface's namespace URI from the interface name as
@@ -41,11 +47,23 @@ difference and no server mode**.
 
 ## What it proves
 
-About the **bridge**: signal traversal in both directions, node types, polarity,
-latest-sample decimation, the startup rule, liveness behaviour, reconnect,
-no-auto-resume, the bridge-side latency figures, and the two connect
-requirements — both namespaces resolved by URI under `ServerInterfaces`, and the
-keep-alive derived from a **granted** session timeout (`EVIDENCE_CONNECT.md`).
+About the **bridge**: signal traversal in both directions **for every configured
+group**, node types, polarity (including `ForkliftObstacleInStopZone` carried
+uninverted), latest-sample decimation, the startup rule counted from the
+configured set, liveness behaviour, reconnect, the restart detection and repair
+of §8.1, no-auto-resume on all four output slots, the bridge-side latency
+figures, and the two connect requirements — both namespaces resolved by URI
+under `ServerInterfaces`, and the keep-alive derived from a **granted** session
+timeout (`EVIDENCE_CONNECT.md`).
+
+**And the write allowlist's refusal of an `Hmi` node.** The five
+`Forklift/Hmi/` requests and `Forklift/Link/HmiHeartbeat` are served with the
+*Writable from HMI/OPC UA* standing `opcua-nodes.md` §10.3 gives them, so a
+bridge write to one **would succeed** — the conformance check proves the
+bridge's own allowlist refuses them, not that this server refused. Conversely
+`Output/` and `Status/` are served **not** writable in both groups, so the
+server-side half of the two-independent-enforcements arrangement is exercised
+too. A double that refused everything would make both checks vacuous.
 
 Two server behaviours are copied on purpose, and they are the only two:
 
@@ -61,17 +79,31 @@ are not the CPU's, and the indices are chosen to be wrong on purpose.
 
 **The PLC program.** It runs no standard program. There is no scan cycle, no
 process image, no interlock, no cycle-running flag, no reset and no threshold
-in this directory. `DemoCell/Status/*` and `DemoCell/Link/BridgeLinkOk` are PLC
-verdicts; this double never forms them, so they keep their start values for a
-whole run — that is the honest answer, not a defect. Nothing observed here is
-evidence for `plc/demo-cell/SPEC.md`.
+in this directory — and none of the forklift's teleop routing, fork-height speed
+cap, soft travel limits, obstacle latch, monitored reset or HMI watchdog.
+`DemoCell/Status/*`, `DemoCell/Link/BridgeLinkOk`, `Forklift/Status/*` and
+`Forklift/Link/HmiLinkOk` are PLC verdicts; this double never forms them, so they
+keep their start values for a whole run — that is the honest answer, not a
+defect. Nothing observed here is evidence for `plc/demo-cell/SPEC.md` or for the
+forklift function block's specification.
+
+**It is not the HMI either.** Serving the `Hmi/` group is not playing the HMI: it
+stores those values, runs no operator interface, forms no request and holds no
+session of the kind `hmi/` will. Any value a harness places in that group is
+scaffolding, and a run against this double proves nothing about ADR 0008's
+operator path.
+
+**The commissioned `Forklift/` address space.** What is served is what
+`opcua-nodes.md` §10 asks TIA Portal for; the browse path, folder tree, per-tag
+rights and node count stay design values until the owner reads them back out of
+the tool (§10.2 step 6).
 
 ## Scaffolding behaviours, and why each is not PLC logic
 
 | ID | Flag | What it does | Why it is not logic |
 |---|---|---|---|
-| S1 | `--command-file PATH` | copies a hand-written float from a file into `DemoCell/Output/ConveyorSpeedCommand` | A human writing a setpoint through a back door. No input value is consulted; there is no condition, sequence or interlock |
-| S2 | `--observe-csv PATH` | server-side log of session count, heartbeat and the whole input image at 5 Hz. The path is a **stem**: one file per double session, never a truncation of the last one | Pure observation |
+| S1 | `--command-file PATH` | copies hand-written setpoints from a file into the `Output/` nodes: a bare float drives `DemoCell/Output/ConveyorSpeedCommand`, and `Name=value` lines drive any output node, including the three `Forklift/Output/*Ref` | A human writing setpoints through a back door. No input value is consulted; there is no condition, sequence or interlock |
+| S2 | `--observe-csv PATH` | server-side log of session count, the bridge's heartbeat, both groups' input images, the setpoints and the `Hmi/` group at 5 Hz. The path is a **stem**: one file per double session, never a truncation of the last one | Pure observation. The `Hmi` columns are how "the bridge never touched them" is *observed* rather than asserted |
 | S3 | `--echo-input KEY` | copies one nominated input into `ConveyorSpeedCommand` so the closed-loop L7 interval has something to measure. Off by default | A wire, not a decision. A real PLC does nothing like it |
 | S4 | `--min-session-timeout-ms`, `--max-session-timeout-ms` | the window this double grants session timeouts within, so a request is revised in one direction or the other | Session housekeeping in a *server*, applied to no signal. It decides nothing about any value in the address space |
 | S5 | `--warm-restart-file PATH` | touching that file assigns **every** node its declared start value, in place, with the server and every open session left up; the file is removed, so each touch is one restart | A bulk assignment of the start values listed at the top of `plc_test_double.py`. Nothing is sequenced, nothing is derived from anything, and no restart *logic* is modelled — a real CPU warm restart also re-runs startup OBs, reloads retained data and may drop the session, and none of that is here |
@@ -82,9 +114,15 @@ only be killed and relaunched: a CPU warm restart reinitialises the data block
 repairs the values it believes it already wrote. The bridge's answer is to read
 its own heartbeat back; `../EVIDENCE_LIFECYCLE.md` §2.4 is the recorded run.
 
-Start values are those of `bridge-design.md` §6.3 — the fail-safe
-pre-connection state, which belongs to the PLC's data block and never to the
-bridge (`PanelStopCircuitClosed` `FALSE`, `ProductSensorRange` `0.0`, …).
+Start values are those of `bridge-design.md` §6.3 and `opcua-nodes.md` §10.9 —
+the fail-safe pre-connection state, which belongs to the PLC's data block and
+never to the bridge (`PanelStopCircuitClosed` `FALSE`, `ProductSensorRange`
+`0.0`, …). The forklift group contributes the one start value in either section
+that is not the type's zero: **`ForkliftObstacleInStopZone` starts `TRUE`**,
+because `TRUE` is its non-permissive state and absence of data is an obstacle.
+That is also what makes the S5 restart test sharp — a reverted server holds
+`TRUE` while the plant is publishing `FALSE`, and write-on-change alone would
+never repair it.
 `PanelResetPressed` starts `FALSE` too, for the opposite reason: a stop must
 fail to *stopped*, a reset to *not reset* (`opcua-nodes.md` §9.3). "No reset"
 above means no reset **logic** — the double holds the input node, and forms no

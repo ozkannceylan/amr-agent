@@ -12,11 +12,26 @@ commissioned two-namespace shape of §3.1 —
       +- ServerInterfaces   ns http://www.siemens.com/simatic-s7-opcua
            +- DemoCell      ns http://DemoCell                (ADR 0006)
                 +- Input/ Output/ Status/ Link/  and their variables
+                +- Forklift/  Hmi/ Input/ Output/ Status/ Link/
 
-— with the `DemoCell/` address space of docs/interfaces/opcua-nodes.md §9: same
-BrowseNames, same folder paths, same data types, same access levels, so the
-bridge and the loop mechanics can be verified in a container without TIA Portal
-or PLCSIM Advanced.
+— with the `DemoCell/` address space of docs/interfaces/opcua-nodes.md §9 **and
+the `Forklift/` subtree of §10**: same BrowseNames, same folder paths, same data
+types, same access levels, so the bridge and the loop mechanics can be verified
+in a container without TIA Portal or PLCSIM Advanced.
+
+**All 33 nodes, including the six the bridge never touches** — a node absent
+from the double cannot be proven untouched (§10). The five `Forklift/Hmi/`
+requests and `Forklift/Link/HmiHeartbeat` are therefore served with the
+*Writable* standing §10.3 gives them, so a bridge write to one **would
+succeed**: the conformance check proves the *bridge's own allowlist* refuses
+them, not that the server refused. A double that refused everything would make
+that check vacuous. Conversely `Output/` and `Status/` are served not writable,
+so the server-side half of the two-independent-enforcements arrangement is
+exercised too.
+
+Serving the `Hmi/` group is **not playing the HMI** (§10). This file stores
+those values; it runs no operator interface, forms no request and holds no
+session of the kind `hmi/` will.
 
 Two server behaviours are copied **deliberately**, and they are the only two:
 
@@ -39,9 +54,13 @@ What it is NOT, and what nothing observed against it proves:
 Scaffolding behaviours, each explicitly labelled below and in the evidence
 files, exist only to exercise the loop:
 
-  S1  --command-file PATH   The file's contents (one float, m/s) are copied
-                            into `DemoCell/Output/ConveyorSpeedCommand`. This
-                            is a HUMAN writing a setpoint by hand through a
+  S1  --command-file PATH   The file's contents are copied into the `Output/`
+                            nodes: a bare float goes to
+                            `DemoCell/Output/ConveyorSpeedCommand`, and
+                            `Name=value` lines address any output node by
+                            BrowseName, which is how the three
+                            `Forklift/Output/*Ref` setpoints are driven. This
+                            is a HUMAN writing setpoints by hand through a
                             back door in the double. It is NOT PLC logic: no
                             input value is consulted, there is no sequence,
                             no interlock and no condition of any kind.
@@ -165,18 +184,78 @@ STATUS = [
     ("ConveyorDriveFault", ua.VariantType.Boolean, False),
 ]
 
-# §9.7 — link. BridgeHeartbeat is the one node outside Input/ the client may write.
+# §9.7 — link. BridgeHeartbeat is the one node of the M3 cell outside Input/
+# that a client may write, and it is the bridge's. The forklift group adds no
+# second heartbeat (§10.11); it adds the HMI's, which is a different client's.
 LINK = [
     ("BridgeHeartbeat", ua.VariantType.UInt16, 0, True),
     ("BridgeLinkOk", ua.VariantType.Boolean, False, False),
 ]
+
+# --------------------------------------------------------------------------- #
+# opcua-nodes.md §10 — the forklift commissioning cell. 18 nodes, of which the
+# bridge touches 12: it never reads and never writes the five Hmi/ requests or
+# Link/HmiHeartbeat (bridge-design.md §4.10).
+# --------------------------------------------------------------------------- #
+
+# §10.4 — the operator's requests. WRITABLE (§10.3), so a bridge write to one
+# would SUCCEED. That is the point: the allowlist check proves the bridge
+# refuses them, not that this server did.
+FORKLIFT_HMI = [
+    ("HmiTractionRequest", ua.VariantType.Float, 0.0),
+    ("HmiSteerRequest", ua.VariantType.Float, 0.0),
+    ("HmiForkRequest", ua.VariantType.Float, 0.0),
+    ("HmiTeleopRequest", ua.VariantType.Boolean, False),
+    ("HmiResetRequest", ua.VariantType.Boolean, False),
+]
+
+# §10.5 — plant state, client-writable: this is the bridge's forklift input
+# image. Start values are §10.9's, and `ForkliftObstacleInStopZone` is the one
+# start value in that section that is not the type's zero — TRUE is the
+# non-permissive state and absence of data is an obstacle.
+FORKLIFT_INPUTS = [
+    ("ForkliftForkHeight", ua.VariantType.Float, 0.0),
+    ("ForkliftLinearSpeed", ua.VariantType.Float, 0.0),
+    ("ForkliftObstacleInStopZone", ua.VariantType.Boolean, True),
+    ("ForkliftObstacleMinDistance", ua.VariantType.Float, 0.0),
+]
+
+# §10.6 — PLC → plant setpoints. NOT writable: neither client writes an
+# actuator output, and the server enforces that half of the rule.
+FORKLIFT_OUTPUTS = [
+    ("ForkliftTractionSpeedRef", ua.VariantType.Float, 0.0),
+    ("ForkliftSteerAngleRef", ua.VariantType.Float, 0.0),
+    ("ForkliftForkSpeedRef", ua.VariantType.Float, 0.0),
+]
+
+# §10.7 — PLC verdicts, read-only for both clients. This double runs no program,
+# so it forms none of them: they keep their start values for the whole run.
+FORKLIFT_STATUS = [
+    ("ForkliftTeleopActive", ua.VariantType.Boolean, False),
+    ("ForkliftObstacleStopActive", ua.VariantType.Boolean, False),
+    ("ForkliftSpeedLimitActive", ua.VariantType.Boolean, False),
+    ("ForkliftResetRequired", ua.VariantType.Boolean, False),
+]
+
+# §10.8 — the HMI's watchdog: its counter is writable (the HMI's to write, and
+# a node the bridge must never touch); the PLC's verdict is not.
+FORKLIFT_LINK = [
+    ("HmiHeartbeat", ua.VariantType.UInt16, 0, True),
+    ("HmiLinkOk", ua.VariantType.Boolean, False, False),
+]
+
+#: The six nodes the bridge must never read and never write (§4.10). Served, so
+#: their being untouched is observable rather than assumed.
+BRIDGE_MUST_NOT_TOUCH: tuple[str, ...] = tuple(
+    name for name, _, _ in FORKLIFT_HMI) + ("HmiHeartbeat",)
 
 
 async def build(server: Server, idx_server_interfaces: int, idx: int) -> dict:
     """Build the commissioned shape: the ServerInterfaces folder in the Siemens
     namespace, the interface node and everything below it in the interface
     namespace (§3.1). `idx` is the interface namespace index; every node under
-    `DemoCell` uses it."""
+    `DemoCell` uses it — the forklift group adds a LEVEL, not a namespace
+    (§3.1 N7)."""
     nodes: dict[str, object] = {}
     objects = server.nodes.objects
     server_interfaces = await objects.add_folder(idx_server_interfaces, "ServerInterfaces")
@@ -200,28 +279,91 @@ async def build(server: Server, idx_server_interfaces: int, idx: int) -> dict:
         if writable:
             await node.set_writable()
         nodes[name] = node
+
+    # §10.3's folder tree, beside the four M3 folders and under the same
+    # interface node.
+    forklift = await demo.add_folder(idx, "Forklift")
+    fk_folders = {
+        "Hmi": await forklift.add_folder(idx, "Hmi"),
+        "Input": await forklift.add_folder(idx, "Input"),
+        "Output": await forklift.add_folder(idx, "Output"),
+        "Status": await forklift.add_folder(idx, "Status"),
+        "Link": await forklift.add_folder(idx, "Link"),
+    }
+    for folder, table in (("Hmi", FORKLIFT_HMI), ("Input", FORKLIFT_INPUTS)):
+        for name, vtype, start in table:
+            node = await fk_folders[folder].add_variable(idx, name, ua.Variant(start, vtype))
+            await node.set_writable()      # §10.3: writable from HMI/OPC UA
+            nodes[name] = node
+    for folder, table in (("Output", FORKLIFT_OUTPUTS), ("Status", FORKLIFT_STATUS)):
+        for name, vtype, start in table:
+            nodes[name] = await fk_folders[folder].add_variable(
+                idx, name, ua.Variant(start, vtype))
+    for name, vtype, start, writable in FORKLIFT_LINK:
+        node = await fk_folders["Link"].add_variable(idx, name, ua.Variant(start, vtype))
+        if writable:
+            await node.set_writable()
+        nodes[name] = node
     return nodes
 
 
+#: Every node the S1 back door may drive: the PLC-owned setpoints of §9.4 and
+#: §10.6. Nothing else is addressable through it — the scaffolding is a wire to
+#: the output nodes, not a general write facility.
+_COMMANDABLE = {
+    name: vtype
+    for name, vtype, _ in list(OUTPUTS) + list(FORKLIFT_OUTPUTS)
+}
+
+
 async def scaffold_command_file(nodes: dict, path: str, period: float = 0.1) -> None:
-    """S1 — TEST SCAFFOLDING. Copies a hand-written float from a file into
-    ConveyorSpeedCommand. A back door for a human, not PLC logic."""
+    """S1 — TEST SCAFFOLDING. Copies hand-written setpoints from a file into the
+    `Output/` nodes. A back door for a human, not PLC logic.
+
+    Two accepted forms, so the M3 harnesses keep working unchanged:
+
+        0.15                      -> ConveyorSpeedCommand (a bare float)
+        ForkliftSteerAngleRef=0.7 -> that node, one `Name=value` per line
+
+    No input value is consulted, nothing is sequenced and no condition of any
+    kind is evaluated. A real PLC forms these setpoints from requests and
+    interlocks; none of that exists in this file.
+    """
     last = None
     while True:
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 text = handle.read().strip()
             if text and text != last:
-                value = float(text)
-                await nodes["ConveyorSpeedCommand"].write_value(
-                    ua.DataValue(ua.Variant(value, ua.VariantType.Float)))
-                LOG.info("SCAFFOLD S1: ConveyorSpeedCommand := %s (hand-written, not PLC logic)", value)
+                for name, value in _parse_command_file(text).items():
+                    await nodes[name].write_value(
+                        ua.DataValue(ua.Variant(value, _COMMANDABLE[name])))
+                    LOG.info("SCAFFOLD S1: %s := %s (hand-written, not PLC logic)", name, value)
                 last = text
         except FileNotFoundError:
             pass
-        except ValueError:
-            LOG.warning("SCAFFOLD S1: %s does not contain a float", path)
+        except (ValueError, KeyError) as exc:
+            LOG.warning("SCAFFOLD S1: %s is not a setpoint file (%s)", path, exc)
         await asyncio.sleep(period)
+
+
+def _parse_command_file(text: str) -> dict[str, float]:
+    """`0.15` -> the conveyor command; `Name=value` lines -> those nodes."""
+    try:
+        return {"ConveyorSpeedCommand": float(text)}
+    except ValueError:
+        pass
+    values: dict[str, float] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, _, raw = line.partition("=")
+        name = name.strip()
+        if name not in _COMMANDABLE:
+            raise KeyError(f"{name!r} is not an Output/ node; commandable: {sorted(_COMMANDABLE)}")
+        values[name] = float(raw)
+    return values
 
 
 async def scaffold_echo(nodes: dict, key: str, period: float = 0.02) -> None:
@@ -244,6 +386,11 @@ def _start_values() -> list[tuple[str, ua.VariantType, object]]:
         + [(name, vtype, start) for name, vtype, start in OUTPUTS]
         + [(name, vtype, start) for name, vtype, start in STATUS]
         + [(name, vtype, start) for name, vtype, start, _ in LINK]
+        + [(name, vtype, start) for name, vtype, start in FORKLIFT_HMI]
+        + [(name, vtype, start) for name, vtype, start in FORKLIFT_INPUTS]
+        + [(name, vtype, start) for name, vtype, start in FORKLIFT_OUTPUTS]
+        + [(name, vtype, start) for name, vtype, start in FORKLIFT_STATUS]
+        + [(name, vtype, start) for name, vtype, start, _ in FORKLIFT_LINK]
     )
 
 
@@ -278,19 +425,31 @@ async def scaffold_warm_restart(nodes: dict, path: str, period: float = 0.05) ->
         await asyncio.sleep(period)
 
 
+#: Columns after the fixed four: the whole served address space bar the PLC
+#: verdicts this double never forms. The `Hmi/` requests and `HmiHeartbeat` are
+#: in here deliberately — the bridge must never write them, and a column that
+#: holds its start value for a whole run is how that is *observed* rather than
+#: assumed (§4.10, §10).
+_OBSERVED = (
+    [name for name, _, _ in INPUTS]
+    + ["ConveyorSpeedCommand"]
+    + [name for name, _, _ in FORKLIFT_INPUTS]
+    + [name for name, _, _ in FORKLIFT_OUTPUTS]
+    + [name for name, _, _ in FORKLIFT_HMI]
+    + ["HmiHeartbeat"]
+)
+
+
 async def observe(nodes: dict, path: str, period: float = 0.2) -> None:
     """S2 — TEST SCAFFOLDING. Server-side record of what the "PLC" sees:
-    session count, the heartbeat and the whole input image.
+    session count, the bridge's heartbeat, the whole input image of both
+    groups, the setpoints and the group the bridge may not touch.
 
     One file per double session, like the bridge's own evidence file: the path
     given is a stem and the suffix names the session, so restarting the double
     cannot erase what the previous run observed (LESSONS 2026-07-28)."""
     path = session_csv_path(path)
-    columns = (
-        ["wall_utc", "monotonic_s", "active_sessions", "BridgeHeartbeat"]
-        + [name for name, _, _ in INPUTS]
-        + ["ConveyorSpeedCommand"]
-    )
+    columns = ["wall_utc", "monotonic_s", "active_sessions", "BridgeHeartbeat"] + _OBSERVED
     with open(path, "x", newline="", encoding="utf-8") as handle:
         csv.writer(handle).writerow(columns)
     LOG.info("SCAFFOLD S2: observing to %s (one file per double session)", path)
@@ -301,9 +460,8 @@ async def observe(nodes: dict, path: str, period: float = 0.2) -> None:
             InternalSession._current_connections,
             await nodes["BridgeHeartbeat"].read_value(),
         ]
-        for name, _, _ in INPUTS:
+        for name in _OBSERVED:
             row.append(await nodes[name].read_value())
-        row.append(await nodes["ConveyorSpeedCommand"].read_value())
         with open(path, "a", newline="", encoding="utf-8") as handle:
             csv.writer(handle).writerow(row)
         await asyncio.sleep(period)
@@ -340,6 +498,13 @@ async def run(args: argparse.Namespace) -> None:
              INTERFACE_NAMESPACE_URI, idx)
     LOG.info("browse path: Objects/%d:ServerInterfaces/%d:DemoCell — two namespaces, "
              "indices deliberately unlike PLCSIM's", idx_server_interfaces, idx)
+    LOG.info("address space: %d nodes — %d in opcua-nodes.md §9, %d in §10; the %d the "
+             "bridge must never touch (%s) are served WRITABLE, so its refusal is the "
+             "bridge's own and not this server's",
+             len(nodes), len(INPUTS) + len(OUTPUTS) + len(STATUS) + len(LINK),
+             len(FORKLIFT_HMI) + len(FORKLIFT_INPUTS) + len(FORKLIFT_OUTPUTS)
+             + len(FORKLIFT_STATUS) + len(FORKLIFT_LINK),
+             len(BRIDGE_MUST_NOT_TOUCH), ", ".join(BRIDGE_MUST_NOT_TOUCH))
 
     # SCAFFOLDING: revise every client's requested session timeout into this
     # window, as the S7-1500 does (§3.2). Not a model of the PLC's value.
@@ -378,7 +543,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="OPC UA test double for the S7-1500 (TEST SCAFFOLDING)")
     parser.add_argument("--endpoint", default="opc.tcp://127.0.0.1:4840/amr-agent/celldouble/")
     parser.add_argument("--command-file", default=None,
-                        help="S1 scaffolding: file whose float contents drive ConveyorSpeedCommand")
+                        help="S1 scaffolding: file whose contents drive the Output/ nodes — "
+                             "a bare float for ConveyorSpeedCommand, or Name=value lines for "
+                             "any output node including the three Forklift/Output/*Ref")
     parser.add_argument("--observe-csv", default=None,
                         help="S2 scaffolding: server-side observation log; the path is a "
                              "stem and one file per double session is written")

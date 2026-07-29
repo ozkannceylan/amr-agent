@@ -29,16 +29,27 @@ Per ADR 0005 D1. Every item is a hard boundary, not a preference.
   client, and that direction is never inverted (invariant 4). The bridge never
   listens on a socket, in any configuration — including against the test
   double.
-- **Nodes it is not allowed to write.** Only the `DemoCell/Input/` nodes (seven
-  since `PanelResetPressed`, opcua-nodes.md §9.3) and
-  `DemoCell/Link/BridgeHeartbeat` (opcua-nodes.md §9.1). Every write goes
-  through one helper that rejects anything else; see
+- **Nodes it is not allowed to write.** Only the `Input/` nodes of the signal
+  groups the run configures, plus the single `DemoCell/Link/BridgeHeartbeat`
+  (opcua-nodes.md §9.1, §10.1): 7 + 1 with the cell group alone, 4 + 1 with the
+  forklift group alone, **11 + 1 with both**. The allowlist is **derived** from
+  the configured groups, never a second list maintained beside them. Every write
+  goes through one helper that rejects anything else; see
   `tools/check_write_allowlist.py`.
+- **The HMI's nodes, in either direction.** `DemoCell/Forklift/Hmi/*` and
+  `DemoCell/Forklift/Link/HmiHeartbeat` are neither read nor written, in any
+  configuration (`bridge-design.md` §4.10). They belong to the *other* OPC UA
+  client, the commissioning HMI in `hmi/`. The server would accept those writes
+  — the group is marked writable and the CPU runs with access control disabled —
+  so the refusal has to come from this side, and it does, twice: at the write
+  helper and at the config loader. `Forklift/Link/HmiLinkOk` is the one
+  `Hmi`-named node the bridge may read, and only to log it.
 - **Secrets.** Endpoint credentials, certificates and keys live outside this
   repository and are referenced by absolute path (invariant 13).
 
-Owns: the ROS 2 ↔ OPC UA signal transport for the M3 demonstration cell, its
-configuration, its own liveness heartbeat, and its measurement instrumentation.
+Owns: the ROS 2 ↔ OPC UA signal transport for the M3 demonstration cell **and
+the M4 forklift commissioning cell**, its configuration, its own liveness
+heartbeat, and its measurement instrumentation.
 
 ---
 
@@ -46,31 +57,54 @@ configuration, its own liveness heartbeat, and its measurement instrumentation.
 
 One OS process that is an **OPC UA client** and a **ROS 2 node**, and nothing
 else. Its whole job is to carry each signal of `docs/interfaces/opcua-nodes.md`
-§9.9 from one side to the other, unchanged, and to write its own heartbeat.
+§9.9 and §10.10 — for the **signal groups the run configures** — from one side
+to the other, unchanged, and to write its own heartbeat.
 
 ```
-   Gazebo cell (ROS 2)                          S7-1500 / PLCSIM (OPC UA server)
+   Gazebo plant (ROS 2)                         S7-1500 / PLCSIM (OPC UA server)
             |                                                    ^
-   8 signals, 7 /cell/* topics                                    | client session
+   the CONFIGURED input topics                                    | ONE client session
+   (7 /cell/*, 4 /forklift/*)                                     | for every group
             v                                                    |
    +-------------------------------------------------------------------+
    |  bridge process                                                   |
    |  subscriber callbacks -> latest-value slots -> 50 ms cycle task   |
-   |  cycle: read Output -> publish to cell -> write Inputs -> HB      |
+   |  cycle: verify own HB -> read Outputs -> publish -> write Inputs  |
+   |                                                          -> HB    |
    +-------------------------------------------------------------------+
 ```
+
+**Signal groups (`bridge-design.md` §2.1).** The config declares which groups a
+run carries — `cell` (`opcua-nodes.md` §9) and/or `forklift` (§10) — and the
+union of their slots is that run's *configured signal set*. It is the only set
+any rule counts: the startup rule R3, the write allowlist, the reconnect refresh
+and the rewrite after a server restart all say *every input in the configured
+set*, and none of them names a number. A group absent from the config
+contributes nothing at all: no subscription, no slot, no node resolution, no
+write, no poll, no allowlist entry.
+
+| Configuration | Input slots | Output slots | Diagnostics | Nodes touched | Allowlist |
+|---|---|---|---|---|---|
+| cell only | 7 | 1 | 6 | 15 | 8 |
+| forklift only | 4 | 3 | 5 | **13** | 5 |
+| both | 11 | 4 | 11 | 27 | 12 |
+
+The forklift-only run touches 13 and not 12 because `DemoCell/Link/Bridge­Heartbeat`
+is a §9 node **every** configuration uses: one process, one session, one
+heartbeat, one link verdict.
 
 | File | Contents |
 |---|---|
 | `run_bridge.py` | launcher |
-| `amr_bridge/config.py` | config loading; **rejects unknown keys** so a threshold cannot be smuggled in through configuration |
+| `amr_bridge/config.py` | the signal-group definitions and config loading; **rejects unknown keys** so a threshold cannot be smuggled in through configuration, and rejects a config that names an HMI node |
 | `amr_bridge/slots.py` | the depth-1 latest-value slots — the only buffering that exists, so nothing can be derived from discarded samples |
-| `amr_bridge/ros_side.py` | subscriptions, one publisher, field addressing |
-| `amr_bridge/opcua_side.py` | session, node resolution, type verification, the 50 ms cycle, the write allowlist, reconnect, and the heartbeat read-back that notices a restarted server |
+| `amr_bridge/ros_side.py` | subscriptions, one publisher per output slot, field addressing |
+| `amr_bridge/opcua_side.py` | session, node resolution, type verification, the 50 ms cycle, the derived write allowlist, reconnect, and the heartbeat read-back that notices a restarted server |
 | `amr_bridge/instrumentation.py` | per-event CSV recording (always on), one file per session |
-| `config/bridge.yaml` | endpoint, **both** namespace URIs, BrowseName paths, topic names, cycle period, evidence paths — no thresholds, no tolerances, no timers, and no namespace index |
-| `test_double/` | TEST SCAFFOLDING: an OPC UA server standing in for the S7-1500 |
-| `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check, connect-conformance check, session-lifecycle check, read-only PLC observer (scaffolding) |
+| `config/bridge.yaml` | **the commissioned PLCSIM endpoint, cell group only** — endpoint, **both** namespace URIs, BrowseName paths, topic names, cycle period, evidence paths. No thresholds, no tolerances, no timers, no namespace index |
+| `config/bridge-double-both.yaml`, `config/bridge-double-forklift.yaml` | the same shape against the **test double**, with both groups and with the forklift group alone. The `Forklift/` subtree is a design value until the owner reads it back out of TIA Portal (`opcua-nodes.md` §10.2 step 6), which is why the committed PLCSIM config does not carry it yet |
+| `test_double/` | TEST SCAFFOLDING: an OPC UA server standing in for the S7-1500, serving all 33 nodes |
+| `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check, connect-conformance check, session-lifecycle check, forklift signal-group check, read-only PLC observer (scaffolding) |
 | `EVIDENCE_LATENCY.md`, `EVIDENCE_SIGNAL_LOSS.md`, `EVIDENCE_CONNECT.md`, `EVIDENCE_LIFECYCLE.md`, `evidence/` | dated captures, each qualified by the environment that produced it |
 
 Where the no-logic rule is visible in the code:
@@ -82,15 +116,22 @@ Where the no-logic rule is visible in the code:
 * ROS subscriptions use `KEEP_LAST` depth 1, so the decimation is done by the
   middleware queue rather than by bridge code;
 * every write passes `PlcClient._write`, which raises `WriteNotPermitted` for
-  any node outside the §9.1 allowlist;
-* `inf`/`NaN` range samples are written through unchanged, logged and counted;
+  any node outside the allowlist derived from the configured groups;
+* `ForkliftObstacleInStopZone` is carried **uninverted**, although its `TRUE` is
+  the non-permissive state — the polarity belongs to the vehicle layer at one
+  end and to the PLC at the other, and inverting it in transport would put it in
+  two places (`opcua-nodes.md` §10.5);
+* `inf`/`NaN` samples on any Real are written through unchanged, logged and
+  counted — the PLC tests each Real against its plausibility window and takes
+  the fault in the `ELSE`, and repairing a value here would hide exactly that;
 * the reset contact is carried as a **level**, exactly like the other three:
   no edge detection, no hold timer, no latch and no pre-first-publish default
   anywhere in this process — before `/cell/panel/reset` first publishes, the
   bridge writes the node not at all and it keeps the PLC's own `FALSE` start
   value (R1);
-* nothing is published on `/cell/conveyor/cmd_speed` unless it was read from
-  the server in the same cycle — no default, no replay, no zero on shutdown.
+* nothing is published on an output topic — `/cell/conveyor/cmd_speed` or any of
+  the three `/forklift/cmd/*` — unless it was read from the server in the same
+  cycle: no default, no replay, no zero on shutdown, per slot.
 
 ## How to run it
 
@@ -152,6 +193,17 @@ Options: `--duration <s>` (stop after N seconds; used for measurement runs),
 `--evidence-csv <path>` (override the raw evidence file). Stop it with
 SIGINT/SIGTERM — it closes the session and writes nothing on the way out.
 
+**Which config, and therefore which groups.** `--config` is what selects the
+signal groups; there is no runtime switch and no flag (§2.1 G3). The run states
+its own configured set as its second log line, and the counts there are the ones
+the table above gives:
+
+```
+configured signal set: cell+forklift — cell 7in/1out/6diag (opcua-nodes.md §9),
+forklift 4in/3out/5diag (opcua-nodes.md §10); 11 input slots, 4 output slots,
+11 diagnostics, 27 nodes touched, write allowlist 12 keys
+```
+
 `evidence.csv_path` in the config is **relative to the `bridge/` directory** and
 therefore names no machine; `~` and `$VARS` are expanded and an absolute path is
 honoured as written.
@@ -201,16 +253,31 @@ Both are connection management, and neither invents or withholds a signal
   `WriteNotPermitted` and `TypeMismatch` mean this process is wrong, and a
   reconnect loop would hide them;
 * the bridge **reads its own `BridgeHeartbeat` back** at the top of every cycle.
-  It is the only node outside `Input/` the bridge may write, so a value it did not
-  write means the server restarted underneath a surviving session — a CPU warm
-  restart reinitialising the data block. The per-session write cache is then
-  dropped and every slot holding a real sample is rewritten in the next cycle,
-  because write-on-change otherwise leaves a reverted contact reverted: on
-  2026-07-28 the PLC read open stop circuits for minutes for exactly that reason.
-  The test is an exact inequality against the last value written, not a threshold
-  or a timer, and the value read is applied to nothing. It costs one read per
-  cycle (0.79 ms median against the double) and is recorded as a `read_rt` row so
-  the cost is measurable rather than asserted.
+  It is the only node outside the configured `Input/` sets that the bridge writes
+  at all, and no other client may write it — the HMI's counter is a different
+  node the bridge never touches — so a value the bridge did not write means the
+  server restarted underneath a surviving session, a CPU warm restart
+  reinitialising the data block. The per-session write cache is then dropped and
+  every slot of the **configured set** holding a real sample is rewritten in the
+  next cycle, because write-on-change otherwise leaves a reverted level signal
+  reverted: on 2026-07-28 the PLC read open stop circuits for minutes for exactly
+  that reason. The test is an exact inequality against the last value written,
+  not a threshold or a timer, and the value read is applied to nothing. It costs
+  one read per cycle (0.72 ms median against the double, both groups configured)
+  and is recorded as a `read_rt` row so the cost is measurable rather than
+  asserted.
+
+  **Its residual is bigger than the design states, and is measured.** A revert
+  that lands between that read-back and the same cycle's heartbeat *write* is
+  erased by that write, so the next read-back compares equal and the revert is
+  never noticed — while the level signals stay at their start values.
+  `bridge-design.md` §8.1 states only the one-value-in-65536 case. Measured on
+  2026-07-29: the window is **5.255 ms of a 50.015 ms cycle, ~10 %**, and a
+  masked revert left an open stop circuit standing for 4.0 s under an advancing
+  heartbeat (`EVIDENCE_CONNECT.md` § m4f-06.4). Closing it needs a second
+  witness, which §8.1 rules is an owner's decision, so it is **requested, not
+  patched**; both restart harnesses now trigger reverts until one is caught and
+  report how many were masked.
 
 An outage is written into the evidence file as a `session,resumed` row carrying
 its length, so a 20 Hz capture with a hole in it says so.
@@ -237,10 +304,14 @@ namespaces (`bridge-design.md` §3.1) and both are browsed by URI, never
 hardcoded — then the resolved `browse path: Objects/<n>:ServerInterfaces/
 <m>:DemoCell`, the requested and **granted** session timeout side by side with
 the keep-alive derived from the granted value (§3.2),
-`all node DataTypes match opcua-nodes.md §9`, the publisher-side QoS of every
-subscribed topic (mismatched QoS is silent in ROS 2), and
-`heartbeat withheld: no real sample yet for ...` until every input has carried
-a real cell sample.
+`all <N> node DataTypes match the node model (...)`,
+`session established, <N> nodes resolved for group(s) ...`, the publisher-side
+QoS of every subscribed topic (mismatched QoS is silent in ROS 2), and
+`heartbeat withheld: <k> of <n> configured input(s) carry no real sample yet`
+until every input of the configured set has carried a real plant sample —
+followed by `startup rule R3 satisfied: all <n> input nodes of the configured
+set (...)`. Every count in those lines comes from the configured set; none is a
+literal.
 
 Every one of those lines is re-emitted on every reconnect, because a new session
 re-resolves both indices and every NodeId, and re-reads what the server granted
@@ -262,13 +333,16 @@ never on the same endpoint as PLCSIM Advanced. Details and its limits:
     --observe-csv /tmp/double_observe.csv
 ```
 
-* `--command-file` — writing a float into that file sets
-  `DemoCell/Output/ConveyorSpeedCommand`. This is a human turning a knob
-  through a back door in the double; it is **not** PLC logic and models
-  nothing the PLC does.
-* `--observe-csv` — server-side log of session count, heartbeat and the whole
-  input image, sampled at 5 Hz. This is what "what the PLC sees" means in the
-  evidence files.
+* `--command-file` — a bare float in that file sets
+  `DemoCell/Output/ConveyorSpeedCommand`; `Name=value` lines set any `Output/`
+  node, which is how the three `Forklift/Output/*Ref` setpoints are driven. This
+  is a human turning knobs through a back door in the double; it is **not** PLC
+  logic and models nothing the PLC does.
+* `--observe-csv` — server-side log of session count, the bridge's heartbeat,
+  the whole input image of both groups, the setpoints, and the `Hmi/` group the
+  bridge must never touch, sampled at 5 Hz. This is what "what the PLC sees"
+  means in the evidence files, and the `Hmi` columns are how "never touched" is
+  *observed* rather than asserted.
 * `--echo-input <NodeKey>` — optional wire from one input to
   `ConveyorSpeedCommand`, for the closed-loop L7 interval only. Off by default.
 * `--warm-restart-file <path>` — touching that file reverts **every** node to its
@@ -287,6 +361,15 @@ The double registers the real server's two namespace URIs behind three filler
 namespaces, so its indices (`5` and `6`) differ from PLCSIM's. That is
 deliberate: a bridge that hardcoded an index would fail against one server or
 the other.
+
+It serves **all 33 nodes** — the 15 of `opcua-nodes.md` §9 and the 18 of §10,
+including the six the bridge must never touch, because a node absent from the
+double cannot be proven untouched. The five `Forklift/Hmi/` requests and
+`Forklift/Link/HmiHeartbeat` are served **writable**, exactly as §10.3 marks
+them, so a bridge write to one *would succeed*; `Output/` and `Status/` are
+served read-only, so the server-side half of the two-independent-enforcements
+arrangement is exercised too. Serving the `Hmi/` group is not playing the HMI:
+the double stores those values and runs no operator interface.
 
 Panel contacts have no physics in the cell, so an unattended run needs a
 stand-in for the human at the panel — all four of them, because the heartbeat
@@ -338,15 +421,45 @@ commissioned instance. It drives the bridge's own `PlcClient.run()` with the slo
 filled by the harness rather than by ROS, since all three behaviours sit on the
 OPC UA side of the slots. The recorded run is `EVIDENCE_LIFECYCLE.md`.
 
+Check the forklift signal group — every configured input slot carrying a ROS
+value into its node, every output slot republishing node changes to its topic,
+the field bit carried uninverted both ways, the restart rewrite over the whole
+configured set, and a forklift-only run reaching its heartbeat on four inputs
+(`bridge-design.md` §2.1, §4.7–§4.10, §6.1, §8.1):
+
+```
+export ROS_DOMAIN_ID=<a free one>
+source /opt/ros/jazzy/setup.bash
+"$VENV/bin/python" "$REPO/bridge/tools/check_forklift_slots.py"
+```
+
+It runs **the real bridge** as a child process against its own doubles (ports
+4842 and 4843), publishes the plant's topics from its own ROS 2 node, and reads
+every node back over an independent session. Options: `--soak <s>` (steady-state
+seconds before the restart check, default 20) and `--restart-attempts <n>`. Like
+the lifecycle harness it restarts its server, so it never goes near PLCSIM. The
+recorded run is `EVIDENCE_CONNECT.md` § m4f-06.
+
 ## What the test double does not prove
 
 **The PLC program.** The double runs no standard program: no scan cycle, no
-process image, no interlocks, no cycle-running flag, no reset, no threshold.
-`DemoCell/Status/*` and `BridgeLinkOk` are PLC verdicts and stay at their start
-values for a whole run against the double. Nothing observed against it is
-evidence for `plc/demo-cell/SPEC.md`, and the M3 gate closes against PLCSIM
-Advanced — run on 2026-07-27 and recorded in `EVIDENCE_LATENCY.md` Section B,
-which is also where the two program defects that run found are written down.
+process image, no interlocks, no cycle-running flag, no reset, no threshold —
+and, for the forklift, no teleop routing, no fork-height speed cap, no soft
+travel limits, no obstacle latch, no monitored reset and no HMI watchdog.
+`DemoCell/Status/*`, `BridgeLinkOk`, `Forklift/Status/*` and `Link/HmiLinkOk`
+are PLC verdicts and stay at their start values for a whole run against the
+double. **It is not the HMI either**: it stores the `Hmi/` values, forms no
+request and holds no session of the kind `hmi/` will. Nothing observed against it
+is evidence for `plc/demo-cell/SPEC.md`, for the forklift function block or for
+ADR 0008's operator path, and the M3 gate closed against PLCSIM Advanced — run
+on 2026-07-27 and recorded in `EVIDENCE_LATENCY.md` Section B, which is also
+where the two program defects that run found are written down.
+
+**The commissioned `Forklift/` address space.** The double serves what
+`opcua-nodes.md` §10 asks TIA Portal for. Those values — browse path, folder
+tree, per-tag rights, node count — are design values until the owner reads them
+back out of the tool (§10.2 step 6). A passing run here says the bridge carries
+the documented shape, not that the CPU publishes it.
 
 ## Observing the PLC during a PLCSIM run
 

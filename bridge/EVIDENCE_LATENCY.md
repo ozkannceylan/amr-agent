@@ -2339,6 +2339,25 @@ neither process was shut down cleanly.
    write cache, rewrite every slot with a real sample — is in the code and now in
    this evidence, and the design document does not carry it. It needs a row, and
    the bridge's own log cites "§8.1" for a rule that is not yet there.
+
+   > **SATISFIED, 2026-07-29** (`bridge-design.md` revised by m4f-05, and that
+   > document's §12 item 13 records the resolution). §8.1 now carries *Restart
+   > detection*, *Restart repair* and *Restart residual*; §7.3 gains **case E**;
+   > §2's cycle description gains **step 0**; §4.3 gains row **9r**; and §9.2
+   > gains **RB**. The log line's "§8.1" citation resolves to a rule that exists,
+   > and the test the design words as an exact inequality is what the code does —
+   > "not lower than", because the counter wraps. Marked here by `bridge/`, which
+   > owns this file (m4f-06).
+   >
+   > **One correction is requested back**, from the m4f-06 run: §8.1's *Restart
+   > residual* row states only the one-value-in-65536 case, and the residual is
+   > materially larger. A revert that lands between the cycle's step-0 read-back
+   > and its own step-4 heartbeat write is erased by that write — measured at
+   > **5.255 ms median of a 50.015 ms cycle, ~10 %** — and it was observed
+   > leaving an open stop circuit and an obstacle bit standing for **4.0 s** under
+   > an advancing heartbeat. Evidence and the request:
+   > `EVIDENCE_CONNECT.md` § m4f-06.4 and
+   > `docs/reports/m4f-06-bridge-forklift-slots.md`.
 2. **`plc/demo-cell/SPEC.md`** — §12 open item 7 is satisfied by behaviour (§B3.2)
    and should record it; §6.7's guarantee, which is conditional on a truthful
    input image, can now name the mechanism that makes it so. §11 4.9b's as-run

@@ -1,8 +1,13 @@
-"""amr-agent bridge — Gazebo cell <-> S7-1500 OPC UA server.
+"""amr-agent bridge — Gazebo plant <-> S7-1500 OPC UA server.
 
 One OS process that is an OPC UA *client* (invariant 4) and a ROS 2 node, and
-nothing else. It carries each signal of docs/interfaces/opcua-nodes.md §9.9
+nothing else. It carries each signal of docs/interfaces/opcua-nodes.md §9.9 and
+§10.10 — for the signal groups the run configures (bridge-design.md §2.1) —
 from one side to the other unchanged, and writes its own heartbeat.
+
+It never reads and never writes the HMI's group, DemoCell/Forklift/Hmi/* and
+DemoCell/Forklift/Link/HmiHeartbeat, in any configuration or direction: those
+belong to the other OPC UA client of the same server (bridge-design.md §4.10).
 
 THE NO-LOGIC RULE (docs/interfaces/bridge-design.md §1.1) is the binding
 statement for every module in this package:

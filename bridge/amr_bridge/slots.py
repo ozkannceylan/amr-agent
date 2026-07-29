@@ -81,7 +81,9 @@ class Slot:
 
 
 class SlotSet:
-    """The input slots, one per §9.3 node, addressed by node key."""
+    """The input slots — one per input node of the **configured signal set**
+    (bridge-design.md §2.1), addressed by node key. A group that the config does
+    not declare has no slot here, so it can hold nothing back (G1, R3)."""
 
     def __init__(self, keys: tuple[str, ...]) -> None:
         self._slots = {key: Slot(key) for key in keys}

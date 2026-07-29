@@ -1,0 +1,135 @@
+# bridge configuration — BOTH signal groups, against the TEST DOUBLE.
+#
+# This is the configuration `bridge-design.md` §2.1 calls "both": 11 input
+# slots, 4 output slots, 11 diagnostics, 27 nodes touched, a 12-key write
+# allowlist. It exists because the double serves the whole interface — the 15
+# nodes of `opcua-nodes.md` §9 and the 18 of §10, including the six the bridge
+# never touches (§4.10) — while the commissioned PLCSIM instance does not yet
+# carry the `Forklift/` subtree at all: those values are design values until the
+# owner reads them back out of TIA Portal (§10.2 step 6, §12 item 10).
+#
+# The endpoint below is the double's. It is never PLCSIM's: an owner session may
+# be live on the commissioned instance at any time, and the double must never be
+# started on the same endpoint (§10, operational rule).
+#
+# Everything the committed `bridge.yaml` says about thresholds, timers and
+# tolerances holds here word for word: there are none, and the loader rejects a
+# key for one.
+
+# The CONFIGURED SIGNAL SET (§2.1). Both groups, so every per-signal rule counts
+# their union: R3 waits for 11 inputs, the reconnect refresh and the restart
+# rewrite cover 11, and the derived write allowlist holds 12 keys.
+groups: ["cell", "forklift"]
+
+opcua:
+  # TEST DOUBLE. Never the commissioned endpoint (bridge-design.md §10).
+  endpoint: "opc.tcp://127.0.0.1:4842/amr-agent/celldouble/"
+  namespace_uris:
+    server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
+    interface: "http://DemoCell"
+  security_policy: "none"
+  certificate_path: null
+  private_key_path: null
+  username: null
+  # A request. The double revises it, as the S7-1500 does (§3.2 S1/S2).
+  requested_session_timeout_ms: 10000
+  session_name: "amr-agent-bridge-double-both"
+  reconnect_interval_s: 1.0
+  reconnect_backoff_max_s: 5.0
+
+nodes:
+  interface_path:
+    - namespace: server_interfaces
+      browse_name: "ServerInterfaces"
+    - namespace: interface
+      browse_name: "DemoCell"
+
+  # One heartbeat for the whole process, both groups (§2.1 G5). It is a §9 node
+  # used by every configuration, which is why a forklift-only run touches 13
+  # nodes and not 12.
+  heartbeat:
+    BridgeHeartbeat:               ["Link", "BridgeHeartbeat"]
+
+  groups:
+    cell:
+      inputs:
+        ConveyorBeltPosition:          ["Input", "ConveyorBeltPosition"]
+        ConveyorBeltSpeed:             ["Input", "ConveyorBeltSpeed"]
+        ProductSensorRange:            ["Input", "ProductSensorRange"]
+        PanelStartPressed:             ["Input", "PanelStartPressed"]
+        PanelResetPressed:             ["Input", "PanelResetPressed"]
+        PanelStopCircuitClosed:        ["Input", "PanelStopCircuitClosed"]
+        PanelProcessStopCircuitClosed: ["Input", "PanelProcessStopCircuitClosed"]
+      outputs:
+        ConveyorSpeedCommand:          ["Output", "ConveyorSpeedCommand"]
+      diagnostics:
+        CellCycleRunning:              ["Status", "CellCycleRunning"]
+        CellProcessStopActive:         ["Status", "CellProcessStopActive"]
+        CellResetRequired:             ["Status", "CellResetRequired"]
+        ProductPresentAtSensor:        ["Status", "ProductPresentAtSensor"]
+        ConveyorDriveFault:            ["Status", "ConveyorDriveFault"]
+        BridgeLinkOk:                  ["Link", "BridgeLinkOk"]
+
+    forklift:
+      # WRITABLE by the bridge — the plant's state, opcua-nodes.md §10.5, in
+      # that section's order. `ForkliftObstacleInStopZone` is the one input
+      # whose TRUE is the NON-permissive state; it is carried uninverted, and
+      # its DB start value is TRUE (§10.9).
+      inputs:
+        ForkliftForkHeight:            ["Forklift", "Input", "ForkliftForkHeight"]
+        ForkliftLinearSpeed:           ["Forklift", "Input", "ForkliftLinearSpeed"]
+        ForkliftObstacleInStopZone:    ["Forklift", "Input", "ForkliftObstacleInStopZone"]
+        ForkliftObstacleMinDistance:   ["Forklift", "Input", "ForkliftObstacleMinDistance"]
+      # READ and applied to the plant unchanged (§10.6). Not writable on the
+      # server either: the two enforcements are independent (§10.3).
+      outputs:
+        ForkliftTractionSpeedRef:      ["Forklift", "Output", "ForkliftTractionSpeedRef"]
+        ForkliftSteerAngleRef:         ["Forklift", "Output", "ForkliftSteerAngleRef"]
+        ForkliftForkSpeedRef:          ["Forklift", "Output", "ForkliftForkSpeedRef"]
+      # READ for logging only, applied to nothing and used in no decision
+      # (§4.9). `HmiLinkOk` is the PLC's verdict on the OTHER client's
+      # liveness; the HMI's own counter `Link/HmiHeartbeat` and the five
+      # `Forklift/Hmi/` requests appear nowhere in this file, in either
+      # direction, and the loader rejects a config that names them (§4.10).
+      diagnostics:
+        ForkliftTeleopActive:          ["Forklift", "Status", "ForkliftTeleopActive"]
+        ForkliftObstacleStopActive:    ["Forklift", "Status", "ForkliftObstacleStopActive"]
+        ForkliftSpeedLimitActive:      ["Forklift", "Status", "ForkliftSpeedLimitActive"]
+        ForkliftResetRequired:         ["Forklift", "Status", "ForkliftResetRequired"]
+        HmiLinkOk:                     ["Forklift", "Link", "HmiLinkOk"]
+
+ros:
+  node_name: "plant_plc_bridge"
+  topics:
+    cell:
+      joint_state:   "/cell/conveyor/joint_state"
+      product_scan:  "/cell/product_sensor/scan"
+      panel_start:   "/cell/panel/start"
+      panel_reset:   "/cell/panel/reset"
+      panel_stop:    "/cell/panel/stop"
+      panel_process_stop: "/cell/panel/process_stop"
+      cmd_speed:     "/cell/conveyor/cmd_speed"
+    forklift:
+      # The vehicle layer's contract (opcua-nodes.md §10.10). Every one is
+      # std_msgs/Float64 or std_msgs/Bool, whose payload is the single field
+      # `data`: there is no index to resolve and no array to select from.
+      fork_height:           "/forklift/fork_height"
+      linear_speed:          "/forklift/linear_speed"
+      obstacle_in_stop_zone: "/forklift/obstacle/in_stop_zone"
+      obstacle_min_distance: "/forklift/obstacle/min_distance"
+      cmd_traction_speed:    "/forklift/cmd/traction_speed"
+      cmd_steer_angle:       "/forklift/cmd/steer_angle"
+      cmd_fork_speed:        "/forklift/cmd/fork_speed"
+  joint_name: "belt_joint"
+  analog_reliability: "reliable"
+
+cycle:
+  period_s: 0.05
+  status_poll_period_s: 1.0
+
+evidence:
+  csv_path: "evidence/latency-double-both.csv"
+  flush_interval_s: 1.0
+
+logging:
+  level: "INFO"

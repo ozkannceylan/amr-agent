@@ -5,6 +5,7 @@
 # config key for any of those would be logic wearing a disguise."
 #
 # Everything below is one of:
+#   - the signal groups this run carries (§2.1),
 #   - an address (endpoint, namespace URIs, BrowseName path, topic name),
 #   - a cadence (cycle period — an expectation, not a deadline, §9.2/§12.7),
 #   - housekeeping (reconnect retry interval, log level, evidence paths).
@@ -12,6 +13,25 @@
 # There is deliberately no threshold, no tolerance, no clamp, no scale, no
 # offset, no debounce time and no "hold last value for X ms" key anywhere in
 # this file, and the loader rejects any key it does not know (config.py).
+
+# The CONFIGURED SIGNAL SET (bridge-design.md §2.1). The union of these groups'
+# slots is the only set any rule counts: the startup rule R3, the write
+# allowlist, the reconnect refresh and the rewrite after a detected server
+# restart all say "every input in the configured signal set" and none of them
+# names a number.
+#
+# This file carries the CELL GROUP ALONE, because it addresses the commissioned
+# PLCSIM Advanced instance and the `Forklift/` subtree of opcua-nodes.md §10 is
+# a design value there until the owner reads it back out of TIA Portal (§10.2
+# step 6, bridge-design.md §12 item 10). A run against the test double, which
+# serves both subtrees, uses bridge-double-both.yaml or
+# bridge-double-forklift.yaml beside this file.
+#
+# A group absent from this list contributes nothing: no subscription, no slot,
+# no node resolution, no write, no poll and no entry in the write allowlist
+# (§2.1 G1). It is not a disabled feature that idles — it does not exist in
+# this run, and its node and topic tables are absent below.
+groups: ["cell"]
 
 opcua:
   # The bridge connects OUT to this endpoint. It never listens (invariant 4).
@@ -28,7 +48,9 @@ opcua:
   # appears here, neither is hardcoded, and neither is derived from the other.
   # A URI that is missing on the server is a connect failure, retried per §8.1 —
   # the bridge never scans the namespace array for a likely-looking entry and
-  # never falls back to an index (§3.1 N4).
+  # never falls back to an index (§3.1 N4). The forklift group would add a
+  # LEVEL, not a namespace: `DemoCell/Forklift/…` resolves under the same
+  # interface node (§3.1 N7).
   namespace_uris:
     # Vendor-fixed. The S7-1500 publishes its ServerInterfaces folder here.
     server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
@@ -73,59 +95,69 @@ nodes:
       browse_name: "ServerInterfaces"
     - namespace: interface
       browse_name: "DemoCell"
-  # Everything below is relative to the interface node (§3.1 N1) and lives in
-  # the interface namespace, mirroring opcua-nodes.md §9.2 exactly.
-  # WRITABLE by the bridge — the PLC input image (§9.3).
-  inputs:
-    ConveyorBeltPosition:          ["Input", "ConveyorBeltPosition"]
-    ConveyorBeltSpeed:             ["Input", "ConveyorBeltSpeed"]
-    ProductSensorRange:            ["Input", "ProductSensorRange"]
-    PanelStartPressed:             ["Input", "PanelStartPressed"]
-    # Normally open like PanelStartPressed, unlike the two NC rows below: its
-    # fail state is FALSE (opcua-nodes.md §9.3). The bridge writes it only from
-    # a real publish, so before the first one the node keeps the server's own
-    # FALSE start value — it is never asserted by this process (§6.1 R1).
-    PanelResetPressed:             ["Input", "PanelResetPressed"]
-    PanelStopCircuitClosed:        ["Input", "PanelStopCircuitClosed"]
-    PanelProcessStopCircuitClosed: ["Input", "PanelProcessStopCircuitClosed"]
-  # WRITABLE by the bridge — its own liveness counter (§9.7).
+
+  # ONE heartbeat for the whole process, shared by every configured group
+  # (§2.1 G5, opcua-nodes.md §10.11: no second heartbeat exists). WRITABLE by
+  # the bridge — its own liveness counter (§9.7).
   heartbeat:
     BridgeHeartbeat:               ["Link", "BridgeHeartbeat"]
-  # READ and applied to the cell unchanged (§9.4).
-  output:
-    ConveyorSpeedCommand:          ["Output", "ConveyorSpeedCommand"]
-  # READ for logging only. Applied to nothing, used in no decision (§4.4).
-  diagnostics:
-    CellCycleRunning:              ["Status", "CellCycleRunning"]
-    CellProcessStopActive:         ["Status", "CellProcessStopActive"]
-    CellResetRequired:             ["Status", "CellResetRequired"]
-    ProductPresentAtSensor:        ["Status", "ProductPresentAtSensor"]
-    ConveyorDriveFault:            ["Status", "ConveyorDriveFault"]
-    BridgeLinkOk:                  ["Link", "BridgeLinkOk"]
+
+  # One table per CONFIGURED group. Paths are relative to the interface node
+  # (§3.1 N1) and live in the interface namespace.
+  groups:
+    cell:
+      # WRITABLE by the bridge — the PLC input image (opcua-nodes.md §9.3).
+      inputs:
+        ConveyorBeltPosition:          ["Input", "ConveyorBeltPosition"]
+        ConveyorBeltSpeed:             ["Input", "ConveyorBeltSpeed"]
+        ProductSensorRange:            ["Input", "ProductSensorRange"]
+        PanelStartPressed:             ["Input", "PanelStartPressed"]
+        # Normally open like PanelStartPressed, unlike the two NC rows below: its
+        # fail state is FALSE (opcua-nodes.md §9.3). The bridge writes it only from
+        # a real publish, so before the first one the node keeps the server's own
+        # FALSE start value — it is never asserted by this process (§6.1 R1).
+        PanelResetPressed:             ["Input", "PanelResetPressed"]
+        PanelStopCircuitClosed:        ["Input", "PanelStopCircuitClosed"]
+        PanelProcessStopCircuitClosed: ["Input", "PanelProcessStopCircuitClosed"]
+      # READ and applied to the cell unchanged (§9.4).
+      outputs:
+        ConveyorSpeedCommand:          ["Output", "ConveyorSpeedCommand"]
+      # READ for logging only. Applied to nothing, used in no decision (§4.4).
+      diagnostics:
+        CellCycleRunning:              ["Status", "CellCycleRunning"]
+        CellProcessStopActive:         ["Status", "CellProcessStopActive"]
+        CellResetRequired:             ["Status", "CellResetRequired"]
+        ProductPresentAtSensor:        ["Status", "ProductPresentAtSensor"]
+        ConveyorDriveFault:            ["Status", "ConveyorDriveFault"]
+        BridgeLinkOk:                  ["Link", "BridgeLinkOk"]
 
 ros:
   node_name: "cell_plc_bridge"
-  # Subscriptions (cell → PLC).
+  # One topic table per configured group.
   topics:
-    joint_state:   "/cell/conveyor/joint_state"
-    product_scan:  "/cell/product_sensor/scan"
-    panel_start:   "/cell/panel/start"
-    panel_reset:   "/cell/panel/reset"
-    panel_stop:    "/cell/panel/stop"
-    panel_process_stop: "/cell/panel/process_stop"
-    # Publication (PLC → cell).
-    cmd_speed:     "/cell/conveyor/cmd_speed"
+    cell:
+      # Subscriptions (cell → PLC).
+      joint_state:   "/cell/conveyor/joint_state"
+      product_scan:  "/cell/product_sensor/scan"
+      panel_start:   "/cell/panel/start"
+      panel_reset:   "/cell/panel/reset"
+      panel_stop:    "/cell/panel/stop"
+      panel_process_stop: "/cell/panel/process_stop"
+      # Publication (PLC → cell).
+      cmd_speed:     "/cell/conveyor/cmd_speed"
   # Addressing, not logic (§4.5): the joint whose position/velocity is the
-  # belt encoder, matched by name in every message.
+  # belt encoder, matched by name in every message. Required by the cell group
+  # and rejected by the loader when no configured group needs it.
   joint_name: "belt_joint"
-  # Subscription reliability for the two analog topics, matched to the
+  # Subscription reliability for the Real-valued topics, matched to the
   # publisher (ros_gz_bridge publishes RELIABLE — verified with
   # `ros2 topic info -v`, logged again at every startup).
   analog_reliability: "reliable"     # "reliable" | "best_effort"
 
 cycle:
   # 20 Hz. An interface expectation (opcua-nodes.md §9.2), NOT a deadline and
-  # NOT a control parameter. The bridge is best effort (invariant 9).
+  # NOT a control parameter. The bridge is best effort (invariant 9). One
+  # cadence for the whole process: a group adds slots, never a cadence (§5.1).
   period_s: 0.05
   # Diagnostics are read at a low rate so they stay visibly out of the
   # measured loop (§5).

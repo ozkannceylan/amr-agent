@@ -1,0 +1,90 @@
+# bridge configuration — the FORKLIFT GROUP ALONE, against the TEST DOUBLE.
+#
+# The third configuration `bridge-design.md` §2.1 admits: 4 input slots, 3
+# output slots, 5 diagnostics, **13** nodes touched — twelve of §10's eighteen
+# plus the one shared heartbeat, which is a §9 node used by every configuration
+# — and a 5-key write allowlist.
+#
+# It exists to make G1 and R3 falsifiable rather than merely stated. With this
+# file the bridge subscribes to no `/cell/*` topic at all, resolves no §9 node
+# but the heartbeat, and reaches its heartbeat on FOUR inputs: the rule as first
+# written said "all seven", which would have stalled this run forever waiting
+# for conveyor topics it was never configured to carry (§6.1).
+#
+# The endpoint is the double's, never PLCSIM's (§10, operational rule).
+
+groups: ["forklift"]
+
+opcua:
+  # A different port from bridge-double-both.yaml, so a run that exercises both
+  # configurations one after the other never waits on the first port's TIME_WAIT.
+  endpoint: "opc.tcp://127.0.0.1:4843/amr-agent/celldouble/"
+  namespace_uris:
+    server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
+    interface: "http://DemoCell"
+  security_policy: "none"
+  certificate_path: null
+  private_key_path: null
+  username: null
+  requested_session_timeout_ms: 10000
+  session_name: "amr-agent-bridge-double-forklift"
+  reconnect_interval_s: 1.0
+  reconnect_backoff_max_s: 5.0
+
+nodes:
+  interface_path:
+    - namespace: server_interfaces
+      browse_name: "ServerInterfaces"
+    - namespace: interface
+      browse_name: "DemoCell"
+
+  # The one heartbeat, unchanged and shared: a forklift-only run writes the same
+  # `DemoCell/Link/BridgeHeartbeat` as a cell-only run (§2.1 G5).
+  heartbeat:
+    BridgeHeartbeat:               ["Link", "BridgeHeartbeat"]
+
+  # The cell group is absent from [groups], so it has no table here and
+  # contributes nothing to this run (§2.1 G1).
+  groups:
+    forklift:
+      inputs:
+        ForkliftForkHeight:            ["Forklift", "Input", "ForkliftForkHeight"]
+        ForkliftLinearSpeed:           ["Forklift", "Input", "ForkliftLinearSpeed"]
+        ForkliftObstacleInStopZone:    ["Forklift", "Input", "ForkliftObstacleInStopZone"]
+        ForkliftObstacleMinDistance:   ["Forklift", "Input", "ForkliftObstacleMinDistance"]
+      outputs:
+        ForkliftTractionSpeedRef:      ["Forklift", "Output", "ForkliftTractionSpeedRef"]
+        ForkliftSteerAngleRef:         ["Forklift", "Output", "ForkliftSteerAngleRef"]
+        ForkliftForkSpeedRef:          ["Forklift", "Output", "ForkliftForkSpeedRef"]
+      diagnostics:
+        ForkliftTeleopActive:          ["Forklift", "Status", "ForkliftTeleopActive"]
+        ForkliftObstacleStopActive:    ["Forklift", "Status", "ForkliftObstacleStopActive"]
+        ForkliftSpeedLimitActive:      ["Forklift", "Status", "ForkliftSpeedLimitActive"]
+        ForkliftResetRequired:         ["Forklift", "Status", "ForkliftResetRequired"]
+        HmiLinkOk:                     ["Forklift", "Link", "HmiLinkOk"]
+
+ros:
+  node_name: "forklift_plc_bridge"
+  topics:
+    forklift:
+      fork_height:           "/forklift/fork_height"
+      linear_speed:          "/forklift/linear_speed"
+      obstacle_in_stop_zone: "/forklift/obstacle/in_stop_zone"
+      obstacle_min_distance: "/forklift/obstacle/min_distance"
+      cmd_traction_speed:    "/forklift/cmd/traction_speed"
+      cmd_steer_angle:       "/forklift/cmd/steer_angle"
+      cmd_fork_speed:        "/forklift/cmd/fork_speed"
+  # No `joint_name`: no configured group selects a joint out of a JointState
+  # array, and the loader rejects the key when nothing needs it (§2.1 G1).
+  analog_reliability: "reliable"
+
+cycle:
+  period_s: 0.05
+  status_poll_period_s: 1.0
+
+evidence:
+  csv_path: "evidence/latency-double-forklift.csv"
+  flush_interval_s: 1.0
+
+logging:
+  level: "INFO"

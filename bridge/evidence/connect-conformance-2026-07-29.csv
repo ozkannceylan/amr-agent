@@ -1,0 +1,21 @@
+event,name,clock,t_start_ns,t_end_ns,interval_ns,value,note
+session,session_timeout_ms,-,,,,8000.0,granted; requested 10000 (clamped BELOW the request)
+session,secure_channel_lifetime_ms,-,,,,3600000.0,granted; requested 3600000
+session,keepalive_period_s,-,,,,2.6667,derived from the granted timeout / 3 (§3.2 S3)
+session,namespace_index:server_interfaces,-,,,,5,http://www.siemens.com/simatic-s7-opcua
+session,namespace_index:interface,-,,,,6,http://DemoCell
+session,connect,-,,,,,opc.tcp://127.0.0.1:4845/amr-agent/celldouble/
+session,keepalive,monotonic,,127614155315945,2681366429,,idle session held open; period 2.667s derived from the grant
+session,keepalive,monotonic,,127616823506458,2668190513,,idle session held open; period 2.667s derived from the grant
+session,keepalive,monotonic,,127619490812092,2667305634,,idle session held open; period 2.667s derived from the grant
+session,keepalive,monotonic,,127622158476733,2667664641,,idle session held open; period 2.667s derived from the grant
+session,disconnect,-,,,,,conformance check done
+session,session_timeout_ms,-,,,,8000.0,granted; requested 10000 (clamped BELOW the request)
+session,secure_channel_lifetime_ms,-,,,,3600000.0,granted; requested 3600000
+session,keepalive_period_s,-,,,,2.6667,derived from the granted timeout / 3 (§3.2 S3)
+session,disconnect,-,,,,,conformance probe
+session,session_timeout_ms,-,,,,8000.0,granted; requested 10000 (clamped BELOW the request)
+session,secure_channel_lifetime_ms,-,,,,3600000.0,granted; requested 3600000
+session,keepalive_period_s,-,,,,2.6667,derived from the granted timeout / 3 (§3.2 S3)
+session,namespace_index:server_interfaces,-,,,,5,http://www.siemens.com/simatic-s7-opcua
+session,disconnect,-,,,,,conformance probe

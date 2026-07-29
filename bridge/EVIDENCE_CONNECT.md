@@ -12,6 +12,12 @@ the PLC program, about PLCSIM's timing, or about the network path — see
 "What this does not establish" at the end. `EVIDENCE_LATENCY.md` Section B
 remains the owner-run PLCSIM capture, and it is where this run must be repeated.
 
+> **A second dated capture, m4f-06 (2026-07-29), sits at the end of this file**:
+> the forklift signal group carried both ways, the write allowlist derived from
+> the configured groups, the HMI-group negative test, and the rewrite after a
+> server restart over all eleven configured inputs. The m3-21 capture below is
+> unchanged, and the cell conformance it records was re-run there.
+
 | Item | Value |
 |---|---|
 | Date | **2026-07-27**, 22:00–22:09 local (`/tmp/m321_observe.csv` stamps are UTC) |
@@ -227,3 +233,304 @@ the bridge and silently browse the wrong path:
 4. That `bridge/tools/check_connect_conformance.py` is **not** run against
    PLCSIM: its idle test deliberately stops exercising a session, and
    `bridge-design.md` §10 keeps the double and PLCSIM off the same endpoint.
+
+---
+---
+
+# 2026-07-29 — the forklift signal group against the double (m4f-06)
+
+Dated capture of the **configured signal set** of `bridge-design.md` §2.1 in
+force: the forklift group (`opcua-nodes.md` §10) carried both ways beside the
+cell group, the write allowlist **derived** from the configured groups, the
+`Forklift/Hmi/` group proven untouched against a server that would have accepted
+the write, and the restart rewrite covering every configured input.
+
+**Server: the test double, not a PLC**, exactly as above. Nothing here is
+evidence about the PLC program, about the forklift function block, or about the
+commissioned `Forklift/` subtree — which is a **design value until the owner
+reads it back out of TIA Portal** (`opcua-nodes.md` §10.2 step 6,
+`bridge-design.md` §12 item 10). The bridge was never pointed at PLCSIM in this
+run; both configurations name a loopback endpoint and the harness refuses a
+`192.168.*` one.
+
+| Item | Value |
+|---|---|
+| Date | **2026-07-29**, run started `2026-07-29T05:20:47Z` (log lines are guest local, UTC+2) |
+| Host | WSL2 Ubuntu 24.04, `/mnt/c` checkout, headless |
+| venv | `/home/ozkan/amr-bridge-venv` (`--system-site-packages`), `asyncua 2.0.1` |
+| Isolation | `ROS_DOMAIN_ID=61`; four double endpoints, ports 4842–4846, none of them PLCSIM's |
+| Configs | `bridge/config/bridge-double-both.yaml`, `bridge-double-forklift.yaml`, and `bridge/config/bridge.yaml` **unmodified** for the two cell harnesses |
+| Bridge | the real process, `bridge/run_bridge.py`, started as a child of the harness — nothing stubbed |
+| Plant | `bridge/tools/check_forklift_slots.py`'s own ROS 2 node, publishing the §9.9 and §10.10 topics at 10 Hz. Stimulus, in the standing of `tools/cell_stimulus.py` |
+| Raw evidence | `evidence/latency-2026-07-29-m4f06-double-both-20260729T052049Z-pid54159.csv.gz`, `…-double-forklift-20260729T052122Z-pid54208.csv.gz`, `evidence/bridgelog-2026-07-29-m4f06-*.log.gz`, `evidence/double-observe-2026-07-29-m4f06-*.csv.gz`, `evidence/console-2026-07-29-m4f06.log.gz`, `evidence/connect-conformance-2026-07-29.csv` |
+
+Four runs, in order, each with its own double: the forklift slots harness, the
+write-allowlist check, and the two **existing cell harnesses on the unmodified
+cell config**. Every process had stopped before its capture was archived
+(LESSONS 2026-07-28).
+
+## m4f-06.1 The configured signal set, as the bridge states it at startup
+
+```
+    configured signal set: cell+forklift — cell 7in/1out/6diag (opcua-nodes.md §9), forklift 4in/3out/5diag (opcua-nodes.md §10); 11 input slots, 4 output slots, 11 diagnostics, 27 nodes touched, write allowlist 12 keys
+```
+
+and, for the forklift-only run:
+
+```
+    configured signal set: forklift — forklift 4in/3out/5diag (opcua-nodes.md §10); 4 input slots, 3 output slots, 5 diagnostics, 13 nodes touched, write allowlist 5 keys
+   ok   and the session resolved exactly those 13 — 2026-07-29 07:21:22,162 INFO    bridge.opcua session established, 13 nodes resolved for group(s) forklift
+```
+
+Both match §2.1's table — 15 / 13 / 27 nodes touched — and the 13 includes the
+shared `DemoCell/Link/BridgeHeartbeat`, which is a §9 node every configuration
+uses.
+
+## m4f-06.2 Every input slot carries a ROS value into its node
+
+```
+A. every configured input slot carries a ROS value into its node (§4.1, §4.7)
+   ok   an independent read-only session sees all 11 published values on their nodes — BridgeHeartbeat=13
+   ok   ForkliftForkHeight carried unchanged — 0.8399999737739563
+   ok   ForkliftLinearSpeed carried unchanged — -0.6200000047683716
+   ok   ForkliftObstacleMinDistance carried unchanged — 3.75
+   ok   ForkliftObstacleInStopZone carried unchanged — False
+
+A'. the same slots carry a SECOND value, and the field bit both ways, uninverted (§4.7 row 12)
+   ok   ForkliftForkHeight followed the plant to its second value — 0.10999999940395355 (was 0.84)
+   ok   ForkliftLinearSpeed followed the plant to its second value — 1.3700000047683716 (was -0.62)
+   ok   ForkliftObstacleInStopZone followed the plant to its second value — True (was False)
+   ok   ForkliftObstacleMinDistance followed the plant to its second value — 0.05000000074505806 (was 3.75)
+   ok   publishing TRUE on /forklift/obstacle/in_stop_zone writes TRUE — the non-permissive polarity is NOT inverted in transport — True
+   ok   and publishing FALSE writes FALSE again — a level, not an edge — False
+```
+
+The read-backs are the single-precision neighbours of the published `float64`
+values — `0.84 → 0.8399999737739563` — which is the `float64 → Real` narrowing
+§4.7 permits and the only numeric operation anywhere on the path. The values
+were read over an **independent** OPC UA session, so what is shown is the
+server's own copy, not anything the bridge's session was holding.
+
+## m4f-06.3 Every output slot republishes node changes to its ROS topic
+
+```
+B. every output slot republishes node changes to its ROS topic (§4.2, §4.8)
+   ok   ConveyorSpeedCommand -> /cell/conveyor/cmd_speed = 0.15 (first round) — received 0.15000000596046448
+   ok   ForkliftTractionSpeedRef -> /forklift/cmd/traction_speed = 0.55 (first round) — received 0.550000011920929
+   ok   ForkliftSteerAngleRef -> /forklift/cmd/steer_angle = -0.9 (first round) — received -0.8999999761581421
+   ok   ForkliftForkSpeedRef -> /forklift/cmd/fork_speed = 0.12 (first round) — received 0.11999999731779099
+        all four arrived within 1.3 ms of each other (0.2s after the setpoints were written)
+   ok   ConveyorSpeedCommand -> /cell/conveyor/cmd_speed = -0.05 (second round) — received -0.05000000074505806
+   ok   ForkliftTractionSpeedRef -> /forklift/cmd/traction_speed = -0.25 (second round) — received -0.25
+   ok   ForkliftSteerAngleRef -> /forklift/cmd/steer_angle = 1.05 (second round) — received 1.0499999523162842
+   ok   ForkliftForkSpeedRef -> /forklift/cmd/fork_speed = 0.0 (second round) — received 0.0
+        all four arrived within 1.1 ms of each other (0.1s after the setpoints were written)
+```
+
+The setpoints were written into the double's `Output/` nodes by hand through the
+S1 back door (scaffolding, a human writing a number). `ForkliftForkSpeedRef = 0.0`
+means *hold*, and the bridge translates it into nothing: it publishes `0.0`. The
+"within 1.3 ms" line is the spread of the four arrival timestamps — one cycle
+phase for all four output slots, as §4.8 requires.
+
+## m4f-06.4 A server restart under a surviving session — and a residual larger than §8.1 states
+
+```
+C. a server restart under a surviving session rewrites EVERY configured input (§8.1, §7.3 case E)
+   ok   before the restart the server holds the plant's values
+        S5 warm restart 1: every node back to its start value in place, sessions left up
+        (timed out after 3.0s waiting for the heartbeat read-back to notice the revert)
+        that revert was masked by the bridge's own heartbeat write in the same cycle; triggering another
+        S5 warm restart 2: every node back to its start value in place, sessions left up
+   ok   the bridge detected the restart from its own heartbeat reading back a value it did not write — 101 ms after trigger 2; 1 earlier revert(s) masked (§8.1 restart residual — larger than the design's one-in-65536; see the m4f-06 report)
+   ok   the write cache was invalidated and the image rewritten in one cycle
+        2026-07-29 07:21:17,082 INFO    bridge.opcua input image rewritten after cache invalidation: 11 of 11 configured input nodes (ConveyorBeltPosition, ConveyorBeltSpeed, ProductSensorRange, ForkliftForkHeight, ForkliftLinearSpeed, ForkliftObstacleMinDistance, PanelStartPressed, PanelResetPressed, PanelStopCircuitClosed, PanelProcessStopCircuitClosed, ForkliftObstacleInStopZone)
+   ok   the count in the log is every input of the configured set — log says 11 of 11
+   ok   the rewrite is in the bridge's evidence file as 11/11 — written in one cycle; configured set cell+forklift
+        input_image_rewritten rows in the evidence file: 0/11, 11/11
+   ok   no session was lost, so nothing but the read-back could have noticed (§7.3 case E) — 0 broken-session row(s)
+   ok   an independent session sees the whole image repaired — the two stop circuits and the forklift field bit included — repaired 862 ms after the trigger
+```
+
+**The rewrite count is read out of the bridge's own log line and out of its
+evidence file — `11 of 11`, `11/11` — never computed here** (LESSONS
+2026-07-27). The `0/11` row is the connect-time invalidation: at that instant no
+slot had a real sample yet, and R1 forbids inventing one.
+
+**The residual, measured.** One revert in this run was **masked**: it landed
+between the cycle's step-0 heartbeat read-back and the cycle's own step-4
+heartbeat write, so that write restored the witness and the next read-back
+compared equal. The double's own 5 Hz observation log — the server's view, "what
+the PLC sees" — shows what that costs. Every transition of the two level signals
+in the whole phase, from `evidence/double-observe-2026-07-29-m4f06-both.csv.gz`:
+
+```
+2026-07-29T05:20:49.035+00:00 HB=0   stop=False zone=True     start values, heartbeat not yet running (R3)
+2026-07-29T05:20:50.040+00:00 HB=1   stop=True  zone=False    R3 satisfied; the plant's values are written
+2026-07-29T05:20:50.845+00:00 HB=17  stop=True  zone=True     the field bit driven TRUE by the plant (A')
+2026-07-29T05:20:51.850+00:00 HB=37  stop=True  zone=False    and back to FALSE
+2026-07-29T05:21:13.166+00:00 HB=463 stop=False zone=True     revert 1 — MASKED: the heartbeat keeps advancing
+2026-07-29T05:21:17.179+00:00 HB=544 stop=True  zone=False    revert 2 detected, image rewritten 11/11
+```
+
+For **4.0 s** — 81 heartbeat increments — the server held an open stop circuit
+and an obstacle in the stop field under a heartbeat that never faltered. That is
+§7.3 case E exactly, and it ended only because the harness triggered a second
+revert. On the commissioned cell the PLC would have qualified those inputs as
+attributable, because the predicate §6.2 gives it is the heartbeat.
+
+The window is measurable from the committed CSV — it is the interval from the
+`read_rt BridgeHeartbeat` start to the `L2 BridgeHeartbeat` response, per cycle:
+
+```
+cycles n=558 median 50.015 ms p95 50.704 ms
+masked window (HB read start -> HB write response) n=556 median 5.255 ms p95 7.886 ms max 10.143 ms
+as a fraction of the median cycle: 10.5 %
+```
+
+So roughly **one revert in ten is invisible to the witness**, not one in 65536.
+`bridge-design.md` §8.1's *Restart residual* row states only the
+lands-on-the-same-value case. This is a **requested correction to that row**, not
+a change made here: closing it needs a second witness, and §8.1 itself rules that
+a second witness needs an owner. It is carried in
+`docs/reports/m4f-06-bridge-forklift-slots.md`. Note that it is **not** a
+forklift property: it was reproduced the same morning by the cell-only
+`check_session_lifecycle.py` on the unmodified cell config.
+
+Both harnesses now trigger reverts until one is caught, up to a bound, and report
+how many were masked — a measurement instead of a coin toss.
+
+## m4f-06.5 The HMI group: never touched, against a server that would accept the write
+
+```
+D1. the six nodes of §4.10 never moved on the server
+   ok   Forklift/Hmi/HmiTractionRequest still holds its start value — 0.0
+   ok   Forklift/Hmi/HmiSteerRequest still holds its start value — 0.0
+   ok   Forklift/Hmi/HmiForkRequest still holds its start value — 0.0
+   ok   Forklift/Hmi/HmiTeleopRequest still holds its start value — False
+   ok   Forklift/Hmi/HmiResetRequest still holds its start value — False
+   ok   Forklift/Link/HmiHeartbeat still holds its start value — 0
+   ok   not one of the six appears anywhere in the bridge's log — not written, not read, not logged (§4.10) — none of HmiTractionRequest, HmiSteerRequest, HmiForkRequest, HmiTeleopRequest, HmiResetRequest, HmiHeartbeat
+   ok   while HmiLinkOk IS logged: the PLC's verdict on the other client is a diagnostic the bridge may read, and the distinction is visible in the log
+```
+
+and, from `bridge/tools/check_write_allowlist.py` against a double serving that
+group **writable**:
+
+```
+1. §4.10 — the allowlist is DERIVED from the configured groups
+   ok   cell only: 8 keys = 7 configured Input/ node(s) + the one heartbeat — bridge.yaml: 15 nodes touched
+   ok   forklift only: 5 keys = 4 configured Input/ node(s) + the one heartbeat — bridge-double-forklift.yaml: 13 nodes touched
+   ok   both: 12 keys = 11 configured Input/ node(s) + the one heartbeat — bridge-double-both.yaml: 27 nodes touched
+   ok   with both groups the allowlist holds exactly 12 keys — BridgeHeartbeat, ConveyorBeltPosition, ConveyorBeltSpeed, ForkliftForkHeight, ForkliftLinearSpeed, ForkliftObstacleInStopZone, ForkliftObstacleMinDistance, PanelProcessStopCircuitClosed, PanelResetPressed, PanelStartPressed, PanelStopCircuitClosed, ProductSensorRange
+   ok   the six nodes of §4.10 are in no set at all — not the allowlist, not the read set, not the diagnostics poll — 27 node keys resolved, 27 nodes touched
+
+2. client side — PlcClient._write refuses every key outside the allowlist
+   ok   HmiTractionRequest: WriteNotPermitted — HmiTractionRequest is not in this run's write allowlist
+   …  (16 keys refused: 4 cell Output/Status/Link, 6 forklift Output/Status/Link, the 5 Hmi requests, HmiHeartbeat)
+
+3. §4.10 — the HMI group, against a server that WOULD have accepted the write
+   ok   the server ACCEPTS a write to Forklift/Hmi/HmiTractionRequest from another client — read back 0.41999998688697815; the bridge's refusal is therefore its own
+   …  all five requests and HmiHeartbeat accepted from an independent client, then restored
+
+4. server side — the double refuses a direct write to a read-only node
+   ok   DemoCell/Forklift/Output/ForkliftTractionSpeedRef — BadUserAccessDenied
+   …  10 read-only nodes, both groups, all BadUserAccessDenied
+
+5. §4.10 consequence 4 — the config loader rejects an Hmi node at startup
+   ok   rejected: an Hmi request in a writable position
+   ok   rejected: the HMI's heartbeat in the diagnostics poll
+
+39 checks, 39 passed, 0 failed
+RESULT: PASS
+```
+
+That is the negative test the design asks for: the refusal is the **bridge's**,
+proven against a server that accepts the same write from another client, and it
+is enforced twice — at the write helper and at the config loader.
+
+## m4f-06.6 Figures, as the run printed them
+
+Phase A, both groups, 559 cycles (~28 s of steady state at 20 Hz):
+
+```
+PHASE A figures, from latency-both-20260729T052049Z-pid54159.csv
+        cycle interval R1            50.02 ms (n=558)
+        heartbeat read-back RB       0.72 ms (n=556)
+        per input slot — L2 write round trip:
+          ConveyorBeltPosition           0.42 ms (n=557)
+          ConveyorBeltSpeed              0.36 ms (n=557)
+          ProductSensorRange             0.30 ms (n=557)
+          PanelStartPressed              0.33 ms (n=2)
+          PanelResetPressed              0.29 ms (n=2)
+          PanelStopCircuitClosed         0.37 ms (n=2)
+          PanelProcessStopCircuitClosed  0.31 ms (n=2)
+          ForkliftForkHeight             0.29 ms (n=557)
+          ForkliftLinearSpeed            0.28 ms (n=557)
+          ForkliftObstacleInStopZone     0.26 ms (n=4)
+          ForkliftObstacleMinDistance    0.29 ms (n=557)
+        per output slot — L5 read-response to publish:
+          ConveyorSpeedCommand           0.12 ms (n=559)
+          ForkliftTractionSpeedRef       0.08 ms (n=559)
+          ForkliftSteerAngleRef          0.06 ms (n=559)
+          ForkliftForkSpeedRef           0.06 ms (n=559)
+        R3 samples received/written per slot: ConveyorBeltPosition 278/557, ConveyorBeltSpeed 278/557, ProductSensorRange 278/557, PanelStartPressed 278/2, PanelResetPressed 278/2, PanelStopCircuitClosed 278/2, PanelProcessStopCircuitClosed 278/2, ForkliftForkHeight 278/557, ForkliftLinearSpeed 278/557, ForkliftObstacleInStopZone 278/4, ForkliftObstacleMinDistance 278/557
+        counters: cycles=559, heartbeat_readbacks=556, heartbeat_suppressed_cycles=2, heartbeat_writes=557, inputs_rewritten_after_restart=11, publishes=2236, server_restarts_detected=1
+```
+
+Phase B, forklift only, 223 cycles:
+
+```
+PHASE B figures, from latency-forklift-only-20260729T052122Z-pid54208.csv
+        cycle interval R1            49.98 ms (n=222)
+        heartbeat read-back RB       0.67 ms (n=220)
+        per input slot — L2 write round trip:
+          ForkliftForkHeight             0.41 ms (n=221)
+          ForkliftLinearSpeed            0.34 ms (n=221)
+          ForkliftObstacleInStopZone     0.27 ms (n=1)
+          ForkliftObstacleMinDistance    0.29 ms (n=221)
+        per output slot — L5 read-response to publish:
+          ForkliftTractionSpeedRef       0.12 ms (n=223)
+          ForkliftSteerAngleRef          0.08 ms (n=223)
+          ForkliftForkSpeedRef           0.06 ms (n=223)
+        R3 samples received/written per slot: ForkliftForkHeight 111/221, ForkliftLinearSpeed 111/221, ForkliftObstacleInStopZone 111/1, ForkliftObstacleMinDistance 111/221
+```
+
+Reading R3: the plant published at 10 Hz and the cycle wrote at 20 Hz, so a
+Real's `278/557` is the cyclic rewrite of an unchanged slot — **not** a freshness
+statement (§4.7). A level signal's `278/4` is write-on-change plus the refreshes:
+one at connect, one per commanded change, one after the restart.
+
+## m4f-06.7 The cell harnesses, on the unmodified cell config
+
+Both existing harnesses were re-run against a double, with
+`bridge/config/bridge.yaml` unchanged apart from the `--endpoint` override each
+already accepts:
+
+```
+RUN 3  cell connect conformance
+   ok   all 15 nodes of the configured set resolved through Objects/ServerInterfaces/DemoCell — 15 nodes for group(s) cell
+   ok   the node count matches bridge-design.md §2.1's table for this configuration — cell -> 15
+   ok   the server revised the request, so the two values are distinguishable in this run — requested 10000 ms, granted 8000 ms (below the request)
+   ok   the measured cadence matches the grant-derived period, not the request-derived one — measured 2.669 s; grant-derived 2.667 s; request-derived 3.333 s
+RESULT: PASS
+
+RUN 4  cell session lifecycle
+   ok   every input of the configured set (7/7) was written in ONE cycle, not repaired gradually — 7/7
+   ok   the bridge detected the restart from its own heartbeat reading back a value it did not write — 41 ms after trigger 1; 0 earlier revert(s) masked by the bridge's own heartbeat write in the same cycle
+RESULT: PASS
+```
+
+The cell run still counts **seven** inputs and **15** nodes; the count comes from
+the configured set in both cases and from a literal in neither.
+
+## What this capture does not establish
+
+| Not established here | Why |
+|---|---|
+| The commissioned `Forklift/` subtree | Its browse path, folder tree, per-tag rights and node count are design values until read back out of TIA Portal (`opcua-nodes.md` §10.2 step 6). The double serves what the document asks for, which is not the same thing as what the CPU will publish |
+| Anything about the forklift PLC function block | The double runs no program: `Forklift/Status/*` and `Link/HmiLinkOk` held their start values for the whole run, as they always do against it |
+| Anything about the HMI | Serving the `Hmi/` group is not playing the HMI (`bridge-design.md` §10). The values written in the negative test are scaffolding, and they were restored |
+| Anything about the vehicle layer | The plant here is the harness's own publisher, not `agv/forklift/`. What it proves is that the bridge carries the topics of §10.10, at the types and polarity documented there |
+| PLCSIM timing, the network path, or the PLC's scan | Loopback, in-container, no PLC. `EVIDENCE_LATENCY.md` Section B owns the PLCSIM figures |
+| That a masked revert is rare | The opposite: it is measured at ~10 % of the cycle above, and the fix is not the bridge's to choose (§8.1) |

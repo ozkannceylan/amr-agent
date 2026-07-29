@@ -57,32 +57,36 @@ from typing import Callable, Optional
 
 from asyncua import Client, ua
 
-from .config import (
-    ANALOG_INPUT_KEYS,
-    BOOL_INPUT_KEYS,
-    HEARTBEAT_KEY,
-    INPUT_KEYS,
-    OUTPUT_KEY,
-    WRITE_ALLOWLIST,
-    Config,
-)
+from .config import BOOL, HEARTBEAT_KEY, REAL, Config
 from .instrumentation import Counters, Recorder
 from .slots import SlotSet
 
 LOG = logging.getLogger("bridge.opcua")
 
-_EXPECTED_TYPE = {
-    **{key: ua.VariantType.Float for key in ANALOG_INPUT_KEYS},
-    **{key: ua.VariantType.Boolean for key in BOOL_INPUT_KEYS},
-    HEARTBEAT_KEY: ua.VariantType.UInt16,
-    OUTPUT_KEY: ua.VariantType.Float,
-}
+#: The three value kinds the model carries, and nothing else: a group adds
+#: slots, not kinds (bridge-design.md §2.1 G4, opcua-nodes.md §10.3).
+_KIND_VARIANT = {REAL: ua.VariantType.Float, BOOL: ua.VariantType.Boolean}
 _EXPECTED_DATATYPE_NODEID = {
     ua.VariantType.Float: ua.NodeId(ua.ObjectIds.Float),
     ua.VariantType.Boolean: ua.NodeId(ua.ObjectIds.Boolean),
     ua.VariantType.UInt16: ua.NodeId(ua.ObjectIds.UInt16),
 }
 _DIAGNOSTIC_TYPE_DEFAULT = ua.VariantType.Boolean
+
+
+def expected_types(cfg: Config) -> dict[str, ua.VariantType]:
+    """The documented DataType of every node this run addresses, derived from
+    the configured groups (§2.1 G1) — inputs by their kind, the outputs and the
+    heartbeat by the one type each has, the diagnostics all Boolean."""
+    types: dict[str, ua.VariantType] = {
+        key: _KIND_VARIANT[kind] for key, kind in cfg.input_kinds.items()
+    }
+    types[HEARTBEAT_KEY] = ua.VariantType.UInt16
+    for key in cfg.output_keys:
+        types[key] = ua.VariantType.Float
+    for key in cfg.diagnostic_keys:
+        types[key] = _DIAGNOSTIC_TYPE_DEFAULT
+    return types
 
 #: Error types a broken session was *expected* to raise. This tuple is no longer
 #: the filter — anything raised by an await that touches the session is treated
@@ -149,13 +153,26 @@ class PlcClient:
         slots: SlotSet,
         recorder: Recorder,
         counters: Counters,
-        publish_cmd: Callable[[float], int],
+        publish_output: Callable[[str, float], int],
     ) -> None:
         self._cfg = cfg
         self._slots = slots
         self._recorder = recorder
         self._counters = counters
-        self._publish_cmd = publish_cmd
+        self._publish_output = publish_output
+
+        # The configured signal set (§2.1). Read once, at construction: the set
+        # is fixed at startup by the config and nothing switches a group on or
+        # off while the process runs (G3). Every count below — the allowlist,
+        # R3's "every input", the restart rewrite — comes from here and from
+        # nowhere else, so no rule in this file names a number.
+        self._input_keys = cfg.input_keys
+        self._analog_input_keys = cfg.analog_input_keys
+        self._bool_input_keys = cfg.bool_input_keys
+        self._output_keys = cfg.output_keys
+        self._output_topic_keys = cfg.output_topic_keys
+        self._write_allowlist = cfg.write_allowlist
+        self._expected_types = expected_types(cfg)
 
         self._client: Optional[Client] = None
         self._nodes: dict[str, object] = {}
@@ -261,7 +278,9 @@ class PlcClient:
         self._connected = True
         self._start_keepalive()
         self._recorder.row("session", "connect", clock="-", note=opc["endpoint"])
-        LOG.info("session established, %d nodes resolved", len(self._nodes))
+        LOG.info(
+            "session established, %d nodes resolved for group(s) %s",
+            len(self._nodes), "+".join(self._cfg.groups))
 
     def _read_back_session_parameters(
         self, requested_session_ms: int, requested_channel_ms: float
@@ -344,24 +363,23 @@ class PlcClient:
         never reused across sessions (§3, §8.1). Each element carries the index
         of the namespace *that element* belongs to (§3.1 N3)."""
         self._nodes = {}
-        for key in list(INPUT_KEYS) + [HEARTBEAT_KEY, OUTPUT_KEY] + list(self._cfg.diagnostic_keys):
+        for key in self._expected_types:
             path = [f"{self._ns_index[ns_key]}:{name}" for ns_key, name in self._cfg.browse_path(key)]
             self._nodes[key] = await client.nodes.objects.get_child(path)
         LOG.info("browse path: Objects/%s", "/".join(
             f"{self._ns_index[ns_key]}:{name}" for ns_key, name in self._cfg.interface_path))
 
     async def _verify_types(self) -> None:
-        for key, expected in _EXPECTED_TYPE.items():
+        for key, expected in self._expected_types.items():
             actual = await self._nodes[key].read_data_type()
             if actual != _EXPECTED_DATATYPE_NODEID[expected]:
                 raise TypeMismatch(
                     f"{key}: server DataType {actual} != documented {expected.name}"
                 )
-        for key in self._cfg.diagnostic_keys:
-            actual = await self._nodes[key].read_data_type()
-            if actual != _EXPECTED_DATATYPE_NODEID[_DIAGNOSTIC_TYPE_DEFAULT]:
-                raise TypeMismatch(f"{key}: server DataType {actual} != documented Boolean")
-        LOG.info("all node DataTypes match opcua-nodes.md §9")
+        LOG.info(
+            "all %d node DataTypes match the node model (%s)",
+            len(self._expected_types),
+            ", ".join(group.reference for group in self._cfg.signal_groups))
 
     # ------------------------------------------------------------------ #
     # Keep-alive — connection housekeeping, never a signal gate (§3.2)
@@ -537,11 +555,18 @@ class PlcClient:
     # ------------------------------------------------------------------ #
 
     async def _write(self, key: str, value, variant_type: ua.VariantType) -> tuple[int, int]:
-        if key not in WRITE_ALLOWLIST:
+        if key not in self._write_allowlist:
+            # The allowlist is DERIVED from the configured groups (§4.10,
+            # consequence 1): the `Input/` nodes of each configured group plus
+            # the one shared heartbeat. It is never a second list maintained
+            # beside the config, so it cannot drift from it. A rejection is a
+            # DEFECT SIGNAL naming the rule, not a skipped write to retry.
             raise WriteNotPermitted(
-                f"{key} is not client-writable (opcua-nodes.md §9.1). The bridge "
-                f"writes only the {len(INPUT_KEYS)} DemoCell/Input/ nodes and "
-                "BridgeHeartbeat."
+                f"{key} is not in this run's write allowlist. The bridge writes only "
+                f"the Input/ nodes of the configured group(s) {'+'.join(self._cfg.groups)} "
+                f"and {HEARTBEAT_KEY} — {len(self._write_allowlist)} keys: "
+                f"{sorted(self._write_allowlist)} (bridge-design.md §3, §4.10; "
+                "opcua-nodes.md §9.1, §10.1)."
             )
         node = self._nodes[key]
         start = time.monotonic_ns()
@@ -586,37 +611,46 @@ class PlcClient:
         self._touch()
 
     async def _output_path(self) -> None:
-        node = self._nodes[OUTPUT_KEY]
-        start = time.monotonic_ns()
-        try:
-            value = await node.read_value()
-        except _BRIDGE_DEFECTS:
-            raise
-        except Exception as exc:
-            # THE 2026-07-28 CRASH SITE. A download dropped the session while
-            # this read was in flight; the exception asyncua raised was not one
-            # of the anticipated types and it left the process through `run`.
-            self._counters.read_errors += 1
-            raise self._session_broken(f"read {OUTPUT_KEY}", exc) from exc
-        read_end = time.monotonic_ns()
-        self._recorder.row(
-            "read_rt", OUTPUT_KEY, t_start_ns=start, t_end_ns=read_end,
-            interval_ns=read_end - start, value=value,
-        )
-        # Float -> float64 widening, m/s unchanged. N1: only a value read in
-        # this cycle is published; nothing is replayed or defaulted (§8.3).
-        published_at = self._publish_cmd(float(value))
-        self._recorder.row(
-            "L5", "cmd_speed", t_start_ns=read_end, t_end_ns=published_at,
-            interval_ns=published_at - read_end, value=value,
-        )
+        """Every configured output slot, read and published in the SAME cycle
+        phase, so the process keeps one cadence and one ordering guarantee to
+        hand the PLC (§4.8, §5.1 "one cadence"). A group brings output slots,
+        never a cadence of its own."""
+        for key in self._output_keys:
+            node = self._nodes[key]
+            start = time.monotonic_ns()
+            try:
+                value = await node.read_value()
+            except _BRIDGE_DEFECTS:
+                raise
+            except Exception as exc:
+                # THE 2026-07-28 CRASH SITE. A download dropped the session while
+                # this read was in flight; the exception asyncua raised was not one
+                # of the anticipated types and it left the process through `run`.
+                self._counters.read_errors += 1
+                raise self._session_broken(f"read {key}", exc) from exc
+            read_end = time.monotonic_ns()
+            self._recorder.row(
+                "read_rt", key, t_start_ns=start, t_end_ns=read_end,
+                interval_ns=read_end - start, value=value,
+            )
+            # Float -> float64 widening, unit unchanged. No ramp, no clamp, no
+            # interlock, no zeroing, on any slot. N1: only a value read in this
+            # cycle is published; nothing is replayed or defaulted (§8.3).
+            published_at = self._publish_output(key, float(value))
+            # Per slot, never averaged across slots: a forklift setpoint and a
+            # conveyor setpoint share a cycle, not a meaning (§9.3, "per group").
+            self._recorder.row(
+                "L5", self._output_topic_keys[key], t_start_ns=read_end, t_end_ns=published_at,
+                interval_ns=published_at - read_end, value=value,
+            )
 
     async def _input_path(self, cycle_start: int) -> None:
         rewriting = self._rewrite_pending
         written: list[str] = []
 
-        # Analogs: cyclic write of the slot's latest value (§5).
-        for key in ANALOG_INPUT_KEYS:
+        # Analogs: cyclic write of the slot's latest value (§5). Every Real of
+        # every configured group — the cell's three and the forklift's three.
+        for key in self._analog_input_keys:
             take_ns = time.monotonic_ns()
             sample = self._slots[key].get()
             if sample is None:
@@ -625,10 +659,13 @@ class PlcClient:
             self._record_write(key, sample, cycle_start, take_ns, start, end)
             written.append(key)
 
-        # Contacts: write on change, plus a full refresh whenever the per-session
-        # write cache is empty — after every (re)connect, and after a server
-        # restart was detected under a surviving session (§8.1).
-        for key in BOOL_INPUT_KEYS:
+        # Level signals: write on change, plus a full refresh whenever the
+        # per-session write cache is empty — after every (re)connect, and after a
+        # server restart was detected under a surviving session (§8.1). The four
+        # panel contacts and the forklift's field bit are treated identically;
+        # the field bit's TRUE is the non-permissive state and is carried
+        # uninverted (§4.7 row 12).
+        for key in self._bool_input_keys:
             take_ns = time.monotonic_ns()
             sample = self._slots[key].get()
             if sample is None:
@@ -646,16 +683,19 @@ class PlcClient:
             # because the repair skipped it.
             self._rewrite_pending = False
             self._counters.inputs_rewritten_after_restart += len(written)
-            skipped = [key for key in INPUT_KEYS if key not in written]
+            skipped = [key for key in self._input_keys if key not in written]
             LOG.info(
-                "input image rewritten after cache invalidation: %d of %d nodes (%s)%s",
-                len(written), len(INPUT_KEYS), ", ".join(written),
+                "input image rewritten after cache invalidation: %d of %d configured "
+                "input nodes (%s)%s",
+                len(written), len(self._input_keys), ", ".join(written),
                 f"; no real sample yet for {', '.join(skipped)} (R1)" if skipped else "",
             )
             self._recorder.row(
                 "session", "input_image_rewritten", clock="-",
-                value=f"{len(written)}/{len(INPUT_KEYS)}",
-                note="written in one cycle" + (f"; R1 withheld {','.join(skipped)}" if skipped else ""),
+                value=f"{len(written)}/{len(self._input_keys)}",
+                note="written in one cycle; configured set "
+                     + "+".join(self._cfg.groups)
+                     + (f"; R1 withheld {','.join(skipped)}" if skipped else ""),
             )
 
     def _record_write(
@@ -700,14 +740,19 @@ class PlcClient:
         self._last_write_start[key] = start
 
     async def _heartbeat_path(self) -> None:
-        missing = [key for key in INPUT_KEYS if key not in self._written_this_session]
+        # R3 counts EVERY INPUT IN THE CONFIGURED SIGNAL SET (§6.1) — what the
+        # config declares, not what the interface offers. A cell-only run counts
+        # 7, a forklift-only run 4, both groups 11, and a group that is not
+        # configured contributes no slot and cannot hold the heartbeat back.
+        missing = [key for key in self._input_keys if key not in self._written_this_session]
         if missing:
             self._counters.heartbeat_suppressed_cycles += 1
             if missing != self._last_missing_logged:
                 # Logged when the set changes, not every cycle.
                 LOG.info(
-                    "heartbeat withheld: no real sample yet for %s (startup rule R3)",
-                    ", ".join(missing),
+                    "heartbeat withheld: %d of %d configured input(s) carry no real "
+                    "sample yet — %s (startup rule R3)",
+                    len(missing), len(self._input_keys), ", ".join(missing),
                 )
                 self._last_missing_logged = list(missing)
             return
@@ -715,10 +760,13 @@ class PlcClient:
         if not self._heartbeat_started:
             self._heartbeat_started = True
             LOG.info(
-                "startup rule satisfied: all %d DemoCell/Input nodes carry a real "
-                "cell sample; heartbeat begins advancing at %d",
-                len(INPUT_KEYS), self._heartbeat + 1)
-            self._recorder.row("startup", "heartbeat_start", clock="-", value=self._heartbeat + 1)
+                "startup rule R3 satisfied: all %d input nodes of the configured set "
+                "(%s) carry a real plant sample; heartbeat begins advancing at %d",
+                len(self._input_keys), "+".join(self._cfg.groups), self._heartbeat + 1)
+            self._recorder.row(
+                "startup", "heartbeat_start", clock="-", value=self._heartbeat + 1,
+                note=f"R3 over {len(self._input_keys)} configured input(s): "
+                     + ",".join(self._input_keys))
         self._heartbeat = (self._heartbeat + 1) % 65536
         start, end = await self._write(HEARTBEAT_KEY, self._heartbeat, ua.VariantType.UInt16)
         # What the next cycle's read-back is compared against (§8.1). Recorded
