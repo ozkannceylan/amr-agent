@@ -5,7 +5,8 @@ gate:                M5 (early)
 agent:               plc
 goal:                plc/forklift-safety/SPEC.md specifies the F-program
                      completely enough for the owner to build it in TIA Safety
-                     from the description alone — F-LAD, not SCL.
+                     from the description alone — F-FBD, the language the
+                     owner's running F_Forklift_Safety already uses.
 invariants_touched:  none — the demand forms inside the CPU (invariant 1);
                      the standard program stays independent (invariant 7:
                      the F-program must remain correct if the standard
@@ -24,9 +25,13 @@ done_when:           the spec mirrors the house structure adapted to F: §1
                      program reads; §4 F-runtime group setup click-path
                      (F-monitoring time, safety administration, password
                      handling stated honestly for a simulation context); §5
-                     the two demand latches in F-LAD described
-                     element-by-element (network by network, each contact,
-                     coil and F-block named): EStopDemand from the simulated
+                     the two demand latches in F-FBD described
+                     element-by-element (network by network, each box, input
+                     negation and F-block named), building ON the owner's
+                     existing F_Forklift_Safety [FB2] / Main_Safety_RTG1 [FB1]
+                     / InstF_Forklift_Safety [DB3] rather than replacing them
+                     (the build state is in the scratchpad file the dispatch
+                     names): EStopDemand from the simulated
                      e-stop F-DI (wire-NC/program-NO), ZoneStopDemand from
                      the zone F-DI, both latching, cleared only by the SF-08
                      monitored reset (edge-triggered, refused while the
