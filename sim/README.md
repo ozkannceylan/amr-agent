@@ -19,6 +19,10 @@ sim/
                                     (conveyor, product, photo-eye, panel)
   worlds/CELL_EVIDENCE.md           dated verification record of the cell run
   launch/cell_bringup.launch.py     one-command headless cell bringup + bridge
+  worlds/forklift_arena.sdf         M4 forklift commissioning arena
+                                    (24 x 16 hall, drive aisle, obstacle props)
+  worlds/FORKLIFT_ARENA_EVIDENCE.md dated verification record of the arena run
+  launch/forklift_bringup.launch.py one-command headless arena bringup + spawn
   worlds/warehouse.sdf              warehouse world for the vehicle work, now M5
                                     (walls, racks, DoorGap, ConveyorStation,
                                     ChargerStation)
@@ -26,6 +30,13 @@ sim/
   launch/warehouse_bringup.launch.py  one-command headless bringup
   setup/install.sh                  idempotent environment setup (run as root)
   scenarios/
+    forklift_commissioning.md       M4 gate procedure: the five criteria as
+                                    owner-runnable scenarios, with the evidence
+                                    checklist and the rehearsal record
+    forklift_stimulus.py            the M4 stimuli: hold a control at the HMI,
+                                    move the aisle crate, transcribe /state
+    run_forklift_rehearsal.py       rehearsal harness for the five scenarios
+                                    against the PLC logic double
     tools/make_map.py               deterministic map generator (world -> map)
     maps/map.yaml, map.pgm          occupancy grid of warehouse.sdf (generated)
     config/nav2_params.yaml         Nav2 parameters for the RB-KAIROS bringup
@@ -441,3 +452,163 @@ and is evidenced separately, from WSL, in its Appendix A.
   a command would put process logic in the simulation layer, and the whole
   point of M3 is that the logic lives in the TIA Portal program
   (invariants 5, 6 and 9).
+
+---
+
+# Forklift commissioning arena (M4)
+
+`worlds/forklift_arena.sdf` + `launch/forklift_bringup.launch.py` are the M4
+gate work under ADR 0008: the same PLC-owned loop as M3, now with a
+**teleoperated forklift** as the plant instead of a conveyor. An operator drives
+it from the commissioning HMI and every command passes
+**HMI → PLC standard program → bridge → simulation**, with every state report
+returning the same way.
+
+The M3 cell is **not** embedded here and this arena is not embedded in it.
+Neither world file includes the other; the coupled cell-plus-vehicle scenario is
+roadmap M9 work (AT-07). The vehicle itself lives in `agv/forklift/model.sdf` —
+`sim/` owns worlds, `agv/` owns the vehicle — and the bringup spawns it in.
+
+**Nothing here is a safety device.** The obstacle props are process furniture.
+The forklift's obstacle stop, fork-height speed cap and fork soft travel limits
+are standard-program **process interlocks** implementing no function of
+`docs/safety/SRS.md` and carrying no SIL or PL claim (ADR 0008 D3). The
+protective stop, the e-stop chain and safe torque off are onboard and hardwired
+and appear in no world file, no launch file and no scenario step.
+
+## What is in the arena
+
+```
+            +y            north wall, inner face y = +7.90
+    .........+.................................................
+    .        |  [PalletZone 2.4 x 2.0 marking]                .
+    .        |   [Pallet + LoadBox] at (-7.50, +4.50)         .
+    .        |            [CrateNorth] (-4.50, +4.20)         .
+    . . . . .+. . . . . . . . . . . . . . . . . . . . . . . .  aisle edge y = +2.00
+    .        |                                                .
+    .        |  [spawn (-6.00, 0)] >>>      [AisleCrate]      .
+ ===+========+=============== drive aisle, centreline y = 0 =======> +x
+    .        |                       straddling it at x = 2.00 .
+    . . . . .+. . . . . . . . . . . . . . . . . . . . . . . .  aisle edge y = -2.00
+    .        |     [PillarSouth] (-2.00, -3.20)               .
+    .........+.................................................
+      west wall                                    east wall x = +11.90
+      x = -11.90
+```
+
+A 24.0 × 16.0 m hall, origin at its centre, with 0.60 m perimeter walls so the
+vehicle's scanner terminates on them instead of running out to its range
+maximum. Box and cylinder primitives only, one directional light, no mesh and no
+texture: rendering on the target machine is llvmpipe software rasterisation, and
+adding any of those changes the figures in `worlds/FORKLIFT_ARENA_EVIDENCE.md`.
+
+**`AisleCrate` is the stop-zone prop**, and its placement is arithmetic rather
+than taste. It stands *on* the aisle centreline with its front face square to
+the aisle at `x = 1.55`, so a vehicle driving straight up the aisle meets it head
+on and the scenario repeats without steering. The stop zone is the ±30° sector
+of a scanner whose process stop distance is 1.20 m, so a prop more than
+`1.20 × sin 30° = 0.60` m off the driving line can never be inside both the
+sector and the distance at once. The world file's header carries the full
+derivation.
+
+**What the scanner sees** is decided by height: the scanner sweeps one
+horizontal plane at `z = 0.25` in the vehicle frame, so the walls, `AisleCrate`,
+`PillarSouth`, `CrateNorth` and `LoadBox` return, while the floor markings and
+the `Pallet` deck (topping out at 0.16 m) do not. A pallet the scanner cannot
+see while the load on it can is the real geometry of a low pallet under a
+truck-mounted scanner.
+
+**An empty forward sector is a no-data condition, not a clear path.** The
+scanner's `range_max` is 8.0 m and the hall is 24 m long, so a vehicle in the
+middle of the aisle with nothing ahead of it has *no valid sample in the
+sector* — and the vehicle layer correctly reports that as
+`in_stop_zone = true`, `min_distance = 0.0`, its no-data sentinel, which reads
+at the PLC as a transducer fault. This is the fail-safe polarity working, and it
+is why the obstacle scenario clears the zone by pushing the crate **further up
+the aisle but no further than the scanner can see it** — never out of the sector,
+and never past 8 m from where the vehicle actually stands.
+
+## Running it
+
+The arena needs `gz-sim-sensors-system` with a render engine, because the
+vehicle's scanner is a `gpu_lidar`; this world loads it and gz's stock
+`empty.sdf` does not. Isolate **both** transports — `ROS_DOMAIN_ID` does not
+isolate Gazebo, `GZ_PARTITION` does:
+
+```
+source /opt/ros/jazzy/setup.bash
+export GZ_PARTITION=myrun ROS_DOMAIN_ID=42
+
+ros2 launch sim/launch/forklift_bringup.launch.py
+```
+
+Headless by default. Options: `gui:=true`, `world:=`, `model:=`, `name:=`,
+`x:= y:= z:= yaw:=` (spawn pose, default `-6.00, 0.00, 0.05` facing `+x`, in the
+open west half of the drive aisle with the whole aisle and the crate ahead).
+
+The launch starts the gz server, spawns `agv/forklift/model.sdf` once, and runs
+one `ros_gz_bridge` carrying `/clock`, the three raw joint commands
+(ROS → gz) and the three feedback topics (gz → ROS). It deliberately does
+**not** start the two vehicle nodes, which `agv/forklift/launch/vehicle.launch.py`
+owns; run them against this world directly, which is what the commissioning
+procedure does:
+
+```
+python3 agv/forklift/scripts/forklift_io.py    --config agv/forklift/config.yaml
+python3 agv/forklift/scripts/obstacle_zone.py  --config agv/forklift/config.yaml
+```
+
+It also starts no PLC, no bridge process and no HMI. Those are `plc/`,
+`bridge/` and `hmi/` processes; this launch only puts the plant on the wire.
+
+**Signalling `ros2 launch` does not bring its group down.** Measured repeatedly:
+the launch process exits and `gz sim` and `parameter_bridge` keep running. Check
+with `pgrep -af` and finish each survivor by exact pid.
+
+The dated capture of the arena — thirteen models, seven bridged topics with
+their measured rates, the wiring direction of each, and a scripted traction pulse
+read back on the bridged odometry — is in `worlds/FORKLIFT_ARENA_EVIDENCE.md`.
+
+## The commissioning scenarios
+
+`scenarios/forklift_commissioning.md` is the M4 gate procedure: the five roadmap
+criteria as an owner-runnable sequence, each with its exact process start order
+and isolation values, its operator steps at the HMI, the node, topic and
+watch-table row that prove it, and the artifact to capture. It mirrors the six
+test procedures of `plc/forklift/SPEC.md` §11, which owns them; it restates none
+of them as an alternative and redefines no gate criterion.
+
+Two helpers support it:
+
+```
+# hold a control set at the HMI - the only way to HOLD the momentary reset
+python3 sim/scenarios/forklift_stimulus.py hold --teleop --traction 0.6 --reset --seconds 20
+
+# move the aisle crate, and put it back
+python3 sim/scenarios/forklift_stimulus.py obstacle --to-x 8.0
+python3 sim/scenarios/forklift_stimulus.py obstacle --home
+
+# one line per change, out of the HMI's own /state endpoint
+python3 sim/scenarios/forklift_stimulus.py watch --seconds 60
+```
+
+```
+# the rehearsal harness: all five scenarios against the PLC logic double
+python3 sim/scenarios/run_forklift_rehearsal.py --scenario all
+```
+
+**No `--once` publish appears anywhere in either script.** A single publish exits
+on the first matching subscriber and races every other one. Every stimulus is a
+repeated publish at a stated rate, an HTTP post to the HMI's own endpoint, or a
+gz service call that returns a reply.
+
+`forklift_stimulus.py plant` is the exception that proves the rule: it drives the
+vehicle's raw command topics directly, which **bypasses the PLC entirely** and is
+therefore never gate evidence. It exists to show the machine alive before a
+refusal is blamed on the program, and it must not run during a recorded scenario.
+
+**The gate closes on the owner's PLCSIM Advanced run and its recording.** The
+rehearsal recorded in `forklift_commissioning.md` ran against
+`plc/forklift/double/`, a stand-in on loopback port 4850. It establishes that the
+procedure is executable and that every observable it names is reachable; it
+establishes nothing about the TIA Portal build.
