@@ -586,34 +586,39 @@ Rules, all of them load-bearing:
    provides three signed analogue values and nothing else: sign carries
    direction, magnitude carries rate, `0.0` is stop or hold.
 
-#### The steer setpoint, and a contradiction in the contract document
+#### The steer setpoint — ruled, and the ruling is what is built here
 
-`ForkliftSteerAngleRef` is specified here with **the same mandatory `ELSE` to
-`0.0`** as the other two. `opcua-nodes.md` §10.6 contradicts itself on this
-point, and the contradiction is written out rather than left to be discovered:
+`ForkliftSteerAngleRef` takes **the same mandatory `ELSE` to `0.0`** as the other
+two. This was the one open question in the first revision of this document: an
+earlier `opcua-nodes.md` §10.6 exempted steering in its table row while its own
+gating paragraph required the zero, and this specification implemented the zero
+and raised the contradiction rather than choosing quietly.
 
-| Statement in §10.6 | Reading |
-|---|---|
-| The `ForkliftSteerAngleRef` **table row**: "Steering is **not** gated to zero on a stop: a steer setpoint is a position, and forcing it to centre would move the wheel of a machine that is supposed to be stopping" | Hold the last angle |
-| The **paragraph below the table**: "each of the three setpoints is assigned in exactly one statement … with the interlock-failed branch driving it to `0.0`" | Zero it |
-| §10.8 **P5**: "every **motion** setpoint is driven to `0.0` in the mandatory `ELSE`" | Ambiguous — a steer angle is arguably not a motion setpoint |
+**`opcua-nodes.md` §10.6 now carries the ruling and the exemption is withdrawn**
+(commit `ae93667`, 2026-07-29): *"all three setpoints, the steer angle included,
+take `0.0` in the interlock-failed `ELSE`"*, and the table row is rewritten to
+say the steer angle is "gated to `0.0` by the interlocks of §10.7 **exactly as
+the other two are**". §10.8 P5 is rewritten with it — "every motion setpoint" is
+explicitly *not* the test, because a steer angle is arguably not a motion and
+that reading is what invited the exemption. **The ruling ratifies what this
+document already specified: no statement, constant, tag or start value changed on
+either side.**
 
-**Zero is implemented, on three grounds.** It is what the gating paragraph and
-ADR 0008 D2.3 require in the words they use; it needs no hidden state, whereas a
-hold means carrying an operator demand across a stop, which is the stale state
-CLAUDE.md §9 tells the machine to re-read rather than resume from; and a
-uniform rule across all three outputs is the one that survives being read in a
-hurry.
+The three grounds it decides on are the three this section argued: a hold needs
+stored state and the zero needs none, one rule across three analogue outputs is
+what survives being read in a hurry, and what the exemption was protecting
+against does not occur — all three assignments execute in the same call, so the
+wheel is re-aimed on a machine whose traction setpoint has already gone to `0.0`.
+**The steer joint moves; the machine does not.**
 
-**The consequence, stated so it is not a surprise on the recording: the steered
-wheel returns to centre while the machine is stopping.** It is visible in every
-stop scenario of §11 and it is not a defect.
+**The visible consequence, stated so it is not a surprise on the recording: the
+steered wheel returns to centre while the machine is stopping.** It appears in
+every stop scenario of §11 and it is not a defect.
 
-**If the owner rules the other way**, the change is one branch: declare a static
+**Were it ever ruled back**, the change is one branch: declare a static
 `SteerAngleHold : Real := 0.0`, assign it inside the permissive branch, and put
-`SteerAngleHold` in the `ELSE` instead of `0.0`. Nothing else moves. The
-contradiction in §10.6 is raised for correction in the report for this brief and
-is **not** resolved by this document's choice.
+`SteerAngleHold` in the `ELSE` instead of `0.0`. Nothing else moves, on either
+side — no node, count, access right or start value.
 
 ### 6.5 The fork-height speed cap
 
@@ -998,11 +1003,11 @@ ELSE
     "ForkliftOutput".ForkliftTractionSpeedRef := 0.0;
 END_IF;
 
-// Steering returns to CENTRE on every stop. opcua-nodes.md §10.6's table row
-// argues for holding the last angle while its own gating paragraph and ADR 0008
-// D2.3 require the zero; the zero is implemented and the contradiction is
-// documented in §6.4. To hold instead: declare a static SteerAngleHold : Real,
-// assign it in the THEN branch and put it in the ELSE. One branch, nothing else.
+// Steering returns to CENTRE on every stop. RULED: opcua-nodes.md §10.6 and P5
+// require all three setpoints, the steer angle included, to take 0.0 in the
+// interlock-failed ELSE; the earlier exemption for steering is withdrawn (§6.4).
+// All three assignments run in the same call, so the wheel is re-aimed on a
+// machine whose traction setpoint has already gone to 0.0.
 IF "ForkliftStatus".ForkliftTeleopActive AND #motionPermissive THEN
     "ForkliftOutput".ForkliftSteerAngleRef := LIMIT(MN := -#STEER_ANGLE_MAX,
                                                     IN := "ForkliftHmi".HmiSteerRequest,
@@ -1336,7 +1341,7 @@ the recorded showcase segment for criterion (a).
 | # | Item | Status |
 |---|---|---|
 | 1 | **`TRACTION_SPEED_MAX` is `1.00` m/s, not the `1.50` m/s the brief named.** `opcua-nodes.md` §10.12 item 4 requires `ForkliftLinearSpeed`'s plausibility window to stay at least twice the cap, and the window is ±2.00 m/s. The vehicle layer's own clamp is 1.50 m/s, so the PLC simply never asks for a speed that clamp would touch | If the owner wants 1.50 m/s, the **window is re-derived first** in `opcua-nodes.md` §10.5 (to ±3.00 m/s), and only then does this constant change. Not a change this document may make |
-| 2 | **`opcua-nodes.md` §10.6 contradicts itself on the steer setpoint**: its table row says steering is *not* gated to zero, its own gating paragraph says all three setpoints take `0.0` in the mandatory `ELSE`, and §10.8 P5 says "every *motion* setpoint" | Zero is implemented, with the reasoning and the one-branch alternative in §6.4. **Raised for correction in the interface document**; whichever way it is ruled, one of the two statements there must go |
+| 2 | **The steer setpoint's gating — the one open question this document raised**: an earlier `opcua-nodes.md` §10.6 exempted steering from the zero in its table row while its own gating paragraph required it | **Closed by the ruling of 2026-07-29** (`opcua-nodes.md` §10.6 and §10.8 P5, commit `ae93667`): all three setpoints, the steer angle included, take `0.0` in the interlock-failed `ELSE`, and the exemption row is withdrawn. **The ruling ratifies what §6.4 and §7 already build** — no statement, constant, tag, start value or node moved on either side. The one-branch alternative stays recorded in §6.4 in case it is ever ruled back |
 | 3 | **No `ForkliftDriveFault` node**, so case D — plant stopped, bridge alive, input image looks live — has **no PLC-visible verdict on this plant** (§8 case P). `ForkliftLinearSpeed` is read and qualified but feeds no verdict | Owner decision, then a revision of this document. One status node would carry it; the detection is PLC content and was not briefed (`opcua-nodes.md` §10.12 item 3) |
 | 4 | **There is no start/enable separation**: `HmiTeleopRequest` doubles as the enable and as the post-reset start action, so the operator must release and re-assert it after every reset (§6.7) | Requested of `docs/interfaces/`: an `HmiStartRequest` node in the `Forklift/Hmi/` group, which would let this cell match the M3 cell's two-device separation. Until then the conflation stands and is written out rather than hidden |
 | 5 | **`HMI_STALE_TIME` = 600 ms is derived from the 5 Hz contractual floor, not from a measurement** | Re-derive from the HMI's measured worst-case write period at commissioning if it exceeds 200 ms (`opcua-nodes.md` §10.8 P3). Raise it only with evidence, and never by sharing `HEARTBEAT_STALE_TIME` (P4) |
