@@ -73,6 +73,18 @@ it is in the HMI (ADR 0008 D2.2).
 > onboard safety layer at all** — on real equipment the protective stop and safe
 > torque off would be onboard and hardwired, and they do not exist here.
 >
+> **One clause of that sentence expired, and it is the F-CPU clause.** ADR 0009
+> put the twin on a 1513F-1 PN running an F-runtime group, so from the moment
+> the §13 delta's precondition is met **this CPU does run an F-program**. The
+> other two clauses stand word for word: the three F-inputs are **engineering
+> stand-ins for wiring**, not safety-rated devices, and this plant still has no
+> onboard safety layer of any kind (`plc/forklift-safety/SPEC.md` §1.2 N4, N7).
+> **This boundary statement is unchanged and now carries more weight, not less.**
+> Reading an F-flag and refusing motion is a **process consequence of a demand**,
+> never the safety reaction — this program still has no safety function, no SIL
+> and no PL, and it de-energizes nothing (N1). What §13 adds is one conjunct and
+> four display copies; it adds no safety function to this program.
+>
 > Loss of either client link is a **degraded mode, not a safety event**
 > (invariant 2).
 
@@ -142,6 +154,12 @@ M3 cell learned the hard way (`plc/demo-cell/SPEC.md` §6.1, LESSONS 2026-07-28)
 **No other tag is server-visible.** No timer, latch, edge memory, constant or
 guard is exported (`opcua-nodes.md` §10.11). Exposing them would invite a client
 to act on them.
+
+**The §13 delta adds four server-visible tags and nothing else** — the read-only
+mirrors of `Forklift/Safety/`, in their own data block and their own folder
+(`opcua-nodes.md` §11). The sentence above stays true of the set it is about:
+§10's node set is still exactly these 18, and no timer, latch, edge memory,
+constant, guard or F-internal becomes visible on any path (§13.4).
 
 ### 3.1b The one tag this program reads but does not own
 
@@ -506,8 +524,14 @@ Then:
 | Set | Definition | Used for |
 |---|---|---|
 | `latchPending` | `ObstacleStopLatch` OR `HmiLinkLostLatch` OR `BridgeLinkLostLatch` OR `PlantInputFaultLatch` OR `RequestFaultLatch` | Mirrored to `ForkliftResetRequired`; blocks the enable edge |
-| `MotionPermissive` | `WorldOk` **and** `NOT latchPending` | May the machine move, and may the setpoints pass (§6.4) |
+| `MotionPermissive` | `WorldOk` **and** `NOT latchPending` — **and `safetyDemandClear` once the §13 delta is applied**, which is the delta's one and only new term | May the machine move, and may the setpoints pass (§6.4) |
 | `CauseGone` | `WorldOk` **only** | May a reset clear the latches (§6.7) |
+
+**`CauseGone` does not take the §13 term, and that is a decision rather than an
+omission** (§13.5): the F-layer's demand is cleared by its own monitored reset
+at an F-input no client can reach, and the process reset clears process latches.
+Putting the safety term in `CauseGone` would make a client's reset request wait
+on the F-layer and would change two sets where the contract asks for one.
 
 Why the two differ, and it is the whole reason a reset is possible at all:
 
@@ -830,7 +854,8 @@ declarations, timer instances and the constant block are per §3. Identifiers no
 listed in §3.2 — `#hmiHbChanged`, `#hmiLinkOk`, `#bridgeLinkOk`, `#heightValid`,
 `#speedValid`, `#plantInputsValid`, `#distanceValid`, `#requestsValid`,
 `#forkRaised`, `#speedCap`, `#tractionDemand`, `#forkDemand`, `#raiseBlocked`,
-`#lowerBlocked`, `#forkDemandAllowed`, `#worldOk`, `#motionPermissive`,
+`#lowerBlocked`, `#forkDemandAllowed`, `#safetyDemandClear` (§13), `#worldOk`,
+`#motionPermissive`,
 `#causeGone`, `#latchPending`, `#resetRise`, `#teleopRise` — are **Temp**,
 computed and consumed within one call. Everything in §3.2 is **Static** and must
 survive the scan. `IEC_TIMER` may be declared as `TON_TIME` on an S7-1500; either
@@ -839,6 +864,36 @@ compiles, and every call site below states its `PT` explicitly.
 ```pascal
 // FB_ForkliftTeleop — called from OB30 (20 ms), once, AFTER FB_DemoCellControl.
 // Nowhere else, and never a second instance.
+
+// ---- 0. F-data: the M5-early coupling delta (§13) ------------------------
+// The ONLY place this FB touches F-data, and it only READS it. The F-program
+// owns every value in InstF_Forklift_Safety; this program writes none of them,
+// and writes nothing in SafetyInputStandIn either (plc/forklift-safety/SPEC.md
+// §6.2 S1, S2). Omit this part and part 4's #safetyDemandClear conjunct and
+// what is left is the M4 program of §1-§12, unchanged: that is the whole
+// fallback (§13.7, ADR 0009 D4).
+
+// Four mirrors, four UNCONDITIONAL assignments, on every call, each from ONE
+// F-flag of the same name. The copy derives nothing: no threshold, no
+// combination, no inversion, no filter, no timer (opcua-nodes.md §11.3). A
+// CONDITIONAL mirror write would leave a display reading "clear" after a
+// demand had formed (MR5). Read-only to every client (MR1).
+"ForkliftSafetyMirror".EStopDemand         := "InstF_Forklift_Safety".EStopDemand;
+"ForkliftSafetyMirror".ZoneStopDemand      := "InstF_Forklift_Safety".ZoneStopDemand;
+"ForkliftSafetyMirror".SafetyResetRequired := "InstF_Forklift_Safety".SafetyResetRequired;
+"ForkliftSafetyMirror".SafetyResetFault    := "InstF_Forklift_Safety".SafetyResetFault;
+
+// The one new permissive term, in AFFIRMATIVE form: both demand flags must be
+// readable and read clear before motion is permitted (plc/forklift-safety/
+// SPEC.md §6.1). Taken from the F-DATA, NEVER from the four mirrors above — a
+// consumer never recomputes an owned value, and logic reading a mirror turns a
+// display group into a causal element (invariant 10, opcua-nodes.md §11.3).
+// NEVER write it as NOT "InstF_Forklift_Safety".SafetyResetRequired either:
+// that flag is the F-side OR of the two demands, an aggregate, and a permissive
+// formed from an aggregate cannot say WHICH demand stands (opcua-nodes.md
+// §11.7). This term sets no latch and starts no timer (§13.5).
+#safetyDemandClear := NOT "InstF_Forklift_Safety".EStopDemand
+                  AND NOT "InstF_Forklift_Safety".ZoneStopDemand;
 
 // ---- 1. Link supervision (before anything that reads an input) ------------
 // HMI heartbeat: this FB owns HmiLinkOk.
@@ -935,7 +990,11 @@ END_IF;
                  OR #RequestFaultLatch;
 "ForkliftStatus".ForkliftResetRequired := #latchPending;
 
-#motionPermissive := #worldOk AND NOT #latchPending;   // may the machine MOVE
+// #safetyDemandClear is the §13 delta's ONE new conjunct, and it lands HERE.
+// #causeGone does NOT take it: the process reset stays independent of the
+// F-layer, and the two reset paths never touch (§13.5).
+#motionPermissive := #worldOk AND #safetyDemandClear
+                     AND NOT #latchPending;            // may the machine MOVE
 #causeGone        := #worldOk;                         // may a RESET clear latches
 // Latches are absent from #causeGone on purpose: a latch must not be its own
 // precondition for clearing. The fork soft limits are absent from BOTH: a
@@ -1247,6 +1306,26 @@ slots configured, the commissioning HMI running and connected, the test double
 > requests are modified. That is worth doing once — it demonstrates the refusal —
 > and it is **not** evidence for any criterion below.
 
+> **One further precondition once the §13 delta is applied — and one refusal it
+> explains.** Both stand-in circuits closed and one monitored F-reset completed
+> before T5.1 begins (`plc/forklift-safety/SPEC.md` T6.0.1–T6.0.3), so that
+> `Forklift/Safety/EStopDemand` and `Forklift/Safety/ZoneStopDemand` both read
+> `FALSE`. **Both demands are latched at the first F-cycle of every CPU run by
+> design** — the stand-in circuits carry fail-safe start values
+> (`plc/forklift-safety/SPEC.md` §3.1) — so closing them and resetting once is a
+> step of every run rather than a fault. This is **one precondition line: it
+> changes no step, no pass line and no pass count in this section** (§13.6).
+>
+> **The refusal signature, so nobody hunts a defect that is not there.** With a
+> demand standing, the enable edge is refused and all three refs stay `0.0`
+> **while every process latch is clear and `ForkliftResetRequired` reads
+> `FALSE`** — the one signature in this document that says *read the safety
+> group, not the process latches*. A standing demand is **motion refused, not a
+> defect** (`plc/forklift-safety/SPEC.md` §6.1). The process reset of 5.1.3 is
+> unaffected either way: it tests `CauseGone`, which the delta does not touch
+> (§13.5). **Without the delta applied none of this paragraph applies**, and
+> §11 runs exactly as written below.
+
 ### How the **Pass** lines below are counted
 
 Three rules govern every pass claim in this section. They exist because a count
@@ -1390,7 +1469,7 @@ the recorded showcase segment for criterion (a).
 
 | Item | Owner |
 |---|---|
-| Anything safety-related: F-CPU, F-I/O, PROFIsafe, e-stop chain, any SF of the SRS | `docs/safety/SRS.md`, gate M5. This plant has none of it (§2), and no function here is a safety function (ADR 0008 D3) |
+| Anything safety-related: F-CPU, F-I/O, PROFIsafe, e-stop chain, any SF of the SRS | `docs/safety/SRS.md`, gate M5, and `plc/forklift-safety/SPEC.md` for the twin's F-program. **The F-CPU clause of §2 expired with ADR 0009** and §13 is the standard side's whole share of it: four read-only flags and one permissive conjunct. No function here is a safety function (ADR 0008 D3), and this document still specifies no F-I/O, no PROFIsafe, no F-network and no SF |
 | The commissioning HMI — its technology, its controls, its display, its write cadence | `hmi/`, ADR 0008 D2.6. This document consumes the six HMI-written nodes and the H1–H5 semantics of `opcua-nodes.md` §10.8 and specifies nothing about how they are produced |
 | The bridge's forklift slots, QoS, reconnect and startup rule | `docs/interfaces/bridge-design.md`, which is **M3-scope today** and does not yet describe the forklift path (`opcua-nodes.md` §10.12 item 2) |
 | The plant: geometry, joint limits, kinematics, the lidar's sector and stop distance | `agv/forklift/` and `sim/`. The field verdict is configured in the vehicle layer and reaches the PLC as one bit (§6.2) |
@@ -1414,3 +1493,304 @@ the recorded showcase segment for criterion (a).
 | 8 | **`agv/forklift/README.md` does not exist**, though `opcua-nodes.md` §10.10 cites it as the vehicle layer's topic contract | `agv/` work. The topic names used in §11's stimuli are taken from `agv/forklift/config.yaml` and from `opcua-nodes.md` §10.10, which agree |
 | 9 | **OB30 now carries two function blocks.** The 20 ms period was chosen for one | Measure the OB30 cycle time and the CPU's maximum cycle time after the download (§10 step 9) and record them beside the M4 evidence. If the budget is tight, the decision is a longer OB period for both FBs — never a second OB with a second time base |
 | 10 | **Every value in §3.1, §4.2 and §4.3 is a design value until it is read back out of the tool** — the folder tree, the per-tag rights, the node count, the browse path and the start values | Owner, at commissioning: §10 steps 11 and 12, recorded with their date, in the manner phase 0 recorded the 15 M3 nodes (`opcua-nodes.md` §9.10). No gate criterion may rest on one before then |
+
+---
+
+## 13. The M5-early safety coupling delta (ADR 0009)
+
+**§1–§12 specify the M4 program. This section is the delta applied on top of the
+program that is already built**, so that the teleop permissive learns the
+F-layer's demand and a client can see a copy of it. It is written as an explicit
+**before and after**: applying it in TIA should not require re-reading anything
+above.
+
+| Document | What it fixes for this section |
+|---|---|
+| `plc/forklift-safety/SPEC.md` §6 | **Contract** for what the four F-flags mean, which of them the permissive reads, and the five rules S1–S5 this program obeys. If this section disagrees, that one wins |
+| `docs/interfaces/opcua-nodes.md` §11 | **Contract** for what the nodes are called, which data block holds them, which folder they hang under and who may read them. If this section disagrees, that one wins |
+| `docs/adr/0009-early-cell-scope-safety-on-the-forklift-twin.md` | D3 the coupling architecture, D4 the fallback, D2.2 that nothing early-opened is M4 evidence |
+
+**Three statements this section does not weaken.** Nothing here is a safety
+function and no SIL or PL is claimed (§2). Nothing here closes M5 or any part of
+its criterion (ADR 0009 D2.3, D2.4). Nothing here may be cited as M4 evidence
+(D2.2). What the delta adds is **one conjunct and four display copies**.
+
+### 13.1 The whole delta on one screen
+
+| # | Where | Change |
+|---|---|---|
+| **E1** | §7, new **part 0** | Four unconditional mirror copies into `ForkliftSafetyMirror`, then `#safetyDemandClear` from the two F-side demand flags |
+| **E2** | §7, part 4 | `#motionPermissive` gains **one** conjunct, `#safetyDemandClear` |
+| **E3** | §7 preamble, §6.3 table | `#safetyDemandClear` declared **Temp**; the `MotionPermissive` row states the new term |
+| **E4** | TIA, outside this document | One new global DB `ForkliftSafetyMirror` and one new interface folder `Forklift/Safety/`, per `opcua-nodes.md` §11.3 and §11.5 |
+| **E5** | §11 preconditions | One precondition line and the refusal signature. **No step, no pass line and no count changes** (§13.6) |
+
+**Nothing else in §1–§12 moves.** In particular the three setpoint assignments of
+§6.4 and §7 part 7 are **byte-identical**: each is still one unconditional
+`IF … ELSE` with a mandatory `ELSE` to `0.0`, executed on every OB call as the
+last action of the FB. The delta reaches them the way every other interlock
+does — through `#motionPermissive` — and adds no branch, no hold, no second
+writer and no analogue path (LESSONS 2026-07-27: gating an analogue setpoint
+means an unconditional assignment with a mandatory `ELSE` to zero, and a
+conditional write is not a gate).
+
+**The count, exactly.** §7's fence gains **5 SCL statements** — four mirror
+copies and one permissive term — and **modifies 1**, the `#motionPermissive`
+assignment, which gains one conjunct. Nothing is deleted and nothing moves.
+Under the metric earlier revisions of this document have used — non-blank,
+non-comment lines inside the `pascal` fence — that is **118 → 125 statement
+lines (+7)**: four copy lines, two for the term (it wraps), and one because the
+permissive assignment now occupies two lines instead of one. Counting only
+lines that end in `;` gives **53 → 58 (+5)**, which is the independent check
+that exactly five statements were added. The fence as a whole goes from 218 to
+252 lines including its markers; the other 27 added lines are comments saying
+why. **The fence hash therefore moves — the first revision to move it since the
+fence was written.** Every earlier revision of this document asserted
+byte-identity against it, so a revision that asserts byte-identity from here on
+quotes the new value, not the old one.
+
+### 13.2 Before applying it — four preconditions
+
+1. **The F-program of `plc/forklift-safety/SPEC.md` §5 is built and running**,
+   safety mode activated, F-collective signature recorded (its §2 F1 and F6).
+2. **Its checkpoint F5 has passed**: a standard block can read
+   `"InstF_Forklift_Safety"` and the project compiles. **This delta rests on
+   exactly one checkpoint, and F5 is it.** Applying E1 before F5 passes turns a
+   coupling question into a build failure in the middle of the standard program.
+3. **The data block and the folder exist**: one new global DB
+   `ForkliftSafetyMirror` with the four Bools, *Accessible from HMI/OPC UA* ✔
+   and *Writable from HMI/OPC UA* **✘ on every member**, and a `Safety` folder
+   beside `Hmi`, `Input`, `Output`, `Status` and `Link` under `Forklift`
+   (`opcua-nodes.md` §11.3, §11.5 — that document owns those steps and this one
+   does not restate them).
+4. **§10's build discipline is unchanged**: compile, download, and confirm the
+   block diff circles are solid green before testing; read the in-force timer
+   values from the watch table rather than from interface defaults. An interface
+   change to a DB is exactly the situation those two steps exist for.
+
+### 13.3 The delta, before and after
+
+**E1 — §7 gains a part 0, ahead of link supervision.** Before: nothing. After
+(the text now in §7, repeated here so the delta can be applied without scrolling):
+
+```pascal
+"ForkliftSafetyMirror".EStopDemand         := "InstF_Forklift_Safety".EStopDemand;
+"ForkliftSafetyMirror".ZoneStopDemand      := "InstF_Forklift_Safety".ZoneStopDemand;
+"ForkliftSafetyMirror".SafetyResetRequired := "InstF_Forklift_Safety".SafetyResetRequired;
+"ForkliftSafetyMirror".SafetyResetFault    := "InstF_Forklift_Safety".SafetyResetFault;
+
+#safetyDemandClear := NOT "InstF_Forklift_Safety".EStopDemand
+                  AND NOT "InstF_Forklift_Safety".ZoneStopDemand;
+```
+
+**Why part 0 and not part 8.** Every top-level statement in §7 executes on every
+call, so "unconditional" holds anywhere in the block; the position is chosen for
+two other reasons. It keeps **every** access to F-data in one region, so the
+cross-reference check of §13.4 is a single-region check rather than a hunt. And
+it leaves parts 1–7 numbered as they were, so §6.4's *"as the last action of the
+FB"* and every "part 2c", "part 3", "part 4", "part 6" reference in this
+document stays true without an edit.
+
+**E2 — §7 part 4, one conjunct.** Before:
+
+```pascal
+#motionPermissive := #worldOk AND NOT #latchPending;   // may the machine MOVE
+```
+
+After:
+
+```pascal
+#motionPermissive := #worldOk AND #safetyDemandClear
+                     AND NOT #latchPending;            // may the machine MOVE
+```
+
+`#causeGone := #worldOk;` is **unchanged**, deliberately (§13.5).
+
+**E3 — the declaration.** `#safetyDemandClear` is **Temp**, computed and consumed
+within one call, like every other identifier in §7's preamble list. It is not
+Static, because it is not state: it is a verdict about the value read this call,
+and a Static copy of it would be a second, staler answer to a question the F-DB
+already answers.
+
+**Three forms this term must not take.** Each is a plausible-looking edit that
+changes what is claimed:
+
+| Do not write | Why not |
+|---|---|
+| `NOT "ForkliftSafetyMirror".EStopDemand AND …` — reading the **mirror** | A consumer never recomputes an owned value (invariant 10), and the mirror group's defining property is that no logic reads it. Logic reading a mirror turns a display group into a causal element (`opcua-nodes.md` §11.3, `plc/forklift-safety/SPEC.md` §6.2 S3). The two hold the same value in the same call, which is exactly what makes this edit easy to make and impossible to see |
+| `NOT "InstF_Forklift_Safety".SafetyResetRequired` | It is the F-side **OR** of the two demands. A permissive formed from an aggregate cannot say which demand stands, and this project does not merge safety states into a computed flag used for control (`opcua-nodes.md` §11.7) |
+| A conditional write to a setpoint, or a second `IF` around part 7 | The gate on an analogue setpoint is the unconditional assignment with its mandatory `ELSE` to `0.0`. A second, conditional writer is not a stronger gate, it is a second writer (§6.4 rules 1 and 2) |
+
+### 13.4 What the delta reads, what it writes, and the two checks
+
+| Direction | Tag | Type | Owner | Note |
+|---|---|---|---|---|
+| **read** | `"InstF_Forklift_Safety".EStopDemand` | Bool | F-program | Feeds `#safetyDemandClear` **and** the mirror |
+| **read** | `"InstF_Forklift_Safety".ZoneStopDemand` | Bool | F-program | Same |
+| **read** | `"InstF_Forklift_Safety".SafetyResetRequired` | Bool | F-program | **Mirrored only.** No logic in this program reads it |
+| **read** | `"InstF_Forklift_Safety".SafetyResetFault` | Bool | F-program | **Mirrored only** |
+| **write** | `"ForkliftSafetyMirror".EStopDemand` | Bool | **this FB** | Server-visible, read-only to every client |
+| **write** | `"ForkliftSafetyMirror".ZoneStopDemand` | Bool | **this FB** | Same |
+| **write** | `"ForkliftSafetyMirror".SafetyResetRequired` | Bool | **this FB** | Same |
+| **write** | `"ForkliftSafetyMirror".SafetyResetFault` | Bool | **this FB** | Same |
+
+§4.1's call-structure box lists this FB's **M4** read and write sets; the four
+reads and four writes above are the delta's, and they are the whole of it.
+
+**Two flags are read and never used in logic, and that is the design.**
+`SafetyResetRequired` is the F-side `OR` and `SafetyResetFault` is a diagnosis of
+a device; both belong on a display and neither belongs in a permissive. The
+permissive names its two flags one at a time.
+
+**Three cross-reference checks, run at every build rather than argued once.**
+
+- `InstF_Forklift_Safety` → the standard program shows **reads only**, all of
+  them inside part 0. Any write from a standard block is S1 broken.
+- `ForkliftSafetyMirror` → **writes only from `FB_ForkliftTeleop`**, and **no
+  read from any program at all**. A read is how a display group quietly becomes
+  a causal element, and it is visible here before it is visible anywhere else.
+- `SafetyInputStandIn` → **no access from any standard block**, ever (S2). The
+  standard program must not be able to create or clear a safety demand.
+
+**The browse path is a read-back, never a field to type.** After the folder is
+added, a client that is not the bridge should resolve
+`Objects/ServerInterfaces/DemoCell/Forklift/Safety/EStopDemand` and the three
+beside it, with the namespace URI still reading `http://DemoCell` — derived by
+TIA from the interface name and not editable (ADR 0006). **The counts move and
+stay set-scoped**: `Forklift/` carries six subfolders and 18 + 4 = 22 nodes, the
+`DemoCell` interface carries 15 + 18 + 4 = 37 (`opcua-nodes.md` §11.8), and a
+client browsing from `Objects` sees more than any of those numbers because the
+CPU also auto-publishes every global DB under `DataBlocksGlobal`. §10 steps 7 and
+11 state the **M4** tree and the **M4** count; they are true about the set they
+are about and are not edited by this delta. All of it is a design value until the
+owner reads it back and records it with its date, together with **one refused
+write** — the only evidence there is for a read-only claim (`opcua-nodes.md`
+§11.5 step 6).
+
+### 13.5 What changes in behaviour, and what deliberately does not
+
+**What changes.** While either demand stands: `#motionPermissive` is `FALSE`, so
+`ForkliftTeleopActive` drops in the same OB call, **all three setpoints are
+driven to `0.0` in that same call**, and a fresh enable edge is refused for as
+long as the demand is latched. The operator's request may still read a full
+driving value in Group 1 while Group 3 reads `0.0` — the same one-screen contrast
+§9 already describes, with a different cause.
+
+**The delta sets no latch in this program, and that is a decision.** Three
+reasons, in the order that decides it:
+
+1. **The F-latch already holds the state.** A standard-program copy of it would
+   be a second answer to one question (invariant 10), and it would need its own
+   clearing rule.
+2. **A process latch is cleared by a client write.** `HmiResetRequest` clears the
+   five latches of §6.7; a sixth latch standing for a safety demand would be
+   cleared by a client — the shadow of a safety demand dismissed from the
+   network, which is precisely the reading `TWIN-DEMO-MAP.md` R1 and R4 exist to
+   prevent, whether or not it cleared anything real.
+3. **The contract asks for one term, not a latch** (`plc/forklift-safety/SPEC.md`
+   §6.1).
+
+**No auto-resume, without a latch to enforce it.** When the F-side reset clears
+the demand, `#motionPermissive` returns `TRUE` — the *permission* returns. Motion
+does not: `ForkliftTeleopActive` is set only by `#teleopRise`, and an enable held
+through the stop kept `#TeleopEnableEdgeMemory` `TRUE` throughout, so there is no
+edge. The operator must **release the enable and assert it again** (§6.7), which
+is what `plc/forklift-safety/SPEC.md` T6.3.3 and T6.3.4 read.
+
+**`CauseGone` is untouched, so the two reset paths never touch.** The process
+reset tests `#causeGone`, which stays exactly `#worldOk`. A standing safety
+demand therefore does **not** block a process reset, and a process reset does not
+touch an F-latch. Putting the term in `#worldOk` instead would have changed
+**two** sets rather than one, would have made a client's reset request wait on
+the F-layer, and would have made §11 step 5.1.3 unrunnable before the F-side
+T6.0 — a coupling in the direction the architecture forbids, bought for nothing.
+
+**Where it lands in §5 and §6.3, and why neither needed rewriting.** §6.3 already
+says `ForkliftTeleopActive` is cleared *"by any permissive going false"*, and the
+delta adds a permissive term; §5's state diagram gains no state and no
+transition, because a demand drives `Active → Disabled` with no latch and blocks
+`Disabled → Active` — both already drawn.
+
+**Consistency, stated as §6.1 states it for the HMI group.** The F-runtime group
+runs in its own F-OB. **No logic here requires two F-flags to have come from the
+same F-cycle**, and none may be added. A preemption between two statements of
+part 0 can at worst mix two F-cycles, which delays a refusal by one 20 ms call or
+delays the return of permission by one — never a wrong steady state, and nothing
+in this project times either edge (`plc/forklift-safety/SPEC.md` §1.2 N1).
+
+**The boot window, and why the delta cannot open it.** If OB30 runs before the
+first F-cycle, the F-flags may read `FALSE` for a scan or two and
+`#safetyDemandClear` reads `TRUE`. Nothing can be enabled in that window anyway:
+both link verdicts are `FALSE` from the first scan, both link latches are already
+set, and `ForkliftResetRequired` reads `TRUE` from power-up (§6.1). **Start
+values are the last line, not the first** — the rule §3.1 states, applied to a
+fourth group of tags.
+
+**The mirror is exactly as old as its source.** The four mirror tags carry the
+fail-safe start values `TRUE`, `TRUE`, `TRUE`, `FALSE` (`opcua-nodes.md` §11.6)
+so a display cannot read "clear" before the first copy executes; after that they
+are overwritten every call, and at a CPU start they may show the F-side truth one
+or two calls late. That is a display artefact of at most one OB call, no logic
+reads it, and the instrument that answers *"which F-build is running?"* is the
+F-collective signature, not a mirror.
+
+### 13.6 T5 impact — every scenario checked, counts re-derived
+
+**A standing demand reads as motion refused, never as a defect.** Every T5
+scenario runs with the delta applied provided §11's new precondition is met, and
+none of them raises a demand.
+
+| Scenario | What the delta could have touched | Verdict |
+|---|---|---|
+| **T5.1** teleop drive | 5.1.4's enable, and 5.1.3's process reset | **No change.** 5.1.4 needs `#safetyDemandClear`, which the precondition supplies. 5.1.3 tests `CauseGone`, which the delta does not touch, so the process reset still clears the two link latches even with a demand standing |
+| **T5.2** fork and soft limits | 5.2.7's *"all five latch bits stay `FALSE`"* | **No change.** The delta adds **no sixth latch**; a demand would show in `Forklift/Safety/SafetyResetRequired`, never in `Forklift/Status/ForkliftResetRequired` (`opcua-nodes.md` §11.1's three-values table) |
+| **T5.3** speed cap | The cap arithmetic | **No change.** `#speedCap` and the single multiplication are untouched; the delta reaches the setpoint only through `#motionPermissive` |
+| **T5.4** obstacle latch and monitored reset | Whether the process obstacle stop and the zone demand could be confused | **No change, and the separation is the point.** The lidar latch is still standard-program process logic with a client-writable reset; the zone demand is an F-latch with an F-input reset no client can reach (`plc/forklift-safety/SPEC.md` §1.3) |
+| **T5.5** HMI heartbeat loss | Whether a link loss now involves the F-layer | **No change.** Link loss is a degraded mode, not a safety event (invariant 2). The demand path uses neither client |
+| **T5.6** bridge session loss | The §8 residual | **No change**, and it is worth saying why: the demand forms and holds with the bridge dead, but the **observable** stop still travels over the bridge, so the residual is exactly as §8 records it |
+
+**Counts, re-derived from the step tables rather than carried forward** (rule 1
+of *How the Pass lines below are counted*): T5.1 **9**, T5.2 **8**, T5.3 **5**,
+T5.4 **10**, T5.5 **6**, T5.6 **5** — **43 steps, unchanged**. The delta adds no
+step row to any scenario, so no denominator moves and no pass line is amended.
+
+**One evidence rule, so a single session does not blur two claims.** T5 may be
+run with the delta applied: with no demand standing, every T5 reaction is
+standard-program process logic exactly as §8 and §11 describe, and the F-layer is
+invisible in it. **If a demand is raised during a session, that segment is T6
+evidence and not M4 evidence** — the two are recorded as two sets (ADR 0009 D2.2,
+`plc/forklift-safety/SPEC.md` §6.5).
+
+### 13.7 The fallback, precisely — four states, only one of which is inert
+
+ADR 0009 D4 requires the fallback to need no document edit. It does not: the
+fallback is **state A**, and taking it means not typing the delta.
+
+| State | The world | What happens |
+|---|---|---|
+| **A — the fallback** | Delta **not applied**; F-layer not built | §1–§12 stand as the M4 specification with its criteria unchanged. No DB, no folder, no nodes, no conjunct. **No file changes and no sentence is edited to take it** (ADR 0009 D4, `plc/forklift-safety/SPEC.md` §6.5) |
+| **B — applied, no demand standing** | Delta applied; F-program built; circuits closed; one reset done | `#safetyDemandClear` is `TRUE` and **every M4 behaviour is exactly as §1–§12 specifies**. This is the sense in which the delta is inert, and it is a **runtime** statement |
+| **C — applied, F-program absent** | Delta applied; `InstF_Forklift_Safety` does not exist | **The standard program does not compile.** The delta is *not* compile-inert, and the flags do not "read clear" — there is nothing to read. Abandoning the F-layer after applying the delta costs removing part 0 and one conjunct, which is why E1 and E2 are marked in §7 and why nothing else moved |
+| **D — applied, F-logic not yet built** | `InstF_Forklift_Safety` exists with its four output flags, but no network sets them — `plc/forklift-safety/SPEC.md` D2 applied and D3 not | Both demand flags read `FALSE`, `#safetyDemandClear` reads `TRUE`, and the delta is inert — **and it looks identical to "all clear" from the standard side.** Nothing in this project depends on telling those apart, because the F-flags carry no claim of their own (N1–N5); the instrument that says which F-build is running is the **F-collective signature**, read online against offline before every run |
+
+### 13.8 Watch rows, and what this delta does not specify
+
+**§9's five groups are unchanged.** The four mirror tags are read **beside their
+sources**, in the `Forklift F gate` table of `plc/forklift-safety/SPEC.md` §8,
+because a mirror read on its own tells you nothing: what is worth seeing is the
+copy beside the value it copies, on one screen.
+
+| Tag | Format | Expected |
+|---|---|---|
+| `"ForkliftSafetyMirror".EStopDemand` | Bool | Equals `"InstF_Forklift_Safety".EStopDemand` on every call. A difference that persists past one OB call means part 0 is not executing |
+| `"ForkliftSafetyMirror".ZoneStopDemand` | Bool | Equals its source, same reading |
+| `"ForkliftSafetyMirror".SafetyResetRequired` | Bool | Equals its source. **Not** `ForkliftStatus.ForkliftResetRequired`, which is the process flag and answers a different question |
+| `"ForkliftSafetyMirror".SafetyResetFault` | Bool | Equals its source. Mirrored, and read by no logic here |
+
+| # | Item | Owner |
+|---|---|---|
+| 1 | **The four mirror rows above are not in any watch table this document owns.** They belong beside `plc/forklift-safety/SPEC.md` §8 Group 2, where their sources already are | That document's own brief. Requested, not taken here |
+| 2 | **Everything in §13.4's read-back is a design value until the owner reads it back**: the folder, the four BrowseNames, the per-tag rights, the four start values, the node counts and the refused write with its status code | Owner, at commissioning, recorded with its date (`opcua-nodes.md` §11.5 step 6, §11.8 item 2) |
+| 3 | **Whether the HMI shows any of this** — and the rule that a lamp for the zone demand and a lamp for the lidar process stop are never the same lamp or the same caption | `hmi/`, its own brief (`opcua-nodes.md` §11.4 MR7, §11.8 item 5) |
+| 4 | **The logic double transliterates §7 as it stood before this delta** (`plc/forklift/double/`). Its kernels exercise the M4 permissive; none of them models an F-flag | `plc/forklift/double/`, a later brief if the delta is to be rehearsed the way §7 was |
+| 5 | **§12 open item 9's cycle-time measurement is now taken with the F-runtime group running.** OB30 carries two function blocks and the CPU additionally runs an F-OB, so the OB30 cycle time and the CPU maximum are read *after* the F-program is downloaded, not before | Owner, at the same download. The F-OB's own cycle and monitoring times are `plc/forklift-safety/SPEC.md` §4.3 and its open item 2, not this document's |
