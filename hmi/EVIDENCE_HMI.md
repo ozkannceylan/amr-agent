@@ -938,3 +938,229 @@ timestamped `DataValue` just as readily as the new one throughout the original
 evidence (§A–E) and this re-run — the defect this brief fixes is invisible to
 either double and was found only on first contact with the real CPU. F.1's
 byte-level comparison is what stands in its place until that contact is made.
+
+---
+
+# G. `Forklift/Safety/` mirrors — lamps, banner and graceful degradation
+
+Brief `docs/briefs/m5a-07-hmi-safety-lamps.md`. Adds the four §11 mirror nodes
+to the 5 Hz status poll, a SAFETY DEMAND banner distinct from the process-stop
+banner, four lamps, and one line stating the panel displays and never
+commands. **Zero new writes**: `HMI_WRITABLE_PATHS`, `WRITE_VARIANT` and
+`REQUEST_ORDER` are byte-for-byte unchanged, and `validate_config` still
+refuses any configuration whose write set is not exactly the six existing
+HMI-writable nodes — the four mirrors were never candidates for that set and
+no code path in this file can write them.
+
+**This section's environment differs from A–F, and that is stated rather than
+discovered**: it runs on the machine's native Windows, not WSL2 (LESSONS
+2026-07-27, "evidence is qualified by the environment that produced it").
+Neither `bridge/test_double/plc_test_double.py` nor `plc/forklift/double/
+server.py` serves `Forklift/Safety/` yet — `opcua-nodes.md` §11 landed
+2026-07-29, after both were written — so this section runs against a new,
+minimal double this layer owns, `hmi/tools/safety_mirror_double.py`, imported
+directly by `hmi/tools/check_hmi_safety_mirrors.py` (no subprocess, no IPC:
+the harness holds the mirror `Node` objects and moves them server-side, which
+is the only way to move them at all, since no client — including this
+harness — is ever granted a write on them). Own port throughout: `4860`,
+distinct from every port this project has used before (4840 PLCSIM, 4842–4846
+the bridge's, 4847 and 4850 the earlier HMI evidence's own, 4897/4898 the
+`m4f-07c` re-run). Neither PLCSIM Advanced nor the commissioned CPU was
+contacted.
+
+| Item | Value |
+|---|---|
+| Date | **2026-07-29** |
+| Host | native Windows 11, this checkout, no WSL involved |
+| venv | plain venv (not `--system-site-packages`), created fresh for this section |
+| Python | 3.13.2 |
+| asyncua | `2.0.1`, the version `bridge/requirements.txt` pins |
+| Dependencies | `asyncua` and the standard library; `python -c "import rclpy"` answers `ModuleNotFoundError: No module named 'rclpy'` |
+| Double | `hmi/tools/safety_mirror_double.py`, own port `4860`; a dumb address space, no program, exactly the standing `bridge/test_double/` already documents of itself |
+| Harness | `hmi/tools/check_hmi_safety_mirrors.py --mode absent` and `--mode present` |
+| Config | `hmi/config-safety-mirror-double.yaml`, HTTP port `8093` |
+| Raw evidence | `evidence/harness-2026-07-29-m5a07-absent.log`, `evidence/harness-2026-07-29-m5a07-present.log`, `evidence/hmi-2026-07-29-m5a07-absent.log`, `evidence/hmi-2026-07-29-m5a07-present.log`, `evidence/hmi-cycles-2026-07-29-m5a07-present-20260729T173633Z-pid19556.csv` |
+
+## G.1 Absent — the connection is unaffected, the panel greys
+
+`check_hmi_safety_mirrors.py --mode absent`, **no failures**. The double serves
+the required `Forklift/` groups and nothing under `Safety/` — the fallback
+ADR 0009 D4 describes and §11.6 rules on:
+
+```
+N1. the HMI connects to a server WITHOUT Forklift/Safety/
+   ok   the HMI reached CONNECTED against a server missing the optional group — the group's absence is not a connect failure (§11.6)
+   ok   the panel's own data shows present=false — {'present': False, 'EStopDemand': None, 'ZoneStopDemand': None, 'SafetyResetRequired': None, 'SafetyResetFault': None}
+   ok   and all four mirror values read null, never a guessed value — {'present': False, 'EStopDemand': None, 'ZoneStopDemand': None, 'SafetyResetRequired': None, 'SafetyResetFault': None}
+
+N2. the connection STAYS up — absence is not retried as a failure
+   ok   still CONNECTED 2 s later — no reconnect loop over the missing group
+   ok   and still reports not present — {'present': False, 'EStopDemand': None, 'ZoneStopDemand': None, 'SafetyResetRequired': None, 'SafetyResetFault': None}
+
+N3. the REQUIRED reads are unaffected by the optional group's absence
+   ok   Forklift/Status/ and Forklift/Link/HmiLinkOk still resolved and are on the panel — ['ForkliftTeleopActive', 'HmiLinkOk']
+
+N4. the served page's own markup carries the label even though this server has nothing to show yet
+   ok   the page's markup contains a 'not present' state for the group
+   ok   and the exact required banner label is present in the markup — static markup, not conditioned on any one server
+```
+
+The backend's own log names the mechanism, not just the outcome:
+
+```
+2026-07-29 19:34:06,249 INFO    hmi optional group Forklift/Safety/ not present on this server (The requested operation has no match to return.(BadNoMatch)) — shown to the operator as 'not present', never as a value; this is not a connect failure (opcua-nodes.md §11.6)
+2026-07-29 19:34:06,251 INFO    hmi session established with opc.tcp://127.0.0.1:4860/amr-agent/safetymirrordouble/ — 6 writable node(s), 12 read-only node(s); browse prefix 2:ServerInterfaces/3:DemoCell
+```
+
+`BadNoMatch` is `translate_browsepaths_to_nodeids`'s answer to a browse path
+with no match at the server — confirmed against the installed library before
+being relied on (a throwaway probe server, one resolvable child and one
+absent, read back as `asyncua.ua.uaerrors.BadNoMatch`, a subclass of
+`ua.uaerrors.UaStatusCodeError`). `_connect`'s optional-group loop catches
+exactly that base class, so it also catches whatever more specific subclass a
+different server reports for the same condition. **12 read-only nodes**, not
+16: the four mirrors were never added to `self._read_nodes`, so `_poll_metrics`
+never reads them and never reports a guessed value for them — `present=false`
+and four `None`s, matching the harness's own reading of `/state` above exactly.
+
+Both this run's log and G.2's carry a "the operator's page has gone quiet"
+WARNING once the harness stops actively polling `/state` between checks: this
+harness checks a condition and moves on rather than running the continuous
+`PageBeacon` `check_hmi_teleop_loop.py` and `check_hmi_h6_and_reset.py` use,
+because this section is about §11's read-only mirrors, not about §10.8 H6.
+The five write requests and the enable going to rest is exactly what H6
+promises and is outside this section's scope; nothing above depends on them,
+and the session stays `CONNECTED` with the heartbeat advancing straight
+through it either way.
+
+## G.2 Present — the fail-safe start values, and each lamp moves on its own
+
+`check_hmi_safety_mirrors.py --mode present`, **no failures**. The same
+double, `--with-safety-mirrors`, serving the group at its §11.6 start values:
+
+```
+P0. the HMI connects to a server WITH Forklift/Safety/
+   ok   the HMI reached CONNECTED against a server carrying the group
+
+P1. the fail-safe start values, read back through the HMI's own /state
+   ok   present=true — {'present': True, 'EStopDemand': True, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+   ok   EStopDemand/ZoneStopDemand/SafetyResetRequired all True, SafetyResetFault False — matches opcua-nodes.md §11.6 exactly — {'present': True, 'EStopDemand': True, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+```
+
+and the session log confirms **16** read-only nodes this time — the 12 of
+G.1 plus the four mirrors:
+
+```
+2026-07-29 19:36:33,760 INFO    hmi session established with opc.tcp://127.0.0.1:4860/amr-agent/safetymirrordouble/ — 6 writable node(s), 16 read-only node(s); browse prefix 2:ServerInterfaces/3:DemoCell
+```
+
+Each mirror was then driven through its own transition, independently, with
+the other three left untouched at every step:
+
+```
+P2. SafetyResetFault moves on its own — a device diagnosis, not a demand
+   ok   the HMI's own /state shows SafetyResetFault True — {'present': True, 'EStopDemand': True, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': True}
+   ok   while SafetyResetRequired is UNCHANGED at True — the two lamps are independent nodes, not derived from one another — {'present': True, 'EStopDemand': True, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': True}
+   ok   and back to False — {'present': True, 'EStopDemand': True, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+
+P3. EStopDemand and ZoneStopDemand clear independently
+   ok   EStopDemand False on the HMI's own /state — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+   ok   while ZoneStopDemand and SafetyResetRequired are UNCHANGED — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+   ok   ZoneStopDemand False on the HMI's own /state — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': False, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+   ok   while SafetyResetRequired is STILL True — this client does not derive it from the other two, it only displays the server's own node (invariant 10) — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': False, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+
+P4. the banner tracks SafetyResetRequired ALONE
+   ok   SafetyResetRequired False — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': False, 'SafetyResetRequired': False, 'SafetyResetFault': False}
+   ok   ZoneStopDemand True again while SafetyResetRequired STAYS False — the banner's trigger is not ZoneStopDemand or EStopDemand directly — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': True, 'SafetyResetRequired': False, 'SafetyResetFault': False}
+   ok   SafetyResetRequired True again — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+```
+
+P4's middle step is the one that actually rules out a wrong wiring: raising
+`ZoneStopDemand` back to `True` while `SafetyResetRequired` stays `False`
+would light a banner keyed on `ZoneStopDemand` (or on any combination this
+client formed itself) and would not light one keyed on `SafetyResetRequired`
+alone. It stayed off. `static/index.html`'s `renderSafety` reads
+`safety.SafetyResetRequired` and nothing else to decide the banner — confirmed
+by inspection of the shipped file, not re-typed here.
+
+This double holds no F-program: every value above is exactly what the harness
+wrote server-side, the same honest limitation section A records for
+`bridge/test_double/`'s `Forklift/Status/*`. Nothing here is evidence that a
+real F-runtime group forms `SafetyResetRequired` as the OR of the other two —
+that is `plc/forklift-safety/SPEC.md` §6's claim, unchanged by this section.
+
+## G.3 The served page's own markup
+
+```
+   ok   the exact required banner label is in the served markup
+   ok   a 'displays ... never commands' statement is in the served markup
+   ok   the word 'obstacle' does not appear near the new ZoneStopDemand lamp's own markup (MR7)
+   ok   and 'ZoneStopDemand' does not appear near the EXISTING obstacle lamp's markup either — the separation holds from both sides
+   ok   and the existing process-stop lamp's markup carries no 'safety demand' wording — the two banners share no sentence
+```
+
+The label is `hmi/static/index.html`'s literal text, `F-CPU safety demand
+(mirror, read-only)`, inside a banner (`#safetybanner`) that is a different
+element from the process-stop banner (`#stopbanner`): a different background
+(`--safety: #8b5cf6`, a violet, against the process-stop banner's `--stop`
+red), a different border style (`double` against `solid`), its own heading
+(`SAFETY DEMAND` against `PROCESS STOP LATCHED`), and its own `.fine` line.
+The one-line statement is the safety section's own `.note` paragraph:
+*"This panel displays the F-CPU's mirrored state; it never commands. No write
+from this HMI reaches these nodes, and no client write anywhere can create,
+prevent or clear a safety reaction."* MR7 is checked from both directions
+rather than asserted: the word `obstacle` is absent for 300 characters around
+`ZoneStopDemand`'s own lamp markup, `ZoneStopDemand` is absent for 300
+characters around the *existing* `ForkliftObstacleInStopZone` lamp's, and
+`safety demand` is absent near `ForkliftObstacleStopActive`'s — three
+independent checks for the one rule MR7 states (`TWIN-DEMO-MAP.md` R4;
+`plc/forklift-safety/SPEC.md` §1.3).
+
+## G.4 A client write against the four is refused, on this double too
+
+```
+P5. a client write against the four is refused (§11.4 MR1), on this double too
+   ok   a client write against Forklift/Safety/EStopDemand was refused — BadUserAccessDenied: User does not have permission to perform the requested operation.(BadUserAccessDenied) — this double keeps §11.4 MR1 even though it is only test scaffolding
+```
+
+`safety_mirror_double.py` never calls `set_writable(True)` on any of the four
+— the same per-tag mechanism `plc/forklift/double/server.py` uses for
+`Forklift/Output/*` and `Forklift/Status/*` — so a defect that tried to write
+one is refused by this double exactly as §11.3's DB table says a real server
+refuses it. This is not evidence about the commissioned CPU's access rights,
+which remain a design value until read back out of the tool (§11.5 step 6);
+it is evidence that this brief's own instrument does not misrepresent the
+group it is standing in for.
+
+## G.5 Per-cycle figures, present-mode run
+
+```
+hmi-cycles-2026-07-29-m5a07-present-20260729T173633Z-pid19556.csv
+  cycles n=41  write RTT median 1.477 ms  p95 2.237 ms  max 2.511 ms
+  cycle period median 94.40 ms  p95 109.42 ms  max 115.40 ms
+  heartbeat 1 -> 41, distinct consecutive changes 40 of 40 intervals
+```
+
+40 of 40 — the write cycle and the heartbeat ran exactly as they do without
+this section's changes; the §11 poll adds no timer of its own and none is
+visible here. **On Windows, `subprocess.Popen.terminate()` calls
+`TerminateProcess()`, which the target process cannot catch** — unlike WSL2's
+POSIX `SIGTERM`, which `hmi_server.py`'s signal handler intercepts and answers
+with §10.8 H5's clean-shutdown line. Neither run in this section exercises
+that path or the final evidence flush it triggers; the harness instead waits
+2.5 s — one `Evidence.row()` flush period — before stopping the process, so
+the CSV above is real per-cycle data written by the ordinary periodic flush,
+never by clean shutdown. Nothing about H5 is exercised or claimed by this
+section, and `hmi_server.py` is unchanged by this finding — it is recorded
+here because it is the first time this layer's evidence has been produced
+outside WSL2 (LESSONS 2026-07-27).
+
+## G.6 What is deliberately not shown here
+
+| Not shown | Why |
+|---|---|
+| A live-browser, DOM-rendered confirmation of the grey "not present" styling or the violet banner's visual distinctiveness | Verified two other ways instead: the data contract (`/state`'s `safety` section, G.1–G.2) and the served markup (G.3) — no browser automation was available to this session, the same gap section C/D record for the held reset |
+| Anything about the commissioned S7-1500 or PLCSIM Advanced | Neither was contacted; both harness modes refuse a non-loopback `--hmi` outright and `hmi/config.yaml` was not run |
+| A real F-runtime group forming `SafetyResetRequired` as the OR of the other two | `safety_mirror_double.py` holds no F-program; every mirror value in G.2 is exactly what the harness wrote. That claim is `plc/forklift-safety/SPEC.md` §6's, verified against the F-runtime group directly, not through this HMI |
+| §10.8 H5's clean-shutdown path, on this platform | See G.5 — this section's own subprocess stops are hard kills, not caught signals; both the absent- and present-mode HMI logs end without a "shutting down cleanly" line |
+| Whether the auto-published `DataBlocksGlobal` path also refuses a write for this group | §11.4's caveat and §9.8's open item; unrelated to this double, which has no such path at all |

@@ -117,5 +117,17 @@ nodes:
     ForkliftResetRequired:       ["Forklift", "Status", "ForkliftResetRequired"]
     HmiLinkOk:                   ["Forklift", "Link",   "HmiLinkOk"]
 
+    # `Forklift/Safety/` — opcua-nodes.md §11.2. Four read-only F-CPU mirrors,
+    # display diagnostics only (§11.3): this client forms no verdict from them
+    # and writes none of them. OPTIONAL, in code (`OPTIONAL_READ_FOLDERS`): a
+    # server that does not carry this group is not a connect failure, and the
+    # page shows the group as "not present" rather than guessing a value
+    # (§11.6). That matters here specifically, because the live commissioned
+    # CPU does not carry this group yet.
+    EStopDemand:                 ["Forklift", "Safety",  "EStopDemand"]
+    ZoneStopDemand:              ["Forklift", "Safety",  "ZoneStopDemand"]
+    SafetyResetRequired:         ["Forklift", "Safety",  "SafetyResetRequired"]
+    SafetyResetFault:            ["Forklift", "Safety",  "SafetyResetFault"]
+
 logging:
   level: "INFO"

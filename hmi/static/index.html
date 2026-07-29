@@ -39,6 +39,7 @@
     --warn:      #e5a50a;
     --stop:      #e0403f;
     --live:      #37b6ff;
+    --safety:    #8b5cf6;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -81,6 +82,31 @@
   #stopbanner h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: .04em; }
   #stopbanner p  { margin: 0; font-size: 15px; font-weight: 600; }
   #stopbanner .fine { font-weight: 400; opacity: .85; margin-top: 6px; }
+
+  /* ---- F-CPU safety demand banner — a MIRROR, visually distinct from the
+     process-stop banner above: different hue, different border style, its own
+     heading, never toggled by the same field (opcua-nodes.md section 11) ---- */
+  #safetybanner {
+    display: none; margin: 0; padding: 18px 16px;
+    background: var(--safety); color: #fff;
+    border-bottom: 4px double #000;
+  }
+  #safetybanner.on { display: block; }
+  #safetybanner h1 { margin: 0; font-size: 26px; letter-spacing: .05em; }
+  #safetybanner .label {
+    margin: 2px 0 10px; font-size: 13px; font-weight: 700; letter-spacing: .02em;
+    opacity: .92;
+  }
+  #safetybanner p.msg { margin: 0; font-size: 15px; font-weight: 600; }
+  #safetybanner .fine { font-weight: 400; opacity: .88; margin-top: 6px; }
+
+  /* ---- F-CPU safety mirror lamps — greyed "not present" is its own state,
+     never a guessed FALSE (opcua-nodes.md section 11.6) ------------------- */
+  .lamp.on.safety .bulb { background: var(--safety); border-color: #ddceff; }
+  .lamps.notpresent .lamp { opacity: .4; }
+  .lamps.notpresent .lamp .bulb {
+    background: #263039 !important; border-color: #3a4753 !important;
+  }
 
   /* ---- layout ----------------------------------------------------------- */
   main {
@@ -191,6 +217,15 @@
     page is not a safety device.</p>
 </div>
 
+<div id="safetybanner">
+  <h1>SAFETY DEMAND</h1>
+  <p class="label">F-CPU safety demand (mirror, read-only)</p>
+  <p class="msg" id="safetytext"></p>
+  <p class="fine">Forklift/Safety/SafetyResetRequired, copied from the F-runtime group.
+    A display of F-CPU state, never a safety path: no client write can create, prevent
+    or clear a safety reaction (opcua-nodes.md &sect;11.4).</p>
+</div>
+
 <main>
   <section>
     <h2>Traction and steer &mdash; drag to drive, release to centre</h2>
@@ -263,6 +298,22 @@
     <p class="note">Setpoint beside measurement: the reference is what the PLC decided, the
       speed is what the plant reported back through the bridge. The HMI displays both and
       recomputes neither.</p>
+  </section>
+
+  <section>
+    <h2>Forklift/Safety/ &mdash; F-CPU mirrors, read only, polled at 5 Hz</h2>
+    <div class="lamps" id="safety_lamps">
+      <div class="lamp safety" id="l_safety_estop"><span class="bulb"></span>EStopDemand</div>
+      <div class="lamp safety" id="l_safety_zone"><span class="bulb"></span>ZoneStopDemand</div>
+      <div class="lamp safety" id="l_safety_resetreq"><span class="bulb"></span>SafetyResetRequired</div>
+      <div class="lamp warn" id="l_safety_resetfault"><span class="bulb"></span>SafetyResetFault</div>
+    </div>
+    <p class="hint" id="safety_notpresent">Forklift/Safety/ not present on this server &mdash;
+      the F-CPU safety layer is not built here. Greyed, not an error: this group is optional
+      (opcua-nodes.md &sect;11.6).</p>
+    <p class="note">This panel displays the F-CPU's mirrored state; it never commands. No
+      write from this HMI reaches these nodes, and no client write anywhere can create,
+      prevent or clear a safety reaction (opcua-nodes.md &sect;11.3, &sect;11.4).</p>
   </section>
 </main>
 
@@ -452,6 +503,37 @@ function setLamp(id, on) {
 }
 function setText(id, text) { document.getElementById(id).textContent = text; }
 
+// Forklift/Safety/ -- opcua-nodes.md section 11. A MIRROR of F-CPU state:
+// displayed, never combined with anything and never fed back into a control.
+// "present" is a structural fact from the backend's own connect, not guessed
+// here -- absence renders as its own grey state, never as a false reading
+// (section 11.6).
+function renderSafety(safety) {
+  var present = !!(safety && safety.present === true);
+  var lamps = document.getElementById("safety_lamps");
+  lamps.classList.toggle("notpresent", !present);
+  document.getElementById("safety_notpresent").classList.toggle("on", !present);
+
+  setLamp("l_safety_estop", present && safety.EStopDemand === true);
+  setLamp("l_safety_zone", present && safety.ZoneStopDemand === true);
+  setLamp("l_safety_resetreq", present && safety.SafetyResetRequired === true);
+  setLamp("l_safety_resetfault", present && safety.SafetyResetFault === true);
+
+  // The banner tracks SafetyResetRequired ALONE -- the PLC's own OR of the two
+  // latches (opcua-nodes.md section 11.2). This page never re-derives that OR
+  // from EStopDemand/ZoneStopDemand: recomputing a verdict the PLC already
+  // formed is exactly what this layer must not do (invariant 10).
+  var demand = present && safety.SafetyResetRequired === true;
+  var banner = document.getElementById("safetybanner");
+  banner.classList.toggle("on", demand);
+  if (demand) {
+    setText("safetytext", "SafetyResetRequired is TRUE on the F-runtime group -- "
+      + "EStopDemand " + String(safety.EStopDemand) + ", ZoneStopDemand "
+      + String(safety.ZoneStopDemand) + ". A monitored reset on that group's own "
+      + "device clears it; nothing on this page can.");
+  }
+}
+
 // What the backend reports about THIS page's liveness (section 10.8 H6). If it
 // has dropped the requests, the page must not go on showing an enable nobody is
 // carrying, so it returns its own controls to rest — the same releaseAll() that
@@ -515,6 +597,7 @@ function render(s) {
   setLamp("l_resetreq", m && m.ForkliftResetRequired);
   setLamp("l_linkok", m && m.HmiLinkOk);
   setLamp("l_zone", m && m.ForkliftObstacleInStopZone);
+  renderSafety(s.safety);
   if (m) {
     setText("m_tref", num(m.ForkliftTractionSpeedRef, 3));
     setText("m_speed", num(m.ForkliftLinearSpeed, 3));

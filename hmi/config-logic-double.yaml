@@ -60,5 +60,13 @@ nodes:
     ForkliftResetRequired:       ["Forklift", "Status", "ForkliftResetRequired"]
     HmiLinkOk:                   ["Forklift", "Link",   "HmiLinkOk"]
 
+    # `Forklift/Safety/` (opcua-nodes.md §11.2), optional (§11.6): this logic
+    # double does not serve it either, so the panel shows the group as "not
+    # present" rather than an error.
+    EStopDemand:                 ["Forklift", "Safety",  "EStopDemand"]
+    ZoneStopDemand:              ["Forklift", "Safety",  "ZoneStopDemand"]
+    SafetyResetRequired:         ["Forklift", "Safety",  "SafetyResetRequired"]
+    SafetyResetFault:            ["Forklift", "Safety",  "SafetyResetFault"]
+
 logging:
   level: "INFO"

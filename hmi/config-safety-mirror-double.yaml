@@ -1,28 +1,32 @@
-# hmi/config-double.yaml — the same HMI against the BRIDGE TEST DOUBLE.
+# hmi/config-safety-mirror-double.yaml — the same HMI against this layer's OWN
+# section 11 double.
 #
-# Identical to `config.yaml` except for the endpoint and the HTTP port. It
-# exists so that no evidence run can reach the commissioned PLCSIM Advanced
-# instance by accident: the endpoint below is loopback, and
-# `tools/check_hmi_writes.py` refuses to run against anything that is not.
+# `hmi/tools/safety_mirror_double.py`. Neither `bridge/test_double/
+# plc_test_double.py` nor `plc/forklift/double/server.py` serves
+# `Forklift/Safety/` yet (opcua-nodes.md §11 landed 2026-07-29, after both), so
+# this is a minimal, independent double owned by this layer — written without
+# importing either, so brief m5a-07 has something to run the section 11
+# evidence against without touching bridge/ or plc/. It is a DUMB address
+# space, exactly like the bridge test double: it runs no program and forms no
+# verdict, so `Forklift/Output/*`, `Forklift/Status/*` and `HmiLinkOk` keep
+# their start values for the whole run. What moves is only the four
+# `Forklift/Safety/` mirrors, and only server-side, from
+# `check_hmi_safety_mirrors.py` — never through a client write, which this
+# double refuses exactly as a real server would (§11.4 MR1).
 #
-# The double is `bridge/test_double/plc_test_double.py`. It is TEST SCAFFOLDING
-# and it is not a PLC: it runs no standard program, forms no verdict and holds
-# no interlock, so `Forklift/Status/*` and `Forklift/Link/HmiLinkOk` keep their
-# start values for a whole run against it. That is the honest answer and not a
-# defect — it is also why a second evidence pass against a logic double is worth
-# having (EVIDENCE_HMI.md §B).
-#
-# Port 4847 is this layer's own. m4f-06 used 4842–4846 for the bridge's doubles;
-# nothing here shares a port with them, and nothing here is ever PLCSIM's 4840.
+# Own port, per the brief: 4860, distinct from every port already spoken for —
+# 4840 (PLCSIM), 4842-4846 (the bridge's test doubles), 4847 (this layer's own
+# instance of the bridge double), 4850 (the PLC logic double), 4897/4898
+# (m4f-07c's one-off re-run instances, EVIDENCE_HMI.md §F.4).
 
 opcua:
-  endpoint: "opc.tcp://127.0.0.1:4847/amr-agent/celldouble/"
+  endpoint: "opc.tcp://127.0.0.1:4860/amr-agent/safetymirrordouble/"
   namespace_uris:
     server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
     interface: "http://DemoCell"
   security_policy: "none"
   requested_session_timeout_ms: 10000
-  session_name: "amr-agent-hmi-double"
+  session_name: "amr-agent-hmi-safety-mirror-double"
   reconnect_interval_s: 1.0
   reconnect_backoff_max_s: 5.0
 
@@ -33,7 +37,7 @@ cycle:
 
 http:
   host: "127.0.0.1"
-  port: 8089
+  port: 8093
 
 nodes:
   interface_path:
@@ -61,9 +65,8 @@ nodes:
     ForkliftResetRequired:       ["Forklift", "Status", "ForkliftResetRequired"]
     HmiLinkOk:                   ["Forklift", "Link",   "HmiLinkOk"]
 
-    # `Forklift/Safety/` (opcua-nodes.md §11.2), optional (§11.6): this bridge
-    # test double does not serve it, so the panel shows the group as "not
-    # present" rather than an error.
+    # `Forklift/Safety/` (opcua-nodes.md §11.2), optional (§11.6). This
+    # double's `--with-safety-mirrors` flag decides whether these resolve.
     EStopDemand:                 ["Forklift", "Safety",  "EStopDemand"]
     ZoneStopDemand:              ["Forklift", "Safety",  "ZoneStopDemand"]
     SafetyResetRequired:         ["Forklift", "Safety",  "SafetyResetRequired"]

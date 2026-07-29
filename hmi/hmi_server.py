@@ -14,7 +14,10 @@ What it does, and the whole of what it does:
   (`docs/interfaces/opcua-nodes.md` §10.4, §10.8 H1);
 * reads `Forklift/Input/`, `Forklift/Output/`, `Forklift/Status/` and
   `Forklift/Link/HmiLinkOk` for the operator's display, and applies them to
-  nothing;
+  nothing; also reads the four `Forklift/Safety/` F-CPU mirrors of
+  `docs/interfaces/opcua-nodes.md` §11, when the server carries them — display
+  diagnostics only, feeding no logic here either (§11.3), and their absence is
+  graceful, never a connect error (§11.6);
 * serves one static page and two small JSON endpoints on loopback.
 
 What it does **not** do, per `hmi/README.md` and ADR 0008 D2/D3 — no interlock,
@@ -133,6 +136,27 @@ READABLE_FOLDERS: frozenset[tuple[str, ...]] = frozenset({
     ("Forklift", "Output"),
     ("Forklift", "Status"),
     ("Forklift", "Link"),
+    ("Forklift", "Safety"),
+})
+
+#: `Forklift/Safety/` — `opcua-nodes.md` §11.2. Four read-only F-CPU mirrors.
+#: None of them is ever written by this process (§11.4 MR1 — no client writes
+#: any of the four, and this file has no code path that tries), and none of
+#: them is combined into anything here: §11.3's "zero PLC readers" restated one
+#: layer up as zero HMI logic readers either. This client displays all four and
+#: decides nothing from them (invariant 10).
+SAFETY_MIRROR_NAMES: tuple[str, ...] = (
+    "EStopDemand", "ZoneStopDemand", "SafetyResetRequired", "SafetyResetFault",
+)
+
+#: Folders whose ABSENCE at connect time is not a connect failure: the group is
+#: reported to the operator as "not present" instead of causing a reconnect
+#: loop (§11.6 — "an absent mirror renders as absent, never as clear"; §11.8
+#: item 5 — the F-layer fallback needs no document edit, and this is the code
+#: side of that). Every OTHER readable folder remains a hard requirement exactly
+#: as before this group existed: its absence is a genuine connect failure.
+OPTIONAL_READ_FOLDERS: frozenset[tuple[str, ...]] = frozenset({
+    ("Forklift", "Safety"),
 })
 
 #: `HmiHeartbeat` is a UInt16 and it WRAPS. The PLC compares for inequality
@@ -544,6 +568,18 @@ class Published:
             },
             "requests": None,
             "metrics": None,
+            # `Forklift/Safety/` — opcua-nodes.md §11.2. Read-only F-CPU mirrors,
+            # on the SAME 5 Hz poll as "metrics" (§11 adds no timer of its own).
+            # `present` is a STRUCTURAL fact learned at connect time: a server
+            # that does not carry this optional group is not an error (§11.6,
+            # §11.8 item 5) and the page greys the group rather than guessing a
+            # value for it. Starts `False` — the safe, uninformative default,
+            # never asserted true until a connect has actually resolved it.
+            "safety": {
+                "present": False,
+                "EStopDemand": None, "ZoneStopDemand": None,
+                "SafetyResetRequired": None, "SafetyResetFault": None,
+            },
             # §10.8 H6, rendered so a page that returns learns why its controls
             # were dropped. `age_ms` is the age the WRITE CYCLE measured when it
             # last looked; a value rendered here would always read ~0 ms, because
@@ -769,6 +805,11 @@ class HmiClient:
         self.client: Client | None = None
         self._write_nodes: dict[str, Any] = {}
         self._read_nodes: dict[str, Any] = {}
+        #: BrowseNames of an OPTIONAL group that failed to resolve on the most
+        #: recent connect (§11.6). Populated in `_connect`, read in
+        #: `_poll_metrics` to decide "present" — one fact, one place it is
+        #: computed, so the log line and the published value can never disagree.
+        self._optional_absent: set[str] = set()
         self._heartbeat = 0
         self._heartbeat_running = False
         self._cycle = 0
@@ -870,10 +911,39 @@ class HmiClient:
         for name, path in HMI_WRITABLE_PATHS.items():
             self._write_nodes[name] = await objects.get_child(
                 prefix + [f"{interface_index}:{part}" for part in path])
+        read_cfg = self.cfg["nodes"].get("read") or {}
         self._read_nodes = {}
-        for name, path in (self.cfg["nodes"].get("read") or {}).items():
+        self._optional_absent = set()
+        for name, path in read_cfg.items():
+            if tuple(path[:-1]) in OPTIONAL_READ_FOLDERS:
+                continue  # resolved as a group, below — not a hard requirement
             self._read_nodes[name] = await objects.get_child(
                 prefix + [f"{interface_index}:{part}" for part in path])
+
+        # Optional groups (today: `Forklift/Safety/`, §11) are resolved TOGETHER,
+        # after every required read above has already succeeded, so a missing
+        # optional folder can never mask a real connect failure elsewhere. §11.6:
+        # "an absent mirror renders as absent, never as clear" — a server that
+        # does not carry this group is not an error, and no client's connect may
+        # fail over it (§11.5 step 6, §11.8 item 5).
+        for folder in OPTIONAL_READ_FOLDERS:
+            names = [n for n, p in read_cfg.items() if tuple(p[:-1]) == folder]
+            if not names:
+                continue
+            try:
+                resolved = {}
+                for name in names:
+                    resolved[name] = await objects.get_child(
+                        prefix + [f"{interface_index}:{part}"
+                                  for part in read_cfg[name]])
+                self._read_nodes.update(resolved)
+            except ua.uaerrors.UaStatusCodeError as exc:
+                self._optional_absent.update(names)
+                LOG.info(
+                    "optional group %s/ not present on this server (%s) — shown "
+                    "to the operator as 'not present', never as a value; this "
+                    "is not a connect failure (opcua-nodes.md §11.6)",
+                    "/".join(folder), exc)
 
         granted = float(client.session_timeout)
         self._connects += 1
@@ -1106,13 +1176,27 @@ class HmiClient:
 
     async def _poll_metrics(self) -> None:
         """The 5 Hz read-only display poll. Reads only `Forklift/Input/`,
-        `Forklift/Output/`, `Forklift/Status/` and `Forklift/Link/HmiLinkOk`;
-        applies them to nothing and recomputes none of them (invariant 10)."""
+        `Forklift/Output/`, `Forklift/Status/`, `Forklift/Link/HmiLinkOk` and —
+        when the server carries them — the four `Forklift/Safety/` mirrors of
+        §11; applies all of it to nothing and recomputes none of it (invariant
+        10)."""
         if not self._read_nodes:
             return
         names = list(self._read_nodes)
         values = await self.client.read_values([self._read_nodes[n] for n in names])
-        self.published.update(metrics=dict(zip(names, values)))
+        reading = dict(zip(names, values))
+        # One fact, one place it is computed (§11.6): a name is only ever in
+        # `_optional_absent` because `_connect` could not resolve the whole
+        # group, so "present" here can never disagree with that log line.
+        safety_present = not any(n in self._optional_absent for n in SAFETY_MIRROR_NAMES)
+        self.published.update(
+            metrics=reading,
+            safety={
+                "present": safety_present,
+                **{n: (reading.get(n) if safety_present else None)
+                   for n in SAFETY_MIRROR_NAMES},
+            },
+        )
         self.published.mark_metrics()
 
     async def _sleep(self, seconds: float) -> None:
