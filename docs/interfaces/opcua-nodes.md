@@ -794,7 +794,8 @@ a **second, independent watchdog on a different client**, not a copy of the firs
 | H2 | Cycle rate **10 Hz nominal, 5 Hz contractual floor**. Below the floor the HMI is not a supervision source and must stop writing rather than write slowly |
 | H3 | The heartbeat is written **last**, after the cycle's five request writes are acknowledged. An advanced heartbeat therefore implies that cycle's requests landed first. This is an **ordering** guarantee, not atomicity: no PLC logic may require two HMI tags to have come from the same cycle |
 | H4 | The counter is a counter, never a timestamp: no epoch, no clock synchronisation, no time zone in a liveness signal. It is not reset across a reconnect and starts from an arbitrary value at HMI restart |
-| H5 | The HMI writes no farewell value, zeroes nothing on shutdown and re-publishes nothing on reconnect beyond the current state of its controls. Stopping the machine is the PLC's decision (§10.6) |
+| H5 | **Two ways out of a running HMI, and only these two.** A **clean shutdown** — `SIGINT`/`SIGTERM`, the operator stopping the process — writes **no farewell value and zeroes nothing**: the counter stops, the server keeps the last requests it was sent, and noticing that is the PLC's job. A **backend fault or a dropped session is not a shutdown**: the deadman fires first, because a control stream that is no longer being carried is a release, so the controls go to rest; the counter then stops; and **one bounded attempt, never retried**, writes what the controls now hold, which is that rest state. Nothing else is written on the way out on either path, and on reconnect the HMI re-publishes nothing beyond the current state of its controls. Neither path stops the machine or claims to (§10.6), and **no PLC behaviour may distinguish them** (below) |
+| H6 | **The operator's presence is watched too, and what is watched is the page.** The browser's unconditional `GET /state` at **5 Hz** doubles as a liveness beacon: any HTTP request from the page refreshes it, and the poll is what guarantees one arrives while no control is being touched. If none arrives for **`UI_POLL_STALE_TIME`** — a named constant, **five poll periods, `1.0 s`** (derived below) — the backend fires **the same deadman as H5's fault path**: all five requests go to rest, the enable included, **while the write cycle and the heartbeat continue**. The process is healthy and keeps saying so; what is gone is the page. Nothing latches and nothing is demanded of the operator: this is invariant 2's degraded-mode pattern one level up, at the operator boundary, and it is **process behaviour, not a safety function** (invariant 1, ADR 0008 D3). The page's controls are carried again as soon as it posts, but **each Bool only once that page has been seen to send it low** — P6's per-session arming, one level up |
 
 **Semantics, interface expectation for the PLC specification.**
 
@@ -807,6 +808,103 @@ a **second, independent watchdog on a different client**, not a copy of the firs
 | P5 | On `HmiLinkOk` `FALSE`: **all three setpoints of §10.6, the steer angle included**, are driven to `0.0` in the mandatory `ELSE` — "every motion setpoint" is not the test, because a steer angle is arguably not a motion and the exemption that reading invited is withdrawn (§10.6) — `ForkliftTeleopActive` drops, and the loss **latches** — `ForkliftResetRequired` is set and a returning heartbeat never by itself restores teleop (ADR 0008 D2.3, CLAUDE.md §9). No request value is evaluated while the verdict is `FALSE`; the requests are then not attributable to an operator |
 | P6 | **The reset edge is armed per link session.** A rising edge of `HmiResetRequest` counts only if the PLC has already observed that node `FALSE` **while `HmiLinkOk` was `TRUE` within the current link session** — the arming latch clears whenever `HmiLinkOk` is `FALSE`. Without it, a reset held from before link-up registers as an edge the moment the link forms and clears every latch with no operator acting at the moment of clearing, which is the automatic resume CLAUDE.md §9 forbids. A guard scoped per session is tested by **ending a session**, not by restarting the machine (LESSONS 2026-07-28) |
 | P7 | Teleop requires **both** link verdicts: `BridgeLinkOk` (the plant's state is attributable) and `HmiLinkOk` (the operator is present). They are independent watchdogs on independent clients and neither substitutes for the other |
+
+**H5's two paths, and why the fault path writes at all.** The split is the behaviour
+`hmi/EVIDENCE_HMI.md` records — §A.9 for both stops, §A.8 for a session lost with a full demand
+standing, §B.8 for the PLC catching a clean stop 650 ms later — and it is ruled here because the two
+clauses that meet in it were written for different situations. H5's "beyond the current state of its
+controls" was written about *reconnect*; the fault path reaches the same wording by a different route,
+and the route is now stated rather than re-derived by whoever reads it next.
+
+- **A clean shutdown is a decision; a fault is a loss.** Stopping the process deliberately says nothing
+  about where the operator's controls were, so H5 leaves them exactly where they are — and that is the
+  better demonstration, because it leaves the server holding a live-looking demand under a stopped
+  counter, which is precisely the condition the watchdog exists to catch. Losing the backend or the
+  session means the browser's stream of control updates is no longer being carried, which is a
+  **release**: the same deadman that runs when the operator lets go of the stick, with the same meaning.
+- **What lands is not a farewell value.** A farewell value is one chosen for the way out — a "safe"
+  number nobody asked for. What this writes is the controls' actual state after a release, which is
+  rest. Inventing a value on the way out is exactly what the bridge is forbidden to do
+  (`bridge-design.md` §7.3 B, §8.3 N5), and this rule stays on the same side of that line.
+- **The counter stops before the write, not after.** H3 makes an advanced heartbeat mean "that cycle's
+  requests landed first". The final write inverts that order deliberately so it can never be read as a
+  cycle: the counter has already stopped when it goes out.
+- **One attempt, bounded, never retried.** A dying process must not keep writing under a stopped
+  counter. The attempt is made once, with a timeout, and its outcome is logged either way — `FAILED`
+  with no session (§A.8) and `LANDED` under a live one (§A.9) are the whole range of outcomes.
+
+**No PLC behaviour may distinguish the two paths.** This is `bridge-design.md` §7.3's rule for the
+bridge's own cases A and B — "a program that behaves differently for A and B is wrong" — and it holds
+here for the same reason: the difference is confined to what a later reader of the server's retained
+values sees, never to what the machine does. The PLC's reaction is P5's and is identical either way —
+the stale timer expires, all three setpoints take `0.0` in the mandatory `ELSE`, `ForkliftTeleopActive`
+drops and the loss latches. `plc/forklift/SPEC.md` satisfies this already and needs no change: it reacts
+to `HmiLinkOk` alone and evaluates no request while that verdict is `FALSE` (§10.9). The clause exists
+so that nothing later is built on a difference the HMI is not promising to keep.
+
+**`UI_POLL_STALE_TIME` — the derivation, and what the poll does not prove.** The page polls `/state`
+every 200 ms, so five periods is `1.0 s` and the window tolerates four consecutive missed polls. **The
+rule is the multiple, not the millisecond**: if the page's poll period changes, the constant is
+re-derived from the new period, exactly as P3 re-derives `HMI_STALE_TIME` from a measured worst case
+rather than quietly reinterpreting the floor. Three stale windows now exist in this cell, and no two of
+them share a derivation:
+
+| Constant | Watches | Watcher | Window | Derivation |
+|---|---|---|---|---|
+| `HEARTBEAT_STALE_TIME` | `BridgeHeartbeat`, 50 ms nominal | PLC | `T#500ms` | ≈ 10 missed beats (`plc/demo-cell/SPEC.md` §3.3) |
+| `HMI_STALE_TIME` | `HmiHeartbeat`, 100 ms nominal | PLC | `T#600ms` | 3 × the 200 ms the 5 Hz contractual floor of H2 allows (P3) |
+| `UI_POLL_STALE_TIME` | the page's `GET /state`, 200 ms | **the HMI backend** | `1.0 s` | 5 × the poll period — a browser honours no floor, so the multiple absorbs jitter the watched side cannot bound |
+
+- **Why five here and three there.** P3 may use three because H2 gives it a floor the watched party
+  contractually honours: below 5 Hz the HMI stops writing rather than write slowly. A page honours no
+  floor — `setInterval` is best effort and a beat can be lost to the main thread, to garbage collection
+  or to the operating system — so the same rule, a small multiple of the worst-case period, lands on a
+  larger multiple from a weaker premise.
+- **Its own constant, never shared with `HMI_STALE_TIME`** — P4's principle one level up. The two watch
+  different parties across different transports, one from the PLC and one from inside the HMI, and the
+  names are deliberately not near-copies of each other so that retuning one cannot read as retuning the
+  other.
+- **The cost of the window, stated so the choice is visible.** One second is the longest a demand made
+  by an absent page can stand; at `TRACTION_SPEED_MAX` = `1.00` m/s (`plc/forklift/SPEC.md` §3.3) that
+  is at most a metre of travel before the requests go to rest. **This is not a stopping distance and no
+  safety distance is claimed**: the reaction is process behaviour, this plant has no safety-rated stop,
+  and stopping the machine remains the PLC's (invariant 1, ADR 0008 D3).
+- **What the poll proves, and what it does not.** It proves the *page* is alive. It does not prove a
+  person is in front of it: an operator who walks away from a live browser leaves the poll ticking, and
+  no timer this layer can run would notice. What H6 closes is the crashed, frozen, closed or
+  disconnected browser — `EVIDENCE_HMI.md` §D's "a browser that crashes with the joystick held" — and
+  the remainder is stated rather than covered, in the standing of case D's honest limitation for the
+  bridge heartbeat (`bridge-design.md` §7.3).
+- **This layer has two 5 Hz polls and H6 is about one of them.** The subject is the browser's
+  `GET /state` over loopback HTTP. The backend's own 5 Hz OPC UA read of `Forklift/Input/`,
+  `Forklift/Output/`, `Forklift/Status/` and `HmiLinkOk` for the display is a different poll on a
+  different transport, and it has no part in this rule.
+
+**Why the heartbeat keeps running under H6, and why nothing latches.** Stopping the counter would say
+"the HMI is gone", which is false, and would buy the PLC's heavier reaction: a link loss latches
+`ForkliftResetRequired` and demands a monitored reset before teleop may return (P5, P6). A page that had
+merely been backgrounded would then cost a reset. The two reactions are proportional on purpose — the
+heavier failure, the whole process gone, is caught faster (`HMI_STALE_TIME`, 600 ms) and latches; the
+lighter one, the page gone under a healthy process, is caught more slowly and does not. The PLC is told
+nothing new in either case: it sees requests at rest under a live heartbeat, a state it already handles,
+because §10.6 forms every setpoint from those requests in one assignment.
+
+**Recovery is a release, not a resume.** The three Reals are carried again as soon as the page posts —
+they move nothing while `ForkliftTeleopActive` is `FALSE`. The two Bools are different: a page that
+thaws with the enable still asserted would otherwise produce a `FALSE → TRUE` on `HmiTeleopRequest` that
+no operator made, and the PLC cannot tell that edge from a real one (§10.7). So each is carried again
+only once that page has been seen to send it low — P6's per-link-session arming, applied to the HMI's
+own input channel. In the ordinary case it costs nothing: the page already returns everything to rest,
+the enable included, on blur, on hide and on unload, so a page coming back from the background has sent
+both low before it is asked to.
+
+**Where H6 sits against "no logic in either client" (§10.1).** A timer over the client's **own input
+channel** stands exactly where H2's timer over its **own cycle** stands: it watches this process's
+liveness, never a process value; it forms no interlock, no latch over a plant signal and no verdict the
+PLC also computes; and it decides only what this client publishes, never what the machine does. H6 adds
+**no node, no start value and no PLC expectation** — the node count of §10.3 and the start values and
+qualification rule of §10.9 are untouched — which is what makes it a rule this section can take while
+the group is being commissioned.
 
 Loss of either link is a **degraded mode, not a safety event** (invariant 2). The controlled stop it
 produces is process logic; the vehicle-side stop that would be safety-rated on real equipment is
@@ -897,3 +995,4 @@ Each row means "no such node under `DemoCell/Forklift/`".
 | 5 | The lidar field geometry — sector and stop distance — is configured in the vehicle layer and reaches the PLC as one bit (§10.5). If the owner prefers the PLC to own that threshold, `ForkliftObstacleInStopZone` is deleted and the PLC forms its verdict from `ForkliftObstacleMinDistance` alone: a one-node change here and a polarity change in the vehicle layer, not a redesign | Owner decision |
 | 6 | Per-client write scoping remains policy rather than enforcement, and two writing clients widen the gap (ADR 0008 D2.5, §9.8's open item). Closing it is OPC UA access control plus the per-DB visibility work already carried | The gate that configures the server for a real client |
 | 7 | **An `HmiStartRequest` node in `Forklift/Hmi/`, requested by `plc/forklift/SPEC.md` §6.7 and its §12 item 4.** This section defines five requests and none is a start, so `HmiTeleopRequest` carries both the enable and the post-reset start action; the conflation and the operator's release-and-reassert sequence are written out in §10.7. A sixth request node would restore the M3 cell's two-device separation — a reset that clears and a separate start that energizes | Owner decision, **post-gate**. It moves the node count, the `ForkliftHmi` DB, a start value (§10.9), the HMI's every-cycle write set (§10.8 H1) and the PLC's enable edge together, which is not a change to make inside a commissioning run. Until then the conflation stands and is stated, not hidden |
+| 8 | **H6 is ruled ahead of its implementation; H5 is not.** `hmi/hmi_server.py` times its own write cycle and nothing else — the page's HTTP requests are served without their arrival being recorded, so there is no poll timestamp that could go stale and the gap stands open: `m4f-07` raised it as its open question 2 and `hmi/EVIDENCE_HMI.md` §D carries it as "a browser that crashes with the joystick held". What H6 asks of that layer: one timestamp refreshed by **every** request the page makes on the loopback endpoint, `UI_POLL_STALE_TIME` held as a named constant with its derivation beside it, the **existing** deadman fired when the window expires with the write cycle and the heartbeat left running, the two Bools re-armed only after the page has been seen to send each low, and the transition logged and rendered in `/state` so a page that returns learns why its controls were dropped. **H5 needs no code**: the split it now rules is the behaviour already implemented and evidenced (`EVIDENCE_HMI.md` §A.8, §A.9, §B.8), and the three clauses this ruling adds — one bounded attempt never retried, the counter stopping before the final write, nothing else written on the way out — are satisfied as built. H5's fourth clause binds the PLC specification instead, and `plc/forklift/SPEC.md` satisfies it already by reacting to `HmiLinkOk` alone | **Request against `hmi/`**, recorded not covered: this document rules the contract and may not edit that layer (CLAUDE.md §5) |
