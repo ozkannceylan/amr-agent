@@ -486,11 +486,11 @@ whose state flows AGV → MQTT → fleet manager at its own gate and still reach
 | What the HMI writes | **Only** the five `Forklift/Hmi/` request nodes and `Forklift/Link/HmiHeartbeat` (§10.4, §10.8). It writes nothing else on this server, on any interface, and nothing under the auto-published `DataBlocksGlobal` folder. |
 | What the bridge writes | Its §9.1 writable set **plus** the four `Forklift/Input/` nodes, and nothing more. The bridge never writes an `Hmi…` node and the HMI never writes an `Input/` node: the two clients' writable sets are disjoint by construction and distinguishable by BrowseName prefix. |
 | No actuator writes, from either client | Neither client writes an actuator output. `Forklift/Output/*` is formed inside the PLC from the teleop-active flag combined with interlocks, and is driven to zero in a mandatory `ELSE` (§10.6). The HMI *requests*; the PLC decides and owns the outcome (invariant 6 discipline, ADR 0008 D2.2). |
-| No logic in either client | The bridge remains a signal translator (§9.1). The HMI is a *source of requests and a display*: no interlock, no latch, no timer, no sequencing, no verdict the PLC also computes (invariant 10, ADR 0008 D2.2, D2.6). |
+| No logic in either client | The bridge remains a signal translator (§9.1). The HMI is a *source of requests and a display*: **no interlock, no latch, no sequencing, no setpoint formation, no reaction to plant state and no verdict the PLC also computes** (invariant 10, ADR 0008 D2.2, D2.6). **The line is not "no timer".** A client needs timers to produce its own cadence and its own liveness, and this model requires three of them by name: the bridge's 20 Hz cycle (`bridge-design.md` §5), the HMI's 10 Hz write cycle and the 5 Hz floor it holds itself to (§10.8 H2), and the HMI's window on its operator's page (§10.8 H6). What no client may do is time a **process value** — a debounce, a fault delay, a dwell, a stale window over a plant signal, "write only if stable for X ms" — because the threshold and the delay are process decisions and they belong to the PLC (§10.5, §10.7, `bridge-design.md` §1.1). **The test is what the timer watches**: its own cycle or its own input channel, never the plant, and never a verdict the PLC also computes. |
 | Single owner | Every node below has exactly one writer, listed per tag in §10.3 (invariant 10). No value is recomputed by a consumer. |
 | One link verdict per client, no duplicates | The bridge's liveness stays `DemoCell/Link/BridgeHeartbeat` / `BridgeLinkOk` — **no second bridge heartbeat is created for the forklift subtree**. One session serves both function blocks; the verdict is written by the demonstration cell's FB and consumed by the forklift FB as a shared DB bit (invariant 10). The HMI's liveness is a *separate and independent* watchdog on a different client (§10.8). |
 | Not a safety path | Every node here is process data. The obstacle stop, the fork-height speed cap and the fork soft limits are **standard-program process interlocks** and implement **no** SRS function: not SF-02, not SF-03, not SF-04, not SF-07, not SF-09 (ADR 0008 D3). No SIL or PL is claimed for any of them, and neither "emergency" nor "protective" appears in any tag, node or topic **name** in this section — the same naming discipline §9.6 sets for the demonstration cell's process stop. Loss of either client link is a degraded mode, not a safety event (invariant 2). |
-| Timing class | Both clients are best effort (invariant 9). Every timing decision that matters — the stale windows, the fault delays, the reset edge — is a PLC timer in the PLC's own time base. |
+| Timing class | Both clients are best effort (invariant 9). Every timing decision **the cell's behaviour depends on** — the two link stale windows, the fault delays, the reset edge — is a PLC timer in the PLC's own time base. A client's own cadence and its window over its own input channel (§10.8 H2, H6) are best effort by construction, and no plant behaviour rests on either meeting a deadline. |
 
 ### 10.2 Server interface: `DemoCell` is extended, not replaced
 
@@ -633,7 +633,7 @@ HMI/OPC UA* column of §10.3: the request group is writable, `Forklift/Output/` 
 | BrowseName | S7 type | OPC UA type | Unit | Engineering range | Plausibility window | Meaning |
 |---|---|---|---|---|---|---|
 | `HmiTractionRequest` | Real | Float | — (fraction) | −1.00 … +1.00 | ±1.05 | Operator's traction demand as a fraction of `TRACTION_SPEED_MAX`. Positive drives forwards. The PLC scales, interlocks and gates it; the plant never sees this number |
-| `HmiSteerRequest` | Real | Float | rad | −1.31 … +1.31 | ±1.35 | Requested steer angle of the front assembly, signed. The limit is the plant's mechanical steer range |
+| `HmiSteerRequest` | Real | Float | rad | −1.31 … +1.31 | ±1.35 | Requested steer angle of the front assembly, signed. The limit is the plant's mechanical steer range, enforced by the PLC's clamp: **§10.6 rules who owns `1.31` and what every other copy of it is**, including the HMI's |
 | `HmiForkRequest` | Real | Float | — (fraction) | −1.00 … +1.00 | ±1.05 | Operator's fork jog demand as a fraction of `FORK_SPEED_MAX`. Positive raises. A jog **speed**, not a height: there is no height request node (§10.11) |
 | `HmiTeleopRequest` | Bool | Boolean | — | — | — | Operator asks for teleop. A **level**, not an edge: it expresses "the operator is at the controls", survives a PLC scan and a restart, and is withdrawn by writing `FALSE`. The PLC's verdict is `ForkliftTeleopActive`, which is a different node with a different owner |
 | `HmiResetRequest` | Bool | Boolean | — | — | — | Operator asks to clear the latched process stops of §10.7. A level carrying the operator's action; **the PLC acts on its rising edge**, under the arming rule of §10.8. No client clears a latch by writing a node — the write is the request, the edge and the arming are PLC program content |
@@ -738,6 +738,34 @@ in the order they decide it:
 returns to centre while the machine is stopping.** It appears in every stop scenario and is not a
 defect. If the owner rules the other way it is one branch in the PLC specification and one row here;
 no node, count, access right or start value moves either way.
+
+**Who owns ±1.31, and what every other copy of it is.** Two different questions meet on this number and
+each has exactly one answer. **The value is the plant's**: it is the `steer_joint` mechanical stop in
+the vehicle layer's model, surfaced by that layer as `steer_limit_rad` (`agv/forklift/config.yaml`). It
+is a mechanical fact, not a process decision, which is what makes it unlike `TRACTION_SPEED_MAX` — that
+one is a process cap the PLC owns (§10.12 item 4). **The authority over what the plant is commanded is
+the PLC's clamp, in this section**: `ForkliftSteerAngleRef` is formed from `HmiSteerRequest` clamped to
+this range inside the PLC, and nothing reaches the plant except through that assignment
+(`plc/forklift/SPEC.md` §3.3 `STEER_ANGLE_MAX`, which cites the vehicle layer's value as its source).
+That is the single enforcement point in the command path. The HMI has none, and no client has one.
+
+**Every other copy is derived and names this section as its source.** Nobody re-derives `1.31` from
+anything; each copy restates the published value and cites where it comes from, which is what keeps one
+owner under invariant 10. The HMI holds it as a named constant beside its citation rather than as a
+config key, deliberately, so it cannot be retuned as though it were a deployment setting —
+`hmi/config.yaml` states the same rule from the other side, that no threshold, limit, scale or clamp
+lives in that file. **That copy is scaling, not authority**: it converts a dimensionless joystick
+position into the rad the node declares, so it decides what the operator's stick *means* and never what
+the machine does, and **it cannot apply a value the PLC would not**. Set too large it does not widen the
+machine's travel — a request between `1.31` and `1.35` is clamped here, and one past `1.35` leaves the
+plausibility window of §10.4 and is read as a broken client rather than as a demand. Set too small it
+only means the operator cannot reach full lock. The plant's own joint limit clamps as well, and that is
+a last-ditch mechanical stop in another layer rather than a second authority — the same reading §10.12
+item 4 gives the vehicle layer's traction clamp.
+
+**A test double or a harness may hold its own copy**, and two do. That is not a second owner: an
+instrument that imported the value it is checking would check nothing. Those copies are written against
+this section and are meant to fail loudly if they ever disagree with it.
 
 The bridge republishes each value to its ROS topic **unchanged** — no ramp, no clamp, no interlock,
 no zeroing of its own (invariant 6, `bridge-design.md` §1.1) — and the plant applies it as given,
