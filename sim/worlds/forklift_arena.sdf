@@ -1,0 +1,493 @@
+<?xml version="1.0" ?>
+<!--
+  forklift_arena.sdf . M4 forklift commissioning arena for the amr-agent
+  project (ADR 0008).
+
+  A bare hall for driving, steering and lifting the in house forklift
+  (agv/forklift/model.sdf). No vehicle is embedded here: the model is a
+  plain <model> and is spawned into this world by
+  sim/launch/forklift_bringup.launch.py, so the arena and the vehicle stay
+  separately owned.
+
+  THE FIXED EQUIPMENT DEMO CELL IS NOT EMBEDDED. sim/worlds/cell.sdf keeps
+  its conveyor, photo eye and operator panel, and this file has none of
+  them. The coupled cell plus vehicle scenario is roadmap M9 work (AT 07,
+  a vehicle in the monitored zone) and belongs to that gate, not to this
+  one. Neither file includes the other.
+
+  NO CONTROL LOGIC LIVES HERE. There is no sequencing, no interlock, no
+  timer, no latch, no threshold and no zone decision in this file. The
+  props below are geometry: they stand still and the vehicle scanner
+  measures whatever range they present. Deciding what a range means is the
+  PLC standard program's job under ADR 0008 D3 (invariants 5, 6 and 9).
+
+  NOTHING HERE IS A SAFETY DEVICE. The obstacle props are process
+  furniture. The protective stop, the e stop chain and safe torque off are
+  onboard and hardwired and appear in no world file (invariant 1).
+
+  ==================== LAYOUT (top view, metres) ====================
+
+  24.0 x 16.0 floor, origin at the centre of the hall. Perimeter walls are
+  0.60 m high so the vehicle scanner, which sweeps a horizontal plane at
+  z = 0.25 in the vehicle frame, terminates on them instead of running out
+  to its 8.0 m range maximum.
+
+              +y            north wall, inner face y = +7.90
+      .........+.................................................
+      .        |  [PalletZone 2.4 x 2.0 marking]                .
+      .        |   [Pallet + LoadBox] at (-7.50, +4.50)         .
+      .        |            [CrateNorth] (-4.50, +4.20)         .
+      . . . . .+. . . . . . . . . . . . . . . . . . . . . . . .  aisle edge y = +2.00
+      .        |                                                .
+      .        |  [spawn (-6.00, 0)] >>>      [AisleCrate]      .
+   ===+========+=============== drive aisle, centreline y = 0 =======> +x
+      .        |                       straddling it at x = 2.00 .
+      . . . . .+. . . . . . . . . . . . . . . . . . . . . . . .  aisle edge y = -2.00
+      .        |     [PillarSouth] (-2.00, -3.20)               .
+      .        |                                                .
+      .........+.................................................
+        west wall            south wall, inner face y = -7.90
+        x = -11.90                                    east wall x = +11.90
+
+  ==================== WHAT THE SCANNER SEES ====================
+
+  The forklift scanner sits at z = 0.25 in the vehicle frame and sweeps a
+  single horizontal plane, so height decides visibility:
+
+    seen      perimeter walls (0 to 0.60), AisleCrate (0 to 0.90),
+              PillarSouth (0 to 2.60), CrateNorth (0 to 1.00),
+              LoadBox (0.16 to 0.86)
+    not seen  the floor markings (0.006 thick, lying on the floor) and
+              the Pallet itself, whose deck tops out at z = 0.16
+
+  A pallet that the scanner cannot see while the load on it can is the
+  real geometry of a low pallet under a truck mounted scanner, not an
+  oversight. It is written down here because it is the kind of thing that
+  otherwise gets discovered as a bug.
+
+  ==================== THE STOP ZONE PROP ====================
+
+  AisleCrate is placed for the obstacle scenario of the M4 gate criterion.
+  It stands ON the aisle centreline at x = 2.00 with its front face square
+  to the aisle at x = 1.55, so a vehicle driving straight up the aisle
+  meets it head on and the scenario is repeatable without steering. It
+  spans y = -0.45 to +0.45, leaving 1.55 m of the marked aisle clear on
+  each side of it.
+
+  Placing it off the centreline was tried and rejected on arithmetic, not
+  taste. The stop zone is the +-30 deg sector of a scanner whose process
+  stop distance is 1.20 m, so a prop whose near face is more than
+  1.20 * sin(30 deg) = 0.60 m off the driving line can never be inside both
+  the sector and the distance at once: it leaves the sector as the vehicle
+  closes on it, and the in sector range asymptotes to (offset / sin 30 deg)
+  instead of falling to the threshold. At the 1.55 m offset an aisle edge
+  placement would need, the nearest in sector range is 3.10 m and the zone
+  never trips.
+
+  Where the vehicle is when the zone trips, for reference only. The scanner
+  leads the model origin by 0.72 m and the process stop distance in
+  agv/forklift/config.yaml is 1.20 m, so a range of 1.20 m to the crate
+  face puts the model origin at
+
+      1.55 - 1.20 - 0.72 = -0.37
+
+  which is 5.63 m of travel from the spawn pose the bringup launch
+  defaults to. That threshold is a config.yaml value evaluated by a vehicle
+  node, and later by the PLC; this world neither knows it nor enforces it.
+
+  ==================== SENSOR SYSTEM ====================
+
+  The vehicle scanner is a gz "gpu_lidar", so this world MUST load
+  gz-sim-sensors-system with a render engine, exactly as cell.sdf does. gz's
+  stock empty.sdf does not, and on it the vehicle drives and lifts while
+  /forklift/gz/scan stays silent (agv/forklift/README.md).
+
+  Rendering on the target machine is llvmpipe software rasterisation
+  (sim/setup/WSL_ENVIRONMENT.md), so the scene is deliberately cheap: box
+  and cylinder primitives only, no mesh, no texture, no shadow, one
+  directional light. Adding any of those is a change to the figures in
+  worlds/FORKLIFT_ARENA_EVIDENCE.md and has to be re measured.
+-->
+<sdf version="1.8">
+  <world name="forklift_arena">
+
+    <!-- Same 2 ms fixed step as cell.sdf and as the throwaway world the
+         model was verified on (agv/forklift/EVIDENCE_MODEL.md section 0),
+         so joint rates measured here are comparable with the ones measured
+         there. The hall is empty enough that 500 Hz still runs at real
+         time headless. -->
+    <physics type="ode">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>500</real_time_update_rate>
+    </physics>
+
+    <plugin name="gz::sim::systems::Physics" filename="libgz-sim-physics-system.so"/>
+    <plugin name="gz::sim::systems::UserCommands" filename="libgz-sim-user-commands-system.so"/>
+    <plugin name="gz::sim::systems::SceneBroadcaster" filename="libgz-sim-scene-broadcaster-system.so"/>
+
+    <!-- Required by the vehicle's gpu_lidar. Without this the scan topic
+         is never advertised and the failure is silent. -->
+    <plugin name="gz::sim::systems::Sensors" filename="libgz-sim-sensors-system.so">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <scene>
+      <ambient>1 1 1 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <shadows>false</shadows>
+      <grid>false</grid>
+    </scene>
+
+    <light name="sun" type="directional">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 12 0 0 0</pose>
+      <diffuse>1.0 1.0 1.0 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.3 0.3 -1.0</direction>
+    </light>
+
+    <gravity>0 0 -9.8</gravity>
+
+    <!-- ============================ Floor ============================ -->
+    <!-- Plain concrete. mu 1.0 so the drive wheel has something to push
+         against; the tricycle is a single driven wheel and a slippery
+         floor turns traction figures into tyre slip figures. -->
+    <model name="Floor">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>24 16</size></plane>
+          </geometry>
+          <surface>
+            <friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>24 16</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.55 0.55 0.55 1</ambient>
+            <diffuse>0.55 0.55 0.55 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ======================= Perimeter walls ======================= -->
+    <!--
+      Four low walls, 0.20 thick and 0.60 high, enclosing 23.8 x 15.8 of
+      clear floor. Low on purpose: they bound the arena and give the
+      scanner a real return without adding the render cost of full height
+      warehouse walls. The north and south walls run the full 24.4 m so the
+      corners close.
+    -->
+    <model name="WallWest">
+      <static>true</static>
+      <pose>-12.00 0 0.30 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.20 16.00 0.60</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.20 16.00 0.60</size></box></geometry>
+          <material><ambient>0.62 0.62 0.64 1</ambient><diffuse>0.62 0.62 0.64 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="WallEast">
+      <static>true</static>
+      <pose>12.00 0 0.30 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.20 16.00 0.60</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.20 16.00 0.60</size></box></geometry>
+          <material><ambient>0.62 0.62 0.64 1</ambient><diffuse>0.62 0.62 0.64 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="WallSouth">
+      <static>true</static>
+      <pose>0 -8.00 0.30 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>24.40 0.20 0.60</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>24.40 0.20 0.60</size></box></geometry>
+          <material><ambient>0.62 0.62 0.64 1</ambient><diffuse>0.62 0.62 0.64 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="WallNorth">
+      <static>true</static>
+      <pose>0 8.00 0.30 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>24.40 0.20 0.60</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>24.40 0.20 0.60</size></box></geometry>
+          <material><ambient>0.62 0.62 0.64 1</ambient><diffuse>0.62 0.62 0.64 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ====================== Drive aisle marking ===================== -->
+    <!--
+      Two painted edge lines at y = +-2.00 defining a 4.0 m clear aisle
+      along the hall. VISUAL ONLY: no collision, 6 mm proud of the floor,
+      so nothing drives over a kerb and the horizontal scanner plane at
+      z = 0.25 never sees them. Paint is not equipment; it marks where the
+      aisle is for a human watching the run.
+    -->
+    <model name="AisleMarking">
+      <static>true</static>
+      <link name="link">
+        <visual name="edge_north">
+          <pose>0 2.00 0.003 0 0 0</pose>
+          <geometry><box><size>21.00 0.10 0.006</size></box></geometry>
+          <material><ambient>0.92 0.80 0.16 1</ambient><diffuse>0.92 0.80 0.16 1</diffuse></material>
+        </visual>
+        <visual name="edge_south">
+          <pose>0 -2.00 0.003 0 0 0</pose>
+          <geometry><box><size>21.00 0.10 0.006</size></box></geometry>
+          <material><ambient>0.92 0.80 0.16 1</ambient><diffuse>0.92 0.80 0.16 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ======================= Pallet zone marking ==================== -->
+    <!--
+      A 2.40 x 2.00 painted outline north of the aisle, marking where a
+      pallet belongs. Same rules as the aisle paint: four visual only
+      strips, no collision, invisible to the scanner plane.
+    -->
+    <model name="PalletZoneMarking">
+      <static>true</static>
+      <pose>-7.50 4.50 0 0 0 0</pose>
+      <link name="link">
+        <visual name="edge_north">
+          <pose>0 0.95 0.003 0 0 0</pose>
+          <geometry><box><size>2.40 0.10 0.006</size></box></geometry>
+          <material><ambient>0.92 0.80 0.16 1</ambient><diffuse>0.92 0.80 0.16 1</diffuse></material>
+        </visual>
+        <visual name="edge_south">
+          <pose>0 -0.95 0.003 0 0 0</pose>
+          <geometry><box><size>2.40 0.10 0.006</size></box></geometry>
+          <material><ambient>0.92 0.80 0.16 1</ambient><diffuse>0.92 0.80 0.16 1</diffuse></material>
+        </visual>
+        <visual name="edge_west">
+          <pose>-1.15 0 0.003 0 0 0</pose>
+          <geometry><box><size>0.10 1.80 0.006</size></box></geometry>
+          <material><ambient>0.92 0.80 0.16 1</ambient><diffuse>0.92 0.80 0.16 1</diffuse></material>
+        </visual>
+        <visual name="edge_east">
+          <pose>1.15 0 0.003 0 0 0</pose>
+          <geometry><box><size>0.10 1.80 0.006</size></box></geometry>
+          <material><ambient>0.92 0.80 0.16 1</ambient><diffuse>0.92 0.80 0.16 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ============================ Pallet =========================== -->
+    <!--
+      In house primitive pallet: three deck boards on two blocks, all in
+      one rigid link. Five primitives, no mesh, nothing imported.
+
+      Dimensions 1.20 (x) x 1.00 (y) x 0.16 (z). Fork entry is along x,
+      which is the axis the blocks run on:
+
+        blocks   y = +-0.45, 0.10 wide, so their inner faces sit at
+                 y = +-0.40
+        tines    y = +-0.28, 0.12 wide, so their outer faces sit at
+                 y = +-0.34
+
+      That is 0.06 m of clearance per side. Vertically the tine top is at
+      z = 0.10 with the carriage fully lowered and the deck underside is at
+      z = 0.12, so the forks enter under the deck with 0.02 m to spare and
+      the load is picked by raising the carriage rather than by driving
+      into it.
+
+      Masses are chosen so a later lift stays inside the carriage
+      controller's measured envelope, and the arithmetic is written here
+      because it is not obvious. The mast controller's lifting integral
+      clamp is i_min = -1500 (agv/forklift/model.sdf); the unloaded
+      assembly weighs about 882 N, and pallet plus load add
+      (20 + 30) * 9.8 = 490 N, for 1372 N against a 1500 N clamp.
+
+      NOT MEASURED. Nothing was lifted in the run recorded in
+      FORKLIFT_ARENA_EVIDENCE.md, and the m4f-02 fork tuning figures are
+      for the unloaded carriage. The numbers above say the load is
+      plausible, not that it works.
+    -->
+    <model name="Pallet">
+      <static>false</static>
+      <pose>-7.50 4.50 0 0 0 0</pose>
+      <link name="link">
+        <inertial>
+          <pose>0 0 0.08 0 0 0</pose>
+          <mass>20.0</mass>
+          <inertia>
+            <ixx>1.7093</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>2.4427</iyy><iyz>0</iyz><izz>4.0667</izz>
+          </inertia>
+        </inertial>
+
+        <collision name="block_left_collision">
+          <pose>0 0.45 0.06 0 0 0</pose>
+          <geometry><box><size>1.20 0.10 0.12</size></box></geometry>
+          <surface>
+            <friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction>
+            <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+          </surface>
+        </collision>
+        <visual name="block_left_visual">
+          <pose>0 0.45 0.06 0 0 0</pose>
+          <geometry><box><size>1.20 0.10 0.12</size></box></geometry>
+          <material><ambient>0.66 0.50 0.30 1</ambient><diffuse>0.66 0.50 0.30 1</diffuse></material>
+        </visual>
+
+        <collision name="block_right_collision">
+          <pose>0 -0.45 0.06 0 0 0</pose>
+          <geometry><box><size>1.20 0.10 0.12</size></box></geometry>
+          <surface>
+            <friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction>
+            <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+          </surface>
+        </collision>
+        <visual name="block_right_visual">
+          <pose>0 -0.45 0.06 0 0 0</pose>
+          <geometry><box><size>1.20 0.10 0.12</size></box></geometry>
+          <material><ambient>0.66 0.50 0.30 1</ambient><diffuse>0.66 0.50 0.30 1</diffuse></material>
+        </visual>
+
+        <collision name="deck_board_west_collision">
+          <pose>-0.48 0 0.14 0 0 0</pose>
+          <geometry><box><size>0.24 1.00 0.04</size></box></geometry>
+          <surface>
+            <friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction>
+            <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+          </surface>
+        </collision>
+        <visual name="deck_board_west_visual">
+          <pose>-0.48 0 0.14 0 0 0</pose>
+          <geometry><box><size>0.24 1.00 0.04</size></box></geometry>
+          <material><ambient>0.72 0.56 0.34 1</ambient><diffuse>0.72 0.56 0.34 1</diffuse></material>
+        </visual>
+
+        <collision name="deck_board_mid_collision">
+          <pose>0 0 0.14 0 0 0</pose>
+          <geometry><box><size>0.24 1.00 0.04</size></box></geometry>
+          <surface>
+            <friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction>
+            <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+          </surface>
+        </collision>
+        <visual name="deck_board_mid_visual">
+          <pose>0 0 0.14 0 0 0</pose>
+          <geometry><box><size>0.24 1.00 0.04</size></box></geometry>
+          <material><ambient>0.72 0.56 0.34 1</ambient><diffuse>0.72 0.56 0.34 1</diffuse></material>
+        </visual>
+
+        <collision name="deck_board_east_collision">
+          <pose>0.48 0 0.14 0 0 0</pose>
+          <geometry><box><size>0.24 1.00 0.04</size></box></geometry>
+          <surface>
+            <friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction>
+            <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+          </surface>
+        </collision>
+        <visual name="deck_board_east_visual">
+          <pose>0.48 0 0.14 0 0 0</pose>
+          <geometry><box><size>0.24 1.00 0.04</size></box></geometry>
+          <material><ambient>0.72 0.56 0.34 1</ambient><diffuse>0.72 0.56 0.34 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- =========================== Load box ========================== -->
+    <!-- The load riding on the pallet. Bottom face sits on the deck top at
+         z = 0.16, so it starts at rest and does not drop at world load. -->
+    <model name="LoadBox">
+      <pose>-7.50 4.50 0.51 0 0 0</pose>
+      <link name="link">
+        <inertial>
+          <mass>30.0</mass>
+          <inertia>
+            <ixx>2.45</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>2.45</iyy><iyz>0</iyz><izz>2.45</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry><box><size>0.70 0.70 0.70</size></box></geometry>
+          <surface>
+            <friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction>
+            <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.70 0.70 0.70</size></box></geometry>
+          <material><ambient>0.80 0.55 0.20 1</ambient><diffuse>0.80 0.55 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ========================= Obstacle props ======================= -->
+    <!--
+      Three static props. AisleCrate is the one placed for the stop zone
+      scenario (see the header); the other two stand clear of the aisle so
+      the scanner has something to return while the vehicle turns, and so
+      that "the aisle is clear" is a statement with content.
+    -->
+    <model name="AisleCrate">
+      <static>true</static>
+      <pose>2.00 0.00 0.45 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.90 0.90 0.90</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.90 0.90 0.90</size></box></geometry>
+          <material><ambient>0.74 0.58 0.36 1</ambient><diffuse>0.74 0.58 0.36 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="PillarSouth">
+      <static>true</static>
+      <pose>-2.00 -3.20 1.30 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.35 0.35 2.60</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.35 0.35 2.60</size></box></geometry>
+          <material><ambient>0.45 0.46 0.50 1</ambient><diffuse>0.45 0.46 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="CrateNorth">
+      <static>true</static>
+      <pose>-4.50 4.20 0.50 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>1.20 0.80 1.00</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>1.20 0.80 1.00</size></box></geometry>
+          <material><ambient>0.74 0.58 0.36 1</ambient><diffuse>0.74 0.58 0.36 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>
