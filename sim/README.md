@@ -518,15 +518,18 @@ the `Pallet` deck (topping out at 0.16 m) do not. A pallet the scanner cannot
 see while the load on it can is the real geometry of a low pallet under a
 truck-mounted scanner.
 
-**An empty forward sector is a no-data condition, not a clear path.** The
+**An empty forward sector reads clear at `range_max`, since `74c7d5f`.** The
 scanner's `range_max` is 8.0 m and the hall is 24 m long, so a vehicle in the
-middle of the aisle with nothing ahead of it has *no valid sample in the
-sector* — and the vehicle layer correctly reports that as
-`in_stop_zone = true`, `min_distance = 0.0`, its no-data sentinel, which reads
-at the PLC as a transducer fault. This is the fail-safe polarity working, and it
-is why the obstacle scenario clears the zone by pushing the crate **further up
-the aisle but no further than the scanner can see it** — never out of the sector,
-and never past 8 m from where the vehicle actually stands.
+middle of the aisle with nothing ahead of it has no in-range return in the
+sector, and the vehicle layer reports that as `in_stop_zone = false`,
+`min_distance = 8.0` — the scan's own `range_max`, not a sentinel. The
+fail-safe (`in_stop_zone = true`, `min_distance = 0.0`) remains for a scan that
+is missing, stale (over 0.50 s old) or structurally unusable, or a sector with
+no sample in either valid class — never for an open horizon. Before `74c7d5f`
+the evaluator read an open horizon as no-data, and the obstacle scenario
+worked around it by keeping `AisleCrate` inside the scanner's range; that
+workaround is retired, and `sim/scenarios/forklift_commissioning.md` §6
+records it as a build difference rather than a live constraint.
 
 ## Running it
 

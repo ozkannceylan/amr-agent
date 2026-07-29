@@ -404,7 +404,7 @@ property under test is that the edge happened *before* the cause went away.
 
 **Stack:** as §1, plus the world stimulus below.
 
-### The world stimulus, and the two ways it must not be done
+### The world stimulus, and the workaround it no longer needs
 
 The obstacle is `AisleCrate`, standing on the aisle centreline at `x = 2.00` with
 its front face at `x = 1.55`. It is moved with the Gazebo `set_pose` service —
@@ -416,29 +416,28 @@ python3 sim/scenarios/forklift_stimulus.py obstacle --to-x 8.0    # clear the zo
 python3 sim/scenarios/forklift_stimulus.py obstacle --home        # put it back
 ```
 
-**Clear the zone by pushing the crate FURTHER UP THE AISLE, and only as far as
-the scanner can still see it.** The scanner's `range_max` is 8.0 m and the hall
-is 24 m long, so a ±30° sector with nothing in range contains no valid sample at
-all — and the vehicle layer reports an empty sector as `in_stop_zone = TRUE`,
-`min_distance = 0.0`, its no-data sentinel, which reads at the PLC as a
-transducer fault rather than as a clear path. Two ways of getting that wrong were
-measured here: teleporting the crate to `(9.0, 6.0)`, out of the sector
-entirely, and moving it to `x = 8.0` while the vehicle still stood 4.6 m back
-down the aisle. Both left `min_distance` at `0.0` where a clear path was
-intended.
+**A crate-placement workaround here predates `74c7d5f` and is no longer
+needed.** Before that commit, the vehicle layer's fail-safe treated a forward
+sector with nothing in range as no-data (`in_stop_zone = TRUE`,
+`min_distance = 0.0` — the same reading a missing or stale scan produces), so
+clearing the zone required keeping `AisleCrate` inside the scanner's
+`range_max`: never out of the ±30° sector, and never pushed past 8 m from the
+vehicle. Since `74c7d5f`, an empty or out-of-range forward sector reads clear
+at `range_max` instead, and the fail-safe applies only to a scan that is
+missing, stale (over 0.50 s old) or structurally unusable — not to an open or
+out-of-range sector.
 
-The rule is therefore arithmetic, not a fixed number. With the scanner leading
-the model origin by 0.72 m and the crate's near face 0.45 m ahead of its centre,
-the in-sector range after the move is `x_crate − x_vehicle − 1.17`, and it must
-land **between the 1.20 m stop distance and the 8.0 m range maximum**. At 5.4.6
-the vehicle has stopped at `x ≈ −0.37`, so `--to-x 8.0` gives 7.04 m and is
-comfortably inside both bounds and inside the PLC's 0.05…8.10 m plausibility
-window.
-
-**Confirm the move in Group 2 before reading the step**:
-`"ForkliftInput".ForkliftObstacleMinDistance` must show a plausible number, not
-`0.0`. A `0.0` there means the crate went out of range, not that the path is
-clear, and the step must be re-run rather than reinterpreted.
+`--to-x 8.0` above still lands the crate at a plausible in-sector distance
+rather than exercising that clear-at-`range_max` path: with the scanner
+leading the model origin by 0.72 m and the crate's near face 0.45 m ahead of
+its centre, the in-sector range is `x_crate − x_vehicle − 1.17`, which at
+5.4.6's stop point (`x ≈ −0.37`) is 7.04 m — the figure the REHEARSAL EVIDENCE
+below reads back as `7.041 m`. The step is unchanged; only the reason the
+placement was once constrained has gone. Confirming the move in Group 2 is
+still good practice — `"ForkliftInput".ForkliftObstacleMinDistance` should
+read near that figure — but a `0.0` there no longer means the crate went out
+of range; since `74c7d5f` it is the same fail-safe reading a missing or stale
+scan produces.
 
 ### The held reset, produced from the page
 
@@ -753,4 +752,4 @@ refusal on the program, and never during a recorded scenario.
 | 2 | **§11 step 5.1.1's `ForkliftObstacleStopActive FALSE` is not guaranteed** under the specified start order. The zone evaluator's no-scan sentinel can be attributable, and the program then correctly latches. Both outcomes observed; a revision stating both is requested | `plc/` | **Closed by `bc6a570`.** §11 5.1.1 now states that **both readings pass**, names the race that decides which one appears, and replaces the single-value check with a pair check — the field bit and the distance are read *before* the verdict is judged, and the latch must **hold** rather than take a value. A latch found set clears at 5.1.3 and changes no later step |
 | 3 | **The HMI's reset cannot be held from the page.** One click is one write cycle, and §11 5.4.4–5.4.7 need it standing across the moment the zone clears. It is producible only by re-posting to `/control` above the write rate. A hold-capable RESET control would let the gate step be run entirely from the operator's screen | `hmi/` | **Closed by `7675960`.** RESET is press-and-hold, with keyboard down/up, writing `HmiResetRequest` `TRUE` every cycle while held and `FALSE` from the cycle after release, and a tap shorter than one write cycle still lands exactly one `TRUE` cycle. **T5.4 now runs entirely from the operator's screen.** The helper remains for T5.5.5, whose reset must stand before the page exists. The same commit added the H6 liveness deadman, whose interaction with the helper is recorded in §9 |
 | 4 | **No bridge configuration exists for the gate run**: `bridge.yaml` is cell-only by choice and `rehearsal-forklift.yaml` points at the double. The forklift group against the commissioned endpoint is a one-file addition after the TIA read-back, and it is a precondition of T5.1 | `bridge/` | **Open, queued to the owner**: `docs/TODO.md`, *owner — M4 queue*, the step "after the TIA read-back: point `bridge/config/bridge.yaml` at the `Forklift` groups". It is one edit per `bridge-design.md` §2.1 and it is deliberately not made before the read-back, because browsing nodes the CPU does not publish would error |
-| 5 | **An empty forward sector is a no-data condition, not a clear path** — the scanner's 8 m range against a 24 m hall. It shapes how the T5.4 stimulus must be written and is recorded in `sim/README.md` with the arena | `sim/` | **Closed by `aa593ed`**, the commit that carries this file: recorded in §6 with its arithmetic and in `sim/README.md` with the arena |
+| 5 | **An empty forward sector is a no-data condition, not a clear path** — the scanner's 8 m range against a 24 m hall. It shapes how the T5.4 stimulus must be written and is recorded in `sim/README.md` with the arena | `sim/` | **Superseded by `74c7d5f`** (`agv/`, outside this file): the behaviour this finding recorded was the teleop false-stop defect, not a feature worth a permanent workaround. §6 above and `sim/README.md` now state the corrected rule — an empty forward sector reads clear at `range_max` — and no longer carry the crate-placement workaround; the original closure by `aa593ed` recorded the pre-fix behaviour faithfully at the time it was written |
