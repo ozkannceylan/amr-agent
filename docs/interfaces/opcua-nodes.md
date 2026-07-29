@@ -1026,3 +1026,325 @@ Each row means "no such node under `DemoCell/Forklift/`".
 | 6 | Per-client write scoping remains policy rather than enforcement, and two writing clients widen the gap (ADR 0008 D2.5, §9.8's open item). Closing it is OPC UA access control plus the per-DB visibility work already carried | The gate that configures the server for a real client |
 | 7 | **An `HmiStartRequest` node in `Forklift/Hmi/`, requested by `plc/forklift/SPEC.md` §6.7 and its §12 item 4.** This section defines five requests and none is a start, so `HmiTeleopRequest` carries both the enable and the post-reset start action; the conflation and the operator's release-and-reassert sequence are written out in §10.7. A sixth request node would restore the M3 cell's two-device separation — a reset that clears and a separate start that energizes | Owner decision, **post-gate**. It moves the node count, the `ForkliftHmi` DB, a start value (§10.9), the HMI's every-cycle write set (§10.8 H1) and the PLC's enable edge together, which is not a change to make inside a commissioning run. Until then the conflation stands and is stated, not hidden |
 | 8 | **H6 was ruled ahead of its implementation; H5 was not.** H6 asked `hmi/` for five things: one timestamp refreshed by **every** request the page makes on the loopback endpoint, `UI_POLL_STALE_TIME` held as a named constant with its derivation beside it, the **existing** deadman fired when the window expires with the write cycle and the heartbeat left running, the two Bools re-armed only after the page has been seen to send each low, and the transition logged and rendered in `/state` so a page that returns learns why its controls were dropped. **H5 needed no code**: the split it rules is the behaviour already implemented and evidenced (`EVIDENCE_HMI.md` §A.8, §A.9, §B.8), and its three added clauses — one bounded attempt never retried, the counter stopping before the final write, nothing else written on the way out — were satisfied as built; H5's fourth clause binds the PLC specification instead, and `plc/forklift/SPEC.md` satisfies it by reacting to `HmiLinkOk` alone | **Closed by `7675960`, 2026-07-29** (`docs/reports/m4f-07b-h6-and-holdable-reset.md`). All five asks are implemented and demonstrated in `hmi/EVIDENCE_HMI.md` **§E** — `check_hmi_h6_and_reset.py`, 34 checks, no failures, against the PLC logic double. **Kernel K1** (§E.2–E.3) is this item's closure: the page's poll is frozen with the backend alive, all five requests read at rest 1063 ms after the last request against the 1000 ms window, the heartbeat increments straight through the drop, `HmiLinkOk` stays `TRUE` and `ForkliftResetRequired` stays `FALSE` — the process behaviour H6 specifies, with nothing latched — and recovery is the release rule, a page that thaws holding both Bools asserted getting neither carried. **Kernel K2** (§E.4) is the same commit's other half, `plc/forklift/SPEC.md` §11 T5.4 driven from the operator's endpoint, closing `m4f-08` finding 3 rather than this item. **One residual is carried, not erased**: `EVIDENCE_HMI.md` §D records that section C's browser pass predates the change and was not re-run, so the page's DOM handlers are unexercised since — E.4 drives the endpoint the page posts to, not the events. That is `hmi/`'s to close and it does not reopen this item |
+
+## 11. Forklift safety mirrors (M5 early)
+
+**These four nodes are display diagnostics. Nothing else.** They are read-only to every client, they
+feed no logic anywhere in this project, and **no client write can create, prevent or clear a safety
+reaction** — neither on this path nor on any other.
+
+**The safety demand never traverses the network; the mirror of it does.** The demand forms from
+simulated F-inputs, latches, and lives inside the F-runtime group of one CPU (ADR 0009 D3.1). What
+leaves that CPU is a **process consequence** — the standard program's motion permissive dropping and
+its three setpoints going to `0.0` (§10.6) — and a **copy of a flag**. A copy is not a cause, and the
+mirror of a demand is not the demand (ADR 0009 D3.3, `plc/forklift-safety/SPEC.md` §6.2 S3).
+
+Added by **ADR 0009**, which opens the cell-scope core of M5 early on the M4 forklift twin under a
+fallback rule. **Nothing in this section closes M5, and nothing here is an acceptance test passed**
+(ADR 0009 D2.3, D2.4; `plc/forklift-safety/SPEC.md` §1.2 N5) — see §11.8. The F-side names, meanings
+and start values below are `plc/forklift-safety/SPEC.md` §6, which is the contract this section
+consumes; where the two disagree, that document wins on what the flags mean and this one wins on what
+the nodes are called and who may read them.
+
+**The parent folder is the forklift *cell*, not the vehicle.** `Forklift/` is the commissioning
+cell's subtree (§10), and the demands mirrored here are **cell-scope** demands formed in the CPU:
+the logic of SF-01 and the SF-07 pattern, guarding a machine that happens to be vehicle-shaped. This
+plant has **no onboard safety layer at all** — no scanner, no protective field, no STO, no bumper
+(`plc/forklift-safety/SPEC.md` §1.2 N7) — and a reader watching a forklift stop must not infer one
+from a folder name.
+
+### 11.1 The path ruling — why these mirrors cannot land on the bare `Safety/` path
+
+**Ruling: the twin's mirrors are `DemoCell/Forklift/Safety/`, a sixth subfolder in the `Forklift/`
+subtree of the existing `DemoCell` server interface. They are not added to the top-level `Safety/`
+group of §4.** This resolves the collision `plc/forklift-safety/SPEC.md` §6.4 note 2 raised and left
+open, and it takes the resolution that document suggested.
+
+**It also answers a question an accepted ADR routed here.** ADR 0007 wrote, of the safety gate:
+*"Whether the mirrors appear in the M1 `Safety/` group or in the cell interface is an interface
+question, requested and not decided here."* The answer is **the cell interface**, in the subtree of
+the cell whose F-runtime group they mirror.
+
+The collision is not a leaf-name inconvenience. §4 already defines `Safety/SafetyResetRequired` for
+the **fixed cell**, and the twin's F-side flag carries that exact leaf name — so the bare path is not
+two nodes with similar names, it is **one full browse path for two different values**:
+
+| Why the bare path is forbidden | Detail |
+|---|---|
+| **One node cannot hold two values** | `Safety/SafetyResetRequired` is §4's node for the fixed cell's SF-08 mirror. Putting the twin's flag there gives one node two writers and two meanings, which is invariant 10 broken at the node rather than at the tag. A client that resolved it could not tell which machine it had answered about |
+| **Neither leaf can move** | §4's leaf is cited by name in `docs/safety/SRS.md` §4, as SF-08's informational mirror. The twin's leaf is fixed by `"InstF_Forklift_Safety".SafetyResetRequired` and by CLAUDE.md §9, which requires a node name to mirror its PLC tag exactly so the two documents can be diffed. **The thing that has to move is the path, because it is the only part of the address neither side owns by name** |
+| **The distinct path costs no edit to any existing sentence** | Every statement in this project that says `Safety/…` — SRS §4 and B1, `handshake-tables.md` §1's no-auto-resume rule, its §6 cell-safety-status row enumerating exactly four `Safety/` nodes, and `docs/roadmap.md` row M5 — still refers to precisely the group it was written about, and stays true untouched. A merged group would have made that four-node enumeration incomplete and made *"if any `Safety/` mirror shows a tripped function"* ambiguous across two machines with two F-programs |
+| **Different cells, different clients, different gates** | §4's group belongs to the **target cell served to the fleet manager** and is unbuilt. This group belongs to the **commissioning cell served to the HMI** on the `DemoCell` interface. §2.2's folder layout describes the first; §9.2 and §10.3 describe the second. A twin node in §2.2's tree would put the twin inside the fleet manager's cell |
+| **It keeps §9.8's refusal row alive** | §9.8 states that no safety node, safety mirror or safety-function reset exists **in the §9 node set**, and ADR 0007 predicted that row would be voided when a safety layer arrived. It is not voided: §11 adds nothing to §9's four folders. The M3 demonstration cell still carries no mirror of anything, its red mushroom is still a process stop (§9.6), and the row stands set-scoped and unedited |
+
+**The folder keeps the name every upstream document already uses.** ADR 0009 D3.3, `TWIN-DEMO-MAP.md`
+R3 and `docs/roadmap.md` row M5 all say *"the `Safety/` mirrors"*. What this ruling changes is the
+folder's **parent**, not its name, so those sentences read naturally against either group and the
+full path is what disambiguates.
+
+**Three "reset required" values now exist in this project, and no two share a path, a folder or an
+owner.** The second collision `plc/forklift-safety/SPEC.md` §6.4 note 3 raised is the standard-side
+one, and it is resolved by the same ruling:
+
+| Value | Full path | Owner | Means | Cleared by |
+|---|---|---|---|---|
+| Fixed cell, F-layer | `Safety/SafetyResetRequired` (§4) | the fixed cell's F-CPU, **unbuilt** | a monitored reset is pending on the fixed cell | a local monitored reset on that cell; never over the network |
+| Twin, F-layer | `Forklift/Safety/SafetyResetRequired` (§11) | the twin's F-runtime group | at least one F-latch stands on the twin | `"SafetyInputStandIn".ResetButtonPressed`, an F-input stand-in **no client can reach** (`TWIN-DEMO-MAP.md` R1) |
+| Twin, **process** | `Forklift/Status/ForkliftResetRequired` (§10.7) | `FB_ForkliftTeleop`, standard program | a process latch or a link loss stands | `Forklift/Hmi/HmiResetRequest`, a client write, on its rising edge |
+
+The two twin rows differ in **both** folder and leaf, which is what `TWIN-DEMO-MAP.md` R4 asks for:
+the process flag and the safety flag never share a node, and the two reset *inputs* are on opposite
+sides of the client boundary — one is a client write, the other is unreachable from any client.
+
+### 11.2 `Forklift/Safety/` — the four mirror nodes
+
+| BrowseName | S7 type | OPC UA type | Mirrors, exactly | Meaning |
+|---|---|---|---|---|
+| `EStopDemand` | Bool | Boolean | `"InstF_Forklift_Safety".EStopDemand` | The **logic of SF-01** is latched in the F-runtime group: the simulated cell e-stop circuit was seen open. **Latched** — it stays `TRUE` after the circuit closes again, and only a monitored reset clears it |
+| `ZoneStopDemand` | Bool | Boolean | `"InstF_Forklift_Safety".ZoneStopDemand` | The **SF-07 pattern** is latched: the simulated marked-zone device circuit was seen open. **This is not the lidar obstacle stop** — that is `Forklift/Status/ForkliftObstacleStopActive`, standard-program process logic, a different node in a different folder with a different owner (§11.4 MR7) |
+| `SafetyResetRequired` | Bool | Boolean | `"InstF_Forklift_Safety".SafetyResetRequired` | The `OR` of the two above: **a monitored reset is required**, including while its cause still stands. It does not answer *"would a reset be accepted now?"* — that is `CauseGone`, an F-internal that is deliberately not a node (§11.7) |
+| `SafetyResetFault` | Bool | Boolean | `"InstF_Forklift_Safety".SafetyResetFault` | The reset **device stand-in** is stuck or bridged: held past `RESET_HOLD_MAX`, or pressed and never seen open since the F-runtime group started. A diagnosis of a device, never a demand |
+
+**All four are Bool. There is no other type in this group and no analogue value of any kind** — no
+timer, no elapsed time, no count, no timestamp (§11.7).
+
+**Ruling: the BrowseNames are the F-side tag names exactly, with no prefix.** CLAUDE.md §9 requires
+OPC UA node names to mirror PLC tag names exactly so the two documents can be diffed, and
+`plc/forklift-safety/SPEC.md` §3.2 states that these mirror names diff against those tags. A
+`Safety…` or `Forklift…` prefix would make this the only place in the project where a mirror is
+renamed away from its source, and it would break a three-way diff — this table, the TIA export, and
+`plc/forklift-safety/SPEC.md` §6.1 — for a word the folder already carries.
+
+That is a deliberate departure from §10.3's `Forklift`-prefix convention, and the departure is
+narrow. **That convention answers "which client may write this tag" from the BrowseName alone**;
+here the answer is *none*, for every node in the group, which the folder and the access rights both
+already say. The diff property is worth more than the repeated word, and the group is small,
+uniform and unwritable.
+
+**`EStop` in a node name is correct here, as it is in §4, and in exactly those two places.** §10.1's
+naming discipline keeps "emergency" and "protective" out of every **process** node name precisely
+because those nodes implement no SRS function. This node mirrors an F-latch that implements the
+*logic* of one, so the rule cuts both ways: an `EStop…` name in this project means an F-layer flag
+and nothing else (`TWIN-DEMO-MAP.md` §5, which admits "e-stop" **only** for the F-side stand-in
+device and its demand). The discipline for §9 and §10 is unchanged and now matters more, because a
+correct use exists one folder away from the lidar stop that must never borrow it.
+
+**Ruling: `SafetyResetFault` is a mirror node.** `plc/forklift-safety/SPEC.md` §6.4 note 1 left the
+fourth flag to this document. It is admitted, for four reasons in the order that decides it:
+
+- **It is exactly what this group is.** A group of display diagnostics that omitted the one flag
+  saying *"the reset device is lying to you"* would be a curated view rather than a mirror.
+- **AT-08 (a)'s "reset-fault flagged" half needs an observable** that is not only the watch table, if
+  it is ever to be shown to anyone not sitting in TIA.
+- **It costs one Bool** in a data block being created anyway: no new folder, no new DB, no new
+  client write, no change to any other group.
+- **The watch table keeps it regardless.** `plc/forklift-safety/SPEC.md` §8 Group 2 reads all four
+  from F-data directly; this node is an addition to that instrument, never a replacement for it.
+
+Whether it also becomes a **lamp** is `hmi/`'s decision, not this document's (§11.8 item 5).
+
+### 11.3 Ownership, the data block and per-tag access rights
+
+**One new global DB, `ForkliftSafetyMirror`, holding all four Bools.** Not new members of
+`ForkliftStatus`: adding members moves the offsets of the four M4 status tags that current watch
+tables and evidence depend on, and a download that leaves project and CPU inconsistent shows up as
+monitoring errors on exactly the rows whose offsets moved (§10.3, LESSONS 2026-07-28). A new DB
+leaves the M4 group byte-identical while it is being commissioned.
+
+**The DB name deviates from the `Forklift<Folder>` pattern by one word, deliberately.**
+`ForkliftSafety` would sit one underscore from `F_Forklift_Safety [FB2]`, the safety block itself,
+and two things that must never be confused would be told apart by punctuation. With `Mirror` in the
+name, the word appears in every fully qualified tag, every watch-table row and every screenshot —
+the same reasoning `plc/forklift-safety/SPEC.md` §7.1 gives for naming the stand-in DB after what it
+stands in for.
+
+| DB | Folder | Contents | *Accessible from HMI/OPC UA* | *Writable from HMI/OPC UA* |
+|---|---|---|---|---|
+| `ForkliftSafetyMirror` | `Forklift/Safety/` | 4 mirror tags | ✔ | **✘ (all four)** |
+| `InstF_Forklift_Safety` (F instance DB) | — | the F-program's whole write set | **✘** | ✘ |
+| `SafetyInputStandIn` (F-input stand-in) | — | the three simulated F-input channels | **✘** | ✘ |
+
+The last two rows are `plc/forklift-safety/SPEC.md` D1 and D7, restated here because they are what
+makes this group **the only client-visible view of F-state**. No client reads F-data directly and no
+client reaches an F-input on any path, including the auto-published `DataBlocksGlobal` folder.
+
+Per-tag ownership. **The value's owner and the node's writer are different roles here, and both are
+single** (invariant 10):
+
+| Node (`Forklift/Safety/…`) | Value owner — single source of truth | Node writer | Readers |
+|---|---|---|---|
+| `EStopDemand` | the F-program, `"InstF_Forklift_Safety".EStopDemand` | PLC **standard** program, copying | HMI (display), owner in the watch table |
+| `ZoneStopDemand` | the F-program, `"InstF_Forklift_Safety".ZoneStopDemand` | PLC standard program, copying | HMI (display), owner in the watch table |
+| `SafetyResetRequired` | the F-program, `"InstF_Forklift_Safety".SafetyResetRequired` | PLC standard program, copying | HMI (display), owner in the watch table |
+| `SafetyResetFault` | the F-program, `"InstF_Forklift_Safety".SafetyResetFault` | PLC standard program, copying | HMI (display), owner in the watch table |
+
+**Why the safety program does not write its own mirrors.** It could — the tool permits an F-block to
+write a standard DB, and the build of 2026-07-29 did exactly that. It must not: one tag has one
+writer, and a client-visible node written by the safety program would put safety data on the wire
+under the safety program's name (ADR 0009 consequences, `plc/forklift-safety/SPEC.md` §3.4). The
+F-program's entire write set is its own instance DB; the standard program reads that DB and copies.
+
+**The copy derives nothing.** No threshold, no combination, no inversion, no filter, no timer. Each
+node is one unconditional assignment from one F-flag of the same name, so a mismatch is visible on a
+single line and a diff of the two documents is a diff of two identical name lists.
+
+**Zero PLC readers: the mirror group is a leaf of the data flow.** The standard program writes these
+four and **no program logic reads them**. The motion permissive's one new term is derived from the
+F-data directly (`plc/forklift-safety/SPEC.md` §6.1), never from a mirror, because a consumer never
+recomputes an owned value (invariant 10, §6.2 S3). **If any logic ever reads a mirror, this group
+stops being diagnostics and becomes a causal element** — which is the entire claim of this section,
+and it is checkable by cross-reference rather than by assertion.
+
+### 11.4 What no client and no program may do
+
+| # | Rule | Why |
+|---|---|---|
+| **MR1** | **No client writes any of the four.** *Writable from HMI/OPC UA* is cleared per tag, so a defect in either client is refused **by the CPU** | Read-only is enforcement here, not policy (ADR 0009 consequences, §10.3) |
+| **MR2** | **No client write can create, prevent or clear a safety reaction — and this holds independently of MR1.** The mirrors feed no logic (§11.3) and the standard program rewrites all four unconditionally every cycle, so a write that somehow landed would be a display artefact shorter than one PLC scan, reaching nothing | Two independent reasons, on purpose. A claim this load-bearing does not rest on one access-right checkbox |
+| **MR3** | **No client clears an F-latch by any route.** The only reset input is `"SafetyInputStandIn".ResetButtonPressed`, an F-input stand-in unreachable from any client. `Forklift/Hmi/HmiResetRequest` is the **process** reset and clears standard-program latches only | `TWIN-DEMO-MAP.md` R1, R2; §10.4, §10.7 |
+| **MR4** | **No consumer recomputes a demand** — not from a mirror, not from a combination of mirrors, not from plant state | Invariant 10; `plc/forklift-safety/SPEC.md` §6.2 S3 |
+| **MR5** | **The copy is unconditional and happens every cycle.** A conditional mirror write leaves a display saying "clear" after a demand has formed | `plc/forklift-safety/SPEC.md` §6.2 S5 |
+| **MR6** | **One copy path, one node per flag.** No second mirror of any of the four exists anywhere in this model, on any interface | A second mirror is a second answer to one question (invariant 10) |
+| **MR7** | **The zone demand and the lidar process stop never share a node, a lamp, a caption or a sentence.** `Forklift/Safety/ZoneStopDemand` and `Forklift/Status/ForkliftObstacleStopActive` are two nodes, in two folders, with two owners and two reset paths, and no display may merge or co-locate them | `TWIN-DEMO-MAP.md` R4; `plc/forklift-safety/SPEC.md` §1.3 — the single most likely place for this project's central claim to be misread |
+
+**`on-change` here describes the subscription, not the write.** A client subscribes to these as it
+does to any Bool verdict in §9.5 and §10.7. The PLC's own behaviour is MR5's: the DB members are
+assigned every cycle whether or not they changed, and the server reports the change when there is
+one. The two statements are about different sides and neither weakens the other.
+
+**One caveat, stated rather than discovered.** The per-tag *Writable* attribute is a property of the
+**DB member**, so it is expected to govern the auto-published `DataBlocksGlobal` path as well as the
+interface path — §9.8 records that at the commissioned access settings the DB path is not otherwise
+write-protected, and §9.8's open item to suppress DB-level exposure is unchanged by this section.
+**That expectation is a design value until it is read back out of the tool**, which is why §11.5 step
+6 asks for a **write attempt and its refusal**, not only a read. MR2's second reason is what keeps
+the outcome of that test off the safety path; it is run anyway, because the M5 criterion is a
+statement about what a client **cannot** do, and the only evidence for a negative is an attempt.
+
+### 11.5 TIA click path (the §10.2 / `plc/demo-cell/SPEC.md` §4.2–§4.3 pattern)
+
+1. CPU → *OPC UA communication* → *Server interfaces* → open the **existing** `DemoCell` interface.
+   Do **not** create a second interface and do **not** rename this one: the interface name **is** the
+   namespace URI (ADR 0006, §10.2).
+2. **Read the namespace URI back** and confirm it still reads `http://DemoCell`. Nothing is entered;
+   the field is derived and not editable. This read-back is repeated after any *Change device*, which
+   is known to delete server interfaces silently (LESSONS 2026-07-27).
+3. Create **one** new global DB `ForkliftSafetyMirror` with the four Bools of §11.2, *Accessible from
+   HMI/OPC UA* ✔ and *Writable from HMI/OPC UA* **✘ on every member**. A new DB, **not** new members
+   of `ForkliftStatus` (§11.3).
+4. In the interface, add a folder `Safety` beside `Hmi`, `Input`, `Output`, `Status` and `Link` under
+   `Forklift`, then drag the four tags into it. **Rename nothing**: each leaf must remain the
+   BrowseName of §11.2, so this document, the TIA export and `plc/forklift-safety/SPEC.md` §6.1 can
+   be diffed three ways.
+5. Download, then confirm the block diff circles are solid green before testing (LESSONS
+   2026-07-28). No offset in `ForkliftStatus` moves, because nothing was added to it — **check its
+   watch-table rows monitor without the error icon anyway**, since "should not have moved" is not a
+   verification.
+6. Browse with a client that is **not** the bridge; read all four at their start values (§11.6), then
+   **attempt one write and record the refusal with its status code and the date**. A read proves the
+   nodes exist; only the refused write proves the read-only claim. Record both in the manner of
+   §9.10.
+
+> **Everything in this section is a design value until step 6 is executed.** The folder, the four
+> BrowseNames, the per-tag rights, the start values and the refusal are what this document asks the
+> tool for; they become facts when they are read back out of it (LESSONS 2026-07-27, ADR 0006). **No
+> gate criterion may rest on one before then** — least of all a criterion about a client being unable
+> to write.
+
+### 11.6 Start values, and what an absent mirror means
+
+Interface expectation for the PLC specification — start values, **not** logic:
+
+| Node | Start value | Reading |
+|---|---|---|
+| `EStopDemand` | **`TRUE`** | The F-side value at every CPU start: `"SafetyInputStandIn".EStopCircuitClosed` starts `FALSE`, so the demand is latched from the first F-cycle of every run |
+| `ZoneStopDemand` | **`TRUE`** | Same, from the zone circuit |
+| `SafetyResetRequired` | **`TRUE`** | The `OR` of the two above. A monitored reset is genuinely required at every CPU start, before the machine can be enabled at all |
+| `SafetyResetFault` | `FALSE` | The reset device stand-in starts unpressed and nothing has been diagnosed. `TRUE` would assert a device fault no one has observed |
+
+**The rule is: a mirror's start value is its source's start value, not the type's zero.** The mirror's
+only job is to be right about the source, and the one moment it can be wrong for free is the scan
+before the first copy executes. A display reading "clear" then would be the boot-polarity defect
+LESSONS 2026-07-28 records for `BridgeLinkOk`, one layer up: **"not yet written" is not "clear"**,
+exactly as "not yet proven stale" was not "alive". Three of these four are therefore not the type's
+zero, deliberately, in the standing of §10.9's `ForkliftObstacleInStopZone`.
+
+As in §10.9, **start values are the last line, not the first**: the standard program overwrites all
+four in its first scan either way, and the F-side truth they are chosen to match is `TRUE`, `TRUE`,
+`TRUE`, `FALSE` at every CPU start (`plc/forklift-safety/SPEC.md` §3.1).
+
+**The fallback, and it needs no document edit** (ADR 0009 D4). The DB, the folder and these four
+nodes are created by the **same delta** that adds the copy statements to the standard program. If
+the F-layer is not built, that delta is not applied: no DB, no folder, no nodes, and the M4 teleop
+demonstration stands alone with its criteria unchanged.
+
+**An absent mirror renders as absent, never as clear** (`plc/forklift-safety/SPEC.md` §6.4 note 4).
+A client that cannot resolve these BrowseNames shows the group as *not present* and greys it; it
+never substitutes a `FALSE`, and it never treats an unresolved node as a value. **No client's connect
+may fail over this group**: it is outside the bridge's configured signal set (`bridge-design.md`
+§2.1) and optional for the HMI, so a server without it is a server with an unbuilt F-layer, not a
+server in error.
+
+### 11.7 Deliberately absent from `Forklift/Safety/`
+
+Each row means "no such node in the §11 node set", in the set-scoped sense §9.8 fixes.
+
+| Not in this group | Why |
+|---|---|
+| Any writable node, of any kind | Nothing a client writes can reach the F-layer. This is the group's defining property, not a restriction on it (§11.4 MR1, MR2) |
+| A safety reset, reset request, acknowledge, inhibit, mute or override node | Safety never traverses the network (invariant 1). §8's "safety commands" row holds here word for word, and `TWIN-DEMO-MAP.md` R1 forbids a client write clearing an F-latch by any route |
+| The F-program's internals — `CauseGone`, `ResetSeenOpen`, `ResetPressArmed`, `ResetHoldValid`, `ResetPulse`, either timer's `ET` or `PT` | They answer *"why did the reset not fire?"*, which is an engineering question asked at the machine, and they are already answered by the watch table (`plc/forklift-safety/SPEC.md` §8 Group 3). Exposing logic state invites a client to act on it (§9.8, §10.11) |
+| A "cell safe", "safety OK" or "all clear" aggregate | Safety states are never merged into a computed flag used for control — each layer acts only on its own inputs (`handshake-tables.md` §6, invariants 1, 7). The `OR` this cell needs is `SafetyResetRequired`, formed in the F-program, with one owner |
+| A mirror of the **fixed cell's** SF-01, SF-05, SF-07 or SF-08 | Those are §4's, on the target cell served to the fleet manager, and are unbuilt. This group mirrors the twin's F-runtime group and nothing else (§11.1) |
+| A PL, SIL, Category, diagnostic-coverage or channel-count node | No achieved PL, no Category and no safety-rated input is claimed anywhere on this plant (ADR 0009 D5, `plc/forklift-safety/SPEC.md` §1.2 N2–N4) |
+| A reaction time, latch age, demand timestamp or any Time value | No timing is claimed here: this program has no output to de-energize and no millisecond figure is measured (`plc/forklift-safety/SPEC.md` §1.2 N1). A timestamp on a mirror would read as a measured reaction time |
+| A second bridge or HMI heartbeat, or a link verdict for this group | One heartbeat per client, unchanged (§9.7, §10.1). A mirror group has no liveness of its own; its freshness is the standard program's cycle |
+
+### 11.8 What §11 does not close, the §10 seam, and open items
+
+**The seam with §10.11, stated plainly because this document would otherwise read as contradicting
+itself.** §10.11's first row says *"Any safety node, safety mirror, e-stop, protective stop, STO or
+safety reset — no such node under `DemoCell/Forklift/`"*, and §11 adds four safety mirrors under
+exactly that path. The row is **not an error and was not wrong when written**:
+
+- **Its invariant-1 half is unchanged and is what the row is really about.** No node in §11 is on a
+  safety path, carries a demand, or can affect one. The obstacle stop is still process logic and is
+  still named as such everywhere (ADR 0008 D3).
+- **What expired is its premise.** The row was written under ADR 0008 for a plant whose CPU had no
+  F-runtime group — *"this plant has no F-CPU"*. ADR 0009 replaced that CPU with a 1513F-1 PN
+  running one, and that is the fact the row rested on.
+- **The exception is bounded to these four read-only mirrors.** No safety command, no e-stop input,
+  no STO and no safety reset node is added, so the rest of the row stands word for word (§11.7).
+
+**One nearby sentence that survives, and why it is worth saying so.** §9.6 ends with *"`Safety/EStopActive`
+in §4 remains the only informational mirror of SF-01"*. That stays true: §4 mirrors **SF-01**, the
+fixed cell's e-stop chain, and `Forklift/Safety/EStopDemand` mirrors the twin's instantiation of
+**the logic of** SF-01 — a different latch, on a different machine, in a different F-program
+(`TWIN-DEMO-MAP.md` §5's say/never-say discipline is exactly this distinction). The sentence is
+scope-dependent rather than wrong, which is the category LESSONS 2026-07-27 says to sweep for; it is
+listed for a cross-reference in item 1 and needs no correction.
+
+**§10 is not edited by this brief**, so the pointer that would make the seam visible from the §10
+side is requested rather than taken (item 1 below). Counts stay set-scoped in the sense §9.8 fixes:
+**§11 is exactly 4 nodes**, §10.3's "18 nodes" remains a true statement about the M4 node set, and
+the `DemoCell` interface now carries 15 (§9) + 18 (§10) + 4 (§11) = **37**, with a client browsing
+from `Objects` seeing more than any of those numbers.
+
+**What §11 does not close.** Nothing here closes M5 or any part of its criterion, and a node existing
+is not an acceptance test passed (ADR 0009 D2.3, `plc/forklift-safety/SPEC.md` §1.2 N5). The M5
+criterion's own mirror clause — *"the `Safety/` mirrors are read-only and no client write can create,
+prevent or clear a safety reaction"* — is a gate-proper statement about the safety layer on the fixed
+cell; **whether it is satisfied by this group, by a fixed-cell group, or by both is decided at M5 and
+not here.** The accurate statement remains *"M5's cell-scope core is being built early"* (ADR 0009
+D2.4). Nothing in §11 may be cited as M4 evidence either (D2.2): the M4 showcase names every reaction
+as standard-program process logic, and these four nodes are no part of it.
+
+| # | Open item | Owner |
+|---|---|---|
+| 1 | **§10 needs three pointers to this section, and until they land this document reads as contradicting itself at §10.11**: the "no safety node under `DemoCell/Forklift/`" row of §10.11, §10.3's folder tree (which lists five subfolders, now six) and §10.3's node count (set-scoped, and true, but silent about this group). A fourth, optional, is §9.6's "the only informational mirror of SF-01", which is true and only reads as narrower than it is. The seam is analysed above; only the cross-references are missing | **Interface agent, its own brief.** Not taken here: this brief forbids changing §10, and an unannounced edit to a group under commissioning is the drift that prohibition exists to prevent |
+| 2 | **Every value in this section is a design value until read back out of the tool** (§11.5 step 6): the folder, the four BrowseNames, the per-tag rights, the four start values, and the refused write with its status code | Owner, at commissioning, recorded with its date as phase 0 recorded the M3 set (§9.10). **No gate criterion may rest on one before then** |
+| 3 | Whether the per-tag *Writable* ✘ also governs the auto-published `DataBlocksGlobal` path is **expected, not verified** (§11.4). §9.8's open item to suppress DB-level exposure is the general form and is unchanged | Owner, at the same read-back; the access-control gate for the general case |
+| 4 | **The bridge is deliberately not a reader**, and the reason is the M5 criterion itself: the reactions must execute with the bridge stopped and the OPC UA session down, so evidence of an F-demand must not come from the client that has to be able to be dead. The F-side instrument is the watch table, which reads F-data directly and does not depend on the copy. If the mirrors are ever wanted in the bridge's evidence CSV, that is a `bridge-design.md` change — its §2.1 configured signal set and its §4 signal map — and not a change here | Deferred by design; a later brief if the showcase asks for it |
+| 5 | `SafetyResetFault` has a **node** (§11.2). Whether it gets a **lamp** is `hmi/`'s decision; the HMI brief asks for three lamps and this section does not enlarge that ask | `hmi/`, its own brief |
+| 6 | **`plc/forklift-safety/SPEC.md` §6.4 notes 1–3 and its §10 open item 4 are answered by this section** — the group is `Forklift/Safety/`, the leaf names are the F-side names unchanged, and the fourth flag gets a node. That document asks to be told, and it is outside this agent's write scope | Requested: one line in §6.4 and one in its §10 open item 4, pointing at `opcua-nodes.md` §11 |
+| 7 | The copy statements themselves — one unconditional assignment per node, every cycle — are `plc/forklift/SPEC.md`'s. **This section is authoritative for the node names, the DB name and the per-tag rights**; `plc/forklift-safety/SPEC.md` §6 is authoritative for what the flags mean | The standard-side delta, its own brief |
