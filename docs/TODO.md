@@ -123,6 +123,9 @@ is the open gate and its brief queue lives in docs/PLAN.md.
 - roadmap.md: the paragraph after the m5a-02 note still carries ADR 0007's
   entry condition as pending, stale beside ADR 0009's closed checkpoint
   (m5a-02 report, open question 1).
+- opcua-nodes.md §11.8 open item 1 is answered by m5a-06b but its closure
+  mark needs a §11 edit that brief forbade — one line with the next
+  interface touch.
 - Stale gate numbers across SRS.md, PL-SCENARIOS.md, plc/demo-cell/SPEC.md,
   sim/README.md, WSL_ENVIRONMENT.md, CREDITS.md, DEFERRED.md,
   bridge-design.md — inventory in docs/reports/m4r2-02-roadmap-renumber.md §3
