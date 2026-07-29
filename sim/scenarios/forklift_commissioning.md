@@ -257,8 +257,10 @@ image is unattributable.
 `"ForkliftInput".ForkliftObstacleInStopZone` reads `FALSE` in Group 2. If
 `ForkliftObstacleStopActive` reads `TRUE`, record it with the cause — the zone
 evaluator's no-scan sentinel, not the DB start value — and continue: 5.1.3's
-reset clears it, because by then the cause is gone. A `SPEC.md` §11 revision to
-state both outcomes is requested in the report for this file.
+reset clears it, because by then the cause is gone. **`SPEC.md` §11 5.1.1 was
+revised in `bc6a570` to state both outcomes**: both readings pass, and the check
+is now the pair — the field bit and the distance are read before the verdict is
+judged, and the latch must *hold* rather than take a particular value.
 
 ---
 
@@ -384,11 +386,12 @@ transliteration of §7, and `hmi/EVIDENCE_HMI.md` §B.4 independently recorded
 `0.180 m/s` against a standing request of `0.60`, which is the same form.
 
 Both readings satisfy the criterion's own words, since the criterion asks only
-that traction be capped while the fork is raised. **Which form is intended is a
-`plc/` ruling**, and it is not one this file may take: either §11 5.3.4's Pass
-line is corrected to the scale form, or §§7 and 9 change to the limit form.
-Requested in the report for this file. Until it is ruled, record the observed
-value and name the form, rather than reading a mismatch as a program defect.
+that traction be capped while the fork is raised, so which form is intended was
+a `plc/` ruling rather than one this file could take. **It was taken in
+`bc6a570`: the scale form is the specified one, and §11 5.3.4's Pass line now
+reads `≈+0.060 m/s`** — the Pass line was the defect, not the program, and §6.5
+and §9's Group 3 row now say so beside it. The reading above is the one to
+expect at the CPU.
 
 ---
 
