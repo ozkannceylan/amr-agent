@@ -1,0 +1,153 @@
+# REHEARSAL CONFIG — the forklift loop against the PLC logic double.
+#
+# What this file is, stated first because a config file is the one place a run
+# picks up a whole set of assumptions without being asked:
+#
+#   * It is the **rehearsal** configuration. It carries the forklift group only
+#     and it points at `opc.tcp://127.0.0.1:4850`, the PLC **logic double** —
+#     a stand-in on the same machine, not a PLC and not PLCSIM Advanced.
+#   * **Gate evidence does not run on this file.** It runs on the live
+#     `bridge/config/bridge.yaml` against PLCSIM Advanced. Nothing observed
+#     against a double is evidence for the PLC program, for its scan cycle or
+#     for the loop the gate claims (`bridge-design.md` §10, ADR 0004).
+#   * **`bridge/config/bridge.yaml` stays cell-only** until the owner reads the
+#     `Forklift/` subtree back out of TIA Portal (`opcua-nodes.md` §10.2 step 6,
+#     `bridge-design.md` §12 item 10). Every value under `Forklift/` below is a
+#     design value: what this project asked the tool for, not what the CPU has
+#     been seen to publish. Pointing the commissioned config at that subtree
+#     before the read-back would have the bridge browse for nodes that may not
+#     exist, and a connect failure there is not a rehearsal.
+#
+# Everything the committed `bridge.yaml` says about the shape of a config holds
+# here word for word: addresses, cadences and housekeeping only. No threshold,
+# no tolerance, no clamp, no scale, no offset, no debounce time, no "hold last
+# value for X ms" — and the loader rejects any key it does not know
+# (`bridge-design.md` §2, §1.1).
+
+# The CONFIGURED SIGNAL SET (bridge-design.md §2.1): the forklift group alone.
+# 4 input slots, 3 output slots, 5 diagnostics, 13 nodes touched — twelve of
+# §10's eighteen plus the one shared heartbeat, which is a §9 node every
+# configuration uses — and a 5-key write allowlist derived from that set.
+#
+# The cell group is absent, so it contributes nothing to a rehearsal run: no
+# subscription, no slot, no node resolution, no write, no poll and no allowlist
+# entry (§2.1 G1). R3 therefore counts FOUR inputs and the heartbeat starts
+# without a single `/cell/*` topic being published.
+groups: ["forklift"]
+
+opcua:
+  # The PLC LOGIC DOUBLE, on this machine. Never PLCSIM's endpoint: an owner
+  # session may be live on the commissioned instance at any time, and a double
+  # must never share an endpoint with it (`bridge-design.md` §10).
+  endpoint: "opc.tcp://127.0.0.1:4850"
+
+  # The browse path crosses TWO namespaces (§3.1 N2), resolved by URI at every
+  # session establishment. Neither index appears here and neither is hardcoded:
+  # the double registers the same two URIs as the real server, deliberately at
+  # different indices, so a rehearsal exercises the same resolution the
+  # commissioned run does. The forklift group adds a LEVEL, not a namespace —
+  # `DemoCell/Forklift/…` resolves under the same interface node (§3.1 N7).
+  namespace_uris:
+    server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
+    interface: "http://DemoCell"
+
+  security_policy: "none"        # the double's setting; PLCSIM's is bridge.yaml's
+  certificate_path: null
+  private_key_path: null
+  username: null
+
+  # A REQUEST, never a value the bridge may rely on (§3.2 S1). Whatever the
+  # double grants is what governs, and the keep-alive is DERIVED from the grant
+  # at every session establishment — deliberately absent from this file (S3).
+  requested_session_timeout_ms: 10000
+  session_name: "amr-agent-bridge-rehearsal"
+
+  # Reconnect housekeeping (§8.1): retry timing for a broken session, never a
+  # gate on a signal.
+  reconnect_interval_s: 1.0
+  reconnect_backoff_max_s: 5.0
+
+nodes:
+  # `DemoCell` does not hang directly under `Objects`: it is a child of the
+  # ServerInterfaces folder the S7-1500 publishes, and that folder is
+  # Siemens-owned, so one index cannot qualify both elements (§3.1 N1/N3).
+  interface_path:
+    - namespace: server_interfaces
+      browse_name: "ServerInterfaces"
+    - namespace: interface
+      browse_name: "DemoCell"
+
+  # ONE heartbeat for the whole process, shared by every configured group
+  # (§2.1 G5). A forklift-only run writes the same `DemoCell/Link/BridgeHeartbeat`
+  # as a cell-only run; there is no second heartbeat (opcua-nodes.md §10.11).
+  heartbeat:
+    BridgeHeartbeat:               ["Link", "BridgeHeartbeat"]
+
+  groups:
+    forklift:
+      # WRITABLE by the bridge — the plant's state (opcua-nodes.md §10.5), in
+      # that section's order. `ForkliftObstacleInStopZone` is the one input
+      # whose TRUE is the NON-permissive state; it is carried uninverted and
+      # its DB start value is TRUE (§10.9).
+      inputs:
+        ForkliftForkHeight:            ["Forklift", "Input", "ForkliftForkHeight"]
+        ForkliftLinearSpeed:           ["Forklift", "Input", "ForkliftLinearSpeed"]
+        ForkliftObstacleInStopZone:    ["Forklift", "Input", "ForkliftObstacleInStopZone"]
+        ForkliftObstacleMinDistance:   ["Forklift", "Input", "ForkliftObstacleMinDistance"]
+      # READ and applied to the plant unchanged (§10.6): no ramp, no clamp, no
+      # interlock, no zeroing. Not writable on the server either — the two
+      # enforcements are independent (§10.3).
+      outputs:
+        ForkliftTractionSpeedRef:      ["Forklift", "Output", "ForkliftTractionSpeedRef"]
+        ForkliftSteerAngleRef:         ["Forklift", "Output", "ForkliftSteerAngleRef"]
+        ForkliftForkSpeedRef:          ["Forklift", "Output", "ForkliftForkSpeedRef"]
+      # READ for logging only, applied to nothing and used in no decision
+      # (§4.9). `HmiLinkOk` is the PLC's verdict on the OTHER client's liveness.
+      # The five `Forklift/Hmi/` requests and `Forklift/Link/HmiHeartbeat`
+      # appear nowhere in this file, in either direction: the bridge never
+      # touches the HMI's group, and the loader rejects a config that names it
+      # (§4.10).
+      diagnostics:
+        ForkliftTeleopActive:          ["Forklift", "Status", "ForkliftTeleopActive"]
+        ForkliftObstacleStopActive:    ["Forklift", "Status", "ForkliftObstacleStopActive"]
+        ForkliftSpeedLimitActive:      ["Forklift", "Status", "ForkliftSpeedLimitActive"]
+        ForkliftResetRequired:         ["Forklift", "Status", "ForkliftResetRequired"]
+        HmiLinkOk:                     ["Forklift", "Link", "HmiLinkOk"]
+
+ros:
+  node_name: "forklift_plc_bridge_rehearsal"
+  topics:
+    forklift:
+      # The vehicle layer's contract (opcua-nodes.md §10.10). Every one is
+      # std_msgs/Float64 or std_msgs/Bool, whose payload is the single field
+      # `data`: no index to resolve and no array to select from (§4.5).
+      fork_height:           "/forklift/fork_height"
+      linear_speed:          "/forklift/linear_speed"
+      obstacle_in_stop_zone: "/forklift/obstacle/in_stop_zone"
+      obstacle_min_distance: "/forklift/obstacle/min_distance"
+      cmd_traction_speed:    "/forklift/cmd/traction_speed"
+      cmd_steer_angle:       "/forklift/cmd/steer_angle"
+      cmd_fork_speed:        "/forklift/cmd/fork_speed"
+  # No `joint_name`: no configured group selects a joint out of a JointState
+  # array, and the loader rejects the key when nothing needs it (§2.1 G1).
+  analog_reliability: "reliable"     # "reliable" | "best_effort"
+
+cycle:
+  # 20 Hz, the same cadence as every other configuration. An interface
+  # expectation (opcua-nodes.md §9.2), NOT a deadline and NOT a control
+  # parameter: the bridge is best effort (invariant 9). A group adds slots,
+  # never a cadence of its own (§5.1).
+  period_s: 0.05
+  status_poll_period_s: 1.0
+
+evidence:
+  # A STEM, not a file name, exactly as everywhere else: the recorder appends a
+  # per-session suffix (UTC second + pid) and creates the file exclusively, so
+  # no rehearsal start can truncate an earlier capture (LESSONS 2026-07-28). The
+  # relative path resolves against the bridge directory, so this file names no
+  # machine. Rehearsal captures are kept apart from the gate's by their stem.
+  csv_path: "evidence/latency-rehearsal-forklift.csv"
+  flush_interval_s: 1.0
+
+logging:
+  level: "INFO"
