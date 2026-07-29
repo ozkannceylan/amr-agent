@@ -33,10 +33,6 @@ is the open gate and its brief queue lives in docs/PLAN.md.
   convenient; not gate work.
 
 ## sim
-- m4f-08 (in flight) — done when the five scenarios are an owner-runnable
-  procedure with an evidence checklist, all five rehearsed through the full
-  loop and labelled REHEARSAL EVIDENCE, and sim/README.md carries the arena
-  section.
 - Cell reskin (deferred, visual only, ARIAC licence blocker unchanged).
 - M6 carried: resume the parked navigation scenario (sim/scenarios/DEFERRED.md).
 
@@ -48,10 +44,10 @@ is the open gate and its brief queue lives in docs/PLAN.md.
   timing forbidden); m4r2-07 report has the context.
 
 ## hmi
-- Implement the operator-liveness rule once m4f-01c lands: a crashed browser
-  currently leaves the last joystick value being written under a healthy
-  heartbeat (m4f-07's declared gap — the page returns controls to rest on
-  release, blur, hide and unload, but not on a crash).
+- m4f-07b (issued) — done when H6's poll-staleness deadman runs (zeros under
+  a continuing heartbeat, recovery as release) and the reset button is
+  press-and-hold capable so §11 T5.4 is executable from the page, both
+  demonstrated against the logic double.
 
 ## bridge
 - Second witness for the masked-revert window (owner design decision,
@@ -65,6 +61,10 @@ is the open gate and its brief queue lives in docs/PLAN.md.
   out-of-window write that cannot be armed by accident in an evidence run.
 
 ## plc
+- m4f-04e (issued) — done when §11 5.3.4's pass line states the cap as the
+  scale §7 computes (0.20 request under the 0.30 cap ⇒ 0.060 m/s, the
+  rehearsed observation) and 5.1.1's first-read race is settled; SCL
+  byte-identical.
 - Fold into the next demo-cell plc brief: F6 (PresenceOnTimer.PT reads T#0MS
   after a CPU restart, likely §6.5's conditional call — diagnose, close or
   escalate); close SPEC §12 item 7 (rewrite-on-restart now delivered); T4.11

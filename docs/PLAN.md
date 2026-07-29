@@ -41,7 +41,10 @@ Implementation wave:
    with m4f-06b rehearsal config (22af207).
 7. m4f-07 hmi — backend + UI. Closed (4804f5a): 40 checks against the bridge
    double, 33 against the PLC logic double, banner and metrics panel live.
-8. m4f-08 sim — scenario procedure + full-loop rehearsal. In flight.
+8. m4f-08 sim — scenario procedure + full-loop rehearsal. Closed (aa593ed):
+   79/79 rehearsal checks across all five scenarios against the logic double,
+   PLCSIM never contacted. Its findings spawned m4f-04e (pass-line
+   corrections) and m4f-07b (H6 liveness + holdable reset), both issued.
 9. m4f-09 verifier — gate verification, last, after the owner evidence.
 
 Two defects were caught by building the logic double rather than by review,
