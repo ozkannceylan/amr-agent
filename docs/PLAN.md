@@ -43,9 +43,16 @@ Implementation wave:
    double, 33 against the PLC logic double, banner and metrics panel live.
 8. m4f-08 sim — scenario procedure + full-loop rehearsal. Closed (aa593ed):
    79/79 rehearsal checks across all five scenarios against the logic double,
-   PLCSIM never contacted. Its findings spawned m4f-04e (pass-line
-   corrections) and m4f-07b (H6 liveness + holdable reset), both issued.
+   PLCSIM never contacted.
 9. m4f-09 verifier — gate verification, last, after the owner evidence.
+
+Correction wave, all closed 2026-07-29: m4f-04e/f/g (cap ruled a scale in
+pass line, double label and caveat — bc6a570, ae08ebc, b9900b3),
+m4f-01e/f/g (the same ruling at its §10 origin, the wide speed-limit flag,
+item-8 closure — 3b944b2, 1618dff, 0ac2359), m4f-07b (H6 liveness + the
+holdable reset — 7675960), m4f-08b/c/d (scenario-doc reconciliation —
+1ed9b80, bd4c6a9, 63cc3e7). Agent-side gate work is complete; the gate
+waits on the owner's TIA session, the recording, then m4f-09.
 
 Two defects were caught by building the logic double rather than by review,
 both in the owner's test procedure rather than in the program: T5.4 released

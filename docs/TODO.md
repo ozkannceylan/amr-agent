@@ -26,9 +26,11 @@ is the open gate and its brief queue lives in docs/PLAN.md.
   error (m4f-06). bridge/config/rehearsal-forklift.yaml is the double-facing
   config and is not the gate config.
 - Run T5 per plc/forklift/SPEC.md §11 (T5.4 corrected 2026-07-29 — hold the
-  reset unbroken; the old release-and-re-assert order measured nothing) and
-  the five commissioning scenarios per sim/scenarios/forklift_commissioning.md,
-  then record the showcase — the recording is gate evidence.
+  reset unbroken, now executable from the page's press-and-hold RESET) and
+  the five commissioning scenarios per sim/scenarios/forklift_commissioning.md
+  (H6 note in its §9: a stimulus step that posts once and waits >1 s decays
+  to rest by design), then record the showcase — the recording is gate
+  evidence.
 - BELT_SPEED_MIN/MAX remain design values (m3-27) — measure and record when
   convenient; not gate work.
 
@@ -44,10 +46,11 @@ is the open gate and its brief queue lives in docs/PLAN.md.
   timing forbidden); m4r2-07 report has the context.
 
 ## hmi
-- m4f-07b (issued) — done when H6's poll-staleness deadman runs (zeros under
-  a continuing heartbeat, recovery as release) and the reset button is
-  press-and-hold capable so §11 T5.4 is executable from the page, both
-  demonstrated against the logic double.
+- Carried, low: EVIDENCE_HMI.md §C's browser pass predates the m4f-07b change
+  (7675960) and was not re-run — the endpoint pass proves the behaviour, the
+  page's new DOM handlers are unexercised. The owner's live session exercises
+  the page naturally; capture one screenshot of the held RESET there and the
+  §D residual row closes.
 
 ## bridge
 - Second witness for the masked-revert window (owner design decision,
@@ -61,10 +64,6 @@ is the open gate and its brief queue lives in docs/PLAN.md.
   out-of-window write that cannot be armed by accident in an evidence run.
 
 ## plc
-- m4f-04e (issued) — done when §11 5.3.4's pass line states the cap as the
-  scale §7 computes (0.20 request under the 0.30 cap ⇒ 0.060 m/s, the
-  rehearsed observation) and 5.1.1's first-read race is settled; SCL
-  byte-identical.
 - Fold into the next demo-cell plc brief: F6 (PresenceOnTimer.PT reads T#0MS
   after a CPU restart, likely §6.5's conditional call — diagnose, close or
   escalate); close SPEC §12 item 7 (rewrite-on-restart now delivered); T4.11
