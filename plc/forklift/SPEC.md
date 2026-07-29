@@ -657,11 +657,16 @@ apart, which is why §11 has step 5.3.4 at all.
 
 **`ForkliftSpeedLimitActive` reads "the cap is in force", not "the cap is
 biting".** It is `TRUE` whenever teleop is active and the carriage is raised, and
-it does not flicker with the operator's control. `opcua-nodes.md` §10.7 describes
-it as "the carriage is raised past the cap's height **and** the traction setpoint
-is being limited below what the operator asked for", which could be read as the
-narrower verdict; the wider reading is implemented because it is the one that is
-useful on a display and stable in a recording.
+it does not flicker with the operator's control. **`opcua-nodes.md` §10.7 now
+states this wider reading and the caveat is withdrawn** (commit `1618dff`,
+2026-07-29): the flag is `TRUE` *"while teleop is active and the carriage is
+raised … regardless of the momentary demand"*, and §10.7 names **"the cap is
+biting"** as the discarded reading so it cannot be re-derived. The revision it
+replaces described the flag as a conjunction — raised **and** the traction
+setpoint being limited below what the operator asked for — which read as the
+narrower verdict. **The ruling ratifies what this section already implements**:
+no statement, constant, tag or start value moved on either side, and the wider
+reading remains the one that is useful on a display and stable in a recording.
 
 **Under a scale the narrower verdict collapses to "the operator is asking for
 something".** `demand × 0.30` is below `demand × 1.00` for *every* non-zero
