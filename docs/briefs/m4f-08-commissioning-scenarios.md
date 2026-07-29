@@ -14,7 +14,8 @@ inputs:              [docs/roadmap.md M4 row, plc/forklift/SPEC.md section 11,
                       bridge/config/rehearsal-forklift.yaml (m4f-06b)]
 deliverable:         sim/scenarios/forklift_commissioning.md (procedure + evidence
                      checklist), plus any stimulus helper script under
-                     sim/scenarios/ it needs
+                     sim/scenarios/ it needs, plus the sim/README.md section for
+                     the arena and these scenarios (requested by m4f-03's report)
 done_when:           each roadmap criterion (a)-(e) has a scenario with: exact
                      process start order (PLCSIM, bridge, sim bringup, vehicle
                      nodes, hmi — with GZ_PARTITION/ROS_DOMAIN_ID values), operator
@@ -35,6 +36,11 @@ done_when:           each roadmap criterion (a)-(e) has a scenario with: exact
 forbidden:           [running against live PLCSIM (owner-run), editing agv/ bridge/
                       hmi/ plc/ files, redefining any gate criterion, mentioning
                       any deadline]
+
+Process notes binding on the scripts: SIGINT does not reliably bring the launch
+process group down (m4f-03 measured >6 s) — every scenario script verifies with
+pgrep -af and finishes by exact pid; fresh GZ_PARTITION and ROS_DOMAIN_ID per
+run as always.
 ```
 
 Git: repo-local owner identity; pathspec-scoped commit of exactly your sim/ files
