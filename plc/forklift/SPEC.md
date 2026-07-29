@@ -117,8 +117,12 @@ holds it.
 > **`ForkliftObstacleInStopZone` starts `TRUE`, the one start value here that is
 > not the type's zero, and that is deliberate** (`opcua-nodes.md` §10.9). Its
 > polarity inverts the `…CircuitClosed` convention of the M3 panel: `TRUE` is the
-> **non-permissive** state, and the vehicle layer publishes `TRUE` whenever the
-> scan is invalid, non-finite or stale. The bridge may not invert a signal, so
+> **non-permissive** state, and the vehicle layer publishes `TRUE` only when the
+> scan is missing, stale or structurally unusable, or the forward sector has no
+> sample in either valid class — never merely because a sample reads beyond the
+> scan's own `range_max`, which is `CLEAR` and reads `FALSE` at `8.00`
+> (`docs/reports/m4f-02c-inf-means-clear.md`, commit `74c7d5f`). The bridge may
+> not invert a signal, so
 > fail-safety is carried by the publisher's polarity, by this start value, and by
 > the qualification rule below — not by the name. Anyone renaming this node must
 > move the polarity of `/forklift/obstacle/in_stop_zone` with it, in the vehicle
@@ -1128,7 +1132,7 @@ writes.
 |---|---|---|
 | `"ForkliftInput".ForkliftForkHeight` | Floating-point | `0.00` parked; rises at ≈0.15 m/s while jogging up; within −0.05 … 1.70 |
 | `"ForkliftInput".ForkliftLinearSpeed` | Floating-point | ≈`0.0` at rest; tracks `ForkliftTractionSpeedRef`; within ±2.00 |
-| `"ForkliftInput".ForkliftObstacleInStopZone` | Bool | **`TRUE` is the non-permissive state.** `FALSE` with the forward sector clear; `TRUE` on a field violation **and** on an invalid, non-finite or stale scan |
+| `"ForkliftInput".ForkliftObstacleInStopZone` | Bool | **`TRUE` is the non-permissive state.** `FALSE` with the forward sector clear, including a sector entirely beyond the scan's `range_max` — beyond-range is `CLEAR` at `8.00`, not absent data; `TRUE` on a field violation **and** on a missing, stale or structurally unusable scan, or a sector with no sample in either valid class (`docs/reports/m4f-02c-inf-means-clear.md`, commit `74c7d5f`) |
 | `"ForkliftInput".ForkliftObstacleMinDistance` | Floating-point | 0.10 … 8.00 with a usable scan; **`0.0` is the no-data sentinel** and reads as a transducer fault, not as a clear path |
 
 ### Group 3 — PLC output setpoints driving the plant
