@@ -72,7 +72,7 @@ name.
 | `/forklift/linear_speed` | `std_msgs/Float64` | 10 Hz | `forklift_io` | forward ground speed [m/s] |
 | `/forklift/obstacle/in_stop_zone` | `std_msgs/Bool` | 10 Hz | `obstacle_zone` | something inside the forward stop zone |
 | `/forklift/obstacle/min_distance` | `std_msgs/Float64` | 10 Hz | `obstacle_zone` | nearest valid range in the sector [m] |
-| `/forklift/scan` | `sensor_msgs/LaserScan` | 10 Hz | bridge | the scanner, renamed from the gz topic |
+| `/forklift/scan` | `sensor_msgs/LaserScan` | 10 Hz | bridge | The scanner, renamed from the gz topic. **Not gap-free.** The gz `gpu_lidar` drops the single sample at exactly +-45 deg. It is the sensor and not the bridge: the `inf` is already in the raw gz message, it appears in the middle of an object returned continuously either side of it, it reproduces against a flat wall, and it follows the vehicle's orientation rather than sitting at a fixed index, so turning the vehicle recovers that ray and loses another (m4f-03 evidence). A consumer of this topic must therefore not assume every sample is finite. `obstacle_zone.py` already treats it correctly, because it judges validity affirmatively per sample and takes the minimum of what is left, rather than condemning a whole scan for containing a bad sample. |
 | `/forklift/odom` | `nav_msgs/Odometry` | 20 Hz | bridge | odometry, renamed from the gz topic |
 | `/forklift/joint_states` | `sensor_msgs/JointState` | physics rate | bridge | joint state, renamed from the gz topic |
 | `/forklift/gz/*_cmd` | `std_msgs/Float64` | on change | `forklift_io` | the raw joint commands, same name both sides |
