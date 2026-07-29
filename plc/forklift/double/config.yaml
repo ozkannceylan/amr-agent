@@ -1,0 +1,25 @@
+# Forklift PLC logic double - configuration.
+#
+# REHEARSAL STAND-IN. The TIA Portal build of plc/forklift/SPEC.md is the plant.
+#
+# Nothing behavioural lives here. Every constant the logic uses is in logic.py's
+# Constants class, transliterated from SPEC.md section 3.3, because a process
+# decision that could be edited in a config file is a process decision that has
+# left the PLC layer. This file carries transport and scheduling only.
+
+server:
+  # 4850. Reserved elsewhere and never to be used here: 4840 is PLCSIM
+  # Advanced's OPC UA server, and 4842-4846 belong to the bridge's own test
+  # doubles. server.py refuses to start on any of them.
+  host: "0.0.0.0"
+  port: 4850
+  path: "/"
+  name: "ForkliftLogicDouble"
+
+logic:
+  # OB30's period, SPEC.md section 4.1. The IEC TONs are timed from the MEASURED
+  # scan period rather than from this nominal value, which is what an S7 TON
+  # does -- it times against the CPU clock, not against an assumed cycle. So a
+  # loop that overruns stretches its timers honestly instead of silently running
+  # them slow.
+  scan_period_s: 0.020
