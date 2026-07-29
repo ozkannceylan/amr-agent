@@ -41,8 +41,11 @@ is the open gate and its brief queue lives in docs/PLAN.md.
 - M6 carried: resume the parked navigation scenario (sim/scenarios/DEFERRED.md).
 
 ## interface
-- m4f-01c (in flight) — done when §10.8 scopes H5's shutdown split and adds
-  the operator-liveness rule with its named constant.
+- Carried, low (fold into the next interface brief): bridge-design.md §7.2
+  and opcua-nodes.md §9.7 still share the flat "No timer, threshold or
+  reaction exists in the bridge" sentence that §10.1's ruling rephrased
+  everywhere else — scope it the same way (own-cycle timers allowed, process
+  timing forbidden); m4r2-07 report has the context.
 
 ## hmi
 - Implement the operator-liveness rule once m4f-01c lands: a crashed browser
