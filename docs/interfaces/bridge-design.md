@@ -392,7 +392,7 @@ cell's and are stated rather than left to be inferred:
 | # | OPC UA node (`DemoCell/Forklift/…`) | S7 / OPC UA type | → ROS 2 topic | Msg type | Field | Conversion | Cadence |
 |---|---|---|---|---|---|---|---|
 | 14 | `Output/ForkliftTractionSpeedRef` | Real / `Float` | `/forklift/cmd/traction_speed` | `std_msgs/Float64` | `data` | `Float → float64` widening, m/s unchanged. **No ramp, clamp, interlock or zeroing** | polled 20 Hz; published every cycle in which a value was read |
-| 15 | `Output/ForkliftSteerAngleRef` | Real / `Float` | `/forklift/cmd/steer_angle` | `std_msgs/Float64` | `data` | widening, rad unchanged. **No clamp** — the PLC clamps to the mechanical range, and deliberately does *not* centre the steer on a stop | as above |
+| 15 | `Output/ForkliftSteerAngleRef` | Real / `Float` | `/forklift/cmd/steer_angle` | `std_msgs/Float64` | `data` | widening, rad unchanged. **No clamp and no centring** — both are the PLC's: it clamps to the mechanical range and drives the angle to `0.0` in the interlock-failed `ELSE`, like the other two setpoints (§10.6) | as above |
 | 16 | `Output/ForkliftForkSpeedRef` | Real / `Float` | `/forklift/cmd/fork_speed` | `std_msgs/Float64` | `data` | widening, m/s unchanged. `0.0` means *hold*, and the bridge translates it into nothing — it publishes `0.0` | as above |
 
 All four output rows (8 and 14–16) are read and published in the **same cycle phase**, so
@@ -697,7 +697,7 @@ value into a session verdict — which is why the bridge's own node is the one u
 | N1 | The bridge publishes on an output topic **only** values it has just read from that topic's `Output/` node in the current cycle. Per slot, for all four: `/cell/conveyor/cmd_speed` from `ConveyorSpeedCommand`, and the three `/forklift/cmd/*` from their `Forklift/Output/*Ref` |
 | N2 | It **never re-publishes a value it read before an outage**. A value read before a disconnect is discarded at the disconnect and is never replayed |
 | N3 | It publishes **nothing** while disconnected — not the last value, not zero, not anything, on any output topic |
-| N4 | After reconnect the first published value is whatever the PLC is commanding **now**. If the PLC has dropped its cycle-running flag or its teleop-active verdict (as §7.4 expects), those values are `0.0` and the machine stops. If the PLC is still commanding motion, the machine moves — because the PLC decided so, which is correct. Note that `ForkliftSteerAngleRef` is deliberately *not* driven to zero by the PLC on a stop (`opcua-nodes.md` §10.6): the bridge carries whatever angle it reads, and that too is the PLC's decision |
+| N4 | After reconnect the first published value is whatever the PLC is commanding **now**. If the PLC has dropped its cycle-running flag or its teleop-active verdict (as §7.4 expects), those values are `0.0` and the machine stops. If the PLC is still commanding motion, the machine moves — because the PLC decided so, which is correct. Note that `ForkliftSteerAngleRef` **is** driven to `0.0` on a stop like the other two (`opcua-nodes.md` §10.6), so a reconnect into a stopped machine carries a centred steer: the bridge publishes whatever angle it reads, and that too is the PLC's decision |
 | N5 | The bridge has no notion of "resume", no saved command state, and no shutdown hook that writes a value |
 
 This is CLAUDE.md §9 ("after a stop the machine never resumes automatically") honoured by
