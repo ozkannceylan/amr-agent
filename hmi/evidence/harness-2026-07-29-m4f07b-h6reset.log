@@ -1,0 +1,55 @@
+Requested session timeout to be 3600000ms, got 600000ms instead
+HMI H6 + held-reset harness — server opc.tcp://127.0.0.1:4850/ (PLC LOGIC DOUBLE), HMI http://127.0.0.1:8090
+Roles: this harness plays the bridge, the plant AND the page; the HMI plays the operator's side of the wire; the double plays the PLC and owns every verdict. Nothing here is evidence about the TIA Portal build.
+
+K0. the loop is up: both links, latches cleared, teleop enabled, driving
+   ok   the HMI reached CONNECTED against the logic double
+   ok   HmiLinkOk went TRUE once the HMI's counter had been seen to change
+   ok   BridgeLinkOk is TRUE too — teleop needs both (§10.8 P7)
+   ok   the boot latches cleared on the reset's rising edge
+   ok   and teleop came up on the separate rising edge of the enable
+   ok   the machine is driving — ForkliftTractionSpeedRef 0.60 m/s
+
+K1. §10.8 H6 — the page's poll stops while the BACKEND STAYS ALIVE
+        before: HmiTractionRequest 0.600, HmiTeleopRequest True, page state LIVE, window 1000.0 ms = 200.0 ms poll x 5
+   ok   all five requests went to rest 1063 ms after the page went quiet, against a 1000 ms UI_POLL_STALE_TIME — the enable included
+        at rest on the server: HmiTractionRequest=0.000, HmiSteerRequest=0.000, HmiForkRequest=0.000, HmiTeleopRequest=False, HmiResetRequest=False
+   ok   and the HEARTBEAT KEPT RUNNING across the drop — 17 -> 27 over 1.0 s. The process is healthy and keeps saying so; what is gone is the page
+   ok   HmiLinkOk is still TRUE — the PLC was told nothing new (True)
+   ok   NOTHING LATCHED: ForkliftResetRequired is FALSE, so no reset is owed for a page that went away (False)
+   ok   the machine stopped anyway, and the PLC decided it from requests at rest — teleop False, refs 0.0, 0.0, 0.0
+        page section as the backend renders it: {"state": "STALE", "age_ms": 2042.6, "last_request_utc": "2026-07-29T10:46:07.941+00:00", "requests": 9, "drops": 1, "last_drop_utc": "2026-07-29T10:46:08.984+00:00", "stale_after_ms": 1000.0, "poll_period_ms": 200.0, "teleop_armed": false, "reset_armed": false}
+   ok   the backend is healthy and says so on the operator's own banner — session CONNECTED, page STALE after 2042.6 ms, drops 1
+   ok   and both Bools are disarmed until the page is seen to send them low — teleop_armed False, reset_armed False
+
+K1r. recovery is a RELEASE, not a resume
+   ok   the three Reals are carried again on the page's very first post — HmiTractionRequest 0.30000001192092896
+   ok   but NEITHER Bool is, even though the page posted both TRUE — a page that thaws with the enable still asserted must not produce a rising edge no operator made — teleop False, reset False
+   ok   once the page had been seen to send it low, the reset is carried again — True
+   ok   and so is the enable — True
+   ok   teleop returned with NO monitored reset demanded of the operator: nothing had latched, so nothing had to be cleared
+        page section now: {"state": "LIVE", "age_ms": 104.1, "last_request_utc": "2026-07-29T10:46:11.980+00:00", "requests": 25, "drops": 1, "last_drop_utc": "2026-07-29T10:46:08.984+00:00", "stale_after_ms": 1000.0, "poll_period_ms": 200.0, "teleop_armed": true, "reset_armed": true}
+
+K2. SPEC §11 T5.4 5.4.2-5.4.9 — the reset HELD across the zone clearing
+   ok   5.4.1 driving at a steady traction demand — ref 0.60 m/s
+   ok   5.4.2 ForkliftObstacleStopActive latched
+   ok   teleop dropped, all three refs 0.0, ForkliftResetRequired TRUE — 0.0, 0.0, 0.0
+   ok   while HmiTractionRequest is STILL STANDING at 0.6000000238418579 — the latch overrides a live command
+        5.4.3 holding the traction control for 10 s, posting NOTHING — the page's GET /state poll is the only traffic, and it is what keeps the request carried (§10.8 H6)
+   ok   after 10 s of silence the demand still stands at 0.6000000238418579 and the ref is still 0.0 — nothing resumed and nothing crept
+   ok   5.4.4 HmiResetRequest reads TRUE on the server in 20 of 20 samples over 1.0 s — the reset is HELD, which is what m4f-08 finding 3 said the page could not produce
+   ok   and it is REFUSED while the obstacle is still in the zone: ForkliftObstacleStopActive True, ForkliftResetRequired True — causeGone is false on C3
+   ok   5.4.5 the enable is refused while a latch stands, so the machine cannot drive itself clear — ForkliftTeleopActive False — and the reset stayed asserted across both posts (True), so the hold is unbroken
+   ok   5.4.6 the zone cleared with the reset STILL ASSERTED — zone False, HmiResetRequest True
+   ok   and the latch STANDS: the field clearing does not release it, and the still-asserted reset supplies no edge — the edge it did produce happened while the cause was still standing
+        5.4.7 stuck reset: 10 more seconds with the zone clear and the button still down
+   ok   the latch NEVER clears for as long as it is held — HmiResetRequest True, ForkliftObstacleStopActive True, ForkliftResetRequired True. No elapsed time makes an edge appear
+   ok   5.4.8 released — HmiResetRequest reads FALSE on the server
+   ok   and on that FRESH rising edge every latch clears — ForkliftResetRequired FALSE
+   ok   ForkliftObstacleStopActive cleared with it — False
+   ok   and NOTHING MOVED: teleop is still FALSE though the enable has been asserted throughout, because a level that never fell produces no edge — ref 0.0
+   ok   5.4.9 released and re-asserted, the enable produces a real edge, teleop returns and the refs follow the operator again — 0.60 m/s
+        the page beacon polled GET /state 135 times, at 200 ms, except while it was deliberately frozen for K1
+
+no failures
+HMI stdout/stderr: /tmp/amr-hmi/hmi-h6-run.log

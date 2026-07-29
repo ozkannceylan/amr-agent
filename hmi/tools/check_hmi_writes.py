@@ -17,6 +17,12 @@ It plays two roles at once, both from outside the HMI process:
 It never contacts PLCSIM Advanced: a non-loopback endpoint is refused outright,
 on the precedent of `bridge/tools/check_forklift_slots.py`.
 
+Playing the operator now also means **polling like the page does**. §10.8 H6
+makes the browser's unconditional `GET /state` the page's liveness beacon, and a
+harness that posts a control and then reads OPC UA for three seconds is
+indistinguishable from a crashed browser. `PageBeacon` below supplies that poll
+for the whole run; it stands in for the page and is not part of the HMI.
+
 The checks, each named for the rule it tests:
 
     J   the write allowlist refuses a config that names anything else
@@ -28,7 +34,8 @@ The checks, each named for the rule it tests:
         repair it, which a write-on-change client would never do
     C   deadman: release writes zeros immediately
     D   HmiTeleopRequest is a LEVEL, asserted and withdrawn (§10.4)
-    E   HmiResetRequest is momentary: TRUE for one write cycle, then FALSE
+    E   HmiResetRequest is a LEVEL too — carried for as long as it is held, low
+        again on release, and a tap shorter than one write cycle still lands
     F   the heartbeat advances every cycle
     M   the metrics panel reads Input/Output/Status/Link and nothing else
     G   session lost and regained: the counter is NOT reset (§10.8 H4) and the
@@ -54,6 +61,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -64,6 +72,10 @@ from asyncua import Client, ua
 
 HERE = Path(__file__).resolve().parent
 HMI_DIR = HERE.parent
+
+#: The page's poll period, `hmi/static/index.html`. The backend derives its H6
+#: window from this same number; the harness only has to poll like the page.
+PAGE_POLL_S = 0.200
 
 HMI_NODES = ("HmiTractionRequest", "HmiSteerRequest", "HmiForkRequest",
              "HmiTeleopRequest", "HmiResetRequest")
@@ -151,6 +163,50 @@ async def until_async(coro_factory, timeout: float = 6.0, poll: float = 0.05):
             return value
         await asyncio.sleep(poll)
     return None
+
+
+class PageBeacon:
+    """Stands in for the browser's unconditional `GET /state` (§10.8 H6).
+
+    An instrument that plays the operator has to poll like the operator's page,
+    because the backend's window is over the page's requests and not over the
+    operator's activity. `freeze()` stops the poll without stopping the harness,
+    which is what "the browser crashed with the joystick held" looks like from
+    inside this process.
+    """
+
+    def __init__(self, base: str, period: float = PAGE_POLL_S) -> None:
+        self.base = base
+        self.period = period
+        self.polls = 0
+        self._enabled = True
+        self._alive = True
+        self._thread = threading.Thread(target=self._loop, name="page-beacon",
+                                        daemon=True)
+
+    def start(self) -> "PageBeacon":
+        self._thread.start()
+        return self
+
+    def _loop(self) -> None:
+        while self._alive:
+            if self._enabled:
+                try:
+                    with urllib.request.urlopen(f"{self.base}/state", timeout=1.0) as r:
+                        r.read()
+                    self.polls += 1
+                except (urllib.error.URLError, OSError):
+                    pass
+            time.sleep(self.period)
+
+    def freeze(self) -> None:
+        self._enabled = False
+
+    def thaw(self) -> None:
+        self._enabled = True
+
+    def stop(self) -> None:
+        self._alive = False
 
 
 class Observer:
@@ -262,6 +318,7 @@ async def run(args: argparse.Namespace, double: DoubleControl) -> int:
         [args.python, str(HMI_DIR / "hmi_server.py"), "--config", args.config]
         + (["--evidence-csv", args.evidence_csv] if args.evidence_csv else []),
         stdout=log, stderr=subprocess.STDOUT)
+    beacon = PageBeacon(args.hmi).start()
     try:
         if not check(bool(await until(lambda: state_is(args.hmi, "CONNECTED"), 20)),
                      "the HMI reached CONNECTED against the double"):
@@ -340,8 +397,8 @@ async def run(args: argparse.Namespace, double: DoubleControl) -> int:
         check(values["HmiTeleopRequest"] is False,
               f"withdrawn by writing FALSE — {values['HmiTeleopRequest']}")
 
-        # ---- E: reset is momentary ----------------------------------------- #
-        head("E. HmiResetRequest is momentary: TRUE for one write cycle, then FALSE")
+        # ---- E: the reset is a level, and it is HELD ----------------------- #
+        head("E. HmiResetRequest is a LEVEL, carried for as long as it is held (§10.4)")
         samples: list[tuple[bool, int]] = []
         post_control(args.hmi, traction=0.0, steer=0.0, fork=0.0, teleop=False, reset=True)
         t0 = time.monotonic()
@@ -351,15 +408,36 @@ async def run(args: argparse.Namespace, double: DoubleControl) -> int:
             await asyncio.sleep(0.01)
         true_samples = [s for s in samples if s[0] is True]
         heartbeats = {s[1] for s in true_samples}
-        check(bool(true_samples),
-              f"the pulse was observed TRUE on the server — {len(true_samples)} of "
-              f"{len(samples)} samples over 1.0 s")
-        check(len(heartbeats) <= 2,
-              f"and it spanned {len(heartbeats)} heartbeat value(s) — one write cycle, "
-              f"sampled across a 100 ms cycle boundary")
-        check(samples[-1][0] is False,
-              f"and it reads FALSE again afterwards, so the PLC sees the node low between "
-              f"presses and can arm its edge per link session (§10.8 P6) — {samples[-1][0]}")
+        check(len(true_samples) > 0.8 * len(samples),
+              f"held down, it reads TRUE on the server for the whole hold — "
+              f"{len(true_samples)} of {len(samples)} samples over 1.0 s")
+        check(len(heartbeats) >= 8,
+              f"across {len(heartbeats)} distinct heartbeat values, so it is being "
+              f"rewritten every cycle rather than pulsed once (H1) — a hold the PLC can "
+              f"observe across the moment a latch's cause disappears (SPEC §11 T5.4)")
+        post_control(args.hmi, traction=0.0, steer=0.0, fork=0.0, teleop=False, reset=False)
+        released = await settle(observer, cycles=3)
+        check(released["HmiResetRequest"] is False,
+              f"released, it reads FALSE again, so the PLC sees the node low between "
+              f"presses and can arm its edge per link session (§10.8 P6) — "
+              f"{released['HmiResetRequest']}")
+        # A tap can begin and end inside one 100 ms write cycle. The press must
+        # still reach the wire: an operator action that no cycle carried is an
+        # action the PLC never had the chance to refuse.
+        seen_true = False
+        post_control(args.hmi, traction=0.0, steer=0.0, fork=0.0, teleop=False, reset=True)
+        post_control(args.hmi, traction=0.0, steer=0.0, fork=0.0, teleop=False, reset=False)
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 1.0 and not seen_true:
+            seen_true = (await observer.read("HmiResetRequest"))["HmiResetRequest"] is True
+            await asyncio.sleep(0.01)
+        check(seen_true,
+              f"and a tap pressed and released inside one write cycle still lands one "
+              f"TRUE cycle — no operator press is dropped by this client — {seen_true}")
+        settled = await settle(observer, cycles=4)
+        check(settled["HmiResetRequest"] is False,
+              f"which then falls again by itself, because the button is no longer held — "
+              f"{settled['HmiResetRequest']}")
 
         # ---- F: the heartbeat ---------------------------------------------- #
         head("F. the heartbeat advances every cycle (H1)")
@@ -523,10 +601,13 @@ async def run(args: argparse.Namespace, double: DoubleControl) -> int:
           "the code-side allowlist in hmi_server.py, and check J shows the process "
           "refuses to start when a config names anything else)")
 
+    beacon.stop()
     await observer.close()
     print(f"\n{'FAILURES: ' + str(len(FAILURES)) if FAILURES else 'no failures'}")
     for failure in FAILURES:
         print(f"  - {failure}")
+    print(f"the page beacon stood in for the browser's 5 Hz GET /state throughout — "
+          f"{beacon.polls} polls (§10.8 H6)")
     print(f"HMI stdout/stderr:      {log_path}")
     print(f"fault run stdout/stderr: {fault_log}")
     return 1 if FAILURES else 0

@@ -25,12 +25,21 @@ standard program. **Nothing here is a safety device**: loss of this process is a
 degraded mode with a controlled stop owned by the PLC, never a safety event
 (invariants 1, 2).
 
-Two timers exist in this file and both are the client's rule about **its own
-cycle**, never about a process value:
+Three timers exist in this file and every one of them is the client's rule about
+**its own cycle or its own input channel**, never about a process value:
 
-* the 10 Hz write cadence, and
+* the 10 Hz write cadence,
 * the 5 Hz contractual floor of §10.8 H2 — "below the floor the HMI is not a
-  supervision source and must stop writing rather than write slowly".
+  supervision source and must stop writing rather than write slowly", and
+* the window over the operator's page, `UI_POLL_STALE_TIME` (§10.8 H6): the
+  page's own `GET /state` is the beacon, and when it has been silent for five
+  poll periods the controls go to rest **while the write cycle and the heartbeat
+  continue**. Nothing latches, and each Bool is carried again only after the page
+  has been seen to send it low.
+
+The test §10.1 states is what a timer watches. All three watch this process —
+its cycle and its own input channel — and none watches the plant or recomputes a
+verdict the PLC also computes.
 
 The heartbeat obligation is one-sided. This process makes the counter change
 every cycle and that is all it owes. The verdict is the PLC's, compared for
@@ -143,6 +152,27 @@ STEER_REQUEST_MAX_RAD = 1.31
 #: that an implausible request is a fault rather than a value to clamp, and
 #: silently clamping would hide exactly the defect the rule exists to catch.
 AXIS_TOLERANCE = 1e-6
+
+#: The page's unconditional `GET /state` period, `static/index.html`. Named here
+#: because the window below is derived FROM it, and the two must be read
+#: together: if the page's poll period changes, the window is re-derived from the
+#: new period rather than the millisecond being quietly reinterpreted.
+UI_POLL_PERIOD_S = 0.200
+
+#: §10.8 H6's `UI_POLL_STALE_TIME`. **Five poll periods**, `1.0 s`. The rule is
+#: the MULTIPLE, not the number: a browser honours no floor — `setInterval` is
+#: best effort and a beat can be lost to the main thread, to garbage collection
+#: or to the operating system — so the multiple absorbs jitter the watched side
+#: cannot bound, which is why it is five here where the PLC's `HMI_STALE_TIME`
+#: may use three (§10.8 P3 has H2's contractual floor to lean on; this does not).
+#:
+#: It is its own constant and shares nothing with `HMI_STALE_TIME`: the two watch
+#: different parties across different transports, one from the PLC and one from
+#: inside this process, and retuning either must not silently retune the other
+#: (§10.8 P4's principle, one level up). It lives here in code, beside its
+#: derivation, rather than in the config file, precisely so it cannot be retuned
+#: as if it were a setting.
+UI_POLL_STALE_TIME = 5.0 * UI_POLL_PERIOD_S
 
 
 class ConfigError(Exception):
@@ -313,7 +343,25 @@ class Controls:
         self.steer_axis = 0.0      # normalised joystick X; scaled to rad on write
         self.fork = 0.0            # fraction, §10.4
         self.teleop = False        # a LEVEL, §10.4
-        self._reset_pulse = False  # one write cycle at TRUE, then FALSE
+        self.reset = False         # a LEVEL too: TRUE for as long as the operator
+        #                            holds the button, FALSE when it is released.
+        #                            §10.4 — the PLC acts on the rising edge and
+        #                            the hold is the operator's, not this client's.
+        #: A press shorter than one write cycle would otherwise never reach the
+        #: wire: `pointerdown` and `pointerup` can both land inside one 100 ms
+        #: cycle. The flag makes a tap carry exactly one `TRUE` cycle, which is
+        #: what the momentary implementation gave and what a physical button
+        #: gives. It is cleared by the cycle that carried it — no timer, and no
+        #: window over anything but this client's own input channel.
+        self._reset_tap = False
+        #: §10.8 H6's release rule, P6's per-session arming one level up. A Bool
+        #: is carried again only once the page has been seen to send it LOW, so a
+        #: page that thaws with the enable still asserted cannot produce a
+        #: `FALSE -> TRUE` the operator never made. `True` at start: a page that
+        #: has never been dropped is armed, and the PLC's own P6 guard is the
+        #: independent one that covers link-up.
+        self._teleop_armed = True
+        self._reset_armed = True
         self.updated_monotonic = time.monotonic()
 
     def apply(self, traction: float, steer_axis: float, fork: float,
@@ -322,10 +370,28 @@ class Controls:
             self.traction = traction
             self.steer_axis = steer_axis
             self.fork = fork
+            # Both Bools are STORED as the page sent them and MASKED at write
+            # time by their arming flag, so /state can show the operator that a
+            # control is being held down rather than silently rewriting it.
             self.teleop = teleop
-            if reset:
-                self._reset_pulse = True
+            self.reset = reset
+            if not teleop:
+                self._teleop_armed = True     # seen low: carried again from here
+            if not reset:
+                self._reset_armed = True
+            elif self._reset_armed:
+                self._reset_tap = True        # a press this short still lands
             self.updated_monotonic = time.monotonic()
+
+    def _to_rest(self) -> None:
+        """Every control at its rest position. Caller holds the lock."""
+        self.traction = 0.0
+        self.steer_axis = 0.0
+        self.fork = 0.0
+        self.teleop = False
+        self.reset = False
+        self._reset_tap = False
+        self.updated_monotonic = time.monotonic()
 
     def zero(self, reason: str) -> None:
         """The deadman. Release the controls and drop the enable.
@@ -336,32 +402,59 @@ class Controls:
         decision (§10.6).
         """
         with self._lock:
-            self.traction = 0.0
-            self.steer_axis = 0.0
-            self.fork = 0.0
-            self.teleop = False
-            self._reset_pulse = False
-            self.updated_monotonic = time.monotonic()
+            self._to_rest()
         LOG.info("controls returned to rest (%s)", reason)
+
+    def release_for_page_loss(self, reason: str) -> None:
+        """§10.8 H6: the same deadman, plus the release rule for the two Bools.
+
+        The page has stopped talking, so its stream of control updates is no
+        longer being carried — a RELEASE, exactly as in H5's fault path, and the
+        controls go to rest. What H6 adds is the recovery rule: the three Reals
+        are carried again as soon as the page posts, because they move nothing
+        while `ForkliftTeleopActive` is `FALSE`, while each Bool waits until the
+        page has been seen to send it low.
+
+        Nothing latches here and nothing is demanded of the operator. This is
+        invariant 2's degraded-mode pattern at the operator boundary; it is
+        process behaviour and **not a safety function** (invariant 1, ADR 0008
+        D3), and stopping the machine remains the PLC's.
+        """
+        with self._lock:
+            self._to_rest()
+            self._teleop_armed = False
+            self._reset_armed = False
+        LOG.warning("the operator's page has gone quiet (%s): all five requests to "
+                    "rest, the enable included. The write cycle and the heartbeat "
+                    "CONTINUE — this process is healthy, the page is not. Nothing "
+                    "latches; each Bool is carried again once the page has been seen "
+                    "to send it low (§10.8 H6).", reason)
 
     def take_cycle_values(self) -> dict[str, Any]:
         """The five request values for one write cycle.
 
-        The reset request is momentary: it reads `TRUE` in exactly one cycle and
-        `FALSE` in every other. The PLC acts on the RISING EDGE and arms that
-        edge per link session (§10.4, §10.8 P6) — the edge, the arming and the
-        hold are program content, never this client's.
+        The reset request is a **level**: `TRUE` in every cycle for as long as
+        the operator holds the button, `FALSE` from the cycle after release. The
+        PLC acts on the RISING EDGE and arms that edge per link session (§10.4,
+        §10.8 P6) — the edge, the arming and the hold are program content, never
+        this client's, and a reset held across the moment its cause disappears is
+        exactly what `plc/forklift/SPEC.md` §11 T5.4 asks an operator to produce.
         """
         with self._lock:
-            reset = self._reset_pulse
-            self._reset_pulse = False
+            reset = self._reset_armed and (self.reset or self._reset_tap)
+            if reset:
+                self._reset_tap = False       # this cycle carried it
             return {
                 "HmiTractionRequest": self.traction,
                 "HmiSteerRequest": self.steer_axis * STEER_REQUEST_MAX_RAD,
                 "HmiForkRequest": self.fork,
-                "HmiTeleopRequest": self.teleop,
+                "HmiTeleopRequest": self.teleop and self._teleop_armed,
                 "HmiResetRequest": reset,
             }
+
+    def arming(self) -> dict[str, bool]:
+        with self._lock:
+            return {"teleop": self._teleop_armed, "reset": self._reset_armed}
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -369,9 +462,60 @@ class Controls:
                 "HmiTractionRequest": self.traction,
                 "HmiSteerRequest": self.steer_axis * STEER_REQUEST_MAX_RAD,
                 "HmiForkRequest": self.fork,
-                "HmiTeleopRequest": self.teleop,
+                "HmiTeleopRequest": self.teleop and self._teleop_armed,
                 "HmiResetRequest": False,
             }
+
+
+# --------------------------------------------------------------------------- #
+# The operator's page, as a liveness beacon — §10.8 H6.
+# --------------------------------------------------------------------------- #
+
+class PageLiveness:
+    """One timestamp, refreshed by **every** request the page makes on this
+    process's loopback endpoint.
+
+    What is watched is the *page*, not the operator. The page's unconditional
+    `GET /state` at 5 Hz is what guarantees a request arrives while no control is
+    being touched — an operator holding the reset button for ten seconds posts
+    nothing at all, and the poll is what carries the "still here" in between. Any
+    request refreshes it: the page load, the poll, the `POST /control`, even the
+    favicon the browser asks for by itself.
+
+    **What this proves and what it does not.** It proves the page is alive. It
+    does not prove a person is in front of it: an operator who walks away from a
+    live browser leaves the poll ticking, and no timer this layer can run would
+    notice. What H6 closes is the crashed, frozen, closed or disconnected
+    browser; the remainder is stated rather than covered.
+
+    The timestamp starts at process start, so a backend nobody has opened a page
+    against goes stale on its own after one window and holds its requests at
+    rest — which is the honest reading of "no page is talking to me".
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._last_monotonic = time.monotonic()
+        self._last_utc = _utc_now()
+        self._requests = 0
+
+    def seen(self) -> None:
+        with self._lock:
+            self._last_monotonic = time.monotonic()
+            self._last_utc = _utc_now()
+            self._requests += 1
+
+    def age(self, now: float | None = None) -> float:
+        with self._lock:
+            return (time.monotonic() if now is None else now) - self._last_monotonic
+
+    def last_utc(self) -> str:
+        with self._lock:
+            return self._last_utc
+
+    def requests(self) -> int:
+        with self._lock:
+            return self._requests
 
 
 # --------------------------------------------------------------------------- #
@@ -400,6 +544,17 @@ class Published:
             },
             "requests": None,
             "metrics": None,
+            # §10.8 H6, rendered so a page that returns learns why its controls
+            # were dropped. `age_ms` is the age the WRITE CYCLE measured when it
+            # last looked; a value rendered here would always read ~0 ms, because
+            # serving this very request refreshed the beacon.
+            "page": {
+                "state": "LIVE", "age_ms": None, "last_request_utc": None,
+                "requests": 0, "drops": 0, "last_drop_utc": None,
+                "stale_after_ms": round(UI_POLL_STALE_TIME * 1000.0, 1),
+                "poll_period_ms": round(UI_POLL_PERIOD_S * 1000.0, 1),
+                "teleop_armed": True, "reset_armed": True,
+            },
             "limits": {"steer_request_max_rad": STEER_REQUEST_MAX_RAD},
         }
         self._last_good_write_monotonic: float | None = None
@@ -457,6 +612,19 @@ class Handler(BaseHTTPRequestHandler):
     sys_version = ""
     controls: Controls
     published: Published
+    liveness: PageLiveness
+
+    def _seen(self) -> None:
+        """§10.8 H6: **any** request from the page refreshes the beacon.
+
+        Called first in both request methods, before the path is examined, so
+        every endpoint counts and a 404 counts too — the beacon's subject is the
+        page's liveness, never which endpoint it happened to reach. It is
+        deliberately not hooked into `handle_one_request`, which on a persistent
+        connection runs before the next request has arrived and would credit the
+        page with a request it has not yet made.
+        """
+        self.liveness.seen()
 
     def log_message(self, fmt, *args):  # noqa: A003 - stdlib signature
         LOG.debug("http %s", fmt % args)
@@ -473,6 +641,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(payload).encode("utf-8"), "application/json")
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib signature
+        self._seen()
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
             try:
@@ -493,6 +662,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "no such path"})
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib signature
+        self._seen()
         if self.path.split("?", 1)[0] != "/control":
             self._json(404, {"error": "no such path"})
             return
@@ -531,7 +701,7 @@ class Evidence:
         "wall_utc", "monotonic_s", "cycle", "session_state", "hb_value",
         "hb_running", "HmiTractionRequest", "HmiSteerRequest", "HmiForkRequest",
         "HmiTeleopRequest", "HmiResetRequest", "write_rtt_ms",
-        "since_last_good_write_ms",
+        "since_last_good_write_ms", "page_state", "page_age_ms",
     )
 
     def __init__(self, stem: str) -> None:
@@ -578,12 +748,16 @@ class HmiClient:
     """
 
     def __init__(self, cfg: dict, controls: Controls, published: Published,
-                 evidence: Evidence | None, inject_fault_after_s: float | None) -> None:
+                 liveness: PageLiveness, evidence: Evidence | None,
+                 inject_fault_after_s: float | None) -> None:
         self.cfg = cfg
         self.controls = controls
         self.published = published
+        self.liveness = liveness
         self.evidence = evidence
         self.inject_fault_after_s = inject_fault_after_s
+        self._page_stale = False
+        self._page_drops = 0
 
         opc = cfg["opcua"]
         self.endpoint = opc["endpoint"]
@@ -807,6 +981,7 @@ class HmiClient:
                     and now - self._started_monotonic >= self.inject_fault_after_s):
                 raise BackendFault("injected backend fault (TEST SCAFFOLDING)")
 
+            self._check_page(now)
             values = self.controls.take_cycle_values()
             started = time.perf_counter()
             # H1/§10.4: all six every cycle, never on change. H3: the heartbeat
@@ -843,6 +1018,8 @@ class HmiClient:
                     values["HmiForkRequest"], values["HmiTeleopRequest"],
                     values["HmiResetRequest"], round(rtt_ms, 3),
                     self.published.render()["session"]["since_last_good_write_ms"],
+                    "STALE" if self._page_stale else "LIVE",
+                    round(self.liveness.age() * 1000.0, 1),
                 )
 
             if self._cycle % self.metrics_every == 0:
@@ -856,6 +1033,50 @@ class HmiClient:
                 deadline = time.monotonic()
                 sleep_for = 0.0
             await self._sleep(max(0.0, sleep_for))
+
+    def _check_page(self, now: float) -> None:
+        """§10.8 H6 — the window over the operator's page, evaluated once a cycle.
+
+        This process has two 5 Hz polls and this rule is about **one** of them:
+        the browser's `GET /state` over loopback HTTP. The backend's own 5 Hz
+        OPC UA read of `Forklift/Input/`, `Forklift/Output/`, `Forklift/Status/`
+        and `HmiLinkOk` for the display is a different poll on a different
+        transport and has no part in it.
+
+        What happens on expiry is the deadman and **nothing else**: the write
+        cycle keeps running and the heartbeat keeps advancing, because stopping
+        the counter would say "the HMI is gone", which is false, and would buy
+        the PLC's heavier reaction — a link loss latches `ForkliftResetRequired`
+        and demands a monitored reset before teleop may return (§10.8 P5, P6). A
+        page that had merely been backgrounded would then cost a reset. The two
+        reactions are proportional on purpose. The PLC is told nothing new: it
+        sees requests at rest under a live heartbeat, a state it already handles.
+
+        Recovery is a **release, not a resume**, and it needs no acknowledgement:
+        the next request from the page ends the condition on its own.
+        """
+        age = self.liveness.age(now)
+        stale = age > UI_POLL_STALE_TIME
+        if stale and not self._page_stale:
+            self._page_stale = True
+            self._page_drops += 1
+            self.controls.release_for_page_loss(
+                f"no request for {age * 1000.0:.0f} ms, over the "
+                f"{UI_POLL_STALE_TIME * 1000.0:.0f} ms UI_POLL_STALE_TIME")
+            self.published.update(page={"last_drop_utc": _utc_now()})
+        elif not stale and self._page_stale:
+            self._page_stale = False
+            LOG.info("the page is talking again after %d drop(s); the three Reals are "
+                     "carried from its next post, and each Bool once it has been seen "
+                     "to send that Bool low (§10.8 H6)", self._page_drops)
+        self.published.update(page={
+            "state": "STALE" if stale else "LIVE",
+            "age_ms": round(age * 1000.0, 1),
+            "last_request_utc": self.liveness.last_utc(),
+            "requests": self.liveness.requests(),
+            "drops": self._page_drops,
+            **{f"{name}_armed": value for name, value in self.controls.arming().items()},
+        })
 
     async def _poll_metrics(self) -> None:
         """The 5 Hz read-only display poll. Reads only `Forklift/Input/`,
@@ -893,10 +1114,12 @@ async def amain(args: argparse.Namespace) -> int:
 
     controls = Controls()
     published = Published(cfg["opcua"]["endpoint"])
+    liveness = PageLiveness()
     evidence = Evidence(args.evidence_csv) if args.evidence_csv else None
 
     Handler.controls = controls
     Handler.published = published
+    Handler.liveness = liveness
     host = (cfg.get("http") or {}).get("host", "127.0.0.1")
     port = int(args.http_port or (cfg.get("http") or {}).get("port", 8088))
     httpd = ThreadingHTTPServer((host, port), Handler)
@@ -904,8 +1127,14 @@ async def amain(args: argparse.Namespace) -> int:
     threading.Thread(target=httpd.serve_forever, name="hmi-http", daemon=True).start()
     LOG.info("HMI UI on http://%s:%d/ — loopback only, one operator, local cell "
              "(ADR 0008 D2.7)", host, port)
+    LOG.info("operator-page window UI_POLL_STALE_TIME = %.0f ms (%.0f x the page's "
+             "%.0f ms GET /state); with no page talking, the five requests are held at "
+             "rest and the heartbeat keeps running (§10.8 H6)",
+             UI_POLL_STALE_TIME * 1000.0, UI_POLL_STALE_TIME / UI_POLL_PERIOD_S,
+             UI_POLL_PERIOD_S * 1000.0)
 
-    client = HmiClient(cfg, controls, published, evidence, args.inject_fault_after_s)
+    client = HmiClient(cfg, controls, published, liveness, evidence,
+                       args.inject_fault_after_s)
     loop = asyncio.get_running_loop()
     for signame in ("SIGINT", "SIGTERM"):
         if hasattr(signal, signame):

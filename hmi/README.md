@@ -30,10 +30,17 @@ preference.
 - **Forming or writing any actuator output.** What this layer streams are
   *requests*. The PLC standard program forms every actuator setpoint from them
   and owns the outcome (invariants 5, 6; ADR 0008 D2.2).
-- **Any interlock, latch, timer or sequencing logic.** Teleop routing, the
-  fork-height speed cap, the fork soft travel limits and the lidar obstacle
+- **Any interlock, latch, sequencing or setpoint formation.** Teleop routing,
+  the fork-height speed cap, the fork soft travel limits and the lidar obstacle
   stop are process interlocks in the standard program (ADR 0008 D3). No verdict
-  the PLC also computes is recomputed here (invariant 10).
+  the PLC also computes is recomputed here (invariant 10). **The line is not "no
+  timer"**: this process owns three, and every one of them watches *itself* —
+  the 10 Hz write cadence, the 5 Hz contractual floor it holds itself to
+  (`opcua-nodes.md` §10.8 H2), and the window over its own operator's page
+  (§10.8 H6). What no client may do is time a **process value** — a debounce, a
+  fault delay, a dwell, a stale window over a plant signal, "write only if
+  stable for X ms" — because the threshold and the delay are process decisions
+  and they belong to the PLC (§10.1). The test is what the timer watches.
 - **Any safety function or safety path.** Nothing here is a safety device and
   nothing here carries safety integrity. The teleop interlocks implement no SRS
   function — not SF-02, SF-03, SF-04, SF-07, SF-09 (ADR 0008 D3) — and loss of
@@ -66,7 +73,10 @@ It streams into the HMI-writable node group:
 - an **enable**;
 - a **reset request**, carried as a level and edge-evaluated in the standard
   program rather than here — the M3 rule that the edge and the hold belong to
-  the program, never to the client;
+  the program, never to the client. The button is **press-and-hold**: the level
+  is `TRUE` for as long as the operator holds it, which is what
+  `plc/forklift/SPEC.md` §11 T5.4 needs, and a press shorter than one write
+  cycle still lands exactly one `TRUE` cycle so no operator action is dropped;
 - a `UInt16` **heartbeat**.
 
 ```
@@ -94,6 +104,18 @@ invariant 2's controlled stop applied at the operator boundary — losing the
 link is a degraded mode, never a safety event. **This HMI is not a safety
 device.**
 
+**The operator's page is watched too, and the reaction is smaller.** The page's
+unconditional `GET /state` doubles as a liveness beacon
+(`docs/interfaces/opcua-nodes.md` §10.8 H6): if nothing arrives from the page for
+`UI_POLL_STALE_TIME` — five poll periods, held as a named constant beside its
+derivation in `hmi_server.py` — the backend returns all five requests to rest,
+the enable included, **while the write cycle and the heartbeat keep running**.
+Nothing latches and no reset is owed: the process is healthy, and what is gone is
+the page. The controls are carried again as soon as the page posts, each Bool
+only once that page has been seen to send it low. Stopping the counter instead
+would claim the whole process had died and would buy the PLC's heavier, latching
+reaction for a browser that had merely been backgrounded.
+
 **The heartbeat obligation is one-sided.** The HMI's job is to make the counter
 change every cycle. The verdict is the PLC's, under the `BridgeHeartbeat` rules
 of `plc/demo-cell/SPEC.md` §6.1: compared for inequality only, never
@@ -117,7 +139,7 @@ the forklift commissioning gate of ADR 0008 D1, whose live number is carried by
 | `static/index.html` | the operator page. One file, offline: no framework, no CDN, no web font, no image |
 | `config.yaml` | addresses and cadences for the **commissioned CPU**. Owner-run |
 | `config-double.yaml`, `config-logic-double.yaml` | the same, against `bridge/test_double/` on 4847 and `plc/forklift/double/` on 4850 |
-| `tools/` | the two evidence harnesses. Instruments, not part of the HMI; each refuses a non-loopback endpoint |
+| `tools/` | the three evidence harnesses — the write contract, the teleop loop, and the §10.8 H6 and held-reset kernels. Instruments, not part of the HMI; each refuses a non-loopback endpoint, and each polls `GET /state` like the page so H6 does not read it as a crashed browser |
 | `EVIDENCE_HMI.md` | the recorded runs, with every figure quoted as it was printed |
 
 ## Known limitation, recorded rather than discovered later

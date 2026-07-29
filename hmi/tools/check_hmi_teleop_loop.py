@@ -23,6 +23,12 @@ Three processes, three roles, and the separation is the point:
                    writes the five requests and `HmiHeartbeat`, and nothing else.
     the double     plays the PLC. It owns every verdict.
 
+Playing the operator also means **polling like the page does**: §10.8 H6 makes
+the browser's unconditional `GET /state` the page's liveness beacon, and a
+harness that posts once and then reads OPC UA for several seconds is
+indistinguishable from a crashed browser. `PageBeacon` supplies that poll for the
+whole run.
+
 Nothing observed here is evidence about the TIA Portal build. It is a rehearsal
 and any divergence resolves toward TIA and `SPEC.md`, never toward the double.
 
@@ -40,6 +46,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -50,6 +57,10 @@ from asyncua import Client, ua
 
 HERE = Path(__file__).resolve().parent
 HMI_DIR = HERE.parent
+
+#: The page's poll period, `hmi/static/index.html`, and therefore the period this
+#: instrument has to poll at while it stands in for the page (§10.8 H6).
+PAGE_POLL_S = 0.200
 
 F = ua.VariantType.Float
 B = ua.VariantType.Boolean
@@ -134,6 +145,40 @@ async def panel_shows(base: str, key: str, wanted, tol=2e-3, timeout=3.0):
             return seen
         await asyncio.sleep(0.05)
     return None
+
+
+class PageBeacon:
+    """Stands in for the browser's unconditional `GET /state` (§10.8 H6).
+
+    The backend's window is over the *page's requests*, not over the operator's
+    activity, so an instrument playing the operator has to poll like the page or
+    it will be read — correctly — as a browser that has crashed.
+    """
+
+    def __init__(self, base: str, period: float = PAGE_POLL_S) -> None:
+        self.base = base
+        self.period = period
+        self.polls = 0
+        self._alive = True
+        self._thread = threading.Thread(target=self._loop, name="page-beacon",
+                                        daemon=True)
+
+    def start(self) -> "PageBeacon":
+        self._thread.start()
+        return self
+
+    def _loop(self) -> None:
+        while self._alive:
+            try:
+                with urllib.request.urlopen(f"{self.base}/state", timeout=1.0) as r:
+                    r.read()
+                self.polls += 1
+            except (urllib.error.URLError, OSError):
+                pass
+            time.sleep(self.period)
+
+    def stop(self) -> None:
+        self._alive = False
 
 
 class PlantAndBridge:
@@ -279,6 +324,7 @@ async def run(args, double) -> int:
         [args.python, str(HMI_DIR / "hmi_server.py"), "--config", args.config]
         + (["--evidence-csv", args.evidence_csv] if args.evidence_csv else []),
         stdout=log, stderr=subprocess.STDOUT)
+    beacon = PageBeacon(args.hmi).start()
     try:
         # ---- P0: the links form ------------------------------------------- #
         head("P0. both link verdicts form, and the HMI's is FALSE until the counter moves")
@@ -474,6 +520,7 @@ async def run(args, double) -> int:
               f"machine stopped anyway, because the PLC decided it "
               f"(ForkliftTractionSpeedRef {standing['ForkliftTractionSpeedRef']})")
     finally:
+        beacon.stop()
         if hmi.poll() is None:
             hmi.terminate()
             try:
@@ -482,6 +529,8 @@ async def run(args, double) -> int:
                 hmi.kill()
         log.close()
 
+    print(f"        the page beacon stood in for the browser's 5 Hz GET /state "
+          f"throughout — {beacon.polls} polls (§10.8 H6)")
     head("Transitions observed on the server, in order")
     for line in plant._transitions:
         print(line)

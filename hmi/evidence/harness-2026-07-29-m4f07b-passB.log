@@ -1,0 +1,76 @@
+Requested session timeout to be 3600000ms, got 600000ms instead
+HMI teleop-loop harness — server opc.tcp://127.0.0.1:4850/ (PLC LOGIC DOUBLE), HMI http://127.0.0.1:8090
+Roles: this harness plays the bridge and the plant, the HMI plays the operator, the double plays the PLC and owns every verdict. Nothing here is evidence about the TIA Portal build.
+
+P0. both link verdicts form, and the HMI's is FALSE until the counter moves
+   ok   HmiLinkOk is FALSE before the HMI has written anything — False. 'Not yet proven stale' is not 'alive' (§10.8 P2)
+   ok   the HMI reached CONNECTED against the logic double
+   ok   HmiLinkOk went TRUE once the HMI's counter had been seen to change — the PLC's verdict on this client's heartbeat
+   ok   BridgeLinkOk is TRUE too — teleop needs both, and they are independent watchdogs on independent clients (§10.8 P7)
+   ok   ForkliftResetRequired is TRUE out of the boot window — both link-lost latches were set while the verdicts were FALSE — True
+   ok   and the HMI's RESET REQUIRED banner is showing it, read from the node rather than recomputed
+
+P1. the monitored reset clears the latches and energizes nothing
+   ok   ForkliftResetRequired went FALSE on the rising edge of HmiResetRequest
+   ok   and NOTHING energized: ForkliftTeleopActive is still FALSE — False
+   ok   and all three setpoints are still 0.0 — 0.0, 0.0, 0.0
+
+P2. a separate rising edge of HmiTeleopRequest enables teleop
+   ok   ForkliftTeleopActive went TRUE — the PLC's verdict, not the HMI's request echoed back
+   ok   the HMI's teleop lamp followed it
+
+P3. the joystick moves the PLC's setpoints (HMI -> PLC -> plant)
+   ok   ForkliftTractionSpeedRef = 0.60 m/s — the request 0.60 scaled by the PLC's TRACTION_SPEED_MAX; the HMI never knew the maximum
+   ok   ForkliftSteerAngleRef = -0.6550 rad — the joystick's X at -0.50 of the declared engineering range
+   ok   the metrics panel shows the reference beside the measurement — ref 0.600 m/s, measured 0.580 m/s
+
+P4. raising the carriage caps the traction setpoint (process logic in the PLC)
+   ok   ForkliftSpeedLimitActive went TRUE with the carriage above the cap height
+   ok   and the traction setpoint was reduced below what the operator asked for — 0.180 m/s against a request that still reads 0.60
+   ok   the HMI's speed-limit lamp is on and the height reads 0.8999999761581421 m
+
+P5. an obstacle in the stop field latches a PROCESS stop over a live command
+   ok   ForkliftObstacleStopActive latched
+   ok   ForkliftTeleopActive dropped in the same call
+   ok   all three setpoints went to 0.0, the steer angle included — 0.0, 0.0, 0.0
+   ok   while the operator's request is STILL STANDING at 0.6 — the latch overrides a live command, which is the whole point of the request/outcome split
+   ok   and ForkliftResetRequired is TRUE again
+   ok   the HMI's large stop banner is up, driven by the node
+
+P6. the field clearing does not release the latch; this machine does not resume by itself
+   ok   the field is clear and the latch is still standing — True
+
+P7. §10.7's conflation: an enable held through the reset produces no edge
+   ok   the reset cleared the latches with ENABLE still asserted
+   ok   and teleop did NOT come back: no rising edge, so the machine stays stopped — False
+   ok   released and re-asserted, the enable produces a real edge and teleop returns — release ENABLE, press RESET, assert ENABLE again
+
+P8. the fork buttons move the fork setpoint
+   ok   ForkliftForkSpeedRef went non-zero while the FORK UP button was held — 0.15000000596046448
+   ok   and back to 0.0 on release, which the plant holds against gravity — 0.0
+
+P9. stopping the HMI is a degraded mode with a PLC-owned controlled stop
+   ok   the machine is being driven when the HMI is stopped — ForkliftTractionSpeedRef 0.550 m/s
+   ok   HmiLinkOk went FALSE 597 ms after the HMI stopped — the heartbeat stopped changing and the PLC's stale timer expired
+   ok   teleop dropped and every setpoint went to 0.0 in the PLC's mandatory ELSE — 0.0, 0.0, 0.0
+   ok   and the loss LATCHED: a returning heartbeat will not by itself restore teleop
+        the HMI's last requests are still on the server, retained; the machine stopped anyway, because the PLC decided it (ForkliftTractionSpeedRef 0.0)
+        the page beacon stood in for the browser's 5 Hz GET /state throughout — 23 polls (§10.8 H6)
+
+Transitions observed on the server, in order
+        12:48:27 BridgeLinkOk=True  HmiLinkOk=True
+        12:48:27 ForkliftResetRequired=False
+        12:48:27 ForkliftTeleopActive=True
+        12:48:27 ForkliftSteerAngleRef=-0.655  ForkliftTractionSpeedRef=0.600
+        12:48:28 ForkliftSpeedLimitActive=True  ForkliftTractionSpeedRef=0.180
+        12:48:28 ForkliftObstacleStopActive=True  ForkliftResetRequired=True  ForkliftSpeedLimitActive=False  ForkliftSteerAngleRef=0.000  ForkliftTeleopActive=False  ForkliftTractionSpeedRef=0.000
+        12:48:29 ForkliftObstacleStopActive=False  ForkliftResetRequired=False
+        12:48:30 ForkliftSpeedLimitActive=True  ForkliftTeleopActive=True
+        12:48:31 ForkliftForkSpeedRef=0.150
+        12:48:31 ForkliftForkSpeedRef=0.000
+        12:48:31 ForkliftSpeedLimitActive=False
+        12:48:31 ForkliftTractionSpeedRef=0.550
+        12:48:32 ForkliftResetRequired=True  ForkliftTeleopActive=False  ForkliftTractionSpeedRef=0.000  HmiLinkOk=False
+
+no failures
+HMI stdout/stderr: /tmp/amr-hmi/hmi-logic-run.log
