@@ -201,7 +201,7 @@ feat/<area>-<slug>
 fix/<area>-<slug>
 docs/<area>-<slug>
 
-Valid areas: plc, fleet, agv, hmi, sim, safety, interfaces, infra.
+Valid areas: plc, fleet, agv, bridge, hmi, sim, safety, interfaces, adr, infra.
 Example: feat/agv-vda5050-client.
 
 Commit messages. Conventional commits, imperative mood, scope matches the area:
