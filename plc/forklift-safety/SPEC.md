@@ -929,26 +929,63 @@ the input real".
 
 ### 6.4 Notes for the mirror node group
 
-Not decisions — these are F-side facts the interface work needs, plus two
-collisions found while writing this document.
+These were F-side facts the interface work needed, plus two collisions found
+while writing this document. **The ruling they waited for has landed**:
+`opcua-nodes.md` §11 (commit `2d2d497`, 2026-07-29) fixes the path, the data
+block, the four node names, the per-tag rights and the start values, and the
+notes below are closed against it. Where the two documents divide: **§11 is
+authoritative for what the nodes are called, which block holds them and who may
+read them; this section stays authoritative for what the flags mean** (§11
+preamble, §11.8 item 7). **No network, tag, constant, watch-table row or T6 step
+moved when it landed**: the ruling took the resolution these notes suggested, so
+what changed is that they now read it back instead of asking for it.
 
-1. **Four flags exist**, not three: the fourth is `SafetyResetFault`. Whether it
-   becomes a mirror node is an interface decision. If it does not, it must still
-   appear in the watch table (§8), because without it AT-08 (a)'s "reset-fault
-   flagged" half has no observable at all.
-2. **Name collision.** `opcua-nodes.md` §4 already defines `Safety/SafetyResetRequired`
-   for the **fixed cell** (SF-08, M9). The twin's flag carries the same leaf name.
-   Two different values with one leaf name in one project is a diff hazard, and
-   the obvious resolution is a distinct path — the twin's mirrors under
-   `Forklift/Safety/` rather than in the top-level `Safety/` group. **That is an
-   interface ruling and is not taken here.**
-3. **Second collision, on the standard side.** `Forklift/Status/ForkliftResetRequired`
-   already exists and is the **process** reset-required flag of `FB_ForkliftTeleop`.
-   The safety flag is a different value with a different owner and a different
-   meaning. Under R4 they must never share a lamp or a sentence either.
+1. **Four flags exist**, not three: the fourth is `SafetyResetFault`. **Ruled: it
+   is a mirror node** (`opcua-nodes.md` §11.2). A group of display diagnostics
+   that omitted the one flag saying the reset device is lying to you would be a
+   curated view rather than a mirror, and AT-08 (a)'s "reset-fault flagged" half
+   needs an observable outside TIA. **The watch table keeps its row regardless**:
+   §8 Group 2 reads all four from F-data directly, and the node is an addition to
+   that instrument, never a replacement for it. Whether the flag also becomes a
+   **lamp** is `hmi/`'s decision, not an interface one (§11.8 item 5).
+2. **Name collision — resolved by moving the path, not a leaf.** `opcua-nodes.md`
+   §4 defines `Safety/SafetyResetRequired` for the **fixed cell** (SF-08, M9) and
+   the twin's flag carries that exact leaf name. **Ruled: the twin's mirrors are
+   `DemoCell/Forklift/Safety/`**, a sixth subfolder in the `Forklift/` subtree of
+   the existing `DemoCell` server interface, and they are **not** added to the
+   top-level `Safety/` group (§11.1). Neither leaf could move — §4's is cited by
+   name in `docs/safety/SRS.md` §4, and the twin's is fixed by
+   `"InstF_Forklift_Safety".SafetyResetRequired` and by CLAUDE.md §9 — so what
+   moved is the path, the only part of the address neither side owns by name.
+   **The leaf names are the F-side tag names exactly, with no prefix** (§11.2),
+   which is what lets this document, the TIA export and §6.1 be diffed three ways.
+3. **Second collision, on the standard side — resolved by the same ruling.**
+   `Forklift/Status/ForkliftResetRequired` is the **process** reset-required flag
+   of `FB_ForkliftTeleop`; `Forklift/Safety/SafetyResetRequired` is the twin's
+   F-flag. They differ in **both folder and leaf**, and their reset *inputs* sit
+   on opposite sides of the client boundary — one is a client write, the other is
+   `"SafetyInputStandIn".ResetButtonPressed`, which no client can reach (§11.1's
+   three-values table). Under R4 they still share no lamp, no caption and no
+   sentence.
 4. **The mirrors are the only client-visible view of F-state**, because `DB3` is
    not accessible from HMI/OPC UA (§4.2 step 11). A mirror that is missing shows
    as absent, not as clear.
+
+**The ruling in the four values this document has to know**, so they can be read
+here rather than fetched:
+
+| What | The ruling (`opcua-nodes.md` §11) |
+|---|---|
+| **Path** | `DemoCell/Forklift/Safety/`, a sixth subfolder beside `Hmi`, `Input`, `Output`, `Status` and `Link`; **not** the top-level `Safety/` group of §4 (§11.1) |
+| **Data block** | One new global DB **`ForkliftSafetyMirror`**, four Bools. The name carries the word *Mirror* deliberately, so it is never one underscore from `F_Forklift_Safety [FB2]` in a screenshot. Written by the **standard** program copying F-data — never by this program, whose whole write set is §3.4 (§11.3) |
+| **Per-tag access** | `ForkliftSafetyMirror`: *Accessible from HMI/OPC UA* ✔, *Writable* **✘ on all four members**. `InstF_Forklift_Safety`: **✘ / ✘**. `SafetyInputStandIn`: **✘ / ✘** — §11.3 restates D7 and D1, which is what makes the mirror group the only client-visible view of F-state (note 4) |
+| **Start values** | `EStopDemand` **`TRUE`**, `ZoneStopDemand` **`TRUE`**, `SafetyResetRequired` **`TRUE`**, `SafetyResetFault` `FALSE` (§11.6). A mirror's start value is its **source's** start value, not the type's zero — and that is exactly the F-side truth at every CPU start, because both stand-in circuits start open (§3.1) |
+
+**Zero PLC readers, and that is the group's defining property.** The standard
+program writes the four and no program logic reads them; the one new permissive
+term is derived from **this program's F-data directly** and never from a mirror
+(§6.1, §6.2 S3, §11.3). It is checkable by cross-reference rather than by
+assertion, which is where it belongs.
 
 ### 6.5 The fallback, precisely
 
@@ -1232,7 +1269,7 @@ function"*, never *"protective stop"* for the lidar latch.
 | Item | Owner |
 |---|---|
 | The standard program's permissive term, the `Safety/` mirror copy statements and their effect on the M4 procedure | `plc/forklift/SPEC.md`, its own brief. §6 is the contract it consumes |
-| The `Safety/` mirror node names, their group, their access rights and their TIA click path | `docs/interfaces/opcua-nodes.md`, its own brief. §6.4 supplies the F-side facts and names two collisions to resolve |
+| The `Safety/` mirror node names, their group, their access rights and their TIA click path | `docs/interfaces/opcua-nodes.md`, **and §11 there has now ruled on all four**. §6.4 supplied the F-side facts and named the two collisions that ruling resolved; it now reads the ruling back rather than asking for it |
 | How the HMI displays safety state | `hmi/`, its own brief. Note that a lamp for the zone demand and a lamp for the lidar process stop must never be the same lamp or carry the same caption (R4) |
 | The marked zone's geometry, its floor marking and the T6 scenario document | `sim/`, its own brief. This document specifies what happens at the F-input; the arena specifies where the marking is |
 | Any second channel, discrepancy monitoring, or anything that would support a Category claim | Real F-I/O, M5 proper. Not reachable on this instance (§2.1) |
@@ -1249,7 +1286,7 @@ function"*, never *"protective stop"* for the lidar latch.
 | 1 | **The F-input channel ruling of §2.1 is a design assessment, not a tool read-back.** No usable PROFIsafe F-DI is assumed to exist on this PLCSIM Advanced instance | Owner, at the §2 checkpoint. If a usable channel is established, **§7 is the only section that changes** and three pins move at §4.2 step 8. The AT-07 and AT-01 (c) consequences (§2.1) are re-read at the same time |
 | 2 | **The F-runtime group's monitoring time and the F-OB's cycle time are not stated here**, and `RESET_HOLD_MIN` must span at least five F-runtime-group cycles (§4.3) | Owner, at §4.2 step 15: read both back, record them, and record which of §4.3's three outcomes applies. If outcome 3 is taken, `RESET_HOLD_MIN` is no longer the SRS's window and that is a **recorded deviation**, not a tuning |
 | 3 | **AT-08 (b) is deferred for want of timed injection** (§7.3). The logic that rejects a sub-200 ms actuation is built and untestable with a hand-driven modify | A timed injection facility writing `SafetyInputStandIn` from the engineering side would move it into scope. **Not a change to this program**, which must behave identically whether or not it exists. This is the F-side twin of the fault-injection facility `plc/forklift/SPEC.md` §12 item 6 already requests |
-| 4 | **`SafetyResetFault` may or may not become a mirror node**, and the twin's `SafetyResetRequired` collides by leaf name with `opcua-nodes.md` §4's fixed-cell mirror (§6.4) | Interface decision, not taken here. If the fault flag gets no node, it must still be observable in the watch table, or AT-08 (a)'s "reset-fault flagged" half has no observable |
+| 4 | **Closed by `opcua-nodes.md` §11** (commit `2d2d497`, 2026-07-29): `SafetyResetFault` **is** a mirror node; the twin's four mirrors are `DemoCell/Forklift/Safety/` in DB `ForkliftSafetyMirror`, *Accessible* ✔ and *Writable* **✘** on every member, with start values `TRUE`, `TRUE`, `TRUE`, `FALSE`; the leaf names are the F-side tag names unchanged (§6.4) | **No network, tag, constant, watch-table row or T6 step moved**, and §8 Group 2 keeps all four rows because it reads F-data directly. What remains open elsewhere: whether the fault flag also gets a **lamp** (`hmi/`, §11.8 item 5), and the standard program's copy statements (`plc/forklift/SPEC.md`, §11.8 item 7) |
 | 5 | **`plc/README.md` has no `forklift-safety/SPEC.md` row**, and its boundary statement names only the two process-stop cells | Requested: one row, and one sentence stating that this cell's F-program implements the **logic** of SF-01, SF-07 as a pattern and SF-08 with no achieved PL, no Category and stand-in inputs. Outside this document's deliverable |
 | 6 | **Every tool-derived value in §2, §4 and §8 is a design value until it is read back**: the licence state, the safety mode, the F-collective signature, the monitoring and cycle times, the compile warnings, the per-DB accessibility as an independent client sees it, and both timer `PT` values in force | Owner, at §4.2 steps 10, 12, 13, 14 and 15, recorded with their date, in the manner phase 0 recorded the M3 node set (`opcua-nodes.md` §9.10). **No gate criterion may rest on one before then** (ADR 0006; LESSONS 2026-07-27) |
 | 7 | **The permissive term is runtime-inert but not compile-inert** (§6.5): once the standard program reads `InstF_Forklift_Safety`, deleting the F-program breaks the standard build | Stated rather than solved. Abandoning the F-layer after the standard-side delta has landed costs the removal of one term |
