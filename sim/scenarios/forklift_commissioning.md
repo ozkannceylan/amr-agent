@@ -440,24 +440,32 @@ window.
 `0.0`. A `0.0` there means the crate went out of range, not that the path is
 clear, and the step must be re-run rather than reinterpreted.
 
-### The held reset, and why a browser click cannot produce it
+### The held reset, produced from the page
 
-The HMI's RESET is **momentary by construction**: one click posts one request and
-the backend writes `HmiResetRequest` `TRUE` for exactly one write cycle. Steps
-5.4.4 to 5.4.7 need it standing for tens of seconds. Hold it by re-posting to the
-HMI's own `/control` endpoint faster than its write rate:
+Steps 5.4.4 to 5.4.7 need the reset standing for tens of seconds, unbroken across
+the moment the zone clears. **Press and hold the page's RESET button**:
+`HmiResetRequest` is `TRUE` in every write cycle for as long as the button is
+down and `FALSE` from the cycle after release, so the node reads `TRUE`
+continuously, which is what the program sees and what the step needs. The button
+takes keyboard down/up as well, and a tap shorter than one write cycle still
+lands exactly one `TRUE` cycle, so 5.1.3's single reset is unaffected.
+
+Confirm it in Group 1 — `"ForkliftHmi".HmiResetRequest` `TRUE` and **staying**
+`TRUE` — before reading 5.4.6. If the hold cannot be produced, steps 5.4.4 and
+5.4.7 are recorded as **not run** under §11 rule 3; they are not a pass by
+default.
+
+The stimulus helper does the same thing from a terminal, and is still what
+T5.5.5 needs, because that step's reset has to be standing before the page
+exists:
 
 ```bash
 python3 sim/scenarios/forklift_stimulus.py hold --teleop --traction 0.6 --reset --seconds 20
 ```
 
-Every write cycle then finds the request standing and the node reads `TRUE`
-continuously, which is what the program sees and what the step needs. Confirm it
-in Group 1 — `"ForkliftHmi".HmiResetRequest` `TRUE` and staying `TRUE` — before
-reading 5.4.6. If the hold cannot be produced, steps 5.4.4 and 5.4.7 are recorded
-as **not run** under §11 rule 3; they are not a pass by default. Requested of
-`hmi/` in the report: a hold-capable reset control on the page itself, so this
-step does not need a second tool.
+**The rehearsal below predates the holdable button** (`7675960`), so its
+transcript records the hold as produced by the helper. Both routes present the
+same level to the program; the difference is which process re-posts it.
 
 | Step | Operator action (**owner**) | Observable |
 |---|---|---|
@@ -650,10 +658,36 @@ produced every REHEARSAL EVIDENCE block above; it is not part of the owner's run
 
 | Subcommand | Use |
 |---|---|
-| `hold` | hold a set of operator controls at the HMI by re-posting to `/control` at a rate. The only way to produce the held reset of 5.4.4 and the pre-link-up reset of 5.5.5 |
+| `hold` | hold a set of operator controls at the HMI by re-posting to `/control` at a rate. T5.4's held reset now comes from the page's own press-and-hold RESET; this is the terminal equivalent, and it is still the only way to produce T5.5.5's reset, which has to be standing before the page exists |
 | `obstacle` | move the aisle crate, and `--home` to put it back |
 | `watch` | poll `/state` and print one line per change — a transition transcript rather than a wall of samples |
 | `plant` | **plant smoke check only** |
+
+### The helper and the operator-liveness deadman
+
+Since `7675960` the HMI runs an **H6 liveness deadman**: every request the page
+makes on the loopback endpoint refreshes one timestamp, and if nothing arrives
+for `UI_POLL_STALE_TIME` — 1.0 s, five poll periods — the backend returns all
+five requests to rest. The write cycle and the heartbeat keep running, nothing
+latches, and no reset is demanded: it is a degraded mode owned by the PLC, not a
+safety reaction. It applies to **this helper too**, because a POST to `/control`
+is one of those requests.
+
+Three consequences worth knowing before writing a step:
+
+- **`hold` is safe by construction.** It re-posts continuously at a stated rate,
+  so the beacon never goes stale while it runs. Nothing about the subcommands
+  above changes.
+- **A step that posts once and then waits longer than a second loses its
+  requests.** They are returned to rest by the deadman, exactly as if the
+  operator had let go — which, from the page's point of view, is what happened.
+  Hold for the duration of a step rather than setting a value and waiting.
+- **Recovery is a release, not a resume.** The three Reals are carried on the
+  next post, but each Bool is carried only once the poster has been seen to send
+  **that** Bool low first. So an enable or a reset re-asserted after a gap needs
+  one post with it `false` before the post that asserts it, or the level never
+  reaches the node. `watch` polls `/state`, which also refreshes the beacon, so a
+  `watch` running alongside keeps the page alive even when nothing is being held.
 
 **No `--once` publish appears in this procedure or in either script.** A single
 publish exits on the first matching subscriber and races every other one, and
@@ -717,6 +751,6 @@ refusal on the program, and never during a recorded scenario.
 |---|---|---|---|
 | 1 | **§11 step 5.3.4's Pass line contradicts §§7 and 9** on the raised-carriage cap: a demand of 0.2 gives `+0.20 m/s` under the Pass line and `+0.060 m/s` under the specified and implemented form. Observed `+0.060` | `plc/` | **Closed by `bc6a570`.** The scale form was ruled the correct one and §11 5.3.4's Pass line now reads `≈+0.060 m/s`; §6.5 states the cap as a scale rather than a ceiling, and §9's Group 3 row says so beside it. The rehearsal reading was the specification's, and the Pass line was the defect |
 | 2 | **§11 step 5.1.1's `ForkliftObstacleStopActive FALSE` is not guaranteed** under the specified start order. The zone evaluator's no-scan sentinel can be attributable, and the program then correctly latches. Both outcomes observed; a revision stating both is requested | `plc/` | **Closed by `bc6a570`.** §11 5.1.1 now states that **both readings pass**, names the race that decides which one appears, and replaces the single-value check with a pair check — the field bit and the distance are read *before* the verdict is judged, and the latch must **hold** rather than take a value. A latch found set clears at 5.1.3 and changes no later step |
-| 3 | **The HMI's reset cannot be held from the page.** One click is one write cycle, and §11 5.4.4–5.4.7 need it standing across the moment the zone clears. It is producible only by re-posting to `/control` above the write rate. A hold-capable RESET control would let the gate step be run entirely from the operator's screen | `hmi/` | **Open, in flight**: `docs/briefs/m4f-07b-h6-and-holdable-reset.md` makes the RESET press-and-hold capable — `TRUE` written every cycle while held, `FALSE` on release — which is what makes T5.4's held-reset steps executable from the page. Until it lands, §6's `forklift_stimulus.py hold --reset` is the way to produce the hold, and the step is not a pass by default without it |
+| 3 | **The HMI's reset cannot be held from the page.** One click is one write cycle, and §11 5.4.4–5.4.7 need it standing across the moment the zone clears. It is producible only by re-posting to `/control` above the write rate. A hold-capable RESET control would let the gate step be run entirely from the operator's screen | `hmi/` | **Closed by `7675960`.** RESET is press-and-hold, with keyboard down/up, writing `HmiResetRequest` `TRUE` every cycle while held and `FALSE` from the cycle after release, and a tap shorter than one write cycle still lands exactly one `TRUE` cycle. **T5.4 now runs entirely from the operator's screen.** The helper remains for T5.5.5, whose reset must stand before the page exists. The same commit added the H6 liveness deadman, whose interaction with the helper is recorded in §9 |
 | 4 | **No bridge configuration exists for the gate run**: `bridge.yaml` is cell-only by choice and `rehearsal-forklift.yaml` points at the double. The forklift group against the commissioned endpoint is a one-file addition after the TIA read-back, and it is a precondition of T5.1 | `bridge/` | **Open, queued to the owner**: `docs/TODO.md`, *owner — M4 queue*, the step "after the TIA read-back: point `bridge/config/bridge.yaml` at the `Forklift` groups". It is one edit per `bridge-design.md` §2.1 and it is deliberately not made before the read-back, because browsing nodes the CPU does not publish would error |
 | 5 | **An empty forward sector is a no-data condition, not a clear path** — the scanner's 8 m range against a 24 m hall. It shapes how the T5.4 stimulus must be written and is recorded in `sim/README.md` with the arena | `sim/` | **Closed by `aa593ed`**, the commit that carries this file: recorded in §6 with its arithmetic and in `sim/README.md` with the arena |
