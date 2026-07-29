@@ -64,11 +64,34 @@ CPU run.
 Owner queue for this gate: docs/TODO.md "owner — M4 queue", starting with the
 m3-37 finding-9 cold-start capture at the first PLCSIM session.
 
-## M5 — Safety layer on the fixed cell: NOT OPENED
+## M5 — cell-scope core OPENED EARLY on the forklift twin (ADR 0009, issued)
 
-Entry work carried unchanged from ADR 0007, re-attached by m4r2-02: the
-F-CPU-on-PLCSIM tool question is owner work in TIA and feeds M5's first
-brief. No M5 brief until it is answered.
+Owner ruling 2026-07-29: the safety gate's cell-scope core (SF-01, SF-08,
+SF-07 pattern) opens early on the forklift twin, fallback-safe — the M4
+demonstration stands alone if the F-layer is not ready, and M4's criteria are
+unchanged. The owner has already swapped the CPU to a 1513F-1 PN
+(6ES7 513-1FM03-0AB0) with PLCSIM communication verified; the remaining
+feasibility checkpoint (Safety licence compile, F-runtime RUN) is the
+abort-to-fallback trigger.
+
+Early wave, briefs issued, dispatch when the agent limit resets:
+1. m5a-01 arch-docs — ADR 0009 (opus).
+2. m5a-02 arch-docs — roadmap note (sonnet), after m5a-01.
+3. m5a-03 safety-spec — TWIN-DEMO-MAP with ISO 13849 references (opus).
+4. m5a-04 plc — F-program SPEC, F-LAD element-by-element (opus), after
+   m5a-03.
+5. m5a-05 plc — teleop permissive delta + mirror writes (opus), after
+   m5a-04.
+6. m5a-06 interface — Safety/ mirror node group (opus), after m5a-04.
+7. m5a-07 hmi — safety lamps and banner (sonnet), after m5a-06.
+8. m5a-08 sim — arena zone marking + T6 scenario (sonnet), after m5a-04.
+
+Also pending re-dispatch at reset: the three interrupted obstacle-semantics
+doc briefs (m4f-01h interface, m4f-04i plc, m4f-08f sim — sonnet resumes).
+
+The rest of M5 (full acceptance runs, the recorded cell + safety showcase on
+the demo cell, F-I/O completion) remains gated as before and opens properly
+when M4 closes.
 
 M0 closed 2026-07-26 (m0-04/07/09), M1 2026-07-26 (m1-04), M2 2026-07-26
 (m2-02), M3 2026-07-28 (m3-37). Filenames are kept as written:

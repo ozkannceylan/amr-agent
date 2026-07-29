@@ -3,6 +3,20 @@
 Open items only. M3 closed 2026-07-28; M4 (forklift commissioning, ADR 0008)
 is the open gate and its brief queue lives in docs/PLAN.md.
 
+## owner — URGENT first, after the CPU swap (affects everything)
+- The 1513F-1 PN swap was a Change device: per LESSONS 2026-07-27 it silently
+  deletes the OPC UA server interface and resets security. "Communication OK"
+  does not prove the interface survived. In TIA verify NOW: DemoCell server
+  interface present with all tags, derived URI reads http://DemoCell,
+  access control and runtime licence intact — then re-download and check the
+  solid-green diff circles before trusting any client.
+- F-layer checkpoint (ADR 0009 abort-to-fallback trigger, ~15 min): STEP 7
+  Safety Advanced V21 licence present; an empty F-project compiles; the
+  F-runtime group reaches RUN on the PLCSIM instance. Any failure ⇒ fall back
+  to the teleop-only demonstration, nothing else changes.
+- Build the F-program per plc/forklift-safety/SPEC.md when m5a-04 lands, then
+  apply the m5a-05 teleop-permissive delta and the Safety/ mirror tags.
+
 ## owner — M4 queue, in order
 - First PLCSIM session of the gate: one watch-table capture at a CPU cold
   start with the bridge down — all seven Group 1 inputs at their DB start
