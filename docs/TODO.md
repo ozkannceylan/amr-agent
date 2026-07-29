@@ -76,6 +76,12 @@ is the open gate and its brief queue lives in docs/PLAN.md.
   of interrupted handshakes, dedicated F-I/O for SF-05/06/07.
 
 ## agv
+- Carried, small: agv/forklift/launch/vehicle.launch.py is the model's
+  standalone test rig (own gz server and spawn). Used inside the composed
+  stack it puts a second forklift into the arena — observed live 2026-07-29.
+  Its file header and the README contract table should say "standalone rig;
+  in the composed stack run the two scripts directly", or the launch should
+  gain a no-sim argument. One small brief.
 - Carried, low: wheel_radius_m, steer_limit_rad and the fork travel exist in
   both model.sdf and config.yaml (SDF cannot be read as YAML); model.sdf is
   the named authority with a mechanical agreement check in the evidence. If
