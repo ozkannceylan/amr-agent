@@ -504,6 +504,185 @@ data returns — the staleness verdict is a level, not a latch, and it is
 judged against the node's own monotonic clock at receipt, never against
 the header stamp of the thing being watched.
 
+### 6.1 Beyond-range is a measurement, not an absence — re-run 2026-07-29, 14:46–14:51
+
+**Why two expectations in the matrix above are now wrong.** That run
+recorded `all samples +inf` as `True / 0.000` and passed itself on it. The
+expectation was the defect, not the code. On **2026-07-29** a teleop
+session on the arena took a **process stop every time the vehicle's
+heading opened up**: `/forklift/scan` healthy at 10 Hz, the ±30° forward
+sector entirely beyond the scanner's 8 m range and therefore entirely
+`inf`, and the affirmative validity test — finite AND inside
+`[range_min, range_max]` — read a full sector of `inf` as *no valid data*
+and published the fail-safe pair into open space. A rangefinder that
+returns beyond-range is not failing to answer. It is answering: **clear to
+`range_max`**. The two rows that change are `all samples +inf` and
+`all above range_max`; both are now `False / 8.000`.
+
+The rule is therefore three classes, and only the last is an absence:
+
+| Class | What the sensor said | Contributes | Fail-safe? |
+|---|---|---|---|
+| `CLEAR` | `+inf`, or a finite range ≥ `range_max` | `range_max` | never |
+| `DISTANCE` | a finite range inside `[range_min, range_max)` | that range | only via the 1.20 m threshold, as before |
+| `INVALID` | `NaN`, `-inf`, or a range below `range_min` | nothing | only if **nothing else** in the sector is valid |
+
+Both valid classes are affirmative comparisons, tested in that order, so a
+`NaN` still reaches neither and is `INVALID`. The fail-safe now fires on a
+missing, stale or structurally unusable scan, or on a sector with no sample
+in **either** valid class — a dead or garbage sensor still stops the
+machine, an open horizon does not.
+
+| Item | Value |
+|---|---|
+| Date | **2026-07-29**, 14:46–14:51 local |
+| Isolation | `GZ_PARTITION=m4f02c`, `ROS_DOMAIN_ID=71` |
+| Environment | As the header table: WSL2 Ubuntu 24.04.4 LTS, ROS 2 Jazzy, `python3 3.12.3`, Gazebo Sim 8.11.0 (`ros-jazzy-gz-sim-vendor 0.0.10-1noble.20260604.111001`), `ros-jazzy-ros-gz 1.0.22-1noble.20260616.074726`, `GL_RENDERER = llvmpipe (LLVM 20.1.2, 256 bits)`, headless |
+| Under test | `scripts/obstacle_zone.py` as committed by this change; `model.sdf`, `config.yaml` and `launch/vehicle.launch.py` unchanged |
+| Note | An unrelated simulation was running on another partition and another domain throughout. It shared the CPU and the software rasteriser with these runs; it did not share a transport with them, and no pid outside this run was signalled |
+
+The matrix is driven the same way as the one above — the node started as
+its own process, real messages on the real topics, no Gazebo — with two
+rows re-expected and four rows added:
+
+```
+obstacle_zone fault matrix: sector +-30 deg, stop 1.20 m, timeout 0.50 s, window [0.10, 8.00] m
+
+ok   clear sector               in_stop_zone=False min_distance=5.0000     (expected False / 5.000)
+ok   obstacle dead ahead        in_stop_zone=True  min_distance=0.8000     (expected True / 0.800)
+ok   obstacle at +10 deg        in_stop_zone=True  min_distance=1.1500     (expected True / 1.150)
+ok   obstacle at -90 deg        in_stop_zone=False min_distance=5.0000     (expected False / 5.000)
+ok   obstacle just outside      in_stop_zone=False min_distance=1.2500     (expected False / 1.250)
+ok   all samples NaN            in_stop_zone=True  min_distance=0.0000     (expected True / 0.000)
+ok   all samples +inf           in_stop_zone=False min_distance=8.0000     (expected False / 8.000)
+ok   all samples -inf           in_stop_zone=True  min_distance=0.0000     (expected True / 0.000)
+ok   all below range_min        in_stop_zone=True  min_distance=0.0000     (expected True / 0.000)
+ok   all above range_max        in_stop_zone=False min_distance=8.0000     (expected False / 8.000)
+ok   empty ranges               in_stop_zone=True  min_distance=0.0000     (expected True / 0.000)
+ok   range window NaN           in_stop_zone=True  min_distance=0.0000     (expected True / 0.000)
+ok   range window inverted      in_stop_zone=True  min_distance=0.0000     (expected True / 0.000)
+ok   one valid among NaN        in_stop_zone=False min_distance=2.0000     (expected False / 2.000)
+ok   inf sector, one finite 2.0 in_stop_zone=False min_distance=2.0000     (expected False / 2.000)
+ok   inf sector, obstacle 0.8   in_stop_zone=True  min_distance=0.8000     (expected True / 0.800)
+ok   inf sector, one NaN        in_stop_zone=False min_distance=8.0000     (expected False / 8.000)
+ok   inf sector, one below min  in_stop_zone=False min_distance=8.0000     (expected False / 8.000)
+ok   clear again before stall   in_stop_zone=False min_distance=5.0000     (expected False / 5.000)
+ok   publisher stopped 3 s      in_stop_zone=True  min_distance=0.0000     (expected True / 0.000)
+ok   recovers when it returns   in_stop_zone=False min_distance=5.0000     (expected False / 5.000)
+
+RESULT: PASS (0 failing case(s))
+```
+
+The four added rows are the ones that decide whether the fix is a fix or a
+hole. **`inf sector, obstacle 0.8` returns `True / 0.800`**: an open
+horizon does not blind the detector, which is the case worth being sure
+of. **`inf sector, one finite 2.0` returns `False / 2.000`**: a `CLEAR`
+sample contributes `range_max`, so the minimum is still the real object.
+**`inf sector, one NaN` returns `False / 8.000`**: a scan is not condemned
+for containing a bad sample, exactly as before. And **`inf sector, one
+below min` returns `False / 8.000`**, which is a residual and is written
+out at the end of this section rather than left to be found.
+
+Everything the old matrix established about a dead sensor is unchanged:
+`all samples NaN`, `all samples -inf`, `all below range_min`, `empty
+ranges`, both unusable windows and `publisher stopped 3 s` are still
+`True / 0.000`. The node's own reason strings, which is where the *why*
+lives, gained exactly one member:
+
+```
+[INFO] [obstacle_zone]: in_stop_zone=False min_distance=5.000 reason=sector clear
+[INFO] [obstacle_zone]: in_stop_zone=True min_distance=0.800 reason=obstacle in sector
+[INFO] [obstacle_zone]: in_stop_zone=True min_distance=0.000 reason=no valid sample in sector
+[INFO] [obstacle_zone]: in_stop_zone=False min_distance=8.000 reason=sector clear beyond range
+[INFO] [obstacle_zone]: in_stop_zone=True min_distance=0.000 reason=scan geometry unusable
+[INFO] [obstacle_zone]: in_stop_zone=True min_distance=0.000 reason=scan range window unusable
+[INFO] [obstacle_zone]: in_stop_zone=True min_distance=0.000 reason=scan stale
+```
+
+#### The same thing on a rendered scan, and the rule that produced the false stop
+
+A synthetic `inf` is not the defect; the defect was a real scanner looking
+at nothing. Two headless Gazebo runs on the minimal world of section 0,
+vehicle spawned at the origin, once facing the wall and once facing away
+from it, with **one real message from each run evaluated under both
+rules** — the rule as committed before this change, and the three-class
+rule:
+
+```
+=== facing OPEN SPACE (yaw = pi, wall behind the vehicle) ===
+scan: 181 samples, angle [-1.5708, 1.5708] rad, window [0.10, 8.00] m
+
+   t[s]   min_distance in_stop_zone
+   0.51       8.000000        False
+   2.02       8.000000        False
+   4.01       8.000000        False
+   6.01       8.000000        False
+
+one real scan, forward sector +-30 deg: 0 DISTANCE, 61 CLEAR, 0 INVALID
+  rule at ce7153b : in_stop_zone=True  min_distance=0.000  reason=no valid sample in sector
+  three-class rule: in_stop_zone=False min_distance=8.000  reason=sector clear beyond range
+```
+
+That is the teleop false stop, reproduced and then removed on the same
+message: sixty-one rays, every one of them a `CLEAR` measurement, zero
+invalid samples, and a rule that called the lot of them missing data.
+
+```
+=== facing the WALL (yaw = 0, near face 3.18 m ahead of the scanner) ===
+
+   t[s]   min_distance in_stop_zone
+   0.50       3.180194        False
+   2.00       3.180194        False
+   4.00       3.180194        False
+   6.00       3.180194        False
+
+one real scan, forward sector +-30 deg: 51 DISTANCE, 10 CLEAR, 0 INVALID
+  rule at ce7153b : in_stop_zone=False min_distance=3.180  reason=sector clear
+  three-class rule: in_stop_zone=False min_distance=3.180  reason=sector clear
+```
+
+`3.180194` is the same wall range section 5 measured, so the distance path
+is untouched by this change. The sector is genuinely mixed on real data —
+the wall is 3.00 m wide and the ±30° sector is 3.67 m wide at 3.18 m, so
+ten rays at the sector edges miss it and come back `CLEAR` — and the
+verdict is still the wall. Neither run produced a single `INVALID` sample:
+the `±45°` dropout of `README.md` sits outside a ±30° sector.
+
+The node's log across the open-space run is the whole change in two lines:
+
+```
+[INFO] [obstacle_zone]: in_stop_zone=True min_distance=0.000 reason=no scan received
+[INFO] [obstacle_zone]: in_stop_zone=False min_distance=8.000 reason=sector clear beyond range
+```
+
+Before any data, the fail-safe. With data that says *nothing out there*,
+`8.000` — which is the **scan's own** `range_max` and not a constant of
+this node, so it follows whatever scanner the model declares. That couples
+two documents: `model.sdf`'s `<range><max>` must stay inside the
+plausibility window the consumer applies to this value
+(`docs/interfaces/opcua-nodes.md` §10.5 gives `0.05 … 8.10` m against the
+scanner's `0.10 … 8.00` m, so `8.00` is inside it with 0.10 m to spare).
+Raising the scanner's range past `8.10` without moving that window would
+make a clear horizon read at the PLC as a transducer fault — the same
+class of mistake as the one this section fixes, one layer along.
+
+#### Residual, stated rather than discovered
+
+**A below-`range_min` return is skipped, not treated as an obstacle.**
+`-inf` and any range under `range_min` are `INVALID`, which is what the
+matrix rows `all samples -inf` and `all below range_min` pin at
+`True / 0.000`. But an `INVALID` sample is ignored whenever *some other*
+sample in the sector is valid — that is the pre-existing "a scan is not
+condemned for containing a bad sample" rule, unchanged here. It is now
+reachable in a combination it was not reachable in before: `inf sector,
+one below min` returns `False / 8.000`. On a scanner that reports
+too-close as a below-minimum return rather than as a short range, that ray
+is the most non-permissive thing the sensor can say, and this node
+currently drops it. Nothing in this run establishes which behaviour the
+scanner in `model.sdf` has; it returned no `INVALID` sample in either
+live run. Deciding it is an owner call and is carried in the report for
+this change, not settled here.
+
 ## 7. Every constant is in `config.yaml`, and it agrees with the model
 
 The two files hold the same numbers because SDF cannot be read as YAML.

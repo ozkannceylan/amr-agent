@@ -17,18 +17,46 @@ WHAT THIS NODE IS NOT
   input to speed and to order execution, at the same integrity level as
   any other process signal.
 
+THREE CLASSES OF SAMPLE, AND WHY THE MIDDLE ONE IS NOT MISSING DATA
+  A rangefinder answers "how far" with three different kinds of answer,
+  and only the last of them is an absence:
+
+    CLEAR     +inf, or a finite range at or beyond range_max. The beam
+              went out and nothing came back inside the sensor's window.
+              That is a measurement: the path is clear to range_max. It
+              is valid, it contributes range_max, and it never triggers
+              the fail-safe.
+    DISTANCE  a finite range inside [range_min, range_max). The thing
+              the sector is watched for.
+    INVALID   NaN, -inf, or a range below range_min. Not an answer.
+
+  Both valid classes are recognised by affirmative comparisons, so a NaN,
+  which makes every comparison false, reaches neither and lands in
+  INVALID rather than passing as a measurement. This is the same rule the
+  PLC layer applies to every Real it reads.
+
 WIRE NC, PROGRAM NO, CARRIED INTO THE VEHICLE LAYER
   CLAUDE.md section 9 asks stop devices to be wired so that losing the
-  signal stops the machine. The network equivalent here: absence of data
-  IS an obstacle. A scan that is missing, stale, structurally unusable, or
-  that contains no valid sample in the sector, publishes
+  signal stops the machine. The network equivalent here: absence of DATA
+  is an obstacle. A scan that is missing, stale, structurally unusable,
+  or whose sector holds no sample in EITHER valid class, publishes
 
       in_stop_zone = True      min_distance = obstacle.unknown_distance_m
 
-  Never the clear state. A sample is counted only by an affirmative test,
-  finite AND inside the scan's own [range_min, range_max] window, so a NaN
-  fails every comparison and lands in the obstacle branch rather than
-  passing as a measurement.
+  Never the clear state. But absence of an ECHO is not absence of data. A
+  forward sector that is entirely beyond range publishes
+
+      in_stop_zone = False     min_distance = scan.range_max
+
+  A dead sensor and a garbage sensor still stop the machine; an open
+  horizon does not. Conflating the two was a real defect: on 2026-07-29 a
+  teleop run took a process stop every time the heading opened up, with a
+  healthy 10 Hz scan behind the verdict.
+
+  min_distance in that case is the SCAN's range_max, not a constant of
+  this node, so it follows the sensor the model declares. The consumer's
+  plausibility window has to contain it: docs/interfaces/opcua-nodes.md
+  section 10.5 gives 0.05 to 8.10 m against this scanner's 0.10 to 8.00 m.
 
   Staleness is judged against this node's own monotonic clock at the
   moment of receipt, never against the publisher's header stamp. A
@@ -56,10 +84,36 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_CONFIG = os.path.normpath(os.path.join(_THIS_DIR, '..', 'config.yaml'))
 
 
+#: A sample either measures a distance, measures that the path is clear to
+#: the end of the sensor's window, or is not an answer at all.
+CLASS_DISTANCE = 'distance'
+CLASS_CLEAR = 'clear'
+CLASS_INVALID = 'invalid'
+
+
 def load_config(path):
     """Read the named-constant file. Every value this node uses is in it."""
     with open(path, 'r', encoding='utf-8') as handle:
         return yaml.safe_load(handle)
+
+
+def classify_sample(sample, range_min, range_max):
+    """Put one range into one of the three classes above.
+
+    Both valid classes are affirmative comparisons, tested in order, so a
+    NaN reaches neither and is INVALID; so does -inf, and so does anything
+    below range_min. +inf fails the first test and passes the second,
+    which is the whole point: no echo is a clear path, not a missing one.
+
+    The caller has already established that range_min and range_max are
+    finite and ordered. That is what makes a sample bounded between them
+    necessarily finite, and it is why no isfinite() call is needed here.
+    """
+    if range_min <= sample and sample < range_max:
+        return CLASS_DISTANCE
+    if sample >= range_max:
+        return CLASS_CLEAR
+    return CLASS_INVALID
 
 
 class ObstacleZone(Node):
@@ -152,7 +206,7 @@ class ObstacleZone(Node):
 
         # Plausibility of the scan's own validity window, before any range
         # is tested against it. A window that is itself NaN or inverted
-        # cannot qualify a sample, so the scan is unusable, not clear.
+        # cannot classify a sample, so the scan is unusable, not clear.
         window_ok = (math.isfinite(scan.range_min)
                      and math.isfinite(scan.range_max)
                      and scan.range_min < scan.range_max)
@@ -163,28 +217,36 @@ class ObstacleZone(Node):
                 or scan.angle_increment == 0.0:
             return True, self.unknown_distance_m, 'scan geometry unusable'
 
-        minimum = None
+        nearest = None      # smallest DISTANCE-class sample in the sector
+        clear_seen = False  # the sector produced at least one CLEAR sample
         for index, sample in enumerate(scan.ranges):
             angle = scan.angle_min + index * scan.angle_increment
             if abs(angle) > self.sector_half_angle_rad:
                 continue
-            # Affirmative validity: finite AND inside the window. A NaN
-            # fails isfinite and both comparisons, so it can never be
-            # counted as a measurement.
-            valid = (math.isfinite(sample)
-                     and scan.range_min <= sample
-                     and sample <= scan.range_max)
-            if not valid:
-                continue
-            if minimum is None or sample < minimum:
-                minimum = sample
+            sample_class = classify_sample(
+                sample, scan.range_min, scan.range_max)
+            if sample_class == CLASS_DISTANCE:
+                if nearest is None or sample < nearest:
+                    nearest = sample
+            elif sample_class == CLASS_CLEAR:
+                clear_seen = True
 
-        if minimum is None:
+        # The fail-safe fires only when the sector yielded nothing in
+        # EITHER valid class: a dead or a garbage sensor. An open horizon
+        # yields CLEAR samples and is a measurement, not an absence.
+        if nearest is None and not clear_seen:
             return True, self.unknown_distance_m, 'no valid sample in sector'
 
-        if minimum <= self.stop_distance_m:
-            return True, minimum, 'obstacle in sector'
-        return False, minimum, 'sector clear'
+        if nearest is None:
+            # Every sample in the sector went out and came back with
+            # nothing inside the window, so the nearest thing the sensor
+            # could have seen is at range_max. That is the measurement,
+            # and it is the scan's own number rather than one of ours.
+            return False, scan.range_max, 'sector clear beyond range'
+
+        if nearest <= self.stop_distance_m:
+            return True, nearest, 'obstacle in sector'
+        return False, nearest, 'sector clear'
 
 
 def main(argv=None):
