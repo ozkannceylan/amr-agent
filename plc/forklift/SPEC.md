@@ -639,8 +639,21 @@ the failure the analogue-validity lesson exists to prevent. Treating an
 implausible height as *raised* is the restrictive direction, and it is the one
 the brief and this document require.
 
-**The cap limits; it does not command.** With the fork raised and a demand of
-0.2, the setpoint is 0.20 m/s, not 0.30 m/s.
+**The cap is a scale, not a ceiling — and it never commands.** `speedCap` is the
+multiplier §6.4's one statement applies to the demand, so raising the carriage
+swaps the full-scale value from `TRACTION_SPEED_MAX` to
+`TRACTION_SPEED_CAP_RAISED` and the operator keeps proportional control inside
+the reduced range. With the fork raised, a demand of 1.0 gives `0.30` m/s and a
+demand of 0.2 gives **`0.060` m/s** — not `0.20` m/s, which is what a *clamp* of
+the full-scale product would give, and not `0.30` m/s, because a small demand is
+never pulled **up** to the cap. The setpoint is `demand × 0.30` raised and
+`demand × 1.00` otherwise, which is what §9's Group 3 row states and what §7
+builds in a single multiplication.
+
+**Full demand is where the two forms agree**, and that is why the distinction is
+easy to lose: at a demand of 1.0 the scale gives `0.30` m/s and a clamp would
+give `0.30` m/s too. Only a *partial* demand under a raised carriage tells them
+apart, which is why §11 has step 5.3.4 at all.
 
 **`ForkliftSpeedLimitActive` reads "the cap is in force", not "the cap is
 biting".** It is `TRUE` whenever teleop is active and the carriage is raised, and
@@ -648,8 +661,16 @@ it does not flicker with the operator's control. `opcua-nodes.md` §10.7 describ
 it as "the carriage is raised past the cap's height **and** the traction setpoint
 is being limited below what the operator asked for", which could be read as the
 narrower verdict; the wider reading is implemented because it is the one that is
-useful on a display and stable in a recording. The alternative is one conjunct:
-`AND (ABS(tractionDemand) * TRACTION_SPEED_MAX > TRACTION_SPEED_CAP_RAISED)`.
+useful on a display and stable in a recording.
+
+**Under a scale the narrower verdict collapses to "the operator is asking for
+something".** `demand × 0.30` is below `demand × 1.00` for *every* non-zero
+demand, so the narrow flag is one conjunct — `AND (ABS(tractionDemand) > 0.0)` —
+and it would drop out each time the control passed through centre, which is
+exactly the flicker the wider reading exists to avoid. **Do not write `AND
+(ABS(tractionDemand) * TRACTION_SPEED_MAX > TRACTION_SPEED_CAP_RAISED)`**: that
+conjunct asks whether the *uncapped* setpoint would have exceeded the cap value,
+which is the question a clamp would ask and this program never asks.
 
 ### 6.6 The fork soft travel limits — direction-scoped aborts
 
@@ -1119,7 +1140,7 @@ writes.
 |---|---|---|
 | `"ForkliftStatus".ForkliftTeleopActive` | Bool | `TRUE` only between an enable rising edge and the next drop condition. Never `TRUE` from a level alone |
 | `"ForkliftStatus".ForkliftObstacleStopActive` | Bool | Latched `TRUE` on the field bit or a sustained lidar fault; **stays `TRUE` after the field clears** |
-| `"ForkliftStatus".ForkliftSpeedLimitActive` | Bool | `TRUE` while teleop is active and the carriage is above 0.50 m, whether or not the cap is biting |
+| `"ForkliftStatus".ForkliftSpeedLimitActive` | Bool | `TRUE` while teleop is active and the carriage is above 0.50 m, whether or not the cap is biting — and the cap is a **scale**, so it bites at every non-zero demand (§6.5) |
 | `"ForkliftStatus".ForkliftResetRequired` | Bool | `TRUE` while any latch is pending; `TRUE` from power-up, because both link latches form at the first scan |
 | `"ForkliftLink".HmiHeartbeat` | Decimal | Advancing ~10/s while the HMI runs; frozen in H1 and H2 |
 | `"ForkliftLink".HmiLinkOk` | Bool | `TRUE` while the heartbeat changes; `FALSE` 600 ms after it stops; **`FALSE` from the first scan of every CPU run until the heartbeat has been seen to change at least once** — it never reads `TRUE` before the first change, whatever `HMI_STALE_TIME` is |
@@ -1238,7 +1259,7 @@ written once outlives the run it was written for.
 
 | Step | Action | Pass |
 |---|---|---|
-| 5.1.1 | Start the world, the bridge and the HMI. Read the watch table **before touching a control** | `HmiLinkOk` `TRUE`, `BridgeLinkOk` `TRUE`, `ForkliftTeleopActive` `FALSE`, `ForkliftResetRequired` **`TRUE`** (both link latches formed at the first scan), all three `…Ref` `0.0`, `ForkliftObstacleStopActive` **`FALSE`** despite the field bit's `TRUE` start value |
+| 5.1.1 | Start the world, the bridge and the HMI. **Wait until `HmiLinkOk` and `BridgeLinkOk` both read `TRUE`, then let one further OB call pass**, and read the watch table **before touching a control**. Read Group 2's `ForkliftObstacleInStopZone` and `ForkliftObstacleMinDistance` in the same reading, **before** judging `ForkliftObstacleStopActive` | `HmiLinkOk` `TRUE`, `BridgeLinkOk` `TRUE`, `ForkliftTeleopActive` `FALSE`, `ForkliftResetRequired` **`TRUE`** (at least both link latches, formed at the first scan), all three `…Ref` `0.0`. **`ForkliftObstacleStopActive` may read `FALSE` or `TRUE`, and both pass** — it is not a guarantee and must not be read as one. The field bit's `TRUE` **start value** is not what is at stake: §6.7's `bridgeLinkOk` conjunct keeps it out of the boot window, and by the time that conjunct lifts the bridge has written the slot at least once from a real sample. What decides the reading is a **race** the PLC does not own: the vehicle layer publishes a no-data sentinel until its first scan arrives, so if that sentinel is still standing when the bridge's heartbeat begins, the field bit is `TRUE` with the link up and the latch **correctly** forms on level, with no delay; if the first true scan wins, no latch forms. **The check is the pair, not the value**: with `ForkliftObstacleInStopZone` now reading `FALSE` and `ForkliftObstacleMinDistance` inside 0.05 … 8.10, `ForkliftObstacleStopActive` must **hold** — set stays set, because a clearing field releases no latch (§6.7), and clear stays clear. A `FALSE` → `TRUE` transition under those two readings is the one defect signature here. **A latch found set clears at 5.1.3** with the two link latches, and changes no later step |
 | 5.1.2 | Assert the enable **before** any reset | Nothing happens: `ForkliftTeleopActive` stays `FALSE`, all three refs stay `0.0`. A latch is pending and the enable edge is refused |
 | 5.1.3 | Release the enable. Assert and release the reset control once | `ForkliftResetRequired` → `FALSE` within two OB calls. `ForkliftTeleopActive` stays `FALSE` and every ref stays `0.0` — **the reset energizes nothing** |
 | 5.1.4 | Assert the enable again (a fresh rising edge) with the traction control at zero | `ForkliftTeleopActive` → `TRUE`; all three refs still `0.0` |
@@ -1273,10 +1294,27 @@ the recorded showcase segment for criterion (a).
 | 5.3.1 | Carriage below 0.50 m, teleop active, traction control at full forward | `ForkliftTractionSpeedRef` = `+1.00` m/s; `ForkliftSpeedLimitActive` `FALSE` |
 | 5.3.2 | **Raise the carriage past 0.50 m with the traction control still at full** | `ForkliftTractionSpeedRef` drops to `+0.30` m/s in the OB call after the height crosses the threshold; `ForkliftSpeedLimitActive` → `TRUE`; the model **visibly slows** in Gazebo without the operator touching anything. **Record both refs and the crossing height** |
 | 5.3.3 | Lower the carriage back below 0.50 m | Ref returns to `+1.00`; `ForkliftSpeedLimitActive` → `FALSE`; the model speeds up again |
-| 5.3.4 | With the carriage raised, move the traction control to ≈0.2 | Ref = ≈`+0.20` m/s — **the cap limits, it does not command**. `ForkliftSpeedLimitActive` stays `TRUE`: it reads "the cap is in force", not "the cap is biting" (§6.5) |
+| 5.3.4 | With the carriage raised, move the traction control to ≈0.2 | Ref = ≈`+0.060` m/s — **the cap is a scale, not a ceiling**. §7 forms the setpoint in one multiplication, `#tractionDemand * #speedCap`, and while the carriage is raised `#speedCap` **is** `TRACTION_SPEED_CAP_RAISED`: 0.2 × 0.30 = 0.060 m/s, which is `demand × 0.30` as §9's Group 3 row states. `≈+0.20` would be the reading if the cap clamped a full-scale product, and it does not; a small demand is never pulled **up** to `0.30` either. `ForkliftSpeedLimitActive` stays `TRUE`: it reads "the cap is in force", not "the cap is biting" (§6.5) |
 | 5.3.5 | Read `ForkliftLinearSpeed` in 5.3.1 and 5.3.2 | It tracks each ref. Record that it feeds **no verdict** in this program — there is no traction drive-fault detection (§8 case P, §12) |
 
 **Pass: all five steps of the table above.**
+
+> **Why 5.3.4's number is `0.060` and not `0.20`, and why the two are easy to
+> confuse.** The cap is a **scale**: §7 assigns the traction setpoint once, as
+> `#tractionDemand * #speedCap`, and raising the carriage swaps `#speedCap` from
+> `TRACTION_SPEED_MAX` to `TRACTION_SPEED_CAP_RAISED`. **At full demand a scale
+> and a clamp give the same answer** — 1.0 × 0.30, and a clamp of 1.00 down to
+> 0.30, are both `+0.30` m/s — so 5.3.1, 5.3.2 and 5.3.3 never distinguish them,
+> and an earlier revision of 5.3.4 stated the clamp's number while §7 and §9's
+> Group 3 row stated the scale's. **5.3.4 is the only step in this section that
+> tells the two apart**, which makes its number the one that has to be right: an
+> owner reading `+0.060` against a pass line saying `≈+0.20` would have gone
+> looking for a defect in a program that computes exactly what it was specified
+> to compute. Surfaced when the procedure was rehearsed and by the logic double,
+> which transliterates §7 statement for statement and prints `0.2 x 0.30 = 0.06`
+> (`plc/forklift/double/EVIDENCE_DOUBLE.md`, kernel K2). **That is arithmetic,
+> not evidence**: the gate's number is the one the owner reads off the watch
+> table against PLCSIM.
 
 ### T5.4 — Obstacle latch, override, refusal and monitored reset *(criterion d)*
 
