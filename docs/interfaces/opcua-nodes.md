@@ -707,7 +707,7 @@ job, and a plant that has stopped publishing under a live bridge is case D of `b
 | BrowseName | S7 type | OPC UA type | Unit | Range | Meaning |
 |---|---|---|---|---|---|
 | `ForkliftTractionSpeedRef` | Real | Float | m/s | ±`TRACTION_SPEED_MAX` | Traction speed setpoint, signed, positive forwards. Formed inside the PLC from `HmiTractionRequest` scaled by `TRACTION_SPEED_MAX`, reduced by the fork-height speed cap when it applies, and gated to `0.0` by the interlocks of §10.7 |
-| `ForkliftSteerAngleRef` | Real | Float | rad | −1.31 … +1.31 | Steer angle setpoint, signed. Clamped in the PLC to the plant's mechanical range. Steering is **not** gated to zero on a stop: a steer setpoint is a position, and forcing it to centre would move the wheel of a machine that is supposed to be stopping |
+| `ForkliftSteerAngleRef` | Real | Float | rad | −1.31 … +1.31 | Steer angle setpoint, signed. Formed from `HmiSteerRequest` clamped in the PLC to the plant's mechanical range, and gated to `0.0` by the interlocks of §10.7 **exactly as the other two are** (ruling below). `0.0` is the centred wheel, and it is a commanded centre, not a hold |
 | `ForkliftForkSpeedRef` | Real | Float | m/s | −0.15 … +0.15 | Fork jog velocity setpoint, signed, positive raises. Formed from `HmiForkRequest` scaled by `FORK_SPEED_MAX`, aborted **in the offending direction only** at a soft travel limit, and gated to `0.0` by the interlocks of §10.7. `0.0` means hold: the plant holds the carriage against gravity |
 
 **Gating a Real means an unconditional assignment with a mandatory `ELSE`.** Interface expectation
@@ -717,6 +717,27 @@ project, on every call, with the interlock-failed branch driving it to `0.0`. A 
 with no `ELSE` leaves the Real holding its last value, so the machine keeps moving after the stop
 (LESSONS 2026-07-27, `plc/demo-cell/SPEC.md` §6.4). This is what ADR 0008 D2.3 requires of the HMI
 watchdog and what §10.7's obstacle stop requires of the obstacle path; both are the same statement.
+
+**Ruling: all three setpoints, the steer angle included, take `0.0` in the interlock-failed `ELSE`.**
+An earlier revision of the row above exempted steering, on the ground that a steer angle is a
+position rather than a motion and that centring it would move the wheel of a machine that is supposed
+to be stopping. **That exemption is withdrawn**: it contradicted this section's own gating paragraph
+and the words ADR 0008 D2.3 uses, and `plc/forklift/SPEC.md` §6.4 implements the zero. Three reasons,
+in the order they decide it:
+
+- **A hold needs stored state; the zero needs none.** Holding the last angle means a static carrying
+  an operator demand across a stop — the stale sequence state CLAUDE.md §9 tells the machine to
+  re-read at restart rather than resume from.
+- **One rule across three analogue outputs is the one that survives being read in a hurry.** An
+  exemption for one output of three is the shape of the defect this paragraph exists to prevent.
+- **What the exemption was protecting against does not occur.** All three assignments execute in the
+  same call, so the wheel is re-aimed on a machine whose traction setpoint has already gone to `0.0`:
+  the steer joint moves, the machine does not.
+
+**The visible consequence, stated here so it is not discovered on the recording: the steered wheel
+returns to centre while the machine is stopping.** It appears in every stop scenario and is not a
+defect. If the owner rules the other way it is one branch in the PLC specification and one row here;
+no node, count, access right or start value moves either way.
 
 The bridge republishes each value to its ROS topic **unchanged** — no ramp, no clamp, no interlock,
 no zeroing of its own (invariant 6, `bridge-design.md` §1.1) — and the plant applies it as given,
@@ -730,7 +751,7 @@ its display, by the bridge for logging, applied to no actuator.
 
 | BrowseName | S7 type | OPC UA type | Meaning |
 |---|---|---|---|
-| `ForkliftTeleopActive` | Bool | Boolean | The PLC's verdict that teleop is enabled: `HmiTeleopRequest` held, both link verdicts `TRUE`, no latch standing. **A level**, and the separate layer from the setpoints — machine state and actuator command are different things (CLAUDE.md §9), which is why this is not the same node as `ForkliftTractionSpeedRef` being non-zero |
+| `ForkliftTeleopActive` | Bool | Boolean | The PLC's verdict that teleop is enabled: `HmiTeleopRequest` held, both link verdicts `TRUE`, no latch standing. **Entered on a rising edge** of that request and never restored by a returning permissive (§10.8 P5); **a level** once entered, and the separate layer from the setpoints — machine state and actuator command are different things (CLAUDE.md §9), which is why this is not the same node as `ForkliftTractionSpeedRef` being non-zero |
 | `ForkliftObstacleStopActive` | Bool | Boolean | A **latched** process stop, raised by `ForkliftObstacleInStopZone` and cleared only by the monitored reset of §10.8. Standard-program process logic; **not** SF-03 and not a protective stop (ADR 0008 D3). The field clearing does not release it: this machine does not resume by itself (CLAUDE.md §9) |
 | `ForkliftSpeedLimitActive` | Bool | Boolean | The fork-height speed cap is in force: the carriage is raised past the cap's height and the traction setpoint is being limited below what the operator asked for. Informational — the reduction itself happens in the setpoint (§10.6). **Not** SF-04 and no PL is claimed |
 | `ForkliftResetRequired` | Bool | Boolean | A monitored, edge-triggered reset is pending before teleop may be enabled again. Set by any latch above and by a link loss (§10.8). **No client clears it by writing a node**: the only reset input is `HmiResetRequest`, and the edge and the arming are PLC program content |
@@ -740,6 +761,19 @@ make: the fork-height speed cap's height and reduced speed; the fork soft travel
 be **direction-scoped aborts** and never a blanket permissive, because a carriage sitting on a limit
 can only leave it by moving (LESSONS 2026-07-27); and the fault delays. A latch is never a term in
 its own clearing condition (LESSONS 2026-07-27), so the reset tests the live world, not the latches.
+
+**One conflation this gate carries, written out where teleop is defined: there is no start request.**
+§10.4 defines five requests and none of them is a start, so `HmiTeleopRequest` doubles as the enable
+*and* as the post-reset start action. The operator's sequence after any latch is therefore *release
+the enable, press reset, assert the enable again*: an enable left asserted through the reset produces
+no rising edge and the machine stays stopped, which is the no-automatic-resume behaviour CLAUDE.md §9
+requires (`plc/forklift/SPEC.md` §6.7). This follows the rule the M3 cell set for exactly this
+situation — when a gate mandates a CLAUDE.md §9 behaviour and the signal table has no device for it,
+implement the behaviour on an existing device, state the conflation, and **request the missing device
+rather than inventing a tag** (LESSONS 2026-07-27). That request is §10.12 item 7; it is post-gate,
+because a sixth request node changes the node count, a DB, a start value and the HMI's write set in a
+group that is being commissioned. Until it is taken, the conflation is correct behaviour and not a
+defect.
 
 ### 10.8 `Forklift/Link/` — the HMI watchdog
 
@@ -770,7 +804,7 @@ a **second, independent watchdog on a different client**, not a copy of the firs
 | P2 | `HmiLinkOk := HmiSeenAlive AND NOT HmiStaleTimer.Q`, where `HmiSeenAlive` is a non-retain latch with start value `FALSE`, set by the first observed change. **The link verdict is `FALSE` from the first scan and stays `FALSE` until the heartbeat has actually moved**: "not yet proven stale" is not "alive", and every guard that rides on link-up inherits this boot polarity (LESSONS 2026-07-28, ADR 0008 D2.3). A verdict formed from the stale timer alone would read `TRUE` for the whole first stale window of every CPU run, before a single operator input had ever arrived |
 | P3 | The stale window is a **named constant**, `HMI_STALE_TIME`, **`T#600ms`** — three times the 200 ms period the 5 Hz floor allows. The **rule is three worst-case write periods**, not this number: if the HMI's measured worst-case period at commissioning exceeds 200 ms, the constant is re-derived from the measurement rather than the floor being quietly reinterpreted |
 | P4 | `HMI_STALE_TIME` is **its own constant**, never shared with `HEARTBEAT_STALE_TIME`. The two watch different clients at different rates, and retuning one must not silently retune the other (invariant 10, the `BELT_FAULT_DELAY` precedent) |
-| P5 | On `HmiLinkOk` `FALSE`: every motion setpoint is driven to `0.0` in the mandatory `ELSE` of §10.6, `ForkliftTeleopActive` drops, and the loss **latches** — `ForkliftResetRequired` is set and a returning heartbeat never by itself restores teleop (ADR 0008 D2.3, CLAUDE.md §9). No request value is evaluated while the verdict is `FALSE`; the requests are then not attributable to an operator |
+| P5 | On `HmiLinkOk` `FALSE`: **all three setpoints of §10.6, the steer angle included**, are driven to `0.0` in the mandatory `ELSE` — "every motion setpoint" is not the test, because a steer angle is arguably not a motion and the exemption that reading invited is withdrawn (§10.6) — `ForkliftTeleopActive` drops, and the loss **latches** — `ForkliftResetRequired` is set and a returning heartbeat never by itself restores teleop (ADR 0008 D2.3, CLAUDE.md §9). No request value is evaluated while the verdict is `FALSE`; the requests are then not attributable to an operator |
 | P6 | **The reset edge is armed per link session.** A rising edge of `HmiResetRequest` counts only if the PLC has already observed that node `FALSE` **while `HmiLinkOk` was `TRUE` within the current link session** — the arming latch clears whenever `HmiLinkOk` is `FALSE`. Without it, a reset held from before link-up registers as an edge the moment the link forms and clears every latch with no operator acting at the moment of clearing, which is the automatic resume CLAUDE.md §9 forbids. A guard scoped per session is tested by **ending a session**, not by restarting the machine (LESSONS 2026-07-28) |
 | P7 | Teleop requires **both** link verdicts: `BridgeLinkOk` (the plant's state is attributable) and `HmiLinkOk` (the operator is present). They are independent watchdogs on independent clients and neither substitutes for the other |
 
@@ -858,7 +892,8 @@ Each row means "no such node under `DemoCell/Forklift/`".
 |---|---|---|
 | 1 | Every value in this section is a **design value until read back out of the tool** (§10.2 step 6): the folder tree, the per-tag rights, the node count and the browse path. Phase-0-style verification with a client that is not the bridge, recorded with its date | Owner, at commissioning |
 | 2 | `bridge-design.md` had to describe the forklift path before any bridge work on this gate: the writable set of its §3, the signal map of its §4, the startup rule R3 ("all seven inputs") and the QoS table all needed the forklift signal set | **Closed by m4f-05, 2026-07-29.** §3's writable set and read set are now scoped per group with the `Forklift/Hmi/` group named as never touched; §4.7–§4.10 carry the signal map; §4.6 carries the QoS rows; and **R3 now reads "every input in the *configured* signal set"** (§2.1, §6.1), so a cell-only run counts 7, a forklift-only run counts 4, both count 11, and no run stalls the heartbeat waiting for topics it was never configured to carry |
-| 3 | No `ForkliftDriveFault` node exists, so case D of `bridge-design.md` §7.3 has no PLC-visible verdict on this plant (§10.11). One status node would carry it; the detection is PLC content | Owner decision, then the PLC forklift FB specification |
-| 4 | `TRACTION_SPEED_MAX` and `FORK_SPEED_MAX` are PLC constants this document does not set. The interface constraint is that `ForkliftLinearSpeed`'s plausibility window stays **at least twice** `TRACTION_SPEED_MAX`; at the ±2.00 m/s window that bounds the cap at 1.00 m/s, and raising the cap re-derives the window rather than tightening the margin | PLC forklift FB specification |
+| 3 | **Open, and now confirmed from the PLC side.** No `ForkliftDriveFault` node exists, so case D of `bridge-design.md` §7.3 — plant stopped, bridge alive, the input image frozen at plausible values — has no verdict on this plant (§10.11). `plc/forklift/SPEC.md` §8 carries it as **case P** and states the gap rather than papering over it: `ForkliftLinearSpeed` is read and qualified but feeds no verdict, so a frozen image under a live link is indistinguishable from a machine the operator is holding still. One `Forklift/Status/` node would carry the verdict; the detection is PLC content and has not been briefed, and inventing the verdict without a node to publish it on was declined on both sides | **Open request**, recorded not covered: owner decision, then the PLC forklift FB specification (`plc/forklift/SPEC.md` §12 item 3, `bridge-design.md` §12 item 12) |
+| 4 | `TRACTION_SPEED_MAX` and `FORK_SPEED_MAX` are PLC constants this document does not set. The interface constraint is that `ForkliftLinearSpeed`'s plausibility window stays **at least twice** `TRACTION_SPEED_MAX`; at the ±2.00 m/s window that bounds the cap at 1.00 m/s, and raising the cap re-derives the window rather than tightening the margin | **Closed by m4f-04, 2026-07-29.** `plc/forklift/SPEC.md` §3.3 sets `TRACTION_SPEED_MAX` = **`1.00` m/s**, which meets the relation at its bound: window ±2.00 ≥ 2 × 1.00. `FORK_SPEED_MAX` = `0.15` m/s, matching `ForkliftForkSpeedRef`'s declared ±0.15 range (§10.6). **The relation stays live in one direction**: a higher cap re-derives the window *here first* (1.50 m/s would require ±3.00 m/s in §10.5) and only then changes the constant — the margin is never tightened to fit a bigger cap. The vehicle layer's own 1.50 m/s clamp is a different layer's last-ditch limit; because 1.00 < 1.50 the PLC never asks for a speed that clamp would touch |
 | 5 | The lidar field geometry — sector and stop distance — is configured in the vehicle layer and reaches the PLC as one bit (§10.5). If the owner prefers the PLC to own that threshold, `ForkliftObstacleInStopZone` is deleted and the PLC forms its verdict from `ForkliftObstacleMinDistance` alone: a one-node change here and a polarity change in the vehicle layer, not a redesign | Owner decision |
 | 6 | Per-client write scoping remains policy rather than enforcement, and two writing clients widen the gap (ADR 0008 D2.5, §9.8's open item). Closing it is OPC UA access control plus the per-DB visibility work already carried | The gate that configures the server for a real client |
+| 7 | **An `HmiStartRequest` node in `Forklift/Hmi/`, requested by `plc/forklift/SPEC.md` §6.7 and its §12 item 4.** This section defines five requests and none is a start, so `HmiTeleopRequest` carries both the enable and the post-reset start action; the conflation and the operator's release-and-reassert sequence are written out in §10.7. A sixth request node would restore the M3 cell's two-device separation — a reset that clears and a separate start that energizes | Owner decision, **post-gate**. It moves the node count, the `ForkliftHmi` DB, a start value (§10.9), the HMI's every-cycle write set (§10.8 H1) and the PLC's enable edge together, which is not a change to make inside a commissioning run. Until then the conflation stands and is stated, not hidden |
