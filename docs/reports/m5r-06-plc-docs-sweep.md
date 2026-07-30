@@ -41,8 +41,8 @@ procedure step, no pass count and no evidence claim changed.
 | `forklift-safety/SPEC.md` title | *"(M5 early, cell-scope core)"* | *"(M5 **opening wave**, cell-scope core)"* | Same reconciliation, in the document's self-description |
 | `forklift-safety/SPEC.md` §1.2 **N5** | *"the recorded cell + safety showcase … the accurate statement is 'M5's cell-scope core is being built early'"* | widened-M5 statement + *"being built **first**"* + a definition of **"M5 proper"** | The one place the SPEC explains its own status. Names ADR 0010 D2's widened M5 (safety scanners on the F-side, navigation stack, HMI v2, **safety + autonomy** showcase) once, so no later occurrence re-argues it |
 | `forklift-safety/SPEC.md` §1.2 **N7** | SF-02/03/04 + vehicle SF-08 *"at M6"*; SF-09 *"at M7"*; SF-05/06 *"at M9"* | **M5** (vehicle-chain content of the same gate); SF-09 **M6**; SF-05/06 **M6** | ADR 0010 D7 states all three landings explicitly — SF-09 was **not** ambiguous. The row's heading now reads *"out of scope **of this document**"*, because after the merge the vehicle chain shares this document's gate and a bare renumber would have made the row self-contradictory |
-| `forklift-safety/SPEC.md` §6.4 | fixed-cell `Safety/SafetyResetRequired` *"(SF-08, M9)"* | **(SF-08, M6)** | Subject is the **fixed cell's** SF-08, whose F-I/O follows its equipment to M6 |
-| `forklift-safety/SPEC.md` §10 | *"Real F-I/O, M5 proper"* | *"Real F-I/O **on the forklift twin**, M5 proper — the forklift's F-I/O is M5 content, while the fixed cell's follows its equipment to M6"* | Says which F-I/O, as the brief's ruling requires |
+| `forklift-safety/SPEC.md` §6.4 | fixed-cell `Safety/SafetyResetRequired` *"(SF-08, M9)"* | **(SF-08, M5)** | Subject is the **fixed cell's instance of SF-08**, which lands at M5 with its vehicle instance. **Corrected — see the correction note below** |
+| `forklift-safety/SPEC.md` §10 | *"Real F-I/O, M5 proper"* | *"Real F-I/O **on the forklift twin**, M5 proper — the forklift's F-I/O is M5 content, while the fixed cell's F-I/O **behind SF-05 and SF-06** arrives with the stations at M6 … SF-08 is M5 in both its instances"* | Says which F-I/O, as the brief's ruling requires; narrowed in the same correction so no reader can take "the fixed cell's F-I/O" as an SF-08 claim |
 
 ## Deliberately left unchanged
 
@@ -75,7 +75,7 @@ procedure step, no pass count and no evidence claim changed.
    forklift boundary sentence; both now exist (README lines 19 and 32–36). It is
    not a gate reference, so it was not touched. It wants a one-line closure in a
    later plc brief.
-4. **Cross-document term choice.** `docs/interfaces/opcua-nodes.md` §11 and its
+4. **Cross-document term choice.**  `docs/interfaces/opcua-nodes.md` §11 and its
    folder-tree line still read *"M5 early"* and are the subject of the parallel
    brief m5r-08. This sweep chose **"M5 opening wave"** for `plc/`. If m5r-08
    picks different words, the two documents will describe the same status

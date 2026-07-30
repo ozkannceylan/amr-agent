@@ -1021,7 +1021,7 @@ what changed is that they now read it back instead of asking for it.
    that instrument, never a replacement for it. Whether the flag also becomes a
    **lamp** is `hmi/`'s decision, not an interface one (§11.8 item 5).
 2. **Name collision — resolved by moving the path, not a leaf.** `opcua-nodes.md`
-   §4 defines `Safety/SafetyResetRequired` for the **fixed cell** (SF-08, M6) and
+   §4 defines `Safety/SafetyResetRequired` for the **fixed cell** (SF-08, M5) and
    the twin's flag carries that exact leaf name. **Ruled: the twin's mirrors are
    `DemoCell/Forklift/Safety/`**, a sixth subfolder in the `Forklift/` subtree of
    the existing `DemoCell` server interface, and they are **not** added to the
@@ -1345,7 +1345,7 @@ function"*, never *"protective stop"* for the lidar latch.
 | The `Safety/` mirror node names, their group, their access rights and their TIA click path | `docs/interfaces/opcua-nodes.md`, **and §11 there has now ruled on all four**. §6.4 supplied the F-side facts and named the two collisions that ruling resolved; it now reads the ruling back rather than asking for it |
 | How the HMI displays safety state | `hmi/`, its own brief. Note that a lamp for the zone demand and a lamp for the lidar process stop must never be the same lamp or carry the same caption (R4) |
 | The marked zone's geometry, its floor marking and the T6 scenario document | `sim/`, its own brief. This document specifies what happens at the F-input; the arena specifies where the marking is |
-| Any second channel, discrepancy monitoring, or anything that would support a Category claim | Real F-I/O **on the forklift twin**, M5 proper — the forklift's F-I/O is M5 content, while the fixed cell's follows its equipment to M6 (ADR 0010 D2, D3). Not reachable on this instance (§2.1) |
+| Any second channel, discrepancy monitoring, or anything that would support a Category claim | Real F-I/O **on the forklift twin**, M5 proper — the forklift's F-I/O is M5 content, while the fixed cell's F-I/O **behind SF-05 and SF-06** arrives with the stations at M6 (ADR 0010 D2, D3). SF-08 is M5 in both its instances (SRS §4). Not reachable on this instance (§2.1) |
 | F-I/O passivation, depassivation and its acknowledgement device | No F-I/O exists (§2.1). On real F-I/O this is an additional device and an additional SF-08 consideration |
 | The reaction path — de-energization, stop categories, measured times | Real hardware (N1). This plant has no output to de-energize |
 | SF-02, SF-03, SF-04, SF-05, SF-06, SF-09 and the vehicle instance of SF-08 | `docs/safety/SRS.md` at their own gates (ADR 0009 D1). Out of scope here (N7) |
