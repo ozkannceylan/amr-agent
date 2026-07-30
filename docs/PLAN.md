@@ -23,12 +23,17 @@ map-view data path (its own ADR at M5 briefing), the LLM attachment point
 (M7 briefing), M6 internal structure (deep-research brief), anything beyond
 the emergency-button process-stop reading.
 
-Briefs: m5r-01 ADR 0010 (arch-docs) closed 166ffb3. m5r-02 roadmap
-(arch-docs), m5r-03 CLAUDE.md §6 (infra), m5r-04 README + CREDITS (infra),
-m5r-05 safety docs (safety-spec), m5r-06 plc docs (plc), m5r-07 sim docs
-(sim) ran in parallel; m5r-08 interfaces docs (interface) follows m5r-07;
-the orchestrator reconciles PLAN/TODO against the full report directory;
-m5r-09 verifier runs last.
+Briefs, all closed 2026-07-30: m5r-01 ADR 0010 (166ffb3), m5r-02 roadmap
+(517b0a4, AT numbers restored by ruling), m5r-03 CLAUDE.md §6 (324b5d7),
+m5r-04 README + CREDITS (32ffb40, dependency-fixed CREDITS wording
+accepted), m5r-05 safety docs (ae3441d, arm out of scope), m5r-06 plc docs
+(a6aba59, two-gate row accepted), m5r-07 sim docs (ebd6bf6), m5r-08
+interfaces docs (e864e5b). Beside the round: m4f-10 one-command stack
+launcher (4d699cb, owner-requested; real bringup untested off-container).
+m5r-09 verifier ruled fail bounded to tracking reconciliation and one
+brief-defect mapping (fixed-cell SF-08 briefed to M6 against ADR 0010
+D7/SRS §4); closure = the SF-08 correction, this reconciliation, and the
+verifier's bounded re-check.
 
 ## M5 — opens when M4 closes
 

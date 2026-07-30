@@ -27,6 +27,14 @@ brief queue lives in docs/PLAN.md.
   the safety program did X").
 
 ## owner — M4 queue, in order
+- Restored (m5r-09 finding 1, half-closed sub-item lost with its parent):
+  m3-37 finding 7 — the built program declares ResetEdgeMemory_1 where
+  plc/forklift/SPEC.md §3.2 says ResetEdgeMemory; align one of them at the
+  next TIA session and sweep the browse names for TIA's silent "_1"
+  suffixes while there (LESSONS 2026-07-30/#81).
+- First WSL run of ./stack.sh (m4f-10): the readiness timeouts are
+  uncalibrated — no bringup ever ran in the container; expect to tune, and
+  report which component start lines disagree with the docs, if any.
 - First PLCSIM session of the gate: one watch-table capture at a CPU cold
   start with the bridge down — all seven Group 1 inputs at their DB start
   values — closes m3-37 findings 1, 2, 8 and 9 at once (it also carries §11
@@ -52,10 +60,11 @@ brief queue lives in docs/PLAN.md.
 - BELT_SPEED_MIN/MAX remain design values (m3-27) — measure and record when
   convenient; not gate work.
 
-## orchestrator — m5r round
-- Commit the wave-2 deliverables per report, dispatch m5r-08 after m5r-07,
-  reconcile PLAN/TODO against the full report directory, then run m5r-09.
-  Done when the m5r-09 verifier passes the sweep.
+## orchestrator — m5r round closure
+- m5r-09 ruled fail bounded to tracking reconciliation plus finding 6
+  (SF-08 fixed-cell instance briefed to M6 against ADR 0010 D7/SRS §4).
+  Done when the SF-08 correction is committed, PLAN/TODO reconcile against
+  the full report directory, and the verifier's bounded re-check passes.
 
 ## M5 opening decisions (with the owner, after the m5r round and M4 close)
 - Map-view data path ADR (ADR 0010 D6a): how SLAM map and obstacle data
@@ -69,6 +78,13 @@ brief queue lives in docs/PLAN.md.
 
 ## sim
 - Cell reskin (deferred, visual only, ARIAC licence blocker unchanged).
+- `--` inside XML comments breaks ElementTree in warehouse.sdf:16,
+  forklift_arena.sdf:326 and cell.sdf:15 (m5r-07 OQ5, reproduced by
+  m5r-09; the LESSONS 2026-07-27 cell.sdf mechanism) — one brief, comment
+  text only.
+- forklift_commissioning.md §1/§10 quote HMI port 8090, which is the
+  rehearsal config's; hmi/config.yaml binds 8088 — align the doc with the
+  config it names (m4f-10 OQ3).
 - M5 carried: resume the parked navigation scenario on the forklift
   (sim/scenarios/DEFERRED.md); the platform migration off RB-KAIROS is
   M5-briefing work (ADR 0010 D1).
@@ -156,6 +172,8 @@ brief queue lives in docs/PLAN.md.
 ## docs residue
 - README architecture diagram and layer table predate the hmi/ layer
   (m4r2-04 residue) — one infra brief when convenient.
+- CLAUDE.md §4's repository layout does not list stack.sh (m5r-09
+  finding 4) — one line with the next contract touch, owner-approved.
 
 ## publication
 - Repository is public-ready and pushed; visibility is the owner's to flip.
