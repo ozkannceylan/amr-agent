@@ -61,6 +61,7 @@ graph TD
     end
 
     HMI["Commissioning HMI<br/>teleop setpoints and status<br/>process data only"]
+    MON["Monitoring service<br/>subscribes to the vehicle ROS 2 graph<br/>no write endpoint, no publisher"]
 
     HMI -->|OPC UA client to server| PLC
     PLC -->|OPC UA server to client| FM
@@ -69,8 +70,15 @@ graph TD
     MQ <-->|order, state, instantActions| CL
     CL --> NAV
     SAFE ==>|hardwired inhibit| NAV
+    NAV --o|subscribe: map, pose, obstacles| MON
+    MON --o|read-only map view, no command| HMI
 
-Legend: thick arrow is the safety path, dashed arrow is the safety fieldbus, thin arrows are process data, including the commissioning HMI edge, which carries process setpoints only (ADR 0008).
+Legend, one link style per plane:
+
+- Thick arrow (`==>`) is the safety path. It is hardwired and onboard, and never traverses the network (invariant 1).
+- Dashed arrow (`-.->`) is the safety fieldbus, PROFIsafe.
+- Thin arrow (`-->`) is process data, and is the only command path. It includes the commissioning HMI edge, which carries process setpoints only (ADR 0008).
+- Circle-ended arrow (`--o`) is the read-only monitoring plane (ADR 0011 D4). It is one way. It carries no command, setpoint, enable or reset; the monitoring service has no write endpoint and no publisher; and it never touches the PLC.
 
 ---
 
