@@ -1,9 +1,21 @@
 # Forklift commissioning cell — S7-1500 standard program specification (M4)
 
 Gate M4, ADR 0008. This is the **implementation specification for the TIA Portal
-program** the owner builds by hand, beside the M3 demonstration cell in the same
-CPU. It is written for an experienced controls engineer sitting in front of the
-software and is meant to be buildable without asking its author a question.
+program** the owner builds by hand. It is written for an experienced controls
+engineer sitting in front of the software and is meant to be buildable without
+asking its author a question.
+
+> **As built, this project runs one standard function block and no demonstration
+> cell** — owner decision, **2026-07-30**, from the TIA session handover. The
+> `safe_amr` project contains no `FB_DemoCellControl`, no `DemoCellLink` data
+> block and none of the M3 node set, so the **bridge watchdog was built inside
+> `FB_ForkliftTeleop`**, reading `"ForkliftLink".BridgeHeartbeat` with the same
+> stale window and the same boot polarity the M3 cell used. No new server node
+> was created and the server interface was not otherwise touched. §3.1b records
+> the consequence, §6.1 and §7 build it, §9 watches it, and every sentence in
+> this document that assumed a neighbouring cell is corrected to match.
+> `plc/demo-cell/SPEC.md` stays a **precedent this document cites**; its program
+> is not in this project.
 
 **Status: specification, not verification.** No part of this document has been
 executed in TIA Portal or PLCSIM Advanced by its author, who has neither
@@ -19,7 +31,7 @@ showcase the roadmap's M4 row requires.
 |---|---|---|
 | `docs/interfaces/opcua-nodes.md` §10 | The 18 nodes: names, types, units, ranges, plausibility windows, ownership, writability, start values, and the P1–P7 expectations on this document | **Contract.** If this document disagrees, §10 wins and this one is corrected |
 | `docs/adr/0008-forklift-commissioning-gate-and-hmi-layer.md` | That teleop routing, the speed cap, the soft limits and the obstacle stop are **process logic in the standard program** and implement no SRS function | **Binding.** See §2 |
-| `plc/demo-cell/SPEC.md` | `FB_DemoCellControl`, the four M3 DBs, `BridgeLinkOk` and `HEARTBEAT_STALE_TIME` | **Input, and unchanged by this document.** `BridgeLinkOk` is *consumed* here and owned there (§6.1) |
+| `plc/demo-cell/SPEC.md` | The bridge watchdog's shape: `HEARTBEAT_STALE_TIME` = `T#500ms`, the `…SeenAlive` boot polarity, the one-latch-one-diagnosis watch table | **Precedent, not a dependency.** That program is **not in this project** (owner decision 2026-07-30), so its bridge verdict is **re-formed here** rather than consumed — same shape, new owner (§3.1b, §6.1) |
 | `CLAUDE.md` §9 | Wire NC / program NO, cycle flag vs actuator, monitored edge reset, no auto-resume | **Binding.** §6 is its application |
 | `docs/roadmap.md`, row M4 | Exit criteria (a)–(e) | §11 is one scenario per criterion |
 | `agv/forklift/config.yaml`, `agv/forklift/model.sdf` | The plant: joint limits, vehicle-layer clamps, topic names | Input to the constants of §3.3 |
@@ -33,8 +45,9 @@ planar lidar — teleoperated from a local commissioning HMI. The HMI is an OPC 
 *client* that writes **requests**; the bridge is a second OPC UA client that
 writes the plant's state and reads back the setpoints. The program:
 
-- supervises the **HMI heartbeat** and forms `HmiLinkOk`, and **consumes**
-  `BridgeLinkOk` from the M3 cell's function block,
+- supervises **both client heartbeats** and forms **both** link verdicts — the
+  HMI's, published as `HmiLinkOk`, and the bridge's, kept internal — because
+  this project has no second function block to own either (§3.1b),
 - tests **every Real** that reaches it — three operator requests and three plant
   values — against its own plausibility window before any process comparison
   reads it,
@@ -155,21 +168,64 @@ M3 cell learned the hard way (`plc/demo-cell/SPEC.md` §6.1, LESSONS 2026-07-28)
 guard is exported (`opcua-nodes.md` §10.11). Exposing them would invite a client
 to act on them.
 
+**One further server-visible tag lives in the `ForkliftLink` DB and is not one of
+the 18: `BridgeHeartbeat`**, the bridge's own liveness counter, `UInt`, written
+by the **bridge**, start value `0`. It is **not a new node and not a forklift
+node** — it is `opcua-nodes.md` §9.7's single bridge heartbeat, the one the
+bridge's configured slot has always pointed at, and there is still exactly **one
+of it for the whole bridge process** (§9.7, §10.1: no second heartbeat is created
+for the forklift subtree). What the owner decision of 2026-07-30 moved is the
+**data block that backs it**, from `DemoCellLink` to `ForkliftLink`, because this
+project has no `DemoCellLink` (§3.1b). Its BrowseName is unchanged, so the
+bridge's path resolves unchanged.
+
 **The §13 delta adds four server-visible tags and nothing else** — the read-only
 mirrors of `Forklift/Safety/`, in their own data block and their own folder
 (`opcua-nodes.md` §11). The sentence above stays true of the set it is about:
 §10's node set is still exactly these 18, and no timer, latch, edge memory,
 constant, guard or F-internal becomes visible on any path (§13.4).
 
-### 3.1b The one tag this program reads but does not own
+### 3.1b Both link verdicts are formed here — the as-built bridge watchdog
 
-| PLC symbol | S7 type | Owner | Why it is read here |
-|---|---|---|---|
-| `"DemoCellLink".BridgeLinkOk` | Bool | **`FB_DemoCellControl`** | One bridge session serves both function blocks, so there is **one** bridge heartbeat and **one** bridge-link verdict (`opcua-nodes.md` §10.1, §10.11). This FB **consumes** it as a shared DB bit and **never writes it**. Creating a second verdict here would give one value two owners (invariant 10) |
+**Owner decision, 2026-07-30.** The `safe_amr` TIA project contains no
+demonstration cell: no `FB_DemoCellControl`, no `DemoCellLink` data block, none
+of the M3 node set. An earlier revision of this document specified the bridge
+verdict as a value *consumed* from that function block. **There is nothing to
+consume it from**, so the watchdog is built here, in the shape the M3 cell
+proved:
 
-`FB_ForkliftTeleop` is called **after** `FB_DemoCellControl` in OB30 (§4.1), so
-the value read here was formed in the same OB call, from the same scan's
-heartbeat. Nothing else of the M3 cell is read, and nothing of it is written.
+| What | As built |
+|---|---|
+| Input | `"ForkliftLink".BridgeHeartbeat`, the bridge's liveness counter (§3.1) |
+| Constant | `HEARTBEAT_STALE_TIME` = `T#500ms`, ≈10 missed beats at the bridge's 50 ms nominal write period (§3.3) |
+| Statics | `LastBridgeHeartbeat`, `BridgeSeenAlive`, `BridgeStaleTimer` (§3.2) |
+| Verdict | `BridgeSeenAlive AND NOT BridgeStaleTimer.Q` — the **pessimistic boot polarity**, `FALSE` from the first scan until the counter has been seen to change (§6.1) |
+| Published? | **No.** The verdict is a Temp, read off its two terms in the watch table (§9 Group 5). No new server node was created |
+
+**Invariant 10 holds, with a new single owner.** One bridge process, one
+heartbeat, one verdict — and in this project the one program that forms it is
+this one. The invariant forbids *two* owners for a value, not a different one;
+what would break it is a second verdict computed somewhere else, and there is no
+somewhere else here.
+
+**Nothing outside this program's own data blocks is read** — with one
+delta-scoped exception, the four F-flags of §13, which are read and never
+written (§13.4).
+
+**Two consequences worth stating rather than discovering.**
+
+- `opcua-nodes.md` §10.1 still describes the shared-project arrangement — *"the
+  verdict is written by the demonstration cell's FB and consumed by the forklift
+  FB as a shared DB bit"*. That sentence is about a project that has both cells;
+  this one has one. It is `docs/interfaces/`'s to reconcile and is **requested,
+  not taken here**. Nothing in the node set moves either way: the heartbeat is
+  still one node, and no verdict node is added.
+- **Which folder the heartbeat hangs in is a read-back.** Every bridge
+  configuration resolves it at `Link/BridgeHeartbeat` relative to the interface
+  node, i.e. `DemoCell/Link/BridgeHeartbeat`. The DB behind it moved; the browse
+  path must not. Confirm it with the independent client at §10 step 11 and record
+  it with its date — a path is a tool-derived value until it is read back
+  (ADR 0006).
 
 ### 3.2 Internal tags — statics of `FB_ForkliftTeleop`, not on the server
 
@@ -180,6 +236,9 @@ All live in the instance DB `"ForkliftControl_DB"`.
 | `LastHmiHeartbeat` | UInt | `0` | Value of `HmiHeartbeat` at the previous OB call. Compared for **inequality** only — never subtracted, never tested for `+1`, never assumed monotonic across the wrap or across an HMI restart (`opcua-nodes.md` §10.8 P1, H4) |
 | `HmiStaleTimer` | IEC_TIMER (TON) | — | Runs while the heartbeat is unchanged |
 | `HmiSeenAlive` | Bool | `FALSE` | *The HMI heartbeat has been observed to change at least once since CPU start.* One-shot, set by the first inequality, never cleared while the CPU runs. It is the **first term** of `HmiLinkOk` and is what makes the verdict `FALSE` — rather than "not yet proven stale" — for the whole boot window (§6.1, P2, LESSONS 2026-07-28) |
+| `LastBridgeHeartbeat` | UInt | `0` | Value of `BridgeHeartbeat` at the previous OB call. Compared for **inequality** only, for the same reasons and with the same prohibitions as the HMI counter above (§3.1b, as built 2026-07-30) |
+| `BridgeStaleTimer` | IEC_TIMER (TON) | — | Runs while the bridge heartbeat is unchanged |
+| `BridgeSeenAlive` | Bool | `FALSE` | *The bridge heartbeat has been observed to change at least once since CPU start.* The same one-shot as `HmiSeenAlive`, on the other client, and the **first term** of the bridge verdict. **Two independent watchdogs, two independent one-shots**: neither substitutes for the other (P7) |
 | `TeleopEnableEdgeMemory` | Bool | **`TRUE`** | Previous state of `HmiTeleopRequest`, for the rising edge that enables teleop. Start value `TRUE` so an enable already asserted at the first scan produces **no** edge: an HMI that boots with the control held cannot start the machine |
 | `ResetEdgeMemory` | Bool | **`TRUE`** | Previous state of `HmiResetRequest`, for the rising edge the reset acts on. Start value `TRUE` for the same reason and with the same effect: a reset already asserted at the first scan can never clear a latch |
 | `ResetDeviceFault` | Bool | **`TRUE`** | *The reset request has not been observed `FALSE` **in the current HMI link session**.* Set `TRUE` whenever `HmiLinkOk` is `FALSE` — at CPU start and again at every HMI link loss — and cleared while `HmiLinkOk` is `TRUE` and `HmiResetRequest` reads `FALSE`. This is the **per-link-session arming guard** of `opcua-nodes.md` §10.8 P6. A **level** verdict about the present session, not a run-long latch: returning to `TRUE` after an outage is the mechanism working, not a device fault. It blocks the reset and nothing else |
@@ -211,7 +270,8 @@ measurements.
 
 | Constant | Value | Basis |
 |---|---|---|
-| `HMI_STALE_TIME` | `T#600ms` | `opcua-nodes.md` §10.8 **P3**: three worst-case HMI write periods at the 5 Hz contractual floor (200 ms). **The rule is three worst-case periods, not this number** — if the measured worst case at commissioning exceeds 200 ms, re-derive the constant from the measurement rather than reinterpreting the floor. **P4: it is its own constant and is never shared with the M3 cell's `HEARTBEAT_STALE_TIME` (`T#500ms`)** — the two watch different clients at different rates, and retuning one must not silently retune the other (invariant 10) |
+| `HMI_STALE_TIME` | `T#600ms` | `opcua-nodes.md` §10.8 **P3**: three worst-case HMI write periods at the 5 Hz contractual floor (200 ms). **The rule is three worst-case periods, not this number** — if the measured worst case at commissioning exceeds 200 ms, re-derive the constant from the measurement rather than reinterpreting the floor. **P4: it is its own constant and is never shared with `HEARTBEAT_STALE_TIME`** — the two watch different clients at different rates, and retuning one must not silently retune the other (invariant 10). Since 2026-07-30 both constants live in **this** FB's constant block, one row apart, which makes P4 easier to break and therefore worth reading twice |
+| `HEARTBEAT_STALE_TIME` | `T#500ms` | The **bridge** watchdog's stale window, ≈10 missed beats at the bridge's 50 ms nominal write period, taken unchanged from `plc/demo-cell/SPEC.md` §3.3 and `opcua-nodes.md` §9.7 — the same number the M3 cell used, now evaluated here (§3.1b). Its own constant, never shared with `HMI_STALE_TIME` (P4) |
 | `TRACTION_SPEED_MAX` | `1.00` m/s | `opcua-nodes.md` §10.12 item 4: `ForkliftLinearSpeed`'s plausibility window must stay **at least twice** this cap, and the window is ±2.00 m/s, which bounds the cap at 1.00 m/s. **Raising the cap re-derives the window first**, in the interface document, and is not a change this specification may make. The vehicle layer's own `traction_speed_max_mps: 1.50` is a *different layer's* last-ditch clamp on a different value; because 1.00 < 1.50 the PLC never asks the plant for a speed its clamp would touch, which is the correct relationship |
 | `TRACTION_SPEED_CAP_RAISED` | `0.30` m/s | Reduced traction speed while the fork is raised. Process decision; 30 % of the uncapped cap, large enough to be driveable and small enough that the reduction is unmistakable in the recording |
 | `FORK_HEIGHT_SLOW_THRESHOLD` | `0.50` m | Carriage height above which the cap applies. Process decision, inside the 0.00…1.60 travel with clear room either side so the crossing is easy to drive to and easy to see |
@@ -237,29 +297,34 @@ measurements.
 ### 4.1 Block structure
 
 ```
-OB30  Cyclic interrupt, 20 ms          -- the only place cell logic runs
-  ├── FB_DemoCellControl / "DemoCellControl_DB"      (M3, unchanged)
-  │       writes "DemoCellLink".BridgeLinkOk
-  └── FB_ForkliftTeleop  / "ForkliftControl_DB"      (this document)
+OB30  Cyclic interrupt, 20 ms          -- the only place standard logic runs
+  └── FB_ForkliftTeleop  / "ForkliftControl_DB"      (this document, and the
+                                                      ONLY standard FB here)
           reads   "ForkliftHmi".*      "ForkliftInput".*
-                  "ForkliftLink".HmiHeartbeat
-                  "DemoCellLink".BridgeLinkOk        -- CONSUMED, never written
+                  "ForkliftLink".HmiHeartbeat        -- HMI watchdog input
+                  "ForkliftLink".BridgeHeartbeat     -- BRIDGE watchdog input,
+                                                        as built 2026-07-30
           writes  "ForkliftOutput".*   "ForkliftStatus".*
                   "ForkliftLink".HmiLinkOk
+
+F-OB  F-runtime group RTG1             -- ADR 0009. Its own OB, NOT called from
+                                          OB30 and not part of this program.
+                                          The §13 delta READS four of its flags
+                                          and writes none of them.
 
 OB1   Main                              -- still contains nothing
 ```
 
 | Decision | Why |
 |---|---|
-| **Called after `FB_DemoCellControl`, in the same OB** | `BridgeLinkOk` is formed by the M3 FB from the same scan's heartbeat, so calling this FB second means it reads a verdict that is one call old at most — not one *scan* old. Calling it first would use last scan's verdict for every plant-input qualification |
+| **One standard FB, and no call order to get right** | This project has no demonstration cell (§3.1b, owner decision 2026-07-30), so there is no second block to be called before or after and no shared DB bit to read. **Both** link verdicts are formed at the top of this FB, from the counters as they read in **this** call, which is the freshest either can be |
 | One cyclic interrupt OB, not OB1 | Every timer in both programs shares one deterministic time base. OB1's period varies with load, which would make `HMI_STALE_TIME` mean different things on different days |
-| 20 ms, unchanged from M3 | The bridge writes at 50 ms (20 Hz) and the HMI at 100 ms nominal, so 20 ms gives at least two OB calls per bridge write and five per HMI cycle. **The OB now carries two FBs**: measure the OB30 cycle time and the CPU maximum cycle time after the download and record them (§12 open item 9) |
+| 20 ms, the period the M3 cell used | The bridge writes at 50 ms (20 Hz) and the HMI at 100 ms nominal, so 20 ms gives at least two OB calls per bridge write and five per HMI cycle. **The OB carries one FB**, and the CPU additionally runs the F-runtime group in its own F-OB: measure the OB30 cycle time and the CPU maximum cycle time after the download and record them (§12 open item 9) |
 | One FB, one instance, no second instance | Every output and status tag has exactly one writer in exactly one statement (invariant 10, ADR 0008 consequences). This FB is instanced **once** |
 | No hard real-time claim | Nothing here is a deterministic timing requirement in the sense of invariant 9. The invariant is satisfied by the logic being in the PLC at all rather than in Python |
 
-> **`FB_ForkliftTeleop` / `"ForkliftControl_DB"` do not match the way
-> `FB_DemoCellControl` / `"DemoCellControl_DB"` do, and that is on purpose.** The
+> **`FB_ForkliftTeleop` and `"ForkliftControl_DB"` do not share a stem, and that
+> is on purpose.** The
 > FB name is this layer's to choose (ADR 0008 D3) and is taken from the brief;
 > the **instance DB name is tabulated in `opcua-nodes.md` §10.3** with its access
 > rights, so that is the name used. The DB is marked *Accessible from HMI/OPC UA*
@@ -268,12 +333,15 @@ OB1   Main                              -- still contains nothing
 
 ### 4.2 Global DBs and access rights
 
-**Five new global DBs, one per node-model folder. The four M3 DBs are not
-extended** (`opcua-nodes.md` §10.3): adding members to `DemoCellInput` and its
-siblings would move the offsets of tags that current M3 evidence, watch tables
-and test records depend on, and a download that leaves project and CPU
-inconsistent shows up as monitoring errors on exactly the rows whose offsets
-moved (LESSONS 2026-07-28). Separate DBs leave the M3 cell byte-identical.
+**Five global DBs, one per node-model folder** (`opcua-nodes.md` §10.3). That
+rule was written against a project that also held the four M3 DBs: adding members
+to `DemoCellInput` and its siblings would have moved the offsets of tags that M3
+evidence, watch tables and test records depend on, and a download that leaves
+project and CPU inconsistent shows up as monitoring errors on exactly the rows
+whose offsets moved (LESSONS 2026-07-28). **This project holds none of those data
+blocks** (§3.1b), so that particular hazard is absent here — and the five-DB
+split stands unchanged anyway, because it is what keeps the folder tree and the
+per-tag access rights one to one.
 
 Optimized block access (the S7-1500 default) throughout: the server interface
 addresses tags symbolically, so no absolute address is needed anywhere.
@@ -284,7 +352,7 @@ addresses tags symbolically, so no absolute address is needed anywhere.
 | `ForkliftInput` | tags 6–9 | ✔ | **✔** (all four) |
 | `ForkliftOutput` | tags 10–12 | ✔ | **✘** |
 | `ForkliftStatus` | tags 13–16 | ✔ | **✘** |
-| `ForkliftLink` | `HmiHeartbeat` ✔/**✔**, `HmiLinkOk` ✔/**✘** | ✔ | per tag |
+| `ForkliftLink` | `HmiHeartbeat` ✔/**✔**, `BridgeHeartbeat` ✔/**✔**, `HmiLinkOk` ✔/**✘** | ✔ | per tag |
 | `ForkliftControl_DB` (instance) | §3.2 internals | **✘** | ✘ |
 
 > The *Writable* column is where the direction rules are **enforced by the server
@@ -296,7 +364,8 @@ addresses tags symbolically, so no absolute address is needed anywhere.
 > **Per-*client* scoping is not enforced**, and with two writing clients that gap
 > is materially wider than it was with one. The commissioned CPU runs with access
 > control disabled and security `None` (`opcua-nodes.md` §9.10), so "only the HMI
-> writes the `Hmi` group and only the bridge writes the `Input` group" is
+> writes the `Hmi` group and `HmiHeartbeat`, and only the bridge writes the
+> `Input` group and `BridgeHeartbeat`" is
 > **policy, not enforcement** (ADR 0008 D2.5). Closing it is OPC UA access
 > control, carried as `opcua-nodes.md` §10.12 item 6 and **not** a change to this
 > program.
@@ -304,9 +373,12 @@ addresses tags symbolically, so no absolute address is needed anywhere.
 ### 4.3 Server interface — `DemoCell` is extended, not replaced
 
 **Ruling, from `opcua-nodes.md` §10.2: the forklift nodes are added to the
-existing `DemoCell` server interface as a `Forklift/` subtree beside the four M3
-folders. No second server interface is created, and the existing one is not
-renamed.**
+existing `DemoCell` server interface as a `Forklift/` subtree. No second server
+interface is created, and the existing one is not renamed.** The ruling was
+written for a project carrying the four M3 folders beside it; **this project
+carries the `Forklift/` subtree and the bridge's `Link/BridgeHeartbeat`, and no
+other M3 folder** (§3.1b, owner decision 2026-07-30). Nothing about the ruling
+changes with the neighbours.
 
 The interface name **is** the namespace URI — TIA derives it as
 `http://<interface name>` and the field is not editable (ADR 0006) — so renaming
@@ -314,16 +386,21 @@ The interface name **is** the namespace URI — TIA derives it as
 the HMI as well. Adding folders and tags does not touch the name, so
 `http://DemoCell` does not move and every existing browse path keeps working.
 
-The honest consequence, stated rather than discovered: **`DemoCell` is now an
-identifier, not a description.** One interface carries the demonstration cell and
-the forklift commissioning cell.
+The honest consequence, stated rather than discovered: **`DemoCell` is an
+identifier, not a description.** In this project it carries the forklift
+commissioning cell, the one bridge heartbeat node, and — with the §13 delta —
+the four safety mirrors. It carries no demonstration cell at all.
 
 Build the tree exactly as below and drag each DB tag into it. **Rename nothing**:
 each leaf name must remain the BrowseName of §3.1.
 
 ```
 DemoCell/                                       ns http://DemoCell, unchanged
-  Input/ Output/ Status/ Link/                  the M3 cell, byte-identical
+  Link/      BridgeHeartbeat                    the bridge's one liveness node
+                                                (opcua-nodes.md §9.7). The DB
+                                                behind it is ForkliftLink here;
+                                                the browse path is unchanged and
+                                                is READ BACK, not typed (§3.1b)
   Forklift/
     Hmi/       HmiTractionRequest  HmiSteerRequest  HmiForkRequest
                HmiTeleopRequest  HmiResetRequest
@@ -393,8 +470,13 @@ ELSE                                      run the stale timer
 LastHmiHeartbeat := HmiHeartbeat          -- after the comparison
 HmiLinkOk := HmiSeenAlive AND NOT HmiStaleTimer.Q
 
--- Bridge link, owned by FB_DemoCellControl
-bridgeLinkOk := "DemoCellLink".BridgeLinkOk     -- read only, never written here
+-- Bridge link, owned HERE TOO since 2026-07-30 (§3.1b) -- same shape, other
+-- client, its own constant and its own one-shot
+IF BridgeHeartbeat <> LastBridgeHeartbeat THEN  reset the stale timer
+                                                and latch BridgeSeenAlive
+ELSE                                            run the stale timer
+LastBridgeHeartbeat := BridgeHeartbeat          -- after the comparison
+bridgeLinkOk := BridgeSeenAlive AND NOT BridgeStaleTimer.Q   -- Temp, not a node
 ```
 
 **Inequality only** (P1). Never `HmiHeartbeat - LastHmiHeartbeat`, never a test
@@ -412,9 +494,15 @@ the first scan and stays `FALSE` until the heartbeat has actually moved.** "Not
 yet proven stale" is not "alive", and every guard that rides on link-up inherits
 this polarity (P2, ADR 0008 D2.3, LESSONS 2026-07-28).
 
-`BridgeLinkOk` already carries the same correction in `FB_DemoCellControl`
-(`plc/demo-cell/SPEC.md` §6.1), which is a second reason not to recompute it
-here: the fix would have to be maintained twice.
+**Both verdicts carry that correction, and since 2026-07-30 both carry it here.**
+The bridge half is the same six lines with the other client's counter, its own
+constant and its own one-shot — `BridgeSeenAlive` is as load-bearing as
+`HmiSeenAlive`, for exactly the reason above, and `bridgeLinkOk := NOT
+BridgeStaleTimer.Q` would read `TRUE` for the first 500 ms of every CPU run
+before the bridge had written anything. The M3 cell paid for this lesson once
+(`plc/demo-cell/SPEC.md` §6.1, LESSONS 2026-07-28); applying it twice inside one
+block is cheaper than maintaining it in two programs, which was the shape this
+document assumed before the project turned out to hold only one.
 
 **A first heartbeat write equal to the start value is invisible for exactly one
 HMI cycle.** The counter is arbitrary at HMI start; if its first written value
@@ -851,7 +939,8 @@ never the *motion*.
 
 Structure and the load-bearing statements only. Not compilable as written:
 declarations, timer instances and the constant block are per §3. Identifiers not
-listed in §3.2 — `#hmiHbChanged`, `#hmiLinkOk`, `#bridgeLinkOk`, `#heightValid`,
+listed in §3.2 — `#hmiHbChanged`, `#bridgeHbChanged`, `#hmiLinkOk`,
+`#bridgeLinkOk`, `#heightValid`,
 `#speedValid`, `#plantInputsValid`, `#distanceValid`, `#requestsValid`,
 `#forkRaised`, `#speedCap`, `#tractionDemand`, `#forkDemand`, `#raiseBlocked`,
 `#lowerBlocked`, `#forkDemandAllowed`, `#safetyDemandClear` (§13), `#worldOk`,
@@ -862,8 +951,9 @@ survive the scan. `IEC_TIMER` may be declared as `TON_TIME` on an S7-1500; eithe
 compiles, and every call site below states its `PT` explicitly.
 
 ```pascal
-// FB_ForkliftTeleop — called from OB30 (20 ms), once, AFTER FB_DemoCellControl.
-// Nowhere else, and never a second instance.
+// FB_ForkliftTeleop — called from OB30 (20 ms), once. It is the ONLY standard
+// FB in this project (§3.1b, owner decision 2026-07-30): there is no demo cell
+// to call before it. Nowhere else, and never a second instance.
 
 // ---- 0. F-data: the M5-early coupling delta (§13) ------------------------
 // The ONLY place this FB touches F-data, and it only READS it. The F-program
@@ -909,9 +999,20 @@ END_IF;
 "ForkliftLink".HmiLinkOk := #HmiSeenAlive AND NOT #HmiStaleTimer.Q;
 #hmiLinkOk := "ForkliftLink".HmiLinkOk;
 
-// Bridge heartbeat: owned by FB_DemoCellControl, CONSUMED here. One session,
-// one heartbeat, one verdict (invariant 10). NEVER assign to this tag.
-#bridgeLinkOk := "DemoCellLink".BridgeLinkOk;
+// Bridge heartbeat: OWNED HERE since 2026-07-30, because this project has no
+// demonstration-cell FB to own it (§3.1b). One bridge session, one heartbeat, one
+// verdict — and here one program forms it (invariant 10). Same six lines as the
+// HMI half above, on the other client, with its OWN constant and its OWN
+// one-shot. NEVER write #bridgeLinkOk := NOT #BridgeStaleTimer.Q: that reads
+// TRUE for the first HEARTBEAT_STALE_TIME of every CPU run, before the bridge
+// has written anything at all.
+#bridgeHbChanged := ("ForkliftLink".BridgeHeartbeat <> #LastBridgeHeartbeat);
+#BridgeStaleTimer(IN := NOT #bridgeHbChanged, PT := #HEARTBEAT_STALE_TIME);
+#LastBridgeHeartbeat := "ForkliftLink".BridgeHeartbeat;  // inequality only
+IF #bridgeHbChanged THEN
+    #BridgeSeenAlive := TRUE;   // one-shot, start value FALSE, non-retain
+END_IF;
+#bridgeLinkOk := #BridgeSeenAlive AND NOT #BridgeStaleTimer.Q;   // Temp, no node
 
 IF NOT #hmiLinkOk THEN
     #HmiLinkLostLatch := TRUE;        // degraded mode, not a safety event
@@ -1114,6 +1215,19 @@ ELSE
 END_IF;
 ```
 
+*Note on the fence's size and its hash*: as built on **2026-07-30** this fence is
+**264 lines including its `pascal` markers, of which 131 are statement lines**
+(non-blank, not a full-line comment). It has moved twice from the 118-statement-
+line M4 baseline: **+7 for the §13 safety coupling** and **+6 for the bridge
+watchdog of §3.1b**, which replaced one consumed assignment with the seven lines
+in part 1's second half. Its `sha256/16`, taken over the fence **including** its
+two markers, is **`2864b018aa0a41d7`** — `a100896d41e7a315` at the M4 baseline
+and `55306f610e09a9f7` after §13. **A revision claiming this fence is
+byte-identical quotes the current value**, not an earlier one. The count of lines
+ending in `;` is 60 and is **not** a statement count: several statements here
+carry a trailing comment, so that metric undercounts and is recorded only because
+earlier revisions used it.
+
 *Note on the reset condition*: it tests `#causeGone`, never `#motionPermissive`.
 `#motionPermissive` contains the latches, so a reset gated on it could never fire
 — the latch would be its own precondition for clearing (§6.3).
@@ -1136,7 +1250,7 @@ mode, not a safety event** (invariant 2, ADR 0008 D3).
 |---|---|---|---|---|
 | **H1** — HMI process stopped or crashed | `HmiHeartbeat` freezes; the five request nodes hold their last written values on the server, so a stopped HMI is not detectable from the requests alone | `HmiHeartbeat` unchanged for `HMI_STALE_TIME` (600 ms), `HmiSeenAlive` already `TRUE` (§6.1) | `HmiLinkOk := FALSE` → C2 drops and `HmiLinkLostLatch` sets → `ForkliftTeleopActive := FALSE` → **all three setpoints driven to `0.0` in the same OB call** → `ForkliftResetRequired := TRUE`. No request value is evaluated while the verdict is `FALSE`: the requests are not attributable to an operator | Monitored reset, then a **fresh** enable edge. A returning heartbeat alone does nothing (P5). The outage also **re-armed `ResetDeviceFault`**; because the HMI writes all six nodes every cycle, the guard clears within one OB call of link-up unless the reset request is genuinely asserted at that moment |
 | **H2** — HMI link lost with the HMI alive (network, session) | Identical at the PLC to H1 | **The same mechanism, and deliberately no other.** Session state is not exposed to the standard program as a supervisable input | **Identical to H1 — no additional action, by design.** The program has no mechanism that could distinguish them, and one that behaved differently would be wrong | As H1 |
-| **B** — bridge stopped or its session lost | `BridgeHeartbeat` freezes; the four `Forklift/Input/` nodes freeze at their last written values | `BridgeLinkOk`, formed in `FB_DemoCellControl` from `HEARTBEAT_STALE_TIME` and consumed here | `C1` drops and `BridgeLinkLostLatch` sets → `ForkliftTeleopActive := FALSE` → **all three setpoints `0.0`** → `ForkliftResetRequired := TRUE`. **All plant-input evaluation is suspended**: `ForkliftObstacleStopActive` does not change, no plausibility latch forms, and a frozen field bit cannot latch a stop | Monitored reset, then a fresh enable edge. **The plant-side residual applies** — see below |
+| **B** — bridge stopped or its session lost | `BridgeHeartbeat` freezes; the four `Forklift/Input/` nodes freeze at their last written values | The bridge verdict, formed **here** from `BridgeHeartbeat`, `HEARTBEAT_STALE_TIME` (500 ms) and `BridgeSeenAlive` (§3.1b, §6.1) | `C1` drops and `BridgeLinkLostLatch` sets → `ForkliftTeleopActive := FALSE` → **all three setpoints `0.0`** → `ForkliftResetRequired := TRUE`. **All plant-input evaluation is suspended**: `ForkliftObstacleStopActive` does not change, no plausibility latch forms, and a frozen field bit cannot latch a stop | Monitored reset, then a fresh enable edge. **The plant-side residual applies** — see below |
 | **S** — CPU restart under surviving client sessions | The five `Forklift/Hmi/` nodes and the four `Forklift/Input/` nodes revert to their DB start values | Both `…SeenAlive` flags are `FALSE` at the first scan, so both link verdicts are `FALSE` and nothing is attributable | Cold-start signature: `HmiLinkOk` `FALSE`, `BridgeLinkOk` `FALSE`, **both link latches set**, `ForkliftResetRequired` `TRUE`, all three setpoints `0.0`, `ForkliftTeleopActive` `FALSE`, and **`ForkliftObstacleStopActive` `FALSE`** despite the `TRUE` start value on the field bit — no sensor is accused of something no sensor reported | **The two clients part company here.** The HMI's every-cycle stream repairs its own five nodes on the next cycle, so no stale HMI level can survive (`opcua-nodes.md` §10.4). The bridge writes plant *bits* on change, so the `Forklift/Input/` group inherits the M3 cell's open item — see below |
 | **P** — plant stopped, bridge alive (case D of `bridge-design.md` §7.3) | The four input nodes freeze at plausible values while `BridgeHeartbeat` keeps advancing. From the PLC's side both links look perfect | **Nothing. No detector exists on this plant and none is added here.** The M3 cell catches the equivalent with `ConveyorDriveFault`, which needs a node to publish the verdict on; **no `ForkliftDriveFault` node exists** (`opcua-nodes.md` §10.11) and inventing the verdict without the node was explicitly declined | **No action, and the reason is stated rather than papered over.** `ForkliftLinearSpeed` is read and qualified but feeds no verdict (§6.2). A frozen image under a live link is indistinguishable from a machine the operator is holding still | Not applicable. Raised as `opcua-nodes.md` §10.12 item 3 and carried here as §12 open item 3 |
 
@@ -1167,8 +1281,10 @@ strand (§10.4, H1).
 ## 9. Watch table — `Forklift M4 gate`
 
 One watch table, five groups. Symbolic addressing only — the DBs are optimized
-and have no absolute addresses. Open it in *Monitor* mode alongside the M3 cell's
-`DemoCell M3 gate` table, which is unchanged.
+and have no absolute addresses. Open it in *Monitor* mode. There is no second
+cell table to open beside it in this project (§3.1b); with the §13 delta applied,
+the table to have open beside it is the `Forklift F gate` one
+(`plc/forklift-safety/SPEC.md` §8).
 
 **Monitor only. Do not use *Modify* or *Force* on any `ForkliftHmi` or
 `ForkliftInput` tag during a gate run**: a modified value proves nothing about
@@ -1212,11 +1328,12 @@ writes.
 | `"ForkliftStatus".ForkliftResetRequired` | Bool | `TRUE` while any latch is pending; `TRUE` from power-up, because both link latches form at the first scan |
 | `"ForkliftLink".HmiHeartbeat` | Decimal | Advancing ~10/s while the HMI runs; frozen in H1 and H2 |
 | `"ForkliftLink".HmiLinkOk` | Bool | `TRUE` while the heartbeat changes; `FALSE` 600 ms after it stops; **`FALSE` from the first scan of every CPU run until the heartbeat has been seen to change at least once** — it never reads `TRUE` before the first change, whatever `HMI_STALE_TIME` is |
-| `"DemoCellLink".BridgeLinkOk` | Bool | The M3 cell's verdict, **read here and owned there**. Included in this table because every plant-input verdict is gated on it |
+| `"ForkliftLink".BridgeHeartbeat` | Decimal | Advancing ~20/s while the bridge runs; frozen in case B. **Written by the bridge, and the input to the watchdog this FB now owns** (§3.1b). The verdict formed from it is a Temp with no node, and is read off its two terms in Group 5 |
 
 ### Group 5 — internal, not on the server
 
 `"ForkliftControl_DB".LastHmiHeartbeat`, `.HmiSeenAlive`, `.HmiStaleTimer.ET`,
+`.LastBridgeHeartbeat`, `.BridgeSeenAlive`, `.BridgeStaleTimer.ET`,
 `.TeleopEnableEdgeMemory`, `.ResetEdgeMemory`, `.ResetDeviceFault`,
 `.ObstacleStopLatch`, `.HmiLinkLostLatch`, `.BridgeLinkLostLatch`,
 `.PlantInputFaultLatch`, `.RequestFaultLatch`, `.PlantInvalidTimer.ET`,
@@ -1226,6 +1343,14 @@ writes.
 and now stale", which the verdict alone cannot tell you. `FALSE` with the
 heartbeat visibly advancing in Group 4 means the HMI's writes are not reaching
 this node.
+
+**`BridgeSeenAlive` and `BridgeStaleTimer.ET` are the *whole* of the bridge
+verdict**, because it is a Temp and has no node to watch (§3.1b). Read them as a
+pair: `BridgeSeenAlive` `FALSE` means the bridge has never written this CPU —
+suspect the endpoint, the slot path or the process, not the link; `TRUE` with
+`BridgeStaleTimer.ET` at or past `T#500ms` means it wrote and then stopped, which
+is case B. `.LastBridgeHeartbeat` beside Group 4's counter shows the comparison
+the FB actually makes, and the two differ for exactly one call after each write.
 
 `ResetDeviceFault` reads `TRUE` from power-up, and again from every HMI link
 loss, until the reset request has been seen `FALSE` with the link up **in the
@@ -1258,24 +1383,24 @@ claim on one screen** — the operator is asking and the PLC is refusing.
 The items below name what to look for and why it matters; they are not a click
 path verified on your installation, and the author cannot run TIA Portal.
 
-**Everything the M3 cell already commissioned stays as it is** — the CPU, the
-firmware, the PLCSIM instance and network mode, the server activation, the
-runtime licence, the security settings and the endpoint (`opcua-nodes.md` §9.10).
-This section adds only what M4 needs.
+**Everything commissioned at phase 0 stays as it is** — the CPU, the firmware,
+the PLCSIM instance and network mode, the server activation, the runtime licence,
+the security settings and the endpoint (`opcua-nodes.md` §9.10). This section
+adds only what M4 needs.
 
 | # | Step | Watch out for |
 |---|---|---|
 | 1 | **Open the existing server interface.** CPU → *OPC UA communication* → *Server interfaces* → open **`DemoCell`**. Do **not** create a second interface and do **not** rename this one | A second interface carries a second derived URI, so every client would resolve a third namespace index and browse two roots to reach one cell (`opcua-nodes.md` §10.2). Renaming breaks every browse-by-URI at connect, for the bridge **and** the HMI |
 | 2 | **Read the namespace URI back** and confirm it still reads `http://DemoCell`. **Nothing is entered**: the field is derived as `http://<interface name>` and is not editable (ADR 0006) | This read-back is the check that the interface you opened is the one the clients browse for. Repeat it after **any** *Change device*, which is known to delete server interfaces and reset security settings silently (LESSONS 2026-07-27) |
-| 3 | **Create the five new global DBs** of §4.2 — `ForkliftHmi`, `ForkliftInput`, `ForkliftOutput`, `ForkliftStatus`, `ForkliftLink` — with the tags and start values of §3.1. **New DBs, not new members of the M3 DBs** | Adding members to `DemoCellInput` and its siblings moves the offsets of tags the M3 evidence depends on. A monitoring-error icon on exactly the rows whose offsets moved is the live tell (LESSONS 2026-07-28) |
+| 3 | **Create the five global DBs** of §4.2 — `ForkliftHmi`, `ForkliftInput`, `ForkliftOutput`, `ForkliftStatus`, `ForkliftLink` — with the tags and start values of §3.1. **`ForkliftLink` carries three members**: `HmiHeartbeat`, `BridgeHeartbeat` and `HmiLinkOk` (§3.1b) | The bridge cannot write a heartbeat that does not exist, and without it the bridge verdict never leaves its boot `FALSE`. Any later change to a DB's member list moves offsets: a monitoring-error icon on exactly the rows whose offsets moved is the live tell (LESSONS 2026-07-28) |
 | 4 | **Set the start values**, and check `ForkliftInput.ForkliftObstacleInStopZone` in particular: it is **`TRUE`** | It is the one start value here that is not the type's zero. A `FALSE` there makes a freshly started CPU believe the forward path is clear |
 | 5 | **Per-tag access rights.** In each DB's declaration table set *Accessible from HMI/OPC UA* and *Writable from HMI/OPC UA* exactly per §4.2 | Leaving any `ForkliftOutput` tag writable would let a client write an actuator setpoint — the one thing invariant 6 forbids. Leaving the `ForkliftHmi` or `ForkliftInput` tags **not** writable makes every client write fail with `BadNotWritable`, and neither heartbeat ever starts |
 | 6 | **Instance DB.** `ForkliftControl_DB` is *Accessible from HMI/OPC UA* **✘** | Timers, latches, edge memories and the reset guard are not exported. Exposing them would invite a client to act on them |
 | 7 | **Add the folder tree.** In the interface, add a folder `Forklift` **beside** `Input`, `Output`, `Status` and `Link`, then the five subfolders, then drag each DB tag into its subfolder | **Rename nothing.** Each leaf name must remain the BrowseName of §3.1, because the BrowseName is the diff key against `opcua-nodes.md` §10 |
-| 8 | **Create `FB_ForkliftTeleop`** with the declarations of §3.2 and §3.3 and the body of §7, and **call it from OB30 after `FB_DemoCellControl`**, with instance DB `ForkliftControl_DB` | Calling it *before* the M3 FB means every plant-input verdict is qualified with last scan's `BridgeLinkOk`. OB1 stays empty |
+| 8 | **Create `FB_ForkliftTeleop`** with the declarations of §3.2 and §3.3 and the body of §7, and **call it from OB30 as the only standard FB**, with instance DB `ForkliftControl_DB` | There is no second standard block in this project, so there is no call order to get wrong (§3.1b) — and both link verdicts are formed inside this FB, from this call's counters. OB1 stays empty |
 | 9 | **Compile, download, then confirm the block diff circles are solid green before testing** | A download that leaves project and CPU inconsistent shows up as silent refusals, monitoring-error icons on the rows whose DB offsets moved, and an in-force timer `PT` that contradicts the call site. Those are the live tells of a stale build (LESSONS 2026-07-28) |
 | 10 | **Check the in-force timer values in the watch table**, not the interface defaults: `HmiStaleTimer.PT` must read `T#600ms`, and the three fault timers their §3.3 values | An interface *Default value* governs nothing once the instance DB exists, and a download without reinitialisation preserves the DB's stale `PT` forever (LESSONS 2026-07-28). This is why §7 states `PT` explicitly at every call site |
-| 11 | **Verify the address space independently** — UaExpert or an `asyncua` client, **not** the bridge and **not** the HMI — against the commissioned endpoint. Browse `Objects` → `ServerInterfaces` → `DemoCell` → `Forklift`, confirm the **five subfolders and 18 nodes** with their data types and start values, and confirm the **15 M3 nodes are unchanged beside them**. **Record the reading with its date** | Do this before involving either client, so a naming or access mistake is not diagnosed as a bridge or HMI defect. Node-count checks are **set-scoped**: a client browsing from `Objects` sees more than 18, and more than 33, because the S7-1500 also auto-publishes every global DB under `DataBlocksGlobal` in its own namespace. That is not a defect (`opcua-nodes.md` §9.8) |
+| 11 | **Verify the address space independently** — UaExpert or an `asyncua` client, **not** the bridge and **not** the HMI — against the commissioned endpoint. Browse `Objects` → `ServerInterfaces` → `DemoCell` → `Forklift`, confirm the **five subfolders and 18 nodes** with their data types and start values, then browse **`DemoCell` → `Link` → `BridgeHeartbeat`** and confirm that node resolves at that path — it is the one the bridge is configured for, and only its data block moved (§3.1b). **Record both readings with their date** | Do this before involving either client, so a naming or access mistake is not diagnosed as a bridge or HMI defect. Node-count checks are **set-scoped**: a client browsing from `Objects` sees more than 18 because the S7-1500 also auto-publishes every global DB under `DataBlocksGlobal` in its own namespace. That is not a defect (`opcua-nodes.md` §9.8) |
 | 12 | **Read back and record what the tool produced**: the derived namespace URI, the full browse path of one leaf, and the per-tag writability as the server reports it | **Every value in §4.3 and in `opcua-nodes.md` §10 is a design value until step 11 and step 12 are executed.** A spec value authored without the tool that realises it is a design value, not a fact (LESSONS 2026-07-27), and no gate criterion may rest on one before it has been owner-verified in the tool |
 
 Finally: **the test double must not be running during any PLCSIM run**, and never
@@ -1347,7 +1472,7 @@ written once outlives the run it was written for.
 
 | Step | Action | Pass |
 |---|---|---|
-| 5.1.1 | Start the world, the bridge and the HMI. **Wait until `HmiLinkOk` and `BridgeLinkOk` both read `TRUE`, then let one further OB call pass**, and read the watch table **before touching a control**. Read Group 2's `ForkliftObstacleInStopZone` and `ForkliftObstacleMinDistance` in the same reading, **before** judging `ForkliftObstacleStopActive` | `HmiLinkOk` `TRUE`, `BridgeLinkOk` `TRUE`, `ForkliftTeleopActive` `FALSE`, `ForkliftResetRequired` **`TRUE`** (at least both link latches, formed at the first scan), all three `…Ref` `0.0`. **`ForkliftObstacleStopActive` may read `FALSE` or `TRUE`, and both pass** — it is not a guarantee and must not be read as one. The field bit's `TRUE` **start value** is not what is at stake: §6.7's `bridgeLinkOk` conjunct keeps it out of the boot window, and by the time that conjunct lifts the bridge has written the slot at least once from a real sample. What decides the reading is a **race** the PLC does not own: the vehicle layer publishes a no-data sentinel until its first scan arrives, so if that sentinel is still standing when the bridge's heartbeat begins, the field bit is `TRUE` with the link up and the latch **correctly** forms on level, with no delay; if the first true scan wins, no latch forms. **The check is the pair, not the value**: with `ForkliftObstacleInStopZone` now reading `FALSE` and `ForkliftObstacleMinDistance` inside 0.05 … 8.10, `ForkliftObstacleStopActive` must **hold** — set stays set, because a clearing field releases no latch (§6.7), and clear stays clear. A `FALSE` → `TRUE` transition under those two readings is the one defect signature here. **A latch found set clears at 5.1.3** with the two link latches, and changes no later step |
+| 5.1.1 | Start the world, the bridge and the HMI. **Wait until `HmiLinkOk` reads `TRUE` and Group 5 shows `BridgeSeenAlive` `TRUE` with `BridgeStaleTimer.ET` far below `T#500ms`** — the bridge verdict is a Temp with no node of its own (§3.1b) — **then let one further OB call pass**, and read the watch table **before touching a control**. Read Group 2's `ForkliftObstacleInStopZone` and `ForkliftObstacleMinDistance` in the same reading, **before** judging `ForkliftObstacleStopActive` | `HmiLinkOk` `TRUE`, the bridge verdict up (`BridgeSeenAlive` `TRUE`, `BridgeStaleTimer.ET` short), `ForkliftTeleopActive` `FALSE`, `ForkliftResetRequired` **`TRUE`** (at least both link latches, formed at the first scan), all three `…Ref` `0.0`. **`ForkliftObstacleStopActive` may read `FALSE` or `TRUE`, and both pass** — it is not a guarantee and must not be read as one. The field bit's `TRUE` **start value** is not what is at stake: §6.7's `bridgeLinkOk` conjunct keeps it out of the boot window, and by the time that conjunct lifts the bridge has written the slot at least once from a real sample. What decides the reading is a **race** the PLC does not own: the vehicle layer publishes a no-data sentinel until its first scan arrives, so if that sentinel is still standing when the bridge's heartbeat begins, the field bit is `TRUE` with the link up and the latch **correctly** forms on level, with no delay; if the first true scan wins, no latch forms. **The check is the pair, not the value**: with `ForkliftObstacleInStopZone` now reading `FALSE` and `ForkliftObstacleMinDistance` inside 0.05 … 8.10, `ForkliftObstacleStopActive` must **hold** — set stays set, because a clearing field releases no latch (§6.7), and clear stays clear. A `FALSE` → `TRUE` transition under those two readings is the one defect signature here. **A latch found set clears at 5.1.3** with the two link latches, and changes no later step |
 | 5.1.2 | Assert the enable **before** any reset | Nothing happens: `ForkliftTeleopActive` stays `FALSE`, all three refs stay `0.0`. A latch is pending and the enable edge is refused |
 | 5.1.3 | Release the enable. Assert and release the reset control once | `ForkliftResetRequired` → `FALSE` within two OB calls. `ForkliftTeleopActive` stays `FALSE` and every ref stays `0.0` — **the reset energizes nothing** |
 | 5.1.4 | Assert the enable again (a fresh rising edge) with the traction control at zero | `ForkliftTeleopActive` → `TRUE`; all three refs still `0.0` |
@@ -1455,10 +1580,10 @@ the recorded showcase segment for criterion (a).
 
 | Step | Action | Pass |
 |---|---|---|
-| 5.6.1 | Teleop active and driving. `kill -9` the bridge. **Note the wall-clock instant** | `BridgeHeartbeat` (the M3 node) freezes; `BridgeLinkOk` → `FALSE` within the M3 cell's `HEARTBEAT_STALE_TIME` |
-| 5.6.2 | Read the three refs and Group 4 | All three refs → `0.0` in the same OB call as `BridgeLinkOk` dropping; `ForkliftTeleopActive` → `FALSE`; `BridgeLinkLostLatch` set and `ForkliftResetRequired` → `TRUE`. **`ForkliftObstacleStopActive` does not change** and no plausibility latch forms — all plant-input evaluation is suspended while the image is unattributable (§6.1) |
+| 5.6.1 | Teleop active and driving. `kill -9` the bridge. **Note the wall-clock instant** | `BridgeHeartbeat` freezes; the bridge verdict drops within `HEARTBEAT_STALE_TIME` (500 ms), formed in this FB — visible as `BridgeStaleTimer.ET` reaching `T#500ms` (§3.1b) |
+| 5.6.2 | Read the three refs and Group 4 | All three refs → `0.0` in the same OB call as the bridge verdict dropping; `ForkliftTeleopActive` → `FALSE`; `BridgeLinkLostLatch` set and `ForkliftResetRequired` → `TRUE`. **`ForkliftObstacleStopActive` does not change** and no plausibility latch forms — all plant-input evaluation is suspended while the image is unattributable (§6.1) |
 | 5.6.3 | Observe the model in Gazebo | It **keeps its last commanded traction** until the bridge returns: the PLC's `0.0` cannot reach the plant while the transport is down. **Record this as the §8 residual** — a property of the demonstration setup, not of the program, and the same residual M3 recorded for the belt |
-| 5.6.4 | Restart the bridge, let the heartbeat advance, and **do nothing else for 30 s** | `BridgeLinkOk` → `TRUE`; the first setpoint the bridge reads and republishes is `0.0`, so the model stops; **teleop does not return**; `ForkliftResetRequired` stays `TRUE` |
+| 5.6.4 | Restart the bridge, let the heartbeat advance, and **do nothing else for 30 s** | The bridge verdict returns — `BridgeStaleTimer.ET` resets and `BridgeSeenAlive` was already `TRUE`; the first setpoint the bridge reads and republishes is `0.0`, so the model stops; **teleop does not return**; `ForkliftResetRequired` stays `TRUE` |
 | 5.6.5 | Reset, then a fresh enable edge | The machine is driveable again. **No auto-resume at any point in 5.6.1–5.6.4**, and the reason the program gives for refusing is the link, not a sensor |
 
 **Pass: all five steps of the table above.**
@@ -1476,7 +1601,7 @@ the recorded showcase segment for criterion (a).
 | Fork **positioning**: a height target, a profile, a positioner | Deliberately absent. The operator jogs a **speed**; a height target would make the PLC a positioner running a profile, which this gate does not need (`opcua-nodes.md` §10.11) |
 | A traction drive-fault verdict | **No node exists to carry one** (`opcua-nodes.md` §10.11, §10.12 item 3). See open item 3 |
 | A creep-out or override mode that drives the machine clear of a latched obstacle | Deliberately absent. Clearing the zone is an action in the world, and an override that moved a machine while its stop was latched would be the auto-resume CLAUDE.md §9 forbids (§11 step 5.4.5) |
-| The M3 demonstration cell's logic | `plc/demo-cell/SPEC.md`, **unchanged by this document**. `BridgeLinkOk` is consumed, never recomputed |
+| The M3 demonstration cell's logic | `plc/demo-cell/SPEC.md`. **That program is not in this project** (§3.1b, owner decision 2026-07-30) and is cited here as precedent only; its bridge verdict is **re-formed** here, not consumed |
 | Per-client write scoping on the server | `opcua-nodes.md` §10.12 item 6 and §9.8's open item. It is policy today, not enforcement, and closing it is access-control work at a later gate |
 
 ### Open items carried out of this specification
@@ -1491,7 +1616,7 @@ the recorded showcase segment for criterion (a).
 | 6 | **The plausibility latches are specified and unverifiable on this plant**, exactly as the M3 cell's are. Gazebo publishes real values, the bridge invents none, and a watch-table *Modify* is overwritten within one write cycle — so there is no way to present the CPU with a genuine `NaN`, an `inf` or a held out-of-window value on any of the six Reals | The same fault-injection facility `plc/demo-cell/SPEC.md` §12 item 6 already requests of `bridge/`, extended to the `Forklift/Hmi/` and `Forklift/Input/` Reals. **Not a change to this program**, which must behave identically whether or not it exists |
 | 7 | **`plc/README.md` has no `forklift/SPEC.md` row** in its Contents table, and its boundary statement names only the M3 cell's process stop | Requested: one row, and one sentence stating that the forklift's obstacle stop, speed cap and soft limits are process interlocks and no safety function. Outside this brief's deliverable |
 | 8 | **`agv/forklift/README.md` does not exist**, though `opcua-nodes.md` §10.10 cites it as the vehicle layer's topic contract | `agv/` work. The topic names used in §11's stimuli are taken from `agv/forklift/config.yaml` and from `opcua-nodes.md` §10.10, which agree |
-| 9 | **OB30 now carries two function blocks.** The 20 ms period was chosen for one | Measure the OB30 cycle time and the CPU's maximum cycle time after the download (§10 step 9) and record them beside the M4 evidence. If the budget is tight, the decision is a longer OB period for both FBs — never a second OB with a second time base |
+| 9 | **OB30 carries one function block, and the CPU also runs the F-runtime group.** The two-FB figure earlier revisions carried was the shared-project case, and this project is not it (§3.1b, owner decision 2026-07-30): one standard FB in OB30, plus `Main_Safety_RTG1` in its own F-OB (ADR 0009). The 20 ms period was chosen before either was known | Measure the OB30 cycle time and the CPU's maximum cycle time after the download (§10 step 9) and record them beside the M4 evidence — **after** the F-program is downloaded, since it is the F-OB that now shares the budget (§13.8 item 5). If the budget is tight, the decision is a longer OB30 period — never a second standard OB with a second time base. The F-runtime group's own cycle and monitoring times are `plc/forklift-safety/SPEC.md` §4.3, not this document's |
 | 10 | **Every value in §3.1, §4.2 and §4.3 is a design value until it is read back out of the tool** — the folder tree, the per-tag rights, the node count, the browse path and the start values | Owner, at commissioning: §10 steps 11 and 12, recorded with their date, in the manner phase 0 recorded the 15 M3 nodes (`opcua-nodes.md` §9.10). No gate criterion may rest on one before then |
 
 ---
@@ -1538,16 +1663,14 @@ conditional write is not a gate).
 copies and one permissive term — and **modifies 1**, the `#motionPermissive`
 assignment, which gains one conjunct. Nothing is deleted and nothing moves.
 Under the metric earlier revisions of this document have used — non-blank,
-non-comment lines inside the `pascal` fence — that is **118 → 125 statement
-lines (+7)**: four copy lines, two for the term (it wraps), and one because the
-permissive assignment now occupies two lines instead of one. Counting only
-lines that end in `;` gives **53 → 58 (+5)**, which is the independent check
-that exactly five statements were added. The fence as a whole goes from 218 to
-252 lines including its markers; the other 27 added lines are comments saying
-why. **The fence hash therefore moves — the first revision to move it since the
-fence was written.** Every earlier revision of this document asserted
-byte-identity against it, so a revision that asserts byte-identity from here on
-quotes the new value, not the old one.
+non-comment lines inside the `pascal` fence — this delta is **+7 statement
+lines**: four copy lines, two for the term (it wraps), and one because the
+permissive assignment now occupies two lines instead of one. It took the fence
+from 118 to 125 statement lines **when it landed**, and it was the first revision
+to move that fence since it was written. **Those totals are no longer the fence's
+totals**: the bridge watchdog of §3.1b added six more on 2026-07-30. The current
+size and hash are stated once, at the end of §7, and that is the only place to
+read them from — a total quoted in two places goes stale in one of them.
 
 ### 13.2 Before applying it — four preconditions
 
