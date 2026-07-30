@@ -955,7 +955,7 @@ compiles, and every call site below states its `PT` explicitly.
 // FB in this project (§3.1b, owner decision 2026-07-30): there is no demo cell
 // to call before it. Nowhere else, and never a second instance.
 
-// ---- 0. F-data: the M5-early coupling delta (§13) ------------------------
+// ---- 0. F-data: the M5 opening-wave coupling delta (§13) -----------------
 // The ONLY place this FB touches F-data, and it only READS it. The F-program
 // owns every value in InstF_Forklift_Safety; this program writes none of them,
 // and writes nothing in SafetyInputStandIn either (plc/forklift-safety/SPEC.md
@@ -1621,7 +1621,7 @@ the recorded showcase segment for criterion (a).
 
 ---
 
-## 13. The M5-early safety coupling delta (ADR 0009)
+## 13. The M5 opening-wave safety coupling delta (ADR 0009)
 
 **§1–§12 specify the M4 program. This section is the delta applied on top of the
 program that is already built**, so that the teleop permissive learns the
@@ -1639,6 +1639,14 @@ above.
 function and no SIL or PL is claimed (§2). Nothing here closes M5 or any part of
 its criterion (ADR 0009 D2.3, D2.4). Nothing here may be cited as M4 evidence
 (D2.2). What the delta adds is **one conjunct and four display copies**.
+
+**Why this reads *opening wave* and not *early*.** ADR 0010 D2 widens M5 to
+absorb the old vehicle gate and takes ADR 0009's direction to completion: the
+early cell-scope opening on the twin becomes the **opening wave of M5 itself**
+rather than a departure from gate discipline. ADR 0010 **extends** ADR 0009
+instead of superseding it, so D3's coupling architecture — everything this
+section specifies — carries over unchanged, and the three statements above stand
+as written.
 
 ### 13.1 The whole delta on one screen
 

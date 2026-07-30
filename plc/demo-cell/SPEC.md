@@ -1680,8 +1680,8 @@ recorded that way rather than inferred from 4.11.**
 
 | Item | Owner |
 |---|---|
-| Anything safety-related: F-CPU, F-I/O, PROFIsafe, e-stop chain, SF-01…SF-08 | `docs/safety/SRS.md`, gate M9. The demonstration cell has none of it (§2) |
-| The M1 target-cell logic — conveyor transfer handshake, door, charger | Gate M8. `opcua-nodes.md` §3–§7 and `handshake-tables.md`; no node of theirs is touched here |
+| Anything safety-related: F-CPU, F-I/O, PROFIsafe, e-stop chain, SF-01…SF-08 | `docs/safety/SRS.md`, gate M5 — and gate M6 for SF-05 and SF-06, which land with the stations (ADR 0010 D2, D3, D7). The demonstration cell has none of it (§2) |
+| The M1 target-cell logic — conveyor transfer handshake, door, charger | Gate M6 (ADR 0010 D3). `opcua-nodes.md` §3–§7 and `handshake-tables.md`; no node of theirs is touched here |
 | The bridge's behaviour | `docs/interfaces/bridge-design.md`, implemented in `bridge/` |
 | Cell geometry, speeds and topic names | `sim/README.md` |
 | HMI | None exists in M3, and no tag here assumes one |
