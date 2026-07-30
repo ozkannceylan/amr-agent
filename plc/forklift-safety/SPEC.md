@@ -57,7 +57,7 @@ leaves the F-runtime group except by the standard program choosing to read it.
 graph LR
     subgraph FRT["F-runtime group RTG1 — the safety path begins and ends here"]
         IN["SafetyInputStandIn<br/>EStopCircuitClosed<br/>ZoneDeviceCircuitClosed<br/>ResetButtonPressed"]
-        FB["F_Forklift_Safety FB2<br/>13 networks, F-FBD"]
+        FB["F_Forklift_Safety FB2<br/>14 networks, F-FBD"]
         DB["InstF_Forklift_Safety DB3<br/>EStopDemand ZoneStopDemand<br/>SafetyResetRequired SafetyResetFault"]
     end
     ENG["Engineering interface<br/>TIA watch table Modify<br/>ENGINEERING STAND-IN"]
@@ -130,7 +130,7 @@ document changes.
 |---|---|---|---|
 | **F0** | Safety Advanced licence present | **Answered 2026-07-29** (ADR 0009, context): the project compiled with its F-runtime group. Confirm it still holds by opening *Safety Administration* and reading the licence state; record it with the date | fallback |
 | **F1** | The F-runtime group reaches RUN on the 1513F-1 PN PLCSIM Advanced instance | **Answered 2026-07-29** (ADR 0009, context): downloaded, CPU in RUN, F-runtime group executing, and the F-logic seen to latch. Re-confirm after each download of this document's deltas | fallback |
-| **F2** | The **instruction set** this specification uses exists in the safety program | Open `F_Forklift_Safety [FB2]` and look in *Instructions* for `RS`, `SR`, `R_TRIG`, `F_TRIG` and `TON`. `SR` is already in use in the build, so bit logic is confirmed; the other four are what §5 adds. **Record which are present** | see §5.0 note 4 for the substitution; not a fallback |
+| **F2** | The **instruction set** this specification uses exists in the safety program | **Answered 2026-07-30, in the tool**: `RS`, `SR` and `TON` are present and are what §5 uses; **`R_TRIG` and `F_TRIG` are not offered in this safety instruction set**, so §5's networks 3, 4 and 14 form both edges by hand from one static (§5.0 note 4). Re-check the list after any TIA or firmware change and record it | The timer is the one with no substitute: without `TON` the monitored window cannot be built and §2's fallback applies. It is present, and networks 6 and 7 use it |
 | **F3** | The **engineering stimulus works with safety mode activated** | Build D1 of §3.0 alone, download, confirm *Safety Administration* reads **safety mode activated**, then *Modify* `"SafetyInputStandIn".EStopCircuitClosed` in a watch table and read it back. **If a Modify of this DB requires deactivating safety mode, the ruling of §7 is broken and there is no honest stimulus** | fallback |
 | **F4** | The F-program can **read** the stand-in DB, and no standard block **writes** it | After D1 and D2, compile the safety program. Record the warning text and count — a safety program reading standard data is expected to be reported. Then right-click `SafetyInputStandIn` → *Cross-references*: the only accesses must be the three read pins in `Main_Safety_RTG1` | fallback |
 | **F5** | The standard program can **read** `InstF_Forklift_Safety` | After D2–D4, add one throwaway read of `"InstF_Forklift_Safety".EStopDemand` in a standard block and compile. **Delete it afterwards** — the real read is the standard-side brief's | fallback: without it the coupling contract of §6 cannot be honoured |
@@ -220,7 +220,7 @@ scratch**: `Main_Safety_RTG1 [FB1]`, `F_Forklift_Safety [FB2]` and
 |---|---|---|
 | **D1** | **Create** global DB `SafetyInputStandIn` — three Bools, all start `FALSE`, *Accessible from HMI/OPC UA* **✘** (§3.1) | R2: the F-inputs are driven at the engineering interface and are reachable by no client, on no path, including `DataBlocksGlobal` |
 | **D2** | **Rewrite the interface** of `F_Forklift_Safety [FB2]`: three Inputs, four Outputs, the statics of §3.3 (§3.2) | The e-stop channel does not exist yet; R4 forbids the current zone-input name; CLAUDE.md §9 requires PascalCase, physical-thing-plus-meaning names, and the mirrors downstream diff against them |
-| **D3** | **Replace FB2's two networks** with the thirteen of §5 | Set-dominant latches, the monitored edge sequence with its hold window and reset-fault, and `SafetyResetRequired` meaning what SF-08 says it means |
+| **D3** | **Replace FB2's two networks** with the fourteen of §5 | Set-dominant latches, the monitored edge sequence with its hold window and reset-fault, and `SafetyResetRequired` meaning what SF-08 says it means |
 | **D4** | **Rewire the call** in `Main_Safety_RTG1 [FB1]`: three inputs from `"SafetyInputStandIn"`, and **all four outputs left unassigned** | The dual-writer resolution: after D4 the F-program's entire write set is `InstF_Forklift_Safety` (§3.4) |
 | **D5** | **Verify by cross-reference** that no F-block writes anything in `DB_ROS_Bridge` | D4 should have removed it; D5 is the check, because "should have" is not a verification |
 | **D6** | **Retire** `DB_AGV_Drive.Sim_Reset_Button` from the F-program | R1. The tag may stay in the project as a dead end; it is no longer connected to anything safety-related |
@@ -270,6 +270,15 @@ All seven are **Bool**. The `I_` / `Q_` prefixes are dropped: this project names
 tags in PascalCase after the physical thing plus its meaning, and the OPC UA
 mirror names downstream diff against these names (CLAUDE.md §9).
 
+> **As built, 2026-07-30.** D1–D7 are **fully applied**, so the *Today* column
+> above is now the historical state and the *After D2* column is the build. The
+> interface reads **3 Inputs, 4 Outputs, 10 statics and 2 constants** — ten and
+> not eleven because this CPU's safety instruction set has no `R_TRIG`/`F_TRIG`,
+> so the two edge instances are replaced by one static, `ResetMemory` (§3.3,
+> §5.0 note 4). The call in `Main_Safety_RTG1` has its three input pins bound to
+> `"SafetyInputStandIn"` and **all four output pins empty**, which is §3.4's
+> write set as a fact rather than an instruction.
+
 > **An interface change moves the instance DB layout.** After D2, `DB3` is
 > regenerated on compile and the download must **re-initialise** it (§4.2 step
 > 10). A download that preserves the old layout leaves stale values ruling —
@@ -278,8 +287,9 @@ mirror names downstream diff against these names (CLAUDE.md §9).
 
 ### 3.3 Statics inside `InstF_Forklift_Safety [DB3]`
 
-All Static, all non-Retain. The four instances are declared as **multi-instances**
-so they live inside `DB3` and no extra data block appears (§4.2 step 9).
+All Static, all non-Retain. **Ten of them**, as built. The two timer instances are
+declared as **multi-instances** so they live inside `DB3` and no extra data block
+appears (§4.2 step 7).
 
 | Symbol | Type | Start value | Purpose |
 |---|---|---|---|
@@ -290,8 +300,7 @@ so they live inside `DB3` and no extra data block appears (§4.2 step 9).
 | `ResetRise` | Bool | `FALSE` | One-scan rising edge of `ResetButtonPressed` |
 | `ResetFall` | Bool | `FALSE` | One-scan falling edge of `ResetButtonPressed` — **the edge the latch releases on** (SRS SF-08) |
 | `ResetPulse` | Bool | `FALSE` | One-scan, fully qualified reset command. The **only** thing that clears either demand latch |
-| `ResetRiseEdge` | `R_TRIG` | — | Multi-instance |
-| `ResetFallEdge` | `F_TRIG` | — | Multi-instance |
+| `ResetMemory` | Bool | **`FALSE`** | `ResetButtonPressed` as it read in the **previous** F-cycle. The whole edge mechanism: networks 3 and 4 compare the device against this, and network 14 — the **last** network — copies the device into it. Start value `FALSE`, so a device already pressed at the first F-cycle **does** produce a rising edge, which is real and is refused downstream by `ResetSeenOpen` rather than suppressed here (network 3). This is what an `R_TRIG`'s hidden static would have held, made visible and watchable (§5.0 note 4, as built 2026-07-30) |
 | `ResetHoldMinTimer` | `TON` | — | Multi-instance. Measures the minimum hold |
 | `ResetHoldMaxTimer` | `TON` | — | Multi-instance. Measures the stuck-actuator bound |
 
@@ -358,10 +367,10 @@ standard side is `SafetyInputStandIn`, which no standard block reads or writes.
 | 1 | **Run the §2 checkpoint first**, at least F0, F1 and F3. F3 needs only D1 | Building the whole delta and discovering at the end that the stimulus needs deactivated safety mode wastes the build and, worse, invites the temptation to demonstrate in deactivated safety mode |
 | 2 | **D1 — add the global DB `SafetyInputStandIn`** with the three Bools of §3.1. Standard DB, optimized access, **no Retain**, start values all `FALSE` | It is a **standard** DB on purpose (§7). Do not create it inside the safety program and do not mark it as an F-DB — an F-DB cannot be modified from a watch table with safety mode activated, which would destroy the stimulus |
 | 3 | **Clear *Accessible from HMI/OPC UA* on `SafetyInputStandIn`** in the DB's properties | This is the enforcement behind R1 and R2, and it is the whole reason the reset cannot be a client write. With the box ticked, the S7-1500 auto-publishes the DB under `Objects/DataBlocksGlobal` in its own namespace, where the commissioned access settings do not write-protect it (`opcua-nodes.md` §9.8, §9.10). **Any OPC UA client could then clear a safety latch.** Untick it, then verify in step 13 by browsing |
-| 4 | **D2 — rewrite FB2's interface** per §3.2: rename two Inputs, add one; rename two Outputs, add two; add the eleven statics of §3.3 | Rename in the interface table rather than deleting and re-adding, so TIA can carry the rename into the call in FB1. Expect the call in `Main_Safety_RTG1` to go inconsistent — step 8 repairs it |
+| 4 | **D2 — rewrite FB2's interface** per §3.2: rename two Inputs, add one; rename two Outputs, add two; add the ten statics of §3.3 | Rename in the interface table rather than deleting and re-adding, so TIA can carry the rename into the call in FB1. Expect the call in `Main_Safety_RTG1` to go inconsistent — step 8 repairs it |
 | 5 | **Add the two constants** of §3.3 in the *Constant* section if the F-block offers one | If it does not, enter `T#200ms` and `T#3s` directly at the `PT` pins in networks 6 and 7. **Never leave a `PT` to an interface default** (LESSONS 2026-07-28) |
-| 6 | **D3 — delete FB2's two existing networks and build the thirteen of §5**, in the order given | The order is not cosmetic: networks 1–10 form the reset, networks 11–13 consume it, so every value a network reads was produced earlier **in the same F-cycle**. Building the latches first makes the reset one cycle old |
-| 7 | **Set the multi-instance option** when TIA offers the call-options dialog for `R_TRIG`, `F_TRIG` and the two `TON` instances | Choosing *Single instance* creates four extra data blocks and moves the statics out of `DB3`, so §8's watch table and §6's contract stop matching the build |
+| 6 | **D3 — delete FB2's two existing networks and build the fourteen of §5**, in the order given | The order is not cosmetic: networks 1–10 form the reset, networks 11–13 consume it, so every value a network reads was produced earlier **in the same F-cycle**. Building the latches first makes the reset one cycle old. **Network 14 is the one deliberate exception and it stays last** — it writes `ResetMemory`, which networks 3 and 4 read from the *previous* cycle (§5.0 note 6) |
+| 7 | **Set the multi-instance option** when TIA offers the call-options dialog for the two `TON` instances | Choosing *Single instance* creates extra data blocks and moves the statics out of `DB3`, so §8's watch table and §6's contract stop matching the build |
 | 8 | **D4 — repair the call** in `Main_Safety_RTG1`: right-click the call box → *Update*, then wire the three input pins to `"SafetyInputStandIn".EStopCircuitClosed`, `.ZoneDeviceCircuitClosed` and `.ResetButtonPressed`, and **leave all four output pins unassigned** | An unassigned FB output pin is legal and is the point: the values live in `DB3` and the standard program reads them there. **If a usable F-DI channel is ever established, this step is the only one that changes** (§2.1) |
 | 9 | **D6 — delete the old operands**: nothing may remain wired to `DB_AGV_Drive.Sim_Reset_Button` or to `DB_ROS_Bridge.Forklift.Input.ForkliftObstacleInStopZone` from any F-block | The lidar bit staying wired into the safety program is R4 broken and would make the recording's central claim false |
 | 10 | **Compile the safety program. Read the warnings and record them** | A safety program that reads standard data is expected to be reported. After these deltas the F-side reads exactly three standard tags and writes none, so the two write-accesses into `Forklift.Status` must have disappeared from the report. **A warning that names `DB_ROS_Bridge` after step 9 means step 8 or 9 is incomplete** |
@@ -433,7 +442,7 @@ execution time beside it.
 ### 5.0 Reading rules for §5.1
 
 1. **Every network is one logic string ending in one coil or one flip-flop box.**
-   Thirteen networks, thirteen written operands.
+   Fourteen networks, fourteen written operands.
 2. **`SR` and `RS` are the opposite way round in TIA from IEC 61131-3, and getting
    it backwards is the single easiest way to build the wrong safety program.** In
    TIA the trailing `1` marks the **dominant** input:
@@ -451,24 +460,40 @@ execution time beside it.
    the *Negate* command from the pin's context menu or the toolbar; a small circle
    appears on the pin. **Every negation below is load-bearing** and each one is
    explained in its network's note.
-4. **If `R_TRIG`, `F_TRIG` or `TON` is absent from the safety instruction set on
-   this version** (§2 check F2), each has a substitute built from what is
-   certainly present:
-   - a rising edge: a Static Bool `ResetMemory` written by an `=` coil at the end
-     of the network from `ResetButtonPressed`, and the edge being
-     `ResetButtonPressed AND NOT ResetMemory` — with the coil placed **after**
-     every reader of the edge;
-   - a falling edge: the same with the negations swapped;
-   - a timer: there is **no substitute**. Without a timer in the safety program the
-     monitored **window** cannot be built, which means SF-08's hold bounds cannot
-     be built, which is a **fallback** under §2 rather than a simplification.
+4. **Both edges are formed by hand, from one static, and that is the build.**
+   `R_TRIG` and `F_TRIG` are **not offered** in this CPU's safety instruction set
+   (§2 check F2, answered in the tool 2026-07-30), so:
+   - the rising edge is `ResetButtonPressed AND NOT ResetMemory` (network 3);
+   - the falling edge is `NOT ResetButtonPressed AND ResetMemory` (network 4);
+   - `ResetMemory := ResetButtonPressed` is **network 14, the last network**, so
+     it runs after every reader of either edge (note 6, and network 14's own
+     note).
+
+   `TON` **is** present and networks 6 and 7 use it. It is the one instruction
+   with **no substitute**: without a timer the monitored **window** cannot be
+   built, SF-08's hold bounds cannot be built, and that is a **fallback** under §2
+   rather than a simplification.
+
+   > **The `R_TRIG` / `F_TRIG` form, for a CPU that has them — not this build.**
+   > Networks 3 and 4 become one `R_TRIG` box with multi-instance `ResetRiseEdge`
+   > and one `F_TRIG` box with `ResetFallEdge`, each driving its `=` coil from
+   > `Q`; network 14 disappears and `ResetMemory` with it, taking the static count
+   > from 10 to 11. **Nothing else moves** — no latch, no window, no pin, no
+   > watch-table row outside those three. It is recorded so a future CPU does not
+   > have to re-derive it, and it appears nowhere in §5.1.
 5. **The operand of an `SR` / `RS` box is written above the box.** The `Q` output
    pin is optional and is left unconnected everywhere below — the operand *is* the
    value.
-6. **No network reads a value that a later network writes.** The order is the
-   design.
+6. **No network reads a value that a later network writes — with exactly one
+   exception, and it is the edge mechanism.** `ResetMemory` is read in networks 3
+   and 4 and written in network 14, deliberately: what those networks need is the
+   value from the **previous** F-cycle, which is exactly what a variable written
+   after them still holds. Moving network 14 earlier, or "repairing" the apparent
+   forward reference, destroys both edges — network 3 would compare the device
+   against itself and never see one. **Network 14 stays last.** Everywhere else
+   the order is the design.
 
-### 5.1 The thirteen networks
+### 5.1 The fourteen networks
 
 ---
 
@@ -529,16 +554,22 @@ group's start.
 
 | Element | Pin | Operand |
 |---|---|---|
-| `R_TRIG` box, multi-instance `#ResetRiseEdge` | `CLK` | `"SafetyInputStandIn".ResetButtonPressed` |
-| `=` coil, from the box's `Q` | — | `#ResetRise` |
+| `AND` box, 2 inputs | in 1 | `"SafetyInputStandIn".ResetButtonPressed` |
+| | in 2 *(negated)* | `#ResetMemory` |
+| `=` coil | — | `#ResetRise` |
 
 **Reads as:** the operator has just pressed the reset device, this F-cycle only.
 
-**Notes.** `R_TRIG`'s stored previous value starts `FALSE`, so a device **already
-pressed at the first F-cycle produces a rising edge**. That edge is real and is
-not suppressed here — it is refused downstream by network 5, which requires
-`ResetSeenOpen`. Suppressing it here instead would hide the very condition SF-08
-wants flagged.
+**Notes.** **The edge is formed by hand**, because this instruction set offers no
+`R_TRIG` (§5.0 note 4). `ResetMemory` holds the device's state from the previous
+F-cycle and is written by **network 14**, after every reader of either edge; the
+apparent forward reference is the mechanism, not a defect (note 6).
+
+`ResetMemory` starts `FALSE`, so a device **already pressed at the first F-cycle
+produces a rising edge** — the same behaviour an `R_TRIG`'s hidden static would
+have given, for the same reason. That edge is real and is not suppressed here: it
+is refused downstream by network 5, which requires `ResetSeenOpen`. Suppressing
+it here instead would hide the very condition SF-08 wants flagged.
 
 ---
 
@@ -546,13 +577,19 @@ wants flagged.
 
 | Element | Pin | Operand |
 |---|---|---|
-| `F_TRIG` box, multi-instance `#ResetFallEdge` | `CLK` | `"SafetyInputStandIn".ResetButtonPressed` |
-| `=` coil, from the box's `Q` | — | `#ResetFall` |
+| `AND` box, 2 inputs | in 1 *(negated)* | `"SafetyInputStandIn".ResetButtonPressed` |
+| | in 2 | `#ResetMemory` |
+| `=` coil | — | `#ResetFall` |
 
 **Reads as:** the operator has just released the reset device, this F-cycle only.
 
 **Notes.** SRS SF-08: *"the latch releases on the **falling edge** (button
 release)"*. The release is the acting edge; the press only starts the measurement.
+
+**The same static, the negations swapped** — network 3's shape mirrored, reading
+the same `ResetMemory` network 14 writes at the end of the cycle (§5.0 note 4).
+With `ResetMemory` starting `FALSE` and the device unpressed, no spurious falling
+edge can form at the first F-cycle.
 
 ---
 
@@ -809,6 +846,39 @@ that flag.**
 Whether a reset would currently be *accepted* is a different question with its own
 watch-table row: `CauseGone`.
 
+---
+
+**Network 14 — `ResetMemory`: the edge mechanism, and it is last for a reason**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `=` coil | — | `#ResetMemory` |
+| driven directly from | — | `"SafetyInputStandIn".ResetButtonPressed` |
+
+**Reads as:** remember, for the next F-cycle, how the reset device reads in this
+one.
+
+**Notes.** One coil, no logic, and **its position is the whole design**. Networks
+3 and 4 form the two edges by comparing the device against this static (§5.0
+note 4); both must see the **previous** cycle's value, so the copy has to run
+after every reader of either edge. Network 10 is the last of those readers, so
+anywhere after it would do — **last is where it cannot drift**, and where a
+network inserted later cannot silently get between a reader and the copy.
+
+**This is the one network that reads nothing and changes nothing in the same
+cycle**, and the one place §5.0 note 6's ordering rule is deliberately inverted.
+Moved earlier, network 3 compares the device against itself, `ResetRise` is never
+`TRUE`, no press is ever armed, and **no reset can ever succeed** — a failure
+that looks like a broken reset device and is not.
+
+**It is written unconditionally, on every F-cycle, `TRUE` or `FALSE`.** An `=`
+coil assigns in both states; a `S`/`R` pair here would leave the memory stuck and
+break the falling edge.
+
+**Nothing downstream reads `ResetMemory`.** It exists for networks 3 and 4 and for
+the watch table (§8 Group 3), where it is the row that tells a stuck edge from a
+stuck device.
+
 ### 5.2 The four latches on one page
 
 | Operand | Box | Dominant | Set by | Cleared by |
@@ -821,6 +891,8 @@ watch-table row: `CauseGone`.
 
 `ResetSeenOpen` is a one-shot set and never cleared; `CauseGone`, `ResetRise`,
 `ResetFall` and `ResetPulse` are recomputed every F-cycle and hold no state.
+`ResetMemory` holds exactly **one F-cycle** of state, which is what makes the two
+edges possible at all (§5.0 note 4, network 14).
 
 ### 5.3 The six ways a reset must fail, and where each one fails
 
@@ -1143,6 +1215,7 @@ deactivating safety mode, and a fabricated latch demonstrates nothing (§7.2).
 | `"InstF_Forklift_Safety".ResetHoldMaxTimer.ET` | Time | Runs for **any** press |
 | `"InstF_Forklift_Safety".ResetHoldMaxTimer.PT` | Time | **Must read `T#3s`** |
 | `"InstF_Forklift_Safety".ResetRise` / `.ResetFall` | Bool | One F-cycle wide; not observable by eye |
+| `"InstF_Forklift_Safety".ResetMemory` | Bool | The device as it read in the **previous** F-cycle (§5.1 network 14). In monitor it tracks Group 1's `ResetButtonPressed` row and differs from it only in the one cycle an edge is being formed, which is why neither edge can be caught by eye. **Stuck `TRUE` with the device visibly released is network 14 not executing** — and the visible symptom of that is a reset that never fires |
 
 ### Group 4 — the process consequence *(the standard side, lands with its own delta)*
 
