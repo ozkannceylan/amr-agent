@@ -61,15 +61,18 @@ brief queue lives in docs/PLAN.md.
   convenient; not gate work.
 
 
-## M5 opening decisions (with the owner, after the m5r round and M4 close)
-- Map-view data path ADR (ADR 0010 D6a): how SLAM map and obstacle data
-  reach the HMI — done when an accepted ADR names the path and the topology
-  edge.
-- Per-sensor brief plan: safety scanner → F-blocks, navigation lidar, SLAM,
-  Nav2, HMI v2 — done when the M5 brief list stands in PLAN.md.
-- Pre-M6: the deep-research brief (fleet architecture, VDA 5050 at scale,
-  world sizing) — done when its findings are owner-ruled (ADR 0010 D6d).
-- Pre-M7: the m4-00-hermes-survey owner decisions — done when each is ruled.
+## M5 — open items
+- Monitoring service directory: ADR 0011 D4 recommends `agv/` but does not
+  rule it; `viz/` is the alternative and the ADR 0005 test names the
+  question — done when the first monitoring brief rules it.
+- F-DI order number and its parameterisation (1oo2 equivalent, discrepancy
+  time, input delay) are unfixed pending the m5-03 verdict — done when the
+  F-program spec carries owner-verified values.
+- plc/forklift-safety/SPEC.md open item 1 is answered in direction, not in
+  fact: ADR 0011 F3 gives the probable cause (TIA V18/V19 defaulting above
+  the supported safety-system-version list) — done when m5-03 settles it.
+- Later gates: the M6 deep-research brief (ADR 0010 D6d) and the
+  m4-00-hermes-survey decisions for M7 (D6c) — each done when owner-ruled.
 
 ## sim
 - Cell reskin (deferred, visual only, ARIAC licence blocker unchanged).
