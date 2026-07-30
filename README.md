@@ -79,15 +79,14 @@ behaviour, never on written code.
 | M1 | Interface contracts | **done** |
 | M2 | Safety requirements spec | **done** |
 | M3 | Fixed equipment I/O loop | **done** |
-| M4 | Forklift commissioning cell | next |
-| M5 | Safety layer on the fixed cell (F-CPU) | archived |
-| M6 | Simulated vehicle | archived |
-| M7 | VDA 5050 client | planned |
-| M8 | Fleet manager | planned |
-| M9 | PLC integration | planned |
-| M10 | Demonstration | planned |
-| M11 | Arm integration | planned |
-| M12 | Command path from Hermes | parked |
+| M4 | Forklift commissioning cell |  **done** |
+| M5 | Simulated vehicle | archived |
+| M6 | VDA 5050 client | planned |
+| M7 | Fleet manager | planned |
+| M8 | PLC integration | planned |
+| M9 | Demonstration | planned |
+| M10 | Arm integration | planned |
+| M11 | Command path from Hermes | parked |
 
 Archived rows moved onto the forklift twin rather than being dropped: the safety
 layer is built on the twin instead of the fixed cell, the VDA 5050 client builds on
