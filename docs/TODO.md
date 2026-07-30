@@ -84,6 +84,18 @@ brief queue lives in docs/PLAN.md.
 - Later gates: the M6 deep-research brief (ADR 0010 D6d) and the
   m4-00-hermes-survey decisions for M7 (D6c) — each done when owner-ruled.
 
+## sim — M5, queued behind the m5-06 topic names
+- sim/launch/forklift_bringup.launch.py bridges `/forklift/gz/scan`, which
+  m5-04 replaced with three scanners: it spawns cleanly, logs a bridge for
+  every entry, reports no error and carries no data — a SILENT failure that
+  will hang the rehearsal. Fix once m5-06 publishes the channel names
+  (m5-07 open question 1). Done when the bringup carries data on the new
+  topics, shown by an echo.
+- The arena has nothing at the 1.80 m navigation plane except one pillar —
+  SLAM needs landmarks there, and a long featureless aisle is a degenerate
+  direction no parameter fixes (m5-04 open question 2, m5-08 depends on it).
+- The mast's rendered and physical bodies disagree (m5-04 open question 5).
+
 ## sim
 - Cell reskin (deferred, visual only, ARIAC licence blocker unchanged).
 - `--` inside XML comments breaks ElementTree in warehouse.sdf:16,
