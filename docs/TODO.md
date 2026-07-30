@@ -61,6 +61,16 @@ brief queue lives in docs/PLAN.md.
   convenient; not gate work.
 
 
+## contract — topology gap found 2026-07-30 (m5-02 open question 1)
+- CLAUDE.md §3 does not draw `bridge/` at all: its only PLC-to-vehicle path
+  is PLC → fleet manager → MQTT → client, while the actual M4/M5 command
+  path is HMI → PLC → bridge → simulation. The layer that carries every
+  command demonstrated so far is therefore outside the diagram invariant 11
+  reads against, and unenforceable by it. Needs an owner-approved infra
+  brief plus an arch-docs ruling on whether the bridge edge is drawn as the
+  simulation's stand-in for field wiring or as a layer in its own right.
+  Done when §3 draws the path the demonstrations actually use.
+
 ## M5 — open items
 - Monitoring service directory: ADR 0011 D4 recommends `agv/` but does not
   rule it; `viz/` is the alternative and the ADR 0005 test names the
