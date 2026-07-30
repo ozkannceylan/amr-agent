@@ -30,10 +30,11 @@ accepted), m5r-05 safety docs (ae3441d, arm out of scope), m5r-06 plc docs
 (a6aba59, two-gate row accepted), m5r-07 sim docs (ebd6bf6), m5r-08
 interfaces docs (e864e5b). Beside the round: m4f-10 one-command stack
 launcher (4d699cb, owner-requested; real bringup untested off-container).
-m5r-09 verifier ruled fail bounded to tracking reconciliation and one
-brief-defect mapping (fixed-cell SF-08 briefed to M6 against ADR 0010
-D7/SRS §4); closure = the SF-08 correction, this reconciliation, and the
-verifier's bounded re-check.
+m5r-09 verifier first ruled fail bounded to tracking reconciliation and
+one brief-defect mapping (fixed-cell SF-08 briefed to M6 against ADR 0010
+D7/SRS §4); after the SF-08 correction (ca767ac, 1ab9117) and the
+reconciliation, the bounded re-check ruled **pass-with-findings** and the
+round is closed 2026-07-30, residue queued in TODO.
 
 ## M5 — opens when M4 closes
 

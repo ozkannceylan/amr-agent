@@ -313,3 +313,122 @@ action implied beyond the rule already appended.
 - **No secret-shaped addition** in the round's diff. The one match,
   `declare -A COMPONENT_TOKEN` in `stack.sh`, is a table of `pgrep` match strings.
 - **The working tree is clean** and nothing was staged or committed by this run.
+
+---
+
+# Addendum — 2026-07-30, bounded re-verification at HEAD ca767ac
+
+Scope, as directed: **check 6 and finding 6 only.** Nothing else was re-run;
+checks 1–5 stand as ruled above. New artifacts examined: commits a5f32bc
+(`docs(infra): reconcile the tracking files against the m5r reports`) and
+ca767ac (`docs(plc): correct the fixed-cell SF-08 landing to M5`), plus 7fa2975,
+which committed the original report.
+
+**Revised overall verdict: pass-with-findings.** The fail is lifted. Check 6 now
+passes with findings and finding 6 is closed. Three new low-severity findings
+(9–11) are recorded; none blocks the round's closure and none touches a
+deliverable's substance.
+
+## Finding 6 re-check — closed
+
+**Sweep by subject, my own.** Every occurrence of `SF-08`, `SafetyResetRequired`
+and *monitored reset* across all live documents — 318 hits, whitespace-normalised
+— re-read with 200 characters of context each side; 31 carry a gate number within
+that window and each was read individually.
+
+- `plc/forklift-safety/SPEC.md` §6.4 now reads *"`opcua-nodes.md` §4 defines
+  `Safety/SafetyResetRequired` for the **fixed cell** (SF-08, **M5**)"*.
+- §10 now reads *"the fixed cell's F-I/O **behind SF-05 and SF-06** arrives with
+  the stations at M6 (ADR 0010 D2, D3). **SF-08 is M5 in both its instances**
+  (SRS §4)"* — the adjacent line that could have been read as inheriting the
+  defect, correctly narrowed in the same change.
+- A targeted pattern for a direct assertion (`SF-08` within 80 characters of `M6`
+  on either side, no sentence or cell boundary between) returns **2** hits, both
+  in `docs/PLAN.md` and `docs/TODO.md`, and both are narrations of the corrected
+  defect — *"SF-08 briefed to M6 against ADR 0010 D7/SRS §4"* — not landing
+  claims. Correct and worth keeping.
+- Every remaining M6 landing in `plc/` is one ADR 0010 puts there by name: SF-09,
+  SF-05/SF-06, the target cell's fixed equipment. The accepted
+  `plc/demo-cell/SPEC.md` two-gate row is unchanged and remains correct.
+- SRS §4 and `plc/forklift-safety/SPEC.md` §6.4 now agree, and both agree with
+  ADR 0010 D7 and `docs/roadmap.md`.
+
+**No live document asserts an SF-08 instance at M6.** Finding 6 is closed, and
+the LESSONS entry appended for it names the right rule — that a brief's mapping
+enumeration is checked against the ADR before dispatch, and that the verifier
+rules on the mapping itself rather than on whether the sweep applied it.
+
+## Check 6 re-check — pass-with-findings
+
+Artifacts: `docs/PLAN.md` and `docs/TODO.md` at ca767ac, against the 131-file
+report directory.
+
+**Closed since the first pass:**
+
+- **Finding 2 — PLAN.** The m5r section now lists all eight briefs closed with
+  their commit hashes (166ffb3, 517b0a4, 324b5d7, 32ffb40, ae3441d, a6aba59,
+  ebd6bf6, e864e5b), names the three accepted deviations beside the briefs that
+  carried them, records m4f-10 (4d699cb) as beside-the-round work with its
+  untested-off-container caveat, and records the m5r-09 verdict with its closure
+  condition. PLAN now reflects the report directory.
+- **Finding 1 — the half-closed sub-item is restored**, to the owner queue, with
+  the LESSONS #81 browse-name sweep attached to it. The parent build item stays
+  correctly deleted.
+- **Finding 3** — the orchestrator row is rewritten to the actual remaining work.
+- **Finding 4** — m4f-10's untested readiness timeouts are queued to the owner,
+  its port-mismatch open question to `sim`, and the `stack.sh` gap in CLAUDE.md
+  §4's layout to `docs residue` as an owner-approved contract touch.
+- **Finding 5** — the three SDF `--`-in-comment defects are queued to `sim` with
+  their exact line numbers, and LESSONS gained the two entries for findings 1
+  and 6.
+
+Both new commits are clean on the check-5 criteria: author and committer
+`Ozkan Ceylan <ozkannceylan@gmail.com>`, conventional messages, scopes `infra`
+and `plc` from the valid list, one logical change each, no attribution.
+`docs/LESSONS.md` is again +2/-0, append-only.
+
+**Findings 9, 10 and 11 below** are why this is pass-with-findings rather than
+pass.
+
+## Findings (continued)
+
+**9. The m5r-06 correction note is not in the repository (check 6, check 5).**
+At HEAD, `docs/reports/m5r-06-plc-docs-sweep.md` carries the two corrected table
+rows, but its `## Correction — SF-08 is M5, not M6 (applied after the first
+pass)` section — the record of *why* the correction happened, its authority
+check, and its by-subject re-sweep — sits **uncommitted in the working tree**
+(`git status` shows the file modified at ca767ac+). The reasoning is the durable
+part; a corrected table row without it reads as if the first pass had been right.
+One `git add` closes this. Separately, ca767ac introduced a stray double space in
+that report's open question 4 (`**Cross-document term choice.**  `docs/…`),
+an edit unrelated to the commit's stated subject.
+
+**10. TODO's verifier row for m5r-09 is now a stale duplicate (check 6).**
+`docs/TODO.md` `## verifier` still reads *"m5r-09 (queued, after the m5r sweeps)
+— done when no live document carries a pre-ADR-0010 gate reference…"*. The report
+exists and is committed (7fa2975) and that criterion has been ruled. The live
+remaining work is the bounded re-check, which the `## orchestrator — m5r round
+closure` row already names, so the verifier row now describes work that is done
+and duplicates work that is tracked elsewhere. Delete it or reduce it to the
+re-check.
+
+**11. Four m5r report open questions are still unqueued (check 6).**
+Each is recorded in a committed report, so nothing is lost, and each was
+correctly outside its own brief's scope — but none reached PLAN or TODO:
+
+- **m5r-04 OQ1** — `assets/rb-kairos-gazebo.png` now illustrates nothing the
+  program contains, and its CREDITS provenance row plus reproduced BSD-3-Clause
+  notice exist to license it. TODO's two RB-KAIROS lines are the sim platform
+  migration and the VDA field values, neither of which is this.
+- **m5r-05 OQ3** — SF-02's old tag split it between sim behaviour and a review at
+  the safety gate; both collapsed into M5, so if the owner wants that review as a
+  distinct later checkpoint, no gate now carries it.
+- **m5r-06 OQ3** — `plc/forklift/SPEC.md` §12 open item 7 is stale: it records
+  that `plc/README.md` has no forklift row and no boundary sentence, and both now
+  exist. TODO line 132's "SPEC §12 item 7" is `demo-cell`'s, a different
+  document's item of the same number.
+- **m5r-07 OQ6** — `sim/README.md:50` lists `scenarios/EVIDENCE_NAV.md` as a
+  "dated capture of a successful headless run", and `sim/README.md:220` describes
+  its contents. I verified the file is absent (`ls sim/scenarios/`), and
+  `sim/scenarios/DEFERRED.md:28` says it will exist only once a run produces it.
+  A live document describing a file its own tree does not contain.
