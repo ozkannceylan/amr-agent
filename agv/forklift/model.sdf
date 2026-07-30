@@ -9,10 +9,15 @@
   any of that means belongs to the vehicle nodes, to the fleet manager or
   to the PLC, never here (invariants 5, 6 and 9).
 
-  It is also NOT a safety device. The scanner below is a process sensor
-  used for a comfort stop zone. The protective stop, the e stop chain and
-  safe torque off are onboard, hardwired and independent of anything in
-  this file or on any network (invariant 1).
+  It is also NOT a safety device. Two of the three scanners below are
+  named safety_scanner_*, and that names the DEVICE CLASS THEY MODEL, not
+  a property of this file: a rendered depth image is not a protective
+  field, has no integrity, no OSSD, no fault reaction and no diagnostic
+  coverage. The protective stop, the e stop chain and safe torque off are
+  onboard, hardwired and independent of anything in this file or on any
+  network (invariant 1). What the two safety scanners give this project is
+  the GEOMETRY of a real installation, measured in
+  EVIDENCE_SENSOR_COVERAGE.md, and nothing else.
 
   Original geometry, primitives only, no external mesh.
 
@@ -28,30 +33,33 @@
   the .x end and the counterweight sits over the drive wheel, opposite
   the load, which is what a counterweight is for.
 
-  TOP VIEW (metres)
+  TOP VIEW (metres). S1 and S2 are the two safety scanners, at
+  diagonally opposite chassis corners; N is the navigation lidar, on the
+  overhead guard, offset to .y of the mast centreline.
 
                             +y
                              ^
       fork tines             |            counterweight
      .......                 |               [====]
      |     |            [rear wheel L]           |
-     |     |    [mast]  .............            |
+     |     |    [mast]  .............           S1 (0.70, 0.45)
    . | . . | . .[||||]. |  chassis  | . [steer + drive wheel] . . > +x
-     |     |            |1.4 x 0.9  |            |
-     |     |            .............            |
-     .......            [rear wheel R]     [safety scanner]
-                                            180 deg forward
+     |     |            |1.4 x 0.9  |     N (0.55, .0.40) at z 1.80
+     |     |            ......... ...            |
+     .......            [rear wheel R]           |
+              S2 (.0.70, .0.45)
 
   SIDE VIEW (metres)
 
+                          N  z = 1.80
           overhead guard roof z = 1.71
           ._______________________.
           |                       |
      [||] |                       |          mast rails to z = 2.05
-     [||] |       chassis         |[ CW ]
+     [||] |       chassis         |[ CW ]    chassis underside z = 0.20
      [||] |_______________________|
     [carriage]                    |
-   ==========                     |
+   ==========               S1/S2 scan plane z = 0.15
    forks     (o)             (o)  (o)   wheels r = 0.12
    ================================================ floor z = 0
 
@@ -69,16 +77,29 @@
 
     /forklift/gz/joint_state   gz.msgs.Model    joint positions and rates
     /forklift/gz/odom          gz.msgs.Odometry pose and body twist
-    /forklift/gz/scan          gz.msgs.LaserScan  planar ranges  [m]
+
+    /forklift/gz/scan_nav           gz.msgs.LaserScan  360 deg, z = 1.80
+    /forklift/gz/scan_safety_front  gz.msgs.LaserScan  275 deg, z = 0.15
+    /forklift/gz/scan_safety_rear   gz.msgs.LaserScan  275 deg, z = 0.15
 
   The numeric values a node needs (wheel radius, steer limit, fork travel)
   are mirrored in config.yaml because SDF cannot be read as YAML. THIS
   FILE IS THE AUTHORITY for the geometry; config.yaml records the same
   numbers for the Python side and is diffed against the values below.
 
-  Sensor note: the scanner is a gz "gpu_lidar", so the world that spawns
-  this model MUST load gz-sim-sensors-system with a render engine. gz's
-  stock empty.sdf does not; sim/worlds/cell.sdf does. See README.md.
+  Sensor note: all three scanners are gz "gpu_lidar" sensors, because
+  gz sim has no CPU ray sensor. The world that spawns this model MUST
+  load gz-sim-sensors-system with a render engine. gz's stock empty.sdf
+  does not; sim/worlds/cell.sdf does. See README.md.
+
+  ONE SENSOR, ONE LINK, AND THE ROTATION LIVES IN THE LINK POSE. Each
+  scanner has its own link and its <gz_frame_id> names that link. Without
+  gz_frame_id the message carries a scoped model/link/sensor frame id and
+  a downstream TF lookup fails. The aperture rotation of the two safety
+  scanners is written into the LINK pose and the sensor pose is identity,
+  so the frame the message names is also the frame its angles are
+  measured in. Rotating the sensor inside its link would leave the two
+  disagreeing by the mount angle, with nothing to say so.
 -->
 <sdf version="1.8">
   <model name="Forklift">
@@ -159,37 +180,211 @@
         <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
       </visual>
 
-      <!-- Scanner housing, so the sensor has a visible place to sit. -->
-      <visual name="scanner_visual">
-        <pose>0.71 0 0.25 0 0 0</pose>
-        <geometry><box><size>0.10 0.16 0.14</size></box></geometry>
-        <material><ambient>0.10 0.10 0.12 1</ambient><diffuse>0.10 0.10 0.12 1</diffuse></material>
+    </link>
+
+    <!-- ======================== Sensing ========================= -->
+    <!--
+      Three planar scanners, each on its own link. Every pose below is
+      DERIVED from the geometry above and the derivation is measured in
+      EVIDENCE_SENSOR_COVERAGE.md, which is the document to read before
+      moving any of them. Summary of what forced each number:
+
+      SCAN PLANE z = 0.15 for the two safety scanners. The free window at
+      the fork end is bounded below by the lowered tine top (z = 0.10,
+      fork_left/right at z 0.075 with 0.05 height) and above by the
+      chassis underside (z = 0.20, chassis box centred 0.45 with 0.50
+      height). 0.15 is the midpoint: 50 mm of clearance each way.
+
+      CORNERS (0.70, 0.45) and (.0.70, .0.45). Those are the corners of
+      the chassis footprint itself, 1.40 x 0.90. The two are on one
+      diagonal so each scanner's 85 deg blind sector points across the
+      vehicle, where the other scanner covers. Which diagonal is free:
+      every element of this model that crosses z = 0.15 is mirror
+      symmetric about y = 0, so occlusion does not choose, and mirroring
+      both poses gives an equivalent layout.
+
+      APERTURE 275 deg, modelled on a SICK microScan3 Pro, with the blind
+      sector centred on the corner diagonal pointing into the body: link
+      yaw +45 deg at the front corner, .135 deg at the rear one.
+
+      NAVIGATION LIDAR z = 1.80, on the overhead guard. This one is
+      forced, not chosen. A 360 deg aperture is only worth its render
+      cost where the sensor clears the vehicle body, and the two best low
+      mountings measured lose 168.5 and 171.9 deg of it to that body,
+      against 29.0 deg here. Above the guard roof (top z = 1.71) and
+      below the mast crossmember (z = 1.95) the only permanent occluder
+      left is the mast. The .y lateral offset from the mast centreline
+      narrows that shadow and clears the fork axis. The height has a cost
+      of its own, written up in the evidence: at 1.80 m this sensor is
+      above every feature of sim/worlds/forklift_arena.sdf as it stands
+      except one pillar.
+
+      RAW RANGES ONLY, all three. No zone, no threshold and no stop
+      decision is taken in this file. scripts/obstacle_zone.py evaluates
+      a comfort zone over the NAVIGATION lidar, as a process function and
+      never as a safety function. The two safety scanners have no
+      consumer in this directory at all, by design: their modelled
+      counterpart's output is an OSSD pair on copper, not a topic.
+
+      BUDGET, and the rule that governs it. Rendering on the target
+      machine is llvmpipe software rasterisation
+      (sim/setup/WSL_ENVIRONMENT.md 4.7), so the vehicle's ray budget is
+      held down: 275 + 275 + 360 = 910 rays per 100 ms across three
+      sensors, against 181 on one sensor before. That cost has NOT been
+      measured, because Gazebo does not run in the container this layout
+      was computed in. No sample count and no update rate here goes up
+      until someone measures the real time factor it buys and writes the
+      figure down.
+    -->
+
+    <link name="safety_scanner_front_link">
+      <!-- Front (drive end) chassis corner, left side. Link yaw 45 deg
+           points the sensor x axis out along the corner diagonal, so the
+           blind sector is centred on 225 deg, into the vehicle. -->
+      <pose>0.70 0.45 0.15 0 0 0.7853982</pose>
+      <inertial>
+        <mass>1.4</mass>
+        <inertia>
+          <ixx>0.004</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.004</iyy><iyz>0</iyz><izz>0.004</izz>
+        </inertia>
+      </inertial>
+      <!-- Housing top face sits 20 mm BELOW the scan plane, so the
+           scanner cannot see its own mounting. Visual only, like the
+           overhead guard: it changes nothing the solver has to do. -->
+      <visual name="housing">
+        <pose>0 0 -0.075 0 0 0</pose>
+        <geometry><box><size>0.14 0.14 0.11</size></box></geometry>
+        <material><ambient>0.72 0.55 0.05 1</ambient><diffuse>0.72 0.55 0.05 1</diffuse></material>
       </visual>
-
-      <!--
-        Planar scanner looking along the driving direction. 181 samples
-        across 180 deg is exactly one sample per degree. The budget is
-        deliberate: rendering here is llvmpipe software rasterisation
-        (sim/setup/WSL_ENVIRONMENT.md 4.7), so sample count and update
-        rate are held down and must not be raised without re measuring.
-
-        RAW RANGES ONLY. No zone, no threshold and no stop decision is
-        taken in this file; scripts/obstacle_zone.py does that, and even
-        then only as a process function, never as a safety function.
-      -->
-      <sensor name="safety_scanner" type="gpu_lidar">
-        <pose>0.72 0 0.25 0 0 0</pose>
+      <sensor name="safety_scanner_front" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>safety_scanner_front_link</gz_frame_id>
         <always_on>1</always_on>
         <update_rate>10</update_rate>
-        <visualize>false</visualize>
-        <topic>/forklift/gz/scan</topic>
+        <visualize>true</visualize>
+        <topic>/forklift/gz/scan_safety_front</topic>
         <lidar>
           <scan>
             <horizontal>
-              <samples>181</samples>
+              <samples>275</samples>
               <resolution>1</resolution>
-              <min_angle>-1.5707963</min_angle>
-              <max_angle>1.5707963</max_angle>
+              <min_angle>-2.3998277</min_angle>
+              <max_angle>2.3998277</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0.0</min_angle>
+              <max_angle>0.0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.10</min>
+            <max>5.5</max>
+            <resolution>0.01</resolution>
+          </range>
+        </lidar>
+      </sensor>
+    </link>
+
+    <link name="safety_scanner_rear_link">
+      <!-- Load end chassis corner, right side: the diagonal opposite of
+           the front scanner. Link yaw .135 deg (= 225 deg). -->
+      <pose>-0.70 -0.45 0.15 0 0 -2.3561945</pose>
+      <inertial>
+        <mass>1.4</mass>
+        <inertia>
+          <ixx>0.004</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.004</iyy><iyz>0</iyz><izz>0.004</izz>
+        </inertia>
+      </inertial>
+      <visual name="housing">
+        <pose>0 0 -0.075 0 0 0</pose>
+        <geometry><box><size>0.14 0.14 0.11</size></box></geometry>
+        <material><ambient>0.72 0.55 0.05 1</ambient><diffuse>0.72 0.55 0.05 1</diffuse></material>
+      </visual>
+      <sensor name="safety_scanner_rear" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>safety_scanner_rear_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>10</update_rate>
+        <visualize>true</visualize>
+        <topic>/forklift/gz/scan_safety_rear</topic>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>275</samples>
+              <resolution>1</resolution>
+              <min_angle>-2.3998277</min_angle>
+              <max_angle>2.3998277</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0.0</min_angle>
+              <max_angle>0.0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.10</min>
+            <max>5.5</max>
+            <resolution>0.01</resolution>
+          </range>
+        </lidar>
+      </sensor>
+    </link>
+
+    <link name="nav_lidar_link">
+      <!-- On the overhead guard roof, offset to .y of the mast
+           centreline. Range max is 8.0 m and that number is COUPLED: it
+           is what obstacle_zone reports as the clear value, and
+           docs/interfaces/opcua-nodes.md 10.5 gives the consuming
+           plausibility window as 0.05 to 8.10 m. Raising it without
+           moving that window makes a clear horizon read at the PLC as a
+           transducer fault.
+
+           The mount stands over the front right overhead guard post
+           (0.55, .0.38), the stiffest point of the roof plate, displaced
+           20 mm further outboard: at y = .0.40 the straight astern ray
+           passes 0.04 m clear of the mast body, and .0.40 is also the
+           largest offset that keeps the 0.06 post inside the 1.24 x 0.88
+           roof plate. Measured in EVIDENCE_SENSOR_COVERAGE.md 7. -->
+      <pose>0.55 -0.40 1.80 0 0 0</pose>
+      <inertial>
+        <mass>1.0</mass>
+        <inertia>
+          <ixx>0.002</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.002</iyy><iyz>0</iyz><izz>0.002</izz>
+        </inertia>
+      </inertial>
+      <!-- Post and head both finish BELOW the scan plane, as the two
+           safety scanner housings do, so no sensor renders its own
+           mounting. Checked by scripts/sensor_coverage.py section 1. -->
+      <visual name="post">
+        <pose>0 0 -0.065 0 0 0</pose>
+        <geometry><box><size>0.06 0.06 0.11</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="head">
+        <pose>0 0 -0.040 0 0 0</pose>
+        <geometry><cylinder><radius>0.05</radius><length>0.04</length></cylinder></geometry>
+        <material><ambient>0.10 0.10 0.12 1</ambient><diffuse>0.10 0.10 0.12 1</diffuse></material>
+      </visual>
+      <sensor name="nav_lidar" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>nav_lidar_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>10</update_rate>
+        <visualize>true</visualize>
+        <topic>/forklift/gz/scan_nav</topic>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.1415927</min_angle>
+              <max_angle>3.1415927</max_angle>
             </horizontal>
             <vertical>
               <samples>1</samples>
@@ -401,6 +596,23 @@
     <joint name="mast_anchor" type="fixed">
       <parent>base_link</parent>
       <child>mast</child>
+    </joint>
+
+    <!-- Sensor mounts. Fixed, so each scanner's frame is a rigid offset
+         of base_link and the transform a consumer needs is a constant. -->
+    <joint name="safety_scanner_front_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>safety_scanner_front_link</child>
+    </joint>
+
+    <joint name="safety_scanner_rear_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>safety_scanner_rear_link</child>
+    </joint>
+
+    <joint name="nav_lidar_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>nav_lidar_link</child>
     </joint>
 
     <!-- Steer axis, vertical. Limit is the mechanical stop of the

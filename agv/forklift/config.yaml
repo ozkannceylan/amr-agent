@@ -55,6 +55,19 @@ rates:
   obstacle_publish_hz: 10.0
 
 obstacle:
+  # WHICH SCANNER THIS READS, AND WHAT CHANGED. `topics.scan` is fed by
+  # the NAVIGATION lidar, whose plane sits at z = 1.80 m. Until the m5-04
+  # sensor layout it was fed by a scanner at z = 0.25 m. The comfort zone
+  # therefore now looks at chest height rather than at shin height, and in
+  # sim/worlds/forklift_arena.sdf, whose walls stop at 0.60 m and whose
+  # tallest crate stops at 1.00 m, it will see almost nothing. That is a
+  # consequence of the layout, it is measured in EVIDENCE_SENSOR_COVERAGE
+  # section 10, and the replacement for this process function is an owner
+  # decision recorded in docs/reports/m5-04-sensor-layout.md. The two
+  # safety scanners at z = 0.15 m are NOT the answer to it by default:
+  # reusing a safety device's measurement channel as a process input is a
+  # decision, not a convenience.
+  #
   # Half width of the sector examined about straight ahead. 0.5236 rad is
   # 30 deg, so the sector is 60 deg wide and centred on the driving
   # direction.
@@ -108,11 +121,24 @@ topics:
   # reads as one namespace; the ROS name is the one vehicle software uses.
   gz_joint_state: /forklift/gz/joint_state
   gz_odom: /forklift/gz/odom
-  gz_scan: /forklift/gz/scan
+  gz_scan_nav: /forklift/gz/scan_nav
 
   joint_states: /forklift/joint_states
   odom: /forklift/odom
   scan: /forklift/scan
+
+  # ---- produced by gz, DELIBERATELY NOT BRIDGED INTO ROS ----
+  # The two safety scanners. These keys exist so this file and model.sdf
+  # declare the same set of gz topics, and so the contract table in
+  # README.md has one source. They are the only keys here that no script
+  # and no launch file reads, and that is the point: the device they model
+  # emits an OSSD pair on copper, and its simulation analogue reaches the
+  # F-program through the PLCSIM Advanced API (ADR 0011 decision 2), not
+  # through the ROS graph. Bridging them would put a safety device's
+  # measurement channel on the process network where any node could
+  # subscribe to it and quietly become a consumer of it.
+  gz_scan_safety_front: /forklift/gz/scan_safety_front
+  gz_scan_safety_rear: /forklift/gz/scan_safety_rear
 
   # ---- vehicle side command inputs, engineering units ----
   cmd_traction_speed: /forklift/cmd/traction_speed

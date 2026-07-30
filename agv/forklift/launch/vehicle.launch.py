@@ -17,7 +17,9 @@
 #   </plugin>
 #
 # exactly as sim/worlds/cell.sdf does. EVIDENCE_MODEL.md quotes the minimal
-# world used to verify the scanner.
+# world used to verify the scanner. The model now carries THREE gpu_lidars,
+# so a world without that plugin loses all three at once, and a world with
+# it pays for all three.
 #
 # NO CONTROL LOGIC LIVES HERE. The bridge is a type translator and this file
 # is process wiring. Sequencing, interlocks and stop decisions belong to the
@@ -77,8 +79,16 @@ _BRIDGE_ARGS = [
 
     '{}@sensor_msgs/msg/JointState[gz.msgs.Model'.format(_TOPICS['gz_joint_state']),
     '{}@nav_msgs/msg/Odometry[gz.msgs.Odometry'.format(_TOPICS['gz_odom']),
-    '{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'.format(_TOPICS['gz_scan']),
+    '{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'.format(_TOPICS['gz_scan_nav']),
 ]
+
+# The two safety scanners are NOT in the list above and that is deliberate.
+# They model a device whose real output is an OSSD pair on copper, and the
+# simulation analogue of that path is the PLCSIM Advanced API into the
+# F-program (ADR 0011 decision 2), not a ROS topic. Bridging them would put
+# a safety device's measurement channel on the process network, where any
+# node could subscribe and quietly become a consumer of it. Their gz topic
+# names are still a contract and still live in config.yaml.
 
 # Feedback keeps the gz name on the gz side and gets the vehicle-facing name
 # on the ROS side. Commands are NOT remapped: the same name on both sides is
@@ -86,7 +96,7 @@ _BRIDGE_ARGS = [
 _BRIDGE_REMAPS = [
     (_TOPICS['gz_joint_state'], _TOPICS['joint_states']),
     (_TOPICS['gz_odom'], _TOPICS['odom']),
-    (_TOPICS['gz_scan'], _TOPICS['scan']),
+    (_TOPICS['gz_scan_nav'], _TOPICS['scan']),
 ]
 
 

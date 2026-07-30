@@ -1,5 +1,19 @@
 # EVIDENCE — the forklift model and the two vehicle nodes (m4f-02)
 
+> **Status of this record, added 2026-07-30.** This is a dated capture and it
+> is left exactly as it was run. One thing it exercised no longer exists: the
+> single 180° scanner at `(0.72, 0, 0.25)` publishing `/forklift/gz/scan`. The
+> m5-04 sensor layout replaced it with two 275° safety scanners at z = 0.15 m
+> and one 360° navigation lidar at z = 1.80 m, and `/forklift/scan` is now fed
+> by the navigation lidar. So the topic names in §1 and §7, the 181-sample
+> scan of §4, and the 3.18 m wall range of §5 and §6.1 describe the sensor
+> that was there then and will not reproduce as written. **Everything else —
+> the joints, the controller tuning, the rates, the unit chain, the fault
+> matrix and the `config.yaml` diff — is untouched by that change**, and the
+> §7 check that `model.sdf` and `config.yaml` declare the same set of gz
+> topics still passes on the new set. Coverage of the new scanners is measured
+> in `EVIDENCE_SENSOR_COVERAGE.md`.
+
 Dated headless capture of `agv/forklift/`: that the model spawns, that each
 of its three driven joints responds to its own explicit gz command topic,
 that the two ROS nodes publish at their declared rates through a real
