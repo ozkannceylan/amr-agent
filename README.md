@@ -64,6 +64,47 @@ construction rather than by assertion.*
 
 ---
 
+## Run it
+
+The Linux side of the M4 commissioning stack comes up with one command:
+
+```bash
+./stack.sh start          # add --headless to run the arena without the Gazebo GUI
+./stack.sh status
+./stack.sh stop
+```
+
+`start` brings up the five Linux-side processes in the order
+[`sim/scenarios/forklift_commissioning.md`](sim/scenarios/forklift_commissioning.md)
+§1 specifies — bridge, arena bringup, the two vehicle nodes, then the
+commissioning HMI — waiting on each one's own readiness signal before the next,
+and writes one PID file per process under `/tmp/amr-agent-stack` (override with
+`AMR_STACK_RUN_DIR`). Starting a second time while the stack is up is refused
+rather than double-spawned. `stop` signals exactly those process groups —
+SIGTERM, a bounded wait, then SIGKILL — and then sweeps for the survivors
+`ros2 launch` leaves behind, matched by this run's `GZ_PARTITION`; there is no
+blanket `pkill`. `status` lists each component up or down.
+
+**The PLC side is not started here.** Put the CPU in RUN on PLCSIM Advanced from
+TIA Portal on the Windows machine first; it is row 1 of the same start order, and
+both OPC UA clients below it are clients of that server (invariant 4).
+
+**Which bridge configuration.** The script passes
+`bridge/config/bridge.yaml` — the live, committed configuration, used exactly as
+it stands — and points `hmi/hmi_server.py` at `hmi/config.yaml`. It never edits a
+config, and adds no threshold, no path and no data route of its own. Both are
+overridable for one run with `AMR_BRIDGE_CONFIG` and `AMR_HMI_CONFIG`. Note that
+`bridge/config/bridge.yaml` is committed carrying the cell signal group alone, so
+a gate run needs the forklift-group configuration named in
+`forklift_commissioning.md` §1; `start` says so and carries on rather than
+choosing a file for you.
+
+Prerequisites are ROS 2 Jazzy, Gazebo and the two virtual environments described
+in [`bridge/README.md`](bridge/README.md) and [`hmi/README.md`](hmi/README.md);
+`start` names any that are missing and stops before spawning anything.
+
+---
+
 ## Milestones
 
 M3 closed 2026-07-28, verified in
