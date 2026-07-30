@@ -29,3 +29,4 @@
 # today, but the rule costs one line and a misdetected binary is corruption.
 *.png -text
 *.gif -text
+*.mp4 -text
