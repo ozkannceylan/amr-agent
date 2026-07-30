@@ -174,12 +174,14 @@ Do not start a gate before the previous one is verified.
 | M0 | Repo skeleton, ADR 0001 recording the invariants | Structure exists, invariants committed |
 | M1 | Interface contracts | VDA 5050 subset and OPC UA node model documented and reviewed |
 | M2 | Safety requirements spec | Every safety function has a trigger, a reaction and an acceptance test |
-| M3 | Simulated vehicle | Gazebo AGV localizes and navigates a warehouse world with Nav2 |
-| M4 | VDA 5050 client | A stub publisher sends an order, the vehicle executes it and reports state |
-| M5 | Fleet manager | Real service assigns orders to two vehicles, traffic conflicts avoided |
-| M6 | PLC integration | PLC serves OPC UA, fleet manager subscribes, station handshake works end to end |
-| M7 | Safety layer | F-CPU implements the spec, e-stop chain and zone monitoring verified against acceptance tests |
-| M8 | Demonstration | Recorded end to end run, validation report, README with architecture narrative |
+| M3 | Fixed equipment I/O loop | Gazebo-to-PLC signal loop demonstrated both ways, latency measured, signal-loss behaviour tested |
+| M4 | Forklift commissioning cell | Teleoperated forklift driven from the HMI with the PLC forming every setpoint; recorded commissioning showcase |
+| M5 | Sensored autonomous forklift | Safety laser scanner into the F-blocks, lidar SLAM and Nav2 autonomy on the forklift, HMI v2 with mode selection; recorded safety + autonomy showcase |
+| M6 | VDA 5050 fleet at scale | Four forklifts serve five loading and five unloading stations over VDA 5050, PLC-owned station handshake end to end; recorded fleet showcase |
+| M7 | LLM operations layer | An LLM supervises operations safely (no actuator writes, no interlock bypass, unreachable-safe); closes with the recorded end-to-end demonstration |
+
+Rows are summaries. The full, verifiable criteria live in docs/roadmap.md,
+which is the live gate order (ADR 0010).
 
 Current gate is tracked in docs/roadmap.md. Update it as part of closing a gate, never in advance.
 
