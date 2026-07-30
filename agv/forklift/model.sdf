@@ -79,8 +79,26 @@
     /forklift/gz/odom          gz.msgs.Odometry pose and body twist
 
     /forklift/gz/scan_nav           gz.msgs.LaserScan  360 deg, z = 1.80
-    /forklift/gz/scan_safety_front  gz.msgs.LaserScan  275 deg, z = 0.15
-    /forklift/gz/scan_safety_rear   gz.msgs.LaserScan  275 deg, z = 0.15
+
+    /forklift/gz/safety_scanner_front/measurement   275 deg, z = 0.15
+    /forklift/gz/safety_scanner_rear/measurement    275 deg, z = 0.15
+
+  TWO CHANNELS PER SAFETY SCANNER, AND ONLY ONE OF THEM IS A TOPIC. The
+  device class these two sensors model emits a safe output (OSSD pair, or
+  safe bits over PROFIsafe) AND a separate NON-SAFE measurement channel
+  that the datasheet provides for HMI, diagnostics and process use while
+  stating it must not be used for safety-related tasks. The gpu_lidar
+  scan below IS the measurement channel; the safe channel is DERIVED from
+  it by field evaluation, which is what the real device does internally,
+  and that derivation is not in this file. Hence the rule a later reader
+  can check mechanically:
+
+    every channel a subscriber can reach is a MEASUREMENT channel.
+    The safe channel has no topic, on gz transport or on ROS, ever.
+
+  The measurement channel is non-safe and must never implement a safety
+  function. The safe channel reaches the F-program through the PLCSIM
+  Advanced API (ADR 0011 decision 2), never through a topic.
 
   The numeric values a node needs (wheel radius, steer limit, fork travel)
   are mirrored in config.yaml because SDF cannot be read as YAML. THIS
@@ -263,7 +281,9 @@
         <always_on>1</always_on>
         <update_rate>10</update_rate>
         <visualize>true</visualize>
-        <topic>/forklift/gz/scan_safety_front</topic>
+        <!-- NON-SAFE MEASUREMENT CHANNEL of this device. The safe
+             channel is not here and is not a topic. -->
+        <topic>/forklift/gz/safety_scanner_front/measurement</topic>
         <lidar>
           <scan>
             <horizontal>
@@ -310,7 +330,9 @@
         <always_on>1</always_on>
         <update_rate>10</update_rate>
         <visualize>true</visualize>
-        <topic>/forklift/gz/scan_safety_rear</topic>
+        <!-- NON-SAFE MEASUREMENT CHANNEL of this device. The safe
+             channel is not here and is not a topic. -->
+        <topic>/forklift/gz/safety_scanner_rear/measurement</topic>
         <lidar>
           <scan>
             <horizontal>

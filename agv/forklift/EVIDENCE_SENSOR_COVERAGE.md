@@ -103,6 +103,15 @@ horizon read at the PLC as a transducer fault. The arena is 24 × 16 m, so a
 longer range would suit it better; that is a cross-layer change and it is
 raised in the report, not taken here.
 
+> **Note added 2026-07-30 (brief m5-06): the mechanism of that coupling has
+> changed, the conclusion has not.** `obstacle_zone.py` no longer reads the
+> navigation lidar, so the value it reports on a clear horizon is now the
+> **front safety scanner's** `range_max` of 5.50 m — inside §10.5's
+> 0.05–8.10 m window with room to spare. The navigation lidar's 8.00 m is
+> therefore no longer pinned by *this* consumer. It stays 8.00 m here because
+> nothing in this brief re-derived it, and whether it should grow is still the
+> cross-layer question raised in the m5-04 report.
+
 ## 2. Method, and the one modelling decision inside it
 
 `scripts/sensor_coverage.py` reads `model.sdf`, resolves each link and geometry
@@ -463,6 +472,24 @@ mast body and the left rear wheel have taken its place. **The residual is
 structural, and 45° is at the optimum.**
 
 ## 10. Consequences for consumers, stated rather than left to be found
+
+> **Status note added 2026-07-30 (brief m5-06).** Items **a**, **c** and
+> **d** below describe the state this document was written in and are
+> **superseded by an owner ruling of the same date**; the measured
+> figures in every other section are untouched by it. The ruling: a
+> safety scanner of the class modelled emits a safe channel **and** a
+> separate non-safe **measurement** channel, the `gpu_lidar` scan is the
+> measurement channel, and the M4 process obstacle stop — a process
+> function — reads the **front** scanner's measurement channel. So:
+> **(a)** `obstacle_zone` no longer reads `/forklift/scan` at all, and
+> the 1.80 m regression this item names is closed rather than open;
+> **(c)** the front measurement channel **is** bridged into ROS, the rear
+> one is not, and neither device's **safe** channel is a topic on any
+> transport; **(d)** TF for all three frames now exists, published by
+> `scripts/sensor_tf.py`. The runs behind all three are
+> `EVIDENCE_SENSOR_TF.md`. Item **b**, the arena's emptiness at the
+> navigation plane, is unaffected and still stands as a request to
+> `sim/`.
 
 **a. `/forklift/scan` is now the navigation lidar, and its plane moved from
 0.25 m to 1.80 m.** The old 180° scanner was the only source of that topic and

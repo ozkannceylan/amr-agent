@@ -55,23 +55,44 @@ rates:
   obstacle_publish_hz: 10.0
 
 obstacle:
-  # WHICH SCANNER THIS READS, AND WHAT CHANGED. `topics.scan` is fed by
-  # the NAVIGATION lidar, whose plane sits at z = 1.80 m. Until the m5-04
-  # sensor layout it was fed by a scanner at z = 0.25 m. The comfort zone
-  # therefore now looks at chest height rather than at shin height, and in
-  # sim/worlds/forklift_arena.sdf, whose walls stop at 0.60 m and whose
-  # tallest crate stops at 1.00 m, it will see almost nothing. That is a
-  # consequence of the layout, it is measured in EVIDENCE_SENSOR_COVERAGE
-  # section 10, and the replacement for this process function is an owner
-  # decision recorded in docs/reports/m5-04-sensor-layout.md. The two
-  # safety scanners at z = 0.15 m are NOT the answer to it by default:
-  # reusing a safety device's measurement channel as a process input is a
-  # decision, not a convenience.
+  # WHICH CHANNEL THIS READS, AND WHY IT IS THAT ONE. obstacle_zone.py
+  # subscribes to `topics.safety_scanner_front_measurement`: the NON-SAFE
+  # MEASUREMENT CHANNEL of the front safety scanner, at z = 0.15 m. It is
+  # a process comfort zone reading a process output, and it is the low
+  # plane M4 demonstrated, 0.10 m below the 0.25 m scanner it replaces.
   #
-  # Half width of the sector examined about straight ahead. 0.5236 rad is
-  # 30 deg, so the sector is 60 deg wide and centred on the driving
-  # direction.
+  # It is NOT fed by the navigation lidar. That sensor's plane is z =
+  # 1.80 m, where a pallet, a crate and the arena's 0.60 m walls are all
+  # invisible, so a comfort zone computed there would read clear in front
+  # of an obstacle the vehicle is about to hit. Owner ruling of
+  # 2026-07-30, docs/briefs/m5-06-measurement-channel.md.
+  #
+  # It is NOT the safe channel either, and no value in this file is. The
+  # device class modelled emits a safe output AND a separate non-safe
+  # measurement channel; this node reads the second one. The measurement
+  # channel must never implement a safety function.
+  #
+  # Half width of the sector examined about the driving direction.
+  # 0.5236 rad is 30 deg, so the sector is 60 deg wide.
   sector_half_angle_rad: 0.5236
+
+  # Centre of that sector, EXPRESSED IN THE ANGLE COORDINATE OF THE SCAN
+  # THE NODE READS, which is the scan's own frame. It is not a free
+  # parameter: it is minus the mount yaw of the sensor feeding the node,
+  # so that the sector stays centred on straight ahead in the VEHICLE
+  # frame whatever corner the sensor sits on.
+  #
+  #   front safety scanner mount yaw   = +0.7853982 rad (+45 deg)
+  #   sector centre in the scan frame  = -0.7853982 rad (-45 deg)
+  #   sector in the scan frame         = -75 deg .. -15 deg
+  #   sector in the vehicle frame      = -30 deg .. +30 deg, ahead
+  #
+  # Zero was correct only while the scan came from a sensor mounted at
+  # yaw 0. Leaving it at zero here would have watched the diagonal
+  # 15..75 deg off the bow and called it "straight ahead".
+  # scripts/check_sensor_frames.py checks this value against model.sdf
+  # rather than trusting the arithmetic above.
+  sector_centre_rad: -0.7853982
 
   # A valid sample at or below this range sets in_stop_zone. This is a
   # process threshold and it is not a protective field.
@@ -105,6 +126,24 @@ spawn:
   z_m: 0.05
   yaw_rad: 0.0
 
+frames:
+  # TF frame names. MIRRORS, like the `model:` block above: model.sdf is
+  # the authority for both the names and the poses, and
+  # scripts/sensor_tf.py reads them from it rather than from here.
+  # scripts/check_sensor_frames.py diffs this block against model.sdf, so
+  # a disagreement is a failing check and not a silent drift.
+  #
+  # The parent carries the model name and the children do not, which looks
+  # inconsistent and is not ours to fix: `base` is what model.sdf's
+  # OdometryPublisher already puts in <robot_base_frame>, and each child is
+  # what that sensor's <gz_frame_id> already puts in its scan header. Those
+  # are the strings the messages actually carry, and a TF tree that renames
+  # either of them stops resolving.
+  base: forklift/base_link
+  safety_scanner_front: safety_scanner_front_link
+  safety_scanner_rear: safety_scanner_rear_link
+  nav_lidar: nav_lidar_link
+
 topics:
   # Simulation clock, bridged one to one.
   clock: /clock
@@ -125,20 +164,47 @@ topics:
 
   joint_states: /forklift/joint_states
   odom: /forklift/odom
+
+  # The NAVIGATION lidar on the ROS side. Its consumers are SLAM, AMCL and
+  # the Nav2 costmaps, and it is the ONLY input any of them may have. No
+  # safety scanner channel feeds a navigation consumer (ADR 0011). The
+  # generic name is kept because it is what a SLAM node expects to be
+  # remapped from, and because it names the vehicle's map-building scan.
   scan: /forklift/scan
 
-  # ---- produced by gz, DELIBERATELY NOT BRIDGED INTO ROS ----
-  # The two safety scanners. These keys exist so this file and model.sdf
-  # declare the same set of gz topics, and so the contract table in
-  # README.md has one source. They are the only keys here that no script
-  # and no launch file reads, and that is the point: the device they model
-  # emits an OSSD pair on copper, and its simulation analogue reaches the
-  # F-program through the PLCSIM Advanced API (ADR 0011 decision 2), not
-  # through the ROS graph. Bridging them would put a safety device's
-  # measurement channel on the process network where any node could
-  # subscribe to it and quietly become a consumer of it.
-  gz_scan_safety_front: /forklift/gz/scan_safety_front
-  gz_scan_safety_rear: /forklift/gz/scan_safety_rear
+  # ---- the two channels of each safety scanner ----
+  # The device class modelled emits TWO outputs: a safe one and a separate
+  # NON-SAFE MEASUREMENT channel that its datasheet provides for HMI,
+  # diagnostics and process use while stating it must not be used for
+  # safety-related tasks. In this simulation the gpu_lidar scan IS the
+  # measurement channel, and the safe (OSSD-equivalent) verdict is DERIVED
+  # from it by field evaluation, which is what the real device does
+  # internally. The derivation is m5-12's and appears nowhere here.
+  #
+  # THE RULE, CHECKABLE BY EYE: every channel a subscriber can reach is a
+  # measurement channel. The safe channel has no topic on either
+  # transport, ever. It reaches the F-program through the PLCSIM Advanced
+  # API (ADR 0011 decision 2), which is this project's analogue of the
+  # copper an OSSD pair runs on.
+  #
+  # THE MEASUREMENT CHANNEL IS NON-SAFE AND MUST NEVER IMPLEMENT A SAFETY
+  # FUNCTION. A rendered depth image has no integrity, no OSSD, no fault
+  # reaction and no diagnostic coverage, and it crosses a bridge and a
+  # network to get here (invariant 1).
+  gz_safety_scanner_front_measurement: /forklift/gz/safety_scanner_front/measurement
+  gz_safety_scanner_rear_measurement: /forklift/gz/safety_scanner_rear/measurement
+
+  # Bridged into ROS, because a process consumer exists for it:
+  # obstacle_zone.py, the M4 comfort stop, whose plane this is.
+  safety_scanner_front_measurement: /forklift/safety_scanner_front/measurement
+
+  # The REAR measurement channel has no ROS name, because no process
+  # consumer exists for it. A measurement channel is bridged when, and
+  # only when, something on the process side consumes it: an unconsumed
+  # channel on the network is an invitation to a drive-by consumer, and
+  # the one prohibition that matters here is a scanner feeding a
+  # NAVIGATION consumer. When a consumer appears, the name it takes is
+  # /forklift/safety_scanner_rear/measurement, by the same pattern.
 
   # ---- vehicle side command inputs, engineering units ----
   cmd_traction_speed: /forklift/cmd/traction_speed

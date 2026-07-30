@@ -28,7 +28,9 @@ project can command in engineering units.
   this layer: a rendered depth image has no integrity, no OSSD, no fault
   reaction and no diagnostic coverage. What they contribute is the
   geometry of a real installation, measured in
-  `EVIDENCE_SENSOR_COVERAGE.md`.
+  `EVIDENCE_SENSOR_COVERAGE.md`. **Their safe channel is not here at
+  all** — it is not a topic on either transport, and the section below
+  says where it does live.
 - **Hard real-time control loops in Python.** The joint controllers close
   their loops inside the physics engine. The Python nodes here run on
   timers and a late one degrades smoothness, never integrity
@@ -41,11 +43,15 @@ project can command in engineering units.
 | `model.sdf` | The vehicle. Geometry, joints, gz systems, three scanners. A plain `<model>`, so any world can spawn it. |
 | `config.yaml` | Every named constant the nodes use. No behavioural constant is written inline in a script. |
 | `scripts/forklift_io.py` | Engineering units in, raw joint commands out; joint state and odometry in, two scalars out. |
-| `scripts/obstacle_zone.py` | Forward stop-zone evaluator over `/forklift/scan`, which is the navigation lidar. |
+| `scripts/obstacle_zone.py` | Forward stop-zone evaluator over the front safety scanner's **non-safe measurement channel**. |
+| `scripts/sensor_tf.py` | Publishes `/tf_static` for the three sensor frames, reading every number out of `model.sdf`. |
 | `scripts/sensor_coverage.py` | Reads `model.sdf` and measures what the three scanners can see. No simulator, no dependency. |
-| `launch/vehicle.launch.py` | Server, spawn, bridge and both nodes, headless by default. |
+| `scripts/check_sensor_frames.py` | Checks that `model.sdf`, `config.yaml`, this README and `/tf_static` agree. Static by default, `--live` against a running graph. |
+| `scripts/obstacle_matrix.py` | Drives `obstacle_zone.py` through its contracted cases, including the ones a rendered scanner cannot produce. |
+| `launch/vehicle.launch.py` | Server, spawn, bridge, sensor TF and both nodes, headless by default. |
 | `EVIDENCE_MODEL.md` | The dated headless run that verified the model and the two nodes. |
 | `EVIDENCE_SENSOR_COVERAGE.md` | The computed coverage of the three scanners, with every residual sector named. |
+| `EVIDENCE_SENSOR_TF.md` | The dated runs behind the sensor frames and the measurement-channel consumer. |
 
 There is deliberately **no world file here.** Worlds belong to `sim/`.
 This directory owns a vehicle.
@@ -67,16 +73,51 @@ name.
 | `/forklift/gz/joint_state` | `gz.msgs.Model` | out of the model | position and rate of the three driven joints |
 | `/forklift/gz/odom` | `gz.msgs.Odometry` | out of the model | ground-truth pose and body twist |
 | `/forklift/gz/scan_nav` | `gz.msgs.LaserScan` | out of the model | navigation lidar: 360 ranges over 360°, 10 Hz, 0.10–8.00 m, plane z = 1.80 m, frame `nav_lidar_link` |
-| `/forklift/gz/scan_safety_front` | `gz.msgs.LaserScan` | out of the model | front safety scanner: 275 ranges over 275°, 10 Hz, 0.10–5.50 m, plane z = 0.15 m, frame `safety_scanner_front_link`. **Not bridged into ROS** |
-| `/forklift/gz/scan_safety_rear` | `gz.msgs.LaserScan` | out of the model | rear safety scanner: same, frame `safety_scanner_rear_link`. **Not bridged into ROS** |
+| `/forklift/gz/safety_scanner_front/measurement` | `gz.msgs.LaserScan` | out of the model | front safety scanner, **non-safe measurement channel**: 275 ranges over 275°, 10 Hz, 0.10–5.50 m, plane z = 0.15 m, frame `safety_scanner_front_link`. Bridged into ROS |
+| `/forklift/gz/safety_scanner_rear/measurement` | `gz.msgs.LaserScan` | out of the model | rear safety scanner, **non-safe measurement channel**: same, frame `safety_scanner_rear_link`. **Not bridged into ROS** — no process consumer exists for it |
+
+### Two channels per safety scanner, and only one of them is a topic
+
+The device class modelled — a 275° safety laser scanner of the
+microScan3 class (ADR 0011, fact F8) — emits **two outputs from one
+device**:
+
+| Channel | What it is | Where it lives here | Who may consume it |
+|---|---|---|---|
+| **safe channel** | the OSSD pair, or safe bits over PROFIsafe: the protective-field verdict | **nowhere in this directory.** Derived by field evaluation (m5-12) and delivered to the F-program through the PLCSIM Advanced API, ADR 0011 decision 2 — this project's analogue of the copper an OSSD pair runs on | the F-program, and nothing else |
+| **measurement channel** | the raw distance profile the datasheet provides for HMI, diagnostics and process use, **while stating it must not be used for safety-related tasks** | the `gpu_lidar` scan, on the gz and ROS topics named `.../measurement` above | process functions. Today: `obstacle_zone.py` |
+
+**The measurement channel is non-safe and must never implement a safety
+function.** Nothing computed from it is a protective stop, a safe speed,
+an enable or a reset, whatever the device it came from is called.
+
+The naming rule, so a later reader cannot confuse the two: **every
+channel a subscriber can reach is a measurement channel, and says
+`measurement` in its name. The safe channel has no topic, on either
+transport, ever.** `scripts/check_sensor_frames.py` section 4 checks
+both halves of that sentence rather than leaving it as a promise.
+
+**Why a process function reading a safety device is not a layer
+violation.** The process function consumes the device's *process* output;
+the safety function consumes the device's *safe* output. They are two
+outputs of one device and they travel two paths that never meet. What
+ADR 0011 forbids is a safety scanner feeding a **navigation** consumer —
+SLAM, AMCL, a costmap — and that prohibition is unchanged: **the
+navigation lidar is the only SLAM input**, on `/forklift/scan`, and no
+scanner channel reaches a costmap.
 
 ### The three scanners, and which one feeds what
 
 | Sensor | Link and `frame_id` | Pose in `base_link` (x, y, z, yaw) | Aperture, blind sector | Consumer |
 |---|---|---|---|---|
-| `nav_lidar` | `nav_lidar_link` | 0.550, −0.400, 1.800, 0° | 360° | `/forklift/scan`: `obstacle_zone`, and SLAM when it exists |
-| `safety_scanner_front` | `safety_scanner_front_link` | 0.700, 0.450, 0.150, +45° | 275°, blind 182.5–267.5° | the safety path only — see below |
-| `safety_scanner_rear` | `safety_scanner_rear_link` | −0.700, −0.450, 0.150, −135° | 275°, blind 2.5–87.5° | the safety path only — see below |
+| `nav_lidar` | `nav_lidar_link` | 0.550, −0.400, 1.800, 0° | 360° | `/forklift/scan`: **SLAM, AMCL and the Nav2 costmaps, and nothing else feeds them** |
+| `safety_scanner_front` | `safety_scanner_front_link` | 0.700, 0.450, 0.150, +45° | 275°, blind 182.5–267.5° | measurement channel → `obstacle_zone` (process). Safe channel → the F-program, off-network |
+| `safety_scanner_rear` | `safety_scanner_rear_link` | −0.700, −0.450, 0.150, −135° | 275°, blind 2.5–87.5° | measurement channel → nobody yet, so it is not bridged. Safe channel → the F-program, off-network |
+
+The pose column is **parsed**, not decorative: `check_sensor_frames.py`
+section 2 reads these three rows out of this file and compares them to
+`model.sdf` sample by sample, so a hand edit that disagrees with the model
+fails a check instead of ageing quietly.
 
 Coverage is **measured**, not asserted: `EVIDENCE_SENSOR_COVERAGE.md` computes
 it from this model's own geometry and names every residual sector with its
@@ -90,9 +131,11 @@ lidar's mast shadow is 29.0°, 2.50 m wide at 5 m. **No sector is claimed to be
 covered by construction** — read section 11 of the evidence before designing
 anything on top of these sensors.
 
-**Why the two safety scanners feed nothing here.** They are declared, they
-publish on gz transport, and `vehicle.launch.py` deliberately does not bridge
-them into the ROS graph. Four reasons, recorded once:
+**Why neither safety scanner feeds SLAM, and why that is a different
+question from the one above.** The front scanner's measurement channel is
+bridged, for a *process* consumer. It still feeds no navigation consumer,
+and would not even if the architecture allowed it. Four reasons, recorded
+once:
 
 - **Height.** At 0.15 m they see a different world from the navigation
   lidar — pallet feet, tine tips, floor returns — and that is what a
@@ -102,12 +145,18 @@ them into the ROS graph. Four reasons, recorded once:
   two disagreeing ones.
 - **The load.** A pallet occludes 39.9° of that plane in the load direction,
   which is a measured fact about the field and a moving hole in a map.
-- **Architecture, and this is the one that decides it.** Their measurement
-  channel is a safety device's. The device they model emits an OSSD pair on
-  copper; the simulation analogue of that path is the PLCSIM Advanced API into
-  the F-program (ADR 0011 decision 2), not a topic. Bridging them would place a
-  safety device's channel on the process network where any node could subscribe
-  and quietly become a consumer of it.
+- **Architecture, and this is the one that decides it.** ADR 0011 rules
+  that a safety scanner does not feed a navigation consumer. That is the
+  prohibition, and bridging a *process* channel for a *process* function
+  does not touch it.
+
+**Why the rear channel is not bridged.** Nothing consumes it. A
+measurement channel goes onto the process network when something on that
+network consumes it, and not before: an unconsumed channel is an
+invitation to a drive-by subscriber, and the subscriber that must never
+appear is a navigation one. When a consumer for it exists, its ROS name
+is `/forklift/safety_scanner_rear/measurement`, by the same pattern as
+the front one.
 
 ### ROS 2, after `launch/vehicle.launch.py`
 
@@ -118,9 +167,10 @@ them into the ROS graph. Four reasons, recorded once:
 | `/forklift/cmd/fork_speed` | `std_msgs/Float64` | on demand | a consumer | carriage rate request [m/s] |
 | `/forklift/fork_height` | `std_msgs/Float64` | 10 Hz | `forklift_io` | carriage travel above fully lowered [m] |
 | `/forklift/linear_speed` | `std_msgs/Float64` | 10 Hz | `forklift_io` | forward ground speed [m/s] |
-| `/forklift/obstacle/in_stop_zone` | `std_msgs/Bool` | 10 Hz | `obstacle_zone` | Something inside the forward stop zone. **`TRUE` is the non-permissive state.** The evaluator sorts every sample in the ±30° sector into three classes: **clear** — `+inf`, or a finite range at or beyond `range_max`, which is the sensor reporting no echo inside its window and counts as a valid measurement at `range_max`; **distance** — a finite range inside `[range_min, range_max)`; **invalid** — `NaN`, `-inf`, or a range below `range_min`. `TRUE` when a distance is at or under 1.20 m, and `TRUE` as a fail-safe when there is no scan, when the newest one is older than 0.50 s, when the scan is structurally unusable, or when the sector holds no sample in **either** valid class. A dead or garbage sensor is all of those; an open horizon is none of them. |
-| `/forklift/obstacle/min_distance` | `std_msgs/Float64` | 10 Hz | `obstacle_zone` | Nearest valid range in the sector [m]: the smallest **distance**-class sample; the scan's own `range_max` when the sector is entirely **clear** beyond range; and `0.0`, the `unknown_distance_m` sentinel from `config.yaml`, in every fail-safe case above. The clear value is the scan's number and not this node's, so it follows whatever scanner `model.sdf` declares — and the consumer's plausibility window must contain it (`docs/interfaces/opcua-nodes.md` §10.5 gives `0.05 … 8.10` m against the navigation lidar's `0.10 … 8.00` m). That coupling is why the navigation lidar's range was left at 8.00 m even though the arena is 24 × 16 m: raising it past 8.10 m would make a clear horizon read at the PLC as a transducer fault. |
-| `/forklift/scan` | `sensor_msgs/LaserScan` | 10 Hz | bridge | **The navigation lidar**, renamed from `/forklift/gz/scan_nav`: 360 samples over 360°, plane z = 1.80 m, frame `nav_lidar_link`. It replaced a 181-sample 180° scanner at z = 0.25 m, so **the plane this topic reports moved up 1.55 m** — a consumer that assumed shin height is now looking at chest height, and in `sim/worlds/forklift_arena.sdf`, whose walls stop at 0.60 m, it will mostly report a clear horizon (`EVIDENCE_SENSOR_COVERAGE.md` §10). **Not gap-free.** The old scanner dropped the single sample at exactly ±45°, in the raw gz message rather than in the bridge, following vehicle orientation rather than a fixed index (m4f-03 evidence). **That was measured on the sensor this one replaced and has not been re-measured here**, so it is a warning and not a specification. The consumer rule is unchanged and stands on its own: do not assume every sample is finite, and do not read a non-finite one as a missing one — an `inf` is the sensor reporting **no echo inside its window**, which is a measurement of a clear path to `range_max`, not an absence of data. `obstacle_zone.py` classifies each sample on exactly that basis and never condemns a whole scan for containing one bad sample. |
+| `/forklift/safety_scanner_front/measurement` | `sensor_msgs/LaserScan` | 10 Hz | bridge | **The front safety scanner's non-safe measurement channel**, renamed from `/forklift/gz/safety_scanner_front/measurement`: 275 samples over 275°, plane z = 0.15 m, range 0.10–5.50 m, frame `safety_scanner_front_link`. Read by `obstacle_zone`. **Not a safety signal**, whatever the device is called, and forbidden to SLAM, AMCL and every costmap. |
+| `/forklift/obstacle/in_stop_zone` | `std_msgs/Bool` | 10 Hz | `obstacle_zone` | Something inside the forward stop zone, computed from the **front safety scanner's measurement channel** at z = 0.15 m — the low plane the M4 showcase demonstrated, not the 1.80 m navigation plane. **`TRUE` is the non-permissive state.** The ±30° sector is centred on the vehicle's driving direction, which is `obstacle.sector_centre_rad` = −45° in this sensor's own angle coordinate because the sensor is mounted on a corner at +45°. The evaluator sorts every sample in that sector into three classes: **clear** — `+inf`, or a finite range at or beyond `range_max`, which is the sensor reporting no echo inside its window and counts as a valid measurement at `range_max`; **distance** — a finite range inside `[range_min, range_max)`; **invalid** — `NaN`, `-inf`, or a range below `range_min`. `TRUE` when a distance is at or under 1.20 m, and `TRUE` as a fail-safe when there is no scan, when the newest one is older than 0.50 s, when the scan is structurally unusable, or when the sector holds no sample in **either** valid class. A dead or garbage sensor is all of those; an open horizon is none of them. |
+| `/forklift/obstacle/min_distance` | `std_msgs/Float64` | 10 Hz | `obstacle_zone` | Nearest valid range in the sector [m]: the smallest **distance**-class sample; the scan's own `range_max` when the sector is entirely **clear** beyond range; and `0.0`, the `unknown_distance_m` sentinel from `config.yaml`, in every fail-safe case above. The clear value is the scan's number and not this node's, so it follows whatever scanner `model.sdf` declares — and the consumer's plausibility window must contain it. Since this node reads the front safety scanner, that value is now **5.50 m**, comfortably inside the `0.05 … 8.10` m window of `docs/interfaces/opcua-nodes.md` §10.5, so **no interface change is owed by this consumer**. The window still bounds the *navigation* lidar's 8.00 m range, which is a separate open item. |
+| `/forklift/scan` | `sensor_msgs/LaserScan` | 10 Hz | bridge | **The navigation lidar**, renamed from `/forklift/gz/scan_nav`: 360 samples over 360°, plane z = 1.80 m, frame `nav_lidar_link`. **This is the vehicle's only SLAM, AMCL and costmap input**, and it is no longer read by `obstacle_zone`: it replaced a 181-sample 180° scanner at z = 0.25 m, so **the plane this topic reports moved up 1.55 m**, and in `sim/worlds/forklift_arena.sdf`, whose walls stop at 0.60 m and whose tallest crate stops at 1.00 m, it reports a clear horizon in front of an obstacle a process stop must see (`EVIDENCE_SENSOR_TF.md` §4 measures exactly that: 60 of 60 forward samples clear at 1.80 m with a crate 0.85 m ahead at 0.15 m). **Not gap-free.** The old scanner dropped the single sample at exactly ±45°, in the raw gz message rather than in the bridge, following vehicle orientation rather than a fixed index (m4f-03 evidence). **That was measured on the sensor this one replaced and has not been re-measured here**, so it is a warning and not a specification. The consumer rule is unchanged and stands on its own: do not assume every sample is finite, and do not read a non-finite one as a missing one — an `inf` is the sensor reporting **no echo inside its window**, which is a measurement of a clear path to `range_max`, not an absence of data. `obstacle_zone.py` classifies each sample on exactly that basis and never condemns a whole scan for containing one bad sample. |
 | `/forklift/odom` | `nav_msgs/Odometry` | 20 Hz | bridge | odometry, renamed from the gz topic |
 | `/forklift/joint_states` | `sensor_msgs/JointState` | physics rate | bridge | joint state, renamed from the gz topic |
 | `/forklift/gz/*_cmd` | `std_msgs/Float64` | on change | `forklift_io` | the raw joint commands, same name both sides |
@@ -140,9 +190,51 @@ because a consumer should not have to know it came from a simulator.
 
 The three sensor mounts — `safety_scanner_front_mount`,
 `safety_scanner_rear_mount`, `nav_lidar_mount` — are `fixed` joints and appear
-in no joint state. **Nothing in this directory publishes a TF from
-`forklift/base_link` to the three sensor frames yet.** SLAM and Nav2 will need
-it; the offsets are constants and are in the sensor table above.
+in no joint state. Their transforms are published instead, as static TF.
+
+### TF
+
+`scripts/sensor_tf.py` publishes one latched `/tf_static` message
+carrying three transforms:
+
+| Parent | Child | Source of the numbers |
+|---|---|---|
+| `forklift/base_link` | `safety_scanner_front_link` | `model.sdf`, read at start-up |
+| `forklift/base_link` | `safety_scanner_rear_link` | `model.sdf`, read at start-up |
+| `forklift/base_link` | `nav_lidar_link` | `model.sdf`, read at start-up |
+
+Three properties are worth knowing before changing any of it:
+
+- **No number is typed anywhere but `model.sdf`.** The node parses the
+  model at start-up, so moving a sensor moves its transform on the next
+  run. `config.yaml`'s `frames:` block is a mirror for the Python side,
+  the same status the `model:` block has, and `check_sensor_frames.py`
+  diffs it against the model.
+- **The child frame is the frame the scan itself names.** Each child is
+  the sensor's `<gz_frame_id>`, which is what lands in
+  `header.frame_id`, so a TF lookup for a scan's own frame resolves. The
+  parent is `model.sdf`'s own `<robot_base_frame>`, so the sensor frames
+  land on the tree the odometry already declares rather than beside it.
+  The parent carries the model name and the children do not; that
+  asymmetry is Gazebo's, and renaming either side to tidy it stops the
+  lookups working.
+- **The node refuses rather than guesses.** If a sensor link is not a
+  fixed child of `base_link`, if `<gz_frame_id>` names a different link,
+  if the `<sensor>` pose is not identity, or if `base_link` is displaced
+  from the model origin, it names the failing check and exits non-zero
+  instead of publishing a transform the model does not justify.
+
+A URDF plus `robot_state_publisher` was the alternative and is the right
+answer **later**: the day TF is needed for the *moving* joints — steer,
+drive wheel, mast — a URDF earns its keep. Today it would be a second
+geometric description of a vehicle that already has one, kept equal to
+the first by hand. Three `static_transform_publisher` processes were the
+other alternative and are worse in the same direction: the poses would
+live in a launch file, in triplicate, with nothing checking them against
+the model.
+
+**Not published here:** `odom → base_link`. That is a localisation
+transform and it belongs to the brief that brings up SLAM.
 
 ### What a world has to provide
 
@@ -189,8 +281,24 @@ ros2 launch agv/forklift/launch/vehicle.launch.py world:=/path/to/world.sdf
 ```
 
 Useful arguments: `world`, `world_name`, `name`, `x`, `y`, `z`, `yaw`,
-`gui`, `server` (set false to spawn into a server someone else started)
-and `nodes`.
+`gui`, `server` (set false to spawn into a server someone else started),
+`nodes`, and `tf` (the sensor transforms, separate from `nodes` because
+SLAM needs them when the two process nodes are off).
+
+Checking the vehicle rather than trusting it. The first two need no
+simulator and no ROS; the third needs a running graph, and the fourth
+starts `obstacle_zone` itself:
+
+```bash
+/usr/bin/python3 agv/forklift/scripts/sensor_tf.py --print
+/usr/bin/python3 agv/forklift/scripts/check_sensor_frames.py
+/usr/bin/python3 agv/forklift/scripts/check_sensor_frames.py --live
+ROS_DOMAIN_ID=79 /usr/bin/python3 agv/forklift/scripts/obstacle_matrix.py
+```
+
+In the session container `python3` is 3.11 and ROS is built against
+3.12, so these are run as `/usr/bin/python3` or through `ros2 launch`
+(`sim/setup/CONTAINER_TOOLCHAIN.md` §3.3).
 
 Driving it by hand, publishing at a rate rather than `--once`, because a
 single message races any subscriber that has not finished matching:

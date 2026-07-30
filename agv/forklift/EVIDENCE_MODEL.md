@@ -13,6 +13,16 @@
 > §7 check that `model.sdf` and `config.yaml` declare the same set of gz
 > topics still passes on the new set. Coverage of the new scanners is measured
 > in `EVIDENCE_SENSOR_COVERAGE.md`.
+>
+> **Second note, added later the same day (brief m5-06).** The sentence above
+> that `/forklift/scan` feeds the stop-zone evaluator has since been overtaken:
+> by the owner ruling of 2026-07-30 the evaluator reads the **front safety
+> scanner's non-safe measurement channel** at z = 0.15 m, and `/forklift/scan`
+> is now the navigation input only. So §6's fault matrix and §6.1's re-run
+> describe the right *behaviour* against the wrong *source*, and their
+> `8.000` clear values are that sensor's `range_max`, not this one's. The
+> matrix is re-run against the current source, as committed code rather than
+> an ad-hoc harness, in `EVIDENCE_SENSOR_TF.md` §5.
 
 Dated headless capture of `agv/forklift/`: that the model spawns, that each
 of its three driven joints responds to its own explicit gz command topic,

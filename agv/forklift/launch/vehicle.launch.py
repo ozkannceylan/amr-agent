@@ -4,7 +4,8 @@
 #   1. the Gazebo (gz sim) server on a world, headless by default,
 #   2. one spawn of agv/forklift/model.sdf into that world,
 #   3. one ros_gz_bridge carrying every topic this directory owns,
-#   4. scripts/forklift_io.py and scripts/obstacle_zone.py.
+#   4. scripts/sensor_tf.py, the static TF for the three sensor frames,
+#   5. scripts/forklift_io.py and scripts/obstacle_zone.py.
 #
 # THE WORLD IS NOT OWNED HERE. agv/ owns a vehicle, not a warehouse, so the
 # world is an argument. Its default is gz's stock empty.sdf, which is enough
@@ -60,6 +61,7 @@ _MODEL_SDF = os.path.join(_FORKLIFT_DIR, 'model.sdf')
 _CONFIG_YAML = os.path.join(_FORKLIFT_DIR, 'config.yaml')
 _IO_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'forklift_io.py')
 _ZONE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'obstacle_zone.py')
+_TF_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'sensor_tf.py')
 
 with open(_CONFIG_YAML, 'r', encoding='utf-8') as _handle:
     _CFG = yaml.safe_load(_handle)
@@ -80,15 +82,35 @@ _BRIDGE_ARGS = [
     '{}@sensor_msgs/msg/JointState[gz.msgs.Model'.format(_TOPICS['gz_joint_state']),
     '{}@nav_msgs/msg/Odometry[gz.msgs.Odometry'.format(_TOPICS['gz_odom']),
     '{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'.format(_TOPICS['gz_scan_nav']),
+    '{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'.format(
+        _TOPICS['gz_safety_scanner_front_measurement']),
 ]
 
-# The two safety scanners are NOT in the list above and that is deliberate.
-# They model a device whose real output is an OSSD pair on copper, and the
-# simulation analogue of that path is the PLCSIM Advanced API into the
-# F-program (ADR 0011 decision 2), not a ROS topic. Bridging them would put
-# a safety device's measurement channel on the process network, where any
-# node could subscribe and quietly become a consumer of it. Their gz topic
-# names are still a contract and still live in config.yaml.
+# WHAT IS AND IS NOT ON THAT LIST, PER CHANNEL.
+#
+# Each safety scanner models a device with TWO outputs: a safe one and a
+# separate NON-SAFE MEASUREMENT channel provided for HMI, diagnostics and
+# process use. The gz scan IS the measurement channel.
+#
+#   front measurement channel  bridged, because a process consumer exists
+#                              for it: obstacle_zone.py, whose plane this
+#                              is (owner ruling, 2026-07-30)
+#   rear measurement channel   not bridged: no process consumer exists. A
+#                              channel is put on the process network when
+#                              something on it consumes the channel, and
+#                              not before
+#   either SAFE channel        NEVER a topic, on either transport. It is
+#                              derived by field evaluation and reaches the
+#                              F-program through the PLCSIM Advanced API
+#                              (ADR 0011 decision 2), which is this
+#                              project's analogue of the copper an OSSD
+#                              pair runs on
+#
+# Bridging a measurement channel is not a safety signal on the process
+# network, and it is not a navigation consumer of a safety scanner either
+# - what ADR 0011 forbids is SLAM, AMCL or a costmap fed from one of
+# these, and the navigation lidar remains the only input any of those
+# gets.
 
 # Feedback keeps the gz name on the gz side and gets the vehicle-facing name
 # on the ROS side. Commands are NOT remapped: the same name on both sides is
@@ -97,6 +119,8 @@ _BRIDGE_REMAPS = [
     (_TOPICS['gz_joint_state'], _TOPICS['joint_states']),
     (_TOPICS['gz_odom'], _TOPICS['odom']),
     (_TOPICS['gz_scan_nav'], _TOPICS['scan']),
+    (_TOPICS['gz_safety_scanner_front_measurement'],
+     _TOPICS['safety_scanner_front_measurement']),
 ]
 
 
@@ -140,6 +164,11 @@ def generate_launch_description():
     ld.add_action(DeclareLaunchArgument(
         'nodes', default_value='true',
         description='Start forklift_io and obstacle_zone'))
+    ld.add_action(DeclareLaunchArgument(
+        'tf', default_value='true',
+        description='Publish /tf_static for the three sensor frames. '
+                    'Separate from "nodes" because SLAM and Nav2 need the '
+                    'transforms even when the two process nodes are off.'))
 
     world = LaunchConfiguration('world')
     world_name = LaunchConfiguration('world_name')
@@ -149,6 +178,7 @@ def generate_launch_description():
     gui = LaunchConfiguration('gui')
     server = LaunchConfiguration('server')
     nodes = LaunchConfiguration('nodes')
+    tf = LaunchConfiguration('tf')
 
     ros_gz_sim_launch = os.path.join(
         get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')
@@ -200,6 +230,17 @@ def generate_launch_description():
         output='screen',
         arguments=_BRIDGE_ARGS,
         remappings=_BRIDGE_REMAPS,
+    ))
+
+    # Static TF for the three sensor frames, read out of the model file
+    # itself so the transforms cannot drift from the geometry. It takes
+    # the model path rather than the config path for that reason: there
+    # is no second copy of a pose anywhere in this launch file.
+    ld.add_action(ExecuteProcess(
+        cmd=[sys.executable, _TF_SCRIPT, '--model', model],
+        name='sensor_tf',
+        output='screen',
+        condition=IfCondition(tf),
     ))
 
     # The two vehicle nodes. They are plain scripts on purpose: this

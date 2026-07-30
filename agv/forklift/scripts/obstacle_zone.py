@@ -1,21 +1,52 @@
 #!/usr/bin/env python3
-"""obstacle_zone.py - forward stop-zone evaluator for the forklift scanner.
+"""obstacle_zone.py - forward stop-zone evaluator for the forklift.
 
 WHAT THIS NODE IS
-  A reader of /forklift/scan that answers one question at a fixed rate:
-  is anything inside the forward sector closer than the stop distance?
+  A reader of one scan that answers one question at a fixed rate: is
+  anything inside the forward sector closer than the stop distance?
 
-      /forklift/scan -> /forklift/obstacle/in_stop_zone   [std_msgs/Bool]
+      /forklift/safety_scanner_front/measurement
+                     -> /forklift/obstacle/in_stop_zone   [std_msgs/Bool]
                      -> /forklift/obstacle/min_distance   [std_msgs/Float64]
 
+WHICH CHANNEL IT READS, AND WHY THAT IS NOT A LAYER VIOLATION
+  The device class the front scanner models emits TWO outputs: a safe one
+  (OSSD pair, or safe bits over PROFIsafe) and a separate NON-SAFE
+  MEASUREMENT channel its datasheet provides for HMI, diagnostics and
+  process use while stating it must not be used for safety-related tasks.
+  This node reads the SECOND one. A process function consuming a device's
+  process output is what that output exists for; what ADR 0011 forbids is
+  a safety scanner feeding a NAVIGATION consumer - SLAM, AMCL, a costmap
+  - and that prohibition is untouched here. The navigation lidar remains
+  the only SLAM input, on /forklift/scan, and this node does not read it.
+
+  It does not read it for a physical reason as well as an architectural
+  one: the navigation lidar's plane is z = 1.80 m, where a pallet, a
+  crate and the arena's 0.60 m walls are all invisible. This channel's
+  plane is z = 0.15 m, which is the low plane the M4 commissioning
+  showcase demonstrated.
+
 WHAT THIS NODE IS NOT
-  IT IS NOT A SAFETY FUNCTION AND MUST NEVER BE PRESENTED AS ONE. It is
-  Python, it reads a scan that has crossed a bridge, and it publishes on a
-  network. The protective stop, the e-stop chain and safe torque off are
-  onboard, hardwired and independent of every topic named above
-  (invariant 1). What this node produces is a process comfort zone: an
-  input to speed and to order execution, at the same integrity level as
-  any other process signal.
+  IT IS NOT A SAFETY FUNCTION AND MUST NEVER BE PRESENTED AS ONE, and
+  reading a safety scanner's measurement channel does not make it one.
+  It is Python, it reads a rendered scan that has crossed a bridge, and
+  it publishes on a network: no integrity, no OSSD, no fault reaction, no
+  diagnostic coverage. The protective stop, the e-stop chain and safe
+  torque off are onboard, hardwired and independent of every topic named
+  above (invariant 1). What this node produces is a process comfort zone:
+  an input to speed and to order execution, at the same integrity level
+  as any other process signal. The OSSD-equivalent verdict derived from
+  the same device is a different signal, on a different path, and it is
+  not computed here.
+
+WHERE THE SECTOR POINTS
+  The sector is centred on the driving direction OF THE VEHICLE, but the
+  angles in a scan are measured in the SENSOR's frame, and this sensor
+  sits on a chassis corner at a mount yaw of +45 deg. The centre is
+  therefore obstacle.sector_centre_rad, which config.yaml derives as
+  minus that mount yaw, and scripts/check_sensor_frames.py checks it
+  against model.sdf. A centre of zero would watch the diagonal 15..75 deg
+  off the bow and report it as "straight ahead".
 
 THREE CLASSES OF SAMPLE, AND WHY THE MIDDLE ONE IS NOT MISSING DATA
   A rangefinder answers "how far" with three different kinds of answer,
@@ -56,7 +87,8 @@ WIRE NC, PROGRAM NO, CARRIED INTO THE VEHICLE LAYER
   min_distance in that case is the SCAN's range_max, not a constant of
   this node, so it follows the sensor the model declares. The consumer's
   plausibility window has to contain it: docs/interfaces/opcua-nodes.md
-  section 10.5 gives 0.05 to 8.10 m against this scanner's 0.10 to 8.00 m.
+  section 10.5 gives 0.05 to 8.10 m against this scanner's 0.10 to
+  5.50 m.
 
   Staleness is judged against this node's own monotonic clock at the
   moment of receipt, never against the publisher's header stamp. A
@@ -97,6 +129,22 @@ def load_config(path):
         return yaml.safe_load(handle)
 
 
+def wrap_angle(angle):
+    """Fold an angle onto (-pi, pi], so a sector can straddle the seam.
+
+    The scan of a corner-mounted sensor runs to +-137.5 deg and the
+    sector centre is -45 deg, so (angle - centre) reaches +182.5 deg and
+    must fold, or samples on the far edge of the aperture would test as
+    if they were behind the vehicle.
+    """
+    return (angle + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def in_sector(angle, centre, half_width):
+    """Is this sample's bearing inside the watched sector?"""
+    return abs(wrap_angle(angle - centre)) <= half_width
+
+
 def classify_sample(sample, range_min, range_max):
     """Put one range into one of the three classes above.
 
@@ -127,6 +175,7 @@ class ObstacleZone(Node):
         topics = cfg['topics']
 
         self.sector_half_angle_rad = obstacle['sector_half_angle_rad']
+        self.sector_centre_rad = obstacle['sector_centre_rad']
         self.stop_distance_m = obstacle['stop_distance_m']
         self.scan_timeout_s = obstacle['scan_timeout_s']
         self.unknown_distance_m = obstacle['unknown_distance_m']
@@ -143,15 +192,23 @@ class ObstacleZone(Node):
             Bool, topics['obstacle_in_stop_zone'], qos)
         self.pub_min_distance = self.create_publisher(
             Float64, topics['obstacle_min_distance'], qos)
+        # The source is the front safety scanner's NON-SAFE MEASUREMENT
+        # channel. The key is named for the channel and not for a generic
+        # "scan", so that changing which channel this process function
+        # consumes is a visible edit here rather than a quiet edit of a
+        # topic string somewhere else.
+        self.source_topic = topics['safety_scanner_front_measurement']
         self.sub_scan = self.create_subscription(
-            LaserScan, topics['scan'], self.cb_scan, qos)
+            LaserScan, self.source_topic, self.cb_scan, qos)
 
         self.timer_evaluate = self.create_timer(
             self.evaluate_period_s, self.cb_evaluate)
 
         self.get_logger().info(
-            'obstacle_zone up: sector +-{:.4f} rad, stop distance {:.2f} m, '
-            'scan timeout {:.2f} s, rate {:.1f} Hz'.format(
+            'obstacle_zone up: source {} (non-safe measurement channel), '
+            'sector {:.4f} +-{:.4f} rad in the scan frame, stop distance '
+            '{:.2f} m, scan timeout {:.2f} s, rate {:.1f} Hz'.format(
+                self.source_topic, self.sector_centre_rad,
                 self.sector_half_angle_rad, self.stop_distance_m,
                 self.scan_timeout_s, cfg['rates']['obstacle_publish_hz']))
 
@@ -221,7 +278,8 @@ class ObstacleZone(Node):
         clear_seen = False  # the sector produced at least one CLEAR sample
         for index, sample in enumerate(scan.ranges):
             angle = scan.angle_min + index * scan.angle_increment
-            if abs(angle) > self.sector_half_angle_rad:
+            if not in_sector(angle, self.sector_centre_rad,
+                             self.sector_half_angle_rad):
                 continue
             sample_class = classify_sample(
                 sample, scan.range_min, scan.range_max)
