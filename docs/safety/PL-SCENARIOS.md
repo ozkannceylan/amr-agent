@@ -25,11 +25,18 @@ What this document *does* claim: that the chain from a described hazard to a
 verifiable reaction is followed correctly and consistently, twelve times, with
 every judgement written down where a reader can disagree with it.
 
-**Gate numbering.** Gate references follow the SRS, which was written before
-ADR 0004 renumbered the gates. Under the current numbering
-(`docs/roadmap.md`) the safety layer is **M9**, the simulated vehicle is M5/M6
-and the demonstration is M10. The SRS's own numbers are left untouched here;
-the discrepancy is recorded in this task's report, not fixed by this document.
+**Gate numbering.** Gate references in this document and in the SRS follow the
+gate order of ADR 0010
+(`docs/adr/0010-milestone-restructure-forklift-first.md`, accepted), which is
+the live order in `docs/roadmap.md`. That order merges what earlier rounds
+carried as separate gates: the safety layer and the vehicle chain are one gate,
+**M5**, both landing on the forklift twin; the VDA 5050 client, the fleet
+manager and the PLC integration that brings the door and charger equipment with
+its stations are one gate, **M6**; the end-to-end demonstration is folded into
+**M7**. The SRS's own gate tags were written under the first numbering and have
+been remapped to this order by what each sentence is about, never by arithmetic
+on the printed number; the per-function landing gate is SRS §4's last column,
+and no scenario below restates it.
 
 ---
 
@@ -407,7 +414,7 @@ duties are tested.
 | SF-07 | Zone monitoring | SC-10 | Also the function that actually holds the hazard in SC-11 |
 | SF-08 | Monitored reset | SC-11 | — |
 | SF-09 | *Supervision watchdog — not a safety function* | SC-12 | Carried to mark the boundary; no PLr, no PL claim |
-| SF-20…29 | *Reserved: arm safety* | none | Out of scope until the arm gate (SRS §1.3) |
+| SF-20…29 | *Reserved: arm safety — ids kept, never reissued* | none | **Out of scope — arm integration removed from the roadmap (ADR 0010 D5)**; the ids stay reserved so the record is not lost (SRS §1.3) |
 
 ### 3.2 Risk-graph parameter coverage
 
