@@ -556,7 +556,7 @@ DemoCell/                          the commissioned server interface, ns http://
     Output/   PLC → plant: setpoints the bridge reads and republishes
     Status/   PLC → both clients: read-only verdicts
     Link/     HMI liveness
-    Safety/   read-only F-safety mirrors (§11, M5 early)
+    Safety/   read-only F-safety mirrors (§11, M5 opening wave)
 ```
 
 Paths are relative to the interface node, as everywhere in this document:
@@ -1034,7 +1034,7 @@ Each row means "no such node under `DemoCell/Forklift/`".
 | 7 | **An `HmiStartRequest` node in `Forklift/Hmi/`, requested by `plc/forklift/SPEC.md` §6.7 and its §12 item 4.** This section defines five requests and none is a start, so `HmiTeleopRequest` carries both the enable and the post-reset start action; the conflation and the operator's release-and-reassert sequence are written out in §10.7. A sixth request node would restore the M3 cell's two-device separation — a reset that clears and a separate start that energizes | Owner decision, **post-gate**. It moves the node count, the `ForkliftHmi` DB, a start value (§10.9), the HMI's every-cycle write set (§10.8 H1) and the PLC's enable edge together, which is not a change to make inside a commissioning run. Until then the conflation stands and is stated, not hidden |
 | 8 | **H6 was ruled ahead of its implementation; H5 was not.** H6 asked `hmi/` for five things: one timestamp refreshed by **every** request the page makes on the loopback endpoint, `UI_POLL_STALE_TIME` held as a named constant with its derivation beside it, the **existing** deadman fired when the window expires with the write cycle and the heartbeat left running, the two Bools re-armed only after the page has been seen to send each low, and the transition logged and rendered in `/state` so a page that returns learns why its controls were dropped. **H5 needed no code**: the split it rules is the behaviour already implemented and evidenced (`EVIDENCE_HMI.md` §A.8, §A.9, §B.8), and its three added clauses — one bounded attempt never retried, the counter stopping before the final write, nothing else written on the way out — were satisfied as built; H5's fourth clause binds the PLC specification instead, and `plc/forklift/SPEC.md` satisfies it by reacting to `HmiLinkOk` alone | **Closed by `7675960`, 2026-07-29** (`docs/reports/m4f-07b-h6-and-holdable-reset.md`). All five asks are implemented and demonstrated in `hmi/EVIDENCE_HMI.md` **§E** — `check_hmi_h6_and_reset.py`, 34 checks, no failures, against the PLC logic double. **Kernel K1** (§E.2–E.3) is this item's closure: the page's poll is frozen with the backend alive, all five requests read at rest 1063 ms after the last request against the 1000 ms window, the heartbeat increments straight through the drop, `HmiLinkOk` stays `TRUE` and `ForkliftResetRequired` stays `FALSE` — the process behaviour H6 specifies, with nothing latched — and recovery is the release rule, a page that thaws holding both Bools asserted getting neither carried. **Kernel K2** (§E.4) is the same commit's other half, `plc/forklift/SPEC.md` §11 T5.4 driven from the operator's endpoint, closing `m4f-08` finding 3 rather than this item. **One residual is carried, not erased**: `EVIDENCE_HMI.md` §D records that section C's browser pass predates the change and was not re-run, so the page's DOM handlers are unexercised since — E.4 drives the endpoint the page posts to, not the events. That is `hmi/`'s to close and it does not reopen this item |
 
-## 11. Forklift safety mirrors (M5 early)
+## 11. Forklift safety mirrors (M5 opening wave)
 
 **These four nodes are display diagnostics. Nothing else.** They are read-only to every client, they
 feed no logic anywhere in this project, and **no client write can create, prevent or clear a safety
@@ -1046,12 +1046,25 @@ leaves that CPU is a **process consequence** — the standard program's motion p
 its three setpoints going to `0.0` (§10.6) — and a **copy of a flag**. A copy is not a cause, and the
 mirror of a demand is not the demand (ADR 0009 D3.3, `plc/forklift-safety/SPEC.md` §6.2 S3).
 
-Added by **ADR 0009**, which opens the cell-scope core of M5 early on the M4 forklift twin under a
+Added by **ADR 0009**, which opens the cell-scope core of M5 first, on the M4 forklift twin, under a
 fallback rule. **Nothing in this section closes M5, and nothing here is an acceptance test passed**
 (ADR 0009 D2.3, D2.4; `plc/forklift-safety/SPEC.md` §1.2 N5) — see §11.8. The F-side names, meanings
 and start values below are `plc/forklift-safety/SPEC.md` §6, which is the contract this section
 consumes; where the two disagree, that document wins on what the flags mean and this one wins on what
 the nodes are called and who may read them.
+
+**Why this reads *opening wave* and not *early*, stated once for the whole section.** **ADR 0010**
+(accepted 2026-07-30) restructures the gates above M4 and **extends ADR 0009 rather than superseding
+it**: what that ADR opened early on the forklift twin becomes M5's own subject matter (D2), so its
+scope table, coupling architecture and wording discipline carry into the new M5 unchanged. The new
+M5 is wider than the gate ADR 0009 opened against — safety scanners wired into the F-blocks, a
+navigation lidar, SLAM and Nav2 on the forklift, HMI v2, closed by a **recorded safety + autonomy
+showcase** — and it lands on **this twin** rather than on the fixed cell (D2, D7). So these four
+nodes are no longer an exception to gate discipline ahead of their gate; they are the **opening
+wave** of M5 itself. Nothing else here changes, and the two statements that matter survive the
+restructure untouched: nothing in this section closes M5, and a node existing is not an acceptance
+test passed. `plc/forklift-safety/SPEC.md` §1.2 N5 makes the same reconciliation from the F-side and
+uses the same term.
 
 **The parent folder is the forklift *cell*, not the vehicle.** `Forklift/` is the commissioning
 cell's subtree (§10), and the demands mirrored here are **cell-scope** demands formed in the CPU:
@@ -1339,12 +1352,16 @@ from `Objects` seeing more than any of those numbers.
 
 **What §11 does not close.** Nothing here closes M5 or any part of its criterion, and a node existing
 is not an acceptance test passed (ADR 0009 D2.3, `plc/forklift-safety/SPEC.md` §1.2 N5). The M5
-criterion's own mirror clause — *"the `Safety/` mirrors are read-only and no client write can create,
-prevent or clear a safety reaction"* — is a gate-proper statement about the safety layer on the fixed
-cell; **whether it is satisfied by this group, by a fixed-cell group, or by both is decided at M5 and
-not here.** The accurate statement remains *"M5's cell-scope core is being built early"* (ADR 0009
-D2.4). Nothing in §11 may be cited as M4 evidence either (D2.2): the M4 showcase names every reaction
-as standard-program process logic, and these four nodes are no part of it.
+criterion's own mirror clause — *"the `Safety/` mirrors remain read-only"*, in a criterion item that
+also requires the reactions to execute with the bridge stopped and the OPC UA session down
+(`docs/roadmap.md` row M5, item (b)) — is a gate-proper statement about the safety layer, which
+**ADR 0010 D2 and D7 land on this twin** rather than on the fixed cell, so the group the clause is
+about is this one. **Whether it is satisfied as built is still decided at M5 and not here**, because
+that item also requires the acceptance tests AT-01, AT-07 and AT-08 and the tool read-back of open
+item 2 below, and neither is in this document's gift. The accurate statement remains *"M5's
+cell-scope core is being built first"* — the opening wave of the preamble above (ADR 0009 D2.4, ADR
+0010 D2). Nothing in §11 may be cited as M4 evidence either (D2.2): the M4 showcase names every
+reaction as standard-program process logic, and these four nodes are no part of it.
 
 | # | Open item | Owner |
 |---|---|---|
