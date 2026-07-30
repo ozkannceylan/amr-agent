@@ -3,15 +3,27 @@
 Open items only. M3 closed 2026-07-28; M4 (forklift commissioning, ADR 0008)
 is the open gate and its brief queue lives in docs/PLAN.md.
 
-## owner — F-layer, current state (2026-07-29, live-verified)
-- CLOSED: interface verified post-swap (full §10 node surface read back,
-  types correct); feasibility checkpoint closed (F-runtime compiled,
-  downloaded, RUN, F-latch executed end to end); bridge round trip proven
-  both ways against the 1513F.
-- NEXT: apply the m5a-04 F-FBD deltas (R_TRIG reset edge, dual-writer
-  rewiring) and the m5a-05 teleop-permissive delta + Safety/ mirror tags when
-  those specs land; build FB_ForkliftTeleop per plc/forklift/SPEC.md §7 in
-  OB30 (the motion writer — currently absent on the CPU).
+## owner — build COMPLETE on the CPU (2026-07-30 TIA handover, live-verified)
+- FB_ForkliftTeleop (§7 + §13) in OB30; D1-D7 applied; mirrors and stand-in
+  DBs served; 23/23 nodes with correct access read back; monitored reset and
+  its 3 s upper bound observed live; first live teleop drive done and
+  captured (owner video, Screen Recording 2026-07-30 085503.mp4 — informal
+  evidence, the formal showcase recording still to be made per the scenario
+  checklists).
+- Before the T6 recording, read from TIA and write down (handover items 1-6):
+  the F-collective signature (online/offline, dated); F-runtime monitoring
+  time and F-OB cycle time; verify RESET_HOLD_MIN (200 ms) covers ≥5 F-OB
+  cycles — if it does not, raising it is an SRS-window deviation recorded as
+  an open item, never a silent tune; OB30 and CPU max cycle times; the
+  safety access-protection password decision (or an explicit out-of-scope
+  line); the HmiStaleTimer.PT watch row showing T#600MS.
+- Copy the TIA evidence PNGs into plc/forklift/evidence/ and
+  plc/forklift-safety/evidence/ — the orchestrator commits them.
+- Run T5.1-T5.6 (plc/forklift/SPEC.md §11) and T6 (safety SPEC §9.1) per
+  sim/scenarios/forklift_commissioning.md §12, then record the showcase with
+  the TWIN-DEMO-MAP naming discipline (nothing early-opened presented as M4
+  evidence; "the operator drove the device from the engineering interface,
+  the safety program did X").
 
 ## owner — M4 queue, in order
 - First PLCSIM session of the gate: one watch-table capture at a CPU cold
