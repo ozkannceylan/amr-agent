@@ -80,13 +80,12 @@ behaviour, never on written code.
 | M2 | Safety requirements spec | **done** |
 | M3 | Fixed equipment I/O loop | **done** |
 | M4 | Forklift commissioning cell |  **done** |
-| M5 | Simulated vehicle | archived |
-| M6 | VDA 5050 client | planned |
-| M7 | Fleet manager | planned |
-| M8 | PLC integration | planned |
-| M9 | Demonstration | planned |
-| M10 | Arm integration | planned |
-| M11 | Command path from Hermes | parked |
+| M5 | VDA 5050 client | planned |
+| M6 | Fleet manager | planned |
+| M7 | PLC integration | planned |
+| M8 | Demonstration | planned |
+| M9 | Arm integration | planned |
+| M10 | Command path from Hermes | parked |
 
 Archived rows moved onto the forklift twin rather than being dropped: the safety
 layer is built on the twin instead of the fixed cell, the VDA 5050 client builds on
