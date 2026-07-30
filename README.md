@@ -24,15 +24,44 @@ process logic, not a safety function. Full 48 s run, watch table readable:
 Layers talk only to their neighbours. The S7-1500 standard program owns fixed
 equipment, interlocks and every motion setpoint. The safety functions belong to an
 F-CPU safety program that must stay correct if the standard program halts; they are
-specified in [`docs/safety/`](docs/safety/) and implemented at M5. The commissioning
-HMI and, later, the fleet manager are OPC UA *clients* of the PLC, never the reverse,
-and a bridge translates ROS 2 topics to OPC UA so the simulation never addresses the
-PLC directly. Thirteen invariants are locked by
+specified in [`docs/safety/`](docs/safety/), and their cell-scope core is being built
+early on the forklift twin
+([ADR 0009](docs/adr/0009-early-cell-scope-safety-on-the-forklift-twin.md)). The
+commissioning HMI and, later, the fleet manager are OPC UA *clients* of the PLC,
+never the reverse, and a bridge translates ROS 2 topics to OPC UA so the simulation
+never addresses the PLC directly. Thirteen invariants are locked by
 [ADR 0001](docs/adr/0001-architecture-invariants.md) — safety never traverses the
 network, loss of network is a degraded mode rather than a safety event, the PLC is
 the OPC UA server. The topology they are drawn in is
 [CLAUDE.md §3](CLAUDE.md#3-topology), and every top-level directory's README opens
 with *This layer must not access*.
+
+```mermaid
+flowchart LR
+    UI["Browser HMI<br/>operator requests<br/>live state and metrics"]
+    BE["HMI backend<br/>OPC UA client"]
+
+    subgraph CPU["S7-1500 CPU 1513F-1 PN"]
+        STD["Standard program<br/>FB_ForkliftTeleop<br/>forms every motion setpoint"]
+        SAFE["F-program<br/>F_Forklift_Safety<br/>the safety demand forms here"]
+    end
+
+    BR["bridge<br/>OPC UA client"]
+    GZ["Gazebo forklift<br/>traction, fork, lidar"]
+
+    UI <--> BE
+    BE -->|requests over OPC UA| STD
+    STD -->|state and read-only safety mirrors| BE
+    STD -->|motion setpoints over OPC UA| BR
+    BR -->|ROS 2 topics| GZ
+    GZ -->|lidar and joint state| BR
+    BR -->|sensor values over OPC UA| STD
+    SAFE -->|demand stays inside the CPU| STD
+```
+
+*The network carries process data and read-only safety mirrors only. The safety
+demand forms inside the CPU and never leaves it, so invariant 1 holds by
+construction rather than by assertion.*
 
 ---
 
@@ -51,14 +80,19 @@ behaviour, never on written code.
 | M2 | Safety requirements spec | **done** |
 | M3 | Fixed equipment I/O loop | **done** |
 | M4 | Forklift commissioning cell | next |
-| M5 | Safety layer on the fixed cell (F-CPU) | planned |
-| M6 | Simulated vehicle | planned |
+| M5 | Safety layer on the fixed cell (F-CPU) | archived |
+| M6 | Simulated vehicle | archived |
 | M7 | VDA 5050 client | planned |
 | M8 | Fleet manager | planned |
 | M9 | PLC integration | planned |
 | M10 | Demonstration | planned |
 | M11 | Arm integration | planned |
 | M12 | Command path from Hermes | parked |
+
+Archived rows moved onto the forklift twin rather than being dropped: the safety
+layer is built on the twin instead of the fixed cell, the VDA 5050 client builds on
+the same twin instead of a separate vehicle, and fleet management follows with
+multiple forklifts.
 
 Gate order follows
 [ADR 0008](docs/adr/0008-forklift-commissioning-gate-and-hmi-layer.md), which extends
