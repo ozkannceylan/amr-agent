@@ -80,3 +80,45 @@ procedure step, no pass count and no evidence claim changed.
    brief m5r-08. This sweep chose **"M5 opening wave"** for `plc/`. If m5r-08
    picks different words, the two documents will describe the same status
    differently — worth fixing the term in one place before both land.
+
+## Correction — SF-08 is M5, not M6 (applied after the first pass)
+
+**The brief's enumeration was wrong, and the first pass followed it.** The
+location list read *"1024 (fixed-cell SF-08 'M9' → M6)"*, so §6.4's fixed-cell
+`Safety/SafetyResetRequired` note was renumbered to M6. That mapping does not
+survive an authority check, and the correction was raised by the orchestrator as
+**m5r-09 finding 6**:
+
+- **ADR 0010 D7** sends only **SF-05 and SF-06** to M6 (with the stations) and
+  **SF-09** to M6. It places *"SF-01, SF-07 and the cell instance of SF-08 at
+  M5, on the twin"* and *"SF-02, SF-03, SF-04 and the vehicle instance of SF-08
+  at M5"*.
+- **`docs/safety/SRS.md` §4**, as remapped by m5r-05, line 185: `SF-08 |
+  Monitored reset | OPC Safety/SafetyResetRequired | AT-08 | M5 (cell and
+  vehicle instances, one gate)`.
+
+Both instances of SF-08 are therefore **M5**. Two lines changed:
+
+| Line | Was (first pass) | Now |
+|---|---|---|
+| `plc/forklift-safety/SPEC.md` §6.4, line 1024 | *"`Safety/SafetyResetRequired` for the **fixed cell** (SF-08, M6)"* | **(SF-08, M5)** |
+| `plc/forklift-safety/SPEC.md` §10, line 1348 | *"…while the fixed cell's follows its equipment to M6 (ADR 0010 D2, D3)."* | *"…while the fixed cell's F-I/O **behind SF-05 and SF-06** arrives with the stations at M6 (ADR 0010 D2, D3). **SF-08 is M5 in both its instances** (SRS §4)."* |
+
+The second line was not itself wrong — it spoke of F-I/O following equipment,
+not of SF-08 — but it sat two rows from the defect and could be read as
+inheriting it, so it now names which F-I/O follows the stations and states
+SF-08's landing outright.
+
+**Re-swept by subject, not by the corrected line.** Every occurrence of `SF-08`
+and of `SafetyResetRequired` in `plc/forklift-safety/SPEC.md` (36 hits,
+whitespace-normalised) was re-read with 160 characters of context on each side;
+five carry a gate number, and after this correction none of them places SF-08 at
+M6. The only M6 landings left anywhere in `plc/` are SF-09, SF-05/SF-06, the
+target cell's fixed equipment and the fixed-cell F-I/O behind SF-05/SF-06 — each
+of which ADR 0010 puts there by name.
+
+This is LESSONS 2026-07-29 again, from the other side: a brief's enumeration is a
+starting point for *where to look*, never a ruling on *what the answer is*. The
+first pass verified the location list by independent search but took its
+per-line mappings as given; the mappings needed checking against ADR 0010 D7 and
+the SRS the same way the locations did.
