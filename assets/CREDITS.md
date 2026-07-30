@@ -8,6 +8,8 @@ permissively licensed sources. No vendor marketing material is used.
 | `plc-drives-cell.gif` | Screen capture of `sim/worlds/cell.sdf` in Gazebo Harmonic, driven live by the S7-1500 standard program on PLCSIM Advanced. |
 | `demo-cell.png` | Screen capture of `sim/worlds/cell.sdf` in Gazebo Harmonic. |
 | `rb-kairos-gazebo.png` | Own render of the manufacturer's ROS 2 description of the Robotnik RB-Kairos, in Gazebo Harmonic 8.11.0 under a headless llvmpipe renderer. See below. |
+| `teleop-showcase.gif` | Owner's own screen recording of the live teleoperation (2026-07-30): a 15 s highlight excerpt, re-encoded and cropped with `ffmpeg`; the crop removes the Windows taskbar. No third-party content. |
+| `teleop-showcase.mp4` | Owner's own screen recording of the live teleoperation (2026-07-30): the full run, re-encoded and cropped with `ffmpeg`; the crop removes the Windows taskbar. No third-party content. |
 
 ## rb-kairos-gazebo.png
 
@@ -55,5 +57,5 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 The RB-Kairos render carries no claim about this project's own progress: the
-vehicle enters the demonstration at M5, and nothing in it has been integrated
+vehicle enters the demonstration at M6, and nothing in it has been integrated
 yet.
