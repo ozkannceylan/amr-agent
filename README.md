@@ -68,7 +68,7 @@ construction rather than by assertion.*
 
 M3 closed 2026-07-28, verified in
 [docs/reports/m3-37-gate-verification.md](docs/reports/m3-37-gate-verification.md)
-(pass-with-findings). Next gate: **M4 — Forklift commissioning cell**. Tracked in
+(pass-with-findings). Current gate: **M4 — Forklift commissioning cell**. Tracked in
 [docs/roadmap.md](docs/roadmap.md); a gate closes only on observable
 behaviour, never on written code.
 
@@ -78,25 +78,29 @@ behaviour, never on written code.
 | M1 | Interface contracts | **done** |
 | M2 | Safety requirements spec | **done** |
 | M3 | Fixed equipment I/O loop | **done** |
-| M4 | Forklift commissioning cell |  **done** |
-| M5 | VDA 5050 client | planned |
-| M6 | Fleet manager | planned |
-| M7 | PLC integration | planned |
-| M8 | Demonstration | planned |
-| M9 | Arm integration | planned |
-| M10 | Command path from Hermes | parked |
+| M4 | Forklift commissioning cell | **closing** — showcase recording and gate verification pending |
+| M5 | Sensored autonomous forklift | planned |
+| M6 | VDA 5050 fleet at scale | planned |
+| M7 | LLM operations layer + final demonstration | planned |
 
 Archived rows moved onto the forklift twin rather than being dropped: the safety
-layer is built on the twin instead of the fixed cell, the VDA 5050 client builds on
-the same twin instead of a separate vehicle, and fleet management follows with
-multiple forklifts.
+layer and the navigation stack both land on the forklift built at M4, which is the
+vehicle platform from M5 onward; the VDA 5050 client, the fleet manager and PLC
+integration merge into one fleet gate at scale, four forklifts against ten PLC-owned
+stations; and the LLM operations layer closes the program, taking the end-to-end
+demonstration with it as its exit criterion. Arm integration is out of scope, its
+safety functions kept in the SRS marked as such rather than deleted.
 
 Gate order follows
-[ADR 0008](docs/adr/0008-forklift-commissioning-gate-and-hmi-layer.md), which extends
-[ADR 0007](docs/adr/0007-safety-first-gate-order.md) rather than superseding it: the
-fixed-equipment Gazebo-to-PLC signal loop is proven first, then the same cell gains a
-teleoperated forklift, then the safety layer on that cell, before any mobile robot,
-broker or fleet work.
+[ADR 0010](docs/adr/0010-milestone-restructure-forklift-first.md), which supersedes
+the order above M3 set by
+[ADR 0008](docs/adr/0008-forklift-commissioning-gate-and-hmi-layer.md) and
+[ADR 0007](docs/adr/0007-safety-first-gate-order.md) and leaves M0–M4 with their
+numbers and criteria: the fixed-equipment Gazebo-to-PLC signal loop is proven first,
+then the same cell gains a teleoperated forklift, then that forklift gains safety
+scanners, a navigation lidar and autonomous driving, then a fleet of them runs a
+warehouse against the PLC's stations, and only then does a supervisory layer sit
+above the whole thing. Each of the last three gates closes on its own recording.
 
 ---
 

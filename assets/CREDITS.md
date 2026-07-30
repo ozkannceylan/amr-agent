@@ -56,6 +56,6 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-The RB-Kairos render carries no claim about this project's own progress: the
-vehicle enters the demonstration at M6, and nothing in it has been integrated
-yet.
+The RB-Kairos render carries no claim about this project's own progress. It was
+the platform selected for the vehicle gate, now M5; ADR 0010 retired it in favour
+of the in-house forklift, and nothing in it was ever integrated.
