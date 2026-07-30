@@ -1,8 +1,9 @@
 # Roadmap
 
-Current gate: M4 — Forklift commissioning cell (ADR 0008), **closing**. The
-gate's criteria are unchanged and the agent-side work is complete; what remains
-is the owner's recorded commissioning showcase and the m4f-09 gate verification.
+Current gate: M5 — Sensored autonomous forklift (ADR 0010 D2, architecture ruled
+by ADR 0011). M4 — Forklift commissioning cell (ADR 0008) — is **closing**: its
+criteria are unchanged and the agent-side work is complete, and it closes on the
+owner's recorded commissioning showcase and the m4f-09 gate verification.
 
 Gate order follows ADR 0010
 (docs/adr/0010-milestone-restructure-forklift-first.md), which supersedes the
@@ -24,10 +25,30 @@ unchanged.
 ADR 0009 (docs/adr/0009-early-cell-scope-safety-on-the-forklift-twin.md,
 accepted) is **extended, not superseded**. Its early opening of the cell-scope
 functions (SF-01, SF-08, the SF-07 pattern) on the forklift twin, built under
-its fallback rule while M4 is still the current gate, becomes the new M5's own
+its fallback rule ahead of M4's closure, becomes the new M5's own
 subject matter; its D1 scope boundaries, D3 coupling architecture and D5 wording
 discipline carry into M5 word for word, and its fallback rule retires once M4
 closes.
+
+ADR 0011 (docs/adr/0011-sensored-autonomy-architecture.md, accepted 2026-07-30)
+extends ADR 0009, renumbers nothing, and settles the architecture inside M5
+without changing the gate's criteria. Four rulings: the forklift's F-runtime
+group is the **vehicle's own onboard safety controller**, so the
+scanner-to-stop chain is internal to the vehicle (D1); the scanner reaches the
+F-program through a **configured F-DI stimulated by the PLCSIM Advanced API by
+tag name**, conditional on this tool's safety system version supporting F-I/O
+simulation and on the API writing those channel values — settled in the tool by
+the first M5 brief, with the labelled standard-DB stand-in as the named
+fallback (D2); in autonomous mode the PLC forms and owns a **motion envelope** —
+motion enable, speed ceiling, zone permit — while the navigation loop closes
+onboard at its own rate, the M4 teleop phrasing standing unchanged (D3); and map,
+pose and obstacle data reach the operator over a **read-only monitoring plane**
+that has no write endpoint and no publisher and carries no command in either
+direction, the process plane HMI → PLC → bridge → vehicle remaining the only
+command path (D4). The claim boundary is D5: M5 states **PLr targets derived
+from the documented risk assessment and claims no achieved PL, Category, SIL or
+PFH**, and claims no safety acceptance test and no program signature, for as
+long as the project is hardware-free.
 
 The feasibility checkpoint ADR 0007 attached to the safety layer — whether
 PLCSIM Advanced can execute an F-CPU safety program — is **substantially
@@ -50,7 +71,7 @@ M3 closed 2026-07-28, verified in docs/reports/m3-37-gate-verification.md (pass-
 | M2 | Safety requirements spec | Every safety function has a trigger, a reaction and an acceptance test |
 | M3 | Fixed equipment I/O loop | All four are demonstrated and recorded: (a) Gazebo sensor state is visible as PLC input bits in a TIA watch table, (b) PLC output bits drive the Gazebo actuator, verified visually, (c) latency and update rate are measured and written down, (d) signal-loss behaviour is defined and tested — what the PLC sees when the bridge stops, and what the equipment does |
 | M4 | Forklift commissioning cell | An operator drives the in-house forklift model in Gazebo from the commissioning HMI, every command passing HMI → PLC standard program → bridge → simulation and every state report returning simulation → bridge → PLC: (a) teleoperated drive with the PLC forming all motion setpoints, (b) the fork raised to a commanded height and stopped by the PLC's soft travel limits, (c) traction speed capped by the PLC while the fork is above its height threshold, (d) an obstacle entering the lidar stop zone latching a PLC process stop that overrides teleop, cleared only by the edge-triggered monitored reset after the zone clears, (e) loss of the HMI heartbeat zeroing all motion setpoints within the watchdog period; and a **recorded commissioning showcase** demonstrates (a)–(e), naming each reaction as standard-program process logic, not a safety function |
-| M5 | Sensored autonomous forklift | On the M4 forklift twin: (a) a safety laser scanner is added to the model and its signals reach the F-CPU safety program's F-blocks, a protective-field intrusion tripping an F-latched stop that overrides teleop and autonomous motion, cleared only by the edge-triggered monitored reset after the field clears; (b) the SRS cell-scope functions SF-01, SF-07 and SF-08 pass their acceptance tests AT-01, AT-07 and AT-08 on PLCSIM Advanced including the standard-program-in-STOP sub-case, the reactions execute with the bridge stopped and the OPC UA session down, and the `Safety/` mirrors remain read-only; (c) a navigation lidar is added, each sensor's data is verified correct as its own step before anything builds on it, and the sensor beams are visible in the Gazebo GUI; (d) SLAM builds a map of the arena and Nav2 drives the forklift autonomously to commanded goals, with AT-02, AT-03 and AT-04 passing and the inhibit demonstrably acting below the navigation stack; (e) the HMI, inherited from M4 and visually reduced, selects the drive mode (teleop / autonomous), shows a real-time map with live obstacles, and carries an emergency button that issues a process stop and displays F-layer state — never a safety function over the network (invariant 1, ADR 0010 D6(b)); and a **recorded safety + autonomy showcase** demonstrates (a)–(e), naming which reactions are F-CPU safety functions and which are process behaviour. The map-view data path is decided by its own ADR at M5 briefing (ADR 0010 D6(a)) |
+| M5 | Sensored autonomous forklift | On the M4 forklift twin: (a) a safety laser scanner is added to the model and its signals reach the F-CPU safety program's F-blocks, a protective-field intrusion tripping an F-latched stop that overrides teleop and autonomous motion, cleared only by the edge-triggered monitored reset after the field clears; (b) the SRS cell-scope functions SF-01, SF-07 and SF-08 pass their acceptance tests AT-01, AT-07 and AT-08 on PLCSIM Advanced including the standard-program-in-STOP sub-case, the reactions execute with the bridge stopped and the OPC UA session down, and the `Safety/` mirrors remain read-only; (c) a navigation lidar is added, each sensor's data is verified correct as its own step before anything builds on it, and the sensor beams are visible in the Gazebo GUI; (d) SLAM builds a map of the arena and Nav2 drives the forklift autonomously to commanded goals, with AT-02, AT-03 and AT-04 passing and the inhibit demonstrably acting below the navigation stack; (e) the HMI, inherited from M4 and visually reduced, selects the drive mode (teleop / autonomous), shows a real-time map with live obstacles, and carries an emergency button that issues a process stop and displays F-layer state — never a safety function over the network (invariant 1, ADR 0010 D6(b)); and a **recorded safety + autonomy showcase** demonstrates (a)–(e), naming which reactions are F-CPU safety functions and which are process behaviour. The map-view data path is the read-only monitoring plane of ADR 0011 D4, which closes ADR 0010 D6(a) |
 | M6 | VDA 5050 fleet at scale | An enlarged warehouse world with five loading stations, five unloading stations and four forklifts: the fleet manager assigns transport orders over VDA 5050 / MQTT and traffic conflicts are avoided; the PLC owns the stations' fixed equipment and serves OPC UA, the fleet manager subscribes, and the station handshake works end to end; AT-05, AT-06 and AT-09 pass (broker killed: controlled stop within the watchdog period, order kept, SF-03 still acting during the outage), and the fixed-equipment F-I/O behind SF-05 and SF-06 lands with the stations; and a **recorded fleet showcase** shows orders, traffic and the station handshake in one run. Entry condition: an owner-ruled deep-research brief precedes any implementation (ADR 0010 D3, D6(d)) |
 | M7 | LLM operations layer and final demonstration | An LLM agent supervises the running cell in real time, takes safe actions through the fleet layer only and alerts the operator; it never writes actuator outputs, never bypasses PLC interlocks, and the system operates normally with the LLM and its transport unreachable; the gate closes with the **recorded end-to-end demonstration**, the validation report and the README architecture narrative, the run showing B4 with both chains live (the cell e-stop does not stop a vehicle, the vehicle chain does not depend on the cell) and the cell operating normally with the fleet layer and all remote access unreachable. Entry condition: the owner decisions in docs/reports/m4-00-hermes-survey.md §6 are ruled (ADR 0010 D4, D6(c)) |
 
@@ -77,11 +98,13 @@ its boundary statements land, under the numbering below, as B1 at M5 and again
 at M6, B2 at M6, B3 at M5 for SF-01/07/08 and at M6 for SF-05/06, and B4 at M7,
 still the one statement that needs both chains alive at once.
 
-Four decisions are recorded as open, not resolved (ADR 0010 D6). **(a)** The
-HMI's real-time map view has no data path: the topology gives the HMI one edge,
-to the PLC, and a SLAM map cannot realistically transit OPC UA process nodes;
-invariant 11 is not amended by naming the gap. Ruled by the owner, by its own
-ADR, at M5 briefing. **(b)** The HMI emergency button is read under invariant 1
+Of the four decisions ADR 0010 D6 recorded as open, one is closed and three
+remain open. **(a)** The HMI's real-time map view had no data path: the topology
+gave the HMI one edge, to the PLC, and a SLAM map cannot realistically transit
+OPC UA process nodes. **Closed by ADR 0011 D4** at M5 briefing — the read-only
+monitoring plane above — which amends the CLAUDE.md §3 topology by one edge
+drawn in a third style and leaves invariant 11 unchanged. Still open:
+**(b)** The HMI emergency button is read under invariant 1
 as a process stop command plus a display of F-layer state, never a safety e-stop
 over the network; anything beyond that reading is an invariant change needing
 its own ADR, and that change is not being made. Ruled by the owner, if ever
