@@ -23,7 +23,10 @@ sim/
                                     (24 x 16 hall, drive aisle, obstacle props)
   worlds/FORKLIFT_ARENA_EVIDENCE.md dated verification record of the arena run
   launch/forklift_bringup.launch.py one-command headless arena bringup + spawn
-  worlds/warehouse.sdf              warehouse world for the vehicle work, now M5
+  worlds/warehouse.sdf              warehouse world of the parked navigation
+                                    scenario; navigation resumes at M5 on the
+                                    forklift (ADR 0010) and whether this world
+                                    is reused there is decided at briefing
                                     (walls, racks, DoorGap, ConveyorStation,
                                     ChargerStation)
   worlds/BRINGUP_EVIDENCE.md        dated verification record of the headless run
@@ -39,7 +42,8 @@ sim/
                                     against the PLC logic double
     tools/make_map.py               deterministic map generator (world -> map)
     maps/map.yaml, map.pgm          occupancy grid of warehouse.sdf (generated)
-    config/nav2_params.yaml         Nav2 parameters for the RB-KAIROS bringup
+    config/nav2_params.yaml         Nav2 parameters of the parked RB-KAIROS
+                                    bringup (platform retired, ADR 0010)
     nav_scenario.launch.py          Nav2 stack (map_server, AMCL, planner,
                                     DWB controller, behaviors, bt_navigator)
     run_scenario.py                 scripted NavigateToPose run + evidence
@@ -100,6 +104,13 @@ apt-get install -y \
 
 ### 4. Robotnik vendor workspace (ADR 0002)
 
+**RB-KAIROS is retired as the vehicle platform (ADR 0010 D1, which supersedes
+ADR 0002's platform selection).** Steps 4 and 5 here, the bringup below and
+the navigation scenario further down are all the RB-KAIROS path, kept as the
+record of the parked work. Nothing in the M3 cell or the M4 forklift arena
+needs them. Navigation work resumes at M5 on the in-house forklift with SLAM;
+which packages that needs is decided at M5 briefing, not restated here.
+
 Cloned unmodified at the `jazzy-devel` branch into
 `/opt/m3-feasibility/ws/src` and built with colcon:
 
@@ -130,6 +141,9 @@ apt-get install -y \
 ```
 
 ## Running the bringup
+
+This is the parked RB-KAIROS bringup, not current work — see the retirement
+note at step 4 and the navigation scenario below.
 
 ```
 source /opt/ros/jazzy/setup.bash
@@ -172,11 +186,20 @@ absorb the slow headless startup.
 The dated capture of exactly these checks from this container is in
 `worlds/BRINGUP_EVIDENCE.md`.
 
-## Navigation scenario (M5, deferred)
+## Navigation scenario (RB-KAIROS, parked — resumes at M5 on the forklift)
 
-This is not current work. Under ADR 0004 the vehicle and navigation gates
-move behind the fixed-equipment loop; this scenario is parked unverified
-and its status is recorded in `sim/scenarios/DEFERRED.md`.
+This is not current work. It was parked under ADR 0004, which moved the
+vehicle and navigation gates behind the fixed-equipment loop; ADR 0010 now
+supersedes that gate order and retires RB-KAIROS as the vehicle platform.
+Navigation work resumes at **M5**, on the in-house forklift, with SLAM
+building the map (ADR 0010 D1, D2). Everything below is the parked
+RB-KAIROS scenario, unverified, and its status is recorded in
+`sim/scenarios/DEFERRED.md`.
+
+Migrating this scenario to the forklift — and whether the warehouse world
+above is reused or replaced by the enlarged M6 warehouse — is **M5-briefing
+work, decided at briefing**. Nothing here decides it, and no file below has
+been rewritten for the new platform.
 
 Localization + Nav2 goal navigation on top of the bringup above. Three
 steps, three terminals, all with both setups sourced
@@ -245,7 +268,7 @@ of rack row B and turns east between the rack rows (~11 m). Expect roughly
   sensor definitions, not from this world.
 - The world's south wall has a free 4 m opening marked by the `DoorGap`
   posts/lintel; the PLC-controlled door and the conveyor/charger handshakes
-  act there in later gates (M6/M7). The blocks are geometry only — no
+  act there at M6 (ADR 0010). The blocks are geometry only — no
   fleet, PLC or safety behavior is simulated here (see the first section).
 
 ---
@@ -256,7 +279,8 @@ of rack row B and turns east between the rack rows (~11 m). Expect roughly
 under ADR 0004: prove the Gazebo-to-PLC signal loop with **fixed equipment
 only**, before any mobile robot. There is no vehicle in this world and
 none belongs in it. The warehouse world and its navigation scenario above
-are the deferred M5 vehicle work and are untouched by this.
+are the parked navigation work, which resumes at M5 on the forklift under
+ADR 0010, and are untouched by this.
 
 ## What is in the cell
 
@@ -466,8 +490,9 @@ returning the same way.
 
 The M3 cell is **not** embedded here and this arena is not embedded in it.
 Neither world file includes the other; the coupled cell-plus-vehicle scenario is
-roadmap M9 work (AT-07). The vehicle itself lives in `agv/forklift/model.sdf` —
-`sim/` owns worlds, `agv/` owns the vehicle — and the bringup spawns it in.
+roadmap M6 work (the coupled AT-07 case, ADR 0010). The vehicle itself lives in
+`agv/forklift/model.sdf` — `sim/` owns worlds, `agv/` owns the vehicle — and the
+bringup spawns it in.
 
 **Nothing here is a safety device.** The obstacle props are process furniture.
 The forklift's obstacle stop, fork-height speed cap and fork soft travel limits

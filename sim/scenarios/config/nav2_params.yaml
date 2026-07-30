@@ -1,6 +1,11 @@
 # nav2_params.yaml - M3 navigation scenario parameters for the amr-agent
 # project (brief m3-02).
 #
+# Parked with the rest of this directory (sim/scenarios/DEFERRED.md). RB-KAIROS
+# is retired as the vehicle platform by ADR 0010 D1; navigation work resumes at
+# M5 on the in-house forklift, and retuning these parameters for it is
+# M5-briefing work, not done here.
+#
 # Tuned for the vendor RB-KAIROS bringup of sim/launch/warehouse_bringup.launch.py
 # in the CPU-only project container (headless real-time factor ~0.1):
 #   - use_sim_time everywhere; all tolerances/timeouts below are SIM seconds.

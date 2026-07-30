@@ -11,9 +11,9 @@
 
   THE FIXED EQUIPMENT DEMO CELL IS NOT EMBEDDED. sim/worlds/cell.sdf keeps
   its conveyor, photo eye and operator panel, and this file has none of
-  them. The coupled cell plus vehicle scenario is roadmap M9 work (AT 07,
-  a vehicle in the monitored zone) and belongs to that gate, not to this
-  one. Neither file includes the other.
+  them. The coupled cell plus vehicle scenario is roadmap M6 work (AT 07
+  coupled, a vehicle in the monitored zone; ADR 0010) and belongs to that
+  gate, not to this one. Neither file includes the other.
 
   NO CONTROL LOGIC LIVES HERE. There is no sequencing, no interlock, no
   timer, no latch, no threshold and no zone decision in this file. The

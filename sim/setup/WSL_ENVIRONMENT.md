@@ -12,7 +12,10 @@ in. Every command below was executed by the author and its real output is
 quoted. The toolchain needed for the M3 demonstration cell — ROS 2 Jazzy,
 Gazebo Harmonic and asyncua 2.0.1 — is installed and verified here. The
 ros2_control and Nav2 packages from `install.sh` are still absent; they belong
-to the deferred M5 vehicle work and the cell does not use them (§3.1).
+to the parked navigation scenario and the cell does not use them (§3.1).
+Navigation work resumes at M5 on the in-house forklift (`docs/roadmap.md`,
+ADR 0010), so what that gate actually needs installed is settled at M5
+briefing, not by the "not needed" entries below.
 
 ## 2. Verified environment table
 
@@ -30,8 +33,8 @@ to the deferred M5 vehicle work and the cell does not use them (§3.1).
 | `ros-jazzy-ros-gz` | installed | `1.0.22-1noble.20260616.074726` | match |
 | Render backend | ogre2 on llvmpipe (container) | ogre2 on `llvmpipe (LLVM 20.1.2, 256 bits)` | match, see §4.7 |
 | Headless RTF (cell) | ~1.0 | `0.99984`, `0.99994` | match |
-| ros2_control stack | installed | **MISSING** | not needed for the M3 cell (M5 work) |
-| Nav2 | installed | **MISSING** | not needed for the M3 cell (M5 work) |
+| ros2_control stack | installed | **MISSING** | not needed for the M3 cell (M5 work, see §3.1) |
+| Nav2 | installed | **MISSING** | not needed for the M3 cell (M5 work, see §3.1) |
 | asyncua | 2.0.1 | `2.0.1` | match |
 | cryptography | 49.0.0 | `49.0.0` | match |
 | pyOpenSSL | 26.3.0 | `26.3.0` | match |
@@ -143,8 +146,15 @@ sudo apt-get update && sudo apt-get install -y ros-jazzy-gz-sim-vendor ros-jazzy
 ```
 
 The ros2_control and Nav2 entries in the `install.sh` package list remain
-uninstalled. That is deliberate: they belong to the deferred M5 vehicle work
-(`sim/scenarios/DEFERRED.md`), and nothing in the M3 cell loads them.
+uninstalled. That is deliberate: they belong to the parked navigation scenario
+(`sim/scenarios/DEFERRED.md`), and nothing in the M3 cell loads them. The M4
+forklift arena does not load them either.
+
+Under ADR 0010 that scenario's platform is retired: navigation work resumes at
+**M5 on the in-house forklift**, with SLAM and Nav2 on that vehicle. The "not
+needed" verdicts above are therefore statements about the M3 cell only. Which
+of these packages M5 actually needs, and in which form, is **re-examined at M5
+briefing** and is not ruled here.
 
 ### 3.2 Python venv and asyncua — COMPLETED
 

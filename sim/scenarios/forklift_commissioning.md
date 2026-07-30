@@ -771,6 +771,16 @@ the cell-scope core of M5 opened early on this cell
 recorded here closes M5, passes an acceptance test, or is cited as M4 evidence
 (ADR 0009 D2.2, D2.3; `docs/safety/TWIN-DEMO-MAP.md` N5, N6).
 
+**Reconciliation with ADR 0010, stated once for this whole section.** ADR 0010
+D2 widens M5 to the sensored autonomous forklift — the safety layer *and* the
+navigation stack, both on this twin — and extends ADR 0009 rather than
+superseding it, so what that ADR opened early as cell-scope content on the twin
+is now M5's own subject matter. The "(M5, early)" in the heading above keeps its
+meaning under the new numbering: this is M5's opening wave, run ahead of the
+gate on the M4 stack, and it still closes nothing. Everything below is unchanged
+by ADR 0010 — the same steps, the same Pass lines, the same non-claims — and
+"M5 proper" wherever it appears in this section means that widened M5 gate.
+
 **Authority.** `plc/forklift-safety/SPEC.md` §9 owns the T6 steps, their Pass
 line and the F-collective-signature discipline; `docs/safety/TWIN-DEMO-MAP.md`
 §3 owns which AT sub-cases are in scope and which are deferred, and the

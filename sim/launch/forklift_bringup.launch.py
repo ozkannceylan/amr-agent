@@ -18,7 +18,8 @@
 #
 #   the fixed-equipment cell. sim/worlds/cell.sdf and its bringup are M3 and
 #     are untouched by this file. The coupled cell plus vehicle scenario is
-#     roadmap M9 work (AT-07) and neither world includes the other.
+#     roadmap M6 work (AT-07 coupled, ADR 0010) and neither world includes
+#     the other.
 #
 #   the PLC, the bridge process and the HMI. Under ADR 0008 every command
 #     reaches the simulation through HMI -> PLC standard program -> bridge,
@@ -26,7 +27,8 @@
 #     and hmi/ processes; this launch only puts the plant on the wire.
 #
 #   Nav2, AMCL, a map and any VDA 5050 client. The forklift carries no
-#     navigation claim (ADR 0008 D5).
+#     navigation claim at M4 (ADR 0008 D5; ADR 0010 D1/D2 give it a
+#     navigation stack at M5, which this file does not anticipate).
 #
 # THIS FILE CONTAINS NO CONTROL LOGIC. The bridge is a type translator: it
 # moves a value across the ROS/gz boundary and changes nothing else. No

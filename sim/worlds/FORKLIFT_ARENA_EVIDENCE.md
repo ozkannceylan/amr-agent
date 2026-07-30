@@ -74,7 +74,7 @@ Available models:
 
 Twelve arena models and the spawned vehicle. No conveyor, no photo-eye and no
 operator panel: the fixed-equipment cell is not embedded here, and the coupled
-cell plus vehicle scenario is roadmap M9 work.
+cell plus vehicle scenario is roadmap M6 work (ADR 0010).
 
 ```
 $ ros2 topic list
@@ -530,7 +530,8 @@ run and nothing else on the machine.
    itself, and the PLC reaction it is there to demonstrate, are later work.
 6. **Nothing about navigation.** No map, no AMCL, no Nav2, no VDA 5050. The
    odometry above is simulator ground truth, not a localisation solution, and
-   the forklift carries no navigation claim (ADR 0008 D5).
+   the forklift carried no navigation claim at M4 (ADR 0008 D5; ADR 0010
+   D1/D2 give it one at M5, which nothing in this run anticipates).
 7. **Nothing about hardware acceleration.** Rendering was llvmpipe. The
    scanner budget of 181 samples at 10 Hz and the arena's texture-free,
    shadow-free scene were chosen against that, and raising either without

@@ -15,6 +15,12 @@
 #      (robotnik_controllers provides the RB-KAIROS mecanum controller;
 #      it is NOT built from the workspace sources)
 #
+# Steps 3 and 4 are the RB-KAIROS path, retired as the vehicle platform by
+# ADR 0010 D1 and kept here as the record of the parked navigation scenario
+# (sim/scenarios/DEFERRED.md). Neither the M3 cell nor the M4 forklift arena
+# needs them. Navigation work resumes at M5 on the in-house forklift; what
+# that gate needs installed is decided at M5 briefing, not by this script.
+#
 # Run as root (or with sudo).
 
 set -euo pipefail

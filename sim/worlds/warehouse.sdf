@@ -1,6 +1,9 @@
 <?xml version="1.0" ?>
 <!--
-  warehouse.sdf - M3 warehouse world for the amr-agent project.
+  warehouse.sdf - warehouse world of the parked navigation scenario
+  (sim/scenarios/DEFERRED.md). Written in the m3 round; under ADR 0010 the
+  navigation work it serves resumes at M5, on the in-house forklift, and
+  whether this world is reused there is decided at M5 briefing.
 
   Layout (top view, metres, origin at floor centre):
 
@@ -16,7 +19,8 @@
          |   ChargerStation (west wall)      DoorGap (south wall, x ~ +6)
          +-----------------------------------------------> +x (east)
 
-  Sensor note: the RB-KAIROS lidars are gz "gpu_lidar" sensors, so this
+  Sensor note: the RB-KAIROS lidars (that platform is retired by ADR 0010;
+  this is the parked bringup) are gz "gpu_lidar" sensors, so this
   world MUST load gz-sim-sensors-system (with a render engine) in addition
   to physics / user-commands / scene-broadcaster. The IMU system is loaded
   for the onboard vectornav IMU.
@@ -152,8 +156,8 @@
     <!-- ========================= Door marker ========================= -->
     <!-- DoorGap: two posts and a lintel marking the 4 m opening in the
          south wall (x in [4, 8]). The opening itself stays free so the
-         vehicle can drive through; the PLC-controlled door will act here
-         in later gates. -->
+         vehicle can drive through; the PLC-controlled door acts here at
+         M6 (ADR 0010). -->
     <model name="DoorGap">
       <static>true</static>
       <pose>6 -10.1 0 0 0 0</pose>
@@ -263,7 +267,7 @@
 
     <!-- ====================== Fixed stations ========================= -->
     <!-- ConveyorStation: transfer station block against the east wall.
-         The S7-1500 owns this equipment in later gates. -->
+         The S7-1500 owns this equipment at M6 (ADR 0010). -->
     <model name="ConveyorStation">
       <static>true</static>
       <pose>13.4 5 0.4 0 0 0</pose>
@@ -277,7 +281,7 @@
     </model>
 
     <!-- ChargerStation: charging dock block against the west wall.
-         Charger interlocks belong to the PLC in later gates. -->
+         Charger interlocks belong to the PLC at M6 (ADR 0010). -->
     <model name="ChargerStation">
       <static>true</static>
       <pose>-14.5 -6 0.6 0 0 0</pose>

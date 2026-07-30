@@ -1,4 +1,7 @@
-# warehouse_bringup.launch.py - M3 bringup for the amr-agent project.
+# warehouse_bringup.launch.py - bringup for the parked navigation scenario
+# (sim/scenarios/DEFERRED.md). Written in the m3 round. RB-KAIROS is retired
+# as the vehicle platform by ADR 0010 D1; navigation work resumes at M5 on the
+# in-house forklift, and migrating this launch is M5-briefing work.
 #
 # One launch file that:
 #   1. starts the Gazebo (gz sim) server with sim/worlds/warehouse.sdf,

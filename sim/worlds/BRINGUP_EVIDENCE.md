@@ -3,6 +3,14 @@
 Date: 2026-07-26. Host: project container, Ubuntu 24.04, ROS 2 Jazzy,
 Gazebo Harmonic (gz-sim-vendor), headless (no GPU, ogre2 on CPU).
 
+Gate note (added 2026-07-30, no figure below is changed): the "M3" in the
+title is the round this run was captured in. The warehouse bringup it
+records belongs to the parked navigation scenario
+(`sim/scenarios/DEFERRED.md`); under ADR 0010 that work resumes at **M5**,
+on the in-house forklift, and RB-KAIROS is retired as the vehicle platform.
+Everything below therefore stands as a dated RB-KAIROS record, not as
+evidence for M5.
+
 Command under test:
 
 ```
