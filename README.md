@@ -4,8 +4,7 @@
 
 An operator drives a simulated forklift from a commissioning HMI while a Siemens
 S7-1500 forms every motion setpoint in between — HMI → PLC → bridge → Gazebo, and
-the state report back the same way over live OPC UA. The recording below is one
-continuous run, not a scripted animation and not a replay.
+the state report back the same way over live OPC UA. 
 
 ![Teleoperated forklift in Gazebo, driven from the commissioning HMI with the S7-1500 forming every setpoint](assets/teleop-showcase.gif)
 
