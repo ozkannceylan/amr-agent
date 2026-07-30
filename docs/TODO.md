@@ -86,6 +86,11 @@ brief queue lives in docs/PLAN.md.
 - Carried, low: opcua-nodes.md §11.8 open item 1 is answered by m5a-06b but
   its closure mark needs a §11 edit that brief forbade — one line with the
   next interface touch.
+- Carried (M6 briefing): vda5050-subset.md still defines
+  typeSpecification.seriesName as RB-KAIROS per ADR 0002, with agvClass
+  CARRIER and an agvKinematic that depends on the vehicle's steering model —
+  redefine against the forklift (ADR 0010 D1) in its own brief; a field-value
+  change, not a renumber (m5r-08 open question 1).
 
 ## hmi
 - Carried, low: EVIDENCE_HMI.md §C's browser pass predates the m4f-07b change
