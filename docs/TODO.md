@@ -61,6 +61,10 @@ is the open gate and its brief queue lives in docs/PLAN.md.
 - M6 carried: resume the parked navigation scenario (sim/scenarios/DEFERRED.md).
 
 ## interface
+- Carried (fold into the next interface brief): opcua-nodes.md §10.1 still
+  describes the shared-project two-FB arrangement; the as-built forklift
+  project runs one standard FB with both link verdicts inside it (m4f-04j).
+  Add the heartbeat browse-path read-back note its report requests.
 - Carried, low (fold into the next interface brief): bridge-design.md §7.2
   and opcua-nodes.md §9.7 still share the flat "No timer, threshold or
   reaction exists in the bridge" sentence that §10.1's ruling rephrased
