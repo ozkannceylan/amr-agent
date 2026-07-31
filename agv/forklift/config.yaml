@@ -205,6 +205,64 @@ odometry:
   # a gap, because an integrator that fills gaps invents distance.
   joint_state_timeout_s: 0.50
 
+standstill:
+  # ============ THE VEHICLE IS NOT ROTATING, AND HOW IT KNOWS ============
+  #
+  # Read by scripts/wheel_odometry.py, which decides the verdict because
+  # it already owns the encoder model, and by scripts/imu_gate.py, which
+  # acts on it. Nothing else forms this datum (invariant 10).
+  #
+  # THE PHYSICS THIS RESTS ON. A tricycle's instantaneous centre of
+  # rotation lies on the line of the rear axle, because the two passive
+  # wheels cannot slide sideways. The drive wheel's contact point does
+  # NOT lie on that line - it stands one wheelbase in front of it - so
+  # the body cannot rotate without the drive wheel travelling. Writing
+  # the drive wheel's velocity in the body frame,
+  #
+  #     v_D = (v_R, psidot * L)     so     |v_D| >= |psidot| * L
+  #
+  # which integrates to |dpsi| <= (tread travelled) / L. ONE DRIVE
+  # ENCODER COUNT IS 2*pi/4096 rad of wheel = 1.53398e-3 * 0.1206 m =
+  # 1.850e-4 m of tread, so a count that does not change bounds the body
+  # rotation over that interval at 1.850e-4 / 1.05 = 1.762e-4 rad, which
+  # is 0.0101 deg. That is the whole argument: when the encoders report
+  # no motion the vehicle is not turning, so whatever the gyro reports in
+  # that condition is bias and not rotation.
+  #
+  # THIS IS NOT A SAFETY FUNCTION. It gates one measurement channel of
+  # one estimator. It inhibits no actuator, latches nothing and stops
+  # nothing; the protective stop and safe torque off are onboard and
+  # hardwired and appear nowhere in this file (invariant 1).
+
+  # BOTH encoder counts must be unchanged for this long before the
+  # verdict goes true. The window is what turns an instantaneous reading
+  # into a condition: holding under one count for 0.50 s bounds the
+  # drive wheel's tread speed at 1.850e-4 / 0.50 = 0.37 mm/s and the
+  # body's rotation rate at 0.0202 deg/s. It also costs 0.50 s of
+  # ungated gyro at the start of every stop, which is the conservative
+  # direction and is deliberate: the gate opens on the FIRST count of
+  # motion and closes only after the window, so it is late to trust the
+  # standstill and instantaneous to distrust it.
+  window_s: 0.50
+
+  # WHY THE STEER COUNT IS IN THE TEST TOO, although the bound above
+  # does not need it. A parked forklift can steer on the spot, and a
+  # steered wheel scrubbing against the floor is the one manoeuvre in
+  # which the drive encoder could stay still while the contact patch
+  # slides. Requiring both counts still means "no wheel is moving at
+  # all", which is a stronger statement than the bound needs and costs
+  # nothing during an idle, when neither moves.
+  include_steer_axis: true
+
+  # A verdict older than this counts as NO verdict, and the gate then
+  # FAILS OPEN - the gyro is fused exactly as it was before this
+  # mechanism existed. The failure directions are not symmetric: a gate
+  # stuck open costs the drift this brief measures, while a gate stuck
+  # closed would hide a real rotation from the filter. So every
+  # uncertainty resolves to open. 0.20 s is ten missed verdicts at the
+  # 50 Hz they are published at.
+  verdict_timeout_s: 0.20
+
 imu:
   # Nothing in this block is a noise parameter. model.sdf owns the
   # sensor's noise, the message carries the covariance gz derives from
@@ -388,6 +446,30 @@ topics:
   # that is deliberate: see model.sdf's <enable_orientation> block, and
   # the warning under "The orientation trap" in README.md.
   imu: /forklift/imu
+
+  # THE GYRO CHANNEL AS THE FILTER ACTUALLY SEES IT. scripts/imu_gate.py
+  # subscribes to `imu` above and republishes here, and the ONE thing it
+  # does is stop republishing while `wheel_standstill` below is true: a
+  # gyro reading taken when the encoders say the vehicle is not rotating
+  # is bias, not rotation, so it is not offered to the filter as a
+  # rotation measurement. `ekf.yaml` names THIS topic as imu0 and never
+  # the raw one.
+  #
+  # A GAP IN THIS TOPIC IS THE SIGNAL, not a fault. The gate suppresses
+  # rather than rewrites, deliberately: a republished message carrying a
+  # zeroed rate would be a sensor reading this vehicle never took, and
+  # any later consumer would have no way to tell it from one it did.
+  # Silence cannot be mistaken for a measurement.
+  imu_gated: /forklift/imu_gated
+
+  # THE ENCODER-DERIVED STANDSTILL VERDICT. std_msgs/Bool at 50 Hz from
+  # scripts/wheel_odometry.py, which owns it because it owns the encoder
+  # model; consumed by scripts/imu_gate.py and by nothing else. The
+  # physics behind it and the window are in the `standstill:` block
+  # above. It is an estimator input, not a machine state: it does not
+  # mean the vehicle is enabled, parked, safe or stopped, and nothing
+  # may read it as any of those.
+  wheel_standstill: /forklift/wheel_standstill
 
   # ---- the two estimator topics ----
   #

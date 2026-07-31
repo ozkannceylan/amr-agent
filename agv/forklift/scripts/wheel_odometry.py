@@ -8,6 +8,22 @@ WHAT THIS NODE IS
   tricycle kinematics, and publishes the result as one nav_msgs/Odometry.
 
       /forklift/joint_states  ->  /forklift/odom_wheel
+                              ->  /forklift/wheel_standstill
+
+THE SECOND OUTPUT, AND WHY IT IS HERE
+  `wheel_standstill` is one boolean: both encoder counts have been
+  unchanged for the window in config.yaml's `standstill:` block. It is
+  published from this node and from no other because this node owns the
+  encoder model (invariant 10) - a consumer that re-derived "is it
+  moving" from the raw joint angles would be quantising the same signal
+  a second time with its own idea of the count grid.
+
+  It is a MEASUREMENT, not a command and not a machine state. It says
+  the wheels are not turning. It does not say the vehicle is enabled,
+  parked, safe or stopped, it inhibits nothing and it latches nothing
+  (invariants 1 and 9). Its one consumer is scripts/imu_gate.py, which
+  uses it to decide whether the gyro's yaw rate is a rotation
+  measurement or a reading of the device's bias.
 
 WHAT THIS NODE IS NOT, AND THIS IS THE IMPORTANT PART
   It is NOT the vehicle's pose. It is ONE SENSOR'S OPINION of it, in
@@ -151,7 +167,7 @@ def yaw_to_quaternion(yaw):
     return (0.0, 0.0, math.sin(yaw * 0.5), math.cos(yaw * 0.5))
 
 
-def _make_node_class(Node, Odometry, QoSProfile, JointState):
+def _make_node_class(Node, Odometry, QoSProfile, JointState, Bool):
     """Build the node class once ROS is importable.
 
     A closure rather than a module-level class, so that this file's
@@ -196,9 +212,16 @@ def _make_node_class(Node, Odometry, QoSProfile, JointState):
             self.odom_frame = frames['odom']
             self.base_frame = frames['base']
 
+            # ---- the standstill verdict ----
+            still = cfg['standstill']
+            self.standstill_window_s = float(still['window_s'])
+            self.standstill_uses_steer = bool(still['include_steer_axis'])
+
             qos = QoSProfile(depth=cfg['qos']['depth'])
             self.pub_odom = self.create_publisher(
                 Odometry, topics['odom_wheel'], qos)
+            self.pub_standstill = self.create_publisher(
+                Bool, topics['wheel_standstill'], qos)
             self.sub_joint_states = self.create_subscription(
                 JointState, topics['joint_states'], self.cb_joint_states, qos)
             self.timer_integrate = self.create_timer(
@@ -209,6 +232,17 @@ def _make_node_class(Node, Odometry, QoSProfile, JointState):
             # mutated in place.
             self.sample = None            # (t_s, drive_rad, steer_rad)
             self.last_sample = None       # the previous integrated sample
+
+            # Standstill detection state. `held_counts` is the pair of
+            # ENCODER COUNTS the wheels have been sitting on, and
+            # `held_since_s` the stamp at which they were first seen there.
+            # The verdict is a duration test on that pair, evaluated at the
+            # 500 Hz the joint states arrive at rather than at the 50 Hz this
+            # node integrates, so a single count between two integration
+            # cycles cannot pass unseen.
+            self.held_counts = None
+            self.held_since_s = None
+            self.standstill = False
 
             # Integrated state: the REAR AXLE MIDPOINT in the odom frame, plus
             # the heading. base_link is derived from it at publication time, so
@@ -232,6 +266,16 @@ def _make_node_class(Node, Odometry, QoSProfile, JointState):
                     self.drive_step_rad, self.steer_step_rad,
                     self.steer_zero_offset_rad, topics['odom_wheel'],
                     1.0 / self.period_s))
+            self.get_logger().info(
+                'standstill verdict on {}: both encoder counts unchanged for '
+                '{:.3f} s ({}), which bounds body rotation at {:.4f} deg/s. '
+                'It is an estimator input and inhibits nothing'.format(
+                    topics['wheel_standstill'], self.standstill_window_s,
+                    'drive and steer' if self.standstill_uses_steer
+                    else 'drive only',
+                    math.degrees(self.rolling_radius_m * self.drive_step_rad
+                                 / self.wheelbase_m
+                                 / self.standstill_window_s)))
 
         # ------------------------------------------------------------------ #
         # Input. Named cb_* so it cannot shadow an rclpy Node attribute.
@@ -245,6 +289,7 @@ def _make_node_class(Node, Odometry, QoSProfile, JointState):
             under simulation those are different quantities.
             """
             if self.drive_joint not in msg.name or self.steer_joint not in msg.name:
+                self.clear_standstill()
                 self.get_logger().warn(
                     'joint state carries {} but this node needs {} and {}'.format(
                         list(msg.name), self.drive_joint, self.steer_joint),
@@ -253,6 +298,7 @@ def _make_node_class(Node, Odometry, QoSProfile, JointState):
             i_drive = msg.name.index(self.drive_joint)
             i_steer = msg.name.index(self.steer_joint)
             if i_drive >= len(msg.position) or i_steer >= len(msg.position):
+                self.clear_standstill()
                 return
 
             drive_rad = msg.position[i_drive]
@@ -266,6 +312,7 @@ def _make_node_class(Node, Odometry, QoSProfile, JointState):
             margin = self.steer_limit_rad + 0.05
             steer_ok = -margin < steer_rad < margin
             if not (drive_ok and steer_ok):
+                self.clear_standstill()
                 self.get_logger().warn(
                     'implausible joint state ignored: {}={}, {}={}'.format(
                         self.drive_joint, drive_rad, self.steer_joint, steer_rad),
@@ -273,7 +320,58 @@ def _make_node_class(Node, Odometry, QoSProfile, JointState):
                 return
 
             stamp = msg.header.stamp
-            self.sample = (stamp.sec + stamp.nanosec * 1e-9, drive_rad, steer_rad)
+            t_s = stamp.sec + stamp.nanosec * 1e-9
+            self.sample = (t_s, drive_rad, steer_rad)
+            self.update_standstill(t_s, drive_rad, steer_rad)
+
+        # ------------------------------------------------------------------ #
+        # The standstill verdict.
+        # ------------------------------------------------------------------ #
+
+        def clear_standstill(self):
+            """Anything that is not a usable joint state opens the gate.
+
+            The two failure directions are not symmetric. A verdict stuck
+            FALSE costs exactly the drift this vehicle had before the gate
+            existed; a verdict stuck TRUE would hide a real rotation from
+            the filter. So every uncertainty - a missing joint, a short
+            message, an implausible angle, a clock that ran backwards -
+            resolves to "not standing still".
+            """
+            self.held_counts = None
+            self.held_since_s = None
+            self.standstill = False
+
+        def update_standstill(self, t_s, drive_rad, steer_rad):
+            """Have both encoder counts held still for the whole window?
+
+            The counts, not the angles. An encoder reports a count, and two
+            angles inside one count are the same reading as far as the
+            vehicle can tell - which is the point: the test has to be the
+            one the real device could actually perform.
+            """
+            counts = (round(drive_rad / self.drive_step_rad),
+                      round((steer_rad + self.steer_zero_offset_rad)
+                            / self.steer_step_rad)
+                      if self.standstill_uses_steer else 0)
+
+            if self.held_counts != counts or self.held_since_s is None:
+                # A count moved. The gate opens on this sample, with no
+                # window and no filtering: distrusting the standstill is
+                # instantaneous, trusting it takes the full window.
+                self.held_counts = counts
+                self.held_since_s = t_s
+                self.standstill = False
+                return
+
+            held_s = t_s - self.held_since_s
+            if held_s < 0.0:
+                # The clock went backwards (a simulator reset). Re-arm
+                # rather than measure a negative duration.
+                self.held_since_s = t_s
+                self.standstill = False
+                return
+            self.standstill = held_s >= self.standstill_window_s
 
         # ------------------------------------------------------------------ #
         # Integration.
@@ -281,6 +379,16 @@ def _make_node_class(Node, Odometry, QoSProfile, JointState):
 
         def cb_integrate(self):
             """One dead-reckoning step, then publish."""
+            # THE VERDICT IS PUBLISHED FIRST, ABOVE EVERY EARLY RETURN
+            # BELOW. Its consumer times it out and fails open, so a
+            # verdict that stops arriving is read as "moving" - which is
+            # right when the joint states have stopped, and wrong when the
+            # vehicle is standing still with a settled integrator. Every
+            # cycle emits one, whatever the integrator then decides to do.
+            verdict = Bool()
+            verdict.data = bool(self.standstill)
+            self.pub_standstill.publish(verdict)
+
             sample = self.sample
             if sample is None:
                 self.get_logger().warn(
@@ -421,8 +529,9 @@ def main(argv=None):
     from rclpy.node import Node
     from rclpy.qos import QoSProfile
     from sensor_msgs.msg import JointState
+    from std_msgs.msg import Bool
 
-    node_class = _make_node_class(Node, Odometry, QoSProfile, JointState)
+    node_class = _make_node_class(Node, Odometry, QoSProfile, JointState, Bool)
 
     rclpy.init(args=[sys.argv[0]] + ros_argv)
     node = node_class(cfg)

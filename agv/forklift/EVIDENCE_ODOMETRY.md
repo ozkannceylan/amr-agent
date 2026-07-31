@@ -4,6 +4,23 @@
 106.49 m path with 1449.8° of total turning.** That is the answer, it is
 larger than convenient, and section 7 says which term produced it.
 
+**Sections 1–11 are brief m5-07c's run and are unchanged. Section 12 is
+brief m5-07d's, and it changed one thing:** the estimator no longer
+integrates gyro bias while the vehicle is standing still. Read in one
+line, the difference is
+
+| | over the idle | while driving |
+|---|---|---|
+| before | **−7.70° per minute** of standing there | −12.98° over the route |
+| after | **0.00° per minute** | −12.88° over the route |
+
+and the right-hand column is the point: **the drift while moving did not
+improve**, by 0.10° over 110.74 s of driving, which is 0.95 of the
+white-noise random walk expected over the same interval. That drift is
+the phenomenon gate M5 exists to correct and it is still there, at full
+size. What is gone is a heading error that depended on how long somebody
+waited before pressing go.
+
 Until brief m5-07c the forklift's pose came from Gazebo: perfect,
 drift-free, and useless as a test of anything downstream. This document
 records the run in which that stopped being true — an IMU on the model, a
@@ -27,6 +44,11 @@ is now the **reference** these numbers are measured against.
 | `ekf.yaml` | md5 `da93e469fb357fab5bfa7f7ea5cd107f` |
 | `scripts/wheel_odometry.py` | md5 `4acdb572352876a13bcccc0dcdcf94cf` |
 | `scripts/check_odometry.py` | md5 `1a56ef3a1600014855f54d83dd91a62a` |
+
+**Those five md5s are the files as brief m5-07c left them, and four of
+them have since changed.** Section 12 carries its own table of the files
+as m5-07d left them, and `model.sdf` appears in both with the same
+digest, which is the check that the noise model was not touched.
 
 ---
 
@@ -472,6 +494,15 @@ changes to how much the filter believes a sensor, i.e. tuning, and the
 brief put the tuning argument in the SLAM brief. **The number is the
 deliverable.**
 
+**Half of that paragraph has since been answered, and the half that was
+answered is not the half that changes this number.** Brief m5-07d landed
+the second option's *first* half — the vehicle now recognises standstill
+and stops offering the gyro's yaw rate to the filter in that condition —
+and deliberately not its second half, the bias estimate that would be
+carried into motion. The covariance was not touched either. So **every
+figure in this section still stands as the drift while moving**, and
+section 12.4 re-measures it on the same route to show that it does.
+
 ---
 
 ## 8. Does this exercise the degenerate aisles?
@@ -599,3 +630,457 @@ invoking shell.
   changes the tyre loading; no run here did it.
 - **Nothing about SLAM or AMCL.** This document measures the input those
   will be given. What they do with it is the next brief's.
+- **Nothing about standing still.** Every figure above is over a driven
+  profile, and the two parked segments inside it were treated as part of
+  the run. Section 12 is what happened when somebody measured the
+  standing case on its own.
+
+---
+
+# 12. STANDING STILL — brief m5-07d
+
+## 12.1 The finding this answers, and where the number came from
+
+`docs/reports/m5-08c-slam-judge.md` finding 4 measured the committed
+warehouse map as **rotated ≈ 2.0° from the building**, by least-squares
+fitting the three longest walls in the committed grid. It attributed the
+rotation to this estimator integrating the gyro's bias through the idle
+between bringup and the first drive command — roughly **0.13 °/s over
+about 20 s**, and it noted the discarded four-minute-idle map at ≈ 20°
+as the confirming slope.
+
+Three things make that a defect rather than a characteristic:
+
+1. the map's orientation is a function of **how long someone waited**;
+2. gz draws the bias sign per run, so **every rebuild gets a different
+   angle, of a different sign**, and nothing downstream may ever
+   hard-code one;
+3. the mitigation on record was a sentence in a procedure ("drive
+   promptly"), enforced by nothing.
+
+**Measured here, and it reproduces exactly.** With the vehicle commanded
+to rest and the estimator as m5-07c left it, the fused heading moved
+**−7.70° per minute of idle** (section 12.3). The judge's 8 °/min was
+right.
+
+## 12.2 The mechanism, and why it is legitimate rather than convenient
+
+### What was added
+
+One node, `scripts/imu_gate.py`, and one boolean.
+
+```
+/forklift/joint_states ──► wheel_odometry.py ──► /forklift/odom_wheel ──┐
+                                            └──► /forklift/wheel_standstill
+                                                          │             │
+/forklift/imu ─────────────────► imu_gate.py ◄────────────┘             │
+                                     └──► /forklift/imu_gated ──► forklift_ekf
+                                                                        ▲
+                                                                        └┘
+```
+
+`wheel_odometry.py` publishes one extra topic: both encoder counts have
+been unchanged for `standstill.window_s` (0.50 s). `imu_gate.py`
+forwards every IMU message unchanged **except** while that verdict is
+true and fresh, when it forwards none. `ekf.yaml` names the gated topic
+as `imu0`. Nothing else changed.
+
+### Why the wheels are evidence about the gyro
+
+A MEMS gyro's output is `rate + bias + noise` and no part of the device
+separates the three. The wheels separate them, for this vehicle, by
+geometry:
+
+> A tricycle's instantaneous centre of rotation lies on the line of its
+> rear axle, because the two passive wheels cannot slide sideways. The
+> drive wheel's contact point is **not** on that line — it stands one
+> wheelbase in front of it. Writing the drive wheel's velocity in the
+> body frame, `v_D = (v_R, ψ̇·L)`, so `|v_D| ≥ |ψ̇|·L`, which integrates
+> to `|Δψ| ≤ (tread travelled) / L`.
+
+One drive encoder count is `2π/4096 × 0.1206 m = 1.850e-4 m` of tread,
+so **a count that does not change bounds the body rotation over that
+interval at `1.850e-4 / 1.05 = 1.762e-4 rad = 0.0101°`.** The harness
+computes that bound from `config.yaml` and prints it on every idle run
+rather than quoting it.
+
+So the rate term is known to be zero to within 0.0101°, independently of
+the gyro. What the gyro reports in that condition is bias. Declining to
+offer it to the filter as a rotation measurement is the **zero angular
+rate update** every inertial navigator implements, and the reason it is
+standard is exactly this one: standstill is the only interval in which a
+dead-reckoning vehicle has independent knowledge of the truth of a rate.
+
+**The steer count is in the test too**, although the bound does not need
+it. A parked forklift can steer on the spot, and a steered wheel
+scrubbing against the floor is the one manoeuvre in which the drive
+encoder could hold while the contact patch slides. Requiring both counts
+means "no wheel is moving at all", which is stronger than the bound needs
+and costs nothing during an idle, when neither moves.
+
+### Why it is a node and not a parameter
+
+The brief's instruction was to prefer configuration to code. **The
+package has no such configuration, and this was checked before the node
+was written.** `robot_localization` 3.8.3
+(`3.8.3-1noble.20260615.152020`), the exact build installed here:
+
+```
+$ strings /opt/ros/jazzy/lib/librl_lib.so | grep -iE 'zero|stationar|standstill|still'
+...
+zero_altitude
+```
+
+`zero_altitude` belongs to `navsat_transform` and is about altitude. The
+filter's whole parameter set — `frequency`, `sensor_timeout`,
+`two_d_mode`, `transform_time_offset`, the four frame names, the per
+sensor `odomN_*` / `imuN_*` families, `use_control` and its limits and
+gains, `process_noise_covariance`, `initial_estimate_covariance`,
+`dynamic_process_noise_covariance`, `smooth_lagged_data`,
+`history_length`, `reset_on_time_jump`, `permit_corrected_publication`,
+`predict_to_current_time`, `disabled_at_startup`, `publish_tf`,
+`publish_acceleration`, `gravitational_acceleration` — contains no
+stationary handling of any kind. Two near misses were considered by name
+and rejected:
+
+| candidate | what it actually does | why not |
+|---|---|---|
+| `dynamic_process_noise_covariance` | scales the process noise by the robot's velocity | it changes how fast the estimate's uncertainty grows, not whether a measurement is fused. At rest it makes the filter trust its own prediction more, which **slows** the integration of the bias and does not stop it — and it is a change to the noise model, which brief m5-07d forbids |
+| `ToggleFilterProcessing` service, with `disabled_at_startup` | freezes the entire filter until another service call | it freezes **position** as well as heading on the strength of one boolean, and re-enabling rides on a service call that can be lost. The failure mode is a filter frozen while the vehicle drives, which is worse than the drift it would prevent |
+
+So the mechanism is one node outside the filter, and the filter's own
+configuration changed by exactly one string: `imu0`, from
+`/forklift/imu` to `/forklift/imu_gated`.
+
+### Two design choices worth stating, because both could have gone the other way
+
+**It suppresses; it does not rewrite.** A republished sample carrying a
+zeroed yaw rate would be a reading this vehicle never took, and nothing
+downstream could tell it from one it did. The gate publishes nothing
+instead, so a gap in `/forklift/imu_gated` means "the gate was closed"
+and can mean nothing else. The filter needs no special handling for the
+gap: an absent measurement is simply not fused, and the wheel odometry's
+own yaw rate — exactly `0.0` while the counts hold, because
+`Δψ = tread·sin δ / L` with `tread = 0` — keeps arriving at 50 Hz and is
+the only yaw-rate measurement in that interval.
+
+**It estimates no bias, and carries nothing into motion.** The standstill
+interval is long enough to observe the bias and subtract it afterwards,
+which is the other half of what a real installation does. That was not
+done, deliberately: it would reduce the drift while moving, which is the
+phenomenon this gate exists to expose. When the gate is open the filter
+is fed, byte for byte, what it was fed before this file existed.
+
+**It fails open, in every direction.** No verdict yet, a verdict older
+than `standstill.verdict_timeout_s`, a clock that ran backwards, a
+missing joint, an implausible angle — each forwards the IMU. A gate stuck
+open costs the drift that is already measured and documented in sections
+1–11; a gate stuck closed would hide a real rotation from the filter,
+and that is the failure worth designing against. The launch refuses the
+one configuration in which the gate would run and be permanently
+ineffective:
+
+```
+$ ros2 launch .../vehicle.launch.py wheel_odom:=false
+[ERROR] [launch]: imu_gate:=true with wheel_odom:=false starts the gyro gate
+with nothing to publish the standstill verdict it gates on. The gate fails
+open, so the stack would run with the gate present and permanently
+ineffective - which looks like a working stationary correction and is not
+one. Run imu_gate:=false, or leave the wheel odometry on.
+```
+
+**It is not a safety function.** It gates one measurement channel of one
+estimator. It inhibits no actuator, latches nothing and commands nothing;
+the protective stop and safe torque off are onboard and hardwired and
+appear in no Python file in this directory (invariants 1 and 9).
+
+**One datum, one owner.** The standstill verdict is formed by
+`wheel_odometry.py`, which already owns the encoder model, and by nothing
+else. A gate that re-derived "is it moving" from the raw joint angles
+would be quantising the same signal a second time with its own idea of
+the count grid (invariant 10). `check_odometry.py` reads the verdict off
+the topic for the same reason.
+
+## 12.3 The idle hold, measured
+
+`--phase idle`, seed 1, vehicle commanded to rest (`speed 0`, `steer 0`
+published through `forklift_io.py`, so the command is delivered rather
+than merely absent), 60 simulated seconds after a 10 s settle.
+
+**No ground truth is read in this phase**, and that is structural rather
+than careful. The question is whether a number moved while nothing
+happened: the vehicle's own encoders establish that nothing happened, its
+own gyro says what would have been integrated, and the fused heading is
+compared with **itself** at the start of the window. There is nothing for
+the simulator's pose to contribute.
+
+| | `imu_gate:=false` | `imu_gate:=true` |
+|---|---|---|
+| distinct drive encoder counts in the window | **1** | **1** |
+| distinct steer encoder counts | **1** | **1** |
+| ⇒ body rotation bounded at | 0.0101° | 0.0101° |
+| raw gyro z, mean over the window | −0.002621 rad/s (−0.1502 °/s) | −0.002618 rad/s (−0.1500 °/s) |
+| raw gyro z, integrated over the window | −9.0086° | −8.9980° |
+| standstill verdict true for | 100.0 % | 100.0 % |
+| gyro samples offered to the filter | 6000 of 6000 (no gate) | **0 of 6000** |
+| **fused heading, net change over 60.0 s** | **−7.7047°** | **0.0000°** |
+| largest excursion from the start | −7.7047° | 0.0000° |
+| **per minute of idle** | **−7.71 °/min** | **0.00 °/min** |
+
+The left column reproduces the judge's 8 °/min from the artifact, and the
+right column is the deliverable. **The gate's window is longer than the
+idle that produced the committed map's error** — 60 s against the ≈ 20 s
+finding 4 attributes it to — so the hold is demonstrated over three times
+the interval that caused the problem.
+
+**And over four minutes**, which is the discarded map's idle:
+
+```
+--phase idle --idle 240, imu_gate:=true, seed 1
+
+  [PASS] the drive encoder reported exactly one count all window   (1 distinct counts over 240.00 s)
+  [PASS] the steer encoder reported exactly one count all window   (1 distinct counts)
+  standstill verdict true for        100.0 % of the window
+  fused heading at the start of the window   -0.001043 rad
+  fused heading at the end                   -0.001043 rad
+
+                                            [rad]        [deg]
+  net change over the window             0.000000       0.0000
+  largest excursion from the start       0.000000       0.0000
+  the gyro would have given             -0.624684     -35.7918
+
+  window length                  239.98 simulated seconds
+```
+
+**0.000000 rad is what the instrument printed, and it means the value did
+not change at the resolution the transform carries** — the transform is
+not frozen, it is republished: 11 477 transforms were recorded over those
+240 s, at the filter's 50 Hz, while 120 000 joint states and 24 000 gyro
+samples arrived. The mechanism for the exactness is not luck: while the
+counts hold, the wheel odometry's yaw rate is the literal float `0.0`
+rather than a small number, so the filter's yaw-rate state settles onto
+zero and its heading has nothing left to integrate.
+
+**The residual −0.001043 rad the window starts from is the gate's own
+cost, and it is the window length.** `0.002618 rad/s × 0.40 s`, against a
+`standstill.window_s` of 0.50 s less the filter's own start-up: the gate
+closes only after both counts have held for the full window, so every
+stop pays up to half a second of ungated gyro. That is the conservative
+direction and it is deliberate — **the gate opens on the first count of
+motion and closes only after the window**, so it is late to trust a
+standstill and instantaneous to distrust one.
+
+## 12.4 The drift while moving, re-measured on the same route
+
+`--phase fusion`, seed 1, the **same** `_PROFILE` and the same flat world
+as sections 5–7. Both columns are runs of this build; the left one sets
+`imu_gate:=false`, which remaps the filter back onto the raw IMU and is
+the m5-07c configuration exactly.
+
+| | `imu_gate:=false` | `imu_gate:=true` |
+|---|---|---|
+| path length | 106.494 m | 106.490 m |
+| heading swept, total | 1449.8° | 1449.8° |
+| simulated duration | 120.95 s | 120.95 s |
+| bias drawn this run | −0.002611 rad/s | −0.002611 rad/s |
+| wheel odometry alone, final | 5.2291 m / +8.8139° | 5.2662 m / +8.9280° |
+| EKF final, **whole run** | 5.0619 m / −17.0501° | 3.2929 m / −12.9381° |
+| seconds the wheels were reported still | 10.22 s | 10.22 s |
+| gyro samples on `/forklift/imu`, as printed | 12 100 | 12 100 |
+| gyro samples on `/forklift/imu_gated`, as printed | 0 — the gate node is not running and the launch remaps the filter onto the raw topic, so the filter was offered all 12 100 | **11 076** — 1 024 suppressed |
+| heading error at the **first moving** sample | −3.2865° | −0.0596° |
+| heading error at the **last moving** sample | −16.2629° | −12.9357° |
+| **drift accumulated WHILE MOVING** | **−12.9765°** over 110.74 s | **−12.8761°** over 110.74 s |
+
+The left column reproduces m5-07c's headline: 5.06 m / −17.05° here
+against 5.21 m / −17.18° there, over the same 106.49 m and 1449.8°, with
+a bias of −0.002611 rad/s here against −0.002582 there. Different draws
+of the same distribution, same route, same answer.
+
+### The moving drift did not improve, and here is the whole arithmetic
+
+The whole-run heading error splits into three intervals, taken from the
+vehicle's own standstill verdict and not from the profile's nominal
+timings:
+
+| | before the drive | while moving | after the drive | total |
+|---|---|---|---|---|
+| `imu_gate:=false` | −3.2865° | **−12.9765°** | −0.7871° | −17.0501° |
+| `imu_gate:=true` | −0.0596° | **−12.8761°** | −0.0024° | −12.9381° |
+| difference | 3.2269° | **0.1004°** | 0.7847° | 4.1120° |
+
+**4.0116° of the 4.1120° improvement is in the two standing intervals**,
+which is what a stationary correction is supposed to do and all it is
+supposed to do. The remaining **0.1004° is the moving column**, and it is
+not a reduction in drift — it is run-to-run noise, of exactly the
+expected size:
+
+```
+sigma = sigma_gyro * sqrt(dt * T) = 1.745e-3 rad/s * sqrt(0.01 s * 110.74 s)
+      = 1.836e-3 rad = 0.1052 deg
+```
+
+The two runs are not bit-identical — the seed fixes the bias draw, not
+the thread scheduling that consumes the noise stream — so the white
+noise integrates to a different random walk in each. **0.1004° is 0.95 of
+one standard deviation of that walk.** There is no reduction to attribute
+a mechanism to, and by construction there could not be: while the gate is
+open the filter receives the raw message unchanged, and the gate was open
+for every sample of the drive. The counters say so directly — **1 024
+suppressed samples at 100 Hz is 10.24 s, against 10.22 s of verdict-true
+time**, and the gate's own log shows exactly two transitions in the whole
+121 s route:
+
+```
+[imu_gate] gyro gate CLOSED - the encoders report no motion, so the gyro is reading its own bias   after 52 forwarded / 0 suppressed
+[imu_gate] gyro gate OPEN - the wheels are turning                                                 after 52 forwarded / 2399 suppressed
+[imu_gate] gyro gate CLOSED - the encoders report no motion, so the gyro is reading its own bias   after 11128 forwarded / 2399 suppressed
+```
+
+No flapping, no closure inside the drive.
+
+### The position error DID improve, by 1.77 m, and that is not the same claim
+
+`5.0619 m → 3.2929 m`. It has one mechanism and it is not reduced drift
+while moving: **the ungated run began driving with its heading already
+−3.29° wrong**, and a heading offset present at the start rotates the
+whole subsequent path about the start point. The final pose is 30.88 m
+from the origin (`√(30.684² + 3.474²)`), so removing 3.2269° of initial
+offset moves the end point by
+
+```
+30.88 m * 0.05632 rad = 1.739 m
+```
+
+against a measured 1.769 m — a 2 % agreement, from geometry alone with no
+free parameter. **The vehicle drifts exactly as far as it did; it now
+starts from where it is pointing.** Anyone quoting these figures should
+quote the moving column, which is the one gate M5 is about.
+
+## 12.5 Why the two columns are a comparison
+
+`gz` draws each sensor's bias — **including its sign** — from a global
+generator at model load, so two runs of the same stack get different
+biases and the m5-07c evidence records three fusion runs at −17.18°,
+−16.41° and +19.85°. A before-and-after taken from two such runs would be
+a comparison of two dice.
+
+`launch/vehicle.launch.py` therefore gained a `seed` argument, which
+passes `--seed` to `gz sim`. It is a **measurement facility and nothing
+on the vehicle reads it**: the default is empty, which restores the random
+draw, and that is what every demonstration uses, because the sign a real
+device wakes up with is not knowable in advance either. Verified here
+before it was relied on:
+
+| seed | drawn gyro z bias |
+|---|---|
+| 4242 | +0.002625, +0.002579 rad/s (two runs) |
+| 1 | −0.002626 rad/s, and −0.002611 in both section 12.4 runs |
+| 2 | +0.002516 rad/s |
+| 3 | +0.002723 rad/s |
+
+The sign follows the seed; the residual spread within one seed is the
+sample mean's own white-noise uncertainty (`1.745e-3/√N`). **Seed 1 was
+chosen because it draws the negative sign, the same sign as m5-07c's
+headline**, so the before-and-after reads in the same direction as the
+number it is being compared with.
+
+## 12.6 What did NOT change, checked rather than asserted
+
+| | |
+|---|---|
+| `model.sdf` | md5 `b04706c41a379abf5b54f409843f8f98` — **identical to section 0's**. Every datasheet-derived noise figure is untouched: the gyro's 0.001745 rad/s white noise, its 0.002618 rad/s bias, the accelerometer's two, all still exactly as m5-07c derived them |
+| the message covariances | untouched. The gyro's is still the white noise only, and the gate forwards every field of every message it forwards unchanged, including that one |
+| `config.yaml`'s `odometry:` covariances | `vx_variance`, `vy_variance`, `vyaw_variance`, `pose_variance_unused` — not one edited. The new constants are in their own `standstill:` block and none of them is a variance |
+| `ekf.yaml` | still sets **no** `process_noise_covariance` and **no** `initial_estimate_covariance`. One line changed: `imu0` |
+| ground truth | still reaches no estimator. `imu_gate.py` subscribes to the vehicle's own IMU and the vehicle's own encoder verdict, and to nothing else; `--phase idle` subscribes to no ground-truth topic at all |
+| the route | `_PROFILE` is byte-identical to the one sections 5–7 ran |
+
+Files as brief m5-07d left them:
+
+| file | md5 |
+|---|---|
+| `model.sdf` | `b04706c41a379abf5b54f409843f8f98` (unchanged) |
+| `config.yaml` | `f908c8f3a9911c1a089c4cde763499d8` |
+| `ekf.yaml` | `05ebbdb17613d03e0b0465cae31d4e4c` |
+| `scripts/wheel_odometry.py` | `8d63bba694000f0d0b0bf68d98967b2b` |
+| `scripts/imu_gate.py` | `297ea24c328fd8c5605fd8600472d4c6` (new) |
+| `scripts/check_odometry.py` | `9a1b0441f24476bc2f5400de77ee1cbc` |
+| `launch/vehicle.launch.py` | `7dd66be25a715eb002cf7e71d96b9010` |
+
+Environment for every run in this section, read from the machine that
+produced them:
+
+| Item | Value |
+|---|---|
+| Date | **2026-07-31**, container run, UTC |
+| Brief | `docs/briefs/m5-07d-stationary-handling.md` |
+| Host | project container, Ubuntu 24.04.4, kernel 6.18.5, `nproc` 4 |
+| Simulator | `gz sim --versions` → `8.11.0` |
+| ROS | Jazzy, `rmw_fastrtps_cpp` |
+| Filter | `ros-jazzy-robot-localization` `3.8.3-1noble.20260615.152020` |
+| Isolation | `GZ_PARTITION` **and** `ROS_DOMAIN_ID` both set, unique per run, headless throughout |
+| Noise seed | `seed:=1` on every run quoted in 12.3 and 12.4 |
+| RTF | **not measured and none is quoted** (LESSONS 2026-07-30) |
+
+## 12.7 Reproducing this
+
+```
+source /opt/ros/jazzy/setup.bash
+export GZ_PARTITION=<unique> ROS_DOMAIN_ID=<n>
+cd <repo>
+
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py --print-world > /tmp/flat.sdf
+
+# the idle hold, gated (the shipped configuration)
+ros2 launch agv/forklift/launch/vehicle.launch.py world:=/tmp/flat.sdf \
+    world_name:=odometry_flat seed:=1 &
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py --phase idle --idle 60
+
+# the same idle, ungated (the m5-07c configuration)
+ros2 launch agv/forklift/launch/vehicle.launch.py world:=/tmp/flat.sdf \
+    world_name:=odometry_flat seed:=1 imu_gate:=false &
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py --phase idle --idle 60
+
+# the route, both ways. ~121 s of simulated time each
+ros2 launch agv/forklift/launch/vehicle.launch.py world:=/tmp/flat.sdf \
+    world_name:=odometry_flat seed:=1 [imu_gate:=false] &
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py --phase fusion
+```
+
+`nodes:=true` is the default and the driven and idle phases both need it:
+`forklift_io.py` is what turns `/forklift/cmd/traction_speed` into the
+model's raw input, and with `nodes:=false` the profile commands motion
+that never happens. The harness now says so rather than dividing by a
+zero path length, which is how that was found.
+
+**Isolate both transports.** `ROS_DOMAIN_ID` does not isolate gz, because
+gz transport is not DDS (LESSONS 2026-07-27). Every process was confirmed
+gone after each run with `ps -eo pid,args`.
+
+## 12.8 What section 12 does not cover
+
+- **Only this vehicle's kinematics.** The bound in 12.2 is a tricycle
+  argument. A differential-drive or omnidirectional vehicle needs its own,
+  and on an omnidirectional platform a held drive encoder does **not**
+  bound body rotation at all.
+- **No gross drive-wheel skid.** The bound assumes the drive wheel rolls.
+  A vehicle being slid bodily across a floor — towed, pushed, or on ice —
+  could rotate with both counts held, and the gate would suppress a real
+  rotation. It is the one credible way this mechanism is wrong, it is not
+  reachable by any commanded motion in this simulation, and nothing here
+  tests it.
+- **The bias is not observed and not compensated.** Every drift figure in
+  sections 1–11 still stands as the drift while moving, and the in-run
+  bias walk is still not modelled (section 2), so all of them are still
+  lower bounds.
+- **Container only.** The owner's WSL host has still never run this
+  configuration.
+- **One idle posture.** The vehicle stood on flat ground with the forks
+  down and the steer straight. A stop on a ramp, or with a raised load
+  rocking on the tyres, is not tested.
+- **Nothing about the map.** This section measures the estimator. Whether
+  a rebuilt map now comes out square to the building is the SLAM brief's
+  measurement, not this one's, and the registration finding 1 of
+  `m5-08c` asks for is still needed either way — a SLAM map's frame is
+  legitimately its own even when its heading no longer drifts.

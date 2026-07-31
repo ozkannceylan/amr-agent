@@ -46,18 +46,19 @@ project can command in engineering units.
 | `scripts/forklift_io.py` | Engineering units in, raw joint commands out; joint state and odometry in, two scalars out. |
 | `scripts/obstacle_zone.py` | Forward stop-zone evaluator over the front safety scanner's **non-safe measurement channel**. |
 | `scripts/sensor_tf.py` | Publishes `/tf_static` for the four sensor frames, reading every number out of `model.sdf`. |
-| `scripts/wheel_odometry.py` | Tricycle dead reckoning from the vehicle's own joint states, through two modelled encoders. Publishes an estimate and **no transform**. |
-| `ekf.yaml` | `robot_localization` parameters. The EKF is the **sole** publisher of `forklift/odom → forklift/base_link`. |
+| `scripts/wheel_odometry.py` | Tricycle dead reckoning from the vehicle's own joint states, through two modelled encoders. Publishes an estimate and **no transform**, plus the encoder-derived standstill verdict. |
+| `scripts/imu_gate.py` | Stops offering the gyro's yaw rate to the EKF while both encoder counts are unchanged — the interval in which that reading is bias and not rotation. Suppresses; never rewrites a sample; **estimates no bias**; fails open. |
+| `ekf.yaml` | `robot_localization` parameters. The EKF is the **sole** publisher of `forklift/odom → forklift/base_link`. Its `imu0` is the **gated** IMU topic. |
 | `scripts/sensor_coverage.py` | Reads `model.sdf` and measures what the three scanners can see. No simulator, no dependency. |
 | `scripts/check_sensor_frames.py` | Checks that `model.sdf`, `config.yaml`, this README and `/tf_static` agree. Static by default, `--live` against a running graph. |
 | `scripts/obstacle_matrix.py` | Drives `obstacle_zone.py` through its contracted cases, including the ones a rendered scanner cannot produce. |
-| `scripts/check_odometry.py` | The instrument behind `EVIDENCE_ODOMETRY.md`: geometry and noise-model checks with no ROS, then the IMU alone, the wheel odometry alone against a known motion, then the fusion. The **only** thing here allowed to read ground truth, and only as a reference. |
+| `scripts/check_odometry.py` | The instrument behind `EVIDENCE_ODOMETRY.md`: geometry and noise-model checks with no ROS, then the IMU alone, the wheel odometry alone against a known motion, the fusion, and the fused heading over an idle. The **only** thing here allowed to read ground truth, and only as a reference — and `--phase idle` reads none at all. |
 | `scripts/check_odom_tf.py` | Checks that `odom → base_link` is published by the model, bridged onto `/tf`, resolvable and tracking. Static by default; `--live [--drive]` measures rate, chain and residual on a running graph. |
-| `launch/vehicle.launch.py` | Server, spawn, bridge, sensor TF, the wheel odometry, the EKF and both process nodes, headless by default. Refuses to start two publishers of one transform. |
+| `launch/vehicle.launch.py` | Server, spawn, bridge, sensor TF, the wheel odometry, the gyro gate, the EKF and both process nodes, headless by default. Refuses to start two publishers of one transform, or a gate with nothing to gate on. Carries an optional `seed` for reproducible sensor-noise draws. |
 | `EVIDENCE_MODEL.md` | The dated headless run that verified the model and the two nodes. |
 | `EVIDENCE_SENSOR_COVERAGE.md` | The computed coverage of the three scanners, with every residual sector named. §13 is the one measured section: the rear scanner's self-return band, from a live headless run. |
 | `EVIDENCE_SENSOR_TF.md` | The dated runs behind the sensor frames and the measurement-channel consumer. |
-| `EVIDENCE_ODOMETRY.md` | The dated runs behind the motion estimate: the IMU's noise against its datasheet, the wheel odometry against a known motion, real slip separated from the `cos δ` geometry, and the **measured drift** of the fused estimate. |
+| `EVIDENCE_ODOMETRY.md` | The dated runs behind the motion estimate: the IMU's noise against its datasheet, the wheel odometry against a known motion, real slip separated from the `cos δ` geometry, and the **measured drift** of the fused estimate. §12 is brief m5-07d's: the standstill handling, the idle hold, and the same route re-measured to show the drift while moving is unchanged. |
 | `EVIDENCE_ODOM_TF.md` | The dated run behind `odom → base_link`: measured rate, captured `tf2` lookups, the residual against the odometry topic, and the seam where the EKF takes the edge over. |
 
 There is deliberately **no world file here.** Worlds belong to `sim/`.
@@ -225,10 +226,12 @@ the front one.
 | `/forklift/obstacle/min_distance` | `std_msgs/Float64` | 10 Hz | `obstacle_zone` | Nearest valid range in the sector [m]: the smallest **distance**-class sample; the scan's own `range_max` when the sector is entirely **clear** beyond range; and `0.0`, the `unknown_distance_m` sentinel from `config.yaml`, in every fail-safe case above. The clear value is the scan's number and not this node's, so it follows whatever scanner `model.sdf` declares — and the consumer's plausibility window must contain it. Since this node reads the front safety scanner, that value is now **5.50 m**, comfortably inside the `0.05 … 8.10` m window of `docs/interfaces/opcua-nodes.md` §10.5, so **no interface change is owed by this consumer**. The window still bounds the *navigation* lidar's 8.00 m range, which is a separate open item. |
 | `/forklift/scan` | `sensor_msgs/LaserScan` | 10 Hz | bridge | **The navigation lidar**, renamed from `/forklift/gz/scan_nav`: 360 samples over 360°, plane z = 1.80 m, frame `nav_lidar_link`. **This is the vehicle's only SLAM, AMCL and costmap input**, and it is no longer read by `obstacle_zone`: it replaced a 181-sample 180° scanner at z = 0.25 m, so **the plane this topic reports moved up 1.55 m**, and in `sim/worlds/forklift_arena.sdf`, whose walls stop at 0.60 m and whose tallest crate stops at 1.00 m, it reports a clear horizon in front of an obstacle a process stop must see (`EVIDENCE_SENSOR_TF.md` §4 measures exactly that: 60 of 60 forward samples clear at 1.80 m with a crate 0.85 m ahead at 0.15 m). **Not gap-free.** The old scanner dropped the single sample at exactly ±45°, in the raw gz message rather than in the bridge, following vehicle orientation rather than a fixed index (m4f-03 evidence). **That was measured on the sensor this one replaced and has not been re-measured here**, so it is a warning and not a specification. The consumer rule is unchanged and stands on its own: do not assume every sample is finite, and do not read a non-finite one as a missing one — an `inf` is the sensor reporting **no echo inside its window**, which is a measurement of a clear path to `range_max`, not an absence of data. `obstacle_zone.py` classifies each sample on exactly that basis and never condemns a whole scan for containing one bad sample. |
 | `/forklift/odom` | `nav_msgs/Odometry` | 20 Hz | bridge | **Ground-truth** odometry, renamed from the gz topic. The name does not say so, and that is a known defect this directory could not fix alone: `/forklift/odom` is a cross-layer contract (`sim/launch/forklift_bringup.launch.py` bridges it, `sim/scenarios/run_forklift_rehearsal.py` reads it). The EKF has now landed, so `/forklift/odom` is the name the **estimate** should carry and this stream should move to `/forklift/odom_ground_truth`. Requested in `docs/reports/m5-07b-odom-tf.md` and again in `m5-07c-realistic-odometry.md`; not taken here. **Read by no estimator** — only by `scripts/check_odometry.py`, as the reference |
-| `/forklift/imu` | `sensor_msgs/Imu` | 100 Hz | bridge | The IMU, renamed from `/forklift/gz/imu`, frame `imu_link`. **Angular velocity and linear acceleration only.** The orientation field arrives as the zero quaternion `(0,0,0,0)` with `orientation_covariance[0] = 0.0`, which by the ROS convention reads as *known exactly* rather than the `-1` that means *absent* — **do not consume it**, it would be simulator ground truth even if it were well formed. The EKF fuses the **yaw rate only**; the accelerometer is not fused, because a 0.0196 m/s² bias integrated twice is 98 m of position error over 100 s |
+| `/forklift/imu` | `sensor_msgs/Imu` | 100 Hz | bridge | The IMU, renamed from `/forklift/gz/imu`, frame `imu_link`. **Angular velocity and linear acceleration only.** The orientation field arrives as the zero quaternion `(0,0,0,0)` with `orientation_covariance[0] = 0.0`, which by the ROS convention reads as *known exactly* rather than the `-1` that means *absent* — **do not consume it**, it would be simulator ground truth even if it were well formed. The EKF fuses the **yaw rate only**, and it fuses it from `/forklift/imu_gated` rather than from here; the accelerometer is not fused, because a 0.0196 m/s² bias integrated twice is 98 m of position error over 100 s |
+| `/forklift/imu_gated` | `sensor_msgs/Imu` | 100 Hz **while moving**, silent while standing | `imu_gate` | **The gyro as a rotation sensor**, which it is only while the vehicle can rotate. Every message is forwarded byte for byte from `/forklift/imu` except while `/forklift/wheel_standstill` is true and fresh, when none is. `ekf.yaml` names this topic and never the raw one. **A gap is the signal, not a fault** — the gate suppresses rather than rewrites, so a zeroed rate can never be mistaken for a reading the device took. It **estimates no bias and carries nothing into motion**, so the drift while driving is unchanged (`EVIDENCE_ODOMETRY.md` §12.4). Fails **open** in every direction |
+| `/forklift/wheel_standstill` | `std_msgs/Bool` | 50 Hz | `wheel_odometry` | Both encoder counts unchanged for 0.50 s. A tricycle's centre of rotation lies on its rear axle line and its drive wheel does not, so a held drive count bounds the body rotation over that interval at **0.0101°** — which is why a gyro reading taken in this condition is bias rather than rotation. **It is an estimator input, not a machine state**: it does not mean the vehicle is enabled, parked, safe or stopped, it inhibits nothing and it latches nothing. One consumer, `imu_gate` |
 | `/forklift/odom_wheel` | `nav_msgs/Odometry` | 50 Hz | `wheel_odometry` | **One sensor's opinion**, not the vehicle's pose: tricycle dead reckoning from `/forklift/joint_states` through two modelled encoders. Twist in the body frame, including the real lateral term `d·yawrate` that `base_link` has because it stands 0.50 m ahead of the rear axle. **Publishes no transform**, and its pose covariance is deliberately useless (1000) because dead-reckoning pose error is unbounded — the EKF fuses the twist and never the pose |
 | `/forklift/odom_filtered` | `nav_msgs/Odometry` | 50 Hz | `forklift_ekf` | **The estimate.** `robot_localization` fusing `odom_wheel` (`vx`, `vy`, `vyaw`) with the IMU (`vyaw`). This node, and no other, publishes `forklift/odom → forklift/base_link` |
-| `/tf` | `tf2_msgs/TFMessage` | 50 Hz | `forklift_ekf` | `forklift/odom → forklift/base_link`, **the vehicle's own motion estimate**. It drifts, which is the point: 5.21 m and −17.18° over a 106.49 m path (`EVIDENCE_ODOMETRY.md`). **Exactly one publisher, measured** — `ros2 topic info /tf --verbose` reports `Publisher count: 1` — and enforced: the launch refuses to start the retired ground-truth bridge alongside it. Every consumer needs `use_sim_time:=true` and must **wait** for the transform rather than assume it at start-up |
+| `/tf` | `tf2_msgs/TFMessage` | 50 Hz | `forklift_ekf` | `forklift/odom → forklift/base_link`, **the vehicle's own motion estimate**. It drifts while it drives, which is the point: **−12.88° of heading over 110.74 s of driving**, on a 106.49 m path with 1449.8° of turning (`EVIDENCE_ODOMETRY.md` §12.4; the same route measured −12.98° with the gyro gate off, and brief m5-07c's own run of it gave 5.21 m / −17.18° whole-run). **It does not drift while the vehicle stands still**: 0.00° over a 240 s idle, against the −35.79° the ungated gyro would have integrated (§12.3). **Exactly one publisher, measured** — `ros2 topic info /tf --verbose` reports `Publisher count: 1` — and enforced: the launch refuses to start the retired ground-truth bridge alongside it. Every consumer needs `use_sim_time:=true` and must **wait** for the transform rather than assume it at start-up |
 | `/forklift/joint_states` | `sensor_msgs/JointState` | physics rate | bridge | joint state, renamed from the gz topic |
 | `/forklift/gz/*_cmd` | `std_msgs/Float64` | on change | `forklift_io` | the raw joint commands, same name both sides |
 
@@ -349,6 +352,8 @@ telling them apart:
 | `/forklift/odom_wheel` | **One sensor's opinion.** Tricycle dead reckoning from this vehicle's own joint states, with its encoder and calibration errors. 50 Hz. Publishes **no transform** | The EKF, as a measurement — exactly as the IMU is |
 | `/forklift/odom_filtered` | **The estimate.** The EKF fusing the two above. 50 Hz | Anything that navigates. It alone publishes `forklift/odom → forklift/base_link` |
 
+Two more topics sit beside them and neither is a pose: `/forklift/wheel_standstill`, the encoder verdict that the wheels are not turning, and `/forklift/imu_gated`, the gyro stream the filter is actually offered. Both are described in the topic table above.
+
 `/forklift/odom`'s name still does not say it is ground truth. That is a
 known defect this directory cannot fix alone — it is a cross-layer
 contract — and the request to rename it `/forklift/odom_ground_truth`
@@ -371,7 +376,9 @@ circular — an estimator scored against its own input cannot be wrong.
 | Source | Contributes | Error model |
 |---|---|---|
 | `scripts/wheel_odometry.py` | `vx`, `vy`, `vyaw` | 4096-count drive encoder, 4096-count steer encoder, a **one-count** steer zero offset, a 0.5 % rolling-radius calibration error. **No slip term** — the physics engine already produces slip |
-| the IMU, `/forklift/imu` | `vyaw` only | Bosch BMI088 datasheet: 0.1 °/s rms white noise, 0.15 °/s bias from the TCO over a stated 10 K |
+| the IMU, via `/forklift/imu_gated` | `vyaw` only, **and only while the wheels are turning** | Bosch BMI088 datasheet: 0.1 °/s rms white noise, 0.15 °/s bias from the TCO over a stated 10 K. The bias is not in the message covariance and is not estimated on board — it integrates into heading exactly as an uncompensated MEMS gyro's does, which is the drift gate M5 exists to correct |
+
+**One interval is treated differently, and only one.** While both encoder counts hold, `scripts/imu_gate.py` stops offering the gyro's yaw rate to the filter, because in that interval the vehicle knows independently that the rate is zero to within 0.0101° — a tricycle cannot rotate without its drive wheel travelling. That is a zero angular rate update, and it is the reason a map's frame no longer depends on how long the stack idled before driving. **It changes nothing while the vehicle moves**: no covariance, no process noise, no datasheet number, and no bias estimate carried out of the stop. `EVIDENCE_ODOMETRY.md` §12 measures both halves of that claim.
 
 **Neither the pose nor the orientation is fused, and each refusal has its
 own reason.** A dead-reckoned *pose* has unbounded error, so fusing it
@@ -451,10 +458,17 @@ Useful arguments: `world`, `world_name`, `name`, `x`, `y`, `z`, `yaw`,
 `nodes`, `tf` (the sensor transforms, separate from `nodes` because SLAM
 needs them when the two process nodes are off), `wheel_odom` (the
 dead reckoning, separate from `ekf` so it can be verified on its own),
-`ekf` (**default `true`**, the sole publisher of `odom → base_link`), and
+`ekf` (**default `true`**, the sole publisher of `odom → base_link`),
 `ground_truth_tf` (**default `false` since the EKF took that edge over**;
 `ekf:=true ground_truth_tf:=true` is refused at launch — see "Three pose
-streams, one owner").
+streams, one owner"), `imu_gate` (**default `true`**, the zero angular
+rate update; setting it false remaps the filter back onto the raw IMU and
+reproduces the m5-07c configuration exactly rather than leaving the
+filter without an IMU, and `imu_gate:=true wheel_odom:=false` is refused
+at launch), and `seed` (**default empty**, a `gz sim --seed` value that
+fixes the sign and magnitude every sensor bias is drawn with — a
+measurement facility, so that a before-and-after compares two runs of one
+vehicle rather than two draws; no node reads it).
 
 Checking the vehicle rather than trusting it. The first two need no
 simulator and no ROS; the third needs a running graph, and the fourth
@@ -474,6 +488,7 @@ ROS_DOMAIN_ID=79 /usr/bin/python3 agv/forklift/scripts/obstacle_matrix.py
 /usr/bin/python3 agv/forklift/scripts/check_odometry.py --phase imu
 /usr/bin/python3 agv/forklift/scripts/check_odometry.py --phase wheel
 /usr/bin/python3 agv/forklift/scripts/check_odometry.py --phase fusion
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py --phase idle --idle 60
 ```
 
 `check_odom_tf.py --drive` **moves the vehicle** — three straight and
@@ -484,10 +499,17 @@ obstacle. Its `--live` mode needs the retired configuration,
 `ekf:=false ground_truth_tf:=true`, because it checks the ground-truth
 transform specifically.
 
-`check_odometry.py`'s three live phases each need the stack up; the
+`check_odometry.py`'s four live phases each need the stack up; the
 driven ones **move the vehicle 106 m** through two sustained turns and
 want the flat world `--print-world` emits, not the arena. `--phase
-static` needs neither ROS nor a simulator. The phases are separate on
+static` needs neither ROS nor a simulator. `--phase idle` commands the
+vehicle to rest and asks whether the fused heading holds; it **reads no
+ground truth at all**, because the question is whether a number moved
+while nothing happened and the vehicle's own encoders are what establish
+that nothing did. Both driven phases and the idle phase need
+`nodes:=true`, the default: `forklift_io.py` is what turns a speed
+command into the model's raw input, and without it the profile commands
+motion that never happens. The phases are separate on
 purpose: the IMU is verified alone, then the wheel odometry alone against
 a known motion, and only then the fusion. `EVIDENCE_ODOMETRY.md` §10 is
 the full recipe.

@@ -40,7 +40,35 @@
 # know its device's live bias either. So this filter trusts the gyro's
 # heading rate more than the bias justifies, exactly as a real integration
 # of an uncompensated MEMS gyro does. EVIDENCE_ODOMETRY.md section 7
-# measures what that costs.
+# measures what that costs WHILE THE VEHICLE MOVES, and it is still the
+# measurement this gate exists to correct. Nothing below reduces it.
+#
+# WHAT IS NEW IN THIS FILE SINCE m5-07c, AND IT IS ONE TOPIC NAME.
+# `imu0` now reads /forklift/imu_gated instead of /forklift/imu. The
+# difference between the two is scripts/imu_gate.py, which forwards every
+# sample unchanged EXCEPT while the wheel odometry reports both encoder
+# counts unchanged - when it forwards none. The physics is in config.yaml's
+# `standstill:` block: a tricycle cannot rotate without its drive wheel
+# travelling, so a held encoder count bounds the body rotation at 0.0101
+# deg, and a gyro reading taken in that condition is bias rather than
+# rotation. Integrating it turned the map of brief m5-08 by 2 deg because
+# somebody idled for twenty seconds.
+#
+# ROBOT_LOCALIZATION 3.8.3 HAS NO PARAMETER FOR THIS, WHICH WAS CHECKED
+# BEFORE THE NODE WAS WRITTEN. Its parameter set carries no zero-velocity
+# or stationary handling of any kind; `dynamic_process_noise_covariance`
+# scales process noise with speed and does not stop a measurement being
+# fused, and the ToggleFilterProcessing service freezes the whole filter
+# on a service call that can be lost. So the mechanism is one node outside
+# the filter, and the filter's own configuration changes by one string.
+# EVIDENCE_ODOMETRY.md section 12 records the search and the reasoning.
+#
+# NO COVARIANCE, NO PROCESS NOISE AND NO DATASHEET NUMBER MOVED WITH IT.
+# The gate changes WHICH INTERVALS a measurement is offered in. It does
+# not change what the measurement is worth when it is offered, and it
+# estimates no bias, so the drift while moving is untouched by
+# construction rather than by measurement - the measurement then confirms
+# it (EVIDENCE_ODOMETRY.md section 12.4).
 
 forklift_ekf:
   ros__parameters:
@@ -122,7 +150,15 @@ forklift_ekf:
     # do. The accelerometer is on the model, fully noise-modelled and
     # verified in EVIDENCE_ODOMETRY.md section 3, because a later brief
     # may want it for something bounded; it is not fused today.
-    imu0: /forklift/imu
+    #
+    # THE TOPIC IS THE GATED ONE. /forklift/imu is the device; this is the
+    # device as a rotation sensor, which it is only while the vehicle can
+    # rotate. See the block at the head of this file. The gate stops
+    # publishing while the encoders report standstill, and this filter
+    # needs no special handling for that: an absent measurement is simply
+    # not fused, and the wheel odometry's own yaw rate - zero by
+    # construction while the counts hold - keeps arriving at 50 Hz.
+    imu0: /forklift/imu_gated
     imu0_config: [false, false, false,
                   false, false, false,
                   false, false, false,

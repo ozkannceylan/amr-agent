@@ -22,6 +22,16 @@ WHAT THIS IS
                      stated manoeuvre set, including two sustained turns,
                      because heading is where a tricycle's odometry
                      actually fails.
+    --phase idle     the fused heading with the vehicle commanded to
+                     rest, over an idle longer than the one that turned
+                     the m5-08 map. NO GROUND TRUTH IS READ IN THIS
+                     PHASE, by construction and not by habit: the
+                     vehicle's own encoders establish that it did not
+                     move, its own gyro says what would have been
+                     integrated, and the fused heading is compared with
+                     ITSELF at the start of the window. There is nothing
+                     for truth to contribute to a question of the form
+                     "did this number change while nothing happened".
 
 WHAT IT IS NOT
   It is not part of the vehicle. Nothing here runs in a demonstration and
@@ -48,8 +58,9 @@ the session container, per sim/setup/CONTAINER_TOOLCHAIN.md section 3.3):
   python3 agv/forklift/scripts/check_odometry.py --phase imu     --settle 20
   python3 agv/forklift/scripts/check_odometry.py --phase wheel
   python3 agv/forklift/scripts/check_odometry.py --phase fusion
+  python3 agv/forklift/scripts/check_odometry.py --phase idle --idle 60
 
-  The three live phases need a running stack and they set use_sim_time on
+  The four live phases need a running stack and they set use_sim_time on
   their own node, because every message they read is stamped with the
   simulation clock.
 """
@@ -662,10 +673,25 @@ class Recorder(object):
         node.create_subscription(JointState, cfg['topics']['joint_states'],
                                  self.cb_joints, qos)
         self.gyro_z = []
+        # The vehicle's OWN verdict that its wheels are not turning, and
+        # the count of gyro samples the gate let through. Both are read
+        # from the vehicle rather than recomputed here: this script owns
+        # no encoder model and inventing a second one would be two answers
+        # to one question (invariant 10). They are recorded in every
+        # driven phase, gate or no gate, because wheel_odometry.py
+        # publishes the verdict either way - which is what makes the
+        # before-and-after split of the route comparable.
+        self.standstill = []   # (t, bool), stamped on receipt
+        self.gated_gyro = 0
+        from std_msgs.msg import Bool
+        node.create_subscription(Bool, cfg['topics']['wheel_standstill'],
+                                 self.cb_standstill, qos)
         if want_tf:
             from sensor_msgs.msg import Imu
             node.create_subscription(Imu, cfg['topics']['imu'],
                                      self.cb_imu, qos)
+            node.create_subscription(Imu, cfg['topics']['imu_gated'],
+                                     self.cb_gated_imu, qos)
 
         self.buffer = None
         self.tf_publishers = 0
@@ -752,6 +778,17 @@ class Recorder(object):
     def cb_imu(self, msg):
         self.gyro_z.append(msg.angular_velocity.z)
 
+    def cb_gated_imu(self, msg):
+        self.gated_gyro += 1
+
+    def cb_standstill(self, msg):
+        # std_msgs/Bool carries no stamp, so the simulation clock is read
+        # here. At 50 Hz the receipt time is within a cycle of the stamp
+        # the message would have had, which is inside every window this
+        # script measures.
+        self.standstill.append(
+            (self.node.get_clock().now().nanoseconds * 1e-9, bool(msg.data)))
+
     def cb_joints(self, msg):
         cfg = self.cfg['model']
         if cfg['drive_joint_name'] not in msg.name:
@@ -783,6 +820,34 @@ def _unwrapped_yaw_sweep(track):
         net += step
         total += abs(step)
     return net, total
+
+
+def _moving_window(standstill):
+    """(first moving t, last moving t, seconds held still) from the verdict.
+
+    The window the vehicle was actually driving in, taken from the
+    VEHICLE'S OWN encoder verdict and not from the profile's nominal
+    timings or from ground truth. It exists so that the drift accumulated
+    WHILE MOVING can be separated from the drift accumulated while the
+    profile was parked - the two are different claims, and a stationary
+    correction is only honest if the first of them does not move.
+    """
+    moving = [t for t, still in standstill if not still]
+    if not moving:
+        return None
+    still_s = 0.0
+    for (t0, s0), (t1, _) in zip(standstill, standstill[1:]):
+        if s0:
+            still_s += t1 - t0
+    return (moving[0], moving[-1], still_s)
+
+
+def _yaw_error_at(pairs, t_s):
+    """Heading error of the pair nearest t_s, or None."""
+    if not pairs:
+        return None
+    r, e = min(pairs, key=lambda pe: abs(pe[0][0] - t_s))
+    return wrap_pi(e[3] - r[3])
 
 
 def _pair(reference, estimate):
@@ -871,6 +936,8 @@ def phase_drive(checker, want_fusion):
     recorder.joints.clear()
     recorder.ekf.clear()
     recorder.gyro_z.clear()
+    recorder.standstill.clear()
+    recorder.gated_gyro = 0
 
     print('  manoeuvre set, timed on the SIMULATION clock:')
     for label, seconds, speed, steer in _PROFILE:
@@ -1049,8 +1116,80 @@ def report_drive(checker, recorder, want_fusion):
                          'told about can make heading worse, and that is a '
                          'finding about cheap MEMS IMUs rather than a defect.')
 
+            section('6b. the same run, split into moving and standing')
+            window = _moving_window(recorder.standstill)
+            pairs = _pair(truth, recorder.ekf)
+            if window is None:
+                checker.check(
+                    'the standstill verdict shows the vehicle moving', False,
+                    '{} messages on {}, none of them false - the vehicle '
+                    'never moved, so this run measures nothing'.format(
+                        len(recorder.standstill),
+                        cfg['topics']['wheel_standstill']))
+            else:
+                t_go, t_halt, still_s = window
+                err_go = _yaw_error_at(pairs, t_go)
+                err_halt = _yaw_error_at(pairs, t_halt)
+                span_s = t_halt - t_go
+                print('  THE SPLIT IS TAKEN FROM THE VEHICLE\'S OWN ENCODER')
+                print('  VERDICT, not from the profile\'s nominal timings and')
+                print('  not from ground truth. Its purpose is to show which')
+                print('  part of the run a change to standstill handling can')
+                print('  possibly have touched.')
+                print('')
+                print('  recorded window            {:.2f} s'.format(
+                    recorder.standstill[-1][0] - recorder.standstill[0][0]))
+                print('  of which the wheels were')
+                print('    reported standing still  {:.2f} s'.format(still_s))
+                print('  first / last moving sample {:.2f} s .. {:.2f} s'
+                      .format(t_go, t_halt))
+                print('  gyro samples on {:<10} {}'.format(
+                    cfg['topics']['imu'], len(recorder.gyro_z)))
+                print('  gyro samples on {:<10} {}   (zero means the gate is'
+                      .format(cfg['topics']['imu_gated'],
+                              recorder.gated_gyro))
+                print('    not running and the filter is remapped onto the '
+                      'raw topic, not that it lost its gyro)')
+                if err_go is not None and err_halt is not None:
+                    moved = wrap_pi(err_halt - err_go)
+                    print('')
+                    print('  heading error at the first moving sample  '
+                          '{:+.4f} deg'.format(math.degrees(err_go)))
+                    print('  heading error at the last moving sample   '
+                          '{:+.4f} deg'.format(math.degrees(err_halt)))
+                    print('  DRIFT ACCUMULATED WHILE MOVING            '
+                          '{:+.4f} deg over {:.2f} s'.format(
+                              math.degrees(moved), span_s))
+                    if recorder.gyro_z:
+                        bias = statistics.fmean(recorder.gyro_z) - \
+                            (net_sweep / duration)
+                        print('  bias x MOVING seconds                     '
+                              '{:+.4f} deg'.format(
+                                  math.degrees(bias * span_s)))
+                        print('  bias x RECORDED seconds                   '
+                              '{:+.4f} deg'.format(
+                                  math.degrees(bias * duration)))
+                    checker.note(
+                        'the moving-only figure is the one to compare across '
+                        'builds. A change that only affects standing intervals '
+                        'leaves it alone and shortens the whole-run figure by '
+                        'bias x the standing seconds; a change that also '
+                        'flatters the moving case moves it, and would be '
+                        'doing something other than what it claims.')
+
     section('7. the drift against what it has to exercise')
     stats = fusion_stats or wheel_stats
+    if stats and stats['final_distance_m'] <= 0.0:
+        # A run in which the vehicle never moved. It has happened - a
+        # stack brought up with nodes:=false has no forklift_io.py, so the
+        # profile's speed commands reach nothing and every table above
+        # reads zero. Say so rather than dividing by it.
+        checker.check('the vehicle travelled a measurable distance', False,
+                      'path length 0.00 m. The profile commanded motion and '
+                      'none happened: check that forklift_io.py is running '
+                      '(nodes:=true) and that the traction command topic has '
+                      'a subscriber.')
+        stats = None
     if stats:
         print('  sim/worlds/WAREHOUSE_LANDMARKS.md section 5 names three')
         print('  degenerate stretches, 4.0 to 5.5 m long, in which the scan')
@@ -1069,12 +1208,216 @@ def report_drive(checker, recorder, want_fusion):
     return checker
 
 
+# ====================================================================== #
+# Phase: idle
+# ====================================================================== #
+
+def phase_idle(checker, idle_s):
+    """Does the fused heading hold while the vehicle is commanded to rest?
+
+    THE QUESTION THIS ANSWERS, AND WHY IT NEEDS NO GROUND TRUTH. The
+    committed warehouse map of brief m5-08 came out about 2 deg rotated
+    from the building because the estimator integrated gyro bias through
+    the idle between bringup and the first drive command. That is not a
+    claim about where the vehicle is; it is a claim that a number MOVED
+    while nothing happened. Its own start value is the reference, the
+    vehicle's own encoders establish that nothing happened, and the
+    vehicle's own gyro says what would have been integrated. Ground truth
+    is not an input to any of the three, and reading it here would put the
+    simulator's pose inside a measurement whose whole point is that the
+    vehicle can make it alone.
+    """
+    from std_msgs.msg import Bool, Float64
+    from sensor_msgs.msg import Imu
+    from rclpy.qos import QoSProfile
+    from tf2_msgs.msg import TFMessage
+
+    cfg = load_config(_CONFIG)
+    frames = cfg['frames']
+    rclpy, node = _live_node('check_odometry_idle')
+    qos = QoSProfile(depth=200)
+
+    fused = []       # (t, yaw) from /tf, the EKF's own transform
+    gyro = []        # (t, wz) raw, the counterfactual
+    gated = []       # (t, wz) as offered to the filter
+    counts = []      # (t, drive_rad, steer_rad) the vehicle's own encoders
+    verdict = []     # (t, bool)
+
+    def cb_tf(msg):
+        for tf in msg.transforms:
+            if (tf.header.frame_id == frames['odom']
+                    and tf.child_frame_id == frames['base']):
+                q = (tf.transform.rotation.x, tf.transform.rotation.y,
+                     tf.transform.rotation.z, tf.transform.rotation.w)
+                fused.append((tf.header.stamp.sec
+                              + tf.header.stamp.nanosec * 1e-9, yaw_of(q)))
+
+    def cb_imu(msg):
+        gyro.append((msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                     msg.angular_velocity.z))
+
+    def cb_gated(msg):
+        gated.append((msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                      msg.angular_velocity.z))
+
+    def cb_joints(msg):
+        model = cfg['model']
+        if model['drive_joint_name'] not in msg.name:
+            return
+        i_d = msg.name.index(model['drive_joint_name'])
+        i_s = msg.name.index(model['steer_joint_name'])
+        counts.append((msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                       msg.position[i_d], msg.position[i_s]))
+
+    def cb_verdict(msg):
+        verdict.append((node.get_clock().now().nanoseconds * 1e-9,
+                        bool(msg.data)))
+
+    node.create_subscription(TFMessage, cfg['topics']['tf'], cb_tf, qos)
+    node.create_subscription(Imu, cfg['topics']['imu'], cb_imu, qos)
+    node.create_subscription(Imu, cfg['topics']['imu_gated'], cb_gated, qos)
+    from sensor_msgs.msg import JointState
+    node.create_subscription(JointState, cfg['topics']['joint_states'],
+                             cb_joints, qos)
+    node.create_subscription(Bool, cfg['topics']['wheel_standstill'],
+                             cb_verdict, qos)
+    pub_speed = node.create_publisher(
+        Float64, cfg['topics']['cmd_traction_speed'], QoSProfile(depth=10))
+    pub_steer = node.create_publisher(
+        Float64, cfg['topics']['cmd_steer_angle'], QoSProfile(depth=10))
+
+    section('1. the vehicle, commanded to rest')
+    if not _wait_clock(rclpy, node):
+        checker.check('the simulation clock is running', False)
+        return checker
+    checker.check('the simulation clock is running', True)
+
+    # Discovery first, then the rest command, then a settle. A model
+    # dropped onto the floor is still ringing for a second or so, and the
+    # window must not start inside that.
+    _sim_sleep(rclpy, node, 5.0)
+    zero = Float64()
+    zero.data = 0.0
+    pub_speed.publish(zero)
+    pub_steer.publish(zero)
+    _sim_sleep(rclpy, node, 5.0)
+
+    for buf in (fused, gyro, gated, counts, verdict):
+        del buf[:]
+    print('  idle window: {:.1f} simulated seconds, speed and steer both '
+          'commanded 0'.format(idle_s))
+    _sim_sleep(rclpy, node, idle_s)
+
+    section('2. did the wheels move at all? (the vehicle\'s own encoders)')
+    ok = len(counts) > 100 and len(fused) > 100
+    checker.check('the streams this phase needs were recorded', ok,
+                  '{} joint states, {} transforms, {} raw gyro samples'
+                  .format(len(counts), len(fused), len(gyro)))
+    if not ok:
+        node.destroy_node()
+        rclpy.shutdown()
+        return checker
+
+    odo = cfg['odometry']
+    drive_step = 2.0 * math.pi / float(odo['drive_encoder_counts_per_rev'])
+    steer_step = 2.0 * math.pi / float(odo['steer_encoder_counts_per_rev'])
+    drive_counts = set(int(round(c[1] / drive_step)) for c in counts)
+    steer_counts = set(int(round(c[2] / steer_step)) for c in counts)
+    span_s = counts[-1][0] - counts[0][0]
+    checker.check('the drive encoder reported exactly one count all window',
+                  len(drive_counts) == 1,
+                  '{} distinct counts over {:.2f} s'.format(
+                      len(drive_counts), span_s))
+    checker.check('the steer encoder reported exactly one count all window',
+                  len(steer_counts) == 1,
+                  '{} distinct counts'.format(len(steer_counts)))
+    # The kinematic bound this buys, computed rather than quoted.
+    bound_rad = (float(odo['rolling_radius_m']) * drive_step
+                 / float(cfg['model']['wheelbase_m']))
+    print('  one drive count bounds the body rotation over the interval it')
+    print('  is held at {:.3e} rad = {:.4f} deg (tricycle: the centre of'
+          .format(bound_rad, math.degrees(bound_rad)))
+    print('  rotation lies on the rear axle line and the drive wheel does')
+    print('  not, so the body cannot turn without the drive wheel travelling)')
+
+    section('3. what the gyro reported, and what reached the filter')
+    wz = [g[1] for g in gyro]
+    mean_wz = statistics.fmean(wz)
+    integrated = 0.0
+    for a, b in zip(gyro, gyro[1:]):
+        integrated += 0.5 * (a[1] + b[1]) * (b[0] - a[0])
+    still_frac = (sum(1 for _, s in verdict if s) / len(verdict)
+                  if verdict else float('nan'))
+    print('  raw gyro z, mean over the window   {:+.6f} rad/s  ({:+.4f} '
+          'deg/s)'.format(mean_wz, math.degrees(mean_wz)))
+    print('  THAT MEAN IS THE BIAS, and the encoders above are why: a rate')
+    print('  measured while the vehicle provably is not rotating is not a')
+    print('  rate. No ground truth was consulted to say so.')
+    print('  raw gyro z, integrated over the')
+    print('    window                           {:+.6f} rad  ({:+.4f} deg)'
+          .format(integrated, math.degrees(integrated)))
+    print('  = the heading this estimator would have gained by standing '
+          'still')
+    print('  standstill verdict true for        {:.1f} % of the window'
+          .format(100.0 * still_frac))
+    print('  gyro samples on {:<18} {}'.format(cfg['topics']['imu'],
+                                               len(gyro)))
+    print('  gyro samples on {:<18} {}'.format(cfg['topics']['imu_gated'],
+                                               len(gated)))
+    print('  READ THAT PAIR WITH THE LAUNCH ARGUMENT IN HAND. With')
+    print('  imu_gate:=true the second row is what the filter was offered.')
+    print('  With imu_gate:=false the gate node is not running, the gated')
+    print('  topic has no publisher, and the launch remaps the filter onto')
+    print('  the raw topic instead - so a zero there means "no gate", not')
+    print('  "no gyro".')
+
+    section('4. did the fused heading hold?')
+    yaw0 = fused[0][1]
+    drift = [wrap_pi(y - yaw0) for _, y in fused]
+    held_s = fused[-1][0] - fused[0][0]
+    worst = max(drift, key=abs)
+    final = drift[-1]
+    print('  fused heading at the start of the window   {:+.6f} rad'
+          .format(yaw0))
+    print('  fused heading at the end                   {:+.6f} rad'
+          .format(fused[-1][1]))
+    print('')
+    print('  {:<34} {:>12} {:>12}'.format('', '[rad]', '[deg]'))
+    print('  {:<34} {:>12.6f} {:>12.4f}'.format(
+        'net change over the window', final, math.degrees(final)))
+    print('  {:<34} {:>12.6f} {:>12.4f}'.format(
+        'largest excursion from the start', worst, math.degrees(worst)))
+    print('  {:<34} {:>12.6f} {:>12.4f}'.format(
+        'the gyro would have given', integrated, math.degrees(integrated)))
+    if held_s > 0:
+        print('')
+        print('  per minute of idle, measured   fused {:+.4f} deg/min '
+              'against gyro {:+.4f} deg/min'.format(
+                  math.degrees(final) * 60.0 / held_s,
+                  math.degrees(integrated) * 60.0 / held_s))
+    print('  window length                  {:.2f} simulated seconds'
+          .format(held_s))
+    checker.note('this phase asserts no pass threshold on the hold. The '
+                 'number is the deliverable and the two rows above it are '
+                 'the comparison: what the heading did against what the '
+                 'unfiltered gyro would have made it do over the same '
+                 'seconds.')
+
+    node.destroy_node()
+    rclpy.shutdown()
+    return checker
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(
         description='Verify and measure the forklift motion estimate.')
-    parser.add_argument('--phase', choices=('static', 'imu', 'wheel', 'fusion'),
+    parser.add_argument('--phase',
+                        choices=('static', 'imu', 'wheel', 'fusion', 'idle'),
                         default='static')
+    parser.add_argument('--idle', type=float, default=60.0,
+                        help='simulated seconds of idle measured by '
+                             '--phase idle (default: %(default)s)')
     parser.add_argument('--print-world', action='store_true',
                         help='emit the flat test world and exit')
     parser.add_argument('--settle', type=float, default=15.0,
@@ -1095,6 +1438,8 @@ def main(argv=None):
         phase_static(checker)
     elif args.phase == 'imu':
         phase_imu(checker, args.settle, args.sample)
+    elif args.phase == 'idle':
+        phase_idle(checker, args.idle)
     else:
         want_fusion = args.phase == 'fusion'
         checker, recorder = phase_drive(checker, want_fusion)
