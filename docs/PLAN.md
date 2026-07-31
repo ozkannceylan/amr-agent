@@ -22,6 +22,14 @@ process network; autonomous mode is governed by a **PLC-issued motion
 envelope** (enable, speed ceiling, zone permit) with the ~20 Hz loop onboard;
 map and obstacles reach the operator over a **read-only monitoring plane**;
 and the gate claims **PLr targets only, never an achieved PL, SIL or PFH**.
+The single 1513F-1 PN hosting that onboard safety controller is a **simulation
+artifact**, never a claim that one F-CPU guards a fleet, and because one
+simulated CPU carries what the architecture calls per-vehicle safety the cell
+and vehicle chains share an execution substrate in simulation (ADR 0011 D1,
+ADR 0012 D2). Refined 2026-07-31 by ADR 0012 D1: the envelope's third element
+is a **fixed-equipment / station permit**, not a zone permit, since zone
+reservation is the fleet manager's under invariant 5 and one datum has one
+owner under invariant 10.
 
 ### Wave 0 — foundations (in flight)
 

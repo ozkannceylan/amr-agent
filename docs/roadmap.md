@@ -48,7 +48,20 @@ direction, the process plane HMI → PLC → bridge → vehicle remaining the on
 command path (D4). The claim boundary is D5: M5 states **PLr targets derived
 from the documented risk assessment and claims no achieved PL, Category, SIL or
 PFH**, and claims no safety acceptance test and no program signature, for as
-long as the project is hardware-free.
+long as the project is hardware-free. The single 1513F-1 PN hosting that onboard
+safety controller is a **simulation artifact**, disclosed as one wherever the
+twin is described and never an architectural claim that one F-CPU guards a
+fleet: one simulated CPU carries what the architecture calls per-vehicle safety,
+so the cell and vehicle chains share an execution substrate in simulation — the
+M7 statement B4 holds architecturally but not at that execution layer (ADR 0011
+D1, ADR 0012 D2).
+
+ADR 0012 (docs/adr/0012-envelope-composition.md, accepted 2026-07-31) refines
+ADR 0011 D3 in one clause and supersedes nothing: the envelope's third element
+is a **fixed-equipment / station permit** — the PLC's statement that the
+equipment it owns is ready for the vehicle to act on it — and not a zone permit,
+because zone reservation belongs to the fleet manager under invariant 5 and one
+datum has one owner under invariant 10.
 
 The feasibility checkpoint ADR 0007 attached to the safety layer — whether
 PLCSIM Advanced can execute an F-CPU safety program — is **substantially
