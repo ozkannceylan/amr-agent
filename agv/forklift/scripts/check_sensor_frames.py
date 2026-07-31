@@ -147,22 +147,37 @@ def read_readme_scanners(path):
 
 
 def read_sdf_sensors(path):
-    """Sensor name -> aperture, sample count, range and topic, from the SDF."""
+    """Sensor name -> link, topic, type and, for a lidar, its aperture.
+
+    NOT EVERY SENSOR ON THIS MODEL IS A SCANNER. Since brief m5-07c the
+    model also carries an IMU, which has no aperture, no sample count and
+    no range. The aperture fields are therefore present only for sensors
+    that declare a <lidar>, and the one check that uses them - section 5,
+    the process consumer's sector - selects the front safety scanner by
+    topic and so never reaches a sensor that lacks them. Reading the
+    aperture unconditionally would have crashed this checker on the IMU
+    with an AttributeError that says nothing about what is wrong.
+    """
     model = ET.parse(path).getroot().find('model')
     sensors = {}
     for link in model.findall('link'):
         for sensor in link.findall('sensor'):
+            spec = {
+                'link': link.get('name'),
+                'type': sensor.get('type'),
+                'topic': (sensor.findtext('topic') or '').strip(),
+            }
             horizontal = sensor.find('./lidar/scan/horizontal')
             ranges = sensor.find('./lidar/range')
-            sensors[sensor.get('name')] = {
-                'link': link.get('name'),
-                'topic': (sensor.findtext('topic') or '').strip(),
-                'samples': int(horizontal.findtext('samples')),
-                'angle_min': float(horizontal.findtext('min_angle')),
-                'angle_max': float(horizontal.findtext('max_angle')),
-                'range_min': float(ranges.findtext('min')),
-                'range_max': float(ranges.findtext('max')),
-            }
+            if horizontal is not None and ranges is not None:
+                spec.update({
+                    'samples': int(horizontal.findtext('samples')),
+                    'angle_min': float(horizontal.findtext('min_angle')),
+                    'angle_max': float(horizontal.findtext('max_angle')),
+                    'range_min': float(ranges.findtext('min')),
+                    'range_max': float(ranges.findtext('max')),
+                })
+            sensors[sensor.get('name')] = spec
     return sensors
 
 

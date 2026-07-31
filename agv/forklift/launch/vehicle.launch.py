@@ -5,11 +5,14 @@
 #   2. one spawn of agv/forklift/model.sdf into that world,
 #   3. one ros_gz_bridge carrying every topic this directory owns,
 #   3b. a SECOND, switchable ros_gz_bridge carrying the simulator's
-#      ground-truth odom -> base_link transform onto /tf. It is interim:
-#      the EKF of the next brief takes that edge over and this node is
-#      then switched off with ground_truth_tf:=false,
-#   4. scripts/sensor_tf.py, the static TF for the three sensor frames,
-#   5. scripts/forklift_io.py and scripts/obstacle_zone.py.
+#      ground-truth odom -> base_link transform onto /tf. RETIRED: it is
+#      off by default since the EKF took that edge over, and asking for
+#      both is a launch-time refusal, not a warning,
+#   4. scripts/wheel_odometry.py and robot_localization's ekf_node - the
+#      vehicle's own motion estimate, and the SOLE publisher of
+#      forklift/odom -> forklift/base_link,
+#   5. scripts/sensor_tf.py, the static TF for the four sensor frames,
+#   6. scripts/forklift_io.py and scripts/obstacle_zone.py.
 #
 # THE WORLD IS NOT OWNED HERE. agv/ owns a vehicle, not a warehouse, so the
 # world is an argument. Its default is gz's stock empty.sdf, which is enough
@@ -49,7 +52,7 @@ import yaml
 
 from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, ExecuteProcess,
-                            IncludeLaunchDescription)
+                            IncludeLaunchDescription, OpaqueFunction)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -66,6 +69,8 @@ _CONFIG_YAML = os.path.join(_FORKLIFT_DIR, 'config.yaml')
 _IO_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'forklift_io.py')
 _ZONE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'obstacle_zone.py')
 _TF_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'sensor_tf.py')
+_WHEEL_ODOM_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'wheel_odometry.py')
+_EKF_YAML = os.path.join(_FORKLIFT_DIR, 'ekf.yaml')
 
 with open(_CONFIG_YAML, 'r', encoding='utf-8') as _handle:
     _CFG = yaml.safe_load(_handle)
@@ -88,6 +93,7 @@ _BRIDGE_ARGS = [
     '{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'.format(_TOPICS['gz_scan_nav']),
     '{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'.format(
         _TOPICS['gz_safety_scanner_front_measurement']),
+    '{}@sensor_msgs/msg/Imu[gz.msgs.IMU'.format(_TOPICS['gz_imu']),
 ]
 
 # WHAT IS AND IS NOT ON THAT LIST, PER CHANNEL.
@@ -131,29 +137,37 @@ _BRIDGE_ARGS = [
 # these, and the navigation lidar remains the only input any of those
 # gets.
 
-# THE INTERIM MOTION ESTIMATE, ON ITS OWN BRIDGE NODE AND ITS OWN SWITCH.
+# THE RETIRED INTERIM MOTION ESTIMATE. THE SWITCH WAS THROWN ON
+# 2026-07-31 AND THIS NODE IS NOW OFF BY DEFAULT.
 #
 # model.sdf's OdometryPublisher publishes odom -> base_link as
 # gz.msgs.Pose_V, from the same simulator pose that fills
 # /forklift/gz/odom. That is GROUND TRUTH: no wheel slip, no encoder
-# quantisation, no drift. Today it is the vehicle's only motion estimate,
-# because nothing on board can produce one and SLAM cannot start without
-# one, so it is bridged onto /tf. It is a SCAFFOLD.
+# quantisation, no drift. Between briefs m5-07b and m5-07c it was the
+# vehicle's only motion estimate, because nothing on board could produce
+# one and SLAM cannot start without one, so it was bridged onto /tf as a
+# SCAFFOLD, behind this switch, so that retiring it would be a launch
+# argument rather than an edit.
 #
-# It is separated from _BRIDGE_ARGS above for one reason: so that
-# retiring it is a launch argument rather than an edit. When the next
-# brief lands the IMU, the slip-and-noise wheel odometry and the EKF that
-# fuses them (owner ruling, 2026-07-31), THE EKF OWNS odom -> base_link.
-# This stack is then started with ground_truth_tf:=false, the node below
-# does not run, /tf carries exactly one publisher of that edge - the EKF -
-# and everything else here is untouched. The gz topic keeps publishing
-# and becomes the REFERENCE that localisation error is measured against,
-# which is the whole reason the EKF is worth building: measured against
-# its own input, AMCL cannot be wrong.
+# Brief m5-07c landed the IMU, the wheel odometry and the EKF that fuses
+# them. THE EKF NOW OWNS odom -> base_link. `ground_truth_tf` therefore
+# defaults to FALSE, the node below does not run, and /tf carries exactly
+# one publisher of that edge. The gz topic keeps publishing and is now the
+# REFERENCE that estimator error is measured against, which was the whole
+# reason the EKF was worth building: measured against its own input, an
+# estimator cannot be wrong.
 #
-# One datum, one owner, at any instant (invariant 10). The switch is what
-# makes the handover exclusive instead of additive; two publishers of one
-# edge on /tf is the failure this separation exists to prevent.
+# One datum, one owner, at any instant (invariant 10). A default is not a
+# guarantee, so the handover is enforced rather than documented: the
+# _refuse_two_transform_sources check below aborts the launch outright if
+# both this bridge and the EKF are asked for. Two publishers of one edge
+# on /tf is the failure this whole separation exists to prevent, and it
+# is the kind that produces a jittering robot and no error message.
+#
+# WHAT IT IS STILL FOR. `ground_truth_tf:=true ekf:=false` is a
+# deliberate, exclusive configuration and it is how the m5-07b evidence
+# is reproduced. It is not a fallback for a misbehaving EKF: a stack that
+# navigates on ground truth is not demonstrating navigation.
 #
 # The remap onto /tf is not cosmetic: /tf is the only topic a
 # TransformListener reads, and the moving transform has to arrive there
@@ -176,7 +190,41 @@ _BRIDGE_REMAPS = [
     (_TOPICS['gz_scan_nav'], _TOPICS['scan']),
     (_TOPICS['gz_safety_scanner_front_measurement'],
      _TOPICS['safety_scanner_front_measurement']),
+    (_TOPICS['gz_imu'], _TOPICS['imu']),
 ]
+
+
+def _refuse_two_transform_sources(context, *args, **kwargs):
+    """Abort the launch rather than put two publishers on one TF edge.
+
+    `ekf` and `ground_truth_tf` both end up publishing
+    forklift/odom -> forklift/base_link. Two publishers of one transform
+    is invariant 10's failure case and tf2 does not complain about it: the
+    listener takes whichever message arrived last, so the symptom is a
+    vehicle that jitters between a perfect pose and a drifting one, with
+    no error anywhere. A default is not a guarantee, so this is checked.
+    """
+    ekf_on = LaunchConfiguration('ekf').perform(context).lower() == 'true'
+    wheel_on = LaunchConfiguration('wheel_odom').perform(
+        context).lower() == 'true'
+    gt_on = LaunchConfiguration('ground_truth_tf').perform(
+        context).lower() == 'true'
+    if ekf_on and not wheel_on:
+        raise RuntimeError(
+            'ekf:=true with wheel_odom:=false starts a filter with no '
+            'odometry source. It would publish a transform built from the '
+            'IMU yaw rate alone, which is a heading with no position in it '
+            'at all - and it would still be the only publisher of that '
+            'edge, so nothing downstream would notice.')
+    if ekf_on and gt_on:
+        raise RuntimeError(
+            'ekf:=true and ground_truth_tf:=true would both publish '
+            'forklift/odom -> forklift/base_link. Exactly one source owns '
+            'that edge (CLAUDE.md invariant 10). Use ekf:=true (the '
+            'default, the vehicle estimating its own pose) or '
+            'ekf:=false ground_truth_tf:=true (the retired m5-07b '
+            'configuration, for reproducing that evidence only).')
+    return []
 
 
 def generate_launch_description():
@@ -225,12 +273,26 @@ def generate_launch_description():
                     'Separate from "nodes" because SLAM and Nav2 need the '
                     'transforms even when the two process nodes are off.'))
     ld.add_action(DeclareLaunchArgument(
-        'ground_truth_tf', default_value='true',
+        'ground_truth_tf', default_value='false',
         description='Bridge the simulator ground-truth odom -> base_link '
-                    'transform onto /tf. INTERIM: true until the EKF of '
-                    'the next brief owns that edge, then false, and the '
+                    'transform onto /tf. RETIRED 2026-07-31: the EKF owns '
+                    'that edge now, so this defaults to false and the '
                     'ground-truth stream stays only as the reference '
-                    'localisation error is measured against.'))
+                    'estimator error is measured against. Setting it true '
+                    'requires ekf:=false and the launch refuses otherwise.'))
+    ld.add_action(DeclareLaunchArgument(
+        'wheel_odom', default_value='true',
+        description='Start scripts/wheel_odometry.py, the vehicle\'s '
+                    'tricycle dead reckoning. It publishes an estimate and '
+                    'NO transform. Separate from "ekf" so the odometry can '
+                    'be verified on its own before a filter consumes it, '
+                    'which is this gate\'s sequencing rule.'))
+    ld.add_action(DeclareLaunchArgument(
+        'ekf', default_value='true',
+        description='Start the robot_localization EKF fusing the wheel '
+                    'odometry with the IMU. It is the sole publisher of '
+                    'forklift/odom -> forklift/base_link, and it needs '
+                    'wheel_odom:=true.'))
 
     world = LaunchConfiguration('world')
     world_name = LaunchConfiguration('world_name')
@@ -242,6 +304,12 @@ def generate_launch_description():
     nodes = LaunchConfiguration('nodes')
     tf = LaunchConfiguration('tf')
     ground_truth_tf = LaunchConfiguration('ground_truth_tf')
+    wheel_odom = LaunchConfiguration('wheel_odom')
+    ekf = LaunchConfiguration('ekf')
+
+    # Checked before anything starts, so a misconfiguration is a refusal
+    # and not a running stack with two answers to one question.
+    ld.add_action(OpaqueFunction(function=_refuse_two_transform_sources))
 
     ros_gz_sim_launch = os.path.join(
         get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')
@@ -306,6 +374,36 @@ def generate_launch_description():
         arguments=_TF_BRIDGE_ARGS,
         remappings=_TF_BRIDGE_REMAPS,
         condition=IfCondition(ground_truth_tf),
+    ))
+
+    # ---- the vehicle's own motion estimate, in two processes ----
+    #
+    # THE ONLY PUBLISHER OF forklift/odom -> forklift/base_link IS THE EKF.
+    # wheel_odometry.py publishes an Odometry message and NO transform;
+    # it is one sensor's opinion, like the IMU, and the EKF fuses the two.
+    #
+    # BOTH CARRY use_sim_time EXPLICITLY, and it is not optional. Every
+    # message in this stack is stamped with the simulation clock. A node
+    # on the system clock differences two clocks, asks tf2 for a transform
+    # 1.8e9 s in the future and is told the transform does not exist -
+    # which reads as a missing publisher rather than as a misconfigured
+    # node, and cost brief m5-07b a debugging session (its report, "two
+    # findings that belong to every future consumer of this tree").
+    ld.add_action(ExecuteProcess(
+        cmd=[sys.executable, _WHEEL_ODOM_SCRIPT, '--config', config,
+             '--ros-args', '-p', 'use_sim_time:=true'],
+        name='wheel_odometry',
+        output='screen',
+        condition=IfCondition(wheel_odom),
+    ))
+    ld.add_action(Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='forklift_ekf',
+        output='screen',
+        parameters=[_EKF_YAML, {'use_sim_time': True}],
+        remappings=[('odometry/filtered', _TOPICS['odom_filtered'])],
+        condition=IfCondition(ekf),
     ))
 
     # Static TF for the three sensor frames, read out of the model file

@@ -84,6 +84,8 @@
                                                   the same ground truth
 
     /forklift/gz/scan_nav           gz.msgs.LaserScan  360 deg, z = 1.80
+    /forklift/gz/imu                gz.msgs.IMU        6-axis MEMS, 100 Hz,
+                                                       NO orientation output
 
     /forklift/gz/safety_scanner_front/measurement   275 deg, z = 0.15
     /forklift/gz/safety_scanner_rear/measurement    275 deg, z = 0.15
@@ -478,6 +480,154 @@
       </sensor>
     </link>
 
+    <!-- =========================== IMU =========================== -->
+    <!--
+      MEMS inertial measurement unit. Six axes, no magnetometer, and NO
+      ORIENTATION OUTPUT - see the block on <enable_orientation> below,
+      which is the most important sentence in this section.
+
+      WHERE IT SITS, AND WHY THERE. On the rear axle centreline
+      (x = -0.50, the midpoint of rear_wheel_left and rear_wheel_right)
+      and low in the chassis (z = 0.25, just above the 0.20 underside).
+      A tricycle's instantaneous centre of rotation always lies on the
+      rear axle LINE, whatever the steer angle, so a device mounted on
+      that line sees no centripetal term in a steady turn and its
+      accelerometer channels stay usable for something later. The FUSED
+      quantity does not care: angular rate is the same at every point of
+      a rigid body, so yaw rate would read identically anywhere on this
+      vehicle. The mounting is chosen for the channels that are not
+      fused yet, not for the one that is.
+
+      THE NOISE NUMBERS ARE A DATASHEET, NOT A TUNING. Every value below
+      is derived from the Bosch Sensortec BMI088 data sheet,
+      BST-BMI088-DS000-19 revision 1.9, 01/2024, tables 4 and 5, read on
+      2026-07-31. That device class - a 6-axis consumer/robotics MEMS
+      IMU - is what an AGV of this size actually carries. The derivation
+      of each number, including the two places where a datasheet figure
+      is deliberately NOT used raw, is written out in
+      EVIDENCE_ODOMETRY.md section 2. Summary:
+
+        gyro white noise   stddev 0.001745 rad/s
+          = the datasheet's own "Output Noise" row, 0.1 deg/s rms at
+            BW = 47 Hz. No arithmetic: the sensor is operated at the
+            datasheet's own quoted condition (100 Hz ODR, 47 Hz BW).
+
+        gyro bias          bias_mean 0.002618 rad/s, bias_stddev 0
+          = TCO 0.015 deg/s/K x 10 K = 0.15 deg/s. NOT the datasheet's
+            +-1 deg/s zero-rate offset: that row is measured with
+            "slow and fast offset cancellation off", and every AGV
+            integration estimates the stationary bias at power-up. What
+            survives that estimate is the temperature change since it,
+            and 10 K is a device calibrated at power-up in an unheated
+            hall and run through a shift. bias_stddev 0 fixes the
+            MAGNITUDE across runs; gz still draws the SIGN at random.
+
+        accel white noise  stddev 0.01076 m/s^2 (x, y), 0.01278 (z)
+          = noise density 160 ug/sqrt(Hz) (x, y) and 190 (z) at
+            sqrt(47 Hz), times g = 9.80665.
+
+        accel bias         bias_mean 0.01961 m/s^2 (= 2 mg)
+          = TCO 0.2 mg/K x 10 K, by the same argument as the gyro: the
+            20 mg zero-g offset is removed by a levelling calibration,
+            the temperature term is not.
+
+      WHAT IS NOT MODELLED, STATED RATHER THAN OMITTED. The datasheet
+      publishes no Allan-variance bias instability, so NO in-run bias
+      random walk is modelled (<dynamic_bias_stddev> is absent, not
+      zero-by-accident). The modelled bias is constant within a run.
+      Real drift is therefore worse than what this model produces, and
+      every drift figure measured against it is a LOWER BOUND. Inventing
+      a random-walk number to close that gap would be a fabricated
+      datum, which is worse than a stated limitation.
+
+      <enable_orientation>false</enable_orientation> IS LOAD BEARING.
+      gz's IMU derives its orientation output from the LINK'S POSE IN
+      THE SIMULATOR - it is ground truth wearing a sensor's name, and
+      a real strapdown IMU with no magnetometer cannot produce an
+      absolute heading at all. Fusing it would put ground truth back
+      into the estimator through the side door and recreate exactly the
+      circularity the two-phase odometry plan exists to remove (brief
+      m5-07c, forbidden list). With this element false the message
+      carries orientation_covariance[0] = -1, the ROS convention for
+      "no orientation in this message", so a consumer that tries cannot
+      silently succeed. ekf.yaml refuses it a second time by
+      setting all three orientation entries of imu0_config false. Two
+      independent refusals, because one of them is a config file that
+      somebody could edit.
+    -->
+    <link name="imu_link">
+      <pose>-0.50 0 0.25 0 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>1e-5</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1e-5</iyy><iyz>0</iyz><izz>1e-5</izz>
+        </inertia>
+      </inertial>
+      <sensor name="imu" type="imu">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>imu_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>100</update_rate>
+        <topic>/forklift/gz/imu</topic>
+        <imu>
+          <enable_orientation>false</enable_orientation>
+          <angular_velocity>
+            <x>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.001745</stddev>
+                <bias_mean>0.002618</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.001745</stddev>
+                <bias_mean>0.002618</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.001745</stddev>
+                <bias_mean>0.002618</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.01076</stddev>
+                <bias_mean>0.01961</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.01076</stddev>
+                <bias_mean>0.01961</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.01278</stddev>
+                <bias_mean>0.01961</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+    </link>
+
     <!-- ========================== Mast ========================== -->
     <!-- Fixed structure. The carriage slides on it, see mast_joint. -->
     <link name="mast">
@@ -691,6 +841,11 @@
       <child>nav_lidar_link</child>
     </joint>
 
+    <joint name="imu_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>imu_link</child>
+    </joint>
+
     <!-- Steer axis, vertical. Limit is the mechanical stop of the
          assembly, not a control decision. -->
     <joint name="steer_joint" type="revolute">
@@ -896,6 +1051,34 @@
       <i_min>-1500.0</i_min>
       <cmd_max>3000.0</cmd_max>
       <cmd_min>-100.0</cmd_min>
+    </plugin>
+
+    <!--
+      THE IMU SYSTEM, CARRIED BY THE MODEL AND NOT BY THE WORLD.
+
+      gz's IMU sensor produces nothing unless some system creates it, the
+      same way a gpu_lidar produces nothing unless gz-sim-sensors-system
+      is loaded. The usual placement for BOTH is the world file - and for
+      the rendering sensors it has to be the world, because they need a
+      render engine the world owns.
+
+      The IMU system does NOT: it scans the whole entity-component
+      manager for Imu components regardless of which entity it was
+      attached to, so a model-level declaration serves this model. That
+      was measured, not assumed - EVIDENCE_ODOMETRY.md section 3 records
+      the same model spawned into a world with no IMU system of its own,
+      publishing /forklift/gz/imu.
+
+      This is worth the two lines because of what it avoids: no world
+      file has to be edited to give this vehicle an IMU, so the sensor
+      travels with the model into sim/worlds/forklift_arena.sdf,
+      sim/worlds/warehouse.sdf and any world a later gate adds. The
+      vehicle carries its own instruments. Contrast the three scanners,
+      which go silent in a world that forgot gz-sim-sensors-system and
+      have needed that noted in every launch file since.
+    -->
+    <plugin filename="gz-sim-imu-system"
+            name="gz::sim::systems::Imu">
     </plugin>
 
     <!--

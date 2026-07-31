@@ -28,11 +28,35 @@ model:
   fork_travel_min_m: 0.0        # mast_joint lower limit
   fork_travel_max_m: 1.6        # mast_joint upper limit
 
-  # Name of the mast joint as it appears in the bridged JointState message.
-  # This is the only joint name a node needs, because the nodes address
-  # joints through topics and not by name. The full joint list is a
+  # Tricycle geometry, DERIVED from model.sdf link poses rather than
+  # written there as a single number, which is why these two are the only
+  # mirrors in this block that are not a verbatim copy:
+  #
+  #   steer_link      <pose>  0.55 0 0.24 ...   the steer axis
+  #   rear_wheel_left <pose> -0.50 0.36 0.12    rear axle
+  #   rear_wheel_right<pose> -0.50 -0.36 0.12   rear axle
+  #
+  # wheelbase        = 0.55 - (-0.50) = 1.05 m
+  # rear axle x in base_link = -0.50 m, so base_link stands 0.50 m
+  # FORWARD of the rear axle midpoint. That offset is not cosmetic: the
+  # rear axle midpoint is the only point of a tricycle whose velocity is
+  # purely longitudinal, so base_link necessarily has a LATERAL velocity
+  # component d*yawrate whenever the vehicle turns, and wheel odometry
+  # that ignores it reports a body twist the vehicle does not have.
+  # scripts/wheel_odometry.py derives the pose of the rear axle exactly
+  # and then places base_link on it. scripts/check_odometry.py checks
+  # both numbers against model.sdf rather than trusting this comment.
+  wheelbase_m: 1.05
+  rear_axle_offset_m: -0.50
+
+  # Joint names as they appear in the bridged JointState message. The
+  # mast joint is the only one forklift_io.py needs; the other two are
+  # what wheel_odometry.py reads, because odometry is the one function
+  # that cannot address a joint through a topic. The full joint list is a
   # contract and its home is the table in README.md.
   mast_joint_name: mast_joint
+  drive_joint_name: drive_wheel_joint
+  steer_joint_name: steer_joint
 
 limits:
   # Largest traction speed this node will pass on. A request beyond it is
@@ -53,6 +77,148 @@ rates:
   io_command_hz: 20.0
   # Publication rate for both /forklift/obstacle/* topics.
   obstacle_publish_hz: 10.0
+
+odometry:
+  # ================ WHEEL ODOMETRY, AND ITS ERROR MODEL ================
+  #
+  # Read by scripts/wheel_odometry.py, which computes the vehicle's own
+  # motion estimate from its own joint states through tricycle
+  # kinematics. It is ONE SENSOR'S OPINION, not the vehicle's pose: it
+  # is an input to the EKF exactly as the IMU is, and the EKF is the
+  # single owner of odom -> base_link (invariant 10).
+  #
+  # THE HONESTY RULE THAT GOVERNS EVERY NUMBER BELOW. None of these was
+  # chosen to make the drift come out at a convenient value. Each is
+  # derived from a stated property of the modelled hardware, the
+  # derivation is in EVIDENCE_ODOMETRY.md section 4, and the resulting
+  # drift is reported whatever it turned out to be.
+  #
+  # WHAT IS *NOT* IN THIS BLOCK, AND THAT IS THE POINT: WHEEL SLIP. The
+  # physics engine already produces it. Over the 3.989 m arc measured by
+  # brief m5-07b the drive wheel turned 4.065 m of tread, and every
+  # metre of that discrepancy arrives free from the contact model. Adding
+  # a slip term here would be inventing an error the simulation already
+  # has, and it would be the exact move the honesty rule forbids.
+
+  # Rate at which the estimate is integrated and published. 50 Hz is the
+  # rate an AGV odometry loop typically runs at, an order under the
+  # 500 Hz the joint states arrive at, so each cycle differences a real
+  # displacement rather than quantiser dither.
+  publish_hz: 50.0
+
+  # ---- the two encoders ----
+  #
+  # DRIVE WHEEL, incremental. 1024 pulses per revolution read in
+  # quadrature = 4096 counts/rev, the commonest catalogue resolution for
+  # a motor-mounted incremental encoder. Quantisation step
+  # 2*pi/4096 = 1.53398e-3 rad, which at the 0.12 m wheel is 0.184 mm of
+  # tread per count. The node quantises the ABSOLUTE wheel angle onto
+  # that grid and differences it, which is what an incremental encoder
+  # physically does; quantising the difference instead would lose the
+  # residue and drift by a count per cycle.
+  drive_encoder_counts_per_rev: 4096
+
+  # STEER AXIS, absolute. 12-bit single-turn, 4096 counts over 2*pi, the
+  # commonest catalogue resolution for an absolute steer-axis encoder.
+  # Same 1.53398e-3 rad step, = 0.0879 deg.
+  steer_encoder_counts_per_rev: 4096
+
+  # STEER ZERO OFFSET, and where the value comes from. A steer encoder's
+  # zero is set against the mechanical straight-ahead by a calibration,
+  # and no calibration can resolve better than ONE COUNT. So the
+  # modelled residual IS one count, 1.53398e-3 rad = 0.0879 deg. It is
+  # deliberately the smallest defensible value rather than a plausible
+  # workshop tolerance, because this is the term that dominates a
+  # tricycle's heading error and it must not be inflated: driving
+  # straight, the vehicle believes it is turning at
+  # v/L * tan(0.0879 deg) = 1.46 mrad/s at 1 m/s, which is 5.0 deg per
+  # 60 s of straight running with no slip anywhere.
+  #
+  # The sign is positive and arbitrary; a real vehicle's is whatever its
+  # last calibration left. Nothing downstream may assume it.
+  steer_zero_offset_rad: 0.00153398
+
+  # ROLLING RADIUS THE NODE BELIEVES, against the 0.12 m the physics
+  # actually rolls on. A loaded polyurethane drive tyre's effective
+  # rolling radius is SMALLER than its free radius, so a vehicle
+  # calibrated on a free or new tyre over-reports distance. 0.5% is the
+  # load-compression figure for a PU drive wheel of this size:
+  # 0.12 * 1.005 = 0.1206 m.
+  #
+  # THE SIGN IS THE PESSIMISTIC ONE ON PURPOSE. Physics slip already
+  # makes the wheel over-turn relative to the ground, so an error that
+  # over-reports distance COMPOUNDS with slip instead of cancelling it.
+  # Choosing the other sign would have flattered the result by half a
+  # per cent and there would have been no way to see it in the output.
+  # Tyre wear, which is larger and the same sign, is not modelled: it is
+  # what a recalibration removes.
+  rolling_radius_m: 0.1206
+
+  # ---- the covariances this node publishes, and their derivation ----
+  #
+  # These are the numbers that decide how much the EKF believes the
+  # wheels against the IMU, so they are derived rather than chosen. All
+  # three are evaluated at a nominal 1.0 m/s, stated because a
+  # covariance from a velocity-dependent error term is only meaningful
+  # with the velocity named. dt = 0.02 s, q = 1.53398e-3 rad,
+  # r = 0.1206 m, L = 1.05 m, d = 0.50 m.
+  #
+  # vx.  Two terms.
+  #   quantisation: the difference of two independent uniform
+  #     quantisation errors has sigma q/sqrt(6) = 6.2624e-4 rad, so
+  #     sigma_s = r * 6.2624e-4 = 7.5525e-5 m and
+  #     sigma_v = 7.5525e-5 / 0.02 = 3.7763e-3 m/s
+  #   rolling radius: 0.5% of 1.0 m/s = 5.0e-3 m/s
+  #   sigma_vx = sqrt(3.7763e-3^2 + 5.0e-3^2) = 6.2658e-3 m/s
+  vx_variance: 3.93e-05
+
+  # vyaw.  yawrate = v * tan(delta) / L, so d(yawrate)/d(delta) at
+  #   delta = 0 is v/L = 0.95238 1/s.
+  #   quantisation: sigma_delta = q/sqrt(12) = 4.4281e-4 rad
+  #                 -> 4.2172e-4 rad/s
+  #   zero offset:  one count, 1.53398e-3 rad -> 1.46094e-3 rad/s
+  #   sigma_vyaw = sqrt(4.2172e-4^2 + 1.46094e-3^2) = 1.52059e-3 rad/s
+  #
+  # Compare the IMU: model.sdf declares the gyro at 1.745e-3 rad/s of
+  # white noise, so the two sources are within a factor of 1.15 of each
+  # other on the SAME quantity and the EKF genuinely blends them rather
+  # than one drowning the other. Neither number was moved to arrange
+  # that; it is what a 12-bit steer encoder and a BMI088 happen to be.
+  vyaw_variance: 2.312e-06
+
+  # vy is not measured. It is d * yawrate exactly, a kinematic
+  # consequence of base_link standing 0.50 m ahead of the rear axle, so
+  # its variance is d^2 times vyaw's: 0.25 * 2.312e-06 = 5.78e-07.
+  vy_variance: 5.78e-07
+
+  # Pose covariance published with the estimate. The pose of a dead
+  # reckoning estimate has UNBOUNDED error, and no honest fixed number
+  # exists for it, so this node publishes a large constant and the EKF
+  # is configured to fuse the TWIST only - never the pose. The value
+  # exists so the message is well formed and so that anything which
+  # ignores this warning and fuses the pose is told the pose is worth
+  # nothing.
+  pose_variance_unused: 1000.0
+
+  # A joint state older than this counts as no joint state. The node
+  # then publishes nothing rather than integrating a stale sample across
+  # a gap, because an integrator that fills gaps invents distance.
+  joint_state_timeout_s: 0.50
+
+imu:
+  # Nothing in this block is a noise parameter. model.sdf owns the
+  # sensor's noise, the message carries the covariance gz derives from
+  # it, and no node here re-states either (invariant 10). What lives
+  # here is only what a node needs in order to CHECK the stream.
+  #
+  # Declared sample rate, mirrored from model.sdf's <update_rate>.
+  # scripts/check_odometry.py compares the measured rate against it
+  # rather than quoting one of the two.
+  publish_hz: 100.0
+
+  # A sample older than this counts as no IMU. Matches the EKF's
+  # sensor_timeout in ekf.yaml.
+  timeout_s: 0.20
 
 obstacle:
   # WHICH CHANNEL THIS READS, AND WHY IT IS THAT ONE. obstacle_zone.py
@@ -143,6 +309,16 @@ frames:
   safety_scanner_front: safety_scanner_front_link
   safety_scanner_rear: safety_scanner_rear_link
   nav_lidar: nav_lidar_link
+  imu: imu_link
+
+  # The odometry frame. It is a MIRROR of model.sdf's <odom_frame>, like
+  # `base` above, and it is written here because ekf.yaml and
+  # scripts/wheel_odometry.py both have to name it and neither may
+  # invent it. The EKF is the sole publisher of the edge
+  # forklift/odom -> forklift/base_link; the name did not change when
+  # ownership of that edge moved from the simulator to the EKF, which is
+  # the whole reason it was stated explicitly in the model.
+  odom: forklift/odom
 
 topics:
   # Simulation clock, bridged one to one.
@@ -161,45 +337,74 @@ topics:
   gz_joint_state: /forklift/gz/joint_state
   gz_odom: /forklift/gz/odom
   gz_scan_nav: /forklift/gz/scan_nav
+  gz_imu: /forklift/gz/imu
 
-  # THE GROUND-TRUTH odom -> base_link TRANSFORM, AND IT IS INTERIM.
+  # THE GROUND-TRUTH odom -> base_link TRANSFORM. RETIRED AS A SOURCE
+  # ON 2026-07-31 AND STILL DECLARED HERE, WHICH IS NOT A CONTRADICTION.
   #
-  # Published by the same model.sdf OdometryPublisher that fills gz_odom,
-  # from the same simulator pose, so it carries no wheel slip and no
-  # drift. Today it is the vehicle's only motion estimate, because
-  # nothing else can produce one and SLAM cannot start without one. It is
-  # a scaffold.
+  # model.sdf's OdometryPublisher still publishes it, because it is the
+  # REFERENCE that estimator error is measured against and phase 2 was
+  # always going to keep it. What changed is that nothing bridges it onto
+  # /tf any more: launch/vehicle.launch.py's ground_truth_tf argument now
+  # defaults to FALSE, the EKF owns odom -> base_link, and the launch
+  # file refuses outright to start with both sources on (see the
+  # exclusivity check in that file).
   #
-  # The name says ground_truth on purpose. An IMU, a wheel odometry
-  # computed from the joint states with slip and noise, and an EKF fusing
-  # them are the next brief's (owner ruling, 2026-07-31); after that
-  # there are TWO pose streams on this vehicle and a reader must never
-  # have to guess which one is the reference. THE EKF THEN OWNS
-  # odom -> base_link, this stream stops being an input to navigation,
-  # and it becomes the reference that localisation error is measured
-  # against. See README.md, "Odometry in two phases", for the seam.
-  #
-  # One datum, one owner (invariant 10): no node here recomputes a pose
-  # from joint states while this is the source, and when the EKF takes
-  # over, this one stops being bridged rather than running beside it. The
-  # gz name is stated in model.sdf so it does not depend on the spawned
-  # model name; the ROS name is /tf because that is the only name tf2
-  # listens on, whichever source is filling it.
+  # It is still a topic name this directory owns, so it is still
+  # declared. It is consumed by exactly one thing:
+  # scripts/check_odometry.py, the measurement harness, which is not an
+  # estimator and does not steer anything. NOTHING THAT NAVIGATES MAY
+  # READ IT. Feeding it to the EKF, to SLAM, to AMCL or to any node whose
+  # output an estimator consumes recreates the circularity the whole
+  # two-phase plan exists to remove: an estimate scored against its own
+  # input cannot be wrong.
   gz_tf_ground_truth: /forklift/gz/tf_ground_truth
 
   joint_states: /forklift/joint_states
 
-  # GROUND TRUTH TOO, and the name does NOT say so - the one place this
-  # directory could not fix it. /forklift/odom is a cross-layer contract
+  # GROUND TRUTH TOO, and the name STILL does not say so - the one place
+  # this directory cannot fix. /forklift/odom is a cross-layer contract
   # (sim/launch/forklift_bringup.launch.py bridges it,
-  # sim/scenarios/run_forklift_rehearsal.py reads it) and renaming it
-  # from here would break a layer this directory may not edit. When the
-  # EKF lands, /forklift/odom is the name the ESTIMATE should carry and
-  # this ground-truth stream should move to /forklift/odom_ground_truth.
-  # That rename is a request, recorded in docs/reports/m5-07b-odom-tf.md,
-  # not a change taken here.
+  # sim/scenarios/run_forklift_rehearsal.py reads it,
+  # scripts/forklift_io.py derives /forklift/linear_speed from it) and
+  # renaming it from here would break a layer this directory may not
+  # edit. The request stands, now with more force than when
+  # docs/reports/m5-07b-odom-tf.md first made it: the ESTIMATE now
+  # exists, it is odom_filtered below, and this name is the reference.
+  # The rename wanted is /forklift/odom -> /forklift/odom_ground_truth
+  # (gz side /forklift/gz/odom_ground_truth), in one coordinated brief.
+  #
+  # Until it happens, THREE pose streams exist on this vehicle and the
+  # rule for telling them apart is written in README.md, "Three pose
+  # streams, one owner": this one is truth, odom_wheel is one sensor's
+  # opinion, odom_filtered is the estimate and it alone owns the
+  # transform.
   odom: /forklift/odom
   tf: /tf
+
+  # ---- the IMU ----
+  # gz name and ROS name differ only by the /gz/ segment, like the other
+  # feedback channels. The ROS message carries NO usable orientation and
+  # that is deliberate: see model.sdf's <enable_orientation> block, and
+  # the warning under "The orientation trap" in README.md.
+  imu: /forklift/imu
+
+  # ---- the two estimator topics ----
+  #
+  # ONE SENSOR'S OPINION. Wheel odometry integrated from this vehicle's
+  # own joint states through its tricycle kinematics, by
+  # scripts/wheel_odometry.py, carrying the encoder and calibration
+  # errors of the `odometry:` block above. It is an INPUT to the EKF in
+  # the same sense the IMU is, it publishes NO transform, and no
+  # consumer should treat it as the vehicle's pose.
+  odom_wheel: /forklift/odom_wheel
+
+  # THE ESTIMATE. robot_localization's EKF, fusing odom_wheel and imu.
+  # This node, and no other, publishes forklift/odom -> forklift/base_link
+  # on /tf. It is the pose Nav2, SLAM and AMCL see, and it is the one
+  # datum in this file with exactly one owner by construction rather than
+  # by convention (invariant 10).
+  odom_filtered: /forklift/odom_filtered
 
   # The NAVIGATION lidar on the ROS side. Its consumers are SLAM, AMCL and
   # the Nav2 costmaps, and it is the ONLY input any of them may have. No

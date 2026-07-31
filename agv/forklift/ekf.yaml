@@ -1,0 +1,134 @@
+# ekf.yaml - parameters for the forklift's state estimator.
+#
+# THIS FILE CONFIGURES THE SINGLE OWNER OF forklift/odom -> forklift/base_link.
+# robot_localization's ekf_node fuses two sensors - the vehicle's wheel
+# odometry and its IMU - and publishes that transform. Nothing else on this
+# vehicle publishes it: launch/vehicle.launch.py refuses to start if the
+# retired ground-truth bridge is also enabled (invariant 10).
+#
+# WHAT IS DELIBERATELY NOT IN THIS FILE
+#
+#   No ground truth. /forklift/odom and /forklift/gz/tf_ground_truth are the
+#   simulator's own pose and no odomN or poseN entry below names either. An
+#   estimator that reads ground truth is scored against its own input and
+#   cannot be wrong, which is the circularity the two-phase odometry plan
+#   exists to remove (brief m5-07c).
+#
+#   No process_noise_covariance and no initial_estimate_covariance. Both
+#   are left at the package defaults ON PURPOSE. They are the two knobs a
+#   drift figure is most easily flattered with, and this brief's job was to
+#   MEASURE the drift, not to arrange it. A later brief that has a reason to
+#   move them states the reason and re-measures.
+#
+#   No map frame producer. map_frame is declared because the parameter is
+#   required, but world_frame is odom_frame, so this node publishes exactly
+#   one transform and never map -> odom. That edge belongs to SLAM or AMCL
+#   and its frame name is still undecided (docs/reports/m5-07b-odom-tf.md,
+#   open question 3).
+#
+# THE COVARIANCES THAT DECIDE THE BLEND ARE NOT HERE EITHER, and that is
+# the right place for them: robot_localization reads each measurement's
+# covariance out of the message. The wheel odometry's comes from
+# config.yaml's `odometry:` block, where its derivation is written; the
+# IMU's is filled by gz from the noise stddev declared in model.sdf. So the
+# weighting between the two sensors is set by two datasheet-derived numbers
+# and by no hand in this file.
+#
+# ONE CONSEQUENCE OF THAT, STATED RATHER THAN HIDDEN: the covariance gz
+# publishes for the gyro is its WHITE NOISE only. The modelled bias
+# (0.002618 rad/s, model.sdf) is not in it, because a real driver does not
+# know its device's live bias either. So this filter trusts the gyro's
+# heading rate more than the bias justifies, exactly as a real integration
+# of an uncompensated MEMS gyro does. EVIDENCE_ODOMETRY.md section 7
+# measures what that costs.
+
+forklift_ekf:
+  ros__parameters:
+
+    # Output rate. Matches the wheel odometry's 50 Hz so the filter is not
+    # predicting between measurements more often than it is correcting.
+    frequency: 50.0
+
+    # A sensor silent for longer than this stops contributing. 0.2 s is
+    # ten missed wheel-odometry cycles and twenty missed IMU samples.
+    sensor_timeout: 0.2
+
+    # A forklift on a warehouse floor. Roll, pitch, z and their rates are
+    # held at zero rather than estimated from noise.
+    two_d_mode: true
+
+    publish_tf: true
+    publish_acceleration: false
+
+    # Frames. Every one of these is a MIRROR of config.yaml's frames:
+    # block, which is itself a mirror of model.sdf. The names did not
+    # change when ownership of the transform moved from the simulator's
+    # OdometryPublisher to this node - that was the point of writing
+    # <odom_frame> and <robot_base_frame> explicitly in the model.
+    map_frame: map
+    odom_frame: forklift/odom
+    base_link_frame: forklift/base_link
+    world_frame: forklift/odom
+
+    # ---------------- sensor 0: the wheel odometry ----------------
+    #
+    # scripts/wheel_odometry.py. Tricycle dead reckoning from this
+    # vehicle's own joint states, carrying its encoder quantisation, its
+    # steer zero offset, its rolling-radius calibration error and the
+    # physics engine's own wheel slip.
+    #
+    # THE TWIST IS FUSED AND THE POSE IS NOT. A dead-reckoned pose has
+    # unbounded error and fusing it would hand the filter the integrator's
+    # drift as though it were a measurement. The node says so in its own
+    # pose covariance; this configuration is the second refusal.
+    #
+    # Order of the 15 flags:
+    #   x, y, z, roll, pitch, yaw,
+    #   vx, vy, vz, vroll, vpitch, vyaw,
+    #   ax, ay, az
+    #
+    # vy is fused and it is NOT zero: base_link stands 0.50 m ahead of the
+    # rear axle, so it genuinely translates sideways in every turn. See the
+    # kinematics block in wheel_odometry.py.
+    odom0: /forklift/odom_wheel
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, true,
+                   false, false, false]
+    odom0_differential: false
+    odom0_relative: false
+    odom0_queue_size: 10
+
+    # -------------------- sensor 1: the IMU --------------------
+    #
+    # YAW RATE ONLY. Two channels are refused and each for its own reason.
+    #
+    # ORIENTATION IS REFUSED BECAUSE IT IS GROUND TRUTH. gz derives an
+    # IMU's orientation output from the link's pose in the simulator, and
+    # a real strapdown IMU with no magnetometer cannot produce an absolute
+    # heading at all. model.sdf sets <enable_orientation>false</> so the
+    # device does not emit one; these three flags are the second,
+    # independent refusal, because that SDF element is one edit away from
+    # being flipped back by someone who did not read this paragraph.
+    #
+    # LINEAR ACCELERATION IS REFUSED BECAUSE IT IS USELESS HERE, and the
+    # arithmetic is short enough to write down: the modelled accelerometer
+    # bias is 0.01961 m/s^2, and a bias integrated twice is 0.5*b*t^2, so
+    # 100 s of driving turns it into 98 m of position error. On a ground
+    # vehicle with no absolute aiding an accelerometer contributes noise
+    # and a divergent double integration, which is why fusing wheel
+    # odometry with gyro yaw rate - and nothing else - is what real AGVs
+    # do. The accelerometer is on the model, fully noise-modelled and
+    # verified in EVIDENCE_ODOMETRY.md section 3, because a later brief
+    # may want it for something bounded; it is not fused today.
+    imu0: /forklift/imu
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_differential: false
+    imu0_relative: false
+    imu0_queue_size: 10
+    imu0_remove_gravitational_acceleration: true
