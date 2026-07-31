@@ -71,6 +71,33 @@ brief queue lives in docs/PLAN.md.
   simulation's stand-in for field wiring or as a layer in its own right.
   Done when §3 draws the path the demonstrations actually use.
 
+## M5 — judge review follow-ups (docs/reports/m5-judge-architecture-review.md)
+- **BLOCKER, deferred by owner ruling 2026-07-30 until m5-03 returns a
+  verdict.** If the F-I/O probe answers NO, roadmap M5 criterion (a) — "its
+  signals reach the F-CPU safety program's F-blocks" — cannot be met by the
+  named fallback, because watch-table Modify means a human types the value
+  and the scanner's signal reaches nothing. ADR 0011 D2's claim that the
+  fallback changes no gate criterion is wrong in that branch. The owner
+  chose to wait rather than pre-decide, since a YES makes the question moot.
+  Done when m5-03's verdict is in and, if NO, one of: the fallback is
+  upgraded to an automated API-driven standard-DB stimulus carrying the
+  S015 validity check, or criterion (a) is amended by ADR. Do not let the
+  gate proceed past m5-15 with this open.
+- M4 showcase recording: owner ruled it is made against the CURRENT tree
+  (judge finding 7). Criterion (d)'s instrument changed under it — the ±90°
+  scanner was deleted and the process stop plane moved 0.25 → 0.15 m — and
+  m5-06 verified live that the behaviour is preserved on the front safety
+  scanner's measurement channel (0.90 m crate caught at 0.85 m). Done when
+  that instrument change is written into the M4 evidence and the scenario
+  procedure, so the recording says which tree it certifies.
+- Monitoring plane, m5-13 briefing (judge finding 6): "read-only by
+  construction" is today a source-code property, not a runtime-enforced one.
+  Decide whether m5-13 adds real enforcement (SROS2/DDS permissions) or
+  whether the limitation is recorded as a limitation. Do not let the phrase
+  stand unqualified either way.
+- m5-18: PL-SCENARIOS carries "Category 3 is claimed" wording, permanent
+  grep-bait against ADR 0011 D5 item 1 — sweep the verb, not the noun.
+
 ## M5 — open items
 - Monitoring service directory: ADR 0011 D4 recommends `agv/` but does not
   rule it; `viz/` is the alternative and the ADR 0005 test names the
