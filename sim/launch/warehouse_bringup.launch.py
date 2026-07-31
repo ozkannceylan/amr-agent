@@ -30,7 +30,7 @@
 # WHAT THIS FILE ADDS THAT THE M4 BRINGUP DOES NOT: THE ESTIMATOR STACK.
 #
 #   M5 is the gate where the vehicle localises itself, and a localisation
-#   consumer needs a transform tree. So this file additionally starts three
+#   consumer needs a transform tree. So this file additionally starts four
 #   agv/-owned processes, exactly as agv/forklift/launch/vehicle.launch.py
 #   starts them:
 #
@@ -39,11 +39,39 @@
 #                                from the geometry
 #     scripts/wheel_odometry.py  tricycle dead reckoning from the vehicle's
 #                                own joint states. Publishes an Odometry
-#                                message and NO transform
+#                                message, a standstill verdict, and NO
+#                                transform
+#     scripts/imu_gate.py        the IMU as a ROTATION sensor: every sample
+#                                forwarded unchanged onto
+#                                /forklift/imu_gated EXCEPT while the wheel
+#                                odometry reports both encoder counts held
 #     robot_localization ekf_node with agv/forklift/ekf.yaml
-#                                the fusion of that with the IMU, and THE
-#                                SOLE PUBLISHER of
+#                                the fusion of those two, and THE SOLE
+#                                PUBLISHER of
 #                                forklift/odom -> forklift/base_link
+#
+#   THE GATE IS THE FOURTH PROCESS AND IT WAS MISSING UNTIL 2026-07-31.
+#   It is not an optional refinement here: agv/forklift/ekf.yaml names
+#   `imu0: /forklift/imu_gated`, which is a topic only imu_gate.py
+#   publishes. Started without it, the EKF found no publisher on its IMU
+#   input, logged nothing about it, and ran on wheel odometry alone - a
+#   different estimator wearing the same node name, with the same single
+#   /tf publisher and the same topic list. That is why there is NO
+#   argument below that starts the EKF without the gate: `estimator`
+#   starts all four or none. The one configuration in which the gate is
+#   present and permanently ineffective (no wheel odometry, so no
+#   standstill verdict, so a gate that fails open for ever) cannot be
+#   asked for here either, because there is no argument for it.
+#
+#   WHAT THE GATE IS FOR, in one line, because a launch file should say
+#   why it starts a process: a tricycle cannot rotate without its drive
+#   wheel travelling, so a held encoder count bounds the body rotation at
+#   0.0101 deg and a gyro reading taken in that condition is bias, not
+#   rotation. Integrating it turned the m5-08b map 2.0 deg off the
+#   building because the stack idled for twenty seconds before the drive
+#   (docs/reports/m5-08c-slam-judge.md finding 1;
+#   agv/forklift/EVIDENCE_ODOMETRY.md section 12 measures the fix at
+#   0.0000 deg over both a 60 s and a 240 s idle).
 #
 #   THE GROUND-TRUTH TF BRIDGE IS NOT STARTED HERE AND HAS NO ARGUMENT.
 #   agv/forklift/launch/vehicle.launch.py carries a switchable bridge for
@@ -93,6 +121,10 @@
 #   /forklift/imu                                 sensor_msgs/Imu, 100 Hz
 #   /forklift/odom_wheel                          nav_msgs/Odometry, 50 Hz
 #       one sensor's opinion, no transform
+#   /forklift/wheel_standstill                    std_msgs/Bool, 50 Hz
+#       the wheel odometry's own verdict: both encoder counts unchanged
+#   /forklift/imu_gated                           sensor_msgs/Imu, <= 100 Hz
+#       the IMU as a rotation sensor. THE TOPIC ekf.yaml FUSES
 #   /forklift/odom_filtered                       nav_msgs/Odometry, 50 Hz
 #       THE ESTIMATE, and the owner of odom -> base_link
 #   /tf                                           tf2_msgs/TFMessage
@@ -140,6 +172,7 @@ _MODEL_SDF = os.path.join(_FORKLIFT_DIR, 'model.sdf')
 _CONFIG_YAML = os.path.join(_FORKLIFT_DIR, 'config.yaml')
 _TF_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'sensor_tf.py')
 _WHEEL_ODOM_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'wheel_odometry.py')
+_IMU_GATE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'imu_gate.py')
 _EKF_YAML = os.path.join(_FORKLIFT_DIR, 'ekf.yaml')
 
 # Spawn pose. The dock aisle south of rack row C runs along y = -5.50; x =
@@ -182,12 +215,17 @@ def generate_launch_description():
     ld.add_action(DeclareLaunchArgument(
         'estimator', default_value='true',
         description='Start the vehicle\'s own pose estimate: sensor_tf.py, '
-                    'wheel_odometry.py and the robot_localization EKF. The '
-                    'EKF is the sole publisher of forklift/odom -> '
-                    'forklift/base_link and there is no argument here that '
-                    'adds a second one. Set false only to bring up the bare '
-                    'plant, which then has no transform tree and cannot '
-                    'carry SLAM, AMCL or Nav2.'))
+                    'wheel_odometry.py, imu_gate.py and the '
+                    'robot_localization EKF. ALL FOUR OR NONE - the EKF '
+                    'fuses /forklift/imu_gated, which only imu_gate.py '
+                    'publishes, and imu_gate.py gates on a verdict only '
+                    'wheel_odometry.py publishes, so a partial start is a '
+                    'silently different estimator. The EKF is the sole '
+                    'publisher of forklift/odom -> forklift/base_link and '
+                    'there is no argument here that adds a second one. Set '
+                    'false only to bring up the bare plant, which then has '
+                    'no transform tree and cannot carry SLAM, AMCL or '
+                    'Nav2.'))
 
     # The M4 bringup carries the world server, the single spawn and the one
     # bridge that states the vehicle's whole topic contract. Everything this
@@ -227,6 +265,21 @@ def generate_launch_description():
         cmd=[sys.executable, _WHEEL_ODOM_SCRIPT, '--config', _CONFIG_YAML,
              '--ros-args', '-p', 'use_sim_time:=true'],
         name='wheel_odometry',
+        output='screen',
+        condition=IfCondition(estimator),
+    ))
+    # The gyro gate, between the bridge's IMU and the filter. It publishes
+    # /forklift/imu_gated, which is the topic ekf.yaml names as imu0, and it
+    # forwards every sample unchanged except while the wheel odometry
+    # reports both encoder counts held. It carries use_sim_time for the same
+    # reason the two nodes above do, and for one more: its freshness test
+    # compares a simulated stamp against its own clock, and on the system
+    # clock it would find every verdict 1.8e9 s stale and gate nothing,
+    # silently, for ever.
+    ld.add_action(ExecuteProcess(
+        cmd=[sys.executable, _IMU_GATE_SCRIPT, '--config', _CONFIG_YAML,
+             '--ros-args', '-p', 'use_sim_time:=true'],
+        name='imu_gate',
         output='screen',
         condition=IfCondition(estimator),
     ))
