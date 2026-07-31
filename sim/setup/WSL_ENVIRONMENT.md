@@ -127,9 +127,9 @@ $ sudo -n true
 sudo: a password is required
 ```
 
-The owner ran the elevated install. For the **M3 demonstration cell only**, the
-Robotnik workspace (`install.sh` §4–§6) is not required — `sim/README.md`
-states the cell needs only `/opt/ros/jazzy`, and
+The owner ran the elevated install. For the **M3 demonstration cell only**, no
+workspace beyond `/opt/ros/jazzy` is required — `sim/README.md` states the cell
+needs only `/opt/ros/jazzy`, and
 `sim/launch/cell_bringup.launch.py` references only `ros_gz_sim` and
 `ros_gz_bridge`:
 
@@ -518,9 +518,11 @@ is.
 Two qualifications, offered as findings rather than changes:
 
 1. If a future gate builds a colcon workspace, do **not** put it on `/mnt/c` —
-   the 104x small-file penalty is exactly what a build hits. `install.sh`
-   already places the Robotnik workspace at `/opt/m3-feasibility/ws`, which is
-   native ext4, so this is already correct.
+   the 104x small-file penalty is exactly what a build hits. Put it on a
+   native ext4 path. (When this was written, `install.sh` provisioned a vendor
+   workspace at `/opt/m3-feasibility/ws`, native ext4, and was correct on that
+   count; m5-09 removed that step with the retired platform, so no workspace
+   location is set by the script any more and this is a rule for the next one.)
 2. If m3-08 wants the tightest possible latency distribution, pointing
    `evidence.csv_path` at a native path (e.g. `~/amr-evidence/`) and copying
    the CSV into the repo afterwards removes the 4.25 ms flush spikes entirely.

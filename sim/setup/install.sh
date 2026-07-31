@@ -6,19 +6,20 @@
 #
 # Idempotent: every step checks before doing. Safe to re-run.
 #
-# What it installs by default (steps 0-3):
+# What it installs (steps 0-3, all of them):
 #   1. python3 -> python3.12 via update-alternatives (container quirk)
 #   2. ROS 2 Jazzy apt source (proxy-safe key and http package host)
 #   3. ROS 2 Jazzy + Gazebo Harmonic + ros_gz + Nav2 + slam_toolbox
 #
-# Steps 4-6 are the RB-KAIROS path (Robotnik jazzy-devel workspace, the
-# closed-source controller debs and the colcon build). That platform was
-# retired by ADR 0010 D1 and the steps are kept only as the record of the
-# parked navigation scenario (sim/scenarios/DEFERRED.md). They are OPT-IN
-# and OFF by default: nothing the project builds now needs them, and running
-# them costs a multi-repository clone plus a colcon build. Enable with
-#
-#   ROBOTNIK=1 ./install.sh
+# This script had three further steps that provisioned the vendor workspace
+# of the vehicle platform retired by ADR 0010 D1 (a multi-repository clone,
+# closed-source controller debs and a colcon build). m5-07 put them behind
+# an opt-in flag; m5-09 removed them entirely. A retired platform does not
+# get an installation path: the flag was executable content that cloned
+# vendor repositories and installed closed-source packages for a vehicle
+# this project does not have. Nothing here provisions it any more, and the
+# parked navigation scenario it served is recorded, not runnable
+# (sim/scenarios/DEFERRED.md).
 #
 # M5 note. Which packages the autonomy gate needs is no longer an open
 # question: the set in ROS_PKGS below was installed and exercised in the
@@ -31,8 +32,6 @@
 
 set -euo pipefail
 
-ROBOTNIK="${ROBOTNIK:-0}"
-ROBOTNIK_WS="${ROBOTNIK_WS:-/opt/m3-feasibility/ws}"
 ROS_DISTRO=jazzy
 
 log() { echo "[install.sh] $*"; }
@@ -134,22 +133,14 @@ ROS_PKGS=(
   git
 )
 
-# ros2_control was in this list for the RB-KAIROS vendor mecanum drive only.
+# Five ros2_control packages (ros2-control, gz-ros2-control,
+# controller-manager, joint-state-broadcaster, joint-trajectory-controller)
+# were in this list for the retired platform's vendor mecanum drive only.
 # The forklift drives through gz joint-controller plugins and a vehicle node,
 # not through ros2_control, and the verified container does not have these
-# packages installed. They move with the rest of the retired platform behind
-# ROBOTNIK=1. If a later gate needs ros2_control for the forklift, add it to
-# ROS_PKGS above and re-verify rather than switching this flag on.
-ROBOTNIK_PKGS=(
-  ros-jazzy-ros2-control
-  ros-jazzy-gz-ros2-control
-  ros-jazzy-controller-manager
-  ros-jazzy-joint-state-broadcaster
-  ros-jazzy-joint-trajectory-controller
-)
-if [[ "$ROBOTNIK" == "1" ]]; then
-  ROS_PKGS+=("${ROBOTNIK_PKGS[@]}")
-fi
+# packages installed. They went with the rest of the retired platform
+# (m5-09, ADR 0010 D1). If a later gate needs ros2_control for the forklift,
+# add it to ROS_PKGS above and re-verify.
 
 MISSING=()
 for p in "${ROS_PKGS[@]}"; do
@@ -163,63 +154,8 @@ else
   log "ROS packages already installed"
 fi
 
-if [[ "$ROBOTNIK" != "1" ]]; then
-  log "done (ROS 2 Jazzy, Gazebo Harmonic, ros_gz, Nav2, slam_toolbox)."
-  log "  source /opt/ros/jazzy/setup.bash"
-  log "  gz sim --versions        # gz only reaches PATH after sourcing ROS"
-  log "Isolate BOTH transports when another simulation may be running:"
-  log "  export GZ_PARTITION=<run> ROS_DOMAIN_ID=<n>   # gz transport is not DDS"
-  log "Steps 4-6 (retired RB-KAIROS platform, ADR 0010 D1) skipped."
-  log "  Re-run with ROBOTNIK=1 to install them."
-  exit 0
-fi
-
-# --- 4. Robotnik jazzy-devel workspace (opt-in, ROBOTNIK=1) -----------------
-# Retired platform, kept as the record of the parked navigation scenario.
-# Clone over https (git clone through the proxy works; api.github.com is not
-# needed for plain clones).
-mkdir -p "$ROBOTNIK_WS/src"
-clone_if_absent() {
-  local url=$1 dir=$2
-  if [[ -d "$dir/.git" ]]; then
-    log "already cloned: $dir"
-  else
-    git clone --branch jazzy-devel --depth 1 "$url" "$dir"
-  fi
-}
-clone_if_absent https://github.com/RobotnikAutomation/robotnik_description.git "$ROBOTNIK_WS/src/robotnik_description"
-clone_if_absent https://github.com/RobotnikAutomation/robotnik_simulation.git  "$ROBOTNIK_WS/src/robotnik_simulation"
-clone_if_absent https://github.com/RobotnikAutomation/robotnik_sensors.git     "$ROBOTNIK_WS/src/robotnik_sensors"
-clone_if_absent https://github.com/RobotnikAutomation/robotnik_common.git      "$ROBOTNIK_WS/src/robotnik_common"
-clone_if_absent https://github.com/RobotnikAutomation/teleop_panel.git         "$ROBOTNIK_WS/src/teleop_panel"
-
-# --- 5. Robotnik controller debs (opt-in, shipped inside robotnik_simulation)
-# The rbkairos ros2_control profile references
-# robotnik_controllers/RBKairosController. That controller is closed-source
-# and distributed as .deb files in robotnik_simulation/debs/. Without them
-# the controller spawner fails and the base never accepts cmd_vel.
-DEBS_DIR="$ROBOTNIK_WS/src/robotnik_simulation/debs"
-if ! dpkg -s ros-jazzy-robotnik-controllers >/dev/null 2>&1; then
-  log "installing Robotnik controller debs from $DEBS_DIR"
-  apt-get install -y \
-    "$DEBS_DIR"/ros-jazzy-robotnik-common-msgs_*.deb \
-    "$DEBS_DIR"/ros-jazzy-robotnik-controllers-msgs_*.deb \
-    "$DEBS_DIR"/ros-jazzy-robotnik-controllers_*.deb
-else
-  log "robotnik_controllers already installed"
-fi
-
-# --- 6. Build the workspace (opt-in) ----------------------------------------
-if [[ -f "$ROBOTNIK_WS/install/setup.bash" ]]; then
-  log "workspace already built: $ROBOTNIK_WS/install"
-else
-  log "building workspace (colcon)"
-  ( cd "$ROBOTNIK_WS" \
-    && . /opt/ros/jazzy/setup.sh \
-    && colcon build --symlink-install )
-fi
-
-log "done. To use:"
+log "done (ROS 2 Jazzy, Gazebo Harmonic, ros_gz, Nav2, slam_toolbox)."
 log "  source /opt/ros/jazzy/setup.bash"
-log "  source $ROBOTNIK_WS/install/setup.bash"
-log "  ros2 launch <repo>/sim/launch/warehouse_bringup.launch.py"
+log "  gz sim --versions        # gz only reaches PATH after sourcing ROS"
+log "Isolate BOTH transports when another simulation may be running:"
+log "  export GZ_PARTITION=<run> ROS_DOMAIN_ID=<n>   # gz transport is not DDS"

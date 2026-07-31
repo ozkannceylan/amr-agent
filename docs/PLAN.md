@@ -62,8 +62,9 @@ and the gate claims **PLr targets only, never an achieved PL, SIL or PFH**.
 10. m5-10 agv — Nav2 written from scratch for the tricycle forklift
     (SmacPlannerHybrid/REEDS_SHEPP, RegulatedPurePursuit with
     `use_rotate_to_heading: false`, polygon footprint, Spin/BackUp removed);
-    Twist → steer angle + drive speed. The parked RB-KAIROS nav2_params is
-    not migrated — it is retired.
+    Twist → steer angle + drive speed. Nothing is migrated: the parked
+    scenario's Nav2 parameter file was deleted with the retired platform
+    (m5-09, ADR 0010 D1), so this brief starts from an empty config.
 11. m5-11 agv — the envelope gate node: consumes the PLC envelope, gates
     motion, velocity smoother closed-loop against odometry.
 12. m5-12 agv/sim — protective and warning field evaluation from the two

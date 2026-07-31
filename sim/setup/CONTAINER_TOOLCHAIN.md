@@ -315,16 +315,24 @@ Changed to match what actually worked:
 
 1. `ros-jazzy-slam-toolbox` added to `ROS_PKGS`. It was named in the brief and
    in `WSL_ENVIRONMENT.md` as missing; it is now installed and pinned.
-2. The RB-KAIROS steps (4, 5, 6 — Robotnik clone, closed-source controller
-   debs, colcon build) are **opt-in behind `ROBOTNIK=1` and off by default**.
-   The platform was retired by ADR 0010 D1, none of it was installed for this
-   verification, and a default-on script that clones five repositories and
-   runs a colcon build did not describe the toolchain that was proven.
+2. The retired platform's steps (4, 5, 6 — vendor clone, closed-source
+   controller debs, colcon build) are **opt-in behind `ROBOTNIK=1` and off by
+   default**. The platform was retired by ADR 0010 D1, none of it was
+   installed for this verification, and a default-on script that clones five
+   repositories and runs a colcon build did not describe the toolchain that
+   was proven.
+   **Superseded 2026-07-31 by m5-09:** those steps, the flag and the
+   workspace variable were removed from `install.sh` entirely. A retired
+   platform gets no installation path. The toolchain this file records is
+   unaffected — none of it was installed for this verification either way.
 3. The five `ros2_control` packages move to the same opt-in block. They were
    there for the vendor mecanum drive; the forklift drives through gz joint
    controller plugins and a vehicle node, and the verified container does not
    have them installed. A note says to add them back to `ROS_PKGS` and
    re-verify if a later gate needs them, rather than switching the flag on.
+   **Superseded 2026-07-31 by m5-09:** the opt-in block is gone, so the five
+   packages are simply absent from the script. The instruction is unchanged —
+   add them to `ROS_PKGS` and re-verify if a later gate needs them.
 4. A warning for the `/usr/local/bin/python3` shadow described in §3.3. It
    warns and does not repoint, because `/usr/local/bin` is not this project's
    to own.

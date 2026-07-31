@@ -42,11 +42,12 @@ sim/
                                     against the PLC logic double
     tools/make_map.py               deterministic map generator (world -> map)
     maps/map.yaml, map.pgm          occupancy grid of warehouse.sdf (generated)
-    config/nav2_params.yaml         Nav2 parameters of the parked RB-KAIROS
-                                    bringup (platform retired, ADR 0010)
-    nav_scenario.launch.py          Nav2 stack (map_server, AMCL, planner,
-                                    DWB controller, behaviors, bt_navigator)
-    run_scenario.py                 scripted NavigateToPose run + evidence
+    nav_scenario.launch.py          Nav2 stack of the parked scenario
+                                    (map_server, AMCL, planner, DWB
+                                    controller, behaviors, bt_navigator);
+                                    parked, not runnable, see DEFERRED.md
+    run_scenario.py                 scripted NavigateToPose run + evidence;
+                                    parked, not runnable, see DEFERRED.md
     EVIDENCE_NAV.md                 dated capture of a successful headless run
 ```
 
@@ -93,133 +94,42 @@ apt-get install -y \
   ros-jazzy-ros-base ros-jazzy-xacro \
   ros-jazzy-robot-state-publisher ros-jazzy-joint-state-publisher \
   ros-jazzy-gz-sim-vendor ros-jazzy-ros-gz \
-  ros-jazzy-ros2-control ros-jazzy-gz-ros2-control \
-  ros-jazzy-controller-manager ros-jazzy-joint-state-broadcaster \
-  ros-jazzy-joint-trajectory-controller \
-  ros-jazzy-navigation2 ros-jazzy-nav2-bringup \
+  ros-jazzy-navigation2 ros-jazzy-nav2-bringup ros-jazzy-slam-toolbox \
   python3-colcon-common-extensions python3-rosdep python3-vcstool git
 ```
 
 `ros-jazzy-gz-sim-vendor` provides Gazebo Harmonic (gz sim 8), per ADR 0003.
 
-### 4. Robotnik vendor workspace (ADR 0002)
+`ros2_control` is deliberately absent. It was here for the retired vehicle
+platform's vendor mecanum drive; the forklift drives through gz
+joint-controller plugins and a vehicle node. If a later gate needs it, add it
+to `install.sh`'s `ROS_PKGS` and re-verify.
 
-**RB-KAIROS is retired as the vehicle platform (ADR 0010 D1, which supersedes
-ADR 0002's platform selection).** Steps 4 and 5 here, the bringup below and
-the navigation scenario further down are all the RB-KAIROS path, kept as the
-record of the parked work. Nothing in the M3 cell or the M4 forklift arena
-needs them. Navigation work resumes at M5 on the in-house forklift with SLAM;
-which packages that needs is decided at M5 briefing, not restated here.
+## The parked warehouse navigation scenario
 
-Cloned unmodified at the `jazzy-devel` branch into
-`/opt/m3-feasibility/ws/src` and built with colcon:
+**Not current work, and not runnable.** The vehicle platform it was built on
+was retired by ADR 0010 D1, which supersedes ADR 0002's platform selection.
+The vendor workspace its bringup needed is no longer provisioned by
+`sim/setup/install.sh` (removed by m5-09), and the scenario's Nav2 parameter
+file was deleted with it — the forklift's Nav2 configuration is written from
+scratch at m5-10, so nothing was lost that m5-10 would have started from.
 
-```
-mkdir -p /opt/m3-feasibility/ws/src && cd /opt/m3-feasibility/ws/src
-git clone -b jazzy-devel https://github.com/RobotnikAutomation/robotnik_description.git
-git clone -b jazzy-devel https://github.com/RobotnikAutomation/robotnik_simulation.git
-git clone -b jazzy-devel https://github.com/RobotnikAutomation/robotnik_sensors.git
-git clone -b jazzy-devel https://github.com/RobotnikAutomation/robotnik_common.git
-git clone -b jazzy-devel https://github.com/RobotnikAutomation/teleop_panel.git
-cd /opt/m3-feasibility/ws
-source /opt/ros/jazzy/setup.bash && colcon build --symlink-install
-```
+What remains, and why:
 
-### 5. Robotnik controller debs (required, easy to miss)
+| File | Why it is still here |
+|---|---|
+| `worlds/warehouse.sdf` | the world; may be reused or replaced by the enlarged M6 warehouse |
+| `worlds/BRINGUP_EVIDENCE.md` | the dated record of the one verified headless run |
+| `launch/warehouse_bringup.launch.py` | the retired vehicle's bringup; still names its vendor spawn path |
+| `scenarios/nav_scenario.launch.py` | the Nav2 node set; `params_file` is now a required argument with no file to satisfy it |
+| `scenarios/run_scenario.py` | the scripted NavigateToPose run; still names the retired vehicle's odometry topic |
+| `scenarios/maps/`, `scenarios/tools/make_map.py` | vehicle-independent; rasterized from the world geometry |
 
-The rbkairos ros2_control profile declares
-`robotnik_base_control: robotnik_controllers/RBKairosController`. That
-mecanum controller is **not** in the cloned sources; Robotnik ships it as
-prebuilt debs inside `robotnik_simulation/debs/`. Without them the
-controller spawner fails and the base never accepts velocity commands:
-
-```
-apt-get install -y \
-  /opt/m3-feasibility/ws/src/robotnik_simulation/debs/ros-jazzy-robotnik-common-msgs_*.deb \
-  /opt/m3-feasibility/ws/src/robotnik_simulation/debs/ros-jazzy-robotnik-controllers-msgs_*.deb \
-  /opt/m3-feasibility/ws/src/robotnik_simulation/debs/ros-jazzy-robotnik-controllers_*.deb
-```
-
-## Running the bringup
-
-This is the parked RB-KAIROS bringup, not current work — see the retirement
-note at step 4 and the navigation scenario below.
-
-```
-source /opt/ros/jazzy/setup.bash
-source /opt/m3-feasibility/ws/install/setup.bash
-ros2 launch /home/user/amr-agent/sim/launch/warehouse_bringup.launch.py
-```
-
-Headless by default. Options: `gui:=true` (Gazebo GUI client),
-`robot_id:=<name>`, `x:= y:= z:=` (spawn pose, default -10, -6, 0.15 in
-the open area south of the racks), `world:=<abs path>`.
-
-### Design choice: vendor spawn path with ros2_control
-
-The launch file starts the gz server with `sim/worlds/warehouse.sdf`,
-bridges `/clock`, and then includes the **unmodified** vendor launch
-`robotnik_gazebo_ignition/spawn_robot.launch.py` with `robot:=rbkairos`
-and `run_rviz:=False`. The vendor launch provides robot_state_publisher,
-the entity spawner, the sensor ros_gz_bridge and the ros2_control spawners
-(gz_ros2_control + `robotnik_controllers/RBKairosController`). This was
-chosen over any hand-rolled drive plugin because it keeps vendor files
-untouched, exercises the same controller stack a real RB-KAIROS uses, and
-was verified working headless in this container (see
-`worlds/BRINGUP_EVIDENCE.md`). The controller spawners' 60 s timeouts
-absorb the slow headless startup.
-
-### Expected evidence after bringup
-
-- `gz model --list` shows the world models (WallNorth..., RackA1...,
-  DoorGap, ConveyorStation, ChargerStation) plus `robot`.
-- `ros2 topic echo /clock --once` returns advancing sim time.
-- `ros2 topic echo /robot/front_laser/scan --once` returns a 270-sample
-  scan with finite ranges (walls/racks visible); `/robot/rear_laser/scan`
-  likewise.
-- `/robot/robotnik_base_control/odom` publishes; publishing
-  `geometry_msgs/Twist` on `/robot/robotnik_base_control/cmd_vel_unstamped`
-  moves the base and odometry integrates.
-- `ros2 control list_controllers -c /robot/controller_manager` lists
-  `joint_state_broadcaster` and `robotnik_base_control` as `active`.
-
-The dated capture of exactly these checks from this container is in
-`worlds/BRINGUP_EVIDENCE.md`.
-
-## Navigation scenario (RB-KAIROS, parked — resumes at M5 on the forklift)
-
-This is not current work. It was parked under ADR 0004, which moved the
-vehicle and navigation gates behind the fixed-equipment loop; ADR 0010 now
-supersedes that gate order and retires RB-KAIROS as the vehicle platform.
 Navigation work resumes at **M5**, on the in-house forklift, with SLAM
-building the map (ADR 0010 D1, D2). Everything below is the parked
-RB-KAIROS scenario, unverified, and its status is recorded in
-`sim/scenarios/DEFERRED.md`.
-
-Migrating this scenario to the forklift — and whether the warehouse world
-above is reused or replaced by the enlarged M6 warehouse — is **M5-briefing
-work, decided at briefing**. Nothing here decides it, and no file below has
-been rewritten for the new platform.
-
-Localization + Nav2 goal navigation on top of the bringup above. Three
-steps, three terminals, all with both setups sourced
-(`/opt/ros/jazzy/setup.bash` then `/opt/m3-feasibility/ws/install/setup.bash`):
-
-```
-# 1. world + robot (as above)
-ros2 launch /home/user/amr-agent/sim/launch/warehouse_bringup.launch.py
-
-# 2. Nav2 stack against the running bringup
-ros2 launch /home/user/amr-agent/sim/scenarios/nav_scenario.launch.py
-
-# 3. scripted run: initial pose -> AMCL localized -> NavigateToPose goal
-python3 /home/user/amr-agent/sim/scenarios/run_scenario.py
-```
-
-Step 3 exits 0 only if the action result is STATUS_SUCCEEDED, and rewrites
-`scenarios/EVIDENCE_NAV.md` with the captured initial `/amcl_pose`, pose
-samples, result status, distance and durations. The committed file is the
-record of the verified run in this container.
+building the map (ADR 0010 D1, D2). Which of the files above survive
+migration is **m5-10 briefing work, decided at briefing**. Nothing here
+decides it, and no file above has been rewritten for the new platform. Full
+status: `sim/scenarios/DEFERRED.md`.
 
 ### Map: generated, not SLAM-mapped
 
@@ -233,39 +143,29 @@ slightly different map every time. The overhead DoorGap lintel is
 deliberately excluded (the lidar never sees it; the vehicle drives under
 it). If the world changes, re-run the script.
 
-### Nav2 configuration notes
+### Nav2 configuration: nothing carried forward
 
-- All nodes run on sim time; tolerances in `config/nav2_params.yaml` are
-  sim seconds.
-- Frames come from the vendor stack: `map -> robot_odom ->
-  robot_base_footprint`. AMCL consumes `/robot/front_laser/scan` (omni
-  motion model, since the base is mecanum).
-- The controller is DWB in a diff-drive-style configuration (vy locked to
-  0) even though the base is holonomic: it is the configuration verified
-  to reach goals here. Nav2's `cmd_vel` (Twist, `enable_stamped_cmd_vel:
-  false`) is remapped to the vendor controller's
-  `/robot/robotnik_base_control/cmd_vel_unstamped`.
-- `lifecycle_manager` runs with `bond_timeout: 0.0`; bond heartbeats
-  starve at RTF ~0.1 and would otherwise take the servers down.
-- Speeds are capped at 0.45 m/s so the slow headless sim tracks commands.
+There is no Nav2 parameter file in this repository. The parked scenario's
+one was written entirely around the retired vehicle — omni motion model, its
+scan, odometry and command topics, its frame tree, its footprint — and the
+owner ruled it is **not a migration candidate**. It was deleted by m5-09
+(ADR 0010 D1). The forklift's configuration is written from scratch at
+m5-10: tricycle kinematics, one navigation lidar, its own frame tree.
 
-### Expected output
+Two settings from the parked run are worth carrying into that brief as
+container findings rather than as configuration, because they are properties
+of the host and not of the vehicle:
 
-Nav2 activation takes a few minutes wall-clock. `run_scenario.py` then
-logs `AMCL localized`, `goal accepted`, periodic pose samples, and finally
-`result: status 4 (SUCCEEDED)`. The default goal (-6.0, 1.5) is in Aisle A;
-from the spawn at (-10, -6) the planned path runs north past the west end
-of rack row B and turns east between the rack rows (~11 m). Expect roughly
-10x the sim duration in wall-clock time.
+- `lifecycle_manager` needed `bond_timeout: 0.0`; bond heartbeats starve at
+  RTF ~0.1 and would otherwise take the servers down.
+- Speeds had to be capped low (0.45 m/s in the parked run) for the slow
+  headless sim to track commands.
 
 ### Known behavior
 
 - Headless real-time factor is ~0.1 on this CPU-only container because the
   lidars and the RGBD camera render through ogre2 on llvmpipe. Functional
   for bringup and CI-style checks; wall-clock patience required.
-- Gazebo prints SDF warnings (`gz_frame_id ... not defined in SDF`) while
-  converting the vendor URDF; they are cosmetic and come from vendor
-  sensor definitions, not from this world.
 - The world's south wall has a free 4 m opening marked by the `DoorGap`
   posts/lintel; the PLC-controlled door and the conveyor/charger handshakes
   act there at M6 (ADR 0010). The blocks are geometry only — no
@@ -394,8 +294,8 @@ ros2 launch /home/user/amr-agent/sim/launch/cell_bringup.launch.py
 ```
 
 Headless by default. Options: `gui:=true` (Gazebo GUI client),
-`world:=<abs path>`. The Robotnik vendor workspace is **not** needed for
-this cell — only `/opt/ros/jazzy`.
+`world:=<abs path>`. The cell needs only `/opt/ros/jazzy` — no additional
+workspace.
 
 Drive the cell from a second terminal:
 
