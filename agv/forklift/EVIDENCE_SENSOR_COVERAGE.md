@@ -4,13 +4,20 @@ What the three scanners declared in `model.sdf` can and cannot see, measured
 against the vehicle's own geometry, with every residual sector named, caused
 and mitigated.
 
-**Every figure in this file is COMPUTED FROM GEOMETRY. Nothing here was
-observed in a running simulation.** Gazebo does not run in the container this
-was produced in (`gz` and `ros2` are both absent; a parallel brief is
-installing the toolchain), and geometric coverage does not need it: a scan
-plane is a plane and an occluder is a polygon. What a live run adds is
+**Every figure in sections 1 to 12 is COMPUTED FROM GEOMETRY. Nothing in them
+was observed in a running simulation.** Gazebo does not run in the container
+those sections were produced in (`gz` and `ros2` are both absent; a parallel
+brief is installing the toolchain), and geometric coverage does not need it: a
+scan plane is a plane and an occluder is a polygon. What a live run adds is
 confirmation that gz renders what this computation says it will, and that is
 a separate brief. Section 12 lists exactly what is owed to it.
+
+> **Section 13 is the exception, added 2026-07-31 (brief m5-04b), and it is
+> MEASURED.** It is the only section in this file taken from a running
+> simulator, it carries its own provenance table, and it is written so that
+> its measured figures and the computed figures above can be compared row by
+> row. It discharges part of section 12 item 2 and adds residual **R8**; it
+> changes no figure in sections 1 to 12.
 
 **This is not a safety claim, in whole or in part.** A computed sight line is
 not a protective field. There is no integrity, no OSSD, no fault reaction, no
@@ -20,12 +27,12 @@ named `safety_scanner_*` model a device class. They are not one.
 
 | Item | Value |
 |---|---|
-| Date | **2026-07-30** |
+| Date | **2026-07-30** (sections 1–12); **2026-07-31** (section 13) |
 | Produced by | `agv/forklift/scripts/sensor_coverage.py --step 0.1`, committed beside this file |
 | Under test | `agv/forklift/model.sdf` as committed by this change |
 | Host | container, Ubuntu 24.04.4 LTS, kernel `6.18.5`, `python3 3.11.15` |
-| Gazebo | **not installed and not run** (`which gz` empty) |
-| ROS 2 | **not installed and not run** (`which ros2` empty) |
+| Gazebo | **not installed and not run** (`which gz` empty) *for sections 1–12; section 13 has its own provenance table* |
+| ROS 2 | **not installed and not run** (`which ros2` empty) *for sections 1–12; see section 13.1* |
 | Dependencies | Python standard library only. No new dependency is introduced |
 | Quantisation | bearings swept at 0.1°; every arc below is quantised to that step |
 
@@ -73,7 +80,10 @@ the choice *does* decide is which side the residual of section 4 lands on.
 x axis, so the 85° blind sector is centred on the sensor's −x axis. Yaw +45°
 at the front corner therefore points the blind sector at bearing 225°, along
 the corner diagonal into the vehicle. Section 9 measures what a different mount
-angle would buy: nothing.
+angle would buy when both scanners rotate together: nothing. Section 13.7
+measures the rear scanner rotating **alone**, which is a different question and
+gets a different, longer answer — and finds that the mirrored rule was derived
+from a plan view of a vehicle that is not symmetric at the scan plane.
 
 **The rotation is in the LINK pose, and the sensor pose is identity.** This is
 a correctness point, not a style one. `<gz_frame_id>` names the link, and a
@@ -471,6 +481,14 @@ aperture, and at δ = +5° that aperture limit is gone but the mast rail, the
 mast body and the left rear wheel have taken its place. **The residual is
 structural, and 45° is at the optimum.**
 
+> **Scope of that claim, sharpened 2026-07-31 (brief m5-04b).** This sweep adds
+> δ to **both** mount yaws and scores **union coverage**, and inside those two
+> choices the conclusion stands unchanged. It does not measure the rear
+> scanner rotating alone, and it does not score what either device spends its
+> own rays on. Section 13.7 does both, over ±90° rather than ±10°, and reaches
+> the same verdict by a different road: δ = 0 stays the choice, now for
+> reasons this section could not have seen.
+
 ## 10. Consequences for consumers, stated rather than left to be found
 
 > **Status note added 2026-07-30 (brief m5-06).** Items **a**, **c** and
@@ -546,7 +564,8 @@ construction. These are the ones the geometry produces.
 | **R4** | A 0.10 m annulus around each scanner housing, at the two chassis corners | 8 and 6 of 408 perimeter points at the 0.10 m offset | `range_min` of the modelled sensor class. A return closer than that is not a measurement | Inherent to the device. The corner mounting means the dead zone sits over the body corner rather than over the approach; a real installation adds mechanical protection there. Note also that `obstacle_zone.py` classes a below-`range_min` return as INVALID and can skip it — recorded already in EVIDENCE_MODEL §6.1 as an open owner question |
 | **R5** | Navigation lidar, bearings 149.4–178.4° at all times, widening to 149.2–179.0° above 1.20 m of carriage travel | 29.0° physical, 2.50 m wide at 5 m; 29.8° with the carriage raised | The mast body, and above 1.20 m of travel the carriage crossing z = 1.80 | Narrowed by the lateral offset from 31.5° and moved off the fork axis, **not eliminated**. The lift component is avoided by navigating with the carriage down, which is the normal travelling posture. Localisation must tolerate a permanent 29° occlusion in the load direction — it is one sensor on a vehicle with a mast, and every forklift has this |
 | **R6** | Anything outside 4.95 m of the model origin, in the worst direction | 4.95 m all-round, 5.46 m mean, against the sensor's own 5.50 m | The 5.50 m range is measured from the sensor and both sensors are 0.83 m off the origin | Quote 4.95 m, not 5.50 m, as what the pair reaches in every direction. Nothing about a protective field follows from either number |
-| **R7** | Everything the simulated sensor sees *through* that the vehicle would block | Simulated shadow 8.9° against physical 29.0° at the navigation plane | A `gpu_lidar` renders `<visual>` geometry; the mast's 0.72 m wide body is `<collision>` only | Every claim in this document is made on the physical set. The divergence itself is an open question in the report: reconcile the mast's two representations, in one direction or the other, before any live coverage figure is quoted |
+| **R7** | Everything the simulated sensor sees *through* that the vehicle would block | Simulated shadow 8.9° against physical 29.0° at the navigation plane | A `gpu_lidar` renders `<visual>` geometry; the mast's 0.72 m wide body is `<collision>` only | Every claim in this document is made on the physical set. The divergence itself is an open question in the report: reconcile the mast's two representations, in one direction or the other, before any live coverage figure is quoted. **Observed 2026-07-31**, section 13.6: the navigation lidar reports the mast as two thin rail lobes of 4 rays each, the visual set exactly |
+| **R8** | **Rear scanner self-view.** Vehicle bearings 93.5–152.7°, sensor-frame −131.5° to −72.3°, indices 6–65 of 275: the rear scanner's own rays terminate on the vehicle at 0.090–0.780 m. Added 2026-07-31, **measured**, section 13 | 60 rays computed and 61 measured (indices 5–65), 21.8 % of the aperture, at carriage travel 0.000 m; 50 reported and 11 dropped below `range_min`. Worst case is the R2 window: 82 reported, 29.8 %, out to 1.022 m at 0.0738 m of travel. Best case is the carriage clear of the plane: 48 reported, mast rails only, out to 0.780 m | The mast rails (z 0.05–2.05) and the carriage (z 0.10–0.60) both cross the 0.150 m plane and both lie *outboard* of the mount in x while spanning the vehicle's full width in y, so they subtend 60.75° from the mount at 0.09–0.73 m. The drive end has nothing in the plane except the drive wheel and steer yoke, which the front scanner's blind sector hides — which is why the front scanner spends 1 ray on the vehicle and the rear one spends 60 | **Structural, and not removable by any mount angle**: the vehicle's own body subtends 129.75° from this mount in three groups against an 85° blind sector, so some group is always in the aperture (section 13.7). Costs **no coverage** — the pair's union, the R1 gap and the 0.30/0.50 m perimeter figures are identical across the whole yaw family that keeps them (section 13.7), because the front scanner covers this sector. The mitigation is a **field** one and it belongs to m5-12: the rear device's protective field must be bounded inside the self-return contour over that sector, which is field geometry configured on the device, **not** a filter applied to samples. A real scanner of this class offers the same sector as a *reference contour* for mount-integrity monitoring; that is the real-world use of this band and it is not implemented here |
 
 Two further sectors were looked for and are **not** present in this geometry,
 which is worth recording so the next reader does not re-derive them: the
@@ -565,6 +584,13 @@ mechanical stop changes no measured arc.
    `model/link/sensor` string; that the measured shadow arcs appear in the
    ranges where this document says they will; and that a raised carriage
    produces R5.
+
+   > **Partly discharged 2026-07-31 by section 13.** All three sensors were
+   > observed advertising and publishing; all three carry their link name in
+   > `frame_id`; the rear and navigation shadow arcs appear at the predicted
+   > ranges, 47 of 49 rear rays within 0.010 m of the computed value. Still
+   > owed: R5 with the carriage raised above 1.20 m of travel, and the front
+   > scanner's arcs against a target rather than against empty arena.
 3. **Nothing about cost.** The ray budget rises from 181 to 910 per 100 ms and
    the sensor count from one to three, on a host that renders with llvmpipe.
    The real-time factor that buys is **not measured here**, and `model.sdf`'s
@@ -580,3 +606,312 @@ mechanical stop changes no measured arc.
 6. **Nothing about the load beyond one rectangle.** R3 is measured with one
    pallet geometry taken from the arena. Overhang, film and irregular loads are
    not modelled.
+
+---
+
+## 13. MEASURED — the rear scanner's near-field return band (m5-04b)
+
+m5-07's verification run reported that on the rear scanner's measurement
+channel **46 of 93 finite returns sit under 0.5 m in one contiguous band**,
+while neither other scanner shows anything like it. This section measures that
+band in a running simulator, names the surfaces that produce it, reconciles it
+with R1 and R2, and reaches a verdict. It is the only measured section in this
+file.
+
+**It is not a safety claim.** Nothing below is a protective field, an OSSD, a
+response time or a stopping distance. It is what one non-safe measurement
+channel reports about the vehicle it is bolted to.
+
+### 13.1 Provenance of the run
+
+| Item | Value |
+|---|---|
+| Date, run window (UTC) | 2026-07-31, `07:38:22` to `07:40:25` |
+| Host | container, Ubuntu 24.04.4 LTS, kernel `6.18.5`, 4 cores, llvmpipe |
+| Gazebo | **8.11.0**, `ros-jazzy-gz-sim-vendor`, `gz sim -s -r`, **headless, no GUI** |
+| ROS 2 | Jazzy; used only for `ros_gz_sim create`. No scan crossed the bridge |
+| World | `sim/worlds/forklift_arena.sdf`, md5 `ef67fa1cf3200e82d08738096d3c6065`, unedited |
+| Model under test | `agv/forklift/model.sdf`, md5 `878819c911a7aea3b600faa56e2e52f6`, the blob committed at `6068b31`, unedited by this brief |
+| Isolation | `GZ_PARTITION=m504b_selfocc` **and** `ROS_DOMAIN_ID=91`. Both, because gz transport is not DDS |
+| Real time factor | `0.99984` at the world's 2 ms fixed step, three `gpu_lidar` sensors |
+| Channel read | `/forklift/gz/safety_scanner_rear/measurement`, read **on the gz side** with `gz topic -e`. It has no ROS name and no consumer (config.yaml `topics:`), and this brief did not give it one |
+| Prediction compared against | `python3 agv/forklift/scripts/sensor_coverage.py --self-return --step 0.25`, sections 10 and 11 of that output |
+
+**The measurement is geometric, not performance.** Nothing here is a rate, a
+latency or a real-time factor claim beyond the one line above, which is
+recorded only to show the sensors were rendering at the world's step rate.
+
+Four captures, three messages each, from one server session:
+
+| Capture | Vehicle pose (world) | Carriage travel, read back from `joint_state` |
+|---|---|---|
+| **A** | (−6.000, 0.000), yaw 0° | 0.000 m (−5.0e−14) |
+| **B** | (3.000, 5.000), yaw 60° | 0.000 m |
+| **C** | (3.000, 5.000), yaw 60° | **0.299 m** — carriage clear of the plane |
+| **D** | (3.000, 5.000), yaw 60° | **0.0738 m** — inside the R2 window |
+
+The three messages of each capture are identical to 1e−6 m, so a single
+message is quoted throughout.
+
+### 13.2 The band, measured
+
+Capture A, 275 samples:
+
+```
+finite returns                             93     (matches m5-07 exactly)
+  of which the vehicle's own body          50     indices 5..65
+  of which the world                       43     nearest 5.200 m
+finite returns under 0.5 m                 46     indices 9..65
+  first and last of that run          0.427 m and 0.164 m
+  minimum inside it                   0.101 m
+rays inside the band reporting inf         11     indices 33..43
+```
+
+**46 of 93 is reproduced to the ray.** The eleven `inf` rays inside the band
+are the explanation of the odd arithmetic: 57 consecutive rays are aimed at the
+vehicle below 0.5 m, and eleven of them strike it at 0.090–0.099 m, inside the
+0.10 m `range_min`, so the device reports them out of range. 57 − 11 = 46.
+
+The sector, in the two frames that get used downstream, and its size:
+
+```
+sensor frame (the frame the message names, safety_scanner_rear_link)
+                       -131.48 deg .. -72.26 deg     indices 6..65
+vehicle bearings         93.52 deg .. 152.74 deg     (0 = +x drive end,
+                                                      180 = fork direction)
+share of the aperture   60 rays of 275 = 21.8 %,  60.75 deg of a 275 deg window
+```
+
+### 13.3 Which surfaces, at what distances
+
+Every ray was predicted from `model.sdf` before the capture and compared
+against it. Agreement over the 49 rays the prediction says are reported:
+**mean deviation 0.0017 m, maximum 0.0133 m, 47 of 49 within 0.010 m.**
+
+| Indices | Vehicle bearings | Surface | Range, measured |
+|---|---|---|---|
+| 6 | 93.5° | `mast/mast_rail_left` | 0.706 m |
+| 7–12 | 94.5–99.5° | `carriage/visual` | 0.626 → 0.300 m |
+| 13–27 | 100.5–114.6° | `mast/mast_rail_right` | 0.187 → 0.116 m |
+| 28–65 | 115.6–152.7° | `carriage/visual` | 0.116 → 0.164 m, dipping to 0.090 (11 rays out of range) |
+
+One disagreement, stated rather than smoothed: **index 5** returns 0.780 m and
+the computation says that ray misses. It is the grazing ray at the left mast
+rail's outer corner. A `gpu_lidar` samples a rendered depth image, so a sample
+at a silhouette edge can land on the near surface where an idealised line
+misses it by a hair. It is one ray of 275 and it does not move any figure in
+this section.
+
+The near end of the band is set by the carriage's own right-hand end, 0.090 m
+from the mount — the scanner sits at (−0.700, −0.450) and the carriage face at
+x = −0.750 spans y = ±0.375, so it passes within 0.09 m of the housing. That
+is why eleven rays fall inside `range_min` (R4) rather than reporting.
+
+### 13.4 It is the vehicle, not the world — captures A and B
+
+The vehicle was translated 9.2 m and rotated 60°, into a different part of the
+arena, and re-measured:
+
+```
+capture A, (-6, 0) yaw  0 deg : band indices 9..65, 46 rays
+capture B, ( 3, 5) yaw 60 deg : band indices 9..65, 46 rays
+identical index set                    : yes
+max |A - B| over the 46 rays           : 0.000004 m
+world returns                          : 43 (A) against 34 (B), nearest
+                                         5.200 m (A) against 3.769 m (B)
+```
+
+The band is **body-fixed to four microns** across a translation and a rotation
+that changed the world returns around it. Nothing outside the vehicle produces
+it.
+
+### 13.5 The band against carriage travel — captures C and D
+
+Measured, against the computed table of section 6:
+
+| Travel | Rays on the body, measured | Under 0.5 m | Farthest | Surfaces |
+|---|---|---|---|---|
+| 0.000 m (A) | 50 reported, 11 out of range | 46 | 0.780 m | mast rails, carriage |
+| **0.0738 m (D)** | **82 reported** | **67** | **1.022 m** | mast rails, **`fork_right`** |
+| 0.299 m (C) | 48 reported | 40 | 0.780 m | mast rails only |
+
+Three things follow, and the middle one is the one m5-12 has to carry:
+
+* **R2 is confirmed from the device's own side.** Inside the 0.05–0.10 m travel
+  window the right tine crosses the plane and the band grows from 60 rays to
+  82, and its far edge moves from 0.780 m to **1.022 m** — a metre of the
+  scanner's own aperture spent on a tine. Section 6 measured that window as a
+  union-coverage gap widening from 5.0° to 20.2°; this is the same event
+  measured as returns.
+* **The carriage leaving the plane does not empty the band.** At 0.299 m of
+  travel 48 rays still terminate on the mast rails, which are fixed structure
+  spanning z 0.05–2.05 and lift with nothing. Section 6's "above 0.11 m of
+  travel the coverage is 360.0°" remains true and is a statement about the
+  *pair's coverage*; it is not a statement that the rear device stops seeing
+  the vehicle.
+* **The worst case for this device is the R2 window, not the load.** For
+  coverage the worst case is a load on the tines (R3, 39.9°). For the rear
+  device's own returns the worst case is 0.05–0.10 m of travel.
+
+### 13.6 The other two scanners, measured for contrast
+
+```
+safety_scanner_front  46 finite returns, none under 0.5 m,
+                      minimum finite 1.084 m at index 274 (bearing 182.50 deg)
+                      predicted 1.085 m, rear_wheel_left/visual
+                      -> ONE ray of 275 on the vehicle, at the aperture edge
+
+nav_lidar             14 finite returns, of which 8 are the vehicle:
+                      indices 330-333 at 1.447-1.483 m  (mast_rail_left)
+                      indices 353-356 at 1.287-1.292 m  (mast_rail_right)
+                      predicted 329-333 at 1.443-1.490 and 353-356 at 1.287-1.292
+```
+
+Two findings here beyond the contrast.
+
+**The front scanner spends 1 ray on the vehicle and the rear scanner spends
+60, from the same corner-mounting rule.** That is not an error in either mount;
+it is the vehicle. Seen from each mount, with the aperture ignored:
+
+```
+from the FRONT mount, self-fan  66.00 deg of 360, in three groups:
+  181.75-209.75  28.00 deg  1.085-1.666 m  carriage, mast, rear_wheel_left   1.00 deg in aperture
+  210.25-218.50   8.25 deg  1.325-1.509 m  rear_wheel_right                  hidden
+  236.50-266.25  29.75 deg  0.367-0.485 m  drive_wheel, steer_link           hidden
+
+from the REAR mount, self-fan  129.75 deg of 360, in three groups:
+    7.25- 59.25  52.00 deg  0.093-0.317 m  rear_wheel_right                  hidden
+   67.50- 84.50  17.00 deg  0.765-0.837 m  rear_wheel_left                   hidden
+   92.75-153.50  60.75 deg  0.090-0.729 m  mast rails, carriage             60.75 deg in aperture
+```
+
+The drive end has almost nothing in the 0.150 m plane — the chassis box starts
+at z = 0.200 and the counterweight at z = 0.300 — and what it does have sits
+near the centreline, inside the front scanner's 85° blind sector. The load end
+has the mast rails from z = 0.050 and the carriage from z = 0.100, both
+*outboard* of the rear mount in x and spanning the full vehicle width in y.
+**The vehicle is symmetric in plan and asymmetric at the scan plane**, and the
+mirrored mounting rule of section 1 was derived from the plan.
+
+**R7 is now observed.** The navigation lidar reports the mast as two thin lobes
+of four rays each, 8 rays in total — the `<visual>` rails, not the 0.72 m
+`<collision>` body. The simulated shadow is the 8.75° one, the vehicle would
+block 29.0°, and the divergence R7 predicted is a measured fact rather than an
+inference.
+
+### 13.7 Reconciliation with R1 and R2, and can a mount change remove it
+
+**Same geometry as R1, a different measure, and therefore a different
+magnitude.** R1 is a *union* residual: the 5.0° of bearings at 2 m radius that
+**neither** scanner reaches. R8 is a *single-device* statistic: the rays one
+scanner spends on the vehicle. They are the same occluder seen two ways, and
+the parallax between the two coordinate systems hides it — the sight line that
+produces R1 at origin-bearing 172°, 2 m out, leaves the rear mount at
+sensor-frame bearing ≈150°, which is index 63 of the measured band. R1 is the
+sliver of the band that the front scanner also cannot reach.
+
+So: **the geometric analysis did not miss this. It did not name it.** Section 4
+already prints the rear scanner's own coverage — 146.1°, 181.9° and 192.6° at
+1, 2 and 3 m against a 274.9° aperture — and the loss in those numbers is this
+band. What was absent was a residual stated per device rather than per pair,
+and R8 now is one. R2 is likewise the same event: section 6 measured the tines
+as a union-coverage widening, section 13.5 measures them as 22 extra rays and
+a far edge at 1.022 m.
+
+**No mount angle removes it.** The blind sector is one contiguous 85° arc. The
+vehicle subtends **129.75°** from the rear mount in three groups, so at least
+44.75° of vehicle is inside the aperture whatever the yaw, and the yaw only
+chooses *which* group. Rotating the rear scanner alone (`--self-return`
+prints this sweep; the pair's coverage is the physical set):
+
+```
+  delta   rays  r.075  r.300 farthest cov 1 m cov 2 m cov 3 m   p0.30   p0.50 x2load
+ -20.0d     78     99     65    0.823  309.5d  355.0d  360.0d   96.8%  100.0%   9.8d
+ -10.0d     68     89     55    0.785  317.2d  355.0d  360.0d   99.0%  100.0%   9.8d
+   0.0d     60     81     47    0.706  317.2d  355.0d  360.0d   99.0%  100.0%   5.8d
+  20.0d     62     83     49    0.309  317.2d  355.0d  360.0d   99.0%  100.0%   0.0d
+  40.0d     62     83     49    0.312  317.2d  355.0d  360.0d   99.0%  100.0%   0.0d
+  60.0d     58     80     52    0.315  317.2d  355.0d  360.0d   99.0%  100.0%   0.0d
+  65.0d     54     76     53    0.823  317.2d  355.0d  360.0d   99.0%  100.0%   0.0d
+  70.0d     58     76     58    0.823  315.8d  352.0d  360.0d   97.3%   98.5%   0.0d
+  78.0d     66     76     66    0.823  313.2d  346.0d  356.2d   93.9%   94.9%   0.0d
+  85.0d     68     71     68    0.823  311.2d  341.2d  350.8d   91.2%   91.7%   4.0d
+  90.0d     67     67     67    0.817  310.2d  338.0d  347.0d   90.0%   90.2%   9.8d
+
+  rays    rays on the vehicle at travel 0.000 m; r.075 and r.300 the same at
+          0.075 m (the R2 window) and 0.300 m (carriage clear)
+  x2load  double-covered arc at 2 m inside the load half, bearings 90-270 deg
+```
+
+Read against δ = 0, which is the model as committed:
+
+* **The best candidate, δ = +65°, removes six rays and pays for them.** It
+  swings the blind sector onto the mast and carriage, which exposes the right
+  rear wheel instead: the far edge of the band moves *out* from 0.706 m to
+  0.823 m, the raised-carriage case gets **worse** (47 rays → 53) and the
+  raised carriage is the normal travelling posture, and it drives the load
+  half's double coverage at 2 m to **zero**. Fewer rays, deeper intrusion,
+  worse where the vehicle spends its time.
+* **Every δ that touches the band also empties `x2load`.** δ = 0 is the only
+  row that keeps any double coverage in the load half — 5.8°, small, but the
+  load half is where R1, R2 and R3 all live and it is the half worth
+  duplicating.
+* **Union coverage is flat from −10° to +65°** and the R1 gap does not move,
+  because the carriage blocks that sight line at any aperture. The band costs
+  **no coverage at all**: 99.0 % of the 0.30 m offset perimeter and 100 % of
+  the 0.50 m one, unchanged, because the front scanner covers the sector the
+  rear scanner spends on the mast.
+
+Two changes that are **not** available, recorded so they are not re-derived:
+
+* **The scan plane cannot move out of it.** Section 1 pins the plane inside a
+  0.100–0.200 m window: below is the tine top, above is the chassis underside.
+  The carriage's own visual starts at z = 0.100 and the mast rails at z = 0.050,
+  so both cross *every* height in that window. Below 0.100 m the tines are in
+  the plane instead, which is worse, and the scanner housing itself spans
+  0.020–0.130 m.
+* **Mounting the device on the carriage** would put the plane above the mast
+  base and clear the band, and it is what some real trucks do — but the plane
+  would then move with the lift, and every fixed-plane figure in this document,
+  R1 through R6, would have to be re-derived as a function of travel. That is a
+  layout decision for a future gate, not a correction to this one.
+
+### 13.8 Verdict — (c), an accepted residual, and what m5-12 inherits
+
+The band is **the vehicle's own mast rails and fork carriage inside the rear
+scanner's aperture**, at vehicle bearings 93.5–152.7°, 0.090–0.780 m, 21.8 % of
+that device's rays at rest and 29.8 % inside the R2 window. It is a derived
+property of the geometry, it is reproduced by computation to 0.0017 m mean, it
+is body-fixed to four microns, it is **not removable by any mount angle**, and
+it **costs no coverage**. It is accepted, and it is recorded as **R8** in
+section 11 in the same voice as R1–R7.
+
+A real counterbalance truck has exactly this on its load side, which is why
+this outcome is instructive rather than embarrassing. What would be wrong is
+the other two answers: pretending it is not there, or deleting the samples in
+software. **A real scanner sees what it sees.** Discarding those returns in a
+node would put a lie about the vehicle's surroundings on the process network
+and would be a filter written into a measurement channel, so this brief did not
+write one and none exists in this directory.
+
+What m5-12's protective-field design inherits, as a constraint, in its own
+words:
+
+1. **The rear device's protective and warning fields must be bounded inside the
+   self-return contour** over sensor-frame −131.5° to −72.3°. A field drawn
+   past 0.090 m in that sector is permanently violated by the vehicle. This is
+   **field geometry configured on the device** — the shape of the monitored
+   region — and it is categorically not a filter applied to samples.
+2. **The bound is travel-dependent.** 0.780 m at rest, **1.022 m** between
+   0.05 and 0.10 m of travel, 0.780 m above it. A field design that switches on
+   lift height must take the R2 window at its own value and must not treat it
+   as equivalent to travel zero.
+3. **No coverage is lost, so no field is owed here.** The pair covers this
+   sector: the front scanner reaches it, and the 0.50 m offset perimeter is
+   100 % covered. The rear device is not the one that watches bearings
+   93.5–152.7°.
+4. **The band is a candidate reference contour.** A real device of this class
+   monitors fixed structure in a reference field to detect its own
+   misalignment, and this band is stable, known and 0.09–0.78 m away. That is
+   the positive use of it. It is named as available, not as implemented, and
+   any such function would be the device's, never a node's.

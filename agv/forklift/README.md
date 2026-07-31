@@ -50,7 +50,7 @@ project can command in engineering units.
 | `scripts/obstacle_matrix.py` | Drives `obstacle_zone.py` through its contracted cases, including the ones a rendered scanner cannot produce. |
 | `launch/vehicle.launch.py` | Server, spawn, bridge, sensor TF and both nodes, headless by default. |
 | `EVIDENCE_MODEL.md` | The dated headless run that verified the model and the two nodes. |
-| `EVIDENCE_SENSOR_COVERAGE.md` | The computed coverage of the three scanners, with every residual sector named. |
+| `EVIDENCE_SENSOR_COVERAGE.md` | The computed coverage of the three scanners, with every residual sector named. §13 is the one measured section: the rear scanner's self-return band, from a live headless run. |
 | `EVIDENCE_SENSOR_TF.md` | The dated runs behind the sensor frames and the measurement-channel consumer. |
 
 There is deliberately **no world file here.** Worlds belong to `sim/`.
@@ -121,15 +121,24 @@ fails a check instead of ageing quietly.
 
 Coverage is **measured**, not asserted: `EVIDENCE_SENSOR_COVERAGE.md` computes
 it from this model's own geometry and names every residual sector with its
-cause and its mitigation. The headline figures, all computed and none observed
-in a running simulation: the two safety scanners together cover 360.0° of the
-bearings around the vehicle at 3.0 m radius and beyond; 355.0° at 2.0 m, the
-missing 5.0° being the carriage shadow at 169.4–174.4°; 100% of the vehicle
-outline offset by 0.50 m; 4.95 m of all-round reach against the sensors' own
-5.50 m range. A pallet in the load direction costs 39.9°. The navigation
-lidar's mast shadow is 29.0°, 2.50 m wide at 5 m. **No sector is claimed to be
-covered by construction** — read section 11 of the evidence before designing
-anything on top of these sensors.
+cause and its mitigation. The headline coverage figures are computed and were
+not observed in a running simulation: the two safety scanners together cover
+360.0° of the bearings around the vehicle at 3.0 m radius and beyond; 355.0° at
+2.0 m, the missing 5.0° being the carriage shadow at 169.4–174.4°; 100% of the
+vehicle outline offset by 0.50 m; 4.95 m of all-round reach against the
+sensors' own 5.50 m range. A pallet in the load direction costs 39.9°. The
+navigation lidar's mast shadow is 29.0°, 2.50 m wide at 5 m. **No sector is
+claimed to be covered by construction** — read section 11 of the evidence
+before designing anything on top of these sensors.
+
+One figure there **is** measured, in §13, and it is a property of one device
+rather than of the pair: **the rear scanner spends 21.8% of its rays on the
+vehicle's own mast rails and fork carriage**, at bearings 93.5–152.7° and
+0.090–0.780 m, rising to 29.8% and 1.022 m while the tines cross the scan
+plane. It costs no coverage, no mount angle removes it, and it is residual
+**R8**. A protective field drawn into that sector would be permanently
+violated, which is a constraint on the field design and not a licence to
+filter the samples.
 
 **Why neither safety scanner feeds SLAM, and why that is a different
 question from the one above.** The front scanner's measurement channel is

@@ -39,6 +39,7 @@ Usage:
     python3 agv/forklift/scripts/sensor_coverage.py            # full report
     python3 agv/forklift/scripts/sensor_coverage.py --step 0.05
     python3 agv/forklift/scripts/sensor_coverage.py --nav-sweep
+    python3 agv/forklift/scripts/sensor_coverage.py --self-return
 
 Every arc this prints is quantised to the bearing step (default 0.1 deg),
 so a boundary is that step, never finer.
@@ -922,6 +923,237 @@ def yaw_sweep(solids, sensors, step):
     front.yaw, rear.yaw = base_f, base_r
 
 
+def ray_range(origin, direction, poly):
+    """Distance along a ray to the nearest edge of poly, or None.
+
+    coverage_flags asks "is this POINT visible", which is the right
+    question for coverage. This asks the sensor's own question: "how far
+    does THIS RAY travel before it terminates", which is what the device
+    reports and what a live scan can be compared against.
+    """
+    best = None
+    n = len(poly)
+    for i in range(n):
+        ax, ay = poly[i]
+        bx, by = poly[(i + 1) % n]
+        ex, ey = bx - ax, by - ay
+        den = direction[0] * (-ey) - direction[1] * (-ex)
+        if abs(den) < 1e-15:
+            continue
+        rx, ry = ax - origin[0], ay - origin[1]
+        t = (rx * (-ey) - ry * (-ex)) / den
+        u = (direction[0] * ry - direction[1] * rx) / den
+        if t > 1e-9 and -1e-9 <= u <= 1.0 + 1e-9:
+            if best is None or t < best:
+                best = t
+    return best
+
+
+def self_returns(sensor, polys):
+    """Per-ray prediction of what the sensor's own vehicle returns.
+
+    One entry per declared sample, in the sensor's own index order, so a
+    row lines up with the same index in a captured scan. Range None means
+    the ray leaves the vehicle.
+    """
+    out = []
+    span = sensor.a_max - sensor.a_min
+    for i in range(sensor.samples):
+        ang = sensor.a_min + span * i / (sensor.samples - 1)
+        world = sensor.yaw + ang
+        d = (math.cos(world), math.sin(world))
+        best, who = None, None
+        for name, poly in polys:
+            t = ray_range((sensor.x, sensor.y), d, poly)
+            if t is not None and (best is None or t < best):
+                best, who = t, name
+        out.append((i, deg(ang), deg(world) % 360.0, best, who))
+    return out
+
+
+def self_fan(sensor, polys, step):
+    """Where the vehicle's own body sits, seen from the sensor's MOUNT.
+
+    Independent of the aperture: it sweeps the full circle about the
+    mount point. That is what decides whether any mount angle could hide
+    the body, because the blind sector is one contiguous arc of fixed
+    width and the body is not.
+    """
+    n = int(round(360.0 / step))
+    hit = []
+    for k in range(n):
+        b = math.radians(k * step)
+        d = (math.cos(b), math.sin(b))
+        best, who = None, None
+        for name, poly in polys:
+            t = ray_range((sensor.x, sensor.y), d, poly)
+            if t is not None and (best is None or t < best):
+                best, who = t, name
+        hit.append((best, who))
+    groups, cur = [], None
+    for k in range(n):
+        rng, who = hit[k]
+        if rng is None:
+            if cur:
+                groups.append(cur)
+                cur = None
+            continue
+        if cur is None:
+            cur = [k * step, k * step, rng, rng, set()]
+        else:
+            cur[1] = k * step
+            cur[2] = min(cur[2], rng)
+            cur[3] = max(cur[3], rng)
+        cur[4].add(who.split('/')[0])
+    if cur:
+        groups.append(cur)
+    if len(groups) > 1 and groups[0][0] == 0.0 and \
+            abs(groups[-1][1] - (360.0 - step)) < 1e-9:
+        tail = groups.pop()
+        groups[0][0] = tail[0] - 360.0
+        groups[0][2] = min(groups[0][2], tail[2])
+        groups[0][3] = max(groups[0][3], tail[3])
+        groups[0][4] |= tail[4]
+    return [(a, b + step, b + step - a, lo, hi, sorted(names))
+            for a, b, lo, hi, names in groups]
+
+
+def _in_aperture(sensor, bearing_rad):
+    rel = wrap(bearing_rad - sensor.yaw)
+    return sensor.a_min - 1e-12 <= rel <= sensor.a_max + 1e-12
+
+
+def report_self_return(solids, sensors, step):
+    """What each scanner sees of its own vehicle, ray by ray.
+
+    Every other section of this script measures COVERAGE, which is a
+    property of the pair. This one measures what a single device
+    REPORTS, which is a property of that device's mounting, and the two
+    are not the same number. A sector can be fully covered by the pair
+    and still be a sector one scanner spends its rays on the vehicle in.
+    """
+    section('10. SELF-RETURN: what each scanner sees of its own vehicle')
+    print('Occluder set is the VISUAL set here, deliberately: this section')
+    print('predicts what the SIMULATED device reports, so that it can be')
+    print('diffed against a captured scan. Every other section claims on the')
+    print('physical set. Lift 0.00 m, steer 0.00 rad unless stated.')
+    polys = occluders(solids, 0.15, kinds=('visual',))
+    for s in sensors:
+        pol = occluders(solids, s.z, kinds=('visual',))
+        print('')
+        print('-- %s, mount (%.3f, %.3f, %.3f), yaw %.1f deg, aperture %.1f deg'
+              % (s.name, s.x, s.y, s.z, deg(s.yaw), deg(s.aperture)))
+        fan = self_fan(s, pol, step)
+        total = sum(g[2] for g in fan)
+        print('   the vehicle seen from this MOUNT, full circle:')
+        for a, b, w, lo, hi, names in fan:
+            inap = sum(step for k in range(int(round(w / step)))
+                       if _in_aperture(s, math.radians(a + k * step)))
+            print('     [%7.2f,%7.2f) %6.2f deg  %.3f..%.3f m  %-28s %s'
+                  % (a % 360.0, b % 360.0, w, lo, hi, ', '.join(names),
+                     'in aperture %.2f deg' % inap if inap else 'BLIND, hidden'))
+        print('     total self-fan %.2f deg of 360; blind sector %.1f deg'
+              % (total, 360.0 - deg(s.aperture)))
+        rays = [r for r in self_returns(s, pol) if r[3] is not None]
+        finite = [r for r in rays if r[3] >= s.r_min]
+        print('   rays terminating on the vehicle: %d of %d samples (%.1f%%)'
+              % (len(rays), s.samples, 100.0 * len(rays) / s.samples))
+        if rays:
+            print('     reported (>= range_min %.2f m): %d; dropped below '
+                  'range_min: %d' % (s.r_min, len(finite), len(rays) - len(finite)))
+            print('     index span %d..%d, vehicle bearings %.2f..%.2f deg'
+                  % (rays[0][0], rays[-1][0], min(r[2] for r in rays),
+                     max(r[2] for r in rays)))
+            print('     nearest %.3f m, farthest %.3f m'
+                  % (min(r[3] for r in rays), max(r[3] for r in rays)))
+            print('   %5s %10s %9s %8s  %s'
+                  % ('idx', 'sensor deg', 'veh brg', 'range m', 'surface'))
+            for i, adeg, brg, rng, who in rays:
+                print('   %5d %10.2f %9.2f %8.3f  %s%s'
+                      % (i, adeg, brg, rng, who,
+                         '   (< range_min, reported out of range)'
+                         if rng < s.r_min else ''))
+
+    rear = [s for s in sensors if s.name == 'safety_scanner_rear'][0]
+    print('')
+    print('-- %s against carriage travel (the R2 window and above it)'
+          % rear.name)
+    print('%8s %8s %8s %10s %10s  %s'
+          % ('lift m', 'rays', 'reported', 'nearest', 'farthest', 'surfaces'))
+    for lift in (0.00, 0.04, 0.05, 0.075, 0.10, 0.11, 0.30, 1.60):
+        pol = occluders(solids, rear.z, kinds=('visual',), lift=lift)
+        rays = [r for r in self_returns(rear, pol) if r[3] is not None]
+        rep = [r for r in rays if r[3] >= rear.r_min]
+        names = sorted(set(r[4].split('/')[0] for r in rays))
+        print('%8.3f %8d %8d %10s %10s  %s'
+              % (lift, len(rays), len(rep),
+                 '%.3f' % min(r[3] for r in rays) if rays else '-',
+                 '%.3f' % max(r[3] for r in rays) if rays else '-',
+                 ', '.join(names) if names else 'none'))
+
+
+def rear_yaw_sweep(solids, sensors, step):
+    """Would a different REAR mount angle reduce the self-return band?
+
+    Section 9's sweep rotates BOTH scanners together and scores union
+    coverage, which is the layout question. This one rotates the rear
+    scanner alone and scores the band, which is the device question. It
+    is a sensitivity study and not a proposal; the trade it exposes is
+    argued in the evidence file, not here.
+    """
+    front = [s for s in sensors if s.name == 'safety_scanner_front'][0]
+    rear = [s for s in sensors if s.name == 'safety_scanner_rear'][0]
+    n, angs = bearings(step)
+    polys = occluders(solids, rear.z, kinds=('visual', 'collision'))
+    vpolys = occluders(solids, rear.z, kinds=('visual',))
+    hull = plan_hull(solids)
+    off_pts = dict((d, offset_samples(hull, d)) for d in (0.30, 0.50))
+    section('11. REAR SCANNER YAW SWEEP (sensitivity study, not a change)')
+    print('delta is added to the rear mount yaw only. "exposed" is the part')
+    print('of the vehicle-seen-from-the-mount fan that lands inside the')
+    print('aperture. Coverage columns are the PAIR, physical set.')
+    print('')
+    print('%7s %6s %6s %6s %8s %7s %7s %7s %7s %7s %6s'
+          % ('delta', 'rays', 'r.075', 'r.300', 'farthest', 'cov 1 m',
+             'cov 2 m', 'cov 3 m', 'p0.30', 'p0.50', 'x2load'))
+    lift_polys = dict((lf, occluders(solids, rear.z, kinds=('visual',),
+                                     lift=lf)) for lf in (0.075, 0.300))
+    base = rear.yaw
+    for delta_deg in (-20.0, -10.0, 0.0, 20.0, 40.0, 60.0, 65.0, 70.0,
+                      78.0, 85.0, 90.0):
+        rear.yaw = base + math.radians(delta_deg)
+        rays = [r for r in self_returns(rear, vpolys) if r[3] is not None]
+        lifted = [len([r for r in self_returns(rear, lift_polys[lf])
+                       if r[3] is not None]) for lf in (0.075, 0.300)]
+        cov = []
+        for radius in (1.0, 2.0, 3.0):
+            ff = coverage_flags(front, polys, radius, angs)
+            fr = coverage_flags(rear, polys, radius, angs)
+            cov.append(measure([a or b for a, b in zip(ff, fr)], step))
+        ff = coverage_flags(front, polys, 2.0, angs)
+        fr = coverage_flags(rear, polys, 2.0, angs)
+        both_load = sum(step for i, (a, b) in enumerate(zip(ff, fr))
+                        if a and b and 90.0 <= i * step < 270.0)
+        per = []
+        for d in (0.30, 0.50):
+            pts = off_pts[d]
+            seen = sum(1 for p in pts
+                       if sees(front, p, polys) or sees(rear, p, polys))
+            per.append(100.0 * seen / len(pts))
+        print('%6.1fd %6d %6d %6d %8s %6.1fd %6.1fd %6.1fd %6.1f%% %6.1f%% %5.1fd'
+              % (delta_deg, len(rays), lifted[0], lifted[1],
+                 '%.3f' % max(r[3] for r in rays) if rays else '-',
+                 cov[0], cov[1], cov[2], per[0], per[1], both_load))
+    rear.yaw = base
+    print('')
+    print('rays    rays terminating on the vehicle, carriage travel 0.000 m')
+    print('r.075   the same at 0.075 m of travel, inside the R2 window')
+    print('r.300   the same at 0.300 m, the carriage clear of the plane')
+    print('x2load  double-covered arc at 2 m within the load half,')
+    print('        bearings 90 to 270 deg: the redundancy that matters,')
+    print('        because R1, R2 and R3 all live in that half')
+
+
 def nav_sweep(solids, step, z=1.80):
     section('NAV LIDAR POSITION SWEEP (design aid, not a result)')
     polys_v = occluders(solids, z, kinds=('visual',),
@@ -956,6 +1188,9 @@ def main():
                     help='sweep navigation lidar positions and stop')
     ap.add_argument('--yaw-sweep', action='store_true',
                     help='sweep safety scanner mount angles and stop')
+    ap.add_argument('--self-return', action='store_true',
+                    help='per-ray self-return prediction and the rear yaw '
+                         'sweep, and stop')
     args = ap.parse_args()
 
     solids, sensors = load_model(args.model)
@@ -968,6 +1203,10 @@ def main():
         return
     if args.yaw_sweep:
         yaw_sweep(solids, sensors, args.step)
+        return
+    if args.self_return:
+        report_self_return(solids, sensors, args.step)
+        rear_yaw_sweep(solids, sensors, args.step)
         return
 
     report_inventory(solids, sensors)
