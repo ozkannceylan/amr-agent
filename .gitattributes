@@ -30,3 +30,11 @@
 *.png -text
 *.gif -text
 *.mp4 -text
+
+# slam_toolbox's serialised pose graph. Neither extension is covered by the
+# rules above and both currently rely on git's heuristic, which only scans the
+# first 8000 bytes for a NUL — the same gap that made map.pgm a stated rule.
+# The pose graph exists so mapping can resume rather than restart, so silent
+# corruption would be discovered only at the run that needed it.
+*.posegraph -text
+sim/maps/**/*.data -text
