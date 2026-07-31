@@ -83,8 +83,9 @@
 # arrives at the world's ~500 Hz and not at a chosen rate. It is bridged
 # as-is: decimating it here would be the bridge deciding what a consumer
 # needs, and the vehicle nodes already rate-limit everything they derive
-# from it. The measured bridged rate is recorded in
-# worlds/FORKLIFT_ARENA_EVIDENCE.md like every other topic.
+# from it. The measured bridged rate is recorded with every other topic's:
+# worlds/FORKLIFT_ARENA_EVIDENCE.md section 3 for the M4 topic set, and
+# setup/CONTAINER_TOOLCHAIN.md section 6.2 for the set below.
 #
 # NOTE ON THE TWO SCAN TOPICS. All three scanners on the model are gpu_lidar
 # sensors, so the world MUST load gz-sim-sensors-system with a render engine.

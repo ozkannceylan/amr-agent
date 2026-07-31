@@ -97,16 +97,22 @@
 
   ==================== SENSOR SYSTEM ====================
 
-  The vehicle scanner is a gz "gpu_lidar", so this world MUST load
-  gz-sim-sensors-system with a render engine, exactly as cell.sdf does. gz's
-  stock empty.sdf does not, and on it the vehicle drives and lifts while
-  /forklift/gz/scan stays silent (agv/forklift/README.md).
+  All three vehicle scanners are gz "gpu_lidar" sensors, so this world MUST
+  load gz-sim-sensors-system with a render engine, exactly as cell.sdf does.
+  gz's stock empty.sdf does not, and on it the vehicle drives and lifts while
+  /forklift/gz/scan_nav and both
+  /forklift/gz/safety_scanner_*/measurement topics stay silent
+  (agv/forklift/README.md).
 
   Rendering on the target machine is llvmpipe software rasterisation
   (sim/setup/WSL_ENVIRONMENT.md), so the scene is deliberately cheap: box
   and cylinder primitives only, no mesh, no texture, no shadow, one
   directional light. Adding any of those is a change to the figures in
   worlds/FORKLIFT_ARENA_EVIDENCE.md and has to be re measured.
+
+  The sensor set is 910 rays per sweep at 10 Hz (360 + 275 + 275). Section 9
+  of worlds/FORKLIFT_ARENA_EVIDENCE.md measures what that costs headless and
+  under the GUI defined below, with and without the beams drawn.
 -->
 <sdf version="1.8">
   <world name="forklift_arena">
@@ -160,15 +166,34 @@
       navigation lidar selects /forklift/gz/scan_nav there; the safety
       pair is on /forklift/gz/safety_scanner_front/measurement and
       /forklift/gz/safety_scanner_rear/measurement. The GUI cannot show
-      all three at once and this file cannot preselect one: the plugin
-      takes no topic parameter from SDF.
+      all three at once, and nothing in this file selects one: the block
+      below passes the plugin no topic, and on the verified run the combo
+      box came up EMPTY with no gz subscriber on any of the three
+      scanners.
+
+      TWO CONSEQUENCES A RECORDING HAS TO PLAN FOR, both measured
+      (FORKLIFT_ARENA_EVIDENCE.md section 9.2):
+
+        1. Nothing is drawn until a human presses refresh. Beams-on is not
+           the start state of this world; it is three clicks in.
+        2. Refresh selects entry ZERO, and the list is sorted, so entry
+           zero is /forklift/gz/safety_scanner_front/measurement. The
+           first beams a viewer sees are the FRONT SAFETY SCANNER's
+           measurement channel, not the navigation lidar, which is entry
+           two. That is a captioning hazard rather than a bug: those beams
+           are a non-safe measurement channel and are not a protective
+           field (invariant 1, agv/forklift/README.md). A showcase that
+           leaves the default selection is showing the wrong sensor with
+           the most dangerous available caption.
 
       Display type is the plugin's second combo box, defaulting to
-      Triangle Strips. Rays draws one line segment per sample per frame,
-      which is the mode a viewer means by "beams" and the most expensive
-      of the three on a software rasteriser. The measured cost of all of
-      this is in worlds/FORKLIFT_ARENA_EVIDENCE.md section 9; it was
-      measured, not assumed, because rendering here is llvmpipe.
+      Triangle Strips. Rays draws one line segment per sample per frame
+      and is the mode a viewer means by "beams". On this llvmpipe box the
+      two cost the same to within the run-to-run spread: 0.8893 against
+      0.8923 real-time factor at the navigation lidar's 360 rays
+      (section 9.3). Points was not measured. The cost of the GUI itself
+      is an order of magnitude larger than the cost of any beam mode, and
+      that is the number a recording plan needs.
 
       The scene settings below are repeated from the world's <scene>
       element on purpose: MinimalScene does not inherit them, it carries
@@ -267,9 +292,15 @@
         <use_event>true</use_event>
       </plugin>
 
-      <!-- The real time factor readout. It is the instrument the render
-           budget in FORKLIFT_ARENA_EVIDENCE.md section 9 is read from,
-           so it stays on screen during any recording. -->
+      <!-- The real time factor readout, on screen for any recording. It
+           is NOT the instrument section 9 measures with: the value it
+           shows is gz's smoothed instantaneous factor, which swung
+           between 0.48 and 3.37 over one sixty-sample capture of /stats
+           on this box. Section 9 measures the same thing as a ratio of
+           differences over a sixty second window, and quotes this readout
+           only as corroboration. At the 1200 px window used there the
+           panel collapses to a strip showing the percentage alone, which
+           is enough for a recording and not enough for a measurement. -->
       <plugin filename="WorldStats" name="World stats">
         <gz-gui>
           <title>World stats</title>
@@ -300,10 +331,19 @@
         </gz-gui>
       </plugin>
 
-      <!-- Capture. Writes a PNG of the 3D view and also advertises the
-           /gui/screenshot service, which is how the beam capture in
-           FORKLIFT_ARENA_EVIDENCE.md section 9 was taken without a human
-           at the window. -->
+      <!-- Capture. Advertises the /gui/screenshot service, which works
+           here and wrote the 3D-view capture in
+           worlds/evidence/m5-05-beams-nav-lidar-3dview-service.png.
+           Two properties of it, both measured, because neither is what
+           the request field looks like (FORKLIFT_ARENA_EVIDENCE.md
+           section 9.4): the StringMsg is a DIRECTORY, not a file name —
+           the plugin always names the file from the capture timestamp —
+           and it captures the 3D view ONLY, so the topic and display
+           type combo boxes are not in it. A capture that has to show
+           which scanner is on screen is an X11 window grab of the whole
+           GUI, which is how the other four files in worlds/evidence/
+           were taken. The service returns `data: true` in every case,
+           including a request that writes no file at all. -->
       <plugin filename="Screenshot" name="Screenshot">
         <gz-gui>
           <property type="bool" key="showTitleBar">false</property>
@@ -506,7 +546,8 @@
       and trips no lidar logic; the two scenarios are independent by
       placement, not by a rule enforced in code.
 
-      Adding this model changes what `gz model --list` reports: thirteen
+      Adding this model changes what `gz model` reports under its list
+      flag: thirteen
       arena models instead of twelve. worlds/FORKLIFT_ARENA_EVIDENCE.md was
       captured before this marking existed and is not re-measured here.
     -->

@@ -124,6 +124,21 @@ explicitly, or run through `ros2 run` / `ros2 launch`.**
 
 ### 4.1 What was run
 
+> **Two topic names in section 4 no longer exist, and section 4 is not
+> rewritten to hide it.** This run was taken on 2026-07-30 against the model as
+> brief m5-04 left it. Brief m5-06 then split the safety scanners' measurement
+> channel and renamed both topics:
+>
+> | as recorded in §4.1, §4.4, §4.5, §7 | the name since m5-06 |
+> |---|---|
+> | `/forklift/gz/scan_safety_front` | `/forklift/gz/safety_scanner_front/measurement` |
+> | `/forklift/gz/scan_safety_rear` | `/forklift/gz/safety_scanner_rear/measurement` |
+>
+> `/forklift/gz/scan_nav` is unchanged. The commands below are kept verbatim
+> because they are the record of what produced the figures; **do not copy them
+> as a recipe** — §6.2 and §8 carry commands that work against the current
+> model. The contract is `agv/forklift/README.md` in every case.
+
 ```
 export GZ_PARTITION=m507evidence ROS_DOMAIN_ID=77 QT_QPA_PLATFORM=offscreen
 gz sim -s -r sim/worlds/forklift_arena.sdf                     # headless
@@ -144,8 +159,9 @@ one that does, and both were set for every run in this document.
 The scan topics were **discovered from the running server** with `gz topic -l`
 rather than assumed, and the bridge argument list was generated from that
 output. This matters: the run below is not against the topic names in
-`sim/launch/forklift_bringup.launch.py`, which are the M4 single-scanner names
-(see §6).
+`sim/launch/forklift_bringup.launch.py`, which at the time of this run were
+still the M4 single-scanner names (see §6.1; §6.2 records the fix and its
+verification).
 
 `sim/launch/forklift_bringup.launch.py` was not edited for this run and no
 file owned by another agent was touched.
@@ -343,27 +359,132 @@ Changed to match what actually worked:
 The script was re-run after editing and is still idempotent: it installs
 nothing on a second pass, prints the shadow warning, and exits before step 4.
 
-## 6. Known gap: the launch file's topic names are the M4 set
+## 6. The launch file's topic names: gap found here, closed by m5-05b
 
-`sim/launch/forklift_bringup.launch.py` bridges `/forklift/gz/scan`, which was
-the single-scanner name. Brief m5-04 replaced that sensor with three —
-`scan_safety_front`, `scan_safety_rear` and `scan_nav` — so the launch file's
-bridge now advertises a ROS topic that nothing publishes to.
+### 6.1 The gap as this document first recorded it
+
+`sim/launch/forklift_bringup.launch.py` bridged `/forklift/gz/scan`, the
+single-scanner name. Brief m5-04 replaced that sensor with three, so the launch
+file's bridge advertised a ROS topic that nothing published to.
 
 This was observed directly. A run of that launch file against the new model
 at 21:02 UTC came up clean, spawned the vehicle and created every bridge, and
 no scan data ever arrived; the only signal was the absence of messages, with
 no error from either side. Under the model as it stood before m5-04 landed,
 the same launch file carried `/forklift/scan` at `average rate: 9.997`, so the
-launch file itself is not broken — it is simply describing the previous
-sensor set.
+launch file itself was not broken — it was describing the previous sensor set.
 
-Updating it is **not** part of this brief and was deliberately not done: the
-topic contract lives in `agv/forklift/README.md`, which m5-04 owns, and the
-run above proves the toolchain without it. It needs a `sim` brief once that
-contract is settled. The failure mode is worth stating plainly, because it is
-silent: a `ros_gz_bridge` entry for a gz topic that nobody publishes logs
+The failure mode is worth stating plainly, because it is silent: a
+`ros_gz_bridge` entry for a gz topic that nobody publishes logs
 `Creating GZ->ROS Bridge` exactly as a working one does.
+
+### 6.2 Closed, 2026-07-31, and verified in this container
+
+Brief m5-05b rewrote `_BRIDGE_ARGS` against the contract table in
+`agv/forklift/README.md`. The launch now bridges eight gz-side names, all of
+which the running server advertises. Isolation `GZ_PARTITION=m505b_verify` /
+`ROS_DOMAIN_ID=81` and `GZ_PARTITION=m505b_confirm` / `ROS_DOMAIN_ID=83`.
+
+`ros2 topic list` with the launch running, in full:
+
+```
+/clock
+/forklift/gz/fork_cmd
+/forklift/gz/steer_cmd
+/forklift/gz/traction_cmd
+/forklift/joint_states
+/forklift/odom
+/forklift/safety_scanner_front/measurement
+/forklift/scan
+/parameter_events
+/rosout
+```
+
+`ros2 topic hz`, first reported window of each, quoted as the tool printed it:
+
+| Topic | `average rate` | min / max | window |
+|---|---|---|---|
+| `/forklift/scan` | `9.995` | `0.098s` / `0.104s` | 12 |
+| `/forklift/safety_scanner_front/measurement` | `10.001` | `0.098s` / `0.103s` | 11 |
+| `/forklift/odom` | `19.998` | `0.049s` / `0.051s` | 22 |
+| `/forklift/joint_states` | `500.055` | `0.000s` / `0.005s` | 501 |
+| `/clock` | `500.191` | `0.000s` / `0.004s` | 501 |
+
+`ros2 topic echo --once --full-length` on the two scan topics, shape counted
+from the untruncated captures:
+
+| ROS topic | `frame_id` | ranges | intensities | finite | `range_max` | `angle_min`/`angle_max` |
+|---|---|---|---|---|---|---|
+| `/forklift/scan` | `nav_lidar_link` | 360 | 360 | 14 | `8.0` | `-3.1415927410125732` / `3.1415927410125732` |
+| `/forklift/safety_scanner_front/measurement` | `safety_scanner_front_link` | 275 | 275 | 46 | `5.5` | `-2.399827718734741` / `2.399827718734741` |
+
+`/clock`, first message of a `ros2 topic echo /clock` capture:
+
+```
+clock:
+  sec: 77
+  nanosec: 294000000
+---
+```
+
+The ROS-to-gz direction was checked too, because a command entry fails silently
+in the same way: `ros2 topic pub -r 5 /forklift/gz/traction_cmd
+std_msgs/msg/Float64 '{data: 3.0}'` produced `data: 3` on
+`gz topic -e -t /forklift/gz/traction_cmd`, and `/forklift/odom` moved from
+`x: -5.999999999999972` to `x: -1.6605650436960087`.
+
+### 6.3 How the silent failure was checked for, not assumed away
+
+Three checks, because "the topics are right now" is a claim about a running
+server and not about a file:
+
+1. **Every gz-side name in the file, cross-checked against the server.** The
+   names were parsed out of `_BRIDGE_ARGS` and compared to `gz topic -l` on the
+   live server, so a typo could not pass as a working entry:
+
+   ```
+   /clock                                               advertised
+   /forklift/gz/steer_cmd                               advertised
+   /forklift/gz/traction_cmd                            advertised
+   /forklift/gz/fork_cmd                                advertised
+   /forklift/gz/scan_nav                                advertised
+   /forklift/gz/safety_scanner_front/measurement        advertised
+   /forklift/gz/odom                                    advertised
+   /forklift/gz/joint_state                             advertised
+   declared: 8   not advertised: 0
+   ```
+
+2. **`ros2 topic hz` on every bridged ROS topic**, not a reading of the log.
+   The launch log is not evidence: it prints `Creating GZ->ROS Bridge` for a
+   dead entry exactly as for a live one.
+
+3. **A negative control, run against the same live server.** A second
+   `parameter_bridge` was started on the removed name, alone, so that its
+   behaviour could be read without ambiguity:
+
+   ```
+   $ ros2 run ros_gz_bridge parameter_bridge \
+       /forklift/gz/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan
+   [INFO] [ros_gz_bridge]: Creating GZ->ROS Bridge: [/forklift/gz/scan
+     (gz.msgs.LaserScan) -> /forklift/gz/scan (sensor_msgs/msg/LaserScan)] (Lazy 0)
+
+   $ ros2 topic hz /forklift/gz/scan
+   WARNING: topic [/forklift/gz/scan] does not appear to be published yet
+
+   $ ros2 topic echo /forklift/gz/scan --once
+   (no output; exit status 124 — killed by timeout)
+   ```
+
+   Same INFO line as the eight working entries. No warning, no error, no data.
+   That is the whole failure mode, reproduced deliberately beside the fix, so
+   the fix is distinguishable from it rather than merely believed.
+
+One discovery artifact worth knowing when reading a negative: the first
+`ros2 topic hz /forklift/scan` of a run printed `WARNING: topic
+[/forklift/scan] does not appear to be published yet` and then reported
+`average rate: 9.736` in the same invocation. A warning at the start of a
+window is not the silent failure — the silent failure prints the warning and
+nothing after it.
 
 ## 7. Concurrency during this work
 
@@ -382,10 +503,13 @@ timeline, from `stat` and `md5sum` at each step:
 | 21:26-21:29 | `42e99e0...` | **the run recorded in §4**, against the committed blob, md5 unchanged start to end |
 
 The §4 run is the one to cite. The earlier runs are kept in this section
-because they are what established that the launch file had gone stale (§6).
+because they are what established that the launch file had gone stale (§6.1).
+The topic names in this table are the ones in force on 2026-07-30; two of them
+were renamed the same day by m5-06, per the table at the head of §4.1.
 
 An unrelated observation from §4.5, passed on rather than acted on: on
-`/forklift/gz/scan_safety_rear`, 46 of the 93 finite returns are under 0.5 m
+`/forklift/gz/scan_safety_rear` — now
+`/forklift/gz/safety_scanner_rear/measurement` — 46 of the 93 finite returns are under 0.5 m
 in one contiguous index band (indices 9 to 65, `0.427` down to `0.164` m),
 while neither other scanner has a single return under 0.5 m. That pattern is
 what a scanner looking into its own vehicle structure produces. It may be
@@ -407,6 +531,21 @@ sleep 10                                  # ROS discovery, see below
 ros2 topic hz <topic>
 ros2 topic echo <topic> --once --full-length
 ```
+
+The whole bringup, which is what a scenario actually runs, is one command and
+needs no topic list of its own — the launch file carries the current one and
+§6.2 is its verification:
+
+```
+export GZ_PARTITION=<unique> ROS_DOMAIN_ID=<n>
+ros2 launch sim/launch/forklift_bringup.launch.py            # headless
+ros2 launch sim/launch/forklift_bringup.launch.py gui:=true  # with the GUI
+```
+
+Under `gui:=true` the beams are still not drawn until someone presses the
+`Visualize lidar` refresh button and picks a scanner, and the entry that press
+selects is the front safety scanner, not the navigation lidar
+(`sim/worlds/FORKLIFT_ARENA_EVIDENCE.md` §9.2).
 
 Two traps, both hit during this work:
 

@@ -13,11 +13,11 @@
          ^
          |   WallNorth
          |   [RackA1]   [RackA2]   [RackA3]      ConveyorStation (east wall)
-         |        --- Aisle A (y ~ +1.5) ---
+         |        === Aisle A (y ~ +1.5) ===
          |   [RackB1]   [RackB2]   [RackB3]
-         |        --- Aisle B (y ~ -5)  ---
+         |        === Aisle B (y ~ -5)  ===
          |   ChargerStation (west wall)      DoorGap (south wall, x ~ +6)
-         +-----------------------------------------------> +x (east)
+         +===============================================> +x (east)
 
   Sensor note: the RB-KAIROS lidars (that platform is retired by ADR 0010;
   this is the parked bringup) are gz "gpu_lidar" sensors, so this
