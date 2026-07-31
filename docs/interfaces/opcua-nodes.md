@@ -1372,3 +1372,460 @@ reaction as standard-program process logic, and these four nodes are no part of 
 | 5 | `SafetyResetFault` has a **node** (§11.2). Whether it gets a **lamp** is `hmi/`'s decision; the HMI brief asks for three lamps and this section does not enlarge that ask | `hmi/`, its own brief |
 | 6 | **`plc/forklift-safety/SPEC.md` §6.4 notes 1–3 and its §10 open item 4 are answered by this section** — the group is `Forklift/Safety/`, the leaf names are the F-side names unchanged, and the fourth flag gets a node. That document asks to be told, and it is outside this agent's write scope | Requested: one line in §6.4 and one in its §10 open item 4, pointing at `opcua-nodes.md` §11 |
 | 7 | The copy statements themselves — one unconditional assignment per node, every cycle — are `plc/forklift/SPEC.md`'s. **This section is authoritative for the node names, the DB name and the per-tag rights**; `plc/forklift-safety/SPEC.md` §6 is authoritative for what the flags mean | The standard-side delta, its own brief |
+
+## 12. The autonomy envelope, the drive mode and the operator's process stop (M5)
+
+Added by **ADR 0011 D3** as refined by **ADR 0012 D1**. In autonomous mode the standard program
+publishes, at its own cycle, an **autonomy envelope** of three elements — a **motion enable**, a
+**speed ceiling** and a **fixed-equipment / station permit** — and the navigation control loop closes
+**onboard the vehicle at its own rate**. This section mints the nodes that carry the envelope, the
+drive mode that selects which control law is in force, the operator's process-stop request, and the
+two values the vehicle's own control layer reports back.
+
+**Nine nodes, in four new subfolders of `Forklift/`.** As in §9, §10 and §11, **this section defines
+nodes only**. Every threshold, delay, latch, arbitration rule and formation term named below is
+standard-program content owned by `plc/forklift/SPEC.md`, or vehicle-layer content owned by `agv/`;
+where a value or a behaviour is named here it is an **interface expectation** for that specification,
+marked as such, and never logic defined in this document.
+
+**What is new in kind, and it is new.** Through §11 every value on this server was either formed by
+the PLC or measured by the plant. This section adds the first values that are neither: a
+**permission the vehicle's own control layer consumes** while forming its own commands, and a
+**report that layer makes about its own gating**. That is what ADR 0011 D3 buys, and it is why the
+rules below are written before the tables.
+
+**Three statements this section does not weaken.** Nothing here is a safety function, and no PL, SIL,
+Category or PFH is claimed for any node in it (ADR 0008 D3, ADR 0011 D5). Nothing here closes M5 or
+any part of its criterion; a node existing is not an acceptance test passed (§11's standing, ADR 0009
+D2.3). And **nothing here presumes the m5-03 F-I/O verdict**: no node in this section is on the
+F-input path whichever way that verdict falls, no node in this section is written by or read by the
+F-runtime group, and **the safe scanner channel is not named here** — its name and its path wait on
+m5-03 and are not coined in this document (§12.12).
+
+**Where the six required attributes live, so a reader can check the set rather than hunt.** Every
+node below carries a **BrowseName**, an **S7 and OPC UA data type**, a **unit and a range or
+plausibility statement** where the type admits one, and a **start value with its cold-start reading**
+— all four in its own group table, on its own row. **Access right, owner and readers** are in
+§12.2's two tables, which cover all nine nodes. The start values are deliberately **not** collected
+into a §10.9-style table of their own: a start value that lives in the row it belongs to travels with
+that row when a later edit moves it, and a value written in two places goes stale in one of them.
+
+### 12.1 Direction rules — three consumers, one server, and one thing this group is not
+
+| Rule | Statement |
+|---|---|
+| Server/client | Unchanged. The PLC is the OPC UA server; the bridge and the HMI are its clients (invariant 4, §10.1). **The vehicle's control layer is not a client of this server and never becomes one** — it sees these values as ROS 2 topics the bridge republishes (§12.10), which is what keeps invariant 11's layer adjacency intact |
+| What the HMI writes | Its §10.1 set **plus two**: `Forklift/Mode/HmiDriveModeRequest` and `Forklift/ProcessStop/HmiProcessStopRequest`. **Its every-cycle write set becomes eight** — the five requests of §10.4, `Link/HmiHeartbeat`, and these two. §10.8 **H1**'s *rule* governs all eight unchanged — every node this client writes, written every cycle, never on change, so a reverted DB is repaired by the next cycle — and only its **count** goes stale, which is §12.13 item 2 |
+| What the bridge writes | Its §10.1 set **plus two**: the two `Forklift/Vehicle/` nodes. It writes no `Mode/`, no `Envelope/` and no `ProcessStop/` node, on any path |
+| The two clients' writable sets stay disjoint | Unchanged and still answerable from the BrowseName alone: the two new HMI-written nodes carry the `Hmi` prefix of §10.3, the two new bridge-written nodes do not, and no node in this section is writable by both |
+| No actuator writes, from any client | Unchanged. Nothing in this section is an actuator output, and the three `Forklift/Output/` setpoints of §10.6 are untouched — same nodes, same single assignment with its mandatory `ELSE` to `0.0`, same owner |
+| **A permission is not a command** | **This is the load-bearing sentence of the section.** Every `Forklift/Envelope/` node is a **bound or a permission** the vehicle's control layer consumes while forming its own commands. **The envelope can prevent motion; it cannot cause it.** No node here instructs the vehicle to move, and a consumer that read `ForkliftMotionEnable` `TRUE` as an instruction to move would be wrong. This is also what keeps invariant 6 out of reach later: when a fleet manager exists it is a **reader** of these nodes at most, and a permission it cannot write is not a channel through which it could command an actuator |
+| Single owner | Every node below has exactly one writer, listed per tag in §12.2 (invariant 10). No consumer recomputes a value another layer owns — in particular the PLC never re-derives the mode from the vehicle's report (§12.3 **M4**), and the vehicle never re-derives the mode from the envelope (**M5**) |
+| One heartbeat per party, and they are not merged | `DemoCell/Link/BridgeHeartbeat` / `BridgeLinkOk` remains the single answer to *"is the bridge alive?"* (§10.1, §10.11). `Forklift/Vehicle/ForkliftVehicleHeartbeat` is **not** a second bridge heartbeat and **not** a second client: it counts the **vehicle control layer's** own cycles and is carried to the server by the bridge like any other plant input. The two answer different questions and no verdict merges them (§12.6) |
+| Not a safety path | Every node here is process data. The envelope, the mode, the operator's process stop and the vehicle's report implement **no** SRS function — not SF-02, not SF-03, not SF-04, not SF-07, not SF-09 — and no SIL or PL is claimed for any of them (ADR 0008 D3, ADR 0011 D5). Neither "emergency" nor "protective" appears in any tag, node or topic **name** in this section, exactly as §9.6 and §10.1 require of process nodes. Loss of any link here is a degraded mode, not a safety event (invariant 2) |
+| Timing class | Best effort, and **that is only admissible because nothing here is a per-sample value** (§12.4 **E1**). Every deadline the cell's behaviour depends on is a PLC timer in the PLC's own time base or a vehicle-side timer in the vehicle's; no timing-critical loop is closed across this interface (invariant 9, ADR 0011 D3) |
+
+### 12.2 Folder layout, data blocks and per-tag access rights
+
+```
+DemoCell/                          the commissioned server interface, ns http://DemoCell
+  Input/ Output/ Status/ Link/     the M3 demonstration cell (§9), unchanged
+  Forklift/
+    Hmi/ Input/ Output/            the M4 forklift commissioning cell (§10), unchanged
+    Status/ Link/
+    Safety/                        the F-safety mirrors (§11), unchanged
+    Mode/                          which control law is asked for, and which is in force  (this section)
+    Envelope/                      the three elements of the autonomy envelope             (this section)
+    Vehicle/                       what the vehicle's own control layer reports back       (this section)
+    ProcessStop/                   the operator's process-stop request, and its latch      (this section)
+```
+
+**Four new global DBs, one per folder, and no existing DB gains a member.** This is §10.3's and
+§11.3's rule applied a third time and for the same reason: adding members to `ForkliftHmi`,
+`ForkliftStatus` or `ForkliftInput` moves the offsets of tags that the M4 watch tables, evidence and
+recording depend on, and a download that leaves project and CPU inconsistent shows up as monitoring
+errors on exactly the rows whose offsets moved (LESSONS 2026-07-28). New DBs leave the M3, M4 and §11
+groups byte-identical while this gate is built.
+
+**The folder names carry their own disclaimers, deliberately.** `ProcessStop/` puts the word in every
+browse path, every watch row and every screenshot, in the standing of §9.6's naming ruling and
+§11.3's `Mirror`: the one node in this project most likely to be mistaken for an emergency stop is
+the one whose full path says *process stop* three folders deep. `Vehicle/` is named for the **source**
+of its two values — the vehicle's own control layer — and it is **not** a vehicle-state group: it
+carries exactly two values, both about gating, and §11's warning stands unchanged, that `Forklift/`
+is the commissioning cell's subtree and no folder name in it asserts an onboard layer that document
+does not describe.
+
+| DB | Folder | Contents | *Accessible from HMI/OPC UA* | *Writable from HMI/OPC UA* |
+|---|---|---|---|---|
+| `ForkliftMode` | `Forklift/Mode/` | 2 mode tags | ✔ | per tag |
+| `ForkliftEnvelope` | `Forklift/Envelope/` | 3 envelope tags | ✔ | **✘ (all three)** |
+| `ForkliftVehicle` | `Forklift/Vehicle/` | 2 vehicle-report tags | ✔ | **✔ (both)** |
+| `ForkliftProcessStop` | `Forklift/ProcessStop/` | 2 tags | ✔ | per tag |
+
+> The *Writable* column is again where §12.1's direction rules are **enforced by the server rather
+> than by convention** (§10.3): with `Forklift/Envelope/*` not writable, a defect in either client
+> that tried to write the envelope is refused by the CPU, and the "a permission is not a command"
+> rule survives a broken client. **Per-*client* scoping remains policy**, unchanged and no wider than
+> §10.3 records: the commissioned CPU runs with access control disabled and security `None` (§9.10),
+> so "only the HMI writes the `Hmi…` tags and only the bridge writes the `Vehicle/` tags" is enforced
+> by each client's own allowlist and not by the server. Closing that is the access-control work §9.8
+> already carries.
+
+Per-tag ownership and readers. **Exactly one writer per node** (invariant 10); "readers" lists every
+consumer this contract admits. **Value owner and node writer are different roles for the two
+`Vehicle/` rows**, as they are for the §11 mirrors: the vehicle's control layer owns the value, the
+bridge writes the node.
+
+| Node (`Forklift/…`) | Writer (single owner) | Value owner, where different | Readers |
+|---|---|---|---|
+| `Mode/HmiDriveModeRequest` | HMI | — | PLC |
+| `Mode/ForkliftDriveModeActive` | PLC | — | HMI (display), **vehicle control layer** (via the bridge), bridge (logging) |
+| `Envelope/ForkliftMotionEnable` | PLC | — | **vehicle control layer** (via the bridge), HMI (display), bridge (logging) |
+| `Envelope/ForkliftSpeedCeiling` | PLC | — | as above |
+| `Envelope/ForkliftEquipmentPermit` | PLC | — | as above |
+| `Vehicle/ForkliftVehicleModeApplied` | bridge | the vehicle's control layer (`agv/`, m5-11) | PLC, HMI (display) |
+| `Vehicle/ForkliftVehicleHeartbeat` | bridge | the vehicle's control layer | PLC, HMI (display) |
+| `ProcessStop/HmiProcessStopRequest` | HMI | — | PLC |
+| `ProcessStop/ForkliftProcessStopActive` | PLC | — | HMI (display), bridge (logging) |
+
+**9 nodes** — 2 in `Mode/`, 3 in `Envelope/`, 2 in `Vehicle/`, 2 in `ProcessStop/`. The count is
+**set-scoped** in the sense §9.8 fixes: §10.3's "18 nodes" remains a true statement about the M4 node
+set and §11's "exactly 4" about the mirror set, and the `DemoCell` interface now carries
+15 (§9) + 18 (§10) + 4 (§11) + 9 (§12) = **46**, still fewer than a client browsing from `Objects`
+sees. **§10.3's and §11.8's "= 37" are the same arithmetic with one term missing**: they predate this
+section, they are interface totals rather than set-scoped counts, and both are listed in §12.13's
+pointer table — a total quoted in three places goes stale in two of them.
+
+### 12.3 `Forklift/Mode/` — which control law is asked for, and which is in force
+
+**One encoding, defined once, re-encoded nowhere.** All three mode-valued nodes in this document —
+the request here, the verdict here, and the vehicle's report in §12.6 — use it unchanged, so the
+three are directly comparable and a disagreement is a comparison rather than a translation.
+
+| Value | Name | Meaning |
+|---|---|---|
+| `0` | **None** | No mode. The non-permissive value: **neither teleoperated nor autonomous motion is granted while the mode in force is `None`**, and "not yet told" is `None`, never a mode |
+| `1` | **Teleop** | The mode M4 demonstrated: the PLC forms every motion setpoint from the operator's requests (§10.6) and the vehicle applies them |
+| `2` | **Autonomous** | The mode ADR 0011 D3 rules: the vehicle's own control layer forms the commands and the PLC publishes the envelope that bounds them |
+
+No other value is defined. A value outside `{0, 1, 2}` is a **broken writer, not a mode to clamp**:
+interface expectation for both consumers, test affirmatively — `valid := (m = 0) OR (m = 1) OR (m = 2)`
+— and take the fault in the `ELSE`, in the form §10.4 fixes for the Reals.
+
+| BrowseName | S7 type | OPC UA type | Unit | Range / plausibility | Start value | Meaning |
+|---|---|---|---|---|---|---|
+| `HmiDriveModeRequest` | UInt | UInt16 | — (enumeration) | exactly `{0, 1, 2}` above; anything else is a fault | **`0` = None** | The mode the **operator has selected on the HMI**. A **level**, not an edge, and not a command: it expresses "this is what the operator has selected", is written every HMI cycle (§10.8 H1), and survives a PLC scan. The PLC forms any edge it needs. **Cold start `0` is the non-permissive value and is what makes a cold start safe on this row**: a machine that booted into `Autonomous` would be offering a control law nobody selected, and a machine that booted into `Teleop` would be offering an enable path nobody asked for |
+| `ForkliftDriveModeActive` | UInt | UInt16 | — (enumeration) | exactly `{0, 1, 2}` above | **`0` = None** | **The authoritative answer to "what mode is the machine in".** The PLC's verdict, formed from `HmiDriveModeRequest`, the link verdicts and the standing latches; the arbitration itself is `plc/forklift/SPEC.md`'s. Read by the HMI for its display **and by the vehicle's control layer** through the bridge — one node, two consumers, one answer. **Cold start `0` is the non-permissive value**: before the standard program has decided anything, the machine is in no mode, and no motion is granted in either path |
+
+**Two beliefs about the mode are made impossible, and here is how.** Interface expectations, binding
+on `hmi/`, on `agv/` and on `plc/forklift/SPEC.md` respectively:
+
+| # | Rule |
+|---|---|
+| **M1** | **There is exactly one authoritative answer**, `ForkliftDriveModeActive`, with the PLC as its single owner (invariant 10). "What mode is the machine in" is answered by reading that node and by nothing else |
+| **M2** | **A consumer displays or acts on the node it read, never on what it sent.** The HMI must not render `HmiDriveModeRequest` as the machine's mode: showing your own request back as the machine's state is the defect this rule exists to prevent, and it is invisible precisely when the PLC has refused the request |
+| **M3** | **Every consumer's copy is qualified by that consumer's own link verdict.** For the HMI that is `HmiLinkOk`; for the vehicle it is the freshness of the ROS side (**E5**). When the verdict is false the mode reads **unknown**, and unknown renders as unknown — never as the last value silently, and never as `Teleop` on the ground that it is the more restrictive of the two defined modes. This is §11.6's rule one layer up: *not yet written is not clear* |
+| **M4** | **The vehicle's report is a different datum, never a second answer** (§12.6). The PLC does not derive its verdict from it, and no consumer chooses between the two: a disagreement is a **fault to display**, not a value to pick |
+| **M5** | **No consumer infers the mode from anything else** — not from the envelope, not from `ForkliftTeleopActive`, not from a setpoint being non-zero. An envelope with `ForkliftMotionEnable` `FALSE` is not "teleop"; it is an autonomy envelope that is currently withholding permission, and the two are distinguishable only by reading the mode |
+| **M6** | **The two modes are mutually exclusive, and that is checkable.** `ForkliftTeleopActive` (§10.7) may be `TRUE` only while the mode in force is `Teleop`; `ForkliftMotionEnable` may be `TRUE` only while it is `Autonomous`. **The two are never `TRUE` at the same time**, in any state, including during a transition — one falls before the other rises |
+
+**The affirmative action that enters autonomous motion, and the conflation this section carries.**
+CLAUDE.md §9 requires that a machine never resume by itself: entering motion takes an operator
+action, not a permissive returning. In teleop that action is the rising edge of `HmiTeleopRequest`
+(§10.7). **In autonomous mode this section defines no separate enable request**, so the affirmative
+action is the operator's **selection of `Autonomous` on `HmiDriveModeRequest`** — a transition into
+`2`, which the PLC treats as the edge, exactly as it treats the teleop enable's rising edge. The
+operator's sequence after any latch is therefore the same shape as §10.7's: *leave the mode, press
+reset, select the mode again.* The conflation is written out rather than left to be discovered, and
+the missing device is **requested rather than invented** (LESSONS 2026-07-27): §12.13 item 5 asks for
+one enable/start request that serves both modes, and ties it to §10.12 item 7's `HmiStartRequest`,
+because **minting two enables for two modes would be the wrong answer to that request**.
+
+### 12.4 `Forklift/Envelope/` — the three elements, and the rules that keep them from becoming a velocity channel
+
+**This folder holds exactly the three elements ADR 0011 D3 composed and ADR 0012 D1 refined, and
+nothing else.** A fourth node in this folder would be a change to the envelope's composition, which
+is an ADR's to make and not this document's — which is why the drive mode, which a reader might
+reasonably have expected here, is in `Mode/` instead: the mode selects **which control law is in
+force**, the envelope **bounds motion within one of them**, and keeping them in different folders
+makes any later widening of the envelope a visible act.
+
+| # | Rule |
+|---|---|
+| **E1** | **Low rate, and not a per-sample value.** The envelope is published at the PLC's own cycle and read by the bridge in the same 20 Hz poll as every other output (§10.10) — but **no consumer may depend on a particular read rate**. The test, and it is checkable per node: *a consumer reading this group at 2 Hz and one reading it at 20 Hz must behave identically apart from latency.* **Any node for which that is false does not belong in this group**, and a proposal to add one is a proposal to route the control loop through the PLC, which invariant 9 and ADR 0011 D3 forbid |
+| **E2** | **A ceiling is not a setpoint, and its sign convention says so as well as its name.** `ForkliftSpeedCeiling` bounds the **magnitude** of speed in either direction and therefore **carries no sign**; the §10.6 setpoints are **signed**, and a negative one means reverse. A quantity that cannot express a direction cannot be a demand, so the distinction survives a reader who looks only at the value. `0.0` on a setpoint means *stop*; `0.0` here means *no motion is permitted*, and the two arrive at the same standstill by different sentences. The type is `Real` because that is the only floating type this model carries; **negative is not a reverse ceiling, it is a fault** (the row below) |
+| **E3** | **The naming reserves `Ref` for setpoints.** No node in this section ends in `Ref` or `Cmd`. Those suffixes belong to §10.6's three, which are the only nodes in this model that command an actuator, and the reservation is what lets a reader tell a bound from a demand in an export, a watch table or a screenshot |
+| **E4** | **The loop is not closed across this interface.** The vehicle's controller runs onboard at its own rate against its own odometry (ADR 0011 D3), and its velocity smoother runs closed-loop against **measured** odometry rather than its own last command — a smoother integrating from its own output fights an external gate and ramps from a value the wheels never had (ADR 0011 D3, recorded there as an implementation consequence and repeated here because it is the consumer of these nodes that must obey it) |
+| **E5** | **A stale envelope is no envelope.** The vehicle's control layer applies the last envelope it holds only while that envelope is **fresh**; when it is not, the vehicle takes its own controlled stop (invariant 2's degraded mode). The freshness window is a **named constant in the vehicle layer, derived from the rate the bridge republishes at, and it is its own constant — never shared with `HMI_STALE_TIME`, `HEARTBEAT_STALE_TIME` or `UI_POLL_STALE_TIME`** (§10.8 P4's principle, one layer further out). Its value is `agv/`'s and is not set here |
+| **E6** | **A permission cannot start motion** (§12.1). Nothing in this folder commands the vehicle; the enable withholds or allows, the ceiling bounds, the permit states a readiness |
+| **E7** | **Nothing here carries order, route, traffic or zone data** — no goal, no waypoint, no pose, no reservation, no identifier of any of them (invariants 3, 5; §12.12) |
+| **E8** | **No claim of safety.** The ceiling is a **process** bound formed by the standard program. Whether the F-layer independently monitors a safe speed is `plc/forklift-safety/SPEC.md`'s subject, a different datum with a different owner in a different program, and **no node in this folder carries it, mirrors it or may be cited as it** (ADR 0011 D5) |
+
+| BrowseName | S7 type | OPC UA type | Unit | Range / plausibility | Start value | Meaning |
+|---|---|---|---|---|---|---|
+| `ForkliftMotionEnable` | Bool | Boolean | — | — | **`FALSE`** | The PLC's **permission for autonomous motion**: `TRUE` only while the mode in force is `Autonomous`, no latch stands, both link verdicts are `TRUE` and the standard program's own permissives hold. **It permits; it never commands** (**E6**). `FALSE` whenever the mode in force is not `Autonomous`, so the node is meaningful in every mode rather than undefined in two of them (**M6**). **Cold start `FALSE` is the non-permissive value**: before the standard program has run a scan, nothing is permitted |
+| `ForkliftSpeedCeiling` | Real | Float | m/s | `0.00` … `TRACTION_SPEED_MAX` (`1.00` m/s today, `plc/forklift/SPEC.md` §3.3). **Unsigned** (**E2**). A value outside the range is a broken supervisor and is non-permissive to the consumer, never a bound to clamp | **`0.0`** | The **upper bound on the magnitude of the vehicle's ground speed** while it drives itself. **It is not a speed setpoint, not a demand and not a target**: a ceiling of `0.80` does not ask for `0.80` m/s, and a vehicle that drove at its ceiling would be one whose own controller happened to want that speed. The vehicle's controller may command anything at or below it; the PLC never learns what was commanded and does not need to. **The ceiling relation of §10.12 item 4 stays live**: the ceiling can never exceed `TRACTION_SPEED_MAX`, and raising that cap re-derives `ForkliftLinearSpeed`'s plausibility window in §10.5 **first**. **Cold start `0.0` is the non-permissive value**: zero permits no motion at all |
+| `ForkliftEquipmentPermit` | Bool | Boolean | — | — | **`FALSE`** | The **fixed-equipment / station permit** of ADR 0012 D1: the PLC's statement that **the equipment it owns is ready for the vehicle to act on it**. It answers *"is the equipment I own ready for you to act on it?"* and **never** *"may you be here?"* — the second question is the fleet manager's zone reservation, a different datum with a different owner, and §12.5 rules the separation. **Cold start `FALSE` is the non-permissive value**: the PLC has stated no readiness, and an unstated readiness is not a granted one |
+
+**Cadence, following §9.2's conventions.** All three are read by the bridge in its 20 Hz output poll
+and republished each cycle a value was read, exactly as the three §10.6 setpoints are — the same
+transport, deliberately, because a second cadence for a second output group would be a second timing
+story for one process. **The 20 Hz is the bridge's, not the envelope's**: **E1** is what makes that
+rate an implementation detail rather than a contract, and a run that polled at 2 Hz would be slower,
+not wrong.
+
+### 12.5 The station permit is not a zone permit, and at M6 both will exist
+
+ADR 0012 D1 replaced the word deliberately, and the replacement is the reason this subsection exists
+rather than a sentence in the table above. **Zone reservation and traffic belong to the fleet manager
+under invariant 5**, and one datum has one owner under invariant 10. At M6 a vehicle's motion is
+bounded by **both** of these, and they are **different data with different owners**:
+
+| Datum | Owner | Where it lives | The question it answers |
+|---|---|---|---|
+| **Fixed-equipment / station permit** | **PLC standard program** | `Forklift/Envelope/ForkliftEquipmentPermit` — this node | *Is the equipment I own ready for you to act on it?* — the door is open, the conveyor is ready, the charging bay is clear, the station handshake is satisfied |
+| **Zone reservation** | **Fleet manager** | the fleet layer, over VDA 5050 / MQTT. **It reaches no node on this server, at any gate** | *May you be here?* |
+
+| # | Rule |
+|---|---|
+| **Z1** | **No document, node name, message field, caption, lamp or spoken line may conflate them**, and **neither may be named with the other's word** (ADR 0012 D1). This is §11.4 **MR7**'s discipline applied to the pair most likely to be merged at M6, and for the same reason: the merge would sound plausible |
+| **Z2** | **The word "zone" appears in no name in this folder, and that is not a stylistic preference.** This project already spends the word three times, on three different things: `Forklift/Safety/ZoneStopDemand` (the F-side marked-zone demand, §11.2), `Forklift/Input/ForkliftObstacleInStopZone` (the lidar's forward stop field, §10.5), and the fleet manager's zone reservation at M6. **A fourth use would make the word meaningless in exactly the document where a reader goes to find out what a name means** |
+| **Z3** | **The permit's granularity is one Bool per vehicle, not one per station**, and it stays that way when the stations arrive. The PLC knows which equipment is engaged with this vehicle from **its own station handshake** (`handshake-tables.md`, invariant 5's second sentence), never from an order, a route or a destination, which are fleet data the PLC does not hold (§8, invariant 5). A per-station node set is the **station handshake's** own group and not an enlargement of the envelope (§12.13 item 6) |
+| **Z4** | **At M5 the permit's term set is empty, and that is stated rather than hidden.** The twin's arena carries no door, conveyor or charger in the vehicle's path, so at M5 the permit is the standard program's statement that **no equipment it owns is withholding readiness**. It is still not a literal: interface expectation for `plc/forklift/SPEC.md`, the node is **assigned from the equipment terms in force**, an empty conjunction today, and it gains terms at M6 without a node, a name or a consumer changing. **Its cold start `FALSE` and the qualification rule of §12.8 are what the node is worth at M5** — a permit that has not been stated is not a permit granted |
+
+### 12.6 `Forklift/Vehicle/` — what the vehicle's control layer reports back
+
+The PLC forms the envelope; **it does not enforce it**. Enforcement is the vehicle's envelope gate
+node (`agv/`, m5-11), which is where the commands are formed and gated. The honest one-line version
+of ADR 0011 D3, stated here because this is the document that says who consumes what: **the PLC owns
+the envelope, the vehicle's gate node enforces it in process, and the vehicle's own onboard safety
+layer is a separate chain that owes nothing to either.** A supervisor that published a bound and
+received nothing back would be making a claim it could not check, so these two nodes are the check.
+
+| BrowseName | S7 type | OPC UA type | Unit | Range / plausibility | Start value | Meaning |
+|---|---|---|---|---|---|---|
+| `ForkliftVehicleModeApplied` | UInt | UInt16 | — (enumeration) | the §12.3 encoding, exactly `{0, 1, 2}`; anything else is a fault | **`0` = None** | **The mode the vehicle's control layer is applying right now** — a readback of a command, in the standing of a valve's position feedback beside its command. It is **not** a second answer to "what mode is the machine in" (**M1**, **M4**): that answer is `ForkliftDriveModeActive` and this node is what the vehicle says it is doing about it. A disagreement that persists is a **fault**; how long is "persists", and whether the reaction is a display or a latch, is `plc/forklift/SPEC.md`'s decision under its own named constant, not this document's. **Cold start `0` is the non-permissive value**: the vehicle has reported nothing, and "not yet reported" is not "agrees" |
+| `ForkliftVehicleHeartbeat` | UInt | UInt16 | — | `0` … `65535`, wraps | **`0`** | Counter incremented by the vehicle's control layer once per its own cycle. Its only meaning is **"the vehicle's control layer completed a cycle recently"**; it carries no process information. It exists because `BridgeLinkOk` proves the **bridge** is alive and proves nothing about the layer behind it — a frozen gate node under a live bridge is case D of `bridge-design.md` §7.3 one level further out, and with the loop onboard that failure now has a motion consequence rather than only a display one. **Cold start `0` is meaningless until it changes**, which is the point: **V2** is what gives it meaning |
+
+**Semantics, interface expectation for the PLC specification.** These are §10.8's P-rules applied to
+a third watched party, and they are stated in full rather than by reference because a rule cited
+across a document is a rule that gets half-applied:
+
+| # | Rule |
+|---|---|
+| **V1** | Test `ForkliftVehicleHeartbeat <> LastVehicleHeartbeat` — **inequality only**. Never subtract, never test for `+1`, never assume monotonic ordering across the wrap or across a restart of the vehicle layer |
+| **V2** | The verdict is `SeenAlive AND NOT StaleTimer.Q`, with `SeenAlive` a non-retain latch starting `FALSE` and set by the first observed change. **The verdict is `FALSE` from the first scan and stays `FALSE` until the counter has actually moved**: "not yet proven stale" is not "alive", and every guard riding on it inherits that boot polarity (LESSONS 2026-07-28) |
+| **V3** | The stale window is **its own named constant**, never shared with `HMI_STALE_TIME` or `HEARTBEAT_STALE_TIME` (§10.8 **P4**). Three parties are now watched across three transports at three rates, and retuning one must not silently retune another. Its value is `plc/forklift/SPEC.md`'s |
+| **V4** | **The verdict is not merged with `BridgeLinkOk`.** They answer different questions — *is the transport alive* and *is the layer behind it running* — and a single "vehicle OK" flag would be the computed aggregate this project refuses everywhere else (§11.7, `handshake-tables.md` §6). What the PLC does when the vehicle's verdict is `FALSE` — withdraw the envelope, latch, or both — is `plc/forklift/SPEC.md`'s, and this document requires only that the envelope it publishes while the vehicle is not answering is the non-permissive one |
+
+**What these two nodes do not make true.** They let the PLC **notice** that its envelope is not being
+applied; they do not let it **enforce** the envelope, and no node in this model does. The backstops
+for a gate node that has stopped gating live in other layers — the vehicle's own onboard safety
+chain, and whatever the F-side specifies (`plc/forklift-safety/SPEC.md`, m5-15) — and **this section
+neither claims nor describes them**.
+
+Cadence: both are written by the bridge as ordinary plant inputs, the counter cyclically at the
+bridge's 20 Hz cycle and the mode on change plus a full refresh on every (re)connect and after any
+detected server restart (§10.5's conventions, unchanged).
+
+### 12.7 `Forklift/ProcessStop/` — the operator's process stop, its latch and its monitored reset
+
+| BrowseName | S7 type | OPC UA type | Unit | Range / plausibility | Start value | Meaning |
+|---|---|---|---|---|---|---|
+| `HmiProcessStopRequest` | Bool | Boolean | — | — | **`TRUE`** | The operator has asked for a **process stop**. A **level** carrying the operator's action, written every HMI cycle (§10.8 H1); **the PLC latches on it**, and no client clears a latch by writing a node. **`TRUE` is the non-permissive state** — the polarity note below. **Cold start `TRUE` is the non-permissive value**: before any client has connected, the server must not be asserting that nobody is asking the machine to stop |
+| `ForkliftProcessStopActive` | Bool | Boolean | — | — | **`TRUE`** | A **latched process stop**, raised by `HmiProcessStopRequest` and cleared **only** by the monitored reset below. Its own node with its own cause: the lidar latch remains `ForkliftObstacleStopActive` (§10.7), and **the two are never merged into an aggregate "stopped" flag** — one node answers one question (invariant 10, §11.7's refusal of computed aggregates). **Cold start `TRUE` is the non-permissive value**, in §11.6's rule: *not yet written is not clear*, and the scan before the standard program's first assignment must not read as a machine free to move |
+
+**What this is NOT — one sentence, and it is the point of the folder name.** **The operator's process
+stop is not a safety function, not an emergency stop and not a protective stop; it does not reach the
+F-layer, it cannot create, prevent or clear an F-latch, and it carries no SIL, PL or Category** —
+invariant 1 (safety never traverses the network), ADR 0010 D6(b) (the HMI's emergency button is read
+as a process-stop command plus a display of F-layer state, and anything more is an invariant change
+needing its own ADR), and §11.4 **MR2**/**MR3**, which hold unchanged for this node as for every other
+client write on this server.
+
+**The display half of ADR 0010 D6(b) needs no node from this section.** It is the four read-only
+mirrors of `Forklift/Safety/` (§11), which already exist, are read-only to every client, and are
+**not touched, enlarged or renamed here**. The operator's screen therefore shows two different things
+side by side and must caption them as two: **what the operator can ask the standard program to do**,
+and **what the F-layer has latched**. §11.4 **MR7**'s rule applies to this pairing too — no lamp, no
+caption and no sentence may merge them.
+
+**Latch and monitored reset, interface expectations for the PLC specification** (the constants, the
+edge and the arming are program content, not defined here):
+
+| # | Rule |
+|---|---|
+| **PS1** | The latch is **set while the request stands and stays set after it clears**. Releasing the button does not release the machine: this cell does not resume by itself (CLAUDE.md §9), exactly as §10.7's obstacle latch does not release when the field clears |
+| **PS2** | The **only** reset input is `Forklift/Hmi/HmiResetRequest` (§10.4). **No second reset node is minted here** — one reset input, one owner (invariant 10) — and the PLC acts on its **rising edge**, under §10.8 **P6**'s per-link-session arming |
+| **PS3** | The reset tests the **live world**, never the latches: **a latch is never a term in its own clearing condition** (LESSONS 2026-07-27). For this latch the live-world term is `HmiProcessStopRequest` reading `FALSE` — the operator has released the button — evaluated only while `HmiLinkOk` is `TRUE` |
+| **PS4** | **Clearing the latch energizes nothing.** A reset returns the machine to the un-enabled state, and motion resumes only on a fresh affirmative operator action — the teleop enable's rising edge (§10.7) or the mode selection of §12.3, according to the mode |
+| **PS5** | The existing `Forklift/Status/ForkliftResetRequired` (§10.7) **gains this cause and stays the single answer** to "is a monitored reset pending". No second reset-required node is created, and the three "reset required" values of §11.1 stay three, not four (§12.13 item 2) |
+| **PS6** | While this latch stands, the envelope is the non-permissive one — `ForkliftMotionEnable` `FALSE` and `ForkliftSpeedCeiling` `0.0` — **and the §10.6 setpoints take `0.0` in their mandatory `ELSE`, unchanged**. The stop reaches the vehicle **through the envelope and through the setpoints**, and **through no stop topic of its own**: a second path to stop the vehicle would be a second owner of the reaction (§12.10) |
+
+**Polarity, stated because a client-written stop inverts the convention of §9.3.** §9.3 names stop
+*contacts* for their circuit state so that a dead signal reads stopped. There is no circuit here: this
+is a button on a screen, written by a client over a network, and naming it `…CircuitClosed` would
+assert a wiring property the device does not have. `TRUE` therefore means *stop requested*, the
+failure direction, and fail-safety is carried by three independent things rather than by the name —
+the start value is `TRUE` (this table); requests are **not attributable to an operator while
+`HmiLinkOk` is `FALSE`** and none is evaluated then (§10.9's qualification rule); and a link loss
+latches on its own account (§10.8 **P5**), so a stopped HMI produces the stop this button would have
+asked for.
+
+**The honest limitation, stated here rather than discovered in the recording.** This path is a
+network path: it is subject to the HMI's cycle, the server's scan and the bridge's cadence, it is
+**unavailable exactly when the link is down**, and no stopping time or distance is claimed for it.
+That is not a defect of the design — it is *why* the safety functions are not on it (invariant 1),
+and the F-layer's reactions do not depend on this node, on this client or on this network in any way,
+whatever m5-03 settles about how the F-inputs are stimulated.
+
+### 12.8 Start values, the qualification rule, and why every value in this section is the non-permissive one
+
+Fail-safe pre-connection state belongs to the PLC as the DB start values (`bridge-design.md` §6.3,
+§10.9, §11.6). **The values themselves are in the group tables above, one per row, each with its
+cold-start reading** — the reason is stated in this section's preamble and it is a reason about
+edits, not about layout.
+
+**The rule this section applies, and it is checkable in one pass:** *every start value in §12 is the
+non-permissive one.* For seven of the nine that happens to be the type's zero; for the two
+`ProcessStop/` nodes it is `TRUE`, which is **not** the type's zero and is chosen deliberately, in the
+standing of §10.9's `ForkliftObstacleInStopZone` and §11.6's three `TRUE` mirrors. A start value in
+this section is never chosen because it is a type's default and never because it is convenient for a
+test; where those two coincide it is a coincidence, and the row says why the value is safe rather
+than what the type does.
+
+> **The qualification rule, inherited unchanged from §10.9 and `plc/demo-cell/SPEC.md` §6.1.** While
+> `BridgeLinkOk` is `FALSE`, the two `Forklift/Vehicle/` values are **not attributable to the vehicle's
+> control layer**; while `HmiLinkOk` is `FALSE`, the two HMI-written requests in this section are
+> **not attributable to an operator**. No verdict derived from either group is evaluated and no fault
+> from either group is latched while its link verdict is `FALSE`. **Start values are the last line,
+> not the first**: the boot polarity of §10.8 **P2** and of **V2** is what actually prevents a freshly
+> started CPU from acting on them.
+
+### 12.9 The two command paths, and which one is live
+
+Two sources can reach the vehicle's actuators once autonomy exists: the PLC's three §10.6 setpoints,
+republished by the bridge to `/forklift/cmd/*`, and the vehicle's own controller. **Exactly one may be
+live at any moment, the selector is the mode in force, and the failure direction is standstill.**
+
+| # | Rule |
+|---|---|
+| **C1** | **The envelope governs the autonomous path only.** The teleop path of §10.6 is unchanged and is not routed through the envelope: in `Teleop` the PLC still forms every motion setpoint, which is the M4 claim standing exactly where it was demonstrated (ADR 0011 D3's mode-scoped reading, ADR 0012 D1) |
+| **C2** | **In any mode other than `Teleop`, `ForkliftTeleopActive` is `FALSE` and the three §10.6 setpoints are `0.0`** — produced by the existing mandatory `ELSE`, with no new branch, no second writer and no change to those three assignments (§10.6, §13's discipline in `plc/forklift/SPEC.md`) |
+| **C3** | **The arbitration is the vehicle's, and it selects on the mode it read** (`ForkliftDriveModeActive`, **M1**). Which topic reaches the actuators, and how the change is made without a step in the command, is `agv/`'s design (m5-11) and is not specified here |
+| **C4** | **A mis-selection fails to standstill.** Because C2 holds, a vehicle that wrongly believed itself in `Teleop` while the PLC was in `Autonomous` would be applying `0.0`; a vehicle that wrongly believed itself in `Autonomous` while the PLC was in `Teleop` would be applying its own controller's output under an envelope whose enable is `FALSE` and whose ceiling is `0.0` (**M6**). **Both errors stop the machine**, and both are visible as a mode disagreement (§12.6) |
+
+### 12.10 ROS 2 topic map
+
+One node per bridged signal, one signal per node, checked in both directions, in §10.10's shape. The
+topic names are the vehicle layer's contract (`agv/forklift/README.md`); the BrowseNames here are the
+authoritative PLC tag names.
+
+| Node (`Forklift/…`) | Direction (PLC view) | ROS 2 topic | Msg type | Field | Conversion | Cadence |
+|---|---|---|---|---|---|---|
+| `Mode/ForkliftDriveModeActive` | PLC → vehicle | `/forklift/mode/in_force` | `std_msgs/UInt16` | `data` | none — the §12.3 encoding unchanged | polled 20 Hz, republished each cycle a value was read |
+| `Envelope/ForkliftMotionEnable` | PLC → vehicle | `/forklift/envelope/motion_enable` | `std_msgs/Bool` | `data` | none | polled 20 Hz |
+| `Envelope/ForkliftSpeedCeiling` | PLC → vehicle | `/forklift/envelope/speed_ceiling` | `std_msgs/Float64` | `data` | `Float → float64` widening, m/s unchanged | polled 20 Hz |
+| `Envelope/ForkliftEquipmentPermit` | PLC → vehicle | `/forklift/envelope/equipment_permit` | `std_msgs/Bool` | `data` | none | polled 20 Hz |
+| `Vehicle/ForkliftVehicleModeApplied` | vehicle → PLC | `/forklift/mode/applied` | `std_msgs/UInt16` | `data` | none | on change + refresh on (re)connect and after a detected server restart |
+| `Vehicle/ForkliftVehicleHeartbeat` | vehicle → PLC | `/forklift/vehicle/heartbeat` | `std_msgs/UInt16` | `data` | none | cyclic 20 Hz, latest value |
+
+**The envelope topics are deliberately not under `/forklift/cmd/`.** That namespace is the vehicle
+layer's for **commands applied to joints** (§10.10, `agv/forklift/README.md`), and putting a bound or
+a permission beside three setpoints would undo in the topic tree what **E2** and **E3** establish in
+the node model. The two `Mode/` topics sit together for the same reason they are comparable: a
+reader diffing `/forklift/mode/in_force` against `/forklift/mode/applied` is reading the disagreement
+**M4** describes.
+
+Nodes in this section that deliberately reach no topic:
+
+| Node | Why |
+|---|---|
+| `Mode/HmiDriveModeRequest`, `ProcessStop/HmiProcessStopRequest` | HMI-written request nodes. The bridge **never reads or writes the HMI's nodes, in any configuration** — `bridge-design.md` §4.10's design rule, which this section extends to the two new request nodes without changing it |
+| `ProcessStop/ForkliftProcessStopActive` | A PLC verdict. **The stop reaches the vehicle through the envelope, not through a stop topic** (**PS6**): a dedicated stop topic would be a second path to one reaction and a second thing to keep true |
+
+**This section adds the first ROS-carried `UInt16` in the model.** `bridge-design.md` §2.1 **G4**
+admits the value type (`Real`/`Bool`/`UInt16`), and `std_msgs/UInt16` needs no new dependency — but
+the bridge has until now generated its only `UInt16` internally, as its own heartbeat, and has never
+carried one from a topic. That is a change to the bridge's signal map and not to its contract, and it
+is requested rather than taken here (§12.13 item 1).
+
+### 12.11 TIA click path (the §10.2 / §11.5 pattern)
+
+1. CPU → *OPC UA communication* → *Server interfaces* → open the **existing** `DemoCell` interface.
+   Do **not** create a second interface and do **not** rename this one: the interface name **is** the
+   namespace URI (ADR 0006, §10.2).
+2. **Read the namespace URI back** and confirm it still reads `http://DemoCell`. Nothing is entered;
+   the field is derived and not editable. Repeat this read-back after any *Change device*, which is
+   known to delete server interfaces silently (LESSONS 2026-07-27).
+3. Create the **four** new global DBs of §12.2 with their per-tag *Accessible* and *Writable*
+   attributes as tabulated there. **New DBs, not new members of `ForkliftHmi`, `ForkliftStatus`,
+   `ForkliftInput` or `ForkliftSafetyMirror`** (§12.2). **The DB names are written correctly the
+   first time and are never renamed once the interface binds them** (LESSONS 2026-07-30).
+4. In the interface, add the four folders `Mode`, `Envelope`, `Vehicle` and `ProcessStop` beside
+   `Hmi`, `Input`, `Output`, `Status`, `Link` and `Safety` under `Forklift`, then drag each tag into
+   its folder. **Rename nothing**: each leaf must remain the BrowseName of §12.3–§12.7 so this
+   document, the TIA export and `plc/forklift/SPEC.md`'s tag list can be diffed three ways
+   (CLAUDE.md §9).
+5. Download, then confirm the block diff circles are solid green before testing, and **sweep the new
+   browse names and DB statics for TIA's silent `_1` collision suffixes** — it appends them without
+   asking, in DB statics and interface rows both, and a `…_1` browse name cuts a client with no error
+   dialog (LESSONS 2026-07-30). No offset in any existing DB moves, because nothing was added to one;
+   **check the M4 and §11 watch-table rows monitor without the error icon anyway**, since "should not
+   have moved" is not a verification.
+6. Browse with a client that is **not** the bridge; read all nine at their start values, then
+   **attempt one write to a `Forklift/Envelope/` node and record the refusal with its status code and
+   the date**. A read proves the nodes exist; only the refused write proves "a permission is not a
+   command" is enforced by the server rather than by convention. Record both in the manner of §9.10.
+
+> **Everything in this section is a design value until step 6 is executed.** The four folders, the
+> nine BrowseNames, the per-tag rights, the start values and the refusal are what this document asks
+> the tool for; they become facts when they are read back out of it (LESSONS 2026-07-27, ADR 0006).
+> **No gate criterion may rest on one before then.**
+
+### 12.12 Deliberately absent from this section
+
+Each row means "no such node in the §12 node set", in the set-scoped sense §9.8 fixes.
+
+| Not in this section | Why |
+|---|---|
+| A velocity, trajectory, curvature or per-sample motion value for autonomous mode | The navigation loop closes onboard at its own rate (ADR 0011 D3). Routing samples through ROS → OPC UA → PLC scan → back puts a timing-critical loop in Python (invariant 9) and makes a gate-zeroed command abort the goal through Nav2's progress checker. **E1** is the standing test for any proposal to add one |
+| A goal, waypoint, route, destination or pose target | Order assignment is the fleet manager's (invariant 5), and a pose target on the PLC would make the standard program a navigator. **How an M5 goal is commanded before a fleet manager exists is not answered by a node here and must not become one** (§12.13 item 4) |
+| A zone permit, zone reservation, traffic or right-of-way node | ADR 0012 D1 and invariant 5: the datum is the fleet manager's and reaches no node on this server. **Z1**–**Z3** |
+| A per-station permit node set, or an array of any kind | **Z3**: the station handshake is its own group (`handshake-tables.md`) and arrays are not expressible in this node model (§10.10) |
+| A second stop path — a stop topic, a stop command node, or a vehicle-facing stop bit | **PS6**: the operator's stop reaches the vehicle through the envelope and the setpoints. A second path is a second owner of one reaction |
+| A second enable, a mode override, a force or an inhibit node | The mode is one datum with one owner (**M1**), and an override is a second writer wearing a different word |
+| Any safety node — an SLS or safe-speed value, an F-reset, a mute, an acknowledge, an inhibit, or **any node for the safety scanner's channel** | Safety never traverses the network (invariant 1). §8's and §11.7's rows hold here word for word. **The safe scanner channel's name and path wait on m5-03 and are deliberately not coined in this document** |
+| A safety mirror of any kind | §11 is the whole mirror set and this section adds nothing to it, renames nothing in it and enlarges nothing in it (§11.2, §11.7) |
+| A second bridge heartbeat or bridge-link verdict | Unchanged (§10.1, §10.11). `ForkliftVehicleHeartbeat` watches a different party and **V4** forbids merging the verdicts |
+| Map, pose, obstacle arrays, costmaps or any monitoring-plane data | Those reach the operator over the **read-only monitoring plane** (ADR 0011 D4), which has no write endpoint, no publisher and **never touches the PLC** (CLAUDE.md §3) |
+| Nav2 internals — goal state, planner or controller status, recovery state, progress-checker output | Exposing another layer's logic state invites a consumer to act on it (§9.8, §10.11). The PLC needs the mode applied and a liveness counter, and gets exactly those |
+| Timers, thresholds, constants or latch internals exposed for a client | Unchanged from §10.11 and §11.7 |
+| A reaction time, latch age, demand timestamp or any Time value | A timestamp on a supervision node reads as a measured reaction time, and none is measured or claimed here (§11.7's row, same reason) |
+| A fleet-facing node, or anything on a second server interface | The fleet-facing interface of §2.1 and ADR 0006 D3 belongs to a later gate, and **its name is a contract decision taken in a document, never in the tool** (§10.2) |
+
+### 12.13 What this section changes elsewhere, and open items
+
+**Four statements in §10 and §11 become narrower than the model they now sit beside, and the pointers
+are requested rather than taken** — the §11.8 item 1 situation, resolved there by its own follow-up
+brief. Each is listed with what it needs, so the follow-up can be written from this table and nothing
+has to be re-derived:
+
+| Where | Statement today | What it needs |
+|---|---|---|
+| §10.1, *What the HMI writes* | "**Only** the five `Forklift/Hmi/` request nodes and `Forklift/Link/HmiHeartbeat`" | "…plus `Forklift/Mode/HmiDriveModeRequest` and `Forklift/ProcessStop/HmiProcessStopRequest` (§12.1)" |
+| §10.1, *What the bridge writes* | "its §9.1 writable set **plus** the four `Forklift/Input/` nodes, and nothing more" | "…plus the two `Forklift/Vehicle/` nodes (§12.1)" |
+| §10.3 folder tree, §10.8 **H1** ("all six"), §10.7 `ForkliftResetRequired` | five subfolders, six HMI writes, latches "above" | ten subfolders; **eight** HMI writes; and the process-stop latch of §12.7 named as a further cause (**PS5**) |
+| §10.3 and §11.8, the interface total | "15 + 18 + 4 = **37**" | "+ 9 (§12) = **46**". The set-scoped counts around them — §10.3's "18 nodes", §11.8's "exactly 4" — stay true untouched; **only the interface totals are stale**, and they are stale in two places for the same reason (§12.2) |
+
+| # | Open item | Owner |
+|---|---|---|
+| 1 | **`bridge-design.md` must carry this signal group before any bridge work on it**: §2.1's configured signal set (whether these six slots join the forklift group or form a third), §4's signal map rows in the shape of its §4.7–§4.9, §4.6's QoS rows, the writable set gaining the two `Forklift/Vehicle/` nodes, and **the first topic-carried `UInt16`** (§12.10). Nothing in its §1.1 no-logic rule changes: the envelope is formed in the PLC and carried by the bridge, never computed in it (ADR 0012's relationship table, ADR 0005) | **Interface agent, its own brief** — m4f-05's shape, not taken here because one brief produces one deliverable |
+| 2 | **The four pointer rows in the table above.** Until they land, §10 reads as narrower than the model and two interface totals read as `37` | **Interface agent, its own brief** (the m5a-06b precedent) |
+| 3 | **Every value in this section is a design value until read back out of the tool** (§12.11 step 6): the four folders, the nine BrowseNames, the per-tag rights, the nine start values, and the refused write with its status code | Owner, at commissioning, recorded with its date as phase 0 recorded the M3 set (§9.10) |
+| 4 | **How an M5 navigation goal is commanded is unanswered and is not answered here.** A goal is not a node in this model and must not become one (invariant 5, §12.12). Whether it comes from a ROS-side tool, from HMI v2 over a path that is not the PLC, or from something else, is `agv/`'s and `hmi/`'s to settle — and any answer that routes a pose through the PLC is an invariant question, not an interface one | Owner decision, at m5-10 / m5-11 / m5-14 |
+| 5 | **One enable/start request that serves both modes**, requested rather than invented (§12.3). Today `HmiTeleopRequest` is the teleop enable and the mode selection's transition into `Autonomous` is the autonomous one — two devices for one idea. §10.12 item 7 already asks for an `HmiStartRequest` for the M4 conflation; **one node should answer both asks**, and minting a second, autonomy-only enable would be the wrong answer | Owner decision; it moves a node count, a DB, a start value and the HMI's every-cycle write set together |
+| 6 | **At M6 the station permit meets the station handshake.** `handshake-tables.md` owns the handshake sequencing; this node is the vehicle-facing summary of its outcome (**Z3**), and the two documents must be reconciled **before** the stations are built, not after. Nothing is owed until M6 | Interface agent, at M6 briefing |
+| 7 | **The mode-disagreement reaction** — how long a disagreement between `ForkliftDriveModeActive` and `ForkliftVehicleModeApplied` must stand before it is a fault, and whether it latches — is `plc/forklift/SPEC.md`'s under its own named constant. This document specifies the datum and requires only that the reaction never be to adopt the vehicle's value (**M4**) | `plc/forklift/SPEC.md`, m5-16 |
+| 8 | **The vehicle-side freshness window of E5** is `agv/`'s named constant, its own, never shared with the three of §10.8. It is not set here | `agv/`, m5-11 |
