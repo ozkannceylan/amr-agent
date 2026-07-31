@@ -213,11 +213,6 @@ brief queue lives in docs/PLAN.md.
   (m4r2-04 residue) — one infra brief when convenient.
 - CLAUDE.md §4's repository layout does not list stack.sh (m5r-09
   finding 4) — one line with the next contract touch, owner-approved.
-- assets/rb-kairos-gazebo.png and its reproduced BSD-3-Clause notice
-  illustrate nothing after ADR 0010 (m5r-04 OQ2) — keep or remove is the
-  owner's call, one line either way. m5-09 left both in place, marked the
-  table row "no longer used", and set out both options in its report; the
-  image is referenced by no live document, so removal is self-contained.
 
 ## publication
 - Repository is public-ready and pushed; visibility is the owner's to flip.
