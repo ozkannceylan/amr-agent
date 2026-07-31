@@ -151,7 +151,7 @@ the forklift commissioning gate of ADR 0008 D1, whose live number is carried by
 | `config.yaml` | addresses and cadences for the **commissioned CPU**. Owner-run |
 | `config-double.yaml`, `config-logic-double.yaml` | the same, against `bridge/test_double/` on 4847 and `plc/forklift/double/` on 4850 |
 | `config-safety-mirror-double.yaml` | the same, against this layer's own `tools/safety_mirror_double.py` on 4860 — neither of the two doubles above serves `Forklift/Safety/` yet |
-| `tools/` | four evidence harnesses — the write contract, the teleop loop, the §10.8 H6 and held-reset kernels, and the §11 mirrors — plus `safety_mirror_double.py`, a minimal OPC UA double this layer owns for the last one. Instruments, not part of the HMI; each harness refuses a non-loopback endpoint, and each polls `GET /state` like the page so H6 does not read it as a crashed browser |
+| `tools/` | four evidence harnesses — the write contract, the teleop loop, the §10.8 H6 and held-reset kernels, and the §11 mirrors — plus `safety_mirror_double.py`, a minimal OPC UA double this layer owns for the last one, and the screenshot pair `capture_screens.mjs` + `screens_plant_driver.py`, which photograph the page in a real browser (`EVIDENCE_HMI.md` §H). Instruments, not part of the HMI; each harness refuses a non-loopback endpoint, and each polls `GET /state` like the page so H6 does not read it as a crashed browser |
 | `EVIDENCE_HMI.md` | the recorded runs, with every figure quoted as it was printed |
 
 ## Known limitation, recorded rather than discovered later

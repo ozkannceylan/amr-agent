@@ -12,7 +12,7 @@
          ^
          |            [ProductSensor]  emitter post, y = +0.75
          |                  |  single beam, z = 0.60, pointing -y
-      ---+---[ConveyorFrame 8.0 x 1.0]------------------------> +x
+      ===+===[ConveyorFrame 8.0 x 1.0]========================> +x
          |            [belt slab, prismatic along x]
          |                  |
          |            [SensorReflector] post, y = -0.80

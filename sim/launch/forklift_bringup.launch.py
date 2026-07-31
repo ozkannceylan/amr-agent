@@ -4,7 +4,7 @@
 #   1. starts the Gazebo (gz sim) server with sim/worlds/forklift_arena.sdf,
 #   2. spawns agv/forklift/model.sdf into it once,
 #   3. starts one ros_gz_bridge carrying /clock, the vehicle's three raw
-#      joint commands (ROS -> gz) and its three feedback topics (gz -> ROS).
+#      joint commands (ROS -> gz) and its four feedback topics (gz -> ROS).
 #
 # WHAT DELIBERATELY DOES NOT RUN HERE:
 #
@@ -46,25 +46,71 @@
 #     /forklift/gz/fork_cmd       std_msgs/Float64    carriage travel [m]
 #
 #   gz -> ROS (feedback, renamed on the ROS side)
-#     /forklift/scan              sensor_msgs/LaserScan   181 ranges, 10 Hz
+#     /forklift/scan                            sensor_msgs/LaserScan
+#         the NAVIGATION lidar, from /forklift/gz/scan_nav.
+#         360 ranges over 360 deg, 10 Hz, plane z = 1.80 m.
+#     /forklift/safety_scanner_front/measurement   sensor_msgs/LaserScan
+#         the front safety scanner's NON-SAFE MEASUREMENT CHANNEL, from
+#         /forklift/gz/safety_scanner_front/measurement.
+#         275 ranges over 275 deg, 10 Hz, plane z = 0.15 m.
 #     /forklift/odom              nav_msgs/Odometry       ground truth, 20 Hz
 #     /forklift/joint_states      sensor_msgs/JointState  physics rate
+#     /forklift/imu               sensor_msgs/Imu         100 Hz. Angular rate
+#         and linear acceleration only; the orientation field is NOT a
+#         rotation, see the note on the bridge row below.
+#
+# THE ESTIMATOR DOES NOT RUN HERE EITHER. This file puts the plant on the
+# wire; the vehicle's wheel odometry, its EKF and its static sensor TF are
+# agv/'s scripts, started by agv/forklift/launch/vehicle.launch.py for the
+# vehicle's own runs and by sim/launch/warehouse_bringup.launch.py for the
+# M5 autonomy runs that need a transform tree. Adding them to the M4
+# commissioning bringup by default would change what a closed gate's launch
+# starts, so it is left as m5-07c open question 3 rather than done here.
 #
 #   infrastructure
 #     /clock                      rosgraph_msgs/Clock     sim time
+#
+# NOT BRIDGED, ON PURPOSE: /forklift/gz/safety_scanner_rear/measurement.
+# agv/forklift/README.md rules that a measurement channel goes onto the
+# process network when something on that network consumes it and not
+# before, and nothing consumes the rear one yet. This launch file follows
+# that ruling rather than bridging "everything the model publishes"; when
+# a consumer appears, agv/ names the ROS topic and this file adds the row.
+#
+# WHAT "measurement" IN A TOPIC NAME MEANS, because a reader will meet the
+# word here before they meet the contract. The device class modelled emits
+# two outputs: a safe channel (the protective-field verdict, an OSSD pair
+# on a real device) and a separate non-safe measurement channel that the
+# datasheet provides for HMI, diagnostics and process use while stating it
+# must not be used for safety-related tasks. Only the second one is a
+# topic. agv/forklift/README.md states the naming rule this file obeys:
+# every channel a subscriber can reach is a measurement channel and says
+# `measurement` in its name, and the safe channel has no topic on either
+# transport, ever. Nothing bridged below is a safety signal, whatever the
+# device it came from is called (invariant 1).
 #
 # NOTE ON /forklift/joint_states. gz's JointStatePublisher has no working
 # rate parameter and publishes once per physics iteration, so this topic
 # arrives at the world's ~500 Hz and not at a chosen rate. It is bridged
 # as-is: decimating it here would be the bridge deciding what a consumer
 # needs, and the vehicle nodes already rate-limit everything they derive
-# from it. The measured bridged rate is recorded in
-# worlds/FORKLIFT_ARENA_EVIDENCE.md like every other topic.
+# from it. The measured bridged rate is recorded with every other topic's:
+# worlds/FORKLIFT_ARENA_EVIDENCE.md section 3 for the M4 topic set, and
+# setup/CONTAINER_TOOLCHAIN.md section 6.2 for the set below.
 #
-# NOTE ON /forklift/scan. The scanner is a gpu_lidar, so the world MUST load
-# gz-sim-sensors-system with a render engine. forklift_arena.sdf does; gz's
-# stock empty.sdf does not, and on it this bridge advertises the topic and
-# nothing ever arrives on it.
+# NOTE ON THE TWO SCAN TOPICS. All three scanners on the model are gpu_lidar
+# sensors, so the world MUST load gz-sim-sensors-system with a render engine.
+# forklift_arena.sdf does; gz's stock empty.sdf does not, and on it this
+# bridge advertises both topics and nothing ever arrives on either.
+#
+# NOTE ON THE SILENT FAILURE THIS FILE ONCE HAD. A ros_gz_bridge entry for a
+# gz topic that nobody publishes logs `Creating GZ->ROS Bridge` exactly as a
+# working one does: no error, no warning, no data. This file bridged
+# /forklift/gz/scan for one round after m5-04 deleted that sensor, and the
+# only symptom was silence (CONTAINER_TOOLCHAIN.md section 6). So every name
+# below is quoted from agv/forklift/README.md AND was confirmed against
+# `gz topic -l` on a running server, and the check that this file works is
+# `ros2 topic hz` on each bridged ROS topic, never a clean-looking log.
 #
 # Usage (after sourcing /opt/ros/jazzy/setup.bash). Isolate BOTH transports
 # whenever another simulation may be running: ROS_DOMAIN_ID does not isolate
@@ -121,24 +167,56 @@ _BRIDGE_ARGS = [
     '/forklift/gz/traction_cmd@std_msgs/msg/Float64]gz.msgs.Double',
     '/forklift/gz/fork_cmd@std_msgs/msg/Float64]gz.msgs.Double',
 
-    # planar scanner: raw ranges, no zone and no threshold applied here
-    '/forklift/gz/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+    # navigation lidar: raw ranges at z = 1.80 m. This is the vehicle's SLAM,
+    # AMCL and costmap input, and no safety scanner channel joins it there.
+    '/forklift/gz/scan_nav@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+
+    # front safety scanner, NON-SAFE MEASUREMENT CHANNEL, at z = 0.15 m: raw
+    # ranges, no zone, no threshold and no field evaluation applied here. The
+    # safe channel is not on this list because it is not a topic at all.
+    ('/forklift/gz/safety_scanner_front/measurement'
+     '@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'),
 
     # ground-truth odometry: simulation feedback, not a localisation solution
     '/forklift/gz/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
 
     # joint position and rate for the three driven joints, at physics rate
     '/forklift/gz/joint_state@sensor_msgs/msg/JointState[gz.msgs.Model',
+
+    # the strapdown IMU, 100 Hz. Added 2026-07-31 (brief m5-08b) to answer
+    # docs/reports/m5-07c-realistic-odometry.md open question 3: the vehicle
+    # gained an IMU and this file, which is the ONE bridge table for this
+    # vehicle, did not carry it, so a stack brought up through here had no
+    # second input for the estimator to fuse.
+    #
+    # THE ORIENTATION IN THIS MESSAGE IS NOT A ROTATION AND MUST NOT BE
+    # READ. model.sdf sets <enable_orientation>false</>, and ros_gz_bridge
+    # then fills the quaternion with (0,0,0,0) and orientation_covariance[0]
+    # with 0.0. The ROS convention for "no orientation here" is -1; 0 means
+    # "known exactly", so a consumer following the convention reads an
+    # invalid quaternion as a perfect heading. That is a bridge defect, not
+    # a model one (m5-07c finding 5). agv/forklift/ekf.yaml refuses all
+    # three orientation flags; any future consumer checks the quaternion
+    # norm before using it.
+    '/forklift/gz/imu@sensor_msgs/msg/Imu[gz.msgs.IMU',
 ]
 
 # Feedback keeps its gz name on the gz side and takes the vehicle-facing
 # name on the ROS side, so a consumer does not have to know it came from a
 # simulator. Commands are NOT remapped: the same name on both sides is what
 # makes them recognisable as the model's raw inputs.
+#
+# The measurement channel keeps the word `measurement` on both sides. Only
+# the /gz/ segment is dropped, because the rule in agv/forklift/README.md is
+# that a reachable channel says so in its name, and a rename that quietly
+# lost the word would be this file editing the contract.
 _BRIDGE_REMAPS = [
-    ('/forklift/gz/scan', '/forklift/scan'),
+    ('/forklift/gz/scan_nav', '/forklift/scan'),
+    ('/forklift/gz/safety_scanner_front/measurement',
+     '/forklift/safety_scanner_front/measurement'),
     ('/forklift/gz/odom', '/forklift/odom'),
     ('/forklift/gz/joint_state', '/forklift/joint_states'),
+    ('/forklift/gz/imu', '/forklift/imu'),
 ]
 
 

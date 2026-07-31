@@ -9,10 +9,18 @@
   any of that means belongs to the vehicle nodes, to the fleet manager or
   to the PLC, never here (invariants 5, 6 and 9).
 
-  It is also NOT a safety device. The scanner below is a process sensor
-  used for a comfort stop zone. The protective stop, the e stop chain and
-  safe torque off are onboard, hardwired and independent of anything in
-  this file or on any network (invariant 1).
+  It is also NOT a safety device. Two of the three scanners below are
+  named safety_scanner_*, and that names the DEVICE CLASS THEY MODEL, not
+  a property of this file: a rendered depth image is not a protective
+  field, has no integrity, no OSSD, no fault reaction and no diagnostic
+  coverage. The protective stop, the e stop chain and safe torque off are
+  onboard, hardwired and independent of anything in this file or on any
+  network (invariant 1). What the two safety scanners give this project is
+  the GEOMETRY of a real installation, measured in
+  EVIDENCE_SENSOR_COVERAGE.md, plus the one NON-SAFE MEASUREMENT channel
+  of the front device that a process function reads (owner ruling of
+  2026-07-30, brief m5-06). Neither of those is a safety property of this
+  file, and nothing else about a safety device is modelled here.
 
   Original geometry, primitives only, no external mesh.
 
@@ -28,30 +36,33 @@
   the .x end and the counterweight sits over the drive wheel, opposite
   the load, which is what a counterweight is for.
 
-  TOP VIEW (metres)
+  TOP VIEW (metres). S1 and S2 are the two safety scanners, at
+  diagonally opposite chassis corners; N is the navigation lidar, on the
+  overhead guard, offset to .y of the mast centreline.
 
                             +y
                              ^
       fork tines             |            counterweight
      .......                 |               [====]
      |     |            [rear wheel L]           |
-     |     |    [mast]  .............            |
+     |     |    [mast]  .............           S1 (0.70, 0.45)
    . | . . | . .[||||]. |  chassis  | . [steer + drive wheel] . . > +x
-     |     |            |1.4 x 0.9  |            |
-     |     |            .............            |
-     .......            [rear wheel R]     [safety scanner]
-                                            180 deg forward
+     |     |            |1.4 x 0.9  |     N (0.55, .0.40) at z 1.80
+     |     |            ......... ...            |
+     .......            [rear wheel R]           |
+              S2 (.0.70, .0.45)
 
   SIDE VIEW (metres)
 
+                          N  z = 1.80
           overhead guard roof z = 1.71
           ._______________________.
           |                       |
      [||] |                       |          mast rails to z = 2.05
-     [||] |       chassis         |[ CW ]
+     [||] |       chassis         |[ CW ]    chassis underside z = 0.20
      [||] |_______________________|
     [carriage]                    |
-   ==========                     |
+   ==========               S1/S2 scan plane z = 0.15
    forks     (o)             (o)  (o)   wheels r = 0.12
    ================================================ floor z = 0
 
@@ -68,17 +79,68 @@
     /forklift/gz/fork_cmd      gz.msgs.Double   carriage travel  [m]
 
     /forklift/gz/joint_state   gz.msgs.Model    joint positions and rates
-    /forklift/gz/odom          gz.msgs.Odometry pose and body twist
-    /forklift/gz/scan          gz.msgs.LaserScan  planar ranges  [m]
+    /forklift/gz/odom          gz.msgs.Odometry GROUND-TRUTH pose and twist
+    /forklift/gz/tf_ground_truth  gz.msgs.Pose_V  odom -> base_link, from
+                                                  the same ground truth
+
+    /forklift/gz/scan_nav           gz.msgs.LaserScan  360 deg, z = 1.80
+    /forklift/gz/imu                gz.msgs.IMU        6-axis MEMS, 100 Hz,
+                                                       NO orientation output
+
+    /forklift/gz/safety_scanner_front/measurement   275 deg, z = 0.15
+    /forklift/gz/safety_scanner_rear/measurement    275 deg, z = 0.15
+
+  TWO CHANNELS PER SAFETY SCANNER, AND ONLY ONE OF THEM IS A TOPIC. The
+  device class these two sensors model emits a safe output (OSSD pair, or
+  safe bits over PROFIsafe) AND a separate NON-SAFE measurement channel
+  that the datasheet provides for HMI, diagnostics and process use while
+  stating it must not be used for safety-related tasks. The gpu_lidar
+  scan below IS the measurement channel; the safe channel is DERIVED from
+  it by field evaluation, which is what the real device does internally,
+  and that derivation is not in this file. Hence the rule a later reader
+  can check mechanically:
+
+    every channel a subscriber can reach is a MEASUREMENT channel.
+    The safe channel has no topic, on gz transport or on ROS, ever.
+
+  The measurement channel is non-safe and must never implement a safety
+  function. The safe channel reaches the F-program, and it never reaches
+  it through a topic, on either transport, under any path.
+
+  BY WHICH PATH IT REACHES THE F-PROGRAM IS DESIGN INTENT, NOT SETTLED
+  FACT. ADR 0011 decision 2 makes it configured F-I/O, an ET 200SP F-DI
+  parameterised as the scanner's OSSD pair, whose channel values the
+  S7-PLCSIM Advanced API drives by tag name: this project's analogue of
+  the copper an OSSD pair runs on. That path has never been run. The two
+  tool questions it rests on, whether this PLCSIM Advanced version and
+  its safety system version simulate F-I/O at all, and whether the API
+  writes a configured F-DI's channel values by tag name, are settled in
+  the tool by plc/forklift-safety/FIO-FEASIBILITY.md under brief m5-03,
+  whose verdict section is blank as this is written. If either answers
+  no, the named fallback of ADR 0011 decision 2 is the standard-DB
+  stand-in of plc/forklift-safety/SPEC.md, labelled a stand-in wherever
+  it appears. Nothing in THIS file changes under either answer: the safe
+  channel is derived outside this file by a field evaluation and is not
+  a topic either way.
 
   The numeric values a node needs (wheel radius, steer limit, fork travel)
   are mirrored in config.yaml because SDF cannot be read as YAML. THIS
   FILE IS THE AUTHORITY for the geometry; config.yaml records the same
   numbers for the Python side and is diffed against the values below.
 
-  Sensor note: the scanner is a gz "gpu_lidar", so the world that spawns
-  this model MUST load gz-sim-sensors-system with a render engine. gz's
-  stock empty.sdf does not; sim/worlds/cell.sdf does. See README.md.
+  Sensor note: all three scanners are gz "gpu_lidar" sensors, because
+  gz sim has no CPU ray sensor. The world that spawns this model MUST
+  load gz-sim-sensors-system with a render engine. gz's stock empty.sdf
+  does not; sim/worlds/cell.sdf does. See README.md.
+
+  ONE SENSOR, ONE LINK, AND THE ROTATION LIVES IN THE LINK POSE. Each
+  scanner has its own link and its <gz_frame_id> names that link. Without
+  gz_frame_id the message carries a scoped model/link/sensor frame id and
+  a downstream TF lookup fails. The aperture rotation of the two safety
+  scanners is written into the LINK pose and the sensor pose is identity,
+  so the frame the message names is also the frame its angles are
+  measured in. Rotating the sensor inside its link would leave the two
+  disagreeing by the mount angle, with nothing to say so.
 -->
 <sdf version="1.8">
   <model name="Forklift">
@@ -159,37 +221,248 @@
         <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
       </visual>
 
-      <!-- Scanner housing, so the sensor has a visible place to sit. -->
-      <visual name="scanner_visual">
-        <pose>0.71 0 0.25 0 0 0</pose>
-        <geometry><box><size>0.10 0.16 0.14</size></box></geometry>
-        <material><ambient>0.10 0.10 0.12 1</ambient><diffuse>0.10 0.10 0.12 1</diffuse></material>
+    </link>
+
+    <!-- ======================== Sensing ========================= -->
+    <!--
+      Three planar scanners, each on its own link. Every pose below is
+      DERIVED from the geometry above and the derivation is measured in
+      EVIDENCE_SENSOR_COVERAGE.md, which is the document to read before
+      moving any of them. Summary of what forced each number:
+
+      SCAN PLANE z = 0.15 for the two safety scanners. The free window at
+      the fork end is bounded below by the lowered tine top (z = 0.10,
+      fork_left/right at z 0.075 with 0.05 height) and above by the
+      chassis underside (z = 0.20, chassis box centred 0.45 with 0.50
+      height). 0.15 is the midpoint: 50 mm of clearance each way.
+
+      CORNERS (0.70, 0.45) and (.0.70, .0.45). Those are the corners of
+      the chassis footprint itself, 1.40 x 0.90. The two are on one
+      diagonal so each scanner's 85 deg blind sector points across the
+      vehicle, where the other scanner covers. Which diagonal is free:
+      every element of this model that crosses z = 0.15 is mirror
+      symmetric about y = 0, so occlusion does not choose, and mirroring
+      both poses gives an equivalent layout.
+
+      APERTURE 275 deg, modelled on a SICK microScan3 Pro, with the blind
+      sector centred on the corner diagonal pointing into the body: link
+      yaw +45 deg at the front corner, .135 deg at the rear one.
+
+      NAVIGATION LIDAR z = 1.80, on the overhead guard. This one is
+      forced, not chosen. A 360 deg aperture is only worth its render
+      cost where the sensor clears the vehicle body, and the two best low
+      mountings measured lose 168.5 and 171.9 deg of it to that body,
+      against 29.0 deg here. Above the guard roof (top z = 1.71) and
+      below the mast crossmember (z = 1.95) the only permanent occluder
+      left is the mast. The .y lateral offset from the mast centreline
+      narrows that shadow and clears the fork axis. The height has a cost
+      of its own, written up in the evidence: at 1.80 m this sensor is
+      above every feature of sim/worlds/forklift_arena.sdf as it stands
+      except one pillar.
+
+      RAW RANGES ONLY, all three. No zone, no threshold and no stop
+      decision is taken in this file. scripts/obstacle_zone.py evaluates
+      a comfort zone over the FRONT SAFETY SCANNER's NON-SAFE
+      MEASUREMENT channel at z = 0.15 m, as a process function and never
+      as a safety function (owner ruling of 2026-07-30, brief m5-06;
+      before it the evaluator read the navigation lidar, and that is no
+      longer true of any file in this directory).
+
+      CONSUMERS, PER CHANNEL, AS THEY STAND. The FRONT measurement
+      channel is bridged into ROS and read by scripts/obstacle_zone.py.
+      The REAR measurement channel has no consumer and is therefore not
+      bridged. NEITHER device's safe channel is a topic on any
+      transport, because the modelled counterpart's safe output is an
+      OSSD pair on copper; it is derived from the same rays as the
+      measurement channel by a field evaluation that is not in this
+      file, and that shared origin is not a second independent channel
+      (agv/forklift/README.md, "Two channels per safety scanner"). The
+      NAVIGATION lidar is the SLAM, AMCL and costmap input, and no
+      scanner channel of either kind reaches a navigation consumer.
+
+      BUDGET, and the rule that governs it. Rendering on the target
+      machine is llvmpipe software rasterisation
+      (sim/setup/WSL_ENVIRONMENT.md 4.7), so the vehicle's ray budget is
+      held down: 275 + 275 + 360 = 910 rays per 100 ms across three
+      sensors, against 181 on one sensor before. That cost has NOT been
+      measured, because Gazebo does not run in the container this layout
+      was computed in. No sample count and no update rate here goes up
+      until someone measures the real time factor it buys and writes the
+      figure down.
+    -->
+
+    <link name="safety_scanner_front_link">
+      <!-- Front (drive end) chassis corner, left side. Link yaw 45 deg
+           points the sensor x axis out along the corner diagonal, so the
+           blind sector is centred on 225 deg, into the vehicle. -->
+      <pose>0.70 0.45 0.15 0 0 0.7853982</pose>
+      <inertial>
+        <mass>1.4</mass>
+        <inertia>
+          <ixx>0.004</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.004</iyy><iyz>0</iyz><izz>0.004</izz>
+        </inertia>
+      </inertial>
+      <!-- Housing top face sits 20 mm BELOW the scan plane, so the
+           scanner cannot see its own mounting. Visual only, like the
+           overhead guard: it changes nothing the solver has to do. -->
+      <visual name="housing">
+        <pose>0 0 -0.075 0 0 0</pose>
+        <geometry><box><size>0.14 0.14 0.11</size></box></geometry>
+        <material><ambient>0.72 0.55 0.05 1</ambient><diffuse>0.72 0.55 0.05 1</diffuse></material>
       </visual>
-
-      <!--
-        Planar scanner looking along the driving direction. 181 samples
-        across 180 deg is exactly one sample per degree. The budget is
-        deliberate: rendering here is llvmpipe software rasterisation
-        (sim/setup/WSL_ENVIRONMENT.md 4.7), so sample count and update
-        rate are held down and must not be raised without re measuring.
-
-        RAW RANGES ONLY. No zone, no threshold and no stop decision is
-        taken in this file; scripts/obstacle_zone.py does that, and even
-        then only as a process function, never as a safety function.
-      -->
-      <sensor name="safety_scanner" type="gpu_lidar">
-        <pose>0.72 0 0.25 0 0 0</pose>
+      <sensor name="safety_scanner_front" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>safety_scanner_front_link</gz_frame_id>
         <always_on>1</always_on>
         <update_rate>10</update_rate>
-        <visualize>false</visualize>
-        <topic>/forklift/gz/scan</topic>
+        <visualize>true</visualize>
+        <!-- NON-SAFE MEASUREMENT CHANNEL of this device. The safe
+             channel is not here and is not a topic. It is derived from
+             these same rays, off this file, and it is not a second
+             independent channel.
+
+             Range max 5.5 m below is COUPLED, and this is where that
+             coupling now lives: since the owner ruling of 2026-07-30
+             this channel is what scripts/obstacle_zone.py reads, so 5.5
+             is the value it reports on a clear horizon, and
+             docs/interfaces/opcua-nodes.md 10.5 gives the consuming
+             plausibility window as 0.05 to 8.10 m. Raising this past
+             8.10 without moving that window would make a clear horizon
+             read at the PLC as a transducer fault. -->
+        <topic>/forklift/gz/safety_scanner_front/measurement</topic>
         <lidar>
           <scan>
             <horizontal>
-              <samples>181</samples>
+              <samples>275</samples>
               <resolution>1</resolution>
-              <min_angle>-1.5707963</min_angle>
-              <max_angle>1.5707963</max_angle>
+              <min_angle>-2.3998277</min_angle>
+              <max_angle>2.3998277</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0.0</min_angle>
+              <max_angle>0.0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.10</min>
+            <max>5.5</max>
+            <resolution>0.01</resolution>
+          </range>
+        </lidar>
+      </sensor>
+    </link>
+
+    <link name="safety_scanner_rear_link">
+      <!-- Load end chassis corner, right side: the diagonal opposite of
+           the front scanner. Link yaw .135 deg (= 225 deg). -->
+      <pose>-0.70 -0.45 0.15 0 0 -2.3561945</pose>
+      <inertial>
+        <mass>1.4</mass>
+        <inertia>
+          <ixx>0.004</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.004</iyy><iyz>0</iyz><izz>0.004</izz>
+        </inertia>
+      </inertial>
+      <visual name="housing">
+        <pose>0 0 -0.075 0 0 0</pose>
+        <geometry><box><size>0.14 0.14 0.11</size></box></geometry>
+        <material><ambient>0.72 0.55 0.05 1</ambient><diffuse>0.72 0.55 0.05 1</diffuse></material>
+      </visual>
+      <sensor name="safety_scanner_rear" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>safety_scanner_rear_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>10</update_rate>
+        <visualize>true</visualize>
+        <!-- NON-SAFE MEASUREMENT CHANNEL of this device. The safe
+             channel is not here and is not a topic. It is derived from
+             these same rays, off this file, and it is not a second
+             independent channel. This channel has no consumer and is
+             not bridged into ROS; nothing here is coupled to a
+             consuming plausibility window. -->
+        <topic>/forklift/gz/safety_scanner_rear/measurement</topic>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>275</samples>
+              <resolution>1</resolution>
+              <min_angle>-2.3998277</min_angle>
+              <max_angle>2.3998277</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0.0</min_angle>
+              <max_angle>0.0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.10</min>
+            <max>5.5</max>
+            <resolution>0.01</resolution>
+          </range>
+        </lidar>
+      </sensor>
+    </link>
+
+    <link name="nav_lidar_link">
+      <!-- On the overhead guard roof, offset to .y of the mast
+           centreline. Range max is 8.0 m. That number USED TO BE
+           coupled, as the value obstacle_zone reports on a clear
+           horizon; since the owner ruling of 2026-07-30 that evaluator
+           reads the front safety scanner instead, so the clear value it
+           reports is that sensor's 5.5 m and this 8.0 m is no longer
+           pinned by that consumer. It stays 8.0 m because nothing has
+           re-derived it, and whether it should grow for the 24 x 16 m
+           arena is the open cross-layer question of
+           EVIDENCE_SENSOR_COVERAGE.md 1. The window any consumer of a
+           clear-horizon value must contain it in is
+           docs/interfaces/opcua-nodes.md 10.5, 0.05 to 8.10 m.
+
+           The mount stands over the front right overhead guard post
+           (0.55, .0.38), the stiffest point of the roof plate, displaced
+           20 mm further outboard: at y = .0.40 the straight astern ray
+           passes 0.04 m clear of the mast body, and .0.40 is also the
+           largest offset that keeps the 0.06 post inside the 1.24 x 0.88
+           roof plate. Measured in EVIDENCE_SENSOR_COVERAGE.md 7. -->
+      <pose>0.55 -0.40 1.80 0 0 0</pose>
+      <inertial>
+        <mass>1.0</mass>
+        <inertia>
+          <ixx>0.002</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.002</iyy><iyz>0</iyz><izz>0.002</izz>
+        </inertia>
+      </inertial>
+      <!-- Post and head both finish BELOW the scan plane, as the two
+           safety scanner housings do, so no sensor renders its own
+           mounting. Checked by scripts/sensor_coverage.py section 1. -->
+      <visual name="post">
+        <pose>0 0 -0.065 0 0 0</pose>
+        <geometry><box><size>0.06 0.06 0.11</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="head">
+        <pose>0 0 -0.040 0 0 0</pose>
+        <geometry><cylinder><radius>0.05</radius><length>0.04</length></cylinder></geometry>
+        <material><ambient>0.10 0.10 0.12 1</ambient><diffuse>0.10 0.10 0.12 1</diffuse></material>
+      </visual>
+      <sensor name="nav_lidar" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>nav_lidar_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>10</update_rate>
+        <visualize>true</visualize>
+        <topic>/forklift/gz/scan_nav</topic>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.1415927</min_angle>
+              <max_angle>3.1415927</max_angle>
             </horizontal>
             <vertical>
               <samples>1</samples>
@@ -204,6 +477,154 @@
             <resolution>0.01</resolution>
           </range>
         </lidar>
+      </sensor>
+    </link>
+
+    <!-- =========================== IMU =========================== -->
+    <!--
+      MEMS inertial measurement unit. Six axes, no magnetometer, and NO
+      ORIENTATION OUTPUT - see the block on <enable_orientation> below,
+      which is the most important sentence in this section.
+
+      WHERE IT SITS, AND WHY THERE. On the rear axle centreline
+      (x = -0.50, the midpoint of rear_wheel_left and rear_wheel_right)
+      and low in the chassis (z = 0.25, just above the 0.20 underside).
+      A tricycle's instantaneous centre of rotation always lies on the
+      rear axle LINE, whatever the steer angle, so a device mounted on
+      that line sees no centripetal term in a steady turn and its
+      accelerometer channels stay usable for something later. The FUSED
+      quantity does not care: angular rate is the same at every point of
+      a rigid body, so yaw rate would read identically anywhere on this
+      vehicle. The mounting is chosen for the channels that are not
+      fused yet, not for the one that is.
+
+      THE NOISE NUMBERS ARE A DATASHEET, NOT A TUNING. Every value below
+      is derived from the Bosch Sensortec BMI088 data sheet,
+      BST-BMI088-DS000-19 revision 1.9, 01/2024, tables 4 and 5, read on
+      2026-07-31. That device class - a 6-axis consumer/robotics MEMS
+      IMU - is what an AGV of this size actually carries. The derivation
+      of each number, including the two places where a datasheet figure
+      is deliberately NOT used raw, is written out in
+      EVIDENCE_ODOMETRY.md section 2. Summary:
+
+        gyro white noise   stddev 0.001745 rad/s
+          = the datasheet's own "Output Noise" row, 0.1 deg/s rms at
+            BW = 47 Hz. No arithmetic: the sensor is operated at the
+            datasheet's own quoted condition (100 Hz ODR, 47 Hz BW).
+
+        gyro bias          bias_mean 0.002618 rad/s, bias_stddev 0
+          = TCO 0.015 deg/s/K x 10 K = 0.15 deg/s. NOT the datasheet's
+            +-1 deg/s zero-rate offset: that row is measured with
+            "slow and fast offset cancellation off", and every AGV
+            integration estimates the stationary bias at power-up. What
+            survives that estimate is the temperature change since it,
+            and 10 K is a device calibrated at power-up in an unheated
+            hall and run through a shift. bias_stddev 0 fixes the
+            MAGNITUDE across runs; gz still draws the SIGN at random.
+
+        accel white noise  stddev 0.01076 m/s^2 (x, y), 0.01278 (z)
+          = noise density 160 ug/sqrt(Hz) (x, y) and 190 (z) at
+            sqrt(47 Hz), times g = 9.80665.
+
+        accel bias         bias_mean 0.01961 m/s^2 (= 2 mg)
+          = TCO 0.2 mg/K x 10 K, by the same argument as the gyro: the
+            20 mg zero-g offset is removed by a levelling calibration,
+            the temperature term is not.
+
+      WHAT IS NOT MODELLED, STATED RATHER THAN OMITTED. The datasheet
+      publishes no Allan-variance bias instability, so NO in-run bias
+      random walk is modelled (<dynamic_bias_stddev> is absent, not
+      zero-by-accident). The modelled bias is constant within a run.
+      Real drift is therefore worse than what this model produces, and
+      every drift figure measured against it is a LOWER BOUND. Inventing
+      a random-walk number to close that gap would be a fabricated
+      datum, which is worse than a stated limitation.
+
+      <enable_orientation>false</enable_orientation> IS LOAD BEARING.
+      gz's IMU derives its orientation output from the LINK'S POSE IN
+      THE SIMULATOR - it is ground truth wearing a sensor's name, and
+      a real strapdown IMU with no magnetometer cannot produce an
+      absolute heading at all. Fusing it would put ground truth back
+      into the estimator through the side door and recreate exactly the
+      circularity the two-phase odometry plan exists to remove (brief
+      m5-07c, forbidden list). With this element false the message
+      carries orientation_covariance[0] = -1, the ROS convention for
+      "no orientation in this message", so a consumer that tries cannot
+      silently succeed. ekf.yaml refuses it a second time by
+      setting all three orientation entries of imu0_config false. Two
+      independent refusals, because one of them is a config file that
+      somebody could edit.
+    -->
+    <link name="imu_link">
+      <pose>-0.50 0 0.25 0 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>1e-5</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1e-5</iyy><iyz>0</iyz><izz>1e-5</izz>
+        </inertia>
+      </inertial>
+      <sensor name="imu" type="imu">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>imu_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>100</update_rate>
+        <topic>/forklift/gz/imu</topic>
+        <imu>
+          <enable_orientation>false</enable_orientation>
+          <angular_velocity>
+            <x>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.001745</stddev>
+                <bias_mean>0.002618</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.001745</stddev>
+                <bias_mean>0.002618</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.001745</stddev>
+                <bias_mean>0.002618</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.01076</stddev>
+                <bias_mean>0.01961</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.01076</stddev>
+                <bias_mean>0.01961</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.01278</stddev>
+                <bias_mean>0.01961</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </z>
+          </linear_acceleration>
+        </imu>
       </sensor>
     </link>
 
@@ -401,6 +822,28 @@
     <joint name="mast_anchor" type="fixed">
       <parent>base_link</parent>
       <child>mast</child>
+    </joint>
+
+    <!-- Sensor mounts. Fixed, so each scanner's frame is a rigid offset
+         of base_link and the transform a consumer needs is a constant. -->
+    <joint name="safety_scanner_front_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>safety_scanner_front_link</child>
+    </joint>
+
+    <joint name="safety_scanner_rear_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>safety_scanner_rear_link</child>
+    </joint>
+
+    <joint name="nav_lidar_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>nav_lidar_link</child>
+    </joint>
+
+    <joint name="imu_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>imu_link</child>
     </joint>
 
     <!-- Steer axis, vertical. Limit is the mechanical stop of the
@@ -611,6 +1054,34 @@
     </plugin>
 
     <!--
+      THE IMU SYSTEM, CARRIED BY THE MODEL AND NOT BY THE WORLD.
+
+      gz's IMU sensor produces nothing unless some system creates it, the
+      same way a gpu_lidar produces nothing unless gz-sim-sensors-system
+      is loaded. The usual placement for BOTH is the world file - and for
+      the rendering sensors it has to be the world, because they need a
+      render engine the world owns.
+
+      The IMU system does NOT: it scans the whole entity-component
+      manager for Imu components regardless of which entity it was
+      attached to, so a model-level declaration serves this model. That
+      was measured, not assumed - EVIDENCE_ODOMETRY.md section 3 records
+      the same model spawned into a world with no IMU system of its own,
+      publishing /forklift/gz/imu.
+
+      This is worth the two lines because of what it avoids: no world
+      file has to be edited to give this vehicle an IMU, so the sensor
+      travels with the model into sim/worlds/forklift_arena.sdf,
+      sim/worlds/warehouse.sdf and any world a later gate adds. The
+      vehicle carries its own instruments. Contrast the three scanners,
+      which go silent in a world that forgot gz-sim-sensors-system and
+      have needed that noted in every launch file since.
+    -->
+    <plugin filename="gz-sim-imu-system"
+            name="gz::sim::systems::Imu">
+    </plugin>
+
+    <!--
       Joint feedback. Position and rate of the three driven joints.
 
       This system has NO rate parameter and publishes once per physics
@@ -628,12 +1099,76 @@
       <joint_name>mast_joint</joint_name>
     </plugin>
 
-    <!-- Ground truth odometry. This is simulation feedback, not a
-         localisation solution; AMCL and Nav2 remain the vehicle's real
-         localisation path. -->
+    <!--
+      GROUND-TRUTH odometry, and - FOR NOW - the odom -> base_link
+      transform. Read the two-phase note before using either.
+
+      THIS IS GROUND TRUTH, NOT A WHEEL ESTIMATE. This system reads the
+      model's pose out of the simulator, so the pose it reports and the
+      transform it publishes carry NO odometry error: no wheel slip, no
+      encoder quantisation, no unbounded heading drift. A real vehicle's
+      odom -> base_link drifts without bound; this one does not, ever.
+
+      TWO PHASES, AND THIS FILE IS PHASE ONE.
+
+        Phase 1, now (M5, brief m5-07b). Nothing on this vehicle can
+        estimate its own motion yet, and SLAM cannot start without a
+        motion estimate, so the ground-truth transform is bridged onto
+        /tf as an INTERIM SOURCE. It is a scaffold, not the answer.
+
+        Phase 2, next (owner ruling, 2026-07-31). An IMU joins this
+        model, wheel odometry is computed from the joint states with
+        slip and noise modelled, and an EKF fuses the two. THE EKF THEN
+        OWNS odom -> base_link. This system keeps publishing, and its
+        role becomes permanent and different: it is the REFERENCE that
+        localisation error is measured AGAINST, and it stops being an
+        input to anything that navigates.
+
+      WHY PHASE 2 IS NOT OPTIONAL. With ground-truth odometry the
+      degenerate aisle stretches of the arena cannot bite, AMCL has
+      nothing to correct, and any "error against ground truth" figure is
+      circular - AMCL scored against its own input. Ground truth is only
+      a reference while something ELSE is the estimate.
+
+      THE SEAM, so the change is a switch and not a rewrite. The gz
+      transform topic is named <tf_topic> below and carried onto /tf by
+      one dedicated bridge node in launch/vehicle.launch.py, behind the
+      launch argument ground_truth_tf. When the EKF lands it is started
+      with ground_truth_tf:=false: this system keeps publishing its
+      topics, nothing here is deleted, and the ONLY publisher of
+      odom -> base_link becomes the EKF. Nothing else in this file
+      changes.
+
+      ONE OWNER PER DATUM AT ANY TIME (invariant 10). In phase 1 the
+      transform is published by THIS system, from the same pose that
+      fills the odometry message, rather than by a node that recomputes
+      a pose from joint states - two sources would be two answers to one
+      question with nothing to say which is right. In phase 2 that one
+      owner is the EKF, and the switch above is what makes the handover
+      exclusive rather than additive.
+
+      WHY THE TOPIC IS NAMED HERE, AND WHY THE NAME SAYS "ground_truth".
+      This system publishes the transform whether or not <tf_topic> is
+      present; without it the name is the MODEL-SCOPED default
+      /model/<spawn name>/pose, which changes when the model is spawned
+      under another name - exactly what the COMMAND TOPICS note above
+      refuses for every other system in this file. Measured before this
+      element was added: the default topic was /model/Forklift/pose,
+      gz.msgs.Pose_V, carrying frame_id "forklift/odom" and
+      child_frame_id "forklift/base_link". The name carries
+      ground_truth because after phase 2 there are TWO pose streams on
+      this vehicle, and a reader must never have to guess which one is
+      the reference.
+
+      The frames are the model's own <odom_frame> and <robot_base_frame>,
+      unscoped and unaltered, so the transform lands on the same tree the
+      sensor frames of scripts/sensor_tf.py hang from - and so that the
+      EKF can take the same edge over without renaming a frame.
+    -->
     <plugin filename="gz-sim-odometry-publisher-system"
             name="gz::sim::systems::OdometryPublisher">
       <odom_topic>/forklift/gz/odom</odom_topic>
+      <tf_topic>/forklift/gz/tf_ground_truth</tf_topic>
       <odom_frame>forklift/odom</odom_frame>
       <robot_base_frame>forklift/base_link</robot_base_frame>
       <dimensions>2</dimensions>

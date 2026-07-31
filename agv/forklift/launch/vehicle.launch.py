@@ -4,7 +4,15 @@
 #   1. the Gazebo (gz sim) server on a world, headless by default,
 #   2. one spawn of agv/forklift/model.sdf into that world,
 #   3. one ros_gz_bridge carrying every topic this directory owns,
-#   4. scripts/forklift_io.py and scripts/obstacle_zone.py.
+#   3b. a SECOND, switchable ros_gz_bridge carrying the simulator's
+#      ground-truth odom -> base_link transform onto /tf. RETIRED: it is
+#      off by default since the EKF took that edge over, and asking for
+#      both is a launch-time refusal, not a warning,
+#   4. scripts/wheel_odometry.py, scripts/imu_gate.py and
+#      robot_localization's ekf_node - the vehicle's own motion estimate,
+#      and the SOLE publisher of forklift/odom -> forklift/base_link,
+#   5. scripts/sensor_tf.py, the static TF for the four sensor frames,
+#   6. scripts/forklift_io.py and scripts/obstacle_zone.py.
 #
 # THE WORLD IS NOT OWNED HERE. agv/ owns a vehicle, not a warehouse, so the
 # world is an argument. Its default is gz's stock empty.sdf, which is enough
@@ -17,7 +25,9 @@
 #   </plugin>
 #
 # exactly as sim/worlds/cell.sdf does. EVIDENCE_MODEL.md quotes the minimal
-# world used to verify the scanner.
+# world used to verify the scanner. The model now carries THREE gpu_lidars,
+# so a world without that plugin loses all three at once, and a world with
+# it pays for all three.
 #
 # NO CONTROL LOGIC LIVES HERE. The bridge is a type translator and this file
 # is process wiring. Sequencing, interlocks and stop decisions belong to the
@@ -42,7 +52,7 @@ import yaml
 
 from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, ExecuteProcess,
-                            IncludeLaunchDescription)
+                            IncludeLaunchDescription, OpaqueFunction)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -58,6 +68,10 @@ _MODEL_SDF = os.path.join(_FORKLIFT_DIR, 'model.sdf')
 _CONFIG_YAML = os.path.join(_FORKLIFT_DIR, 'config.yaml')
 _IO_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'forklift_io.py')
 _ZONE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'obstacle_zone.py')
+_TF_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'sensor_tf.py')
+_WHEEL_ODOM_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'wheel_odometry.py')
+_IMU_GATE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'imu_gate.py')
+_EKF_YAML = os.path.join(_FORKLIFT_DIR, 'ekf.yaml')
 
 with open(_CONFIG_YAML, 'r', encoding='utf-8') as _handle:
     _CFG = yaml.safe_load(_handle)
@@ -77,7 +91,95 @@ _BRIDGE_ARGS = [
 
     '{}@sensor_msgs/msg/JointState[gz.msgs.Model'.format(_TOPICS['gz_joint_state']),
     '{}@nav_msgs/msg/Odometry[gz.msgs.Odometry'.format(_TOPICS['gz_odom']),
-    '{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'.format(_TOPICS['gz_scan']),
+    '{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'.format(_TOPICS['gz_scan_nav']),
+    '{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'.format(
+        _TOPICS['gz_safety_scanner_front_measurement']),
+    '{}@sensor_msgs/msg/Imu[gz.msgs.IMU'.format(_TOPICS['gz_imu']),
+]
+
+# WHAT IS AND IS NOT ON THAT LIST, PER CHANNEL.
+#
+# Each safety scanner models a device with TWO outputs: a safe one and a
+# separate NON-SAFE MEASUREMENT channel provided for HMI, diagnostics and
+# process use. The gz scan IS the measurement channel.
+#
+#   front measurement channel  bridged, because a process consumer exists
+#                              for it: obstacle_zone.py, whose plane this
+#                              is (owner ruling, 2026-07-30)
+#   rear measurement channel   not bridged: no process consumer exists. A
+#                              channel is put on the process network when
+#                              something on it consumes the channel, and
+#                              not before
+#   either SAFE channel        NEVER a topic, on either transport, under
+#                              any path. It is derived by field
+#                              evaluation from the same rays as the
+#                              measurement channel and reaches the
+#                              F-program off the process network
+#
+# BY WHICH PATH the safe channel reaches the F-program is DESIGN INTENT,
+# NOT SETTLED FACT, and nothing on the bridge list above depends on the
+# answer. ADR 0011 decision 2 makes it configured F-I/O (an ET 200SP F-DI
+# parameterised as the scanner's OSSD pair) whose channel values the
+# S7-PLCSIM Advanced API drives by tag name, this project's analogue of
+# the copper an OSSD pair runs on. That path has never been run; it is
+# settled in the tool by plc/forklift-safety/FIO-FEASIBILITY.md under
+# brief m5-03, whose verdict is still blank. If it answers no, the named
+# fallback is the standard-DB stand-in of plc/forklift-safety/SPEC.md,
+# labelled a stand-in wherever it appears. This launch file bridges no
+# safe channel under either answer.
+#
+# THE odom -> base_link TRANSFORM IS NOT ON THAT LIST. It has a bridge
+# node of its own, below, because it is INTERIM and the second node is
+# the switch that retires it. See the block above that node.
+#
+# Bridging a measurement channel is not a safety signal on the process
+# network, and it is not a navigation consumer of a safety scanner either
+# - what ADR 0011 forbids is SLAM, AMCL or a costmap fed from one of
+# these, and the navigation lidar remains the only input any of those
+# gets.
+
+# THE RETIRED INTERIM MOTION ESTIMATE. THE SWITCH WAS THROWN ON
+# 2026-07-31 AND THIS NODE IS NOW OFF BY DEFAULT.
+#
+# model.sdf's OdometryPublisher publishes odom -> base_link as
+# gz.msgs.Pose_V, from the same simulator pose that fills
+# /forklift/gz/odom. That is GROUND TRUTH: no wheel slip, no encoder
+# quantisation, no drift. Between briefs m5-07b and m5-07c it was the
+# vehicle's only motion estimate, because nothing on board could produce
+# one and SLAM cannot start without one, so it was bridged onto /tf as a
+# SCAFFOLD, behind this switch, so that retiring it would be a launch
+# argument rather than an edit.
+#
+# Brief m5-07c landed the IMU, the wheel odometry and the EKF that fuses
+# them. THE EKF NOW OWNS odom -> base_link. `ground_truth_tf` therefore
+# defaults to FALSE, the node below does not run, and /tf carries exactly
+# one publisher of that edge. The gz topic keeps publishing and is now the
+# REFERENCE that estimator error is measured against, which was the whole
+# reason the EKF was worth building: measured against its own input, an
+# estimator cannot be wrong.
+#
+# One datum, one owner, at any instant (invariant 10). A default is not a
+# guarantee, so the handover is enforced rather than documented: the
+# _refuse_two_transform_sources check below aborts the launch outright if
+# both this bridge and the EKF are asked for. Two publishers of one edge
+# on /tf is the failure this whole separation exists to prevent, and it
+# is the kind that produces a jittering robot and no error message.
+#
+# WHAT IT IS STILL FOR. `ground_truth_tf:=true ekf:=false` is a
+# deliberate, exclusive configuration and it is how the m5-07b evidence
+# is reproduced. It is not a fallback for a misbehaving EKF: a stack that
+# navigates on ground truth is not demonstrating navigation.
+#
+# The remap onto /tf is not cosmetic: /tf is the only topic a
+# TransformListener reads, and the moving transform has to arrive there
+# while the STATIC sensor transforms arrive on /tf_static from
+# sensor_tf.py. Two topics, two halves of one tree.
+_TF_BRIDGE_ARGS = [
+    '{}@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V'.format(
+        _TOPICS['gz_tf_ground_truth']),
+]
+_TF_BRIDGE_REMAPS = [
+    (_TOPICS['gz_tf_ground_truth'], _TOPICS['tf']),
 ]
 
 # Feedback keeps the gz name on the gz side and gets the vehicle-facing name
@@ -86,8 +188,114 @@ _BRIDGE_ARGS = [
 _BRIDGE_REMAPS = [
     (_TOPICS['gz_joint_state'], _TOPICS['joint_states']),
     (_TOPICS['gz_odom'], _TOPICS['odom']),
-    (_TOPICS['gz_scan'], _TOPICS['scan']),
+    (_TOPICS['gz_scan_nav'], _TOPICS['scan']),
+    (_TOPICS['gz_safety_scanner_front_measurement'],
+     _TOPICS['safety_scanner_front_measurement']),
+    (_TOPICS['gz_imu'], _TOPICS['imu']),
 ]
+
+
+def _gz_server(context, *args, **kwargs):
+    """The gz server, with an optional noise seed.
+
+    WHY A SEED ARGUMENT EXISTS. gz draws each sensor's bias - including
+    its SIGN - from a global generator at model load, so two runs of the
+    same stack get different gyro biases and a drift figure cannot be
+    compared with the one before it. `gz sim --seed` fixes that draw, which
+    is what makes a before-and-after measurement of an estimator change
+    honest rather than a comparison of two dice. It is a MEASUREMENT
+    facility and nothing on the vehicle reads it: leaving it empty, which
+    is the default and what every demonstration uses, restores the random
+    draw, and the sign a real device wakes up with is not knowable anyway.
+    """
+    server_on = LaunchConfiguration('server').perform(context).lower() == 'true'
+    if not server_on:
+        return []
+    seed = LaunchConfiguration('seed').perform(context).strip()
+    world = LaunchConfiguration('world').perform(context)
+    gz_args = '-r -s '
+    if seed:
+        gz_args += '--seed {} '.format(seed)
+    ros_gz_sim_launch = os.path.join(
+        get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')
+    return [IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(ros_gz_sim_launch),
+        launch_arguments={
+            'gz_args': gz_args + world,
+            'on_exit_shutdown': 'true',
+        }.items(),
+    )]
+
+
+def _estimator_filter(context, *args, **kwargs):
+    """The EKF node, whose IMU input depends on whether the gate runs.
+
+    ekf.yaml names /forklift/imu_gated as imu0, because the gated stream
+    is what the filter is meant to fuse. With `imu_gate:=false` that topic
+    has no publisher, and a filter silently running on wheel odometry
+    alone is a different estimator wearing the same name - so this
+    function REMAPS the filter back onto the raw IMU instead. That is the
+    m5-07c configuration exactly, and it is how the before-and-after
+    measurement in EVIDENCE_ODOMETRY.md section 12 is reproduced: one
+    launch argument, no edit to a parameter file, and no run in which the
+    filter quietly lost a sensor.
+    """
+    if LaunchConfiguration('ekf').perform(context).lower() != 'true':
+        return []
+    gate_on = LaunchConfiguration('imu_gate').perform(context).lower() == 'true'
+    remaps = [('odometry/filtered', _TOPICS['odom_filtered'])]
+    if not gate_on:
+        remaps.append((_TOPICS['imu_gated'], _TOPICS['imu']))
+    return [Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='forklift_ekf',
+        output='screen',
+        parameters=[_EKF_YAML, {'use_sim_time': True}],
+        remappings=remaps,
+    )]
+
+
+def _refuse_two_transform_sources(context, *args, **kwargs):
+    """Abort the launch rather than put two publishers on one TF edge.
+
+    `ekf` and `ground_truth_tf` both end up publishing
+    forklift/odom -> forklift/base_link. Two publishers of one transform
+    is invariant 10's failure case and tf2 does not complain about it: the
+    listener takes whichever message arrived last, so the symptom is a
+    vehicle that jitters between a perfect pose and a drifting one, with
+    no error anywhere. A default is not a guarantee, so this is checked.
+    """
+    ekf_on = LaunchConfiguration('ekf').perform(context).lower() == 'true'
+    wheel_on = LaunchConfiguration('wheel_odom').perform(
+        context).lower() == 'true'
+    gt_on = LaunchConfiguration('ground_truth_tf').perform(
+        context).lower() == 'true'
+    if ekf_on and not wheel_on:
+        raise RuntimeError(
+            'ekf:=true with wheel_odom:=false starts a filter with no '
+            'odometry source. It would publish a transform built from the '
+            'IMU yaw rate alone, which is a heading with no position in it '
+            'at all - and it would still be the only publisher of that '
+            'edge, so nothing downstream would notice.')
+    gate_on = LaunchConfiguration('imu_gate').perform(context).lower() == 'true'
+    if gate_on and not wheel_on:
+        raise RuntimeError(
+            'imu_gate:=true with wheel_odom:=false starts the gyro gate with '
+            'nothing to publish the standstill verdict it gates on. The gate '
+            'fails open, so the stack would run with the gate present and '
+            'permanently ineffective - which looks like a working stationary '
+            'correction and is not one. Run imu_gate:=false, or leave the '
+            'wheel odometry on.')
+    if ekf_on and gt_on:
+        raise RuntimeError(
+            'ekf:=true and ground_truth_tf:=true would both publish '
+            'forklift/odom -> forklift/base_link. Exactly one source owns '
+            'that edge (CLAUDE.md invariant 10). Use ekf:=true (the '
+            'default, the vehicle estimating its own pose) or '
+            'ekf:=false ground_truth_tf:=true (the retired m5-07b '
+            'configuration, for reproducing that evidence only).')
+    return []
 
 
 def generate_launch_description():
@@ -130,28 +338,75 @@ def generate_launch_description():
     ld.add_action(DeclareLaunchArgument(
         'nodes', default_value='true',
         description='Start forklift_io and obstacle_zone'))
+    ld.add_action(DeclareLaunchArgument(
+        'tf', default_value='true',
+        description='Publish /tf_static for the three sensor frames. '
+                    'Separate from "nodes" because SLAM and Nav2 need the '
+                    'transforms even when the two process nodes are off.'))
+    ld.add_action(DeclareLaunchArgument(
+        'ground_truth_tf', default_value='false',
+        description='Bridge the simulator ground-truth odom -> base_link '
+                    'transform onto /tf. RETIRED 2026-07-31: the EKF owns '
+                    'that edge now, so this defaults to false and the '
+                    'ground-truth stream stays only as the reference '
+                    'estimator error is measured against. Setting it true '
+                    'requires ekf:=false and the launch refuses otherwise.'))
+    ld.add_action(DeclareLaunchArgument(
+        'wheel_odom', default_value='true',
+        description='Start scripts/wheel_odometry.py, the vehicle\'s '
+                    'tricycle dead reckoning. It publishes an estimate and '
+                    'NO transform. Separate from "ekf" so the odometry can '
+                    'be verified on its own before a filter consumes it, '
+                    'which is this gate\'s sequencing rule.'))
+    ld.add_action(DeclareLaunchArgument(
+        'ekf', default_value='true',
+        description='Start the robot_localization EKF fusing the wheel '
+                    'odometry with the IMU. It is the sole publisher of '
+                    'forklift/odom -> forklift/base_link, and it needs '
+                    'wheel_odom:=true.'))
+    ld.add_action(DeclareLaunchArgument(
+        'imu_gate', default_value='true',
+        description='Start scripts/imu_gate.py, which stops offering the '
+                    'gyro\'s yaw rate to the filter while both encoder '
+                    'counts are unchanged - the interval in which that '
+                    'reading is bias and not rotation. Setting it false '
+                    'remaps the filter back onto the raw IMU and reproduces '
+                    'the m5-07c configuration exactly; it does not leave the '
+                    'filter without an IMU.'))
+    ld.add_action(DeclareLaunchArgument(
+        'seed', default_value='',
+        description='Noise seed passed to gz sim, fixing the sign and value '
+                    'each sensor bias is drawn with. Empty (the default) '
+                    'leaves the draw random, which is what a real device '
+                    'does. It exists so a before-and-after measurement of '
+                    'the estimator compares two runs of one vehicle rather '
+                    'than two draws.'))
 
-    world = LaunchConfiguration('world')
+    # `world` and `server` are not resolved here: _gz_server reads both,
+    # because the seed has to change the command line rather than a
+    # substitution inside it.
     world_name = LaunchConfiguration('world_name')
     model = LaunchConfiguration('model')
     config = LaunchConfiguration('config')
     name = LaunchConfiguration('name')
     gui = LaunchConfiguration('gui')
-    server = LaunchConfiguration('server')
     nodes = LaunchConfiguration('nodes')
+    tf = LaunchConfiguration('tf')
+    ground_truth_tf = LaunchConfiguration('ground_truth_tf')
+    wheel_odom = LaunchConfiguration('wheel_odom')
+    imu_gate = LaunchConfiguration('imu_gate')
+
+    # Checked before anything starts, so a misconfiguration is a refusal
+    # and not a running stack with two answers to one question.
+    ld.add_action(OpaqueFunction(function=_refuse_two_transform_sources))
 
     ros_gz_sim_launch = os.path.join(
         get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')
 
-    # Gazebo server, headless, running immediately (-r -s).
-    ld.add_action(IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(ros_gz_sim_launch),
-        launch_arguments={
-            'gz_args': ['-r -s ', world],
-            'on_exit_shutdown': 'true',
-        }.items(),
-        condition=IfCondition(server),
-    ))
+    # Gazebo server, headless, running immediately (-r -s). Built in a
+    # function rather than declared, because the optional --seed has to be
+    # absent from the command line entirely when no seed is asked for.
+    ld.add_action(OpaqueFunction(function=_gz_server))
 
     # Optional GUI client attaching to the running server.
     ld.add_action(IncludeLaunchDescription(
@@ -190,6 +445,67 @@ def generate_launch_description():
         output='screen',
         arguments=_BRIDGE_ARGS,
         remappings=_BRIDGE_REMAPS,
+    ))
+
+    # The interim ground-truth motion estimate, on its own bridge node so
+    # that the EKF of the next brief retires it with ground_truth_tf:=false
+    # rather than with an edit. See the block above _TF_BRIDGE_ARGS.
+    ld.add_action(Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='forklift_ground_truth_tf_bridge',
+        output='screen',
+        arguments=_TF_BRIDGE_ARGS,
+        remappings=_TF_BRIDGE_REMAPS,
+        condition=IfCondition(ground_truth_tf),
+    ))
+
+    # ---- the vehicle's own motion estimate, in two processes ----
+    #
+    # THE ONLY PUBLISHER OF forklift/odom -> forklift/base_link IS THE EKF.
+    # wheel_odometry.py publishes an Odometry message and NO transform;
+    # it is one sensor's opinion, like the IMU, and the EKF fuses the two.
+    #
+    # BOTH CARRY use_sim_time EXPLICITLY, and it is not optional. Every
+    # message in this stack is stamped with the simulation clock. A node
+    # on the system clock differences two clocks, asks tf2 for a transform
+    # 1.8e9 s in the future and is told the transform does not exist -
+    # which reads as a missing publisher rather than as a misconfigured
+    # node, and cost brief m5-07b a debugging session (its report, "two
+    # findings that belong to every future consumer of this tree").
+    ld.add_action(ExecuteProcess(
+        cmd=[sys.executable, _WHEEL_ODOM_SCRIPT, '--config', config,
+             '--ros-args', '-p', 'use_sim_time:=true'],
+        name='wheel_odometry',
+        output='screen',
+        condition=IfCondition(wheel_odom),
+    ))
+    # THE GYRO GATE, between the bridge's IMU and the filter. It publishes
+    # /forklift/imu_gated, which is the topic ekf.yaml names, and it
+    # forwards every sample unchanged except while the wheel odometry
+    # reports both encoder counts held. It carries use_sim_time for the
+    # same reason the two nodes above do, and for one more: its freshness
+    # test compares a simulated stamp against its own clock, and on the
+    # system clock it would find every verdict 1.8e9 s stale and gate
+    # nothing, silently, for ever.
+    ld.add_action(ExecuteProcess(
+        cmd=[sys.executable, _IMU_GATE_SCRIPT, '--config', config,
+             '--ros-args', '-p', 'use_sim_time:=true'],
+        name='imu_gate',
+        output='screen',
+        condition=IfCondition(imu_gate),
+    ))
+    ld.add_action(OpaqueFunction(function=_estimator_filter))
+
+    # Static TF for the three sensor frames, read out of the model file
+    # itself so the transforms cannot drift from the geometry. It takes
+    # the model path rather than the config path for that reason: there
+    # is no second copy of a pose anywhere in this launch file.
+    ld.add_action(ExecuteProcess(
+        cmd=[sys.executable, _TF_SCRIPT, '--model', model],
+        name='sensor_tf',
+        output='screen',
+        condition=IfCondition(tf),
     ))
 
     # The two vehicle nodes. They are plain scripts on purpose: this

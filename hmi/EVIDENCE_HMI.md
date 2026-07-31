@@ -585,6 +585,16 @@ noise the operator has to learn to ignore.
 the page is not reproducible from this repository and would age against the
 markup. Opening `http://127.0.0.1:8088/` while the HMI runs is the check.
 
+> **Revisited 2026-07-31 — section H.** Screenshots are now committed, for a
+> reason this section did not have: the page is about to be rewritten as HMI v2,
+> and the owner asked for a picture of what v2 inherits. Both halves of the
+> objection above are answered rather than dropped — the images are reproducible
+> because the script that presses the buttons is committed beside them
+> (`tools/capture_screens.mjs`), and they still age against the markup, which is
+> why section H states plainly that they are **baseline documentation, not
+> evidence and not a gate claim**. The figures in this section remain the
+> evidence for what this section claims.
+
 **This section predates `m4f-07b`.** The RESET control it exercised was the
 momentary one, and the page's markup and handlers have since changed (A.5,
 section E). Re-running the browser pass against the held reset is carried in D as
@@ -601,7 +611,7 @@ not shown.
 | Anything about the commissioned S7-1500 | Both harnesses refuse a non-loopback endpoint and `hmi/config.yaml` was never run. The live connection is the owner's, later |
 | Anything about the TIA Portal build | Section B ran against `plc/forklift/double/`, a rehearsal stand-in. `opcua-nodes.md` §10 is a design value until the owner reads the `Forklift/` subtree back out of the tool (§10.2 step 6) |
 | ~~A browser that crashes with the joystick held~~ **— closed by `m4f-07b`, section E** | This was the open item: the page returns the controls to rest on release, blur, hide and unload, but a hard crash left the last requests standing until the PLC's watchdog acted. §10.8 H6 ruled the window and E.2 demonstrates it — the page's own `GET /state` is the beacon, and at `UI_POLL_STALE_TIME` the backend returns every request to rest under a continuing heartbeat. It is a **process** reaction, not a safety function, and the machine is still stopped by the PLC. What is still not covered, and cannot be by any timer this layer runs, is an operator who walks away from a live browser: the poll keeps ticking and no window notices |
-| The page's held RESET exercised in a real browser | Section C's browser pass predates `m4f-07b` and was not re-run: no browser was drivable from this session. The handlers were changed to the same press-and-hold shape the fork buttons already use, and E.4 demonstrates the whole of T5.4 through the endpoint the page posts to — but the DOM events themselves are unexercised since the change, and re-running section C against the held reset is the honest next step |
+| ~~The page's held RESET exercised in a real browser~~ **— closed by section H (H.2)** | Section C's browser pass predated `m4f-07b` and was not re-run: no browser was drivable from that session. The handlers were changed to the same press-and-hold shape the fork buttons already use, and E.4 demonstrated the whole of T5.4 through the endpoint the page posts to — but the DOM events themselves were unexercised since the change. Section H presses the button with real pointer events on 2026-07-31 and records `HmiResetRequest true` while it is held |
 | Two writing clients being *enforced* apart | Per-client scoping is policy, not server enforcement, on a CPU running access control disabled and security `None` (ADR 0008 D2.5). A.1 shows this client keeping the policy; it does not show the server keeping it |
 | A measured worst-case write period on the target machine | §10.8 P3 sets `HMI_STALE_TIME` at three worst-case write periods and says to re-derive it from a measurement if the HMI's worst case exceeds 200 ms. The p95 here is `100.90 ms`, well inside, but that is a WSL loopback figure against a double, not the commissioned cell |
 
@@ -1159,8 +1169,223 @@ outside WSL2 (LESSONS 2026-07-27).
 
 | Not shown | Why |
 |---|---|
-| A live-browser, DOM-rendered confirmation of the grey "not present" styling or the violet banner's visual distinctiveness | Verified two other ways instead: the data contract (`/state`'s `safety` section, G.1–G.2) and the served markup (G.3) — no browser automation was available to this session, the same gap section C/D record for the held reset |
+| ~~A live-browser, DOM-rendered confirmation of the grey "not present" styling or the violet banner's visual distinctiveness~~ **— captured in section H (H.4, H.10, H.11)** | Verified two other ways at the time: the data contract (`/state`'s `safety` section, G.1–G.2) and the served markup (G.3) — no browser automation was available to that session. A browser was available on 2026-07-31 and both states are now recorded as images |
 | Anything about the commissioned S7-1500 or PLCSIM Advanced | Neither was contacted; both harness modes refuse a non-loopback `--hmi` outright and `hmi/config.yaml` was not run |
 | A real F-runtime group forming `SafetyResetRequired` as the OR of the other two | `safety_mirror_double.py` holds no F-program; every mirror value in G.2 is exactly what the harness wrote. That claim is `plc/forklift-safety/SPEC.md` §6's, verified against the F-runtime group directly, not through this HMI |
 | §10.8 H5's clean-shutdown path, on this platform | See G.5 — this section's own subprocess stops are hard kills, not caught signals; both the absent- and present-mode HMI logs end without a "shutting down cleanly" line |
 | Whether the auto-published `DataBlocksGlobal` path also refuses a write for this group | §11.4's caveat and §9.8's open item; unrelated to this double, which has no such path at all |
+
+---
+
+# H. The M4 page, photographed — baseline before HMI v2
+
+**This section is baseline documentation, not evidence for a gate criterion and
+not a claim about anything.** It records what the M4 commissioning page looks
+like and how it behaves, in a real browser engine, as it stands *before* the
+HMI v2 work of the current gate changes it. Every state below was produced by a
+double on loopback; no PLC and no F-CPU exist in any of it.
+
+Sections A–G are still the evidence. An image ages against the markup in a way a
+quoted figure does not, so each screenshot is committed together with the DOM
+readout the page was showing at the instant of capture — the numbers, not the
+picture, are what can be checked later.
+
+| Item | Value |
+|---|---|
+| Date | **2026-07-31**. One capture run, UTC: pass 1 images written `07:36:56`–`07:37:12`, pass 2 images `07:37:19` (file timestamps) |
+| Host | Linux container, Ubuntu 24.04.4, kernel `6.18.5`, headless. **Not WSL2** — sections A–G were produced on the owner's WSL2 machine, and evidence is qualified by the environment that produced it (LESSONS 2026-07-27) |
+| venv | `/home/user/amr-hmi-venv`, `python3.12 -m venv` — **plain venv, deliberately not `--system-site-packages`**; `python -c 'import rclpy'` answers `ModuleNotFoundError: No module named 'rclpy'` |
+| Python | `3.12.3 (main, Mar  3 2026, 12:15:18) [GCC 13.3.0]` |
+| asyncua | `2.0.1`, the pin in `bridge/requirements.txt` |
+| Browser | Chromium `141.0.7390.37`, driven headless by Playwright (Node). Both are environment tooling: **nothing in `hmi/` imports either**, and the HMI itself is unchanged by this section |
+| Pass 1 server | `plc/forklift/double/server.py` on **4850**, the PLC layer's logic double, with `hmi/config-logic-double.yaml` (HTTP 8090). Images 01–09 |
+| Pass 2 server | `hmi/tools/safety_mirror_double.py --with-safety-mirrors` on **4860**, with `hmi/config-safety-mirror-double.yaml` (HTTP 8093). Images 10–11 |
+| Instruments | `hmi/tools/capture_screens.mjs` (drives the browser, spawns and stops every process) and `hmi/tools/screens_plant_driver.py` (plays the bridge and the plant: it writes the four `Forklift/Input/` nodes and `DemoCell/Link/BridgeHeartbeat`, and never a `Forklift/Hmi/` node) |
+| Images | `evidence/hmi-page-01…11-*-2026-07-31.png`, 1680 px wide, full page |
+| Raw evidence | `evidence/capture-2026-07-31-m5-13a.log` — the capture run's own output, including the DOM readout printed immediately before each screenshot and every browser console message. Every figure quoted below is a value from that log or text visible in the image it describes |
+
+The three roles of section B are unchanged, with the browser in the operator's
+place: the plant driver plays the bridge and the plant, the page plays the
+operator, and the double plays the PLC and owns every verdict. Nothing here is
+evidence about the TIA Portal build.
+
+Every process had stopped before the images were read: `ss -ltn` reported **no
+listeners on 4850/4860/8090/8093** afterwards (LESSONS 2026-07-28 — a session is
+ended by observation, never by assumption).
+
+## H.1 `hmi-page-01-reset-required-2026-07-31.png` — the page at boot
+
+Logic double, nothing touched yet. The amber **RESET REQUIRED** banner, the
+`ForkliftResetRequired` lamp, and the reset-sequence hint beside the buttons. The
+latch is the double's own start state (`ForkliftObstacleInStopZone` starts
+`TRUE`, `plc/forklift/double/logic.py`), formed before the operator arrived —
+which is exactly the boot behaviour CLAUDE.md §9 asks for: the machine does not
+resume by itself.
+
+```
+{ "linkstate": "CONNECTED", "hb": "15", "rtt": "1.8 / 1.7 ms",
+  "lamps": { "resetreq": true, "linkok": true, "teleop": false },
+  "stopbanner": { "on": true, "title": "RESET REQUIRED" } }
+```
+
+## H.2 `hmi-page-02-reset-held-2026-07-31.png` — RESET held down
+
+**This is what section D listed as not shown.** The button is pressed with a real
+`pointerdown` and held for 1.5 s before the capture, so the `m4f-07b` DOM
+handlers are the ones under the finger, not the HTTP endpoint behind them.
+`HmiResetRequest` reads `true` on the page's own request table while the button
+is down, and the latch has already cleared on the rising edge:
+
+```
+{ "requests": { "reset": "true", "teleop": "false" },
+  "lamps": { "resetreq": false }, "stopbanner": { "on": false } }
+```
+
+**One finding, and it is cosmetic.** The RESET button looks *identical* held and
+not held. `button:active, button.held` sets the live blue, but `button#reset`
+follows it in the stylesheet with a higher specificity (an id beats a class), so
+the amber styling wins in both states. The fork-jog buttons, which carry no id
+rule, do light up while held — visible in H.5. The behaviour is correct in both
+cases and only the feedback differs; it is recorded here because an operator
+holding a control with no visual acknowledgement is exactly the kind of thing an
+HMI v2 pass should fix.
+
+## H.3 `hmi-page-03-connected-teleop-2026-07-31.png` — connected and driving
+
+The reference image of the page in its normal working state: joystick held at
+`X = +0.55, Y = +0.64`, ENABLE asserted, the carriage raised to `1.20 m`, and the
+PLC answering.
+
+```
+{ "linkstate": "CONNECTED", "hb": "71", "rtt": "1.9 / 1.9 ms",
+  "requests": { "traction": "0.640", "steer": "0.721", "fork": "0.000",
+                "teleop": "true", "reset": "false" },
+  "lamps": { "teleop": true, "speed": true, "linkok": true },
+  "metrics": { "tref": "0.192", "speed": "0.180", "height": "1.200",
+               "sref": "0.721", "period": "100.0", "age": "149" } }
+```
+
+`0.192` is `0.64 × 0.30`, the raised-carriage cap — not `0.64 × 1.00`. The HMI
+neither applied that cap nor knows its threshold: it displayed the request it
+sent and the reference the PLC formed, side by side, and recomputed neither
+(invariant 10). Same figure as section C's browser pass, from a different
+machine and a different session.
+
+## H.4 `hmi-page-04-safety-mirrors-absent-2026-07-31.png` — `Forklift/Safety/` absent
+
+The section 11 panel on a server that does not carry the group, cropped to the
+panel. All four lamps greyed at 40 % opacity with their bulbs neutral, and the
+amber "not present" note under them. **Greyed is its own state, never a guessed
+`FALSE`** (`opcua-nodes.md` §11.6). The link is `CONNECTED` throughout: an absent
+optional group is not a connect failure.
+
+## H.5 `hmi-page-05-fork-jog-held-2026-07-31.png` — the fork jog held
+
+`FORK UP` held, visibly lit blue by the `.held` rule. The request is a
+full-scale `1.000` and the PLC answers with `0.150 m/s`, `FORK_SPEED_MAX`:
+
+```
+{ "requests": { "fork": "1.000", "teleop": "true" },
+  "metrics": { "fref": "0.150", "height": "1.200", "tref": "0.000" } }
+```
+
+## H.6 `hmi-page-06-process-stop-latched-2026-07-31.png` — a latched process stop
+
+`ForkliftObstacleInStopZone` was driven `TRUE` by the plant driver *while the
+joystick was still held*. The red **PROCESS STOP LATCHED** banner, both stop
+lamps lit, `ForkliftResetRequired` back on — and the requests still standing at
+`0.560 / 0.655 / true` while every reference reads `0.000`:
+
+```
+{ "requests": { "traction": "0.560", "steer": "0.655", "teleop": "true" },
+  "lamps": { "obstacle": true, "zone": true, "resetreq": true, "teleop": false },
+  "metrics": { "tref": "0.000", "sref": "0.000" } }
+```
+
+That gap between a live request and a zero reference is the whole architecture in
+one picture: the operator is still asking, and the PLC has already decided. The
+banner says so in its own fine print — standard-program process logic, not a
+safety function, and this page is not a safety device.
+
+## H.7 `hmi-page-07-page-beacon-stale-2026-07-31.png` — §10.8 H6, seen from the page
+
+The browser context was taken offline for 2.2 s, longer than
+`UI_POLL_STALE_TIME = 1000 ms`, and photographed on the first poll after it came
+back. The link banner still reads `CONNECTED` and the heartbeat is still
+counting; what changed is the **page beacon**, in amber:
+
+```
+{ "linkstate": "CONNECTED", "hb": "151", "beacon": "STALE - requests held at rest",
+  "requests": { "traction": "0.000", "teleop": "false", "reset": "false" } }
+```
+
+The backend returned all five requests to rest, the enable included, **while the
+write cycle and the heartbeat kept running**. Nothing latched and no reset is
+owed for it: the process is healthy and what was gone is the page.
+
+## H.8 `hmi-page-08-requests-dropped-notice-2026-07-31.png` — after the page returns
+
+The same run one second later. The beacon reads a normal age again and the
+amber notice carries the history — "Requests were held at rest 1 time(s) … press
+ENABLE again when ready. Nothing latched in the PLC and no reset is owed for
+this." Recovery is a release, never a resume: `HmiTeleopRequest` stays `false`
+until a person presses ENABLE again.
+
+## H.9 `hmi-page-09-link-lost-2026-07-31.png` — supervision lost
+
+The double was killed under a live session. The banner turns amber
+**RECONNECTING** and carries the reason verbatim, the heartbeat reads
+`161  STOPPED`, and the whole metrics table greys out at `metrics age 1748 ms`:
+
+```
+{ "linkstate": "RECONNECTING", "hb": "161  STOPPED", "lastwrite": "1650 ms ago" }
+```
+
+with the reason line under the banner, read off the image itself:
+
+```
+ConnectionRefusedError: [Errno 111] Connect call failed ('127.0.0.1', 4850)
+```
+
+The stale values stay on screen, greyed rather than blanked or frozen-looking,
+and the page keeps saying in its footer what this is: a degraded mode with a
+PLC-owned controlled stop, never a safety event (invariants 1, 2).
+
+## H.10 `hmi-page-10-safety-mirrors-present-2026-07-31.png` — `Forklift/Safety/` present
+
+The same panel against `safety_mirror_double.py --with-safety-mirrors`, cropped.
+Three violet lamps lit and one dark, the group's fail-safe start values
+`EStopDemand TRUE`, `ZoneStopDemand TRUE`, `SafetyResetRequired TRUE`,
+`SafetyResetFault FALSE` (§11.6). Read side by side with H.4 this is the whole of
+§11.6's contract: present-and-lit, present-and-dark, and absent are three
+distinguishable states on the panel.
+
+## H.11 `hmi-page-11-safety-demand-banner-2026-07-31.png` — the mirror banner
+
+The full page for the same run. The violet **SAFETY DEMAND** banner sits below
+the amber process banner, with a different hue, a double border, its own heading
+and the label "F-CPU safety demand (mirror, read-only)" — the visual
+distinctness §11 asks for, seen rather than inferred from the markup. Its text is
+the PLC's own `SafetyResetRequired`, quoted, never an OR this page re-derived:
+
+```
+"SafetyResetRequired is TRUE on the F-runtime group -- EStopDemand true,
+ ZoneStopDemand true. A monitored reset on that group's own device clears it;
+ nothing on this page can."
+```
+
+This double is a **dumb address space**: it runs no program, so `HmiLinkOk` is
+dark and every `Forklift/Output/` and `Forklift/Status/` value in that image is a
+start value, not a verdict. The mirrors are the only thing in image 11 worth
+reading.
+
+## H.12 What is deliberately not shown here
+
+| Not shown | Why |
+|---|---|
+| Anything about the commissioned S7-1500, PLCSIM Advanced or the TIA build | Neither was contacted. Both configurations name loopback ports 4850 and 4860; `hmi/config.yaml` was not run |
+| Anything about a real F-CPU | The four mirrors in H.10–H.11 are `safety_mirror_double.py`'s start values. No F-program exists behind them, and no safety claim is made or implied by an image of a lamp |
+| The page under a real operator's hand, on the commissioning laptop | A headless Chromium driven by a script is not an operator, and no touch device, screen size or lighting condition was evaluated. Ergonomics of the M4 page are untested and stay that way |
+| A latch cleared with the full T5.4 sequence | H.2 shows the held reset clearing the boot latch with the enable already low. `SPEC.md` §11 T5.4's whole procedure — release ENABLE, hold RESET across the moment the cause disappears, assert ENABLE again — is section E's, run against the endpoint, and is not repeated here |
+| The `page beacon` window measured, rather than illustrated | H.7 is a picture of a state whose numbers section E measured. Nothing in this section times anything |
+| Any figure derived by arithmetic while writing | Every quoted value is what the page's own DOM carried at the instant of capture, printed by the capture script beside each shot |

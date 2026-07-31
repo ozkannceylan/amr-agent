@@ -1,8 +1,10 @@
 # TODO
 
-Open items only. M4 (forklift commissioning, ADR 0008) is the open gate,
-in closing; the m5r restructure round (ADR 0010) is in flight and its
-brief queue lives in docs/PLAN.md.
+Open items only. M5 (sensored autonomous forklift, ADR 0010 D2) is the open
+gate; M4 (forklift commissioning, ADR 0008) is closing, on the owner's
+recorded commissioning showcase and the m4f-09 gate verification. The m5r
+restructure round (ADR 0010) is closed; the brief queue lives in
+docs/PLAN.md.
 
 ## owner — build COMPLETE on the CPU (2026-07-30 TIA handover, live-verified)
 - FB_ForkliftTeleop (§7 + §13) in OB30; D1-D7 applied; mirrors and stand-in
@@ -61,15 +63,67 @@ brief queue lives in docs/PLAN.md.
   convenient; not gate work.
 
 
-## M5 opening decisions (with the owner, after the m5r round and M4 close)
-- Map-view data path ADR (ADR 0010 D6a): how SLAM map and obstacle data
-  reach the HMI — done when an accepted ADR names the path and the topology
-  edge.
-- Per-sensor brief plan: safety scanner → F-blocks, navigation lidar, SLAM,
-  Nav2, HMI v2 — done when the M5 brief list stands in PLAN.md.
-- Pre-M6: the deep-research brief (fleet architecture, VDA 5050 at scale,
-  world sizing) — done when its findings are owner-ruled (ADR 0010 D6d).
-- Pre-M7: the m4-00-hermes-survey owner decisions — done when each is ruled.
+## contract — topology gap found 2026-07-30 (m5-02 open question 1)
+- CLAUDE.md §3 does not draw `bridge/` at all: its only PLC-to-vehicle path
+  is PLC → fleet manager → MQTT → client, while the actual M4/M5 command
+  path is HMI → PLC → bridge → simulation. The layer that carries every
+  command demonstrated so far is therefore outside the diagram invariant 11
+  reads against, and unenforceable by it. Needs an owner-approved infra
+  brief plus an arch-docs ruling on whether the bridge edge is drawn as the
+  simulation's stand-in for field wiring or as a layer in its own right.
+  Done when §3 draws the path the demonstrations actually use.
+
+## M5 — judge review follow-ups (docs/reports/m5-judge-architecture-review.md)
+- **BLOCKER, deferred by owner ruling 2026-07-30 until m5-03 returns a
+  verdict.** If the F-I/O probe answers NO, roadmap M5 criterion (a) — "its
+  signals reach the F-CPU safety program's F-blocks" — cannot be met by the
+  named fallback, because watch-table Modify means a human types the value
+  and the scanner's signal reaches nothing. ADR 0011 D2's claim that the
+  fallback changes no gate criterion is wrong in that branch. The owner
+  chose to wait rather than pre-decide, since a YES makes the question moot.
+  Done when m5-03's verdict is in and, if NO, one of: the fallback is
+  upgraded to an automated API-driven standard-DB stimulus carrying the
+  S015 validity check, or criterion (a) is amended by ADR. Do not let the
+  gate proceed past m5-15 with this open.
+- M4 showcase recording: owner ruled it is made against the CURRENT tree
+  (judge finding 7). Criterion (d)'s instrument changed under it — the ±90°
+  scanner was deleted and the process stop plane moved 0.25 → 0.15 m — and
+  m5-06 verified live that the behaviour is preserved on the front safety
+  scanner's measurement channel (0.90 m crate caught at 0.85 m). Done when
+  that instrument change is written into the M4 evidence and the scenario
+  procedure, so the recording says which tree it certifies.
+- Monitoring plane, m5-13 briefing (judge finding 6): "read-only by
+  construction" is today a source-code property, not a runtime-enforced one.
+  Decide whether m5-13 adds real enforcement (SROS2/DDS permissions) or
+  whether the limitation is recorded as a limitation. Do not let the phrase
+  stand unqualified either way.
+- m5-18: PL-SCENARIOS carries "Category 3 is claimed" wording, permanent
+  grep-bait against ADR 0011 D5 item 1 — sweep the verb, not the noun.
+
+## M5 — open items
+- Monitoring service directory: ADR 0011 D4 recommends `agv/` but does not
+  rule it; `viz/` is the alternative and the ADR 0005 test names the
+  question — done when the first monitoring brief rules it.
+- F-DI order number and its parameterisation (1oo2 equivalent, discrepancy
+  time, input delay) are unfixed pending the m5-03 verdict — done when the
+  F-program spec carries owner-verified values.
+- plc/forklift-safety/SPEC.md open item 1 is answered in direction, not in
+  fact: ADR 0011 F3 gives the probable cause (TIA V18/V19 defaulting above
+  the supported safety-system-version list) — done when m5-03 settles it.
+- Later gates: the M6 deep-research brief (ADR 0010 D6d) and the
+  m4-00-hermes-survey decisions for M7 (D6c) — each done when owner-ruled.
+
+## sim — M5, queued behind the m5-06 topic names
+- sim/launch/forklift_bringup.launch.py bridges `/forklift/gz/scan`, which
+  m5-04 replaced with three scanners: it spawns cleanly, logs a bridge for
+  every entry, reports no error and carries no data — a SILENT failure that
+  will hang the rehearsal. Fix once m5-06 publishes the channel names
+  (m5-07 open question 1). Done when the bringup carries data on the new
+  topics, shown by an echo.
+- The arena has nothing at the 1.80 m navigation plane except one pillar —
+  SLAM needs landmarks there, and a long featureless aisle is a degenerate
+  direction no parameter fixes (m5-04 open question 2, m5-08 depends on it).
+- The mast's rendered and physical bodies disagree (m5-04 open question 5).
 
 ## sim
 - Cell reskin (deferred, visual only, ARIAC licence blocker unchanged).
@@ -80,12 +134,26 @@ brief queue lives in docs/PLAN.md.
 - forklift_commissioning.md §1/§10 quote HMI port 8090, which is the
   rehearsal config's; hmi/config.yaml binds 8088 — align the doc with the
   config it names (m4f-10 OQ3).
-- sim/README.md:50 lists scenarios/EVIDENCE_NAV.md, which exists only once
-  a run produces it (DEFERRED.md:28) — mark it "(generated by the first
+- sim/README.md:51 lists scenarios/EVIDENCE_NAV.md, which exists only once
+  a run produces it (DEFERRED.md:51) — mark it "(generated by the first
   run)" with the next sim touch (m5r-07 OQ6).
 - M5 carried: resume the parked navigation scenario on the forklift
-  (sim/scenarios/DEFERRED.md); the platform migration off RB-KAIROS is
-  M5-briefing work (ADR 0010 D1).
+  (sim/scenarios/DEFERRED.md). Nothing migrates automatically — m5-09
+  deleted the scenario's Nav2 config with the retired platform and m5-10
+  writes the forklift's from scratch; which of the parked files survive is
+  m5-10 briefing work.
+- Carried (m5-10 briefing, raised by m5-09): the parked scenario's two
+  remaining code files still carry retired-platform values —
+  scenarios/nav_scenario.launch.py (NavFn/DWB/spin-backup node set, the
+  retired command topic, params_file now required with no file to satisfy
+  it) and scenarios/run_scenario.py (the retired odometry topic). The owner
+  ruled only on the Nav2 config; decide keep-or-delete for these two.
+- Carried (m5-10 briefing, raised by m5-09): sim/launch/warehouse_bringup
+  .launch.py spawns the retired vehicle through its vendor launch, and
+  sim/worlds/BRINGUP_EVIDENCE.md is that vehicle's bringup evidence.
+  m5-09 could not touch either (a concurrent agent held sim/launch/ and
+  sim/worlds/). Definition of done: both are ruled on and, if kept, say so
+  as record rather than as a runnable procedure.
 
 ## interface
 - Carried (fold into the next interface brief): opcua-nodes.md §10.1 still
@@ -174,9 +242,6 @@ brief queue lives in docs/PLAN.md.
   (m4r2-04 residue) — one infra brief when convenient.
 - CLAUDE.md §4's repository layout does not list stack.sh (m5r-09
   finding 4) — one line with the next contract touch, owner-approved.
-- assets/rb-kairos-gazebo.png and its reproduced BSD-3-Clause notice
-  illustrate nothing after ADR 0010 (m5r-04 OQ2) — keep or remove is the
-  owner's call, one line either way.
 
 ## publication
 - Repository is public-ready and pushed; visibility is the owner's to flip.

@@ -1,0 +1,56 @@
+[capture] chromium 141.0.7390.37
+[capture] started double pid 2625
+[capture] started plant pid 2634
+[capture] started hmi pid 2635
+[capture] boot {"link":"CONNECTED","linkstate":"CONNECTED","hb":"15","rtt":"1.8 / 1.7 ms","beacon":"149 ms ago","lastwrite":"49 ms ago","requests":{"traction":"0.000","steer":"0.000","fork":"0.000","teleop":"false","reset":"false"},"lamps":{"teleop":false,"obstacle":false,"speed":false,"resetreq":true,"linkok":true,"zone":false},"safety":{"notpresent":true,"estop":false,"zone":false,"resetreq":false,"resetfault":false,"banner":false},"stopbanner":{"on":true,"title":"RESET REQUIRED"},"metrics":{"tref":"0.000","speed":"0.000","height":"0.200","dist":"3.500","sref":"0.000","fref":"0.000","rtt":"1.82","rttmed":"1.73","period":"100.1","age":"149"}}
+[capture] shot hmi-page-01-reset-required-2026-07-31.png  255737 bytes  — boot state against the logic double: RESET REQUIRED banner, ForkliftResetRequired lamp
+[capture] reset held {"link":"CONNECTED","linkstate":"CONNECTED","hb":"31","rtt":"1.8 / 2.0 ms","beacon":"149 ms ago","lastwrite":"49 ms ago","requests":{"traction":"0.000","steer":"0.000","fork":"0.000","teleop":"false","reset":"true"},"lamps":{"teleop":false,"obstacle":false,"speed":false,"resetreq":false,"linkok":true,"zone":false},"safety":{"notpresent":true,"estop":false,"zone":false,"resetreq":false,"resetfault":false,"banner":false},"stopbanner":{"on":false,"title":"RESET REQUIRED"},"metrics":{"tref":"0.000","speed":"0.000","height":"0.200","dist":"3.500","sref":"0.000","fref":"0.000","rtt":"1.76","rttmed":"1.96","period":"100.1","age":"149"}}
+[capture] shot hmi-page-02-reset-held-2026-07-31.png  211683 bytes  — RESET held down: HmiResetRequest true for as long as the button is held
+[capture] ForkliftResetRequired after the held reset: true
+[capture] driving {"link":"CONNECTED","linkstate":"CONNECTED","hb":"71","rtt":"1.9 / 1.9 ms","beacon":"148 ms ago","lastwrite":"50 ms ago","requests":{"traction":"0.640","steer":"0.721","fork":"0.000","teleop":"true","reset":"false"},"lamps":{"teleop":true,"obstacle":false,"speed":true,"resetreq":false,"linkok":true,"zone":false},"safety":{"notpresent":true,"estop":false,"zone":false,"resetreq":false,"resetfault":false,"banner":false},"stopbanner":{"on":false,"title":"RESET REQUIRED"},"metrics":{"tref":"0.192","speed":"0.180","height":"1.200","dist":"3.200","sref":"0.721","fref":"0.000","rtt":"1.90","rttmed":"1.92","period":"100.0","age":"149"}}
+[capture] shot hmi-page-03-connected-teleop-2026-07-31.png  217699 bytes  — connected and driving: joystick held, ENABLE asserted, PLC lamps and metrics live
+[capture] shot hmi-page-04-safety-mirrors-absent-2026-07-31.png  32133 bytes  — Forklift/Safety/ absent on this server: the group greys rather than reading FALSE
+[capture] fork jog held {"link":"CONNECTED","linkstate":"CONNECTED","hb":"95","rtt":"2.1 / 2.1 ms","beacon":"148 ms ago","lastwrite":"50 ms ago","requests":{"traction":"0.000","steer":"0.000","fork":"1.000","teleop":"true","reset":"false"},"lamps":{"teleop":true,"obstacle":false,"speed":true,"resetreq":false,"linkok":true,"zone":false},"safety":{"notpresent":true,"estop":false,"zone":false,"resetreq":false,"resetfault":false,"banner":false},"stopbanner":{"on":false,"title":"RESET REQUIRED"},"metrics":{"tref":"0.000","speed":"0.180","height":"1.200","dist":"3.200","sref":"0.000","fref":"0.150","rtt":"2.12","rttmed":"2.08","period":"100.0","age":"147"}}
+[capture] shot hmi-page-05-fork-jog-held-2026-07-31.png  215783 bytes  — FORK UP held: HmiForkRequest 1.000 and the PLC answering with ForkliftForkSpeedRef
+[capture] process stop latched {"link":"CONNECTED","linkstate":"CONNECTED","hb":"121","rtt":"2.1 / 2.1 ms","beacon":"148 ms ago","lastwrite":"50 ms ago","requests":{"traction":"0.560","steer":"0.655","fork":"0.000","teleop":"true","reset":"false"},"lamps":{"teleop":false,"obstacle":true,"speed":false,"resetreq":true,"linkok":true,"zone":true},"safety":{"notpresent":true,"estop":false,"zone":false,"resetreq":false,"resetfault":false,"banner":false},"stopbanner":{"on":true,"title":"PROCESS STOP LATCHED"},"metrics":{"tref":"0.000","speed":"0.000","height":"1.200","dist":"0.350","sref":"0.000","fref":"0.000","rtt":"2.12","rttmed":"2.08","period":"99.9","age":"149"}}
+[capture] shot hmi-page-06-process-stop-latched-2026-07-31.png  262248 bytes  — PLC-latched process stop over a live command: setpoints held at zero by the PLC
+[capture]   console: error Failed to load resource: net::ERR_INTERNET_DISCONNECTED
+[capture]   console: error Failed to load resource: net::ERR_INTERNET_DISCONNECTED
+[capture]   console: error Failed to load resource: net::ERR_INTERNET_DISCONNECTED
+[capture]   console: error Failed to load resource: net::ERR_INTERNET_DISCONNECTED
+[capture]   console: error Failed to load resource: net::ERR_INTERNET_DISCONNECTED
+[capture]   console: error Failed to load resource: net::ERR_INTERNET_DISCONNECTED
+[capture]   console: error Failed to load resource: net::ERR_INTERNET_DISCONNECTED
+[capture]   console: error Failed to load resource: net::ERR_INTERNET_DISCONNECTED
+[capture]   console: error Failed to load resource: net::ERR_INTERNET_DISCONNECTED
+[capture]   console: error Failed to load resource: net::ERR_INTERNET_DISCONNECTED
+[capture]   console: error Failed to load resource: net::ERR_INTERNET_DISCONNECTED
+[capture] page beacon stale {"link":"CONNECTED","linkstate":"CONNECTED","hb":"151","rtt":"1.8 / 2.1 ms","beacon":"STALE - requests held at rest","lastwrite":"50 ms ago","requests":{"traction":"0.000","steer":"0.000","fork":"0.000","teleop":"false","reset":"false"},"lamps":{"teleop":false,"obstacle":true,"speed":false,"resetreq":true,"linkok":true,"zone":true},"safety":{"notpresent":true,"estop":false,"zone":false,"resetreq":false,"resetfault":false,"banner":false},"stopbanner":{"on":true,"title":"PROCESS STOP LATCHED"},"metrics":{"tref":"0.000","speed":"0.000","height":"1.200","dist":"0.350","sref":"0.000","fref":"0.000","rtt":"1.75","rttmed":"2.13","period":"100.1","age":"148"}}
+[capture] shot hmi-page-07-page-beacon-stale-2026-07-31.png  285072 bytes  — the backend held the requests at rest while this page was silent (§10.8 H6)
+[capture] after the drop {"link":"CONNECTED","linkstate":"CONNECTED","hb":"159","rtt":"2.2 / 1.9 ms","beacon":"148 ms ago","lastwrite":"50 ms ago","requests":{"traction":"0.000","steer":"0.000","fork":"0.000","teleop":"false","reset":"false"},"lamps":{"teleop":false,"obstacle":true,"speed":false,"resetreq":true,"linkok":true,"zone":true},"safety":{"notpresent":true,"estop":false,"zone":false,"resetreq":false,"resetfault":false,"banner":false},"stopbanner":{"on":true,"title":"PROCESS STOP LATCHED"},"metrics":{"tref":"0.000","speed":"0.000","height":"1.200","dist":"0.350","sref":"0.000","fref":"0.000","rtt":"2.23","rttmed":"1.92","period":"100.0","age":"150"}}
+[capture] shot hmi-page-08-requests-dropped-notice-2026-07-31.png  283288 bytes  — after the page returns: the drop is reported, nothing latched, no reset owed
+[capture] stopped double
+[capture] link lost {"link":"RECONNECTING","linkstate":"RECONNECTING","hb":"161  STOPPED","rtt":"2.2 / 2.0 ms","beacon":"48 ms ago","lastwrite":"1650 ms ago","requests":{"traction":"0.000","steer":"0.000","fork":"0.000","teleop":"false","reset":"false"},"lamps":{"teleop":false,"obstacle":true,"speed":false,"resetreq":true,"linkok":true,"zone":true},"safety":{"notpresent":true,"estop":false,"zone":false,"resetreq":false,"resetfault":false,"banner":false},"stopbanner":{"on":true,"title":"PROCESS STOP LATCHED"},"metrics":{"tref":"0.000","speed":"0.000","height":"1.200","dist":"0.350","sref":"0.000","fref":"0.000","rtt":"2.18","rttmed":"1.95","period":"100.0","age":"1748"}}
+[capture] shot hmi-page-09-link-lost-2026-07-31.png  291429 bytes  — supervision lost: the link banner leaves CONNECTED and the metrics grey out
+[capture] stopped plant
+[capture] stopped hmi
+[capture] started safetydouble pid 2752
+[capture] started hmi-safety pid 3115
+[capture] safety mirrors present {"link":"CONNECTED","linkstate":"CONNECTED","hb":"16","rtt":"1.9 / 2.0 ms","beacon":"115 ms ago","lastwrite":"83 ms ago","requests":{"traction":"0.000","steer":"0.000","fork":"0.000","teleop":"false","reset":"false"},"lamps":{"teleop":false,"obstacle":false,"speed":false,"resetreq":true,"linkok":false,"zone":true},"safety":{"notpresent":false,"estop":true,"zone":true,"resetreq":true,"resetfault":false,"banner":true},"stopbanner":{"on":true,"title":"RESET REQUIRED"},"metrics":{"tref":"0.000","speed":"0.000","height":"0.000","dist":"0.000","sref":"0.000","fref":"0.000","rtt":"1.89","rttmed":"2.01","period":"100.1","age":"83"}}
+[capture] shot hmi-page-10-safety-mirrors-present-2026-07-31.png  25220 bytes  — Forklift/Safety/ present: the four mirrors at their fail-safe start values
+[capture] shot hmi-page-11-safety-demand-banner-2026-07-31.png  278473 bytes  — the F-CPU safety demand banner, visually distinct from the process-stop banner
+[capture] stopped hmi-safety
+[capture] stopped safetydouble
+[capture] page-beacon STALE captured: true
+[capture] --- screenshots ---
+[capture] hmi-page-01-reset-required-2026-07-31.png  255737 bytes  boot state against the logic double: RESET REQUIRED banner, ForkliftResetRequired lamp
+[capture] hmi-page-02-reset-held-2026-07-31.png  211683 bytes  RESET held down: HmiResetRequest true for as long as the button is held
+[capture] hmi-page-03-connected-teleop-2026-07-31.png  217699 bytes  connected and driving: joystick held, ENABLE asserted, PLC lamps and metrics live
+[capture] hmi-page-04-safety-mirrors-absent-2026-07-31.png  32133 bytes  Forklift/Safety/ absent on this server: the group greys rather than reading FALSE
+[capture] hmi-page-05-fork-jog-held-2026-07-31.png  215783 bytes  FORK UP held: HmiForkRequest 1.000 and the PLC answering with ForkliftForkSpeedRef
+[capture] hmi-page-06-process-stop-latched-2026-07-31.png  262248 bytes  PLC-latched process stop over a live command: setpoints held at zero by the PLC
+[capture] hmi-page-07-page-beacon-stale-2026-07-31.png  285072 bytes  the backend held the requests at rest while this page was silent (§10.8 H6)
+[capture] hmi-page-08-requests-dropped-notice-2026-07-31.png  283288 bytes  after the page returns: the drop is reported, nothing latched, no reset owed
+[capture] hmi-page-09-link-lost-2026-07-31.png  291429 bytes  supervision lost: the link banner leaves CONNECTED and the metrics grey out
+[capture] hmi-page-10-safety-mirrors-present-2026-07-31.png  25220 bytes  Forklift/Safety/ present: the four mirrors at their fail-safe start values
+[capture] hmi-page-11-safety-demand-banner-2026-07-31.png  278473 bytes  the F-CPU safety demand banner, visually distinct from the process-stop banner

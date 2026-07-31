@@ -23,14 +23,33 @@ sim/
                                     (24 x 16 hall, drive aisle, obstacle props)
   worlds/FORKLIFT_ARENA_EVIDENCE.md dated verification record of the arena run
   launch/forklift_bringup.launch.py one-command headless arena bringup + spawn
-  worlds/warehouse.sdf              warehouse world of the parked navigation
-                                    scenario; navigation resumes at M5 on the
-                                    forklift (ADR 0010) and whether this world
-                                    is reused there is decided at briefing
-                                    (walls, racks, DoorGap, ConveyorStation,
-                                    ChargerStation)
-  worlds/BRINGUP_EVIDENCE.md        dated verification record of the headless run
-  launch/warehouse_bringup.launch.py  one-command headless bringup
+  worlds/warehouse.sdf              M5 autonomy world: 30 x 20 hall, three
+                                    rack rows cut by a central cross aisle,
+                                    two end aisles, building columns, dock
+                                    door, transfer station, two charging
+                                    bays, safety zone marking
+  worlds/WAREHOUSE_EVIDENCE.md      dated bringup record of that world, and
+                                    the citable charging bay register
+  worlds/WAREHOUSE_LANDMARKS.md     measured landmark availability at the
+                                    navigation scan plane, produced BEFORE
+                                    any SLAM run; names the degenerate
+                                    stretches
+  worlds/WAREHOUSE_SLAM_EVIDENCE.md the SLAM mapping run, read against that
+                                    prediction stretch by stretch
+  worlds/BRINGUP_EVIDENCE.md        HISTORICAL ONLY: the retired RB-KAIROS
+                                    platform's headless run, in the world as
+                                    it was before m5-08
+  launch/warehouse_bringup.launch.py  one-command headless bringup + forklift
+                                    spawn + the vehicle's estimator stack
+                                    (wraps forklift_bringup)
+  launch/warehouse_slam.launch.py   slam_toolbox online_async against a
+                                    running warehouse bringup
+  config/slam_toolbox_warehouse.yaml  its parameters; every non-default
+                                    carries its reason on the line above it
+  maps/warehouse/                   THE warehouse map. warehouse.pgm/.yaml
+                                    for AMCL, warehouse.posegraph/.data to
+                                    resume mapping. Built by SLAM, not
+                                    rasterised
   setup/install.sh                  idempotent environment setup (run as root)
   scenarios/
     forklift_commissioning.md       M4 gate procedure: the five criteria as
@@ -40,13 +59,23 @@ sim/
                                     move the aisle crate, transcribe /state
     run_forklift_rehearsal.py       rehearsal harness for the five scenarios
                                     against the PLC logic double
-    tools/make_map.py               deterministic map generator (world -> map)
-    maps/map.yaml, map.pgm          occupancy grid of warehouse.sdf (generated)
-    config/nav2_params.yaml         Nav2 parameters of the parked RB-KAIROS
-                                    bringup (platform retired, ADR 0010)
-    nav_scenario.launch.py          Nav2 stack (map_server, AMCL, planner,
-                                    DWB controller, behaviors, bt_navigator)
-    run_scenario.py                 scripted NavigateToPose run + evidence
+    warehouse_mapping_route.py      the stated mapping route, driven as a
+                                    scripted stimulus; the route is a
+                                    constant in the file
+    tools/landmark_map.py           landmark availability of a world at a
+                                    scan plane, from geometry alone
+    tools/make_map.py               deterministic map generator (world -> map),
+                                    rectangles read from the SDF at run time.
+                                    Has NO committed output; see below
+    tools/mapping_evidence.py       record and read a mapping run: /tf
+                                    publishers, the three pose streams, the
+                                    named degenerate stretches, the closures
+    nav_scenario.launch.py          Nav2 stack of the parked scenario
+                                    (map_server, AMCL, planner, DWB
+                                    controller, behaviors, bt_navigator);
+                                    parked, not runnable, see DEFERRED.md
+    run_scenario.py                 scripted NavigateToPose run + evidence;
+                                    parked, not runnable, see DEFERRED.md
     EVIDENCE_NAV.md                 dated capture of a successful headless run
 ```
 
@@ -93,183 +122,180 @@ apt-get install -y \
   ros-jazzy-ros-base ros-jazzy-xacro \
   ros-jazzy-robot-state-publisher ros-jazzy-joint-state-publisher \
   ros-jazzy-gz-sim-vendor ros-jazzy-ros-gz \
-  ros-jazzy-ros2-control ros-jazzy-gz-ros2-control \
-  ros-jazzy-controller-manager ros-jazzy-joint-state-broadcaster \
-  ros-jazzy-joint-trajectory-controller \
-  ros-jazzy-navigation2 ros-jazzy-nav2-bringup \
+  ros-jazzy-navigation2 ros-jazzy-nav2-bringup ros-jazzy-slam-toolbox \
   python3-colcon-common-extensions python3-rosdep python3-vcstool git
 ```
 
 `ros-jazzy-gz-sim-vendor` provides Gazebo Harmonic (gz sim 8), per ADR 0003.
 
-### 4. Robotnik vendor workspace (ADR 0002)
+`ros2_control` is deliberately absent. It was here for the retired vehicle
+platform's vendor mecanum drive; the forklift drives through gz
+joint-controller plugins and a vehicle node. If a later gate needs it, add it
+to `install.sh`'s `ROS_PKGS` and re-verify.
 
-**RB-KAIROS is retired as the vehicle platform (ADR 0010 D1, which supersedes
-ADR 0002's platform selection).** Steps 4 and 5 here, the bringup below and
-the navigation scenario further down are all the RB-KAIROS path, kept as the
-record of the parked work. Nothing in the M3 cell or the M4 forklift arena
-needs them. Navigation work resumes at M5 on the in-house forklift with SLAM;
-which packages that needs is decided at M5 briefing, not restated here.
+## The warehouse world (M5 autonomy)
 
-Cloned unmodified at the `jazzy-devel` branch into
-`/opt/m3-feasibility/ws/src` and built with colcon:
+**Current work.** The owner ruled on 2026-07-30 that M5's SLAM and Nav2
+autonomy runs in the warehouse world rather than in the M4 commissioning
+arena: autonomy needs aisles and racks to be meaningful, and M6 enlarges
+this same world to ten stations, so the map artifact and the Nav2 tuning
+carry forward instead of being discarded. The arena keeps its M4
+commissioning role, and neither world includes the other.
 
-```
-mkdir -p /opt/m3-feasibility/ws/src && cd /opt/m3-feasibility/ws/src
-git clone -b jazzy-devel https://github.com/RobotnikAutomation/robotnik_description.git
-git clone -b jazzy-devel https://github.com/RobotnikAutomation/robotnik_simulation.git
-git clone -b jazzy-devel https://github.com/RobotnikAutomation/robotnik_sensors.git
-git clone -b jazzy-devel https://github.com/RobotnikAutomation/robotnik_common.git
-git clone -b jazzy-devel https://github.com/RobotnikAutomation/teleop_panel.git
-cd /opt/m3-feasibility/ws
-source /opt/ros/jazzy/setup.bash && colcon build --symlink-install
-```
-
-### 5. Robotnik controller debs (required, easy to miss)
-
-The rbkairos ros2_control profile declares
-`robotnik_base_control: robotnik_controllers/RBKairosController`. That
-mecanum controller is **not** in the cloned sources; Robotnik ships it as
-prebuilt debs inside `robotnik_simulation/debs/`. Without them the
-controller spawner fails and the base never accepts velocity commands:
+`worlds/warehouse.sdf` was rewritten for that at m5-08 and
+`launch/warehouse_bringup.launch.py` now spawns the in-house forklift. That
+launch wraps `forklift_bringup.launch.py` for the world, the spawn and the
+bridge — there is one topic contract for this vehicle and one launch file
+that states it — and adds the one thing an autonomy world needs that a
+commissioning arena does not: **the vehicle's own pose estimate.**
 
 ```
-apt-get install -y \
-  /opt/m3-feasibility/ws/src/robotnik_simulation/debs/ros-jazzy-robotnik-common-msgs_*.deb \
-  /opt/m3-feasibility/ws/src/robotnik_simulation/debs/ros-jazzy-robotnik-controllers-msgs_*.deb \
-  /opt/m3-feasibility/ws/src/robotnik_simulation/debs/ros-jazzy-robotnik-controllers_*.deb
+export GZ_PARTITION=myrun ROS_DOMAIN_ID=42     # isolate BOTH transports
+ros2 launch sim/launch/warehouse_bringup.launch.py
 ```
 
-## Running the bringup
+That starts `agv/forklift/scripts/sensor_tf.py`, `scripts/wheel_odometry.py`
+and the `robot_localization` EKF with `agv/forklift/ekf.yaml` (all three are
+`agv/`'s; this layer starts them and owns none of them). **The EKF is the
+sole publisher of `forklift/odom -> forklift/base_link`, and no launch file
+in `sim/` bridges the simulator's ground-truth transform or offers an
+argument that would** — `ros2 topic info /tf --verbose` on this bringup
+reports `Publisher count: 1`, captured in
+`worlds/WAREHOUSE_SLAM_EVIDENCE.md` §3. Pass `estimator:=false` for the bare
+plant, which then has no transform tree and cannot carry SLAM, AMCL or Nav2.
 
-This is the parked RB-KAIROS bringup, not current work — see the retirement
-note at step 4 and the navigation scenario below.
-
-```
-source /opt/ros/jazzy/setup.bash
-source /opt/m3-feasibility/ws/install/setup.bash
-ros2 launch /home/user/amr-agent/sim/launch/warehouse_bringup.launch.py
-```
-
-Headless by default. Options: `gui:=true` (Gazebo GUI client),
-`robot_id:=<name>`, `x:= y:= z:=` (spawn pose, default -10, -6, 0.15 in
-the open area south of the racks), `world:=<abs path>`.
-
-### Design choice: vendor spawn path with ros2_control
-
-The launch file starts the gz server with `sim/worlds/warehouse.sdf`,
-bridges `/clock`, and then includes the **unmodified** vendor launch
-`robotnik_gazebo_ignition/spawn_robot.launch.py` with `robot:=rbkairos`
-and `run_rviz:=False`. The vendor launch provides robot_state_publisher,
-the entity spawner, the sensor ros_gz_bridge and the ros2_control spawners
-(gz_ros2_control + `robotnik_controllers/RBKairosController`). This was
-chosen over any hand-rolled drive plugin because it keeps vendor files
-untouched, exercises the same controller stack a real RB-KAIROS uses, and
-was verified working headless in this container (see
-`worlds/BRINGUP_EVIDENCE.md`). The controller spawners' 60 s timeouts
-absorb the slow headless startup.
-
-### Expected evidence after bringup
-
-- `gz model --list` shows the world models (WallNorth..., RackA1...,
-  DoorGap, ConveyorStation, ChargerStation) plus `robot`.
-- `ros2 topic echo /clock --once` returns advancing sim time.
-- `ros2 topic echo /robot/front_laser/scan --once` returns a 270-sample
-  scan with finite ranges (walls/racks visible); `/robot/rear_laser/scan`
-  likewise.
-- `/robot/robotnik_base_control/odom` publishes; publishing
-  `geometry_msgs/Twist` on `/robot/robotnik_base_control/cmd_vel_unstamped`
-  moves the base and odometry integrates.
-- `ros2 control list_controllers -c /robot/controller_manager` lists
-  `joint_state_broadcaster` and `robotnik_base_control` as `active`.
-
-The dated capture of exactly these checks from this container is in
-`worlds/BRINGUP_EVIDENCE.md`.
-
-## Navigation scenario (RB-KAIROS, parked — resumes at M5 on the forklift)
-
-This is not current work. It was parked under ADR 0004, which moved the
-vehicle and navigation gates behind the fixed-equipment loop; ADR 0010 now
-supersedes that gate order and retires RB-KAIROS as the vehicle platform.
-Navigation work resumes at **M5**, on the in-house forklift, with SLAM
-building the map (ADR 0010 D1, D2). Everything below is the parked
-RB-KAIROS scenario, unverified, and its status is recorded in
-`sim/scenarios/DEFERRED.md`.
-
-Migrating this scenario to the forklift — and whether the warehouse world
-above is reused or replaced by the enlarged M6 warehouse — is **M5-briefing
-work, decided at briefing**. Nothing here decides it, and no file below has
-been rewritten for the new platform.
-
-Localization + Nav2 goal navigation on top of the bringup above. Three
-steps, three terminals, all with both setups sourced
-(`/opt/ros/jazzy/setup.bash` then `/opt/m3-feasibility/ws/install/setup.bash`):
+### SLAM, and the map
 
 ```
-# 1. world + robot (as above)
-ros2 launch /home/user/amr-agent/sim/launch/warehouse_bringup.launch.py
-
-# 2. Nav2 stack against the running bringup
-ros2 launch /home/user/amr-agent/sim/scenarios/nav_scenario.launch.py
-
-# 3. scripted run: initial pose -> AMCL localized -> NavigateToPose goal
-python3 /home/user/amr-agent/sim/scenarios/run_scenario.py
+ros2 launch sim/launch/warehouse_slam.launch.py      # beside the bringup
 ```
 
-Step 3 exits 0 only if the action result is STATUS_SUCCEEDED, and rewrites
-`scenarios/EVIDENCE_NAV.md` with the captured initial `/amcl_pose`, pose
-samples, result status, distance and durations. The committed file is the
-record of the verified run in this container.
+`online_async`, not `online_sync`: rendering here is llvmpipe software
+rasterisation and a scan match that overruns the 0.1 s scan period stalls a
+synchronous callback. **`async_slam_toolbox_node` is a lifecycle node and
+does nothing whatever until it is transitioned** — started as a plain `Node`
+it logs one line, subscribes to nothing and publishes no transform, with no
+warning of any kind. That launch file emits the configure and activate
+transitions; the check that it worked is `/map` on the topic list, never a
+clean log.
 
-### Map: generated, not SLAM-mapped
+`maps/warehouse/` is the map that run produced, in both forms: the
+`.pgm`/`.yaml` pair AMCL consumes and the `.posegraph`/`.data` pair that
+lets mapping resume rather than restart. It was built from the vehicle's own
+scans against its own drifting odometry, over the route stated in
+`scenarios/warehouse_mapping_route.py`, and read against
+`worlds/WAREHOUSE_LANDMARKS.md` stretch by stretch. Both documents are worth
+reading before any localisation parameter is chosen.
 
-`scenarios/maps/` is produced by `scenarios/tools/make_map.py`, which
-rasterizes the known static geometry of `worlds/warehouse.sdf` (every
-rectangle in the script is copied from the SDF model poses). This was
-chosen over slam_toolbox mapping because it is deterministic, reproducible
-in seconds, and diffable against the world file; at the container's ~0.1
-real-time factor a SLAM mapping drive would take an hour and produce a
-slightly different map every time. The overhead DoorGap lintel is
-deliberately excluded (the lidar never sees it; the vehicle drives under
-it). If the world changes, re-run the script.
+### The honesty rule the world obeys
 
-### Nav2 configuration notes
+A long featureless aisle is a **degenerate direction** for scan matching and
+no slam_toolbox parameter fixes it. Everything in this world is there
+because a real warehouse has it — rack uprights, rack ends, stock present in
+some bays and absent in others, cross and end aisles, building columns, a
+dock door frame, a transfer station frame, a charging area. **Nothing was
+scattered into an aisle because scan matching struggles without it**, and
+where the honest world still leaves a degenerate stretch, that stretch is
+measured and named rather than landscaped away.
 
-- All nodes run on sim time; tolerances in `config/nav2_params.yaml` are
-  sim seconds.
-- Frames come from the vendor stack: `map -> robot_odom ->
-  robot_base_footprint`. AMCL consumes `/robot/front_laser/scan` (omni
-  motion model, since the base is mecanum).
-- The controller is DWB in a diff-drive-style configuration (vy locked to
-  0) even though the base is holonomic: it is the configuration verified
-  to reach goals here. Nav2's `cmd_vel` (Twist, `enable_stamped_cmd_vel:
-  false`) is remapped to the vendor controller's
-  `/robot/robotnik_base_control/cmd_vel_unstamped`.
-- `lifecycle_manager` runs with `bond_timeout: 0.0`; bond heartbeats
-  starve at RTF ~0.1 and would otherwise take the servers down.
-- Speeds are capped at 0.45 m/s so the slow headless sim tracks commands.
+`worlds/WAREHOUSE_LANDMARKS.md` is that measurement, produced from geometry
+**before** any SLAM run, so the SLAM result can be read against a prediction
+instead of being the only number anyone sees. It names three degenerate
+stretches, all in the fully-loaded east half of the hall. Read it before
+tuning any localisation parameter against this world.
 
-### Expected output
+### Charging bays
 
-Nav2 activation takes a few minutes wall-clock. `run_scenario.py` then
-logs `AMCL localized`, `goal accepted`, periodic pose samples, and finally
-`result: status 4 (SUCCEEDED)`. The default goal (-6.0, 1.5) is in Aisle A;
-from the spawn at (-10, -6) the planned path runs north past the west end
-of rack row B and turns east between the rack rows (~11 m). Expect roughly
-10x the sim duration in wall-clock time.
+Two bays in the dock apron, added at m5-08 on the owner's instruction:
+`ChargeBay1Marking` / `ChargeBay1Cabinet` and `ChargeBay2Marking` /
+`ChargeBay2Cabinet`. **Geometry plus names and nothing else** — no docking
+behaviour, no approach logic, no charging state, no PLC or fleet
+interaction; that planning arrives with fleet management at M6. The poses,
+the sizing arithmetic and what each part shows at each scan plane are in
+`worlds/WAREHOUSE_EVIDENCE.md` section 5, which is the document a later
+fleet brief cites rather than re-measuring the SDF. The M3-era
+`ChargerStation` placeholder was **replaced** by these, not kept beside
+them.
+
+### The rasteriser, which now has no committed output
+
+`scenarios/tools/make_map.py` rasterizes the static world geometry rather
+than SLAM-mapping it, because that is deterministic, reproducible in seconds
+and diffable against the world file. Its rectangles are read from the SDF at
+run time; the hand-copied list it used to carry could not survive a change
+to the world, and did not.
+
+**`scenarios/maps/` was DELETED on 2026-07-31 by m5-08b.** It held a grid
+rasterized from the pre-m5-08 world for the retired vehicle — a picture of a
+building this repository no longer contains. Its source of truth was gone,
+its only consumers are the two parked scripts beside it (whose Nav2
+parameter file m5-09 had already deleted), and it is regenerable in seconds
+by the tool above. The generator is the artifact; its output was not. And
+with `maps/warehouse/` now holding a map that has an owner, keeping a second
+one that is nobody's would be a datum with two answers (invariant 10).
+
+`make_map.py` itself is untouched and still useful — as the second opinion
+against the SLAM map, and as the generator for whatever static map m5-10
+decides Nav2 wants. It still requires an explicit `--z` and has no default,
+because which scan plane a static map represents — the navigation lidar's
+1.80 m, or a lower plane carrying what a vehicle can collide with — remains
+a Nav2 configuration decision belonging to **m5-10**. That question is
+untouched by the deletion.
+
+## What is still parked
+
+| File | Status |
+|---|---|
+| `scenarios/nav_scenario.launch.py` | the Nav2 node set of the retired platform's scenario; `params_file` is a required argument with no file to satisfy it |
+| `scenarios/run_scenario.py` | the scripted NavigateToPose run; still names the retired vehicle's odometry topic |
+| `worlds/BRINGUP_EVIDENCE.md` | historical record of the retired platform in the pre-m5-08 world; cite nothing from it |
+
+Whether the two scenario scripts survive migration is **m5-10 briefing
+work**. Full status: `sim/scenarios/DEFERRED.md`.
+
+### Nav2 configuration: nothing carried forward
+
+There is no Nav2 parameter file in this repository. The parked scenario's
+one was written entirely around the retired vehicle — omni motion model, its
+scan, odometry and command topics, its frame tree, its footprint — and the
+owner ruled it is **not a migration candidate**. It was deleted by m5-09
+(ADR 0010 D1). The forklift's configuration is written from scratch at
+m5-10: tricycle kinematics, one navigation lidar, its own frame tree.
+
+Two settings from the parked run are worth carrying into that brief as
+container findings rather than as configuration, because they are properties
+of the host and not of the vehicle:
+
+- `lifecycle_manager` needed `bond_timeout: 0.0`; bond heartbeats starve at
+  RTF ~0.1 and would otherwise take the servers down.
+- Speeds had to be capped low (0.45 m/s in the parked run) for the slow
+  headless sim to track commands.
 
 ### Known behavior
 
-- Headless real-time factor is ~0.1 on this CPU-only container because the
-  lidars and the RGBD camera render through ogre2 on llvmpipe. Functional
-  for bringup and CI-style checks; wall-clock patience required.
-- Gazebo prints SDF warnings (`gz_frame_id ... not defined in SDF`) while
-  converting the vendor URDF; they are cosmetic and come from vendor
-  sensor definitions, not from this world.
+- The ~0.1 headless real-time factor recorded for the pre-m5-08 world was
+  the retired platform's figure, and it included an RGBD camera this project
+  does not carry. **Superseded 2026-07-31 by m5-08b**, which had the machine
+  to itself: this world runs at `real_time_factor: 0.99934892417589938`
+  headless with the vehicle and its estimator, and at 0.9831 simulation
+  seconds per wall second with slam_toolbox running as well
+  (`worlds/WAREHOUSE_SLAM_EVIDENCE.md` §2).
+- **The EKF integrates about 0.0023 rad/s of heading on a stationary
+  vehicle** — 8° per minute — because it fuses a modelled gyro bias against
+  a wheel odometry that correctly reports zero yaw rate, with no
+  zero-velocity update. Consequence for anyone mapping: the map frame is
+  anchored to the vehicle's heading ESTIMATE at the first scan, so idling
+  the stack before driving rotates the finished map away from the building
+  by that much. Start the drive as soon as slam_toolbox is active. Measured
+  twice per run in `worlds/WAREHOUSE_SLAM_EVIDENCE.md` §8.
 - The world's south wall has a free 4 m opening marked by the `DoorGap`
   posts/lintel; the PLC-controlled door and the conveyor/charger handshakes
   act there at M6 (ADR 0010). The blocks are geometry only — no
   fleet, PLC or safety behavior is simulated here (see the first section).
+- Two `python3` interpreters are on PATH here. `/usr/local/bin/python3` is
+  3.11 and runs the stdlib-only tools in `scenarios/tools/`;
+  `rclpy` is built for 3.12 and imports only under `/usr/bin/python3`. A
+  script that subscribes to a topic must be run with the latter.
 
 ---
 
@@ -278,9 +304,9 @@ of rack row B and turns east between the rack rows (~11 m). Expect roughly
 `worlds/cell.sdf` + `launch/cell_bringup.launch.py` are the M3 gate work
 under ADR 0004: prove the Gazebo-to-PLC signal loop with **fixed equipment
 only**, before any mobile robot. There is no vehicle in this world and
-none belongs in it. The warehouse world and its navigation scenario above
-are the parked navigation work, which resumes at M5 on the forklift under
-ADR 0010, and are untouched by this.
+none belongs in it. The warehouse world above is the M5 autonomy world and
+the two Nav2 scenario scripts beside it are still parked; neither is
+touched by this.
 
 ## What is in the cell
 
@@ -394,8 +420,8 @@ ros2 launch /home/user/amr-agent/sim/launch/cell_bringup.launch.py
 ```
 
 Headless by default. Options: `gui:=true` (Gazebo GUI client),
-`world:=<abs path>`. The Robotnik vendor workspace is **not** needed for
-this cell — only `/opt/ros/jazzy`.
+`world:=<abs path>`. The cell needs only `/opt/ros/jazzy` — no additional
+workspace.
 
 Drive the cell from a second terminal:
 

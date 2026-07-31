@@ -1,0 +1,207 @@
+# slam_toolbox_warehouse.yaml - mapping parameters for sim/worlds/warehouse.sdf.
+#
+# Used by sim/launch/warehouse_slam.launch.py with slam_toolbox's
+# `async_slam_toolbox_node` (mode `online_async`). ONLINE_SYNC IS NOT AN
+# OPTION HERE: it processes each scan inside the subscription callback, and
+# under llvmpipe software rasterisation (sim/setup/CONTAINER_TOOLCHAIN.md
+# section 4.6) a scan match that takes longer than the 0.1 s scan period
+# stalls the callback and the queue grows without bound.
+#
+# ============ HOW TO READ THIS FILE ============
+#
+# It is derived from slam_toolbox's own
+# /opt/ros/jazzy/share/slam_toolbox/config/mapper_params_online_async.yaml
+# (2.8.5). EVERY VALUE BELOW THAT DIFFERS FROM THAT FILE IS MARKED
+# `NON-DEFAULT` AND CARRIES ITS REASON ON THE LINE ABOVE IT. Values that
+# match the shipped default are repeated here only where a reader would
+# otherwise have to go and look them up, and are marked `default`.
+#
+# Frame and topic names are neither tuning nor default: they are the
+# vehicle's contract, quoted from agv/forklift/config.yaml, and they are
+# marked `contract`.
+#
+# NOTHING IN THIS FILE WAS MOVED BECAUSE THE MAP LOOKED BETTER AFTERWARDS.
+# The six non-defaults are each an argument from a measured property of
+# this vehicle or this world - the sensor's own range, the aisle geometry
+# of sim/worlds/WAREHOUSE_LANDMARKS.md, and the 5.21 m / -17.18 deg drift
+# of agv/forklift/EVIDENCE_ODOMETRY.md - and each would be the same value
+# if the map had come out worse.
+#
+# WHAT NO PARAMETER IN THIS FILE CAN FIX: the three degenerate stretches
+# named in WAREHOUSE_LANDMARKS.md section 5. Where a scan carries no
+# along-aisle information, no search window, penalty or buffer length
+# creates any. See sim/worlds/WAREHOUSE_SLAM_EVIDENCE.md for what actually
+# happened there.
+
+slam_toolbox:
+  ros__parameters:
+
+    # ---- solver: all defaults ----
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ---- frames and topic: contract, not configuration ----
+    #
+    # odom_frame and base_frame are quoted from agv/forklift/config.yaml's
+    # `frames:` block, which mirrors model.sdf. They carry the model name
+    # because that is the string the messages actually carry.
+    #
+    # THE odom -> base_link EDGE UNDER THIS NODE IS THE EKF'S, and this node
+    # never publishes it. slam_toolbox publishes map -> forklift/odom and
+    # that edge alone, so the two publishers on /tf are disjoint.
+    odom_frame: forklift/odom                     # contract
+    base_frame: forklift/base_link                # contract
+    map_frame: map                                # default
+
+    # The NAVIGATION lidar, z = 1.80 m, and the only localisation input this
+    # vehicle has. No safety scanner channel feeds this node, ever
+    # (ADR 0011, agv/forklift/README.md).
+    scan_topic: /forklift/scan                    # contract
+
+    mode: mapping                                 # default
+    use_map_saver: true                           # default
+
+    debug_logging: false                          # default
+    throttle_scans: 1                             # default
+    transform_publish_period: 0.02                # default
+    map_update_interval: 5.0                      # default
+    transform_timeout: 0.2                        # default
+    tf_buffer_duration: 30.0                      # default
+    stack_size_to_use: 40000000                   # default
+    enable_interactive_mode: true                 # default
+    restamp_tf: false                             # default
+
+    # Cell size of the published and saved occupancy grid, in metres. The
+    # shipped default and the value kept: 0.05 m is what nav2_map_server,
+    # AMCL and every other map in this repository use
+    # (sim/scenarios/tools/make_map.py, and the map.yaml this run replaces),
+    # and a mapping resolution that does not match the localisation
+    # resolution is a resampling nobody asked for.
+    resolution: 0.05                              # default
+
+    # NON-DEFAULT (shipped 0.0). The navigation lidar declares
+    # range_min = 0.10 m in model.sdf. A return below a sensor's own
+    # range_min is not a measurement, and rastering it as one paints
+    # occupied cells inside the vehicle.
+    min_laser_range: 0.10
+
+    # NON-DEFAULT (shipped 20.0). The navigation lidar's range_max is
+    # 8.00 m. slam_toolbox ray-traces FREE space out to max_laser_range
+    # along every ray, so a value above the sensor's own maximum clears
+    # cells the sensor never looked at: in a 30 x 20 m hall that is 12 m of
+    # invented free space per ray, straight through the racking. 8.00 is
+    # the sensor's number, not a chosen one.
+    max_laser_range: 8.00
+
+    # ---- when a scan becomes a node in the graph ----
+    #
+    # NON-DEFAULT (shipped 0.5). This is the reason the other two gates
+    # below can mean what they say. slam_toolbox requires BOTH the time
+    # gate and a travel gate before it processes a scan, so at the route's
+    # 0.80 m/s straight-line speed a 0.5 s minimum interval sets node
+    # spacing to 0.40 m NO MATTER what minimum_travel_distance says - the
+    # default silently couples node spacing to vehicle speed. 0.20 s is two
+    # scan periods at the sensor's 10 Hz, which puts the travel gates back
+    # in charge at every speed this route drives.
+    minimum_time_interval: 0.20
+
+    # NON-DEFAULT (shipped 0.5). WAREHOUSE_LANDMARKS.md section 5 measures
+    # the along-track residual through the worst pose of East A at
+    # 0.191 m rms for a 0.25 m displacement and 0.423 m for 1.00 m - a
+    # basin that is shallow and narrow, and 99% of it carried by ten
+    # grazing rays. A 0.50 m gap between nodes asks the matcher to correct
+    # from the edge of that basin using a prior that has been dead
+    # reckoning for the whole gap; 0.30 m keeps each correction inside it
+    # and puts ~18 nodes across the 5.5 m East dock stretch instead of ~11.
+    minimum_travel_distance: 0.30
+
+    # NON-DEFAULT (shipped 0.5 rad = 28.6 deg). The route turns 90 deg at
+    # eight aisle mouths. At the default, a turn is three nodes and the
+    # scan changes by nearly 30 deg between consecutive ones, which is
+    # outside coarse_search_angle_offset (0.349 rad) only just, and leaves
+    # the graph with almost no constraint through the corner where the
+    # vehicle's heading error is being created. 0.20 rad = 11.5 deg makes a
+    # 90 deg turn eight nodes.
+    minimum_travel_heading: 0.20
+
+    # NON-DEFAULT (shipped 10). The running buffer of recent scans that
+    # scan-to-map matching runs against. At the 0.30 m node spacing above,
+    # 10 nodes is 3.0 m of history - less than half the 8.00 m the sensor
+    # can see, so structure the vehicle drove past is dropped from the
+    # local map while it is still in view. 30 nodes is 9.0 m, which holds
+    # one full sensor horizon and is what keeps a rack END in the buffer
+    # while the vehicle is inside the flat stretch beyond it. This is the
+    # one parameter that does anything at all for a degenerate corridor,
+    # and it does not fix it: it lengthens the memory, it does not create
+    # information.
+    scan_buffer_size: 30
+
+    # default (10.0), kept because it must stay above max_laser_range and
+    # 10.0 already is.
+    scan_buffer_maximum_scan_distance: 10.0
+
+    use_scan_matching: true                       # default
+    use_scan_barycenter: true                     # default
+    check_min_dist_and_heading_precisely: false   # default
+    link_match_minimum_response_fine: 0.1         # default
+    link_scan_maximum_distance: 1.5               # default
+
+    # ---- loop closure ----
+    #
+    # do_loop_closing is the default and it is left on deliberately: this
+    # route is a closed circuit that returns to its start pose, and loop
+    # closure is the mechanism being tested.
+    do_loop_closing: true                         # default
+
+    # NON-DEFAULT (shipped 3.0). This is the radius, in the CURRENT
+    # estimate, within which slam_toolbox looks for an older chain to close
+    # against. agv/forklift/EVIDENCE_ODOMETRY.md measures 5.21 m of
+    # accumulated position error over a 106 m route on this vehicle. A
+    # search radius of 3.0 m is therefore smaller than the error the
+    # closure exists to remove: on a 115 m circuit the vehicle can arrive
+    # back at its start believing it is 5 m away, and no candidate would be
+    # considered at all.
+    #
+    # THE COST IS STATED RATHER THAN HIDDEN. A larger radius is a larger
+    # opportunity for a FALSE closure, and the rack bay pitch in this world
+    # is 2.30 m. WAREHOUSE_LANDMARKS.md section 5 tested exactly that and
+    # found no secondary residual minimum within +-3.00 m of the worst East
+    # A pose - so the aliasing question is answered inside 3 m and is NOT
+    # answered between 3 m and 6 m. The guard against the difference is
+    # that both response thresholds below are left at their defaults, so a
+    # candidate 6 m away still has to match as well as one 3 m away.
+    loop_search_maximum_distance: 6.0
+
+    loop_match_minimum_chain_size: 10             # default
+    loop_match_maximum_variance_coarse: 3.0       # default
+    loop_match_minimum_response_coarse: 0.35      # default
+    loop_match_minimum_response_fine: 0.45        # default
+
+    # ---- correlation, loop-closure search space, scan matcher ----
+    # Every value below is the shipped default. Nothing in this block was
+    # touched: these are the knobs a map is most easily flattered with, and
+    # this brief's job was to find out what this world does to a scan
+    # matcher, not to arrange it.
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true
+    min_pass_through: 2
+    occupancy_threshold: 0.1

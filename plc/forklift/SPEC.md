@@ -35,6 +35,8 @@ showcase the roadmap's M4 row requires.
 | `CLAUDE.md` §9 | Wire NC / program NO, cycle flag vs actuator, monitored edge reset, no auto-resume | **Binding.** §6 is its application |
 | `docs/roadmap.md`, row M4 | Exit criteria (a)–(e) | §11 is one scenario per criterion |
 | `agv/forklift/config.yaml`, `agv/forklift/model.sdf` | The plant: joint limits, vehicle-layer clamps, topic names | Input to the constants of §3.3 |
+| `docs/interfaces/opcua-nodes.md` §12 | The nine M5 nodes — the drive mode, the autonomy envelope, the vehicle's report and the operator's process stop — with their types, start values, ownership, writability and the **M1–M6**, **E1–E8**, **Z1–Z4**, **V1–V4**, **PS1–PS6**, **C1–C4** expectations | **Contract for §14.** If §14 disagrees, §12 wins and §14 is corrected |
+| `docs/adr/0014-motion-control-locus.md` | **D1** the loop closes onboard and no motion value crosses the seam; **D3** the word *onboard* covers the F-runtime group and not this program; **D4** the three seams; **D5** the disclosure obligation | **Binding on §14.** The PLC's autonomous-mode authority is permissive and **checked, not compelled** |
 
 ---
 
@@ -261,6 +263,12 @@ down re-latches.
 substitution, no filter and no ramp on any of the three outputs. Every output is
 recomputed from scratch on every OB call (§6.4).
 
+**The §14 delta adds ten statics to this instance DB and edits none of the rows
+above.** They are declared in §14.3 with their start values and their reasons, and
+they are **read back out of the watch table after the download** rather than
+trusted from the FB interface — adding a member to a live instance DB is exactly
+the situation LESSONS 2026-07-28 records.
+
 ### 3.3 Constants
 
 Declared in the FB's constant block. Every one is a **process decision** that the
@@ -289,6 +297,12 @@ measurements.
 | `PLANT_FAULT_DELAY` | `T#300ms` | Three source periods: the vehicle layer publishes `fork_height` and `linear_speed` at 10 Hz. Tolerates two corrupt or dropped samples without latching |
 | `LIDAR_FAULT_DELAY` | `T#300ms` | Same basis, same rate, **its own constant** so the lidar's tolerance and the drive feedback's tolerance can be tuned apart (invariant 10, the `BELT_FAULT_DELAY` precedent) |
 | `REQUEST_FAULT_DELAY` | `T#600ms` | Three worst-case HMI write periods at the 5 Hz floor — the same rule as `HMI_STALE_TIME`, and again its own constant. An implausible request drops the motion permissive **immediately** through `WorldOk`; this delay only governs when it becomes a *latch* |
+
+**The §14 delta adds six constant rows to this block and changes none of the rows
+above.** They are declared in §14.3 with their bases. **P4 applies to them
+too**: `VEHICLE_STALE_TIME` is its own window on a third watched party and is
+never shared with `HMI_STALE_TIME` or `HEARTBEAT_STALE_TIME`, even where the
+numbers coincide.
 
 ---
 
@@ -452,6 +466,11 @@ separately, in §6.4.
 `Disabled` to `Active` is a fresh rising edge of the enable.** A reset energizes
 nothing.
 
+**The §14 delta adds no state and no transition to the diagram above.** The drive
+mode is a **second, separate** state machine, drawn in §14.4 with its five named
+transitions; the only thing it changes here is that the `Disabled → Active` edge
+additionally requires the mode in force to be `Teleop`.
+
 ---
 
 ## 6. Control logic, in words
@@ -606,12 +625,14 @@ any actuator is doing.
 | C4 | `heightValid AND speedValid` | Both plant Reals are inside their physical windows right now |
 | C5 | `distanceValid` | The lidar's diagnostic distance is a measurement right now |
 | C6 | `requestsValid` | All three operator Reals are inside their windows right now |
+| C7 | `NOT HmiProcessStopRequest` | **§14 only.** The operator is not asking the machine to stop right now. It is a term of `WorldOk` and therefore of `CauseGone`, because **PS3** makes the released button this latch's live-world term |
+| C8 | `NOT ModeDisagreeTimer.Q` | **§14 only.** The vehicle's applied mode has not been disagreeing with the mode in force for `MODE_DISAGREE_DELAY` — evaluated only while the vehicle's report is attributable, so it is permissive when no vehicle control layer is running. **This is the one delayed cause whose `WorldOk` term is the *debounced* verdict and not the live one**, and §14.7 gives the reason: the vehicle's normal adopt window is a disagreement, and a live term would disarm the mode it was just given |
 
 Then:
 
 | Set | Definition | Used for |
 |---|---|---|
-| `latchPending` | `ObstacleStopLatch` OR `HmiLinkLostLatch` OR `BridgeLinkLostLatch` OR `PlantInputFaultLatch` OR `RequestFaultLatch` | Mirrored to `ForkliftResetRequired`; blocks the enable edge |
+| `latchPending` | `ObstacleStopLatch` OR `HmiLinkLostLatch` OR `BridgeLinkLostLatch` OR `PlantInputFaultLatch` OR `RequestFaultLatch` — **and `ProcessStopLatch` and `ModeDisagreeLatch` once the §14 delta is applied, making seven** | Mirrored to `ForkliftResetRequired`; blocks the enable edge **and the entry into any drive mode** (§14.4) |
 | `MotionPermissive` | `WorldOk` **and** `NOT latchPending` — **and `safetyDemandClear` once the §13 delta is applied**, which is the delta's one and only new term | May the machine move, and may the setpoints pass (§6.4) |
 | `CauseGone` | `WorldOk` **only** | May a reset clear the latches (§6.7) |
 
@@ -855,8 +876,8 @@ the PLC acts on its **rising edge**.
 
 | Action | Device and edge | Condition | Effect |
 |---|---|---|---|
-| **Reset** | **rising** edge of `HmiResetRequest` | a latch is pending **and** `CauseGone` **and** `NOT ResetDeviceFault` | Clear all five latches, `ForkliftResetRequired := FALSE`. **Nothing energizes**: `ForkliftTeleopActive` stays `FALSE` and all three setpoints stay `0.0` |
-| **Enable** | **rising** edge of `HmiTeleopRequest` | no latch pending **and** `MotionPermissive` | `ForkliftTeleopActive := TRUE` |
+| **Reset** | **rising** edge of `HmiResetRequest` | a latch is pending **and** `CauseGone` **and** `NOT ResetDeviceFault` | Clear all five latches — **seven once the §14 delta is applied** — and `ForkliftResetRequired := FALSE`. **Nothing energizes**: `ForkliftTeleopActive` stays `FALSE` and all three setpoints stay `0.0` |
+| **Enable** | **rising** edge of `HmiTeleopRequest` | no latch pending **and** `MotionPermissive` — **and the mode in force is `Teleop` once the §14 delta is applied** | `ForkliftTeleopActive := TRUE` |
 
 Monitoring, per CLAUDE.md §9 ("the reset is edge triggered so a stuck button does
 not count as a reset"):
@@ -949,6 +970,12 @@ listed in §3.2 — `#hmiHbChanged`, `#bridgeHbChanged`, `#hmiLinkOk`,
 computed and consumed within one call. Everything in §3.2 is **Static** and must
 survive the scan. `IEC_TIMER` may be declared as `TON_TIME` on an S7-1500; either
 compiles, and every call site below states its `PT` explicitly.
+
+**The fence below is the M4 program with the §13 delta applied. The §14 delta
+adds three parts to it and modifies five of its statements**, at the insertion
+points §14.8 names; its eleven further Temps are listed in §14.3. **This fence is
+not edited by §14, and the size and hash recorded after it stay true about the
+listing they describe.**
 
 ```pascal
 // FB_ForkliftTeleop — called from OB30 (20 ms), once. It is the ONLY standard
@@ -1286,6 +1313,11 @@ cell table to open beside it in this project (§3.1b); with the §13 delta appli
 the table to have open beside it is the `Forklift F gate` one
 (`plc/forklift-safety/SPEC.md` §8).
 
+**With the §14 delta applied this table gains a sixth group and Group 5 gains
+eleven internal rows**, both listed in §14.11. The five groups below are otherwise
+unchanged, and every "five latch bits" reading in them is scoped to the M4
+program: under §14 the number is seven.
+
 **Monitor only. Do not use *Modify* or *Force* on any `ForkliftHmi` or
 `ForkliftInput` tag during a gate run**: a modified value proves nothing about
 the loop, and it would fight the HMI's 10 Hz and the bridge's 20 Hz cyclic
@@ -1451,6 +1483,27 @@ slots configured, the commissioning HMI running and connected, the test double
 > (§13.5). **Without the delta applied none of this paragraph applies**, and
 > §11 runs exactly as written below.
 
+> **Two further preconditions once the §14 delta is applied, and the first is a
+> hard dependency rather than a formality.**
+>
+> 1. **HMI v2 is running and writing all eight of its nodes every cycle**
+>    (`opcua-nodes.md` §12.1; m5-14). `HmiProcessStopRequest` starts `TRUE`, so a
+>    v1 HMI writing only six nodes leaves it `TRUE` forever, `WorldOk` is `FALSE`
+>    forever, and **no scenario below can be enabled in either mode.** That is the
+>    delta's dependency showing rather than a defect, and the watch table says so
+>    in one row: `HmiProcessStopRequest` `TRUE` beside `ForkliftProcessStopActive`
+>    `TRUE` (§14.14 state C).
+> 2. **The mode in force reads `Teleop`** before any enable edge below is expected
+>    to do anything. Reaching it is step **5.1.3b**, which is a step rather than a
+>    precondition line because it can only be taken *after* the reset at 5.1.3.
+>
+> **This delta moves two things in this section and they are named rather than
+> absorbed** (§14.12): T5.1 gains step **5.1.3b**, so its specified denominator is
+> **10**; and T5.5's step **5.5.6 is re-specified** to include a mode
+> re-selection. **The denominator of a run that already happened never grows** —
+> a T5.1 run recorded against the 9-row table is a 9-row run, and its evidence
+> record gains an outstanding row instead.
+
 ### How the **Pass** lines below are counted
 
 Three rules govern every pass claim in this section. They exist because a count
@@ -1475,6 +1528,7 @@ written once outlives the run it was written for.
 | 5.1.1 | Start the world, the bridge and the HMI. **Wait until `HmiLinkOk` reads `TRUE` and Group 5 shows `BridgeSeenAlive` `TRUE` with `BridgeStaleTimer.ET` far below `T#500ms`** — the bridge verdict is a Temp with no node of its own (§3.1b) — **then let one further OB call pass**, and read the watch table **before touching a control**. Read Group 2's `ForkliftObstacleInStopZone` and `ForkliftObstacleMinDistance` in the same reading, **before** judging `ForkliftObstacleStopActive` | `HmiLinkOk` `TRUE`, the bridge verdict up (`BridgeSeenAlive` `TRUE`, `BridgeStaleTimer.ET` short), `ForkliftTeleopActive` `FALSE`, `ForkliftResetRequired` **`TRUE`** (at least both link latches, formed at the first scan), all three `…Ref` `0.0`. **`ForkliftObstacleStopActive` may read `FALSE` or `TRUE`, and both pass** — it is not a guarantee and must not be read as one. The field bit's `TRUE` **start value** is not what is at stake: §6.7's `bridgeLinkOk` conjunct keeps it out of the boot window, and by the time that conjunct lifts the bridge has written the slot at least once from a real sample. What decides the reading is a **race** the PLC does not own: the vehicle layer publishes a no-data sentinel until its first scan arrives, so if that sentinel is still standing when the bridge's heartbeat begins, the field bit is `TRUE` with the link up and the latch **correctly** forms on level, with no delay; if the first true scan wins, no latch forms. **The check is the pair, not the value**: with `ForkliftObstacleInStopZone` now reading `FALSE` and `ForkliftObstacleMinDistance` inside 0.05 … 8.10, `ForkliftObstacleStopActive` must **hold** — set stays set, because a clearing field releases no latch (§6.7), and clear stays clear. A `FALSE` → `TRUE` transition under those two readings is the one defect signature here. **A latch found set clears at 5.1.3** with the two link latches, and changes no later step |
 | 5.1.2 | Assert the enable **before** any reset | Nothing happens: `ForkliftTeleopActive` stays `FALSE`, all three refs stay `0.0`. A latch is pending and the enable edge is refused |
 | 5.1.3 | Release the enable. Assert and release the reset control once | `ForkliftResetRequired` → `FALSE` within two OB calls. `ForkliftTeleopActive` stays `FALSE` and every ref stays `0.0` — **the reset energizes nothing** |
+| 5.1.3b | **§14 only.** Move the mode selector to `None` and then to `Teleop`, i.e. drive `HmiDriveModeRequest` `1 → 0 → 1`. Read Group 6 before and after | `ForkliftDriveModeActive` → `1` on the transition **into** `1`, not on the value standing there: a selector already reading `1` at link-up produces no transition, which is why the round trip through `0` is the action. Nothing energizes — `ForkliftTeleopActive` stays `FALSE`, all three refs stay `0.0`, `ForkliftMotionEnable` stays `FALSE` and `ForkliftSpeedCeiling` stays `0.0`. **If the mode stays `0`, read `latchPending` first**: entry is admitted only with every latch clear and the machine at standstill (§14.4) |
 | 5.1.4 | Assert the enable again (a fresh rising edge) with the traction control at zero | `ForkliftTeleopActive` → `TRUE`; all three refs still `0.0` |
 | 5.1.5 | Move the traction control to full forward | `ForkliftTractionSpeedRef` → `+1.00` m/s; the model drives forward in Gazebo; `ForkliftLinearSpeed` rises to track it. **Screenshot Group 1 beside Group 3** — the request and the setpoint the PLC formed from it |
 | 5.1.6 | Move the steer control to ≈+0.8 rad, then ≈−0.8 rad | `ForkliftSteerAngleRef` follows the clamped request and the model steers both ways |
@@ -1482,8 +1536,9 @@ written once outlives the run it was written for.
 | 5.1.8 | **Release the enable while driving** | All three refs → `0.0` in the same OB call; `ForkliftTeleopActive` → `FALSE`; the steered wheel returns to centre (§6.4); `ForkliftResetRequired` stays `FALSE` — a normal stop, no latch |
 | 5.1.9 | Re-assert the enable | Teleop returns with **no reset** — releasing the enable is not a fault |
 
-**Pass: all nine steps of the table above.** Evidence: watch-table screenshots and
-the recorded showcase segment for criterion (a).
+**Pass: all nine steps of the table above — ten with the §14 delta applied**, the
+tenth being 5.1.3b. Evidence: watch-table screenshots and the recorded showcase
+segment for criterion (a).
 
 ### T5.2 — Fork to height, and both soft-limit aborts *(criterion b)*
 
@@ -1572,7 +1627,7 @@ the recorded showcase segment for criterion (a).
 | 5.5.3 | Observe the model in Gazebo | It stops on the zero command. Record what the plant does and how quickly — the PLC's zero reaches it as fast as the bridge polls the output slots, and until then the plant holds the last value it was given (§8 residual) |
 | 5.5.4 | Restart the HMI, let the heartbeat advance, and **do nothing else for 30 s** | `HmiLinkOk` → `TRUE`; **teleop does not return**; refs stay `0.0`; `ForkliftResetRequired` stays `TRUE`. `ResetDeviceFault` (Group 5) read `TRUE` through the outage — the re-arm of §6.7 — and clears within one watch-table update of link-up, because the HMI writes all six of its nodes every cycle |
 | 5.5.5 | **Reset asserted from before the link came up** — the P6 guard, and it is tested by **ending a session, not by restarting the machine**. Stop the HMI; arrange for it to write `HmiResetRequest` `TRUE` from its very first cycle; restart it | `ResetDeviceFault` reads `TRUE` **before, through and after** link-up, so the rising edge arriving with the first attributable sample is **refused**: `ForkliftResetRequired` stays `TRUE`, every latch stays set, nothing moves. The watch table says why — `ResetDeviceFault TRUE` beside `HmiLinkOk TRUE`. Then have the HMI write the request `FALSE` (the guard clears within one update) and `TRUE` again: **that** fresh edge clears the latches |
-| 5.5.6 | Reset normally, then assert the enable | Latches clear, then teleop returns on the fresh enable edge, and the machine is driveable. **No auto-resume at any point in 5.5.1–5.5.5** |
+| 5.5.6 | Reset normally, **then — §14 only — re-select `Teleop` (drive `HmiDriveModeRequest` `1 → 0 → 1`)**, then assert the enable | Latches clear, then teleop returns on the fresh enable edge, and the machine is driveable. **No auto-resume at any point in 5.5.1–5.5.5.** With the delta applied the re-selection is required and is not optional: the outage took the mode to `None` through **X4**, and `LastModeRequest` was tracked through the outage precisely so that the link coming back up manufactures no transition (§14.4). Without the delta the step is *reset, then assert the enable*, as it was written |
 
 **Pass: all six steps of the table above.**
 
@@ -1885,6 +1940,11 @@ of *How the Pass lines below are counted*): T5.1 **9**, T5.2 **8**, T5.3 **5**,
 T5.4 **10**, T5.5 **6**, T5.6 **5** — **43 steps, unchanged**. The delta adds no
 step row to any scenario, so no denominator moves and no pass line is amended.
 
+**These counts are scoped to the §13 delta and stay true about it.** The §14 delta
+does add one step row — T5.1's 5.1.3b — so under §14 the counts are T5.1 **10**,
+T5.2 8, T5.3 5, T5.4 10, T5.5 6, T5.6 5, **44 steps** (§14.12). Two deltas, two
+denominators, and neither absorbs the other.
+
 **One evidence rule, so a single session does not blur two claims.** T5 may be
 run with the delta applied: with no demand standing, every T5 reaction is
 standard-program process logic exactly as §8 and §11 describe, and the F-layer is
@@ -1925,3 +1985,960 @@ copy beside the value it copies, on one screen.
 | 3 | **Whether the HMI shows any of this** — and the rule that a lamp for the zone demand and a lamp for the lidar process stop are never the same lamp or the same caption | `hmi/`, its own brief (`opcua-nodes.md` §11.4 MR7, §11.8 item 5) |
 | 4 | **The logic double transliterates §7 as it stood before this delta** (`plc/forklift/double/`). Its kernels exercise the M4 permissive; none of them models an F-flag | `plc/forklift/double/`, a later brief if the delta is to be rehearsed the way §7 was |
 | 5 | **§12 open item 9's cycle-time measurement is now taken with the F-runtime group running.** OB30 carries two function blocks and the CPU additionally runs an F-OB, so the OB30 cycle time and the CPU maximum are read *after* the F-program is downloaded, not before | Owner, at the same download. The F-OB's own cycle and monitoring times are `plc/forklift-safety/SPEC.md` §4.3 and its open item 2, not this document's |
+
+---
+
+## 14. The M5 autonomous-mode delta — the drive mode, the autonomy envelope and the operator's process stop
+
+**§1–§12 specify the M4 program and §13 the safety-coupling delta. This section
+is the second delta, applied on top of both**, so that the standard program can
+supervise a vehicle that drives itself. It is written as an explicit **before and
+after** in §13's shape: applying it in TIA should not require re-reading anything
+above.
+
+| Document | What it fixes for this section |
+|---|---|
+| `docs/interfaces/opcua-nodes.md` §12 | **Contract** for the nine nodes: names, types, units, ranges, ownership, writability, start values, and the **M1–M6**, **E1–E8**, **Z1–Z4**, **V1–V4**, **PS1–PS6** and **C1–C4** expectations placed on this document. **This section implements them and redefines none.** If this section disagrees, §12 wins and this one is corrected |
+| `docs/adr/0011-sensored-autonomy-architecture.md` D3 | That in autonomous mode the standard program publishes an envelope and the navigation loop closes **onboard the vehicle at its own rate** |
+| `docs/adr/0012-envelope-composition.md` D1 | That the envelope's third element is a **fixed-equipment / station permit**, not a zone permit |
+| `docs/adr/0014-motion-control-locus.md` | **D1** no motion value crosses the OPC UA seam at any granularity; **D3** the word *onboard* covers the F-runtime group and **not this program**; **D4** the three seams; **D5** the disclosure obligation §14.5 discharges |
+
+### The one sentence that decides how this section is read
+
+> **In autonomous mode this program is a supervisor, not a controller. Its
+> authority over motion is permissive and checked, not compelled: the standard
+> program forms and publishes the envelope, and the gate that enforces it runs on
+> the vehicle** (ADR 0014 D5, `opcua-nodes.md` §12.6). **This program can withhold
+> permission, and it can notice that permission was not honoured. It cannot stop
+> the vehicle.**
+
+Two consequences of that sentence, both load-bearing below:
+
+- **No statement in this section may be written so that it reads as a command.**
+  The envelope permits, bounds and states a readiness; it never instructs. Any
+  future edit that gives this program a per-sample motion value in autonomous
+  mode is an ADR 0014 D1 change, not a specification change.
+- **This program is the *cell's* PLC, not the vehicle's onboard controller.**
+  ADR 0014 D3 bounds ADR 0011 D1's word *onboard* to the F-runtime group. Nothing
+  in this section makes the S7-1500 a vehicle-borne controller, and no sentence
+  produced from it may say that it does.
+
+**In teleoperated mode nothing changes at all.** §7 still forms every motion
+setpoint from the operator's requests, in the same three assignments with the
+same mandatory `ELSE` to `0.0` (§14.10). The drive mode decides only **which of
+the two command sources may reach the actuators**; it changes no node's
+writability, no client's allowlist and no request node.
+
+**Three statements this section does not weaken.** Nothing here is a safety
+function and no SIL, PL, Category or PFH is claimed for any of it (§2, ADR 0008
+D3, ADR 0011 D5). Nothing here is on the F-input path, is written or read by the
+F-runtime group, or names the safe scanner channel — **nothing in this section
+presumes the m5-03 F-I/O verdict, whichever way it falls** (`opcua-nodes.md`
+§12.12). And nothing here closes M5 or any part of its criterion: a specification
+is not an acceptance test passed.
+
+### 14.1 The whole delta on one screen
+
+| # | Where | Change |
+|---|---|---|
+| **A1** | TIA, outside this document | **Four new global DBs** — `ForkliftMode`, `ForkliftEnvelope`, `ForkliftVehicle`, `ForkliftProcessStop` — and **four new interface folders** `Mode/`, `Envelope/`, `Vehicle/`, `ProcessStop/` under `Forklift/`, per `opcua-nodes.md` §12.2 and §12.11. **No existing DB gains a member** (§14.2) |
+| **A2** | §3.3 | **Six new constant rows**, eight identifiers, §14.3 |
+| **A3** | §3.2 | **Ten new statics**, three of them timers, §14.3 |
+| **A4** | §7, new **part 2d** | Mode-request validity, the **vehicle heartbeat watchdog**, the mode-disagreement detector and the standstill timer |
+| **A5** | §7, new **part 3b** | The **operator's process-stop latch** and its published node |
+| **A6** | §7, part 4 | `#worldOk` gains **C7** and **C8**; `#latchPending` gains **two** members — seven latches, not five |
+| **A7** | §7, new **part 5a** | The **mode arbiter**: five named transitions, evaluated once per call ahead of both command paths |
+| **A8** | §7, part 5 | The reset clears **seven** latches; the two `ForkliftTeleopActive` statements each gain **one conjunct**, `#DriveModeInForce = #MODE_TELEOP` |
+| **A9** | §7, new **part 8** | The **only** assignments to the mode node and the three envelope nodes |
+| **A10** | §6.3, §5, §9 | Two permissive rows, one pointer to the arbiter's state machine, one new watch group |
+| **A11** | §11 | Two preconditions, **one new step row** (5.1.3b) and **one re-specified step** (5.5.6). §14.12 states the count movement rather than absorbing it |
+
+**Nothing else in §1–§13 moves.** In particular:
+
+- **The three setpoint assignments of §6.4 and §7 part 7 are byte-identical.**
+  Each is still one unconditional `IF … ELSE` with a mandatory `ELSE` to `0.0`,
+  executed on every OB call as the last of the three. The mode reaches them the
+  way every other interlock does — through `ForkliftTeleopActive`, which can now
+  only be `TRUE` while the mode in force is `Teleop` — and this section adds **no
+  branch, no hold, no second writer and no analogue path** to any of them
+  (`opcua-nodes.md` §12.9 **C2**; LESSONS 2026-07-27).
+- **§7's fence, its statement-line count and its `sha256/16` are not restated or
+  amended here.** They describe the M4 + §13 listing and stay true about it; the
+  M5 program is that listing **plus** §14.8's parts, inserted at the points §14.8
+  names.
+- **§13 is neither required nor excluded.** This section reads `#motionPermissive`
+  and does not care whether that term carries `#safetyDemandClear` yet. Applied
+  after §13 it inherits the safety conjunct; applied without §13 it inherits the
+  M4 form. No statement below changes either way.
+
+### 14.2 Server-visible tags — exactly the nine nodes of `opcua-nodes.md` §12
+
+The PLC symbol's leaf name **is** the OPC UA BrowseName, character for character,
+as in §3.1. The DB is a container: a client sees `Forklift/Mode/HmiDriveModeRequest`
+regardless of which DB holds it.
+
+| # | BrowseName path (under the `DemoCell` interface) | PLC symbol | S7 type | Written by | Start value |
+|---|---|---|---|---|---|
+| 1 | `Forklift/Mode/HmiDriveModeRequest` | `"ForkliftMode".HmiDriveModeRequest` | UInt | HMI | `0` (None) |
+| 2 | `Forklift/Mode/ForkliftDriveModeActive` | `"ForkliftMode".ForkliftDriveModeActive` | UInt | **program** | `0` (None) |
+| 3 | `Forklift/Envelope/ForkliftMotionEnable` | `"ForkliftEnvelope".ForkliftMotionEnable` | Bool | **program** | `FALSE` |
+| 4 | `Forklift/Envelope/ForkliftSpeedCeiling` | `"ForkliftEnvelope".ForkliftSpeedCeiling` | Real | **program** | `0.0` |
+| 5 | `Forklift/Envelope/ForkliftEquipmentPermit` | `"ForkliftEnvelope".ForkliftEquipmentPermit` | Bool | **program** | `FALSE` |
+| 6 | `Forklift/Vehicle/ForkliftVehicleModeApplied` | `"ForkliftVehicle".ForkliftVehicleModeApplied` | UInt | bridge | `0` (None) |
+| 7 | `Forklift/Vehicle/ForkliftVehicleHeartbeat` | `"ForkliftVehicle".ForkliftVehicleHeartbeat` | UInt | bridge | `0` |
+| 8 | `Forklift/ProcessStop/HmiProcessStopRequest` | `"ForkliftProcessStop".HmiProcessStopRequest` | Bool | HMI | **`TRUE`** |
+| 9 | `Forklift/ProcessStop/ForkliftProcessStopActive` | `"ForkliftProcessStop".ForkliftProcessStopActive` | Bool | **program** | **`TRUE`** |
+
+**The numbering above is scoped to this set of nine and continues nothing.** Every
+count in this document stays **set-scoped** in the sense `opcua-nodes.md` §9.8
+fixes: §3.1's "exactly the 18 nodes of §10" stays a true statement about the M4
+set, §13.4's "18 + 4 = 22" a true statement about the M4 + mirror set, and
+`Forklift/` now carries **ten** subfolders and 18 + 4 + 9 = **31** nodes.
+
+**Two interface totals exist and they are different numbers, which is worth one
+sentence rather than a later correction.** `opcua-nodes.md` §12.2 gives the
+**node model's** total as 15 (§9) + 18 (§10) + 4 (§11) + 9 (§12) = **46**. **This
+project's `DemoCell` interface does not carry the §9 demonstration cell at all**
+(§3.1b, owner decision 2026-07-30): it carries `Link/BridgeHeartbeat` and the
+`Forklift/` subtree, so **as built it is 1 + 31 = 32**. §13.4's "15 + 18 + 4 = 37"
+is the node model's arithmetic quoted for the mirror set and is true about that
+document, not about this CPU. A client browsing from `Objects` sees more than any
+of these numbers, because the CPU also auto-publishes every global DB under
+`DataBlocksGlobal`. That is not a defect.
+
+**Four new global DBs, one per folder, and no existing DB gains a member.** This
+is §4.2's rule applied a third time and for the same reason: adding members to
+`ForkliftHmi`, `ForkliftInput`, `ForkliftStatus`, `ForkliftLink` or
+`ForkliftSafetyMirror` moves the offsets of tags that the M4 and §13 watch tables
+and evidence depend on, and a download that leaves project and CPU inconsistent
+shows up as monitoring errors on exactly the rows whose offsets moved (LESSONS
+2026-07-28).
+
+| DB | Contents | *Accessible from HMI/OPC UA* | *Writable from HMI/OPC UA* |
+|---|---|---|---|
+| `ForkliftMode` | tags 1–2 above | ✔ | **✔ on `HmiDriveModeRequest` only** |
+| `ForkliftEnvelope` | tags 3–5 above | ✔ | **✘ (all three)** |
+| `ForkliftVehicle` | tags 6–7 above | ✔ | **✔ (both — the bridge writes them)** |
+| `ForkliftProcessStop` | tags 8–9 above | ✔ | **✔ on `HmiProcessStopRequest` only** |
+
+> **`ForkliftEnvelope` not writable is where "a permission is not a command" stops
+> being a convention and becomes a server refusal** (`opcua-nodes.md` §12.2). A
+> defect in either client that tried to write the enable, the ceiling or the
+> permit is refused by the CPU. **Per-*client* scoping remains policy**, unchanged
+> and no wider than §4.2 records: the commissioned CPU runs with access control
+> disabled and security `None`, so "only the HMI writes the two `Hmi…` tags and
+> only the bridge writes the two `Vehicle/` tags" is each client's own allowlist,
+> not the server's. Closing that is the access-control work `opcua-nodes.md`
+> §10.12 item 6 already carries, and is not a change to this program.
+
+**No member of any of the four new DBs is declared Retain**, for §3.2's reason: a
+restart re-reads the world and decides where it is.
+
+**The folder tree of §4.3 gains four folders and is otherwise untouched:**
+
+```
+DemoCell/                                       ns http://DemoCell, unchanged
+  Link/      BridgeHeartbeat
+  Forklift/
+    Hmi/  Input/  Output/  Status/  Link/       §3.1, unchanged
+    Safety/                                     §13, unchanged
+    Mode/         HmiDriveModeRequest  ForkliftDriveModeActive
+    Envelope/     ForkliftMotionEnable  ForkliftSpeedCeiling
+                  ForkliftEquipmentPermit
+    Vehicle/      ForkliftVehicleModeApplied  ForkliftVehicleHeartbeat
+    ProcessStop/  HmiProcessStopRequest  ForkliftProcessStopActive
+```
+
+**Rename nothing, and read the namespace URI back rather than typing it.** The
+interface name **is** the namespace URI, derived by TIA as `http://<interface
+name>` in a field that is not editable (ADR 0006); the browse paths above are
+**read-back values**, not fields to enter, and every one of them is a design value
+until the owner reads it out of the tool and records it with its date (§14.13).
+
+### 14.3 New constants and new statics
+
+**Six new constant rows — eight identifiers** — in the FB's constant block beside
+§3.3's. Every one is a **process decision** the node model deliberately refused to
+make. Commissioning values, not measurements.
+
+| Constant | Type | Value | Basis |
+|---|---|---|---|
+| `MODE_NONE` / `MODE_TELEOP` / `MODE_AUTONOMOUS` | UInt | `0` / `1` / `2` | The `opcua-nodes.md` §12.3 encoding, **written once and re-encoded nowhere**. Every comparison in §14.8 is against these three symbols, so a literal `2` appears in no statement of this program. Counted as one constant row because they are one decision |
+| `VEHICLE_STALE_TIME` | Time | `T#500ms` | The **vehicle control layer's** stale window — ≈10 missed beats at the 50 ms cadence the bridge carries the counter at (`opcua-nodes.md` §12.10). **Its own constant, never shared with `HMI_STALE_TIME` or `HEARTBEAT_STALE_TIME`** (§12.6 **V3**, §10.8 **P4**): three parties are now watched across three transports, and retuning one must not silently retune another. Its value coincides with `HEARTBEAT_STALE_TIME`'s; that is a coincidence of two rates, not a shared decision, exactly as `FORK_REQUEST_MIN/MAX` coincides with the traction pair |
+| `MODE_DISAGREE_DELAY` | Time | `T#2s` | How long `ForkliftVehicleModeApplied` may differ from `ForkliftDriveModeActive` before the difference is a **fault** (§12.13 item 7). **The rule is "comfortably longer than the vehicle's worst-case adopt-and-report time", not this number.** The supervision round trip is ~46 ms measured one way and an upper bound at that (ADR 0014 **G1**), but the vehicle may complete its own controlled-stop ramp before it reports the new mode, and that time is `agv/`'s (m5-11) and is **not known here** — §14.15 open item 2 asks for it, and this constant is re-derived from it when it lands |
+| `AUTONOMOUS_SPEED_CEILING` | Real | `0.60` m/s | The ceiling published while autonomous motion is permitted. **60 % of `TRACTION_SPEED_MAX`**, chosen so that the fork-height clamp to `TRACTION_SPEED_CAP_RAISED` (`0.30`) is an **unmistakable halving** in the recording rather than a change nobody can see, and so the ceiling can never exceed `TRACTION_SPEED_MAX` (`opcua-nodes.md` §10.12 item 4 and §12.4's row). **No conformity is claimed for this or any other speed in this document** (ADR 0011 D5); ADR 0014 records `0.3` m/s as **G7**, a practice figure, and this constant is not derived from it and must not be presented as it |
+| `STANDSTILL_SPEED` | Real | `0.05` m/s | The standstill window on `ForkliftLinearSpeed`, 5 % of `TRACTION_SPEED_MAX` — above odometry quantisation and far below any speed the cell drives at. A design value to be confirmed against the plant's resting `ForkliftLinearSpeed` at commissioning |
+| `STANDSTILL_TIME` | Time | `T#500ms` | How long the machine must read standstill before a mode entry is admitted, so a zero crossing on the way through cannot be mistaken for a stop. Its own constant |
+
+**Ten new statics**, in the instance DB `"ForkliftControl_DB"` beside §3.2's.
+
+| Symbol | Type | Start value | Purpose |
+|---|---|---|---|
+| `DriveModeInForce` | UInt | `0` (None) | **The mode arbiter's state.** The single internal answer to "what mode is the machine in"; `ForkliftDriveModeActive` is its published copy, assigned in exactly one statement in part 8. Start value `0` is the non-permissive one: before the arbiter has decided anything the machine is in **no** mode, and no motion is granted in either path |
+| `LastModeRequest` | UInt | `0` | Value of `HmiDriveModeRequest` at the previous OB call, for the **selector transition** the arbiter treats as the operator's affirmative action. Compared for **inequality** only. **Tracked unconditionally, including while the request is unattributable**, so a link coming back up manufactures no transition (§14.4 **X4**) |
+| `AutonomousArmed` | Bool | `FALSE` | **This cell's cycle-running flag for the autonomous control law**, in the sense of CLAUDE.md §9 — it says *the operator has enabled autonomous mode*, and it says nothing about what any actuator is doing. Set **only** by transition **X2**; cleared by any drop condition in the same OB call. It is the exact counterpart of `ForkliftTeleopActive` for the other mode, and it is **internal**: `opcua-nodes.md` §12.12 refuses a second enable **node**, and this is not one |
+| `LastVehicleHeartbeat` | UInt | `0` | Value of `ForkliftVehicleHeartbeat` at the previous OB call. **Inequality only** — never subtracted, never tested for `+1`, never assumed monotonic across the wrap or across a restart of the vehicle layer (§12.6 **V1**) |
+| `VehicleSeenAlive` | Bool | `FALSE` | *The vehicle's heartbeat has been observed to change at least once since CPU start.* One-shot, set by the first inequality, never cleared while the CPU runs. **The first term of the vehicle verdict** and what makes it `FALSE` — rather than "not yet proven stale" — for the whole boot window (§12.6 **V2**, LESSONS 2026-07-28). **Three independent watchdogs, three independent one-shots**: none substitutes for another |
+| `VehicleStaleTimer` | IEC_TIMER (TON) | — | Runs while the vehicle heartbeat is unchanged |
+| `ModeDisagreeTimer` | IEC_TIMER (TON) | — | Runs while the vehicle's applied mode differs from the mode in force and the report is attributable. **Its `Q` is both the latch's trigger and `WorldOk`'s C8 term** (§14.7) |
+| `ModeDisagreeLatch` | Bool | `FALSE` | The disagreement stood for `MODE_DISAGREE_DELAY`. A **sixth** cause of `ForkliftResetRequired`. **The reaction is never to adopt the vehicle's value** (§12.3 **M4**) |
+| `ProcessStopLatch` | Bool | **`TRUE`** | The operator's latched process stop, mirrored to `ForkliftProcessStopActive`. **Start value `TRUE`** so that the published node cannot read *clear* before the program has decided anything, matching the node's own start value (§12.7). A **seventh** cause of `ForkliftResetRequired` |
+| `StandstillTimer` | IEC_TIMER (TON) | — | Delay before a plausible standstill admits a mode entry |
+
+**New Temps**, computed and consumed within one call, added to §7's preamble list:
+`#modeRequest`, `#modeRequestValid`, `#modeSelectRise`, `#modeEntryAdmitted`,
+`#vehicleHbChanged`, `#vehicleAlive`, `#vehicleModeValid`, `#modeDisagreeRaw`,
+`#atStandstill`, `#autonomousMotionPermitted`, `#equipmentPermit`.
+
+> **The instance DB outliving the declaration is the failure this project has
+> already paid for.** An interface *Default value* governs nothing once the
+> instance DB exists, and a download without reinitialisation preserves the DB's
+> old contents (LESSONS 2026-07-28). Adding ten statics to a live
+> `"ForkliftControl_DB"` is exactly that situation: after the download, **read
+> every value in the table above out of the watch table**, not out of the FB
+> interface, and reinitialise the instance DB if any of them disagrees.
+> `ProcessStopLatch` is the one to check first, because a stale `FALSE` there
+> publishes a cleared process stop that nobody cleared. **Nothing is Retain**, so
+> a reinitialisation costs nothing.
+
+### 14.4 The mode arbiter
+
+Two sources can reach the vehicle's actuators once autonomy exists — the PLC's
+three §10.6 setpoints, and the vehicle's own controller — and **exactly one may
+be live at any moment** (`opcua-nodes.md` §12.9). The arbiter below is what makes
+that true, and it is written as a state machine because "the HMI should not do
+that" is not a specification: what the program does when a client does it is.
+
+```mermaid
+stateDiagram-v2
+    [*] --> ModeNone
+    ModeNone: None (0) — no control law in force, no motion granted in either path
+    ModeTeleop: Teleop (1) — §7 forms every setpoint, unchanged
+    ModeAutonomous: Autonomous (2) — the PLC publishes the envelope
+
+    ModeNone --> ModeTeleop: X1 SelectTeleop
+    ModeNone --> ModeAutonomous: X2 SelectAutonomous
+    ModeTeleop --> ModeNone: X3 DeselectMode
+    ModeAutonomous --> ModeNone: X3 DeselectMode
+    ModeTeleop --> ModeNone: X4 ModeUnattributable
+    ModeAutonomous --> ModeNone: X4 ModeUnattributable
+    ModeNone --> ModeNone: X5 EntryRefused
+    ModeTeleop --> ModeTeleop: X6 ModeHeld
+    ModeAutonomous --> ModeAutonomous: X6 ModeHeld
+```
+
+**The decision is taken once per OB call, ahead of both command paths.** That is
+what makes `opcua-nodes.md` §12.3 **M6** — *`ForkliftTeleopActive` and
+`ForkliftMotionEnable` are never both `TRUE`, in any state, including during a
+transition* — true **by construction** rather than by inspection: both are formed
+later in the same call from the one value `#DriveModeInForce`, so no scan ends
+with two live sources.
+
+| # | Transition | From → To | Condition | What it is |
+|---|---|---|---|---|
+| **X1** | `SelectTeleop` | None → Teleop | `#modeSelectRise` into `Teleop` **and** `#modeEntryAdmitted` | The operator selected teleoperated mode and the machine was in a state to accept it |
+| **X2** | `SelectAutonomous` | None → Autonomous | `#modeSelectRise` into `Autonomous` **and** `#modeEntryAdmitted` **and** `#vehicleAlive` | The operator selected autonomous mode. **This transition is the affirmative action that enables autonomous motion** — `opcua-nodes.md` §12.3 defines no separate autonomous enable, so the selection *is* the edge, and it is the only thing that sets `AutonomousArmed` |
+| **X3** | `DeselectMode` | Teleop \| Autonomous → None | the request no longer equals the mode in force, while `#hmiLinkOk` | The operator moved the selector. **Leaving a mode is unconditional**: there is no state, latch or motion that can hold the machine in a mode the operator has left |
+| **X4** | `ModeUnattributable` | any → None | `NOT #modeRequestValid` — the HMI link verdict is `FALSE`, **or** the request is outside `{0, 1, 2}` | *Not yet told* is `None`, never a mode. A dead client's last written value is not an operator's selection (§10.9's qualification rule), and a value outside the set is a **broken writer, not a mode to clamp** (§12.3) |
+| **X5** | `EntryRefused` | None → None | `#modeSelectRise` with `#modeEntryAdmitted` (or, for `Autonomous`, `#vehicleAlive`) `FALSE` | The selection was made and **consumed**: `LastModeRequest` advances, so the same selector position produces no second transition. Re-entry needs the operator to move the selector **away and back**. This is the no-auto-resume rule of CLAUDE.md §9 written for a selector instead of a button |
+| **X6** | `ModeHeld` | Teleop \| Autonomous → same | none of X3, X4 | **A latch, a safety demand or a process stop does *not* move the mode.** They drop `ForkliftTeleopActive`, clear `AutonomousArmed` and take the envelope non-permissive; the mode in force is the selector's verdict and stays where the operator put it. `opcua-nodes.md` §12.4's enable row is written the same way — the enable carries the latches, the mode does not — and §12.3 **M5** anticipates exactly this reading: an envelope with `ForkliftMotionEnable` `FALSE` is not "teleop", it is an autonomy envelope withholding permission |
+
+**`#modeEntryAdmitted` has exactly two terms, and both are checkable at a watch
+table**: `#StandstillTimer.Q` — the machine has read standstill for
+`STANDSTILL_TIME` — and `#motionPermissive`, the M4 permissive unchanged, which
+already carries both link verdicts, the obstacle field, all six plausibility
+windows, the seven latches and (once §13 is applied) the safety demand. Entry
+into `Autonomous` takes one further term, `#vehicleAlive`: **a supervisor does not
+declare a control law in force that nobody is applying.**
+
+#### The three cases that would otherwise be argued at the watch table
+
+| Case | What the program does |
+|---|---|
+| **A mode request arrives mid-motion** | **X3 fires in the call the request changes**, so the mode goes to `None` immediately. In `Teleop` that drops `ForkliftTeleopActive` in the same call and the three setpoints go to `0.0` through the existing mandatory `ELSE`; in `Autonomous` it clears `AutonomousArmed` in the same call, so `ForkliftMotionEnable` goes `FALSE` and `ForkliftSpeedCeiling` goes `0.0` in the same call, and the vehicle takes its **own** controlled stop on its own ramp — the PLC withdrew permission, it did not command a stop. **Entry into the newly selected mode is then refused** (X5), because the machine is still moving and `#StandstillTimer.Q` is `FALSE`; the transition is consumed. The operator must wait for standstill and **select again**. A mode change mid-motion therefore always costs one deliberate re-selection, and there is no path by which the machine swaps control laws while moving |
+| **A mode request arrives while a process stop is latched** | `ProcessStopLatch` is a member of `#latchPending`, so `#motionPermissive` is `FALSE`, so `#modeEntryAdmitted` is `FALSE`: **X5**, the mode stays `None`, nothing is armed, and the transition is consumed. When the operator later clears the latch with the monitored reset, **the selector still reads the mode it requested and no transition exists**, so the machine does not enter it: the operator must move the selector away and back. That is `opcua-nodes.md` §12.3's stated sequence — *leave the mode, press reset, select the mode again* — and it is why a reset energizes nothing here either. If instead the latch forms while a mode is already in force, **X6** holds the mode and the enable, the arming and the setpoints all drop; the same re-selection is required afterwards, because `AutonomousArmed` is set only by X2 and `ForkliftTeleopActive` only by a fresh `#teleopRise` |
+| **The losing source keeps writing** | **HMI writing while `Autonomous` is in force:** the five `Forklift/Hmi/` requests are still qualified and still plausibility-tested — a broken client still latches `RequestFaultLatch` and still drops `#worldOk`, which drops the **envelope** as well — but `ForkliftTeleopActive` cannot be set while the mode is not `Teleop`, so the three setpoints stay `0.0` through the **existing** `ELSE`, with no new branch (§12.9 **C2**). A held `HmiTeleopRequest` produces **no edge** when `Teleop` is later selected, so the machine does not start. `HmiProcessStopRequest` stays live in every mode: the operator's stop is not mode-scoped. **Vehicle writing its own actuators while `Teleop` is in force, or while the enable is `FALSE`:** the PLC publishes the non-permissive envelope and **notices** through `ForkliftVehicleModeApplied ≠ ForkliftDriveModeActive`. After `MODE_DISAGREE_DELAY` the timer's `Q` drops `#worldOk` through **C8** **and** sets `ModeDisagreeLatch` in the same call, so teleop drops, the envelope goes non-permissive, `ForkliftResetRequired` goes `TRUE` and a monitored reset is required — and the reset is refused for as long as the disagreement is still standing, because C8 is in `#causeGone`. **What the PLC cannot do is stop the vehicle**, and no sentence in this document may suggest otherwise: the enforcing gate runs on the vehicle (ADR 0014 D5). The two report nodes exist so that "checked" is a demonstrated check rather than a word |
+
+**The reaction to a disagreement is never to adopt the vehicle's value** (§12.3
+**M4**). `ForkliftDriveModeActive` is formed from `HmiDriveModeRequest`, the link
+verdicts and the standing latches, and from nothing else; `ForkliftVehicleModeApplied`
+is read, compared, and used to withdraw permission — never to set a mode.
+
+### 14.5 The envelope — three elements, one source each
+
+> **Stated once, plainly, where the envelope is specified: the PLC's authority in
+> autonomous mode is permissive and *checked, not compelled*. This program forms
+> and publishes the envelope; the gate that enforces it runs on the vehicle
+> (ADR 0014 D5, `opcua-nodes.md` §12.6). A specification implying that this
+> program compels the vehicle would be false, and the M5 showcase narration has
+> to say so in the same words.**
+
+| Element | Node | Source, in one line |
+|---|---|---|
+| **Motion enable** | `ForkliftMotionEnable` | `#autonomousMotionPermitted` — the mode in force is `Autonomous`, `AutonomousArmed` is set, the **M4 permissive** `#motionPermissive` holds, and the vehicle is answering. **It permits; it never commands** (**E6**) |
+| **Speed ceiling** | `ForkliftSpeedCeiling` | `MIN(AUTONOMOUS_SPEED_CEILING, #speedCap)` while motion is permitted, `0.0` in a **mandatory `ELSE`** otherwise. `#speedCap` is §6.5's existing fork-height value, so **the fork-height clamp applies in autonomous mode exactly as it does in teleop** |
+| **Equipment permit** | `ForkliftEquipmentPermit` | The conjunction of the **named equipment register** below. Never a literal |
+
+**The ceiling is not a setpoint, and this program must not write logic that makes
+it read like one** (**E2**, **E3**). Four properties keep it a bound and all four
+are in the statement that forms it: it is **unsigned** and expresses a magnitude
+in either direction, while every §10.6 setpoint is signed; it is not multiplied by
+any demand and no demand exists in autonomous mode to multiply it by; it is
+published at this program's own cycle and **no consumer may depend on the rate**
+(**E1**); and it ends in neither `Ref` nor `Cmd`, suffixes this model reserves for
+the three nodes that command an actuator. A ceiling of `0.60` does **not** ask for
+`0.60` m/s. The PLC never learns what the vehicle commanded, and does not need to.
+
+**One constant serves two roles and that is worth naming.** `#speedCap` is a
+**scale** in teleop — `#tractionDemand * #speedCap`, §6.5 — and a **bound** here.
+Both readings agree numerically because `#speedCap` is a full-scale value in m/s:
+with the carriage raised the teleop full scale is `0.30` m/s and the autonomous
+ceiling is `0.30` m/s. The arithmetic is a `MIN`, not a multiplication, and there
+is no demand term anywhere in it.
+
+**`ForkliftSpeedLimitActive` stays teleop-scoped, and the consequence is stated
+rather than hidden.** `opcua-nodes.md` §10.7 defines it as *"`TRUE` while teleop
+is active and the carriage is raised"*, and **this section does not redefine a
+§10 node**. So in autonomous mode the fork-height clamp is visible only as the
+ceiling's value falling from `0.60` to `0.30`, and not on that flag. Widening the
+flag is a §10.7 change and is **requested, not taken** (§14.15 open item 3).
+
+#### The equipment permit's terms, at M5 and at M6
+
+`opcua-nodes.md` §12.5 **Z4** records that the permit's equipment term set is
+empty at M5, and **Z3** that its terms come from the PLC's **own station
+handshake** and never from an order, a route or a destination. Two things follow,
+and the second is a decision this document takes rather than inherits.
+
+**First, the finding, stated because it is not obvious from the world file.** The
+M5 warehouse world does contain fixed equipment as geometry — a conveyor station,
+a transfer-station frame, two charge bays and a dock-door opening
+(`sim/worlds/warehouse.sdf`, model list recorded in
+`sim/worlds/WAREHOUSE_EVIDENCE.md` §1) — and **this project's standard program
+holds no signal from any of them.** There is no
+conveyor, door or charger input node in this CPU, because there is no
+demonstration cell in this project at all (§3.1b, owner decision 2026-07-30): the
+`DemoCell` interface carries the forklift subtree, the bridge heartbeat and the
+four safety mirrors, and nothing else. **There is likewise no station handshake to
+derive from at M5** — `handshake-tables.md` describes a cell this project does not
+contain — so no term of the M6 register can be evaluated today.
+
+**Second, the decision: an empty register is not published as a granted permit,
+and it is not published as a literal either.** The register is declared with named
+members, and its **M5 membership is two terms that are real, PLC-held and
+falsifiable at a watch table**:
+
+| # | Term | Reads as | Falsified by |
+|---|---|---|---|
+| **EQ1** | `#bridgeLinkOk` | *I can see my own cell.* Every item of equipment this program could own reaches it through the bridge; with that transport dark the program can state no readiness about equipment it cannot observe. A stated readiness formed while blind is the one thing a permit must never be | `kill -9` the bridge; the permit drops within `HEARTBEAT_STALE_TIME` |
+| **EQ2** | `NOT #ProcessStopLatch` | *My cell is not stopped.* While the operator's process stop stands, the cell is not ready for a vehicle to act on any part of it | Press the process stop on the HMI |
+
+Neither term is an order, a route, a destination, a zone, a reservation or a
+traffic verdict, and **no term added at M6 may be one either** (invariants 3 and
+5; **Z1**–**Z3**). The word *zone* appears in no name in this group, for the reason
+**Z2** gives: the project already spends it three times on three different things.
+
+**What M6 adds**, without a node, a name or a consumer changing (**Z4**), each term
+named here so the M6 brief can be written from this table:
+
+| M6 term | The question it answers | Where its value will come from |
+|---|---|---|
+| `#dockDoorOpen` | is the door open | the door's own status group (`opcua-nodes.md` §6) |
+| `#conveyorStationReady` | is the conveyor ready to be loaded or unloaded | the conveyor's handshake group (§5) |
+| `#chargeBayClear` | is the charging bay clear | the charger's handshake group (§7) |
+| `#stationHandshakeSatisfied` | has the handshake for the station this vehicle is engaged with completed | `handshake-tables.md`, **from the PLC's own handshake state and from no order, route or destination** (**Z3**) |
+
+**Granularity stays one Bool per vehicle** (**Z3**). A per-station node set is the
+station handshake's own group and is not an enlargement of the envelope.
+
+**Three forms this permit must not take.** Each is a plausible-looking edit that
+changes what is claimed:
+
+| Do not write | Why not |
+|---|---|
+| `ForkliftEquipmentPermit := TRUE;` | A permit that cannot be `FALSE` is a decoration. It would also survive to M6 unnoticed, because nothing would ever have exercised it |
+| A term derived from a goal, a destination, a route, a station **identifier** or a zone | Those are fleet data this PLC does not hold (invariant 5) and the permit is not the channel through which they would arrive (**Z1**, **Z3**, **E7**) |
+| A conditional write with no `ELSE`, or a second writer | The permit is a Bool assigned **unconditionally in exactly one statement**, like every other published verdict in this program |
+
+### 14.6 The process stop, the seventh latch and the reset
+
+`Forklift/ProcessStop/` implements `opcua-nodes.md` §12.7 and adds nothing to it.
+
+| Rule | How this program meets it |
+|---|---|
+| **PS1** the latch is set while the request stands and stays set after it clears | Set on level in part 3b, qualified by `#hmiLinkOk`; cleared **only** by the monitored reset of part 5 |
+| **PS2** the only reset input is `HmiResetRequest`, on its **rising edge**, under the per-link-session arming of §10.8 **P6** | Unchanged: `#resetRise AND NOT #ResetDeviceFault`. **No second reset node is minted** |
+| **PS3** the reset tests the **live world**, never the latches | `#causeGone` is still exactly `#worldOk`, which now carries **C7**, `HmiProcessStopRequest` reading `FALSE`. **A latch is never a term in its own clearing condition** (LESSONS 2026-07-27) |
+| **PS4** clearing the latch energizes nothing | Unchanged. A reset returns the machine to the un-enabled state; motion resumes only on a fresh affirmative action — the teleop enable's rising edge, or transition **X2** |
+| **PS5** `ForkliftResetRequired` gains this cause and stays the single answer | `"ForkliftStatus".ForkliftResetRequired := #latchPending`, one statement, unchanged — `#latchPending` gains two members |
+| **PS6** while the latch stands the envelope is non-permissive and the setpoints take `0.0` in their mandatory `ELSE` | `ProcessStopLatch ∈ #latchPending ⇒ #motionPermissive FALSE ⇒` teleop drops, the three setpoints take `0.0`, `AutonomousArmed` clears, the enable is `FALSE` and the ceiling is `0.0`. **The stop reaches the vehicle through the envelope and the setpoints and through no stop topic of its own** |
+
+**Seven latches, not five.** `#latchPending` is now
+`ObstacleStopLatch OR HmiLinkLostLatch OR BridgeLinkLostLatch OR
+PlantInputFaultLatch OR RequestFaultLatch OR ProcessStopLatch OR
+ModeDisagreeLatch`, and the reset clears all seven in one statement. Every
+sentence in §6.7, §9 and §11 that says *five* is scoped to the M4 program and
+stays true about it; under this delta the number is seven and §14.11's watch rows
+are where it is read.
+
+**The polarity is inverted relative to §9.3's stop contacts, and that is
+deliberate.** `HmiProcessStopRequest` is a button on a screen written by a client
+over a network; there is no circuit, so naming it `…CircuitClosed` would assert a
+wiring property it does not have. `TRUE` means *stop requested* — the failure
+direction — and fail-safety is carried by three independent things rather than by
+the name: the start value `TRUE` on both the node and `ProcessStopLatch`; the
+qualification rule, under which a request is not attributable to an operator while
+`HmiLinkOk` is `FALSE`; and the HMI link latch of §6.1, so that a stopped HMI
+produces the stop this button would have asked for.
+
+**What this is NOT, in one sentence.** The operator's process stop is **not a
+safety function, not an emergency stop and not a protective stop**; it does not
+reach the F-layer, it cannot create, prevent or clear an F-latch, and it carries
+no SIL, PL or Category (invariant 1, ADR 0010 D6(b), §11.4 **MR2**/**MR3** of the
+node model, and §2 of this document). It is a network path, unavailable exactly
+when the link is down, and **no stopping time or distance is claimed for it**.
+That is not a defect of the design — it is *why* the safety functions are not on
+it.
+
+### 14.7 The vehicle's report — a third watched party, and what it does not buy
+
+`Forklift/Vehicle/` implements `opcua-nodes.md` §12.6 **V1**–**V4**.
+
+- **V1** — `ForkliftVehicleHeartbeat <> LastVehicleHeartbeat`, **inequality only**.
+  Never subtract, never test for `+1`, never assume monotonic ordering across the
+  wrap or across a restart of the vehicle layer.
+- **V2** — `#vehicleAlive := #bridgeLinkOk AND #VehicleSeenAlive AND NOT
+  #VehicleStaleTimer.Q`. **`FALSE` from the first scan and until the counter has
+  actually moved.** "Not yet proven stale" is not "alive", and every guard riding
+  on it inherits that boot polarity (LESSONS 2026-07-28). `#bridgeLinkOk` is
+  conjoined because the counter reaches this program through the bridge: an
+  unattributable transport makes the party behind it unattributable too.
+- **V3** — `VEHICLE_STALE_TIME` is **its own constant** (§14.3).
+- **V4** — **the verdict is not merged with `BridgeLinkOk`.** They answer
+  different questions — *is the transport alive* and *is the layer behind it
+  running* — and §14.11 reads them apart, on their own rows.
+
+**The vehicle's verdict sets no latch, and that is a decision.** Three reasons, in
+the order that decides it:
+
+1. **It would make the M4 teleop cell unusable.** The vehicle's control layer does
+   not exist in a teleop-only run, so its verdict is `FALSE` for the whole run. A
+   latch would put `ForkliftResetRequired` permanently `TRUE` and block every
+   enable edge, which would break §11's six scenarios and §13's statement that
+   every M4 behaviour is exactly as §1–§12 specifies. **The autonomous path
+   requires the vehicle; the teleop path must not.**
+2. **No auto-resume is already enforced without it.** A vehicle that stops
+   answering clears `AutonomousArmed` in the same OB call, and `AutonomousArmed`
+   is re-set **only** by transition **X2** — a fresh operator selection. The
+   permission returns when the vehicle does; the motion does not.
+3. **The diagnosis is better without it.** `VehicleSeenAlive` beside
+   `VehicleStaleTimer.ET` says *never seen* versus *seen and now stale*, which one
+   latch bit cannot (§14.11).
+
+**A persistent mode disagreement is different and does latch**, because it is not
+an absence — it is a report that the envelope is not being applied, from a layer
+that is demonstrably alive. After `MODE_DISAGREE_DELAY` the same timer output
+both drops `#worldOk` through **C8** and sets `ModeDisagreeLatch`, so the machine
+stops, a monitored reset is required, and the reset is **refused while the
+disagreement still stands** — C8 is in `#causeGone`, and a latch is never a term
+in its own clearing condition (LESSONS 2026-07-27).
+
+> **Why C8 is the debounced verdict and not the live comparison, which is the
+> obvious form and is wrong.** Written the obvious way — `C8 := NOT (applied ≠ in
+> force)` — the term is `FALSE` for the whole of the vehicle's **normal adopt
+> window**: the PLC decides the new mode in one scan, the vehicle sees it a bridge
+> cycle later and reports it a cycle after that. A live C8 therefore drops
+> `#motionPermissive` in the call *after* transition **X2**, which clears
+> `AutonomousArmed`, which can only be re-set by another **X2** — and the next
+> selection races the same window. **`Autonomous` becomes unreachable**, and the
+> watch table shows a mode of `2` with an enable that flickers `TRUE` for exactly
+> one OB call per selection. Found by transliterating §14.8 into a **throwaway**
+> double while this section was being written — **not committed, and not evidence
+> for anything**; open item 6 asks for the committed one — and running the entry
+> sequence with a 200 ms adopt window rather than an instantaneous one, which is
+> why the modelled delay mattered more than the logic did. The debounced form costs one thing and it is stated rather than
+> hidden: a disagreement is not visible in `#worldOk` until
+> `MODE_DISAGREE_DELAY` has elapsed, so the constant is the whole of the
+> tolerance and §14.15 open item 2 is what bounds it.
+
+**What these two nodes do not make true.** They let this program **notice** that
+its envelope is not being applied. They do not let it **enforce** the envelope,
+and no node in this model does. The backstops for a gate node that has stopped
+gating live in other layers, and **this section neither claims nor describes
+them** (ADR 0011 D5, ADR 0014 D5).
+
+### 14.8 SCL — the three new parts, and the five modified statements
+
+Structure and the load-bearing statements only, in §7's manner. **§7's own fence
+is not edited and its size and hash are not restated**; the parts below are
+inserted at the points named, and every timer states its `PT` explicitly at the
+call site.
+
+**New part 2d — after part 2c, before part 3.**
+
+```pascal
+// ---- 2d. The mode request, the vehicle's report, and standstill ----------
+// Mode request: AFFIRMATIVE validity against the three defined values. A value
+// outside {0,1,2} is a BROKEN WRITER, not a mode to clamp (opcua-nodes.md
+// §12.3). The literals live in the constant block and appear nowhere else.
+#modeRequest      := "ForkliftMode".HmiDriveModeRequest;
+#modeRequestValid := #hmiLinkOk
+    AND (   (#modeRequest = #MODE_NONE)
+         OR (#modeRequest = #MODE_TELEOP)
+         OR (#modeRequest = #MODE_AUTONOMOUS));
+
+// Vehicle heartbeat: the THIRD watched party, with its OWN constant and its OWN
+// one-shot (opcua-nodes.md §12.6 V1-V3). Inequality only: the counter is UInt16,
+// it wraps, and it restarts from an arbitrary value at every restart of the
+// vehicle layer. NEVER write #vehicleAlive := NOT #VehicleStaleTimer.Q -- that
+// reads TRUE for the first VEHICLE_STALE_TIME of every CPU run, before the
+// vehicle layer has reported anything at all.
+#vehicleHbChanged := ("ForkliftVehicle".ForkliftVehicleHeartbeat
+                      <> #LastVehicleHeartbeat);
+#VehicleStaleTimer(IN := NOT #vehicleHbChanged, PT := #VEHICLE_STALE_TIME);
+#LastVehicleHeartbeat := "ForkliftVehicle".ForkliftVehicleHeartbeat;
+IF #vehicleHbChanged THEN
+    #VehicleSeenAlive := TRUE;   // one-shot, start value FALSE, non-retain
+END_IF;
+// NOT merged with #bridgeLinkOk into one "vehicle OK" flag (V4): they answer
+// different questions and §14.11 reads them apart, on their own rows.
+#vehicleAlive := #bridgeLinkOk AND #VehicleSeenAlive
+                 AND NOT #VehicleStaleTimer.Q;
+
+// The vehicle's applied mode is a READBACK, never a second answer (M1, M4). The
+// comparison is against #DriveModeInForce as it stands from the previous call --
+// part 5a has not run yet -- which is exactly the value the vehicle was last
+// told. An invalid report is a disagreement, never a value to adopt.
+#vehicleModeValid :=
+       ("ForkliftVehicle".ForkliftVehicleModeApplied = #MODE_NONE)
+    OR ("ForkliftVehicle".ForkliftVehicleModeApplied = #MODE_TELEOP)
+    OR ("ForkliftVehicle".ForkliftVehicleModeApplied = #MODE_AUTONOMOUS);
+#modeDisagreeRaw := #vehicleAlive
+    AND NOT (#vehicleModeValid
+             AND ("ForkliftVehicle".ForkliftVehicleModeApplied
+                  = #DriveModeInForce));
+// The RAW comparison is TRUE for the whole of the vehicle's normal adopt window,
+// so it is NEVER used as a permissive term. #ModeDisagreeTimer.Q is: it is both
+// C8 in part 4 and this latch's trigger, and the two therefore fire in the same
+// call. NEVER write "AND NOT #modeDisagreeRaw" into #worldOk -- that disarms the
+// mode one call after it was selected and makes Autonomous unreachable (§14.7).
+#ModeDisagreeTimer(IN := #modeDisagreeRaw, PT := #MODE_DISAGREE_DELAY);
+IF #ModeDisagreeTimer.Q THEN #ModeDisagreeLatch := TRUE; END_IF;
+
+// Standstill, for the mode arbiter. AFFIRMATIVE: an implausible speed is NOT
+// standstill, which is the restrictive direction -- the §6.5 form, applied to a
+// third comparison. The timer is called unconditionally here and its Q is read
+// in part 5a: a timer that must be released by leaving a state is never called
+// inside the branch that owns the state (LESSONS 2026-07-27).
+#atStandstill := #speedValid
+    AND (ABS("ForkliftInput".ForkliftLinearSpeed) < #STANDSTILL_SPEED);
+#StandstillTimer(IN := #atStandstill, PT := #STANDSTILL_TIME);
+```
+
+**New part 3b — after part 3, before part 4.**
+
+```pascal
+// ---- 3b. The operator's process stop (PROCESS stop; no SRS function) -----
+// Level, no delay, no debounce -- the §6.7 shape on the other client. The
+// #hmiLinkOk conjunct is what keeps this out of the boot window: the node's
+// START VALUE IS TRUE, and without it a cold-started CPU would latch a stop no
+// operator requested. The boot window is covered instead by the start value TRUE
+// on #ProcessStopLatch itself, so the published node cannot read CLEAR before
+// this program has decided anything (opcua-nodes.md §12.7, §12.8).
+IF #hmiLinkOk AND "ForkliftProcessStop".HmiProcessStopRequest THEN
+    #ProcessStopLatch := TRUE;
+END_IF;
+"ForkliftProcessStop".ForkliftProcessStopActive := #ProcessStopLatch;
+```
+
+**Part 4 — two modified statements.** Before:
+
+```pascal
+#worldOk :=
+       #bridgeLinkOk                                                   // C1
+   AND #hmiLinkOk                                                      // C2
+   AND NOT "ForkliftInput".ForkliftObstacleInStopZone                  // C3
+   AND #plantInputsValid                                               // C4
+   AND #distanceValid                                                  // C5
+   AND #requestsValid;                                                 // C6
+
+#latchPending := #ObstacleStopLatch OR #HmiLinkLostLatch
+                 OR #BridgeLinkLostLatch OR #PlantInputFaultLatch
+                 OR #RequestFaultLatch;
+```
+
+After:
+
+```pascal
+#worldOk :=
+       #bridgeLinkOk                                                   // C1
+   AND #hmiLinkOk                                                      // C2
+   AND NOT "ForkliftInput".ForkliftObstacleInStopZone                  // C3
+   AND #plantInputsValid                                               // C4
+   AND #distanceValid                                                  // C5
+   AND #requestsValid                                                  // C6
+   AND NOT "ForkliftProcessStop".HmiProcessStopRequest                 // C7
+   AND NOT #ModeDisagreeTimer.Q;                                       // C8
+
+#latchPending := #ObstacleStopLatch OR #HmiLinkLostLatch
+                 OR #BridgeLinkLostLatch OR #PlantInputFaultLatch
+                 OR #RequestFaultLatch
+                 OR #ProcessStopLatch OR #ModeDisagreeLatch;
+```
+
+`#motionPermissive` and `#causeGone` are **not edited**: both already read
+`#worldOk` and `#latchPending`, so both inherit C7, C8 and the two latches without
+a character changing. That is deliberate — C7 must be in `#causeGone` because
+**PS3** makes the released button this latch's live-world term, and C8 must be in
+`#causeGone` so that a reset cannot clear a disagreement that is still standing.
+
+**New part 5a — after part 4, before part 5's reset.**
+
+```pascal
+// ---- 5a. Mode arbitration: ONE decision per call, ahead of BOTH command
+// paths, which is what makes "the two are never both TRUE, including during a
+// transition" true by construction (opcua-nodes.md §12.3 M6) rather than by
+// inspection. #worldOk, #latchPending and #motionPermissive are already formed.
+#modeSelectRise    := #modeRequestValid AND (#modeRequest <> #LastModeRequest);
+#modeEntryAdmitted := #StandstillTimer.Q AND #motionPermissive;
+
+// X4 ModeUnattributable, then X3 DeselectMode. LEAVING a mode is unconditional:
+// no latch, no demand and no motion can hold the machine in a mode the operator
+// has left or can no longer be asked about. "Not yet told" is None, never a mode.
+IF NOT #modeRequestValid THEN
+    #DriveModeInForce := #MODE_NONE;                        // X4
+ELSIF #modeRequest <> #DriveModeInForce THEN
+    #DriveModeInForce := #MODE_NONE;                        // X3
+END_IF;
+// The X3 branch also fires from None whenever the selector reads a mode that is
+// not in force -- assigning None to None. That is a no-op by construction and is
+// left as one rather than guarded, because a guard would be a second place where
+// the arbiter's state is decided.
+
+// X1 / X2 / X5. Entry is admitted ONLY from None, ONLY on a fresh selector
+// transition, ONLY at confirmed standstill and ONLY while the M4 permissive
+// holds -- and entry into Autonomous takes one further term, because a
+// supervisor does not declare a control law in force that nobody is applying.
+// A refused entry falls through and the transition is CONSUMED below: re-entry
+// needs the operator to move the selector away and back (X5).
+IF (#DriveModeInForce = #MODE_NONE) AND #modeSelectRise
+   AND #modeEntryAdmitted THEN
+    IF #modeRequest = #MODE_TELEOP THEN
+        #DriveModeInForce := #MODE_TELEOP;                  // X1
+    ELSIF (#modeRequest = #MODE_AUTONOMOUS) AND #vehicleAlive THEN
+        #DriveModeInForce := #MODE_AUTONOMOUS;              // X2
+        // The affirmative action that enables autonomous motion. This section
+        // mints NO second enable node (opcua-nodes.md §12.12): the selection IS
+        // the edge, exactly as the teleop enable's rising edge is (§12.3).
+        #AutonomousArmed  := TRUE;
+    END_IF;
+END_IF;
+
+// Updated ONCE, after every test that reads it, and tracked EVEN WHILE THE
+// REQUEST IS UNATTRIBUTABLE so that a link coming back up manufactures no
+// transition. This is §10.8 P6's lesson on the other control: a selection
+// standing across an outage is not an operator's selection.
+#LastModeRequest := #modeRequest;
+
+// The autonomous cycle-running flag. Machine state and actuator command are
+// separate layers (CLAUDE.md §9): this bit says the operator has enabled the
+// autonomous control law, part 8 forms the envelope from it and the interlocks.
+// Cleared by ANY drop condition in the same OB call; set ONLY by X2 above, so a
+// returning permissive restores the PERMISSION and never the MOTION.
+IF NOT ((#DriveModeInForce = #MODE_AUTONOMOUS)
+        AND #motionPermissive AND #vehicleAlive) THEN
+    #AutonomousArmed := FALSE;
+END_IF;
+```
+
+**Part 5 — two modified statements.** The reset clears **seven** latches:
+
+```pascal
+IF #resetRise AND NOT #ResetDeviceFault AND #latchPending AND #causeGone THEN
+    #ObstacleStopLatch    := FALSE;  #HmiLinkLostLatch     := FALSE;
+    #BridgeLinkLostLatch  := FALSE;  #PlantInputFaultLatch := FALSE;
+    #RequestFaultLatch    := FALSE;
+    #ProcessStopLatch     := FALSE;  #ModeDisagreeLatch    := FALSE;
+END_IF;
+```
+
+and the two `ForkliftTeleopActive` statements each gain **one** conjunct, so that
+teleop is the live source only while the mode in force says so:
+
+```pascal
+IF #teleopRise AND NOT #latchPending AND #motionPermissive
+   AND (#DriveModeInForce = #MODE_TELEOP) THEN
+    "ForkliftStatus".ForkliftTeleopActive := TRUE;
+END_IF;
+
+IF NOT (#motionPermissive AND "ForkliftHmi".HmiTeleopRequest
+        AND (#DriveModeInForce = #MODE_TELEOP)) THEN
+    "ForkliftStatus".ForkliftTeleopActive := FALSE;
+END_IF;
+```
+
+**New part 8 — after part 7, as the last action of the FB.**
+
+```pascal
+// ---- 8. THE ONLY assignments to the mode node and the three envelope nodes
+// The published copy of the arbiter's state. One writer, one statement. No
+// consumer infers the mode from anything else, and this program never derives it
+// from the vehicle's report (opcua-nodes.md §12.3 M1, M4).
+"ForkliftMode".ForkliftDriveModeActive := #DriveModeInForce;
+
+// The enable. It PERMITS; it never commands (E6). It is TRUE only while the mode
+// in force is Autonomous, so it and ForkliftTeleopActive are never both TRUE
+// (M6) -- both are formed in this call from the one value decided in part 5a.
+#autonomousMotionPermitted :=
+       (#DriveModeInForce = #MODE_AUTONOMOUS)
+   AND #AutonomousArmed
+   AND #motionPermissive
+   AND #vehicleAlive;
+"ForkliftEnvelope".ForkliftMotionEnable := #autonomousMotionPermitted;
+
+// The ceiling is a BOUND, not a setpoint: unsigned, magnitude in either
+// direction, no demand term anywhere in it, and MIN rather than a
+// multiplication. #speedCap is §6.5's fork-height value, so the fork-height
+// clamp applies in BOTH modes. The ELSE is mandatory and unconditional: without
+// it the Real keeps its last value and the bridge keeps republishing a
+// permission this program has withdrawn (LESSONS 2026-07-27).
+IF #autonomousMotionPermitted THEN
+    "ForkliftEnvelope".ForkliftSpeedCeiling :=
+        MIN(IN1 := #AUTONOMOUS_SPEED_CEILING, IN2 := #speedCap);
+ELSE
+    "ForkliftEnvelope".ForkliftSpeedCeiling := 0.0;
+END_IF;
+
+// The fixed-equipment / station permit (ADR 0012 D1). NEVER a literal TRUE. The
+// M5 register has two named members and gains four at M6 (§14.5); no member is
+// or ever becomes an order, a route, a destination or a zone reservation --
+// those are the fleet manager's data and reach no node on this server
+// (invariant 5, opcua-nodes.md §12.5 Z1-Z3).
+#equipmentPermit := #bridgeLinkOk                  // EQ1
+                    AND NOT #ProcessStopLatch;     // EQ2
+"ForkliftEnvelope".ForkliftEquipmentPermit := #equipmentPermit;
+```
+
+*Note on `#DriveModeInForce` being read in part 2d before part 5a writes it*: the
+disagreement is deliberately measured against the mode the vehicle was **last
+told**, which is the previous call's value. The comparison is therefore never one
+scan early, and a mode change costs one OB call of agreed disagreement rather than
+a spurious fault.
+
+*Note on the order of parts 5a and 5*: the arbiter runs **before** the reset and
+the enable, and `#latchPending` is still computed once, in part 4, ahead of all
+three. So a mode selection, a reset and an enable edge arriving in the same 20 ms
+call are three separate actions and cannot be collapsed into one.
+
+### 14.9 Cold start — every value checked against `opcua-nodes.md` §12, row by row
+
+**The rule is that every start value in §12 is the non-permissive one, and the
+check below is that the program's first scan publishes the same thing the DB start
+value says.** A start value the program immediately contradicts is worse than no
+start value at all, because it hides the contradiction for exactly one scan.
+
+| Node | §12 start value | What the first scan does | Agrees? |
+|---|---|---|---|
+| `Mode/HmiDriveModeRequest` | `0` None | Not written by this program. `#modeRequestValid` is `FALSE` because `#hmiLinkOk` is `FALSE` at the first scan, so **X4** holds the arbiter at `None` whatever the node reads | ✔ |
+| `Mode/ForkliftDriveModeActive` | `0` None | `#DriveModeInForce` static start `0`; part 8 publishes `0` | ✔ |
+| `Envelope/ForkliftMotionEnable` | `FALSE` | `#autonomousMotionPermitted` is `FALSE` on four independent counts — mode is `None`, `AutonomousArmed` is `FALSE`, `#motionPermissive` is `FALSE` (both link verdicts `FALSE`, both link latches set), `#vehicleAlive` is `FALSE` (**V2**) | ✔ |
+| `Envelope/ForkliftSpeedCeiling` | `0.0` | The mandatory `ELSE` assigns `0.0` | ✔ |
+| `Envelope/ForkliftEquipmentPermit` | `FALSE` | **EQ1** is `#bridgeLinkOk`, `FALSE` at the first scan; **EQ2** is `NOT #ProcessStopLatch`, also `FALSE`. **The permit is non-permissive by logic and not only by start value** — start values are the last line, not the first | ✔ |
+| `Vehicle/ForkliftVehicleModeApplied` | `0` None | Bridge-written. `#vehicleAlive` is `FALSE`, so `#modeDisagreeRaw` is `FALSE`, the timer never runs, and **no fault is latched and no permissive is dropped on a value nobody reported** | ✔ |
+| `Vehicle/ForkliftVehicleHeartbeat` | `0` | Bridge-written. `VehicleSeenAlive` is `FALSE`, so the verdict is `FALSE` until the counter has been **seen to change** — `0` is meaningless until it moves, which is the point (**V2**) | ✔ |
+| `ProcessStop/HmiProcessStopRequest` | **`TRUE`** | HMI-written. `TRUE` is the non-permissive value, so **C7** holds `#worldOk` `FALSE`; and the request is not attributable while `#hmiLinkOk` is `FALSE`, so part 3b latches nothing from it | ✔ |
+| `ProcessStop/ForkliftProcessStopActive` | **`TRUE`** | Published from `#ProcessStopLatch`, whose static start value is **`TRUE`** for exactly this reason: the scan before the program's first decision must not read as a machine free to move | ✔ **— and this is the one row whose agreement depends on an instance-DB value**, so §14.13 reads it back |
+
+**Cold-start signature of the delta, to be read once at every CPU start:** mode in
+force `None`, enable `FALSE`, ceiling `0.0`, permit `FALSE`, process stop
+**active**, `ForkliftResetRequired` `TRUE`, and `VehicleSeenAlive` `FALSE` with
+`VehicleStaleTimer.ET` running. Nothing can be enabled in that window in either
+path, and the reason the program gives is the link, never a sensor and never a
+vehicle that has not spoken yet.
+
+**The residual §8 already records applies to one of the two new bridge-written
+nodes.** `ForkliftVehicleModeApplied` is a **level** written on change, so a CPU
+restart under a surviving bridge session leaves it holding a reverted start value
+until the bridge's refresh repairs it (`opcua-nodes.md` §12.6's cadence; the M3
+open item `plc/demo-cell/SPEC.md` §12 item 7). `ForkliftVehicleHeartbeat` is
+cyclic and repairs itself. Neither can produce a permissive verdict while it is
+stale, because `#vehicleAlive` gates both.
+
+### 14.10 What changes in behaviour, and what deliberately does not
+
+**The teleop path is unchanged, and here is the whole of the change to it.** Two
+conjuncts, both in part 5, both on `ForkliftTeleopActive`. That is all. §6.4's
+three setpoint assignments, §6.5's cap, §6.6's soft limits, §6.7's obstacle latch
+and monitored reset, §6.1's two watchdogs and §6.2's six plausibility windows are
+**not touched by this section**. In `Teleop` the PLC still forms every motion
+setpoint from the operator's requests — the M4 claim standing exactly where it was
+demonstrated (ADR 0011 D3's mode-scoped reading, ADR 0012 D1, ADR 0014 D2(4),
+`opcua-nodes.md` §12.9 **C1**).
+
+**The fork-height speed clamp is process logic and applies in both modes.** In
+`Teleop` it is a scale on the demand (§6.5, unchanged); in `Autonomous` it is the
+second argument of the ceiling's `MIN`. Raising the carriage past
+`FORK_HEIGHT_SLOW_THRESHOLD` therefore halves the published ceiling from `0.60` to
+`0.30` m/s, and an implausible height forces the reduced value in both modes,
+because `#forkRaised` is `(NOT #heightValid) OR (height > threshold)` and that
+half is the load-bearing one.
+
+**What is new.** While the mode in force is `Autonomous` and everything holds, the
+program publishes an enable, a ceiling and a permit at its own cycle, and reads
+back what the vehicle says it is applying. While anything does not hold — a latch,
+a demand, a link, an implausible value, a released mode, a vehicle that stopped
+answering — it publishes the non-permissive envelope **in the same OB call**, and
+the vehicle stops itself on its own ramp.
+
+**The delta sets no latch for the vehicle's absence, and one for its
+disagreement**, and §14.7 gives the three reasons.
+
+**No auto-resume, by construction, in both modes.** Nothing sets
+`ForkliftTeleopActive` except a rising edge of `HmiTeleopRequest` with the mode in
+force `Teleop`; nothing sets `AutonomousArmed` except transition **X2**. No
+returning signal — heartbeat, clearing field, recovering transducer, reconnecting
+session, cleared safety demand, released process stop — sets either. A permissive
+returning restores the *permission*, never the *motion*.
+
+**§5's state diagram gains no state and no transition.** It describes
+`ForkliftTeleopActive`, which still leaves `Disabled` only on a fresh enable edge
+and still drops on any permissive going false; the mode is a **second, separate**
+state machine and is drawn in §14.4.
+
+### 14.11 Watch rows
+
+**§9's five groups are unchanged.** Group 5 gains eleven internal rows and a new
+**Group 6** carries the nine server-visible nodes.
+
+#### Group 6 — mode, envelope and the vehicle's report *(server-visible)*
+
+| Tag | Format | Expected |
+|---|---|---|
+| `"ForkliftMode".HmiDriveModeRequest` | Decimal | `0`, `1` or `2` only. Anything else is a **broken client**, and the arbiter answers by holding `None` |
+| `"ForkliftMode".ForkliftDriveModeActive` | Decimal | The authoritative answer to "what mode is the machine in". `0` from power-up and after every HMI link loss. **Never follows the request by itself** — it moves only on a transition of §14.4 |
+| `"ForkliftEnvelope".ForkliftMotionEnable` | Bool | `TRUE` only with `ForkliftDriveModeActive` = `2`. **Never `TRUE` in the same reading as `ForkliftTeleopActive`** — that pair is **M6** on one screen, and a reading with both set is the one defect signature in this group |
+| `"ForkliftEnvelope".ForkliftSpeedCeiling` | Floating-point | `0.0` unless the enable is `TRUE`; `0.60` with the carriage below `FORK_HEIGHT_SLOW_THRESHOLD`, `0.30` above it. **Unsigned, and never a value the vehicle is being asked for** |
+| `"ForkliftEnvelope".ForkliftEquipmentPermit` | Bool | `TRUE` only while the bridge verdict is up **and** no process stop is latched. `FALSE` from power-up until the first monitored reset |
+| `"ForkliftVehicle".ForkliftVehicleModeApplied` | Decimal | Follows `ForkliftDriveModeActive` within the vehicle's own adopt time. A **persistent** difference is `ModeDisagreeLatch` after `MODE_DISAGREE_DELAY`; **a difference is never resolved by adopting this value** |
+| `"ForkliftVehicle".ForkliftVehicleHeartbeat` | Decimal | Advancing while the vehicle's control layer runs; frozen when it stops. The verdict formed from it is a Temp with no node and is read off its two terms in Group 5 |
+| `"ForkliftProcessStop".HmiProcessStopRequest` | Bool | **`TRUE` is the non-permissive state.** `TRUE` while the operator holds the stop, and `TRUE` at its start value before any client has connected |
+| `"ForkliftProcessStop".ForkliftProcessStopActive` | Bool | Latched `TRUE` on the request, **stays `TRUE` after the request clears**, and `TRUE` from power-up |
+
+#### Group 5 — internal, eleven further rows
+
+`"ForkliftControl_DB".DriveModeInForce`, `.LastModeRequest`, `.AutonomousArmed`,
+`.LastVehicleHeartbeat`, `.VehicleSeenAlive`, `.VehicleStaleTimer.ET`,
+`.ModeDisagreeTimer.ET`, `.ModeDisagreeLatch`, `.ProcessStopLatch`,
+`.StandstillTimer.ET`, and the in-force `PT` of all three new timers.
+
+**`VehicleSeenAlive` and `VehicleStaleTimer.ET` are the *whole* of the vehicle
+verdict**, because it is a Temp with no node. Read them as a pair, exactly as
+§9 Group 5 reads the bridge's: `VehicleSeenAlive` `FALSE` means the vehicle's
+control layer has **never** written this CPU — suspect the layer, the bridge slot
+or the topic, not the link; `TRUE` with `VehicleStaleTimer.ET` at or past
+`T#500ms` means it wrote and then stopped.
+
+**`DriveModeInForce` beside `LastModeRequest` and `HmiDriveModeRequest` is the
+arbiter on one screen.** `LastModeRequest` equal to the request with the mode in
+force at `None` is the **X5** signature — a selection was made and refused, and
+the machine is waiting for the operator to move the selector away and back. It is
+the one reading in this document that says *nothing is broken; select again*.
+
+**The seven latch bits together are the whole of §6.7 and §14.6 on one screen**,
+and they are what turns "the machine will not start" into a named cause.
+`ForkliftResetRequired` says only *that* something is latched.
+
+**Group 1 beside Group 6 is this delta's version of the gate's one-screen claim**:
+during an autonomous stop `HmiDriveModeRequest` may still read `2` while
+`ForkliftMotionEnable` reads `FALSE` and `ForkliftSpeedCeiling` reads `0.0` — the
+operator has asked for a mode and the PLC is withholding permission inside it.
+
+### 14.12 §11 impact — every scenario checked, counts re-derived
+
+**Two preconditions are added to §11's shared list once this delta is applied**,
+and one of them is a hard dependency rather than a formality:
+
+1. **HMI v2 is running and writing all eight of its nodes every cycle**
+   (`opcua-nodes.md` §12.1; m5-14). `HmiProcessStopRequest`'s start value is
+   `TRUE`, so a v1 HMI that writes only six nodes leaves it `TRUE` forever, **C7**
+   holds `#worldOk` `FALSE` forever, and **nothing in §11 can be enabled in either
+   mode.** With the delta applied and HMI v1 running, the cell is inert by design
+   and the watch table says why: `HmiProcessStopRequest` `TRUE` with
+   `ForkliftProcessStopActive` `TRUE` and every process latch pending. **This is
+   the delta's single largest coupling and it is stated here rather than
+   discovered** (§14.14 state C).
+2. **The mode in force reads `Teleop`** before any enable edge in §11 is expected
+   to do anything.
+
+| Scenario | What the delta could have touched | Verdict |
+|---|---|---|
+| **T5.1** teleop drive | 5.1.4's enable edge | **One new step, 5.1.3b.** The reset at 5.1.3 clears the latches; only then can `Teleop` be entered, because `#modeEntryAdmitted` contains `#motionPermissive`. Steps 5.1.1–5.1.3 and 5.1.4–5.1.9 are otherwise unchanged, and 5.1.1's cold-start reading gains Group 6's signature |
+| **T5.2** fork and soft limits | 5.2.7's *"all five latch bits stay `FALSE`"* | **No step change.** Read **seven** latch bits instead of five; all seven stay `FALSE`. A soft-limit abort is still a direction-scoped refusal and still sets no latch |
+| **T5.3** speed cap | The cap arithmetic | **No change.** `#speedCap` and the single multiplication are untouched. The delta reads `#speedCap` in part 8; it does not modify it |
+| **T5.4** obstacle latch and monitored reset | 5.4.8's *"all five latches clear"*, and 5.4.9's fresh enable edge | **No step change.** Seven latches clear on the fresh rising edge instead of five. **The mode survives a latch** (**X6**), so 5.4.9's fresh enable edge returns teleop with no re-selection |
+| **T5.5** HMI heartbeat loss | 5.5.6's *"teleop returns on the fresh enable edge"* | **One re-specified step, 5.5.6.** The HMI outage takes the mode to `None` through **X4**, and `LastModeRequest` is tracked through the outage so link-up manufactures no transition. 5.5.6 therefore reads *reset, **re-select `Teleop`**, then assert the enable*. 5.5.5's P6 guard test is unaffected |
+| **T5.6** bridge session loss | Whether the mode falls | **No change.** **X4** is scoped to the HMI verdict, so a bridge loss does not move the mode. It does drop `#vehicleAlive`, clear `AutonomousArmed` and take the envelope non-permissive, and it sets `BridgeLinkLostLatch` exactly as before. The §8 residual is unchanged, and it now has a second reading worth recording: while the bridge is down the PLC's withdrawn permission cannot reach the vehicle either, which is why the vehicle's own freshness window (**E5**, `agv/`'s) exists |
+
+**Counts, re-derived from the step tables rather than carried forward** (§11 rule
+1): T5.1 **10**, T5.2 **8**, T5.3 **5**, T5.4 **10**, T5.5 **6**, T5.6 **5** —
+**44 steps under this delta**, against 43 under §13. **§13.6's "43 steps,
+unchanged" stays true about the §13 delta and is scoped there**, and rule 2
+applies to both movements: the specified denominator grows, and **the denominator
+of a run that already happened never grows**. A T5.1 run recorded against the
+9-row table is a 9-row run; under this delta its evidence record gains an
+outstanding row for 5.1.3b, and T5.5's gains one for the re-specified 5.5.6.
+
+**One evidence rule, so a single session does not blur two claims.** A T5 segment
+run with the mode in force `Teleop` is teleop evidence and says nothing about the
+envelope; a segment run in `Autonomous` is M5 evidence and is not M4 evidence. The
+two are recorded as two sets, in ADR 0009 D2.2's discipline.
+
+### 14.13 TIA Portal — what this delta adds to §10, and what bites
+
+| # | Step | Watch out for |
+|---|---|---|
+| 1 | **Open the existing `DemoCell` server interface. Do not create a second one and do not rename this one**, then **read the namespace URI back** and confirm it still reads `http://DemoCell` | The interface name **is** the URI and the field is derived, not editable (ADR 0006). Repeat the read-back after any *Change device*, which deletes server interfaces silently (LESSONS 2026-07-27) |
+| 2 | **Create the four new global DBs** of §14.2 with their members, start values and per-tag *Accessible* / *Writable* attributes. **New DBs, not new members of any existing DB** | The DB names are contract identifiers, are **written correctly the first time and are never renamed once the interface binds them** — a rename drags every interface local-data reference with it and TIA's silent `_1` suffix follows (LESSONS 2026-07-30) |
+| 3 | **Check the two `TRUE` start values**: `ForkliftProcessStop.HmiProcessStopRequest` and `ForkliftProcessStop.ForkliftProcessStopActive` | They are the only two start values in this delta that are not the type's zero, and both are deliberate. A `FALSE` on either makes a freshly started server assert that nobody is asking the machine to stop |
+| 4 | **Add the four folders** `Mode`, `Envelope`, `Vehicle`, `ProcessStop` beside `Hmi`, `Input`, `Output`, `Status`, `Link` and `Safety` under `Forklift`, then drag each tag into its folder. **Rename nothing** | Each leaf must remain the BrowseName of `opcua-nodes.md` §12.3–§12.7, because the BrowseName is the diff key between that document, the TIA export and §14.2 |
+| 5 | **Add the constants, the ten statics and the new Temps to `FB_ForkliftTeleop`**, then insert §14.8's parts at the points it names | The FB keeps its name and its instance DB keeps `ForkliftControl_DB`: the name is now a mild misnomer and **is deliberately not changed**, because a rename with no functional content is exactly the change this project has been bitten by (LESSONS 2026-07-30) |
+| 6 | **Compile, download, then confirm the block diff circles are solid green before testing**, and **sweep the new browse names and DB statics for TIA's silent `_1` collision suffixes** | It appends them without asking, in DB statics and interface rows both, and a `…_1` browse name cuts a client with **no error dialog**. Check the M4 and §13 watch rows monitor without the error icon as well — no offset should have moved, and "should not have moved" is not a verification |
+| 7 | **Read the ten new statics and the three new `PT` values out of the watch table**, not out of the FB interface, and reinitialise `ForkliftControl_DB` if any disagrees with §14.3 | An interface *Default value* governs nothing once the instance DB exists (LESSONS 2026-07-28). `ProcessStopLatch` is the one to check first: a stale `FALSE` publishes a cleared process stop that nobody cleared |
+| 8 | **Verify the address space with a client that is not the bridge and not the HMI.** Browse the four folders, read all nine nodes at their start values, then **attempt one write to a `Forklift/Envelope/` node and record the refusal with its status code and the date** | A read proves the nodes exist; only the **refused write** proves that "a permission is not a command" is enforced by the server rather than by convention (`opcua-nodes.md` §12.11 step 6) |
+| 9 | **Re-measure the OB30 cycle time and the CPU maximum** after this download | §12 open item 9 and §13.8 item 5: OB30's one FB has grown and the F-OB shares the budget. If it is tight, the answer is a longer OB30 period — never a second standard OB with a second time base |
+
+> **Everything in §14.2 and §14.3 is a design value until step 8 is executed.** The
+> four folders, the nine BrowseNames, the per-tag rights, the start values and the
+> refusal are what this document asks the tool for; they become facts when they
+> are read back out of it and recorded with their date (LESSONS 2026-07-27,
+> ADR 0006). **No gate criterion may rest on one before then.**
+
+### 14.14 The fallback — four states, only one of which is inert
+
+| State | The world | What happens |
+|---|---|---|
+| **A — the fallback** | Delta **not applied** | §1–§13 stand unchanged. No DB, no folder, no node, no constant, no static, no part. **No file changes and no sentence is edited to take it** |
+| **B — applied, HMI v2 running, mode `Teleop`** | Everything present | **Every M4 and §13 behaviour is exactly as §1–§13 specifies**, with two additions: the enable edge needs the mode in force, and §11 carries 5.1.3b. This is the sense in which the delta is inert in teleop, and it is a **runtime** statement |
+| **C — applied, HMI v1 running** | The HMI writes six nodes, not eight | **The cell is inert and no scenario runs.** `HmiProcessStopRequest` holds its `TRUE` start value, **C7** holds `#worldOk` `FALSE`, and every enable edge in both paths is refused. It is not a defect and it is not a compile failure: it is the delta's dependency on m5-14, visible on the watch table in one row. **Do not apply this delta before HMI v2 writes the two new request nodes** |
+| **D — applied, no vehicle control layer** | The bridge runs; nothing publishes the two `Vehicle/` topics | `#vehicleAlive` is `FALSE` for the whole run, so **`Autonomous` cannot be entered** (**X2**'s extra term) and the envelope stays non-permissive. **Teleop is unaffected**, by the decision of §14.7. The diagnosis is `VehicleSeenAlive` `FALSE` in Group 5 — *never seen*, not *stopped* |
+
+### 14.15 What this section does not specify, and open items
+
+| Item | Owner |
+|---|---|
+| **The vehicle's envelope gate node** — how it consumes the enable, the ceiling and the permit, where the gate sits relative to its smoother, how it arbitrates between the two command sources and how it changes source without a step in the command | `agv/`, m5-11. ADR 0014 D4 seam (b) states its contract; **this document specifies none of it** |
+| **The vehicle-side freshness window** of `opcua-nodes.md` §12.4 **E5** | `agv/`, m5-11. Its own named constant, never shared with the three of §10.8 |
+| **How an M5 navigation goal is commanded** | Unanswered here and **not answered by a node** (§12.12, §12.13 item 4). A pose target on this PLC would make the standard program a navigator and is an invariant question, not an interface one |
+| **Anything in the safety program** — the F-blocks, the scanner channel, the F-I/O path and its verdict | `plc/forklift-safety/SPEC.md` and m5-15. **Nothing in this section presumes the m5-03 verdict**, reads or writes an F-tag beyond §13's four, or names a safe scanner channel |
+| **The bridge's slots for these six bridged signals** | `docs/interfaces/bridge-design.md`, requested as `opcua-nodes.md` §12.13 item 1. It carries the **first topic-carried `UInt16`** in this project |
+| **What the HMI shows**, and the rule that a lamp for the process stop and a lamp for an F-latch are never the same lamp or the same caption | `hmi/`, m5-14 (§11.4 **MR7**) |
+
+| # | Open item | Status |
+|---|---|---|
+| 1 | **`AUTONOMOUS_SPEED_CEILING` = `0.60` m/s is a process decision, not a measurement or a conformity statement.** No PL, SIL, Category or PFH is claimed for it, and ADR 0014's **G7** figure is a practice reference this constant is not derived from | Confirm at commissioning against what the vehicle can actually follow. Raising it above `TRACTION_SPEED_MAX` is forbidden by `opcua-nodes.md` §10.12 item 4, and raising that cap re-derives `ForkliftLinearSpeed`'s plausibility window **first** |
+| 2 | **`MODE_DISAGREE_DELAY` = `T#2s` is bounded from below by a number this document does not hold** — the vehicle's worst-case time to adopt a new mode and report it, which may include its own controlled-stop ramp | `agv/` (m5-11) states it; this constant is re-derived from it when it lands. **Requested, not invented** |
+| 3 | **`ForkliftSpeedLimitActive` stays teleop-scoped**, so in autonomous mode the fork-height clamp is visible only in the ceiling's value | A `opcua-nodes.md` §10.7 change, **requested rather than taken**: this section does not redefine a §10 node |
+| 4 | **`FB_ForkliftTeleop` is now a misnomer** — it carries the autonomous-mode supervisor as well — and is **deliberately not renamed**, with `ForkliftControl_DB` | Recorded rather than fixed. A rename with no functional content is the change this project has been bitten by; if it is ever taken, it is taken with the server interface's bindings checked in the same step |
+| 5 | **`ForkliftEquipmentPermit`'s M5 register has two members and neither is fixed equipment**, because this project's standard program holds no fixed-equipment signal at all (§14.5). §12.5 **Z4** anticipates an empty conjunction; this document publishes a **named, falsifiable two-term register** instead, and the difference is a reading of **Z4** rather than a contradiction of it | Flagged for the interface agent: if **Z4** is meant to require that the permit read `TRUE` at M5 whenever the program is running, this document's EQ1/EQ2 need its ruling. Nothing in the node set moves either way |
+| 6 | **The mode arbiter's five transitions are specified and unverified.** No part of §14 has been executed in TIA Portal or PLCSIM Advanced by its author, who has neither installed | The owner's run, and — on the §7 precedent, where a specification defect was found by transliterating into an executable double rather than by review — a double for §14.8's parts before the owner types them (`plc/forklift/double/`) |
+| 7 | **`plc/README.md` still has no `forklift/SPEC.md` row**, and its boundary statement names only the M3 cell's process stop | Carried from §12 open item 7 and still outside this brief's deliverable. It now needs one further sentence: the operator's process stop of `Forklift/ProcessStop/` is a **process** stop and no safety function |

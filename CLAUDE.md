@@ -61,6 +61,7 @@ graph TD
     end
 
     HMI["Commissioning HMI<br/>teleop setpoints and status<br/>process data only"]
+    MON["Monitoring service<br/>subscribes to the vehicle ROS 2 graph<br/>no write endpoint, no publisher"]
 
     HMI -->|OPC UA client to server| PLC
     PLC -->|OPC UA server to client| FM
@@ -69,8 +70,15 @@ graph TD
     MQ <-->|order, state, instantActions| CL
     CL --> NAV
     SAFE ==>|hardwired inhibit| NAV
+    NAV --o|subscribe: map, pose, obstacles| MON
+    MON --o|read-only map view, no command| HMI
 
-Legend: thick arrow is the safety path, dashed arrow is the safety fieldbus, thin arrows are process data, including the commissioning HMI edge, which carries process setpoints only (ADR 0008).
+Legend, one link style per plane:
+
+- Thick arrow (`==>`) is the safety path. It is hardwired and onboard, and never traverses the network (invariant 1).
+- Dashed arrow (`-.->`) is the safety fieldbus, PROFIsafe.
+- Thin arrow (`-->`) is process data, and is the only command path. It includes the commissioning HMI edge, which carries process setpoints only (ADR 0008).
+- Circle-ended arrow (`--o`) is the read-only monitoring plane (ADR 0011 D4). It is one way. It carries no command, setpoint, enable or reset; the monitoring service has no write endpoint and no publisher; and it never touches the PLC.
 
 ---
 
@@ -179,9 +187,10 @@ Do not start a gate before the previous one is verified.
 | M5 | Sensored autonomous forklift | Safety laser scanner into the F-blocks, lidar SLAM and Nav2 autonomy on the forklift, HMI v2 with mode selection; recorded safety + autonomy showcase |
 | M6 | VDA 5050 fleet at scale | Four forklifts serve five loading and five unloading stations over VDA 5050, PLC-owned station handshake end to end; recorded fleet showcase |
 | M7 | LLM operations layer | An LLM supervises operations safely (no actuator writes, no interlock bypass, unreachable-safe); closes with the recorded end-to-end demonstration |
+| M8 | Vendor portability: a second, Beckhoff/TwinCAT implementation of the PLC layer | Placed after M6 and M7. The same byte-identical bridge and commissioning HMI serve both controllers, the M4 forklift scenarios run against TwinCAT in their own session, the controller in force is server-reported throughout, the drift check against the node model passes, and the public claim states the F-safety asymmetry; closes on committed evidence |
 
 Rows are summaries. The full, verifiable criteria live in docs/roadmap.md,
-which is the live gate order (ADR 0010).
+which is the live gate order (ADR 0010, with M8 added by ADR 0013).
 
 Current gate is tracked in docs/roadmap.md. Update it as part of closing a gate, never in advance.
 

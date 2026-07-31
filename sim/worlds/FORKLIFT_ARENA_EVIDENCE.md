@@ -7,6 +7,12 @@ topics carry traffic at a measured rate, that the bridge is wired in the
 direction each topic is declared in, and that a scripted `gz topic` traction
 pulse moves the vehicle by an amount visible on the bridged ROS odometry.
 
+**Sections 1 to 8 are that M4 record and are not re-run.** Section 9 was added
+later, at M5, and is a different run on a different machine against a different
+sensor set: it measures what the world's new `<gui>` block and the M5 three
+scanner set cost to render, and it carries its own inputs table. Read the two as
+two dated captures, not as one document.
+
 **Simulation only, and not a safety claim.** Everything below was produced by
 Gazebo on a software rasteriser. Nothing here is evidence about a real
 vehicle, a real scanner or a protective field. The obstacle props in this
@@ -504,6 +510,243 @@ signal was enough. The gz server command line carries the world path and the
 bridge carries its node name, so a pattern of `forklift_arena` matches this
 run and nothing else on the machine.
 
+## 9. Render budget of the M5 sensor set, and the beams on screen
+
+**Separate run, separate date, separate machine from sections 1 to 8.** Those
+sections are the M4 record: one 181-sample scanner on `/forklift/gz/scan`, WSL2
+on the owner's laptop, 2026-07-29. This section was taken on 2026-07-31 in the
+project container against the M5 sensor set that brief m5-04 landed, and it does
+not restate or replace anything above. Where the two disagree on a topic name or
+a sample count, the M4 record is describing a model that no longer exists.
+
+| Item | Value |
+|---|---|
+| Date | **2026-07-31**, 06:49–07:14 UTC |
+| Host | project container, 4 cores (`nproc` = 4) |
+| Gazebo | `gz sim --versions` → `8.11.0` |
+| Render | `GL_RENDERER = llvmpipe (LLVM 20.1.2, 256 bits)`, `GL_VERSION = 4.5 (Compatibility Profile) Mesa 25.2.8-0ubuntu0.24.04.2`, read from `/root/.gz/rendering/ogre2.log` after deleting it before the run |
+| Display | `Xvfb :99 -screen 0 1600x1000x24`, GUI window 1200x1000 |
+| World | `sim/worlds/forklift_arena.sdf` md5 `7a37ebe5a5ef290a32675170b5ce76f8` |
+| Model | `agv/forklift/model.sdf` md5 `878819c911a7aea3b600faa56e2e52f6` |
+| Sensor set | 910 rays per sweep at 10 Hz: 360 (`scan_nav`) + 275 + 275 (the two safety scanners' measurement channels) |
+| Isolation | `GZ_PARTITION=m505_render`, `ROS_DOMAIN_ID=82` (and `m505_shot` / 84 for §9.4) |
+| ERROR lines | 0 in the server log, 0 in either GUI log |
+
+**Not a safety claim, and the pictures are the reason to say so twice.** Two of
+the four window captures below show a *safety scanner* drawing beams. Those
+beams are the device's **non-safe measurement channel** rendered by a debug
+plugin. They are not a protective field, they are not an OSSD state, and no
+screen in this project ever shows a protective field, because the safety
+function is onboard and hardwired and has no topic on either transport
+(invariant 1; `agv/forklift/README.md`).
+
+### 9.1 What the world had to gain for beams to be possible
+
+`<visualize>true</visualize>` on the sensor is necessary and not sufficient in
+Harmonic. The `<gui>` block added to `forklift_arena.sdf` loads `VisualizeLidar`
+alongside `MinimalScene`, `GzSceneManager`, `InteractiveViewControl`,
+`CameraTracking`, `EntityContextMenuPlugin`, `WorldControl`, `WorldStats` and
+`Screenshot`. Read back from the committed file:
+
+```
+gui plugins: ['MinimalScene', 'GzSceneManager', 'InteractiveViewControl',
+              'CameraTracking', 'EntityContextMenuPlugin', 'WorldControl',
+              'WorldStats', 'VisualizeLidar', 'Screenshot']
+```
+
+The plugin binary is present in this container at
+`/opt/ros/jazzy/opt/gz_sim_vendor/lib/gz-sim-8/plugins/gui/libVisualizeLidar.so`.
+
+### 9.2 Beams are three clicks in, and the first ones are the wrong sensor
+
+The instrument for "is the plugin actually drawing" is not the picture, it is
+`gz topic -i`: `VisualizeLidar` subscribes to exactly the topic its combo box
+has selected, so a subscriber on a scan topic **is** a beam being drawn, and no
+subscriber is no beam. Measured, in order, on one GUI session:
+
+| GUI state | `gz topic -i -t /forklift/gz/scan_nav` | front safety scanner |
+|---|---|---|
+| GUI up, no interaction | `No subscribers on topic [/forklift/gz/scan_nav]` | `No subscribers` |
+| after pressing refresh | `No subscribers` | **`Subscribers: tcp://192.0.2.2:43705`** |
+| after selecting `scan_nav` | **`Subscribers: tcp://192.0.2.2:43705`** | `No subscribers` |
+
+So: the world loads the plugin, the plugin comes up with an **empty** topic list
+and draws nothing, and pressing refresh selects **entry zero of a sorted list**,
+which is `/forklift/gz/safety_scanner_front/measurement`. The navigation lidar is
+entry two. The combo box contents, read off the open dropdown, were exactly:
+
+```
+/forklift/gz/safety_scanner_f...     <- selected by refresh
+/forklift/gz/safety_scanner_r...
+/forklift/gz/scan_nav
+```
+
+The same three-step sequence was repeated on a second, fresh GUI session with
+the same result, including `No subscribers` before the first click.
+
+### 9.3 The render budget, measured
+
+`real_time_factor` on `/stats` is published **once per physics iteration** in
+this world — 500 Hz, not the 5 Hz a reader would assume — and it is an
+instantaneous value: one 60-sample capture ranged `0.4803` to `3.3703` with a
+median of `1.0000`. It is useless as a single reading. Every figure below is
+therefore the ratio of differences between two `/stats` messages 60 s of wall
+clock apart, with both messages kept verbatim. The worked example, from the
+Rays measurement:
+
+```
+--- /stats at t0 ---
+sim_time  { sec: 836 nsec: 154000000 }
+real_time { sec: 950 nsec: 396211256 }
+iterations: 418077
+real_time_factor: 1.0009979950010159
+step_size { nsec: 2000000 }
+
+--- /stats at t1 (+60 s wall) ---
+sim_time  { sec: 889 nsec: 630000000 }
+real_time { sec: 1010 nsec: 531226926 }
+iterations: 444815
+real_time_factor: 1.42360001395128
+step_size { nsec: 2000000 }
+
+RESULT  d_sim=53.476 s  d_real=60.135 s  d_iterations=26738  RTF(window)=0.8893
+```
+
+Session B is the primary set: one server process, one GUI attached to it, the
+navigation lidar selected directly, and only the plugin's own controls changed
+between rows. Session A ran first and had the front safety scanner selected
+before the navigation lidar; it is kept because it is the run the Rays/Strips
+comparison was first taken on.
+
+| # | Configuration | `d_sim` | `d_real` | RTF over the window |
+|---|---|---|---|---|
+| F | **headless**, server only, no GUI client | `60.006` | `60.128` | **`0.9980`** |
+| G | GUI attached, `VisualizeLidar` loaded, **no topic selected** | `55.118` | `60.139` | **`0.9165`** |
+| H | GUI, beams **on**, navigation lidar, Triangle Strips | `53.668` | `60.147` | **`0.8923`** |
+| I | GUI, beams **off** (checkbox), subscription still held | `55.164` | `60.132` | **`0.9174`** |
+| J | GUI, beams **on**, navigation lidar, **Rays** | `53.476` | `60.135` | **`0.8893`** |
+| K | GUI, beams **off** again (drift bracket) | `54.968` | `60.162` | **`0.9137`** |
+
+Session A, same instrument, front safety scanner selected first:
+
+| # | Configuration | RTF over the window |
+|---|---|---|
+| C | GUI, beams on, navigation lidar, Rays | `0.8221` |
+| D | GUI, beams on, navigation lidar, Triangle Strips | `0.8371` |
+| E | GUI, beams off (checkbox), subscription held | `0.8397` |
+
+What the numbers say:
+
+- **Headless is still real time at 910 rays.** `0.9980`. Adding two scanners
+  and moving from 181 rays to 910 did not cost the headless run its real-time
+  factor; the M4 figure it is being compared against is `0.99984`.
+- **The GUI costs about 8 points of RTF, and the beams cost about 2.5.**
+  `0.9980` → `0.9165` for attaching the GUI at all; `0.9174`/`0.9137` → `0.8923`
+  for switching the navigation lidar's beams on. The GUI is roughly three times
+  the cost of the thing it was added to show.
+- **Rays and Triangle Strips cost the same here**, `0.8893` against `0.8923`,
+  which is inside the drift bracket the two beams-off readings define
+  (`0.9174`, `0.9137`). At 360 rays the mode is a viewer's choice, not a budget
+  decision. Points was not measured.
+- **Between-session spread is larger than the beam cost.** Session A sits about
+  0.08 below session B at every equivalent state. The two sessions differ in
+  that A had selected the front safety scanner before the navigation lidar, so
+  the plausible cause is a lidar visual left in the scene by the first
+  selection — unproven, and the reason the deltas above are all taken *within*
+  a session and never across the two.
+- The GUI's own `WorldStats` readout, cropped from the captures at the moment
+  of measurement, showed `92.57 %` during row H and `88.42 %` during row J. It
+  corroborates the order of magnitude and is not what the table is computed
+  from.
+
+**Is the GUI usable in this container?** Yes, at 1200x1000 with beams on: the
+window is responsive to clicks, the beams update, and the simulation holds
+`0.89` of real time. That is a finding about *this* container, on `llvmpipe`,
+with 4 cores, and the showcase runs on the owner's machine — which reports the
+same `llvmpipe (LLVM 20.1.2, 256 bits)` (`sim/setup/WSL_ENVIRONMENT.md` §4.7)
+but is not the same box and has not been re-measured. **Every figure in this
+section is container evidence and does not transfer** (LESSONS 2026-07-27).
+
+### 9.4 The captured artifacts
+
+Five files, in `sim/worlds/evidence/`:
+
+| File | What it shows |
+|---|---|
+| `m5-05-gui-no-beams.png` | the GUI as this world opens it: `VisualizeLidar` docked, combo box **empty**, no beams anywhere. This is the beams-off control for the table above |
+| `m5-05-beams-safety-scanner-front-strips.png` | what one press of refresh gives you: the **front safety scanner's measurement channel**, `Min. Range 0.100000`, `Max. Range 5.500000`, Triangle Strips. Not a protective field |
+| `m5-05-beams-nav-lidar-strips.png` | the **navigation lidar** selected: `Min. Range 0.100000`, `Max. Range 8.000000`, Triangle Strips, the full 360° disc |
+| `m5-05-beams-nav-lidar-rays.png` | the same sensor in **Rays**, panel showing `/forklift/gz/scan_nav` and `Visual Type: Rays`. This is the beam capture the gate asks for |
+| `m5-05-beams-nav-lidar-3dview-service.png` | the same beams captured through the `/gui/screenshot` service instead of the window manager |
+| `m5-05-beams-nav-lidar-launch-guitrue.png` | the composed path: `ros2 launch sim/launch/forklift_bringup.launch.py gui:=true`, world + spawn + ROS bridge + GUI in one command, navigation lidar beams drawn |
+
+The four window captures are X11 root-window grabs, cropped to the 1200x1000 GUI
+window. They include the plugin's panel deliberately: **which scanner is on
+screen is not guessable from the beams**, and a beam picture with no panel in it
+is a caption waiting to go wrong.
+
+`/gui/screenshot` behaves differently from what its request field suggests, and
+this was measured rather than assumed:
+
+```
+--- request A: full file path "<dir>/shots/scene_a.png" ---   data: true
+--- request B: directory path "<dir>/shots"               ---   data: true
+--- request C: empty                                      ---   data: true
+--- files under <dir>/shots ---
+2026-07-31T07:13:50.188986108.png
+2026-07-31T07:13:54.546317036.png
+```
+
+Two requests, two files, **neither named as asked**: the string is a directory
+and the plugin names the file from the capture timestamp. The third request
+returned `data: true` and wrote no file that a `find / -xdev -name '*.png'`
+newer than the request could locate. The service output is 831x952 — the 3D
+view only, no panel.
+
+### 9.5 One thing the pictures show that is not about rendering
+
+In `m5-05-beams-nav-lidar-strips.png` the navigation lidar's disc floats
+**above** the arena's walls and crates. That is correct and it is the geometry
+`agv/forklift/README.md` warns about in prose: the navigation plane is at
+z = 1.80 m, the arena's walls stop at 0.60 m and its tallest crate at 1.00 m, so
+this sensor reports a clear horizon over an obstacle a process stop has to see.
+The obstacle evaluator reads the front safety scanner at z = 0.15 m for exactly
+that reason. Nothing in this section changes that; it is recorded because the
+picture makes the argument in one glance and the prose takes a paragraph.
+
+### 9.6 The launch file's own `gui:=true` path, and what it costs the scan rate
+
+Rows F to K attached `gz sim -g` by hand to a server started by hand, which is
+the controlled arrangement but is not what anybody types. The composed path was
+run separately, `GZ_PARTITION=m505_guitrue` / `ROS_DOMAIN_ID=85`, on `Xvfb :97`:
+
+```
+ros2 launch sim/launch/forklift_bringup.launch.py gui:=true
+```
+
+One command brought up the world, the spawn, the ROS bridge and the GUI: 8
+`Creating ... Bridge` lines, **0 ERROR lines**, and after the same three clicks
+the navigation lidar beams were on screen
+(`worlds/evidence/m5-05-beams-nav-lidar-launch-guitrue.png`). `gz topic -i -t
+/forklift/gz/scan_nav` showed **two** subscribers in this configuration, which
+is the correct count and a useful cross-check: one is `ros_gz_bridge`, one is
+`VisualizeLidar`.
+
+The number worth carrying forward is what the GUI does to the bridged sensor
+rate on this box:
+
+| Configuration | `ros2 topic hz /forklift/scan`, first window |
+|---|---|
+| headless (`gui:=false`, the default) | `average rate: 9.995`, min `0.098s` max `0.104s`, window 12 |
+| `gui:=true` | `average rate: 8.488`, min `0.101s` max `0.132s`, window 10 |
+
+The scanner is declared at 10 Hz in both cases. Attaching the GUI costs about
+1.5 Hz of it, which is the same story the RTF table tells — the simulation runs
+slower, so a sensor tied to simulation time publishes less often in wall-clock
+terms. **Any consumer whose timeout assumes 10 Hz must be checked against 8.5 Hz
+before a GUI run is used for anything but looking at.** The obstacle evaluator's
+0.50 s staleness window survives this comfortably; nothing else was checked.
+
 ## What this does not establish
 
 1. **Nothing about safety.** No protective field, no e-stop chain, no STO. The
@@ -537,4 +780,19 @@ run and nothing else on the machine.
    shadow-free scene were chosen against that, and raising either without
    re-measuring changes the figures above.
 8. **Nothing about a GUI.** `gui:=true` exists as an argument and was not
-   exercised; every figure here comes from a server-only run.
+   exercised; every figure in sections 1 to 8 comes from a server-only run.
+   **Superseded by section 9**, which attaches a GUI and measures it — on a
+   different date, a different machine and a different sensor set. The
+   render-budget rows use `gz sim -g` attached to a server started by hand, to
+   keep the configuration under control; `gui:=true` is exercised separately in
+   §9.6 and works, at a measured cost to the bridged scan rate.
+9. **Nothing about the owner's machine, for section 9.** Section 9 is container
+   evidence. The container and the owner's WSL host both report `llvmpipe (LLVM
+   20.1.2, 256 bits)`, which makes the numbers plausible there and does not make
+   them measured there. The showcase recording is on the owner's machine and
+   needs its own capture (LESSONS 2026-07-27: evidence is qualified by the
+   environment that produced it).
+10. **Nothing about a moving vehicle, for section 9.** Every render-budget row
+   was taken with the forklift standing at its spawn pose. Driving it changes
+   what the scanners hit and what the beam visual has to redraw, and none of
+   these figures cover that.
