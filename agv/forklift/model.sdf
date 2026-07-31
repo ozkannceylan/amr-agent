@@ -17,7 +17,10 @@
   onboard, hardwired and independent of anything in this file or on any
   network (invariant 1). What the two safety scanners give this project is
   the GEOMETRY of a real installation, measured in
-  EVIDENCE_SENSOR_COVERAGE.md, and nothing else.
+  EVIDENCE_SENSOR_COVERAGE.md, plus the one NON-SAFE MEASUREMENT channel
+  of the front device that a process function reads (owner ruling of
+  2026-07-30, brief m5-06). Neither of those is a safety property of this
+  file, and nothing else about a safety device is modelled here.
 
   Original geometry, primitives only, no external mesh.
 
@@ -97,8 +100,24 @@
     The safe channel has no topic, on gz transport or on ROS, ever.
 
   The measurement channel is non-safe and must never implement a safety
-  function. The safe channel reaches the F-program through the PLCSIM
-  Advanced API (ADR 0011 decision 2), never through a topic.
+  function. The safe channel reaches the F-program, and it never reaches
+  it through a topic, on either transport, under any path.
+
+  BY WHICH PATH IT REACHES THE F-PROGRAM IS DESIGN INTENT, NOT SETTLED
+  FACT. ADR 0011 decision 2 makes it configured F-I/O, an ET 200SP F-DI
+  parameterised as the scanner's OSSD pair, whose channel values the
+  S7-PLCSIM Advanced API drives by tag name: this project's analogue of
+  the copper an OSSD pair runs on. That path has never been run. The two
+  tool questions it rests on, whether this PLCSIM Advanced version and
+  its safety system version simulate F-I/O at all, and whether the API
+  writes a configured F-DI's channel values by tag name, are settled in
+  the tool by plc/forklift-safety/FIO-FEASIBILITY.md under brief m5-03,
+  whose verdict section is blank as this is written. If either answers
+  no, the named fallback of ADR 0011 decision 2 is the standard-DB
+  stand-in of plc/forklift-safety/SPEC.md, labelled a stand-in wherever
+  it appears. Nothing in THIS file changes under either answer: the safe
+  channel is derived outside this file by a field evaluation and is not
+  a topic either way.
 
   The numeric values a node needs (wheel radius, steer limit, fork travel)
   are mirrored in config.yaml because SDF cannot be read as YAML. THIS
@@ -239,10 +258,23 @@
 
       RAW RANGES ONLY, all three. No zone, no threshold and no stop
       decision is taken in this file. scripts/obstacle_zone.py evaluates
-      a comfort zone over the NAVIGATION lidar, as a process function and
-      never as a safety function. The two safety scanners have no
-      consumer in this directory at all, by design: their modelled
-      counterpart's output is an OSSD pair on copper, not a topic.
+      a comfort zone over the FRONT SAFETY SCANNER's NON-SAFE
+      MEASUREMENT channel at z = 0.15 m, as a process function and never
+      as a safety function (owner ruling of 2026-07-30, brief m5-06;
+      before it the evaluator read the navigation lidar, and that is no
+      longer true of any file in this directory).
+
+      CONSUMERS, PER CHANNEL, AS THEY STAND. The FRONT measurement
+      channel is bridged into ROS and read by scripts/obstacle_zone.py.
+      The REAR measurement channel has no consumer and is therefore not
+      bridged. NEITHER device's safe channel is a topic on any
+      transport, because the modelled counterpart's safe output is an
+      OSSD pair on copper; it is derived from the same rays as the
+      measurement channel by a field evaluation that is not in this
+      file, and that shared origin is not a second independent channel
+      (agv/forklift/README.md, "Two channels per safety scanner"). The
+      NAVIGATION lidar is the SLAM, AMCL and costmap input, and no
+      scanner channel of either kind reaches a navigation consumer.
 
       BUDGET, and the rule that governs it. Rendering on the target
       machine is llvmpipe software rasterisation
@@ -282,7 +314,18 @@
         <update_rate>10</update_rate>
         <visualize>true</visualize>
         <!-- NON-SAFE MEASUREMENT CHANNEL of this device. The safe
-             channel is not here and is not a topic. -->
+             channel is not here and is not a topic. It is derived from
+             these same rays, off this file, and it is not a second
+             independent channel.
+
+             Range max 5.5 m below is COUPLED, and this is where that
+             coupling now lives: since the owner ruling of 2026-07-30
+             this channel is what scripts/obstacle_zone.py reads, so 5.5
+             is the value it reports on a clear horizon, and
+             docs/interfaces/opcua-nodes.md 10.5 gives the consuming
+             plausibility window as 0.05 to 8.10 m. Raising this past
+             8.10 without moving that window would make a clear horizon
+             read at the PLC as a transducer fault. -->
         <topic>/forklift/gz/safety_scanner_front/measurement</topic>
         <lidar>
           <scan>
@@ -331,7 +374,11 @@
         <update_rate>10</update_rate>
         <visualize>true</visualize>
         <!-- NON-SAFE MEASUREMENT CHANNEL of this device. The safe
-             channel is not here and is not a topic. -->
+             channel is not here and is not a topic. It is derived from
+             these same rays, off this file, and it is not a second
+             independent channel. This channel has no consumer and is
+             not bridged into ROS; nothing here is coupled to a
+             consuming plausibility window. -->
         <topic>/forklift/gz/safety_scanner_rear/measurement</topic>
         <lidar>
           <scan>
@@ -359,12 +406,17 @@
 
     <link name="nav_lidar_link">
       <!-- On the overhead guard roof, offset to .y of the mast
-           centreline. Range max is 8.0 m and that number is COUPLED: it
-           is what obstacle_zone reports as the clear value, and
-           docs/interfaces/opcua-nodes.md 10.5 gives the consuming
-           plausibility window as 0.05 to 8.10 m. Raising it without
-           moving that window makes a clear horizon read at the PLC as a
-           transducer fault.
+           centreline. Range max is 8.0 m. That number USED TO BE
+           coupled, as the value obstacle_zone reports on a clear
+           horizon; since the owner ruling of 2026-07-30 that evaluator
+           reads the front safety scanner instead, so the clear value it
+           reports is that sensor's 5.5 m and this 8.0 m is no longer
+           pinned by that consumer. It stays 8.0 m because nothing has
+           re-derived it, and whether it should grow for the 24 x 16 m
+           arena is the open cross-layer question of
+           EVIDENCE_SENSOR_COVERAGE.md 1. The window any consumer of a
+           clear-horizon value must contain it in is
+           docs/interfaces/opcua-nodes.md 10.5, 0.05 to 8.10 m.
 
            The mount stands over the front right overhead guard post
            (0.55, .0.38), the stiffest point of the roof plate, displaced

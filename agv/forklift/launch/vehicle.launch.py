@@ -99,12 +99,23 @@ _BRIDGE_ARGS = [
 #                              channel is put on the process network when
 #                              something on it consumes the channel, and
 #                              not before
-#   either SAFE channel        NEVER a topic, on either transport. It is
-#                              derived by field evaluation and reaches the
-#                              F-program through the PLCSIM Advanced API
-#                              (ADR 0011 decision 2), which is this
-#                              project's analogue of the copper an OSSD
-#                              pair runs on
+#   either SAFE channel        NEVER a topic, on either transport, under
+#                              any path. It is derived by field
+#                              evaluation from the same rays as the
+#                              measurement channel and reaches the
+#                              F-program off the process network
+#
+# BY WHICH PATH the safe channel reaches the F-program is DESIGN INTENT,
+# NOT SETTLED FACT, and nothing on the bridge list above depends on the
+# answer. ADR 0011 decision 2 makes it configured F-I/O (an ET 200SP F-DI
+# parameterised as the scanner's OSSD pair) whose channel values the
+# S7-PLCSIM Advanced API drives by tag name, this project's analogue of
+# the copper an OSSD pair runs on. That path has never been run; it is
+# settled in the tool by plc/forklift-safety/FIO-FEASIBILITY.md under
+# brief m5-03, whose verdict is still blank. If it answers no, the named
+# fallback is the standard-DB stand-in of plc/forklift-safety/SPEC.md,
+# labelled a stand-in wherever it appears. This launch file bridges no
+# safe channel under either answer.
 #
 # Bridging a measurement channel is not a safety signal on the process
 # network, and it is not a navigation consumer of a safety scanner either

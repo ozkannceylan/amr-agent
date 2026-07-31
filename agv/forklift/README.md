@@ -30,7 +30,8 @@ project can command in engineering units.
   geometry of a real installation, measured in
   `EVIDENCE_SENSOR_COVERAGE.md`. **Their safe channel is not here at
   all** — it is not a topic on either transport, and the section below
-  says where it does live.
+  says where it is intended to live and what about that path is still
+  unproven.
 - **Hard real-time control loops in Python.** The joint controllers close
   their loops inside the physics engine. The Python nodes here run on
   timers and a late one degrades smoothness, never integrity
@@ -84,7 +85,7 @@ device**:
 
 | Channel | What it is | Where it lives here | Who may consume it |
 |---|---|---|---|
-| **safe channel** | the OSSD pair, or safe bits over PROFIsafe: the protective-field verdict | **nowhere in this directory.** Derived by field evaluation (m5-12) and delivered to the F-program through the PLCSIM Advanced API, ADR 0011 decision 2 — this project's analogue of the copper an OSSD pair runs on | the F-program, and nothing else |
+| **safe channel** | the OSSD pair, or safe bits over PROFIsafe: the protective-field verdict | **nowhere in this directory.** Derived by field evaluation (m5-12) from the same scan, and delivered to the F-program off the process network. *By which path* is ADR 0011 decision 2's **design intent and is not yet proven** — see the two notes below | the F-program, and nothing else |
 | **measurement channel** | the raw distance profile the datasheet provides for HMI, diagnostics and process use, **while stating it must not be used for safety-related tasks** | the `gpu_lidar` scan, on the gz and ROS topics named `.../measurement` above | process functions. Today: `obstacle_zone.py` |
 
 **The measurement channel is non-safe and must never implement a safety
@@ -97,10 +98,44 @@ channel a subscriber can reach is a measurement channel, and says
 transport, ever.** `scripts/check_sensor_frames.py` section 4 checks
 both halves of that sentence rather than leaving it as a promise.
 
+**How the safe channel reaches the F-program is design intent, not
+settled fact.** ADR 0011 decision 2 makes it **configured F-I/O** — an
+ET 200SP F-DI parameterised as the scanner's OSSD pair — whose channel
+values the **S7-PLCSIM Advanced API drives by tag name**, this project's
+analogue of the copper an OSSD pair runs on. **That path has never been
+run.** The two tool questions it rests on — whether this PLCSIM Advanced
+version and its safety system version simulate F-I/O at all, and whether
+the API writes a configured F-DI's channel values by tag name — are
+settled *in the tool* by `plc/forklift-safety/FIO-FEASIBILITY.md` under
+brief **m5-03**, whose verdict section is blank as this is written. If
+either answers no, the fallback ADR 0011 decision 2 names is the
+**standard-DB stand-in** of `plc/forklift-safety/SPEC.md`, labelled a
+stand-in wherever it appears. Nothing in this directory changes under
+either answer: the safe channel is not a topic on either path, and no
+file here stimulates it.
+
+**One device, one ray cast: the split is not redundancy.** Both channels
+come out of the *same* `gpu_lidar` render. That is honest device
+modelling — a real scanner derives its safe output from its own
+measurement core too — but it means the two channels **share every
+failure of the rays**, and nothing here may be read as two independent
+channels. `EVIDENCE_SENSOR_COVERAGE.md` makes it concrete: **R7** is a
+live instance, where the mast's 0.72 m collision slab is `<visual>`-less
+and the simulated shadow is 8.9° against a physical 29.0°, so a target
+inside that wedge is invisible to the process stop **and** to the field
+evaluation on the same scan; **R8** is the converse, where the rear
+device's own body returns would sit inside any protective field drawn
+over that sector. What the split buys is naming hygiene and consumer
+separation — one channel on the network, one never on it. It buys no
+diversity, no second opinion and no fault detection, and no document in
+this project may present it as though it does.
+
 **Why a process function reading a safety device is not a layer
 violation.** The process function consumes the device's *process* output;
-the safety function consumes the device's *safe* output. They are two
-outputs of one device and they travel two paths that never meet. What
+the safety function consumes the device's *safe* output. Downstream of
+the sensor they are two outputs of one device travelling two paths that
+never meet — upstream of it they are one measurement, per the note
+above. What
 ADR 0011 forbids is a safety scanner feeding a **navigation** consumer —
 SLAM, AMCL, a costmap — and that prohibition is unchanged: **the
 navigation lidar is the only SLAM input**, on `/forklift/scan`, and no
@@ -111,8 +146,8 @@ scanner channel reaches a costmap.
 | Sensor | Link and `frame_id` | Pose in `base_link` (x, y, z, yaw) | Aperture, blind sector | Consumer |
 |---|---|---|---|---|
 | `nav_lidar` | `nav_lidar_link` | 0.550, −0.400, 1.800, 0° | 360° | `/forklift/scan`: **SLAM, AMCL and the Nav2 costmaps, and nothing else feeds them** |
-| `safety_scanner_front` | `safety_scanner_front_link` | 0.700, 0.450, 0.150, +45° | 275°, blind 182.5–267.5° | measurement channel → `obstacle_zone` (process). Safe channel → the F-program, off-network |
-| `safety_scanner_rear` | `safety_scanner_rear_link` | −0.700, −0.450, 0.150, −135° | 275°, blind 2.5–87.5° | measurement channel → nobody yet, so it is not bridged. Safe channel → the F-program, off-network |
+| `safety_scanner_front` | `safety_scanner_front_link` | 0.700, 0.450, 0.150, +45° | 275°, blind 182.5–267.5° | measurement channel → `obstacle_zone` (process). Safe channel → the F-program, off-network, by a path that is design intent and not yet proven (see above) |
+| `safety_scanner_rear` | `safety_scanner_rear_link` | −0.700, −0.450, 0.150, −135° | 275°, blind 2.5–87.5° | measurement channel → nobody yet, so it is not bridged. Safe channel → the F-program, off-network, by a path that is design intent and not yet proven (see above) |
 
 The pose column is **parsed**, not decorative: `check_sensor_frames.py`
 section 2 reads these three rows out of this file and compares them to

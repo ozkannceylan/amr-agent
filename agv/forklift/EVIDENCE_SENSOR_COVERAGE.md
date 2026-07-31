@@ -540,8 +540,15 @@ are 2.5 m, does present features at this plane.
 **c. The safety scanners are not bridged into ROS, deliberately.** Their gz
 topics are a contract and live in `model.sdf`, `config.yaml` and the README
 table, but `vehicle.launch.py` does not carry them into the ROS graph. The
-device they model emits an OSSD pair on copper, and the simulation analogue of
-that path is the PLCSIM Advanced API into the F-program (ADR 0011 decision 2).
+device they model emits an OSSD pair on copper, and that output is not a topic
+on any transport. The simulation analogue of *that path* — configured F-I/O
+driven by the PLCSIM Advanced API by tag name — is **ADR 0011 decision 2's
+design intent and is unproven**: it has never been run, it is settled in the
+tool by `plc/forklift-safety/FIO-FEASIBILITY.md` under brief m5-03 whose
+verdict is still blank, and if that answers no the named fallback is the
+standard-DB stand-in of `plc/forklift-safety/SPEC.md`, labelled a stand-in
+wherever it appears. **Neither answer reaches this document**: what is measured
+here is geometry, and the safe channel is absent from the ROS graph either way.
 Bridging them would put a safety device's measurement channel on the process
 network where any node could subscribe and quietly become a consumer.
 

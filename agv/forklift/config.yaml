@@ -183,9 +183,25 @@ topics:
   #
   # THE RULE, CHECKABLE BY EYE: every channel a subscriber can reach is a
   # measurement channel. The safe channel has no topic on either
-  # transport, ever. It reaches the F-program through the PLCSIM Advanced
-  # API (ADR 0011 decision 2), which is this project's analogue of the
-  # copper an OSSD pair runs on.
+  # transport, ever.
+  #
+  # HOW that safe channel reaches the F-program is DESIGN INTENT, NOT
+  # SETTLED FACT. ADR 0011 decision 2 makes it configured F-I/O (an
+  # ET 200SP F-DI parameterised as the scanner's OSSD pair) whose channel
+  # values the S7-PLCSIM Advanced API drives by tag name, this project's
+  # analogue of the copper an OSSD pair runs on. That path has never been
+  # run: whether this PLCSIM Advanced version simulates F-I/O at all, and
+  # whether the API writes a configured F-DI's channel values by tag
+  # name, are settled in the tool by plc/forklift-safety/FIO-FEASIBILITY.md
+  # (brief m5-03), whose verdict is still blank. If either answers no, the
+  # named fallback is the standard-DB stand-in of
+  # plc/forklift-safety/SPEC.md, labelled a stand-in wherever it appears.
+  # No name or value in THIS file changes under either answer.
+  #
+  # The safe channel is derived from the SAME rays as the measurement
+  # channel. That is honest device modelling and it is NOT redundancy:
+  # the two share every failure of the rays. See README.md, "Two channels
+  # per safety scanner".
   #
   # THE MEASUREMENT CHANNEL IS NON-SAFE AND MUST NEVER IMPLEMENT A SAFETY
   # FUNCTION. A rendered depth image has no integrity, no OSSD, no fault
