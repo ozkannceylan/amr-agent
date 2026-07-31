@@ -18,7 +18,9 @@ Architecture settled with the owner 2026-07-30, recorded in ADR 0011:
 the forklift's F-runtime group is the vehicle's **onboard safety
 controller**; the scanner reaches the F-program through **configured F-DI
 stimulated by the PLCSIM Advanced API** — the simulation's wiring, never the
-process network; autonomous mode is governed by a **PLC-issued motion
+process network, and **design intent that has never been run**: m5-03 settles
+it in the tool and its verdict is blank, with the standard-DB stand-in as the
+named fallback (ADR 0011 D2); autonomous mode is governed by a **PLC-issued motion
 envelope** (enable, speed ceiling, zone permit) with the ~20 Hz loop onboard;
 map and obstacles reach the operator over a **read-only monitoring plane**;
 and the gate claims **PLr targets only, never an achieved PL, SIL or PFH**.
