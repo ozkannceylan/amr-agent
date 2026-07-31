@@ -49,10 +49,12 @@ project can command in engineering units.
 | `scripts/sensor_coverage.py` | Reads `model.sdf` and measures what the three scanners can see. No simulator, no dependency. |
 | `scripts/check_sensor_frames.py` | Checks that `model.sdf`, `config.yaml`, this README and `/tf_static` agree. Static by default, `--live` against a running graph. |
 | `scripts/obstacle_matrix.py` | Drives `obstacle_zone.py` through its contracted cases, including the ones a rendered scanner cannot produce. |
-| `launch/vehicle.launch.py` | Server, spawn, bridge, sensor TF and both nodes, headless by default. |
+| `scripts/check_odom_tf.py` | Checks that `odom → base_link` is published by the model, bridged onto `/tf`, resolvable and tracking. Static by default; `--live [--drive]` measures rate, chain and residual on a running graph. |
+| `launch/vehicle.launch.py` | Server, spawn, bridge, sensor TF, the interim ground-truth motion transform and both nodes, headless by default. |
 | `EVIDENCE_MODEL.md` | The dated headless run that verified the model and the two nodes. |
 | `EVIDENCE_SENSOR_COVERAGE.md` | The computed coverage of the three scanners, with every residual sector named. §13 is the one measured section: the rear scanner's self-return band, from a live headless run. |
 | `EVIDENCE_SENSOR_TF.md` | The dated runs behind the sensor frames and the measurement-channel consumer. |
+| `EVIDENCE_ODOM_TF.md` | The dated run behind `odom → base_link`: measured rate, captured `tf2` lookups, the residual against the odometry topic, and the seam where the EKF takes the edge over. |
 
 There is deliberately **no world file here.** Worlds belong to `sim/`.
 This directory owns a vehicle.
@@ -72,7 +74,8 @@ name.
 | `/forklift/gz/traction_cmd` | `gz.msgs.Double` | into the model | drive wheel spin rate [rad/s] |
 | `/forklift/gz/fork_cmd` | `gz.msgs.Double` | into the model | carriage travel target [m] |
 | `/forklift/gz/joint_state` | `gz.msgs.Model` | out of the model | position and rate of the three driven joints |
-| `/forklift/gz/odom` | `gz.msgs.Odometry` | out of the model | ground-truth pose and body twist |
+| `/forklift/gz/odom` | `gz.msgs.Odometry` | out of the model | **ground-truth** pose and body twist, 20 Hz. Straight out of the simulator: no slip, no drift. See "Odometry in two phases" below |
+| `/forklift/gz/tf_ground_truth` | `gz.msgs.Pose_V` | out of the model | `forklift/odom → forklift/base_link`, 20 Hz, from the **same ground-truth pose** as the row above. Bridged onto `/tf` as the vehicle's **interim** motion estimate. The name says which source it is because after the EKF lands there will be two |
 | `/forklift/gz/scan_nav` | `gz.msgs.LaserScan` | out of the model | navigation lidar: 360 ranges over 360°, 10 Hz, 0.10–8.00 m, plane z = 1.80 m, frame `nav_lidar_link` |
 | `/forklift/gz/safety_scanner_front/measurement` | `gz.msgs.LaserScan` | out of the model | front safety scanner, **non-safe measurement channel**: 275 ranges over 275°, 10 Hz, 0.10–5.50 m, plane z = 0.15 m, frame `safety_scanner_front_link`. Bridged into ROS |
 | `/forklift/gz/safety_scanner_rear/measurement` | `gz.msgs.LaserScan` | out of the model | rear safety scanner, **non-safe measurement channel**: same, frame `safety_scanner_rear_link`. **Not bridged into ROS** — no process consumer exists for it |
@@ -215,7 +218,8 @@ the front one.
 | `/forklift/obstacle/in_stop_zone` | `std_msgs/Bool` | 10 Hz | `obstacle_zone` | Something inside the forward stop zone, computed from the **front safety scanner's measurement channel** at z = 0.15 m — the low plane the M4 showcase demonstrated, not the 1.80 m navigation plane. **`TRUE` is the non-permissive state.** The ±30° sector is centred on the vehicle's driving direction, which is `obstacle.sector_centre_rad` = −45° in this sensor's own angle coordinate because the sensor is mounted on a corner at +45°. The evaluator sorts every sample in that sector into three classes: **clear** — `+inf`, or a finite range at or beyond `range_max`, which is the sensor reporting no echo inside its window and counts as a valid measurement at `range_max`; **distance** — a finite range inside `[range_min, range_max)`; **invalid** — `NaN`, `-inf`, or a range below `range_min`. `TRUE` when a distance is at or under 1.20 m, and `TRUE` as a fail-safe when there is no scan, when the newest one is older than 0.50 s, when the scan is structurally unusable, or when the sector holds no sample in **either** valid class. A dead or garbage sensor is all of those; an open horizon is none of them. |
 | `/forklift/obstacle/min_distance` | `std_msgs/Float64` | 10 Hz | `obstacle_zone` | Nearest valid range in the sector [m]: the smallest **distance**-class sample; the scan's own `range_max` when the sector is entirely **clear** beyond range; and `0.0`, the `unknown_distance_m` sentinel from `config.yaml`, in every fail-safe case above. The clear value is the scan's number and not this node's, so it follows whatever scanner `model.sdf` declares — and the consumer's plausibility window must contain it. Since this node reads the front safety scanner, that value is now **5.50 m**, comfortably inside the `0.05 … 8.10` m window of `docs/interfaces/opcua-nodes.md` §10.5, so **no interface change is owed by this consumer**. The window still bounds the *navigation* lidar's 8.00 m range, which is a separate open item. |
 | `/forklift/scan` | `sensor_msgs/LaserScan` | 10 Hz | bridge | **The navigation lidar**, renamed from `/forklift/gz/scan_nav`: 360 samples over 360°, plane z = 1.80 m, frame `nav_lidar_link`. **This is the vehicle's only SLAM, AMCL and costmap input**, and it is no longer read by `obstacle_zone`: it replaced a 181-sample 180° scanner at z = 0.25 m, so **the plane this topic reports moved up 1.55 m**, and in `sim/worlds/forklift_arena.sdf`, whose walls stop at 0.60 m and whose tallest crate stops at 1.00 m, it reports a clear horizon in front of an obstacle a process stop must see (`EVIDENCE_SENSOR_TF.md` §4 measures exactly that: 60 of 60 forward samples clear at 1.80 m with a crate 0.85 m ahead at 0.15 m). **Not gap-free.** The old scanner dropped the single sample at exactly ±45°, in the raw gz message rather than in the bridge, following vehicle orientation rather than a fixed index (m4f-03 evidence). **That was measured on the sensor this one replaced and has not been re-measured here**, so it is a warning and not a specification. The consumer rule is unchanged and stands on its own: do not assume every sample is finite, and do not read a non-finite one as a missing one — an `inf` is the sensor reporting **no echo inside its window**, which is a measurement of a clear path to `range_max`, not an absence of data. `obstacle_zone.py` classifies each sample on exactly that basis and never condemns a whole scan for containing one bad sample. |
-| `/forklift/odom` | `nav_msgs/Odometry` | 20 Hz | bridge | odometry, renamed from the gz topic |
+| `/forklift/odom` | `nav_msgs/Odometry` | 20 Hz | bridge | **Ground-truth** odometry, renamed from the gz topic. The name does not say so, and that is a known defect this directory could not fix alone: `/forklift/odom` is a cross-layer contract (`sim/launch/forklift_bringup.launch.py` bridges it, `sim/scenarios/run_forklift_rehearsal.py` reads it). When the EKF lands, `/forklift/odom` is the name the **estimate** should carry and this stream should move to `/forklift/odom_ground_truth`. Requested in `docs/reports/m5-07b-odom-tf.md`, not taken here |
+| `/tf` | `tf2_msgs/TFMessage` | 20 Hz measured | bridge (`forklift_ground_truth_tf_bridge`) | `forklift/odom → forklift/base_link`, the vehicle's motion estimate, renamed from `/forklift/gz/tf_ground_truth`. **Interim, and ground truth**: no slip, no drift, replaced by the EKF's output in the next brief. Exactly one publisher, by design (invariant 10); switched off with `ground_truth_tf:=false`. Every consumer needs `use_sim_time:=true` and must **wait** for the transform rather than assume it at start-up |
 | `/forklift/joint_states` | `sensor_msgs/JointState` | physics rate | bridge | joint state, renamed from the gz topic |
 | `/forklift/gz/*_cmd` | `std_msgs/Float64` | on change | `forklift_io` | the raw joint commands, same name both sides |
 
@@ -237,6 +241,43 @@ The three sensor mounts — `safety_scanner_front_mount`,
 in no joint state. Their transforms are published instead, as static TF.
 
 ### TF
+
+The tree has two halves on two topics, and both are needed before a scan
+can be put on a map:
+
+```
+  map                     absent. No SLAM, no AMCL yet, and the name is
+   |                      not decided (M6 has four vehicles)
+   |
+  forklift/odom           /tf, 20 Hz, from model.sdf's OdometryPublisher
+   |                      via the bridge. INTERIM, and ground truth
+   |
+  forklift/base_link
+   |
+   +-- nav_lidar_link                  /tf_static, from sensor_tf.py
+   +-- safety_scanner_front_link       /tf_static, from sensor_tf.py
+   +-- safety_scanner_rear_link        /tf_static, from sensor_tf.py
+```
+
+`EVIDENCE_ODOM_TF.md` is the dated run: **20.000 Hz measured** from the
+transform stamps, largest gap equal to the nominal period across a
+driven arc, the chain resolved through a real `tf2` buffer, and a
+residual against the odometry topic of **max 0.000e+00 m / 6.661e-16 rad
+over 253 paired samples**.
+
+Three things every consumer of this tree inherits:
+
+- **`use_sim_time:=true`, mandatory.** Every message is stamped with the
+  simulation clock. A consumer on the system clock asks for a transform
+  ~1.8e9 s newer than any it holds and reports a *missing transform*
+  rather than a misconfigured node.
+- **Wait for the transform, bounded.** A `TransformListener` fills its
+  own buffer, so "published" and "answerable" are different moments
+  (`EVIDENCE_SENSOR_TF.md` §2, and both `tf2_echo` captures in
+  `EVIDENCE_ODOM_TF.md` §4 show it).
+- **The names carry the model prefix on the parent pair and not on the
+  sensor frames.** That asymmetry is Gazebo's; renaming either side to
+  tidy it stops the lookups resolving.
 
 `scripts/sensor_tf.py` publishes one latched `/tf_static` message
 carrying three transforms:
@@ -277,7 +318,47 @@ other alternative and are worse in the same direction: the poses would
 live in a launch file, in triplicate, with nothing checking them against
 the model.
 
-**Not published here:** `odom → base_link`. That is a localisation
+### Odometry in two phases, and this is phase one
+
+**Phase 1, now.** `odom → base_link` is the simulator's **ground truth**:
+`model.sdf`'s `OdometryPublisher` publishes it as `gz.msgs.Pose_V` on
+`/forklift/gz/tf_ground_truth`, from the same pose that fills
+`/forklift/gz/odom`, and one dedicated bridge node carries it onto `/tf`.
+It carries **no wheel slip, no encoder quantisation and no drift**. It
+exists because SLAM cannot start without a motion estimate and nothing on
+this vehicle can produce one yet. **It is a scaffold.**
+
+**Phase 2, next** (owner ruling, 2026-07-31). An IMU joins the model,
+wheel odometry is computed from `/forklift/joint_states` with slip and
+noise modelled, and an EKF fuses the two. **The EKF then owns
+`odom → base_link`.** The ground-truth stream keeps publishing in a
+different and permanent role: the **reference** that localisation error
+is measured against.
+
+**Why phase 2 is not optional.** With ground-truth odometry the
+degenerate aisle stretches of the arena cannot bite, AMCL has nothing to
+correct, and any "error against ground truth" figure is circular — AMCL
+scored against its own input. Ground truth is only a reference while
+something *else* is the estimate. Concretely, `EVIDENCE_ODOM_TF.md` §3
+measures the gap the EKF has to model: over a 3.989 m arc the drive wheel
+turned 4.065 m of tread, and **this transform carries none of that
+0.076 m of slip**.
+
+**The seam, so the handover is a switch and not a rewrite:**
+
+| | Today | After the EKF |
+|---|---|---|
+| Publisher of `odom → base_link` | `forklift_ground_truth_tf_bridge` | the EKF node |
+| How this one retires | — | `ground_truth_tf:=false`. No edit |
+| What the EKF consumes | — | the IMU topic and wheel odometry from `/forklift/joint_states` — **not** the ground-truth stream |
+| Frame names | `forklift/odom`, `forklift/base_link` | **unchanged**, which is why they are written explicitly in `model.sdf` |
+
+`EVIDENCE_ODOM_TF.md` §6 runs that switch: with `ground_truth_tf:=false`
+the node, the topic and the frame are all gone, so when the EKF arrives
+it is the **only** publisher of that edge. One datum, one owner
+(invariant 10), across the handover rather than argued about afterwards.
+
+**Still not published here:** `map → odom`. That is a localisation
 transform and it belongs to the brief that brings up SLAM.
 
 ### What a world has to provide
@@ -326,8 +407,10 @@ ros2 launch agv/forklift/launch/vehicle.launch.py world:=/path/to/world.sdf
 
 Useful arguments: `world`, `world_name`, `name`, `x`, `y`, `z`, `yaw`,
 `gui`, `server` (set false to spawn into a server someone else started),
-`nodes`, and `tf` (the sensor transforms, separate from `nodes` because
-SLAM needs them when the two process nodes are off).
+`nodes`, `tf` (the sensor transforms, separate from `nodes` because SLAM
+needs them when the two process nodes are off), and `ground_truth_tf`
+(the interim `odom → base_link` on `/tf`, **`true` today and `false` from
+the brief that lands the EKF** — see "Odometry in two phases").
 
 Checking the vehicle rather than trusting it. The first two need no
 simulator and no ROS; the third needs a running graph, and the fourth
@@ -338,7 +421,16 @@ starts `obstacle_zone` itself:
 /usr/bin/python3 agv/forklift/scripts/check_sensor_frames.py
 /usr/bin/python3 agv/forklift/scripts/check_sensor_frames.py --live
 ROS_DOMAIN_ID=79 /usr/bin/python3 agv/forklift/scripts/obstacle_matrix.py
+
+/usr/bin/python3 agv/forklift/scripts/check_odom_tf.py
+/usr/bin/python3 agv/forklift/scripts/check_odom_tf.py --live --drive
 ```
+
+`check_odom_tf.py --drive` **moves the vehicle** — three straight and
+turning legs at 0.5 m/s, then a stop — because a motion transform can
+only be checked against motion. Give it clear floor: the arena run in
+`EVIDENCE_ODOM_TF.md` spawns at `x:=-6.0 y:=-6.0`, where the arc meets no
+obstacle.
 
 In the session container `python3` is 3.11 and ROS is built against
 3.12, so these are run as `/usr/bin/python3` or through `ros2 launch`

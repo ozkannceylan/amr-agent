@@ -225,8 +225,13 @@ def check_static(checker):
     sdf_topics = set()
     for element in ET.parse(_MODEL).getroot().iter('topic'):
         sdf_topics.add((element.text or '').strip())
-    for element in ET.parse(_MODEL).getroot().iter('odom_topic'):
-        sdf_topics.add((element.text or '').strip())
+    # <topic> is what a sensor and most systems use; the OdometryPublisher
+    # names its two outputs <odom_topic> and <tf_topic> instead. All three
+    # element names have to be swept, or a topic the model publishes could
+    # sit outside the contract without a check noticing.
+    for tag in ('odom_topic', 'tf_topic'):
+        for element in ET.parse(_MODEL).getroot().iter(tag):
+            sdf_topics.add((element.text or '').strip())
     cfg_gz_topics = set(v for k, v in topics.items() if k.startswith('gz_'))
     checker.check('every SDF topic is declared in config.yaml',
                   sdf_topics <= cfg_gz_topics,

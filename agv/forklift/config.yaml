@@ -162,8 +162,44 @@ topics:
   gz_odom: /forklift/gz/odom
   gz_scan_nav: /forklift/gz/scan_nav
 
+  # THE GROUND-TRUTH odom -> base_link TRANSFORM, AND IT IS INTERIM.
+  #
+  # Published by the same model.sdf OdometryPublisher that fills gz_odom,
+  # from the same simulator pose, so it carries no wheel slip and no
+  # drift. Today it is the vehicle's only motion estimate, because
+  # nothing else can produce one and SLAM cannot start without one. It is
+  # a scaffold.
+  #
+  # The name says ground_truth on purpose. An IMU, a wheel odometry
+  # computed from the joint states with slip and noise, and an EKF fusing
+  # them are the next brief's (owner ruling, 2026-07-31); after that
+  # there are TWO pose streams on this vehicle and a reader must never
+  # have to guess which one is the reference. THE EKF THEN OWNS
+  # odom -> base_link, this stream stops being an input to navigation,
+  # and it becomes the reference that localisation error is measured
+  # against. See README.md, "Odometry in two phases", for the seam.
+  #
+  # One datum, one owner (invariant 10): no node here recomputes a pose
+  # from joint states while this is the source, and when the EKF takes
+  # over, this one stops being bridged rather than running beside it. The
+  # gz name is stated in model.sdf so it does not depend on the spawned
+  # model name; the ROS name is /tf because that is the only name tf2
+  # listens on, whichever source is filling it.
+  gz_tf_ground_truth: /forklift/gz/tf_ground_truth
+
   joint_states: /forklift/joint_states
+
+  # GROUND TRUTH TOO, and the name does NOT say so - the one place this
+  # directory could not fix it. /forklift/odom is a cross-layer contract
+  # (sim/launch/forklift_bringup.launch.py bridges it,
+  # sim/scenarios/run_forklift_rehearsal.py reads it) and renaming it
+  # from here would break a layer this directory may not edit. When the
+  # EKF lands, /forklift/odom is the name the ESTIMATE should carry and
+  # this ground-truth stream should move to /forklift/odom_ground_truth.
+  # That rename is a request, recorded in docs/reports/m5-07b-odom-tf.md,
+  # not a change taken here.
   odom: /forklift/odom
+  tf: /tf
 
   # The NAVIGATION lidar on the ROS side. Its consumers are SLAM, AMCL and
   # the Nav2 costmaps, and it is the ONLY input any of them may have. No

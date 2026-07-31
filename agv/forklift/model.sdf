@@ -79,7 +79,9 @@
     /forklift/gz/fork_cmd      gz.msgs.Double   carriage travel  [m]
 
     /forklift/gz/joint_state   gz.msgs.Model    joint positions and rates
-    /forklift/gz/odom          gz.msgs.Odometry pose and body twist
+    /forklift/gz/odom          gz.msgs.Odometry GROUND-TRUTH pose and twist
+    /forklift/gz/tf_ground_truth  gz.msgs.Pose_V  odom -> base_link, from
+                                                  the same ground truth
 
     /forklift/gz/scan_nav           gz.msgs.LaserScan  360 deg, z = 1.80
 
@@ -914,12 +916,76 @@
       <joint_name>mast_joint</joint_name>
     </plugin>
 
-    <!-- Ground truth odometry. This is simulation feedback, not a
-         localisation solution; AMCL and Nav2 remain the vehicle's real
-         localisation path. -->
+    <!--
+      GROUND-TRUTH odometry, and - FOR NOW - the odom -> base_link
+      transform. Read the two-phase note before using either.
+
+      THIS IS GROUND TRUTH, NOT A WHEEL ESTIMATE. This system reads the
+      model's pose out of the simulator, so the pose it reports and the
+      transform it publishes carry NO odometry error: no wheel slip, no
+      encoder quantisation, no unbounded heading drift. A real vehicle's
+      odom -> base_link drifts without bound; this one does not, ever.
+
+      TWO PHASES, AND THIS FILE IS PHASE ONE.
+
+        Phase 1, now (M5, brief m5-07b). Nothing on this vehicle can
+        estimate its own motion yet, and SLAM cannot start without a
+        motion estimate, so the ground-truth transform is bridged onto
+        /tf as an INTERIM SOURCE. It is a scaffold, not the answer.
+
+        Phase 2, next (owner ruling, 2026-07-31). An IMU joins this
+        model, wheel odometry is computed from the joint states with
+        slip and noise modelled, and an EKF fuses the two. THE EKF THEN
+        OWNS odom -> base_link. This system keeps publishing, and its
+        role becomes permanent and different: it is the REFERENCE that
+        localisation error is measured AGAINST, and it stops being an
+        input to anything that navigates.
+
+      WHY PHASE 2 IS NOT OPTIONAL. With ground-truth odometry the
+      degenerate aisle stretches of the arena cannot bite, AMCL has
+      nothing to correct, and any "error against ground truth" figure is
+      circular - AMCL scored against its own input. Ground truth is only
+      a reference while something ELSE is the estimate.
+
+      THE SEAM, so the change is a switch and not a rewrite. The gz
+      transform topic is named <tf_topic> below and carried onto /tf by
+      one dedicated bridge node in launch/vehicle.launch.py, behind the
+      launch argument ground_truth_tf. When the EKF lands it is started
+      with ground_truth_tf:=false: this system keeps publishing its
+      topics, nothing here is deleted, and the ONLY publisher of
+      odom -> base_link becomes the EKF. Nothing else in this file
+      changes.
+
+      ONE OWNER PER DATUM AT ANY TIME (invariant 10). In phase 1 the
+      transform is published by THIS system, from the same pose that
+      fills the odometry message, rather than by a node that recomputes
+      a pose from joint states - two sources would be two answers to one
+      question with nothing to say which is right. In phase 2 that one
+      owner is the EKF, and the switch above is what makes the handover
+      exclusive rather than additive.
+
+      WHY THE TOPIC IS NAMED HERE, AND WHY THE NAME SAYS "ground_truth".
+      This system publishes the transform whether or not <tf_topic> is
+      present; without it the name is the MODEL-SCOPED default
+      /model/<spawn name>/pose, which changes when the model is spawned
+      under another name - exactly what the COMMAND TOPICS note above
+      refuses for every other system in this file. Measured before this
+      element was added: the default topic was /model/Forklift/pose,
+      gz.msgs.Pose_V, carrying frame_id "forklift/odom" and
+      child_frame_id "forklift/base_link". The name carries
+      ground_truth because after phase 2 there are TWO pose streams on
+      this vehicle, and a reader must never have to guess which one is
+      the reference.
+
+      The frames are the model's own <odom_frame> and <robot_base_frame>,
+      unscoped and unaltered, so the transform lands on the same tree the
+      sensor frames of scripts/sensor_tf.py hang from - and so that the
+      EKF can take the same edge over without renaming a frame.
+    -->
     <plugin filename="gz-sim-odometry-publisher-system"
             name="gz::sim::systems::OdometryPublisher">
       <odom_topic>/forklift/gz/odom</odom_topic>
+      <tf_topic>/forklift/gz/tf_ground_truth</tf_topic>
       <odom_frame>forklift/odom</odom_frame>
       <robot_base_frame>forklift/base_link</robot_base_frame>
       <dimensions>2</dimensions>

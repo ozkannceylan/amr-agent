@@ -4,6 +4,10 @@
 #   1. the Gazebo (gz sim) server on a world, headless by default,
 #   2. one spawn of agv/forklift/model.sdf into that world,
 #   3. one ros_gz_bridge carrying every topic this directory owns,
+#   3b. a SECOND, switchable ros_gz_bridge carrying the simulator's
+#      ground-truth odom -> base_link transform onto /tf. It is interim:
+#      the EKF of the next brief takes that edge over and this node is
+#      then switched off with ground_truth_tf:=false,
 #   4. scripts/sensor_tf.py, the static TF for the three sensor frames,
 #   5. scripts/forklift_io.py and scripts/obstacle_zone.py.
 #
@@ -117,11 +121,51 @@ _BRIDGE_ARGS = [
 # labelled a stand-in wherever it appears. This launch file bridges no
 # safe channel under either answer.
 #
+# THE odom -> base_link TRANSFORM IS NOT ON THAT LIST. It has a bridge
+# node of its own, below, because it is INTERIM and the second node is
+# the switch that retires it. See the block above that node.
+#
 # Bridging a measurement channel is not a safety signal on the process
 # network, and it is not a navigation consumer of a safety scanner either
 # - what ADR 0011 forbids is SLAM, AMCL or a costmap fed from one of
 # these, and the navigation lidar remains the only input any of those
 # gets.
+
+# THE INTERIM MOTION ESTIMATE, ON ITS OWN BRIDGE NODE AND ITS OWN SWITCH.
+#
+# model.sdf's OdometryPublisher publishes odom -> base_link as
+# gz.msgs.Pose_V, from the same simulator pose that fills
+# /forklift/gz/odom. That is GROUND TRUTH: no wheel slip, no encoder
+# quantisation, no drift. Today it is the vehicle's only motion estimate,
+# because nothing on board can produce one and SLAM cannot start without
+# one, so it is bridged onto /tf. It is a SCAFFOLD.
+#
+# It is separated from _BRIDGE_ARGS above for one reason: so that
+# retiring it is a launch argument rather than an edit. When the next
+# brief lands the IMU, the slip-and-noise wheel odometry and the EKF that
+# fuses them (owner ruling, 2026-07-31), THE EKF OWNS odom -> base_link.
+# This stack is then started with ground_truth_tf:=false, the node below
+# does not run, /tf carries exactly one publisher of that edge - the EKF -
+# and everything else here is untouched. The gz topic keeps publishing
+# and becomes the REFERENCE that localisation error is measured against,
+# which is the whole reason the EKF is worth building: measured against
+# its own input, AMCL cannot be wrong.
+#
+# One datum, one owner, at any instant (invariant 10). The switch is what
+# makes the handover exclusive instead of additive; two publishers of one
+# edge on /tf is the failure this separation exists to prevent.
+#
+# The remap onto /tf is not cosmetic: /tf is the only topic a
+# TransformListener reads, and the moving transform has to arrive there
+# while the STATIC sensor transforms arrive on /tf_static from
+# sensor_tf.py. Two topics, two halves of one tree.
+_TF_BRIDGE_ARGS = [
+    '{}@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V'.format(
+        _TOPICS['gz_tf_ground_truth']),
+]
+_TF_BRIDGE_REMAPS = [
+    (_TOPICS['gz_tf_ground_truth'], _TOPICS['tf']),
+]
 
 # Feedback keeps the gz name on the gz side and gets the vehicle-facing name
 # on the ROS side. Commands are NOT remapped: the same name on both sides is
@@ -180,6 +224,13 @@ def generate_launch_description():
         description='Publish /tf_static for the three sensor frames. '
                     'Separate from "nodes" because SLAM and Nav2 need the '
                     'transforms even when the two process nodes are off.'))
+    ld.add_action(DeclareLaunchArgument(
+        'ground_truth_tf', default_value='true',
+        description='Bridge the simulator ground-truth odom -> base_link '
+                    'transform onto /tf. INTERIM: true until the EKF of '
+                    'the next brief owns that edge, then false, and the '
+                    'ground-truth stream stays only as the reference '
+                    'localisation error is measured against.'))
 
     world = LaunchConfiguration('world')
     world_name = LaunchConfiguration('world_name')
@@ -190,6 +241,7 @@ def generate_launch_description():
     server = LaunchConfiguration('server')
     nodes = LaunchConfiguration('nodes')
     tf = LaunchConfiguration('tf')
+    ground_truth_tf = LaunchConfiguration('ground_truth_tf')
 
     ros_gz_sim_launch = os.path.join(
         get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')
@@ -241,6 +293,19 @@ def generate_launch_description():
         output='screen',
         arguments=_BRIDGE_ARGS,
         remappings=_BRIDGE_REMAPS,
+    ))
+
+    # The interim ground-truth motion estimate, on its own bridge node so
+    # that the EKF of the next brief retires it with ground_truth_tf:=false
+    # rather than with an edit. See the block above _TF_BRIDGE_ARGS.
+    ld.add_action(Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='forklift_ground_truth_tf_bridge',
+        output='screen',
+        arguments=_TF_BRIDGE_ARGS,
+        remappings=_TF_BRIDGE_REMAPS,
+        condition=IfCondition(ground_truth_tf),
     ))
 
     # Static TF for the three sensor frames, read out of the model file
