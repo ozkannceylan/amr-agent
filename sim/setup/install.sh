@@ -126,6 +126,14 @@ ROS_PKGS=(
   ros-jazzy-navigation2
   ros-jazzy-nav2-bringup
   ros-jazzy-slam-toolbox
+  # The vehicle's state estimator (agv/forklift/ekf.yaml). PINNED HERE ON
+  # PURPOSE, 2026-07-31: it was already on the box, but only as an AUTOMATIC
+  # dependency of ros-jazzy-nav2-waypoint-follower, so `apt autoremove` would
+  # take it the moment Nav2 left and the vehicle would lose the sole
+  # publisher of odom -> base_link with no other symptom. Named as a direct
+  # dependency it survives that. Requested by
+  # docs/reports/m5-07c-realistic-odometry.md open question 1.
+  ros-jazzy-robot-localization
   # workspace build tools
   python3-colcon-common-extensions
   python3-rosdep

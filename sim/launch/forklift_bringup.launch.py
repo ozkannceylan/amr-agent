@@ -55,6 +55,17 @@
 #         275 ranges over 275 deg, 10 Hz, plane z = 0.15 m.
 #     /forklift/odom              nav_msgs/Odometry       ground truth, 20 Hz
 #     /forklift/joint_states      sensor_msgs/JointState  physics rate
+#     /forklift/imu               sensor_msgs/Imu         100 Hz. Angular rate
+#         and linear acceleration only; the orientation field is NOT a
+#         rotation, see the note on the bridge row below.
+#
+# THE ESTIMATOR DOES NOT RUN HERE EITHER. This file puts the plant on the
+# wire; the vehicle's wheel odometry, its EKF and its static sensor TF are
+# agv/'s scripts, started by agv/forklift/launch/vehicle.launch.py for the
+# vehicle's own runs and by sim/launch/warehouse_bringup.launch.py for the
+# M5 autonomy runs that need a transform tree. Adding them to the M4
+# commissioning bringup by default would change what a closed gate's launch
+# starts, so it is left as m5-07c open question 3 rather than done here.
 #
 #   infrastructure
 #     /clock                      rosgraph_msgs/Clock     sim time
@@ -171,6 +182,23 @@ _BRIDGE_ARGS = [
 
     # joint position and rate for the three driven joints, at physics rate
     '/forklift/gz/joint_state@sensor_msgs/msg/JointState[gz.msgs.Model',
+
+    # the strapdown IMU, 100 Hz. Added 2026-07-31 (brief m5-08b) to answer
+    # docs/reports/m5-07c-realistic-odometry.md open question 3: the vehicle
+    # gained an IMU and this file, which is the ONE bridge table for this
+    # vehicle, did not carry it, so a stack brought up through here had no
+    # second input for the estimator to fuse.
+    #
+    # THE ORIENTATION IN THIS MESSAGE IS NOT A ROTATION AND MUST NOT BE
+    # READ. model.sdf sets <enable_orientation>false</>, and ros_gz_bridge
+    # then fills the quaternion with (0,0,0,0) and orientation_covariance[0]
+    # with 0.0. The ROS convention for "no orientation here" is -1; 0 means
+    # "known exactly", so a consumer following the convention reads an
+    # invalid quaternion as a perfect heading. That is a bridge defect, not
+    # a model one (m5-07c finding 5). agv/forklift/ekf.yaml refuses all
+    # three orientation flags; any future consumer checks the quaternion
+    # norm before using it.
+    '/forklift/gz/imu@sensor_msgs/msg/Imu[gz.msgs.IMU',
 ]
 
 # Feedback keeps its gz name on the gz side and takes the vehicle-facing
@@ -188,6 +216,7 @@ _BRIDGE_REMAPS = [
      '/forklift/safety_scanner_front/measurement'),
     ('/forklift/gz/odom', '/forklift/odom'),
     ('/forklift/gz/joint_state', '/forklift/joint_states'),
+    ('/forklift/gz/imu', '/forklift/imu'),
 ]
 
 

@@ -33,11 +33,27 @@ WHY `--z` IS REQUIRED AND HAS NO DEFAULT.
   Choosing between them is a NAVIGATION decision and belongs to the Nav2
   configuration brief, not to this tool. So this tool refuses to guess.
 
-STATUS OF scenarios/maps/ AS COMMITTED: STALE. The committed map.pgm and
-map.yaml were rasterised from the pre-m5-08 warehouse world for the retired
-vehicle platform. They are left in place, marked here and in sim/README.md,
-rather than regenerated, because regenerating them means choosing the plane
-above, and that choice is m5-10's.
+THIS TOOL NO LONGER HAS A COMMITTED OUTPUT, AND THAT IS THE POINT OF IT.
+`scenarios/maps/` used to hold a map.pgm/map.yaml rasterised from the
+pre-m5-08 warehouse world for the retired vehicle platform. Brief m5-08b
+DELETED it: the world it described had been rewritten, its only consumers
+were the two parked scripts beside this one, and a second map in a
+repository whose warehouse map now has an owner is a datum with two
+answers (invariant 10).
+
+Nothing was lost, because THIS FILE is the artifact and its output is not.
+Rasterising the current world takes seconds and is deterministic. What was
+never decided - which plane a static map represents - is still not decided
+here, and this tool still refuses to guess.
+
+THE MAP THAT IS COMMITTED IS NOT THIS TOOL'S. `sim/maps/warehouse/` holds a
+map slam_toolbox built from the vehicle's own scans and its own drifting
+odometry (sim/worlds/WAREHOUSE_SLAM_EVIDENCE.md). The two are different
+kinds of thing and must not be confused: that one is what the vehicle can
+actually perceive and localise against, this one is what the world file
+says is there. This tool remains useful as the second opinion - a
+SLAM map that disagrees with a rasterised one is a finding - and as the
+generator for whatever static map m5-10 decides Nav2 wants.
 
 Output: map.pgm + map.yaml (trinary, 0.05 m/px). Occupied = 0 (black), free
 = 254 (white). Python standard library only.

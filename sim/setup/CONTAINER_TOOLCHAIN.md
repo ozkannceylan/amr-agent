@@ -72,6 +72,8 @@ From `dpkg-query -W -f='${Version}'`:
 | `ros-jazzy-navigation2` | `1.3.12-1noble.20260615.181551` |
 | `ros-jazzy-nav2-bringup` | `1.3.12-1noble.20260616.082701` |
 | `ros-jazzy-slam-toolbox` | `2.8.5-1noble.20260615.161600` |
+| `ros-jazzy-robot-localization` | `3.8.3-1noble.20260615.152020` |
+| `ros-jazzy-nav2-map-server` | `1.3.12-1noble.20260615.153120` |
 | `ros-jazzy-xacro` | `2.1.1-1noble.20260519.011123` |
 | `ros-jazzy-robot-state-publisher` | `3.3.4-1noble.20260615.150609` |
 | `ros-jazzy-joint-state-publisher` | `2.4.1-1noble.20260615.140100` |
@@ -83,6 +85,25 @@ Nothing on the brief's list was unavailable. `ros-jazzy-slam-toolbox` and the
 two Nav2 packages, which `install.sh` listed but which had never been
 installed anywhere in this project, all resolved from
 `packages.ros.org/ros2/ubuntu noble main` and installed without incident.
+
+**Two rows added 2026-07-31 by m5-08b, and neither was installed by it.**
+Both arrived on 2026-07-30 as automatic dependencies of the Nav2 install
+above and were read back with the same `dpkg-query -W` on 2026-07-31:
+
+- **`ros-jazzy-robot-localization`** is the vehicle's EKF
+  (`agv/forklift/ekf.yaml`) and, since m5-08b, is started by
+  `sim/launch/warehouse_bringup.launch.py`. It was `apt-mark showauto`, a
+  dependency of `ros-jazzy-nav2-waypoint-follower`, so `apt autoremove`
+  would have taken it if Nav2 ever left and the vehicle would have lost the
+  sole publisher of `odom -> base_link` silently. It is now named directly
+  in `install.sh`'s `ROS_PKGS`. Requested by
+  `docs/reports/m5-07c-realistic-odometry.md` open question 1.
+- **`ros-jazzy-nav2-map-server`** is not called by any launch file here, but
+  `/slam_toolbox/save_map` spawns its `map_saver_cli` to write the
+  `.pgm`/`.yaml` pair, so it is a runtime dependency of producing the map
+  artifact. It is left implicit in `ROS_PKGS` (it comes with
+  `ros-jazzy-navigation2`, which is named) and recorded here so the
+  dependency is visible.
 
 `ros2 doctor --report`, MIDDLEWARE section:
 

@@ -56,11 +56,34 @@ The question "is the warehouse world reused or replaced" is therefore
 **answered**, and it is not m5-10's to decide: it is reused, and M6 enlarges
 it to ten stations.
 
-`maps/` did NOT survive that rewrite. It is rasterized from the world's
-static geometry, and the geometry changed, so the committed grid is **stale**
-until it is regenerated. `tools/make_map.py` now reads its rectangles from
-the SDF at run time and requires an explicit `--z`, because which scan plane
-a static map represents is a Nav2 decision that belongs to m5-10.
+`maps/` did NOT survive that rewrite, and on **2026-07-31 brief m5-08b
+deleted it**. It had been rasterized from the world's static geometry, the
+geometry changed, and the grid described a building this repository no
+longer contains. Three things made deletion the right ruling rather than
+regeneration or relocation:
+
+- its **source of truth was gone** — the world was rewritten at m5-08;
+- its only **consumers are the two parked scripts in this directory**, both
+  written against the retired platform, and the Nav2 parameter file they
+  needed was itself deleted by m5-09 (ADR 0010 D1);
+- it is **regenerable in seconds** by `tools/make_map.py`, which survives.
+  The generator is the artifact; its output was not.
+
+And there is now a warehouse map that has an owner: `sim/maps/warehouse/`,
+built by slam_toolbox from the vehicle's own scans
+(`worlds/WAREHOUSE_SLAM_EVIDENCE.md`). Two maps of one building, one of them
+nobody's, is a datum with two answers (invariant 10).
+
+`tools/make_map.py` still reads its rectangles from the SDF at run time and
+still requires an explicit `--z`, because which scan plane a STATIC map
+represents is a Nav2 decision that belongs to m5-10. That question is
+untouched by the deletion.
 
 Nothing else here is deleted. Treat every file in this directory as
 unverified until a run produces EVIDENCE_NAV.md with a SUCCESS result.
+
+**Both parked scripts still name `maps/map.yaml` in their own headers.**
+Those references are now dangling, deliberately: they are part of the
+description of a scenario that does not run, and rewriting them would make
+a parked file look maintained. Whether either script survives migration is
+still m5-10 briefing work.

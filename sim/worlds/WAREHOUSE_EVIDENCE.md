@@ -251,6 +251,6 @@ date and are correct as history.
 
 | Item | Owed to |
 |---|---|
-| A real-time-factor figure for this world, taken on an uncontended machine, against the arena's figures | the next sim brief that has the machine to itself |
+| ~~A real-time-factor figure for this world, taken on an uncontended machine~~ | **ANSWERED 2026-07-31 by m5-08b**, which had the machine to itself: `real_time_factor: 0.99934892417589938` for the bringup alone, and 0.9831 simulation seconds per wall second measured across a 179 s drive with slam_toolbox also running. `WAREHOUSE_SLAM_EVIDENCE.md` section 2 |
 | A GUI capture showing the navigation lidar beams in this world | the M5 recording work |
-| A decision on which scan plane a static Nav2 map of this world represents, and a regenerated `scenarios/maps/` | m5-10 (Nav2 configuration) |
+| A decision on which scan plane a STATIC Nav2 map of this world represents | m5-10 (Nav2 configuration) |

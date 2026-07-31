@@ -34,11 +34,22 @@ sim/
                                     navigation scan plane, produced BEFORE
                                     any SLAM run; names the degenerate
                                     stretches
+  worlds/WAREHOUSE_SLAM_EVIDENCE.md the SLAM mapping run, read against that
+                                    prediction stretch by stretch
   worlds/BRINGUP_EVIDENCE.md        HISTORICAL ONLY: the retired RB-KAIROS
                                     platform's headless run, in the world as
                                     it was before m5-08
   launch/warehouse_bringup.launch.py  one-command headless bringup + forklift
-                                    spawn (wraps forklift_bringup)
+                                    spawn + the vehicle's estimator stack
+                                    (wraps forklift_bringup)
+  launch/warehouse_slam.launch.py   slam_toolbox online_async against a
+                                    running warehouse bringup
+  config/slam_toolbox_warehouse.yaml  its parameters; every non-default
+                                    carries its reason on the line above it
+  maps/warehouse/                   THE warehouse map. warehouse.pgm/.yaml
+                                    for AMCL, warehouse.posegraph/.data to
+                                    resume mapping. Built by SLAM, not
+                                    rasterised
   setup/install.sh                  idempotent environment setup (run as root)
   scenarios/
     forklift_commissioning.md       M4 gate procedure: the five criteria as
@@ -48,12 +59,17 @@ sim/
                                     move the aisle crate, transcribe /state
     run_forklift_rehearsal.py       rehearsal harness for the five scenarios
                                     against the PLC logic double
+    warehouse_mapping_route.py      the stated mapping route, driven as a
+                                    scripted stimulus; the route is a
+                                    constant in the file
     tools/landmark_map.py           landmark availability of a world at a
                                     scan plane, from geometry alone
     tools/make_map.py               deterministic map generator (world -> map),
-                                    rectangles read from the SDF at run time
-    maps/map.yaml, map.pgm          STALE: rasterised from the pre-m5-08
-                                    warehouse world; see below
+                                    rectangles read from the SDF at run time.
+                                    Has NO committed output; see below
+    tools/mapping_evidence.py       record and read a mapping run: /tf
+                                    publishers, the three pose streams, the
+                                    named degenerate stretches, the closures
     nav_scenario.launch.py          Nav2 stack of the parked scenario
                                     (map_server, AMCL, planner, DWB
                                     controller, behaviors, bt_navigator);
@@ -128,14 +144,48 @@ commissioning role, and neither world includes the other.
 
 `worlds/warehouse.sdf` was rewritten for that at m5-08 and
 `launch/warehouse_bringup.launch.py` now spawns the in-house forklift. That
-launch is deliberately a thin wrapper around `forklift_bringup.launch.py`:
-there is one topic contract for this vehicle and one launch file that states
-it, and this one adds a world and a spawn pose.
+launch wraps `forklift_bringup.launch.py` for the world, the spawn and the
+bridge — there is one topic contract for this vehicle and one launch file
+that states it — and adds the one thing an autonomy world needs that a
+commissioning arena does not: **the vehicle's own pose estimate.**
 
 ```
 export GZ_PARTITION=myrun ROS_DOMAIN_ID=42     # isolate BOTH transports
 ros2 launch sim/launch/warehouse_bringup.launch.py
 ```
+
+That starts `agv/forklift/scripts/sensor_tf.py`, `scripts/wheel_odometry.py`
+and the `robot_localization` EKF with `agv/forklift/ekf.yaml` (all three are
+`agv/`'s; this layer starts them and owns none of them). **The EKF is the
+sole publisher of `forklift/odom -> forklift/base_link`, and no launch file
+in `sim/` bridges the simulator's ground-truth transform or offers an
+argument that would** — `ros2 topic info /tf --verbose` on this bringup
+reports `Publisher count: 1`, captured in
+`worlds/WAREHOUSE_SLAM_EVIDENCE.md` §3. Pass `estimator:=false` for the bare
+plant, which then has no transform tree and cannot carry SLAM, AMCL or Nav2.
+
+### SLAM, and the map
+
+```
+ros2 launch sim/launch/warehouse_slam.launch.py      # beside the bringup
+```
+
+`online_async`, not `online_sync`: rendering here is llvmpipe software
+rasterisation and a scan match that overruns the 0.1 s scan period stalls a
+synchronous callback. **`async_slam_toolbox_node` is a lifecycle node and
+does nothing whatever until it is transitioned** — started as a plain `Node`
+it logs one line, subscribes to nothing and publishes no transform, with no
+warning of any kind. That launch file emits the configure and activate
+transitions; the check that it worked is `/map` on the topic list, never a
+clean log.
+
+`maps/warehouse/` is the map that run produced, in both forms: the
+`.pgm`/`.yaml` pair AMCL consumes and the `.posegraph`/`.data` pair that
+lets mapping resume rather than restart. It was built from the vehicle's own
+scans against its own drifting odometry, over the route stated in
+`scenarios/warehouse_mapping_route.py`, and read against
+`worlds/WAREHOUSE_LANDMARKS.md` stretch by stretch. Both documents are worth
+reading before any localisation parameter is chosen.
 
 ### The honesty rule the world obeys
 
@@ -167,21 +217,30 @@ fleet brief cites rather than re-measuring the SDF. The M3-era
 `ChargerStation` placeholder was **replaced** by these, not kept beside
 them.
 
-### Map: generated, not SLAM-mapped — and currently stale
+### The rasteriser, which now has no committed output
 
 `scenarios/tools/make_map.py` rasterizes the static world geometry rather
 than SLAM-mapping it, because that is deterministic, reproducible in seconds
-and diffable against the world file. Its rectangles are now read from the
-SDF at run time; the hand-copied list it used to carry could not survive a
-change to the world, and did not.
+and diffable against the world file. Its rectangles are read from the SDF at
+run time; the hand-copied list it used to carry could not survive a change
+to the world, and did not.
 
-**`scenarios/maps/` as committed is stale**: it was rasterized from the
-pre-m5-08 world for the retired vehicle. It is left in place and marked
-rather than regenerated, because regenerating it requires choosing which
-scan plane a static map represents — the navigation lidar's 1.80 m, or a
-lower plane carrying what a vehicle can collide with — and that is a Nav2
-configuration decision belonging to **m5-10**. The tool therefore requires
-`--z` and has no default.
+**`scenarios/maps/` was DELETED on 2026-07-31 by m5-08b.** It held a grid
+rasterized from the pre-m5-08 world for the retired vehicle — a picture of a
+building this repository no longer contains. Its source of truth was gone,
+its only consumers are the two parked scripts beside it (whose Nav2
+parameter file m5-09 had already deleted), and it is regenerable in seconds
+by the tool above. The generator is the artifact; its output was not. And
+with `maps/warehouse/` now holding a map that has an owner, keeping a second
+one that is nobody's would be a datum with two answers (invariant 10).
+
+`make_map.py` itself is untouched and still useful — as the second opinion
+against the SLAM map, and as the generator for whatever static map m5-10
+decides Nav2 wants. It still requires an explicit `--z` and has no default,
+because which scan plane a static map represents — the navigation lidar's
+1.80 m, or a lower plane carrying what a vehicle can collide with — remains
+a Nav2 configuration decision belonging to **m5-10**. That question is
+untouched by the deletion.
 
 ## What is still parked
 
@@ -190,7 +249,6 @@ configuration decision belonging to **m5-10**. The tool therefore requires
 | `scenarios/nav_scenario.launch.py` | the Nav2 node set of the retired platform's scenario; `params_file` is a required argument with no file to satisfy it |
 | `scenarios/run_scenario.py` | the scripted NavigateToPose run; still names the retired vehicle's odometry topic |
 | `worlds/BRINGUP_EVIDENCE.md` | historical record of the retired platform in the pre-m5-08 world; cite nothing from it |
-| `scenarios/maps/` | stale, see above |
 
 Whether the two scenario scripts survive migration is **m5-10 briefing
 work**. Full status: `sim/scenarios/DEFERRED.md`.
@@ -217,10 +275,19 @@ of the host and not of the vehicle:
 
 - The ~0.1 headless real-time factor recorded for the pre-m5-08 world was
   the retired platform's figure, and it included an RGBD camera this project
-  does not carry. **No real-time factor for the current warehouse world has
-  been measured**: the m5-08 bringup shared the machine with another
-  agent's simulator, and a contended RTF is worthless. The figure is owed to
-  the next sim brief that has the machine to itself.
+  does not carry. **Superseded 2026-07-31 by m5-08b**, which had the machine
+  to itself: this world runs at `real_time_factor: 0.99934892417589938`
+  headless with the vehicle and its estimator, and at 0.9831 simulation
+  seconds per wall second with slam_toolbox running as well
+  (`worlds/WAREHOUSE_SLAM_EVIDENCE.md` §2).
+- **The EKF integrates about 0.0023 rad/s of heading on a stationary
+  vehicle** — 8° per minute — because it fuses a modelled gyro bias against
+  a wheel odometry that correctly reports zero yaw rate, with no
+  zero-velocity update. Consequence for anyone mapping: the map frame is
+  anchored to the vehicle's heading ESTIMATE at the first scan, so idling
+  the stack before driving rotates the finished map away from the building
+  by that much. Start the drive as soon as slam_toolbox is active. Measured
+  twice per run in `worlds/WAREHOUSE_SLAM_EVIDENCE.md` §8.
 - The world's south wall has a free 4 m opening marked by the `DoorGap`
   posts/lintel; the PLC-controlled door and the conveyor/charger handshakes
   act there at M6 (ADR 0010). The blocks are geometry only — no
