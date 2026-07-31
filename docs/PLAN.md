@@ -55,7 +55,10 @@ and the gate claims **PLr targets only, never an achieved PL, SIL or PFH**.
    verified host today), pinned versions.
 8. m5-08 sim — `slam_toolbox online_async` mapping run; the map committed as
    a versioned artifact with one owner (invariant 10).
-9. m5-09 agv — AMCL against the frozen map; localization evidence.
+9. m5-08b agv — AMCL against the frozen map; localization evidence.
+   (Renumbered from m5-09: that id was taken by the retired-platform purge,
+   whose brief and report are already committed under it. A filename's
+   number names its round, so the file keeps it and the plan moves.)
 
 ### Wave C — autonomy and the envelope
 
