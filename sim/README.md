@@ -23,14 +23,22 @@ sim/
                                     (24 x 16 hall, drive aisle, obstacle props)
   worlds/FORKLIFT_ARENA_EVIDENCE.md dated verification record of the arena run
   launch/forklift_bringup.launch.py one-command headless arena bringup + spawn
-  worlds/warehouse.sdf              warehouse world of the parked navigation
-                                    scenario; navigation resumes at M5 on the
-                                    forklift (ADR 0010) and whether this world
-                                    is reused there is decided at briefing
-                                    (walls, racks, DoorGap, ConveyorStation,
-                                    ChargerStation)
-  worlds/BRINGUP_EVIDENCE.md        dated verification record of the headless run
-  launch/warehouse_bringup.launch.py  one-command headless bringup
+  worlds/warehouse.sdf              M5 autonomy world: 30 x 20 hall, three
+                                    rack rows cut by a central cross aisle,
+                                    two end aisles, building columns, dock
+                                    door, transfer station, two charging
+                                    bays, safety zone marking
+  worlds/WAREHOUSE_EVIDENCE.md      dated bringup record of that world, and
+                                    the citable charging bay register
+  worlds/WAREHOUSE_LANDMARKS.md     measured landmark availability at the
+                                    navigation scan plane, produced BEFORE
+                                    any SLAM run; names the degenerate
+                                    stretches
+  worlds/BRINGUP_EVIDENCE.md        HISTORICAL ONLY: the retired RB-KAIROS
+                                    platform's headless run, in the world as
+                                    it was before m5-08
+  launch/warehouse_bringup.launch.py  one-command headless bringup + forklift
+                                    spawn (wraps forklift_bringup)
   setup/install.sh                  idempotent environment setup (run as root)
   scenarios/
     forklift_commissioning.md       M4 gate procedure: the five criteria as
@@ -40,8 +48,12 @@ sim/
                                     move the aisle crate, transcribe /state
     run_forklift_rehearsal.py       rehearsal harness for the five scenarios
                                     against the PLC logic double
-    tools/make_map.py               deterministic map generator (world -> map)
-    maps/map.yaml, map.pgm          occupancy grid of warehouse.sdf (generated)
+    tools/landmark_map.py           landmark availability of a world at a
+                                    scan plane, from geometry alone
+    tools/make_map.py               deterministic map generator (world -> map),
+                                    rectangles read from the SDF at run time
+    maps/map.yaml, map.pgm          STALE: rasterised from the pre-m5-08
+                                    warehouse world; see below
     nav_scenario.launch.py          Nav2 stack of the parked scenario
                                     (map_server, AMCL, planner, DWB
                                     controller, behaviors, bt_navigator);
@@ -105,43 +117,83 @@ platform's vendor mecanum drive; the forklift drives through gz
 joint-controller plugins and a vehicle node. If a later gate needs it, add it
 to `install.sh`'s `ROS_PKGS` and re-verify.
 
-## The parked warehouse navigation scenario
+## The warehouse world (M5 autonomy)
 
-**Not current work, and not runnable.** The vehicle platform it was built on
-was retired by ADR 0010 D1, which supersedes ADR 0002's platform selection.
-The vendor workspace its bringup needed is no longer provisioned by
-`sim/setup/install.sh` (removed by m5-09), and the scenario's Nav2 parameter
-file was deleted with it — the forklift's Nav2 configuration is written from
-scratch at m5-10, so nothing was lost that m5-10 would have started from.
+**Current work.** The owner ruled on 2026-07-30 that M5's SLAM and Nav2
+autonomy runs in the warehouse world rather than in the M4 commissioning
+arena: autonomy needs aisles and racks to be meaningful, and M6 enlarges
+this same world to ten stations, so the map artifact and the Nav2 tuning
+carry forward instead of being discarded. The arena keeps its M4
+commissioning role, and neither world includes the other.
 
-What remains, and why:
+`worlds/warehouse.sdf` was rewritten for that at m5-08 and
+`launch/warehouse_bringup.launch.py` now spawns the in-house forklift. That
+launch is deliberately a thin wrapper around `forklift_bringup.launch.py`:
+there is one topic contract for this vehicle and one launch file that states
+it, and this one adds a world and a spawn pose.
 
-| File | Why it is still here |
+```
+export GZ_PARTITION=myrun ROS_DOMAIN_ID=42     # isolate BOTH transports
+ros2 launch sim/launch/warehouse_bringup.launch.py
+```
+
+### The honesty rule the world obeys
+
+A long featureless aisle is a **degenerate direction** for scan matching and
+no slam_toolbox parameter fixes it. Everything in this world is there
+because a real warehouse has it — rack uprights, rack ends, stock present in
+some bays and absent in others, cross and end aisles, building columns, a
+dock door frame, a transfer station frame, a charging area. **Nothing was
+scattered into an aisle because scan matching struggles without it**, and
+where the honest world still leaves a degenerate stretch, that stretch is
+measured and named rather than landscaped away.
+
+`worlds/WAREHOUSE_LANDMARKS.md` is that measurement, produced from geometry
+**before** any SLAM run, so the SLAM result can be read against a prediction
+instead of being the only number anyone sees. It names three degenerate
+stretches, all in the fully-loaded east half of the hall. Read it before
+tuning any localisation parameter against this world.
+
+### Charging bays
+
+Two bays in the dock apron, added at m5-08 on the owner's instruction:
+`ChargeBay1Marking` / `ChargeBay1Cabinet` and `ChargeBay2Marking` /
+`ChargeBay2Cabinet`. **Geometry plus names and nothing else** — no docking
+behaviour, no approach logic, no charging state, no PLC or fleet
+interaction; that planning arrives with fleet management at M6. The poses,
+the sizing arithmetic and what each part shows at each scan plane are in
+`worlds/WAREHOUSE_EVIDENCE.md` section 5, which is the document a later
+fleet brief cites rather than re-measuring the SDF. The M3-era
+`ChargerStation` placeholder was **replaced** by these, not kept beside
+them.
+
+### Map: generated, not SLAM-mapped — and currently stale
+
+`scenarios/tools/make_map.py` rasterizes the static world geometry rather
+than SLAM-mapping it, because that is deterministic, reproducible in seconds
+and diffable against the world file. Its rectangles are now read from the
+SDF at run time; the hand-copied list it used to carry could not survive a
+change to the world, and did not.
+
+**`scenarios/maps/` as committed is stale**: it was rasterized from the
+pre-m5-08 world for the retired vehicle. It is left in place and marked
+rather than regenerated, because regenerating it requires choosing which
+scan plane a static map represents — the navigation lidar's 1.80 m, or a
+lower plane carrying what a vehicle can collide with — and that is a Nav2
+configuration decision belonging to **m5-10**. The tool therefore requires
+`--z` and has no default.
+
+## What is still parked
+
+| File | Status |
 |---|---|
-| `worlds/warehouse.sdf` | the world; may be reused or replaced by the enlarged M6 warehouse |
-| `worlds/BRINGUP_EVIDENCE.md` | the dated record of the one verified headless run |
-| `launch/warehouse_bringup.launch.py` | the retired vehicle's bringup; still names its vendor spawn path |
-| `scenarios/nav_scenario.launch.py` | the Nav2 node set; `params_file` is now a required argument with no file to satisfy it |
+| `scenarios/nav_scenario.launch.py` | the Nav2 node set of the retired platform's scenario; `params_file` is a required argument with no file to satisfy it |
 | `scenarios/run_scenario.py` | the scripted NavigateToPose run; still names the retired vehicle's odometry topic |
-| `scenarios/maps/`, `scenarios/tools/make_map.py` | vehicle-independent; rasterized from the world geometry |
+| `worlds/BRINGUP_EVIDENCE.md` | historical record of the retired platform in the pre-m5-08 world; cite nothing from it |
+| `scenarios/maps/` | stale, see above |
 
-Navigation work resumes at **M5**, on the in-house forklift, with SLAM
-building the map (ADR 0010 D1, D2). Which of the files above survive
-migration is **m5-10 briefing work, decided at briefing**. Nothing here
-decides it, and no file above has been rewritten for the new platform. Full
-status: `sim/scenarios/DEFERRED.md`.
-
-### Map: generated, not SLAM-mapped
-
-`scenarios/maps/` is produced by `scenarios/tools/make_map.py`, which
-rasterizes the known static geometry of `worlds/warehouse.sdf` (every
-rectangle in the script is copied from the SDF model poses). This was
-chosen over slam_toolbox mapping because it is deterministic, reproducible
-in seconds, and diffable against the world file; at the container's ~0.1
-real-time factor a SLAM mapping drive would take an hour and produce a
-slightly different map every time. The overhead DoorGap lintel is
-deliberately excluded (the lidar never sees it; the vehicle drives under
-it). If the world changes, re-run the script.
+Whether the two scenario scripts survive migration is **m5-10 briefing
+work**. Full status: `sim/scenarios/DEFERRED.md`.
 
 ### Nav2 configuration: nothing carried forward
 
@@ -163,13 +215,20 @@ of the host and not of the vehicle:
 
 ### Known behavior
 
-- Headless real-time factor is ~0.1 on this CPU-only container because the
-  lidars and the RGBD camera render through ogre2 on llvmpipe. Functional
-  for bringup and CI-style checks; wall-clock patience required.
+- The ~0.1 headless real-time factor recorded for the pre-m5-08 world was
+  the retired platform's figure, and it included an RGBD camera this project
+  does not carry. **No real-time factor for the current warehouse world has
+  been measured**: the m5-08 bringup shared the machine with another
+  agent's simulator, and a contended RTF is worthless. The figure is owed to
+  the next sim brief that has the machine to itself.
 - The world's south wall has a free 4 m opening marked by the `DoorGap`
   posts/lintel; the PLC-controlled door and the conveyor/charger handshakes
   act there at M6 (ADR 0010). The blocks are geometry only — no
   fleet, PLC or safety behavior is simulated here (see the first section).
+- Two `python3` interpreters are on PATH here. `/usr/local/bin/python3` is
+  3.11 and runs the stdlib-only tools in `scenarios/tools/`;
+  `rclpy` is built for 3.12 and imports only under `/usr/bin/python3`. A
+  script that subscribes to a topic must be run with the latter.
 
 ---
 
@@ -178,9 +237,9 @@ of the host and not of the vehicle:
 `worlds/cell.sdf` + `launch/cell_bringup.launch.py` are the M3 gate work
 under ADR 0004: prove the Gazebo-to-PLC signal loop with **fixed equipment
 only**, before any mobile robot. There is no vehicle in this world and
-none belongs in it. The warehouse world and its navigation scenario above
-are the parked navigation work, which resumes at M5 on the forklift under
-ADR 0010, and are untouched by this.
+none belongs in it. The warehouse world above is the M5 autonomy world and
+the two Nav2 scenario scripts beside it are still parked; neither is
+touched by this.
 
 ## What is in the cell
 

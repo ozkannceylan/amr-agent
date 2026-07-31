@@ -1,53 +1,91 @@
-# warehouse_bringup.launch.py - bringup for the parked navigation scenario
-# (sim/scenarios/DEFERRED.md). Written in the m3 round. RB-KAIROS is retired
-# as the vehicle platform by ADR 0010 D1; navigation work resumes at M5 on the
-# in-house forklift, and migrating this launch is M5-briefing work.
+# warehouse_bringup.launch.py - M5 autonomy bringup for amr-agent.
 #
-# One launch file that:
-#   1. starts the Gazebo (gz sim) server with sim/worlds/warehouse.sdf,
-#      headless by default (gui:=true adds the gz GUI client),
-#   2. bridges /clock from Gazebo to ROS,
-#   3. spawns the Robotnik RB-KAIROS by including the UNMODIFIED vendor
-#      launch robotnik_gazebo_ignition/launch/spawn_robot.launch.py, which
-#      itself starts:
-#        - robot_state_publisher (via robotnik_description),
-#        - the ros_gz_sim "create" entity spawner,
-#        - a ros_gz_bridge for the onboard sensors (lidars, IMU, cameras),
-#        - ros2_control controller spawners (joint_state_broadcaster +
-#          robotnik_base_control mecanum controller via gz_ros2_control).
+# Starts sim/worlds/warehouse.sdf headless, spawns the in-house forklift
+# (agv/forklift/model.sdf) into it and bridges the vehicle's topics.
 #
-# Resulting key ROS topics (robot_id default "robot"):
-#   /clock
-#   /robot/robot_description                  (robot_state_publisher)
-#   /robot/joint_states, /tf, /tf_static
-#   /robot/front_laser/scan, /robot/rear_laser/scan   (safety lidars)
-#   /robot/imu/data
-#   /robot/robotnik_base_control/cmd_vel      (TwistStamped command in)
-#   /robot/robotnik_base_control/cmd_vel_unstamped (Twist command in)
-#   /robot/robotnik_base_control/odom         (odometry out)
+# WHAT CHANGED, AND WHY THIS FILE IS A THIN WRAPPER.
 #
-# Usage (after sourcing /opt/ros/jazzy and the Robotnik workspace):
-#   ros2 launch sim/launch/warehouse_bringup.launch.py
-#   ros2 launch sim/launch/warehouse_bringup.launch.py gui:=true
-#   ros2 launch sim/launch/warehouse_bringup.launch.py robot_id:=agv1 x:=-10.0 y:=-6.0
+#   This file used to spawn the Robotnik RB-KAIROS through that vendor's
+#   spawn_robot.launch.py. RB-KAIROS is retired as the vehicle platform by
+#   ADR 0010 D1, the vendor workspace is no longer provisioned by
+#   sim/setup/install.sh, and the owner ruled on 2026-07-30 that M5's SLAM
+#   and Nav2 autonomy runs in the warehouse world rather than in the M4
+#   commissioning arena. So the vendor spawn path is gone and the vehicle
+#   this file puts in the world is the forklift.
+#
+#   The bringup then becomes "the M4 forklift bringup, pointed at a
+#   different world", and that is exactly what it is written as: it includes
+#   forklift_bringup.launch.py and overrides the world and the spawn pose.
+#   The alternative was a second copy of the bridge table, and a bridge
+#   table that exists twice is a bridge table that drifts. There is ONE
+#   topic contract for this vehicle (agv/forklift/README.md), one launch
+#   file that states it (forklift_bringup.launch.py), and this file adds a
+#   world and a place to stand.
+#
+#   Consequence worth knowing before debugging: every topic, remap and
+#   parameter question about this launch is answered in
+#   forklift_bringup.launch.py, including the note on why the rear safety
+#   scanner's measurement channel is deliberately not bridged.
+#
+# WHAT DELIBERATELY DOES NOT RUN HERE: the two vehicle nodes, the PLC, the
+# bridge process, the HMI, and Nav2 / SLAM. Same list, same reasons, as
+# forklift_bringup.launch.py. This file puts a plant and a vehicle on the
+# wire; SLAM and Nav2 are m5-10 work and are launched separately against
+# this world.
+#
+# THIS FILE CONTAINS NO CONTROL LOGIC. No sequencing, no interlock, no
+# timer, no latch, no threshold. The protective stop is onboard and
+# hardwired and appears in no launch file (invariant 1).
+#
+# Topics (authoritative table: agv/forklift/README.md):
+#
+#   /clock                                        rosgraph_msgs/Clock
+#   /forklift/gz/steer_cmd, traction_cmd, fork_cmd  std_msgs/Float64  (in)
+#   /forklift/scan                                sensor_msgs/LaserScan
+#       the NAVIGATION lidar, 360 ranges over 360 deg, 10 Hz, z = 1.80 m
+#   /forklift/safety_scanner_front/measurement    sensor_msgs/LaserScan
+#       the front safety scanner's NON-SAFE measurement channel, z = 0.15 m
+#   /forklift/odom                                nav_msgs/Odometry, 20 Hz
+#   /forklift/joint_states                        sensor_msgs/JointState
+#
+# Usage (after sourcing /opt/ros/jazzy/setup.bash). Isolate BOTH transports
+# whenever another simulation may be running: ROS_DOMAIN_ID does not isolate
+# Gazebo, because gz transport does not use DDS. GZ_PARTITION does.
+#
+#   export GZ_PARTITION=myrun ROS_DOMAIN_ID=42
+#   ros2 launch /path/to/sim/launch/warehouse_bringup.launch.py
+#   ros2 launch /path/to/sim/launch/warehouse_bringup.launch.py gui:=true
+#   ros2 launch /path/to/sim/launch/warehouse_bringup.launch.py x:=-9.80 y:=-7.70
+#
+# The check that this file works is `ros2 topic hz` on each bridged ROS
+# topic, never a clean-looking log: a ros_gz_bridge entry for a gz topic
+# that nobody publishes logs `Creating GZ->ROS Bridge` exactly as a working
+# one does (sim/setup/CONTAINER_TOOLCHAIN.md section 6).
 
 import os
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
-from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
 
-from ament_index_python.packages import get_package_share_directory
-
-# The world ships in this repository next to the launch file, so resolve it
-# relative to this file instead of a package share directory.
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_WORLD = os.path.normpath(
-    os.path.join(_THIS_DIR, '..', 'worlds', 'warehouse.sdf')
-)
+    os.path.join(_THIS_DIR, '..', 'worlds', 'warehouse.sdf'))
+_FORKLIFT_BRINGUP = os.path.join(_THIS_DIR, 'forklift_bringup.launch.py')
+
+# Spawn pose. The dock aisle south of rack row C runs along y = -5.50; x =
+# -6.00 puts the vehicle in the open west half of it, facing +x, with the
+# central cross aisle ahead and both charging bays behind its right shoulder.
+# The vehicle's plan envelope there is x in [-7.875, -5.140], y in [-6.020,
+# -4.980]: clear of rack row C's south face at y = -3.80, of the building
+# column at (-4.60, -7.00) and of both charge bay outlines, which end at
+# y = -6.10 and are paint in any case. Overridable per run: a scenario that
+# wants a different start pose passes it rather than editing this file.
+_SPAWN_X = '-6.00'
+_SPAWN_Y = '-5.50'
+_SPAWN_Z = '0.05'
+_SPAWN_YAW = '0.0'
 
 
 def generate_launch_description():
@@ -55,72 +93,39 @@ def generate_launch_description():
 
     ld.add_action(DeclareLaunchArgument(
         'world', default_value=_DEFAULT_WORLD,
-        description='Absolute path to the world SDF file'))
+        description='Absolute path to the warehouse world SDF file'))
+    ld.add_action(DeclareLaunchArgument(
+        'name', default_value='Forklift',
+        description='Name the model is spawned under'))
+    ld.add_action(DeclareLaunchArgument(
+        'x', default_value=_SPAWN_X, description='Spawn x [m]'))
+    ld.add_action(DeclareLaunchArgument(
+        'y', default_value=_SPAWN_Y, description='Spawn y [m]'))
+    ld.add_action(DeclareLaunchArgument(
+        'z', default_value=_SPAWN_Z, description='Spawn z [m]'))
+    ld.add_action(DeclareLaunchArgument(
+        'yaw', default_value=_SPAWN_YAW, description='Spawn yaw [rad]'))
     ld.add_action(DeclareLaunchArgument(
         'gui', default_value='false',
         description='Also start the Gazebo GUI client (headless if false)'))
     ld.add_action(DeclareLaunchArgument(
-        'robot_id', default_value='robot',
-        description='Robot namespace / entity name'))
-    # Spawn pose: open area south of rack row B, clear of racks and stations.
-    ld.add_action(DeclareLaunchArgument(
-        'x', default_value='-10.0', description='Spawn X [m]'))
-    ld.add_action(DeclareLaunchArgument(
-        'y', default_value='-6.0', description='Spawn Y [m]'))
-    ld.add_action(DeclareLaunchArgument(
-        'z', default_value='0.15', description='Spawn Z [m]'))
+        'use_sim_time', default_value='true',
+        description='Run the bridge on simulation time from /clock'))
 
-    world = LaunchConfiguration('world')
-    gui = LaunchConfiguration('gui')
-    robot_id = LaunchConfiguration('robot_id')
-
-    ros_gz_sim_launch = os.path.join(
-        get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')
-
-    # Gazebo server, headless, running immediately (-r -s).
+    # The M4 bringup carries the world server, the single spawn and the one
+    # bridge that states the vehicle's whole topic contract. Everything this
+    # file adds is which world and where to stand.
     ld.add_action(IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(ros_gz_sim_launch),
+        PythonLaunchDescriptionSource(_FORKLIFT_BRINGUP),
         launch_arguments={
-            'gz_args': ['-r -s ', world],
-            'on_exit_shutdown': 'true',
-        }.items(),
-    ))
-
-    # Optional GUI client attaching to the running server.
-    ld.add_action(IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(ros_gz_sim_launch),
-        launch_arguments={
-            'gz_args': '-g',
-            'on_exit_shutdown': 'true',
-        }.items(),
-        condition=IfCondition(gui),
-    ))
-
-    # /clock bridge (Gazebo -> ROS).
-    ld.add_action(Node(
-        package='ros_gz_bridge',
-        executable='parameter_bridge',
-        name='gz_clock_bridge',
-        output='screen',
-        arguments=['/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock'],
-    ))
-
-    # RB-KAIROS spawn via the unmodified vendor launch (robot description +
-    # robot_state_publisher + entity create + sensor bridge + ros2_control
-    # controller spawners). run_rviz:=False keeps the bringup headless.
-    ld.add_action(IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(
-            get_package_share_directory('robotnik_gazebo_ignition'),
-            'launch', 'spawn_robot.launch.py')),
-        launch_arguments={
-            'robot': 'rbkairos',
-            'robot_model': 'rbkairos',
-            'robot_id': robot_id,
+            'world': LaunchConfiguration('world'),
+            'name': LaunchConfiguration('name'),
             'x': LaunchConfiguration('x'),
             'y': LaunchConfiguration('y'),
             'z': LaunchConfiguration('z'),
-            'run_rviz': 'False',
-            'use_sim_time': 'True',
+            'yaw': LaunchConfiguration('yaw'),
+            'gui': LaunchConfiguration('gui'),
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
         }.items(),
     ))
 

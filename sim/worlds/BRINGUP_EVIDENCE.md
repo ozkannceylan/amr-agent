@@ -1,4 +1,21 @@
-# M3 bringup evidence
+# M3 bringup evidence — RETIRED VEHICLE, HISTORICAL RECORD ONLY
+
+> **Nothing in this file describes anything that still exists.** It is the
+> dated record of one headless bringup of the **Robotnik RB-KAIROS**, a
+> platform retired by ADR 0010 D1, in a world that has since been rewritten.
+> It is kept because deleting a run that happened is not how this repository
+> handles parked work, and it is superseded in every respect:
+>
+> | What this file shows | Where the current record is |
+> |---|---|
+> | the warehouse bringup | `worlds/WAREHOUSE_EVIDENCE.md` (m5-08, 2026-07-31) |
+> | the world's model list | same file, section 1. Nine of the models listed below no longer exist under those names, and `ChargerStation` was replaced by two named charging bays |
+> | the launch command | `sim/launch/warehouse_bringup.launch.py` no longer spawns a vendor robot; it spawns `agv/forklift/model.sdf` |
+> | the vehicle's topics | `agv/forklift/README.md` is the contract; none of the `/robot/...` topics below exist |
+>
+> **Do not cite a figure from this file as evidence for M5.** Not the
+> ~6 Hz clock rate, not the model list, not the drive test. They belong to a
+> different vehicle in a different world.
 
 Date: 2026-07-26. Host: project container, Ubuntu 24.04, ROS 2 Jazzy,
 Gazebo Harmonic (gz-sim-vendor), headless (no GPU, ogre2 on CPU).

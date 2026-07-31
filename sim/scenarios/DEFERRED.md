@@ -38,19 +38,29 @@ The consequence for the two files left here:
 Both are kept as the record of the parked scenario, not as this project's
 interface. Neither can be run: `sim/setup/install.sh` no longer provisions
 the vendor workspace their bringup needed (m5-09). Whether either file
-survives migration — and whether the warehouse world is reused or replaced
-by the enlarged M6 warehouse world — is **m5-10 briefing work, decided at
-briefing**. None of it is decided here.
+survives migration is **m5-10 briefing work, decided at briefing**.
 
-`maps/` and `tools/make_map.py` are vehicle-independent: the map is
-rasterized from the static geometry of `worlds/warehouse.sdf`, so it
-survives the platform change and needs re-generating only if that world
-changes.
+## What is no longer parked (m5-08, 2026-07-31)
+
+**The world and its bringup left this list.** The owner ruled on 2026-07-30
+that M5 autonomy runs in the warehouse world, so:
+
+- `worlds/warehouse.sdf` was rewritten as the M5 autonomy world and its
+  landmark availability measured (`worlds/WAREHOUSE_LANDMARKS.md`);
+- `launch/warehouse_bringup.launch.py` now spawns the forklift and was
+  verified headless (`worlds/WAREHOUSE_EVIDENCE.md`);
+- `worlds/BRINGUP_EVIDENCE.md` is marked as the retired platform's
+  historical record and describes nothing that still exists.
+
+The question "is the warehouse world reused or replaced" is therefore
+**answered**, and it is not m5-10's to decide: it is reused, and M6 enlarges
+it to ten stations.
+
+`maps/` did NOT survive that rewrite. It is rasterized from the world's
+static geometry, and the geometry changed, so the committed grid is **stale**
+until it is regenerated. `tools/make_map.py` now reads its rectangles from
+the SDF at run time and requires an explicit `--z`, because which scan plane
+a static map represents is a Nav2 decision that belongs to m5-10.
 
 Nothing else here is deleted. Treat every file in this directory as
 unverified until a run produces EVIDENCE_NAV.md with a SUCCESS result.
-
-The warehouse world and headless bringup in sim/worlds and sim/launch are
-still the retired vehicle's bringup; they were verified against it (see
-sim/worlds/BRINGUP_EVIDENCE.md) and are left in place pending the same
-m5-10 briefing decision.
