@@ -187,9 +187,10 @@ Do not start a gate before the previous one is verified.
 | M5 | Sensored autonomous forklift | Safety laser scanner into the F-blocks, lidar SLAM and Nav2 autonomy on the forklift, HMI v2 with mode selection; recorded safety + autonomy showcase |
 | M6 | VDA 5050 fleet at scale | Four forklifts serve five loading and five unloading stations over VDA 5050, PLC-owned station handshake end to end; recorded fleet showcase |
 | M7 | LLM operations layer | An LLM supervises operations safely (no actuator writes, no interlock bypass, unreachable-safe); closes with the recorded end-to-end demonstration |
+| M8 | Vendor portability: a second, Beckhoff/TwinCAT implementation of the PLC layer | Placed after M6 and M7. The same byte-identical bridge and commissioning HMI serve both controllers, the M4 forklift scenarios run against TwinCAT in their own session, the controller in force is server-reported throughout, the drift check against the node model passes, and the public claim states the F-safety asymmetry; closes on committed evidence |
 
 Rows are summaries. The full, verifiable criteria live in docs/roadmap.md,
-which is the live gate order (ADR 0010).
+which is the live gate order (ADR 0010, with M8 added by ADR 0013).
 
 Current gate is tracked in docs/roadmap.md. Update it as part of closing a gate, never in advance.
 

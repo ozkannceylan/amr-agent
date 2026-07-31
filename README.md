@@ -109,7 +109,9 @@ in [`bridge/README.md`](bridge/README.md) and [`hmi/README.md`](hmi/README.md);
 
 M3 closed 2026-07-28, verified in
 [docs/reports/m3-37-gate-verification.md](docs/reports/m3-37-gate-verification.md)
-(pass-with-findings). Current gate: **M4 — Forklift commissioning cell**. Tracked in
+(pass-with-findings). Current gate: **M5 — Sensored autonomous forklift**;
+**M4 — Forklift commissioning cell** is closing, on the owner's recorded
+commissioning showcase and the m4f-09 gate verification. Tracked in
 [docs/roadmap.md](docs/roadmap.md); a gate closes only on observable
 behaviour, never on written code.
 
@@ -120,15 +122,16 @@ behaviour, never on written code.
 | M2 | Safety requirements spec | **done** |
 | M3 | Fixed equipment I/O loop | **done** |
 | M4 | Forklift commissioning cell | **closing** — showcase recording and gate verification pending |
-| M5 | Sensored autonomous forklift | planned |
+| M5 | Sensored autonomous forklift | **in progress** |
 | M6 | VDA 5050 fleet at scale | planned |
 | M7 | LLM operations layer + final demonstration | planned |
+| M8 | Vendor portability: a second Beckhoff/TwinCAT PLC layer | planned |
 
 Archived rows moved onto the forklift twin rather than being dropped: the safety
 layer and the navigation stack both land on the forklift built at M4, which is the
 vehicle platform from M5 onward; the VDA 5050 client, the fleet manager and PLC
 integration merge into one fleet gate at scale, four forklifts against ten PLC-owned
-stations; and the LLM operations layer closes the program, taking the end-to-end
+stations; and the LLM operations layer closes the main line, taking the end-to-end
 demonstration with it as its exit criterion. Arm integration is out of scope, its
 safety functions kept in the SRS marked as such rather than deleted.
 
@@ -141,7 +144,13 @@ numbers and criteria: the fixed-equipment Gazebo-to-PLC signal loop is proven fi
 then the same cell gains a teleoperated forklift, then that forklift gains safety
 scanners, a navigation lidar and autonomous driving, then a fleet of them runs a
 warehouse against the PLC's stations, and only then does a supervisory layer sit
-above the whole thing. Each of the last three gates closes on its own recording.
+above the whole thing. M4, M5, M6 and M7 each close on their own recording.
+
+After that main line, [ADR 0013](docs/adr/0013-vendor-portability-gate.md) adds
+**M8**: a second, Beckhoff/TwinCAT implementation of the PLC layer, proven by the
+same unmodified clients and the same scenarios running against both controllers in
+separate sessions. It is placed after M6 and M7 so that no gate on the main line
+waits on a vendor's release date, and it closes on committed evidence.
 
 ---
 

@@ -1,8 +1,10 @@
 # TODO
 
-Open items only. M4 (forklift commissioning, ADR 0008) is the open gate,
-in closing; the m5r restructure round (ADR 0010) is in flight and its
-brief queue lives in docs/PLAN.md.
+Open items only. M5 (sensored autonomous forklift, ADR 0010 D2) is the open
+gate; M4 (forklift commissioning, ADR 0008) is closing, on the owner's
+recorded commissioning showcase and the m4f-09 gate verification. The m5r
+restructure round (ADR 0010) is closed; the brief queue lives in
+docs/PLAN.md.
 
 ## owner — build COMPLETE on the CPU (2026-07-30 TIA handover, live-verified)
 - FB_ForkliftTeleop (§7 + §13) in OB30; D1-D7 applied; mirrors and stand-in
