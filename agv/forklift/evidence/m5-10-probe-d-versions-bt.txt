@@ -1,0 +1,43 @@
+### nav2 package versions (ros2 pkg xml <pkg> --tag version)
+nav2_planner                               1.3.12
+nav2_controller                            1.3.12
+nav2_bt_navigator                          1.3.12
+nav2_behaviors                             1.3.12
+nav2_velocity_smoother                     1.3.12
+nav2_smac_planner                          1.3.12
+nav2_regulated_pure_pursuit_controller     1.3.12
+nav2_costmap_2d                            1.3.12
+
+### the shipped plugin descriptor for the hybrid planner
+/opt/ros/jazzy/share/nav2_smac_planner/smac_plugin_2d.xml:2:  <class type="nav2_smac_planner::SmacPlanner2D" base_class_type="nav2_core::GlobalPlanner">
+/opt/ros/jazzy/share/nav2_smac_planner/smac_plugin_hybrid.xml:2:	<class type="nav2_smac_planner::SmacPlannerHybrid" base_class_type="nav2_core::GlobalPlanner">
+/opt/ros/jazzy/share/nav2_smac_planner/smac_plugin_lattice.xml:2:	<class type="nav2_smac_planner::SmacPlannerLattice" base_class_type="nav2_core::GlobalPlanner">
+
+### control sets shipped with nav2_smac_planner
+/opt/ros/jazzy/share/nav2_smac_planner/sample_primitives/5cm_resolution/0.5m_turning_radius
+/opt/ros/jazzy/share/nav2_smac_planner/sample_primitives/5cm_resolution/1m_turning_radius
+
+### nav2's DEFAULT navigate_to_pose tree, the recovery half
+9:    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+14:          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+18:              <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+20:          </RecoveryNode>
+22:        <RecoveryNode number_of_retries="1" name="FollowPath">
+26:            <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+28:        </RecoveryNode>
+39:              <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+40:              <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+42:            <Spin spin_dist="1.57" error_code_id="{spin_error_code}"/>
+43:            <Wait wait_duration="5.0"/>
+44:            <BackUp backup_dist="0.30" backup_speed="0.15" error_code_id="{backup_code_id}"/>
+48:    </RecoveryNode>
+
+### the stock behaviour-server plugin list
+305:    behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
+306-    spin:
+307-      plugin: "nav2_behaviors::Spin"
+308-    backup:
+
+### gz sim version
+Gazebo Sim, version 8.11.0
+Copyright (C) 2018 Open Source Robotics Foundation.

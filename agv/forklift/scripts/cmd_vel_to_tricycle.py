@@ -99,9 +99,12 @@ planner may emit.
    NOT preserve the requested curvature - the vehicle turns less sharply
    than asked. That is a real deviation, so it is COUNTED and logged
    rather than absorbed. With nav2.yaml's minimum turning radius of
-   1.05 m the planner never asks for more than 45 deg, so a clamp here is
-   evidence of something else (a smoother artefact, or a controller
-   correcting hard) and should not be quiet.
+   1.05 m the PLANNER never asks for more than 45 deg, so a clamp is
+   never the plan. It is the CONTROLLER correcting hard, and it was
+   measured: on the goal approach, where RPP is inside the tolerance
+   circle and cannot rotate in place, it demanded the full 75.06 deg stop
+   (EVIDENCE_NAV2.md section 5.1). So a clamp is expected at the end of a
+   goal and unexpected in mid-aisle, and it is logged either way.
 
 2. THE TRACTION LIMIT. v_D from (4) may exceed the vehicle's traction
    limit even when v does not, because 1/cos(delta) grows without bound.
@@ -130,6 +133,12 @@ is. It does not:
   - re-centre the steer, because re-centring is itself a motion command
     the caller did not issue, and it is the wrong pre-position for the
     cusp that usually follows.
+
+A REFUSAL IS COUNTED ONLY AT A STANDSTILL, below
+`navigation.zero_speed_mps`. Between that and the creep deadband the
+request is executable and the converter simply declines to act on a
+curvature it cannot resolve; that is reported at INFO and is not a
+refusal. See `_below_creep`.
 
 The refusal is COUNTED and reported on
 /forklift/nav/tricycle_refusals (std_msgs/UInt32, monotonic). A nonzero
@@ -236,6 +245,7 @@ class CmdVelToTricycle(Node):
         self.steer_limit_rad = model['steer_limit_rad']
         self.traction_max_mps = limits['traction_speed_max_mps']
         self.creep_speed_mps = nav['creep_speed_mps']
+        self.zero_speed_mps = nav['zero_speed_mps']
         self.yawrate_refusal_radps = nav['yawrate_refusal_radps']
         self.throttle_s = cfg['logging']['throttle_s']
 
@@ -326,16 +336,39 @@ class CmdVelToTricycle(Node):
 
     def _below_creep(self, v, w):
         """|v| is under the creep deadband: the requested curvature is not
-        a number the controller meant."""
-        if abs(w) > self.yawrate_refusal_radps:
+        a number the controller meant.
+
+        WHAT COUNTS AS A REFUSAL, AND WHY IT IS NARROWER THAN THIS BAND.
+        A refusal means the request has NO (delta, v_D) at all, which is
+        true only when the vehicle is asked to turn while STOPPED. A
+        request of v = 0.016 m/s with w = 0.012 rad/s is a 1.29 m radius
+        at a crawl - perfectly executable - and the converter declines it
+        only because it is 4 mm/s from a standstill and the ratio is
+        noise. Counting that as a refusal made the counter useless: the
+        first measured run reported 27 "rotation in place" refusals for a
+        goal that was reached, every one of them the tail of a
+        deceleration through this band. The counter exists to prove that
+        nothing upstream is commanding a differential base (nav2's Spin
+        sends v = 0 exactly), so it counts only requests at a standstill.
+        """
+        if abs(v) <= self.zero_speed_mps and \
+                abs(w) > self.yawrate_refusal_radps:
             self.refusals += 1
             self.get_logger().warn(
-                'ROTATION IN PLACE REFUSED: v={:+.4f} m/s (under the '
-                '{:.3f} m/s creep deadband) with w={:+.4f} rad/s. A '
-                'tricycle cannot turn its body without its drive wheel '
-                'travelling; commanding zero traction and holding the '
-                'steer axis. refusals={}'.format(
-                    v, self.creep_speed_mps, w, self.refusals),
+                'ROTATION IN PLACE REFUSED: v={:+.4f} m/s (at a standstill, '
+                'under {:.4f} m/s) with w={:+.4f} rad/s. A tricycle cannot '
+                'turn its body without its drive wheel travelling; '
+                'commanding zero traction and holding the steer axis. '
+                'refusals={}'.format(
+                    v, self.zero_speed_mps, w, self.refusals),
+                throttle_duration_sec=self.throttle_s)
+        elif abs(w) > self.yawrate_refusal_radps:
+            self.get_logger().info(
+                'below the {:.3f} m/s creep deadband at v={:+.4f} m/s with '
+                'w={:+.4f} rad/s: holding the steer axis and stopping. This '
+                'is NOT a refusal - the request was executable and the '
+                'vehicle was {:.0f} mm/s from rest.'.format(
+                    self.creep_speed_mps, v, w, 1000 * abs(v)),
                 throttle_duration_sec=self.throttle_s)
 
         # Zero traction either way. The steer is held, not re-centred: see

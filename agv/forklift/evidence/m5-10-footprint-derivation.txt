@@ -1,0 +1,32 @@
+footprint derived from agv/forklift/model.sdf
+  primitives projected   1608 corner points from 19 collision/visual elements
+  steer postures         0, +-1.3100 rad (the mechanical stop)
+
+THE HULL, 8 vertices, counter-clockwise, base_link frame
+  [ -1.875,  -0.340]   fork_right / collision
+  [ -0.700,  -0.549]   safety_scanner_rear_link / housing
+  [ +0.700,  -0.450]   base_link / chassis_collision
+  [ +0.860,  -0.400]   base_link / counterweight_collision
+  [ +0.860,  +0.400]   base_link / counterweight_collision
+  [ +0.700,  +0.549]   safety_scanner_front_link / housing
+  [ -0.700,  +0.450]   base_link / chassis_collision
+  [ -1.875,  +0.340]   fork_left / collision
+
+footprint: "[[-1.875,-0.340],[-0.700,-0.549],[0.700,-0.450],[0.860,-0.400],[0.860,0.400],[0.700,0.549],[-0.700,0.450],[-1.875,0.340]]"
+
+DERIVED DIMENSIONS
+  length (x)             2.735 m
+  width  (y)             1.098 m
+  circumscribed radius   1.906 m about base_link
+    -> a `robot_radius` model would need 1.906 m of clear space each side,
+       against the 1.90 m half width of a 3.80 m aisle. THAT is why this is a polygon.
+
+PADDED BY 0.27 m, the way nav2 pads (per coordinate, outward)
+  padded length          3.275 m
+  padded width           1.638 m
+
+THE SWEPT CIRCLE on the tightest PLANNED arc (R = 1.05 m about the rear axle at x = -0.50)
+  outermost point        1.988 m unpadded, 2.370 m padded
+  swept circle           4.739 m across padded
+    -> the vehicle CANNOT turn round inside a 3.80 m aisle, which is correct
+       for a forklift and is what makes the refusal case a real measurement.

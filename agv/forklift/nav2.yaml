@@ -56,11 +56,34 @@
 #   vehicle BELIEVES; the vehicle is really somewhere within 0.263 m of it.
 #   Growing the collision polygon by that much is what makes "the planner
 #   says this path is clear" a statement about where the vehicle actually
-#   is. It is deliberately NOT put into `inflation_radius`: inflation makes
-#   a cell EXPENSIVE and the planner's `cost_penalty` will trade it away,
-#   while padding makes the cell LETHAL for this vehicle and produces a
-#   refusal. A planner that quietly routes through a rack is worse than one
-#   that refuses.
+#   is.
+#
+#   IT IS NOT PUT INTO `inflation_radius`, AND THE REASON IS MEASURED
+#   RATHER THAN ARGUED (EVIDENCE_NAV2.md section 2.1 and section 5.0).
+#   Padding grows the collision polygon, so it converts localization error
+#   into a refusal. Inflation at the radius this file uses does not behave
+#   like the soft gradient it is usually described as: the padded
+#   footprint's INSCRIBED radius is 0.769 m, larger than the 0.55 m
+#   inflation radius, so EVERY inflated cell here is
+#   INSCRIBED_INFLATED_OBSTACLE and the layer is a hard 0.55 m band rather
+#   than a gradient. Both costmaps say so at configure and those two ERROR
+#   lines are expected:
+#
+#     [local_costmap]  The configured inflation radius (0.550) is smaller
+#                      than the computed inscribed radius (0.769) ...
+#     [planner_server] The inflation radius (0.550000) is smaller than the
+#                      circumscribed radius (2.230050) ... This may
+#                      significantly slow down planning times!
+#
+#   RAISING IT WAS TRIED AND MEASURED. With the global inflation radius at
+#   2.24 m - just over the circumscribed radius, which is what silences the
+#   planner's warning and enables its potential-field shortcut - the same
+#   10 m aisle route's plan wandered 0.826 m off the straight line between
+#   its own endpoints, against 0.410 m at 0.55 m. In a 3.80 m aisle with
+#   0.356 m of clearance at the worst column pinch, that is the wrong
+#   trade: the cost of the full-footprint collision check is planning time
+#   (measured 0.012-0.166 s per plan, section 5), and the cost of the
+#   bigger inflation is the lateral budget the vehicle does not have.
 #
 #   `xy_goal_tolerance: 0.25` is dimensioned from the same measurement, in
 #   the other direction: a goal tolerance tighter than the localizer's own
@@ -403,8 +426,20 @@ controller_server:
       # the computed curvature collapses. With R = 1.05 m the ceiling is
       # 2.10 m. The lower bound is the wheelbase, 1.05 m: a carrot inside
       # the wheelbase makes the steering law jittery on a long vehicle.
-      # 1.20 m sits just above the lower bound with 0.90 m of headroom.
-      lookahead_dist: 1.20
+      #
+      # 1.60 m, AND THE NUMBER WAS MEASURED RATHER THAN CHOSEN
+      # (EVIDENCE_NAV2.md section 5.1). At the 1.20 m this file first
+      # carried, the same 5.5 m aisle traverse tracked its plan at rms
+      # 0.171 m / max 0.396 m and on a repeat diverged 1.18 m off the aisle
+      # centre into the rack face, where RPP's own collision check stopped
+      # it. At 1.60 m the same route tracked at rms 0.119 m / max 0.190 m
+      # and the divergence did not recur. The mechanism is the vehicle, not
+      # the parameter: the drive wheel understeers by up to 23 % of radius
+      # (section 3.3) and the steer axis needs up to 0.79 s to slew, so the
+      # curvature RPP demands is realised late; a longer carrot demands less
+      # curvature per metre of cross-track error and the loop stops
+      # over-correcting. 1.60 m keeps 0.50 m of margin under the 2R ceiling.
+      lookahead_dist: 1.60
       use_velocity_scaled_lookahead_dist: false
       min_lookahead_dist: 0.60      # unused while the line above is false,
       max_lookahead_dist: 2.00      # stated so the bound is on the record

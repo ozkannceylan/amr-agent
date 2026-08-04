@@ -1,0 +1,30 @@
+
+============================================================================================================
+Twist -> tricycle, CHECKED AGAINST A COMMANDED MOTION
+============================================================================================================
+L = 1.0500 m   steer stop +-1.3100 rad (75.057 deg)
+Commanded on /cmd_vel_smoothed; achieved read from /forklift/odom, the simulator's own pose of the model.
+delta_pub is what the converter PUBLISHED; delta_meas is atan(L * w_meas / v_meas), what the vehicle ACTUALLY drove.
+
+segment                                                      v_cmd    w_cmd |   v_meas    w_meas | delta_pub delta_meas |    R_cmd   R_meas speed
+-------------------------------------------------------------------------------------------------------------------------------------------------
+straight ahead                                               0.300   0.0000 |   0.3000   -0.0001 |     0.000    -0.027 |      inf -2269.265   100%
+straight astern - retraces the row above                    -0.300   0.0000 |  -0.3000   -0.0014 |     0.000    +0.277 |      inf +217.438   100%
+left,  R = 2.10 m  (delta +26.57 deg)                        0.300   0.1429 |   0.3107    0.1297 |    26.565   +23.674 |   +2.100   +2.395   104%
+astern on the same lock, R = 2.10 m - retrace               -0.300  -0.1429 |  -0.3021   -0.1549 |    26.565   +28.296 |   +2.100   +1.950   101%
+left,  R = 1.05 m  (delta +45.0 deg, the tightest planned arc)   0.300   0.2857 |   0.3425    0.2652 |    45.000   +39.112 |   +1.050   +1.291   114%
+astern on the same lock, R = 1.05 m - retrace               -0.300  -0.2857 |  -0.3228   -0.2922 |    45.000   +43.548 |   +1.050   +1.105   108%
+right, R = 1.05 m  (delta -45.0 deg)                         0.300  -0.2857 |   0.3309   -0.2848 |   -45.000   -42.105 |   -1.050   -1.162   110%
+astern on the same lock, R = 1.05 m - retrace               -0.300   0.2857 |  -0.3204    0.2951 |   -45.000   -44.049 |   -1.050   -1.085   107%
+ROTATION IN PLACE - must be REFUSED                          0.000   0.5000 |   0.0000    0.0000 |   -45.000        -- |       --       --     --
+
+THE REFUSAL SEGMENT, read on its own terms:
+  commanded            v = +0.000 m/s, w = +0.5000 rad/s
+  refusals counted     7435 over 5.50 s
+  traction published   +0.0000 m/s
+  the vehicle moved    0.0000 m and turned +0.0000 deg
+
+
+WORST RELATIVE RADIUS ERROR over the arcs: 23.00% (left,  R = 1.05 m  (delta +45.0 deg, the tightest planned arc))
+That figure contains TYRE SLIP as well as the conversion, so it is an UPPER BOUND on the conversion's own error and is never quoted as the conversion's error.
+wrote /home/user/amr-agent/agv/forklift/evidence/m5-10-convcheck.csv (3411 samples)

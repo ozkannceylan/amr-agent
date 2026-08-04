@@ -1,0 +1,81 @@
+### navigation.launch.py log, filtered: planning, following, refusing
+122:[planner_server-1] [ERROR] [1785836410.615344230] [computeCircumscribedCost]: The inflation radius (0.550000) is smaller than the circumscribed radius (2.230050) If this is an SE2-collision checking plugin, it cannot use costmap potential field to speed up collision checking by only checking the full footprint when robot is within possibly-inscribed radius of an obstacle. This may significantly slow down planning times!
+123:[planner_server-1] [ERROR] [1785836410.616686820] [planner_server]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+124:[controller_server-2] [INFO] [1785836410.758718701] [controller_server]: Passing new path to controller.
+125:[planner_server-1] [ERROR] [1785836411.725557317] [computeCircumscribedCost]: The inflation radius (0.550000) is smaller than the circumscribed radius (2.230050) If this is an SE2-collision checking plugin, it cannot use costmap potential field to speed up collision checking by only checking the full footprint when robot is within possibly-inscribed radius of an obstacle. This may significantly slow down planning times!
+126:[planner_server-1] [ERROR] [1785836411.725613926] [planner_server]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+127:[controller_server-2] [INFO] [1785836411.808889251] [controller_server]: Passing new path to controller.
+128:[planner_server-1] [ERROR] [1785836412.815755350] [computeCircumscribedCost]: The inflation radius (0.550000) is smaller than the circumscribed radius (2.230050) If this is an SE2-collision checking plugin, it cannot use costmap potential field to speed up collision checking by only checking the full footprint when robot is within possibly-inscribed radius of an obstacle. This may significantly slow down planning times!
+129:[planner_server-1] [ERROR] [1785836412.815816556] [planner_server]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+130:[controller_server-2] [INFO] [1785836412.858928067] [controller_server]: Passing new path to controller.
+139:[controller_server-2] [ERROR] [1785836413.659157283] [controller_server]: Controller patience exceeded
+140:[controller_server-2] [WARN] [1785836413.659261001] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+141:[controller_server-2] [INFO] [1785836413.675000878] [local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+142:[controller_server-2] [INFO] [1785836413.676230877] [controller_server]: Received a goal, begin computing control effort.
+146:[planner_server-1] [ERROR] [1785836413.844489232] [computeCircumscribedCost]: The inflation radius (0.550000) is smaller than the circumscribed radius (2.230050) If this is an SE2-collision checking plugin, it cannot use costmap potential field to speed up collision checking by only checking the full footprint when robot is within possibly-inscribed radius of an obstacle. This may significantly slow down planning times!
+147:[planner_server-1] [ERROR] [1785836413.844544246] [planner_server]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+148:[controller_server-2] [INFO] [1785836413.888386635] [controller_server]: Passing new path to controller.
+152:[controller_server-2] [ERROR] [1785836413.988871500] [controller_server]: Controller patience exceeded
+153:[controller_server-2] [WARN] [1785836413.990310336] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+154:[controller_server-2] [INFO] [1785836414.006193191] [local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+155:[planner_server-1] [INFO] [1785836414.008589610] [global_costmap.global_costmap]: Received request to clear entirely the global_costmap
+156:[cmd_vel_to_tricycle-6] [WARN] [1785836414.660234423] [cmd_vel_to_tricycle]: ROTATION IN PLACE REFUSED: v=+0.0003 m/s (at a standstill, under 0.0020 m/s) with w=-0.0140 rad/s. A tricycle cannot turn its body without its drive wheel travelling; commanding zero traction and holding the steer axis. refusals=1
+157:[planner_server-1] [ERROR] [1785836414.701846544] [computeCircumscribedCost]: The inflation radius (0.550000) is smaller than the circumscribed radius (2.230050) If this is an SE2-collision checking plugin, it cannot use costmap potential field to speed up collision checking by only checking the full footprint when robot is within possibly-inscribed radius of an obstacle. This may significantly slow down planning times!
+158:[controller_server-2] [INFO] [1785836414.805109437] [controller_server]: Received a goal, begin computing control effort.
+167:[controller_server-2] [ERROR] [1785836415.157241543] [controller_server]: Controller patience exceeded
+168:[controller_server-2] [WARN] [1785836415.158437335] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+169:[controller_server-2] [INFO] [1785836415.175500846] [local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+170:[controller_server-2] [INFO] [1785836415.177085749] [controller_server]: Received a goal, begin computing control effort.
+179:[controller_server-2] [ERROR] [1785836415.496469372] [controller_server]: Controller patience exceeded
+180:[controller_server-2] [WARN] [1785836415.497359698] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+184:[planner_server-1] [ERROR] [1785836420.637103683] [computeCircumscribedCost]: The inflation radius (0.550000) is smaller than the circumscribed radius (2.230050) If this is an SE2-collision checking plugin, it cannot use costmap potential field to speed up collision checking by only checking the full footprint when robot is within possibly-inscribed radius of an obstacle. This may significantly slow down planning times!
+185:[planner_server-1] [ERROR] [1785836420.637165905] [planner_server]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+186:[controller_server-2] [INFO] [1785836420.724401049] [controller_server]: Received a goal, begin computing control effort.
+195:[controller_server-2] [ERROR] [1785836421.075887734] [controller_server]: Controller patience exceeded
+196:[controller_server-2] [WARN] [1785836421.076657375] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+197:[controller_server-2] [INFO] [1785836421.095009532] [local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+198:[controller_server-2] [INFO] [1785836421.096019224] [controller_server]: Received a goal, begin computing control effort.
+206:[controller_server-2] [ERROR] [1785836421.438717515] [controller_server]: Controller patience exceeded
+207:[controller_server-2] [WARN] [1785836421.438903776] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+208:[controller_server-2] [INFO] [1785836421.456222002] [local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+209:[planner_server-1] [INFO] [1785836421.457278754] [global_costmap.global_costmap]: Received request to clear entirely the global_costmap
+210:[planner_server-1] [ERROR] [1785836421.689078376] [computeCircumscribedCost]: The inflation radius (0.550000) is smaller than the circumscribed radius (2.230050) If this is an SE2-collision checking plugin, it cannot use costmap potential field to speed up collision checking by only checking the full footprint when robot is within possibly-inscribed radius of an obstacle. This may significantly slow down planning times!
+211:[planner_server-1] [ERROR] [1785836421.689161209] [planner_server]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+212:[controller_server-2] [INFO] [1785836421.765873141] [controller_server]: Received a goal, begin computing control effort.
+221:[controller_server-2] [ERROR] [1785836422.117315431] [controller_server]: Controller patience exceeded
+222:[controller_server-2] [WARN] [1785836422.117964319] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+223:[controller_server-2] [INFO] [1785836422.134742129] [local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+224:[controller_server-2] [INFO] [1785836422.136337675] [controller_server]: Received a goal, begin computing control effort.
+232:[controller_server-2] [ERROR] [1785836422.437723369] [controller_server]: Controller patience exceeded
+233:[controller_server-2] [WARN] [1785836422.437917684] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+237:[planner_server-1] [ERROR] [1785836427.574569288] [computeCircumscribedCost]: The inflation radius (0.550000) is smaller than the circumscribed radius (2.230050) If this is an SE2-collision checking plugin, it cannot use costmap potential field to speed up collision checking by only checking the full footprint when robot is within possibly-inscribed radius of an obstacle. This may significantly slow down planning times!
+238:[planner_server-1] [ERROR] [1785836427.574620909] [planner_server]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+239:[controller_server-2] [INFO] [1785836427.635316780] [controller_server]: Received a goal, begin computing control effort.
+248:[controller_server-2] [ERROR] [1785836427.986176014] [controller_server]: Controller patience exceeded
+249:[controller_server-2] [WARN] [1785836427.986307882] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+250:[controller_server-2] [INFO] [1785836428.005488540] [local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+251:[controller_server-2] [INFO] [1785836428.008007443] [controller_server]: Received a goal, begin computing control effort.
+260:[controller_server-2] [ERROR] [1785836428.359244235] [controller_server]: Controller patience exceeded
+261:[controller_server-2] [WARN] [1785836428.359832224] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+262:[controller_server-2] [INFO] [1785836428.374448172] [local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+263:[planner_server-1] [INFO] [1785836428.375747738] [global_costmap.global_costmap]: Received request to clear entirely the global_costmap
+265:[planner_server-1] [ERROR] [1785836428.697483763] [computeCircumscribedCost]: The inflation radius (0.550000) is smaller than the circumscribed radius (2.230050) If this is an SE2-collision checking plugin, it cannot use costmap potential field to speed up collision checking by only checking the full footprint when robot is within possibly-inscribed radius of an obstacle. This may significantly slow down planning times!
+266:[planner_server-1] [ERROR] [1785836428.697566200] [planner_server]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+267:[controller_server-2] [INFO] [1785836428.784892516] [controller_server]: Received a goal, begin computing control effort.
+276:[controller_server-2] [ERROR] [1785836429.137178759] [controller_server]: Controller patience exceeded
+277:[controller_server-2] [WARN] [1785836429.137817079] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+278:[controller_server-2] [INFO] [1785836429.154425081] [local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+279:[controller_server-2] [INFO] [1785836429.156412278] [controller_server]: Received a goal, begin computing control effort.
+288:[controller_server-2] [ERROR] [1785836429.489516697] [controller_server]: Controller patience exceeded
+289:[controller_server-2] [WARN] [1785836429.489640663] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+293:[planner_server-1] [ERROR] [1785836434.624488663] [computeCircumscribedCost]: The inflation radius (0.550000) is smaller than the circumscribed radius (2.230050) If this is an SE2-collision checking plugin, it cannot use costmap potential field to speed up collision checking by only checking the full footprint when robot is within possibly-inscribed radius of an obstacle. This may significantly slow down planning times!
+294:[planner_server-1] [ERROR] [1785836434.625517759] [planner_server]: Inflation layer either not found or inflation is not set sufficiently for optimized non-circular collision checking capabilities. It is HIGHLY recommended to set the inflation radius to be at MINIMUM half of the robot's largest cross-section. See github.com/ros-planning/navigation2/tree/main/nav2_smac_planner#potential-fields for full instructions. This will substantially impact run-time performance.
+295:[controller_server-2] [INFO] [1785836434.715599202] [controller_server]: Received a goal, begin computing control effort.
+304:[controller_server-2] [ERROR] [1785836435.066809128] [controller_server]: Controller patience exceeded
+305:[controller_server-2] [WARN] [1785836435.066913093] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+306:[controller_server-2] [INFO] [1785836435.084354234] [local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+307:[controller_server-2] [INFO] [1785836435.086843291] [controller_server]: Received a goal, begin computing control effort.
+315:[controller_server-2] [ERROR] [1785836435.438296627] [controller_server]: Controller patience exceeded
+316:[controller_server-2] [WARN] [1785836435.439347933] [controller_server]: [follow_path] [ActionServer] Aborting handle.
+317:[bt_navigator-5] [WARN] [1785836435.464325234] [bt_navigator]: [navigate_to_pose] [ActionServer] Aborting handle.
+318:[bt_navigator-5] [ERROR] [1785836435.464578057] [bt_navigator]: Goal failed

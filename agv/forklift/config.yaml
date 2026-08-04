@@ -656,6 +656,22 @@ navigation:
   # stop short of every goal. 0.02 m/s is 2.5x below it.
   creep_speed_mps: 0.02
 
+  # THE STANDSTILL THRESHOLD, and it is the one that decides what counts
+  # as a REFUSAL. A tricycle can turn only while its drive wheel travels,
+  # so the request that has no solution at all is "turn while stopped".
+  # Below this speed the vehicle is stopped as far as its own instruments
+  # are concerned: one drive-encoder count per 50 Hz odometry cycle is
+  # 0.184 mm of tread in 0.02 s = 0.0092 m/s, and this is a fifth of that.
+  #
+  # WHY IT IS SEPARATE FROM THE CREEP DEADBAND ABOVE. The first measured
+  # navigation run counted 27 "rotation in place" refusals on a goal it
+  # reached: every one was the tail of a deceleration, where the smoother
+  # had the speed at 15 mm/s and the controller still wanted a curve. That
+  # request is executable - 15 mm/s on a 1.29 m radius - and calling it a
+  # refusal made the counter say nothing. nav2's Spin sends v = 0 exactly,
+  # which is what this threshold catches.
+  zero_speed_mps: 0.002
+
   # THE ROTATION-IN-PLACE REPORT THRESHOLD. Below the creep deadband, a
   # yaw rate above this is a request the vehicle physically cannot honour
   # - one steered wheel one wheelbase ahead of the rear axle cannot turn

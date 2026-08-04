@@ -403,6 +403,156 @@ def cmd_goal(args):
 
 
 # --------------------------------------------------------------------------- #
+# plan - the PLANNER on its own, with no plant and no controller
+# --------------------------------------------------------------------------- #
+#
+# WHY THIS EXISTS SEPARATELY FROM `goal`. A `goal` run measures the planner,
+# the controller, the converter, the estimator and the physics at once, and
+# costs a simulator. `ComputePathToPose` takes an explicit start pose
+# (`use_start`), so the PLAN can be measured against a bare planner_server
+# and a map_server in a few seconds - which is what makes it honest to state
+# what a planner parameter changed, instead of changing several and driving
+# once.
+#
+# WHAT IT MEASURES THAT `analyse` CANNOT: the deviation of the plan from the
+# straight line between its own endpoints. In a straight aisle that number
+# IS the planner's quality, and it comes straight out of the vehicle's
+# lateral budget: the aisle is 3.80 m, the padded footprint is 1.638 m wide,
+# so a plan that wanders 0.35 m off the line has spent a third of the
+# remaining clearance before the controller has made its first error.
+
+def _lateral_excursion(poses):
+    """Largest perpendicular distance from the chord between the ends."""
+    if len(poses) < 3:
+        return 0.0
+    ax, ay = poses[0][0], poses[0][1]
+    bx, by = poses[-1][0], poses[-1][1]
+    dx, dy = bx - ax, by - ay
+    n = math.hypot(dx, dy)
+    if n < 1e-9:
+        return 0.0
+    worst = 0.0
+    for p in poses:
+        d = abs((p[0] - ax) * dy - (p[1] - ay) * dx) / n
+        worst = max(worst, d)
+    return worst
+
+
+def cmd_plan(args):
+    import rclpy
+    from action_msgs.msg import GoalStatus
+    from geometry_msgs.msg import PoseStamped
+    from nav2_msgs.action import ComputePathToPose
+    from rclpy.action import ActionClient
+    from rclpy.node import Node
+    from rclpy.parameter import Parameter
+    import time as _time
+
+    rec = load_registration(args.registration)
+    sx, sy, syaw = world_to_map(rec, args.start_x, args.start_y,
+                                args.start_yaw)
+    gx, gy, gyaw = world_to_map(rec, args.x, args.y, args.yaw)
+
+    _CODES = {0: 'NONE', 200: 'UNKNOWN', 201: 'INVALID_PLANNER',
+              202: 'TF_ERROR', 203: 'START_OUTSIDE_MAP',
+              204: 'GOAL_OUTSIDE_MAP', 205: 'START_OCCUPIED',
+              206: 'GOAL_OCCUPIED', 207: 'TIMEOUT', 208: 'NO_VALID_PATH'}
+
+    def stamped(x, y, yaw):
+        p = PoseStamped()
+        p.header.frame_id = 'map'
+        p.pose.position.x, p.pose.position.y = x, y
+        p.pose.orientation.z = math.sin(yaw / 2.0)
+        p.pose.orientation.w = math.cos(yaw / 2.0)
+        return p
+
+    rclpy.init()
+    node = Node('nav2_plan',
+                parameter_overrides=[Parameter('use_sim_time', value=False)])
+    client = ActionClient(node, ComputePathToPose, 'compute_path_to_pose')
+    if not client.wait_for_server(timeout_sec=args.server_timeout):
+        print('FAIL: /compute_path_to_pose did not appear within {:.0f} s'
+              .format(args.server_timeout))
+        node.destroy_node()
+        rclpy.shutdown()
+        return 2
+
+    goal = ComputePathToPose.Goal()
+    goal.start = stamped(sx, sy, syaw)
+    goal.goal = stamped(gx, gy, gyaw)
+    goal.use_start = True
+    goal.planner_id = args.planner_id
+
+    t0 = _time.monotonic()
+    fut = client.send_goal_async(goal)
+    while not fut.done():
+        rclpy.spin_once(node, timeout_sec=0.05)
+    handle = fut.result()
+    if not handle.accepted:
+        print('REFUSED AT ACCEPTANCE')
+        node.destroy_node()
+        rclpy.shutdown()
+        return 1
+    rfut = handle.get_result_async()
+    while not rfut.done():
+        rclpy.spin_once(node, timeout_sec=0.05)
+        if _time.monotonic() - t0 > args.wall_timeout:
+            print('WALL TIMEOUT waiting for a plan')
+            node.destroy_node()
+            rclpy.shutdown()
+            return 2
+    res = rfut.result()
+    wall = _time.monotonic() - t0
+
+    status = {GoalStatus.STATUS_SUCCEEDED: 'SUCCEEDED',
+              GoalStatus.STATUS_ABORTED: 'ABORTED',
+              GoalStatus.STATUS_CANCELED: 'CANCELED'}.get(
+                  res.status, 'status {}'.format(res.status))
+    code = getattr(res.result, 'error_code', 0)
+    msg = getattr(res.result, 'error_msg', '')
+    poses = [(p.pose.position.x, p.pose.position.y, _yaw_of(p.pose.orientation))
+             for p in res.result.path.poses]
+
+    print('start world ({:+.3f}, {:+.3f}) yaw {:+.4f} -> map '
+          '({:+.3f}, {:+.3f})'.format(args.start_x, args.start_y,
+                                      args.start_yaw, sx, sy))
+    print('goal  world ({:+.3f}, {:+.3f}) yaw {:+.4f} -> map '
+          '({:+.3f}, {:+.3f})'.format(args.x, args.y, args.yaw, gx, gy))
+    print('RESULT      {}'.format(status))
+    print('error_code  {} {}'.format(code, _CODES.get(code, '')))
+    if msg:
+        print('error_msg   {}'.format(msg))
+    pt = res.result.planning_time
+    print('planning    {:.3f} s reported by the server, {:.3f} s wall '
+          'round trip'.format(pt.sec + pt.nanosec * 1e-9, wall))
+    print('points      {}'.format(len(poses)))
+    if poses:
+        length, cusps, rev = _path_metrics(poses)
+        chord = math.hypot(poses[-1][0] - poses[0][0],
+                           poses[-1][1] - poses[0][1])
+        print('length      {:.3f} m   (straight line between the ends is '
+              '{:.3f} m)'.format(length, chord))
+        print('cusps       {}   reverse {:.1f} % of the length'
+              .format(cusps, 100 * rev))
+        print('EXCURSION   {:.3f} m off the straight line between the ends'
+              .format(_lateral_excursion(poses)))
+        print('goal gap    {:.3f} m between the last path pose and the '
+              'commanded goal'.format(
+                  math.hypot(poses[-1][0] - gx, poses[-1][1] - gy)))
+    if args.plan:
+        with open(args.plan, 'w', encoding='utf-8') as fh:
+            json.dump({'goal_map': [gx, gy, gyaw],
+                       'start_map': [sx, sy, syaw],
+                       'status': status, 'error_code': code,
+                       'first_plan_map': poses, 'last_plan_map': poses,
+                       'goal_world': [args.x, args.y, args.yaw]}, fh)
+        print('wrote {}'.format(args.plan))
+    node.destroy_node()
+    rclpy.shutdown()
+    return 0 if status == 'SUCCEEDED' else 1
+
+
+# --------------------------------------------------------------------------- #
 # convcheck - the conversion against a COMMANDED MOTION
 # --------------------------------------------------------------------------- #
 #
@@ -426,23 +576,35 @@ def cmd_goal(args):
 # never of the conversion alone. It is an upper bound on the conversion's
 # own error.
 
-#: (label, v [m/s], w [rad/s], duration [s of simulation time]).
-#: Ordered so the vehicle stays near where it started: every left arc is
-#: followed by the mirrored right arc.
+#: (label, v [m/s], w [rad/s]).
+#:
+#: EVERY SEGMENT IS RETRACED BY THE ONE AFTER IT, and that is not a
+#: presentation choice - it is what makes the run measurable at all. An
+#: earlier ordering (left arc, mirrored right arc, ...) accumulated
+#: translation: over eight 8 s segments it walked the vehicle 7 m across the
+#: apron and INTO a rack face, and the two tightest arcs of that run
+#: measured 0.09 and 0.00 m/s against a commanded 0.30 - a contact, silently
+#: reported as a conversion result. Retracing bounds the whole run inside
+#: one segment length of the start.
+#:
+#: A RETRACE IS THE SAME STEER ANGLE DRIVEN BACKWARDS. From (1),
+#: w = v tan(delta)/L, so negating v and w together holds delta and the
+#: vehicle runs back along the arc it just drove. That is also why the
+#: retrace rows are the reverse-arc measurement this vehicle needs: a
+#: Reeds-Shepp reverse segment is exactly this manoeuvre.
 def _conv_segments(wheelbase_m):
-    L = wheelbase_m
     v = 0.30
     return [
-        ('straight ahead',                    v,  0.0),
-        ('left,  R = 2.10 m  (delta +26.6 deg)',  v,  v / 2.10),
-        ('right, R = 2.10 m  (delta -26.6 deg)',  v, -v / 2.10),
+        ('straight ahead',                                    v,  0.0),
+        ('straight astern - retraces the row above',         -v,  0.0),
+        ('left,  R = 2.10 m  (delta +26.57 deg)',             v,  v / 2.10),
+        ('astern on the same lock, R = 2.10 m - retrace',    -v, -v / 2.10),
         ('left,  R = 1.05 m  (delta +45.0 deg, the tightest planned arc)',
          v,  v / 1.05),
-        ('right, R = 1.05 m  (delta -45.0 deg)',  v, -v / 1.05),
-        ('straight astern',                  -v,  0.0),
-        ('astern on left lock, R = 2.10 m (delta -26.6 deg)',
-         -v, -(-v) / 2.10),
-        ('ROTATION IN PLACE - must be REFUSED', 0.0, 0.50),
+        ('astern on the same lock, R = 1.05 m - retrace',    -v, -v / 1.05),
+        ('right, R = 1.05 m  (delta -45.0 deg)',              v, -v / 1.05),
+        ('astern on the same lock, R = 1.05 m - retrace',    -v,  v / 1.05),
+        ('ROTATION IN PLACE - must be REFUSED',             0.0,  0.50),
     ]
 
 
@@ -516,6 +678,8 @@ def cmd_convcheck(args):
     rows = []
     results = []
     wall0 = _time.monotonic()
+    row_period = 1.0 / args.record_hz
+    next_row = node.sim_time()
     for label, v, w in _conv_segments(L):
         msg = Twist()
         msg.linear.x, msg.angular.z = v, w
@@ -547,10 +711,18 @@ def cmd_convcheck(args):
                     steer_seen.append(node.steer)
                 if math.isfinite(node.traction):
                     traction_seen.append(node.traction)
-            rows.append('{:.3f},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},'
-                        '{:.6f},{:.6f},{}'.format(
-                            now, gt[0], gt[1], gt[2], v, w,
-                            node.steer, node.traction, node.refusals))
+            # THE RECORDING IS RATE LIMITED AND THE MEASUREMENT IS NOT.
+            # `rclpy.spin_once` returns as soon as there is work, so this
+            # loop turns several thousand times a second; recording every
+            # turn produced a 27 MB CSV for 64 s of simulation, in which
+            # consecutive rows carry the same 20 Hz ground-truth pose. The
+            # integration above still sees every turn.
+            if now >= next_row:
+                next_row = now + row_period
+                rows.append('{:.3f},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},'
+                            '{:.6f},{:.6f},{}'.format(
+                                now, gt[0], gt[1], gt[2], v, w,
+                                node.steer, node.traction, node.refusals))
             if now >= t_end:
                 break
             if _time.monotonic() - wall0 > args.wall_timeout:
@@ -597,13 +769,14 @@ def cmd_convcheck(args):
     print('delta_pub is what the converter PUBLISHED; delta_meas is '
           'atan(L * w_meas / v_meas), what the vehicle ACTUALLY drove.')
     print('')
-    hdr = ('{:<58} {:>7} {:>8} | {:>8} {:>9} | {:>9} {:>9} | {:>8} {:>8}'
+    hdr = ('{:<58} {:>7} {:>8} | {:>8} {:>9} | {:>9} {:>9} | {:>8} {:>8} {}'
            .format('segment', 'v_cmd', 'w_cmd', 'v_meas', 'w_meas',
-                   'delta_pub', 'delta_meas', 'R_cmd', 'R_meas'))
+                   'delta_pub', 'delta_meas', 'R_cmd', 'R_meas', 'speed'))
     print(hdr)
     print('-' * len(hdr))
     worst_r = 0.0
     worst_label = ''
+    short = []
     for r in results:
         if r['w'] != 0.0 and r['v'] != 0.0:
             R_cmd = '{:+8.3f}'.format(r['v'] / r['w'])
@@ -622,10 +795,24 @@ def cmd_convcheck(args):
             d_meas_s = '{:+9.3f}'.format(d_meas)
         else:
             d_meas_s = '       --'
+        # THE CONTACT CHECK. A segment that did not achieve the speed it was
+        # given is not a conversion measurement: the vehicle was held by
+        # something. It is flagged here rather than left for a reader to
+        # notice, because an earlier run of this harness drove into a rack
+        # and reported the contact as an arc.
+        if r['v'] != 0.0:
+            ratio = abs(r['v_meas']) / abs(r['v'])
+            speed_note = '{:>5.0f}%'.format(100 * ratio)
+            if ratio < 0.85:
+                speed_note += ' HELD'
+                short.append((r['label'], ratio))
+        else:
+            speed_note = '    --'
         print('{:<58} {:>7.3f} {:>8.4f} | {:>8.4f} {:>9.4f} | {:>9.3f} '
-              '{} | {} {}'.format(
+              '{} | {} {} {}'.format(
                   r['label'], r['v'], r['w'], r['v_meas'], r['w_meas'],
-                  math.degrees(r['steer_cmd']), d_meas_s, R_cmd, R_meas))
+                  math.degrees(r['steer_cmd']), d_meas_s, R_cmd, R_meas,
+                  speed_note))
         if r['w'] != 0.0 and r['v'] != 0.0 and R_meas_v is not None:
             rel = abs(R_meas_v - r['v'] / r['w']) / abs(r['v'] / r['w'])
             if rel > worst_r:
@@ -641,6 +828,16 @@ def cmd_convcheck(args):
     print('  traction published   {:+.4f} m/s'.format(ref['traction_cmd']))
     print('  the vehicle moved    {:.4f} m and turned {:+.4f} deg'.format(
         ref['dpath'], math.degrees(ref['dyaw'])))
+    print('')
+    if short:
+        print('')
+        print('SEGMENTS THAT DID NOT ACHIEVE THEIR COMMANDED SPEED - these '
+              'are NOT conversion measurements:')
+        for label, ratio in short:
+            print('  {:.0f}% of commanded   {}'.format(100 * ratio, label))
+        print('  A vehicle that will not accelerate to a speed it is given '
+              'is being HELD by something. Check the ground-truth track '
+              'against the map before reading any figure on those rows.')
     print('')
     print('WORST RELATIVE RADIUS ERROR over the arcs: {:.2%} ({})'.format(
         worst_r, worst_label))
@@ -664,15 +861,27 @@ def cmd_convcheck(args):
 # analyse
 # --------------------------------------------------------------------------- #
 
+#: A direction change counts as a cusp only once the new direction has
+#: persisted for this many metres. THE REASON IS A MEASUREMENT, not taste:
+#: on a path whose points are 0.05 m apart and whose headings come out of a
+#: smoother, the sign of (step . heading) flips on single points wherever
+#: the step is a few millimetres. Counting those, this function reported
+#: "2 cusps, 0.7 % reverse" for a plan down a straight aisle - 0.07 m of
+#: "reverse" spread over two points. A tricycle's cusp is a real event: it
+#: stops, slews the steer axis across, and sets off the other way. 0.25 m
+#: is five path points and half the shortest reverse leg the planner's own
+#: 1.05 m turning radius can produce.
+_CUSP_MIN_RUN_M = 0.25
+
+
 def _path_metrics(poses):
     """Length, direction reversals (cusps) and reverse fraction of a path.
 
     A path point's DIRECTION is the sign of the dot product between the
     step it takes and the heading it carries. A Reeds-Shepp cusp is where
-    that sign flips, which is the one place a tricycle stops and slews the
-    steer axis across. Counting it from the path's own headings rather than
-    from a velocity means the count is a property of the PLAN, available
-    before the vehicle moves."""
+    that sign flips AND STAYS FLIPPED - see `_CUSP_MIN_RUN_M`. Counting it
+    from the path's own headings rather than from a velocity means the
+    count is a property of the PLAN, available before the vehicle moves."""
     if not poses or len(poses) < 3:
         return 0.0, 0, 0.0
     length = 0.0
@@ -687,11 +896,33 @@ def _path_metrics(poses):
         yaw = poses[i][2]
         dot = dx * math.cos(yaw) + dy * math.sin(yaw)
         signs.append((1 if dot >= 0.0 else -1, step))
-    cusps = 0
-    for i in range(1, len(signs)):
-        if signs[i][0] != signs[i - 1][0]:
-            cusps += 1
-    reverse_len = sum(s for sg, s in signs if sg < 0)
+
+    # Collapse the sign sequence into runs, then drop every run shorter
+    # than _CUSP_MIN_RUN_M into its neighbours before counting.
+    runs = []
+    for sg, step in signs:
+        if runs and runs[-1][0] == sg:
+            runs[-1][1] += step
+        else:
+            runs.append([sg, step])
+    merged = []
+    for sg, run_len in runs:
+        if run_len < _CUSP_MIN_RUN_M and merged:
+            merged[-1][1] += run_len
+        elif merged and merged[-1][0] == sg:
+            merged[-1][1] += run_len
+        else:
+            merged.append([sg, run_len])
+    # a second pass, because dropping a short run can join two equal ones
+    joined = []
+    for sg, run_len in merged:
+        if joined and joined[-1][0] == sg:
+            joined[-1][1] += run_len
+        else:
+            joined.append([sg, run_len])
+
+    cusps = max(0, len(joined) - 1)
+    reverse_len = sum(r for sg, r in joined if sg < 0)
     return length, cusps, (reverse_len / length if length > 0 else 0.0)
 
 
@@ -873,6 +1104,25 @@ def main(argv=None):
     g.add_argument('--registration', default=None)
     g.set_defaults(func=cmd_goal)
 
+    p = sub.add_parser(
+        'plan',
+        help='ask the PLANNER alone for a path between two stated poses. '
+             'Needs a planner_server and a map_server; needs no simulator, '
+             'no controller and no localizer.')
+    p.add_argument('--start-x', type=float, required=True)
+    p.add_argument('--start-y', type=float, required=True)
+    p.add_argument('--start-yaw', type=float, default=0.0)
+    p.add_argument('--x', type=float, required=True,
+                   help='goal x in the WORLD frame [m]')
+    p.add_argument('--y', type=float, required=True)
+    p.add_argument('--yaw', type=float, default=0.0)
+    p.add_argument('--planner-id', default='GridBased')
+    p.add_argument('--plan', default=None, help='write the plan here (JSON)')
+    p.add_argument('--server-timeout', type=float, default=60.0)
+    p.add_argument('--wall-timeout', type=float, default=120.0)
+    p.add_argument('--registration', default=None)
+    p.set_defaults(func=cmd_plan)
+
     c = sub.add_parser(
         'convcheck',
         help='check the Twist -> tricycle conversion against a COMMANDED '
@@ -892,6 +1142,11 @@ def main(argv=None):
     c.add_argument('--settle', type=float, default=60.0,
                    help='WALL seconds to wait for the ground-truth stream')
     c.add_argument('--wall-timeout', type=float, default=900.0)
+    c.add_argument('--record-hz', type=float, default=50.0,
+                   help='rows per SIMULATION second in the CSV. The '
+                        'measurement integrates every loop turn whatever '
+                        'this is; it bounds the file, which was 27 MB for '
+                        '64 s before it existed.')
     c.add_argument('--csv', default=None)
     c.set_defaults(func=cmd_convcheck)
 

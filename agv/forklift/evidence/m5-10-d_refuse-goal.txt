@@ -1,0 +1,16 @@
+registration  theta -0.007915259 rad  t (+6.029223, +5.541460) m  FLOOR rms 0.0404 MAX 0.1411 m
+goal  world (+5.0000, +9.0000) yaw +0.0000 rad  ->  map (+11.1003, +14.5016) yaw -0.0079 rad
+goal ACCEPTED at t_sim 41.71
+
+RESULT           ABORTED
+error_code       208
+elapsed          90.77 s of simulation time
+plans published  0
+refusals         0 rotation-in-place commands refused by the converter
+final BELIEVED   map (+1.5848, +12.5769) yaw -0.0079
+  carried to world (-4.5000, +7.0000) yaw +0.0000
+final TRUTH      world (-4.5000, +7.0000) yaw -0.0000
+ABSOLUTE goal error (truth vs commanded goal): 9.7082 m (68.80 x floor)
+  heading error -0.000 deg
+wrote /home/user/amr-agent/agv/forklift/evidence/m5-10-d_refuse-run.csv (905 samples)
+wrote /home/user/amr-agent/agv/forklift/evidence/m5-10-d_refuse-plan.json

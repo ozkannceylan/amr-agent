@@ -1,0 +1,61 @@
+### params file used
+    planner_server:
+      ros__parameters:
+        use_sim_time: false
+        planner_plugins: ["GridBased"]
+        GridBased:
+          plugin: "nav2_smac_planner::SmacPlannerHybrid"
+          motion_model_for_search: "REEDS_SHEPP"
+          minimum_turning_radius: 1.05
+          allow_unknown: false
+          allow_reverse_expansion: true
+
+### ros2 lifecycle set /planner_server configure
+Transitioning successful
+
+### ros2 param get /planner_server GridBased.allow_reverse_expansion
+Parameter not set
+
+### ros2 param get /planner_server GridBased.motion_model_for_search
+String value is: REEDS_SHEPP
+
+### ros2 param list /planner_server | grep GridBased
+  GridBased.allow_primitive_interpolation
+  GridBased.allow_unknown
+  GridBased.analytic_expansion_max_cost
+  GridBased.analytic_expansion_max_cost_override
+  GridBased.analytic_expansion_max_length
+  GridBased.analytic_expansion_ratio
+  GridBased.angle_quantization_bins
+  GridBased.cache_obstacle_heuristic
+  GridBased.change_penalty
+  GridBased.cost_penalty
+  GridBased.debug_visualizations
+  GridBased.downsample_costmap
+  GridBased.downsample_obstacle_heuristic
+  GridBased.downsampling_factor
+  GridBased.lookup_table_size
+  GridBased.max_iterations
+  GridBased.max_on_approach_iterations
+  GridBased.max_planning_time
+  GridBased.minimum_turning_radius
+  GridBased.motion_model_for_search
+  GridBased.non_straight_penalty
+  GridBased.plugin
+  GridBased.retrospective_penalty
+  GridBased.reverse_penalty
+  GridBased.smooth_path
+  GridBased.smoother.do_refinement
+  GridBased.smoother.max_iterations
+  GridBased.smoother.refinement_num
+  GridBased.smoother.tolerance
+  GridBased.smoother.w_data
+  GridBased.smoother.w_smooth
+  GridBased.terminal_checking_interval
+  GridBased.tolerance
+  GridBased.use_quadratic_cost_penalty
+
+### the node's own log, verbatim (INFO lines mentioning the plugin)
+[INFO] [1785832523.023042415] [planner_server]: Created global planner plugin GridBased of type nav2_smac_planner::SmacPlannerHybrid
+[INFO] [1785832523.023194116] [planner_server]: Configuring GridBased of type SmacPlannerHybrid
+[INFO] [1785832526.945157287] [planner_server]: Configured plugin GridBased of type SmacPlannerHybrid with maximum iterations 1000000, max on approach iterations 1000, and not allowing unknown traversal. Tolerance 0.25.Using motion model: Reeds-Shepp.
