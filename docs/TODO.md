@@ -32,9 +32,11 @@ remains the input path.
     after release, and reopening re-asserted the demand in 79.1 ms. **Caveat:
     the run is on the probe copy `safe_amr_FIOPROBE`** — repeat it on `safe_amr`
     before the gate cites it, and do not work in the probe copy meanwhile.
-    Residual: a TIA watch table carrying the `SafetyInputStandIn.*` and
-    `InstF_Forklift_Safety.*` rows, screenshotted mid-hold, is the one
-    independent corroboration still missing (an offline row edit).
+    **Second witness obtained the same day**: the run was repeated against the
+    CPU's own OPC UA server, which does not expose `SafetyInputStandIn` at all,
+    so a mirror change there can only have come through the F-program. Both
+    views agree on every transition and every non-transition. The corroboration
+    item is closed; no watch-table screenshot is owed.
   - (2) and (3) remain open.
 - m5-15 (F-program spec) is unblocked and is written against the stand-in path,
   carrying FIO-FEASIBILITY §6's three consequences: the stand-in labelled

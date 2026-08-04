@@ -1,0 +1,10 @@
+﻿23:47:38.224  sequence begins; CPU state as found
+23:47:39.765  WRITE  SafetyInputStandIn.EStopCircuitClosed          := True
+23:47:42.272  WRITE  SafetyInputStandIn.ZoneDeviceCircuitClosed     := True
+23:47:44.781  WRITE  SafetyInputStandIn.ResetButtonPressed          := True
+23:47:45.793  WRITE  SafetyInputStandIn.ResetButtonPressed          := False
+23:47:45.793  reset released - demands should clear now
+23:47:48.809  WRITE  SafetyInputStandIn.EStopCircuitClosed          := False
+23:47:48.809  E-stop circuit reopened - demand should re-assert, zone demand must NOT
+23:47:51.821  RESTORED all three stand-in inputs to FALSE (as found)
+23:47:53.339  done

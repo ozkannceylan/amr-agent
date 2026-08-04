@@ -98,13 +98,60 @@ never an achieved PL, SIL or PFH — is untouched.
    environment that produced it (LESSONS 2026-07-27), so the sequence repeats on
    the working project `safe_amr` before the gate cites it. The probe copy also
    should not be worked in meanwhile, or the two projects diverge silently.
-2. **One independent corroboration is cheap and still missing.** Every reading
-   here came through the API, and the m5-03 lesson is precisely that the API can
-   have its own view. The F-block instance data is a genuinely different memory
-   location and the F-logic result is not forgeable, so the proof stands — but a
-   TIA watch table carrying the `SafetyInputStandIn.*` and
-   `InstF_Forklift_Safety.*` rows, screenshotted mid-hold, would close it beyond
-   argument. Adding those rows is an offline edit and cannot be done from here.
+2. **CLOSED by the second witness below.** ~~Every reading here came through the
+   API.~~ The run was repeated against an independent OPC UA witness.
 3. **`RESET_HOLD_MIN` = 200 ms is confirmed in force**, against the five F-OB
    cycles (500 ms) the M4 handover item asks for. The deviation recorded in
    docs/TODO.md is real and unchanged by this run.
+
+---
+
+## Second witness — the CPU's own OPC UA server, 2026-08-04
+
+Open question 2 asked for a reading that did not come through the writer's API.
+A TIA watch table was the obvious candidate and could not be reached: adding
+rows is an offline edit, and GUI automation of the running project was attempted
+and abandoned after three failed clicks rather than persisted with unattended on
+a live safety project.
+
+**The OPC UA server is the better witness anyway**, and it was available. It is a
+different protocol on a different stack, served by the CPU itself, and it is the
+project's actual production data path under invariant 4.
+
+**The decisive detail: `SafetyInputStandIn` is not exposed on that server at
+all.** A browse of `opc.tcp://192.168.53.1:4840` finds `ForkliftSafetyMirror`,
+`ForkliftStatus`, `ForkliftInput` and `ForkliftOutput` under
+`DataBlocksGlobal`, and no stand-in DB. So nothing this witness sees can be an
+echo of the writer's process image — the only route from an API write to a
+mirror change runs **through the F-program**.
+
+Evidence: `evidence/m5-03b-opcua-witness.log` (the witness, 52 505 polls over
+30 s, a ~0.57 ms sampling interval, so the latencies below are behaviour and not
+polling artefacts), `evidence/m5-03b-standin-stimulus-proof-run2.log` (the API
+writes, wall-clock stamped for correlation), and the two scripts beside them.
+
+| Event | API view (F-block instance) | OPC UA view (mirror) |
+|---|---|---|
+| circuit closes | demands unchanged | **unchanged** — no auto-resume, confirmed twice |
+| reset released → demands clear | 37.0 ms | **41 ms** |
+| circuit reopens → demand re-asserts | 79.1 ms | **114 ms** |
+| `ZoneStopDemand` while only the E-stop circuit is open | stays clear | **stays clear** |
+| restore → demands return | — | **94 ms** |
+
+The two views agree on every transition and on every non-transition. The mirror's
+larger figures are expected: it is a standard-side copy written in OB30 at 20 ms
+and then published by the server, so it sits one copy and one publish downstream
+of the F-block data the API reads.
+
+`ForkliftStatus.ForkliftResetRequired` stayed TRUE throughout, correctly — it is
+held by the link latches with no bridge and no HMI connected, which is the same
+state `plc/forklift/evidence/m4-cold-start-bridge-down.png` records.
+
+**What this changes.** The proof no longer rests on a single tool's view. The
+m5-03 failure mode — writer and consumer disagreeing — is excluded by two
+independent consumers agreeing, one of which cannot see the written datum at all.
+
+**Housekeeping from this run.** TIA was left with the *Program info* tab open
+rather than the *Forklift M4 gate* watch table, a side effect of the abandoned
+GUI attempt. Nothing was modified in the project; the CPU was restored to its
+as-found state and the restore sample matches the baseline.
