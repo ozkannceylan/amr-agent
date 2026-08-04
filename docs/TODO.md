@@ -142,6 +142,39 @@ remains the input path.
 - m5-18: PL-SCENARIOS carries "Category 3 is claimed" wording, permanent
   grep-bait against ADR 0011 D5 item 1 — sweep the verb, not the noun.
 
+## m5-11 — closed 2026-08-04 (f02ece7), residue by owner
+
+- **interface**: `opcua-nodes.md` §12 specifies four data without specifying the
+  vehicle's reaction. Four conservative readings were implemented and named in
+  the code and EVIDENCE_ENVELOPE §2; each can only make the gate more
+  restrictive. The interface agent rules: (a) the equipment permit's motion
+  effect, (b) a ceiling outside its window, (c) a mode outside `{0,1,2}`,
+  (d) how the autonomous chain clears the teleop path (§12.9 C3). Done when §12
+  states each reaction and the gate's code cites it instead of its own reading.
+- **interface, invariant 10**: `envelope.ceiling_max_mps = 1.00` is a second copy
+  of `TRACTION_SPEED_MAX` (plc/forklift/SPEC.md §3.3). Done when either the
+  vehicle reads it from the single owner or §12.4 says consumers carry a local
+  copy deliberately.
+- **agv, carried**: `stale_window_s = 0.50` is a design value. ADR 0014's open
+  item asks for the brief that measures PLC-write-to-topic age and jitter; the
+  constant is re-derived when it lands.
+- **agv, small**: `EVIDENCE_NAV2.md` §7's reproduction recipe now brings up a
+  gated chain, so the vehicle correctly will not move without an envelope. Needs
+  the note and the pair `gate:=false cmd_topic:=/cmd_vel_smoothed`. The m5-11
+  brief forbade the edit.
+- **sim / owner ruling**: this machine has no Nav2 and no `robot_localization`,
+  and no passwordless sudo. Both ran from a user-prefix `.deb` overlay in
+  `~/ros-overlay/prefix` — no system package installed, no repo dependency added.
+  `sim/setup/WSL_ENVIRONMENT.md` should record the overlay, and the owner decides
+  whether to install the stack properly instead. **Every m5-11 figure is
+  qualified by that overlay** (LESSONS 2026-07-27).
+- **fleet/M6**: a goal aborted while the envelope is withheld is nobody's yet —
+  Nav2 held 235 s then aborted with code 105, as ADR 0011 D3 predicts.
+  Re-issuing the goal is order-level behaviour.
+- **bridge**: the gate publishes its report but the bridge's signal map does not
+  carry the group (`opcua-nodes.md` §12.13 item 1), so ADR 0014 D5.3's readback
+  is closed on the vehicle side only. This is the report's `next_suggested`.
+
 ## M5 — open items
 - Monitoring service directory: ADR 0011 D4 recommends `agv/` but does not
   rule it; `viz/` is the alternative and the ADR 0005 test names the
@@ -216,8 +249,9 @@ closed; the warehouse world with a measured landmark map; SLAM, an
 adversarial judge round, a rebuilt map, a committed world->map registration
 and absolute scoring; AMCL; and Nav2 for the tricycle.
 
-Vehicle side, NOT STARTED: m5-11 envelope gate node, m5-12 protective and
+Vehicle side, NOT STARTED: m5-12 protective and
 warning field evaluation, m5-13 monitoring service, m5-14 HMI v2a then v2b.
+(m5-11 the envelope gate node CLOSED 2026-08-04, f02ece7.)
 
 Documents, CLOSED: opcua-nodes §12 (envelope, mode, process stop), the
 standard program delta (SPEC §14), the PLr derivations and the D5 claim

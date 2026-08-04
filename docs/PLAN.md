@@ -85,8 +85,14 @@ forced the last two.
     REEDS_SHEPP and RegulatedPurePursuit, the Twist->tricycle conversion
     derived and checked in the simulator, and four measured cases including
     a goal the planner correctly refuses without the vehicle moving.
-12. **m5-11 agv — ISSUED 2026-08-04**
-    (docs/briefs/m5-11-envelope-gate-node.md). The envelope gate node: subscribes to the PLC
+12. **m5-11 agv — CLOSED 2026-08-04** (f02ece7,
+    docs/reports/m5-11-envelope-gate-node.md). All six acceptance observations
+    measured on the owner's WSL machine. The §3.2 centrepiece came out a real
+    number, not an assertion: gate release open-loop steps 0.5000 m/s and
+    3.5249 m/s², closed-loop 0.0250 m/s and 0.4096 m/s² — 20x and 8.6x, the
+    open-loop peak seven times what the chain is dimensioned for. A creep defect
+    found by measurement (0.0852 m) is fixed and re-measured at zero.
+    The envelope gate node: subscribes to the PLC
     envelope, gates motion, and sits BELOW the velocity smoother so it still
     acts with the link dead; the smoother moves to CLOSED_LOOP against
     odometry, because Nav2's open-loop default limits acceleration against
