@@ -43,9 +43,12 @@ owner under invariant 10.
    stayed passivated with no acknowledgement reachable, and the API's
    by-name write — which does return success and does read back — never
    appeared in the watch table. The standard-DB stand-in of
-   plc/forklift-safety/SPEC.md §7 stays the input path. m5-15 is unblocked;
-   the judge's roadmap-criterion-(a) blocker is now live and needs an owner
-   ruling (docs/TODO.md).
+   plc/forklift-safety/SPEC.md §7 stays the input path. **Owner ruling
+   2026-08-04 on the consequence: BOTH remedies** — the stand-in is upgraded to
+   an automated API-driven standard-DB stimulus (a proof run first, verified in
+   the consumer's view, since the probe only ever wrote an F-channel) **and**
+   roadmap criterion (a) is amended by ADR. m5-15 is written against the proven
+   path once that lands. Definition of done: docs/TODO.md.
 
 Beside the wave: ADR 0012 envelope composition, ADR 0013 vendor gate (M8),
 ADR 0014 motion control locus, and the m5-judge architecture review that
@@ -82,7 +85,8 @@ forced the last two.
     REEDS_SHEPP and RegulatedPurePursuit, the Twist->tricycle conversion
     derived and checked in the simulator, and four measured cases including
     a goal the planner correctly refuses without the vehicle moving.
-12. **m5-11 agv — NEXT.** The envelope gate node: subscribes to the PLC
+12. **m5-11 agv — ISSUED 2026-08-04**
+    (docs/briefs/m5-11-envelope-gate-node.md). The envelope gate node: subscribes to the PLC
     envelope, gates motion, and sits BELOW the velocity smoother so it still
     acts with the link dead; the smoother moves to CLOSED_LOOP against
     odometry, because Nav2's open-loop default limits acceleration against

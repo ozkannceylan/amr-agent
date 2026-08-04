@@ -12,10 +12,20 @@ plc/forklift-safety/FIO-FEASIBILITY.md §7. The configured F-DI stayed
 passivated on this installation and the API's by-name write never reached the
 watch table, so the standard-DB stand-in of plc/forklift-safety/SPEC.md §7
 remains the input path.
-- **owner ruling needed: roadmap M5 criterion (a).** The judge review held that
-  a NO verdict puts it in question, and the owner deferred the blocker until
-  the verdict was in. It is in. Done when arch-docs/safety-spec record the
-  ruling and the roadmap row reads what the fallback can actually demonstrate.
+- **roadmap M5 criterion (a): OWNER RULED 2026-08-04 — BOTH remedies, not one.**
+  The stand-in is upgraded to an **automated API-driven standard-DB stimulus**
+  carrying the Siemens S015 validity check and labelled a stand-in everywhere,
+  **and** criterion (a) is **amended by ADR** to state what that stand-in can
+  actually demonstrate. Two consequences the ruling rests on: the probe proved
+  *Modify* is refused outright in permanent safety mode (`2206:000002`), so the
+  fallback as ADR 0011 D2 names it cannot run at all and automating it is not
+  optional; and the API path to a **standard** DB is **plausible but unproven** —
+  the probe only ever wrote an F-channel, whose failure was the F-driver
+  substituting a fail-safe value. Done when (1) a short proof run shows an API
+  write to `SafetyInputStandIn` standing **in the consumer's view**, per LESSONS
+  2026-08-04, (2) an ADR amends criterion (a) and the roadmap row follows it,
+  and (3) m5-15 is written against the proven path. Do not let the gate proceed
+  past m5-15 with any of the three open.
 - m5-15 (F-program spec) is unblocked and is written against the stand-in path,
   carrying FIO-FEASIBILITY §6's three consequences: the stand-in labelled
   wherever it appears, the S015 validity check carried visibly in the F-code
@@ -98,17 +108,13 @@ remains the input path.
   Done when §3 draws the path the demonstrations actually use.
 
 ## M5 — judge review follow-ups (docs/reports/m5-judge-architecture-review.md)
-- **BLOCKER, deferred by owner ruling 2026-07-30 until m5-03 returns a
-  verdict.** If the F-I/O probe answers NO, roadmap M5 criterion (a) — "its
-  signals reach the F-CPU safety program's F-blocks" — cannot be met by the
-  named fallback, because watch-table Modify means a human types the value
-  and the scanner's signal reaches nothing. ADR 0011 D2's claim that the
-  fallback changes no gate criterion is wrong in that branch. The owner
-  chose to wait rather than pre-decide, since a YES makes the question moot.
-  Done when m5-03's verdict is in and, if NO, one of: the fallback is
-  upgraded to an automated API-driven standard-DB stimulus carrying the
-  S015 validity check, or criterion (a) is amended by ADR. Do not let the
-  gate proceed past m5-15 with this open.
+- **BLOCKER — RULED 2026-08-04, now tracked under the m5-03 heading above.**
+  The verdict came back `ADR 0011 D2 fallback`, so criterion (a) went live as
+  the judge predicted, and the owner ruled **both** remedies rather than one.
+  The live definition of done is the three-part one under
+  "m5-03 — F-I/O probe verdict is IN"; this row stays only to record that the
+  judge's finding was upheld and that ADR 0011 D2's claim that the fallback
+  changes no gate criterion is now known wrong.
 - M4 showcase recording: owner ruled it is made against the CURRENT tree
   (judge finding 7). Criterion (d)'s instrument changed under it — the ±90°
   scanner was deleted and the process stop plane moved 0.25 → 0.15 m — and
