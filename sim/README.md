@@ -50,6 +50,14 @@ sim/
                                     for AMCL, warehouse.posegraph/.data to
                                     resume mapping. Built by SLAM, not
                                     rasterised
+    warehouse_registration.yaml     T(world -> map) for THAT grid, DERIVED
+                                    from its walls, with its residual. The
+                                    single owner of that transform
+                                    (invariant 10). Bound to one grid by
+                                    md5; a rebuilt map must be re-derived
+    register_map.py                 derives it. `derive` prints, `--write`
+                                    commits, `show` reads one back and
+                                    verifies it against the grid beside it
   setup/install.sh                  idempotent environment setup (run as root)
   scenarios/
     forklift_commissioning.md       M4 gate procedure: the five criteria as
@@ -67,9 +75,16 @@ sim/
     tools/make_map.py               deterministic map generator (world -> map),
                                     rectangles read from the SDF at run time.
                                     Has NO committed output; see below
-    tools/mapping_evidence.py       record and read a mapping run: /tf
-                                    publishers, the three pose streams, the
-                                    named degenerate stretches, the closures
+    tools/mapping_evidence.py       record and read a run: /tf publishers,
+                                    the three pose streams, the named
+                                    degenerate stretches, the closures.
+                                    `analyse` has TWO scoring modes and
+                                    --score is MANDATORY: `absolute` (via
+                                    the committed registration, no
+                                    anchoring - the only mode in which
+                                    "localisation error" may be said) and
+                                    `anchored-drift` (mapping drift only,
+                                    circular as a localisation score)
     nav_scenario.launch.py          Nav2 stack of the parked scenario
                                     (map_server, AMCL, planner, DWB
                                     controller, behaviors, bt_navigator);
@@ -178,6 +193,16 @@ it logs one line, subscribes to nothing and publishes no transform, with no
 warning of any kind. That launch file emits the configure and activate
 transitions; the check that it worked is `/map` on the topic list, never a
 clean log.
+
+**The committed map was REBUILT on 2026-08-04 by brief m5-08d**, after
+`docs/reports/m5-08c-slam-judge.md` found the previous grid rotated 2.0°
+from the building by pre-drive idle drift. The rebuild is 0.45° off, and
+`worlds/WAREHOUSE_SLAM_EVIDENCE.md` §12 records it against the artifact it
+replaced. Every artifact in `maps/warehouse/` travels with
+`warehouse_registration.yaml`, which is the **only** place a world→map
+transform lives: it is derived from the grid's walls, never asserted, and
+it is bound to one grid by md5 so a rebuilt map cannot be scored through a
+stale transform.
 
 `maps/warehouse/` is the map that run produced, in both forms: the
 `.pgm`/`.yaml` pair AMCL consumes and the `.posegraph`/`.data` pair that

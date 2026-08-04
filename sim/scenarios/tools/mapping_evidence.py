@@ -15,7 +15,61 @@ THREE JOBS, THREE SUBCOMMANDS, AND NONE OF THEM STEERS ANYTHING.
 
   analyse     read that CSV against sim/worlds/WAREHOUSE_LANDMARKS.md
               section 5 - the degenerate stretches, by name and by extent -
-              and report what actually happened in each one.
+              and report what actually happened in each one. IT HAS TWO
+              SCORING MODES AND `--score` IS MANDATORY; see below.
+
+THE TWO SCORING MODES, AND WHY CHOOSING IS NOT OPTIONAL
+
+  `analyse` reports an estimate's error against ground truth, and there
+  are two different quantities that phrase can mean. They differ by an
+  order of magnitude, one of them is circular if used for the wrong
+  question, and until 2026-08-04 this tool computed the circular one
+  silently and without a name. `--score` now has no default: the caller
+  states which quantity is wanted, because getting it wrong is not
+  visible in the output.
+
+  --score absolute
+      THE LOCALISATION SCORE. The estimate's `map -> base_link` is carried
+      into the world frame through the COMMITTED, PRE-DERIVED transform in
+      sim/maps/warehouse/warehouse_registration.yaml, which was fitted to
+      the map's walls before this run existed and contains no figure from
+      it. NO PER-RUN ANCHORING HAPPENS ANYWHERE. A localiser that is
+      consistently 0.3 m wrong scores 0.3 m, which is the whole point.
+      The registration's own residual is printed as a FLOOR: an error
+      below it is not a measurement of the localiser.
+
+      This is the mode an AMCL gate is scored in. It is the only mode in
+      which the words "localisation error" may be used.
+
+  --score anchored-drift
+      DRIFT SINCE THE START OF THE DRIVE, and nothing else. The rigid
+      SE(2) transform carrying the estimate's FIRST drive sample exactly
+      onto truth is applied to every sample, so the error curve starts at
+      zero by construction and any constant offset or rotation of the
+      estimate vanishes into the anchor.
+
+      VALID for: how far a mapping run's estimate wandered from where it
+      started - which is the right question about a map being built, since
+      a SLAM map's frame is legitimately its own.
+
+      INVALID for: any localisation score. It cannot see a constant error
+      and it cannot see a wrong frame; an AMCL converged into the wrong
+      part of a shallow basin scores near zero in it. It is also anchored
+      on ONE sample, so yaw noise in that sample rotates the entire error
+      curve - about 0.11 m at this route's lever arm.
+
+      This mode produced the 0.185 m rms / 0.014 m final figures in
+      sim/worlds/WAREHOUSE_SLAM_EVIDENCE.md. Those remain correct as drift
+      figures and must never be quoted as localisation accuracy
+      (docs/reports/m5-08c-slam-judge.md finding 2).
+
+  One more difference, and it is deliberate. `anchored-drift` DROPS the
+  parked segments at each end of the run, because with a first-sample
+  anchor they charge the route with heading error the route did not
+  produce. `absolute` KEEPS EVERY SAMPLE: with no anchor there is nothing
+  to protect, and a localiser's error while the vehicle stands still is a
+  measurement in its own right - it is exactly the dwell case
+  m5-08c finding 3 says the AMCL gate must contain.
 
 WHY THE GROUND TRUTH IS IN THE CSV AT ALL. It is the reference an estimate
 is SCORED against, which is the only legitimate use of it and the reason
@@ -38,7 +92,11 @@ subcommands need rclpy, so run them with /usr/bin/python3):
   /usr/bin/python3 sim/scenarios/tools/mapping_evidence.py record \\
       --csv /tmp/run.csv --seconds 600
   /usr/bin/python3 sim/scenarios/tools/mapping_evidence.py analyse \\
-      --csv /tmp/run.csv
+      --csv /tmp/run.csv --score anchored-drift
+  /usr/bin/python3 sim/scenarios/tools/mapping_evidence.py analyse \\
+      --csv /tmp/run.csv --score absolute
+
+`analyse` and `closures` need no rclpy and run under any python3.
 """
 
 import argparse
@@ -349,6 +407,60 @@ def anchor(rows, prefix):
     return (ox, oy, dyaw)
 
 
+def load_registration(path=None):
+    """The committed T(world -> map), through the tool that owns it.
+
+    INVARIANT 10. This tool does not parse the registration file and does
+    not carry a copy of the transform. It imports
+    sim/maps/warehouse/register_map.py, which derived it, and that module's
+    `load_registration` verifies the grid md5 before returning - so a run
+    scored against a map that has been rebuilt since the transform was
+    derived FAILS HERE rather than producing a plausible wrong number."""
+    module_dir = os.path.join(_REPO_ROOT, 'sim', 'maps', 'warehouse')
+    if module_dir not in sys.path:
+        sys.path.insert(0, module_dir)
+    try:
+        import register_map
+    except ImportError:
+        raise SystemExit(
+            'cannot import {}/register_map.py, which owns the world->map '
+            'transform. --score absolute cannot run without it.'
+            .format(module_dir))
+    if path is None:
+        path = register_map.DEFAULT_REGISTRATION
+    return register_map.load_registration(path)
+
+
+def place_absolute(rows, prefix, record):
+    """Carry an estimate from the MAP frame into the world, no anchoring.
+
+    The registration is p_map = R(theta) p_world + t, so the inverse
+    carries a map-frame pose out into the world:
+
+        p_world = R(-theta) (p_map - t)
+
+    Every sample gets the SAME transform, and that transform was fitted to
+    the map's walls before this run existed. Nothing about this run enters
+    it, so the error this produces is absolute: a constant offset stays a
+    constant offset instead of vanishing into an anchor.
+
+    Fills the same `<prefix>_wx`, `_wy`, `_wyaw` columns `anchor()` fills,
+    so everything downstream is identical between the two modes and the
+    only difference is which transform was used."""
+    theta = record['theta_rad']
+    c, s = math.cos(-theta), math.sin(-theta)
+    tx, ty = record['t_x_m'], record['t_y_m']
+    placed = 0
+    for row in rows:
+        mx, my = row[prefix + '_x'] - tx, row[prefix + '_y'] - ty
+        row[prefix + '_wx'] = c * mx - s * my
+        row[prefix + '_wy'] = s * mx + c * my
+        row[prefix + '_wyaw'] = _wrap(row[prefix + '_yaw'] - theta)
+        if not math.isnan(row[prefix + '_wx']):
+            placed += 1
+    return placed
+
+
 def _errors(row, prefix):
     ex = row[prefix + '_wx'] - row['truth_x']
     ey = row[prefix + '_wy'] - row['truth_y']
@@ -410,33 +522,118 @@ def cmd_analyse(args):
             stopped_at = index
             break
     head, tail = rows[:moved_at + 1], rows[stopped_at:]
-    rows = rows[moved_at:stopped_at + 1]
-    slam_rows = [r for r in rows if r['slam_ok'] > 0.5]
-    anchor_ekf = anchor(rows, 'ekf')
-    anchor_slam = anchor(rows, 'slam')
+    absolute = args.score == 'absolute'
 
-    print('# Mapping run, read against sim/worlds/WAREHOUSE_LANDMARKS.md')
-    print('')
-    for label, transform in (('forklift/odom', anchor_ekf),
-                             ('map', anchor_slam)):
-        if transform:
-            print('{:>13} sits at ({:+.3f}, {:+.3f}) in the world and is '
-                  'rotated {:+.2f} deg from it'.format(
-                      label, transform[0], transform[1],
-                      math.degrees(transform[2])))
-    print('  (the map frame\'s rotation is the EKF heading error at the '
-          'moment slam_toolbox')
-    print('   processed its first scan; it is arbitrary, not an error)')
-    print('')
+    if absolute:
+        # NO ANCHORING, AND NO TRIMMING EITHER. With a pre-derived
+        # transform there is no first sample to protect, and a localiser's
+        # error while the vehicle stands still is a measurement rather than
+        # a contaminant - it is the dwell case m5-08c finding 3 exists for.
+        # The parked segments are REPORTED as their own rows below instead
+        # of being dropped.
+        registration = load_registration(args.registration)
+        placed = place_absolute(rows, 'slam', registration)
+        slam_rows = [r for r in rows if r['slam_ok'] > 0.5]
+        print('# Localisation run, scored ABSOLUTELY')
+        print('')
+        print('Every `map` pose below was carried into the world frame '
+              'through the')
+        print('COMMITTED transform, derived from the map\'s walls before '
+              'this run:')
+        print('')
+        print('    {}'.format(os.path.relpath(
+            args.registration or os.path.join(
+                _REPO_ROOT, 'sim', 'maps', 'warehouse',
+                'warehouse_registration.yaml'), _REPO_ROOT)))
+        print('    theta = {:+.6f} rad = {:+.4f} deg,  t = ({:+.4f}, '
+              '{:+.4f}) m'.format(registration['theta_rad'],
+                                  math.degrees(registration['theta_rad']),
+                                  registration['t_x_m'],
+                                  registration['t_y_m']))
+        print('    grid md5 verified: this transform belongs to this map')
+        print('')
+        print('NO PER-RUN ANCHORING WAS APPLIED ANYWHERE. A constant error '
+              'stays a')
+        print('constant error. {} of {} samples carry a map pose.'.format(
+            placed, len(rows)))
+        print('')
+        print('*** FLOOR: the registration\'s own residual is {:.4f} m rms, '
+              '{:.4f} m max.'.format(registration['residual_rms_m'],
+                                     registration['residual_max_m']))
+        print('    No error below that is a measurement of the localiser; '
+              'it is a')
+        print('    measurement of how well a rigid transform fits a sheared '
+              'grid.')
+        print('')
+        print('The EKF is NOT scored in this mode. `forklift/odom` has no '
+              'derived')
+        print('registration to the world - only `map` does - and asserting '
+              'one from')
+        print('the spawn pose is exactly the thing this mode exists to stop.')
+        print('')
+        for label, segment in (('before', head), ('after', tail)):
+            seg = [r for r in segment if r['slam_ok'] > 0.5
+                   and not math.isnan(r['slam_wx'])]
+            if len(seg) > 1:
+                errs = [_errors(r, 'slam') for r in seg]
+                norms = [math.hypot(e[0], e[1]) for e in errs]
+                span = seg[-1]['sim_s'] - seg[0]['sim_s']
+                print('parked {:>6} the drive  {:6.1f} s, absolute error '
+                      'mean {:.3f} m, max {:.3f} m  (KEPT, not dropped)'
+                      .format(label, span, sum(norms) / len(norms),
+                              max(norms)))
+        print('')
+    else:
+        rows = rows[moved_at:stopped_at + 1]
+        slam_rows = [r for r in rows if r['slam_ok'] > 0.5]
+        anchor_ekf = anchor(rows, 'ekf')
+        anchor_slam = anchor(rows, 'slam')
+
+        print('# Mapping run, read against sim/worlds/WAREHOUSE_LANDMARKS.md')
+        print('')
+        print('SCORED AS ANCHORED DRIFT. Every error below is DRIFT SINCE '
+              'THE START OF')
+        print('THE DRIVE, not localisation error, and it is not a '
+              'localisation score:')
+        print('the anchor makes the first sample exactly zero by '
+              'construction, so a')
+        print('constant offset or a wrong frame is invisible here. For a '
+              'localisation')
+        print('number use --score absolute (m5-08c finding 2).')
+        print('')
+        for label, transform in (('forklift/odom', anchor_ekf),
+                                 ('map', anchor_slam)):
+            if transform:
+                print('{:>13} sits at ({:+.3f}, {:+.3f}) in the world and is '
+                      'rotated {:+.2f} deg from it'.format(
+                          label, transform[0], transform[1],
+                          math.degrees(transform[2])))
+        print('  (this is a SINGLE-SAMPLE frame relation at the start of '
+              'the drive.')
+        print('   It is NOT the map artifact\'s rotation from the building - '
+              'for that,')
+        print('   fit the grid\'s walls: sim/maps/warehouse/register_map.py)')
+        print('')
     for label, segment in (('before', head), ('after', tail)):
-        if len(segment) > 1:
-            drift = _wrap(segment[-1]['ekf_yaw'] - segment[0]['ekf_yaw'])
-            span = segment[-1]['sim_s'] - segment[0]['sim_s']
+        # NAN-SAFE. The EKF has not published yet for the first samples of
+        # a recording, so segment[0]['ekf_yaw'] is nan and a plain
+        # difference printed "+nan deg" as if it were a measurement. Take
+        # the first and last samples that actually carry an EKF heading.
+        valid = [r for r in segment if not math.isnan(r['ekf_yaw'])]
+        if len(valid) > 1:
+            drift = _wrap(valid[-1]['ekf_yaw'] - valid[0]['ekf_yaw'])
+            span = valid[-1]['sim_s'] - valid[0]['sim_s']
             print('parked {:>6} the drive  {:6.1f} s, EKF heading moved '
                   '{:+7.2f} deg  ({:+.5f} rad/s at rest)'.format(
                       label, span, math.degrees(drift),
                       drift / span if span else 0.0))
-    print('samples in the drive     {}'.format(len(rows)))
+        elif len(segment) > 1:
+            print('parked {:>6} the drive  {:6.1f} s, EKF heading: no '
+                  'sample carried one'.format(
+                      label, segment[-1]['sim_s'] - segment[0]['sim_s']))
+    print('samples scored           {}{}'.format(
+        len(rows), '  (whole recording; parked samples KEPT)' if absolute
+        else '  (the drive only; parked segments dropped)'))
     print('samples with a SLAM pose {}'.format(len(slam_rows)))
     print('simulation time          {:.1f} s'.format(
         rows[-1]['sim_s'] - rows[0]['sim_s']))
@@ -455,9 +652,18 @@ def cmd_analyse(args):
     print('ground-truth turning     {:.1f} deg (1 s stride)'.format(
         math.degrees(turned)))
     print('')
-    print('Both estimates are ANCHORED to the world at the first sample of')
-    print('the drive: neither frame is the world frame and neither claims to')
-    print('be, so every error below is DRIFT SINCE THE START OF THE DRIVE.')
+    if absolute:
+        print('NOTHING BELOW IS ANCHORED. Every error is an ABSOLUTE '
+              'world-frame')
+        print('error, taken through the committed transform above, floor '
+              '{:.4f} m.'.format(registration['residual_max_m']))
+    else:
+        print('Both estimates are ANCHORED to the world at the first sample '
+              'of')
+        print('the drive: neither frame is the world frame and neither '
+              'claims to')
+        print('be, so every error below is DRIFT SINCE THE START OF THE '
+              'DRIVE.')
 
     # ---- whole-run error, both estimates ----
     print('')
@@ -466,8 +672,10 @@ def cmd_analyse(args):
     print('| estimate | final |dx,dy| | final heading | max |dx,dy| | '
           'rms |dx,dy| |')
     print('|---|---|---|---|---|')
-    for prefix, label in (('ekf', 'EKF (dead reckoning)'),
-                          ('slam', 'SLAM (map -> base_link)')):
+    pairs = (('slam', 'map -> base_link, ABSOLUTE'),) if absolute else (
+        ('ekf', 'EKF (dead reckoning)'),
+        ('slam', 'SLAM (map -> base_link)'))
+    for prefix, label in pairs:
         source = slam_rows if prefix == 'slam' else rows
         source = [r for r in source
                   if not math.isnan(r[prefix + '_wx'])]
@@ -495,13 +703,20 @@ def cmd_analyse(args):
     print('`along-x` is the error component ALONG the aisle, which is the')
     print('direction those stretches carry no information in.')
     print('')
-    print('| stretch | pass | samples | entry along-x | exit along-x | '
-          'growth | max across-y | heading at exit |')
-    print('|---|---|---|---|---|---|---|---|')
+    # A DWELL AND A REVERSE ARE BOTH EXPRESSIBLE HERE, which m5-08c
+    # finding 3 requires of whatever instrument the AMCL gate uses. A
+    # dwell inside a stretch keeps the samples contiguous, so it stays ONE
+    # pass and shows up as a long `seconds` against a short travelled
+    # distance; leaving and re-entering starts a SECOND pass. Neither
+    # needs a new subcommand, but `seconds` has to be on the table for a
+    # dwell to be readable at all, which is why it is.
+    print('| stretch | pass | samples | seconds | entry along-x | '
+          'exit along-x | growth | max across-y | heading at exit |')
+    print('|---|---|---|---|---|---|---|---|---|')
     for stretch in stretches:
         groups = _passes(slam_rows, stretch)
         if not groups:
-            print('| **{}** | - | 0 | not driven with a SLAM pose | | | | |'
+            print('| **{}** | - | 0 | - | not driven with a SLAM pose | | | | |'
                   .format(stretch['name']))
             continue
         for number, group in enumerate(groups, start=1):
@@ -510,29 +725,34 @@ def cmd_analyse(args):
             ex0, _, _ = _errors(first, 'slam')
             ex1, ey1, eyaw1 = _errors(last, 'slam')
             across = max(abs(_errors(slam_rows[i], 'slam')[1]) for i in group)
-            print('| **{}** | {} | {} | {:+.3f} m | {:+.3f} m | {:+.3f} m | '
-                  '{:.3f} m | {:+.2f} deg |'.format(
-                      stretch['name'], number, len(group), ex0, ex1,
+            print('| **{}** | {} | {} | {:.1f} s | {:+.3f} m | {:+.3f} m | '
+                  '{:+.3f} m | {:.3f} m | {:+.2f} deg |'.format(
+                      stretch['name'], number, len(group),
+                      last['sim_s'] - first['sim_s'], ex0, ex1,
                       ex1 - ex0, across, math.degrees(eyaw1)))
 
     # The same table for the EKF, so "odometry carried it" is a measured
-    # statement and not an inference.
-    print('')
-    print('The same stretches, for the EKF alone - what the scan matcher had')
-    print('to work against:')
-    print('')
-    print('| stretch | pass | entry along-x | exit along-x | growth |')
-    print('|---|---|---|---|---|')
-    for stretch in stretches:
-        groups = _passes(rows, stretch)
-        for number, group in enumerate(groups, start=1):
-            first, last = rows[group[0]], rows[group[-1]]
-            if math.isnan(first['ekf_wx']):
-                continue
-            ex0, _, _ = _errors(first, 'ekf')
-            ex1, _, _ = _errors(last, 'ekf')
-            print('| **{}** | {} | {:+.3f} m | {:+.3f} m | {:+.3f} m |'.format(
-                stretch['name'], number, ex0, ex1, ex1 - ex0))
+    # statement and not an inference. Anchored mode only: the EKF's frame
+    # has no derived world registration, so there is nothing to score it
+    # against absolutely.
+    if not absolute:
+        print('')
+        print('The same stretches, for the EKF alone - what the scan matcher '
+              'had')
+        print('to work against:')
+        print('')
+        print('| stretch | pass | entry along-x | exit along-x | growth |')
+        print('|---|---|---|---|---|')
+        for stretch in stretches:
+            groups = _passes(rows, stretch)
+            for number, group in enumerate(groups, start=1):
+                first, last = rows[group[0]], rows[group[-1]]
+                if math.isnan(first['ekf_wx']):
+                    continue
+                ex0, _, _ = _errors(first, 'ekf')
+                ex1, _, _ = _errors(last, 'ekf')
+                print('| **{}** | {} | {:+.3f} m | {:+.3f} m | {:+.3f} m |'
+                      .format(stretch['name'], number, ex0, ex1, ex1 - ex0))
 
     # ---- loop closure, detected as a step in map -> odom ----
     print('')
@@ -719,6 +939,31 @@ def build_parser():
 
     ana = sub.add_parser('analyse', help='read the run against the prediction')
     ana.add_argument('--csv', required=True)
+    # MANDATORY, AND MANDATORY IS THE POINT. There is no default because
+    # the two modes answer different questions, differ by an order of
+    # magnitude, and neither output would look wrong to a reader who had
+    # not chosen. Before 2026-08-04 this tool had one unnamed behaviour -
+    # the anchored one - and the localisation reading of its numbers was
+    # circular (m5-08c finding 2). The fix is a name and a choice, not a
+    # better default.
+    ana.add_argument('--score', required=True,
+                     choices=('absolute', 'anchored-drift'),
+                     help='absolute: carry map->base_link into the world '
+                          'through the COMMITTED, pre-derived registration; '
+                          'no per-run anchoring anywhere; keeps the parked '
+                          'samples. THE ONLY MODE IN WHICH "LOCALISATION '
+                          'ERROR" MAY BE SAID. || anchored-drift: rigidly '
+                          'anchor the estimate onto truth at the first '
+                          'drive sample, so the error starts at zero by '
+                          'construction. Valid for MAPPING DRIFT, invalid '
+                          'for any localisation score - it cannot see a '
+                          'constant error or a wrong frame')
+    ana.add_argument('--registration', default=None,
+                     help='registration file for --score absolute (default: '
+                          'sim/maps/warehouse/warehouse_registration.yaml). '
+                          'Its grid md5 is verified, so a run scored against '
+                          'a rebuilt map fails rather than producing a '
+                          'plausible wrong number')
     ana.add_argument('--jump-m', type=float, default=0.05,
                      help='map->odom step counted as a correction, m')
     ana.add_argument('--jump-rad', type=float, default=0.0087,

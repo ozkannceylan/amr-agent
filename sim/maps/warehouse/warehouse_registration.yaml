@@ -1,0 +1,75 @@
+# warehouse_registration.yaml - T(world -> map) for the grid named below.
+#
+# DERIVED, NOT ASSERTED. Every number in this file was computed by
+# register_map.py from the committed grid and the committed world file; no
+# figure from any run entered the calculation. Re-derive with
+#
+#     python3 sim/maps/warehouse/register_map.py derive
+#
+# THIS FILE IS BOUND TO ONE GRID. map_md5 below is the md5 of the .pgm this
+# transform was derived from. A regenerated map draws a new gyro bias sign,
+# a new pre-drive idle and a new first-scan pose, so its rotation from the
+# building is a DIFFERENT NUMBER: load_registration() refuses a grid whose
+# md5 does not match, and nothing downstream may carry this transform
+# across a rebuild.
+#
+# THE RESIDUAL IS THE FLOOR. residual_max_m is the largest perpendicular
+# distance between a wall point in the grid and where this transform says
+# that wall is. No rigid transform fits this grid to the building better
+# than that, so no localisation error smaller than it is a measurement of
+# the localiser.
+#
+#   p_map = R(theta) * p_world + t
+#
+map_yaml: warehouse.yaml
+map_image: warehouse.pgm
+map_md5: a663163036c5890937f9045bcf559e72
+map_yaml_md5: 62bfa651dbb7f93d6a873a4edcf433cf
+world_sdf: sim/worlds/warehouse.sdf
+world_md5: c3bd8f810a72a3d4846d8a202f077e3e
+derived_utc: 2026-08-04T05:00:23Z
+tool: sim/maps/warehouse/register_map.py
+
+theta_rad: -0.007915259
+theta_deg: -0.453510947
+t_x_m: 6.029222691
+t_y_m: 5.541459743
+
+residual_rms_m: 0.040363
+residual_max_m: 0.141100
+shear_deg: 0.325049
+n_wall_points: 1444
+trim_cells: 3.0
+
+# per wall: extremes taken, extremes kept by the trimming
+# rule, its own rotation from the building, and max
+# residual against the common transform
+walls:
+  - name: WallWest
+    extremes: 410
+    points: 297
+    dropped: 113
+    angle_deg: -0.5828
+    fit_rms_m: 0.0177
+    residual_max_m: 0.0913
+  - name: WallSouthEast+WallSouthWest
+    extremes: 605
+    points: 400
+    dropped: 205
+    angle_deg: -0.2577
+    fit_rms_m: 0.0254
+    residual_max_m: 0.1411
+  - name: WallNorth
+    extremes: 605
+    points: 346
+    dropped: 259
+    angle_deg: -0.5494
+    fit_rms_m: 0.0198
+    residual_max_m: 0.0891
+  - name: WallEast
+    extremes: 410
+    points: 401
+    dropped: 9
+    angle_deg: -0.4646
+    fit_rms_m: 0.0159
+    residual_max_m: 0.0751
