@@ -110,6 +110,33 @@ forced the last two.
     (bea766b).
 20. m5-19 verifier — gate verification, last.
 
+## Session handover, 2026-08-04
+
+The vehicle side of M5 is built and evidenced through Nav2. The owner is
+pausing agent work here to settle the PLC questions first, so a later session
+should expect the next instruction to concern the PLC half, not the vehicle.
+
+**The one hard external dependency.** `plc/forklift-safety/FIO-FEASIBILITY.md`
+is written and its verdict section is blank: five owner-executed steps in TIA
+Portal and PLCSIM Advanced that settle whether the simulated scanner can drive
+real configured F-I/O through the PLCSIM Advanced API by tag name. It blocks
+m5-15 (the F-program spec) and nothing else. A NO verdict also reopens
+roadmap criterion (a) — that blocker is stated in docs/TODO.md and was
+deferred by owner ruling until the verdict is in, rather than pre-decided.
+
+**Agent discipline for the next session**, learned the hard way here: run ONE
+agent at a time. Parallel fleets both hit usage limits sooner and multiply the
+loss when a limit or a container suspension lands — four agents died to one
+suspension in this session and three runs were lost to limits. Every brief
+should require intermediate results to be written into the evidence as they
+land rather than held for the end; that change reduced a lost run from hours
+of work to minutes.
+
+**What a resumed session should read first**, in order: docs/LESSONS.md (the
+standing rule), this file, docs/TODO.md's "M5 - where the work stands"
+section for the measured numbers that should not be re-derived, then the
+report for whichever brief it is resuming.
+
 Sequencing rule for this gate, from the owner: each module is verified before
 the next builds on it. A wave does not open on an unverified predecessor.
 
