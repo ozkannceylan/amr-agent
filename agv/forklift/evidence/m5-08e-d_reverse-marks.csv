@@ -1,0 +1,5 @@
+sim_s,label,speed_mps,steer_rad
+29.3840,settle,0.0000,0.0000
+33.3840,reverse through East A,-0.6000,0.0000
+47.5840,stop,0.0000,0.0000
+55.6260,END,0.0000,0.0000

@@ -1,0 +1,12 @@
+/tf
+  Publisher count: 2
+    Node name: amcl   Node namespace: /   Topic type: tf2_msgs/msg/TFMessage
+    Node name: forklift_ekf   Node namespace: /   Topic type: tf2_msgs/msg/TFMessage
+  Edges observed over 12 s, parent -> child : messages
+    forklift/odom -> forklift/base_link : 567
+    map -> forklift/odom : 97
+/tf_static
+  Publisher count: 1
+    Node name: sensor_tf
+
+VERDICT: 2 publisher(s) on /tf: amcl, forklift_ekf

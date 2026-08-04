@@ -1,0 +1,251 @@
+# amcl.yaml - nav2_amcl 1.3.12 (Jazzy) against the committed warehouse map.
+#
+# WHAT THIS FILE CONFIGURES AND WHAT IT DOES NOT
+#
+#   Two lifecycle nodes, started by agv/forklift/launch/localization.launch.py:
+#   `map_server`, which serves the FROZEN committed grid, and `amcl`, which
+#   localises the vehicle in it. Nothing here plans, controls or stops
+#   anything. The protective stop and safe torque off are onboard and
+#   hardwired and appear in no parameter below (invariant 1).
+#
+# WHAT REACHES AMCL. EXACTLY TWO THINGS.
+#
+#   1. `/forklift/scan` - the NAVIGATION lidar at z = 1.80 m, 360 ranges
+#      over 360 deg at 10 Hz (agv/forklift/model.sdf, `nav_lidar`).
+#   2. `forklift/odom -> forklift/base_link` on /tf - the EKF's estimate,
+#      and the EKF is the sole publisher of that edge
+#      (agv/forklift/ekf.yaml, invariant 10).
+#
+#   AND NOTHING ELSE. In particular:
+#
+#   - NO GROUND TRUTH. `/forklift/odom` is the simulator's own pose despite
+#     its name (agv/forklift/config.yaml says so). It is not in this file,
+#     it is not in ekf.yaml, and no parameter here can reach it. The
+#     reference stream is consumed by the SCORER only.
+#   - NEITHER SAFETY SCANNER. `safety_scanner_front/measurement` and
+#     `safety_scanner_rear/measurement` are non-safe measurement channels of
+#     devices whose safe channel is not on either transport at all
+#     (agv/forklift/README.md). A localiser that consumed one would create
+#     the impression that a safety device carries a process function, and
+#     the rear channel is not even bridged. `scan_topic` names one topic.
+#
+# THE MOTION MODEL, STATED AND JUSTIFIED
+#
+#   `robot_model_type: "nav2_amcl::DifferentialMotionModel"`.
+#
+#   This vehicle is a TRICYCLE: one steered, driven wheel leading, two
+#   passive wheels trailing (model.sdf). A tricycle CANNOT TRANSLATE
+#   SIDEWAYS - its rear axle midpoint has purely longitudinal velocity,
+#   which is exactly the constraint the differential model encodes and
+#   exactly the constraint `nav2_amcl::OmniMotionModel` removes. The omni
+#   model adds an independent lateral noise term (alpha3 applied to a
+#   sideways translation), so its particles would spread into poses this
+#   vehicle cannot reach, and AMCL would then be free to explain a scan
+#   with a lateral slip that never happened.
+#
+#   The retired RB-KAIROS platform (ADR 0010 D1) was a genuine omni base,
+#   and the omni model was correct FOR IT. It is written out here rather
+#   than left at a default so that the choice is a decision on the record
+#   and not an inheritance.
+#
+#   The differential model is ALSO the nav2 default. That is a coincidence,
+#   not the reason, and it is stated so that nobody reading the table below
+#   mistakes "same as default" for "not chosen".
+#
+# EVERY NON-DEFAULT IS LISTED IN agv/forklift/EVIDENCE_LOCALIZATION.md
+# SECTION 3 WITH ONE SENTENCE OF REASON. Values that equal the nav2 default
+# and are still written here carry the marker DEFAULT-KEPT and a reason for
+# keeping them, because a default that matters to a measurement is a choice
+# too.
+#
+# NOTHING IN THIS FILE WAS TUNED AGAINST A RESULT. Every value below was
+# fixed before the first scored run, from the sensor's own datasheet
+# (model.sdf), from the frame names the messages actually carry
+# (config.yaml `frames:`), or from a measurement somebody else published
+# (sim/worlds/WAREHOUSE_LANDMARKS.md). The evidence records the run order so
+# that claim is checkable.
+
+map_server:
+  ros__parameters:
+    use_sim_time: true
+
+    # NON-DEFAULT (nav2 leaves it unset and expects the launch to supply
+    # it). Set from the launch argument `map`, which defaults to the
+    # committed sim/maps/warehouse/warehouse.yaml. This file does not
+    # hardcode the path, because the map has one owner and it is not agv/.
+    # yaml_filename: <supplied by the launch>
+
+    # DEFAULT-KEPT. `map` is the topic amcl subscribes to below, and `map`
+    # is the frame the registration in sim/maps/warehouse/ is expressed in.
+    topic_name: "map"
+    frame_id: "map"
+
+amcl:
+  ros__parameters:
+    use_sim_time: true
+
+    # ---- frames and topics: this vehicle's, not a tutorial robot's ----
+
+    # NON-DEFAULT (nav2: "base_footprint"). The string the messages
+    # actually carry; model.sdf's OdometryPublisher writes it and
+    # config.yaml `frames:` mirrors it.
+    base_frame_id: "forklift/base_link"
+
+    # NON-DEFAULT (nav2: "odom"). Same reason; ekf.yaml publishes this
+    # exact string as the parent of base_link.
+    odom_frame_id: "forklift/odom"
+
+    # DEFAULT-KEPT. The frame the committed map and its registration are
+    # expressed in. AMCL becomes the SOLE publisher of map -> forklift/odom.
+    global_frame_id: "map"
+
+    # NON-DEFAULT (nav2: "scan"). The navigation lidar, and the only sensor
+    # topic in this file. See the header for what is deliberately absent.
+    scan_topic: "/forklift/scan"
+
+    # DEFAULT-KEPT. map_server publishes the frozen grid here, latched.
+    map_topic: "map"
+
+    # ---- the motion model ----
+
+    # See the header. Tricycle: no sideways translation exists to model.
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+
+    # DEFAULT-KEPT, all five. These are the motion model's noise terms and
+    # they are left at the nav2 defaults ON PURPOSE: deriving them from
+    # this vehicle's own encoder model would be a second, competing
+    # statement of a quantity agv/forklift/ekf.yaml already owns
+    # (invariant 10), and fitting them to a result is the tuning this
+    # brief forbids. They are recorded here so that "default" is a stated
+    # position rather than an omission.
+    alpha1: 0.2
+    alpha2: 0.2
+    alpha3: 0.2
+    alpha4: 0.2
+    alpha5: 0.2
+
+    # ---- the sensor model ----
+
+    # DEFAULT-KEPT. The likelihood field model; the beam model's per-ray
+    # raycast is far more expensive and this host is already software
+    # rasterising the lidar.
+    laser_model_type: "likelihood_field"
+
+    # NON-DEFAULT (nav2: -1.0 and 100.0). The navigation lidar's OWN
+    # limits, quoted from model.sdf's nav_lidar <range>: min 0.10 m, max
+    # 8.00 m. AMCL's defaults describe a different sensor, and a max range
+    # twelve times the real one changes which returns are treated as
+    # "saw nothing".
+    laser_min_range: 0.10
+    laser_max_range: 8.00
+
+    # NON-DEFAULT (nav2: 60). The scan carries 360 rays. AMCL subsamples to
+    # `max_beams` evenly, so the default keeps one ray in six.
+    # sim/worlds/WAREHOUSE_LANDMARKS.md section 5 measured that in the whole
+    # east half of this world "the only along-aisle information in the scan
+    # is carried by ten rays or fewer" (top10 above 90%), and one-in-six of
+    # ten rays is under two rays. Keeping one ray in two is the difference
+    # between subsampling a degenerate scan and discarding it. Raised for
+    # that measured reason, before the first run, and not moved afterwards.
+    max_beams: 180
+
+    # DEFAULT-KEPT. The mixture weights and the hit sigma of the likelihood
+    # field. Nothing measured about this world argues for moving them, and
+    # moving them to improve a figure is the forbidden tuning.
+    z_hit: 0.5
+    z_rand: 0.5
+    z_max: 0.05
+    z_short: 0.05
+    sigma_hit: 0.2
+    lambda_short: 0.1
+    laser_likelihood_max_dist: 2.0
+
+    # DEFAULT-KEPT (off). Beam skipping discards rays that disagree with
+    # the majority of particles - which in a degenerate aisle is a way to
+    # discard exactly the ten rays that carry the along-aisle information.
+    do_beamskip: false
+    beam_skip_distance: 0.5
+    beam_skip_threshold: 0.3
+    beam_skip_error_threshold: 0.9
+
+    # ---- the filter ----
+
+    # DEFAULT-KEPT. 500 to 2000 particles with KLD resampling.
+    min_particles: 500
+    max_particles: 2000
+    pf_err: 0.05
+    pf_z: 0.99
+    resample_interval: 1
+
+    # DEFAULT-KEPT, AND LOAD-BEARING FOR THE DWELL TEST. AMCL runs its
+    # filter only after the vehicle has moved 0.25 m or turned 0.2 rad. A
+    # STANDING VEHICLE THEREFORE GETS NO CORRECTION: map -> odom is held
+    # and re-broadcast, and whatever the odometry does during a dwell
+    # passes through to the pose unopposed. That is the mechanism the dwell
+    # measurement exists to expose, so it is left at the default rather
+    # than lowered to make the dwell look better.
+    update_min_d: 0.25
+    update_min_a: 0.2
+
+    # DEFAULT-KEPT (both zero = augmented-MCL recovery DISABLED), and this
+    # is a deliberate position. Recovery injects random particles when the
+    # short-term likelihood average falls below the long-term one. In an
+    # aisle that carries no along-track information, a randomly injected
+    # particle one bay along scores just as well as the truth, so recovery
+    # could relocate the filter to an equally-likely WRONG pose and the
+    # error curve would show a clean jump that reads as a recovery. With
+    # recovery off, a divergence stays visible as a divergence.
+    recovery_alpha_slow: 0.0
+    recovery_alpha_fast: 0.0
+
+    # DEFAULT-KEPT. AMCL owns map -> forklift/odom and publishes it; the
+    # EKF owns forklift/odom -> forklift/base_link and publishes that. Two
+    # publishers on /tf, two DISJOINT edges, exactly as the SLAM bringup
+    # showed (invariant 10).
+    tf_broadcast: true
+    transform_tolerance: 1.0
+
+    # ---- the initial pose ----
+
+    # NON-DEFAULT (nav2: false). These runs are unattended measurements
+    # with no RViz and no operator, so the pose prior is supplied as a
+    # parameter and STATED per run in the evidence. The launch overrides
+    # the three numbers below; the values here are placeholders that put
+    # the vehicle at the map origin and are never the ones a run uses.
+    set_initial_pose: true
+    initial_pose:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      yaw: 0.0
+
+    # DEFAULT-KEPT (0.5 Hz), AND NOT BY CHOICE. The intent was 0.0, to stop
+    # amcl writing its current pose back into its own initial_pose_*
+    # parameters, so that a measurement could only ever start from the prior
+    # its run states. THAT VALUE DOES NOT WORK: nav2_amcl 1.3.12 computes
+    # save_pose_period_ = tf2::durationFromSec(1.0 / save_pose_rate) with no
+    # guard, so 0.0 gives an infinite period and the CONFIGURE transition
+    # dies with
+    #
+    #   Original error: Input t_sec is too large or too small for
+    #   tf2::Duration
+    #
+    # leaving the node unconfigured and silent. Reproduced on its own,
+    # outside this stack, with `ros2 run nav2_amcl amcl --ros-args -p
+    # save_pose_rate:=0.0` and a single `ros2 lifecycle set /amcl
+    # configure`; 0.5 configures cleanly in the same reproduction.
+    save_pose_rate: 0.5
+
+    # NON-DEFAULT (nav2: false), AND IT IS WHAT save_pose_rate: 0.0 WAS FOR.
+    # With this true, amcl is REQUIRED to be given a pose - from the
+    # parameters above or from /initialpose - whenever the filter is reset,
+    # instead of quietly re-initialising from the last pose it saved. The
+    # stated prior is therefore the only thing a run can start from, which
+    # is the property the convergence measurement depends on: a filter that
+    # silently began from where the previous activation ended would measure
+    # nothing.
+    always_reset_initial_pose: true
+
+    # DEFAULT-KEPT. The map is frozen and served once; this only matters if
+    # a second map ever arrived, which in this stack it cannot.
+    first_map_only: false

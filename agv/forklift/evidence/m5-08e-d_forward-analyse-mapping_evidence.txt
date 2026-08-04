@@ -1,0 +1,81 @@
+# Localisation run, scored ABSOLUTELY
+
+Every `map` pose below was carried into the world frame through the
+COMMITTED transform, derived from the map's walls before this run:
+
+    sim/maps/warehouse/warehouse_registration.yaml
+    theta = -0.007915 rad = -0.4535 deg,  t = (+6.0292, +5.5415) m
+    grid md5 verified: this transform belongs to this map
+
+NO PER-RUN ANCHORING WAS APPLIED ANYWHERE. A constant error stays a
+constant error. 324 of 324 samples carry a map pose.
+
+*** FLOOR: the registration's own residual is 0.0404 m rms, 0.1411 m max.
+    No error below that is a measurement of the localiser; it is a
+    measurement of how well a rigid transform fits a sheared grid.
+
+The EKF is NOT scored in this mode. `forklift/odom` has no derived
+registration to the world - only `map` does - and asserting one from
+the spawn pose is exactly the thing this mode exists to stop.
+
+parked before the drive     7.0 s, absolute error mean 0.000 m, max 0.003 m  (KEPT, not dropped)
+parked  after the drive    11.2 s, absolute error mean 0.172 m, max 0.176 m  (KEPT, not dropped)
+
+parked before the drive     7.0 s, EKF heading moved   +0.02 deg  (+0.00004 rad/s at rest)
+parked  after the drive    11.2 s, EKF heading moved   +0.10 deg  (+0.00016 rad/s at rest)
+samples scored           324  (whole recording; parked samples KEPT)
+samples with a SLAM pose 324
+simulation time          32.1 s
+ground-truth path        8.52 m
+ground-truth turning     0.2 deg (1 s stride)
+
+NOTHING BELOW IS ANCHORED. Every error is an ABSOLUTE world-frame
+error, taken through the committed transform above, floor 0.1411 m.
+
+## Whole-run error against ground truth
+
+| estimate | final |dx,dy| | final heading | max |dx,dy| | rms |dx,dy| |
+|---|---|---|---|---|
+| map -> base_link, ABSOLUTE | 0.176 m | -1.58 deg | 0.176 m | 0.118 m |
+
+## The three named degenerate stretches
+
+Extents read from WAREHOUSE_LANDMARKS.md section 5 at run time.
+`along-x` is the error component ALONG the aisle, which is the
+direction those stretches carry no information in.
+
+| stretch | pass | samples | seconds | entry along-x | exit along-x | growth | max across-y | heading at exit |
+|---|---|---|---|---|---|---|---|---|
+| **East A** | 1 | 84 | 8.2 s | +0.005 m | -0.089 m | -0.094 m | 0.058 m | -1.05 deg |
+| **East B** | - | 0 | - | not driven with a SLAM pose | | | | |
+| **East dock** | - | 0 | - | not driven with a SLAM pose | | | | |
+
+## Corrections to map -> forklift/odom
+
+A loop closure re-optimises the graph and moves map -> odom in one
+step. Steps above 0.050 m or 0.50 deg between consecutive
+samples are listed; continuous scan matching moves this transform
+smoothly and produces none.
+
+| sim time | step | heading step | at ground truth | on |
+|---|---|---|---|---|
+| 8.0 s | 0.017 m | +1.24 deg | (+1.64, +7.00) | East A |
+| 8.5 s | 0.011 m | +0.88 deg | (+1.94, +7.00) | East A |
+| 9.5 s | 0.020 m | +1.02 deg | (+2.54, +7.00) | East A |
+| 10.0 s | 0.024 m | +1.12 deg | (+2.84, +7.00) | East A |
+| 10.5 s | 0.081 m | +2.39 deg | (+3.14, +6.99) | East A |
+| 11.0 s | 0.022 m | +0.81 deg | (+3.44, +6.99) | East A |
+| 11.5 s | 0.051 m | +0.26 deg | (+3.74, +6.99) | East A |
+| 12.4 s | 0.044 m | +0.62 deg | (+4.31, +6.99) | East A |
+| 12.9 s | 0.070 m | +1.32 deg | (+4.61, +6.99) | East A |
+| 13.5 s | 0.089 m | +1.32 deg | (+4.97, +6.99) | East A |
+| 13.9 s | 0.053 m | +0.88 deg | (+5.21, +6.99) | East A |
+| 14.5 s | 0.096 m | +1.17 deg | (+5.57, +6.99) | East A |
+| 15.0 s | 0.131 m | +1.63 deg | (+5.87, +6.99) | East A |
+| 15.5 s | 0.104 m | +1.29 deg | (+6.17, +6.98) | East A |
+| 16.0 s | 0.056 m | +0.68 deg | (+6.47, +6.98) | aisle A east |
+| 16.5 s | 0.068 m | +0.70 deg | (+6.77, +6.98) | aisle A east |
+| 18.5 s | 0.051 m | +0.34 deg | (+7.97, +6.98) | aisle A east |
+| 20.5 s | 0.153 m | +1.07 deg | (+9.14, +6.97) | aisle A east |
+
+total map->odom steps above threshold: 18
