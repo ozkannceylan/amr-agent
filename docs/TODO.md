@@ -113,17 +113,27 @@ docs/PLAN.md.
 - Later gates: the M6 deep-research brief (ADR 0010 D6d) and the
   m4-00-hermes-survey decisions for M7 (D6c) — each done when owner-ruled.
 
-## sim — M5, queued behind the m5-06 topic names
-- sim/launch/forklift_bringup.launch.py bridges `/forklift/gz/scan`, which
-  m5-04 replaced with three scanners: it spawns cleanly, logs a bridge for
-  every entry, reports no error and carries no data — a SILENT failure that
-  will hang the rehearsal. Fix once m5-06 publishes the channel names
-  (m5-07 open question 1). Done when the bringup carries data on the new
-  topics, shown by an echo.
-- The arena has nothing at the 1.80 m navigation plane except one pillar —
-  SLAM needs landmarks there, and a long featureless aisle is a degenerate
-  direction no parameter fixes (m5-04 open question 2, m5-08 depends on it).
-- The mast's rendered and physical bodies disagree (m5-04 open question 5).
+## sim — M5 carried
+- `warehouse_slam.launch.py` carries a lifecycle emit-before-register race:
+  the run dies after "Read map ... 606 X 410" with no error in any log. The
+  fix pattern is proven in `agv/forklift/launch/localization.launch.py` —
+  register every handler, then emit (m5-08e). Done when the race is gone and
+  a clean chain is captured.
+- `warehouse_bringup.launch.py` has no `seed` argument, so a seeded A/B of
+  the reverse traversal is impossible; m5-10's forward control was handed 8x
+  more heading drift than its reverse pass and the confound had to be named
+  instead of removed (m5-08e, m5-10). Done when a seed can be passed.
+- `forklift_bringup.launch.py` cannot bring the current vehicle stack up: it
+  still lacks the IMU bridge, wheel odometry, EKF, `imu_gate.py` and the new
+  `standstill` config key (m5-07c/d/e). The arena scenarios cannot run until
+  it does. Done when the arena bringup carries the same stack the warehouse
+  one does, shown by an echo.
+- The arena has almost nothing at the 1.80 m navigation plane; the warehouse
+  world was built for autonomy instead (owner ruling, ADR-recorded in the
+  roadmap). Only relevant if an arena navigation scenario is ever wanted.
+- The mast's rendered and physical bodies disagree — measured: the nav lidar
+  reports the mast as two 4-ray rail lobes, 8.75 deg simulated against 29.0
+  deg physical (m5-04 OQ5, quantified by m5-04b).
 
 ## sim
 - Cell reskin (deferred, visual only, ARIAC licence blocker unchanged).
@@ -154,6 +164,56 @@ docs/PLAN.md.
   m5-09 could not touch either (a concurrent agent held sim/launch/ and
   sim/worlds/). Definition of done: both are ruled on and, if kept, say so
   as record rather than as a runnable procedure.
+
+## M5 — where the work stands (2026-08-04)
+
+Vehicle side, CLOSED and evidenced: sensors and coverage; the measurement /
+safe channel split; realistic odometry (IMU + tricycle wheel odometry + EKF,
+noise from a datasheet) with the standstill gate and its post-drive leak
+closed; the warehouse world with a measured landmark map; SLAM, an
+adversarial judge round, a rebuilt map, a committed world->map registration
+and absolute scoring; AMCL; and Nav2 for the tricycle.
+
+Vehicle side, NOT STARTED: m5-11 envelope gate node, m5-12 protective and
+warning field evaluation, m5-13 monitoring service, m5-14 HMI v2a then v2b.
+
+Documents, CLOSED: opcua-nodes §12 (envelope, mode, process stop), the
+standard program delta (SPEC §14), the PLr derivations and the D5 claim
+boundary.
+
+Documents, BLOCKED: m5-15 the F-program spec, on the m5-03 verdict alone.
+
+### Measured numbers a later session should not re-derive
+- Localization: steady-state rms 0.124 m, max 0.263 m, against a registration
+  residual MAX of **0.141 m** — the instrument floor. Any figure at or below
+  it is "at the instrument's resolution", never a smaller number. The floor
+  swallows 74 % of the route run, so a criterion tighter than ~0.14 m is not
+  measurable through this map.
+- Odometry drift the localizer exists to correct: 106 m route with 1450 deg of
+  turning gives roughly 5 m and 13-17 deg, bias sign drawn per run.
+- Estimator dwell cost: 0.000 deg for a dwell beginning >16 s after the stop;
+  the "at most 0.33 deg" figure for a dwell beginning at the stop was measured
+  from one stop and was exceeded 1.6x by the AMCL dwell — treat it as an
+  observation with n=1, not a bound.
+- Nav2: straight 0.183 m absolute; short reverse tracks to rms 0.0009 m but a
+  6 m reverse diverges to 50 deg at about 2.4 m (n=1) because pure pursuit is
+  stable only with the steered axle leading; a goal inside racking is refused
+  with the vehicle never moving; `footprint_padding: 0.27` is set from the
+  measured 0.263 m.
+- Render budget: three lidars at 910 rays total cost nothing measurable
+  headless (RTF 1.0004); the GUI costs ~8 points and the beams ~2.5.
+
+### Carried from m5-10, for m5-11 and later
+- Goal tolerance 0.25 m sits below the vehicle's own manoeuvring granularity
+  (smallest measured arc radius 1.29 m); one attempt in four shuffled 240 s
+  at 0.335 m out. Revisit when docking is specified.
+- Every plan on the straight route opens with a 0.092 m Reeds-Shepp reverse
+  that RPP executes; `reverse_penalty` cannot remove it without wrecking
+  genuine reverses (swept 2/3/5/10).
+- Routes through the 2.35 m column pinches leave 0.356 m of total budget,
+  which makes drivability a fleet-routing decision at M6, not a tuning one.
+- The refusal error code does not carry its reason (208 driven, 207 on the
+  bench).
 
 ## interface
 - Carried (fold into the next interface brief): opcua-nodes.md §10.1 still
