@@ -74,10 +74,15 @@ forced the last two.
 
 ### Wave C — autonomy and the envelope. IN FLIGHT
 
-11. **m5-10 Nav2 for the tricycle — in flight.** Configuration and launch
-    landed unverified (307dd10, 73e1e62) when a usage limit cut the first
-    agent; the resumed agent verifies them rather than inheriting them.
-12. m5-11 agv — the envelope gate node: consumes the PLC envelope, gates
+11. m5-10 Nav2 for the tricycle. CLOSED (a5b330d): SmacPlannerHybrid with
+    REEDS_SHEPP and RegulatedPurePursuit, the Twist->tricycle conversion
+    derived and checked in the simulator, and four measured cases including
+    a goal the planner correctly refuses without the vehicle moving.
+12. **m5-11 agv — NEXT.** The envelope gate node: subscribes to the PLC
+    envelope, gates motion, and sits BELOW the velocity smoother so it still
+    acts with the link dead; the smoother moves to CLOSED_LOOP against
+    odometry, because Nav2's open-loop default limits acceleration against
+    its own last command and would lurch on gate release — the envelope gate node: consumes the PLC envelope, gates
     motion below the smoother so it acts with the link dead, velocity
     smoother closed-loop against odometry.
 13. m5-12 agv/sim — protective and warning field evaluation from the two
