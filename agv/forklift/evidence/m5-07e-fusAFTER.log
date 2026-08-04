@@ -1,0 +1,110 @@
+
+=== 1. the run ========================================================
+  manoeuvre set, timed on the SIMULATION clock:
+    settle         3.0 s  speed +0.00 m/s  steer +0.000 rad
+    straight 1    10.0 s  speed +1.00 m/s  steer +0.000 rad
+    turn left     40.0 s  speed +1.00 m/s  steer +0.350 rad
+    straight 2    10.0 s  speed +1.00 m/s  steer +0.000 rad
+    turn right    40.0 s  speed +1.00 m/s  steer -0.350 rad
+    straight 3    10.0 s  speed +1.00 m/s  steer +0.000 rad
+    stop           5.0 s  speed +0.00 m/s  steer +0.000 rad
+  [PASS] ground truth was recorded   (2420 samples)
+  [PASS] wheel odometry was recorded   (6050 samples)
+  [PASS] joint states were recorded   (60500 samples)
+
+=== 2. what the vehicle actually did ==================================
+  path length            106.492 m
+  heading swept, TOTAL   25.302 rad  (1449.7 deg, 4.03 turns)
+  heading swept, net     +0.169 rad  (+9.7 deg) - near zero because the two sustained turns oppose
+  simulated duration     120.95 s
+  final truth pose       (+30.683, +3.461) m, yaw +0.1690 rad
+
+=== 3. slip, separated from the cos(delta) geometry ===================
+  drive wheel tread turned          109.999 m
+  base_link path (ground truth)     106.492 m
+  rear axle path (ground truth)     105.453 m
+  rear axle path predicted from
+    tread * cos(steer), no slip     105.407 m
+
+  NAIVE "slip" = (tread - base_link path) / path   +3.29 %
+  REAL  slip   = (predicted - true) rear axle path -0.04 %
+  [note] the difference between those two numbers is geometry, not slip: a steered drive wheel travels a longer path than the axle it pushes, by 1/cos(delta), and base_link is offset from that axle again
+
+=== 4. the wheel odometry alone, against ground truth =================
+
+  wheel odometry error against ground truth
+   after [m]   position [m]  heading [deg]
+       10.67         0.5391         1.8996
+       26.64         0.8992         8.7729
+       53.24         2.2514        17.5563
+       79.87         4.2359        11.7468
+      106.49         5.2409         8.8301   <- final
+  worst position error 5.2410 m at 106.49 m travelled
+
+=== 5. the fused estimate (the EKF transform) against truth ===========
+  [PASS] exactly one publisher of forklift/odom -> forklift/base_link   (1 publisher(s) of /tf: ['forklift_ekf'])
+  [PASS] the EKF transform was published on /tf   (5995 transforms recorded)
+  [PASS] a tf2 consumer on simulation time resolves the edge at "now"   (155554 successful lookups; last error: none)
+
+  EKF (odom -> base_link) error against ground truth
+   after [m]   position [m]  heading [deg]
+       10.67         0.1077        -1.0455
+       26.64         0.0229        -2.0796
+       53.24         0.5162        -4.3722
+       79.87         1.2406        -8.4822
+      106.49         3.2255       -12.7872   <- final
+  worst position error 3.2259 m at 106.49 m travelled
+
+=== 6. did fusing the IMU help? =======================================
+                               position [m]    heading [deg]
+  wheel odometry alone               5.2409           8.8301
+  EKF, wheels + gyro                 3.2255         -12.7872
+
+  WHY, MEASURED RATHER THAN ASSERTED:
+  mean gyro z over the run     -0.001211 rad/s  (12100 samples)
+  the vehicle's own mean yaw rate  +0.001398 rad/s (ground truth)
+  the difference, the BIAS     -0.002608 rad/s  (model.sdf declares 0.002618, sign drawn by gz)
+  bias x duration              -0.3155 rad = -18.08 deg
+  EKF heading error            -0.2232 rad = -12.79 deg
+  The filter is tracking the gyro. The IMU arrives at 100 Hz and the
+  wheel odometry at 50 Hz, so the gyro gets twice the corrections, and
+  the package-default process noise on yaw rate is large enough that
+  the estimate follows whichever measurement came last. The message
+  covariance the filter is given carries the gyro's WHITE NOISE only.
+  [note] this comparison is REPORTED, not required to come out either way. A gyro whose bias the filter is not told about can make heading worse, and that is a finding about cheap MEMS IMUs rather than a defect.
+
+=== 6b. the same run, split into moving and standing ==================
+  THE SPLIT IS TAKEN FROM THE VEHICLE'S OWN ENCODER
+  VERDICT, not from the profile's nominal timings and
+  not from ground truth. Its purpose is to show which
+  part of the run a change to standstill handling can
+  possibly have touched.
+
+  recorded window            120.98 s
+  of which the wheels were
+    reported standing still  10.22 s
+  first / last moving sample 28.12 s .. 138.86 s
+  gyro samples on /forklift/imu 12100
+  gyro samples on /forklift/imu_gated 11076   (zero means the gate is
+    not running and the filter is remapped onto the raw topic, not that it lost its gyro)
+
+  heading error at the first moving sample  +0.0000 deg
+  heading error at the last moving sample   -12.7800 deg
+  DRIFT ACCUMULATED WHILE MOVING            -12.7800 deg over 110.74 s
+  bias x MOVING seconds                     -16.5509 deg
+  bias x RECORDED seconds                   -18.0765 deg
+  [note] the moving-only figure is the one to compare across builds. A change that only affects standing intervals leaves it alone and shortens the whole-run figure by bias x the standing seconds; a change that also flatters the moving case moves it, and would be doing something other than what it claims.
+
+=== 7. the drift against what it has to exercise ======================
+  sim/worlds/WAREHOUSE_LANDMARKS.md section 5 names three
+  degenerate stretches, 4.0 to 5.5 m long, in which the scan
+  carries almost no along-aisle information and odometry has
+  to carry the vehicle across them.
+
+  measured position error      3.2255 m over 106.49 m
+  pro rata over the longest
+  degenerate stretch, 5.5 m    0.1666 m
+  [note] the pro-rata figure is an ORDER OF MAGNITUDE and not a prediction: dead-reckoning error grows with heading error, so it is superlinear in distance and depends on the manoeuvres, not only on how far the vehicle went
+
+6 check(s), 0 failed
+HARNESS_RC=0

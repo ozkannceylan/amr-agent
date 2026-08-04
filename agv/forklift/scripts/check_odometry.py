@@ -32,6 +32,22 @@ WHAT THIS IS
                      ITSELF at the start of the window. There is nothing
                      for truth to contribute to a question of the form
                      "did this number change while nothing happened".
+    --phase postidle THE SAME QUESTION IN THE OTHER REGIME: the idle
+                     AFTER a drive. It drives `_PROFILE` first and then
+                     measures, so it differs from --phase idle in one
+                     thing, whether the vehicle has moved. It also
+                     records the encoders' sub-count residual, every
+                     standstill re-arm, both IMU streams and the
+                     filter's own yaw rate, and attributes the heading
+                     it measures to gate-open, filter-relaxing and
+                     filter-quiet intervals - which is what tells a gate
+                     that admits samples apart from a filter that turns
+                     without one. No ground truth here either.
+    --phase replay   NO ROS AND NO SIMULATOR. Reads a series written by
+                     --phase postidle and replays candidate standstill
+                     rules over the recorded counts, so "what would a
+                     different rule have done" is answered from a
+                     committed artifact rather than by re-measuring.
 
 WHAT IT IS NOT
   It is not part of the vehicle. Nothing here runs in a demonstration and
@@ -59,6 +75,8 @@ the session container, per sim/setup/CONTAINER_TOOLCHAIN.md section 3.3):
   python3 agv/forklift/scripts/check_odometry.py --phase wheel
   python3 agv/forklift/scripts/check_odometry.py --phase fusion
   python3 agv/forklift/scripts/check_odometry.py --phase idle --idle 60
+  python3 agv/forklift/scripts/check_odometry.py --phase postidle \
+      --idle 210 --csv agv/forklift/evidence/postidle.csv
 
   The four live phases need a running stack and they set use_sim_time on
   their own node, because every message they read is stamped with the
@@ -479,7 +497,129 @@ def phase_static(checker):
     checker.note('that is the encoder quantisation, the one-count steer zero '
                  'offset and the 0.5% rolling-radius error, with NO slip and '
                  'NO IMU. The live phases add the physics.')
+
+    section('6. the standstill verdict, driven through count series')
+    check_standstill_window(checker, cfg)
     return checker
+
+
+def check_standstill_window(checker, cfg):
+    """Drive StandstillWindow through series whose answer is known.
+
+    NO ROS, NO SIMULATOR. The defect brief m5-07e fixed - a slow axis
+    relaxation discarding a standstill the vehicle had been holding
+    throughout - cost a 210 s live run to find. Every case below is the
+    same question asked as a table, so the next one costs nothing
+    (LESSONS 2026-07-29).
+    """
+    sys.path.insert(0, _THIS_DIR)
+    import wheel_odometry as wo
+
+    still = cfg['standstill']
+    window_s = float(still['window_s'])
+    tol = int(still['steer_tolerance_counts'])
+    hz = float(cfg['odometry']['publish_hz']) * 10.0   # the joint-state rate
+
+    def run(drive_of, steer_of, seconds, dt=1.0 / hz, start=100.0):
+        """Feed a series and return the fraction of samples verdict-true,
+        counted only after the first window has had time to fill."""
+        sw = wo.StandstillWindow(window_s, tol, bool(still['include_steer_axis']))
+        true_n = total = 0
+        n = int(round(seconds / dt))
+        for i in range(n):
+            t = start + i * dt
+            verdict = sw.update(t, drive_of(i * dt), steer_of(i * dt))
+            if i * dt >= window_s + dt:
+                total += 1
+                true_n += 1 if verdict else 0
+        return true_n / float(total) if total else float('nan')
+
+    zero = lambda s: 0
+    checker.check('a vehicle whose counts never move reads standstill',
+                  run(zero, zero, 10.0) == 1.0,
+                  'verdict true for {:.1%} of the samples after the first '
+                  'window'.format(run(zero, zero, 10.0)))
+
+    # The window has to elapse before the verdict forms, and not before.
+    sw = wo.StandstillWindow(window_s, tol, True)
+    dt = 1.0 / hz
+    seen_true_at = None
+    for i in range(int(round(3.0 / dt))):
+        if sw.update(100.0 + i * dt, 0, 0) and seen_true_at is None:
+            seen_true_at = i * dt
+    checker.check('the verdict waits the whole window before it forms',
+                  seen_true_at is not None
+                  and abs(seen_true_at - window_s) <= 2.0 * dt,
+                  'first true at {:.4f} s against a {:.3f} s window'.format(
+                      seen_true_at if seen_true_at is not None
+                      else float('nan'), window_s))
+
+    # THE DEFECT THIS SECTION EXISTS FOR. A steer axis relaxing by one
+    # count every 11 s, with the drive count dead still - the measured
+    # post-drive behaviour of this vehicle (EVIDENCE_ODOMETRY.md 13).
+    creep = run(zero, lambda s: int(s // 11.0), 120.0)
+    checker.check('a steer axis creeping one count every 11 s stays '
+                  'standstill', creep == 1.0,
+                  'verdict true for {:.1%} of the samples'.format(creep))
+
+    # ... and the drive axis doing the same must NOT, because that is the
+    # bound. One count per 11 s of drive is 1.7e-5 m/s of tread, but the
+    # gate may not assume it: the tolerance that carries the bound is zero.
+    drive_creep = run(lambda s: int(s // 11.0), zero, 120.0)
+    checker.check('a DRIVE axis creeping one count every 11 s does not',
+                  drive_creep < 1.0,
+                  'verdict true for {:.1%} of the samples - the gate opens '
+                  'around each count'.format(drive_creep))
+
+    # A commanded steer manoeuvre must open the gate at once. The profile
+    # slews 0.35 rad in about a second; even a tenth of that rate is
+    # hundreds of counts inside one window.
+    steer_step_rad = 2.0 * math.pi / float(
+        cfg['odometry']['steer_encoder_counts_per_rev'])
+    rate_rps = 0.035
+    slew = run(zero, lambda s: int(round(s * rate_rps / steer_step_rad)), 10.0)
+    checker.check('a steer axis slewing at {:.3f} rad/s opens the gate'
+                  .format(rate_rps), slew == 0.0,
+                  'verdict true for {:.1%} of the samples, at {:.1f} '
+                  'counts per window'.format(
+                      slew, rate_rps * window_s / steer_step_rad))
+
+    # A gap longer than the window is not a standstill, whatever the
+    # counts say across it.
+    sw = wo.StandstillWindow(window_s, tol, True)
+    for i in range(int(round(2.0 / dt))):
+        sw.update(100.0 + i * dt, 0, 0)
+    after_gap = sw.update(100.0 + 2.0 + 5.0 * window_s, 0, 0)
+    checker.check('a joint-state gap longer than the window clears the '
+                  'verdict', after_gap is False,
+                  'verdict after a {:.2f} s gap: {}'.format(
+                      5.0 * window_s, after_gap))
+
+    # A clock that ran backwards is a simulator reset, not a standstill.
+    sw = wo.StandstillWindow(window_s, tol, True)
+    for i in range(int(round(2.0 / dt))):
+        sw.update(100.0 + i * dt, 0, 0)
+    checker.check('a clock that runs backwards clears the verdict',
+                  sw.update(50.0, 0, 0) is False,
+                  'verdict on a stamp 50 s in the past: {}'.format(
+                      sw.standstill))
+
+    checker.check('the drive tolerance is zero, which is the bound itself',
+                  wo.DRIVE_TOLERANCE_COUNTS == 0,
+                  'DRIVE_TOLERANCE_COUNTS = {}'.format(
+                      wo.DRIVE_TOLERANCE_COUNTS))
+
+    odo = cfg['odometry']
+    bound_deg = math.degrees(float(odo['rolling_radius_m'])
+                             * (2.0 * math.pi
+                                / float(odo['drive_encoder_counts_per_rev']))
+                             / float(cfg['model']['wheelbase_m']))
+    checker.note('the verdict permits at most {:.4f} deg of body rotation '
+                 'over the window from the drive term ({:.4f} deg/s), and '
+                 'the steer term carries no bound at all - it is a rate '
+                 'guard, at {:.3f} deg/s'.format(
+                     bound_deg, bound_deg / window_s,
+                     math.degrees(tol * steer_step_rad / window_s)))
 
 
 # ====================================================================== #
@@ -1408,13 +1548,735 @@ def phase_idle(checker, idle_s):
     return checker
 
 
+# ====================================================================== #
+# Phase: postidle
+# ====================================================================== #
+#
+# THE REGIME --phase idle DOES NOT REACH. Its idle starts at bringup,
+# with every joint at its spawn value, and the heading holds to 0.01 deg
+# over it. Brief m5-08d measured the SAME vehicle over a 200.4 s idle
+# taken AFTER a drive and found +2.02 deg, with 92-97 % of the gyro
+# samples suppressed rather than 100 %. This phase drives the SAME
+# `_PROFILE` first and then measures, so the two idles differ in one
+# thing: whether the vehicle has moved.
+#
+# It reads no ground truth, for the reason written over phase_idle: the
+# question is whether a number moved while nothing happened, and the
+# vehicle's own encoders answer the second half of that.
+
+#: Two gated IMU samples further apart than this belong to two separate
+#: openings of the gate. The device runs at 100 Hz, so this is five
+#: sample periods - long enough that jitter never splits a burst, short
+#: enough that the 0.50 s arming window never merges two.
+_BURST_GAP_S = 0.05
+
+#: How long after a burst of gated samples the EKF is still allowed to be
+#: settling, for the three-way attribution below. Ten filter cycles.
+_TAIL_S = 0.20
+
+
+def _bursts(stamps, gap_s):
+    """Group sorted timestamps into [start, end] runs separated by > gap_s."""
+    runs = []
+    for t in stamps:
+        if runs and t - runs[-1][1] <= gap_s:
+            runs[-1][1] = t
+        else:
+            runs.append([t, t])
+    return runs
+
+
+def _in_any(t, windows):
+    for a, b in windows:
+        if a <= t <= b:
+            return True
+    return False
+
+
+def _split_yaw(track, bursts, tail_s):
+    """Signed yaw change of a (t, yaw) track, split three ways.
+
+    Each consecutive pair contributes its own increment to exactly one
+    bucket, chosen by where the midpoint of the pair falls:
+
+      inside  - the gate was open; a gyro sample was being fused
+      tail    - within `tail_s` of a burst ending; the filter is still
+                relaxing whatever that burst put into its yaw rate state
+      quiet   - the gate was closed and had been for longer than that
+
+    A leak that lives in `quiet` is the filter integrating a stale
+    twist. A leak that lives in `inside` is the gate letting samples
+    through. The buckets are what tells those two apart.
+    """
+    inside = tail = quiet = 0.0
+    tails = [(b, b + tail_s) for _, b in bursts]
+    for (ta, ya), (tb, yb) in zip(track, track[1:]):
+        d = wrap_pi(yb - ya)
+        mid = 0.5 * (ta + tb)
+        if _in_any(mid, [(a, b) for a, b in bursts]):
+            inside += d
+        elif _in_any(mid, tails):
+            tail += d
+        else:
+            quiet += d
+    return inside, tail, quiet
+
+
+def phase_postidle(checker, idle_s, csv_path, want_truth):
+    """The gate's behaviour in the regime an AMCL dwell test sits in.
+
+    Drives `_PROFILE`, stops, and then measures the idle - recording the
+    encoders, the standstill verdict, both IMU streams, the fused
+    heading and the filter's own yaw rate, so that each candidate
+    mechanism is ruled in or out by a number rather than by argument.
+
+    `want_truth` adds ONE further stream and it answers ONE question,
+    section 7's: the standstill verdict includes the steer count on the
+    ground that a parked forklift steering on the spot could scrub its
+    drive tyre and take the body round with it. That premise is a claim
+    about the world, and truth is the only instrument for it. It is
+    recorded as a REFERENCE, reported in its own section, and it enters
+    no verdict this phase computes - sections 2 to 6 are identical with
+    it and without it. The hold measurement itself needs no truth at all
+    and does not consult it.
+    """
+    from std_msgs.msg import Bool, Float64
+    from sensor_msgs.msg import Imu, JointState
+    from nav_msgs.msg import Odometry
+    from rclpy.qos import QoSProfile
+    from tf2_msgs.msg import TFMessage
+
+    cfg = load_config(_CONFIG)
+    frames = cfg['frames']
+    odo = cfg['odometry']
+    still_cfg = cfg['standstill']
+    drive_step = 2.0 * math.pi / float(odo['drive_encoder_counts_per_rev'])
+    steer_step = 2.0 * math.pi / float(odo['steer_encoder_counts_per_rev'])
+    window_s = float(still_cfg['window_s'])
+    timeout_s = float(still_cfg['verdict_timeout_s'])
+
+    rclpy, node = _live_node('check_odometry_postidle')
+    qos = QoSProfile(depth=500)
+
+    fused = []       # (t, yaw) from /tf - the EKF's own transform
+    ekf_wz = []      # (t, wz) the filter's own yaw rate state
+    gyro = []        # (t, wz) raw
+    gated = []       # (t, wz) as offered to the filter
+    joints = []      # (t, drive_rad, steer_rad)
+    verdict = []     # (t_arrival, bool) on the node's clock, as the gate sees
+    truth = []       # (t, x, y, yaw) REFERENCE ONLY, section 7, never fused
+
+    def cb_truth(msg):
+        q = (msg.pose.pose.orientation.x, msg.pose.pose.orientation.y,
+             msg.pose.pose.orientation.z, msg.pose.pose.orientation.w)
+        truth.append((msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                      msg.pose.pose.position.x, msg.pose.pose.position.y,
+                      yaw_of(q)))
+
+    def cb_tf(msg):
+        for tf in msg.transforms:
+            if (tf.header.frame_id == frames['odom']
+                    and tf.child_frame_id == frames['base']):
+                q = (tf.transform.rotation.x, tf.transform.rotation.y,
+                     tf.transform.rotation.z, tf.transform.rotation.w)
+                fused.append((tf.header.stamp.sec
+                              + tf.header.stamp.nanosec * 1e-9, yaw_of(q)))
+
+    def cb_filtered(msg):
+        ekf_wz.append((msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                       msg.twist.twist.angular.z))
+
+    def cb_imu(msg):
+        gyro.append((msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                     msg.angular_velocity.z))
+
+    def cb_gated(msg):
+        gated.append((msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                      msg.angular_velocity.z))
+
+    def cb_joints(msg):
+        model = cfg['model']
+        if model['drive_joint_name'] not in msg.name:
+            return
+        i_d = msg.name.index(model['drive_joint_name'])
+        i_s = msg.name.index(model['steer_joint_name'])
+        joints.append((msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                       msg.position[i_d], msg.position[i_s]))
+
+    def cb_verdict(msg):
+        verdict.append((node.get_clock().now().nanoseconds * 1e-9,
+                        bool(msg.data)))
+
+    topics = cfg['topics']
+    node.create_subscription(TFMessage, topics['tf'], cb_tf, qos)
+    node.create_subscription(Odometry, topics['odom_filtered'],
+                             cb_filtered, qos)
+    node.create_subscription(Imu, topics['imu'], cb_imu, qos)
+    node.create_subscription(Imu, topics['imu_gated'], cb_gated, qos)
+    node.create_subscription(JointState, topics['joint_states'],
+                             cb_joints, qos)
+    node.create_subscription(Bool, topics['wheel_standstill'],
+                             cb_verdict, qos)
+    if want_truth:
+        node.create_subscription(Odometry, topics['odom'], cb_truth, qos)
+    pub_speed = node.create_publisher(
+        Float64, topics['cmd_traction_speed'], QoSProfile(depth=10))
+    pub_steer = node.create_publisher(
+        Float64, topics['cmd_steer_angle'], QoSProfile(depth=10))
+
+    section('1. the drive, then the idle')
+    if not _wait_clock(rclpy, node):
+        checker.check('the simulation clock is running', False)
+        return checker
+    checker.check('the simulation clock is running', True)
+    _sim_sleep(rclpy, node, 5.0)
+
+    print('  the SAME manoeuvre set as --phase fusion, timed on the')
+    print('  simulation clock, then {:.1f} s of idle:'.format(idle_s))
+    driving = [leg for leg in _PROFILE if leg[0] != 'stop']
+    for label, seconds, speed, steer in driving:
+        print('    {:<12} {:>5.1f} s  speed {:+.2f} m/s  steer {:+.3f} rad'
+              .format(label, seconds, speed, steer))
+
+    for label, seconds, speed, steer in driving:
+        steer_msg = Float64()
+        steer_msg.data = float(steer)
+        pub_steer.publish(steer_msg)
+        _sim_sleep(rclpy, node, 1.0)
+        speed_msg = Float64()
+        speed_msg.data = float(speed)
+        pub_speed.publish(speed_msg)
+        _sim_sleep(rclpy, node, max(0.0, seconds - 1.0))
+
+    # Everything recorded from here is the stop transition and the idle.
+    # The buffers are cleared BEFORE the stop is commanded, so the
+    # deceleration is inside the window and the 0.50 s arming hypothesis
+    # has something to be measured against.
+    for buf in (fused, ekf_wz, gyro, gated, joints, verdict, truth):
+        del buf[:]
+    t_stop = node.get_clock().now().nanoseconds * 1e-9
+    stop = Float64()
+    stop.data = 0.0
+    pub_speed.publish(stop)
+    pub_steer.publish(stop)
+    print('  stop commanded at t = {:.3f} s (simulation clock); recording '
+          '{:.1f} s'.format(t_stop, idle_s))
+    _sim_sleep(rclpy, node, idle_s)
+
+    ok = len(joints) > 100 and len(fused) > 100 and len(verdict) > 100
+    checker.check('the streams this phase needs were recorded', ok,
+                  '{} joint states, {} transforms, {} raw gyro, {} gated, '
+                  '{} verdicts'.format(len(joints), len(fused), len(gyro),
+                                       len(gated), len(verdict)))
+    if not ok:
+        node.destroy_node()
+        rclpy.shutdown()
+        return checker
+
+    if csv_path:
+        _write_postidle_csv(csv_path, t_stop, joints, verdict, gyro, gated,
+                            fused, ekf_wz, truth)
+        print('  raw series written to {}'.format(csv_path))
+
+    node.destroy_node()
+    rclpy.shutdown()
+
+    # ------------------------------------------------------------------ #
+    report_postidle(checker, cfg, t_stop, idle_s, joints, verdict, gyro,
+                    gated, fused, ekf_wz, drive_step, steer_step, window_s,
+                    timeout_s, truth)
+    return checker
+
+
+def _write_postidle_csv(path, t_stop, joints, verdict, gyro, gated, fused,
+                        ekf_wz, truth=()):
+    """One row per sample of every stream, tagged, longest stream first.
+
+    Written as a tall table rather than a joined one on purpose: the
+    streams run at 500, 100 and 50 Hz and joining them would resample
+    somebody's data. Columns: t_rel, stream, value_a, value_b.
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    if directory and not os.path.isdir(directory):
+        os.makedirs(directory)
+    with open(path, 'w', encoding='utf-8') as handle:
+        handle.write('t_rel_s,stream,a,b\n')
+        for t, d, s in joints:
+            handle.write('{:.6f},joint,{:.12f},{:.12f}\n'.format(t - t_stop, d, s))
+        for t, v in verdict:
+            handle.write('{:.6f},verdict,{:d},\n'.format(t - t_stop, int(v)))
+        for t, w in gyro:
+            handle.write('{:.6f},gyro,{:.12f},\n'.format(t - t_stop, w))
+        for t, w in gated:
+            handle.write('{:.6f},gated,{:.12f},\n'.format(t - t_stop, w))
+        for t, y in fused:
+            handle.write('{:.6f},fused_yaw,{:.12f},\n'.format(t - t_stop, y))
+        for t, w in ekf_wz:
+            handle.write('{:.6f},ekf_wz,{:.12f},\n'.format(t - t_stop, w))
+        # REFERENCE ONLY, and labelled so in the stream name. Nothing that
+        # estimates or steers reads this file.
+        for t, x, y, yaw in truth:
+            handle.write('{:.6f},truth_yaw,{:.12f},{:.12f}\n'
+                         .format(t - t_stop, yaw, math.hypot(x, y)))
+
+
+def report_postidle(checker, cfg, t_stop, idle_s, joints, verdict, gyro,
+                    gated, fused, ekf_wz, drive_step, steer_step, window_s,
+                    timeout_s, truth=()):
+    """Rule each candidate mechanism in or out, one measurement each."""
+    odo = cfg['odometry']
+    radius_m = float(odo['rolling_radius_m'])
+    wheelbase_m = float(cfg['model']['wheelbase_m'])
+
+    section('2. what the encoders did during the idle')
+    d_counts = [int(round(j[1] / drive_step)) for j in joints]
+    s_counts = [int(round((j[2] + float(odo['steer_zero_offset_rad']))
+                          / steer_step)) for j in joints]
+    d_resid = [j[1] / drive_step - round(j[1] / drive_step) for j in joints]
+    span_s = joints[-1][0] - joints[0][0]
+
+    d_changes = sum(1 for a, b in zip(d_counts, d_counts[1:]) if a != b)
+    s_changes = sum(1 for a, b in zip(s_counts, s_counts[1:]) if a != b)
+    d_excursion = max(d_counts) - min(d_counts)
+    d_net = d_counts[-1] - d_counts[0]
+    s_excursion = max(s_counts) - min(s_counts)
+    s_net = s_counts[-1] - s_counts[0]
+
+    print('  over {:.2f} s of idle, at {:.0f} Hz of joint state:'.format(
+        span_s, len(joints) / span_s if span_s > 0 else 0.0))
+    print('  {:<38} {:>10} {:>10}'.format('', 'drive', 'steer'))
+    print('  {:<38} {:>10d} {:>10d}'.format(
+        'distinct counts visited', len(set(d_counts)), len(set(s_counts))))
+    print('  {:<38} {:>10d} {:>10d}'.format(
+        'count CHANGES (each re-arms the window)', d_changes, s_changes))
+    print('  {:<38} {:>10d} {:>10d}'.format(
+        'count excursion, max - min', d_excursion, s_excursion))
+    print('  {:<38} {:>10d} {:>10d}'.format(
+        'count NET change, last - first', d_net, s_net))
+    print('')
+    print('  DITHER OR CREEP: a net change equal to the excursion is the')
+    print('  wheel slowly turning; an excursion with a net change of zero')
+    print('  and many changes is one count boundary being crossed and')
+    print('  re-crossed. The sub-count residual says which boundary:')
+    print('  drive angle in counts, residual from the nearest grid point')
+    print('    mean   {:+.4f} count   (0.5 is exactly on a boundary)'.format(
+        statistics.fmean(d_resid)))
+    print('    min    {:+.4f} count'.format(min(d_resid)))
+    print('    max    {:+.4f} count'.format(max(d_resid)))
+    print('    pk-pk  {:.4f} count  = {:.3e} rad of wheel = {:.3e} m of '
+          'tread'.format(max(d_resid) - min(d_resid),
+                         (max(d_resid) - min(d_resid)) * drive_step,
+                         (max(d_resid) - min(d_resid)) * drive_step * radius_m))
+    bound_deg = math.degrees(radius_m * drive_step / wheelbase_m)
+    print('  one drive count still bounds the body rotation at {:.4f} deg'
+          .format(bound_deg))
+
+    section('3. the verdict, and its freshness')
+    still_frac = sum(1 for _, s in verdict if s) / float(len(verdict))
+    gaps = [b[0] - a[0] for a, b in zip(verdict, verdict[1:])]
+    rises = sum(1 for a, b in zip(verdict, verdict[1:]) if b[1] and not a[1])
+    falls = sum(1 for a, b in zip(verdict, verdict[1:]) if a[1] and not b[1])
+    false_time = sum((b[0] - a[0]) for a, b in zip(verdict, verdict[1:])
+                     if not a[1])
+    print('  verdict true for                     {:.2f} % of the window'
+          .format(100.0 * still_frac))
+    print('  verdict FALSE for                    {:.3f} s'.format(false_time))
+    print('  false -> true transitions            {}'.format(rises))
+    print('  true -> false transitions            {}'.format(falls))
+    print('  largest gap between two verdicts     {:.4f} s'.format(
+        max(gaps) if gaps else float('nan')))
+    print('  the gate times a verdict out after   {:.4f} s'.format(timeout_s))
+    fresh_ok = (max(gaps) < timeout_s) if gaps else False
+    checker.check('every verdict arrived inside the gate\'s freshness window',
+                  fresh_ok,
+                  'largest gap {:.4f} s against a {:.3f} s timeout'.format(
+                      max(gaps) if gaps else float('nan'), timeout_s))
+    print('  IF THAT CHECK PASSES the freshness hypothesis is OUT: the gate')
+    print('  never fell back to open because a verdict went stale.')
+    print('')
+    print('  re-arm accounting: {} true->false transitions x {:.2f} s of'
+          .format(falls, window_s))
+    print('  window = {:.2f} s of gate-open time predicted, against {:.3f} s'
+          .format(falls * window_s, false_time))
+    print('  of verdict-false time measured.')
+
+    section('4. what the gyro reported, and what reached the filter')
+    wz = [g[1] for g in gyro]
+    mean_wz = statistics.fmean(wz) if wz else float('nan')
+    integrated = 0.0
+    for a, b in zip(gyro, gyro[1:]):
+        integrated += 0.5 * (a[1] + b[1]) * (b[0] - a[0])
+    suppressed = len(gyro) - len(gated)
+    print('  raw gyro z, mean over the idle       {:+.6f} rad/s ({:+.4f} '
+          'deg/s)'.format(mean_wz, math.degrees(mean_wz)))
+    print('  raw gyro z, integrated               {:+.6f} rad  ({:+.4f} deg)'
+          .format(integrated, math.degrees(integrated)))
+    print('  raw samples                          {}'.format(len(gyro)))
+    print('  samples offered to the filter        {}'.format(len(gated)))
+    print('  suppressed                           {} = {:.2f} %'.format(
+        suppressed,
+        100.0 * suppressed / len(gyro) if gyro else float('nan')))
+    gated_wz = [g[1] for g in gated]
+    if gated_wz:
+        print('  gated stream, mean                   {:+.6f} rad/s'.format(
+            statistics.fmean(gated_wz)))
+        print('  gated stream, sum x nominal 0.01 s   {:+.4f} deg'.format(
+            math.degrees(statistics.fmean(gated_wz) * len(gated_wz) * 0.01)))
+        print('  = the heading the samples that got through would have')
+        print('  contributed on their own, if the filter took each at face')
+        print('  value. It is the size of the leak the gate itself explains.')
+
+    section('5. where the fused heading actually moved')
+    yaw0 = fused[0][1]
+    drift = [wrap_pi(y - yaw0) for _, y in fused]
+    held_s = fused[-1][0] - fused[0][0]
+    final = drift[-1]
+    worst = max(drift, key=abs)
+    print('  net change over the idle             {:+.6f} rad ({:+.4f} deg)'
+          .format(final, math.degrees(final)))
+    print('  largest excursion from the start     {:+.6f} rad ({:+.4f} deg)'
+          .format(worst, math.degrees(worst)))
+    if held_s > 0:
+        print('  per minute of idle                   {:+.4f} deg/min'
+              .format(math.degrees(final) * 60.0 / held_s))
+    print('  window length                        {:.2f} simulated seconds'
+          .format(held_s))
+
+    # --- the arming window at the stop transition, on its own ---
+    first_open_end = t_stop
+    bursts = _bursts([g[0] for g in gated], _BURST_GAP_S)
+    if bursts:
+        first_open_end = bursts[0][1]
+    def _yaw_at(t):
+        best = None
+        for ts, y in fused:
+            if ts <= t:
+                best = y
+            else:
+                break
+        return best if best is not None else fused[0][1]
+    settle_deg = math.degrees(wrap_pi(_yaw_at(first_open_end) - yaw0))
+    rest_deg = math.degrees(final) - settle_deg
+    print('')
+    print('  the FIRST burst of gated samples after the stop ends at')
+    print('  t_stop {:+.3f} s. Heading gained inside it {:+.4f} deg;'
+          .format(first_open_end - t_stop, settle_deg))
+    print('  heading gained over the remaining {:.1f} s {:+.4f} deg.'
+          .format(held_s - (first_open_end - fused[0][0]), rest_deg))
+    print('  A leak that is only the settling window is the first number')
+    print('  and nothing else. The second number is the one that scales')
+    print('  with how long a dwell lasts.')
+
+    section('6. attribution: gate open, filter relaxing, or filter quiet')
+    inside, tail, quiet = _split_yaw(fused, bursts, _TAIL_S)
+    total = inside + tail + quiet
+    open_s = sum(b - a for a, b in bursts)
+    print('  {} separate openings of the gate over the idle, {:.3f} s of'
+          .format(len(bursts), open_s))
+    print('  gate-open time in total ({:.2f} % of the window)'.format(
+        100.0 * open_s / held_s if held_s else float('nan')))
+    print('')
+    print('  {:<44} {:>12} {:>9}'.format('bucket', '[deg]', 'share'))
+    for label, value in (('gate OPEN - a gyro sample was being fused', inside),
+                         ('within {:.2f} s after an opening - relaxing'
+                          .format(_TAIL_S), tail),
+                         ('gate CLOSED and quiet', quiet)):
+        print('  {:<44} {:>12.4f} {:>8.1f} %'.format(
+            label, math.degrees(value),
+            100.0 * value / total if total else float('nan')))
+    print('  {:<44} {:>12.4f}'.format('total', math.degrees(total)))
+    print('')
+    print('  READ THIS TABLE AS THE VERDICT ON THE MECHANISM. Weight in the')
+    print('  first row is the gate admitting samples. Weight in the third')
+    print('  row is the filter turning with no measurement at all, which')
+    print('  would be a stale twist and not a gate defect.')
+
+    if ekf_wz:
+        wzs = [abs(w) for _, w in ekf_wz]
+        print('')
+        print('  the filter\'s own yaw rate state over the idle:')
+        print('    mean |wz|   {:.3e} rad/s'.format(statistics.fmean(wzs)))
+        print('    max  |wz|   {:.3e} rad/s'.format(max(wzs)))
+        quiet_wz = [abs(w) for t, w in ekf_wz
+                    if not _in_any(t, [(a, b + _TAIL_S) for a, b in bursts])]
+        if quiet_wz:
+            print('    max  |wz| with the gate closed and settled  {:.3e} '
+                  'rad/s'.format(max(quiet_wz)))
+            print('    = {:.4f} deg/min if it were held for a whole minute'
+                  .format(math.degrees(max(quiet_wz)) * 60.0))
+
+    if truth:
+        section('7. REFERENCE ONLY: did the body move while the steer swept?')
+        print('  Everything above was measured without truth. This section')
+        print('  reads the simulator\'s own pose and asks ONE question that')
+        print('  no encoder can answer: the standstill verdict includes the')
+        print('  steer count because a parked forklift steering on the spot')
+        print('  could scrub its drive tyre and take the body round with it.')
+        print('  Over this idle the steer axis swept while the drive count')
+        print('  was held. Did the body actually rotate?')
+        # THE IDLE IS NOT ONE INTERVAL AND MUST NOT BE SCORED AS ONE. A
+        # stop command does not stop a vehicle; it coasts. The drive
+        # encoder says exactly when the wheel stopped turning, so the
+        # window is split there, on the vehicle's own evidence.
+        d_counts_t = [(j[0], int(round(j[1] / drive_step))) for j in joints]
+        wheel_stop_t = d_counts_t[0][0]
+        for (ta, ca), (tb, cb) in zip(d_counts_t, d_counts_t[1:]):
+            if cb != ca:
+                wheel_stop_t = tb
+        parked_from = wheel_stop_t + window_s
+
+        s_counts = [(j[0], int(round((j[2] + float(cfg['odometry']
+                                                   ['steer_zero_offset_rad']))
+                                     / steer_step))) for j in joints]
+        parked_steer = [c for t, c in s_counts if t >= parked_from]
+        sweep = (max(parked_steer) - min(parked_steer)) if parked_steer else 0
+
+        def span(series, index, frm):
+            sel = [s for s in series if s[0] >= frm]
+            if len(sel) < 2:
+                return 0.0, 0.0
+            base = sel[0][index]
+            net = wrap_pi(sel[-1][index] - base)
+            worst = max((abs(wrap_pi(s[index] - base)) for s in sel))
+            return net, worst
+
+        t0, x0, y0, yaw0_t = truth[0]
+        coast_m = max(math.hypot(x - x0, y - y0) for _, x, y, _ in truth)
+        px0 = py0 = None
+        for t, x, y, _ in truth:
+            if t >= parked_from:
+                px0, py0 = x, y
+                break
+        parked_m = (max(math.hypot(x - px0, y - py0)
+                        for t, x, y, _ in truth if t >= parked_from)
+                    if px0 is not None else float('nan'))
+        net_all, worst_all = span(truth, 3, truth[0][0])
+        net_parked, worst_parked = span(truth, 3, parked_from)
+        fused_parked, _ = span(fused, 1, parked_from)
+        print('')
+        print('  the drive wheel stopped turning at   t_stop {:+.3f} s; the'
+              .format(wheel_stop_t - t_stop))
+        print('  vehicle coasted {:.4f} m getting there, and everything below'
+              .format(coast_m))
+        print('  the rule is measured from t_stop {:+.3f} s, one window after.'
+              .format(parked_from - t_stop))
+        print('')
+        print('  {:<40} {:>14} {:>14}'.format(
+            '', 'whole idle', 'wheel parked'))
+        print('  {:<40} {:>14.4f} {:>14.4f}'.format(
+            'steer axis swept [deg]',
+            (max(c for _, c in s_counts) - min(c for _, c in s_counts))
+            * math.degrees(steer_step), sweep * math.degrees(steer_step)))
+        print('  {:<40} {:>14.6f} {:>14.6f}'.format(
+            'TRUE position excursion [m]', coast_m, parked_m))
+        print('  {:<40} {:>14.6f} {:>14.6f}'.format(
+            'TRUE heading, largest excursion [deg]',
+            math.degrees(worst_all), math.degrees(worst_parked)))
+        print('  {:<40} {:>14.6f} {:>14.6f}'.format(
+            'TRUE heading, net [deg]',
+            math.degrees(net_all), math.degrees(net_parked)))
+        print('')
+        print('  AND THE NUMBER A DWELL TEST ACTUALLY CARES ABOUT - the')
+        print('  estimator\'s ERROR while the wheel was provably parked:')
+        print('  {:<40} {:>14.6f}'.format(
+            'fused heading, net [deg]', math.degrees(fused_parked)))
+        print('  {:<40} {:>14.6f}'.format(
+            'TRUE heading, net [deg]', math.degrees(net_parked)))
+        print('  {:<40} {:>14.6f}'.format(
+            'estimator error accrued [deg]',
+            math.degrees(fused_parked - net_parked)))
+        parked_s = truth[-1][0] - parked_from
+        if parked_s > 0:
+            print('  {:<40} {:>14.6f}'.format(
+                'per minute of parked dwell [deg/min]',
+                math.degrees(fused_parked - net_parked) * 60.0 / parked_s))
+            print('  {:<40} {:>14.2f}'.format(
+                'over which [s]', parked_s))
+        print('  truth samples                        {}'.format(len(truth)))
+        print('')
+        print('  A true heading excursion far under the steer sweep is the')
+        print('  measured answer to the scrub premise ON THIS VEHICLE, IN')
+        print('  THIS SIMULATOR, ON THIS FLOOR. It is not a general result')
+        print('  and it is not a licence to drop the steer term: a vehicle')
+        print('  towed or pushed bodily rotates with BOTH counts held, and')
+        print('  no encoder on this machine sees that at all.')
+
+    checker.note('this phase asserts no pass threshold on the hold. The '
+                 'section 5 number is the deliverable and sections 2, 3 and '
+                 '6 are what attribute it.')
+    return checker
+
+
+# ====================================================================== #
+# Phase: replay
+# ====================================================================== #
+
+class _ReferenceStandstill(object):
+    """m5-07d's rule, TRANSCRIBED so it can be compared rather than recalled.
+
+    Both counts must equal the pair recorded when the hold began, within
+    `band` counts, and the hold restarts whenever they do not. `band=0`
+    is exactly what shipped before brief m5-07e; the banded variants are
+    the obvious fix that a reader will ask about, and 13.4 answers by
+    running them rather than by arguing.
+
+    It is HERE, in the harness, and not in wheel_odometry.py: the vehicle
+    carries one rule and this file carries the ones it is measured
+    against.
+    """
+
+    def __init__(self, window_s, band, use_steer):
+        self.window_s = float(window_s)
+        self.band = int(band)
+        self.use_steer = bool(use_steer)
+        self.ref = None
+        self.held_from_s = None
+
+    def update(self, t_s, drive_count, steer_count):
+        counts = (drive_count, steer_count if self.use_steer else 0)
+        if (self.ref is None or self.held_from_s is None
+                or abs(counts[0] - self.ref[0]) > self.band
+                or abs(counts[1] - self.ref[1]) > self.band):
+            self.ref = counts
+            self.held_from_s = t_s
+            return False
+        held_s = t_s - self.held_from_s
+        if held_s < 0.0:
+            self.held_from_s = t_s
+            return False
+        return held_s >= self.window_s
+
+
+def phase_replay(checker, csv_path):
+    """Replay candidate standstill rules over a recorded postidle CSV.
+
+    NO ROS AND NO SIMULATOR. The counts are already on disk, so asking
+    what a different rule would have done costs nothing and needs no
+    second run - which is what makes the comparison in
+    EVIDENCE_ODOMETRY.md 13.4 checkable from the committed artifacts
+    rather than only reproducible by re-measuring.
+
+    THE PREDICTED LEAK IS AN ESTIMATE AND IS LABELLED ONE. It is the
+    gate-open seconds times the measured gyro bias, which is what the
+    filter would integrate if it took each admitted sample at face
+    value. The real filter blends, so the live number is close but not
+    equal - 13.4's -0.505 deg predicted against 13.7's -0.659 deg
+    measured on a longer idle. The RANKING is the deliverable, not the
+    third decimal.
+    """
+    sys.path.insert(0, _THIS_DIR)
+    import wheel_odometry as wo
+
+    cfg = load_config(_CONFIG)
+    odo = cfg['odometry']
+    still = cfg['standstill']
+    drive_step = 2.0 * math.pi / float(odo['drive_encoder_counts_per_rev'])
+    steer_step = 2.0 * math.pi / float(odo['steer_encoder_counts_per_rev'])
+    offset = float(odo['steer_zero_offset_rad'])
+    window_s = float(still['window_s'])
+    shipped_tol = int(still['steer_tolerance_counts'])
+
+    joints = []
+    gyro = []
+    with open(csv_path, 'r', encoding='utf-8') as handle:
+        for line in handle:
+            if line.startswith('t_rel'):
+                continue
+            parts = line.rstrip('\n').split(',')
+            if parts[1] == 'joint':
+                joints.append((float(parts[0]), float(parts[2]),
+                               float(parts[3])))
+            elif parts[1] == 'gyro':
+                gyro.append(float(parts[2]))
+
+    section('1. the recording')
+    ok = len(joints) > 1000 and len(gyro) > 100
+    checker.check('the CSV carries a joint and a gyro stream', ok,
+                  '{} joint states, {} gyro samples'.format(
+                      len(joints), len(gyro)))
+    if not ok:
+        return checker
+    span_s = joints[-1][0] - joints[0][0]
+    bias = statistics.fmean(gyro)
+    print('  {}'.format(csv_path))
+    print('  idle span                      {:.2f} s'.format(span_s))
+    print('  measured gyro bias             {:+.6f} rad/s ({:+.4f} deg/s)'
+          .format(bias, math.degrees(bias)))
+
+    counts = [(t, int(round(d / drive_step)),
+               int(round((s + offset) / steer_step))) for t, d, s in joints]
+
+    section('2. what each rule would have done with these counts')
+
+    def score(rule):
+        open_s = 0.0
+        prev_t = None
+        prev_still = False
+        for t, dc, sc in counts:
+            if prev_t is not None and not prev_still:
+                open_s += t - prev_t
+            prev_still = rule.update(t, dc, sc)
+            prev_t = t
+        return open_s
+
+    rules = [
+        ('m5-07d as shipped: both exact, receding reference',
+         lambda: _ReferenceStandstill(window_s, 0, True)),
+        ('the same rule, drive axis only',
+         lambda: _ReferenceStandstill(window_s, 0, False)),
+        ('the same rule, +-1 count band on both axes',
+         lambda: _ReferenceStandstill(window_s, 1, True)),
+        ('the same rule, +-2 count band on both axes',
+         lambda: _ReferenceStandstill(window_s, 2, True)),
+        ('trailing window, drive exact, steer exact',
+         lambda: wo.StandstillWindow(window_s, 0, True)),
+        ('trailing window, drive exact, steer tol 1  <- SHIPPED'
+         if shipped_tol == 1 else 'trailing window, drive exact, steer tol 1',
+         lambda: wo.StandstillWindow(window_s, 1, True)),
+        ('trailing window, drive exact, steer tol 2',
+         lambda: wo.StandstillWindow(window_s, 2, True)),
+        ('trailing window, drive exact, no steer term',
+         lambda: wo.StandstillWindow(window_s, 0, False)),
+    ]
+    print('  {:<52} {:>9} {:>10} {:>12}'.format(
+        'rule', 'suppr.', 'open [s]', 'leak [deg]'))
+    for label, make in rules:
+        open_s = score(make())
+        leak = math.degrees(bias) * open_s
+        print('  {:<52} {:>8.2f}% {:>10.3f} {:>12.3f}'.format(
+            label, 100.0 * (1.0 - open_s / span_s), open_s, leak))
+    print('')
+    print('  THE LEAK COLUMN IS PREDICTED, not measured: gate-open seconds')
+    print('  x the measured bias. The filter blends rather than taking each')
+    print('  sample at face value, so the live figure differs; the ranking')
+    print('  is what this table is for. The live numbers are section 13.7.')
+    print('')
+    print('  Read rows 1 and 5 together: making the window trailing while')
+    print('  keeping exact equality changes nothing, so the receding')
+    print('  reference is not the defect on its own. And rows 3 and 4 are')
+    print('  the obvious band fix, which barely helps - a band absorbs')
+    print('  dither, and a monotonically creeping axis walks out of any')
+    print('  band and re-arms anyway.')
+    return checker
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(
         description='Verify and measure the forklift motion estimate.')
     parser.add_argument('--phase',
-                        choices=('static', 'imu', 'wheel', 'fusion', 'idle'),
+                        choices=('static', 'imu', 'wheel', 'fusion', 'idle',
+                                 'postidle', 'replay'),
                         default='static')
+    parser.add_argument('--csv', default='',
+                        help='path for the raw per-sample series of '
+                             '--phase postidle (default: not written)')
+    parser.add_argument('--truth', action='store_true',
+                        help='--phase postidle only: also record the '
+                             'simulator pose as a REFERENCE for section 7, '
+                             'which asks whether the body rotates while the '
+                             'steer axis sweeps. It enters no other section '
+                             'and no verdict')
     parser.add_argument('--idle', type=float, default=60.0,
                         help='simulated seconds of idle measured by '
                              '--phase idle (default: %(default)s)')
@@ -1440,6 +2302,13 @@ def main(argv=None):
         phase_imu(checker, args.settle, args.sample)
     elif args.phase == 'idle':
         phase_idle(checker, args.idle)
+    elif args.phase == 'postidle':
+        phase_postidle(checker, args.idle, args.csv, args.truth)
+    elif args.phase == 'replay':
+        if not args.csv:
+            parser.error('--phase replay needs --csv, a series written by '
+                         '--phase postidle')
+        phase_replay(checker, args.csv)
     else:
         want_fusion = args.phase == 'fusion'
         checker, recorder = phase_drive(checker, want_fusion)

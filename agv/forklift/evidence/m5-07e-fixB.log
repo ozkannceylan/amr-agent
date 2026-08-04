@@ -1,0 +1,133 @@
+
+=== 1. the drive, then the idle =======================================
+  [PASS] the simulation clock is running
+  the SAME manoeuvre set as --phase fusion, timed on the
+  simulation clock, then 220.0 s of idle:
+    settle         3.0 s  speed +0.00 m/s  steer +0.000 rad
+    straight 1    10.0 s  speed +1.00 m/s  steer +0.000 rad
+    turn left     40.0 s  speed +1.00 m/s  steer +0.350 rad
+    straight 2    10.0 s  speed +1.00 m/s  steer +0.000 rad
+    turn right    40.0 s  speed +1.00 m/s  steer -0.350 rad
+    straight 3    10.0 s  speed +1.00 m/s  steer +0.000 rad
+  stop commanded at t = 135.076 s (simulation clock); recording 220.0 s
+  [PASS] the streams this phase needs were recorded   (110000 joint states, 10980 transforms, 22000 raw gyro, 336 gated, 11000 verdicts)
+  raw series written to /home/user/amr-agent/agv/forklift/evidence/m5-07e-postidle-after.csv
+
+=== 2. what the encoders did during the idle ==========================
+  over 220.00 s of idle, at 500 Hz of joint state:
+                                              drive      steer
+  distinct counts visited                       146         28
+  count CHANGES (each re-arms the window)        145         53
+  count excursion, max - min                    870         27
+  count NET change, last - first                870         -3
+
+  DITHER OR CREEP: a net change equal to the excursion is the
+  wheel slowly turning; an excursion with a net change of zero
+  and many changes is one count boundary being crossed and
+  re-crossed. The sub-count residual says which boundary:
+  drive angle in counts, residual from the nearest grid point
+    mean   -0.3707 count   (0.5 is exactly on a boundary)
+    min    -0.4986 count
+    max    +0.4944 count
+    pk-pk  0.9930 count  = 1.523e-03 rad of wheel = 1.837e-04 m of tread
+  one drive count still bounds the body rotation at 0.0101 deg
+
+=== 3. the verdict, and its freshness =================================
+  verdict true for                     98.46 % of the window
+  verdict FALSE for                    3.358 s
+  false -> true transitions            9
+  true -> false transitions            8
+  largest gap between two verdicts     0.0380 s
+  the gate times a verdict out after   0.2000 s
+  [PASS] every verdict arrived inside the gate's freshness window   (largest gap 0.0380 s against a 0.200 s timeout)
+  IF THAT CHECK PASSES the freshness hypothesis is OUT: the gate
+  never fell back to open because a verdict went stale.
+
+  re-arm accounting: 8 true->false transitions x 0.50 s of
+  window = 4.00 s of gate-open time predicted, against 3.358 s
+  of verdict-false time measured.
+
+=== 4. what the gyro reported, and what reached the filter ============
+  raw gyro z, mean over the idle       -0.002615 rad/s (-0.1498 deg/s)
+  raw gyro z, integrated               -0.575271 rad  (-32.9606 deg)
+  raw samples                          22000
+  samples offered to the filter        336
+  suppressed                           21664 = 98.47 %
+  gated stream, mean                   -0.003760 rad/s
+  gated stream, sum x nominal 0.01 s   -0.7238 deg
+  = the heading the samples that got through would have
+  contributed on their own, if the filter took each at face
+  value. It is the size of the leak the gate itself explains.
+
+=== 5. where the fused heading actually moved =========================
+  net change over the idle             -0.011493 rad (-0.6585 deg)
+  largest excursion from the start     -0.011493 rad (-0.6585 deg)
+  per minute of idle                   -0.1796 deg/min
+  window length                        219.98 simulated seconds
+
+  the FIRST burst of gated samples after the stop ends at
+  t_stop +0.804 s. Heading gained inside it -0.3287 deg;
+  heading gained over the remaining 219.2 s -0.3298 deg.
+  A leak that is only the settling window is the first number
+  and nothing else. The second number is the one that scales
+  with how long a dwell lasts.
+
+=== 6. attribution: gate open, filter relaxing, or filter quiet =======
+  9 separate openings of the gate over the idle, 3.270 s of
+  gate-open time in total (1.49 % of the window)
+
+  bucket                                              [deg]     share
+  gate OPEN - a gyro sample was being fused         -0.6343     96.3 %
+  within 0.20 s after an opening - relaxing         -0.0205      3.1 %
+  gate CLOSED and quiet                             -0.0037      0.6 %
+  total                                             -0.6585
+
+  READ THIS TABLE AS THE VERDICT ON THE MECHANISM. Weight in the
+  first row is the gate admitting samples. Weight in the third
+  row is the filter turning with no measurement at all, which
+  would be a stale twist and not a gate defect.
+
+  the filter's own yaw rate state over the idle:
+    mean |wz|   5.441e-05 rad/s
+    max  |wz|   2.657e-02 rad/s
+    max  |wz| with the gate closed and settled  1.407e-25 rad/s
+    = 0.0000 deg/min if it were held for a whole minute
+
+=== 7. REFERENCE ONLY: did the body move while the steer swept? =======
+  Everything above was measured without truth. This section
+  reads the simulator's own pose and asks ONE question that
+  no encoder can answer: the standstill verdict includes the
+  steer count because a parked forklift steering on the spot
+  could scrub its drive tyre and take the body round with it.
+  Over this idle the steer axis swept while the drive count
+  was held. Did the body actually rotate?
+
+  the drive wheel stopped turning at   t_stop +0.300 s; the
+  vehicle coasted 0.1380 m getting there, and everything below
+  the rule is measured from t_stop +0.800 s, one window after.
+
+                                               whole idle   wheel parked
+  steer axis swept [deg]                           2.3730         2.3730
+  TRUE position excursion [m]                    0.138031       0.001568
+  TRUE heading, largest excursion [deg]          0.221327       0.001750
+  TRUE heading, net [deg]                       -0.218106       0.001471
+
+  AND THE NUMBER A DWELL TEST ACTUALLY CARES ABOUT - the
+  estimator's ERROR while the wheel was provably parked:
+  fused heading, net [deg]                      -0.329766
+  TRUE heading, net [deg]                        0.001471
+  estimator error accrued [deg]                 -0.331237
+  per minute of parked dwell [deg/min]          -0.090678
+  over which [s]                                   219.17
+  truth samples                        4400
+
+  A true heading excursion far under the steer sweep is the
+  measured answer to the scrub premise ON THIS VEHICLE, IN
+  THIS SIMULATOR, ON THIS FLOOR. It is not a general result
+  and it is not a licence to drop the steer term: a vehicle
+  towed or pushed bodily rotates with BOTH counts held, and
+  no encoder on this machine sees that at all.
+  [note] this phase asserts no pass threshold on the hold. The section 5 number is the deliverable and sections 2, 3 and 6 are what attribute it.
+
+3 check(s), 0 failed
+HARNESS_RC=0

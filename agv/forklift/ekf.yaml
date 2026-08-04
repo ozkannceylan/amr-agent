@@ -46,13 +46,24 @@
 # WHAT IS NEW IN THIS FILE SINCE m5-07c, AND IT IS ONE TOPIC NAME.
 # `imu0` now reads /forklift/imu_gated instead of /forklift/imu. The
 # difference between the two is scripts/imu_gate.py, which forwards every
-# sample unchanged EXCEPT while the wheel odometry reports both encoder
-# counts unchanged - when it forwards none. The physics is in config.yaml's
+# sample unchanged EXCEPT while the wheel odometry reports the wheels
+# standing still - when it forwards none. The physics is in config.yaml's
 # `standstill:` block: a tricycle cannot rotate without its drive wheel
 # travelling, so a held encoder count bounds the body rotation at 0.0101
 # deg, and a gyro reading taken in that condition is bias rather than
 # rotation. Integrating it turned the map of brief m5-08 by 2 deg because
 # somebody idled for twenty seconds.
+#
+# THAT VERDICT IS A RATE OVER A TRAILING WINDOW, not a total since the
+# last count change, and brief m5-07e is why: the first version asked
+# whether both counts had been unchanged since a receding reference, and
+# the steer axis's post-drive relaxation - one count every eleven seconds
+# - discarded the standstill and re-opened this filter's gyro channel for
+# 14.4 s of a 210 s idle. NOTHING IN THIS FILE CHANGED FOR IT. The gate
+# changes which intervals a measurement is offered in; what it is worth
+# when offered is still set by the two datasheet-derived covariances and
+# by no hand here. EVIDENCE_ODOMETRY.md section 13 is the measurement,
+# and 13.9 re-shows the drift while moving on the same profile.
 #
 # ROBOT_LOCALIZATION 3.8.3 HAS NO PARAMETER FOR THIS, WHICH WAS CHECKED
 # BEFORE THE NODE WAS WRITTEN. Its parameter set carries no zero-velocity

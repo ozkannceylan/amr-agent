@@ -1,0 +1,98 @@
+
+=== 1. the drive, then the idle =======================================
+  [PASS] the simulation clock is running
+  the SAME manoeuvre set as --phase fusion, timed on the
+  simulation clock, then 210.0 s of idle:
+    settle         3.0 s  speed +0.00 m/s  steer +0.000 rad
+    straight 1    10.0 s  speed +1.00 m/s  steer +0.000 rad
+    turn left     40.0 s  speed +1.00 m/s  steer +0.350 rad
+    straight 2    10.0 s  speed +1.00 m/s  steer +0.000 rad
+    turn right    40.0 s  speed +1.00 m/s  steer -0.350 rad
+    straight 3    10.0 s  speed +1.00 m/s  steer +0.000 rad
+  stop commanded at t = 137.214 s (simulation clock); recording 210.0 s
+  [PASS] the streams this phase needs were recorded   (105000 joint states, 10161 transforms, 21000 raw gyro, 1440 gated, 10500 verdicts)
+  raw series written to /home/user/amr-agent/agv/forklift/evidence/m5-07e-postidle-before.csv
+
+=== 2. what the encoders did during the idle ==========================
+  over 210.00 s of idle, at 500 Hz of joint state:
+                                              drive      steer
+  distinct counts visited                       145         28
+  count CHANGES (each re-arms the window)        144         53
+  count excursion, max - min                    859         27
+  count NET change, last - first                859         -2
+
+  DITHER OR CREEP: a net change equal to the excursion is the
+  wheel slowly turning; an excursion with a net change of zero
+  and many changes is one count boundary being crossed and
+  re-crossed. The sub-count residual says which boundary:
+  drive angle in counts, residual from the nearest grid point
+    mean   -0.2558 count   (0.5 is exactly on a boundary)
+    min    -0.4867 count
+    max    +0.4911 count
+    pk-pk  0.9777 count  = 1.500e-03 rad of wheel = 1.809e-04 m of tread
+  one drive count still bounds the body rotation at 0.0101 deg
+
+=== 3. the verdict, and its freshness =================================
+  verdict true for                     93.14 % of the window
+  verdict FALSE for                    14.384 s
+  false -> true transitions            20
+  true -> false transitions            19
+  largest gap between two verdicts     0.0300 s
+  the gate times a verdict out after   0.2000 s
+  [PASS] every verdict arrived inside the gate's freshness window   (largest gap 0.0300 s against a 0.200 s timeout)
+  IF THAT CHECK PASSES the freshness hypothesis is OUT: the gate
+  never fell back to open because a verdict went stale.
+
+  re-arm accounting: 19 true->false transitions x 0.50 s of
+  window = 9.50 s of gate-open time predicted, against 14.384 s
+  of verdict-false time measured.
+
+=== 4. what the gyro reported, and what reached the filter ============
+  raw gyro z, mean over the idle       -0.002614 rad/s (-0.1498 deg/s)
+  raw gyro z, integrated               -0.548910 rad  (-31.4502 deg)
+  raw samples                          21000
+  samples offered to the filter        1440
+  suppressed                           19560 = 93.14 %
+  gated stream, mean                   -0.002926 rad/s
+  gated stream, sum x nominal 0.01 s   -2.4142 deg
+  = the heading the samples that got through would have
+  contributed on their own, if the filter took each at face
+  value. It is the size of the leak the gate itself explains.
+
+=== 5. where the fused heading actually moved =========================
+  net change over the idle             -0.036843 rad (-2.1110 deg)
+  largest excursion from the start     -0.036843 rad (-2.1110 deg)
+  per minute of idle                   -0.6032 deg/min
+  window length                        209.97 simulated seconds
+
+  the FIRST burst of gated samples after the stop ends at
+  t_stop +0.806 s. Heading gained inside it -0.3290 deg;
+  heading gained over the remaining 209.2 s -1.7820 deg.
+  A leak that is only the settling window is the first number
+  and nothing else. The second number is the one that scales
+  with how long a dwell lasts.
+
+=== 6. attribution: gate open, filter relaxing, or filter quiet =======
+  19 separate openings of the gate over the idle, 14.230 s of
+  gate-open time in total (6.78 % of the window)
+
+  bucket                                              [deg]     share
+  gate OPEN - a gyro sample was being fused         -2.0653     97.8 %
+  within 0.20 s after an opening - relaxing         -0.0336      1.6 %
+  gate CLOSED and quiet                             -0.0121      0.6 %
+  total                                             -2.1110
+
+  READ THIS TABLE AS THE VERDICT ON THE MECHANISM. Weight in the
+  first row is the gate admitting samples. Weight in the third
+  row is the filter turning with no measurement at all, which
+  would be a stale twist and not a gate defect.
+
+  the filter's own yaw rate state over the idle:
+    mean |wz|   2.086e-04 rad/s
+    max  |wz|   2.579e-02 rad/s
+    max  |wz| with the gate closed and settled  6.573e-03 rad/s
+    = 22.5967 deg/min if it were held for a whole minute
+  [note] this phase asserts no pass threshold on the hold. The section 5 number is the deliverable and sections 2, 3 and 6 are what attribute it.
+
+3 check(s), 0 failed
+HARNESS_RC=0

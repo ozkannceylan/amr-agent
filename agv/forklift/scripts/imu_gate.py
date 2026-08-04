@@ -19,7 +19,11 @@ WHY THAT IS PHYSICS AND NOT A CONVENIENCE
   rotation lies on its rear axle line and its drive wheel does not, so
   the body cannot turn without the drive wheel travelling (the
   arithmetic is in config.yaml's `standstill:` block, which bounds the
-  body rotation over a held count at 0.0101 deg). What the gyro reports
+  body rotation over a held count at 0.0101 deg). The verdict is a RATE
+  over a trailing window, not a total since the last count change; this
+  file does not form it and does not need to know, but brief m5-07e
+  changed which intervals it is true in and EVIDENCE_ODOMETRY.md
+  section 13 says by how much. What the gyro reports
   in that condition is therefore bias, and integrating it produces
   heading the vehicle does not have. Declining to treat it as a
   rotation measurement is what a real installation does, under the name
