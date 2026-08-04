@@ -1,0 +1,88 @@
+m5-03 F-I/O probe — S7-PLCSIM Advanced API console log
+Recorded 2026-08-04 by the owner in front of the tool.
+API: C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll
+Host: Windows PowerShell 5.1, Add-Type -Path (no new project dependency).
+Instance: FIOPROBE (probe copy safe_amr_FIOPROBE), CPU in RUN, safety mode activated.
+
+--- tag list enumeration -------------------------------------------------
+API version: 458752
+Registered instances:
+  [0] FIOPROBE
+Opened: FIOPROBE  OperatingState=Run
+Tag count: 166
+--- tags matching Probe / F00000 / FDI ---
+  ProbeFdiCh0  [Bool] area=Input
+  F00000_F-DI8x24VDCHF_1  [DB] area=DataBlock
+  F00000_F-DI8x24VDCHF_1.PASS_ON  [Bool] area=DataBlock
+  F00000_F-DI8x24VDCHF_1.ACK_NEC  [Bool] area=DataBlock
+  F00000_F-DI8x24VDCHF_1.ACK_REI  [Bool] area=DataBlock
+  F00000_F-DI8x24VDCHF_1.IPAR_EN  [Bool] area=DataBlock
+  F00000_F-DI8x24VDCHF_1.DISABLE  [Bool] area=DataBlock
+  F00000_F-DI8x24VDCHF_1.PASS_OUT  [Bool] area=DataBlock
+  F00000_F-DI8x24VDCHF_1.QBAD  [Bool] area=DataBlock
+  F00000_F-DI8x24VDCHF_1.ACK_REQ  [Bool] area=DataBlock
+  F00000_F-DI8x24VDCHF_1.IPAR_OK  [Bool] area=DataBlock
+  F00000_F-DI8x24VDCHF_1.DIAG  [Byte] area=DataBlock
+  F00000_F-DI8x24VDCHF_1.DISABLED  [Bool] area=DataBlock
+  F00000_F-DI8x24VDCHF_1.BASEID_ACTIVE  [LWord] area=DataBlock
+
+--- write by tag name, 10 s hold -----------------------------------------
+OperatingState = Run
+before         ProbeFdiCh0=False QBAD=True  PASS_OUT=True  ACK_REQ=False
+WriteBool returned without error
+t+1s           ProbeFdiCh0=True  QBAD=True  PASS_OUT=True  ACK_REQ=False
+t+2s           ProbeFdiCh0=True  QBAD=True  PASS_OUT=True  ACK_REQ=False
+t+3s           ProbeFdiCh0=True  QBAD=True  PASS_OUT=True  ACK_REQ=False
+t+4s           ProbeFdiCh0=True  QBAD=True  PASS_OUT=True  ACK_REQ=False
+t+5s           ProbeFdiCh0=True  QBAD=True  PASS_OUT=True  ACK_REQ=False
+t+6s           ProbeFdiCh0=True  QBAD=True  PASS_OUT=True  ACK_REQ=False
+t+7s           ProbeFdiCh0=True  QBAD=True  PASS_OUT=True  ACK_REQ=False
+t+8s           ProbeFdiCh0=True  QBAD=True  PASS_OUT=True  ACK_REQ=False
+t+9s           ProbeFdiCh0=True  QBAD=True  PASS_OUT=True  ACK_REQ=False
+t+10s          ProbeFdiCh0=True  QBAD=True  PASS_OUT=True  ACK_REQ=False
+reset write ok
+after reset    ProbeFdiCh0=False QBAD=True  PASS_OUT=True  ACK_REQ=False
+
+--- 60 s hold, watch table observed inside the hold window ---------------
+TRUE yazildi, 60 sn tutuluyor
+  5s api=True qbad=True
+ 10s api=True qbad=True
+ 15s api=True qbad=True
+ 20s api=True qbad=True
+ 25s api=True qbad=True
+ 30s api=True qbad=True
+ 35s api=True qbad=True
+ 40s api=True qbad=True
+ 45s api=True qbad=True
+ 50s api=True qbad=True
+ 55s api=True qbad=True
+ 60s api=True qbad=True
+(the closing release write returned "Error Code: -14, InstanceNotRunning" —
+ the instance had already been stopped by the owner at that moment)
+
+TIA watch table, read inside the hold window, screenshot
+m5-03-watch-false-while-api-holds-true.png:
+  "ProbeFdiCh0"                          FALSE
+  F00000_F-DI8x24VDCHF_1.PASS_OUT        TRUE
+  F00000_F-DI8x24VDCHF_1.QBAD            TRUE
+  F00000_F-DI8x24VDCHF_1.ACK_REQ         FALSE
+  F00000_F-DI8x24VDCHF_1.ACK_NEC         TRUE
+  F00000_F-DI8x24VDCHF_1.IPAR_OK         FALSE
+  F00000_F-DI8x24VDCHF_1.DIAG            16#00
+
+--- working project (safe_amr, instance safecell3) readings --------------
+ForkliftControl_DB.HmiStaleTimer.PT    = 600 ms
+ForkliftControl_DB.BridgeStaleTimer.PT = 500 ms
+Tag-name sweep for TIA "_1" collision suffixes: ForkliftControl_DB.ResetEdgeMemory
+carries no suffix; the only "_1" name in the instance tag list is the
+stand-alone tag "Tag_1".
+Cold start, bridge down:
+  ForkliftHmi.HmiTractionRequest = 0
+  ForkliftHmi.HmiSteerRequest    = 0
+  ForkliftHmi.HmiForkRequest     = 0
+  ForkliftHmi.HmiTeleopRequest   = False
+  ForkliftHmi.HmiResetRequest    = False
+  ForkliftInput.ForkliftForkHeight        = 0
+  ForkliftInput.ForkliftLinearSpeed       = 0
+  ForkliftInput.ForkliftObstacleInStopZone = False
+  ForkliftInput.ForkliftObstacleMinDistance = 0
