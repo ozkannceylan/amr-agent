@@ -26,6 +26,16 @@ remains the input path.
   2026-08-04, (2) an ADR amends criterion (a) and the roadmap row follows it,
   and (3) m5-15 is written against the proven path. Do not let the gate proceed
   past m5-15 with any of the three open.
+  - **(1) PROVEN 2026-08-04** — docs/reports/m5-03b-standin-stimulus-proof.md.
+    The API write reached the F-program's consumer view in 80.4 ms (one F-OB
+    cycle), the monitored reset ran on API-written data and cleared 37.0 ms
+    after release, and reopening re-asserted the demand in 79.1 ms. **Caveat:
+    the run is on the probe copy `safe_amr_FIOPROBE`** — repeat it on `safe_amr`
+    before the gate cites it, and do not work in the probe copy meanwhile.
+    Residual: a TIA watch table carrying the `SafetyInputStandIn.*` and
+    `InstF_Forklift_Safety.*` rows, screenshotted mid-hold, is the one
+    independent corroboration still missing (an offline row edit).
+  - (2) and (3) remain open.
 - m5-15 (F-program spec) is unblocked and is written against the stand-in path,
   carrying FIO-FEASIBILITY §6's three consequences: the stand-in labelled
   wherever it appears, the S015 validity check carried visibly in the F-code
