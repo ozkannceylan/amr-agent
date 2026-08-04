@@ -2,7 +2,7 @@
 
 Companion to `docs/safety/SRS.md`. The SRS names the safety functions and one
 performance-level target line. This document shows the **method** that produces
-such a line: for twelve concrete demand situations, hazard → risk graph → PLr →
+such a line: for fifteen concrete demand situations, hazard → risk graph → PLr →
 covering safety function → architecture → validation test → acceptance test.
 
 ---
@@ -22,13 +22,21 @@ that no reader has to go looking for it:
 | Risk assessment | The risk-graph inputs below are **engineering judgement on a described cell**, not the output of a machine-specific risk assessment with a real layout, real speeds and real masses. On real hardware every parameter would be re-derived. |
 
 What this document *does* claim: that the chain from a described hazard to a
-verifiable reaction is followed correctly and consistently, twelve times, with
+verifiable reaction is followed correctly and consistently, fifteen times, with
 every judgement written down where a reader can disagree with it.
+
+**The claim boundary of ADR 0011 D5 is landed once, in SRS §5**, in full and as
+a list. It is binding on every line below. Nothing here states an achieved PL,
+an achieved Category, a SIL or a PFH for this project's chain; every PL and
+Category figure below is a **target quoted from SRS §5**, and every PLr is a
+**floor derived from a risk graph**.
 
 **Gate numbering.** Gate references in this document and in the SRS follow the
 gate order of ADR 0010
-(`docs/adr/0010-milestone-restructure-forklift-first.md`, accepted), which is
-the live order in `docs/roadmap.md`. That order merges what earlier rounds
+(`docs/adr/0010-milestone-restructure-forklift-first.md`, accepted) **as amended
+by ADR 0013**, which places the vendor-portability gate M8 after M6 and M7 and
+assigns it no number of its own. `docs/roadmap.md` is the live order and is what
+any disagreement is settled against. That order merges what earlier rounds
 carried as separate gates: the safety layer and the vehicle chain are one gate,
 **M5**, both landing on the forklift twin; the VDA 5050 client, the fleet
 manager and the PLC integration that brings the door and charger equipment with
@@ -37,6 +45,18 @@ its stations are one gate, **M6**; the end-to-end demonstration is folded into
 been remapped to this order by what each sentence is about, never by arithmetic
 on the printed number; the per-function landing gate is SRS §4's last column,
 and no scenario below restates it.
+
+**The three M5 vehicle scenarios, and the verdict they do not presume.** SC-13,
+SC-14 and SC-15 derive the functions the M5 gate adds to the vehicle — the
+two-scanner protective stop, safely limited speed, and the SS1 sequencing the
+two of them share. A **PLr is a demand on the function, not on the path its
+inputs arrive by.** How the scanner signal reaches the safety program is settled
+in the tool by brief m5-03 (ADR 0011 D2: primary path a configured F-DI
+stimulated by the PLCSIM Advanced API, named fallback the standard-DB stand-in),
+and its verdict is not presumed here: **the three derivations below hold
+unchanged under either outcome**, because neither outcome changes a hazard, an
+exposure or an avoidance possibility. This is stated once, here, and no scenario
+below restates it.
 
 ---
 
@@ -85,16 +105,21 @@ Resulting required performance level:
 a person is exposed to the hazard zone. It is not the duration of a fault, not
 the duty cycle of the machine and not the frequency of the demand. This
 distinction is made explicitly because it is the one most often got wrong, and
-because two scenarios below (SC-03, SC-11) invite the mistake.
+because four scenarios below invite the mistake in four different disguises:
+**SC-03** offers a wire-break rate, **SC-11** a coincidence rate, **SC-14** the
+rate at which a speed ceiling is violated, and **SC-15** the failure rate of a
+brake. None of the four is F. In each, F is inherited from the demand scenario
+the fault or the coincidence acts on.
 
 ### 1.3 PLr is a floor
 
-A PLr is the minimum the safety function must reach. Implementing above it is
-normal and is not an error — in this cell every F-CPU function shares one
-architecture (two-channel F-I/O, PROFIsafe, F-CPU), so a function whose PLr is
-c is nevertheless built at the same Category 3 / PL d as its neighbours. SC-09
-is the worked example. What is *not* permitted is implementing below the
-floor, or adjusting a parameter until the floor drops to what was convenient.
+A PLr is the minimum the safety function must reach. Targeting above it is
+normal and is not an error — in this cell every F-CPU function is specified on
+one architecture (two-channel F-I/O, PROFIsafe, F-CPU), so a function whose PLr
+is c nevertheless carries the same Category 3 / PL d **target** as its
+neighbours. SC-09 is the worked example. What is *not* permitted is targeting
+below the floor, or adjusting a parameter until the floor drops to what was
+convenient.
 
 ### 1.4 Boundaries binding every scenario
 
@@ -174,7 +199,8 @@ a connector pulled during maintenance, a crushed strand. Nobody is hurt by the
 break itself. The hazard is that the break is **silent**, and the next time
 SC-01's demand arrives the operator presses a button that does nothing. This
 scenario is the demand of SC-01 with the safety function already dead, and it
-is the reason Category 3 is claimed rather than Category 1.
+is the reason the architecture is **targeted at** Category 3 rather than
+Category 1.
 
 | Field | Content |
 |---|---|
@@ -234,7 +260,7 @@ selected field set is valid for.
 | **Architecture** | SRS §5 target: **Category 3, PL d**. Safety laser scanner with two-channel OSSD outputs into the onboard safety system, speed-dependent field-set selection, dual-channel STO. The protective field's dimensioning is part of the safety function: a field too small for the valid speed is a design fault no architecture recovers from. |
 | **Network** | None. Scanner → onboard safety system → drive inhibit. `safetyState.fieldViolation` is a report (N1). |
 | **Validation test** | *Stimulus:* vehicle travelling at nominal speed; spawn an obstacle into the protective field. *Observation:* deceleration begins in the next control cycle; standstill is reached **inside** the field's dimensioned boundary; `fieldViolation` = true. Remove the obstacle: the inhibit releases only after the 2 s clear time, and motion resumes only on a fresh Nav2 command, never a resumed one. Repeat with the obstacle reaching the bumper: the stop **latches** and survives obstacle removal until an SF-08 reset. *Fault addressed:* none; this is the demand and stop-distance test. *Pass:* stop distance inside the field, no resume before the clear time, bumper latch confirmed. *Fail:* standstill outside the field boundary — which invalidates the field dimensioning, not the function. |
-| **Maps to** | **AT-03** |
+| **Maps to** | **AT-03**. This scenario is the field working where the field reaches. The two-scanner realisation the M5 vehicle carries, and the **measured** sectors where the union of the two apertures does not reach, are derived separately in **SC-13**; the reaction path both share is **SC-15**. |
 
 ---
 
@@ -254,7 +280,7 @@ relative to the braking distance to stop in time.
 | **P** | **P1** — a person walking toward a vehicle that has visibly slowed can stop walking; avoidance is possible. |
 | **PLr** | **b** (S1, F2, P1) |
 | **Covering SF** | **SF-04** — warning-field speed reduction. Speed limited to ≤ 0.3 m/s while the warning field is occupied. Level-based, automatic release after 2 s clear. |
-| **Architecture** | **No PL is claimed, and PLr b is therefore not met by this function.** The SRS declares SF-04 safety-related but informative (SRS §3, SF-04 honesty row; §5): the speed reduction is implemented in vehicle software as scanner field output → Nav2 speed limit, and on real hardware would be safety-rated only with safety-rated speed monitoring (SLS) on a safety-rated channel. This project has neither. The honest position is stated as a chain of three sentences: *the derived floor for this hazard is PLr b; SF-04 does not meet it; the hazard is covered instead by SF-03 at PL d, whose protective field is dimensioned for the case where the speed reduction fails entirely.* SF-04 is a comfort and throughput measure that happens to reduce risk, not a measure the safety case leans on. |
+| **Architecture** | **No PL is claimed, and PLr b is therefore not met by this function.** The SRS declares SF-04 safety-related but informative (SRS §3, SF-04 honesty row; §5): the speed reduction is implemented in vehicle software as scanner field output → Nav2 speed limit, and on real hardware would be safety-rated only with safety-rated speed monitoring (SLS) on a safety-rated channel. This project has neither. The honest position is stated as a chain of three sentences: *the derived floor for this hazard is PLr b; SF-04 does not meet it; the hazard is covered instead by SF-03 at PL d, whose protective field is dimensioned for the case where the speed reduction fails entirely.* SF-04 is a comfort and throughput measure that happens to reduce risk, not a measure the safety case leans on. **What SF-10 does and does not change here (added at M5):** SF-10, safely limited speed, is a rated *enforcement* of a speed ceiling and it is selected in the **reduced-detection** monitoring case of SC-13, which is not the warning-field case of this scenario. SF-04 still only *requests* the creep speed this scenario's S1 rests on. Whether the warning-field case should also select an SLS limit — which would move that S1 off a layout precondition and onto a rated function — is a monitoring-case design question for the field design and the safety-program specification, and it is **recorded as open here rather than decided**. |
 | **Network** | None in the backing function. SF-04 itself runs in vehicle software — which is exactly why it carries no claim — but it is onboard, and its failure degrades to SF-03, never to a network dependency (N1). |
 | **Validation test** | *Stimulus:* place an obstacle in the warning field only. *Observation:* commanded and actual speed drop to ≤ 0.3 m/s within one field-report cycle; the protective field is not violated; no stop occurs. Clear the field: nominal speed returns after 2 s. **Then the test that matters:** disable the speed-reduction handler entirely and drive at full speed into the same scenario — SF-03 must still stop the vehicle inside the protective field. *Fault addressed:* total loss of SF-04, treated not as a fault to be detected but as a condition the backing function must survive. That is the only defensible way to use an unrated function in a safety argument. *Pass:* all three observations, and specifically the third. *Fail:* the third observation failing, which would mean the safety case had quietly come to depend on unrated software. |
 | **Maps to** | **AT-04** |
@@ -320,7 +346,7 @@ are live and the traction battery's charger is behind them.
 | **P** | **P1** — the hazard is static rather than approaching, access into the docking pocket is deliberate rather than incidental, and the station carries a charging indicator; avoidance is possible under those specific conditions. *Arguable:* if that indicator is a process lamp driven by the standard program, it is not trustworthy for avoidance and P2 applies, giving PLr d. The argument is worth noting and does not change the design — see the architecture row. |
 | **PLr** | **c** (S2, F1, P1) |
 | **Covering SF** | **SF-06** — charger interlock, in its **permissive** aspect. The contactor may close only while the F-CPU's own docked-position confirmation is present **and** the standard program is commanding a charge. `ChargeRequest` over OPC UA is a process precondition seen by the standard program; it is never sufficient and never reaches the F-CPU. |
-| **Architecture** | SRS §5 target: **Category 3, PL d** — *above* the derived floor of PLr c, and deliberately so. SF-06 is implemented on the same F-CPU, the same PROFIsafe segment and the same two-channel F-I/O as SF-01, because building one interlock on a separate, cheaper, lower-category subsystem would add an architecture to maintain and verify in order to save nothing. **PLr is a floor** (§1.3): exceeding it is a correct outcome, and it is also why the P1/P2 argument above is bounded — either parameter choice is already satisfied by what is built. |
+| **Architecture** | SRS §5 target: **Category 3, PL d** — *above* the derived floor of PLr c, and deliberately so. SF-06 is specified on the same F-CPU, the same PROFIsafe segment and the same two-channel F-I/O as SF-01, because specifying one interlock on a separate, cheaper, lower-category subsystem would add an architecture to maintain and verify in order to save nothing. **PLr is a floor** (§1.3): exceeding it is a correct outcome, and it is also why the P1/P2 argument above is bounded — either parameter choice is already satisfied by what is built. |
 | **Network** | None in the permissive. The docked-position switch is F-I/O and independent of the standard program's `ChargerVehicleDocked` diagnostic; `ChargeRequest` arrives over OPC UA and is one term of the *standard* program's command, which is itself only one term of the F-CPU's AND (N1). |
 | **Validation test** | *Stimulus:* command a charge with the docked-position input absent. *Observation:* the contactor output stays at 0 for the full duration of the command. Then confirm docking and command again: the contactor closes. Then force the docked input away while charging: the contactor output reaches 0 within 100 ms and **latches**; restoring docking without a reset does not re-close it. Repeat the trip case with the standard program in STOP (N4). *Fault addressed:* none; permissive and trip demand tests. The AND is what is under test — a design that closed on `ChargeRequest` alone would pass every other test in this document. *Pass:* all four observations. *Fail:* the contactor closing on any subset of the permissive. |
 | **Maps to** | **AT-06 (a), (b), (c), (d)** |
@@ -395,6 +421,98 @@ scenario in this document with **no risk-graph derivation and no PLr**.
 
 ---
 
+**Three scenarios added at M5.** SC-12 is where the method stops and it is left
+exactly where it is; nothing below displaces it. The three that follow were
+derived later, for the functions the M5 gate adds to the vehicle, and they take
+the next numbers rather than being inserted among their subject matter. They are
+read in order: SC-13 measures where the protective field does not reach, SC-14
+covers what is left standing between that residual and a person, and SC-15 is
+the one stop path both of them end in.
+
+---
+
+### SC-13 — Person in the measured load-direction residual, loaded truck travelling fork-first
+
+**Hazard.** The forklift is a counterbalance truck and travels in both
+directions: with a pallet on the tines it travels fork-first as routinely as it
+travels drive-first. Two 275° safety laser scanners at diagonal chassis corners
+cover the full circle **by union** at 3 m and beyond. They do not cover it
+everywhere. With a load in the fork direction the measured coverage of the
+0.150 m scan plane loses **39.9°** centred on the fork axis — bearings
+164.5–204.4°, of which 30.0° is the pallet itself
+(`agv/forklift/EVIDENCE_SENSOR_COVERAGE.md` **R3**) — and at close range a
+further **5.0° at 2 m** to the left of the fork axis stands behind the carriage
+(**R1**). A person standing in that sector, in the direction the loaded truck is
+travelling, is not seen at the safety plane by either device. The truck closes
+on them and no protective field trips.
+
+| Field | Content |
+|---|---|
+| **S** | **S2** — a loaded counterbalance truck against a person: crushing against a rack upright or a wall, or the load toppling onto them. Irreversible. *Arguable in one direction only:* at the 0.3 m/s cap with free space behind the person, contact is SC-06's bruise and S1. The bounding case is a person between the load and a fixed structure, which stays **S2** at any speed this truck can reach, so S2 is what the derivation carries. |
+| **F** | **F2** — the same continuously shared aisles as SC-05, and the fork direction is the direction of travel for every loaded transport leg. **F is the person's exposure to the hazard zone, not the frequency with which a load occludes the plane** — which is in any case every loaded leg, and would be the wrong quantity even if it were rare (§1.2). |
+| **P** | **P1**, on the same layout precondition SC-05 claims: open sight lines and lateral escape room, and a truck that is large, audible and visible on approach **even though the truck cannot see the person**. *Arguable, and the arguing is the point of the scenario:* a person already committed between the load and a rack upright has no escape direction and no cue, which is P2 and PLr **e**. That case is **SC-04's** — the vehicle e-stop is what exists for hazards outside the field geometry — and the response written down there is a change to the machine and the layout, never a re-argued parameter. |
+| **PLr** | **d** (S2, F2, P1) |
+| **Covering SF** | **SF-03** — protective field stop, in its **two-scanner** form, which is the function this scenario derives. And the sentence the scenario exists for: **SF-03 covers the sectors the union reaches and does not cover the residual.** Inside R3 there is no detection at all, so a detection-based function cannot be the covering measure there. Following §1.1's rule, the other function live at the same time is **cross-referenced without being claimed**: the residual's hazard is held by **SF-10**, safely limited speed, holding the ISO 3691-4 creep cap while the load-direction detection is reduced, with **SF-02** as the last resort SC-04 describes. This is the SC-11 shape — a PLr belongs to the hazard, not to the function named in the title — and it is spelled out for the same reason. **The reduced field plus creep speed is a risk reduction and is written down as one.** It does not make the sector visible, it does not shorten it, and no sentence in this project may say that it does. |
+| **Architecture** | SRS §5 target: **Category 3, PL d** for SF-03, now with two devices. Two safety laser scanners at diagonal chassis corners, each with two-channel OSSD outputs into the vehicle's onboard safety system; monitoring-case selection cross-validated against safely measured speed and direction, with the device's permitted-successor switching-sequence check and a switching-time margin (ADR 0011 F9); dual-channel STO through SF-11. **The protective argument leans on the union of the two apertures and on nothing else** — per-device coverage is not the union, and the document that measures both says so per device (**R8**: 21.8 % of the rear device's own rays terminate on the vehicle, which costs the *pair* no coverage and is therefore an exposure qualifier on that device's field geometry, not on this hazard's derivation). **Component data, guarded.** The device class modelled is the SICK microScan3 Pro PROFINET, whose published figures are Type 3, Category 3 / PL d, PFH 8×10⁻⁸ h⁻¹ (ADR 0011 **F8**). **Those are the modelled component's data. They are not, and are never presented as, a figure achieved by anything in this repository** (ADR 0011 D5 item 7; SRS §5). No component has been selected, procured or certified here. |
+| **Network** | None. Scanner → onboard safety system → drive inhibit, and the creep cap that covers the residual is selected and monitored inside the vehicle's safety controller. No coverage figure, no monitoring case and no speed limit in this scenario travels over MQTT, OPC UA or the PLC's process envelope (N1). |
+| **Validation test** | *Stimulus:* pallet on the tines at rest travel; with the vehicle travelling fork-first, place a target in the measured residual at bearings 164.5–204.4°, 2.0 m from the model origin. *Observation:* (a) **neither protective field reports the target** — the negative observation is the one this test exists for, and it must be **observed in the run**, never inferred from the geometry document; (b) the monitoring case in force is the reduced load-direction one; (c) the speed limit in force is ≤ 0.3 m/s, cross-checked against AT-10; (d) move the same target to a bearing **outside** the residual — the field trips and AT-03 (a) executes normally. *Fault addressed:* none; this is the coverage-boundary test. *Pass:* all four, and specifically that (a) and (d) are demonstrated **in one run** — a test that only shows the field working proves the residual does not exist, and a test that only shows the residual proves the field does not work. *Fail:* the residual not reproducing where it is measured, which invalidates the coverage evidence rather than the function; or the creep cap not in force, which would leave the residual covered by nothing. |
+| **Maps to** | **AT-03 (e)**, the added two-scanner and residual observation; cross-checked by **AT-10 (a)** |
+
+---
+
+### SC-14 — The creep cap exceeded while detection is reduced
+
+**Hazard.** The truck is in the state SC-13 leaves it in: a load in the fork
+direction, the reduced monitoring case selected, and a residual sector nothing
+sees into. The whole of what remains between a person in that sector and a
+loaded truck is that the truck is moving at no more than 0.3 m/s. The speed then
+exceeds it — a stale or wrong envelope ceiling from the PLC, a velocity smoother
+integrating from its own last command instead of from measured odometry
+(ADR 0011 D3's implementation consequence), a navigation controller that simply
+commands more, or a monitoring case that switched later than the speed did. The
+person is met at a speed the residual argument never allowed for.
+
+| Field | Content |
+|---|---|
+| **S** | **S2**, inherited from SC-13. Same person, same load, same fixed structure behind them; only the closing speed has changed, and it has changed in the wrong direction. |
+| **F** | **F2**, inherited from SC-13. **Not the rate at which a speed ceiling is violated.** F asks how often a person is in the hazard zone; deriving it from how often a smoother overshoots is the §1.2 error with a different fault in the slot. |
+| **P** | **P1**, inherited from SC-13 rather than re-argued. The fault changes the vehicle's speed, not the person's sight lines or escape room. |
+| **PLr** | **d** (S2, F2, P1) — necessarily identical to SC-13, because the hazard is SC-13's hazard. What the loss of the cap changes is which function has to hold the floor, not where the floor is. |
+| **Covering SF** | **SF-10** — safely limited speed. The limit in force is selected by the onboard safety system per monitoring case, and the **reduced-detection case selects ≤ 0.3 m/s**: the cap ISO 3691-4 places on a truck whose personnel-detection means are muted (ADR 0011 **F11**, quoted as the practice the model follows, **never as a conformity statement**). Exceeding the limit demands **SF-11** — SS1, then STO. |
+| **The speed source** | Stated, because the whole function turns on it. SLS monitors the vehicle's **own safely measured speed and direction**, taken from the traction drive's measurement channels **inside the vehicle's safety controller**. It is **not** `cmd_vel`, **not** the odometry topic, **not** VDA `state.velocity`, **not** the HMI's displayed speed, and **not** the PLC's envelope speed ceiling. The envelope ceiling is a **process** value: the PLC forms it and does not enforce it, the enforcing gate runs on the vehicle, and the compelling backstop is this function (ADR 0014 D5). A safety function that took its measurement over OPC UA would be a safety function traversing the network, which invariant 1 forbids outright; a safety function that took its *limit* from the process ceiling would be checking a supervisor's word against itself. |
+| **Architecture** | SRS §5 target: **Category 3, PL d**. Two channels of speed and direction, cross-compared inside the safety program; the SLS limit selected from the monitoring case under the same permitted-successor and switching-time-margin discipline the field-set selection uses (ADR 0011 F9); the reaction routed through the one SS1 path of SF-11. On real hardware SLS is realised **in the drive** and selected by the F-CPU (ADR 0011 **F10**). **In this project the entire function is modelled** — there is no drive, no encoder pair and no safety-rated measurement channel, and SRS §5's honesty section governs every word of this row. |
+| **What this does not do to SF-04** | SF-04 remains exactly what it was: the **warning-field** speed reduction, implemented in vehicle software, safety-related but informative, **no PL claimed** (SRS §3 SF-04; SC-06). SF-04 *requests* a speed; SF-10 *enforces* a ceiling, and it does so in the reduced-detection case, which is not the warning-field case. The two are not the same function arriving twice, and SC-06's PLr b is still not met by SF-04. |
+| **Network** | None in the function. The envelope arrives over OPC UA and the bridge and is exactly the process traffic that must **not** be able to raise a safety limit; the network's inability to move the SLS limit is what the validation test demonstrates (N1). |
+| **Validation test** | *Stimulus:* reduced load-direction monitoring case in force, SLS limit 0.3 m/s; command a speed above the limit through the navigation stack. Then repeat with the PLC's envelope speed ceiling set **above** the SLS limit. *Observation:* (a) the safety model's own measured speed crosses the limit and SF-11 is demanded; the vehicle reaches standstill and torque is removed; (b) the trip **latches** — returning the speed below the limit does not release it, and the onboard SF-08 monitored reset does, after which motion resumes only on a fresh navigation command; (c) in the second run the SLS limit does **not** move and the trip still occurs, so no process value reaches this function; (d) repeat (a) with the bridge stopped and the OPC UA session down — unchanged (B1, B3). *Fault addressed:* none; this is the demand test. Observation (c) is the invariant test wearing a speed limit. *Pass:* all four. *Fail:* the limit tracking the envelope ceiling, or the trip depending on any process value — either of which would have put the network in a safety function's causal chain. |
+| **Maps to** | **AT-10 (a)–(d)** |
+
+---
+
+### SC-15 — Single fault: the SS1 deceleration phase fails during a protective-stop demand
+
+**Hazard.** SC-05's demand: a person steps into the aisle and the protective
+field trips. The reaction is a category 1 stop — decelerate under control, then
+remove torque. The deceleration phase then fails: a brake that develops no
+torque, a drive that faults into freewheel, a commanded ramp that is never
+achieved on a wet floor or a gradient. Nobody is hurt by the failure itself. The
+hazard is that the safety function **believes it is stopping** while the vehicle
+is still travelling toward the person — and that belief lasts exactly as long as
+the function is willing to wait for a standstill that is not coming.
+
+| Field | Content |
+|---|---|
+| **S** | **S2** — the exposure is SC-05's exposure. The fault changes nothing about the injury, only about whether it happens. |
+| **F** | **F2** — SC-05's continuously shared aisles. **Not the failure rate of a brake.** F asks how often the *person* is in the hazard zone (§1.2); deriving it from the fault would understate the risk, which is the SC-03 error transplanted onto the vehicle. |
+| **P** | **P1** — inherited from SC-05, unchanged. The fault does not alter the person's sight lines or escape room. |
+| **PLr** | **d** (S2, F2, P1) — necessarily identical to SC-05, because a PLr is a property of the hazard and not of the failure mode. What the fault changes is the **architecture** needed to hold that floor. This is SC-03's reasoning on the vehicle side, and the two are deliberately parallel. |
+| **Covering SF** | **SF-11** — SS1 sequencing, in its **time-limit** aspect. SS1-t is a stop that is *timed*, not a stop that *waits*: STO and the mechanical brake are applied at standstill **or at the SS1 time limit (≤ 1 s), whichever comes first**, and the timer runs from the **demand**, never from the moment a deceleration is observed to have begun. A category 1 stop without that limit is a category 2 stop wearing the wrong name. |
+| **Architecture** | SRS §5 target: **Category 3, PL d**. **One** sequenced stop path shared by every category 1 demand on this vehicle — SF-03's protective field and bumper, and SF-10's speed-limit trip, both enter it. The timer is started by the demand, the deceleration is monitored rather than assumed, and STO is applied on the earlier of standstill and the limit. Sharing one path is deliberate: two stop paths would be two owners of one reaction, and the second one is the one nobody tests. **SF-11 holds no latch of its own** — the latch belongs to the function that demanded the stop, and the safe state SF-11 reaches is released by that function's own reset rule (SF-03's field-clear release, SF-10's SF-08 monitored reset). |
+| **Network** | None. Demand, timer, deceleration monitoring and STO all sit inside the vehicle's onboard safety controller. Nothing in the sequence consults, waits for or reports to anything off the vehicle before acting (N1). |
+| **Validation test** | *Stimulus:* vehicle at nominal speed; violate the protective field as in AT-03 **with the modelled deceleration disabled**, so the ramp cannot be achieved. *Observation:* (a) STO and brake are applied **at the SS1 time limit**, not withheld pending a standstill that never arrives; (b) the same demand with deceleration working reaches STO **at standstill, earlier than the limit** — the two runs together demonstrate "whichever comes first" instead of asserting it; (c) repeat with SF-10 as the demanding function instead of SF-03 — the same single sequence executes and no second stop path appears; (d) after each, the latch behaviour is the demanding function's and not SF-11's. *Fault addressed:* loss of the deceleration phase of a category 1 stop, taken as a fault the sequence must **survive** rather than one it must diagnose. No fault exclusion is claimed for the brake or the drive; none is justified in this project. *Pass:* all four. *Fail:* STO waiting on a standstill signal — the defect that silently turns a timed stop into an untimed one, and the most dangerous thing this test can find. |
+| **Maps to** | **AT-11 (a)–(d)** |
+
+---
+
 ## 3. Coverage
 
 ### 3.1 Safety function coverage
@@ -405,15 +523,17 @@ duties are tested.
 
 | SF | Function | Scenarios | Why more than one, where applicable |
 |---|---|---|---|
-| SF-01 | Cell e-stop chain | SC-01, SC-02, SC-03 | Demand in motion; demand at rest against unexpected start-up; the single-fault case that Category 3 is claimed for |
+| SF-01 | Cell e-stop chain | SC-01, SC-02, SC-03 | Demand in motion; demand at rest against unexpected start-up; the single-fault case the Category 3 **target** exists for |
 | SF-02 | Vehicle e-stop | SC-04 | — |
-| SF-03 | Protective field stop | SC-05 | Also the backing function for SC-06 and the independence demonstration in SC-12 |
+| SF-03 | Protective field stop | SC-05, SC-13 | The field working where the field reaches; the two-scanner union and the **measured** residual sectors where it does not. Also the backing function for SC-06 and the independence demonstration in SC-12 |
 | SF-04 | Warning-field speed reduction | SC-06 | — |
 | SF-05 | Door interlock | SC-07, SC-08 | Stopping duty and inhibiting duty; a design meeting only the first passes SC-07 and fails SC-08 lethally |
 | SF-06 | Charger interlock | SC-09 | — |
 | SF-07 | Zone monitoring | SC-10 | Also the function that actually holds the hazard in SC-11 |
 | SF-08 | Monitored reset | SC-11 | — |
 | SF-09 | *Supervision watchdog — not a safety function* | SC-12 | Carried to mark the boundary; no PLr, no PL claim |
+| SF-10 | Safely limited speed (SLS) | SC-14 | Also the **only** covering measure inside SC-13's residual sector, where no detection function reaches |
+| SF-11 | SS1 stop sequencing | SC-15 | The one category 1 stop path; exercised as a fault scenario because a stop path that is only ever demanded successfully is never tested |
 | SF-20…29 | *Reserved: arm safety — ids kept, never reissued* | none | **Out of scope — arm integration removed from the roadmap (ADR 0010 D5)**; the ids stay reserved so the record is not lost (SRS §1.3) |
 
 ### 3.2 Risk-graph parameter coverage
@@ -421,10 +541,10 @@ duties are tested.
 | Parameter | Value | Scenarios | Exercised |
 |---|---|---|---|
 | S | S1 | SC-06 | yes |
-| S | S2 | SC-01…05, SC-07…11 | yes |
+| S | S2 | SC-01…05, SC-07…11, SC-13…15 | yes |
 | F | F1 | SC-02, SC-04, SC-08, SC-09, SC-10, SC-11 | yes |
-| F | F2 | SC-01, SC-03, SC-05, SC-06, SC-07 | yes |
-| P | P1 | SC-01, SC-03, SC-05, SC-06, SC-07, SC-09 | yes |
+| F | F2 | SC-01, SC-03, SC-05, SC-06, SC-07, SC-13, SC-14, SC-15 | yes |
+| P | P1 | SC-01, SC-03, SC-05, SC-06, SC-07, SC-09, SC-13, SC-14, SC-15 | yes |
 | P | P2 | SC-02, SC-04, SC-08, SC-10, SC-11 | yes |
 
 All six parameter values are exercised, and no value is carried by a single
@@ -438,8 +558,8 @@ layout precondition stated in its own table.
 |---|---|---|
 | a | none | Reached only at S1/F1/P1, where a dedicated safety function is not the proportionate measure |
 | b | SC-06 | Derived, and deliberately **not met** by SF-04; carried by SF-03 instead |
-| c | SC-09 | Derived floor, **exceeded** by the shared Category 3 / PL d architecture (§1.3) |
-| d | SC-01…05, SC-07, SC-08, SC-10, SC-11 | The dominant outcome |
+| c | SC-09 | Derived floor, **exceeded** by the shared Category 3 / PL d **target** architecture (§1.3) |
+| d | SC-01…05, SC-07, SC-08, SC-10, SC-11, SC-13, SC-14, SC-15 | The dominant outcome |
 | e | none | See below |
 
 A d-dominated distribution is the expected result for this machine, not a sign
@@ -447,24 +567,42 @@ of a flattened analysis: an AGV cell's characteristic hazards are crushing
 between masses (S2) in continuously shared space (F2), and that pairing reaches
 d as soon as avoidance is anything less than certain.
 
-**PLr e is not reached, and four scenarios say where it would be.** SC-01,
-SC-05, SC-07 and SC-11 each identify the parameter that would push them to e —
-a button out of reach, a blind rack gap, a door onto a blind approach, a zone
-the operator cannot see into before resetting — and in all four the response
-written down is a change to the *machine* (layout, field dimensioning, choice
-of guard, sight lines), never a re-argued parameter. That is the
+**PLr e is not reached, and five scenarios say where it would be.** SC-01,
+SC-05, SC-07, SC-11 and SC-13 each identify the parameter that would push them
+to e — a button out of reach, a blind rack gap, a door onto a blind approach, a
+zone the operator cannot see into before resetting, a person committed between a
+load and a rack upright — and in all five the response written down is a change
+to the *machine* (layout, field dimensioning, choice of guard, sight lines,
+speed while detection is reduced), never a re-argued parameter. That is the
 correct use of a risk graph: when it lands on e, it is telling you the
 guarding is wrong, not that the control system needs to be better.
 
+**Where the M5 scenarios land, and why none of them lands lower.** SC-13, SC-14
+and SC-15 all derive **d**, and they derive it three times over the same hazard:
+a person in a loaded truck's path, in continuously shared aisles, with avoidance
+possible only on a layout precondition. SC-14 and SC-15 inherit S, F and P from
+the scenario each of them acts on rather than deriving new ones, which is why
+their floors are identical to their parents' by construction. A reader who finds
+three d's in a row should read that as the risk graph behaving, not as a
+flattened analysis: the parameters that differ between the three are which
+function has to hold the floor, and that is not a risk-graph parameter.
+
 ### 3.4 Single-fault behaviour
 
-Category 3 is a claim about single faults, so at least one scenario must
-exercise one rather than assert it. **SC-03** does: a broken conductor in one
-channel of the two-channel e-stop loop, with the pass criterion being that the
-fault produces the safe reaction, is detected by discrepancy monitoring, and
-latches until a monitored reset. It also names the three mechanisms separately
-— polarity, redundancy, diagnosis — because only the combination supports the
-Category 3 sentence.
+A Category 3 **target** is a requirement about single faults, so at least one
+scenario must exercise one rather than assert it. **SC-03** does, on the cell
+side: a broken conductor in one channel of the two-channel e-stop loop, with the
+pass criterion being that the fault produces the safe reaction, is detected by
+discrepancy monitoring, and latches until a monitored reset. It also names the
+three mechanisms separately — polarity, redundancy, diagnosis — because only the
+combination supports the Category 3 target sentence.
+
+**SC-15** is the same duty on the vehicle side, and it exercises a different
+class of fault deliberately. SC-03 injects the loss of an **input channel**;
+SC-15 injects the loss of a **reaction phase** — the deceleration of a category 1
+stop. A safety function can be perfectly redundant on its inputs and still fail
+to stop the machine, and a fault list that only ever attacks the sensing half
+never finds that out.
 
 Two further scenarios test fault behaviour without being fault-injection
 tests: **SC-06** requires the safety case to survive the *total* loss of an
@@ -478,11 +616,13 @@ not quietly retract it.
 
 Every scenario's reaction row reads "none". That is not a formatting artefact —
 it is the single check that matters most for this architecture, so it is stated
-per scenario rather than once. Twelve scenarios, twelve reaction chains, zero
+per scenario rather than once. Fifteen scenarios, fifteen reaction chains, zero
 messages: button or sensor → hardwired or F-I/O → PROFIsafe or onboard inhibit
 → de-energized output. The network appears in this document only as read-only
-mirrors written after the fact, and in SC-08 and SC-12 as the thing being
-demonstrated *powerless*.
+mirrors written after the fact, and in SC-08, SC-12 and SC-14 as the thing being
+demonstrated *powerless* — in SC-14's case a PLC-formed speed ceiling that
+cannot raise a safety limit, which is invariant 1 restated in the units the M5
+autonomy demonstration is watched in.
 
 ---
 
@@ -502,6 +642,9 @@ demonstrated *powerless*.
 | SC-10 | Presence in the transfer zone | SF-07 | d | Cat 3, PL d | AT-07 (a)–(d) |
 | SC-11 | Reset demanded with the hazard present | SF-08 | d *(hazard)* | PL c for SF-08; hazard held by SF-07 at PL d | AT-08 (a)–(d), cross-check AT-07 (b) |
 | SC-12 | Supervision lost mid-order | SF-09 *(not a safety function)* | **not applied** | none — no SIL/PL claim | AT-09 |
+| SC-13 | Person in the measured load-direction residual | SF-03 | d *(hazard)* | Cat 3, PL d for SF-03; **inside the residual the hazard is held by SF-10**, not by SF-03 | AT-03 (e), cross-check AT-10 (a) |
+| SC-14 | Creep cap exceeded while detection is reduced | SF-10 | d | Cat 3, PL d | AT-10 (a)–(d) |
+| SC-15 | Single fault: SS1 deceleration phase fails | SF-11 | d *(inherited from SC-05)* | Cat 3, PL d | AT-11 (a)–(d) |
 
 Every scenario maps to exactly one SF and at least one acceptance test in
 SRS §4. No scenario introduces a safety function, a reaction, a timing figure
@@ -524,7 +667,15 @@ Repeated at the end because a reader who skipped §0 will read this:
 - No fault list from ISO 13849-2 has been applied exhaustively, and no fault
   exclusion has been justified against its tables. SC-03 exercises one fault
   because Category 3 demands at least one demonstration; it is not a validation.
-- No component has been selected, procured or certified.
+- No component has been selected, procured or certified. Where a modelled
+  device's published figures appear — ADR 0011 F8's scanner class, quoted once
+  in SC-13 — they are the **modelled component's data** and carry that sentence
+  beside them. They are not this system's result.
+- **The measured coverage residuals are geometry, not fields.** R1–R8 in
+  `agv/forklift/EVIDENCE_SENSOR_COVERAGE.md` are computed and measured sight
+  lines. SC-13 uses them as an **input to a derivation**; nothing in this
+  document establishes a protective-field length, a response time or a stopping
+  distance, and no field boundary here is validated.
 - No test in this document has been run. The validation tests are
   specifications for the acceptance tests in SRS §4, which are executed at
   their own gates.
