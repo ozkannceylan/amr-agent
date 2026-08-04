@@ -201,6 +201,9 @@ docs/PLAN.md.
   shared with bridge); the demo-cell §4.3 "Nothing else goes into the
   interface." sentence, scope-stale after opcua-nodes §10.
 - T4.11b stays blocked on bridge fault injection (above).
+- One clause, next forklift-safety touch: plc/forklift-safety/SPEC.md §1.2
+  N7 predates SF-10/SF-11 and should name them in its no-onboard-safety
+  statement (m5-18 open question 1).
 - Carried, low: plc/forklift/SPEC.md §12 item 7 is stale (its own item 7 —
   distinct from demo-cell's) — close with the next forklift plc touch
   (m5r-06 OQ3).
