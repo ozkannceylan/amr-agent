@@ -34,9 +34,10 @@ Category figure below is a **target quoted from SRS §5**, and every PLr is a
 **Gate numbering.** Gate references in this document and in the SRS follow the
 gate order of ADR 0010
 (`docs/adr/0010-milestone-restructure-forklift-first.md`, accepted) **as amended
-by ADR 0013**, which places the vendor-portability gate M8 after M6 and M7 and
-assigns it no number of its own. `docs/roadmap.md` is the live order and is what
-any disagreement is settled against. That order merges what earlier rounds
+by ADR 0013**, which places the vendor-portability gate after M6 and M7 and
+deliberately **assigns it no number**; `docs/roadmap.md` numbers it **M8**,
+because that document is the single source for gate numbering, and it is the live
+order any disagreement is settled against. That order merges what earlier rounds
 carried as separate gates: the safety layer and the vehicle chain are one gate,
 **M5**, both landing on the forklift twin; the VDA 5050 client, the fleet
 manager and the PLC integration that brings the door and charger equipment with
@@ -440,11 +441,13 @@ cover the full circle **by union** at 3 m and beyond. They do not cover it
 everywhere. With a load in the fork direction the measured coverage of the
 0.150 m scan plane loses **39.9°** centred on the fork axis — bearings
 164.5–204.4°, of which 30.0° is the pallet itself
-(`agv/forklift/EVIDENCE_SENSOR_COVERAGE.md` **R3**) — and at close range a
-further **5.0° at 2 m** to the left of the fork axis stands behind the carriage
-(**R1**). A person standing in that sector, in the direction the loaded truck is
-travelling, is not seen at the safety plane by either device. The truck closes
-on them and no protective field trips.
+(`agv/forklift/EVIDENCE_SENSOR_COVERAGE.md` **R3**). The structural residual
+**R1** — 5.0° at 2 m, bearings 169.4–174.4°, where the carriage stands between
+the rear device and those bearings — lies **inside** that arc and adds nothing to
+it while a load is present; it is the part of the sector that survives when the
+load does not, and it closes at 3 m. A person standing in the arc, in the
+direction the loaded truck is travelling, is not seen at the safety plane by
+either device. The truck closes on them and no protective field trips.
 
 | Field | Content |
 |---|---|
@@ -455,8 +458,8 @@ on them and no protective field trips.
 | **Covering SF** | **SF-03** — protective field stop, in its **two-scanner** form, which is the function this scenario derives. And the sentence the scenario exists for: **SF-03 covers the sectors the union reaches and does not cover the residual.** Inside R3 there is no detection at all, so a detection-based function cannot be the covering measure there. Following §1.1's rule, the other function live at the same time is **cross-referenced without being claimed**: the residual's hazard is held by **SF-10**, safely limited speed, holding the ISO 3691-4 creep cap while the load-direction detection is reduced, with **SF-02** as the last resort SC-04 describes. This is the SC-11 shape — a PLr belongs to the hazard, not to the function named in the title — and it is spelled out for the same reason. **The reduced field plus creep speed is a risk reduction and is written down as one.** It does not make the sector visible, it does not shorten it, and no sentence in this project may say that it does. |
 | **Architecture** | SRS §5 target: **Category 3, PL d** for SF-03, now with two devices. Two safety laser scanners at diagonal chassis corners, each with two-channel OSSD outputs into the vehicle's onboard safety system; monitoring-case selection cross-validated against safely measured speed and direction, with the device's permitted-successor switching-sequence check and a switching-time margin (ADR 0011 F9); dual-channel STO through SF-11. **The protective argument leans on the union of the two apertures and on nothing else** — per-device coverage is not the union, and the document that measures both says so per device (**R8**: 21.8 % of the rear device's own rays terminate on the vehicle, which costs the *pair* no coverage and is therefore an exposure qualifier on that device's field geometry, not on this hazard's derivation). **Component data, guarded.** The device class modelled is the SICK microScan3 Pro PROFINET, whose published figures are Type 3, Category 3 / PL d, PFH 8×10⁻⁸ h⁻¹ (ADR 0011 **F8**). **Those are the modelled component's data. They are not, and are never presented as, a figure achieved by anything in this repository** (ADR 0011 D5 item 7; SRS §5). No component has been selected, procured or certified here. |
 | **Network** | None. Scanner → onboard safety system → drive inhibit, and the creep cap that covers the residual is selected and monitored inside the vehicle's safety controller. No coverage figure, no monitoring case and no speed limit in this scenario travels over MQTT, OPC UA or the PLC's process envelope (N1). |
-| **Validation test** | *Stimulus:* pallet on the tines at rest travel; with the vehicle travelling fork-first, place a target in the measured residual at bearings 164.5–204.4°, 2.0 m from the model origin. *Observation:* (a) **neither protective field reports the target** — the negative observation is the one this test exists for, and it must be **observed in the run**, never inferred from the geometry document; (b) the monitoring case in force is the reduced load-direction one; (c) the speed limit in force is ≤ 0.3 m/s, cross-checked against AT-10; (d) move the same target to a bearing **outside** the residual — the field trips and AT-03 (a) executes normally. *Fault addressed:* none; this is the coverage-boundary test. *Pass:* all four, and specifically that (a) and (d) are demonstrated **in one run** — a test that only shows the field working proves the residual does not exist, and a test that only shows the residual proves the field does not work. *Fail:* the residual not reproducing where it is measured, which invalidates the coverage evidence rather than the function; or the creep cap not in force, which would leave the residual covered by nothing. |
-| **Maps to** | **AT-03 (e)**, the added two-scanner and residual observation; cross-checked by **AT-10 (a)** |
+| **Validation test** | *Stimulus:* pallet on the tines with the carriage at **zero travel**, the condition the residual is measured at; with the vehicle travelling fork-first, place a target in the measured residual at bearings 164.5–204.4°, 2.0 m from the model origin. *Observation:* (a) **neither protective field reports the target** — the negative observation is the one this test exists for, and it must be **observed in the run**, never inferred from the geometry document; (b) the monitoring case in force is the reduced load-direction one; (c) the speed limit in force is ≤ 0.3 m/s, cross-checked against AT-10; (d) move the same target to a bearing **outside** the residual — the field trips and AT-03 (a) executes normally. *Fault addressed:* none; this is the coverage-boundary test. *Pass:* all four, and specifically that (a) and (d) are demonstrated **in one run** — a test that only shows the field working proves the residual does not exist, and a test that only shows the residual proves the field does not work. *Fail:* the residual not reproducing where it is measured, which invalidates the coverage evidence rather than the function; or the creep cap not in force, which would leave the residual covered by nothing. |
+| **Maps to** | **AT-03 (d)**, the added two-scanner and residual observation; cross-checked by **AT-10 (a)** |
 
 ---
 
@@ -642,7 +645,7 @@ autonomy demonstration is watched in.
 | SC-10 | Presence in the transfer zone | SF-07 | d | Cat 3, PL d | AT-07 (a)–(d) |
 | SC-11 | Reset demanded with the hazard present | SF-08 | d *(hazard)* | PL c for SF-08; hazard held by SF-07 at PL d | AT-08 (a)–(d), cross-check AT-07 (b) |
 | SC-12 | Supervision lost mid-order | SF-09 *(not a safety function)* | **not applied** | none — no SIL/PL claim | AT-09 |
-| SC-13 | Person in the measured load-direction residual | SF-03 | d *(hazard)* | Cat 3, PL d for SF-03; **inside the residual the hazard is held by SF-10**, not by SF-03 | AT-03 (e), cross-check AT-10 (a) |
+| SC-13 | Person in the measured load-direction residual | SF-03 | d *(hazard)* | Cat 3, PL d for SF-03; **inside the residual the hazard is held by SF-10**, not by SF-03 | AT-03 (d), cross-check AT-10 (a) |
 | SC-14 | Creep cap exceeded while detection is reduced | SF-10 | d | Cat 3, PL d | AT-10 (a)–(d) |
 | SC-15 | Single fault: SS1 deceleration phase fails | SF-11 | d *(inherited from SC-05)* | Cat 3, PL d | AT-11 (a)–(d) |
 
