@@ -1,0 +1,19 @@
+[INFO] [1785879836.351000267] [envelope_run]: envelope: enable := True at t = 0.030 s
+[INFO] [1785879836.362970910] [envelope_run]: envelope: ceiling := 0.6 at t = 0.030 s
+[INFO] [1785879836.373142080] [envelope_run]: envelope: permit := True at t = 0.030 s
+[INFO] [1785879836.386707553] [envelope_run]: envelope: mode := 2 at t = 0.030 s
+[INFO] [1785879846.323083992] [envelope_run]: envelope: enable := False at t = 10.030 s
+recorded 783 state rows, 432 gated messages, 315 envelope publications, 310 smoothed messages
+
+=== scenario enable-drop ===
+run 783 state rows over 16.02 s of simulated time
+the enable FALSE was first PUBLISHED at t = 10.0299 s
+  ground speed at the event      : +0.4000 m/s
+  first REDUCED gated command    : t = 10.0834 s, 0.0534 s after the event (+0.4000 -> +0.3750 m/s)
+  first ZERO gated command       : t = 10.8385 s, 0.8086 s after the event
+  mean decel of the EMITTED ramp : 0.4947 m/s^2 (|+0.4000| m/s over 0.8086 s; the gate is set to 0.50)
+  emitted commands in the stop   : n = 31, largest single step 0.0200 m/s
+  per-step decel (gaps >= 25 ms) : max 0.6594, mean 0.4988 m/s^2 over n = 15 steps (the gate is set to 0.50)
+  standstill (|v| <= 0.010 m/s)  : t = 10.880 s, 0.850 s after the event, 0.1719 m travelled
+  standstill (|v| <= 0.002 m/s)  : t = 10.880 s, 0.850 s after the event, 0.1719 m travelled
+  readback: heartbeat moved 299 times over 749 samples, last 379; mode applied ended 2

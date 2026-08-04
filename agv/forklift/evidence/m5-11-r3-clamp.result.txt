@@ -1,0 +1,19 @@
+[INFO] [1785878017.956505058] [envelope_run]: envelope: enable := True at t = 0.030 s
+[INFO] [1785878017.968971597] [envelope_run]: envelope: ceiling := 0.6 at t = 0.030 s
+[INFO] [1785878017.978307610] [envelope_run]: envelope: permit := True at t = 0.030 s
+[INFO] [1785878017.991140630] [envelope_run]: envelope: mode := 2 at t = 0.030 s
+[INFO] [1785878022.931487487] [envelope_run]: envelope: ceiling := 0.4 at t = 5.030 s
+[INFO] [1785878025.931850522] [envelope_run]: envelope: ceiling := 0.2 at t = 8.030 s
+[INFO] [1785878028.933356276] [envelope_run]: envelope: ceiling := 0.1 at t = 11.030 s
+recorded 669 state rows, 273 gated messages, 269 envelope publications, 273 smoothed messages
+
+=== scenario clamp ===
+run 669 state rows over 14.02 s of simulated time
+
+   ceiling      n    commanded      emitted  emitted max      ratio
+--------------------------------------------------------------------
+     0.600     80       0.2760       0.2760       0.6000     1.0000
+     0.400     40       0.4270       0.4000       0.4000     0.9368
+     0.200     40       0.2258       0.2000       0.2000     0.8858
+     0.100     39       0.1254       0.1000       0.1000     0.7972
+  readback: heartbeat moved 260 times over 650 samples, last 398; mode applied ended 2

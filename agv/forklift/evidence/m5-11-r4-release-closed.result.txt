@@ -1,0 +1,17 @@
+[INFO] [1785878090.531275150] [envelope_run]: envelope: enable := False at t = 0.340 s
+[INFO] [1785878090.538813360] [envelope_run]: envelope: ceiling := 0.6 at t = 0.340 s
+[INFO] [1785878090.547546960] [envelope_run]: envelope: permit := True at t = 0.340 s
+[INFO] [1785878090.558328896] [envelope_run]: envelope: mode := 2 at t = 0.340 s
+[INFO] [1785878100.199815760] [envelope_run]: envelope: enable := True at t = 10.030 s
+recorded 770 state rows, 505 gated messages, 309 envelope publications, 307 smoothed messages
+
+=== scenario release ===
+run 770 state rows over 16.02 s of simulated time
+the gate was RELEASED (enable TRUE first published) at t = 10.0301 s
+  SMOOTHED command at release    : +0.0250 m/s  <-- what the smoother had wound up to while the vehicle was held at zero
+  gated command just before      : +0.0000 m/s
+  gated command just after       : +0.0000 m/s
+  THE STEP AT RELEASE            : +0.0000 m/s (n = 1 event)
+  ground-truth accel over 1.0 s : +0.2563 m/s^2 (+0.0000 -> +0.2512 m/s)
+  peak sampled accel (50 Hz)     : 1.2500 m/s^2
+  readback: heartbeat moved 306 times over 767 samples, last 431; mode applied ended 2

@@ -1,0 +1,21 @@
+[INFO] [1785877950.178818205] [envelope_run]: envelope: enable := True at t = 0.030 s
+[INFO] [1785877950.191868328] [envelope_run]: envelope: ceiling := 0.6 at t = 0.030 s
+[INFO] [1785877950.204151746] [envelope_run]: envelope: permit := True at t = 0.030 s
+[INFO] [1785877950.214360282] [envelope_run]: envelope: mode := 2 at t = 0.030 s
+[WARN] [1785877960.157978158] [envelope_run]: DOUBLE STOPPED PUBLISHING at t = 10.030 s. The link is dead; nothing commanded a stop.
+recorded 770 state rows, 614 gated messages, 191 envelope publications, 318 smoothed messages
+
+=== scenario stale ===
+run 770 state rows over 16.02 s of simulated time
+the double's LAST envelope publication: t = 9.9800 s (nothing commanded a stop; the link simply died)
+the vehicle-side freshness window      : 0.500 s (config.yaml envelope.stale_window_s)
+  ground speed at the event      : +0.4000 m/s
+  first REDUCED gated command    : t = 10.4976 s, 0.5176 s after the event (+0.4000 -> +0.3770 m/s)
+  first ZERO gated command       : t = 11.2398 s, 1.2598 s after the event
+  mean decel of the EMITTED ramp : 0.3175 m/s^2 (|+0.4000| m/s over 1.2598 s; the gate is set to 0.50)
+  emitted commands in the stop   : n = 52, largest single step 0.0230 m/s
+  per-step decel (gaps >= 25 ms) : max 0.5020, mean 0.3145 m/s^2 over n = 25 steps (the gate is set to 0.50)
+  standstill (|v| <= 0.010 m/s)  : t = 11.300 s, 1.320 s after the event, 0.3715 m travelled
+  standstill (|v| <= 0.002 m/s)  : t = 11.300 s, 1.320 s after the event, 0.3715 m travelled
+  detection latency vs the window: first zero at 1.2598 s after the last message, against a 0.500 s window + a 0.7598 s ramp from the speed above
+  readback: heartbeat moved 295 times over 738 samples, last 440; mode applied ended 0

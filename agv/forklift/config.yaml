@@ -622,13 +622,43 @@ topics:
   # rather than inheriting it, because a subscriber of the wrong type
   # receives nothing at all and logs nothing about it.
   #
-  # WHERE m5-11's ENVELOPE GATE GOES: between cmd_vel_smoothed and the
-  # converter, which is ADR 0014 seam (b)'s "below the smoother". It is
-  # not named here and no constant of it exists in this file. The
-  # converter's input topic is a launch argument so the gate can be
-  # inserted without editing either.
+  # THE ENVELOPE GATE SITS BETWEEN cmd_vel_smoothed AND THE CONVERTER,
+  # which is ADR 0014 seam (b)'s "below the smoother" (m5-11). It is named
+  # here now, and its constants are the `envelope:` block at the end of
+  # this file. The converter's input topic is still a launch argument, so
+  # the gate was inserted without editing the converter.
   cmd_vel: /cmd_vel
   cmd_vel_smoothed: /cmd_vel_smoothed
+  cmd_vel_gated: /cmd_vel_gated
+
+  # ---- the envelope seam, PLC -> vehicle (opcua-nodes.md section 12.10) ----
+  #
+  # THESE ARE NOT COMMANDS AND NOT SETPOINTS. Every one of them is a bound
+  # or a permission the vehicle's own control layer consumes while forming
+  # its own commands (section 12.1, "a permission is not a command"). The
+  # envelope can prevent motion; it cannot cause it.
+  #
+  # NOTHING IN agv/ IS AN OPC UA CLIENT. These are ROS 2 topics the bridge
+  # republishes, which is what keeps invariant 11's layer adjacency
+  # intact (section 12.1). At M5 no PLC is connected and they are driven
+  # by scripts/envelope_run.py, a topic double.
+  #
+  # THE NAMES ARE THE NODE MODEL'S, not this file's: the BrowseNames in
+  # opcua-nodes.md section 12.10 are authoritative and the topic column of
+  # that table is what is copied here.
+  envelope_motion_enable: /forklift/envelope/motion_enable
+  envelope_speed_ceiling: /forklift/envelope/speed_ceiling
+  envelope_equipment_permit: /forklift/envelope/equipment_permit
+  mode_in_force: /forklift/mode/in_force
+
+  # ---- the vehicle's report back (section 12.6) ----
+  #
+  # The two values ADR 0014 D5.3 requires the gate's evidence to exercise:
+  # a supervisor that published a bound and received nothing back would be
+  # making a claim it could not check. They are a READBACK, never a second
+  # answer to "what mode is the machine in" (M1, M4).
+  mode_applied: /forklift/mode/applied
+  vehicle_heartbeat: /forklift/vehicle/heartbeat
 
 navigation:
   # ============ THE Twist -> TRICYCLE CONVERSION, AND ITS TWO EDGES ============
@@ -684,3 +714,103 @@ navigation:
   # can even tell it is turning, and any real Spin request (nav2's default
   # tree asks for 1.57 rad) crosses it by two orders of magnitude.
   yawrate_refusal_radps: 0.01
+
+envelope:
+  # ================== THE ENVELOPE GATE'S NAMED CONSTANTS ==================
+  #
+  # Read by scripts/envelope_gate.py, and by nothing else. The gate is the
+  # vehicle-side ENFORCER of the envelope the PLC forms: the PLC forms the
+  # envelope and does not enforce it (opcua-nodes.md section 12.6, ADR 0014
+  # D5).
+  #
+  # NOTHING IN THIS BLOCK IS A SAFETY PARAMETER, and the gate is not a
+  # safety function. Loss of the envelope is a DEGRADED MODE and not a
+  # safety event (invariant 2, section 12.1). The protective stop, the
+  # e-stop chain and safe torque off are onboard and hardwired and no
+  # value here can trigger, release or delay one (invariant 1).
+
+  # THE FRESHNESS WINDOW, opcua-nodes.md section 12.4 E5, and it is E5's
+  # "named constant in the vehicle layer" - ITS OWN, never shared with
+  # HMI_STALE_TIME, HEARTBEAT_STALE_TIME or UI_POLL_STALE_TIME, which are
+  # three PLC- and HMI-side constants watching different parties across
+  # different transports (section 10.8 P4 one layer out).
+  #
+  # WHERE THE VALUE COMES FROM. E5 says it is "derived from the rate the
+  # bridge republishes at". That rate is 20 Hz (section 12.10, every
+  # envelope row), so one publication is 50 ms and this window is TEN of
+  # them. It is deliberately not tighter: the bridge's poll is
+  # phase-quantised, the vehicle's own scheduler jitters, and a window
+  # that stops the vehicle on ordinary jitter would make the degraded mode
+  # the normal mode.
+  #
+  # WHAT IT IS NOT DERIVED FROM, stated because it would be the wrong
+  # derivation: it is NOT set from the ~46 ms closed-loop interval ADR 0014
+  # quotes as G1. That figure is an upper bound on a PLC round trip
+  # measured through a 0-50 ms poll phase, and it is not a measurement of
+  # envelope age on the vehicle's side of the bridge. ADR 0014's own open
+  # item asks for a brief that MEASURES PLC-write-to-topic age and jitter;
+  # until that measurement exists this window is a DESIGN VALUE derived
+  # from a nominal rate, and EVIDENCE_ENVELOPE.md says so.
+  stale_window_s: 0.50
+
+  # THE COMMAND TIMEOUT. If the chain ABOVE the gate stops talking - the
+  # smoother dies, or its own 1.0 s dead-man has already zeroed it and
+  # then it stops too - the gate drives its output to zero on the same
+  # ramp rather than holding the last command. forklift_io.py republishes
+  # its held command at 20 Hz, so a gate that simply went quiet would
+  # leave the vehicle driving on the last value it ever emitted.
+  #
+  # It is SEPARATE from stale_window_s and must stay separate: one watches
+  # the supervisor, the other watches this vehicle's own controller, and
+  # retuning one must not silently retune the other.
+  command_timeout_s: 0.50
+
+  # THE GATE'S OWN DECELERATION RAMP. ADR 0014 seam (b)'s gate law is
+  # "enable false, or envelope stale -> controlled stop ON THE VEHICLE'S
+  # OWN DECELERATION RAMP". A step to zero is not a controlled stop: it is
+  # a command discontinuity that the chain below cannot honour anyway.
+  #
+  # 0.50 m/s^2 is the same figure nav2.yaml gives the smoother as
+  # max_decel, and the duplication is deliberate rather than shared: the
+  # smoother's limit is a parameter of a node this repository does not
+  # own, in a file with a different reader, and the gate must ramp
+  # correctly when the smoother is not running at all. The two are checked
+  # against each other in EVIDENCE_ENVELOPE.md and not wired together.
+  stop_decel_mps2: 0.50
+
+  # THE GATE'S OUTPUT RATE. 20 Hz, matching nav2.yaml's
+  # smoothing_frequency, so the gate neither drops nor duplicates a
+  # command in the pass-through case. This timer is what publishes the
+  # ramp and the held zero; a command arriving while the gate is passing
+  # is emitted IMMEDIATELY and not held for the next tick, so the gate
+  # adds no latency to the permissive path (measured in
+  # EVIDENCE_ENVELOPE.md section 7).
+  publish_hz: 20.0
+
+  # THE CEILING'S PLAUSIBILITY WINDOW, opcua-nodes.md section 12.4:
+  # 0.00 ... TRACTION_SPEED_MAX, unsigned, and "a value outside the range
+  # is a broken supervisor and is non-permissive to the consumer, never a
+  # bound to clamp". Tested AFFIRMATIVELY - valid := (0 <= c <= max) - so
+  # a NaN falls through to the fault branch (LESSONS 2026-07-27).
+  #
+  # THE VALUE 1.00 IS THE PLC'S CONSTANT, NOT THIS LAYER'S. It mirrors
+  # TRACTION_SPEED_MAX in plc/forklift/SPEC.md section 3.3 as
+  # opcua-nodes.md section 12.4 quotes it. That makes it a SECOND COPY of
+  # a datum with one owner, which invariant 10 does not admit; it is
+  # carried as a plausibility bound only, it can only ever make the gate
+  # MORE restrictive, and it is raised in the m5-11 report as an open
+  # question rather than silently owned here.
+  #
+  # It is NOT limits.traction_speed_max_mps (1.50) above. That is the
+  # DRIVE-WHEEL TREAD speed limit of this model, a different quantity in a
+  # different place in the chain: the ceiling bounds ground speed.
+  ceiling_max_mps: 1.00
+
+  # THE MODE ENCODING, opcua-nodes.md section 12.3, defined there and
+  # re-encoded nowhere. Written out here so this file can be diffed
+  # against that table; a value outside {0, 1, 2} is a broken writer and
+  # is a fault, never a mode to clamp.
+  mode_none: 0
+  mode_teleop: 1
+  mode_autonomous: 2
+
