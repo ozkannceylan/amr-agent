@@ -1,0 +1,622 @@
+#!/usr/bin/env python3
+"""nav2_run.py - the measurement harness for the forklift's Nav2 stack.
+
+WHAT IT DOES
+  `goal`     converts a WORLD pose into the MAP frame through the
+             committed registration, sends it to /navigate_to_pose,
+             records the run at 10 Hz and prints what the stack did -
+             including what it did when it REFUSED.
+  `analyse`  scores a recording: goal error measured ABSOLUTELY in the
+             world frame, cross-track error against the plan the vehicle
+             was actually given, direction reversals, and the gap between
+             where the vehicle THOUGHT it finished and where it really
+             did.
+
+WHAT IT IS NOT. It is not part of the vehicle. It publishes no transform,
+no command and no pose; it drives nothing and it corrects nothing. It is
+an instrument, and it is the only thing in this stack allowed to look at
+ground truth.
+
+THE REFERENCE IS EXACT AND IT REACHES NOTHING ELSE. /forklift/odom is the
+simulator's own pose of the model despite its name (agv/forklift/config.yaml
+carries the standing rename request). It is subscribed HERE and by nothing
+that navigates: not by the EKF, not by AMCL, not by any costmap. An
+estimate scored against its own input cannot be wrong.
+
+THE GOAL IS GIVEN IN THE MAP FRAME, WHICH IS ALL A REAL VEHICLE COULD
+KNOW. There is no world frame on a forklift and no T(world -> map) on one
+either. The conversion lives here, in the harness, for the same reason
+localization.launch.py refuses to carry it: putting it in the vehicle's own
+software would make the vehicle depend on a transform that exists only
+because this is a simulation. The transform is reached through
+sim/maps/warehouse/register_map.py, the module that DERIVED it, which
+verifies the grid md5 before returning it (invariant 10).
+
+THE FLOOR TRAVELS WITH EVERY FIGURE. The registration's residual max is
+0.141 m and no rigid transform fits the committed grid to the building
+better than that. Any error at or below it is reported as "at the
+instrument's resolution" by the same rule EVIDENCE_LOCALIZATION.md follows,
+applied by this tool and not by the reader.
+
+Usage (after sourcing /opt/ros/jazzy/setup.bash):
+
+  python3 agv/forklift/scripts/nav2_run.py goal \\
+      --x 0.0 --y 7.0 --yaw 0.0 --csv run.csv --plan run-plan.csv
+
+  python3 agv/forklift/scripts/nav2_run.py analyse \\
+      --csv run.csv --plan run-plan.csv
+"""
+
+import argparse
+import csv
+import json
+import math
+import os
+import sys
+
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_FORKLIFT_DIR = os.path.normpath(os.path.join(_THIS_DIR, '..'))
+_REPO_ROOT = os.path.normpath(os.path.join(_FORKLIFT_DIR, '..', '..'))
+
+#: The columns of the run CSV, in order. Written out so a reader of the
+#: file does not have to run the tool to know what a column is.
+_RUN_FIELDS = [
+    't_sim',            # simulation time [s]
+    'gt_x', 'gt_y', 'gt_yaw',        # GROUND TRUTH, world frame, exact
+    'amcl_x', 'amcl_y', 'amcl_yaw',  # map -> forklift/base_link, map frame
+    'cmd_v', 'cmd_w',   # the Twist the converter was handed [m/s, rad/s]
+    'steer', 'traction',             # what the converter emitted
+    'refusals',         # monotonic count of refused in-place rotations
+]
+
+
+def _wrap(a):
+    return math.atan2(math.sin(a), math.cos(a))
+
+
+def _yaw_of(q):
+    return math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                      1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+
+
+# --------------------------------------------------------------------------- #
+# the committed registration, through the module that derived it
+# --------------------------------------------------------------------------- #
+
+def load_registration(path=None):
+    """Reached through sim/maps/warehouse/register_map.py, never parsed
+    here. It verifies the grid md5, so a run scored against a rebuilt map
+    FAILS HERE instead of producing a plausible wrong number."""
+    module_dir = os.path.join(_REPO_ROOT, 'sim', 'maps', 'warehouse')
+    if module_dir not in sys.path:
+        sys.path.insert(0, module_dir)
+    try:
+        import register_map
+    except ImportError:
+        raise SystemExit(
+            'cannot import {}/register_map.py, which owns the world->map '
+            'transform.'.format(module_dir))
+    if path is None:
+        path = register_map.DEFAULT_REGISTRATION
+    return register_map.load_registration(path)
+
+
+def world_to_map(rec, x, y, yaw):
+    """p_map = R(theta) p_world + t, the registration's own direction."""
+    th = rec['theta_rad']
+    c, s = math.cos(th), math.sin(th)
+    return (c * x - s * y + rec['t_x_m'],
+            s * x + c * y + rec['t_y_m'],
+            _wrap(yaw + th))
+
+
+def map_to_world(rec, x, y, yaw):
+    """p_world = R(-theta) (p_map - t)."""
+    th = rec['theta_rad']
+    c, s = math.cos(-th), math.sin(-th)
+    mx, my = x - rec['t_x_m'], y - rec['t_y_m']
+    return (c * mx - s * my, s * mx + c * my, _wrap(yaw - th))
+
+
+def against_floor(value_m, floor_m):
+    """The reporting rule, applied by the tool and not by the reader."""
+    if value_m <= floor_m:
+        return '{:.4f} m (at the instrument\'s resolution, floor {:.4f} m)' \
+            .format(value_m, floor_m)
+    return '{:.4f} m ({:.2f} x floor)'.format(value_m, value_m / floor_m)
+
+
+# --------------------------------------------------------------------------- #
+# goal
+# --------------------------------------------------------------------------- #
+
+def cmd_goal(args):
+    import rclpy
+    from action_msgs.msg import GoalStatus
+    from geometry_msgs.msg import PoseStamped, Twist
+    from nav_msgs.msg import Odometry, Path
+    from nav2_msgs.action import NavigateToPose
+    from rclpy.action import ActionClient
+    from rclpy.node import Node
+    from rclpy.parameter import Parameter
+    from std_msgs.msg import Float64, UInt32
+    import tf2_ros
+
+    rec = load_registration(args.registration)
+    gx, gy, gyaw = world_to_map(rec, args.x, args.y, args.yaw)
+
+    class Runner(Node):
+        def __init__(self):
+            # use_sim_time is an OVERRIDE at construction, not a
+            # set_parameters call afterwards: the clock has to be on /clock
+            # before the first get_clock().now(), or the node reads the
+            # system clock once and every deadline computed from it is
+            # 1.8e9 s out.
+            super().__init__(
+                'nav2_run',
+                parameter_overrides=[Parameter('use_sim_time', value=True)])
+
+            self.gt = None
+            self.cmd = (0.0, 0.0)
+            self.steer = float('nan')
+            self.traction = float('nan')
+            self.refusals = 0
+            self.first_plan = None
+            self.last_plan = None
+            self.plan_count = 0
+
+            self.tf_buffer = tf2_ros.Buffer()
+            self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+
+            self.create_subscription(Odometry, '/forklift/odom',
+                                     self.cb_ground_truth, 10)
+            self.create_subscription(Twist, args.cmd_topic, self.cb_cmd, 10)
+            self.create_subscription(
+                Float64, '/forklift/cmd/steer_angle', self.cb_steer, 10)
+            self.create_subscription(
+                Float64, '/forklift/cmd/traction_speed', self.cb_traction, 10)
+            self.create_subscription(
+                UInt32, '/forklift/nav/tricycle_refusals',
+                self.cb_refusals, 10)
+            self.create_subscription(Path, '/plan', self.cb_plan, 10)
+
+            self.client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+
+        # Callbacks are cb_* so none can shadow an rclpy Node attribute.
+        def cb_ground_truth(self, msg):
+            p = msg.pose.pose
+            self.gt = (p.position.x, p.position.y, _yaw_of(p.orientation))
+
+        def cb_cmd(self, msg):
+            self.cmd = (msg.linear.x, msg.angular.z)
+
+        def cb_steer(self, msg):
+            self.steer = msg.data
+
+        def cb_traction(self, msg):
+            self.traction = msg.data
+
+        def cb_refusals(self, msg):
+            self.refusals = msg.data
+
+        def cb_plan(self, msg):
+            poses = [(p.pose.position.x, p.pose.position.y,
+                      _yaw_of(p.pose.orientation)) for p in msg.poses]
+            if not poses:
+                return
+            self.plan_count += 1
+            if self.first_plan is None:
+                self.first_plan = poses
+            self.last_plan = poses
+
+        def map_pose(self):
+            try:
+                tr = self.tf_buffer.lookup_transform(
+                    'map', 'forklift/base_link', rclpy.time.Time())
+            except Exception:
+                return None
+            t = tr.transform.translation
+            return (t.x, t.y, _yaw_of(tr.transform.rotation))
+
+        def sim_time(self):
+            return self.get_clock().now().nanoseconds * 1e-9
+
+    rclpy.init()
+    node = Runner()
+
+    # ---- wait for the action server and for a transform tree ----
+    print('registration  theta {:+.9f} rad  t ({:+.6f}, {:+.6f}) m  '
+          'FLOOR rms {:.4f} MAX {:.4f} m'.format(
+              rec['theta_rad'], rec['t_x_m'], rec['t_y_m'],
+              rec['residual_rms_m'], rec['residual_max_m']))
+    print('goal  world ({:+.4f}, {:+.4f}) yaw {:+.4f} rad'
+          '  ->  map ({:+.4f}, {:+.4f}) yaw {:+.4f} rad'.format(
+              args.x, args.y, args.yaw, gx, gy, gyaw))
+
+    if not node.client.wait_for_server(timeout_sec=args.server_timeout):
+        print('FAIL: /navigate_to_pose action server did not appear within '
+              '{:.0f} s. Nav2 is not up.'.format(args.server_timeout))
+        node.destroy_node()
+        rclpy.shutdown()
+        return 2
+
+    # BOUNDED POLL ON THE WALL CLOCK, not on sim time: this is a wait for a
+    # transform tree to EXIST, and until it does there is no reason to
+    # believe /clock has been read either.
+    import time as _time
+    settle_deadline = _time.monotonic() + args.settle
+    while _time.monotonic() < settle_deadline:
+        rclpy.spin_once(node, timeout_sec=0.05)
+        if node.map_pose() is not None and node.gt is not None:
+            break
+    if node.map_pose() is None:
+        print('FAIL: no map -> forklift/base_link transform after {:.0f} s. '
+              'The localization stack is not up.'.format(args.settle))
+        node.destroy_node()
+        rclpy.shutdown()
+        return 2
+    if node.gt is None:
+        print('FAIL: no /forklift/odom. The bringup is not up, and this '
+              'harness has no reference to score against.')
+        node.destroy_node()
+        rclpy.shutdown()
+        return 2
+
+    goal = NavigateToPose.Goal()
+    goal.pose = PoseStamped()
+    goal.pose.header.frame_id = 'map'
+    goal.pose.header.stamp = node.get_clock().now().to_msg()
+    goal.pose.pose.position.x = gx
+    goal.pose.pose.position.y = gy
+    goal.pose.pose.orientation.z = math.sin(gyaw / 2.0)
+    goal.pose.pose.orientation.w = math.cos(gyaw / 2.0)
+
+    t0 = node.sim_time()
+    wall0 = _time.monotonic()
+    send_future = node.client.send_goal_async(goal)
+    while not send_future.done():
+        rclpy.spin_once(node, timeout_sec=0.05)
+    handle = send_future.result()
+
+    if not handle.accepted:
+        print('')
+        print('REFUSED AT ACCEPTANCE: the action server rejected the goal.')
+        node.destroy_node()
+        rclpy.shutdown()
+        return 1
+    print('goal ACCEPTED at t_sim {:.2f}'.format(t0))
+
+    result_future = handle.get_result_async()
+
+    rows = []
+    next_sample = node.sim_time()
+    period = 1.0 / args.record_hz
+    while not result_future.done():
+        rclpy.spin_once(node, timeout_sec=0.02)
+        now = node.sim_time()
+        if now >= next_sample:
+            next_sample = now + period
+            mp = node.map_pose()
+            gt = node.gt
+            rows.append({
+                't_sim': '{:.3f}'.format(now),
+                'gt_x': '' if gt is None else '{:.6f}'.format(gt[0]),
+                'gt_y': '' if gt is None else '{:.6f}'.format(gt[1]),
+                'gt_yaw': '' if gt is None else '{:.6f}'.format(gt[2]),
+                'amcl_x': '' if mp is None else '{:.6f}'.format(mp[0]),
+                'amcl_y': '' if mp is None else '{:.6f}'.format(mp[1]),
+                'amcl_yaw': '' if mp is None else '{:.6f}'.format(mp[2]),
+                'cmd_v': '{:.6f}'.format(node.cmd[0]),
+                'cmd_w': '{:.6f}'.format(node.cmd[1]),
+                'steer': '{:.6f}'.format(node.steer),
+                'traction': '{:.6f}'.format(node.traction),
+                'refusals': str(node.refusals),
+            })
+        if now - t0 > args.timeout:
+            print('TIMEOUT after {:.1f} s of simulation time; cancelling'
+                  .format(now - t0))
+            handle.cancel_goal_async()
+            break
+        # WALL BACKSTOP. If /clock stalls, the simulation-time deadline
+        # above never fires and this harness would wait for ever - which is
+        # exactly the "ended a turn waiting on a process" failure
+        # docs/LESSONS.md 2026-07-27 records.
+        if _time.monotonic() - wall0 > args.wall_timeout:
+            print('WALL TIMEOUT after {:.0f} s with simulation time at '
+                  '{:.1f} s; cancelling. A stalled /clock is the usual '
+                  'cause.'.format(_time.monotonic() - wall0, now - t0))
+            handle.cancel_goal_async()
+            break
+
+    status_name = 'CANCELLED/TIMEOUT'
+    error_code = None
+    if result_future.done():
+        res = result_future.result()
+        status = res.status
+        status_name = {
+            GoalStatus.STATUS_SUCCEEDED: 'SUCCEEDED',
+            GoalStatus.STATUS_ABORTED: 'ABORTED',
+            GoalStatus.STATUS_CANCELED: 'CANCELED',
+        }.get(status, 'status {}'.format(status))
+        error_code = getattr(res.result, 'error_code', None)
+
+    t_end = node.sim_time()
+
+    # ---- what actually happened, printed before anything is scored ----
+    mp = node.map_pose()
+    gt = node.gt
+    print('')
+    print('RESULT           {}'.format(status_name))
+    print('error_code       {}'.format(
+        'none' if error_code in (None, 0) else error_code))
+    print('elapsed          {:.2f} s of simulation time'.format(t_end - t0))
+    print('plans published  {}'.format(node.plan_count))
+    print('refusals         {} rotation-in-place commands refused by the '
+          'converter'.format(node.refusals))
+    if mp is not None:
+        w = map_to_world(rec, *mp)
+        print('final BELIEVED   map ({:+.4f}, {:+.4f}) yaw {:+.4f}'
+              .format(*mp))
+        print('  carried to world ({:+.4f}, {:+.4f}) yaw {:+.4f}'.format(*w))
+    if gt is not None:
+        print('final TRUTH      world ({:+.4f}, {:+.4f}) yaw {:+.4f}'
+              .format(*gt))
+        d = math.hypot(gt[0] - args.x, gt[1] - args.y)
+        print('ABSOLUTE goal error (truth vs commanded goal): {}'.format(
+            against_floor(d, rec['residual_max_m'])))
+        print('  heading error {:+.3f} deg'.format(
+            math.degrees(_wrap(gt[2] - args.yaw))))
+
+    if args.csv:
+        with open(args.csv, 'w', newline='', encoding='utf-8') as fh:
+            wr = csv.DictWriter(fh, fieldnames=_RUN_FIELDS)
+            wr.writeheader()
+            wr.writerows(rows)
+        print('wrote {} ({} samples)'.format(args.csv, len(rows)))
+
+    if args.plan:
+        payload = {
+            'goal_world': [args.x, args.y, args.yaw],
+            'goal_map': [gx, gy, gyaw],
+            'status': status_name,
+            'error_code': error_code,
+            'elapsed_s': t_end - t0,
+            'plans_published': node.plan_count,
+            'refusals': node.refusals,
+            'first_plan_map': node.first_plan,
+            'last_plan_map': node.last_plan,
+        }
+        with open(args.plan, 'w', encoding='utf-8') as fh:
+            json.dump(payload, fh)
+        print('wrote {}'.format(args.plan))
+
+    node.destroy_node()
+    rclpy.shutdown()
+    return 0 if status_name == 'SUCCEEDED' else 1
+
+
+# --------------------------------------------------------------------------- #
+# analyse
+# --------------------------------------------------------------------------- #
+
+def _path_metrics(poses):
+    """Length, direction reversals (cusps) and reverse fraction of a path.
+
+    A path point's DIRECTION is the sign of the dot product between the
+    step it takes and the heading it carries. A Reeds-Shepp cusp is where
+    that sign flips, which is the one place a tricycle stops and slews the
+    steer axis across. Counting it from the path's own headings rather than
+    from a velocity means the count is a property of the PLAN, available
+    before the vehicle moves."""
+    if not poses or len(poses) < 3:
+        return 0.0, 0, 0.0
+    length = 0.0
+    signs = []
+    for i in range(len(poses) - 1):
+        dx = poses[i + 1][0] - poses[i][0]
+        dy = poses[i + 1][1] - poses[i][1]
+        step = math.hypot(dx, dy)
+        if step < 1e-9:
+            continue
+        length += step
+        yaw = poses[i][2]
+        dot = dx * math.cos(yaw) + dy * math.sin(yaw)
+        signs.append((1 if dot >= 0.0 else -1, step))
+    cusps = 0
+    for i in range(1, len(signs)):
+        if signs[i][0] != signs[i - 1][0]:
+            cusps += 1
+    reverse_len = sum(s for sg, s in signs if sg < 0)
+    return length, cusps, (reverse_len / length if length > 0 else 0.0)
+
+
+def _cross_track(point, poly):
+    """Shortest distance from a point to a polyline."""
+    best = float('inf')
+    for i in range(len(poly) - 1):
+        ax, ay = poly[i][0], poly[i][1]
+        bx, by = poly[i + 1][0], poly[i + 1][1]
+        dx, dy = bx - ax, by - ay
+        den = dx * dx + dy * dy
+        if den < 1e-12:
+            d = math.hypot(point[0] - ax, point[1] - ay)
+        else:
+            t = ((point[0] - ax) * dx + (point[1] - ay) * dy) / den
+            t = max(0.0, min(1.0, t))
+            d = math.hypot(point[0] - (ax + t * dx),
+                           point[1] - (ay + t * dy))
+        best = min(best, d)
+    return best
+
+
+def cmd_analyse(args):
+    rec = load_registration(args.registration)
+    floor = rec['residual_max_m']
+
+    with open(args.csv, newline='', encoding='utf-8') as fh:
+        rows = list(csv.DictReader(fh))
+    if not rows:
+        raise SystemExit('empty recording: {}'.format(args.csv))
+
+    def num(row, key):
+        v = row.get(key, '')
+        return float(v) if v not in ('', None) else None
+
+    payload = {}
+    if args.plan and os.path.exists(args.plan):
+        with open(args.plan, encoding='utf-8') as fh:
+            payload = json.load(fh)
+
+    print('=' * 74)
+    print('nav2_run analyse   {}'.format(os.path.basename(args.csv)))
+    print('=' * 74)
+    print('FLOOR   registration residual rms {:.4f} m, MAX {:.4f} m'.format(
+        rec['residual_rms_m'], floor))
+    print('samples {}   simulation span {:.2f} s'.format(
+        len(rows), num(rows[-1], 't_sim') - num(rows[0], 't_sim')))
+
+    if payload:
+        print('status  {}   error_code {}   plans {}   refusals {}'.format(
+            payload.get('status'), payload.get('error_code'),
+            payload.get('plans_published'), payload.get('refusals')))
+
+    # ---- the plan the vehicle was given, in world coordinates ----
+    plan_world = []
+    if payload.get('first_plan_map'):
+        plan_world = [map_to_world(rec, *p)
+                      for p in payload['first_plan_map']]
+        length, cusps, rev = _path_metrics(plan_world)
+        print('')
+        print('THE PLAN (first published)')
+        print('  points        {}'.format(len(plan_world)))
+        print('  length        {:.3f} m'.format(length))
+        print('  cusps         {}   (direction reversals in the plan)'
+              .format(cusps))
+        print('  reverse       {:.1f} % of the path length'.format(100 * rev))
+
+    # ---- the drive ----
+    gt = [(num(r, 'gt_x'), num(r, 'gt_y'), num(r, 'gt_yaw'), num(r, 't_sim'))
+          for r in rows if num(r, 'gt_x') is not None]
+    travelled = sum(math.hypot(gt[i + 1][0] - gt[i][0],
+                               gt[i + 1][1] - gt[i][1])
+                    for i in range(len(gt) - 1))
+    v = [num(r, 'cmd_v') for r in rows if num(r, 'cmd_v') is not None]
+    tr = [num(r, 'traction') for r in rows
+          if num(r, 'traction') is not None and
+          not math.isnan(num(r, 'traction'))]
+    st = [num(r, 'steer') for r in rows
+          if num(r, 'steer') is not None and
+          not math.isnan(num(r, 'steer'))]
+    moving = [x for x in v if abs(x) > 0.02]
+
+    print('')
+    print('THE DRIVE')
+    print('  ground-truth path      {:.3f} m'.format(travelled))
+    if moving:
+        print('  commanded speed        mean {:+.3f}  max {:+.3f}  '
+              'min {:+.3f} m/s (moving samples)'.format(
+                  sum(moving) / len(moving), max(v), min(v)))
+    fwd = sum(1 for x in v if x > 0.02)
+    rvs = sum(1 for x in v if x < -0.02)
+    print('  command sign           {} forward / {} reverse / {} at rest'
+          .format(fwd, rvs, len(v) - fwd - rvs))
+    if st:
+        print('  steer angle commanded  max |{:.4f}| rad ({:.2f} deg), '
+              'stop is 1.3100 rad'.format(
+                  max(abs(x) for x in st),
+                  math.degrees(max(abs(x) for x in st))))
+    if tr:
+        print('  drive-wheel speed      max |{:.3f}| m/s, limit is '
+              '1.500 m/s'.format(max(abs(x) for x in tr)))
+    refs = [int(r['refusals']) for r in rows if r.get('refusals')]
+    if refs:
+        print('  rotation-in-place      {} refused over the run'
+              .format(max(refs)))
+
+    # ---- tracking, against the plan the vehicle was given ----
+    if plan_world and len(plan_world) > 1:
+        errs = [_cross_track(p, plan_world) for p in gt]
+        errs_sorted = sorted(errs)
+        print('')
+        print('TRACKING (ground truth against the FIRST plan, world frame)')
+        print('  rms   {:.4f} m'.format(
+            math.sqrt(sum(e * e for e in errs) / len(errs))))
+        print('  max   {:.4f} m'.format(max(errs)))
+        print('  p95   {:.4f} m'.format(
+            errs_sorted[int(0.95 * (len(errs_sorted) - 1))]))
+        print('  NOTE: the plan is a MAP-frame object and the truth is a '
+              'world-frame one, so this figure contains the localization '
+              'error as well as the controller\'s. It is an upper bound on '
+              'the controller and is never quoted as the controller\'s own.')
+
+    # ---- the goal ----
+    if payload.get('goal_world'):
+        gxw, gyw, gyw_yaw = payload['goal_world']
+        fx, fy, fyaw, _ = gt[-1]
+        d = math.hypot(fx - gxw, fy - gyw)
+        print('')
+        print('THE GOAL')
+        print('  commanded (world)      ({:+.4f}, {:+.4f}) yaw {:+.4f} rad'
+              .format(gxw, gyw, gyw_yaw))
+        print('  reached   (truth)      ({:+.4f}, {:+.4f}) yaw {:+.4f} rad'
+              .format(fx, fy, fyaw))
+        print('  ABSOLUTE position error {}'.format(against_floor(d, floor)))
+        print('  heading error           {:+.3f} deg'.format(
+            math.degrees(_wrap(fyaw - gyw_yaw))))
+        amcl = [(num(r, 'amcl_x'), num(r, 'amcl_y'), num(r, 'amcl_yaw'))
+                for r in rows if num(r, 'amcl_x') is not None]
+        if amcl and payload.get('goal_map'):
+            bx, by, byaw = amcl[-1]
+            gmx, gmy, gmyaw = payload['goal_map']
+            db = math.hypot(bx - gmx, by - gmy)
+            print('  BELIEVED error (map)    {:.4f} m, heading {:+.3f} deg'
+                  .format(db, math.degrees(_wrap(byaw - gmyaw))))
+            print('  belief vs truth         the vehicle thought it was '
+                  '{:.4f} m from the goal and was really {:.4f} m'
+                  .format(db, d))
+    return 0
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    parser = argparse.ArgumentParser(
+        description='Send a goal to the forklift\'s Nav2 stack and score it.')
+    sub = parser.add_subparsers(dest='command', required=True)
+
+    g = sub.add_parser('goal', help='send one goal and record the run')
+    g.add_argument('--x', type=float, required=True,
+                   help='goal x in the WORLD frame [m]')
+    g.add_argument('--y', type=float, required=True,
+                   help='goal y in the WORLD frame [m]')
+    g.add_argument('--yaw', type=float, default=0.0,
+                   help='goal yaw in the WORLD frame [rad]')
+    g.add_argument('--csv', default=None, help='write the 10 Hz recording here')
+    g.add_argument('--plan', default=None,
+                   help='write the plan and the result here (JSON)')
+    g.add_argument('--timeout', type=float, default=240.0,
+                   help='give up after this much SIMULATION time [s]')
+    g.add_argument('--wall-timeout', type=float, default=1200.0,
+                   help='hard backstop in WALL seconds, for a stalled clock')
+    g.add_argument('--settle', type=float, default=30.0,
+                   help='WALL seconds to wait for a transform tree and a '
+                        'ground-truth reference before sending')
+    g.add_argument('--server-timeout', type=float, default=60.0,
+                   help='wall seconds to wait for the action server')
+    g.add_argument('--record-hz', type=float, default=10.0)
+    g.add_argument('--cmd-topic', default='/cmd_vel_smoothed',
+                   help='the Twist topic to record as the command')
+    g.add_argument('--registration', default=None)
+    g.set_defaults(func=cmd_goal)
+
+    a = sub.add_parser('analyse', help='score a recording')
+    a.add_argument('--csv', required=True)
+    a.add_argument('--plan', default=None)
+    a.add_argument('--registration', default=None)
+    a.set_defaults(func=cmd_analyse)
+
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

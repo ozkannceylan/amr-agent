@@ -605,3 +605,66 @@ topics:
   linear_speed: /forklift/linear_speed
   obstacle_in_stop_zone: /forklift/obstacle/in_stop_zone
   obstacle_min_distance: /forklift/obstacle/min_distance
+
+  # ---- the Nav2 command chain (nav2.yaml, m5-10) ----
+  #
+  # THE THREE TOPICS OF ADR 0014 SEAM (b), IN ORDER. None of them leaves
+  # the vehicle; seam (b) never crosses OPC UA at any granularity.
+  #
+  #   cmd_vel           controller_server's 20 Hz output
+  #   cmd_vel_smoothed  velocity_smoother's output, ramp limited against
+  #                     the EKF's measured twist
+  #   -> scripts/cmd_vel_to_tricycle.py -> cmd_steer_angle and
+  #      cmd_traction_speed above, which are forklift_io.py's inputs
+  #
+  # BOTH CARRY geometry_msgs/Twist, NOT TwistStamped. On Jazzy every nav2
+  # node's `enable_stamped_cmd_vel` defaults FALSE; nav2.yaml pins it
+  # rather than inheriting it, because a subscriber of the wrong type
+  # receives nothing at all and logs nothing about it.
+  #
+  # WHERE m5-11's ENVELOPE GATE GOES: between cmd_vel_smoothed and the
+  # converter, which is ADR 0014 seam (b)'s "below the smoother". It is
+  # not named here and no constant of it exists in this file. The
+  # converter's input topic is a launch argument so the gate can be
+  # inserted without editing either.
+  cmd_vel: /cmd_vel
+  cmd_vel_smoothed: /cmd_vel_smoothed
+
+navigation:
+  # ============ THE Twist -> TRICYCLE CONVERSION, AND ITS TWO EDGES ============
+  #
+  # Read by scripts/cmd_vel_to_tricycle.py. The conversion itself is
+  # geometry and lives in that file with its derivation; what lives here
+  # is the two thresholds that decide what happens where the geometry
+  # stops being defined.
+  #
+  # NOTHING IN THIS BLOCK IS A SAFETY PARAMETER. The converter inhibits
+  # nothing, latches nothing and stops nothing; a refused command is a
+  # command not issued, not a machine state (invariant 1).
+
+  # THE CREEP DEADBAND. Below this forward speed the requested curvature
+  # w/v is not a number the controller meant: the ratio's denominator is
+  # dominated by rounding and by the smoother's ramp, and every steer
+  # angle it implies is beyond the mechanical stop anyway (at |v| = 0.02
+  # and the stack's own maximum yaw rate 0.5714 rad/s the implied angle is
+  # 88.1 deg against a 75.06 deg stop).
+  #
+  # WHY THIS VALUE AND NOT A ROUNDER ONE. It must sit BELOW the
+  # controller's own smallest intended speed, which is RPP's
+  # `min_approach_linear_velocity: 0.05` in nav2.yaml. A deadband at or
+  # above 0.05 m/s would swallow the approach creep and the vehicle would
+  # stop short of every goal. 0.02 m/s is 2.5x below it.
+  creep_speed_mps: 0.02
+
+  # THE ROTATION-IN-PLACE REPORT THRESHOLD. Below the creep deadband, a
+  # yaw rate above this is a request the vehicle physically cannot honour
+  # - one steered wheel one wheelbase ahead of the rear axle cannot turn
+  # the body without travelling. The converter commands zero traction,
+  # HOLDS the steer axis where it is, and counts the refusal.
+  #
+  # 0.01 rad/s is 0.57 deg/s, 28x the 0.0202 deg/s that the `standstill:`
+  # block above shows one held drive-encoder count already bounds the body
+  # rotation at. So it is comfortably above the rate at which this vehicle
+  # can even tell it is turning, and any real Spin request (nav2's default
+  # tree asks for 1.57 rad) crosses it by two orders of magnitude.
+  yawrate_refusal_radps: 0.01
