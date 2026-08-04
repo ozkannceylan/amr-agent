@@ -6,6 +6,27 @@ recorded commissioning showcase and the m4f-09 gate verification. The m5r
 restructure round (ADR 0010) is closed; the brief queue lives in
 docs/PLAN.md.
 
+## m5-03 — F-I/O probe verdict is IN (2026-08-04): ADR 0011 D2 fallback
+Report: docs/reports/m5-03-fio-probe-run.md. Procedure and verdict:
+plc/forklift-safety/FIO-FEASIBILITY.md §7. The configured F-DI stayed
+passivated on this installation and the API's by-name write never reached the
+watch table, so the standard-DB stand-in of plc/forklift-safety/SPEC.md §7
+remains the input path.
+- **owner ruling needed: roadmap M5 criterion (a).** The judge review held that
+  a NO verdict puts it in question, and the owner deferred the blocker until
+  the verdict was in. It is in. Done when arch-docs/safety-spec record the
+  ruling and the roadmap row reads what the fallback can actually demonstrate.
+- m5-15 (F-program spec) is unblocked and is written against the stand-in path,
+  carrying FIO-FEASIBILITY §6's three consequences: the stand-in labelled
+  wherever it appears, the S015 validity check carried visibly in the F-code
+  per F-runtime group, and D1 untouched. Done when the spec exists with those
+  three visible in it.
+- plc/forklift-safety/SPEC.md §10 open item 1 closes as **confirmed by
+  observation** rather than as a design assessment. Done when §10 says so and
+  cites the report.
+- Housekeeping: delete the probe copy `safe_amr_FIOPROBE` (FIO-FEASIBILITY
+  §0.1 rule 3). The working project `safe_amr` was never modified.
+
 ## owner — build COMPLETE on the CPU (2026-07-30 TIA handover, live-verified)
 - FB_ForkliftTeleop (§7 + §13) in OB30; D1-D7 applied; mirrors and stand-in
   DBs served; 23/23 nodes with correct access read back; monitored reset and
@@ -13,15 +34,15 @@ docs/PLAN.md.
   captured (owner video, Screen Recording 2026-07-30 085503.mp4 — informal
   evidence, the formal showcase recording still to be made per the scenario
   checklists).
-- Before the T6 recording, read from TIA and write down (handover items 1-6):
-  the F-collective signature (online/offline, dated); F-runtime monitoring
-  time and F-OB cycle time; verify RESET_HOLD_MIN (200 ms) covers ≥5 F-OB
-  cycles — if it does not, raising it is an SRS-window deviation recorded as
-  an open item, never a silent tune; OB30 and CPU max cycle times; the
-  safety access-protection password decision (or an explicit out-of-scope
-  line); the HmiStaleTimer.PT watch row showing T#600MS.
-- Copy the TIA evidence PNGs into plc/forklift/evidence/ and
-  plc/forklift-safety/evidence/ — the orchestrator commits them.
+- Handover items 1-6: DONE 2026-08-04, all six read from the tool and recorded
+  in docs/reports/m5-03-fio-probe-run.md ("Faz 2 okumaları").
+  One of them did not pass: **RESET_HOLD_MIN (200 ms) does not cover five F-OB
+  cycles** — FOB_RTG1 is OB123 at 100 ms, so five cycles are 500 ms. Recorded
+  as an open SRS-window deviation, not tuned. Done when a safety-spec brief
+  either widens the window or restates the requirement, with the acceptance
+  test re-read beside it.
+- TIA evidence PNGs copied and committed 2026-08-04 (plc/forklift/evidence/
+  m4-*.png, plc/forklift-safety/evidence/m4-*.png and m5-03-*.png).
 - Run T5.1-T5.6 (plc/forklift/SPEC.md §11) and T6 (safety SPEC §9.1) per
   sim/scenarios/forklift_commissioning.md §12, then record the showcase with
   the TWIN-DEMO-MAP naming discipline (nothing early-opened presented as M4
@@ -29,27 +50,30 @@ docs/PLAN.md.
   the safety program did X").
 
 ## owner — M4 queue, in order
-- Restored (m5r-09 finding 1, half-closed sub-item lost with its parent):
-  m3-37 finding 7 — the built program declares ResetEdgeMemory_1 where
-  plc/forklift/SPEC.md §3.2 says ResetEdgeMemory; align one of them at the
-  next TIA session and sweep the browse names for TIA's silent "_1"
-  suffixes while there (LESSONS 2026-07-30/#81).
+- m3-37 finding 7: CLOSED 2026-08-04 as **not reproduced**. The downloaded
+  program's tag list carries ForkliftControl_DB.ResetEdgeMemory, unsuffixed,
+  matching plc/forklift/SPEC.md §3.2. The "_1" sweep over the whole instance
+  tag list found one unrelated name: a stand-alone Bool `Tag_1` with no
+  documented owner. Done when `Tag_1` is either named per CLAUDE.md §9 or
+  deleted at the next TIA session.
 - First WSL run of ./stack.sh (m4f-10): the readiness timeouts are
   uncalibrated — no bringup ever ran in the container; expect to tune, and
   report which component start lines disagree with the docs, if any.
-- First PLCSIM session of the gate: one watch-table capture at a CPU cold
-  start with the bridge down — all seven Group 1 inputs at their DB start
-  values — closes m3-37 findings 1, 2, 8 and 9 at once (it also carries §11
-  4.8's cold-start half and 4.9b form (b)). In the same session: the Group 1 +
-  Group 2 capture with the cell running.
-- Clock durability before any measurement run: elevated `Set-Service w32time
-  -StartupType Automatic; Start-Service w32time; w32tm /resync` (the
-  2026-07-27 resync was one-shot; the service does not stay started).
+- Cold-start capture: DONE 2026-08-04, plc/forklift/evidence/
+  m4-cold-start-bridge-down.png — closes m3-37 findings 1, 2, 8 and 9 and
+  carries §11 4.8's cold-start half and 4.9b form (b).
+  **Still owed from the same item: the Group 1 + Group 2 capture with the cell
+  running**, deferred by the owner to its own run. Done when one screenshot
+  shows both groups live with the bridge and HMI up.
+- Clock durability: DONE 2026-08-04 — w32time set to Automatic, started, and
+  `w32tm /resync` reported success; service confirmed Running.
 - Stop the still-live m3-26-era bridge session with SIGTERM before new bridge
   work: its clean shutdown prints the build-G R1/R2/R3 ratio set m3-36 wants,
   and its CSV is archived only after the process is gone (LESSONS 2026-07-28).
 - After the TIA read-back: point bridge/config/bridge.yaml at the Forklift
-  groups (one edit per bridge-design §2.1). Until then the live config is
+  groups (one edit per bridge-design §2.1). The TIA read-back finished
+  2026-08-04; the edit was deliberately left to the same run as the
+  running-cell capture that would verify it, rather than committed blind. Until then the live config is
   deliberately cell-only — browsing nodes the CPU does not publish would
   error (m4f-06). bridge/config/rehearsal-forklift.yaml is the double-facing
   config and is not the gate config.

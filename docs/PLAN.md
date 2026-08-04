@@ -36,12 +36,16 @@ owner under invariant 10.
 ### Wave 0 — foundations. CLOSED
 
 1. m5-01 ADR 0011 (166ffb3). 2. m5-02 topology monitoring-plane edge
-   (f5ff3a7). 3. **m5-03 F-I/O feasibility — WRITTEN, AWAITING THE OWNER'S
-   TIA SESSION** (plc/forklift-safety/FIO-FEASIBILITY.md, verdict section
-   blank). This is the gate's one hard external dependency: it opens the
-   PLC half and blocks m5-15 alone. A judge review found that a NO verdict
-   also puts roadmap criterion (a) in question — see docs/TODO.md, the
-   blocker deferred by owner ruling until the verdict is in.
+   (f5ff3a7). 3. **m5-03 F-I/O feasibility — RUN 2026-08-04, verdict is
+   `ADR 0011 D2 fallback`** (plc/forklift-safety/FIO-FEASIBILITY.md §7,
+   docs/reports/m5-03-fio-probe-run.md). The ET 200SP F-DI configured,
+   compiled, downloaded and ran with safety mode activated, but the module
+   stayed passivated with no acknowledgement reachable, and the API's
+   by-name write — which does return success and does read back — never
+   appeared in the watch table. The standard-DB stand-in of
+   plc/forklift-safety/SPEC.md §7 stays the input path. m5-15 is unblocked;
+   the judge's roadmap-criterion-(a) blocker is now live and needs an owner
+   ruling (docs/TODO.md).
 
 Beside the wave: ADR 0012 envelope composition, ADR 0013 vendor gate (M8),
 ADR 0014 motion control locus, and the m5-judge architecture review that
@@ -101,7 +105,9 @@ forced the last two.
 
 ### Wave E — PLC specifications, owner-executed
 
-16. m5-15 plc — F-program spec. **BLOCKED on m5-03's verdict.**
+16. m5-15 plc — F-program spec. **UNBLOCKED 2026-08-04**: written against the
+    standard-DB stand-in input path, carrying FIO-FEASIBILITY §6's three
+    consequences.
 17. m5-16 plc — standard program delta: mode arbitration and envelope
     formation. CLOSED (57f0f57).
 18. m5-17 interface — envelope, mode and process-stop nodes. CLOSED
