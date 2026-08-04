@@ -1,0 +1,41 @@
+No signing policy available, user certificate cannot get verified
+No encrypting policy available, password may get transferred in plaintext
+HMI safety-mirror harness — mode PRESENT, double port 4860, HMI http://127.0.0.1:8093
+The double serves Forklift/Safety/ at its fail-safe start values. Driving each mirror through its own transition and checking that the HMI's lamps and banner track it, and nothing else, from opcua-nodes.md §11.
+
+P0. the HMI connects to a server WITH Forklift/Safety/
+   ok   the HMI reached CONNECTED against a server carrying the group
+
+P1. the fail-safe start values, read back through the HMI's own /state
+   ok   present=true — {'present': True, 'EStopDemand': True, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+   ok   EStopDemand/ZoneStopDemand/SafetyResetRequired all True, SafetyResetFault False — matches opcua-nodes.md §11.6 exactly — {'present': True, 'EStopDemand': True, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+   ok   the exact required banner label is in the served markup
+   ok   a 'displays ... never commands' statement is in the served markup
+   ok   the word 'obstacle' does not appear near the new ZoneStopDemand lamp's own markup (MR7)
+   ok   and 'ZoneStopDemand' does not appear near the EXISTING obstacle lamp's markup either — the separation holds from both sides
+   ok   and the existing process-stop lamp's markup carries no 'safety demand' wording — the two banners share no sentence
+
+P2. SafetyResetFault moves on its own — a device diagnosis, not a demand
+   ok   the HMI's own /state shows SafetyResetFault True — {'present': True, 'EStopDemand': True, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': True}
+   ok   while SafetyResetRequired is UNCHANGED at True — the two lamps are independent nodes, not derived from one another — {'present': True, 'EStopDemand': True, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': True}
+   ok   and back to False — {'present': True, 'EStopDemand': True, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+
+P3. EStopDemand and ZoneStopDemand clear independently
+   ok   EStopDemand False on the HMI's own /state — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+   ok   while ZoneStopDemand and SafetyResetRequired are UNCHANGED — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+   ok   ZoneStopDemand False on the HMI's own /state — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': False, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+   ok   while SafetyResetRequired is STILL True — this client does not derive it from the other two, it only displays the server's own node (invariant 10) — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': False, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+
+P4. the banner tracks SafetyResetRequired ALONE
+   ok   SafetyResetRequired False — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': False, 'SafetyResetRequired': False, 'SafetyResetFault': False}
+        the banner's on/off is client-side JS driven from this same field; the assertion here is on the data contract the JS reads (renderSafety in static/index.html gates the banner on safety.SafetyResetRequired alone, confirmed by source inspection)
+   ok   ZoneStopDemand True again while SafetyResetRequired STAYS False — the banner's trigger is not ZoneStopDemand or EStopDemand directly — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': True, 'SafetyResetRequired': False, 'SafetyResetFault': False}
+   ok   SafetyResetRequired True again — {'present': True, 'EStopDemand': False, 'ZoneStopDemand': True, 'SafetyResetRequired': True, 'SafetyResetFault': False}
+
+P5. a client write against the four is refused (§11.4 MR1), on this double too
+Requested session timeout to be 3600000ms, got 600000ms instead
+   ok   a client write against Forklift/Safety/EStopDemand was refused — BadUserAccessDenied: User does not have permission to perform the requested operation.(BadUserAccessDenied) — this double keeps §11.4 MR1 even though it is only test scaffolding
+        waiting one evidence-flush period (2.5 s) so the per-cycle CSV has rows before this process is stopped
+
+no failures
+HMI stdout/stderr: hmi\evidence\_scratch\hmi-safety-present-run.log

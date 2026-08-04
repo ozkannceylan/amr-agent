@@ -1,0 +1,23 @@
+No signing policy available, user certificate cannot get verified
+No encrypting policy available, password may get transferred in plaintext
+HMI safety-mirror harness — mode ABSENT, double port 4860, HMI http://127.0.0.1:8093
+The double serves Forklift/ WITHOUT Forklift/Safety/. Proving the HMI's connect does not fail and does not loop over an optional group it cannot resolve (opcua-nodes.md §11.6).
+
+N1. the HMI connects to a server WITHOUT Forklift/Safety/
+   ok   the HMI reached CONNECTED against a server missing the optional group — the group's absence is not a connect failure (§11.6)
+   ok   the panel's own data shows present=false — {'present': False, 'EStopDemand': None, 'ZoneStopDemand': None, 'SafetyResetRequired': None, 'SafetyResetFault': None}
+   ok   and all four mirror values read null, never a guessed value — {'present': False, 'EStopDemand': None, 'ZoneStopDemand': None, 'SafetyResetRequired': None, 'SafetyResetFault': None}
+
+N2. the connection STAYS up — absence is not retried as a failure
+   ok   still CONNECTED 2 s later — no reconnect loop over the missing group
+   ok   and still reports not present — {'present': False, 'EStopDemand': None, 'ZoneStopDemand': None, 'SafetyResetRequired': None, 'SafetyResetFault': None}
+
+N3. the REQUIRED reads are unaffected by the optional group's absence
+   ok   Forklift/Status/ and Forklift/Link/HmiLinkOk still resolved and are on the panel — ['ForkliftTeleopActive', 'HmiLinkOk']
+
+N4. the served page's own markup carries the label even though this server has nothing to show yet
+   ok   the page's markup contains a 'not present' state for the group
+   ok   and the exact required banner label is present in the markup — static markup, not conditioned on any one server
+
+no failures
+HMI stdout/stderr: hmi\evidence\_scratch\hmi-safety-absent-run.log

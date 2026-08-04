@@ -1,0 +1,6 @@
+2026-07-29 19:34:06,163 INFO    hmi HMI UI on http://127.0.0.1:8093/ — loopback only, one operator, local cell (ADR 0008 D2.7)
+2026-07-29 19:34:06,163 INFO    hmi operator-page window UI_POLL_STALE_TIME = 1000 ms (5 x the page's 200 ms GET /state); with no page talking, the five requests are held at rest and the heartbeat keeps running (§10.8 H6)
+2026-07-29 19:34:06,249 INFO    hmi optional group Forklift/Safety/ not present on this server (The requested operation has no match to return.(BadNoMatch)) — shown to the operator as 'not present', never as a value; this is not a connect failure (opcua-nodes.md §11.6)
+2026-07-29 19:34:06,251 INFO    hmi session established with opc.tcp://127.0.0.1:4860/amr-agent/safetymirrordouble/ — 6 writable node(s), 12 read-only node(s); browse prefix 2:ServerInterfaces/3:DemoCell
+2026-07-29 19:34:06,251 INFO    hmi session timeout requested 10000 ms, granted 10000 ms (the granted value is the only one any behaviour uses)
+2026-07-29 19:34:07,359 WARNING hmi the operator's page has gone quiet (no request for 1066 ms, over the 1000 ms UI_POLL_STALE_TIME): all five requests to rest, the enable included. The write cycle and the heartbeat CONTINUE — this process is healthy, the page is not. Nothing latches; each Bool is carried again once the page has been seen to send it low (§10.8 H6).
