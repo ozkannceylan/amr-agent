@@ -2,15 +2,22 @@
 """nav2_run.py - the measurement harness for the forklift's Nav2 stack.
 
 WHAT IT DOES
-  `goal`     converts a WORLD pose into the MAP frame through the
-             committed registration, sends it to /navigate_to_pose,
-             records the run at 10 Hz and prints what the stack did -
-             including what it did when it REFUSED.
-  `analyse`  scores a recording: goal error measured ABSOLUTELY in the
-             world frame, cross-track error against the plan the vehicle
-             was actually given, direction reversals, and the gap between
-             where the vehicle THOUGHT it finished and where it really
-             did.
+  `goal`      converts a WORLD pose into the MAP frame through the
+              committed registration, sends it to /navigate_to_pose,
+              records the run at 10 Hz and prints what the stack did -
+              including what it did when it REFUSED.
+  `analyse`   scores a recording: goal error measured ABSOLUTELY in the
+              world frame, cross-track error against the plan the vehicle
+              was actually given, direction reversals, and the gap between
+              where the vehicle THOUGHT it finished and where it really
+              did.
+  `convcheck` CHECKS THE Twist -> TRICYCLE CONVERSION AGAINST A COMMANDED
+              MOTION. It publishes a timed sequence of known twists into
+              the converter's own input topic and measures what the VEHICLE
+              then did, from ground truth. A round trip through the algebra
+              proves the algebra; only this proves the vehicle turns on the
+              radius it was asked for. It needs the bringup and the
+              converter, and it needs NO planner, controller or localizer.
 
 WHAT IT IS NOT. It is not part of the vehicle. It publishes no transform,
 no command and no pose; it drives nothing and it corrects nothing. It is
@@ -396,6 +403,264 @@ def cmd_goal(args):
 
 
 # --------------------------------------------------------------------------- #
+# convcheck - the conversion against a COMMANDED MOTION
+# --------------------------------------------------------------------------- #
+#
+# WHY THIS IS NOT THE SELF-CHECK. `cmd_vel_to_tricycle.py --self-check`
+# round-trips (v, w) -> (delta, v_D) -> (v', w') through an independently
+# written forward model. That proves the algebra is self-consistent and
+# nothing else: if the wheelbase were wrong, or the traction topic carried
+# body speed instead of tread speed, or the steer sign were inverted, the
+# round trip would still close exactly.
+#
+# THIS check closes the loop through the PHYSICS. It publishes a known twist
+# on the converter's input topic and measures the resulting body motion from
+# the simulator's own pose of the model. The comparison is between the
+# COMMANDED (v, w) and the ACHIEVED (v, w) - so wheelbase, wheel radius, the
+# tread-speed convention and both signs are all in the measurement.
+#
+# WHAT IT DOES NOT CONTROL FOR, stated before any figure is read: the
+# physics engine produces tyre slip, and a steered wheel on lock scrubs. So
+# the achieved radius is not expected to equal the commanded one exactly,
+# and the residual reported below is a measurement of conversion PLUS slip,
+# never of the conversion alone. It is an upper bound on the conversion's
+# own error.
+
+#: (label, v [m/s], w [rad/s], duration [s of simulation time]).
+#: Ordered so the vehicle stays near where it started: every left arc is
+#: followed by the mirrored right arc.
+def _conv_segments(wheelbase_m):
+    L = wheelbase_m
+    v = 0.30
+    return [
+        ('straight ahead',                    v,  0.0),
+        ('left,  R = 2.10 m  (delta +26.6 deg)',  v,  v / 2.10),
+        ('right, R = 2.10 m  (delta -26.6 deg)',  v, -v / 2.10),
+        ('left,  R = 1.05 m  (delta +45.0 deg, the tightest planned arc)',
+         v,  v / 1.05),
+        ('right, R = 1.05 m  (delta -45.0 deg)',  v, -v / 1.05),
+        ('straight astern',                  -v,  0.0),
+        ('astern on left lock, R = 2.10 m (delta -26.6 deg)',
+         -v, -(-v) / 2.10),
+        ('ROTATION IN PLACE - must be REFUSED', 0.0, 0.50),
+    ]
+
+
+def cmd_convcheck(args):
+    import rclpy
+    from geometry_msgs.msg import Twist
+    from nav_msgs.msg import Odometry
+    from rclpy.node import Node
+    from rclpy.parameter import Parameter
+    from std_msgs.msg import Float64, UInt32
+    import time as _time
+    import yaml as _yaml
+
+    with open(args.config, encoding='utf-8') as fh:
+        cfg = _yaml.safe_load(fh)
+    L = cfg['model']['wheelbase_m']
+    dmax = cfg['model']['steer_limit_rad']
+
+    class Conv(Node):
+        def __init__(self):
+            super().__init__(
+                'nav2_convcheck',
+                parameter_overrides=[Parameter('use_sim_time', value=True)])
+            self.gt = None
+            self.steer = float('nan')
+            self.traction = float('nan')
+            self.refusals = 0
+            self.pub = self.create_publisher(Twist, args.cmd_topic, 10)
+            self.create_subscription(Odometry, '/forklift/odom',
+                                     self.cb_ground_truth, 10)
+            self.create_subscription(
+                Float64, '/forklift/cmd/steer_angle', self.cb_steer, 10)
+            self.create_subscription(
+                Float64, '/forklift/cmd/traction_speed', self.cb_traction, 10)
+            self.create_subscription(
+                UInt32, '/forklift/nav/tricycle_refusals',
+                self.cb_refusals, 10)
+
+        # cb_* so none can shadow an rclpy Node attribute.
+        def cb_ground_truth(self, msg):
+            p = msg.pose.pose
+            self.gt = (p.position.x, p.position.y, _yaw_of(p.orientation))
+
+        def cb_steer(self, msg):
+            self.steer = msg.data
+
+        def cb_traction(self, msg):
+            self.traction = msg.data
+
+        def cb_refusals(self, msg):
+            self.refusals = msg.data
+
+        def sim_time(self):
+            return self.get_clock().now().nanoseconds * 1e-9
+
+    rclpy.init()
+    node = Conv()
+
+    # BOUNDED WALL POLL for the reference stream. Until it exists there is
+    # nothing to measure against and no reason to believe /clock is read.
+    deadline = _time.monotonic() + args.settle
+    while _time.monotonic() < deadline and node.gt is None:
+        rclpy.spin_once(node, timeout_sec=0.05)
+    if node.gt is None:
+        print('FAIL: no /forklift/odom after {:.0f} s. The bringup is not up.'
+              .format(args.settle))
+        node.destroy_node()
+        rclpy.shutdown()
+        return 2
+
+    rows = []
+    results = []
+    wall0 = _time.monotonic()
+    for label, v, w in _conv_segments(L):
+        msg = Twist()
+        msg.linear.x, msg.angular.z = v, w
+        t_start = node.sim_time()
+        t_meas = t_start + args.slew          # discard the steer slew
+        t_end = t_start + args.segment
+        p_meas = None
+        p_last = None
+        t_last = None
+        path = 0.0
+        ref0 = node.refusals
+        steer_seen = []
+        traction_seen = []
+        while True:
+            node.pub.publish(msg)
+            rclpy.spin_once(node, timeout_sec=0.02)
+            now = node.sim_time()
+            gt = node.gt
+            if gt is None:
+                continue
+            if p_last is not None:
+                path += math.hypot(gt[0] - p_last[0], gt[1] - p_last[1])
+            p_last, t_last = gt, now
+            if p_meas is None and now >= t_meas:
+                p_meas, t_meas_actual, path0 = gt, now, path
+                steer_seen, traction_seen = [], []
+            if p_meas is not None:
+                if math.isfinite(node.steer):
+                    steer_seen.append(node.steer)
+                if math.isfinite(node.traction):
+                    traction_seen.append(node.traction)
+            rows.append('{:.3f},{:.6f},{:.6f},{:.6f},{:.6f},{:.6f},'
+                        '{:.6f},{:.6f},{}'.format(
+                            now, gt[0], gt[1], gt[2], v, w,
+                            node.steer, node.traction, node.refusals))
+            if now >= t_end:
+                break
+            if _time.monotonic() - wall0 > args.wall_timeout:
+                print('WALL TIMEOUT: /clock has stalled.')
+                break
+
+        dt = t_last - t_meas_actual
+        dyaw = _wrap(p_last[2] - p_meas[2])
+        dpath = path - path0
+        # SIGNED speed: the sign of the displacement projected on the
+        # heading the vehicle held. A reversing vehicle covers path too.
+        dx, dy = p_last[0] - p_meas[0], p_last[1] - p_meas[1]
+        along = dx * math.cos(p_meas[2]) + dy * math.sin(p_meas[2])
+        sign = 1.0 if along >= 0.0 else -1.0
+        v_meas = sign * dpath / dt if dt > 0 else float('nan')
+        w_meas = dyaw / dt if dt > 0 else float('nan')
+        steer_cmd = (sum(steer_seen) / len(steer_seen)) if steer_seen \
+            else float('nan')
+        traction_cmd = (sum(traction_seen) / len(traction_seen)) \
+            if traction_seen else float('nan')
+        results.append({
+            'label': label, 'v': v, 'w': w, 'dt': dt,
+            'v_meas': v_meas, 'w_meas': w_meas,
+            'steer_cmd': steer_cmd, 'traction_cmd': traction_cmd,
+            'refused': node.refusals - ref0,
+            'dpath': dpath, 'dyaw': dyaw,
+        })
+
+    # stop
+    msg = Twist()
+    for _ in range(20):
+        node.pub.publish(msg)
+        rclpy.spin_once(node, timeout_sec=0.02)
+
+    # ------------------------------------------------------------------ #
+    print('')
+    print('=' * 108)
+    print('Twist -> tricycle, CHECKED AGAINST A COMMANDED MOTION')
+    print('=' * 108)
+    print('L = {:.4f} m   steer stop +-{:.4f} rad ({:.3f} deg)'.format(
+        L, dmax, math.degrees(dmax)))
+    print('Commanded on {}; achieved read from /forklift/odom, the '
+          'simulator\'s own pose of the model.'.format(args.cmd_topic))
+    print('delta_pub is what the converter PUBLISHED; delta_meas is '
+          'atan(L * w_meas / v_meas), what the vehicle ACTUALLY drove.')
+    print('')
+    hdr = ('{:<58} {:>7} {:>8} | {:>8} {:>9} | {:>9} {:>9} | {:>8} {:>8}'
+           .format('segment', 'v_cmd', 'w_cmd', 'v_meas', 'w_meas',
+                   'delta_pub', 'delta_meas', 'R_cmd', 'R_meas'))
+    print(hdr)
+    print('-' * len(hdr))
+    worst_r = 0.0
+    worst_label = ''
+    for r in results:
+        if r['w'] != 0.0 and r['v'] != 0.0:
+            R_cmd = '{:+8.3f}'.format(r['v'] / r['w'])
+        else:
+            R_cmd = '     inf' if r['v'] != 0.0 else '      --'
+        if abs(r['w_meas']) > 1e-4 and abs(r['v_meas']) > 1e-4:
+            R_meas_v = r['v_meas'] / r['w_meas']
+            R_meas = '{:+8.3f}'.format(R_meas_v)
+        else:
+            R_meas_v = None
+            R_meas = '     inf' if abs(r['v_meas']) > 1e-3 else '      --'
+        if abs(r['v_meas']) > 1e-4:
+            d_meas = math.degrees(math.atan2(
+                L * r['w_meas'] * (1.0 if r['v_meas'] >= 0 else -1.0),
+                abs(r['v_meas'])))
+            d_meas_s = '{:+9.3f}'.format(d_meas)
+        else:
+            d_meas_s = '       --'
+        print('{:<58} {:>7.3f} {:>8.4f} | {:>8.4f} {:>9.4f} | {:>9.3f} '
+              '{} | {} {}'.format(
+                  r['label'], r['v'], r['w'], r['v_meas'], r['w_meas'],
+                  math.degrees(r['steer_cmd']), d_meas_s, R_cmd, R_meas))
+        if r['w'] != 0.0 and r['v'] != 0.0 and R_meas_v is not None:
+            rel = abs(R_meas_v - r['v'] / r['w']) / abs(r['v'] / r['w'])
+            if rel > worst_r:
+                worst_r, worst_label = rel, r['label']
+
+    print('')
+    print('THE REFUSAL SEGMENT, read on its own terms:')
+    ref = results[-1]
+    print('  commanded            v = {:+.3f} m/s, w = {:+.4f} rad/s'
+          .format(ref['v'], ref['w']))
+    print('  refusals counted     {} over {:.2f} s'.format(
+        ref['refused'], ref['dt']))
+    print('  traction published   {:+.4f} m/s'.format(ref['traction_cmd']))
+    print('  the vehicle moved    {:.4f} m and turned {:+.4f} deg'.format(
+        ref['dpath'], math.degrees(ref['dyaw'])))
+    print('')
+    print('WORST RELATIVE RADIUS ERROR over the arcs: {:.2%} ({})'.format(
+        worst_r, worst_label))
+    print('That figure contains TYRE SLIP as well as the conversion, so it '
+          'is an UPPER BOUND on the conversion\'s own error and is never '
+          'quoted as the conversion\'s error.')
+
+    if args.csv:
+        with open(args.csv, 'w', encoding='utf-8') as fh:
+            fh.write('t_sim,gt_x,gt_y,gt_yaw,cmd_v,cmd_w,steer,traction,'
+                     'refusals\n')
+            fh.write('\n'.join(rows) + '\n')
+        print('wrote {} ({} samples)'.format(args.csv, len(rows)))
+
+    node.destroy_node()
+    rclpy.shutdown()
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # analyse
 # --------------------------------------------------------------------------- #
 
@@ -607,6 +872,28 @@ def main(argv=None):
                    help='the Twist topic to record as the command')
     g.add_argument('--registration', default=None)
     g.set_defaults(func=cmd_goal)
+
+    c = sub.add_parser(
+        'convcheck',
+        help='check the Twist -> tricycle conversion against a COMMANDED '
+             'MOTION. Needs the bringup and the converter; needs no '
+             'planner, controller or localizer.')
+    c.add_argument('--config', default=os.path.join(_FORKLIFT_DIR,
+                                                    'config.yaml'))
+    c.add_argument('--cmd-topic', default='/cmd_vel_smoothed',
+                   help='the converter\'s input topic to publish onto')
+    c.add_argument('--segment', type=float, default=8.0,
+                   help='SIMULATION seconds per segment')
+    c.add_argument('--slew', type=float, default=2.5,
+                   help='SIMULATION seconds discarded at the head of each '
+                        'segment while the steer axis slews to its new '
+                        'angle (model.sdf steer_joint <velocity> 2.0 rad/s, '
+                        'so 90 deg takes 0.79 s; this is generous)')
+    c.add_argument('--settle', type=float, default=60.0,
+                   help='WALL seconds to wait for the ground-truth stream')
+    c.add_argument('--wall-timeout', type=float, default=900.0)
+    c.add_argument('--csv', default=None)
+    c.set_defaults(func=cmd_convcheck)
 
     a = sub.add_parser('analyse', help='score a recording')
     a.add_argument('--csv', required=True)
