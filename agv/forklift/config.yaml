@@ -234,25 +234,75 @@ standstill:
   # nothing; the protective stop and safe torque off are onboard and
   # hardwired and appear nowhere in this file (invariant 1).
 
-  # BOTH encoder counts must be unchanged for this long before the
-  # verdict goes true. The window is what turns an instantaneous reading
-  # into a condition: holding under one count for 0.50 s bounds the
-  # drive wheel's tread speed at 1.850e-4 / 0.50 = 0.37 mm/s and the
-  # body's rotation rate at 0.0202 deg/s. It also costs 0.50 s of
-  # ungated gyro at the start of every stop, which is the conservative
-  # direction and is deliberate: the gate opens on the FIRST count of
-  # motion and closes only after the window, so it is late to trust the
-  # standstill and instantaneous to distrust it.
+  # THE TRAILING WINDOW. The verdict is a RATE TEST over the last
+  # `window_s`, not a total since the last count change: over the window
+  # the drive count must not have changed at all, and the steer count by
+  # no more than `steer_tolerance_counts`. Holding under one drive count
+  # for 0.50 s bounds the drive wheel's tread speed at
+  # 1.850e-4 / 0.50 = 0.37 mm/s and the body's rotation rate at
+  # 0.0202 deg/s. It also costs 0.50 s of ungated gyro at the start of
+  # every stop, which is the conservative direction and is deliberate:
+  # the gate opens on the FIRST count of motion and closes only after
+  # the window, so it is late to trust the standstill and instantaneous
+  # to distrust it.
+  #
+  # WHY A WINDOW AND NOT A REFERENCE INSTANT, WHICH IS WHAT m5-07d
+  # WROTE. A test of the form "both counts unchanged SINCE t0", with t0
+  # receding for as long as the vehicle stands, is a statement about
+  # TOTAL displacement over an unbounded interval. No axis of a real
+  # machine satisfies it for ever: any creep, however slow, eventually
+  # crosses a count, and the whole held interval is then discarded and
+  # the gyro gate re-opened for a full window. Measured over a 210 s
+  # idle AFTER a drive, that cost 14.4 s of ungated gyro and 2.11 deg of
+  # heading, GROWING with how long the vehicle stood there
+  # (EVIDENCE_ODOMETRY.md section 13). What the gate needs at each
+  # sample is "the body is not rotating now", and that is a rate.
   window_s: 0.50
 
   # WHY THE STEER COUNT IS IN THE TEST TOO, although the bound above
   # does not need it. A parked forklift can steer on the spot, and a
   # steered wheel scrubbing against the floor is the one manoeuvre in
   # which the drive encoder could stay still while the contact patch
-  # slides. Requiring both counts still means "no wheel is moving at
-  # all", which is a stronger statement than the bound needs and costs
-  # nothing during an idle, when neither moves.
+  # slides. Requiring both axes still means "no wheel is moving at all",
+  # which is a stronger statement than the bound needs.
+  #
+  # IT DOES NOT COST NOTHING DURING AN IDLE. m5-07d said it did, on the
+  # evidence of two idles taken at bringup with every joint still at its
+  # spawn value. After a DRIVE the steer axis relaxes: measured over a
+  # 210 s post-drive idle it swept 27 counts (2.37 deg), one count at a
+  # time, roughly one count every eleven seconds, while the drive count
+  # did not move once after the first 0.30 s. Under the old
+  # exact-equality test those single steer counts were the ENTIRE leak.
   include_steer_axis: true
+
+  # HOW MUCH THE STEER COUNT MAY MOVE ACROSS THE WINDOW, AND WHERE THE
+  # NUMBER COMES FROM. It is ONE COUNT, and it is not a fitted value: it
+  # is the same one count of zero uncertainty this file already declares
+  # for that encoder in `steer_zero_offset_rad` above. A calibration
+  # cannot resolve the steer zero to better than one count, so the
+  # vehicle does not know its own steer angle to better than one count,
+  # and a test that demands the reading be IDENTICAL is asking the axis
+  # to hold to a precision its own model does not claim.
+  #
+  # WHAT IT PERMITS, STATED RATHER THAN ASSUMED. One count across a
+  # 0.50 s window is a steer rate of 1.53398e-3 / 0.50 = 3.07e-3 rad/s
+  # = 0.176 deg/s. Against the axis's own declared maximum of 2.0 rad/s
+  # (model.sdf, steer_joint <velocity>) that is 0.15 % of full rate, so
+  # any commanded steer motion crosses it by three orders of magnitude
+  # and opens the gate at once. Against the measured post-drive
+  # relaxation of 0.09 counts/s it is 20x larger, which is why the
+  # relaxation no longer re-opens the gate.
+  #
+  # THE DRIVE AXIS HAS NO SUCH TOLERANCE AND MUST NOT BE GIVEN ONE. Its
+  # zero-change test IS the bound: a tolerance of N counts multiplies
+  # the permitted body rotation by (N + 1), so one count of drive
+  # tolerance would raise the bound from 0.0202 deg/s to 0.0404 deg/s -
+  # 2.4 deg/min of REAL rotation the gate would then hide, which is the
+  # failure direction this whole mechanism is designed against. The
+  # drive tolerance is written as a constant in wheel_odometry.py, not
+  # as a parameter here, so that it cannot be raised by editing a file
+  # that reviews as configuration.
+  steer_tolerance_counts: 1
 
   # A verdict older than this counts as NO verdict, and the gate then
   # FAILS OPEN - the gyro is fused exactly as it was before this
@@ -555,3 +605,82 @@ topics:
   linear_speed: /forklift/linear_speed
   obstacle_in_stop_zone: /forklift/obstacle/in_stop_zone
   obstacle_min_distance: /forklift/obstacle/min_distance
+
+  # ---- the Nav2 command chain (nav2.yaml, m5-10) ----
+  #
+  # THE THREE TOPICS OF ADR 0014 SEAM (b), IN ORDER. None of them leaves
+  # the vehicle; seam (b) never crosses OPC UA at any granularity.
+  #
+  #   cmd_vel           controller_server's 20 Hz output
+  #   cmd_vel_smoothed  velocity_smoother's output, ramp limited against
+  #                     the EKF's measured twist
+  #   -> scripts/cmd_vel_to_tricycle.py -> cmd_steer_angle and
+  #      cmd_traction_speed above, which are forklift_io.py's inputs
+  #
+  # BOTH CARRY geometry_msgs/Twist, NOT TwistStamped. On Jazzy every nav2
+  # node's `enable_stamped_cmd_vel` defaults FALSE; nav2.yaml pins it
+  # rather than inheriting it, because a subscriber of the wrong type
+  # receives nothing at all and logs nothing about it.
+  #
+  # WHERE m5-11's ENVELOPE GATE GOES: between cmd_vel_smoothed and the
+  # converter, which is ADR 0014 seam (b)'s "below the smoother". It is
+  # not named here and no constant of it exists in this file. The
+  # converter's input topic is a launch argument so the gate can be
+  # inserted without editing either.
+  cmd_vel: /cmd_vel
+  cmd_vel_smoothed: /cmd_vel_smoothed
+
+navigation:
+  # ============ THE Twist -> TRICYCLE CONVERSION, AND ITS TWO EDGES ============
+  #
+  # Read by scripts/cmd_vel_to_tricycle.py. The conversion itself is
+  # geometry and lives in that file with its derivation; what lives here
+  # is the two thresholds that decide what happens where the geometry
+  # stops being defined.
+  #
+  # NOTHING IN THIS BLOCK IS A SAFETY PARAMETER. The converter inhibits
+  # nothing, latches nothing and stops nothing; a refused command is a
+  # command not issued, not a machine state (invariant 1).
+
+  # THE CREEP DEADBAND. Below this forward speed the requested curvature
+  # w/v is not a number the controller meant: the ratio's denominator is
+  # dominated by rounding and by the smoother's ramp, and every steer
+  # angle it implies is beyond the mechanical stop anyway (at |v| = 0.02
+  # and the stack's own maximum yaw rate 0.5714 rad/s the implied angle is
+  # 88.1 deg against a 75.06 deg stop).
+  #
+  # WHY THIS VALUE AND NOT A ROUNDER ONE. It must sit BELOW the
+  # controller's own smallest intended speed, which is RPP's
+  # `min_approach_linear_velocity: 0.05` in nav2.yaml. A deadband at or
+  # above 0.05 m/s would swallow the approach creep and the vehicle would
+  # stop short of every goal. 0.02 m/s is 2.5x below it.
+  creep_speed_mps: 0.02
+
+  # THE STANDSTILL THRESHOLD, and it is the one that decides what counts
+  # as a REFUSAL. A tricycle can turn only while its drive wheel travels,
+  # so the request that has no solution at all is "turn while stopped".
+  # Below this speed the vehicle is stopped as far as its own instruments
+  # are concerned: one drive-encoder count per 50 Hz odometry cycle is
+  # 0.184 mm of tread in 0.02 s = 0.0092 m/s, and this is a fifth of that.
+  #
+  # WHY IT IS SEPARATE FROM THE CREEP DEADBAND ABOVE. The first measured
+  # navigation run counted 27 "rotation in place" refusals on a goal it
+  # reached: every one was the tail of a deceleration, where the smoother
+  # had the speed at 15 mm/s and the controller still wanted a curve. That
+  # request is executable - 15 mm/s on a 1.29 m radius - and calling it a
+  # refusal made the counter say nothing. nav2's Spin sends v = 0 exactly,
+  # which is what this threshold catches.
+  zero_speed_mps: 0.002
+
+  # THE ROTATION-IN-PLACE REPORT THRESHOLD. Below the creep deadband, a
+  # yaw rate above this is a request the vehicle physically cannot honour
+  # - one steered wheel one wheelbase ahead of the rear axle cannot turn
+  # the body without travelling. The converter commands zero traction,
+  # HOLDS the steer axis where it is, and counts the refusal.
+  #
+  # 0.01 rad/s is 0.57 deg/s, 28x the 0.0202 deg/s that the `standstill:`
+  # block above shows one held drive-encoder count already bounds the body
+  # rotation at. So it is comfortably above the rate at which this vehicle
+  # can even tell it is turning, and any real Spin request (nav2's default
+  # tree asks for 1.57 rad) crosses it by two orders of magnitude.
+  yawrate_refusal_radps: 0.01

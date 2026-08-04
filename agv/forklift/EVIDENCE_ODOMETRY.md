@@ -1084,3 +1084,487 @@ gone after each run with `ps -eo pid,args`.
   measurement, not this one's, and the registration finding 1 of
   `m5-08c` asks for is still needed either way — a SLAM map's frame is
   legitimately its own even when its heading no longer drifts.
+
+---
+
+# 13. The gate leaked in the idle AFTER a drive — brief m5-07e
+
+## 13.1 The finding, and why section 12's idles missed it
+
+Section 12 measured the gate over a 60 s idle and a 240 s idle and
+reported the fused heading holding at **0.00°** over both. Both of those
+idles were taken **at bringup, before the vehicle had ever moved.**
+
+`docs/reports/m5-08d-remap-and-registration.md` §9 item 4 measured the
+same vehicle in the other regime — idle **after** a drive — with the
+ground-truth position frozen at 0.0000 m, and found **+2.02° over a
+200.4 s idle**, against **+0.01° over the 26.8 s pre-drive idle** of the
+same run. 92–97 % of the gyro samples suppressed, not 100 %. It named a
+likely cause — drive-encoder dither under a settled suspension — and
+marked it **unconfirmed**.
+
+That regime is the one an AMCL dwell test sits in, and at 0.61 °/min a
+two-minute dwell would hand the localizer more than a degree of heading
+error from the estimator alone. So the question was not whether to
+mitigate it but **what it actually was.**
+
+## 13.2 The instrument
+
+`scripts/check_odometry.py --phase postidle`. It drives the SAME
+`_PROFILE` as `--phase fusion`, commands the stop, and then records the
+idle at full rate:
+
+| stream | rate | what it settles |
+|---|---|---|
+| `/forklift/joint_states` | 500 Hz | which axis moves, to the sub-count residual |
+| `/forklift/wheel_standstill` | 50 Hz | every re-arm, and the arrival gaps the gate times out on |
+| `/forklift/imu` | 100 Hz | the bias, and what would have been integrated |
+| `/forklift/imu_gated` | ≤100 Hz | exactly which samples reached the filter |
+| `/tf` | 50 Hz | the fused heading |
+| `/forklift/odom_filtered` | 50 Hz | the filter's own yaw-rate state |
+
+It reads **no ground truth** for any of that, for section 12.3's reason.
+`--truth` adds one further stream used by **section 7 only**, which asks
+a question no encoder can answer and is discussed in 13.6.
+
+The headline attribution is a three-way split of the fused heading
+change: increments taken while a gated sample was in flight, increments
+within 0.20 s of a burst ending, and increments with the gate closed and
+settled. **A leak in the third bucket is the filter integrating a stale
+twist. A leak in the first is the gate admitting samples.** That split
+is what separates two hypotheses that look identical in a single number.
+
+Raw per-sample series and verbatim harness output, in `evidence/`:
+
+| file | md5 | the run |
+|---|---|---|
+| `m5-07e-postidle-before.csv.gz` | `c495b197ae9fe1ea7de5a73a3a39f565` | 210 s post-drive idle, m5-07d's rule |
+| `m5-07e-postidle-after.csv.gz` | `5fe1aa8a1023c459ac7e86a93d76af06` | 220 s post-drive idle, this brief's rule, with the truth reference |
+| `m5-07e-baseA.log` | `8b0542f5d20c8f0176205f9f6fc49d14` | the before idle, harness output |
+| `m5-07e-fixA.log` | `385ff52793d75c3ebb5f502a19186220` | a 210 s after-idle taken before section 7 learned to split the coast; kept because it is an independent repeat of the headline |
+| `m5-07e-fixB.log` | `873d4aded9e425e9ce44b60aa2c32aab` | the 220 s after idle, the run 13.7 quotes |
+| `m5-07e-fusBEFORE.log` | `189138ba28cbee353b54b7a6a42f45e7` | the route, m5-07d's rule |
+| `m5-07e-fusAFTER.log` | `1526190718a13471a29fd61063a8b203` | the route, this brief's rule |
+
+Both CSVs were **gzipped after their writers were confirmed gone**, never
+under a live writer (LESSONS 2026-07-28). `.gitattributes` already
+carries `*.gz -text`.
+
+**The two after-idles agree.** `fixA` (210 s) and `fixB` (220 s) are
+separate runs of the same build: −0.1797 and −0.1796 °/min over the whole
+idle, 98.47 % suppressed in both.
+
+## 13.3 Four candidates, each ruled in or out by a measurement
+
+One run: `--phase postidle --idle 210`, seed 1, the code as m5-07d left
+it. It reproduces m5-08d's finding — **−2.1110° over 209.97 s =
+−0.6032 °/min**, against m5-08d's +2.02° / 0.61 °/min on a fresh bias
+draw of the other sign.
+
+| candidate | measurement | verdict |
+|---|---|---|
+| the gate's freshness window lapsing, so it failed open | largest gap between two verdicts **0.0300 s**, against the 0.2000 s timeout | **OUT.** It never came close |
+| the EKF integrating a stale twist through velocity decay | of the −2.1110°, **−0.0121° (0.6 %)** accrued with the gate closed and settled; −0.0336° (1.6 %) in the 0.20 s relaxation tails; **−2.0653° (97.8 %)** with a gyro sample actually being fused | **OUT** as the mechanism. It is a 0.6 % tail on the real one |
+| the 0.50 s arming window at the stop transition | the first burst ends at t_stop **+0.806 s** and cost **−0.3290°**; the remaining 209.2 s cost **−1.7820°** | **IN, but 16 %.** It is a fixed cost per stop and it is not the term that scales with dwell length |
+| encoder counts still settling after a drive | see below | **IN — and not the axis m5-08d named** |
+
+### The drive encoder is not dithering. It is not moving at all.
+
+Over the 210 s idle the drive count changed 144 times — **and every one
+of them is inside the first 0.296 s**, the vehicle coasting to a stop
+after the command. For the following **209.7 s the drive count did not
+change once**, and its sub-count residual held to
+
+```
+parked drive wheel, sub-count residual
+  mean  -0.256049   min  -0.256049   max  -0.256049
+  pk-pk  3.842e-09 count = 5.893e-12 rad of wheel = 7.107e-13 m of tread
+```
+
+Four parts in a billion of one count. There is no dither, the wheel is
+not parked near a boundary, and **m5-08d's stated hypothesis is ruled
+out by direct measurement.** Replaying the recorded joint series through
+a drive-only verdict gives 99.62 % suppression and a predicted leak of
+−0.119°, against the −2.155° the real rule produced.
+
+### It is the STEER axis, one count at a time
+
+```
+                                          drive      steer
+distinct counts visited                     145         28
+count CHANGES (each re-armed the window)    144         53
+count excursion, max - min                  859         27
+count NET change, last - first              859         -2
+```
+
+Clustering every count change into bursts and asking which axis starts
+each one:
+
+```
+20 bursts of encoder activity over the idle
+   started by the drive axis   1     (the 0.296 s coast)
+   started by the steer axis  19
+```
+
+The steer axis **relaxes after a drive.** It swept 27 counts — 2.373° —
+across the idle: a 4.1 s transient of about one count every 0.2 s
+starting at t+11.3 s, and then **isolated single counts roughly every
+eleven seconds** for the rest of the window (gaps of 9.9, 10.4, 11.8,
+15.4, 65.0, 16.2, 12.7, 11.6, 11.5, 12.2 s).
+
+That is the whole mechanism. `update_standstill` required **both counts
+to be identical to the pair recorded when the hold began**, so each of
+those single steer counts discarded however long the vehicle had been
+standing and made the verdict false for a fresh 0.50 s window. The
+arithmetic closes:
+
+```
+  0.8 s (the coast)  +  4.6 s (the 11-15 s transient)
+                     +  18 x 0.5 s (isolated single counts)   = 13.9 s
+  measured verdict-false time                                   14.384 s
+  measured gate-open time                                       14.230 s
+  x the measured bias -0.1498 deg/s                            -2.13 deg
+  measured fused heading change                                -2.111 deg
+```
+
+**Why section 12's idles were clean:** at bringup every joint sits
+exactly at its spawn value under no load, so neither axis moves and the
+verdict is never re-armed. The steer term's cost was invisible for
+exactly as long as nobody drove first. `config.yaml` said the term
+"costs nothing during an idle, when neither moves"; that sentence was
+true of the only idles that had been measured and false of the regime
+that matters.
+
+## 13.4 The defect is the SHAPE of the test, not its threshold
+
+The old test asked whether both counts had been unchanged **since a
+reference instant that receded for as long as the vehicle stood still.**
+That is a statement about **total displacement over an unbounded
+interval**, and no axis of a real machine satisfies it for ever: any
+creep, however slow, eventually crosses a count, and the whole held
+interval is then thrown away.
+
+What the consumer needs at each sample is *"the body is not rotating
+now"*, and that is a **rate** — a displacement over a **fixed** window.
+Asking for a total was asking for more than the physics needs and more
+than the machine can give.
+
+Replaying the recorded 210 s joint series through candidate rules, which
+costs nothing because the counts are already on disk. **This table is
+checkable from the committed artifacts and needs no simulator** —
+`--phase replay` is the instrument, and the rows below are its output:
+
+```
+zcat agv/forklift/evidence/m5-07e-postidle-before.csv.gz > /tmp/before.csv
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py \
+    --phase replay --csv /tmp/before.csv
+```
+
+**The leak column is PREDICTED, not measured**: gate-open seconds times
+the measured bias, which is what the filter would integrate if it took
+each admitted sample at face value. The filter blends, so the live figure
+differs — −0.505° predicted here against −0.659° measured over the longer
+idle in 13.7. The **ranking** is what the table is for.
+
+| rule | suppressed | gate open | predicted leak |
+|---|---|---|---|
+| **R0** as shipped: both exact, receding reference | 93.15 % | 14.386 s | −2.155° (−0.616 °/min) |
+| R1 same, ±1 count band on both | 96.11 % | 8.162 s | −1.222° (−0.349 °/min) |
+| R2 same, ±2 count band on both | 97.00 % | 6.296 s | −0.943° (−0.269 °/min) |
+| R3 trailing window, both exact | 93.15 % | 14.382 s | −2.154° (−0.615 °/min) |
+| **R4 trailing window, drive exact, steer ≤1 count** | **98.40 %** | **3.370 s** | **−0.505° (−0.144 °/min)** |
+| R5 trailing window, drive exact, steer ≤2 | 99.46 % | 1.130 s | −0.169° (−0.048 °/min) |
+| R7 trailing window, drive exact, no steer term | 99.62 % | 0.794 s | −0.119° (−0.034 °/min) |
+
+Two of those rows are worth reading twice. **R3 is R0**: making the
+window trailing while keeping exact equality changes nothing, so the
+receding reference is not the defect on its own. And **R1/R2, the
+obvious band fix, barely help**: a band absorbs dither, and this is not
+dither — it is monotonic creep, which walks out of any fixed band and
+re-arms anyway.
+
+**The replay is validated against the live run.** Replaying the *shipped*
+rule over the counts recorded by the *after* run gives 98.47 % suppressed
+and 3.374 s of gate-open time; that run measured **98.47 % and 3.270 s
+live**. Replaying *m5-07d's* rule over the same after-run counts gives
+14.988 s and −2.246°, an independent second observation of the defect on
+a different run from the one in 13.3.
+
+## 13.5 What was changed
+
+**`StandstillWindow`, at module scope in `wheel_odometry.py`, with no ROS
+in it.** The verdict is now the **spread of each count over a trailing
+`window_s`**:
+
+| axis | test | what it is |
+|---|---|---|
+| drive | spread **= 0** counts over the window | **the bound.** `\|Δψ\| ≤ (tread travelled)/L` is true precisely because the count did not change, so its tolerance is zero — and it is a module constant, `DRIVE_TOLERANCE_COUNTS`, not an entry in `config.yaml`, because a tolerance of N counts multiplies the permitted body rotation by (N+1) and one count would take the bound from 0.0202 °/s to 0.0404 °/s = 2.4 °/min of **real** rotation the gate would then hide |
+| steer | spread **≤ 1** count over the window | **a rate guard, and it carries no bound.** The tolerance is the **one count of zero uncertainty this file already declares for that encoder** (`steer_zero_offset_rad`): a calibration cannot resolve the steer zero better than one count, so demanding the reading be *identical* asks the axis to hold to a precision the vehicle's own model of it does not claim |
+
+One count across a 0.50 s window is a steer rate of **0.176 °/s**. The
+axis's own declared maximum is 2.0 rad/s (`model.sdf`, `steer_joint`
+`<velocity>`), so any commanded steer motion exceeds it by three orders
+of magnitude and opens the gate at once; the measured post-drive
+relaxation is 0.09 counts/s, twenty times under it.
+
+Every uncertainty still resolves to "not standing still", and now does so
+by throwing the count history away rather than by setting a flag, so no
+verdict can form again until a fresh window of samples exists. A gap in
+the joint states longer than the window, and a clock that runs backwards,
+both clear it — the second was already handled, the first was not.
+
+**It is exercised without a simulator.** `--phase static` section 6 drives
+`StandstillWindow` through eight count series whose answer is known,
+including the defect itself. The old defect cost a 210 s live run to
+find; the next one costs a table (LESSONS 2026-07-29).
+
+```
+=== 6. the standstill verdict, driven through count series ============
+  [PASS] a vehicle whose counts never move reads standstill
+  [PASS] the verdict waits the whole window before it forms   (first true at 0.5000 s)
+  [PASS] a steer axis creeping one count every 11 s stays standstill   (100.0%)
+  [PASS] a DRIVE axis creeping one count every 11 s does not   (95.8% - the gate opens around each count)
+  [PASS] a steer axis slewing at 0.035 rad/s opens the gate   (0.0%, at 11.4 counts per window)
+  [PASS] a joint-state gap longer than the window clears the verdict
+  [PASS] a clock that runs backwards clears the verdict
+  [PASS] the drive tolerance is zero, which is the bound itself
+```
+
+`--phase static` now passes **31 checks, 0 failed** (was 23).
+
+## 13.6 The steer term's premise, measured
+
+The steer count is in the verdict because "a parked forklift steering on
+the spot is the one manoeuvre in which the drive encoder could stay still
+while the contact patch slides" (section 12.2). That is a claim about the
+world, and truth is the only instrument for it, so `--phase postidle
+--truth` records the simulator's pose — **as a reference, in its own
+section, entering no verdict this phase computes.**
+
+Over the 220 s post-fix idle the steer axis swept **2.3730°** with the
+drive count held throughout, and the body:
+
+| from t_stop + 0.800 s, one window after the drive wheel stopped | |
+|---|---|
+| TRUE position excursion | **0.001568 m** |
+| TRUE heading, largest excursion | **0.001750°** |
+| TRUE heading, net over 219.17 s | **+0.001471°** |
+
+2.373° of steer sweep produced 0.0018° of body rotation — three orders of
+magnitude smaller, and at the floor of what the reference resolves. **On
+this vehicle, in this simulator, on this floor, steer-axis motion with
+the drive count held does not turn the body.** The kinematics say why:
+the steer axis passes through the wheel centre, so there is no castor
+trail, and rotating the wheel about it translates the contact point by
+zero — while a body rotation of Δψ requires the drive wheel centre to
+trace an arc of Δψ·L.
+
+**That is a measurement and not a licence to delete the term.** It says
+nothing about a real tyre with a finite contact patch, and the failure
+the term was named for is not the one it detects anyway: a vehicle towed
+or pushed bodily rotates with **both** counts held, and no encoder on
+this machine sees that at all (12.8, and open question 2 of m5-07d). The
+term is kept, demoted from an exact-equality test to a rate guard, and
+described as a guard rather than as part of the bound.
+
+## 13.7 The re-measurement, over 220 s
+
+`--phase postidle --idle 220 --truth`, seed 1, the same world, the same
+profile, the same stop.
+
+| | before (m5-07d's rule) | after |
+|---|---|---|
+| idle measured | 209.97 s | 219.98 s |
+| gyro samples suppressed | 93.14 % | **98.47 %** |
+| separate openings of the gate | 19 | **9** |
+| gate-open time | 14.230 s | **3.270 s** |
+| **fused heading, whole idle** | **−2.1110°** | **−0.6585°** |
+| as a rate over the whole idle | −0.6032 °/min | −0.1796 °/min |
+
+**But the rate is the wrong summary of the second column, and this is the
+result.** Split the idle at t+20 s:
+
+| | before | after |
+|---|---|---|
+| fused heading over the first 20 s | −1.2559° | −0.6585° |
+| **fused heading over the REST of the idle** | **−0.8550° over 190 s (−0.2701 °/min)** | **+0.000000° over 200 s (0.0000 °/min)** |
+| gyro samples admitted after t+20 s | 647 | **0** |
+
+**The last gate opening of the whole run ends at t+15.414 s. For the
+following 204.6 s not one gyro sample reaches the filter and the fused
+heading does not move at all.** Every one of the nine openings, with what
+each cost:
+
+```
+   start      end    len_s   fused_deg   true_deg    err_deg
+   0.004    0.804    0.800     -0.3326    -0.2196    -0.1130   <- the coast
+  11.494   13.094    1.600     -0.2031     0.0007    -0.2038   <- the steer
+  13.154   13.354    0.200     -0.0437     0.0001    -0.0438      axis's
+  13.454   13.644    0.190     -0.0424     0.0001    -0.0425      post-drive
+  13.784   13.944    0.160     -0.0314     0.0001    -0.0314      relaxation
+  14.134   14.284    0.150     -0.0290     0.0001    -0.0291      transient
+  14.514   14.614    0.100     -0.0132     0.0000    -0.0133
+  14.934   14.994    0.060     -0.0060     0.0000    -0.0060
+  15.404   15.414    0.010     -0.0028     0.0000    -0.0028
+                    3.270 s total
+```
+
+and the estimator's error, against truth, accrued epoch by epoch:
+
+```
+  [  0.80,  5.00)  fused  -0.0064  true  +0.0000  error  -0.0064 deg
+  [  5.00, 20.00)  fused  -0.3259  true  +0.0009  error  -0.3268 deg
+  [ 20.00, 60.00)  fused  +0.0000  true  -0.0021  error  +0.0021 deg
+  [ 60.00,120.00)  fused  +0.0000  true  -0.0006  error  +0.0006 deg
+  [120.00,220.00)  fused  +0.0000  true  +0.0032  error  -0.0032 deg
+```
+
+**The leak has changed kind, not only size.** It was a rate that grew
+with how long the vehicle stood there; it is now a **fixed cost paid once
+per stop, inside the first sixteen seconds, and nothing afterwards.** A
+two-minute dwell and a twenty-minute dwell now cost the same.
+
+The first row of that table is also not all estimator error. The vehicle
+**coasts 0.138 m** after the stop command and genuinely turns −0.2196°
+doing it; the gate is correctly open, and the filter is tracking real
+motion. Of the −0.3326°, **−0.1130° is estimator error and the rest is
+the vehicle.**
+
+## 13.8 The residual, stated as a bound
+
+| | |
+|---|---|
+| **worst case, a dwell beginning at the stop command** | **−0.331° of heading error**, accrued in the first 16 s, then flat |
+| a dwell beginning 20 s after the stop | **0.000°**, measured over 200 s |
+| as a rate over the parked interval, if quoted that way | −0.0907 °/min over 219.17 s — **and quoting it that way is wrong**, because the error does not accrue at a rate |
+| **for the AMCL dwell test** | a two-minute dwell inside a degenerate aisle costs **at most 0.33°** of estimator heading, and **0.00°** if the dwell starts more than 16 s after the vehicle last moved |
+
+Against the brief's premise — "at 0.61 °/min a two-minute dwell hands
+AMCL over a degree from the estimator alone" — a two-minute dwell now
+costs **0.33° at worst and 0.00° if it does not begin in the settling
+window.** The dwell test measures the localizer.
+
+**Where the residual is, exactly.** All of it is the steer axis's
+post-drive relaxation transient at t+11.5 s to t+15.4 s, where the axis
+moves at up to **3 counts per 0.50 s window (0.53 °/s)** and correctly
+exceeds the 1-count rate tolerance. Nothing was done about it, on
+purpose: an axis moving at half a degree per second **is** motion, the
+gate opening for it is the conservative direction, and a tolerance chosen
+to swallow it would have been a number fitted to make this table look
+better. `config.yaml`'s tolerance is derived from the encoder's stated
+calibration limit and from nothing in this measurement.
+
+## 13.9 The drift while moving, re-shown on the same profile
+
+The gate must not touch the moving case. `--phase fusion`, seed 1, same
+world, same `_PROFILE`, **both runs taken in this session** — the
+before-run from a scratch tree holding `git show HEAD:` versions of
+`wheel_odometry.py`, `config.yaml` and `check_odometry.py`, so the two
+differ in the standstill rule and in nothing else.
+
+| | before | after |
+|---|---|---|
+| **drift accumulated WHILE MOVING** | **−12.8941° over 110.76 s** | **−12.7800° over 110.74 s** |
+| gyro samples on `/forklift/imu` | 12100 | 12100 |
+| gyro samples on `/forklift/imu_gated` | 11077 | 11076 |
+| verdict-true time over the recorded window | 10.20 s | 10.22 s |
+| path length | 106.494 m | 106.494 m |
+
+The difference is **0.1141°**. The expected white-noise random walk over
+the same interval is `σ_gyro·√(Δt·T) = 1.745e-3·√(0.01·110.74) =
+0.1052°`, so it is **1.08 σ** — the same noise floor section 12.4
+reported at 0.95 σ, and it could not have been otherwise: **one gyro
+sample in 12 100 differs between the two runs.** While the vehicle moves
+the drive count changes by thousands per window, the spread test fails
+instantly, the gate is open for every sample of the drive, and the filter
+is fed exactly what it was fed before.
+
+For reference, section 12.4's figure for the same seed in an earlier
+session was −12.8761°, 0.018° from this session's before-run.
+
+## 13.10 What did NOT change, checked rather than asserted
+
+| file | md5 as this section was written | |
+|---|---|---|
+| `model.sdf` | `b04706c41a379abf5b54f409843f8f98` | **byte-identical to sections 0 and 12.6.** Every datasheet noise figure is untouched: the gyro's 0.001745 rad/s white noise, its 0.002618 rad/s bias, the accelerometer's two |
+| `ekf.yaml` | `356afa12db9393e89bf92c6fbdbc07eb` | **comment only, and that is checked rather than claimed**: `yaml.safe_load` of this file and of `git show HEAD:` of it compare **equal**. No covariance, no `process_noise_covariance`, no `initial_estimate_covariance`, no sensor config, no topic name |
+| `config.yaml` | `155fa00a23d1dedf2cb5bf95425535b5` | one new key, `standstill.steer_tolerance_counts: 1`, and the `standstill:` prose. Comparing the parsed documents key by key, **`standstill` is the only top-level key that differs** — `odometry`, `model`, `limits`, `imu`, `obstacle`, `frames`, `qos`, `logging`, `rates`, `spawn` and `topics` are all unchanged, so no derived covariance and no error-model number moved |
+| `scripts/imu_gate.py` | `50f7594017b157157870c61a9c2c5521` | **docstring only, no behaviour.** The gate was never the defect: its freshness test was ruled out by measurement in 13.3 and not touched |
+| `launch/vehicle.launch.py` | `c6448e01b46134ee03359966960b3172` | **comment only.** No node, argument, default or exclusivity check changed |
+| `scripts/wheel_odometry.py` | `c641e9573888305d6a01e7cccb5faa2d` | `StandstillWindow` added and the verdict delegated to it. The kinematics, the encoder model, the integration and the published covariances are untouched |
+| `scripts/check_odometry.py` | `fdd215616e022248313372533cd69536` | `--phase postidle`, `--phase replay`, `--truth`, `--csv`, and static section 6. **No existing phase's arithmetic changed**; `--phase static`'s original 23 checks all still pass, and the phase now runs 31 |
+| `README.md` | `2ef4dfc5cb77cc7b9852fc8f63a3b64a` | the `/forklift/wheel_standstill` and `imu_gate` rows of the contract table, re-worded to the rate test |
+
+- **No bias is estimated and nothing is carried into motion.** The change
+  is to *which intervals* a measurement is offered in, exactly as
+  section 12.6 said of the original. `StandstillWindow` holds encoder
+  counts and timestamps and no gyro quantity of any kind.
+- **No ground truth reaches an estimator.** `--truth` is a flag on the
+  measurement harness, off by default, reported in its own section,
+  entering no verdict. Sections 2–6 of the phase are identical with it
+  and without it.
+- **`_PROFILE` is unchanged**, which is what makes 13.9 a comparison.
+- **No dependency was added.** `collections` is in the standard library.
+
+## 13.11 Reproducing this
+
+```
+source /opt/ros/jazzy/setup.bash
+export GZ_PARTITION=<unique> ROS_DOMAIN_ID=<n>
+cd <repo>
+
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py --print-world > /tmp/flat.sdf
+
+# the post-drive idle. It drives _PROFILE first, so it is ~340 s of
+# simulated time; the pre-drive idle is --phase idle and is a different
+# question.
+ros2 launch agv/forklift/launch/vehicle.launch.py world:=/tmp/flat.sdf \
+    world_name:=odometry_flat seed:=1 &
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py --phase postidle \
+    --idle 220 --truth --csv agv/forklift/evidence/postidle.csv
+
+# the moving drift, on the same profile
+ros2 launch agv/forklift/launch/vehicle.launch.py world:=/tmp/flat.sdf \
+    world_name:=odometry_flat seed:=1 &
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py --phase fusion
+
+# the verdict itself, with no ROS and no simulator
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py --phase static
+
+# 13.4's rule comparison, from the committed series, also with no ROS
+zcat agv/forklift/evidence/m5-07e-postidle-before.csv.gz > /tmp/before.csv
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py \
+    --phase replay --csv /tmp/before.csv
+```
+
+The before-column of 13.7 and 13.9 is the same commands against a tree
+built with `git show HEAD:agv/forklift/{scripts/wheel_odometry.py,
+scripts/check_odometry.py,config.yaml}` copied over a copy of
+`agv/forklift/`; `launch/vehicle.launch.py` resolves every path from its
+own location, so the copy is self-contained.
+
+**Isolate both transports.** `ROS_DOMAIN_ID` does not isolate gz, because
+gz transport is not DDS (LESSONS 2026-07-27). Every run here was headless,
+driven to completion in the foreground, and every process confirmed gone
+with `pgrep -af` afterwards. **No RTF figure was taken and none is
+quoted** (LESSONS 2026-07-30).
+
+## 13.12 What section 13 does not cover
+
+- **One stop, one posture, one seed.** Flat ground, forks down, steer
+  commanded straight, `--seed 1`. The steer relaxation's size and the
+  16 s it lasts are properties of *this* stop; a stop from a turn, on a
+  ramp, or with a raised load rocking on the tyres is not measured, and
+  the fixed per-stop cost of 13.8 is a measurement of one of them.
+- **The residual is not fixed, only bounded and located.** 13.8 states
+  where it is and why it was left.
+- **The steer term is now a guard with no bound behind it**, and
+  13.6 says so. It fires on steer rate. It does not detect the failure
+  it was named for, and neither did the exact-equality version.
+- **Gross drive-wheel skid is still the one credible way the mechanism is
+  wrong** (12.8). Nothing here changes or tests it.
+- **Nothing about the map, and nothing about AMCL.** This measures the
+  estimator standing still. Whether 0.33° per stop is acceptable to a
+  dwell test is the AMCL brief's criterion to state, not this one's.
+- **Container only.** Every figure is from the project session container.
+  The owner's WSL2 host has never run this configuration.

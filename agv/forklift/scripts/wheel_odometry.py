@@ -11,12 +11,34 @@ WHAT THIS NODE IS
                               ->  /forklift/wheel_standstill
 
 THE SECOND OUTPUT, AND WHY IT IS HERE
-  `wheel_standstill` is one boolean: both encoder counts have been
-  unchanged for the window in config.yaml's `standstill:` block. It is
+  `wheel_standstill` is one boolean, and it is a RATE TEST OVER A
+  TRAILING WINDOW: over the last `standstill.window_s`, the drive
+  encoder count has not changed at all, and the steer encoder count has
+  moved by no more than `standstill.steer_tolerance_counts`. It is
   published from this node and from no other because this node owns the
   encoder model (invariant 10) - a consumer that re-derived "is it
   moving" from the raw joint angles would be quantising the same signal
   a second time with its own idea of the count grid.
+
+  IT IS A RATE, NOT A TOTAL, AND THAT DISTINCTION IS THE WHOLE OF BRIEF
+  m5-07e. The first version of this verdict asked whether both counts
+  had been unchanged SINCE a reference instant that receded without
+  limit. That is a statement about total displacement over an unbounded
+  interval, and no axis of a real machine satisfies it for ever: any
+  creep, however slow, eventually crosses a count and throws the whole
+  held interval away. The consumer then re-opens for a full window every
+  time it happens. Measured on this vehicle over a 210 s idle AFTER a
+  drive, the steer axis relaxed by one count roughly every eleven
+  seconds, and those single counts alone re-opened the gyro gate for
+  14.4 s of the 210 - 2.11 deg of heading, growing with how long the
+  vehicle stood there. Over the same idle the DRIVE count did not move
+  once after the first 0.30 s, and its sub-count residual held to
+  4e-9 of a count.
+
+  What the consumer needs at each sample is "the body is not rotating
+  NOW", which is a rate; asking for a total was asking for more than
+  the physics needs and more than the machine can give.
+  agv/forklift/EVIDENCE_ODOMETRY.md section 13 is the measurement.
 
   It is a MEASUREMENT, not a command and not a machine state. It says
   the wheels are not turning. It does not say the vehicle is enabled,
@@ -122,6 +144,7 @@ the session container, per sim/setup/CONTAINER_TOOLCHAIN.md section 3.3):
 """
 
 import argparse
+import collections
 import math
 import os
 import sys
@@ -165,6 +188,112 @@ def quantise(value, step):
 def yaw_to_quaternion(yaw):
     """(x, y, z, w) for a rotation about z only."""
     return (0.0, 0.0, math.sin(yaw * 0.5), math.cos(yaw * 0.5))
+
+
+#: The drive axis's count tolerance, in counts, and it is ZERO. It is a
+#: module constant rather than an entry in config.yaml deliberately: it
+#: is not a setting, it is the premise of the bound. "The drive count did
+#: not change over the window" is exactly what makes |dpsi| <= tread/L
+#: true, and a tolerance of N counts multiplies the permitted body
+#: rotation by (N + 1). One count of tolerance would take the bound from
+#: 0.0202 deg/s to 0.0404 deg/s - 2.4 deg/min of REAL rotation the gate
+#: would then hide, which is the failure direction the whole mechanism
+#: exists to design against. It does not belong in a file that reviews as
+#: configuration.
+DRIVE_TOLERANCE_COUNTS = 0
+
+
+class StandstillWindow(object):
+    """Are the wheels turning, decided over a TRAILING WINDOW of counts.
+
+    AT MODULE SCOPE, WITH NO ROS IN IT, for the same reason the
+    kinematics above are: scripts/check_odometry.py --phase static
+    drives this class through count series whose answer is known and
+    needs no simulator to do it. The defect this class replaces was
+    found by a live 210 s measurement that cost a run; the next one
+    should be findable by a table (LESSONS 2026-07-29).
+
+    THE TEST, AND WHY IT IS A SPREAD AND NOT A DURATION.
+
+      drive - the count's spread over the last `window_s` must be zero.
+              This is the premise of |dpsi| <= (tread travelled)/L, so
+              its tolerance is DRIVE_TOLERANCE_COUNTS and that is zero.
+      steer - the count's spread over the same window must be at most
+              `steer_tolerance_counts`. This is a RATE, and the
+              tolerance is the one count of zero uncertainty the vehicle
+              already declares for that encoder.
+
+    The predecessor asked whether both counts had been unchanged SINCE a
+    reference instant that receded for as long as the vehicle stood
+    still. That is a statement about total displacement over an
+    unbounded interval, and it fails under any creep however slow: one
+    crossed count discards the whole held interval. Measured over a
+    210 s post-drive idle, the steer axis's one-count-per-eleven-seconds
+    relaxation re-opened the gyro gate for 14.4 s of it.
+
+    EVERY UNCERTAINTY RESOLVES TO "NOT STANDING STILL". A clock that ran
+    backwards, a gap longer than the window, a history that has not yet
+    spanned the window: each returns False, and `clear()` throws the
+    history away rather than setting a flag, so no verdict can be formed
+    again until a fresh window of samples exists.
+    """
+
+    def __init__(self, window_s, steer_tolerance_counts, use_steer):
+        self.window_s = float(window_s)
+        self.steer_tolerance_counts = int(steer_tolerance_counts)
+        self.use_steer = bool(use_steer)
+        self.drive_history = collections.deque()
+        self.steer_history = collections.deque()
+        self.history_from_s = None
+        self.last_sample_s = None
+        self.standstill = False
+
+    def clear(self):
+        """Forget everything. The next verdict needs a whole new window."""
+        self.drive_history.clear()
+        self.steer_history.clear()
+        self.history_from_s = None
+        self.last_sample_s = None
+        self.standstill = False
+
+    def update(self, t_s, drive_count, steer_count):
+        """One sample of the two COUNTS. Returns the verdict."""
+        if self.last_sample_s is not None:
+            gap_s = t_s - self.last_sample_s
+            if gap_s < 0.0 or gap_s > self.window_s:
+                # The clock ran backwards (a simulator reset), or the
+                # joint states stopped for longer than the window. Either
+                # way the window is no longer covered by observation, and
+                # an unobserved interval is not a standstill.
+                self.clear()
+
+        if self.history_from_s is None:
+            self.history_from_s = t_s
+
+        self.drive_history.append((t_s, drive_count))
+        self.steer_history.append((t_s, steer_count))
+        self.last_sample_s = t_s
+
+        cutoff_s = t_s - self.window_s
+        for history in (self.drive_history, self.steer_history):
+            while len(history) > 1 and history[0][0] < cutoff_s:
+                history.popleft()
+
+        if t_s - self.history_from_s < self.window_s:
+            # Trusting the standstill takes the full window; distrusting
+            # it is instantaneous.
+            self.standstill = False
+            return self.standstill
+
+        drive_spread = (max(c for _, c in self.drive_history)
+                        - min(c for _, c in self.drive_history))
+        steer_spread = (max(c for _, c in self.steer_history)
+                        - min(c for _, c in self.steer_history))
+        steer_ok = (not self.use_steer
+                    or steer_spread <= self.steer_tolerance_counts)
+        self.standstill = (drive_spread <= DRIVE_TOLERANCE_COUNTS
+                           and steer_ok)
+        return self.standstill
 
 
 def _make_node_class(Node, Odometry, QoSProfile, JointState, Bool):
@@ -216,6 +345,7 @@ def _make_node_class(Node, Odometry, QoSProfile, JointState, Bool):
             still = cfg['standstill']
             self.standstill_window_s = float(still['window_s'])
             self.standstill_uses_steer = bool(still['include_steer_axis'])
+            self.steer_tolerance_counts = int(still['steer_tolerance_counts'])
 
             qos = QoSProfile(depth=cfg['qos']['depth'])
             self.pub_odom = self.create_publisher(
@@ -233,15 +363,15 @@ def _make_node_class(Node, Odometry, QoSProfile, JointState, Bool):
             self.sample = None            # (t_s, drive_rad, steer_rad)
             self.last_sample = None       # the previous integrated sample
 
-            # Standstill detection state. `held_counts` is the pair of
-            # ENCODER COUNTS the wheels have been sitting on, and
-            # `held_since_s` the stamp at which they were first seen there.
-            # The verdict is a duration test on that pair, evaluated at the
-            # 500 Hz the joint states arrive at rather than at the 50 Hz this
-            # node integrates, so a single count between two integration
-            # cycles cannot pass unseen.
-            self.held_counts = None
-            self.held_since_s = None
+            # Standstill detection. The whole test lives in the
+            # module-level StandstillWindow above, which has no ROS in it
+            # and is driven by check_odometry.py --phase static. It is fed
+            # at the 500 Hz the joint states arrive at rather than at the
+            # 50 Hz this node integrates, so a single count between two
+            # integration cycles cannot pass unseen.
+            self.still_window = StandstillWindow(
+                self.standstill_window_s, self.steer_tolerance_counts,
+                self.standstill_uses_steer)
             self.standstill = False
 
             # Integrated state: the REAR AXLE MIDPOINT in the odom frame, plus
@@ -267,10 +397,12 @@ def _make_node_class(Node, Odometry, QoSProfile, JointState, Bool):
                     self.steer_zero_offset_rad, topics['odom_wheel'],
                     1.0 / self.period_s))
             self.get_logger().info(
-                'standstill verdict on {}: both encoder counts unchanged for '
-                '{:.3f} s ({}), which bounds body rotation at {:.4f} deg/s. '
-                'It is an estimator input and inhibits nothing'.format(
+                'standstill verdict on {}: over a trailing {:.3f} s window '
+                'the drive count moved 0 and the steer count at most {} '
+                '({}), which bounds body rotation at {:.4f} deg/s. It is an '
+                'estimator input and inhibits nothing'.format(
                     topics['wheel_standstill'], self.standstill_window_s,
+                    self.steer_tolerance_counts,
                     'drive and steer' if self.standstill_uses_steer
                     else 'drive only',
                     math.degrees(self.rolling_radius_m * self.drive_step_rad
@@ -335,43 +467,33 @@ def _make_node_class(Node, Odometry, QoSProfile, JointState, Bool):
             FALSE costs exactly the drift this vehicle had before the gate
             existed; a verdict stuck TRUE would hide a real rotation from
             the filter. So every uncertainty - a missing joint, a short
-            message, an implausible angle, a clock that ran backwards -
-            resolves to "not standing still".
+            message, an implausible angle, a clock that ran backwards, a
+            gap longer than the window - resolves to "not standing still",
+            and it does so by throwing the count history away rather than
+            by setting a flag, so no verdict can be formed again until a
+            fresh window of samples exists.
             """
-            self.held_counts = None
-            self.held_since_s = None
+            self.still_window.clear()
             self.standstill = False
 
         def update_standstill(self, t_s, drive_rad, steer_rad):
-            """Have both encoder counts held still for the whole window?
+            """Quantise both axes and hand the COUNTS to the window.
 
             The counts, not the angles. An encoder reports a count, and two
             angles inside one count are the same reading as far as the
             vehicle can tell - which is the point: the test has to be the
-            one the real device could actually perform.
+            one the real device could actually perform. The steer reading
+            carries the same zero offset the integrator uses, so the
+            verdict and the estimate are quantising one signal once.
+
+            The test itself is StandstillWindow's, at module scope, where
+            it can be exercised with no ROS present.
             """
-            counts = (round(drive_rad / self.drive_step_rad),
-                      round((steer_rad + self.steer_zero_offset_rad)
-                            / self.steer_step_rad)
-                      if self.standstill_uses_steer else 0)
-
-            if self.held_counts != counts or self.held_since_s is None:
-                # A count moved. The gate opens on this sample, with no
-                # window and no filtering: distrusting the standstill is
-                # instantaneous, trusting it takes the full window.
-                self.held_counts = counts
-                self.held_since_s = t_s
-                self.standstill = False
-                return
-
-            held_s = t_s - self.held_since_s
-            if held_s < 0.0:
-                # The clock went backwards (a simulator reset). Re-arm
-                # rather than measure a negative duration.
-                self.held_since_s = t_s
-                self.standstill = False
-                return
-            self.standstill = held_s >= self.standstill_window_s
+            drive_count = round(drive_rad / self.drive_step_rad)
+            steer_count = round((steer_rad + self.steer_zero_offset_rad)
+                                / self.steer_step_rad)
+            self.standstill = self.still_window.update(
+                t_s, drive_count, steer_count)
 
         # ------------------------------------------------------------------ #
         # Integration.

@@ -1,5 +1,43 @@
 # EVIDENCE — the warehouse map, built by SLAM against real odometry (m5-08b)
 
+> ## SUPERSEDED, 2026-08-04, by m5-08d — read §12 before quoting anything here
+>
+> **The artifacts this file describes no longer exist in the working tree.**
+> `sim/maps/warehouse/warehouse.{pgm,yaml,posegraph,data}` were rebuilt by
+> brief `m5-08d` on 2026-08-04. The grid this file measures is
+> `warehouse.pgm` md5 `8c48cc4e9d1771558eb3c648d9c15df8`; the committed
+> grid is now `a663163036c5890937f9045bcf559e72`. **§12 records the
+> replacement**, with the full md5 table and what changed.
+>
+> Three specific things in this file are now wrong or must be re-read, and
+> they are corrected in place below as well as here:
+>
+> 1. **The −2.82° in §5 and §9 is not the map's rotation from the
+>    building.** It is a single-sample frame relation at the first sample
+>    of the drive. The m5-08b artifact's actual rotation, measured by
+>    fitting its walls, is **+1.83°**, and the new artifact's is
+>    **−0.45°**. Nothing may use a number from §5 as a world→map
+>    transform: that transform now has one owner and one file,
+>    `sim/maps/warehouse/warehouse_registration.yaml`, derived by
+>    `sim/maps/warehouse/register_map.py`.
+> 2. **Every error figure in this file — 0.185 m rms, 0.358 m max, 0.014 m
+>    final — is ANCHORED DRIFT, not localisation error.** They remain
+>    correct as drift figures and this file always said so. They are
+>    invalid as a localisation score, because the anchor makes the first
+>    sample zero by construction (`docs/reports/m5-08c-slam-judge.md`
+>    finding 2). The instrument that produced them now demands
+>    `--score anchored-drift` by name, and `--score absolute` is the mode
+>    an AMCL number comes from.
+> 3. **The 2.82° cosine correction in §9's span check used the wrong
+>    angle** (the artifact's rotation is 1.83°). The effect is 0.01–0.02 m
+>    and changes no conclusion; the span check was independently
+>    reproduced by m5-08c at 30.046 m against a true 30.00 m.
+>
+> The run recorded in §§1–11 happened and its account of it is accurate.
+> It is kept, not deleted, because the two maps are a measured before and
+> after of the idle-drift fix.
+
+
 **The first M5 run in which SLAM could fail.** Until brief m5-07c the
 vehicle's pose came from Gazebo's ground truth, so scan matching was
 scored against its own input and could not be wrong. m5-07c retired that:
@@ -209,6 +247,14 @@ something.
 For this run both frames came out at `(-6.009, -5.500)`, rotated
 **−2.82°** from the world. That rotation is the EKF's heading error at the
 instant SLAM initialised — see §6.
+
+> **Corrected 2026-08-04 (m5-08d).** That −2.82° is a **single-sample**
+> frame relation at the first sample of the drive, and it is **not** this
+> map's rotation from the building — the grid is drawn from all 327 graph
+> nodes and does not inherit that instant. Fitting the artifact's own
+> walls puts it at **+1.83°**. Nothing may use −2.82° as a world→map
+> transform. That transform is derived, per map, by
+> `sim/maps/warehouse/register_map.py`.
 
 ### Whole run
 
@@ -503,6 +549,14 @@ m on the 30 m span and 0.02 m on the 20 m one. Corrected, the map puts the
 hall at **30.01 × 20.03–20.08 m against a true 30.00 × 20.00 m**, which is
 inside the 0.05 m cell size in both directions.
 
+> **Corrected 2026-08-04 (m5-08d).** The angle used here is wrong: the
+> image axes sit **1.83°** off the wall normals, not 2.82° (see the
+> correction in §5). `1/cos 1.83° = 1.0005`, so the correction is 0.015 m
+> on the 30 m span rather than 0.04 m. **The conclusion is unchanged** —
+> the map is still inside one cell in both directions — and m5-08c
+> reproduced the east-west span independently, perpendicular to fitted
+> walls, at **30.046 m against a true 30.00 m**.
+
 That is the check that says the map is right. "It looks correct" appears
 nowhere in this file.
 
@@ -584,8 +638,15 @@ ros2 service call /slam_toolbox/serialize_map \
     slam_toolbox/srv/SerializePoseGraph \
     "{filename: '<repo>/sim/maps/warehouse/warehouse'}"
 
-# and the reading
-/usr/bin/python3 sim/scenarios/tools/mapping_evidence.py analyse --csv /tmp/run.csv
+# the registration for the map just saved. PER MAP - re-derive every time
+python3 sim/maps/warehouse/register_map.py derive --write
+
+# and the reading. --score is MANDATORY (superseded 2026-08-04: this line
+# read `analyse --csv /tmp/run.csv` and silently produced the anchored
+# quantity). Use anchored-drift for a mapping run, absolute for a
+# localisation score.
+/usr/bin/python3 sim/scenarios/tools/mapping_evidence.py analyse \
+    --csv /tmp/run.csv --score anchored-drift
 /usr/bin/python3 sim/scenarios/tools/mapping_evidence.py closures \
     --slam-log <slam stdout> --route-log <route stdout> --csv /tmp/run.csv
 ```
@@ -640,3 +701,173 @@ To look at the grid:
 - **Nothing about the M4 command path.** The route bypasses the PLC (§4).
 - **One run.** The gyro bias sign is drawn per run (§8), so a second run
   will produce different numbers. Nothing here is a repeatability claim.
+
+---
+
+## 12. The rebuild — m5-08d, 2026-08-04
+
+This section records the artifacts that **replaced** the ones §§1–11
+measure, and it is the section to read first. Everything above it is the
+superseded run, kept as the before half of a measured comparison.
+
+### 12.1 Why the map was rebuilt
+
+`docs/reports/m5-08c-slam-judge.md` finding 1: the m5-08b grid is rotated
+**2.0°** from the building, because the estimator integrated gyro bias
+through the ~20 s of idle between bringup and the drive. That cause was
+fixed in `agv/` by brief m5-07d — an encoder-gated zero angular rate
+update — and this run is the first map built by a stack carrying it.
+
+### 12.2 Environment
+
+| Item | Value |
+|---|---|
+| Where | project session container. **Not the owner's WSL2 host**, which has never run this stack (`sim/setup/WSL_ENVIRONMENT.md`) |
+| ROS 2 | Jazzy |
+| Gazebo | Harmonic, `gz sim --versions` → `8.11.0` |
+| slam_toolbox | `2.8.5-1noble.20260615.161600` |
+| robot_localization | `3.8.3-1noble.20260615.152020` |
+| Isolation | `GZ_PARTITION=m508d_map`, `ROS_DOMAIN_ID=71`. **Both transports**, because gz transport is not DDS |
+| Display | headless, `QT_QPA_PLATFORM=offscreen`, `DISPLAY` unset |
+| Seed | **none**, the same discipline as m5-08b, so the gyro bias sign is drawn fresh |
+
+### 12.3 The estimator stack, captured
+
+The bringup starts four `agv/`-owned processes where m5-08b started three:
+`sensor_tf.py`, `wheel_odometry.py`, **`imu_gate.py`** and the
+`robot_localization` EKF. `sim/launch/warehouse_bringup.launch.py` ties
+all four to one `estimator` argument, because `ekf.yaml` fuses
+`/forklift/imu_gated`, which only `imu_gate.py` publishes — started
+without it the EKF silently runs on wheel odometry alone.
+
+`mapping_evidence.py publishers --seconds 12`, bringup only:
+
+```
+/tf
+  Publisher count: 1
+    Node name: forklift_ekf   Node namespace: /   Topic type: tf2_msgs/msg/TFMessage
+  Edges observed over 12 s, parent -> child : messages
+    forklift/odom -> forklift/base_link : 470
+/tf_static
+  Publisher count: 1
+    Node name: sensor_tf
+VERDICT: 1 publisher(s) on /tf: forklift_ekf
+```
+
+The ground-truth TF bridge is not started and has no argument. With SLAM
+up the count goes to 3 (both extras named `slam_toolbox`) and the edge set
+gains exactly the disjoint `map -> forklift/odom`.
+
+**The gate is live, not merely started.** Parked, `/forklift/imu` runs at
+100.038 Hz and `/forklift/imu_gated` publishes nothing at all;
+`/forklift/wheel_standstill` is `true` at 50.012 Hz. Across a 60 s idle the
+fused orientation is bit-identical (`z: 0.0005849960834777662`,
+`w: 0.9999998288897766` at both ends). That residual is a yaw of 0.067°,
+which is the 0.50 s of ungated gyro the gate costs at every stop by design.
+
+### 12.4 The run
+
+Route unchanged — `sim/scenarios/warehouse_mapping_route.py` was not
+edited. **178.9 s of simulation time, 9 legs, 107.68 m of ground-truth
+path, 916.4° of turning** against m5-08b's 179 s / 107.5 m: the same drive.
+
+### 12.5 The artifacts
+
+| file | superseded md5 (m5-08b) | **committed md5 (m5-08d)** |
+|---|---|---|
+| `warehouse.pgm` | `8c48cc4e9d1771558eb3c648d9c15df8` | **`a663163036c5890937f9045bcf559e72`** |
+| `warehouse.yaml` | `306392c787c18f95d010d2927ee0ad2f` | **`62bfa651dbb7f93d6a873a4edcf433cf`** |
+| `warehouse.posegraph` | `a7c8ade4b898fbd9d91cb9270c77ea79` | **`158bc494430a7da4f6ff4b4c7335c477`** |
+| `warehouse.data` | `59ae8f84aef684f8575771ebcf296863` | **`01177d41fb0b29d0c39a521f76db420e`** |
+
+New grid 606 × 410 cells at 0.050 m, origin `[-9.145, -4.778, 0]`,
+`mode: trinary`, `negate: 0`, thresholds 0.65 / 0.196 — the nav2 defaults,
+unchanged. `save_map` returned `result=0` on the first attempt and
+`serialize_map` on the first.
+
+`.gitattributes` coverage **verified, not assumed**: `git check-attr text`
+returns `unset` for `warehouse.pgm`, `warehouse.posegraph` and
+`warehouse.data` (rules `*.pgm -text`, `*.posegraph -text`,
+`sim/maps/**/*.data -text`), and `auto` for the two yaml files, which is
+correct for text.
+
+### 12.6 Squareness — the headline, and it is not zero
+
+Measured from the committed grid alone by fitting its four perimeter walls
+(`sim/maps/warehouse/register_map.py`); no run figure enters it.
+
+| | m5-08b grid | **rebuilt grid** |
+|---|---|---|
+| rotation from the building | +1.8343° | **−0.4535°** |
+| internal shear | 0.4244° | **0.3250°** |
+| west / south / north / east | +1.81 / +2.11 / +1.69 / +1.81° | **−0.58 / −0.26 / −0.55 / −0.46°** |
+
+**4.0× squarer, and not square.** The 0.45° that remains is not the idle:
+§12.3 measured the idle contribution at 0.067° and showed it frozen, so at
+most 15 % of it can be pre-drive. The rest is in-motion heading error that
+the pose graph did not fully absorb. The shear barely moved and is
+therefore not an idle-drift effect at all — it is a property of the
+mapping, and it is what the registration residual mostly is. **No
+slam_toolbox parameter was changed to chase either number.**
+
+### 12.7 The registration
+
+`sim/maps/warehouse/warehouse_registration.yaml`, derived from this grid:
+
+```
+p_map = R(theta) * p_world + t
+theta = -0.007915259 rad = -0.453510947 deg
+t     = (+6.029222691, +5.541459743) m
+residual rms 0.040363 m, MAX 0.141100 m, over 1444 wall points
+```
+
+**0.141 m is the floor under every localisation number measured through
+it.** It must be re-derived for every regenerated map, and that is
+enforced: the file records the grid's md5 and `load_registration()`
+refuses a mismatch.
+
+### 12.8 This run's own error, both ways, on one CSV
+
+The same 4150-sample recording, read by both scoring modes:
+
+| | `--score anchored-drift` | `--score absolute` |
+|---|---|---|
+| what it measures | drift since the start of the drive | world-frame error through the committed transform |
+| `map -> base_link` rms | 0.138 m | **0.077 m** |
+| max | 0.290 m | **0.146 m** |
+| final | 0.031 m | 0.082 m |
+| parked samples | dropped | **kept** |
+
+The absolute figure is **smaller** than the anchored one, which is worth
+saying plainly because the reverse was expected. The anchored mode pins the
+curve onto one sample at the start of the drive, and yaw noise in that
+single sample rotates everything after it; the absolute mode has no such
+sample. **The absolute max, 0.146 m, is at the registration floor of
+0.141 m** — so this run establishes that SLAM's own `map -> base_link`
+tracked truth to within the instrument's resolution, and nothing finer.
+That is what a floor is for.
+
+### 12.9 What this rebuild does not establish
+
+Everything in §11 still applies unchanged — no WSL evidence, no
+localisation claim, no dwell, one speed, one floor, empty forks, no M4
+command path, and one run with a freshly drawn bias sign.
+
+One thing to add. **The gate leaks during a long idle AFTER a drive**,
+which is a case m5-07d did not test — its 60 s and 240 s idles were both
+from bringup, with the vehicle never having moved. Measured here with
+ground-truth position frozen to 0.0000 m for 180 s:
+
+| idle | span | EKF heading moved | rate |
+|---|---|---|---|
+| **before** the drive | 26.8 s | **+0.01°** | ~0.00 °/min |
+| **after** the drive, whole tail | 200.4 s | **+2.02°** | 0.61 °/min |
+| **after** the drive, excluding the first settling window | 180.7 s | **+0.72°** | 0.24 °/min |
+
+Against the ungated 7.71 °/min m5-07d measured, the gate is removing
+92–97 % of it and not 100 %. The likely mechanism is drive-encoder dither
+under a settled suspension re-opening the 0.50 s standstill window, but
+nothing here confirms it. **It did not affect this map** — the mapping was
+done and the artifacts saved before that idle — but it is exactly the
+regime an AMCL dwell test will sit in, and it is raised as an open
+question to `agv/` in `docs/reports/m5-08d-remap-and-registration.md`.

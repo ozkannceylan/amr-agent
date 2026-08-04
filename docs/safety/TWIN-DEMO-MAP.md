@@ -12,17 +12,21 @@ keeps the recording true.
 | `docs/safety/SRS.md` §3, §4, §5 | The functions, their ATs, the PL targets, the honesty section | **Contract.** If this addendum disagrees, the SRS wins and this one is corrected |
 | `docs/safety/PL-SCENARIOS.md` | The risk-graph derivations behind every PLr quoted below | **Contract.** No parameter is re-derived here |
 | `docs/adr/0009-*.md` | Scope (D1), gate bounds (D2), coupling (D3), fallback (D4), ISO 13849 basis and wording discipline (D5) | **Binding** |
-| `docs/adr/0010-milestone-restructure-forklift-first.md` | The gate order every reference here uses, and what M5 now contains (D2, D7) | **Binding** |
+| `docs/adr/0010-milestone-restructure-forklift-first.md`, **as amended by ADR 0013** | The gate order every reference here uses, and what M5 now contains (D2, D7). ADR 0013 D1 places the vendor-portability gate after M6 and M7 and deliberately assigns it **no number**; `docs/roadmap.md` numbers it **M8** as the single source for gate numbering | **Binding**; `docs/roadmap.md` is the live order and settles any disagreement |
 | `docs/roadmap.md` row M5 | The gate criterion this work does **not** close | **Binding** |
 
-**Gate numbers.** ADR 0010 extends ADR 0009 rather than superseding it: what
-that ADR opened early as cell-scope content on the twin is now M5's own subject
-matter, and M5 absorbs the vehicle chain with it, so **one gate — M5, on the
-forklift twin — carries both the safety layer and autonomy** (ADR 0010 D2, D7).
-AT-01, AT-07 and AT-08 therefore land at M5, and so do AT-02, AT-03 and AT-04,
-which this addendum does not touch (NC-1). SRS §4 carries the per-function
-landing gate; the AT identifiers are unaffected and are used here exactly as the
-SRS writes them.
+**Gate numbers.** They follow ADR 0010 as amended by ADR 0013, with
+`docs/roadmap.md` as the live order. ADR 0010 extends ADR 0009 rather than
+superseding it: what that ADR opened early as cell-scope content on the twin is
+now M5's own subject matter, and M5 absorbs the vehicle chain with it, so **one
+gate — M5, on the forklift twin — carries both the safety layer and autonomy**
+(ADR 0010 D2, D7). ADR 0013 adds the vendor-portability gate after M6 and M7 —
+numbered **M8** by `docs/roadmap.md` — and touches nothing this addendum
+references.
+AT-01, AT-07 and AT-08 therefore land at M5, and so do AT-02, AT-03, AT-04 and
+the sensored gate's AT-10 and AT-11, none of which this addendum touches (NC-1).
+SRS §4 carries the per-function landing gate; the AT identifiers are unaffected
+and are used here exactly as the SRS writes them.
 
 ---
 
@@ -42,7 +46,7 @@ SRS writes them.
 
 | SF | SRS text instantiated | On the twin | PLr floor, and where it is derived | SRS §5 target |
 |---|---|---|---|---|
-| **SF-01** cell e-stop chain | Trigger: *"Any cell e-stop mushroom button actuated … two-channel NC, discrepancy-monitored by the F-CPU"*. Reaction: *"F-CPU de-energizes all fixed-equipment enabling outputs … stop category 0 … ≤ 100 ms"* — **not instantiated** (T4). Safe state: *"`EStopActive` latched (level)"*. Reset: *"Latched until: all buttons unlatched → monitored reset per SF-08"*, no auto-resume | A **single-channel** simulated e-stop F-input, read wire-NC / program-NO, latching `EStopDemand` in F-data; the standard permissive drops and all three setpoints go to `0.0`. The SRS's equipment list — conveyor, door, charger — does not exist on this plant, and neither does the second channel | **d** — SC-01 (S2, F2, P1) and SC-02 (S2, F1, P2); SC-03 is the single-fault scenario Category 3 is claimed for | **Category 3, PL d** |
+| **SF-01** cell e-stop chain | Trigger: *"Any cell e-stop mushroom button actuated … two-channel NC, discrepancy-monitored by the F-CPU"*. Reaction: *"F-CPU de-energizes all fixed-equipment enabling outputs … stop category 0 … ≤ 100 ms"* — **not instantiated** (T4). Safe state: *"`EStopActive` latched (level)"*. Reset: *"Latched until: all buttons unlatched → monitored reset per SF-08"*, no auto-resume | A **single-channel** simulated e-stop F-input, read wire-NC / program-NO, latching `EStopDemand` in F-data; the standard permissive drops and all three setpoints go to `0.0`. The SRS's equipment list — conveyor, door, charger — does not exist on this plant, and neither does the second channel | **d** — SC-01 (S2, F2, P1) and SC-02 (S2, F1, P2); SC-03 is the single-fault scenario the Category 3 **target** exists for | **Category 3, PL d** |
 | **SF-07** zone monitoring, **as a pattern** | Trigger: *"Presence detected in the monitored … zone (safety-rated zone device … on F-I/O) while any fixed equipment in that zone … is enabled"*. Reaction: *"conveyor **stop category 1** (ramp ≤ 500 ms then power removal) … initiated ≤ 100 ms after detection"* — **not instantiated** (T4). Reset: zone clear restores the permission, *"but a trip during an active transfer latches"* | A **marked arena zone** the forklift is driven into, signalled by a zone F-input stand-in, latching `ZoneStopDemand`. Two substitutions, named: the equipment guarded is the twin's own drive, not a conveyor, and what the zone detects is the **machine**, not a person. The twin therefore instantiates the **pattern** — zone occupied → F-latch → motion refused → reset required — and not the hazard SC-10 describes. The latch is unconditional here: there is no transfer to be "active" | **d** — SC-10 (S2, F1, P2) | **Category 3, PL d** |
 | **SF-08** monitored reset, **cell instance** | Trigger: *"Operator actuates the reset device … after the cause of a latched SF has been cleared"*. Reaction: *"signal must rise, be held between 0.2 s and 3 s, and the latch releases on the falling edge"*; high at power-up or longer than 3 s is a stuck actuator, rejected with a reset-fault; *"Reset while any SF trigger is still present is ignored"*. Safe state: *"Reset never energizes anything"* | A reset device stand-in on an **F-input** — never a client write (§6 R1). It clears the F-latches only; motion returns solely on a fresh teleop enable edge. The 2026-07-29 build's level acknowledgement becomes the monitored edge (ADR 0009, consequences) | **d for the hazard** — SC-11 (S2, F1, P2). The hazard is **held by SF-07** at Category 3 / PL d, not by the reset | **PL c**, adequate because a reset starts nothing |
 
@@ -60,9 +64,13 @@ re-argued here and no gap is closed by re-arguing one.
 ## 3. Acceptance sub-cases: in scope, deferred
 
 Nothing below is passed. **In scope** means the T6 demonstration procedure
-exercises it; **deferred** means it lands at M5 proper — the F-I/O half of that
-gate, where the forklift's safety scanners are wired into the F-CPU's F-blocks
-(ADR 0010 D2) — on real F-I/O outputs.
+exercises it; **deferred** means it lands at M5 proper — the F-side half of that
+gate, where the forklift's safety scanners reach the F-CPU's F-blocks (ADR 0010
+D2) by whichever input path brief **m5-03** settles in the tool: ADR 0011 D2's
+primary configured F-DI, or its named standard-DB fallback. **That verdict is not
+presumed here, and no deferral below depends on it** — what defers a sub-case is
+the missing second channel, the missing timed stimulus or the missing output, none
+of which the input path changes.
 
 | Sub-case | The SRS sub-case, in brief | On the twin | Status |
 |---|---|---|---|
@@ -85,12 +93,12 @@ gate, where the forklift's safety scanners are wired into the F-CPU's F-blocks
 
 | # | The twin does **not** claim |
 |---|---|
-| **NC-1** | **SF-02, SF-03, SF-04 and the vehicle instance of SF-08 are out of scope** at this gate (ADR 0009 D1). A vehicle-shaped machine stopping when a zone is entered is **not** SF-03: this plant has no safety laser scanner, no protective or warning field, no STO, no bumper and no onboard safety layer at all. They land at **M5**, with the safety scanners and the navigation stack the forklift acquires there (ADR 0010 D2, D7) — the same gate as the cell-scope functions above, no longer a later one. |
+| **NC-1** | **SF-02, SF-03, SF-04, SF-10, SF-11 and the vehicle instance of SF-08 are out of scope** at this gate (ADR 0009 D1). A vehicle-shaped machine stopping when a zone is entered is **not** SF-03: this plant has no safety laser scanner, no protective or warning field, no STO, no bumper, no safe speed measurement and no onboard safety layer at all — so it is not SF-10 or SF-11 either, and a speed the standard program limits is not safely limited speed. They land at **M5**, with the safety scanners and the navigation stack the forklift acquires there (ADR 0010 D2, D7) — the same gate as the cell-scope functions above, no longer a later one. |
 | **NC-2** | **No achieved PL, anywhere.** Every figure in §2 is a design target derived from judgement about a described cell. No SISTEMA model, no MTTF<sub>D</sub>, DC<sub>avg</sub>, CCF or PFH<sub>D</sub>, no certified component, no ISO 13849-2 validation (SRS §5; `PL-SCENARIOS.md` §0, §5). Simulation demonstrates **acceptance-test logic**. |
-| **NC-3** | **No Category is demonstrated.** Category 3 is a claim about single faults, redundancy and diagnosis; the twin has one stand-in channel and no diagnostics, and AT-01 (c) is deferred. |
+| **NC-3** | **No Category is demonstrated.** A Category 3 target is a requirement about single faults, redundancy and diagnosis; the twin has one stand-in channel and no diagnostics, and AT-01 (c) is deferred. |
 | **NC-4** | **No safety-rated input exists.** Every F-input is an engineering stand-in (§5.2). The demonstration shows what the safety program does with an input, never how the input arrives. |
 | **NC-5** | **No safety reaction path exists** (T4). No de-energization, no stop category, no measured time. Millisecond figures stay design requirements for real hardware. |
-| **NC-6** | **Nothing here is an acceptance test passed, and nothing closes M5** (ADR 0009 D1, D2.3). The M5 criterion additionally requires each AT with its B3 sub-case, the same reactions with the bridge stopped and the OPC UA session down, and the read-only mirrors — and, since ADR 0010 D2 widened M5 to carry autonomy on this same twin, the vehicle-chain tests AT-02, AT-03 and AT-04 with the inhibit demonstrably acting below the navigation stack, closed by a **recorded safety + autonomy showcase**. |
+| **NC-6** | **Nothing here is an acceptance test passed, and nothing closes M5** (ADR 0009 D1, D2.3). The M5 criterion additionally requires each AT with its B3 sub-case, the same reactions with the bridge stopped and the OPC UA session down, and the read-only mirrors — and, since ADR 0010 D2 widened M5 to carry autonomy on this same twin, the vehicle-chain tests AT-02, AT-03, AT-04, AT-10 and AT-11 with the inhibit demonstrably acting below the navigation stack, closed by a **recorded safety + autonomy showcase**. |
 | **NC-7** | **The M3 demonstration cell is unchanged.** Its red mushroom stays a **process stop** (ADR 0004; `PL-SCENARIOS.md` N2). Sharing a CPU with an F-runtime group does not make it part of one, and nothing in that cell may be recorded or labelled as any SF. |
 | **NC-8** | **The lidar obstacle stop and the process reset stay standard-program process logic** (ADR 0008 D3; ADR 0009 D1). The obstacle stop is not SF-07 and not SF-03; the process reset is not SF-08. They never share a tag name, a node, a lamp or a sentence with the F-layer. |
 | **NC-9** | **Link loss stays degraded mode, not a safety event** (invariant 2; SRS B2). The twin's HMI- and bridge-link latches are process logic and are not SF-09 either. |

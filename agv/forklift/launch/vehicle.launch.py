@@ -483,7 +483,9 @@ def generate_launch_description():
     # THE GYRO GATE, between the bridge's IMU and the filter. It publishes
     # /forklift/imu_gated, which is the topic ekf.yaml names, and it
     # forwards every sample unchanged except while the wheel odometry
-    # reports both encoder counts held. It carries use_sim_time for the
+    # reports the wheels standing still - the drive count's spread zero
+    # and the steer count's at most one over a trailing 0.50 s window.
+    # It carries use_sim_time for the
     # same reason the two nodes above do, and for one more: its freshness
     # test compares a simulated stamp against its own clock, and on the
     # system clock it would find every verdict 1.8e9 s stale and gate

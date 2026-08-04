@@ -1,0 +1,95 @@
+<!--
+  navigate_to_pose_tricycle.xml - the forklift's navigate-to-pose tree.
+
+  WHY THIS FILE EXISTS. nav2's default tree,
+  nav2_bt_navigator/navigate_to_pose_w_replanning_and_recovery.xml, ends its
+  recovery RoundRobin with
+
+      <Spin spin_dist="1.57" .../>
+      <Wait wait_duration="5.0"/>
+      <BackUp backup_dist="0.30" backup_speed="0.15" .../>
+
+  and both motion recoveries assume a base this vehicle is not.
+
+  SPIN IS IMPOSSIBLE HERE. It commands angular.z with linear.x = 0. A
+  tricycle's drive wheel stands one wheelbase ahead of the rear axle, so the
+  body cannot rotate without the drive wheel travelling: there is no steer
+  angle and no wheel speed that produces that twist.
+  scripts/cmd_vel_to_tricycle.py REFUSES it rather than faking it - which
+  means that with Spin left in the tree the vehicle would stand still for
+  the whole behaviour and the behaviour would then report success.
+
+  BACKUP IS POSSIBLE AND IS STILL REMOVED, which is the less obvious half.
+  nav2_behaviors' DriveOnHeading publishes linear.x with angular.z = 0 - a
+  straight line, which this vehicle drives in both directions. It is out for
+  three reasons, none of them kinematic:
+
+    - Its collision check simulates a STRAIGHT line from the current pose.
+      The steer axis is wherever the controller last left it and takes up to
+      0.79 s to slew back to centre (90 deg at model.sdf's 2.0 rad/s), so
+      the vehicle drives an ARC through space the check never examined.
+    - 0.30 m is 11 % of this vehicle's 2.735 m length. Sized to actually
+      change the situation it would be metres, and a blind multi-metre
+      reverse with 1.875 m of fork leading is not a thing a 900 kg machine
+      should do because a plan failed.
+    - Reverse here is a PLANNED manoeuvre. The Reeds-Shepp planner emits
+      reverse segments and cusps against the map whenever reverse is the
+      right answer. A blind reverse recovery duplicates that without the
+      map, which is strictly worse.
+
+  WHAT IS LEFT, AND IT IS THE POINT RATHER THAN A LOSS: clear the costmaps,
+  wait, replan - and if it still cannot plan, STOP AND REPORT. A planner
+  that refuses is better than one that silently fails or routes through a
+  rack, and a tree with no motion recovery is what makes the refusal prompt
+  and quiet instead of a machine milling about in an aisle.
+
+  EVERYTHING ELSE IS THE STOCK TREE, deliberately: the 1 Hz replan rate, the
+  six top-level retries, the per-branch costmap clears and the two error
+  codes are nav2's and are not re-argued here.
+
+  THIS FILE CONTAINS NO SAFETY LOGIC. The protective stop, the e-stop chain
+  and safe torque off are onboard and hardwired and appear in no behaviour
+  tree (invariant 1).
+-->
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
+        <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
+            <Sequence>
+              <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+              <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+            </Sequence>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}"/>
+          <Sequence>
+            <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
+            <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+          </Sequence>
+        </RecoveryNode>
+      </PipelineSequence>
+      <Sequence>
+        <Fallback>
+          <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
+          <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+        </Fallback>
+        <ReactiveFallback name="RecoveryFallback">
+          <GoalUpdated/>
+          <RoundRobin name="RecoveryActions">
+            <Sequence name="ClearingActions">
+              <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+              <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+            </Sequence>
+            <Wait wait_duration="5.0"/>
+          </RoundRobin>
+        </ReactiveFallback>
+      </Sequence>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

@@ -1,0 +1,16 @@
+registration  theta -0.007915259 rad  t (+6.029223, +5.541460) m  FLOOR rms 0.0404 MAX 0.1411 m
+goal  world (+7.0000, +7.0000) yaw +0.0000 rad  ->  map (+13.0844, +12.4858) yaw -0.0079 rad
+goal ACCEPTED at t_sim 47.84
+
+RESULT           SUCCEEDED
+error_code       none
+elapsed          11.09 s of simulation time
+plans published  11
+refusals         0 rotation-in-place commands refused by the converter
+final BELIEVED   map (+12.9414, +12.3969) yaw +0.0656
+  carried to world (+6.8577, +6.9099) yaw +0.0735
+final TRUTH      world (+6.8592, +6.9472) yaw +0.0926
+ABSOLUTE goal error (truth vs commanded goal): 0.1503 m (1.07 x floor)
+  heading error +5.306 deg
+wrote /home/user/amr-agent/agv/forklift/evidence/m5-10-c_degenerate-run.csv (111 samples)
+wrote /home/user/amr-agent/agv/forklift/evidence/m5-10-c_degenerate-plan.json

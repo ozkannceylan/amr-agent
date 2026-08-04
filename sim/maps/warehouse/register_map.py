@@ -59,17 +59,23 @@ METHOD, IN FULL, SO IT CAN BE ARGUED WITH
      pose and size, reduced to the INNER FACE - the face nearer the hall
      centre, which is the surface a lidar sees.
   3. For each wall, take the extreme occupied cell per grid row (east and
-     west walls) or per grid column (north and south walls). Keep the
-     points whose extreme coordinate is within --band of the median of
-     that set: that discards rows where the wall was never observed and
-     the extreme is a rack instead. The kept count is printed, so a wall
-     fitted from too few points is visible rather than hidden.
-  4. Solve for theta by scanning it and solving t in closed form at each
+     west walls) or per grid column (north and south walls). EVERY row or
+     column is taken; there is no pre-filter. What is not on the wall is
+     removed by the trimming rule in step 4 and by nothing else.
+  4. THE TRIMMING RULE - a wall is a line. Seed with a repeated-median
+     line (50 % breakdown), drop every extreme further than --trim-cells
+     cells from it, refit by least squares, repeat to convergence. See
+     `fit_line_robust` for why the seed cannot be least squares and what
+     happens when it is. Kept and dropped counts are printed per wall, so
+     a wall fitted from a remnant is visible rather than hidden, and a
+     wall whose survivors fall under --min-points is REFUSED rather than
+     fitted.
+  5. Solve for theta by scanning it and solving t in closed form at each
      step (the objective is quadratic in t and one-dimensional in theta),
-     then refine by ternary search. Report the per-wall rotation as well
-     as the common one: their SPREAD is the grid's internal shear, which a
-     rigid transform cannot absorb and which the residual therefore
-     contains.
+     then refine by ternary search, over the KEPT points only. Report the
+     per-wall rotation as well as the common one: their SPREAD is the
+     grid's internal shear, which a rigid transform cannot absorb and
+     which the residual therefore contains.
 
   Standard library only. No numpy, no yaml module, no ROS.
 
@@ -260,15 +266,26 @@ def _median(values):
     return ordered[mid] if n % 2 else 0.5 * (ordered[mid - 1] + ordered[mid])
 
 
-def extract_wall(mask, width, height, meta, normal, band_m):
-    """Points on one wall, in MAP metres.
+def extract_wall(mask, width, height, meta, normal):
+    """Candidate points on one wall, in MAP metres.
 
-    The wall is the extreme occupied cell in the outward direction: for an
-    east-facing normal, the rightmost occupied cell of each row; for a
-    north-facing normal, the topmost occupied cell of each column. Rows or
-    columns whose extreme is further than `band_m` from the median extreme
-    are dropped - those are lines of sight in which the wall was never
-    observed and the extreme is a rack face instead."""
+    The candidate is the extreme occupied cell in the outward direction:
+    for an east-facing normal, the rightmost occupied cell of each row;
+    for a north-facing normal, the topmost occupied cell of each column.
+
+    EVERY row or column that has an occupied cell contributes one
+    candidate, and NOTHING IS FILTERED HERE. An earlier version of this
+    function kept only the candidates within a fixed distance of the
+    median extreme, which is an axis-aligned band; the walls of this grid
+    are rotated ~1.8 deg from the grid axes, so across the 30 m hall a
+    +-0.60 m band clips 1.05 m of genuine wall - and it clips it at the
+    two ENDS, which are the points that determine the angle best. Measured
+    on the m5-08b grid: the band threw away 82 of 343 real north-wall
+    points and 42 of 404 real south-wall points, and moved the fitted
+    north angle by 0.04 deg. A band cannot be widened out of this, because
+    a band wide enough to hold a tilted wall is wide enough to hold the
+    racking in front of it. Selection is the trimming rule's job
+    (`fit_line_robust`) and no other's."""
     resolution = meta['resolution']
     ox, oy, _ = meta['origin']
 
@@ -294,44 +311,108 @@ def extract_wall(mask, width, height, meta, normal, band_m):
                 if mask[row * width + col]:
                     points.append(to_world(col, row))
                     break
-    if not points:
-        return []
-    axis = 0 if abs(normal[0]) > 0.5 else 1
-    centre = _median([p[axis] for p in points])
-    return [p for p in points if abs(p[axis] - centre) <= band_m]
+    return points
+
+
+def repeated_median_line(points, normal):
+    """Siegel's repeated-median line. Returns (unit normal, offset).
+
+    This is the SEED for the trimming rule, and it is a repeated median
+    rather than anything cheaper because it is the standard fit with a
+    50 % breakdown point: it returns the line the majority of the points
+    lie on even when almost half of them lie on a different surface
+    entirely. Slope = median over i of (median over j of the pairwise
+    slope through i and j); intercept = median of the residual offsets at
+    that slope.
+
+    The wall is parametrised as `d = slope * t + intercept` with t along
+    the wall and d along its normal, which is well conditioned here
+    because the walls are within a couple of degrees of the grid axes -
+    the vertical-line degeneracy of a y-on-x fit cannot be reached.
+
+    O(n^2) in pure Python: ~0.4 s for the 614-point walls of this grid,
+    which is the whole cost of the tool."""
+    axis = 0 if abs(normal[0]) > 0.5 else 1     # along the wall's normal
+    tan = 1 - axis                              # along the wall
+    slopes = []
+    n = len(points)
+    for i in range(n):
+        ti, di = points[i][tan], points[i][axis]
+        inner = []
+        for j in range(n):
+            if i == j:
+                continue
+            tj, dj = points[j][tan], points[j][axis]
+            if abs(tj - ti) < 1e-9:
+                continue
+            inner.append((dj - di) / (tj - ti))
+        if inner:
+            slopes.append(_median(inner))
+    if not slopes:
+        return None
+    slope = _median(slopes)
+    intercept = _median([p[axis] - slope * p[tan] for p in points])
+    vec = (-slope, 1.0) if axis == 1 else (1.0, -slope)
+    length = math.hypot(vec[0], vec[1])
+    vec = (vec[0] / length, vec[1] / length)
+    if vec[0] * normal[0] + vec[1] * normal[1] < 0.0:
+        vec = (-vec[0], -vec[1])
+    on_line = (intercept, 0.0) if axis == 0 else (0.0, intercept)
+    return vec, vec[0] * on_line[0] + vec[1] * on_line[1]
 
 
 def fit_line_robust(points, normal, resolution, min_points, tolerance_cells):
     """Fit a wall line, discarding what is not on the wall.
 
-    THE BAND FILTER IS NOT ENOUGH AND THIS IS WHY. Rack row A stands
-    against the north wall and the dock stations against the south, so in
-    every column where the wall itself was never observed the extreme
-    occupied cell is a rack or a station face a few tens of centimetres in
-    front of it. Those points are not noise on the wall - they are a
-    different surface - and averaging them in tilts the fitted line and
-    inflates the residual with a quantity that is not registration error.
-    Measured on the m5-08b grid, leaving them in fitted the north wall with
-    an rms of 0.304 m (six cells) and turned its apparent rotation the
-    wrong way.
+    WHAT IS BEING DISCARDED. Rack row A stands against the north wall and
+    the dock stations against the south, so in every column where the wall
+    itself was never observed the extreme occupied cell is a rack or a
+    station face a few tens of centimetres in front of it. Those points
+    are not noise on the wall - they are a different surface - and
+    averaging them in tilts the fitted line and inflates the residual with
+    a quantity that is not registration error. Measured on the m5-08b
+    grid, leaving them in fitted the north wall with an rms of 0.304 m
+    (six cells) and turned its apparent rotation the wrong way, -1.32 deg
+    against +1.81 deg on the east and west walls.
 
-    THE RULE, STATED ONCE AND APPLIED TO ALL FOUR WALLS EQUALLY: fit, drop
-    every point further than `tolerance_cells` cells from the fitted line,
-    refit, repeat until the kept set stops changing. No wall gets its own
-    tolerance and no point is removed by hand. If the survivors fall under
-    `min_points` the wall is refused rather than fitted, because a line
-    through the few points that happen to agree is not a measurement of a
-    wall.
+    THE RULE, STATED ONCE AND APPLIED TO ALL FOUR WALLS EQUALLY: seed with
+    a repeated-median line, drop every point further than
+    `tolerance_cells` cells from the current line, refit by least squares,
+    repeat until the kept set stops changing. No wall gets its own
+    tolerance, no wall gets its own seed, and no point is removed by hand.
+    If the survivors fall under `min_points` the wall is REFUSED rather
+    than fitted, because a line through the few points that happen to
+    agree is not a measurement of a wall.
 
-    Returns (normal, offset, rms, kept_points, dropped)."""
+    THE SEED CANNOT BE LEAST SQUARES, AND THIS IS THE MEASUREMENT THAT
+    SAYS SO. A least-squares seed is dragged towards the contaminating
+    surface, and the trim then converges onto THAT surface and reports a
+    tight fit to it. On the m5-08b north wall, seeded by least squares and
+    trimmed at 2, 3, 4 and 6 cells, this function returns -1.61, -1.80,
+    -1.43 and -1.32 deg - the sign of the racking, not of the building -
+    with an rms as low as 0.0295 m. A small residual against the wrong
+    surface is the worst failure available here, because it looks like
+    success. Seeded by the repeated median the same four tolerances return
+    +1.69, +1.69, +1.69 and +1.69 deg at an rms of 0.021-0.026 m,
+    agreeing with the east and west walls to within the grid's own shear.
+
+    CHOOSING `tolerance_cells`. It must be larger than the wall's own
+    scatter, so that a converged fit is not cut off by its own threshold,
+    and smaller than the standoff of the nearest non-wall surface. On this
+    grid the wall scatter is ~0.02 m rms and rack row A stands 0.35-0.55 m
+    off the north wall, so anything from 2 to 6 cells (0.10-0.30 m) is
+    inside that window - and across that whole window the fitted angle
+    moves by less than 0.01 deg. The default of 3 cells (0.15 m) is the
+    middle of it. The choice is therefore not load-bearing; the SEED is.
+
+    Returns (normal, offset, rms, kept_points, dropped) or None."""
     tolerance = tolerance_cells * resolution
+    seed = repeated_median_line(points, normal)
+    if seed is None:
+        return None
+    unit, offset = seed
     kept = list(points)
-    dropped = 0
     for _ in range(20):
-        fit = fit_line(kept, normal)
-        if fit is None:
-            break
-        unit, offset, _ = fit
         survivors = [p for p in kept
                      if abs(unit[0] * p[0] + unit[1] * p[1] - offset)
                      <= tolerance]
@@ -339,12 +420,15 @@ def fit_line_robust(points, normal, resolution, min_points, tolerance_cells):
             break
         if len(survivors) == len(kept):
             break
-        dropped += len(kept) - len(survivors)
         kept = survivors
+        fit = fit_line(kept, normal)
+        if fit is None:
+            break
+        unit, offset = fit[0], fit[1]
     fit = fit_line(kept, normal)
     if fit is None:
         return None
-    return fit[0], fit[1], fit[2], kept, dropped
+    return fit[0], fit[1], fit[2], kept, len(points) - len(kept)
 
 
 def fit_line(points, normal):
@@ -490,12 +574,16 @@ def write_registration(path, record):
     for key in ('residual_rms_m', 'residual_max_m', 'shear_deg'):
         lines.append('{}: {:.6f}\n'.format(key, record[key]))
     lines.append('n_wall_points: {}\n'.format(record['n_wall_points']))
-    lines.append('\n# per wall: points, own rotation from the building, and\n'
-                 '# max residual against the common transform\n')
+    lines.append('trim_cells: {}\n'.format(record['trim_cells']))
+    lines.append('\n# per wall: extremes taken, extremes kept by the trimming\n'
+                 '# rule, its own rotation from the building, and max\n'
+                 '# residual against the common transform\n')
     lines.append('walls:\n')
     for wall in record['walls']:
         lines.append('  - name: {}\n'.format(wall['name']))
+        lines.append('    extremes: {}\n'.format(wall['extremes']))
         lines.append('    points: {}\n'.format(wall['points']))
+        lines.append('    dropped: {}\n'.format(wall['dropped']))
         lines.append('    angle_deg: {:.4f}\n'.format(wall['angle_deg']))
         lines.append('    fit_rms_m: {:.4f}\n'.format(wall['fit_rms_m']))
         lines.append('    residual_max_m: {:.4f}\n'.format(
@@ -600,30 +688,54 @@ def cmd_derive(args):
                     '+'.join(entry['names']), entry['offset'], offset))
 
     walls = []
-    print('| wall | models | points kept | fit rms | own rotation |')
-    print('|---|---|---|---|---|')
+    print('Trimming rule: a wall is a line. Seed with a repeated-median fit')
+    print('(50 % breakdown), drop every extreme further than {} cells '
+          '({:.3f} m)'.format(args.trim_cells, args.trim_cells *
+                              meta['resolution']))
+    print('from it, refit, repeat to convergence. Applied to all four walls')
+    print('identically. See fit_line_robust for why the seed is not least')
+    print('squares.')
+    print('')
+    print('| wall | models | extremes | kept | dropped | fit rms | '
+          'own rotation |')
+    print('|---|---|---|---|---|---|---|')
     rows = []
     for key in sorted(sides):
         entry = sides[key]
         normal = entry['normal']
-        points = extract_wall(mask, width, height, meta, normal, args.band)
+        label = '+'.join(entry['names'])
+        points = extract_wall(mask, width, height, meta, normal)
         if len(points) < args.min_points:
             raise SystemExit(
-                'wall {} yielded {} points within {:.2f} m of its median '
-                'extreme, under the --min-points floor of {}. This grid does '
-                'not contain enough of that wall to register against.'.format(
-                    '+'.join(entry['names']), len(points), args.band,
-                    args.min_points))
-        fit = fit_line(points, normal)
-        own = math.atan2(fit[0][1], fit[0][0]) - math.atan2(normal[1],
-                                                            normal[0])
+                'wall {} yielded only {} extreme cells, under the '
+                '--min-points floor of {}. This grid does not contain '
+                'enough of that wall to register against.'.format(
+                    label, len(points), args.min_points))
+        robust = fit_line_robust(points, normal, meta['resolution'],
+                                 args.min_points, args.trim_cells)
+        if robust is None:
+            raise SystemExit('wall {}: no line could be fitted'.format(label))
+        unit, offset, rms, kept, dropped = robust
+        if len(kept) < args.min_points:
+            raise SystemExit(
+                'wall {}: the trimming rule left {} of {} extremes, under '
+                'the --min-points floor of {}. A line through the few points '
+                'that happen to agree is not a measurement of a wall, so '
+                'this wall is REFUSED rather than fitted. Either the grid '
+                'does not contain this wall or --trim-cells is too '
+                'tight.'.format(label, len(kept), len(points),
+                                args.min_points))
+        own = math.atan2(unit[1], unit[0]) - math.atan2(normal[1], normal[0])
         own = math.atan2(math.sin(own), math.cos(own))
-        label = '+'.join(entry['names'])
-        rows.append((label, len(points), fit[2], math.degrees(own)))
-        print('| {} | {} | {} | {:.3f} m | {:+.4f} deg |'.format(
-            _side_name(normal), label, len(points), fit[2],
+        rows.append((label, len(kept), rms, math.degrees(own), len(points),
+                     dropped))
+        print('| {} | {} | {} | {} | {} | {:.4f} m | {:+.4f} deg |'.format(
+            _side_name(normal), label, len(points), len(kept), dropped, rms,
             math.degrees(own)))
-        walls.append((label, normal, entry['offset'], points))
+        # The TRIMMED set is what the transform is solved over. Feeding the
+        # untrimmed set here would put the racking back into the residual
+        # after the fit had just removed it from the angle.
+        walls.append((label, normal, entry['offset'], kept))
 
     angles = [row[3] for row in rows]
     shear = max(angles) - min(angles)
@@ -663,6 +775,8 @@ def cmd_derive(args):
         wall_records.append({
             'name': label,
             'points': row[1],
+            'extremes': row[4],
+            'dropped': row[5],
             'angle_deg': row[3],
             'fit_rms_m': row[2],
             'residual_max_m': wall_max,
@@ -685,6 +799,7 @@ def cmd_derive(args):
         'residual_max_m': worst,
         'shear_deg': shear,
         'n_wall_points': total,
+        'trim_cells': args.trim_cells,
         'walls': wall_records,
     }
     if args.write:
@@ -744,11 +859,19 @@ def build_parser():
     der.add_argument('--write', action='store_true',
                      help='write the registration file. Without this the '
                           'tool prints and commits nothing')
-    der.add_argument('--band', type=float, default=0.60,
-                     help='keep wall points within this of the median '
-                          'extreme, m (default: %(default)s)')
+    der.add_argument('--trim-cells', type=float, default=3.0,
+                     help='THE TRIMMING RULE. Drop every extreme further '
+                          'than this many cells from the fitted wall line, '
+                          'refit, repeat to convergence (default: '
+                          '%(default)s cells = 0.15 m at 0.05 m/cell). Must '
+                          'sit above the wall\'s own scatter and below the '
+                          'standoff of the nearest non-wall surface; on '
+                          'this building anything from 2 to 6 moves the '
+                          'fitted angle by under 0.01 deg')
     der.add_argument('--min-points', type=int, default=100,
-                     help='refuse to register a wall with fewer points')
+                     help='REFUSE a wall whose extremes, or whose survivors '
+                          'of the trimming rule, fall under this count '
+                          '(default: %(default)s)')
     der.set_defaults(func=cmd_derive)
 
     show = sub.add_parser('show', help='print a committed registration')

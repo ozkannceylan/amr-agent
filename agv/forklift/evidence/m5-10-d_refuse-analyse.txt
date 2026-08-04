@@ -1,0 +1,19 @@
+==========================================================================
+nav2_run analyse   m5-10-d_refuse-run.csv
+==========================================================================
+FLOOR   registration residual rms 0.0404 m, MAX 0.1411 m
+samples 905   simulation span 90.74 s
+status  ABORTED   error_code 208   plans 0   refusals 0
+
+THE DRIVE
+  ground-truth path      0.000 m
+  command sign           0 forward / 0 reverse / 905 at rest
+  rotation-in-place      0 refused over the run
+
+THE GOAL
+  commanded (world)      (+5.0000, +9.0000) yaw +0.0000 rad
+  reached   (truth)      (-4.5000, +7.0000) yaw -0.0000 rad
+  ABSOLUTE position error 9.7082 m (68.80 x floor)
+  heading error           -0.000 deg
+  BELIEVED error (map)    9.7082 m, heading +0.000 deg
+  belief vs truth         the vehicle thought it was 9.7082 m from the goal and was really 9.7082 m

@@ -1,0 +1,98 @@
+# d_forward
+
+SCORED ABSOLUTELY. Every `map` pose below was carried into the world
+frame through the COMMITTED transform, derived from the map's walls
+before this run existed. NO PER-RUN ANCHORING ANYWHERE.
+
+    sim/maps/warehouse/warehouse_registration.yaml
+    theta = -0.007915259 rad = -0.453511 deg,  t = (+6.029223, +5.541460) m
+    grid md5 verified by register_map.load_registration()
+
+*** FLOOR: registration residual 0.0404 m rms, 0.1411 m MAX.
+    No figure at or below 0.1411 m is a measurement of AMCL. It is
+    reported as "at the instrument's resolution", never as a smaller number.
+
+THE REFERENCE IS EXACT. `truth_*` is the simulator's own pose of the
+model (gz OdometryPublisher), not an estimate of it, so it carries no
+error of its own and every figure below is attributable to the
+localization chain: navigation lidar -> AMCL, EKF -> AMCL, against the
+frozen committed grid. It reaches NO estimator.
+
+samples                  324
+samples with a map pose  324
+samples scored           324
+simulation time          32.1 s
+ground-truth path        8.52 m
+ground truth start       (+1.000, +7.000) yaw -0.00 deg
+ground truth end         (+9.519, +6.973) yaw -0.20 deg
+
+## Whole run, absolute error of map -> base_link
+
+  rms    0.118 m  AT THE INSTRUMENT'S RESOLUTION (floor 0.141 m)
+  max    0.176 m  (floor 0.141 m)
+  mean   0.092 m  AT THE INSTRUMENT'S RESOLUTION (floor 0.141 m)
+  min    0.000 m  AT THE INSTRUMENT'S RESOLUTION (floor 0.141 m)
+  first  0.000 m  AT THE INSTRUMENT'S RESOLUTION (floor 0.141 m)
+  final  0.176 m  (floor 0.141 m)
+  heading  final -1.576 deg, max |2.308| deg, rms 1.094 deg
+
+## Motion phases, segmented from GROUND TRUTH alone
+
+A phase is standing still when the reference moves less than 0.020 m/s
+over a 1.0 s window. The reference is exact, so this is a fact about
+the vehicle and not a verdict about an estimate.
+
+| phase | state | sim s | seconds | error mean | error max | error end | heading end |
+|---|---|---|---|---|---|---|---|
+| 1 | STILL | 0.0 | 6.3 | 0.000 m | 0.000 m | 0.000 m | +0.000 deg |
+| 2 | MOVING | 6.4 | 15.2 | 0.073 m | 0.168 m | 0.144 m | -1.474 deg |
+| 3 | STILL | 21.7 | 10.5 | 0.175 m | 0.176 m | 0.176 m | -1.576 deg |
+
+## Apportionment per commanded leg
+
+  --- settle -> forward through East A  (4.0 s) ---
+  APPORTIONED over the commanded window (4.0 s):
+    total heading, map -> base_link      +0.0000 deg
+    of which AMCL, map -> odom           +0.0000 deg  (0.0000 m, 0 correction(s))
+    of which the EKF, odom -> base_link  +0.0000 deg  <- WHAT AMCL WAS HANDED
+    real body rotation, ground truth     +0.0000 deg
+
+  --- forward through East A -> stop  (14.2 s) ---
+  APPORTIONED over the commanded window (14.2 s):
+    total heading, map -> base_link      -0.6865 deg
+    of which AMCL, map -> odom           -3.6078 deg  (0.4035 m, 28 correction(s))
+    of which the EKF, odom -> base_link  +2.9213 deg  <- WHAT AMCL WAS HANDED
+    real body rotation, ground truth     -0.1952 deg
+
+  --- stop -> END  (8.0 s) ---
+  APPORTIONED over the commanded window (8.0 s):
+    total heading, map -> base_link      -1.0980 deg
+    of which AMCL, map -> odom           +0.0000 deg  (0.0000 m, 0 correction(s))
+    of which the EKF, odom -> base_link  -1.0980 deg  <- WHAT AMCL WAS HANDED
+    real body rotation, ground truth     +0.0000 deg
+
+
+## Corrections to map -> forklift/odom
+
+Steps above 0.050 m or 0.50 deg between consecutive samples.
+
+       8.0 s  0.017 m  +1.24 deg  at truth (+1.64, +7.00)
+       8.5 s  0.011 m  +0.88 deg  at truth (+1.94, +7.00)
+       9.5 s  0.020 m  +1.02 deg  at truth (+2.54, +7.00)
+      10.0 s  0.024 m  +1.12 deg  at truth (+2.84, +7.00)
+      10.5 s  0.081 m  +2.39 deg  at truth (+3.14, +6.99)
+      11.0 s  0.022 m  +0.81 deg  at truth (+3.44, +6.99)
+      11.5 s  0.051 m  +0.26 deg  at truth (+3.74, +6.99)
+      12.4 s  0.044 m  +0.62 deg  at truth (+4.31, +6.99)
+      12.9 s  0.070 m  +1.32 deg  at truth (+4.61, +6.99)
+      13.5 s  0.089 m  +1.32 deg  at truth (+4.97, +6.99)
+      13.9 s  0.053 m  +0.88 deg  at truth (+5.21, +6.99)
+      14.5 s  0.096 m  +1.17 deg  at truth (+5.57, +6.99)
+      15.0 s  0.131 m  +1.63 deg  at truth (+5.87, +6.99)
+      15.5 s  0.104 m  +1.29 deg  at truth (+6.17, +6.98)
+      16.0 s  0.056 m  +0.68 deg  at truth (+6.47, +6.98)
+      16.5 s  0.068 m  +0.70 deg  at truth (+6.77, +6.98)
+      18.5 s  0.051 m  +0.34 deg  at truth (+7.97, +6.98)
+      20.5 s  0.153 m  +1.07 deg  at truth (+9.14, +6.97)
+
+total steps above threshold: 18, largest single step 0.1529 m

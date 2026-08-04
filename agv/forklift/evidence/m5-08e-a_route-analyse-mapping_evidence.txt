@@ -1,0 +1,301 @@
+# Localisation run, scored ABSOLUTELY
+
+Every `map` pose below was carried into the world frame through the
+COMMITTED transform, derived from the map's walls before this run:
+
+    sim/maps/warehouse/warehouse_registration.yaml
+    theta = -0.007915 rad = -0.4535 deg,  t = (+6.0292, +5.5415) m
+    grid md5 verified: this transform belongs to this map
+
+NO PER-RUN ANCHORING WAS APPLIED ANYWHERE. A constant error stays a
+constant error. 1880 of 1882 samples carry a map pose.
+
+*** FLOOR: the registration's own residual is 0.0404 m rms, 0.1411 m max.
+    No error below that is a measurement of the localiser; it is a
+    measurement of how well a rigid transform fits a sheared grid.
+
+The EKF is NOT scored in this mode. `forklift/odom` has no derived
+registration to the world - only `map` does - and asserting one from
+the spawn pose is exactly the thing this mode exists to stop.
+
+parked before the drive     4.2 s, absolute error mean 0.001 m, max 0.019 m  (KEPT, not dropped)
+parked  after the drive     4.1 s, absolute error mean 0.088 m, max 0.093 m  (KEPT, not dropped)
+
+parked before the drive     4.4 s, EKF heading moved   +0.01 deg  (+0.00004 rad/s at rest)
+parked  after the drive     4.1 s, EKF heading moved   +0.26 deg  (+0.00109 rad/s at rest)
+samples scored           1882  (whole recording; parked samples KEPT)
+samples with a SLAM pose 1880
+simulation time          187.3 s
+ground-truth path        107.68 m
+ground-truth turning     918.0 deg (1 s stride)
+
+NOTHING BELOW IS ANCHORED. Every error is an ABSOLUTE world-frame
+error, taken through the committed transform above, floor 0.1411 m.
+
+## Whole-run error against ground truth
+
+| estimate | final |dx,dy| | final heading | max |dx,dy| | rms |dx,dy| |
+|---|---|---|---|---|
+| map -> base_link, ABSOLUTE | 0.093 m | -1.23 deg | 0.263 m | 0.124 m |
+
+## The three named degenerate stretches
+
+Extents read from WAREHOUSE_LANDMARKS.md section 5 at run time.
+`along-x` is the error component ALONG the aisle, which is the
+direction those stretches carry no information in.
+
+| stretch | pass | samples | seconds | entry along-x | exit along-x | growth | max across-y | heading at exit |
+|---|---|---|---|---|---|---|---|---|
+| **East A** | 1 | 63 | 6.2 s | -0.085 m | +0.002 m | +0.087 m | 0.060 m | -1.69 deg |
+| **East B** | 1 | 50 | 4.9 s | -0.104 m | -0.029 m | +0.076 m | 0.031 m | +0.02 deg |
+| **East B** | 2 | 50 | 4.8 s | -0.132 m | +0.020 m | +0.151 m | 0.035 m | -0.39 deg |
+| **East dock** | 1 | 70 | 6.8 s | +0.045 m | +0.002 m | -0.043 m | 0.138 m | +2.44 deg |
+
+## Corrections to map -> forklift/odom
+
+A loop closure re-optimises the graph and moves map -> odom in one
+step. Steps above 0.050 m or 0.50 deg between consecutive
+samples are listed; continuous scan matching moves this transform
+smoothly and produces none.
+
+| sim time | step | heading step | at ground truth | on |
+|---|---|---|---|---|
+| 4.7 s | 0.003 m | +0.56 deg | (-5.69, -5.50) | dock aisle west |
+| 5.5 s | 0.017 m | +0.65 deg | (-5.05, -5.50) | dock aisle west |
+| 5.9 s | 0.011 m | +0.88 deg | (-4.73, -5.50) | dock aisle west |
+| 6.3 s | 0.004 m | +0.69 deg | (-4.41, -5.51) | dock aisle west |
+| 7.8 s | 0.043 m | +1.13 deg | (-3.13, -5.51) | dock aisle west |
+| 8.2 s | 0.031 m | +0.50 deg | (-2.81, -5.51) | dock aisle west |
+| 8.6 s | 0.059 m | +0.59 deg | (-2.49, -5.51) | dock aisle west |
+| 10.3 s | 0.047 m | +0.54 deg | (-1.17, -5.52) | dock aisle cross aisle mouth |
+| 10.7 s | 0.067 m | +0.61 deg | (-0.85, -5.52) | dock aisle cross aisle mouth |
+| 11.1 s | 0.092 m | +0.93 deg | (-0.57, -5.52) | dock aisle cross aisle mouth |
+| 11.5 s | 0.080 m | +0.86 deg | (-0.25, -5.52) | dock aisle cross aisle mouth |
+| 12.2 s | 0.082 m | +0.62 deg | (+0.39, -5.53) | dock aisle cross aisle mouth |
+| 12.6 s | 0.109 m | +1.03 deg | (+0.67, -5.53) | dock aisle cross aisle mouth |
+| 14.3 s | 0.071 m | +0.43 deg | (+2.03, -5.53) | East dock |
+| 14.7 s | 0.097 m | +0.85 deg | (+2.35, -5.53) | East dock |
+| 15.1 s | 0.120 m | +0.99 deg | (+2.67, -5.52) | East dock |
+| 16.3 s | 0.075 m | +0.38 deg | (+3.59, -5.52) | East dock |
+| 17.5 s | 0.085 m | +0.42 deg | (+4.59, -5.51) | East dock |
+| 17.9 s | 0.114 m | +0.57 deg | (+4.91, -5.51) | East dock |
+| 18.3 s | 0.251 m | +1.43 deg | (+5.23, -5.50) | East dock |
+| 18.7 s | 0.083 m | +0.34 deg | (+5.55, -5.50) | East dock |
+| 19.8 s | 0.057 m | +0.33 deg | (+6.43, -5.49) | East dock |
+| 20.3 s | 0.093 m | +0.48 deg | (+6.83, -5.49) | dock aisle east |
+| 21.4 s | 0.152 m | +0.72 deg | (+7.71, -5.48) | dock aisle east |
+| 22.3 s | 0.182 m | +0.71 deg | (+8.47, -5.48) | dock aisle east |
+| 22.7 s | 0.069 m | +0.29 deg | (+8.75, -5.47) | dock aisle east |
+| 23.1 s | 0.255 m | +1.03 deg | (+9.07, -5.47) | dock aisle east |
+| 23.5 s | 0.308 m | +1.11 deg | (+9.39, -5.47) | dock aisle east |
+| 23.9 s | 0.183 m | +0.72 deg | (+9.71, -5.47) | dock aisle east |
+| 24.7 s | 0.234 m | +0.86 deg | (+10.35, -5.46) | dock aisle east |
+| 25.5 s | 0.051 m | +0.14 deg | (+10.99, -5.45) | dock aisle east |
+| 25.9 s | 0.257 m | +0.86 deg | (+11.31, -5.45) | dock aisle east |
+| 26.6 s | 0.212 m | +0.68 deg | (+11.55, -5.39) | dock aisle east |
+| 27.6 s | 0.101 m | +0.34 deg | (+11.78, -5.23) | dock aisle east |
+| 29.5 s | 0.268 m | +0.85 deg | (+12.08, -4.80) | dock aisle east |
+| 30.4 s | 0.570 m | +1.94 deg | (+12.16, -4.56) | dock aisle east |
+| 31.3 s | 0.135 m | +0.45 deg | (+12.21, -4.32) | east end aisle |
+| 32.2 s | 0.152 m | +0.39 deg | (+12.23, -4.04) | east end aisle |
+| 33.0 s | 0.530 m | +1.65 deg | (+12.22, -3.79) | east end aisle |
+| 33.8 s | 0.357 m | +1.10 deg | (+12.20, -3.53) | east end aisle |
+| 34.6 s | 0.099 m | +0.27 deg | (+12.17, -3.26) | east end aisle |
+| 35.1 s | 0.146 m | +0.47 deg | (+12.11, -2.95) | east end aisle |
+| 36.3 s | 0.115 m | +0.27 deg | (+11.91, -2.01) | east end aisle |
+| 36.7 s | 0.085 m | +0.25 deg | (+11.86, -1.70) | east end aisle |
+| 37.1 s | 0.123 m | +0.45 deg | (+11.83, -1.38) | east end aisle |
+| 37.5 s | 0.276 m | +0.90 deg | (+11.82, -1.06) | aisle B east |
+| 38.3 s | 0.170 m | +0.54 deg | (+11.80, -0.43) | aisle B east |
+| 38.7 s | 0.141 m | +0.45 deg | (+11.81, -0.11) | aisle B east |
+| 39.2 s | 0.134 m | +0.43 deg | (+11.79, +0.15) | aisle B east |
+| 40.0 s | 0.198 m | +0.55 deg | (+11.70, +0.41) | aisle B east |
+| 41.0 s | 0.701 m | +2.12 deg | (+11.52, +0.62) | aisle B east |
+| 42.0 s | 0.368 m | +1.06 deg | (+11.31, +0.78) | aisle B east |
+| 42.9 s | 0.128 m | +0.35 deg | (+11.07, +0.89) | aisle B east |
+| 43.8 s | 0.524 m | +1.59 deg | (+10.81, +0.96) | aisle B east |
+| 44.7 s | 0.336 m | +0.98 deg | (+10.54, +0.99) | aisle B east |
+| 45.6 s | 0.289 m | +0.93 deg | (+10.27, +1.00) | aisle B east |
+| 47.2 s | 0.110 m | +0.35 deg | (+9.75, +0.95) | aisle B east |
+| 48.0 s | 0.424 m | +1.44 deg | (+9.40, +0.89) | aisle B east |
+| 48.4 s | 0.156 m | +0.43 deg | (+9.09, +0.82) | aisle B east |
+| 48.8 s | 0.151 m | +0.48 deg | (+8.78, +0.74) | aisle B east |
+| 49.2 s | 0.059 m | +0.04 deg | (+8.47, +0.68) | aisle B east |
+| 50.0 s | 0.194 m | +0.68 deg | (+7.84, +0.59) | aisle B east |
+| 50.3 s | 0.063 m | +0.24 deg | (+7.60, +0.57) | aisle B east |
+| 50.7 s | 0.198 m | +0.77 deg | (+7.28, +0.55) | East B |
+| 51.6 s | 0.071 m | +0.32 deg | (+6.57, +0.55) | East B |
+| 51.9 s | 0.136 m | +0.48 deg | (+6.33, +0.55) | East B |
+| 52.3 s | 0.288 m | +1.26 deg | (+6.01, +0.56) | East B |
+| 52.7 s | 0.164 m | +0.71 deg | (+5.65, +0.57) | East B |
+| 53.1 s | 0.096 m | +0.48 deg | (+5.33, +0.59) | East B |
+| 53.5 s | 0.251 m | +1.20 deg | (+5.01, +0.60) | East B |
+| 54.4 s | 0.229 m | +1.10 deg | (+4.37, +0.63) | East B |
+| 54.8 s | 0.271 m | +1.33 deg | (+4.05, +0.65) | East B |
+| 55.2 s | 0.059 m | +0.24 deg | (+3.73, +0.67) | East B |
+| 55.6 s | 0.094 m | +0.48 deg | (+3.41, +0.68) | aisle B east |
+| 56.0 s | 0.067 m | +0.43 deg | (+3.09, +0.70) | aisle B east |
+| 56.8 s | 0.203 m | +1.23 deg | (+2.45, +0.72) | aisle B east |
+| 57.6 s | 0.054 m | +0.06 deg | (+1.81, +0.72) | aisle B cross aisle mouth |
+| 58.0 s | 0.054 m | +0.40 deg | (+1.49, +0.71) | aisle B cross aisle mouth |
+| 58.3 s | 0.084 m | +0.50 deg | (+1.17, +0.71) | aisle B cross aisle mouth |
+| 58.8 s | 0.097 m | +0.50 deg | (+0.85, +0.70) | aisle B cross aisle mouth |
+| 59.5 s | 0.118 m | +0.80 deg | (+0.21, +0.69) | aisle B cross aisle mouth |
+| 59.9 s | 0.055 m | +0.44 deg | (-0.11, +0.68) | aisle B cross aisle mouth |
+| 60.3 s | 0.114 m | +0.85 deg | (-0.43, +0.67) | aisle B cross aisle mouth |
+| 60.7 s | 0.058 m | +0.49 deg | (-0.75, +0.67) | aisle B cross aisle mouth |
+| 61.2 s | 0.065 m | +0.36 deg | (-1.11, +0.66) | aisle B cross aisle mouth |
+| 61.6 s | 0.063 m | +0.16 deg | (-1.43, +0.65) | aisle B west |
+| 62.0 s | 0.064 m | +0.58 deg | (-1.75, +0.64) | aisle B west |
+| 63.2 s | 0.053 m | +0.41 deg | (-2.71, +0.61) | aisle B west |
+| 65.5 s | 0.065 m | +0.62 deg | (-4.59, +0.58) | aisle B west |
+| 65.9 s | 0.071 m | +0.84 deg | (-4.91, +0.59) | aisle B west |
+| 67.5 s | 0.077 m | +0.40 deg | (-6.18, +0.61) | aisle B west |
+| 68.0 s | 0.060 m | +1.11 deg | (-6.50, +0.61) | aisle B west |
+| 68.8 s | 0.064 m | +0.88 deg | (-7.14, +0.63) | aisle B west |
+| 69.2 s | 0.082 m | +0.67 deg | (-7.46, +0.63) | aisle B west |
+| 71.6 s | 0.064 m | +0.85 deg | (-9.38, +0.68) | aisle B west |
+| 72.8 s | 0.057 m | +0.56 deg | (-10.34, +0.70) | aisle B west |
+| 74.7 s | 0.054 m | +0.56 deg | (-11.57, +0.78) | aisle B west |
+| 75.7 s | 0.121 m | +0.94 deg | (-11.81, +0.95) | aisle B west |
+| 76.6 s | 0.127 m | +0.99 deg | (-11.97, +1.14) | aisle B west |
+| 78.6 s | 0.206 m | +1.52 deg | (-12.18, +1.65) | west end aisle |
+| 79.6 s | 0.068 m | +0.35 deg | (-12.23, +1.94) | west end aisle |
+| 82.1 s | 0.198 m | +1.43 deg | (-12.20, +2.74) | west end aisle |
+| 82.9 s | 0.068 m | +0.45 deg | (-12.15, +3.04) | west end aisle |
+| 83.3 s | 0.077 m | +0.24 deg | (-12.09, +3.35) | west end aisle |
+| 84.1 s | 0.135 m | +0.55 deg | (-11.95, +3.97) | west end aisle |
+| 84.5 s | 0.174 m | +0.92 deg | (-11.89, +4.28) | west end aisle |
+| 84.9 s | 0.200 m | +0.98 deg | (-11.85, +4.60) | west end aisle |
+| 85.3 s | 0.299 m | +1.79 deg | (-11.83, +4.92) | west end aisle |
+| 85.7 s | 0.080 m | +0.62 deg | (-11.81, +5.23) | west end aisle |
+| 86.1 s | 0.085 m | +0.36 deg | (-11.81, +5.55) | aisle A west |
+| 87.3 s | 0.178 m | +0.95 deg | (-11.80, +6.49) | aisle A west |
+| 89.1 s | 0.372 m | +1.88 deg | (-11.54, +6.96) | aisle A west |
+| 90.1 s | 0.131 m | +0.62 deg | (-11.32, +7.13) | aisle A west |
+| 92.1 s | 0.365 m | +1.78 deg | (-10.76, +7.33) | aisle A west |
+| 93.1 s | 0.231 m | +1.21 deg | (-10.49, +7.35) | aisle A west |
+| 93.9 s | 0.062 m | +0.22 deg | (-10.24, +7.35) | aisle A west |
+| 96.9 s | 0.265 m | +1.25 deg | (-8.81, +7.11) | aisle A west |
+| 97.3 s | 0.106 m | +0.56 deg | (-8.51, +7.04) | aisle A west |
+| 98.1 s | 0.123 m | +0.73 deg | (-7.87, +6.94) | aisle A west |
+| 98.5 s | 0.059 m | +0.31 deg | (-7.56, +6.92) | aisle A west |
+| 99.0 s | 0.225 m | +1.00 deg | (-7.24, +6.90) | aisle A west |
+| 99.4 s | 0.212 m | +1.05 deg | (-6.92, +6.90) | aisle A west |
+| 99.8 s | 0.085 m | +0.26 deg | (-6.60, +6.90) | aisle A west |
+| 100.2 s | 0.186 m | +0.96 deg | (-6.28, +6.90) | aisle A west |
+| 100.6 s | 0.083 m | +0.29 deg | (-5.96, +6.91) | aisle A west |
+| 101.0 s | 0.062 m | +0.24 deg | (-5.64, +6.92) | aisle A west |
+| 101.4 s | 0.158 m | +0.80 deg | (-5.32, +6.94) | aisle A west |
+| 101.8 s | 0.127 m | +0.55 deg | (-5.00, +6.95) | aisle A west |
+| 102.5 s | 0.088 m | +0.59 deg | (-4.40, +6.98) | aisle A west |
+| 103.4 s | 0.085 m | +0.36 deg | (-3.69, +7.02) | aisle A west |
+| 104.2 s | 0.065 m | +0.27 deg | (-3.09, +7.05) | aisle A west |
+| 104.6 s | 0.061 m | +0.20 deg | (-2.73, +7.06) | aisle A west |
+| 105.4 s | 0.101 m | +0.51 deg | (-2.09, +7.07) | aisle A cross aisle mouth |
+| 105.8 s | 0.083 m | +0.38 deg | (-1.81, +7.07) | aisle A cross aisle mouth |
+| 106.2 s | 0.198 m | +0.85 deg | (-1.49, +7.06) | aisle A cross aisle mouth |
+| 106.6 s | 0.181 m | +0.70 deg | (-1.17, +7.06) | aisle A cross aisle mouth |
+| 107.0 s | 0.065 m | +0.24 deg | (-0.85, +7.05) | aisle A cross aisle mouth |
+| 107.4 s | 0.076 m | +0.34 deg | (-0.53, +7.05) | aisle A cross aisle mouth |
+| 108.6 s | 0.222 m | +1.01 deg | (+0.47, +7.02) | aisle A cross aisle mouth |
+| 109.0 s | 0.143 m | +0.57 deg | (+0.75, +7.02) | aisle A cross aisle mouth |
+| 109.4 s | 0.085 m | +0.30 deg | (+1.07, +7.01) | aisle A cross aisle mouth |
+| 109.8 s | 0.143 m | +0.55 deg | (+1.39, +7.00) | aisle A east |
+| 110.6 s | 0.094 m | +0.40 deg | (+2.03, +6.98) | East A |
+| 111.0 s | 0.141 m | +0.56 deg | (+2.39, +6.97) | East A |
+| 111.4 s | 0.104 m | +0.36 deg | (+2.71, +6.96) | East A |
+| 111.8 s | 0.167 m | +0.62 deg | (+3.03, +6.96) | East A |
+| 112.6 s | 0.320 m | +1.29 deg | (+3.63, +6.94) | East A |
+| 113.0 s | 0.073 m | +0.34 deg | (+3.95, +6.94) | East A |
+| 113.4 s | 0.054 m | +0.15 deg | (+4.27, +6.93) | East A |
+| 113.8 s | 0.055 m | +0.22 deg | (+4.59, +6.93) | East A |
+| 114.2 s | 0.112 m | +0.38 deg | (+4.95, +6.94) | East A |
+| 114.6 s | 0.096 m | +0.34 deg | (+5.27, +6.94) | East A |
+| 115.0 s | 0.157 m | +0.55 deg | (+5.59, +6.95) | East A |
+| 115.8 s | 0.268 m | +0.92 deg | (+6.19, +6.96) | East A |
+| 116.6 s | 0.157 m | +0.42 deg | (+6.83, +6.97) | aisle A east |
+| 117.4 s | 0.086 m | +0.31 deg | (+7.47, +6.98) | aisle A east |
+| 117.8 s | 0.146 m | +0.40 deg | (+7.79, +6.99) | aisle A east |
+| 118.2 s | 0.371 m | +1.14 deg | (+8.11, +7.00) | aisle A east |
+| 118.6 s | 0.420 m | +1.32 deg | (+8.43, +7.01) | aisle A east |
+| 119.0 s | 0.088 m | +0.30 deg | (+8.75, +7.01) | aisle A east |
+| 119.4 s | 0.274 m | +0.75 deg | (+9.07, +7.02) | aisle A east |
+| 120.2 s | 0.141 m | +0.44 deg | (+9.71, +7.03) | aisle A east |
+| 120.6 s | 0.295 m | +0.82 deg | (+10.03, +7.04) | aisle A east |
+| 121.0 s | 0.075 m | +0.19 deg | (+10.35, +7.05) | aisle A east |
+| 121.4 s | 0.184 m | +0.53 deg | (+10.67, +7.06) | aisle A east |
+| 121.7 s | 0.172 m | +0.44 deg | (+10.99, +7.06) | aisle A east |
+| 122.1 s | 0.218 m | +0.59 deg | (+11.26, +7.05) | aisle A east |
+| 122.9 s | 0.350 m | +0.97 deg | (+11.50, +6.98) | aisle A east |
+| 124.8 s | 0.119 m | +0.31 deg | (+11.89, +6.66) | aisle A east |
+| 125.8 s | 0.095 m | +0.29 deg | (+12.04, +6.42) | east end aisle |
+| 126.8 s | 0.095 m | +0.21 deg | (+12.14, +6.16) | east end aisle |
+| 127.8 s | 0.254 m | +0.63 deg | (+12.19, +5.86) | east end aisle |
+| 128.7 s | 0.182 m | +0.49 deg | (+12.21, +5.59) | east end aisle |
+| 129.6 s | 0.065 m | +0.11 deg | (+12.20, +5.30) | east end aisle |
+| 130.4 s | 0.309 m | +0.78 deg | (+12.18, +5.03) | east end aisle |
+| 131.2 s | 0.094 m | +0.18 deg | (+12.13, +4.73) | east end aisle |
+| 131.6 s | 0.089 m | +0.21 deg | (+12.07, +4.42) | east end aisle |
+| 132.0 s | 0.058 m | +0.12 deg | (+12.00, +4.11) | east end aisle |
+| 132.4 s | 0.665 m | +1.69 deg | (+11.93, +3.76) | east end aisle |
+| 132.8 s | 0.056 m | +0.19 deg | (+11.89, +3.48) | east end aisle |
+| 133.2 s | 0.113 m | +0.35 deg | (+11.85, +3.17) | east end aisle |
+| 134.0 s | 0.209 m | +0.56 deg | (+11.81, +2.53) | east end aisle |
+| 134.4 s | 0.653 m | +1.81 deg | (+11.81, +2.21) | aisle B east |
+| 134.8 s | 0.483 m | +1.32 deg | (+11.81, +1.89) | aisle B east |
+| 135.2 s | 0.087 m | +0.27 deg | (+11.81, +1.57) | aisle B east |
+| 135.6 s | 0.151 m | +0.44 deg | (+11.82, +1.26) | aisle B east |
+| 136.3 s | 0.156 m | +0.47 deg | (+11.77, +1.02) | aisle B east |
+| 137.1 s | 0.057 m | +0.22 deg | (+11.63, +0.79) | aisle B east |
+| 138.1 s | 0.106 m | +0.31 deg | (+11.45, +0.61) | aisle B east |
+| 139.2 s | 0.140 m | +0.35 deg | (+11.19, +0.45) | aisle B east |
+| 141.0 s | 0.460 m | +1.26 deg | (+10.66, +0.32) | aisle B east |
+| 141.9 s | 0.484 m | +1.34 deg | (+10.39, +0.30) | aisle B east |
+| 142.9 s | 0.357 m | +0.94 deg | (+10.10, +0.31) | aisle B east |
+| 143.7 s | 0.130 m | +0.38 deg | (+9.82, +0.34) | aisle B east |
+| 144.5 s | 0.066 m | +0.22 deg | (+9.55, +0.38) | aisle B east |
+| 144.9 s | 0.099 m | +0.30 deg | (+9.26, +0.44) | aisle B east |
+| 145.7 s | 0.193 m | +0.60 deg | (+8.64, +0.59) | aisle B east |
+| 146.1 s | 0.062 m | +0.17 deg | (+8.33, +0.65) | aisle B east |
+| 146.5 s | 0.203 m | +0.72 deg | (+8.01, +0.70) | aisle B east |
+| 146.9 s | 0.396 m | +1.40 deg | (+7.69, +0.73) | aisle B east |
+| 147.3 s | 0.086 m | +0.31 deg | (+7.37, +0.74) | East B |
+| 147.7 s | 0.064 m | +0.25 deg | (+7.06, +0.75) | East B |
+| 148.1 s | 0.104 m | +0.33 deg | (+6.74, +0.75) | East B |
+| 148.9 s | 0.179 m | +0.71 deg | (+6.10, +0.74) | East B |
+| 149.3 s | 0.054 m | +0.18 deg | (+5.78, +0.73) | East B |
+| 149.7 s | 0.100 m | +0.44 deg | (+5.50, +0.72) | East B |
+| 150.1 s | 0.089 m | +0.29 deg | (+5.18, +0.70) | East B |
+| 150.5 s | 0.137 m | +0.64 deg | (+4.86, +0.69) | East B |
+| 151.3 s | 0.181 m | +0.70 deg | (+4.22, +0.66) | East B |
+| 152.1 s | 0.058 m | +0.23 deg | (+3.58, +0.63) | East B |
+| 152.5 s | 0.191 m | +0.88 deg | (+3.26, +0.61) | aisle B east |
+| 153.7 s | 0.072 m | +0.38 deg | (+2.30, +0.58) | aisle B cross aisle mouth |
+| 154.1 s | 0.093 m | +0.30 deg | (+1.98, +0.58) | aisle B cross aisle mouth |
+| 154.5 s | 0.095 m | +0.62 deg | (+1.66, +0.58) | aisle B cross aisle mouth |
+| 154.9 s | 0.234 m | +1.30 deg | (+1.34, +0.59) | aisle B cross aisle mouth |
+| 155.2 s | 0.127 m | +0.77 deg | (+1.02, +0.59) | aisle B cross aisle mouth |
+| 155.7 s | 0.065 m | +0.38 deg | (+0.70, +0.60) | aisle B cross aisle mouth |
+| 156.3 s | 0.119 m | +0.77 deg | (+0.42, +0.57) | aisle B cross aisle mouth |
+| 157.4 s | 0.185 m | +1.15 deg | (+0.14, +0.42) | aisle B cross aisle mouth |
+| 158.2 s | 0.065 m | +0.35 deg | (-0.04, +0.24) | aisle B cross aisle mouth |
+| 160.2 s | 0.064 m | +0.29 deg | (-0.28, -0.24) | aisle B cross aisle mouth |
+| 162.9 s | 0.150 m | +0.96 deg | (-0.35, -1.04) | central cross aisle |
+| 163.8 s | 0.066 m | +0.66 deg | (-0.33, -1.33) | central cross aisle |
+| 165.3 s | 0.069 m | +0.20 deg | (-0.19, -2.06) | central cross aisle |
+| 166.1 s | 0.081 m | +0.52 deg | (-0.04, -2.72) | central cross aisle |
+| 166.4 s | 0.094 m | +0.48 deg | (+0.00, -2.95) | central cross aisle |
+| 167.3 s | 0.125 m | +0.73 deg | (+0.07, -3.62) | central cross aisle |
+| 168.9 s | 0.053 m | +0.32 deg | (+0.08, -4.87) | dock aisle cross aisle mouth |
+| 169.7 s | 0.123 m | +0.94 deg | (-0.00, -5.12) | dock aisle cross aisle mouth |
+| 171.5 s | 0.142 m | +1.04 deg | (-0.33, -5.50) | dock aisle cross aisle mouth |
+| 174.6 s | 0.113 m | +0.74 deg | (-1.17, -5.79) | dock aisle west |
+| 176.4 s | 0.061 m | +0.46 deg | (-1.74, -5.79) | dock aisle west |
+| 178.8 s | 0.073 m | +0.69 deg | (-2.99, -5.58) | dock aisle west |
+| 179.2 s | 0.085 m | +0.93 deg | (-3.31, -5.52) | dock aisle west |
+| 180.8 s | 0.062 m | +0.72 deg | (-4.58, -5.40) | dock aisle west |
+| 181.6 s | 0.114 m | +1.21 deg | (-5.21, -5.40) | dock aisle west |
+| 183.2 s | 0.100 m | +1.33 deg | (-6.49, -5.47) | dock aisle west |
+
+total map->odom steps above threshold: 237
