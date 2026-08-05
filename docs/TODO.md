@@ -6,6 +6,52 @@ recorded commissioning showcase and the m4f-09 gate verification. The m5r
 restructure round (ADR 0010) is closed; the brief queue lives in
 docs/PLAN.md.
 
+## PLC — M5 BUILD LANDED 2026-08-05 (merge c9a4c77, local only, not pushed)
+Built in one owner-driven TIA session on `safe_amr` (CPU 1513F-1 PN, PLCSIM
+instance `safecell3`). The authoritative account is
+`plc/forklift/TIA-BUILD-PROCEDURE.md`'s progress block and record table — read
+it before trusting any summary, including this one.
+
+**True now that was not:** the §12 node set is on the CPU and was read back by a
+third-party client, with the write on `Forklift/Envelope/ForkliftMotionEnable`
+**refused by the server** (`BadNotWritable`); the §14 delta runs and its §14.9
+cold-start signature was observed in full; **HMI v2a connected to the live CPU
+for the first time** (8 writable + 23 read-only, no browse failure) and drove
+`HmiProcessStopRequest` TRUE → FALSE → TRUE end to end; the m5-03b stand-in
+proof now stands on `safe_amr` rather than the deleted probe copy, with two
+independent witnesses agreeing on every transition and every non-transition;
+and the §4.5 F-delta is in the CPU — collective F-signature `AA735E2A` →
+`2BC94038`, the S015 disclosure naming exactly the four `SafetyInputStandIn`
+members and nothing else, the cross-reference showing four reads and zero
+writes, and an external client proving the F-side and the stand-in DB are
+**absent from the server's address space** (`DataBlocksGlobal` is not published
+at all). `safe_amr_FIOPROBE` and the undocumented `Tag_1` are gone.
+
+**MAY NOT BE CLAIMED until the writer has actually run:** that `StandInValid`
+ever becomes TRUE, any T6 step, the re-arming of the stale timer, and the whole
+reset path on this build. **No gate criterion may cite them.** The stand-in path
+is a standard DB throughout and establishes no safety-integrity claim (ADR 0011
+D5 untouched).
+
+- **m5-41 IN FLIGHT** — run the writer (`bridge/`, built 640e71e). Closes
+  forklift-safety SPEC §4.5 step 13 and T6. Carries the witness question: the
+  old OPC UA proof read `DataBlocksGlobal`, which is **no longer published**, so
+  the witness path has to be re-established before any reading is trusted.
+- **Re-read** `"ForkliftControl_DB".ModeDisagreeTimer.PT` and
+  `.StandstillTimer.PT` **with the bridge running**. Both read `T#0MS` today
+  because their `IN` was FALSE — an open check, not a defect. Folded into m5-41.
+- **owner + orchestrator**: rename the session's screenshots together. They sit
+  in the owner's OneDrive Screenshots folder as `Screenshot 2026-08-05
+  HHMMSS.png` and were deliberately **not** auto-mapped by timestamp, because a
+  mislabelled evidence file is worse than a missing one.
+- Housekeeping, low: the PLCSIM instance `FIOPROBE` is still listed in the
+  control panel, switched off.
+- **Out of reviewed scope, found in passing:** `SafetyInputStandIn` has **"Data
+  block accessible via Web server" ticked.** That is a disclosure surface nobody
+  reviewed. Done when it is either cleared or ruled deliberate and recorded.
+- Stale, recorded rather than fixed: step 189 of the build procedure says the
+  writer does not exist. The procedure says so itself.
+
 ## m5-03 — F-I/O probe verdict is IN (2026-08-04): ADR 0011 D2 fallback
 Report: docs/reports/m5-03-fio-probe-run.md. Procedure and verdict:
 plc/forklift-safety/FIO-FEASIBILITY.md §7. The configured F-DI stayed

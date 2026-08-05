@@ -118,7 +118,18 @@ forced the last two.
     Note m5-16's hard dependency: HmiProcessStopRequest starts TRUE, so the
     §14 program is inert under HMI v1.
 
-### Wave E — PLC specifications, owner-executed
+### Wave E — PLC specifications and the build. BUILT 2026-08-05
+
+The M5 PLC half was built in one owner-driven TIA session on `safe_amr` and
+merged as `c9a4c77` (local only, unpushed). The §12 node set, the §14 standard
+delta and the §4.5 F-delta are all on the CPU; HMI v2a connected to the live
+controller for the first time. **The one part left unproven is the writer run**
+— until it happens, `StandInValid` going TRUE, every T6 step and the reset path
+on this build may not be claimed by any gate criterion. The authoritative
+account is `plc/forklift/TIA-BUILD-PROCEDURE.md`'s progress block; the queue is
+docs/TODO.md.
+
+### Wave E — the specifications behind it
 
 16. m5-15 plc — F-program spec. **UNBLOCKED 2026-08-04**: written against the
     automated stand-in stimulus of ADR 0015 (never watch-table *Modify*),
