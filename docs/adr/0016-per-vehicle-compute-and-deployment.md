@@ -1,6 +1,14 @@
 # ADR 0016: Per-vehicle compute — one DDS domain per forklift, one vehicle image, and the named crossings
 
-Status:        proposed (2026-08-05, brief m5-22). Awaiting owner ruling.
+Status:        accepted (2026-08-05, owner ruling; proposed the same day by
+               brief m5-22). The owner also ruled the one open question this
+               ADR left to them: **the serial → domain allocation table lives
+               sim-side, as D2 states.** Phase 1 (m5-24) had implemented the
+               constraint at an `agv/` location because `sim/` was outside that
+               brief's write scope and it reported the disagreement rather than
+               choosing; the file moves to the sim side in its own brief, and
+               the constraint — exactly one file pairs a serial with a domain
+               ID, read through one code path — is unchanged by the move.
 
 What this ADR does, stated before anything else:
 

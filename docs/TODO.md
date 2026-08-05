@@ -214,7 +214,7 @@ remains the input path.
   carry the group (`opcua-nodes.md` §12.13 item 1), so ADR 0014 D5.3's readback
   is closed on the vehicle side only. This is the report's `next_suggested`.
 
-## ADR 0016 — per-vehicle compute, PROPOSED 2026-08-05, owner ruling needed
+## ADR 0016 — per-vehicle compute, ACCEPTED 2026-08-05
 docs/adr/0016-per-vehicle-compute-and-deployment.md, plan in
 docs/reports/m5-22-vehicle-compute-deployment-research.md. One DDS domain per
 vehicle; one vehicle image with identity from a per-vehicle config rooted in
@@ -228,9 +228,9 @@ adopted. **No invariant touched** — every crossing rides an existing seam.
   a *driving* vehicle's extra controller/costmap cost, four models at 3 640
   rays, and the GUI's ~8 RTF points for a recorded showcase. Phase 4 converts
   the projection to a measurement before M6 builds on it.
-- Owner ruling needed on the ADR itself. Phase 1 was briefed and built ahead of
-  acceptance on the owner's standing instruction (2026-08-05); it touches no
-  invariant and leaves the m5-10/m5-11 chains runnable.
+- **ACCEPTED by the owner 2026-08-05.** Phase 1 was built ahead of acceptance on
+  the owner's standing instruction; it touches no invariant and leaves the
+  m5-10/m5-11 chains runnable. Phases 2–4 are now open to brief.
 - **Phase 3 carries two owner decisions** — fold into the m5-13 item: the
   monitoring mechanism (multi-context process vs `domain_bridge`, which is a
   **new dependency** and therefore proposed-and-waiting per CLAUDE.md §10), and
@@ -273,12 +273,15 @@ Beside it: `EVIDENCE_NAV2.md` §0 already carries its qualifier honestly —
 the fault was in the reader, not the file.
 
 ## ADR 0016 Phase 1 — CLOSED 2026-08-05 (m5-24), two items left
-- **Owner decision: where does the allocation table live?** ADR 0016 D2 puts it
-  sim-side; the m5-24 brief put it in `agv/`. The agent implemented the
-  *constraint* (exactly one file pairs a serial with a domain ID, read through
-  one code path) at the brief's location because `sim/` is not its to write, and
-  wrote the disagreement up rather than silently choosing. Done when the owner
-  rules and, if it moves, one brief moves it.
+- **Allocation table: RULED 2026-08-05 — it lives SIM-SIDE**, as ADR 0016 D2
+  states. m5-24 built it at `agv/forklift/vehicles/allocation.yaml` because
+  `sim/` was outside its write scope, and reported the disagreement instead of
+  choosing. Done when one brief moves the file to the sim side, repoints
+  `scripts/vehicle_identity.py`'s single lookup path at the new location, and
+  shows the m5-24 domain-wall observation still passing. The **constraint does
+  not change**: exactly one file pairs a serial with a domain ID, no per-vehicle
+  config carries a domain, and the launch still refuses to start when the
+  environment disagrees with the file.
 - **`sim/` edits requested** by m5-24 report §3 to make the split clean rather
   than worked around — precise enough to become a sim brief.
 
