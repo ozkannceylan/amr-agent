@@ -1,0 +1,34 @@
+==========================================================================
+nav2_run analyse   run.csv
+==========================================================================
+FLOOR   registration residual rms 0.0404 m, MAX 0.1411 m
+samples 151   simulation span 15.00 s
+status  SUCCEEDED   error_code 0   plans 15   refusals 0
+
+THE PLAN (first published)
+  points        71
+  length        5.693 m
+  cusps         1   (direction reversals in the plan)
+  reverse       1.6 % of the path length
+
+THE DRIVE
+  ground-truth path      5.752 m
+  commanded speed        mean +0.384  max +0.627  min -0.107 m/s (moving samples)
+  command sign           131 forward / 14 reverse / 6 at rest
+  steer angle commanded  max |1.2146| rad (69.59 deg), stop is 1.3100 rad
+  drive-wheel speed      max |0.628| m/s, limit is 1.500 m/s
+  rotation-in-place      0 refused over the run
+
+TRACKING (ground truth against the FIRST plan, world frame)
+  rms   0.2810 m
+  max   0.4474 m
+  p95   0.4415 m
+  NOTE: the plan is a MAP-frame object and the truth is a world-frame one, so this figure contains the localization error as well as the controller's. It is an upper bound on the controller and is never quoted as the controller's own.
+
+THE GOAL
+  commanded (world)      (+1.0000, +7.0000) yaw +0.0000 rad
+  reached   (truth)      (+1.0653, +7.2955) yaw -0.1547 rad
+  ABSOLUTE position error 0.3026 m (2.14 x floor)
+  heading error           -8.861 deg
+  BELIEVED error (map)    0.2494 m, heading -8.642 deg
+  belief vs truth         the vehicle thought it was 0.2494 m from the goal and was really 0.3026 m

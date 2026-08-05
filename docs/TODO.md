@@ -265,7 +265,51 @@ adopted. **No invariant touched** — every crossing rides an existing seam.
 - ADR 0016's F3–F7 are `[snippet]`-graded: re-verify before any is made
   load-bearing beyond that ADR (the ADR 0014 rule).
 
-## BLOCKER-CLASS — the Nav2 route has never completed on the showcase machine
+## Nav2 route — DIAGNOSED 2026-08-05 (m5-31). Not a regression, not a platform gap.
+**The route works on WSL.** Run r2 reproduced the committed result with nothing
+changed: **13.21 s, 0.156 m, tracking rms 0.051 m** against 13.40 s / 0.183 m /
+0.119 m. Both framings below were wrong, and the reason is the same both times:
+five repeats gave 1 clean traverse, 2 completions after 69–94 s of recovery and
+2 timeouts at 120 s — and **the container's own committed history was 1 success
+in 4 at identical parameters.** The committed figure was always one draw from a
+distribution straddling the acceptance criterion.
+
+Both leading hypotheses were falsified with evidence, not argued away: WSL
+measures **RTF 0.996–1.001** and the container's RTF is recoverable from its own
+committed log — both ran at ~1.0; and the believed pose is **0.000 m / 0.00° off
+truth at goal acceptance in every run on both machines**, so belief decay over
+the longer dwell is dead too.
+
+**The cause, demonstrated.** The goal checker needs `xy_goal_tolerance` 0.25 m
+**and** `yaw_goal_tolerance` 0.15 rad **at the same tick**. Each is satisfied for
+tens of seconds; the two are never satisfied together in any failing run — r4
+spent **55.9 s** inside the position circle and **47.1 s** inside the heading
+window with **0 samples inside both**. The geometry says why: this vehicle pays
+**2.1–2.6 m of travel per radian** in the endgame, so correcting one yaw
+tolerance costs ~0.32–0.39 m against a 0.25 m box. An intermediate hypothesis —
+the `stateful` latch reset 116 times by the 1 Hz replan — was tested and killed:
+at a tenth the replan rate the vehicle **parked 2.7 cm from the goal and sat
+pointing 47° away for 85 s**.
+
+- **OWNER DECISION: how is this fixed?** Two one-variable confirmations were run
+  in `/tmp` copies and deliberately **not applied**: raising the yaw tolerance
+  alone finishes the route on the approach twice (15.01 s, 13.71 s), and one run
+  completed at a believed heading error of **8.642° — 0.048° outside the
+  committed tolerance**. The constraint is `xy_tol > R × yaw_tol`, which today
+  fails by ~1.5×. **The agent's recommendation is to fix it upstream** with an
+  approach corridor that controls the arrival heading, because a wider checker
+  hides the geometry rather than removing it.
+- **Second finding, unrelated and worth its own item:** the recovery shuffle
+  degrades AMCL to **0.661 m worst case**, 2.5× the 0.263 m that
+  `footprint_padding: 0.27` is derived from. Done when the padding is re-derived
+  or the shuffle is prevented.
+- Every committed figure is now ruled in `EVIDENCE_NAV2.md` §8.6: the §5.5
+  planner bench **re-measures exactly** (the planner is deterministic and was
+  never the variable), the **0.141 m floor stands**, case A's single figure is
+  **superseded by the distribution**, and cases B/B′/C/D as drives plus the §1
+  probes are marked **unverified on this platform**.
+
+## ~~BLOCKER-CLASS~~ — superseded by the entry above (kept for its reasoning)
 **Reframed 2026-08-05 by the m5-23 judge; the first framing was wrong and the
 correction matters.** This was written up as a *regression* caused by m5-21's
 package install. It is not. `agv/forklift/EVIDENCE_NAV2.md` §0 states in its own

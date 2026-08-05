@@ -749,3 +749,388 @@ python3 agv/forklift/scripts/cmd_vel_to_tricycle.py --ros-args -p use_sim_time:=
 python3 agv/forklift/scripts/forklift_io.py --ros-args -p use_sim_time:=true
 python3 agv/forklift/scripts/nav2_run.py convcheck --csv convcheck.csv
 ```
+
+---
+---
+
+# 8. THE SHOWCASE MACHINE — 2026-08-05 (m5-31)
+
+**Sections 0-7 above are untouched.** They are container runs and they stay
+exactly as they were committed. This section is the first diagnosis of the
+same route on the **WSL machine the M5 showcase runs on**, and it is written
+as each measurement landed rather than assembled afterwards.
+
+| Item | Value |
+|---|---|
+| Date | **2026-08-05** |
+| Host | WSL2 Ubuntu 24.04 on the owner's Windows 11 machine, **20 cores**, headless, llvmpipe |
+| Package stack | current with the archive as of m5-26 (`sim/setup/WSL_ENVIRONMENT.md` Part III); nav2 **1.3.12**, the same version §0 records |
+| Under test | unchanged. No file in `agv/` was edited to obtain any figure in this section |
+| Isolation | `GZ_PARTITION=m531<tag>` **and** `ROS_DOMAIN_ID=81`, both set on every run |
+| Machine checked alone | before the first run: `load average 0.03`, no `gz sim`, no ROS 2 process, `/dev/shm` 2 entries, 2026-08-05T12:26:54Z |
+| Chain | `warehouse_bringup` -> `localization.launch.py` -> `navigation.launch.py gate:=false cmd_topic:=/cmd_vel_smoothed` — the **m5-10 chain**, one variable against §5 |
+| Route | §5.1's case A, world (−4.5, +7.0) -> (+1.0, +7.0) |
+
+**This is not a regression and this section never calls it one.** §0's own
+environment block says nothing above was ever reproduced here, so every figure
+below is a **first measurement on this platform**, not a second one
+(`docs/LESSONS.md` 2026-08-05).
+
+## 8.1 Two hypotheses the 4-core / 20-core clue pointed at, and how each was killed
+
+Both were killed by measurement before anything was changed.
+
+### (a) Real-time factor and the wall-clock loop rates — FALSIFIED
+
+The reasoning was: nav2's controller loop is a steady-clock loop, so if the
+simulator's real-time factor differs, the controller's period in **simulated**
+time differs with it, and a machine that runs the world slower gives its
+controller more iterations per simulated metre.
+
+Measured on WSL, `gz topic -e -t /world/warehouse/stats`:
+
+```
+bare world, no vehicle, no ROS       real_time_factor: 0.99619999511862
+full stack up, vehicle at rest       real_time_factor: 0.9999855002102469
+immediately after a route run        real_time_factor: 1.0010951981467726
+```
+
+The container side is settled from the **committed** artefacts rather than
+guessed. `evidence/m5-10-a_straight-stack.txt` carries the wall clock of every
+`Passing new path to controller`, which the behaviour tree provokes once per
+replan:
+
+```
+1785837125.586  1785837126.637  1785837127.678  1785837128.716  1785837129.756
+1785837130.786  1785837131.807  1785837132.827
+             consecutive differences 0.997 0.989 0.977 0.967 0.997 0.967 0.987 s
+```
+
+Thirteen replans spanning **12.6 s of wall clock** inside a run whose recording
+spans **13.39 s of simulation time**. **The container was also at RTF ~ 1.0.**
+There is no real-time-factor difference between the two platforms, so nothing
+downstream of one can explain the difference in outcome.
+
+### (b) Belief degrading while the stack stood still before the goal — FALSIFIED
+
+`sim/README.md` records that the EKF integrates ~0.0023 rad/s of heading on a
+stationary vehicle, and AMCL does not correct it because `update_min_d 0.25` /
+`update_min_a 0.2` mean a stationary robot produces no update. The container
+issued its goals at **t_sim 45-48**; this session's runs issue them at
+**t_sim 150-183**, because bringing three launch files up here takes longer.
+That is a two-to-three-minute difference in standing time.
+
+Measured, believed pose against ground truth **at the first recorded sample of
+each run**, which is the instant the goal was accepted:
+
+| run | t_sim at goal ACCEPTED | position error | heading error |
+|---|---|---|---|
+| container 5.1 case A | 47.69 | 0.000 m | -0.07 deg |
+| container 5.1 attempt 4 | 45.22 | 0.000 m | +0.00 deg |
+| container 5.3 case C | 47.84 | 0.000 m | -0.01 deg |
+| **WSL r1** | **150.32** | **0.000 m** | **+0.00 deg** |
+| **WSL r2** | **178.82** | **0.000 m** | **+0.00 deg** |
+
+**No drift reaches the belief, on either platform**, and r2 is the positive
+control: it stood the longest (178.82 s) and produced the **best** run in this
+whole session. Dwell is not the variable.
+
+## 8.2 The route on this platform, five runs, nothing changed
+
+`gate:=false cmd_topic:=/cmd_vel_smoothed`, the section 5 chain, committed
+`nav2.yaml`, committed behaviour tree, same goal, `--timeout 120`. Machine
+checked idle before the first and torn down to zero stray processes after each.
+
+| run | result | elapsed (sim) | ground-truth path | goal error, absolute | believed | tracking rms / max | fwd / rev / rest | steer max |
+|---|---|---|---|---|---|---|---|---|
+| **r1** | SUCCEEDED | 82.21 s | 12.090 m | 0.061 m | 0.167 m | 0.4097 / 1.0838 m | 461 / 264 / 98 | **75.06 deg (stop)** |
+| **r2** | **SUCCEEDED** | **13.21 s** | **5.556 m** | **0.156 m** | 0.199 m | **0.0510 / 0.1030 m** | 112 / 16 / 5 | 45.47 deg |
+| **r3** | SUCCEEDED | 106.30 s | 14.248 m | 0.187 m | 0.059 m | 0.4578 / 1.1350 m | 545 / 352 / 164 | **75.06 deg (stop)** |
+| **r4** | **TIMEOUT** | 120.00 s | 12.110 m | 0.432 m | 0.387 m | 0.3425 / 0.7923 m | 609 / 352 / 235 | **75.06 deg (stop)** |
+| **r5** | **TIMEOUT** | 120.00 s | 13.624 m | 0.272 m | 0.444 m | 0.4259 / 1.0517 m | 535 / 319 / 343 | **75.06 deg (stop)** |
+
+Artefacts: `evidence/m5-31-a_straight-r<N>-{run.csv,goal.txt,analyse.txt,plan.json}`.
+
+**The committed 13.40 s / 0.183 m result reproduces here — r2 gives 13.21 s and
+0.156 m, and tracks three times tighter than the committed run did.** So there
+is no platform regression and no packaging regression to find. What there is,
+is a route whose outcome is a **draw**: one clean traverse in five, two that
+arrived and then spent 70-95 s recovering, and two that never finished.
+
+The container's own history says the same thing and always did: section 5.1
+records four attempts on this route, of which one succeeded in 13.40 s and one
+ran 240 s without ever satisfying the goal, **at the same parameters**. The
+committed figure is one draw quoted as a result.
+
+**The plan is identical in every run and is not the variable.** 71 points,
+5.693 m, 1 cusp, 1.6 % reverse — the committed plan, in all five. Section 5.5's
+whole bench re-runs here unchanged; see 8.6.
+
+## 8.3 THE CAUSE — the goal checker's two conditions are not jointly reachable by this vehicle
+
+The goal checker is `SimpleGoalChecker` with `xy_goal_tolerance: 0.25` and
+`yaw_goal_tolerance: 0.15` rad (8.594 deg). Both must hold **at the same
+controller tick**.
+
+Counted over every recorded sample of each run — believed pose against the
+commanded goal, which is the pair the checker itself evaluates:
+
+| run | samples inside 0.25 m | samples inside 8.594 deg | **samples inside BOTH** | outcome |
+|---|---|---|---|---|
+| container 5.1 case A | 1 | 134 | **1**, at t = 13.4 s | SUCCEEDED at t = 13.4 s |
+| container 5.1 attempt 4 | 80 | 2186 | **0** | TIMEOUT at 240 s |
+| WSL r2 | 2 | 133 | **2**, first at t = 13.1 s | SUCCEEDED at t = 13.2 s |
+| WSL r3 | 446 | 262 | 6, first at t = 105.8 s | SUCCEEDED at t = 106.3 s |
+| WSL r1 | 177 | 461 | 15, first at t = 14.9 s | SUCCEEDED at t = 82.2 s |
+| **WSL r4** | **559** | **471** | **0** | **TIMEOUT at 120 s** |
+| **WSL r5** | **117** | **641** | **0** | **TIMEOUT at 120 s** |
+
+**Every completion happens at a sample where both hold, and every failure is a
+run in which the two never hold together.** r4 is the clearest: it spent
+**55.9 s inside the position circle** and **47.1 s inside the heading window**,
+and never one second inside both. The container's 240 s attempt is the same
+shape, and it is the same shape at four cores.
+
+### The position term is not what blocks it
+
+`stateful: true` is set precisely so that position latches once satisfied. It
+is reset by `ControllerServer::setPlannerPath`, which runs on every path the
+behaviour tree hands down — **116 times in r4's 120 s**, once per second, from
+the tree's `<RateController hz="1.0">`. The obvious next hypothesis is that the
+latch never survives long enough to be useful.
+
+**Tested, with the replan rate lowered tenfold and nothing else changed** —
+`bt_xml:=` a copy of the committed tree with `hz="0.1"`
+(`evidence/m5-31-experiment-bt-slowreplan.xml`), run e1:
+
+```
+resets (Passing new path to controller)   11 over 120 s, against 116 in r4
+RESULT           CANCELLED/TIMEOUT
+elapsed          120.00 s
+final BELIEVED   0.0265 m from the goal, heading -47.208 deg
+samples inside 0.25 m   851 of 1196     samples inside 8.594 deg   238
+samples inside BOTH     0
+```
+
+**The vehicle parked 2.7 cm from the goal and stayed there, pointing 47 deg
+away, for the rest of the run.** So the latch is not the mechanism and the
+position tolerance is not the binding term: **the heading is.**
+
+### Why heading cannot be fixed once position is right
+
+The endgame is a manoeuvre with a measured cost. Over every sample after the
+vehicle first came within 0.6 m of the goal, from ground truth:
+
+| run | endgame duration | ground-truth path | total heading turned | **metres travelled per radian** | median instantaneous radius |
+|---|---|---|---|---|---|
+| container 5.1 case A | 1.1 s | 0.38 m | 1.5 deg | 14.95 | 14.56 m |
+| WSL r2 | 0.8 s | 0.37 m | 1.6 deg | 12.90 | 12.99 m |
+| WSL r1 | 69.4 s | 6.88 m | 160.3 deg | **2.46** | 2.17 m |
+| WSL r3 | 93.5 s | 8.95 m | 245.3 deg | **2.09** | 2.21 m |
+| WSL r4 | 105.2 s | 6.72 m | 158.6 deg | **2.43** | 2.05 m |
+| WSL r5 | 107.0 s | 8.35 m | 213.5 deg | **2.24** | 1.87 m |
+| container 5.1 attempt 4 | 218.8 s | 2.54 m | 57.1 deg | **2.55** | 1.46 m |
+| WSL e1 (slow replan) | 109.2 s | 4.99 m | 120.9 deg | **2.37** | 1.05 m |
+
+**The two clean runs turn 1.5 deg in the endgame and the rest turn 120-245 deg.**
+And when this vehicle turns, it pays **2.1-2.6 m of travel per radian** — the
+non-holonomic coupling, measured, not assumed. Correcting a heading error of
+one yaw tolerance (0.15 rad) therefore costs about **0.32-0.39 m of travel**,
+against a position tolerance of **0.25 m**. The correction is bigger than the
+box it has to stay inside.
+
+> **The cause, stated once.** `xy_goal_tolerance: 0.25 m` and
+> `yaw_goal_tolerance: 0.15 rad` are each individually reasonable and are
+> **jointly unreachable** on a vehicle that cannot rotate in place and pays
+> ~2.4 m of travel per radian of heading. Any approach that delivers the goal
+> position with more than roughly 8.6 deg of heading error has **no manoeuvre**
+> that fixes the heading without leaving the position circle, and no manoeuvre
+> that re-enters the position circle without changing the heading again. The
+> run then either completes on the approach itself or does not complete at all.
+
+### The discriminator, and it is the approach, not the endgame
+
+Believed heading error at the **first** sample inside the position circle:
+
+| run | heading at first entry | outcome |
+|---|---|---|
+| container 5.1 case A | **-3.86 deg** | SUCCEEDED, 13.4 s |
+| WSL r2 | **+2.17 deg** | SUCCEEDED, 13.2 s |
+| WSL r1 | -7.72 deg | SUCCEEDED at 82.2 s, after 69 s of recovery |
+| WSL r5 | -13.11 deg | TIMEOUT |
+| container 5.1 attempt 4 | -16.34 deg | TIMEOUT |
+| WSL r4 | +19.73 deg | TIMEOUT |
+| WSL r3 | +37.26 deg | SUCCEEDED at 106.3 s, after 94 s of recovery |
+
+**Every run that arrives inside 8.6 deg finishes at once; no run that arrives
+outside it finishes quickly, and two never finish.** The arrival heading is not
+controlled by anything: RPP delivers whatever the last metre of path gives, and
+the vehicle is still correcting cross-track error as it reaches the goal. In r1
+the vehicle tracked 0.41 m north of the aisle centre and was turning right when
+it arrived; in r2 it tracked 0.09 m north and arrived straight.
+
+## 8.4 Two one-variable confirmations — RUN AS EXPERIMENTS, NOT APPLIED
+
+**Nothing in `agv/` was edited for these.** Each used a copy of `nav2.yaml` in
+`/tmp` differing from the committed file by **exactly one line**, verified by
+`diff` after the run, and passed in with `params_file:=`.
+
+| experiment | the one line | result | endgame |
+|---|---|---|---|
+| **e2** | `yaw_goal_tolerance: 0.15` -> **0.60** | **SUCCEEDED in 15.01 s**, path 5.752 m, 0 refusals | none — finished on the approach, believed heading **-8.642 deg** |
+| **e3** | the same | **SUCCEEDED in 13.71 s**, path 5.559 m, 0 refusals | none — believed heading -0.819 deg |
+| **e4** | `xy_goal_tolerance: 0.25` -> **0.45** | SUCCEEDED in 31.06 s, path 7.171 m, 1 refusal | one correction manoeuvre, steer to 74.40 deg, then in |
+
+**e2 is the sharpest number in this section.** It completed with a believed
+heading error of **8.642 deg**, which is **0.048 deg outside the committed
+0.15 rad tolerance**. Under the committed configuration that identical approach
+would have been rejected and would have entered the shuffle. The margin the
+committed configuration leaves is not small; it is negative by a rounding
+error.
+
+e4 says the same thing from the other side: 0.20 m of extra position slack is
+enough to absorb **one** heading correction, so the route completes — but in
+31 s and with the steer at 74.40 deg, not on the approach.
+
+**Neither value is proposed here and neither was written to `nav2.yaml`.** They
+are the measurement that identifies which term binds. What to do about it is
+8.7.
+
+## 8.5 What the recovery shuffle costs the localizer — a second-order finding
+
+Section 4 dimensions `footprint_padding: 0.27` from a measured localization
+worst case of **0.263 m**. Believed pose against ground truth, over every
+sample of this session's runs:
+
+| run | position rms | position max | heading rms | heading max |
+|---|---|---|---|---|
+| r2 (clean traverse) | 0.0421 m | 0.0955 m | 0.78 deg | 1.90 deg |
+| r1 | 0.1021 m | 0.2402 m | 1.63 deg | 3.53 deg |
+| r5 | 0.1146 m | 0.1741 m | 1.66 deg | 3.91 deg |
+| e1 | 0.1865 m | 0.2335 m | 5.69 deg | 11.32 deg |
+| r3 | 0.2468 m | 0.4154 m | 3.57 deg | 8.18 deg |
+| **r4** | **0.3990 m** | **0.6610 m** | 5.78 deg | **10.48 deg** |
+| **all pooled, n = 5606** | **0.2394 m** | **0.6610 m** | 4.18 deg | 11.32 deg |
+
+**A clean traverse localizes better than the committed figure; a shuffling one
+localizes far worse.** r4's 0.661 m worst case is **2.5 x the 0.263 m the
+costmap padding is dimensioned from**, so during the recovery the padded
+footprint no longer covers where the vehicle actually is. The mechanism is not
+mysterious — hundreds of direction reversals with the steer at the stop are the
+regime AMCL's motion model is least able to follow — but it means the endgame
+does not merely waste time: **it degrades the one measurement the collision
+geometry is built on.**
+
+## 8.6 Ruling on every committed figure
+
+Each row is **still stands** (re-measured here, with the number), **superseded**
+(both numbers given), or **unverified on this platform** — never "plausible".
+
+### The Nav2 figures (sections 1, 3, 5)
+
+| committed figure | ruling on WSL |
+|---|---|
+| 5.1 case A **SUCCEEDED 13.40 s, 0.183 m, rms 0.119 m** | **SUPERSEDED as a result, reproduced as a draw.** r2 gives 13.21 s / 0.156 m / rms 0.051 m — but that is 1 run in 5. The honest figure for this route on this platform is the 8.2 table: 5 runs -> 1 clean, 2 completed after 69-94 s of recovery, 2 timed out at 120 s |
+| 5.1 attempt 4, **TIMEOUT at 240 s, 0.335 m** | **STILL STANDS, and is the majority case here.** WSL r4 and r5 are the same event at 120 s |
+| 5.1 the plan, **5.693 m, 71 points, 1 cusp, 1.6 % reverse** | **STILL STANDS.** Identical in all nine runs of this session |
+| 5.1 the **0.092 m leading reverse primitive** | **STILL STANDS.** Present in every plan measured here |
+| 5.1 `lookahead_dist` 1.20 -> 1.60 | **UNVERIFIED on this platform.** No 1.20 m run was taken here; the comparison it rests on is container-only |
+| 5.5 the planner bench: A 5.693 m 1 cusp; B 2 m 2.000 m 0 cusps 100 % reverse; B 6 m 6.106 m; C 6.003 m; the 10 m route 10.254 m; D refused | **STILL STANDS, every row, exactly.** Re-run here against a bare `map_server` + `planner_server`, no simulator: 5.693 / 2.000 / 6.106 / 6.003 / 10.254 m with the same cusp counts and the same reverse percentages, and D `ABORTED 207 TIMEOUT` — one of the two codes 5.4 records for it. **The planner is deterministic and is not the variable** |
+| 5.5 planning times 0.012-0.166 s | **UNVERIFIED.** The bench ran, but no timing figure was taken and none is quoted |
+| 5.0 the 10 m route's **0.410 m excursion** and the column pinch | **UNVERIFIED as a drive.** The plan re-measures here (10.254 m); no vehicle was driven down it in this session |
+| 5.2 case B, 2 m astern, 0.312 m, rms 0.0009 m | **UNVERIFIED on this platform.** Not driven here |
+| 5.2 case B', reverse diverges beyond **~2.4 m** | **UNVERIFIED on this platform.** Not driven here, and it was already n = 1 |
+| 5.3 case C, degenerate stretch, 11.09 s, 0.150 m | **UNVERIFIED on this platform.** Not driven here |
+| 5.4 case D, refusal `208` after 90.77 s, vehicle moves 0.000 m | **PARTLY.** The planner's refusal re-measures on the bench (`207`); the 90.77 s, the seven attempts and the 0.000 m of motion were not re-driven here |
+| 3.3 the conversion check, understeer to 23 %, refusal of rotation in place | **UNVERIFIED as a run.** But the refusal path is exercised in every run above (r1 7, r4 8, r5 11 refusals counted), and the endgame's measured 1.05-2.21 m median radius is consistent with the 1.29 m the committed check reports |
+| 1 (a)-(e), the five Jazzy parameter traps | **UNVERIFIED on this platform.** nav2 is 1.3.12 on both sides, but a version match is not a measurement and this section does not treat it as one |
+| 2, the footprint hull and `--aisle`'s 0.356 m | **UNVERIFIED here.** Both are computed from committed files by a script that takes no measurement from the machine |
+
+### The localization figures (section 4, from `EVIDENCE_LOCALIZATION.md`)
+
+| committed figure | ruling on WSL |
+|---|---|
+| the **0.141 m instrument floor** (registration residual max) | **STILL STANDS.** `load_registration` verifies the grid's md5 and re-derives the floor at the start of every harness run; all nine runs of this session printed `FLOOR rms 0.0404 MAX 0.1411 m` and would have refused to run against a rebuilt map |
+| steady-state **rms 0.124 m** | **STILL STANDS while the vehicle drives, SUPERSEDED while it shuffles.** Clean traverse r2: **0.042 m**. Recovery runs: r3 **0.247 m**, r4 **0.399 m**. Pooled over all 5606 samples: **0.239 m** |
+| worst case **max 0.263 m** | **SUPERSEDED: 0.661 m** (r4). Three runs stay under it (r2 0.096, r5 0.174, r1 0.240); the two worst shuffles exceed it by 1.6x and 2.5x |
+| heading **rms 1.44 deg, max 4.52 deg** | **SUPERSEDED: rms 4.18 deg, max 11.32 deg** pooled. r2 alone gives **0.78 / 1.90 deg**, better than committed |
+| section 4's derived `footprint_padding: 0.27` | **NO LONGER COVERS THE MEASUREMENT it is derived from**, during recovery only (0.661 m against 0.263 m). It is untouched here; 8.7 asks for it |
+
+**One qualification these rows carry.** The localization figures above were
+taken on the aisle-A route this brief drove, not on the route
+`EVIDENCE_LOCALIZATION.md` measured. They are the same building, the same
+localizer and the same instrument floor, and the comparison is stated as
+route-to-route rather than as a repeat of that run.
+
+## 8.7 What this asks for, and what was deliberately not done
+
+**Nothing was tuned.** `nav2.yaml`, the behaviour tree, `config.yaml`,
+`cmd_vel_to_tricycle.py` and both launch files are exactly as they were
+committed. The two parameter values in 8.4 exist only in `/tmp` copies and are
+named as the instrument that identified the binding term.
+
+1. **The goal criterion has to be re-derived against the vehicle's turning
+   geometry, not only against the localizer.** Section 6 item 1 already asked
+   for this and dimensioned it wrongly: it says the vehicle "has no small move
+   that closes a 0.3 m gap", and the measurement here says the position gap is
+   closed routinely — r4 reached 0.047 m and e1 reached 0.027 m — while the
+   **heading** is what cannot be brought in. The tolerance pair has to satisfy
+   `xy_tol > R_endgame x yaw_tol`, and with R measured at 2.1-2.6 m/rad,
+   0.25 m against 0.15 rad fails that by about 1.5x. Either term can pay for it
+   (e2, e4), and which one should is a decision about what a "reached" goal
+   means for a fork truck approaching a station — not a number to nudge.
+2. **The arrival heading is uncontrolled, and that is the upstream fix.** A
+   goal checker with slack hides the problem; the vehicle still arrives turning
+   because RPP is correcting cross-track error into the last metre. An approach
+   corridor — the final segment driven straight along the goal heading, which
+   the Reeds-Shepp planner can express and the behaviour tree could enforce —
+   fixes the cause instead of widening the acceptance. This is the same request
+   section 6 item 2 makes about the leading reverse primitive, at the other end
+   of the path, and both belong in a plan post-processor or the tree.
+3. **`footprint_padding` is dimensioned from a number the recovery
+   invalidates** (8.5). Either the padding grows to cover the recovery regime,
+   or — better — the recovery stops happening, which is items 1 and 2.
+4. **Not measured here, and it should be, before the showcase:** whether the
+   other section 5 cases (B, B', C, and D as a drive) behave on this platform.
+   This brief re-measured case A and the planner bench only. 8.6 marks each of
+   the others unverified rather than assuming the aisle-A result carries.
+5. **A repeat count belongs in the harness.** Every figure in section 5 is
+   n = 1, and this section only exists because five repeats were taken.
+   `nav2_run.py goal` should take a repeat argument and stamp its own output
+   path, which also closes section 6 item 9's truncation problem.
+
+## 8.8 How this section was run
+
+```bash
+# machine verified alone first: load average 0.03, no gz, no ROS process,
+# /dev/shm 2 entries, 2026-08-05T12:26:54Z
+source /opt/ros/jazzy/setup.bash
+export GZ_PARTITION=m531<tag> ROS_DOMAIN_ID=81     # BOTH, every run
+unset DISPLAY WAYLAND_DISPLAY                      # headless, llvmpipe
+
+ros2 launch sim/launch/warehouse_bringup.launch.py x:=-4.5 y:=7.0 yaw:=0.0
+ros2 launch agv/forklift/launch/localization.launch.py \
+    initial_pose_x:=1.584770 initial_pose_y:=12.576859 initial_pose_yaw:=-0.007915
+ros2 launch agv/forklift/launch/navigation.launch.py \
+    gate:=false cmd_topic:=/cmd_vel_smoothed
+python3 agv/forklift/scripts/nav2_run.py goal --x 1.0 --y 7.0 --yaw 0.0 \
+    --settle 20 --timeout 120 --csv <tag>.csv --plan <tag>.json
+python3 agv/forklift/scripts/nav2_run.py analyse --csv <tag>.csv --plan <tag>.json
+
+# THE PLANNER BENCH NEEDS A TF TREE AS WELL AS A MAP, which section 7's recipe
+# omits: planner_server ACTIVATE FAILS without one, and every route then
+# returns 205 START_OCCUPIED, which reads like a map fault and is not one.
+ros2 run tf2_ros static_transform_publisher --x 1.58477 --y 12.576859 \
+    --yaw -0.007915 --frame-id map --child-frame-id forklift/odom
+ros2 run tf2_ros static_transform_publisher \
+    --frame-id forklift/odom --child-frame-id forklift/base_link
+ros2 run nav2_map_server map_server --ros-args \
+    -p yaml_filename:=sim/maps/warehouse/warehouse.yaml
+ros2 run nav2_planner planner_server --ros-args --params-file agv/forklift/nav2.yaml
+python3 agv/forklift/scripts/nav2_run.py plan --start-x -4.5 --start-y 7.0 --x 1.0 --y 7.0
+```
+
+Every run was torn down by pattern against observed `ps -eo args` output,
+`ros2 daemon stop` included, and verified to **zero** remaining processes
+before the next one started. Runs were serialised; no two simulators ever ran
+at once, and the machine was re-checked idle between them.
