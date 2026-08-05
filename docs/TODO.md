@@ -40,10 +40,11 @@ D5 untouched).
 - **Re-read** `"ForkliftControl_DB".ModeDisagreeTimer.PT` and
   `.StandstillTimer.PT` **with the bridge running**. Both read `T#0MS` today
   because their `IN` was FALSE — an open check, not a defect. Folded into m5-41.
-- **owner + orchestrator**: rename the session's screenshots together. They sit
-  in the owner's OneDrive Screenshots folder as `Screenshot 2026-08-05
-  HHMMSS.png` and were deliberately **not** auto-mapped by timestamp, because a
-  mislabelled evidence file is worse than a missing one.
+- Deferred by the owner 2026-08-05, off the agenda, blocks nothing: renaming
+  the session's screenshots. They sit in the owner's OneDrive Screenshots folder
+  as `Screenshot 2026-08-05 HHMMSS.png`. They were deliberately **not**
+  auto-mapped by timestamp, because a mislabelled evidence file is worse than a
+  missing one — so this waits for the owner and is done with them or not at all.
 - Housekeeping, low: the PLCSIM instance `FIOPROBE` is still listed in the
   control panel, switched off.
 - **Out of reviewed scope, found in passing:** `SafetyInputStandIn` has **"Data
