@@ -744,7 +744,38 @@ velocity_smoother:
     # let the smoother emit a (v, w) pair whose implied steer angle is
     # beyond the mechanical stop.
     max_velocity: [0.60, 0.0, 0.5714]
-    min_velocity: [-0.60, 0.0, -0.5714]
+
+    # THE REVERSE (FORK-FIRST) CAP IS 0.55 m/s AND IT IS NOT A TUNING
+    # CHOICE. It was -0.60, symmetric with the forward cap, until
+    # 2026-08-06 (m5-12b). agv/forklift/FIELD-EVALUATION.md section 5
+    # derives it from GEOMETRY: fork-first the protective field must sit
+    # past the tine tips, and bearings 169.4-174.4 deg there are occluded
+    # from the rear device by the carriage (residual R1), so those
+    # bearings rely on the FRONT device at ~4.0 m - the range at which a
+    # 1.00 deg/ray scanner is still guaranteed to strike a 70 mm object.
+    # That caps the usable fork-first depth at ~1.41 m, and solving the
+    # design's D(v) = 0.46v + v^2 + 0.05 + 0.74 = 1.41 gives v = 0.59 m/s.
+    # 0.55 is that geometric closure with margin.
+    #
+    # FORWARD KEEPS 0.60: drive-first the geometry closes at ~1.49 m/s, so
+    # nothing constrains it here. The cap is asymmetric because the
+    # VEHICLE is asymmetric, not because reverse is treated as riskier.
+    #
+    # NOTHING HERE ENFORCES A SAFETY LIMIT AND THIS IS NOT A SAFE SPEED.
+    # It is a navigation parameter that keeps the commanded regime inside
+    # the speed the phase-1 static field was sized for
+    # (FIELD-EVALUATION.md section 12). field_evaluation.py enforces no
+    # speed at all; enforcement is the envelope chain's, as process
+    # behaviour, and the modelled SF-10's as the backstop.
+    #
+    # IT MOVES A PARAMETER THE m5-10 NAV2 EVIDENCE WAS TAKEN AT. Every
+    # committed figure in EVIDENCE_NAV2.md was measured at -0.60, and no
+    # figure there is restated as holding at -0.55; a route that commands
+    # reverse travel has to be re-measured before its numbers are quoted
+    # again. Whether Nav2 in the warehouse world ever commands reverse at
+    # all is measurement 6 of FIELD-EVALUATION.md section 11 and is
+    # unanswered.
+    min_velocity: [-0.55, 0.0, -0.5714]
 
     # 0.50 m/s^2. Stop distance from 0.60 m/s is v^2/2a = 0.36 m, which is
     # inside RPP's 0.60 m collision look-ahead. Angular acceleration is

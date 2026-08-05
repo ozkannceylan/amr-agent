@@ -45,6 +45,7 @@ project can command in engineering units.
 | `config.yaml` | Every named constant the nodes use. No behavioural constant is written inline in a script. |
 | `scripts/forklift_io.py` | Engineering units in, raw joint commands out; joint state and odometry in, two scalars out. |
 | `scripts/obstacle_zone.py` | Forward stop-zone evaluator over the front safety scanner's **non-safe measurement channel**. |
+| `scripts/field_evaluation.py` | The protective-field evaluation, phase 1 of `FIELD-EVALUATION.md`. A **model of what a safety-rated scanner does inside its own housing** — contour, per-device verdict, OSSD-equivalent pair, union aggregation — feeding a **stand-in for wiring** over one dedicated TCP link. **Not a safety function; no Category, no PL, no SIL, no PFH** (ADR 0011 D5). It publishes **no topic** and latches nothing. Evidence: `EVIDENCE_FIELD_EVALUATION.md`. |
 | `scripts/sensor_tf.py` | Publishes `/tf_static` for the four sensor frames, reading every number out of `model.sdf`. |
 | `scripts/wheel_odometry.py` | Tricycle dead reckoning from the vehicle's own joint states, through two modelled encoders. Publishes an estimate and **no transform**, plus the encoder-derived standstill verdict. |
 | `scripts/imu_gate.py` | Stops offering the gyro's yaw rate to the EKF while the encoders report the wheels standing still — the interval in which that reading is bias and not rotation. Suppresses; never rewrites a sample; **estimates no bias**; fails open. |
@@ -107,7 +108,7 @@ name.
 | `/forklift/gz/imu` | `gz.msgs.IMU` | out of the model | 6-axis MEMS IMU, 100 Hz, frame `imu_link`, noise from the BMI088 datasheet. **No orientation output** — `<enable_orientation>false</>`, because gz derives orientation from the link pose and it would be ground truth. The IMU *system* is carried by the model, not the world, so no world file needs editing |
 | `/forklift/gz/scan_nav` | `gz.msgs.LaserScan` | out of the model | navigation lidar: 360 ranges over 360°, 10 Hz, 0.10–8.00 m, plane z = 1.80 m, frame `nav_lidar_link` |
 | `/forklift/gz/safety_scanner_front/measurement` | `gz.msgs.LaserScan` | out of the model | front safety scanner, **non-safe measurement channel**: 275 ranges over 275°, 10 Hz, 0.10–5.50 m, plane z = 0.15 m, frame `safety_scanner_front_link`. Bridged into ROS |
-| `/forklift/gz/safety_scanner_rear/measurement` | `gz.msgs.LaserScan` | out of the model | rear safety scanner, **non-safe measurement channel**: same, frame `safety_scanner_rear_link`. **Not bridged into ROS** — no process consumer exists for it |
+| `/forklift/gz/safety_scanner_rear/measurement` | `gz.msgs.LaserScan` | out of the model | rear safety scanner, **non-safe measurement channel**: same, frame `safety_scanner_rear_link`. **Bridged into ROS since 2026-08-06 (m5-12b)**, under the name reserved for it, because a consumer now exists: `scripts/field_evaluation.py` needs both devices |
 
 ### Two channels per safety scanner, and only one of them is a topic
 
@@ -117,8 +118,17 @@ device**:
 
 | Channel | What it is | Where it lives here | Who may consume it |
 |---|---|---|---|
-| **safe channel** | the OSSD pair, or safe bits over PROFIsafe: the protective-field verdict | **nowhere in this directory.** Derived by field evaluation (m5-12) from the same scan, and delivered to the F-program off the process network. *By which path* is ADR 0011 decision 2's **design intent and is not yet proven** — see the two notes below | the F-program, and nothing else |
-| **measurement channel** | the raw distance profile the datasheet provides for HMI, diagnostics and process use, **while stating it must not be used for safety-related tasks** | the `gpu_lidar` scan, on the gz and ROS topics named `.../measurement` above | process functions. Today: `obstacle_zone.py` |
+| **safe channel** | the OSSD pair, or safe bits over PROFIsafe: the protective-field verdict | **on no topic, on either transport.** Derived from the same rays by `scripts/field_evaluation.py` (m5-12b, phase 1 of `FIELD-EVALUATION.md`), which is a **model of what the device does inside its own housing** and carries no claim. It leaves the vehicle on **one dedicated TCP connection** to the stand-in writer of `plc/forklift-safety/SPEC.md` §7.2 — never on the process network | the F-program, through the stand-in writer, and nothing else |
+| **measurement channel** | the raw distance profile the datasheet provides for HMI, diagnostics and process use, **while stating it must not be used for safety-related tasks** | the `gpu_lidar` scan, on the gz and ROS topics named `.../measurement` above | process functions. Today: `obstacle_zone.py` (front). `field_evaluation.py` reads both, and what it derives from them is *not* a measurement channel and *not* a topic |
+
+**By which path the safe channel reaches the F-program is settled.**
+ADR 0011 decision 2 named configured F-I/O driven by tag name through the
+S7-PLCSIM Advanced API. `plc/forklift-safety/FIO-FEASIBILITY.md` ran that
+probe in the tool and the named fallback is what stands: the standard-DB
+**stand-in for wiring** of `plc/forklift-safety/SPEC.md`, written by the
+stand-in writer, labelled a stand-in wherever it appears. Nothing in this
+directory changes under either answer, and no Category, Performance
+Level, SIL or PFH is claimed for any of it (ADR 0011 D5).
 
 **The measurement channel is non-safe and must never implement a safety
 function.** Nothing computed from it is a protective stop, a safe speed,
@@ -178,8 +188,8 @@ scanner channel reaches a costmap.
 | Sensor | Link and `frame_id` | Pose in `base_link` (x, y, z, yaw) | Aperture, blind sector | Consumer |
 |---|---|---|---|---|
 | `nav_lidar` | `nav_lidar_link` | 0.550, −0.400, 1.800, 0° | 360° | `/forklift/scan`: **SLAM, AMCL and the Nav2 costmaps, and nothing else feeds them** |
-| `safety_scanner_front` | `safety_scanner_front_link` | 0.700, 0.450, 0.150, +45° | 275°, blind 182.5–267.5° | measurement channel → `obstacle_zone` (process). Safe channel → the F-program, off-network, by a path that is design intent and not yet proven (see above) |
-| `safety_scanner_rear` | `safety_scanner_rear_link` | −0.700, −0.450, 0.150, −135° | 275°, blind 2.5–87.5° | measurement channel → nobody yet, so it is not bridged. Safe channel → the F-program, off-network, by a path that is design intent and not yet proven (see above) |
+| `safety_scanner_front` | `safety_scanner_front_link` | 0.700, 0.450, 0.150, +45° | 275°, blind 182.5–267.5° | measurement channel → `obstacle_zone` (process) and `field_evaluation`. Safe channel → the F-program, off-network, through the stand-in writer (see above) |
+| `safety_scanner_rear` | `safety_scanner_rear_link` | −0.700, −0.450, 0.150, −135° | 275°, blind 2.5–87.5° | measurement channel → `field_evaluation`, and bridged since 2026-08-06 for it. Safe channel → the F-program, off-network, through the stand-in writer (see above) |
 | `imu` | `imu_link` | −0.500, 0.000, 0.250, 0° | 6 axes, 100 Hz, **no orientation output** | `/forklift/imu`: the EKF, and it fuses the **yaw rate only**. Mounted on the rear axle line, where a tricycle's instantaneous centre of rotation always lies, so a steady turn produces no centripetal term |
 
 The pose column is **parsed**, not decorative: `check_sensor_frames.py`
@@ -227,13 +237,16 @@ once:
   prohibition, and bridging a *process* channel for a *process* function
   does not touch it.
 
-**Why the rear channel is not bridged.** Nothing consumes it. A
-measurement channel goes onto the process network when something on that
-network consumes it, and not before: an unconsumed channel is an
-invitation to a drive-by subscriber, and the subscriber that must never
-appear is a navigation one. When a consumer for it exists, its ROS name
-is `/forklift/safety_scanner_rear/measurement`, by the same pattern as
-the front one.
+**Why the rear channel is bridged now, and was not before.** The rule
+never changed: a measurement channel goes onto the process network when
+something on that network consumes it, and not before, because an
+unconsumed channel is an invitation to a drive-by subscriber and the
+subscriber that must never appear is a navigation one. What changed on
+2026-08-06 is that the consumer exists — `scripts/field_evaluation.py`
+needs **both** devices, since the protective verdict is the union of the
+two and the fork direction is the rear device's to watch. It took the
+name this file had already reserved for it,
+`/forklift/safety_scanner_rear/measurement`, verbatim.
 
 ### ROS 2, after `launch/vehicle.launch.py`
 
@@ -255,7 +268,8 @@ the front one.
 | `/forklift/cmd/fork_speed` | `std_msgs/Float64` | on demand | a consumer | carriage rate request [m/s] |
 | `/forklift/fork_height` | `std_msgs/Float64` | 10 Hz | `forklift_io` | carriage travel above fully lowered [m] |
 | `/forklift/linear_speed` | `std_msgs/Float64` | 10 Hz | `forklift_io` | forward ground speed [m/s] |
-| `/forklift/safety_scanner_front/measurement` | `sensor_msgs/LaserScan` | 10 Hz | bridge | **The front safety scanner's non-safe measurement channel**, renamed from `/forklift/gz/safety_scanner_front/measurement`: 275 samples over 275°, plane z = 0.15 m, range 0.10–5.50 m, frame `safety_scanner_front_link`. Read by `obstacle_zone`. **Not a safety signal**, whatever the device is called, and forbidden to SLAM, AMCL and every costmap. |
+| `/forklift/safety_scanner_front/measurement` | `sensor_msgs/LaserScan` | 10 Hz | bridge | **The front safety scanner's non-safe measurement channel**, renamed from `/forklift/gz/safety_scanner_front/measurement`: 275 samples over 275°, plane z = 0.15 m, range 0.10–5.50 m, frame `safety_scanner_front_link`. Read by `obstacle_zone` and by `field_evaluation`. **Not a safety signal**, whatever the device is called, and forbidden to SLAM, AMCL and every costmap. |
+| `/forklift/safety_scanner_rear/measurement` | `sensor_msgs/LaserScan` | 10 Hz | bridge | **The rear safety scanner's non-safe measurement channel**, renamed from `/forklift/gz/safety_scanner_rear/measurement`: same shape as the front one, frame `safety_scanner_rear_link`. Bridged 2026-08-06 because `field_evaluation` consumes it. **Not a safety signal**, and forbidden to SLAM, AMCL and every costmap. Expect a large near-field band on this device: 61 of its 275 rays land on the vehicle's own mast rails and carriage at 0.090–0.780 m (residual **R8**, measured in `EVIDENCE_SENSOR_COVERAGE.md` §13). Those returns are real and are not filtered out anywhere; what `field_evaluation` does with them is draw its **field boundary inside them**, which is device geometry, not a filter. |
 | `/forklift/obstacle/in_stop_zone` | `std_msgs/Bool` | 10 Hz | `obstacle_zone` | Something inside the forward stop zone, computed from the **front safety scanner's measurement channel** at z = 0.15 m — the low plane the M4 showcase demonstrated, not the 1.80 m navigation plane. **`TRUE` is the non-permissive state.** The ±30° sector is centred on the vehicle's driving direction, which is `obstacle.sector_centre_rad` = −45° in this sensor's own angle coordinate because the sensor is mounted on a corner at +45°. The evaluator sorts every sample in that sector into three classes: **clear** — `+inf`, or a finite range at or beyond `range_max`, which is the sensor reporting no echo inside its window and counts as a valid measurement at `range_max`; **distance** — a finite range inside `[range_min, range_max)`; **invalid** — `NaN`, `-inf`, or a range below `range_min`. `TRUE` when a distance is at or under 1.20 m, and `TRUE` as a fail-safe when there is no scan, when the newest one is older than 0.50 s, when the scan is structurally unusable, or when the sector holds no sample in **either** valid class. A dead or garbage sensor is all of those; an open horizon is none of them. |
 | `/forklift/obstacle/min_distance` | `std_msgs/Float64` | 10 Hz | `obstacle_zone` | Nearest valid range in the sector [m]: the smallest **distance**-class sample; the scan's own `range_max` when the sector is entirely **clear** beyond range; and `0.0`, the `unknown_distance_m` sentinel from `config.yaml`, in every fail-safe case above. The clear value is the scan's number and not this node's, so it follows whatever scanner `model.sdf` declares — and the consumer's plausibility window must contain it. Since this node reads the front safety scanner, that value is now **5.50 m**, comfortably inside the `0.05 … 8.10` m window of `docs/interfaces/opcua-nodes.md` §10.5, so **no interface change is owed by this consumer**. The window still bounds the *navigation* lidar's 8.00 m range, which is a separate open item. |
 | `/forklift/scan` | `sensor_msgs/LaserScan` | 10 Hz | bridge | **The navigation lidar**, renamed from `/forklift/gz/scan_nav`: 360 samples over 360°, plane z = 1.80 m, frame `nav_lidar_link`. **This is the vehicle's only SLAM, AMCL and costmap input**, and it is no longer read by `obstacle_zone`: it replaced a 181-sample 180° scanner at z = 0.25 m, so **the plane this topic reports moved up 1.55 m**, and in `sim/worlds/forklift_arena.sdf`, whose walls stop at 0.60 m and whose tallest crate stops at 1.00 m, it reports a clear horizon in front of an obstacle a process stop must see (`EVIDENCE_SENSOR_TF.md` §4 measures exactly that: 60 of 60 forward samples clear at 1.80 m with a crate 0.85 m ahead at 0.15 m). **Not gap-free.** The old scanner dropped the single sample at exactly ±45°, in the raw gz message rather than in the bridge, following vehicle orientation rather than a fixed index (m4f-03 evidence). **That was measured on the sensor this one replaced and has not been re-measured here**, so it is a warning and not a specification. The consumer rule is unchanged and stands on its own: do not assume every sample is finite, and do not read a non-finite one as a missing one — an `inf` is the sensor reporting **no echo inside its window**, which is a measurement of a clear path to `range_max`, not an absence of data. `obstacle_zone.py` classifies each sample on exactly that basis and never condemns a whole scan for containing one bad sample. |

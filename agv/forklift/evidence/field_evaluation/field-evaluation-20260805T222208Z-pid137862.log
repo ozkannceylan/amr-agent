@@ -1,0 +1,26 @@
+2026-08-05T22:22:09.221Z | START | FIELD EVALUATION - a MODEL of what a safety-rated scanner does internally, feeding a STAND-IN FOR WIRING. Not a safety function; no Category, no Performance Level, no SIL, no PFH, no diagnostic coverage (ADR 0011 D5). It reports levels and latches nothing.
+2026-08-05T22:22:09.249Z | START | phase 1 of agv/forklift/FIELD-EVALUATION.md section 12: one STATIC all-direction contour, no case selection, no warning field, no speed enforcement
+2026-08-05T22:22:09.254Z | START | config = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/config.yaml
+2026-08-05T22:22:09.263Z | START | model = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/model.sdf (scanner mounts read from it, not mirrored)
+2026-08-05T22:22:09.270Z | START | front device: topic /forklift/safety_scanner_front/measurement (NON-SAFE measurement channel), mount x=0.700 y=0.450 yaw=0.7853982 rad
+2026-08-05T22:22:09.276Z | START | rear device: topic /forklift/safety_scanner_rear/measurement (NON-SAFE measurement channel), mount x=-0.700 y=-0.450 yaw=-2.3561945 rad
+2026-08-05T22:22:09.283Z | START | contour: corridors x -3.225..2.210 m, y -0.550..+0.550 m in the vehicle frame - the plan outline (-1.875..0.860 m) grown by the protective depth 1.35 m fore and aft, half width 0.55 m
+2026-08-05T22:22:09.289Z | START | self-return clip: rear device, sensor frame -133.0..-71.8 deg, boundary capped at 0.040 m - FIELD GEOMETRY, not a filter applied to samples
+2026-08-05T22:22:09.294Z | START | self-return clip: front device, sensor frame +136.4..+137.6 deg, boundary capped at 1.034 m - FIELD GEOMETRY, not a filter applied to samples
+2026-08-05T22:22:09.298Z | START | failure rules: freshness 0.30 s, clear debounce 3 scans, invalid-fault threshold 5% clearing after 3 scans, evaluation tick 20.0 Hz. Unknown means INTRUSION in every one of them; an empty horizon means CLEAR, because a beyond-range return is a measurement
+2026-08-05T22:22:09.304Z | START | link: 172.19.176.1:45015 - the address was read back from this host (WSL default route (ip route show default)), never taken from a document (ADR 0006). ZONE 1 = field clear, ZONE 0 = intrusion or this evaluation's own fault: the digit is the CIRCUIT LEVEL
+2026-08-05T22:22:09.309Z | START | THE VERDICT HAS NO ROS TOPIC and never will: the safe channel has no topic on either transport (owner ruling m5-06). This log and the writer's session log are the correlated record SPEC 7.6 requires
+2026-08-05T22:22:09.314Z | START | log = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/field_evaluation/field-evaluation-20260805T222208Z-pid137862.log
+2026-08-05T22:22:09.320Z | AGGREGATE | boot verdict INTRUSION: boot: no device has yet proved its field clear
+2026-08-05T22:22:09.325Z | DEVICE | front stamps advancing (seq=1 stamp=371.100000)
+2026-08-05T22:22:09.325Z | DEVICE | front contour built: 275 rays, 275 of them with a live field, boundary 0.100..3.925 m over the live rays, mount (x=0.700 y=0.450 yaw=0.7854 rad), scan window 0.10..5.50 m
+2026-08-05T22:22:09.326Z | AGGREGATE | unchanged (INTRUSION), reason now: front: field not clear; rear: no scan yet received
+2026-08-05T22:22:09.354Z | LINK | up: connected to the stand-in writer at 172.19.176.1:45015
+2026-08-05T22:22:09.361Z | SEND | ZONE 0 -> first line on a new connection (a connection is a transition from unknown)
+2026-08-05T22:22:09.469Z | DEVICE | front CLEAR after 3 consecutive fully-valid fully-clear scans (seq=3 stamp=371.300000)
+2026-08-05T22:22:09.505Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: no scan yet received
+2026-08-05T22:22:44.435Z | LINK | down (this node is shutting down). The writer converts the silence into an open zone channel within its own 1 s stale window
+2026-08-05T22:22:44.441Z | EXIT | front device: 352 scan(s) ingested, last invalid fraction 0.00%, last intrusion-ray count 0, faulted=False
+2026-08-05T22:22:44.441Z | EXIT | rear device: 0 scan(s) ingested, last invalid fraction 0.00%, last intrusion-ray count 0, faulted=False
+2026-08-05T22:22:44.441Z | EXIT | link: 1 connect attempt(s), 67 line(s) sent, of which 66 were PING keepalives (not logged individually - this is a transition log)
+2026-08-05T22:22:44.442Z | EXIT | field evaluation stopped. The writer sees the link die and drives ZoneDeviceCircuitClosed FALSE within FIELD_LINK_STALE_MAX = 1 s: loss of the intrusion source reads as an intrusion, never as a clear field

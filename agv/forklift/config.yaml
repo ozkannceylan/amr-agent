@@ -587,13 +587,24 @@ topics:
   # obstacle_zone.py, the M4 comfort stop, whose plane this is.
   safety_scanner_front_measurement: /forklift/safety_scanner_front/measurement
 
-  # The REAR measurement channel has no ROS name, because no process
-  # consumer exists for it. A measurement channel is bridged when, and
-  # only when, something on the process side consumes it: an unconsumed
-  # channel on the network is an invitation to a drive-by consumer, and
-  # the one prohibition that matters here is a scanner feeding a
-  # NAVIGATION consumer. When a consumer appears, the name it takes is
-  # /forklift/safety_scanner_rear/measurement, by the same pattern.
+  # THE REAR MEASUREMENT CHANNEL, bridged 2026-08-06 (m5-12b) UNDER THE
+  # RESERVED NAME. Until then this block said "no ROS name, because no
+  # process consumer exists for it ... when a consumer appears, the name
+  # it takes is /forklift/safety_scanner_rear/measurement, by the same
+  # pattern". THAT CONSUMER NOW EXISTS: scripts/field_evaluation.py needs
+  # both devices, because the protective verdict is the UNION of the two
+  # (FIELD-EVALUATION.md section 7) and the fork direction is the rear
+  # device's to watch. The reserved name is taken verbatim; nothing was
+  # renamed and no second name was invented.
+  #
+  # IT IS STILL THE NON-SAFE MEASUREMENT CHANNEL, exactly like its front
+  # twin, and bridging it changes nothing about that. The safe channel of
+  # either device still has no topic on either transport (see the block
+  # above, and README.md "Two channels per safety scanner"). The one
+  # prohibition that matters is unchanged: NO SCANNER CHANNEL FEEDS A
+  # NAVIGATION CONSUMER - SLAM, AMCL and the costmaps read
+  # `scan` (the navigation lidar) and nothing else.
+  safety_scanner_rear_measurement: /forklift/safety_scanner_rear/measurement
 
   # ---- vehicle side command inputs, engineering units ----
   cmd_traction_speed: /forklift/cmd/traction_speed
@@ -849,4 +860,243 @@ envelope:
   mode_none: 0
   mode_teleop: 1
   mode_autonomous: 2
+
+field:
+  # ============ THE PROTECTIVE FIELD EVALUATION - PHASE 1 ONLY ============
+  #
+  # Read by scripts/field_evaluation.py, and by nothing else. The AUTHORITY
+  # for every value below is agv/forklift/FIELD-EVALUATION.md (m5-12); this
+  # block is where that document's constants are NAMED, per this directory's
+  # rule that no behavioural constant is written inline in a Python file. If
+  # the two disagree, FIELD-EVALUATION.md is right and this file is wrong,
+  # and the section reference beside each value is what makes that diffable.
+  #
+  # WHAT THIS IS, IN ONE SENTENCE. A MODEL OF WHAT A SAFETY-RATED SCANNER
+  # DOES INSIDE ITS OWN HOUSING - turn its rays into a protective-field
+  # verdict - feeding a STAND-IN FOR WIRING. It is standard Python reading
+  # a rendered depth image across a bridge and a graph.
+  #
+  # IT IS NOT A SAFETY FUNCTION AND CARRIES NO CLAIM: no Category, no
+  # Performance Level, no SIL, no PFH, no channel count, no diagnostic
+  # coverage (ADR 0011 D5, FIELD-EVALUATION.md section 10). Every PL and
+  # Category named in that document is a PLr TARGET out of docs/safety/,
+  # never an achievement. No depth, response time or stopping distance
+  # below is a figure any machine is characterised by. The protective stop,
+  # the e-stop chain and safe torque off are onboard and hardwired
+  # (invariant 1); this node latches nothing and stops nothing.
+  #
+  # THE VERDICT HAS NO TOPIC, AND THAT IS THE POINT. It crosses exactly one
+  # dedicated TCP link to the stand-in writer (plc/forklift-safety/SPEC.md
+  # section 7.2), as a real device's OSSD pair crosses only its own copper.
+  # The rule in `topics:` above - "every channel a subscriber can reach is a
+  # measurement channel; the safe channel has no topic on either transport,
+  # ever" - is an owner ruling (m5-06, 2026-07-30) and this node obeys it.
+  # scripts/check_sensor_frames.py section 4 checks that rule by machine.
+
+  # ---- the contour, phase 1: ONE STATIC ALL-DIRECTION FIELD ----
+  #
+  # FIELD-EVALUATION.md section 12 phase 1: "case B's geometry as one
+  # static all-direction contour (fork sector 1.35 m, drive sector 1.35 m -
+  # deliberately the SMALLER derived depth everywhere ...), clipped per
+  # section 6". No case selection, no speed enforcement, no warning field:
+  # those are phases 2 and 3 and none of them is built.
+  #
+  # WHERE 1.35 m COMES FROM (section 5, case B). D(v) = v*T + v^2/(2a) + Z
+  # + Kp*T with T = 0.46 s (section 3, summed per stage), a = 0.50 m/s^2
+  # (the envelope gate's measured ramp), Z = 0.05 m, and the PROVISIONAL
+  # intruder-advance term Kp*T = 0.74 m. At v = 0.55 m/s that is
+  # 0.253 + 0.303 + 0.05 + 0.74 = 1.35 m.
+  #
+  # PROVISIONAL, AND SAID SO RATHER THAN SETTLED. The ISO 13855 framing
+  # behind the Kp term comes from secondary engineering sources; the
+  # project has no access to the standard's text, so whether a
+  # vehicle-carried field must add intruder advance at all is UNRESOLVED
+  # (FIELD-EVALUATION.md sections 4 and 10.3). The DEMANDING reading is
+  # carried here - the term is included, which makes the field LARGER.
+  # Three of T's eight stages are budgets, not measurements (section 11).
+  protective_depth_m: 1.35
+
+  # HALF WIDTH OF THE TWO CORRIDORS (section 6): 0.45 vehicle half-width
+  # + 0.05 measurement allowance Z + 0.05 steering-deviation allowance.
+  # The last term is a BUDGET and is measurement 7 of section 11.
+  #
+  # It lands 1 mm outside the vehicle's own widest plan point (the plan
+  # hull of model.sdf is y = +-0.5490, set by the two scanner housing
+  # corners at 45 deg). Those housings sit 20 mm BELOW the scan plane by
+  # construction, so they return nothing and the coincidence costs
+  # nothing - but a housing raised into the plane would make this contour
+  # permanently violated, and that is why the number is written here with
+  # its derivation rather than tuned.
+  corridor_half_width_m: 0.55
+
+  # THE VEHICLE OUTLINE THE DEPTHS ARE MEASURED FROM. MIRRORS of the plan
+  # hull of model.sdf, like the `model:` block above: model.sdf is the
+  # authority. Read back from it on 2026-08-06 as x [-1.8750, 0.8600]
+  # (tine tips to nose). scripts/field_evaluation.py re-reads model.sdf
+  # for the two SCANNER POSES rather than mirroring those, so no pose is
+  # copied anywhere; these two scalars are the only mirrors here.
+  outline_nose_x_m: 0.86
+  outline_tine_tip_x_m: -1.875
+
+  # ---- the self-return clips (section 6, R8) ----
+  #
+  # A FIELD DRAWN PAST THE VEHICLE'S OWN RETURNS IS PERMANENTLY VIOLATED.
+  # Each entry caps the field's OUTER BOUNDARY over a bearing band of one
+  # device, in THAT DEVICE'S OWN FRAME (the frame its message names).
+  #
+  # THIS IS FIELD GEOMETRY, CATEGORICALLY NOT A FILTER APPLIED TO SAMPLES
+  # (EVIDENCE_SENSOR_COVERAGE.md section 13.8 point 1, in its own words).
+  # The samples are untouched and still classified; what the clip changes
+  # is HOW FAR THE MONITORED REGION REACHES at that bearing, which is what
+  # a real device's configured contour does. Deleting the returns instead
+  # would put a lie about the vehicle's surroundings into the evaluation.
+  #
+  # A bearing whose boundary falls below the sensor's own range_min has NO
+  # LIVE FIELD: no sample can be inside it, so the sector is excluded and
+  # an invalid sample there raises nothing. That is how the rear band is
+  # excluded, and it is stated rather than special-cased in code.
+  self_return_clips:
+    - device: rear
+      # Measured: the rear device's own mast rails and fork carriage,
+      # returns at 0.090-0.780 m (EVIDENCE_SENSOR_COVERAGE.md section 13,
+      # R8). Boundary = 0.090 - 0.05 = 0.040 m, which is below range_min
+      # 0.10 m, so the sector is EXCLUDED from the rear field entirely -
+      # FIELD-EVALUATION.md section 6's "effectively the sector is
+      # excluded". It costs no coverage: the FRONT device watches those
+      # bearings (section 13.8 point 3).
+      #
+      # THE BAND IS WIDER THAN FIELD-EVALUATION.md SECTION 6'S TABLE, AND
+      # THE DEVIATION IS DELIBERATE AND MEASURED. That table quotes
+      # -131.5..-72.3 deg, which are section 13.2's -131.48..-72.26
+      # rounded OUTWARD at one end and INWARD at the other. Applied as
+      # written it leaves the two EDGE rays of the measured band inside
+      # the field:
+      #
+      #   index  5, bearing -132.482 deg, self-return 0.780 m (mast rail
+      #             corner, section 13.3) against a contour boundary of
+      #             1.001 m  -> permanent intrusion
+      #   index 65, bearing  -72.263 deg, self-return 0.164 m (carriage,
+      #             section 13.3) against a contour boundary of 2.183 m
+      #             -> permanent intrusion
+      #
+      # Either one alone makes the rear field permanently violated and the
+      # aggregate verdict INTRUSION for ever. Section 13.2's own body-
+      # return index set is 5..65, not 6..65, and section 13.3 records
+      # index 5 explicitly. So this band is taken from the MEASURED index
+      # set the design's own rule points at - "clipped by each device's
+      # measured self-return contour minus 0.05 m" - and is placed between
+      # rays: index 4 is at -133.485 deg and index 66 at -71.259 deg, so
+      # -133.0 and -71.8 catch 5..65 inclusive and nothing else. A
+      # correction to section 6's table is requested in the m5-12b report
+      # rather than edited into another brief's deliverable.
+      bearing_lo_deg: -133.0
+      bearing_hi_deg: -71.8
+      boundary_m: 0.040
+    - device: front
+      # Measured: ONE ray of 275, index 274 at the aperture edge, on
+      # rear_wheel_left at 1.084 m (section 13.6). Sensor-frame bearing
+      # +137.49 deg; the +182.5 deg quoted in section 6 of the design is
+      # the VEHICLE bearing of the same ray. Boundary 1.084 - 0.05.
+      bearing_lo_deg: 136.4
+      bearing_hi_deg: 137.6
+      boundary_m: 1.034
+
+  # ---- freshness, validity and debounce (section 8) ----
+  #
+  # RULE 0, AND IT GOVERNS EVERY VALUE IN THIS SUB-BLOCK: the safe
+  # direction is the DEMANDING one - unknown means intrusion. Never the
+  # reverse.
+
+  # THREE SCAN PERIODS, AND THIS NODE'S OWN VALUE. Deliberately distinct
+  # from obstacle.scan_timeout_s (0.50 s), envelope.stale_window_s
+  # (0.50 s), odometry.joint_state_timeout_s and imu.timeout_s: those
+  # watch different parties for different purposes, and sharing a window
+  # would let one retuning silently retune another (section 8 rule 1).
+  scan_fresh_max_s: 0.30
+
+  # CLEAR IS DEBOUNCED, INTRUSION IS NOT (section 8). Intrusion asserts on
+  # ONE scan - defensible only because the simulated sensor declares no
+  # noise model; a real device of this class evaluates 2-8 consecutive
+  # scans and a noise model added to model.sdf re-opens this. Clear needs
+  # three consecutive fully-valid, fully-clear scans = 0.30 s. Asymmetric
+  # on purpose: instant to demand, slow to release. Downstream the demand
+  # LATCHES anyway (SPEC section 5, ZoneStopDemand, cleared only by the
+  # monitored reset), so this shapes a reported level and never a latch.
+  clear_debounce_scans: 3
+
+  # A SENSOR PRODUCING GARBAGE AT RATE IS NOT A SENSOR (section 8 rule 5).
+  # Above this fraction of invalid samples in one scan the device is
+  # FAULTED and reads intrusion; the fault clears only after three
+  # consecutive scans back under it. 0.05 is a design value.
+  invalid_fault_fraction: 0.05
+  fault_clear_scans: 3
+
+  # THE EVALUATION TICK. The aggregate is re-formed at this rate whether
+  # or not a scan arrived, so a device that goes silent becomes an
+  # intrusion on the freshness rule rather than on the next message that
+  # never comes. 20 Hz is twice the 10 Hz scan rate.
+  evaluate_hz: 20.0
+
+  # ---- the link to the stand-in writer (SPEC section 7.2) ----
+  link:
+    # THE WINDOWS HOST ADDRESS IS A READ-BACK VALUE, NEVER A DOCUMENT'S
+    # (ADR 0006, and SPEC section 7.2 says so explicitly). `auto` means
+    # the node derives it from THIS HOST's own configuration and LOGS
+    # which source produced it: $AMR_FIELD_LINK_HOST if set, else the WSL
+    # default route, else the resolv.conf nameserver. An explicit address
+    # here overrides the derivation and is also logged.
+    host: auto
+
+    # SPEC section 7.2 design value. The writer listens on it; this node
+    # dials it. One TCP connection, one client at a time.
+    port: 45015
+
+    # 1 Hz keepalive, SPEC section 7.2. The writer's FIELD_LINK_STALE_MAX
+    # is 1000 ms, so a ping period equal to that window would race it.
+    # 0.50 s is two pings inside the writer's window.
+    ping_period_s: 0.50
+
+    # One reconnect attempt per second, each logged. While the link is
+    # down this node sends nothing and the writer, by its own contract,
+    # drives the zone channel OPEN after its stale window. The
+    # evaluation's own death is handled by its consumer in the demanding
+    # direction and NOTHING here duplicates that.
+    reconnect_period_s: 1.0
+
+    # HOW LONG A NON-BLOCKING CONNECT IS GIVEN TO COMPLETE before the
+    # attempt is abandoned and a new one started. It is a DEADLINE, never
+    # a wait: the socket is non-blocking and completion is polled with
+    # select() at zero timeout on later evaluation ticks.
+    #
+    # THE FIRST BUILD BLOCKED HERE AND FAILED ITSELF FOR IT. With
+    # socket.create_connection(timeout=2.0) and no writer listening, each
+    # attempt stalled this node's single-threaded executor for the whole
+    # timeout; the scan and /clock queues backed up behind it and the node
+    # then read ITS OWN freshness rule as violated - 0.838-0.996 s of
+    # stamp age against a 0.30 s window - while an independent probe on
+    # the same two topics in the same run measured 0.016 s and 0.027 s.
+    # LESSONS 2026-07-29 states this for a harness; it binds harder on a
+    # node whose other job is to notice that a scanner has gone silent.
+    connect_timeout_s: 2.0
+
+    # ZONE <digit>: THE DIGIT IS THE CIRCUIT LEVEL, fixed by
+    # bridge/STANDIN-WRITER-DESIGN.md section 3 because SPEC section 7.2
+    # left it unassigned, and MATCHED here rather than re-invented - the
+    # listener is built and running-tested.
+    #   ZONE 1 = field clear    -> ZoneDeviceCircuitClosed := TRUE
+    #   ZONE 0 = intrusion, OR this evaluation's own fault verdict
+    #                           -> ZoneDeviceCircuitClosed := FALSE
+    # Wire NC, program NO, rebuilt for a software wire.
+    zone_clear_digit: 1
+    zone_intrusion_digit: 0
+
+  # ---- the transition log (section 7, SPEC section 7.6) ----
+  #
+  # LOAD-BEARING EVIDENCE, NOT A NICETY. Criterion (a) is decided by
+  # CORRELATED RECORDS, because the F-program cannot check a write's
+  # origin (SPEC section 7.6): a zone transition in the writer's log with
+  # no matching line here is NOT criterion-(a) evidence, whatever the
+  # narration says. One file per session, unique name per start, refusing
+  # a collision rather than overwriting (LESSONS 2026-07-28).
+  log_dir: evidence/field_evaluation
 

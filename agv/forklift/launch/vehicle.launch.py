@@ -69,6 +69,7 @@ _CONFIG_YAML = os.path.join(_FORKLIFT_DIR, 'config.yaml')
 _IO_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'forklift_io.py')
 _ZONE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'obstacle_zone.py')
 _TF_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'sensor_tf.py')
+_FIELD_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'field_evaluation.py')
 _WHEEL_ODOM_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'wheel_odometry.py')
 _IMU_GATE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'imu_gate.py')
 _EKF_YAML = os.path.join(_FORKLIFT_DIR, 'ekf.yaml')
@@ -94,6 +95,8 @@ _BRIDGE_ARGS = [
     '{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'.format(_TOPICS['gz_scan_nav']),
     '{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'.format(
         _TOPICS['gz_safety_scanner_front_measurement']),
+    '{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'.format(
+        _TOPICS['gz_safety_scanner_rear_measurement']),
     '{}@sensor_msgs/msg/Imu[gz.msgs.IMU'.format(_TOPICS['gz_imu']),
 ]
 
@@ -106,27 +109,41 @@ _BRIDGE_ARGS = [
 #   front measurement channel  bridged, because a process consumer exists
 #                              for it: obstacle_zone.py, whose plane this
 #                              is (owner ruling, 2026-07-30)
-#   rear measurement channel   not bridged: no process consumer exists. A
-#                              channel is put on the process network when
-#                              something on it consumes the channel, and
-#                              not before
+#   rear measurement channel   BRIDGED 2026-08-06 (m5-12b), under the name
+#                              config.yaml reserved for it. The rule did
+#                              not change - a channel is bridged when
+#                              something on the process side consumes it -
+#                              what changed is that the consumer now
+#                              exists: scripts/field_evaluation.py needs
+#                              BOTH devices, because the protective
+#                              verdict is the union of the two and the
+#                              fork direction is the rear device's to
+#                              watch
 #   either SAFE channel        NEVER a topic, on either transport, under
 #                              any path. It is derived by field
 #                              evaluation from the same rays as the
 #                              measurement channel and reaches the
 #                              F-program off the process network
 #
-# BY WHICH PATH the safe channel reaches the F-program is DESIGN INTENT,
-# NOT SETTLED FACT, and nothing on the bridge list above depends on the
-# answer. ADR 0011 decision 2 makes it configured F-I/O (an ET 200SP F-DI
-# parameterised as the scanner's OSSD pair) whose channel values the
-# S7-PLCSIM Advanced API drives by tag name, this project's analogue of
-# the copper an OSSD pair runs on. That path has never been run; it is
-# settled in the tool by plc/forklift-safety/FIO-FEASIBILITY.md under
-# brief m5-03, whose verdict is still blank. If it answers no, the named
-# fallback is the standard-DB stand-in of plc/forklift-safety/SPEC.md,
-# labelled a stand-in wherever it appears. This launch file bridges no
-# safe channel under either answer.
+# BRIDGING THE REAR MEASUREMENT CHANNEL IS NOT A SAFE CHANNEL APPEARING ON
+# THE NETWORK. It is the same non-safe distance profile its front twin
+# already carried; what field_evaluation.py DERIVES from the two of them
+# is the safe-shaped verdict, and that verdict has no topic and crosses
+# one dedicated TCP link to the stand-in writer instead
+# (plc/forklift-safety/SPEC.md section 7.2). The prohibition that matters
+# is likewise unchanged: no scanner channel feeds a NAVIGATION consumer,
+# and the navigation lidar remains the only input SLAM, AMCL and the
+# costmaps get.
+#
+# BY WHICH PATH the safe channel reaches the F-program was DESIGN INTENT
+# and is now settled, and nothing on the bridge list above depends on the
+# answer either way. ADR 0011 decision 2 named configured F-I/O (an
+# ET 200SP F-DI parameterised as the scanner's OSSD pair) driven by tag
+# name through the S7-PLCSIM Advanced API. plc/forklift-safety/
+# FIO-FEASIBILITY.md ran that probe in the tool and the named fallback is
+# what stands: the standard-DB stand-in of plc/forklift-safety/SPEC.md,
+# written by the stand-in writer, labelled a stand-in wherever it appears.
+# This launch file bridges no safe channel under either answer.
 #
 # THE odom -> base_link TRANSFORM IS NOT ON THAT LIST. It has a bridge
 # node of its own, below, because it is INTERIM and the second node is
@@ -191,6 +208,8 @@ _BRIDGE_REMAPS = [
     (_TOPICS['gz_scan_nav'], _TOPICS['scan']),
     (_TOPICS['gz_safety_scanner_front_measurement'],
      _TOPICS['safety_scanner_front_measurement']),
+    (_TOPICS['gz_safety_scanner_rear_measurement'],
+     _TOPICS['safety_scanner_rear_measurement']),
     (_TOPICS['gz_imu'], _TOPICS['imu']),
 ]
 
@@ -374,6 +393,17 @@ def generate_launch_description():
                     'the m5-07c configuration exactly; it does not leave the '
                     'filter without an IMU.'))
     ld.add_action(DeclareLaunchArgument(
+        'field_evaluation', default_value='false',
+        description='Start scripts/field_evaluation.py, the protective-field '
+                    'evaluation of agv/forklift/FIELD-EVALUATION.md phase 1. '
+                    'It is a MODEL of what a safety-rated scanner does '
+                    'internally, feeding a STAND-IN FOR WIRING, and it is not '
+                    'a safety function: no Category, no Performance Level, no '
+                    'SIL, no PFH (ADR 0011 D5). It publishes no topic - the '
+                    'verdict crosses one dedicated TCP link to the stand-in '
+                    'writer - and it needs that writer listening on the '
+                    'Windows host, which is why it is off by default.'))
+    ld.add_action(DeclareLaunchArgument(
         'seed', default_value='',
         description='Noise seed passed to gz sim, fixing the sign and value '
                     'each sensor bias is drawn with. Empty (the default) '
@@ -524,6 +554,37 @@ def generate_launch_description():
         name='obstacle_zone',
         output='screen',
         condition=IfCondition(nodes),
+    ))
+
+    # ---- the protective-field evaluation (m5-12 phase 1) ----
+    #
+    # OFF BY DEFAULT, AND DELIBERATELY SO. This node dials a TCP link to
+    # the stand-in writer on the Windows host; in every run that is not
+    # exercising the safety chain there is no writer to dial, and a node
+    # logging a refused connection once a second in every M4 and M5 run
+    # would be noise nobody reads. Asking for it explicitly also means the
+    # criterion-(a) evidence records the argument that turned it on rather
+    # than inheriting a default.
+    #
+    # IT PUBLISHES NOTHING. The protective verdict has no ROS topic on
+    # either transport (owner ruling m5-06, checked by
+    # scripts/check_sensor_frames.py section 4); it crosses one dedicated
+    # link, as a real device's OSSD pair crosses only its own copper. So
+    # turning this node on adds no topic to the graph and takes nothing
+    # away from obstacle_zone.py, which keeps reading the front
+    # measurement channel untouched.
+    #
+    # use_sim_time is not optional here. The freshness rule compares a
+    # simulated stamp against this node's own clock; on the system clock
+    # every scan would read 1.8e9 s stale and the verdict would sit at
+    # INTRUSION for ever, which is the safe direction but is not an
+    # evaluation.
+    ld.add_action(ExecuteProcess(
+        cmd=[sys.executable, _FIELD_SCRIPT, '--config', config,
+             '--model', model, '--ros-args', '-p', 'use_sim_time:=true'],
+        name='field_evaluation',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('field_evaluation')),
     ))
 
     return ld

@@ -1,0 +1,249 @@
+2026-08-05T22:12:23.654Z | START | FIELD EVALUATION - a MODEL of what a safety-rated scanner does internally, feeding a STAND-IN FOR WIRING. Not a safety function; no Category, no Performance Level, no SIL, no PFH, no diagnostic coverage (ADR 0011 D5). It reports levels and latches nothing.
+2026-08-05T22:12:23.682Z | START | phase 1 of agv/forklift/FIELD-EVALUATION.md section 12: one STATIC all-direction contour, no case selection, no warning field, no speed enforcement
+2026-08-05T22:12:23.687Z | START | config = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/config.yaml
+2026-08-05T22:12:23.693Z | START | model = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/model.sdf (scanner mounts read from it, not mirrored)
+2026-08-05T22:12:23.699Z | START | front device: topic /forklift/safety_scanner_front/measurement (NON-SAFE measurement channel), mount x=0.700 y=0.450 yaw=0.7853982 rad
+2026-08-05T22:12:23.705Z | START | rear device: topic /forklift/safety_scanner_rear/measurement (NON-SAFE measurement channel), mount x=-0.700 y=-0.450 yaw=-2.3561945 rad
+2026-08-05T22:12:23.711Z | START | contour: corridors x -3.225..2.210 m, y -0.550..+0.550 m in the vehicle frame - the plan outline (-1.875..0.860 m) grown by the protective depth 1.35 m fore and aft, half width 0.55 m
+2026-08-05T22:12:23.718Z | START | self-return clip: rear device, sensor frame -133.0..-71.8 deg, boundary capped at 0.040 m - FIELD GEOMETRY, not a filter applied to samples
+2026-08-05T22:12:23.722Z | START | self-return clip: front device, sensor frame +136.4..+137.6 deg, boundary capped at 1.034 m - FIELD GEOMETRY, not a filter applied to samples
+2026-08-05T22:12:23.729Z | START | failure rules: freshness 0.30 s, clear debounce 3 scans, invalid-fault threshold 5% clearing after 3 scans, evaluation tick 20.0 Hz. Unknown means INTRUSION in every one of them; an empty horizon means CLEAR, because a beyond-range return is a measurement
+2026-08-05T22:12:23.735Z | START | link: 172.19.176.1:45015 - the address was read back from this host (WSL default route (ip route show default)), never taken from a document (ADR 0006). ZONE 1 = field clear, ZONE 0 = intrusion or this evaluation's own fault: the digit is the CIRCUIT LEVEL
+2026-08-05T22:12:23.742Z | START | THE VERDICT HAS NO ROS TOPIC and never will: the safe channel has no topic on either transport (owner ruling m5-06). This log and the writer's session log are the correlated record SPEC 7.6 requires
+2026-08-05T22:12:23.748Z | START | log = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/field_evaluation/field-evaluation-20260805T221223Z-pid136417.log
+2026-08-05T22:12:23.752Z | AGGREGATE | boot verdict INTRUSION: boot: no device has yet proved its field clear
+2026-08-05T22:12:26.446Z | DEVICE | front stamps advancing (seq=1 stamp=0.004000)
+2026-08-05T22:12:26.447Z | DEVICE | front contour built: 275 rays, 275 of them with a live field, boundary 0.100..3.925 m over the live rays, mount (x=0.700 y=0.450 yaw=0.7854 rad), scan window 0.10..5.50 m
+2026-08-05T22:12:26.455Z | DEVICE | rear stamps advancing (seq=1 stamp=0.004000)
+2026-08-05T22:12:26.455Z | DEVICE | rear contour built: 275 rays, 214 of them with a live field, boundary 0.100..2.913 m over the live rays, mount (x=-0.700 y=-0.450 yaw=-2.3562 rad), scan window 0.10..5.50 m
+2026-08-05T22:12:26.506Z | AGGREGATE | unchanged (INTRUSION), reason now: front: field not clear; rear: field not clear
+2026-08-05T22:12:28.531Z | LINK | connect attempt 1 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:28.537Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.968 s outside [0, 0.30] s; rear: scan stamp age 0.968 s outside [0, 0.30] s
+2026-08-05T22:12:30.545Z | LINK | connect attempt 2 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:30.556Z | DEVICE | front CLEAR after 3 consecutive fully-valid fully-clear scans (seq=3 stamp=3.100000)
+2026-08-05T22:12:30.556Z | DEVICE | rear CLEAR after 3 consecutive fully-valid fully-clear scans (seq=3 stamp=3.100000)
+2026-08-05T22:12:30.557Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.888 s outside [0, 0.30] s; rear: scan stamp age 0.888 s outside [0, 0.30] s
+2026-08-05T22:12:32.567Z | LINK | connect attempt 3 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:32.578Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.908 s outside [0, 0.30] s; rear: scan stamp age 0.908 s outside [0, 0.30] s
+2026-08-05T22:12:34.587Z | LINK | connect attempt 4 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:34.594Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.924 s outside [0, 0.30] s; rear: scan stamp age 0.924 s outside [0, 0.30] s
+2026-08-05T22:12:36.602Z | LINK | connect attempt 5 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:36.607Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.838 s outside [0, 0.30] s; rear: scan stamp age 0.838 s outside [0, 0.30] s
+2026-08-05T22:12:38.614Z | LINK | connect attempt 6 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:38.621Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.852 s outside [0, 0.30] s; rear: scan stamp age 0.852 s outside [0, 0.30] s
+2026-08-05T22:12:40.627Z | LINK | connect attempt 7 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:40.635Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.866 s outside [0, 0.30] s; rear: scan stamp age 0.866 s outside [0, 0.30] s
+2026-08-05T22:12:42.644Z | LINK | connect attempt 8 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:42.650Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.880 s outside [0, 0.30] s; rear: scan stamp age 0.880 s outside [0, 0.30] s
+2026-08-05T22:12:44.659Z | LINK | connect attempt 9 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:44.665Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.996 s outside [0, 0.30] s; rear: scan stamp age 0.996 s outside [0, 0.30] s
+2026-08-05T22:12:46.670Z | LINK | connect attempt 10 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:46.678Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.908 s outside [0, 0.30] s; rear: scan stamp age 0.908 s outside [0, 0.30] s
+2026-08-05T22:12:48.688Z | LINK | connect attempt 11 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:48.695Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.926 s outside [0, 0.30] s; rear: scan stamp age 0.926 s outside [0, 0.30] s
+2026-08-05T22:12:50.703Z | LINK | connect attempt 12 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:50.709Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.840 s outside [0, 0.30] s; rear: scan stamp age 0.840 s outside [0, 0.30] s
+2026-08-05T22:12:52.716Z | LINK | connect attempt 13 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:52.721Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.852 s outside [0, 0.30] s; rear: scan stamp age 0.852 s outside [0, 0.30] s
+2026-08-05T22:12:54.727Z | LINK | connect attempt 14 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:54.733Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.864 s outside [0, 0.30] s; rear: scan stamp age 0.864 s outside [0, 0.30] s
+2026-08-05T22:12:56.740Z | LINK | connect attempt 15 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:56.749Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.880 s outside [0, 0.30] s; rear: scan stamp age 0.880 s outside [0, 0.30] s
+2026-08-05T22:12:58.776Z | LINK | connect attempt 16 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:12:58.783Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.898 s outside [0, 0.30] s; rear: scan stamp age 0.898 s outside [0, 0.30] s
+2026-08-05T22:13:00.791Z | LINK | connect attempt 17 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:00.800Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.816 s outside [0, 0.30] s; rear: scan stamp age 0.916 s outside [0, 0.30] s
+2026-08-05T22:13:02.808Z | LINK | connect attempt 18 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:02.815Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.830 s outside [0, 0.30] s; rear: scan stamp age 0.830 s outside [0, 0.30] s
+2026-08-05T22:13:04.823Z | LINK | connect attempt 19 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:04.830Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.946 s outside [0, 0.30] s; rear: scan stamp age 0.946 s outside [0, 0.30] s
+2026-08-05T22:13:06.837Z | LINK | connect attempt 20 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:06.844Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.860 s outside [0, 0.30] s; rear: scan stamp age 0.860 s outside [0, 0.30] s
+2026-08-05T22:13:08.853Z | LINK | connect attempt 21 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:08.862Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.878 s outside [0, 0.30] s; rear: scan stamp age 0.878 s outside [0, 0.30] s
+2026-08-05T22:13:10.872Z | LINK | connect attempt 22 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:10.882Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.898 s outside [0, 0.30] s; rear: scan stamp age 0.898 s outside [0, 0.30] s
+2026-08-05T22:13:12.891Z | LINK | connect attempt 23 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:12.899Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.814 s outside [0, 0.30] s; rear: scan stamp age 0.914 s outside [0, 0.30] s
+2026-08-05T22:13:14.908Z | LINK | connect attempt 24 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:14.914Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.830 s outside [0, 0.30] s; rear: scan stamp age 0.830 s outside [0, 0.30] s
+2026-08-05T22:13:16.921Z | LINK | connect attempt 25 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:16.926Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.842 s outside [0, 0.30] s; rear: scan stamp age 0.842 s outside [0, 0.30] s
+2026-08-05T22:13:18.932Z | LINK | connect attempt 26 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:18.937Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.852 s outside [0, 0.30] s; rear: scan stamp age 0.852 s outside [0, 0.30] s
+2026-08-05T22:13:20.945Z | LINK | connect attempt 27 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:20.954Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.870 s outside [0, 0.30] s; rear: scan stamp age 0.870 s outside [0, 0.30] s
+2026-08-05T22:13:22.964Z | LINK | connect attempt 28 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:22.973Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.888 s outside [0, 0.30] s; rear: scan stamp age 0.888 s outside [0, 0.30] s
+2026-08-05T22:13:24.981Z | LINK | connect attempt 29 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:24.989Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.882 s outside [0, 0.30] s; rear: scan stamp age 0.882 s outside [0, 0.30] s
+2026-08-05T22:13:26.999Z | LINK | connect attempt 30 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:27.010Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.902 s outside [0, 0.30] s; rear: scan stamp age 0.902 s outside [0, 0.30] s
+2026-08-05T22:13:29.036Z | LINK | connect attempt 31 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:29.043Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.816 s outside [0, 0.30] s; rear: scan stamp age 0.916 s outside [0, 0.30] s
+2026-08-05T22:13:31.050Z | LINK | connect attempt 32 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:31.057Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.930 s outside [0, 0.30] s; rear: scan stamp age 0.930 s outside [0, 0.30] s
+2026-08-05T22:13:33.065Z | LINK | connect attempt 33 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:33.070Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.944 s outside [0, 0.30] s; rear: scan stamp age 0.944 s outside [0, 0.30] s
+2026-08-05T22:13:35.077Z | LINK | connect attempt 34 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:35.084Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.858 s outside [0, 0.30] s; rear: scan stamp age 0.858 s outside [0, 0.30] s
+2026-08-05T22:13:37.091Z | LINK | connect attempt 35 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:37.097Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.870 s outside [0, 0.30] s; rear: scan stamp age 0.870 s outside [0, 0.30] s
+2026-08-05T22:13:39.107Z | LINK | connect attempt 36 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:39.117Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.992 s outside [0, 0.30] s; rear: scan stamp age 0.992 s outside [0, 0.30] s
+2026-08-05T22:13:41.124Z | LINK | connect attempt 37 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:41.132Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.906 s outside [0, 0.30] s; rear: scan stamp age 0.906 s outside [0, 0.30] s
+2026-08-05T22:13:43.141Z | LINK | connect attempt 38 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:43.148Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.822 s outside [0, 0.30] s; rear: scan stamp age 0.922 s outside [0, 0.30] s
+2026-08-05T22:13:45.156Z | LINK | connect attempt 39 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:45.162Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.852 s outside [0, 0.30] s; rear: scan stamp age 0.852 s outside [0, 0.30] s
+2026-08-05T22:13:47.171Z | LINK | connect attempt 40 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:47.179Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.970 s outside [0, 0.30] s; rear: scan stamp age 0.970 s outside [0, 0.30] s
+2026-08-05T22:13:49.187Z | LINK | connect attempt 41 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:49.197Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.888 s outside [0, 0.30] s; rear: scan stamp age 0.888 s outside [0, 0.30] s
+2026-08-05T22:13:51.205Z | LINK | connect attempt 42 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:51.215Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.906 s outside [0, 0.30] s; rear: scan stamp age 0.906 s outside [0, 0.30] s
+2026-08-05T22:13:53.224Z | LINK | connect attempt 43 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:53.230Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.820 s outside [0, 0.30] s; rear: scan stamp age 0.920 s outside [0, 0.30] s
+2026-08-05T22:13:55.239Z | LINK | connect attempt 44 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:55.246Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.936 s outside [0, 0.30] s; rear: scan stamp age 0.936 s outside [0, 0.30] s
+2026-08-05T22:13:57.254Z | LINK | connect attempt 45 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:57.261Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.852 s outside [0, 0.30] s; rear: scan stamp age 0.852 s outside [0, 0.30] s
+2026-08-05T22:13:59.286Z | LINK | connect attempt 46 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:13:59.291Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.866 s outside [0, 0.30] s; rear: scan stamp age 0.866 s outside [0, 0.30] s
+2026-08-05T22:14:01.298Z | LINK | connect attempt 47 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:01.309Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.884 s outside [0, 0.30] s; rear: scan stamp age 0.884 s outside [0, 0.30] s
+2026-08-05T22:14:03.320Z | LINK | connect attempt 48 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:03.327Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.902 s outside [0, 0.30] s; rear: scan stamp age 0.902 s outside [0, 0.30] s
+2026-08-05T22:14:05.338Z | LINK | connect attempt 49 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:05.345Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.820 s outside [0, 0.30] s; rear: scan stamp age 0.920 s outside [0, 0.30] s
+2026-08-05T22:14:07.353Z | LINK | connect attempt 50 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:07.360Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.834 s outside [0, 0.30] s; rear: scan stamp age 0.834 s outside [0, 0.30] s
+2026-08-05T22:14:09.366Z | LINK | connect attempt 51 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:09.373Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.848 s outside [0, 0.30] s; rear: scan stamp age 0.848 s outside [0, 0.30] s
+2026-08-05T22:14:11.381Z | LINK | connect attempt 52 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:11.391Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.866 s outside [0, 0.30] s; rear: scan stamp age 0.866 s outside [0, 0.30] s
+2026-08-05T22:14:13.400Z | LINK | connect attempt 53 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:13.410Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.884 s outside [0, 0.30] s; rear: scan stamp age 0.884 s outside [0, 0.30] s
+2026-08-05T22:14:15.418Z | LINK | connect attempt 54 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:15.425Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.998 s outside [0, 0.30] s; rear: scan stamp age 0.998 s outside [0, 0.30] s
+2026-08-05T22:14:17.433Z | LINK | connect attempt 55 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:17.441Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.914 s outside [0, 0.30] s; rear: scan stamp age 1.014 s outside [0, 0.30] s
+2026-08-05T22:14:19.449Z | LINK | connect attempt 56 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:19.456Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.930 s outside [0, 0.30] s; rear: scan stamp age 0.930 s outside [0, 0.30] s
+2026-08-05T22:14:21.465Z | LINK | connect attempt 57 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:21.472Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.846 s outside [0, 0.30] s; rear: scan stamp age 0.846 s outside [0, 0.30] s
+2026-08-05T22:14:23.479Z | LINK | connect attempt 58 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:23.489Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.864 s outside [0, 0.30] s; rear: scan stamp age 0.864 s outside [0, 0.30] s
+2026-08-05T22:14:25.496Z | LINK | connect attempt 59 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:25.502Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.876 s outside [0, 0.30] s; rear: scan stamp age 0.876 s outside [0, 0.30] s
+2026-08-05T22:14:27.528Z | LINK | connect attempt 60 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:27.536Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.994 s outside [0, 0.30] s; rear: scan stamp age 0.994 s outside [0, 0.30] s
+2026-08-05T22:14:29.547Z | LINK | connect attempt 61 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:29.556Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.914 s outside [0, 0.30] s; rear: scan stamp age 0.914 s outside [0, 0.30] s
+2026-08-05T22:14:31.563Z | LINK | connect attempt 62 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:31.570Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.828 s outside [0, 0.30] s; rear: scan stamp age 0.828 s outside [0, 0.30] s
+2026-08-05T22:14:33.577Z | LINK | connect attempt 63 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:33.583Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.840 s outside [0, 0.30] s; rear: scan stamp age 0.840 s outside [0, 0.30] s
+2026-08-05T22:14:35.591Z | LINK | connect attempt 64 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:35.599Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.956 s outside [0, 0.30] s; rear: scan stamp age 0.956 s outside [0, 0.30] s
+2026-08-05T22:14:37.608Z | LINK | connect attempt 65 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:37.618Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.876 s outside [0, 0.30] s; rear: scan stamp age 0.876 s outside [0, 0.30] s
+2026-08-05T22:14:39.625Z | LINK | connect attempt 66 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:39.637Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.894 s outside [0, 0.30] s; rear: scan stamp age 0.894 s outside [0, 0.30] s
+2026-08-05T22:14:41.647Z | LINK | connect attempt 67 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:41.656Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 1.014 s outside [0, 0.30] s; rear: scan stamp age 1.014 s outside [0, 0.30] s
+2026-08-05T22:14:43.664Z | LINK | connect attempt 68 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:43.675Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.832 s outside [0, 0.30] s; rear: scan stamp age 0.832 s outside [0, 0.30] s
+2026-08-05T22:14:45.681Z | LINK | connect attempt 69 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:45.687Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.844 s outside [0, 0.30] s; rear: scan stamp age 0.844 s outside [0, 0.30] s
+2026-08-05T22:14:47.695Z | LINK | connect attempt 70 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:47.703Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.960 s outside [0, 0.30] s; rear: scan stamp age 0.960 s outside [0, 0.30] s
+2026-08-05T22:14:49.712Z | LINK | connect attempt 71 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:49.721Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.878 s outside [0, 0.30] s; rear: scan stamp age 0.878 s outside [0, 0.30] s
+2026-08-05T22:14:51.728Z | LINK | connect attempt 72 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:51.740Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.898 s outside [0, 0.30] s; rear: scan stamp age 0.898 s outside [0, 0.30] s
+2026-08-05T22:14:53.748Z | LINK | connect attempt 73 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:53.756Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.914 s outside [0, 0.30] s; rear: scan stamp age 0.914 s outside [0, 0.30] s
+2026-08-05T22:14:55.764Z | LINK | connect attempt 74 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:55.772Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.830 s outside [0, 0.30] s; rear: scan stamp age 0.830 s outside [0, 0.30] s
+2026-08-05T22:14:57.796Z | LINK | connect attempt 75 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:57.803Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.844 s outside [0, 0.30] s; rear: scan stamp age 0.844 s outside [0, 0.30] s
+2026-08-05T22:14:59.812Z | LINK | connect attempt 76 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:14:59.821Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.862 s outside [0, 0.30] s; rear: scan stamp age 0.862 s outside [0, 0.30] s
+2026-08-05T22:15:01.829Z | LINK | connect attempt 77 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:15:01.840Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.880 s outside [0, 0.30] s; rear: scan stamp age 0.880 s outside [0, 0.30] s
+2026-08-05T22:15:03.850Z | LINK | connect attempt 78 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:15:03.858Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.898 s outside [0, 0.30] s; rear: scan stamp age 0.898 s outside [0, 0.30] s
+2026-08-05T22:15:05.866Z | LINK | connect attempt 79 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:15:05.874Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.914 s outside [0, 0.30] s; rear: scan stamp age 1.014 s outside [0, 0.30] s
+2026-08-05T22:15:07.881Z | LINK | connect attempt 80 to 172.19.176.1:45015 failed: timed out. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-05T22:15:07.891Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.832 s outside [0, 0.30] s; rear: scan stamp age 0.932 s outside [0, 0.30] s
+2026-08-05T22:15:08.957Z | LINK | up: connected to the stand-in writer at 172.19.176.1:45015
+2026-08-05T22:15:08.965Z | SEND | ZONE 0 -> first line on a new connection (a connection is a transition from unknown)
+2026-08-05T22:15:08.966Z | AGGREGATE | unchanged (INTRUSION), reason now: front: scan stamp age 0.908 s outside [0, 0.30] s; rear: scan stamp age 0.908 s outside [0, 0.30] s
+2026-08-05T22:15:08.973Z | SEND | PING keepalive
+2026-08-05T22:15:09.008Z | AGGREGATE | CLEAR - both devices clear (front seq=154 rear seq=154)
+2026-08-05T22:15:09.016Z | SEND | ZONE 1 -> aggregate transition
+2026-08-05T22:15:09.508Z | SEND | PING keepalive
+2026-08-05T22:15:10.058Z | SEND | PING keepalive
+2026-08-05T22:15:10.558Z | SEND | PING keepalive
+2026-08-05T22:15:11.108Z | SEND | PING keepalive
+2026-08-05T22:15:11.608Z | SEND | PING keepalive
+2026-08-05T22:15:12.158Z | SEND | PING keepalive
+2026-08-05T22:15:12.658Z | SEND | PING keepalive
+2026-08-05T22:15:13.158Z | SEND | PING keepalive
+2026-08-05T22:15:13.708Z | SEND | PING keepalive
+2026-08-05T22:15:14.258Z | SEND | PING keepalive
+2026-08-05T22:15:14.758Z | SEND | PING keepalive
+2026-08-05T22:15:15.258Z | SEND | PING keepalive
+2026-08-05T22:15:15.758Z | SEND | PING keepalive
+2026-08-05T22:15:16.308Z | SEND | PING keepalive
+2026-08-05T22:15:16.858Z | SEND | PING keepalive
+2026-08-05T22:15:17.358Z | SEND | PING keepalive
+2026-08-05T22:15:17.908Z | SEND | PING keepalive
+2026-08-05T22:15:18.408Z | SEND | PING keepalive
+2026-08-05T22:15:18.958Z | SEND | PING keepalive
+2026-08-05T22:15:19.458Z | SEND | PING keepalive
+2026-08-05T22:15:20.008Z | SEND | PING keepalive
+2026-08-05T22:15:20.508Z | SEND | PING keepalive
+2026-08-05T22:15:21.058Z | SEND | PING keepalive
+2026-08-05T22:15:21.558Z | SEND | PING keepalive
+2026-08-05T22:15:22.108Z | SEND | PING keepalive
+2026-08-05T22:15:22.608Z | SEND | PING keepalive
+2026-08-05T22:15:23.108Z | SEND | PING keepalive
+2026-08-05T22:15:23.608Z | SEND | PING keepalive
+2026-08-05T22:15:24.108Z | SEND | PING keepalive
+2026-08-05T22:15:24.658Z | SEND | PING keepalive
+2026-08-05T22:15:25.158Z | SEND | PING keepalive
+2026-08-05T22:15:25.708Z | SEND | PING keepalive
+2026-08-05T22:15:26.208Z | SEND | PING keepalive
+2026-08-05T22:15:26.708Z | SEND | PING keepalive
+2026-08-05T22:15:27.258Z | SEND | PING keepalive
+2026-08-05T22:15:27.825Z | SEND | PING keepalive
+2026-08-05T22:15:28.375Z | SEND | PING keepalive
+2026-08-05T22:15:28.924Z | SEND | PING keepalive
+2026-08-05T22:15:29.424Z | SEND | PING keepalive
+2026-08-05T22:15:29.925Z | SEND | PING keepalive
+2026-08-05T22:15:30.475Z | SEND | PING keepalive
+2026-08-05T22:15:31.025Z | SEND | PING keepalive
+2026-08-05T22:15:31.575Z | SEND | PING keepalive
+2026-08-05T22:15:32.125Z | SEND | PING keepalive
+2026-08-05T22:15:32.675Z | SEND | PING keepalive
+2026-08-05T22:15:33.175Z | SEND | PING keepalive
+2026-08-05T22:15:33.725Z | SEND | PING keepalive
+2026-08-05T22:15:34.275Z | SEND | PING keepalive
+2026-08-05T22:15:34.775Z | SEND | PING keepalive
+2026-08-05T22:15:35.325Z | SEND | PING keepalive
+2026-08-05T22:15:35.874Z | SEND | PING keepalive
+2026-08-05T22:15:36.375Z | SEND | PING keepalive
+2026-08-05T22:15:36.875Z | SEND | PING keepalive
+2026-08-05T22:15:37.425Z | SEND | PING keepalive
+2026-08-05T22:15:37.925Z | SEND | PING keepalive
+2026-08-05T22:15:38.475Z | SEND | PING keepalive
+2026-08-05T22:15:38.975Z | SEND | PING keepalive
+2026-08-05T22:15:39.525Z | SEND | PING keepalive
+2026-08-05T22:15:40.074Z | SEND | PING keepalive
+2026-08-05T22:15:40.575Z | SEND | PING keepalive
+2026-08-05T22:15:40.702Z | LINK | down (this node is shutting down). The writer converts the silence into an open zone channel within its own 1 s stale window
+2026-08-05T22:15:40.708Z | EXIT | field evaluation stopped. The writer sees the link die and drives ZoneDeviceCircuitClosed FALSE within FIELD_LINK_STALE_MAX = 1 s: loss of the intrusion source reads as an intrusion, never as a clear field

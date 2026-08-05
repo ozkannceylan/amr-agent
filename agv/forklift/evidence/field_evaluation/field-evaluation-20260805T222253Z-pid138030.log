@@ -1,0 +1,240 @@
+2026-08-05T22:22:53.121Z | START | FIELD EVALUATION - a MODEL of what a safety-rated scanner does internally, feeding a STAND-IN FOR WIRING. Not a safety function; no Category, no Performance Level, no SIL, no PFH, no diagnostic coverage (ADR 0011 D5). It reports levels and latches nothing.
+2026-08-05T22:22:53.149Z | START | phase 1 of agv/forklift/FIELD-EVALUATION.md section 12: one STATIC all-direction contour, no case selection, no warning field, no speed enforcement
+2026-08-05T22:22:53.154Z | START | config = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/config.yaml
+2026-08-05T22:22:53.161Z | START | model = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/model.sdf (scanner mounts read from it, not mirrored)
+2026-08-05T22:22:53.166Z | START | front device: topic /forklift/safety_scanner_front/measurement (NON-SAFE measurement channel), mount x=0.700 y=0.450 yaw=0.7853982 rad
+2026-08-05T22:22:53.171Z | START | rear device: topic /forklift/safety_scanner_rear/measurement (NON-SAFE measurement channel), mount x=-0.700 y=-0.450 yaw=-2.3561945 rad
+2026-08-05T22:22:53.177Z | START | contour: corridors x -3.225..2.210 m, y -0.550..+0.550 m in the vehicle frame - the plan outline (-1.875..0.860 m) grown by the protective depth 1.35 m fore and aft, half width 0.55 m
+2026-08-05T22:22:53.185Z | START | self-return clip: rear device, sensor frame -133.0..-71.8 deg, boundary capped at 0.040 m - FIELD GEOMETRY, not a filter applied to samples
+2026-08-05T22:22:53.191Z | START | self-return clip: front device, sensor frame +136.4..+137.6 deg, boundary capped at 1.034 m - FIELD GEOMETRY, not a filter applied to samples
+2026-08-05T22:22:53.198Z | START | failure rules: freshness 0.30 s, clear debounce 3 scans, invalid-fault threshold 5% clearing after 3 scans, evaluation tick 20.0 Hz. Unknown means INTRUSION in every one of them; an empty horizon means CLEAR, because a beyond-range return is a measurement
+2026-08-05T22:22:53.205Z | START | link: 172.19.176.1:45015 - the address was read back from this host (WSL default route (ip route show default)), never taken from a document (ADR 0006). ZONE 1 = field clear, ZONE 0 = intrusion or this evaluation's own fault: the digit is the CIRCUIT LEVEL
+2026-08-05T22:22:53.211Z | START | THE VERDICT HAS NO ROS TOPIC and never will: the safe channel has no topic on either transport (owner ruling m5-06). This log and the writer's session log are the correlated record SPEC 7.6 requires
+2026-08-05T22:22:53.216Z | START | log = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/field_evaluation/field-evaluation-20260805T222253Z-pid138030.log
+2026-08-05T22:22:53.222Z | AGGREGATE | boot verdict INTRUSION: boot: no device has yet proved its field clear
+2026-08-05T22:22:53.231Z | DEVICE | rear stamps advancing (seq=1 stamp=414.900000)
+2026-08-05T22:22:53.231Z | DEVICE | rear contour built: 275 rays, 214 of them with a live field, boundary 0.100..2.913 m over the live rays, mount (x=-0.700 y=-0.450 yaw=-2.3562 rad), scan window 0.10..5.50 m
+2026-08-05T22:22:53.340Z | DEVICE | rear CLEAR after 3 consecutive fully-valid fully-clear scans (seq=3 stamp=415.100000)
+2026-08-05T22:22:54.095Z | AGGREGATE | unchanged (INTRUSION), reason now: front: no scan yet received
+2026-08-05T22:22:54.112Z | LINK | up: connected to the stand-in writer at 172.19.176.1:45015
+2026-08-05T22:22:54.118Z | SEND | ZONE 0 -> first line on a new connection (a connection is a transition from unknown)
+2026-08-05T22:22:54.141Z | DEVICE | front stamps advancing (seq=1 stamp=415.000000)
+2026-08-05T22:22:54.142Z | DEVICE | front contour built: 275 rays, 275 of them with a live field, boundary 0.100..3.925 m over the live rays, mount (x=0.700 y=0.450 yaw=0.7854 rad), scan window 0.10..5.50 m
+2026-08-05T22:22:54.143Z | DEVICE | front CLEAR after 3 consecutive fully-valid fully-clear scans (seq=3 stamp=415.200000)
+2026-08-05T22:22:54.163Z | AGGREGATE | CLEAR - both devices clear (front seq=10 rear seq=11)
+2026-08-05T22:22:54.171Z | SEND | ZONE 1 -> aggregate transition
+2026-08-05T22:23:04.730Z | AGGREGATE | INTRUSION - rear: scan stamp age 0.300 s outside [0, 0.30] s (front seq=115 rear seq=114)
+2026-08-05T22:23:04.738Z | SEND | ZONE 0 -> aggregate transition
+2026-08-05T22:23:04.780Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.350 s outside [0, 0.30] s
+2026-08-05T22:23:04.831Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.400 s outside [0, 0.30] s
+2026-08-05T22:23:04.880Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.450 s outside [0, 0.30] s
+2026-08-05T22:23:04.930Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.500 s outside [0, 0.30] s
+2026-08-05T22:23:04.980Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.550 s outside [0, 0.30] s
+2026-08-05T22:23:05.030Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.600 s outside [0, 0.30] s
+2026-08-05T22:23:05.080Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.650 s outside [0, 0.30] s
+2026-08-05T22:23:05.130Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.700 s outside [0, 0.30] s
+2026-08-05T22:23:05.180Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.750 s outside [0, 0.30] s
+2026-08-05T22:23:05.230Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.800 s outside [0, 0.30] s
+2026-08-05T22:23:05.280Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.850 s outside [0, 0.30] s
+2026-08-05T22:23:05.330Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.900 s outside [0, 0.30] s
+2026-08-05T22:23:05.380Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 0.950 s outside [0, 0.30] s
+2026-08-05T22:23:05.430Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.000 s outside [0, 0.30] s
+2026-08-05T22:23:05.480Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.050 s outside [0, 0.30] s
+2026-08-05T22:23:05.530Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.100 s outside [0, 0.30] s
+2026-08-05T22:23:05.580Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.150 s outside [0, 0.30] s
+2026-08-05T22:23:05.630Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.200 s outside [0, 0.30] s
+2026-08-05T22:23:05.680Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.250 s outside [0, 0.30] s
+2026-08-05T22:23:05.730Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.300 s outside [0, 0.30] s
+2026-08-05T22:23:05.780Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.350 s outside [0, 0.30] s
+2026-08-05T22:23:05.830Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.400 s outside [0, 0.30] s
+2026-08-05T22:23:05.880Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.450 s outside [0, 0.30] s
+2026-08-05T22:23:05.930Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.500 s outside [0, 0.30] s
+2026-08-05T22:23:05.980Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.550 s outside [0, 0.30] s
+2026-08-05T22:23:06.031Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.600 s outside [0, 0.30] s
+2026-08-05T22:23:06.080Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.650 s outside [0, 0.30] s
+2026-08-05T22:23:06.131Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.700 s outside [0, 0.30] s
+2026-08-05T22:23:06.180Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.750 s outside [0, 0.30] s
+2026-08-05T22:23:06.231Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.800 s outside [0, 0.30] s
+2026-08-05T22:23:06.280Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.850 s outside [0, 0.30] s
+2026-08-05T22:23:06.330Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.900 s outside [0, 0.30] s
+2026-08-05T22:23:06.380Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 1.950 s outside [0, 0.30] s
+2026-08-05T22:23:06.430Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.000 s outside [0, 0.30] s
+2026-08-05T22:23:06.480Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.050 s outside [0, 0.30] s
+2026-08-05T22:23:06.530Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.100 s outside [0, 0.30] s
+2026-08-05T22:23:06.580Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.150 s outside [0, 0.30] s
+2026-08-05T22:23:06.630Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.200 s outside [0, 0.30] s
+2026-08-05T22:23:06.680Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.250 s outside [0, 0.30] s
+2026-08-05T22:23:06.730Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.300 s outside [0, 0.30] s
+2026-08-05T22:23:06.781Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.350 s outside [0, 0.30] s
+2026-08-05T22:23:06.830Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.400 s outside [0, 0.30] s
+2026-08-05T22:23:06.880Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.450 s outside [0, 0.30] s
+2026-08-05T22:23:06.930Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.500 s outside [0, 0.30] s
+2026-08-05T22:23:06.980Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.550 s outside [0, 0.30] s
+2026-08-05T22:23:07.031Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.600 s outside [0, 0.30] s
+2026-08-05T22:23:07.080Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.650 s outside [0, 0.30] s
+2026-08-05T22:23:07.131Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.700 s outside [0, 0.30] s
+2026-08-05T22:23:07.180Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.750 s outside [0, 0.30] s
+2026-08-05T22:23:07.230Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.800 s outside [0, 0.30] s
+2026-08-05T22:23:07.280Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.850 s outside [0, 0.30] s
+2026-08-05T22:23:07.330Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.900 s outside [0, 0.30] s
+2026-08-05T22:23:07.380Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 2.950 s outside [0, 0.30] s
+2026-08-05T22:23:07.430Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.000 s outside [0, 0.30] s
+2026-08-05T22:23:07.480Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.050 s outside [0, 0.30] s
+2026-08-05T22:23:07.530Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.100 s outside [0, 0.30] s
+2026-08-05T22:23:07.581Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.150 s outside [0, 0.30] s
+2026-08-05T22:23:07.630Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.200 s outside [0, 0.30] s
+2026-08-05T22:23:07.680Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.250 s outside [0, 0.30] s
+2026-08-05T22:23:07.730Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.300 s outside [0, 0.30] s
+2026-08-05T22:23:07.780Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.350 s outside [0, 0.30] s
+2026-08-05T22:23:07.831Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.400 s outside [0, 0.30] s
+2026-08-05T22:23:07.880Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.450 s outside [0, 0.30] s
+2026-08-05T22:23:07.930Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.500 s outside [0, 0.30] s
+2026-08-05T22:23:07.980Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.550 s outside [0, 0.30] s
+2026-08-05T22:23:08.030Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.600 s outside [0, 0.30] s
+2026-08-05T22:23:08.080Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.650 s outside [0, 0.30] s
+2026-08-05T22:23:08.130Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.700 s outside [0, 0.30] s
+2026-08-05T22:23:08.180Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.750 s outside [0, 0.30] s
+2026-08-05T22:23:08.231Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.800 s outside [0, 0.30] s
+2026-08-05T22:23:08.280Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.850 s outside [0, 0.30] s
+2026-08-05T22:23:08.330Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.900 s outside [0, 0.30] s
+2026-08-05T22:23:08.380Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 3.950 s outside [0, 0.30] s
+2026-08-05T22:23:08.430Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.000 s outside [0, 0.30] s
+2026-08-05T22:23:08.480Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.050 s outside [0, 0.30] s
+2026-08-05T22:23:08.530Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.100 s outside [0, 0.30] s
+2026-08-05T22:23:08.581Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.150 s outside [0, 0.30] s
+2026-08-05T22:23:08.630Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.200 s outside [0, 0.30] s
+2026-08-05T22:23:08.681Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.250 s outside [0, 0.30] s
+2026-08-05T22:23:08.730Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.300 s outside [0, 0.30] s
+2026-08-05T22:23:08.780Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.350 s outside [0, 0.30] s
+2026-08-05T22:23:08.831Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.400 s outside [0, 0.30] s
+2026-08-05T22:23:08.881Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.450 s outside [0, 0.30] s
+2026-08-05T22:23:08.930Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.500 s outside [0, 0.30] s
+2026-08-05T22:23:08.980Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.550 s outside [0, 0.30] s
+2026-08-05T22:23:09.030Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.600 s outside [0, 0.30] s
+2026-08-05T22:23:09.080Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.650 s outside [0, 0.30] s
+2026-08-05T22:23:09.130Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.700 s outside [0, 0.30] s
+2026-08-05T22:23:09.180Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.750 s outside [0, 0.30] s
+2026-08-05T22:23:09.230Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.800 s outside [0, 0.30] s
+2026-08-05T22:23:09.280Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.850 s outside [0, 0.30] s
+2026-08-05T22:23:09.330Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.900 s outside [0, 0.30] s
+2026-08-05T22:23:09.381Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 4.950 s outside [0, 0.30] s
+2026-08-05T22:23:09.430Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.000 s outside [0, 0.30] s
+2026-08-05T22:23:09.480Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.050 s outside [0, 0.30] s
+2026-08-05T22:23:09.531Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.100 s outside [0, 0.30] s
+2026-08-05T22:23:09.580Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.150 s outside [0, 0.30] s
+2026-08-05T22:23:09.630Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.200 s outside [0, 0.30] s
+2026-08-05T22:23:09.680Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.250 s outside [0, 0.30] s
+2026-08-05T22:23:09.730Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.300 s outside [0, 0.30] s
+2026-08-05T22:23:09.780Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.350 s outside [0, 0.30] s
+2026-08-05T22:23:09.831Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.400 s outside [0, 0.30] s
+2026-08-05T22:23:09.880Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.450 s outside [0, 0.30] s
+2026-08-05T22:23:09.930Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.500 s outside [0, 0.30] s
+2026-08-05T22:23:09.980Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.550 s outside [0, 0.30] s
+2026-08-05T22:23:10.030Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.600 s outside [0, 0.30] s
+2026-08-05T22:23:10.080Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.650 s outside [0, 0.30] s
+2026-08-05T22:23:10.130Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.700 s outside [0, 0.30] s
+2026-08-05T22:23:10.180Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.750 s outside [0, 0.30] s
+2026-08-05T22:23:10.230Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.800 s outside [0, 0.30] s
+2026-08-05T22:23:10.280Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.850 s outside [0, 0.30] s
+2026-08-05T22:23:10.330Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.900 s outside [0, 0.30] s
+2026-08-05T22:23:10.381Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 5.950 s outside [0, 0.30] s
+2026-08-05T22:23:10.430Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.000 s outside [0, 0.30] s
+2026-08-05T22:23:10.480Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.050 s outside [0, 0.30] s
+2026-08-05T22:23:10.530Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.100 s outside [0, 0.30] s
+2026-08-05T22:23:10.580Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.150 s outside [0, 0.30] s
+2026-08-05T22:23:10.630Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.200 s outside [0, 0.30] s
+2026-08-05T22:23:10.680Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.250 s outside [0, 0.30] s
+2026-08-05T22:23:10.730Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.300 s outside [0, 0.30] s
+2026-08-05T22:23:10.780Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.350 s outside [0, 0.30] s
+2026-08-05T22:23:10.830Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.400 s outside [0, 0.30] s
+2026-08-05T22:23:10.880Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.450 s outside [0, 0.30] s
+2026-08-05T22:23:10.930Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.500 s outside [0, 0.30] s
+2026-08-05T22:23:10.980Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.550 s outside [0, 0.30] s
+2026-08-05T22:23:11.030Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.600 s outside [0, 0.30] s
+2026-08-05T22:23:11.080Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.650 s outside [0, 0.30] s
+2026-08-05T22:23:11.130Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.700 s outside [0, 0.30] s
+2026-08-05T22:23:11.180Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.750 s outside [0, 0.30] s
+2026-08-05T22:23:11.231Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.800 s outside [0, 0.30] s
+2026-08-05T22:23:11.280Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.850 s outside [0, 0.30] s
+2026-08-05T22:23:11.330Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.900 s outside [0, 0.30] s
+2026-08-05T22:23:11.380Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 6.950 s outside [0, 0.30] s
+2026-08-05T22:23:11.430Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.000 s outside [0, 0.30] s
+2026-08-05T22:23:11.480Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.050 s outside [0, 0.30] s
+2026-08-05T22:23:11.530Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.100 s outside [0, 0.30] s
+2026-08-05T22:23:11.580Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.150 s outside [0, 0.30] s
+2026-08-05T22:23:11.630Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.200 s outside [0, 0.30] s
+2026-08-05T22:23:11.680Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.250 s outside [0, 0.30] s
+2026-08-05T22:23:11.730Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.300 s outside [0, 0.30] s
+2026-08-05T22:23:11.780Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.350 s outside [0, 0.30] s
+2026-08-05T22:23:11.830Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.400 s outside [0, 0.30] s
+2026-08-05T22:23:11.881Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.450 s outside [0, 0.30] s
+2026-08-05T22:23:11.930Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.500 s outside [0, 0.30] s
+2026-08-05T22:23:11.980Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.550 s outside [0, 0.30] s
+2026-08-05T22:23:12.031Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.600 s outside [0, 0.30] s
+2026-08-05T22:23:12.080Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.650 s outside [0, 0.30] s
+2026-08-05T22:23:12.130Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.700 s outside [0, 0.30] s
+2026-08-05T22:23:12.180Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.750 s outside [0, 0.30] s
+2026-08-05T22:23:12.230Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.800 s outside [0, 0.30] s
+2026-08-05T22:23:12.280Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.850 s outside [0, 0.30] s
+2026-08-05T22:23:12.330Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.900 s outside [0, 0.30] s
+2026-08-05T22:23:12.380Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 7.950 s outside [0, 0.30] s
+2026-08-05T22:23:12.431Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.000 s outside [0, 0.30] s
+2026-08-05T22:23:12.480Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.050 s outside [0, 0.30] s
+2026-08-05T22:23:12.530Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.100 s outside [0, 0.30] s
+2026-08-05T22:23:12.580Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.150 s outside [0, 0.30] s
+2026-08-05T22:23:12.630Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.200 s outside [0, 0.30] s
+2026-08-05T22:23:12.689Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.250 s outside [0, 0.30] s
+2026-08-05T22:23:12.737Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.300 s outside [0, 0.30] s
+2026-08-05T22:23:12.787Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.350 s outside [0, 0.30] s
+2026-08-05T22:23:12.837Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.400 s outside [0, 0.30] s
+2026-08-05T22:23:12.888Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.450 s outside [0, 0.30] s
+2026-08-05T22:23:12.937Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.500 s outside [0, 0.30] s
+2026-08-05T22:23:12.987Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.550 s outside [0, 0.30] s
+2026-08-05T22:23:13.037Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.600 s outside [0, 0.30] s
+2026-08-05T22:23:13.087Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.650 s outside [0, 0.30] s
+2026-08-05T22:23:13.137Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.700 s outside [0, 0.30] s
+2026-08-05T22:23:13.187Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.750 s outside [0, 0.30] s
+2026-08-05T22:23:13.237Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.800 s outside [0, 0.30] s
+2026-08-05T22:23:13.287Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.850 s outside [0, 0.30] s
+2026-08-05T22:23:13.337Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.900 s outside [0, 0.30] s
+2026-08-05T22:23:13.387Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 8.950 s outside [0, 0.30] s
+2026-08-05T22:23:13.437Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.000 s outside [0, 0.30] s
+2026-08-05T22:23:13.487Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.050 s outside [0, 0.30] s
+2026-08-05T22:23:13.537Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.100 s outside [0, 0.30] s
+2026-08-05T22:23:13.587Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.150 s outside [0, 0.30] s
+2026-08-05T22:23:13.637Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.200 s outside [0, 0.30] s
+2026-08-05T22:23:13.687Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.250 s outside [0, 0.30] s
+2026-08-05T22:23:13.737Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.300 s outside [0, 0.30] s
+2026-08-05T22:23:13.787Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.350 s outside [0, 0.30] s
+2026-08-05T22:23:13.837Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.400 s outside [0, 0.30] s
+2026-08-05T22:23:13.887Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.450 s outside [0, 0.30] s
+2026-08-05T22:23:13.937Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.500 s outside [0, 0.30] s
+2026-08-05T22:23:13.987Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.550 s outside [0, 0.30] s
+2026-08-05T22:23:14.037Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.600 s outside [0, 0.30] s
+2026-08-05T22:23:14.087Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.650 s outside [0, 0.30] s
+2026-08-05T22:23:14.137Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.700 s outside [0, 0.30] s
+2026-08-05T22:23:14.187Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.750 s outside [0, 0.30] s
+2026-08-05T22:23:14.238Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.800 s outside [0, 0.30] s
+2026-08-05T22:23:14.287Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.850 s outside [0, 0.30] s
+2026-08-05T22:23:14.337Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.900 s outside [0, 0.30] s
+2026-08-05T22:23:14.387Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 9.950 s outside [0, 0.30] s
+2026-08-05T22:23:14.437Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.000 s outside [0, 0.30] s
+2026-08-05T22:23:14.487Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.050 s outside [0, 0.30] s
+2026-08-05T22:23:14.537Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.100 s outside [0, 0.30] s
+2026-08-05T22:23:14.587Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.150 s outside [0, 0.30] s
+2026-08-05T22:23:14.637Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.200 s outside [0, 0.30] s
+2026-08-05T22:23:14.687Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.250 s outside [0, 0.30] s
+2026-08-05T22:23:14.737Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.300 s outside [0, 0.30] s
+2026-08-05T22:23:14.787Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.350 s outside [0, 0.30] s
+2026-08-05T22:23:14.837Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.400 s outside [0, 0.30] s
+2026-08-05T22:23:14.887Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.450 s outside [0, 0.30] s
+2026-08-05T22:23:14.937Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.500 s outside [0, 0.30] s
+2026-08-05T22:23:14.987Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.550 s outside [0, 0.30] s
+2026-08-05T22:23:15.037Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.600 s outside [0, 0.30] s
+2026-08-05T22:23:15.087Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.650 s outside [0, 0.30] s
+2026-08-05T22:23:15.137Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.700 s outside [0, 0.30] s
+2026-08-05T22:23:15.187Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.750 s outside [0, 0.30] s
+2026-08-05T22:23:15.237Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.800 s outside [0, 0.30] s
+2026-08-05T22:23:15.287Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: scan stamp age 10.850 s outside [0, 0.30] s
+2026-08-05T22:23:15.337Z | AGGREGATE | CLEAR - both devices clear (front seq=221 rear seq=121)
+2026-08-05T22:23:15.344Z | SEND | ZONE 1 -> aggregate transition
