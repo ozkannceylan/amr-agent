@@ -43,8 +43,13 @@ remains the input path.
     The M5 row's criterion (a) is rewritten and is the only criterion text any
     ADR has changed. Report: docs/reports/m5-20-criterion-a-amendment.md.
   - (3) m5-15 remains open, now written against ADR 0015 D1.
-  - **Sweep residue from m5-20 — twelve locations state something the verdict
-    falsifies; listed, not edited, each owned by its layer:** five agv files
+  - **Sweep residue — fourteen locations, not twelve.** The m5-23 judge found
+    two the m5-20 sweep missed: **`FIO-FEASIBILITY.md` §6**, whose retired
+    "driven by *Modify* … inert by construction" text the verdict section
+    actively routes readers into (m5-15's rewrite takes it), and **PLAN.md's
+    session-handover paragraph**, which still said the verdict was blank while
+    the same file's Wave 0 recorded it — corrected 2026-08-05. The original
+    twelve, listed, not edited, each owned by its layer: five agv files
     still say "verdict is blank" (`model.sdf`, `README.md`, `config.yaml`,
     `launch/vehicle.launch.py`, `EVIDENCE_SENSOR_COVERAGE.md` §10c); plc
     `forklift-safety/SPEC.md` §7 + §2 F3 + §4.2 step 8 + §9 T6 carry the
@@ -239,25 +244,33 @@ adopted. **No invariant touched** — every crossing rides an existing seam.
 - ADR 0016's F3–F7 are `[snippet]`-graded: re-verify before any is made
   load-bearing beyond that ADR (the ADR 0014 rule).
 
-## BLOCKER-CLASS — Nav2 route regression, found 2026-08-05 by m5-24
-The m5-10 straight-route goal **no longer completes**, and it is **not** the
-vehicle image's doing: m5-24 ran the identical goal on the **untouched ungated
-m5-10 chain** in the same session and got the same failure.
+## BLOCKER-CLASS — the Nav2 route has never completed on the showcase machine
+**Reframed 2026-08-05 by the m5-23 judge; the first framing was wrong and the
+correction matters.** This was written up as a *regression* caused by m5-21's
+package install. It is not. `agv/forklift/EVIDENCE_NAV2.md` §0 states in its own
+environment block that every m5-10 figure is a **project session container** run
+(Ubuntu 24.04, **4 cores**, headless) and says outright *"Nothing here has been
+reproduced on the owner's WSL machine, and the M5 showcase runs there."*
 
-| | Committed (m5-10) | 2026-08-05 |
+| | Committed (m5-10) | 2026-08-05, WSL |
 |---|---|---|
 | outcome | SUCCEEDED in 13.40 s | **TIMEOUT at 90 s** |
 | final | 0.183 m absolute | **0.628 m** |
+| host | container, 4 cores | WSL, 20 cores |
+| nav2 | 1.3.12 | 1.3.12 |
 
-The prime suspect is the environment change of the same day: m5-21 replaced the
-`.deb` overlay with system packages, so the Nav2 build and the whole Fast-DDS
-set moved underneath the committed figures. That is a hypothesis, not a
-diagnosis — nobody has bisected it. **Nothing was tuned**, correctly: m5-24 was
-forbidden to, and tuning before diagnosis would have destroyed the evidence.
-Done when a brief establishes the cause — old vs new Nav2 build, DDS, machine
-load, or a real navigation defect — and says whether the committed m5-10 and
-m5-08e figures still stand on the installed stack. **Until then, treat every
-Nav2 figure in the evidence as qualified by the overlay it was measured under.**
+So the 2026-08-05 run is not a regression — it is the **first attempt on the
+showcase platform, and it failed**. The package hypothesis is dead beside it:
+the Nav2 version is the same on both sides. **Roadmap criterion (d) currently
+rests entirely on container evidence that the showcase platform contradicts** —
+LESSONS 2026-07-27's container-as-proof mistake, recurring.
+
+Done when the route is either made to complete on WSL and re-measured there, or
+the failure is diagnosed and criterion (d)'s evidence is restated against a
+platform it actually holds on. **Nothing was tuned**, correctly: m5-24 was
+forbidden to, and tuning before diagnosis destroys the evidence.
+Beside it: `EVIDENCE_NAV2.md` §0 already carries its qualifier honestly —
+the fault was in the reader, not the file.
 
 ## ADR 0016 Phase 1 — CLOSED 2026-08-05 (m5-24), two items left
 - **Owner decision: where does the allocation table live?** ADR 0016 D2 puts it

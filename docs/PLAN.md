@@ -138,13 +138,14 @@ The vehicle side of M5 is built and evidenced through Nav2. The owner is
 pausing agent work here to settle the PLC questions first, so a later session
 should expect the next instruction to concern the PLC half, not the vehicle.
 
-**The one hard external dependency.** `plc/forklift-safety/FIO-FEASIBILITY.md`
-is written and its verdict section is blank: five owner-executed steps in TIA
-Portal and PLCSIM Advanced that settle whether the simulated scanner can drive
-real configured F-I/O through the PLCSIM Advanced API by tag name. It blocks
-m5-15 (the F-program spec) and nothing else. A NO verdict also reopens
-roadmap criterion (a) — that blocker is stated in docs/TODO.md and was
-deferred by owner ruling until the verdict is in, rather than pre-decided.
+**The one hard external dependency — SETTLED 2026-08-04, this paragraph is kept
+as history.** `plc/forklift-safety/FIO-FEASIBILITY.md` was written with its
+verdict section blank, awaiting five owner-executed steps in TIA Portal and
+PLCSIM Advanced. Those steps ran: the verdict is **`ADR 0011 D2 fallback`**
+(§7), the configured F-I/O path answered no, and criterion (a) was amended by
+**ADR 0015** rather than left reopened. m5-15 is unblocked and is written
+against the automated stand-in stimulus. Wave 0 above carries the current
+statement; nothing in this handover section is still pending.
 
 **Agent discipline for the next session**, learned the hard way here: run ONE
 agent at a time. Parallel fleets both hit usage limits sooner and multiply the

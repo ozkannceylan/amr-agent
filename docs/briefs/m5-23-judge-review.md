@@ -59,6 +59,16 @@ Look specifically for:
    evidence that cannot be reproduced from what is written, naming that
    violates CLAUDE.md §9.
 
+8. **The Nav2 route regression found 2026-08-05 (docs/TODO.md, blocker-class).**
+   The m5-10 straight-route goal SUCCEEDED in 13.40 s at 0.183 m when
+   committed; on 2026-08-05 it TIMED OUT at 90 s at 0.628 m — and on the
+   **untouched** m5-10 chain, so the vehicle image did not cause it. Nobody has
+   bisected it. Judge the consequence, not the cause: **how much of the
+   committed M5 evidence still stands** if the installed stack navigates
+   differently from the overlay it was measured on? Say which specific
+   figures — m5-08e localization, m5-10 Nav2, m5-11 gate — are now unqualified
+   claims, and whether any gate criterion currently rests on one.
+
 For each finding: file, the claim, why it fails, and what would make it stand.
 Rank by severity. Say plainly which findings **block the gate** and which are
 housekeeping.
