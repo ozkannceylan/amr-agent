@@ -1,0 +1,37 @@
+registration  theta -0.007915259 rad  t (+6.029223, +5.541460) m  FLOOR rms 0.0404 MAX 0.1411 m
+STATION  world (+1.0000, +7.0000) yaw +0.0000  ->  map (+7.0846, +12.5333) yaw -0.0079   checker general_goal_checker
+STAGING  world (-3.5000, +7.0000) yaw +0.0000  ->  map (+2.5847, +12.5689) yaw -0.0079   checker staging_goal_checker
+d = 4.500 m back along the goal heading; go-arounds bounded at 2
+
+LEGS
+  stage        SUCCEEDED             6.40 s  believed 0.117 m / +0.27 deg  truth 0.163 m / +0.56 deg  entry-heading +0.34 deg  reversals-after-entry 0
+  STAGING STOP heading  believed +0.265 deg  truth +0.561 deg   (against the approach axis)
+  STAGING STOP offset   longitudinal -0.1522 m   lateral +0.0589 m   (truth)
+  approach0: MISS DETECTED - entered the position circle at +17.12 deg, outside the 8.594 deg window; abandoning the approach rather than correcting inside the circle
+  approach0    CANCELED             15.53 s  believed 0.100 m / +19.36 deg  truth 0.043 m / +22.55 deg  entry-heading +17.12 deg  reversals-after-entry 0
+               MISS ABORT: entered the position circle at +17.12 deg, outside the 8.594 deg window
+  goaround0    SUCCEEDED            69.45 s  believed 0.275 m / -17.81 deg  truth 0.395 m / -18.20 deg  entry-heading -15.76 deg  reversals-after-entry 0
+  approach1: MISS DETECTED - entered the position circle at +34.14 deg, outside the 8.594 deg window; abandoning the approach rather than correcting inside the circle
+  approach1    CANCELED             11.73 s  believed 0.259 m / +42.54 deg  truth 0.314 m / +45.71 deg  entry-heading +34.14 deg  reversals-after-entry 0
+               MISS ABORT: entered the position circle at +34.14 deg, outside the 8.594 deg window
+  goaround1    SUCCEEDED            17.12 s  believed 0.333 m / +45.08 deg  truth 0.287 m / +45.26 deg  entry-heading +49.49 deg  reversals-after-entry 0
+  approach2    ABORTED              21.50 s  believed 4.828 m / +44.73 deg  truth 4.743 m / +45.26 deg  entry-heading none  reversals-after-entry 0
+  GO-AROUND BOUND REACHED: 3 approach(es) attempted, 2 go-around(s) allowed and spent. Reporting failure rather than continuing to manoeuvre.
+
+RESULT           FAILED_GO_AROUND_BOUND
+go-arounds       2 used of 2 allowed   BOUND FIRED
+legs             6
+elapsed          141.74 s of simulation time over all legs
+final approach   ABORTED  believed 4.8283 m / +44.729 deg
+  ABSOLUTE goal error (truth vs commanded goal): 4.7430 m (33.61 x floor)
+  heading error +45.255 deg
+  entry heading  never entered the circle   (the 8.594 deg discriminator)
+STAGING STOP     believed +0.265 deg   truth +0.561 deg   (heading against the approach axis)
+MISS ABORTS      approach0, approach1   (entry outside 8.594 deg, or reversal 2 after entry; ARRIVAL-GEOMETRY.md 9.5. An aborted approach is NOT clean)
+SHUFFLE REGIME   NO   (>= 3 commanded direction reversals after first entry into the position circle, counted per leg)
+LOCALIZATION     believed vs truth over the whole run, n = 1685
+  position       rms 0.1588 m   MAX 0.3698 m   (0.263 m is what footprint_padding is dimensioned from)
+  heading        rms 2.51 deg  MAX 7.37 deg
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-35-a_straight-r5-run.csv (1685 samples, all legs)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-35-a_straight-r5-run-approach.csv (245 samples, final approach leg only)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-35-a_straight-r5-plan.json

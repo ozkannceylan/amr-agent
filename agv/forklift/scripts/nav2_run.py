@@ -484,7 +484,61 @@ _STAGE_FIELDS = _RUN_FIELDS + ['leg']
 _SHUFFLE_REVERSALS = 3
 #: Speed deadband for "the vehicle is being commanded to move", the same
 #: 0.02 m/s `analyse` uses to classify a command's sign.
+#:
+#: IT IS DELIBERATELY NOT RE-TIED TO `navigation.creep_speed_mps`, which
+#: m5-35 lowered to 0.005 (ARRIVAL-GEOMETRY.md 9.1). This constant defines
+#: the PRE-REGISTERED shuffle test, and the whole point of a pre-registered
+#: test is that its definition does not move between the run it was
+#: registered against (m5-31 8.2) and the runs it now scores. The cost is
+#: stated rather than hidden: a direction change executed entirely inside
+#: 0.005-0.02 m/s is not counted as a reversal by either the live detector
+#: below or the post-hoc column, in m5-33's runs and in m5-35's alike.
 _MOVING_MPS = 0.02
+
+# --------------------------------------------------------------------------- #
+# THE MISS DETECTOR (ARRIVAL-GEOMETRY.md 9.5)
+# --------------------------------------------------------------------------- #
+#
+# WHY IT EXISTS. m5-33 built the go-around but nothing that DECLARES a miss,
+# so r4 entered the position circle 16.94 deg off the axis and was left to
+# shuffle 20 reversals to a lucky completion, because only the 45 s timeout
+# could end the leg. ARRIVAL-GEOMETRY.md section 2.4 design (ii) says an
+# in-circle correction is never attempted; a detector is what makes that
+# sentence true of a running vehicle rather than of a document.
+#
+# ITS TWO THRESHOLDS ARE THE COMMITTED MEASUREMENTS, NOT NEW NUMBERS:
+#
+#   entry heading   the goal checker's OWN yaw tolerance, 0.15 rad =
+#                   8.594 deg, which section 8.3 measured as a 5-of-5
+#                   discriminator across m5-31 and m5-33 with no exception.
+#                   NOTHING HERE WIDENS OR NARROWS THAT TOLERANCE: the
+#                   detector READS the same window the checker scores by,
+#                   and abandons an approach that has already entered
+#                   outside it.
+#   reversals       the SECOND reversal after first circle entry. Clean
+#                   traverses measured 0 and 1 (m5-31 8.2) and 0, 1, 0
+#                   (m5-33 9.2); the pre-registered shuffle threshold is 3.
+#                   So 2 sits above every clean run on record and below the
+#                   regime it exists to prevent.
+#
+# STATED PLAINLY, BECAUSE IT AFFECTS HOW THE RESULT READS. These aborts make
+# "no leg in the shuffle regime" partly TRUE BY CONSTRUCTION. That is design
+# (ii)'s contract and not a way of passing the test: an aborted approach is
+# NOT clean, it spends a go-around, and a run whose every approach aborts
+# fails. The >= 4-of-5-clean criterion can still fail honestly.
+#
+# WHERE IT LIVES, AND WHERE IT BELONGS. In the harness, beside the
+# sequencing m5-33 put here, because a miss is an ORDER-EXECUTION decision
+# and not a control law. At M6 it is the VDA 5050 client's per-node retry
+# decision. It is written to be lifted, not kept.
+
+#: Believed heading error at first circle entry, in degrees, beyond which
+#: the approach is abandoned. Set from the committed `yaw_goal_tolerance`
+#: of 0.15 rad rather than restated as a decimal, so the two cannot drift.
+_MISS_ENTRY_HEADING_DEG = math.degrees(0.15)
+#: Commanded direction reversals after first circle entry at which the
+#: approach is abandoned.
+_MISS_REVERSALS = 2
 
 
 def _direction_reversals(v_series):
@@ -607,8 +661,15 @@ def cmd_stage(args):
                 r['leg'] = state['leg']
                 rows.append(r)
 
-    def drive(label, wx, wy, wyaw, checker, timeout):
-        """One leg. Returns its record; appends its samples to `rows`."""
+    def drive(label, wx, wy, wyaw, checker, timeout, miss_abort=False):
+        """One leg. Returns its record; appends its samples to `rows`.
+
+        `miss_abort` arms the ARRIVAL-GEOMETRY.md 9.5 detector, which is
+        passed True for STATION approaches and False for the staging and
+        go-around legs: those are checked position-only, their heading is
+        not the quantity under test, and a go-around's deliberate
+        reverse-out is not a shuffle.
+        """
         state['leg'] = label
         mx, my, myaw = world_to_map(rec, wx, wy, wyaw)
 
@@ -642,6 +703,38 @@ def cmd_stage(args):
                     'goal_world': [wx, wy, wyaw], 'goal_map': [mx, my, myaw],
                     'elapsed_s': 0.0, 'row0': row0, 'row1': len(rows)}
 
+        # ---- the miss detector's live state (ARRIVAL-GEOMETRY.md 9.5) ----
+        # It runs on the SAME samples the CSV records, so the abort a reader
+        # sees in the log is decidable from the file afterwards.
+        miss = {'entered': False, 'sign': 0, 'reversals': 0, 'reason': None}
+
+        def watch(r):
+            """Return an abort reason for this sample, or None."""
+            if not r['amcl_x']:
+                return None
+            if not miss['entered']:
+                if math.hypot(float(r['amcl_x']) - mx,
+                              float(r['amcl_y']) - my) > args.entry_radius:
+                    return None
+                miss['entered'] = True
+                err = math.degrees(_wrap(float(r['amcl_yaw']) - myaw))
+                if abs(err) > args.miss_heading_deg:
+                    return ('entered the position circle at {:+.2f} deg, '
+                            'outside the {:.3f} deg window'
+                            .format(err, args.miss_heading_deg))
+                # fall through: this sample also seeds the sign series, so
+                # the live count matches the post-hoc column exactly.
+            v = float(r['cmd_v'])
+            sign = 1 if v > _MOVING_MPS else (-1 if v < -_MOVING_MPS else 0)
+            if sign != 0:
+                if miss['sign'] != 0 and sign != miss['sign']:
+                    miss['reversals'] += 1
+                    if miss['reversals'] >= args.miss_reversals:
+                        return ('reversal {} after circle entry'
+                                .format(miss['reversals']))
+                miss['sign'] = sign
+            return None
+
         result_future = handle.get_result_async()
         timed_out = False
         while not result_future.done():
@@ -652,6 +745,16 @@ def cmd_stage(args):
                 r = _row(node, now)
                 r['leg'] = label
                 rows.append(r)
+                if miss_abort and miss['reason'] is None:
+                    reason = watch(r)
+                    if reason is not None:
+                        miss['reason'] = reason
+                        timed_out = True
+                        print('  {}: MISS DETECTED - {}; abandoning the '
+                              'approach rather than correcting inside the '
+                              'circle'.format(label, reason))
+                        handle.cancel_goal_async()
+                        break
             if now - t0 > timeout:
                 timed_out = True
                 print('  {}: TIMEOUT after {:.1f} s of simulation time; '
@@ -715,6 +818,10 @@ def cmd_stage(args):
             'row1': len(rows),
             'plan_map': node.first_plan,
             'plans_published': node.plan_count,
+            # None on every leg the detector was not armed for, and on an
+            # armed leg that was never declared a miss.
+            'miss_abort_reason': miss['reason'],
+            'miss_detector_armed': bool(miss_abort),
         }
 
         # ---- the two mechanism columns, per leg ----
@@ -772,6 +879,8 @@ def cmd_stage(args):
                   else '{:+.2f} deg'.format(rec_leg['entry_heading_deg']),
                   rec_leg['reversals_after_entry'],
                   '  SHUFFLE' if rec_leg['shuffle'] else ''))
+        if miss['reason'] is not None:
+            print('  {:<12} MISS ABORT: {}'.format('', miss['reason']))
         legs.append(rec_leg)
         return rec_leg
 
@@ -786,12 +895,49 @@ def cmd_stage(args):
 
     first = drive('stage', sx, sy, syaw, args.staging_checker,
                   args.staging_timeout)
+
+    # ---- THE STAGING STOP, INSTRUMENTED (ARRIVAL-GEOMETRY.md 9.3) ----
+    # m5-33's five-repeat table carried the staging stop's POSITION and no
+    # HEADING column, so the final leg's entry-heading spread could not be
+    # attributed: whether it is inherited from the heading the vehicle
+    # arrives at staging with, or generated on the final leg itself, was
+    # unknowable from the committed data. Both headings are recorded here -
+    # believed and true, against the approach axis - beside the stop's
+    # decomposition into its longitudinal and lateral parts, the residual
+    # being lateral by construction (9.1 (A)).
+    staging_stop = {
+        'status': first['status'],
+        'believed_yaw_err_deg': first.get('believed_yaw_err_deg'),
+        'truth_yaw_err_deg': first.get('truth_yaw_err_deg'),
+        'truth_pos_err_m': first.get('truth_pos_err_m'),
+        'believed_pos_err_m': first.get('believed_pos_err_m'),
+    }
+    if first.get('final_truth') is not None:
+        dx = first['final_truth'][0] - sx
+        dy = first['final_truth'][1] - sy
+        staging_stop['truth_longitudinal_m'] = (dx * math.cos(syaw)
+                                                + dy * math.sin(syaw))
+        staging_stop['truth_lateral_m'] = (-dx * math.sin(syaw)
+                                           + dy * math.cos(syaw))
+    print('  STAGING STOP heading  believed {}  truth {}   '
+          '(against the approach axis)'.format(
+              'none' if staging_stop['believed_yaw_err_deg'] is None
+              else '{:+.3f} deg'.format(staging_stop['believed_yaw_err_deg']),
+              'none' if staging_stop['truth_yaw_err_deg'] is None
+              else '{:+.3f} deg'.format(staging_stop['truth_yaw_err_deg'])))
+    if 'truth_lateral_m' in staging_stop:
+        print('  STAGING STOP offset   longitudinal {:+.4f} m   '
+              'lateral {:+.4f} m   (truth)'.format(
+                  staging_stop['truth_longitudinal_m'],
+                  staging_stop['truth_lateral_m']))
+
     if first['status'] != 'SUCCEEDED':
         outcome = 'FAILED_AT_STAGING'
     else:
         for attempt in range(args.max_go_arounds + 1):
             leg = drive('approach{}'.format(attempt), args.x, args.y, args.yaw,
-                        args.final_checker, args.approach_timeout)
+                        args.final_checker, args.approach_timeout,
+                        miss_abort=not args.no_miss_abort)
             if leg['status'] == 'SUCCEEDED':
                 outcome = 'REACHED'
                 break
@@ -819,6 +965,7 @@ def cmd_stage(args):
     loc = _localization_stats(rows, rec)
     approach_legs = [l for l in legs if l['leg'].startswith('approach')]
     shuffled = [l['leg'] for l in legs if l['shuffle']]
+    aborted = [l['leg'] for l in legs if l.get('miss_abort_reason')]
 
     print('')
     print('RESULT           {}'.format(outcome))
@@ -844,6 +991,19 @@ def cmd_stage(args):
             'never entered the circle'
             if last['entry_heading_deg'] is None
             else '{:+.3f} deg'.format(last['entry_heading_deg'])))
+    print('STAGING STOP     believed {}   truth {}   '
+          '(heading against the approach axis)'.format(
+              'none' if staging_stop['believed_yaw_err_deg'] is None
+              else '{:+.3f} deg'.format(staging_stop['believed_yaw_err_deg']),
+              'none' if staging_stop['truth_yaw_err_deg'] is None
+              else '{:+.3f} deg'.format(staging_stop['truth_yaw_err_deg'])))
+    print('MISS ABORTS      {}   (entry outside {:.3f} deg, or reversal {} '
+          'after entry; ARRIVAL-GEOMETRY.md 9.5. An aborted approach is NOT '
+          'clean)'.format(
+              'none' if not aborted else ', '.join(aborted),
+              args.miss_heading_deg, args.miss_reversals)
+          if not args.no_miss_abort else
+          'MISS ABORTS      DETECTOR DISARMED (--no-miss-abort)')
     print('SHUFFLE REGIME   {}   (>= {} commanded direction reversals after '
           'first entry into the position circle, counted per leg)'.format(
               'NO' if not shuffled else 'YES: ' + ', '.join(shuffled),
@@ -896,6 +1056,13 @@ def cmd_stage(args):
             'go_around_bound_fired': bound_fired,
             'shuffle_legs': shuffled,
             'shuffle_threshold_reversals': _SHUFFLE_REVERSALS,
+            'staging_stop': staging_stop,
+            'miss_abort_legs': aborted,
+            'miss_detector': {
+                'armed': not args.no_miss_abort,
+                'entry_heading_deg': args.miss_heading_deg,
+                'reversals': args.miss_reversals,
+            },
             'localization': loc,
             'elapsed_s': total,
             'plans_published': node.plan_count,
@@ -1635,10 +1802,16 @@ def main(argv=None):
                         'the heading the final leg delivers.')
     s.add_argument('--d', type=float, default=3.0,
                    help='staging distance back along the goal heading [m]. '
-                        'DERIVED, not tuned: 2*sqrt(R*e0) + lookahead = '
-                        '2*sqrt(1.291*0.35) + 1.60 = 2.94 -> 3.0 m '
-                        '(ARRIVAL-GEOMETRY.md 4.2). Changing e0 - i.e. the '
-                        'staging checker tolerance - re-derives it.')
+                        'DERIVED, not tuned. The leg is an S-curve of '
+                        '2*sqrt(R*e0) followed by a straight tail, and it '
+                        'is the TAIL that converges the heading. At one '
+                        'lookahead of tail: 2*sqrt(1.291*0.35) + 1.60 = '
+                        '2.94 -> 3.0 m, which is this default and what '
+                        'm5-33 measured (ARRIVAL-GEOMETRY.md 4.2). At TWO '
+                        'lookaheads: 1.34 + 3.20 = 4.54 -> 4.5 m, which is '
+                        'what 9.4 derives and m5-35 runs. Changing e0 - '
+                        'i.e. the staging checker tolerance - re-derives '
+                        'both.')
     s.add_argument('--max-go-arounds', type=int, default=2,
                    help='THE BOUND. Approaches attempted = this + 1. When it '
                         'is spent the run reports failure instead of '
@@ -1659,10 +1832,36 @@ def main(argv=None):
                    help='SIMULATION seconds for a staging or go-around leg')
     s.add_argument('--approach-timeout', type=float, default=45.0,
                    help='SIMULATION seconds for one STATION approach. Short '
-                        'on purpose: a clean 3 m final leg costs ~10 s, so 45 '
-                        'is 4x margin and still well short of the 69-120 s '
-                        'endgame shuffles m5-31 measured. A miss is meant to '
-                        'cost a go-around, not a shuffle.')
+                        'on purpose: a clean 3 m final leg costs ~6.3 s and '
+                        'a clean 4.5 m one ~9.5 s, so 45 is ample and still '
+                        'well short of the 69-120 s endgame shuffles m5-31 '
+                        'measured. Since m5-35 it is the BACKSTOP BEHIND '
+                        'the miss detector rather than the thing that '
+                        'detects a miss: a miss costs a go-around, not a '
+                        'shuffle and not a timeout.')
+    s.add_argument('--miss-heading-deg', type=float,
+                   default=_MISS_ENTRY_HEADING_DEG,
+                   help='THE MISS DETECTOR, entry-heading branch '
+                        '(ARRIVAL-GEOMETRY.md 9.5). An approach whose first '
+                        'sample inside the position circle is further off '
+                        'the goal heading than this is ABANDONED, not '
+                        'corrected. The default is the committed '
+                        'yaw_goal_tolerance of 0.15 rad = 8.594 deg, read '
+                        'rather than restated, and section 8.3 measured it '
+                        'as a 5-of-5 discriminator. This does not widen or '
+                        'narrow any tolerance: the checker still scores by '
+                        'the same window.')
+    s.add_argument('--miss-reversals', type=int, default=_MISS_REVERSALS,
+                   help='THE MISS DETECTOR, reversal branch. Abandon the '
+                        'approach at this many commanded direction '
+                        'reversals after first circle entry. Default 2: '
+                        'clean traverses measured 0 and 1 (8.2) and 0, 1, 0 '
+                        '(9.2), and the pre-registered shuffle threshold is '
+                        '3.')
+    s.add_argument('--no-miss-abort', action='store_true',
+                   help='DISARM the miss detector, i.e. reproduce m5-33\'s '
+                        'behaviour, in which a badly aligned entry is left '
+                        'to shuffle until the approach timeout.')
     s.add_argument('--entry-radius', type=float, default=0.25,
                    help='radius for the mechanism columns (believed heading '
                         'at first entry, reversals after it). The committed '

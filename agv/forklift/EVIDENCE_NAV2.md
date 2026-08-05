@@ -1448,3 +1448,449 @@ Three findings that are new here, none of them actionable inside this brief's
 **No tolerance was widened anywhere in this section.** `general_goal_checker`
 is byte-identical to its committed form: `xy_goal_tolerance: 0.25`,
 `yaw_goal_tolerance: 0.15`.
+
+# 10. FORCING THE ARRIVAL — 2026-08-05 (m5-35)
+
+**Sections 0-9 above are untouched.** Section 9 is the distribution this
+section tries to close; section 8 is the diagnosis both answer.
+
+This section is written **as each run lands**, exactly as section 9 was, and
+for the same reason: a session limit already destroyed one attempt's
+unwritten work today (`docs/LESSONS.md` 2026-08-05, and the 2026-08-04 entry
+on dispatch losses). The headings below were written **before the first run
+was started**, and each row is appended the moment the run it describes
+exists.
+
+| Item | Value |
+|---|---|
+| Date | **2026-08-05** |
+| Host | WSL2 Ubuntu 24.04 on the owner's Windows 11 machine, 20 cores, headless, llvmpipe — the §8/§9 machine |
+| Package stack | unchanged since §8. nav2 **1.3.12** |
+| Under test | `ARRIVAL-GEOMETRY.md` §9 as written: the creep-deadband fix (§9.1), the 4.5 m final leg (§9.4) and the miss detector (§9.5), with the staging-stop heading instrumented (§9.3) |
+| **Tolerances** | **`xy_goal_tolerance: 0.25` and `yaw_goal_tolerance: 0.15` are UNCHANGED**, as they were in §9. Neither was widened. The miss detector *reads* the yaw tolerance; it does not move it |
+| Isolation | `GZ_PARTITION=m535r<N>` **and** `ROS_DOMAIN_ID` per run, both set on every run |
+| Chain | `warehouse_bringup` -> `localization.launch.py` -> `navigation.launch.py gate:=false cmd_topic:=/cmd_vel_smoothed` — the §8.8/§9.3 chain |
+| Route | §5.1's case A, world (−4.5, +7.0) -> station (+1.0, +7.0) yaw 0 — **the same route §8.2 and §9.2 measured** |
+| Staging pose | world (**−3.5**, +7.0) yaw 0, i.e. **`d = 4.5`** m back along the goal heading (§9.4; §9's d was 3.0, staging at −2.0) |
+| Go-around bound | `--max-go-arounds 2`, unchanged |
+| Approach timeout | 45 s of simulation time, unchanged — now the **backstop behind** the miss detector rather than the thing that detects a miss |
+
+## 10.0 What was verified before the first run
+
+### (a) The three changes, and that they are the ones §9 specifies
+
+| file | change | authority |
+|---|---|---|
+| `config.yaml` | `navigation.creep_speed_mps: 0.02` -> **0.005**, with the admissible-window derivation written into the comment as a FORMULA rather than a number | §9.1 |
+| `scripts/nav2_run.py` | the miss detector on approach legs (entry-heading and 2-reversal aborts), the staging-stop heading instrumented, both surfaced in the log and in the JSON | §9.5, §9.3 |
+| invocation | `--d 4.5` (the argument already existed; the default stays 3.0) | §9.4 |
+
+Nothing else changed. `nav2.yaml` and the behaviour tree are byte-identical
+to their §9 form; no dependency was added; `opennav_docking` was not
+activated.
+
+### (b) THE DEADBAND SWEEP — every floor in the chain, not only the one that bit
+
+The §9.1 deadlock is a relation between **two floors**, so fixing it means
+checking that no *other* pair stands in that relation afterwards. The chain
+from the controller to the plant was read stage by stage:
+
+| stage | floor it imposes | after this build |
+|---|---|---|
+| RPP `min_approach_linear_velocity: 0.05` | a floor on the **requested** speed, above the smoother | never reaches the plant; the smoother's from-rest ramp forms the command |
+| `velocity_smoother`, `CLOSED_LOOP` + `scale_velocities` | from rest emits at most `max_accel*dt` on the tightest axis: `v_pinned(κ) = min(0.025, 0.02381/κ)`, whose minimum over the reachable range is **0.00667 m/s** at the mechanical steer stop (κ_max = tan(1.31)/1.05 = 3.569 1/m) | unchanged — this is the layer that *produces* the smallest command |
+| `envelope_gate.py` | `zero_speed_mps` (0.002), but **only inside `ramp_towards_zero`**, i.e. on the stop ramp; the permissive path has no deadband | not in this chain at all (`gate:=false`), and would not deadlock if it were |
+| `cmd_vel_to_tricycle.py` creep deadband | **zeroes traction** below it — the deadlocking floor | **0.005 m/s**, which is below 0.00667, so no command the smoother can form from rest is zeroed |
+| `cmd_vel_to_tricycle.py` `zero_speed_mps` (0.002) | classifies a **refusal**; it gates nothing, because the creep branch has already decided the traction | unchanged; semantics untouched |
+| `forklift_io.py` | a symmetric clamp at ±1.50 m/s and nothing else — **no deadband** | unchanged |
+| gz `JointController` on `drive_wheel_joint` | raw velocity command, no ramp, no deadzone | unchanged |
+
+**Stated explicitly, because it is the thing that could have been moved
+rather than removed: after this build no pair of floors in the chain stands
+in the deadlock relation.** The only deadband that zeroes traction (0.005)
+sits below the smallest command the layer above it can produce from rest
+(0.00667), with the refusal threshold (0.002) below that again. The one
+floor left unmeasured is the **plant's own breakaway**, which is not a
+parameter of ours: if the vehicle physically cannot move at the tread speed
+0.00667 m/s implies, the symptom returns with **nonzero traction commanded**,
+and that is what falsifier 2 below is read against.
+
+### (c) THE CONVERTER BENCH, run before any simulator (§9.6)
+
+The smoother's from-rest output at r1's recorded steer of 1.072 rad, fed to
+the real converter node under both deadbands. Artefact:
+`evidence/m5-35-creep-bench.txt`.
+
+```
+kappa = tan(1.072)/1.05 = 1.7483 1/m
+the smoother's from-rest output at that curvature: a_w*dt/kappa = 0.02381/1.7483 = 0.01362 m/s
+the config file in the tree says creep_speed_mps = 0.005
+
+COMMITTED deadband (m5-33)     creep 0.0200 m/s  in v +0.01362 m/s w +0.02381 rad/s
+                               ->  steer +1.0720 rad  traction +0.00000 m/s   refusals 0
+CHANGED deadband (this build)  creep 0.0050 m/s  in v +0.01362 m/s w +0.02381 rad/s
+                               ->  steer +1.0720 rad  traction +0.02847 m/s   refusals 0
+
+VERDICT: the committed deadband zeroes traction and the changed one does not
+```
+
+Three things are established by it, none of them needing a simulator:
+
+1. **The §9.1 derivation is arithmetic, not a story.** The predicted
+   0.0136 m/s comes out as **0.01362 m/s**, against r1's recorded held
+   command of 0.015 m/s — one sample quantum apart.
+2. **The committed build zeroes traction on that exact command** while
+   holding the steer axis at +1.0720 rad, which is every recorded symptom of
+   §9.3 r1 reproduced on a bench in seconds.
+3. **The changed build passes it**: +0.02847 m/s of drive-wheel tread, which
+   is `v/cos(1.072)`, the conversion's own formula. The refusal counter
+   stays at 0 in both, confirming this was never the refusal branch.
+
+### (d) The machine, alone
+
+Recorded per run in §10.3 below, by the driver rather than by the operator:
+the driver refuses to start if anything matching the simulator/Nav2 process
+patterns is running, prints load, `/dev/shm` count and a UTC timestamp before
+the run, and verifies the remaining process count after it.
+
+## 10.1 The five repeats
+
+Same route, same chain, same way §8.2 and §9.2 did them. Rows are appended as
+each run lands.
+
+**"Clean" means what it meant in §9.2**: REACHED, with zero go-arounds used
+and no leg in the shuffle regime. **An aborted approach is NOT clean.** The
+shuffle test is unchanged and still pre-registered (`_SHUFFLE_REVERSALS = 3`,
+`_MOVING_MPS = 0.02`); it was deliberately *not* re-tied to the new creep
+deadband, because a pre-registered test whose definition moves between the
+runs it compares is not a test.
+
+| run | outcome | go-arounds | approaches | miss aborts | shuffle regime | staging-stop heading (believed / truth) | final approach: entry heading | localization max |
+|---|---|---|---|---|---|---|---|---|
+| **r1** | FAILED_RETURNING_TO_STAGING | 1 of 2 | 1 | **YES: approach0** (entry) | **NO** | **-6.471 / -7.406 deg** | **+27.46 deg** | **0.4565 m** |
+| **r2** | **REACHED (clean)** | 0 of 2 | 1 | none | **NO** | **-2.739 / -3.024 deg** | **+2.93 deg** | **0.1414 m** |
+| **r3** | **REACHED (clean)** | 0 of 2 | 1 | none | **NO** | **-9.758 / -9.554 deg** | **+6.57 deg** | **0.1141 m** |
+| **r4** | FAILED_RETURNING_TO_STAGING | 1 of 2 | 1 | **YES: approach0** (entry) | **NO** | **-10.440 / -9.040 deg** | **+33.37 deg** | **0.4045 m** |
+| **r5** | FAILED_GO_AROUND_BOUND | **2 of 2, BOUND FIRED** | 3 | **YES: approach0, approach1** (entry) | **NO** | **+0.265 / +0.561 deg** | **+17.12 deg** (approach0); approach1 **+34.14 deg**; approach2 never entered | **0.3698 m** |
+
+## 10.2 What each run did, recorded before the next was started
+
+### r1 — the miss detector fired; the go-around then failed on its own leg
+
+Run window 2026-08-05T16:33Z to 16:40Z, machine verified alone before
+(`load 0.00`, `/dev/shm` 165 from the previous session's orphaned Fast-DDS
+segments, **zero** matching processes) and torn down to **zero** processes
+after.
+
+**The stall is gone, and the recording proves it rather than asserting it.**
+The falsifier-2 test, run over the whole CSV of both r1s:
+
+```
+m5-35 r1   frozen truth >= 5 s with nonzero cmd_v      : none
+           frozen truth >= 5 s with nonzero TRACTION   : none
+           samples commanded in 0.005-0.02 m/s: 30 (29 with nonzero traction)
+
+m5-33 r1   frozen truth >= 5 s with nonzero cmd_v      : 75.8-95.6 s, 131.2-146.2 s,
+                                                         146.4-161.4 s, 161.6-176.6 s,
+                                                         181.6-190.0 s
+           frozen truth >= 5 s with nonzero TRACTION   : none
+           samples commanded in 0.005-0.02 m/s: 857 (0 with nonzero traction)
+```
+
+That is the deadlock and its removal in one table. Under the committed
+deadband, **857 samples** were commanded into the 0.005-0.02 m/s band and
+**not one of them reached the plant**; the truth froze for 19.8 s and then
+for three further windows. Under the changed deadband, 29 of 30 such samples
+produce traction and no freeze of 5 s or longer occurs anywhere in the run.
+**Note the second row of each block**: neither run has a freeze with nonzero
+*traction*, so falsifier 2 as literally worded (`nonzero cmd_v`) fires on the
+m5-33 recording it was written from. The form that discriminates is the one
+with the converter's output in it, and both are reported here for that
+reason.
+
+**What failed instead, and it is not the stall.** The final leg tracked out
+of the corridor rather than converging into it. The vehicle left staging at
+truth yaw **-7.41 deg**, ran the 4.7 m plan at 0.6 m/s, and arrived beside
+the station rather than at it: at t = 51.8 s ground truth was
+(+1.230, +7.383), i.e. **0.38 m to the left of the goal line with the
+position circle never entered**. It then overshot to x = +1.89, reversed
+through a large arc that swung the heading to +1.29 rad, and only on the way
+back did it first enter the 0.25 m circle — at **+27.46 deg**, at which point
+the detector abandoned the approach, as designed. The go-around leg was then
+**ABORTED by Nav2** at 69.71 s having reached (0.525 m, +44.66 deg) from
+staging, so the run ended `FAILED_RETURNING_TO_STAGING` with one go-around
+spent.
+
+**Localization**: rms 0.1725 m, **max 0.4565 m**, which is **above** the
+0.263 m criterion — the first run of the set already breaches it, and the
+excursion belongs to the large reverse manoeuvre, exactly the coupling §8.5
+measured.
+
+**Nothing was changed after this run.** r2-r5 were run at identical
+settings. One draw is not a distribution (`docs/LESSONS.md` 2026-08-05), and
+re-tuning after run 1 would destroy the measurement.
+
+### r2 — the clean shape at d = 4.5, and the leg cost the design predicted
+
+Machine verified alone (`load 0.45`, zero matching processes), torn down to
+zero. **REACHED, clean**: no go-around, no abort, no leg in the shuffle
+regime, 16.61 s over both legs. The final leg took **9.16 s** for 4.5 m,
+against the ~9.5 s 9.6 predicted from the clean 3 m leg's 6.31 s, and it
+entered the circle at **+2.93 deg** - inside the window, from a staging stop
+whose heading was **-3.02 deg** (truth). Localization max **0.1414 m**,
+inside the criterion.
+
+### r3 — clean from the worst staging heading of the set so far
+
+Machine verified alone (`load 0.79`, zero matching processes), torn down to
+zero. **REACHED, clean**, 18.16 s over both legs, final leg 8.61 s. It is
+the informative row of the three so far: the vehicle arrived at staging
+**-9.55 deg** off the approach axis (truth) with a **-0.2412 m lateral**
+residual, i.e. outside the 8.594 deg window at staging and with essentially
+the whole staging tolerance spent laterally - and the 4.5 m leg still
+delivered a **+6.57 deg** entry, inside the window, and a clean arrival.
+That is the tail doing the work the settling model says it does.
+
+### r4 — the same failure shape as r1, and the go-around leg is where it ends
+
+Machine verified alone (zero matching processes), torn down to zero. The
+load average at start was **1.85**, the highest of the set, the previous
+run's teardown still draining; recorded because it is the one between-run
+difference this session did not control.
+
+r4 repeats r1 shape for shape: the staging stop was **-9.04 deg** (truth)
+with a **-0.2747 m longitudinal** residual, the final leg missed the
+corridor rather than converging into it, the first entry into the position
+circle came at **+33.37 deg** on the way back from an overshoot, the
+detector abandoned the approach, and the go-around leg was then **ABORTED
+by Nav2** at 48.72 s, ending 0.659 m and -67.34 deg from staging.
+Localization max **0.4045 m**, again above the 0.263 m criterion and again
+belonging to the large manoeuvre rather than to the approach.
+
+Two of the four runs so far therefore fail in the same way, and it is
+**not** the failure §9 was built against: no stall, no shuffle, no in-circle
+correction. It is the final leg leaving the corridor.
+
+### r5 — the run that decides the attribution: a perfect staging heading, and the leg still missed
+
+Machine verified alone (`load 2.08`, zero matching processes), torn down to
+zero. r5 arrived at staging **+0.56 deg** off the approach axis (truth) with
+a 0.059 m lateral residual — the best-aligned staging stop of the five — and
+the 4.5 m leg **still** put the vehicle 0.41 m below the goal line and
+entered the circle at **+17.12 deg**. The detector abandoned it; the
+go-around returned to staging (69.45 s); the second approach entered at
+**+34.14 deg**, *worse than the first*; the second go-around returned; and
+the third approach was **ABORTED by Nav2 at 4.74 m from the goal**. The
+bound then fired, correctly: three approaches attempted, two go-arounds
+spent, failure reported at 141.74 s rather than continued manoeuvring.
+
+**This is the run that settles §9.3's question.** The staging-stop heading
+column exists to say whether the entry-heading variance is *inherited* from
+staging or *generated on the leg*. r5 inherits nothing — it starts on the
+axis — and generates 17 deg. The answer is: **generated on the leg.**
+
+## 10.3 How this section was run
+
+Identical in discipline to §9.3, one driver invocation per repeat. The
+driver refuses to start if anything matching
+`gz sim|nav2|amcl|controller_server|bt_navigator|parameter_bridge|planner_server|velocity_smoother|robot_state_publisher|ekf_node|cmd_vel_to_tricycle|forklift_io|wheel_odometry|imu_gate`
+is running, prints the load, the `/dev/shm` count and a UTC timestamp
+before the run, gates each bring-up stage on a topic appearing rather than
+on a fixed sleep (`/forklift/odom`, then `/particle_cloud`, then `/plan`),
+and verifies the remaining process count after teardown. **All five runs
+started with zero matching processes and ended with zero.**
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export GZ_PARTITION=m535r<N> ROS_DOMAIN_ID=9<N>     # BOTH, every run
+unset DISPLAY WAYLAND_DISPLAY                        # headless, llvmpipe
+
+ros2 launch sim/launch/warehouse_bringup.launch.py x:=-4.5 y:=7.0 yaw:=0.0
+ros2 launch agv/forklift/launch/localization.launch.py \
+    initial_pose_x:=1.584770 initial_pose_y:=12.576859 initial_pose_yaw:=-0.007915
+ros2 launch agv/forklift/launch/navigation.launch.py \
+    gate:=false cmd_topic:=/cmd_vel_smoothed
+
+# THE ONE ARGUMENT THAT DIFFERS FROM 9.3: --d 3.0 -> --d 4.5.
+python3 agv/forklift/scripts/nav2_run.py stage \
+    --x 1.0 --y 7.0 --yaw 0.0 --d 4.5 --max-go-arounds 2 \
+    --settle 30 --staging-timeout 90 --approach-timeout 45 \
+    --csv  evidence/m5-35-a_straight-r<N>-run.csv \
+    --plan evidence/m5-35-a_straight-r<N>-plan.json
+
+python3 agv/forklift/scripts/nav2_run.py analyse \
+    --csv  evidence/m5-35-a_straight-r<N>-run-approach.csv \
+    --plan evidence/m5-35-a_straight-r<N>-plan.json
+```
+
+Per-run load average at start, recorded because it is the one between-run
+difference this session did not control: r1 0.00, r2 0.45, r3 0.79,
+r4 1.85, r5 2.08 (each run's teardown still draining into the next). It
+does **not** order the outcomes: r1 failed from the quietest machine of the
+five and r3 was clean from a busier one. Artefacts per run:
+`evidence/m5-35-a_straight-r<N>-{run.csv,run-approach.csv,plan.json,stage.txt,analyse.txt}`,
+plus `evidence/m5-35-creep-bench.txt`.
+
+## 10.4 THE DISTRIBUTION — against the done-condition, not softened
+
+| criterion | result | verdict |
+|---|---|---|
+| >= 4 of 5 **clean** traverses | **2 of 5** (r2, r3) | **NOT MET** |
+| no run enters the shuffle regime | **none did**, 0 of 5 | **MET** — and partly *by construction*, as §9.5 declared in advance: three runs were abandoned by the miss detector before any in-circle correction could begin |
+| localization max <= 0.263 m across the set | **0.4565 m** (r1); r4 0.4045 m and r5 0.3698 m also breach it | **NOT MET** |
+
+| | m5-31 (§8.2) | m5-33, d = 3.0 (§9.2) | **m5-35, d = 4.5** |
+|---|---|---|---|
+| clean traverses | 1 of 5 | **3 of 5** | **2 of 5** |
+| reached at all | 3 of 5 | 4 of 5 | **2 of 5** |
+| runs in the shuffle regime | 4 of 5 | 1 of 5 | **0 of 5** |
+| localization max over the set | 0.661 m | **0.1186 m** | **0.4565 m** |
+| terminal stalls | — | 1 of 5 (r1) | **0 of 5** |
+
+**Stated plainly: the distribution did not close, and on two of the three
+criteria this build is worse than the one it replaces.** The shuffle is gone
+and the stall is gone; what remains is a third failure mode that neither
+§8's diagnosis nor §9's design addresses, and the localization excursions
+come back with it because a failed approach manoeuvres.
+
+### THE MECHANISM, measured rather than inferred
+
+The failing runs do not stall, do not shuffle and are not badly aligned at
+staging. **They drive out of the corridor.** Ground-truth cross-track from
+the y = 7.0 approach line, measured over the OUTBOUND part of the first
+approach only — every sample up to the first commanded reversal, so no
+recovery manoeuvre is counted:
+
+| set | run | cross-track at the end of the outbound run | outcome |
+|---|---|---|---|
+| m5-33 (d = 3.0) | r1 | **-0.340 m** | failed |
+| m5-33 | r2 | +0.220 m | clean |
+| m5-33 | r3 | -0.148 m | clean |
+| m5-33 | r4 | **-0.416 m** | shuffled (not clean) |
+| m5-33 | r5 | +0.167 m | clean |
+| **m5-35 (d = 4.5)** | r1 | **+0.550 m** | failed |
+| **m5-35** | r2 | +0.150 m | **clean** |
+| **m5-35** | r3 | +0.202 m | **clean** |
+| **m5-35** | r4 | **-0.583 m** | failed |
+| **m5-35** | r5 | **-0.409 m** | failed |
+
+**A cross-track above the 0.25 m position tolerance at the end of the
+outbound run separates clean from not-clean 10 times out of 10, across both
+sets.** It is a sharper discriminator than the entry heading, and it is
+upstream of it: a vehicle that passes the station further than `xy_tol` to
+one side never enters the position circle on its outbound run at all, so
+everything that follows — the overshoot, the reverse arc, the late entry at
+17-33 deg — is *recovery*, and the entry heading measures the recovery
+rather than the approach.
+
+**And this is why lengthening the leg was the wrong lever.** The cross-track
+is not a decaying transient; it is a rate. In r5 the vehicle held a
+sustained heading of about -6.6 deg for the whole leg while its belief error
+stayed under 0.126 m, so the offset accumulated at roughly 0.10 m per metre
+travelled. The §9.4 settling model assumed the *heading* error decays with
+tail length, which it may; what integrates along the tail is the *lateral*
+error, and 4.5 m of it buys 50 % more cross-track than 3.0 m did. The
+measured means bear it out: mean terminal |cross-track| went from 0.258 m at
+d = 3.0 to 0.379 m at d = 4.5.
+
+The plans are not the cause and were checked before the controller was
+blamed: every approach plan is straight to within 0.014-0.096 m of its own
+chord and every one ends at y = +7.000 exactly. Localization is not the
+cause either: belief-versus-truth error during the approach legs peaked at
+0.114-0.199 m, well under the 0.4-0.66 m excursions.
+
+### A SECOND NEW MECHANISM: the go-around cannot always be planned
+
+Two of the four go-arounds attempted (r1, r4) and r5's third approach ended
+`ABORTED` by Nav2, and the planner log says why:
+
+```
+[planner_server] GridBased plugin failed to plan from (2.04, 11.67) to (2.58, 12.57): "Start occupied"
+[bt_navigator] Goal failed
+```
+
+A miss that ends beside the station leaves the vehicle in a pose the global
+costmap scores as **occupied**, and no path can be planned *from* it. §9.2
+provisioned the go-around for a bad return **heading**; the precondition it
+actually lacks is a **plannable start pose**. The same log carries a
+standing configuration warning, pre-existing and not introduced here:
+`inflation radius (0.550000) is smaller than the circumscribed radius
+(2.230050)`, which both slows SE2 collision checking and makes a
+0.4 m-off-line pose next to a rack likely to read as occupied.
+
+## 10.5 THE REGISTERED PREDICTIONS, scored — including the ones that failed
+
+§9.7 registered a per-run prediction and four falsifiers **before** this run
+existed. Scored honestly, because a design that predicted wrongly and says
+so is worth more than one that reports outcomes only.
+
+| §9.7 prediction | outcome | verdict |
+|---|---|---|
+| **5 of 5** first-approach clean (point prediction) | 2 of 5 | **WRONG** |
+| r2/r3/r5-analogues clean, entries within ±6 deg | two clean at +2.93 and +6.57 deg; the third run of that group failed | **PARTLY** |
+| r4-analogue clean at ≈ +7 deg — *the settling model's own test row* | no run converted a large entry into a small one; three entered at +17.12, +27.46 and +33.37 deg | **WRONG** |
+| r1-analogue: **no stall anywhere** | no freeze of >= 5 s with nonzero traction in any of the five runs; and none with nonzero `cmd_v` either | **RIGHT** |
+| a residual miss aborts immediately and completes via one provisioned go-around | the abort half held exactly — every abort fired at the first in-circle sample; the completion half did not — **no** go-around ever produced a clean arrival, and two could not even be planned | **HALF RIGHT** |
+| localization ≈ 0.12 m, criterion 0.263 m | 0.114-0.457 m; three runs breach the criterion | **WRONG** |
+
+| §9.7 falsifier | fired? | what it kills |
+|---|---|---|
+| 1. any final-leg entry outside 8.594 deg | **FIRED**, 3 of 5 (+17.12, +27.46, +33.37 deg) | **the §9.4 settling model is falsified.** The staging-heading column then decides the follow-up, and it does: see below |
+| 2. ground truth frozen >= 5 s with nonzero `cmd_v` | **did not fire** in any of the five | **§9.1's derivation stands**, and is independently confirmed by the bench of §10.0 (c) and by the 857-vs-30 band comparison of §10.2 |
+| 3. a re-approach entering worse than its first attempt | **FIRED** — r5's approach1 entered at +34.14 deg against approach0's +17.12 deg | **the §9.2 capacity argument is falsified.** Extra leg length does not make a re-approach better than the approach it replaces |
+| 4. a clean-shaped run killed by an abort | **did not fire** — every abort was an entry at 17-33 deg, nowhere near the 8.594 deg window, and no aborted leg had reached even one reversal | **the §9.5 thresholds are sound as derived**; the aborts cost no clean run |
+
+**Falsifier 1 fired, and §9.3's instrumentation answers the question it
+raises.** The staging-stop heading, per run against the entry it produced:
+
+| run | staging-stop heading (truth) | first-approach entry heading | outcome |
+|---|---|---|---|
+| r1 | -7.41 deg | +27.46 deg | failed |
+| r2 | -3.02 deg | +2.93 deg | **clean** |
+| r3 | **-9.55 deg** | +6.57 deg | **clean** |
+| r4 | -9.04 deg | +33.37 deg | failed |
+| r5 | **+0.56 deg** | +17.12 deg | failed |
+
+There is no relation. The **worst** staging heading of the set (r3, -9.55
+deg, outside the arrival window and with its whole tolerance spent
+laterally) produced a clean arrival; the **best** (r5, +0.56 deg, on the
+axis) produced a 17 deg miss. So the entry-heading variance is **generated
+on the final leg, not inherited from staging** — which is exactly the
+disjunction §9's open question 2 posed, now decided by measurement. The
+lever is therefore neither the staging pose nor the leg length: it is
+tracking on the leg.
+
+## 10.6 What this section asks the next brief to decide
+
+The done-condition is **not met** and this section does not tune to reach
+it. `xy_goal_tolerance: 0.25` and `yaw_goal_tolerance: 0.15` are
+byte-identical to their committed form, as they have been through §8, §9 and
+§10, and no threshold in the miss detector touches either.
+
+What remains, named:
+
+1. **The cross-track rate on a straight leg is the unsolved quantity.** A
+   sustained heading offset of a few degrees, held for the length of the
+   leg, is what puts the vehicle beside the station. It must be *measured*
+   before anything is changed: the understeer-at-small-angles measurement
+   §6 already asks for is the first candidate, the converter's steer-angle
+   fidelity at small commands the second, and RPP's lack of any cross-track
+   term the third. This is a controller question, and it is the first one
+   in this whole line of work that is.
+2. **`d` is not the lever, and 4.5 m is worse than 3.0 m.** On the evidence
+   here the shorter leg should be restored unless a cross-track fix lands
+   first, because the error integrates along the leg.
+3. **The go-around needs a plannable start, not just a heading.** Three legs
+   died on `"Start occupied"`. A retry that cannot be planned is not a
+   retry, and this is the second time the go-around's *precondition* has
+   turned out to be something other than what was provisioned for.
+4. The inflation-radius warning (`0.55` against a circumscribed `2.23`) is
+   pre-existing, is logged on every run, and has never been ruled on.
+
+**What this section does establish, and it is not nothing.** The terminal
+stall is gone by derivation and by measurement: 0 of 5 runs stalled, against
+1 of 5 before, and the bench shows the mechanism switching off at the
+converter. The shuffle regime is gone: 0 of 5, against 1 of 5 and 4 of 5
+before it. The miss detector works exactly as designed and cost no clean
+run. And the staging-stop instrumentation answered the attribution question
+that two previous sections could only argue about.

@@ -1,0 +1,13 @@
+[INFO] [1785947804.536849415] [cmd_vel_to_tricycle]: cmd_vel_to_tricycle up: /bench/cmd_vel -> (/forklift/cmd/steer_angle, /forklift/cmd/traction_speed); L = 1.050 m, steer stop +-1.3100 rad (75.06 deg), traction limit 1.50 m/s, creep deadband 0.020 m/s
+[INFO] [1785947806.546980771] [cmd_vel_to_tricycle]: below the 0.020 m/s creep deadband at v=+0.0136 m/s with w=+0.0238 rad/s: holding the steer axis and stopping. This is NOT a refusal - the request was executable and the vehicle was 14 mm/s from rest.
+[INFO] [1785947809.577822574] [cmd_vel_to_tricycle]: cmd_vel_to_tricycle up: /bench/cmd_vel -> (/forklift/cmd/steer_angle, /forklift/cmd/traction_speed); L = 1.050 m, steer stop +-1.3100 rad (75.06 deg), traction limit 1.50 m/s, creep deadband 0.005 m/s
+kappa = tan(1.072)/1.05 = 1.7483 1/m
+the smoother's from-rest output at that curvature: a_w*dt/kappa = 0.02381/1.7483 = 0.01362 m/s
+the config file in the tree says creep_speed_mps = 0.005
+
+COMMITTED deadband (m5-33)         creep 0.0200 m/s   in v +0.01362 m/s w +0.02381 rad/s  ->  steer +1.0720 rad  traction +0.00000 m/s   refusals 0
+                                   (seeded at v = 0.30 m/s first: steer +1.0720 rad, traction +0.6271 m/s)
+CHANGED deadband (this build)      creep 0.0050 m/s   in v +0.01362 m/s w +0.02381 rad/s  ->  steer +1.0720 rad  traction +0.02847 m/s   refusals 0
+                                   (seeded at v = 0.30 m/s first: steer +1.0720 rad, traction +0.6271 m/s)
+
+VERDICT: the committed deadband zeroes traction and the changed one does not - the deadlock mechanism is confirmed at the converter

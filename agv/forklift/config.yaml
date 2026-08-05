@@ -675,16 +675,52 @@ navigation:
   # THE CREEP DEADBAND. Below this forward speed the requested curvature
   # w/v is not a number the controller meant: the ratio's denominator is
   # dominated by rounding and by the smoother's ramp, and every steer
-  # angle it implies is beyond the mechanical stop anyway (at |v| = 0.02
+  # angle it implies is beyond the mechanical stop anyway (at |v| = 0.005
   # and the stack's own maximum yaw rate 0.5714 rad/s the implied angle is
-  # 88.1 deg against a 75.06 deg stop).
+  # 89.5 deg against a 75.06 deg stop).
   #
-  # WHY THIS VALUE AND NOT A ROUNDER ONE. It must sit BELOW the
-  # controller's own smallest intended speed, which is RPP's
-  # `min_approach_linear_velocity: 0.05` in nav2.yaml. A deadband at or
-  # above 0.05 m/s would swallow the approach creep and the vehicle would
-  # stop short of every goal. 0.02 m/s is 2.5x below it.
-  creep_speed_mps: 0.02
+  # THE VALUE IS AN UPPER BOUND FROM THE LAYER ABOVE, NOT A TUNING KNOB,
+  # AND IT IS THE FORMULA THAT GOVERNS, NOT THIS NUMBER
+  # (ARRIVAL-GEOMETRY.md 9.1; docs/LESSONS.md 2026-08-05, the deadlock
+  # entry). nav2.yaml's velocity_smoother is `feedback: CLOSED_LOOP` with
+  # `scale_velocities: true`, so from REST its output per tick cannot
+  # exceed max_accel * dt on the most restrictive axis:
+  #
+  #     dt      = 1 / smoothing_frequency          = 1 / 20 Hz = 0.05 s
+  #     a_v*dt  = 0.50 m/s^2   * 0.05 s            = 0.025  m/s
+  #     a_w*dt  = 0.4762 rad/s^2 * 0.05 s          = 0.02381 rad/s
+  #     v_pinned(kappa) = min(0.025, 0.02381 / kappa)   m/s
+  #
+  # so at commanded curvature kappa the SMALLEST speed this chain can
+  # ever hand the converter from rest is v_pinned, and at the mechanical
+  # steer stop, kappa_max = tan(1.31) / 1.05 = 3.569 1/m, that floor is
+  #
+  #     a_w * dt / kappa_max = 0.02381 / 3.569 = 0.00667 m/s.
+  #
+  # A deadband at or above that floor is a DEADLOCK and not a margin: the
+  # converter zeroes traction, the plant does not move, the EKF measures
+  # zero, the closed-loop smoother stays pinned at v_pinned, and the leg
+  # stalls until a timeout cancels it. 0.02 m/s armed that loop for every
+  # steer beyond atan(0.02381/0.02 * 1.05) = 51.3 deg and it was measured
+  # doing so: EVIDENCE_NAV2.md 9.3 r1, cmd_v held at 0.015 m/s with the
+  # steer at 1.072 rad and ground truth frozen for 20 s.
+  #
+  # THE ADMISSIBLE WINDOW, derived from the two floors either side:
+  #
+  #     zero_speed_mps (0.002)  <  creep  <  a_w * dt / kappa_max (0.00667)
+  #
+  # The lower bound keeps the refusal semantics below intact; the upper
+  # bound makes the deadlock unreachable at ANY steer angle, because the
+  # armed region kappa > 0.02381 / creep = 4.76 1/m lies beyond the
+  # mechanical kappa_max = 3.569 1/m. 0.005 sits inside that window with
+  # margin on both sides. IF max_accel, smoothing_frequency or the steer
+  # stop CHANGES, THIS VALUE IS RE-DERIVED FROM THE WINDOW ABOVE.
+  #
+  # It also stays well below the controller's own smallest intended
+  # speed, RPP's `min_approach_linear_velocity: 0.05` in nav2.yaml: a
+  # deadband at or above that would swallow the approach creep and the
+  # vehicle would stop short of every goal.
+  creep_speed_mps: 0.005
 
   # THE STANDSTILL THRESHOLD, and it is the one that decides what counts
   # as a REFUSAL. A tricycle can turn only while its drive wheel travels,

@@ -341,9 +341,9 @@ class CmdVelToTricycle(Node):
         WHAT COUNTS AS A REFUSAL, AND WHY IT IS NARROWER THAN THIS BAND.
         A refusal means the request has NO (delta, v_D) at all, which is
         true only when the vehicle is asked to turn while STOPPED. A
-        request of v = 0.016 m/s with w = 0.012 rad/s is a 1.29 m radius
+        request of v = 0.004 m/s with w = 0.003 rad/s is a 1.29 m radius
         at a crawl - perfectly executable - and the converter declines it
-        only because it is 4 mm/s from a standstill and the ratio is
+        only because it is 2 mm/s from a standstill and the ratio is
         noise. Counting that as a refusal made the counter useless: the
         first measured run reported 27 "rotation in place" refusals for a
         goal that was reached, every one of them the tail of a

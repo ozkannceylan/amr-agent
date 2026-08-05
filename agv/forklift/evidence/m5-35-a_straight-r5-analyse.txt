@@ -1,0 +1,33 @@
+==========================================================================
+nav2_run analyse   m5-35-a_straight-r5-run-approach.csv
+==========================================================================
+FLOOR   registration residual rms 0.0404 m, MAX 0.1411 m
+samples 245   simulation span 24.40 s
+status  FAILED_GO_AROUND_BOUND   error_code None   plans 118   refusals 11
+
+THE PLAN (first published)
+  points        64
+  length        4.937 m
+  cusps         0   (direction reversals in the plan)
+  reverse       0.0 % of the path length
+
+THE DRIVE
+  ground-truth path      0.001 m
+  command sign           0 forward / 0 reverse / 245 at rest
+  steer angle commanded  max |0.1337| rad (7.66 deg), stop is 1.3100 rad
+  drive-wheel speed      max |0.000| m/s, limit is 1.500 m/s
+  rotation-in-place      11 refused over the run
+
+TRACKING (ground truth against the FIRST plan, world frame)
+  rms   0.0159 m
+  max   0.0160 m
+  p95   0.0160 m
+  NOTE: the plan is a MAP-frame object and the truth is a world-frame one, so this figure contains the localization error as well as the controller's. It is an upper bound on the controller and is never quoted as the controller's own.
+
+THE GOAL
+  commanded (world)      (+1.0000, +7.0000) yaw +0.0000 rad
+  reached   (truth)      (-3.7405, +7.1566) yaw +0.7899 rad
+  ABSOLUTE position error 4.7430 m (33.61 x floor)
+  heading error           +45.255 deg
+  BELIEVED error (map)    4.8283 m, heading +44.729 deg
+  belief vs truth         the vehicle thought it was 4.8283 m from the goal and was really 4.7430 m
