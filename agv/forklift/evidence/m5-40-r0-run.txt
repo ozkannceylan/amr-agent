@@ -1,0 +1,28 @@
+registration  theta -0.007915259 rad  t (+6.029223, +5.541460) m  FLOOR rms 0.0404 MAX 0.1411 m
+STATION  world (+1.0000, +7.0000) yaw +0.0000  ->  map (+7.0846, +12.5333) yaw -0.0079   checker general_goal_checker
+STAGING  world (-3.5000, +7.0000) yaw +0.0000  ->  map (+2.5847, +12.5689) yaw -0.0079   checker staging_goal_checker
+d = 4.500 m back along the goal heading; go-arounds bounded at 2
+
+LEGS
+  stage        SUCCEEDED             9.45 s  believed 0.196 m / -0.46 deg  truth 0.267 m / -0.05 deg  entry-heading -1.15 deg  reversals-after-entry 0
+  STAGING STOP heading  believed -0.457 deg  truth -0.053 deg   (against the approach axis)
+  STAGING STOP offset   longitudinal -0.2655 m   lateral +0.0266 m   (truth)
+  approach0    SUCCEEDED             9.50 s  believed 0.158 m / -2.40 deg  truth 0.091 m / -1.76 deg  entry-heading -1.94 deg  reversals-after-entry 0
+
+RESULT           REACHED
+go-arounds       0 used of 2 allowed
+legs             2
+elapsed          18.95 s of simulation time over all legs
+final approach   SUCCEEDED  believed 0.1585 m / -2.401 deg
+  ABSOLUTE goal error (truth vs commanded goal): 0.0912 m (at the instrument's resolution, floor 0.1411 m)
+  heading error -1.761 deg
+  entry heading  -1.937 deg   (the 8.594 deg discriminator)
+STAGING STOP     believed -0.457 deg   truth -0.053 deg   (heading against the approach axis)
+MISS ABORTS      none   (entry outside 8.594 deg, or reversal 2 after entry; ARRIVAL-GEOMETRY.md 9.5. An aborted approach is NOT clean)
+SHUFFLE REGIME   NO   (>= 3 commanded direction reversals after first entry into the position circle, counted per leg)
+LOCALIZATION     believed vs truth over the whole run, n = 278
+  position       rms 0.0663 m   MAX 0.1083 m   (0.263 m is what footprint_padding is dimensioned from)
+  heading        rms 0.84 deg  MAX 1.75 deg
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-40-r0-run.csv (278 samples, all legs)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-40-r0-run-approach.csv (124 samples, final approach leg only)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-40-r0-plan.json

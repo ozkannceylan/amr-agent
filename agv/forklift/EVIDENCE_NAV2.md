@@ -2421,3 +2421,591 @@ committed / hold 1.4, **c** warehouse / committed / 2 deg held 14 s,
    inflation-radius warning (§10.6 item 4) are untouched here** and remain
    open. Neither fired in any of these five runs, because no run needed a
    go-around — which is not the same as either being fixed.
+
+---
+---
+
+# 12. THE PLANT CHANGE, APPLIED AND RE-MEASURED - 2026-08-05 (m5-40)
+
+**Sections 0-11 above are untouched and byte-identical.** Section 11 (m5-38)
+diagnosed the cause and proved the fix on a `/tmp` copy passed with
+`model:=`; the owner then ruled option (i) of section 11.8 item 1 - apply the
+change and re-measure what it invalidates.
+`agv/forklift/PLANT-CHANGE-INVENTORY.md` (m5-39) is the authority for what
+that means and in what order; this section executes that order and nothing
+else.
+
+**Every heading below was written before the run that fills it.** Rows are
+appended the moment a run lands, before the next is launched
+(`docs/LESSONS.md` 2026-08-05, entry 117).
+
+## 12.0 The change, as applied
+
+| | committed before | committed after |
+|---|---|---|
+| `model.sdf` steer `p_gain` | 6000.0 | **60000.0** |
+| smallest promptly executable steer error `e* = 400 / p_gain` | 3.8 deg | **0.38 deg** |
+| the plugin's comment block | argued for 6000, sized `i_max` against it, and claimed the scrub "disappears once the vehicle rolls" | rewritten: states `e*`, why 60000, the two honest limits on it, the falsified claim named as falsified, and what `i_max` now carries |
+
+Nothing else in the file moved: `i_gain`, `d_gain`, `i_max`, `i_min`,
+`cmd_max`, `cmd_min`, the joint damping, the geometry, the masses, the
+sensors and every topic name are unchanged. The mast joint already ran
+`p_gain` 60000, so the model's gains stay in one family.
+
+## 12.1 Run 0 - the committed-tree stamp
+
+Section 11.6's five repeats were taken with `model:=` pointing at a `/tmp`
+copy. The inventory (section 4, run 0) records the one formality that owes:
+**one run of the committed tree**, no `model:=` anywhere, so the figures
+rest on the file the repository carries rather than on a copy that matched
+it. Same route, same goal, same `--d 4.5`, same protocol as 11.6 - the only
+difference from r1-r5 is that the model argument is gone.
+
+### The pre-run check, and the result
+
+Machine alone, enforced by the driver: matching processes **0** before the
+run and **0** after teardown, load 0.08, `/dev/shm` 517,
+`2026-08-05T21:09:13Z`. The driver also prints the committed model's
+`p_gain` lines before bring-up, so the artefact records which plant it ran:
+`<p_gain>60000.0</p_gain>` at line 1046 (steer) and 1091 (mast).
+
+| | m5-38 r1-r5 (`model:=` copy) | **m5-40 r0 (committed tree)** |
+|---|---|---|
+| outcome | REACHED (clean) x5 | **REACHED (clean)** |
+| go-arounds | 0 of 2, every run | **0 of 2** |
+| approaches | 1, every run | **1** |
+| miss aborts | none | **none** |
+| shuffle regime | NO, 0 of 5 | **NO** |
+| entry heading | -3.34 .. +2.23 deg | **-1.94 deg** |
+| localization max | 0.0718 .. 0.1523 m | **0.1083 m** |
+| terminal outbound cross-track | +0.028 .. +0.056 m | **+0.030 m** |
+| cross-track rate over the leg | +0.0048 .. +0.0173, r1 -0.0267 m/m | **+0.0007 m/m** |
+| absolute goal error (truth) | - | **0.0912 m**, below the 0.1411 m floor |
+
+```
+RESULT           REACHED          elapsed 18.95 s of simulation time, 2 legs
+final approach   SUCCEEDED        believed 0.1585 m / -2.401 deg
+LOCALIZATION     n = 278          position rms 0.0663 m  MAX 0.1083 m
+                                  heading  rms 0.84 deg  MAX 1.75 deg
+THE PLAN         4.696 m, 0 cusps, 0.0 % reverse
+THE DRIVE        truth path 4.682 m, steer commanded max 6.72 deg, 0 refusals
+TRACKING         rms 0.0352 m  max 0.0722 m  p95 0.0637 m (upper bound, contains localization)
+```
+
+Cross-track was computed from `m5-40-r0-run-approach.csv` by the same
+definition section 11.6 used (`gt_y - 7.0` at the first and last sample of
+the approach leg, over the leg's ground-truth length). The definition was
+checked by re-deriving m5-38 r1 from its committed CSV first:
+**+0.174 -> +0.048 m, rate -0.0267 m/m, mean yaw -1.41 deg**, which
+reproduces section 11.6's published row.
+
+### What the stamp settles
+
+Section 11.6's figures no longer rest on a `model:=` override. One run of
+the committed tree lands **inside the band of the five**, on every column:
+clean, no go-around, no shuffle, localization max between r4's 0.0718 and
+r1's 0.1523, terminal cross-track inside the 0.028-0.056 m band.
+
+Two things it deliberately does **not** claim. It is **one draw**, so it
+stamps the tree rather than re-measuring the distribution
+(`docs/LESSONS.md` 2026-08-05, entry 103); the distribution is section
+11.6's five, and this run is the evidence that the five describe the
+committed file. And its cross-track rate of +0.0007 m/m is the lowest of
+the six, which is a draw and not an improvement.
+
+## 12.2 Case B-prime, 6 m astern - RUN FIRST, and why
+
+Section 5.2's second half is the one committed figure whose **conclusion**
+the plant change could flip: "reverse is followed to about 2.4 m; beyond
+that the heading diverges", n = 1, on the old plant, in the container,
+already marked platform-unverified by section 8.6. Reverse pure pursuit
+with the steered axle trailing is exactly a small-correction regime, and on
+the old plant small corrections did not execute. If the divergence was
+partly a deadband artefact, that is a finding worth more than the
+re-measurement, which is why the inventory puts it first.
+
+Route: spawn world (+1.0, +7.0), goal world (-5.0, +7.0).
+
+### A defect found on the way in, in the committed harness
+
+The first attempt did not run: `nav2_run.py goal` raised
+`NameError: name 'NavigateToPose' is not defined` at line 311, before a
+goal was ever sent. The import was lost when the recorder was factored out
+into `_build_recorder` (`6798d8d`, m5-33); `cmd_stage` kept its own copy at
+its own call site and `cmd_goal` did not. **Every `goal` invocation has
+raised at the first goal since that commit**, which is why sections 8, 9,
+10 and 11 - all of them `stage` runs - never saw it. The section 5 cases
+were last driven before the refactor. One line restored, at the site that
+uses the name, with the history in a comment beside it.
+
+A second, softer trap in the same path: the first repaired run was
+`ABORTED` in 0.20 s with 0 plans and
+`bt_navigator: Initial robot pose is not available` -
+`Requested time 12.838 but the earliest data is at time 13.400`. The goal
+was formed before AMCL's `map -> odom` had any history older than the goal
+stamp. `cmd_goal`'s `--settle` loop exits the instant the transform is
+first available, which is exactly one sample too early; the driver now
+waits 25 s after `/plan` appears. `stage` does not show this because its
+goal-checker selection and staging leg spend that time anyway. **Recorded
+here, not fixed in the harness**: the fix belongs with a decision about
+whether `cmd_goal` should require a minimum TF age, which is a design
+question and not this brief's.
+
+### Result - and the conclusion does move, though not in the predicted direction
+
+**Two runs, one variable.** The same route, the same platform, the same
+committed tree, the same driver, the same domain-isolated protocol; the
+only difference is which `model.sdf` the vehicle is spawned from - the
+committed tree (steer `p_gain` 60000) or `git show HEAD:` of the same file
+(steer `p_gain` 6000, byte-verified identical to HEAD), passed with
+`model:=`. This is a one-variable A/B, unlike the comparison against
+section 5.2 itself, which also crosses a platform and every nav2.yaml
+round from section 5.1 onwards.
+
+| | section 5.2, old plant, container | **old plant, WSL, this tree** | **new plant, WSL, this tree** |
+|---|---|---|---|
+| outcome | **ABORTED `104`** | **ABORTED `104`** | **SUCCEEDED, 57.59 s** |
+| plan | 6.106 m, 0 cusps, 100 % reverse | 6.106 m, 0 cusps, 100 % reverse | 6.106 m, 0 cusps, 100 % reverse |
+| ground-truth path | - | 3.927 m | **12.470 m** |
+| heading divergence begins | ~2.39 m of travel | **2.745 m of travel** | 5.7 m of travel |
+| worst heading | +0.87 rad (50 deg) | **+44.42 deg** at 3.26 m | **-51.54 deg** at 6.26 m |
+| distance from goal at the end | 3.68 m | **2.78 m** | **0.345 m** (2.45 x floor) |
+| rotation-in-place refusals | - | 1 | 2 |
+| plans published | - | 19 | 52 |
+
+**The old plant reproduces its own committed result on this platform.**
+Abort code, onset distance and divergence magnitude all land where section
+5.2 put them, which retires that figure's platform caveat (section 8.6) at
+the same time as it answers the deadband question.
+
+**So B-prime's divergence is NOT a deadband artefact.** It is real, it is
+the geometry section 5.2 named - pure pursuit referenced at the trailing
+end of the wheelbase - and it survives a plant ten times stiffer at small
+angles. On the new plant the heading still runs out, and further (-51.5 deg
+against +44.4), simply because the vehicle keeps going instead of being
+abandoned at 3.9 m.
+
+**What the plant change does move is the outcome.** The new plant recovers:
+52 plans against 19, 12.470 m of travel for a 6.106 m plan, forward
+segments inside a 100 %-reverse plan, and an arrival 0.345 m from the goal
+instead of an abort 2.78 m short. That is a reverse manoeuvre completed by
+replanning, not a reverse manoeuvre followed.
+
+### Ruling on section 5.2's reverse bound
+
+Section 5.2 reads: *"Measured limit on this vehicle at 0.60 m/s: reverse is
+followed to about 2.4 m; beyond that the heading diverges."* That sentence
+**stands, on both plants**, and it now has n = 2 platforms behind it rather
+than n = 1 run: the onset measured here is 2.745 m on the old plant and the
+divergence is not removed on the new one.
+
+What must **not** be carried forward is the sentence beside it, that a
+6 m reverse goal is unreachable. On the new plant it is reached. TODO's
+measured-numbers block quotes the bound; it should keep the bound and gain
+the outcome, phrased as: *reverse is followed to about 2.4 m and the
+heading then diverges on both plants; under `p_gain` 60000 the vehicle
+recovers by replanning and still arrives, at 3.2 x the plan length in
+travel.* The cost is the number that matters for M6 traffic, and it is
+measured: **a 6 m reverse costs 12.5 m of travel and 57.6 s.**
+
+## 12.3 Case B, 2 m astern
+
+Route: spawn world (+1.0, +7.0), goal world (-1.0, +7.0). The old-plant
+figure is `SUCCEEDED in 4.37 s`, tracking rms 0.0009 m, absolute error
+0.3117 m.
+
+### Result - and the surprise of this section
+
+Same one-variable A/B as 12.2: two runs, the plant is the only difference.
+
+| | section 5.2, old plant, container | **old plant, WSL, this tree** | **new plant, WSL, this tree** |
+|---|---|---|---|
+| outcome | SUCCEEDED 4.37 s | SUCCEEDED 4.50 s | SUCCEEDED 4.65 s |
+| plan | 2.000 m, 0 cusps, 100 % reverse | 2.000 m, 0 cusps, 100 % reverse | 2.000 m, 0 cusps, 100 % reverse |
+| ground-truth path | - | 1.708 m | 1.755 m |
+| steer commanded, max | 2.82 deg | **3.35 deg** | **13.21 deg** |
+| TRACKING rms | **0.0009 m** | **0.0010 m** | **0.0206 m** |
+| TRACKING max | 0.0027 m | 0.0031 m | **0.0480 m** |
+| absolute goal error (truth) | 0.3117 m | 0.2924 m | **0.2512 m** |
+
+**The tracking figure gets 20 times worse on the new plant, and that is not
+a defect - it is the same mechanism as 12.2 read at a route where it costs
+something.** Case B is a 2 m straight reverse from an already-aligned pose.
+The correct trajectory is to do nothing but drive backwards, and on the old
+plant that is exactly what a frozen steer axis produces: a 3.35 deg command
+that does not execute *is* the perfect plan here, so the deadband was
+**flattering** this case. Section 5.2's 0.0009 m is therefore the tightest
+tracking in the file for a reason that has nothing to do with control
+quality, and the WSL old-plant run reproduces it to 0.0001 m.
+
+Give the axis authority and RPP's reverse corrections start acting - and
+reverse corrections are exactly the ones section 5.2 identified as an
+unstable loop, because the steered wheel trails. The commanded steer goes
+to 13.21 deg and the vehicle wobbles at the 2 cm scale. It still arrives,
+and it arrives **closer** than either old-plant run (0.2512 m against
+0.2924 / 0.3117), because the endgame correction now executes.
+
+**The finding, stated once.** The plant change did not create the reverse
+instability and did not remove it; it **un-masked** it. Under `p_gain`
+6000 the reverse loop could not act, so short reverse legs looked perfect
+and long ones aborted. Under 60000 the loop acts: short legs cost 2 cm of
+wobble and long legs cost travel instead of an abort. Section 5.2's
+recommendation - that RPP needs a reverse-specific reference point and
+lookahead on this vehicle - is not weakened by the plant change. It is the
+open item the plant change makes visible, and it is now the binding one for
+any M6 route that reverses.
+
+## 12.4 Case C, the named degenerate stretch
+
+Route: spawn world (+1.0, +7.0), goal world (+7.0, +7.0). Old plant:
+`SUCCEEDED in 11.09 s`, tracking rms 0.0730 m, absolute error 0.1503 m.
+
+### Result
+
+| | section 5.3, old plant, container | **new plant, WSL, this tree** |
+|---|---|---|
+| outcome | SUCCEEDED 11.09 s | **SUCCEEDED 11.41 s** |
+| plan | 6.003 m, 0 cusps, 0.0 % reverse | 6.003 m, 0 cusps, 0.0 % reverse |
+| ground-truth path | 5.866 m | 5.791 m |
+| steer commanded, max | 11.63 deg | 7.86 deg |
+| TRACKING rms / max | 0.0730 / 0.1223 m | **0.0423 / 0.0885 m** |
+| absolute goal error (truth) | 0.1503 m (1.07 x floor) | **0.2009 m (1.42 x floor)** |
+| rotation-in-place refused | 0 | 0 |
+
+**Tracking improves by 42 % and the arrival error grows, and the two are
+not in tension.** This is a forward drive, the regime in which the plant
+change simply lets small corrections act: the vehicle now holds the plan to
+0.0885 m worst against 0.1223 m, and asks for a smaller maximum steer angle
+to do it (7.86 against 11.63 deg), which is what a loop that corrects early
+looks like. The arrival error is a different instrument: at 0.2009 m
+against a 0.1411 m registration floor it is 1.42 x the floor, where section
+5.3's draw was 1.07 x, and both sit inside the regime section 5.3 itself
+describes as "at the instrument's resolution". East A is the aisle where
+99 % of the along-aisle information is carried by ten rays; what this pair
+of draws bounds is the localizer, not the controller.
+
+**Case C's conclusion is unchanged**: the named degenerate stretch costs the
+traverse nothing measurable, and the drive is clean, 0 cusps, 0 % reverse,
+0 refusals. No re-derivation follows from it.
+
+## 12.5 Case D, the goal the planner must refuse
+
+Route: spawn world (+1.0, +7.0), goal world (+5.0, +9.0), inside RackRowA.
+The refusal half (error code 208, seven planning attempts) was already
+re-measured on the bench in section 8.6 and is plant-independent. What is a
+drive observation, and therefore re-measured here, is the other half: **the
+vehicle never moves**, ground-truth path 0.000 m.
+
+### Result
+
+| | section 5.4, old plant, container | **new plant, WSL, this tree** |
+|---|---|---|
+| goal accepted at the door | yes | **yes** (`t_sim 30.22`) |
+| planning attempts, each failing out loud | 7 | **14** |
+| the planner's stated reason | `"no valid path found"` | **`"exceeded maximum iterations"`** |
+| costmap clears / `Wait 5.0` recoveries | 6 retries | 10 global-costmap clears, 3 waits |
+| result | **ABORTED `208` NO_VALID_PATH**, 90.77 s | **ABORTED `207`**, 59.84 s |
+| **ground-truth path** | **0.000 m** | **0.000 m** |
+| samples, all at rest | 905 over 90.74 s | **597 over 59.81 s**, 0 forward / 0 reverse / 597 at rest |
+| rotation-in-place refusals | 0 | 0 |
+| final truth pose | the spawn pose to six decimals | **the spawn pose to six decimals** |
+
+**The half this brief owed is confirmed and unchanged: the vehicle never
+moves.** 597 consecutive at-rest samples over a minute of refusal, and the
+final truth pose is the spawn pose. That is the property removing `Spin`
+and `BackUp` from the behaviour tree exists to produce, and it does not
+depend on the plant - which is what the inventory predicted, and it is now
+measured rather than predicted.
+
+**The error code changed, and section 5.4 predicted that too.** It reads:
+*"the planner does not distinguish 'goal occupied' from 'no path' ... the
+bench shows the same goal returning `207 TIMEOUT` on other runs, from the
+same cause. A caller cannot tell from the error code why it was refused."*
+This run is that second draw arriving in a full-stack run rather than on
+the bench, with the planner's own reason changing from
+`"no valid path found"` to `"exceeded maximum iterations"` for the same
+goal on the same grid. **It strengthens section 6's M6 request rather than
+disturbing it**: a fleet manager reading `207` versus `208` learns nothing
+about the world, and this is now demonstrated twice at two levels.
+
+## 12.6 The `footprint_padding` re-derivation
+
+The standing TODO item is "padding re-derived or the shuffle prevented".
+The shuffle is what the plant change prevents (0 of 5 in section 11.6), so
+the re-derivation belongs here, on new-plant localization maxima.
+
+### The new-plant localization maxima this derivation may use
+
+Believed pose against ground truth, every sample of every **new-plant**
+drive on the record, re-read through the committed registration by the same
+`map_to_world` the harness uses. The reader was validated first by
+reproducing two figures the harness printed itself: m5-40 r0's
+`rms 0.0663 / MAX 0.1083` and m5-38 r1's `MAX 0.1523`, both exact.
+
+| run | regime | n | position rms | **position max** | heading max |
+|---|---|---|---|---|---|
+| m5-38 r1 | staged route, d = 4.5 | 295 | 0.0884 m | 0.1523 m | 1.34 deg |
+| m5-38 r2, r3, r4, r5 | staged route, d = 4.5 | - | - | 0.1082 / 0.1315 / 0.0718 / 0.1068 m | - |
+| **m5-40 r0** | staged route, committed tree | 278 | 0.0663 m | 0.1083 m | 1.75 deg |
+| **m5-40 case B** | 2 m reverse | 47 | 0.0166 m | **0.0364 m** | 0.68 deg |
+| **m5-40 case C** | degenerate stretch, forward | 114 | 0.0408 m | 0.0885 m | 3.34 deg |
+| **m5-40 case B-prime** | 6 m reverse, 52 replans | 574 | 0.1236 m | **0.2056 m** | 4.12 deg |
+| m5-40 case D | refusal, stationary throughout | 597 | 0.0000 m | 0.0000 m | 0.05 deg |
+| **pooled, all nine driving runs** | | **2413** | **0.0849 m** | **0.2056 m** | **4.12 deg** |
+
+Two things this table says that a single number would hide. **The worst
+new-plant localization is not on the criterion route** - it is case
+B-prime, the long reverse, whose 52 replans and reversals are the regime
+section 8.5 identified as the one AMCL's motion model follows worst. And
+**the shuffle regime does not appear at all**: section 8.5's 0.661 m came
+from r4's hundreds of reversals at the steer stop, and no new-plant run has
+entered that regime (0 of 6 staged routes).
+
+### The derivation
+
+Section 4's rule is explicit: `footprint_padding` is the measured
+localization max, rounded up to the centimetre, because a costmap places
+the footprint at the pose the vehicle *believes* and the vehicle is really
+somewhere within that radius of it. Applying the same rule to the same
+quantity on the new plant:
+
+```
+measured max, pooled over every new-plant drive   0.2056 m
+rounded up to the centimetre                      0.21 m
+committed value                                   0.27 m
+```
+
+**The derivation says the committed 0.27 stands, and it is not changed.**
+That is the ruling, and the reasons are worth more than the number:
+
+1. **0.27 now covers the measurement again, with 0.06 m to spare.** The
+   standing TODO item is "padding re-derived **or** the shuffle prevented";
+   section 8.6 opened it because r4's 0.661 m left the padding not covering
+   its own derivation. Both halves are now satisfied - the shuffle does not
+   occur on this plant, and the re-derivation lands under the committed
+   value.
+2. **Shrinking it to 0.21 would be a real loss for no gain.** Section 2.1
+   spends the padding out of a 1.081 m half-aisle and a 0.356 m half-pinch;
+   0.06 m back buys aisle margin nobody has asked for, at the cost of
+   making the collision polygon a tighter fit to a distribution measured
+   over nine runs.
+3. **The 0.263 m it was derived from is a different route's measurement.**
+   Section 4 takes it from `EVIDENCE_LOCALIZATION.md`'s route case (a),
+   which has **not** been re-driven on the new plant (inventory item 6, and
+   still open). Replacing a figure from that route with a figure from these
+   routes would be a substitution, not a re-derivation, and section 8.6
+   already carries the route-to-route caveat.
+
+**The goal tolerances beside it, checked by their own rules rather than
+re-derived.** `xy_goal_tolerance: 0.25` is section 4's "twice the measured
+rms and just inside the measured max": 2 x 0.0849 = 0.17 m and the max is
+0.2056 m, so 0.25 sits outside both and stays. `yaw_goal_tolerance: 0.15`
+rad is "1.9 x the heading max": 1.9 x 4.12 deg = 7.8 deg = 0.137 rad,
+inside the committed 0.15. **Neither is changed, and neither is widened.**
+Both are covered by their own derivations on the new plant, which is the
+first time that has been true since section 8.6.
+
+## 12.7 Section 3.3 convcheck, on the new plant
+
+`nav2.yaml`'s steer-reserve derivation cites section 3.3's **23 % understeer
+at the tightest arc**. The arcs it drives (26.57 deg, 45 deg) sit above even
+the old 3.8 deg knee, but the transient onto each lock and the achieved-radius
+means pass through the steer PID.
+
+### The first attempt was HELD, and the harness said so
+
+Run at world (-8.0, +7.0), inside aisle A, three of the eight arc segments
+came back at **79 %, 46 % and 82 %** of commanded speed with the harness's
+own warning: *"A vehicle that will not accelerate to a speed it is given is
+being HELD by something."* It was: an `R = 1.05 m` arc swings up to 2.1 m
+laterally and the aisle is 3.80 m wide. That run
+(`evidence/m5-40-conv-convcheck.{csv,txt}`) is kept as what it is - **not a
+conversion measurement** - because it is the check of `docs/LESSONS.md`
+2026-08-04 (a motion check that does not retrace its segments cannot tell a
+followed arc from a blocked one) doing its job on a live run for the first
+time. Its 147.94 % worst radius error is the arithmetic of a blocked
+vehicle and means nothing about the conversion.
+
+Section 3.3's own spawn pose is not recorded (it was a container run,
+`/home/user/amr-agent/...`), so the re-run derives one instead of guessing
+again: the most open cell in the committed grid, by clear half-width, is
+**world (-1.396, -6.756) with 2.90 m of clearance** - the dock apron. The
+re-run spawns at (-1.4, -6.75) and **no segment is HELD**: every row lands
+at 100-111 % of commanded speed.
+
+### Result
+
+`evidence/m5-40-conv2-convcheck.{csv,txt}`, 3500 samples.
+
+| segment | old plant (section 3.3, container) | **new plant (m5-40, apron)** |
+|---|---|---|
+| straight ahead / astern | 0.3000 / -0.3000 m/s, 100 % | 0.3000 / -0.3000 m/s, 100 % |
+| `R = 2.10 m` left, achieved R | +2.395 m (14 % wide) | **+2.271 m (8.1 % wide)** |
+| `R = 2.10 m` astern retrace | +1.950 m | +2.180 m |
+| `R = 1.05 m` left, achieved R | +1.291 m | **+1.202 m** |
+| `R = 1.05 m` left, `delta_meas` | +39.112 deg for 45 commanded | **+41.150 deg** |
+| `R = 1.05 m` right, achieved R | -1.162 m | -1.177 m |
+| **worst relative radius error** | **23.00 %** | **14.43 %** |
+| speed achievement, every segment | 100-114 % | 100-111 % |
+| rotation in place | REFUSED, vehicle moved 0.0000 m | **REFUSED, vehicle moved 0.0000 m, turned +0.0000 deg** |
+
+**The understeer is not removed; it is reduced from 23 % to 14 %, and both
+figures are upper bounds that contain tyre slip.** That is the honest
+reading: the steer axis now reaches its commanded lock sooner, so less of
+each arc is spent in the transient onto it, but a tricycle on a scrubbing
+tyre still drives wider than its kinematic radius, and nothing in this
+change touches the tyre.
+
+**What it does to `nav2.yaml`'s steer reserve.** Section 3.3 item 3 rules
+that the planner's tightest arc costs more steer than the kinematic 45 deg,
+and puts the reserve to the 75.06 deg stop "nearer 24 deg than the 30 deg
+the file's derivation claims". Re-derived from the new measurement by the
+same route - to drive `delta_meas` 45 deg you must publish
+`45 x 45 / 41.150 = 49.2 deg` - the reserve becomes **75.06 - 49.2 =
+25.8 deg**. So the correction section 3.3 makes to `nav2.yaml` **stands and
+shrinks**: the file's 30 deg is still optimistic, by about 4 deg rather
+than 6. No parameter is changed here; the derivation is what was asked for.
+
+**Two rows to read with care.** The `R = 2.10 m` astern retrace moves from
++1.950 m to +2.180 m, i.e. from 7 % tight to 4 % wide - the old row was the
+only arc in the set that came out *tighter* than commanded, which is what a
+half-executed lock produces, and it is now on the same side as every other
+row. And the refusal count fell from 7435 to 1363; both are counts of
+messages at whatever rate the harness spun, and section 3.3 already quotes
+that number only as "nonzero".
+
+## 12.8 How this section was run
+
+### The machine, alone, per run
+
+**Enforced by the driver, not remembered by the operator**, the section
+11.7 protocol unchanged: every run refuses to start unless `pgrep -c -f`
+over the
+`gz sim|nav2|amcl|controller_server|bt_navigator|parameter_bridge|planner_server|velocity_smoother|robot_state_publisher|ekf_node|cmd_vel_to_tricycle|forklift_io|wheel_odometry|imu_gate`
+pattern returns **0**, prints load, `/dev/shm` count and a UTC timestamp,
+gates each bring-up stage on a topic appearing (`/forklift/odom`,
+`/particle_cloud`, `/plan`) rather than on a sleep, and verifies the count
+after teardown. The driver additionally prints the committed `model.sdf`'s
+`<p_gain>` lines before bring-up, so every artefact records which plant
+produced it.
+
+| run | partition / domain | start (UTC) | end (UTC) | load at start | `/dev/shm` | before / after |
+|---|---|---|---|---|---|---|
+| r0, committed-tree stamp | `m540r0` / 90 | 21:09:13 | 21:10:02 | 0.08 | 517 | 0 / 0 |
+| B-prime, new plant | `m540bprime` / 91 | 21:13:0x | 21:15:31 | 0.58 | 578 | 0 / 0 |
+| B-prime, **old plant** | `m540bprime-oldplant` / 92 | 21:17:5x | 21:19:20 | - | - | 0 / 0 |
+| B, new plant | `m540b` / 93 | 21:19:4x | 21:21:08 | - | - | 0 / 0 |
+| B, **old plant** | `m540b-oldplant` / 94 | 21:22:1x | 21:23:33 | 1.48 | - | 0 / 0 |
+| C | `m540c` / 95 | 21:23:5x | 21:25:09 | 1.25 | - | 0 / 0 |
+| D | `m540d` / 96 | 21:25:2x | 21:27:12 | 2.82 | - | 0 / 0 |
+| convcheck, HELD, discarded | `m540conv` / 97 | 21:28:5x | 21:30:38 | 0.54 | 646 | 0 / 0 |
+| convcheck, apron | `m540conv2` / 98 | 21:31:2x | 21:33:14 | 1.86 | 668 | 0 / 0 |
+
+**One incident, recorded rather than tidied away.** The first `b-oldplant`
+launch was issued twice, two minutes apart, because the launching shell
+reported a path error that made the first launch look like it had not
+started. It had. **The guard did its job**: the second invocation counted
+15 matching processes and refused to start. But the second invocation's
+output redirection truncated the first's log while the first was still
+writing to it - the same open-file hazard as `docs/LESSONS.md` 2026-07-28
+(entry 69), arriving through a redirect rather than a `gzip`. **That run
+was discarded, not repaired**, and `b-oldplant` was re-run alone from a
+verified-empty machine; the figures in 12.3 are the re-run's. The
+discarded run left no evidence file that any figure here quotes.
+
+**A second self-inflicted trap worth one line**: `pkill -f "gz sim"` issued
+from an interactive shell kills the shell, because the shell's own command
+line contains the pattern (`docs/LESSONS.md` 2026-07-27). Written
+`pkill -f "gz[ ]sim"` in the driver's teardown.
+
+### Isolation
+
+`GZ_PARTITION` **and** `ROS_DOMAIN_ID` were both set on every run, distinct
+per run, because `gz transport` does not use DDS and the ROS variable does
+not isolate the simulator (`docs/LESSONS.md` 2026-07-27). Every run
+headless, `DISPLAY` and `WAYLAND_DISPLAY` unset. **No RTF figure was taken
+and none is quoted** (`docs/LESSONS.md` 2026-07-30).
+
+### What was and was not changed in the repository
+
+**Changed**: `model.sdf`'s steer `p_gain` and the comment block that argues
+for it (12.0), and one restored import in `nav2_run.py` (12.2).
+
+**Byte-identical**: `nav2.yaml`, `amcl.yaml`, `ekf.yaml`, `config.yaml`,
+the behaviour tree, both launch files, `cmd_vel_to_tricycle.py`,
+`envelope_gate.py`, `forklift_io.py`, `wheel_odometry.py`. **No tolerance
+was widened** - `xy_goal_tolerance: 0.25` and `yaw_goal_tolerance: 0.15`
+are untouched, and 12.6 checks both against their own derivations rather
+than adjusting either. **No dependency was added.** `plc/`, `bridge/` and
+`sim/` were not touched.
+
+### Commands
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export GZ_PARTITION=m540<tag> ROS_DOMAIN_ID=<n>      # BOTH, every run
+unset DISPLAY WAYLAND_DISPLAY                        # headless, llvmpipe
+
+# the staged route, run 0 - section 11.7's commands with model:= REMOVED
+ros2 launch sim/launch/warehouse_bringup.launch.py x:=-4.5 y:=7.0 yaw:=0.0
+ros2 launch agv/forklift/launch/localization.launch.py \
+    initial_pose_x:=1.584770 initial_pose_y:=12.576859 initial_pose_yaw:=-0.007915
+ros2 launch agv/forklift/launch/navigation.launch.py \
+    gate:=false cmd_topic:=/cmd_vel_smoothed
+python3 agv/forklift/scripts/nav2_run.py stage \
+    --x 1.0 --y 7.0 --yaw 0.0 --d 4.5 --max-go-arounds 2 \
+    --settle 30 --staging-timeout 90 --approach-timeout 45 \
+    --csv evidence/m5-40-r0-run.csv --plan evidence/m5-40-r0-plan.json
+
+# the section 5 cases - spawn at world (+1.0, +7.0), map (7.084598, 12.533325)
+ros2 launch sim/launch/warehouse_bringup.launch.py x:=1.0 y:=7.0 yaw:=0.0
+#   ... localization at the map pose above, navigation as above, THEN:
+python3 agv/forklift/scripts/nav2_run.py goal --x <GX> --y 7.0 --yaw 0.0 \
+    --settle 30 --csv evidence/m5-40-<tag>-run.csv \
+    --plan evidence/m5-40-<tag>-plan.json
+#   B' GX = -5.0    B GX = -1.0    C GX = +7.0    D --x 5.0 --y 9.0 --timeout 240
+# NOTE: 25 s of wait after /plan appears, before the goal - see 12.2.
+
+# the conversion check - bringup + converter + io ONLY, no planner or localizer
+ros2 launch sim/launch/warehouse_bringup.launch.py x:=-1.4 y:=-6.75 yaw:=0.0
+python3 agv/forklift/scripts/cmd_vel_to_tricycle.py --ros-args -p use_sim_time:=true
+python3 agv/forklift/scripts/forklift_io.py --ros-args -p use_sim_time:=true
+python3 agv/forklift/scripts/nav2_run.py convcheck \
+    --csv evidence/m5-40-conv2-convcheck.csv
+
+# THE ONE ARGUMENT THAT MAKES AN OLD-PLANT A/B, and it is the whole comparison
+git show HEAD:agv/forklift/model.sdf > /tmp/m5-40-oldplant.sdf   # verified identical
+ros2 launch sim/launch/warehouse_bringup.launch.py ... model:=/tmp/m5-40-oldplant.sdf
+```
+
+Artefacts, all under `agv/forklift/evidence/`:
+`m5-40-r0-{run.csv,run-approach.csv,plan.json,run.txt,analyse.txt}`,
+`m5-40-{b,bprime,c,d}-{run.csv,plan.json,run.txt,analyse.txt}`,
+`m5-40-{b,bprime}-oldplant-{run.csv,plan.json,run.txt,analyse.txt}`,
+`m5-40-conv-convcheck.{csv,txt}` (the HELD run, kept as what it is),
+`m5-40-conv2-convcheck.{csv,txt}`.
+
+## 12.9 What section 12 asks the next brief to decide
+
+1. **RPP has no reverse-specific reference point on this vehicle, and the
+   plant change made that the binding item** (12.2, 12.3). It was section
+   5.2's diagnosis, masked for two gates by an actuator that could not
+   execute the corrections. Any M6 route that reverses more than ~2.4 m
+   pays 3.2 x the plan length in travel today.
+2. **`cmd_goal`'s settle loop exits one sample too early** (12.2). Recorded,
+   not fixed: whether it should require a minimum TF age is a design
+   decision, and the `goal` path had been dead since m5-33 so no committed
+   figure depends on the current behaviour.
+3. **`footprint_padding` stays 0.27 and the standing TODO item closes**
+   (12.6), on both of its alternatives at once.
+4. **`nav2.yaml`'s steer-reserve comment still overstates the reserve**
+   (12.7): 30 deg claimed, ~25.8 deg measured. Section 3.3 already rules
+   this; the number moves, the ruling does not.
+5. **Section 3.3's spawn pose is not recorded anywhere** and had to be
+   re-derived (12.7). Any harness whose result depends on where the vehicle
+   stands should print that pose into its own artefact.
+6. **`sim/` items are untouched, as the inventory left them**:
+   `FORKLIFT_ARENA_EVIDENCE.md` section 5's traction figure still
+   contradicts m5-38 section 11.3 (b), and its section 6 steer step still
+   describes the old plant. Both are requests to `sim/`, not findings this
+   section may act on.

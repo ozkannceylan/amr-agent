@@ -967,17 +967,61 @@
     <!--
       Steer angle command [rad].
 
-      i_max is sized deliberately, and it is bounded from both sides.
+      THE LOAD THIS AXIS WORKS INTO. A steered wheel carrying this vehicle
+      scrubs against the floor, a resisting moment measured at roughly
+      400 N m. That moment is what sets every number in this plugin, and
+      the quantity that decides whether a command executes at all is the
+      angle error at which the proportional term first exceeds it:
 
-      Too low and the angle never arrives: steering a loaded wheel that is
-      standing still scrubs against the floor, a resisting moment measured
-      at roughly 400 N m for this vehicle, and an integral clamp under that
-      leaves a permanent error no proportional gain can remove.
+          e* = M_scrub / p_gain = 400 / 60000 = 0.0067 rad = 0.38 deg
 
-      Too high and it oscillates: once the vehicle rolls, the scrub
-      disappears, the accumulated surplus has nothing left to push against
-      and the joint hunts at its rate limit. Both were observed. The clamp
-      is therefore set just above the measured scrub moment.
+      Below e* the joint moves only as the integral winds up, which takes
+      seconds. p_gain is therefore not a tuning preference: it is the
+      smallest steer correction the plant can execute promptly.
+
+      WHY p_gain IS 60000 AND NOT 6000. This axis ran at 6000 through M4
+      and most of M5, which puts e* at 3.8 deg. Nav2's corrections on a
+      straight leg are 1 to 2.5 deg over a leg lasting 8 to 9 s, so none
+      of them executed and a straight leg was open loop in yaw: the
+      heading error the vehicle entered with was held, and a held heading
+      error integrates into cross track at sin(theta) per metre, measured
+      at 0.084 m/m mean magnitude over ten routes. Raising p_gain to
+      60000, the value the mast joint already uses, moves e* to 0.38 deg,
+      below every command the controller forms on a straight leg. Measured
+      on the plant bench, a 2 deg command goes from 5 percent executed to
+      76 percent executed inside 1.4 s and the body follows the joint to
+      within 1 percent; over five route repeats the mean cross track rate
+      falls from 0.089 to 0.0134 m/m. See EVIDENCE_NAV2.md sections 11.2,
+      11.3 and 11.6 (m5-38) for the static curve, the A/B that located the
+      resisting moment in the tyre contact, and the distribution.
+
+      Two honest limits on that number. No upper bracket was swept: 60000
+      is a sufficient value derived from this model's own 400 N m figure,
+      and its stability is evidenced by the absence of hunting out to
+      +/- 20 deg on the bench, not by a sweep. And the residual shortfall
+      below 0.5 deg (0.09 to 0.23 of commanded inside a 1.4 s window) is
+      settling, not a dead region; it falls smoothly with command size.
+
+      A CLAIM THIS COMMENT USED TO MAKE, AND WHY IT IS GONE. It said the
+      scrub "disappears once the vehicle rolls", which is false and was
+      falsified directly: rolling at 0.6 m/s in the warehouse, the
+      committed axis still failed every command under 3 deg. The variable
+      that removes the resisting moment is GRIP, not motion. The same
+      bench in the arena world, whose floor gives the drive wheel no
+      traction at all, reaches every commanded angle including 0.5 deg
+      inside 1.4 s. Anything measured on a surface without grip
+      characterises this axis with its load disconnected.
+
+      i_max STAYS AT 800, just above the measured scrub moment, and its
+      job has changed. Under p_gain 6000 the integral was the only term
+      that could ever break the scrub, so the clamp had to clear 400 N m
+      or a permanent error survived; the clamp is still sized that way and
+      that lower bound still holds for the standing still case, where a
+      loaded wheel is turned from rest. What the clamp no longer carries
+      is the running correction, which p_gain now executes directly. The
+      upper bound on the clamp is unchanged and was observed: a surplus
+      large enough to outlive the condition that built it hunts the joint
+      at its rate limit.
 
       WHERE THE DAMPING LIVES, AND WHY IT IS NOT d_gain. The controller's
       derivative term is an EXPLICIT force evaluated once per physics step,
@@ -999,7 +1043,7 @@
             name="gz::sim::systems::JointPositionController">
       <joint_name>steer_joint</joint_name>
       <topic>/forklift/gz/steer_cmd</topic>
-      <p_gain>6000.0</p_gain>
+      <p_gain>60000.0</p_gain>
       <i_gain>1500.0</i_gain>
       <d_gain>30.0</d_gain>
       <i_max>800.0</i_max>

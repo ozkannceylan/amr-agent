@@ -263,6 +263,14 @@ def cmd_goal(args):
     import rclpy
     from action_msgs.msg import GoalStatus
     from geometry_msgs.msg import PoseStamped
+    # This import is NOT redundant with _build_recorder's. The recorder was
+    # factored out of this function (m5-33) and took every import with it,
+    # including the one the goal message below is built from, so `goal` has
+    # raised NameError at the first goal it sent ever since. `stage` kept
+    # its own copy at its own call site, which is why every section from 8
+    # onwards ran and this defect stayed invisible until m5-40 re-drove the
+    # section 5 cases. An import belongs at the site that USES the name.
+    from nav2_msgs.action import NavigateToPose
 
     rec = load_registration(args.registration)
     gx, gy, gyaw = world_to_map(rec, args.x, args.y, args.yaw)

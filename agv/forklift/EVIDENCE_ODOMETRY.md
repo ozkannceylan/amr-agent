@@ -1568,3 +1568,223 @@ quoted** (LESSONS 2026-07-30).
   dwell test is the AMCL brief's criterion to state, not this one's.
 - **Container only.** Every figure is from the project session container.
   The owner's WSL2 host has never run this configuration.
+
+---
+
+# 14. THE POST-DRIVE IDLE ON THE NEW PLANT - 2026-08-05 (m5-40)
+
+**Sections 1-13 above are untouched and byte-identical.** They are
+container runs on the plant that carried steer `p_gain` 6000, and they stay
+exactly as they were committed.
+
+m5-40 applied the steer-gain change ruled by the owner (`model.sdf` steer
+`p_gain` 6000 -> 60000; `EVIDENCE_NAV2.md` section 12).
+`agv/forklift/PLANT-CHANGE-INVENTORY.md` classifies **section 13 alone** in
+this file as affected, and it says exactly why: sections 1-12's drift
+figures are properties of the error model and the gyro bias, reconciled in
+closed form by the file itself and commanded at steer angles (0 and
++/-20.1 deg) far above even the old plant's 3.8 deg knee, whereas section
+13 measures **the steer axis's own post-drive relaxation against the tyre
+contact** - which is the mechanism whose stiffness the change multiplies by
+ten. The inventory called the direction of change unknown and refused to
+predict it. This section measures it.
+
+**Every heading below was written before the run that fills it.**
+
+## 14.1 What is re-measured, and what is not
+
+**Re-measured**: section 13's *measured* quantities - the steer axis's
+post-drive sweep, the gate openings it causes, the fused heading they move,
+and the per-stop cost section 13.8 states as a bound.
+
+**Not re-measured, and not in question**: section 13's *rules*. The
+trailing-rate window, the drive-exact / steer-within-one-count verdict, the
+demotion of the steer term from an equality test to a rate guard, and the
+reasoning in 13.4 and 13.6 are plant-independent design, and the plant
+change gives no reason to revisit any of them. Nothing in `config.yaml`,
+`wheel_odometry.py` or `check_odometry.py` is touched by this section.
+
+**Also not re-measured**: `EVIDENCE_LOCALIZATION.md`'s AMCL handover
+figures (+0.5389 deg and +0.548 deg at two stops), which that file's
+section 10 item 2 asks to be restated as a range or re-derived. They are a
+different instrument reading a related mechanism, and re-deriving them
+needs that file's own route re-driven on the new plant - inventory item 6,
+still open. What this section supplies is the odometry half of the
+interpretation, which is what the inventory scheduled.
+
+## 14.2 The new plant, same recipe
+
+`--phase postidle --idle 220 --truth`, seed 1, the same world
+(`--print-world` into `/tmp/flat.sdf`), the same `_PROFILE`, the same stop.
+Artefacts: `evidence/m5-40-postidle.{csv.gz,txt}`. Three checks, none failed.
+
+| | section 13, old plant, container | **m5-40, new plant, WSL** |
+|---|---|---|
+| idle measured | 219.98 s | 219.97 s |
+| **steer axis swept over the idle** | **2.3730 deg** | **0.1758 deg** |
+| distinct steer counts visited / changes | - | 3 / 4, excursion 2 counts, net 0 |
+| gyro samples suppressed | 98.47 % | **99.64 %** (21920 of 22000) |
+| **separate openings of the gate** | **9** | **1** |
+| **gate-open time** | **3.270 s** | **0.790 s** (0.36 % of the window) |
+| **fused heading, whole idle** | **-0.6585 deg** | **-0.1076 deg** |
+| as a rate over the whole idle | -0.1796 deg/min | -0.0293 deg/min |
+| fused heading after the settling window | +0.000000 deg over 200 s | **-0.0009 deg over 219.2 s** |
+| verdict true for | - | 99.65 % of the window, largest gap 0.0220 s against a 0.200 s timeout |
+
+**The relaxation transient is gone, and that is the whole result.** Section
+13.7's nine gate openings are one opening followed by eight, from t+11.5 s
+to t+15.4 s, that section 13.8 names outright: *"All of it is the steer
+axis's post-drive relaxation transient at t+11.5 s to t+15.4 s, where the
+axis moves at up to 3 counts per 0.50 s window."* On the new plant **there
+is no second opening at all.** The axis sweeps 0.1758 deg over the whole
+idle instead of 2.3730 deg - it is held, which is what ten times the
+proportional authority against a relaxing scrub moment predicts - and never
+again exceeds the 1-count rate tolerance after the coast.
+
+The single remaining opening is the coast, and section 13 already accounts
+for that one as mostly real vehicle motion rather than estimator error:
+
+| the one opening | |
+|---|---|
+| ends at | t_stop + 0.798 s |
+| fused heading gained inside it | **-0.1067 deg** (99.2 % of the idle's total) |
+| fused heading over the remaining 219.2 s | **-0.0009 deg** (0.8 %) |
+| gate closed and quiet | **0.0000 deg** |
+| the vehicle's own coast | 0.1403 m, drive wheel stops at t_stop + 0.284 s |
+
+**Truth, as a reference section entering no verdict** (section 13.6's
+premise, re-measured):
+
+| from t_stop + 0.784 s, one window after the drive wheel stopped | old plant | **new plant** |
+|---|---|---|
+| steer axis swept | 2.3730 deg | **0.1758 deg** |
+| TRUE position excursion | 0.001568 m | **0.000001 m** |
+| TRUE heading, largest excursion | 0.001750 deg | **0.000030 deg** |
+| **estimator error accrued while the wheel was provably parked** | - | **-0.001241 deg over 219.17 s = -0.000340 deg/min** |
+
+Section 13.6's conclusion is therefore unchanged and slightly stronger: a
+steer sweep with the drive count held does not turn this body, and the
+sweep is now an order of magnitude smaller as well.
+
+## 14.3 The one-variable A/B against the old plant, on this machine
+
+Section 14.2 compares a WSL run against container figures, which is two
+variables (`docs/LESSONS.md` 2026-08-05, entry 108: a comparison across two
+environments is a first attempt, not a second). So the same recipe was run
+again on this machine with **only the plant changed** - `model:=` pointing
+at `git show HEAD:agv/forklift/model.sdf`, byte-verified identical to HEAD,
+steer `p_gain` 6000, mast unchanged at 60000. Artefacts:
+`evidence/m5-40-postidle-oldplant.{csv.gz,txt}`.
+
+| | section 13, old plant, **container** | **old plant, WSL** | **new plant, WSL** |
+|---|---|---|---|
+| **steer axis swept** | **2.3730 deg** | **2.3730 deg** | **0.1758 deg** |
+| separate gate openings | 9 | **9** | **1** |
+| gate-open time | 3.270 s | 3.320 s | **0.790 s** |
+| gyro samples suppressed | 98.47 % | 98.46 % | **99.64 %** |
+| verdict true for | - | 98.47 % | 99.65 % |
+| fused heading, whole idle | -0.6585 deg | -0.6933 deg | **-0.1076 deg** |
+| first burst ends at | - | t_stop + 0.790 s | t_stop + 0.798 s |
+| heading gained inside the first burst | - | -0.3128 deg | -0.1067 deg |
+| **heading gained over the remaining 219.2 s** | - | **-0.3805 deg** | **-0.0009 deg** |
+| gate CLOSED and quiet, the filter turning with no measurement | - | -0.0018 deg | **0.0000 deg** |
+| the vehicle's own coast | 0.138 m | 0.1082 m | 0.1403 m |
+| **estimator error while the wheel was provably parked** | - | **-0.382055 deg over 219.17 s** | **-0.001241 deg over 219.17 s** |
+| as a rate over the parked interval | - | -0.104575 deg/min | **-0.000340 deg/min** |
+
+**The old plant reproduces itself on this machine to four decimal places on
+the quantity that matters** - the steer sweep is 2.3730 deg in the
+container and 2.3730 deg here - so section 13's platform caveat ("Container
+only. The owner's WSL2 host has never run this configuration") is retired
+by this run, and the plant is the only variable left standing between the
+two columns.
+
+**The transient is a plant effect and nothing else.** Nine openings become
+one, 2.3730 deg of sweep becomes 0.1758 deg, and the estimator error
+accrued while the wheel is parked falls by a factor of **308**. This is the
+inventory's open direction settled: it predicted "a stiffer hold plausibly
+creeps less" and refused to assert it; it creeps less, by two orders of
+magnitude.
+
+## 14.4 The per-stop cost, restated
+
+Section 13.8 states the bound this replaces:
+
+> **worst case, a dwell beginning at the stop command: -0.331 deg of
+> heading error, accrued in the first 16 s, then flat**; a dwell beginning
+> 20 s after the stop: 0.000 deg.
+
+`docs/LESSONS.md` 2026-08-04 (entry 94) already ruled that figure a sample
+rather than a bound - one stop, one posture, one seed - and TODO carries it
+with that caveat. **It stays a sample here**; what changes is its value and
+its shape, and the shape is now simpler because there is only one gate
+opening to account for.
+
+| | old plant (WSL A/B) | **new plant** |
+|---|---|---|
+| a dwell beginning **at the stop command** | -0.6933 deg of fused heading, of which the vehicle really turned -0.1911 deg | **-0.1076 deg of fused heading, of which the vehicle really turned -0.0158 deg** |
+| **estimator error over such a dwell** (fused minus true) | **-0.502 deg** | **-0.092 deg** |
+| a dwell beginning **after the settling window** | -0.382 deg over 219 s | **-0.0012 deg over 219 s** |
+| the settling window itself | ends at t + 15.4 s (section 13.7's last opening) | **ends at t + 0.798 s** |
+
+**Three statements, each with its n.**
+
+1. **A dwell that begins at the stop costs about -0.09 deg of estimator
+   heading on this plant** (n = 1 stop, seed 1, flat ground, forks down,
+   steer straight - the same single instance section 13.12 lists, so the
+   same caveat applies unchanged).
+2. **A dwell that begins after the vehicle has settled costs nothing
+   measurable**: -0.0012 deg over 219 s, which is 0.4 % of the old plant's
+   -0.382 deg and at the floor of what this instrument resolves.
+3. **The settling window shrinks from ~16 s to under 1 s**, and what
+   remains of it is the vehicle's own coast rather than the steer axis
+   relaxing. That is the practically useful half: a route that stops and
+   dwells no longer has to wait out a relaxation transient before its
+   estimator is quiet.
+
+**What this does NOT settle.** `EVIDENCE_LOCALIZATION.md`'s +0.5389 deg
+EKF-handover figure and its +0.548 deg second stop are AMCL-side
+measurements on the old plant, and they are not re-derived here (14.1).
+This section removes the odometry-side mechanism that was the leading
+candidate for explaining them; whether the AMCL figures move with it is
+that file's measurement to take, on its own route.
+
+## 14.5 How this section was run
+
+**Measured alone, checked rather than remembered.** Both runs refuse to
+start unless `pgrep -c -f` over the process pattern returns 0, print load,
+`/dev/shm` count and a UTC timestamp, gate bring-up on `/forklift/odom`
+appearing rather than on a sleep, and verify the count after teardown.
+New plant: 0 before, 0 after, load 0.37, `/dev/shm` 690,
+`2026-08-05T21:35:49Z` to `21:41:43Z`. Old plant: 0 before, 0 after, load
+1.18, `/dev/shm` 722, `21:42:56Z` to `21:48:49Z`. Both drivers print the
+committed model's `<p_gain>` lines before bring-up, so each artefact
+records which plant it ran on.
+
+**Both transports isolated on every run.** `GZ_PARTITION=m540postidle` /
+`ROS_DOMAIN_ID=99` for the new plant, `m540postidleold` / `89` for the old
+one - `gz transport` is not DDS and the ROS variable does not isolate the
+simulator (`docs/LESSONS.md` 2026-07-27). Headless, `DISPLAY` and
+`WAYLAND_DISPLAY` unset. **No RTF figure was taken and none is quoted.**
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export GZ_PARTITION=m540postidle ROS_DOMAIN_ID=99      # BOTH, every run
+unset DISPLAY WAYLAND_DISPLAY
+
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py --print-world > /tmp/flat.sdf
+ros2 launch agv/forklift/launch/vehicle.launch.py world:=/tmp/flat.sdf \
+    world_name:=odometry_flat seed:=1
+/usr/bin/python3 agv/forklift/scripts/check_odometry.py --phase postidle \
+    --idle 220 --truth --csv agv/forklift/evidence/m5-40-postidle.csv   # gzipped after the run,
+    #                                                     the writer confirmed gone first
+
+# THE ONE ARGUMENT THAT DIFFERS FOR 14.3, and it is the whole A/B:
+#   git show HEAD:agv/forklift/model.sdf > /tmp/m5-40-oldplant.sdf
+#   ros2 launch ... model:=/tmp/m5-40-oldplant.sdf
+```
+
+`check_odometry.py`, `wheel_odometry.py`, `config.yaml`, `ekf.yaml` and
+`launch/vehicle.launch.py` are byte-identical to their committed form.
+The only file this brief changed in `agv/` that any run above reads is
+`model.sdf` itself.

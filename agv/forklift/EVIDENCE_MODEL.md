@@ -23,6 +23,28 @@
 > `8.000` clear values are that sensor's `range_max`, not this one's. The
 > matrix is re-run against the current source, as committed code rather than
 > an ad-hoc harness, in `EVIDENCE_SENSOR_TF.md` §5.
+>
+> **Third note, added 2026-08-05 (brief m5-40).** The plant this record was
+> taken on no longer exists either. `model.sdf`'s steer `p_gain` was raised
+> from 6000 to 60000 by the owner's ruling on m5-38, moving the angle below
+> which the steer axis cannot overcome the tyre scrub from 3.8° to 0.38°. So
+> **§2.1's steer figures describe the prior plant**: the 0.553 rad reached
+> three seconds after a 0.60 rad step, and the sentence beside it that "the
+> approach is asymptotic by design: the integral has to build against the
+> moment of scrubbing a loaded wheel that is standing still", are both
+> properties of `p_gain` 6000 and will not reproduce. The new axis is
+> characterised at every angle from ±0.5° to ±20° in `EVIDENCE_NAV2.md` §11.2
+> and §11.5, and the change itself is in §12. **Nothing else in this file
+> moves**: §2.2's traction chain and its 0.0016 rad steer residual, §2.3 and
+> §3's mast figures (that joint already ran `p_gain` 60000 and did not
+> change), §4's rates, §5's straight drive at zero steer command, §6's fault
+> matrices and §7's config/model agreement are all either steer-free or
+> measured on a stationary vehicle. §7 in particular is a static comparison
+> of `model.sdf` against `config.yaml`, and the whole edit is one `<p_gain>`
+> value plus a comment block: `git diff -U0` on `model.sdf` shows exactly one
+> changed element, `<p_gain>6000.0</p_gain>` to `<p_gain>60000.0</p_gain>`,
+> so no mirrored value and no `<topic>` element moved. `steer_joint` still
+> declares ±1.31 rad and `mast_joint` 0.0–1.6 m, matching `config.yaml`.
 
 Dated headless capture of `agv/forklift/`: that the model spawns, that each
 of its three driven joints responds to its own explicit gz command topic,
