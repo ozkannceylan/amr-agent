@@ -1,0 +1,16 @@
+﻿2026-08-05T21:15:48.283Z | START | ENGINEERING STAND-IN WRITER -- not a safety device, not a safety path; it stands in for the WIRING of three simulated safety-input channels and carries no Category, no PL, no SIL and no PFH
+2026-08-05T21:15:48.284Z | START | instance = safecell3
+2026-08-05T21:15:48.285Z | START | dll = C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll
+2026-08-05T21:15:48.288Z | START | api version = 0x70000 (7.0)
+2026-08-05T21:15:48.293Z | START | field-link listener port = 45015, FIELD_LINK_STALE_MAX = 1000 ms
+2026-08-05T21:15:48.293Z | START | write set (exact and closed): SafetyInputStandIn.EStopCircuitClosed, SafetyInputStandIn.ZoneDeviceCircuitClosed, SafetyInputStandIn.ResetButtonPressed, SafetyInputStandIn.StandInHeartbeat
+2026-08-05T21:15:48.294Z | START | log = C:\Users\ozkan\projects\amr-agent\bridge\standin_writer\logs\standin-writer-20260805T211547Z-pid5340.log
+2026-08-05T21:15:48.295Z | START | operator console = interactive
+2026-08-05T21:15:48.295Z | START | boot levels: EStopCircuitClosed=False ZoneDeviceCircuitClosed=False ResetButtonPressed=False -- open, open, unpressed: the fail-safe pre-connection state
+2026-08-05T21:15:48.302Z | API | connected to instance 'safecell3', OperatingState = Run
+2026-08-05T21:15:48.308Z | LINK | listening on 0.0.0.0:45015 for the field evaluation; none is required -- the writer serves the cell with no field link ever arriving, and while none is up the zone channel belongs to the operator
+2026-08-05T21:17:28.848Z | OPERATOR | estop close -> EStopCircuitClosed := True
+2026-08-05T21:17:30.030Z | OPERATOR | zone close -> ZoneDeviceCircuitClosed := True
+2026-08-05T21:17:31.523Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-05T21:17:32.719Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-05T21:17:40.276Z | OPERATOR | status -- levels: estop=closed zone=closed reset=released | heartbeat=2239 | field link down (operator owns the zone channel) | API connected | cycles=2239 overruns=0 write-failures=0

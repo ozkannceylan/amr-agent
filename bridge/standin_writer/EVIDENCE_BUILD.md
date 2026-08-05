@@ -202,33 +202,481 @@ interface instead.
 
 ---
 
-## §3 Run B — DEFERRED: the S015 delta had not landed when this build ended
+## §3 Run B — RUN on 2026-08-05T23:10Z, against the POST-delta build (m5-41)
 
-`SafetyInputStandIn.StandInHeartbeat` was still absent from the live tag list
-after 45 minutes of polling at 20 s intervals (`state=Run`, `tags=185`
-unchanged throughout). Everything in `STANDIN-WRITER-DESIGN.md` §8 that reads
-`StandInHeartbeat`, `HeartbeatSeen` or `StandInValid` therefore **has not been
-observed** and is stated as unproven rather than assumed:
+> Written as each observation landed, not at the end. The §3 table that
+> follows the capture is the run-A deferral list, updated in place.
 
-| §8 check | Status |
+### B0.0 — the captures, all of them
+
+Every file named in §3 lives in `bridge/standin_writer/evidence/`. The writer's
+own session logs are per-session run artefacts under `logs/` (gitignored); the
+three from this run are copied out under dated names, the short one in full and
+the two long ones with their `CYCLE` lines stripped.
+
+| File | What it is |
 |---|---|
-| 1 double start refused | **proven**, run A §1 A1 |
-| 2 belief: heartbeat advances, `StandInValid` → TRUE | **not run** — the tag does not exist |
-| 3 the cell starts: `estop close`/`zone close`/reset → demands clear | **not run** — needs `StandInValid` TRUE |
-| 4 typing does not starve the heartbeat | **not run** — needs the heartbeat |
-| 5 death converts to a demand | **not run** — needs `StandInValid` |
-| 6 rebirth restores belief, not motion | **not run** — needs `StandInValid` |
-| 7 terminal write, success form | **not run**; the *failure* form is proven, run A §1 A5 |
-| 8 zone/refusal shapes | **proven**, run A §1 A3 and A4 |
+| `m5-41-B1-consumer.log` / `-witness.log` | B1 belief + B2 start sequence + B3 re-assert |
+| `m5-41-B4-consumer.log` / `-witness.log` | B4 unplanned writer death |
+| `m5-41-B5-rebirth-consumer.log` | B5 restart |
+| `m5-41-B6-consumer.log` / `-witness.log` | B6 second start sequence, slow typing, commanded kill |
+| `m5-41-B7-consumer.log` | B7 terminal write |
+| `m5-41-timers-ForkliftControl_DB.log`, `m5-41-timers-InstF_Forklift_Safety.log` | §3.2, all four members of every timer |
+| `m5-41-writer-session-2026-08-05-pid37312.log` | the B7 writer session, complete |
+| `…-pid34844-events.log`, `…-pid5340-events.log` | the B1–B6 writer sessions, `CYCLE` lines stripped |
+| `m5-41-B*-witness.err` | the asyncua session-timeout grant line, kept because the grant is `min(request, cap)` and is read back, never assumed |
 
-The mechanism each unrun check exercises is nevertheless exercised in run A by
-a different route: the counter-withholding rule and the reconnect path by A2,
-the console non-blocking read by A3 (four commands accepted while the loop
-kept cycling), the terminal write by A5.
+New read-only scaffolding built for this run, both in `testing/`:
+`opcua_witness.py` (§B0.1) and `read_timers.ps1` (§3.2). Neither writes
+anything. `observe_consumer.ps1` gained four columns — `StandInStaleTimer.Q`
+and the three validated channels — so B4 onward carry 21 bits where B1–B3 carry
+17; each capture prints its own column list.
 
-**What run B is, when the delta lands.** Start the writer, run the eight
-checks with `testing/observe_consumer.ps1` reading the consumer's view and the
-OPC UA witness of F1 running beside it, and append the capture here as §3.
+### B0 — the build the run ran against, read back
+
+`SafetyInputStandIn.StandInHeartbeat` **exists**. Live tag list, instance
+`safecell3`, `OperatingState = Run`, **199 tags** (185 before the delta):
+
+```
+SafetyInputStandIn.EStopCircuitClosed          Bool
+SafetyInputStandIn.ZoneDeviceCircuitClosed     Bool
+SafetyInputStandIn.ResetButtonPressed          Bool
+SafetyInputStandIn.StandInHeartbeat            Int      <-- the S015 delta
+InstF_Forklift_Safety.HeartbeatChanged         Bool
+InstF_Forklift_Safety.HeartbeatSeen            Bool
+InstF_Forklift_Safety.StandInValid             Bool
+InstF_Forklift_Safety.HeartbeatMemory          Int
+InstF_Forklift_Safety.StandInStaleTimer.{IN,PT,Q,ET}
+InstF_Forklift_Safety.EStopClosedValid         Bool
+InstF_Forklift_Safety.ZoneClosedValid          Bool
+InstF_Forklift_Safety.ResetPressedValid        Bool
+```
+
+### B0.1 — the witness, re-established before anything was trusted
+
+The run-A witness (`m5-03b-opcua-witness.py`) addresses the mirror as
+`ns=3;s="ForkliftSafetyMirror"."EStopDemand"` — a NodeId in the CPU's own
+auto-published namespace, whose `DataBlocksGlobal` folder this server
+**no longer publishes at all** (`m5-25b-f-absence-2026-08-05.log`). So the
+witness path was re-established from scratch rather than assumed:
+
+| Question | Answer, read back |
+|---|---|
+| Does the browse path of `opcua-nodes.md` §11.2 serve the mirror? | **Yes.** `Objects/ServerInterfaces/DemoCell/Forklift/Safety/{EStopDemand, ZoneStopDemand, SafetyResetRequired, SafetyResetFault}` browses and reads. This is the witness used below (`testing/opcua_witness.py`, new) |
+| Does the old `ns=3` NodeId form still resolve, with `DataBlocksGlobal` unbrowsable? | **Yes** — `ns=3;s="ForkliftSafetyMirror"."EStopDemand"` → `True`, `ns=3;s="ForkliftStatus"."ForkliftResetRequired"` → `True`. **Unbrowsable is not unaddressable** for a string NodeId; the run-A witness would still have worked. Recorded because the opposite was the working assumption |
+| Is the absence of the F-side and the stand-in DB an absence of *browse*, or of the address space? | **Of the address space.** Read by direct NodeId, `SafetyInputStandIn.EStopCircuitClosed`, `.StandInHeartbeat`, `InstF_Forklift_Safety.StandInValid`, `.HeartbeatSeen` and `.EStopDemand` all return **`BadNodeIdUnknown`** — "does not exist in the server address space" — not `BadNotReadable`. The m5-25b claim is stronger than its browse sweep proved |
+
+**What no witness can see, stated rather than papered over.**
+`HeartbeatSeen` and `StandInValid` are members of `InstF_Forklift_Safety`,
+which is on **no** client's address space (above). There is therefore **no
+OPC UA witness for them and none was invented.** They are read where the brief
+directs: from the F-block's own instance data, by
+`testing/observe_consumer.ps1`, **a separate process** — a different memory
+location from the four `SafetyInputStandIn` members the writer writes, and
+never the writer's own read-back (the writer has none, by construction).
+The OPC UA witness runs beside it on the consequence — the four
+`ForkliftSafetyMirror` values — and cannot echo anything written.
+
+### B1 — belief: the single observation everything was waiting on (design §8 check 2)
+
+Observer started first, writer started 4 s into its window. Columns as the
+observer prints them; only the ones that move are named here.
+
+```
+        t_ms  .................   hb        note
+        33.3  00000000011101110   0 0       baseline
+     4,385.5  00000011111101110   3 3       CHANGE
+     5,075.1  00000011111101110   17 15     tick
+    40,133.2  00000011111101110   718 718   tick
+```
+
+Reading the CHANGE, bit by bit:
+
+| Bit | Tag | baseline | after |
+|---|---|---|---|
+| 6 | `InstF_Forklift_Safety.HeartbeatChanged` | 0 | **1** |
+| 7 | `InstF_Forklift_Safety.HeartbeatSeen` | 0 | **1** |
+| 8 | `InstF_Forklift_Safety.StandInValid` | 0 | **1** |
+| 9,10,11 | `EStopDemand`, `ZoneStopDemand`, `SafetyResetRequired` | 1,1,1 | **1,1,1 — unchanged** |
+
+**`HeartbeatSeen` and `StandInValid` are TRUE, observed, in the consumer's
+view.** The heartbeat advances (`hb` 3 → 718 over 40 s; `HeartbeatMemory`
+tracks it one cycle behind), and **both demands stay latched** — belief is not
+motion, which is design §8 check 2 in full.
+
+The transition is 385 ms after the `Start-Process` call that launched the
+writer, and that interval contains PowerShell start-up, `Add-Type`,
+`CreateInterface` and `UpdateTagList` as well as the F-program's own
+recognition. **It is a single draw and is not a latency figure for anything**
+(LESSONS 2026-08-05); the design's "≈150 ms of the first republish" is neither
+confirmed nor refuted by it, because the first republish was not separately
+timed.
+
+Command that produced it:
+
+```
+powershell -ExecutionPolicy Bypass -File bridge\standin_writer\standin_writer.ps1 -Instance safecell3
+powershell -ExecutionPolicy Bypass -File bridge\standin_writer\testing\observe_consumer.ps1 -Instance safecell3 -Duration 75 -TickSeconds 5
+python bridge\standin_writer\testing\opcua_witness.py 70
+```
+
+Captures: `evidence/m5-41-B1-consumer.log`, `evidence/m5-41-B1-witness.log`.
+
+### B2 — the cell starts: circuits close, nothing clears; the reset clears on release (design §8 check 3)
+
+Same observer window, commands fed into the writer's own console by
+`testing/console_feed.ps1` (`WriteConsoleInput`, addressed by process id).
+
+```
+    44,720.4  10000011111101110   810 808   CHANGE   estop close  -> SafetyInputStandIn.EStopCircuitClosed
+    44,785.3  10010011111101110   811 811   CHANGE                   InstF_...EStopCircuitClosed follows      (+64.9 ms)
+    46,223.7  11010011111101110   840 839   CHANGE   zone close   -> SafetyInputStandIn.ZoneDeviceCircuitClosed
+    46,318.3  11011011111101110   842 842   CHANGE                   InstF_...ZoneDeviceCircuitClosed follows (+94.6 ms)
+    48,740.6  11111011111101110   890 889   CHANGE   reset press  -> SafetyInputStandIn.ResetButtonPressed
+    48,784.0  11111111111101110   891 891   CHANGE                   InstF_...ResetButtonPressed follows      (+43.4 ms)
+    49,897.3  11011111111101110   914 912   CHANGE   reset release-> ResetButtonPressed FALSE (held 1,156.7 ms)
+    49,923.1  11011011100001110   914 914   CHANGE   EStopDemand, ZoneStopDemand, SafetyResetRequired ALL -> 0 (+25.8 ms)
+    49,945.2  11011011100000000   914 914   CHANGE   the four ForkliftSafetyMirror bits follow                (+22.1 ms)
+```
+
+Three things are observed here and each is separately load-bearing:
+
+1. **Closing both circuits cleared no demand.** Bits 9/10/11 stay `1,1,1`
+   from 44.7 s to 49.9 s with both circuits closed. A stop is not undone by
+   its cause going away (CLAUDE.md §9 restart behaviour).
+2. **The press cleared nothing either** — bits 9/10/11 still `1,1,1` for the
+   whole 1,156.7 ms hold.
+3. **Both demands cleared on the RELEASE**, 25.8 ms after it. The monitored,
+   edge-triggered reset runs on this build.
+
+Independent witness, same events, different protocol stack:
+
+```
+23:10:23.716  1110  baseline      EStopDemand, ZoneStopDemand, SafetyResetRequired set
+23:11:13.845  0000  CHANGE        all clear
+```
+
+### B3 — a circuit reopening re-asserts, and only its own demand
+
+```
+    60,776.0  11001011110100000  1131 1130 CHANGE   estop open -> EStopDemand 1, SafetyResetRequired 1,
+                                                    ZoneStopDemand stays 0
+    60,809.1  01001011110101010  1132 1130 CHANGE   the mirror follows                        (+33.1 ms)
+    63,854.3  11001011110101010  1193 1191 CHANGE   estop close -> circuit closed again
+    63,909.7  11011011110101010  1194 1193 CHANGE   InstF_...EStopCircuitClosed follows       (+55.4 ms)
+                                                    demands stay 1,0,1 -- closing does not clear
+```
+
+Witness: `23:11:24.690  1010  CHANGE` — `EStopDemand` set, `ZoneStopDemand`
+still clear, `SafetyResetRequired` set. **Reopening one circuit re-asserts
+that circuit's demand and not the other's**, and closing it again does not
+clear the latch.
+
+**One honest note on the 60,776.0 row.** The observer's sample is 17 `ReadBool`
+calls plus two `ReadInt16`, **not atomic**, so a line that spans a transition
+can read torn: this one shows `SafetyInputStandIn.EStopCircuitClosed` still `1`
+while the F-side copy already reads `0`. The next line, 33 ms later, is
+consistent. Only the sequence across lines is evidence; no single line is.
+
+### B4 — the fail-safe direction: the heartbeat freezes and both demands latch (design §8 check 5)
+
+**How this one arose, stated plainly because it matters.** The writer process
+**terminated abruptly at 21:13:35.953Z** — its log ends mid-`CYCLE` at
+`hb=3757` with **no `TERMINAL` and no `EXIT` line**, so it was killed rather
+than exited, and the commanded kill in the same script had not yet run. The
+cause is not established (§3.3 F3). It is recorded as what it is: an
+**unplanned writer death**, which is exactly SPEC §7.3 row 1's case, and the
+F-program's response was captured in full because the observer was already
+running.
+
+Observer columns changed for this run: `StandInStaleTimer.Q` and the three
+**validated** channels were added, because they are the whole point of S015.
+
+```
+        t_ms  .....................   hb        note
+        31.0  110110111011010101010   3704 3703 baseline   writer alive, both circuits closed
+     2,783.9  110110011011010101010   3757 3757 CHANGE     HeartbeatChanged -> FALSE, hb frozen at 3757
+     3,808.6  110110010100011101010   3757 3757 CHANGE     StandInValid -> FALSE, StandInStaleTimer.Q -> TRUE,
+                                                           EStopClosedValid -> FALSE, ZoneClosedValid -> FALSE,
+                                                           ZoneStopDemand -> TRUE
+     3,835.4  110110010100011101110   3757 3757 CHANGE     the mirror follows                      (+26.8 ms)
+    25,119.4  110110010100011101110   3757 3757 tick       held for the remaining 21 s
+```
+
+- **Heartbeat frozen → validity lost.** `HeartbeatChanged` FALSE at 2,783.9 ms,
+  `StandInValid` FALSE at 3,808.6 ms: **1,024.7 ms**, against
+  `StandInStaleTimer.PT` = `T#1S` read in force plus one 100 ms F-OB. One draw,
+  not a bound.
+- **Both demands latch.** `EStopDemand` and `SafetyResetRequired` were already
+  set from B3; `ZoneStopDemand` joins them at the same instant. All three then
+  stand for the rest of the window.
+- **This is the S015 check visibly doing its work.** Bits 0/1 (the raw
+  channels, frozen at the writer's last write) read `1,1` — closed — while
+  bits 10/11 (the validated channels) read `0,0`. The raw and the validated
+  rows **differ exactly when `StandInValid` is FALSE and a channel is closed**,
+  which is what `plc/forklift/TIA-BUILD-PROCEDURE.md` step 187 says cannot be
+  seen until a writer exists.
+
+Independent witness, different protocol stack, same event:
+
+```
+23:13:33.150  1010  baseline
+23:13:37.130  1110  CHANGE      ZoneStopDemand joins the latch
+```
+
+Capture: `evidence/m5-41-B4-consumer.log`, `evidence/m5-41-B4-witness.log`.
+
+### B5 — rebirth restores belief, not motion (design §8 check 6)
+
+The writer was restarted (fresh log name `standin-writer-20260805T211547Z-pid5340.log`,
+`CreateNew`, so the earlier session's file is intact).
+
+```
+        t_ms  .....................   hb        note
+        28.5  110110010100011101110   3757 3757 baseline  dead-writer state: raw 1,1 / validated 0,0
+     4,260.5  000110010100011101110      1 3757 CHANGE    the writer's boot republish drives all three
+                                                          channels open; heartbeat restarts at 1
+     4,334.2  000000111000011101110      3    2 CHANGE    HeartbeatChanged, HeartbeatSeen, StandInValid
+                                                          -> TRUE; demands stay 1,1,1
+    30,018.5  000000111000011101110    516  515 final
+```
+
+**Belief comes back; the latches do not.** `StandInValid` TRUE again with
+`EStopDemand`, `ZoneStopDemand` and `SafetyResetRequired` all still set — they
+are cleared only by a fresh monitored reset. The boot republish drives the
+three channels **open**, so the restored cell asks for a deliberate operator
+action rather than resuming from the state the dead writer left behind.
+
+Note `HeartbeatSeen` read TRUE throughout the dead window (baseline bit 7),
+while `StandInValid` read FALSE: `HeartbeatSeen` is the latched "life has been
+seen at least once" memory and `StandInValid` is the live verdict. They are
+different questions and the build answers them differently.
+
+Capture: `evidence/m5-41-B5-rebirth-consumer.log`.
+
+### B6 — the whole shape again on a second writer instance, then a *commanded* kill (design §8 checks 3, 4, 5)
+
+One 34 s window, one writer session (pid 5340), everything in order. This is a
+**second independent instance** of the start-and-reset sequence, run because a
+criterion-relevant observation made once is one draw (LESSONS 2026-08-05).
+
+```
+        t_ms  .....................   hb        note
+        34.5  000000111000011101110   1948 1946 baseline  channels open, StandInValid TRUE, demands 1,1,1
+     3,234.9  100000111000011101110   2012 2010 CHANGE    estop close -> raw channel
+     3,292.0  100100111010011101110   2013 2012 CHANGE    F copy AND EStopClosedValid follow    (+57.1 ms)
+     4,406.4  110100111010011101110   2035 2033 CHANGE    zone close -> raw channel
+     4,427.7  110110111011011101110   2036 2035 CHANGE    F copy AND ZoneClosedValid follow     (+21.3 ms)
+     5,912.8  111110111011011101110   2065 2064 CHANGE    reset press -> raw channel
+     5,982.2  111111111011111101110   2067 2066 CHANGE    F copy AND ResetPressedValid follow   (+69.4 ms)
+                                                          demands still 1,1,1 through all of the above
+     7,110.4  110110111011000001110   2089 2089 CHANGE    reset release (held 1,197.6 ms):
+                                                          EStopDemand, ZoneStopDemand, SafetyResetRequired -> 0
+     7,134.2  110110111011000000000   2090 2089 CHANGE    the mirror follows                    (+23.8 ms)
+    -- slow typing: six keys at one per second, 6.1 s from first key to Enter --
+    10,077.9  110110111011000000000   2148 2147 tick
+    15,090.1  110110111011000000000   2249 2248 tick
+    16,349.3  110110011011000000000   2270 2270 CHANGE    Stop-Process -Force: HeartbeatChanged -> FALSE
+    17,359.5  110110010100011100000   2270 2270 CHANGE    StandInValid -> FALSE, StaleTimer.Q -> TRUE,
+                                                          EStopClosedValid / ZoneClosedValid -> FALSE,
+                                                          all three demands -> TRUE
+    17,379.9  110110010100011101110   2270 2270 CHANGE    the mirror follows                    (+20.4 ms)
+    30,136.0  110110010100011101110   2270 2270 tick      held
+```
+
+Witness, independently:
+
+```
+23:17:25.477  1110  baseline
+23:17:32.771  0000  CHANGE     the reset clears both demands
+23:17:43.019  1110  CHANGE     the commanded kill latches them again
+# 75608 polls over 32 s, final 1110
+```
+
+What this window closes:
+
+- **Check 3, second instance.** Both circuits closed and the reset held for
+  1,197.6 ms cleared nothing until the **release**, and the validated channels
+  track the raw ones one F-cycle behind *while* `StandInValid` is TRUE — the
+  positive half of S015, where B4 showed the negative half.
+- **Check 4 — typing does not starve the heartbeat.** Six keys at one per
+  second, **6.1 s** from first key to Enter, entirely inside the 7.1 s → 16.3 s
+  span: **no CHANGE line in it**, `StandInValid` stayed TRUE, and the heartbeat
+  advanced ~101 counts per 5 s tick, i.e. the full 20 Hz. The non-blocking
+  per-key read is observed, not asserted.
+- **Check 5 — a commanded kill converts to a demand.** `Stop-Process -Force`,
+  not `quit`. `HeartbeatChanged` FALSE at 16,349.3 ms, `StandInValid` FALSE at
+  17,359.5 ms: **1,010.2 ms**, a second draw beside B4's 1,024.7 ms against
+  `StandInStaleTimer.PT` = `T#1S`. Both demands latch, and the raw channels
+  read `1,1` closed while the validated channels read `0,0` — the S015
+  signature again.
+
+Capture: `evidence/m5-41-B6-consumer.log`, `evidence/m5-41-B6-witness.log`.
+
+### B7 — the terminal write, success form (design §8 check 7, §5.4)
+
+Third writer session (pid 37312). Both circuits were closed first, so the
+terminal write had something to drive.
+
+```
+        t_ms  .....................   hb        note
+        40.0  110110010100011101110   2270 2270 baseline  dead-writer state from B6
+     3,382.7  010110010100011101110      1 2270 CHANGE    boot republish; heartbeat restarts at 1
+     3,416.8  000000111000011101110      2    2 CHANGE    StandInValid -> TRUE (third instance)
+     6,774.3  100000111000011101110     69   67 CHANGE    estop close
+     6,842.9  100100111010011101110     71   70 CHANGE    F copy + EStopClosedValid              (+68.6 ms)
+     7,968.1  100100111011011101110     93   92 CHANGE    ZoneClosedValid
+     8,001.4  110110111011011101110     94   92 CHANGE    zone channel fully closed
+     9,971.1  000110111011011101110    132  132 CHANGE    QUIT: all three channels written FALSE,
+                                                          heartbeat still 132 and the writer still alive
+    10,051.6  000110011000011101110    132  132 CHANGE    HeartbeatChanged FALSE; EStopClosedValid and
+                                                          ZoneClosedValid FALSE -- while StandInValid is
+                                                          STILL TRUE, because the channels are genuinely open
+    10,081.8  000000011000011101110    132  132 CHANGE    the F copies follow the open channels
+    11,082.0  000000010100011101110    132  132 CHANGE    StandInValid -> FALSE, StaleTimer.Q -> TRUE
+                                                          (+1,030.4 ms after the heartbeat froze)
+    25,133.3  000000010100011101110    132  132 tick      held
+```
+
+Writer log, the last three lines of the session:
+
+```
+21:19:09.422Z | OPERATOR | quit
+21:19:09.432Z | TERMINAL | all three channels written FALSE (open, unpressed, the demand direction)
+                           before falling silent; the heartbeat now freezes and both demands latch
+                           on channels already open
+21:19:09.441Z | EXIT     | reason=quit cycles=132 overruns=2 write-failures=0 final heartbeat=132
+```
+
+**The terminal write happens first and the silence second, and the order is
+visible in the consumer's view**: the channels go open at 9,971.1 ms with the
+writer still alive and `StandInValid` still TRUE, and only 1,030.4 ms later
+does validity fall. Both demands therefore latch **on channels already open** —
+there is no ambiguity about why the cell stopped, which is the whole point of
+§5.4. `write-failures=0` across the session; 132 cycles in ≈6.6 s is the 20 Hz
+cadence, with 2 overruns.
+
+Capture: `evidence/m5-41-B7-consumer.log`; log
+`logs/standin-writer-20260805T211902Z-pid37312.log`.
+
+---
+
+## §3.1 Run B — the run-A deferral list, closed or still open
+
+The run-A table listed six of the eight `STANDIN-WRITER-DESIGN.md` §8 checks as
+**not run**, each blocked on `SafetyInputStandIn.StandInHeartbeat` not existing.
+It exists (B0). Every row is now settled, and each names the capture that
+settles it:
+
+| §8 check | Status after run B |
+|---|---|
+| 1 double start refused | **proven**, run A §1 A1. Not re-run; the mechanism did not change |
+| 2 belief: heartbeat advances, `StandInValid` → TRUE | **RUN — proven**, B1, and again at B5 and B7. Three instances |
+| 3 the cell starts: `estop close`/`zone close`/reset → demands clear | **RUN — proven**, B2 and again B6. Two instances, both confirmed by the OPC UA witness |
+| 4 typing does not starve the heartbeat | **RUN — proven**, B6: 6.1 s from first key to Enter, no CHANGE line in the span, heartbeat at 20 Hz throughout |
+| 5 death converts to a demand | **RUN — proven twice**: B4 (unplanned death) and B6 (`Stop-Process -Force`). Freeze-to-invalid 1,024.7 ms and 1,010.2 ms |
+| 6 rebirth restores belief, not motion | **RUN — proven**, B5: `StandInValid` TRUE again, all three latches standing |
+| 7 terminal write, success form | **RUN — proven**, B7: channels open *while the writer still lives*, validity falls 1,030.4 ms later |
+| 8 zone/refusal shapes | **proven**, run A §1 A3 and A4. Not re-run — no field link exists to re-exercise (SPEC §10 open item 9) |
+
+**Still not run, and named rather than glossed:** a CPU stop and restart
+repaired by the republish (the design's §8 list does not contain it either; it
+would stop a controller the owner has just finished building), and the
+field-link *acceptance* path against the real m5-12 evaluation, which does not
+exist. Neither is a T6 step.
+
+---
+
+## §3.2 The two `ForkliftControl_DB` timer `PT`s — the open check, answered
+
+`plc/forklift/TIA-BUILD-PROCEDURE.md`'s progress block leaves this open:
+`ModeDisagreeTimer.PT` and `StandstillTimer.PT` read `T#0MS` in force while
+`VehicleStaleTimer.PT` read its specified `T#500MS`, and the hypothesis was
+that the difference is `IN`.
+
+**`IN` was NOT made TRUE for either timer, and the reason is structural, not a
+matter of effort.** Both need the bridge writing the forklift group to the live
+CPU:
+
+- `StandstillTimer.IN` = `#atStandstill` = `#speedValid AND |speed| < STANDSTILL_SPEED`,
+  and `#speedValid` requires `#bridgeLinkOk`, which requires
+  **`"ForkliftLink".BridgeHeartbeat`** to be changing.
+- `ModeDisagreeTimer.IN` additionally requires `#vehicleAlive`, i.e.
+  **`"ForkliftVehicle".ForkliftVehicleHeartbeat`** changing.
+
+`ForkliftLink` is a **different DB** from the M3 cell's `Link` folder, verified
+in the live tag list. The committed `bridge/config/bridge.yaml` is cell-only by
+its own statement and maps `BridgeHeartbeat` to `["Link","BridgeHeartbeat"]`,
+so running it would advance the *cell's* heartbeat and not this one; and
+`config/rehearsal-forklift.yaml`, which does carry the forklift group, points at
+the PLC logic double on `127.0.0.1:4850` and is labelled "gate evidence does not
+run on this file". **No committed configuration maps the forklift group to the
+live CPU** — that is exactly the bridge deliverable chunk P lists as missing.
+Nothing was improvised to fill it.
+
+**What was done instead, and it settles the question more strongly than one
+read with `IN` TRUE would have.** All four members — `IN`, `PT`, `ET`, `Q` — of
+**every** timer instance in both DBs were read together
+(`testing/read_timers.ps1`, read-only):
+
+```
+ForkliftControl_DB                          InstF_Forklift_Safety
+timer                IN     PT       ET     timer                IN     PT       ET
+BridgeStaleTimer     True   T#500MS  T#500MS   F_IEC_Timer_Instance False  T#0MS    T#0MS
+HmiStaleTimer        True   T#600MS  T#600MS   ResetHoldMaxTimer    False  T#3000MS T#0MS
+LidarInvalidTimer    False  T#0MS    T#0MS     ResetHoldMinTimer    False  T#200MS  T#0MS
+ModeDisagreeTimer    False  T#0MS    T#0MS     StandInStaleTimer    True   T#1000MS T#1000MS
+PlantInvalidTimer    False  T#0MS    T#0MS
+RequestInvalidTimer  False  T#0MS    T#0MS
+StandstillTimer      False  T#0MS    T#0MS
+VehicleStaleTimer    True   T#500MS  T#500MS
+```
+
+Three things follow, and the third is the one that closes it:
+
+1. **The split is exactly on `IN`, across the whole DB.** All three
+   `ForkliftControl_DB` timers with `IN` TRUE hold their specified `PT`; all
+   **five** with `IN` FALSE read `T#0MS` — not the two the procedure named.
+   A defect confined to two call sites would not paint five.
+2. **`PT` is not zeroed by `IN` going FALSE.** `ResetHoldMinTimer` reads
+   `T#200MS` and `ResetHoldMaxTimer` reads `T#3000MS` **with `IN` FALSE** —
+   because those two timers *have* run, during the reset presses of B2 and B6,
+   and the instance kept the `PT` its call site last wrote.
+3. Therefore **`T#0MS` means "this timer has never yet run on this build", not
+   "a stale `PT` governs".** It is the opposite of the LESSONS 2026-07-28 trap,
+   where a *non-zero wrong* value was in force and ruled; here nothing is in
+   force because nothing has run, and the call site's value lands the moment it
+   does. That the call site's value does land was observed twice in this
+   session: `StandInStaleTimer.PT` = `T#1S` produced measured freeze-to-invalid
+   intervals of 1,024.7 ms (B4) and 1,010.2 ms (B6).
+
+**What this does not establish.** It does not read `T#2S` or `T#500MS` off
+`ModeDisagreeTimer` / `StandstillTimer` — those values remain **design values**
+until the timers run. The open check should stay open in that narrow form and
+close on the first forklift run with the bridge writing `ForkliftLink`.
+
+Captures: `evidence/m5-41-timers-ForkliftControl_DB.log`,
+`evidence/m5-41-timers-InstF_Forklift_Safety.log`.
+
+---
+
+## §3.3 F3 — one writer process died without logging its exit, cause not established
+
+At **21:13:35.953Z** the writer of pid 34844 stopped mid-`CYCLE` at `hb=3757`.
+Its log has **no `TERMINAL` and no `EXIT` line**, no `API` line, and the
+Windows Application log shows nothing in the window; the commanded
+`Stop-Process` in the same script had not yet run and the process was gone
+before the next `console_feed` command reached it. The session's other three
+writer instances (pid 5340, pid 37312, and 5340 again through five
+`console_feed` invocations) were unaffected, so it is **not reproducible from
+this session's evidence** and no mechanism is claimed.
+
+It is recorded for two reasons. It cost the planned shape of one test — B4 was
+supposed to be a commanded kill and became an observation of an unplanned one,
+which is why B6 re-ran it commanded. And it is itself an instance of the
+failure the design is built around: an abrupt writer death **converted to a
+latched demand within 1,024.7 ms with no operator action**, which is the
+correct direction, and the F-program did not need to know why the writer died.
 
 ---
 
@@ -289,8 +737,10 @@ reset release        -> both demands clear, SafetyResetRequired -> FALSE
 then enable and drive from the HMI as in M4. `quit` (or Ctrl+C) writes all
 three channels FALSE and only then falls silent.
 
-**Watch out for one thing.** Until `SafetyInputStandIn.StandInHeartbeat`
-exists in the downloaded build, every cycle will log
+**Watch out for one thing — no longer in force, kept for the diagnosis.**
+`SafetyInputStandIn.StandInHeartbeat` **exists** in the build as of
+2026-08-05 (§B0), so what follows describes a pre-delta controller. Until the
+tag exists in the downloaded build, every cycle will log
 
 ```
 API | write failed: ... "Error Code: -4, DoesNotExist"
@@ -323,3 +773,44 @@ no project was touched at any point in this build.
 
 The delta poll ran from 19:35 to 20:37 local (about 62 minutes, 15–20 s
 interval) and reported `state=Run tags=185 hb=False` unchanged throughout.
+
+### §6.1 State the CPU was left in after run B (m5-41)
+
+Read back after B7's `quit`, instance `safecell3`, `OperatingState = Run`:
+
+```
+SafetyInputStandIn.EStopCircuitClosed         False
+SafetyInputStandIn.ZoneDeviceCircuitClosed    False
+SafetyInputStandIn.ResetButtonPressed         False
+SafetyInputStandIn.StandInHeartbeat             132   (frozen: no writer running)
+InstF_Forklift_Safety.StandInValid            False
+InstF_Forklift_Safety.HeartbeatSeen            True
+InstF_Forklift_Safety.EStopDemand              True
+InstF_Forklift_Safety.ZoneStopDemand           True
+InstF_Forklift_Safety.SafetyResetRequired      True
+InstF_Forklift_Safety.SafetyResetFault        False
+ForkliftSafetyMirror.{EStop,ZoneStop,SafetyResetRequired,SafetyResetFault}
+                                               True, True, True, False
+```
+
+No writer process is running (the `Global\amr-standin-writer` mutex was
+acquired and released to prove it), nothing is listening on port 45015.
+**Nothing was downloaded, no block was compiled, no program was changed, no
+project was opened and no `plc/` file was edited.** Every write in run B went
+through the writer's four-tag allowlist; nothing else on the CPU was written by
+anything.
+
+**Two differences from the pre-run state, and both are recorded rather than
+tidied away:**
+
+1. `SafetyInputStandIn.StandInHeartbeat` reads **132** instead of 0. It is a
+   free-running counter left at the last value the writer wrote; frozen is the
+   only property that means anything, and it is frozen.
+2. `InstF_Forklift_Safety.HeartbeatSeen` reads **TRUE** where the owner's
+   invalid-boot signature (procedure step 187) had it FALSE. This is
+   **unavoidable and correct**: it is the one-shot "life has been seen at least
+   once" latch of SPEC §5.4 V2, and observing it go TRUE was the point of this
+   run. Only a CPU STOP → RUN clears it, and stopping the controller was not in
+   scope. A reader who repeats step 187 on this CPU will therefore see nine of
+   its ten readings and `HeartbeatSeen` TRUE; the tenth returns after a cold
+   start.

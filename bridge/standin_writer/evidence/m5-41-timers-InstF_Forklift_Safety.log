@@ -1,0 +1,10 @@
+﻿# READ-ONLY. instance=safecell3  state=Run  db=InstF_Forklift_Safety
+# TIME read through ReadInt32 (milliseconds); there is no ReadTime on this API.
+
+timer                              IN     PT in force  ET           Q
+---------------------------------- ------ ------------ ------------ -----
+F_IEC_Timer_Instance               False  T#0MS        T#0MS        False
+ResetHoldMaxTimer                  False  T#3000MS     T#0MS        False
+ResetHoldMinTimer                  False  T#200MS      T#0MS        False
+StandInStaleTimer                  True   T#1000MS     T#1000MS     True
+# done

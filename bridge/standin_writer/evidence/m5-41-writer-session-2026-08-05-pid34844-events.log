@@ -1,0 +1,17 @@
+﻿2026-08-05T21:10:28.111Z | START | ENGINEERING STAND-IN WRITER -- not a safety device, not a safety path; it stands in for the WIRING of three simulated safety-input channels and carries no Category, no PL, no SIL and no PFH
+2026-08-05T21:10:28.114Z | START | instance = safecell3
+2026-08-05T21:10:28.114Z | START | dll = C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll
+2026-08-05T21:10:28.120Z | START | api version = 0x70000 (7.0)
+2026-08-05T21:10:28.123Z | START | field-link listener port = 45015, FIELD_LINK_STALE_MAX = 1000 ms
+2026-08-05T21:10:28.123Z | START | write set (exact and closed): SafetyInputStandIn.EStopCircuitClosed, SafetyInputStandIn.ZoneDeviceCircuitClosed, SafetyInputStandIn.ResetButtonPressed, SafetyInputStandIn.StandInHeartbeat
+2026-08-05T21:10:28.125Z | START | log = C:\Users\ozkan\projects\amr-agent\bridge\standin_writer\logs\standin-writer-20260805T211027Z-pid34844.log
+2026-08-05T21:10:28.125Z | START | operator console = interactive
+2026-08-05T21:10:28.126Z | START | boot levels: EStopCircuitClosed=False ZoneDeviceCircuitClosed=False ResetButtonPressed=False -- open, open, unpressed: the fail-safe pre-connection state
+2026-08-05T21:10:28.134Z | API | connected to instance 'safecell3', OperatingState = Run
+2026-08-05T21:10:28.140Z | LINK | listening on 0.0.0.0:45015 for the field evaluation; none is required -- the writer serves the cell with no field link ever arriving, and while none is up the zone channel belongs to the operator
+2026-08-05T21:11:08.597Z | OPERATOR | estop close -> EStopCircuitClosed := True
+2026-08-05T21:11:10.108Z | OPERATOR | zone close -> ZoneDeviceCircuitClosed := True
+2026-08-05T21:11:12.617Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-05T21:11:13.765Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-05T21:11:24.664Z | OPERATOR | estop open -> EStopCircuitClosed := False
+2026-08-05T21:11:27.716Z | OPERATOR | estop close -> EStopCircuitClosed := True

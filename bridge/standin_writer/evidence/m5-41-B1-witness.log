@@ -1,0 +1,7 @@
+# OPC UA witness on opc.tcp://192.168.53.1:4840
+# path: Objects/ServerInterfaces/DemoCell/Forklift/Safety/
+# columns: EStopDemand, ZoneStopDemand, SafetyResetRequired, SafetyResetFault
+23:10:23.716  1110  baseline
+23:11:13.845  0000  CHANGE
+23:11:24.690  1010  CHANGE
+# 128747 polls over 70 s, final 1010

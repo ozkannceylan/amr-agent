@@ -1,0 +1,49 @@
+# READ-ONLY observer. It writes nothing. The verdict is the CONSUMER's view.
+# instance: safecell3   operating state: Run
+# columns, in order:
+#  [ 0] SafetyInputStandIn.EStopCircuitClosed
+#  [ 1] SafetyInputStandIn.ZoneDeviceCircuitClosed
+#  [ 2] SafetyInputStandIn.ResetButtonPressed
+#  [ 3] InstF_Forklift_Safety.EStopCircuitClosed
+#  [ 4] InstF_Forklift_Safety.ZoneDeviceCircuitClosed
+#  [ 5] InstF_Forklift_Safety.ResetButtonPressed
+#  [ 6] InstF_Forklift_Safety.HeartbeatChanged
+#  [ 7] InstF_Forklift_Safety.HeartbeatSeen
+#  [ 8] InstF_Forklift_Safety.StandInValid
+#  [ 9] InstF_Forklift_Safety.StandInStaleTimer.Q
+#  [10] InstF_Forklift_Safety.EStopClosedValid
+#  [11] InstF_Forklift_Safety.ZoneClosedValid
+#  [12] InstF_Forklift_Safety.ResetPressedValid
+#  [13] InstF_Forklift_Safety.EStopDemand
+#  [14] InstF_Forklift_Safety.ZoneStopDemand
+#  [15] InstF_Forklift_Safety.SafetyResetRequired
+#  [16] InstF_Forklift_Safety.SafetyResetFault
+#  [17] ForkliftSafetyMirror.EStopDemand
+#  [18] ForkliftSafetyMirror.ZoneStopDemand
+#  [19] ForkliftSafetyMirror.SafetyResetRequired
+#  [20] ForkliftSafetyMirror.SafetyResetFault
+#   int  SafetyInputStandIn.StandInHeartbeat
+#   int  InstF_Forklift_Safety.HeartbeatMemory
+
+        t_ms  .....................   hb        note
+        34.5  000000111000011101110   1948 1946 baseline
+        66.2  000000111000011101110   1948 1948 tick
+     3,234.9  100000111000011101110   2012 2010 CHANGE
+     3,292.0  100100111010011101110   2013 2012 CHANGE
+     4,406.4  110100111010011101110   2035 2033 CHANGE
+     4,427.7  110110111011011101110   2036 2035 CHANGE
+     5,071.6  110110111011011101110   2048 2048 tick
+     5,912.8  111110111011011101110   2065 2064 CHANGE
+     5,982.2  111111111011111101110   2067 2066 CHANGE
+     7,110.4  110110111011000001110   2089 2089 CHANGE
+     7,134.2  110110111011000000000   2090 2089 CHANGE
+    10,077.9  110110111011000000000   2148 2147 tick
+    15,090.1  110110111011000000000   2249 2248 tick
+    16,349.3  110110011011000000000   2270 2270 CHANGE
+    17,359.5  110110010100011100000   2270 2270 CHANGE
+    17,379.9  110110010100011101110   2270 2270 CHANGE
+    20,098.1  110110010100011101110   2270 2270 tick
+    25,118.1  110110010100011101110   2270 2270 tick
+    30,136.0  110110010100011101110   2270 2270 tick
+    34,017.6  110110010100011101110   2270 2270 final
+# done

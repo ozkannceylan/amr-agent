@@ -1,0 +1,43 @@
+# READ-ONLY observer. It writes nothing. The verdict is the CONSUMER's view.
+# instance: safecell3   operating state: Run
+# columns, in order:
+#  [ 0] SafetyInputStandIn.EStopCircuitClosed
+#  [ 1] SafetyInputStandIn.ZoneDeviceCircuitClosed
+#  [ 2] SafetyInputStandIn.ResetButtonPressed
+#  [ 3] InstF_Forklift_Safety.EStopCircuitClosed
+#  [ 4] InstF_Forklift_Safety.ZoneDeviceCircuitClosed
+#  [ 5] InstF_Forklift_Safety.ResetButtonPressed
+#  [ 6] InstF_Forklift_Safety.HeartbeatChanged
+#  [ 7] InstF_Forklift_Safety.HeartbeatSeen
+#  [ 8] InstF_Forklift_Safety.StandInValid
+#  [ 9] InstF_Forklift_Safety.StandInStaleTimer.Q
+#  [10] InstF_Forklift_Safety.EStopClosedValid
+#  [11] InstF_Forklift_Safety.ZoneClosedValid
+#  [12] InstF_Forklift_Safety.ResetPressedValid
+#  [13] InstF_Forklift_Safety.EStopDemand
+#  [14] InstF_Forklift_Safety.ZoneStopDemand
+#  [15] InstF_Forklift_Safety.SafetyResetRequired
+#  [16] InstF_Forklift_Safety.SafetyResetFault
+#  [17] ForkliftSafetyMirror.EStopDemand
+#  [18] ForkliftSafetyMirror.ZoneStopDemand
+#  [19] ForkliftSafetyMirror.SafetyResetRequired
+#  [20] ForkliftSafetyMirror.SafetyResetFault
+#   int  SafetyInputStandIn.StandInHeartbeat
+#   int  InstF_Forklift_Safety.HeartbeatMemory
+
+        t_ms  .....................   hb        note
+        31.0  110110111011010101010   3704 3703 baseline
+        65.6  110110111011010101010   3705 3703 tick
+     2,783.9  110110011011010101010   3757 3757 CHANGE
+     3,808.6  110110010100011101010   3757 3757 CHANGE
+     3,835.4  110110010100011101110   3757 3757 CHANGE
+     5,080.5  110110010100011101110   3757 3757 tick
+    10,082.8  110110010100011101110   3757 3757 tick
+    15,093.0  110110010100011101110   3757 3757 tick
+    20,109.7  110110010100011101110   3757 3757 tick
+    25,119.4  110110010100011101110   3757 3757 tick
+    30,129.5  110110010100011101110   3757 3757 tick
+    35,158.9  110110010100011101110   3757 3757 tick
+    40,176.9  110110010100011101110   3757 3757 tick
+    42,032.8  110110010100011101110   3757 3757 final
+# done

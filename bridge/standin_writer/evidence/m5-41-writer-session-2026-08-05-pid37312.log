@@ -1,0 +1,151 @@
+2026-08-05T21:19:02.768Z | START | ENGINEERING STAND-IN WRITER -- not a safety device, not a safety path; it stands in for the WIRING of three simulated safety-input channels and carries no Category, no PL, no SIL and no PFH
+2026-08-05T21:19:02.771Z | START | instance = safecell3
+2026-08-05T21:19:02.772Z | START | dll = C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll
+2026-08-05T21:19:02.776Z | START | api version = 0x70000 (7.0)
+2026-08-05T21:19:02.778Z | START | cycle = 50 ms
+2026-08-05T21:19:02.781Z | START | field-link listener port = 45015, FIELD_LINK_STALE_MAX = 1000 ms
+2026-08-05T21:19:02.782Z | START | write set (exact and closed): SafetyInputStandIn.EStopCircuitClosed, SafetyInputStandIn.ZoneDeviceCircuitClosed, SafetyInputStandIn.ResetButtonPressed, SafetyInputStandIn.StandInHeartbeat
+2026-08-05T21:19:02.783Z | START | log = C:\Users\ozkan\projects\amr-agent\bridge\standin_writer\logs\standin-writer-20260805T211902Z-pid37312.log
+2026-08-05T21:19:02.784Z | START | operator console = interactive
+2026-08-05T21:19:02.787Z | START | boot levels: EStopCircuitClosed=False ZoneDeviceCircuitClosed=False ResetButtonPressed=False -- open, open, unpressed: the fail-safe pre-connection state
+2026-08-05T21:19:02.801Z | API | connected to instance 'safecell3', OperatingState = Run
+2026-08-05T21:19:02.811Z | LINK | listening on 0.0.0.0:45015 for the field evaluation; none is required -- the writer serves the cell with no field link ever arriving, and while none is up the zone channel belongs to the operator
+2026-08-05T21:19:02.868Z | CYCLE | hb=1 estop=0 zone=0 reset=0
+2026-08-05T21:19:02.873Z | OVERRUN | cycle 1 missed its deadline by 3.7 ms
+2026-08-05T21:19:02.881Z | CYCLE | hb=2 estop=0 zone=0 reset=0
+2026-08-05T21:19:02.931Z | CYCLE | hb=3 estop=0 zone=0 reset=0
+2026-08-05T21:19:02.980Z | CYCLE | hb=4 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.025Z | CYCLE | hb=5 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.088Z | CYCLE | hb=6 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.134Z | CYCLE | hb=7 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.180Z | CYCLE | hb=8 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.232Z | CYCLE | hb=9 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.276Z | CYCLE | hb=10 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.337Z | CYCLE | hb=11 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.384Z | CYCLE | hb=12 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.431Z | CYCLE | hb=13 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.477Z | CYCLE | hb=14 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.524Z | CYCLE | hb=15 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.586Z | CYCLE | hb=16 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.641Z | CYCLE | hb=17 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.683Z | CYCLE | hb=18 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.725Z | CYCLE | hb=19 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.788Z | CYCLE | hb=20 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.833Z | CYCLE | hb=21 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.879Z | CYCLE | hb=22 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.925Z | CYCLE | hb=23 estop=0 zone=0 reset=0
+2026-08-05T21:19:03.987Z | CYCLE | hb=24 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.034Z | CYCLE | hb=25 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.080Z | CYCLE | hb=26 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.127Z | CYCLE | hb=27 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.191Z | CYCLE | hb=28 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.236Z | CYCLE | hb=29 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.282Z | CYCLE | hb=30 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.328Z | CYCLE | hb=31 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.375Z | CYCLE | hb=32 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.442Z | CYCLE | hb=33 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.487Z | CYCLE | hb=34 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.531Z | CYCLE | hb=35 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.577Z | CYCLE | hb=36 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.625Z | CYCLE | hb=37 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.688Z | CYCLE | hb=38 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.733Z | CYCLE | hb=39 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.780Z | CYCLE | hb=40 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.826Z | CYCLE | hb=41 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.888Z | CYCLE | hb=42 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.934Z | CYCLE | hb=43 estop=0 zone=0 reset=0
+2026-08-05T21:19:04.984Z | CYCLE | hb=44 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.029Z | CYCLE | hb=45 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.077Z | CYCLE | hb=46 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.138Z | CYCLE | hb=47 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.186Z | CYCLE | hb=48 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.230Z | CYCLE | hb=49 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.278Z | CYCLE | hb=50 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.322Z | CYCLE | hb=51 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.386Z | CYCLE | hb=52 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.432Z | CYCLE | hb=53 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.478Z | CYCLE | hb=54 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.540Z | CYCLE | hb=55 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.586Z | CYCLE | hb=56 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.633Z | CYCLE | hb=57 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.679Z | CYCLE | hb=58 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.726Z | CYCLE | hb=59 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.788Z | CYCLE | hb=60 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.835Z | CYCLE | hb=61 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.880Z | CYCLE | hb=62 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.927Z | CYCLE | hb=63 estop=0 zone=0 reset=0
+2026-08-05T21:19:05.991Z | CYCLE | hb=64 estop=0 zone=0 reset=0
+2026-08-05T21:19:06.038Z | CYCLE | hb=65 estop=0 zone=0 reset=0
+2026-08-05T21:19:06.085Z | CYCLE | hb=66 estop=0 zone=0 reset=0
+2026-08-05T21:19:06.132Z | CYCLE | hb=67 estop=0 zone=0 reset=0
+2026-08-05T21:19:06.210Z | OPERATOR | estop close -> EStopCircuitClosed := True
+2026-08-05T21:19:06.222Z | CYCLE | hb=68 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.222Z | OVERRUN | cycle 68 missed its deadline by 6.4 ms
+2026-08-05T21:19:06.229Z | CYCLE | hb=69 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.288Z | CYCLE | hb=70 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.334Z | CYCLE | hb=71 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.380Z | CYCLE | hb=72 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.428Z | CYCLE | hb=73 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.475Z | CYCLE | hb=74 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.537Z | CYCLE | hb=75 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.583Z | CYCLE | hb=76 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.633Z | CYCLE | hb=77 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.676Z | CYCLE | hb=78 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.739Z | CYCLE | hb=79 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.782Z | CYCLE | hb=80 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.830Z | CYCLE | hb=81 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.877Z | CYCLE | hb=82 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.924Z | CYCLE | hb=83 estop=1 zone=0 reset=0
+2026-08-05T21:19:06.985Z | CYCLE | hb=84 estop=1 zone=0 reset=0
+2026-08-05T21:19:07.031Z | CYCLE | hb=85 estop=1 zone=0 reset=0
+2026-08-05T21:19:07.077Z | CYCLE | hb=86 estop=1 zone=0 reset=0
+2026-08-05T21:19:07.124Z | CYCLE | hb=87 estop=1 zone=0 reset=0
+2026-08-05T21:19:07.187Z | CYCLE | hb=88 estop=1 zone=0 reset=0
+2026-08-05T21:19:07.232Z | CYCLE | hb=89 estop=1 zone=0 reset=0
+2026-08-05T21:19:07.279Z | CYCLE | hb=90 estop=1 zone=0 reset=0
+2026-08-05T21:19:07.325Z | CYCLE | hb=91 estop=1 zone=0 reset=0
+2026-08-05T21:19:07.389Z | CYCLE | hb=92 estop=1 zone=0 reset=0
+2026-08-05T21:19:07.437Z | OPERATOR | zone close -> ZoneDeviceCircuitClosed := True
+2026-08-05T21:19:07.444Z | CYCLE | hb=93 estop=1 zone=1 reset=0
+2026-08-05T21:19:07.481Z | CYCLE | hb=94 estop=1 zone=1 reset=0
+2026-08-05T21:19:07.527Z | CYCLE | hb=95 estop=1 zone=1 reset=0
+2026-08-05T21:19:07.573Z | CYCLE | hb=96 estop=1 zone=1 reset=0
+2026-08-05T21:19:07.635Z | CYCLE | hb=97 estop=1 zone=1 reset=0
+2026-08-05T21:19:07.682Z | CYCLE | hb=98 estop=1 zone=1 reset=0
+2026-08-05T21:19:07.729Z | CYCLE | hb=99 estop=1 zone=1 reset=0
+2026-08-05T21:19:07.777Z | CYCLE | hb=100 estop=1 zone=1 reset=0
+2026-08-05T21:19:07.838Z | CYCLE | hb=101 estop=1 zone=1 reset=0
+2026-08-05T21:19:07.883Z | CYCLE | hb=102 estop=1 zone=1 reset=0
+2026-08-05T21:19:07.930Z | CYCLE | hb=103 estop=1 zone=1 reset=0
+2026-08-05T21:19:07.977Z | CYCLE | hb=104 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.023Z | CYCLE | hb=105 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.085Z | CYCLE | hb=106 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.131Z | CYCLE | hb=107 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.181Z | CYCLE | hb=108 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.228Z | CYCLE | hb=109 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.289Z | CYCLE | hb=110 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.335Z | CYCLE | hb=111 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.382Z | CYCLE | hb=112 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.427Z | CYCLE | hb=113 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.475Z | CYCLE | hb=114 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.536Z | CYCLE | hb=115 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.582Z | CYCLE | hb=116 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.631Z | CYCLE | hb=117 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.676Z | CYCLE | hb=118 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.724Z | CYCLE | hb=119 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.786Z | CYCLE | hb=120 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.832Z | CYCLE | hb=121 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.888Z | CYCLE | hb=122 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.927Z | CYCLE | hb=123 estop=1 zone=1 reset=0
+2026-08-05T21:19:08.973Z | CYCLE | hb=124 estop=1 zone=1 reset=0
+2026-08-05T21:19:09.037Z | CYCLE | hb=125 estop=1 zone=1 reset=0
+2026-08-05T21:19:09.082Z | CYCLE | hb=126 estop=1 zone=1 reset=0
+2026-08-05T21:19:09.128Z | CYCLE | hb=127 estop=1 zone=1 reset=0
+2026-08-05T21:19:09.179Z | CYCLE | hb=128 estop=1 zone=1 reset=0
+2026-08-05T21:19:09.238Z | CYCLE | hb=129 estop=1 zone=1 reset=0
+2026-08-05T21:19:09.287Z | CYCLE | hb=130 estop=1 zone=1 reset=0
+2026-08-05T21:19:09.332Z | CYCLE | hb=131 estop=1 zone=1 reset=0
+2026-08-05T21:19:09.380Z | CYCLE | hb=132 estop=1 zone=1 reset=0
+2026-08-05T21:19:09.422Z | OPERATOR | quit
+2026-08-05T21:19:09.432Z | TERMINAL | all three channels written FALSE (open, unpressed, the demand direction) before falling silent; the heartbeat now freezes and both demands latch on channels already open
+2026-08-05T21:19:09.441Z | EXIT | reason=quit cycles=132 overruns=2 write-failures=0 final heartbeat=132

@@ -1,0 +1,39 @@
+# READ-ONLY observer. It writes nothing. The verdict is the CONSUMER's view.
+# instance: safecell3   operating state: Run
+# columns, in order:
+#  [ 0] SafetyInputStandIn.EStopCircuitClosed
+#  [ 1] SafetyInputStandIn.ZoneDeviceCircuitClosed
+#  [ 2] SafetyInputStandIn.ResetButtonPressed
+#  [ 3] InstF_Forklift_Safety.EStopCircuitClosed
+#  [ 4] InstF_Forklift_Safety.ZoneDeviceCircuitClosed
+#  [ 5] InstF_Forklift_Safety.ResetButtonPressed
+#  [ 6] InstF_Forklift_Safety.HeartbeatChanged
+#  [ 7] InstF_Forklift_Safety.HeartbeatSeen
+#  [ 8] InstF_Forklift_Safety.StandInValid
+#  [ 9] InstF_Forklift_Safety.StandInStaleTimer.Q
+#  [10] InstF_Forklift_Safety.EStopClosedValid
+#  [11] InstF_Forklift_Safety.ZoneClosedValid
+#  [12] InstF_Forklift_Safety.ResetPressedValid
+#  [13] InstF_Forklift_Safety.EStopDemand
+#  [14] InstF_Forklift_Safety.ZoneStopDemand
+#  [15] InstF_Forklift_Safety.SafetyResetRequired
+#  [16] InstF_Forklift_Safety.SafetyResetFault
+#  [17] ForkliftSafetyMirror.EStopDemand
+#  [18] ForkliftSafetyMirror.ZoneStopDemand
+#  [19] ForkliftSafetyMirror.SafetyResetRequired
+#  [20] ForkliftSafetyMirror.SafetyResetFault
+#   int  SafetyInputStandIn.StandInHeartbeat
+#   int  InstF_Forklift_Safety.HeartbeatMemory
+
+        t_ms  .....................   hb        note
+        28.5  110110010100011101110   3757 3757 baseline
+        55.9  110110010100011101110   3757 3757 tick
+     4,260.5  000110010100011101110   1 3757    CHANGE
+     4,334.2  000000111000011101110   3 2       CHANGE
+     5,062.3  000000111000011101110   17 17     tick
+    10,067.2  000000111000011101110   117 117   tick
+    15,079.8  000000111000011101110   218 216   tick
+    20,088.1  000000111000011101110   318 316   tick
+    25,103.3  000000111000011101110   418 417   tick
+    30,018.5  000000111000011101110   516 515   final
+# done

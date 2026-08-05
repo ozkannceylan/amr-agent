@@ -1,0 +1,56 @@
+# READ-ONLY observer. It writes nothing. The verdict is the CONSUMER's view.
+# instance: safecell3   operating state: Run
+# columns, in order:
+#  [ 0] SafetyInputStandIn.EStopCircuitClosed
+#  [ 1] SafetyInputStandIn.ZoneDeviceCircuitClosed
+#  [ 2] SafetyInputStandIn.ResetButtonPressed
+#  [ 3] InstF_Forklift_Safety.EStopCircuitClosed
+#  [ 4] InstF_Forklift_Safety.ZoneDeviceCircuitClosed
+#  [ 5] InstF_Forklift_Safety.ResetButtonPressed
+#  [ 6] InstF_Forklift_Safety.HeartbeatChanged
+#  [ 7] InstF_Forklift_Safety.HeartbeatSeen
+#  [ 8] InstF_Forklift_Safety.StandInValid
+#  [ 9] InstF_Forklift_Safety.EStopDemand
+#  [10] InstF_Forklift_Safety.ZoneStopDemand
+#  [11] InstF_Forklift_Safety.SafetyResetRequired
+#  [12] InstF_Forklift_Safety.SafetyResetFault
+#  [13] ForkliftSafetyMirror.EStopDemand
+#  [14] ForkliftSafetyMirror.ZoneStopDemand
+#  [15] ForkliftSafetyMirror.SafetyResetRequired
+#  [16] ForkliftSafetyMirror.SafetyResetFault
+#   int  SafetyInputStandIn.StandInHeartbeat
+#   int  InstF_Forklift_Safety.HeartbeatMemory
+
+        t_ms  .................   hb        note
+        33.3  00000000011101110   0 0       baseline
+        60.4  00000000011101110   0 0       tick
+     4,385.5  00000011111101110   3 3       CHANGE
+     5,075.1  00000011111101110   17 15     tick
+    10,084.3  00000011111101110   117 117   tick
+    15,105.9  00000011111101110   218 216   tick
+    20,115.2  00000011111101110   318 318   tick
+    25,116.1  00000011111101110   418 417   tick
+    30,124.0  00000011111101110   518 517   tick
+    35,129.3  00000011111101110   618 616   tick
+    40,133.2  00000011111101110   718 718   tick
+    44,720.4  10000011111101110   810 808   CHANGE
+    44,785.3  10010011111101110   811 811   CHANGE
+    45,142.1  10010011111101110   818 817   tick
+    46,223.7  11010011111101110   840 839   CHANGE
+    46,318.3  11011011111101110   842 842   CHANGE
+    48,740.6  11111011111101110   890 889   CHANGE
+    48,784.0  11111111111101110   891 891   CHANGE
+    49,897.3  11011111111101110   914 912   CHANGE
+    49,923.1  11011011100001110   914 914   CHANGE
+    49,945.2  11011011100000000   914 914   CHANGE
+    50,172.7  11011011100000000   919 918   tick
+    55,181.4  11011011100000000   1019 1018 tick
+    60,187.0  11011011100000000   1119 1118 tick
+    60,776.0  11001011110100000   1131 1130 CHANGE
+    60,809.1  01001011110101010   1132 1130 CHANGE
+    63,854.3  11001011110101010   1193 1191 CHANGE
+    63,909.7  11011011110101010   1194 1193 CHANGE
+    65,212.4  11011011110101010   1220 1218 tick
+    70,222.2  11011011110101010   1320 1320 tick
+    75,014.5  11011011110101010   1416 1415 final
+# done
