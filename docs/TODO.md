@@ -321,6 +321,34 @@ is written now (brief m5-30) and implemented after M5 closes.
   obstacles is **inside M5** — it is criterion (e) word for word, delivered as
   m5-13 plus HMI v2b. Only the beyond-criterion parts above are v3.
 
+## m5-15 — F-program spec DONE 2026-08-05, four items owed by others
+`plc/forklift-safety/SPEC.md` is rewritten against ADR 0015. The judge's F3
+stimulus gap is closed: the reset arrives as one deliberate command per shaped
+press on the operator channel, with the F-program's unchanged edge / window /
+stuck-fault monitoring doing the *monitored* work. §7.6 says flatly that the
+F-program **cannot** check a write's origin and specifies a four-way correlated
+log instead of pretending otherwise.
+- **owner ruling: where does the stand-in writer live?** It is a Windows-host
+  process on the proven PowerShell/API path, level-republishing all four
+  `SafetyInputStandIn` members every 50 ms. Its directory is not ruled — no
+  existing layer obviously owns a Windows-side process. Done when ruled.
+- **m5-12** must publish the field-evaluation log the writer's zone channel
+  consumes, over the named WSL→Windows TCP link.
+- **sim**: `sim/scenarios/forklift_commissioning.md` §13's T6 rows follow SPEC
+  §9's rewrite — 29 automated steps now, including a writer-death scenario.
+- **safety-spec**: two rulings, plus the `RESET_HOLD_MIN` 200 ms against five
+  F-OB cycles of 500 ms — recorded and handed over untouched, as briefed.
+
+## sim + plc — the fifth consumer, found by the m5-29 review
+Making the HMI's eight-node write set required broke the four M4 harnesses in
+`hmi/tools/`, which was known. The review found a **fifth consumer nobody
+declared**: `sim/scenarios/run_forklift_rehearsal.py:90` and
+`sim/scenarios/forklift_commissioning.md`. **M8 criterion (b) depends on it** —
+the M4 scenario procedures must run against a second controller. Done when both
+are repointed at a double serving §12, or the dependency is restated. Not
+fixable inside `hmi/`; it needs the `plc/forklift/double/` §14+§12 extension
+that m5-27 already requested.
+
 ## M5 — open items
 - Monitoring service directory: ADR 0011 D4 recommends `agv/` but does not
   rule it; `viz/` is the alternative and the ADR 0005 test names the

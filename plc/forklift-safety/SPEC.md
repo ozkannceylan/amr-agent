@@ -18,6 +18,20 @@ rather than clicked blind; every tool-derived value is a **design value until th
 owner reads it back out of the tool** (ADR 0006). Nothing here is evidence for any
 gate.
 
+> **Revision 2026-08-05, against ADR 0015.** The m5-03 probe settled the input
+> path in the tool: configured F-I/O never leaves passivation on this
+> installation, and watch-table *Modify* of fail-safe-adjacent data is refused
+> outright in permanent safety mode (`2206:000002`). The stimulus is now the
+> **automated stand-in writer** of §7 — the S7-PLCSIM Advanced API writing
+> `SafetyInputStandIn` by tag name, with no hand at a watch table anywhere in
+> the chain — and the S015 validity check is carried **visibly in the F-code**
+> as the §5.4 delta. Sections rewritten in this revision: §2 (F3, new F7,
+> §2.1 closure note), §3.1–§3.3 (the heartbeat member and the validity
+> statics), §4.3 (the recorded window deviation), §4.5 (new: the delta
+> click-path), §5.0/§5.3/§5.4 (the validity networks), §6.3, §7 (whole), §8,
+> §9 (all stimuli automated), §10. The fourteen networks of §5.1, the coupling
+> contract of §6 and every demand/reset behaviour are **unchanged**.
+
 ## Authority
 
 | Document | What it fixes | Relation to this one |
@@ -56,15 +70,19 @@ leaves the F-runtime group except by the standard program choosing to read it.
 ```mermaid
 graph LR
     subgraph FRT["F-runtime group RTG1 — the safety path begins and ends here"]
-        IN["SafetyInputStandIn<br/>EStopCircuitClosed<br/>ZoneDeviceCircuitClosed<br/>ResetButtonPressed"]
-        FB["F_Forklift_Safety FB2<br/>14 networks, F-FBD"]
+        IN["SafetyInputStandIn<br/>EStopCircuitClosed<br/>ZoneDeviceCircuitClosed<br/>ResetButtonPressed<br/>StandInHeartbeat"]
+        FB["F_Forklift_Safety FB2<br/>22 networks, F-FBD<br/>incl. S015 validity check"]
         DB["InstF_Forklift_Safety DB3<br/>EStopDemand ZoneStopDemand<br/>SafetyResetRequired SafetyResetFault"]
     end
-    ENG["Engineering interface<br/>TIA watch table Modify<br/>ENGINEERING STAND-IN"]
+    FE["Field evaluation, WSL<br/>Gazebo scanner verdict (m5-12)"]
+    OP["Operator channel<br/>writer console, Windows host"]
+    WR["Stand-in writer, Windows host<br/>PLCSIM Advanced API, by tag name<br/>AUTOMATED STAND-IN — ADR 0015"]
     STD["Standard program<br/>FB_ForkliftTeleop<br/>permissive term + Safety mirrors"]
     CL["OPC UA clients<br/>HMI, bridge"]
 
-    ENG -.->|stand-in for wiring| IN
+    FE -->|TCP, zone verdict| WR
+    OP -->|one command, one action| WR
+    WR -.->|stand-in for wiring| IN
     IN ==> FB
     FB ==> DB
     DB -->|read only| STD
@@ -73,8 +91,9 @@ graph LR
 
 Thick arrows are the demand path. It is three boxes wide and never leaves the
 F-runtime group. The dashed arrow is a **substitute for wiring** and carries no
-claim (§7). What crosses to the standard program is a **read**, and what leaves
-the CPU is a **consequence and a mirror**.
+claim (§7); it is automated end to end — no watch table, no client, no human
+typing a value (ADR 0015 D1). What crosses to the standard program is a
+**read**, and what leaves the CPU is a **consequence and a mirror**.
 
 ### 1.2 Non-claims — read before anything else
 
@@ -131,8 +150,9 @@ document changes.
 | **F0** | Safety Advanced licence present | **Answered 2026-07-29** (ADR 0009, context): the project compiled with its F-runtime group. Confirm it still holds by opening *Safety Administration* and reading the licence state; record it with the date | fallback |
 | **F1** | The F-runtime group reaches RUN on the 1513F-1 PN PLCSIM Advanced instance | **Answered 2026-07-29** (ADR 0009, context): downloaded, CPU in RUN, F-runtime group executing, and the F-logic seen to latch. Re-confirm after each download of this document's deltas | fallback |
 | **F2** | The **instruction set** this specification uses exists in the safety program | **Answered 2026-07-30, in the tool**: `RS`, `SR` and `TON` are present and are what §5 uses; **`R_TRIG` and `F_TRIG` are not offered in this safety instruction set**, so §5's networks 3, 4 and 14 form both edges by hand from one static (§5.0 note 4). Re-check the list after any TIA or firmware change and record it | The timer is the one with no substitute: without `TON` the monitored window cannot be built and §2's fallback applies. It is present, and networks 6 and 7 use it |
-| **F3** | The **engineering stimulus works with safety mode activated** | Build D1 of §3.0 alone, download, confirm *Safety Administration* reads **safety mode activated**, then *Modify* `"SafetyInputStandIn".EStopCircuitClosed` in a watch table and read it back. **If a Modify of this DB requires deactivating safety mode, the ruling of §7 is broken and there is no honest stimulus** | fallback |
-| **F4** | The F-program can **read** the stand-in DB, and no standard block **writes** it | After D1 and D2, compile the safety program. Record the warning text and count — a safety program reading standard data is expected to be reported. Then right-click `SafetyInputStandIn` → *Cross-references*: the only accesses must be the three read pins in `Main_Safety_RTG1` | fallback |
+| **F3** | The **automated stimulus works with safety mode activated, read in the consumer's view** | The API write to `SafetyInputStandIn` by tag name must land in `InstF_Forklift_Safety`'s own members — the consumer's view, never the writer's read-back (LESSONS 2026-08-04) — with *Safety Administration* reading **safety mode activated**. **Answered 2026-08-04 on the probe copy** (m5-03b: `WriteBool` → F-block instance in 80.4 ms, the monitored reset ran on API-written data, corroborated by the CPU's OPC UA server, a witness that does not expose the stand-in DB). **Re-confirm on the working project `safe_amr` before any T6 run** — evidence is qualified by the environment that produced it (LESSONS 2026-07-27); `plc/forklift-safety/evidence/m5-25-standin-stimulus-repeat.ps1` is the instrument. Watch-table *Modify* is **retired as a stimulus** (ADR 0015 D1) and is not what this check exercises — the tool refuses fail-safe *Modify* outright in permanent safety mode (`2206:000002`, m5-03) | fallback |
+| **F7** | The **S015 delta's instruction set exists**: an Int comparator (`<>`) and `MOVE` for Int are offered in this CPU's safety instruction set | §5.4's networks V1 and M2 need them, and F2's lesson is that this F-set omits instructions one would assume present (`R_TRIG`/`F_TRIG` are absent). Open the F-FBD instruction list, record what is offered with the date, **before building V1**. If either is missing, stop and report: the heartbeat's type then becomes a design change (a Bool toggle with a period of at least three writer cycles, so the F-OB cannot alias it), not a substitution to make at the keyboard | report before building; the fourteen networks of §5.1 are unaffected either way |
+| **F4** | The F-program can **read** the stand-in DB, and no standard block **writes** it | After D1 and D2, compile the safety program. Record the warning text and count — a safety program reading standard data is expected to be reported. Then right-click `SafetyInputStandIn` → *Cross-references*: the only accesses must be the read pins in `Main_Safety_RTG1` — three as built, **four after the §5.4 delta** (§4.5 step 11) | fallback |
 | **F5** | The standard program can **read** `InstF_Forklift_Safety` | After D2–D4, add one throwaway read of `"InstF_Forklift_Safety".EStopDemand` in a standard block and compile. **Delete it afterwards** — the real read is the standard-side brief's | fallback: without it the coupling contract of §6 cannot be honoured |
 | **F6** | Safety mode is **activated** and the build in the CPU is the build on the screen | *Safety Administration* online: safety mode **activated**, and the **F-collective signature** online equals offline. Record the signature with its date | fallback for the run; re-download and re-check |
 
@@ -180,6 +200,18 @@ happens at three pins of one call in `Main_Safety_RTG1` (§4.2 step 8) and
 **nothing inside `F_Forklift_Safety` moves**. That is the whole reason the input
 channels are FB interface parameters rather than direct global reads.
 
+> **Confirmed by observation, 2026-08-04.** The m5-03 probe ran exactly the
+> falsification attempt this paragraph asks for, and the assessment held — and
+> failed in a way the assessment had not predicted: the configured F-DI stays
+> passivated **indefinitely, with clean diagnostics** (`QBAD` = `PASS_OUT` = 1,
+> `ACK_REQ` never rising, `DIAG` = `16#00`, both modules "Module exists. OK"),
+> and the API write to the channel lands only in the writer's view while the
+> watch table reads the fail-safe value (`FIO-FEASIBILITY.md` §7, verdict
+> **`ADR 0011 D2 fallback`**, owner, at the tool). §10 open item 1 is closed as
+> **confirmed by observation**, ADR 0015 D1 fixes the stand-in as the M5 input
+> path, and the "if a usable channel turns out to exist" branch above is
+> retained for a future installation only — not for this one.
+
 **The AT-07 consequence, stated rather than discovered.** With no F-I/O channel:
 
 - **AT-07 (a) and (b) are exercised as logic and ordering only** — already the
@@ -188,9 +220,11 @@ channels are FB interface parameters rather than direct global reads.
 - **AT-01 (c) stays deferred and no Category is demonstrated** (N3). A second
   channel and its discrepancy monitoring have nowhere to live.
 - **The provenance of the input is never claimed.** Any sentence of the form
-  "the safety input detected…" is false here; the true sentence is "the operator
-  at the engineering interface played the device, and the safety program did
-  this with it".
+  "the safety input detected…" is false here; the true sentence is "the value a
+  device would have put on the wire was written into the stand-in over a
+  software interface — by the field evaluation for the zone, by the operator's
+  command for the e-stop and the reset (§7.2) — and the safety program did this
+  with it".
 - **What the ruling buys**, and it is the reason it is worth taking rather than
   waiting: the stimulus uses **neither the bridge nor the OPC UA session**. The
   2026-07-29 network-fed form could never satisfy the M5 criterion at all
@@ -236,6 +270,14 @@ Retain.** It is a **standard** DB and not an F-DB, and §7 gives the four reason
 | `"SafetyInputStandIn".EStopCircuitClosed` | Bool | **`FALSE`** | The cell e-stop's NC circuit. **`TRUE` = closed = not actuated and the wiring healthy.** `FALSE` = actuated, or a broken wire, or an absent signal — all three read as a demand. **Wire NC, program NO** (CLAUDE.md §9): the program uses the tag as a plain NO contact, so every failure of the channel falls in the stopping direction |
 | `"SafetyInputStandIn".ZoneDeviceCircuitClosed` | Bool | **`FALSE`** | The marked-zone device's NC output. **`TRUE` = zone clear and device healthy.** `FALSE` = zone occupied, device faulty, or wire broken. Same convention, same reasoning |
 | `"SafetyInputStandIn".ResetButtonPressed` | Bool | **`FALSE`** | The monitored reset device. **NO contact, read NO: `TRUE` only while pressed.** This looks like an exception to wire-NC/program-NO and is exactly its intent — a reset must be *actively* commanded, so a broken wire, an absent signal and a dead device all mean **no reset**, which is the safe direction. A reset device wired NC would reset the machine when its cable was cut |
+| `"SafetyInputStandIn".StandInHeartbeat` | Int | **`0`** | The writer's liveness counter, incremented every writer cycle (§7.1). **It is not a device and models no wiring**: it exists so the S015 validity check (§5.4) can tell a live stand-in from a frozen one. Frozen, or never started, reads **invalid** — and invalid reads as both circuits open and the reset unpressed, the stopping direction. This is the wire-break rule rebuilt for a software wire |
+
+> **As-built delta (SD1).** The DB as built 2026-07-30 carries the three Bools
+> only; `StandInHeartbeat` is the one stand-in change of the §4.5 session.
+> After adding it, **re-open the DB's properties and read *Accessible from
+> HMI/OPC UA* back** — it must still be ✘ — and re-verify by the independent
+> browse of §4.2 step 14. An edit is an occasion for a property to revert, and
+> "still unreachable" is a read-back, not an assumption (ADR 0006).
 
 **Both start values are the fail-safe pre-connection state** (`plc/demo-cell/SPEC.md`
 §3.1, `plc/forklift/SPEC.md` §3.1), and here they also model the truth about real
@@ -265,6 +307,7 @@ statement.
 | Output | — | **`EStopDemand`** | **New**, with its channel |
 | Output | `Q_ResetRequired` | `SafetyResetRequired` | Renamed to the name `TWIN-DEMO-MAP.md` §3 uses throughout, and **its meaning changes** — see §5, network 13 |
 | Output | — | **`SafetyResetFault`** | **New.** SF-08 requires a stuck-or-bridged actuator to be *flagged*, not merely ignored (`TWIN-DEMO-MAP.md` §3, AT-08 (a): "the upper bound and the power-up rejection are what make it a reset *fault* rather than merely a non-event") |
+| Input | — | **`StandInHeartbeat`** (Int) | **New with the S015 delta** (§5.4, typed in the §4.5 session — not part of the 2026-07-30 build). Bound at the call to `"SafetyInputStandIn".StandInHeartbeat` |
 
 All seven are **Bool**. The `I_` / `Q_` prefixes are dropped: this project names
 tags in PascalCase after the physical thing plus its meaning, and the OPC UA
@@ -279,6 +322,12 @@ mirror names downstream diff against these names (CLAUDE.md §9).
 > `"SafetyInputStandIn"` and **all four output pins empty**, which is §3.4's
 > write set as a fact rather than an instruction.
 
+> **After the §5.4 S015 delta** (specified 2026-08-05, not yet built) the
+> interface reads **4 Inputs, 4 Outputs, 18 statics and 3 constants**: one Int
+> input, the eight statics of §3.3's second table, and `STANDIN_STALE_MAX`. The
+> call in `Main_Safety_RTG1` gains a fourth input pin and the four output pins
+> stay empty (§4.5 step 7).
+
 > **An interface change moves the instance DB layout.** After D2, `DB3` is
 > regenerated on compile and the download must **re-initialise** it (§4.2 step
 > 10). A download that preserves the old layout leaves stale values ruling —
@@ -287,9 +336,10 @@ mirror names downstream diff against these names (CLAUDE.md §9).
 
 ### 3.3 Statics inside `InstF_Forklift_Safety [DB3]`
 
-All Static, all non-Retain. **Ten of them**, as built. The two timer instances are
-declared as **multi-instances** so they live inside `DB3` and no extra data block
-appears (§4.2 step 7).
+All Static, all non-Retain. **Ten of them as built 2026-07-30**, growing to
+**eighteen** with the §5.4 S015 delta (second table below). Every timer instance
+is declared as a **multi-instance** so it lives inside `DB3` and no extra data
+block appears (§4.2 step 7, §4.5 step 3).
 
 | Symbol | Type | Start value | Purpose |
 |---|---|---|---|
@@ -318,6 +368,28 @@ explicit at the call site**, so no stale instance value can ever rule (LESSONS
 0.2 s–3 s window is **not measured**"). They are built because the logic being
 demonstrated is SF-08's logic, and a monitored reset without its window is a
 different function.
+
+**Added by the §5.4 S015 delta** — eight statics, all non-Retain, typed in the
+§4.5 session:
+
+| Symbol | Type | Start value | Purpose |
+|---|---|---|---|
+| `HeartbeatChanged` | Bool | `FALSE` | *The writer advanced the heartbeat since the previous F-cycle.* Recomputed every cycle; holds no state |
+| `HeartbeatSeen` | Bool | **`FALSE`** | *The stand-in has been observed alive at least once since the F-runtime group started.* One-shot `S`, never cleared while the group runs — the boot polarity: a link verdict is `FALSE` until the heartbeat has been **seen to change**; "not yet proven stale" is not "alive" (LESSONS 2026-07-28) |
+| `StandInStaleTimer` | `TON` | — | Multi-instance. Measures how long the heartbeat has gone without advancing |
+| `StandInValid` | Bool | **`FALSE`** | *The stand-in is alive right now*: seen at least once, and not stale. The S015 verdict, one row in the watch table |
+| `EStopClosedValid` | Bool | `FALSE` | The e-stop channel **as the logic reads it**: closed AND the stand-in valid. Invalid falls to open — the demand direction |
+| `ZoneClosedValid` | Bool | `FALSE` | Same, zone channel |
+| `ResetPressedValid` | Bool | `FALSE` | Same, reset channel: a press exists only while the stand-in is alive |
+| `HeartbeatMemory` | Int | **`0`** | `StandInHeartbeat` as it read in the **previous** F-cycle — the same visible-static edge mechanism as `ResetMemory`, written by network M2, the last network (§5.4) |
+
+**And a third constant**, same rules as the two above — declared in the
+*Constant* section if offered, otherwise the literal at the `PT` pin, **explicit
+at the call site either way** (LESSONS 2026-07-28):
+
+| Constant | Value | Basis |
+|---|---|---|
+| `STANDIN_STALE_MAX` | `T#1s` | A design value of **this** specification, not an SRS number — no SRS window governs the stand-in, because the SRS contains no stand-in. Derivation: ten in-force F-OB cycles (`FOB_RTG1` = OB123, cyclic 100 ms, read back 2026-08-04, m5-03 report) and twenty writer cycles (50 ms, §7.1) — wide enough that jitter on either side cannot trip it, short enough that a dead writer latches both demands within about a second (§7.3). It comfortably satisfies the five-cycle sampling rule of §4.3 that `RESET_HOLD_MIN` currently does not |
 
 ### 3.4 The whole write set of the F-program
 
@@ -365,7 +437,7 @@ standard side is `SafetyInputStandIn`, which no standard block reads or writes.
 | # | Step | Watch out for |
 |---|---|---|
 | 1 | **Run the §2 checkpoint first**, at least F0, F1 and F3. F3 needs only D1 | Building the whole delta and discovering at the end that the stimulus needs deactivated safety mode wastes the build and, worse, invites the temptation to demonstrate in deactivated safety mode |
-| 2 | **D1 — add the global DB `SafetyInputStandIn`** with the three Bools of §3.1. Standard DB, optimized access, **no Retain**, start values all `FALSE` | It is a **standard** DB on purpose (§7). Do not create it inside the safety program and do not mark it as an F-DB — an F-DB cannot be modified from a watch table with safety mode activated, which would destroy the stimulus |
+| 2 | **D1 — add the global DB `SafetyInputStandIn`** with the three Bools of §3.1 (the heartbeat member arrives later, §4.5 step 2). Standard DB, optimized access, **no Retain**, start values all `FALSE` | It is a **standard** DB on purpose (§7). Do not create it inside the safety program and do not mark it as an F-DB — F-data cannot be stimulated from outside the safety program at all in permanent safety mode (m5-03: watch-table *Modify* refused, `2206:000002`, and an API write to an F-channel lands in a process image the F-driver overwrites), which would destroy the stimulus |
 | 3 | **Clear *Accessible from HMI/OPC UA* on `SafetyInputStandIn`** in the DB's properties | This is the enforcement behind R1 and R2, and it is the whole reason the reset cannot be a client write. With the box ticked, the S7-1500 auto-publishes the DB under `Objects/DataBlocksGlobal` in its own namespace, where the commissioned access settings do not write-protect it (`opcua-nodes.md` §9.8, §9.10). **Any OPC UA client could then clear a safety latch.** Untick it, then verify in step 13 by browsing |
 | 4 | **D2 — rewrite FB2's interface** per §3.2: rename two Inputs, add one; rename two Outputs, add two; add the ten statics of §3.3 | Rename in the interface table rather than deleting and re-adding, so TIA can carry the rename into the call in FB1. Expect the call in `Main_Safety_RTG1` to go inconsistent — step 8 repairs it |
 | 5 | **Add the two constants** of §3.3 in the *Constant* section if the F-block offers one | If it does not, enter `T#200ms` and `T#3s` directly at the `PT` pins in networks 6 and 7. **Never leave a `PT` to an interface default** (LESSONS 2026-07-28) |
@@ -408,6 +480,20 @@ recorded with the evidence:
    recorded as an open item**, not a tuning decision. The SRS text stands; the
    twin's departure from it is what gets written down.
 
+> **Outcome recorded 2026-08-04, at the tool** (m5-03 report, Faz 2 items 2–3):
+> `FOB_RTG1` = **OB123, cyclic 100 ms** (warn 110 ms, maximum 120 ms). Five
+> F-OB cycles are **500 ms**; `RESET_HOLD_MIN` = **200 ms** spans two — the
+> rule above is **violated in the build as it stands**. Which repair to take —
+> lower the F-OB cycle (outcome 2), raise the window off the SRS's number
+> (outcome 3), or relax the five-cycle rule itself — is a change to the
+> monitored-reset window the SRS states, and it belongs to a **safety-spec
+> brief with AT-08 re-read beside it, not to this document and not to a
+> keystroke at the tool**. Until that ruling lands: both constants stay exactly
+> as the SRS states them, the deviation stands **open** (§10 open item 2), and
+> **every T6 / AT-08 evidence record carries one line naming it**. It also
+> shadows any AT-08 (b) scope ruling (§7.5): a 200 ms window sampled at 100 ms
+> is a two-sample verdict with a full sample of jitter either side.
+
 **The F-monitoring time governs the F-runtime group, not an F-I/O connection**,
 because no F-I/O is configured (§2.1). If the CPU reports an F-runtime-group
 timeout after the deltas, the F-runtime group's execution time has grown past its
@@ -429,11 +515,36 @@ execution time beside it.
   running the program I am reading?" without inference.
 - **Safety mode reads *activated* for every step of §9.** If any step ever
   requires deactivating safety mode, that step is not a T6 step and does not go in
-  the evidence — see §7.2.
+  the evidence — see §7.8.
 - **No F-I/O acknowledgement (depassivation) logic exists**, because no F-I/O
   exists. On real F-I/O a depassivation acknowledgement is an additional device
   and an additional consideration for SF-08; it is deliberately not specified
   (§10).
+
+### 4.5 The S015 / stimulus delta — click-path for the F-session, in order
+
+This is the build session `plc/forklift/TIA-BUILD-PROCEDURE.md` chunk J waits
+on. The base is the **as-built 2026-07-30 program** (D1–D7 applied, fourteen
+networks in FB2); everything below is a delta to it. §0-style discipline from
+§4.2 applies throughout: in-force values only, green diff circles, `_1` sweep,
+signature read-back.
+
+| # | Step | Verify before moving on |
+|---|---|---|
+| 1 | **Run §2 F3 on `safe_amr`** (the m5-25 repeat script) and **§2 F7** (open the F-FBD instruction list) | F3: consumer-view transitions in the repeat log, safety mode activated. F7: the Int comparator (`<>`) and `MOVE` recorded as offered, with the date. **If F7 fails, stop and report** — do not substitute at the keyboard |
+| 2 | **SD1 — add `StandInHeartbeat : Int`, start value `0`, to `SafetyInputStandIn`** (§3.1) | The DB is still a standard DB, optimized, no Retain; re-open its properties and read *Accessible from HMI/OPC UA* back — still **✘** |
+| 3 | **Extend FB2's interface** (§3.2, §3.3): Input `StandInHeartbeat : Int`; the eight statics of §3.3's second table, `StandInStaleTimer` as a **multi-instance** `TON`; constant `STANDIN_STALE_MAX := T#1s` in the *Constant* section if offered, else plan the literal at V3's `PT` pin | Interface reads **4 / 4 / 18 / 3** — counts read off the interface table, not assumed. Expect the call in `Main_Safety_RTG1` to go inconsistent; step 7 repairs it |
+| 4 | **Build V1–V7 as the new *first seven* networks**, in §5.4's order, ahead of the existing fourteen | Each network's written operand matches §5.4; the previous network 1 (`CauseGone`) is now the eighth network in TIA's numbering |
+| 5 | **Re-point the operands** of the existing networks per §5.4's re-point table — ten networks, thirteen pins | Search FB2 for `SafetyInputStandIn`: **no logic network reads a raw channel any more** — the only consumers of the raw inputs are V5–V7 (channels) and V1 (heartbeat) |
+| 6 | **Build M2** (`MOVE`: `#StandInHeartbeat` → `#HeartbeatMemory`) as the **last network**, after the `ResetMemory` network — whose driver now reads `#ResetPressedValid` per the re-point | M2 is last; the two memory copies close the block, in the order `ResetMemory`, `HeartbeatMemory` |
+| 7 | **Repair the call in `Main_Safety_RTG1`**: *Update*, then wire the fourth input pin to `"SafetyInputStandIn".StandInHeartbeat`; the three Bool pins unchanged, **all four output pins still empty** | Call box consistent: 4 inputs wired, 0 outputs wired |
+| 8 | **Compile the safety program; read the warnings** | The standard-data disclosure (S015 territory) now lists **four members of `SafetyInputStandIn` and nothing else**. A warning naming any other DB means a re-point was missed |
+| 9 | **Download with re-initialisation of `DB3`** — the interface change moved the layout (LESSONS 2026-07-28); expect the CPU in STOP | Diff circles solid green; **F-collective signature online = offline**, recorded with its date. It **will differ** from `AA735E2A` (the pre-delta signature, read 2026-08-04) — a changed collective signature is the *expected evidence* of the delta, not an error |
+| 10 | **`_1` sweep** on every new name (LESSONS 2026-07-30) | No silent suffix on `StandInHeartbeat`, on any new static, or on any browse name |
+| 11 | **Cross-reference `SafetyInputStandIn`** | Exactly **four read accesses**, all at the call in `Main_Safety_RTG1`; **no write access from any block on the CPU** — the only writer is the stand-in writer, outside the CPU (§7.1) |
+| 12 | **Independent browse** (UaExpert / `asyncua` — not the bridge, not the HMI) | `SafetyInputStandIn` and `InstF_Forklift_Safety` appear **nowhere**, including `Objects/DataBlocksGlobal`. Record the reading with its date |
+| 13 | **Start the stand-in writer; watch §8 Groups 1 and 3** | `HeartbeatSeen` → `TRUE` and `StandInValid` → `TRUE` within about one writer cycle plus one F-cycle (≈150 ms; do not stopwatch it, read the transition). Then **stop the writer**: `StandInValid` → `FALSE` within `STANDIN_STALE_MAX` plus one F-cycle and **both demands latch** — §7.3 row 1 observed, and a first rehearsal of T6.7 |
+| 14 | **Read back and record**: safety mode activated; the new F-collective signature; the F-OB cycle; and the in-force `PT` of **all three** timers from the watch table | `StandInStaleTimer.PT` reads `T#1s`, `ResetHoldMinTimer.PT` `T#200ms`, `ResetHoldMaxTimer.PT` `T#3s` — **in force, never defaults** (LESSONS 2026-07-28) |
 
 ---
 
@@ -442,7 +553,9 @@ execution time beside it.
 ### 5.0 Reading rules for §5.1
 
 1. **Every network is one logic string ending in one coil or one flip-flop box.**
-   Fourteen networks, fourteen written operands.
+   Fourteen core networks, fourteen written operands — and, with the §5.4 S015
+   delta, eight more for a total of **twenty-two**, still one written operand
+   each.
 2. **`SR` and `RS` are the opposite way round in TIA from IEC 61131-3, and getting
    it backwards is the single easiest way to build the wrong safety program.** In
    TIA the trailing `1` marks the **dominant** input:
@@ -484,16 +597,24 @@ execution time beside it.
 5. **The operand of an `SR` / `RS` box is written above the box.** The `Q` output
    pin is optional and is left unconnected everywhere below — the operand *is* the
    value.
-6. **No network reads a value that a later network writes — with exactly one
-   exception, and it is the edge mechanism.** `ResetMemory` is read in networks 3
+6. **No network reads a value that a later network writes — with exactly two
+   exceptions, and both are memory copies.** `ResetMemory` is read in networks 3
    and 4 and written in network 14, deliberately: what those networks need is the
    value from the **previous** F-cycle, which is exactly what a variable written
    after them still holds. Moving network 14 earlier, or "repairing" the apparent
    forward reference, destroys both edges — network 3 would compare the device
-   against itself and never see one. **Network 14 stays last.** Everywhere else
-   the order is the design.
+   against itself and never see one. **Network 14 stays last among the core
+   fourteen**, and the S015 delta adds the second copy of the same shape:
+   `HeartbeatMemory`, read in V1 and written by M2, the final network of the
+   block (§5.4). Everywhere else the order is the design.
 
-### 5.1 The fourteen networks
+### 5.1 The fourteen core networks — as built 2026-07-30
+
+> **Read with §5.4.** After the S015 delta, seven validity networks run ahead
+> of network 1 and every operand this section writes as
+> `"SafetyInputStandIn".X` or as a raw channel input is re-pointed to its
+> validated static per §5.4's re-point table. The logic of all fourteen
+> networks is otherwise unchanged, so they are left exactly as built.
 
 ---
 
@@ -759,8 +880,9 @@ released, with the live world clear and the device healthy.
 
 - `ResetFall` — a **held** control is not a reset, ever. No elapsed time makes an
   edge appear.
-- `ResetHoldValid` — too short is refused (AT-08 (b)'s logic, whose *test* is
-  deferred, §7.3) and too long is refused (AT-08 (a)).
+- `ResetHoldValid` — too short is refused (AT-08 (b)'s logic; whether its test
+  enters scope is safety-spec's ruling, §7.5) and too long is refused
+  (AT-08 (a)).
 - `CauseGone` — a reset with a trigger still present is ignored (AT-08 (c)). This
   is the check **at the moment of release**. It is the third of three on the same
   condition: network 5 checks it at the **press**, networks 5 and 9 hold it
@@ -892,7 +1014,11 @@ stuck device.
 `ResetSeenOpen` is a one-shot set and never cleared; `CauseGone`, `ResetRise`,
 `ResetFall` and `ResetPulse` are recomputed every F-cycle and hold no state.
 `ResetMemory` holds exactly **one F-cycle** of state, which is what makes the two
-edges possible at all (§5.0 note 4, network 14).
+edges possible at all (§5.0 note 4, network 14). The S015 delta adds one more of
+each kind: `HeartbeatSeen` is a one-shot set like `ResetSeenOpen`,
+`HeartbeatChanged`, `StandInValid` and the three validated channels are
+recomputed every cycle, and `HeartbeatMemory` holds one F-cycle of state for V1
+exactly as `ResetMemory` does for networks 3 and 4 (§5.4).
 
 ### 5.3 The six ways a reset must fail, and where each one fails
 
@@ -906,8 +1032,9 @@ another being correct.
 | 2 | **The device is already pressed when the F-runtime group starts** | `ResetSeenOpen` is `FALSE`, so network 5 refuses to arm and network 6's timer never runs; network 8 flags the fault from the first cycle. Once the device is released the fault clears and the **next** press behaves normally | SF-08 "high at power-up"; **AT-08 (a)**, second half |
 | 3 | **The device is pressed while a demand stands and held across the cause clearing** | Network 5 saw `CauseGone` false at the rising edge, so the press was never armed; network 6's timer never ran; `ResetHoldValid` is `FALSE` at the release. **Nothing clears, whenever the cause goes away and however long the hold** | SF-08 "reset while any SF trigger is still present is ignored"; **AT-08 (c)** |
 | 4 | **A valid-looking press and release while a demand still stands** | Network 10 needs `CauseGone` at the release, **and** networks 11/12 are set-dominant so the standing demand re-asserts in the same cycle | **AT-08 (c)** |
-| 5 | **A press shorter than the monitored minimum** | Network 6's timer never reaches `Q`, so `ResetHoldValid` is never set and network 10's conjunction fails at the release | SF-08 "held between 0.2 s and 3 s"; **AT-08 (b)** — logic built, **test deferred** (§7.3) |
+| 5 | **A press shorter than the monitored minimum** | Network 6's timer never reaches `Q`, so `ResetHoldValid` is never set and network 10's conjunction fails at the release | SF-08 "held between 0.2 s and 3 s"; **AT-08 (b)** — logic built; the timed stimulus now exists and the scope ruling is safety-spec's (§7.5, §9.2) |
 | 6 | **A validly armed press during which a cause appears and disappears again before the release** | Network 5's `R1` drops the arming the moment the cause returns and it cannot re-arm without a fresh rising edge; network 9's `R1` clears the hold verdict that had already been latched. **The demand that formed during the acknowledgement survives it** | SF-08 "reset while any SF trigger is still present is ignored", read across the whole actuation rather than at its endpoints; **AT-08 (c)** |
+| 7 | **The stand-in goes invalid during the hold — the writer dies mid-press** | V5–V7 drive every validated channel to open/unpressed in the same F-cycle validity drops. Network 1 drops `CauseGone`; network 5's `R1` disarms; network 9's `R1` clears the verdict, reset-dominant, even while the min timer's `Q` is still `TRUE` in that call; network 10's `CauseGone` conjunct refuses the falling edge the invalidation itself produced; and networks 11/12 latch both demands in the same cycle. **A dying stand-in cannot clear a latch on its way down** — the walkthrough is §5.4's | S015 check (§5.4); no SRS sub-case — the failing part is the stand-in, which the SRS does not contain |
 
 **And the one way it must succeed:** an armed press — cause already gone, device
 previously seen open — held between 200 ms and 3 s with the live world clear
@@ -918,6 +1045,192 @@ clear, and network 13 drops `SafetyResetRequired`.
 standard side, motion returns only on a **fresh teleop enable edge**, which the
 reset does not produce (`plc/forklift/SPEC.md` §6.7). *"A reset is required, and
 it starts nothing"* (`TWIN-DEMO-MAP.md` §5.3).
+
+### 5.4 The S015 validity check — eight networks, visible in the F-code
+
+**Why it exists.** The safety program reads standard data, and TIA's mechanism
+for that is **disclosure, not protection**: warning **S015** lists the standard
+tags in the safety summary and requires a **process-specific validity check per
+F-runtime group** (ADR 0011 F6; FIO-FEASIBILITY §6 consequence 2, binding on
+this document). This section is that check, written out as networks the owner
+types — not acknowledged in a compile log and forgotten. **It adds no
+integrity**: the stand-in stays a standard DB and standard tags stay unsafe;
+what the check adds is honesty about liveness — a writer that dies, freezes or
+never starts is converted into a **demand**, never into a silent "world clear"
+(§7.3). That is wire NC / program NO rebuilt for a software wire.
+
+**Why F-FBD and not SCL.** TIA Safety on the S7-1500 offers F-LAD and F-FBD
+only — there is no F-SCL — so "written out as code" means the network tables
+below, in exactly the form the fourteen built networks used. The §5.0 reading
+rules apply unchanged.
+
+**Position rule, load-bearing.** V1–V7 run **before** network 1: every consumer
+must read a validated value computed earlier in the *same* F-cycle, or a dying
+writer gets one cycle of stale trust. M2 runs **last**, after network 14 — the
+second memory copy of §5.0 note 6. In TIA's numbering after the build, V1–V7
+are networks 1–7, the core fourteen are 8–21, M2 is 22.
+
+---
+
+**V1 — `HeartbeatChanged`: has the writer advanced the heartbeat?**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `CMP <>` box (Int) | in 1 | `#StandInHeartbeat` |
+| | in 2 | `#HeartbeatMemory` |
+| `=` coil | — | `#HeartbeatChanged` |
+
+**Reads as:** the writer has written a fresh heartbeat since the previous
+F-cycle.
+
+**Notes.** The comparison is against the **previous** cycle's value, held by
+`HeartbeatMemory` and written by **M2, the last network** — the same deliberate
+apparent-forward-reference as `ResetMemory` (§5.0 note 6). The writer increments
+every 50 ms (§7.1) and the F-OB runs at 100 ms, so a live writer advances the
+counter by about two per cycle and this coil is `TRUE` on **every** cycle while
+the writer lives; wrap-around at the Int limit is just another inequality.
+Confirm the Int comparator is offered before building (§2 F7).
+
+---
+
+**V2 — `HeartbeatSeen`: the boot polarity**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `S` (set output) coil | in | `#HeartbeatChanged` |
+| | operand | `#HeartbeatSeen` |
+
+**Reads as:** the stand-in has been observed alive at least once since the
+F-runtime group started.
+
+**Notes.** Start value `FALSE`, one-shot set, never cleared while the group
+runs — the exact shape of `ResetSeenOpen` (network 2). **This term is the
+lesson of `BridgeLinkOk`** (LESSONS 2026-07-28): a verdict built only on "not
+yet proven stale" boots `TRUE` for the whole first stale window, and every
+guard riding on it inherits the boot polarity. `StandInValid` therefore boots
+`FALSE` and stays `FALSE` until life has been **seen**, which is why the
+machine starts stopped even if the writer is slow to arrive.
+
+---
+
+**V3 — `StandInStaleTimer`: how long since the last advance**
+
+| Element | Pin | Operand / value |
+|---|---|---|
+| `TON` box, multi-instance `#StandInStaleTimer` | `IN` | `#HeartbeatChanged` *(negated)* |
+| | `PT` | `#STANDIN_STALE_MAX` (`T#1s`) |
+
+**Reads as:** the heartbeat has not advanced for `STANDIN_STALE_MAX`.
+
+**Notes.** Called **unconditionally, every cycle**, outside any branch — a
+timer that must be released by an event is called with `IN` as the event's own
+test, never from inside a state that stops executing (LESSONS 2026-07-28). A
+live writer makes `HeartbeatChanged` `TRUE` every cycle, so `IN` is `FALSE` and
+`ET` re-zeroes in the same call; the first cycle after the writer dies, `IN`
+goes `TRUE` and the clock runs. `PT` is explicit at the pin (§3.3 for the
+basis of the value).
+
+---
+
+**V4 — `StandInValid`: the S015 verdict**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `AND` box, 2 inputs | in 1 | `#HeartbeatSeen` |
+| | in 2 *(negated)* | `#StandInStaleTimer.Q` |
+| `=` coil | — | `#StandInValid` |
+
+**Reads as:** the stand-in is alive right now — seen alive at least once, and
+not currently stale.
+
+**Notes.** Affirmative form, deliberately (LESSONS 2026-07-27 on analogue
+plausibility, applied to liveness): validity is **asserted from evidence of
+life**, and everything else — boot, stale, frozen, never-started — falls
+through to invalid without being enumerated.
+
+---
+
+**V5 — `EStopClosedValid`** · **V6 — `ZoneClosedValid`** · **V7 —
+`ResetPressedValid`**
+
+Three networks of one shape; V5 shown, V6 and V7 substitute their channel.
+
+| Element | Pin | Operand |
+|---|---|---|
+| `AND` box, 2 inputs | in 1 | `#EStopCircuitClosed` *(V6: `#ZoneDeviceCircuitClosed`; V7: `#ResetButtonPressed`)* |
+| | in 2 | `#StandInValid` |
+| `=` coil | — | `#EStopClosedValid` *(V6: `#ZoneClosedValid`; V7: `#ResetPressedValid`)* |
+
+**Reads as:** the channel, as the logic is allowed to believe it — closed (or
+pressed) only while the stand-in is alive.
+
+**Notes.** Every failure direction is the stopping one: invalid makes both
+circuits read **open** (demand latches) and the reset read **unpressed** (no
+edge, no arming, no pulse). **From here on, no network reads a raw channel** —
+the re-point table below is exhaustive and §4.5 step 5 verifies it by search.
+
+---
+
+**M2 — `HeartbeatMemory`: the second memory copy, and it is the final network**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `MOVE` box | `IN` | `#StandInHeartbeat` |
+| | `OUT1` | `#HeartbeatMemory` |
+
+**Reads as:** remember, for the next F-cycle, the heartbeat value read in this
+one.
+
+**Notes.** Every rule of network 14 applies verbatim: unconditional, every
+cycle; last so it cannot drift and nothing can be inserted between it and V1's
+read of the previous value. Moved earlier, V1 compares the heartbeat against
+itself, `HeartbeatChanged` is never `TRUE`, the stale timer runs from the first
+cycle and `StandInValid` dies — a failure that looks exactly like a dead writer
+and is not. `MOVE` presence is §2 F7's check.
+
+---
+
+**The re-point table — every raw-channel read in the core fourteen, and what it
+becomes.** Ten networks, thirteen pins; nothing else in any core network moves.
+
+| Network | Pin | Was | Becomes |
+|---|---|---|---|
+| 1 `CauseGone` | `AND` in 1 | `"SafetyInputStandIn".EStopCircuitClosed` | `#EStopClosedValid` |
+| 1 `CauseGone` | `AND` in 2 | `"SafetyInputStandIn".ZoneDeviceCircuitClosed` | `#ZoneClosedValid` |
+| 2 `ResetSeenOpen` | `S` coil input | `ResetButtonPressed` *(negated)* | an `AND` box: `#StandInValid` AND `#ResetPressedValid` *(negated)* |
+| 3 `ResetRise` | `AND` in 1 | `ResetButtonPressed` | `#ResetPressedValid` |
+| 4 `ResetFall` | `AND` in 1 *(negated)* | `ResetButtonPressed` | `#ResetPressedValid` |
+| 5 `ResetPressArmed` | `OR` in 1 *(negated)* | `ResetButtonPressed` | `#ResetPressedValid` |
+| 6 `ResetHoldMinTimer` | `AND` in 1 | `ResetButtonPressed` | `#ResetPressedValid` |
+| 7 `ResetHoldMaxTimer` | `TON` `IN` | `ResetButtonPressed` | `#ResetPressedValid` |
+| 8 `SafetyResetFault` | `AND` in 1 | `ResetButtonPressed` | `#ResetPressedValid` |
+| 8 `SafetyResetFault` | `R1` *(negated)* | `ResetButtonPressed` | `#ResetPressedValid` |
+| 11 `EStopDemand` | `S1` *(negated)* | `"SafetyInputStandIn".EStopCircuitClosed` | `#EStopClosedValid` |
+| 12 `ZoneStopDemand` | `S1` *(negated)* | `"SafetyInputStandIn".ZoneDeviceCircuitClosed` | `#ZoneClosedValid` |
+| 14 `ResetMemory` | coil driver | `"SafetyInputStandIn".ResetButtonPressed` | `#ResetPressedValid` |
+
+**Network 2's change is the one that is more than a substitution**, so it is
+said in full: "seen open" now means *observed not pressed **while the stand-in
+was alive***. Without the `#StandInValid` conjunct, the invalid boot window —
+during which `ResetPressedValid` is forced `FALSE` — would count as having seen
+the device open, and a device genuinely stuck from before start-up would slip
+the power-up rejection the moment validity arrived. With it, nothing is "seen"
+until the stand-in can be believed.
+
+**The walkthrough this section owes — a writer dying mid-press cannot fire the
+reset.** Suppose an armed, valid press is being held and the writer dies. At
+most `STANDIN_STALE_MAX` plus one F-cycle later, V4 drops `StandInValid`. In
+that same F-cycle, in order: V5–V7 force all three validated channels to
+open/unpressed; network 1 drops `CauseGone`; network 4 forms a **falling
+edge** (`ResetPressedValid` fell against `ResetMemory` still `TRUE`); network
+5's `R1` (`NOT pressed OR NOT CauseGone`) disarms the press; network 9's `R1`
+(`NOT CauseGone`) clears `ResetHoldValid`, reset-dominant, even while the min
+timer's `Q` is still `TRUE` in this call; network 10 sees the falling edge but
+refuses it — `ResetHoldValid` and `CauseGone` are both already `FALSE`,
+computed earlier **in the same scan**; and networks 11/12 latch both demands.
+The one edge a dying stand-in can produce lands on a cycle in which the world
+already reads unclear. This is why the position rule is load-bearing and why
+§5.0 note 6's ordering discipline extends to the validity networks.
 
 ---
 
@@ -974,9 +1287,10 @@ existing step.
 
 ### 6.3 What the F-program reads, and what it never reads
 
-**Its entire read set is the three Bools of `SafetyInputStandIn`.** It reads no
-teleop state, no HMI request, no bridge value, no link verdict, no plant feedback
-and no standard-program status bit (ADR 0009 D3.2).
+**Its entire read set is the four members of `SafetyInputStandIn`** — the three
+channel Bools and the `StandInHeartbeat` Int the S015 check consumes (§5.4). It
+reads no teleop state, no HMI request, no bridge value, no link verdict, no
+plant feedback and no standard-program status bit (ADR 0009 D3.2).
 
 **Invariant 7, honestly.** The safety program must remain correct if the standard
 program halts or misbehaves. It reads no value the standard program produces, so
@@ -985,19 +1299,25 @@ data block**, and the honest residual is therefore: *a standard block that wrote
 `SafetyInputStandIn` could create or clear a demand.* Three things hold that shut,
 and the first two are enforcement rather than intention:
 
-1. **No standard block writes it** — verified by cross-reference at §4.2 step 13,
-   at every build, not once.
+1. **No standard block writes it** — verified by cross-reference at §4.2 step 13
+   and §4.5 step 11, at every build, not once. The DB's one writer is the
+   stand-in writer, outside the CPU, through the PLCSIM Advanced API (§7.1) —
+   exactly one writer per tag, and it is not the standard program.
 2. **No client can reach it** — *Accessible from HMI/OPC UA* cleared, verified by
-   an independent browse at §4.2 step 14.
-3. **It disappears entirely on real hardware.** The DB exists only because there
-   is no F-DI to wire to. When one exists, §4.2 step 8 re-points three pins at the
-   channel, the DB is deleted, and the standard-to-safety access goes with it
-   (§2.1).
+   an independent browse at §4.2 step 14 and §4.5 step 12.
+3. **A writer that dies or lies frozen is a demand, not a clear world** — the
+   §5.4 validity check converts stand-in silence into both circuits reading
+   open (§7.3). What the check cannot do is add integrity: the data stays
+   standard, and the claim boundary of §7.8 governs every sentence about it.
+4. **It disappears entirely on real hardware.** The DB exists only because there
+   is no F-DI to wire to. When one exists, §4.2 step 8 re-points the input pins
+   at the channel, the DB is deleted, and the standard-to-safety access goes
+   with it (§2.1).
 
 That is the correct shape of the claim: not "the F-program is isolated" but
 "the F-program's only dependency on standard storage is a stand-in for wiring,
-its writers are enumerated and checked, and it is removed by the change that makes
-the input real".
+its writers are enumerated and checked, its liveness is checked in the F-code,
+and it is removed by the change that makes the input real".
 
 ### 6.4 Notes for the mirror node group
 
@@ -1086,44 +1406,223 @@ Two honest qualifications, because "inert" is doing a lot of work in D4:
 
 ---
 
-## 7. Driving the simulated F-inputs
+## 7. Driving the simulated F-inputs — the automated stand-in writer
 
-### 7.1 The stimulus, exactly
+### 7.1 The path, exactly (ADR 0015 D1)
 
-**The three channels of `SafetyInputStandIn` are driven by *Modify* from the TIA
-watch table of §8, over the engineering connection.** That is the whole mechanism.
+**The channels of `SafetyInputStandIn` are written by one process — the
+stand-in writer — through the S7-PLCSIM Advanced API by tag name, with no hand
+at a watch table anywhere in the chain.** That is the whole mechanism.
+Watch-table *Modify* is **retired as a stimulus** (ADR 0015 D1): the m5-03
+probe recorded the tool refusing fail-safe *Modify* outright in permanent
+safety mode — *"Debugging of fail-safe tags is not allowed in permanent safety
+mode. (2206:000002)"* — and the judge review had already shown a hand-typed
+value fails criterion (a)'s substance, because a human typing a value is not a
+signal reaching anything. Watch tables remain what they are everywhere else in
+this project: a **reading** instrument (§8).
 
 | Property | Statement |
 |---|---|
-| **Command** | *Modify* (`Modify value` → `Modify now`, or the permanent modify trigger). **Not *Force***: on an S7-1500, force applies to I/O tags, not to data block members, so it is not offered for these operands |
-| **Persistence** | Nothing in the program writes these tags, so a modified value **stands until it is modified again**. There is no cyclic writer to fight, which is what makes a hand-driven stimulus workable here and is not true of the `Forklift/Hmi/` or `Forklift/Input/` groups (`plc/forklift/SPEC.md` §9) |
-| **After a CPU restart** | The DB reverts to its start values, so both circuits read open and both demands latch. Re-close them and reset — T6.0 |
-| **Safety mode** | **Activated**, throughout. Nothing in this stimulus requires it to be deactivated, and §7.2 explains why that is the decisive property |
-| **Clients** | **None.** The bridge and the HMI are not involved in forming, holding or clearing any demand |
+| **Writer process** | One long-lived process on the **Windows host**, beside PLCSIM Advanced. It loads the installed API assembly the way both proofs did — Windows PowerShell 5.1, `Add-Type -Path` on `Siemens.Simatic.Simulation.Runtime.Api.x64.dll` (API 7.0) — introducing **no new dependency**. The assembly path and version are **read-back values from the m5-03 record**, never values to re-derive from this document. Its implementation home in the repository is an **owner ruling still open** (judge review F6; §10 open item 8); this section is the contract any implementation satisfies |
+| **What it writes** | **All four members of `SafetyInputStandIn`, every cycle**: the three channel levels, and `StandInHeartbeat` incremented once per cycle. By tag name, via `WriteBool` / `WriteInt32`-class calls — never by address area (ADR 0011 F7) |
+| **Cycle** | **50 ms**, logged by the writer at start-up. Half the in-force F-OB cycle (`FOB_RTG1` = OB123, cyclic 100 ms, read back 2026-08-04), so every F-cycle samples a fresh write and an advanced heartbeat |
+| **Level republish, never write-on-change** | A CPU restart reverts the DB to its start values, and a write-on-change writer never repairs the levels whose source state did not change — the exact bridge failure LESSONS 2026-07-28 records. Republishing every level every 50 ms repairs a restart within one F-cycle, and repairs it as a **level**, latching nothing |
+| **After a CPU restart** | The DB reads start values for at most one writer cycle; both demands latch (correctly — §3.1); the writer restores the levels; the latches stand until one monitored reset — T6.0 / T6.6 |
+| **Verification** | A write on this path is proven **in the consumer's view** — `InstF_Forklift_Safety`'s own members — never in the writer's read-back (LESSONS 2026-08-04, the m5-03 divergence), and gate evidence carries at least one witness that cannot see the written DB: the CPU's own OPC UA server, which does not expose `SafetyInputStandIn` (m5-03b) |
+| **Safety mode** | **Activated**, throughout. The API write path runs under activated safety mode — proven, not assumed (m5-03b) |
+| **Clients** | **None.** The bridge and the HMI are not involved in forming, holding or clearing any demand, and no client can reach the DB (§4.2 steps 3, 14) |
 
-**Why the stand-in lives in a standard DB rather than in F-data** — four reasons,
-in order of weight:
+**Why the stand-in lives in a standard DB rather than in F-data** — four
+reasons, re-verified by the probe:
 
-1. **A watch-table modify of F-data requires deactivating safety mode.** Then the
-   demonstration would be conducted in the one CPU state where the safety
-   program's protections are lifted, which is not a demonstration of a safety
-   program.
-2. **Fabricating F-data tests the watch table, not the program.** Modifying
-   `EStopDemand` directly would set the latch without exercising a single network
-   of §5. The stimulus must enter at the **channel**, which is where a device
-   would enter.
-3. **It keeps the swap to real F-I/O a three-pin change** (§2.1, §4.2 step 8).
+1. **F-data cannot be stimulated from outside the safety program at all in
+   permanent safety mode** — the watch table is refused (`2206:000002`), and the
+   API's write to an F-channel lands in a process image the F-driver overwrites
+   (m5-03, both views never agreeing for a single sample).
+2. **Fabricating F-data would test the writer, not the program.** Writing
+   `EStopDemand` directly would set the latch without exercising a single
+   network of §5. The stimulus enters at the **channel**, which is where a
+   device would enter.
+3. **It keeps the swap to real F-I/O a pin-level change** (§2.1, §4.2 step 8).
 4. **It is honest about what it is.** The DB's own name carries the word
    *stand-in*, so the substitution is visible in every fully qualified tag,
    every watch-table row and every screenshot — the strongest possible place to
    satisfy `TWIN-DEMO-MAP.md` §5.2 rule 1.
 
-**How the zone is played, said plainly because a viewer will assume otherwise.**
-The marked arena zone is a **floor marking**. The device that would watch it does
-not exist. The owner, at the engineering interface, opens
-`ZoneDeviceCircuitClosed` at the moment the machine crosses the marking. **No
-sensor detects the crossing**, and the recording says so in the stand-in sentence
-that `TWIN-DEMO-MAP.md` §5.1 fixes word for word:
+### 7.2 The writer's two sources — and who owns which channel
+
+| Channel | Source | Mechanism |
+|---|---|---|
+| `ZoneDeviceCircuitClosed` | **The field evaluation** (m5-12), whenever its link is up | The protective-field verdict crosses to the writer, which maps *intrusion* to `FALSE` (open) and *clear* to `TRUE` — with **no human act anywhere in that chain**. This is criterion (a)'s form |
+| `ZoneDeviceCircuitClosed` | The operator channel, **only while no field link is up** | `zone open` / `zone close` — the pre-m5-12 form, and the floor-marking play of §7.7 |
+| `EStopCircuitClosed` | The operator channel only | `estop open` / `estop close`. A deliberate command: no device exists to play the e-stop, and the field evaluation has no business touching it |
+| `ResetButtonPressed` | The operator channel **only** | §7.4 — the reset's origin gets its own section |
+| `StandInHeartbeat` | The writer itself | Incremented every cycle; no source commands it |
+
+**One channel, one source at any moment.** While a field-evaluation link is up,
+the zone channel belongs to it and operator `zone` commands are **refused with
+a logged refusal**. The e-stop and reset channels never take field input, by
+construction — the writer simply has no mapping from the field link to them.
+
+**The transport, named.** The field evaluation runs in WSL (ROS 2); the writer
+runs on Windows. The link is **one TCP connection, WSL client → Windows
+listener on the writer**, port **45015** (a design value of this spec),
+carrying newline-delimited text: `ZONE 0` / `ZONE 1` at every verdict
+transition, plus a `PING` keepalive at 1 Hz. The Windows-side address WSL must
+dial is host-configuration-derived and is a **read-back value**: the field
+evaluation takes it from its own configuration, never from this document
+(ADR 0006). If the link is silent longer than **`FIELD_LINK_STALE_MAX` = 1 s**,
+the writer drives the zone channel **open** and logs the transition — loss of
+the intrusion source reads as an intrusion, never as a clear field. The
+operator channel is the writer's own console on the Windows host: engineering
+access on the simulation machine, not a network endpoint and not a client.
+
+**The operator command set** — the vocabulary §9 T6 uses:
+
+| Command | Effect |
+|---|---|
+| `estop open` / `estop close` | `EStopCircuitClosed` := `FALSE` / `TRUE` |
+| `zone open` / `zone close` | The zone channel; **refused while the field link is up** |
+| `reset press` / `reset release` | `ResetButtonPressed` := `TRUE` / `FALSE`, held until countermanded |
+| `reset pulse <ms>` | One shaped actuation: `TRUE` for `<ms>`, then `FALSE` — the timed injection of §7.5 |
+
+**One command, one action.** The writer never repeats, retries or auto-releases
+a press (beyond the pulse's own shaped release), so a stuck operator key cannot
+produce a second actuation, and a second reset needs a second deliberate
+command.
+
+**The log is part of the design, not a nicety.** One log file per writer
+session, **unique name per start** (LESSONS 2026-07-28: never share an evidence
+file across restarts), wall-clock stamped, one line each for: every source
+event received (`FIELD` or `OPERATOR`, with the value), every API write issued,
+every field-link state change, every refusal. §7.6 is why this log is
+load-bearing rather than diagnostic.
+
+### 7.3 Failure behaviour — what the F-program sees when the writer dies, and why each direction is safe
+
+| # | Failure | What the F-program sees | Why it is safe |
+|---|---|---|---|
+| 1 | **The writer dies** — process killed, host down, API session lost | Every member freezes; `StandInHeartbeat` stops advancing. Within `STANDIN_STALE_MAX` plus one F-cycle, §5.4 drops `StandInValid`; all three validated channels read open/unpressed; **both demands latch and no reset can be accepted** | A frozen "circuit closed" is never trusted: the S015 check converts silence into a demand. Wire NC / program NO, rebuilt for a software wire |
+| 2 | **The field-evaluation link dies, writer alive** | The writer drives the zone channel open after `FIELD_LINK_STALE_MAX`; `ZoneStopDemand` latches. The heartbeat keeps advancing, so `StandInValid` stays `TRUE` and the watch table shows exactly **which** demand stands and why | Loss of the intrusion source reads as an intrusion, not as a clear field |
+| 3 | **The writer wedges with `ResetButtonPressed` `TRUE`**, heartbeat still advancing | A press held past `RESET_HOLD_MAX` = 3 s: `SafetyResetFault` flags, `ResetHoldValid` is cleared for that press, no latch clears | Exactly the stuck-or-bridged actuator SF-08 exists to refuse — the software failure lands on the branch built for the hardware failure (§5.3 case 1) |
+| 4 | **The CPU restarts under a live writer** | Start values for at most one writer cycle; demands latched by the restart stay latched; the writer restores levels, which latches nothing | The restart re-latches by design (§3.1); the writer repairs **levels**, and no level repair produces an edge |
+| 5 | **Writer dying mid-press** | §5.3 case 7 — the falling edge the invalidation produces is refused in the same cycle it forms | The §5.4 walkthrough, network by network |
+| 6 | **Both writer and field evaluation dead** | The §3.1 start-value world: everything open, both demands latched | The fail-safe pre-connection state, unchanged |
+
+**None of this is a safety claim.** The writer is standard software driving a
+standard DB. The S015 check buys **honesty about liveness**, not integrity
+(§7.8), and every failure row above is a statement about demonstration
+behaviour, not about a safety function.
+
+### 7.4 The reset's origin — the compliant stimulus, and why it is still a monitored reset
+
+**The gap, named before the ruling** (judge review F3, soft spot 2): retiring
+*Modify* left `ResetButtonPressed` with **no compliant stimulus at all** — it is
+"never a client write" (R1), the field evaluation has no business pressing a
+reset, and m5-03b drove it from a test script, which is fine for a proof and
+not for a showcase.
+
+**The ruling of this specification: the reset originates at the writer's
+operator channel, and nowhere else.**
+
+- **Never a client write** — R1 unchanged. No OPC UA, HMI or bridge path to the
+  DB exists (verified by browse, §4.2 step 14), so the rule is enforced by
+  reachability, not by policy.
+- **Never the field evaluation** — the writer has no field mapping to this
+  channel by construction (§7.2).
+- **Never a watch table** (ADR 0015 D1).
+- **One deliberate human act per reset**: the operator issues one command —
+  `reset press` … `reset release`, or `reset pulse <ms>` — at the writer's
+  console on the Windows host. The command channel sits in the same trust
+  domain as the retired watch table (engineering access on the simulation
+  host); what moved is the human's act, from *typing a value into a table* to
+  *commanding one shaped actuation of the stand-in channel*, with the write
+  itself automated, logged and identical in mechanism to the other two
+  channels.
+
+**Why this is still the monitored reset CLAUDE.md §9 requires.** The monitoring
+is the F-program's, and it is unchanged by where the signal comes from: the
+reset acts only on a **falling edge**, after a rise and a hold inside the
+monitored window; a **stuck signal is not a reset** — no elapsed time creates
+an edge, and past 3 s the stuck signal is a flagged fault; a press that began
+before the cause cleared clears nothing; a reset never starts motion. Every one
+of those refusals tests the **signal**, and the F-logic tests it identically
+whatever produced it — m5-03b ran precisely this acceptance logic on
+API-written data: a commanded 1000 ms hold, clearance 37 ms after release,
+edge-triggered, with closing the circuit alone clearing nothing. A writer
+defect is caught the same way a device defect would be: wedged `TRUE` is the
+stuck actuator (§7.3 row 3), and death mid-press is refused in-cycle (§5.3
+case 7).
+
+**And why a human here does not break "no human in the loop".** ADR 0015 D1 and
+criterion (a) demand no human act in the **scanner chain** — intrusion → field
+evaluation → writer → F-blocks → stop — and that chain has none (§7.2, §7.6).
+The reset is the opposite case by specification: CLAUDE.md §9 and SF-08 demand
+a **deliberate operator action**, so a human *originating* the reset is the
+requirement, not a violation. What the criterion actually forbids at the reset
+is a **hand at a watch table**, and there is none: the human commands, the
+writer writes, the write is logged and mechanically identical to every other
+stand-in write.
+
+**Stated honestly, what this path does not demonstrate.** With a shaped pulse,
+the *hold duration* is produced by the writer, not by a human holding a device
+against a clock. AT-08 (d) on this path therefore demonstrates the F-logic
+**accepting a compliant actuation and refusing every non-compliant one**
+(§5.3) — it does not demonstrate reset-device ergonomics, nothing in the SRS
+asks it to, and the stand-in sentence (§7.7) already says no device exists.
+
+### 7.5 Timed injection now exists — AT-08 (b) is safety-spec's call
+
+`reset pulse <ms>` is a timed injection: m5-03b held a commanded 1000 ms press,
+so the facility §10 open item 3 waited for **exists on this path**, and a
+commanded 100 ms pulse is exactly AT-08 (b)'s stimulus. Whether AT-08 (b)
+**enters scope** is a `TWIN-DEMO-MAP.md` §3 condition and therefore
+**safety-spec's ruling, not this document's** (ADR 0015 consequences say the
+same). Until ruled, the sub-case stays an outstanding row (§9.2) with its
+reason changed: not "no stimulus exists" but "stimulus exists; scope ruling
+pending". One caution travels with the hand-over: the §4.3 deviation —
+`RESET_HOLD_MIN` = 200 ms against an in-force 100 ms F-OB — is the **same
+brief's** to resolve, and a 100 ms rejection test against a 100 ms sampler
+proves little either way until the window question is settled.
+
+### 7.6 What the F-program can check about a write's origin — and what it cannot
+
+Criterion (a) requires the intrusion to originate **in Gazebo**. Honestly:
+
+- **What the F-program can check**: liveness and plausibility of the stand-in —
+  the heartbeat advancing (else invalid, §5.4), and nothing more; the channels
+  are Bools, so no analogue plausibility window applies. The §5.4 check is the
+  **whole** in-CPU instrument.
+- **What it cannot check, said flatly: origin.** A `WriteBool` issued by the
+  field evaluation and one issued by a test script are **byte-identical at the
+  CPU**. No F-network can tell them apart, and none below pretends to.
+- **Where the distinction is actually made — outside the F-program, in
+  correlated records.** Gate evidence for criterion (a) carries, time-correlated
+  at every zone transition: (1) the field evaluation's own transition log on
+  the Gazebo side — a deliverable the m5-12 brief must specify (§10 open item
+  9); (2) the writer's session log, naming the source of each write (`FIELD`);
+  (3) the consumer's-view record (`InstF_Forklift_Safety`); and (4) the OPC UA
+  witness, which cannot see the written DB. A run whose zone transition appears
+  in the writer log with source `OPERATOR`, or appears in no field-evaluation
+  log, is **not criterion-(a) evidence, whatever the narration says**.
+
+### 7.7 How the zone is played — two forms, both labelled
+
+**The field form — criterion (a)'s, once m5-12 exists.** The Gazebo protective
+field evaluates an intrusion; the verdict crosses the §7.2 link; the writer
+opens `ZoneDeviceCircuitClosed`; no human acts anywhere in the chain. What is
+still true and still said: the evaluation is a **model feeding a stand-in for
+wiring**, not a safety-rated device, and it carries no claim.
+
+**The operator form — available now, and the floor-marking play.** The marked
+arena zone is a **floor marking**; no sensor watches it. The operator issues
+`zone open` at the moment the machine crosses the marking. This form exercises
+every network of §5 identically and satisfies **nothing** in criterion (a)'s
+intrusion chain — §7.6's correlated record is exactly what tells the two forms
+apart in evidence.
+
+Either way, the recording says so in the stand-in sentence that
+`TWIN-DEMO-MAP.md` §5.1 fixes word for word:
 
 > "The inputs that trip this demand are engineering stand-ins. In a simulated cell
 > there is no wiring, so the value a safety-rated device would put on a hardwired
@@ -1132,7 +1631,7 @@ that `TWIN-DEMO-MAP.md` §5.1 fixes word for word:
 > demonstrated is what the safety program does with the input, never how the input
 > arrives; the stand-in carries no category, no performance level and no claim."
 
-### 7.2 What the stimulus is, and is not
+### 7.8 What the stimulus is, and is not
 
 - **It is not the safety path** and is never called one. It stands in for
   **wiring**, not for a safety input (`TWIN-DEMO-MAP.md` §5.2).
@@ -1141,37 +1640,32 @@ that `TWIN-DEMO-MAP.md` §5.1 fixes word for word:
   OPC UA and was doubly disqualified: an engineering stand-in that is also unable
   to satisfy the M5 criterion at all, because a reaction whose input arrives over
   OPC UA cannot execute with the session down (§5.2 rule 2). **The demand's
-  formation now uses neither the bridge nor the OPC UA session.**
+  formation uses neither the bridge nor the OPC UA session** — the writer's API
+  path enters below any client interface.
+- **It is not a hand at a watch table** (ADR 0015 D1). No step of §9 modifies
+  anything, anywhere; a step that needed *Modify* would not be a T6 step.
 - **It does not make the reaction network-free.** The observable stop is produced
   by the standard program and travels to the plant over OPC UA and the bridge
   (N1). What is independent of the network is the **demand**; what is not is the
   **consequence**, and the recording distinguishes them.
-- **It never touches F-data.** No step of §9 modifies anything in
-  `InstF_Forklift_Safety`. A step that needed to would not be a T6 step.
+- **It never touches F-data.** The writer writes `SafetyInputStandIn` and
+  nothing else; `InstF_Forklift_Safety` is written only by the F-program.
+- **The S015 check adds no integrity.** Standard tags are explicitly not
+  fail-safe data (ADR 0011 F6); TIA's mechanism for standard data in a safety
+  program is **disclosure, not protection**, and §5.4 is what makes the
+  disclosure honest — it converts writer death into a demand, and it makes no
+  data fail-safe.
 - **It carries no Category, no PL, no channel count and no diagnostic coverage**
-  (N2, N3, N4).
+  (N2, N3, N4). Every design target quoted anywhere in this document — SF-01
+  and SF-07 **Category 3, PL d targets**, SF-08 **PL c target** — remains a
+  target and never an achievement (ADR 0011 D5).
 
-### 7.3 What the stimulus cannot produce
-
-**A controlled actuation shorter than 200 ms.** A hand-driven modify has no timing
-guarantee anywhere near the monitored minimum, so **AT-08 (b) stays deferred**
-exactly as `TWIN-DEMO-MAP.md` §3 has it: *"It moves into scope if, and only if,
-the F-spec's stimulus strategy provides timed injection."* **This strategy does
-not provide timed injection**, so the sub-case stays deferred and stays an
-outstanding row wherever the demonstration is recorded (R5).
-
-What would move it into scope is a timed injection facility writing
-`SafetyInputStandIn` from the engineering side with a controlled pulse width. That
-is not specified here and is not a change to this program, which must behave
-identically whether or not it exists (§10, open item 3). **The logic that rejects
-a short pulse is built and is testable the moment such a facility exists** — it is
-the test, not the program, that is missing.
-
-**Also out of reach with this stimulus:** anything requiring a second channel
-(AT-01 (c), discrepancy monitoring), and anything requiring the standard program
-in STOP (AT-01 (b), AT-07 (d)) — the latter because the twin's observable
-consequence is produced *by* the standard program, so halting it removes the
-observable instead of testing it (`TWIN-DEMO-MAP.md` §3).
+**Still out of reach with this stimulus, whatever its automation:** anything
+requiring a second channel (AT-01 (c), discrepancy monitoring — no second
+channel exists to inject into), and anything requiring the standard program in
+STOP (AT-01 (b), AT-07 (d)) — the twin's observable consequence is produced
+*by* the standard program, so halting it removes the observable instead of
+testing it (`TWIN-DEMO-MAP.md` §3). AT-08 (b) is no longer on this list: §7.5.
 
 ---
 
@@ -1180,17 +1674,20 @@ observable instead of testing it (`TWIN-DEMO-MAP.md` §3).
 One watch table, four groups, symbolic addressing only. Open it in *Monitor* mode
 beside the `Forklift M4 gate` table, which is unchanged.
 
-**Modify is used on Group 1 only.** Groups 2, 3 and 4 are read. **Never modify
-anything in Group 2 or Group 3** — those are F-data, modifying them requires
-deactivating safety mode, and a fabricated latch demonstrates nothing (§7.2).
+**No row of this table is ever modified.** Watch tables are a **reading
+instrument** in this project (ADR 0015 D1): the stimulus is the stand-in writer
+(§7), fail-safe rows could not be modified anyway with safety mode activated
+(`2206:000002`), and a fabricated latch demonstrates nothing. Groups 1–4 are
+all read, all the time.
 
-### Group 1 — the three stand-in F-inputs *(the stimulus, and the only modified rows)*
+### Group 1 — the stand-in channels *(written by the writer; read-only here)*
 
 | Tag | Format | Expected |
 |---|---|---|
-| `"SafetyInputStandIn".EStopCircuitClosed` | Bool | `FALSE` at every CPU start. `TRUE` = circuit closed, e-stop not actuated. **`FALSE` is the demand**, and covers actuation, a cut wire and a dead channel alike |
-| `"SafetyInputStandIn".ZoneDeviceCircuitClosed` | Bool | `FALSE` at every CPU start. `TRUE` = zone clear and device healthy |
-| `"SafetyInputStandIn".ResetButtonPressed` | Bool | `TRUE` only while the reset device is held. The program acts on the **falling** edge of this row, after a hold inside the monitored window |
+| `"SafetyInputStandIn".EStopCircuitClosed` | Bool | `FALSE` at every CPU start, restored by the writer's next republish. `TRUE` = circuit closed, e-stop not actuated. **`FALSE` is the demand**, and covers actuation, a cut wire and a dead channel alike |
+| `"SafetyInputStandIn".ZoneDeviceCircuitClosed` | Bool | `FALSE` at every CPU start. `TRUE` = zone clear and device healthy. Follows the field evaluation while its link is up, the operator `zone` commands otherwise (§7.2) |
+| `"SafetyInputStandIn".ResetButtonPressed` | Bool | `TRUE` only while the writer holds a commanded press. The program acts on the **falling** edge of this row, after a hold inside the monitored window |
+| `"SafetyInputStandIn".StandInHeartbeat` | Dec | **Advancing while the writer runs; frozen means the writer is dead** — and the row that says so authoritatively is Group 3's `StandInValid` |
 
 ### Group 2 — F-data: the coupling contract *(what the standard program reads)*
 
@@ -1215,7 +1712,13 @@ deactivating safety mode, and a fabricated latch demonstrates nothing (§7.2).
 | `"InstF_Forklift_Safety".ResetHoldMaxTimer.ET` | Time | Runs for **any** press |
 | `"InstF_Forklift_Safety".ResetHoldMaxTimer.PT` | Time | **Must read `T#3s`** |
 | `"InstF_Forklift_Safety".ResetRise` / `.ResetFall` | Bool | One F-cycle wide; not observable by eye |
-| `"InstF_Forklift_Safety".ResetMemory` | Bool | The device as it read in the **previous** F-cycle (§5.1 network 14). In monitor it tracks Group 1's `ResetButtonPressed` row and differs from it only in the one cycle an edge is being formed, which is why neither edge can be caught by eye. **Stuck `TRUE` with the device visibly released is network 14 not executing** — and the visible symptom of that is a reset that never fires |
+| `"InstF_Forklift_Safety".ResetMemory` | Bool | The device as it read in the **previous** F-cycle (§5.1 network 14; after the §5.4 re-point it tracks `ResetPressedValid`). In monitor it tracks Group 1's `ResetButtonPressed` row and differs from it only in the one cycle an edge is being formed, which is why neither edge can be caught by eye. **Stuck `TRUE` with the device visibly released is network 14 not executing** — and the visible symptom of that is a reset that never fires |
+| `"InstF_Forklift_Safety".StandInValid` | Bool | The S015 verdict (§5.4). `FALSE` at every start **until the writer's heartbeat has been seen to change** — the boot polarity, not a defect; `TRUE` while the writer lives; `FALSE` within `STANDIN_STALE_MAX` of the writer dying. **`FALSE` with Group 1 showing closed circuits is the whole diagnosis of a dead writer**: the logic is refusing to believe a frozen world |
+| `"InstF_Forklift_Safety".HeartbeatSeen` | Bool | `FALSE` at start; `TRUE` once the stand-in has ever been seen alive; never falls while the F-runtime group runs |
+| `"InstF_Forklift_Safety".StandInStaleTimer.ET` | Time | Near `0` while the writer lives (re-zeroed every cycle a heartbeat advance is seen); climbing means the writer has stopped |
+| `"InstF_Forklift_Safety".StandInStaleTimer.PT` | Time | **Must read `T#1s`.** An interface default governs nothing once the instance DB exists (LESSONS 2026-07-28) |
+| `"InstF_Forklift_Safety".EStopClosedValid` / `.ZoneClosedValid` / `.ResetPressedValid` | Bool | The channels **as the logic reads them** (§5.4 V5–V7). They differ from Group 1's raw rows exactly when `StandInValid` is `FALSE` — and that difference on screen is the S015 check doing its work |
+| `"InstF_Forklift_Safety".HeartbeatMemory` | Dec | The heartbeat one F-cycle behind (§5.4 M2). Frozen while Group 1's heartbeat advances is M2 not executing — the visible symptom of which is `StandInValid` dying with a live writer |
 
 ### Group 4 — the process consequence *(the standard side, lands with its own delta)*
 
@@ -1243,13 +1746,19 @@ exists. They read `FALSE`. That is correct: they are the **process** latch and t
 
 ## 9. T6 — the owner-executable demonstration procedure
 
-**Preconditions.** The F-program of §5 in RUN with safety mode **activated** and
-the F-collective signature recorded (§4.2 step 15); the `Forklift F gate` watch
-table of §8 open in *Monitor* mode; the `Forklift M4 gate` watch table open beside
-it. For every step whose *needs* column says **std**, additionally: the standard
-program with its permissive delta applied, the forklift world running, the bridge
-running with the forklift slots configured, and the commissioning HMI connected —
-i.e. everything the M4 procedure needs, plus the delta.
+**Preconditions.** The F-program of §5 **including the §5.4 delta** in RUN with
+safety mode **activated** and the F-collective signature recorded (§4.5 step
+14); §2 F3 re-confirmed on `safe_amr` (§4.5 step 1); the **stand-in writer of
+§7 available on the Windows host** with a fresh session log per start; the
+`Forklift F gate` watch table of §8 open in *Monitor* mode; the `Forklift M4
+gate` watch table open beside it. **Every stimulus below is a writer action —
+an operator command at the writer's console (§7.2), or the field evaluation
+itself — and no step touches a watch table for anything but reading**
+(ADR 0015 D1). For every step whose *needs* column says **std**, additionally:
+the standard program with its permissive delta applied, the forklift world
+running, the bridge running with the forklift slots configured, and the
+commissioning HMI connected — i.e. everything the M4 procedure needs, plus the
+delta.
 
 > **This section runs only when the F-program exists.** If the F-layer is not
 > ready, every item is dropped and the M4 teleop demonstration stands alone with
@@ -1277,52 +1786,60 @@ i.e. everything the M4 procedure needs, plus the delta.
 
 | Step | Needs | Action | Pass | AT |
 |---|---|---|---|---|
-| **T6.0.1** | F | CPU started. Read Group 2 **before touching anything** | `EStopDemand` `TRUE`, `ZoneStopDemand` `TRUE`, `SafetyResetRequired` `TRUE`, `SafetyResetFault` `FALSE`. `CauseGone` `FALSE`. **The machine starts stopped**, because both stand-in circuits start open (§3.1) | — |
-| **T6.0.2** | F | *Modify* both circuits to `TRUE` | `CauseGone` → `TRUE`. **Both demands stay latched** — closing the circuits restores the *permission*, never the *motion* | AT-01 (d) shape |
-| **T6.0.3** | F | Press and release the reset device stand-in, holding it about 1 s | `ResetPressArmed` `TRUE` while held, `ResetHoldValid` `TRUE` after 200 ms, then on release both demands clear and `SafetyResetRequired` → `FALSE` | **AT-08 (d)** |
-| **T6.0.4** | std | Enable teleop and drive | The machine drives normally. **This is the baseline**: with no demand standing, the safety layer is invisible in the process behaviour | — |
-| **T6.1.1** | std | **Driving** at a steady traction demand, *Modify* `EStopCircuitClosed` → `FALSE` | In the same F-cycle: `EStopDemand` → `TRUE`, `SafetyResetRequired` → `TRUE`. In the standard program's same call: `ForkliftTeleopActive` → `FALSE` and **all three setpoints → `0.0`**; the model stops in Gazebo. **Record that `HmiTractionRequest` is still standing at its driving value** — the demand overrides a live command | **AT-01 (a)**, logic and ordering only. No output is de-energized and **the 100 ms figure is not measured** (N1) |
-| **T6.1.2** | F | *Modify* `EStopCircuitClosed` back to `TRUE` — the button released, no reset | `EStopDemand` stays **`TRUE`**, `SafetyResetRequired` stays `TRUE`, setpoints stay `0.0`. `CauseGone` → `TRUE`. **The latch survives its cause** | **AT-01 (d)** |
-| **T6.2.1** | F | With the e-stop circuit **still open** (re-open it), press the reset device and **hold it — do not release until T6.2.4** | `ResetPressArmed` reads **`FALSE`** while the device is visibly held. `ResetHoldMinTimer.ET` stays `0`. The press was never armed, because `CauseGone` was false at its rising edge | **AT-08 (c)** |
-| **T6.2.2** | F | **Close the e-stop circuit with the reset still held** | `CauseGone` → `TRUE` while `ResetButtonPressed` still reads `TRUE`. `EStopDemand` stays **`TRUE`**. **Two properties in one observation**: the cause clearing releases no latch, and the held device supplies **no edge** — the edge it did produce happened while the cause was still standing | **AT-08 (c)** |
-| **T6.2.3** | F | Keep holding for a further 10 s | `ResetHoldMaxTimer.ET` reaches `T#3s` and `SafetyResetFault` → `TRUE`. **`ResetHoldValid` stays `FALSE` and was never `TRUE` in this press** — it was never armed, so there is nothing here for the upper bound to clear; that transition is only visible in T6.6-style holds that *were* armed. The latch **never** clears, for as long as it is held, and no elapsed time makes an edge appear | **AT-08 (a)**, both halves |
-| **T6.2.4** | F | Release the reset device | `SafetyResetFault` → `FALSE`. `EStopDemand` still **`TRUE`**: the release produced a falling edge, but `ResetHoldValid` was `FALSE`, so no pulse formed. **A press that began under a standing demand clears nothing, whenever the cause goes away** | **AT-08 (a)**, **AT-08 (c)** |
-| **T6.3.1** | F | Confirm `ResetButtonPressed` reads `FALSE`, then press again and hold about 1 s with the circuits closed | `ResetPressArmed` → `TRUE` this time; `ResetHoldValid` → `TRUE` after 200 ms | **AT-08 (d)** |
-| **T6.3.2** | F | Release | `EStopDemand` → `FALSE`, `SafetyResetRequired` → `FALSE`, on the **falling** edge | **AT-08 (d)** |
+| **T6.0.1** | F | CPU in RUN, **writer not yet started**. Read Groups 1–3 **before touching anything** | `EStopDemand` `TRUE`, `ZoneStopDemand` `TRUE`, `SafetyResetRequired` `TRUE`, `SafetyResetFault` `FALSE`, `CauseGone` `FALSE` — and `StandInValid` `FALSE`, `HeartbeatSeen` `FALSE`. **The machine starts stopped and unbelieving**: both stand-in circuits start open (§3.1) and the stand-in itself is not yet trusted (§5.4 boot polarity) | — |
+| **T6.0.2** | F | **Start the stand-in writer** (fresh session log, §7.2) | Group 1's heartbeat row advances; `HeartbeatSeen` → `TRUE` and `StandInValid` → `TRUE` within about one writer cycle plus one F-cycle. **Both demands stay latched** — validity restores *belief*, never motion | — |
+| **T6.0.3** | F | Writer commands `estop close`, then `zone close` | `CauseGone` → `TRUE`. **Both demands stay latched** — closing the circuits restores the *permission*, never the *motion* | AT-01 (d) shape |
+| **T6.0.4** | F | `reset press`, hold about 1 s, `reset release` | `ResetPressArmed` `TRUE` while held, `ResetHoldValid` `TRUE` after 200 ms, then on release both demands clear and `SafetyResetRequired` → `FALSE` | **AT-08 (d)** |
+| **T6.0.5** | std | Enable teleop and drive | The machine drives normally. **This is the baseline**: with no demand standing, the safety layer is invisible in the process behaviour | — |
+| **T6.1.1** | std | **Driving** at a steady traction demand, writer command `estop open` | In the F-cycle that samples the open circuit: `EStopDemand` → `TRUE`, `SafetyResetRequired` → `TRUE`. In the standard program's same call: `ForkliftTeleopActive` → `FALSE` and **all three setpoints → `0.0`**; the model stops in Gazebo. **Record that `HmiTractionRequest` is still standing at its driving value** — the demand overrides a live command | **AT-01 (a)**, logic and ordering only. No output is de-energized and **the 100 ms figure is not measured** (N1) |
+| **T6.1.2** | F | `estop close` — the button released, no reset | `EStopDemand` stays **`TRUE`**, `SafetyResetRequired` stays `TRUE`, setpoints stay `0.0`. `CauseGone` → `TRUE`. **The latch survives its cause** | **AT-01 (d)** |
+| **T6.2.1** | F | `estop open` again; then `reset press` and **hold — no `reset release` until T6.2.4** | `ResetPressArmed` reads **`FALSE`** while the device is visibly held. `ResetHoldMinTimer.ET` stays `0`. The press was never armed, because `CauseGone` was false at its rising edge | **AT-08 (c)** |
+| **T6.2.2** | F | **With the press still held**, `estop close` | `CauseGone` → `TRUE` while `ResetButtonPressed` still reads `TRUE`. `EStopDemand` stays **`TRUE`**. **Two properties in one observation**: the cause clearing releases no latch, and the held device supplies **no edge** — the edge it did produce happened while the cause was still standing | **AT-08 (c)** |
+| **T6.2.3** | F | Keep it held a further 10 s — no command | `ResetHoldMaxTimer.ET` reaches `T#3s` and `SafetyResetFault` → `TRUE`. **`ResetHoldValid` stays `FALSE` and was never `TRUE` in this press** — it was never armed, so there is nothing here for the upper bound to clear; that transition is only visible in holds that *were* armed. The latch **never** clears, for as long as it is held, and no elapsed time makes an edge appear | **AT-08 (a)**, both halves |
+| **T6.2.4** | F | `reset release` | `SafetyResetFault` → `FALSE`. `EStopDemand` still **`TRUE`**: the release produced a falling edge, but `ResetHoldValid` was `FALSE`, so no pulse formed. **A press that began under a standing demand clears nothing, whenever the cause goes away** | **AT-08 (a)**, **AT-08 (c)** |
+| **T6.3.1** | F | Confirm Group 1's `ResetButtonPressed` reads `FALSE`, then `reset press` and hold about 1 s, circuits closed | `ResetPressArmed` → `TRUE` this time; `ResetHoldValid` → `TRUE` after 200 ms | **AT-08 (d)** |
+| **T6.3.2** | F | `reset release` | `EStopDemand` → `FALSE`, `SafetyResetRequired` → `FALSE`, on the **falling** edge | **AT-08 (d)** |
 | **T6.3.3** | std | Observe the machine and the setpoints, touching nothing, for 30 s | **Nothing moves.** All three setpoints stay `0.0` and `ForkliftTeleopActive` stays `FALSE`, even if the enable has been held throughout — a level that never fell produces no edge. **"Nothing energizes" is the load-bearing observation** | **AT-08 (d)** |
 | **T6.3.4** | std | Release the enable, confirm it reads `FALSE`, assert it again | Teleop returns on that **fresh** edge and the machine is driveable. **Reset and enable are two separate, deliberate actions** | **AT-08 (d)** |
-| **T6.3.5** | F | **Re-trip under an armed hold.** With no demand standing, press the reset device and hold it. After about 1 s, *Modify* `EStopCircuitClosed` → `FALSE` and back to `TRUE`, **without releasing the reset device**. Then release it | `EStopDemand` latches on the opening and **is still latched after the release**. While the device is still held, `ResetPressArmed` and `ResetHoldValid` both read **`FALSE`** — the demand that appeared during the hold disarmed the press, and it cannot re-arm without a fresh rising edge. **An acknowledgement covers only the events that had already happened when it began.** Clear it with a fresh press | **AT-08 (c)** |
-| **T6.4.1** | std | Drive the forklift across the floor toward the marked zone | Nothing changes as it approaches. **No sensor watches the marking** (§7.1) | — |
-| **T6.4.2** | std | At the moment the machine crosses the marking, *Modify* `ZoneDeviceCircuitClosed` → `FALSE` | In the same F-cycle: `ZoneStopDemand` → `TRUE`, `SafetyResetRequired` → `TRUE`; standard side: `ForkliftTeleopActive` → `FALSE`, **all three setpoints → `0.0`**, the model stops. **`EStopDemand` stays `FALSE`** — the watch table names *which* demand stands | **AT-07 (a)**, logic and ordering only. No ramp, no power removal, **no stop category demonstrated**, no timing claimed |
-| **T6.4.3** | F | *Modify* `ZoneDeviceCircuitClosed` back to `TRUE` — reversing out of the zone | `ZoneStopDemand` stays **`TRUE`**, setpoints stay `0.0`. **No restart without a monitored reset** | **AT-07 (b)** |
+| **T6.3.5** | F | **Re-trip under an armed hold.** With no demand standing, `reset press` and hold. After about 1 s, `estop open` then `estop close`, **without releasing the press**. Then `reset release` | `EStopDemand` latches on the opening and **is still latched after the release**. While the press is still held, `ResetPressArmed` and `ResetHoldValid` both read **`FALSE`** — the demand that appeared during the hold disarmed the press, and it cannot re-arm without a fresh rising edge. **An acknowledgement covers only the events that had already happened when it began.** Clear it with a fresh press | **AT-08 (c)** |
+| **T6.4.1** | std | Drive the forklift across the floor toward the marked zone | Nothing changes as it approaches. Operator form: **no sensor watches the marking** (§7.7). Field form: the protective field is evaluating and nothing opens until an intrusion | — |
+| **T6.4.2** | std | **Operator form:** at the moment the machine crosses the marking, `zone open`. **Field form** (criterion (a)'s chain; needs m5-12 and the §7.2 link): drive into the protective field — **no command is issued; the evaluation opens the channel** | In the F-cycle that samples it: `ZoneStopDemand` → `TRUE`, `SafetyResetRequired` → `TRUE`; standard side: `ForkliftTeleopActive` → `FALSE`, **all three setpoints → `0.0`**, the model stops. **`EStopDemand` stays `FALSE`** — the watch table names *which* demand stands. **Gate evidence for criterion (a) uses the field form with §7.6's correlated record**; the operator form is labelled as such and satisfies nothing in the intrusion chain | **AT-07 (a)**, logic and ordering only. No ramp, no power removal, **no stop category demonstrated**, no timing claimed |
+| **T6.4.3** | F | Reverse out of the zone. Operator form: `zone close` as it clears the marking; field form: the evaluation closes the channel | `ZoneStopDemand` stays **`TRUE`**, setpoints stay `0.0`. **No restart without a monitored reset** | **AT-07 (b)** |
 | **T6.4.4** | std | With the demand standing, release the enable and assert it again — a **fresh** enable edge | **Refused.** `ForkliftTeleopActive` stays `FALSE` and every setpoint stays `0.0`. The inhibiting duty, and the half most easily left untested | **AT-07 (c)** |
-| **T6.4.5** | F | Monitored reset: press ~1 s, release | `ZoneStopDemand` → `FALSE`, `SafetyResetRequired` → `FALSE`. **Nothing moves** | **AT-08 (d)** |
+| **T6.4.5** | F | Monitored reset: `reset press` about 1 s, `reset release` | `ZoneStopDemand` → `FALSE`, `SafetyResetRequired` → `FALSE`. **Nothing moves** | **AT-08 (d)** |
 | **T6.4.6** | std | Release the enable, assert it again | Driveable. **No auto-resume at any point in T6.1–T6.4** | — |
-| **T6.5.1** | F | Open **both** circuits, then close only the zone circuit, then attempt a valid reset | Refused, and the watch table says exactly why: `CauseGone` `FALSE` because the e-stop circuit is still open, so `ResetPressArmed` reads `FALSE` while the device is held and `ResetHoldMinTimer.ET` stays `0`. Both latches hold. **One reset clears every latch, and only when the whole live world is clear** (§5.1 network 1) | **AT-08 (c)** |
-| **T6.5.2** | F | Close the e-stop circuit too, then a valid reset | Both demands clear together on one pulse | **AT-08 (d)** |
-| **T6.6.1** | F | **Power-up stuck device.** With the reset device *Modified* to `TRUE`, restart the CPU and let the F-runtime group start with it held | `ResetSeenOpen` **`FALSE`**, `SafetyResetFault` **`TRUE`** from the first F-cycle, both demands latched. Close both circuits: `CauseGone` `TRUE`, and **the held device still clears nothing** | **AT-08 (a)**, second half |
-| **T6.6.2** | F | Release the device | `ResetSeenOpen` → `TRUE`, `SafetyResetFault` → `FALSE`. **Nothing clears on that release** — the press was never armed | **AT-08 (a)** |
-| **T6.6.3** | F | Press again, hold ~1 s, release | Both demands clear. **The rejection lasted exactly as long as the stuck condition** | **AT-08 (d)** |
+| **T6.5.1** | F | `estop open` and `zone open`; then `zone close` only; then attempt a valid reset (`reset press` about 1 s, `reset release`) | Refused, and the watch table says exactly why: `CauseGone` `FALSE` because the e-stop circuit is still open, so `ResetPressArmed` reads `FALSE` while the press is held and `ResetHoldMinTimer.ET` stays `0`. Both latches hold. **One reset clears every latch, and only when the whole live world is clear** (§5.1 network 1) | **AT-08 (c)** |
+| **T6.5.2** | F | `estop close` too, then a valid reset | Both demands clear together on one pulse | **AT-08 (d)** |
+| **T6.6.1** | F | **Power-up stuck device.** `reset press` and leave it held; **restart the CPU with the writer left running** | `ResetSeenOpen` **`FALSE`**, `SafetyResetFault` **`TRUE`** from the first believed F-cycle, both demands latched. Then `estop close` and `zone close`: `CauseGone` `TRUE`, and **the held device still clears nothing**. *Recorded caveat:* the writer republishes every 50 ms against a 100 ms F-OB, so the first valid sample is expected to read the held press; **if `ResetSeenOpen` reads `TRUE` instead**, the first believed cycle sampled the DB's start values before the writer's first post-RUN republish — a race of the stand-in, not a program defect. Record which occurred, `reset release`, and re-run the step | **AT-08 (a)**, second half |
+| **T6.6.2** | F | `reset release` | `ResetSeenOpen` → `TRUE`, `SafetyResetFault` → `FALSE`. **Nothing clears on that release** — the press was never armed | **AT-08 (a)** |
+| **T6.6.3** | F | `reset press` about 1 s, `reset release` | Both demands clear. **The rejection lasted exactly as long as the stuck condition** | **AT-08 (d)** |
+| **T6.7.1** | F | **Writer death.** With no demand standing (straight after T6.6.3) and the machine idle, **kill the writer process** | Within `STANDIN_STALE_MAX` plus one F-cycle: `StandInValid` → `FALSE`, all three validated channels fall, **both demands latch**, `SafetyResetRequired` → `TRUE`. **§7.3 row 1 observed: a dead stand-in is a demand, never a silently clear world** | S015 check (§5.4); no AT — the SRS contains no stand-in |
+| **T6.7.2** | F | Restart the writer (fresh session log); `estop close`, `zone close`; then a valid reset | `StandInValid` returns within one writer cycle plus one F-cycle; **the demands stay latched across the writer's death and rebirth** and clear only on the reset. The latch outlived its transport | S015 check; AT-08 (d) shape |
 
-**Pass: all 26 steps of the table above**, each recorded against the F-collective
-signature of the build it was run on.
+**Pass: all 29 steps of the table above**, each recorded against the F-collective
+signature of the build it was run on. The count is the number of rows in this
+table at writing time and is re-derived whenever the table changes; the
+denominator of a run that already happened never grows (LESSONS 2026-07-28).
 
 **Evidence.** Watch-table screenshots showing Group 1 beside Group 2 at each
 transition; for the **std** steps, the same screenshot beside Group 4 — the
-operator asking and the PLC refusing, on one screen; and the recorded segment,
-which speaks the three statements of `TWIN-DEMO-MAP.md` §5.1 as written.
+operator asking and the PLC refusing, on one screen; **the writer's session log
+for every run** (§7.2), and for any field-form step the §7.6 correlated record;
+and the recorded segment, which speaks the three statements of
+`TWIN-DEMO-MAP.md` §5.1 as written. Every T6 / AT-08 record carries one line
+naming the open `RESET_HOLD_MIN` window deviation (§4.3).
 
 ### 9.2 Outstanding rows — deferred sub-cases
 
 **A deferred sub-case is never absorbed into a pass count** (R5). These rows stay
-outstanding wherever this demonstration is recorded, alongside the 26 above:
+outstanding wherever this demonstration is recorded, alongside the 29 above:
 
 | Sub-case | Why it is not in the table | Where it lands |
 |---|---|---|
 | **AT-01 (b)** — repeat (a) with the standard program in STOP | The twin's observable consequence is produced *by* the standard program, so halting it removes the observable instead of testing it | M5 proper, on real F-I/O outputs |
 | **AT-01 (c)** — open one of two channels → trip **plus discrepancy fault** | One stand-in channel, no second channel, no discrepancy monitoring. **SC-03 is not exercised, so no Category is demonstrated** (N3) | M5 proper |
 | **AT-07 (d)** — standard program in STOP, repeat (a) | AT-01 (b)'s reason | M5 proper |
-| **AT-08 (b)** — pulse shorter than 0.2 s → rejected | A hand-driven modify has no sub-0.2 s timing guarantee (§7.3). **The logic is built and untested**, not absent | Moves into scope if a timed injection facility exists (§10, open item 3) |
+| **AT-08 (b)** — pulse shorter than 0.2 s → rejected | **The timed stimulus now exists** — `reset pulse <ms>` (§7.5) — so the `TWIN-DEMO-MAP.md` §3 condition ("if, and only if, the F-spec's stimulus strategy provides timed injection") is met on the stimulus side. **The logic is built and untested**, not absent. What is pending is the **scope ruling, which is safety-spec's**, taken together with the §4.3 window deviation that shadows any sub-window test | Safety-spec ruling (§10, open item 3); stays outstanding until then |
 
 ### 9.3 What the recording says
 
@@ -1356,10 +1873,14 @@ function"*, never *"protective stop"* for the lidar latch.
 
 | # | Item | Status |
 |---|---|---|
-| 1 | **The F-input channel ruling of §2.1 is a design assessment, not a tool read-back.** No usable PROFIsafe F-DI is assumed to exist on this PLCSIM Advanced instance | Owner, at the §2 checkpoint. If a usable channel is established, **§7 is the only section that changes** and three pins move at §4.2 step 8. The AT-07 and AT-01 (c) consequences (§2.1) are re-read at the same time |
-| 2 | **The F-runtime group's monitoring time and the F-OB's cycle time are not stated here**, and `RESET_HOLD_MIN` must span at least five F-runtime-group cycles (§4.3) | Owner, at §4.2 step 15: read both back, record them, and record which of §4.3's three outcomes applies. If outcome 3 is taken, `RESET_HOLD_MIN` is no longer the SRS's window and that is a **recorded deviation**, not a tuning |
-| 3 | **AT-08 (b) is deferred for want of timed injection** (§7.3). The logic that rejects a sub-200 ms actuation is built and untestable with a hand-driven modify | A timed injection facility writing `SafetyInputStandIn` from the engineering side would move it into scope. **Not a change to this program**, which must behave identically whether or not it exists. This is the F-side twin of the fault-injection facility `plc/forklift/SPEC.md` §12 item 6 already requests |
+| 1 | **CLOSED, confirmed by observation** (m5-03, 2026-08-04): the configured F-DI stays passivated indefinitely on this installation with clean diagnostics, and no usable PROFIsafe channel exists. ADR 0015 D1 fixes the stand-in as the M5 input path | Closed. The §2.1 "if a usable channel exists" branch survives for a future installation only |
+| 2 | **The `RESET_HOLD_MIN` window deviation is OPEN and is safety-spec's.** Read back 2026-08-04: F-OB cycle 100 ms, so five cycles are 500 ms against the SRS's 200 ms minimum — the §4.3 sampling rule is violated in the build as it stands | **Safety-spec brief**, with AT-08 re-read beside it: lower the F-OB cycle, raise the window off the SRS number, or relax the five-cycle rule. **Deliberately not tuned here.** Until ruled, both constants stay as the SRS states them and every T6 / AT-08 record names the deviation (§4.3, §9.1) |
+| 3 | **AT-08 (b): the timed stimulus exists** (`reset pulse <ms>`, §7.5); the scope ruling is pending | **Safety-spec ruling**, taken together with open item 2 — a 200 ms window sampled at 100 ms shadows any sub-window rejection test. The program behaves identically either way |
 | 4 | **Closed by `opcua-nodes.md` §11** (commit `2d2d497`, 2026-07-29): `SafetyResetFault` **is** a mirror node; the twin's four mirrors are `DemoCell/Forklift/Safety/` in DB `ForkliftSafetyMirror`, *Accessible* ✔ and *Writable* **✘** on every member, with start values `TRUE`, `TRUE`, `TRUE`, `FALSE`; the leaf names are the F-side tag names unchanged (§6.4) | **No network, tag, constant, watch-table row or T6 step moved**, and §8 Group 2 keeps all four rows because it reads F-data directly. What remains open elsewhere: whether the fault flag also gets a **lamp** (`hmi/`, §11.8 item 5), and the standard program's copy statements (`plc/forklift/SPEC.md`, §11.8 item 7) |
 | 5 | **`plc/README.md` has no `forklift-safety/SPEC.md` row**, and its boundary statement names only the two process-stop cells | Requested: one row, and one sentence stating that this cell's F-program implements the **logic** of SF-01, SF-07 as a pattern and SF-08 with no achieved PL, no Category and stand-in inputs. Outside this document's deliverable |
 | 6 | **Every tool-derived value in §2, §4 and §8 is a design value until it is read back**: the licence state, the safety mode, the F-collective signature, the monitoring and cycle times, the compile warnings, the per-DB accessibility as an independent client sees it, and both timer `PT` values in force | Owner, at §4.2 steps 10, 12, 13, 14 and 15, recorded with their date, in the manner phase 0 recorded the M3 node set (`opcua-nodes.md` §9.10). **No gate criterion may rest on one before then** (ADR 0006; LESSONS 2026-07-27) |
 | 7 | **The permissive term is runtime-inert but not compile-inert** (§6.5): once the standard program reads `InstF_Forklift_Safety`, deleting the F-program breaks the standard build | Stated rather than solved. Abandoning the F-layer after the standard-side delta has landed costs the removal of one term |
+| 8 | **The stand-in writer's implementation home has no owner** (judge review F6): the process crosses the Windows host, the WSL field evaluation and the plc-specified contract, and no roster agent's write scope obviously holds it | **Owner ruling requested.** §7.1–§7.3 are the contract any implementation satisfies; the m5-03b scripts in `plc/forklift-safety/evidence/` are its proven kernel. Until ruled, no implementation is written |
+| 9 | **The field evaluation must log its verdict transitions wall-clock stamped** — §7.6's correlated record is the only instrument that distinguishes a field-originated write from a scripted one, and its first log is the evaluation's own | Requested of the **m5-12 brief** (vehicle side). Without it, no run can be criterion-(a) evidence, whatever the narration says |
+| 10 | **`sim/scenarios/forklift_commissioning.md` §13 still stimulates by watch-table *Modify*** — its T6 mirror steps (T6.0.2–T6.6.3 there, plus the §13 preamble naming the Modify mechanism) predate ADR 0015 | Requested of the **sim agent**: mirror the rewritten §9.1 — writer commands and the two zone forms — and sweep that document **by subject** (*Modify*, stand-in, `SafetyInputStandIn`), not by the row list named here, which is a starting point and not an enumeration (LESSONS 2026-07-29) |
+| 11 | **The writer's path appears in no topology diagram** (judge review F6): field evaluation (WSL) → TCP → writer (Windows) → API → CPU is drawn only in §1.1 here | Requested of **arch-docs**, with the pending bridge/ topology item it parallels: an invariant that names a diagram can only bind what the diagram contains (LESSONS 2026-07-30) |
