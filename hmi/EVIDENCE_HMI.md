@@ -1416,8 +1416,15 @@ here was derived by arithmetic while writing.
 | HMI configuration | `hmi/config-v2a-double.yaml`, HTTP `127.0.0.1:8094` |
 | Write cycle / read poll | 100 ms / 200 ms, as that configuration names them |
 | Adopt delay in the double | **1.2 s per stage**, `--adopt-delay 1.2` |
-| Run log | `hmi/evidence/capture-v2a-2026-08-05-run2.log` |
+| Run log | `hmi/evidence/capture-v2a-2026-08-05-run3.log` — the m5-29b re-capture, after the finding-1 fix. The m5-28 run it replaces is `…-run2.log`, kept beside it |
 | Manifest written as the run landed | `hmi/evidence/screenshots/MANIFEST-2026-08-05.txt` |
+
+**Two more logs belong to this section and are read with it.**
+`hmi/evidence/capture-v2a-2026-08-05-f1-defect-before-fix.log` is the same
+second-tab pass run against the **superseded** page, and it is the reproduction
+of m5-29 finding 1 (§I.7). `hmi/evidence/f2-connect-failure-2026-08-05.log` is
+the connect refusal `hmi/config.yaml` produces against a server with no §12
+nodes (§I.8).
 
 **No PLC was contacted.** Neither the commissioned S7-1500 nor PLCSIM Advanced
 took part: the endpoint above is loopback, and the running CPU carries no
@@ -1481,16 +1488,24 @@ All files are `hmi/evidence/screenshots/v2a-NN-…-2026-08-05.png`.
 | 21 | `safety-lamps-f-demand-active` | an F-layer e-stop demand asserted — **the only red element on the page** — with the PROCESS STOP beside it still amber |
 | 22 | `safety-lamps-group-absent` | the server does not carry `Forklift/Safety/` at all: the zone greys with *not present on this server*, the session stays CONNECTED, no lamp is substituted with `FALSE` |
 | 23 | `page-beacon-drop-standing-controls-held` | after this page went quiet and returned: the five teleop requests were held at rest and the enable dropped, while **the process stop and the mode selector kept their operator-set values** |
+| 24 | `second-tab-adopts-current-state` | **a SECOND TAB**, opened while the operator was already working in the first: it renders the stop RELEASED and TELEOP selected — the values the backend holds *now* — rather than the §12.8 boot values a page asserting its own defaults would show |
+| 25 | `second-tab-backgrounded-stop-stays-engaged` | **the m5-29 finding-1 path walked.** The operator engaged the stop in this tab; the other tab, holding the older position, was then backgrounded with its `visibilitychange` and `blur` handlers fired. The engaged stop is **still engaged**, on the wire and on this screen, and the selector is still TELEOP |
 
-Brief m5-28 §3 asked for a minimum of ten states. The set above is 24, and the
+Images 24 and 25 were added by m5-29b. Every image in the table was re-captured
+in that run, so no row describes a page that no longer exists: the mode chip's
+in-flight tone is now neutral rather than amber (§5.2), and zone A carries the
+§8 *not reaching the PLC* caption under the selector when the link is down.
+
+Brief m5-28 §3 asked for a minimum of ten states. The set above is 26, and the
 states it adds beyond that list are the ones the design specifies and the list
 did not name: the pre-link cold start (00), the release that does **not** clear
 the latch (02), the reset that energizes nothing (04), **both halves** of the
 adopt window separately (05, 06), the settled state that proves the in-flight
 rendering *clears* (07), the diagnostics drawer (12), the two different
 never-resolving disagreements (13, 14), the PLC declaring one (15), the session
-and backend halves of "down" apart from the link half (18, 19), and the
-standing-control behaviour under a page drop (23).
+and backend halves of "down" apart from the link half (18, 19), the
+standing-control behaviour under a page drop (23), and the two-page states a
+one-page instrument could not reach at all (24, 25).
 
 ## I.4 The adopt window, exercised rather than asserted
 
@@ -1531,9 +1546,10 @@ and to the TIA build.
 
 The capture script does not only photograph. It reads the rendered DOM at each
 step and **asserts**, so a silent rendering regression cannot pass as a
-captured screenshot. Run of 2026-08-05: **41 checks, 41 passed, 0 failed**
-(counted by `CHECK PASS` / `CHECK FAIL` lines in the run log). The
-load-bearing ones:
+captured screenshot. Run of 2026-08-05 (`…-run3.log`, after the m5-29b fixes):
+**51 checks, 51 passed, 0 failed** (counted by `CHECK PASS` / `CHECK FAIL`
+lines in the run log; the m5-28 run in `…-run2.log` carried 41 of these, and
+m5-29b adds the other 10 — eight in the second-tab pass and two on the §8 selector caption). The load-bearing ones:
 
 | Check | What would have failed it |
 |---|---|
@@ -1553,6 +1569,10 @@ load-bearing ones:
 | the backend gone: the page renders unknown, not its last look | a frozen display that looks live |
 | H6: the five deadman requests went to rest; the heartbeat kept running | the page loss buying the PLC's heavier reaction |
 | PS-B / §5.1: the two standing controls held their operator-set values | a page hiccup inventing an operator act in either direction |
+| F1(a): a second page renders the backend's standing values, not the boot values | a page asserting its own defaults over an operator's positions |
+| F1(b): backgrounding a second page changed neither standing value on the wire | **the m5-29 finding-1 defect** |
+| F1(c): every write cycle after that background still carried both values | the same, proved per cycle rather than at two samples |
+| §8: the selector says *not reaching the PLC* link-down, and does not say it link-up | a caption the design requires being absent, or stuck on |
 
 ## I.6 What is deliberately not shown here
 
@@ -1565,3 +1585,86 @@ load-bearing ones:
 | The page under a real operator's hand | a headless Chrome driven by a script is not an operator. No touch device, screen size, glove or lighting condition was evaluated |
 | The live map, obstacles or pose | v2b (m5-13, ADR 0011 D4). v2a designs and builds none of it |
 | Any measured latency or timing figure | this section photographs states. The write-cycle and round-trip figures of §E were not re-measured here, and no number in §I is a performance claim |
+
+## I.7 The second tab — m5-29 finding 1, reproduced and then walked again
+
+The m5-28 page rendered its two STANDING controls from a **local copy adopted
+once** and re-asserted that copy in **every** post: the 50 ms dirty loop, every
+deadman post, `blur`, `pagehide` and `visibilitychange`. One tab and one reload
+are safe and the m5-28 evidence for them is genuine. A **second tab** is not:
+it holds the position the operator has since changed, and backgrounding it
+posts that stale position.
+
+An operator opening a second tab is not doing anything unusual, so this was
+**reproduced before it was fixed** rather than argued about. The instrument
+gained a two-page pass (`capture_v2a_screens.mjs`, `passSecondTab`) that opens a
+real second browser target on the same backend, has the operator engage the stop
+in the first, and then backgrounds the second — firing the page's own
+`visibilitychange` and `blur` handlers into it.
+
+**The defect, from `capture-v2a-2026-08-05-f1-defect-before-fix.log`** (the same
+pass against the superseded page; DOM quotes unedited):
+
+```
+B2 the other tab follows the backend    pstop.label "PROCESS STOP"
+                                        requests.pstop "true"
+A after the other tab was backgrounded  pstop.label "PROCESS STOP — ENGAGED"
+                                        requests.pstop "false"
+CHECK FAIL  F1(b)   HmiProcessStopRequest=false HmiDriveModeRequest=1
+CHECK FAIL  F1(c)   cycles=20 stop-flips=20 mode-flips=0
+```
+
+Read the two middle lines together: **the operator's own screen says ENGAGED
+while the wire says released.** The stop was released by a browser event, and
+every one of the 20 write cycles that followed carried the release
+(`hmi-cycles-2026-08-05-secondtab-20260805T115515Z-pid12676.csv`, the backend's
+own per-cycle log). Four checks failed. The mode selector has the identical
+mechanism, where a stale post is a fresh `#modeSelectRise` at the PLC — X3, or
+X2, which is the affirmative autonomous enable.
+
+**The same pass after the fix**, from `…-run3.log`:
+
+```
+B2 the other tab follows the backend    pstop.label "PROCESS STOP — ENGAGED"
+A after the other tab was backgrounded  pstop.label "PROCESS STOP — ENGAGED"
+                                        requests.pstop "true"
+CHECK PASS  F1(b)   ...                 CHECK PASS  F1(c)  cycles=23
+                                        stop-flips=0 mode-flips=0
+```
+
+The second tab now **follows the backend** — it renders ENGAGED because the
+backend holds ENGAGED — and backgrounding it changes nothing on the wire, in
+any of the 23 write cycles that follow
+(`hmi-cycles-2026-08-05-secondtab-20260805T120629Z-pid656.csv`). The deadman
+half is untouched: `F1(b2)` confirms the backgrounded page's five teleop
+requests still went to rest, which is H6 doing exactly its job.
+
+What changed, in three lines: the page renders both standing controls from
+`/state` on **every** poll and holds no copy; a standing key is sent only in the
+post triggered by the click that changed it, so no periodic, deadman, blur or
+beacon post carries one and a missing key means UNCHANGED; and `do_POST`
+republishes the standing section, so `/state` cannot serve a stale position while
+the OPC UA session is down. The rendered position catches up on the next 200 ms
+poll after a click, and there is deliberately no optimistic local override —
+a local override is what the defect was made of.
+
+## I.8 The designed connect failure, made legible
+
+`hmi/config.yaml` is **meant** to fail at connect against today's commissioned
+CPU: that CPU carries no `opcua-nodes.md` §12 node until the owner's TIA
+session, and a missing REQUIRED node is a genuine connect failure this client
+never browses around. m5-29 finding 2: the symptom was a bare
+`connect failed: BadNoMatch … (retry in 1.0 s)` naming no node and no path, so
+the next person to hit it would debug a working system.
+
+`hmi/evidence/f2-connect-failure-2026-08-05.log` is the refusal as it now
+reads, produced by pointing the v2a node set at `plc/forklift/double/server.py`
+(port 4850) — a server carrying the §10 set and **no** §12 node, which is the
+shape of the CPU today. It names the node (`HmiDriveModeRequest`), its path
+under the resolved browse prefix, that the failure is expected, the procedure
+that adds the nodes (`plc/forklift/TIA-BUILD-PROCEDURE.md`), the config header
+that explains it, and what to run meanwhile. The same string is what `/state`
+carries as `session.reason`, so the page's degraded banner says it too.
+
+No PLC was contacted for §I.7 or §I.8, and neither is evidence about the TIA
+build, a real F-CPU or the vehicle layer.

@@ -203,6 +203,14 @@ OPTIONAL_READ_FOLDERS: frozenset[tuple[str, ...]] = frozenset({
     ("Forklift", "Safety"),
 })
 
+#: The `opcua-nodes.md` §12 folders. Their absence is a REQUIRED node missing
+#: and a genuine connect failure — but against the commissioned CPU it is the
+#: DESIGNED failure of `hmi/config.yaml` rather than a defect, so a browse that
+#: fails inside one of them says so at the point of failure (m5-29 finding 2).
+SECTION_12_FOLDERS: frozenset[str] = frozenset({
+    "Mode", "Envelope", "Vehicle", "ProcessStop",
+})
+
 #: `HmiHeartbeat` is a UInt16 and it WRAPS. The PLC compares for inequality
 #: only and never subtracts (§10.8 P1), so the wrap is not an event here either.
 HEARTBEAT_MODULUS = 65536
@@ -241,6 +249,17 @@ UI_POLL_PERIOD_S = 0.200
 #: derivation, rather than in the config file, precisely so it cannot be retuned
 #: as if it were a setting.
 UI_POLL_STALE_TIME = 5.0 * UI_POLL_PERIOD_S
+
+#: The age past which this process's OWN LAST GOOD WRITE stops counting as
+#: write health, published on `/state` so the page renders the process stop
+#: UNAVAILABLE without inventing a millisecond of its own (V2A-DESIGN §8: "the
+#: backend publishes every window"; m5-29 finding 4). It is a window over THIS
+#: process's own write channel — the same class of fact as `UI_POLL_STALE_TIME`
+#: over its own page — and it is not a window over any plant value or any PLC
+#: verdict (§10.1). Twenty write cycles at the 10 Hz cadence: long enough that
+#: a scheduling hiccup is not a fault, short enough that a hung write surfaces
+#: to the operator while the session still claims to be up.
+WRITE_HEALTH_STALE_TIME = 2.0
 
 
 class ConfigError(Exception):
@@ -685,6 +704,9 @@ class Published:
             "write": {
                 "cycles": 0, "rtt_last_ms": None, "rtt_median10_ms": None,
                 "period_ms_target": None, "period_ms_measured": None,
+                # The window the page renders the stop UNAVAILABLE past, so it
+                # invents no number of its own (V2A-DESIGN §8).
+                "stale_after_ms": round(WRITE_HEALTH_STALE_TIME * 1000.0, 1),
             },
             "requests": None,
             "metrics": None,
@@ -864,6 +886,16 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, TypeError) as exc:
             self._json(400, {"error": str(exc)})
             return
+        if process_stop is not None or drive_mode is not None:
+            # PUBLISH THE STANDING STATE FROM HERE, NOT ONLY FROM THE WRITE
+            # CYCLE. Every page renders these two controls from this section on
+            # every poll (PS-D), so a value that reaches this endpoint and is
+            # not published until the next successful write cycle is a value
+            # `/state` serves STALE for as long as the OPC UA session is down —
+            # and a page loading in that window would draw the wrong position of
+            # a standing control. The write cycle refreshes it too; this makes
+            # the refresh unconditional on the session (m5-29 finding 1).
+            self.published.update(controls=self.controls.standing())
         self._json(200, {"accepted": True})
 
 
@@ -1038,6 +1070,40 @@ class HmiClient:
 
     # -- session ------------------------------------------------------------ #
 
+    async def _resolve(self, objects, prefix: list[str], interface_index: int,
+                       name: str, path, role: str):
+        """One REQUIRED browse, and a refusal that says which node was missing.
+
+        A required node that does not resolve is a genuine connect failure and
+        this client never browses around one (`bridge-design.md` §3.1 N4). What
+        this wrapper adds is legibility. Against today's commissioned CPU
+        `hmi/config.yaml` is MEANT to fail here — the `opcua-nodes.md` §12 nodes
+        arrive in the owner's TIA session — and the bare `BadNoMatch` it used to
+        raise named no browse path at all, so the next person to hit it would
+        debug a working system (m5-29 finding 2).
+        """
+        path = tuple(path)   # the write table is a tuple, the config read table a list
+        browse_path = prefix + [f"{interface_index}:{part}" for part in path]
+        try:
+            return await objects.get_child(browse_path)
+        except Exception as exc:  # noqa: BLE001 - re-raised, richer, below
+            detail = (
+                f"{role} node {name} not found on this server: "
+                f"no {'/'.join(path)} under the browse prefix "
+                f"{'/'.join(prefix)} ({type(exc).__name__}: {exc})"
+            )
+            if path[:1] == ("Forklift",) and path[1:2] and path[1] in SECTION_12_FOLDERS:
+                detail += (
+                    " — THIS IS THE EXPECTED FAILURE against the commissioned CPU: "
+                    "it does not carry the opcua-nodes.md §12 nodes "
+                    "(Forklift/Mode, /Envelope, /Vehicle, /ProcessStop) until the "
+                    "owner's TIA session lands them. The procedure that adds them is "
+                    "plc/forklift/TIA-BUILD-PROCEDURE.md; see the header of "
+                    "hmi/config.yaml. Until then run the v2a screen against "
+                    "hmi/config-v2a-double.yaml, which serves §12 on loopback"
+                )
+            raise ConnectionError(detail) from exc
+
     async def _connect(self) -> None:
         opc = self.cfg["opcua"]
         client = Client(url=self.endpoint)
@@ -1070,16 +1136,16 @@ class HmiClient:
         objects = client.nodes.objects
         self._write_nodes = {}
         for name, path in HMI_WRITABLE_PATHS.items():
-            self._write_nodes[name] = await objects.get_child(
-                prefix + [f"{interface_index}:{part}" for part in path])
+            self._write_nodes[name] = await self._resolve(
+                objects, prefix, interface_index, name, path, "write")
         read_cfg = self.cfg["nodes"].get("read") or {}
         self._read_nodes = {}
         self._optional_absent = set()
         for name, path in read_cfg.items():
             if tuple(path[:-1]) in OPTIONAL_READ_FOLDERS:
                 continue  # resolved as a group, below — not a hard requirement
-            self._read_nodes[name] = await objects.get_child(
-                prefix + [f"{interface_index}:{part}" for part in path])
+            self._read_nodes[name] = await self._resolve(
+                objects, prefix, interface_index, name, path, "read")
 
         # Optional groups (today: `Forklift/Safety/`, §11) are resolved TOGETHER,
         # after every required read above has already succeeded, so a missing

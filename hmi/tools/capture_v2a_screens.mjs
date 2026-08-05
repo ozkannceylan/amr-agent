@@ -37,8 +37,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync, appendFileSync, openSync, statSync, rmSync }
-  from 'node:fs';
+import { mkdirSync, writeFileSync, appendFileSync, openSync, statSync, rmSync,
+  readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -56,6 +56,12 @@ const CDP_PORT = parseInt(arg('cdp-port', '9333'), 10);
 const DOUBLE_PORT = arg('double-port', '4861');
 const HMI_BASE = 'http://127.0.0.1:8094';
 const SCRATCH = path.join(os.tmpdir(), 'amr-hmi-v2a-screens');
+// Which passes to run. Default is every pass, in order — a partial run rewrites
+// the manifest with only what it captured, so a partial run is a development
+// aid and never the evidence run.
+const ALL_PASSES = ['boot', 'coldstart', 'refused', 'disagree', 'linksession',
+  'safety', 'pagestale', 'secondtab'];
+const PASSES = arg('passes', ALL_PASSES.join(',')).split(',').map((s) => s.trim());
 
 mkdirSync(OUT, { recursive: true });
 mkdirSync(SCRATCH, { recursive: true });
@@ -224,6 +230,8 @@ async function readout(cdp, label) {
       pstop: {label: t('pstop'), cls: cls('pstop'),
               disabled: document.getElementById('pstop').disabled,
               caption: t('pstopcaption')},
+      modelink: {on: document.getElementById('modelink').classList.contains('on'),
+                 text: t('modelink')},
       machineMode: t('machinemode'), vehicleMode: t('vehiclemode'),
       vehicleDiff: document.getElementById('vehiclediff').classList.contains('on'),
       selected: [0,1,2].filter(m =>
@@ -252,15 +260,64 @@ function check(name, ok, detail) {
 }
 
 // ------------------------------------------------------------- the passes --
-function startStack(scenario, extra = []) {
+function startStack(scenario, extra = [], evidenceStem = null) {
   start('double', PYTHON, ['hmi/tools/v2a_scenario_double.py',
     '--port', DOUBLE_PORT, '--scenario', scenario, '--adopt-delay', '1.2',
     '--run-seconds', '400', ...extra]);
   return sleep(3500).then(() => {
-    start('hmi', PYTHON, ['hmi/hmi_server.py', '--config', 'hmi/config-v2a-double.yaml']);
+    // One evidence CSV per backend session, unique name per start — the backend
+    // stamps the file itself (LESSONS 2026-07-28: a shared CSV path across
+    // restarts wipes the earlier data).
+    const ev = evidenceStem ? ['--evidence-csv', evidenceStem] : [];
+    start('hmi', PYTHON, ['hmi/hmi_server.py',
+      '--config', 'hmi/config-v2a-double.yaml', ...ev]);
     return waitFor('the HMI backend to connect',
       async () => (await state()).session.state === 'CONNECTED');
   });
+}
+
+/** The newest CSV the backend wrote for `stem`, parsed. The backend appends a
+ *  UTC stamp and its pid to the stem, so the newest match is this session's. */
+function readEvidenceCsv(stem) {
+  const dir = path.dirname(path.resolve(REPO, stem));
+  const base = path.basename(stem, '.csv');
+  const files = readdirSync(dir).filter((f) => f.startsWith(base) && f.endsWith('.csv'))
+    .map((f) => path.join(dir, f))
+    .sort((a, b) => statSync(a).mtimeMs - statSync(b).mtimeMs);
+  if (!files.length) throw new Error(`no evidence CSV for ${stem}`);
+  const lines = readFileSync(files[files.length - 1], 'utf8').trim().split(/\r?\n/);
+  const head = lines[0].split(',');
+  return {
+    path: files[files.length - 1],
+    rows: lines.slice(1).map((l) => {
+      const cells = l.split(',');
+      return Object.fromEntries(head.map((h, i) => [h, cells[i]]));
+    }),
+  };
+}
+
+/** A SECOND browser tab on the same page, opened through the same CDP endpoint.
+ *  This is the whole point of the second-tab pass: nothing about it is simulated
+ *  — it is another real page, with its own DOM handlers, posting to the same
+ *  backend. */
+async function openTab() {
+  const r = await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?url=about:blank`,
+    { method: 'PUT' });
+  const t = await r.json();
+  const c = await Cdp.open(t.webSocketDebuggerUrl);
+  c.targetId = t.id;
+  await c.send('Page.enable');
+  await c.send('Runtime.enable');
+  await c.send('Emulation.setDeviceMetricsOverride',
+    { width: 1540, height: 1700, deviceScaleFactor: 1, mobile: false });
+  return c;
+}
+async function closeTab(c) {
+  try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${c.targetId}`); }
+  catch { /* the browser is going away anyway */ }
+  // The second tab's WebSocket keeps Node's event loop alive on its own, so an
+  // unclosed one leaves the instrument running long after its last check.
+  try { c.ws.close(); } catch { /* already closed */ }
 }
 function stopStack() {
   stop('hmi'); stop('double');
@@ -379,6 +436,8 @@ async function passColdStart(cdp) {
   r = await readout(cdp, '07 teleop settled');
   check('the in-flight rendering CLEARED once the window closed',
     r.strip.mode === 'TELEOP' && r.vehicleDiff === false, r.strip.mode);
+  check('§8: with the link UP the selector carries no "not reaching the PLC" caption',
+    r.modelink.on === false, r.modelink.text);
   await cdp.shot(`v2a-07-teleop-mode-in-force-${DATE}.png`,
     'TELEOP in force and settled: the in-flight rendering has cleared, selected = in '
     + 'force = applied, and zone B has un-greyed');
@@ -541,6 +600,10 @@ async function passLinkAndSession(cdp) {
     && r.strip.session === 'CONNECTED', r.strip.session + ' ' + r.pstop.cls);
   check('HmiLinkOk FALSE: it is not left looking engaged either',
     !r.pstop.cls.includes('engaged'), r.pstop.cls);
+  check('§8: link down — the selector renders its position AND says it is not '
+    + 'reaching the PLC',
+    r.modelink.on === true && /not reaching the PLC/i.test(r.modelink.text)
+    && r.selected.length === 1, r.modelink.text + ' selected=' + JSON.stringify(r.selected));
   check('HmiLinkOk FALSE: every read-derived state renders UNKNOWN',
     r.zoneC.resetreq.startsWith('UNKNOWN') && r.zoneD.estop.startsWith('UNKNOWN'),
     JSON.stringify(r.zoneC));
@@ -673,6 +736,136 @@ async function passPageStale(cdp) {
   await stopStack();
 }
 
+/* ===========================================================================
+ * THE SECOND TAB — m5-29 finding 1, reproduced rather than reasoned about.
+ *
+ * An operator who opens a second tab is not doing anything unusual. The v2a
+ * build rendered both STANDING controls from a local copy adopted once and
+ * re-asserted that copy in EVERY post — the dirty loop, the deadman, `blur`,
+ * `visibilitychange`. One tab and one reload are safe; a second tab is not.
+ *
+ * This pass walks that exact path:
+ *
+ *   1. the operator, in tab A, releases the stop, resets and selects TELEOP;
+ *   2. tab B is opened — it must render what the BACKEND holds now, not the
+ *      §12.8 boot values;
+ *   3. the operator ENGAGES the stop in tab A, so tab B's copy is now stale;
+ *   4. tab B is backgrounded, and the page's own `visibilitychange` and `blur`
+ *      handlers are fired on it.
+ *
+ * Under the defect, step 4 releases the engaged stop on the wire while tab A
+ * still reads PROCESS STOP — ENGAGED. The three checks below are the review's
+ * F1 (a), (b) and (c); (c) reads the backend's own per-cycle evidence CSV, so
+ * it is not two lucky samples either side of the event but every cycle in the
+ * window.
+ * ======================================================================== */
+async function passSecondTab(cdpA) {
+  const STEM = 'hmi/evidence/hmi-cycles-2026-08-05-secondtab.csv';
+  await startStack('coldstart', ['--with-safety-mirrors'], STEM);
+  await cdpA.navigate(HMI_BASE + '/');
+  await waitFor('the PLC link verdict',
+    async () => (await state()).metrics.HmiLinkOk === true);
+
+  // ---- 1. the operator works in tab A: release, reset, select TELEOP.
+  await cdpA.click('#pstop');
+  await sleep(500);
+  const rp = await cdpA.press('#reset');
+  await sleep(900);
+  await cdpA.release(rp);
+  await waitFor('the latches to clear',
+    async () => (await state()).metrics.ForkliftResetRequired === false);
+  await cdpA.click('#mode1');
+  await waitFor('the vehicle to report the mode',
+    async () => (await state()).metrics.ForkliftVehicleModeApplied === 1);
+  await sleep(600);
+  let s = await state();
+  check('second tab, setup: the backend now holds stop RELEASED and mode TELEOP',
+    s.controls.process_stop === false && s.controls.drive_mode === 1,
+    JSON.stringify(s.controls));
+
+  // ---- 2. THE SECOND TAB.
+  const cdpB = await openTab();
+  await cdpB.navigate(HMI_BASE + '/');
+  await sleep(1500);
+  let rb = await readout(cdpB, 'B1 second tab opened mid-scenario');
+  check('F1(a): a second page opened mid-scenario renders the BACKEND\'s standing '
+    + 'values, not the §12.8 boot values',
+    !rb.pstop.cls.includes('engaged') && rb.pstop.label === 'PROCESS STOP'
+    && rb.selected.length === 1 && rb.selected[0] === 1,
+    rb.pstop.label + ' selected=' + JSON.stringify(rb.selected));
+  await cdpB.shot(`v2a-24-second-tab-adopts-current-state-${DATE}.png`,
+    'a SECOND TAB opened while the operator was already working in the first: it renders '
+    + 'the stop RELEASED and TELEOP selected — the values the backend holds now — and not '
+    + 'the §12.8 boot values it would have shown by asserting its own defaults');
+
+  // ---- 3. the operator ENGAGES the stop in tab A. Tab B's copy is now stale.
+  await cdpA.click('#pstop');
+  await waitFor('the PLC to latch the stop',
+    async () => (await state()).metrics.ForkliftProcessStopActive === true);
+  await sleep(700);
+  const rA = await readout(cdpA, 'A engaged the stop');
+  check('second tab: the acting page shows the stop ENGAGED',
+    rA.pstop.cls.includes('engaged'), rA.pstop.label);
+  rb = await readout(cdpB, 'B2 the other tab follows the backend');
+  check('F1(a2): the OTHER tab followed the backend and now renders ENGAGED too',
+    rb.pstop.cls.includes('engaged'), rb.pstop.label);
+
+  s = await state();
+  const cycleBefore = Number(s.write.cycles);
+
+  // ---- 4. background tab B and fire the page's own handlers on it.
+  await cdpA.send('Page.bringToFront');
+  await sleep(300);
+  const walked = await cdpB.evaluate(`(() => {
+    const before = document.visibilityState;
+    try {
+      Object.defineProperty(document, 'visibilityState',
+        { configurable: true, get: () => 'hidden' });
+    } catch (e) { /* already hidden by bringToFront */ }
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('blur'));
+    return { before, dispatched: document.visibilityState };
+  })()`);
+  log('B3 backgrounded — visibilityState ' + JSON.stringify(walked)
+    + '; visibilitychange and blur dispatched into the page');
+  await sleep(3000);              // longer than the evidence CSV's flush period
+
+  s = await state();
+  check('F1(b): backgrounding the non-acting page changed NEITHER standing value '
+    + 'on the wire — the engaged stop is still engaged',
+    s.requests.HmiProcessStopRequest === true && s.requests.HmiDriveModeRequest === 1,
+    `HmiProcessStopRequest=${s.requests.HmiProcessStopRequest} `
+    + `HmiDriveModeRequest=${s.requests.HmiDriveModeRequest}`);
+  check('F1(b2): H6 still fired for the DEADMAN requests of the backgrounded page',
+    s.requests.HmiTeleopRequest === false && s.requests.HmiTractionRequest === 0,
+    JSON.stringify(s.requests));
+
+  const rA2 = await readout(cdpA, 'A after the other tab was backgrounded');
+  check('F1(b3): the operator\'s own screen and the wire still agree — ENGAGED',
+    rA2.pstop.cls.includes('engaged') && rA2.requests.pstop === 'true',
+    rA2.pstop.label + ' / ' + rA2.requests.pstop);
+  await cdpA.shot(`v2a-25-second-tab-backgrounded-stop-stays-engaged-${DATE}.png`,
+    'THE FAILURE PATH WALKED: a second tab was opened, the operator engaged the stop in '
+    + 'this one, and the second tab was then backgrounded with its visibilitychange and '
+    + 'blur handlers fired. The engaged stop is still engaged, on the wire and on this '
+    + 'screen, and the selector is still TELEOP');
+
+  // ---- (c) every cycle in the window, from the backend's own evidence CSV.
+  const csv = readEvidenceCsv(STEM);
+  const after = csv.rows.filter((r) => Number(r.cycle) > cycleBefore);
+  const badStop = after.filter((r) => r.HmiProcessStopRequest !== 'True');
+  const badMode = after.filter((r) => r.HmiDriveModeRequest !== '1');
+  check('F1(c): the blur-triggered post carried NO standing key — every one of the '
+    + `${after.length} write cycles after the background still wrote the stop `
+    + 'engaged and the mode TELEOP',
+    after.length > 10 && badStop.length === 0 && badMode.length === 0,
+    `cycles=${after.length} stop-flips=${badStop.length} `
+    + `mode-flips=${badMode.length} csv=${path.basename(csv.path)}`);
+
+  await closeTab(cdpB);
+  await stopStack();
+}
+
 // --------------------------------------------------------------------- main
 let chrome, cdp;
 try {
@@ -697,13 +890,16 @@ try {
   log('browser', ver.Browser);
   appendFileSync(MANIFEST, `browser: ${ver.Browser}\n\n`);
 
-  await passBoot(cdp);
-  await passColdStart(cdp);
-  await passRefused(cdp);
-  await passDisagree(cdp);
-  await passLinkAndSession(cdp);
-  await passSafety(cdp);
-  await passPageStale(cdp);
+  const RUNNERS = {
+    boot: passBoot, coldstart: passColdStart, refused: passRefused,
+    disagree: passDisagree, linksession: passLinkAndSession, safety: passSafety,
+    pagestale: passPageStale, secondtab: passSecondTab,
+  };
+  for (const name of ALL_PASSES) {
+    if (!PASSES.includes(name)) { log(`pass ${name} SKIPPED (--passes)`); continue; }
+    log(`--- pass ${name} ---`);
+    await RUNNERS[name](cdp);
+  }
 
   log('--- checks ---');
   if (failures.length) {

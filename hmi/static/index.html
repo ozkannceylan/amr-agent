@@ -33,8 +33,21 @@
 
   Two controls are new and both are STANDING, not deadman: the mode selector
   and the process stop. Neither returns to rest when this page goes quiet, and
-  the page adopts both from the backend on load rather than asserting its own
-  defaults (V2A-DESIGN PS-B, PS-D, section 5.1).
+  the page RENDERS BOTH FROM THE BACKEND'S PUBLISHED STATE ON EVERY POLL,
+  holding no copy of its own and asserting no default of its own (V2A-DESIGN
+  PS-B, PS-D, section 5.1).
+
+  WHY THAT IS WRITTEN IN CAPITALS. A page that keeps a local copy of a standing
+  control and re-asserts it in every post is safe with one tab and unsafe with
+  two: the second tab holds a stale copy, and the moment it is backgrounded its
+  blur and visibilitychange handlers post that copy — releasing an engaged
+  process stop while the operator's own screen still reads ENGAGED, or firing a
+  fresh mode-select rise at the PLC, the affirmative autonomous enable included.
+  m5-29 finding 1. So each standing key is sent in exactly ONE post: the one
+  triggered by the click that changed it. The periodic post, the deadman, blur
+  and the unload beacon carry no standing key at all, and a missing key means
+  UNCHANGED at the backend. A page that is not being clicked cannot move a
+  standing control, however many pages there are.
 -->
 <html lang="en">
 <head>
@@ -81,6 +94,11 @@
     background: #000a; letter-spacing: .04em; font-size: 13px;
   }
   #strip .chip.good { color: var(--ok);   border-color: var(--ok); }
+  /* A NEUTRAL chip, not an amber one. Section 5.2: the in-flight renderings —
+     "selection not in force" and "vehicle adopting" — are what a normal mode
+     change looks like while it is happening, and they are never an alarm.
+     Amber on this page belongs to the process stop and to attention states. */
+  #strip .chip.neutral { color: var(--ink); border-color: var(--edge-2); }
   #strip .chip.warn { color: var(--warn); border-color: var(--warn); }
   #strip .chip.bad  { color: var(--amber); border-color: var(--amber); }
   #strip .chip.unk  { color: var(--ink-dimmer); border-color: var(--edge); }
@@ -154,6 +172,9 @@
   .modelabel { font-size: 11.5px; letter-spacing: .1em; color: var(--ink-dim);
                font-weight: 700; }
   .modelabel .n { font-family: "Cascadia Mono", Consolas, monospace; font-weight: 400; }
+  #modelink { display: none; margin: 8px 0 0; font-size: 12px; line-height: 1.5;
+              color: #f2d9a6; }
+  #modelink.on { display: block; }
   #vehiclerow { margin: 12px 0 0; font-size: 13px; color: var(--ink-dim); }
   #vehiclerow b { color: var(--ink); font-weight: 700; }
   #vehiclediff { display: none; margin-top: 4px; color: var(--warn); font-size: 12.5px; }
@@ -298,6 +319,7 @@
     <p class="fine">Selecting <b>autonomous permits the vehicle to move under its own
       control</b>: this section defines no separate autonomous enable, so the selection is
       the affirmative action. Leaving a mode is moving the selector to NONE.</p>
+    <p id="modelink"></p>
 
     <p class="modelabel" style="margin-top:16px">MACHINE MODE
       &mdash; <span class="n">ForkliftDriveModeActive</span></p>
@@ -444,30 +466,55 @@
 "use strict";
 
 /* ------------------------------------------------------------------ model --
- * The operator's control positions. Five DEADMAN requests, and two STANDING
- * controls that this page must not assert until it has adopted the backend's
- * values (PS-D). `adopted` is what guarantees a reload releases nothing.
+ * The operator's control positions. Only the five DEADMAN requests live here.
+ *
+ * The two STANDING controls deliberately do NOT: this page holds no copy of
+ * them. `rendered` is the last value the BACKEND published, used for drawing
+ * and for computing a click's absolute target, and it is overwritten by every
+ * poll. `pending` is a one-shot: a click stages the key it changed, the very
+ * next post carries it, and it is cleared by that post. No other post ever
+ * carries a standing key (PS-D; m5-29 finding 1).
  */
 var ctl = { traction: 0, steer: 0, fork: 0, teleop: false, reset: false };
-var standing = { process_stop: null, drive_mode: null };
-var adopted = false;
+var rendered = { process_stop: null, drive_mode: null };
+var pending = null;
+var seenState = false;      // a /state response has been seen — the click gate
 var dirty = true;
+
+/* The two windows this page renders against are the BACKEND's, published on
+ * /state. The page invents no millisecond of its own (V2A-DESIGN §8), and
+ * these hold the last published values so the backend-gone render path can
+ * reuse them instead of a literal. Null until /state has been seen once, which
+ * is not a gap: with no read poll at all every state is unknown anyway. */
+var lastWindows = { read_stale_after_ms: null, write_stale_after_ms: null };
 
 var POLL_PERIOD_MS = 200;
 var MODE_NAMES = { 0: "NONE", 1: "TELEOP", 2: "AUTONOMOUS" };
+
+function stage(key, value) {
+  pending = pending || {};
+  pending[key] = value;
+}
 
 function post(useBeacon) {
   var body = {
     traction: ctl.traction, steer: ctl.steer, fork: ctl.fork,
     teleop: ctl.teleop, reset: ctl.reset
   };
-  // The two standing keys are omitted until this page has adopted the
-  // backend's state. A missing key means UNCHANGED for them, so a page that
-  // posts before it has read /state cannot release an engaged stop or command
-  // a mode exit.
-  if (adopted) {
-    body.process_stop = standing.process_stop;
-    body.drive_mode = standing.drive_mode;
+  // A standing key travels ONLY in the post triggered by the click that
+  // changed it, and a missing key means UNCHANGED at the backend. So the 50 ms
+  // dirty loop, every deadman post, blur, pagehide and visibilitychange carry
+  // no standing key and can change nothing — in this tab or in any other.
+  //
+  // If this post fails, the staged value is gone with it and the control the
+  // operator clicked visibly does not move on the next poll. That is the
+  // intended behaviour: a standing control re-asserted by a background timer
+  // is the defect above, and an operator watching a control that did not
+  // change presses it again.
+  if (pending) {
+    if ("process_stop" in pending) body.process_stop = pending.process_stop;
+    if ("drive_mode" in pending) body.drive_mode = pending.drive_mode;
+    pending = null;
   }
   var text = JSON.stringify(body);
   dirty = false;
@@ -570,20 +617,26 @@ resetBtn.addEventListener("blur", function () { resetHold(false); });
  *
  * It is inert while UNAVAILABLE. A control whose effect could not arrive must
  * not accept a press it cannot deliver, and it must not look armed either.
+ *
+ * The click computes an ABSOLUTE target from the value last rendered from the
+ * backend — never from a copy this page has been carrying — and stages it for
+ * the next post only. The rendered state catches up on the following 200 ms
+ * poll; that lag is accepted and there is deliberately no optimistic local
+ * override, because a local override is the copy this defect was made of.
  */
 var pstopBtn = id("pstop");
 var pstopAvailable = false;
 pstopBtn.addEventListener("click", function () {
-  if (!adopted || !pstopAvailable) return;
-  standing.process_stop = !standing.process_stop;
+  if (!seenState || !pstopAvailable || typeof rendered.process_stop !== "boolean") return;
+  stage("process_stop", !rendered.process_stop);
   post(false);
 });
 
 /* ------------------------------------------------ the mode selector ------- */
 [0, 1, 2].forEach(function (m) {
   id("mode" + m).addEventListener("click", function () {
-    if (!adopted) return;
-    standing.drive_mode = m;
+    if (!seenState) return;
+    stage("drive_mode", m);          // the clicked position, absolute
     post(false);
   });
 });
@@ -643,10 +696,18 @@ function render(s) {
 
   /* ---- the three health facts of the link strip ------------------------- */
   var ageMs = s.metrics_age_ms;
-  var staleAfter = (s.read_poll && s.read_poll.stale_after_ms) || 1000;
-  // A window over THIS PROCESS'S OWN read poll — its own channel, published by
-  // the backend, never a window over a plant value or a PLC verdict.
-  var readStale = (typeof ageMs !== "number") || ageMs > staleAfter;
+  // Both windows are the BACKEND's numbers, published on /state; this page
+  // invents neither (V2A-DESIGN §8). A window over THIS PROCESS'S OWN read
+  // poll and over its own last good write — its own channels, never a window
+  // over a plant value or a PLC verdict.
+  var staleAfter = (s.read_poll && typeof s.read_poll.stale_after_ms === "number")
+    ? s.read_poll.stale_after_ms : lastWindows.read_stale_after_ms;
+  var writeStaleAfter = (s.write && typeof s.write.stale_after_ms === "number")
+    ? s.write.stale_after_ms : lastWindows.write_stale_after_ms;
+  lastWindows.read_stale_after_ms = staleAfter;
+  lastWindows.write_stale_after_ms = writeStaleAfter;
+  var readStale = (typeof ageMs !== "number") || (typeof staleAfter !== "number")
+    || ageMs > staleAfter;
   var linkOk = m ? m.HmiLinkOk : null;
 
   // Every read-derived state is UNKNOWN when the session is down, when the
@@ -677,24 +738,41 @@ function render(s) {
       + (s.session.reason ? "  [" + s.session.reason + "]" : "");
   }
 
-  /* ---- the standing controls, adopted from the backend ------------------ */
+  /* ---- the standing controls, RENDERED FROM THE BACKEND every poll ------ *
+   * Not from a local copy, and not once at load. Two pages open on this
+   * backend therefore always draw the same two positions, and a page that has
+   * been backgrounded for an hour draws what the backend holds the moment it
+   * is looked at again (PS-D; m5-29 finding 1).                            */
   var c = s.controls || {};
-  if (!adopted && typeof c.process_stop === "boolean") {
-    standing.process_stop = c.process_stop;
-    standing.drive_mode = c.drive_mode;
-    adopted = true;
-  }
-  var selected = adopted ? standing.drive_mode : c.drive_mode;
+  var haveControls = typeof c.process_stop === "boolean";
+  rendered.process_stop = haveControls ? c.process_stop : null;
+  rendered.drive_mode = haveControls ? c.drive_mode : null;
+  var selected = rendered.drive_mode;
   [0, 1, 2].forEach(function (k) {
     id("mode" + k).classList.toggle("sel", selected === k);
   });
 
+  // §8: on link-down the selector renders its position and says it is not
+  // reaching the PLC. When the backend itself is not answering there IS no
+  // published position, and this page shows none rather than a remembered one
+  // — the same rule as every other state on the screen.
+  var ml = id("modelink");
+  ml.classList.toggle("on", dataUnknown || !haveControls);
+  if (!haveControls) {
+    setText("modelink", "Not reaching the PLC — and the selector's position cannot be "
+      + "read from the backend either, so none is shown. A remembered position is not "
+      + "a position.");
+  } else if (dataUnknown) {
+    setText("modelink", "Not reaching the PLC. The position shown is the one this "
+      + "backend holds and keeps writing; the PLC is not attributing it to an operator.");
+  }
+
   /* ---- THE PROCESS STOP: armed, engaged, or UNAVAILABLE ----------------- */
   var writeHealthy = sessionUp && s.session.since_last_good_write_ms !== null
-    && s.session.since_last_good_write_ms < 2000;
+    && typeof writeStaleAfter === "number"
+    && s.session.since_last_good_write_ms < writeStaleAfter;
   pstopAvailable = writeHealthy && !readStale && linkOk === true;
-  var engaged = standing.process_stop === true
-    || (!adopted && c.process_stop === true);
+  var engaged = rendered.process_stop === true;
 
   pstopBtn.classList.toggle("unavailable", !pstopAvailable);
   pstopBtn.classList.toggle("engaged", pstopAvailable && engaged);
@@ -743,12 +821,12 @@ function render(s) {
     // CHANGING. Neutral, never an alarm: this is also what a normal, in-flight
     // selection looks like, and treating the in-flight window as an error is
     // exactly the mistake that once made autonomous mode unreachable.
-    chip.className = "chip warn"; chip.textContent = "SELECTION NOT IN FORCE";
+    chip.className = "chip neutral"; chip.textContent = "SELECTION NOT IN FORCE";
     caption.textContent = "The PLC has not entered the selected mode. If this persists: "
       + "return the selector to NONE, resolve the conditions below, and select again — "
       + "a refused selection is consumed and will never be entered without a fresh one.";
   } else if (applied !== inForce) {
-    chip.className = "chip warn"; chip.textContent = "VEHICLE ADOPTING";
+    chip.className = "chip neutral"; chip.textContent = "VEHICLE ADOPTING";
     caption.textContent = "The vehicle has not yet reported the mode in force. This window "
       + "lasts as long as the vehicle's own adopt-and-report takes, and this screen puts no "
       + "clock on it.";
@@ -868,7 +946,13 @@ function render(s) {
 function poll() {
   fetch("/state", { cache: "no-store" })
     .then(function (r) { return r.json(); })
-    .then(render)
+    .then(function (s) {
+      // The click gate: the handlers act only once a /state has been seen, so
+      // a click landing before the first response cannot compute a target from
+      // a value this page has not read.
+      seenState = true;
+      render(s);
+    })
     .catch(function () {
       // The backend is not answering. The page renders the SAME unknown state
       // it renders for any other unattributable reading, rather than freezing
@@ -881,9 +965,16 @@ function poll() {
           since_last_good_write_ms: null, granted_session_timeout_ms: null,
         },
         heartbeat: { value: null, running: false },
-        write: {}, requests: {}, metrics: null, metrics_age_ms: null,
+        // Both windows are the last values the BACKEND published, not literals
+        // invented here. Null before any /state has been seen, which changes
+        // nothing: with no read poll at all every state is unknown regardless.
+        write: { stale_after_ms: lastWindows.write_stale_after_ms },
+        requests: {}, metrics: null, metrics_age_ms: null,
+        // No `controls`: with the backend gone there is no published standing
+        // state, so the selector shows no position and the stop renders
+        // UNAVAILABLE. A remembered position is not a position.
         controls: {}, safety: { present: false }, page: {},
-        read_poll: { stale_after_ms: 1000 },
+        read_poll: { stale_after_ms: lastWindows.read_stale_after_ms },
       });
     });
 }

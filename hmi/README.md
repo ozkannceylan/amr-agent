@@ -87,7 +87,12 @@ It streams into the HMI-writable node group:
   put them, because releasing an engaged stop or commanding a mode exit on a
   browser hiccup would fabricate an operator act. The stop **boots engaged**,
   matching the server's §12.8 start value, so the first `FALSE` this process
-  ever writes is an operator's release on the page.
+  ever writes is an operator's release on the page. **The backend is the only
+  holder of both positions** (m5-29b): a page renders them from `/state` on
+  every poll and sends one only in the post triggered by the click that changed
+  it, so no periodic, deadman, blur or unload post carries a standing value and
+  a second tab — stale, backgrounded, or both — cannot release an engaged stop
+  or fire a mode-select rise the operator never made.
 
 **The process stop is not an emergency stop, and the screen is built so that
 cannot be misread.** ADR 0010 D6(b) rules it a process-stop request plus a
