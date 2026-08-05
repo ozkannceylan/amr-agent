@@ -1,37 +1,29 @@
-# SUPERSEDED BY HMI v2a (m5-28). This file names the M4 six-node write set;
-# `hmi_server.py`'s allowlist is now the EIGHT of `opcua-nodes.md` §12.1, so
-# the backend refuses to start on this configuration and says which nodes are
-# missing. It is kept as the record of what the runs in EVIDENCE_HMI.md
-# actually used. Making the M4 harnesses runnable again needs the
-# `plc/forklift/double/` §14 + §12 extension requested in the m5-27 report; it
-# is not an edit to this file, and this file is not edited to pretend
-# otherwise.
+# hmi/config-v2a-double.yaml — HMI v2a against this layer's own scenario double.
 #
-# hmi/config-double.yaml — the same HMI against the BRIDGE TEST DOUBLE.
+# `hmi/tools/v2a_scenario_double.py`. The running CPU serves the six Forklift
+# DBs and no opcua-nodes.md section 12 node (m5-23 Part B); the section 12 set
+# arrives in the owner's TIA session. v2a is therefore developed and evidenced
+# against a double that serves section 12, double-first, exactly as v1 was
+# (hmi/V2A-DESIGN.md section 10).
 #
-# Identical to `config.yaml` except for the endpoint and the HTTP port. It
-# exists so that no evidence run can reach the commissioned PLCSIM Advanced
-# instance by accident: the endpoint below is loopback, and
-# `tools/check_hmi_writes.py` refuses to run against anything that is not.
+# The write table below is the EIGHT of section 12.1: the five section 10.4
+# requests, Link/HmiHeartbeat, Mode/HmiDriveModeRequest and
+# ProcessStop/HmiProcessStopRequest. The allowlist that admits exactly those
+# eight lives in hmi_server.py, in code; this file cannot widen it.
 #
-# The double is `bridge/test_double/plc_test_double.py`. It is TEST SCAFFOLDING
-# and it is not a PLC: it runs no standard program, forms no verdict and holds
-# no interlock, so `Forklift/Status/*` and `Forklift/Link/HmiLinkOk` keep their
-# start values for a whole run against it. That is the honest answer and not a
-# defect — it is also why a second evidence pass against a logic double is worth
-# having (EVIDENCE_HMI.md §B).
-#
-# Port 4847 is this layer's own. m4f-06 used 4842–4846 for the bridge's doubles;
-# nothing here shares a port with them, and nothing here is ever PLCSIM's 4840.
+# Own port, per V2A-DESIGN section 10: 4861. Distinct from every port already
+# spoken for - 4840 (PLCSIM), 4842-4846 (the bridge's test doubles), 4847 (this
+# layer's own instance of the bridge double), 4850 (the PLC logic double), 4860
+# (safety_mirror_double.py), 4897/4898 (m4f-07c's re-run instances).
 
 opcua:
-  endpoint: "opc.tcp://127.0.0.1:4847/amr-agent/celldouble/"
+  endpoint: "opc.tcp://127.0.0.1:4861/amr-agent/v2ascenariodouble/"
   namespace_uris:
     server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
     interface: "http://DemoCell"
   security_policy: "none"
   requested_session_timeout_ms: 10000
-  session_name: "amr-agent-hmi-double"
+  session_name: "amr-agent-hmi-v2a-double"
   reconnect_interval_s: 1.0
   reconnect_backoff_max_s: 5.0
 
@@ -42,7 +34,7 @@ cycle:
 
 http:
   host: "127.0.0.1"
-  port: 8089
+  port: 8094
 
 nodes:
   interface_path:
@@ -54,6 +46,8 @@ nodes:
     HmiForkRequest:              ["Forklift", "Hmi", "HmiForkRequest"]
     HmiTeleopRequest:            ["Forklift", "Hmi", "HmiTeleopRequest"]
     HmiResetRequest:             ["Forklift", "Hmi", "HmiResetRequest"]
+    HmiDriveModeRequest:         ["Forklift", "Mode", "HmiDriveModeRequest"]
+    HmiProcessStopRequest:       ["Forklift", "ProcessStop", "HmiProcessStopRequest"]
   heartbeat:
     HmiHeartbeat:                ["Forklift", "Link", "HmiHeartbeat"]
   read:
@@ -70,9 +64,17 @@ nodes:
     ForkliftResetRequired:       ["Forklift", "Status", "ForkliftResetRequired"]
     HmiLinkOk:                   ["Forklift", "Link",   "HmiLinkOk"]
 
-    # `Forklift/Safety/` (opcua-nodes.md §11.2), optional (§11.6): this bridge
-    # test double does not serve it, so the panel shows the group as "not
-    # present" rather than an error.
+    # section 12 reads - display only, feeding no logic in this process.
+    ForkliftDriveModeActive:     ["Forklift", "Mode",        "ForkliftDriveModeActive"]
+    ForkliftMotionEnable:        ["Forklift", "Envelope",    "ForkliftMotionEnable"]
+    ForkliftSpeedCeiling:        ["Forklift", "Envelope",    "ForkliftSpeedCeiling"]
+    ForkliftEquipmentPermit:     ["Forklift", "Envelope",    "ForkliftEquipmentPermit"]
+    ForkliftVehicleModeApplied:  ["Forklift", "Vehicle",     "ForkliftVehicleModeApplied"]
+    ForkliftVehicleHeartbeat:    ["Forklift", "Vehicle",     "ForkliftVehicleHeartbeat"]
+    ForkliftProcessStopActive:   ["Forklift", "ProcessStop", "ForkliftProcessStopActive"]
+
+    # `Forklift/Safety/` (opcua-nodes.md section 11.2), optional (section 11.6).
+    # The double's --with-safety-mirrors flag decides whether these resolve.
     EStopDemand:                 ["Forklift", "Safety",  "EStopDemand"]
     ZoneStopDemand:              ["Forklift", "Safety",  "ZoneStopDemand"]
     SafetyResetRequired:         ["Forklift", "Safety",  "SafetyResetRequired"]

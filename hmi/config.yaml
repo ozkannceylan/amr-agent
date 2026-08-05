@@ -1,7 +1,15 @@
 # hmi/config.yaml — the commissioning HMI's addresses and cadences.
 #
 # THIS FILE ADDRESSES THE COMMISSIONED PLCSIM ADVANCED INSTANCE. It is the
-# owner-run configuration. Every run recorded in EVIDENCE_HMI.md used
+# owner-run configuration.
+#
+# v2a (m5-28): this file now names the EIGHT writes and the seven §12 reads the
+# v2a screen needs. THE RUNNING CPU DOES NOT CARRY §12 YET — those nodes arrive
+# in the owner's TIA session (m5-23 Part B) — so until that download lands this
+# configuration will fail at connect on the first §12 browse, by design: a
+# missing REQUIRED read is a genuine connect failure and this client never
+# browses around one. The v2a screen is developed and evidenced against
+# `config-v2a-double.yaml` in the meantime (hmi/V2A-DESIGN.md §10). Every run recorded in EVIDENCE_HMI.md used
 # `config-double.yaml` beside it, which names a loopback test double; the
 # harness `tools/check_hmi_writes.py` refuses a non-loopback endpoint outright.
 #
@@ -54,7 +62,7 @@ opcua:
   reconnect_backoff_max_s: 5.0
 
 cycle:
-  # 10 Hz nominal (`opcua-nodes.md` §10.8 H2). All six HMI nodes are written
+  # 10 Hz nominal (`opcua-nodes.md` §10.8 H2). All eight HMI nodes are written
   # every cycle regardless of change (§10.4, H1) — the stream is self-repairing,
   # so a CPU restart that reverts the DB is corrected by the next cycle.
   write_period_s: 0.100
@@ -83,16 +91,20 @@ nodes:
     - "server_interfaces:ServerInterfaces"
     - "interface:DemoCell"
 
-  # The five requests of `opcua-nodes.md` §10.4. Written every cycle, in this
-  # order, as one batched write. `hmi_server.py` holds the same five paths as a
-  # code-side allowlist and refuses to start if this table names anything else,
-  # so widening the write set needs a code change and not a config edit.
+  # The five requests of `opcua-nodes.md` §10.4 PLUS the two §12.1 additions —
+  # SEVEN, written every cycle, in this order, as one batched write, with the
+  # heartbeat following them (H3) to make EIGHT. `hmi_server.py` holds the same
+  # eight paths as a code-side allowlist and refuses to start if this table
+  # names anything else, so widening the write set needs a code change and not
+  # a config edit.
   write:
     HmiTractionRequest:          ["Forklift", "Hmi", "HmiTractionRequest"]
     HmiSteerRequest:             ["Forklift", "Hmi", "HmiSteerRequest"]
     HmiForkRequest:              ["Forklift", "Hmi", "HmiForkRequest"]
     HmiTeleopRequest:            ["Forklift", "Hmi", "HmiTeleopRequest"]
     HmiResetRequest:             ["Forklift", "Hmi", "HmiResetRequest"]
+    HmiDriveModeRequest:         ["Forklift", "Mode", "HmiDriveModeRequest"]
+    HmiProcessStopRequest:       ["Forklift", "ProcessStop", "HmiProcessStopRequest"]
 
   # Written LAST, after the five above are acknowledged (§10.8 H3). An advanced
   # heartbeat therefore implies that cycle's requests landed first. That is an
@@ -116,6 +128,21 @@ nodes:
     ForkliftSpeedLimitActive:    ["Forklift", "Status", "ForkliftSpeedLimitActive"]
     ForkliftResetRequired:       ["Forklift", "Status", "ForkliftResetRequired"]
     HmiLinkOk:                   ["Forklift", "Link",   "HmiLinkOk"]
+
+    # opcua-nodes.md §12 — the drive mode's authoritative answer, the three
+    # envelope elements, the vehicle's two report values and the process-stop
+    # latch. Display only: no value read here enters any verdict, timer or
+    # interlock in this process. `HmiDriveModeRequest` and
+    # `HmiProcessStopRequest` are deliberately absent from this table — this
+    # client WRITES them, and a consumer displays the node it read, never what
+    # it sent (§12.3 M2). `hmi_server.py` refuses a config that names either.
+    ForkliftDriveModeActive:     ["Forklift", "Mode",        "ForkliftDriveModeActive"]
+    ForkliftMotionEnable:        ["Forklift", "Envelope",    "ForkliftMotionEnable"]
+    ForkliftSpeedCeiling:        ["Forklift", "Envelope",    "ForkliftSpeedCeiling"]
+    ForkliftEquipmentPermit:     ["Forklift", "Envelope",    "ForkliftEquipmentPermit"]
+    ForkliftVehicleModeApplied:  ["Forklift", "Vehicle",     "ForkliftVehicleModeApplied"]
+    ForkliftVehicleHeartbeat:    ["Forklift", "Vehicle",     "ForkliftVehicleHeartbeat"]
+    ForkliftProcessStopActive:   ["Forklift", "ProcessStop", "ForkliftProcessStopActive"]
 
     # `Forklift/Safety/` — opcua-nodes.md §11.2. Four read-only F-CPU mirrors,
     # display diagnostics only (§11.3): this client forms no verdict from them
