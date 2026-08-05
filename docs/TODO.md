@@ -393,10 +393,22 @@ press on the operator channel, with the F-program's unchanged edge / window /
 stuck-fault monitoring doing the *monitored* work. §7.6 says flatly that the
 F-program **cannot** check a write's origin and specifies a four-way correlated
 log instead of pretending otherwise.
-- **owner ruling: where does the stand-in writer live?** It is a Windows-host
-  process on the proven PowerShell/API path, level-republishing all four
-  `SafetyInputStandIn` members every 50 ms. Its directory is not ruled — no
-  existing layer obviously owns a Windows-side process. Done when ruled.
+- **owner ruling 2026-08-05: the stand-in writer lives in `bridge/`.** Reasoning
+  recorded so a later reader does not re-open it: `bridge/` is already the
+  simulation's stand-in for field wiring — the role ADR 0005 made it a top-level
+  layer for — and the writer is that same role for the safety channel, where a
+  real cell would have F-I/O wiring. Two consequences the design must carry:
+  `bridge/` now holds a **Windows-side process** beside its WSL ROS 2 / asyncua
+  one, and it reaches the CPU through the **PLCSIM Advanced API** rather than
+  OPC UA, so `bridge/README.md`'s boundary statement is rewritten in the same
+  round. `plc/forklift-safety/SPEC.md` §10 open item 8 closes when the plc agent
+  next touches that file — **not now, the owner is working in `plc/`.**
+- **URGENT, 2026-08-05 night:** the owner chose option A in the TIA session, so
+  the S015 delta lands and `StandInValid` boots FALSE until a heartbeat is seen
+  to change. **Nothing advances that heartbeat until the writer exists**, so
+  both demands stay latched, no reset is accepted, and the cell — including the
+  working M4 teleop demonstration — is inert until the writer ships. It is the
+  overnight priority.
 - **m5-12** must publish the field-evaluation log the writer's zone channel
   consumes, over the named WSL→Windows TCP link.
 - **sim**: `sim/scenarios/forklift_commissioning.md` §13's T6 rows follow SPEC
