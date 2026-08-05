@@ -1770,7 +1770,7 @@ touch the renderer's packages at all**; it removed a stub none of them used.
 | `ros-jazzy-*` whose version changed | **288** |
 | `ros-jazzy-*` unchanged | **112** |
 | non-ROS packages changed | **54** |
-| **Gazebo packages changed** | **0** — `gz-sim` stays at **8.11.0**; Harmonic comes from `packages.osrfoundation.org`, which was already current |
+| **Gazebo packages changed** | **0** — `gz-sim` stays at **8.11.0**. Harmonic comes from the **ROS vendor packages** (`ros-jazzy-gz-*-vendor`), all four byte-identical against the snapshot; **there is no `packages.osrfoundation.org` apt source on this machine**, as §17 shows. (Corrected 2026-08-05 by m5-26b: this row originally named osrfoundation and contradicted §17 in the same file.) |
 
 The 288 that moved are the base ROS tree, dated January to June:
 
