@@ -1,0 +1,16 @@
+registration  theta -0.007915259 rad  t (+6.029223, +5.541460) m  FLOOR rms 0.0404 MAX 0.1411 m
+goal  world (+1.0000, +7.0000) yaw +0.0000 rad  ->  map (+7.0846, +12.5333) yaw -0.0079 rad
+goal ACCEPTED at t_sim 165.76
+
+RESULT           ABORTED
+error_code       105
+elapsed          235.46 s of simulation time
+plans published  217
+refusals         0 rotation-in-place commands refused by the converter
+final BELIEVED   map (+2.2265, +12.5839) yaw +0.0058
+  carried to world (-3.8583, +7.0121) yaw +0.0137
+final TRUTH      world (-3.8918, +7.0097) yaw +0.0228
+ABSOLUTE goal error (truth vs commanded goal): 4.8918 m (34.67 x floor)
+  heading error +1.305 deg
+wrote /home/ozkan/m5-11-runs/r12-goal-gated.nav2.csv (2341 samples)
+wrote /home/ozkan/m5-11-runs/r12-goal-gated.nav2.json

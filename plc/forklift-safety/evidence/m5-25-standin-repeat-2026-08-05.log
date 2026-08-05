@@ -1,0 +1,37 @@
+﻿# instance: safecell3
+# operating state: Run
+# BridgeSeenAlive = False  HmiSeenAlive = False   (both FALSE means nothing competed with these writes)
+# columns, in order:
+#  [ 0] SafetyInputStandIn.EStopCircuitClosed
+#  [ 1] SafetyInputStandIn.ZoneDeviceCircuitClosed
+#  [ 2] SafetyInputStandIn.ResetButtonPressed
+#  [ 3] InstF_Forklift_Safety.EStopCircuitClosed
+#  [ 4] InstF_Forklift_Safety.ZoneDeviceCircuitClosed
+#  [ 5] InstF_Forklift_Safety.ResetButtonPressed
+#  [ 6] InstF_Forklift_Safety.EStopDemand
+#  [ 7] InstF_Forklift_Safety.ZoneStopDemand
+#  [ 8] InstF_Forklift_Safety.SafetyResetRequired
+#  [ 9] InstF_Forklift_Safety.SafetyResetFault
+#  [10] ForkliftSafetyMirror.EStopDemand
+#  [11] ForkliftSafetyMirror.ZoneStopDemand
+#  [12] ForkliftSafetyMirror.SafetyResetRequired
+#  [13] ForkliftSafetyMirror.SafetyResetFault
+#
+#  IN = stand-in DB (what the API writes) | CON = F-block instance (the CONSUMER's view)
+#  OUT = F-program outputs | MIR = standard-side mirror of those outputs
+
+     t_ms  . . . . . . . . . . . . . .
+     30.9  00000011101110   PHASE0 baseline
+# write EStopCircuitClosed:=TRUE returned in 4.6 ms
+    101.3  10010011101110   PHASE1 consumer FOLLOWED
+# consumer-view latency: 48.8 ms (read the F-OB period back before comparing)
+  2,070.9  10010011101110   PHASE1 end
+  2,883.8  11011011101110   PHASE2 both circuits closed
+  3,896.7  11111111101110   PHASE3 reset held 1000 ms, about to release
+  3,936.0  11011000001110   PHASE3 SafetyResetRequired CLEARED
+# cleared 38.3 ms after release
+  5,920.4  11011000000000   PHASE3 end
+  6,006.9  01001010100000   PHASE4 EStopDemand RE-ASSERTED
+# demand re-asserted 84.8 ms after the circuit opened
+  8,748.5  00000011101110   RESTORED to as-found
+# done

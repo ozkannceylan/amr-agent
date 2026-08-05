@@ -7,3 +7,8 @@ __pycache__/
 # log. Dated captures in evidence/ are committed measured evidence and stay
 # visible: none of them carries a pid.
 evidence/*-pid*.csv
+
+# The stand-in writer's per-session logs. One file per start, unique name
+# per start; they are run artefacts, not committed evidence. A capture that
+# is to be kept is copied out of here under a dated name.
+standin_writer/logs/

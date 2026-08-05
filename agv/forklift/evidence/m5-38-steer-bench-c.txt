@@ -1,0 +1,13 @@
+[INFO] [1785956264.226304378] [steer_bench]: steer_bench: 6 steps, bench speed 0.600 m/s, hold 2.0 s
+[INFO] [1785956301.226236965] [steer_bench]: steer_bench: schedule complete
+wrote 740 samples to /tmp/m5-38-c-bench.csv
+
+phase        cmd[deg]  JOINT[deg]   BODY[deg] joint/cmd  body/cmd   v[m/s]
+--------------------------------------------------------------------------
+standstill      2.000       1.338         nan     0.669         -    0.000
+rolling         2.000       1.621       1.605     0.810     0.803    0.599
+
+READING IT. joint/cmd near 1 with body/cmd near 0 puts the
+deadband in the TYRE. joint/cmd near 0 puts it in the ACTUATOR.
+Both near 1 means the deadband is not in the plant at all and
+the search moves back up the chain.

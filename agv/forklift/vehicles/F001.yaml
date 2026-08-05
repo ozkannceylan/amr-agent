@@ -1,0 +1,72 @@
+# F001.yaml - ONE FORKLIFT'S IDENTITY. Everything that makes this machine
+# this machine, and nothing that is true of every forklift.
+#
+# ADR 0016 D2: the vehicle's software is one image, identical per instance, and
+# its identity is INJECTED by exactly one file - this one. No serial number, no
+# pose and no domain is compiled into any node, and the behavioural constants
+# every forklift shares stay in ../config.yaml where they already are.
+#
+# THE ROOT DATUM IS THE VDA 5050 serialNumber. It is the identity the fleet
+# layer will address this vehicle by at M6 (VDA 5050 topic scheme
+# `interfaceName/majorVersion/manufacturer/serialNumber/topic`), so the vehicle
+# does not get a second name for internal use. The manufacturer string and the
+# serial FORMAT are the interface agent's to settle - ADR 0016 says so
+# explicitly - and neither is invented here.
+#
+# THERE IS NO DOMAIN ID IN THIS FILE, ON PURPOSE. It is in allocation.yaml,
+# which is the single owner of the serial -> domain mapping (invariant 10).
+# scripts/vehicle_identity.py joins the two.
+
+serial_number: F001
+
+# ---------------------------------------------------------------------------
+# WHERE THE MACHINE STANDS, IN TWO FRAMES, AND WHY BOTH ARE HERE
+#
+# `spawn` is a SIMULATION datum: where the model is placed in the world. A real
+# forklift has no spawn pose and no world frame at all - it is simply where it
+# is - so this block exists because the substrate is Gazebo and for no other
+# reason.
+#
+# `initial_pose` is the REAL datum: where the vehicle is told it is, in the
+# frame of the map it was given. That is what an operator does in the field and
+# all a real vehicle could ever know, which is why AMCL is seeded from it.
+#
+# They are the same place expressed twice, so ONE of them owns it: `spawn`
+# does. `initial_pose` is its image under the committed registration of
+# sim/maps/warehouse/, derived - never typed - by
+#
+#   python3 agv/forklift/scripts/localization_run.py map-pose \
+#       --x -4.5 --y 7.0 --yaw 0.0
+#
+#   world  (-4.5000, +7.0000) yaw +0.000000 rad
+#   map    (+1.5848, +12.5769) yaw -0.007915 rad
+#
+# derived 2026-08-05, against the committed grid. Re-derive it if `spawn`
+# moves or the map is rebuilt; the conversion is deliberately NOT done inside
+# the vehicle's launch, because that would make the vehicle's own bringup
+# depend on a transform that exists only because this is a simulation
+# (launch/localization.launch.py's header states the same rule).
+#
+# The pose chosen is the aisle at y = +7.0 that m5-10 case A and the m5-11
+# envelope runs both use, so one spawn serves the Nav2 goal and the
+# pass-through measurement.
+# ---------------------------------------------------------------------------
+
+spawn:
+  x_m: -4.5
+  y_m: 7.0
+  z_m: 0.05
+  yaw_rad: 0.0
+
+initial_pose:
+  x_m: 1.584770
+  y_m: 12.576859
+  yaw_rad: -0.007915
+
+# ---------------------------------------------------------------------------
+# Per-vehicle calibration would live here (ADR 0016 D2 names it as the third
+# thing this file carries). This vehicle has none: every calibration constant
+# it uses today - encoder counts, rolling-radius error, the steer zero offset -
+# is a property of the MODEL rather than of this instance, and lives in
+# ../config.yaml. A block is not invented here to hold nothing.
+# ---------------------------------------------------------------------------

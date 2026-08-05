@@ -43,6 +43,24 @@
   rack, and a tree with no motion recovery is what makes the refusal prompt
   and quiet instead of a machine milling about in an aisle.
 
+  THE THIRD SELECTOR (added m5-33) IS THE ONE NON-STOCK ADDITION BESIDES THE
+  RECOVERY REMOVAL. GoalCheckerSelector is nav2's own node
+  (nav2_goal_checker_selector_bt_node, in bt_navigator's default plugin list
+  in this build - verified against libbt_navigator_core.so, 2026-08-05), and
+  it is placed and wired exactly like the ControllerSelector and
+  PlannerSelector already above it: it subscribes to a latched std_msgs/String
+  and writes the name onto FollowPath's goal_checker_id port.
+
+  ITS DEFAULT IS THE COMMITTED CHECKER. With nothing publishing on
+  `goal_checker_selector`, `default_goal_checker="general_goal_checker"` makes
+  this tree behave exactly as it did before - the same 0.25 m / 0.15 rad pair,
+  unchanged. The selector exists so a STAGING pose can be checked
+  position-only (nav2.yaml `staging_goal_checker`) while the station pose
+  keeps the tight pair untouched. See ARRIVAL-GEOMETRY.md section 7 phase 1:
+  the arrival heading is delivered by the ROUTE, because EVIDENCE_NAV2.md
+  section 8.3 measured that this vehicle has no endgame manoeuvre that can
+  deliver it.
+
   EVERYTHING ELSE IS THE STOCK TREE, deliberately: the 1 Hz replan rate, the
   six top-level retries, the per-branch costmap clears and the two error
   codes are nav2's and are not re-argued here.
@@ -57,6 +75,7 @@
       <PipelineSequence name="NavigateWithReplanning">
         <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
         <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
+        <GoalCheckerSelector selected_goal_checker="{selected_goal_checker}" default_goal_checker="general_goal_checker" topic_name="goal_checker_selector"/>
         <RateController hz="1.0">
           <RecoveryNode number_of_retries="1" name="ComputePathToPose">
             <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
@@ -67,7 +86,7 @@
           </RecoveryNode>
         </RateController>
         <RecoveryNode number_of_retries="1" name="FollowPath">
-          <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}"/>
+          <FollowPath path="{path}" controller_id="{selected_controller}" goal_checker_id="{selected_goal_checker}" error_code_id="{follow_path_error_code}"/>
           <Sequence>
             <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
             <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>

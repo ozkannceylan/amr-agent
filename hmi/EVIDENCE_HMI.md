@@ -1389,3 +1389,282 @@ reading.
 | A latch cleared with the full T5.4 sequence | H.2 shows the held reset clearing the boot latch with the enable already low. `SPEC.md` §11 T5.4's whole procedure — release ENABLE, hold RESET across the moment the cause disappears, assert ENABLE again — is section E's, run against the endpoint, and is not repeated here |
 | The `page beacon` window measured, rather than illustrated | H.7 is a picture of a state whose numbers section E measured. Nothing in this section times anything |
 | Any figure derived by arithmetic while writing | Every quoted value is what the page's own DOM carried at the instant of capture, printed by the capture script beside each shot |
+
+---
+
+# Section I — HMI v2a, the operator screen, state by state (m5-28)
+
+`hmi/V2A-DESIGN.md` is the authority for the screen recorded here; m5-28 built
+it. Every image below lives in `hmi/evidence/screenshots/`, which is
+**gitignored by owner ruling** — the files stay on the machine that produced
+them, and **this list is the only part of the capture that travels with the
+repository**. A claim to have screenshotted a state is worth nothing without
+its row here.
+
+Every value quoted in this section is what the page's own DOM carried at the
+instant of capture, printed by the capture script beside each shot. Nothing
+here was derived by arithmetic while writing.
+
+## I.1 Environment
+
+| Item | Value |
+|---|---|
+| Machine | the **Windows showcase machine**, not the container and not WSL |
+| Python | 3.13.2 (MSC v.1942, 64-bit), `asyncua` 2.0.1 |
+| Browser | `Chrome/151.0.7922.75`, headless, driven over the Chrome DevTools Protocol |
+| Server under the HMI | `hmi/tools/v2a_scenario_double.py` on `opc.tcp://127.0.0.1:4861/amr-agent/v2ascenariodouble/` |
+| HMI configuration | `hmi/config-v2a-double.yaml`, HTTP `127.0.0.1:8094` |
+| Write cycle / read poll | 100 ms / 200 ms, as that configuration names them |
+| Adopt delay in the double | **1.2 s per stage**, `--adopt-delay 1.2` |
+| Run log | `hmi/evidence/capture-v2a-2026-08-05-run3.log` — the m5-29b re-capture, after the finding-1 fix. The m5-28 run it replaces is `…-run2.log`, kept beside it |
+| Manifest written as the run landed | `hmi/evidence/screenshots/MANIFEST-2026-08-05.txt` |
+
+**Two more logs belong to this section and are read with it.**
+`hmi/evidence/capture-v2a-2026-08-05-f1-defect-before-fix.log` is the same
+second-tab pass run against the **superseded** page, and it is the reproduction
+of m5-29 finding 1 (§I.7). `hmi/evidence/f2-connect-failure-2026-08-05.log` is
+the connect refusal `hmi/config.yaml` produces against a server with no §12
+nodes (§I.8).
+
+**No PLC was contacted.** Neither the commissioned S7-1500 nor PLCSIM Advanced
+took part: the endpoint above is loopback, and the running CPU carries no
+`opcua-nodes.md` §12 node at all (m5-23 Part B), which is exactly why the
+double exists. **Nothing in this section is evidence about the TIA build, about
+a real F-CPU, or about the vehicle layer**, and nothing rehearsed against a
+double closes any gate criterion.
+
+## I.2 What produced these, and the three roles
+
+```
+v2a_scenario_double.py   plays the PLC and the vehicle. It owns every verdict
+                         the page displays. It runs NO arbiter: each state
+                         change is a straight-line script that waits for a
+                         value the HMI wrote, sleeps a scripted delay and
+                         assigns a recorded answer from SPEC.md 14. A refusal
+                         is a DIFFERENT SCRIPT, never a computed branch
+hmi_server.py            the software under test, backend half
+the browser              plays the OPERATOR, through the page, with genuine
+                         input events - so the page's own DOM handlers are the
+                         code exercised, not the HTTP endpoints behind them
+```
+
+The last line is deliberate. §C of this document carries a residual from
+exactly that confusion: a page's handlers can pass an endpoint test while being
+themselves unexercised. Every press below went through `Input.dispatchMouseEvent`
+into the rendered page.
+
+`capture_v2a_screens.mjs` speaks CDP over the WebSocket built into Node 22 and
+**adds no dependency of any kind** — no Playwright, no `node_modules`, nothing
+in any venv. That is why it runs on this machine, where `capture_screens.mjs`
+(§H's Playwright instrument) does not.
+
+## I.3 The screenshots, one row per state
+
+All files are `hmi/evidence/screenshots/v2a-NN-…-2026-08-05.png`.
+
+| # | File stem | State it shows |
+|---|---|---|
+| 00 | `cold-start-link-not-granted` | CPU cold start with `HmiLinkOk` still `FALSE`. **PROCESS STOP renders UNAVAILABLE**, every read-derived state renders unknown (hatched, em-dash), and the backend is nonetheless writing `HmiProcessStopRequest` `TRUE` — the §12.8 boot value it must not flip |
+| 01 | `cold-start-before-operator` | cold start with the link up, before the operator does anything: the stop **ENGAGED and armed**, process stop latched, reset required, envelope `WITHHELD` / `0.00 m/s` / `not stated`. §14.9's signature, and connecting has cleared nothing |
+| 02 | `process-stop-released-latch-stands` | design §9 step 3, the operator releases the stop: `HmiProcessStopRequest` goes `FALSE` and **the latch visibly does not clear**. Request and latch are two things |
+| 03 | `reset-held` | step 4, RESET held: `HmiResetRequest` `true` for as long as the button is down |
+| 04 | `latches-cleared-nothing-energized` | after the reset: both latches clear and **nothing energized** — teleop inactive, motion withheld, ceiling still `0.00 m/s` |
+| 05 | `mode-change-in-flight-not-in-force` | **A MODE CHANGE IN FLIGHT, stage 1.** Selected TELEOP, in force still NONE; chip reads *selection not in force*, neutral, never an alarm. Captured **350 ms into a 1.2 s window** |
+| 06 | `mode-change-in-flight-vehicle-adopting` | **A MODE CHANGE IN FLIGHT, stage 2.** In force TELEOP, vehicle still applying NONE; chip reads *vehicle adopting*, and the two data are shown side by side as data, not a verdict |
+| 07 | `teleop-mode-in-force` | the in-flight rendering **cleared**: selected = in force = applied, zone B un-greyed |
+| 08 | `teleop-enabled-and-driving` | ENABLE asserted and the joystick held — the second, separate act after selecting the mode |
+| 09 | `autonomous-mode-in-force` | AUTONOMOUS in force; the selection *was* the affirmative action. Envelope reads `PERMITTED` / `0.80 m/s` / `ready` |
+| 10 | `process-stop-engaged` | the stop engaged during an autonomous run: amber, rectangular, depressed, captioned *stop requested — release, then RESET*. It acts on press, with no confirmation dialog |
+| 11 | `process-stop-latched` | the PLC has latched it: *process stop latched* and *reset required* assert, and **the envelope goes non-permissive** — the stop reaches the vehicle through the envelope, not through a stop topic of its own |
+| 12 | `diagnostics-drawer-open` | zone F opened: every raw input, output, request and counter v1 showed as a labelled number, demoted rather than deleted. `ForkliftVehicleHeartbeat` appears as the **raw counter** and no liveness verdict is derived from it |
+| 13 | `mode-selection-refused` | **a disagreement that never resolves**: AUTONOMOUS selected, entry refused and consumed, and 5 s later the chip still reads *selection not in force*. The caption states the away-and-back re-selection; the conditions strip re-renders what the PLC publishes and diagnoses nothing |
+| 14 | `vehicle-adopting-unresolved` | a **vehicle that never adopts**: AUTONOMOUS in force, vehicle applying NONE, 2.5 s in — twice the adopt window — still neutral and still not an alarm |
+| 15 | `mode-disagreement-declared-by-plc` | the same disagreement after the PLC's own delay elapsed: **RESET REQUIRED** asserts in zone C and the envelope goes non-permissive. The verdict arrived from the PLC; the HMI ran no timer |
+| 16 | `link-down-process-stop-unavailable` | `HmiLinkOk` `FALSE` **with the OPC UA session still up**: the stop renders UNAVAILABLE and the strip states the degraded-mode fact. The two causes are visibly separate |
+| 17 | `safety-lamps-unknown-link-down` | **zone D cropped from the same frame**: with the reading unattributable, all four F-layer lamps render UNKNOWN rather than clear |
+| 18 | `session-down` | the server went away under a live session: the session chip leaves CONNECTED and the stop is UNAVAILABLE on the backend's own channel rather than on `HmiLinkOk` |
+| 19 | `backend-not-answering` | the HMI backend itself stopped: the page does **not** keep its last live look — every state goes unknown |
+| 20 | `safety-lamps-healthy` | mirrors present and clear: outlined lamps, own banner, own frame, nothing from zone C merged in |
+| 21 | `safety-lamps-f-demand-active` | an F-layer e-stop demand asserted — **the only red element on the page** — with the PROCESS STOP beside it still amber |
+| 22 | `safety-lamps-group-absent` | the server does not carry `Forklift/Safety/` at all: the zone greys with *not present on this server*, the session stays CONNECTED, no lamp is substituted with `FALSE` |
+| 23 | `page-beacon-drop-standing-controls-held` | after this page went quiet and returned: the five teleop requests were held at rest and the enable dropped, while **the process stop and the mode selector kept their operator-set values** |
+| 24 | `second-tab-adopts-current-state` | **a SECOND TAB**, opened while the operator was already working in the first: it renders the stop RELEASED and TELEOP selected — the values the backend holds *now* — rather than the §12.8 boot values a page asserting its own defaults would show |
+| 25 | `second-tab-backgrounded-stop-stays-engaged` | **the m5-29 finding-1 path walked.** The operator engaged the stop in this tab; the other tab, holding the older position, was then backgrounded with its `visibilitychange` and `blur` handlers fired. The engaged stop is **still engaged**, on the wire and on this screen, and the selector is still TELEOP |
+
+Images 24 and 25 were added by m5-29b. Every image in the table was re-captured
+in that run, so no row describes a page that no longer exists: the mode chip's
+in-flight tone is now neutral rather than amber (§5.2), and zone A carries the
+§8 *not reaching the PLC* caption under the selector when the link is down.
+
+Brief m5-28 §3 asked for a minimum of ten states. The set above is 26, and the
+states it adds beyond that list are the ones the design specifies and the list
+did not name: the pre-link cold start (00), the release that does **not** clear
+the latch (02), the reset that energizes nothing (04), **both halves** of the
+adopt window separately (05, 06), the settled state that proves the in-flight
+rendering *clears* (07), the diagnostics drawer (12), the two different
+never-resolving disagreements (13, 14), the PLC declaring one (15), the session
+and backend halves of "down" apart from the link half (18, 19), the
+standing-control behaviour under a page drop (23), and the two-page states a
+one-page instrument could not reach at all (24, 25).
+
+## I.4 The adopt window, exercised rather than asserted
+
+LESSONS 2026-07-31: the obvious steady-state form of a commanded-versus-reported
+comparison made autonomous mode **permanently unreachable**, and it was found by
+an executable double running a **200 ms** adopt window rather than an
+instantaneous one. This build was tested the same way and with a longer window.
+
+The double opens the window in two stages, each `--adopt-delay` long, because
+the screen has two distinct in-flight renderings:
+
+| Stage | Condition | Chip | Where it was captured |
+|---|---|---|---|
+| 1 | selected ≠ in force | `SELECTION NOT IN FORCE` | image 05, **350 ms into a 1.2 s stage** |
+| 2 | selected = in force ≠ applied | `VEHICLE ADOPTING` | image 06, **400 ms into the next 1.2 s stage** |
+| — | all three agree | the mode name, steady | image 07 |
+
+Quoted from the run log, image 05 and image 06, unedited:
+
+```
+05 selection in flight  strip.mode "SELECTION NOT IN FORCE"
+                        machineMode "NONE"   selected [1]   requests.mode "1"
+06 vehicle adopting     strip.mode "VEHICLE ADOPTING"
+                        machineMode "TELEOP" vehicleMode "NONE" vehicleDiff true
+```
+
+**Three things this run establishes and one it does not.** It establishes that
+the in-flight rendering appears (05, 06), that it **clears** when the window
+closes (07), and that a disagreement which never resolves is rendered without
+alarm and without any HMI-side clock — twice, in two different shapes (13, 14),
+with the PLC's own declaration arriving later as `ForkliftResetRequired` (15).
+It does **not** establish anything about `MODE_DISAGREE_DELAY`, about
+`#modeEntryAdmitted`, or about any §14 term: the double replays answers and
+computes no verdict, and every one of those belongs to `plc/forklift/SPEC.md`
+and to the TIA build.
+
+## I.5 The checks the capture asserted while it ran
+
+The capture script does not only photograph. It reads the rendered DOM at each
+step and **asserts**, so a silent rendering regression cannot pass as a
+captured screenshot. Run of 2026-08-05 (`…-run3.log`, after the m5-29b fixes):
+**51 checks, 51 passed, 0 failed** (counted by `CHECK PASS` / `CHECK FAIL`
+lines in the run log; the m5-28 run in `…-run2.log` carried 41 of these, and
+m5-29b adds the other 10 — eight in the second-tab pass and two on the §8 selector caption). The load-bearing ones:
+
+| Check | What would have failed it |
+|---|---|
+| cold start: the stop is UNAVAILABLE and `disabled` while `HmiLinkOk` is `FALSE` | a control that looks armed over a dead link |
+| cold start: it is not rendered engaged-looking while unavailable | the two states blurring into one |
+| cold start: every read-derived state is UNKNOWN, not clear | *not yet written* read as *clear* |
+| cold start: the backend is nonetheless writing the stop engaged | a connecting HMI flipping a non-permissive boot value |
+| PS1: the latch did not clear when the request did | request and latch conflated |
+| the reset cleared the latches and energized nothing | a reset that starts something |
+| adopt stage 1 / stage 2 chips, and machine mode never showing the selector | §12.3 **M2**, showing your own request back as state |
+| the in-flight rendering cleared once the window closed | a stuck in-flight state, i.e. the 2026-07-31 defect's shape |
+| an unresolved adopt window is still neutral, and the chip never says "fault" | the HMI declaring a verdict the PLC owns |
+| M6: teleop-active and motion-enable never both asserted | two live command sources |
+| `HmiLinkOk` `FALSE` with the session UP still renders UNAVAILABLE | conflating the two independent causes |
+| an F-demand asserts red, and the stop beside it stays amber | red leaking out of zone D |
+| an absent mirror group greys and the session stays CONNECTED | an optional group failing a connect, or reading `FALSE` |
+| the backend gone: the page renders unknown, not its last look | a frozen display that looks live |
+| H6: the five deadman requests went to rest; the heartbeat kept running | the page loss buying the PLC's heavier reaction |
+| PS-B / §5.1: the two standing controls held their operator-set values | a page hiccup inventing an operator act in either direction |
+| F1(a): a second page renders the backend's standing values, not the boot values | a page asserting its own defaults over an operator's positions |
+| F1(b): backgrounding a second page changed neither standing value on the wire | **the m5-29 finding-1 defect** |
+| F1(c): every write cycle after that background still carried both values | the same, proved per cycle rather than at two samples |
+| §8: the selector says *not reaching the PLC* link-down, and does not say it link-up | a caption the design requires being absent, or stuck on |
+
+## I.6 What is deliberately not shown here
+
+| Not shown | Why |
+|---|---|
+| Anything about the commissioned S7-1500 or the TIA build | neither was contacted; the CPU carries no §12 node yet, which is why the double exists |
+| Anything about a real F-CPU | the four mirrors in 20–22 are the double's scripted values. No F-program exists behind them and no safety claim is made or implied by an image of a lamp |
+| Anything about the vehicle's control layer | `ForkliftVehicleModeApplied` and `ForkliftVehicleHeartbeat` were moved by a script standing in for the bridge. No `agv/` node ran |
+| Any arbitration, threshold, delay or latch behaviour of the standard program | the double replays recorded answers with scripted delays. Divergence resolves toward `SPEC.md` and toward TIA, never toward the double |
+| The page under a real operator's hand | a headless Chrome driven by a script is not an operator. No touch device, screen size, glove or lighting condition was evaluated |
+| The live map, obstacles or pose | v2b (m5-13, ADR 0011 D4). v2a designs and builds none of it |
+| Any measured latency or timing figure | this section photographs states. The write-cycle and round-trip figures of §E were not re-measured here, and no number in §I is a performance claim |
+
+## I.7 The second tab — m5-29 finding 1, reproduced and then walked again
+
+The m5-28 page rendered its two STANDING controls from a **local copy adopted
+once** and re-asserted that copy in **every** post: the 50 ms dirty loop, every
+deadman post, `blur`, `pagehide` and `visibilitychange`. One tab and one reload
+are safe and the m5-28 evidence for them is genuine. A **second tab** is not:
+it holds the position the operator has since changed, and backgrounding it
+posts that stale position.
+
+An operator opening a second tab is not doing anything unusual, so this was
+**reproduced before it was fixed** rather than argued about. The instrument
+gained a two-page pass (`capture_v2a_screens.mjs`, `passSecondTab`) that opens a
+real second browser target on the same backend, has the operator engage the stop
+in the first, and then backgrounds the second — firing the page's own
+`visibilitychange` and `blur` handlers into it.
+
+**The defect, from `capture-v2a-2026-08-05-f1-defect-before-fix.log`** (the same
+pass against the superseded page; DOM quotes unedited):
+
+```
+B2 the other tab follows the backend    pstop.label "PROCESS STOP"
+                                        requests.pstop "true"
+A after the other tab was backgrounded  pstop.label "PROCESS STOP — ENGAGED"
+                                        requests.pstop "false"
+CHECK FAIL  F1(b)   HmiProcessStopRequest=false HmiDriveModeRequest=1
+CHECK FAIL  F1(c)   cycles=20 stop-flips=20 mode-flips=0
+```
+
+Read the two middle lines together: **the operator's own screen says ENGAGED
+while the wire says released.** The stop was released by a browser event, and
+every one of the 20 write cycles that followed carried the release
+(`hmi-cycles-2026-08-05-secondtab-20260805T115515Z-pid12676.csv`, the backend's
+own per-cycle log). Four checks failed. The mode selector has the identical
+mechanism, where a stale post is a fresh `#modeSelectRise` at the PLC — X3, or
+X2, which is the affirmative autonomous enable.
+
+**The same pass after the fix**, from `…-run3.log`:
+
+```
+B2 the other tab follows the backend    pstop.label "PROCESS STOP — ENGAGED"
+A after the other tab was backgrounded  pstop.label "PROCESS STOP — ENGAGED"
+                                        requests.pstop "true"
+CHECK PASS  F1(b)   ...                 CHECK PASS  F1(c)  cycles=23
+                                        stop-flips=0 mode-flips=0
+```
+
+The second tab now **follows the backend** — it renders ENGAGED because the
+backend holds ENGAGED — and backgrounding it changes nothing on the wire, in
+any of the 23 write cycles that follow
+(`hmi-cycles-2026-08-05-secondtab-20260805T120629Z-pid656.csv`). The deadman
+half is untouched: `F1(b2)` confirms the backgrounded page's five teleop
+requests still went to rest, which is H6 doing exactly its job.
+
+What changed, in three lines: the page renders both standing controls from
+`/state` on **every** poll and holds no copy; a standing key is sent only in the
+post triggered by the click that changed it, so no periodic, deadman, blur or
+beacon post carries one and a missing key means UNCHANGED; and `do_POST`
+republishes the standing section, so `/state` cannot serve a stale position while
+the OPC UA session is down. The rendered position catches up on the next 200 ms
+poll after a click, and there is deliberately no optimistic local override —
+a local override is what the defect was made of.
+
+## I.8 The designed connect failure, made legible
+
+`hmi/config.yaml` is **meant** to fail at connect against today's commissioned
+CPU: that CPU carries no `opcua-nodes.md` §12 node until the owner's TIA
+session, and a missing REQUIRED node is a genuine connect failure this client
+never browses around. m5-29 finding 2: the symptom was a bare
+`connect failed: BadNoMatch … (retry in 1.0 s)` naming no node and no path, so
+the next person to hit it would debug a working system.
+
+`hmi/evidence/f2-connect-failure-2026-08-05.log` is the refusal as it now
+reads, produced by pointing the v2a node set at `plc/forklift/double/server.py`
+(port 4850) — a server carrying the §10 set and **no** §12 node, which is the
+shape of the CPU today. It names the node (`HmiDriveModeRequest`), its path
+under the resolved browse prefix, that the failure is expected, the procedure
+that adds the nodes (`plc/forklift/TIA-BUILD-PROCEDURE.md`), the config header
+that explains it, and what to run meanwhile. The same string is what `/state`
+carries as `session.reason`, so the page's degraded banner says it too.
+
+No PLC was contacted for §I.7 or §I.8, and neither is evidence about the TIA
+build, a real F-CPU or the vehicle layer.

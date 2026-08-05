@@ -1,3 +1,12 @@
+# SUPERSEDED BY HMI v2a (m5-28). This file names the M4 six-node write set;
+# `hmi_server.py`'s allowlist is now the EIGHT of `opcua-nodes.md` §12.1, so
+# the backend refuses to start on this configuration and says which nodes are
+# missing. It is kept as the record of what the runs in EVIDENCE_HMI.md
+# actually used. Making the M4 harnesses runnable again needs the
+# `plc/forklift/double/` §14 + §12 extension requested in the m5-27 report; it
+# is not an edit to this file, and this file is not edited to pretend
+# otherwise.
+#
 # hmi/config-logic-double.yaml — the same HMI against the PLC LOGIC DOUBLE.
 #
 # `plc/forklift/double/server.py`, port 4850. That double is the PLC layer's

@@ -23,7 +23,18 @@ The forklift group loosens nothing the cell group established. Where a statement
 of the cell alone it has been **scoped to its group rather than deleted**, and every count
 below says which set it counts (§2.1).
 
----
+> **Scope note (m5-36, owner ruling 2026-08-05).** `bridge/` now holds a **second
+> process** this document does not describe: the **stand-in writer**, the simulation's
+> stand-in for the *wiring* of the forklift twin's three simulated safety-input channels.
+> It runs on the Windows host, reaches the CPU through the **S7-PLCSIM Advanced API by
+> tag name** — not OPC UA — and is specified by `plc/forklift-safety/SPEC.md` §7
+> (ADR 0015 D1), realised by `bridge/STANDIN-WRITER-DESIGN.md`. **Every statement in
+> this document — one process, client-only, never listens, the no-logic tables, the
+> signal maps, the allowlist counts — is about the translator process alone** and none
+> is weakened: the two processes share no code, no config, no session and no tag, the
+> writer's four tags live in a DB the OPC UA server does not expose, and the writer's
+> single TCP listener (the field-evaluation link, port 45015) belongs to that process,
+> not to the translator, which still never listens on anything.
 
 ## 1. What the bridge is, and is not
 

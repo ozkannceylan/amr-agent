@@ -66,12 +66,23 @@ project can command in engineering units.
 | `EVIDENCE_LOCALIZATION.md` | The dated runs behind AMCL against the frozen map, scored **absolutely** through the committed registration with the 0.141 m floor stated beside every figure: steady state over the full mapping route, convergence from a 1.166 m / 10° wrong prior, a 128.7 s dwell in the worst degenerate stretch, and that stretch traversed fork first against a forward control. |
 | `nav2.yaml` | The Nav2 stack, written for a **tricycle**: `SmacPlannerHybrid` with `REEDS_SHEPP` (reverse comes from the motion model, not from `allow_reverse_expansion`, which is a Lattice parameter), `RegulatedPurePursuit` with `use_rotate_to_heading: false` and `allow_reversing: true`, a **polygon** footprint padded by the measured localization error, and a `CLOSED_LOOP` velocity smoother. Every non-default carries its reason in the file. Contains no safety parameter. |
 | `behavior_trees/navigate_to_pose_tricycle.xml` | The navigate-to-pose tree with nav2's `Spin` and `BackUp` recoveries **removed**: `Spin` has no `(δ, v_D)` solution on this vehicle and a blind reverse duplicates the planner without the map. What is left is clear the costmaps, wait, replan — and if it still cannot plan, stop and report. |
-| `launch/navigation.launch.py` | The vehicle's **navigation** stack: planner, controller, behaviours, velocity smoother, `bt_navigator`, the Twist→tricycle converter and `forklift_io.py`. Started against a running bringup and localization. Registers every lifecycle handler before emitting the first transition. `cmd_topic` is m5-11's envelope-gate insertion point. |
+| `launch/navigation.launch.py` | The vehicle's **navigation** stack: planner, controller, behaviours, velocity smoother, `bt_navigator`, the Twist→tricycle converter and `forklift_io.py`. Started against a running bringup and localization. Registers every lifecycle handler before emitting the first transition. **It now starts the envelope gate as well, and `cmd_topic` defaults to the gate's output** — `gate:=false cmd_topic:=/cmd_vel_smoothed` restores the m5-10 chain. |
+| `scripts/envelope_gate.py` | **The vehicle-side enforcer of the PLC's motion envelope** (ADR 0014 seam (b)), sitting **below** the velocity smoother: enable false, permit false, an invalid ceiling or mode, or an envelope older than the freshness window → a controlled ramp to zero on the vehicle's own deceleration; otherwise the command passes, clamped in **magnitude** to the ceiling with both components scaled so the arc survives. Reports its applied mode and a heartbeat back. In teleop it ramps to zero and **falls silent**, because the PLC owns the actuator topics there. It is **not** a safety function and **not** an OPC UA client. `--self-check` exercises the arithmetic with no ROS. |
+| `launch/envelope.launch.py` | The gate's own measurement stack: the velocity smoother with `feedback` **overridable from the command line**, the gate, the converter and `forklift_io.py`, and no planner, controller or localizer. It is what makes the open-loop / closed-loop comparison a one-variable experiment. |
+| `scripts/envelope_run.py` | The instrument behind `EVIDENCE_ENVELOPE.md`, and the **ROS 2 topic double** that stands in for the PLC: it publishes the six §12.10 envelope topics on a script — including the one interesting thing a double can do, **stop publishing** — records every stage of the chain in four files, and scores the run. No OPC UA, no bridge, no PLCSIM. |
+| `EVIDENCE_ENVELOPE.md` | The dated runs behind the gate, on **the owner's WSL machine**: the controlled stop on an enable drop and on a stale envelope, the ceiling clamp at four values, pass-through fidelity, the permit, the readback and the source handover — and the measured open-loop / closed-loop difference at gate release that justifies `nav2.yaml`'s `CLOSED_LOOP`. |
 | `scripts/cmd_vel_to_tricycle.py` | The one place a body twist becomes a steer angle and a drive-wheel **tread** speed: `δ = atan2(L·w·sign(v), \|v\|)`, `v_D = v / cos δ`. Closes no loop and holds no state but the last commanded steer. Refuses rotation in place — at a standstill only — and counts it. |
 | `scripts/nav2_run.py` | The instrument behind `EVIDENCE_NAV2.md`: `goal` sends one world-frame goal through the committed registration and records the run at 10 Hz, `analyse` scores it absolutely, `plan` asks the planner alone for a path with no simulator, and `convcheck` checks the Twist→tricycle conversion against a **commanded motion**. Reads ground truth as a reference and drives nothing that navigates. |
 | `scripts/footprint_from_model.py` | Derives the Nav2 footprint polygon from `model.sdf` (convex hull of every collision and visual primitive, steer axis at both stops) and checks it against `nav2.yaml`. `--aisle` scans the committed grid and reports how much lateral room the padded polygon actually leaves. No simulator. |
 | `EVIDENCE_NAV2.md` | The dated runs behind autonomy: the five Jazzy parameter traps each probed on a running node, the footprint derivation, the Twist→tricycle conversion checked against a **commanded motion**, and four measured cases — a straight aisle traverse, a reverse segment, a goal in the named degenerate stretch, and a goal the planner refuses, with what refusal looks like from outside. |
-| `evidence/` | The raw recordings, leg marks, captured `/tf` publisher lists and verbatim scorer output for `m5-07e` and `m5-08e`. Every figure in the two evidence files above is recomputable from them. |
+| `vehicles/allocation.yaml` | **The one owner of the serial → DDS domain mapping** (ADR 0016 D1, invariant 10). No other file in this repository pairs a serial with a domain ID, and no per-vehicle config carries one. It also reserves the operator/monitoring domain and the vehicle band. |
+| `vehicles/F001.yaml` | **One forklift's identity**: its VDA 5050 `serialNumber`, its spawn pose (world frame, a simulation datum) and its initial pose (map frame, the datum a real vehicle is given). Everything that makes this machine *this* machine, and nothing that is true of every forklift. |
+| `scripts/vehicle_identity.py` | The single reader of the two files above. Joins them, validates the allocation and **refuses** — an unallocated serial, a duplicate domain, an ID outside the safe 0–101 range, a per-vehicle file carrying its own domain. `--self-check` exercises every refusal with no ROS. |
+| `scripts/vehicle_image.py` | **Starts one vehicle's own computer.** The stand-in for the systemd unit a real forklift would run (ADR 0016 D5): it resolves the identity, puts the process into that vehicle's DDS domain and hands over to the launch below. |
+| `launch/vehicle_image.launch.py` | **Everything the vehicle's own computer runs**, in one launch and one domain: the gz bridges including `/clock`, sensor TF, wheel odometry, the gyro gate, the EKF, map server and AMCL, the whole Nav2 stack, the envelope gate, the converter and `forklift_io`. It starts **no** Gazebo server — the sim side owns the world. Refuses if the domain it was handed is not the allocated one. |
+| `scripts/check_contract_topics.py` | Parses the ROS contract table below out of this file and diffs it against a running graph. `--expect-absent` inverts the verdict, which is how "the vehicle is not visible from this domain" is a pass with a name rather than an empty screen. |
+| `EVIDENCE_VEHICLE_IMAGE.md` | The dated run behind ADR 0016 Phase 1: the vehicle image inside its own domain, the boundary demonstrated by failing to cross it from three other domains, the contract diffed from inside, a Nav2 goal accepted, and the m5-11 §7 observation re-run. |
+| `evidence/` | The raw recordings, leg marks, captured `/tf` publisher lists and verbatim scorer output for `m5-07e`, `m5-08e` and `m5-11`. Every figure in the evidence files above is recomputable from them. |
 
 There is deliberately **no world file here.** Worlds belong to `sim/`.
 This directory owns a vehicle.
@@ -230,7 +241,15 @@ the front one.
 |---|---|---|---|---|
 | `/forklift/cmd/traction_speed` | `std_msgs/Float64` | on demand | a consumer | ground speed request [m/s] |
 | `/cmd_vel` | `geometry_msgs/Twist` | 20 Hz while a goal is active | `controller_server` | The controller's body twist. **`Twist`, not `TwistStamped`**: on Jazzy `enable_stamped_cmd_vel` defaults false and `nav2.yaml` pins it, because a subscriber of the wrong type receives nothing and logs nothing about it |
-| `/cmd_vel_smoothed` | `geometry_msgs/Twist` | 20 Hz | `velocity_smoother` | The same twist, ramp limited **closed loop against `/forklift/odom_filtered`** and scaled as a whole so the curvature `w/v` survives. Read by `cmd_vel_to_tricycle`. **m5-11's envelope gate is inserted between this topic and the converter** (ADR 0014 seam (b)) via the `cmd_topic` launch argument |
+| `/cmd_vel_smoothed` | `geometry_msgs/Twist` | 20 Hz | `velocity_smoother` | The same twist, ramp limited **closed loop against `/forklift/odom_filtered`** and scaled as a whole so the curvature `w/v` survives. **Read by the envelope gate**, which now sits between this topic and the converter (ADR 0014 seam (b), m5-11) — inserted through `navigation.launch.py`'s `cmd_topic` argument, whose default is now `/cmd_vel_gated`. **Closed loop is not a preference here**: with a gate below it, an open-loop smoother goes on ramping while the vehicle is held at zero and hands over a step at release — measured at **+0.5000 m/s and 3.52 m/s²** against **+0.0250 m/s and 0.41 m/s²** closed loop (`EVIDENCE_ENVELOPE.md` §6) |
+| `/cmd_vel_gated` | `geometry_msgs/Twist` | 20 Hz | `envelope_gate` | **The envelope gate's output, and what the converter now reads.** While the envelope is permissive it is the message above, emitted unchanged unless the speed ceiling bites, in which case both components are scaled by one factor so the arc survives. While it is not — enable `FALSE`, permit `FALSE`, an invalid ceiling or mode, or an envelope older than `envelope.stale_window_s` — it is a controlled ramp to zero at `envelope.stop_decel_mps2` and then a held zero. **It is not a safety signal**: loss of the envelope is a degraded mode, not a safety event (invariant 2), and the onboard protective stop reaches no topic. Measured in `EVIDENCE_ENVELOPE.md` |
+| `/forklift/envelope/motion_enable` | `std_msgs/Bool` | 20 Hz | the bridge (a double at M5) | **The PLC's permission for autonomous motion** (`opcua-nodes.md` §12.4). **It permits; it never commands** — `TRUE` is not an instruction to move. `FALSE` is the non-permissive value and is what a cold start reads |
+| `/forklift/envelope/speed_ceiling` | `std_msgs/Float64` | 20 Hz | the bridge (a double at M5) | **An upper bound on the magnitude of ground speed [m/s], unsigned**, not a setpoint and not a target. A value outside `0.00 … envelope.ceiling_max_mps` is a broken supervisor and is non-permissive to this consumer, never a bound to clamp |
+| `/forklift/envelope/equipment_permit` | `std_msgs/Bool` | 20 Hz | the bridge (a double at M5) | **The fixed-equipment / station permit** (ADR 0012 D1): *is the equipment I own ready for you to act on it?* — **never** *may you be here?*, which is the fleet manager's zone reservation and reaches no node and no topic here. `FALSE` is non-permissive to the gate, which is this layer's conservative reading of a reaction §12 does not specify |
+| `/forklift/mode/in_force` | `std_msgs/UInt16` | 20 Hz | the bridge (a double at M5) | **The authoritative answer to "what mode is the machine in"**: `0` None, `1` Teleop, `2` Autonomous (`opcua-nodes.md` §12.3). The gate applies the autonomous law only in `2`; in `1` it ramps to zero and then **falls silent**, because the PLC owns `/forklift/cmd/*` in teleop |
+| `/forklift/mode/applied` | `std_msgs/UInt16` | 20 Hz | `envelope_gate` | **A readback, never a second answer** to the question above. It reports what the gate is applying **now**, so it lags the mode in force by the adopt window rather than echoing it |
+| `/forklift/vehicle/heartbeat` | `std_msgs/UInt16` | 20 Hz | `envelope_gate` | The gate's own cycle counter, wrapping at 65536. Its only meaning is "the vehicle's control layer completed a cycle recently"; it carries no process information and is **not** a second bridge heartbeat |
+| `/forklift/envelope/gate_state` | `std_msgs/UInt16` | 20 Hz | `envelope_gate` | Diagnostic of that node: `0` PASSING, `1` STOPPING, `2` HOLD_ZERO, `3` SILENT. Not a vehicle state and not a PLC datum |
 | `/forklift/nav/tricycle_refusals` | `std_msgs/UInt32` | on demand | `cmd_vel_to_tricycle` | Monotonic count of **rotation-in-place requests refused at a standstill**. A nonzero count means something upstream is commanding a differential base — it is the standing check that nav2's `Spin` recovery has not come back. Not a safety signal and not a machine state |
 | `/forklift/cmd/steer_angle` | `std_msgs/Float64` | on demand | a consumer | steer angle request [rad] |
 | `/forklift/cmd/fork_speed` | `std_msgs/Float64` | on demand | a consumer | carriage rate request [m/s] |
@@ -448,6 +467,45 @@ it stands that world presents this sensor with almost nothing
 (`EVIDENCE_SENSOR_COVERAGE.md` §10). `sim/worlds/warehouse.sdf`, racks 2.0 m
 and walls 2.5 m, does.
 
+## Running it as a vehicle image, which is what a second forklift would be
+
+**Since ADR 0016 Phase 1 there are two sides to a run**, and the split is the
+point: adding a forklift is adding a machine, not adding processes to a shared
+graph.
+
+| Side | What it is | Where it runs |
+|---|---|---|
+| **sim side** | Gazebo and the world. **No ROS process at all**, so it joins no DDS domain | one `GZ_PARTITION`, shared — one world is one warehouse floor |
+| **vehicle image** | everything the vehicle's own computer runs, listed in the table above | **its own `ROS_DOMAIN_ID`**, allocated in `vehicles/allocation.yaml` |
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export GZ_PARTITION=myrun          # the SIMULATOR's boundary. Shared.
+
+# the sim side: the floor
+gz sim -r -s sim/worlds/warehouse.sdf
+
+# the vehicle: it sets ROS_DOMAIN_ID itself, from the allocation table
+python3 agv/forklift/scripts/vehicle_image.py --vehicle F001
+```
+
+Three things follow from the domain and they are not optional:
+
+- **Every hand-run tool has to pick a domain.** `ros2 topic echo` against F001
+  needs `ROS_DOMAIN_ID=51`; a session that forgets sees an **empty graph** and
+  may read it as a dead stack. The number is read from
+  `vehicles/allocation.yaml`, never remembered.
+- **`GZ_PARTITION` and `ROS_DOMAIN_ID` are different boundaries.** gz transport
+  is not DDS, so the domain does not isolate the simulator and the partition
+  does not isolate the ROS graph. Set both.
+- **The wall is checkable, and it is checked rather than claimed.**
+  `EVIDENCE_VEHICLE_IMAGE.md` §3 runs `ros2 topic list` from three other
+  domains and finds no `/forklift` topic in any of them.
+
+`launch/vehicle.launch.py` and the `warehouse_bringup` recipes below are
+unchanged and still run; the vehicle image includes the first of them rather
+than restating its bridge table.
+
 ## Running it
 
 Rendering on this machine is software rasterisation, so the server runs
@@ -545,6 +603,25 @@ ros2 topic pub -r 5 /forklift/cmd/fork_speed     std_msgs/msg/Float64 '{data: 0.
 `fork_speed` is a **rate** request that is integrated into a position
 target. Zero does not lower the forks; zero holds them, which is what a
 lift control lever does.
+
+**Driving it under the envelope gate, which is what autonomous mode now
+means.** With `navigation.launch.py` up, the vehicle will not move until
+something publishes an envelope: no envelope is a **stale** envelope and
+the gate holds zero, which is the intended failure direction and not a
+broken stack. At M5 no PLC is connected, so the envelope comes from the
+double:
+
+```bash
+python3 agv/forklift/scripts/envelope_run.py run \
+    --scenario supervise --csv /tmp/run.csv --drop-at 12.0 --duration 45.0
+
+# the gate's arithmetic, with no ROS and no simulator
+python3 agv/forklift/scripts/envelope_gate.py --self-check
+```
+
+`EVIDENCE_ENVELOPE.md` §12 is the full recipe, including the two-run
+open-loop / closed-loop comparison, which needs
+`launch/envelope.launch.py` rather than the navigation stack.
 
 ## Two design points worth knowing before changing anything
 

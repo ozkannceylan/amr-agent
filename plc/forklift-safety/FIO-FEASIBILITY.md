@@ -536,15 +536,39 @@ step 2's configuration or download failing, step 3's module staying passivated,
 step 4's API not writing the channel by tag name or the write not standing, or
 step 5's coupling not rescuing a marginal step 4.
 
-**The fallback is ADR 0011 D2's named one**: the **present standard-DB stand-in**
-of `plc/forklift-safety/SPEC.md` §7 — the three Bools of `SafetyInputStandIn`,
-driven by *Modify* from the watch table over the engineering connection.
+> **Superseded in part by ADR 0015 (2026-08-05), and corrected here because the
+> §7 verdict routes readers into this section.** The paragraphs below are kept
+> as the record of what ADR 0011 D2 named; two of their claims did not survive
+> the probe this very document records, and the mechanism in force is stated
+> first so no reader leaves with the retired one:
+>
+> - **The stimulus in force** is the **automated API-driven stand-in writer**
+>   (ADR 0015 D1; `SPEC.md` §7 as rewritten): the S7-PLCSIM Advanced API
+>   writing `SafetyInputStandIn` by tag name, no human in the loop. **Watch-table
+>   *Modify* is retired as a stimulus for any gate evidence** — this document's
+>   own step 3 record shows the tool refusing fail-safe *Modify* outright in
+>   permanent safety mode (`2206:000002`), and the judge review showed a
+>   hand-typed value fails criterion (a)'s substance.
+> - **"Driven by *Modify* from the watch table"** was D2's description and it
+>   could not have run as written under the conditions the demonstration
+>   imposes (ADR 0015 D3 item 2).
+> - **"Inert by construction — the path the project already runs"** was a claim
+>   about a different configuration and was never exercised under these
+>   conditions; it is superseded by ADR 0015 D3 item 1 (LESSONS 2026-08-04).
+>
+> The **three consequences below stand unchanged** and are binding on the m5-15
+> F-program specification, which now carries them.
 
-**It is inert by construction.** It is the path the project already runs. Taking
-it requires building nothing and removing nothing: delete the probe copy of §0.1,
-and the working build is untouched. `SPEC.md` §2.1's ruling stands, its §10 open
-item 1 closes as **confirmed by observation** rather than as a design assessment,
-and no network, tag, watch-table row or T6 step moves.
+What ADR 0011 D2 named, kept as record: the **standard-DB stand-in** of
+`plc/forklift-safety/SPEC.md` §7 — the three Bools of `SafetyInputStandIn` —
+which D2 described as *"driven by Modify from the watch table over the
+engineering connection"* and asserted was *"inert by construction … the path
+the project already runs"*. Taking the fallback required building nothing and
+removing nothing: delete the probe copy of §0.1, and the working build is
+untouched. `SPEC.md` §2.1's ruling stands, its §10 open item 1 closes as
+**confirmed by observation** rather than as a design assessment — and the
+stimulus that drives the stand-in is ADR 0015's, per the supersession note
+above.
 
 **Its consequence, which is not cosmetic.** ADR 0011 **F6**: only fail-safe data
 from F-I/O and other safety programs may be processed in a safety program,

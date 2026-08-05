@@ -1,0 +1,24 @@
+registration  theta -0.007915259 rad  t (+6.029223, +5.541460) m  FLOOR rms 0.0404 MAX 0.1411 m
+STATION  world (+1.0000, +7.0000) yaw +0.0000  ->  map (+7.0846, +12.5333) yaw -0.0079   checker general_goal_checker
+STAGING  world (-2.0000, +7.0000) yaw +0.0000  ->  map (+4.0847, +12.5571) yaw -0.0079   checker staging_goal_checker
+d = 3.000 m back along the goal heading; go-arounds bounded at 2
+
+LEGS
+  stage        SUCCEEDED            10.11 s  believed 0.218 m / +3.95 deg  truth 0.232 m / +4.19 deg  entry-heading +3.82 deg  reversals-after-entry 0
+  approach0    SUCCEEDED             6.31 s  believed 0.182 m / -0.75 deg  truth 0.259 m / -1.25 deg  entry-heading -1.46 deg  reversals-after-entry 0
+
+RESULT           REACHED
+go-arounds       0 used of 2 allowed
+legs             2
+elapsed          16.42 s of simulation time over all legs
+final approach   SUCCEEDED  believed 0.1818 m / -0.753 deg
+  ABSOLUTE goal error (truth vs commanded goal): 0.2591 m (1.84 x floor)
+  heading error -1.248 deg
+  entry heading  -1.457 deg   (the 8.594 deg discriminator)
+SHUFFLE REGIME   NO   (>= 3 commanded direction reversals after first entry into the position circle, counted per leg)
+LOCALIZATION     believed vs truth over the whole run, n = 253
+  position       rms 0.0492 m   MAX 0.1186 m   (0.263 m is what footprint_padding is dimensioned from)
+  heading        rms 0.52 deg  MAX 1.31 deg
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-33-a_straight-r2-run.csv (253 samples, all legs)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-33-a_straight-r2-run-approach.csv (92 samples, final approach leg only)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-33-a_straight-r2-plan.json

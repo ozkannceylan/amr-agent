@@ -1,0 +1,31 @@
+registration  theta -0.007915259 rad  t (+6.029223, +5.541460) m  FLOOR rms 0.0404 MAX 0.1411 m
+STATION  world (+1.0000, +7.0000) yaw +0.0000  ->  map (+7.0846, +12.5333) yaw -0.0079   checker general_goal_checker
+STAGING  world (-3.5000, +7.0000) yaw +0.0000  ->  map (+2.5847, +12.5689) yaw -0.0079   checker staging_goal_checker
+d = 4.500 m back along the goal heading; go-arounds bounded at 2
+
+LEGS
+  stage        SUCCEEDED            10.45 s  believed 0.211 m / -6.47 deg  truth 0.238 m / -7.41 deg  entry-heading -4.86 deg  reversals-after-entry 0
+  STAGING STOP heading  believed -6.471 deg  truth -7.406 deg   (against the approach axis)
+  STAGING STOP offset   longitudinal -0.2368 m   lateral +0.0255 m   (truth)
+  approach0: MISS DETECTED - entered the position circle at +27.46 deg, outside the 8.594 deg window; abandoning the approach rather than correcting inside the circle
+  approach0    CANCELED             32.23 s  believed 0.190 m / +22.90 deg  truth 0.203 m / +23.43 deg  entry-heading +27.46 deg  reversals-after-entry 0
+               MISS ABORT: entered the position circle at +27.46 deg, outside the 8.594 deg window
+  goaround0    ABORTED              69.71 s  believed 0.432 m / +50.43 deg  truth 0.525 m / +44.66 deg  entry-heading none  reversals-after-entry 0
+
+RESULT           FAILED_RETURNING_TO_STAGING
+go-arounds       1 used of 2 allowed
+legs             3
+elapsed          112.40 s of simulation time over all legs
+final approach   CANCELED  believed 0.1903 m / +22.904 deg
+  ABSOLUTE goal error (truth vs commanded goal): 0.2034 m (1.44 x floor)
+  heading error +23.428 deg
+  entry heading  +27.458 deg   (the 8.594 deg discriminator)
+STAGING STOP     believed -6.471 deg   truth -7.406 deg   (heading against the approach axis)
+MISS ABORTS      approach0   (entry outside 8.594 deg, or reversal 2 after entry; ARRIVAL-GEOMETRY.md 9.5. An aborted approach is NOT clean)
+SHUFFLE REGIME   NO   (>= 3 commanded direction reversals after first entry into the position circle, counted per leg)
+LOCALIZATION     believed vs truth over the whole run, n = 1257
+  position       rms 0.1725 m   MAX 0.4565 m   (0.263 m is what footprint_padding is dimensioned from)
+  heading        rms 3.76 deg  MAX 14.65 deg
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-35-a_straight-r1-run.csv (1257 samples, all legs)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-35-a_straight-r1-run-approach.csv (351 samples, final approach leg only)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-35-a_straight-r1-plan.json

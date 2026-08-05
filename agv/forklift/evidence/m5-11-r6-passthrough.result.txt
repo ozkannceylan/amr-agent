@@ -1,0 +1,13 @@
+[INFO] [1785878241.715718343] [envelope_run]: envelope: enable := True at t = 0.030 s
+[INFO] [1785878241.723493954] [envelope_run]: envelope: ceiling := 1.0 at t = 0.030 s
+[INFO] [1785878241.732242988] [envelope_run]: envelope: permit := True at t = 0.030 s
+[INFO] [1785878241.741768809] [envelope_run]: envelope: mode := 2 at t = 0.030 s
+recorded 700 state rows, 262 gated messages, 280 envelope publications, 268 smoothed messages
+
+=== scenario passthrough ===
+run 700 state rows over 14.02 s of simulated time
+  matched pairs                  : n = 221
+  |gated - smoothed|             : max 0.000e+00 m/s, mean 0.000e+00 m/s
+  exact matches                  : 221 of 221
+  gate latency (smoothed -> gated): max 0.0010 s, mean 0.0004 s
+  readback: heartbeat moved 256 times over 642 samples, last 391; mode applied ended 2

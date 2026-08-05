@@ -1,0 +1,9 @@
+Requested session timeout to be 3600000ms, got 30000ms instead
+# OPC UA witness on opc.tcp://192.168.53.1:4840
+# columns: EStopDemand, ZoneStopDemand, SafetyResetRequired, SafetyResetFault, ForkliftResetRequired
+23:47:31.158  11101  baseline
+23:47:45.834  00001  CHANGE
+23:47:48.923  00101  CHANGE
+23:47:48.924  10101  CHANGE
+23:47:51.915  11101  CHANGE
+# 52505 polls over 30 s, final 11101

@@ -1,0 +1,36 @@
+[capture] started chrome pid 35160
+[capture] browser Chrome/151.0.7922.75
+[capture] pass boot SKIPPED (--passes)
+[capture] pass coldstart SKIPPED (--passes)
+[capture] pass refused SKIPPED (--passes)
+[capture] pass disagree SKIPPED (--passes)
+[capture] pass linksession SKIPPED (--passes)
+[capture] pass safety SKIPPED (--passes)
+[capture] pass pagestale SKIPPED (--passes)
+[capture] --- pass secondtab ---
+[capture] started double pid 28708
+[capture] started hmi pid 12676
+[capture]   CHECK PASS  second tab, setup: the backend now holds stop RELEASED and mode TELEOP
+[capture] B1 second tab opened mid-scenario {"strip":{"session":"CONNECTED","link":"YES","age":"30 ms","mode":"TELEOP","degraded":false},"pstop":{"label":"PROCESS STOP","cls":"","disabled":false,"caption":"Requests a stop from the PLC's standard program, over the network. The PLC latches it; release the button, then press RESET to clear."},"machineMode":"TELEOP","vehicleMode":"TELEOP","vehicleDiff":false,"selected":[1],"zoneC":{"pstop":"clear / clear","obstacle":"clear / clear","speed":"clear / clear","resetreq":"clear / not required","teleop":"clear / inactive"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear","resetreq":"clear / clear","resetfault":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)","permit":"equipment not stated"},"requests":{"mode":"1","pstop":"false","teleop":"false","reset":"false","traction":"0.000"}}
+[capture]   CHECK PASS  F1(a): a second page opened mid-scenario renders the BACKEND's standing values, not the §12.8 boot values
+[capture] shot v2a-24-second-tab-adopts-current-state-2026-08-05.png  129820 bytes  — a SECOND TAB opened while the operator was already working in the first: it renders the stop RELEASED and TELEOP selected — the values the backend holds now — and not the §12.8 boot values it would have shown by asserting its own defaults
+[capture] A engaged the stop {"strip":{"session":"CONNECTED","link":"YES","age":"171 ms","mode":"TELEOP","degraded":false},"pstop":{"label":"PROCESS STOP — ENGAGED","cls":"engaged","disabled":false,"caption":"Stop requested — release, then RESET. Requests a stop from the PLC's standard program, over the network. The PLC latches it; releasing this button does not clear the latch."},"machineMode":"TELEOP","vehicleMode":"TELEOP","vehicleDiff":false,"selected":[1],"zoneC":{"pstop":"clear / clear","obstacle":"clear / clear","speed":"clear / clear","resetreq":"clear / not required","teleop":"clear / inactive"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear","resetreq":"clear / clear","resetfault":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)","permit":"equipment not stated"},"requests":{"mode":"1","pstop":"true","teleop":"false","reset":"false","traction":"0.000"}}
+[capture]   CHECK PASS  second tab: the acting page shows the stop ENGAGED
+[capture] B2 the other tab follows the backend {"strip":{"session":"CONNECTED","link":"YES","age":"30 ms","mode":"TELEOP","degraded":false},"pstop":{"label":"PROCESS STOP","cls":"","disabled":false,"caption":"Requests a stop from the PLC's standard program, over the network. The PLC latches it; release the button, then press RESET to clear."},"machineMode":"TELEOP","vehicleMode":"TELEOP","vehicleDiff":false,"selected":[1],"zoneC":{"pstop":"ASSERTED / LATCHED","obstacle":"clear / clear","speed":"clear / clear","resetreq":"ASSERTED / REQUIRED","teleop":"clear / inactive"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear","resetreq":"clear / clear","resetfault":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)","permit":"equipment not stated"},"requests":{"mode":"1","pstop":"true","teleop":"false","reset":"false","traction":"0.000"}}
+[capture]   CHECK FAIL  F1(a2): the OTHER tab followed the backend and now renders ENGAGED too  PROCESS STOP
+[capture] B3 backgrounded — visibilityState {"before":"hidden","dispatched":"hidden"}; visibilitychange and blur dispatched into the page
+[capture]   CHECK FAIL  F1(b): backgrounding the non-acting page changed NEITHER standing value on the wire — the engaged stop is still engaged  HmiProcessStopRequest=false HmiDriveModeRequest=1
+[capture]   CHECK PASS  F1(b2): H6 still fired for the DEADMAN requests of the backgrounded page
+[capture] A after the other tab was backgrounded {"strip":{"session":"CONNECTED","link":"YES","age":"172 ms","mode":"TELEOP","degraded":false},"pstop":{"label":"PROCESS STOP — ENGAGED","cls":"engaged","disabled":false,"caption":"Stop requested — release, then RESET. Requests a stop from the PLC's standard program, over the network. The PLC latches it; releasing this button does not clear the latch."},"machineMode":"TELEOP","vehicleMode":"TELEOP","vehicleDiff":false,"selected":[1],"zoneC":{"pstop":"ASSERTED / LATCHED","obstacle":"clear / clear","speed":"clear / clear","resetreq":"ASSERTED / REQUIRED","teleop":"clear / inactive"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear","resetreq":"clear / clear","resetfault":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)","permit":"equipment not stated"},"requests":{"mode":"1","pstop":"false","teleop":"false","reset":"false","traction":"0.000"}}
+[capture]   CHECK FAIL  F1(b3): the operator's own screen and the wire still agree — ENGAGED  PROCESS STOP — ENGAGED / false
+[capture] shot v2a-25-second-tab-backgrounded-stop-stays-engaged-2026-08-05.png  131698 bytes  — THE FAILURE PATH WALKED: a second tab was opened, the operator engaged the stop in this one, and the second tab was then backgrounded with its visibilitychange and blur handlers fired. The engaged stop is still engaged, on the wire and on this screen, and the selector is still TELEOP
+[capture]   CHECK FAIL  F1(c): the blur-triggered post carried NO standing key — every one of the 20 write cycles after the background still wrote the stop engaged and the mode TELEOP  cycles=20 stop-flips=20 mode-flips=0 csv=hmi-cycles-2026-08-05-secondtab-20260805T115515Z-pid12676.csv
+[capture] stopped hmi
+[capture] stopped double
+[capture] --- checks ---
+[capture] FAILED 4 check(s):
+[capture]   F1(a2): the OTHER tab followed the backend and now renders ENGAGED too PROCESS STOP
+[capture]   F1(b): backgrounding the non-acting page changed NEITHER standing value on the wire — the engaged stop is still engaged HmiProcessStopRequest=false HmiDriveModeRequest=1
+[capture]   F1(b3): the operator's own screen and the wire still agree — ENGAGED PROCESS STOP — ENGAGED / false
+[capture]   F1(c): the blur-triggered post carried NO standing key — every one of the 20 write cycles after the background still wrote the stop engaged and the mode TELEOP cycles=20 stop-flips=20 mode-flips=0 csv=hmi-cycles-2026-08-05-secondtab-20260805T115515Z-pid12676.csv
+[capture] stopped chrome

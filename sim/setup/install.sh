@@ -162,6 +162,40 @@ else
   log "ROS packages already installed"
 fi
 
+# Fast-CDR / Fast-DDS COHERENCE. Measured on the owner's WSL machine
+# 2026-08-05 (sim/setup/WSL_ENVIRONMENT.md section 12), and a no-op on a box
+# whose whole ROS tree came from one archive snapshot.
+#
+# The failure it prevents: installing today's Nav2 onto a ROS tree that is
+# months behind the archive puts a nav2_msgs typesupport library built
+# against a NEWER Fast-CDR beside an OLDER libfastcdr, and nav2_amcl and
+# controller_server then die at startup with exit code 127 and
+#   undefined symbol: _ZN8eprosima7fastcdr3Cdr9serializeEj
+# ldd reports nothing missing, because the fault is a symbol and not a file.
+#
+# Why the four are named TOGETHER and never one at a time: Fast-CDR 2.2.5 ->
+# 2.2.7 is not a drop-in despite an unchanged soname (libfastcdr.so.2).
+# Upgrading fastcdr alone left every ROS 2 process on that machine aborting
+# at startup - the Gazebo bridge and the EKF included, not only Nav2.
+# fastrtps and both rmw_fastrtps packages have to move with it.
+#
+# --only-upgrade, so this can never pull a package in that was not already
+# there, and it does nothing at all when they are already current.
+DDS_PKGS=(
+  ros-jazzy-fastcdr
+  ros-jazzy-fastrtps
+  ros-jazzy-rmw-fastrtps-cpp
+  ros-jazzy-rmw-fastrtps-shared-cpp
+)
+# Unconditional on purpose (m5-21b decision 2, finding 1). Guarding this on
+# MISSING skipped it in exactly the case that caused the original outage: a
+# machine where every ROS_PKGS entry is already present and someone later
+# hand-installs a new ROS package against a stale Fast-DDS set. On an
+# already-current machine --only-upgrade is a no-op, so the guard bought
+# nothing and cost that hole.
+log "aligning the Fast-DDS stack with the archive: ${DDS_PKGS[*]}"
+apt-get install --only-upgrade -y "${DDS_PKGS[@]}"
+
 log "done (ROS 2 Jazzy, Gazebo Harmonic, ros_gz, Nav2, slam_toolbox)."
 log "  source /opt/ros/jazzy/setup.bash"
 log "  gz sim --versions        # gz only reaches PATH after sourcing ROS"

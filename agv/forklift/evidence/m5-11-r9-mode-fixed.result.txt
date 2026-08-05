@@ -1,0 +1,22 @@
+[INFO] [1785878468.567571562] [envelope_run]: envelope: enable := True at t = 0.030 s
+[INFO] [1785878468.579090310] [envelope_run]: envelope: ceiling := 0.6 at t = 0.030 s
+[INFO] [1785878468.589743941] [envelope_run]: envelope: permit := True at t = 0.030 s
+[INFO] [1785878468.599366418] [envelope_run]: envelope: mode := 2 at t = 0.030 s
+[INFO] [1785878476.542708952] [envelope_run]: envelope: mode := 1 at t = 8.030 s
+[INFO] [1785878480.540833694] [envelope_run]: envelope: mode := 2 at t = 12.030 s
+recorded 885 state rows, 289 gated messages, 356 envelope publications, 340 smoothed messages
+
+=== scenario mode ===
+run 885 state rows over 18.02 s of simulated time
+  mode in force / applied / gate state, at each change:
+    t =   0.000 s  in force 0  applied -1  state -1  gated v +0.0000  traction +0.0000
+    t =   0.101 s  in force 2  applied -1  state -1  gated v +0.0000  traction +0.0000
+    t =   1.700 s  in force 2  applied 0  state 2  gated v +0.0000  traction +0.0000
+    t =   1.760 s  in force 2  applied 2  state 0  gated v +0.0000  traction +0.0000
+    t =   8.045 s  in force 1  applied 2  state 0  gated v +0.4000  traction +0.4000
+    t =   8.100 s  in force 1  applied 2  state 1  gated v +0.3660  traction +0.3660
+    t =   8.840 s  in force 1  applied 1  state 3  gated v +0.0000  traction +0.0000
+    t =  12.043 s  in force 2  applied 1  state 3  gated v +0.0000  traction +0.0000
+    t =  12.100 s  in force 2  applied 2  state 0  gated v +0.0250  traction +0.0250
+  longest silence on the gated topic: 3.264 s, beginning t = 8.822 s
+  readback: heartbeat moved 325 times over 814 samples, last 425; mode applied ended 2

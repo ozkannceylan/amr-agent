@@ -1,0 +1,16 @@
+registration  theta -0.007915259 rad  t (+6.029223, +5.541460) m  FLOOR rms 0.0404 MAX 0.1411 m
+goal  world (+1.0000, +7.0000) yaw +0.0000 rad  ->  map (+7.0846, +12.5333) yaw -0.0079 rad
+goal ACCEPTED at t_sim 178.32
+
+RESULT           SUCCEEDED
+error_code       none
+elapsed          15.01 s of simulation time
+plans published  15
+refusals         0 rotation-in-place commands refused by the converter
+final BELIEVED   map (+7.0090, +12.7695) yaw -0.1612
+  carried to world (+0.9226, +7.2356) yaw -0.1532
+final TRUTH      world (+1.0653, +7.2955) yaw -0.1547
+ABSOLUTE goal error (truth vs commanded goal): 0.3026 m (2.14 x floor)
+  heading error -8.861 deg
+wrote /tmp/m531/e2/run.csv (151 samples)
+wrote /tmp/m531/e2/plan.json

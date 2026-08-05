@@ -1,0 +1,34 @@
+==========================================================================
+nav2_run analyse   m5-35-a_straight-r1-run-approach.csv
+==========================================================================
+FLOOR   registration residual rms 0.0404 m, MAX 0.1411 m
+samples 351   simulation span 35.14 s
+status  FAILED_RETURNING_TO_STAGING   error_code None   plans 97   refusals 10
+
+THE PLAN (first published)
+  points        61
+  length        4.711 m
+  cusps         0   (direction reversals in the plan)
+  reverse       0.0 % of the path length
+
+THE DRIVE
+  ground-truth path      8.892 m
+  commanded speed        mean +0.137  max +0.622  min -0.513 m/s (moving samples)
+  command sign           196 forward / 120 reverse / 35 at rest
+  steer angle commanded  max |1.3100| rad (75.06 deg), stop is 1.3100 rad
+  drive-wheel speed      max |0.622| m/s, limit is 1.500 m/s
+  rotation-in-place      5 refused over the run
+
+TRACKING (ground truth against the FIRST plan, world frame)
+  rms   0.4457 m
+  max   1.0526 m
+  p95   0.9704 m
+  NOTE: the plan is a MAP-frame object and the truth is a world-frame one, so this figure contains the localization error as well as the controller's. It is an upper bound on the controller and is never quoted as the controller's own.
+
+THE GOAL
+  commanded (world)      (+1.0000, +7.0000) yaw +0.0000 rad
+  reached   (truth)      (+1.1154, +6.8325) yaw +0.4089 rad
+  ABSOLUTE position error 0.2034 m (1.44 x floor)
+  heading error           +23.428 deg
+  BELIEVED error (map)    0.1903 m, heading +22.904 deg
+  belief vs truth         the vehicle thought it was 0.1903 m from the goal and was really 0.2034 m

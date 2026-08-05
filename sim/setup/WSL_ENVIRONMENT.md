@@ -1,4 +1,20 @@
-# WSL environment for the M3 toolchain
+# WSL environment — the owner's machine, as it is
+
+Two parts, written at two dates, both still describing this one machine.
+
+- **Part I (sections 1 to 5)** is the M3 toolchain record of 2026-07-27.
+  Its WSL findings are still true and are the reason it is kept: where `gz`
+  lives (§4.1), the clock (§4.5), the `/mnt/c` DrvFs cost (§4.6), that WSLg
+  buys no GPU (§4.7), the line-ending trap (§4.8).
+- **Part II (sections 6 to 13)** is the autonomy stack, installed
+  2026-08-05 under brief m5-21. **It supersedes §2's two `MISSING` rows for
+  Nav2 and `robot_localization`**, which are now installed system packages,
+  and it is where the Fast-CDR collision that installing them exposed is
+  written down.
+
+---
+
+# Part I — the M3 toolchain, 2026-07-27
 
 ## 1. Purpose and scope
 
@@ -10,14 +26,22 @@ environment all committed M3 evidence (`sim/worlds/CELL_EVIDENCE.md`,
 `bridge/EVIDENCE_LATENCY.md`, `bridge/EVIDENCE_SIGNAL_LOSS.md`) was captured
 in. Every command below was executed by the author and its real output is
 quoted. The toolchain needed for the M3 demonstration cell — ROS 2 Jazzy,
-Gazebo Harmonic and asyncua 2.0.1 — is installed and verified here. The
-ros2_control and Nav2 packages from `install.sh` are still absent; they belong
-to the parked navigation scenario and the cell does not use them (§3.1).
-Navigation work resumes at M5 on the in-house forklift (`docs/roadmap.md`,
-ADR 0010), so what that gate actually needs installed is settled at M5
-briefing, not by the "not needed" entries below.
+Gazebo Harmonic and asyncua 2.0.1 — is installed and verified here.
+
+**As written on 2026-07-27**, the ros2_control and Nav2 packages from
+`install.sh` were still absent; they belonged to the parked navigation
+scenario and the cell does not use them (§3.1). Navigation work resumed at
+M5 on the in-house forklift (`docs/roadmap.md`, ADR 0010), and **Part II
+settles it: Nav2, `slam_toolbox` and `robot_localization` were installed on
+2026-08-05.** The ros2_control five stayed out. Read every "not needed"
+verdict below as a statement about the M3 cell on its own date.
 
 ## 2. Verified environment table
+
+> **Dated 2026-07-27.** Part II superseded the two `MISSING` rows; **Part III
+> §20.2 records which version strings below have since moved and which were
+> re-queried and are unchanged.** Read the two together — the versions here are
+> what was observed on 2026-07-27, not what is installed today.
 
 | Component | Expected (container) | Observed (WSL) | Status |
 |---|---|---|---|
@@ -33,8 +57,9 @@ briefing, not by the "not needed" entries below.
 | `ros-jazzy-ros-gz` | installed | `1.0.22-1noble.20260616.074726` | match |
 | Render backend | ogre2 on llvmpipe (container) | ogre2 on `llvmpipe (LLVM 20.1.2, 256 bits)` | match, see §4.7 |
 | Headless RTF (cell) | ~1.0 | `0.99984`, `0.99994` | match |
-| ros2_control stack | installed | **MISSING** | not needed for the M3 cell (M5 work, see §3.1) |
-| Nav2 | installed | **MISSING** | not needed for the M3 cell (M5 work, see §3.1) |
+| ros2_control stack | installed | **MISSING** | not needed for the M3 cell; retired with the M5 platform (`install.sh` note, ADR 0010 D1). The interface libraries Nav2's controllers depend on arrived with Part II; the five packages themselves are still absent |
+| Nav2 | installed | **MISSING as of 2026-07-27; INSTALLED 2026-08-05** | `ros-jazzy-nav2-bringup` / `navigation2` **1.3.12**, see **Part II §10.1**. This row is superseded |
+| `robot_localization` | (not surveyed) | **MISSING as of 2026-07-27; INSTALLED 2026-08-05** | **3.8.3**, see **Part II §10.1**. This row is superseded |
 | asyncua | 2.0.1 | `2.0.1` | match |
 | cryptography | 49.0.0 | `49.0.0` | match |
 | pyOpenSSL | 26.3.0 | `26.3.0` | match |
@@ -56,8 +81,8 @@ MISS ros-jazzy-gz-ros2-control
 MISS ros-jazzy-controller-manager
 MISS ros-jazzy-joint-state-broadcaster
 MISS ros-jazzy-joint-trajectory-controller
-MISS ros-jazzy-navigation2
-MISS ros-jazzy-nav2-bringup
+MISS ros-jazzy-navigation2                 <- INSTALLED 2026-08-05, Part II
+MISS ros-jazzy-nav2-bringup                <- INSTALLED 2026-08-05, Part II
 OK   python3-colcon-common-extensions  0.3.0-100
 OK   python3-rosdep  0.26.0-1
 MISS python3-vcstool
@@ -152,9 +177,13 @@ forklift arena does not load them either.
 
 Under ADR 0010 that scenario's platform is retired: navigation work resumes at
 **M5 on the in-house forklift**, with SLAM and Nav2 on that vehicle. The "not
-needed" verdicts above are therefore statements about the M3 cell only. Which
-of these packages M5 actually needs, and in which form, is **re-examined at M5
-briefing** and is not ruled here.
+needed" verdicts above are therefore statements about the M3 cell only.
+
+**Settled 2026-08-05 (Part II).** Nav2, `slam_toolbox` and
+`robot_localization` were installed; the five ros2_control packages were
+not, because the forklift drives through gz joint-controller plugins and a
+vehicle node rather than through `ros2_control` (`install.sh`, ADR 0010 D1).
+The elevated route used was `wsl.exe -u root`, not `sudo` (§7).
 
 ### 3.2 Python venv and asyncua — COMPLETED
 
@@ -829,3 +858,1272 @@ the symptom is gone; see §3.0 for the verification.
    `xml.etree` failure is not rediscovered and mistaken for file corruption.
    Any *tooling* the project writes that parses SDF with `xml.etree` will need
    the comment cleaned up first; nothing does today.
+
+---
+
+# Part II — the autonomy stack, installed 2026-08-05 (m5-21)
+
+Part I above is the M3 record and is kept because its WSL findings (§4.1
+`gz` on PATH, §4.5 the clock, §4.6 DrvFs, §4.7 llvmpipe, §4.8 line endings)
+are still true of this machine. **What changed on 2026-08-05 is §2's two
+`MISSING` rows: Nav2 and the estimator are now installed as system
+packages.** Sections 6 to 10 are the record of that, written as each step
+landed, not afterwards.
+
+## 6. What was missing, and the overlay that stood in for it
+
+`m5-11` needed `nav2_velocity_smoother` and `robot_localization` and this
+machine had neither. Under a brief that forbade adding dependencies, it
+fetched `.deb` files with `apt-get download` and extracted them into a
+**user prefix** at `~/ros-overlay/prefix` — no system package installed,
+nothing written outside `$HOME`. The archive's `fastcdr` / `fastrtps` had
+to come with them (typesupport ABI), and `nav2_smac_planner` /
+`nav2_map_server` dragged in `libompl.so.18` and GraphicsMagick.
+
+```
+$ du -sh ~/ros-overlay
+245M    /home/ozkan/ros-overlay
+$ ls ~/ros-overlay/prefix/opt/ros/jazzy/share | wc -l
+36
+```
+
+**Every figure in `agv/forklift/EVIDENCE_ENVELOPE.md` was measured against
+that overlay**, and that qualifier belongs on those figures (LESSONS
+2026-07-27: evidence is qualified by the environment that produced it).
+Section 10 below re-runs one of them on the installed stack and reports
+whether the two agree.
+
+## 7. Privilege on this machine — a fact, with no credential in it
+
+`sudo` here requires a password (Part I §3.1, still true). The route that
+works without one is WSL's own root user, invoked from the Windows side:
+
+```
+PS> wsl.exe -u root -e bash -lc '<command>'
+```
+
+```
+$ wsl.exe -u root -e bash -lc 'id'
+uid=0(root) gid=0(root) groups=0(root)
+```
+
+That is a property of the WSL distro's default-user configuration, not a
+stored secret. **No password was requested, handled or stored at any point
+in this work, and none appears in this repository** (invariant 13).
+
+The ROS 2 apt source was already in place and needed no change:
+
+```
+/etc/apt/sources.list.d/ros2.list:deb [arch=amd64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu noble main
+```
+
+## 8. The snapshot, taken before anything was installed
+
+This is the rollback record. It exists on the machine at
+`/root/m5-21-snapshot`, copied readable to `~/m5-21-snapshot`:
+
+| File | What it holds | Size |
+|---|---|---|
+| `dpkg-selections.txt` | `dpkg --get-selections`, the whole system | **2095 lines** |
+| `ros-jazzy-versions.txt` | `dpkg-query -W -f='${Package} ${Version}\n' 'ros-jazzy-*'` | **327 packages** |
+| `apt-history-tail.txt` | tail of `/var/log/apt/history.log` | last 30 lines |
+
+The last three apt transactions before this work were all
+`unattended-upgrade` (`distro-info-data`, `openssl`, `tzdata`, on
+2026-08-04). Nothing had touched the ROS tree.
+
+**The machine is well behind the archive**, which is the risk this brief
+was written around:
+
+```
+$ apt list --upgradable | wc -l
+347                 # includes the "Listing..." header, so 346 packages
+$ apt list --upgradable | grep -c '^ros-jazzy-'
+292
+```
+
+Baseline, before the install, with the overlay **not** sourced:
+
+```
+$ source /opt/ros/jazzy/setup.bash
+$ ros2 pkg prefix nav2_bringup ; ros2 pkg prefix robot_localization
+Package not found
+Package not found
+```
+
+## 9. The apt plan, simulated before it was executed
+
+Two candidate package sets were simulated. **They produce an identical
+plan** — `ros-jazzy-nav2-bringup` already pulls `ros-jazzy-navigation2` —
+so the narrower command was the one executed:
+
+```
+$ apt-get -s install ros-jazzy-nav2-bringup ros-jazzy-robot-localization
+0 upgraded, 137 newly installed, 0 to remove and 346 not upgraded.
+$ grep -c '^Remv' sim-plan-narrow.txt
+0
+```
+
+**Nothing is upgraded and nothing is removed.** The feared outcome — an
+`apt install` dragging the whole 292-package ROS tree forward and breaking
+a working stack — does not happen: apt satisfies every dependency of the
+new packages against the versions already installed. The 346 packages
+behind the archive stay behind it.
+
+Of the 137 new packages, **73 are `ros-jazzy-*`** (the Nav2 set,
+`robot_localization`, `slam_toolbox`, `behaviortree_cpp`, `bond`/`bondcpp`,
+`ompl`, the `ros2_control` interface libraries Nav2's controllers pull in)
+and 64 are Ubuntu libraries — the ones the overlay had had to work around
+by hand: `libgeographiclib26`, GraphicsMagick, `libceres`/SuiteSparse,
+`libomp`. No package outside `noble`, `noble-updates`,
+`noble-security` and `packages.ros.org/ros2/ubuntu noble` appears in the
+plan.
+
+## 10. What the install actually did
+
+Executed, and recorded from the log rather than from the plan:
+
+```
+$ wsl.exe -u root -e bash -lc 'DEBIAN_FRONTEND=noninteractive apt-get install -y \
+      ros-jazzy-nav2-bringup ros-jazzy-robot-localization'
+Need to get 88.4 MB of archives.
+After this operation, 549 MB of additional disk space will be used.
+...
+Setting up ros-jazzy-robot-localization (3.8.3-1noble.20260615.152020) ...
+Setting up ros-jazzy-nav2-bringup (1.3.12-1noble.20260616.082701) ...
+exit=0
+```
+
+`/var/log/apt/history.log`, the transaction as apt recorded it:
+
+```
+Start-Date: 2026-08-05  07:40:36
+Commandline: apt-get install -y ros-jazzy-nav2-bringup ros-jazzy-robot-localization
+Install: ... (137 packages, all "automatic" except the two named)
+End-Date: 2026-08-05  07:41:01
+```
+
+**There is no `Upgrade:` line and no `Remove:` line in that transaction.**
+The outcome matched the simulation exactly:
+
+| | Simulated | Actual |
+|---|---|---|
+| `ros-jazzy-*` installed, before → after | 327 → 400 | **327 → 400** (+73) |
+| upgraded | 0 | **0** |
+| removed | 0 | **0** |
+| `ros-jazzy-*` still behind the archive | 292 | **292**, unchanged |
+| errors in the log | — | **0** |
+
+25 seconds, 88.4 MB fetched, 549 MB on disk.
+
+### 10.1 The versions that matter
+
+Recorded so this environment is reproducible from this document alone:
+
+| Package | Version |
+|---|---|
+| `ros-jazzy-nav2-bringup` | `1.3.12-1noble.20260616.082701` |
+| `ros-jazzy-navigation2` | `1.3.12-1noble.20260615.181551` |
+| `ros-jazzy-robot-localization` | **`3.8.3-1noble.20260615.152020`** |
+| `ros-jazzy-nav2-velocity-smoother` | **`1.3.12-1noble.20260615.153210`** |
+| `ros-jazzy-nav2-amcl` | `1.3.12-1noble.20260615.153115` |
+| `ros-jazzy-nav2-map-server` | `1.3.12-1noble.20260615.153120` |
+| `ros-jazzy-nav2-controller` | `1.3.12-1noble.20260615.165600` |
+| `ros-jazzy-nav2-planner` | `1.3.12-1noble.20260615.170058` |
+| `ros-jazzy-nav2-bt-navigator` | `1.3.12-1noble.20260615.165211` |
+| `ros-jazzy-nav2-behaviors` | `1.3.12-1noble.20260615.170333` |
+| `ros-jazzy-nav2-lifecycle-manager` | `1.3.12-1noble.20260615.152740` |
+| `ros-jazzy-slam-toolbox` | `2.8.5-1noble.20260615.161600` |
+| `ros-jazzy-behaviortree-cpp` | `4.9.0-1noble.20260615.161133` |
+| `ros-jazzy-ompl` | `1.7.0-2noble.20260225.055751` |
+
+**The two versions in bold are the two `EVIDENCE_ENVELOPE.md` §0 names**
+— `nav2_velocity_smoother` 1.3.12 and `robot_localization` 3.8.3. The
+system packages are the **same upstream versions** the overlay carried,
+which is why §12's comparison is a comparison of packaging and not of
+software.
+
+## 11. The overlay is retired
+
+Nothing in the repository ever *sourced* it — the only references are
+prose:
+
+```
+$ grep -rl 'ros-overlay' .
+./agv/forklift/EVIDENCE_ENVELOPE.md      (prose, §0 and §11 item 7)
+./docs/reports/m5-11-envelope-gate-node.md
+./docs/TODO.md
+./docs/briefs/m5-21-wsl-ros-stack-install.md
+```
+
+No launch file, no script, no `~/.bashrc` line. `~/.bashrc` sources
+`/opt/ros/jazzy/setup.bash` and nothing else.
+
+It was moved aside **before** the verification runs below, so no run in
+§12 can have touched it:
+
+```
+$ mv ~/ros-overlay ~/ros-overlay.retired-m5-21
+$ ls -d ~/ros-overlay/prefix
+ls: cannot access '/home/ozkan/ros-overlay/prefix': No such file or directory
+```
+
+245 MB, kept under the `.retired-m5-21` name rather than deleted, so the
+environment m5-11 measured in can be restored if a figure ever has to be
+re-read against it. **It is not on any search path** and can be deleted
+once this work is committed.
+
+Resolution, with the overlay gone and only `/opt/ros/jazzy` sourced:
+
+```
+$ source /opt/ros/jazzy/setup.bash
+$ echo $AMENT_PREFIX_PATH
+/opt/ros/jazzy
+$ ros2 pkg prefix nav2_bringup            ->  /opt/ros/jazzy
+$ ros2 pkg prefix robot_localization      ->  /opt/ros/jazzy
+$ ros2 pkg prefix nav2_velocity_smoother  ->  /opt/ros/jazzy
+$ ros2 pkg prefix nav2_amcl               ->  /opt/ros/jazzy
+$ ros2 pkg prefix slam_toolbox            ->  /opt/ros/jazzy
+```
+
+## 12. The verification runs, and the one collision they found
+
+### 12.1 First run — the vehicle stack and the smoother came up
+
+`GZ_PARTITION=m521verify`, `ROS_DOMAIN_ID=58`, both, always (LESSONS
+2026-07-27). Warehouse bringup, then the m5-11 envelope stack:
+
+```
+$ ros2 launch sim/launch/warehouse_bringup.launch.py x:=-4.5 y:=7.0 yaw:=0.0
+$ ros2 launch agv/forklift/launch/envelope.launch.py feedback:=CLOSED_LOOP
+/cmd_vel_to_tricycle  /envelope_gate  /forklift_arena_bridge  /forklift_ekf
+/imu_gate  /sensor_tf  /velocity_smoother  /wheel_odometry
+```
+
+`/forklift_ekf` is `robot_localization`'s `ekf_node` and
+`/velocity_smoother` is `nav2_velocity_smoother`, both now from
+`/opt/ros/jazzy`. **No fatal error and no process death in either log.**
+
+### 12.2 Second run — AMCL and `controller_server` died, exit 127
+
+The full stack (`localization.launch.py` + `navigation.launch.py`) was
+started next, and two of the newly installed nodes died:
+
+```
+[amcl-2] /opt/ros/jazzy/lib/nav2_amcl/amcl: symbol lookup error:
+  /opt/ros/jazzy/lib/libnav2_msgs__rosidl_typesupport_fastrtps_cpp.so:
+  undefined symbol: _ZN8eprosima7fastcdr3Cdr9serializeEj
+[ERROR] [amcl-2]: process has died [pid 28648, exit code 127, ...]
+[ERROR] [controller_server-2]: process has died [pid 28720, exit code 127, ...]
+```
+
+`ldd` reports **no** missing library for either binary, and
+`/opt/ros/jazzy/lib/nav2_amcl/amcl --help` starts cleanly on its own — the
+fault is a *symbol*, not a file:
+
+```
+$ ldd /opt/ros/jazzy/lib/nav2_amcl/amcl | grep -i 'not found'
+(nothing)
+```
+
+**This is precisely the collision `EVIDENCE_ENVELOPE.md` §11 item 7
+predicted.** `libnav2_msgs__rosidl_typesupport_fastrtps_cpp.so` came from
+today's archive and was built against a newer Fast-CDR than the one this
+machine has:
+
+```
+ros-jazzy-fastcdr    installed 2.2.5-1noble.20260121.175748   candidate 2.2.7-1noble.20260225.051855
+ros-jazzy-fastrtps   installed 2.14.5-2noble.20260121.180353  candidate 2.14.6-1noble.20260303.233638
+```
+
+`Cdr::serialize(unsigned int)` is exported by 2.2.7 and not by 2.2.5. The
+overlay solved it by carrying the archive's `fastcdr`/`fastrtps` beside
+the system's; a system install has to reconcile them instead.
+
+### 12.3 Upgrading `fastcdr` alone broke the entire ROS installation
+
+Simulated first, and the plan was as narrow as a plan gets:
+
+```
+$ apt-get -s install ros-jazzy-fastcdr
+1 upgraded, 0 newly installed, 0 to remove and 345 not upgraded.
+```
+
+`libfastcdr.so.2.2.5` was copied to `/root/m5-21-snapshot/` before the
+upgrade, which is the only reason this is recoverable — **the 2.2.5
+package is no longer in the archive at all**:
+
+```
+$ apt-cache madison ros-jazzy-fastcdr
+ros-jazzy-fastcdr | 2.2.7-1noble.20260225.051855 | packages.ros.org/ros2/ubuntu noble/main
+```
+
+The upgrade installed cleanly, the missing symbol appeared, and **every
+ROS 2 process on the machine then died** — not just Nav2. The Gazebo
+bridge, `sensor_tf`, `wheel_odometry`, `imu_gate` and `ekf_node` all
+aborted, and both Nav2 launch files threw a Fast-CDR exception before
+starting anything:
+
+```
+[ERROR] [parameter_bridge-3]: process has died ... exit code -6
+[ERROR] [ekf_node-7]:         process has died ... exit code -6
+[ERROR] [sensor_tf-4]:        process has died ... exit code 1
+[ERROR] [launch]: Caught exception in launch: This member is not been selected
+```
+
+So `fastcdr` 2.2.5 -> 2.2.7 is **not** a drop-in despite an unchanged
+soname (`libfastcdr.so.2`): the installed `fastrtps` 2.14.5 does not work
+against it.
+
+**Restoring the 2.2.5 file restored the machine**, which is what confirms
+the attribution rather than making it plausible (LESSONS 2026-07-27):
+
+```
+$ cp -a /root/m5-21-snapshot/libfastcdr.so.2.2.5 /opt/ros/jazzy/lib/
+$ ln -sfn libfastcdr.so.2.2.5 /opt/ros/jazzy/lib/libfastcdr.so.2
+$ ros2 run demo_nodes_cpp talker
+[INFO] [talker]: Publishing: 'Hello World: 1'
+$ python3 -c 'import rclpy; ...'
+rclpy publish OK
+```
+
+### 12.4 The two coherent ways forward, both simulated
+
+```
+$ apt-get -s install ros-jazzy-fastcdr ros-jazzy-fastrtps \
+                     ros-jazzy-rmw-fastrtps-cpp ros-jazzy-rmw-fastrtps-shared-cpp
+3 upgraded, 0 newly installed, 0 to remove and 342 not upgraded.
+
+$ apt-get -s dist-upgrade
+345 upgraded, 7 newly installed, 1 to remove and 0 not upgraded.
+Remv libglapi-mesa [24.2.8-1ubuntu1~24.04.1]
+```
+
+**The full `dist-upgrade` removes a package** — `libglapi-mesa`, dropped
+by a Mesa upgrade — and Mesa is what renders every Gazebo run on this
+machine (§4.7, llvmpipe). Under this brief's rule a removal is a
+stop-and-report, and it is not taken. The narrow DDS set removes nothing
+and is the one that was executed; §12.5 is its result.
+
+### 12.5 The DDS set moved together, and the whole stack came up
+
+```
+$ wsl.exe -u root -e bash -lc 'apt-get install -y ros-jazzy-fastcdr \
+      ros-jazzy-fastrtps ros-jazzy-rmw-fastrtps-cpp ros-jazzy-rmw-fastrtps-shared-cpp'
+3 upgraded, 0 newly installed, 0 to remove and 342 not upgraded.
+Setting up ros-jazzy-fastrtps (2.14.6-1noble.20260303.233638) ...
+Setting up ros-jazzy-rmw-fastrtps-shared-cpp (8.4.4-1noble.20260615.124045) ...
+Setting up ros-jazzy-rmw-fastrtps-cpp (8.4.4-1noble.20260615.124621) ...
+exit=0
+```
+
+Base ROS 2 first, because §12.3 is the reason not to trust a Nav2 launch as
+the first test after a DDS change:
+
+```
+$ ros2 run demo_nodes_cpp talker      ->  Publishing: 'Hello World: 1'
+$ python3 -c 'import rclpy; ...'      ->  rclpy publish OK
+$ /opt/ros/jazzy/lib/nav2_amcl/amcl   ->  amcl lifecycle node launched.
+```
+
+Then the **full M5 vehicle stack** — warehouse bringup, then
+`localization.launch.py` with `EVIDENCE_LOCALIZATION.md`'s initial pose,
+then `navigation.launch.py`:
+
+```
+/amcl  /behavior_server  /bt_navigator  /bt_navigator_navigate_to_pose_rclcpp_node
+/controller_server  /planner_server  /map_server  /velocity_smoother
+/global_costmap/global_costmap  /local_costmap/local_costmap
+/cmd_vel_to_tricycle  /envelope_gate  /forklift_arena_bridge  /forklift_ekf
+/forklift_io  /imu_gate  /sensor_tf  /wheel_odometry
+```
+
+**That list is from a run started on a clean machine** — see §12.7, which
+is the reason the first attempt's list is not the one quoted here.
+`smoother_server` and `waypoint_follower` do not appear because
+`navigation.launch.py` does not start them; that is the project's node set,
+not a missing package.
+
+Lifecycle state of every managed node, read rather than assumed:
+
+| Node | State |
+|---|---|
+| `/map_server` | **active [3]** |
+| `/amcl` | **active [3]** |
+| `/controller_server` | **active [3]** |
+| `/planner_server` | **active [3]** |
+| `/behavior_server` | **active [3]** |
+| `/bt_navigator` | **active [3]** |
+| `/velocity_smoother` | **active [3]** |
+
+```
+fatal=0  process-died=0     in all three launch logs
+```
+
+The `[ERROR]` lines that remain are **not** install failures and are worth
+naming so they are not chased: the costmap inflation-radius advisories that
+Nav2 logs at ERROR severity for this vehicle's footprint (a `nav2.yaml`
+tuning matter, present before this work), and `map -> forklift/base_link`
+TF extrapolation messages from `planner_server` polling while no goal is
+active and AMCL is still settling. No process died and no node left
+`active`.
+
+### 12.6 The re-run m5-11 measurement — what agrees and what does not
+
+`EVIDENCE_ENVELOPE.md` §7, observation 5, pass-through fidelity: the
+cheapest decisive one, because it exercises `nav2_velocity_smoother` and
+`robot_localization` on a non-constant command and its result is a residual
+that cannot be produced by luck.
+
+```
+$ ros2 launch sim/launch/warehouse_bringup.launch.py x:=-4.5 y:=7.0 yaw:=0.0
+$ ros2 launch agv/forklift/launch/envelope.launch.py feedback:=CLOSED_LOOP
+$ python3 agv/forklift/scripts/envelope_run.py run --scenario passthrough \
+      --csv ~/m5-21-runs/m521-passthrough.csv
+```
+
+**Four** runs on the installed stack, against the committed overlay figure:
+
+| | committed (overlay) | installed A | installed B | installed C | installed D |
+|---|---|---|---|---|---|
+| DDS stack | 2.2.5 + overlay copy | 2.2.5 | **2.2.7 / 2.14.6** | **2.2.7 / 2.14.6** | **2.2.7 / 2.14.6** |
+| machine verified clear of orphans first | - | no | no | no | **yes** (§12.7) |
+| matched pairs | 221 | 221 | 224 | 676 | 440 |
+| `max abs(gated_v - smoothed_v)` | **0.000e+00** | **0.000e+00** | **0.000e+00** | **0.000e+00** | **0.000e+00** |
+| exact matches | 221 of 221 | **221 of 221** | **224 of 224** | **676 of 676** | **440 of 440** |
+| gate latency, mean | 0.0004 s | 0.0004 s | 0.0012 s | 0.0023 s | **0.0242 s** |
+| gate latency, max | **0.0010 s** | 0.0014 s | 0.0465 s | 0.0122 s | **0.0713 s** |
+
+**What agrees, exactly: the observation itself.** The residual is
+`0.000e+00` on both components and **every matched pair is exact, in every
+run, on both packagings** - 221, 224, 676 and 440 pairs of them. That is
+the claim §7 makes, and it reproduces on the installed stack without
+qualification.
+
+**What disagrees, and it is stated rather than reconciled: the latency
+figures.** The committed **mean 0.0004 s / max 0.0010 s** is not
+reproduced. Across four runs the mean ranged **0.0004 to 0.0242 s** and the
+max **0.0014 to 0.0713 s** - up to **60x** the committed mean and **71x**
+the committed max. **Nothing was tuned to make them agree**, and no figure
+above was discarded.
+
+Read honestly, this is a finding about the figure rather than about either
+environment, and three things say so:
+
+1. Run **A** ran on the *old* DDS stack and landed at 0.0004 / 0.0014 s, so
+   the spread is not caused by the Fast-DDS upgrade.
+2. Run **D** ran on a machine verified clear of orphan processes and
+   stranded shared memory (§12.7) and is the **worst** of the four, so it is
+   not caused by contention from leftovers either.
+3. The four runs disagree with **each other** by 60x on the mean, so
+   `0.0004 s` was a sample and never a bound (LESSONS 2026-08-04).
+
+The matched-pair count moving 221 -> 676 -> 440 is the same story from the
+other side: how many commands the smoother emits in the scenario's 14 s of
+simulated time is not a controlled quantity here, so neither is the worst
+queueing delay among them. What the gate's design guarantees is the **zero
+residual**, and that is what held.
+
+**What this asks for.** `agv/forklift/EVIDENCE_ENVELOPE.md` is outside this
+brief's write scope. Two changes are requested in the m5-21 report: §0's
+environment block should say the figures were measured **under the
+`~/ros-overlay/prefix` overlay, which no longer exists**, and §7's latency
+row should be re-read as a single-run observation with its n rather than as
+a property of the gate, with the four figures above beside it.
+
+### 12.7 A Fast-DDS version change strands `/dev/shm`, and killing a launch is not killing its nodes
+
+Two housekeeping faults surfaced between the runs above and are recorded
+because both are easy to misread as the install having failed.
+
+**The stale segments.** Part I §4.4 noted that Fast DDS leaves its
+`/dev/shm` objects behind after a clean exit and called it housekeeping.
+After the Fast-DDS upgrade it stops being housekeeping: the new
+`libfastrtps` could not take the ports the old one had left locked, and
+every node logged
+
+```
+[RTPS_TRANSPORT_SHM Error] Failed init_port fastrtps_port7000:
+    open_and_lock_file failed -> Function open_port_internal
+```
+
+which looks exactly like a broken install and is not one. With **no ROS 2
+process running**:
+
+```
+$ ls /dev/shm | wc -l
+151
+$ rm -f /dev/shm/fastrtps_* /dev/shm/sem.fastrtps_*
+$ ls /dev/shm | wc -l
+2
+```
+
+and the same binaries started cleanly. **Clear `/dev/shm` after any
+`fastcdr` / `fastrtps` / `rmw_fastrtps` change**, and only while nothing is
+running.
+
+**The orphans.** `kill`ing a `ros2 launch` process does **not** reliably
+take the nodes it started. Five nodes from earlier runs — two `ekf_node`,
+two `map_server`, one `amcl` — were still alive minutes after their
+launches were killed, and they are what held those 151 segments. They also
+put **duplicate names into `ros2 node list`** during the first full-stack
+run, which is a genuinely misleading symptom: a live ghost and a new node
+share a name and either may answer.
+
+```
+$ pkill -f 'nav2_map_server|nav2_amcl|robot_localization/ekf_node|nav2_controller|...'
+$ pgrep -af 'nav2_|ekf_node|gz sim|ros2 launch|forklift' | wc -l
+0
+```
+
+The rule that follows, and it is the same shape as Part I §4.7's `pkill`
+lesson: **tear a run down by pattern against observed `pgrep -af` output
+and verify the count is zero**, then clear `/dev/shm`, before reading
+anything from the next run. The §12.5 node list and the §12.6 **run D** figures
+were taken after that teardown; runs A, B and C were not, which is why
+§12.6 records per run whether the machine had been verified clear.
+
+
+## 13. How to reproduce this environment, and what is still open
+
+### 13.1 The recipe
+
+On a machine whose whole ROS tree came from one archive snapshot, this is
+one command and the Fast-DDS step below is a no-op:
+
+```bash
+sudo ./sim/setup/install.sh          # ROS_PKGS already names navigation2,
+                                     # nav2-bringup, slam-toolbox and
+                                     # robot-localization
+```
+
+On a machine whose ROS tree is months behind the archive, the second step is
+**required and is now in the script** (the `DDS_PKGS` block added by m5-21).
+**This machine was such a machine when the paragraph was written and is no
+longer one** — Part III brought it to 0 packages behind — so read the
+following as the recipe for a *stale* machine, not as a description of this
+one. On this machine today the `--only-upgrade` step is the no-op the
+paragraph above describes:
+
+```bash
+apt-get install -y ros-jazzy-nav2-bringup ros-jazzy-robot-localization
+apt-get install --only-upgrade -y ros-jazzy-fastcdr ros-jazzy-fastrtps \
+                                  ros-jazzy-rmw-fastrtps-cpp \
+                                  ros-jazzy-rmw-fastrtps-shared-cpp
+```
+
+`--only-upgrade` is deliberate: it can never pull in a package that was not
+already installed. `install.sh` runs it only when it actually installed
+something, so a current machine is untouched.
+
+**Then, before the first run** — because a Fast-DDS change strands the old
+shared-memory segments (§12.7), and only while nothing is running:
+
+```bash
+rm -f /dev/shm/fastrtps_* /dev/shm/sem.fastrtps_*
+```
+
+**Where this differs from `install.sh` and why the script was still the
+right home.** The package list was already correct — `ROS_PKGS` has named
+`navigation2`, `nav2-bringup`, `slam-toolbox` and `robot-localization`
+since m5-09/m5-07c. What the script did not know is that installing them
+onto a stale tree needs the Fast-DDS realignment, and that is a durable
+property of this install path rather than a fact about one afternoon, so it
+belongs in the script and not only in this document.
+
+### 13.2 Rollback record
+
+`/root/m5-21-snapshot`, copied readable to `~/m5-21-snapshot`:
+
+| File | What it is |
+|---|---|
+| `dpkg-selections.txt` | the whole system before any of this, 2095 lines |
+| `ros-jazzy-versions.txt` | 327 `ros-jazzy-*` packages with versions, before |
+| `apt-history-tail.txt` | `/var/log/apt/history.log` tail, before |
+| `sim-plan.txt`, `sim-plan-narrow.txt`, `sim-plan-fastcdr.txt`, `sim-plan-dds.txt`, `sim-plan-distupgrade.txt` | the five simulated plans |
+| `install.log`, `install-fastcdr.log`, `install-dds.log` | what actually ran |
+| **`libfastcdr.so.2.2.5`** | **the pre-upgrade library.** Keep it: 2.2.5 is no longer in the archive, so this file is the only rollback for §12.3 |
+
+`~/ros-overlay.retired-m5-21` (245 MB) is the m5-11 overlay, moved aside and
+on no search path.
+
+### 13.3 Open
+
+1. **CLOSED 2026-08-05 by Part III (m5-26) — the machine is now 0 packages
+   behind the archive**, with no hold and no pin. The owner took the decision
+   this item asks for, the dist-upgrade ran with the Gazebo re-run attached
+   (§19.1), and the `libglapi-mesa` removal was re-derived from scratch
+   before it was relied on: it is a package split, not a loss (§16).
+   *The original item, kept because §12's post-mortem and §13.1's recipe are
+   both written against the stale state it describes and only read correctly
+   beside it:* "This machine is still 288 `ros-jazzy-*` packages behind the
+   archive (342 in total; 400 `ros-jazzy-*` packages are installed). That is
+   deliberate: `apt-get -s dist-upgrade` proposes 345 upgrades and **removes
+   `libglapi-mesa`**, and Mesa is the software rasteriser every Gazebo run
+   here depends on (§4.7). A removal is a stop-and-report under the m5-21
+   brief and was not taken. If a future package needs a newer ROS tree, the
+   dist-upgrade is an owner decision with a Gazebo re-run attached to it, not
+   a step inside another brief."
+2. **`agv/forklift/EVIDENCE_ENVELOPE.md` still describes the overlay as
+   present.** It is outside m5-21's write scope; the report requests the
+   qualifier and the latency-figure correction (§12.6).
+3. **The five `EVIDENCE_ENVELOPE.md` observations other than pass-through
+   have not been re-run on the installed stack.** One was re-run because
+   the brief asked for one. §12.6's spread is a reason to repeat the
+   enable-drop, stale, clamp, release and permit figures for their own n
+   before any of them is quoted as a bound — those are stopping distances
+   and reaction times, which is exactly the class of figure a 60x timing
+   spread would move.
+4. **Clock (§4.5 / §5 item 3) is unchanged and still untreated** —
+   `w32time` was `Stopped` at the last check and nothing here touched it.
+   Nothing in Part II depends on the wall clock.
+
+---
+
+# Part III — the archive catch-up, 2026-08-05 (m5-26)
+
+Part II left this machine **342 packages behind the archive**, deliberately, and
+§13.3 item 1 recorded why that was not a resting place: `packages.ros.org`
+serves only today's builds, so every future install pairs a new library against
+old ones — the exact m5-21 failure — and **there is no rollback while stale**,
+because `fastcdr` 2.2.5 has already left the archive and the machine's only
+copy is one saved file. The owner ruled on 2026-08-05 to catch up.
+
+Sections 14 to 20 are written **as each step landed**: the snapshot before
+anything changed, the apt plan before it was executed, the outcome after.
+
+## 14. The machine was idle and unshared before anything ran
+
+Checked, not assumed (LESSONS 2026-07-30: two agents on one simulator contend
+even with disjoint file scopes). Patterns are written `[g]z sim` style so the
+check cannot match its own command line — the naive form does, and reports a
+count of 1 or 2 on a completely idle machine:
+
+```
+$ ps -eo pid,args | grep -E "[g]z sim|[r]os2 launch|[n]av2_|[e]kf_node"
+(nothing)
+$ ps -e --no-headers | wc -l          ->  46 processes on the whole machine
+$ uptime                              ->  load average: 0.00, 0.01, 0.04
+$ ls /dev/shm | wc -l                 ->  2      (clean; §12.7's baseline)
+$ fuser /var/lib/dpkg/lock-frontend   ->  no holder
+```
+
+No Gazebo, no ROS process, no bridge, no apt or dpkg transaction in flight.
+The only long-lived process matching anything was `unattended-upgrade
+--shutdown --wait-for-signal`, which is the idle daemon and not a transaction.
+
+## 15. The snapshot, taken before anything changed
+
+This is the rollback record and it is worth more than the upgrade. Taken at
+**2026-08-05T08:13:17Z**, at `/root/m5-26-snapshot`, copied readable to
+`~/m5-26-snapshot`:
+
+| File | What it holds |
+|---|---|
+| `taken-at.txt` | the UTC instant above |
+| `dpkg-selections.txt` | `dpkg --get-selections`, **2232 lines** |
+| `all-versions.txt` | every installed package with its version, **2232 packages** |
+| `ros-jazzy-versions.txt` | **400** `ros-jazzy-*` packages with versions |
+| `holds.txt` | `apt-mark showhold` — **empty, 0 holds** |
+| `apt-history-tail.txt` | `/var/log/apt/history.log`, last 40 lines |
+| `mesa-before.txt` | every installed `mesa` / `glapi` / `amber` package |
+| `sim-plan-distupgrade.txt` | §17's simulated plan |
+
+`/root/m5-21-snapshot` from Part II is **untouched and still present**,
+including `libfastcdr.so.2.2.5` — the file §12.3's attribution depends on.
+
+State before, read rather than assumed:
+
+```
+$ apt list --upgradable | tail -n +2 | wc -l    ->  342
+$ apt list --upgradable | grep -c '^ros-jazzy-' ->  288
+$ apt-mark showhold                             ->  (empty)
+```
+
+The last apt transactions were m5-21's three installs (07:40, 07:48 and 07:53
+on 2026-08-05) preceded by `unattended-upgrade`. Nothing else had touched the
+tree.
+
+### 15.1 The renderer, read from the ogre2 log BEFORE the upgrade
+
+So that §19.1's reading is a comparison and not an assertion. Two findings
+worth recording for anyone who repeats this:
+
+**`warehouse.sdf` alone will not give you a renderer reading.** gz-sim creates
+the render context lazily, only when the world contains a rendering sensor.
+The warehouse without the forklift spawned has none, so a 45 s headless run
+produces a log with no `GL_` line in it at all — which reads like a failure and
+is not one. `cell.sdf` carries the `gpu_lidar` photo-eye and is the cheap
+standalone probe; it is the world §4.7 used.
+
+**`GL_RENDERER` is not in Gazebo's console output.** It is in OGRE's own log
+file, `~/.gz/rendering/ogre2.log`, which is what "read it from the ogre2 log"
+means. The console at `-v 4` shows only the `libEGL warning ... falling back to
+kms_swrast` line, which is a symptom and not the reading.
+
+```
+$ GZ_PARTITION=m526pre gz sim -s --headless-rendering -r -v 4 sim/worlds/cell.sdf
+$ grep -E 'GL_VERSION|GL_RENDERER' ~/.gz/rendering/ogre2.log
+10:15:05: GL_VERSION  = 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2
+10:15:05: GL_RENDERER = llvmpipe (LLVM 20.1.2, 256 bits)
+```
+
+Identical to §4.7's five-configuration result. Copied to
+`~/m5-26-runs/ogre2-before.log`.
+
+## 16. The `libglapi-mesa` removal, verified here rather than inherited
+
+m5-21b reported this removal harmless. That is a report's claim, so it was
+re-derived from scratch before it was relied on. **Four independent checks, and
+the fourth is the one that settles it.**
+
+**Check 1 — the Mesa that renders is already current, the stub is not.**
+
+```
+libgl1-mesa-dri   25.2.8-0ubuntu0.24.04.2      <- contains llvmpipe
+libglx-mesa0      25.2.8-0ubuntu0.24.04.2
+libegl-mesa0      25.2.8-0ubuntu0.24.04.2
+mesa-libgallium   25.2.8-0ubuntu0.24.04.2      <- the version §15.1 printed
+libglapi-mesa     24.2.8-1ubuntu1~24.04.1      <- a Mesa 24 leftover
+```
+
+**Check 2 — per `dpkg`, exactly one installed package depends on it.** Read
+from the installed control fields, not from `apt-cache rdepends`, which also
+lists `libglx-mesa0`, `libgl1-mesa-dri`, `libegl-mesa0` and `libosmesa6`
+because their *older* versions in the cache depended on it. That difference is
+the whole reason to read dpkg rather than the cache:
+
+```
+$ dpkg-query -W -f='${Package}|${Depends}\n' | grep libglapi
+libgl1-amber-dri|... libglapi-mesa (>= 24.0.3) ...
+```
+
+`libgl1-amber-dri` is the classic-DRI driver for pre-2012 Intel and pre-2007
+ATI/NVIDIA hardware.
+
+**Check 3 — nothing in the llvmpipe path links it.** The only ELF objects on
+the entire system that reference `libglapi.so.0` are the four Amber drivers:
+
+```
+$ grep -rl 'libglapi.so.0' /usr/lib/x86_64-linux-gnu/
+/usr/lib/x86_64-linux-gnu/libglapi.so.0.0.0          (itself)
+/usr/lib/x86_64-linux-gnu/dri/i965_dri.so            (Intel, pre-2012)
+/usr/lib/x86_64-linux-gnu/dri/radeon_dri.so          (ATI, pre-2007)
+/usr/lib/x86_64-linux-gnu/dri/r200_dri.so            (ATI, pre-2003)
+/usr/lib/x86_64-linux-gnu/dri/nouveau_vieux_dri.so   (NVIDIA, pre-2010)
+
+$ ldd <libGLX_mesa | libEGL_mesa | libgallium-25.2.8 | kms_swrast_dri
+       | libOSMesa | libGL> | grep -c libglapi        ->  0, all six
+```
+
+**Check 4 — the live renderer does not map it.** The decisive one, because it
+tests the running process rather than the packaging.
+`~/.gz/rendering/ogre2.log` was truncated first, so the `GL_RENDERER` line
+below provably belongs to *this* process, and the map was read while it was
+still alive:
+
+```
+$ : > ~/.gz/rendering/ogre2.log
+$ GZ_PARTITION=m526maps2 gz sim -s --headless-rendering -r -v 4 sim/worlds/cell.sdf &
+   reached GL_RENDERER in a FRESH ogre2.log after 3 s
+   10:17:31: GL_RENDERER = llvmpipe (LLVM 20.1.2, 256 bits)
+
+$ grep -c libglapi /proc/$GZPID/maps
+0
+
+$ awk '{print $6}' /proc/$GZPID/maps | grep -E 'mesa|gallium|libGL|libEGL' | sort -u
+/usr/lib/x86_64-linux-gnu/libEGL.so.1.1.0
+/usr/lib/x86_64-linux-gnu/libEGL_mesa.so.0.0.0
+/usr/lib/x86_64-linux-gnu/libEGL_nvidia.so.570.211.01
+/usr/lib/x86_64-linux-gnu/libGL.so.1.7.0
+/usr/lib/x86_64-linux-gnu/libGLX.so.0.0.0
+/usr/lib/x86_64-linux-gnu/libGLX_mesa.so.0.0.0
+/usr/lib/x86_64-linux-gnu/libGLdispatch.so.0.0.0
+/usr/lib/x86_64-linux-gnu/libgallium-25.2.8-0ubuntu0.24.04.2.so
+```
+
+**A process that has printed `GL_RENDERER = llvmpipe` maps zero bytes of
+`libglapi`.** It renders out of `libgallium-25.2.8`, reached through
+`libEGL_mesa` / `libGLX_mesa` — all three at 25.2.8, none of them a dependant
+of the stub.
+
+### 16.1 The removal is a package split, not an orphan being dropped
+
+The plan shows the actual mechanism, and it is better than "apt tidies up after
+a Mesa upgrade that in practice already happened":
+
+```
+Inst libgl1-amber-dri [21.3.9-0ubuntu2] (21.3.9-0ubuntu3~24.04.2 ...)
+Remv libglapi-mesa [24.2.8-1ubuntu1~24.04.1] []
+Inst libglapi-amber (21.3.9-0ubuntu3~24.04.2 ...)
+```
+
+The new `libgl1-amber-dri` stops depending on Mesa's stub and ships its own
+private copy as **`libglapi-amber`**. The file does not leave the machine at
+all; its owner changes from Mesa to Amber, and the Mesa-24 leftover that
+nothing else used goes with it. **Nothing loses a library.**
+
+## 17. The apt plan, simulated before it was executed
+
+```
+$ apt-get -s dist-upgrade
+342 upgraded, 7 newly installed, 1 to remove and 0 not upgraded.
+```
+
+| | |
+|---|---|
+| upgraded | **342** (289 of them `ros-jazzy-*`) |
+| newly installed | **7** |
+| **removed** | **1** — `libglapi-mesa`, and nothing else |
+| not upgraded / kept back | **0** |
+| origins | `noble`, `noble-updates`, `noble-security`, `packages.ros.org/ros2/ubuntu noble`, `nvidia.github.io` — no new source appears |
+
+The removal count is **one**, it is the package §16 dismantled, and the brief's
+stop-and-report condition is therefore not met. Full plan saved to
+`/root/m5-26-snapshot/sim-plan-distupgrade.txt`.
+
+### 17.1 The seven new packages, and the five that deserved a look
+
+```
+ros-jazzy-rosidl-generator-rs        0.4.12    (new package in the ROS set)
+libglapi-amber                       21.3.9    (§16.1, the split)
+libnvidia-compute-580   libnvidia-gl-580   libnvidia-common-580
+nvidia-firmware-580-580.173.02        nvidia-kernel-common-580
+```
+
+**Five NVIDIA-580 packages arriving on a machine that renders in software
+wants an explanation before it is accepted.** It is Ubuntu's driver-series
+transition, and it was traced rather than waved through: `libnvidia-gl-570` is
+itself upgraded (`...0ubuntu0.24.04.2` -> `...0ubuntu1.24.04.1`) and the new
+570 **depends on** `libnvidia-gl-580`, turning 570 into a shim over 580.
+Nothing in this project requested it.
+
+It is an **addition, not a removal**, so it does not meet the stop condition —
+but it is not cosmetic either, and it is recorded because it touches the exact
+thing §19.1 verifies. This machine registers **two** EGL vendors, NVIDIA at
+priority 10 ahead of Mesa at 50, and has WSL's GPU passthrough present:
+
+```
+$ ls /usr/share/glvnd/egl_vendor.d/    ->  10_nvidia.json  50_mesa.json
+$ ls /dev/dxg                          ->  present
+$ ls /usr/lib/wsl/lib/                 ->  libcuda.so.1, libd3d12.so, nvidia-smi, ...
+```
+
+and §16 check 4's map read shows `libEGL_nvidia.so.570.211.01` **is loaded into
+the render process**. It is tried first and does not win, which is why §4.7 and
+§15.1 both end on llvmpipe. Moving that library from 570 to 580 therefore
+changes a library that is genuinely in the render path. Whether the renderer
+survives it is not a question a simulation can answer, which is what §19.1 is
+for.
+
+## 18. What the upgrade actually did
+
+Executed 2026-08-05 **10:21:33 - 10:23:18 local** (1 min 45 s), recorded from
+the log and from `/var/log/apt/history.log` rather than from the plan:
+
+```
+$ apt-get dist-upgrade -y -o Dpkg::Options::=--force-confdef \
+                          -o Dpkg::Options::=--force-confold
+342 upgraded, 7 newly installed, 1 to remove and 0 not upgraded.
+Removing libglapi-mesa:amd64 (24.2.8-1ubuntu1~24.04.1) ...
+```
+
+```
+Start-Date: 2026-08-05  10:21:33
+Commandline: apt-get dist-upgrade -y ...
+Remove: libglapi-mesa:amd64 (24.2.8-1ubuntu1~24.04.1)
+End-Date: 2026-08-05  10:23:18
+```
+
+**One `Remove:` line, and it names one package.** The outcome matched the
+simulation exactly:
+
+| | Simulated | Actual |
+|---|---|---|
+| upgraded | 342 | **342** |
+| newly installed | 7 | **7** |
+| removed | 1 (`libglapi-mesa`) | **1, `libglapi-mesa`** |
+| `E:` / `dpkg: error` / "Errors were encountered" | — | **0** |
+| broken packages afterwards (`dpkg -l` not `ii`) | — | **0** |
+| **packages behind the archive, after** | 0 | **0** |
+| `apt-mark showhold`, after | (none) | **(none)** — no hold or pin was used |
+
+`ros-jazzy-*` installed went 400 -> **401**; total installed 2232 -> **2238**.
+
+The confirmation of §16.1's mechanism, read after the fact:
+
+```
+libglapi-mesa    ->  un  (removed, no longer installed)
+libglapi-amber   ->  21.3.9-0ubuntu3~24.04.2  (installed)
+libgl1-amber-dri ->  21.3.9-0ubuntu2  ->  21.3.9-0ubuntu3~24.04.2
+```
+
+Every other Mesa package is **byte-for-byte the version it was before**:
+`libgl1-mesa-dri`, `libglx-mesa0`, `libegl-mesa0`, `mesa-libgallium`,
+`mesa-vulkan-drivers` all still 25.2.8-0ubuntu0.24.04.2. **The upgrade did not
+touch the renderer's packages at all**; it removed a stub none of them used.
+
+### 18.1 What moved, and the part that is more interesting than the count
+
+| | |
+|---|---|
+| `ros-jazzy-*` whose version changed | **288** |
+| `ros-jazzy-*` unchanged | **112** |
+| non-ROS packages changed | **54** |
+| **Gazebo packages changed** | **0** — `gz-sim` stays at **8.11.0**. Harmonic comes from the **ROS vendor packages** (`ros-jazzy-gz-*-vendor`), all four byte-identical against the snapshot; **there is no `packages.osrfoundation.org` apt source on this machine**, as §17 shows. (Corrected 2026-08-05 by m5-26b: this row originally named osrfoundation and contradicted §17 in the same file.) |
+
+The 288 that moved are the base ROS tree, dated January to June:
+
+```
+ros-jazzy-action-msgs   2.0.3-1noble.20260126.172111 -> 2.0.4-1noble.20260612.054718
+ros-jazzy-ament-cmake   2.5.5-1noble.20260121.181635 -> 2.5.6-2noble.20260225.222913
+ros-jazzy-rclcpp        ...                          -> 28.1.21-1noble.20260615.133124
+ros-jazzy-rclpy         ...                          -> 7.1.11-1noble.20260615.133206
+```
+
+**The four packages m5-21's §12.5 realignment installed did not move at all** —
+they were already today's builds, which is why they were the ones that
+collided:
+
+```
+ros-jazzy-fastcdr                2.2.7-1noble.20260225.051855   (unchanged)
+ros-jazzy-fastrtps               2.14.6-1noble.20260303.233638  (unchanged)
+ros-jazzy-rmw-fastrtps-cpp       8.4.4-1noble.20260615.124621   (unchanged)
+ros-jazzy-rmw-fastrtps-shared-cpp 8.4.4-1noble.20260615.124045  (unchanged)
+```
+
+**What moved instead is the other half of that ABI pair**, and this is the
+thing worth taking away:
+
+```
+ros-jazzy-rosidl-typesupport-fastrtps-c    3.6.3-...20260122 -> 3.6.4-...20260612
+ros-jazzy-rosidl-typesupport-fastrtps-cpp  3.6.3-...20260121 -> 3.6.4-...20260612
+ros-jazzy-rosidl-dynamic-typesupport-fastrtps  0.1.0-3noble.20260121 -> ...20260612
+ros-jazzy-fastrtps-cmake-module            3.6.3-...20260121 -> 3.6.4-...20260603
+```
+
+§12.2's `undefined symbol: _ZN8eprosima7fastcdr3Cdr9serializeEj` was a January
+typesupport calling a February Fast-CDR. m5-21 closed that gap by dragging
+Fast-DDS **forward**; this upgrade closes it from the other side by bringing
+the typesupport **up to meet it**. The tree is now coherent in one direction
+rather than patched in two.
+
+`/dev/shm` was cleared after the upgrade as the Fast-DDS rule requires
+(§12.7, LESSONS 2026-08-05) and with nothing running. **It was already clean —
+2 entries before and after** — which is expected here, because no
+`fastcdr`/`fastrtps`/`rmw_fastrtps` version changed; the step is recorded as
+performed and as a no-op, not skipped.
+
+The 54 non-ROS changes are ordinary Ubuntu security and update traffic
+(`apparmor`, `binutils`, `coreutils`, `apport`, `netplan`, `nftables`,
+`cloud-init`, `linux-libc-dev`), Docker 29.2.1 -> 29.7.1, six `python3-colcon-*`
+packages, and the NVIDIA series move of §17.1. No new apt source appeared.
+
+---
+
+## 19. Verification — the deliverable
+
+Three checks, in the order the brief sets them, each run on a machine verified
+clear beforehand and torn down to `pgrep`-zero afterwards.
+
+### 19.1 The renderer still reads llvmpipe
+
+Read from `~/.gz/rendering/ogre2.log`, truncated first so the line provably
+belongs to this run, at **10:24:39** — 81 s after the upgrade ended.
+
+| | before (§15.1, 10:15:05) | **after (10:24:39)** |
+|---|---|---|
+| `GL_VERSION` | 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2 | **identical** |
+| `GL_VENDOR` | Mesa | **Mesa** |
+| `GL_RENDERER` | llvmpipe (LLVM 20.1.2, 256 bits) | **llvmpipe (LLVM 20.1.2, 256 bits)** |
+| `GPU Vendor` | unknown | **unknown** |
+| EGL devices found | 2 | **2**, same two, same order |
+
+**Character for character the same reading.** §4.7's conclusion is unchanged
+and this machine still renders in software.
+
+**The NVIDIA question §17.1 raised is answered, and it did move.** The EGL
+vendor library the render process loads is now the 580 one:
+
+```
+$ ls -la /usr/lib/x86_64-linux-gnu/libEGL_nvidia.so.0
+libEGL_nvidia.so.0 -> libEGL_nvidia.so.580.173.02        (was 570.211.01)
+```
+
+So the reading above was taken with the new NVIDIA EGL vendor in place, tried
+first at priority 10, and Mesa's llvmpipe still wins. The series transition is
+real, it reached the render path, and it changed nothing observable.
+
+### 19.2 The §12.5 stack comes up, with Nav2 active and nothing dying
+
+`warehouse_bringup.launch.py x:=-4.5 y:=7.0` -> `localization.launch.py` ->
+`navigation.launch.py`, isolated on both transports (`GZ_PARTITION=m526stack`,
+`ROS_DOMAIN_ID=78`). Base ROS 2 was smoke-tested first, because §12.3 is the
+reason not to let a Nav2 launch be the first test after a library change:
+
+```
+$ ros2 run demo_nodes_cpp talker            ->  Publishing: 'Hello World: 1..4'
+$ python3 -c 'import rclpy; ...'            ->  rclpy publish OK
+$ /opt/ros/jazzy/lib/nav2_amcl/amcl         ->  amcl lifecycle node launched.
+$ .../nav2_controller/controller_server     ->  controller_server lifecycle node launched.
+```
+
+The last two are the exact binaries that died at **exit 127** in §12.2.
+
+**23 nodes**, the same set §12.5 records:
+
+```
+/amcl /behavior_server /bt_navigator /bt_navigator_navigate_to_pose_rclcpp_node
+/cmd_vel_to_tricycle /controller_server /envelope_gate /forklift_arena_bridge
+/forklift_ekf /forklift_io /global_costmap/global_costmap /imu_gate
+/local_costmap/local_costmap /map_server /planner_server /sensor_tf
+/velocity_smoother /wheel_odometry  + 2 launch_ros + 3 transform_listener_impl
+```
+
+```
+                    fatal   process-died   error
+bringup.log           0          0            0
+localization.log      0          0            0
+navigation.log        0          0            3
+```
+
+The three `[ERROR]` lines are the costmap inflation-radius advisories §12.5
+already names as pre-existing and not to be chased — same text, same three
+sites (`global_costmap`, `computeCircumscribedCost`, `local_costmap`).
+
+Lifecycle state, and **the reading method matters here**:
+
+```
+/controller_server  active [3]      /bt_navigator       active [3]
+/planner_server     active [3]      /velocity_smoother  active [3]
+/behavior_server    active [3]
+/map_server         Node not found  <- the CLI, not the node
+/amcl               Node not found  <- the CLI, not the node
+```
+
+**"Node not found" was not accepted as a result.** Both nodes are in the node
+list above, and the lifecycle manager's own log is unambiguous:
+
+```
+[map_server]: Configuring / Activating / Creating bond (map_server) to lifecycle manager.
+[amcl]:       Configuring / Activating / Creating bond (amcl) to lifecycle manager.
+```
+
+§19.3 then settled it by reading the state a second way. **The cause is the
+`ros2` CLI daemon's cold graph cache**: `ros2 lifecycle get` goes through a
+daemon that is started by the first such call and whose graph is still filling.
+In both runs it is the **first** query in the loop that fails and never a later
+one — two nodes in the first run, one in the second. The rule that follows:
+**read a lifecycle state through `ros2 service call /<node>/get_state` as well
+as through `ros2 lifecycle get`, and never report a first-query
+"Node not found" as a node state.**
+
+### 19.3 The m5-24 vehicle-image run repeats
+
+Same recipe as `EVIDENCE_VEHICLE_IMAGE.md` §9, `GZ_PARTITION=m526img`, vehicle
+`F001` in its own domain 51. Started **2026-08-05T08:33:37Z**.
+
+The sim side came up with **12 gz-transport topics**, matching m5-24 exactly.
+The vehicle image resolved the same identity from the same config:
+
+```
+serial F001   domain id 51 (from allocation.yaml)
+spawn world  x -4.5000 y +7.0000 z +0.0500 yaw +0.000000
+initial map  x +1.584770 y +12.576859 yaw -0.007915
+```
+
+```
+process has died : 0        [FATAL] : 0
+```
+
+**The m5-24 scoping fix survived the upgrade**, which is the thing most likely
+to be quietly undone by 288 moving ROS packages — the check is not that Nav2
+started but that it started on *this vehicle's* parameter file (§1.1):
+
+```
+Created global planner plugin GridBased of type nav2_smac_planner::SmacPlannerHybrid
+Using motion model: Reeds-Shepp
+robot_base_frame: forklift/base_link
+```
+
+`SmacPlannerHybrid`, not the `NavfnPlanner` default; `forklift/base_link`, not
+the `base_link` default.
+
+**The domain wall, both directions.**
+
+```
+==== from OUTSIDE, ROS_DOMAIN_ID=52 ====
+$ ros2 topic list --no-daemon --spin-time 5
+/parameter_events
+/rosout                                  <- the querying process's own two
+topics matching "forklift": 0
+$ check_contract_topics.py --live --expect-absent
+PASS: the boundary holds  (expected NO contract topic in domain 52)
+
+==== from INSIDE, ROS_DOMAIN_ID=51 ====
+$ check_contract_topics.py --live
+ROS_DOMAIN_ID=51   live topics: 93
+contract rows present : 29 of 29
+contract rows missing : 0
+PASS: every contract row is on the wire
+```
+
+**93 live topics and 29 of 29 contract rows, identical to m5-24 §4**, and
+nothing at all from domain 52. **23 nodes**, and all seven managed nodes
+`active` read two independent ways:
+
+| Node | `ros2 lifecycle get` | `ros2 service call .../get_state` |
+|---|---|---|
+| `/map_server` | *Node not found* (§19.2, first query) | **active** |
+| `/amcl` | active [3] | **active** |
+| `/controller_server` | active [3] | **active** |
+| `/planner_server` | active [3] | **active** |
+| `/behavior_server` | active [3] | **active** |
+| `/bt_navigator` | active [3] | **active** |
+| `/velocity_smoother` | active [3] | **active** |
+
+Four `[ERROR]` lines, all four the same inflation-radius advisories.
+
+**The pass-through observation, the one whose residual is a property of the
+design:**
+
+```
+$ ROS_DOMAIN_ID=51 python3 agv/forklift/scripts/envelope_run.py run \
+      --scenario passthrough --csv passthrough.csv
+
+recorded 699 state rows, 228 gated messages, 280 envelope publications,
+         241 smoothed messages
+
+=== scenario passthrough ===
+run 699 state rows over 14.02 s of simulated time
+  matched pairs                  : n = 220
+  |gated - smoothed|             : max 0.000e+00 m/s, mean 0.000e+00 m/s
+  exact matches                  : 220 of 220
+  gate latency (smoothed -> gated): max 0.0011 s, mean 0.0004 s
+```
+
+| | committed m5-11 §7 | installed A-D (§12.6) | m5-24 §6 | **this run, post-upgrade** |
+|---|---|---|---|---|
+| matched pairs | 221 | 221 / 224 / 676 / 440 | 220 | **220** |
+| `max abs(gated_v - smoothed_v)` | **0.000e+00** | **0.000e+00** x4 | **0.000e+00** | **0.000e+00** |
+| exact matches | 221 of 221 | all, all four | 220 of 220 | **220 of 220** |
+| gate latency, mean | 0.0004 s | 0.0004 - 0.0242 s | 0.0005 s | **0.0004 s** |
+| gate latency, max | 0.0010 s | 0.0014 - 0.0713 s | 0.0011 s | **0.0011 s** |
+
+**The residual reproduces exactly — seven recorded runs now, across two
+packagings, a per-vehicle domain and a 342-package upgrade.** That is the half
+that is a property of the design.
+
+**The latency is the other half and it is one more draw.** It landed at the
+committed sample this time. That is **not** a confirmation any more than
+§12.6's 60x spread was a regression (LESSONS 2026-08-04); nothing was tuned,
+and no run was discarded to get it.
+
+### 19.4 Teardown, both runs
+
+```
+$ pgrep-equivalent after teardown   ->  0
+$ ls /dev/shm | wc -l               ->  2
+```
+
+Both runs were torn down by pattern against observed `ps -eo args` output and
+verified to zero, and `/dev/shm` was cleared each time (§12.7).
+
+**One artefact worth naming so nobody chases it.** The sim-side check
+"ROS processes on the sim side" reported **1** rather than the expected 0. It
+was traced rather than waved away: the match was a leftover
+`ros2-daemon --ros-domain-id 78` from §19.2's run — the CLI's own helper
+process, in a *different* domain from the vehicle, holding no vehicle node. It
+is the same CLI daemon behind §19.2's "Node not found". Both daemons were
+stopped afterwards. **`ros2 daemon stop` belongs in the teardown**, next to the
+`pkill` and the `/dev/shm` clear.
+
+---
+
+## 20. Where this leaves the machine
+
+```
+$ apt list --upgradable | tail -n +2 | wc -l   ->  0
+$ apt-mark showhold                            ->  (none)
+$ dpkg -l | grep -c '^i[^i]'                   ->  0   (no broken package)
+$ dpkg-query -W 'ros-jazzy-*' | wc -l          ->  401
+```
+
+**Zero packages behind the archive, zero holds, zero pins.** The condition that
+caused the m5-21 outage — a tree assembled from two archive snapshots months
+apart — no longer exists, and §13.1's `--only-upgrade` Fast-DDS step is now the
+no-op it was designed to be on a coherent machine.
+
+Rollback records, both intact:
+
+| | |
+|---|---|
+| `/root/m5-26-snapshot` | this upgrade: selections, all 2232 versions before, 400 `ros-jazzy-*` before and 401 after, holds, apt history, the simulated plan, `distupgrade.log` |
+| `/root/m5-21-snapshot` | **untouched**, including `libfastcdr.so.2.2.5` — still the only copy of a build the archive has deleted |
+
+Both are copied readable to `~/m5-26-snapshot` and `~/m5-21-snapshot`.
+
+**What is now true that was not.** A rollback is no longer a one-file rescue: on
+a current tree every installed version is still in the archive, so
+`/root/m5-26-snapshot/all-versions-after.txt` is a re-installable list rather
+than a historical record. That is the property staying stale had removed.
+
+### 20.1 What this does not establish
+
+1. **Timing figures did not become bounds.** §19.3's latency agreeing with the
+   committed sample is one draw of a quantity measured to move by 60x on this
+   machine. Nothing here licenses quoting it as a bound.
+2. **Only the pass-through observation was re-run.** §13.3 item 3's other five
+   `EVIDENCE_ENVELOPE.md` observations — enable-drop, stale, clamp, release,
+   permit — are still un-re-run, now against a tree that moved again.
+3. **No Nav2 goal was driven.** m5-24 §5's `ABORTED / error_code 104` is
+   untouched by this work and remains its own open question. This brief verified
+   that the stack comes up and that the boundary and the residual hold; it did
+   not re-open route following.
+4. **The 112 unchanged `ros-jazzy-*` packages** are unchanged because they were
+   already at today's build, not because they were held. There are no holds.
+5. **Section 4.5's clock is still untreated.** `w32time` was not checked or
+   changed here, and nothing in Part III depends on the wall clock.
+
+### 20.2 What Part III supersedes in §2's table
+
+Part II superseded §2's two `MISSING` rows. Part III moves version strings, so
+the same duty applies here — swept by subject (every row of §2 and every line
+of its `ROS_PKGS` survey re-queried), not by the rows that looked likely
+(LESSONS 2026-07-29).
+
+**Rows whose version moved:**
+
+| §2 row | as §2 records it | **now** |
+|---|---|---|
+| `ros-jazzy-ros-base` | `0.11.0-1noble.20260126.203129` | **`0.11.0-1noble.20260616.084325`** |
+| `ros-jazzy-robot-state-publisher` | `3.3.3-3noble.20260126.180730` | **`3.3.4-1noble.20260615.150609`** |
+
+**Rows re-queried and unchanged**, so §2 still reads true for them: `xacro`
+2.1.1, `gz-sim-vendor` 0.0.10, `ros-gz` 1.0.22, `python3-colcon-common-extensions`
+0.3.0-100, `python3-rosdep` 0.26.0-1, `git`, `python3.12-venv`, `python3-yaml`,
+**Gazebo `8.11.0`**, and **the render backend, `ogre2` on
+`llvmpipe (LLVM 20.1.2, 256 bits)`** (§19.1).
+
+**Two `MISS` lines in the survey were already wrong before this upgrade, and
+that is a finding about the document rather than about the upgrade.** Both are
+present in the *pre*-upgrade snapshot, so they arrived with m5-21's 137
+dependencies and the survey was never refreshed:
+
+```
+ros-jazzy-joint-state-publisher    2.4.1-1noble.20260615.140100    (survey says MISS)
+ros-jazzy-joint-state-broadcaster  4.40.1-1noble.20260615.171040   (survey says MISS)
+```
+
+**Still genuinely absent**, and unchanged by this upgrade:
+`ros-jazzy-ros2-control`, `ros-jazzy-gz-ros2-control`,
+`ros-jazzy-controller-manager`, `ros-jazzy-joint-trajectory-controller`,
+`python3-vcstool`. The forklift does not use `ros2_control` (ADR 0010 D1), so
+§2's `ros2_control stack -> MISSING` row is still correct in substance — but
+it is correct for four packages, not five, because `joint-state-broadcaster`
+came in as a Nav2 dependency.
+
+**The rule this pays for:** a package survey pasted into a document is a
+measurement with a date on it, and it goes stale on the next install rather
+than on the next upgrade. Re-query it whenever the tree is touched, or the
+document quietly claims a package is missing that has been installed for hours.

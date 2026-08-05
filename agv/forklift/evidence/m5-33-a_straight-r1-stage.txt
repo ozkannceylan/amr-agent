@@ -1,0 +1,27 @@
+registration  theta -0.007915259 rad  t (+6.029223, +5.541460) m  FLOOR rms 0.0404 MAX 0.1411 m
+STATION  world (+1.0000, +7.0000) yaw +0.0000  ->  map (+7.0846, +12.5333) yaw -0.0079   checker general_goal_checker
+STAGING  world (-2.0000, +7.0000) yaw +0.0000  ->  map (+4.0847, +12.5571) yaw -0.0079   checker staging_goal_checker
+d = 3.000 m back along the goal heading; go-arounds bounded at 2
+
+LEGS
+  stage        SUCCEEDED            11.10 s  believed 0.241 m / -0.47 deg  truth 0.254 m / +1.25 deg  entry-heading +2.43 deg  reversals-after-entry 0
+  approach0: TIMEOUT after 45.0 s of simulation time; cancelling
+  approach0    CANCELED             45.03 s  believed 0.355 m / +7.16 deg  truth 0.336 m / +9.65 deg  entry-heading +10.87 deg  reversals-after-entry 1
+  goaround0: TIMEOUT after 90.0 s of simulation time; cancelling
+  goaround0    CANCELED             90.02 s  believed 0.661 m / +3.25 deg  truth 0.682 m / +8.54 deg  entry-heading none  reversals-after-entry 0
+
+RESULT           FAILED_RETURNING_TO_STAGING
+go-arounds       1 used of 2 allowed
+legs             3
+elapsed          146.15 s of simulation time over all legs
+final approach   CANCELED  believed 0.3546 m / +7.162 deg
+  ABSOLUTE goal error (truth vs commanded goal): 0.3360 m (2.38 x floor)
+  heading error +9.649 deg
+  entry heading  +10.875 deg   (the 8.594 deg discriminator)
+SHUFFLE REGIME   NO   (>= 3 commanded direction reversals after first entry into the position circle, counted per leg)
+LOCALIZATION     believed vs truth over the whole run, n = 1595
+  position       rms 0.0652 m   MAX 0.1059 m   (0.263 m is what footprint_padding is dimensioned from)
+  heading        rms 3.79 deg  MAX 5.29 deg
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-33-a_straight-r1-run.csv (1595 samples, all legs)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-33-a_straight-r1-run-approach.csv (479 samples, final approach leg only)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-33-a_straight-r1-plan.json

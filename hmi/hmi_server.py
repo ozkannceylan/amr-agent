@@ -9,16 +9,33 @@ server for one operator's browser**, and it is nothing else.
 
 What it does, and the whole of what it does:
 
-* streams the five `Forklift/Hmi/` **requests** and `Forklift/Link/HmiHeartbeat`
-  into the server, **all six every cycle regardless of change**
-  (`docs/interfaces/opcua-nodes.md` §10.4, §10.8 H1);
-* reads `Forklift/Input/`, `Forklift/Output/`, `Forklift/Status/` and
-  `Forklift/Link/HmiLinkOk` for the operator's display, and applies them to
-  nothing; also reads the four `Forklift/Safety/` F-CPU mirrors of
-  `docs/interfaces/opcua-nodes.md` §11, when the server carries them — display
-  diagnostics only, feeding no logic here either (§11.3), and their absence is
-  graceful, never a connect error (§11.6);
+* streams the five `Forklift/Hmi/` **requests**, `Forklift/Mode/
+  HmiDriveModeRequest`, `Forklift/ProcessStop/HmiProcessStopRequest` and
+  `Forklift/Link/HmiHeartbeat` into the server, **all eight every cycle
+  regardless of change** (`docs/interfaces/opcua-nodes.md` §10.4, §12.1,
+  §10.8 H1), the heartbeat last (H3);
+* reads `Forklift/Input/`, `Forklift/Output/`, `Forklift/Status/`,
+  `Forklift/Link/HmiLinkOk` and the §12 groups `Forklift/Mode/`,
+  `Forklift/Envelope/`, `Forklift/Vehicle/` and `Forklift/ProcessStop/` for the
+  operator's display, and applies them to nothing; also reads the four
+  `Forklift/Safety/` F-CPU mirrors of `docs/interfaces/opcua-nodes.md` §11,
+  when the server carries them — display diagnostics only, feeding no logic
+  here either (§11.3), and their absence is graceful, never a connect error
+  (§11.6);
 * serves one static page and two small JSON endpoints on loopback.
+
+**v2a (m5-28), built to `hmi/V2A-DESIGN.md`.** Two controls are added and both
+are **standing** rather than deadman controls: the mode selector (§5.1) and the
+operator's process stop (§4). Neither is returned to rest by the H6 page window
+and neither is re-armed per page session — returning the selector to None would
+command a mode exit no operator made, and both directions of releasing or
+engaging a stop on a page loss would fabricate an operator act (V2A-DESIGN
+PS-B, PS-C). The process stop **boots ENGAGED** to match the server's §12.8
+start value: the first `FALSE` this process ever writes is an operator's
+release on the page (PS-A). Nothing about the mode is decided here — no timer,
+no debounce, no verdict; every mode rendering is a pure function of the values
+read on one poll, and the only party that times a mode disagreement is the PLC
+(SPEC §14.7).
 
 What it does **not** do, per `hmi/README.md` and ADR 0008 D2/D3 — no interlock,
 no latch, no timer over a process value, no sequencing, no actuator output, no
@@ -92,52 +109,79 @@ STATIC_DIR = HERE / "static"
 # control disabled and security `None`. "Only the HMI writes the Hmi group" is
 # therefore policy honoured by this client, exactly as the bridge's allowlist is
 # policy honoured by that one. So the allowlist lives here, in code, and the
-# config file cannot widen it: a `write:` table naming anything but these six
+# config file cannot widen it: a `write:` table naming anything but these eight
 # paths refuses to start the process.
 # --------------------------------------------------------------------------- #
 
-#: The five requests of §10.4 plus the heartbeat of §10.8. BrowseName -> browse
-#: path below the `DemoCell` interface node. This is the complete set of nodes
-#: this process may write, on this server or any other.
+#: The five requests of §10.4, the two §12.1 additions and the heartbeat of
+#: §10.8 — **eight**. BrowseName -> browse path below the `DemoCell` interface
+#: node. This is the complete set of nodes this process may write, on this
+#: server or any other. It grew by exactly the two §12 rows and by nothing else
+#: (V2A-DESIGN §2.1); the mechanism is unchanged.
 HMI_WRITABLE_PATHS: dict[str, tuple[str, ...]] = {
     "HmiTractionRequest": ("Forklift", "Hmi", "HmiTractionRequest"),
     "HmiSteerRequest": ("Forklift", "Hmi", "HmiSteerRequest"),
     "HmiForkRequest": ("Forklift", "Hmi", "HmiForkRequest"),
     "HmiTeleopRequest": ("Forklift", "Hmi", "HmiTeleopRequest"),
     "HmiResetRequest": ("Forklift", "Hmi", "HmiResetRequest"),
+    "HmiDriveModeRequest": ("Forklift", "Mode", "HmiDriveModeRequest"),
+    "HmiProcessStopRequest": ("Forklift", "ProcessStop", "HmiProcessStopRequest"),
     "HmiHeartbeat": ("Forklift", "Link", "HmiHeartbeat"),
 }
 
-#: The five requests, in the order they are written, as one batched call.
+#: The seven non-heartbeat writes, in the order they are written, as one
+#: batched call. The heartbeat follows them in a second call (H3), so an
+#: advanced heartbeat implies that cycle's requests landed first.
 REQUEST_ORDER: tuple[str, ...] = (
     "HmiTractionRequest",
     "HmiSteerRequest",
     "HmiForkRequest",
     "HmiTeleopRequest",
     "HmiResetRequest",
+    "HmiDriveModeRequest",
+    "HmiProcessStopRequest",
 )
 
-#: OPC UA variant type per written node — §10.4 and §10.8. Writing a Python
-#: float without this would send a Double to a Float tag.
+#: OPC UA variant type per written node — §10.4, §10.8 and §12. Writing a
+#: Python float without this would send a Double to a Float tag.
 WRITE_VARIANT: dict[str, ua.VariantType] = {
     "HmiTractionRequest": ua.VariantType.Float,
     "HmiSteerRequest": ua.VariantType.Float,
     "HmiForkRequest": ua.VariantType.Float,
     "HmiTeleopRequest": ua.VariantType.Boolean,
     "HmiResetRequest": ua.VariantType.Boolean,
+    "HmiDriveModeRequest": ua.VariantType.UInt16,
+    "HmiProcessStopRequest": ua.VariantType.Boolean,
     "HmiHeartbeat": ua.VariantType.UInt16,
 }
 
 #: Folders this process may READ. `Forklift/Hmi/` is deliberately absent: the
 #: requests are this client's own output and reading them back would invite
-#: treating the server's copy as state (§10.1, invariant 10).
+#: treating the server's copy as state (§10.1, invariant 10). `Forklift/Mode/`
+#: IS readable, but only for `ForkliftDriveModeActive` — the config's read table
+#: never names `HmiDriveModeRequest`, for the same reason and under §12.3 M2.
 READABLE_FOLDERS: frozenset[tuple[str, ...]] = frozenset({
     ("Forklift", "Input"),
     ("Forklift", "Output"),
     ("Forklift", "Status"),
     ("Forklift", "Link"),
     ("Forklift", "Safety"),
+    ("Forklift", "Mode"),
+    ("Forklift", "Envelope"),
+    ("Forklift", "Vehicle"),
+    ("Forklift", "ProcessStop"),
 })
+
+#: The two nodes this client writes that it must never read back as state
+#: (§12.3 **M2**: *a consumer displays or acts on the node it read, never on
+#: what it sent*). A config naming either in its read table refuses to start.
+NEVER_READ_BACK: frozenset[str] = frozenset({
+    "HmiDriveModeRequest", "HmiProcessStopRequest",
+})
+
+#: `Forklift/Mode/` — the §12.3 encoding, defined once in the node model and
+#: re-encoded nowhere. Display only: this process never decides a mode from it.
+DRIVE_MODE_NAMES: dict[int, str] = {0: "None", 1: "Teleop", 2: "Autonomous"}
 
 #: `Forklift/Safety/` — `opcua-nodes.md` §11.2. Four read-only F-CPU mirrors.
 #: None of them is ever written by this process (§11.4 MR1 — no client writes
@@ -157,6 +201,14 @@ SAFETY_MIRROR_NAMES: tuple[str, ...] = (
 #: as before this group existed: its absence is a genuine connect failure.
 OPTIONAL_READ_FOLDERS: frozenset[tuple[str, ...]] = frozenset({
     ("Forklift", "Safety"),
+})
+
+#: The `opcua-nodes.md` §12 folders. Their absence is a REQUIRED node missing
+#: and a genuine connect failure — but against the commissioned CPU it is the
+#: DESIGNED failure of `hmi/config.yaml` rather than a defect, so a browse that
+#: fails inside one of them says so at the point of failure (m5-29 finding 2).
+SECTION_12_FOLDERS: frozenset[str] = frozenset({
+    "Mode", "Envelope", "Vehicle", "ProcessStop",
 })
 
 #: `HmiHeartbeat` is a UInt16 and it WRAPS. The PLC compares for inequality
@@ -197,6 +249,17 @@ UI_POLL_PERIOD_S = 0.200
 #: derivation, rather than in the config file, precisely so it cannot be retuned
 #: as if it were a setting.
 UI_POLL_STALE_TIME = 5.0 * UI_POLL_PERIOD_S
+
+#: The age past which this process's OWN LAST GOOD WRITE stops counting as
+#: write health, published on `/state` so the page renders the process stop
+#: UNAVAILABLE without inventing a millisecond of its own (V2A-DESIGN §8: "the
+#: backend publishes every window"; m5-29 finding 4). It is a window over THIS
+#: process's own write channel — the same class of fact as `UI_POLL_STALE_TIME`
+#: over its own page — and it is not a window over any plant value or any PLC
+#: verdict (§10.1). Twenty write cycles at the 10 Hz cadence: long enough that
+#: a scheduling hiccup is not a fault, short enough that a hung write surfaces
+#: to the operator while the session still claims to be up.
+WRITE_HEALTH_STALE_TIME = 2.0
 
 
 class ConfigError(Exception):
@@ -326,7 +389,7 @@ def validate_config(cfg: dict, path: Path) -> None:
     write.update(nodes.get("heartbeat") or {})
     if set(write) != set(HMI_WRITABLE_PATHS):
         raise ConfigError(
-            f"{path}: the write set must be exactly the six HMI-writable nodes "
+            f"{path}: the write set must be exactly the eight HMI-writable nodes "
             f"({', '.join(sorted(HMI_WRITABLE_PATHS))}); this file names "
             f"{', '.join(sorted(write)) or '(none)'}"
         )
@@ -338,6 +401,13 @@ def validate_config(cfg: dict, path: Path) -> None:
             )
     for name, browse_path in (nodes.get("read") or {}).items():
         folder = tuple(browse_path[:-1])
+        if browse_path[-1] in NEVER_READ_BACK:
+            raise ConfigError(
+                f"{path}: {name} reads {'/'.join(browse_path)}, which this client "
+                f"WRITES. A consumer displays the node it read, never what it sent "
+                f"(opcua-nodes.md §12.3 M2) — the defect that rule prevents is "
+                f"invisible precisely when the PLC has refused the request"
+            )
         if folder not in READABLE_FOLDERS:
             raise ConfigError(
                 f"{path}: {name} reads {'/'.join(browse_path)}, which is outside the "
@@ -386,6 +456,26 @@ class Controls:
         #: independent one that covers link-up.
         self._teleop_armed = True
         self._reset_armed = True
+        #: **The two STANDING controls of v2a.** Neither is a deadman control
+        #: and neither is armed per page session (V2A-DESIGN PS-B, PS-C, §5.1):
+        #:
+        #: * `process_stop` boots **`TRUE`** (PS-A), matching the server's
+        #:   §12.8 start value. A freshly connected HMI must not flip a
+        #:   non-permissive server value the operator has not touched, so the
+        #:   first `FALSE` this process ever writes is an operator's release on
+        #:   the page. It holds its last operator-set value through a page loss:
+        #:   releasing it would invent the permissive act, and engaging it on
+        #:   every browser hiccup would latch a stop nobody requested. It needs
+        #:   no arming because it carries no dangerous edge — the PLC latches on
+        #:   LEVEL `TRUE`, a phantom engage is non-permissive, and a phantom
+        #:   release clears nothing by itself.
+        #: * `drive_mode` boots `0` (None) and holds its last operator-set
+        #:   value too: returning it to None would command a mode exit (X3) no
+        #:   operator made.
+        #:
+        #: Neither is touched by `_to_rest`, and that omission is the rule.
+        self.process_stop = True
+        self.drive_mode = 0
         self.updated_monotonic = time.monotonic()
 
     def apply(self, traction: float, steer_axis: float, fork: float,
@@ -407,8 +497,39 @@ class Controls:
                 self._reset_tap = True        # a press this short still lands
             self.updated_monotonic = time.monotonic()
 
+    def set_process_stop(self, engaged: bool) -> None:
+        """The operator's two-state process stop — a LEVEL, standing.
+
+        Nothing is decided here. The PLC latches on the level, and no client
+        clears a latch by writing a node (§12.7 PS1). Releasing this is what
+        makes the reset's live-world term true (PS3); it is not itself a reset.
+        """
+        with self._lock:
+            self.process_stop = bool(engaged)
+            self.updated_monotonic = time.monotonic()
+
+    def set_drive_mode(self, mode: int) -> None:
+        """The selector position — a LEVEL, standing, in the §12.3 encoding.
+
+        `0` None, `1` Teleop, `2` Autonomous. Refused if it is anything else:
+        §12.3's rule is that a value outside `{0, 1, 2}` is a broken writer and
+        not a mode to clamp, and this client will not be that writer.
+        """
+        value = int(mode)
+        if value not in DRIVE_MODE_NAMES:
+            raise ValueError(
+                f"drive_mode={mode} is outside the §12.3 encoding "
+                f"{{0 None, 1 Teleop, 2 Autonomous}}")
+        with self._lock:
+            self.drive_mode = value
+            self.updated_monotonic = time.monotonic()
+
     def _to_rest(self) -> None:
-        """Every control at its rest position. Caller holds the lock."""
+        """Every DEADMAN control at its rest position. Caller holds the lock.
+
+        `process_stop` and `drive_mode` are deliberately absent: they are
+        standing controls and a page loss is not an operator act (PS-B, §5.1).
+        """
         self.traction = 0.0
         self.steer_axis = 0.0
         self.fork = 0.0
@@ -474,11 +595,23 @@ class Controls:
                 "HmiForkRequest": self.fork,
                 "HmiTeleopRequest": self.teleop and self._teleop_armed,
                 "HmiResetRequest": reset,
+                "HmiDriveModeRequest": self.drive_mode,
+                "HmiProcessStopRequest": self.process_stop,
             }
 
     def arming(self) -> dict[str, bool]:
         with self._lock:
             return {"teleop": self._teleop_armed, "reset": self._reset_armed}
+
+    def standing(self) -> dict[str, Any]:
+        """What the page adopts on load (PS-D), so a reload silently engages
+        and releases nothing."""
+        with self._lock:
+            return {
+                "process_stop": self.process_stop,
+                "drive_mode": self.drive_mode,
+                "drive_mode_name": DRIVE_MODE_NAMES[self.drive_mode],
+            }
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -488,6 +621,12 @@ class Controls:
                 "HmiForkRequest": self.fork,
                 "HmiTeleopRequest": self.teleop and self._teleop_armed,
                 "HmiResetRequest": False,
+                # The two standing controls keep their operator-set values in
+                # the final write too: the deadman is not an operator act, and
+                # writing a released stop here would be this process inventing
+                # one on its way out (PS-B).
+                "HmiDriveModeRequest": self.drive_mode,
+                "HmiProcessStopRequest": self.process_stop,
             }
 
 
@@ -565,9 +704,25 @@ class Published:
             "write": {
                 "cycles": 0, "rtt_last_ms": None, "rtt_median10_ms": None,
                 "period_ms_target": None, "period_ms_measured": None,
+                # The window the page renders the stop UNAVAILABLE past, so it
+                # invents no number of its own (V2A-DESIGN §8).
+                "stale_after_ms": round(WRITE_HEALTH_STALE_TIME * 1000.0, 1),
             },
             "requests": None,
             "metrics": None,
+            # The two STANDING controls, as this backend holds them. The page
+            # adopts these on load and changes them only on an operator action
+            # (V2A-DESIGN PS-D): a reload must silently engage or release
+            # nothing. `process_stop` starts `True` — PS-A.
+            "controls": {
+                "process_stop": True, "drive_mode": 0, "drive_mode_name": "None",
+            },
+            # This process's bookkeeping about ITS OWN read poll — the same
+            # class of fact as `page` below, on the other transport. It is what
+            # lets the page render every read-derived state as UNKNOWN when the
+            # poll is failing, without inventing a number of its own and
+            # without any window over a plant value (§10.1, V2A-DESIGN §8).
+            "read_poll": {"period_ms": None, "stale_after_ms": None},
             # `Forklift/Safety/` — opcua-nodes.md §11.2. Read-only F-CPU mirrors,
             # on the SAME 5 Hz poll as "metrics" (§11 adds no timer of its own).
             # `present` is a STRUCTURAL fact learned at connect time: a server
@@ -710,11 +865,37 @@ class Handler(BaseHTTPRequestHandler):
             fork = _axis(payload.get("fork", 0.0), "fork")
             teleop = bool(payload.get("teleop", False))
             reset = bool(payload.get("reset", False))
+            # THE TWO STANDING CONTROLS ARE OPTIONAL IN THIS PAYLOAD, and the
+            # asymmetry is deliberate. For the five deadman requests a missing
+            # key means REST, which is the whole of the deadman. For these two
+            # a missing key means UNCHANGED: a page that has not yet adopted
+            # the backend's state (PS-D) must not be able to release an engaged
+            # stop or command a mode exit merely by posting.
+            process_stop = payload.get("process_stop", None)
+            drive_mode = payload.get("drive_mode", None)
         except (ValueError, TypeError, json.JSONDecodeError) as exc:
             # §10.4: an implausible request is a fault, not a value to clamp.
             self._json(400, {"error": str(exc)})
             return
         self.controls.apply(traction, steer, fork, teleop, reset)
+        try:
+            if process_stop is not None:
+                self.controls.set_process_stop(bool(process_stop))
+            if drive_mode is not None:
+                self.controls.set_drive_mode(drive_mode)
+        except (ValueError, TypeError) as exc:
+            self._json(400, {"error": str(exc)})
+            return
+        if process_stop is not None or drive_mode is not None:
+            # PUBLISH THE STANDING STATE FROM HERE, NOT ONLY FROM THE WRITE
+            # CYCLE. Every page renders these two controls from this section on
+            # every poll (PS-D), so a value that reaches this endpoint and is
+            # not published until the next successful write cycle is a value
+            # `/state` serves STALE for as long as the OPC UA session is down —
+            # and a page loading in that window would draw the wrong position of
+            # a standing control. The write cycle refreshes it too; this makes
+            # the refresh unconditional on the session (m5-29 finding 1).
+            self.published.update(controls=self.controls.standing())
         self._json(200, {"accepted": True})
 
 
@@ -736,7 +917,8 @@ class Evidence:
     COLUMNS = (
         "wall_utc", "monotonic_s", "cycle", "session_state", "hb_value",
         "hb_running", "HmiTractionRequest", "HmiSteerRequest", "HmiForkRequest",
-        "HmiTeleopRequest", "HmiResetRequest", "write_rtt_ms",
+        "HmiTeleopRequest", "HmiResetRequest", "HmiDriveModeRequest",
+        "HmiProcessStopRequest", "write_rtt_ms",
         "since_last_good_write_ms", "page_state", "page_age_ms",
     )
 
@@ -799,8 +981,18 @@ class HmiClient:
         self.endpoint = opc["endpoint"]
         self.write_period = float(cfg["cycle"]["write_period_s"])
         self.floor_period = float(cfg["cycle"]["floor_period_s"])
-        self.metrics_every = max(1, round(float(cfg["cycle"]["metrics_period_s"])
-                                          / self.write_period))
+        self.metrics_period = float(cfg["cycle"]["metrics_period_s"])
+        self.metrics_every = max(1, round(self.metrics_period / self.write_period))
+        # The window the page renders UNKNOWN past, published so the page never
+        # invents a number of its own. FIVE read-poll periods, the same
+        # MULTIPLE as `UI_POLL_STALE_TIME` and for the same reason: it absorbs
+        # jitter the watched side cannot bound. What it watches is **this
+        # process's own read poll**, its own channel — not a plant value, not a
+        # PLC verdict and not anything the PLC also computes (§10.1's test).
+        published.update(read_poll={
+            "period_ms": round(self.metrics_period * 1000.0, 1),
+            "stale_after_ms": round(5.0 * self.metrics_period * 1000.0, 1),
+        })
 
         self.client: Client | None = None
         self._write_nodes: dict[str, Any] = {}
@@ -834,7 +1026,7 @@ class HmiClient:
         """
         if name not in HMI_WRITABLE_PATHS:
             raise WriteRefused(
-                f"{name} is not one of the six HMI-writable nodes "
+                f"{name} is not one of the eight HMI-writable nodes "
                 f"({', '.join(sorted(HMI_WRITABLE_PATHS))}) — refused by the HMI's "
                 f"own allowlist, before the request reached the server"
             )
@@ -845,8 +1037,9 @@ class HmiClient:
 
     async def _write(self, values: dict[str, Any]) -> None:
         """THE single write helper, together with `_writable` above: every one
-        of the six HMI-writable nodes passes through here, split into two
-        calls per cycle (the five requests, then the heartbeat).
+        of the eight HMI-writable nodes passes through here, split into two
+        calls per cycle (the five requests plus the two §12 standing
+        controls, then the heartbeat).
 
         S7-COMPATIBLE DATAVALUES ONLY (first real-CPU contact, 2026-07-29):
         `BadWriteNotSupported: The server does not support writing the
@@ -876,6 +1069,40 @@ class HmiClient:
         await self.client.write_values(nodes, datavalues)
 
     # -- session ------------------------------------------------------------ #
+
+    async def _resolve(self, objects, prefix: list[str], interface_index: int,
+                       name: str, path, role: str):
+        """One REQUIRED browse, and a refusal that says which node was missing.
+
+        A required node that does not resolve is a genuine connect failure and
+        this client never browses around one (`bridge-design.md` §3.1 N4). What
+        this wrapper adds is legibility. Against today's commissioned CPU
+        `hmi/config.yaml` is MEANT to fail here — the `opcua-nodes.md` §12 nodes
+        arrive in the owner's TIA session — and the bare `BadNoMatch` it used to
+        raise named no browse path at all, so the next person to hit it would
+        debug a working system (m5-29 finding 2).
+        """
+        path = tuple(path)   # the write table is a tuple, the config read table a list
+        browse_path = prefix + [f"{interface_index}:{part}" for part in path]
+        try:
+            return await objects.get_child(browse_path)
+        except Exception as exc:  # noqa: BLE001 - re-raised, richer, below
+            detail = (
+                f"{role} node {name} not found on this server: "
+                f"no {'/'.join(path)} under the browse prefix "
+                f"{'/'.join(prefix)} ({type(exc).__name__}: {exc})"
+            )
+            if path[:1] == ("Forklift",) and path[1:2] and path[1] in SECTION_12_FOLDERS:
+                detail += (
+                    " — THIS IS THE EXPECTED FAILURE against the commissioned CPU: "
+                    "it does not carry the opcua-nodes.md §12 nodes "
+                    "(Forklift/Mode, /Envelope, /Vehicle, /ProcessStop) until the "
+                    "owner's TIA session lands them. The procedure that adds them is "
+                    "plc/forklift/TIA-BUILD-PROCEDURE.md; see the header of "
+                    "hmi/config.yaml. Until then run the v2a screen against "
+                    "hmi/config-v2a-double.yaml, which serves §12 on loopback"
+                )
+            raise ConnectionError(detail) from exc
 
     async def _connect(self) -> None:
         opc = self.cfg["opcua"]
@@ -909,16 +1136,16 @@ class HmiClient:
         objects = client.nodes.objects
         self._write_nodes = {}
         for name, path in HMI_WRITABLE_PATHS.items():
-            self._write_nodes[name] = await objects.get_child(
-                prefix + [f"{interface_index}:{part}" for part in path])
+            self._write_nodes[name] = await self._resolve(
+                objects, prefix, interface_index, name, path, "write")
         read_cfg = self.cfg["nodes"].get("read") or {}
         self._read_nodes = {}
         self._optional_absent = set()
         for name, path in read_cfg.items():
             if tuple(path[:-1]) in OPTIONAL_READ_FOLDERS:
                 continue  # resolved as a group, below — not a hard requirement
-            self._read_nodes[name] = await objects.get_child(
-                prefix + [f"{interface_index}:{part}" for part in path])
+            self._read_nodes[name] = await self._resolve(
+                objects, prefix, interface_index, name, path, "read")
 
         # Optional groups (today: `Forklift/Safety/`, §11) are resolved TOGETHER,
         # after every required read above has already succeeded, so a missing
@@ -1051,7 +1278,7 @@ class HmiClient:
         await self._disconnect()
 
     async def _cycle_forever(self) -> None:
-        """The 10 Hz write cycle. All six nodes every cycle, heartbeat last."""
+        """The 10 Hz write cycle. All eight nodes every cycle, heartbeat last."""
         self._heartbeat_running = True
         deadline = time.monotonic()
         previous = None
@@ -1080,7 +1307,7 @@ class HmiClient:
             self._check_page(now)
             values = self.controls.take_cycle_values()
             started = time.perf_counter()
-            # H1/§10.4: all six every cycle, never on change. H3: the heartbeat
+            # H1/§10.4/§12.1: all eight every cycle, never on change. H3: the heartbeat
             # is written LAST, after the five requests are acknowledged, so an
             # advanced heartbeat implies that cycle's requests landed first.
             await self._write({name: values[name] for name in REQUEST_ORDER})
@@ -1105,6 +1332,7 @@ class HmiClient:
                         else round(statistics.median(self._periods) * 1000.0, 1)),
                 },
                 requests=values,
+                controls=self.controls.standing(),
             )
             if self.evidence is not None:
                 self.evidence.row(
@@ -1112,7 +1340,8 @@ class HmiClient:
                     self._heartbeat, True,
                     values["HmiTractionRequest"], values["HmiSteerRequest"],
                     values["HmiForkRequest"], values["HmiTeleopRequest"],
-                    values["HmiResetRequest"], round(rtt_ms, 3),
+                    values["HmiResetRequest"], values["HmiDriveModeRequest"],
+                    values["HmiProcessStopRequest"], round(rtt_ms, 3),
                     self.published.render()["session"]["since_last_good_write_ms"],
                     "STALE" if self._page_stale else "LIVE",
                     round(self.liveness.age() * 1000.0, 1),

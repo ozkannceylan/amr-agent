@@ -77,10 +77,41 @@ It streams into the HMI-writable node group:
   is `TRUE` for as long as the operator holds it, which is what
   `plc/forklift/SPEC.md` §11 T5.4 needs, and a press shorter than one write
   cycle still lands exactly one `TRUE` cycle so no operator action is dropped;
-- a `UInt16` **heartbeat**.
+- a `UInt16` **heartbeat**;
+- **v2a (m5-28)**, the two `opcua-nodes.md` §12.1 additions, which take the
+  every-cycle write set from six to **eight**: `Mode/HmiDriveModeRequest`, the
+  operator's mode selection as a level, and
+  `ProcessStop/HmiProcessStopRequest`, the operator's process stop. Both are
+  **standing** controls rather than deadman ones — a page loss returns the five
+  §10.4 requests to rest and deliberately leaves these two where the operator
+  put them, because releasing an engaged stop or commanding a mode exit on a
+  browser hiccup would fabricate an operator act. The stop **boots engaged**,
+  matching the server's §12.8 start value, so the first `FALSE` this process
+  ever writes is an operator's release on the page. **The backend is the only
+  holder of both positions** (m5-29b): a page renders them from `/state` on
+  every poll and sends one only in the post triggered by the click that changed
+  it, so no periodic, deadman, blur or unload post carries a standing value and
+  a second tab — stale, backgrounded, or both — cannot release an engaged stop
+  or fire a mode-select rise the operator never made.
+
+**The process stop is not an emergency stop, and the screen is built so that
+cannot be misread.** ADR 0010 D6(b) rules it a process-stop request plus a
+read-only display of F-layer state, and `hmi/V2A-DESIGN.md` §4 implements
+exactly that: the control is labelled **PROCESS STOP**, rectangular, amber, and
+the words *emergency*, *e-stop*, *not-aus* and *protective* appear nowhere on
+or near it. **Red is reserved on that page for the two F-layer demand lamps**,
+which are the only display of the only thing in this cell that carries the word
+e-stop. And the control renders **UNAVAILABLE** — hatched, greyed, inert —
+whenever its effect could not arrive: session down, write cycle failing, or
+`HmiLinkOk` false or stale. A control that looks armed over a dead link is the
+defect that design exists to prevent (invariant 1: safety never traverses the
+network).
 
 For display only, it also reads `Forklift/Input/`, `Forklift/Output/`,
-`Forklift/Status/` and `Forklift/Link/HmiLinkOk`, and — when the server
+`Forklift/Status/`, `Forklift/Link/HmiLinkOk`, the §12 groups `Forklift/Mode/`
+(the authoritative `ForkliftDriveModeActive`, never its own request back —
+§12.3 M2), `Forklift/Envelope/`, `Forklift/Vehicle/` and
+`Forklift/ProcessStop/`, and — when the server
 carries them — the four `Forklift/Safety/` F-CPU mirrors of
 `docs/interfaces/opcua-nodes.md` §11: `EStopDemand`, `ZoneStopDemand`,
 `SafetyResetRequired`, `SafetyResetFault`. These are read-only copies of
@@ -148,10 +179,10 @@ the forklift commissioning gate of ADR 0008 D1, whose live number is carried by
 |---|---|
 | `hmi_server.py` | the whole backend — the OPC UA client session, the 10 Hz write cycle, the 5 Hz read-only poll, and a loopback HTTP server for one operator's browser. `asyncua` and the standard library, nothing else |
 | `static/index.html` | the operator page. One file, offline: no framework, no CDN, no web font, no image |
-| `config.yaml` | addresses and cadences for the **commissioned CPU**. Owner-run |
-| `config-double.yaml`, `config-logic-double.yaml` | the same, against `bridge/test_double/` on 4847 and `plc/forklift/double/` on 4850 |
-| `config-safety-mirror-double.yaml` | the same, against this layer's own `tools/safety_mirror_double.py` on 4860 — neither of the two doubles above serves `Forklift/Safety/` yet |
-| `tools/` | four evidence harnesses — the write contract, the teleop loop, the §10.8 H6 and held-reset kernels, and the §11 mirrors — plus `safety_mirror_double.py`, a minimal OPC UA double this layer owns for the last one, and the screenshot pair `capture_screens.mjs` + `screens_plant_driver.py`, which photograph the page in a real browser (`EVIDENCE_HMI.md` §H). Instruments, not part of the HMI; each harness refuses a non-loopback endpoint, and each polls `GET /state` like the page so H6 does not read it as a crashed browser |
+| `config.yaml` | addresses and cadences for the **commissioned CPU**. Owner-run. Names the v2a eight-node write set, so it needs the §12 nodes the owner's TIA session adds |
+| `config-v2a-double.yaml` | the v2a configuration, against this layer's own `tools/v2a_scenario_double.py` on 4861 |
+| `config-double.yaml`, `config-logic-double.yaml`, `config-safety-mirror-double.yaml` | **M4-era configurations, superseded by v2a.** They name the six-node write set, and `hmi_server.py` refuses to start on them now that the allowlist is eight. They are kept because they are what the recorded M4 and §11 evidence runs used; restoring runnable M4 harnesses needs the `plc/forklift/double/` §14 extension requested in the m5-27 report, not an edit here |
+| `tools/` | four M4 evidence harnesses — the write contract, the teleop loop, the §10.8 H6 and held-reset kernels, and the §11 mirrors — plus `safety_mirror_double.py`, a minimal OPC UA double this layer owns for the last one, and the screenshot pair `capture_screens.mjs` + `screens_plant_driver.py`, which photograph the M4 page in a real browser (`EVIDENCE_HMI.md` §H). For v2a: `v2a_scenario_double.py`, the interim scenario double of `V2A-DESIGN.md` §10 — it serves §10, §12 and (optionally) §11 and **replays scripted sequences** from `SPEC.md` §14 rather than reimplementing them — and `capture_v2a_screens.mjs`, which drives Chrome over the DevTools Protocol with **no third-party package at all**, presses the page's own DOM handlers and writes `EVIDENCE_HMI.md` §I's screenshots. Instruments, not part of the HMI; each harness refuses a non-loopback endpoint, and each polls `GET /state` like the page so H6 does not read it as a crashed browser |
 | `EVIDENCE_HMI.md` | the recorded runs, with every figure quoted as it was printed |
 
 ## Known limitation, recorded rather than discovered later

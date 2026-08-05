@@ -134,13 +134,20 @@ def against_floor(value_m, floor_m):
 
 
 # --------------------------------------------------------------------------- #
-# goal
+# the recorder, shared by `goal` and `stage`
 # --------------------------------------------------------------------------- #
+#
+# ONE RECORDER, TWO COMMANDS, SO THE TWO CSVs ARE COMPARABLE. A staged run
+# has to be scored against the m5-31 baseline (EVIDENCE_NAV2.md section 8.2),
+# and a figure taken by a second implementation of the same recording is a
+# figure with an extra difference in it. `goal` and `stage` therefore build
+# the identical node, subscribe to the identical topics and write the
+# identical columns; only the sequencing above them differs.
 
-def cmd_goal(args):
+def _build_recorder(cmd_topic, node_name='nav2_run'):
+    """Construct the recording node. `rclpy.init()` must already have run."""
     import rclpy
-    from action_msgs.msg import GoalStatus
-    from geometry_msgs.msg import PoseStamped, Twist
+    from geometry_msgs.msg import Twist
     from nav_msgs.msg import Odometry, Path
     from nav2_msgs.action import NavigateToPose
     from rclpy.action import ActionClient
@@ -148,9 +155,6 @@ def cmd_goal(args):
     from rclpy.parameter import Parameter
     from std_msgs.msg import Float64, UInt32
     import tf2_ros
-
-    rec = load_registration(args.registration)
-    gx, gy, gyaw = world_to_map(rec, args.x, args.y, args.yaw)
 
     class Runner(Node):
         def __init__(self):
@@ -160,7 +164,7 @@ def cmd_goal(args):
             # system clock once and every deadline computed from it is
             # 1.8e9 s out.
             super().__init__(
-                'nav2_run',
+                node_name,
                 parameter_overrides=[Parameter('use_sim_time', value=True)])
 
             self.gt = None
@@ -177,7 +181,7 @@ def cmd_goal(args):
 
             self.create_subscription(Odometry, '/forklift/odom',
                                      self.cb_ground_truth, 10)
-            self.create_subscription(Twist, args.cmd_topic, self.cb_cmd, 10)
+            self.create_subscription(Twist, cmd_topic, self.cb_cmd, 10)
             self.create_subscription(
                 Float64, '/forklift/cmd/steer_angle', self.cb_steer, 10)
             self.create_subscription(
@@ -228,8 +232,43 @@ def cmd_goal(args):
         def sim_time(self):
             return self.get_clock().now().nanoseconds * 1e-9
 
+    return Runner()
+
+
+def _row(node, now):
+    """One recorded sample, in the committed column order."""
+    mp = node.map_pose()
+    gt = node.gt
+    return {
+        't_sim': '{:.3f}'.format(now),
+        'gt_x': '' if gt is None else '{:.6f}'.format(gt[0]),
+        'gt_y': '' if gt is None else '{:.6f}'.format(gt[1]),
+        'gt_yaw': '' if gt is None else '{:.6f}'.format(gt[2]),
+        'amcl_x': '' if mp is None else '{:.6f}'.format(mp[0]),
+        'amcl_y': '' if mp is None else '{:.6f}'.format(mp[1]),
+        'amcl_yaw': '' if mp is None else '{:.6f}'.format(mp[2]),
+        'cmd_v': '{:.6f}'.format(node.cmd[0]),
+        'cmd_w': '{:.6f}'.format(node.cmd[1]),
+        'steer': '{:.6f}'.format(node.steer),
+        'traction': '{:.6f}'.format(node.traction),
+        'refusals': str(node.refusals),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# goal
+# --------------------------------------------------------------------------- #
+
+def cmd_goal(args):
+    import rclpy
+    from action_msgs.msg import GoalStatus
+    from geometry_msgs.msg import PoseStamped
+
+    rec = load_registration(args.registration)
+    gx, gy, gyaw = world_to_map(rec, args.x, args.y, args.yaw)
+
     rclpy.init()
-    node = Runner()
+    node = _build_recorder(args.cmd_topic)
 
     # ---- wait for the action server and for a transform tree ----
     print('registration  theta {:+.9f} rad  t ({:+.6f}, {:+.6f}) m  '
@@ -303,22 +342,7 @@ def cmd_goal(args):
         now = node.sim_time()
         if now >= next_sample:
             next_sample = now + period
-            mp = node.map_pose()
-            gt = node.gt
-            rows.append({
-                't_sim': '{:.3f}'.format(now),
-                'gt_x': '' if gt is None else '{:.6f}'.format(gt[0]),
-                'gt_y': '' if gt is None else '{:.6f}'.format(gt[1]),
-                'gt_yaw': '' if gt is None else '{:.6f}'.format(gt[2]),
-                'amcl_x': '' if mp is None else '{:.6f}'.format(mp[0]),
-                'amcl_y': '' if mp is None else '{:.6f}'.format(mp[1]),
-                'amcl_yaw': '' if mp is None else '{:.6f}'.format(mp[2]),
-                'cmd_v': '{:.6f}'.format(node.cmd[0]),
-                'cmd_w': '{:.6f}'.format(node.cmd[1]),
-                'steer': '{:.6f}'.format(node.steer),
-                'traction': '{:.6f}'.format(node.traction),
-                'refusals': str(node.refusals),
-            })
+            rows.append(_row(node, now))
         if now - t0 > args.timeout:
             print('TIMEOUT after {:.1f} s of simulation time; cancelling'
                   .format(now - t0))
@@ -400,6 +424,663 @@ def cmd_goal(args):
     node.destroy_node()
     rclpy.shutdown()
     return 0 if status_name == 'SUCCEEDED' else 1
+
+
+# --------------------------------------------------------------------------- #
+# stage - THE STAGED APPROACH
+# --------------------------------------------------------------------------- #
+#
+# WHAT THIS IS AND WHY IT IS NOT A TUNING PASS. EVIDENCE_NAV2.md section 8.3
+# measured that `xy_goal_tolerance: 0.25` and `yaw_goal_tolerance: 0.15` are
+# JOINTLY unreachable in an endgame correction on this vehicle: heading is
+# bought with travel at 2.1-2.6 m per radian, so one yaw tolerance of
+# correction costs 0.32-0.39 m against a 0.25 m box. r4 spent 55.9 s inside
+# the position circle and 47.1 s inside the heading window with ZERO samples
+# inside both.
+#
+# NEITHER TOLERANCE IS TOUCHED HERE, and that is the point. The station goal
+# is checked by the committed pair, unchanged. What changes is that the
+# vehicle ARRIVES ALREADY ALIGNED, so the correction the geometry forbids is
+# never attempted:
+#
+#   1. a STAGING pose, d = 3.0 m back along the goal heading. d is DERIVED
+#      (ARRIVAL-GEOMETRY.md section 4.2): 2*sqrt(R*e0) = 2*sqrt(1.291*0.35)
+#      = 1.34 m to remove the staging arrival's lateral offset with two
+#      opposed arcs, plus one lookahead (1.60 m, nav2.yaml) of straight tail
+#      to converge and centre the steer. It is not a round number chosen to
+#      taste and it is not tuned here.
+#   2. the staging goal is checked POSITION-ONLY (`staging_goal_checker`,
+#      nav2_controller::PositionGoalChecker), selected per goal through
+#      nav2's own GoalCheckerSelector -> FollowPath goal_checker_id path.
+#      The staging pose does not need a heading; the final leg replans from
+#      wherever the vehicle actually stands.
+#   3. the station goal is a FRESH, ~straight 3 m leg from a standing start
+#      with near-zero initial cross-track, checked by the committed pair.
+#   4. a miss is a BOUNDED GO-AROUND: return to staging, re-approach, at
+#      most --max-go-arounds times, then FAIL AND SAY SO. An in-circle
+#      correction is never attempted, because section 8.3 proved it cannot
+#      terminate, and an unbounded retry is that same failure with a new
+#      name.
+#
+# WHERE THIS LOGIC BELONGS IN THE END. In the goal-sending layer, which is
+# here, and at M6 in the VDA 5050 client's node-by-node order execution: a
+# staging pose is just a node with a loose `allowedDeviationXY/Theta` pair
+# and the station is a node with a tight one (ARRIVAL-GEOMETRY.md section 6).
+# It is written to be lifted, not kept.
+
+#: The whole-run CSV carries one extra column over `goal`: which leg the
+#: sample belongs to. `analyse` reads with DictReader and ignores it, so an
+#: approach leg extracted from this file scores exactly as a `goal` run does.
+_STAGE_FIELDS = _RUN_FIELDS + ['leg']
+
+#: Pre-registered before the first run, so the verdict is not chosen after
+#: seeing the data. A leg is in the SHUFFLE REGIME when, AFTER its first
+#: sample inside the goal's position circle, the commanded direction
+#: reverses at least this many times. The m5-31 baseline separates cleanly
+#: on it: the two clean traverses reversed 0 and 1 times in the endgame,
+#: every non-completing run reversed dozens. Counted per leg, so a
+#: go-around's deliberate reverse-out - which happens in the RETURN leg -
+#: is never miscounted as a shuffle.
+_SHUFFLE_REVERSALS = 3
+#: Speed deadband for "the vehicle is being commanded to move", the same
+#: 0.02 m/s `analyse` uses to classify a command's sign.
+#:
+#: IT IS DELIBERATELY NOT RE-TIED TO `navigation.creep_speed_mps`, which
+#: m5-35 lowered to 0.005 (ARRIVAL-GEOMETRY.md 9.1). This constant defines
+#: the PRE-REGISTERED shuffle test, and the whole point of a pre-registered
+#: test is that its definition does not move between the run it was
+#: registered against (m5-31 8.2) and the runs it now scores. The cost is
+#: stated rather than hidden: a direction change executed entirely inside
+#: 0.005-0.02 m/s is not counted as a reversal by either the live detector
+#: below or the post-hoc column, in m5-33's runs and in m5-35's alike.
+_MOVING_MPS = 0.02
+
+# --------------------------------------------------------------------------- #
+# THE MISS DETECTOR (ARRIVAL-GEOMETRY.md 9.5)
+# --------------------------------------------------------------------------- #
+#
+# WHY IT EXISTS. m5-33 built the go-around but nothing that DECLARES a miss,
+# so r4 entered the position circle 16.94 deg off the axis and was left to
+# shuffle 20 reversals to a lucky completion, because only the 45 s timeout
+# could end the leg. ARRIVAL-GEOMETRY.md section 2.4 design (ii) says an
+# in-circle correction is never attempted; a detector is what makes that
+# sentence true of a running vehicle rather than of a document.
+#
+# ITS TWO THRESHOLDS ARE THE COMMITTED MEASUREMENTS, NOT NEW NUMBERS:
+#
+#   entry heading   the goal checker's OWN yaw tolerance, 0.15 rad =
+#                   8.594 deg, which section 8.3 measured as a 5-of-5
+#                   discriminator across m5-31 and m5-33 with no exception.
+#                   NOTHING HERE WIDENS OR NARROWS THAT TOLERANCE: the
+#                   detector READS the same window the checker scores by,
+#                   and abandons an approach that has already entered
+#                   outside it.
+#   reversals       the SECOND reversal after first circle entry. Clean
+#                   traverses measured 0 and 1 (m5-31 8.2) and 0, 1, 0
+#                   (m5-33 9.2); the pre-registered shuffle threshold is 3.
+#                   So 2 sits above every clean run on record and below the
+#                   regime it exists to prevent.
+#
+# STATED PLAINLY, BECAUSE IT AFFECTS HOW THE RESULT READS. These aborts make
+# "no leg in the shuffle regime" partly TRUE BY CONSTRUCTION. That is design
+# (ii)'s contract and not a way of passing the test: an aborted approach is
+# NOT clean, it spends a go-around, and a run whose every approach aborts
+# fails. The >= 4-of-5-clean criterion can still fail honestly.
+#
+# WHERE IT LIVES, AND WHERE IT BELONGS. In the harness, beside the
+# sequencing m5-33 put here, because a miss is an ORDER-EXECUTION decision
+# and not a control law. At M6 it is the VDA 5050 client's per-node retry
+# decision. It is written to be lifted, not kept.
+
+#: Believed heading error at first circle entry, in degrees, beyond which
+#: the approach is abandoned. Set from the committed `yaw_goal_tolerance`
+#: of 0.15 rad rather than restated as a decimal, so the two cannot drift.
+_MISS_ENTRY_HEADING_DEG = math.degrees(0.15)
+#: Commanded direction reversals after first circle entry at which the
+#: approach is abandoned.
+_MISS_REVERSALS = 2
+
+
+def _direction_reversals(v_series):
+    """Sign changes in a commanded-speed series, ignoring the deadband."""
+    signs = [1 if x > _MOVING_MPS else (-1 if x < -_MOVING_MPS else 0)
+             for x in v_series]
+    signs = [s for s in signs if s != 0]
+    return sum(1 for i in range(len(signs) - 1) if signs[i] != signs[i + 1])
+
+
+def _localization_stats(rows, rec):
+    """Believed pose against ground truth, the EVIDENCE_NAV2.md 8.5 figure.
+
+    The belief is a MAP-frame object and the truth a world-frame one, so the
+    belief is carried through the committed registration before it is
+    differenced - the same direction 8.5 used."""
+    pos, head = [], []
+    for r in rows:
+        if not r['gt_x'] or not r['amcl_x']:
+            continue
+        bx, by, byaw = map_to_world(rec, float(r['amcl_x']),
+                                    float(r['amcl_y']), float(r['amcl_yaw']))
+        pos.append(math.hypot(bx - float(r['gt_x']), by - float(r['gt_y'])))
+        head.append(abs(math.degrees(_wrap(byaw - float(r['gt_yaw'])))))
+    if not pos:
+        return None
+    return {
+        'n': len(pos),
+        'pos_rms': math.sqrt(sum(p * p for p in pos) / len(pos)),
+        'pos_max': max(pos),
+        'yaw_rms': math.sqrt(sum(h * h for h in head) / len(head)),
+        'yaw_max': max(head),
+    }
+
+
+def cmd_stage(args):
+    import rclpy
+    from action_msgs.msg import GoalStatus
+    from geometry_msgs.msg import PoseStamped
+    from nav2_msgs.action import NavigateToPose
+    from std_msgs.msg import String
+    import time as _time
+
+    rec = load_registration(args.registration)
+
+    # The staging pose: d back ALONG THE GOAL HEADING, same heading. Derived
+    # in the world frame and carried through the registration exactly as the
+    # goal is, so both poses reach Nav2 by the identical path.
+    sx = args.x - args.d * math.cos(args.yaw)
+    sy = args.y - args.d * math.sin(args.yaw)
+    syaw = args.yaw
+
+    goal_map = world_to_map(rec, args.x, args.y, args.yaw)
+    stage_map = world_to_map(rec, sx, sy, syaw)
+
+    rclpy.init()
+    node = _build_recorder(args.cmd_topic, 'nav2_stage')
+
+    # LATCHED, because the selector node subscribes transient-local with
+    # depth 1 and the tree may create that subscription after we publish.
+    from rclpy.qos import (QoSProfile, QoSDurabilityPolicy,
+                           QoSReliabilityPolicy, QoSHistoryPolicy)
+    sel_qos = QoSProfile(depth=1,
+                         history=QoSHistoryPolicy.KEEP_LAST,
+                         reliability=QoSReliabilityPolicy.RELIABLE,
+                         durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
+    sel_pub = node.create_publisher(String, args.selector_topic, sel_qos)
+
+    print('registration  theta {:+.9f} rad  t ({:+.6f}, {:+.6f}) m  '
+          'FLOOR rms {:.4f} MAX {:.4f} m'.format(
+              rec['theta_rad'], rec['t_x_m'], rec['t_y_m'],
+              rec['residual_rms_m'], rec['residual_max_m']))
+    print('STATION  world ({:+.4f}, {:+.4f}) yaw {:+.4f}  ->  map '
+          '({:+.4f}, {:+.4f}) yaw {:+.4f}   checker {}'.format(
+              args.x, args.y, args.yaw, goal_map[0], goal_map[1], goal_map[2],
+              args.final_checker))
+    print('STAGING  world ({:+.4f}, {:+.4f}) yaw {:+.4f}  ->  map '
+          '({:+.4f}, {:+.4f}) yaw {:+.4f}   checker {}'.format(
+              sx, sy, syaw, stage_map[0], stage_map[1], stage_map[2],
+              args.staging_checker))
+    print('d = {:.3f} m back along the goal heading; go-arounds bounded at '
+          '{}'.format(args.d, args.max_go_arounds))
+
+    if not node.client.wait_for_server(timeout_sec=args.server_timeout):
+        print('FAIL: /navigate_to_pose action server did not appear within '
+              '{:.0f} s. Nav2 is not up.'.format(args.server_timeout))
+        node.destroy_node()
+        rclpy.shutdown()
+        return 2
+
+    settle_deadline = _time.monotonic() + args.settle
+    while _time.monotonic() < settle_deadline:
+        rclpy.spin_once(node, timeout_sec=0.05)
+        if node.map_pose() is not None and node.gt is not None:
+            break
+    if node.map_pose() is None or node.gt is None:
+        print('FAIL: no map -> forklift/base_link transform, or no '
+              '/forklift/odom, after {:.0f} s.'.format(args.settle))
+        node.destroy_node()
+        rclpy.shutdown()
+        return 2
+
+    rows = []
+    legs = []
+    wall0 = _time.monotonic()
+    period = 1.0 / args.record_hz
+    state = {'next_sample': node.sim_time(), 'leg': 'settle'}
+
+    def pump(seconds_wall):
+        """Spin and record for a bounded wall interval. Recording never
+        stops between legs: the localization figures are taken over the
+        WHOLE run, as EVIDENCE_NAV2.md 8.5 took them."""
+        end = _time.monotonic() + seconds_wall
+        while _time.monotonic() < end:
+            rclpy.spin_once(node, timeout_sec=0.02)
+            now = node.sim_time()
+            if now >= state['next_sample']:
+                state['next_sample'] = now + period
+                r = _row(node, now)
+                r['leg'] = state['leg']
+                rows.append(r)
+
+    def drive(label, wx, wy, wyaw, checker, timeout, miss_abort=False):
+        """One leg. Returns its record; appends its samples to `rows`.
+
+        `miss_abort` arms the ARRIVAL-GEOMETRY.md 9.5 detector, which is
+        passed True for STATION approaches and False for the staging and
+        go-around legs: those are checked position-only, their heading is
+        not the quantity under test, and a go-around's deliberate
+        reverse-out is not a shuffle.
+        """
+        state['leg'] = label
+        mx, my, myaw = world_to_map(rec, wx, wy, wyaw)
+
+        # SELECT THE CHECKER FIRST, THEN SETTLE, THEN SEND. The selector is
+        # a subscription in the tree, so the selection has to be in the
+        # subscriber before FollowPath is ticked. Latched publish plus a
+        # bounded settle, and the selection is stated in the leg record so
+        # a reader can see which checker each leg was scored by.
+        sel_pub.publish(String(data=checker))
+        pump(args.selector_settle)
+
+        goal = NavigateToPose.Goal()
+        goal.pose = PoseStamped()
+        goal.pose.header.frame_id = 'map'
+        goal.pose.header.stamp = node.get_clock().now().to_msg()
+        goal.pose.pose.position.x = mx
+        goal.pose.pose.position.y = my
+        goal.pose.pose.orientation.z = math.sin(myaw / 2.0)
+        goal.pose.pose.orientation.w = math.cos(myaw / 2.0)
+
+        node.first_plan = None
+        row0 = len(rows)
+        t0 = node.sim_time()
+        send_future = node.client.send_goal_async(goal)
+        while not send_future.done():
+            rclpy.spin_once(node, timeout_sec=0.05)
+        handle = send_future.result()
+        if not handle.accepted:
+            print('  {}: REFUSED AT ACCEPTANCE'.format(label))
+            return {'leg': label, 'checker': checker, 'status': 'REFUSED',
+                    'goal_world': [wx, wy, wyaw], 'goal_map': [mx, my, myaw],
+                    'elapsed_s': 0.0, 'row0': row0, 'row1': len(rows)}
+
+        # ---- the miss detector's live state (ARRIVAL-GEOMETRY.md 9.5) ----
+        # It runs on the SAME samples the CSV records, so the abort a reader
+        # sees in the log is decidable from the file afterwards.
+        miss = {'entered': False, 'sign': 0, 'reversals': 0, 'reason': None}
+
+        def watch(r):
+            """Return an abort reason for this sample, or None."""
+            if not r['amcl_x']:
+                return None
+            if not miss['entered']:
+                if math.hypot(float(r['amcl_x']) - mx,
+                              float(r['amcl_y']) - my) > args.entry_radius:
+                    return None
+                miss['entered'] = True
+                err = math.degrees(_wrap(float(r['amcl_yaw']) - myaw))
+                if abs(err) > args.miss_heading_deg:
+                    return ('entered the position circle at {:+.2f} deg, '
+                            'outside the {:.3f} deg window'
+                            .format(err, args.miss_heading_deg))
+                # fall through: this sample also seeds the sign series, so
+                # the live count matches the post-hoc column exactly.
+            v = float(r['cmd_v'])
+            sign = 1 if v > _MOVING_MPS else (-1 if v < -_MOVING_MPS else 0)
+            if sign != 0:
+                if miss['sign'] != 0 and sign != miss['sign']:
+                    miss['reversals'] += 1
+                    if miss['reversals'] >= args.miss_reversals:
+                        return ('reversal {} after circle entry'
+                                .format(miss['reversals']))
+                miss['sign'] = sign
+            return None
+
+        result_future = handle.get_result_async()
+        timed_out = False
+        while not result_future.done():
+            rclpy.spin_once(node, timeout_sec=0.02)
+            now = node.sim_time()
+            if now >= state['next_sample']:
+                state['next_sample'] = now + period
+                r = _row(node, now)
+                r['leg'] = label
+                rows.append(r)
+                if miss_abort and miss['reason'] is None:
+                    reason = watch(r)
+                    if reason is not None:
+                        miss['reason'] = reason
+                        timed_out = True
+                        print('  {}: MISS DETECTED - {}; abandoning the '
+                              'approach rather than correcting inside the '
+                              'circle'.format(label, reason))
+                        handle.cancel_goal_async()
+                        break
+            if now - t0 > timeout:
+                timed_out = True
+                print('  {}: TIMEOUT after {:.1f} s of simulation time; '
+                      'cancelling'.format(label, now - t0))
+                handle.cancel_goal_async()
+                break
+            # WALL BACKSTOP over the whole run, not the leg: a stalled
+            # /clock makes every simulation-time deadline unreachable, and
+            # this harness never waits for ever (docs/LESSONS.md
+            # 2026-07-27).
+            if _time.monotonic() - wall0 > args.wall_timeout:
+                timed_out = True
+                print('  {}: WALL TIMEOUT at {:.0f} s with simulation time '
+                      'at {:.1f} s; cancelling.'.format(
+                          label, _time.monotonic() - wall0, now - t0))
+                handle.cancel_goal_async()
+                break
+
+        if timed_out:
+            # Bounded wait for the cancellation to actually land, so the
+            # next leg is not sent while the controller is still driving.
+            cancel_end = _time.monotonic() + args.cancel_grace
+            while (not result_future.done()
+                   and _time.monotonic() < cancel_end):
+                rclpy.spin_once(node, timeout_sec=0.05)
+                now = node.sim_time()
+                if now >= state['next_sample']:
+                    state['next_sample'] = now + period
+                    r = _row(node, now)
+                    r['leg'] = label
+                    rows.append(r)
+
+        status_name = 'CANCELLED/TIMEOUT'
+        error_code = None
+        if result_future.done():
+            res = result_future.result()
+            status_name = {
+                GoalStatus.STATUS_SUCCEEDED: 'SUCCEEDED',
+                GoalStatus.STATUS_ABORTED: 'ABORTED',
+                GoalStatus.STATUS_CANCELED: 'CANCELED',
+            }.get(res.status, 'status {}'.format(res.status))
+            error_code = getattr(res.result, 'error_code', None)
+        t_end = node.sim_time()
+
+        # Let the stack come to rest before the leg is scored: the
+        # controller publishes an explicit zero on a finished goal
+        # (`publish_zero_velocity`), and the vehicle takes a moment to stop.
+        pump(args.leg_rest)
+
+        leg_rows = rows[row0:]
+        rec_leg = {
+            'leg': label,
+            'checker': checker,
+            'status': status_name,
+            'error_code': error_code,
+            'goal_world': [wx, wy, wyaw],
+            'goal_map': [mx, my, myaw],
+            'elapsed_s': t_end - t0,
+            'samples': len(leg_rows),
+            'row0': row0,
+            'row1': len(rows),
+            'plan_map': node.first_plan,
+            'plans_published': node.plan_count,
+            # None on every leg the detector was not armed for, and on an
+            # armed leg that was never declared a miss.
+            'miss_abort_reason': miss['reason'],
+            'miss_detector_armed': bool(miss_abort),
+        }
+
+        # ---- the two mechanism columns, per leg ----
+        # (i) believed heading error at the FIRST sample inside the position
+        #     circle - the m5-31 8.3 discriminator, which is what explains
+        #     WHY a run completes rather than that it did.
+        # (ii) direction reversals after that first entry - the shuffle test.
+        entry_idx = None
+        for i, r in enumerate(leg_rows):
+            if not r['amcl_x']:
+                continue
+            if math.hypot(float(r['amcl_x']) - mx,
+                          float(r['amcl_y']) - my) <= args.entry_radius:
+                entry_idx = i
+                break
+        if entry_idx is not None:
+            r = leg_rows[entry_idx]
+            rec_leg['entry_heading_deg'] = math.degrees(
+                _wrap(float(r['amcl_yaw']) - myaw))
+            rec_leg['entry_t_sim'] = float(r['t_sim'])
+            after = [float(x['cmd_v']) for x in leg_rows[entry_idx:]]
+            rec_leg['reversals_after_entry'] = _direction_reversals(after)
+        else:
+            rec_leg['entry_heading_deg'] = None
+            rec_leg['reversals_after_entry'] = 0
+        rec_leg['shuffle'] = (
+            rec_leg['reversals_after_entry'] >= _SHUFFLE_REVERSALS)
+
+        st = [abs(float(r['steer'])) for r in leg_rows
+              if r['steer'] and not math.isnan(float(r['steer']))]
+        rec_leg['steer_max_deg'] = math.degrees(max(st)) if st else None
+
+        if node.gt is not None:
+            rec_leg['final_truth'] = list(node.gt)
+            rec_leg['truth_pos_err_m'] = math.hypot(node.gt[0] - wx,
+                                                    node.gt[1] - wy)
+            rec_leg['truth_yaw_err_deg'] = math.degrees(
+                _wrap(node.gt[2] - wyaw))
+        mp = node.map_pose()
+        if mp is not None:
+            rec_leg['final_believed_map'] = list(mp)
+            rec_leg['believed_pos_err_m'] = math.hypot(mp[0] - mx, mp[1] - my)
+            rec_leg['believed_yaw_err_deg'] = math.degrees(
+                _wrap(mp[2] - myaw))
+
+        print('  {:<12} {:<18} {:>7.2f} s  believed {:.3f} m / {:+.2f} deg'
+              '  truth {:.3f} m / {:+.2f} deg  entry-heading {}'
+              '  reversals-after-entry {}{}'.format(
+                  label, status_name, rec_leg['elapsed_s'],
+                  rec_leg.get('believed_pos_err_m', float('nan')),
+                  rec_leg.get('believed_yaw_err_deg', float('nan')),
+                  rec_leg.get('truth_pos_err_m', float('nan')),
+                  rec_leg.get('truth_yaw_err_deg', float('nan')),
+                  'none' if rec_leg['entry_heading_deg'] is None
+                  else '{:+.2f} deg'.format(rec_leg['entry_heading_deg']),
+                  rec_leg['reversals_after_entry'],
+                  '  SHUFFLE' if rec_leg['shuffle'] else ''))
+        if miss['reason'] is not None:
+            print('  {:<12} MISS ABORT: {}'.format('', miss['reason']))
+        legs.append(rec_leg)
+        return rec_leg
+
+    # ----------------------------------------------------------------- #
+    # the sequence
+    # ----------------------------------------------------------------- #
+    print('')
+    print('LEGS')
+    outcome = 'FAILED'
+    go_arounds = 0
+    bound_fired = False
+
+    first = drive('stage', sx, sy, syaw, args.staging_checker,
+                  args.staging_timeout)
+
+    # ---- THE STAGING STOP, INSTRUMENTED (ARRIVAL-GEOMETRY.md 9.3) ----
+    # m5-33's five-repeat table carried the staging stop's POSITION and no
+    # HEADING column, so the final leg's entry-heading spread could not be
+    # attributed: whether it is inherited from the heading the vehicle
+    # arrives at staging with, or generated on the final leg itself, was
+    # unknowable from the committed data. Both headings are recorded here -
+    # believed and true, against the approach axis - beside the stop's
+    # decomposition into its longitudinal and lateral parts, the residual
+    # being lateral by construction (9.1 (A)).
+    staging_stop = {
+        'status': first['status'],
+        'believed_yaw_err_deg': first.get('believed_yaw_err_deg'),
+        'truth_yaw_err_deg': first.get('truth_yaw_err_deg'),
+        'truth_pos_err_m': first.get('truth_pos_err_m'),
+        'believed_pos_err_m': first.get('believed_pos_err_m'),
+    }
+    if first.get('final_truth') is not None:
+        dx = first['final_truth'][0] - sx
+        dy = first['final_truth'][1] - sy
+        staging_stop['truth_longitudinal_m'] = (dx * math.cos(syaw)
+                                                + dy * math.sin(syaw))
+        staging_stop['truth_lateral_m'] = (-dx * math.sin(syaw)
+                                           + dy * math.cos(syaw))
+    print('  STAGING STOP heading  believed {}  truth {}   '
+          '(against the approach axis)'.format(
+              'none' if staging_stop['believed_yaw_err_deg'] is None
+              else '{:+.3f} deg'.format(staging_stop['believed_yaw_err_deg']),
+              'none' if staging_stop['truth_yaw_err_deg'] is None
+              else '{:+.3f} deg'.format(staging_stop['truth_yaw_err_deg'])))
+    if 'truth_lateral_m' in staging_stop:
+        print('  STAGING STOP offset   longitudinal {:+.4f} m   '
+              'lateral {:+.4f} m   (truth)'.format(
+                  staging_stop['truth_longitudinal_m'],
+                  staging_stop['truth_lateral_m']))
+
+    if first['status'] != 'SUCCEEDED':
+        outcome = 'FAILED_AT_STAGING'
+    else:
+        for attempt in range(args.max_go_arounds + 1):
+            leg = drive('approach{}'.format(attempt), args.x, args.y, args.yaw,
+                        args.final_checker, args.approach_timeout,
+                        miss_abort=not args.no_miss_abort)
+            if leg['status'] == 'SUCCEEDED':
+                outcome = 'REACHED'
+                break
+            if attempt >= args.max_go_arounds:
+                # THE BOUND. Not a retry loop with a large number in it: the
+                # count is fixed, it is stated, and when it is spent the run
+                # reports failure instead of continuing to manoeuvre.
+                bound_fired = True
+                outcome = 'FAILED_GO_AROUND_BOUND'
+                print('  GO-AROUND BOUND REACHED: {} approach(es) attempted, '
+                      '{} go-around(s) allowed and spent. Reporting failure '
+                      'rather than continuing to manoeuvre.'.format(
+                          attempt + 1, args.max_go_arounds))
+                break
+            go_arounds += 1
+            back = drive('goaround{}'.format(attempt), sx, sy, syaw,
+                         args.staging_checker, args.staging_timeout)
+            if back['status'] != 'SUCCEEDED':
+                outcome = 'FAILED_RETURNING_TO_STAGING'
+                break
+
+    # ----------------------------------------------------------------- #
+    # the verdict
+    # ----------------------------------------------------------------- #
+    loc = _localization_stats(rows, rec)
+    approach_legs = [l for l in legs if l['leg'].startswith('approach')]
+    shuffled = [l['leg'] for l in legs if l['shuffle']]
+    aborted = [l['leg'] for l in legs if l.get('miss_abort_reason')]
+
+    print('')
+    print('RESULT           {}'.format(outcome))
+    print('go-arounds       {} used of {} allowed{}'.format(
+        go_arounds, args.max_go_arounds,
+        '   BOUND FIRED' if bound_fired else ''))
+    print('legs             {}'.format(len(legs)))
+    total = sum(l['elapsed_s'] for l in legs)
+    print('elapsed          {:.2f} s of simulation time over all legs'
+          .format(total))
+    if approach_legs:
+        last = approach_legs[-1]
+        print('final approach   {}  believed {:.4f} m / {:+.3f} deg'.format(
+            last['status'], last.get('believed_pos_err_m', float('nan')),
+            last.get('believed_yaw_err_deg', float('nan'))))
+        if last.get('truth_pos_err_m') is not None:
+            print('  ABSOLUTE goal error (truth vs commanded goal): {}'
+                  .format(against_floor(last['truth_pos_err_m'],
+                                        rec['residual_max_m'])))
+            print('  heading error {:+.3f} deg'.format(
+                last['truth_yaw_err_deg']))
+        print('  entry heading  {}   (the 8.594 deg discriminator)'.format(
+            'never entered the circle'
+            if last['entry_heading_deg'] is None
+            else '{:+.3f} deg'.format(last['entry_heading_deg'])))
+    print('STAGING STOP     believed {}   truth {}   '
+          '(heading against the approach axis)'.format(
+              'none' if staging_stop['believed_yaw_err_deg'] is None
+              else '{:+.3f} deg'.format(staging_stop['believed_yaw_err_deg']),
+              'none' if staging_stop['truth_yaw_err_deg'] is None
+              else '{:+.3f} deg'.format(staging_stop['truth_yaw_err_deg'])))
+    print('MISS ABORTS      {}   (entry outside {:.3f} deg, or reversal {} '
+          'after entry; ARRIVAL-GEOMETRY.md 9.5. An aborted approach is NOT '
+          'clean)'.format(
+              'none' if not aborted else ', '.join(aborted),
+              args.miss_heading_deg, args.miss_reversals)
+          if not args.no_miss_abort else
+          'MISS ABORTS      DETECTOR DISARMED (--no-miss-abort)')
+    print('SHUFFLE REGIME   {}   (>= {} commanded direction reversals after '
+          'first entry into the position circle, counted per leg)'.format(
+              'NO' if not shuffled else 'YES: ' + ', '.join(shuffled),
+              _SHUFFLE_REVERSALS))
+    if loc:
+        print('LOCALIZATION     believed vs truth over the whole run, '
+              'n = {}'.format(loc['n']))
+        print('  position       rms {:.4f} m   MAX {:.4f} m   '
+              '(0.263 m is what footprint_padding is dimensioned from)'
+              .format(loc['pos_rms'], loc['pos_max']))
+        print('  heading        rms {:.2f} deg  MAX {:.2f} deg'.format(
+            loc['yaw_rms'], loc['yaw_max']))
+
+    # ----------------------------------------------------------------- #
+    # artefacts
+    # ----------------------------------------------------------------- #
+    if args.csv:
+        with open(args.csv, 'w', newline='', encoding='utf-8') as fh:
+            wr = csv.DictWriter(fh, fieldnames=_STAGE_FIELDS)
+            wr.writeheader()
+            wr.writerows(rows)
+        print('wrote {} ({} samples, all legs)'.format(args.csv, len(rows)))
+
+        # The final approach leg on its own, so `analyse` scores it exactly
+        # as it scores a `goal` run - same columns, same plan, one leg.
+        if approach_legs:
+            last = approach_legs[-1]
+            stem, ext = os.path.splitext(args.csv)
+            apath = stem + '-approach' + (ext or '.csv')
+            with open(apath, 'w', newline='', encoding='utf-8') as fh:
+                wr = csv.DictWriter(fh, fieldnames=_STAGE_FIELDS)
+                wr.writeheader()
+                wr.writerows(rows[last['row0']:last['row1']])
+            print('wrote {} ({} samples, final approach leg only)'.format(
+                apath, last['row1'] - last['row0']))
+
+    if args.plan:
+        last_plan = approach_legs[-1]['plan_map'] if approach_legs else None
+        payload = {
+            'command': 'stage',
+            'staging_distance_m': args.d,
+            'staging_world': [sx, sy, syaw],
+            'staging_map': list(stage_map),
+            'goal_world': [args.x, args.y, args.yaw],
+            'goal_map': list(goal_map),
+            'status': ('SUCCEEDED' if outcome == 'REACHED' else outcome),
+            'outcome': outcome,
+            'go_arounds_used': go_arounds,
+            'go_arounds_allowed': args.max_go_arounds,
+            'go_around_bound_fired': bound_fired,
+            'shuffle_legs': shuffled,
+            'shuffle_threshold_reversals': _SHUFFLE_REVERSALS,
+            'staging_stop': staging_stop,
+            'miss_abort_legs': aborted,
+            'miss_detector': {
+                'armed': not args.no_miss_abort,
+                'entry_heading_deg': args.miss_heading_deg,
+                'reversals': args.miss_reversals,
+            },
+            'localization': loc,
+            'elapsed_s': total,
+            'plans_published': node.plan_count,
+            'refusals': node.refusals,
+            'legs': legs,
+            # `first_plan_map` is the FINAL APPROACH leg's plan, so
+            # `analyse --csv <...>-approach.csv --plan <this>` reports
+            # tracking against the path that leg was actually given.
+            'first_plan_map': last_plan,
+            'last_plan_map': node.last_plan,
+        }
+        with open(args.plan, 'w', encoding='utf-8') as fh:
+            json.dump(payload, fh)
+        print('wrote {}'.format(args.plan))
+
+    node.destroy_node()
+    rclpy.shutdown()
+    return 0 if outcome == 'REACHED' else 1
 
 
 # --------------------------------------------------------------------------- #
@@ -1103,6 +1784,113 @@ def main(argv=None):
                    help='the Twist topic to record as the command')
     g.add_argument('--registration', default=None)
     g.set_defaults(func=cmd_goal)
+
+    s = sub.add_parser(
+        'stage',
+        help='THE STAGED APPROACH. Drive to a staging pose d back along the '
+             'goal heading, checked POSITION-ONLY, then a fresh straight '
+             'final leg to the station checked by the committed pair - and '
+             'on a miss, a BOUNDED go-around instead of an endgame '
+             'correction the geometry forbids (ARRIVAL-GEOMETRY.md 7).')
+    s.add_argument('--x', type=float, required=True,
+                   help='STATION x in the WORLD frame [m]')
+    s.add_argument('--y', type=float, required=True,
+                   help='STATION y in the WORLD frame [m]')
+    s.add_argument('--yaw', type=float, default=0.0,
+                   help='STATION yaw in the WORLD frame [rad]. The staging '
+                        'pose is placed back along THIS heading, and it is '
+                        'the heading the final leg delivers.')
+    s.add_argument('--d', type=float, default=3.0,
+                   help='staging distance back along the goal heading [m]. '
+                        'DERIVED, not tuned. The leg is an S-curve of '
+                        '2*sqrt(R*e0) followed by a straight tail, and it '
+                        'is the TAIL that converges the heading. At one '
+                        'lookahead of tail: 2*sqrt(1.291*0.35) + 1.60 = '
+                        '2.94 -> 3.0 m, which is this default and what '
+                        'm5-33 measured (ARRIVAL-GEOMETRY.md 4.2). At TWO '
+                        'lookaheads: 1.34 + 3.20 = 4.54 -> 4.5 m, which is '
+                        'what 9.4 derives and m5-35 runs. Changing e0 - '
+                        'i.e. the staging checker tolerance - re-derives '
+                        'both.')
+    s.add_argument('--max-go-arounds', type=int, default=2,
+                   help='THE BOUND. Approaches attempted = this + 1. When it '
+                        'is spent the run reports failure instead of '
+                        'continuing to manoeuvre; an unbounded retry is the '
+                        'endgame shuffle wearing a new name.')
+    s.add_argument('--staging-checker', default='staging_goal_checker',
+                   help='nav2.yaml goal checker for the staging and '
+                        'go-around legs (position-only)')
+    s.add_argument('--final-checker', default='general_goal_checker',
+                   help='nav2.yaml goal checker for the STATION leg. The '
+                        'committed 0.25 m / 0.15 rad pair, untouched.')
+    s.add_argument('--selector-topic', default='goal_checker_selector',
+                   help='the tree\'s GoalCheckerSelector topic')
+    s.add_argument('--selector-settle', type=float, default=1.5,
+                   help='WALL seconds between publishing a checker selection '
+                        'and sending the goal it applies to')
+    s.add_argument('--staging-timeout', type=float, default=90.0,
+                   help='SIMULATION seconds for a staging or go-around leg')
+    s.add_argument('--approach-timeout', type=float, default=45.0,
+                   help='SIMULATION seconds for one STATION approach. Short '
+                        'on purpose: a clean 3 m final leg costs ~6.3 s and '
+                        'a clean 4.5 m one ~9.5 s, so 45 is ample and still '
+                        'well short of the 69-120 s endgame shuffles m5-31 '
+                        'measured. Since m5-35 it is the BACKSTOP BEHIND '
+                        'the miss detector rather than the thing that '
+                        'detects a miss: a miss costs a go-around, not a '
+                        'shuffle and not a timeout.')
+    s.add_argument('--miss-heading-deg', type=float,
+                   default=_MISS_ENTRY_HEADING_DEG,
+                   help='THE MISS DETECTOR, entry-heading branch '
+                        '(ARRIVAL-GEOMETRY.md 9.5). An approach whose first '
+                        'sample inside the position circle is further off '
+                        'the goal heading than this is ABANDONED, not '
+                        'corrected. The default is the committed '
+                        'yaw_goal_tolerance of 0.15 rad = 8.594 deg, read '
+                        'rather than restated, and section 8.3 measured it '
+                        'as a 5-of-5 discriminator. This does not widen or '
+                        'narrow any tolerance: the checker still scores by '
+                        'the same window.')
+    s.add_argument('--miss-reversals', type=int, default=_MISS_REVERSALS,
+                   help='THE MISS DETECTOR, reversal branch. Abandon the '
+                        'approach at this many commanded direction '
+                        'reversals after first circle entry. Default 2: '
+                        'clean traverses measured 0 and 1 (8.2) and 0, 1, 0 '
+                        '(9.2), and the pre-registered shuffle threshold is '
+                        '3.')
+    s.add_argument('--no-miss-abort', action='store_true',
+                   help='DISARM the miss detector, i.e. reproduce m5-33\'s '
+                        'behaviour, in which a badly aligned entry is left '
+                        'to shuffle until the approach timeout.')
+    s.add_argument('--entry-radius', type=float, default=0.25,
+                   help='radius for the mechanism columns (believed heading '
+                        'at first entry, reversals after it). The committed '
+                        'xy_goal_tolerance.')
+    s.add_argument('--leg-rest', type=float, default=3.0,
+                   help='WALL seconds recorded after each leg so the vehicle '
+                        'is scored at rest')
+    s.add_argument('--cancel-grace', type=float, default=10.0,
+                   help='WALL seconds to let a cancellation land before the '
+                        'next leg is sent')
+    s.add_argument('--csv', default=None,
+                   help='write the 10 Hz recording of ALL legs here; the '
+                        'final approach leg is also written alongside as '
+                        '<stem>-approach<ext> so `analyse` scores it exactly '
+                        'as it scores a `goal` run')
+    s.add_argument('--plan', default=None,
+                   help='write the legs, the verdict and the plan here (JSON)')
+    s.add_argument('--wall-timeout', type=float, default=1800.0,
+                   help='hard backstop in WALL seconds over the whole run, '
+                        'for a stalled clock')
+    s.add_argument('--settle', type=float, default=30.0,
+                   help='WALL seconds to wait for a transform tree and a '
+                        'ground-truth reference before the first leg')
+    s.add_argument('--server-timeout', type=float, default=60.0)
+    s.add_argument('--record-hz', type=float, default=10.0)
+    s.add_argument('--cmd-topic', default='/cmd_vel_smoothed',
+                   help='the Twist topic to record as the command')
+    s.add_argument('--registration', default=None)
+    s.set_defaults(func=cmd_stage)
 
     p = sub.add_parser(
         'plan',

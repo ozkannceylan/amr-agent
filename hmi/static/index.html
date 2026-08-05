@@ -1,45 +1,76 @@
 <!DOCTYPE html>
 <!--
-  amr-agent commissioning HMI — operator page.
+  amr-agent commissioning HMI — operator page, v2a (m5-28).
 
-  One file, offline: no framework, no CDN, no web font, no image, no external
-  request of any kind. Everything the page needs is in this document, which is
-  why it works on a commissioning laptop with no route off the cell.
+  Built to hmi/V2A-DESIGN.md. One file, offline: no framework, no CDN, no web
+  font, no image, no external request of any kind.
 
   What the operator produces here are REQUESTS. The PLC standard program forms
   every actuator setpoint from them, applies its interlocks and owns the
   outcome (ADR 0008 D2.2). Nothing on this page is a safety device and nothing
   on it carries safety integrity.
 
-  Two properties of this page are contract rather than decoration:
+  THE ONE PROPERTY THIS PAGE EXISTS TO PROTECT. An operator who sees a big red
+  button on a screen believes it stops the machine. On this screen it does not
+  and cannot (invariant 1: safety never traverses the network). So the control
+  is built as exactly what it is: an amber, rectangular PROCESS STOP, denied the
+  visual language of a real emergency stop, with red reserved for the two
+  F-layer demand lamps — the only display on this page of the only thing in
+  this cell that carries the word e-stop. And it renders UNAVAILABLE whenever
+  its effect could not arrive: a control that looks armed over a dead link is
+  the defect the whole design exists to prevent.
 
-  * its /state poll is unconditional and is also its LIVENESS BEACON. The
-    backend holds every request at rest if nothing arrives from here for five
-    poll periods (opcua-nodes.md section 10.8 H6), and keeps its heartbeat
-    running while it does, because this page being gone is not this process
-    being gone;
-  * ENABLE and RESET are both LEVELS and both are held. RESET in particular is
-    press-and-hold, because the commissioning procedure needs a reset that
-    stands unbroken across the moment its cause disappears.
+  THE HMI RUNS NO TIMER, NO DEBOUNCE AND NO VERDICT OVER ANY MODE VALUE. Every
+  rendering below is a pure function of the values read on one poll. The only
+  party that times a mode disagreement is the PLC (SPEC section 14.7), and its
+  verdict reaches this screen as ForkliftResetRequired.
+
+  Two properties carried unchanged from v1:
+
+  * the /state poll is unconditional and is also this page's LIVENESS BEACON
+    (opcua-nodes.md section 10.8 H6);
+  * ENABLE and RESET are both LEVELS and both are held.
+
+  Two controls are new and both are STANDING, not deadman: the mode selector
+  and the process stop. Neither returns to rest when this page goes quiet, and
+  the page RENDERS BOTH FROM THE BACKEND'S PUBLISHED STATE ON EVERY POLL,
+  holding no copy of its own and asserting no default of its own (V2A-DESIGN
+  PS-B, PS-D, section 5.1).
+
+  WHY THAT IS WRITTEN IN CAPITALS. A page that keeps a local copy of a standing
+  control and re-asserts it in every post is safe with one tab and unsafe with
+  two: the second tab holds a stale copy, and the moment it is backgrounded its
+  blur and visibilitychange handlers post that copy — releasing an engaged
+  process stop while the operator's own screen still reads ENGAGED, or firing a
+  fresh mode-select rise at the PLC, the affirmative autonomous enable included.
+  m5-29 finding 1. So each standing key is sent in exactly ONE post: the one
+  triggered by the click that changed it. The periodic post, the deadman, blur
+  and the unload beacon carry no standing key at all, and a missing key means
+  UNCHANGED at the backend. A page that is not being clicked cannot move a
+  standing control, however many pages there are.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>amr-agent forklift commissioning HMI</title>
+<title>amr-agent forklift commissioning HMI &mdash; v2a</title>
 <style>
   :root {
     --bg:        #0b0d10;
-    --panel:     #15191e;
-    --panel-2:   #1d232a;
-    --edge:      #2c343d;
+    --panel:     #14181d;
+    --panel-2:   #1b2027;
+    --edge:      #2b333c;
+    --edge-2:    #3a444f;
     --ink:       #e9eef4;
-    --ink-dim:   #93a1b0;
-    --ok:        #14b866;
-    --warn:      #e5a50a;
-    --stop:      #e0403f;
-    --live:      #37b6ff;
-    --safety:    #8b5cf6;
+    --ink-dim:   #8d9aa8;
+    --ink-dimmer:#5f6b78;
+    --ok:        #24a06a;      /* asserted, benign                       */
+    --live:      #3aa0dc;      /* asserted, active                       */
+    --warn:      #d9a121;      /* asserted, attention                    */
+    --amber:     #d98324;      /* the PROCESS STOP, and only it          */
+    --amber-hi:  #f0a441;
+    --fdemand:   #d2312f;      /* RED. Zone D demand lamps, and NOTHING else */
+    --unknown:   #2a3138;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -47,85 +78,176 @@
     font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 15px; -webkit-text-size-adjust: 100%;
   }
-  body { padding: 0 0 24px; touch-action: manipulation; }
+  body { padding: 0 0 20px; touch-action: manipulation; }
   .mono { font-family: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
           font-variant-numeric: tabular-nums; }
 
-  /* ---- persistent PLC connection banner -------------------------------- */
-  #link {
+  /* ---- link strip -------------------------------------------------------- */
+  #strip {
     position: sticky; top: 0; z-index: 20;
-    display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 18px;
-    padding: 10px 16px; border-bottom: 2px solid #000;
-    background: var(--panel-2); color: var(--ink);
-    font-weight: 600; letter-spacing: .02em;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 20px;
+    padding: 9px 16px; border-bottom: 2px solid #000; background: var(--panel-2);
+    font-weight: 600;
   }
-  #link.CONNECTED    { background: #0d3a24; border-bottom-color: var(--ok); }
-  #link.RECONNECTING { background: #3d2f04; border-bottom-color: var(--warn); }
-  #link.DOWN         { background: #3d1414; border-bottom-color: var(--stop); }
-  #link .state {
-    font-size: 20px; padding: 2px 12px; border-radius: 3px;
-    background: #000a; border: 1px solid var(--edge);
+  #strip .chip {
+    padding: 3px 11px; border-radius: 3px; border: 1px solid var(--edge-2);
+    background: #000a; letter-spacing: .04em; font-size: 13px;
   }
-  #link.CONNECTED    .state { color: var(--ok);   border-color: var(--ok); }
-  #link.RECONNECTING .state { color: var(--warn); border-color: var(--warn); }
-  #link.DOWN         .state { color: var(--stop); border-color: var(--stop); }
-  .k { color: var(--ink-dim); font-weight: 400; }
+  #strip .chip.good { color: var(--ok);   border-color: var(--ok); }
+  /* A NEUTRAL chip, not an amber one. Section 5.2: the in-flight renderings —
+     "selection not in force" and "vehicle adopting" — are what a normal mode
+     change looks like while it is happening, and they are never an alarm.
+     Amber on this page belongs to the process stop and to attention states. */
+  #strip .chip.neutral { color: var(--ink); border-color: var(--edge-2); }
+  #strip .chip.warn { color: var(--warn); border-color: var(--warn); }
+  #strip .chip.bad  { color: var(--amber); border-color: var(--amber); }
+  #strip .chip.unk  { color: var(--ink-dimmer); border-color: var(--edge); }
+  #strip .k { color: var(--ink-dim); font-weight: 400; font-size: 13px; }
+  #strip #modechip { font-size: 13px; }
+  #degraded {
+    display: none; width: 100%; margin: 4px 0 0; font-weight: 400;
+    font-size: 12.5px; color: #f2d9a6;
+  }
+  #degraded.on { display: block; }
 
-  /* ---- latched process stop banner ------------------------------------- */
-  #stopbanner {
-    display: none; margin: 0; padding: 18px 16px;
-    background: var(--stop); color: #fff;
-    border-bottom: 4px solid #000;
-  }
-  #stopbanner.on { display: block; }
-  #stopbanner.reset-only { background: var(--warn); color: #1a1400; }
-  #stopbanner h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: .04em; }
-  #stopbanner p  { margin: 0; font-size: 15px; font-weight: 600; }
-  #stopbanner .fine { font-weight: 400; opacity: .85; margin-top: 6px; }
-
-  /* ---- F-CPU safety demand banner — a MIRROR, visually distinct from the
-     process-stop banner above: different hue, different border style, its own
-     heading, never toggled by the same field (opcua-nodes.md section 11) ---- */
-  #safetybanner {
-    display: none; margin: 0; padding: 18px 16px;
-    background: var(--safety); color: #fff;
-    border-bottom: 4px double #000;
-  }
-  #safetybanner.on { display: block; }
-  #safetybanner h1 { margin: 0; font-size: 26px; letter-spacing: .05em; }
-  #safetybanner .label {
-    margin: 2px 0 10px; font-size: 13px; font-weight: 700; letter-spacing: .02em;
-    opacity: .92;
-  }
-  #safetybanner p.msg { margin: 0; font-size: 15px; font-weight: 600; }
-  #safetybanner .fine { font-weight: 400; opacity: .88; margin-top: 6px; }
-
-  /* ---- F-CPU safety mirror lamps — greyed "not present" is its own state,
-     never a guessed FALSE (opcua-nodes.md section 11.6) ------------------- */
-  .lamp.on.safety .bulb { background: var(--safety); border-color: #ddceff; }
-  .lamps.notpresent .lamp { opacity: .4; }
-  .lamps.notpresent .lamp .bulb {
-    background: #263039 !important; border-color: #3a4753 !important;
-  }
-
-  /* ---- layout ----------------------------------------------------------- */
+  /* ---- layout ------------------------------------------------------------ */
   main {
-    display: grid; gap: 14px; padding: 14px;
-    grid-template-columns: minmax(300px, 380px) minmax(220px, 260px) minmax(320px, 1fr);
+    display: grid; gap: 12px; padding: 12px;
+    grid-template-columns: minmax(330px, 1fr) minmax(330px, 1fr);
+    align-items: start;
   }
-  @media (max-width: 1080px) { main { grid-template-columns: 1fr; } }
+  /* The envelope sits under the F-layer zone rather than under the teleop
+     controls, so the two columns end at about the same height. Zones A-F still
+     occupy ONE COLUMN PAIR, which is what leaves room for v2b's map pane to
+     join as a third column without moving a control the operator has learned. */
+  @media (min-width: 901px) { #envzone { grid-column: 2; } }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
   section {
     background: var(--panel); border: 1px solid var(--edge); border-radius: 4px;
     padding: 12px;
   }
   h2 {
-    margin: 0 0 10px; font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
-    color: var(--ink-dim); font-weight: 700;
+    margin: 0 0 10px; font-size: 11.5px; letter-spacing: .15em;
+    text-transform: uppercase; color: var(--ink-dim); font-weight: 700;
   }
+  .note  { color: var(--ink-dim); font-size: 12px; line-height: 1.5; margin: 9px 0 0; }
+  .fine  { color: var(--ink-dimmer); font-size: 11.5px; line-height: 1.5; margin: 6px 0 0; }
 
-  /* ---- joystick --------------------------------------------------------- */
+  /* ---- the three-state indicator: asserted, clear, UNKNOWN ---------------- */
+  .st { display: flex; align-items: center; gap: 9px; padding: 7px 9px;
+        border: 1px solid var(--edge); border-radius: 3px; background: var(--panel-2);
+        font-size: 13px; font-weight: 600; color: var(--ink-dim); margin-bottom: 6px; }
+  .st .bulb { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto;
+              background: var(--unknown); border: 2px solid var(--edge-2); }
+  .st .val { margin-left: auto; font-size: 12px; font-weight: 700;
+             color: var(--ink-dimmer); letter-spacing: .04em; }
+  .st.clear { color: var(--ink-dim); }
+  .st.clear .val { color: var(--ink-dim); }
+  .st.on { color: var(--ink); }
+  .st.on.warn  .bulb { background: var(--warn);  border-color: #f2cf7a; }
+  .st.on.live  .bulb { background: var(--live);  border-color: #a6dcf7; }
+  .st.on.ok    .bulb { background: var(--ok);    border-color: #86e0ba; }
+  .st.on.amber .bulb { background: var(--amber); border-color: var(--amber-hi); }
+  .st.on .val { color: var(--ink); }
+  /* UNKNOWN: grey, hatched, value em-dash. Never the last live look. */
+  .st.unk { opacity: .55; }
+  .st.unk .bulb {
+    background: repeating-linear-gradient(45deg, #2a3138 0 3px, #3a444f 3px 6px);
+    border-color: var(--edge-2);
+  }
+  .st.unk .val { color: var(--ink-dimmer); }
+
+  /* ---- mode zone --------------------------------------------------------- */
+  .selector { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .selector button {
+    margin: 0; padding: 13px 6px; font-size: 14px; font-weight: 700;
+    letter-spacing: .05em;
+  }
+  .selector button.sel { background: #123449; border-color: var(--live); color: #cfeaf9; }
+  #machinemode {
+    margin: 14px 0 2px; font-size: 40px; font-weight: 800; letter-spacing: .02em;
+    line-height: 1.05;
+  }
+  #machinemode.unk { color: var(--ink-dimmer); }
+  .modelabel { font-size: 11.5px; letter-spacing: .1em; color: var(--ink-dim);
+               font-weight: 700; }
+  .modelabel .n { font-family: "Cascadia Mono", Consolas, monospace; font-weight: 400; }
+  #modelink { display: none; margin: 8px 0 0; font-size: 12px; line-height: 1.5;
+              color: #f2d9a6; }
+  #modelink.on { display: block; }
+  #vehiclerow { margin: 12px 0 0; font-size: 13px; color: var(--ink-dim); }
+  #vehiclerow b { color: var(--ink); font-weight: 700; }
+  #vehiclediff { display: none; margin-top: 4px; color: var(--warn); font-size: 12.5px; }
+  #vehiclediff.on { display: block; }
+  #modecaption { margin: 10px 0 0; font-size: 12.5px; color: var(--ink-dim); line-height: 1.5; }
+  #conditions { margin: 8px 0 0; padding: 8px 9px; border: 1px dashed var(--edge-2);
+                border-radius: 3px; font-size: 12px; color: var(--ink-dim); display: none; }
+  #conditions.on { display: block; }
+  #conditions span.c { display: inline-block; margin: 2px 10px 2px 0; }
+  #conditions span.c b { color: var(--ink); }
+
+  /* ---- buttons ----------------------------------------------------------- */
+  button {
+    display: block; width: 100%; padding: 15px 10px; margin-bottom: 9px;
+    font-size: 16px; font-weight: 700; letter-spacing: .06em;
+    color: var(--ink); background: var(--panel-2);
+    border: 2px solid var(--edge-2); border-radius: 4px; cursor: pointer;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  button:active, button.held { background: #123449; border-color: var(--live); }
+  button#enable.on { background: #0e3a27; border-color: var(--ok); color: #b7f5d6; }
+  button#reset { background: #2a2409; border-color: #6a5a12; }
+  button:focus-visible { outline: 3px solid var(--live); outline-offset: 2px; }
+  button[disabled] { cursor: not-allowed; }
+
+  /* ---- THE PROCESS STOP -------------------------------------------------- *
+   * PSU2 rectangular, same corner radius as every other button. PSU3 amber,
+   * never red-on-yellow. PSU4 inside zone C among the other stop states.
+   * There is no round shape, no mushroom, no hand icon and no oversizing
+   * anywhere in this rule block, and that is the rule.                       */
+  #pstop {
+    padding: 20px 10px; font-size: 19px; letter-spacing: .1em;
+    color: #1c1102; background: var(--amber); border: 2px solid var(--amber-hi);
+    border-radius: 4px; margin-bottom: 6px;
+  }
+  #pstop.engaged {
+    background: #7a4a12; color: #ffdcaa; border-color: #b87a2c;
+    box-shadow: inset 0 3px 0 #00000055;
+  }
+  #pstop.unavailable {
+    background: repeating-linear-gradient(45deg, #23282e 0 6px, #2c333a 6px 12px);
+    color: var(--ink-dimmer); border-color: var(--edge-2); cursor: not-allowed;
+  }
+  #pstopcaption { margin: 0 0 10px; font-size: 12px; line-height: 1.5;
+                  color: var(--ink-dim); }
+  #pstopcaption b { color: var(--ink); }
+  #pstoplimit { margin: 6px 0 12px; font-size: 11.5px; line-height: 1.5;
+                color: var(--ink-dimmer); }
+
+  /* ---- zone D: the F-layer mirror, its own banner and its own frame ------- */
+  #fzone { border: 2px solid #5a2f2e; background: #14100f; }
+  #fbanner {
+    margin: -12px -12px 12px; padding: 10px 12px; background: #2a1615;
+    border-bottom: 2px solid #5a2f2e; font-size: 12px; font-weight: 700;
+    letter-spacing: .04em; color: #f0c9c7;
+  }
+  #fzone .st.on.demand .bulb { background: var(--fdemand); border-color: #f19a98; }
+  #fzone .st.on.demand { color: #ffd9d8; }
+  #fabsent { display: none; margin: 0 0 8px; padding: 8px 9px; border-radius: 3px;
+             background: #241b12; border: 1px solid #6a5a12; color: #f0dca5;
+             font-size: 12px; line-height: 1.5; }
+  #fabsent.on { display: block; }
+
+  /* ---- envelope ---------------------------------------------------------- */
+  .env { display: flex; align-items: baseline; gap: 10px; padding: 7px 9px;
+         border: 1px solid var(--edge); border-radius: 3px; background: var(--panel-2);
+         margin-bottom: 6px; font-size: 13px; color: var(--ink-dim); }
+  .env .v { margin-left: auto; font-weight: 700; color: var(--ink); }
+  .env.unk .v { color: var(--ink-dimmer); }
+
+  /* ---- joystick ---------------------------------------------------------- */
   #pad {
-    position: relative; width: 100%; aspect-ratio: 1 / 1; margin: 0 auto;
+    position: relative; width: 100%; max-width: 300px; aspect-ratio: 1 / 1; margin: 0 auto 10px;
     background:
       linear-gradient(var(--edge), var(--edge)) center/2px 100% no-repeat,
       linear-gradient(var(--edge), var(--edge)) center/100% 2px no-repeat,
@@ -135,100 +257,116 @@
   }
   #pad.live { border-color: var(--live); }
   #knob {
-    position: absolute; left: 50%; top: 50%; width: 74px; height: 74px;
-    margin: -37px 0 0 -37px; border-radius: 50%;
-    background: #33404d; border: 3px solid var(--ink-dim);
-    box-shadow: 0 0 0 2px #000 inset;
+    position: absolute; left: 50%; top: 50%; width: 60px; height: 60px;
+    margin: -30px 0 0 -30px; border-radius: 50%;
+    background: #2f3a46; border: 3px solid var(--ink-dim);
   }
-  #pad.live #knob { background: #14506e; border-color: var(--live); }
-  .padlabel {
-    position: absolute; color: var(--ink-dim); font-size: 11px; letter-spacing: .1em;
-  }
-  .padlabel.n { top: 6px; left: 50%; transform: translateX(-50%); }
-  .padlabel.s { bottom: 6px; left: 50%; transform: translateX(-50%); }
-  .padlabel.w { left: 6px; top: 50%; transform: translateY(-50%); }
-  .padlabel.e { right: 6px; top: 50%; transform: translateY(-50%); }
+  #pad.live #knob { background: #123449; border-color: var(--live); }
+  .padlabel { position: absolute; color: var(--ink-dimmer); font-size: 10.5px;
+              letter-spacing: .1em; }
+  .padlabel.n { top: 5px; left: 50%; transform: translateX(-50%); }
+  .padlabel.s { bottom: 5px; left: 50%; transform: translateX(-50%); }
+  .padlabel.w { left: 5px; top: 50%; transform: translateY(-50%); }
+  .padlabel.e { right: 5px; top: 50%; transform: translateY(-50%); }
+  #teleopzone.dim { opacity: .45; }
+  #teleopdim { display: none; margin: 0 0 10px; padding: 8px 9px; border-radius: 3px;
+               background: var(--panel-2); border: 1px dashed var(--edge-2);
+               color: var(--ink-dim); font-size: 12px; }
+  #teleopdim.on { display: block; }
+  .forkrow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .forkrow button { margin-bottom: 9px; }
 
-  /* ---- buttons ---------------------------------------------------------- */
-  button {
-    display: block; width: 100%; padding: 16px 10px; margin-bottom: 10px;
-    font-size: 17px; font-weight: 700; letter-spacing: .06em;
-    color: var(--ink); background: var(--panel-2);
-    border: 2px solid var(--edge); border-radius: 4px; cursor: pointer;
-    touch-action: none; user-select: none; -webkit-user-select: none;
-  }
-  button:active, button.held { background: #14506e; border-color: var(--live); }
-  button#enable.on { background: #0d3a24; border-color: var(--ok); color: #b7f5d6; }
-  button#reset { background: #2c2306; border-color: #6a5410; }
-  button:focus-visible { outline: 3px solid var(--live); outline-offset: 2px; }
-
-  /* ---- lamps ------------------------------------------------------------ */
-  .lamps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
-  .lamp {
-    display: flex; align-items: center; gap: 9px; padding: 9px 10px;
-    background: var(--panel-2); border: 1px solid var(--edge); border-radius: 3px;
-    font-size: 12.5px; font-weight: 600; color: var(--ink-dim);
-  }
-  .lamp .bulb {
-    width: 15px; height: 15px; border-radius: 50%; flex: 0 0 auto;
-    background: #263039; border: 2px solid #3a4753;
-  }
-  .lamp.on { color: var(--ink); }
-  .lamp.on.ok   .bulb { background: var(--ok);   border-color: #7df3b8; }
-  .lamp.on.warn .bulb { background: var(--warn); border-color: #ffdd80; }
-  .lamp.on.stop .bulb { background: var(--stop); border-color: #ff9b9a; }
-  .lamp.on.live .bulb { background: var(--live); border-color: #b3e4ff; }
-
-  /* ---- metrics ---------------------------------------------------------- */
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--edge); }
-  th { color: var(--ink-dim); font-weight: 600; font-size: 12px; }
-  td.v { text-align: right; font-size: 15px; }
-  td.u { width: 3.2em; color: var(--ink-dim); font-size: 12px; }
-  tr.pair td { border-bottom: none; }
-  tr.pair + tr td { border-top: 1px solid var(--edge); }
-  .stale td { opacity: .45; }
-  .note { color: var(--ink-dim); font-size: 12px; line-height: 1.5; margin: 10px 0 0; }
-  .hint {
-    margin: 0 0 10px; padding: 9px 10px; border-radius: 3px; font-size: 12.5px;
-    background: #2c2306; border: 1px solid #6a5410; color: #f0dca5; display: none;
-  }
-  .hint.on { display: block; }
-  #beacon.stale { color: var(--warn); }
-  footer { padding: 4px 16px; color: var(--ink-dim); font-size: 12px; line-height: 1.6; }
+  /* ---- diagnostics drawer ------------------------------------------------ */
+  #diag { grid-column: 1 / -1; }
+  #diag summary { cursor: pointer; font-size: 11.5px; letter-spacing: .15em;
+                  text-transform: uppercase; color: var(--ink-dim); font-weight: 700;
+                  padding: 4px 0; }
+  #diag table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  #diag th, #diag td { text-align: left; padding: 4px 6px;
+                       border-bottom: 1px solid var(--edge); font-size: 12.5px; }
+  #diag th { color: var(--ink-dim); font-weight: 600; }
+  #diag td.v { text-align: right; }
+  #diagcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+              gap: 0 18px; }
+  #drop { display: none; margin: 9px 0 0; padding: 8px 9px; border-radius: 3px;
+          background: #241b12; border: 1px solid #6a5a12; color: #f0dca5;
+          font-size: 12px; line-height: 1.5; }
+  #drop.on { display: block; }
+  footer { padding: 6px 16px; color: var(--ink-dimmer); font-size: 11.5px; line-height: 1.6; }
 </style>
 </head>
 <body>
 
-<div id="link" class="DOWN">
-  <span class="state" id="linkstate">DOWN</span>
-  <span><span class="k">endpoint</span> <span class="mono" id="endpoint">-</span></span>
-  <span><span class="k">last good write</span> <span class="mono" id="lastwrite">-</span></span>
-  <span><span class="k">HmiHeartbeat</span> <span class="mono" id="hb">-</span></span>
-  <span><span class="k">write RTT</span> <span class="mono" id="rtt">-</span></span>
-  <span><span class="k">page beacon</span> <span class="mono" id="beacon">-</span></span>
-  <span class="k mono" id="linkreason"></span>
-</div>
-
-<div id="stopbanner">
-  <h1 id="stoptitle">PROCESS STOP LATCHED</h1>
-  <p id="stoptext"></p>
-  <p class="fine">Standard-program process logic in the PLC. Not a safety function, and this
-    page is not a safety device.</p>
-</div>
-
-<div id="safetybanner">
-  <h1>SAFETY DEMAND</h1>
-  <p class="label">F-CPU safety demand (mirror, read-only)</p>
-  <p class="msg" id="safetytext"></p>
-  <p class="fine">Forklift/Safety/SafetyResetRequired, copied from the F-runtime group.
-    A display of F-CPU state, never a safety path: no client write can create, prevent
-    or clear a safety reaction (opcua-nodes.md &sect;11.4).</p>
+<div id="strip">
+  <span class="k">session</span><span class="chip unk" id="c_session">DOWN</span>
+  <span class="k">PLC sees operator</span><span class="chip unk" id="c_link">&mdash;</span>
+  <span class="k">data</span><span class="chip unk" id="c_age">&mdash;</span>
+  <span class="k">mode</span><span class="chip unk" id="modechip">&mdash;</span>
+  <span class="k mono" id="c_endpoint"></span>
+  <p id="degraded"></p>
 </div>
 
 <main>
+
+  <!-- ============================ A  MODE ============================== -->
   <section>
-    <h2>Traction and steer &mdash; drag to drive, release to centre</h2>
+    <h2>A &nbsp;Mode</h2>
+    <div class="selector">
+      <button id="mode0" data-mode="0">NONE</button>
+      <button id="mode1" data-mode="1">TELEOP</button>
+      <button id="mode2" data-mode="2">AUTONOMOUS</button>
+    </div>
+    <p class="fine">Selecting <b>autonomous permits the vehicle to move under its own
+      control</b>: this section defines no separate autonomous enable, so the selection is
+      the affirmative action. Leaving a mode is moving the selector to NONE.</p>
+    <p id="modelink"></p>
+
+    <p class="modelabel" style="margin-top:16px">MACHINE MODE
+      &mdash; <span class="n">ForkliftDriveModeActive</span></p>
+    <div id="machinemode" class="unk">&mdash;</div>
+    <p class="fine">The PLC's verdict and the only authoritative answer to &ldquo;what mode
+      is the machine in&rdquo;. This is never the selector's position.</p>
+
+    <p id="vehiclerow">vehicle applying &nbsp;<b id="vehiclemode">&mdash;</b>
+      <span class="k">(ForkliftVehicleModeApplied)</span></p>
+    <p id="vehiclediff">vehicle report differs &mdash; two data shown side by side, not a
+      verdict. A disagreement that persists is the PLC's to declare, and it arrives here as
+      RESET REQUIRED.</p>
+
+    <p id="modecaption"></p>
+    <p id="conditions"></p>
+  </section>
+
+  <!-- ======================= C  STOPS AND RESET ========================= -->
+  <section>
+    <h2>C &nbsp;Stops and reset &mdash; standard program, process logic</h2>
+
+    <button id="pstop">PROCESS STOP</button>
+    <p id="pstopcaption"></p>
+    <p id="pstoplimit">Software stop via PLC over the network &mdash; unavailable if the link
+      is down. This plant is simulated; on real equipment the emergency stop is the hardwired
+      device at the machine, never a screen.</p>
+
+    <div class="st" id="s_pstop"><span class="bulb"></span>process stop latched
+      <span class="val">&mdash;</span></div>
+    <div class="st" id="s_obstacle"><span class="bulb"></span>obstacle stop latched
+      <span class="val">&mdash;</span></div>
+    <div class="st" id="s_speedlimit"><span class="bulb"></span>speed limit active
+      <span class="val">&mdash;</span></div>
+    <div class="st" id="s_resetreq"><span class="bulb"></span>reset required
+      <span class="val">&mdash;</span></div>
+
+    <button id="reset" style="margin-top:10px">RESET &mdash; HOLD</button>
+    <p class="note">RESET is a level, held. The PLC acts on the rising edge and arms that
+      edge per link session; no client clears a latch by writing a node, and clearing a latch
+      energizes nothing.</p>
+    <p id="drop"></p>
+  </section>
+
+  <!-- ======================= B  TELEOP CONTROLS ========================= -->
+  <section id="teleopzone">
+    <h2>B &nbsp;Teleop controls</h2>
+    <p id="teleopdim"></p>
     <div id="pad">
       <div id="knob"></div>
       <span class="padlabel n">FORWARD</span>
@@ -236,254 +374,285 @@
       <span class="padlabel w">LEFT</span>
       <span class="padlabel e">RIGHT</span>
     </div>
-    <table style="margin-top:12px">
-      <tr><th>HmiTractionRequest</th><td class="v mono" id="q_traction">0.000</td><td class="u">frac</td></tr>
-      <tr><th>HmiSteerRequest</th><td class="v mono" id="q_steer">0.000</td><td class="u">rad</td></tr>
-      <tr><th>HmiForkRequest</th><td class="v mono" id="q_fork">0.000</td><td class="u">frac</td></tr>
-      <tr><th>HmiTeleopRequest</th><td class="v mono" id="q_teleop">false</td><td class="u"></td></tr>
-      <tr><th>HmiResetRequest</th><td class="v mono" id="q_reset">false</td><td class="u"></td></tr>
-    </table>
-    <p class="note">Release &rArr; zeros are written on the next cycle. The controls also
-      return to rest when this page loses focus or is hidden. A request is not a
-      command: the PLC scales it, interlocks it and owns what the machine does.</p>
-  </section>
-
-  <section>
-    <h2>Fork jog, enable, reset</h2>
-    <button id="forkup" data-fork="1">FORK UP &mdash; HOLD</button>
-    <button id="forkdown" data-fork="-1">FORK DOWN &mdash; HOLD</button>
+    <div class="forkrow">
+      <button id="forkup" data-fork="1">FORK UP</button>
+      <button id="forkdown" data-fork="-1">FORK DOWN</button>
+    </div>
     <button id="enable">ENABLE TELEOP</button>
-    <p class="hint" id="resethint">A latch is standing. Sequence: <b>release ENABLE</b>,
-      press <b>RESET</b>, then assert <b>ENABLE</b> again. An enable left asserted through
-      the reset produces no rising edge and the machine stays stopped. Holding RESET down
-      changes nothing after its first edge, and it clears no latch whose cause is still
-      standing.</p>
-    <button id="reset">RESET &mdash; HOLD</button>
-    <p class="hint" id="dropnotice"></p>
-    <p class="note">RESET is a <b>level, held</b>: the backend writes
-      <span class="mono">TRUE</span> every write cycle for as long as the button is down and
-      <span class="mono">FALSE</span> from the cycle after it is released. A tap still lands
-      exactly one <span class="mono">TRUE</span> cycle, so no press is lost. The PLC acts on
-      the rising edge and arms that edge per link session; no client clears a latch by
-      writing a node, and no elapsed hold makes a second edge appear.</p>
+    <div class="st" id="s_teleop"><span class="bulb"></span>ForkliftTeleopActive
+      <span class="val">&mdash;</span></div>
+    <p class="note">A request is not a command: the PLC scales it, interlocks it and owns
+      what the machine does. These controls stream in every mode; greying is display.</p>
   </section>
 
-  <section>
-    <h2>PLC state &mdash; read only, polled at 5 Hz</h2>
-    <div class="lamps">
-      <div class="lamp live" id="l_teleop"><span class="bulb"></span>ForkliftTeleopActive</div>
-      <div class="lamp stop" id="l_obstacle"><span class="bulb"></span>ForkliftObstacleStopActive</div>
-      <div class="lamp warn" id="l_speed"><span class="bulb"></span>ForkliftSpeedLimitActive</div>
-      <div class="lamp warn" id="l_resetreq"><span class="bulb"></span>ForkliftResetRequired</div>
-      <div class="lamp ok" id="l_linkok"><span class="bulb"></span>HmiLinkOk</div>
-      <div class="lamp stop" id="l_zone"><span class="bulb"></span>ForkliftObstacleInStopZone</div>
-    </div>
-    <table id="metrics">
-      <tr class="pair">
-        <th>ForkliftTractionSpeedRef</th><td class="v mono" id="m_tref">-</td><td class="u">m/s</td>
-      </tr>
-      <tr>
-        <th>ForkliftLinearSpeed <span class="k">measured</span></th>
-        <td class="v mono" id="m_speed">-</td><td class="u">m/s</td>
-      </tr>
-      <tr><th>ForkliftForkHeight</th><td class="v mono" id="m_height">-</td><td class="u">m</td></tr>
-      <tr><th>ForkliftObstacleMinDistance</th><td class="v mono" id="m_dist">-</td><td class="u">m</td></tr>
-      <tr><th>ForkliftSteerAngleRef</th><td class="v mono" id="m_sref">-</td><td class="u">rad</td></tr>
-      <tr><th>ForkliftForkSpeedRef</th><td class="v mono" id="m_fref">-</td><td class="u">m/s</td></tr>
-      <tr><th>write round-trip, last</th><td class="v mono" id="m_rtt">-</td><td class="u">ms</td></tr>
-      <tr><th>write round-trip, median of 10</th><td class="v mono" id="m_rttmed">-</td><td class="u">ms</td></tr>
-      <tr><th>write cycle, measured period</th><td class="v mono" id="m_period">-</td><td class="u">ms</td></tr>
-      <tr><th>metrics age</th><td class="v mono" id="m_age">-</td><td class="u">ms</td></tr>
-    </table>
-    <p class="note">Setpoint beside measurement: the reference is what the PLC decided, the
-      speed is what the plant reported back through the bridge. The HMI displays both and
-      recomputes neither.</p>
+  <!-- ==================== D  F-LAYER STATE (MIRROR) ==================== -->
+  <section id="fzone">
+    <div id="fbanner">F-LAYER STATE &mdash; READ-ONLY MIRROR. NOTHING ON THIS SCREEN CAN
+      WRITE, CLEAR OR RESET IT.</div>
+    <p id="fabsent">F-layer mirrors not present on this server. Greyed, not an error, and
+      never substituted with a value: this group is optional, and a lamp that looks healthy
+      with no data is worse than no lamp.</p>
+    <div class="st" id="f_estop"><span class="bulb"></span>e-stop demand
+      <span class="val">&mdash;</span></div>
+    <div class="st" id="f_zone"><span class="bulb"></span>zone-stop demand
+      <span class="val">&mdash;</span></div>
+    <div class="st" id="f_resetreq"><span class="bulb"></span>safety reset required
+      <span class="val">&mdash;</span></div>
+    <div class="st" id="f_resetfault"><span class="bulb"></span>reset device fault
+      <span class="val">&mdash;</span></div>
+    <p class="fine">Forklift/Safety/, copied from the F-runtime group. Displayed, never
+      combined and never fed into a control. These lamps clear by the F-side's own reset
+      path and by nothing on this screen.</p>
   </section>
 
-  <section>
-    <h2>Forklift/Safety/ &mdash; F-CPU mirrors, read only, polled at 5 Hz</h2>
-    <div class="lamps" id="safety_lamps">
-      <div class="lamp safety" id="l_safety_estop"><span class="bulb"></span>EStopDemand</div>
-      <div class="lamp safety" id="l_safety_zone"><span class="bulb"></span>ZoneStopDemand</div>
-      <div class="lamp safety" id="l_safety_resetreq"><span class="bulb"></span>SafetyResetRequired</div>
-      <div class="lamp warn" id="l_safety_resetfault"><span class="bulb"></span>SafetyResetFault</div>
-    </div>
-    <p class="hint" id="safety_notpresent">Forklift/Safety/ not present on this server &mdash;
-      the F-CPU safety layer is not built here. Greyed, not an error: this group is optional
-      (opcua-nodes.md &sect;11.6).</p>
-    <p class="note">This panel displays the F-CPU's mirrored state; it never commands. No
-      write from this HMI reaches these nodes, and no client write anywhere can create,
-      prevent or clear a safety reaction (opcua-nodes.md &sect;11.3, &sect;11.4).</p>
+  <!-- ========================= E  ENVELOPE ============================= -->
+  <section id="envzone">
+    <h2>E &nbsp;Autonomy envelope (published by PLC)</h2>
+    <div class="env" id="e_enable">autonomous motion <span class="v">&mdash;</span></div>
+    <div class="env" id="e_ceiling">speed ceiling <span class="v">&mdash;</span></div>
+    <div class="env" id="e_permit">equipment <span class="v">&mdash;</span></div>
+    <p class="fine">A permission is not a command. The envelope can prevent motion; it
+      cannot cause it. The ceiling is a bound on speed, never a setpoint or a target.</p>
   </section>
+
+  <!-- ======================= F  DIAGNOSTICS ============================= -->
+  <details id="diag">
+    <summary>F &nbsp;Diagnostics &mdash; raw values and counters</summary>
+    <div id="diagcols">
+      <table>
+        <tr><th>ForkliftForkHeight</th><td class="v mono" id="d_height">&mdash;</td></tr>
+        <tr><th>ForkliftLinearSpeed</th><td class="v mono" id="d_speed">&mdash;</td></tr>
+        <tr><th>ForkliftObstacleInStopZone</th><td class="v mono" id="d_inzone">&mdash;</td></tr>
+        <tr><th>ForkliftObstacleMinDistance</th><td class="v mono" id="d_dist">&mdash;</td></tr>
+        <tr><th>ForkliftTractionSpeedRef</th><td class="v mono" id="d_tref">&mdash;</td></tr>
+        <tr><th>ForkliftSteerAngleRef</th><td class="v mono" id="d_sref">&mdash;</td></tr>
+        <tr><th>ForkliftForkSpeedRef</th><td class="v mono" id="d_fref">&mdash;</td></tr>
+        <tr><th>ForkliftVehicleHeartbeat</th><td class="v mono" id="d_vhb">&mdash;</td></tr>
+      </table>
+      <table>
+        <tr><th>HmiTractionRequest</th><td class="v mono" id="q_traction">&mdash;</td></tr>
+        <tr><th>HmiSteerRequest</th><td class="v mono" id="q_steer">&mdash;</td></tr>
+        <tr><th>HmiForkRequest</th><td class="v mono" id="q_fork">&mdash;</td></tr>
+        <tr><th>HmiTeleopRequest</th><td class="v mono" id="q_teleop">&mdash;</td></tr>
+        <tr><th>HmiResetRequest</th><td class="v mono" id="q_reset">&mdash;</td></tr>
+        <tr><th>HmiDriveModeRequest</th><td class="v mono" id="q_mode">&mdash;</td></tr>
+        <tr><th>HmiProcessStopRequest</th><td class="v mono" id="q_pstop">&mdash;</td></tr>
+        <tr><th>HmiHeartbeat</th><td class="v mono" id="q_hb">&mdash;</td></tr>
+      </table>
+      <table>
+        <tr><th>write round-trip last / median10</th><td class="v mono" id="d_rtt">&mdash;</td></tr>
+        <tr><th>write cycle measured period</th><td class="v mono" id="d_period">&mdash;</td></tr>
+        <tr><th>read poll age</th><td class="v mono" id="d_age">&mdash;</td></tr>
+        <tr><th>page beacon</th><td class="v mono" id="d_beacon">&mdash;</td></tr>
+        <tr><th>session connects</th><td class="v mono" id="d_connects">&mdash;</td></tr>
+        <tr><th>session timeout granted</th><td class="v mono" id="d_timeout">&mdash;</td></tr>
+      </table>
+    </div>
+    <p class="fine">The raw dump is demoted, not deleted: v1 showed every node as a labelled
+      number, v2a shows verdicts as states and keeps the numbers here.</p>
+  </details>
+
 </main>
 
 <footer>
-  Local commissioning HMI. OPC UA client of the PLC; it holds no server and exposes no
+  Local commissioning HMI, v2a. OPC UA client of the PLC; it holds no server and exposes no
   endpoint. Requests only &mdash; teleop routing, the fork-height speed cap, the fork soft
-  travel limits and the obstacle stop are process logic in the standard program.
-  Loss of this page or of this link is a degraded mode with a PLC-owned controlled stop,
-  never a safety event.
+  travel limits and the obstacle stop are process logic in the standard program. Loss of this
+  page or of this link is a degraded mode with a PLC-owned controlled stop, never a safety
+  event. Nothing on this page is a safety device.
 </footer>
 
 <script>
 "use strict";
 
-// The operator's control positions. Normalised axes in [-1, 1]; the backend
-// expresses the steer axis in the unit HmiSteerRequest declares. Both Bools are
-// LEVELS: teleop is asserted until it is withdrawn, and reset is TRUE for as
-// long as the button is physically held. Neither is shortened here — the edge,
-// the arming and the hold are the PLC program's, never this page's.
+/* ------------------------------------------------------------------ model --
+ * The operator's control positions. Only the five DEADMAN requests live here.
+ *
+ * The two STANDING controls deliberately do NOT: this page holds no copy of
+ * them. `rendered` is the last value the BACKEND published, used for drawing
+ * and for computing a click's absolute target, and it is overwritten by every
+ * poll. `pending` is a one-shot: a click stages the key it changed, the very
+ * next post carries it, and it is cleared by that post. No other post ever
+ * carries a standing key (PS-D; m5-29 finding 1).
+ */
 var ctl = { traction: 0, steer: 0, fork: 0, teleop: false, reset: false };
+var rendered = { process_stop: null, drive_mode: null };
+var pending = null;
+var seenState = false;      // a /state response has been seen — the click gate
 var dirty = true;
 
-// The unconditional /state poll below is also this page's LIVENESS BEACON: the
-// backend returns every request to rest if nothing arrives from here for five
-// poll periods (UI_POLL_STALE_TIME, opcua-nodes.md section 10.8 H6). The two
-// numbers are derived from this one, so it is named once and used twice.
+/* The two windows this page renders against are the BACKEND's, published on
+ * /state. The page invents no millisecond of its own (V2A-DESIGN §8), and
+ * these hold the last published values so the backend-gone render path can
+ * reuse them instead of a literal. Null until /state has been seen once, which
+ * is not a gap: with no read poll at all every state is unknown anyway. */
+var lastWindows = { read_stale_after_ms: null, write_stale_after_ms: null };
+
 var POLL_PERIOD_MS = 200;
+var MODE_NAMES = { 0: "NONE", 1: "TELEOP", 2: "AUTONOMOUS" };
+
+function stage(key, value) {
+  pending = pending || {};
+  pending[key] = value;
+}
 
 function post(useBeacon) {
-  var body = JSON.stringify({
+  var body = {
     traction: ctl.traction, steer: ctl.steer, fork: ctl.fork,
     teleop: ctl.teleop, reset: ctl.reset
-  });
+  };
+  // A standing key travels ONLY in the post triggered by the click that
+  // changed it, and a missing key means UNCHANGED at the backend. So the 50 ms
+  // dirty loop, every deadman post, blur, pagehide and visibilitychange carry
+  // no standing key and can change nothing — in this tab or in any other.
+  //
+  // If this post fails, the staged value is gone with it and the control the
+  // operator clicked visibly does not move on the next poll. That is the
+  // intended behaviour: a standing control re-asserted by a background timer
+  // is the defect above, and an operator watching a control that did not
+  // change presses it again.
+  if (pending) {
+    if ("process_stop" in pending) body.process_stop = pending.process_stop;
+    if ("drive_mode" in pending) body.drive_mode = pending.drive_mode;
+    pending = null;
+  }
+  var text = JSON.stringify(body);
   dirty = false;
   if (useBeacon && navigator.sendBeacon) {
-    navigator.sendBeacon("/control", new Blob([body], { type: "application/json" }));
+    navigator.sendBeacon("/control", new Blob([text], { type: "application/json" }));
     return;
   }
   fetch("/control", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: body
+    method: "POST", headers: { "Content-Type": "application/json" }, body: text
   }).catch(function () { dirty = true; });
 }
-
 function touch() { dirty = true; }
-
-// Pointer capture keeps a drag alive when the pointer leaves the element. It is
-// not available for every pointer in every browser, and a control that throws
-// here would stop responding, so the failure is contained rather than fatal.
-function capture(el, id) {
-  try { el.setPointerCapture(id); } catch (e) { /* drag still works */ }
+function capture(el, id) { try { el.setPointerCapture(id); } catch (e) { /* ok */ } }
+function id(x) { return document.getElementById(x); }
+function setText(x, t) { id(x).textContent = t; }
+function num(v, dp) {
+  return (v === null || v === undefined || typeof v !== "number") ? "—" : v.toFixed(dp);
 }
+function str(v) { return (v === null || v === undefined) ? "—" : String(v); }
 
-// The control stream. The backend writes all six nodes every 100 ms cycle
-// whatever arrives here, so this loop only has to keep the latest positions
-// current; it is not itself the write cadence.
 setInterval(function () { if (dirty) post(false); }, 50);
 
-/* ---- joystick: pointer events, mouse and touch alike -------------------- */
-var pad = document.getElementById("pad");
-var knob = document.getElementById("knob");
-var dragging = null;
-
+/* ------------------------------------------------------------- joystick --- */
+var pad = id("pad"), knob = id("knob"), dragging = null;
 function padUpdate(ev) {
   var r = pad.getBoundingClientRect();
   var x = ((ev.clientX - r.left) / r.width) * 2 - 1;
   var y = ((ev.clientY - r.top) / r.height) * 2 - 1;
   ctl.steer = Math.max(-1, Math.min(1, x));
-  ctl.traction = Math.max(-1, Math.min(1, -y));   // up is forwards
+  ctl.traction = Math.max(-1, Math.min(1, -y));
   knob.style.left = (50 + ctl.steer * 50) + "%";
   knob.style.top = (50 - ctl.traction * 50) + "%";
   touch();
 }
-
 function padRelease() {
-  dragging = null;
-  ctl.steer = 0; ctl.traction = 0;
+  dragging = null; ctl.steer = 0; ctl.traction = 0;
   knob.style.left = "50%"; knob.style.top = "50%";
   pad.classList.remove("live");
-  post(false);                       // deadman: zeros go out immediately
+  post(false);
 }
-
 pad.addEventListener("pointerdown", function (ev) {
-  dragging = ev.pointerId;
-  capture(pad, ev.pointerId);
-  pad.classList.add("live");
-  padUpdate(ev);
-  ev.preventDefault();
+  dragging = ev.pointerId; capture(pad, ev.pointerId);
+  pad.classList.add("live"); padUpdate(ev); ev.preventDefault();
 });
 pad.addEventListener("pointermove", function (ev) {
   if (dragging === ev.pointerId) { padUpdate(ev); ev.preventDefault(); }
 });
-["pointerup", "pointercancel", "lostpointercapture"].forEach(function (name) {
-  pad.addEventListener(name, function (ev) {
-    if (dragging === ev.pointerId) { padRelease(); }
-  });
+["pointerup", "pointercancel", "lostpointercapture"].forEach(function (n) {
+  pad.addEventListener(n, function (ev) { if (dragging === ev.pointerId) padRelease(); });
 });
 
-/* ---- fork jog: hold to move -------------------------------------------- */
-["forkup", "forkdown"].forEach(function (id) {
-  var b = document.getElementById(id);
-  var value = parseFloat(b.dataset.fork);
+/* ------------------------------------------------------------ fork jog ---- */
+["forkup", "forkdown"].forEach(function (x) {
+  var b = id(x), value = parseFloat(b.dataset.fork);
   b.addEventListener("pointerdown", function (ev) {
-    capture(b, ev.pointerId);
-    b.classList.add("held");
+    capture(b, ev.pointerId); b.classList.add("held");
     ctl.fork = value; post(false); ev.preventDefault();
   });
   ["pointerup", "pointercancel", "lostpointercapture", "pointerleave"].forEach(function (n) {
     b.addEventListener(n, function () {
-      if (!b.classList.contains("held")) { return; }
-      b.classList.remove("held");
-      ctl.fork = 0; post(false);     // deadman: release writes zero
+      if (!b.classList.contains("held")) return;
+      b.classList.remove("held"); ctl.fork = 0; post(false);
     });
   });
 });
 
-/* ---- enable (a level) and reset (a level, press and hold) --------------- */
-var enableBtn = document.getElementById("enable");
+/* -------------------------------------------------- enable and reset ------ */
+var enableBtn = id("enable");
 enableBtn.addEventListener("click", function () {
   ctl.teleop = !ctl.teleop;
   enableBtn.classList.toggle("on", ctl.teleop);
-  enableBtn.textContent = ctl.teleop ? "ENABLE TELEOP - ASSERTED" : "ENABLE TELEOP";
+  enableBtn.textContent = ctl.teleop ? "ENABLE TELEOP — ASSERTED" : "ENABLE TELEOP";
   post(false);
 });
 
-// RESET is press-and-hold, the same shape as the fork jog buttons, because the
-// commissioning procedure needs a reset that stands unbroken across the moment
-// its cause disappears (plc/forklift/SPEC.md section 11, T5.4 steps 5.4.4-5.4.8:
-// the latch must be seen NOT to clear while the button is still down, and to
-// clear only on a fresh edge after a real release). A click that the page turned
-// into a one-cycle pulse could not produce that, so the hold is the operator's
-// and the page carries it verbatim.
-var resetBtn = document.getElementById("reset");
+var resetBtn = id("reset");
 function resetHold(on) {
-  if (ctl.reset === on) { return; }
-  ctl.reset = on;
-  resetBtn.classList.toggle("held", on);
-  post(false);
+  if (ctl.reset === on) return;
+  ctl.reset = on; resetBtn.classList.toggle("held", on); post(false);
 }
 resetBtn.addEventListener("pointerdown", function (ev) {
-  capture(resetBtn, ev.pointerId);
-  resetHold(true);
-  ev.preventDefault();
+  capture(resetBtn, ev.pointerId); resetHold(true); ev.preventDefault();
 });
 ["pointerup", "pointercancel", "lostpointercapture", "pointerleave"].forEach(function (n) {
   resetBtn.addEventListener(n, function () { resetHold(false); });
 });
-// Keyboard: a button fires click on Space/Enter, which carries no hold, so the
-// key's own down and up edges are used instead. Auto-repeat is ignored: it is
-// one continuous press, not a stream of them.
 resetBtn.addEventListener("keydown", function (ev) {
-  if ((ev.key === " " || ev.key === "Enter") && !ev.repeat) {
-    resetHold(true); ev.preventDefault();
-  }
+  if ((ev.key === " " || ev.key === "Enter") && !ev.repeat) { resetHold(true); ev.preventDefault(); }
 });
 resetBtn.addEventListener("keyup", function (ev) {
   if (ev.key === " " || ev.key === "Enter") { resetHold(false); ev.preventDefault(); }
 });
 resetBtn.addEventListener("blur", function () { resetHold(false); });
 
-/* ---- the deadman on anything that means "the operator let go" ----------- */
+/* ------------------------------------------ THE PROCESS STOP (V2A-DESIGN 4)
+ * A two-state STANDING control: pressing engages, pressing again releases.
+ * The release is deliberately a separate act, because it is the live-world
+ * term the PLC's reset tests. It acts on press: no confirmation dialog, because
+ * a confirmation on a stop request delays the request.
+ *
+ * It is inert while UNAVAILABLE. A control whose effect could not arrive must
+ * not accept a press it cannot deliver, and it must not look armed either.
+ *
+ * The click computes an ABSOLUTE target from the value last rendered from the
+ * backend — never from a copy this page has been carrying — and stages it for
+ * the next post only. The rendered state catches up on the following 200 ms
+ * poll; that lag is accepted and there is deliberately no optimistic local
+ * override, because a local override is the copy this defect was made of.
+ */
+var pstopBtn = id("pstop");
+var pstopAvailable = false;
+pstopBtn.addEventListener("click", function () {
+  if (!seenState || !pstopAvailable || typeof rendered.process_stop !== "boolean") return;
+  stage("process_stop", !rendered.process_stop);
+  post(false);
+});
+
+/* ------------------------------------------------ the mode selector ------- */
+[0, 1, 2].forEach(function (m) {
+  id("mode" + m).addEventListener("click", function () {
+    if (!seenState) return;
+    stage("drive_mode", m);          // the clicked position, absolute
+    post(false);
+  });
+});
+
+/* --------------------------------------------------------- the deadman ---- *
+ * The five deadman requests only. The two standing controls are deliberately
+ * untouched: a page losing focus is not an operator releasing a stop, and it is
+ * not an operator leaving a mode either (PS-B).
+ */
 function releaseAll(useBeacon) {
-  ctl.traction = 0; ctl.steer = 0; ctl.fork = 0; ctl.teleop = false;
-  ctl.reset = false;
+  ctl.traction = 0; ctl.steer = 0; ctl.fork = 0; ctl.teleop = false; ctl.reset = false;
   dragging = null;
   knob.style.left = "50%"; knob.style.top = "50%";
   pad.classList.remove("live");
   resetBtn.classList.remove("held");
-  ["forkup", "forkdown"].forEach(function (id) {
-    document.getElementById(id).classList.remove("held");
-  });
+  ["forkup", "forkdown"].forEach(function (x) { id(x).classList.remove("held"); });
   enableBtn.classList.remove("on");
   enableBtn.textContent = "ENABLE TELEOP";
   post(useBeacon);
@@ -491,157 +660,324 @@ function releaseAll(useBeacon) {
 window.addEventListener("blur", function () { releaseAll(false); });
 window.addEventListener("pagehide", function () { releaseAll(true); });
 document.addEventListener("visibilitychange", function () {
-  if (document.visibilityState === "hidden") { releaseAll(true); }
+  if (document.visibilityState === "hidden") releaseAll(true);
 });
 
-/* ---- display ------------------------------------------------------------ */
-function num(v, dp) {
-  return (v === null || v === undefined || typeof v !== "number") ? "-" : v.toFixed(dp);
-}
-function setLamp(id, on) {
-  document.getElementById(id).classList.toggle("on", on === true);
-}
-function setText(id, text) { document.getElementById(id).textContent = text; }
-
-// Forklift/Safety/ -- opcua-nodes.md section 11. A MIRROR of F-CPU state:
-// displayed, never combined with anything and never fed back into a control.
-// "present" is a structural fact from the backend's own connect, not guessed
-// here -- absence renders as its own grey state, never as a false reading
-// (section 11.6).
-function renderSafety(safety) {
-  var present = !!(safety && safety.present === true);
-  var lamps = document.getElementById("safety_lamps");
-  lamps.classList.toggle("notpresent", !present);
-  document.getElementById("safety_notpresent").classList.toggle("on", !present);
-
-  setLamp("l_safety_estop", present && safety.EStopDemand === true);
-  setLamp("l_safety_zone", present && safety.ZoneStopDemand === true);
-  setLamp("l_safety_resetreq", present && safety.SafetyResetRequired === true);
-  setLamp("l_safety_resetfault", present && safety.SafetyResetFault === true);
-
-  // The banner tracks SafetyResetRequired ALONE -- the PLC's own OR of the two
-  // latches (opcua-nodes.md section 11.2). This page never re-derives that OR
-  // from EStopDemand/ZoneStopDemand: recomputing a verdict the PLC already
-  // formed is exactly what this layer must not do (invariant 10).
-  var demand = present && safety.SafetyResetRequired === true;
-  var banner = document.getElementById("safetybanner");
-  banner.classList.toggle("on", demand);
-  if (demand) {
-    setText("safetytext", "SafetyResetRequired is TRUE on the F-runtime group -- "
-      + "EStopDemand " + String(safety.EStopDemand) + ", ZoneStopDemand "
-      + String(safety.ZoneStopDemand) + ". A monitored reset on that group's own "
-      + "device clears it; nothing on this page can.");
+/* ------------------------------------------------------------- rendering --
+ * EVERY Boolean renders in exactly three ways: asserted, clear, and UNKNOWN.
+ * Unknown is grey, hatched and shows an em-dash. A stale display never keeps
+ * its last live look: not yet written is not clear.
+ */
+function setState(x, value, tone, onWord, offWord) {
+  var el = id(x), unknown = (value !== true && value !== false);
+  el.classList.remove("on", "clear", "unk", "warn", "live", "ok", "amber", "demand");
+  if (unknown) {
+    el.classList.add("unk");
+    el.querySelector(".val").textContent = "—";
+    return;
   }
+  el.classList.add(value ? "on" : "clear");
+  if (value) el.classList.add(tone);
+  el.querySelector(".val").textContent = value ? (onWord || "ASSERTED")
+                                               : (offWord || "clear");
 }
 
-// What the backend reports about THIS page's liveness (section 10.8 H6). If it
-// has dropped the requests, the page must not go on showing an enable nobody is
-// carrying, so it returns its own controls to rest — the same releaseAll() that
-// blur, hide and unload already run. That release is also what re-arms the two
-// Bools, and the operator's next ENABLE press is then a rising edge a person
-// actually made. Recovery is a release, never a resume.
+function setEnv(x, text, unknown) {
+  var el = id(x);
+  el.classList.toggle("unk", !!unknown);
+  el.querySelector(".v").textContent = text;
+}
+
 var seenDrops = 0;
-function renderPage(page) {
-  var beacon = document.getElementById("beacon");
-  var stale = page.state === "STALE";
-  beacon.textContent = stale ? "STALE - requests held at rest"
-    : (typeof page.age_ms === "number" ? num(page.age_ms, 0) + " ms ago" : "-");
-  beacon.classList.toggle("stale", stale);
-
-  if (typeof page.drops === "number" && page.drops > seenDrops) {
-    seenDrops = page.drops;
-    releaseAll(false);
-  }
-  var notice = document.getElementById("dropnotice");
-  if (stale) {
-    notice.textContent = "This page has not reached the backend for "
-      + num(page.stale_after_ms, 0) + " ms. Every request is held at rest and the "
-      + "enable is dropped. The heartbeat is still running, nothing has latched, and "
-      + "the controls are carried again as soon as this page talks; each ON/OFF "
-      + "control only after it has been seen released.";
-  } else if (seenDrops > 0) {
-    notice.textContent = "Requests were held at rest " + seenDrops + " time(s) because "
-      + "this page went quiet, most recently at " + (page.last_drop_utc || "-")
-      + ". The controls were returned to rest here; press ENABLE again when ready. "
-      + "Nothing latched in the PLC and no reset is owed for this.";
-  }
-  notice.classList.toggle("on", stale || seenDrops > 0);
-}
 
 function render(s) {
-  var link = document.getElementById("link");
-  link.className = s.session.state;
-  setText("linkstate", s.session.state);
-  setText("endpoint", s.session.endpoint);
-  setText("lastwrite", s.session.since_last_good_write_ms === null
-    ? "never" : num(s.session.since_last_good_write_ms, 0) + " ms ago");
-  setText("hb", s.heartbeat.value === null ? "-"
-    : s.heartbeat.value + (s.heartbeat.running ? "" : "  STOPPED"));
-  setText("rtt", num(s.write.rtt_last_ms, 1) + " / " + num(s.write.rtt_median10_ms, 1) + " ms");
-  setText("linkreason", s.session.reason ? s.session.reason : "");
-  renderPage(s.page || {});
+  var m = s.metrics || null;
+  var sessionUp = s.session.state === "CONNECTED";
 
+  /* ---- the three health facts of the link strip ------------------------- */
+  var ageMs = s.metrics_age_ms;
+  // Both windows are the BACKEND's numbers, published on /state; this page
+  // invents neither (V2A-DESIGN §8). A window over THIS PROCESS'S OWN read
+  // poll and over its own last good write — its own channels, never a window
+  // over a plant value or a PLC verdict.
+  var staleAfter = (s.read_poll && typeof s.read_poll.stale_after_ms === "number")
+    ? s.read_poll.stale_after_ms : lastWindows.read_stale_after_ms;
+  var writeStaleAfter = (s.write && typeof s.write.stale_after_ms === "number")
+    ? s.write.stale_after_ms : lastWindows.write_stale_after_ms;
+  lastWindows.read_stale_after_ms = staleAfter;
+  lastWindows.write_stale_after_ms = writeStaleAfter;
+  var readStale = (typeof ageMs !== "number") || (typeof staleAfter !== "number")
+    || ageMs > staleAfter;
+  var linkOk = m ? m.HmiLinkOk : null;
+
+  // Every read-derived state is UNKNOWN when the session is down, when the
+  // read poll is failing, or when the PLC says it no longer attributes
+  // requests to an operator.
+  var dataUnknown = !sessionUp || readStale || linkOk !== true;
+
+  var cs = id("c_session");
+  cs.className = "chip " + (sessionUp ? "good" : (s.session.state === "DOWN" ? "bad" : "warn"));
+  cs.textContent = s.session.state;
+
+  var cl = id("c_link");
+  if (!sessionUp || readStale) { cl.className = "chip unk"; cl.textContent = "—"; }
+  else if (linkOk === true)    { cl.className = "chip good"; cl.textContent = "YES"; }
+  else                         { cl.className = "chip bad";  cl.textContent = "NO"; }
+
+  var ca = id("c_age");
+  ca.className = "chip " + (readStale ? "bad" : "good");
+  ca.textContent = (typeof ageMs === "number") ? (num(ageMs, 0) + " ms") : "—";
+  setText("c_endpoint", s.session.endpoint || "");
+
+  var degraded = id("degraded");
+  degraded.classList.toggle("on", dataUnknown);
+  if (dataUnknown) {
+    degraded.textContent = "Link down. The PLC's watchdog stops the machine and latches; "
+      + "a monitored reset will be required. Every state below reads unknown because it "
+      + "cannot be attributed, not because it is clear."
+      + (s.session.reason ? "  [" + s.session.reason + "]" : "");
+  }
+
+  /* ---- the standing controls, RENDERED FROM THE BACKEND every poll ------ *
+   * Not from a local copy, and not once at load. Two pages open on this
+   * backend therefore always draw the same two positions, and a page that has
+   * been backgrounded for an hour draws what the backend holds the moment it
+   * is looked at again (PS-D; m5-29 finding 1).                            */
+  var c = s.controls || {};
+  var haveControls = typeof c.process_stop === "boolean";
+  rendered.process_stop = haveControls ? c.process_stop : null;
+  rendered.drive_mode = haveControls ? c.drive_mode : null;
+  var selected = rendered.drive_mode;
+  [0, 1, 2].forEach(function (k) {
+    id("mode" + k).classList.toggle("sel", selected === k);
+  });
+
+  // §8: on link-down the selector renders its position and says it is not
+  // reaching the PLC. When the backend itself is not answering there IS no
+  // published position, and this page shows none rather than a remembered one
+  // — the same rule as every other state on the screen.
+  var ml = id("modelink");
+  ml.classList.toggle("on", dataUnknown || !haveControls);
+  if (!haveControls) {
+    setText("modelink", "Not reaching the PLC — and the selector's position cannot be "
+      + "read from the backend either, so none is shown. A remembered position is not "
+      + "a position.");
+  } else if (dataUnknown) {
+    setText("modelink", "Not reaching the PLC. The position shown is the one this "
+      + "backend holds and keeps writing; the PLC is not attributing it to an operator.");
+  }
+
+  /* ---- THE PROCESS STOP: armed, engaged, or UNAVAILABLE ----------------- */
+  var writeHealthy = sessionUp && s.session.since_last_good_write_ms !== null
+    && typeof writeStaleAfter === "number"
+    && s.session.since_last_good_write_ms < writeStaleAfter;
+  pstopAvailable = writeHealthy && !readStale && linkOk === true;
+  var engaged = rendered.process_stop === true;
+
+  pstopBtn.classList.toggle("unavailable", !pstopAvailable);
+  pstopBtn.classList.toggle("engaged", pstopAvailable && engaged);
+  pstopBtn.disabled = !pstopAvailable;
+  if (!pstopAvailable) {
+    pstopBtn.textContent = "PROCESS STOP — UNAVAILABLE";
+    setText("pstopcaption", "Link down — this request cannot reach the PLC. "
+      + "The PLC's own watchdog has already stopped the machine.");
+  } else if (engaged) {
+    pstopBtn.textContent = "PROCESS STOP — ENGAGED";
+    setText("pstopcaption", "Stop requested — release, then RESET. Requests a stop "
+      + "from the PLC's standard program, over the network. The PLC latches it; releasing "
+      + "this button does not clear the latch.");
+  } else {
+    pstopBtn.textContent = "PROCESS STOP";
+    setText("pstopcaption", "Requests a stop from the PLC's standard program, over the "
+      + "network. The PLC latches it; release the button, then press RESET to clear.");
+  }
+
+  /* ---- zone C states ---------------------------------------------------- */
+  var u = dataUnknown || !m;
+  setState("s_pstop", u ? null : m.ForkliftProcessStopActive, "amber", "LATCHED", "clear");
+  setState("s_obstacle", u ? null : m.ForkliftObstacleStopActive, "amber", "LATCHED", "clear");
+  setState("s_speedlimit", u ? null : m.ForkliftSpeedLimitActive, "warn", "ACTIVE", "clear");
+  setState("s_resetreq", u ? null : m.ForkliftResetRequired, "warn", "REQUIRED", "not required");
+  setState("s_teleop", u ? null : m.ForkliftTeleopActive, "live", "ACTIVE", "inactive");
+
+  /* ---- zone A: mode, as a pure function of THIS poll's values ------------ */
+  var inForce = u ? null : m.ForkliftDriveModeActive;
+  var applied = u ? null : m.ForkliftVehicleModeApplied;
+  var mm = id("machinemode");
+  mm.classList.toggle("unk", inForce === null || inForce === undefined);
+  mm.textContent = (inForce === null || inForce === undefined)
+    ? "—" : (MODE_NAMES[inForce] || ("INVALID (" + inForce + ")"));
+  setText("vehiclemode", (applied === null || applied === undefined)
+    ? "—" : (MODE_NAMES[applied] || ("INVALID (" + applied + ")")));
+  id("vehiclediff").classList.toggle("on",
+    inForce !== null && applied !== null && inForce !== undefined
+    && applied !== undefined && inForce !== applied);
+
+  var chip = id("modechip"), caption = id("modecaption");
+  if (inForce === null || inForce === undefined) {
+    chip.className = "chip unk"; chip.textContent = "—";
+    caption.textContent = "The machine's mode cannot be read and is never inferred.";
+  } else if (selected !== inForce) {
+    // CHANGING. Neutral, never an alarm: this is also what a normal, in-flight
+    // selection looks like, and treating the in-flight window as an error is
+    // exactly the mistake that once made autonomous mode unreachable.
+    chip.className = "chip neutral"; chip.textContent = "SELECTION NOT IN FORCE";
+    caption.textContent = "The PLC has not entered the selected mode. If this persists: "
+      + "return the selector to NONE, resolve the conditions below, and select again — "
+      + "a refused selection is consumed and will never be entered without a fresh one.";
+  } else if (applied !== inForce) {
+    chip.className = "chip neutral"; chip.textContent = "VEHICLE ADOPTING";
+    caption.textContent = "The vehicle has not yet reported the mode in force. This window "
+      + "lasts as long as the vehicle's own adopt-and-report takes, and this screen puts no "
+      + "clock on it.";
+  } else {
+    chip.className = "chip good"; chip.textContent = MODE_NAMES[inForce] || "—";
+    caption.textContent = "Selected, in force and applied agree.";
+  }
+
+  // "Conditions below" is a re-render of PLC-published values already on this
+  // page. It is not a diagnosis computed here, and it does not pretend to be
+  // complete: the PLC does not publish its standstill term or its per-latch
+  // causes.
+  var showConditions = (inForce !== null && inForce !== undefined && selected !== inForce);
+  var cond = id("conditions");
+  cond.classList.toggle("on", showConditions);
+  if (showConditions) {
+    function word(v, t, f) { return (v === true) ? t : (v === false ? f : "—"); }
+    cond.innerHTML =
+      "<span class='c'>PLC sees operator <b>" + word(linkOk, "yes", "NO") + "</b></span>"
+      + "<span class='c'>reset required <b>" + word(m.ForkliftResetRequired, "YES", "no") + "</b></span>"
+      + "<span class='c'>process stop latched <b>" + word(m.ForkliftProcessStopActive, "YES", "no") + "</b></span>"
+      + "<span class='c'>obstacle stop latched <b>" + word(m.ForkliftObstacleStopActive, "YES", "no") + "</b></span>"
+      + "<span class='c'>e-stop demand <b>" + word(s.safety && s.safety.present ? s.safety.EStopDemand : null, "YES", "no") + "</b></span>"
+      + "<span class='c'>zone-stop demand <b>" + word(s.safety && s.safety.present ? s.safety.ZoneStopDemand : null, "YES", "no") + "</b></span>"
+      + "<span class='c'>safety reset required <b>" + word(s.safety && s.safety.present ? s.safety.SafetyResetRequired : null, "YES", "no") + "</b></span>"
+      + " &mdash; and see machine state; this list is what the PLC publishes, not a "
+      + "diagnosis made here.";
+  }
+
+  /* ---- zone B greying: display only, the write stream never stops -------- */
+  var teleopMode = (inForce === 1);
+  id("teleopzone").classList.toggle("dim", !teleopMode);
+  id("teleopdim").classList.toggle("on", !teleopMode);
+  if (!teleopMode) {
+    setText("teleopdim", "The mode in force is not TELEOP, so these controls move nothing. "
+      + "They are still written to the PLC every cycle — greying is display, not gating.");
+  }
+
+  /* ---- zone D: the F-layer mirrors -------------------------------------- */
+  var sf = s.safety || {};
+  var fpresent = sf.present === true;
+  id("fabsent").classList.toggle("on", !fpresent);
+  var fUnknown = !fpresent || dataUnknown;
+  setState("f_estop", fUnknown ? null : sf.EStopDemand, "demand", "DEMAND LATCHED", "clear");
+  setState("f_zone", fUnknown ? null : sf.ZoneStopDemand, "demand", "DEMAND LATCHED", "clear");
+  setState("f_resetreq", fUnknown ? null : sf.SafetyResetRequired, "warn", "REQUIRED", "clear");
+  setState("f_resetfault", fUnknown ? null : sf.SafetyResetFault, "warn", "FAULT", "clear");
+
+  /* ---- zone E: the envelope --------------------------------------------- */
+  setEnv("e_enable", u ? "—"
+    : (m.ForkliftMotionEnable === true ? "PERMITTED" : "WITHHELD"), u);
+  setEnv("e_ceiling", u ? "—"
+    : (m.ForkliftSpeedCeiling === 0 ? "no motion permitted (0.00 m/s)"
+       : num(m.ForkliftSpeedCeiling, 2) + " m/s"), u);
+  setEnv("e_permit", u ? "—"
+    : (m.ForkliftEquipmentPermit === true ? "ready" : "not stated"), u);
+
+  /* ---- zone F: the drawer ----------------------------------------------- */
   var q = s.requests || {};
   setText("q_traction", num(q.HmiTractionRequest, 3));
   setText("q_steer", num(q.HmiSteerRequest, 3));
   setText("q_fork", num(q.HmiForkRequest, 3));
-  setText("q_teleop", q.HmiTeleopRequest === true ? "true" : "false");
-  setText("q_reset", q.HmiResetRequest === true ? "true" : "false");
-
-  var m = s.metrics;
-  var stale = s.metrics_age_ms === null || s.metrics_age_ms > 1500;
-  document.getElementById("metrics").classList.toggle("stale", stale);
-  setLamp("l_teleop", m && m.ForkliftTeleopActive);
-  setLamp("l_obstacle", m && m.ForkliftObstacleStopActive);
-  setLamp("l_speed", m && m.ForkliftSpeedLimitActive);
-  setLamp("l_resetreq", m && m.ForkliftResetRequired);
-  setLamp("l_linkok", m && m.HmiLinkOk);
-  setLamp("l_zone", m && m.ForkliftObstacleInStopZone);
-  renderSafety(s.safety);
+  setText("q_teleop", str(q.HmiTeleopRequest));
+  setText("q_reset", str(q.HmiResetRequest));
+  setText("q_mode", str(q.HmiDriveModeRequest));
+  setText("q_pstop", str(q.HmiProcessStopRequest));
+  setText("q_hb", s.heartbeat.value === null ? "—"
+    : (s.heartbeat.value + (s.heartbeat.running ? "" : "  STOPPED")));
   if (m) {
-    setText("m_tref", num(m.ForkliftTractionSpeedRef, 3));
-    setText("m_speed", num(m.ForkliftLinearSpeed, 3));
-    setText("m_height", num(m.ForkliftForkHeight, 3));
-    setText("m_dist", num(m.ForkliftObstacleMinDistance, 3));
-    setText("m_sref", num(m.ForkliftSteerAngleRef, 3));
-    setText("m_fref", num(m.ForkliftForkSpeedRef, 3));
+    setText("d_height", num(m.ForkliftForkHeight, 3));
+    setText("d_speed", num(m.ForkliftLinearSpeed, 3));
+    setText("d_inzone", str(m.ForkliftObstacleInStopZone));
+    setText("d_dist", num(m.ForkliftObstacleMinDistance, 3));
+    setText("d_tref", num(m.ForkliftTractionSpeedRef, 3));
+    setText("d_sref", num(m.ForkliftSteerAngleRef, 3));
+    setText("d_fref", num(m.ForkliftForkSpeedRef, 3));
+    // The RAW counter, and no verdict derived from it: "is the vehicle alive"
+    // is the PLC's verdict, it is not published as a node, and a staleness
+    // window over it here would be this layer timing a process value.
+    setText("d_vhb", str(m.ForkliftVehicleHeartbeat));
+  } else {
+    ["d_height", "d_speed", "d_inzone", "d_dist", "d_tref", "d_sref", "d_fref",
+     "d_vhb"].forEach(function (x) { setText(x, "—"); });
   }
-  setText("m_rtt", num(s.write.rtt_last_ms, 2));
-  setText("m_rttmed", num(s.write.rtt_median10_ms, 2));
-  setText("m_period", num(s.write.period_ms_measured, 1));
-  setText("m_age", s.metrics_age_ms === null ? "-" : num(s.metrics_age_ms, 0));
+  setText("d_rtt", num(s.write.rtt_last_ms, 2) + " / " + num(s.write.rtt_median10_ms, 2) + " ms");
+  setText("d_period", num(s.write.period_ms_measured, 1) + " ms");
+  setText("d_age", (typeof ageMs === "number" ? num(ageMs, 0) + " ms" : "—")
+    + (readStale ? "  STALE" : ""));
+  setText("d_connects", s.session.connects === null || s.session.connects === undefined
+    ? "—" : String(s.session.connects));
+  setText("d_timeout", num(s.session.granted_session_timeout_ms, 0) + " ms");
 
-  var stopped = !!(m && m.ForkliftObstacleStopActive);
-  var resetReq = !!(m && m.ForkliftResetRequired);
-  var banner = document.getElementById("stopbanner");
-  banner.classList.toggle("on", stopped || resetReq);
-  banner.classList.toggle("reset-only", !stopped && resetReq);
-  if (stopped) {
-    setText("stoptitle", "PROCESS STOP LATCHED");
-    setText("stoptext", "ForkliftObstacleStopActive is TRUE. Every setpoint is held at zero "
-      + "by the PLC. The field clearing does not release the latch; a monitored reset does.");
-  } else if (resetReq) {
-    setText("stoptitle", "RESET REQUIRED");
-    setText("stoptext", "ForkliftResetRequired is TRUE. Release ENABLE, press RESET, then "
-      + "assert ENABLE again. This machine does not resume by itself.");
+  /* ---- the page's own liveness window, H6 -------------------------------- */
+  var page = s.page || {};
+  var pageStale = page.state === "STALE";
+  setText("d_beacon", pageStale ? "STALE — requests held at rest"
+    : (typeof page.age_ms === "number" ? num(page.age_ms, 0) + " ms ago" : "—"));
+  if (typeof page.drops === "number" && page.drops > seenDrops) {
+    seenDrops = page.drops;
+    releaseAll(false);
   }
-  document.getElementById("resethint").classList.toggle("on", stopped || resetReq);
+  var drop = id("drop");
+  if (pageStale) {
+    setText("drop", "This page has not reached the backend for "
+      + num(page.stale_after_ms, 0) + " ms. The five teleop requests are held at rest and "
+      + "the enable is dropped. The heartbeat is still running and nothing has latched. "
+      + "The process stop and the mode selector are STANDING controls and are untouched: "
+      + "a page loss is not an operator act.");
+  } else if (seenDrops > 0) {
+    setText("drop", "Requests were held at rest " + seenDrops + " time(s) because this page "
+      + "went quiet, most recently at " + (page.last_drop_utc || "—")
+      + ". Nothing latched in the PLC and no reset is owed for this.");
+  }
+  drop.classList.toggle("on", pageStale || seenDrops > 0);
 }
 
 function poll() {
   fetch("/state", { cache: "no-store" })
     .then(function (r) { return r.json(); })
-    .then(render)
+    .then(function (s) {
+      // The click gate: the handlers act only once a /state has been seen, so
+      // a click landing before the first response cannot compute a target from
+      // a value this page has not read.
+      seenState = true;
+      render(s);
+    })
     .catch(function () {
-      var link = document.getElementById("link");
-      link.className = "DOWN";
-      setText("linkstate", "DOWN");
-      setText("linkreason", "the HMI backend is not answering on this machine");
+      // The backend is not answering. The page renders the SAME unknown state
+      // it renders for any other unattributable reading, rather than freezing
+      // on its last live look — a page that keeps showing yesterday's lamps is
+      // the thing three-state rendering exists to prevent.
+      render({
+        session: {
+          state: "DOWN", endpoint: "", connects: null,
+          reason: "the HMI backend is not answering on this machine",
+          since_last_good_write_ms: null, granted_session_timeout_ms: null,
+        },
+        heartbeat: { value: null, running: false },
+        // Both windows are the last values the BACKEND published, not literals
+        // invented here. Null before any /state has been seen, which changes
+        // nothing: with no read poll at all every state is unknown regardless.
+        write: { stale_after_ms: lastWindows.write_stale_after_ms },
+        requests: {}, metrics: null, metrics_age_ms: null,
+        // No `controls`: with the backend gone there is no published standing
+        // state, so the selector shows no position and the stop renders
+        // UNAVAILABLE. A remembered position is not a position.
+        controls: {}, safety: { present: false }, page: {},
+        read_poll: { stale_after_ms: lastWindows.read_stale_after_ms },
+      });
     });
 }
-// Unconditional, and it is the beacon: it runs whether or not anything on the
-// page is being touched, which is what carries "this page is still here" through
-// a ten-second reset hold that posts nothing at all.
 setInterval(poll, POLL_PERIOD_MS);
 poll();
 post(false);

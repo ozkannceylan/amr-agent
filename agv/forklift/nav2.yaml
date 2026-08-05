@@ -360,7 +360,15 @@ controller_server:
                                       # smoother's timeout
 
     progress_checker_plugins: ["progress_checker"]
-    goal_checker_plugins: ["general_goal_checker"]
+    # TWO CHECKERS, SELECTED PER GOAL. `general_goal_checker` is the
+    # committed pair and is the DEFAULT: a goal sent with no selection is
+    # checked exactly as it was before m5-33. `staging_goal_checker` is
+    # position-only and is selected, per goal, for the STAGING pose of a
+    # staged approach (ARRIVAL-GEOMETRY.md section 7 phase 1). The
+    # mechanism is nav2's own: `GoalCheckerSelector` in the tree writes the
+    # name onto `FollowPath`'s `goal_checker_id` port, symmetric with the
+    # controller and planner selectors the tree already carries.
+    goal_checker_plugins: ["general_goal_checker", "staging_goal_checker"]
     controller_plugins: ["FollowPath"]
 
     progress_checker:
@@ -393,6 +401,34 @@ controller_server:
       # this one it is the opposite - it stops the controller from driving
       # BACK OUT of the tolerance circle to chase a heading it is already
       # holding.
+      stateful: true
+
+    # THE STAGING CHECKER. `nav2_controller::PositionGoalChecker` is in
+    # this installation (nav2_controller 1.3.12 plugins.xml, read
+    # 2026-08-05): "Goal checker that only checks XY position and ignores
+    # orientation". Its only two parameters are `xy_goal_tolerance` and
+    # `stateful` (symbol read from libposition_goal_checker.so).
+    #
+    # WHY POSITION-ONLY, AND ONLY HERE. EVIDENCE_NAV2.md section 8.3 proved
+    # the committed pair is jointly unreachable in an endgame correction on
+    # this vehicle: heading costs 2.1-2.6 m of travel per radian, so one
+    # yaw tolerance costs more displacement than the position box allows.
+    # The staged design does not relax that pair - it makes the correction
+    # unnecessary by delivering the heading on a straight final leg. For
+    # that the vehicle must be allowed to STOP at the staging pose without
+    # being asked for a heading it would have to shuffle for. The staging
+    # pose is 3.0 m of straight run-in short of the station, so its own
+    # heading does not have to be right: the final leg's plan starts from
+    # wherever the vehicle actually stands.
+    #
+    # 0.25 m, THE SAME RADIUS, NOT A WIDER ONE. This is the committed
+    # position tolerance; only the heading term is dropped, and only for
+    # the staging pose. The e0 = 0.25 + 0.10 m arrival scatter that
+    # ARRIVAL-GEOMETRY.md section 4.2 derives d = 3.0 m from assumes
+    # exactly this number, so changing it re-derives the staging distance.
+    staging_goal_checker:
+      plugin: "nav2_controller::PositionGoalChecker"
+      xy_goal_tolerance: 0.25
       stateful: true
 
     FollowPath:

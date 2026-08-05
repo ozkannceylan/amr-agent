@@ -1,0 +1,32 @@
+F2 evidence — hmi/config.yaml's DESIGNED connect failure, made legible (m5-29b)
+===============================================================================
+
+Produced on the Windows showcase machine, 2026-08-05, by running hmi_server.py
+against `plc/forklift/double/server.py` (port 4850) — a server that carries the
+opcua-nodes.md §10 set and NO §12 node, which is exactly the shape of the
+commissioned CPU today. The configuration used was hmi/config-v2a-double.yaml
+with the endpoint repointed at that double and the HTTP port moved off 8094;
+the repointed copy was a scratch file and is deliberately not committed.
+
+No PLC was contacted. Nothing here is evidence about the TIA build.
+
+BEFORE (m5-29 finding 2, quoting the review): the operator saw
+    connect failed: BadNoMatch ... (retry in 1.0 s)
+naming no node and no browse path, forever.
+
+AFTER — the first four retries of one run, unedited:
+
+2026-08-05 13:37:27,708 WARNING hmi connect failed: ConnectionError: write node HmiDriveModeRequest not found on this server: no Forklift/Mode/HmiDriveModeRequest under the browse prefix 2:ServerInterfaces/3:DemoCell (BadNoMatch: The requested operation has no match to return.(BadNoMatch)) — THIS IS THE EXPECTED FAILURE against the commissioned CPU: it does not carry the opcua-nodes.md §12 nodes (Forklift/Mode, /Envelope, /Vehicle, /ProcessStop) until the owner's TIA session lands them. The procedure that adds them is plc/forklift/TIA-BUILD-PROCEDURE.md; see the header of hmi/config.yaml. Until then run the v2a screen against hmi/config-v2a-double.yaml, which serves §12 on loopback (retry in 1.0 s)
+
+2026-08-05 13:37:28,729 WARNING hmi connect failed: ConnectionError: write node HmiDriveModeRequest not found on this server: no Forklift/Mode/HmiDriveModeRequest under the browse prefix 2:ServerInterfaces/3:DemoCell (BadNoMatch: The requested operation has no match to return.(BadNoMatch)) — THIS IS THE EXPECTED FAILURE against the commissioned CPU: it does not carry the opcua-nodes.md §12 nodes (Forklift/Mode, /Envelope, /Vehicle, /ProcessStop) until the owner's TIA session lands them. The procedure that adds them is plc/forklift/TIA-BUILD-PROCEDURE.md; see the header of hmi/config.yaml. Until then run the v2a screen against hmi/config-v2a-double.yaml, which serves §12 on loopback (retry in 2.0 s)
+
+2026-08-05 13:37:30,739 WARNING hmi connect failed: ConnectionError: write node HmiDriveModeRequest not found on this server: no Forklift/Mode/HmiDriveModeRequest under the browse prefix 2:ServerInterfaces/3:DemoCell (BadNoMatch: The requested operation has no match to return.(BadNoMatch)) — THIS IS THE EXPECTED FAILURE against the commissioned CPU: it does not carry the opcua-nodes.md §12 nodes (Forklift/Mode, /Envelope, /Vehicle, /ProcessStop) until the owner's TIA session lands them. The procedure that adds them is plc/forklift/TIA-BUILD-PROCEDURE.md; see the header of hmi/config.yaml. Until then run the v2a screen against hmi/config-v2a-double.yaml, which serves §12 on loopback (retry in 4.0 s)
+
+2026-08-05 13:37:34,748 WARNING hmi connect failed: ConnectionError: write node HmiDriveModeRequest not found on this server: no Forklift/Mode/HmiDriveModeRequest under the browse prefix 2:ServerInterfaces/3:DemoCell (BadNoMatch: The requested operation has no match to return.(BadNoMatch)) — THIS IS THE EXPECTED FAILURE against the commissioned CPU: it does not carry the opcua-nodes.md §12 nodes (Forklift/Mode, /Envelope, /Vehicle, /ProcessStop) until the owner's TIA session lands them. The procedure that adds them is plc/forklift/TIA-BUILD-PROCEDURE.md; see the header of hmi/config.yaml. Until then run the v2a screen against hmi/config-v2a-double.yaml, which serves §12 on loopback (retry in 5.0 s)
+
+The message names the node (HmiDriveModeRequest), its full browse path under
+the resolved prefix, that the failure is EXPECTED against today's CPU, the
+procedure that adds the nodes (plc/forklift/TIA-BUILD-PROCEDURE.md), the config
+header that explains it, and what to run in the meantime. The same string is
+what `/state` carries as session.reason, so the page's degraded banner says it
+too rather than only the log.

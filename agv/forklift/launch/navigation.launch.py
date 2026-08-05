@@ -1,12 +1,13 @@
 # navigation.launch.py - the vehicle's Nav2 stack.
 #
-# FIVE LIFECYCLE NODES AND TWO PLAIN ONES.
+# FIVE LIFECYCLE NODES AND THREE PLAIN ONES.
 #
 #   nav2_planner/planner_server         SmacPlannerHybrid, Reeds-Shepp
 #   nav2_controller/controller_server   RegulatedPurePursuit
 #   nav2_behaviors/behavior_server      `wait` and nothing that moves
 #   nav2_bt_navigator/bt_navigator      the TRICYCLE behaviour tree
 #   nav2_velocity_smoother              CLOSED_LOOP on the EKF's odometry
+#   scripts/envelope_gate.py            the PLC's envelope, enforced here
 #   scripts/cmd_vel_to_tricycle.py      Twist -> (steer angle, drive speed)
 #   scripts/forklift_io.py              engineering units -> gz joint cmds
 #
@@ -38,15 +39,28 @@
 # the vehicle's own ROS graph. The chain is
 #
 #   controller_server -> /cmd_vel -> velocity_smoother
-#     -> /cmd_vel_smoothed -> [m5-11's envelope gate] -> the converter
-#       -> /forklift/cmd/* -> forklift_io -> gz
+#     -> /cmd_vel_smoothed -> envelope_gate -> /cmd_vel_gated
+#       -> the converter -> /forklift/cmd/* -> forklift_io -> gz
 #
-# THE GATE'S INSERTION POINT IS THE `cmd_topic` ARGUMENT. m5-11 starts its
-# node subscribing to /cmd_vel_smoothed and publishing, say,
-# /cmd_vel_gated, and launches this file with cmd_topic:=/cmd_vel_gated.
-# No file in this directory changes. The envelope gate is NOT anticipated
-# here in any other way: no enable, no ceiling and no freshness window
-# appears in this launch or in nav2.yaml.
+# THE GATE IS IN THE CHAIN BY DEFAULT, AND THAT IS A CHOICE OF FAILURE
+# DIRECTION (m5-11). It went in through the `cmd_topic` argument this file
+# already reserved for it, so the converter and nav2.yaml are untouched;
+# what changed is that `cmd_topic` now DEFAULTS to the gate's output and
+# `gate:=true` is the default. A launch that needed an argument remembered
+# in order to gate the vehicle would bypass the gate silently the one time
+# somebody forgot, and the vehicle would then move with no envelope at
+# all.
+#
+#   gate:=false cmd_topic:=/cmd_vel_smoothed   restores the m5-10 chain
+#
+# and that pair is what EVIDENCE_NAV2.md section 7's reproduction recipe
+# needs, because with the gate in the chain and no envelope published the
+# vehicle correctly does not move.
+#
+# NO ENVELOPE CONSTANT APPEARS IN THIS FILE OR IN nav2.yaml. The
+# freshness window, the ramp, the rate and the ceiling's plausibility
+# window are agv/forklift/config.yaml's `envelope:` block, and this file
+# holds no threshold of any kind.
 #
 # GROUND TRUTH REACHES NOTHING STARTED HERE. /forklift/odom is the
 # simulator's own pose of the model despite its name (config.yaml carries
@@ -119,6 +133,7 @@ _DEFAULT_PARAMS = os.path.join(_FORKLIFT_DIR, 'nav2.yaml')
 _DEFAULT_CONFIG = os.path.join(_FORKLIFT_DIR, 'config.yaml')
 _DEFAULT_BT = os.path.join(
     _FORKLIFT_DIR, 'behavior_trees', 'navigate_to_pose_tricycle.xml')
+_GATE = os.path.join(_FORKLIFT_DIR, 'scripts', 'envelope_gate.py')
 _CONVERTER = os.path.join(_FORKLIFT_DIR, 'scripts', 'cmd_vel_to_tricycle.py')
 _FORKLIFT_IO = os.path.join(_FORKLIFT_DIR, 'scripts', 'forklift_io.py')
 
@@ -143,13 +158,21 @@ def generate_launch_description():
         description='agv/forklift/config.yaml, the named-constant file the '
                     'two Python nodes read.'))
     ld.add_action(DeclareLaunchArgument(
-        'cmd_topic', default_value='/cmd_vel_smoothed',
-        description='Twist topic the tricycle converter subscribes to. '
-                    'THIS IS m5-11\'s INSERTION POINT: point it at the '
-                    'envelope gate\'s output and the gate sits below the '
-                    'smoother exactly as ADR 0014 seam (b) specifies, with '
-                    'no edit to this file, to nav2.yaml or to the '
-                    'converter.'))
+        'cmd_topic', default_value='/cmd_vel_gated',
+        description='Twist topic the tricycle converter subscribes to. It '
+                    'defaults to the ENVELOPE GATE\'s output, so the gate '
+                    'sits below the smoother exactly as ADR 0014 seam (b) '
+                    'specifies. With gate:=false this must be set back to '
+                    '/cmd_vel_smoothed, or nothing publishes it and the '
+                    'vehicle never moves.'))
+    ld.add_action(DeclareLaunchArgument(
+        'gate', default_value='true',
+        description='Also start scripts/envelope_gate.py, the vehicle-side '
+                    'enforcer of the PLC envelope. TRUE by default: the '
+                    'gate is a fail-safe and a stack that could be brought '
+                    'up without it by forgetting an argument is a stack '
+                    'that drives with no envelope. It is NOT a safety '
+                    'function (invariant 2).'))
     ld.add_action(DeclareLaunchArgument(
         'use_sim_time', default_value='true',
         description='Read the clock from /clock. Leaving this false '
@@ -234,6 +257,15 @@ def generate_launch_description():
     # /usr/local/bin/python3 is 3.11 and has no rclpy
     # (sim/setup/CONTAINER_TOOLCHAIN.md section 3.3).
     # ---------------------------------------------------------------- #
+
+    ld.add_action(ExecuteProcess(
+        cmd=[sys.executable, _GATE,
+             '--config', LaunchConfiguration('config_file'),
+             '--ros-args', '-p', 'use_sim_time:=true'],
+        name='envelope_gate',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('gate')),
+    ))
 
     ld.add_action(ExecuteProcess(
         cmd=[sys.executable, _CONVERTER,

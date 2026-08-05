@@ -11,3 +11,10 @@ bridge/evidence/*-latest.csv
 # Owner's local scratch, deliberately outside the deliverable.
 HANDOVER.local.md
 check_nodes.py
+
+# HMI review screenshots. Produced by the build as evidence and kept LOCAL by
+# owner ruling 2026-08-05: they exist so the owner can look at every state and
+# give feedback before the review pass, not to travel with the repository.
+# NOTE: if a screenshot later becomes gate evidence for criterion (e), it is
+# promoted out of this directory and committed like any other evidence file.
+hmi/evidence/screenshots/
