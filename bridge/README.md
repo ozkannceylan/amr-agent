@@ -4,6 +4,17 @@
 
 Per ADR 0005 D1. Every item is a hard boundary, not a preference.
 
+**This layer holds two processes since m5-36** (owner ruling 2026-08-05,
+recorded in `STANDIN-WRITER-DESIGN.md`): the **ROS 2 ↔ OPC UA translator**
+(WSL, the process everything below this paragraph was written against) and
+the **stand-in writer** (Windows host), the simulation's stand-in for the
+*wiring* of the three simulated safety-input channels, reaching the CPU
+through the **S7-PLCSIM Advanced API by tag name** — not OPC UA — per
+`plc/forklift-safety/SPEC.md` §7 and ADR 0015 D1. They share nothing: no
+code, no config, no log, no socket, no session, no tag. The bulleted
+boundary below binds the **translator**; the writer's own boundary follows
+it.
+
 - **Fleet manager code, state or configuration.** The bridge and the fleet
   manager are separate processes that share no state and call no code of each
   other's (ADR 0004, ADR 0005). Nothing under `fleet/` is imported here.
@@ -26,9 +37,11 @@ Per ADR 0005 D1. Every item is a hard boundary, not a preference.
   (invariants 1, 2). The panel's red mushroom carried by this bridge is a
   **process** stop, never an emergency stop (opcua-nodes.md §9.6).
 - **The OPC UA server role.** The PLC is the server, this process is the
-  client, and that direction is never inverted (invariant 4). The bridge never
-  listens on a socket, in any configuration — including against the test
-  double.
+  client, and that direction is never inverted (invariant 4). The translator
+  never listens on a socket, in any configuration — including against the test
+  double. (The stand-in writer's single TCP listener is that *other*
+  process's, below — it is not an OPC UA endpoint and the translator never
+  touches it.)
 - **Nodes it is not allowed to write.** Only the `Input/` nodes of the signal
   groups the run configures, plus the single `DemoCell/Link/BridgeHeartbeat`
   (opcua-nodes.md §9.1, §10.1): 7 + 1 with the cell group alone, 4 + 1 with the
@@ -47,18 +60,49 @@ Per ADR 0005 D1. Every item is a hard boundary, not a preference.
 - **Secrets.** Endpoint credentials, certificates and keys live outside this
   repository and are referenced by absolute path (invariant 13).
 
+**The stand-in writer must not access** (full statement:
+`STANDIN-WRITER-DESIGN.md` §9):
+
+- **OPC UA, in any role, and ROS 2, and everything the translator is denied
+  above** — MQTT, VDA 5050, fleet, order and traffic concepts, the HMI.
+- **Any CPU datum outside its four-tag allowlist.** It writes exactly the
+  four members of `SafetyInputStandIn` (three channel levels and the
+  heartbeat) and reads nothing but `OperatingState`. Never F-data, never
+  `InstF_Forklift_Safety`, never a watch-table *Modify*, never another DB.
+- **Any process decision.** It translates two sources — the field
+  evaluation's zone verdict and the operator's console commands — into
+  channel levels, republished every 50 ms. Its only timers are its own cycle,
+  the staleness of its own input link, and the operator-commanded pulse
+  width, all three fixed by `plc/forklift-safety/SPEC.md` §7; no timer
+  watches the plant and no verdict is derived from plant state.
+- **Any safety claim.** It is an **engineering stand-in for wiring**, labelled
+  as such wherever it appears; it carries no Category, no PL, no SIL, no PFH
+  (SPEC §1.2 N2–N4). Its one permitted listener is the field-evaluation TCP
+  link on port 45015, single client, and nothing else may ever listen in this
+  layer.
+
 Owns: the ROS 2 ↔ OPC UA signal transport for the M3 demonstration cell **and
 the M4 forklift commissioning cell**, its configuration, its own liveness
-heartbeat, and its measurement instrumentation.
+heartbeat, and its measurement instrumentation; and the **stand-in writer**
+for the forklift twin's simulated safety-input channels
+(`STANDIN-WRITER-DESIGN.md`), with its session logs.
 
 ---
 
 ## What it is
 
-One OS process that is an **OPC UA client** and a **ROS 2 node**, and nothing
-else. Its whole job is to carry each signal of `docs/interfaces/opcua-nodes.md`
-§9.9 and §10.10 — for the **signal groups the run configures** — from one side
-to the other, unchanged, and to write its own heartbeat.
+**The translator**: one OS process that is an **OPC UA client** and a
+**ROS 2 node**, and nothing else. Its whole job is to carry each signal of
+`docs/interfaces/opcua-nodes.md` §9.9 and §10.10 — for the **signal groups
+the run configures** — from one side to the other, unchanged, and to write
+its own heartbeat.
+
+**The stand-in writer**: a second, Windows-side process — one PowerShell 5.1
+script driving the four members of `SafetyInputStandIn` through the PLCSIM
+Advanced API at 50 ms, from the field evaluation's TCP link and an operator
+console. Everything about it — contract, cycle, console, failure behaviour,
+acceptance — is in `STANDIN-WRITER-DESIGN.md`; the rest of this README is
+about the translator.
 
 ```
    Gazebo plant (ROS 2)                         S7-1500 / PLCSIM (OPC UA server)
@@ -104,6 +148,7 @@ heartbeat, one link verdict.
 | `config/bridge.yaml` | **the commissioned PLCSIM endpoint, cell group only** — endpoint, **both** namespace URIs, BrowseName paths, topic names, cycle period, evidence paths. No thresholds, no tolerances, no timers, no namespace index |
 | `config/bridge-double-both.yaml`, `config/bridge-double-forklift.yaml` | the same shape against the **test double**, with both groups and with the forklift group alone. The `Forklift/` subtree is a design value until the owner reads it back out of TIA Portal (`opcua-nodes.md` §10.2 step 6), which is why the committed PLCSIM config does not carry it yet |
 | `test_double/` | TEST SCAFFOLDING: an OPC UA server standing in for the S7-1500, serving all 33 nodes |
+| `STANDIN-WRITER-DESIGN.md`, `standin_writer/` | the Windows-side **stand-in writer** for the forklift twin's simulated safety-input channels (SPEC §7, ADR 0015): design, script and per-session logs. Not part of the translator; shares nothing with it |
 | `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check, connect-conformance check, session-lifecycle check, forklift signal-group check, read-only PLC observer (scaffolding) |
 | `EVIDENCE_LATENCY.md`, `EVIDENCE_SIGNAL_LOSS.md`, `EVIDENCE_CONNECT.md`, `EVIDENCE_LIFECYCLE.md`, `evidence/` | dated captures, each qualified by the environment that produced it |
 
