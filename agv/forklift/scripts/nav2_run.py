@@ -1618,6 +1618,81 @@ def main(argv=None):
     g.add_argument('--registration', default=None)
     g.set_defaults(func=cmd_goal)
 
+    s = sub.add_parser(
+        'stage',
+        help='THE STAGED APPROACH. Drive to a staging pose d back along the '
+             'goal heading, checked POSITION-ONLY, then a fresh straight '
+             'final leg to the station checked by the committed pair - and '
+             'on a miss, a BOUNDED go-around instead of an endgame '
+             'correction the geometry forbids (ARRIVAL-GEOMETRY.md 7).')
+    s.add_argument('--x', type=float, required=True,
+                   help='STATION x in the WORLD frame [m]')
+    s.add_argument('--y', type=float, required=True,
+                   help='STATION y in the WORLD frame [m]')
+    s.add_argument('--yaw', type=float, default=0.0,
+                   help='STATION yaw in the WORLD frame [rad]. The staging '
+                        'pose is placed back along THIS heading, and it is '
+                        'the heading the final leg delivers.')
+    s.add_argument('--d', type=float, default=3.0,
+                   help='staging distance back along the goal heading [m]. '
+                        'DERIVED, not tuned: 2*sqrt(R*e0) + lookahead = '
+                        '2*sqrt(1.291*0.35) + 1.60 = 2.94 -> 3.0 m '
+                        '(ARRIVAL-GEOMETRY.md 4.2). Changing e0 - i.e. the '
+                        'staging checker tolerance - re-derives it.')
+    s.add_argument('--max-go-arounds', type=int, default=2,
+                   help='THE BOUND. Approaches attempted = this + 1. When it '
+                        'is spent the run reports failure instead of '
+                        'continuing to manoeuvre; an unbounded retry is the '
+                        'endgame shuffle wearing a new name.')
+    s.add_argument('--staging-checker', default='staging_goal_checker',
+                   help='nav2.yaml goal checker for the staging and '
+                        'go-around legs (position-only)')
+    s.add_argument('--final-checker', default='general_goal_checker',
+                   help='nav2.yaml goal checker for the STATION leg. The '
+                        'committed 0.25 m / 0.15 rad pair, untouched.')
+    s.add_argument('--selector-topic', default='goal_checker_selector',
+                   help='the tree\'s GoalCheckerSelector topic')
+    s.add_argument('--selector-settle', type=float, default=1.5,
+                   help='WALL seconds between publishing a checker selection '
+                        'and sending the goal it applies to')
+    s.add_argument('--staging-timeout', type=float, default=90.0,
+                   help='SIMULATION seconds for a staging or go-around leg')
+    s.add_argument('--approach-timeout', type=float, default=45.0,
+                   help='SIMULATION seconds for one STATION approach. Short '
+                        'on purpose: a clean 3 m final leg costs ~10 s, so 45 '
+                        'is 4x margin and still well short of the 69-120 s '
+                        'endgame shuffles m5-31 measured. A miss is meant to '
+                        'cost a go-around, not a shuffle.')
+    s.add_argument('--entry-radius', type=float, default=0.25,
+                   help='radius for the mechanism columns (believed heading '
+                        'at first entry, reversals after it). The committed '
+                        'xy_goal_tolerance.')
+    s.add_argument('--leg-rest', type=float, default=3.0,
+                   help='WALL seconds recorded after each leg so the vehicle '
+                        'is scored at rest')
+    s.add_argument('--cancel-grace', type=float, default=10.0,
+                   help='WALL seconds to let a cancellation land before the '
+                        'next leg is sent')
+    s.add_argument('--csv', default=None,
+                   help='write the 10 Hz recording of ALL legs here; the '
+                        'final approach leg is also written alongside as '
+                        '<stem>-approach<ext> so `analyse` scores it exactly '
+                        'as it scores a `goal` run')
+    s.add_argument('--plan', default=None,
+                   help='write the legs, the verdict and the plan here (JSON)')
+    s.add_argument('--wall-timeout', type=float, default=1800.0,
+                   help='hard backstop in WALL seconds over the whole run, '
+                        'for a stalled clock')
+    s.add_argument('--settle', type=float, default=30.0,
+                   help='WALL seconds to wait for a transform tree and a '
+                        'ground-truth reference before the first leg')
+    s.add_argument('--server-timeout', type=float, default=60.0)
+    s.add_argument('--record-hz', type=float, default=10.0)
+    s.add_argument('--cmd-topic', default='/cmd_vel_smoothed',
+                   help='the Twist topic to record as the command')
+    s.add_argument('--registration', default=None)
+    s.set_defaults(func=cmd_stage)
+
     p = sub.add_parser(
         'plan',
         help='ask the PLANNER alone for a path between two stated poses. '

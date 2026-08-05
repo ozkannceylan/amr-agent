@@ -1,0 +1,29 @@
+registration  theta -0.007915259 rad  t (+6.029223, +5.541460) m  FLOOR rms 0.0404 MAX 0.1411 m
+STATION  world (+1.0000, +7.0000) yaw +0.0000  ->  map (+7.0846, +12.5333) yaw -0.0079   checker general_goal_checker
+STAGING  world (-2.0000, +7.0000) yaw +0.0000  ->  map (+4.0847, +12.5571) yaw -0.0079   checker staging_goal_checker
+d = 3.000 m back along the goal heading; go-arounds bounded at 1
+
+LEGS
+  stage        SUCCEEDED             6.31 s  believed 0.114 m / -3.31 deg  truth 0.100 m / -2.11 deg  entry-heading -2.16 deg  reversals-after-entry 0
+  approach0: TIMEOUT after 4.0 s of simulation time; cancelling
+  approach0    CANCELED              4.02 s  believed 0.540 m / +5.60 deg  truth 0.451 m / +5.96 deg  entry-heading none  reversals-after-entry 0
+  goaround0    SUCCEEDED             5.70 s  believed 0.163 m / -28.76 deg  truth 0.176 m / -28.56 deg  entry-heading -22.33 deg  reversals-after-entry 0
+  approach1: TIMEOUT after 4.0 s of simulation time; cancelling
+  approach1    CANCELED              4.02 s  believed 0.260 m / +1.15 deg  truth 0.220 m / +0.50 deg  entry-heading none  reversals-after-entry 0
+  GO-AROUND BOUND REACHED: 2 approach(es) attempted, 1 go-around(s) allowed and spent. Reporting failure rather than continuing to manoeuvre.
+
+RESULT           FAILED_GO_AROUND_BOUND
+go-arounds       1 used of 1 allowed   BOUND FIRED
+legs             4
+elapsed          20.05 s of simulation time over all legs
+final approach   CANCELED  believed 0.2597 m / +1.146 deg
+  ABSOLUTE goal error (truth vs commanded goal): 0.2199 m (1.56 x floor)
+  heading error +0.500 deg
+  entry heading  never entered the circle   (the 8.594 deg discriminator)
+SHUFFLE REGIME   NO   (>= 3 commanded direction reversals after first entry into the position circle, counted per leg)
+LOCALIZATION     believed vs truth over the whole run, n = 379
+  position       rms 0.0697 m   MAX 0.1205 m   (0.263 m is what footprint_padding is dimensioned from)
+  heading        rms 0.87 deg  MAX 3.49 deg
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-33-a_straight-bound-run.csv (379 samples, all legs)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-33-a_straight-bound-run-approach.csv (70 samples, final approach leg only)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-33-a_straight-bound-plan.json
