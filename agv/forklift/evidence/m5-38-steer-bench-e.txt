@@ -1,0 +1,43 @@
+[INFO] [1785956577.924085662] [steer_bench]: steer_bench: 36 steps, bench speed 0.600 m/s, hold 1.4 s
+[INFO] [1785956631.715930202] [steer_bench]: steer_bench: schedule complete
+wrote 1076 samples to /tmp/m5-38-e-bench.csv
+
+phase        cmd[deg]  JOINT[deg]   BODY[deg] joint/cmd  body/cmd   v[m/s]
+--------------------------------------------------------------------------
+standstill    -20.000     -20.052         nan     1.003         -    0.000
+standstill    -10.000     -10.002         nan     1.000         -    0.000
+standstill     -5.000      -4.874         nan     0.975         -    0.000
+standstill     -3.000      -2.738         nan     0.913         -    0.000
+standstill     -2.000      -1.672         nan     0.836         -    0.000
+standstill     -1.500      -1.138         nan     0.758         -    0.000
+standstill     -1.000      -0.606         nan     0.606         -    0.000
+standstill     -0.500      -0.111         nan     0.223         -    0.000
+standstill      0.500       0.125         nan     0.251         -    0.000
+standstill      1.000       0.599         nan     0.599         -    0.000
+standstill      1.500       1.129         nan     0.752         -    0.000
+standstill      2.000       1.660         nan     0.830         -    0.000
+standstill      3.000       2.705         nan     0.902         -    0.000
+standstill      5.000       4.799         nan     0.960         -    0.000
+standstill     10.000       9.987         nan     0.999         -    0.000
+standstill     20.000      20.023         nan     1.001         -    0.000
+rolling       -20.000     -19.616     -19.029     0.981     0.951    0.579
+rolling       -10.000      -9.561      -9.496     0.956     0.950    0.594
+rolling        -5.000      -4.570      -4.561     0.914     0.912    0.597
+rolling        -3.000      -2.581      -2.576     0.860     0.859    0.599
+rolling        -2.000      -1.578      -1.579     0.789     0.789    0.600
+rolling        -1.500      -1.092      -1.089     0.728     0.726    0.600
+rolling        -1.000      -0.595      -0.596     0.595     0.596    0.600
+rolling        -0.500      -0.116      -0.117     0.232     0.234    0.600
+rolling         0.500       0.047       0.047     0.094     0.095    0.600
+rolling         1.000       0.525       0.523     0.525     0.523    0.600
+rolling         1.500       1.015       1.014     0.677     0.676    0.600
+rolling         2.000       1.521       1.518     0.761     0.759    0.600
+rolling         3.000       2.513       2.505     0.838     0.835    0.599
+rolling         5.000       4.495       4.471     0.899     0.894    0.600
+rolling        10.000       9.479       9.340     0.948     0.934    0.595
+rolling        20.000      19.483      18.867     0.974     0.943    0.569
+
+READING IT. joint/cmd near 1 with body/cmd near 0 puts the
+deadband in the TYRE. joint/cmd near 0 puts it in the ACTUATOR.
+Both near 1 means the deadband is not in the plant at all and
+the search moves back up the chain.

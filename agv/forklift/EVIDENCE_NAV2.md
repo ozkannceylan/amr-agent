@@ -1894,3 +1894,530 @@ converter. The shuffle regime is gone: 0 of 5, against 1 of 5 and 4 of 5
 before it. The miss detector works exactly as designed and cost no clean
 run. And the staging-stop instrumentation answered the attribution question
 that two previous sections could only argue about.
+
+---
+
+# 11. THE CROSS-TRACK RATE — 2026-08-05 (m5-38)
+
+**Sections 0-10 above are untouched and byte-identical.** Section 10 asks
+for exactly one thing (§10.6 item 1): *measure* the cross-track rate on a
+straight leg before changing anything. This section is that measurement.
+
+This section is written **as each result lands**, not assembled afterwards
+(`docs/LESSONS.md` 2026-08-04, 2026-08-05: a session limit destroyed one
+agent's unwritten work).
+
+| Item | Value |
+|---|---|
+| Date | **2026-08-05** |
+| Host | WSL2 Ubuntu 24.04 on the owner's Windows 11 machine, 20 cores, headless, llvmpipe — the §8/§9/§10 machine |
+| Package stack | unchanged since §8. nav2 **1.3.12** |
+| **Tolerances** | **`xy_goal_tolerance: 0.25` and `yaw_goal_tolerance: 0.15` are UNCHANGED**, as through §8, §9 and §10 |
+| Isolation | `GZ_PARTITION` **and** `ROS_DOMAIN_ID`, both set on every run |
+
+## 11.1 The sign, established first — it is not a bias
+
+The brief asks for the sign first, because a consistent sign is a bias and a
+random sign is not. **The sign is not consistent.** Signed ground-truth
+cross-track rate over the outbound part of the first approach leg — the same
+window §10.4 measured, every sample up to the first commanded reversal, so
+no recovery manoeuvre is counted. Artefact:
+`evidence/m5-38-offline-cross-track.txt`.
+
+| set | run | y−7 at leg start | y−7 at leg end | **signed rate [m/m]** | mean yaw [deg] | outcome |
+|---|---|---|---|---|---|---|
+| m5-33 (d = 3.0) | r1 | +0.253 | −0.340 | **−0.1966** | −6.65 | failed |
+| m5-33 | r2 | +0.231 | +0.220 | −0.0037 | +1.02 | clean |
+| m5-33 | r3 | −0.096 | −0.148 | −0.0164 | −1.32 | clean |
+| m5-33 | r4 | −0.145 | −0.416 | **−0.0922** | −4.63 | shuffled |
+| m5-33 | r5 | −0.095 | +0.167 | **+0.0868** | +2.85 | clean |
+| m5-35 (d = 4.5) | r1 | +0.025 | +0.550 | **+0.0927** | +3.06 | failed |
+| m5-35 | r2 | +0.009 | +0.150 | +0.0288 | +0.58 | clean |
+| m5-35 | r3 | −0.241 | +0.202 | **+0.0970** | +1.79 | clean |
+| m5-35 | r4 | +0.084 | −0.533 | **−0.1271** | −6.27 | failed |
+| m5-35 | r5 | +0.059 | −0.409 | **−0.1007** | −4.00 | failed |
+
+```
+n = 10   negative 6   positive 4
+mean  -0.0231 m/m      mean of |rate|  0.0842 m/m      sd  0.1026 m/m
+the mean is 0.71 standard errors from zero
+```
+
+**Six one way, four the other, and a mean indistinguishable from zero
+against a magnitude of 0.084 m/m.** This halves the search exactly as the
+brief said it would, and it eliminates the whole bias family in one
+measurement: **no steady steer trim, no estimator heading bias, no
+converter sign asymmetry and no left/right asymmetry in the model can
+produce a quantity whose magnitude is reproducible and whose sign is a coin
+flip.** Whatever this is, it *amplifies a disturbance the vehicle already
+has* rather than injecting one of its own.
+
+That reframes the question. It is not "what is pushing the vehicle off the
+line", it is **"why does the controller's correction not bring it back"**.
+
+## 11.2 THE STATIC CURVE, from the ten committed recordings
+
+The correction is not brought back because **the vehicle does not execute
+it.** Commanded steer is the `steer` column — what `cmd_vel_to_tricycle.py`
+published. Achieved steer is inferred from ground truth alone,
+`δ_ach = atan(L·ω/v)`, which is the same bicycle relation the converter
+inverts, read the other way. Pooled over every sample of all ten runs with
+|v| > 0.20 m/s. One sample of actuator lag is removed; the lag was
+identified by sweep rather than assumed (rms of `δ_ach − δ_cmd`: 2.518 deg
+at lag 0, **2.456 at lag 1**, 2.816 at lag 2, rising monotonically after —
+so the transport lag is one sample, ~0.1 s, and it is not the mechanism).
+
+| commanded [deg] | n | mean cmd | mean achieved | **achieved / commanded** |
+|---|---|---|---|---|
+| −90 .. −40 | 96 | −48.888 | −48.911 | **1.000** |
+| −40 .. −25 | 105 | −32.303 | −33.392 | 1.034 |
+| −25 .. −15 | 77 | −20.238 | −20.536 | 1.015 |
+| −15 .. −8 | 103 | −10.961 | −9.918 | 0.905 |
+| −8 .. −4 | 113 | −5.511 | −4.478 | 0.813 |
+| −4 .. −2.5 | 67 | −3.199 | −1.770 | 0.553 |
+| −2.5 .. −1.5 | 117 | −1.866 | −0.693 | **0.372** |
+| −1.5 .. −0.75 | 136 | −1.122 | −0.076 | **0.068** |
+| −0.75 .. −0.25 | 68 | −0.504 | −0.309 | 0.614 |
+| −0.25 .. +0.25 | 56 | −0.021 | +0.154 | — |
+| +0.25 .. +0.75 | 71 | +0.519 | −0.152 | **−0.292** |
+| +0.75 .. +1.5 | 155 | +1.186 | +0.034 | **0.029** |
+| +1.5 .. +2.5 | 203 | +1.973 | +0.607 | **0.308** |
+| +2.5 .. +4 | 134 | +3.078 | +2.512 | 0.816 |
+| +4 .. +8 | 108 | +6.048 | +5.585 | 0.923 |
+| +8 .. +15 | 131 | +11.433 | +10.808 | 0.945 |
+| +15 .. +25 | 143 | +20.198 | +20.126 | 0.996 |
+| +25 .. +40 | 177 | +32.021 | +32.432 | 1.013 |
+| +40 .. +90 | 146 | +50.021 | +48.552 | 0.971 |
+
+**Above ~15 deg the vehicle executes what it is told, to within 3 %. Below
+~2 deg it executes essentially nothing, on both sides of zero.** That is a
+symmetric **deadband of roughly ±2 deg of steer**, and it is exactly the
+shape the §11.1 sign result predicts: a deadband has no sign of its own, it
+simply refuses to remove whatever error is already there.
+
+**This is the answer to the brief's "a bias a straight line exposes and an
+arc hides".** It is not a bias, but the exposure argument is right and it is
+geometric: the planner's tightest arc is 45 deg of steer and a mid-aisle
+correction is 5-20 deg — all far outside the band. A **straight** line is the
+one regime in which every command RPP forms lives inside ±2.5 deg, and it is
+therefore the one regime in which the vehicle is effectively open-loop in
+yaw.
+
+It is also, quantitatively, the whole of §10.4's finding. Held heading error
+θ integrates to cross-track at `sin θ` per metre; the observed 0.084-0.127
+m/m is θ = 4.8-7.3 deg, and the §10 runs sat at −6.65, −6.27, −4.63 and
+−4.00 deg mean yaw with the steer commanded at +1.5 to +2.2 deg and the yaw
+*frozen*. m5-35 r4 is the cleanest single window: over 3.5 s of leg the
+command was held at +1.19 to +2.23 deg and ground-truth yaw read −10.85,
+−10.97, −11.06, −11.08, −11.06 deg. **Three seconds of sustained command,
+zero response.** That is not noise and it is not lag.
+
+And it explains §10's reversal directly. The deadband makes the leg an
+integrator with no feedback, so cross-track grows linearly with leg length:
+4.5 m buys 50 % more than 3.0 m, which is what the two sets measured
+(mean |terminal cross-track| 0.258 m → 0.379 m).
+
+**What this section does NOT yet establish** is *where* the deadband lives.
+`δ_ach` is inferred from body yaw, so it conflates two candidates: the steer
+joint failing to reach the commanded angle (actuator), and the joint
+reaching it while the body fails to yaw (tyre slip at the rear axle, whose
+`mu2` is 0.4). §11.3 separates them, because the fix is different for each
+and a fix aimed at the wrong one is a green run with an unknown cause.
+
+## 11.3 The decisive experiment: is the deadband in the actuator or in the tyre?
+
+`scripts/steer_bench.py` publishes **straight onto the model's own command
+inputs** — `/forklift/gz/steer_cmd` and `/forklift/gz/traction_cmd` — so
+Nav2, the smoother, `envelope_gate.py`, `cmd_vel_to_tricycle.py` and
+`forklift_io.py` are **all out of the loop**. Anything it measures is the
+plant. It reads the steer joint's own angle out of `/forklift/joint_states`
+and the body pose out of the ground-truth odometry, so the two candidates
+are separated by measurement rather than by argument. Each step carries its
+**achieved speed**, so a step the vehicle was blocked for is visibly held
+rather than silently scored as an arc (`docs/LESSONS.md` 2026-08-04).
+
+### (a) The joint is not the deadband, and the body is not slipping
+
+Run **c**, warehouse world, one command held long enough to separate a slow
+arrival from a refusal to arrive. Artefact:
+`evidence/m5-38-steer-bench-c.{csv,txt}`.
+
+```
+phase        cmd[deg]  JOINT[deg]   BODY[deg] joint/cmd  body/cmd   v[m/s]
+standstill      2.000       1.338         nan     0.669         -    0.000
+rolling         2.000       1.621       1.605     0.810     0.803    0.599
+```
+
+**The body does exactly what the joint does** — 1.605 deg of implied steer
+against 1.621 deg of joint angle, 1 % apart, at a verified 0.599 m/s. So
+**tyre slip is not the mechanism**, and §11.2's inference from body yaw was
+reading the joint faithfully all along.
+
+**What the joint does is the finding.** A 2 deg step, held, rolling:
+
+```
+t+ 0.0 s  +0.70    t+ 3.5 s  +0.98    t+ 7.5 s  +1.56    t+11.0 s  +1.61
+t+ 1.0 s  +0.53    t+ 4.5 s  +1.05    t+ 8.5 s  +1.54    t+12.5 s  +1.82
+t+ 2.0 s  +0.49    t+ 5.5 s  +1.40    t+ 9.5 s  +1.53    t+13.5 s  +1.62
+t+ 3.0 s  +0.93    t+ 6.5 s  +1.25    t+10.5 s  +1.77    final     +1.66
+```
+
+**Fourteen seconds of held command and the axis has still not arrived at
+two degrees.** The settling time of the steer axis for a small command is of
+the order of **ten seconds**. A Nav2 approach leg lasts 8-9 s and RPP
+re-forms its command every 50 ms.
+
+### (b) The resisting moment is the tyre's, proven by a one-variable A/B
+
+The two worlds differ in exactly one thing that matters here: in
+`sim/worlds/forklift_arena.sdf` the drive wheel **has no grip** — the bench
+found it spinning at a commanded 5.000 rad/s with the body at 0.005 m/s,
+i.e. 0.6 m/s of tread producing no travel — while in the warehouse the same
+command drives the vehicle at 0.600 m/s. Same model, same PID gains, same
+joint, same 1.4 s hold, same command sequence. Runs **d** (arena) and **b**
+(warehouse). Artefacts: `evidence/m5-38-steer-bench-{b,d}.{csv,txt}`.
+
+| commanded [deg] | **arena** joint/cmd (no grip) | **warehouse** joint/cmd (grip) |
+|---|---|---|
+| −20.0 | **1.052** | 0.787 |
+| −10.0 | **1.026** | 0.548 |
+| −5.0 | **1.013** | 0.000 |
+| −3.0 | **1.007** | −0.088 |
+| −2.0 | **1.006** | 0.039 |
+| −1.5 | **1.013** | 0.040 |
+| −1.0 | **1.042** | −0.030 |
+| −0.5 | **1.191** | −0.099 |
+| +0.5 | **0.735** | 0.220 |
+| +1.0 | **0.937** | 0.065 |
+| +1.5 | **0.980** | 0.095 |
+| +2.0 | **0.994** | 0.052 |
+| +3.0 | **1.001** | 0.114 |
+| +5.0 | **1.008** | 0.393 |
+| +10.0 | **1.017** | 0.603 |
+| +20.0 | **1.033** | 0.779 |
+
+**Without grip the axis reaches every commanded angle, half a degree
+included, inside 1.4 s. With grip it reaches none of the small ones.** The
+resisting moment is therefore **contact-borne** — it comes from the tyre,
+not from the joint's own damping or friction, and not from the controller.
+
+This also falsifies `model.sdf`'s own documented assumption. The comment
+above the steer PID says the scrub "disappears" once the vehicle rolls. It
+does not: run **b**'s rolling rows are the same as its standstill rows at
+every small angle, at a verified 0.600 m/s.
+
+## 11.4 THE CAUSE, stated once
+
+> **The steer axis has no proportional authority over the tyre's reaction
+> moment at small angles, so small steer commands are executed only by
+> integral windup, on a ten-second timescale. Nav2's corrections on a
+> straight leg are 1 to 2.5 degrees and the leg lasts 8 to 9 seconds, so
+> the vehicle executes essentially none of them. Whatever heading error it
+> enters the leg with is therefore HELD for the whole leg, and a held
+> heading error integrates into cross-track at sin θ per metre — 0.10 m per
+> metre at the 5.7 deg the failing runs hold.**
+
+The arithmetic is `model.sdf`'s own. The steer PID's proportional term is
+`p_gain · e = 6000 · e` N·m. The comment above that plugin records the
+tyre's scrub reaction as **"roughly 400 N m for this vehicle"**, measured.
+Proportional torque only exceeds it above
+
+```
+e > 400 / 6000 = 0.0667 rad = 3.8 deg
+```
+
+and below that the joint waits on the integral, `i_gain 1500`, which needs
+`∫e dt = 400/1500 = 0.267 rad·s` — **7.6 s at a 2 deg error**. The
+predicted knee at 3.8 deg and the ten-second windup are what §11.2 measured
+independently from ten Nav2 runs (`ach/cmd` 0.03 at 1.2 deg, 0.31 at
+2.0 deg, 0.82 at 3.1 deg, 0.92 at 6.0 deg, 1.00 above 15 deg) and what
+§11.3 (a) measured directly on the joint. **Three independent measurements,
+one number.**
+
+**Why the envelope gate's zero residual was never in tension with this.**
+The gate passes a Twist through unchanged and that is exactly what it was
+measured to do; the loss is two stages below it, between a steer angle
+command and a steer joint. Nothing above the converter can see it, which is
+why nine sections of diagnosis upstream of the plant found real defects and
+never found this one.
+
+**Why a straight line exposes it and an arc hides it, quantitatively.** The
+planner's tightest arc is 45 deg of steer and a mid-aisle correction is
+5-20 deg — all above the knee, all executed at unity gain. A straight leg is
+the only regime in which every command RPP forms lives inside the dead
+region, and it is therefore the only regime in which the vehicle is
+**open-loop in yaw**.
+
+**Why every previous lever failed, in one line each.** Staging the approach
+(§9) fixed the *entry* heading, which the deadband then holds instead of
+correcting. Lengthening the leg (§10) added metres to an open-loop
+integrator. Widening a tolerance (§8.4, refused twice by the owner) would
+have accepted the error rather than removing it. **None of them could have
+worked**, and the §10.5 result that the worst staging heading arrived clean
+while the best missed by 17 deg is exactly what an open-loop leg predicts:
+the outcome is set by the disturbance the vehicle happens to pick up in the
+first metre, not by where it started.
+
+## 11.5 The fix, and whether applying it is inside this task
+
+**The lever is the quantity that sets the threshold, and it is one number.**
+`e* = M_scrub / p_gain`. Raising the steer PID's proportional gain from
+**6000 to 60000** moves the threshold from 3.8 deg to **0.38 deg**, i.e.
+below every command RPP forms on a straight leg. That value is not
+arbitrary — it is the gain `model.sdf` already gives the mast joint, so the
+model gains stay in one family.
+
+Measured, run **e**, the same bench and the same 1.4 s hold as run **b**,
+warehouse world, differing from **b** by **exactly one line**
+(`diff` verified: `1002c1002`, `<p_gain>6000.0</p_gain>` →
+`<p_gain>60000.0</p_gain>`, 1 line changed, nothing else). Artefact:
+`evidence/m5-38-steer-bench-e.{csv,txt}`.
+
+| commanded [deg], rolling | joint/cmd **committed** (run b) | joint/cmd **experiment** (run e) | body/cmd (run e) |
+|---|---|---|---|
+| ±0.5 | 0.220 / −0.099 | 0.094 / **0.232** | 0.095 / 0.234 |
+| ±1.0 | 0.065 / −0.030 | **0.525 / 0.595** | 0.523 / 0.596 |
+| ±1.5 | 0.095 / 0.040 | **0.677 / 0.728** | 0.676 / 0.726 |
+| ±2.0 | 0.052 / 0.039 | **0.761 / 0.789** | 0.759 / 0.789 |
+| ±3.0 | 0.114 / −0.088 | **0.838 / 0.860** | 0.835 / 0.859 |
+| ±5.0 | 0.393 / 0.000 | **0.899 / 0.914** | 0.894 / 0.912 |
+| ±10.0 | 0.603 / 0.548 | **0.948 / 0.956** | 0.934 / 0.950 |
+| ±20.0 | 0.779 / 0.787 | **0.974 / 0.981** | 0.943 / 0.951 |
+
+**A 2 deg command goes from 5 % executed to 76 % executed inside 1.4 s**,
+and the body follows the joint to within 1 % at every row, so the yaw the
+controller asked for is the yaw it gets. The residual shortfall in run **e**
+is *settling inside a 1.4 s window*, not a dead region: it falls smoothly
+with command size and the only row still collapsed is ±0.5 deg, which is
+0.009 m of cross-track per metre — a twelfth of the failing rate and below
+the 0.084 m/m this whole investigation is about. **The predicted knee at
+0.38 deg is where the measured curve breaks.** No hunting appeared at the
+large angles (±20 deg reaches ±19.5 cleanly), which is the failure mode
+`model.sdf`'s comment warns about at the other end.
+
+> **So the answer to the brief's question is yes: the drift can be removed,
+> and the lever is the steer axis's proportional authority over the tyre's
+> reaction moment.**
+
+### Whether applying it is inside this task — it is NOT, and here is why
+
+**The change is not written into `agv/forklift/model.sdf`.** It exists only
+as a `/tmp` copy differing by one verified line and passed in with
+`model:=`, which is the same discipline §8.4 used for the two tolerance
+experiments. Three reasons, and the third is the binding one:
+
+1. **`model.sdf` is the vehicle plant, and every committed motion figure in
+   the repository is qualified by it** — `EVIDENCE_ODOMETRY.md`,
+   `EVIDENCE_LOCALIZATION.md`, this file's §1-§10, `sim/`'s arena and
+   warehouse evidence, and the recorded M4 commissioning showcase. Changing
+   the plant inside a diagnosis brief would silently re-qualify all of them.
+2. **The gains it changes are recorded in `model.sdf` as measured**, with a
+   documented instability at the opposite end (`d_gain 1200` stopped the
+   joint responding; joint damping 400 stopped it moving). A ten-fold gain
+   change deserves its own bracketing, not a line edit inside another
+   brief's scope.
+3. **A plant change is a cross-layer consequence and this agent owns one
+   layer.** `sim/` re-measures against this model and does not know it moved.
+
+**What is offered instead is the strongest evidence obtainable without
+applying it**: the five repeats of §11.6, run on the experimental model by
+argument, so the orchestrator can rule on a one-line change that already has
+its distribution measured.
+
+## 11.6 The five repeats, on the experimental model, NOT applied
+
+**One variable against §10.** The route, the chain, the goal, the staging
+distance `--d 4.5`, the go-around bound, every timeout and the whole
+committed configuration are §10.3's exactly; `nav2.yaml`, the behaviour
+tree, `config.yaml` and every script in the command chain are byte-identical
+to their committed form. **The single difference is the steer `p_gain` in
+the model passed with `model:=`.** §10 is therefore the baseline, and it is
+deliberately the *harder* geometry: §10.6 item 2 records that d = 4.5 is
+worse than d = 3.0, so this set is run on the leg length that amplifies the
+defect most.
+
+**Done-condition, from the brief, not softened**: at least 4 of 5 clean, no
+run in the shuffle regime, localization max at or below 0.263 m.
+
+| baseline | m5-33 §9 (d = 3.0) | **m5-35 §10 (d = 4.5)** | **m5-38 §11 (d = 4.5, p_gain 60000)** |
+|---|---|---|---|
+| clean traverses | 3 of 5 | **2 of 5** | *see below* |
+| localization max | 0.1186 m | **0.4565 m** | *see below* |
+
+Rows are appended **as each run lands**, before the next is launched.
+
+| run | outcome | go-arounds | approaches | shuffle regime | entry heading | terminal outbound cross-track | localization max |
+|---|---|---|---|---|---|---|---|
+| **r1** | **REACHED (clean)** | 0 of 2 | 1 | **NO** | **−3.34 deg** | **+0.048 m** (from +0.174, it CONVERGED) | **0.1523 m** |
+| **r2** | **REACHED (clean)** | 0 of 2 | 1 | **NO** | **+2.23 deg** | **+0.056 m** (rate +0.0048 m/m) | **0.1082 m** |
+| **r3** | **REACHED (clean)** | 0 of 2 | 1 | **NO** | **−2.19 deg** | **+0.035 m** (rate +0.0056 m/m) | **0.1315 m** |
+| **r4** | **REACHED (clean)** | 0 of 2 | 1 | **NO** | **−0.57 deg** | **+0.028 m** (rate +0.0126 m/m) | **0.0718 m** |
+| **r5** | **REACHED (clean)** | 0 of 2 | 1 | **NO** | **+1.86 deg** | **+0.056 m** (rate +0.0173 m/m) | **0.1068 m** |
+
+### THE DISTRIBUTION, against the done-condition
+
+| criterion | result | verdict |
+|---|---|---|
+| ≥ 4 of 5 **clean** traverses | **5 of 5** | **MET** |
+| no run enters the shuffle regime | **0 of 5**, and this time **not by construction** — the miss detector never fired, so no approach was abandoned before it could shuffle | **MET** |
+| localization max ≤ 0.263 m | **0.1523 m** worst of the set (0.0718, 0.1068, 0.1082, 0.1315, 0.1523) | **MET** |
+
+**All three met, on the leg length §10 proved is the worse one.** Against
+the two baselines, one variable at a time:
+
+| | m5-31 §8.2 (no staging) | m5-33 §9 (d = 3.0) | m5-35 §10 (d = 4.5) | **m5-38 §11 (d = 4.5, p_gain 60000)** |
+|---|---|---|---|---|
+| clean traverses | 1 of 5 | 3 of 5 | 2 of 5 | **5 of 5** |
+| reached at all | 3 of 5 | 4 of 5 | 2 of 5 | **5 of 5** |
+| runs in the shuffle regime | 4 of 5 | 1 of 5 | 0 of 5 | **0 of 5** |
+| go-arounds spent | — | 1 | 4 | **0** |
+| miss aborts | — | 0 | 3 | **0** |
+| localization max | 0.661 m | 0.1186 m | 0.4565 m | **0.1523 m** |
+| entry heading, worst | +37.26 deg | +16.94 deg | +33.37 deg | **+2.23 deg** |
+
+### The cross-track rate itself — the quantity the brief asked for
+
+This is the measurement that closes §10.6 item 1, and it is the one that
+matters, because the outcome column above could in principle be luck and
+this cannot.
+
+| set | terminal outbound cross-track, per run | mean \|rate\| |
+|---|---|---|
+| m5-33 (d = 3.0) | −0.340, +0.220, −0.148, −0.416, +0.167 m | **0.0791 m/m** |
+| m5-35 (d = 4.5) | +0.550, +0.150, +0.202, −0.583, −0.409 m | **0.0893 m/m** |
+| **m5-38 (d = 4.5, experiment)** | **+0.048, +0.056, +0.035, +0.028, +0.056 m** | **0.0134 m/m** |
+
+**The rate falls by a factor of 6.7, and the spread collapses from ±0.58 m
+to a 0.028-0.056 m band.** Every one of the ten baseline runs ended the
+outbound leg somewhere in a 1.13 m-wide scatter; all five of these end
+inside 28 mm of each other, and every one is an order of magnitude inside
+the 0.25 m tolerance that §10.4 showed separates clean from not-clean ten
+times out of ten.
+
+**And r1 is the row that proves the loop is closed rather than merely
+quiet.** It began its leg at **+0.174 m** of cross-track — a larger initial
+offset than eight of the ten baseline runs — and *converged* to +0.048 m
+over the 4.74 m leg, a rate of **−0.0267 m/m** pointing back at the line.
+Under the committed plant no run ever converged; the error only ever grew,
+because the vehicle could not execute the correction. **This is the
+difference between an open-loop leg and a closed one, in one run.**
+
+Mean yaw over the leg fell from −6.65 to +3.06 deg across the baselines to
+**−1.40 to +0.83 deg** here, which is the same result read at the cause
+rather than at the effect.
+
+## 11.7 How this section was run
+
+### What was changed in the repository, and what was not
+
+**`agv/forklift/model.sdf` is byte-identical to its committed form**; line
+1002 still reads `<p_gain>6000.0</p_gain>`, verified after the last run.
+`nav2.yaml`, `config.yaml`, the behaviour tree, both launch files,
+`cmd_vel_to_tricycle.py`, `envelope_gate.py` and `forklift_io.py` are all
+byte-identical. **No tolerance was widened** — `xy_goal_tolerance: 0.25` and
+`yaw_goal_tolerance: 0.15` are untouched, as they have been through §8, §9,
+§10 and here. No dependency was added, `opennav_docking` was not activated,
+and `plc/` and `bridge/` were not touched.
+
+**One file was added**: `scripts/steer_bench.py`, the plant harness §11.3
+runs. It is a measurement harness — it closes no loop, holds no goal, and no
+launch file that navigates starts it.
+
+The experimental plant is `/tmp/m5-38-exp-model.sdf`, one verified line from
+the committed model (`evidence/m5-38-exp-model.diff`), reached with
+`model:=`. `warehouse_bringup.launch.py` does not declare a `model`
+argument, but a launch configuration set on the command line is visible to
+the include (`docs/LESSONS.md` 2026-08-05), so `forklift_bringup`'s own
+`model` argument takes it and the committed file is never read for the
+spawn. This is the §8.4 pattern: a one-line experiment, diffed after the
+run, never written to the tree.
+
+### Isolation and measuring alone
+
+**Enforced by the driver, not remembered by the operator.** Every run
+refuses to start unless `pgrep -c -f` over the
+`gz sim|nav2|amcl|controller_server|bt_navigator|parameter_bridge|planner_server|velocity_smoother|robot_state_publisher|ekf_node|cmd_vel_to_tricycle|forklift_io|wheel_odometry|imu_gate`
+pattern returns **0**, prints load, `/dev/shm` count and a UTC timestamp
+before, gates each bring-up stage on a topic appearing rather than on a
+sleep (`/forklift/odom`, `/particle_cloud`, `/plan`), and verifies the
+remaining count after teardown. **All five route runs and all five bench
+runs started with zero matching processes and ended with zero.**
+
+`GZ_PARTITION` **and** `ROS_DOMAIN_ID` were both set on every run —
+`GZ_PARTITION=m538r<N>`, `ROS_DOMAIN_ID=9<N>` for the route runs and
+`m538<tag>` / `88` for the bench runs — because `gz transport` does not use
+DDS and the ROS variable does not isolate the simulator (`docs/LESSONS.md`
+2026-07-27).
+
+Per-run starting load, recorded because it is the one between-run difference
+not controlled: r1 (machine idle, 0.00 at session start), r2 0.31,
+r3 **3.28**, r4 2.10, r5 2.27 — the previous run's teardown still draining.
+**It does not order the outcomes**: all five are clean, and r3, from the
+busiest machine of the set, is neither the best nor the worst row.
+`/dev/shm` grew from 214 to 459 orphaned Fast-DDS segments across the
+session, left in place; no figure depends on them.
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export GZ_PARTITION=m538r<N> ROS_DOMAIN_ID=9<N>     # BOTH, every run
+unset DISPLAY WAYLAND_DISPLAY                        # headless, llvmpipe
+
+# THE ONE ARGUMENT THAT DIFFERS FROM 10.3, and it is the whole experiment.
+ros2 launch sim/launch/warehouse_bringup.launch.py x:=-4.5 y:=7.0 yaw:=0.0 \
+    model:=/tmp/m5-38-exp-model.sdf
+ros2 launch agv/forklift/launch/localization.launch.py \
+    initial_pose_x:=1.584770 initial_pose_y:=12.576859 initial_pose_yaw:=-0.007915
+ros2 launch agv/forklift/launch/navigation.launch.py \
+    gate:=false cmd_topic:=/cmd_vel_smoothed
+
+python3 agv/forklift/scripts/nav2_run.py stage \
+    --x 1.0 --y 7.0 --yaw 0.0 --d 4.5 --max-go-arounds 2 \
+    --settle 30 --staging-timeout 90 --approach-timeout 45 \
+    --csv  evidence/m5-38-a_straight-r<N>-run.csv \
+    --plan evidence/m5-38-a_straight-r<N>-plan.json
+python3 agv/forklift/scripts/nav2_run.py analyse \
+    --csv  evidence/m5-38-a_straight-r<N>-run-approach.csv \
+    --plan evidence/m5-38-a_straight-r<N>-plan.json
+
+# THE PLANT BENCH, no Nav2 anywhere in it
+ros2 launch sim/launch/warehouse_bringup.launch.py x:=-8.0 y:=7.0 yaw:=0.0 \
+    [model:=/tmp/m5-38-exp-model.sdf for run e]
+python3 agv/forklift/scripts/steer_bench.py --csv <tag>.csv --speed 0.6 --hold 1.4
+python3 agv/forklift/scripts/steer_bench.py --csv <tag>.csv --profile hold \
+    --angles 2 --long-hold 14 --speed 0.6          # run c
+```
+
+Bench runs: **a** arena / committed model / hold 2.0, **b** warehouse /
+committed / hold 1.4, **c** warehouse / committed / 2 deg held 14 s,
+**d** arena / committed / hold 1.4 (the exact A/B partner of **b**),
+**e** warehouse / experimental / hold 1.4 (the other exact A/B partner of
+**b**). Artefacts: `evidence/m5-38-steer-bench-{a,b,c,d,e}.{csv,txt}`,
+`evidence/m5-38-offline-cross-track.txt`,
+`evidence/m5-38-exp-model.diff`, and per route run
+`evidence/m5-38-a_straight-r<N>-{run.csv,run-approach.csv,plan.json,stage.txt,analyse.txt}`.
+
+## 11.8 What this section asks the next brief to decide
+
+1. **Whether to apply the one-line plant change.** It has its distribution
+   measured (5 of 5, §11.6) and its mechanism named (§11.4). It is not
+   applied here for the three reasons in §11.5, and the first of them needs
+   a ruling: **every committed motion figure in `agv/` and `sim/` is
+   qualified by the current plant**, and applying this re-qualifies them.
+   The honest options are (i) apply and re-measure the affected evidence,
+   (ii) apply and mark the affected figures as taken on the prior plant, or
+   (iii) leave it and accept the arrival distribution.
+2. **`d` should still be restored to 3.0** if the change is applied. §10.6
+   item 2 stands on its own evidence; this set used 4.5 only to keep the
+   comparison one variable against §10, and a shorter leg is strictly better
+   once the leg is closed-loop.
+3. **Two `sim/`-owned findings this brief cannot write** (they are in the
+   report as requests): the arena floor gives the drive wheel **no
+   traction** — 5.000 rad/s of commanded wheel speed against 0.005 m/s of
+   travel, §11.3 (b) — which every arena figure involving traction,
+   steering effort or tyre behaviour is qualified by; and `model.sdf`'s
+   documented claim that the scrub "disappears" once the vehicle rolls is
+   **falsified** (§11.3 (b)).
+4. **The go-around's `"Start occupied"` precondition (§10.6 item 3) and the
+   inflation-radius warning (§10.6 item 4) are untouched here** and remain
+   open. Neither fired in any of these five runs, because no run needed a
+   go-around — which is not the same as either being fixed.
