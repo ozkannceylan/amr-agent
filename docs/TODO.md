@@ -6,6 +6,35 @@ recorded commissioning showcase and the m4f-09 gate verification. The m5r
 restructure round (ADR 0010) is closed; the brief queue lives in
 docs/PLAN.md.
 
+## m5-12b — the intrusion now originates in Gazebo (2026-08-06)
+`agv/forklift/EVIDENCE_FIELD_EVALUATION.md`, report m5-12b. A box moved into
+the contour drove `ZoneDeviceCircuitClosed` with **no `OPERATOR` line anywhere
+in the writer's session** — four transitions, all sourced `FIELD`. The control
+case is what makes it mean something: an object 2.85 m away and plainly visible,
+but outside the 1.35 m contour, produced **no verdict**.
+
+- **CRITERION (a) IS NOT CLOSED, and this is the remaining step.** The chain is
+  proven Gazebo → `ZoneDeviceCircuitClosed`. It is **not** shown through to
+  `ZoneStopDemand`, which needs a **watch table under activated safety mode** —
+  **owner work at the tool.** No gate criterion may claim the demand until then.
+- **DESIGN DEFECT, correct before the next field brief:** `FIELD-EVALUATION.md`
+  §6's rear clip band reads `-72.3°`, which rounds the measured `-72.26°`
+  (`EVIDENCE_SENSOR_COVERAGE` §13.2) **the wrong way** and leaves indices 5 and
+  65 — self-returns at 0.780 m and 0.164 m against boundaries of 1.001 m and
+  2.183 m — **inside the field, holding the verdict at INTRUSION for ever.**
+  m5-12b used the measured index set instead and requested the fix rather than
+  editing another brief's deliverable. Done when §6 carries the measured set.
+- **TOOL BROKEN, needs its own brief:** `agv/forklift/scripts/sensor_coverage.py`
+  no longer runs against `model.sdf` — `load_model` reads
+  `lidar/scan/horizontal` for every `<sensor>` and the IMU has none, so it dies
+  with an `AttributeError` before printing a line. **This is the tool that
+  produced all of `EVIDENCE_SENSOR_COVERAGE.md`**, so that evidence is currently
+  unreproducible.
+- **`nav2.yaml`'s reverse cap moved −0.60 → −0.55** as FIELD-EVALUATION §5/§12
+  require. That **invalidates every reverse-travel figure in
+  `EVIDENCE_NAV2.md`** — which now compounds with m5-40's finding that the
+  reverse defect is real and un-masked. Both belong in the same reverse brief.
+
 ## PLC — M5 BUILD LANDED 2026-08-05 (merge c9a4c77, local only, not pushed)
 Built in one owner-driven TIA session on `safe_amr` (CPU 1513F-1 PN, PLCSIM
 instance `safecell3`). The authoritative account is
