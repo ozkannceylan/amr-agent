@@ -320,6 +320,27 @@ is written now (brief m5-30) and implemented after M5 closes.
 - **Boundary ruled by the owner 2026-08-05:** the real-time map with live
   obstacles is **inside M5** — it is criterion (e) word for word, delivered as
   m5-13 plus HMI v2b. Only the beyond-criterion parts above are v3.
+- Plan: `hmi/V3-PLAN.md`, five phases (report m5-30). v3 adds **zero OPC UA
+  nodes and zero HMI writes**; every new datum rides the ADR 0011 D4 monitoring
+  plane. It also refuses RViz's 2D-goal tool — goal commanding stays the
+  standing §12.13 item 4 decision.
+
+### TIME-CRITICAL: five constraints the m5-13 brief must carry
+v3 forces v2b decisions, and m5-13 is not briefed yet, so shaping it now is free
+and shaping it later is not (`hmi/V3-PLAN.md` §2):
+1. a **serialNumber-rooted per-vehicle namespace even at n = 1** — retrofitting
+   one at n = 4 is the expensive version
+2. the **whole map**, not a crop around the vehicle
+3. **no bulk pixels on the JSON poll**
+4. the ADR 0016 **D3c mechanism ruling taken knowing camera load** — that
+   favours a multi-context process over `domain_bridge`'s fixed forwarded set
+5. **camera selection implementable as subscription lifecycle only**
+
+Still the owner's, unassumed: the D3c mechanism and directory, and whether the
+monitoring plane's read-only property gains runtime enforcement.
+**Camera cost is unmeasured and unclaimable** until V3-4's four-cell probe runs —
+llvmpipe software rendering, and whether Gazebo renders an unsubscribed camera
+at all is itself a measurement.
 
 ## m5-15 — F-program spec DONE 2026-08-05, four items owed by others
 `plc/forklift-safety/SPEC.md` is rewritten against ADR 0015. The judge's F3
