@@ -178,12 +178,16 @@ remains the input path.
   gated chain, so the vehicle correctly will not move without an envelope. Needs
   the note and the pair `gate:=false cmd_topic:=/cmd_vel_smoothed`. The m5-11
   brief forbade the edit.
-- **sim / owner ruling**: this machine has no Nav2 and no `robot_localization`,
-  and no passwordless sudo. Both ran from a user-prefix `.deb` overlay in
-  `~/ros-overlay/prefix` — no system package installed, no repo dependency added.
-  `sim/setup/WSL_ENVIRONMENT.md` should record the overlay, and the owner decides
-  whether to install the stack properly instead. **Every m5-11 figure is
-  qualified by that overlay** (LESSONS 2026-07-27).
+- **sim: CLOSED 2026-08-05 by m5-21** — Nav2 (`ros-jazzy-nav2-bringup` 1.3.12)
+  and `robot_localization` 3.8.3 are system packages; the overlay is retired to
+  `~/ros-overlay.retired-m5-21`. The feared cross-tree upgrade did not happen
+  (0 upgraded / 137 new / 0 removed). The EVIDENCE_ENVELOPE qualifier and the
+  latency re-reading are applied. **Two owner decisions left over:**
+  (i) `apt-get -s dist-upgrade` removes `libglapi-mesa`, and Mesa is the
+  rasteriser every Gazebo run here uses — so dist-upgrade was NOT taken; decide
+  whether the machine stays behind the archive deliberately.
+  (ii) the Fast-DDS four-package set now sits in `sim/setup/install.sh` behind
+  `--only-upgrade`; confirm that is where it belongs.
 - **fleet/M6**: a goal aborted while the envelope is withheld is nobody's yet —
   Nav2 held 235 s then aborted with code 105, as ADR 0011 D3 predicts.
   Re-issuing the goal is order-level behaviour.

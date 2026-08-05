@@ -12,6 +12,7 @@ filled in **as each run lands**, not at the end.
 | Under test | `agv/forklift/scripts/envelope_gate.py`, its `envelope:` block in `agv/forklift/config.yaml`, `agv/forklift/launch/envelope.launch.py`, `agv/forklift/launch/navigation.launch.py` |
 | Instrument | `agv/forklift/scripts/envelope_run.py` — the ROS 2 topic double **and** the recorder. **No OPC UA client, no bridge, no PLCSIM anywhere in this file** |
 | Host | **the owner's WSL2 machine** (§0) |
+| **Environment qualifier** | **Every figure in this file was produced under a user-prefix `.deb` overlay** (`~/ros-overlay/prefix`), because this machine had no Nav2 and no `robot_localization` at the time. That overlay was **retired 2026-08-05** by m5-21, which installed both as system packages; the re-run findings are in §7 and in `docs/reports/m5-21-wsl-ros-stack-install.md`. Figures here are **not** automatically valid on the installed stack — §7's residual was re-verified, the rest was not. |
 
 ---
 
@@ -388,6 +389,23 @@ gate emits on the command's own callback while passing and reserves its
 20 Hz timer for the ramp and the held zero, so the permissive path is not
 delayed by up to a period — which is what a timer-only design would have
 cost.
+
+> **Corrected 2026-08-05 (m5-21). Those two latency figures are a sample,
+> not a bound.** The observation was re-run four times on the apt-installed
+> stack — see `docs/reports/m5-21-wsl-ros-stack-install.md` — and the
+> **residual half reproduced exactly**: `0.000e+00` on both components,
+> every pair exact, over 221 / 224 / 676 / 440 pairs. The **latency half did
+> not**: mean came out **0.0004–0.0242 s** and max **0.0014–0.0713 s**,
+> up to **60x** and **71x** the figures above. Nothing was tuned and no run
+> was discarded. The spread is not a packaging artefact — the run on the old
+> DDS stack reproduced the committed figure and the run on the
+> verified-clean machine was the worst of the four — so this is the n=1
+> lesson of 2026-08-04 landing again on a figure that was never repeated.
+> **Read the residual as the design property it is, and read the latency as
+> "sub-millisecond in the best case, tens of milliseconds observed", with no
+> upper bound established.** The design argument above — that the permissive
+> path is not delayed by a full period — survives; the numbers attached to
+> it do not carry a worst case.
 
 ## 8. Observation 6 — the fixed-equipment / station permit
 
