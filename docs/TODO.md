@@ -239,6 +239,36 @@ adopted. **No invariant touched** — every crossing rides an existing seam.
 - ADR 0016's F3–F7 are `[snippet]`-graded: re-verify before any is made
   load-bearing beyond that ADR (the ADR 0014 rule).
 
+## BLOCKER-CLASS — Nav2 route regression, found 2026-08-05 by m5-24
+The m5-10 straight-route goal **no longer completes**, and it is **not** the
+vehicle image's doing: m5-24 ran the identical goal on the **untouched ungated
+m5-10 chain** in the same session and got the same failure.
+
+| | Committed (m5-10) | 2026-08-05 |
+|---|---|---|
+| outcome | SUCCEEDED in 13.40 s | **TIMEOUT at 90 s** |
+| final | 0.183 m absolute | **0.628 m** |
+
+The prime suspect is the environment change of the same day: m5-21 replaced the
+`.deb` overlay with system packages, so the Nav2 build and the whole Fast-DDS
+set moved underneath the committed figures. That is a hypothesis, not a
+diagnosis — nobody has bisected it. **Nothing was tuned**, correctly: m5-24 was
+forbidden to, and tuning before diagnosis would have destroyed the evidence.
+Done when a brief establishes the cause — old vs new Nav2 build, DDS, machine
+load, or a real navigation defect — and says whether the committed m5-10 and
+m5-08e figures still stand on the installed stack. **Until then, treat every
+Nav2 figure in the evidence as qualified by the overlay it was measured under.**
+
+## ADR 0016 Phase 1 — CLOSED 2026-08-05 (m5-24), two items left
+- **Owner decision: where does the allocation table live?** ADR 0016 D2 puts it
+  sim-side; the m5-24 brief put it in `agv/`. The agent implemented the
+  *constraint* (exactly one file pairs a serial with a domain ID, read through
+  one code path) at the brief's location because `sim/` is not its to write, and
+  wrote the disagreement up rather than silently choosing. Done when the owner
+  rules and, if it moves, one brief moves it.
+- **`sim/` edits requested** by m5-24 report §3 to make the split clean rather
+  than worked around — precise enough to become a sim brief.
+
 ## M5 — open items
 - Monitoring service directory: ADR 0011 D4 recommends `agv/` but does not
   rule it; `viz/` is the alternative and the ADR 0005 test names the

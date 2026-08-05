@@ -75,6 +75,13 @@ project can command in engineering units.
 | `scripts/nav2_run.py` | The instrument behind `EVIDENCE_NAV2.md`: `goal` sends one world-frame goal through the committed registration and records the run at 10 Hz, `analyse` scores it absolutely, `plan` asks the planner alone for a path with no simulator, and `convcheck` checks the Twist→tricycle conversion against a **commanded motion**. Reads ground truth as a reference and drives nothing that navigates. |
 | `scripts/footprint_from_model.py` | Derives the Nav2 footprint polygon from `model.sdf` (convex hull of every collision and visual primitive, steer axis at both stops) and checks it against `nav2.yaml`. `--aisle` scans the committed grid and reports how much lateral room the padded polygon actually leaves. No simulator. |
 | `EVIDENCE_NAV2.md` | The dated runs behind autonomy: the five Jazzy parameter traps each probed on a running node, the footprint derivation, the Twist→tricycle conversion checked against a **commanded motion**, and four measured cases — a straight aisle traverse, a reverse segment, a goal in the named degenerate stretch, and a goal the planner refuses, with what refusal looks like from outside. |
+| `vehicles/allocation.yaml` | **The one owner of the serial → DDS domain mapping** (ADR 0016 D1, invariant 10). No other file in this repository pairs a serial with a domain ID, and no per-vehicle config carries one. It also reserves the operator/monitoring domain and the vehicle band. |
+| `vehicles/F001.yaml` | **One forklift's identity**: its VDA 5050 `serialNumber`, its spawn pose (world frame, a simulation datum) and its initial pose (map frame, the datum a real vehicle is given). Everything that makes this machine *this* machine, and nothing that is true of every forklift. |
+| `scripts/vehicle_identity.py` | The single reader of the two files above. Joins them, validates the allocation and **refuses** — an unallocated serial, a duplicate domain, an ID outside the safe 0–101 range, a per-vehicle file carrying its own domain. `--self-check` exercises every refusal with no ROS. |
+| `scripts/vehicle_image.py` | **Starts one vehicle's own computer.** The stand-in for the systemd unit a real forklift would run (ADR 0016 D5): it resolves the identity, puts the process into that vehicle's DDS domain and hands over to the launch below. |
+| `launch/vehicle_image.launch.py` | **Everything the vehicle's own computer runs**, in one launch and one domain: the gz bridges including `/clock`, sensor TF, wheel odometry, the gyro gate, the EKF, map server and AMCL, the whole Nav2 stack, the envelope gate, the converter and `forklift_io`. It starts **no** Gazebo server — the sim side owns the world. Refuses if the domain it was handed is not the allocated one. |
+| `scripts/check_contract_topics.py` | Parses the ROS contract table below out of this file and diffs it against a running graph. `--expect-absent` inverts the verdict, which is how "the vehicle is not visible from this domain" is a pass with a name rather than an empty screen. |
+| `EVIDENCE_VEHICLE_IMAGE.md` | The dated run behind ADR 0016 Phase 1: the vehicle image inside its own domain, the boundary demonstrated by failing to cross it from three other domains, the contract diffed from inside, a Nav2 goal accepted, and the m5-11 §7 observation re-run. |
 | `evidence/` | The raw recordings, leg marks, captured `/tf` publisher lists and verbatim scorer output for `m5-07e`, `m5-08e` and `m5-11`. Every figure in the evidence files above is recomputable from them. |
 
 There is deliberately **no world file here.** Worlds belong to `sim/`.
@@ -459,6 +466,45 @@ perimeter walls 0.60 m tall and exactly one object that reaches 1.80 m, so as
 it stands that world presents this sensor with almost nothing
 (`EVIDENCE_SENSOR_COVERAGE.md` §10). `sim/worlds/warehouse.sdf`, racks 2.0 m
 and walls 2.5 m, does.
+
+## Running it as a vehicle image, which is what a second forklift would be
+
+**Since ADR 0016 Phase 1 there are two sides to a run**, and the split is the
+point: adding a forklift is adding a machine, not adding processes to a shared
+graph.
+
+| Side | What it is | Where it runs |
+|---|---|---|
+| **sim side** | Gazebo and the world. **No ROS process at all**, so it joins no DDS domain | one `GZ_PARTITION`, shared — one world is one warehouse floor |
+| **vehicle image** | everything the vehicle's own computer runs, listed in the table above | **its own `ROS_DOMAIN_ID`**, allocated in `vehicles/allocation.yaml` |
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export GZ_PARTITION=myrun          # the SIMULATOR's boundary. Shared.
+
+# the sim side: the floor
+gz sim -r -s sim/worlds/warehouse.sdf
+
+# the vehicle: it sets ROS_DOMAIN_ID itself, from the allocation table
+python3 agv/forklift/scripts/vehicle_image.py --vehicle F001
+```
+
+Three things follow from the domain and they are not optional:
+
+- **Every hand-run tool has to pick a domain.** `ros2 topic echo` against F001
+  needs `ROS_DOMAIN_ID=51`; a session that forgets sees an **empty graph** and
+  may read it as a dead stack. The number is read from
+  `vehicles/allocation.yaml`, never remembered.
+- **`GZ_PARTITION` and `ROS_DOMAIN_ID` are different boundaries.** gz transport
+  is not DDS, so the domain does not isolate the simulator and the partition
+  does not isolate the ROS graph. Set both.
+- **The wall is checkable, and it is checked rather than claimed.**
+  `EVIDENCE_VEHICLE_IMAGE.md` §3 runs `ros2 topic list` from three other
+  domains and finds no `/forklift` topic in any of them.
+
+`launch/vehicle.launch.py` and the `warehouse_bringup` recipes below are
+unchanged and still run; the vehicle image includes the first of them rather
+than restating its bridge table.
 
 ## Running it
 

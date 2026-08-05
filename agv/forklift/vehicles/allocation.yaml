@@ -1,0 +1,50 @@
+# allocation.yaml - THE ONE OWNER OF THE serial -> DDS DOMAIN MAPPING.
+#
+# ADR 0016 D1 makes one forklift's entire ROS 2 graph live in its own DDS
+# domain, so that a second forklift is another machine rather than another
+# process in a shared graph. A domain ID is therefore a piece of site
+# infrastructure, like an IP address: it is allocated once, in one place, and
+# every other file learns it from here.
+#
+# INVARIANT 10, STATED AS A RULE A READER CAN CHECK:
+#
+#   * this file is the ONLY place in the repository where a serial number is
+#     paired with a domain ID;
+#   * a per-vehicle config file (vehicles/<serial>.yaml) may name its serial.
+#     It must NOT carry a domain ID - the domain is looked up from here by
+#     scripts/vehicle_identity.py, and there is one code path for the lookup;
+#   * a shell that exports ROS_DOMAIN_ID by hand is a memory, not a source.
+#     scripts/vehicle_image.py sets it from this file, and
+#     launch/vehicle_image.launch.py REFUSES to start if the environment it
+#     was handed disagrees with this file.
+#
+# WHY 0-101 AND NOT ANY NUMBER. DDS maps each domain ID onto its own UDP port
+# block, and the block for an ID above 101 collides with the Linux ephemeral
+# port range (ADR 0016 fact F1). 0-101 inclusive is the safe range and the
+# validator enforces it.
+#
+# WHY THE OPERATOR SIDE HAS ONE AT ALL. ADR 0011 D4's monitoring plane and any
+# hand-run `ros2` tool need a domain to sit in that is nobody's vehicle, so
+# that a session which forgets to select a vehicle sees an empty graph rather
+# than half of one. The mechanism that carries vehicle data to it is ruled at
+# m5-13 (ADR 0016 D3c) and nothing here presumes it.
+
+# The safe range this file allocates out of. A bound, not an assignment.
+domain_range: [0, 101]
+
+# Reserved for vehicles. Also a bound: an ID inside it may only ever be given
+# to a vehicle, and the validator refuses a vehicle outside it.
+vehicle_range: [51, 54]
+
+# Not a vehicle. The operator / monitoring side of ADR 0011 D4.
+operator_domain: 10
+
+# THE MAPPING. One line per vehicle that exists. A serial with no line here
+# has no domain and cannot be started, which is the intended direction: an
+# unallocated machine does not silently join somebody else's graph.
+vehicles:
+  F001: 51
+
+# 52, 53 and 54 are inside vehicle_range and unassigned. They are deliberately
+# NOT written as placeholder rows: a row here means a vehicle exists, and the
+# M6 fleet adds its rows when its vehicles are built (ADR 0016 Phase 4).
