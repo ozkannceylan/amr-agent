@@ -446,3 +446,281 @@ Named per the brief's rule — nothing below is guessed at in this document:
 5. **Staging arrival scatter** — the actual e₀ distribution at the staging
    pose under `PositionGoalChecker`, which either confirms d = 3.0 m or
    re-derives it through the same formula with the measured e₀.
+
+---
+
+## 9. Forcing the arrival (m5-34 design)
+
+This section is the m5-34 design and, unlike §1–§8, it **does** name the
+two values a build changes. It takes m5-33's three named mechanisms
+(report m5-33 §5, `EVIDENCE_NAV2.md` §9.6) and fixes or rules out each
+one, then derives the lever from the §2/§4.2 relations. Everything quoted
+is a committed measurement; everything derived shows its arithmetic; every
+prediction is registered before the run so the five repeats can falsify
+the design rather than merely report it.
+
+### 9.1 Mechanism 1 — the terminal stall is a DEADLOCK, derived and matched
+
+The brief asked whether the vehicle can physically execute 0.015 m/s at
+near-full lock. The answer is that **the plant never received that
+command at all**. The stall is a closed loop between three committed
+parameters, none of them wrong alone:
+
+1. **The smoother's from-rest ceiling.** `velocity_smoother` is
+   `CLOSED_LOOP` on the EKF and limits acceleration against the
+   *measured* twist. From rest, its output per 20 Hz tick can exceed the
+   measurement by at most `max_accel × Δt`: **0.025 m/s** linear and
+   **0.0238 rad/s** angular. With `scale_velocities: true` the whole
+   twist is scaled by the most restrictive axis, so at commanded
+   curvature κ the linear output from rest is pinned at
+
+       v_pinned(κ) = min(0.025, 0.0238/κ)  m/s.
+
+2. **The converter's creep deadband.** `cmd_vel_to_tricycle.py` publishes
+   **zero traction** for any |v| below `creep_speed_mps = 0.02`
+   (config.yaml), holding the steer axis. This is the below-creep branch,
+   not a refusal — which is exactly why r1's refusal counter stayed
+   frozen at 5.
+
+3. **The loop.** Zero traction → the plant does not move → the EKF
+   measures zero → the smoother stays pinned at v_pinned → the converter
+   keeps zeroing. **Permanent**, until a timeout cancels the leg.
+
+The deadlock arms whenever the vehicle is at rest and the commanded
+curvature satisfies v_pinned(κ) < 0.02, i.e.
+
+    κ > 0.0238 / 0.02 = 1.19 1/m   ⇔   steer > atan(1.19 × 1.05) = 51.3°.
+
+**Matched against r1, number by number.** r1 stalled with the steer at
++1.072 rad (61.4° > 51.3°, armed): κ = tan(1.072)/1.05 = 1.75 1/m, so
+v_pinned = 0.0238/1.75 = **0.0136 m/s** — the recorded held cmd_v of
+**0.015 m/s**, within one sample quantum. Steer held (below-creep branch
+holds the axis), traction zero (truth frozen 20 s), refusals frozen (the
+INFO branch, |v| = 0.015 > `zero_speed_mps` 0.002). Every recorded
+symptom of §9.1 (B) of the evidence is reproduced. r1's go-around leg
+(752 of 945 samples at rest) is the same deadlock re-armed: the leg
+begins at rest with the steer near lock, which is precisely the arming
+condition. The `min_approach_linear_velocity: 0.05` question the m5-33
+report raised is answered: RPP's 0.05 never reaches the plant — the
+smoother's from-rest ceiling forms the 0.015, and the converter's
+deadband turns it into zero.
+
+**The minimum executable command, stated as the rule** (LESSONS
+2026-07-28: granted = min(request, cap), never one observed value): from
+rest at curvature κ the tightest command this chain can pass to the plant
+is v_pinned(κ); at the mechanical lock κ_max = tan(1.31)/1.05 =
+3.57 1/m, giving a floor of **0.0067 m/s**. The converter's deadband must
+sit *below* that floor or the chain deadlocks at rest for every steer
+angle beyond 51.3°.
+
+**The fix — one derived line.** `creep_speed_mps: 0.02 → 0.005` in
+`agv/forklift/config.yaml`. The admissible window is derived, not tuned:
+
+    zero_speed_mps (0.002)  <  creep  <  a_wz·Δt / κ_max  (0.0067)
+
+0.005 keeps the refusal semantics untouched (`zero_speed_mps` and
+`yawrate_refusal_radps` unchanged, so a Spin still counts as a refusal
+and nothing else does) and makes the deadlock unreachable at *any* steer
+angle: the armed region κ > 0.0238/0.005 = 4.76 1/m lies beyond the
+mechanical κ_max = 3.57. Risk, stated: commands in the 0.005–0.02 band
+now steer-and-creep instead of holding. That band's curvature is no
+longer noise — `scale_velocities: true` preserves the commanded ratio —
+and the steer axis's own 2.0 rad/s slew filters jitter; the build
+verifies the deadband change on the converter bench (feed 0.015 m/s at
+κ = 1.75: the committed file must publish zero traction, the changed
+file a nonzero pair) before any simulator run.
+
+**Ruling: FIXED** (design; the build measures). Falsifier registered:
+any run showing ground truth frozen ≥ 5 s while cmd_v is nonzero means
+this derivation missed the mechanism.
+
+### 9.2 Mechanism 2 — the go-around restores its precondition by CAPACITY, not by a checker
+
+The measured go-around returned to staging at **−28.56°**
+(`EVIDENCE_NAV2.md` §9.4) because the return leg is checked
+position-only. Two candidate fixes, one of which the geometry refuses:
+
+- **A heading-checked return fails relation (A) by regress.** For a
+  conjunctive check at staging to be satisfiable it needs
+  yaw_tol < xy_tol / R_endgame = 0.25 / (2.1…2.6) = **0.096–0.119 rad
+  (5.5–6.8°)** — *tighter* than the 8.594° window the final leg cannot
+  yet be forced inside. Requiring at staging what cannot be delivered at
+  the station is the same problem moved 3 m, with a smaller box. Ruled
+  out by arithmetic.
+- **Provision the retry instead.** The final-leg length must absorb the
+  worst return heading. Extending §4.2's formula with the heading term
+  (one arc of R·θ₀ to shed the initial heading, §2.1):
+
+      d  ≥  R·θ₀ + 2·√(R·e₀) + lookahead
+         =  1.291 × 0.4985  +  2·√(1.291 × 0.35)  +  1.60
+         =  0.64 + 1.34 + 1.60  =  **3.59 m**      (θ₀ = 28.56° measured)
+
+  d = 3.0 m is **under-provisioned for the measured worst return by
+  0.6 m** — the retry began worse than the first attempt because the leg
+  it re-runs was never sized for a bad entry heading. The d chosen in
+  §9.4 (4.5 m) covers 3.59 m with 0.9 m margin, so the re-approach is
+  provisioned for the worst measured return heading **without any
+  heading check anywhere**.
+
+The stall fix (§9.1) is also load-bearing here: r1's go-around did not
+fail for want of heading — it never moved, because the return leg starts
+at rest with the steer near lock, the deadlock's exact arming state.
+
+**Ruling: FIXED**, by the §9.1 deadband change plus the §9.4 staging
+distance. Falsifier registered: a go-around run whose re-approach enters
+the position circle with a *larger* heading error than its first attempt.
+
+### 9.3 Mechanism 3 — what "lateral by construction" implies, and the measurement that is actually missing
+
+m5-33 tested the obvious inference — larger lateral offset causes the
+miss — and it is **not supported at n = 5** (r2: 0.231 m off, clean). It
+is not resurrected here. What *does* follow from "the staging residual is
+lateral by construction" is already inside the d formula: every final leg
+contains an S-curve of length 2·√(R·e₀) before its straight tail begins,
+so e₀ buys leg length, and the tail — not e₀ — is what converges the
+heading. The variance that decides the outcome is the **entry heading**,
+and its source is unattributed because one input to the final leg was
+never recorded: **§9.2's five-repeat table has no staging-stop heading
+column.** The vehicle arrives at staging with an unconstrained,
+unmeasured heading (the one instance on record, the bound run, measured
+−2.11°), and whether the final leg's entry-heading spread is inherited
+from that or generated by tracking is unknowable from the committed data.
+
+**Ruling: RULED OUT as a cause claim (no new evidence, per the brief);
+converted into instrumentation.** The build records the staging-stop
+heading (believed and truth) per run, exactly as the bound run already
+did, so the next analysis can attribute the entry-heading variance
+instead of arguing about it. The burden is a measurement; this is the
+measurement.
+
+### 9.4 The two levers, derived — and the geometry favours the longer leg
+
+**Lever 1, constrain the heading at staging.** Its checker form is ruled
+out by the §9.2 regress arithmetic. Its geometric form — arrive at
+staging *along the axis* so the heading is right without being checked —
+is achievable only by giving the leg into staging a straight in-line
+tail, which is the same mechanism as lever 2 applied one leg earlier: it
+lengthens the corridor without lengthening the leg that actually delivers
+the station heading. Same cost, indirect benefit. Not chosen.
+
+**Lever 2, lengthen the final leg.** The leg decomposes as S-curve +
+straight tail. At d = 3.0 the tail is 3.0 − 1.34 = **1.66 m ≈ 1.04
+lookaheads**, and it delivered an entry-heading spread of −1.8…+16.9°.
+Sizing the tail at **two lookaheads** (the linearised pure-pursuit
+settling constant is the lookahead distance — a model, flagged as such,
+not a measurement):
+
+    d  =  2·√(R·e₀) + 2 × lookahead  =  1.34 + 3.20  =  4.54  →  **d = 4.5 m**
+
+Under that model the extra 1.5 m of tail attenuates entry-heading error
+by e^(−1.5/1.6) = 0.39: r4's +16.94° maps to ≈ +6.6° and r1's +10.87°
+to ≈ +4.3°, both inside 8.594°. The three clean entries (−1.46, −1.78,
++5.44°) can only shrink. **This is the registered prediction the run
+tests, and its failure mode is informative**: any entry outside 8.594° at
+d = 4.5 falsifies the settling model, and the §9.3 staging-heading column
+then says whether the residual variance enters at staging or is generated
+on the leg.
+
+**The corridor still fits.** The corridor lies along the approach axis
+and consumes aisle length, not the lateral pinch budget (§4.2). Two
+statements, kept separate:
+
+- *Route A:* staging moves from (−2.0, +7.0) to (−3.5, +7.0); the run's
+  start is (−4.5, +7.0), so the corridor exists and the staging leg
+  shrinks to 1.0 m. No column pinch lies on route A.
+- *In general:* the S-curve zone — the first ≈1.5 m after staging —
+  carries lateral excursion up to e₀ ≈ 0.35 m (r1 measured 0.58 m peak
+  to peak), which exceeds the 2.35 m pinches' **0.356 m total** budget.
+  So the placement rule a 4.5 m corridor imposes is: **no pinch may
+  overlap the S-curve zone**, and the straight tail may cross a pinch
+  only at normal tracking error (clean-run rms 0.051 m). This is the
+  fleet-routing constraint §4.2 already hands to M6 — lengthening d
+  moves the S-curve zone 1.5 m further from the station, it does not
+  change the rule.
+
+One confound stated now rather than discovered later: the 1.0 m staging
+leg from an aligned standing start will land at staging with less scatter
+and a straighter heading than m5-33's 2.5 m leg did. The run therefore
+tests forcing under a *smaller* e₀ than m5-33's; the per-run staging
+columns (§9.3) are what keep the comparison honest, and the d formula
+was sized for e₀ = 0.35 regardless, so the design does not depend on the
+easier draw.
+
+### 9.5 The miss branch, completed — abort instead of shuffle
+
+§2.4's design (ii) states that on a miss "no in-circle correction is ever
+attempted", and m5-33 built the go-around but not the **miss detector**:
+r4 entered at +16.94° and was left to shuffle 20 reversals to a lucky
+completion, because nothing declared the miss until the 45 s timeout.
+The detector is derivable from the committed measurements:
+
+- **Entry-heading abort.** The §8.3 discriminator is 5-of-5 with no
+  exception across m5-33: an entry outside 8.594° does not complete
+  cleanly. So at the first sample inside the position circle, if the
+  believed heading error exceeds the yaw window, the harness cancels the
+  approach and go-arounds immediately.
+- **Reversal abort.** Backstop for a within-window entry that degrades:
+  cancel at the **second** commanded direction reversal after first
+  circle entry. Derived from the measured clean-run counts (0 and 1
+  reversal in §8.2's clean traverses; 0, 1, 0 in m5-33's) and below the
+  pre-registered shuffle threshold of 3.
+
+Stated plainly so the pre-registered shuffle test is not gamed: these
+aborts make "no leg in the shuffle regime" true partly **by
+construction**, and that is the design's intent — the shuffle is the
+in-circle correction §2 proves cannot terminate, and design (ii)'s
+contract is that it is never attempted. An aborted approach is **not
+clean** and is scored as a go-around run; the ≥4-of-5-clean criterion is
+untouched by the aborts and can still fail honestly. The aborts live in
+the harness (`nav2_run.py stage`), the same instrument layer m5-33's
+sequencing lives in; at M6 this is the VDA 5050 client's per-node
+retry decision, and it is written to be lifted.
+
+### 9.6 The build, exactly, and the one run
+
+Changes (all inside `agv/`, no tolerance touched, no dependency, no
+`opennav_docking`, no BT or `nav2.yaml` edit):
+
+| file | change |
+|---|---|
+| `agv/forklift/config.yaml` | `creep_speed_mps: 0.02 → 0.005`, comment updated with the §9.1 window derivation |
+| `agv/forklift/scripts/nav2_run.py` | `stage`: entry-heading abort and 2-reversal abort on approach legs (§9.5); record staging-stop believed+truth heading per run (§9.3); no new subcommand |
+| invocation | `--d 4.5` (the argument exists; no code change) |
+
+Pre-run bench check (minutes, no simulator): converter fed 0.015 m/s at
+κ = 1.75 — committed file publishes zero traction, changed file a
+nonzero pair. This confirms the §9.1 mechanism before any run spends an
+hour on it.
+
+Then **one five-repeat run** of route A, the §9.3 chain of
+`EVIDENCE_NAV2.md`, same isolation discipline (`GZ_PARTITION` +
+`ROS_DOMAIN_ID`, machine verified alone, serialized, torn down to zero),
+each row written as it lands. `--max-go-arounds 2`,
+`--approach-timeout 45` unchanged (a clean 4.5 m leg costs ≈ 9.5 s; the
+timeout is now the backstop behind the aborts, not the detector).
+
+### 9.7 The registered prediction — which runs, and why
+
+Against m5-33's five, mechanism by mechanism:
+
+| m5-33 run | was | predicted at d = 4.5 + creep fix + aborts | why |
+|---|---|---|---|
+| r2, r3, r5 | clean, entries −1.46/−1.78/+5.44° | **clean**, entries within ±6° | longer tail only shrinks a small entry error |
+| r4 | reached through a 20-reversal shuffle, entry +16.94° | **clean**, entry ≈ +7° | the tail doubles from 1.04 to 1.97 lookaheads; settling model §9.4 |
+| r1 | stalled 20 s, go-around deadlocked, FAILED | **no stall anywhere** (deadlock unreachable, §9.1); if the entry still misses, an immediate abort and **one provisioned go-around** to REACHED | creep fix + §9.2 capacity |
+
+Predicted distribution: **5 of 5 first-approach clean** is the point
+prediction; the done-conditions pass at ≥ 4 of 5 clean, **zero legs in
+the shuffle regime** (aborts, §9.5 — scored honestly), localization max
+≤ 0.263 m (no shuffle regime → expect ≈ 0.12 m as m5-33 measured).
+
+Falsifiers, each naming the derivation it kills:
+
+1. Any final-leg entry outside 8.594° → the §9.4 settling model is
+   wrong; read the staging-heading column to locate the variance.
+2. Ground truth frozen ≥ 5 s with nonzero cmd_v → the §9.1 deadlock
+   derivation missed the mechanism.
+3. A re-approach entering worse than its first attempt → the §9.2
+   capacity argument is wrong.
+4. A clean-shaped run killed by an abort (entry inside window, < 2
+   reversals, cancelled anyway) → the §9.5 thresholds are mis-derived.
