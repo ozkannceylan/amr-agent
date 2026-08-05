@@ -209,6 +209,36 @@ remains the input path.
   carry the group (`opcua-nodes.md` §12.13 item 1), so ADR 0014 D5.3's readback
   is closed on the vehicle side only. This is the report's `next_suggested`.
 
+## ADR 0016 — per-vehicle compute, PROPOSED 2026-08-05, owner ruling needed
+docs/adr/0016-per-vehicle-compute-and-deployment.md, plan in
+docs/reports/m5-22-vehicle-compute-deployment-research.md. One DDS domain per
+vehicle; one vehicle image with identity from a per-vehicle config rooted in
+the VDA 5050 serialNumber; four named crossings; per-instance gz topic
+prefixes; systemd units as the real-PC story, containers compatible but not
+adopted. **No invariant touched** — every crossing rides an existing seam.
+- **Resource question measured, not projected away** (2026-08-05, alone,
+  headless): one vehicle's full stack **2.70–2.86 cores / 1 165 MB**, Gazebo +
+  world + one model **1.12 cores / 597 MB**. Four project to **12–14 of 20
+  logical cores and ~5.5 of 15 GiB — they fit.** Unmeasured and named as risk:
+  a *driving* vehicle's extra controller/costmap cost, four models at 3 640
+  rays, and the GUI's ~8 RTF points for a recorded showcase. Phase 4 converts
+  the projection to a measurement before M6 builds on it.
+- Owner ruling needed on the ADR itself. Phase 1 was briefed and built ahead of
+  acceptance on the owner's standing instruction (2026-08-05); it touches no
+  invariant and leaves the m5-10/m5-11 chains runnable.
+- **Phase 3 carries two owner decisions** — fold into the m5-13 item: the
+  monitoring mechanism (multi-context process vs `domain_bridge`, which is a
+  **new dependency** and therefore proposed-and-waiting per CLAUDE.md §10), and
+  the monitoring directory (`agv/` vs `viz/`, the standing ADR 0011 D4 /
+  ADR 0005 question).
+- Open, small: whether container packaging is demonstrated at all (ADR 0016 D5
+  keeps it compatible, not adopted) — cheap later, costly now.
+- The `bridge/` topology-gap item above should draw the bridge edge
+  **per-vehicle-shaped** when its infra brief lands (ADR 0016's invariant-11
+  row).
+- ADR 0016's F3–F7 are `[snippet]`-graded: re-verify before any is made
+  load-bearing beyond that ADR (the ADR 0014 rule).
+
 ## M5 — open items
 - Monitoring service directory: ADR 0011 D4 recommends `agv/` but does not
   rule it; `viz/` is the alternative and the ADR 0005 test names the
