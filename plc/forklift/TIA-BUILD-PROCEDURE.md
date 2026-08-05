@@ -6,7 +6,7 @@
 action with one observable result, so the session always has something to ask
 about and the owner never has to hold two instructions at once.
 
-**What this builds, and it is exactly three things:**
+**What this builds, and it is exactly four things:**
 
 1. **The `opcua-nodes.md` §12 node set** — four global DBs, four interface
    folders, nine nodes — verified from **outside** TIA before anything else is
@@ -16,29 +16,42 @@ about and the owner never has to hold two instructions at once.
 3. **The m5-03b stand-in stimulus proof, repeated on the working project
    `safe_amr`**, plus the deletion of the probe copy `safe_amr_FIOPROBE` and
    the `Tag_1` loose end.
+4. **The `plc/forklift-safety/SPEC.md` §4.5 F-delta** — the stand-in
+   heartbeat, the eight S015 validity networks of §5.4, the thirteen-pin
+   re-point, and the download-with-reinitialisation that makes them run.
+   **Chunks J–O**, added once §4.5 existed to build from.
 
 **What this does NOT build, and must not be made to.**
 
-> **The F-program half of M5 is pending brief m5-15 and appears nowhere in this
-> document.** m5-15 is the F-program specification — the S015 validity check,
-> the automated stand-in writer, its rate and failure behaviour, the
-> WSL→Windows transport and the reset-origination path — and **it has not been
-> written yet**. A procedure that told the owner to build fail-safe logic from
-> an unwritten specification would produce a safety program nobody specified.
-> **Chunk J** lists what the future F-session will need, so it can be seen
-> coming. It contains no build steps, and none may be added to it here.
+> **The stand-in writer is not built here, and no step may be added that builds
+> it.** `plc/forklift-safety/SPEC.md` §7 specifies the writer completely — one
+> Windows-host process, all four members every 50 ms, level republish, two
+> sources — but **its implementation home is an owner ruling that has not been
+> made** (SPEC §10 open item 8). No implementation exists in this repository
+> and none may be written at the keyboard during a build session. Chunk O
+> observes everything the F-delta does **without** a writer, which is the
+> fail-safe direction and is worth observing; chunk P lists what stays
+> unproven until the ruling lands.
 
-Chunk H does run F-relevant **evidence** on the existing F-program: it writes
-standard DB tags with the PLCSIM Advanced API and watches the F-blocks react.
-It **changes no F-block, no F-runtime group and no F-I/O**, and it types no
-value into a fail-safe tag — TIA refuses that outright in permanent safety
-mode (`2206:000002`, LESSONS 2026-08-04), which is precisely why that path
-exists.
+Chunk H runs F-relevant **evidence** on the F-program as it stands before the
+delta: it writes standard DB tags with the PLCSIM Advanced API and watches the
+F-blocks react. It **changes no F-block, no F-runtime group and no F-I/O**, and
+it types no value into a fail-safe tag — TIA refuses that outright in permanent
+safety mode (`2206:000002`, LESSONS 2026-08-04), which is precisely why that
+path exists.
+
+> **Chunk H must run before chunk J, and cannot be re-run after it.** The
+> repeat script writes the three Bool channels and **no heartbeat**. After the
+> S015 delta a frozen heartbeat means `StandInValid` `FALSE`, which forces all
+> three validated channels to open/unpressed — so the script would drive a
+> program that has correctly stopped believing it. §2 F3 is closed **before**
+> the delta or not at all.
 
 **Every name, type, value and browse path below is quoted from
-`plc/forklift/SPEC.md` §14 or `docs/interfaces/opcua-nodes.md` §12.** Nothing
-here was invented. Where a value is one TIA *derives* rather than accepts — the
-namespace URI above all — the step says **read it back** and never *type it*.
+`plc/forklift/SPEC.md` §14, `docs/interfaces/opcua-nodes.md` §12 or
+`plc/forklift-safety/SPEC.md` §3–§5.** Nothing here was invented. Where a value
+is one TIA *derives* rather than accepts — the namespace URI above all — the
+step says **read it back** and never *type it*.
 
 ---
 
@@ -71,6 +84,16 @@ LESSONS 2026-07-27).
 | OB30 cycle time and CPU maximum, re-measured (step 97) | | |
 | m5-03b repeat on `safe_amr` (steps 102–106) | | |
 | `safe_amr_FIOPROBE` deleted (step 113) | | |
+| F-collective signature **before** the F-delta (step 119) | | |
+| F-OB number and cycle time in force (step 120) | | |
+| §2 F7 — Int `<>` and `MOVE` offered? (steps 122–123) | | |
+| FB2 interface counts after the delta, 4 / 4 / 18 / 3 (step 141) | | |
+| S015 disclosure warning, the tags it names (step 172) | | |
+| F-collective signature **after** the F-delta (step 176) | | |
+| `SafetyInputStandIn` cross-reference: 4 reads, 0 writes (step 178) | | |
+| F-side absence check `RESULT:` line (step 179) | | |
+| Three F timer `PT` values in force (step 186) | | |
+| Invalid-boot signature of §5.4 observed (step 187) | | |
 
 ---
 
@@ -79,9 +102,10 @@ LESSONS 2026-07-27).
 | # | Precondition | How to know |
 |---|---|---|
 | 1 | The working project is **`safe_amr`**. The probe copy `safe_amr_FIOPROBE` is **not** the project being edited | Step 1 reads the title bar |
-| 2 | **The bridge is not running and the HMI is not running.** A download drops the CPU's OPC UA sessions mid-read, and this project has already lost an evidence run to that (LESSONS 2026-07-28) | Step 41 checks it, and chunk H's log prints both link one-shots |
+| 2 | **The bridge is not running and the HMI is not running.** A download drops the CPU's OPC UA sessions mid-read, and this project has already lost an evidence run to that (LESSONS 2026-07-28) | Step 41 checks it, chunk H's log prints both link one-shots, and the same holds for the F-side download at step 174 |
 | 3 | Nothing else is writing this CPU — no test double on the same endpoint, no leftover API session | |
-| 4 | The four `Forklift/Safety/` mirrors and the M4 subtree already exist on the `DemoCell` interface | Step 7 reads the folder list back |
+| 4 | The four `Forklift/Safety/` mirrors and the M4 subtree already exist on the `DemoCell` interface | Step 7 reads the folder list back; step 179 uses the four mirrors as its positive control |
+| 5 | **For chunks J–O only:** the F-program is the **as-built 2026-07-30** build — D1–D7 applied, fourteen networks in FB2, interface 3 / 4 / 10 / 2 | Step 130 reads the four counts back, and stops if they differ |
 
 **If reality does not match a step, stop and say so.** A wrong keystroke in a
 safety project costs more than a question, and this document was written by an
@@ -898,28 +922,636 @@ DBs present, saved as `plc/forklift/evidence/m5-25-housekeeping.png`.
 
 ---
 
-## Chunk J — what is NOT in this procedure, and what comes next
+## Chunk J — the F-session's ground truth, and one decision
 
-**No step in this document builds, edits or downloads any part of the safety
-program.** The F-program specification is **brief m5-15** and it does not exist
-yet. Building fail-safe logic from an unwritten specification would produce a
-safety program nobody specified, and no amount of care in the tool would fix
-that afterwards.
+*Ends with: the licence, safety mode, the pre-delta signature, the F-OB cycle
+and the S015 instruction set all read back, and one answer.*
 
-**What the future F-session will need, so it can be seen coming.** Each item is
-m5-15's to *specify*; none may be attempted from this document:
+**Everything from here to chunk O is the F-delta**, `plc/forklift-safety/SPEC.md`
+§4.5. It can be run in the same sitting as chunks 0–I or in its own session; the
+only chunk it depends on is **H**, and it depends on H having run **first**
+(see the callout at the top of this document — the repeat script writes no
+heartbeat, so §2 F3 cannot be closed after the delta).
 
-| What | Where it comes from |
-|---|---|
-| The **S015 validity check** — TIA requires a process-specific validity check per F-runtime group for standard data entering it, and it is owed **visibly in the F-code** | m5-15, rewriting `plc/forklift-safety/SPEC.md` §7 and FIO-FEASIBILITY §6 |
-| The **automated stand-in writer** — its design, its rate, its failure behaviour, and which layer owns it | m5-15 + an owner ruling on the writer's home (judge review F6: the path crosses `agv/`, `plc/` and the Windows host, and no roster agent obviously owns it) |
-| The **WSL→Windows transport** for that writer | m5-15 |
-| The **reset-origination path** — `SafetyInputStandIn.ResetButtonPressed` has no compliant stimulus today: watch-table *Modify* is retired, the field evaluation has no business pressing a reset, and a test script is fine for a proof but not for the showcase | m5-15 (judge review F3 soft spot 2) |
-| The **protective/warning field evaluation** that produces the intrusion | m5-12, not started |
+**Nothing in chunks J–O touches the standard program.** The one new object on
+the standard side is a member added to a standard DB that no standard block
+reads or writes.
 
-**And two things that are agent work, not TIA work, before the first true
-end-to-end run:** HMI v2a (m5-14a — without it the cell is inert, chunk D) and
-the bridge's forklift-group repoint plus the §12.10 slot tables.
+**117.** Open **Safety Administration** for the CPU.
+*You should see:* the F-runtime group `RTG1` with `FOB_RTG1` and
+`Main_Safety_RTG1` under it, and a licence state.
+*Tell me:* the **Safety Advanced licence state** as it reads.
+*Why:* SPEC §2 **F0**. It was answered 2026-07-29; this confirms it still holds
+on this project, with today's date.
+
+**118.** In the same view, read the **safety mode**.
+*Tell me:* the exact wording.
+*Expected:* **activated** (permanent safety mode).
+**Trap.** Everything below assumes it stays activated. If a step ever seems to
+need it deactivated, that step is wrong — say so instead of deactivating. And
+no step below plans to *Modify* a fail-safe tag, because TIA refuses that
+outright in this mode (`2206:000002`, LESSONS 2026-08-04).
+
+**119.** Read the **F-collective signature**, online and offline.
+*Tell me:* both values, and whether they are equal.
+*Context, not an expectation:* `AA735E2A` was read on 2026-08-04, before this
+delta. **Record what you read** — it is the *before* value, and step 176 must
+show a **different** one. A collective signature that has not changed after a
+download is the F-side's version of a stale build (SPEC §2 F6).
+
+**120.** Open the F-OB's properties and read the **OB number and its cycle
+time** in force.
+*Tell me:* both, as the tool states them.
+*Context:* `FOB_RTG1` = OB123, cyclic 100 ms, read back 2026-08-04. It is what
+`STANDIN_STALE_MAX` = `T#1s` was derived against (ten F-cycles, SPEC §3.3).
+**Open item, not yours to fix at the keyboard:** at 100 ms, `RESET_HOLD_MIN` =
+200 ms spans two F-cycles where SPEC §4.3 requires five. That deviation is
+**open and belongs to a safety-spec ruling** (SPEC §10 open item 2). Both
+constants stay exactly as the SRS states them, and every evidence record from
+this build carries one line naming the deviation.
+
+**121.** Confirm chunk H has run **on this build**: find the log
+`plc/forklift-safety/evidence/m5-25-standin-repeat-<date>.log`.
+*Tell me:* the file name and its date.
+**Stop if it does not exist** and run chunk H first. This is SPEC §4.5 step 1's
+F3 half, and it is the last moment it can be closed: after the S015 delta the
+repeat script drives a program that has correctly stopped believing a frozen
+stand-in, so a re-run would measure the S015 check rather than the stimulus.
+
+**122.** Open **`F_Forklift_Safety [FB2]`**. In the *Instructions* task card,
+find the **comparator** operations available **inside the safety program**, and
+look for `<>` usable with an **Int**.
+*Tell me:* whether it is offered, and what the instruction is called.
+*Why this is asked before anything is built:* SPEC §2 **F7**, and it is a
+genuine unknown. This safety instruction set already turned out to omit
+`R_TRIG` and `F_TRIG`, which is why the existing block forms both edges by hand.
+
+**123.** In the same instruction list, look for **`MOVE`** usable with an Int.
+*Tell me:* whether it is offered.
+**Stop if either `<>` or `MOVE` is missing.** The heartbeat's type then becomes
+a **design change** — SPEC §2 F7 names the fallback shape, a Bool toggle with a
+period of at least three writer cycles so the F-OB cannot alias it — and that is
+a specification change, **not a substitution to make at the keyboard**. Report
+it and stop; the fourteen existing networks are unaffected either way.
+
+**124.** Screenshot the safety instruction list showing both, saved as
+`plc/forklift-safety/evidence/m5-25b-f7-instruction-set.png`.
+*Tell me:* saved.
+*Why a screenshot of an instruction list:* F7 is recorded as a tool read-back
+with its date, like every other tool-derived value in this project.
+
+**125. DECISION.** One consequence has to be decided before the delta, not
+discovered after.
+
+**What happens the moment the S015 delta is downloaded:** `StandInValid` boots
+`FALSE` and stays `FALSE` until the heartbeat has been **seen to change**
+(SPEC §5.4 V2 — the boot polarity). No process advances that heartbeat, because
+**the stand-in writer does not exist**: SPEC §7 specifies it completely, and its
+implementation home is an **owner ruling that has not been made** (SPEC §10
+open item 8). So all three validated channels read open/unpressed, **both
+demands stay latched and no reset can be accepted, indefinitely.**
+
+That is **by design, not a defect**, and it is the fail-safe direction: a writer
+that never started reads as a demand, never as a clear world. But it means the
+F-program is **inert** after this delta until the writer exists.
+
+*What depends on your answer:*
+
+- **Proceed (A).** Chunks K–O go in now. The delta is built, downloaded and
+  verified, and chunk O observes the whole invalid-boot signature — which is
+  §7.3 rows 1 and 6 observed for real. **T6 cannot run** until the writer
+  exists. The `Forklift M4 gate` behaviour is unaffected either way, because
+  the standard program does not yet read F-data.
+- **Stop here (B).** The F-program stays as built on 2026-07-30, chunk H's F3
+  proof stands, and the delta waits for the writer ruling so that build and
+  stimulus land together. Nothing done in chunks 0–I has to be undone.
+
+*Tell me:* **A or B.**
+
+---
+
+## Chunk K — the heartbeat member and FB2's interface (SPEC §4.5 steps 2–3)
+
+*Ends with: `SafetyInputStandIn` carrying four members and still reachable by
+no client, and FB2's interface reading 4 / 4 / 18 / 3.*
+
+**126.** In Program blocks, open the standard DB **`SafetyInputStandIn`**.
+*You should see:* three Bools — `EStopCircuitClosed`,
+`ZoneDeviceCircuitClosed`, `ResetButtonPressed` — all start value `FALSE`.
+*Tell me:* the three rows as they read.
+**Trap.** This is a **standard** DB and it stays one. Do not move it into the
+safety program and do not mark it as an F-DB: F-data cannot be stimulated from
+outside the safety program at all in permanent safety mode, which would destroy
+the stimulus (SPEC §4.2 step 2).
+
+**127.** Add a fourth member **`StandInHeartbeat`**, data type **`Int`**, start
+value **`0`**.
+*Tell me:* the row as it reads.
+*What it is:* not a device and not a wire — the writer's liveness counter, so
+the S015 check can tell a live stand-in from a frozen one (SPEC §3.1).
+
+**128.** Confirm **no member of this DB is Retain**.
+*Tell me:* that the Retain column is clear on all four.
+
+**129.** Open the DB's **properties** and read *Accessible from HMI/OPC UA*
+back.
+*You should see:* **✘**, unticked.
+*Tell me:* what the box reads.
+**Trap, and this is why it is read rather than assumed.** An edit is an
+occasion for a property to revert, and with this box ticked the S7-1500
+auto-publishes the DB under `Objects/DataBlocksGlobal` in its own namespace,
+where the commissioned access settings do **not** write-protect it — any OPC UA
+client could then clear a safety latch (SPEC §4.2 step 3). Step 179 turns this
+read-back into a fact from outside the tool.
+
+**130.** Open **`F_Forklift_Safety [FB2]`**'s interface table and read the
+**counts** back.
+*Tell me:* how many Inputs, Outputs, Statics and Constants it has.
+*Expected, as built 2026-07-30:* **3 / 4 / 10 / 2**.
+**Stop if it differs** — this delta is written against that build, and a
+different starting point is a different delta.
+
+**131.** Add an **Input** named **`StandInHeartbeat`**, type **`Int`**.
+*Tell me:* the row, and that it is the fourth Input.
+*Why an interface parameter and not a global read:* the same reason the three
+channels are — if a usable F-I/O channel ever exists, the swap is pins at one
+call and nothing inside this block moves (SPEC §2.1).
+
+Steps 132–139 add the **eight statics** of SPEC §3.3's second table. Each is
+one row: name, type, start value. All Static, all non-Retain.
+
+**132.** `HeartbeatChanged` — **`Bool`**, start **`FALSE`**.
+**133.** `HeartbeatSeen` — **`Bool`**, start **`FALSE`**.
+*After 133, tell me:* the start value of `HeartbeatSeen` as it reads.
+**Trap.** `FALSE` is load-bearing. This static is the boot polarity: a verdict
+built only on "not yet proven stale" boots `TRUE` for the whole first stale
+window, and every guard riding on it inherits that (LESSONS 2026-07-28,
+`BridgeLinkOk`). Life must be **seen** before it is believed.
+**134.** `StandInStaleTimer` — the **same timer type** the existing
+`ResetHoldMinTimer` uses: open that static, read its declared type back, and
+give this one the same.
+*Tell me:* the type you read off `ResetHoldMinTimer`, and that you used it.
+**Trap:** when TIA offers the call-options dialog, choose **multi-instance**.
+*Single instance* creates an extra data block and moves the statics out of
+`DB3`, so SPEC §8's watch table and §6's contract stop matching the build
+(SPEC §4.2 step 7).
+**135.** `StandInValid` — **`Bool`**, start **`FALSE`**.
+**136.** `EStopClosedValid` — **`Bool`**, start **`FALSE`**.
+**137.** `ZoneClosedValid` — **`Bool`**, start **`FALSE`**.
+**138.** `ResetPressedValid` — **`Bool`**, start **`FALSE`**.
+**139.** `HeartbeatMemory` — **`Int`**, start **`0`**.
+*Tell me:* the eight static rows are present.
+
+**140.** Add the constant **`STANDIN_STALE_MAX`** = **`T#1s`** in the block's
+*Constant* section — **if the F-block offers one**.
+*Tell me:* whether it offers a Constant section, and the row if it does.
+**If it does not**, say so and we enter `T#1s` as a **literal at V3's `PT` pin**
+at step 146. Either way the `PT` is **explicit at the call site**: a `PT` left
+to an interface default is the defect this project once hunted for a session
+while the value in force was `T#1M_40S` (LESSONS 2026-07-28).
+
+**141.** Read the interface **counts** back again.
+*Tell me:* the four counts as the interface table shows them.
+*Expected:* **4 / 4 / 18 / 3** — or 4 / 4 / 18 / 2 if step 140 found no
+Constant section.
+**Read them off the table.** A count you assumed is not a count.
+
+**142.** Screenshot the interface table showing the new Input, the eight statics
+and the constant, saved as
+`plc/forklift-safety/evidence/m5-25b-f-declarations.png`.
+*Tell me:* saved.
+
+> **Chunk K done.** The block has the vocabulary of §5.4. Nothing uses it yet
+> and the compiled program has not changed behaviour.
+
+---
+
+## Chunk L — the seven validity networks (SPEC §5.4 V1–V7)
+
+*Ends with: seven new networks ahead of the existing fourteen, each ending in
+one written operand.*
+
+**The position rule is load-bearing.** V1–V7 run **before** network 1, so every
+consumer reads a validated value computed earlier in the **same** F-cycle. Built
+after the latches instead, a dying writer would get one cycle of stale trust.
+After this chunk, TIA numbers V1–V7 as networks 1–7 and the core fourteen as
+8–21.
+
+Each step below builds **one** network. The element/pin/operand tables are in
+`plc/forklift-safety/SPEC.md` §5.4 — open it beside TIA and build from there,
+reading each network's notes: the notes carry the traps.
+
+**143.** In FB2, insert a **new empty network above the existing network 1**
+(`CauseGone`).
+*Tell me:* the empty network is first, and what the network below it is titled.
+*Expected below it:* `CauseGone`.
+
+**144.** Build **V1 — `HeartbeatChanged`**: a `CMP <>` box (Int) with
+in 1 = `#StandInHeartbeat`, in 2 = `#HeartbeatMemory`, driving an `=` coil on
+`#HeartbeatChanged`.
+*Tell me:* the coil's operand and the two comparator inputs as they read.
+**Trap:** `#HeartbeatMemory` is written by the **last** network of the block, so
+this comparison reads the **previous** cycle's value. That apparent forward
+reference is the design (SPEC §5.0 note 6) — do not "repair" it.
+
+**145.** Build **V2 — `HeartbeatSeen`**: an `S` (set output) coil with operand
+`#HeartbeatSeen`, driven by `#HeartbeatChanged`.
+*Tell me:* the coil type and its operand.
+*Why a set coil and not an assignment:* one-shot, never cleared while the
+F-runtime group runs — the same shape as `ResetSeenOpen`.
+
+**146.** Build **V3 — `StandInStaleTimer`**: a `TON` box, multi-instance
+`#StandInStaleTimer`, with `IN` = `#HeartbeatChanged` **(negated)** and `PT` =
+`#STANDIN_STALE_MAX` — or the literal `T#1s` at the pin if step 140 found no
+Constant section.
+*Tell me:* the `PT` operand as it reads at the pin, and that the `IN` pin shows
+the negation circle.
+**Trap:** the box is called **unconditionally, every cycle**, outside any
+branch. A timer that must be released by an event is called with `IN` as the
+event's own test — a timer called inside a state that stops executing can only
+ever be released by code that runs in the same scan as the exit (LESSONS
+2026-07-27).
+
+**147.** Build **V4 — `StandInValid`**: an `AND` box, in 1 = `#HeartbeatSeen`,
+in 2 = `#StandInStaleTimer.Q` **(negated)**, driving `=` on `#StandInValid`.
+*Tell me:* the two inputs and which one carries the negation circle.
+*Why this shape:* validity is asserted **affirmatively from evidence of life**,
+so boot, stale, frozen and never-started all fall through to invalid without
+being enumerated (LESSONS 2026-07-27, applied to liveness).
+
+**148.** Build **V5 — `EStopClosedValid`**: `AND` of `#EStopCircuitClosed` and
+`#StandInValid`, driving `=` on `#EStopClosedValid`.
+*Tell me:* the coil operand.
+
+**149.** Build **V6 — `ZoneClosedValid`**: the same shape with
+`#ZoneDeviceCircuitClosed`.
+*Tell me:* the coil operand.
+
+**150.** Build **V7 — `ResetPressedValid`**: the same shape with
+`#ResetButtonPressed`.
+*Tell me:* the coil operand.
+*What V5–V7 buy:* every failure direction is the stopping one. Invalid makes
+both circuits read **open** and the reset read **unpressed** — no edge, no
+arming, no pulse.
+
+**151.** Read the **first eight networks** back in order and tell me each one's
+**written operand**.
+*Expected, in this order:* `HeartbeatChanged`, `HeartbeatSeen`,
+`StandInStaleTimer`, `StandInValid`, `EStopClosedValid`, `ZoneClosedValid`,
+`ResetPressedValid`, then `CauseGone` as network 8.
+*Tell me:* the eight operands, and stop if the order differs.
+
+**152.** Screenshot networks 1–7, saved as
+`plc/forklift-safety/evidence/m5-25b-f-validity-networks.png`.
+*Tell me:* saved.
+
+> **Chunk L done.** The validity verdict exists. Nothing consumes it yet — the
+> core fourteen still read the raw channels, which chunk M fixes.
+
+---
+
+## Chunk M — the re-point, and the last network (SPEC §5.4)
+
+*Ends with: no logic network reading a raw channel, and `HeartbeatMemory`
+written by the final network of the block.*
+
+The re-point table in SPEC §5.4 is **exhaustive**: ten networks, thirteen pins,
+and nothing else in any core network moves. Steps 153–163 walk it in network
+order, using TIA's **new** numbering (the core fourteen are now 8–21).
+
+**153.** Network **8 `CauseGone`** — re-point the `AND` box: in 1 from
+`"SafetyInputStandIn".EStopCircuitClosed` to **`#EStopClosedValid`**, in 2 from
+`.ZoneDeviceCircuitClosed` to **`#ZoneClosedValid`**.
+*Tell me:* the two inputs as they now read.
+
+**154.** Network **9 `ResetSeenOpen`** — this one is **more than a
+substitution**. Replace the negated `ResetButtonPressed` on the `S` coil's input
+with an **`AND` box**: `#StandInValid` AND `#ResetPressedValid` *(negated)*.
+*Tell me:* the network as it now reads, and which pin carries the negation.
+*Why the extra conjunct:* "seen open" must mean *observed not pressed **while
+the stand-in was alive***. Without it, the invalid boot window — during which
+`ResetPressedValid` is forced `FALSE` — would count as having seen the device
+open, and a device genuinely stuck from before start-up would slip the power-up
+rejection the moment validity arrived.
+
+**155.** Network **10 `ResetRise`** — `AND` in 1 from `ResetButtonPressed` to
+**`#ResetPressedValid`**.
+*Tell me:* the input as it now reads.
+
+**156.** Network **11 `ResetFall`** — `AND` in 1 *(negated)* to
+**`#ResetPressedValid`**.
+*Tell me:* the input, and that the negation circle survived the edit.
+
+**157.** Network **12 `ResetPressArmed`** — `OR` in 1 *(negated)* to
+**`#ResetPressedValid`**.
+*Tell me:* the input and its negation.
+
+**158.** Network **13 `ResetHoldMinTimer`** — `AND` in 1 to
+**`#ResetPressedValid`**.
+*Tell me:* the input.
+**Do not touch this network's `PT`.** It stays `RESET_HOLD_MIN` = `T#200ms`
+exactly as the SRS states it; the sampling deviation of step 120 is a
+safety-spec ruling, not a keystroke here.
+
+**159.** Network **14 `ResetHoldMaxTimer`** — `TON` `IN` to
+**`#ResetPressedValid`**.
+*Tell me:* the `IN` pin.
+**Its `PT` also stays** `T#3s`.
+
+**160.** Network **15 `SafetyResetFault`** — **two** pins: `AND` in 1, and the
+`R1` pin *(negated)*, both from `ResetButtonPressed` to
+**`#ResetPressedValid`**.
+*Tell me:* both pins as they now read.
+
+**161.** Network **18 `EStopDemand`** — `S1` *(negated)* from
+`"SafetyInputStandIn".EStopCircuitClosed` to **`#EStopClosedValid`**.
+*Tell me:* the pin.
+**Trap:** this is the `RS` box, **set-dominant**. Do not swap it for an `SR`
+while you are in here — in TIA the trailing `1` marks the dominant input, and a
+demand arriving in the same cycle as a reset must win (SPEC §5.0 note 2).
+
+**162.** Network **19 `ZoneStopDemand`** — `S1` *(negated)* to
+**`#ZoneClosedValid`**.
+*Tell me:* the pin.
+
+**163.** Network **21 `ResetMemory`** — the coil's driver from
+`"SafetyInputStandIn".ResetButtonPressed` to **`#ResetPressedValid`**.
+*Tell me:* the driver as it now reads.
+
+**164.** Search FB2 for **`SafetyInputStandIn`** and list every hit.
+*You should see:* hits **only** in networks 1 (the heartbeat) and 5, 6, 7 (the
+three channels) — four in total, in the validity networks and nowhere else.
+*Tell me:* the hit list.
+**This is the verification of the whole re-point, and it is a search rather
+than a re-read for a reason:** thirteen pins is exactly the size of list where
+one gets missed, and the missed one reads a raw channel that a dead writer has
+frozen in the permissive direction.
+
+**165.** Build **M2 — `HeartbeatMemory`** as the **last network of the block**,
+after network 21 (`ResetMemory`): a `MOVE` box, `IN` = `#StandInHeartbeat`,
+`OUT1` = `#HeartbeatMemory`.
+*Tell me:* it is in, and what network number it has.
+**Trap:** last, and unconditional. Moved earlier, V1 compares the heartbeat
+against itself, `HeartbeatChanged` is never `TRUE`, the stale timer runs from
+the first cycle and `StandInValid` dies — **a failure that looks exactly like a
+dead writer and is not.**
+
+**166.** Read the **network count** back, and the titles of the last two
+networks.
+*Tell me:* the count and the two titles.
+*Expected:* **22**, ending `ResetMemory` then `HeartbeatMemory` — the two memory
+copies closing the block in that order.
+
+**167.** Screenshot the last three networks, saved as
+`plc/forklift-safety/evidence/m5-25b-f-repoint-and-m2.png`.
+*Tell me:* saved.
+
+> **Chunk M done.** The block is written. It is not on the CPU yet, and the call
+> in `Main_Safety_RTG1` is still inconsistent — chunk N repairs it.
+
+---
+
+## Chunk N — call, compile, download, and the checks a script can run
+
+*Ends with: the delta in the CPU with a changed collective signature, four read
+accesses and zero writes on the stand-in, and the F-side absence proven from
+outside TIA.*
+
+**168.** Open **`Main_Safety_RTG1 [FB1]`**, right-click the
+`F_Forklift_Safety` call box and choose **Update**.
+*Tell me:* whether the call box still shows an inconsistency marker.
+
+**169.** Wire the **fourth input pin** to
+**`"SafetyInputStandIn".StandInHeartbeat`**.
+*Tell me:* all four input pins as they read.
+*Expected:* the three Bool channels unchanged plus the heartbeat.
+
+**170.** Confirm **all four output pins are still empty**.
+*Tell me:* that they are.
+**Trap.** An unassigned FB output pin is legal and is the point: the values live
+in `DB3` and the standard program reads them **there**. A wired output pin here
+would put the F-program back to writing a standard DB — the dual-writer defect
+D4 exists to remove (SPEC §3.4).
+
+**171.** **Compile the safety program.**
+*Tell me:* the error and warning counts.
+**Stop on any error** — give me the message text.
+
+**172.** Open the compile/safety summary and find the **standard-data
+disclosure** (the S015 territory warning).
+*Tell me:* every tag it names.
+*Expected:* **four members of `SafetyInputStandIn` and nothing else.**
+**A warning naming any other DB means a re-point was missed** — go back to step
+164's search. And note what this warning is: TIA's mechanism here is
+**disclosure, not protection**, which is exactly why §5.4's validity check is
+built as networks the owner types rather than acknowledged in a log and
+forgotten.
+
+**173.** Screenshot the compile summary showing that warning, saved as
+`plc/forklift-safety/evidence/m5-25b-f-compile-s015.png`.
+*Tell me:* saved.
+
+**174.** **Download the safety program, with re-initialisation of
+`InstF_Forklift_Safety [DB3]`.** Expect TIA to want the CPU in STOP.
+*Tell me:* the dialog wording, and whether you were offered and took the
+re-initialisation option. If you do not see it, **stop and tell me what the
+dialog offers**.
+**Trap.** The interface change moved the DB layout. A download that preserves
+the old instance values leaves stale values ruling — the live tells are
+monitoring-error icons on exactly the rows whose offsets moved and an in-force
+`PT` that contradicts the call site (LESSONS 2026-07-28). Nothing here is
+Retain, so a re-initialisation costs nothing.
+
+**175.** Check the **diff circles** are **solid green** on every block.
+*Tell me:* what they show.
+**Read nothing until they are.** "I downloaded" is not "the CPU runs the new
+build", and this project has read it that way twice.
+
+**176.** Read the **F-collective signature** online and offline again.
+*Tell me:* both values, and whether they are equal to each other and different
+from step 119's.
+*Expected:* equal to each other, **different** from step 119.
+**A changed collective signature is the expected evidence of this delta, not an
+error.** Unchanged means the CPU is not running what you are reading — and this
+is the F-side's strongest stale-build instrument, because it answers "is the CPU
+running the program I am reading?" in one value rather than by inference.
+
+**177.** Open `InstF_Forklift_Safety [DB3]` and read the **new static names**
+back, and the new member name in `SafetyInputStandIn`.
+*Tell me:* any name ending in `_1` or another digit suffix.
+**Trap:** TIA appends collision suffixes without asking, in DB statics as well
+as interface rows, and a suffixed name cuts a client with no error dialog
+(LESSONS 2026-07-30). Step 179 sweeps the browse names by machine; these
+statics are swept here, by eye.
+
+**178.** Right-click **`SafetyInputStandIn`** → **Cross-references**.
+*You should see:* exactly **four read accesses**, all at the call in
+`Main_Safety_RTG1`, and **no write access from any block on the CPU**.
+*Tell me:* the access count and where each one is.
+*Why zero writes is the interesting half:* the only writer of this DB is the
+stand-in writer, outside the CPU. A write access from a block on the CPU means
+something in the program is fabricating its own stimulus.
+
+**179.** Run the F-side absence check from a shell **outside TIA**:
+
+    python plc/forklift-safety/evidence/m5-25b-f-absence-verify.py opc.tcp://<instance IP>:4840
+
+using the IP read back at step 4. It needs `asyncua`; use the same environment
+the bridge's client runs in. **It writes nothing** — the claim is that the datum
+is unreachable, and a script that tried to write it would be asserting the
+reachability it exists to deny.
+*You should see:* the namespace array, a **positive control** reading the four
+`Forklift/Safety/` mirrors, then the absence sweep, the `DataBlocksGlobal`
+listing, a collision-suffix sweep, and a final `RESULT:` line.
+*Tell me:* the `RESULT:` line, and what `DataBlocksGlobal` was reported to hold.
+**Stop if the result is FAIL** — the script names what is reachable.
+*Why the control runs first and the script aborts if it fails:* **an absence
+proven by a browse that never reached the server is not an absence.** The
+mirrors are the proof that this client sees the CPU at all.
+
+**180.** Save that output to
+`plc/forklift-safety/evidence/m5-25b-f-absence-<today's date>.log`.
+*Tell me:* the file name you used.
+**Trap:** one log per run, unique name per run (LESSONS 2026-07-28).
+
+> **Chunk N done.** The S015 check is running in the CPU, its signature is
+> recorded, and "no client can reach the F-side" is a read-back from a different
+> protocol stack rather than a setting.
+
+---
+
+## Chunk O — in force, and what the delta does with no writer
+
+*Ends with: three `PT`s read in force, and the invalid-boot signature of §5.4
+observed — which is the only part of §4.5 step 13 that can be run today.*
+
+**181.** In **Watch and force tables**, look for a table named
+**`Forklift F gate`**.
+*Tell me:* whether it exists. If it does, tell me roughly how many rows it has.
+*Context:* SPEC §8 specifies it in four groups. Whether the 2026-07-30 build
+created it is not recorded anywhere, which is why this is a question and not an
+instruction.
+
+**182.** Make sure **SPEC §8 Group 1**'s four rows are in that table (creating
+the table if step 181 found none): the three `"SafetyInputStandIn"` channels,
+and **`"SafetyInputStandIn".StandInHeartbeat`** in **Dec**.
+*Tell me:* four rows present.
+**No row of this table is ever modified.** It is a **reading** instrument: the
+stimulus is the writer, fail-safe rows could not be modified anyway with safety
+mode activated (`2206:000002`), and a fabricated latch demonstrates nothing.
+
+**183.** Add **SPEC §8 Group 3**'s eight new validity rows:
+`"InstF_Forklift_Safety".StandInValid`, `.HeartbeatSeen`,
+`.StandInStaleTimer.ET`, `.StandInStaleTimer.PT`, `.EStopClosedValid`,
+`.ZoneClosedValid`, `.ResetPressedValid`, `.HeartbeatMemory` (Dec).
+*Tell me:* eight rows added.
+
+**184.** Confirm **Group 2**'s four rows are present:
+`"InstF_Forklift_Safety".EStopDemand`, `.ZoneStopDemand`,
+`.SafetyResetRequired`, `.SafetyResetFault`.
+*Tell me:* four rows present.
+
+**185.** Put the table in **Monitor**.
+*Tell me:* whether any row shows a monitoring-error icon.
+**Trap:** an error icon on exactly the rows whose offsets moved is the live tell
+of a download that did not re-initialise `DB3` (step 174).
+
+**186.** Read the **three timer `PT` values in force**.
+*Expected:* `StandInStaleTimer.PT` = `T#1s`, `ResetHoldMinTimer.PT` =
+`T#200ms`, `ResetHoldMaxTimer.PT` = `T#3s`.
+*Tell me:* the three values as the watch table shows them.
+**Trap, and this is why they are read here and not off the interface.** An
+interface *Default value* governs **nothing** once the instance DB exists. A
+disagreement here is a stale build or a download without re-initialisation — not
+a typo — and the repair is step 174 again, not an edit.
+
+**187.** Read the **invalid-boot signature** off the table, all in one reading:
+
+    StandInValid                FALSE
+    HeartbeatSeen               FALSE
+    StandInStaleTimer.ET        at PT (T#1s), not climbing
+    EStopClosedValid            FALSE
+    ZoneClosedValid             FALSE
+    ResetPressedValid           FALSE
+    EStopDemand                 TRUE
+    ZoneStopDemand              TRUE
+    SafetyResetRequired         TRUE
+    SafetyResetFault            FALSE
+
+*Tell me:* each of those ten readings.
+**This is the delta working, not the delta failing.** With no writer, the
+heartbeat never advances, so life is never seen, so the logic refuses to
+believe a frozen world and holds both demands. It is SPEC §7.3 rows 1 and 6
+observed — *wire NC, program NO*, rebuilt for a software wire.
+**Two readings would be the defect signature of this whole delta:**
+`StandInValid` **`TRUE`** with the heartbeat frozen (V2's boot polarity is
+wrong, or V4 is reading the timer un-negated), or `EStopClosedValid` **`TRUE`**
+while `StandInValid` is `FALSE` (V5 is not conjoined with validity). If you see
+either, **stop**.
+*Also worth reading, and it is not a fault:* Group 1's raw channel rows read
+`FALSE` too, so they and the validated rows agree right now. **They differ
+exactly when `StandInValid` is `FALSE` and a channel is closed** — and that
+difference on screen is the S015 check doing its work. It cannot be seen until
+a writer exists.
+
+**188.** Screenshot the watch table showing that signature, saved as
+`plc/forklift-safety/evidence/m5-25b-f-invalid-boot-signature.png`.
+*Tell me:* saved.
+
+**189. BLOCKED, and it is recorded rather than worked around.** SPEC §4.5 step
+13 — start the stand-in writer, watch `HeartbeatSeen` and `StandInValid` go
+`TRUE`, then stop it and watch validity drop and both demands latch — **cannot
+be run in this session.** No writer implementation exists: SPEC §7 is the
+contract, and its **implementation home is an owner ruling that has not been
+made** (SPEC §10 open item 8). Until it lands, no implementation may be written,
+here or at the keyboard.
+
+*What is proven without it, and it is not nothing:* the delta compiles, downloads
+with a changed collective signature, is reachable by no client, reads four
+standard tags and writes none, holds its three `PT`s in force, and **fails in
+the stopping direction with the stand-in dead** (step 187). That is the failure
+row the check exists for.
+
+*What stays unproven until the writer exists:* that validity ever becomes
+`TRUE`; every T6 step; the re-arming of the stale timer; and the whole reset
+path on this build. **No gate criterion may cite them.**
+*Tell me:* that you have read this and are not going to improvise a writer.
+
+**190.** Record the **F-session read-backs** in one go, for the record table:
+safety mode (step 118), the new collective signature (step 176), the F-OB and
+its cycle (step 120), and the three `PT`s (step 186).
+*Tell me:* the four lines, each with today's date.
+*Why they are collected rather than trusted from earlier in the session:* SPEC
+§4.5 step 14 asks for them together, at the end, against the build that is
+actually running.
+
+**191.** Fill in every remaining row of the **record table** at the top of this
+document with its date, and rewrite the **progress block**.
+*Tell me:* done.
+
+> **Chunk O done.** The S015 validity check runs in the F-CPU, and the F-program
+> is deliberately inert until the stand-in writer exists. It establishes **no
+> safety integrity claim**: the stand-in stays a standard DB, standard tags stay
+> unsafe, and what the check adds is honesty about liveness (SPEC §5.4, §7.8).
+
+---
+
+## Chunk P — what is still not built, and who owns it
+
+**No step above builds any of the following, and none may be added that does.**
+Each is somebody's specified work, and where a step in this document would have
+depended on one, it is marked BLOCKED in place rather than filled with an
+invented value.
+
+| What is missing | Whose it is | What it blocks here |
+|---|---|---|
+| **The stand-in writer's implementation home** — an **owner ruling**, not made. SPEC §7.1–§7.3 is the complete contract; no implementation exists and none may be written until the ruling lands | **Owner** (SPEC §10 open item 8) | Step 189, and with it every T6 step, every criterion-(a) run, and any observation of `StandInValid` `TRUE` |
+| **The field evaluation's wall-clock transition log** — §7.6's four-way correlated record is the only instrument that distinguishes a field-originated write from a scripted one | **m5-12**, not started (SPEC §10 open item 9) | The zone channel's criterion-(a) form. Without it a zone transition is an operator command whatever the narration says |
+| **`sim/scenarios/forklift_commissioning.md` §13** still stimulates by watch-table *Modify*, which ADR 0015 retired | **sim agent** (SPEC §10 open item 10) | Nothing in this document, but it will contradict SPEC §9.1 for anyone reading both |
+| **The `RESET_HOLD_MIN` sampling deviation** — 200 ms against a 100 ms F-OB is two cycles where §4.3 requires five | **safety-spec**, with AT-08 re-read beside it (SPEC §10 open item 2) | Nothing is tuned here; step 120 names it and every evidence record from this build carries one line naming it |
+| **AT-08 (b)'s scope** — the timed stimulus `reset pulse <ms>` now exists; whether the sub-window rejection test is in scope is a ruling, shadowed by the one above | **safety-spec** (SPEC §10 open item 3) | Nothing here; the program behaves identically either way |
+| **HMI v2a** (m5-14a) — without it the standard cell is inert after chunk D | **hmi agent** | Teleop drive and any showcase re-take, per chunk D |
+| **The bridge's forklift-group repoint and the §12.10 slot tables** | **bridge agent** | The vehicle-side half of the §14 envelope |
 
 ---
 
@@ -937,7 +1569,17 @@ the bridge's forklift-group repoint plus the §12.10 slot tables.
 | G — download and in force | 82–97 | in-force statics and `PT`s, cold-start signature, cycle time |
 | H — m5-03b on `safe_amr` | 98–107 | the stand-in proof on the working project |
 | I — housekeeping | 108–116 | `Tag_1` resolved, probe copy deleted, project saved |
-| J — not built here | — | the F-program half, pending m5-15 |
+| J — F ground truth and decision | 117–125 | licence, safety mode, pre-delta signature, F-OB cycle, F7 |
+| K — heartbeat and FB2 interface | 126–142 | four DB members, interface 4 / 4 / 18 / 3 |
+| L — the validity networks | 143–152 | V1–V7 ahead of `CauseGone` |
+| M — re-point and last network | 153–167 | thirteen pins re-pointed, 22 networks, M2 last |
+| N — call, compile, download | 168–180 | changed signature, 4 reads / 0 writes, absence proven |
+| O — in force, no writer | 181–191 | three `PT`s in force, the invalid-boot signature |
+| P — not built here | — | the writer, the field log, two safety-spec rulings |
 
-**116 steps.** If a step turns out to contain two actions, split it and say the
+**191 steps.** If a step turns out to contain two actions, split it and say the
 total has changed.
+
+**Steps 1–116 are the standard-program side and steps 117–191 are the F-side.**
+They are two sittings for most people, and the only ordering constraint between
+them is that **chunk H runs before chunk J**.
