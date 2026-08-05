@@ -193,7 +193,28 @@ remains the input path.
     guard was dropped 2026-08-05: the guard skipped the step in exactly the
     hand-install case that caused the outage, while `--only-upgrade` is a no-op
     on a current machine.
-  - **(i) OWNER'S CALL, recommendation is CATCH UP, not pin.** The
+  - **(i) DONE 2026-08-05 by m5-26** — the owner ruled catch up. `dist-upgrade`
+    ran once: **342 upgraded, 7 new, 1 removed, 0 errors, 0 broken**, and the
+    machine is now **0 packages behind with no hold and no pin**. All three
+    verifications passed: `GL_RENDERER` still `llvmpipe (LLVM 20.1.2, 256 bits)`
+    read from the ogre2 log against a pre-upgrade reading taken first; 23 nodes
+    up with all seven managed nodes `active` and zero process deaths; the m5-24
+    domain wall holding both directions and the pass-through residual still
+    `0.000e+00`. Nothing tuned, nothing restored.
+    - **The one real risk, answered by measurement:** the plan added five
+      NVIDIA-580 packages, and NVIDIA is registered as an EGL vendor **ahead of
+      Mesa** on this machine with `libEGL_nvidia` genuinely loaded into the
+      render process. The post-upgrade renderer reading was taken with the new
+      vendor in place, so the llvmpipe result is a measurement of the current
+      configuration, not an inheritance.
+    - **Consequence, carried:** every evidence file measured before 2026-08-05
+      now describes an environment that no longer exists. m5-26 could not edit
+      them. Most M5 evidence was already container-qualified; the ones that need
+      the new qualifier are the WSL-measured files — `EVIDENCE_ENVELOPE.md` and
+      `EVIDENCE_VEHICLE_IMAGE.md`. Done when each carries it.
+  - ~~**(i) OWNER'S CALL, recommendation is CATCH UP, not pin.**~~ Superseded
+    above; the reasoning is kept because it is why the decision went this way.
+    The
     `libglapi-mesa` removal is verified hollow: it is a Mesa-24 stub, the
     packages that actually contain llvmpipe are already at 25.2.8 — the exact
     version the Gazebo log prints — and the only installed dependant is
