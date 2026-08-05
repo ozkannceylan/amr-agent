@@ -187,10 +187,14 @@ DDS_PKGS=(
   ros-jazzy-rmw-fastrtps-cpp
   ros-jazzy-rmw-fastrtps-shared-cpp
 )
-if [[ ${#MISSING[@]} -gt 0 ]]; then
-  log "aligning the Fast-DDS stack with the archive: ${DDS_PKGS[*]}"
-  apt-get install --only-upgrade -y "${DDS_PKGS[@]}"
-fi
+# Unconditional on purpose (m5-21b decision 2, finding 1). Guarding this on
+# MISSING skipped it in exactly the case that caused the original outage: a
+# machine where every ROS_PKGS entry is already present and someone later
+# hand-installs a new ROS package against a stale Fast-DDS set. On an
+# already-current machine --only-upgrade is a no-op, so the guard bought
+# nothing and cost that hole.
+log "aligning the Fast-DDS stack with the archive: ${DDS_PKGS[*]}"
+apt-get install --only-upgrade -y "${DDS_PKGS[@]}"
 
 log "done (ROS 2 Jazzy, Gazebo Harmonic, ros_gz, Nav2, slam_toolbox)."
 log "  source /opt/ros/jazzy/setup.bash"

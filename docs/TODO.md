@@ -182,12 +182,26 @@ remains the input path.
   and `robot_localization` 3.8.3 are system packages; the overlay is retired to
   `~/ros-overlay.retired-m5-21`. The feared cross-tree upgrade did not happen
   (0 upgraded / 137 new / 0 removed). The EVIDENCE_ENVELOPE qualifier and the
-  latency re-reading are applied. **Two owner decisions left over:**
-  (i) `apt-get -s dist-upgrade` removes `libglapi-mesa`, and Mesa is the
-  rasteriser every Gazebo run here uses — so dist-upgrade was NOT taken; decide
-  whether the machine stays behind the archive deliberately.
-  (ii) the Fast-DDS four-package set now sits in `sim/setup/install.sh` behind
-  `--only-upgrade`; confirm that is where it belongs.
+  latency re-reading are applied. Both follow-up decisions are answered in
+  docs/reports/m5-21b-install-decisions.md:
+  - **(ii) CLOSED** — `install.sh` is the right home, and its `if MISSING`
+    guard was dropped 2026-08-05: the guard skipped the step in exactly the
+    hand-install case that caused the outage, while `--only-upgrade` is a no-op
+    on a current machine.
+  - **(i) OWNER'S CALL, recommendation is CATCH UP, not pin.** The
+    `libglapi-mesa` removal is verified hollow: it is a Mesa-24 stub, the
+    packages that actually contain llvmpipe are already at 25.2.8 — the exact
+    version the Gazebo log prints — and the only installed dependant is
+    `libgl1-amber-dri`, a pre-2007 GPU driver this machine has no use for.
+    Staying pinned is what CAUSED the m5-21 outage: packages.ros.org serves
+    only today's builds, so every future install pairs new against stale, and
+    **there is no rollback — `fastcdr` 2.2.5 is already gone from the archive
+    and the machine's only copy is one saved file in `/root/m5-21-snapshot`**.
+    342 packages behind. Done when an infra brief runs the dist-upgrade with a
+    snapshot first, `/dev/shm` cleared after, and `done_when` carrying a Gazebo
+    `GL_RENDERER` read plus the §12.5 vehicle-stack bringup. **Not run
+    unattended: it mutates the environment every evidence file is qualified by,
+    and 342 packages can surprise in ways no simulation shows.**
 - **fleet/M6**: a goal aborted while the envelope is withheld is nobody's yet —
   Nav2 held 235 s then aborted with code 105, as ADR 0011 D3 predicts.
   Re-issuing the goal is order-level behaviour.
