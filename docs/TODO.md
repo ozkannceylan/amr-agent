@@ -306,6 +306,21 @@ the fault was in the reader, not the file.
 - **`sim/` edits requested** by m5-24 report §3 to make the split clean rather
   than worked around — precise enough to become a sim brief.
 
+## HMI v3 — owner feedback 2026-08-05, planned at the END of M5
+The owner reviewed the v2a screenshots and asked for a substantially larger
+operator page in a later version. **Not M5 work** except where noted; the plan
+is written now (brief m5-30) and implemented after M5 closes.
+- teleop joystick shown **only** when teleop mode is selected — owner ruled
+  2026-08-05 that this waits for v3 rather than being fixed in v2a
+- the warehouse map with the vehicle's live position on it, **RViz-grade**
+- every piece of vehicle information reachable from this one page
+- selectable **live camera views** from the vehicle. Note: the forklift model
+  has no camera today, so this is a model change with a render-budget cost, on
+  a machine where the GUI already costs ~8 RTF points
+- **Boundary ruled by the owner 2026-08-05:** the real-time map with live
+  obstacles is **inside M5** — it is criterion (e) word for word, delivered as
+  m5-13 plus HMI v2b. Only the beyond-criterion parts above are v3.
+
 ## M5 — open items
 - Monitoring service directory: ADR 0011 D4 recommends `agv/` but does not
   rule it; `viz/` is the alternative and the ADR 0005 test names the
