@@ -61,10 +61,156 @@ Rewrite the three fields below whenever a step completes, and always before the
 session ends. Resuming then costs nothing: read this section, give the next
 step.
 
-    chunk:               not started
-    last completed step: none
-    verified so far:     nothing yet
-    notes:               —
+    chunk:               COMPLETE — chunks 0 and A–O all done in the session of
+                         2026-08-05 (step 49 = A, step 125 = A). Step 189 stands
+                         BLOCKED as written: no writer was improvised.
+    last completed step: 189
+    STEP 189 IS NOW STALE, and this is the first thing the next session should
+                         act on. Step 189 rests on "no writer implementation
+                         exists". One does: commit 640e71e built the stand-in
+                         writer in `bridge/`, on the owner's ruling recorded in
+                         440666d, and it is blocked on exactly one thing — the
+                         `StandInHeartbeat` tag not existing in the controller,
+                         which threw a does-not-exist on 122 consecutive cycles.
+                         **That tag was created and downloaded in this session
+                         (step 127).** So the writer is unblocked: run it, watch
+                         `HeartbeatSeen` and `StandInValid` go TRUE, then stop it
+                         and watch validity drop and both demands latch. That is
+                         SPEC §4.5 step 13 and the whole of T6, and it is the
+                         only part of this build that stayed unproven today.
+    step 164 caught one: the network 15 `R1` re-point had NOT taken, although it
+                         had been reported done at step 160 — the search found
+                         it still reading `"SafetyInputStandIn".ResetButtonPressed`.
+                         Re-applied, and the search then returned 0. This is the
+                         step existing for exactly its stated reason.
+    chunks N and O:      the safety program compiled 0/0, downloaded WITH
+                         re-initialisation of DB3, circles solid green, and the
+                         collective F-signature changed. The four call pins are
+                         wired, the four output pins are still empty, no name
+                         carries a `_1`, and the `Forklift F gate` table (which
+                         already existed with 21 rows) now carries Group 1's
+                         heartbeat row and Group 3's eight validity rows —
+                         30 rows, monitoring with no error icon.
+    EVIDENCE GAP:        of the ~14 screenshots this procedure asks for, only
+                         `m5-25-before-interface.png` and
+                         `m5-25-cold-start-signature.png` are on disk. Every
+                         other one was reported saved but is not in
+                         plc/forklift/evidence/ or plc/forklift-safety/evidence/.
+                         The tool-produced artefacts — five logs and
+                         safety_summary.pdf — ARE present, and they carry the
+                         load-bearing values; the missing files are the visual
+                         record. They WERE taken: they sit unrenamed in
+                         `C:\Users\ozkan\OneDrive\Pictures\Screenshots` as
+                         `Screenshot 2026-08-05 HHMMSS.png`, from 16:47 onward.
+                         They were deliberately NOT auto-mapped into evidence
+                         names, because that mapping would be inferred from
+                         timestamps and a mislabelled evidence file is worse than
+                         a missing one. Rename them with the owner, who knows
+                         which is which, before any gate cites them.
+    note for step 164:   V1 and V5–V7 were built on the FB's INTERFACE
+                         PARAMETERS (`#StandInHeartbeat`,
+                         `#EStopCircuitClosed`, `#ZoneDeviceCircuitClosed`,
+                         `#ResetButtonPressed`) exactly as steps 144 and 148–150
+                         write them. The pre-delta core networks, by contrast,
+                         read `"SafetyInputStandIn".<channel>` GLOBALLY. So once
+                         chunk M's re-point is done, a text search for
+                         `SafetyInputStandIn` inside FB2 will return **zero**
+                         hits, not the four step 164 predicts — the four reads
+                         live at FB1's call pins instead, which is what the
+                         step 178 cross-reference row actually asks for.
+    verified so far:     project safe_amr on CPU 1513F-1 PN (6ES7 513-1FM03-0AB0,
+                         fw V3.1); PLCSIM instance safecell3 at 192.168.53.1;
+                         DemoCell interface URI reads http://DemoCell; Forklift
+                         has six subfolders (Input, Output, Status, Hmi, Link,
+                         Safety) with the four Safety mirrors present.
+                         Chunk A: four new global DBs created with all nine
+                         members, types, start values (both ProcessStop members
+                         TRUE) and access rights per §14.2; Retain clear on all
+                         nine; no existing DB opened or edited.
+                         Chunk B: Forklift now has ten subfolders; the nine §12
+                         nodes are in place with no _1 suffix, and the three
+                         Envelope leaves read access level RD only.
+                         Chunk C: compiled 0/0, downloaded, diff circles solid
+                         green; the nine nodes read back from outside TIA with
+                         asyncua 2.0.1 on the Windows host, and the write on
+                         Forklift/Envelope/ForkliftMotionEnable was REFUSED with
+                         BadNotWritable. The `Forklift M4 gate` table monitors
+                         with no error icon on any row.
+                         Chunk D answered A, with one owner-added verification
+                         run between C and E: HMI v2a was pointed at the live
+                         CPU with hmi/config.yaml and CONNECTED — 8 writable and
+                         23 read-only nodes resolved, §12 and the four Safety
+                         mirrors included, zero browse failures. Its writes land:
+                         Mode/HmiDriveModeRequest went 0 -> 1, and
+                         ProcessStop/HmiProcessStopRequest was driven TRUE ->
+                         False -> TRUE from the operator page.
+                         ForkliftProcessStopActive stayed TRUE throughout, which
+                         is correct — no program writes it until §14 part 3b.
+                         The HMI was stopped again before chunk E.
+                         CORRECTION to this document: chunk D's text says the
+                         cell "goes inert until HMI v2a exists". v2a exists (it
+                         was built in ea4d63d) and has now been exercised against
+                         the real CPU; what chunk D's consequence actually turns
+                         on is v2a being RUNNING, not v2a being built.
+                         Chunk E: eight constants, ten statics and eleven temps
+                         declared in FB_ForkliftTeleop (FB3, instance
+                         ForkliftControl_DB / DB10); the timer type read back
+                         off HmiStaleTimer is TON_TIME. ProcessStopLatch reads
+                         default `true`. Neither the FB nor its instance DB was
+                         renamed.
+                         Chunk F: parts 2d, 3b, 5a and 8 inserted and the five
+                         statements modified; compiles 0 errors / 0 warnings.
+                         At the owner's request steps 74–79 were applied as ONE
+                         paste of the whole FB body rather than five in-place
+                         edits, and that body is now committed to the repository
+                         as `plc/forklift/scl/FB_ForkliftTeleop.scl`,
+                         byte-identical to what was pasted, so a future TIA
+                         export can be diffed against it.
+                         Chunk G: downloaded, circles solid green, no `_1` in
+                         the new statics, watch table `Forklift M5 delta` built
+                         with all 22 rows and monitoring cleanly. The §14.9
+                         cold-start signature was observed in full after a
+                         STOP -> RUN, and the node set was re-read from outside
+                         TIA with the nine values now PROGRAM-PUBLISHED and the
+                         envelope write still refused
+                         (`m5-25-node-verify-2026-08-05-post-delta.log`).
+    open check:          two timer PTs read `T#0MS` in force. This is NOT the
+                         LESSONS 2026-07-28 stale-PT trap: all three statics
+                         were created by this very download, so their content
+                         starts at zero, the only writer of `PT` is the call
+                         site, and the one timer whose `IN` is TRUE
+                         (`VehicleStaleTimer`, heartbeat frozen) reads exactly
+                         its specified `T#500MS`. `ModeDisagreeTimer` and
+                         `StandstillTimer` have `IN` FALSE — `#modeDisagreeRaw`
+                         needs `#vehicleAlive`, `#atStandstill` needs
+                         `#speedValid`, and both need the bridge. Re-read all
+                         three PTs with the bridge running before any test that
+                         depends on the 2 s or 500 ms delay. A reinitialisation
+                         would not have helped and was deliberately not done.
+                         Chunk H: the m5-03b criterion (a) proof now stands on
+                         the working project — see the record table row. Both
+                         runs were executed from the session's own shells rather
+                         than the owner's consoles, so step 107's side-by-side
+                         console screenshot was NOT taken; the two dated logs in
+                         plc/forklift-safety/evidence/ are the evidence, and they
+                         are stronger than the screenshot would have been. The
+                         run established no safety integrity claim: the path is a
+                         standard DB and ADR 0011 D5's claim boundary is
+                         untouched.
+    notes:               FIOPROBE instance still listed in the PLCSIM panel,
+                         switched off — chunk I business, not touched.
+                         Step 12: ForkliftDriveModeActive was first typed as
+                         "ForkliftMode" and corrected before proceeding.
+                         Step 25 had to be redone: the two TRUE start values did
+                         not commit the first time, and after they were retyped
+                         and downloaded the server still read False — the DBs
+                         already existed on the CPU, so the download preserved
+                         their actual values (LESSONS 2026-07-28). A PLCSIM
+                         STOP -> RUN took the start values, nothing being Retain.
+                         Note for step 45's script: it prints the §14.2 start
+                         value beside the live value but does NOT fail on a
+                         mismatch — it reported PASS while both ProcessStop
+                         nodes read False. Compare that column by eye.
 
 **Record table.** These are values only the tool can produce. Fill each in when
 the step that produces it passes, with its date. Until a row is filled, the
@@ -73,27 +219,27 @@ LESSONS 2026-07-27).
 
 | Record | Value | Date |
 |---|---|---|
-| Server interface namespace URI, read back (step 6) | | |
-| PLCSIM Advanced instance name, read back (step 3) | | |
-| PLCSIM Advanced instance IP, read back (step 4) | | |
-| Nine §12 browse paths confirmed (step 45) | | |
-| Status code of the refused `Envelope/` write (step 45) | | |
-| Ten new statics in force match §14.3 (step 90) | | |
-| Three new timer `PT` values in force (step 91) | | |
-| Cold-start signature of §14.9 observed (step 94) | | |
-| OB30 cycle time and CPU maximum, re-measured (step 97) | | |
-| m5-03b repeat on `safe_amr` (steps 102–106) | | |
-| `safe_amr_FIOPROBE` deleted (step 113) | | |
-| F-collective signature **before** the F-delta (step 119) | | |
-| F-OB number and cycle time in force (step 120) | | |
-| §2 F7 — Int `<>` and `MOVE` offered? (steps 122–123) | | |
-| FB2 interface counts after the delta, 4 / 4 / 18 / 3 (step 141) | | |
-| S015 disclosure warning, the tags it names (step 172) | | |
-| F-collective signature **after** the F-delta (step 176) | | |
-| `SafetyInputStandIn` cross-reference: 4 reads, 0 writes (step 178) | | |
-| F-side absence check `RESULT:` line (step 179) | | |
-| Three F timer `PT` values in force (step 186) | | |
-| Invalid-boot signature of §5.4 observed (step 187) | | |
+| Server interface namespace URI, read back (step 6) | `http://DemoCell` | 2026-08-05 |
+| PLCSIM Advanced instance name, read back (step 3) | `safecell3` | 2026-08-05 |
+| PLCSIM Advanced instance IP, read back (step 4) | `192.168.53.1` | 2026-08-05 |
+| Nine §12 browse paths confirmed (step 45) | all nine, values match §14.2; ten subfolders; 44 browse names, no `_1` | 2026-08-05 |
+| Status code of the refused `Envelope/` write (step 45) | `BadNotWritable` — "The access level does not allow writing to the Node." | 2026-08-05 |
+| Ten new statics in force match §14.3 (step 90) | all ten agree; `ProcessStopLatch` reads TRUE in force | 2026-08-05 |
+| Three new timer `PT` values in force (step 91) | `VehicleStaleTimer.PT` = `T#500MS`; the other two read `T#0MS` **because their `IN` is FALSE** — see the note below, not a stale build | 2026-08-05 |
+| Cold-start signature of §14.9 observed (step 94) | all seven: mode `0`, enable FALSE, ceiling `0.0`, permit FALSE, `ForkliftProcessStopActive` TRUE, `ForkliftResetRequired` TRUE, `VehicleSeenAlive` FALSE with `VehicleStaleTimer.ET` at `T#500MS` | 2026-08-05 |
+| OB30 cycle time and CPU maximum, re-measured (step 97) | CPU cycle shortest 1.002 ms, last 1.006 ms, longest 1.701 ms; configured maximum 150 ms. OB30's own execution time was not read — this panel is the CPU cycle | 2026-08-05 |
+| m5-03b repeat on `safe_amr` (steps 102–106) | PASS on all four phases — (a) 48.8 ms consumer-view latency, (b) closing both circuits cleared no demand, (c) `SafetyResetRequired` cleared 38.3 ms **after** release, (d) E-stop re-asserted 84.8 ms with `ZoneStopDemand` clear; restored bit string identical to the PHASE0 baseline. The independent OPC UA witness agrees on every transition **and every non-transition**. Logs: `m5-25-standin-repeat-2026-08-05.log`, `m5-25-opcua-witness-2026-08-05.log` | 2026-08-05 |
+| `safe_amr_FIOPROBE` deleted (step 113) | deleted, together with `safe_amr_FIOPROBE.backup`. The PLCSIM Advanced **instance** named FIOPROBE is still listed in the control panel, switched off | 2026-08-05 |
+| F-collective signature **before** the F-delta (step 119) | `AA735E2A`, offline = online. Unchanged from the 2026-08-04 read, so the day's standard-program downloads touched no F-block. F-SW `AA735E29`, F-HW `00000001` | 2026-08-05 |
+| F-OB number and cycle time in force (step 120) | `FOB_RTG1` = **OB123**, cyclic interrupt, cycle time 100000 µs = **100 ms**, priority 12, warn 110 ms, maximum 120 ms | 2026-08-05 |
+| §2 F7 — Int `<>` and `MOVE` offered? (steps 122–123) | **Both offered.** `CMP <>` ("Not equal") under Comparator operations, and `MOVE` under Move operations V2.0. No design change: the heartbeat stays `Int` | 2026-08-05 |
+| FB2 interface counts after the delta, 4 / 4 / 18 / 3 (step 141) | read back **4 / 4 / 19 / 3**. The static count is 19, not 18, because the pre-delta block already carried **11** statics and not 10: the eleventh is TIA's auto-generated `F_IEC_Timer_Instance` (TON), which SPEC §3.3's table does not count. Same build, different counting rule — step 130's 3 / 4 / 10 / 2 should read 3 / 4 / 11 / 2 | 2026-08-05 |
+| S015 disclosure warning, the tags it names (step 172) | TIA raised **no compile warning**; the disclosure appears in **Safety Administration → Generate safety summary**, section *"Data from the standard user program"*. It names exactly the four `SafetyInputStandIn` members — `ZoneDeviceCircuitClosed`, `ResetButtonPressed`, `EStopCircuitClosed`, `StandInHeartbeat` — all at `Main_Safety_RTG1 [FB1]` network 1, RTG1, **and nothing else**. Summary saved as `plc/forklift/evidence/safety_summary.pdf` | 2026-08-05 |
+| F-collective signature **after** the F-delta (step 176) | `2BC94038`, offline = online, different from step 119's `AA735E2A`. F-SW `2BC94037`; F-HW unchanged at `00000001` | 2026-08-05 |
+| `SafetyInputStandIn` cross-reference: 4 reads, 0 writes (step 178) | exactly four accesses, one per member, **all `Read`**, all at `Main_Safety_RTG1` %FB1 NW1. **No write access from any block on the CPU** | 2026-08-05 |
+| F-side absence check `RESULT:` line (step 179) | `RESULT: PASS` — positive control read all four `Forklift/Safety/` mirrors first, then 328 browse names swept: `SafetyInputStandIn`, `StandInHeartbeat`, `InstF_Forklift_Safety`, `F_Forklift_Safety`, `Main_Safety_RTG1` all **absent**; `DataBlocksGlobal` **not published at all**; no `_1`. Log `m5-25b-f-absence-2026-08-05.log` | 2026-08-05 |
+| Three F timer `PT` values in force (step 186) | `StandInStaleTimer.PT` = `T#1S`, `ResetHoldMinTimer.PT` = `T#200MS`, `ResetHoldMaxTimer.PT` = `T#3S` — all three as specified | 2026-08-05 |
+| Invalid-boot signature of §5.4 observed (step 187) | **all ten readings as written**: `StandInValid` FALSE, `HeartbeatSeen` FALSE, `StandInStaleTimer.ET` at `T#1S` and not climbing, the three validated channels FALSE, `EStopDemand` / `ZoneStopDemand` / `SafetyResetRequired` TRUE, `SafetyResetFault` FALSE. Neither defect signature present | 2026-08-05 |
 
 ---
 

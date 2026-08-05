@@ -1,0 +1,29 @@
+Requested session timeout to be 3600000ms, got 30000ms instead
+endpoint: opc.tcp://192.168.53.1:4840
+
+[1] namespace array as the server reports it:
+     ns=0  http://opcfoundation.org/UA/
+     ns=1  urn:SIMATIC.S7-1500.OPC-UA.Application:1513F-1 PN
+     ns=2  http://opcfoundation.org/UA/DI/
+     ns=3  http://www.siemens.com/simatic-s7-opcua
+     ns=4  http://DemoCell
+
+[2] positive control - the four Forklift/Safety/ mirrors (opcua-nodes.md §11.2) must browse and read:
+     Forklift/Safety/EStopDemand            True
+     Forklift/Safety/ZoneStopDemand         True
+     Forklift/Safety/SafetyResetRequired    True
+     Forklift/Safety/SafetyResetFault       False
+     control passed - this client does reach and read the CPU's F-side mirrors, so an absence it reports is a real absence
+
+[3] absence sweep over 328 browse names under Objects (depth limit 8):
+     SafetyInputStandIn       absent
+     StandInHeartbeat         absent
+     InstF_Forklift_Safety    absent
+     F_Forklift_Safety        absent
+     Main_Safety_RTG1         absent
+     DataBlocksGlobal        not published at all
+
+[4] collision-suffix sweep over the same 328 names:
+     none - no browse name visited ends in _<n>
+
+RESULT: PASS - the F-side data and the stand-in DB are on no client's address space, proven by a client that demonstrably reaches the same server
