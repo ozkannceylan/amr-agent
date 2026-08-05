@@ -16,11 +16,13 @@ HMI v2 with mode selection, closed by a recorded safety + autonomy showcase.
 
 Architecture settled with the owner 2026-07-30, recorded in ADR 0011:
 the forklift's F-runtime group is the vehicle's **onboard safety
-controller**; the scanner reaches the F-program through **configured F-DI
-stimulated by the PLCSIM Advanced API** — the simulation's wiring, never the
-process network, and **design intent that has never been run**: m5-03 settles
-it in the tool and its verdict is blank, with the standard-DB stand-in as the
-named fallback (ADR 0011 D2); autonomous mode is governed by a **PLC-issued motion
+controller**; the scanner's simulated signal reaches the F-program through the
+**automated API-driven standard-DB stand-in** — m5-03 settled ADR 0011 D2 in
+the tool 2026-08-04 and the F-I/O path answered no, so ADR 0015 amended
+roadmap criterion (a) to the stand-in path, proven in the consumer's view and
+against an independent OPC UA witness (m5-03b), labelled a stand-in
+everywhere, S015-checked, and buying no safety integrity; autonomous mode is
+governed by a **PLC-issued motion
 envelope** (enable, speed ceiling, zone permit) with the ~20 Hz loop onboard;
 map and obstacles reach the operator over a **read-only monitoring plane**;
 and the gate claims **PLr targets only, never an achieved PL, SIL or PFH**.
@@ -47,8 +49,11 @@ owner under invariant 10.
    2026-08-04 on the consequence: BOTH remedies** — the stand-in is upgraded to
    an automated API-driven standard-DB stimulus (a proof run first, verified in
    the consumer's view, since the probe only ever wrote an F-channel) **and**
-   roadmap criterion (a) is amended by ADR. m5-15 is written against the proven
-   path once that lands. Definition of done: docs/TODO.md.
+   roadmap criterion (a) is amended by ADR. Part one PROVEN 2026-08-04
+   (docs/reports/m5-03b-standin-stimulus-proof.md, on the probe copy — repeats
+   on `safe_amr` before the gate cites it); part two DONE by **ADR 0015** and
+   the amended M5 row (m5-20). m5-15 is written against the proven path.
+   Definition of done: docs/TODO.md.
 
 Beside the wave: ADR 0012 envelope composition, ADR 0013 vendor gate (M8),
 ADR 0014 motion control locus, and the m5-judge architecture review that
@@ -116,8 +121,9 @@ forced the last two.
 ### Wave E — PLC specifications, owner-executed
 
 16. m5-15 plc — F-program spec. **UNBLOCKED 2026-08-04**: written against the
-    standard-DB stand-in input path, carrying FIO-FEASIBILITY §6's three
-    consequences.
+    automated stand-in stimulus of ADR 0015 (never watch-table *Modify*),
+    carrying FIO-FEASIBILITY §6's three consequences and rewriting
+    plc/forklift-safety/SPEC.md §7 and its §2 checkpoint F3 accordingly.
 17. m5-16 plc — standard program delta: mode arbitration and envelope
     formation. CLOSED (57f0f57).
 18. m5-17 interface — envelope, mode and process-stop nodes. CLOSED

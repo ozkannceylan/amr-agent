@@ -37,7 +37,23 @@ remains the input path.
     so a mirror change there can only have come through the F-program. Both
     views agree on every transition and every non-transition. The corroboration
     item is closed; no watch-table screenshot is owed.
-  - (2) and (3) remain open.
+  - **(2) DONE 2026-08-05** — **ADR 0015** (accepted on the owner's ruling; no
+    invariant touched) partially supersedes ADR 0011 D2 by name: both the
+    "changes no gate criterion" claim and the watch-table *Modify* mechanism.
+    The M5 row's criterion (a) is rewritten and is the only criterion text any
+    ADR has changed. Report: docs/reports/m5-20-criterion-a-amendment.md.
+  - (3) m5-15 remains open, now written against ADR 0015 D1.
+  - **Sweep residue from m5-20 — twelve locations state something the verdict
+    falsifies; listed, not edited, each owned by its layer:** five agv files
+    still say "verdict is blank" (`model.sdf`, `README.md`, `config.yaml`,
+    `launch/vehicle.launch.py`, `EVIDENCE_SENSOR_COVERAGE.md` §10c); plc
+    `forklift-safety/SPEC.md` §7 + §2 F3 + §4.2 step 8 + §9 T6 carry the
+    *Modify* mechanism (m5-15 rewrites them); `sim/scenarios/
+    forklift_commissioning.md` §13's T6 rows follow that rewrite;
+    `docs/safety/TWIN-DEMO-MAP.md` §3 is stale **and its AT-08 (b) deferral
+    condition is now triggered** — m5-03b held a commanded 1000 ms, so whether
+    the sub-case enters scope is a safety-spec ruling. ADRs 0011/0012/0014 are
+    never edited; the forward pointer lives in ADR 0015.
 - m5-15 (F-program spec) is unblocked and is written against the stand-in path,
   carrying FIO-FEASIBILITY §6's three consequences: the stand-in labelled
   wherever it appears, the S015 validity check carried visibly in the F-code
