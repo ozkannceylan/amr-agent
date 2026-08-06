@@ -1,0 +1,3 @@
+    0.00s  connected to 127.0.0.1:45016; 120 mm/s at 20 Hz, B skewed by 0
+   28.02s  STEP: speed 120 -> 120 mm/s, B skew 0 -> 80
+   44.01s  closed after 44.01s

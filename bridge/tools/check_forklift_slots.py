@@ -195,7 +195,20 @@ class Plant(Node):
                 self._pubs[node_key] = self.create_publisher(
                     Bool if isinstance(self.values[node_key], bool) else Float64,
                     topics[topic_key], qos)
-            for _node_key, topic_key in group.outputs:
+            for node_key, topic_key, kind in group.outputs:
+                # `SignalGroup.outputs` carries (node key, topic key, kind)
+                # since the envelope group (config.py, 1842c42): a group may
+                # publish a `UInt16` output and this plant subscribes `Float64`
+                # only. Both configurations this harness loads are REAL-only, so
+                # rather than widen the plant silently, refuse a kind it cannot
+                # represent — a harness that cannot apply its stimulus fails
+                # loud instead of testing nothing (LESSONS 2026-08-06).
+                if kind != config_mod.REAL:
+                    raise SystemExit(
+                        f"check_forklift_slots: output slot {node_key} is of kind "
+                        f"{kind!r}; this harness subscribes std_msgs/Float64 only and "
+                        "would have measured a topic nobody publishes on. Extend the "
+                        "plant before configuring a non-Real output into it.")
                 self.create_subscription(
                     Float64, topics[topic_key],
                     lambda msg, key=topic_key: self.cb_command(key, msg), qos)

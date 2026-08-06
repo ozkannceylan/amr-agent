@@ -12,8 +12,11 @@ Four independent checks, and the third is the one the forklift group makes
 necessary:
 
   1. **Derived, not hand-maintained.** The allowlist comes from the configured
-     groups (§4.10, consequence 1). Checked by loading all three configurations
-     the design admits and reading the list each one produces.
+     groups (§4.10, consequence 1). Checked by loading **every committed
+     configuration** and reading the list each one produces — and by asserting
+     that the table naming them covers `bridge/config/`, so a configuration
+     added later cannot escape the check, and a configuration whose groups are
+     repointed (as `bridge.yaml`'s were in 1842c42) fails visibly.
   2. **Client side.** `PlcClient._write` raises `WriteNotPermitted` for any key
      outside that list, before a byte reaches the network — including every node
      of the HMI's group.
@@ -123,11 +126,29 @@ async def check_allowlist_is_derived(checks: Checks, workdir: str) -> config_mod
     print("\n1. §4.10 — the allowlist is DERIVED from the configured groups")
     sizes = {}
     both = None
-    for name, filename, groups, inputs in (
-        ("cell only", "bridge.yaml", ("cell",), 7),
-        ("forklift only", "bridge-double-forklift.yaml", ("forklift",), 4),
-        ("both", "bridge-double-both.yaml", ("cell", "forklift"), 11),
-    ):
+    #: Every committed configuration, with the groups and the input count each
+    #: one actually declares. Read from the files, not from memory: `bridge.yaml`
+    #: was the cell-only configuration until 1842c42 repointed it at the
+    #: forklift and envelope groups (the interface in force publishes no cell
+    #: node), and this table went on asserting the cell shape against it. The
+    #: sweep below is what stops that recurring: a configuration this table does
+    #: not name fails the check rather than escaping it.
+    CONFIGURATIONS = (
+        ("commissioned: forklift+envelope", "bridge.yaml", ("forklift", "envelope"), 6),
+        ("double: forklift only", "bridge-double-forklift.yaml", ("forklift",), 4),
+        ("double: cell+forklift", "bridge-double-both.yaml", ("cell", "forklift"), 11),
+        ("double: M5 forklift+envelope+warning", "bridge-double-m5.yaml",
+         ("forklift", "envelope", "warning"), 7),
+        ("rehearsal: forklift only", "rehearsal-forklift.yaml", ("forklift",), 4),
+    )
+    on_disk = {os.path.basename(path) for path in os.listdir(os.path.join(HERE, "config"))
+               if path.endswith(".yaml")}
+    named = {filename for _, filename, _, _ in CONFIGURATIONS}
+    checks.ok(on_disk == named,
+              "every committed configuration is covered by this check",
+              f"unnamed: {sorted(on_disk - named) or 'none'}; "
+              f"missing from disk: {sorted(named - on_disk) or 'none'}")
+    for name, filename, groups, inputs in CONFIGURATIONS:
         cfg = config_mod.load(os.path.join(HERE, "config", filename))
         sizes[name] = len(cfg.write_allowlist)
         checks.ok(
@@ -137,10 +158,11 @@ async def check_allowlist_is_derived(checks: Checks, workdir: str) -> config_mod
             f"Input/ node(s) + the one heartbeat",
             f"{filename}: {cfg.touched_node_count} nodes touched",
         )
-        if name == "both":
+        if filename == "bridge-double-both.yaml":
             both = cfg
     assert both is not None
-    checks.ok(sizes["both"] == 12, "with both groups the allowlist holds exactly 12 keys",
+    checks.ok(sizes["double: cell+forklift"] == 12,
+              "with the cell and forklift groups the allowlist holds exactly 12 keys",
               ", ".join(sorted(both.write_allowlist)))
     forbidden = {name for _, name, *_ in HMI_GROUP}
     checks.ok(

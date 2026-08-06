@@ -1,0 +1,37 @@
+﻿2026-08-06T17:09:53.413Z | START | ENGINEERING STAND-IN WRITER -- not a safety device, not a safety path; it stands in for the WIRING of three simulated safety-input channels and carries no Category, no PL, no SIL and no PFH
+2026-08-06T17:09:53.415Z | START | instance = safecell3
+2026-08-06T17:09:53.415Z | START | dll = C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll
+2026-08-06T17:09:53.419Z | START | api version = 0x70000 (7.0)
+2026-08-06T17:09:53.421Z | START | cycle = 50 ms
+2026-08-06T17:09:53.421Z | START | field-link listener port = 45015 (zone + warning), FIELD_LINK_STALE_MAX = 1000 ms
+2026-08-06T17:09:53.422Z | START | speed-source listener port = 45016, MOTION_SILENCE_MAX = 250 ms
+2026-08-06T17:09:53.422Z | START | write set (exact and closed): SafetyInputStandIn.EStopCircuitClosed, SafetyInputStandIn.ZoneDeviceCircuitClosed, SafetyInputStandIn.ResetButtonPressed, SafetyInputStandIn.StandInHeartbeat, SafetyInputStandIn.SpeedReadingA, SafetyInputStandIn.SpeedReadingB, SafetyInputStandIn.SpeedSeqA, SafetyInputStandIn.SpeedSeqB, SafetyInputStandIn.MotionPresent, SafetyInputStandIn.MotionObservationValid, SafetyInputStandIn.WarningFieldClear
+2026-08-06T17:09:53.423Z | START | log = C:\Users\ozkan\projects\amr-agent\bridge\standin_writer\logs\standin-writer-20260806T170953Z-pid32084.log
+2026-08-06T17:09:53.423Z | START | operator console = interactive
+2026-08-06T17:09:53.423Z | START | boot levels: EStopCircuitClosed=False ZoneDeviceCircuitClosed=False ResetButtonPressed=False -- open, open, unpressed: the fail-safe pre-connection state
+2026-08-06T17:09:53.424Z | START | boot levels, SPEC 11.3 members: WarningFieldClear=False (the limit is in force until a source says otherwise), MotionPresent=True MotionObservationValid=False (an unobservable vehicle is moving), both speed sequences FROZEN until a live SPD line -- the writer never invents a speed and never repeats one
+2026-08-06T17:09:54.022Z | API | connected to instance 'safecell3', OperatingState = Run
+2026-08-06T17:09:54.053Z | MEMBERS | speed group present: SafetyInputStandIn.SpeedReadingA, SafetyInputStandIn.SpeedReadingB, SafetyInputStandIn.SpeedSeqA, SafetyInputStandIn.SpeedSeqB
+2026-08-06T17:09:54.054Z | MEMBERS | motion group present: SafetyInputStandIn.MotionPresent, SafetyInputStandIn.MotionObservationValid
+2026-08-06T17:09:54.055Z | MEMBERS | warning group present: SafetyInputStandIn.WarningFieldClear
+2026-08-06T17:09:54.056Z | MEMBERS | all eleven members of SPEC 11.3 are present; the speed chain has a source
+2026-08-06T17:09:54.064Z | LINK | listening on 0.0.0.0:45015 for the field evaluation; none is required -- the writer serves the cell with no field link ever arriving, and while none is up the zone channel belongs to the operator
+2026-08-06T17:09:54.065Z | SPEEDLINK | listening on 0.0.0.0:45016 for the speed source; none is required -- the writer serves the cell with no speed source ever arriving, and while none is up both sequences stay frozen and the motion channel reads MOVING
+2026-08-06T17:10:33.727Z | SPEEDLINK | up: speed-source client 127.0.0.1:49274 connected. Until its first SPD line each sequence stays frozen, and until its first MOT line MotionPresent stays TRUE -- a link with no reading yet is not a speed
+2026-08-06T17:10:33.784Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T17:10:33.808Z | SPEED | channel A alive: first reading written, SpeedReadingA = 250 mm/s, SpeedSeqA = 1
+2026-08-06T17:10:33.823Z | SPEED | channel B alive: first reading written, SpeedReadingB = 250 mm/s, SpeedSeqB = 1
+2026-08-06T17:10:33.834Z | OVERRUN | cycle 795 missed its deadline by 11.0 ms
+2026-08-06T17:10:58.929Z | SPEED | motion observation unavailable (no MOT line for 250 ms) -> MotionPresent := TRUE, MotionObservationValid := FALSE. An unobservable vehicle is moving; a false 'still' is what would corroborate a lying encoder
+2026-08-06T17:11:01.569Z | OVERRUN | cycle 1350 missed its deadline by 0.9 ms
+2026-08-06T17:11:03.785Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T17:11:06.773Z | REFUSED | speed link: 'SPD A 99999' is outside the Int the DB member is (-32768..32767 mm/s); nothing is written and the sequence does not advance
+2026-08-06T17:11:07.732Z | REFUSED | speed link: malformed line 'SPD A notanumber' -- it refreshes nothing; bytes are not proof of a live reading
+2026-08-06T17:11:08.725Z | REFUSED | speed link: malformed line 'HELLO WORLD' -- it refreshes nothing; bytes are not proof of a live reading
+2026-08-06T17:11:15.224Z | OVERRUN | cycle 1623 missed its deadline by 6.1 ms
+2026-08-06T17:11:16.668Z | OVERRUN | cycle 1652 missed its deadline by 0.6 ms
+2026-08-06T17:11:18.983Z | SPEED | motion observation unavailable (no MOT line for 250 ms) -> MotionPresent := TRUE, MotionObservationValid := FALSE. An unobservable vehicle is moving; a false 'still' is what would corroborate a lying encoder
+2026-08-06T17:11:19.930Z | SPEEDLINK | refused a second connection: one speed-source client at a time
+2026-08-06T17:12:54.344Z | OPERATOR | quit
+2026-08-06T17:12:54.365Z | TERMINAL | levels written in the demand direction before falling silent: the three circuits FALSE (open, open, unpressed), WarningFieldClear FALSE, MotionPresent TRUE with MotionObservationValid FALSE. The two speed readings and both sequences are deliberately left UNWRITTEN and FROZEN at SpeedSeqA=630 SpeedSeqB=708 -- a terminal zero would be an invented speed. The heartbeat now freezes and the demands latch on channels already open
+2026-08-06T17:12:54.374Z | EXIT | reason=quit cycles=3605 overruns=4 write-failures=0 final heartbeat=3605 speed cycles A=630 B=708 final sequences A=630 B=708

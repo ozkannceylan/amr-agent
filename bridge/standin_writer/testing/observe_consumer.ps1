@@ -63,11 +63,57 @@ $BOOLS = Pick @(
   'ForkliftSafetyMirror.EStopDemand',
   'ForkliftSafetyMirror.ZoneStopDemand',
   'ForkliftSafetyMirror.SafetyResetRequired',
-  'ForkliftSafetyMirror.SafetyResetFault'
+  'ForkliftSafetyMirror.SafetyResetFault',
+  # SPEC 11 -- the speed monitor and the SS1 sequencer. Written by the
+  # extended writer on the stand-in side, computed by the F-program on the
+  # InstF side. Absent members are dropped, so this observer works before and
+  # after the owner finishes the delta.
+  'SafetyInputStandIn.MotionPresent',
+  'SafetyInputStandIn.MotionObservationValid',
+  'SafetyInputStandIn.WarningFieldClear',
+  'InstF_Forklift_Safety.MotionPresent',
+  'InstF_Forklift_Safety.WarningFieldClear',
+  'InstF_Forklift_Safety.SpeedSeqAChanged',
+  'InstF_Forklift_Safety.SpeedSeqBChanged',
+  'InstF_Forklift_Safety.SpeedChainSeen',
+  'InstF_Forklift_Safety.SpeedAValid',
+  'InstF_Forklift_Safety.SpeedBValid',
+  'InstF_Forklift_Safety.SpeedStaleNow',
+  'InstF_Forklift_Safety.SpeedAStaleTimer.Q',
+  'InstF_Forklift_Safety.SpeedBStaleTimer.Q',
+  'InstF_Forklift_Safety.WarningFieldClearValid',
+  'InstF_Forklift_Safety.SpeedDiscrepantNow',
+  'InstF_Forklift_Safety.SpeedDiscrepancyTimer.Q',
+  'InstF_Forklift_Safety.SpeedNearZero',
+  'InstF_Forklift_Safety.MotionPresentValid',
+  'InstF_Forklift_Safety.ShaftDoubtNow',
+  'InstF_Forklift_Safety.ShaftDoubtTimer.Q',
+  'InstF_Forklift_Safety.SpeedOverLimitNow',
+  'InstF_Forklift_Safety.SpeedOverLimitTimer.Q',
+  'InstF_Forklift_Safety.SpeedLimitOnsetTimer.Q',
+  'InstF_Forklift_Safety.SpeedCauseGone',
+  'InstF_Forklift_Safety.SpeedMonitorDemand',
+  'InstF_Forklift_Safety.Ss1Demand',
+  'InstF_Forklift_Safety.Ss1Timer.Q',
+  'InstF_Forklift_Safety.VehicleStandstillNow',
+  'InstF_Forklift_Safety.TorqueOffDemand'
 )
 $INTS = Pick @(
   'SafetyInputStandIn.StandInHeartbeat',
-  'InstF_Forklift_Safety.HeartbeatMemory'
+  'InstF_Forklift_Safety.HeartbeatMemory',
+  # The freshness sequences, on BOTH sides. These are the columns that say
+  # whether a reading is live: a sequence that stops advancing is a MISSING
+  # reading, and missing is a demand. They are printed rather than
+  # change-detected, because they change every cycle when they are healthy.
+  'SafetyInputStandIn.SpeedSeqA',
+  'SafetyInputStandIn.SpeedSeqB',
+  'SafetyInputStandIn.SpeedReadingA',
+  'SafetyInputStandIn.SpeedReadingB',
+  'InstF_Forklift_Safety.SpeedSeqA',
+  'InstF_Forklift_Safety.SpeedSeqB',
+  'InstF_Forklift_Safety.SpeedReadingA',
+  'InstF_Forklift_Safety.SpeedReadingB',
+  'InstF_Forklift_Safety.SpeedDiff'
 )
 
 "# READ-ONLY observer. It writes nothing. The verdict is the CONSUMER's view."

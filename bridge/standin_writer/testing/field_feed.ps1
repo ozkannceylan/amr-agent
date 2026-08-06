@@ -17,7 +17,15 @@ param(
   [int]$Port = 45015,
   [string]$Script = '',
   [double]$Duration = 10,
-  [switch]$NoPing
+  [switch]$NoPing,
+  # Keepalive rate. SPEC 7.2 names 1 Hz against FIELD_LINK_STALE_MAX = 1 s,
+  # which leaves ZERO margin: measured 2026-08-06, a 1 Hz feeder had its link
+  # reaped as stale after three keepalives, 10 ms before the fourth arrived,
+  # because the sender's interval drifts a few ms past 1.000 s and the
+  # writer's test is "> 1000 ms". The writer implements the spec's value and
+  # is not changed for a test's convenience; this knob exists so a check of
+  # the ZONE/WARN vocabulary is not silently a check of that margin instead.
+  [double]$PingHz = 5
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,7 +56,7 @@ while ($sw.Elapsed.TotalSeconds -lt $Duration) {
   for ($i = 0; $i -lt $events.Count; $i++) {
     if (-not $sent[$i] -and $sw.Elapsed.TotalSeconds -ge $events[$i].t) { Send $events[$i].line; $sent[$i] = $true }
   }
-  if (-not $NoPing -and $sw.Elapsed.TotalSeconds -ge $nextPing) { Send 'PING'; $nextPing = $sw.Elapsed.TotalSeconds + 1.0 }
+  if (-not $NoPing -and $sw.Elapsed.TotalSeconds -ge $nextPing) { Send 'PING' | Out-Null; $nextPing += (1.0 / $PingHz) }
   Start-Sleep -Milliseconds 20
 }
 $s.Close(); $c.Close()
