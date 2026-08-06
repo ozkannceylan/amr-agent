@@ -25,8 +25,8 @@ controlled stop are the F-PLC's, not the standard program's.**
 
 | # | Question | Ruling |
 |---|---|---|
-| 1 | What "standards-compliant" means here | **Architectural fidelity plus a simulated safe-measurement structure** — two channels, cross-compared, demand on discrepancy. Not certification: this project claims PLr targets only (ADR 0011 D5) |
-| 2 | Where the two speed channels come from | **Two encoder channels on one shaft, independent noise** — what a real safe encoder is, rather than two convenient different measurements |
+| 1 | What "standards-compliant" means here | **Architectural fidelity plus a simulated safe-measurement structure** — two readings cross-compared, demand on discrepancy. Not certification: this project claims PLr targets only (ADR 0011 D5) |
+| 2 | Where the speed readings come from | **Two reading channels on one shaft, independent noise** — what a real safe encoder is, rather than two convenient different measurements. Its honest name is a **single-channel tested system**; see §3 |
 | 3 | What STO means in simulation | **Joint controller disabled plus a holding brake.** Implementation **deferred**: planned here, built after the vehicle is seen working |
 | 4 | What "a vehicle working" means | **The full loop without the map first**, validated, then the map |
 | 5 | Whether SLS limits or monitors | **Monitors.** The standard program limits; the F-program verifies and demands |
