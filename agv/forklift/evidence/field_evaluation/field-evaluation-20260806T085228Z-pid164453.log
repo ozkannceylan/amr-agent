@@ -1,0 +1,48 @@
+2026-08-06T08:52:28.735Z | START | FIELD EVALUATION - a MODEL of what a safety-rated scanner does internally, feeding a STAND-IN FOR WIRING. Not a safety function; no Category, no Performance Level, no SIL, no PFH, no diagnostic coverage (ADR 0011 D5). It reports levels and latches nothing.
+2026-08-06T08:52:28.758Z | START | phases 1 and 2 of agv/forklift/FIELD-EVALUATION.md section 12: two STATIC all-direction contours - protective and warning - with no case selection and no speed enforcement anywhere in this node
+2026-08-06T08:52:28.763Z | START | config = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/config.yaml
+2026-08-06T08:52:28.767Z | START | model = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/model.sdf (scanner mounts read from it, not mirrored)
+2026-08-06T08:52:28.772Z | START | front device: topic /forklift/safety_scanner_front/measurement (NON-SAFE measurement channel), mount x=0.700 y=0.450 yaw=0.7853982 rad
+2026-08-06T08:52:28.776Z | START | rear device: topic /forklift/safety_scanner_rear/measurement (NON-SAFE measurement channel), mount x=-0.700 y=-0.450 yaw=-2.3561945 rad
+2026-08-06T08:52:28.782Z | START | protective contour: corridors x -3.225..2.210 m, y -0.550..+0.550 m in the vehicle frame - the plan outline (-1.875..0.860 m) grown by the protective depth 1.35 m fore and aft, half width 0.55 m. Intrusion opens the zone channel and stops the vehicle
+2026-08-06T08:52:28.786Z | START | warning contour: corridors x -5.225..4.210 m, y -0.550..+0.550 m in the vehicle frame - the SAME outline and the SAME half width grown by the warning depth 3.35 m, derived in section 6.1 as W = D + v*T_w + (v^2-v_c^2)/2a + Kp*[T_w+(v-v_c)/a] = 1.35 + 0.210 + 0.270 + 1.520 at v = 0.60 m/s. Occupation demands a SPEED REDUCTION to the creep ceiling and stops nothing
+2026-08-06T08:52:28.789Z | START | self-return clip: rear device, sensor frame -133.0..-71.8 deg, boundary capped at 0.040 m - FIELD GEOMETRY, not a filter applied to samples
+2026-08-06T08:52:28.793Z | START | self-return clip: front device, sensor frame +136.4..+137.6 deg, boundary capped at 1.034 m - FIELD GEOMETRY, not a filter applied to samples
+2026-08-06T08:52:28.797Z | START | failure rules: freshness 0.30 s, clear debounce 3 scans, invalid-fault threshold 5% clearing after 3 scans, evaluation tick 20.0 Hz. Unknown means INTRUSION in every one of them; an empty horizon means CLEAR, because a beyond-range return is a measurement
+2026-08-06T08:52:28.801Z | START | link: 127.0.0.1:45015 - the address was read back from this host (environment AMR_FIELD_LINK_HOST), never taken from a document (ADR 0006). ZONE 1 = field clear, ZONE 0 = intrusion or this evaluation's own fault: the digit is the CIRCUIT LEVEL
+2026-08-06T08:52:28.804Z | START | warning verdict: /forklift/warning_field/occupied [std_msgs/Bool], published at the 20.0 Hz evaluation tick and NOT on transitions, so that its ABSENCE is visible. Occupation asserts on one scan; release needs 3 clear scans AND THEN the SF-04 clear-hold of 2.0 s on this node's own steady clock. Every failure rule reads OCCUPIED. NO CONSUMER EXISTS YET, and any consumer owes a stale rule of its own: no message inside its window means OCCUPIED, never clear
+2026-08-06T08:52:28.808Z | START | THE PROTECTIVE VERDICT HAS NO ROS TOPIC and never will: the safe channel has no topic on either transport (owner ruling m5-06). This log and the writer's session log are the correlated record SPEC 7.6 requires
+2026-08-06T08:52:28.813Z | START | log = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/field_evaluation/field-evaluation-20260806T085228Z-pid164453.log
+2026-08-06T08:52:28.817Z | AGGREGATE | boot verdict INTRUSION: boot: no device has yet proved its field clear
+2026-08-06T08:52:28.820Z | WARNING | unchanged (OCCUPIED), reason now: front: no scan yet received; rear: no scan yet received
+2026-08-06T08:52:28.826Z | AGGREGATE | unchanged (INTRUSION), reason now: front: no scan yet received; rear: no scan yet received
+2026-08-06T08:52:28.835Z | LINK | up: connected to the stand-in writer at 127.0.0.1:45015
+2026-08-06T08:52:28.839Z | SEND | ZONE 0 -> first line on a new connection (a connection is a transition from unknown)
+2026-08-06T08:52:29.135Z | WARNING | unchanged (OCCUPIED), reason now: the simulation clock has not advanced; front: no scan yet received; rear: no scan yet received
+2026-08-06T08:52:29.142Z | AGGREGATE | unchanged (INTRUSION), reason now: the simulation clock has not advanced for 0.315 s of this node's own steady time (limit 0.30 s), so no scan can be proved fresh; front: no scan yet received; rear: no scan yet received
+2026-08-06T08:52:30.535Z | WARNING | unchanged (OCCUPIED), reason now: front: no scan yet received; rear: no scan yet received
+2026-08-06T08:52:30.540Z | AGGREGATE | unchanged (INTRUSION), reason now: front: no scan yet received; rear: no scan yet received
+2026-08-06T08:52:30.835Z | WARNING | unchanged (OCCUPIED), reason now: the simulation clock has not advanced; front: no scan yet received; rear: no scan yet received
+2026-08-06T08:52:30.839Z | AGGREGATE | unchanged (INTRUSION), reason now: the simulation clock has not advanced for 0.300 s of this node's own steady time (limit 0.30 s), so no scan can be proved fresh; front: no scan yet received; rear: no scan yet received
+2026-08-06T08:52:31.335Z | WARNING | unchanged (OCCUPIED), reason now: front: no scan yet received; rear: no scan yet received
+2026-08-06T08:52:31.351Z | AGGREGATE | unchanged (INTRUSION), reason now: front: no scan yet received; rear: no scan yet received
+2026-08-06T08:52:31.364Z | DEVICE | front stamps advancing (seq=1 stamp=0.004000)
+2026-08-06T08:52:31.364Z | DEVICE | front protective contour built: 275 rays, 275 of them with a live field, boundary 0.100..3.925 m over the live rays, mount (x=0.700 y=0.450 yaw=0.7854 rad), scan window 0.10..5.50 m
+2026-08-06T08:52:31.364Z | DEVICE | front warning contour built: 275 rays, 275 of them with a live field, boundary 0.100..5.500 m over the live rays, mount (x=0.700 y=0.450 yaw=0.7854 rad), scan window 0.10..5.50 m
+2026-08-06T08:52:31.365Z | DEVICE | front nesting check: 0 ray(s) where the warning boundary is inside the protective one (must be 0)
+2026-08-06T08:52:31.369Z | DEVICE | rear stamps advancing (seq=1 stamp=0.004000)
+2026-08-06T08:52:31.369Z | DEVICE | rear protective contour built: 275 rays, 214 of them with a live field, boundary 0.100..2.913 m over the live rays, mount (x=-0.700 y=-0.450 yaw=-2.3562 rad), scan window 0.10..5.50 m
+2026-08-06T08:52:31.369Z | DEVICE | rear warning contour built: 275 rays, 214 of them with a live field, boundary 0.100..4.915 m over the live rays, mount (x=-0.700 y=-0.450 yaw=-2.3562 rad), scan window 0.10..5.50 m
+2026-08-06T08:52:31.369Z | DEVICE | rear nesting check: 0 ray(s) where the warning boundary is inside the protective one (must be 0)
+2026-08-06T08:52:31.385Z | WARNING | unchanged (OCCUPIED), reason now: front: warning field occupied; rear: warning field occupied
+2026-08-06T08:52:31.392Z | AGGREGATE | unchanged (INTRUSION), reason now: front: field not clear; rear: field not clear
+2026-08-06T08:52:31.584Z | DEVICE | front CLEAR after 3 consecutive fully-valid fully-clear scans (seq=3 stamp=0.200000)
+2026-08-06T08:52:31.585Z | AGGREGATE | unchanged (INTRUSION), reason now: rear: field not clear
+2026-08-06T08:52:31.594Z | DEVICE | rear CLEAR after 3 consecutive fully-valid fully-clear scans (seq=3 stamp=0.200000)
+2026-08-06T08:52:31.635Z | AGGREGATE | CLEAR - both devices clear (front seq=3 rear seq=3)
+2026-08-06T08:52:31.643Z | SEND | ZONE 1 -> aggregate transition
+2026-08-06T08:55:07.843Z | LINK | down (this node is shutting down). The writer converts the silence into an open zone channel within its own 1 s stale window
+2026-08-06T08:55:07.850Z | EXIT | front device: 1564 scan(s) ingested, last invalid fraction 0.00%, last protective intrusion-ray count 0, last warning-ray count 1, faulted=False
+2026-08-06T08:55:07.851Z | EXIT | rear device: 1564 scan(s) ingested, last invalid fraction 4.00%, last protective intrusion-ray count 0, last warning-ray count 13, faulted=False
+2026-08-06T08:55:07.851Z | EXIT | link: 1 connect attempt(s), 302 line(s) sent, of which 300 were PING keepalives (not logged individually - this is a transition log)
+2026-08-06T08:55:07.851Z | EXIT | field evaluation stopped. The writer sees the link die and drives ZoneDeviceCircuitClosed FALSE within FIELD_LINK_STALE_MAX = 1 s: loss of the intrusion source reads as an intrusion, never as a clear field

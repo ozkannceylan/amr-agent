@@ -4,7 +4,10 @@
     agv/forklift/FIELD-EVALUATION.md is the AUTHORITY for everything this
     node does. agv/forklift/config.yaml `field:` holds every constant.
     plc/forklift-safety/SPEC.md section 7.2 is the consumer contract.
-    THIS FILE BUILDS PHASE 1 OF THAT DESIGN AND NOTHING ELSE.
+    THIS FILE BUILDS PHASES 1 AND 2 OF THAT DESIGN AND NOTHING ELSE:
+    the protective field and its dedicated link (phase 1, m5-12b) and
+    the warning field and its topic (phase 2, m5-47). Phase 3 - case
+    selection A/B/C - is not built, and no speed is enforced here.
 
 WHAT THIS NODE IS
 
@@ -42,7 +45,25 @@ WHAT THIS NODE IS NOT, AND THIS IS NOT A DISCLAIMER BUT A SPECIFICATION
   e-stop chain and safe torque off are onboard and hardwired
   (invariant 1).
 
-THE VERDICT HAS NO ROS TOPIC, AND THAT IS THE DESIGN
+TWO FIELDS, AND THEY LEAVE THIS NODE BY DIFFERENT ROADS
+
+  PROTECTIVE FIELD - intrusion opens the zone channel and stops the
+  vehicle. It crosses ONLY the dedicated TCP link below. No topic, ever.
+
+  WARNING FIELD - larger (3.35 m against 1.35 m, both derived in
+  FIELD-EVALUATION.md sections 4 and 6.1), and occupation demands a
+  SPEED REDUCTION to the creep ceiling rather than a stop. It is process
+  data: it crosses one non-safe ROS topic, published AT THE TICK so that
+  its absence is visible, and its consumer owes a stale rule of its own.
+  This node enforces no speed and latches nothing, in either field.
+
+  The two contours carry the same clips and the warning depth is the
+  larger, so the warning boundary is at or beyond the protective one at
+  every ray and the verdicts are NESTED: every protective intrusion is
+  also a warning occupation. The node checks that at contour build and
+  logs the count, rather than assuming it.
+
+THE PROTECTIVE VERDICT HAS NO ROS TOPIC, AND THAT IS THE DESIGN
 
   config.yaml's `topics:` block carries an owner ruling (m5-06,
   2026-07-30): "every channel a subscriber can reach is a measurement
@@ -115,6 +136,7 @@ from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import QoSProfile
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Bool
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _FORKLIFT_DIR = os.path.normpath(os.path.join(_THIS_DIR, '..'))
@@ -223,7 +245,23 @@ def classify_sample(sample, range_min, range_max):
 
 
 class Contour(object):
-    """The protective field of one device, as a boundary radius per ray.
+    """ONE field of one device, as a boundary radius per ray.
+
+    Two instances exist per device and they differ only in the depth of
+    the rectangle they are built from: the PROTECTIVE field, whose
+    intrusion opens the zone channel and stops the vehicle, and the
+    WARNING field, larger, whose occupation trips a SPEED REDUCTION and
+    stops nothing (FIELD-EVALUATION.md section 6.1). Same corridor half
+    width, same self-return clips, same class - because they are the same
+    kind of object, and a warning field drawn past the vehicle's own
+    returns is permanently occupied for exactly the reason a protective
+    one is permanently violated.
+
+    Since the warning depth is strictly greater than the protective
+    depth and both carry the same clips, the warning boundary is >= the
+    protective boundary at every ray. THE TWO VERDICTS ARE THEREFORE
+    NESTED, NEVER INDEPENDENT: every protective intrusion is also a
+    warning occupation, by construction rather than by a coded rule.
 
     A real device's protective field IS a contour: for every bearing the
     head fires at, how far out the monitored region reaches. This class
@@ -248,7 +286,8 @@ class Contour(object):
     """
 
     def __init__(self, mount, rect, clips, angle_min, angle_increment,
-                 count, range_min, range_max):
+                 count, range_min, range_max, label='protective'):
+        self.label = label
         self.range_min = range_min
         self.range_max = range_max
         mx, my, myaw = mount
@@ -322,6 +361,7 @@ class DeviceEvaluation(object):
         self.params = params
 
         self.contour = None
+        self.warning_contour = None
         self.geometry_key = None
 
         self.seq = 0
@@ -343,6 +383,24 @@ class DeviceEvaluation(object):
         self.last_record = None
         self.last_invalid_fraction = 0.0
         self.last_intrusion_count = 0
+
+        # THE WARNING FIELD (phase 2). It BOOTS OCCUPIED for the same
+        # reason the protective verdict boots INTRUSION: nothing has yet
+        # proved it clear, and the demanding direction for a speed
+        # reduction is that the reduction is in force.
+        #
+        # `warning_dirty` is what the last scan saw. `warning_occupied`
+        # is the REPORTED level, which is slower to release than the scan
+        # by SF-04's 2 s clear-hold; `warning_clear_since` is the steady
+        # time at which the hold started, and is None whenever the hold
+        # is not running. Steady time, not the simulation clock, for the
+        # reason written at the evaluation tick.
+        self.warning_dirty = True
+        self.warning_occupied = True
+        self.warning_clear_run = 0
+        self.warning_clear_since = None
+        self.last_warning_count = 0
+        self.last_warning_nearest = None
 
     # -------------------------------------------------------------- #
 
@@ -386,20 +444,38 @@ class DeviceEvaluation(object):
             self.contour = Contour(
                 self.mount, self.params['rect'], self.params['clips'],
                 msg.angle_min, msg.angle_increment, len(msg.ranges),
-                msg.range_min, msg.range_max)
+                msg.range_min, msg.range_max, label='protective')
+            self.warning_contour = Contour(
+                self.mount, self.params['warning_rect'], self.params['clips'],
+                msg.angle_min, msg.angle_increment, len(msg.ranges),
+                msg.range_min, msg.range_max, label='warning')
             self.geometry_key = key
+            for contour in (self.contour, self.warning_contour):
+                lines.append(('DEVICE', (
+                    '{} {} contour built: {} rays, {} of them with a live '
+                    'field, boundary {:.3f}..{:.3f} m over the live rays, '
+                    'mount (x={:.3f} y={:.3f} yaw={:.4f} rad), scan window '
+                    '{:.2f}..{:.2f} m').format(
+                        self.name, contour.label, len(msg.ranges),
+                        contour.live_count(),
+                        min(b for b, l in zip(contour.boundary,
+                                              contour.live) if l),
+                        max(b for b, l in zip(contour.boundary,
+                                              contour.live) if l),
+                        self.mount[0], self.mount[1], self.mount[2],
+                        msg.range_min, msg.range_max)))
+            # NESTING, CHECKED RATHER THAN ASSUMED. The warning boundary
+            # must be at or beyond the protective boundary at every ray;
+            # if it ever is not, a ray could be a protective intrusion
+            # and not a warning occupation, and the speed reduction that
+            # is supposed to precede the stop would not have happened.
+            breaches = sum(1 for w, p in zip(self.warning_contour.boundary,
+                                             self.contour.boundary)
+                           if w < p - 1e-9)
             lines.append(('DEVICE', (
-                '{} contour built: {} rays, {} of them with a live field, '
-                'boundary {:.3f}..{:.3f} m over the live rays, mount '
-                '(x={:.3f} y={:.3f} yaw={:.4f} rad), scan window '
-                '{:.2f}..{:.2f} m').format(
-                    self.name, len(msg.ranges), self.contour.live_count(),
-                    min(b for b, l in zip(self.contour.boundary,
-                                          self.contour.live) if l),
-                    max(b for b, l in zip(self.contour.boundary,
-                                          self.contour.live) if l),
-                    self.mount[0], self.mount[1], self.mount[2],
-                    msg.range_min, msg.range_max)))
+                '{} nesting check: {} ray(s) where the warning boundary is '
+                'inside the protective one (must be 0)').format(
+                    self.name, breaches)))
 
         # ---- the one pass over the rays ----
         #
@@ -411,9 +487,13 @@ class DeviceEvaluation(object):
         saw_intrusion = False
         invalid_count = 0
         nearest = None
+        warning_count = 0
+        warning_nearest = None
 
         boundary = self.contour.boundary
         live = self.contour.live
+        w_boundary = self.warning_contour.boundary
+        w_live = self.warning_contour.live
         r_min, r_max = msg.range_min, msg.range_max
 
         for index, sample in enumerate(msg.ranges):
@@ -422,10 +502,14 @@ class DeviceEvaluation(object):
             sample_class = classify_sample(sample, r_min, r_max)
             if sample_class == CLASS_CLEAR:
                 # A MEASUREMENT: clear to range_max. It proves the whole
-                # ray, so it can never make a field dirty. This is the
-                # 2026-07-29 lesson, in one branch.
+                # ray, so it can never make a field dirty - protective or
+                # warning. This is the 2026-07-29 lesson, in one branch.
                 continue
             if sample_class == CLASS_DISTANCE:
+                if w_live[index] and sample <= w_boundary[index]:
+                    warning_count += 1
+                    if warning_nearest is None or sample < warning_nearest:
+                        warning_nearest = sample
                 if live[index] and sample <= boundary[index]:
                     intrusion_count += 1
                     saw_intrusion = True
@@ -434,11 +518,14 @@ class DeviceEvaluation(object):
                 continue
             # ELSE: not an answer at all.
             invalid_count += 1
+            # An invalid ray cannot prove its sector clear, so inside a
+            # live field sector it counts as an intrusion of THAT field.
+            # Outside one it raises nothing - there is no field there to
+            # be uncertain about. Applied to both fields separately,
+            # because their live sectors are not the same set.
+            if w_live[index]:
+                warning_count += 1
             if live[index]:
-                # An invalid ray cannot prove its sector clear, so inside
-                # a live field sector it counts as an intrusion of that
-                # field. Outside one it raises nothing - there is no field
-                # there to be uncertain about.
                 intrusion_count += 1
                 saw_intrusion = True
 
@@ -446,6 +533,41 @@ class DeviceEvaluation(object):
         invalid_fraction = (invalid_count / float(total)) if total else 1.0
         self.last_invalid_fraction = invalid_fraction
         self.last_intrusion_count = intrusion_count
+        self.last_warning_count = warning_count
+        self.last_warning_nearest = warning_nearest
+
+        # ---- the warning field's own book-keeping, per scan ----
+        #
+        # OCCUPATION ASSERTS ON ONE SCAN, exactly like the protective
+        # verdict and for the same reason (the simulated sensor declares
+        # no noise model). RELEASE IS THE SLOW ONE: it needs the same 3
+        # fully-clear scans AND THEN SF-04's 2 s clear-hold, which is
+        # started here and expires in warning_verdict() on steady time.
+        # The hold is restarted from zero by a single dirty scan.
+        self.warning_dirty = (warning_count > 0)
+        if self.warning_dirty:
+            self.warning_clear_run = 0
+            self.warning_clear_since = None
+            if not self.warning_occupied:
+                lines.append(('WARNING', (
+                    '{} warning field OCCUPIED on one scan: {} ray(s) inside '
+                    'the warning contour, nearest {:.3f} m (seq={} '
+                    'stamp={:.6f})').format(
+                        self.name, warning_count,
+                        warning_nearest if warning_nearest is not None
+                        else float('nan'), self.seq, stamp_s)))
+            self.warning_occupied = True
+        else:
+            self.warning_clear_run += 1
+            if (self.warning_clear_run >= self.params['clear_debounce_scans']
+                    and self.warning_clear_since is None):
+                self.warning_clear_since = rx_monotonic
+                if self.warning_occupied:
+                    lines.append(('WARNING', (
+                        '{} warning field clear on {} consecutive scans; '
+                        'SF-04 clear-hold of {:.1f} s started (seq={})'
+                    ).format(self.name, self.warning_clear_run,
+                             self.params['warning_clear_hold_s'], self.seq)))
 
         # ---- the OSSD-equivalent record, formed atomically ----
         a_clear = (intrusion_count == 0)
@@ -577,6 +699,61 @@ class DeviceEvaluation(object):
             return (False, (self.name, 'not-clear'),
                     '{}: field not clear'.format(self.name))
         return True, (self.name, 'clear'), '{}: clear'.format(self.name)
+
+    def warning_verdict(self, now_ros_s, now_monotonic):
+        """(occupied, key, reason, lines) for this device's WARNING field.
+
+        THE SAME RULE 0, IN THE SAME DIRECTION: unknown means occupied.
+        Every failure that makes the protective verdict read INTRUSION
+        makes this read OCCUPIED - a dead, stale, frozen, discrepant or
+        faulted device cannot prove a warning field clear any more than
+        it can prove a protective one clear. The difference between the
+        two verdicts is what they COST when they are wrong, and that is
+        the consumer's business, not this rule's.
+
+        The release side is where they differ: SF-04's 2 s clear-hold
+        expires HERE, on the caller's steady clock, so that it goes on
+        expiring while scans arrive and cannot be held open by a device
+        that has merely stopped talking.
+        """
+        lines = []
+        fresh, why = self.freshness(now_ros_s, now_monotonic)
+        blocked = None
+        if not fresh:
+            blocked = ((self.name, 'warn-stale'), why)
+        elif not self.advancing:
+            blocked = ((self.name, 'warn-frozen-stamps'),
+                       '{}: scan stamps not advancing'.format(self.name))
+        elif self.discrepancy:
+            blocked = ((self.name, 'warn-discrepancy'),
+                       '{}: OSSD-equivalent discrepancy'.format(self.name))
+        elif self.faulted:
+            blocked = ((self.name, 'warn-fault'),
+                       '{}: {}'.format(self.name, self.fault_reason))
+        if blocked is not None:
+            # A device that cannot be trusted also cannot be accumulating
+            # clear time, so the hold is torn down rather than paused.
+            self.warning_clear_since = None
+            self.warning_clear_run = 0
+            self.warning_occupied = True
+            return True, blocked[0], blocked[1], lines
+
+        if self.warning_occupied and self.warning_clear_since is not None:
+            held = now_monotonic - self.warning_clear_since
+            if held >= self.params['warning_clear_hold_s']:
+                self.warning_occupied = False
+                lines.append(('WARNING', (
+                    '{} warning field RELEASED after the SF-04 clear-hold: '
+                    '{:.3f} s of continuous non-occupation on this node\'s '
+                    'own steady clock (limit {:.1f} s, seq={})').format(
+                        self.name, held,
+                        self.params['warning_clear_hold_s'], self.seq)))
+
+        if self.warning_occupied:
+            return (True, (self.name, 'warn-occupied'),
+                    '{}: warning field occupied'.format(self.name), lines)
+        return (False, (self.name, 'warn-clear'),
+                '{}: warning field clear'.format(self.name), lines)
 
 
 # ------------------------------------------------------------------------ #
@@ -869,10 +1046,26 @@ class FieldEvaluation(Node):
             os.path.join(_FORKLIFT_DIR, field['log_dir']))
 
         depth = field['protective_depth_m']
+        warning_depth = field['warning_depth_m']
         half = field['corridor_half_width_m']
         rect = (field['outline_tine_tip_x_m'] - depth,
                 field['outline_nose_x_m'] + depth,
                 -half, half)
+        # The warning rectangle is the SAME outline grown by the SAME
+        # half width and a LARGER depth (FIELD-EVALUATION.md section 6.1).
+        # It is derived here from the outline rather than from the
+        # protective rectangle, so that the two depths stay independently
+        # traceable to the two derivations that produced them.
+        warning_rect = (field['outline_tine_tip_x_m'] - warning_depth,
+                        field['outline_nose_x_m'] + warning_depth,
+                        -half, half)
+        if not warning_depth > depth:
+            raise RuntimeError(
+                'field.warning_depth_m ({}) must be GREATER than '
+                'field.protective_depth_m ({}). A warning field that is not '
+                'larger than the protective field cannot trip a speed '
+                'reduction before the stop it is supposed to precede.'
+                .format(warning_depth, depth))
 
         clips_by_device = {d: [] for d in DEVICES}
         for clip in field.get('self_return_clips') or []:
@@ -883,6 +1076,8 @@ class FieldEvaluation(Node):
         mounts = read_scanner_mounts(model_path)
         common = {
             'rect': rect,
+            'warning_rect': warning_rect,
+            'warning_clear_hold_s': field['warning_clear_hold_s'],
             'scan_fresh_max_s': field['scan_fresh_max_s'],
             'clear_debounce_scans': field['clear_debounce_scans'],
             'invalid_fault_fraction': field['invalid_fault_fraction'],
@@ -916,7 +1111,30 @@ class FieldEvaluation(Node):
         self._last_ros_mono = time.monotonic()
         self.aggregate_reason = 'boot: no device has yet proved its field clear'
 
+        # THE WARNING VERDICT BOOTS OCCUPIED, like everything else here.
+        self.warning_occupied = True
+        self.warning_key = None
+        self.warning_reason = 'boot: no device has yet proved its warning '\
+                              'field clear'
+
         qos = QoSProfile(depth=cfg['qos']['depth'])
+
+        # THE WARNING VERDICT HAS A TOPIC AND THE PROTECTIVE ONE NEVER
+        # WILL, and the asymmetry is the design rather than an oversight.
+        # The m5-06 ruling bars the SAFE channel from every transport;
+        # this is not it. SF-04 carries no PL claim, trips a SPEED
+        # REDUCTION rather than a stop, and is backed unconditionally by
+        # SF-03 - whose verdict still crosses only the dedicated link.
+        #
+        # PUBLISHED AT THE TICK, NOT ON TRANSITIONS. A consumer that
+        # republishes the last value it saw would turn this node's death
+        # into a standing order to keep driving fast (LESSONS 2026-08-04),
+        # so the level is on the wire 20 times a second and its ABSENCE is
+        # the signal. Any consumer owes a stale rule of its own: no
+        # message inside its own window means OCCUPIED, never clear.
+        self.pub_warning = self.create_publisher(
+            Bool, topics['warning_field_occupied'], qos)
+
         self.sub_front = self.create_subscription(
             LaserScan, self.source_topics['front'],
             self.cb_scan_front, qos)
@@ -962,10 +1180,10 @@ class FieldEvaluation(Node):
             'diagnostic coverage (ADR 0011 D5). It reports levels and '
             'latches nothing.')
         self.emit('START', banner)
-        self.emit('START', 'phase 1 of agv/forklift/FIELD-EVALUATION.md '
-                           'section 12: one STATIC all-direction contour, no '
-                           'case selection, no warning field, no speed '
-                           'enforcement')
+        self.emit('START', 'phases 1 and 2 of agv/forklift/FIELD-EVALUATION.md '
+                           'section 12: two STATIC all-direction contours - '
+                           'protective and warning - with no case selection '
+                           'and no speed enforcement anywhere in this node')
         self.emit('START', 'config = {}'.format(config_path))
         self.emit('START', 'model = {} (scanner mounts read from it, not '
                            'mirrored)'.format(model_path))
@@ -976,12 +1194,24 @@ class FieldEvaluation(Node):
                                'yaw={:.7f} rad'.format(
                                    name, self.source_topics[name], *mount))
         self.emit('START', (
-            'contour: corridors x {:.3f}..{:.3f} m, y {:+.3f}..{:+.3f} m in '
-            'the vehicle frame - the plan outline ({:.3f}..{:.3f} m) grown by '
-            'the protective depth {:.2f} m fore and aft, half width {:.2f} m'
+            'protective contour: corridors x {:.3f}..{:.3f} m, y '
+            '{:+.3f}..{:+.3f} m in the vehicle frame - the plan outline '
+            '({:.3f}..{:.3f} m) grown by the protective depth {:.2f} m fore '
+            'and aft, half width {:.2f} m. Intrusion opens the zone channel '
+            'and stops the vehicle'
         ).format(rect[0], rect[1], rect[2], rect[3],
                  field['outline_tine_tip_x_m'], field['outline_nose_x_m'],
                  depth, half))
+        self.emit('START', (
+            'warning contour: corridors x {:.3f}..{:.3f} m, y '
+            '{:+.3f}..{:+.3f} m in the vehicle frame - the SAME outline and '
+            'the SAME half width grown by the warning depth {:.2f} m, '
+            'derived in section 6.1 as W = D + v*T_w + (v^2-v_c^2)/2a + '
+            'Kp*[T_w+(v-v_c)/a] = 1.35 + 0.210 + 0.270 + 1.520 at v = 0.60 '
+            'm/s. Occupation demands a SPEED REDUCTION to the creep ceiling '
+            'and stops nothing'
+        ).format(warning_rect[0], warning_rect[1], warning_rect[2],
+                 warning_rect[3], warning_depth))
         for clip in field.get('self_return_clips') or []:
             self.emit('START', (
                 'self-return clip: {} device, sensor frame {:+.1f}..{:+.1f} '
@@ -1006,7 +1236,18 @@ class FieldEvaluation(Node):
                 host, link_cfg['port'], how, link_cfg['zone_clear_digit'],
                 link_cfg['zone_intrusion_digit']))
         self.emit('START', (
-            'THE VERDICT HAS NO ROS TOPIC and never will: the safe channel '
+            'warning verdict: {} [std_msgs/Bool], published at the {:.1f} Hz '
+            'evaluation tick and NOT on transitions, so that its ABSENCE is '
+            'visible. Occupation asserts on one scan; release needs {} clear '
+            'scans AND THEN the SF-04 clear-hold of {:.1f} s on this node\'s '
+            'own steady clock. Every failure rule reads OCCUPIED. NO CONSUMER '
+            'EXISTS YET, and any consumer owes a stale rule of its own: no '
+            'message inside its window means OCCUPIED, never clear').format(
+                topics['warning_field_occupied'], field['evaluate_hz'],
+                field['clear_debounce_scans'], field['warning_clear_hold_s']))
+        self.emit('START', (
+            'THE PROTECTIVE VERDICT HAS NO ROS TOPIC and never will: the safe '
+            'channel '
             'has no topic on either transport (owner ruling m5-06). This log '
             'and the writer\'s session log are the correlated record SPEC '
             '7.6 requires'))
@@ -1021,7 +1262,7 @@ class FieldEvaluation(Node):
 
     def emit(self, cls, detail):
         self.log.write(cls, detail)
-        if cls in ('START', 'AGGREGATE', 'FAULT', 'LINK'):
+        if cls in ('START', 'AGGREGATE', 'WARNING', 'FAULT', 'LINK'):
             self.get_logger().info('{} | {}'.format(cls, detail))
 
     def cb_scan_front(self, msg):
@@ -1084,6 +1325,48 @@ class FieldEvaluation(Node):
         reason = '; '.join(reasons) if reasons else 'both devices clear'
         key = tuple(keys)
 
+        # ---- the WARNING aggregate, by the same union ----
+        w_reasons = []
+        w_keys = []
+        warning = False
+        if clock_frozen:
+            warning = True
+            w_keys.append(('clock', 'frozen'))
+            w_reasons.append('the simulation clock has not advanced')
+        for name in DEVICES:
+            occupied, w_key, w_why, w_lines = \
+                self.devices[name].warning_verdict(now_ros_s, now_mono)
+            for cls, detail in w_lines:
+                self.emit(cls, detail)
+            w_keys.append(w_key)
+            if occupied:
+                warning = True
+                w_reasons.append(w_why)
+        w_reason = ('; '.join(w_reasons) if w_reasons
+                    else 'both devices report the warning field clear')
+        w_key = tuple(w_keys)
+
+        if warning != self.warning_occupied:
+            self.warning_occupied = warning
+            self.warning_key = w_key
+            self.emit('WARNING', (
+                'warning field {} - {} (front {} ray(s) inside, rear {}). '
+                'This demands a SPEED REDUCTION to the creep ceiling and '
+                'stops nothing; the protective verdict is separate and is '
+                'unaffected by this line').format(
+                    'OCCUPIED' if warning else 'CLEAR', w_reason,
+                    self.devices['front'].last_warning_count,
+                    self.devices['rear'].last_warning_count))
+        elif w_key != self.warning_key:
+            self.warning_key = w_key
+            self.emit('WARNING', 'unchanged ({}), reason now: {}'.format(
+                'OCCUPIED' if warning else 'CLEAR', w_reason))
+
+        # EVERY TICK, not on transitions. See the publisher's comment.
+        msg = Bool()
+        msg.data = warning
+        self.pub_warning.publish(msg)
+
         if clear != self.aggregate_clear:
             self.aggregate_clear = clear
             self.aggregate_key = key
@@ -1115,9 +1398,11 @@ class FieldEvaluation(Node):
             device = self.devices[name]
             self.emit('EXIT', (
                 '{} device: {} scan(s) ingested, last invalid fraction '
-                '{:.2%}, last intrusion-ray count {}, faulted={}').format(
+                '{:.2%}, last protective intrusion-ray count {}, last '
+                'warning-ray count {}, faulted={}').format(
                     name, device.seq, device.last_invalid_fraction,
-                    device.last_intrusion_count, device.faulted))
+                    device.last_intrusion_count, device.last_warning_count,
+                    device.faulted))
         self.emit('EXIT', (
             'link: {} connect attempt(s), {} line(s) sent, of which {} were '
             'PING keepalives (not logged individually - this is a transition '

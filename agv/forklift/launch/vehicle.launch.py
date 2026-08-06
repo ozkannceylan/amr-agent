@@ -394,15 +394,19 @@ def generate_launch_description():
                     'filter without an IMU.'))
     ld.add_action(DeclareLaunchArgument(
         'field_evaluation', default_value='false',
-        description='Start scripts/field_evaluation.py, the protective-field '
-                    'evaluation of agv/forklift/FIELD-EVALUATION.md phase 1. '
-                    'It is a MODEL of what a safety-rated scanner does '
-                    'internally, feeding a STAND-IN FOR WIRING, and it is not '
-                    'a safety function: no Category, no Performance Level, no '
-                    'SIL, no PFH (ADR 0011 D5). It publishes no topic - the '
-                    'verdict crosses one dedicated TCP link to the stand-in '
-                    'writer - and it needs that writer listening on the '
-                    'Windows host, which is why it is off by default.'))
+        description='Start scripts/field_evaluation.py, the protective- and '
+                    'warning-field evaluation of '
+                    'agv/forklift/FIELD-EVALUATION.md phases 1 and 2. It is a '
+                    'MODEL of what a safety-rated scanner does internally, '
+                    'feeding a STAND-IN FOR WIRING, and it is not a safety '
+                    'function: no Category, no Performance Level, no SIL, no '
+                    'PFH (ADR 0011 D5). The PROTECTIVE verdict publishes no '
+                    'topic - it crosses one dedicated TCP link to the '
+                    'stand-in writer, which has to be listening on the '
+                    'Windows host, and that is why this is off by default. '
+                    'The WARNING verdict is process data and does have a '
+                    'topic, /forklift/warning_field/occupied, published at '
+                    'the evaluation tick so that its absence is visible.'))
     ld.add_action(DeclareLaunchArgument(
         'seed', default_value='',
         description='Noise seed passed to gz sim, fixing the sign and value '

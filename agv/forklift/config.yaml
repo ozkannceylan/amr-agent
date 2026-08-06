@@ -617,6 +617,36 @@ topics:
   obstacle_in_stop_zone: /forklift/obstacle/in_stop_zone
   obstacle_min_distance: /forklift/obstacle/min_distance
 
+  # THE WARNING-FIELD VERDICT, and it is on a topic ON PURPOSE while the
+  # protective verdict never will be. std_msgs/Bool, published by
+  # scripts/field_evaluation.py (FIELD-EVALUATION.md section 6.1, phase 2).
+  #
+  # WHY THIS ONE MAY HAVE A TOPIC. The m5-06 ruling above bars the SAFE
+  # channel from every transport. The warning verdict is not the safe
+  # channel and is not equivalent to one: SF-04 carries NO PL claim, trips
+  # a SPEED REDUCTION rather than a stop, and is backed unconditionally by
+  # SF-03, whose verdict still crosses only the dedicated link. Its name
+  # deliberately contains no "safe", "ossd" or "protective" token, which
+  # is also what keeps scripts/check_sensor_frames.py section 4 honest
+  # rather than merely quiet.
+  #
+  # IT IS PUBLISHED AT THE EVALUATION TICK, NOT ON TRANSITIONS, AND THAT
+  # IS THE CONTRACT. A consumer that republishes the last value it saw
+  # would turn this node's death into a standing order to keep driving
+  # fast (LESSONS 2026-08-04, twice). So: the level is on the wire 20
+  # times a second, its ABSENCE is the signal, and any consumer owes a
+  # stale rule of its own - no message inside its own window means
+  # OCCUPIED, never clear. The stand-in writer already owes the same duty
+  # on the protective link; this is that duty, restated for a topic.
+  #
+  # NO CONSUMER EXISTS YET. The path the design assumes is: this topic ->
+  # a ROS-to-OPC-UA carrier (bridge/'s) -> a node in the model
+  # (docs/interfaces/'s) -> the STANDARD program lowers the envelope
+  # ceiling -> the F-program only verifies and demands. Neither the
+  # carrier nor the node is this directory's to create; both are requested
+  # in the m5-47 report.
+  warning_field_occupied: /forklift/warning_field/occupied
+
   # ---- the Nav2 command chain (nav2.yaml, m5-10) ----
   #
   # THE THREE TOPICS OF ADR 0014 SEAM (b), IN ORDER. None of them leaves
@@ -916,6 +946,58 @@ field:
   # Three of T's eight stages are budgets, not measurements (section 11).
   protective_depth_m: 1.35
 
+  # ---- the warning field, phase 2 (FIELD-EVALUATION.md section 6.1) ----
+  #
+  # LARGER THAN THE PROTECTIVE FIELD, AND IT TRIPS A SPEED REDUCTION
+  # RATHER THAN A STOP. Same corridor half-width, same self-return clips,
+  # one static all-direction depth like phase 1's.
+  #
+  # DERIVED, NOT CHOSEN. The requirement is that an intruder standing on
+  # the warning boundary cannot reach the PROTECTIVE boundary before the
+  # vehicle has finished slowing to the creep ceiling v_c = 0.30 m/s:
+  #
+  #   W(v) = D + v*T_w + (v^2 - v_c^2)/(2a) + Kp*[T_w + (v - v_c)/a]
+  #
+  # with D = 1.35 m (the protective depth IN FORCE, above), T_w = 0.35 s
+  # (section 3's warning chain, summed per stage - shorter than the
+  # protective T = 0.46 s because the warning path passes through neither
+  # the stand-in writer nor the F-program), a = 0.50 m/s^2 (the envelope
+  # gate's measured ramp), and the PROVISIONAL intruder-advance term Kp =
+  # 1.6 m/s carried in the DEMANDING direction as section 4 carries it.
+  #
+  # AT THE SPEED IN FORCE, v = 0.60 m/s (nav2.yaml max_velocity 0.60
+  # forward, min_velocity -0.55 reverse - the worst of the two sizes one
+  # static contour):
+  #
+  #   W = 1.35 + 0.60*0.35 + (0.36-0.09)/1.00 + 1.6*(0.35+0.60)
+  #     = 1.35 + 0.210    + 0.270            + 1.520
+  #     = 3.350 m
+  #
+  # WHERE IT DOES NOT FIT, AND IT IS NOT SMOOTHED. Section 4's
+  # detection-capability floor is 4.01 m for a 70 mm object at 1.00365
+  # deg/ray. The drive-direction worst corner sits 3.65 m from the front
+  # device and fits; the FORK-direction worst corner sits 4.63 m from the
+  # rear device and does NOT - the ray spacing there has opened to 81 mm.
+  # It is a detection-capability shortfall, not a range one (4.63 m is
+  # inside the class's 4.95 m reach and the model's 5.50 m range_max).
+  # Acceptable for THIS field and for no other reason than that SF-04
+  # carries NO PL CLAIM and is backed unconditionally by SF-03, whose
+  # field is inside the floor everywhere. Resizing down to 4.01 m would
+  # silently deliver less speed reduction than the derivation requires.
+  warning_depth_m: 3.35
+
+  # SF-04'S OWN RELEASE DISCIPLINE (SRS SF-04). Occupation asserts on ONE
+  # scan, like the protective verdict. Release needs the 3-scan clear
+  # debounce AND THEN 2 s of continuous non-occupation, timed on this
+  # node's own STEADY clock - not the simulation clock, for the reason
+  # written at the evaluation tick in scripts/field_evaluation.py.
+  #
+  # THE HOLD IS IMPLEMENTED HERE RATHER THAN DOWNSTREAM because the
+  # consumer of the warning verdict is a ceiling-forming path with no
+  # memory of why the ceiling was lowered; a release discipline left to it
+  # is a release discipline nobody owns.
+  warning_clear_hold_s: 2.0
+
   # HALF WIDTH OF THE TWO CORRIDORS (section 6): 0.45 vehicle half-width
   # + 0.05 measurement allowance Z + 0.05 steering-deviation allowance.
   # The last term is a BUDGET and is measurement 7 of section 11.
@@ -965,12 +1047,12 @@ field:
       # excluded". It costs no coverage: the FRONT device watches those
       # bearings (section 13.8 point 3).
       #
-      # THE BAND IS WIDER THAN FIELD-EVALUATION.md SECTION 6'S TABLE, AND
-      # THE DEVIATION IS DELIBERATE AND MEASURED. That table quotes
-      # -131.5..-72.3 deg, which are section 13.2's -131.48..-72.26
-      # rounded OUTWARD at one end and INWARD at the other. Applied as
-      # written it leaves the two EDGE rays of the measured band inside
-      # the field:
+      # THE BAND MATCHES FIELD-EVALUATION.md SECTION 6'S TABLE, WHICH WAS
+      # CORRECTED TO IT ON 2026-08-06 (m5-47). It did not, from 2026-08-05
+      # to 2026-08-06: that table quoted -131.5..-72.3 deg, which are
+      # section 13.2's -131.48..-72.26 rounded OUTWARD at one end and
+      # INWARD at the other. Applied as written it leaves the two EDGE
+      # rays of the measured band inside the field:
       #
       #   index  5, bearing -132.482 deg, self-return 0.780 m (mast rail
       #             corner, section 13.3) against a contour boundary of
@@ -986,9 +1068,13 @@ field:
       # set the design's own rule points at - "clipped by each device's
       # measured self-return contour minus 0.05 m" - and is placed between
       # rays: index 4 is at -133.485 deg and index 66 at -71.259 deg, so
-      # -133.0 and -71.8 catch 5..65 inclusive and nothing else. A
-      # correction to section 6's table is requested in the m5-12b report
-      # rather than edited into another brief's deliverable.
+      # -133.0 and -71.8 catch 5..65 inclusive and nothing else.
+      #
+      # THE RULE THAT CAME OUT OF IT, now stated in section 6 of the
+      # design and binding on every boundary in this block: A GEOMETRIC
+      # BOUNDARY DERIVED FROM A MEASUREMENT IS ROUNDED IN THE DIRECTION
+      # THAT EXCLUDES, NEVER FOR READABILITY. For a clip band that means
+      # widening it; for a clip cap it means rounding down.
       bearing_lo_deg: -133.0
       bearing_hi_deg: -71.8
       boundary_m: 0.040
