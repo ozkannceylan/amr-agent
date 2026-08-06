@@ -20,18 +20,45 @@
 # restart all say "every input in the configured signal set" and none of them
 # names a number.
 #
-# This file carries the CELL GROUP ALONE, because it addresses the commissioned
-# PLCSIM Advanced instance and the `Forklift/` subtree of opcua-nodes.md §10 is
-# a design value there until the owner reads it back out of TIA Portal (§10.2
-# step 6, bridge-design.md §12 item 10). A run against the test double, which
-# serves both subtrees, uses bridge-double-both.yaml or
-# bridge-double-forklift.yaml beside this file.
+# This file carries the FORKLIFT GROUP, and the CELL GROUP IS ABSENT. Both
+# halves of that sentence are observations of the server, taken 2026-08-06 with
+# bridge/tools/probe_server_paths.py against the commissioned instance and
+# recorded in bridge/EVIDENCE_ENVELOPE_BRIDGE.md §1:
+#
+#   * the `Forklift/` subtree is no longer a design value — the owner's build
+#     (plc/forklift/TIA-BUILD-PROCEDURE.md, 2026-08-05) created it and every
+#     §10 path this file names reads back with its documented type, no `_1`
+#     suffix anywhere. That closes the condition the previous version of this
+#     comment carried (opcua-nodes.md §10.2 step 6, bridge-design.md §12 item 10);
+#   * the CPU in force runs project `safe_amr`, whose `DemoCell` interface
+#     publishes `Forklift/` and `Link/BridgeHeartbeat` AND NOTHING ELSE. The M3
+#     cell's `Input/`, `Output/` and `Status/` folders and `Link/BridgeLinkOk`
+#     are not advertised and are not addressable — each returns `BadNoMatch`.
+#     So the cell group is not omitted as a preference: a run carrying it
+#     against this CPU fails at node resolution, which is the intended failure
+#     mode (§3.1 N4) and not a configuration to keep around.
 #
 # A group absent from this list contributes nothing: no subscription, no slot,
 # no node resolution, no write, no poll and no entry in the write allowlist
 # (§2.1 G1). It is not a disabled feature that idles — it does not exist in
-# this run, and its node and topic tables are absent below.
-groups: ["cell"]
+# this run, and its node and topic tables are absent below. The cell group's
+# tables therefore left this file with the group, and a run against the M3
+# demonstration-cell project restores them from git history rather than from a
+# commented-out block: a table that is present but unused is a table nothing
+# checks.
+#
+# A run against the test double, which serves both subtrees, uses
+# bridge-double-both.yaml or bridge-double-forklift.yaml beside this file.
+# The ENVELOPE group beside it carries `opcua-nodes.md` §12 — the autonomy
+# envelope, the drive mode and the vehicle's report back. A THIRD group and not
+# an enlargement of the forklift group: a group is one plant and one node-model
+# section (§2.1), these six slots are §12's and live in four DBs of their own,
+# and every committed count of the forklift group stays true untouched.
+# §12.13 item 1 leaves that choice to the interface agent and asks for
+# `bridge-design.md` to carry the group before any bridge work on it; the
+# design document does not carry it yet, so this configuration is the bridge's
+# proposal made runnable, and the m5-44 report requests the interface round.
+groups: ["forklift", "envelope"]
 
 opcua:
   # The bridge connects OUT to this endpoint. It never listens (invariant 4).
@@ -105,50 +132,95 @@ nodes:
   # One table per CONFIGURED group. Paths are relative to the interface node
   # (§3.1 N1) and live in the interface namespace.
   groups:
-    cell:
-      # WRITABLE by the bridge — the PLC input image (opcua-nodes.md §9.3).
+    forklift:
+      # WRITABLE by the bridge — the plant's state (opcua-nodes.md §10.5), in
+      # that section's order. `ForkliftObstacleInStopZone` is the one input
+      # whose TRUE is the NON-permissive state; it is carried uninverted and
+      # its DB start value is TRUE (§10.9).
       inputs:
-        ConveyorBeltPosition:          ["Input", "ConveyorBeltPosition"]
-        ConveyorBeltSpeed:             ["Input", "ConveyorBeltSpeed"]
-        ProductSensorRange:            ["Input", "ProductSensorRange"]
-        PanelStartPressed:             ["Input", "PanelStartPressed"]
-        # Normally open like PanelStartPressed, unlike the two NC rows below: its
-        # fail state is FALSE (opcua-nodes.md §9.3). The bridge writes it only from
-        # a real publish, so before the first one the node keeps the server's own
-        # FALSE start value — it is never asserted by this process (§6.1 R1).
-        PanelResetPressed:             ["Input", "PanelResetPressed"]
-        PanelStopCircuitClosed:        ["Input", "PanelStopCircuitClosed"]
-        PanelProcessStopCircuitClosed: ["Input", "PanelProcessStopCircuitClosed"]
-      # READ and applied to the cell unchanged (§9.4).
+        ForkliftForkHeight:            ["Forklift", "Input", "ForkliftForkHeight"]
+        ForkliftLinearSpeed:           ["Forklift", "Input", "ForkliftLinearSpeed"]
+        ForkliftObstacleInStopZone:    ["Forklift", "Input", "ForkliftObstacleInStopZone"]
+        ForkliftObstacleMinDistance:   ["Forklift", "Input", "ForkliftObstacleMinDistance"]
+      # READ and applied to the plant unchanged (§10.6): no ramp, no clamp, no
+      # interlock, no zeroing. Not writable on the server either — the two
+      # enforcements are independent (§10.3), and the CPU refuses the write.
       outputs:
-        ConveyorSpeedCommand:          ["Output", "ConveyorSpeedCommand"]
-      # READ for logging only. Applied to nothing, used in no decision (§4.4).
+        ForkliftTractionSpeedRef:      ["Forklift", "Output", "ForkliftTractionSpeedRef"]
+        ForkliftSteerAngleRef:         ["Forklift", "Output", "ForkliftSteerAngleRef"]
+        ForkliftForkSpeedRef:          ["Forklift", "Output", "ForkliftForkSpeedRef"]
+      # READ for logging only, applied to nothing and used in no decision
+      # (§4.9). `HmiLinkOk` is the PLC's verdict on the OTHER client's liveness.
+      # The five `Forklift/Hmi/` requests and `Forklift/Link/HmiHeartbeat`
+      # appear nowhere in this file, in either direction: the bridge never
+      # touches the HMI's group, and the loader rejects a config that names it
+      # (§4.10).
       diagnostics:
-        CellCycleRunning:              ["Status", "CellCycleRunning"]
-        CellProcessStopActive:         ["Status", "CellProcessStopActive"]
-        CellResetRequired:             ["Status", "CellResetRequired"]
-        ProductPresentAtSensor:        ["Status", "ProductPresentAtSensor"]
-        ConveyorDriveFault:            ["Status", "ConveyorDriveFault"]
-        BridgeLinkOk:                  ["Link", "BridgeLinkOk"]
+        ForkliftTeleopActive:          ["Forklift", "Status", "ForkliftTeleopActive"]
+        ForkliftObstacleStopActive:    ["Forklift", "Status", "ForkliftObstacleStopActive"]
+        ForkliftSpeedLimitActive:      ["Forklift", "Status", "ForkliftSpeedLimitActive"]
+        ForkliftResetRequired:         ["Forklift", "Status", "ForkliftResetRequired"]
+        HmiLinkOk:                     ["Forklift", "Link", "HmiLinkOk"]
+
+    envelope:
+      # WRITABLE by the bridge — the two values the VEHICLE'S OWN CONTROL LAYER
+      # owns and the bridge carries (opcua-nodes.md §12.2: value owner and node
+      # writer are different roles). `Forklift/Vehicle/` is the only writable
+      # position this group has.
+      inputs:
+        ForkliftVehicleModeApplied:    ["Forklift", "Vehicle", "ForkliftVehicleModeApplied"]
+        ForkliftVehicleHeartbeat:      ["Forklift", "Vehicle", "ForkliftVehicleHeartbeat"]
+      # READ and republished unchanged (§12.10). NOT WRITABLE on the server:
+      # the CPU refuses a write to `Forklift/Envelope/*` with BadNotWritable
+      # (read back 2026-08-05, TIA-BUILD-PROCEDURE record table), which is the
+      # server-side half of "a permission is not a command" (§12.2). The
+      # bridge's own allowlist is the other half and is derived from the
+      # `inputs` table above, so neither depends on the other.
+      outputs:
+        ForkliftDriveModeActive:       ["Forklift", "Mode", "ForkliftDriveModeActive"]
+        ForkliftMotionEnable:          ["Forklift", "Envelope", "ForkliftMotionEnable"]
+        ForkliftSpeedCeiling:          ["Forklift", "Envelope", "ForkliftSpeedCeiling"]
+        ForkliftEquipmentPermit:       ["Forklift", "Envelope", "ForkliftEquipmentPermit"]
+      # READ for logging only, applied to nothing and reaching no topic: the
+      # operator's stop reaches the vehicle through the envelope and the
+      # setpoints, never through a stop topic of its own (§12.7 PS6).
+      diagnostics:
+        ForkliftProcessStopActive:     ["Forklift", "ProcessStop", "ForkliftProcessStopActive"]
+      # `Mode/HmiDriveModeRequest` and `ProcessStop/HmiProcessStopRequest` are
+      # absent from every table above, in both directions. They are the HMI's,
+      # and the loader rejects a config that names an `Hmi…` tag in a writable
+      # position (§4.10).
 
 ros:
-  node_name: "cell_plc_bridge"
+  node_name: "forklift_plc_bridge"
   # One topic table per configured group.
   topics:
-    cell:
-      # Subscriptions (cell → PLC).
-      joint_state:   "/cell/conveyor/joint_state"
-      product_scan:  "/cell/product_sensor/scan"
-      panel_start:   "/cell/panel/start"
-      panel_reset:   "/cell/panel/reset"
-      panel_stop:    "/cell/panel/stop"
-      panel_process_stop: "/cell/panel/process_stop"
-      # Publication (PLC → cell).
-      cmd_speed:     "/cell/conveyor/cmd_speed"
-  # Addressing, not logic (§4.5): the joint whose position/velocity is the
-  # belt encoder, matched by name in every message. Required by the cell group
-  # and rejected by the loader when no configured group needs it.
-  joint_name: "belt_joint"
+    forklift:
+      # The vehicle layer's contract (opcua-nodes.md §10.10). Every one is
+      # std_msgs/Float64 or std_msgs/Bool, whose payload is the single field
+      # `data`: no index to resolve and no array to select from (§4.5).
+      fork_height:           "/forklift/fork_height"
+      linear_speed:          "/forklift/linear_speed"
+      obstacle_in_stop_zone: "/forklift/obstacle/in_stop_zone"
+      obstacle_min_distance: "/forklift/obstacle/min_distance"
+      cmd_traction_speed:    "/forklift/cmd/traction_speed"
+      cmd_steer_angle:       "/forklift/cmd/steer_angle"
+      cmd_fork_speed:        "/forklift/cmd/fork_speed"
+    envelope:
+      # The vehicle layer's contract (opcua-nodes.md §12.10, and the same names
+      # in agv/forklift/config.yaml's `topics:` block). The four the bridge
+      # publishes are DELIBERATELY NOT under /forklift/cmd/: that namespace is
+      # for commands applied to joints, and a bound or a permission does not
+      # belong beside three setpoints (§12.10).
+      mode_in_force:             "/forklift/mode/in_force"
+      envelope_motion_enable:    "/forklift/envelope/motion_enable"
+      envelope_speed_ceiling:    "/forklift/envelope/speed_ceiling"
+      envelope_equipment_permit: "/forklift/envelope/equipment_permit"
+      # Subscriptions (vehicle → PLC).
+      mode_applied:              "/forklift/mode/applied"
+      vehicle_heartbeat:         "/forklift/vehicle/heartbeat"
+  # No `joint_name`: no configured group selects a joint out of a JointState
+  # array, and the loader rejects the key when nothing needs it (§2.1 G1).
   # Subscription reliability for the Real-valued topics, matched to the
   # publisher (ros_gz_bridge publishes RELIABLE — verified with
   # `ros2 topic info -v`, logged again at every startup).

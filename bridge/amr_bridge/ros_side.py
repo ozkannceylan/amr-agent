@@ -32,9 +32,14 @@ from rclpy.qos import (
     ReliabilityPolicy,
 )
 from sensor_msgs.msg import JointState, LaserScan
-from std_msgs.msg import Bool, Float64
+from std_msgs.msg import Bool, Float64, UInt16
 
-from .config import BOOL, Config
+from .config import BOOL, REAL, UINT16, Config
+
+#: The message type each value kind travels in, both directions. Marshalling,
+#: not logic: the kind comes from the node model's own type column and this map
+#: is the whole of the translation (§2.1 G4, §4.5).
+_MSG_TYPE = {REAL: Float64, BOOL: Bool, UINT16: UInt16}
 from .instrumentation import ActuationProbe, Counters, Recorder
 from .slots import SlotSet
 
@@ -105,6 +110,10 @@ class PlantInterface(Node):
         self._out_pubs: dict[str, object] = {}
         #: Output node key -> topic name, for the QoS report and the log.
         self._out_topics: dict[str, str] = {}
+        #: Output node key -> value kind, so `publish_output` marshals into the
+        #: message type the node model gives that node and never into a widened
+        #: Float64 (`opcua-nodes.md` §12.10's msg-type column).
+        self._out_kinds: dict[str, str] = {}
 
         for group in cfg.signal_groups:
             topics = cfg.topics(group.name)
@@ -112,11 +121,12 @@ class PlantInterface(Node):
                 self._subscribe_structured(group.name, topic_key, topics[topic_key])
             for node_key, topic_key, kind in group.scalar_inputs:
                 self._subscribe_scalar(node_key, topics[topic_key], kind)
-            for node_key, topic_key in group.outputs:
+            for node_key, topic_key, kind in group.outputs:
                 topic = topics[topic_key]
                 self._out_pubs[node_key] = self.create_publisher(
-                    Float64, topic, self._contact_qos)
+                    _MSG_TYPE[kind], topic, self._contact_qos)
                 self._out_topics[node_key] = topic
+                self._out_kinds[node_key] = kind
             LOG.info(
                 "group %s (%s): %d input slot(s), %d output topic(s)",
                 group.name, group.reference, len(group.input_keys), len(group.outputs))
@@ -141,6 +151,14 @@ class PlantInterface(Node):
         if kind == BOOL:
             self.create_subscription(
                 Bool, topic, lambda msg, key=node_key: self.cb_scalar_bool(key, msg),
+                self._contact_qos)
+        elif kind == UINT16:
+            # The vehicle's applied mode and its own cycle counter. RELIABLE,
+            # like the level signals: a mode readback that is dropped is a
+            # disagreement the PLC would see and time (§12.6 M4), and a dropped
+            # heartbeat increment is a liveness gap that never happened.
+            self.create_subscription(
+                UInt16, topic, lambda msg, key=node_key: self.cb_scalar_uint(key, msg),
                 self._contact_qos)
         else:
             self.create_subscription(
@@ -186,6 +204,15 @@ class PlantInterface(Node):
         # std_msgs/Bool has no header, so there is no sim timestamp.
         self._slots[key].put(bool(msg.data), recv_ns, None)
 
+    def cb_scalar_uint(self, key: str, msg: UInt16) -> None:
+        recv_ns = time.monotonic_ns()
+        # Carried as published. The bridge does not test the mode against the
+        # three defined values, does not subtract heartbeat counts and does not
+        # notice a wrap: validity is an affirmative test the PLC makes, and
+        # inequality is the only comparison the counter admits (§12.3, §12.6
+        # V1). Any of those here would be a second interpreter (§1.1).
+        self._slots[key].put(int(msg.data), recv_ns, None)
+
     def cb_scalar_real(self, key: str, msg: Float64) -> None:
         recv_ns = time.monotonic_ns()
         value = float(msg.data)
@@ -206,23 +233,34 @@ class PlantInterface(Node):
 
     # --- publishers --------------------------------------------------------
 
-    def publish_output(self, node_key: str, value: float) -> int:
+    def publish_output(self, node_key: str, value) -> int:
         """Publish the value just read from that node, unchanged. Returns the
         monotonic timestamp taken after publish() returns (L5 end).
 
-        No ramp, no clamp, no interlock, no zeroing, on any of the four output
-        slots (§4.2, §4.8). `ForkliftForkSpeedRef` of 0.0 means *hold*, and the
-        bridge translates it into nothing: it publishes 0.0.
+        No ramp, no clamp, no interlock, no zeroing, on any output slot (§4.2,
+        §4.8). `ForkliftForkSpeedRef` of 0.0 means *hold*, and the bridge
+        translates it into nothing: it publishes 0.0. The envelope elements are
+        carried the same way: `ForkliftMotionEnable` `FALSE` and
+        `ForkliftSpeedCeiling` `0.0` are published as they are read, and a
+        transport that withheld or reinterpreted either would be deciding
+        whether the vehicle may move (`opcua-nodes.md` §12.1, §1.1).
         """
-        msg = Float64()
-        msg.data = value
+        kind = self._out_kinds[node_key]
+        msg = _MSG_TYPE[kind]()
+        # Marshalling only. Float -> float64 widening, Boolean -> bool,
+        # UInt16 -> uint16; no scale, no offset, no rounding.
+        msg.data = (
+            float(value) if kind == REAL
+            else bool(value) if kind == BOOL
+            else int(value)
+        )
         self._out_pubs[node_key].publish(msg)
         done_ns = time.monotonic_ns()
         self._counters.publishes += 1
         if node_key == "ConveyorSpeedCommand":
             # L6 is a property of the cell simulator (§9.2). It is measurement
             # only: it holds no transported value and can gate nothing.
-            self._probe.note_publish(value, self.sim_time_ns())
+            self._probe.note_publish(float(value), self.sim_time_ns())
         return done_ns
 
     def sim_time_ns(self) -> Optional[int]:

@@ -68,6 +68,18 @@ NAMESPACE_KEYS: tuple[str, ...] = (NS_SERVER_INTERFACES, NS_INTERFACE)
 #: Value kinds a group may bring (§2.1 G4). Nothing else exists.
 REAL = "real"      # S7 Real / OPC UA Float
 BOOL = "bool"      # S7 Bool / OPC UA Boolean
+#: S7 UInt / OPC UA UInt16. The bridge has generated a UInt16 since m3-04 — its
+#: own heartbeat — but until the §12 group it had never CARRIED one from or to a
+#: topic (`opcua-nodes.md` §12.10). It is a value type §2.1 G4 already admits and
+#: `std_msgs/UInt16` needs no new dependency: a group adds slots, not kinds.
+UINT16 = "uint16"
+
+#: Write cadence of an input slot (§5). Not a timer and not a policy the bridge
+#: chooses per run: it is transcribed from the node model's own cadence column,
+#: per signal, and it is why the two `Forklift/Vehicle/` nodes differ from each
+#: other despite sharing a type (`opcua-nodes.md` §12.6, last paragraph).
+CYCLIC = "cyclic"          # written every cycle from the slot's latest value
+ON_CHANGE = "on_change"    # written when the value changes, plus every refresh
 
 #: The one node the bridge writes for itself, shared by every configured group
 #: (§2.1 G5, opcua-nodes.md §9.7, §10.11: there is no second heartbeat). It is a
@@ -88,12 +100,15 @@ class SignalGroup:
     name: str
     #: Where the authoritative node table lives. Quoted in log lines and errors.
     reference: str
-    #: (node key, kind) for every input the bridge WRITES, in the node model's
-    #: documented order. The cell's order is §9.3's (panel contacts grouped by
-    #: failure direction); the forklift's is §10.5's.
-    inputs: tuple[tuple[str, str], ...]
-    #: (node key, ROS topic key) for every output the bridge READS and applies.
-    outputs: tuple[tuple[str, str], ...]
+    #: (node key, kind, cadence) for every input the bridge WRITES, in the node
+    #: model's documented order. The cell's order is §9.3's (panel contacts
+    #: grouped by failure direction); the forklift's is §10.5's; the envelope
+    #: group's is §12.10's. The cadence is transcribed from the same table.
+    inputs: tuple[tuple[str, str, str], ...]
+    #: (node key, ROS topic key, kind) for every output the bridge READS and
+    #: applies. The kind is the published message's type: a group that carries a
+    #: `UInt16` output publishes `std_msgs/UInt16`, not a widened Float64.
+    outputs: tuple[tuple[str, str, str], ...]
     #: Nodes read at the diagnostics rate, logged and applied to nothing.
     diagnostics: tuple[str, ...]
     #: (node key, ROS topic key, kind) for inputs that arrive as a whole
@@ -108,11 +123,11 @@ class SignalGroup:
 
     @property
     def input_keys(self) -> tuple[str, ...]:
-        return tuple(key for key, _ in self.inputs)
+        return tuple(key for key, _kind, _cadence in self.inputs)
 
     @property
     def output_keys(self) -> tuple[str, ...]:
-        return tuple(key for key, _ in self.outputs)
+        return tuple(key for key, _topic, _kind in self.outputs)
 
     @property
     def topic_keys(self) -> tuple[str, ...]:
@@ -120,7 +135,7 @@ class SignalGroup:
         return (
             self.structured_topics
             + tuple(topic for _, topic, _ in self.scalar_inputs)
-            + tuple(topic for _, topic in self.outputs)
+            + tuple(topic for _, topic, _ in self.outputs)
         )
 
 
@@ -129,15 +144,15 @@ CELL_GROUP = SignalGroup(
     name="cell",
     reference="opcua-nodes.md §9",
     inputs=(
-        ("ConveyorBeltPosition", REAL),
-        ("ConveyorBeltSpeed", REAL),
-        ("ProductSensorRange", REAL),
-        ("PanelStartPressed", BOOL),
-        ("PanelResetPressed", BOOL),
-        ("PanelStopCircuitClosed", BOOL),
-        ("PanelProcessStopCircuitClosed", BOOL),
+        ("ConveyorBeltPosition", REAL, CYCLIC),
+        ("ConveyorBeltSpeed", REAL, CYCLIC),
+        ("ProductSensorRange", REAL, CYCLIC),
+        ("PanelStartPressed", BOOL, ON_CHANGE),
+        ("PanelResetPressed", BOOL, ON_CHANGE),
+        ("PanelStopCircuitClosed", BOOL, ON_CHANGE),
+        ("PanelProcessStopCircuitClosed", BOOL, ON_CHANGE),
     ),
-    outputs=(("ConveyorSpeedCommand", "cmd_speed"),),
+    outputs=(("ConveyorSpeedCommand", "cmd_speed", REAL),),
     diagnostics=(
         "CellCycleRunning",
         "CellProcessStopActive",
@@ -164,19 +179,19 @@ FORKLIFT_GROUP = SignalGroup(
     name="forklift",
     reference="opcua-nodes.md §10",
     inputs=(
-        ("ForkliftForkHeight", REAL),
-        ("ForkliftLinearSpeed", REAL),
+        ("ForkliftForkHeight", REAL, CYCLIC),
+        ("ForkliftLinearSpeed", REAL, CYCLIC),
         # TRUE is the non-permissive state and it is carried UNINVERTED (§4.7
         # row 12, opcua-nodes.md §10.5). The polarity belongs to the vehicle
         # layer at one end and to the PLC at the other; inverting it in
         # transport would put it in two places.
-        ("ForkliftObstacleInStopZone", BOOL),
-        ("ForkliftObstacleMinDistance", REAL),
+        ("ForkliftObstacleInStopZone", BOOL, ON_CHANGE),
+        ("ForkliftObstacleMinDistance", REAL, CYCLIC),
     ),
     outputs=(
-        ("ForkliftTractionSpeedRef", "cmd_traction_speed"),
-        ("ForkliftSteerAngleRef", "cmd_steer_angle"),
-        ("ForkliftForkSpeedRef", "cmd_fork_speed"),
+        ("ForkliftTractionSpeedRef", "cmd_traction_speed", REAL),
+        ("ForkliftSteerAngleRef", "cmd_steer_angle", REAL),
+        ("ForkliftForkSpeedRef", "cmd_fork_speed", REAL),
     ),
     diagnostics=(
         "ForkliftTeleopActive",
@@ -198,11 +213,77 @@ FORKLIFT_GROUP = SignalGroup(
     structured_topics=(),
 )
 
+#: The autonomy envelope, the drive mode and the vehicle's report back —
+#: `opcua-nodes.md` §12, ADR 0011 D3 as refined by ADR 0012 D1, gate M5.
+#:
+#: **A THIRD GROUP, not an enlargement of the forklift group.** A group is "a
+#: named set of slots that travel together because they belong to one plant and
+#: one node-model section" (`bridge-design.md` §2.1); these six slots are §12's,
+#: they live in four DBs of their own, and every committed count of the forklift
+#: group (4in/3out/5diag, 13 nodes, a 5-key allowlist) stays true untouched.
+#: `opcua-nodes.md` §12.13 item 1 leaves the choice open — "whether these six
+#: slots join the forklift group or form a third" — and names the **interface
+#: agent** as its owner. This definition is therefore the bridge's proposal
+#: carried into code so it could be run and measured; it is not the interface
+#: ruling, and `bridge-design.md` does not yet carry this group at all
+#: (requested in the m5-44 report).
+#:
+#: **Nothing here is logic.** The envelope is formed in the PLC and carried
+#: unchanged: no threshold on the ceiling, no interpretation of the enable, no
+#: comparison of the mode in force against the mode applied — that comparison is
+#: the PLC's own (`FB_ForkliftTeleop.scl`, §14) and a bridge that made it would
+#: be a second owner of a verdict (invariant 10, §1.1).
+#:
+#: The two HMI-written nodes of §12 — `Mode/HmiDriveModeRequest` and
+#: `ProcessStop/HmiProcessStopRequest` — appear NOWHERE below, in either
+#: direction, exactly as the five `Forklift/Hmi/` requests do not (§4.10,
+#: `opcua-nodes.md` §12.10's "deliberately reach no topic" table).
+ENVELOPE_GROUP = SignalGroup(
+    name="envelope",
+    reference="opcua-nodes.md §12",
+    inputs=(
+        # The vehicle's control layer owns both values; the bridge writes both
+        # nodes (§12.2, "value owner and node writer are different roles"). The
+        # two cadences are §12.6's own, and they differ despite the shared type:
+        # the mode applied is a level and is written on change, the heartbeat is
+        # a counter whose whole meaning is that it keeps moving.
+        ("ForkliftVehicleModeApplied", UINT16, ON_CHANGE),
+        ("ForkliftVehicleHeartbeat", UINT16, CYCLIC),
+    ),
+    outputs=(
+        # The mode in force — the authoritative answer to "what mode is the
+        # machine in" (§12.3 M1), republished so the vehicle can select its
+        # control law from the node it read rather than from what it sent.
+        ("ForkliftDriveModeActive", "mode_in_force", UINT16),
+        # The three envelope elements. A PERMISSION, A BOUND AND A READINESS —
+        # never a command (§12.1, E6). The ceiling is unsigned and is not a
+        # setpoint (E2); the bridge neither clamps it nor compares it with
+        # anything (§1.1).
+        ("ForkliftMotionEnable", "envelope_motion_enable", BOOL),
+        ("ForkliftSpeedCeiling", "envelope_speed_ceiling", REAL),
+        ("ForkliftEquipmentPermit", "envelope_equipment_permit", BOOL),
+    ),
+    diagnostics=(
+        # The operator's latched process stop: a PLC verdict, read for the log
+        # and applied to nothing. It deliberately reaches NO topic — the stop
+        # reaches the vehicle through the envelope and the setpoints, and a
+        # second path would be a second owner of one reaction (§12.7 PS6,
+        # §12.10's own table).
+        "ForkliftProcessStopActive",
+    ),
+    scalar_inputs=(
+        ("ForkliftVehicleModeApplied", "mode_applied", UINT16),
+        ("ForkliftVehicleHeartbeat", "vehicle_heartbeat", UINT16),
+    ),
+    structured_topics=(),
+)
+
 #: Every group this bridge knows how to carry. A config may declare any
 #: non-empty subset; the union of the declared ones is the configured signal set.
 GROUPS: dict[str, SignalGroup] = {
     CELL_GROUP.name: CELL_GROUP,
     FORKLIFT_GROUP.name: FORKLIFT_GROUP,
+    ENVELOPE_GROUP.name: ENVELOPE_GROUP,
 }
 
 #: BrowseName elements the bridge must never address, in either direction, in
@@ -237,7 +318,27 @@ class Config:
 
     @property
     def input_kinds(self) -> dict[str, str]:
-        return {key: kind for group in self.signal_groups for key, kind in group.inputs}
+        return {
+            key: kind
+            for group in self.signal_groups
+            for key, kind, _cadence in group.inputs
+        }
+
+    @property
+    def input_cadences(self) -> dict[str, str]:
+        return {
+            key: cadence
+            for group in self.signal_groups
+            for key, _kind, cadence in group.inputs
+        }
+
+    @property
+    def output_kinds(self) -> dict[str, str]:
+        return {
+            key: kind
+            for group in self.signal_groups
+            for key, _topic, kind in group.outputs
+        }
 
     @property
     def input_keys(self) -> tuple[str, ...]:
@@ -251,15 +352,26 @@ class Config:
         return tuple(key for group in self.signal_groups for key in group.input_keys)
 
     @property
-    def analog_input_keys(self) -> tuple[str, ...]:
-        """Real inputs: written cyclically from the latest sample (§5)."""
-        return tuple(key for key, kind in self.input_kinds.items() if kind == REAL)
+    def cyclic_input_keys(self) -> tuple[str, ...]:
+        """Inputs written cyclically from the slot's latest value (§5).
+
+        Every Real of every configured group, and the vehicle's heartbeat
+        counter. The cadence comes from the node model per signal, never from
+        the value's type: `ForkliftVehicleHeartbeat` and
+        `ForkliftVehicleModeApplied` are both `UInt16` and are written
+        differently (`opcua-nodes.md` §12.6).
+        """
+        return tuple(
+            key for key, cadence in self.input_cadences.items() if cadence == CYCLIC
+        )
 
     @property
-    def bool_input_keys(self) -> tuple[str, ...]:
-        """Bool inputs: written on change, plus a full refresh on every
-        (re)connect and after a detected server restart (§5, §8.1)."""
-        return tuple(key for key, kind in self.input_kinds.items() if kind == BOOL)
+    def on_change_input_keys(self) -> tuple[str, ...]:
+        """Inputs written on change, plus a full refresh on every (re)connect
+        and after a detected server restart (§5, §8.1)."""
+        return tuple(
+            key for key, cadence in self.input_cadences.items() if cadence == ON_CHANGE
+        )
 
     @property
     def output_keys(self) -> tuple[str, ...]:
@@ -268,7 +380,11 @@ class Config:
     @property
     def output_topic_keys(self) -> dict[str, str]:
         """Output node key -> the ROS topic key it is republished on."""
-        return {key: topic for group in self.signal_groups for key, topic in group.outputs}
+        return {
+            key: topic
+            for group in self.signal_groups
+            for key, topic, _kind in group.outputs
+        }
 
     @property
     def diagnostic_keys(self) -> tuple[str, ...]:

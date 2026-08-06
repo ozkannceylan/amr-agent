@@ -57,7 +57,7 @@ from typing import Callable, Optional
 
 from asyncua import Client, ua
 
-from .config import BOOL, HEARTBEAT_KEY, REAL, Config
+from .config import BOOL, HEARTBEAT_KEY, REAL, UINT16, Config
 from .instrumentation import Counters, Recorder
 from .slots import SlotSet
 
@@ -65,7 +65,11 @@ LOG = logging.getLogger("bridge.opcua")
 
 #: The three value kinds the model carries, and nothing else: a group adds
 #: slots, not kinds (bridge-design.md §2.1 G4, opcua-nodes.md §10.3).
-_KIND_VARIANT = {REAL: ua.VariantType.Float, BOOL: ua.VariantType.Boolean}
+_KIND_VARIANT = {
+    REAL: ua.VariantType.Float,
+    BOOL: ua.VariantType.Boolean,
+    UINT16: ua.VariantType.UInt16,
+}
 _EXPECTED_DATATYPE_NODEID = {
     ua.VariantType.Float: ua.NodeId(ua.ObjectIds.Float),
     ua.VariantType.Boolean: ua.NodeId(ua.ObjectIds.Boolean),
@@ -82,8 +86,8 @@ def expected_types(cfg: Config) -> dict[str, ua.VariantType]:
         key: _KIND_VARIANT[kind] for key, kind in cfg.input_kinds.items()
     }
     types[HEARTBEAT_KEY] = ua.VariantType.UInt16
-    for key in cfg.output_keys:
-        types[key] = ua.VariantType.Float
+    for key, kind in cfg.output_kinds.items():
+        types[key] = _KIND_VARIANT[kind]
     for key in cfg.diagnostic_keys:
         types[key] = _DIAGNOSTIC_TYPE_DEFAULT
     return types
@@ -167,8 +171,13 @@ class PlcClient:
         # R3's "every input", the restart rewrite — comes from here and from
         # nowhere else, so no rule in this file names a number.
         self._input_keys = cfg.input_keys
-        self._analog_input_keys = cfg.analog_input_keys
-        self._bool_input_keys = cfg.bool_input_keys
+        # Cadence per slot, from the node model's own cadence column — not from
+        # the value's type (§5, `opcua-nodes.md` §12.6).
+        self._cyclic_input_keys = cfg.cyclic_input_keys
+        self._on_change_input_keys = cfg.on_change_input_keys
+        self._input_variants = {
+            key: _KIND_VARIANT[kind] for key, kind in cfg.input_kinds.items()
+        }
         self._output_keys = cfg.output_keys
         self._output_topic_keys = cfg.output_topic_keys
         self._write_allowlist = cfg.write_allowlist
@@ -195,7 +204,7 @@ class PlcClient:
         # Per-session state, cleared on every (re)connect (R4) and whenever the
         # server is found to have restarted underneath a surviving session.
         self._written_this_session: set[str] = set()
-        self._last_bool_written: dict[str, bool] = {}
+        self._last_on_change_written: dict[str, object] = {}
         self._last_write_start: dict[str, int] = {}
         # The heartbeat value THIS session last wrote, or None if it has written
         # none yet. The bridge is the only client permitted to write that node
@@ -465,7 +474,7 @@ class PlcClient:
         thresholded — a dict is emptied.
         """
         self._written_this_session.clear()
-        self._last_bool_written.clear()
+        self._last_on_change_written.clear()
         self._last_missing_logged = []
         self._last_heartbeat_written = None
         self._rewrite_pending = True
@@ -633,10 +642,13 @@ class PlcClient:
                 "read_rt", key, t_start_ns=start, t_end_ns=read_end,
                 interval_ns=read_end - start, value=value,
             )
-            # Float -> float64 widening, unit unchanged. No ramp, no clamp, no
-            # interlock, no zeroing, on any slot. N1: only a value read in this
-            # cycle is published; nothing is replayed or defaulted (§8.3).
-            published_at = self._publish_output(key, float(value))
+            # Marshalling only: Float -> float64 widening, Boolean -> Bool,
+            # UInt16 -> UInt16, unit and encoding unchanged. No ramp, no clamp,
+            # no interlock, no zeroing, on any slot — and no interpretation of
+            # the three envelope elements or of the mode (§4.8, §1.1). N1: only
+            # a value read in this cycle is published; nothing is replayed or
+            # defaulted (§8.3).
+            published_at = self._publish_output(key, value)
             # Per slot, never averaged across slots: a forklift setpoint and a
             # conveyor setpoint share a cycle, not a meaning (§9.3, "per group").
             self._recorder.row(
@@ -648,32 +660,36 @@ class PlcClient:
         rewriting = self._rewrite_pending
         written: list[str] = []
 
-        # Analogs: cyclic write of the slot's latest value (§5). Every Real of
-        # every configured group — the cell's three and the forklift's three.
-        for key in self._analog_input_keys:
+        # Cyclic slots: write the slot's latest value every cycle (§5). Every
+        # Real of every configured group — the cell's three and the forklift's
+        # three — and the vehicle's heartbeat counter, whose whole meaning is
+        # that it keeps moving (`opcua-nodes.md` §12.6).
+        for key in self._cyclic_input_keys:
             take_ns = time.monotonic_ns()
             sample = self._slots[key].get()
             if sample is None:
                 continue  # R1: no sample, no write. No default, ever.
-            start, end = await self._write(key, sample.value, ua.VariantType.Float)
+            start, end = await self._write(key, sample.value, self._input_variants[key])
             self._record_write(key, sample, cycle_start, take_ns, start, end)
             written.append(key)
 
         # Level signals: write on change, plus a full refresh whenever the
         # per-session write cache is empty — after every (re)connect, and after a
         # server restart was detected under a surviving session (§8.1). The four
-        # panel contacts and the forklift's field bit are treated identically;
-        # the field bit's TRUE is the non-permissive state and is carried
-        # uninverted (§4.7 row 12).
-        for key in self._bool_input_keys:
+        # panel contacts, the forklift's field bit and the vehicle's applied
+        # mode are treated identically; the field bit's TRUE is the
+        # non-permissive state and is carried uninverted (§4.7 row 12), and the
+        # applied mode is a readback the bridge neither validates nor compares
+        # with the mode in force — that comparison is the PLC's (§12.6 M4).
+        for key in self._on_change_input_keys:
             take_ns = time.monotonic_ns()
             sample = self._slots[key].get()
             if sample is None:
                 continue
-            if self._last_bool_written.get(key) == sample.value and key in self._written_this_session:
+            if self._last_on_change_written.get(key) == sample.value and key in self._written_this_session:
                 continue
-            start, end = await self._write(key, sample.value, ua.VariantType.Boolean)
-            self._last_bool_written[key] = bool(sample.value)
+            start, end = await self._write(key, sample.value, self._input_variants[key])
+            self._last_on_change_written[key] = sample.value
             self._record_write(key, sample, cycle_start, take_ns, start, end)
             written.append(key)
 
