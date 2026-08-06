@@ -32,6 +32,16 @@ gate.
 > §9 (all stimuli automated), §10. The fourteen networks of §5.1, the coupling
 > contract of §6 and every demand/reset behaviour are **unchanged**.
 
+> **Revision 2026-08-06 (m5-49).** A second F-delta — the speed monitor
+> (SF-10 pattern) and the SS1 stop sequencer (SF-11 logic) — is specified in
+> **§11**, as a delta to the as-built 2026-08-05 program. It adds seven
+> stand-in members (SD2, §11.3), six FB2 inputs and two outputs, twenty-seven
+> networks (§11.5), two pins on existing networks (`CauseGone` and
+> `SafetyResetRequired`, §11.5 re-point table), watch Group 5 (§11.8) and the
+> Q click-path (§11.9). §1–§10 are otherwise unchanged; where a §1–§10
+> statement of counts or read sets is affected, a note at that statement
+> points here.
+
 ## Authority
 
 | Document | What it fixes | Relation to this one |
@@ -279,6 +289,12 @@ Retain.** It is a **standard** DB and not an F-DB, and §7 gives the four reason
 > browse of §4.2 step 14. An edit is an occasion for a property to revert, and
 > "still unreachable" is a read-back, not an assumption (ADR 0006).
 
+> **As-built delta (SD2, m5-49).** The §11 delta adds **seven further
+> members** — the two speed readings, their two sequences, the two motion
+> flags and the warning-field selector (§11.3) — under the same rules and the
+> same re-read of the accessibility property. After SD2 the DB carries
+> **eleven** members.
+
 **Both start values are the fail-safe pre-connection state** (`plc/demo-cell/SPEC.md`
 §3.1, `plc/forklift/SPEC.md` §3.1), and here they also model the truth about real
 F-I/O: an F-DI boots passivated and reads zero until it is depassivated. The
@@ -326,7 +342,13 @@ mirror names downstream diff against these names (CLAUDE.md §9).
 > interface reads **4 Inputs, 4 Outputs, 18 statics and 3 constants**: one Int
 > input, the eight statics of §3.3's second table, and `STANDIN_STALE_MAX`. The
 > call in `Main_Safety_RTG1` gains a fourth input pin and the four output pins
-> stay empty (§4.5 step 7).
+> stay empty (§4.5 step 7). **Built 2026-08-05** — this is now the as-built
+> state.
+
+> **After the §11 SLS/SS1 delta** (specified 2026-08-06, not yet built) the
+> interface reads **10 Inputs, 6 Outputs, 43 Statics and 17 Constants**
+> (§11.3), the call gains six input pins, and all **six** output pins stay
+> empty.
 
 > **An interface change moves the instance DB layout.** After D2, `DB3` is
 > regenerated on compile and the download must **re-initialise** it (§4.2 step
@@ -555,7 +577,8 @@ signature read-back.
 1. **Every network is one logic string ending in one coil or one flip-flop box.**
    Fourteen core networks, fourteen written operands — and, with the §5.4 S015
    delta, eight more for a total of **twenty-two**, still one written operand
-   each.
+   each. (The §11 SLS/SS1 delta adds twenty-seven more for a total of
+   **forty-nine**, same rule — §11.5.)
 2. **`SR` and `RS` are the opposite way round in TIA from IEC 61131-3, and getting
    it backwards is the single easiest way to build the wrong safety program.** In
    TIA the trailing `1` marks the **dominant** input:
@@ -1242,6 +1265,10 @@ between them and this program.
 
 ### 6.1 What the standard program reads — four Bools, read-only
 
+> **After the §11 delta: six Bools.** `SpeedMonitorDemand` and
+> `TorqueOffDemand` join the four below, and the permissive term gains one
+> conjunct — §11.8's coupling rows are the delta to this section.
+
 | PLC symbol | Type | Reads as |
 |---|---|---|
 | `"InstF_Forklift_Safety".EStopDemand` | Bool | The SF-01 demand is latched |
@@ -1290,7 +1317,9 @@ existing step.
 **Its entire read set is the four members of `SafetyInputStandIn`** — the three
 channel Bools and the `StandInHeartbeat` Int the S015 check consumes (§5.4). It
 reads no teleop state, no HMI request, no bridge value, no link verdict, no
-plant feedback and no standard-program status bit (ADR 0009 D3.2).
+plant feedback and no standard-program status bit (ADR 0009 D3.2). (After the
+§11 delta the read set is **ten members of the same DB** — §11.3; the sentence
+above it is otherwise unchanged, and the write set stays §3.4's one DB.)
 
 **Invariant 7, honestly.** The safety program must remain correct if the standard
 program halts or misbehaves. It reads no value the standard program produces, so
@@ -1424,7 +1453,7 @@ this project: a **reading** instrument (§8).
 | Property | Statement |
 |---|---|
 | **Writer process** | One long-lived process on the **Windows host**, beside PLCSIM Advanced. It loads the installed API assembly the way both proofs did — Windows PowerShell 5.1, `Add-Type -Path` on `Siemens.Simatic.Simulation.Runtime.Api.x64.dll` (API 7.0) — introducing **no new dependency**. The assembly path and version are **read-back values from the m5-03 record**, never values to re-derive from this document. Its implementation home in the repository is an **owner ruling still open** (judge review F6; §10 open item 8); this section is the contract any implementation satisfies |
-| **What it writes** | **All four members of `SafetyInputStandIn`, every cycle**: the three channel levels, and `StandInHeartbeat` incremented once per cycle. By tag name, via `WriteBool` / `WriteInt32`-class calls — never by address area (ADR 0011 F7) |
+| **What it writes** | **All four members of `SafetyInputStandIn`, every cycle**: the three channel levels, and `StandInHeartbeat` incremented once per cycle. By tag name, via `WriteBool` / `WriteInt32`-class calls — never by address area (ADR 0011 F7). *(After the §11 extension: eleven members, with the seven speed/motion/warning members governed by §11.2's per-channel freshness rules — the sequences advance only on fresh source data, deliberately, so silence stays visible)* |
 | **Cycle** | **50 ms**, logged by the writer at start-up. Half the in-force F-OB cycle (`FOB_RTG1` = OB123, cyclic 100 ms, read back 2026-08-04), so every F-cycle samples a fresh write and an advanced heartbeat |
 | **Level republish, never write-on-change** | A CPU restart reverts the DB to its start values, and a write-on-change writer never repairs the levels whose source state did not change — the exact bridge failure LESSONS 2026-07-28 records. Republishing every level every 50 ms repairs a restart within one F-cycle, and repairs it as a **level**, latching nothing |
 | **After a CPU restart** | The DB reads start values for at most one writer cycle; both demands latch (correctly — §3.1); the writer restores the levels; the latches stand until one monitored reset — T6.0 / T6.6 |
@@ -1671,8 +1700,9 @@ testing it (`TWIN-DEMO-MAP.md` §3). AT-08 (b) is no longer on this list: §7.5.
 
 ## 8. Watch table — `Forklift F gate`
 
-One watch table, four groups, symbolic addressing only. Open it in *Monitor* mode
-beside the `Forklift M4 gate` table, which is unchanged.
+One watch table, four groups, symbolic addressing only — **five after the §11
+delta, which adds Group 5, the speed monitor (§11.8)**. Open it in *Monitor*
+mode beside the `Forklift M4 gate` table, which is unchanged.
 
 **No row of this table is ever modified.** Watch tables are a **reading
 instrument** in this project (ADR 0015 D1): the stimulus is the stand-in writer
@@ -1884,3 +1914,919 @@ function"*, never *"protective stop"* for the lidar latch.
 | 9 | **The field evaluation must log its verdict transitions wall-clock stamped** — §7.6's correlated record is the only instrument that distinguishes a field-originated write from a scripted one, and its first log is the evaluation's own | Requested of the **m5-12 brief** (vehicle side). Without it, no run can be criterion-(a) evidence, whatever the narration says |
 | 10 | **`sim/scenarios/forklift_commissioning.md` §13 still stimulates by watch-table *Modify*** — its T6 mirror steps (T6.0.2–T6.6.3 there, plus the §13 preamble naming the Modify mechanism) predate ADR 0015 | Requested of the **sim agent**: mirror the rewritten §9.1 — writer commands and the two zone forms — and sweep that document **by subject** (*Modify*, stand-in, `SafetyInputStandIn`), not by the row list named here, which is a starting point and not an enumeration (LESSONS 2026-07-29) |
 | 11 | **The writer's path appears in no topology diagram** (judge review F6): field evaluation (WSL) → TCP → writer (Windows) → API → CPU is drawn only in §1.1 here | Requested of **arch-docs**, with the pending bridge/ topology item it parallels: an invariant that names a diagram can only bind what the diagram contains (LESSONS 2026-07-30) |
+
+---
+
+## 11. The SLS / SS1 delta — the speed monitor and the stop sequencer (m5-49)
+
+> **Revision 2026-08-06, second F-delta.** This section specifies the speed
+> monitor (the logic of **SF-10** as a pattern) and the SS1 stop sequencer (the
+> logic of **SF-11**) as a delta to the 22-network build of §5.1 + §5.4. It is
+> written the way §5.4 was: element/pin/operand tables the owner types in
+> F-FBD, every timer with its `PT` explicit at the call site, a click-path
+> (§11.9) in §4.5's shape, and a per-step verification. Nothing in §1–§10
+> above is restated; where this delta touches an earlier section, the touch
+> is a re-point row in §11.5 or a note placed at the touched section.
+
+### 11.0 What this delta is, and its non-claims
+
+**The certified split, applied.** The **standard** program lowers the envelope
+speed ceiling when the warning field trips (`plc/forklift/SPEC.md` §14.16 —
+that delta and this one are one brief, two documents). The **F-program**
+independently measures the drive shaft's speed from two readings, checks it
+against the speed limit in force, and **demands a stop** when the limit is
+exceeded, when the two readings disagree, when a reading goes missing, or when
+a claimed standstill is contradicted by the motion-present observation. On any
+of those demands the SS1 sequencer runs: the standing demand produces the
+plant's controlled stop through the existing chain, and at
+standstill-or-timeout the F-program raises the torque-off demand. This
+placement — limiting in standard logic with no safety credit, measurement +
+monitoring + reaction in the safety layer — is **modelled on** the certified
+practice recorded in `docs/safety/SLS-STANDARDS-BASIS.md` (F5) and on the
+IEC/EN 61800-5-2 function definitions as vendors render them (F1). It is
+never described as *in conformance with* anything (basis §3 row 1 wording
+rule), and no clause number appears here because none was read.
+
+Non-claims, in addition to every row of §1.2:
+
+| # | The claim that is **not** made |
+|---|---|
+| **N10** | **The measurement arrangement is a SINGLE-CHANNEL TESTED SYSTEM, never a two-channel one.** One shaft, one measured quantity, two readings of it, cross-compared (basis F4, S4's own classification). No Category is claimed or implied by the pair, and the word *two-channel* appears in this section only inside this negation |
+| **N11** | **The motion-present observation is a labelled STAND-IN for a mechanical fault exclusion.** Real systems close the shared-shaft hole with a construction argument on the coupling, not a monitored signal (basis F4). This project has no such argument, substitutes an observation from the navigation lidar, and says so wherever the observation appears |
+| **N12** | **The readings arrive as standard data**, over the stand-in writer, into a standard DB. The S015 disclosure grows and its validity check is extended visibly in the F-code (§11.5). No integrity claim of any kind attaches to the path: no PL, no Category, no SIL, no PFH (ADR 0011 D5). SF-10's and SF-11's design targets stay `docs/safety/SRS.md` §5's and are quoted nowhere here as achievements |
+| **N13** | **No speed value leaves the F-program** (ADR 0014). Its outputs are two more Bools — `SpeedMonitorDemand` and `TorqueOffDemand` — demands, never speeds. The readings themselves cross no client interface: the stand-in DB remains unreachable by any client (§4.2 step 14) |
+| **N14** | **The torque-off reaction path does not exist yet.** The plant's holding brake and controller disable are the next brief's `model.sdf` change (design spec §5, phase 4). Until it lands, `TorqueOffDemand` is a latched Bool in `DB3` and its mirror, and drives nothing — the same shape as N1. §11.7 lists exactly what cannot be tested until the plant exists |
+| **N15** | **The SS1 time limit and the stop are logic only.** No stop category is demonstrated, no deceleration is monitored (this is SS1-t-shaped sequencing, not SS1-r), and no millisecond figure of SRS §3 is measured here |
+
+### 11.1 The two derived constants — quoted, not re-derived
+
+Both are **measurements from `agv/forklift/EVIDENCE_ODOMETRY.md` §15.4**
+(n = 13 200 paired samples, 660.0 s, reproduced across three runs). They are
+quoted here and re-derived nowhere; if this section and that evidence
+disagree, the evidence is right and this file is corrected.
+
+| Derived value | As measured | As typed (§11.3) | The one transformation, and its direction |
+|---|---|---|---|
+| discrepancy threshold | **0.0308 m/s** = 4 × σ of the channel difference (σ = 0.007696 m/s) | `SPEED_DISCREPANCY_MAX` = **31** mm/s | The seam carries Int mm/s (§11.2), so 30.784 mm/s is rounded **up** to 31. Up is the direction that **preserves the measured property** — zero exceedances in 6 600 F-grid samples held above 0.0308, so it holds a fortiori above 0.031 — at a cost of 0.2 mm/s of sensitivity (0.03 σ). Rounding down would have manufactured a threshold the nuisance measurement was never run at |
+| discrepancy time | **200 ms** — the two-cycle floor on the F-program's 100 ms grid; the measured longest excursion run above threshold was **0 of 6 600**, and lag-1 autocorrelation on the F-grid measured −0.0105, so consecutive F-samples are independent draws | `SPEED_DISCREPANCY_TIME` = `T#200ms` | None. Implemented as a `TON` (§11.5 SL12), which raises `Q` on the F-sample at which 200 ms of **continuous** discrepancy has elapsed — the third consecutive discrepant sample. No single sample and no two-sample blip can demand |
+
+**The honest limit travels with them** (evidence §15.4): a frozen reading is
+visible to the cross-comparison only above 0.0308 m/s of tread speed; below
+that, the motion-present stand-in is what covers the regime. The two
+mechanisms are complementary and neither substitutes for the other. And a
+channel that goes **missing** — as opposed to frozen — is caught by neither of
+these but by the stale rule of §11.5, which is why the sources deliberately go
+silent rather than repeat (§11.2).
+
+### 11.2 The transport ruling — how the readings reach the F-program
+
+**The gap this section closes** (m5-48 report, requests 1–3): the two speed
+readings and the motion observation existed only as ROS topics in WSL, with no
+transport, no payload and no stale rule specified on the PLC side.
+
+**Ruling: the stand-in writer carries them, exactly as it carries the zone
+verdict — and nothing else may.** The demand these readings feed must form
+inside the CPU using **neither the bridge nor the OPC UA session** (§7.8);
+routing a speed over OPC UA would both put the demand's formation on the
+client seam (the 2026-07-29 disqualification) and put a motion value on the
+network seam ADR 0014 closed. The writer's API path enters below any client
+interface and already owns the stand-in DB.
+
+**Why the seam carries Int mm/s and not Real m/s.** Two reasons, and the
+decision stands whichever way the first resolves in the tool:
+
+1. **`Real` is not expected in this CPU's safety instruction set.** The F2/F7
+   lesson is that this F-set omits instructions one would assume present, so
+   §11.4's check F8 reads the offered comparators before anything is built —
+   but the design does not gamble on the answer: Int is F-conformant on any
+   reading of the set.
+2. **The quantisation costs nothing.** 1 mm/s of quantisation against a
+   measured per-channel σ of 5.4 mm/s (evidence §15.4) is noise-floor
+   irrelevant, and an integer compare is exact where a floating compare
+   invites tolerance arguments.
+
+The scaling — `round(v × 1000)`, signed — is applied by the WSL-side client
+before the line is written, so the wire, the writer log and the DB member all
+carry the same integer and can be diffed. A non-finite value (`NaN`, `±inf`)
+is **never scaled and never sent**: the client publishes no line for it, the
+sequence freezes, and the stale rule reads the channel as missing. This is
+the analogue-plausibility lesson (LESSONS 2026-07-27) applied at the source;
+the F-side window in §11.5 SL6/SL7 is the independent second application.
+
+**The speed-source link — a second TCP connection, same shape as §7.2's.**
+WSL client → Windows listener on the writer, port **45016** (a design value of
+this spec, beside 45015), newline-delimited text:
+
+| Line | Sent when | Meaning |
+|---|---|---|
+| `SPD A <int>` | every evaluation tick with a **fresh** channel-A reading | signed drive-wheel tread speed, mm/s, channel A |
+| `SPD B <int>` | same, channel B | channel B |
+| `MOT <p> <v>` | every evaluation tick (20 Hz) | `p` = 1 motion present, `v` = 1 observation valid. `p` already folds the source's fail direction: an invalid observation is published as motion-present TRUE (`agv/forklift/config.yaml` `safe_speed:`) |
+| `PING` | 1 Hz | keepalive, for the writer's link log only |
+
+**The client is `agv/forklift/scripts/safe_speed_channels.py`** (or a
+forwarder beside it — `agv/`'s choice), which already implements the
+source-side stale rule: a channel whose plant read is stale is **not
+published** (`read_fresh_max_s` = 0.25 s), precisely so that a frozen speed
+can never be handed to a monitor. **That silence is the payload's most
+important property and every layer below preserves it**:
+
+| Layer | The rule |
+|---|---|
+| Source (WSL) | No fresh plant read → no `SPD` line. Silence, never repetition |
+| Writer, per 50 ms cycle | For each channel: **if** at least one `SPD` line arrived since the previous cycle, write the latest value to `SpeedReadingA`/`B` **and increment `SpeedSeqA`/`B`**; **else write neither** — the sequence freezes, which is what the F-code reads as missing. For `MOT`: write `MotionPresent` from the latest line; if no `MOT` line for **`MOTION_SILENCE_MAX` = 250 ms** (writer design value, the source's own five-interval window), or the 45016 link is down, write `MotionPresent := TRUE` and log the transition — an unobservable vehicle is *moving*, never *still* |
+| F-program | §11.5 SL1–SL8: a sequence that stops advancing for `SPEED_STALE_MAX` makes that channel invalid, and an invalid channel **is a demand** (SL8 → D1), never a zero speed and never the last value |
+
+**The warning field's channel rides the existing field link.** The field
+evaluation's TCP connection (§7.2, port 45015) gains one vocabulary entry,
+same polarity convention as `ZONE`:
+
+| Line | Meaning |
+|---|---|
+| `WARN 0` | warning field **occupied** (sent at every warning-verdict transition) |
+| `WARN 1` | warning field clear |
+
+The writer maps `WARN 0` → `WarningFieldClear := FALSE`, `WARN 1` → `TRUE`.
+On field-link silence beyond `FIELD_LINK_STALE_MAX` (= 1 s, §7.2) the writer
+drives **both** the zone channel open **and** `WarningFieldClear := FALSE`:
+loss of the field source reads as intrusion *and* as warning-occupied, never
+as a clear field. Before the first `WARN` line of a session the channel holds
+its start value `FALSE` — the limit is in force until the source has said
+otherwise. (The warning verdict also travels a second, process path to the
+standard program — `plc/forklift/SPEC.md` §14.16. One producer, two
+consumers, no recomputation: the field evaluation owns the verdict, invariant
+10 holds, and the two paths never substitute for each other.)
+
+**Who implements what** — this section is the contract; the implementations
+are requests of this brief's report, not deliverables of this document:
+
+| Piece | Owner | What §11 fixes for it |
+|---|---|---|
+| Writer: 45016 listener, seven new members' write behaviour, `WARN` handling, log lines for every source event and refusal | **bridge/** (`standin_writer`, owner ruling 2026-08-05) | The table above, §11.3's member set, the log obligations of §7.2 unchanged |
+| WSL client: the `SPD`/`MOT`/`PING` sender beside the channel node | **agv/** | The line grammar, the scaling, the never-send-non-finite rule |
+| Two new mirror nodes under `Forklift/Safety/` | **interface** (`opcua-nodes.md`) | The F-side tag names `SpeedMonitorDemand`, `TorqueOffDemand` (§11.3); leaf = tag, mirror rules of §6.4 unchanged |
+| The standard program's copy statements and its permissive term gaining the new demand | **plc/forklift/SPEC.md**'s standard-side brief | §11.8's coupling rows |
+
+### 11.3 New members, interface, statics and constants
+
+**`SafetyInputStandIn` gains seven members** (SD2). Still a standard DB,
+optimized, no Retain, *Accessible from HMI/OPC UA* still **✘** — re-read the
+property after the edit and re-verify by independent browse, exactly as SD1
+required.
+
+| PLC symbol | S7 type | Start value | Meaning, and the polarity |
+|---|---|---|---|
+| `"SafetyInputStandIn".SpeedReadingA` | Int | **`0`** | Signed drive-wheel tread speed, **mm/s**, reading channel A of the single-channel tested system (N10). A value, not a verdict; trusted only while its sequence advances |
+| `"SafetyInputStandIn".SpeedReadingB` | Int | **`0`** | Same, reading channel B |
+| `"SafetyInputStandIn".SpeedSeqA` | Int | **`0`** | Channel A's freshness sequence: incremented by the writer **only** in a cycle that received a fresh channel-A reading (§11.2). Frozen means the reading is missing, and missing is a demand. The heartbeat mechanism of §3.1, rebuilt per channel |
+| `"SafetyInputStandIn".SpeedSeqB` | Int | **`0`** | Same, channel B |
+| `"SafetyInputStandIn".MotionPresent` | Bool | **`TRUE`** | The motion-present observation — **a labelled stand-in for a mechanical fault exclusion on the shaft coupling** (N11). `TRUE` = the world is seen moving past the vehicle, **or** the observation is invalid, stale or absent: every uncertainty resolves to *moving*, because a false *still* is what corroborates a lying encoder. Start value `TRUE` for the same reason |
+| `"SafetyInputStandIn".MotionObservationValid` | Bool | **`FALSE`** | Diagnosis only: the observation behind `MotionPresent` was valid. **Read by no F-network** — it exists for the watch table (§11.8), so *moving because observed* and *moving because unobservable* can be told apart on screen. Not bound at the FB call |
+| `"SafetyInputStandIn".WarningFieldClear` | Bool | **`FALSE`** | The warning field's verdict as the speed monitor's **limit selector**: `TRUE` = warning field clear and the field source alive; `FALSE` = occupied, source silent, link down, or never yet heard — all of which select the limit. Wire NC / program NO, applied to a field verdict |
+
+**`F_Forklift_Safety [FB2]` interface after this delta: 10 Inputs, 6 Outputs,
+43 Statics, 17 Constants** (3 existing + 14 new identifiers on the eleven
+rows below) — counts to be read off the interface table at §11.9 step Q3,
+never assumed.
+
+| Section | Added | Bound at the call to |
+|---|---|---|
+| Input | `SpeedReadingA`, `SpeedReadingB` (Int) | the two reading members |
+| Input | `SpeedSeqA`, `SpeedSeqB` (Int) | the two sequence members |
+| Input | `MotionPresent` (Bool) | `"SafetyInputStandIn".MotionPresent` |
+| Input | `WarningFieldClear` (Bool) | `"SafetyInputStandIn".WarningFieldClear` |
+| Output | **`SpeedMonitorDemand`** (Bool) | left unassigned, like all four existing outputs (§3.4). The SF-10-pattern demand: over-limit, discrepancy, missing reading, or contradicted standstill — latched, cleared only by the monitored reset |
+| Output | **`TorqueOffDemand`** (Bool) | left unassigned. The SS1 sequencer's second stage: standstill-or-timeout reached under a standing vehicle stop demand. Holds no latch of its own beyond the demand's life (SRS SF-11: the safe state is released by the demanding function's reset) |
+
+**New statics in `InstF_Forklift_Safety [DB3]`** — twenty-five, all
+non-Retain, every timer a multi-instance:
+
+| Symbol | Type | Start | Purpose |
+|---|---|---|---|
+| `SpeedSeqAChanged` | Bool | `FALSE` | Channel A's sequence advanced since the previous F-cycle. Recomputed every cycle |
+| `SpeedSeqBChanged` | Bool | `FALSE` | Same, B |
+| `SpeedChainSeen` | Bool | **`FALSE`** | *A speed reading has been seen alive at least once since the F-runtime group started* — either channel. One-shot `S`, never cleared while the group runs: the `HeartbeatSeen` boot polarity, per chain. **This is the arming term**: a run in which the speed sources never start (every cell-scope T6 run, every `safe_speed:=false` launch) never arms the monitor and is not blocked by it — and once armed, silence is a demand for the rest of the run. The residual this buys, and its mitigation: §11.6 |
+| `SpeedAStaleTimer` | `TON` | — | How long channel A's sequence has gone without advancing |
+| `SpeedBStaleTimer` | `TON` | — | Same, B |
+| `SpeedAValid` | Bool | `FALSE` | Channel A as the logic may believe it: stand-in alive, chain seen, sequence advancing, value inside the physical window. Affirmative form; everything else falls to invalid |
+| `SpeedBValid` | Bool | `FALSE` | Same, B |
+| `SpeedStaleNow` | Bool | `FALSE` | The chain has been seen and at least one channel is not currently valid — the *missing reading* condition, live |
+| `WarningFieldClearValid` | Bool | `FALSE` | The limit selector as the logic reads it: clear only while the stand-in is alive |
+| `SpeedDiff` | Int | `0` | `SpeedReadingA − SpeedReadingB`, this cycle |
+| `SpeedDiscrepantNow` | Bool | `FALSE` | Both channels valid and \|A−B\| above `SPEED_DISCREPANCY_MAX`, live |
+| `SpeedDiscrepancyTimer` | `TON` | — | The discrepancy persistence clock |
+| `SpeedNearZero` | Bool | `FALSE` | Both channels valid and both inside the standstill window |
+| `MotionPresentValid` | Bool | `FALSE` | The motion observation as the logic reads it: present, **or** stand-in invalid — the one validated channel whose fail direction is `TRUE` (N11) |
+| `ShaftDoubtNow` | Bool | `FALSE` | The shaft claims standstill while the world is seen moving — the shared-shaft hole, live |
+| `ShaftDoubtTimer` | `TON` | — | Its persistence clock |
+| `SpeedLimitOnsetTimer` | `TON` | — | Runs while the limit is selected; its `Q` is the enforcement gate, so the plant gets its budgeted slow-down time before the limit bites |
+| `SpeedOverLimitNow` | Bool | `FALSE` | Enforcement in force and either valid channel beyond the limit, live |
+| `SpeedOverLimitTimer` | `TON` | — | Over-limit persistence clock |
+| `SpeedCauseGone` | Bool | `FALSE` | The speed world is clear right now (or was never armed). Joins network 1's `CauseGone` conjunction: one reset, all latches, only when the **whole** live world is clear. Contains no latch (LESSONS 2026-07-27) |
+| `Ss1Demand` | Bool | `FALSE` | The vehicle's category-1 stop path is demanded: `ZoneStopDemand OR SpeedMonitorDemand`. **`EStopDemand` is deliberately absent**: the cell e-stop stops no vehicle (SRS B4, owner ruling 2026-08-06) |
+| `Ss1Timer` | `TON` | — | The SS1 time-limit clock |
+| `VehicleStandstillNow` | Bool | `FALSE` | Standstill as the F-program can honestly assert it: both readings valid and inside the window **and** the motion observation not contradicting them. Unconfirmable standstill (invalid channels, unobservable world) stays `FALSE`, and SS1 then completes on its timeout — the SS1-t degradation a real drive takes with no encoder feedback |
+| `SpeedSeqAMemory` | Int | **`0`** | Channel A's sequence as it read in the **previous** F-cycle; written by M3, at the block's end (§5.0 note 6, third instance) |
+| `SpeedSeqBMemory` | Int | **`0`** | Same, B; written by M4, the final network |
+
+**New constants** — same rules as §3.3's: declared in the *Constant* section
+if offered, otherwise literals at the pins, **explicit at the call site either
+way** (LESSONS 2026-07-28). Every derivation is on the row.
+
+| Constant | Value | Basis |
+|---|---|---|
+| `SPEED_DISCREPANCY_MAX` | `31` | §11.1. mm/s, 4 σ measured, rounded up |
+| `SPEED_DISCREPANCY_NEG` | `-31` | The same bound, negative side — declared so both `CMP` pins stay symbolic |
+| `SPEED_DISCREPANCY_TIME` | `T#200ms` | §11.1. The two-cycle floor, measured longest run 0 |
+| `SPEED_STALE_MAX` | `T#500ms` | A design value of this spec: the source's own no-reading window (0.25 s, `read_fresh_max_s`) + one writer cycle (50 ms) + one F-cycle (100 ms) + margin, rounded up to **five F-OB cycles** — the §4.3 sampling rule satisfied by construction. A dead channel is a latched demand within ~0.6 s of its last reading |
+| `SPEED_PLAUSIBLE_MAX` / `SPEED_PLAUSIBLE_NEG` | `4000` / `-4000` | The physical window (LESSONS 2026-07-27, swept to every signal of the kind per LESSONS 2026-07-28): the drive wheel is steered, so tread speed reaches body speed / cos δ; at `TRACTION_SPEED_MAX` = 1.0 m/s and the 1.31 rad steer stop that is 1.0 / 0.2579 = **3 877 mm/s**, rounded **away** from real values so no physically reachable speed can read implausible. Outside the window is a channel fault (invalid), never a value |
+| `SPEED_LIMIT_MAX` / `SPEED_LIMIT_NEG` | `300` / `-300` | **The SLS limit, quoted**: SRS SF-10 / SC-13's 0.3 m/s creep cap, independently corroborated by the standards basis (F2, the muted-detection row). Not a new number. It bounds the **measured tread speed**, which is ≥ body speed always — conservative in the demanding direction (§11.6) |
+| `SPEED_LIMIT_ONSET_MAX` | `T#1s500ms` | The slow-down time the plant is entitled to before the limit bites, derived from the warning chain's own budget (`agv/forklift/FIELD-EVALUATION.md` §3, §6.1): verdict-to-ceiling response T_w = 0.35 s + the ramp (0.60 − 0.20) / 0.50 m/s² = 0.80 s ⇒ worst compliance 1.15 s, plus 0.35 s margin for the transport asymmetry (the F-side hears of the trip in ~0.15 s over the writer; the plant hears over the longer process path). 15 F-cycles. **After it, a vehicle still above the limit is the failed slow-down this function exists to catch**, discovered within a further `SPEED_OVERLIMIT_TIME` + one F-cycle |
+| `SPEED_OVERLIMIT_TIME` | `T#200ms` | The same two-cycle floor as the discrepancy time, resting on the same measured sample independence (lag-1 −0.0105): no single noise sample at the margin can demand, and a real over-limit persists |
+| `SPEED_STANDSTILL_MAX` / `SPEED_STANDSTILL_NEG` | `50` / `-50` | mm/s. Above the 1 mm/s quantisation and above 4 σ of read noise (22 mm/s), far below the 300 mm/s regime. Its value coincides with the standard program's `STANDSTILL_SPEED` (0.05 m/s); that is a coincidence of two independently owned windows on two devices, not a shared decision — the §14.3 `VEHICLE_STALE_TIME` rule again |
+| `SHAFT_DOUBT_TIME` | `T#1s` | Longer than the observation's legitimate trailing edge at every stop — the source holds *moving* for 0.50 s after motion ends (`motion_hold_s`) plus scan and grid lags, ≈ 0.7 s worst — so a normal braking-to-rest never demands; and short enough that a decoupled shaft under a rolling vehicle is a latched demand within 1 s + one F-cycle. Ten F-cycles |
+| `SS1_TIME_MAX` | `T#1s` | **Quoted**: SRS SF-03's reaction row — "STO + brake at standstill or at the SS1 time limit (≤ 1 s), whichever comes first". Not a new number |
+
+### 11.4 Feasibility check F8 — run before building anything in §11.5
+
+| # | Check | How, and what to record | Abort |
+|---|---|---|---|
+| **F8** | The F-FBD instruction set offers, for **Int**: `CMP >`, `CMP <`, and `SUB`; and accepts a **negative Int constant** at a `CMP` pin | Open the instruction list on this CPU with the date, exactly as F7 was run. `CMP <>` and `MOVE` are already confirmed (F7, 2026-08-05 session). Build one throwaway network with `CMP <` against `-31`, compile, delete it | **If `SUB` or a comparator is missing, stop and report** — the cross-comparison then needs a design change (e.g. two one-sided comparisons per ordering, or a DInt path), not a substitution at the keyboard. The 49-network layout of §11.5 is not built until F8 passes |
+
+F0–F7 are unchanged and re-run as §4.5 step 1 requires. F4's expected
+cross-reference count changes: after this delta the stand-in DB shows **ten
+read accesses**, all at the call in `Main_Safety_RTG1` (§11.9 step Q12).
+
+### 11.5 The networks — twenty-seven new, two pins re-pointed, 49 in all
+
+**Reading rules: §5.0 applies unchanged.** One logic string, one written
+operand per network; `RS` for demand latches (set-dominant), `SR` for flags
+that must clear (reset-dominant); every negation is load-bearing and noted.
+
+**Position rule, load-bearing, in three parts.**
+
+1. **SL1–SL20 run after V7 and before `CauseGone`** — `CauseGone` gains the
+   `SpeedCauseGone` conjunct, so the speed world must be computed earlier in
+   the same F-cycle, exactly as V1–V7 must precede the channels they validate.
+2. **D1 runs between `ZoneStopDemand` and `SafetyResetRequired`** — the flag
+   ORs the new demand, so the demand must be computed first; and D1's `R` pin
+   reads `ResetPulse`, computed at network 10 of the core set.
+3. **Q1–Q4 run after `SafetyResetRequired`; M3 and M4 run last, after M2** —
+   the sequencer reads the latches decided this cycle, and the two sequence
+   memories are the third and fourth instances of §5.0 note 6's memory-copy
+   shape.
+
+**The block after this delta, in TIA's numbering** (each name is the
+network's written operand):
+
+    1–7    V1–V7                        §5.4, unchanged
+    8–27   SL1–SL20                     the speed validity and monitor terms, below
+    28     CauseGone                    core network 1, +1 pin (re-point table)
+    29–39  core networks 2–12           unchanged (ResetPulse is 37,
+                                        EStopDemand 38, ZoneStopDemand 39)
+    40     D1  SpeedMonitorDemand       the new demand latch, below
+    41     SafetyResetRequired          core network 13, +1 pin (re-point table)
+    42–45  Q1–Q4                        the SS1 sequencer, below
+    46     ResetMemory                  core network 14, unchanged
+    47     M2  HeartbeatMemory          §5.4, unchanged
+    48     M3  SpeedSeqAMemory          below
+    49     M4  SpeedSeqBMemory          below — the final network
+
+---
+
+**SL1 — `SpeedSeqAChanged`: did channel A deliver a fresh reading?**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `CMP <>` box (Int) | in 1 | `#SpeedSeqA` |
+| | in 2 | `#SpeedSeqAMemory` |
+| `=` coil | — | `#SpeedSeqAChanged` |
+
+**Reads as:** the writer advanced channel A's sequence since the previous
+F-cycle — which it does only in a cycle that received a fresh reading (§11.2).
+
+**Notes.** V1's mechanism per channel: the comparison is against the previous
+cycle's value, held by `SpeedSeqAMemory` and written by **M3, at the block's
+end**. The apparent forward reference is the design (§5.0 note 6). Wrap-around
+is just another inequality. A live source at 20 Hz against a 50 ms writer and
+a 100 ms F-OB makes this coil `TRUE` on every cycle; single dropped samples
+are absorbed by `SPEED_STALE_MAX`, not here.
+
+---
+
+**SL2 — `SpeedSeqBChanged`** — SL1's shape with `#SpeedSeqB` /
+`#SpeedSeqBMemory`, coil `#SpeedSeqBChanged`.
+
+---
+
+**SL3 — `SpeedChainSeen`: the arming one-shot**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `OR` box, 2 inputs | in 1 | `#SpeedSeqAChanged` |
+| | in 2 | `#SpeedSeqBChanged` |
+| `S` (set output) coil | in | the `OR` output |
+| | operand | `#SpeedChainSeen` |
+
+**Reads as:** a speed reading has been seen alive at least once since the
+F-runtime group started.
+
+**Notes.** One shot, never cleared — `HeartbeatSeen`'s shape (§5.4 V2), and
+the same boot-polarity lesson: nothing speed-related is believed, **and
+nothing speed-related demands**, until life has been seen. **Either channel
+arms the pair**: one channel arriving while the other never does is a chain
+that has been seen with a channel missing, which SL8 turns into a demand —
+a half-fitted measurement is a fault, not a smaller measurement.
+
+---
+
+**SL4 — `SpeedAStaleTimer`: how long since channel A's last fresh reading**
+
+| Element | Pin | Operand / value |
+|---|---|---|
+| `TON` box, multi-instance `#SpeedAStaleTimer` | `IN` | `#SpeedSeqAChanged` *(negated)* |
+| | `PT` | `#SPEED_STALE_MAX` (`T#500ms`) |
+
+**Notes.** V3's shape per channel: called unconditionally, every cycle; a
+fresh reading re-zeroes `ET` in the same call; the first cycle after the
+source falls silent, the clock runs. `PT` explicit at the pin.
+
+---
+
+**SL5 — `SpeedBStaleTimer`** — SL4's shape with `#SpeedSeqBChanged`
+*(negated)*, multi-instance `#SpeedBStaleTimer`, same `PT`.
+
+---
+
+**SL6 — `SpeedAValid`: channel A as the logic may believe it**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `AND` box, 5 inputs | in 1 | `#StandInValid` |
+| | in 2 | `#SpeedChainSeen` |
+| | in 3 *(negated)* | `#SpeedAStaleTimer.Q` |
+| `CMP >` box (Int) → | in 4 | `#SpeedReadingA` > `#SPEED_PLAUSIBLE_NEG` |
+| `CMP <` box (Int) → | in 5 | `#SpeedReadingA` < `#SPEED_PLAUSIBLE_MAX` |
+| `=` coil | — | `#SpeedAValid` |
+
+**Reads as:** the stand-in is alive, the chain has been seen, channel A's
+sequence is advancing, and its value sits inside the physically reachable
+window.
+
+**Notes.** **Affirmative, like V4 and for the same reason** (LESSONS
+2026-07-27): validity is asserted from evidence; boot, stale, frozen-sequence
+and out-of-window all fall through to invalid without being enumerated. The
+window is the plausibility rule for an analogue-class input applied on the
+F-side even though the source already refuses non-finite values — two
+independent applications, not one shared one (LESSONS 2026-07-28: sweep the
+rule to every signal of the kind).
+
+---
+
+**SL7 — `SpeedBValid`** — SL6's shape with channel B's operands, coil
+`#SpeedBValid`.
+
+---
+
+**SL8 — `SpeedStaleNow`: a missing reading, live**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `OR` box, 2 inputs | in 1 *(negated)* | `#SpeedAValid` |
+| | in 2 *(negated)* | `#SpeedBValid` |
+| `AND` box, 2 inputs | in 1 | `#SpeedChainSeen` |
+| | in 2 | the `OR` output |
+| `=` coil | — | `#SpeedStaleNow` |
+
+**Reads as:** the speed measurement has existed in this run and at least one
+of its readings is missing, stale, implausible or unbelievable **right now**.
+
+**Notes — this network is the m5-48 request 3 answer, as F-code.** A missing
+reading is a demand (D1 latches on this), never a zero speed and never the
+last value. Gated by `SpeedChainSeen` so that a run with no speed sources —
+every cell-scope T6 run — is not blocked by a measurement it never had.
+
+---
+
+**SL9 — `WarningFieldClearValid`: the limit selector, validated**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `AND` box, 2 inputs | in 1 | `#WarningFieldClear` |
+| | in 2 | `#StandInValid` |
+| `=` coil | — | `#WarningFieldClearValid` |
+
+**Reads as:** the warning field is clear, said by a live source through a live
+stand-in. Anything else — occupied, silent field link, dead writer, never yet
+heard — selects the limit. V5's shape, third application.
+
+---
+
+**SL10 — `SpeedDiff`: the cross-comparison's subtraction**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `SUB` box (Int) | in 1 | `#SpeedReadingA` |
+| | in 2 | `#SpeedReadingB` |
+| `MOVE`-style output | `OUT` | `#SpeedDiff` |
+
+**Reads as:** the difference of the two readings of one shaft, this cycle.
+
+**Notes.** Both readings carry the same sign convention from the same shaft,
+so the difference cancels the common speed and leaves the reading heads'
+disagreement — the only thing the comparison is for. Int overflow cannot
+occur: both operands are inside ±4000 whenever they are believed (SL6/SL7),
+and the difference is compared, never accumulated.
+
+---
+
+**SL11 — `SpeedDiscrepantNow`: the readings disagree, live**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `CMP >` box (Int) | — | `#SpeedDiff` > `#SPEED_DISCREPANCY_MAX` |
+| `CMP <` box (Int) | — | `#SpeedDiff` < `#SPEED_DISCREPANCY_NEG` |
+| `OR` box, 2 inputs | in 1, in 2 | the two comparisons |
+| `AND` box, 3 inputs | in 1 | `#SpeedAValid` |
+| | in 2 | `#SpeedBValid` |
+| | in 3 | the `OR` output |
+| `=` coil | — | `#SpeedDiscrepantNow` |
+
+**Reads as:** both readings are believable and they differ by more than the
+measured 4 σ bound in either direction.
+
+**Notes.** Validity is conjoined so that a stale or implausible channel is
+reported as **missing** (SL8), not as **discrepant** — two different
+diagnoses on two watch rows. The two-sided comparison is written with two
+constants rather than an `ABS` box so F8 stays a three-instruction check.
+
+---
+
+**SL12 — `SpeedDiscrepancyTimer`: the derived discrepancy time**
+
+| Element | Pin | Operand / value |
+|---|---|---|
+| `TON` box, multi-instance `#SpeedDiscrepancyTimer` | `IN` | `#SpeedDiscrepantNow` |
+| | `PT` | `#SPEED_DISCREPANCY_TIME` (`T#200ms`) |
+
+**Notes.** `Q` rises on the F-sample at which 200 ms of continuous
+discrepancy has elapsed — the third consecutive discrepant sample on the
+100 ms grid. The measured longest run in 6 600 samples was zero (§11.1), so
+any `Q` here is a fault, never noise. Called unconditionally; a single clean
+sample re-zeroes `ET` in the same call.
+
+---
+
+**SL13 — `SpeedNearZero`: the shaft claims standstill**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `AND` box, 6 inputs | in 1 | `#SpeedAValid` |
+| | in 2 | `#SpeedBValid` |
+| `CMP <` (Int) → | in 3 | `#SpeedReadingA` < `#SPEED_STANDSTILL_MAX` |
+| `CMP >` (Int) → | in 4 | `#SpeedReadingA` > `#SPEED_STANDSTILL_NEG` |
+| `CMP <` (Int) → | in 5 | `#SpeedReadingB` < `#SPEED_STANDSTILL_MAX` |
+| `CMP >` (Int) → | in 6 | `#SpeedReadingB` > `#SPEED_STANDSTILL_NEG` |
+| `=` coil | — | `#SpeedNearZero` |
+
+**Reads as:** both readings are believable and both sit inside the standstill
+window.
+
+**Notes.** Consumed twice, with opposite partners: with motion **present** it
+is the shared-shaft doubt (SL15); with motion **absent** it is the standstill
+that lets SS1 remove torque early (Q3). Requiring validity means an invalid
+channel can neither claim standstill nor confirm one.
+
+---
+
+**SL14 — `MotionPresentValid`: the observation as the logic reads it**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `OR` box, 2 inputs | in 1 | `#MotionPresent` |
+| | in 2 *(negated)* | `#StandInValid` |
+| `=` coil | — | `#MotionPresentValid` |
+
+**Reads as:** the world is seen moving — or nobody can say, which counts as
+moving.
+
+**Notes.** The one validated channel whose fail direction is `TRUE`: V5–V7
+force their channels to the *open/unpressed* demand direction on invalidity;
+this one forces to *moving*, because for this observation the demanding
+direction is the one that refuses to corroborate a standstill (N11; LESSONS
+2026-08-06 on choosing the statistic's failure direction — the same asymmetry,
+one layer up).
+
+---
+
+**SL15 — `ShaftDoubtNow`: the shared-shaft hole, live**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `AND` box, 2 inputs | in 1 | `#SpeedNearZero` |
+| | in 2 | `#MotionPresentValid` |
+| `=` coil | — | `#ShaftDoubtNow` |
+
+**Reads as:** the shaft reports standstill while the world is seen moving
+past the vehicle — the signature of a decoupled encoder, whose two readings
+lie together (N11).
+
+---
+
+**SL16 — `ShaftDoubtTimer`**
+
+| Element | Pin | Operand / value |
+|---|---|---|
+| `TON` box, multi-instance `#ShaftDoubtTimer` | `IN` | `#ShaftDoubtNow` |
+| | `PT` | `#SHAFT_DOUBT_TIME` (`T#1s`) |
+
+**Notes.** The `PT` is what makes every normal stop silent: braking to rest
+legitimately produces up to ~0.7 s of *readings-zero, motion-still-held*
+while the observation's 0.5 s hold decays (§11.3 basis row). A doubt that
+outlives the hold is a fault.
+
+---
+
+**SL17 — `SpeedLimitOnsetTimer`: the slow-down budget**
+
+| Element | Pin | Operand / value |
+|---|---|---|
+| `TON` box, multi-instance `#SpeedLimitOnsetTimer` | `IN` | `#WarningFieldClearValid` *(negated)* |
+| | `PT` | `#SPEED_LIMIT_ONSET_MAX` (`T#1s500ms`) |
+
+**Reads as:** the limit has been selected for longer than the plant's
+budgeted slow-down time; from here the limit is **enforced**.
+
+**Notes.** The onset delay is a property of the monitor, not a grace given to
+a fault: during the window the discrepancy, stale and shaft-doubt checks all
+remain in force — only the over-limit comparison waits. The field clearing
+re-zeroes the clock in the same call, so a re-entry restarts the budget.
+
+---
+
+**SL18 — `SpeedOverLimitNow`: above the limit under enforcement, live**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `CMP >` (Int) → `OR` A | — | `#SpeedReadingA` > `#SPEED_LIMIT_MAX` |
+| `CMP <` (Int) → `OR` A | — | `#SpeedReadingA` < `#SPEED_LIMIT_NEG` |
+| `AND` box A, 2 inputs | in 1 | `#SpeedAValid` |
+| | in 2 | `OR` A output |
+| *(same three elements again for B)* | | `AND` box B from `#SpeedBValid` and channel B's two comparisons |
+| `OR` box, 2 inputs | in 1, in 2 | `AND` A, `AND` B |
+| `AND` box, 2 inputs | in 1 | `#SpeedLimitOnsetTimer.Q` |
+| | in 2 | the `OR` output |
+| `=` coil | — | `#SpeedOverLimitNow` |
+
+**Reads as:** enforcement is in force and **either** believable reading is
+beyond the limit in either direction.
+
+**Notes.** *Either*, not *both*: one channel reading high is a demand even
+while its partner reads compliant — the cross-comparison will usually also
+fire, but neither check waits for the other. The comparison is against the
+**tread** speed, which is ≥ body speed always; §11.6 states what that
+conservatism costs and where.
+
+---
+
+**SL19 — `SpeedOverLimitTimer`**
+
+| Element | Pin | Operand / value |
+|---|---|---|
+| `TON` box, multi-instance `#SpeedOverLimitTimer` | `IN` | `#SpeedOverLimitNow` |
+| | `PT` | `#SPEED_OVERLIMIT_TIME` (`T#200ms`) |
+
+---
+
+**SL20 — `SpeedCauseGone`: the speed world, clear right now**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `AND` box, 4 inputs | in 1 *(negated)* | `#SpeedStaleNow` |
+| | in 2 *(negated)* | `#SpeedDiscrepantNow` |
+| | in 3 *(negated)* | `#ShaftDoubtNow` |
+| | in 4 *(negated)* | `#SpeedOverLimitNow` |
+| `=` coil | — | `#SpeedCauseGone` |
+
+**Reads as:** no speed-world cause stands right now — including trivially,
+by construction, in a run whose speed chain was never armed (every term is
+gated by validity or by `SpeedChainSeen`, so all four read `FALSE` before the
+chain exists and `SpeedCauseGone` reads `TRUE`).
+
+**Notes.** **Contains no latch** — `SpeedMonitorDemand` is deliberately not a
+term, or the latch would be its own clearing precondition and no reset could
+ever fire (LESSONS 2026-07-27; the `CauseGone` rule, third application). It
+tests the four *live* conditions, not the timers' `Q`s: a discrepancy that
+stopped 100 ms ago is a world already clear, exactly as a released e-stop is.
+
+---
+
+**D1 — `SpeedMonitorDemand`: the SF-10-pattern latch**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `OR` box, 4 inputs | in 1 | `#SpeedStaleNow` |
+| | in 2 | `#SpeedDiscrepancyTimer.Q` |
+| | in 3 | `#ShaftDoubtTimer.Q` |
+| | in 4 | `#SpeedOverLimitTimer.Q` |
+| `RS` box, operand `#SpeedMonitorDemand` | `R` | `#ResetPulse` |
+| | `S1` | the `OR` output |
+
+**Reads as:** the speed measurement is missing, the readings disagree beyond
+the measured bound for the derived time, the shaft's standstill claim is
+contradicted, or the vehicle is over the limit under enforcement — latched,
+cleared only by the fully qualified monitored reset.
+
+**Notes.** **`RS`, set-dominant, like every demand latch** (§5.0 note 2): a
+cause standing in the same cycle as a reset pulse wins. The stale term enters
+**unfiltered** — its persistence is already inside `SPEED_STALE_MAX` — while
+the other three enter through their timers. Four causes, four watch rows,
+one latch: which cause fired is read off SL8/SL12/SL16/SL19, not guessed.
+
+**Position.** Between `ZoneStopDemand` and `SafetyResetRequired`, so the flag
+network ORs a value computed this cycle.
+
+---
+
+**Q1 — `Ss1Demand`: the vehicle's one category-1 stop path is demanded**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `OR` box, 2 inputs | in 1 | `#ZoneStopDemand` |
+| | in 2 | `#SpeedMonitorDemand` |
+| `=` coil | — | `#Ss1Demand` |
+
+**Reads as:** a vehicle stop demand stands — the protective-field pattern
+latch or the speed monitor.
+
+**Notes.** **Exactly one stop path** (SRS SF-11: a second path is the one
+nobody tests): both demanding functions enter here and nowhere else.
+**`EStopDemand` is deliberately absent** — the cell e-stop stops no vehicle
+(SRS B4); its consequence remains the standard program's cell-side refusal,
+unchanged. Recomputed every cycle; the latching lives in the demands, never
+here (SRS SF-11 holds no latch of its own).
+
+---
+
+**Q2 — `Ss1Timer`: the SS1 time limit**
+
+| Element | Pin | Operand / value |
+|---|---|---|
+| `TON` box, multi-instance `#Ss1Timer` | `IN` | `#Ss1Demand` |
+| | `PT` | `#SS1_TIME_MAX` (`T#1s`) |
+
+**Notes.** `IN` is the demand's own level, so the clock starts in the cycle
+the demand latches and re-zeroes in the cycle the reset clears it — never
+released from inside a state (LESSONS 2026-07-27/28).
+
+---
+
+**Q3 — `VehicleStandstillNow`: standstill the F-program can assert**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `AND` box, 2 inputs | in 1 | `#SpeedNearZero` |
+| | in 2 *(negated)* | `#MotionPresentValid` |
+| `=` coil | — | `#VehicleStandstillNow` |
+
+**Reads as:** both believable readings sit in the standstill window **and**
+the motion observation does not contradict them.
+
+**Notes.** The corroboration is the whole point (N11): a decoupled shaft
+reads zero on both channels, and without the second observation SS1 would
+remove torque "at standstill" on a rolling vehicle. With channels invalid or
+the world unobservable this coil is `FALSE` and stage two waits for the
+timeout — late, never wrong.
+
+---
+
+**Q4 — `TorqueOffDemand`: the second stage**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `OR` box, 2 inputs | in 1 | `#VehicleStandstillNow` |
+| | in 2 | `#Ss1Timer.Q` |
+| `AND` box, 2 inputs | in 1 | `#Ss1Demand` |
+| | in 2 | the `OR` output |
+| `RS` box, operand `#TorqueOffDemand` | `R` | `#Ss1Demand` *(negated)* |
+| | `S1` | the `AND` output |
+
+**Reads as:** a vehicle stop demand stands and either standstill is
+confirmed or the SS1 time limit has expired — torque-off is demanded, and it
+holds for as long as the demand does.
+
+**Notes.** **Set-dominant, and the latch's life is the demand's life** — `R`
+is `NOT Ss1Demand`, so the flag cannot flicker off if standstill unconfirms
+(a vehicle moving under applied torque-off is a brake failure; withdrawing
+the demand then would be exactly backwards), and it drops in the same cycle
+the monitored reset clears the demanding latches. That is SRS SF-11's "no
+latch of its own": the safe state is released by the reset rule of the
+function that demanded it, and no separate reset exists here. `S` and `R`
+are mutually exclusive by construction, so the dominance is a statement of
+intent. **What consumes this flag does not exist yet** (N14): the plant's
+brake and controller disable are the next brief's; until then the observable
+is this operand and its mirror.
+
+---
+
+**M3 — `SpeedSeqAMemory`** · **M4 — `SpeedSeqBMemory`: the third and fourth
+memory copies, and M4 is the final network**
+
+| Element | Pin | Operand |
+|---|---|---|
+| `MOVE` box | `IN` | `#SpeedSeqA` *(M4: `#SpeedSeqB`)* |
+| | `OUT1` | `#SpeedSeqAMemory` *(M4: `#SpeedSeqBMemory`)* |
+
+**Notes.** Every rule of network 14 and M2 verbatim: unconditional, every
+cycle, last — after M2, in the order M3 then M4 — so nothing can sit between
+SL1/SL2's read of the previous value and the copy. Moved earlier, SL1
+compares the sequence against itself, `SpeedSeqAChanged` is never `TRUE`, the
+stale timer condemns a live channel, and the failure looks exactly like a
+dead source and is not (M2's note, per channel).
+
+---
+
+**The re-point table — every pin in the existing 22 networks that this delta
+touches. Two pins, and nothing else moves.**
+
+| Network (TIA # after delta) | Pin | Was | Becomes |
+|---|---|---|---|
+| 28 `CauseGone` | `AND` box | 2 inputs: `#EStopClosedValid`, `#ZoneClosedValid` | **3 inputs**: the same two plus `#SpeedCauseGone` |
+| 41 `SafetyResetRequired` | `OR` box | 2 inputs: `#EStopDemand`, `#ZoneStopDemand` | **3 inputs**: the same two plus `#SpeedMonitorDemand` |
+
+**`CauseGone`'s change keeps the one-reset rule whole**: one monitored reset
+clears every F-latch — now three — and only when the whole live world is
+clear, speed world included. A reset attempted while the readings still
+disagree, or while the writer's speed source is dead, is refused with
+`CauseGone` `FALSE` on the watch table saying why, exactly as a standing zone
+is refused today. **`SafetyResetRequired` keeps its meaning**: at least one
+F-latch stands — the plain OR, now of three.
+
+### 11.6 The stale rule and the failure walkthroughs
+
+**The rule, in one sentence, as built above:** a reading that stops arriving
+becomes an invalid channel within `SPEED_STALE_MAX` (SL4–SL7), an invalid
+channel on an armed chain is `SpeedStaleNow` (SL8), and `SpeedStaleNow`
+latches `SpeedMonitorDemand` in the same F-cycle (D1) — **a missing reading
+is a demand, never a zero and never the last value**, and the latch then
+outlives the failure until one monitored reset.
+
+| # | Failure | What the F-program sees | Why the direction is safe |
+|---|---|---|---|
+| 1 | **One channel's source dies** (node stops publishing that channel; writer alive) | That channel's `SPD` lines stop; its sequence freezes; `SpeedAValid`/`BValid` falls at `SPEED_STALE_MAX`; `SpeedStaleNow` → D1 latches; SS1 runs; torque-off at the timeout (standstill unconfirmable with one channel invalid — Q3 requires both) | Silence is visible by construction: the source never repeats, the writer never re-increments, and the F-code converts the frozen sequence into a demand |
+| 2 | **Both channels die** (the WSL node dies, or the 45016 link drops) | Both sequences freeze; same path, both channels; `MotionPresent` is driven `TRUE` by the writer's `MOT` silence rule, so no standstill can be confirmed either | Same, and the motion stand-in fails toward *moving* |
+| 3 | **The writer dies** | `StandInHeartbeat` freezes; §5.4 drops `StandInValid`; **every** validated channel falls — the three §5.4 channels to open/unpressed, both speed channels to invalid, motion to *moving*, warning to *limit selected*. All three demands latch | The §7.3 row-1 behaviour, extended: one liveness verdict gates every belief |
+| 4 | **A channel freezes at a value** (a head fault inside the source, still publishing) | Above 31 mm/s of true-speed change the cross-comparison catches it in `SPEED_DISCREPANCY_TIME`; below, the frozen channel tracks its partner within noise and is invisible to the comparison — **the regime the motion stand-in covers**: a frozen *zero* under a rolling vehicle is `ShaftDoubtNow` within the observation's lag | The measured detection floor, stated in §11.1 and in the evidence rather than discovered |
+| 5 | **The shaft or coupling "fails"** — both readings zero, vehicle rolling | `SpeedNearZero` with `MotionPresentValid` → `ShaftDoubtTimer` → D1 within `SHAFT_DOUBT_TIME` + one F-cycle | The stand-in for the mechanical fault exclusion doing its one job (N11) |
+| 6 | **The slow-down itself fails** — warning field trips, ceiling does not come down or the vehicle does not follow it | `WarningFieldClearValid` falls within ~0.15 s of the trip; `SPEED_LIMIT_ONSET_MAX` grants the budgeted 1.5 s; a tread reading still beyond 300 mm/s then persists through `SPEED_OVERLIMIT_TIME` → D1 → SS1 → torque-off | **The reason the function exists** (design spec §4 property 3): the safety layer catches the failure of the process-side reduction it never relied on |
+| 7 | **The field link dies while driving fast** | The writer drives the zone channel open (existing rule) **and** the warning channel to limit-selected. `ZoneStopDemand` latches immediately — the vehicle is already stopping — and the speed monitor's enforcement arms behind it | Loss of the field source was already an intrusion; the limit selection is a second, independent consequence in the same direction |
+| 8 | **The writer wedges with values held and heartbeat advancing** | Sequences freeze (the wedge stops the 45016 reads) → row 1. If the wedge somehow keeps incrementing sequences while holding stale values, the readings still agree with each other and with the last plant state; the motion stand-in covers the rolling case, the cross-comparison the diverging case | Named honestly: a byzantine writer is outside the stand-in's threat model (§7.8 — the writer is standard software and carries no claim) |
+
+**The conservatism, named with its cost.** The monitored quantity is **tread**
+speed; the limit is the body-speed cap. Tread = body / cos δ on a steered
+drive wheel, so the monitor over-reads exactly when the vehicle turns. At the
+warning ceiling of 0.20 m/s (`plc/forklift/SPEC.md` §14.16) the enforcement
+margin is 100 mm/s: compliant straight-line creep sits 78 mm/s of noise-margin
+under the limit, and the full ceiling remains compliant up to \|δ\| ≤
+acos(200/300) ≈ **48°** of steer. Beyond that, in the warning regime, the
+vehicle must slow further or the monitor will — correctly, by its own law —
+demand. This is the demanding-direction conservatism the source documents
+already state (`config.yaml` `safe_speed:`), it is the direction a real
+drive-shaft SLS errs in, and the vehicle-side compliance question is named as
+an open item in this brief's report, not silently absorbed.
+
+**The residual of arming-by-first-sight, named.** A run in which the vehicle
+drives autonomously while the speed sources were **never started** is not
+monitored — `SpeedChainSeen` never sets, and nothing in the CPU can know a
+measurement it never met. Three things bound it: the launch default couples
+the channels to the vehicle stack (`safe_speed` is a `vehicle.launch.py`
+argument, one flag beside the nodes that drive); the T7 rehearsal (§11.9 step
+Q17) makes *chain armed* a read-back precondition of any speed-monitor
+evidence; and the honest default question — whether `safe_speed` should
+default `true` once this chain exists — is m5-48's open question 2, carried
+to the report, not decided here.
+
+### 11.7 SS1 — the two stages, and what cannot be tested until the plant exists
+
+**Stage one, the controlled stop, is the existing chain and this delta adds
+nothing to it.** A standing `Ss1Demand` cause (`ZoneStopDemand` today,
+`SpeedMonitorDemand` with this delta) reaches the standard program's motion
+permissive through the coupling contract, the permissive drops, the three
+setpoints take `0.0` in their mandatory `ELSE`, the envelope goes
+non-permissive, and the vehicle executes its **own** controlled stop on its
+own ramp — the PLC withdrew permission, it did not command a stop
+(`plc/forklift/SPEC.md` §14). Nothing here times that ramp and no deceleration
+is monitored (N15).
+
+**Stage two is Q2–Q4**: at standstill-confirmed or at `SS1_TIME_MAX`,
+whichever comes first, `TorqueOffDemand` sets and holds for the demand's
+life. **What stage two will mean at the plant** — specified now, against the
+next brief, so that brief builds a consumer and not a design:
+
+| The plant obligation (next brief, `agv/` `model.sdf`) | Source of the requirement |
+|---|---|
+| On `TorqueOffDemand` `TRUE` (via its mirror and the bridge): joint controller **disabled** and holding brake **applied** | Design spec §2 decision 3, §5 |
+| While applied, **the vehicle is deaf to commands** — setpoints, envelope values and teleop requests reach no actuator, and the envelope reopening does **not** restore authority | Design spec §5's observable; the m5-49 task ruling |
+| Authority returns only when `TorqueOffDemand` falls — which happens only when the monitored reset clears the demanding latch — and motion then needs a **fresh** affirmative command | SRS SF-11 reset row; CLAUDE.md §9 no-auto-resume |
+
+**Testable now, at the watch table, before the plant exists** (T7 rows,
+§11.9 step Q17): the demand causes latching D1; `Ss1Timer` running from the
+demand; `TorqueOffDemand` setting at `Q` with standstill unconfirmable
+(SS1-t shape); the whole set clearing on one monitored reset; the boot
+signature. **Not testable until the plant's brake and controller disable
+exist:**
+
+| Untestable today | Which acceptance test waits on it |
+|---|---|
+| Torque-off having any effect — the vehicle going deaf, staying deaf on envelope reopen, holding on the brake | **AT-11** (a), (b) entirely; AT-10 (a)'s "torque is removed" clause |
+| The *standstill-confirmed, earlier than the limit* branch under a real stop (Q3 going `TRUE` from live readings as the vehicle rests) | **AT-11 (b)** — observable in the watch table once the vehicle chain runs, but only meaningful against a plant that then obeys |
+| "Whichever comes first" demonstrated rather than asserted — the (a)/(b) pair with deceleration disabled and working | **AT-11 (a)+(b)** |
+| The single-stop-path property under SF-10 as the demanding function | **AT-11 (c)** |
+
+The AT-10/AT-11 runs themselves are Task 6's (m5-52); this section is what
+they run against.
+
+### 11.8 Watch table and coupling additions
+
+**`Forklift F gate` gains Group 5 — the speed monitor.** No row is ever
+modified (§8 preamble unchanged).
+
+| Tag | Format | Expected |
+|---|---|---|
+| `"SafetyInputStandIn".SpeedReadingA` / `.SpeedReadingB` | Dec | mm/s, signed. `0` until the speed source runs; tracking each other within ~31 while it does |
+| `"SafetyInputStandIn".SpeedSeqA` / `.SpeedSeqB` | Dec | Advancing while the source publishes; **frozen is a missing reading and Group 5's `SpeedStaleNow` is the row that says so authoritatively** |
+| `"SafetyInputStandIn".MotionPresent` | Bool | `TRUE` at start (fail direction), `FALSE` only while a valid observation says the world stands still |
+| `"SafetyInputStandIn".MotionObservationValid` | Bool | Diagnosis only, read by no network: distinguishes *moving because observed* from *moving because unobservable* |
+| `"SafetyInputStandIn".WarningFieldClear` | Bool | `FALSE` at start and whenever the field source is silent; `TRUE` only on a live `WARN 1` |
+| `"InstF_Forklift_Safety".SpeedChainSeen` | Bool | `FALSE` until the first fresh reading of the run; never falls after. **`FALSE` here is why a cell-scope run is not blocked by the speed monitor** |
+| `"InstF_Forklift_Safety".SpeedAValid` / `.SpeedBValid` | Bool | The channels as the logic believes them |
+| `"InstF_Forklift_Safety".SpeedStaleNow` / `.SpeedDiscrepantNow` / `.ShaftDoubtNow` / `.SpeedOverLimitNow` | Bool | The four live causes — which one fired is read here, never guessed from the latch |
+| `"InstF_Forklift_Safety".SpeedDiff` | Dec | The cross-comparison's input; hunting a discrepancy starts at this row |
+| `"InstF_Forklift_Safety".WarningFieldClearValid` | Bool | The limit selector in force |
+| `"InstF_Forklift_Safety".SpeedLimitOnsetTimer.ET` / `.PT` | Time | `PT` **must read `T#1s500ms` in force** (LESSONS 2026-07-28) |
+| `"InstF_Forklift_Safety".SpeedDiscrepancyTimer.ET` / `.PT` | Time | `PT` **`T#200ms`** |
+| `"InstF_Forklift_Safety".SpeedAStaleTimer.PT` / `.SpeedBStaleTimer.PT` | Time | **`T#500ms`**, both |
+| `"InstF_Forklift_Safety".ShaftDoubtTimer.ET` / `.PT` | Time | `PT` **`T#1s`** |
+| `"InstF_Forklift_Safety".SpeedOverLimitTimer.ET` / `.PT` | Time | `PT` **`T#200ms`** |
+| `"InstF_Forklift_Safety".SpeedMonitorDemand` | Bool | The latch. `TRUE` stays after every cause clears; only the monitored reset drops it |
+| `"InstF_Forklift_Safety".Ss1Demand` | Bool | `ZoneStopDemand OR SpeedMonitorDemand`, live |
+| `"InstF_Forklift_Safety".Ss1Timer.ET` / `.PT` | Time | `PT` **`T#1s`**; `ET` runs exactly while `Ss1Demand` stands |
+| `"InstF_Forklift_Safety".VehicleStandstillNow` | Bool | Standstill the F-program can assert; `FALSE` whenever channels are invalid or the world unobservable |
+| `"InstF_Forklift_Safety".TorqueOffDemand` | Bool | Sets at standstill-or-timeout under a demand; **drops only when the demand does** |
+| `"InstF_Forklift_Safety".SpeedSeqAMemory` / `.SpeedSeqBMemory` | Dec | One F-cycle behind their Group-5 partners; frozen while the partner advances is M3/M4 not executing — the M2 diagnosis, per channel |
+
+**The coupling contract of §6 gains two rows and one term** — the standard
+side stays its own brief; this is the contract it consumes:
+
+| Addition | Statement |
+|---|---|
+| §6.1 read set | The standard program reads **six** Bools from `InstF_Forklift_Safety`: the four of §6.1 plus `SpeedMonitorDemand` and `TorqueOffDemand`, read-only, one writer (this program) |
+| §6.1 permissive term | *safety demand clear* = **NOT** `EStopDemand` **AND NOT** `ZoneStopDemand` **AND NOT** `SpeedMonitorDemand`. (`TorqueOffDemand` is deliberately not a permissive term: it is a strict consequence of causes already in the conjunction, and its consumer is the **vehicle's** inhibit, not the cell's permissive) |
+| §6.4 mirrors | `ForkliftSafetyMirror` grows to **six** Bools, leaf = tag name exactly: `SpeedMonitorDemand` start `FALSE` (its latch cannot be set before the chain is armed), `TorqueOffDemand` start **`TRUE`** (its source reads `TRUE` from the first believed F-cycle of every run: `ZoneStopDemand` boots latched, so `Ss1Timer` expires within 1 s of boot — a mirror's start value is its source's start-state truth, §6.4's own rule). **Requested of the interface agent**, with the §11.2 ownership table; the path, rights and start-value rulings are `opcua-nodes.md`'s to make |
+
+### 11.9 The click-path — the owner's session, in §4.5's shape
+
+The base is the **as-built 2026-08-05 program** (22 networks, S015 delta in
+the CPU, signature read back). Everything below is a delta to it. §0-style
+discipline throughout: in-force values only, green diff circles, `_1` sweep,
+signature read-back. **The delta is typeable today, before the writer
+extension exists**: with the writer still writing only four members, the
+seven new members hold their start values, no sequence ever advances, the
+monitor never arms, and step Q16's no-source signature is the proof the
+build fails in the stopping direction. A later brief expands this table into
+numbered one-action steps in `plc/forklift/TIA-BUILD-PROCEDURE.md` (its
+chunk Q stub names this table as the source).
+
+| # | Step | Verify before moving on |
+|---|---|---|
+| Q1 | **Run §2 F3 on `safe_amr`** (the m5-25 repeat script) and **§11.4 F8** (the instruction list, plus the throwaway `CMP < -31` network, compiled then deleted) | F3: consumer-view transitions, safety mode activated. F8: Int `CMP >`, `CMP <`, `SUB` recorded as offered with the date; the negative literal accepted. **If F8 fails, stop and report** |
+| Q2 | **SD2 — add the seven members of §11.3 to `SafetyInputStandIn`**, types and start values exactly as the table (note `MotionPresent` starts **`TRUE`**) | Member list reads 11 (4 + 7); still a standard DB, optimized, no Retain; *Accessible from HMI/OPC UA* re-read — still **✘** |
+| Q3 | **Extend FB2's interface**: six Inputs (§11.3 — `MotionObservationValid` is **not** among them), two Outputs, twenty-five Statics with every `TON` a **multi-instance**, and the **fourteen new constant identifiers** in the *Constant* section if offered (else plan literals at the pins) | Interface reads **10 / 6 / 43 / 17**, read off the table. The call in `Main_Safety_RTG1` goes inconsistent; Q10 repairs it |
+| Q4 | **Build SL1–SL20 as new networks between V7 and `CauseGone`**, in §11.5's order | Twenty written operands matching §11.5; `CauseGone` now sits at network 28. The two `TON` traps hold: every `IN` is the condition's own test, every `PT` explicit |
+| Q5 | **Re-point `CauseGone`**: the `AND` box gains a third input, `#SpeedCauseGone` | The network reads three inputs: `#EStopClosedValid`, `#ZoneClosedValid`, `#SpeedCauseGone` |
+| Q6 | **Build D1 (`SpeedMonitorDemand`) between `ZoneStopDemand` and `SafetyResetRequired`** | `RS` box — **set-dominant, trailing `1` on `S1`** — with `R` = `#ResetPulse`. The build in front of you has two `RS` demand latches to copy the shape from |
+| Q7 | **Re-point `SafetyResetRequired`**: the `OR` box gains `#SpeedMonitorDemand` | Three inputs; the flag still means "at least one F-latch stands" |
+| Q8 | **Build Q1–Q4 after `SafetyResetRequired`**, in order | Four written operands; Q4's `RS` has `R` = `#Ss1Demand` *(negated)* and its `S1` carries the `AND` |
+| Q9 | **Build M3 and M4 as the final two networks**, after M2 | Network count **49**; the last four read, in order: `ResetMemory`, `HeartbeatMemory`, `SpeedSeqAMemory`, `SpeedSeqBMemory` |
+| Q10 | **Repair the call in `Main_Safety_RTG1`**: *Update*, wire the six new input pins to their §11.3 members; **all six output pins stay empty** | 10 inputs wired, 0 outputs wired. `MotionObservationValid` is bound to no pin |
+| Q11 | **Compile the safety program; read the warnings** | The S015 disclosure lists **ten members of `SafetyInputStandIn` and nothing else** (`MotionObservationValid` is unread and does not appear). Any other DB named means a wire is wrong |
+| Q12 | **Download with re-initialisation of `DB3`** (the interface moved the layout — LESSONS 2026-07-28); CPU in STOP as TIA requires | Diff circles solid green; **F-collective signature online = offline, recorded with its date** — it differs from the 2026-08-05 signature, which is the delta's expected evidence |
+| Q13 | **`_1` sweep** on every new name, DB members and statics both (LESSONS 2026-07-30) | Zero silent suffixes |
+| Q14 | **Cross-reference `SafetyInputStandIn`** | **Ten read accesses**, all at the `Main_Safety_RTG1` call; **zero writes from any block on the CPU** |
+| Q15 | **Independent browse** (UaExpert / `asyncua` — not the bridge, not the HMI) | `SafetyInputStandIn` and `InstF_Forklift_Safety` appear **nowhere**, `DataBlocksGlobal` included; recorded with the date |
+| Q16 | **Add §11.8's Group 5 rows; read the no-source signature** — writer in whatever state it is in, speed source absent | `SpeedChainSeen` `FALSE`, both valids `FALSE`, `SpeedStaleNow` `FALSE`, `SpeedCauseGone` **`TRUE`**, `SpeedMonitorDemand` **`FALSE`**, `WarningFieldClearValid` `FALSE`, `SpeedLimitOnsetTimer.ET` at `PT`, `Ss1Demand` tracking the zone latch, `TorqueOffDemand` `TRUE` if a demand has stood ≥ 1 s (boot state) — **the monitor is silent because it never met its measurement, and everything it cannot verify reads in the stopping direction.** Two readings would be the delta's defect signature: `SpeedChainSeen` `TRUE` with no source ever started (SL3 mis-wired), or `SpeedCauseGone` `FALSE` blocking the reset in a cell-scope run (a validity gate missing on one of SL8/SL11/SL15/SL18) |
+| Q17 | **Read back and record**: safety mode activated; the new signature; the in-force `PT` of **all seven** new timers plus the three existing ones, from the watch table with each timer's `IN` state noted (a `T#0MS` on a never-run timer is the instrument, not the value — LESSONS 2026-08-05) | Ten `PT`s in force as §11.8 lists them. **T7 rehearsal, once the writer extension and the WSL client exist**: start the speed source, watch `SpeedChainSeen` then both valids rise; kill the source, watch `SpeedStaleNow` → D1 latch → `Ss1Timer` run → `TorqueOffDemand` at `T#1s`; restore, close circuits, one monitored reset clears all three latches together — refused until the speed world is clear, `CauseGone` saying why |
+
+### 11.10 What this delta does not specify, and its requests
+
+| Item | Owner |
+|---|---|
+| The writer extension (45016 listener, seven members, `WARN`, `MOT` silence rule, log lines) | **bridge/** — §11.2 is the contract; requested in the m5-49 report |
+| The WSL-side `SPD`/`MOT`/`PING` client | **agv/** — same table; requested |
+| The two mirror nodes, their path, rights and start values | **interface**, `opcua-nodes.md` — §11.8's row is the request and the F-side facts |
+| The standard program's two copy statements and the third permissive conjunct | `plc/forklift/SPEC.md`'s standard-side brief, from §11.8 |
+| The warning-field ceiling — the process consumer | `plc/forklift/SPEC.md` **§14.16**, this same brief |
+| The plant's brake and controller disable, and everything N14 defers | The next brief (m5-50), against §11.7's obligation table |
+| AT-10 / AT-11 runs and their evidence | Task 6 (m5-52) |
+| Whether the warning field is the right **selector** for the SLS limit — the SRS holds SF-10's selection to the reduced-detection monitoring case (SC-13) and records the warning-field coupling as open (SC-06); this delta implements the plan's ruling on the only selector that exists, on one channel a future case-selector can drive instead | **safety-spec** — flagged in the m5-49 report, not resolved here |
+| Whether `safe_speed` should default `true` once this chain exists | Owner, with the agv agent (m5-48 open question 2, carried) |

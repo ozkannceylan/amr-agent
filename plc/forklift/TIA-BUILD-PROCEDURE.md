@@ -1698,6 +1698,37 @@ invented value.
 | **AT-08 (b)'s scope** — the timed stimulus `reset pulse <ms>` now exists; whether the sub-window rejection test is in scope is a ruling, shadowed by the one above | **safety-spec** (SPEC §10 open item 3) | Nothing here; the program behaves identically either way |
 | **HMI v2a** (m5-14a) — without it the standard cell is inert after chunk D | **hmi agent** | Teleop drive and any showcase re-take, per chunk D |
 | **The bridge's forklift-group repoint and the §12.10 slot tables** | **bridge agent** | The vehicle-side half of the §14 envelope |
+| **The stand-in writer's speed extension** — the 45016 listener, the seven new members, `WARN` on the field link (`plc/forklift-safety/SPEC.md` §11.2) | **bridge agent** (m5-49 report request) | Chunk Q's T7 rehearsal (its step Q17 second half). The F-delta itself types and shows its no-source signature without it |
+| **The WSL-side `SPD`/`MOT`/`PING` client** beside `safe_speed_channels.py` | **agv agent** (m5-49 report request) | Same rehearsal |
+| **The warning node `Forklift/Warning/ForkliftWarningFieldOccupied` and its bridge slot** (`plc/forklift/SPEC.md` §14.16) | **interface + bridge agents** (m5-49 report request) | Chunk Q's standard-side half — the ceiling delta compiles against the DB either way, but nothing drives the node until the slot exists |
+
+---
+
+## Chunk Q — the m5-49 SLS/SS1 and warning-ceiling delta: specified, not yet expanded
+
+**Nothing below is a numbered step, and the honest count for this chunk today
+is zero.** The m5-49 brief produced the specification and its click-paths; the
+expansion into one-action-one-observable numbered steps is a **later brief**,
+which starts from these two sources and adds nothing of its own judgement:
+
+| Half | Click-path in force | What it builds |
+|---|---|---|
+| **F-side** | `plc/forklift-safety/SPEC.md` **§11.9** (steps Q1–Q17), with the network tables in §11.5 and the counts in §11.3 | Seven stand-in members (SD2), FB2 at 10 / 6 / 43 / 17, twenty-seven new networks for 49 in all, two re-pointed pins, watch Group 5, the no-source signature |
+| **Standard side** | `plc/forklift/SPEC.md` **§14.16** | One new DB `ForkliftWarning` and its requested node, one constant `WARNING_SPEED_CEILING`, one temp, the modified part-8 ceiling statement, two watch rows |
+
+**Ordering constraints the expansion must carry.** The F-side half depends on
+chunk O's build (the 22-network, S015 program in the CPU) and on nothing else
+— it is typeable **before** the writer's speed extension exists, and §11.9
+step Q16's no-source signature is exactly the with-nothing-attached proof, the
+way chunk O's step 187 was. The standard-side half depends on the interface
+agent's ruling on the warning node; typing it against an unruled path is how
+two documents start disagreeing, so it **waits for the ruling**, and the
+F-side half does not wait for it. The T7 rehearsal (Q17, second half) waits on
+the two implementation requests in chunk P's table.
+
+**When the expansion lands it takes step numbers 192 onward**, updates the
+step index, and re-derives every count from the spec tables at that moment —
+never from this stub.
 
 ---
 
@@ -1722,6 +1753,7 @@ invented value.
 | N — call, compile, download | 168–180 | changed signature, 4 reads / 0 writes, absence proven |
 | O — in force, no writer | 181–191 | three `PT`s in force, the invalid-boot signature |
 | P — not built here | — | the writer, the field log, two safety-spec rulings |
+| Q — m5-49 delta, not yet expanded | — (192+ when its brief lands) | the click-paths in force: `forklift-safety/SPEC.md` §11.9, `forklift/SPEC.md` §14.16 |
 
 **191 steps.** If a step turns out to contain two actions, split it and say the
 total has changed.

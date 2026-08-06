@@ -2276,7 +2276,7 @@ is read, compared, and used to withdraw permission — never to set a mode.
 | Element | Node | Source, in one line |
 |---|---|---|
 | **Motion enable** | `ForkliftMotionEnable` | `#autonomousMotionPermitted` — the mode in force is `Autonomous`, `AutonomousArmed` is set, the **M4 permissive** `#motionPermissive` holds, and the vehicle is answering. **It permits; it never commands** (**E6**) |
-| **Speed ceiling** | `ForkliftSpeedCeiling` | `MIN(AUTONOMOUS_SPEED_CEILING, #speedCap)` while motion is permitted, `0.0` in a **mandatory `ELSE`** otherwise. `#speedCap` is §6.5's existing fork-height value, so **the fork-height clamp applies in autonomous mode exactly as it does in teleop** |
+| **Speed ceiling** | `ForkliftSpeedCeiling` | `MIN(AUTONOMOUS_SPEED_CEILING, #speedCap)` while motion is permitted, `0.0` in a **mandatory `ELSE`** otherwise. `#speedCap` is §6.5's existing fork-height value, so **the fork-height clamp applies in autonomous mode exactly as it does in teleop**. *(The §14.16 delta adds a third bound, `WARNING_SPEED_CEILING`, in force while the warning field is occupied — same single assignment, same `ELSE`)* |
 | **Equipment permit** | `ForkliftEquipmentPermit` | The conjunction of the **named equipment register** below. Never a literal |
 
 **The ceiling is not a setpoint, and this program must not write logic that makes
@@ -2942,3 +2942,163 @@ two are recorded as two sets, in ADR 0009 D2.2's discipline.
 | 5 | **`ForkliftEquipmentPermit`'s M5 register has two members and neither is fixed equipment**, because this project's standard program holds no fixed-equipment signal at all (§14.5). §12.5 **Z4** anticipates an empty conjunction; this document publishes a **named, falsifiable two-term register** instead, and the difference is a reading of **Z4** rather than a contradiction of it | Flagged for the interface agent: if **Z4** is meant to require that the permit read `TRUE` at M5 whenever the program is running, this document's EQ1/EQ2 need its ruling. Nothing in the node set moves either way |
 | 6 | **The mode arbiter's five transitions are specified and unverified.** No part of §14 has been executed in TIA Portal or PLCSIM Advanced by its author, who has neither installed | The owner's run, and — on the §7 precedent, where a specification defect was found by transliterating into an executable double rather than by review — a double for §14.8's parts before the owner types them (`plc/forklift/double/`) |
 | 7 | **`plc/README.md` still has no `forklift/SPEC.md` row**, and its boundary statement names only the M3 cell's process stop | Carried from §12 open item 7 and still outside this brief's deliverable. It now needs one further sentence: the operator's process stop of `Forklift/ProcessStop/` is a **process** stop and no safety function |
+
+### 14.16 The warning-field ceiling — the SF-04 consumer (m5-49 delta)
+
+**The gap this subsection closes** (m5-47 report, first open question): the
+warning verdict is published on `/forklift/warning_field/occupied` and
+**nothing consumes it** — the warning field trips nothing today. This is the
+consumer: **the standard program lowers the envelope speed ceiling while the
+warning field is occupied.** That is what actually slows the vehicle, and it
+earns **no safety credit** — the F-program independently monitors the measured
+speed against the limit and demands a stop if the slow-down fails
+(`plc/forklift-safety/SPEC.md` §11, the same brief). The split is the
+certified pattern (`docs/safety/SLS-STANDARDS-BASIS.md` F5): setpoint
+limiting in standard logic, monitoring and reaction in the safety layer, and
+this program is **modelled on** that practice, never *in conformance with*
+anything.
+
+**Everything §14's one deciding sentence says still holds.** The ceiling
+remains a bound, published, not commanded; the enforcing gate runs on the
+vehicle; and nothing here is a safety function — SF-04 carries **no PL claim**
+(SRS SF-04 honesty row, `FIELD-EVALUATION.md` §1), and the safety-rated
+protection remains SF-03's protective stop beneath it.
+
+#### The signal, and the requested node
+
+| # | BrowseName path (requested) | PLC symbol | S7 type | Written by | Start value |
+|---|---|---|---|---|---|
+| 10 | `Forklift/Warning/ForkliftWarningFieldOccupied` | `"ForkliftWarning".ForkliftWarningFieldOccupied` | Bool | bridge | **`TRUE`** |
+
+- **One new global DB `ForkliftWarning`, one member** — §14.2's rule a fourth
+  time: no existing DB gains a member, because offsets move and watch tables
+  lie (LESSONS 2026-07-28). *Accessible* ✔, *Writable* ✔ (the bridge writes
+  it) — per-client scoping stays policy, exactly as the two `Vehicle/` tags.
+- **The node is a REQUEST to the interface agent** (`opcua-nodes.md`), not a
+  creation here: the path, the leaf and the rights are that document's to
+  rule, under its own refusal of any *safe-speed* or *SLS* name (§12.12) —
+  this leaf names a **field state**, not a safety function, and the polarity
+  is in the name: `TRUE` = occupied. **Start value `TRUE`** — the
+  fail-direction: before the chain has ever spoken, the cell behaves as if
+  the field were occupied and the ceiling is reduced, never the reverse.
+- **The producing chain**: `field_evaluation.py` (WSL) publishes the verdict
+  at the 20 Hz evaluation tick — deliberately at the tick and not on
+  transitions, **so that its absence is visible** — → the bridge carries it
+  to this node. The bridge slot is a **request to the bridge agent**.
+
+#### The stale rule travels with the topic, at every layer
+
+The publisher's guarantee is destroyed by any layer that republishes a last
+value as if silence were continuity (LESSONS 2026-08-04, twice; the m5-47
+report's second open question names this obligation for every consumer):
+
+| Layer | The rule |
+|---|---|
+| Bridge (requested) | **No message on the topic within its own freshness window → write `TRUE` (occupied)** to the node, and log the transition. The window is the bridge's own named constant, bounded below by the 20 Hz publish tick; never shared with another window |
+| This program | `#warningFieldOccupied := "ForkliftWarning".ForkliftWarningFieldOccupied OR NOT #bridgeLinkOk` — a dark transport cannot report a clear field. (A dead **bridge** additionally latches `BridgeLinkLostLatch` and drops motion entirely; this term exists so the *ceiling* is honest even inside the stale window before that latch bites) |
+| The F-side | Has its **own, independent** copy of the verdict over the writer path (`plc/forklift-safety/SPEC.md` §11.2 `WARN`), with its own stale rule. One producer — the field evaluation — two consumers, neither recomputing the verdict, neither substituting for the other (invariant 10) |
+
+**The clear-hold is the producer's and is not re-implemented here.** SF-04's
+2 s clear-hold is inside the field evaluation (`warning_clear_hold_s`,
+measured live at 2.028–2.038 s); this program consumes the held verdict. A
+second hold here would give one behaviour two owners.
+
+#### One new constant, and its derivation
+
+| Constant | Type | Value | Basis |
+|---|---|---|---|
+| `WARNING_SPEED_CEILING` | Real | **`0.20`** m/s | The ceiling published while the warning field is occupied. **Derived, not chosen, from two constraints.** (1) *Below the monitor*: the F-side enforces 300 mm/s on the **measured tread speed** after its onset budget; the certified pattern is setpoint limiting **below** the monitoring value (basis F5 — the Siemens rendering: the inverter limits the setpoint to values below the SLS monitoring). 0.20 leaves a 100 mm/s margin, of which 22 mm/s is 4 σ of measured read noise and 1 mm/s quantisation (`EVIDENCE_ODOMETRY.md` §15.4), leaving 77 mm/s for the vehicle's ceiling-tracking overshoot — **unmeasured, and requested of `agv/`** (open item below); and it keeps the full ceiling monitor-compliant up to ≈ 48° of steer (tread = body / cos δ). A ceiling of 0.30 — the limit itself — would sit **at** the monitoring value and trip on noise, which is why the two numbers must differ. (2) *At least the derived reduction*: `FIELD-EVALUATION.md` §6.1 sized the 3.35 m warning depth for the vehicle to be **at or below v_c = 0.30 m/s by the protective boundary**; a 0.20 ceiling passes 0.30 at the same point on the same ramp and continues down — more reduction than the derivation requires, never less. **No conformity is claimed for this or any speed in this document** (ADR 0011 D5) |
+
+#### The SCL delta — one temp, one modified statement
+
+**Part 2d gains one temp**, computed with the other link-qualified reads:
+
+```
+// The warning field's verdict, stale-safe: a dark transport cannot report a
+// clear field (LESSONS 2026-08-04). The bridge's own rule (silence => TRUE)
+// covers topic death; this term covers transport death. TRUE = occupied.
+#warningFieldOccupied := "ForkliftWarning".ForkliftWarningFieldOccupied
+                         OR NOT #bridgeLinkOk;
+```
+
+**Part 8's ceiling statement is modified — and it stays exactly one
+unconditional `IF … ELSE` with the mandatory `ELSE` to `0.0`** (a conditional
+write is not a gate, LESSONS 2026-07-27). Before and after:
+
+```
+// WAS (§14.8):
+IF #autonomousMotionPermitted THEN
+    "ForkliftEnvelope".ForkliftSpeedCeiling :=
+        MIN(IN1 := #AUTONOMOUS_SPEED_CEILING, IN2 := #speedCap);
+ELSE
+    "ForkliftEnvelope".ForkliftSpeedCeiling := 0.0;
+END_IF;
+
+// BECOMES: the warning term is a third bound inside the same single
+// assignment. MIN of bounds, never a multiplication, no demand term -- the
+// ceiling stays a bound (E2, E3) and gains no second writer and no branch.
+IF #autonomousMotionPermitted THEN
+    IF #warningFieldOccupied THEN
+        "ForkliftEnvelope".ForkliftSpeedCeiling :=
+            MIN(IN1 := MIN(IN1 := #AUTONOMOUS_SPEED_CEILING,
+                           IN2 := #speedCap),
+                IN2 := #WARNING_SPEED_CEILING);
+    ELSE
+        "ForkliftEnvelope".ForkliftSpeedCeiling :=
+            MIN(IN1 := #AUTONOMOUS_SPEED_CEILING, IN2 := #speedCap);
+    END_IF;
+ELSE
+    "ForkliftEnvelope".ForkliftSpeedCeiling := 0.0;
+END_IF;
+```
+
+Every path assigns the node exactly once per call; the outer `ELSE` to `0.0`
+is untouched; no other statement of §14.8 moves. `ForkliftMotionEnable` and
+`ForkliftEquipmentPermit` are unaffected: the warning field **reduces** the
+envelope, it does not close it — closing is SF-03's channel, and the two must
+never share a mechanism or a sentence (R4's shape, one function over).
+
+#### Scope, behaviour, and what this is not
+
+- **Teleop is out of scope, stated rather than implied.** The warning ceiling
+  bounds the **envelope**, which exists in autonomous mode. In teleop the
+  operator holds the speed authority through §7 unchanged. Whether SF-04's
+  creep demand should also clamp the teleop scale is a safety-spec question,
+  carried in the m5-49 report — not silently taken (a §6.5 change) and not
+  silently dropped.
+- **Behaviour in force**: warning occupied → ceiling falls to 0.20 (0.60
+  normally; the fork-height 0.30 clamp still applies and the `MIN` orders
+  them correctly whichever is lower). Field clear + 2 s producer hold →
+  ceiling returns. The vehicle slows on its own gate; nothing here commands.
+- **Not a safety function, no credit taken.** The F-side monitor is what
+  carries SF-10's logic; if this ceiling never falls — bridge dead, node
+  stale, this delta unapplied — the monitor demands the stop on its own
+  measurement within its onset budget. That independence is the design's
+  point, and no sentence may lean the safety case on this subsection.
+
+#### Watch rows, cold start, verification
+
+| Tag | Format | Expected |
+|---|---|---|
+| `"ForkliftWarning".ForkliftWarningFieldOccupied` | Bool | **`TRUE`** at every CPU start and under every silence; `FALSE` only while the bridge relays a live *clear* |
+| `"ForkliftEnvelope".ForkliftSpeedCeiling` | Floating-point | `0.0` unenabled; `0.60` / `0.30` per fork height with the field clear; **`0.20` while occupied** |
+
+Cold start: the node's start value `TRUE` and `#warningFieldOccupied` agree
+(`#bridgeLinkOk` is `FALSE` at the first scan, so the term is `TRUE` twice
+over) — the §14.9 rule holds: the start value is the non-permissive one and
+the program's first scan publishes nothing more permissive.
+
+Verification at the tool, §14.13-style: after download, drive the node
+`TRUE`/`FALSE` from the bridge side (never a watch-table Modify of a
+program-read value in a demonstration) and read the ceiling row fall and
+return; then stop the bridge and read the ceiling fall to `0.20` within
+`HEARTBEAT_STALE_TIME` despite the node still reading `FALSE` — the stale
+term observed doing its work. Record both with dates.
+
+#### Open items this subsection adds
+
+| # | Open item | Status |
+|---|---|---|
+| 8 | **The node, its DB and its bridge slot are requests** — interface (`opcua-nodes.md`) and bridge agents; this subsection is written against the requested shape and is corrected if the ruling moves the path or leaf | Requested in the m5-49 report |
+| 9 | **The vehicle's ceiling-tracking overshoot is unmeasured** and bounds `WARNING_SPEED_CEILING` from above (the 77 mm/s remainder in its derivation). If `agv/` measures an overshoot above that, the ceiling is re-derived **downward** | Requested of `agv/` (m5-11's gate owns the tracking) |
+| 10 | **Whether SF-04 should also clamp the teleop scale** | safety-spec, via the m5-49 report |
