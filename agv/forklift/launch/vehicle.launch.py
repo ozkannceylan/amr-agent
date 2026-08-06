@@ -59,7 +59,7 @@ from launch.actions import (DeclareLaunchArgument, ExecuteProcess,
                             IncludeLaunchDescription, OpaqueFunction)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 from ament_index_python.packages import get_package_share_directory
@@ -76,6 +76,8 @@ _TF_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'sensor_tf.py')
 _FIELD_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'field_evaluation.py')
 _SAFE_SPEED_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts',
                                   'safe_speed_channels.py')
+_SAFE_SPEED_LINK_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts',
+                                       'safe_speed_link.py')
 _STO_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'sto_contactor.py')
 _WHEEL_ODOM_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'wheel_odometry.py')
 _IMU_GATE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'imu_gate.py')
@@ -466,6 +468,20 @@ def generate_launch_description():
                     'reads publish at the physics rate; forgetting it is '
                     'safe, because a missing reading reads as a demand.'))
     ld.add_action(DeclareLaunchArgument(
+        'safe_speed_link', default_value='true',
+        description='Whether the readings above are also CARRIED to the '
+                    'stand-in writer by scripts/safe_speed_link.py '
+                    '(plc/forklift-safety/SPEC.md section 11.2). It only '
+                    'acts when safe_speed is on: asking for the readings is '
+                    'asking for them to reach the monitor, so the carrier '
+                    'is coupled to them rather than given a second argument '
+                    'to forget. Set it false for a channels-only '
+                    'MEASUREMENT run, where a link that keeps retrying a '
+                    'listener nobody started is noise. Turning it off does '
+                    'not make anything permissive: with no readings arriving '
+                    'the F-program reads both channels as missing, and '
+                    'missing is a demand.'))
+    ld.add_action(DeclareLaunchArgument(
         'safe_speed_csv', default_value='',
         description='Measurement facility. A path here makes the '
                     'safe-speed node record every tick to it, including a '
@@ -735,6 +751,31 @@ def generate_launch_description():
         name='safe_speed_channels',
         output='screen',
         condition=IfCondition(LaunchConfiguration('safe_speed')),
+    ))
+
+    # ---- the carrier that puts those readings on the wire (m5-56) ----
+    #
+    # BOTH ARGUMENTS MUST BE ON, and the condition is written as an
+    # explicit conjunction rather than nested includes. A launch
+    # configuration set by one include is visible to the next
+    # (LESSONS 2026-08-05), so a condition that reads only
+    # safe_speed_link would start a carrier in any composition that had
+    # set it, whether or not this vehicle's readings exist.
+    #
+    # NO use_sim_time HERE, AND THAT IS THE DESIGN. Every window in this
+    # node - its tick and both freshness windows - is measured on a
+    # STEADY clock, because the data whose failure those windows exist
+    # to notice arrives over the same graph that carries /clock
+    # (LESSONS 2026-08-06). A watchdog does not run on a clock its
+    # subject supplies.
+    ld.add_action(ExecuteProcess(
+        cmd=[sys.executable, _SAFE_SPEED_LINK_SCRIPT, '--config', config],
+        name='safe_speed_link',
+        output='screen',
+        condition=IfCondition(PythonExpression([
+            "'", LaunchConfiguration('safe_speed'), "'.lower() == 'true' and "
+            "'", LaunchConfiguration('safe_speed_link'), "'.lower() == 'true'",
+        ])),
     ))
 
     return ld

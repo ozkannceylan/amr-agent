@@ -1,0 +1,4 @@
+2026-08-06T17:07:30.778969Z | START | local sink listening on 0.0.0.0:45016 - a MODEL of the writer half of SPEC 11.2, not the stand-in writer. It writes to no PLC.
+2026-08-06T17:07:33.179400Z | LINK | up: speed-source client connected from ('127.0.0.1', 51112)
+2026-08-06T17:07:44.879879Z | MOTION | MotionPresent driven TRUE: no MOT line for 0.253 s - an unobservable vehicle is MOVING, never still
+2026-08-06T17:07:55.793767Z | EXIT | received SPD 444, MOT 222, PING 21, malformed 0; refused 0 extra connections; final SeqA 222, SeqB 221, MotionPresent True

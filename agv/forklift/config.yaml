@@ -600,6 +600,92 @@ safe_speed:
   # check is there to notice.
   read_fresh_max_s: 0.25
 
+  # ---- the speed-source link to the stand-in writer ----
+  # (plc/forklift-safety/SPEC.md section 11.2)
+  #
+  # READ BY scripts/safe_speed_link.py, the carrier that puts the two
+  # channel readings and the motion observation on the wire. The node
+  # ABOVE (safe_speed_channels.py) publishes; this link forwards. They
+  # are two processes on purpose: the producer keeps its one job, and a
+  # link that stalls cannot stall the differencing that feeds it.
+  #
+  # THE PROPERTY THE WHOLE BLOCK EXISTS TO PRESERVE. A channel with no
+  # fresh reading is NOT SENT. It is never sent as zero and never sent
+  # as the value it last had. The writer converts the resulting frozen
+  # freshness sequence into an invalid channel and the F-program
+  # converts an invalid channel into a demand (SPEC section 11.5
+  # SL1-SL8). Every rule below is in service of that one sentence, and
+  # any change that makes this link emit a value it did not just receive
+  # breaks the safety argument two layers up.
+  link:
+    # THE WINDOWS HOST ADDRESS IS A READ-BACK VALUE, NEVER A DOCUMENT'S
+    # (ADR 0006, SPEC section 7.2). `auto` means the node derives it from
+    # THIS HOST's own configuration and LOGS which source produced it:
+    # $AMR_SPEED_LINK_HOST if set, else $AMR_FIELD_LINK_HOST (the field
+    # link dials the same Windows host, so one export serves both), else
+    # the WSL default route, else the resolv.conf nameserver.
+    host: auto
+
+    # SPEC section 11.2 design value, beside the field link's 45015. The
+    # writer listens on it; this node dials it. One TCP connection, one
+    # client at a time - a second connection is refused by the listener,
+    # so this node's reconnect must survive being closed on.
+    port: 45016
+
+    # SPEC section 11.2 states the keepalive as 1 Hz and this is that
+    # value. It is NOT a liveness budget for the readings: the readings'
+    # own liveness is carried by the freshness sequences, which is the
+    # whole point of them. PING exists for the writer's link log.
+    ping_period_s: 1.0
+
+    # One reconnect attempt per second, each logged. While the link is
+    # down this node sends nothing at all; the writer, by its own
+    # contract, freezes both sequences and drives MotionPresent TRUE.
+    reconnect_period_s: 1.0
+
+    # A connect attempt is abandoned by DEADLINE and never waited on:
+    # the socket is non-blocking throughout, including the connect
+    # (the m5-12 lesson - a link that blocks its own event loop makes
+    # the node fail its own freshness rules).
+    connect_timeout_s: 2.0
+
+    # HOW OLD AN ARRIVED MOTION MESSAGE MAY BE BEFORE THIS NODE STOPS
+    # FORWARDING IT. 0.15 s is three publish intervals at the block's
+    # 20 Hz. Measured on THIS node's steady clock at the moment of
+    # arrival, never on a header stamp and never on simulation time: the
+    # producer supplies the data whose failure this window exists to
+    # notice, and a watchdog does not run on a clock its subject
+    # supplies (LESSONS 2026-08-06).
+    #
+    # WHY IT IS SMALL. Silence here starts the writer's own
+    # MOTION_SILENCE_MAX = 250 ms, so the total time to MotionPresent
+    # TRUE is this window plus that one. TRUE is the safe direction, so
+    # this window is pure latency ON THE SAFE TRANSITION and is kept
+    # short. It is not made zero because one jittered arrival would then
+    # break the stream for no reason.
+    motion_fresh_max_s: 0.15
+
+    # A CHANNEL READING OLDER THAN THIS IS NOT FORWARDED EITHER, and it
+    # is the same 0.25 s the producer applies at its own input for the
+    # same reason. In normal operation this window never fires: the
+    # forwarding rule is send-once-per-arrival, so a reading that stops
+    # arriving simply stops being sent. The window is the second, level
+    # form of that rule, and it is what makes a message that arrived
+    # late - queued behind a stall - a NON-reading rather than a fresh
+    # one.
+    reading_fresh_max_s: 0.25
+
+    # THE WIRE CARRIES SIGNED Int MILLIMETRES PER SECOND (SPEC 11.2).
+    # These are the S7 Int bounds, and they are here so the refusal
+    # below is a named constant rather than a magic number: a reading
+    # that will not fit an Int is NOT SENT - it is refused and logged,
+    # the sequence freezes, and the F-program reads the channel as
+    # missing. A wrapped Int would be a value, and a wrong one; silence
+    # is a demand. The F-side plausibility window (+/-4000 mm/s,
+    # SPEC 11.3) is a SEPARATE and independent test and this is not it.
+    wire_int_min: -32768
+    wire_int_max: 32767
+
 imu:
   # Nothing in this block is a noise parameter. model.sdf owns the
   # sensor's noise, the message carries the covariance gz derives from

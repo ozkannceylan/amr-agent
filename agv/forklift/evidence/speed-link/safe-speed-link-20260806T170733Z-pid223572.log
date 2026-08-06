@@ -1,0 +1,14 @@
+2026-08-06T17:07:33.104497Z | LINK | writer address 127.0.0.1:45016 read back from config safe_speed.link.host
+2026-08-06T17:07:33.227600Z | LINK | up: connected to the stand-in writer at 127.0.0.1:45016 (attempt 1, connection 1). NO READING IS REPLAYED ONTO A NEW CONNECTION: the first SPD line a fresh link carries is the first reading that arrives after it, so a reconnect can never resurrect a value measured before the gap
+2026-08-06T17:07:33.259331Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-06T17:07:33.272482Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-06T17:07:33.279033Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-06T17:07:33.576853Z | SILENT | a: sending again after 0.400 s of silence (8 ticks)
+2026-08-06T17:07:33.589117Z | SILENT | b: sending again after 0.400 s of silence (8 ticks)
+2026-08-06T17:07:33.597090Z | SILENT | mot: sending again after 0.400 s of silence (8 ticks)
+2026-08-06T17:07:33.602222Z | MOTION | MOT 0 1 (present=False, observation valid=True)
+2026-08-06T17:07:44.727052Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-06T17:07:44.733287Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-06T17:07:44.738352Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-06T17:07:55.801884Z | EXIT | link attempts 1, connections 1, drops 0; sent SPD A 222, SPD B 222, MOT 222, PING 21; refused non-finite 0, out-of-range 0; silent ticks A 231, B 231, MOT 231; discarded stale A 0, B 0, MOT 0
+2026-08-06T17:07:55.823692Z | LINK | down (node shutting down). Both freshness sequences stop advancing at the writer within one of its cycles, and the F-program reads both channels as missing - a demand, not a zero

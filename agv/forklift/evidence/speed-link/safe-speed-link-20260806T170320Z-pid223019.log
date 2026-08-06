@@ -1,0 +1,11 @@
+2026-08-06T17:03:20.455970Z | LINK | writer address 127.0.0.1:45016 read back from config safe_speed.link.host
+2026-08-06T17:03:20.583630Z | LINK | up: connected to the stand-in writer at 127.0.0.1:45016 (attempt 1, connection 1). NO READING IS REPLAYED ONTO A NEW CONNECTION: the first SPD line a fresh link carries is the first reading that arrives after it, so a reconnect can never resurrect a value measured before the gap
+2026-08-06T17:03:20.588136Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-06T17:03:20.591833Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-06T17:03:20.594570Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-06T17:03:23.283652Z | SILENT | a: sending again after 2.750 s of silence (55 ticks)
+2026-08-06T17:03:23.287892Z | SILENT | b: sending again after 2.750 s of silence (55 ticks)
+2026-08-06T17:03:23.292190Z | SILENT | mot: sending again after 2.750 s of silence (55 ticks)
+2026-08-06T17:03:23.296512Z | MOTION | MOT 1 1 (present=True, observation valid=True)
+2026-08-06T17:03:48.186067Z | EXIT | link attempts 1, connections 1, drops 0; sent SPD A 451, SPD B 452, MOT 498, PING 26; refused non-finite 0, out-of-range 0; silent ticks A 102, B 101, MOT 55; discarded stale A 0, B 0, MOT 0
+2026-08-06T17:03:48.196639Z | LINK | down (node shutting down). Both freshness sequences stop advancing at the writer within one of its cycles, and the F-program reads both channels as missing - a demand, not a zero

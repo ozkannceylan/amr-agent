@@ -1,0 +1,8 @@
+2026-08-06T17:08:34.685734Z | START | local sink listening on 0.0.0.0:45016 - a MODEL of the writer half of SPEC 11.2, not the stand-in writer. It writes to no PLC.
+2026-08-06T17:08:37.031682Z | LINK | up: speed-source client connected from ('127.0.0.1', 35384)
+2026-08-06T17:08:42.123161Z | LINK | refused a second connection from ('127.0.0.1', 35396): one speed-source client at a time
+2026-08-06T17:08:43.173852Z | LINK | refused a second connection from ('127.0.0.1', 35408): one speed-source client at a time
+2026-08-06T17:08:44.173203Z | LINK | refused a second connection from ('127.0.0.1', 35414): one speed-source client at a time
+2026-08-06T17:08:45.223019Z | LINK | refused a second connection from ('127.0.0.1', 40726): one speed-source client at a time
+2026-08-06T17:08:46.222720Z | LINK | refused a second connection from ('127.0.0.1', 40732): one speed-source client at a time
+2026-08-06T17:08:48.687015Z | EXIT | received SPD 448, MOT 225, PING 11, malformed 0; refused 5 extra connections; final SeqA 223, SeqB 222, MotionPresent True

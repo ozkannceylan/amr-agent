@@ -1,0 +1,15 @@
+2026-08-06T17:13:48.845794Z | LINK | writer address 172.19.176.1:45116 read back from WSL default route (ip route show default)
+2026-08-06T17:13:48.966789Z | LINK | up: connected to the stand-in writer at 172.19.176.1:45116 (attempt 1, connection 1). NO READING IS REPLAYED ONTO A NEW CONNECTION: the first SPD line a fresh link carries is the first reading that arrives after it, so a reconnect can never resurrect a value measured before the gap
+2026-08-06T17:13:48.969922Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-06T17:13:48.972603Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-06T17:13:48.975147Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-06T17:13:49.316734Z | SILENT | a: sending again after 0.400 s of silence (8 ticks)
+2026-08-06T17:13:49.323921Z | SILENT | b: sending again after 0.400 s of silence (8 ticks)
+2026-08-06T17:13:49.327448Z | SILENT | mot: sending again after 0.400 s of silence (8 ticks)
+2026-08-06T17:13:49.330652Z | MOTION | MOT 1 1 (present=True, observation valid=True)
+2026-08-06T17:14:12.033731Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-06T17:14:12.044026Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-06T17:14:12.183807Z | MOTION | MOT 1 0 (present=True, observation valid=False)
+2026-08-06T17:14:20.833816Z | LINK | down (peer closed the connection (EOF) - either the listener refused this as a second speed-source client, or the writer stopped. This end cannot tell those apart; the writer session log can). Both freshness sequences stop advancing at the writer within one of its cycles, and the F-program reads both channels as missing - a demand, not a zero
+2026-08-06T17:14:22.883825Z | LINK | connect attempt 2 to 172.19.176.1:45116 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-06T17:14:23.428886Z | EXIT | link attempts 3, connections 1, drops 1; sent SPD A 453, SPD B 453, MOT 630, PING 30; refused non-finite 0, out-of-range 0; silent ticks A 237, B 237, MOT 8; discarded stale A 0, B 0, MOT 0

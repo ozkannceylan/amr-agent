@@ -1,0 +1,3 @@
+2026-08-06T17:10:30.082902Z | START | injecting 40.0 on /forklift/drive_speed/channel_a (channel a)
+2026-08-06T17:10:38.083133Z | INJECT | switching to the POSITIVE CONTROL: 0.25 m/s, finite and in range, on the same topic
+2026-08-06T17:10:45.083518Z | EXIT | published 155 of the injected value and 141 positive-control values

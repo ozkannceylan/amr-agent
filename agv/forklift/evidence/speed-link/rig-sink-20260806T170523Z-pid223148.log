@@ -1,0 +1,3 @@
+2026-08-06T17:05:23.185105Z | START | local sink listening on 0.0.0.0:45016 - a MODEL of the writer half of SPEC 11.2, not the stand-in writer. It writes to no PLC.
+2026-08-06T17:05:25.591960Z | LINK | up: speed-source client connected from ('127.0.0.1', 48784)
+2026-08-06T17:05:48.206893Z | EXIT | received SPD 426, MOT 446, PING 22, malformed 0; refused 0 extra connections; final SeqA 213, SeqB 212, MotionPresent True
