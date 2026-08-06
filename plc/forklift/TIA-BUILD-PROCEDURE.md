@@ -76,17 +76,168 @@ Rewrite the three fields below whenever a step completes, and always before the
 session ends. Resuming then costs nothing: read this section, give the next
 step.
 
-    chunk:               NEXT IS CHUNK Q, step 192. Chunks 0 and A–O are done
-                         (session of 2026-08-05; step 49 = A, step 125 = A), and
-                         step 189 stands BLOCKED as written: no writer was
-                         improvised. Chunks Q–X are new (m5-49b): 192–360, the
-                         speed monitor, the SS1 sequencer and the warning-field
-                         ceiling. **Chunks Q–W type today** and need nothing
-                         that does not exist; chunk X is gated at step 338 on
-                         the interface agent's warning-node ruling, and step 335
-                         is BLOCKED on the writer's speed extension and the WSL
-                         client. Total is now 360 steps, not 191.
-    last completed step: 189
+    chunk:               ALL 360 STEPS ARE WALKED. Chunks 0 and A-O were done in
+                         the session of 2026-08-05; chunks Q-X in the session of
+                         2026-08-06. Both halves of the m5-49 delta are IN THE
+                         CPU: the F-side speed monitor and SS1 sequencer, and the
+                         standard side's warning-field ceiling. What remains is
+                         acceptance testing, not building.
+    three things stand open, none of them worked around:
+                         (1) step 189 and step 335 — the T7 rehearsal — on the
+                         writer's 45016 speed extension and the WSL client;
+                         (2) step 358's `0.20` reading, which is UNREACHABLE as
+                         the step is written (see its record row) and belongs to
+                         an acceptance run with the bridge UP;
+                         (3) §14.16's full verification, driving the node from
+                         the bridge side, which the bridge warning slot built in
+                         4a4eb99 now makes possible.
+    what the F-CPU now runs: F_Forklift_Safety is 49 networks — the seven S015
+                         validity networks, SL1-SL20's speed world at 8-27,
+                         `CauseGone` at 28 with its third conjunct, D1
+                         `SpeedMonitorDemand` at 40, the Q1-Q4 SS1 sequencer at
+                         42-45, and four memory copies closing at 46-49.
+                         Collective F-signature 50573CD9. It is deliberately
+                         INERT: with no speed source the monitor never meets its
+                         measurement, and everything it cannot verify reads in
+                         the stopping direction while a cell-scope run stays
+                         unblocked. It establishes NO safety integrity claim —
+                         the readings arrive as standard data over a standard
+                         writer.
+    session of 2026-08-06: chunk Q is DONE, steps 192-209. Base build re-read at
+                         step 193 and matches: safety mode activated, collective
+                         F-signature 2BC94038 offline = online, F-SW 2BC94037,
+                         F-HW 00000001. SafetyInputStandIn (DB14) now carries
+                         eleven members, Retain clear on all eleven, no `_1`
+                         suffix, and the block-level "Accessible from HMI/OPC UA"
+                         is still cleared. The per-member "Accessible from
+                         HMI/OPC UA" column reads CHECKED on all eleven rows and
+                         always has; step 179 passed in exactly that state, so
+                         the block-level box is the one that governs.
+    counting rule:       the four interface section counts are Input / Output /
+                         Static / CONSTANT, not Temp. FB2 has zero temps. So
+                         step 141's 4 / 4 / 19 / 3 and step 217's expected
+                         10 / 6 / 44 / 17 both end in the constant count.
+    chunks R and S:      DONE, steps 210-263. FB2's interface is 10 / 6 / 44 / 17
+                         with every new timer a multi-instance inside DB3 (no new
+                         instance DB appeared), and the timer type string TIA
+                         writes in the SAFETY block is `TON` — not the
+                         `TON_TIME` chunk E read back on the standard side, which
+                         is why step 221 exists. The `F_Forklift_Safety` call in
+                         FB1 now carries its expected inconsistency marker; it is
+                         left for step 303.
+    evidence, this session: saved by the session directly into
+                         plc/forklift-safety/evidence/ from the owner's
+                         screenshots, so the 2026-08-05 EVIDENCE GAP cannot
+                         recur — m5-49-standin-seven-members.png,
+                         m5-49-fb2-io.png, m5-49-fb2-constants.png, and step
+                         263's statics shot as TWO files,
+                         m5-49-fb2-statics-1.png and -2.png, because 44 rows do
+                         not fit one screen. The document asks for one file named
+                         m5-49-fb2-statics.png; that name is deliberately unused
+                         rather than applied to half the section.
+    chunk T:             DONE, steps 264-286. SL1-SL20 are networks 8-27 and
+                         `CauseGone` is 28, exactly as the position rule
+                         predicts; step 285's twenty written operands read back
+                         in the specified order. Evidence is eight files,
+                         m5-49-f-speed-networks-1..8.png, because twenty FBD
+                         networks do not fit one capture.
+    ONE DEFECT, caught at step 280: `ShaftDoubtTimer` landed as its OWN instance
+                         DB (`%DB15`), the trap step 226 names. Change call type
+                         to multi-instance then created a NEW static
+                         `F_IEC_Timer_Instance_1` rather than binding the
+                         existing one, so the repair was three moves: retype the
+                         call's instance name to `#ShaftDoubtTimer`, delete the
+                         `_1` static, delete DB15. Static count back to 44 and no
+                         stray instance DB in the tree. The other six new timers
+                         went in clean. **Type the instance name explicitly when
+                         the call-options dialog appears; do not accept its
+                         default.**
+    chunk T detail:      steps 264-276 done. FB2 is FBD, not LAD, which is why
+                         step 197's unterminated rung would not compile. The new
+                         networks sit between `ResetPressedValid` (7) and
+                         `CauseGone`, exactly as the position rule requires, and
+                         TIA has renumbered `CauseGone` downward as each one
+                         landed. Built so far, one network each: SL1 network 8,
+                         SL2 9, SL3 10, SL4 11, SL5 12, SL6 13, SL7 14, SL8 15,
+                         SL9 16, SL10 17, SL11 18, SL12 19. Every timer went in
+                         as a multi-instance with its `PT` explicit at the call
+                         site. Input order into the `&` and `>=1` boxes differs
+                         from the order §11.5's tables list, which is cosmetic in
+                         FBD and was not reworked.
+    chunk U:             DONE, steps 287-301. FB2 is 49 networks. `CauseGone`
+                         (28) and `SafetyResetRequired` (41) each carry their
+                         third input, D1 `SpeedMonitorDemand` is network 40
+                         between `ZoneStopDemand` and `SafetyResetRequired`, and
+                         the Q1-Q4 sequencer is 42-45. Step 300's seven core
+                         positions read back 28, 37, 38, 39, 40, 41, 46 exactly.
+                         The block closes on the four memory copies in order:
+                         `ResetMemory` 46, `HeartbeatMemory` 47,
+                         `SpeedSeqAMemory` 48, `SpeedSeqBMemory` 49. Evidence:
+                         m5-49-f-demand-and-ss1-1.png and -2.png.
+    chunks V and W:      DONE, steps 302-337. Step 302 was verified by
+                         measurement rather than by asking: no python process on
+                         the host, no writer shell, and NO TCP connection to
+                         4840 or to 192.168.53.1 at all. Compile 0/0 — but only
+                         at the second attempt: the first raised one warning,
+                         `F-block '#ShaftDoubtTimer' is not used`, the DB15 ghost
+                         of the step 280 defect still inside the compiler's block
+                         set although the project tree no longer showed it. A
+                         second compile cleared it. Downloaded WITH
+                         re-initialisation of DB3, circles solid green, no `_1`
+                         anywhere, watch table `Forklift F gate` grown from 30 to
+                         67 rows and monitoring with no error icon on any row.
+    ONE DOCUMENT GAP, found at step 333: step 325's nine live-cause rows omit
+                         `SpeedCauseGone`, which step 333 then asks to be read
+                         and which is one of the two defect signatures of the
+                         whole delta. Added as an extra row; it reads TRUE. Any
+                         future run of this procedure should add it at step 325.
+    step 329, the one that cost a step last time: `MotionPresent` read TRUE in
+                         force straight after the download, so the start values
+                         DID apply this time and step 330's STOP -> RUN was not
+                         needed. `SafetyInputStandIn` had gained seven members
+                         rather than being created, which is the case step 25
+                         lost on.
+    chunk X:             DONE, steps 338-360. The interface ruling exists (§13)
+                         and grants the requested shape unchanged, so the gate
+                         opened. New DB `ForkliftWarning` with one member,
+                         start `TRUE`, Retain clear; `WARNING_SPEED_CEILING`
+                         (Real `0.20`) and the temp `warningFieldOccupied` in
+                         FB3; the §14.16 SCL delta applied; `Forklift` now
+                         eleven subfolders with the leaf at RD/WR and no `_1`;
+                         compiled 0/0, downloaded, circles green; node check
+                         PASS at 46 browse names.
+    THE SCL PASTE WENT IN WRONG THE FIRST TIME, and the shape of the error is
+                         worth carrying: typed in by hand, the
+                         `#warningFieldOccupied` statement landed INSIDE
+                         `#atStandstill := #speedValid ... AND (ABS(...))`,
+                         splitting one statement in two. The repair was one
+                         paste of the whole body from
+                         plc/forklift/scl/FB_ForkliftTeleop.scl, which the
+                         session edited first so the committed file and the CPU
+                         agree — the chunk F precedent, second application.
+    A CONCURRENT SESSION WAS WRITING THE SAME CPU, and it is why the F-side
+                         watch table was found at SpeedSeqA 630 / SpeedSeqB 708,
+                         readings 250/250, `SpeedChainSeen` TRUE, `SpeedStaleNow`
+                         TRUE, `SpeedMonitorDemand` / `Ss1Demand` /
+                         `TorqueOffDemand` all TRUE — the whole stale-to-SS1
+                         chain, live. **It is not recorded as T7 evidence**: the
+                         stimulus was another session's agent traffic, nothing
+                         about its start, duration or death was controlled, and
+                         a run whose precondition was never confirmed is
+                         discarded rather than repaired (LESSONS 2026-08-06).
+                         Kept as `m5-49-f-stale-chain-uncontrolled.png` under a
+                         name that says so. The readings ARE consistent with the
+                         delta behaving exactly as §11 specifies.
+    A CHECK OF MINE WAS WRONG TWICE, and both are the same class: `netstat`
+                         against port 4840 proves no OPC UA client and says
+                         NOTHING about the writer, which holds a PLCSIM Advanced
+                         API session (the procedure says so at step 302 and the
+                         session read past it); and a process sweep whose pattern
+                         was `bridge|hmi` matched its OWN command line. Verify a
+                         quiet machine by process identity, exclude the checker
+                         from its own sweep, and remember TIA's own online
+                         connection is port 102, not 4840.
+    last completed step: 360
     STEP 189 IS NOW STALE, and this is the first thing the next session should
                          act on. Step 189 rests on "no writer implementation
                          exists". One does: commit 640e71e built the stand-in
@@ -262,17 +413,17 @@ LESSONS 2026-07-27).
 | F-side absence check `RESULT:` line (step 179) | `RESULT: PASS` — positive control read all four `Forklift/Safety/` mirrors first, then 328 browse names swept: `SafetyInputStandIn`, `StandInHeartbeat`, `InstF_Forklift_Safety`, `F_Forklift_Safety`, `Main_Safety_RTG1` all **absent**; `DataBlocksGlobal` **not published at all**; no `_1`. Log `m5-25b-f-absence-2026-08-05.log` | 2026-08-05 |
 | Three F timer `PT` values in force (step 186) | `StandInStaleTimer.PT` = `T#1S`, `ResetHoldMinTimer.PT` = `T#200MS`, `ResetHoldMaxTimer.PT` = `T#3S` — all three as specified | 2026-08-05 |
 | Invalid-boot signature of §5.4 observed (step 187) | **all ten readings as written**: `StandInValid` FALSE, `HeartbeatSeen` FALSE, `StandInStaleTimer.ET` at `T#1S` and not climbing, the three validated channels FALSE, `EStopDemand` / `ZoneStopDemand` / `SafetyResetRequired` TRUE, `SafetyResetFault` FALSE. Neither defect signature present | 2026-08-05 |
-| §11.4 F8 — Int `CMP >`, `CMP <`, `SUB` offered? negative literal accepted? (steps 195–198) | | |
-| FB2 interface counts after the §11 delta (steps 217, 219, 247, 261) | expected 10 / 6 / **44** / 17 in TIA's counting — 43 in §11.3's, the step 141 counting rule again | |
-| F-collective signature **after** the §11 delta (step 317) | must differ from `2BC94038` | |
-| S015 disclosure after the §11 delta — the tags it names (step 313) | expected ten `SafetyInputStandIn` members and nothing else; `MotionObservationValid` absent | |
-| `SafetyInputStandIn` cross-reference: 10 reads, 0 writes (step 319) | | |
-| F-side absence check `RESULT:` line, re-run (step 320) | | |
-| Ten timer `PT` values in force, each with its `IN` (step 332) | | |
-| No-source signature of §11.9 Q16 observed (step 333) | | |
-| Warning node ruling read from `opcua-nodes.md` — folder, leaf, rights (step 338) | | |
-| Node check re-run after the warning node: browse-name count and suffix sweep (step 354) | | |
-| Ceiling in force with the field occupied and the bridge down (step 358) | expected `0.20` | |
+| §11.4 F8 — Int `CMP >`, `CMP <`, `SUB` offered? negative literal accepted? (steps 195–198) | **All offered.** `CMP >` ("Greater than") and `CMP <` ("Less than") under Comparator operations; `SUB` ("Subtract") under Math functions. The literal `-31` was accepted at the pin with no warning **and survived compilation**. Step 197 as written does not compile in LAD — an unterminated rung raises `Network 23: A coil/assignment is required`, which is the LAD rule and not F8 failing; the probe was compiled with a temporary `probe8` Bool temp driven by the box, and network and temp were both deleted at step 199 | 2026-08-06 |
+| FB2 interface counts after the §11 delta (steps 217, 219, 247, 261) | read back **10 / 6 / 44 / 17**, exactly as expected. Statics occupy rows 22–65 and TIA added no helper instance of its own for the seven new `TON`s; constants occupy rows 70–86. `MotionObservationValid` is absent from Input by design | 2026-08-06 |
+| F-collective signature **after** the §11 delta (step 317) | `50573CD9`, offline = online, different from `2BC94038` as required. F-SW `50573CD8`; F-HW unchanged at `00000001`. Downloaded WITH re-initialisation of DB3, diff circles solid green | 2026-08-06 |
+| S015 disclosure after the §11 delta — the tags it names (step 313) | exactly **ten**, all `SafetyInputStandIn` members, all at `Main_Safety_RTG1 [FB1]` network 1, RTG1, and nothing else. `MotionObservationValid` **absent**, as designed. Summary saved as `plc/forklift-safety/evidence/m5-49-safety-summary.pdf` | 2026-08-06 |
+| `SafetyInputStandIn` cross-reference: 10 reads, 0 writes (step 319) | exactly ten accesses, one per member, **all `Read`**, all at `Main_Safety_RTG1` %FB1 NW1. No write access from any block on the CPU. `MotionObservationValid` does not appear at all, having no reference | 2026-08-06 |
+| F-side absence check `RESULT:` line, re-run (step 320) | `RESULT: PASS` — positive control read all four `Forklift/Safety/` mirrors (`True`, `True`, `True`, `False` — demands standing, correct with no writer), then 328 browse names swept: `SafetyInputStandIn`, `StandInHeartbeat`, `InstF_Forklift_Safety`, `F_Forklift_Safety`, `Main_Safety_RTG1` all absent; `DataBlocksGlobal` not published at all; no `_<n>` suffix. Log `m5-49-f-absence-2026-08-06.log`. Script unedited | 2026-08-06 |
+| Ten timer `PT` values in force, each with its `IN` (step 332) | **all ten as specified**, read through `read_timers.ps1` against `InstF_Forklift_Safety`: `SpeedAStaleTimer` `T#500MS` (`IN` TRUE), `SpeedBStaleTimer` `T#500MS` (TRUE), `SpeedDiscrepancyTimer` `T#200MS` (FALSE), `SpeedOverLimitTimer` `T#200MS` (FALSE), `ShaftDoubtTimer` `T#1000MS` (FALSE), `SpeedLimitOnsetTimer` `T#1500MS` (TRUE), `Ss1Timer` `T#1000MS` (TRUE), `StandInStaleTimer` `T#1000MS` (TRUE), `ResetHoldMinTimer` `T#200MS` (FALSE), `ResetHoldMaxTimer` `T#3000MS` (FALSE). The only `T#0MS` is TIA's own `F_IEC_Timer_Instance` with `IN` FALSE — never run, the instrument and not a value. Log `m5-49-f-timers-2026-08-06.log` | 2026-08-06 |
+| No-source signature of §11.9 Q16 observed (step 333) | **all thirteen readings as written.** `SpeedChainSeen` FALSE, both valids FALSE, `SpeedStaleNow` FALSE, `SpeedDiscrepantNow` FALSE, `ShaftDoubtNow` FALSE, `SpeedOverLimitNow` FALSE, `SpeedCauseGone` **TRUE**, `SpeedMonitorDemand` FALSE, `WarningFieldClearValid` FALSE, `SpeedLimitOnsetTimer.ET` at `PT` and not climbing, `Ss1Demand` TRUE tracking the zone latch, `TorqueOffDemand` TRUE. **Neither defect signature present.** Note the arming term working in the open: both stale timers have expired (`ET` at `PT`, `Q` TRUE) while `SpeedStaleNow` stays FALSE, because `SpeedChainSeen` was never armed. Evidence `m5-49-f-no-source-signature.png` | 2026-08-06 |
+| Warning node ruling read from `opcua-nodes.md` — folder, leaf, rights (step 338) | **The ruling exists** (§13, "the node exists, exactly as §14.16 requests it") and grants the requested shape unchanged: DB `ForkliftWarning`, folder `Forklift/Warning/`, leaf `ForkliftWarningFieldOccupied`, Bool, start `TRUE`, *Accessible* ✔, *Writable* ✔ (the bridge writes it). Read back in the tool: leaf name exact with no `_1`, access level **RD/WR**, `Forklift` now eleven subfolders | 2026-08-06 |
+| Node check re-run after the warning node: browse-name count and suffix sweep (step 354) | `RESULT: PASS`. **46** browse names under `DemoCell`, none ending `_<n>`; step 45 read 44, and the folder plus the leaf are exactly +2. Eleven subfolders with `Warning` among them. All nine §12 nodes read back with the live value matching the §14.2 start value **compared by eye** — both `ProcessStop` nodes `True` this time, unlike the 2026-08-05 run the checker passed while they read `False`. Envelope write still `BadNotWritable`. Log `m5-49-node-verify-2026-08-06.log`. Note §13 counts 47 nodes in §9.8's set-scoped sense while the sweep counts 46 browse names in the tree — two counting rules, one build | 2026-08-06 |
+| Ceiling in force with the field occupied and the bridge down (step 358) | **`0.20` is UNREACHABLE as step 358 is written, and this is a defect in the step rather than in the build.** With `#bridgeLinkOk` FALSE the envelope cannot be permitted by two independent routes — `#vehicleAlive` names it directly and `#worldOk` C1 names it again — so the mandatory `ELSE` assigns `0.0` and the warning term, correct though it is, sits inside a branch that cannot be entered. Read back on a verified-quiet machine: node **`TRUE`**, `ForkliftSpeedCeiling` **`0.0`**, `ForkliftMotionEnable` **`False`**. What that does prove is the mandatory `ELSE` — the ceiling is driven to zero rather than holding its last value, which is the LESSONS 2026-07-27 defect measured absent. The `0.20` observation needs the bridge **UP** with the node `TRUE` in the permitted branch, and belongs to an acceptance run. Evidence `m5-49-warning-ceiling-else-branch.png`; the name `m5-49-warning-ceiling.png` is deliberately unused rather than attached to a reading it does not show | 2026-08-06 |
 
 ---
 

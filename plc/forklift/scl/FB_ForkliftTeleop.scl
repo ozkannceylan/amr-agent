@@ -166,6 +166,12 @@ END_IF;
 #StandstillTimer(IN := #atStandstill,
                  PT := #STANDSTILL_TIME);
 
+// The warning field's verdict, stale-safe: a dark transport cannot report a
+// clear field (LESSONS 2026-08-04). The bridge's own rule (silence => TRUE)
+// covers topic death; this term covers transport death. TRUE = occupied.
+#warningFieldOccupied := "ForkliftWarning".ForkliftWarningFieldOccupied
+                         OR NOT #bridgeLinkOk;
+
 // ---- 3. Obstacle latch (PROCESS stop; not SF-03, not any SRS function) ----
 // Level, no delay, no debounce on the field bit. The bridgeLinkOk conjunct is
 // what keeps this out of the boot window: the node's START VALUE IS TRUE, so
@@ -404,9 +410,20 @@ END_IF;
 // clamp applies in BOTH modes. The ELSE is mandatory and unconditional: without
 // it the Real keeps its last value and the bridge keeps republishing a
 // permission this program has withdrawn (LESSONS 2026-07-27).
+// The §14.16 delta adds a THIRD bound inside this same single assignment. MIN
+// of bounds, never a multiplication, no demand term -- the ceiling stays a
+// bound and gains no second writer and no branch. Every path still assigns the
+// node exactly once per call and the outer ELSE to 0.0 is untouched.
 IF #autonomousMotionPermitted THEN
-    "ForkliftEnvelope".ForkliftSpeedCeiling :=
-        MIN(IN1 := #AUTONOMOUS_SPEED_CEILING, IN2 := #speedCap);
+    IF #warningFieldOccupied THEN
+        "ForkliftEnvelope".ForkliftSpeedCeiling :=
+            MIN(IN1 := MIN(IN1 := #AUTONOMOUS_SPEED_CEILING,
+                           IN2 := #speedCap),
+                IN2 := #WARNING_SPEED_CEILING);
+    ELSE
+        "ForkliftEnvelope".ForkliftSpeedCeiling :=
+            MIN(IN1 := #AUTONOMOUS_SPEED_CEILING, IN2 := #speedCap);
+    END_IF;
 ELSE
     "ForkliftEnvelope".ForkliftSpeedCeiling := 0.0;
 END_IF;

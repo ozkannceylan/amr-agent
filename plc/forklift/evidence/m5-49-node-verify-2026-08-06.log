@@ -1,0 +1,40 @@
+﻿python : Requested session timeout to be 3600000ms, got 30000ms instead
+At line:1 char:483
++ ... G" } else { python plc\forklift\evidence\m5-25-node-verify.py opc.tcp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Requested sessi...30000ms instead:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+# m5-25 node verification
+# endpoint: opc.tcp://192.168.53.1:4840
+
+[1] namespace array as the server reports it:
+     ns=0  http://opcfoundation.org/UA/
+     ns=1  urn:SIMATIC.S7-1500.OPC-UA.Application:1513F-1 PN
+     ns=2  http://opcfoundation.org/UA/DI/
+     ns=3  http://www.siemens.com/simatic-s7-opcua
+     ns=4  http://DemoCell
+  read back: the server interface namespace URI is 'http://DemoCell'
+
+[2] collision-suffix sweep over 46 browse names under DemoCell:
+     none - no browse name under the interface ends in _<n>
+
+[3] subfolders under Forklift (11): Envelope, Hmi, Input, Link, Mode, Output, ProcessStop, Safety, Status, Vehicle, Warning
+
+[4] the nine §12 nodes:
+     browse path                                    type       value        start value (§14.2)
+     Forklift/Mode/HmiDriveModeRequest              UInt16     0            0
+     Forklift/Mode/ForkliftDriveModeActive          UInt16     0            0
+     Forklift/Envelope/ForkliftMotionEnable         Boolean    False        False
+     Forklift/Envelope/ForkliftSpeedCeiling         Float      0.0          0.0
+     Forklift/Envelope/ForkliftEquipmentPermit      Boolean    False        False
+     Forklift/Vehicle/ForkliftVehicleModeApplied    UInt16     0            0
+     Forklift/Vehicle/ForkliftVehicleHeartbeat      UInt16     0            0
+     Forklift/ProcessStop/HmiProcessStopRequest     Boolean    True         True
+     Forklift/ProcessStop/ForkliftProcessStopActive Boolean    True         True
+
+[5] write probe on Forklift/Envelope/ForkliftMotionEnable (writes back the value it already holds):
+     REFUSED: The access level does not allow writing to the Node.(BadNotWritable)
+     record this status code and today's date - it is what proves 'a permission is not a command' is enforced by the server (opcua-nodes.md §12.11 step 6)
+
+RESULT: PASS - every check above passed
