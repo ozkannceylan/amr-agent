@@ -137,8 +137,12 @@ node the bridge itself owns and compares it with what this session last wrote.
 ### 2.1 The configured signal set — normative
 
 The bridge carries **signal groups**. A group is a named set of slots that travel
-together because they belong to one plant and one node-model section: today the
-**cell** group (`opcua-nodes.md` §9) and the **forklift** group (§10). The config
+together because they belong to one plant and one node-model section: the
+**cell** group (`opcua-nodes.md` §9), the **forklift** group (§10), and — **ruled here,
+confirming the m5-44 third-group reading** — the **envelope** group (§12 plus the §13
+warning slot, §4.11). A third group rather than an enlarged forklift group, so every
+committed "forklift group = 4/3/5, 13 nodes" figure stays true and the M4 configuration
+remains expressible without the M5 nodes. The config
 declares which groups a run carries; the union of their slots is the run's **configured
 signal set**, and it is the only set any rule in this document counts.
 
@@ -150,20 +154,32 @@ signal set**, and it is the only set any rule in this document counts.
 | G4 | Adding a group adds **slots, not kinds**. It brings no new value type (Real/Bool/UInt16 only, `opcua-nodes.md` §10.3), no new dependency (§11), and no exception to §1.1 |
 | G5 | The bridge writes **one** heartbeat for the whole process, not one per group (`opcua-nodes.md` §10.1, §10.11). One session, one counter, one link verdict `BridgeLinkOk`, consumed by both PLC function blocks |
 
-The three configurations this design admits, with the counts every other section refers
+The configurations this design admits, with the counts every other section refers
 back to:
 
 | Configuration | Input slots (bridge writes) | Output slots (bridge reads and republishes) | Diagnostics (read, logged only) | Nodes touched |
 |---|---|---|---|---|
 | Cell only | 7 | 1 | 6 | 15 |
 | Forklift only | 4 | 3 | 5 | **13** |
-| Both | **11** | **4** | **11** | **27** |
+| Cell + forklift | **11** | **4** | **11** | **27** |
+| Forklift + envelope | **6** | **7** | **6** | **20** |
+
+The forklift + envelope counts are the **observed** counts of the committed configuration
+against the live CPU (m5-44, 2026-08-06: 20 nodes resolved, 7 allowlist keys, every
+DataType matched) and **exclude the warning slot**, which is ruled in §4.11 but not yet
+built — when it lands, the input-slot count and the allowlist each gain one, and the bridge
+agent records the new observed counts rather than deriving them here. **The cell group
+cannot be carried against the `safe_amr` CPU at all**: its interface publishes `Forklift/`
+and `Link/BridgeHeartbeat` and nothing else, each cell node answering `BadNoMatch` by
+direct address (m5-44's finding), so cell-carrying configurations describe the M3 project's
+server, not the M5 one.
 
 "Nodes touched" counts the input slots, the output slots, the diagnostics and — for any
 configuration that runs at all — the single `DemoCell/Link/BridgeHeartbeat`. That heartbeat
 is a **§9 node used by every configuration**, which is why a forklift-only run touches 13
 nodes and not 12: twelve of §10's eighteen, plus the one shared counter. With both groups
-configured the interface carries 33 nodes (15 in §9, 18 in §10) and the bridge touches 27
+configured the bridge touches 27 of the interface's nodes (the 15 of §9 and 18 of §10 — the
+interface itself has since grown to 47, `opcua-nodes.md` §13.3)
 of them: the six it never touches are the five `Forklift/Hmi/` requests and
 `Forklift/Link/HmiHeartbeat`, which belong to the other client (§4.10).
 
@@ -287,18 +303,20 @@ request in one run and above it in the other (§12 item 9).
 
 ## 4. Signal map
 
-Two groups (§2.1), derived directly from `opcua-nodes.md` §9.9 and §10.10. With both
-configured: **eleven** nodes the bridge writes, **four** it reads and applies, one
-heartbeat it writes and reads back, **eleven** read-only diagnostics — and **six** nodes on
-the same interface it never touches (§4.10).
+Three groups (§2.1), derived directly from `opcua-nodes.md` §9.9, §10.10, §12.10 and §13.3.
+With cell + forklift configured: **eleven** nodes the bridge writes, **four** it reads and
+applies, one heartbeat it writes and reads back, **eleven** read-only diagnostics — and
+**six** nodes on the same interface it never touches (§4.10, which the envelope group
+extends to eight).
 
 | Rows | Group | Direction | Where |
 |---|---|---|---|
 | 1–7 | cell | cell → PLC | §4.1 |
 | 8 | cell | PLC → cell | §4.2 |
-| 9 | both | the bridge's own node | §4.3 |
+| 9 | every configured group | the bridge's own node | §4.3 |
 | 10–13 | forklift | plant → PLC | §4.7 |
 | 14–16 | forklift | PLC → plant | §4.8 |
+| 17–23 | envelope | both directions | §4.11 |
 
 The forklift rows **continue** the numbering rather than restarting it, so an existing
 reference to "signal map row 5" keeps meaning what it meant. Addressing (§4.5) and QoS
@@ -359,7 +377,8 @@ node and there is no second heartbeat (`opcua-nodes.md` §10.11).
 
 ### 4.6 ROS 2 QoS
 
-Both groups, one table. Every row is a *subscription* profile except where marked.
+Cell and forklift groups, one table; the envelope group's rows are with its signal map
+(§4.11), same reasoning per class. Every row is a *subscription* profile except where marked.
 
 | Topic class | Subscription QoS | Why |
 |---|---|---|
@@ -455,6 +474,71 @@ aspirational:
 5. The negative test is only meaningful against a server that **would** accept the write,
    which is why the test double serves the `Hmi/` group writable (§10). A refusal proven
    against a server that refuses everything proves nothing about the bridge.
+
+**The envelope group extends this rule without changing it** (`opcua-nodes.md` §12.10):
+`Forklift/Mode/HmiDriveModeRequest` and `Forklift/ProcessStop/HmiProcessStopRequest` are
+HMI-written request nodes and the bridge never reads or writes them, in any configuration,
+in either direction — the never-touched set on this interface is eight nodes when the
+envelope group is configured.
+
+### 4.11 The envelope group — §12's nine nodes and the §13 warning slot
+
+Added 2026-08-06 (m5-54), closing `opcua-nodes.md` §12.13 item 1 and confirming the
+**third-group** reading the m5-44 build took as its proposal. The group carries the M5
+autonomy seam: the mode and envelope down to the vehicle, the vehicle's report back up, and
+the warning-field verdict in. Nothing in §1.1 changes: **the envelope is formed in the PLC
+and carried by the bridge, never computed in it** (ADR 0012's relationship table, ADR 0005).
+
+**PLC → vehicle (bridge reads and republishes):**
+
+| # | OPC UA node (`DemoCell/Forklift/…`) | S7 / OPC UA type | → ROS 2 topic | Msg type | Field | Conversion | Cadence |
+|---|---|---|---|---|---|---|---|
+| 17 | `Mode/ForkliftDriveModeActive` | UInt / `UInt16` | `/forklift/mode/in_force` | `std_msgs/UInt16` | `data` | none — the §12.3 encoding unchanged, **no clamp on an out-of-range value** (the consumer takes the fault, §12.3) | polled 20 Hz; published every cycle in which a value was read |
+| 18 | `Envelope/ForkliftMotionEnable` | Bool / `Boolean` | `/forklift/envelope/motion_enable` | `std_msgs/Bool` | `data` | none | as above |
+| 19 | `Envelope/ForkliftSpeedCeiling` | Real / `Float` | `/forklift/envelope/speed_ceiling` | `std_msgs/Float64` | `data` | `Float → float64` widening, m/s unchanged. **No clamp, no substitution**: an out-of-window value reaches the vehicle, whose gate treats it as non-permissive (§12.4 E2) | as above |
+| 20 | `Envelope/ForkliftEquipmentPermit` | Bool / `Boolean` | `/forklift/envelope/equipment_permit` | `std_msgs/Bool` | `data` | none | as above |
+
+**Vehicle → PLC (bridge writes into the PLC image):**
+
+| # | ROS 2 topic | Msg type | Field | → OPC UA node (`DemoCell/Forklift/…`) | S7 / OPC UA type | Conversion | Cadence |
+|---|---|---|---|---|---|---|---|
+| 21 | `/forklift/mode/applied` | `std_msgs/UInt16` | `data` | `Vehicle/ForkliftVehicleModeApplied` | UInt / `UInt16` | none | on-change + refresh on every (re)connect **and after a detected server restart** (§8.1) |
+| 22 | `/forklift/vehicle/heartbeat` | `std_msgs/UInt16` | `data` | `Vehicle/ForkliftVehicleHeartbeat` | UInt / `UInt16` | none — the counter is **carried, never generated**: the bridge's own liveness stays row 9, and a bridge that synthesised this counter would be forging the vehicle layer's pulse | cyclic 20 Hz, latest value |
+| 23 | `/forklift/warning_field/occupied` | `std_msgs/Bool` | `data` | `Warning/ForkliftWarningFieldOccupied` | Bool / `Boolean` | none — `TRUE` = occupied on both sides, **no inversion** | on-change, **plus the silence rule below**, + refresh on (re)connect and after a detected server restart |
+
+**Row 23's silence rule (`opcua-nodes.md` §13.2 W1) — the slot's defining behaviour.** The
+producer publishes at its 20 Hz tick so that its absence is visible, and no layer may
+republish a last *clear* as if silence were continuity (LESSONS 2026-08-04). If no message
+arrives on the topic within the slot's own freshness window — a named constant of the
+bridge, bounded below by the producer's 50 ms tick, never shared with any other window —
+the bridge **writes `TRUE` (occupied) to the node and logs the transition**. This is a
+freshness window over the bridge's own input channel, the timer class §7.2 admits; the
+verdict itself is never computed here. **Row 23 is ruled but not yet built**: the committed
+configuration's observed counts exclude it (§2.1), and the implementation is the bridge
+agent's own brief.
+
+**Diagnostics (read at 1 Hz, logged only, applied to nothing — §4.4's rule):**
+`ProcessStop/ForkliftProcessStopActive`. The other §12 verdict-readers of the bridge are
+rows 17–20 themselves, which it both logs and republishes.
+
+**QoS (extends §4.6, same reasoning per class):** rows 17–20 publish and row 23 subscribes
+`KEEP_LAST` depth 1, `RELIABLE`, `VOLATILE` (Bool levels and the mode are the
+panel-contact argument; the ceiling matches the command-publisher profile); rows 21–22
+subscribe `KEEP_LAST` depth 1, reliability matched to the publisher. Compatibility is
+checked at startup per configured group, never assumed.
+
+**The writable set gains three keys** when this group is configured: the two
+`Forklift/Vehicle/` nodes and (when row 23 lands) the `Warning/` node — the allowlist stays
+derived from the configured groups (§4.10), never hand-maintained. **Rows 17, 21 and 22 are
+the first topic-carried `UInt16`** in the bridge: §2.1 G4 already admits the value type and
+`std_msgs/UInt16` needs no new dependency; what changed is that the bridge now carries a
+`UInt16` it did not generate (m5-44 built exactly this).
+
+**One interaction, recorded from m5-44 open question 3:** row 21 is written on change, so
+after a server restart it is repaired only by §8.1's full rewrite — designed, and observed
+working — while the PLC times the mode readback's staleness with its own
+`ModeDisagreeTimer`. The two mechanisms are independent and neither substitutes for the
+other.
 
 ---
 
@@ -612,8 +696,12 @@ and heartbeat in different scans.
 This document specifies **only what the PLC can observe**. The staleness threshold, the
 value of `BridgeLinkOk`, and what the conveyor does when the heartbeat stops are specified
 in `plc/demo-cell/SPEC.md` and implemented in the standard program (§9.7 of the node model).
-No timer, threshold or reaction exists in the bridge. Loss of the bridge is a **degraded
-mode, not a safety event** (invariant 2), and no safety function is involved (invariant 1).
+**No process timer, threshold or reaction exists in the bridge** — the scope the node model's
+§10.1 rules: the bridge's timers may watch its own cycle and its own input channels (its
+20 Hz cadence, a per-slot topic-freshness window such as the warning slot's in §4.11), never
+a plant signal, a debounce, a fault delay or a verdict the PLC also computes. Loss of the
+bridge is a **degraded mode, not a safety event** (invariant 2), and no safety function is
+involved (invariant 1).
 
 ### 7.3 What the PLC observes in each failure mode
 
@@ -816,7 +904,7 @@ the first; the second is owner-executed (PLAN.md).
 
 | Item | Statement |
 |---|---|
-| What it is | A minimal OPC UA **server** that stands in for the S7-1500 on PLCSIM Advanced, exposing the `DemoCell/` address space of `opcua-nodes.md` §9 **and the `Forklift/` subtree of §10** — same BrowseNames, same folder paths, same data types, same access levels. All 33 nodes, **including the six the bridge never touches** (§4.10): a node absent from the double cannot be proven untouched |
+| What it is | A minimal OPC UA **server** that stands in for the S7-1500 on PLCSIM Advanced, exposing the `DemoCell/` address space of `opcua-nodes.md` §9 **and the `Forklift/` subtree of §10** — same BrowseNames, same folder paths, same data types, same access levels. All 33 nodes of those two sections, **including the six the bridge never touches** (§4.10): a node absent from the double cannot be proven untouched. This double predates the envelope group and does not yet serve §12 or §13; extending it is open work of the bridge agent's own brief (§12 open items), and m5-44's envelope observations were taken against the live CPU rather than against it |
 | The HMI group: served, writable, and never written by the bridge | The five `Forklift/Hmi/` requests and `Forklift/Link/HmiHeartbeat` are served with the *Writable* standing §10.3 gives them, so a bridge write to one **would succeed**. That is the point: the conformance check proves the bridge's own allowlist refuses them, not that the server refused. Conversely `Forklift/Output/*` is served **not writable**, so the server-side half of the two-independent-enforcements arrangement is exercised too. A double that refused everything would make both checks vacuous |
 | Restart fidelity | The double can be **restarted, and can revert its input values to their start values without dropping the session** — the shape of §7.3 case E. This is what makes §8.1's restart detection and repair testable at all: no other failure produces a healthy session over a reverted input image. Like the timeout revision below, the *shape* is imitated; the CPU's actual restart behaviour is still not reproduced |
 | Shape it must reproduce | The **commissioned two-namespace path of §3.1**: a `ServerInterfaces` folder in namespace `http://www.siemens.com/simatic-s7-opcua` under `Objects`, with the `DemoCell` interface node and everything beneath it in `http://DemoCell` (the URI TIA derives from the interface name, ADR 0006). The double matches both URIs so the bridge's browse-by-URI resolves identically against it and against PLCSIM. It deliberately registers the two namespaces so their **indices differ from PLCSIM's**: a bridge that hardcoded either index must fail against the double |
@@ -880,8 +968,10 @@ to the repository (invariant 13).
 | 8 | m3-01 open question 6 (stale "Navigation scenario (M3)" heading in `sim/README.md`) | **Corrected, re-opened, and closed.** `sim/` first made the heading "Navigation scenario (M5, deferred)"; **ADR 0008 D1** then shifted every gate above M3 by one, which made that M5 name the wrong gate. **ADR 0010 supersedes that shift** (accepted 2026-07-30): vehicle and navigation work is **M5**, on the in-house forklift, and RB-KAIROS is retired as the platform (D1, D2, D7) — so the number was right and the platform was not. `sim/` corrected the heading under m5r-07; see item 15 for the text now in force. **Closed** |
 | 9 | Conformance of the running bridge and test double to §3.1 and §3.2 | **Closed by m3-21**, recorded in `bridge/EVIDENCE_CONNECT.md`. The client carries both URIs in config, resolves both indices by URI at every session establishment with each path element qualified by its own namespace, and reads the granted session timeout back to derive the keep-alive from it (N1–N6, S1–S6). The double serves the `ServerInterfaces` → `DemoCell` shape on indices deliberately unlike PLCSIM's and revises the request in both directions, so the rules are falsifiable rather than merely satisfied. The pre-commissioning shape — one namespace, `DemoCell` resolved directly under `Objects`, the configured session timeout used as if granted — is gone from the tree and is rejected by the config loader if a stale checkout reintroduces it. What remains is the owner's repetition of the same checks against PLCSIM: item 9 of `EVIDENCE_LATENCY.md` Section B, with the checklist at the end of `bridge/EVIDENCE_CONNECT.md` |
 | 10 | The `Forklift/` browse path, its folder tree, its per-tag access rights and its node count | **Design values until read back out of TIA Portal** (`opcua-nodes.md` §10.2 step 6, §10.12 item 1). §3.1's tree marks the line as such. No gate criterion may rest on them before the owner's read-back with a client that is not the bridge, recorded with its date — the ADR 0006 discipline, and the LESSONS 2026-07-27 rule that a spec value authored without the tool that realises it is a design value, not a fact. **Open, owner, at commissioning** |
-| 11 | Implementing the configured-signal-set model in `bridge/` | **Closed by m4f-06, 2026-07-29, commit `71d3b76`.** All four now hold in the shipped code: the write allowlist is **derived** from the configured groups (§4.10) and a config naming an `Hmi` node in any position is rejected outright; R3's count comes from the configured set rather than the seven cell inputs (§6.1); the reconnect refresh and the restart repair take the same count (§8.1); and the log lines are worded per configured set instead of naming `DemoCell/Input` (§9.3). Recorded in `bridge/EVIDENCE_CONNECT.md` § m4f-06 against the double, with the figures as printed: `check_forklift_slots.py` **46 checks, 46 passed**; `check_write_allowlist.py` **39 checks, 39 passed**; the restart rewrite read `11 of 11` out of the bridge's log and `11/11` out of its evidence file; a forklift-only run reaches its heartbeat on **four** inputs and touches **13** nodes. The design was the contract and the code followed it. **The commissioned `bridge.yaml` stays cell-only by choice**, because a PLCSIM run would otherwise browse for a subtree that is a design value until item 10's read-back; adding the group there is a one-file edit afterwards |
+| 11 | Implementing the configured-signal-set model in `bridge/` | **Closed by m4f-06, 2026-07-29, commit `71d3b76`.** All four now hold in the shipped code: the write allowlist is **derived** from the configured groups (§4.10) and a config naming an `Hmi` node in any position is rejected outright; R3's count comes from the configured set rather than the seven cell inputs (§6.1); the reconnect refresh and the restart repair take the same count (§8.1); and the log lines are worded per configured set instead of naming `DemoCell/Input` (§9.3). Recorded in `bridge/EVIDENCE_CONNECT.md` § m4f-06 against the double, with the figures as printed: `check_forklift_slots.py` **46 checks, 46 passed**; `check_write_allowlist.py` **39 checks, 39 passed**; the restart rewrite read `11 of 11` out of the bridge's log and `11/11` out of its evidence file; a forklift-only run reaches its heartbeat on **four** inputs and touches **13** nodes. The design was the contract and the code followed it. ~~**The commissioned `bridge.yaml` stays cell-only by choice**~~ — superseded 2026-08-06 (m5-44): `bridge.yaml` now carries the forklift and envelope groups and the **cell group cannot be carried against the `safe_amr` CPU at all** (§2.1) |
 | 12 | §7.3 case D on the forklift plant — plant stopped, bridge alive, input image looks live, and **no `ForkliftDriveFault` node exists** to carry the verdict | **Open, owner decision then the PLC forklift FB specification.** Mirrors `opcua-nodes.md` §10.12 item 3 exactly and is not restated as a second request. Nothing here is the bridge's to fix: detecting a frozen plant needs a timer and a threshold, which §1.1 places in the PLC. The M3 cell closed the same item with `ConveyorDriveFault` (item 4); the forklift has no equivalent node yet |
 | 13 | `bridge/EVIDENCE_LATENCY.md`'s standing request: "§8.1's *Detection* row … the design document does not carry it. It needs a row, and the bridge's own log cites §8.1 for a rule that is not yet there" | **Resolved here**: §8.1 gains *Restart detection*, *Restart repair* and *Restart residual*, §7.3 gains case E, §2's cycle description gains step 0, §4.3 gains row 9r, and §9.2 gains RB. The log line's citation now resolves to a rule that exists. The requesting file is in `bridge/` and cannot be edited from here — and **`bridge/` marked its own request `SATISFIED, 2026-07-29`** in `EVIDENCE_LATENCY.md` Section B item 1 (m4f-06, `71d3b76`), confirming that the bridge's "§8.1" log citation now resolves and that the exact-inequality test the design words is what the code does. **Both halves closed.** The same note requested **one correction back** — that §8.1's *Restart residual* row understated the residual — which is made in §8.1 above and is the reason this item closes with a corrected row rather than the row it was resolved with |
 | 14 | Statements elsewhere that were true of a one-group interface and are now scope-stale | **Bridge half confirmed, 2026-07-29** (`bridge/EVIDENCE_LIFECYCLE.md` §1.2, m4f-06): with the forklift group configured, the bridge's write set is the `Input/` nodes of the configured groups **plus its own heartbeat**, so `BridgeHeartbeat` remains the only node outside an `Input/` folder that the bridge writes — the sentence stands rather than merely staying defensible. It also remains a valid *witness*, because the second client's counter is `Forklift/Link/HmiHeartbeat`, a node the bridge never touches, and the two writable sets are disjoint by BrowseName prefix (`opcua-nodes.md` §10.1). What that confirmation did **not** establish is how wide the witness's blind spot is — measured since, and now carried by §8.1's *Restart residual* row. **The `plc/` half stays open**: `plc/demo-cell/SPEC.md` §4.3's "Nothing else goes into the interface" was true of the M3 cell and is no longer true of the interface. `plc/`'s to correct; requested, not edited here |
 | 15 | `sim/README.md`'s navigation-scenario heading | **Closed by m5r-07, 2026-07-30; heading re-cut by m5-09, 2026-07-31.** m5r-07 made the heading name the retired platform and the gate; m5-09 purged the platform's residue under ADR 0010 D1, and the heading now reads `## The parked warehouse navigation scenario`, with the gate and the retirement stated in the section body. This item was raised against the ADR 0008 D1 shift, which made "M5, deferred" name the wrong gate; **ADR 0010 supersedes that shift** and puts vehicle and navigation work back at **M5**, on the forklift, with RB-KAIROS retired — so what was stale was the platform, not the number. Raised from item 8, which this document owns the history of but not the file |
+| 16 | **The warning slot, §4.11 row 23** — the silence-⇒-`TRUE` window as a named constant, the explicit `TRUE` write on expiry, the transition log line, and the new observed configuration counts | **Open, bridge agent's own brief** (`opcua-nodes.md` §13 item 1; `plc/forklift/SPEC.md` §14.16's request, ruled 2026-08-06). `plc/forklift/TIA-BUILD-PROCEDURE.md` step 358's second half waits on it; the stale direction is observable without it |
+| 17 | **The test double does not serve the envelope group** (§10): §12's nine nodes and §13's one are absent from it, so §4.11 is currently testable only against the live CPU | **Open, bridge agent**, naturally the same brief as item 16 |

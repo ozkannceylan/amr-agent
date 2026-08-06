@@ -338,7 +338,10 @@ detectable from the input bits alone. That is the reason this node pair exists.
 **Reaction is PLC program content.** The staleness criterion for `BridgeHeartbeat`, the value of
 `BridgeLinkOk`, and what the equipment does when the heartbeat stops are specified in
 `plc/demo-cell/SPEC.md` and implemented in the standard program. No timer, threshold or reaction is
-defined in this document, and none of it is in the bridge. Loss of the bridge is a degraded mode,
+defined in this document, and **no process timer is in the bridge** — the scope §10.1 rules: a
+client's timers may watch its own cycle and its own input channels (the bridge's 20 Hz cadence, a
+per-slot topic-freshness window such as §13 W1's), never a plant signal, a debounce, a fault delay
+or a verdict the PLC also computes. Loss of the bridge is a degraded mode,
 not a safety event (invariant 2), and nothing about it is a safety function.
 
 ### 9.8 Deliberately absent from DemoCell/
@@ -483,12 +486,12 @@ whose state flows AGV → MQTT → fleet manager at its own gate and still reach
 | Rule | Statement |
 |---|---|
 | Server/client | The PLC is the OPC UA server. **Both** the bridge and the HMI are clients. Never inverted, for either (invariant 4, ADR 0008 D2.1). |
-| What the HMI writes | **Only** the five `Forklift/Hmi/` request nodes and `Forklift/Link/HmiHeartbeat` (§10.4, §10.8). It writes nothing else on this server, on any interface, and nothing under the auto-published `DataBlocksGlobal` folder. |
-| What the bridge writes | Its §9.1 writable set **plus** the four `Forklift/Input/` nodes, and nothing more. The bridge never writes an `Hmi…` node and the HMI never writes an `Input/` node: the two clients' writable sets are disjoint by construction and distinguishable by BrowseName prefix. |
+| What the HMI writes | **Only** the five `Forklift/Hmi/` request nodes and `Forklift/Link/HmiHeartbeat` (§10.4, §10.8) — **plus, from M5, `Forklift/Mode/HmiDriveModeRequest` and `Forklift/ProcessStop/HmiProcessStopRequest` (§12.1), making its every-cycle write set eight**. It writes nothing else on this server, on any interface, and nothing under the auto-published `DataBlocksGlobal` folder. |
+| What the bridge writes | Its §9.1 writable set **plus** the four `Forklift/Input/` nodes — **plus, from M5, the two `Forklift/Vehicle/` nodes (§12.1) and `Forklift/Warning/ForkliftWarningFieldOccupied` (§13)** — and nothing more. The bridge never writes an `Hmi…` node and the HMI never writes an `Input/`, `Vehicle/` or `Warning/` node: the two clients' writable sets are disjoint by construction and distinguishable by BrowseName prefix. |
 | No actuator writes, from either client | Neither client writes an actuator output. `Forklift/Output/*` is formed inside the PLC from the teleop-active flag combined with interlocks, and is driven to zero in a mandatory `ELSE` (§10.6). The HMI *requests*; the PLC decides and owns the outcome (invariant 6 discipline, ADR 0008 D2.2). |
 | No logic in either client | The bridge remains a signal translator (§9.1). The HMI is a *source of requests and a display*: **no interlock, no latch, no sequencing, no setpoint formation, no reaction to plant state and no verdict the PLC also computes** (invariant 10, ADR 0008 D2.2, D2.6). **The line is not "no timer".** A client needs timers to produce its own cadence and its own liveness, and this model requires three of them by name: the bridge's 20 Hz cycle (`bridge-design.md` §5), the HMI's 10 Hz write cycle and the 5 Hz floor it holds itself to (§10.8 H2), and the HMI's window on its operator's page (§10.8 H6). What no client may do is time a **process value** — a debounce, a fault delay, a dwell, a stale window over a plant signal, "write only if stable for X ms" — because the threshold and the delay are process decisions and they belong to the PLC (§10.5, §10.7, `bridge-design.md` §1.1). **The test is what the timer watches**: its own cycle or its own input channel, never the plant, and never a verdict the PLC also computes. |
 | Single owner | Every node below has exactly one writer, listed per tag in §10.3 (invariant 10). No value is recomputed by a consumer. |
-| One link verdict per client, no duplicates | The bridge's liveness stays `DemoCell/Link/BridgeHeartbeat` / `BridgeLinkOk` — **no second bridge heartbeat is created for the forklift subtree**. One session serves both function blocks; the verdict is written by the demonstration cell's FB and consumed by the forklift FB as a shared DB bit (invariant 10). The HMI's liveness is a *separate and independent* watchdog on a different client (§10.8). |
+| One link verdict per client, no duplicates | The bridge's liveness stays the single heartbeat at the browse path `DemoCell/Link/BridgeHeartbeat` — **no second bridge heartbeat is created for the forklift subtree**. **As built (owner decision 2026-07-30, m4f-04j): the `safe_amr` project has no demonstration-cell FB, so `FB_ForkliftTeleop` forms both link verdicts itself** — the heartbeat tag lives in `ForkliftLink` while its BrowseName and path are unchanged, and the bridge verdict is a Temp published on **no node** (`plc/forklift/SPEC.md` §3.1b). One bridge process, one counter, one verdict, one owner (invariant 10). **The heartbeat's browse path is a read-back, not a design value**: the DB behind it moved and the path must not, so the path is verified by independent browse and recorded with its date — resolved by the committed bridge config against the live CPU 2026-08-06 (m5-44). The HMI's liveness is a *separate and independent* watchdog on a different client (§10.8). |
 | Not a safety path | Every node here is process data. The obstacle stop, the fork-height speed cap and the fork soft limits are **standard-program process interlocks** and implement **no** SRS function: not SF-02, not SF-03, not SF-04, not SF-07, not SF-09 (ADR 0008 D3). No SIL or PL is claimed for any of them, and neither "emergency" nor "protective" appears in any tag, node or topic **name** in this section — the same naming discipline §9.6 sets for the demonstration cell's process stop. Loss of either client link is a degraded mode, not a safety event (invariant 2). |
 | Timing class | Both clients are best effort (invariant 9). Every timing decision **the cell's behaviour depends on** — the two link stale windows, the fault delays, the reset edge — is a PLC timer in the PLC's own time base. A client's own cadence and its window over its own input channel (§10.8 H2, H6) are best effort by construction, and no plant behaviour rests on either meeting a deadline. |
 
@@ -557,6 +560,8 @@ DemoCell/                          the commissioned server interface, ns http://
     Status/   PLC → both clients: read-only verdicts
     Link/     HMI liveness
     Safety/   read-only F-safety mirrors (§11, M5 opening wave)
+    Mode/ Envelope/ Vehicle/ ProcessStop/   the M5 autonomy delta (§12)
+    Warning/  the warning-field verdict (§13)
 ```
 
 Paths are relative to the interface node, as everywhere in this document:
@@ -617,8 +622,9 @@ consumer this contract admits.
 **18 nodes** — 5 in `Hmi/`, 4 in `Input/`, 3 in `Output/`, 4 in `Status/`, 2 in `Link/`. The count is
 subtree-scoped in the sense §9.8 fixes: the `DemoCell` interface carries these 18 **and** the 15 of
 §9, and a client browsing from `Objects` sees more than either number. **This count is silent about
-`Forklift/Safety/`**, a sixth subfolder added later by ADR 0009 with its own 4 nodes (§11): with it,
-the `DemoCell` interface carries 15 (§9) + 18 (§10) + 4 (§11) = 37, still fewer than a client
+the later subfolders**: `Safety/` (ADR 0009, 4 nodes, §11), the four M5 autonomy folders (9 nodes,
+§12) and `Warning/` (1 node, §13). With them the `DemoCell` interface carries
+15 (§9) + 18 (§10) + 4 (§11) + 9 (§12) + 1 (§13) = **47**, still fewer than a client
 browsing from `Objects` sees.
 
 An `Hmi` prefix on every HMI-written tag is deliberate redundancy inside a folder already named
@@ -661,7 +667,7 @@ exactly that. `NaN` and `inf` fall through an affirmative test to the same branc
 
 **Every HMI node is written every HMI cycle, not on change** (§10.8). That is what makes a CPU
 restart under a surviving HMI session harmless on this side: there is no HMI-written level that can
-stay stale after the DB reverts, because the next cycle rewrites all six. The failure recorded on
+stay stale after the DB reverts, because the next cycle rewrites the whole set (eight from M5, §10.8 H1). The failure recorded on
 2026-07-28 — a reverted input image that a write-on-change client never repairs — cannot form here.
 
 ### 10.5 `Forklift/Input/` — plant state (bridge writes)
@@ -791,7 +797,7 @@ its display, by the bridge for logging, applied to no actuator.
 | `ForkliftTeleopActive` | Bool | Boolean | The PLC's verdict that teleop is enabled: `HmiTeleopRequest` held, both link verdicts `TRUE`, no latch standing. **Entered on a rising edge** of that request and never restored by a returning permissive (§10.8 P5); **a level** once entered, and the separate layer from the setpoints — machine state and actuator command are different things (CLAUDE.md §9), which is why this is not the same node as `ForkliftTractionSpeedRef` being non-zero |
 | `ForkliftObstacleStopActive` | Bool | Boolean | A **latched** process stop, raised by `ForkliftObstacleInStopZone` and cleared only by the monitored reset of §10.8. Standard-program process logic; **not** SF-03 and not a protective stop (ADR 0008 D3). The field clearing does not release it: this machine does not resume by itself (CLAUDE.md §9) |
 | `ForkliftSpeedLimitActive` | Bool | Boolean | **The fork-height cap is the multiplier in force**: `TRUE` while teleop is active and the carriage is raised (`plc/forklift/SPEC.md` §6.5's `forkRaised`), **regardless of the momentary demand**, so the flag is steady while that condition holds and never follows the operator's control. It therefore reads `TRUE` at zero demand as well, when nothing is being reduced yet; that is the cost of this reading and it is the right one for a display and for a recording. **The discarded reading is "the cap is biting"** — named so it cannot be re-derived: under §10.6's scale semantics the capped setpoint is below the uncapped one at *every* non-zero demand, so that verdict degenerates to "the operator is asking for something" and would drop out each time the control crossed centre. Informational — the reduction itself happens in the setpoint (§10.6). **Not** SF-04 and no PL is claimed |
-| `ForkliftResetRequired` | Bool | Boolean | A monitored, edge-triggered reset is pending before teleop may be enabled again. Set by any latch above and by a link loss (§10.8). **No client clears it by writing a node**: the only reset input is `HmiResetRequest`, and the edge and the arming are PLC program content |
+| `ForkliftResetRequired` | Bool | Boolean | A monitored, edge-triggered reset is pending before teleop may be enabled again. Set by any latch above, by a link loss (§10.8), **and from M5 by the operator's process-stop latch (§12.7 PS5)** — it stays the single answer to "is a monitored reset pending". **No client clears it by writing a node**: the only reset input is `HmiResetRequest`, and the edge and the arming are PLC program content |
 
 Interface expectations for the PLC specification, each a process decision this document does not
 make: the fork-height speed cap's height and reduced speed; the fork soft travel limits, which must
@@ -827,7 +833,7 @@ a **second, independent watchdog on a different client**, not a copy of the firs
 
 | # | Rule |
 |---|---|
-| H1 | The HMI writes **all six** of its nodes every cycle — the five requests and the heartbeat — never on change. A stream is self-repairing: a CPU restart that reverts the DB is corrected by the next cycle (LESSONS 2026-07-28) |
+| H1 | The HMI writes **all of its nodes** every cycle — **eight from M5**: the five requests, the heartbeat, and the two §12 requests (`HmiDriveModeRequest`, `HmiProcessStopRequest`, §12.1) — never on change. A stream is self-repairing: a CPU restart that reverts the DB is corrected by the next cycle (LESSONS 2026-07-28) |
 | H2 | Cycle rate **10 Hz nominal, 5 Hz contractual floor**. Below the floor the HMI is not a supervision source and must stop writing rather than write slowly |
 | H3 | The heartbeat is written **last**, after the cycle's five request writes are acknowledged. An advanced heartbeat therefore implies that cycle's requests landed first. This is an **ordering** guarantee, not atomicity: no PLC logic may require two HMI tags to have come from the same cycle |
 | H4 | The counter is a counter, never a timestamp: no epoch, no clock synchronisation, no time zone in a liveness signal. It is not reset across a reconnect and starts from an arbitrary value at HMI restart |
@@ -1012,7 +1018,7 @@ Each row means "no such node under `DemoCell/Forklift/`".
 | Not in this subtree | Why |
 |---|---|
 | Any safety node other than the read-only mirrors of §11 — a safety command, e-stop input, protective stop, STO or safety reset | Safety never traverses the network (invariant 1): no node in this subtree is a safety path, carries a demand, or can affect one — that is what this row has always meant, and it is unchanged. **What has expired is the premise, not the claim** (analysed in §11.8): this row was written under ADR 0008 for a plant whose CPU had no F-runtime group; ADR 0009 replaced that CPU with a 1513F-1 PN that now instantiates SF-01, SF-08 and the SF-07 pattern, still with no safety-rated device — simulated F-input stand-ins only (ADR 0009 D5). What that CPU exposes on this interface is bounded to the four read-only `Forklift/Safety/` mirrors of §11: diagnostics only, never a reaction channel, and no route by which a client can create, prevent or clear a safety reaction (§11.4). The rest of this row stands word for word (§11.7). The obstacle stop remains process logic, named as such everywhere (ADR 0008 D3) |
-| A second bridge heartbeat or a second bridge-link verdict | One session serves both function blocks; `DemoCell/Link/BridgeLinkOk` remains the single owner of "the bridge is alive" and the forklift FB consumes it as a shared DB bit (invariant 10, §10.1) |
+| A second bridge heartbeat or a second bridge-link verdict | One bridge process, one counter at `DemoCell/Link/BridgeHeartbeat`, one verdict with one owner (invariant 10, §10.1). As built the forklift FB forms that verdict itself from the shared heartbeat (m4f-04j, §10.1) — still no second heartbeat and no second verdict, and on the `safe_amr` build the verdict is published on no node at all |
 | A fork **height** request, or any position or pose target | The operator jogs a speed. A height target would make the PLC a positioner running a profile, which is a sequencer this gate does not need and did not brief; the fork's soft limits already own the ends of travel |
 | An HMI-writable output or status node | The HMI requests and displays. Making a verdict writable would give it two owners (invariant 10) and would let a client clear a latch by writing a node, which §10.7 forbids |
 | A client-writable node for anything on the M3 cell | The forklift group is admitted by ADR 0008 D2 for the forklift cell. §9 is untouched: `DemoCell/Input/` still has the bridge as its only writer and `ConveyorSpeedCommand` is still not client-writable |
@@ -1345,9 +1351,11 @@ scope-dependent rather than wrong, which is the category LESSONS 2026-07-27 says
 listed for a cross-reference in item 1 and needs no correction.
 
 **§10 is not edited by this brief**, so the pointer that would make the seam visible from the §10
-side is requested rather than taken (item 1 below). Counts stay set-scoped in the sense §9.8 fixes:
+side was requested rather than taken, and has since landed (item 1 below, closed 2026-08-06).
+Counts stay set-scoped in the sense §9.8 fixes:
 **§11 is exactly 4 nodes**, §10.3's "18 nodes" remains a true statement about the M4 node set, and
-the `DemoCell` interface now carries 15 (§9) + 18 (§10) + 4 (§11) = **37**, with a client browsing
+the `DemoCell` interface — 37 when this section was written — now carries
+15 (§9) + 18 (§10) + 4 (§11) + 9 (§12) + 1 (§13) = **47**, with a client browsing
 from `Objects` seeing more than any of those numbers.
 
 **What §11 does not close.** Nothing here closes M5 or any part of its criterion, and a node existing
@@ -1365,7 +1373,7 @@ reaction as standard-program process logic, and these four nodes are no part of 
 
 | # | Open item | Owner |
 |---|---|---|
-| 1 | **§10 needs three pointers to this section, and until they land this document reads as contradicting itself at §10.11**: the "no safety node under `DemoCell/Forklift/`" row of §10.11, §10.3's folder tree (which lists five subfolders, now six) and §10.3's node count (set-scoped, and true, but silent about this group). A fourth, optional, is §9.6's "the only informational mirror of SF-01", which is true and only reads as narrower than it is. The seam is analysed above; only the cross-references are missing | **Interface agent, its own brief.** Not taken here: this brief forbids changing §10, and an unannounced edit to a group under commissioning is the drift that prohibition exists to prevent |
+| 1 | ~~**§10 needs three pointers to this section**~~ **CLOSED** — the three pointers landed by m5a-06b (the §10.11 row, §10.3's tree, §10.3's count), and §9.6's optional fourth carries its scope note; closure mark added by m5-54, the §11 edit the m5a-06b brief forbade | Closed 2026-08-06 |
 | 2 | **Every value in this section is a design value until read back out of the tool** (§11.5 step 6): the folder, the four BrowseNames, the per-tag rights, the four start values, and the refused write with its status code | Owner, at commissioning, recorded with its date as phase 0 recorded the M3 set (§9.10). **No gate criterion may rest on one before then** |
 | 3 | Whether the per-tag *Writable* ✘ also governs the auto-published `DataBlocksGlobal` path is **expected, not verified** (§11.4). §9.8's open item to suppress DB-level exposure is the general form and is unchanged | Owner, at the same read-back; the access-control gate for the general case |
 | 4 | **The bridge is deliberately not a reader**, and the reason is the M5 criterion itself: the reactions must execute with the bridge stopped and the OPC UA session down, so evidence of an F-demand must not come from the client that has to be able to be dead. The F-side instrument is the watch table, which reads F-data directly and does not depend on the copy. If the mirrors are ever wanted in the bridge's evidence CSV, that is a `bridge-design.md` change — its §2.1 configured signal set and its §4 signal map — and not a change here | Deferred by design; a later brief if the showcase asks for it |
@@ -1415,7 +1423,7 @@ that row when a later edit moves it, and a value written in two places goes stal
 | Rule | Statement |
 |---|---|
 | Server/client | Unchanged. The PLC is the OPC UA server; the bridge and the HMI are its clients (invariant 4, §10.1). **The vehicle's control layer is not a client of this server and never becomes one** — it sees these values as ROS 2 topics the bridge republishes (§12.10), which is what keeps invariant 11's layer adjacency intact |
-| What the HMI writes | Its §10.1 set **plus two**: `Forklift/Mode/HmiDriveModeRequest` and `Forklift/ProcessStop/HmiProcessStopRequest`. **Its every-cycle write set becomes eight** — the five requests of §10.4, `Link/HmiHeartbeat`, and these two. §10.8 **H1**'s *rule* governs all eight unchanged — every node this client writes, written every cycle, never on change, so a reverted DB is repaired by the next cycle — and only its **count** goes stale, which is §12.13 item 2 |
+| What the HMI writes | Its §10.1 set **plus two**: `Forklift/Mode/HmiDriveModeRequest` and `Forklift/ProcessStop/HmiProcessStopRequest`. **Its every-cycle write set becomes eight** — the five requests of §10.4, `Link/HmiHeartbeat`, and these two. §10.8 **H1**'s *rule* governs all eight unchanged — every node this client writes, written every cycle, never on change, so a reverted DB is repaired by the next cycle — and only its **count** went stale, corrected when §12.13 item 2 landed |
 | What the bridge writes | Its §10.1 set **plus two**: the two `Forklift/Vehicle/` nodes. It writes no `Mode/`, no `Envelope/` and no `ProcessStop/` node, on any path |
 | The two clients' writable sets stay disjoint | Unchanged and still answerable from the BrowseName alone: the two new HMI-written nodes carry the `Hmi` prefix of §10.3, the two new bridge-written nodes do not, and no node in this section is writable by both |
 | No actuator writes, from any client | Unchanged. Nothing in this section is an actuator output, and the three `Forklift/Output/` setpoints of §10.6 are untouched — same nodes, same single assignment with its mandatory `ELSE` to `0.0`, same owner |
@@ -1492,10 +1500,10 @@ bridge writes the node.
 **9 nodes** — 2 in `Mode/`, 3 in `Envelope/`, 2 in `Vehicle/`, 2 in `ProcessStop/`. The count is
 **set-scoped** in the sense §9.8 fixes: §10.3's "18 nodes" remains a true statement about the M4 node
 set and §11's "exactly 4" about the mirror set, and the `DemoCell` interface now carries
-15 (§9) + 18 (§10) + 4 (§11) + 9 (§12) = **46**, still fewer than a client browsing from `Objects`
-sees. **§10.3's and §11.8's "= 37" are the same arithmetic with one term missing**: they predate this
-section, they are interface totals rather than set-scoped counts, and both are listed in §12.13's
-pointer table — a total quoted in three places goes stale in two of them.
+15 (§9) + 18 (§10) + 4 (§11) + 9 (§12) + 1 (§13) = **47**, still fewer than a client browsing from
+`Objects` sees. §10.3's and §11.8's totals were re-derived to the same arithmetic when the §12.13
+pointer rows landed (m5-54) — a total quoted in three places goes stale in two of them, which is why
+all three now carry the full sum rather than a partial one.
 
 ### 12.3 `Forklift/Mode/` — which control law is asked for, and which is in force
 
@@ -1749,7 +1757,7 @@ Nodes in this section that deliberately reach no topic:
 admits the value type (`Real`/`Bool`/`UInt16`), and `std_msgs/UInt16` needs no new dependency — but
 the bridge has until now generated its only `UInt16` internally, as its own heartbeat, and has never
 carried one from a topic. That is a change to the bridge's signal map and not to its contract, and it
-is requested rather than taken here (§12.13 item 1).
+was requested rather than taken here, and has since landed (§12.13 item 1, `bridge-design.md` §4.11).
 
 ### 12.11 TIA click path (the §10.2 / §11.5 pattern)
 
@@ -1807,25 +1815,106 @@ Each row means "no such node in the §12 node set", in the set-scoped sense §9.
 
 ### 12.13 What this section changes elsewhere, and open items
 
-**Four statements in §10 and §11 become narrower than the model they now sit beside, and the pointers
-are requested rather than taken** — the §11.8 item 1 situation, resolved there by its own follow-up
-brief. Each is listed with what it needs, so the follow-up can be written from this table and nothing
-has to be re-derived:
+**Four statements in §10 and §11 became narrower than the model they now sit beside; the pointer
+rows below LANDED 2026-08-06 (m5-54)** and the table is kept as the record of what moved:
 
-| Where | Statement today | What it needs |
+| Where | Statement before | What landed |
 |---|---|---|
 | §10.1, *What the HMI writes* | "**Only** the five `Forklift/Hmi/` request nodes and `Forklift/Link/HmiHeartbeat`" | "…plus `Forklift/Mode/HmiDriveModeRequest` and `Forklift/ProcessStop/HmiProcessStopRequest` (§12.1)" |
-| §10.1, *What the bridge writes* | "its §9.1 writable set **plus** the four `Forklift/Input/` nodes, and nothing more" | "…plus the two `Forklift/Vehicle/` nodes (§12.1)" |
-| §10.3 folder tree, §10.8 **H1** ("all six"), §10.7 `ForkliftResetRequired` | five subfolders, six HMI writes, latches "above" | ten subfolders; **eight** HMI writes; and the process-stop latch of §12.7 named as a further cause (**PS5**) |
-| §10.3 and §11.8, the interface total | "15 + 18 + 4 = **37**" | "+ 9 (§12) = **46**". The set-scoped counts around them — §10.3's "18 nodes", §11.8's "exactly 4" — stay true untouched; **only the interface totals are stale**, and they are stale in two places for the same reason (§12.2) |
+| §10.1, *What the bridge writes* | "its §9.1 writable set **plus** the four `Forklift/Input/` nodes, and nothing more" | "…plus the two `Forklift/Vehicle/` nodes (§12.1) and the §13 warning node" |
+| §10.3 folder tree, §10.8 **H1** ("all six"), §10.5's "rewrites all six", §10.7 `ForkliftResetRequired` | five subfolders, six HMI writes, latches "above" | eleven subfolders (the four §12 folders and §13's `Warning/`); **eight** HMI writes, swept by subject to both "six" occurrences; and the process-stop latch of §12.7 named as a further cause (**PS5**) |
+| §10.3 and §11.8, the interface total | "15 + 18 + 4 = **37**" | "+ 9 (§12) + 1 (§13) = **47**" in both places, and in §12.2 (§13 landed between the request and its execution, so the total moved once more in the same round rather than going stale a third time) |
 
 | # | Open item | Owner |
 |---|---|---|
-| 1 | **`bridge-design.md` must carry this signal group before any bridge work on it**: §2.1's configured signal set (whether these six slots join the forklift group or form a third), §4's signal map rows in the shape of its §4.7–§4.9, §4.6's QoS rows, the writable set gaining the two `Forklift/Vehicle/` nodes, and **the first topic-carried `UInt16`** (§12.10). Nothing in its §1.1 no-logic rule changes: the envelope is formed in the PLC and carried by the bridge, never computed in it (ADR 0012's relationship table, ADR 0005) | **Interface agent, its own brief** — m4f-05's shape, not taken here because one brief produces one deliverable |
-| 2 | **The four pointer rows in the table above.** Until they land, §10 reads as narrower than the model and two interface totals read as `37` | **Interface agent, its own brief** (the m5a-06b precedent) |
-| 3 | **Every value in this section is a design value until read back out of the tool** (§12.11 step 6): the four folders, the nine BrowseNames, the per-tag rights, the nine start values, and the refused write with its status code | Owner, at commissioning, recorded with its date as phase 0 recorded the M3 set (§9.10) |
+| 1 | ~~**`bridge-design.md` must carry this signal group**~~ **CLOSED 2026-08-06 (m5-54)**: `bridge-design.md` §4.11 carries the group as a **third group** (the m5-44 reading, confirmed as the ruling), with the signal-map rows, QoS, the writable set gaining the two `Forklift/Vehicle/` nodes and the first topic-carried `UInt16`. Nothing in its §1.1 no-logic rule changed | Closed; the bridge's as-built group definition in `config.py` stands as ruled |
+| 2 | ~~**The four pointer rows in the table above.**~~ **LANDED 2026-08-06 (m5-54)** — see the table | Closed |
+| 3 | **Every value in this section is a design value until read back out of the tool** (§12.11 step 6). **Partially executed**: all nine nodes were read back from outside TIA on 2026-08-06 at their documented types, ten `Forklift/` subfolders, no `_1` suffix (m5-44 report, request 2), and the envelope write refusal was recorded (`BadNotWritable`, 2026-08-05 build session). The start-value read-back with its date remains the owner's | Owner, remaining half, recorded as phase 0 recorded the M3 set (§9.10) |
 | 4 | **How an M5 navigation goal is commanded is unanswered and is not answered here.** A goal is not a node in this model and must not become one (invariant 5, §12.12). Whether it comes from a ROS-side tool, from HMI v2 over a path that is not the PLC, or from something else, is `agv/`'s and `hmi/`'s to settle — and any answer that routes a pose through the PLC is an invariant question, not an interface one | Owner decision, at m5-10 / m5-11 / m5-14 |
 | 5 | **One enable/start request that serves both modes**, requested rather than invented (§12.3). Today `HmiTeleopRequest` is the teleop enable and the mode selection's transition into `Autonomous` is the autonomous one — two devices for one idea. §10.12 item 7 already asks for an `HmiStartRequest` for the M4 conflation; **one node should answer both asks**, and minting a second, autonomy-only enable would be the wrong answer | Owner decision; it moves a node count, a DB, a start value and the HMI's every-cycle write set together |
 | 6 | **At M6 the station permit meets the station handshake.** `handshake-tables.md` owns the handshake sequencing; this node is the vehicle-facing summary of its outcome (**Z3**), and the two documents must be reconciled **before** the stations are built, not after. Nothing is owed until M6 | Interface agent, at M6 briefing |
 | 7 | **The mode-disagreement reaction** — how long a disagreement between `ForkliftDriveModeActive` and `ForkliftVehicleModeApplied` must stand before it is a fault, and whether it latches — is `plc/forklift/SPEC.md`'s under its own named constant. This document specifies the datum and requires only that the reaction never be to adopt the vehicle's value (**M4**) | `plc/forklift/SPEC.md`, m5-16 |
 | 8 | **The vehicle-side freshness window of E5** is `agv/`'s named constant, its own, never shared with the three of §10.8. It is not set here | `agv/`, m5-11 |
+
+## 13. The warning-field verdict node (M5, m5-49/m5-54)
+
+**Ruling: the node exists, exactly as `plc/forklift/SPEC.md` §14.16 requests it.**
+
+| BrowseName | Full path | S7 type | OPC UA type | Unit | Start value | Meaning |
+|---|---|---|---|---|---|---|
+| `ForkliftWarningFieldOccupied` | `DemoCell/Forklift/Warning/ForkliftWarningFieldOccupied` | Bool | Boolean | — | **`TRUE`** | The warning-field verdict as the **standard program's process input**: `TRUE` = the warning field is occupied, **or the verdict is stale, silent or has never been heard** — every uncertainty resolves to occupied. `FALSE` only while a live carrier is relaying a live *clear*. **Cold start `TRUE` is the non-permissive value**: before the chain has ever spoken, the ceiling is reduced, never the reverse (§14.16's fail direction) |
+
+| DB | Folder | Contents | *Accessible from HMI/OPC UA* | *Writable from HMI/OPC UA* |
+|---|---|---|---|---|
+| `ForkliftWarning` | `Forklift/Warning/` | 1 tag | ✔ | **✔** (the bridge writes it) |
+
+| Node | Writer (single owner) | Value owner, where different | Readers |
+|---|---|---|---|
+| `Warning/ForkliftWarningFieldOccupied` | bridge | the field evaluation (`agv/forklift/scripts/field_evaluation.py`, m5-47) | PLC standard program (§14.16, the ceiling term), HMI (display, optional), bridge (logging) |
+
+**A new subfolder and a new one-member DB, not a member anywhere else.** Not in `ForkliftInput` —
+no existing DB gains a member, because offsets move and watch tables lie (§10.3, §11.3, §12.2,
+LESSONS 2026-07-28), and §10's "18 nodes" stays set-scoped and true. Not in `Envelope/` — that
+folder holds **exactly the three elements ADR 0011 D3 composed** and a fourth node there is a
+change to the envelope's composition, which is an ADR's to make (§12.4); this node is an **input
+to** the ceiling's formation, not an element of the envelope. `Warning/` follows §12.2's
+folder-disclaimer practice: the word is in every browse path, watch row and screenshot, and the
+leaf names a **field state**, never a function. Per-*client* scoping stays policy, exactly as for
+the two `Vehicle/` tags (§12.2's caveat, unchanged).
+
+### 13.1 Why §12.12's refusals do not catch this node — checked, not assumed
+
+§12.12 refuses, by name, *"an SLS or safe-speed value"* and *"any node for the safety scanner's
+channel"*, on §11.7's rule. A warning-field verdict is adjacent to both, so both tests are run:
+
+| Refusal | The test, applied |
+|---|---|
+| Not an SLS or safe-speed node | The node carries **no speed** — no value, no limit, no setpoint. It is a Bool field state whose consumer forms a ceiling that remains a bound under **E2**/**E3** (single assignment, `MIN` of bounds, mandatory `ELSE`, §14.16). No name in this section contains `Safe`, `SLS`, `Speed`, `Ref` or `Cmd`. The SLS-pattern limit itself (`SPEED_LIMIT_MAX`) lives in the F-program and reaches no node (`plc/forklift-safety/SPEC.md` §11.3) |
+| Not the safety scanner's channel | The safe channel rides the **stand-in writer path** — `"SafetyInputStandIn".WarningFieldClear`, fed by the `WARN` line on the field link (`plc/forklift-safety/SPEC.md` §11.2) — which enters below any client interface and **never touches this server**. This node is the **process copy** for the standard program's process ceiling. One producer, two consumers, two transports; neither consumer recomputes the verdict and neither path substitutes for the other (invariant 10) |
+| §11 untouched | This node is not under `Forklift/Safety/`, mirrors no F-flag, feeds no F-network and carries no demand. §11.7's rows hold word for word; the §11 mirror set stays exactly 4 |
+| **E1**, run affirmatively | The verdict is a **level** with the producer's own 2 s clear-hold (`warning_clear_hold_s`); a consumer at 2 Hz and one at 20 Hz behave identically apart from latency. It belongs on this seam |
+| Invariant 1 | Process data end to end. Loss of any part of this path makes the cell **more** restrictive (the ceiling falls), never less, and no safety reaction depends on it — the F-side monitor demands the stop on its own measurement whichever way this path fails (§14.16) |
+
+### 13.2 The stale rule across the seam — how a last-value store carries a silence-means-occupied topic
+
+The producer publishes at the 20 Hz evaluation tick, not on transitions, **so that its absence is
+visible**; its consumer must treat no-message-inside-the-window as **occupied** (m5-47, LESSONS
+2026-08-04). An OPC UA node is the exact hazard that rule names: **the server holds the last
+written value, so the seam is by construction a republishing layer.** The model preserves the
+guarantee by making every layer that holds the value also **assert** it:
+
+| # | Rule |
+|---|---|
+| **W1** | **The bridge slot converts silence into an explicit `TRUE`.** No message on `/forklift/warning_field/occupied` inside the bridge's own freshness window → the bridge **writes `TRUE` to the node and logs the transition**. The window is the bridge's own named constant, bounded below by the producer's 50 ms tick, never shared with any other window (§10.8 **P4**'s principle). A `FALSE` on this node is therefore never an implied clear: it is a fresh claim, written by a live bridge that heard a fresh *clear* inside its window |
+| **W2** | **Bridge death is the consumer's term, not the slot's.** A dead bridge freezes the node — possibly at `FALSE`. The PLC therefore never reads the node bare: `#warningFieldOccupied := node OR NOT #bridgeLinkOk` (§14.16), and `BridgeLinkOk` boots `FALSE` and falls within `HEARTBEAT_STALE_TIME` of the heartbeat freezing (LESSONS 2026-07-28's boot polarity) |
+| **W3** | **The start value covers the scans before the first write**, and a server restart's revert lands at `TRUE` — the fail direction. The bridge's §8.1 full rewrite after a detected restart applies to this slot as to every other |
+| **W4** | Write cadence: **on change, plus the explicit `TRUE` of W1 on window expiry, plus a full refresh on (re)connect and after any detected server restart** (§10.5's conventions). No consumer may depend on a faster cadence (**E1**) |
+| **W5** | **The honest residual, stated rather than hidden.** Between the bridge's death and `BridgeLinkOk` falling, a frozen `FALSE` can stand for at most the heartbeat stale window, and the ceiling stays up for that bounded time. The process chain accepts that residual; the independent backstop is the F-side monitor, whose own copy of the verdict rides the writer path with its own stale rule and its own onset budget, and which demands the stop if the slow-down fails for **any** reason — this seam included (`plc/forklift-safety/SPEC.md` §11.6, §14.16) |
+
+**What the seam cannot do, said plainly: it cannot itself carry silence.** A held value is what an
+OPC UA node *is*. The guarantee survives because silence is converted to an asserted `TRUE` at the
+last layer that can observe it (W1), and because the one failure that freezes the node is detected
+by a verdict formed outside it (W2). No layer between the producer and the ceiling term republishes
+a clear it did not freshly hear.
+
+### 13.3 Topic map, counts, and the tool
+
+| Node (`Forklift/…`) | Direction (PLC view) | ROS 2 topic | Msg type | Field | Conversion | Cadence |
+|---|---|---|---|---|---|---|
+| `Warning/ForkliftWarningFieldOccupied` | plant → PLC | `/forklift/warning_field/occupied` | `std_msgs/Bool` | `data` | none — `TRUE` = occupied on both sides | per **W4** |
+
+**§13 is exactly 1 node**, in the set-scoped sense §9.8 fixes; the `DemoCell` interface carries
+15 (§9) + 18 (§10) + 4 (§11) + 9 (§12) + 1 (§13) = **47**.
+
+The TIA click path is `plc/forklift/TIA-BUILD-PROCEDURE.md` chunk X (steps 338–360), which was
+written against the requested shape this section grants unchanged: DB `ForkliftWarning`, folder
+`Warning` beside the ten existing `Forklift/` subfolders, leaf = tag name, *Accessible* ✔,
+*Writable* ✔. **Everything in this section is a design value until read back out of the tool**
+(§12.11 step 6's discipline): the folder, the BrowseName, the rights and the start value become
+facts when the owner reads them back, and no gate criterion may rest on one before then.
+
+| # | Open item | Owner |
+|---|---|---|
+| 1 | **The bridge slot itself** — the W1 window as a named constant, the silence-⇒-`TRUE` write, the transition log line. The design row is carried in `bridge-design.md` §4.11 (this round); the implementation is the bridge agent's own brief, and step 358's second half waits on it | bridge agent (m5-49 report request) |
+| 2 | **Whether the HMI displays the node** — a lamp is `hmi/`'s decision; this section only admits it as a reader | `hmi/`, at its next brief |
+| 3 | **Every value here is a design value until the owner's read-back**, recorded with its date | Owner, chunk X steps 349–360 |
