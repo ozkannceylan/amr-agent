@@ -1,0 +1,67 @@
+Requested session timeout to be 3600000ms, got 8000ms instead
+Requested session timeout to be 3600000ms, got 8000ms instead
+bridge write allowlist — opcua-nodes.md §9.1/§10.1, bridge-design.md §3/§4.10
+  endpoint opc.tcp://127.0.0.1:4842/amr-agent/celldouble/  (TEST DOUBLE)
+
+1. §4.10 — the allowlist is DERIVED from the configured groups
+   ok   every committed configuration is covered by this check — unnamed: none; missing from disk: none
+   ok   commissioned: forklift+envelope+warning+safety: 8 keys = 7 configured Input/ node(s) + the one heartbeat — bridge.yaml: 22 nodes touched
+   ok   double: forklift only: 5 keys = 4 configured Input/ node(s) + the one heartbeat — bridge-double-forklift.yaml: 13 nodes touched
+   ok   double: cell+forklift: 12 keys = 11 configured Input/ node(s) + the one heartbeat — bridge-double-both.yaml: 27 nodes touched
+   ok   double: M5 forklift+envelope+warning+safety: 8 keys = 7 configured Input/ node(s) + the one heartbeat — bridge-double-m5.yaml: 22 nodes touched
+   ok   rehearsal: forklift only: 5 keys = 4 configured Input/ node(s) + the one heartbeat — rehearsal-forklift.yaml: 13 nodes touched
+   ok   with the cell and forklift groups the allowlist holds exactly 12 keys — BridgeHeartbeat, ConveyorBeltPosition, ConveyorBeltSpeed, ForkliftForkHeight, ForkliftLinearSpeed, ForkliftObstacleInStopZone, ForkliftObstacleMinDistance, PanelProcessStopCircuitClosed, PanelResetPressed, PanelStartPressed, PanelStopCircuitClosed, ProductSensorRange
+   ok   the six nodes of §4.10 are in no set at all — not the allowlist, not the read set, not the diagnostics poll — 27 node keys resolved, 27 nodes touched
+
+2. client side — PlcClient._write refuses every key outside the allowlist
+   ok   ConveyorSpeedCommand: WriteNotPermitted — ConveyorSpeedCommand is not in this run's write allowlist
+   ok   CellCycleRunning: WriteNotPermitted — CellCycleRunning is not in this run's write allowlist
+   ok   ConveyorDriveFault: WriteNotPermitted — ConveyorDriveFault is not in this run's write allowlist
+   ok   BridgeLinkOk: WriteNotPermitted — BridgeLinkOk is not in this run's write allowlist
+   ok   ForkliftTractionSpeedRef: WriteNotPermitted — ForkliftTractionSpeedRef is not in this run's write allowlist
+   ok   ForkliftSteerAngleRef: WriteNotPermitted — ForkliftSteerAngleRef is not in this run's write allowlist
+   ok   ForkliftForkSpeedRef: WriteNotPermitted — ForkliftForkSpeedRef is not in this run's write allowlist
+   ok   ForkliftTeleopActive: WriteNotPermitted — ForkliftTeleopActive is not in this run's write allowlist
+   ok   ForkliftObstacleStopActive: WriteNotPermitted — ForkliftObstacleStopActive is not in this run's write allowlist
+   ok   HmiLinkOk: WriteNotPermitted — HmiLinkOk is not in this run's write allowlist
+   ok   TorqueOffDemand: WriteNotPermitted — TorqueOffDemand is not in this run's write allowlist
+   ok   SpeedMonitorDemand: WriteNotPermitted — SpeedMonitorDemand is not in this run's write allowlist
+   ok   EStopDemand: WriteNotPermitted — EStopDemand is not in this run's write allowlist
+   ok   ZoneStopDemand: WriteNotPermitted — ZoneStopDemand is not in this run's write allowlist
+   ok   HmiTractionRequest: WriteNotPermitted — HmiTractionRequest is not in this run's write allowlist
+   ok   HmiSteerRequest: WriteNotPermitted — HmiSteerRequest is not in this run's write allowlist
+   ok   HmiForkRequest: WriteNotPermitted — HmiForkRequest is not in this run's write allowlist
+   ok   HmiTeleopRequest: WriteNotPermitted — HmiTeleopRequest is not in this run's write allowlist
+   ok   HmiResetRequest: WriteNotPermitted — HmiResetRequest is not in this run's write allowlist
+   ok   HmiHeartbeat: WriteNotPermitted — HmiHeartbeat is not in this run's write allowlist
+
+3. §4.10 — the HMI group, against a server that WOULD have accepted the write
+   ok   the server ACCEPTS a write to Forklift/Hmi/HmiTractionRequest from another client — read back 0.41999998688697815; the bridge's refusal is therefore its own
+   ok   the server ACCEPTS a write to Forklift/Hmi/HmiSteerRequest from another client — read back -0.33000001311302185; the bridge's refusal is therefore its own
+   ok   the server ACCEPTS a write to Forklift/Hmi/HmiForkRequest from another client — read back 0.75; the bridge's refusal is therefore its own
+   ok   the server ACCEPTS a write to Forklift/Hmi/HmiTeleopRequest from another client — read back True; the bridge's refusal is therefore its own
+   ok   the server ACCEPTS a write to Forklift/Hmi/HmiResetRequest from another client — read back True; the bridge's refusal is therefore its own
+   ok   the server ACCEPTS a write to Forklift/Link/HmiHeartbeat from another client — read back 7; the bridge's refusal is therefore its own
+
+4. server side — the double refuses a direct write to a read-only node
+   ok   DemoCell/Output/ConveyorSpeedCommand — BadUserAccessDenied
+   ok   DemoCell/Status/CellCycleRunning — BadUserAccessDenied
+   ok   DemoCell/Status/ConveyorDriveFault — BadUserAccessDenied
+   ok   DemoCell/Link/BridgeLinkOk — BadUserAccessDenied
+   ok   DemoCell/Forklift/Output/ForkliftTractionSpeedRef — BadUserAccessDenied
+   ok   DemoCell/Forklift/Output/ForkliftSteerAngleRef — BadUserAccessDenied
+   ok   DemoCell/Forklift/Output/ForkliftForkSpeedRef — BadUserAccessDenied
+   ok   DemoCell/Forklift/Status/ForkliftTeleopActive — BadUserAccessDenied
+   ok   DemoCell/Forklift/Status/ForkliftObstacleStopActive — BadUserAccessDenied
+   ok   DemoCell/Forklift/Link/HmiLinkOk — BadUserAccessDenied
+   ok   DemoCell/Forklift/Safety/TorqueOffDemand — BadUserAccessDenied
+   ok   DemoCell/Forklift/Safety/SpeedMonitorDemand — BadUserAccessDenied
+   ok   DemoCell/Forklift/Safety/EStopDemand — BadUserAccessDenied
+   ok   DemoCell/Forklift/Safety/ZoneStopDemand — BadUserAccessDenied
+
+5. §4.10 consequence 4 — the config loader rejects an Hmi node at startup
+   ok   rejected: an Hmi request in a writable position — /tmp/amr-allowlist-3ur4_9hh/hmi-probe
+   ok   rejected: the HMI's heartbeat in the diagnostics poll — /tmp/amr-allowlist-3ur4_9hh/hmi-probe
+
+50 checks, 50 passed, 0 failed
+RESULT: PASS

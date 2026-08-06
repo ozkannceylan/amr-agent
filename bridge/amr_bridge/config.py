@@ -182,6 +182,15 @@ class SignalGroup:
     #: Slots whose silence is asserted rather than held (§13.2 W1). Empty for
     #: every group but the warning group.
     stale_asserts: tuple[StaleAssert, ...] = ()
+    #: Node keys this group may find ABSENT from the server without failing the
+    #: connect (`opcua-nodes.md` §11.6: *"no client's connect may fail over this
+    #: group"*). Addressing only: an absent node is resolved on no session, read
+    #: in no cycle and published on no topic — never replaced by a value. The
+    #: tolerance is per node and per group, so a mistyped BrowseName anywhere
+    #: else is still the fatal configuration error it has always been (§3.1 N4),
+    #: and absence is re-tested at every session establishment rather than
+    #: remembered.
+    optional_nodes: tuple[str, ...] = ()
 
     @property
     def input_keys(self) -> tuple[str, ...]:
@@ -402,6 +411,78 @@ WARNING_GROUP = SignalGroup(
     ),
 )
 
+#: The F-program's SS1 second-stage demand, carried to the vehicle's torque-off
+#: stand-in — `opcua-nodes.md` §11 and its **§11.2b SD1–SD10**, gate M5.
+#: **One node, one topic, one direction: the bridge READS and republishes.**
+#:
+#: `TorqueOffDemand` is the one mirror in §11 that a consumer acts on (§11.2b
+#: **SD2**). The value is the F-program's, mirrored into a standard DB by the
+#: standard program; the bridge is a reader of that mirror and never its author,
+#: and it writes nothing anywhere in `Forklift/Safety/` — read-only to every
+#: client (§11.4 **MR1**). That is not a rule this file restates and hopes for:
+#: this group declares **no inputs**, and the write allowlist is *derived* from
+#: the configured groups' inputs (`Config.write_allowlist`), so configuring the
+#: group adds exactly zero writable keys.
+#:
+#: **`SpeedMonitorDemand` is deliberately absent, and so are the other four
+#: mirrors** (**SD1**). The speed monitor's reaction is the PLC's permissive,
+#: formed from F-data directly; what reaches the vehicle is the consequence —
+#: the permissive drops, the setpoints take `0.0`, the envelope goes
+#: non-permissive — through no stop topic of its own. A slot here would be a
+#: second path to one reaction, which is a second owner of it (§12.7 **PS6**).
+#: The remaining four are display-only. **Nothing but a demand Bool crosses this
+#: seam**: no speed, no limit, no margin, no channel reading and no value that
+#: was exceeded (**SD7**, ADR 0014 D4).
+#:
+#: **SD5 — and it is the deliberate opposite of the warning group above.**
+#: This group has **no `StaleAssert`, no freshness window and no synthesised
+#: value in either polarity**, and that asymmetry is the ruling rather than an
+#: oversight. `WARNING_GROUP` converts its producer's silence into an explicit
+#: `TRUE` because silence there must not read as a fresh clear. Here a stale,
+#: silent or never-resolved demand is **NOT torque-off**: the consumer latches on
+#: an *observed* `TRUE` and releases on an *observed* `FALSE`, and a link that
+#: never speaks leaves it closed. Three reasons, none of them interchangeable —
+#: loss of supervision is a degraded mode and not a safety event (invariant 2);
+#: the controlled stop a lost link calls for already exists one layer up in the
+#: envelope gate's freshness rule (§12.4 **E5**), so inferring a stop here would
+#: be a second owner of it; and torque removal is asserted, never inferred,
+#: because a safety reaction riding the network's silence is exactly what
+#: invariant 1 keeps off the network. A later reader who finds this asymmetry
+#: surprising is reading it correctly: **the reason is in this comment and the
+#: other behaviour is in no line of this package.**
+#:
+#: **The node may legitimately be absent, and absence is not an error** (§11.6).
+#: The leaf is created by the same TIA delta that adds the copy statements to the
+#: standard program (`plc/forklift/TIA-FIX-PROCEDURE.md` chunks AD–AF); until
+#: that delta is applied the server has a `Forklift/Safety/` folder with four
+#: mirrors and not six — measured, not assumed, against the controller in force
+#: on 2026-08-06 with `bridge/tools/probe_server_paths.py`. §11.6 rules that **no
+#: client's connect may fail over this group** and that a bridge which cannot
+#: resolve the leaf *"logs the absence and publishes nothing rather than
+#: synthesising either polarity"*. `optional_nodes` is that rule and only that
+#: rule: it changes node **resolution**, never a value, and an absent node
+#: produces no message at all — which SD5 makes the correct outcome rather than a
+#: fallback.
+SAFETY_GROUP = SignalGroup(
+    name="safety",
+    reference="opcua-nodes.md §11 (SD1–SD10 in §11.2b)",
+    inputs=(),
+    outputs=(
+        # Read every cycle in the output phase and republished unchanged: no
+        # inversion, no latch, no edge, no debounce, no window. The latch is the
+        # consumer's (SD2) and the demand is the F-program's (invariant 10); a
+        # bridge that held, stretched or re-timed this Bool would be a second
+        # owner of a safety reaction's timing.
+        ("TorqueOffDemand", "torque_off_demand", BOOL),
+    ),
+    diagnostics=(),
+    scalar_inputs=(),
+    structured_topics=(),
+    # SD5: empty, deliberately. See the block comment above.
+    stale_asserts=(),
+    optional_nodes=("TorqueOffDemand",),
+)
+
 #: Every group this bridge knows how to carry. A config may declare any
 #: non-empty subset; the union of the declared ones is the configured signal set.
 GROUPS: dict[str, SignalGroup] = {
@@ -409,6 +490,7 @@ GROUPS: dict[str, SignalGroup] = {
     FORKLIFT_GROUP.name: FORKLIFT_GROUP,
     ENVELOPE_GROUP.name: ENVELOPE_GROUP,
     WARNING_GROUP.name: WARNING_GROUP,
+    SAFETY_GROUP.name: SAFETY_GROUP,
 }
 
 #: BrowseName elements the bridge must never address, in either direction, in
@@ -529,6 +611,18 @@ class Config:
         }
 
     @property
+    def optional_node_keys(self) -> frozenset[str]:
+        """Node keys whose ABSENCE from the server is not a connect failure, for
+        the configured groups only (`opcua-nodes.md` §11.6).
+
+        Empty in every configuration that does not carry a group declaring one,
+        so no node becomes optional by sharing a run with one that is.
+        """
+        return frozenset(
+            key for group in self.signal_groups for key in group.optional_nodes
+        )
+
+    @property
     def write_allowlist(self) -> frozenset[str]:
         """The complete set of node keys this run may write — **derived** from
         the configured groups, never hand-maintained beside them (§4.10).
@@ -566,12 +660,15 @@ class Config:
             f"{rule.window_s:.3f}s of silence ({rule.reference})"
             for rule in self.stale_asserts.values()
         )
+        optional = ", ".join(sorted(self.optional_node_keys))
         return (
             f"configured signal set: {'+'.join(self.groups)} — {per_group}; "
             f"{len(self.input_keys)} input slots, {len(self.output_keys)} output slots, "
             f"{len(self.diagnostic_keys)} diagnostics, {self.touched_node_count} nodes "
             f"touched, write allowlist {len(self.write_allowlist)} keys"
             + (f"; silence rule: {silence}" if silence else "")
+            + (f"; may be absent without failing the connect: {optional} "
+               "(opcua-nodes.md §11.6)" if optional else "")
         )
 
     # --- addressing helpers (translation, never logic) ---------------------

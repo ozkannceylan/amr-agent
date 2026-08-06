@@ -13,15 +13,20 @@ commissioned two-namespace shape of §3.1 —
            +- DemoCell      ns http://DemoCell                (ADR 0006)
                 +- Input/ Output/ Status/ Link/  and their variables
                 +- Forklift/  Hmi/ Input/ Output/ Status/ Link/
+                              Mode/ Envelope/ Vehicle/ ProcessStop/
+                              Warning/ Safety/
 
 — with the `DemoCell/` address space of docs/interfaces/opcua-nodes.md §9 **and
-the `Forklift/` subtree of §10, §12 and §13**: same BrowseNames, same folder
+the `Forklift/` subtree of §10, §11, §12 and §13**: same BrowseNames, same folder
 paths, same data types, same access levels, same start values, so the bridge and
 the loop mechanics can be verified in a container without TIA Portal or PLCSIM
 Advanced.
 
-**All 43 nodes, including the eight the bridge never touches** — a node absent
-from the double cannot be proven untouched (§10). The five `Forklift/Hmi/`
+**All 49 nodes in the default shape, including the eight the bridge never
+touches** — a node absent from the double cannot be proven untouched (§10). The
+count is the double's own startup line, not arithmetic done here, and it moves
+with `--safety-mirrors`: 47 in the `four` shape the controller had on
+2026-08-06, 43 with the F-layer's mirror folder absent altogether. The five `Forklift/Hmi/`
 requests and `Forklift/Link/HmiHeartbeat` are therefore served with the
 *Writable* standing §10.3 gives them, so a bridge write to one **would
 succeed**: the conformance check proves the *bridge's own allowlist* refuses
@@ -60,11 +65,15 @@ files, exist only to exercise the loop:
                             `DemoCell/Output/ConveyorSpeedCommand`, and
                             `Name=value` lines address any output node by
                             BrowseName, which is how the three
-                            `Forklift/Output/*Ref` setpoints are driven. This
-                            is a HUMAN writing setpoints by hand through a
-                            back door in the double. It is NOT PLC logic: no
-                            input value is consulted, there is no sequence,
-                            no interlock and no condition of any kind.
+                            `Forklift/Output/*Ref` setpoints are driven, and
+                            since m5-62 the six `Forklift/Safety/` mirrors too
+                            — `TorqueOffDemand=true`. This is a HUMAN writing
+                            values by hand through a back door in the double,
+                            SERVER-SIDE, where the standard program's copy
+                            from F-data would happen. It is NOT PLC logic and
+                            it is not a client write: no input value is
+                            consulted, there is no sequence, no interlock, no
+                            latch, no reset and no condition of any kind.
   S2  --observe-csv PATH    Server-side observation log: what the "PLC" sees.
   S3  --echo-input KEY      Optional: copies one nominated input value into
                             ConveyorSpeedCommand, for the closed-loop L7
@@ -300,6 +309,53 @@ FORKLIFT_WARNING = [
     ("ForkliftWarningFieldOccupied", ua.VariantType.Boolean, True),
 ]
 
+# §11 — the F-program's six mirrors, added 2026-08-06 (m5-62). READ-ONLY for
+# every client (§11.4 MR1): `set_writable` is never called on one, so a client
+# write is refused BY THIS SERVER, as the CPU refuses it. The bridge's own
+# allowlist refuses it independently, and neither enforcement is derived from the
+# other.
+#
+# START VALUES ARE §11.6's, AND FOUR OF THE SIX ARE NOT THE TYPE'S ZERO. The rule
+# there is *a mirror's start value is its source's start value*, not "choose the
+# non-permissive value" — which is why `SpeedMonitorDemand` starts FALSE (its
+# source cannot be TRUE before the monitor has armed) while `TorqueOffDemand`
+# starts TRUE (the zone latch boots set, so the SS1 sequencer's second stage
+# stands from the first believed F-cycle). That TRUE is doing real work in this
+# double: it is what a client reads before anything writes, and what a warm
+# restart reverts to, so a bridge run started against a quiet double publishes
+# torque-off first and the vehicle boots deaf until a monitored reset — the
+# consequence §11.6 and SD6 state rather than leave to be discovered on stage.
+#
+# This double runs NO F-program and no standard program: it forms none of these
+# six and derives none of them from another. They hold their start values unless
+# the S1 back door writes one, which is a human writing a value.
+FORKLIFT_SAFETY = [
+    ("EStopDemand", ua.VariantType.Boolean, True),
+    ("ZoneStopDemand", ua.VariantType.Boolean, True),
+    ("SafetyResetRequired", ua.VariantType.Boolean, True),
+    ("SafetyResetFault", ua.VariantType.Boolean, False),
+    ("SpeedMonitorDemand", ua.VariantType.Boolean, False),
+    ("TorqueOffDemand", ua.VariantType.Boolean, True),
+]
+
+#: The shapes of `Forklift/Safety/` this double can serve, so the bridge can be
+#: exercised against the controller as it IS as well as as it WILL BE. Not a
+#: preference and not scaffolding invented for convenience: each is a real state
+#: of the CPU on the way through `plc/forklift/TIA-FIX-PROCEDURE.md`.
+#:
+#:   six  — after chunks AD–AF: the full §11.2 group;
+#:   four — the controller in force at 2026-08-06T21:58Z, measured with
+#:          `bridge/tools/probe_server_paths.py`: EStopDemand, SafetyResetFault,
+#:          SafetyResetRequired, ZoneStopDemand advertised, and the SLS/SS1 pair
+#:          not yet created;
+#:   none — the F-layer not built at all (ADR 0009 D4's fallback), in which the
+#:          folder itself is absent.
+SAFETY_MIRROR_SHAPES = {
+    "six": [name for name, _, _ in FORKLIFT_SAFETY],
+    "four": ["EStopDemand", "ZoneStopDemand", "SafetyResetRequired", "SafetyResetFault"],
+    "none": [],
+}
+
 #: The eight nodes the bridge must never read and never write (§4.10): the five
 #: `Forklift/Hmi/` requests, `Link/HmiHeartbeat`, and §12's two HMI-written
 #: requests. Served — and the two §12 ones served WRITABLE — so that their being
@@ -309,7 +365,8 @@ BRIDGE_MUST_NOT_TOUCH: tuple[str, ...] = tuple(
     "HmiHeartbeat", "HmiDriveModeRequest", "HmiProcessStopRequest")
 
 
-async def build(server: Server, idx_server_interfaces: int, idx: int) -> dict:
+async def build(server: Server, idx_server_interfaces: int, idx: int,
+                safety_shape: str = "six") -> dict:
     """Build the commissioned shape: the ServerInterfaces folder in the Siemens
     namespace, the interface node and everything below it in the interface
     namespace (§3.1). `idx` is the interface namespace index; every node under
@@ -392,6 +449,23 @@ async def build(server: Server, idx_server_interfaces: int, idx: int) -> dict:
             node = await m5_folders[folder].add_variable(idx, name, ua.Variant(start, vtype))
             await node.set_writable()
             nodes[name] = node
+
+    # §11 — the mirror folder. Served in one of the three real shapes above, so a
+    # run can be taken against the controller as it is today (`four`) as well as
+    # after chunks AD–AF (`six`). With `none` the folder itself is not created,
+    # which is the unbuilt-F-layer case: `Forklift/Safety/` advertised nowhere.
+    #
+    # NOT WRITABLE, any of them: `set_writable` is never called here. A client
+    # write is refused by this server exactly as the CPU refuses it (§11.4 MR1),
+    # so the bridge's own refusal to write them is proven independently of it.
+    served = SAFETY_MIRROR_SHAPES[safety_shape]
+    if served:
+        safety_folder = await forklift.add_folder(idx, "Safety")
+        for name, vtype, start in FORKLIFT_SAFETY:
+            if name not in served:
+                continue
+            nodes[name] = await safety_folder.add_variable(
+                idx, name, ua.Variant(start, vtype))
     return nodes
 
 
@@ -409,6 +483,14 @@ _COMMANDABLE.update({
     "ForkliftDriveModeActive": ua.VariantType.UInt16,
     "ForkliftProcessStopActive": ua.VariantType.Boolean,
 })
+# The §11 mirrors, drivable through the same back door and in the same standing.
+# It is a HUMAN writing a value SERVER-SIDE — which is where the standard
+# program's copy from F-data also happens — and it is emphatically NOT a client
+# write: `Forklift/Safety/` is refused to every client by this server and by the
+# bridge's allowlist independently (§11.4 MR1, MR2). No F-program runs here, no
+# latch is modelled, no reset is modelled and no demand is derived from another:
+# `TorqueOffDemand` moves when and only when a hand moves it.
+_COMMANDABLE.update({name: vtype for name, vtype, _ in FORKLIFT_SAFETY})
 
 
 async def scaffold_command_file(nodes: dict, path: str, period: float = 0.1) -> None:
@@ -510,6 +592,7 @@ def _start_values() -> list[tuple[str, ua.VariantType, object]]:
         + [(name, vtype, start) for name, vtype, start in FORKLIFT_VEHICLE]
         + [(name, vtype, start) for name, vtype, start, _ in FORKLIFT_PROCESS_STOP]
         + [(name, vtype, start) for name, vtype, start in FORKLIFT_WARNING]
+        + [(name, vtype, start) for name, vtype, start in FORKLIFT_SAFETY]
     )
 
 
@@ -534,6 +617,8 @@ async def scaffold_warm_restart(nodes: dict, path: str, period: float = 0.05) ->
             except OSError:
                 pass
             for name, vtype, start in _start_values():
+                if name not in nodes:
+                    continue  # a shape this run does not serve (§11's four/none)
                 await nodes[name].write_value(ua.DataValue(ua.Variant(start, vtype)))
             LOG.warning(
                 "SCAFFOLD S5: WARM RESTART — every node reset to its start value in "
@@ -564,6 +649,13 @@ _OBSERVED = (
     + [name for name, _, _ in FORKLIFT_VEHICLE]
     + [name for name, _, _, _ in FORKLIFT_PROCESS_STOP]
     + [name for name, _, _ in FORKLIFT_WARNING]
+    # §11. `TorqueOffDemand` is here because a run that claims the vehicle
+    # reacted to it must be able to say what the SERVER held while that
+    # happened — a witness on the server's side of the seam, not the client's.
+    # The other five are here for the opposite reason: the bridge must never
+    # read or write them, and a column that holds its start value for a whole
+    # run is how that is observed rather than asserted.
+    + [name for name, _, _ in FORKLIFT_SAFETY]
 )
 
 
@@ -576,7 +668,11 @@ async def observe(nodes: dict, path: str, period: float = 0.2) -> None:
     given is a stem and the suffix names the session, so restarting the double
     cannot erase what the previous run observed (LESSONS 2026-07-28)."""
     path = session_csv_path(path)
-    columns = ["wall_utc", "monotonic_s", "active_sessions", "BridgeHeartbeat"] + _OBSERVED
+    # Only what this run actually serves: with the §11 folder in its `four` or
+    # `none` shape those columns do not exist, and an empty column would read as
+    # a value that never moved.
+    observed = [name for name in _OBSERVED if name in nodes]
+    columns = ["wall_utc", "monotonic_s", "active_sessions", "BridgeHeartbeat"] + observed
     with open(path, "x", newline="", encoding="utf-8") as handle:
         csv.writer(handle).writerow(columns)
     LOG.info("SCAFFOLD S2: observing to %s (one file per double session)", path)
@@ -587,7 +683,7 @@ async def observe(nodes: dict, path: str, period: float = 0.2) -> None:
             InternalSession._current_connections,
             await nodes["BridgeHeartbeat"].read_value(),
         ]
-        for name in _OBSERVED:
+        for name in observed:
             row.append(await nodes[name].read_value())
         with open(path, "a", newline="", encoding="utf-8") as handle:
             csv.writer(handle).writerow(row)
@@ -618,22 +714,29 @@ async def run(args: argparse.Namespace) -> None:
                  filler, await server.register_namespace(filler))
     idx_server_interfaces = await server.register_namespace(SERVER_INTERFACES_NAMESPACE_URI)
     idx = await server.register_namespace(INTERFACE_NAMESPACE_URI)
-    nodes = await build(server, idx_server_interfaces, idx)
+    nodes = await build(server, idx_server_interfaces, idx, args.safety_mirrors)
     LOG.info("namespace %s registered at index %d (ServerInterfaces folder)",
              SERVER_INTERFACES_NAMESPACE_URI, idx_server_interfaces)
     LOG.info("namespace %s registered at index %d (DemoCell interface and below)",
              INTERFACE_NAMESPACE_URI, idx)
     LOG.info("browse path: Objects/%d:ServerInterfaces/%d:DemoCell — two namespaces, "
              "indices deliberately unlike PLCSIM's", idx_server_interfaces, idx)
-    LOG.info("address space: %d nodes — %d in opcua-nodes.md §9, %d in §10, %d in §12, "
-             "%d in §13; the %d the bridge must never touch (%s) are served WRITABLE, "
-             "so its refusal is the bridge's own and not this server's",
+    served_safety = SAFETY_MIRROR_SHAPES[args.safety_mirrors]
+    LOG.info("address space: %d nodes — %d in opcua-nodes.md §9, %d in §10, %d in §11, "
+             "%d in §12, %d in §13; the %d the bridge must never touch (%s) are served "
+             "WRITABLE, so its refusal is the bridge's own and not this server's",
              len(nodes), len(INPUTS) + len(OUTPUTS) + len(STATUS) + len(LINK),
              len(FORKLIFT_HMI) + len(FORKLIFT_INPUTS) + len(FORKLIFT_OUTPUTS)
-             + len(FORKLIFT_STATUS) + len(FORKLIFT_LINK),
+             + len(FORKLIFT_STATUS) + len(FORKLIFT_LINK), len(served_safety),
              len(FORKLIFT_MODE) + len(FORKLIFT_ENVELOPE) + len(FORKLIFT_VEHICLE)
              + len(FORKLIFT_PROCESS_STOP), len(FORKLIFT_WARNING),
              len(BRIDGE_MUST_NOT_TOUCH), ", ".join(BRIDGE_MUST_NOT_TOUCH))
+    LOG.info("Forklift/Safety/ shape %r: %d mirror(s) served%s — READ-ONLY to every "
+             "client (opcua-nodes.md §11.4 MR1); this double runs no F-program and "
+             "forms none of them",
+             args.safety_mirrors, len(served_safety),
+             (" (" + ", ".join(served_safety) + ")") if served_safety else
+             " — the folder itself is absent, the unbuilt-F-layer case")
 
     # SCAFFOLDING: revise every client's requested session timeout into this
     # window, as the S7-1500 does (§3.2). Not a model of the PLC's value.
@@ -694,6 +797,13 @@ def main() -> None:
                         help="S4 scaffolding: longest session timeout this double grants; "
                              "the default is below the bridge's configured request, so the "
                              "grant is clamped down")
+    parser.add_argument("--safety-mirrors", choices=sorted(SAFETY_MIRROR_SHAPES),
+                        default="six",
+                        help="which shape of Forklift/Safety/ to serve: 'six' after "
+                             "TIA-FIX-PROCEDURE chunks AD-AF, 'four' as the controller "
+                             "in force was measured on 2026-08-06 (no TorqueOffDemand, "
+                             "no SpeedMonitorDemand), 'none' for an unbuilt F-layer. "
+                             "Not scaffolding behaviour: each is a real state of the CPU")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),

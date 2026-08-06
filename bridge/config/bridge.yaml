@@ -67,7 +67,34 @@
 # `bridge/tools/probe_server_paths.py`, advertised under `Forklift/Warning/`
 # and addressable — so the group is declared here rather than only against the
 # double (LESSONS 2026-08-06: probe the server before editing a client config).
-groups: ["forklift", "envelope", "warning"]
+# The SAFETY group beside them carries `opcua-nodes.md` §11 — the one mirror a
+# consumer acts on, `Forklift/Safety/TorqueOffDemand`, read and republished to
+# the vehicle's torque-off stand-in (§11.2b SD2). It is the only group in this
+# file that WRITES NOTHING: it declares no inputs, and since the write allowlist
+# is derived from the inputs of the configured groups it adds zero writable keys,
+# which is §11.4 MR1 enforced by construction rather than by promise.
+#
+# THE LEAF IS NOT ON THE CONTROLLER IN FORCE YET, AND THIS GROUP IS DECLARED
+# ANYWAY — the one case in this file where that is correct, and it is the node
+# model's ruling rather than a preference. Probed 2026-08-06T21:58Z against the
+# commissioned instance with `bridge/tools/probe_server_paths.py`:
+# `Forklift/Safety/` is advertised and carries FOUR mirrors — `EStopDemand`,
+# `SafetyResetFault`, `SafetyResetRequired`, `ZoneStopDemand`. `TorqueOffDemand`
+# and `SpeedMonitorDemand` are created by `plc/forklift/TIA-FIX-PROCEDURE.md`
+# chunks AD–AF, which the owner had not yet applied. `opcua-nodes.md` §11.6 rules
+# that **no client's connect may fail over this group** and that a bridge which
+# cannot resolve the leaf logs the absence and publishes nothing rather than
+# synthesising either polarity, so the group is declared with the node marked
+# optional in `amr_bridge/config.py` (SAFETY_GROUP.optional_nodes). Against
+# today's CPU the run connects, logs the absence once and publishes no message —
+# and no message is not torque-off (§11.2b SD5). When the delta lands, the next
+# session resolves the leaf and carries it, with no edit to this file.
+#
+# That is deliberately NOT the treatment the warning group got below: there the
+# node's absence would have failed the connect, so the group stayed out of this
+# file until the node was read back. Here the node model itself rules the
+# absence tolerable, for this group and this node only.
+groups: ["forklift", "envelope", "warning", "safety"]
 
 opcua:
   # The bridge connects OUT to this endpoint. It never listens (invariant 4).
@@ -205,6 +232,24 @@ nodes:
       # `amr_bridge/config.py`, not a value in this file.
       inputs:
         ForkliftWarningFieldOccupied:  ["Forklift", "Warning", "ForkliftWarningFieldOccupied"]
+
+    safety:
+      # READ ONLY — `opcua-nodes.md` §11. One node, one topic, one direction.
+      # There is no `inputs` table here and there never will be: every node in
+      # `Forklift/Safety/` is read-only to every client (§11.4 MR1), and the
+      # bridge's own allowlist, derived from the inputs tables, is the second and
+      # independent half of that (§4.10).
+      #
+      # `SpeedMonitorDemand` has NO slot, NO topic and NO consumer (§11.2b SD1):
+      # its reaction is the PLC's permissive, formed from F-data directly, and
+      # what reaches the vehicle is the consequence — the permissive drops, the
+      # setpoints take 0.0 in their mandatory ELSE, the envelope goes
+      # non-permissive — through no stop topic of its own. The other four mirrors
+      # are the HMI's to display. What crosses this seam is one demand Bool and
+      # nothing else: no speed, no limit, no margin, no channel reading and no
+      # value that was exceeded (SD7, ADR 0014 D4).
+      outputs:
+        TorqueOffDemand:               ["Forklift", "Safety", "TorqueOffDemand"]
       # `Mode/HmiDriveModeRequest` and `ProcessStop/HmiProcessStopRequest` are
       # absent from every table above, in both directions. They are the HMI's,
       # and the loader rejects a config that names an `Hmi…` tag in a writable
@@ -242,6 +287,14 @@ ros:
       # The producer's own topic name, `agv/forklift/config.yaml` topics: block
       # and `opcua-nodes.md` §13.3, unchanged.
       warning_field_occupied:    "/forklift/warning_field/occupied"
+    safety:
+      # The CONSUMER's own topic name — `agv/forklift/config.yaml` topics:
+      # `safety_torque_off_demand`, subscribed by
+      # `agv/forklift/scripts/sto_contactor.py`, which has carried the
+      # subscription since m5-50 and had no publisher until this group existed.
+      # Deliberately not under /forklift/cmd/: that namespace is for commands
+      # applied to joints, and a demand is not a setpoint.
+      torque_off_demand:         "/forklift/safety/torque_off_demand"
   # No `joint_name`: no configured group selects a joint out of a JointState
   # array, and the loader rejects the key when nothing needs it (§2.1 G1).
   # Subscription reliability for the Real-valued topics, matched to the

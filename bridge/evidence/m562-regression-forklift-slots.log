@@ -1,0 +1,129 @@
+bridge forklift signal group — brief m4f-06
+  endpoints opc.tcp://127.0.0.1:4842/amr-agent/celldouble/, opc.tcp://127.0.0.1:4843/amr-agent/celldouble/  (TEST DOUBLE, started by this harness)
+  workdir  /tmp/amr-forklift-slots-m562
+  ROS_DOMAIN_ID=93
+
+=== PHASE A — both groups, bridge-double-both.yaml ===
+    configured signal set: cell+forklift — cell 7in/1out/6diag (opcua-nodes.md §9), forklift 4in/3out/5diag (opcua-nodes.md §10); 11 input slots, 4 output slots, 11 diagnostics, 27 nodes touched, write allowlist 12 keys
+[37;1m2026-08-06 22:21:29.295 [31;1m[[37;1mRTPS_TRANSPORT_SHM[31;1m Error] [37mFailed init_port fastrtps_port7000: open_and_lock_file failed[34;1m -> Function [36mopen_port_internal[m
+Requested session timeout to be 3600000ms, got 8000ms instead
+    bridge log /tmp/amr-forklift-slots-m562/bridge-both.log
+Requested session timeout to be 3600000ms, got 8000ms instead
+
+A0. startup — R3 counts the configured set (§6.1)
+   ok   the heartbeat begins only once every configured input has carried a real sample — after 1.2s
+        2026-08-06 22:21:31,730 INFO    bridge.opcua startup rule R3 satisfied: all 11 input nodes of the configured set (cell+forklift) carry a real plant sample; heartbeat begins advancing at 1
+   ok   the count in the bridge's own log is the configured set's, not a literal — log says 11 input nodes for cell+forklift
+   ok   the run states its configured set at startup (§2.1 G3) — cell+forklift — cell 7in/1out/6diag (opcua-nodes.md §9), forklift 4in/3out/5diag (opcua-nodes.md §10); 11 input slots, 4 output slots, 11 diagnostics, 27 nodes touched, write allowlist 12 keys
+
+A. every configured input slot carries a ROS value into its node (§4.1, §4.7)
+   ok   an independent read-only session sees all 11 published values on their nodes — BridgeHeartbeat=14
+   ok   ForkliftForkHeight carried unchanged — 0.8399999737739563
+   ok   ForkliftLinearSpeed carried unchanged — -0.6200000047683716
+   ok   ForkliftObstacleMinDistance carried unchanged — 3.75
+   ok   ForkliftObstacleInStopZone carried unchanged — False
+
+A'. the same slots carry a SECOND value, and the field bit both ways, uninverted (§4.7 row 12)
+   ok   ForkliftForkHeight followed the plant to its second value — 0.10999999940395355 (was 0.84)
+   ok   ForkliftLinearSpeed followed the plant to its second value — 1.3700000047683716 (was -0.62)
+   ok   ForkliftObstacleInStopZone followed the plant to its second value — True (was False)
+   ok   ForkliftObstacleMinDistance followed the plant to its second value — 0.05000000074505806 (was 3.75)
+   ok   publishing TRUE on /forklift/obstacle/in_stop_zone writes TRUE — the non-permissive polarity is NOT inverted in transport — True
+   ok   and publishing FALSE writes FALSE again — a level, not an edge — False
+
+B. every output slot republishes node changes to its ROS topic (§4.2, §4.8)
+   ok   ConveyorSpeedCommand -> /cell/conveyor/cmd_speed = 0.15 (first round) — received 0.15000000596046448
+   ok   ForkliftTractionSpeedRef -> /forklift/cmd/traction_speed = 0.55 (first round) — received 0.550000011920929
+   ok   ForkliftSteerAngleRef -> /forklift/cmd/steer_angle = -0.9 (first round) — received -0.8999999761581421
+   ok   ForkliftForkSpeedRef -> /forklift/cmd/fork_speed = 0.12 (first round) — received 0.11999999731779099
+        all four arrived within 1.0 ms of each other (0.1s after the setpoints were written)
+   ok   ConveyorSpeedCommand -> /cell/conveyor/cmd_speed = -0.05 (second round) — received -0.05000000074505806
+   ok   ForkliftTractionSpeedRef -> /forklift/cmd/traction_speed = -0.25 (second round) — received -0.25
+   ok   ForkliftSteerAngleRef -> /forklift/cmd/steer_angle = 1.05 (second round) — received 1.0499999523162842
+   ok   ForkliftForkSpeedRef -> /forklift/cmd/fork_speed = 0.0 (second round) — received 0.0
+        all four arrived within 1.7 ms of each other (0.1s after the setpoints were written)
+
+    steady state: 20 s at 20 Hz with all 11 slots live, so the figures below rest on a run rather than on a handful of cycles
+
+C. a server restart under a surviving session rewrites EVERY configured input (§8.1, §7.3 case E)
+   ok   before the restart the server holds the plant's values
+        S5 warm restart 1: every node back to its start value in place, sessions left up
+   ok   the bridge detected the restart from its own heartbeat reading back a value it did not write — 101 ms after trigger 1; 0 earlier revert(s) masked (§8.1 restart residual — larger than the design's one-in-65536; see the m4f-06 report)
+   ok   the write cache was invalidated and the image rewritten in one cycle
+        2026-08-06 22:21:54,737 INFO    bridge.opcua input image rewritten after cache invalidation: 11 of 11 configured input nodes (ConveyorBeltPosition, ConveyorBeltSpeed, ProductSensorRange, ForkliftForkHeight, ForkliftLinearSpeed, ForkliftObstacleMinDistance, PanelStartPressed, PanelResetPressed, PanelStopCircuitClosed, PanelProcessStopCircuitClosed, ForkliftObstacleInStopZone)
+   ok   the count in the log is every input of the configured set — log says 11 of 11
+   ok   the rewrite is in the bridge's evidence file as 11/11 — written in one cycle; configured set cell+forklift
+        input_image_rewritten rows in the evidence file: 0/11, 11/11
+   ok   no session was lost, so nothing but the read-back could have noticed (§7.3 case E) — 0 broken-session row(s)
+   ok   an independent session sees the whole image repaired — the two stop circuits and the forklift field bit included — repaired 367 ms after the trigger
+
+D1. the six nodes of §4.10 never moved on the server
+   ok   Forklift/Hmi/HmiTractionRequest still holds its start value — 0.0
+   ok   Forklift/Hmi/HmiSteerRequest still holds its start value — 0.0
+   ok   Forklift/Hmi/HmiForkRequest still holds its start value — 0.0
+   ok   Forklift/Hmi/HmiTeleopRequest still holds its start value — False
+   ok   Forklift/Hmi/HmiResetRequest still holds its start value — False
+   ok   Forklift/Link/HmiHeartbeat still holds its start value — 0
+   ok   not one of the six appears anywhere in the bridge's log — not written, not read, not logged (§4.10) — none of HmiTractionRequest, HmiSteerRequest, HmiForkRequest, HmiTeleopRequest, HmiResetRequest, HmiHeartbeat
+   ok   while HmiLinkOk IS logged: the PLC's verdict on the other client is a diagnostic the bridge may read, and the distinction is visible in the log
+   ok   the bridge ran to the end of the phase and stopped cleanly on SIGINT — no farewell value, nothing zeroed (§7.3 B) — exit status 0
+
+PHASE A figures, from latency-both-20260806T202131Z-pid263621.csv
+        cycle interval R1            50.02 ms (n=467)
+        heartbeat read-back RB       0.64 ms (n=466)
+        per input slot — L2 write round trip:
+          ConveyorBeltPosition           0.38 ms (n=467)
+          ConveyorBeltSpeed              0.32 ms (n=467)
+          ProductSensorRange             0.28 ms (n=467)
+          PanelStartPressed              0.26 ms (n=2)
+          PanelResetPressed              0.36 ms (n=2)
+          PanelStopCircuitClosed         0.24 ms (n=2)
+          PanelProcessStopCircuitClosed  0.25 ms (n=2)
+          ForkliftForkHeight             0.27 ms (n=467)
+          ForkliftLinearSpeed            0.27 ms (n=467)
+          ForkliftObstacleInStopZone     0.33 ms (n=4)
+          ForkliftObstacleMinDistance    0.27 ms (n=467)
+        per output slot — L5 read-response to publish:
+          ConveyorSpeedCommand           0.11 ms (n=468)
+          ForkliftTractionSpeedRef       0.07 ms (n=468)
+          ForkliftSteerAngleRef          0.06 ms (n=468)
+          ForkliftForkSpeedRef           0.05 ms (n=468)
+        R3 samples received/written per slot: ConveyorBeltPosition 233/467, ConveyorBeltSpeed 233/467, ProductSensorRange 232/467, PanelStartPressed 232/2, PanelResetPressed 232/2, PanelStopCircuitClosed 232/2, PanelProcessStopCircuitClosed 232/2, ForkliftForkHeight 232/467, ForkliftLinearSpeed 232/467, ForkliftObstacleInStopZone 232/4, ForkliftObstacleMinDistance 232/467
+        counters: cycle_overruns=1, cycles=468, heartbeat_readbacks=466, heartbeat_suppressed_cycles=1, heartbeat_writes=467, inputs_rewritten_after_restart=11, publishes=1872, server_restarts_detected=1
+
+=== PHASE B — forklift only, bridge-double-forklift.yaml ===
+    configured signal set: forklift — forklift 4in/3out/5diag (opcua-nodes.md §10); 4 input slots, 3 output slots, 5 diagnostics, 13 nodes touched, write allowlist 5 keys
+[37;1m2026-08-06 22:21:56.007 [31;1m[[37;1mRTPS_TRANSPORT_SHM[31;1m Error] [37mFailed init_port fastrtps_port7000: open_and_lock_file failed[34;1m -> Function [36mopen_port_internal[m
+Requested session timeout to be 3600000ms, got 8000ms instead
+Requested session timeout to be 3600000ms, got 8000ms instead
+   ok   a forklift-only run reaches its heartbeat with no /cell/* topic published at all — after 0.9s
+        2026-08-06 22:21:58,050 INFO    bridge.opcua startup rule R3 satisfied: all 4 input nodes of the configured set (forklift) carry a real plant sample; heartbeat begins advancing at 1
+   ok   R3 counted FOUR inputs — the configured set, not the seven of the cell group (§6.1) — log says 4 for forklift
+   ok   13 nodes touched and a 5-key allowlist — §2.1's forklift-only row, the shared heartbeat included — forklift 4in/3out/5diag (opcua-nodes.md §10); 4 input slots, 3 output slots, 5 diagnostics, 13 nodes touched, write allowlist 5 keys
+   ok   and the session resolved exactly those 13 — 2026-08-06 22:21:57,895 INFO    bridge.opcua session established, 13 nodes resolved for group(s) forklift
+   ok   the four forklift nodes carry the plant's values
+   ok   every DemoCell/Input/ node still holds its start value: a group absent from the config contributes nothing (§2.1 G1) — ConveyorBeltPosition=0.0, ConveyorBeltSpeed=0.0, ProductSensorRange=0.0, PanelStopCircuitClosed=False, PanelProcessStopCircuitClosed=False
+   ok   the cell group is named nowhere in this run's configured set — forklift
+
+    steady state: 10 s at 20 Hz on the four forklift slots
+
+PHASE B figures, from latency-forklift-only-20260806T202157Z-pid263674.csv
+        cycle interval R1            49.99 ms (n=223)
+        heartbeat read-back RB       0.65 ms (n=220)
+        per input slot — L2 write round trip:
+          ForkliftForkHeight             0.39 ms (n=221)
+          ForkliftLinearSpeed            0.32 ms (n=221)
+          ForkliftObstacleInStopZone     0.29 ms (n=1)
+          ForkliftObstacleMinDistance    0.29 ms (n=221)
+        per output slot — L5 read-response to publish:
+          ForkliftTractionSpeedRef       0.11 ms (n=224)
+          ForkliftSteerAngleRef          0.07 ms (n=224)
+          ForkliftForkSpeedRef           0.06 ms (n=224)
+        R3 samples received/written per slot: ForkliftForkHeight 111/221, ForkliftLinearSpeed 111/221, ForkliftObstacleInStopZone 111/1, ForkliftObstacleMinDistance 111/221
+        counters: cycles=224, heartbeat_readbacks=220, heartbeat_suppressed_cycles=3, heartbeat_writes=221, publishes=672
+
+E. per-session evidence naming (§9.4, LESSONS 2026-07-28)
+   ok   the --evidence-csv argument is a stem; the file written names the session — latency-forklift-only-20260806T202157Z-pid263674.csv
+
+46 checks, 46 passed, 0 failed
+RESULT: PASS

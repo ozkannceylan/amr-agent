@@ -7,21 +7,27 @@
 # (`bridge-design.md` §12 item 17), the envelope group could only ever be
 # exercised against PLCSIM Advanced.
 #
-# The configured set is therefore 7 input slots, 7 output slots, 6 diagnostics,
-# 21 nodes touched and an 8-key write allowlist — and no rule anywhere in the
-# bridge writes any of those numbers down: each is derived from the groups
-# declared here (§2.1 G2).
+# The configured set is 7 input slots, 8 output slots, 6 diagnostics, 22 nodes
+# touched and an 8-key write allowlist — and no rule anywhere in the bridge
+# writes any of those numbers down: each is derived from the groups declared here
+# (§2.1 G2), and the line above is a transcription of the bridge's own startup
+# line rather than arithmetic done in this comment.
 #
 # The endpoint is the double's, never PLCSIM's (§10, operational rule). It is
 # its own port, so a run of this file never waits on another double's TIME_WAIT.
 
-# Four groups exist in the loader; three are declared here. The `warning` group
+# Five groups exist in the loader; four are declared here. The `warning` group
 # is a SEPARATE group and not four rows added to `envelope`, for the reason
 # `amr_bridge/config.py` states at WARNING_GROUP: §13 is its own node-model
 # section, and the node does not exist on the controller in force until
 # `plc/forklift/TIA-BUILD-PROCEDURE.md` chunk X creates it — so a run against
 # today's CPU must be able to leave it out without losing the envelope.
-groups: ["forklift", "envelope", "warning"]
+#
+# The `safety` group (added 2026-08-06, m5-62) is the fifth, and it is a group of
+# its own for the same two reasons one section down: §11 is its own node-model
+# section with its own folder and its own DB, and it is the ONLY group in this
+# file that reads and never writes.
+groups: ["forklift", "envelope", "warning", "safety"]
 
 opcua:
   endpoint: "opc.tcp://127.0.0.1:4845/amr-agent/celldouble/"
@@ -84,6 +90,21 @@ nodes:
       inputs:
         ForkliftWarningFieldOccupied:  ["Forklift", "Warning", "ForkliftWarningFieldOccupied"]
 
+    safety:
+      # ONE node, READ ONLY, republished to the vehicle's torque-off stand-in
+      # (`opcua-nodes.md` §11.2b SD2). There is no `inputs` table here and there
+      # never will be: `Forklift/Safety/` is read-only to every client (§11.4
+      # MR1) and the write allowlist is derived from the `inputs` tables, so this
+      # group adds zero writable keys by construction.
+      #
+      # `SpeedMonitorDemand` and the other four mirrors are ABSENT deliberately
+      # (SD1): the speed monitor's reaction is the PLC's permissive and reaches
+      # the vehicle as consequence, through no stop topic of its own, and the
+      # rest are display-only. Nothing but the demand Bool crosses this seam —
+      # no speed, no limit, no margin, no reading (SD7, ADR 0014 D4).
+      outputs:
+        TorqueOffDemand:               ["Forklift", "Safety", "TorqueOffDemand"]
+
 ros:
   node_name: "forklift_plc_bridge"
   topics:
@@ -106,6 +127,13 @@ ros:
       # The producer's own topic name, `agv/forklift/config.yaml` topics: block
       # and `opcua-nodes.md` §13.3, unchanged.
       warning_field_occupied:    "/forklift/warning_field/occupied"
+    safety:
+      # The consumer's own topic name, `agv/forklift/config.yaml` topics:
+      # `safety_torque_off_demand`, and the subscriber is
+      # `agv/forklift/scripts/sto_contactor.py`. Deliberately NOT under
+      # /forklift/cmd/: a demand is not a setpoint (§12.10's reasoning, applied
+      # to §11).
+      torque_off_demand:         "/forklift/safety/torque_off_demand"
   analog_reliability: "reliable"
 
 cycle:

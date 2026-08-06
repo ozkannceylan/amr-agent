@@ -81,6 +81,15 @@ READ_ONLY_ON_THE_SERVER = [
     (["Forklift", "Status"], "ForkliftTeleopActive", ua.Variant(False, ua.VariantType.Boolean)),
     (["Forklift", "Status"], "ForkliftObstacleStopActive", ua.Variant(False, ua.VariantType.Boolean)),
     (["Forklift", "Link"], "HmiLinkOk", ua.Variant(False, ua.VariantType.Boolean)),
+    # §11.4 MR1 — every mirror is read-only to every client, and the one the
+    # bridge now READS is checked here beside the four it does not touch at all.
+    # A group the bridge reads is exactly where "read" could quietly become
+    # "read/write", so the refusal is exercised on the node itself rather than
+    # inferred from the folder (§11.4 MR2's two independent reasons).
+    (["Forklift", "Safety"], "TorqueOffDemand", ua.Variant(False, ua.VariantType.Boolean)),
+    (["Forklift", "Safety"], "SpeedMonitorDemand", ua.Variant(True, ua.VariantType.Boolean)),
+    (["Forklift", "Safety"], "EStopDemand", ua.Variant(False, ua.VariantType.Boolean)),
+    (["Forklift", "Safety"], "ZoneStopDemand", ua.Variant(False, ua.VariantType.Boolean)),
 ]
 
 #: The six nodes of §4.10: written by the HMI, read by the PLC, **never touched
@@ -138,12 +147,17 @@ async def check_allowlist_is_derived(checks: Checks, workdir: str) -> config_mod
         # `probe_server_paths.py` read `Forklift/Warning/` back off the
         # controller in force. Seven inputs, not six: the §13 node joins §10's
         # four and §12's two.
-        ("commissioned: forklift+envelope+warning", "bridge.yaml",
-         ("forklift", "envelope", "warning"), 7),
+        # m5-62 (2026-08-06) added the `safety` group to both M5 configurations.
+        # THE INPUT COUNT IS UNCHANGED AT SEVEN, AND THAT IS THE POINT: the
+        # safety group declares no inputs at all, so a group the bridge READS
+        # adds exactly zero writable keys — §11.4 MR1 enforced by the derivation
+        # rather than by a promise in a comment.
+        ("commissioned: forklift+envelope+warning+safety", "bridge.yaml",
+         ("forklift", "envelope", "warning", "safety"), 7),
         ("double: forklift only", "bridge-double-forklift.yaml", ("forklift",), 4),
         ("double: cell+forklift", "bridge-double-both.yaml", ("cell", "forklift"), 11),
-        ("double: M5 forklift+envelope+warning", "bridge-double-m5.yaml",
-         ("forklift", "envelope", "warning"), 7),
+        ("double: M5 forklift+envelope+warning+safety", "bridge-double-m5.yaml",
+         ("forklift", "envelope", "warning", "safety"), 7),
         ("rehearsal: forklift only", "rehearsal-forklift.yaml", ("forklift",), 4),
     )
     on_disk = {os.path.basename(path) for path in os.listdir(os.path.join(HERE, "config"))

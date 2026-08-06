@@ -157,6 +157,12 @@ class Counters:
         # configuration that carries no such slot.
         self.silence_assertions = 0
         self.silence_max_age_ns = 0
+        # `opcua-nodes.md` §11.6: nodes a configured group declares optional and
+        # this run found absent from the server, counted once per session
+        # establishment. Non-zero means a topic carried no message at all for
+        # that session — which for the §11 demand is the specified outcome (SD5),
+        # not a degraded one. Zero in every configuration that declares none.
+        self.optional_nodes_absent = 0
         self.missing_joint_name = 0
         self.empty_scan = 0
         self.publishes = 0

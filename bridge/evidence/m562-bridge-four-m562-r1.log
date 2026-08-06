@@ -1,0 +1,47 @@
+2026-08-06 22:08:05,244 INFO    bridge evidence for this session: /mnt/c/Users/ozkan/projects/amr-agent/bridge/evidence/m562-latency-four-m562-r1-20260806T200805Z-pid262706.csv (stem /mnt/c/Users/ozkan/projects/amr-agent/bridge/evidence/m562-latency-four-m562-r1.csv; the previous session's file is not touched)
+2026-08-06 22:08:05,244 INFO    bridge configured signal set: forklift+envelope+warning+safety — forklift 4in/3out/5diag (opcua-nodes.md §10), envelope 2in/4out/1diag (opcua-nodes.md §12), warning 1in/0out/0diag (opcua-nodes.md §13), safety 0in/1out/0diag (opcua-nodes.md §11 (SD1–SD10 in §11.2b)); 7 input slots, 8 output slots, 6 diagnostics, 22 nodes touched, write allowlist 8 keys; silence rule: ForkliftWarningFieldOccupied asserts True after 0.500s of silence (opcua-nodes.md §13.2 W1); may be absent without failing the connect: TorqueOffDemand (opcua-nodes.md §11.6)
+[37;1m2026-08-06 22:08:05.252 [31;1m[[37;1mRTPS_TRANSPORT_SHM[31;1m Error] [37mFailed init_port fastrtps_port7000: open_and_lock_file failed[34;1m -> Function [36mopen_port_internal[m
+[37;1m2026-08-06 22:08:05.254 [31;1m[[37;1mRTPS_TRANSPORT_SHM[31;1m Error] [37mFailed init_port fastrtps_port7002: open_and_lock_file failed[34;1m -> Function [36mopen_port_internal[m
+2026-08-06 22:08:05,357 INFO    bridge.ros group forklift (opcua-nodes.md §10): 4 input slot(s), 3 output topic(s)
+2026-08-06 22:08:05,359 INFO    bridge.ros group envelope (opcua-nodes.md §12): 2 input slot(s), 4 output topic(s)
+2026-08-06 22:08:05,360 INFO    bridge.ros group warning (opcua-nodes.md §13): 1 input slot(s), 0 output topic(s)
+2026-08-06 22:08:05,698 INFO    bridge.ros group safety (opcua-nodes.md §11 (SD1–SD10 in §11.2b)): 0 input slot(s), 1 output topic(s)
+2026-08-06 22:08:05,699 INFO    bridge ROS 2 node forklift_plc_bridge spinning; config /mnt/c/Users/ozkan/projects/amr-agent/bridge/config/bridge-double-m5.yaml
+2026-08-06 22:08:05,705 WARNING asyncua.client.client Requested session timeout to be 3600000ms, got 8000ms instead
+2026-08-06 22:08:05,707 INFO    bridge.opcua session timeout: requested 10000 ms, granted 8000 ms — clamped BELOW the request; the granted value is the only one in force (§3.2 S2)
+2026-08-06 22:08:05,707 INFO    bridge.opcua secure channel lifetime: requested 3600000 ms, granted 3600000 ms — revised by the same mechanism (§3.2 S6)
+2026-08-06 22:08:05,708 INFO    bridge.opcua keep-alive interval 2.667 s = granted 8000 ms / 3 (§3.2 S3); derived from the request it would have been 3.333 s, which is not used
+2026-08-06 22:08:05,709 INFO    bridge.opcua namespace http://www.siemens.com/simatic-s7-opcua (server_interfaces) resolved to index 5
+2026-08-06 22:08:05,710 INFO    bridge.opcua namespace http://DemoCell (interface) resolved to index 6
+2026-08-06 22:08:05,717 WARNING bridge.opcua TorqueOffDemand is NOT on this server (BadNoMatch) — declared optional by opcua-nodes.md §11.6, so the connect stands. It will be read in no cycle and published on no topic: no message, no synthesised value, and no message is not torque-off (§11.2b SD5). Path: 5:ServerInterfaces/6:DemoCell/6:Forklift/6:Safety/6:TorqueOffDemand
+2026-08-06 22:08:05,720 INFO    bridge.opcua browse path: Objects/5:ServerInterfaces/6:DemoCell
+2026-08-06 22:08:05,726 INFO    bridge.opcua all 21 resolved node DataTypes match the node model (opcua-nodes.md §10, opcua-nodes.md §12, opcua-nodes.md §13, opcua-nodes.md §11 (SD1–SD10 in §11.2b)); 1 optional node(s) absent from this server: TorqueOffDemand
+2026-08-06 22:08:05,726 INFO    bridge.opcua write cache invalidated (new session): every input slot with a real sample is rewritten in the next cycle
+2026-08-06 22:08:05,726 INFO    bridge.opcua session established, 21 nodes resolved for group(s) forklift+envelope+warning+safety
+2026-08-06 22:08:05,728 INFO    bridge.opcua input image rewritten after cache invalidation: 0 of 7 configured input nodes (); no real sample yet for ForkliftForkHeight, ForkliftLinearSpeed, ForkliftObstacleInStopZone, ForkliftObstacleMinDistance, ForkliftVehicleModeApplied, ForkliftVehicleHeartbeat, ForkliftWarningFieldOccupied (R1)
+2026-08-06 22:08:05,728 INFO    bridge.opcua heartbeat withheld: 7 of 7 configured input(s) carry no real sample yet — ForkliftForkHeight, ForkliftLinearSpeed, ForkliftObstacleInStopZone, ForkliftObstacleMinDistance, ForkliftVehicleModeApplied, ForkliftVehicleHeartbeat, ForkliftWarningFieldOccupied (startup rule R3)
+2026-08-06 22:08:05,730 INFO    bridge.opcua PLC diagnostics (logged only): {'ForkliftTeleopActive': False, 'ForkliftObstacleStopActive': False, 'ForkliftSpeedLimitActive': False, 'ForkliftResetRequired': False, 'HmiLinkOk': False, 'ForkliftProcessStopActive': True}
+2026-08-06 22:08:05,783 INFO    bridge.opcua startup rule R3 satisfied: all 7 input nodes of the configured set (forklift+envelope+warning+safety) carry a real plant sample; heartbeat begins advancing at 1
+2026-08-06 22:08:06,734 INFO    bridge.opcua PLC diagnostics (logged only): {'ForkliftTeleopActive': False, 'ForkliftObstacleStopActive': False, 'ForkliftSpeedLimitActive': False, 'ForkliftResetRequired': False, 'HmiLinkOk': False, 'ForkliftProcessStopActive': True}
+2026-08-06 22:08:07,785 INFO    bridge.opcua PLC diagnostics (logged only): {'ForkliftTeleopActive': False, 'ForkliftObstacleStopActive': False, 'ForkliftSpeedLimitActive': False, 'ForkliftResetRequired': False, 'HmiLinkOk': False, 'ForkliftProcessStopActive': True}
+2026-08-06 22:08:08,702 INFO    bridge.ros QoS /forklift/fork_height: publisher reliability=RELIABLE durability=VOLATILE history=UNKNOWN depth=0
+2026-08-06 22:08:08,703 INFO    bridge.ros QoS /forklift/linear_speed: publisher reliability=RELIABLE durability=VOLATILE history=UNKNOWN depth=0
+2026-08-06 22:08:08,703 INFO    bridge.ros QoS /forklift/obstacle/in_stop_zone: publisher reliability=RELIABLE durability=VOLATILE history=UNKNOWN depth=0
+2026-08-06 22:08:08,704 INFO    bridge.ros QoS /forklift/obstacle/min_distance: publisher reliability=RELIABLE durability=VOLATILE history=UNKNOWN depth=0
+2026-08-06 22:08:08,704 INFO    bridge.ros QoS /forklift/mode/applied: publisher reliability=RELIABLE durability=VOLATILE history=UNKNOWN depth=0
+2026-08-06 22:08:08,704 INFO    bridge.ros QoS /forklift/vehicle/heartbeat: publisher reliability=RELIABLE durability=VOLATILE history=UNKNOWN depth=0
+2026-08-06 22:08:08,705 INFO    bridge.ros QoS /forklift/warning_field/occupied: publisher reliability=RELIABLE durability=VOLATILE history=UNKNOWN depth=0
+2026-08-06 22:08:08,705 INFO    bridge.ros QoS /forklift/cmd/traction_speed: 0 subscriber(s) 
+2026-08-06 22:08:08,705 INFO    bridge.ros QoS /forklift/cmd/steer_angle: 0 subscriber(s) 
+2026-08-06 22:08:08,706 INFO    bridge.ros QoS /forklift/cmd/fork_speed: 0 subscriber(s) 
+2026-08-06 22:08:08,706 INFO    bridge.ros QoS /forklift/mode/in_force: 0 subscriber(s) 
+2026-08-06 22:08:08,706 INFO    bridge.ros QoS /forklift/envelope/motion_enable: 0 subscriber(s) 
+2026-08-06 22:08:08,707 INFO    bridge.ros QoS /forklift/envelope/speed_ceiling: 0 subscriber(s) 
+2026-08-06 22:08:08,707 INFO    bridge.ros QoS /forklift/envelope/equipment_permit: 0 subscriber(s) 
+2026-08-06 22:08:08,707 INFO    bridge.ros QoS /forklift/safety/torque_off_demand: 2 subscriber(s) reliability=RELIABLE, reliability=RELIABLE
+2026-08-06 22:08:08,834 INFO    bridge.opcua PLC diagnostics (logged only): {'ForkliftTeleopActive': False, 'ForkliftObstacleStopActive': False, 'ForkliftSpeedLimitActive': False, 'ForkliftResetRequired': False, 'HmiLinkOk': False, 'ForkliftProcessStopActive': True}
+2026-08-06 22:08:09,885 INFO    bridge.opcua PLC diagnostics (logged only): {'ForkliftTeleopActive': False, 'ForkliftObstacleStopActive': False, 'ForkliftSpeedLimitActive': False, 'ForkliftResetRequired': False, 'HmiLinkOk': False, 'ForkliftProcessStopActive': True}
+2026-08-06 22:08:10,895 INFO    bridge.opcua PLC diagnostics (logged only): {'ForkliftTeleopActive': False, 'ForkliftObstacleStopActive': False, 'ForkliftSpeedLimitActive': False, 'ForkliftResetRequired': False, 'HmiLinkOk': False, 'ForkliftProcessStopActive': True}
+2026-08-06 22:08:11,486 INFO    bridge signal 2: stopping; no farewell value, nothing zeroed
+2026-08-06 22:08:11,537 INFO    bridge.opcua session closed (clean shutdown); no farewell value written, nothing zeroed
+2026-08-06 22:08:11,547 INFO    bridge stopped after 5.8s; evidence written to /mnt/c/Users/ozkan/projects/amr-agent/bridge/evidence/m562-latency-four-m562-r1-20260806T200805Z-pid262706.csv

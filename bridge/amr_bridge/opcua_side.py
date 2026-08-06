@@ -142,6 +142,17 @@ class NamespaceNotFound(Exception):
     """
 
 
+#: Server statuses that mean **this node does not exist on this server**, as
+#: opposed to a link that failed while asking. Only these are read as absence,
+#: and only for a node its group declared optional (`opcua-nodes.md` §11.6).
+#: `BadNoMatch` is what the commissioned S7-1500 returns for a BrowseName it does
+#: not publish, observed 2026-08-06 with `tools/probe_server_paths.py`.
+_ABSENT_NODE_STATUSES = (
+    ua.StatusCodes.BadNoMatch,
+    ua.StatusCodes.BadNodeIdUnknown,
+    ua.StatusCodes.BadNotFound,
+)
+
 #: Exceptions that mean *this process is wrong*, not *the link is broken*. They
 #: are never routed into the reconnect path: reconnecting cannot fix a
 #: mis-addressed node or a write to a node the bridge may not write, and a retry
@@ -191,9 +202,16 @@ class PlcClient:
         self._silent_now: dict[str, bool] = {}
         self._write_allowlist = cfg.write_allowlist
         self._expected_types = expected_types(cfg)
+        # Nodes whose absence from the server is not a connect failure (§11.6).
+        # Empty in every configuration that carries no group declaring one.
+        self._optional_keys = cfg.optional_node_keys
 
         self._client: Optional[Client] = None
         self._nodes: dict[str, object] = {}
+        #: Optional nodes this SESSION found absent. Re-derived at every session
+        #: establishment, never carried across one: the TIA delta that creates
+        #: the leaf lands between sessions and the next connect must see it.
+        self._absent_optional: list[str] = []
         # Namespace index per namespace key, resolved by URI at every session
         # establishment and dropped with the session (§3.1 N2, §8.1).
         self._ns_index: dict[str, int] = {}
@@ -379,25 +397,64 @@ class PlcClient:
     async def _resolve_nodes(self, client: Client) -> None:
         """NodeIds are resolved by qualified BrowseName path once per session and
         never reused across sessions (§3, §8.1). Each element carries the index
-        of the namespace *that element* belongs to (§3.1 N3)."""
+        of the namespace *that element* belongs to (§3.1 N3).
+
+        **One narrow tolerance, ruled by the node model rather than chosen here**
+        (`opcua-nodes.md` §11.6): a node listed in its group's `optional_nodes`
+        may be absent from the server without failing the connect, because *"no
+        client's connect may fail over this group"* and because the F-layer's
+        mirrors are created by a TIA delta that may not have been applied yet.
+        An absent node is then read in no cycle and published on no topic — it is
+        never replaced by a value in either polarity, which is §11.2b **SD5**
+        arriving at the plant as *no message*, and no message is not torque-off.
+
+        The tolerance is bounded three ways so it cannot hide a defect: only keys
+        the configured groups declare optional are eligible; only a server status
+        that means *this node does not exist here* is treated as absence, while
+        any other failure is still a connect failure; and absence is re-tested at
+        every session establishment, so the delta landing on the CPU is picked up
+        by the next reconnect and needs no edit to any file.
+        """
         self._nodes = {}
+        self._absent_optional = []
         for key in self._expected_types:
             path = [f"{self._ns_index[ns_key]}:{name}" for ns_key, name in self._cfg.browse_path(key)]
-            self._nodes[key] = await client.nodes.objects.get_child(path)
+            try:
+                self._nodes[key] = await client.nodes.objects.get_child(path)
+            except ua.UaStatusCodeError as exc:
+                if key not in self._optional_keys or exc.code not in _ABSENT_NODE_STATUSES:
+                    raise
+                self._absent_optional.append(key)
+                self._counters.optional_nodes_absent += 1
+                LOG.warning(
+                    "%s is NOT on this server (%s) — declared optional by "
+                    "opcua-nodes.md §11.6, so the connect stands. It will be read in "
+                    "no cycle and published on no topic: no message, no synthesised "
+                    "value, and no message is not torque-off (§11.2b SD5). Path: %s",
+                    key, ua.StatusCode(exc.code).name, "/".join(path),
+                )
+                self._recorder.row(
+                    "session", "optional_node_absent", clock="-", value=key,
+                    note=f"{ua.StatusCode(exc.code).name}; {'/'.join(path)}; "
+                         "no topic message is published for it (opcua-nodes.md §11.6, §11.2b SD5)",
+                )
         LOG.info("browse path: Objects/%s", "/".join(
             f"{self._ns_index[ns_key]}:{name}" for ns_key, name in self._cfg.interface_path))
 
     async def _verify_types(self) -> None:
-        for key, expected in self._expected_types.items():
-            actual = await self._nodes[key].read_data_type()
+        for key, node in self._nodes.items():
+            expected = self._expected_types[key]
+            actual = await node.read_data_type()
             if actual != _EXPECTED_DATATYPE_NODEID[expected]:
                 raise TypeMismatch(
                     f"{key}: server DataType {actual} != documented {expected.name}"
                 )
         LOG.info(
-            "all %d node DataTypes match the node model (%s)",
-            len(self._expected_types),
-            ", ".join(group.reference for group in self._cfg.signal_groups))
+            "all %d resolved node DataTypes match the node model (%s)%s",
+            len(self._nodes),
+            ", ".join(group.reference for group in self._cfg.signal_groups),
+            f"; {len(self._absent_optional)} optional node(s) absent from this server: "
+            + ", ".join(self._absent_optional) if self._absent_optional else "")
 
     # ------------------------------------------------------------------ #
     # Keep-alive — connection housekeeping, never a signal gate (§3.2)
@@ -634,7 +691,15 @@ class PlcClient:
         hand the PLC (§4.8, §5.1 "one cadence"). A group brings output slots,
         never a cadence of its own."""
         for key in self._output_keys:
-            node = self._nodes[key]
+            node = self._nodes.get(key)
+            if node is None:
+                # An optional node this server does not have (§11.6). Nothing is
+                # read and NOTHING IS PUBLISHED — not a held value, not a default,
+                # not the other polarity. For `TorqueOffDemand` that silence is
+                # the specified outcome, not a degraded one: absence is not
+                # torque-off (§11.2b SD5), and the absence was logged once at
+                # connect rather than once per cycle.
+                continue
             start = time.monotonic_ns()
             try:
                 value = await node.read_value()
@@ -876,6 +941,8 @@ class PlcClient:
         """Read-only, applied to nothing, used in no decision (§4.4)."""
         values = {}
         for key in self._cfg.diagnostic_keys:
+            if key not in self._nodes:
+                continue  # optional and absent from this server (§11.6)
             try:
                 values[key] = await self._nodes[key].read_value()
             except _BRIDGE_DEFECTS:

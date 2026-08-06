@@ -122,7 +122,8 @@ about the translator.
 ```
 
 **Signal groups (`bridge-design.md` §2.1).** The config declares which groups a
-run carries — `cell` (`opcua-nodes.md` §9) and/or `forklift` (§10) — and the
+run carries — `cell` (`opcua-nodes.md` §9), `forklift` (§10), `safety` (§11),
+`envelope` (§12), `warning` (§13) — and the
 union of their slots is that run's *configured signal set*. It is the only set
 any rule counts: the startup rule R3, the write allowlist, the reconnect refresh
 and the rewrite after a server restart all say *every input in the configured
@@ -135,6 +136,11 @@ write, no poll, no allowlist entry.
 | cell only | 7 | 1 | 6 | 15 | 8 |
 | forklift only | 4 | 3 | 5 | **13** | 5 |
 | both | 11 | 4 | 11 | 27 | 12 |
+| M5, the shape in force: forklift+envelope+warning+safety | 7 | 8 | 6 | 22 | 8 |
+
+The M5 row is a transcription of the bridge's own startup line, not arithmetic
+done here. Its allowlist is **8** with four groups configured and 8 with three:
+the safety group reads one node and writes none, so it adds no writable key.
 
 The forklift-only run touches 13 and not 12 because `DemoCell/Link/Bridge­Heartbeat`
 is a §9 node **every** configuration uses: one process, one session, one
@@ -148,13 +154,14 @@ heartbeat, one link verdict.
 | `amr_bridge/ros_side.py` | subscriptions, one publisher per output slot, field addressing |
 | `amr_bridge/opcua_side.py` | session, node resolution, type verification, the 50 ms cycle, the derived write allowlist, reconnect, and the heartbeat read-back that notices a restarted server |
 | `amr_bridge/instrumentation.py` | per-event CSV recording (always on), one file per session |
-| `config/bridge.yaml` | **the commissioned PLCSIM endpoint, cell group only** — endpoint, **both** namespace URIs, BrowseName paths, topic names, cycle period, evidence paths. No thresholds, no tolerances, no timers, no namespace index |
+| `config/bridge.yaml` | **the commissioned PLCSIM endpoint** — endpoint, **both** namespace URIs, BrowseName paths, topic names, cycle period, evidence paths. No thresholds, no tolerances, no timers, no namespace index. It carries the **forklift, envelope, warning and safety** groups: the cell group left it when the controller in force stopped publishing the M3 cell's folders (probed 2026-08-06, every cell path `BadNoMatch`) |
 | `config/bridge-double-both.yaml`, `config/bridge-double-forklift.yaml` | the same shape against the **test double**, with both groups and with the forklift group alone. The `Forklift/` subtree is a design value until the owner reads it back out of TIA Portal (`opcua-nodes.md` §10.2 step 6), which is why the committed PLCSIM config does not carry it yet |
-| `config/bridge-double-m5.yaml` | the M5 configuration against the double: the forklift, envelope and **warning** groups together (`opcua-nodes.md` §10, §12, §13). The warning group is deliberately its own group and is **not** in the committed PLCSIM config, because the node it addresses is created by `plc/forklift/TIA-BUILD-PROCEDURE.md` chunk X and does not exist on the controller yet |
-| `test_double/` | TEST SCAFFOLDING: an OPC UA server standing in for the S7-1500, serving all 43 nodes — §9, §10, and, from m5-55, §12 and §13 |
+| `config/bridge-double-m5.yaml` | the M5 configuration against the double: the forklift, envelope, **warning** and **safety** groups together (`opcua-nodes.md` §10, §12, §13, §11). Each is its own group for the same reason — one plant, one node-model section |
+| `config/…` — the **safety** group (m5-62) | one node, **read only**: `Forklift/Safety/TorqueOffDemand` → `/forklift/safety/torque_off_demand` (§11.2b **SD2**). It declares no inputs, so it adds **zero** keys to the derived write allowlist — §11.4 MR1 by construction. `SpeedMonitorDemand` has no slot, no topic and no consumer (**SD1**). The leaf is the one node in any config marked *optional*: §11.6 rules that no client's connect may fail over this group, so a run against a controller without it connects, logs the absence and publishes nothing — **and no message is not torque-off** (**SD5**), which is the deliberate opposite of the warning slot's silence rule |
+| `test_double/` | TEST SCAFFOLDING: an OPC UA server standing in for the S7-1500, serving all 49 nodes — §9, §10, from m5-55 §12 and §13, and from m5-62 the six §11 mirrors in any of three real shapes (`--safety-mirrors six｜four｜none`) |
 | `STANDIN-WRITER-DESIGN.md`, `standin_writer/` | the Windows-side **stand-in writer** for the forklift twin's simulated safety-input channels (SPEC §7, ADR 0015): design, script and per-session logs. Not part of the translator; shares nothing with it |
-| `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check, connect-conformance check, session-lifecycle check, forklift signal-group check, read-only PLC observer (scaffolding), envelope-chain witness, **warning-field stimulus (scaffolding) and warning-node witness** |
-| `EVIDENCE_LATENCY.md`, `EVIDENCE_SIGNAL_LOSS.md`, `EVIDENCE_CONNECT.md`, `EVIDENCE_LIFECYCLE.md`, `EVIDENCE_ENVELOPE_BRIDGE.md`, `EVIDENCE_WARNING_SLOT.md`, `evidence/` | dated captures, each qualified by the environment that produced it |
+| `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check, connect-conformance check, session-lifecycle check, forklift signal-group check, read-only PLC observer (scaffolding), envelope-chain witness, warning-field stimulus (scaffolding) and warning-node witness, server-path probe, **torque-off slot check (bridge + real consumer, with its positive control in the same run)** |
+| `EVIDENCE_LATENCY.md`, `EVIDENCE_SIGNAL_LOSS.md`, `EVIDENCE_CONNECT.md`, `EVIDENCE_LIFECYCLE.md`, `EVIDENCE_ENVELOPE_BRIDGE.md`, `EVIDENCE_WARNING_SLOT.md`, `EVIDENCE_TORQUE_OFF_SLOT.md`, `evidence/` | dated captures, each qualified by the environment that produced it |
 
 Where the no-logic rule is visible in the code:
 

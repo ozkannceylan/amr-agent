@@ -1,0 +1,13 @@
+2026-08-06 22:09:13,940 INFO    plc-double SCAFFOLD: index-shift namespace urn:amr-agent:test-double:index-shift:1 at index 2
+2026-08-06 22:09:13,941 INFO    plc-double SCAFFOLD: index-shift namespace urn:amr-agent:test-double:index-shift:2 at index 3
+2026-08-06 22:09:13,941 INFO    plc-double SCAFFOLD: index-shift namespace urn:amr-agent:test-double:index-shift:3 at index 4
+2026-08-06 22:09:13,946 INFO    plc-double namespace http://www.siemens.com/simatic-s7-opcua registered at index 5 (ServerInterfaces folder)
+2026-08-06 22:09:13,947 INFO    plc-double namespace http://DemoCell registered at index 6 (DemoCell interface and below)
+2026-08-06 22:09:13,949 INFO    plc-double browse path: Objects/5:ServerInterfaces/6:DemoCell — two namespaces, indices deliberately unlike PLCSIM's
+2026-08-06 22:09:13,950 INFO    plc-double address space: 49 nodes — 15 in opcua-nodes.md §9, 18 in §10, 6 in §11, 9 in §12, 1 in §13; the 8 the bridge must never touch (HmiTractionRequest, HmiSteerRequest, HmiForkRequest, HmiTeleopRequest, HmiResetRequest, HmiHeartbeat, HmiDriveModeRequest, HmiProcessStopRequest) are served WRITABLE, so its refusal is the bridge's own and not this server's
+2026-08-06 22:09:13,950 INFO    plc-double Forklift/Safety/ shape 'six': 6 mirror(s) served (EStopDemand, ZoneStopDemand, SafetyResetRequired, SafetyResetFault, SpeedMonitorDemand, TorqueOffDemand) — READ-ONLY to every client (opcua-nodes.md §11.4 MR1); this double runs no F-program and forms none of them
+2026-08-06 22:09:13,950 INFO    plc-double SCAFFOLD: session timeout granted within [5000, 8000] ms — a request outside it is revised, in either direction
+2026-08-06 22:09:13,951 WARNING asyncua.server.server No signing policy available, user certificate cannot get verified
+2026-08-06 22:09:13,951 WARNING asyncua.server.server No encrypting policy available, password may get transferred in plaintext
+2026-08-06 22:09:13,951 INFO    plc-double active OPC UA sessions: 0
+2026-08-06 22:09:13,952 INFO    plc-double TEST DOUBLE listening on opc.tcp://127.0.0.1:4842/amr-agent/celldouble/ — this is scaffolding, not a PLC
