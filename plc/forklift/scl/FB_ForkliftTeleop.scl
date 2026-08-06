@@ -11,14 +11,26 @@
 "ForkliftSafetyMirror".SafetyResetRequired := "InstF_Forklift_Safety".SafetyResetRequired;
 "ForkliftSafetyMirror".SafetyResetFault := "InstF_Forklift_Safety".SafetyResetFault;
 
+// The m5-59 F1 delta: SIX mirrors, not four. Same shape, same rule -- one
+// unconditional assignment per node, every call, deriving nothing. Without
+// these two the SLS monitor and the SS1 sequencer are built, correct and
+// observable on the CPU and reach no client at all (VALIDATION-M5 6.2).
+"ForkliftSafetyMirror".SpeedMonitorDemand := "InstF_Forklift_Safety".SpeedMonitorDemand;
+"ForkliftSafetyMirror".TorqueOffDemand := "InstF_Forklift_Safety".TorqueOffDemand;
+
 // The one new permissive term, in AFFIRMATIVE form. Taken from the F-DATA,
 // NEVER from the four mirrors above -- a consumer never recomputes an owned
 // value, and logic reading a mirror turns a display group into a causal
 // element. NEVER write it as NOT SafetyResetRequired either: that flag is the
 // F-side OR of the two demands, and a permissive formed from an aggregate
 // cannot say WHICH demand stands. This term sets no latch and starts no timer.
+// The m5-59 F1 delta adds the THIRD conjunct, safety SPEC 11.8's coupling row.
+// TorqueOffDemand is deliberately NOT a term here: it is a strict consequence
+// of causes already in this conjunction, and its consumer is the VEHICLE's
+// inhibit, not the cell's permissive.
 #safetyDemandClear := NOT "InstF_Forklift_Safety".EStopDemand
-AND NOT "InstF_Forklift_Safety".ZoneStopDemand;
+AND NOT "InstF_Forklift_Safety".ZoneStopDemand
+AND NOT "InstF_Forklift_Safety".SpeedMonitorDemand;
 
 // FB_ForkliftTeleop -- called once from OB30 (20 ms). Nowhere else, and never a
 // second instance. Source: plc/forklift/SPEC.md 7. The M5-early safety delta of
@@ -331,6 +343,21 @@ IF #forkRaised THEN
 ELSE
     #speedCap := #TRACTION_SPEED_MAX;
 END_IF;
+// The m5-59 F4 delta: the warning field's ceiling applies in TELEOP too, and
+// the reason is the F-side monitor rather than a preference. SL17/SL18 enforce
+// the 300 mm/s SLS limit on the MEASURED tread speed whenever the warning field
+// is occupied, and the F-program cannot read the drive mode (safety SPEC 6.3).
+// A mode this program leaves unclamped is a mode that LATCHES SpeedMonitorDemand
+// instead of slowing -- measured at 1.000 m/s straight through a 3.499 m warning
+// trip (VALIDATION-M5 5). One temp, one unconditional IF with a mandatory ELSE,
+// both branches assigning. #speedCap itself is NOT touched: 6.5's fork-height
+// cap and part 8's envelope ceiling keep their own single owner.
+IF #warningFieldOccupied THEN
+    #teleopSpeedCap := MIN(IN1 := #speedCap, IN2 := #WARNING_SPEED_CEILING);
+ELSE
+    #teleopSpeedCap := #speedCap;
+END_IF;
+
 // "The cap is IN FORCE", not "the cap is biting": stable on a display and in a
 // recording, and it does not flicker with the operator's control.
 "ForkliftStatus".ForkliftSpeedLimitActive :=
@@ -364,7 +391,7 @@ END_IF;
 // mandatory: without it the Real keeps its last value, the bridge keeps
 // republishing it, and the machine keeps moving after the stop.
 IF "ForkliftStatus".ForkliftTeleopActive AND #motionPermissive THEN
-    "ForkliftOutput".ForkliftTractionSpeedRef := #tractionDemand * #speedCap;
+    "ForkliftOutput".ForkliftTractionSpeedRef := #tractionDemand * #teleopSpeedCap;
 ELSE
     "ForkliftOutput".ForkliftTractionSpeedRef := 0.0;
 END_IF;

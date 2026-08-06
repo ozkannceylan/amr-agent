@@ -3101,4 +3101,63 @@ term observed doing its work. Record both with dates.
 |---|---|---|
 | 8 | **The node, its DB and its bridge slot are requests** — interface (`opcua-nodes.md`) and bridge agents; this subsection is written against the requested shape and is corrected if the ruling moves the path or leaf | Requested in the m5-49 report |
 | 9 | **The vehicle's ceiling-tracking overshoot is unmeasured** and bounds `WARNING_SPEED_CEILING` from above (the 77 mm/s remainder in its derivation). If `agv/` measures an overshoot above that, the ceiling is re-derived **downward** | Requested of `agv/` (m5-11's gate owns the tracking) |
-| 10 | **Whether SF-04 should also clamp the teleop scale** | safety-spec, via the m5-49 report |
+| 10 | ~~**Whether SF-04 should also clamp the teleop scale**~~ **ANSWERED — §14.17.** It does, and the answer is forced by the F-side monitor rather than chosen | Closed 2026-08-06 by m5-59 |
+
+### 14.17 The warning ceiling applies in teleop too — the m5-59 F4 delta
+
+**The observation this closes.** In two full-speed teleop runs the warning field
+occupied at 3.499 m and the vehicle continued at **1.000 m/s, unchanged**, to the
+protective boundary (`docs/VALIDATION-M5.md` §5). §14.16 bounds
+`ForkliftSpeedCeiling`, which is the **autonomous** envelope; the teleop setpoint
+is `#tractionDemand × #speedCap` and the warning ceiling was not a term in it.
+That was a true statement about the build. It is now changed, and **not because
+"slow down first, then stop" reads better on a recording**:
+
+> **The F-program cannot read the drive mode.** §6.3 of the safety spec is
+> explicit — it reads no teleop state, no HMI request and no standard-program
+> status bit. So `SPEED_LIMIT_MAX` is enforced on the **measured tread speed**
+> whenever the warning field is occupied, **in both modes**, once
+> `SPEED_LIMIT_ONSET_MAX` has run. A mode this program leaves unclamped is not a
+> mode that goes fast; it is a mode that **latches `SpeedMonitorDemand`** where
+> the operator expected to be slowed. Leaving teleop out was never a choice
+> between two behaviours — it was a choice between slowing and stopping hard.
+
+**The counter-argument, and why it does not win.** A commissioning operator whose
+vehicle goes sluggish for a reason he cannot see is a real cost. It is answered
+by an indicator, not by a faster vehicle: `Forklift/Warning/ForkliftWarningFieldOccupied`
+already exists as a node, and a lamp on it is `hmi/`'s to add (requested, not
+taken here). The alternative — the vehicle stopping hard and demanding a
+monitored reset — is strictly the more confusing of the two.
+
+#### The delta — one temp, one new statement, one modified statement
+
+| # | Change | Note |
+|---|---|---|
+| 1 | New Temp `#teleopSpeedCap`, **Real** | Twelfth temp of §14.3's list |
+| 2 | New statement, after §6.5's `#speedCap` block | Unconditional `IF … ELSE`, **both** branches assigning |
+| 3 | Part 7's traction statement takes `#teleopSpeedCap` in place of `#speedCap` | The `IF … ELSE` gate around it, and its mandatory `ELSE` to `0.0`, are untouched |
+
+```
+IF #warningFieldOccupied THEN
+    #teleopSpeedCap := MIN(IN1 := #speedCap, IN2 := #WARNING_SPEED_CEILING);
+ELSE
+    #teleopSpeedCap := #speedCap;
+END_IF;
+```
+
+**`#speedCap` itself is deliberately not modified.** It feeds §6.5's
+`ForkliftSpeedLimitActive` — the *fork-height* cap's display flag — and part 8's
+envelope ceiling, which applies the warning bound on its own. Folding the warning
+term into `#speedCap` would give one behaviour two owners and would make a
+fork-height lamp light for a field verdict.
+
+**No new constant.** `WARNING_SPEED_CEILING` = 0.20 m/s is §14.16's, derived
+there, and it is the same bound reaching a second consumer — not a second number.
+
+#### What this does not cover, stated rather than left to be found
+
+| # | Not covered | Consequence |
+|---|---|---|
+| 1 | **Steer angles beyond ≈ 48°.** The F-side limit is on **tread** speed, `body / cos δ`; a compliant 0.20 m/s body speed reads as 300 mm/s of tread at 48° and as 776 mm/s at the 75° stop. An operator holding full lock inside a warning field will still latch `SpeedMonitorDemand` | §14.16's own figure, now inherited by teleop. A steer-dependent clamp is **not** taken: it is new logic with its own failure modes, and the consequence here is a correct demand and a monitored reset, never a hazard. It belongs on the record and in the operator's briefing, not in a keystroke |
+| 2 | **The onset budget is now the binding assumption.** `SPEED_LIMIT_ONSET_MAX` was re-derived to `T#2s300ms` (safety spec §11.3) precisely to cover the 1.00 → 0.20 m/s ramp this clamp asks the plant for. The two values move together | If `TRACTION_SPEED_MAX`, `WARNING_SPEED_CEILING` or the plant's 0.50 m/s² deceleration changes, **both** are re-derived |
+| 3 | Any safety credit | Unchanged from §14.16: this is setpoint limiting in standard logic, it earns none, and the F-side monitor demands the stop on its own measurement if it never happens. **No PL, Category, SIL or PFH is claimed or implied** |

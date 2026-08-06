@@ -1978,6 +1978,77 @@ channel that goes **missing** — as opposed to frozen — is caught by neither 
 these but by the stale rule of §11.5, which is why the sources deliberately go
 silent rather than repeat (§11.2).
 
+### 11.1b The standstill window — derived against both bounds, not one (m5-59 F2)
+
+**The gap this closes.** `SPEED_STANDSTILL_MAX` and the vehicle's
+`safe_speed.motion_threshold_mps` were derived independently, in two documents,
+against two different questions, and **nobody derived the window between them**.
+The consequence was measured: at a deliberate 0.02 m/s teleop creep, with the
+two encoder channels reading **15–26 mm/s** — a speed the vehicle was executing
+correctly — `SpeedNearZero` and `MotionPresentValid` were both `TRUE`,
+`ShaftDoubtNow` stood, and `SpeedMonitorDemand` latched one
+`SHAFT_DOUBT_TIME` later (`bridge/evidence/m5-58-consumer-creep-shaftdoubt.log`,
+`docs/VALIDATION-M5.md` §3). Nav2's from-rest speed sits in the same band, so
+every autonomous mission latched in its first metre.
+
+**What each threshold must actually distinguish, and from what noise.**
+
+| | `motion_threshold_mps` (vehicle) | `SPEED_STANDSTILL_MAX` (here) |
+|---|---|---|
+| The question | *Is the world moving past the vehicle?* | *Is this reading indistinguishable from a stopped shaft?* |
+| The quantity | q95 of the per-ray range change between consecutive navigation scans — **a rate, not a speed** | the two encoder channels' tread-speed readings, mm/s |
+| The noise it must clear | the observation's floor at rest: **0.0000143 m/s** worst over 5 644 sustained-rest samples (`agv/forklift/EVIDENCE_ODOMETRY.md` §15.5) | the reading heads' jitter at rest: **σ = 5.47 mm/s per channel**, from the measured σ of the difference in the 0.00–0.02 m/s band (0.007731 / √2, §15.4), consecutive F-samples independent (lag-1 −0.0105) |
+| Its failure direction | every uncertainty resolves to **moving** — a wrong *still* is what corroborates a lying encoder (N11) | a window too **narrow** delays the doubt; a window too **wide** manufactures one |
+
+**The vehicle-side threshold does not move, and that is a finding rather than
+an omission.** 0.0014 m/s sits 98× above the measured rest floor and 64× below
+the slowest sustained-motion sample; raising it would blind the one mechanism
+that covers a frozen channel below 0.0308 m/s of tread speed (§11.1's honest
+limit), which is the regime the cross-comparison already cannot see. The band
+is closed **entirely on this side of the seam**. Note also that 0.0014 m/s is a
+*rate*: at the worst measured rate-to-body ratio (0.715) it corresponds to a
+body speed of **≈ 2.0 mm/s**, and that conversion is an extrapolation below
+0.05 m/s — so the band's lower edge is ≈ 2 mm/s of body speed, not 1.4 mm/s.
+
+**The derivation, over the ten F-cycles the demand actually needs.** `ShaftDoubtNow`
+must hold **continuously** for `SHAFT_DOUBT_TIME` = `T#1s` = ten F-cycles before
+D1 latches (SL15/SL16), and SL13 requires **both** channels inside the window in
+every one of them. With per-channel readings ~N(v, σ), σ = 5.47 mm/s, and samples
+independent on the F-grid, the probability that a demand forms in one such
+window is `p_in(v, W)^20` where `p_in = Φ((W−v)/σ) − Φ((−W−v)/σ)`.
+
+| Bound | Requirement | Gives |
+|---|---|---|
+| **Detection** — a stopped shaft under a rolling vehicle must demand | `p_demand(0, W) ≥ 0.5` per one-second window | `W ≥ 11.6` mm/s |
+| **Exclusion** — the measured teleop creep, tread ≈ 20 mm/s, must not | `p_demand(20, W) ≤ 1e-9` per window | `W ≤ 18.0` mm/s |
+
+**Admissible window 11.6 … 18.0 mm/s; `15` is taken**, the round value nearest
+its centre. At `W` = 15 the same arithmetic reads back:
+
+| Tread speed | What it is | `p_demand` per one-second window |
+|---|---|---|
+| 0 mm/s | a decoupled or frozen shaft | **0.885** — demanded in the first window, and the `TON` re-arms continuously, so ≈ 1.1 s expected |
+| 20 mm/s | the measured teleop creep (readings 15–26) | 1.3e-15 |
+| 25 mm/s | **the minimum tread speed the autonomy stack can hand the plant from rest, at every steer angle** | 3.7e-30 |
+
+**The 25 mm/s is a construction, not a lucky gap.** Nav2's closed-loop smoother
+cannot exceed `max_accel × dt` from rest on either axis, so
+`v = min(0.025, 0.02381/κ)` (`agv/forklift/config.yaml`, `navigation:`), and the
+F-program measures **tread** speed, which for a steered drive wheel is
+`v / cos δ`. In the acceleration-limited regime that is `0.025 / cos δ ≥ 0.025`;
+in the curvature-limited regime it is `0.025 / sin δ ≥ 0.0259` at the 1.31 rad
+steer stop. **The minimum over every steer angle is 0.025 m/s**, and the window
+sits 1.83 σ below it.
+
+**What the new value does not cover, stated rather than left to be found.**
+
+| # | Not covered | Why, and what does cover it |
+|---|---|---|
+| 1 | A healthy vehicle **sustaining** a tread speed below ≈ 15 mm/s for many seconds — a teleop operator riding the converter's own 0.005 m/s creep deadband — can still produce a false demand | Irreducible with these instruments: the reading heads' jitter (σ 5.47 mm/s) is the same order as the speeds being separated. The demand is a latched stop with a monitored reset, never a hazard, and no autonomous regime reaches it (row above) |
+| 2 | A decoupled shaft under a vehicle **rolling below ≈ 2 mm/s** of body speed | The motion observation's own floor. Nothing here sees it, and nothing claims to |
+| 3 | Detection is now **probabilistic in the first second** (0.885) where the old value made it near-certain | The cost of excluding the healthy vehicle. The `TON` re-arms every cycle, so the expected detection is ≈ 1.1 s and the tail is short; SS1's own timeout is unaffected |
+| 4 | Any of this as integrity | N10–N15 unchanged. One shaft, two readings, standard data, a labelled stand-in for a fault exclusion. **No PL, Category, SIL or PFH is claimed or implied by this derivation or by any figure in it** |
+
 ### 11.2 The transport ruling — how the readings reach the F-program
 
 **The gap this section closes** (m5-48 report, requests 1–3): the two speed
@@ -2141,9 +2212,9 @@ way** (LESSONS 2026-07-28). Every derivation is on the row.
 | `SPEED_STALE_MAX` | `T#500ms` | A design value of this spec: the source's own no-reading window (0.25 s, `read_fresh_max_s`) + one writer cycle (50 ms) + one F-cycle (100 ms) + margin, rounded up to **five F-OB cycles** — the §4.3 sampling rule satisfied by construction. A dead channel is a latched demand within ~0.6 s of its last reading |
 | `SPEED_PLAUSIBLE_MAX` / `SPEED_PLAUSIBLE_NEG` | `4000` / `-4000` | The physical window (LESSONS 2026-07-27, swept to every signal of the kind per LESSONS 2026-07-28): the drive wheel is steered, so tread speed reaches body speed / cos δ; at `TRACTION_SPEED_MAX` = 1.0 m/s and the 1.31 rad steer stop that is 1.0 / 0.2579 = **3 877 mm/s**, rounded **away** from real values so no physically reachable speed can read implausible. Outside the window is a channel fault (invalid), never a value |
 | `SPEED_LIMIT_MAX` / `SPEED_LIMIT_NEG` | `300` / `-300` | **The SLS limit, quoted**: SRS SF-10 / SC-13's 0.3 m/s creep cap, independently corroborated by the standards basis (F2, the muted-detection row). Not a new number. It bounds the **measured tread speed**, which is ≥ body speed always — conservative in the demanding direction (§11.6) |
-| `SPEED_LIMIT_ONSET_MAX` | `T#1s500ms` | The slow-down time the plant is entitled to before the limit bites, derived from the warning chain's own budget (`agv/forklift/FIELD-EVALUATION.md` §3, §6.1): verdict-to-ceiling response T_w = 0.35 s + the ramp (0.60 − 0.20) / 0.50 m/s² = 0.80 s ⇒ worst compliance 1.15 s, plus 0.35 s margin for the transport asymmetry (the F-side hears of the trip in ~0.15 s over the writer; the plant hears over the longer process path). 15 F-cycles. **After it, a vehicle still above the limit is the failed slow-down this function exists to catch**, discovered within a further `SPEED_OVERLIMIT_TIME` + one F-cycle |
+| `SPEED_LIMIT_ONSET_MAX` | `T#2s300ms` | The slow-down time the plant is entitled to before the limit bites, derived from the warning chain's own budget (`agv/forklift/FIELD-EVALUATION.md` §3, §6.1): verdict-to-ceiling response T_w = 0.35 s + the ramp from **the highest speed the plant can be at when the limit is selected** down to `WARNING_SPEED_CEILING`, at the 0.50 m/s² the same source measures. **Revised 2026-08-06 (m5-59 F4).** The first derivation ramped from the *autonomous* ceiling — (0.60 − 0.20) / 0.50 = 0.80 s ⇒ worst compliance 1.15 s ⇒ `T#1s500ms` — which was silently a statement that the vehicle is never in teleop when the field trips. It is: measured twice at 1.000 m/s straight through a 3.499 m warning trip (`docs/VALIDATION-M5.md` §5), and `plc/forklift/SPEC.md` §14.17 now clamps teleop through the same ceiling from `TRACTION_SPEED_MAX`. The ramp is therefore (1.00 − 0.20) / 0.50 = **1.60 s** ⇒ worst compliance **1.95 s**, plus the same 0.35 s transport-asymmetry margin (the F-side hears of the trip in ~0.15 s over the writer; the plant hears over the longer process path) = **2.30 s = 23 F-cycles**. **What the revision costs, said plainly:** a genuinely failed slow-down is discovered **0.80 s later than before**, still within a further `SPEED_OVERLIMIT_TIME` + one F-cycle, and with SF-03's protective field stopping the vehicle on its own independent channel throughout. **What it does not change:** the discrepancy, stale and shaft-doubt checks stay live for the whole budget (SL17 note) — only the over-limit comparison waits |
 | `SPEED_OVERLIMIT_TIME` | `T#200ms` | The same two-cycle floor as the discrepancy time, resting on the same measured sample independence (lag-1 −0.0105): no single noise sample at the margin can demand, and a real over-limit persists |
-| `SPEED_STANDSTILL_MAX` / `SPEED_STANDSTILL_NEG` | `50` / `-50` | mm/s. Above the 1 mm/s quantisation and above 4 σ of read noise (22 mm/s), far below the 300 mm/s regime. Its value coincides with the standard program's `STANDSTILL_SPEED` (0.05 m/s); that is a coincidence of two independently owned windows on two devices, not a shared decision — the §14.3 `VEHICLE_STALE_TIME` rule again |
+| `SPEED_STANDSTILL_MAX` / `SPEED_STANDSTILL_NEG` | `15` / `-15` | mm/s. **Revised 2026-08-06 (m5-59 F2); was `50` / `-50`, and the derivation is §11.1b.** The old row read "above 4 σ of read noise (22 mm/s), far below the 300 mm/s regime", which bounds the window from *below* and never bounded it from above — so it was 9 σ wide and swallowed every speed Nav2 and a teleop creep actually execute, and SL15 read a healthy slow vehicle as a failed shaft. The new value is derived against both bounds jointly, over the ten F-cycles of `SHAFT_DOUBT_TIME`, and the coincidence with the standard program's `STANDSTILL_SPEED` (0.05 m/s) is gone with it — two independently owned windows on two devices, as the §14.3 `VEHICLE_STALE_TIME` rule always said |
 | `SHAFT_DOUBT_TIME` | `T#1s` | Longer than the observation's legitimate trailing edge at every stop — the source holds *moving* for 0.50 s after motion ends (`motion_hold_s`) plus scan and grid lags, ≈ 0.7 s worst — so a normal braking-to-rest never demands; and short enough that a decoupled shaft under a rolling vehicle is a latched demand within 1 s + one F-cycle. Ten F-cycles |
 | `SS1_TIME_MAX` | `T#1s` | **Quoted**: SRS SF-03's reaction row — "STO + brake at standstill or at the SS1 time limit (≤ 1 s), whichever comes first". Not a new number |
 
@@ -2391,6 +2462,11 @@ sample re-zeroes `ET` in the same call.
 
 **Reads as:** both readings are believable and both sit inside the standstill
 window.
+
+**The window is `15` / `-15` mm/s, not `50` / `-50` — see §11.1b** for the
+derivation and for what it does not cover. Both uses below take the revised
+value; the same arithmetic shows Q3 asserting a true standstill on the first
+F-cycle with probability 0.988, so the sequencer's second stage is unaffected.
 
 **Notes.** Consumed twice, with opposite partners: with motion **present** it
 is the shared-shaft doubt (SL15); with motion **absent** it is the standstill
