@@ -1,0 +1,10 @@
+# observe_safety_mirrors  endpoint=opc.tcp://192.168.53.1:4840
+# started=2026-08-06T19:02:01.465586+00:00  label='V5 run 3: repeat of the full-teleop wall approach'
+# 23 nodes, 20.0 Hz, 60.0 s -> /home/ozkan/m5-58/logs/mirrors-v5r3.csv
+   3.502  19:02:05.015  TeleopActive: False -> True
+   4.102  19:02:05.615  SafetyResetRequired: False -> True
+  20.603  19:02:22.116  WarningFieldOccupied: False -> True
+  22.652  19:02:24.166  ZoneStopDemand: False -> True
+  22.652  19:02:24.166  TeleopActive: True -> False
+  23.003  19:02:24.516  ObstacleInStopZone: False -> True
+# 1200 rows written to /home/ozkan/m5-58/logs/mirrors-v5r3.csv

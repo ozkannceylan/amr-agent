@@ -58,7 +58,16 @@
 # `bridge-design.md` to carry the group before any bridge work on it; the
 # design document does not carry it yet, so this configuration is the bridge's
 # proposal made runnable, and the m5-44 report requests the interface round.
-groups: ["forklift", "envelope"]
+# The WARNING group beside them carries `opcua-nodes.md` §13 — the one node
+# `Forklift/Warning/ForkliftWarningFieldOccupied`, written from the field
+# evaluation's own topic. It was absent from this file until 2026-08-06 (m5-58)
+# for the reason `amr_bridge/config.py` states at WARNING_GROUP: the node did
+# not exist on the controller in force until TIA-BUILD-PROCEDURE chunk X. It
+# now does — read back against `safecell3` at 2026-08-06T17:57Z with
+# `bridge/tools/probe_server_paths.py`, advertised under `Forklift/Warning/`
+# and addressable — so the group is declared here rather than only against the
+# double (LESSONS 2026-08-06: probe the server before editing a client config).
+groups: ["forklift", "envelope", "warning"]
 
 opcua:
   # The bridge connects OUT to this endpoint. It never listens (invariant 4).
@@ -186,6 +195,16 @@ nodes:
       # setpoints, never through a stop topic of its own (§12.7 PS6).
       diagnostics:
         ForkliftProcessStopActive:     ["Forklift", "ProcessStop", "ForkliftProcessStopActive"]
+
+    warning:
+      # WRITABLE by the bridge — `opcua-nodes.md` §13. The VALUE is the field
+      # evaluation's; the bridge is the node's writer and never its author
+      # (invariant 10). Nothing is inverted, latched, thresholded or debounced
+      # here; the group's only added behaviour is the §13.2 W1 stale assert,
+      # which times the bridge's OWN input channel and is a named constant in
+      # `amr_bridge/config.py`, not a value in this file.
+      inputs:
+        ForkliftWarningFieldOccupied:  ["Forklift", "Warning", "ForkliftWarningFieldOccupied"]
       # `Mode/HmiDriveModeRequest` and `ProcessStop/HmiProcessStopRequest` are
       # absent from every table above, in both directions. They are the HMI's,
       # and the loader rejects a config that names an `Hmi…` tag in a writable
@@ -219,6 +238,10 @@ ros:
       # Subscriptions (vehicle → PLC).
       mode_applied:              "/forklift/mode/applied"
       vehicle_heartbeat:         "/forklift/vehicle/heartbeat"
+    warning:
+      # The producer's own topic name, `agv/forklift/config.yaml` topics: block
+      # and `opcua-nodes.md` §13.3, unchanged.
+      warning_field_occupied:    "/forklift/warning_field/occupied"
   # No `joint_name`: no configured group selects a joint out of a JointState
   # array, and the loader rejects the key when nothing needs it (§2.1 G1).
   # Subscription reliability for the Real-valued topics, matched to the

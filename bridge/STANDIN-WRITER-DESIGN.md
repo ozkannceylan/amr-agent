@@ -280,6 +280,36 @@ needs the first to end); a malformed `<ms>`; any unrecognised line. The
 levels the commands set are the writer's internal state; the CPU sees them at
 the next 50 ms republish.
 
+### 4.1 The command file — the same operator, a second keyboard (m5-58)
+
+`-CommandFile <path>` makes the writer poll a file once per cycle and execute
+each newly appended line **through the same `Invoke-Command2`** the console
+feeds. Same grammar, same refusals, same log lines; the only difference is
+where the characters came from, and every executed line is logged as
+`OPERATOR | command file: <line>` before it acts.
+
+**Why it exists.** `[Console]::KeyAvailable` needs a real console, and a
+writer started from a script has none — it logs `operator console =
+UNAVAILABLE` and no command can be entered for the whole session. That would
+have left `estop`, `zone` and `reset` undrivable in exactly the unattended
+validation runs whose subject is those three channels (m5-58). It is the
+operator's hands moved to a file, not a new capability.
+
+**What it deliberately does not add.** No command for a speed reading, a
+motion flag or the warning field: those arrive from a source on the two links
+or they are missing, and a human typing one would be inventing a measurement.
+The `default` arm of `Invoke-Command2` refuses them by the same sentence it
+always did.
+
+**How it behaves.** Polled inside the one loop, so it can never outrank the
+heartbeat: only whole lines already on disk are consumed, a partial trailing
+line is left for the next cycle, a file that shrinks is re-read from the top
+rather than from the middle of a line, and any IO error is logged once as
+`REFUSED` and swallowed. Empty (the default) opens no file. **Write the file
+as UTF-8 without a BOM** — a BOM is a character, the writer offers it to the
+grammar, and it is refused loudly as an unrecognised command, which is the
+correct behaviour and a confusing first line.
+
 ---
 
 ## 5. Failure behaviour — how each §7.3 row is achieved

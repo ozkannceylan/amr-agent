@@ -41,7 +41,22 @@ param(
   [Parameter(Mandatory = $true)][string]$Instance,
   [string]$Dll      = "C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll",
   [int]$Port        = 45015,
-  [int]$SpeedPort   = 45016
+  [int]$SpeedPort   = 45016,
+  # THE OPERATOR'S SECOND KEYBOARD, AND IT IS NOTHING MORE THAN THAT
+  # (m5-58). Lines appended to this file are fed to the SAME
+  # Invoke-Command2 the console feeds, in the same order, with the same
+  # refusals and the same log lines - the only difference is which device
+  # the operator's fingers were on. It exists because an unattended
+  # validation run cannot type: [Console]::KeyAvailable needs a real
+  # console, and a writer started from a script has none, which would have
+  # left `estop`, `zone` and `reset` undrivable for the whole of a run
+  # whose whole subject is those three channels.
+  #
+  # It adds NO command and NO capability: there is still no way to set a
+  # speed, a motion flag or the warning field, because those come from a
+  # source or they are missing (see the `default` arm of Invoke-Command2).
+  # Empty (the default) polls nothing and opens no file.
+  [string]$CommandFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -641,6 +656,55 @@ function Invoke-Command2([string]$raw) {
   }
 }
 
+# ---------------------------------------------------------------------
+# The command file (m5-58). Polled once per cycle, non-blocking, and it
+# NEVER blocks the loop: only whole lines already on disk are consumed,
+# a partial trailing line is left for the next cycle, and any IO error is
+# logged once and swallowed. The heartbeat outranks the operator.
+# ---------------------------------------------------------------------
+$script:cmdFileOffset = 0
+$script:cmdFilePartial = ''
+$script:cmdFileWarned = $false
+function Service-CommandFile {
+  if ([string]::IsNullOrEmpty($CommandFile)) { return }
+  try {
+    if (-not (Test-Path -LiteralPath $CommandFile)) { return }
+    $fs2 = New-Object System.IO.FileStream(
+      $CommandFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read,
+      ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+    try {
+      if ($fs2.Length -lt $script:cmdFileOffset) {
+        # Truncated or replaced under us. Start again from the top rather
+        # than reading a value out of the middle of a line.
+        $script:cmdFileOffset = 0
+        $script:cmdFilePartial = ''
+      }
+      if ($fs2.Length -le $script:cmdFileOffset) { return }
+      $count = [int]($fs2.Length - $script:cmdFileOffset)
+      $null  = $fs2.Seek($script:cmdFileOffset, [System.IO.SeekOrigin]::Begin)
+      $buf   = New-Object byte[] $count
+      $read  = $fs2.Read($buf, 0, $count)
+      $script:cmdFileOffset += $read
+      $text = [System.Text.Encoding]::UTF8.GetString($buf, 0, $read)
+      $text = $script:cmdFilePartial + $text
+      $parts = $text -split "`n"
+      $script:cmdFilePartial = $parts[$parts.Length - 1]
+      for ($i = 0; $i -lt $parts.Length - 1; $i++) {
+        $line = $parts[$i].TrimEnd("`r")
+        if ($line.Trim().Length -eq 0) { continue }
+        Say 'OPERATOR' ("command file: {0}" -f $line)
+        Invoke-Command2 $line
+        if (-not $script:running) { return }
+      }
+    } finally { $fs2.Dispose() }
+  } catch {
+    if (-not $script:cmdFileWarned) {
+      $script:cmdFileWarned = $true
+      Say 'REFUSED' ("command file {0} unreadable ({1}); the writer keeps its cycle and its links, and the console is unaffected" -f $CommandFile, $_.Exception.Message)
+    }
+  }
+}
+
 function Service-Console {
   if (-not $script:consoleOk) { return }
   try {
@@ -740,6 +804,7 @@ Say 'START' ("speed-source listener port = {0}, MOTION_SILENCE_MAX = {1} ms" -f 
 Say 'START' ("write set (exact and closed): {0}" -f ($ALLOWLIST -join ', '))
 Say 'START' ("log = {0}" -f $logPath)
 Say 'START' ("operator console = {0}" -f $(if ($consoleOk) { 'interactive' } else { 'UNAVAILABLE (no interactive console; commands cannot be entered this session)' }))
+Say 'START' ("operator command file = {0}" -f $(if ([string]::IsNullOrEmpty($CommandFile)) { 'none (console only)' } else { $CommandFile + ' -- appended lines are executed as typed commands, with the same vocabulary and the same refusals' }))
 Say 'START' ("boot levels: EStopCircuitClosed=False ZoneDeviceCircuitClosed=False ResetButtonPressed=False -- open, open, unpressed: the fail-safe pre-connection state")
 Say 'START' ("boot levels, SPEC 11.3 members: WarningFieldClear=False (the limit is in force until a source says otherwise), MotionPresent=True MotionObservationValid=False (an unobservable vehicle is moving), both speed sequences FROZEN until a live SPD line -- the writer never invents a speed and never repeats one")
 
@@ -784,8 +849,11 @@ try {
   while ($running) {
     $n++
 
-    # 1. console -- per key, non-blocking
+    # 1. console -- per key, non-blocking -- then the command file, which
+    #    is the same operator through a different keyboard
     Service-Console
+    if (-not $running) { break }
+    Service-CommandFile
     if (-not $running) { break }
 
     # 2. field link (zone + warning), then the speed-source link

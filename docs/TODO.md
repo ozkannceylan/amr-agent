@@ -1,5 +1,13 @@
 # TODO
 
+## m5-58 — full stack validation (BRIEF WRITTEN, dispatches next)
+`docs/briefs/m5-58-full-stack-validation.md`. The owner's five named
+priorities, each with a positive control: the scanner slowing then stopping,
+the e-stop, an autonomous mission, safety during autonomous, and **safety
+during teleoperation — an operator driving at a wall cannot crash**.
+Deliverable `docs/VALIDATION-M5.md`, the document the showcase is narrated
+from. Waits only on the writer's 45016 speed link, which gates AT-10/AT-11.
+
 Open items only. M5 (sensored autonomous forklift, ADR 0010 D2) is the open
 gate; M4 (forklift commissioning, ADR 0008) is closing, on the owner's
 recorded commissioning showcase and the m4f-09 gate verification. The m5r

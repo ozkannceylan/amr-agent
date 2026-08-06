@@ -1,0 +1,8 @@
+# observe_safety_mirrors  endpoint=opc.tcp://192.168.53.1:4840
+# started=2026-08-06T18:32:14.125281+00:00  label='V2 run 1: e-stop with its positive control'
+# 23 nodes, 20.0 Hz, 70.0 s -> /home/ozkan/m5-58/logs/mirrors-v2r1.csv
+   3.452  18:32:17.623  TeleopActive: False -> True
+   7.302  18:32:21.473  EStopDemand: False -> True
+   7.302  18:32:21.473  SafetyResetRequired: False -> True
+   7.302  18:32:21.473  TeleopActive: True -> False
+# 1400 rows written to /home/ozkan/m5-58/logs/mirrors-v2r1.csv

@@ -134,7 +134,12 @@ async def check_allowlist_is_derived(checks: Checks, workdir: str) -> config_mod
     #: sweep below is what stops that recurring: a configuration this table does
     #: not name fails the check rather than escaping it.
     CONFIGURATIONS = (
-        ("commissioned: forklift+envelope", "bridge.yaml", ("forklift", "envelope"), 6),
+        # m5-58 (2026-08-06) declared the warning group here too, after
+        # `probe_server_paths.py` read `Forklift/Warning/` back off the
+        # controller in force. Seven inputs, not six: the §13 node joins §10's
+        # four and §12's two.
+        ("commissioned: forklift+envelope+warning", "bridge.yaml",
+         ("forklift", "envelope", "warning"), 7),
         ("double: forklift only", "bridge-double-forklift.yaml", ("forklift",), 4),
         ("double: cell+forklift", "bridge-double-both.yaml", ("cell", "forklift"), 11),
         ("double: M5 forklift+envelope+warning", "bridge-double-m5.yaml",

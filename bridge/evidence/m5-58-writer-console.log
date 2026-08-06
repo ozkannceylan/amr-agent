@@ -1,0 +1,231 @@
+
+  ==============================================================
+   ENGINEERING STAND-IN WRITER -- NOT A SAFETY DEVICE
+   Stand-in for the WIRING of three simulated safety-input
+   channels. No Category, no PL, no SIL, no PFH, no claim.
+  ==============================================================
+
+2026-08-06T18:01:18.220Z | START | ENGINEERING STAND-IN WRITER -- not a safety device, not a safety path; it stands in for the WIRING of three simulated safety-input channels and carries no Category, no PL, no SIL and no PFH
+2026-08-06T18:01:18.228Z | START | instance = safecell3
+2026-08-06T18:01:18.229Z | START | dll = C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll
+2026-08-06T18:01:18.230Z | START | api version = 0x70000 (7.0)
+2026-08-06T18:01:18.232Z | START | cycle = 50 ms
+2026-08-06T18:01:18.233Z | START | field-link listener port = 45015 (zone + warning), FIELD_LINK_STALE_MAX = 1000 ms
+2026-08-06T18:01:18.233Z | START | speed-source listener port = 45016, MOTION_SILENCE_MAX = 250 ms
+2026-08-06T18:01:18.234Z | START | write set (exact and closed): SafetyInputStandIn.EStopCircuitClosed, SafetyInputStandIn.ZoneDeviceCircuitClosed, SafetyInputStandIn.ResetButtonPressed, SafetyInputStandIn.StandInHeartbeat, SafetyInputStandIn.SpeedReadingA, SafetyInputStandIn.SpeedReadingB, SafetyInputStandIn.SpeedSeqA, SafetyInputStandIn.SpeedSeqB, SafetyInputStandIn.MotionPresent, SafetyInputStandIn.MotionObservationValid, SafetyInputStandIn.WarningFieldClear
+2026-08-06T18:01:18.235Z | START | log = C:\Users\ozkan\projects\amr-agent\bridge\standin_writer\logs\standin-writer-20260806T180117Z-pid48736.log
+2026-08-06T18:01:18.235Z | START | operator console = UNAVAILABLE (no interactive console; commands cannot be entered this session)
+2026-08-06T18:01:18.237Z | START | operator command file = C:\Users\ozkan\m5-58\writer-cmd-20260806-200117.txt -- appended lines are executed as typed commands, with the same vocabulary and the same refusals
+2026-08-06T18:01:18.237Z | START | boot levels: EStopCircuitClosed=False ZoneDeviceCircuitClosed=False ResetButtonPressed=False -- open, open, unpressed: the fail-safe pre-connection state
+2026-08-06T18:01:18.238Z | START | boot levels, SPEC 11.3 members: WarningFieldClear=False (the limit is in force until a source says otherwise), MotionPresent=True MotionObservationValid=False (an unobservable vehicle is moving), both speed sequences FROZEN until a live SPD line -- the writer never invents a speed and never repeats one
+2026-08-06T18:01:18.245Z | API | connected to instance 'safecell3', OperatingState = Run
+2026-08-06T18:01:18.261Z | MEMBERS | speed group present: SafetyInputStandIn.SpeedReadingA, SafetyInputStandIn.SpeedReadingB, SafetyInputStandIn.SpeedSeqA, SafetyInputStandIn.SpeedSeqB
+2026-08-06T18:01:18.263Z | MEMBERS | motion group present: SafetyInputStandIn.MotionPresent, SafetyInputStandIn.MotionObservationValid
+2026-08-06T18:01:18.264Z | MEMBERS | warning group present: SafetyInputStandIn.WarningFieldClear
+2026-08-06T18:01:18.265Z | MEMBERS | all eleven members of SPEC 11.3 are present; the speed chain has a source
+2026-08-06T18:01:18.271Z | LINK | listening on 0.0.0.0:45015 for the field evaluation; none is required -- the writer serves the cell with no field link ever arriving, and while none is up the zone channel belongs to the operator
+2026-08-06T18:01:18.272Z | SPEEDLINK | listening on 0.0.0.0:45016 for the speed source; none is required -- the writer serves the cell with no speed source ever arriving, and while none is up both sequences stay frozen and the motion channel reads MOVING
+
+  Commands: estop open|close  zone open|close  reset press|release
+            reset pulse <ms>  status  quit        (Ctrl+C = quit)
+  No command sets a speed, a motion flag or the warning field: those
+  arrive from a source on the two links, or they are missing.
+
+2026-08-06T18:01:18.296Z | OPERATOR | command file: ?
+2026-08-06T18:01:18.300Z | REFUSED | '?': unrecognised command. Known: estop open|close, zone open|close, reset press|release, reset pulse <ms>, status, quit. There is deliberately no operator command for the speed readings, the motion observation or the warning field: those come from a source or they are missing, and a human typing one would be inventing a measurement
+2026-08-06T18:01:31.628Z | OPERATOR | command file: status
+2026-08-06T18:01:31.633Z | OPERATOR | status -- levels: estop=OPEN zone=OPEN reset=released | heartbeat=267 | field link down (operator owns the zone channel) | API connected | cycles=267 overruns=1 write-failures=0
+2026-08-06T18:01:31.638Z | OPERATOR | status -- speed link down | groups present: speed=True motion=True warning=True | WarningFieldClear=FALSE (occupied/silent -- the limit is selected) | MotionPresent=True (unobservable, so MOVING) | A never written seq=0 | B never written seq=0 | advancing cycles A=0 B=0
+2026-08-06T18:11:10.645Z | LINK | up: field-evaluation client 172.19.180.72:34232 connected; the zone channel now belongs to the field and is held FALSE until its first ZONE line -- a link with no verdict yet is not a clear field
+2026-08-06T18:11:10.664Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T18:11:10.835Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T18:13:38.940Z | OPERATOR | command file: estop close
+2026-08-06T18:13:38.946Z | OPERATOR | estop close -> EStopCircuitClosed := True
+2026-08-06T18:13:44.183Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:13:44.192Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:13:45.739Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:15:40.048Z | SPEEDLINK | up: speed-source client 172.19.180.72:33416 connected. Until its first SPD line each sequence stays frozen, and until its first MOT line MotionPresent stays TRUE -- a link with no reading yet is not a speed
+2026-08-06T18:15:40.539Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:16:31.525Z | SPEED | channel A alive: first reading written, SpeedReadingA = 7 mm/s, SpeedSeqA = 1
+2026-08-06T18:16:31.536Z | SPEED | channel B alive: first reading written, SpeedReadingB = 7 mm/s, SpeedSeqB = 1
+2026-08-06T18:16:57.545Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:16:57.547Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:16:59.090Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:22:19.044Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:22:31.537Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:24:13.548Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:24:28.239Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:24:30.294Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:24:30.297Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:24:31.800Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:24:39.748Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:24:48.341Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:26:15.219Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:26:15.222Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:26:16.739Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:26:29.743Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:26:33.487Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T18:26:34.438Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:29:52.144Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:29:52.147Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:29:53.654Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:31:09.849Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:31:09.991Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T18:31:10.505Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:31:14.552Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T18:31:14.595Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T18:31:15.447Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T18:31:15.495Z | SPEED | motion observation unavailable (no MOT line for 250 ms) -> MotionPresent := TRUE, MotionObservationValid := FALSE. An unobservable vehicle is moving; a false 'still' is what would corroborate a lying encoder
+2026-08-06T18:31:15.902Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T18:31:15.905Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:31:51.249Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:31:51.253Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:31:52.802Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:32:17.893Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:32:21.409Z | OPERATOR | command file: estop open
+2026-08-06T18:32:21.413Z | OPERATOR | estop open -> EStopCircuitClosed := False
+2026-08-06T18:32:22.340Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:32:29.412Z | OPERATOR | command file: estop close
+2026-08-06T18:32:29.415Z | OPERATOR | estop close -> EStopCircuitClosed := True
+2026-08-06T18:33:27.696Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:33:27.700Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:33:29.245Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:33:41.292Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:33:44.796Z | OPERATOR | command file: estop open
+2026-08-06T18:33:44.799Z | OPERATOR | estop open -> EStopCircuitClosed := False
+2026-08-06T18:33:45.690Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:33:51.809Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:33:51.812Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:33:53.355Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:33:58.096Z | OPERATOR | command file: estop close
+2026-08-06T18:33:58.100Z | OPERATOR | estop close -> EStopCircuitClosed := True
+2026-08-06T18:34:01.103Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:34:01.108Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:34:02.650Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:34:06.747Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:34:13.500Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:35:09.798Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T18:35:09.846Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T18:35:37.006Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T18:35:37.097Z | SPEED | motion observation unavailable (no MOT line for 250 ms) -> MotionPresent := TRUE, MotionObservationValid := FALSE. An unobservable vehicle is moving; a false 'still' is what would corroborate a lying encoder
+2026-08-06T18:35:37.143Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T18:35:37.147Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:35:37.806Z | SPEED | motion observation unavailable (no MOT line for 250 ms) -> MotionPresent := TRUE, MotionObservationValid := FALSE. An unobservable vehicle is moving; a false 'still' is what would corroborate a lying encoder
+2026-08-06T18:35:37.897Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:39:13.548Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:39:13.552Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:39:15.104Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:41:10.444Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:41:10.956Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:41:39.546Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T18:41:39.549Z | SPEED | motion observation unavailable (no MOT line for 250 ms) -> MotionPresent := TRUE, MotionObservationValid := FALSE. An unobservable vehicle is moving; a false 'still' is what would corroborate a lying encoder
+2026-08-06T18:41:39.652Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T18:41:39.655Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:44:53.547Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T18:44:53.609Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T18:47:16.097Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:47:16.652Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:47:25.609Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:47:25.613Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:47:27.147Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:48:22.851Z | SPEED | motion observation unavailable (no MOT line for 250 ms) -> MotionPresent := TRUE, MotionObservationValid := FALSE. An unobservable vehicle is moving; a false 'still' is what would corroborate a lying encoder
+2026-08-06T18:48:22.960Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:48:25.055Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:48:25.601Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:48:46.210Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:48:46.698Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:49:43.057Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:49:43.603Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:50:04.405Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:50:04.947Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:50:37.062Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:50:37.655Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:50:58.261Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:50:58.757Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:51:28.102Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:51:28.660Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:51:50.799Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:51:51.348Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:52:26.402Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:52:26.960Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:52:47.949Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:52:48.512Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:52:53.909Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T18:52:53.910Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T18:53:38.662Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T18:53:38.664Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T18:53:40.107Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:53:40.606Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:53:56.657Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T18:53:56.659Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T18:54:03.008Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:54:03.012Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:54:04.552Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:54:36.006Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:54:36.654Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:54:37.549Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:55:14.210Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:55:14.601Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:55:37.751Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:55:42.461Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:55:59.761Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:56:00.150Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:56:04.260Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:56:04.353Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:56:04.864Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:56:06.357Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:56:07.104Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:56:07.351Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:56:07.898Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:56:10.554Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:56:13.210Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:56:13.212Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:56:39.012Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:56:39.261Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:56:50.103Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:56:50.803Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:56:51.563Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:56:52.013Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:56:52.715Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:56:58.653Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:57:35.503Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:57:36.261Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:57:37.353Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:57:37.461Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:57:38.162Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:57:39.407Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:57:40.061Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:57:40.199Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:57:41.602Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:57:41.911Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:57:42.813Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:57:43.215Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:57:43.912Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:57:44.005Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:58:07.303Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T18:58:07.305Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T18:58:08.812Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T18:58:12.300Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:58:21.764Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:58:52.403Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T18:59:37.005Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T18:59:37.609Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T19:00:06.462Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T19:00:06.464Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T19:00:07.964Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T19:00:21.304Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T19:00:40.102Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T19:00:41.262Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T19:01:35.004Z | SPEED | motion observation unavailable (no MOT line for 250 ms) -> MotionPresent := TRUE, MotionObservationValid := FALSE. An unobservable vehicle is moving; a false 'still' is what would corroborate a lying encoder
+2026-08-06T19:01:35.112Z | SPEED | MOT 1 0 -> MotionPresent := True, MotionObservationValid := False
+2026-08-06T19:01:35.115Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T19:01:35.565Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T19:01:37.162Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T19:01:37.363Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T19:01:37.767Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-06T19:01:50.711Z | OPERATOR | command file: reset pulse 1500
+2026-08-06T19:01:50.713Z | OPERATOR | reset pulse 1500 -> ResetButtonPressed := True now, False after 1500 ms (the F-program judges the hold)
+2026-08-06T19:01:52.263Z | OPERATOR | reset pulse elapsed -> ResetButtonPressed := False (the shaped release)
+2026-08-06T19:02:05.157Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+2026-08-06T19:02:24.100Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T19:02:25.213Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
