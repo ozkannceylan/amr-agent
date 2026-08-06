@@ -6,7 +6,7 @@
 action with one observable result, so the session always has something to ask
 about and the owner never has to hold two instructions at once.
 
-**What this builds, and it is exactly four things:**
+**What this builds, and it is exactly five things:**
 
 1. **The `opcua-nodes.md` §12 node set** — four global DBs, four interface
    folders, nine nodes — verified from **outside** TIA before anything else is
@@ -20,6 +20,12 @@ about and the owner never has to hold two instructions at once.
    heartbeat, the eight S015 validity networks of §5.4, the thirteen-pin
    re-point, and the download-with-reinitialisation that makes them run.
    **Chunks J–O**, added once §4.5 existed to build from.
+5. **The m5-49 SLS/SS1 delta** — `plc/forklift-safety/SPEC.md` §11's speed
+   monitor and SS1 sequencer (twenty-seven new networks, 49 in all), and
+   `plc/forklift/SPEC.md` §14.16's warning-field ceiling on the standard side.
+   **Chunks Q–X**, steps 192–360, added once §11 and §14.16 existed to build
+   from. The F-side half types **today**; the standard side is gated on the
+   interface agent's ruling at step 338.
 
 **What this does NOT build, and must not be made to.**
 
@@ -32,6 +38,15 @@ about and the owner never has to hold two instructions at once.
 > observes everything the F-delta does **without** a writer, which is the
 > fail-safe direction and is worth observing; chunk P lists what stays
 > unproven until the ruling lands.
+
+> **This prohibition has moved on once, and it moved on in the owner's favour.**
+> The ruling landed on 2026-08-05 and the writer was built in `bridge/`
+> (`bridge/standin_writer/standin_writer.ps1`), so the paragraph above describes
+> the world chunks J–O were written in, not today's. **What it still forbids
+> exactly:** improvising an implementation at the keyboard — which today means
+> the writer's **45016 speed extension** and the WSL `SPD`/`MOT`/`PING` client
+> (chunk P), the two things step 335 is BLOCKED on. Chunks Q–W are built and
+> proven **without** them.
 
 Chunk H runs F-relevant **evidence** on the F-program as it stands before the
 delta: it writes standard DB tags with the PLCSIM Advanced API and watches the
@@ -61,9 +76,16 @@ Rewrite the three fields below whenever a step completes, and always before the
 session ends. Resuming then costs nothing: read this section, give the next
 step.
 
-    chunk:               COMPLETE — chunks 0 and A–O all done in the session of
-                         2026-08-05 (step 49 = A, step 125 = A). Step 189 stands
-                         BLOCKED as written: no writer was improvised.
+    chunk:               NEXT IS CHUNK Q, step 192. Chunks 0 and A–O are done
+                         (session of 2026-08-05; step 49 = A, step 125 = A), and
+                         step 189 stands BLOCKED as written: no writer was
+                         improvised. Chunks Q–X are new (m5-49b): 192–360, the
+                         speed monitor, the SS1 sequencer and the warning-field
+                         ceiling. **Chunks Q–W type today** and need nothing
+                         that does not exist; chunk X is gated at step 338 on
+                         the interface agent's warning-node ruling, and step 335
+                         is BLOCKED on the writer's speed extension and the WSL
+                         client. Total is now 360 steps, not 191.
     last completed step: 189
     STEP 189 IS NOW STALE, and this is the first thing the next session should
                          act on. Step 189 rests on "no writer implementation
@@ -240,6 +262,17 @@ LESSONS 2026-07-27).
 | F-side absence check `RESULT:` line (step 179) | `RESULT: PASS` — positive control read all four `Forklift/Safety/` mirrors first, then 328 browse names swept: `SafetyInputStandIn`, `StandInHeartbeat`, `InstF_Forklift_Safety`, `F_Forklift_Safety`, `Main_Safety_RTG1` all **absent**; `DataBlocksGlobal` **not published at all**; no `_1`. Log `m5-25b-f-absence-2026-08-05.log` | 2026-08-05 |
 | Three F timer `PT` values in force (step 186) | `StandInStaleTimer.PT` = `T#1S`, `ResetHoldMinTimer.PT` = `T#200MS`, `ResetHoldMaxTimer.PT` = `T#3S` — all three as specified | 2026-08-05 |
 | Invalid-boot signature of §5.4 observed (step 187) | **all ten readings as written**: `StandInValid` FALSE, `HeartbeatSeen` FALSE, `StandInStaleTimer.ET` at `T#1S` and not climbing, the three validated channels FALSE, `EStopDemand` / `ZoneStopDemand` / `SafetyResetRequired` TRUE, `SafetyResetFault` FALSE. Neither defect signature present | 2026-08-05 |
+| §11.4 F8 — Int `CMP >`, `CMP <`, `SUB` offered? negative literal accepted? (steps 195–198) | | |
+| FB2 interface counts after the §11 delta (steps 217, 219, 247, 261) | expected 10 / 6 / **44** / 17 in TIA's counting — 43 in §11.3's, the step 141 counting rule again | |
+| F-collective signature **after** the §11 delta (step 317) | must differ from `2BC94038` | |
+| S015 disclosure after the §11 delta — the tags it names (step 313) | expected ten `SafetyInputStandIn` members and nothing else; `MotionObservationValid` absent | |
+| `SafetyInputStandIn` cross-reference: 10 reads, 0 writes (step 319) | | |
+| F-side absence check `RESULT:` line, re-run (step 320) | | |
+| Ten timer `PT` values in force, each with its `IN` (step 332) | | |
+| No-source signature of §11.9 Q16 observed (step 333) | | |
+| Warning node ruling read from `opcua-nodes.md` — folder, leaf, rights (step 338) | | |
+| Node check re-run after the warning node: browse-name count and suffix sweep (step 354) | | |
+| Ceiling in force with the field occupied and the bridge down (step 358) | expected `0.20` | |
 
 ---
 
@@ -252,6 +285,7 @@ LESSONS 2026-07-27).
 | 3 | Nothing else is writing this CPU — no test double on the same endpoint, no leftover API session | |
 | 4 | The four `Forklift/Safety/` mirrors and the M4 subtree already exist on the `DemoCell` interface | Step 7 reads the folder list back; step 179 uses the four mirrors as its positive control |
 | 5 | **For chunks J–O only:** the F-program is the **as-built 2026-07-30** build — D1–D7 applied, fourteen networks in FB2, interface 3 / 4 / 10 / 2 | Step 130 reads the four counts back, and stops if they differ |
+| 6 | **For chunks Q–W only:** the F-program is the **as-built 2026-08-05** build — 22 networks, the S015 delta applied, collective signature `2BC94038`. **For chunk X only:** the interface agent has ruled on the warning node | Step 193 reads the signature back and stops if it differs; step 338 is the ruling gate |
 
 **If reality does not match a step, stop and say so.** A wrong keystroke in a
 safety project costs more than a question, and this document was written by an
@@ -1684,7 +1718,8 @@ document with its date, and rewrite the **progress block**.
 
 ## Chunk P — what is still not built, and who owns it
 
-**No step above builds any of the following, and none may be added that does.**
+**No step in this document builds any of the following, and none may be added
+that does.**
 Each is somebody's specified work, and where a step in this document would have
 depended on one, it is marked BLOCKED in place rather than filled with an
 invented value.
@@ -1698,37 +1733,1129 @@ invented value.
 | **AT-08 (b)'s scope** — the timed stimulus `reset pulse <ms>` now exists; whether the sub-window rejection test is in scope is a ruling, shadowed by the one above | **safety-spec** (SPEC §10 open item 3) | Nothing here; the program behaves identically either way |
 | **HMI v2a** (m5-14a) — without it the standard cell is inert after chunk D | **hmi agent** | Teleop drive and any showcase re-take, per chunk D |
 | **The bridge's forklift-group repoint and the §12.10 slot tables** | **bridge agent** | The vehicle-side half of the §14 envelope |
-| **The stand-in writer's speed extension** — the 45016 listener, the seven new members, `WARN` on the field link (`plc/forklift-safety/SPEC.md` §11.2) | **bridge agent** (m5-49 report request) | Chunk Q's T7 rehearsal (its step Q17 second half). The F-delta itself types and shows its no-source signature without it |
-| **The WSL-side `SPD`/`MOT`/`PING` client** beside `safe_speed_channels.py` | **agv agent** (m5-49 report request) | Same rehearsal |
-| **The warning node `Forklift/Warning/ForkliftWarningFieldOccupied` and its bridge slot** (`plc/forklift/SPEC.md` §14.16) | **interface + bridge agents** (m5-49 report request) | Chunk Q's standard-side half — the ceiling delta compiles against the DB either way, but nothing drives the node until the slot exists |
+| **The stand-in writer's speed extension** — the 45016 listener, the seven new members, `WARN` on the field link (`plc/forklift-safety/SPEC.md` §11.2) | **bridge agent** (m5-49 report request) | **Step 335**, the T7 rehearsal. Chunks Q–W type and show the no-source signature (step 333) without it |
+| **The WSL-side `SPD`/`MOT`/`PING` client** beside `safe_speed_channels.py` | **agv agent** (m5-49 report request) | Same rehearsal, step 335 |
+| **The interface ruling on `Forklift/Warning/ForkliftWarningFieldOccupied`** (`plc/forklift/SPEC.md` §14.16 requests it; the path, leaf and rights are `opcua-nodes.md`'s to rule) | **interface agent** (m5-49 report request) | **Step 338**, the gate on the whole of chunk X |
+| **The warning node's bridge slot**, with its own silence-⇒-occupied window | **bridge agent** (m5-49 report request) | **Step 358**'s second half — the ceiling falling and returning under a live verdict. The stale direction is observable without it |
 
 ---
 
-## Chunk Q — the m5-49 SLS/SS1 and warning-ceiling delta: specified, not yet expanded
+## Chunks Q–X — the m5-49 SLS/SS1 and warning-ceiling delta
 
-**Nothing below is a numbered step, and the honest count for this chunk today
-is zero.** The m5-49 brief produced the specification and its click-paths; the
-expansion into one-action-one-observable numbered steps is a **later brief**,
-which starts from these two sources and adds nothing of its own judgement:
+*Steps **192–360**, expanded from `plc/forklift-safety/SPEC.md` **§11.9** (Q1–Q17,
+with the network tables of §11.5 and the counts of §11.3) and
+`plc/forklift/SPEC.md` **§14.16**. Nothing below was invented: every name, type,
+value and position is quoted from those two sections, and where a value is one
+the tool derives, the step says read it back.*
 
-| Half | Click-path in force | What it builds |
+**Which half depends on what, and this is the reason the F-side comes first.**
+
+| Half | Chunks | Depends on |
 |---|---|---|
-| **F-side** | `plc/forklift-safety/SPEC.md` **§11.9** (steps Q1–Q17), with the network tables in §11.5 and the counts in §11.3 | Seven stand-in members (SD2), FB2 at 10 / 6 / 43 / 17, twenty-seven new networks for 49 in all, two re-pointed pins, watch Group 5, the no-source signature |
-| **Standard side** | `plc/forklift/SPEC.md` **§14.16** | One new DB `ForkliftWarning` and its requested node, one constant `WARNING_SPEED_CEILING`, one temp, the modified part-8 ceiling statement, two watch rows |
+| **F-side** — the speed monitor and the SS1 sequencer | **Q–W**, steps 192–337 | Chunk O's build in the CPU (22 networks, S015, signature `2BC94038`) and **nothing else**. It **types today**: with the writer still writing four members, the seven new members hold their start values, no sequence ever advances, the monitor never arms, and step 333's no-source signature is the proof that the build fails in the stopping direction — the same shape as step 187 |
+| **Standard side** — the warning-field ceiling | **X**, steps 338–360 | The **interface agent's ruling** on `Forklift/Warning/ForkliftWarningFieldOccupied`. Step 338 is a gate that stops the chunk if the ruling is not in `docs/interfaces/opcua-nodes.md` yet |
+| **The T7 rehearsal** — a live speed source driving the monitor | step 335, **BLOCKED** | The writer's 45016 extension (**bridge**) and the WSL `SPD`/`MOT`/`PING` client (**agv**), both in chunk P's table |
 
-**Ordering constraints the expansion must carry.** The F-side half depends on
-chunk O's build (the 22-network, S015 program in the CPU) and on nothing else
-— it is typeable **before** the writer's speed extension exists, and §11.9
-step Q16's no-source signature is exactly the with-nothing-attached proof, the
-way chunk O's step 187 was. The standard-side half depends on the interface
-agent's ruling on the warning node; typing it against an unruled path is how
-two documents start disagreeing, so it **waits for the ruling**, and the
-F-side half does not wait for it. The T7 rehearsal (Q17, second half) waits on
-the two implementation requests in chunk P's table.
+**Two chunk-P rows have moved on since chunk P was written, and it matters
+here.** The stand-in writer now exists (`bridge/standin_writer/standin_writer.ps1`,
+owner ruling of 2026-08-05) and has been run against this CPU (m5-41), so the
+F-side of this delta is worked **beside a writer that is alive** — which changes
+two things: the writer is a client of the instance and must be **stopped before
+every download** (step 302), and §2 F3 no longer needs the m5-25 repeat script
+(step 194).
 
-**When the expansion lands it takes step numbers 192 onward**, updates the
-step index, and re-derives every count from the spec tables at that moment —
-never from this stub.
+---
+
+## Chunk Q — F8, and the seven new stand-in members (SPEC §11.9 Q1–Q2)
+
+*Ends with: the Int instruction set recorded as offered with today's date, and
+`SafetyInputStandIn` carrying eleven members.*
+
+**192.** In TIA Portal, read the **title bar**.
+*You should see:* **`safe_amr`**.
+*Tell me:* what it says.
+The probe copy was deleted at step 113; if a second project name appears here,
+stop.
+
+**193.** Open **Safety Administration** online and read **two** things: the
+safety mode state, and the **F-collective signature** online and offline.
+*Expected:* safety mode **activated**; both signatures `2BC94038` and equal to
+each other — the build chunk N left.
+*Tell me:* the mode and the two signature values.
+**This is the base-build check and it is not a formality.** Every network
+number below (`CauseGone` at 28, `ResetPulse` at 37) is counted against the
+22-network build. A different signature means you are looking at a different
+program, and the position rules of §11.5 no longer land where they say.
+
+**194.** Read this and confirm it — **§2 F3 is answered and the m5-25 repeat
+script must not be run again.**
+The record table already carries F3 on `safe_amr` (steps 102–106, PASS on all
+four phases), and m5-41 went further: it observed `StandInValid` **`TRUE`** in
+the consumer's view against this very build. **Do not run**
+`plc/forklift-safety/evidence/m5-25-standin-stimulus-repeat.ps1`: it writes the
+three Bool channels and **no heartbeat**, which after the S015 delta means
+`StandInValid` `FALSE` and all three validated channels forced to the demanding
+direction — the script would be driving a program that has correctly stopped
+believing it. That is this document's own chunk-H rule, and it still holds.
+If you want F3 re-confirmed live today, the instrument is the **writer**
+(`bridge\standin_writer\standin_writer.ps1 -Instance safecell3`), which supplies
+the heartbeat, plus `bridge\standin_writer\testing\observe_consumer.ps1` reading
+the F-block's own instance data.
+*Tell me:* that you have read this and will not run the repeat script.
+
+**195.** In `F_Forklift_Safety [FB2]`, open the **instruction list** and look
+under **Comparator operations** for **`CMP >`** and **`CMP <`** for **Int**.
+*Tell me:* whether each is offered, character for character as the list names
+it.
+*This is §11.4 F8, first half.* F7 already recorded `CMP <>` and `MOVE` as
+offered on this CPU (2026-08-05). **The list is read rather than assumed
+because this F-set omits instructions one would assume present** — `R_TRIG` and
+`F_TRIG` are absent from it (F2), which is why §5's edges are built by hand.
+
+**196.** In the same list, look under **Math functions** for **`SUB`** for
+**Int**.
+*Tell me:* whether it is offered.
+**Stop and report if `SUB` or either comparator is missing.** The
+cross-comparison then needs a design change — two one-sided comparisons per
+ordering, or a DInt path — and that is a specification decision, **not a
+substitution to make at the keyboard** (§11.4's abort column).
+
+**197.** Build **one throwaway network** at the end of FB2: a `CMP <` box (Int)
+with in 1 = `#StandInHeartbeat` and in 2 = the **literal `-31`**, driving
+nothing.
+*Tell me:* whether TIA accepted the negative literal at the pin, and any
+message it showed.
+*Why a negative literal specifically:* four of the fourteen new constants are
+negative (`SPEED_DISCREPANCY_NEG`, `SPEED_PLAUSIBLE_NEG`, `SPEED_LIMIT_NEG`,
+`SPEED_STANDSTILL_NEG`), and a set that refuses them changes the design, not
+the typing.
+
+**198.** **Compile the safety program.**
+*Tell me:* the error and warning counts.
+**Stop on any error** and give me the message text — that is F8 failing.
+
+**199.** **Delete the throwaway network** and read the network count back.
+*Expected:* **22**, ending `ResetMemory` then `HeartbeatMemory`.
+*Tell me:* the count and the last two network titles.
+*Why it is deleted rather than kept:* it is a compile probe, not logic, and F8
+is recorded as a read-back in the record table. The collective signature is
+re-read after the real delta at step 317 either way.
+
+Steps 200–206 add the **seven new members of `SafetyInputStandIn`** (SPEC
+§11.3, SD2). Each is one row: name, type, start value. **This DB already
+exists on the CPU** — see step 329 for what that costs.
+
+**200.** `SpeedReadingA` — type **`Int`**, start **`0`**.
+**201.** `SpeedReadingB` — type **`Int`**, start **`0`**.
+**202.** `SpeedSeqA` — type **`Int`**, start **`0`**.
+**203.** `SpeedSeqB` — type **`Int`**, start **`0`**.
+*After 203, tell me:* the four rows as they read.
+
+**204.** `MotionPresent` — type **`Bool`**, start **`TRUE`**.
+*Tell me:* the row, and the start value as it reads.
+**Trap.** `TRUE` is the fail direction and is deliberate (§11.3, N11): an
+unobservable world counts as **moving**, because a false *still* is what
+corroborates a lying encoder. `FALSE` here would let the SS1 sequencer confirm
+a standstill nobody observed.
+
+**205.** `MotionObservationValid` — type **`Bool`**, start **`FALSE`**.
+*Tell me:* the row.
+*It is read by no network* — it exists so the watch table can tell *moving
+because observed* from *moving because unobservable* (§11.8). It is **not** an
+FB input and is bound to no pin (step 310).
+
+**206.** `WarningFieldClear` — type **`Bool`**, start **`FALSE`**.
+*Tell me:* the row.
+**Trap.** `FALSE` means *limit selected*. Occupied, silent field link, dead
+writer and never-yet-heard all read the same, and all of them select the
+limit — *wire NC, program NO* applied to a field verdict.
+
+**207.** Read `SafetyInputStandIn` back: the **member count**, and that the
+**Retain** column is clear on all of them.
+*Expected:* **11** members (4 + 7), no Retain, block still **optimized**.
+*Tell me:* the count and the Retain state.
+
+**208.** Open the DB's **properties** and re-read **Accessible from
+HMI/OPC UA**.
+*Expected:* still **✘ (cleared)**.
+*Tell me:* what the checkbox reads.
+**Trap.** Adding members is exactly when this gets re-enabled by accident, and
+the consequence is silent: seven speed members published to every client. Step
+320 proves the absence from outside TIA; this step is the cheap check that
+makes that proof likely to pass.
+
+**209.** Screenshot `SafetyInputStandIn`'s declaration table showing all eleven
+members, saved as
+`plc/forklift-safety/evidence/m5-49-standin-seven-members.png`.
+*Tell me:* saved.
+
+> **Chunk Q done.** The instruction set is recorded as offered with today's
+> date, and the stand-in DB carries the seven new members. Nothing reads them
+> yet.
+
+---
+
+## Chunk R — FB2's new inputs and outputs (SPEC §11.9 Q3, first half)
+
+*Ends with: FB2's Input section reading ten rows and its Output section six,
+with `MotionObservationValid` deliberately absent from both.*
+
+**210.** Open **`F_Forklift_Safety [FB2]`**'s interface and read the **four
+section counts** back: Input, Output, Static, Constant.
+*Expected:* **4 / 4 / 19 / 3** — the build chunk K left.
+*Tell me:* the four numbers.
+**The static count is 19, not 18, and that is not an error.** TIA's
+auto-generated `F_IEC_Timer_Instance` is a real row that SPEC §3.3's table does
+not count (record table, step 141). Same build, two counting rules — carry that
+forward to step 247.
+**Do not rename this FB and do not rename `InstF_Forklift_Safety [DB3]`.**
+
+Steps 211–216 add the **six new Inputs** (§11.3). One row each.
+
+**211.** `SpeedReadingA` — **`Int`**.
+**212.** `SpeedReadingB` — **`Int`**.
+**213.** `SpeedSeqA` — **`Int`**.
+**214.** `SpeedSeqB` — **`Int`**.
+**215.** `MotionPresent` — **`Bool`**.
+**216.** `WarningFieldClear` — **`Bool`**.
+*After 216, tell me:* the six rows as they read.
+
+**217.** Read the **Input count** back, and confirm **`MotionObservationValid`
+is not among the rows**.
+*Expected:* **10** inputs.
+*Tell me:* the count, and that the diagnosis-only member is absent.
+*Why it is absent by design:* an input the block never reads still enters the
+S015 disclosure at step 313 and still has to be explained. The disclosure lists
+what the safety program reads; keeping it honest costs one row of restraint
+here.
+
+**218.** Add the Output **`SpeedMonitorDemand`** — **`Bool`**.
+*Tell me:* the row.
+
+**219.** Add the Output **`TorqueOffDemand`** — **`Bool`**.
+*Tell me:* the row, and the Output count.
+*Expected:* **6**.
+
+**220.** Screenshot the Input and Output sections, saved as
+`plc/forklift-safety/evidence/m5-49-fb2-io.png`.
+*Tell me:* saved.
+
+> **Chunk R done.** The block can be handed the readings. It has nowhere to put
+> its working values yet — chunk S is that.
+
+---
+
+## Chunk S — the twenty-five statics and the fourteen constants (SPEC §11.9 Q3, second half)
+
+*Ends with: FB2's interface reading 10 / 6 / 44 / 17 in TIA's own counting, with
+every new timer a multi-instance.*
+
+**221.** Open the existing static **`StandInStaleTimer`** and read its
+**declared type** back.
+*Tell me:* the type string exactly as TIA writes it.
+*Use that same type for all seven new timers below.* §11.3 names them `TON`;
+the string the tool writes is the tool's, not the document's — the same
+read-back chunk E made at step 64.
+
+Steps 222–246 add the **twenty-five new statics** (§11.3). One row each: name,
+type, start value. Types are `Bool` start `FALSE` unless the row says
+otherwise.
+
+**222.** `SpeedSeqAChanged` — `Bool`.
+**223.** `SpeedSeqBChanged` — `Bool`.
+**224.** `SpeedChainSeen` — `Bool`.
+*After 224, tell me:* the three rows.
+*`SpeedChainSeen` is the arming term* — it is what keeps a cell-scope run, in
+which no speed source ever starts, from being blocked by a measurement it never
+had.
+
+**225.** `SpeedAStaleTimer` — the timer type from step 221, **multi-instance**.
+**226.** `SpeedBStaleTimer` — same.
+*After 226, tell me:* that both were accepted as multi-instances and not as
+separate instance DBs.
+**Trap.** A timer that lands as its own instance DB is a second block to
+download and a second place a stale `PT` can hide. Every timer in this block is
+a multi-instance inside `DB3`, which is what makes step 331 able to read them
+all in one sweep.
+
+**227.** `SpeedAValid` — `Bool`.
+**228.** `SpeedBValid` — `Bool`.
+**229.** `SpeedStaleNow` — `Bool`.
+**230.** `WarningFieldClearValid` — `Bool`.
+**231.** `SpeedDiff` — **`Int`**, start **`0`**.
+**232.** `SpeedDiscrepantNow` — `Bool`.
+**233.** `SpeedDiscrepancyTimer` — timer type, multi-instance.
+**234.** `SpeedNearZero` — `Bool`.
+**235.** `MotionPresentValid` — `Bool`.
+**236.** `ShaftDoubtNow` — `Bool`.
+**237.** `ShaftDoubtTimer` — timer type, multi-instance.
+**238.** `SpeedLimitOnsetTimer` — timer type, multi-instance.
+**239.** `SpeedOverLimitNow` — `Bool`.
+**240.** `SpeedOverLimitTimer` — timer type, multi-instance.
+**241.** `SpeedCauseGone` — `Bool`.
+**242.** `Ss1Demand` — `Bool`.
+**243.** `Ss1Timer` — timer type, multi-instance.
+**244.** `VehicleStandstillNow` — `Bool`.
+**245.** `SpeedSeqAMemory` — **`Int`**, start **`0`**.
+**246.** `SpeedSeqBMemory` — **`Int`**, start **`0`**.
+*After 246, tell me:* that all twenty-five rows are present, and the spelling of
+the last two — they are the two the whole stale rule reads against.
+
+**247.** Read the **Static count** back.
+*Expected:* **44** — 19 + 25, in TIA's counting. §11.3 says 43 because it counts
+the way §3.3 does, without `F_IEC_Timer_Instance`.
+*Tell me:* the number you see, and, **if it is higher than 44**, the names of
+the extra rows.
+**A row TIA generated for itself is not a typo — do not delete one.** Seven new
+`TON`s may or may not make the tool add helper instances of its own; that is
+the tool's business. What matters is that no row you typed is missing and no
+name carries a suffix (step 318).
+
+Steps 248–261 add the **fourteen new constants** to the **Constant** section —
+which exists on this block, since step 210 read three constants back. Each is
+one row: name, type, value. **Every derivation is on its row in §11.3**; none
+of these numbers is re-derived here or at the keyboard.
+
+**248.** `SPEED_DISCREPANCY_MAX` — **`Int`**, **`31`**.
+**249.** `SPEED_DISCREPANCY_NEG` — **`Int`**, **`-31`**.
+*After 249, tell me:* both rows, and that the negative value was accepted.
+*Why 31 and not 30.784:* the seam carries Int mm/s and 4 σ of the measured
+channel difference rounds **up**, the direction that preserves the measured
+zero-exceedance property (§11.1). Rounding down would have manufactured a
+threshold the nuisance measurement was never run at.
+
+**250.** `SPEED_DISCREPANCY_TIME` — **`Time`**, **`T#200ms`**.
+**251.** `SPEED_STALE_MAX` — **`Time`**, **`T#500ms`**.
+**252.** `SPEED_PLAUSIBLE_MAX` — **`Int`**, **`4000`**.
+**253.** `SPEED_PLAUSIBLE_NEG` — **`Int`**, **`-4000`**.
+**254.** `SPEED_LIMIT_MAX` — **`Int`**, **`300`**.
+**255.** `SPEED_LIMIT_NEG` — **`Int`**, **`-300`**.
+*After 255, tell me:* the four rows.
+**Trap: these two pairs are not interchangeable and never share a value.**
+`SPEED_PLAUSIBLE_*` is the **physical window** — outside it a reading is a
+channel fault, never a value (the analogue-plausibility rule, LESSONS
+2026-07-27). `SPEED_LIMIT_*` is the **SLS limit**, quoted from SRS SF-10. One
+says *this cannot be a speed*, the other says *this speed is too fast*.
+
+**256.** `SPEED_LIMIT_ONSET_MAX` — **`Time`**, **`T#1s500ms`**.
+**257.** `SPEED_OVERLIMIT_TIME` — **`Time`**, **`T#200ms`**.
+**258.** `SPEED_STANDSTILL_MAX` — **`Int`**, **`50`**.
+**259.** `SPEED_STANDSTILL_NEG` — **`Int`**, **`-50`**.
+**260.** `SHAFT_DOUBT_TIME` — **`Time`**, **`T#1s`**.
+**261.** `SS1_TIME_MAX` — **`Time`**, **`T#1s`**.
+*After 261, tell me:* the six rows, and the **Constant count**.
+*Expected:* **17** (3 + 14).
+**`SS1_TIME_MAX` and `SHAFT_DOUBT_TIME` read the same and are two constants on
+purpose** — one is quoted from SRS SF-03's reaction row, the other is derived
+from the motion observation's own hold time. Retuning one must never silently
+retune the other; this project already keeps `VEHICLE_STALE_TIME` and
+`HEARTBEAT_STALE_TIME` apart for the same reason (step 54).
+
+**262.** Look at the call to `F_Forklift_Safety` in **`Main_Safety_RTG1 [FB1]`**.
+*You should see:* an **inconsistency marker** on the call box.
+*Tell me:* whether it is there.
+**That marker is expected and is not repaired here.** Step 303 repairs it,
+after the networks exist — repairing it now would only mean doing it twice.
+
+**263.** Screenshot the Static and Constant sections, saved as
+`plc/forklift-safety/evidence/m5-49-fb2-statics.png`.
+*Tell me:* saved.
+
+> **Chunk S done.** The block has the whole vocabulary of §11. It uses none of
+> it yet.
+
+---
+
+## Chunk T — SL1–SL20, the speed validity and monitor terms (SPEC §11.5)
+
+*Ends with: twenty new networks between `ResetPressedValid` and `CauseGone`,
+each ending in one written operand.*
+
+**The position rule is load-bearing, exactly as it was for V1–V7.** SL1–SL20
+run **after V7 and before `CauseGone`**, because `CauseGone` gains the
+`SpeedCauseGone` conjunct at step 287 and must read a value computed **earlier
+in the same F-cycle**. After this chunk TIA numbers V1–V7 as 1–7, SL1–SL20 as
+8–27, and `CauseGone` as 28.
+
+Each step below builds **one** network. The element/pin/operand tables are in
+`plc/forklift-safety/SPEC.md` §11.5 — open it beside TIA and build from there,
+reading each network's notes: the notes carry the traps.
+
+**264.** In FB2, insert a **new empty network immediately below network 7**
+(`ResetPressedValid`) and **above** `CauseGone`.
+*Tell me:* the empty network's number, and the titles of the networks above and
+below it.
+*Expected:* above `ResetPressedValid`, below `CauseGone`.
+
+**265.** Build **SL1 — `SpeedSeqAChanged`**: a `CMP <>` box (Int), in 1 =
+`#SpeedSeqA`, in 2 = `#SpeedSeqAMemory`, driving an `=` coil on
+`#SpeedSeqAChanged`.
+*Tell me:* the coil operand and the two comparator inputs.
+**Trap, and it is V1's trap per channel:** `#SpeedSeqAMemory` is written by
+**M4's neighbour M3, at the very end of the block** (step 296), so this
+comparison reads the **previous** cycle's value. That apparent forward
+reference is the design (§5.0 note 6) — do not "repair" it.
+
+**266.** Build **SL2 — `SpeedSeqBChanged`**: SL1's shape with `#SpeedSeqB` /
+`#SpeedSeqBMemory`, coil `#SpeedSeqBChanged`.
+*Tell me:* the coil operand.
+
+**267.** Build **SL3 — `SpeedChainSeen`**: an `OR` box (in 1 =
+`#SpeedSeqAChanged`, in 2 = `#SpeedSeqBChanged`) driving an **`S` (set output)**
+coil on `#SpeedChainSeen`.
+*Tell me:* the coil type and its operand.
+*Why a set coil:* one shot, never cleared while the F-runtime group runs —
+`HeartbeatSeen`'s shape. **Either channel arms the pair**: one channel arriving
+while the other never does is a chain seen with a reading missing, which SL8
+turns into a demand. A half-fitted measurement is a fault, not a smaller
+measurement.
+
+**268.** Build **SL4 — `SpeedAStaleTimer`**: a `TON` box, multi-instance
+`#SpeedAStaleTimer`, `IN` = `#SpeedSeqAChanged` **(negated)**, `PT` =
+`#SPEED_STALE_MAX`.
+*Tell me:* the `PT` operand as it reads at the pin, and that `IN` shows the
+negation circle.
+**Trap.** The box is called **unconditionally, every cycle**, outside any
+branch, and its `PT` is **explicit at the call site**. A timer called inside a
+state that stops executing can only be released by code running in the same
+scan as the exit (LESSONS 2026-07-27), and a `PT` left to an interface default
+is a stale instance value waiting to rule (LESSONS 2026-07-28).
+
+**269.** Build **SL5 — `SpeedBStaleTimer`**: SL4's shape with
+`#SpeedSeqBChanged` *(negated)*, multi-instance `#SpeedBStaleTimer`, same `PT`.
+*Tell me:* the `PT` operand and the negation.
+
+**270.** Build **SL6 — `SpeedAValid`**: a 5-input `AND` — `#StandInValid`,
+`#SpeedChainSeen`, `#SpeedAStaleTimer.Q` *(negated)*, `#SpeedReadingA` >
+`#SPEED_PLAUSIBLE_NEG`, `#SpeedReadingA` < `#SPEED_PLAUSIBLE_MAX` — driving `=`
+on `#SpeedAValid`.
+*Tell me:* the five inputs in order and which one carries the negation.
+*Why affirmative:* validity is asserted **from evidence**, so boot, stale,
+frozen-sequence and out-of-window all fall through to invalid without being
+enumerated. Written as a negated out-of-window test instead, an implausible
+reading would read as plausible in exactly the case this exists to catch.
+
+**271.** Build **SL7 — `SpeedBValid`**: SL6's shape with channel B's operands,
+coil `#SpeedBValid`.
+*Tell me:* the coil operand.
+
+**272.** Build **SL8 — `SpeedStaleNow`**: an `OR` of `#SpeedAValid`
+*(negated)* and `#SpeedBValid` *(negated)*, `AND`ed with `#SpeedChainSeen`,
+driving `=` on `#SpeedStaleNow`.
+*Tell me:* the network as it reads, and which two pins carry negations.
+**This network is the whole stale rule in one place:** a missing reading is a
+**demand** (D1 latches on it at step 289), never a zero and never the last
+value. The `SpeedChainSeen` conjunct is what keeps a run with no speed sources
+from being blocked by it.
+
+**273.** Build **SL9 — `WarningFieldClearValid`**: `AND` of
+`#WarningFieldClear` and `#StandInValid`, driving `=` on
+`#WarningFieldClearValid`.
+*Tell me:* the coil operand.
+*V5's shape, third application:* the limit selector is believed clear only
+while the stand-in is alive.
+
+**274.** Build **SL10 — `SpeedDiff`**: a `SUB` box (Int), in 1 =
+`#SpeedReadingA`, in 2 = `#SpeedReadingB`, `OUT` = `#SpeedDiff`.
+*Tell me:* the three operands.
+
+**275.** Build **SL11 — `SpeedDiscrepantNow`**: `#SpeedDiff` >
+`#SPEED_DISCREPANCY_MAX` `OR` `#SpeedDiff` < `#SPEED_DISCREPANCY_NEG`, `AND`ed
+with `#SpeedAValid` and `#SpeedBValid`, driving `=` on `#SpeedDiscrepantNow`.
+*Tell me:* the three `AND` inputs and the two comparisons.
+*Why validity is conjoined:* a stale or implausible channel must be reported as
+**missing** (SL8), not as **discrepant** — two different diagnoses on two watch
+rows, and hunting the wrong one costs a session.
+
+**276.** Build **SL12 — `SpeedDiscrepancyTimer`**: `TON`, multi-instance
+`#SpeedDiscrepancyTimer`, `IN` = `#SpeedDiscrepantNow`, `PT` =
+`#SPEED_DISCREPANCY_TIME`.
+*Tell me:* the `IN` and `PT` operands.
+
+**277.** Build **SL13 — `SpeedNearZero`**: a 6-input `AND` — `#SpeedAValid`,
+`#SpeedBValid`, and the four standstill-window comparisons of §11.5 SL13 —
+driving `=` on `#SpeedNearZero`.
+*Tell me:* the six inputs in order.
+
+**278.** Build **SL14 — `MotionPresentValid`**: an `OR` of `#MotionPresent` and
+`#StandInValid` **(negated)**, driving `=` on `#MotionPresentValid`.
+*Tell me:* the two inputs and which carries the negation.
+**Trap, and it is the one network in this block whose fail direction is
+`TRUE`.** V5–V7 force their channels to *open/unpressed* on invalidity; this
+one forces to *moving*, because for this observation the demanding direction is
+the one that **refuses to corroborate a standstill**. An `AND` here — the shape
+every other validity network uses — would make a dead stand-in say *the world
+is still*, which is exactly backwards.
+
+**279.** Build **SL15 — `ShaftDoubtNow`**: `AND` of `#SpeedNearZero` and
+`#MotionPresentValid`, driving `=` on `#ShaftDoubtNow`.
+*Tell me:* the coil operand.
+
+**280.** Build **SL16 — `ShaftDoubtTimer`**: `TON`, multi-instance
+`#ShaftDoubtTimer`, `IN` = `#ShaftDoubtNow`, `PT` = `#SHAFT_DOUBT_TIME`.
+*Tell me:* the `IN` and `PT` operands.
+*What the `PT` buys:* braking to rest legitimately produces up to ~0.7 s of
+*readings-zero, motion-still-held* while the observation's own hold decays. A
+doubt that outlives the hold is a fault; one shorter than it is a normal stop.
+
+**281.** Build **SL17 — `SpeedLimitOnsetTimer`**: `TON`, multi-instance
+`#SpeedLimitOnsetTimer`, `IN` = `#WarningFieldClearValid` **(negated)**, `PT` =
+`#SPEED_LIMIT_ONSET_MAX`.
+*Tell me:* the `IN` pin with its negation, and the `PT`.
+*This is the plant's slow-down budget and nothing else:* during the window the
+discrepancy, stale and shaft-doubt checks all stay in force — **only** the
+over-limit comparison waits.
+
+**282.** Build **SL18 — `SpeedOverLimitNow`** per §11.5's table: each channel's
+two limit comparisons `OR`ed and `AND`ed with that channel's validity, the two
+results `OR`ed, and that `AND`ed with `#SpeedLimitOnsetTimer.Q`, driving `=` on
+`#SpeedOverLimitNow`.
+*Tell me:* the final `AND`'s two inputs, and that both channels are represented.
+***Either* channel, not both:** one reading high is a demand while its partner
+reads compliant. Neither check waits for the other.
+
+**283.** Build **SL19 — `SpeedOverLimitTimer`**: `TON`, multi-instance
+`#SpeedOverLimitTimer`, `IN` = `#SpeedOverLimitNow`, `PT` =
+`#SPEED_OVERLIMIT_TIME`.
+*Tell me:* the `IN` and `PT` operands.
+
+**284.** Build **SL20 — `SpeedCauseGone`**: a 4-input `AND`, **every input
+negated** — `#SpeedStaleNow`, `#SpeedDiscrepantNow`, `#ShaftDoubtNow`,
+`#SpeedOverLimitNow` — driving `=` on `#SpeedCauseGone`.
+*Tell me:* the four inputs and that all four negation circles are present.
+**Trap.** `#SpeedMonitorDemand` is **deliberately not a term here.** A latch
+that is a term in its own clearing condition can never be cleared, and this
+project has already built that deadlock once (LESSONS 2026-07-27). It also
+tests the four **live** conditions and not the timers' `Q`s: a discrepancy that
+stopped 100 ms ago is a world already clear, exactly as a released e-stop is.
+
+**285.** Read the **written operand of networks 8 to 27** back, in order.
+*Expected:* `SpeedSeqAChanged`, `SpeedSeqBChanged`, `SpeedChainSeen`,
+`SpeedAStaleTimer`, `SpeedBStaleTimer`, `SpeedAValid`, `SpeedBValid`,
+`SpeedStaleNow`, `WarningFieldClearValid`, `SpeedDiff`, `SpeedDiscrepantNow`,
+`SpeedDiscrepancyTimer`, `SpeedNearZero`, `MotionPresentValid`, `ShaftDoubtNow`,
+`ShaftDoubtTimer`, `SpeedLimitOnsetTimer`, `SpeedOverLimitNow`,
+`SpeedOverLimitTimer`, `SpeedCauseGone` — then **`CauseGone` as network 28**.
+*Tell me:* the twenty operands and the title of network 28. **Stop if the order
+differs**: SL6 reading a stale timer computed after it, or SL20 reading a cause
+computed after it, is a network that silently evaluates last cycle's world.
+
+**286.** Screenshot networks 8–27, saved as
+`plc/forklift-safety/evidence/m5-49-f-speed-networks.png`.
+*Tell me:* saved.
+
+> **Chunk T done.** The speed world is computed. Nothing consumes it yet — no
+> latch, no reset term, no sequencer.
+
+---
+
+## Chunk U — the two re-points, the demand latch, and the sequencer (SPEC §11.5)
+
+*Ends with: 49 networks, `SpeedMonitorDemand` latching between the two existing
+demands and the reset flag, and the two sequence memories closing the block.*
+
+**287.** Network **28 `CauseGone`** — give the `AND` box a **third input** and
+wire it to **`#SpeedCauseGone`**.
+*Tell me:* the three inputs as they now read.
+*Expected:* `#EStopClosedValid`, `#ZoneClosedValid`, `#SpeedCauseGone`.
+*What this keeps whole:* one monitored reset clears every F-latch — now three —
+and only when the **whole live world** is clear. A reset attempted while the
+readings still disagree is refused, with this row on the watch table saying why.
+
+**288.** Insert a **new empty network between network 39 (`ZoneStopDemand`) and
+`SafetyResetRequired`**.
+*Tell me:* the new network's number and the titles above and below it.
+*Expected:* number **40**, above `ZoneStopDemand`, below `SafetyResetRequired`.
+
+**289.** Build **D1 — `SpeedMonitorDemand`**: a 4-input `OR` —
+`#SpeedStaleNow`, `#SpeedDiscrepancyTimer.Q`, `#ShaftDoubtTimer.Q`,
+`#SpeedOverLimitTimer.Q` — into the **`S1`** pin of an `RS` box with operand
+`#SpeedMonitorDemand`, `R` = `#ResetPulse`.
+*Tell me:* the four `OR` inputs, and which pin of the latch box carries the
+trailing `1`.
+**Trap.** `RS`, **set-dominant**, like every demand latch in this block: a cause
+standing in the same cycle as a reset pulse must win. The build in front of you
+has two `RS` demand latches to copy the shape from — do not reach for `SR`.
+*Why the stale term enters unfiltered while the other three enter through
+timers:* its persistence is already inside `SPEED_STALE_MAX`; timing it twice
+would only make a missing reading slower to become a demand.
+
+**290.** Network **41 `SafetyResetRequired`** — give the `OR` box a **third
+input** and wire it to **`#SpeedMonitorDemand`**.
+*Tell me:* the three inputs.
+*The flag keeps its meaning exactly:* at least one F-latch stands — the plain
+`OR`, now of three.
+
+**291.** Insert a **new empty network immediately after network 41
+(`SafetyResetRequired`)**.
+*Tell me:* its number and the title of the network below it.
+*Expected:* number **42**, below it `ResetMemory`.
+
+**292.** Build **Q1 — `Ss1Demand`**: an `OR` of `#ZoneStopDemand` and
+`#SpeedMonitorDemand`, driving `=` on `#Ss1Demand`.
+*Tell me:* the two inputs.
+**`#EStopDemand` is deliberately absent, and this is the one place in the block
+where a missing input is the design.** The cell e-stop stops no vehicle (SRS
+B4, owner ruling 2026-08-06); its consequence stays the standard program's
+cell-side refusal. Adding it here would give the vehicle a second stop path —
+the one nobody tests.
+
+**293.** Build **Q2 — `Ss1Timer`**: `TON`, multi-instance `#Ss1Timer`, `IN` =
+`#Ss1Demand`, `PT` = `#SS1_TIME_MAX`.
+*Tell me:* the `IN` and `PT` operands.
+*`IN` is the demand's own level*, so the clock starts in the cycle the demand
+latches and re-zeroes in the cycle the reset clears it — never released from
+inside a state.
+
+**294.** Build **Q3 — `VehicleStandstillNow`**: `AND` of `#SpeedNearZero` and
+`#MotionPresentValid` **(negated)**, driving `=` on `#VehicleStandstillNow`.
+*Tell me:* the two inputs and which carries the negation.
+**The corroboration is the whole point.** A decoupled shaft reads zero on both
+channels; without the second observation SS1 would remove torque "at
+standstill" on a rolling vehicle. With channels invalid or the world
+unobservable this coil is `FALSE` and stage two waits for the timeout — late,
+never wrong.
+
+**295.** Build **Q4 — `TorqueOffDemand`**: an `OR` of `#VehicleStandstillNow`
+and `#Ss1Timer.Q`, `AND`ed with `#Ss1Demand`, into the **`S1`** of an `RS` box
+with operand `#TorqueOffDemand` and `R` = `#Ss1Demand` **(negated)**.
+*Tell me:* the `S1` chain, and the `R` pin with its negation.
+**Trap: the `R` pin is the demand negated, not the reset pulse.** The latch's
+life is the demand's life, so it cannot flicker off if standstill unconfirms —
+a vehicle moving under applied torque-off is a brake failure, and withdrawing
+the demand then would be exactly backwards. It drops in the same cycle the
+monitored reset clears the demanding latches, which is SF-11 holding no latch
+of its own.
+
+**296.** Build **M3 — `SpeedSeqAMemory`** as a new network **after M2
+(`HeartbeatMemory`)**: a `MOVE` box, `IN` = `#SpeedSeqA`, `OUT1` =
+`#SpeedSeqAMemory`.
+*Tell me:* the network number and the two operands.
+
+**297.** Build **M4 — `SpeedSeqBMemory`** as the **final network of the
+block**: a `MOVE` box, `IN` = `#SpeedSeqB`, `OUT1` = `#SpeedSeqBMemory`.
+*Tell me:* the network number and the two operands.
+**Trap, M2's trap per channel.** Last, and unconditional. Moved earlier, SL1
+compares a sequence against itself, `SpeedSeqAChanged` is never `TRUE`, the
+stale timer condemns a live channel, and **the failure looks exactly like a
+dead speed source and is not.**
+
+**298.** Read the **network count** back and the titles of the **last four**
+networks.
+*Expected:* **49**, ending `ResetMemory`, `HeartbeatMemory`, `SpeedSeqAMemory`,
+`SpeedSeqBMemory` — the four memory copies closing the block in that order.
+*Tell me:* the count and the four titles.
+
+**299.** Re-read networks **28** and **41** and confirm each has **three**
+inputs.
+*Tell me:* the three inputs of each.
+*Why a re-read here and a text search at step 164:* that re-point was thirteen
+pins across ten networks, the size of list where one gets missed. This one is
+**two pins**, and both **add** an input rather than replace one — there is no
+"what must no longer be there" to search for. Two sites read back is the check;
+thirteen was not.
+
+**300.** Read the **core network positions** back: which numbers now carry
+`CauseGone`, `ResetPulse`, `EStopDemand`, `ZoneStopDemand`, `SpeedMonitorDemand`,
+`SafetyResetRequired`, `ResetMemory`.
+*Expected:* **28, 37, 38, 39, 40, 41, 46.**
+*Tell me:* the seven numbers.
+**Stop if `SpeedMonitorDemand` is not between `ZoneStopDemand` and
+`SafetyResetRequired`.** The flag network must `OR` a value computed **this**
+cycle; one network out of place makes the reset flag lag the demand by a full
+F-cycle, and the watch table would show it only as an odd flicker.
+
+**301.** Screenshot networks 40–45, saved as
+`plc/forklift-safety/evidence/m5-49-f-demand-and-ss1.png`.
+*Tell me:* saved.
+
+> **Chunk U done.** The block is written: 49 networks, three demand latches,
+> one sequencer. It is not on the CPU, and the call in `Main_Safety_RTG1` is
+> still inconsistent.
+
+---
+
+## Chunk V — call, compile, download, and the checks a script can run (SPEC §11.9 Q10–Q15)
+
+*Ends with: the delta in the CPU with a changed collective signature, ten read
+accesses and zero writes on the stand-in, and the F-side absence re-proven from
+outside TIA.*
+
+**302.** Confirm **three** processes are stopped: the **bridge**, the **HMI**,
+and the **stand-in writer**.
+*Tell me:* all three confirmed.
+**Trap, and the third one is new since chunk N was written.** A download drops
+the CPU's OPC UA sessions mid-read and this project has already lost an evidence
+capture that way (LESSONS 2026-07-28). The writer is not an OPC UA client — it
+holds a **PLCSIM Advanced API** session — and a download under it is how a
+process keeps writing four members into a DB whose layout has just moved. Stop
+it, and check the console is actually gone rather than assuming it (LESSONS
+2026-08-06).
+
+**303.** Open **`Main_Safety_RTG1 [FB1]`**, right-click the
+`F_Forklift_Safety` call box and choose **Update**.
+*Tell me:* whether the call box still shows an inconsistency marker, and how
+many input pins it now shows.
+
+Steps 304–309 wire the **six new input pins**. One pin each, each to its
+`"SafetyInputStandIn"` member of the same name.
+
+**304.** `SpeedReadingA` ← **`"SafetyInputStandIn".SpeedReadingA`**.
+**305.** `SpeedReadingB` ← **`"SafetyInputStandIn".SpeedReadingB`**.
+**306.** `SpeedSeqA` ← **`"SafetyInputStandIn".SpeedSeqA`**.
+**307.** `SpeedSeqB` ← **`"SafetyInputStandIn".SpeedSeqB`**.
+**308.** `MotionPresent` ← **`"SafetyInputStandIn".MotionPresent`**.
+**309.** `WarningFieldClear` ← **`"SafetyInputStandIn".WarningFieldClear`**.
+*After 309, tell me:* the six pins as they read.
+
+**310.** Read **all ten input pins** back, and confirm
+**`MotionObservationValid` is bound to no pin**.
+*Tell me:* the ten pins, and that the eleventh member is unbound.
+
+**311.** Confirm **all six output pins are still empty**.
+*Tell me:* that they are.
+**Trap.** An unassigned FB output pin is legal and is the point: the values live
+in `DB3` and the standard program reads them **there**. A wired output pin puts
+the F-program back to writing a standard DB — the dual-writer defect D4 exists
+to remove.
+
+**312.** **Compile the safety program.**
+*Tell me:* the error and warning counts.
+**Stop on any error** — give me the message text.
+
+**313.** Open **Safety Administration → Generate safety summary** and find the
+section **"Data from the standard user program"**.
+*You should see:* **ten members of `SafetyInputStandIn` and nothing else** —
+the four of the S015 delta plus the six new inputs.
+*Tell me:* every tag it names, and the count.
+**`MotionObservationValid` must not appear** — it is read by no network, and if
+it does, a pin is wired that should not be. **A tag from any other DB means a
+wire is wrong**, and TIA's mechanism here is **disclosure, not protection**,
+which is exactly why the validity networks are typed rather than acknowledged
+in a log and forgotten.
+
+**314.** Save that summary as
+`plc/forklift-safety/evidence/m5-49-safety-summary.pdf`.
+*Tell me:* saved.
+
+**315.** **Download the safety program, with re-initialisation of
+`InstF_Forklift_Safety [DB3]`.** Expect TIA to want the CPU in STOP.
+*Tell me:* the dialog wording, and whether you were offered and took the
+re-initialisation option. If you do not see it, **stop and tell me what the
+dialog offers**.
+**Trap.** The interface change moved the DB layout: twenty-five new statics
+sitting among the existing ones. A download that preserves the old instance
+values leaves stale values ruling, and the live tells are monitoring-error icons
+on exactly the rows whose offsets moved and an in-force `PT` that contradicts
+the call site (LESSONS 2026-07-28). Nothing here is Retain, so a
+re-initialisation costs nothing.
+
+**316.** Check the **diff circles** are **solid green** on every block.
+*Tell me:* what they show.
+**Read nothing until they are.** "I downloaded" is not "the CPU runs the new
+build", and this project has read it that way twice.
+
+**317.** Read the **F-collective signature** online and offline.
+*Tell me:* both values, whether they are equal to each other, and whether they
+differ from `2BC94038`.
+*Expected:* equal to each other, **different** from `2BC94038`.
+**A changed collective signature is the expected evidence of this delta.**
+Unchanged means the CPU is not running what you are reading — and this is the
+F-side's strongest stale-build instrument, because it answers *"is the CPU
+running the program I am reading?"* in one value rather than by inference.
+
+**318.** Sweep for **`_1`**: read back the seven new `SafetyInputStandIn`
+members and the twenty-five new statics in `DB3`.
+*Tell me:* any name ending in `_1` or another digit suffix.
+**Trap.** TIA appends collision suffixes **without asking**, in DB statics as
+well as interface rows, and a suffixed name cuts a client with no error dialog
+(LESSONS 2026-07-30). The names most at risk here are the ones that nearly
+collide with something already in the block — `SpeedSeqAMemory` beside
+`HeartbeatMemory`, the seven timers beside the three existing ones.
+
+**319.** Right-click **`SafetyInputStandIn`** → **Cross-references**.
+*You should see:* exactly **ten read accesses**, all at the call in
+`Main_Safety_RTG1`, and **no write access from any block on the CPU**.
+*Tell me:* the access count and where each one is.
+*Why zero writes is the interesting half:* the only writer of this DB is the
+stand-in writer, outside the CPU. A write access from a block on the CPU means
+something in the program is fabricating its own stimulus.
+
+**320.** Run the F-side absence check from a shell **outside TIA**:
+
+    python plc/forklift-safety/evidence/m5-25b-f-absence-verify.py opc.tcp://192.168.53.1:4840
+
+*You should see:* the positive control reading the four `Forklift/Safety/`
+mirrors, then the absence sweep, the `DataBlocksGlobal` listing, the
+collision-suffix sweep, and a final `RESULT:` line.
+*Tell me:* the `RESULT:` line and the browse-name count.
+**Stop if the result is FAIL.**
+*Two things about this script, and neither is a defect:* it sweeps for the DB
+**names** (`SafetyInputStandIn`, `InstF_Forklift_Safety`), so the seven new
+members are covered by their parent and it needs no edit; and its positive
+control expects the **four** existing mirrors, so it still passes before the
+interface agent adds the two new ones. **Do not edit it in this session** — a
+checker changed to fit the run it is checking is no longer a check.
+
+**321.** Save that output to
+`plc/forklift-safety/evidence/m5-49-f-absence-<today's date>.log`.
+*Tell me:* the file name you used.
+**Trap:** one log per run, unique name per run — a reused name silently wipes
+the evidence it was compared against (LESSONS 2026-07-28, 2026-08-06).
+
+**322.** Screenshot Safety Administration showing the new signature, saved as
+`plc/forklift-safety/evidence/m5-49-f-signature-after.png`.
+*Tell me:* saved.
+
+> **Chunk V done.** The speed monitor and the SS1 sequencer are in the CPU,
+> their signature is recorded, and "no client can reach the readings" is a
+> read-back from a different protocol stack rather than a setting.
+
+---
+
+## Chunk W — in force, and what the delta does with no speed source (SPEC §11.9 Q16–Q17)
+
+*Ends with: ten timer `PT`s read in force and the no-source signature observed —
+which is everything of §11.9 that can be run before the writer extension
+exists.*
+
+**323.** Open the watch table **`Forklift F gate`**.
+*Tell me:* that it opens and roughly how many rows it has.
+*Expected:* 30, from chunk O.
+
+**324.** Add the **stand-in half of Group 5** — seven rows:
+`"SafetyInputStandIn".SpeedReadingA`, `.SpeedReadingB`, `.SpeedSeqA`,
+`.SpeedSeqB` (all **Dec**), `.MotionPresent`, `.MotionObservationValid`,
+`.WarningFieldClear`.
+*Tell me:* seven rows added.
+**No row of this table is ever modified.** It is a **reading** instrument: the
+stimulus is the writer, fail-safe rows could not be modified anyway with safety
+mode activated (`2206:000002`), and a fabricated latch demonstrates nothing.
+
+**325.** Add the **live-cause rows** — nine:
+`"InstF_Forklift_Safety".SpeedChainSeen`, `.SpeedAValid`, `.SpeedBValid`,
+`.SpeedStaleNow`, `.SpeedDiscrepantNow`, `.ShaftDoubtNow`, `.SpeedOverLimitNow`,
+`.WarningFieldClearValid`, `.SpeedDiff` (**Dec**).
+*Tell me:* nine rows added.
+*These four `…Now` rows are where the diagnosis lives:* which cause fired is
+**read**, never guessed from the latch.
+
+**326.** Add the **timer rows** — `ET` and `PT` for `SpeedAStaleTimer`,
+`SpeedBStaleTimer`, `SpeedDiscrepancyTimer`, `ShaftDoubtTimer`,
+`SpeedLimitOnsetTimer`, `SpeedOverLimitTimer` and `Ss1Timer`, all under
+`"InstF_Forklift_Safety"`.
+*Tell me:* the row count you added.
+
+**327.** Add the **latch and sequencer rows** — six:
+`"InstF_Forklift_Safety".SpeedMonitorDemand`, `.Ss1Demand`,
+`.VehicleStandstillNow`, `.TorqueOffDemand`, `.SpeedSeqAMemory` (**Dec**),
+`.SpeedSeqBMemory` (**Dec**).
+*Tell me:* six rows added.
+
+**328.** Put the table in **Monitor**.
+*Tell me:* whether any row shows a monitoring-error icon.
+**Trap:** an error icon on exactly the rows whose offsets moved is the live tell
+of a download that did not re-initialise `DB3` (step 315). The repair is that
+step again, not an edit here.
+
+**329.** Read the **seven new `SafetyInputStandIn` members in force**.
+*Expected:* `MotionPresent` **`TRUE`**, everything else `0` / `FALSE`.
+*Tell me:* the seven values.
+**Trap, and this one has already cost this project a step.** **A start value
+governs a DB that does not exist yet.** `SafetyInputStandIn` was already on the
+CPU, so the download preserved its actual contents and the new members' start
+values may never have been applied — which for `MotionPresent` means the
+fail-direction value silently reading `FALSE`. Step 25 lost exactly this way.
+
+**330.** **Only if `MotionPresent` read `FALSE` at step 329:** in the PLCSIM
+Advanced control panel, take the instance **STOP → RUN**, then read the seven
+members again.
+*Tell me:* whether you needed this, and the seven values after it.
+*Why a restart and not a Modify:* a restart **applies the start values**, which
+is the mechanism that took them at step 25; typing the value in would set the
+datum without fixing the reason it was wrong, and would leave the next restart
+to undo it.
+
+**331.** From a Windows PowerShell shell **outside TIA**, run the timer reader
+against the F-block's instance data:
+
+    powershell -ExecutionPolicy Bypass -File bridge\standin_writer\testing\read_timers.ps1 -Instance safecell3 -Block InstF_Forklift_Safety
+
+*You should see:* one row per timer with **`IN`, `PT` in force, `ET` and `Q`
+together** — ten timers: the three from chunk O and the seven new ones.
+*Tell me:* the ten rows as printed.
+**It writes nothing**, and it reads the **consumer's view** — the F-block's own
+instance data, not any writer's read-back (LESSONS 2026-08-04). If it does not
+run, read the same twenty values off the watch table instead; the reading is
+what matters, not the instrument.
+
+**332.** Compare the ten `PT`s against this list, row by row:
+
+    SpeedAStaleTimer.PT         T#500MS      SpeedBStaleTimer.PT       T#500MS
+    SpeedDiscrepancyTimer.PT    T#200MS      SpeedOverLimitTimer.PT    T#200MS
+    ShaftDoubtTimer.PT          T#1S         SpeedLimitOnsetTimer.PT   T#1S500MS
+    Ss1Timer.PT                 T#1S         StandInStaleTimer.PT      T#1S
+    ResetHoldMinTimer.PT        T#200MS      ResetHoldMaxTimer.PT      T#3S
+
+*Tell me:* any row that differs, **and the `IN` column beside every `PT` you
+report**.
+**Two traps meet here and they point in opposite directions.** A `PT` reading
+`T#0MS` on a timer whose `IN` is **FALSE** says *this timer has never run on
+this build* — that is the instrument, not the value, and on a freshly
+downloaded block it is expected. A `PT` that **contradicts the call site** on a
+timer that has run is the stale-instance defect, and its repair is step 315
+again (LESSONS 2026-08-05, 2026-07-28). Reading `PT` without `IN` cannot tell
+them apart, which is why the reader prints all four members.
+*Save the output* to
+`plc/forklift-safety/evidence/m5-49-f-timers-<today's date>.log`.
+
+**333.** Read the **no-source signature** off the table, all in one reading:
+
+    SpeedChainSeen              FALSE
+    SpeedAValid                 FALSE
+    SpeedBValid                 FALSE
+    SpeedStaleNow               FALSE
+    SpeedDiscrepantNow          FALSE
+    ShaftDoubtNow               FALSE
+    SpeedOverLimitNow           FALSE
+    SpeedCauseGone              TRUE
+    SpeedMonitorDemand          FALSE
+    WarningFieldClearValid      FALSE
+    SpeedLimitOnsetTimer.ET     at PT (T#1s500ms), not climbing
+    Ss1Demand                   tracking ZoneStopDemand
+    TorqueOffDemand             TRUE if a demand has stood for 1 s (boot state)
+
+*Tell me:* each of those thirteen readings.
+**This is the delta working, not the delta failing.** The monitor is silent
+because **it never met its measurement**, and everything it cannot verify reads
+in the stopping direction: the limit is selected, the onset budget is long
+spent, and the sequencer has already run on the zone latch that boots set.
+**Two readings would be the defect signature of this whole delta:**
+`SpeedChainSeen` **`TRUE`** with no speed source ever started (SL3 mis-wired to
+something that toggles), or `SpeedCauseGone` **`FALSE`** in this state, which
+would block the monitored reset in every cell-scope run and means a validity
+gate is missing on one of SL8 / SL11 / SL15 / SL18. If you see either, **stop**.
+
+**334.** Screenshot the watch table showing that signature, saved as
+`plc/forklift-safety/evidence/m5-49-f-no-source-signature.png`.
+*Tell me:* saved.
+
+**335. BLOCKED, and it is recorded rather than worked around.** §11.9 step
+Q17's second half — the **T7 rehearsal**: start the speed source, watch
+`SpeedChainSeen` and both valids rise; kill it, watch `SpeedStaleNow` → D1 latch
+→ `Ss1Timer` run → `TorqueOffDemand` at `T#1s`; restore, close the circuits, and
+watch one monitored reset clear all three latches together — **cannot be run in
+this session.** It needs two things that do not exist: the writer's **45016
+extension** (bridge agent, `plc/forklift-safety/SPEC.md` §11.2) and the **WSL
+`SPD`/`MOT`/`PING` client** (agv agent). Both are in chunk P's table. **Do not
+improvise either**, and do not type values into the seven members to imitate a
+source: a fabricated reading proves the watch table works.
+
+*What is proven without them, and it is not nothing:* the delta compiles,
+downloads with a changed collective signature, is reachable by no client, reads
+ten standard tags and writes none, holds ten `PT`s in force, and **reads in the
+stopping direction with no measurement at all** (step 333) — while leaving a
+cell-scope run unblocked, which is the property `SpeedChainSeen` exists for.
+
+*What stays unproven until they land:* that any channel ever becomes valid;
+every over-limit, discrepancy and shaft-doubt path; the SS1 sequence running
+from a real demand; and the reset clearing three latches. **No gate criterion
+may cite them.**
+*Tell me:* that you have read this and are not going to improvise a source.
+
+**336.** Record the **F-session read-backs** in one go, for the record table:
+F8's offered instructions (steps 195–198), the new collective signature (step
+317), the interface counts (steps 217, 219, 247, 261), the S015 disclosure's ten
+members (step 313), the absence `RESULT:` line (step 320), the ten `PT`s (step
+332) and the no-source signature (step 333), each with today's date.
+*Tell me:* the lines.
+
+**337.** Rewrite the **progress block** at the top of this document.
+*Tell me:* done.
+
+> **Chunk W done.** The speed monitor and the SS1 sequencer run in the F-CPU
+> and are deliberately inert until a speed source exists. They establish **no
+> safety integrity claim**: the readings arrive as standard data over a
+> standard writer, and what the build adds is a monitor that refuses to believe
+> a measurement it cannot see.
+
+---
+
+## Chunk X — the warning-field ceiling, the standard side (`plc/forklift/SPEC.md` §14.16)
+
+*Ends with: the envelope ceiling falling to `0.20` m/s while the warning field
+reads occupied, with the node's start value and the stale term both observed.*
+
+**338. GATE — this chunk does not start until the interface ruling exists.**
+Open `docs/interfaces/opcua-nodes.md` and look for the warning node —
+`Forklift/Warning/ForkliftWarningFieldOccupied` as §14.16 requests it.
+*Tell me:* whether it is there, and if it is, the **exact folder name, leaf
+name and rights** the document rules.
+**If it is not there, stop: chunk X is BLOCKED and chunks Q–W stand on their
+own.** §14.16's path is a **request**, not a ruling, and typing a browse path
+against an unruled name is how two documents start disagreeing — which is also
+why the leaf must never be renamed afterwards: the BrowseName is the diff key
+between the node model, the TIA export and the spec (LESSONS 2026-07-30).
+**Every name below is the requested one. Where the ruling differs, the ruling
+wins and you tell me before typing it.**
+
+**339.** Project tree → **Program blocks** → **Add new block** → **Data block**,
+type **Global DB**, name it **`ForkliftWarning`**.
+*Tell me:* that it exists with that exact name.
+**Trap.** A **new** DB, and no existing DB gains a member — adding one to
+`ForkliftEnvelope` or `ForkliftStatus` moves the offsets that the M4 and §14
+watch tables read, and the live tell is a monitoring-error icon on exactly the
+rows that moved (LESSONS 2026-07-28). And **write the name correctly the first
+time**: once the interface binds it, a rename drags every interface local-data
+reference in one stroke, which is how a silent `BridgeHeartbeat_1` once cut the
+bridge with no error dialog (LESSONS 2026-07-30).
+
+**340.** Add the member **`ForkliftWarningFieldOccupied`**, type **`Bool`**,
+start value **`TRUE`**.
+*Tell me:* the row and the start value as it reads.
+**`TRUE` is the fail direction and is the point.** Before the chain has ever
+spoken, the cell behaves as if the field were occupied and the ceiling is
+reduced. `FALSE` would make a freshly started server assert a clear field
+nobody has looked at.
+
+**341.** Set the member's attributes: *Accessible from HMI/OPC UA* **✔**,
+*Writable from HMI/OPC UA* **✔**.
+*Tell me:* the two checkbox states.
+*Writable because the **bridge** writes it* — this node has exactly one writer,
+like the two `Vehicle/` tags, and per-client scoping stays policy.
+
+**342.** Confirm the member is **not** marked **Retain**.
+*Tell me:* the Retain column state.
+
+**343.** Open **`FB_ForkliftTeleop`** and add the constant
+**`WARNING_SPEED_CEILING`** — type **`Real`**, value **`0.20`** (m/s).
+*Tell me:* the row.
+*Derived, not chosen* (§14.16): it sits **below** the F-side's 300 mm/s
+monitoring value by 100 mm/s, of which 22 is 4 σ of measured read noise and 1 is
+quantisation. A ceiling **at** the monitoring value would trip on noise, which
+is why the two numbers must differ. **Do not round it to 0.2 in a way that types
+as an Int** — read the row back as a Real.
+
+**344.** Add the Temp **`warningFieldOccupied`** — **`Bool`** — to the FB's temp
+section.
+*Tell me:* the row, and the new temp count.
+
+**345.** In **part 2d**, insert the warning-verdict statement exactly as
+`plc/forklift/SPEC.md` §14.16 writes it, **including its comment**:
+
+    #warningFieldOccupied := "ForkliftWarning".ForkliftWarningFieldOccupied
+                             OR NOT #bridgeLinkOk;
+
+*Tell me:* it is in, and which statement it sits after.
+**The `OR NOT #bridgeLinkOk` is not defensive decoration.** A dark transport
+cannot report a clear field: without that term the ceiling stays high through
+the whole stale window, because the node holds its last value and silence reads
+as continuity (LESSONS 2026-08-04, twice).
+
+**346.** Replace **part 8's ceiling statement** with the *after* form in
+§14.16 — the nested `MIN`, inside the same single `IF … ELSE`.
+*Tell me:* the statement as it now reads, and that the outer `ELSE` still
+assigns `0.0`.
+**Trap, and it is the one this project wrote a lesson for.** The ceiling is
+assigned **exactly once per call on every path**, with a mandatory `ELSE` to
+`0.0`. A conditional write is not a gate: a `Real` left unwritten holds its last
+value, and the vehicle keeps its old ceiling after the permissive drops. The
+warning term is a **third bound inside the same assignment** — a `MIN`, never a
+multiplication and never a second statement.
+
+**347.** **Compile the standard program** — *Software (only changes)*.
+*Tell me:* the error and warning counts.
+**Stop on any error.**
+
+**348.** Open the **`DemoCell`** server interface and add a folder named
+**`Warning`** under `Forklift` — or the folder name step 338's ruling gives.
+*Tell me:* the folder appears, and how many subfolders `Forklift` now has.
+*Expected:* eleven.
+**Do not rename the interface itself, ever** — the interface name **is** the
+namespace URI (ADR 0006), and a rename silently breaks every browse-by-URI at
+connect.
+
+**349.** Drag `ForkliftWarning`'s tag into **`Warning`**, and read the leaf name
+back.
+*Tell me:* the leaf name character for character.
+**Rename nothing, and look hard for a trailing `_1`.**
+
+**350.** Confirm the **bridge and the HMI are not running**.
+*Tell me:* both confirmed.
+
+**351.** **Compile** → *Software (only changes)*.
+*Tell me:* the error and warning counts.
+
+**352.** **Download to device.** Let it finish.
+*Tell me:* that it completed and what the dialog reported.
+
+**353.** Check the **diff circles** are **solid green** on every block.
+*Tell me:* what they show.
+**Test nothing until they are.**
+
+**354.** Run the node check from a shell outside TIA:
+
+    python plc/forklift/evidence/m5-25-node-verify.py opc.tcp://192.168.53.1:4840
+
+*You should see:* the nine §12 nodes read back, the refused write on
+`Forklift/Envelope/ForkliftMotionEnable` (`BadNotWritable`), and the
+browse-name sweep — now carrying the new folder and leaf, and **no `_1`**.
+*Tell me:* the browse-name count, whether the sweep found any suffix, and the
+new leaf's path as the sweep prints it.
+**This script knows nothing about the warning node** and is not edited to. What
+it proves here is that the nine nodes still read back, the envelope write is
+still refused, and the address space grew by exactly the folder and leaf you
+added. Its start-value column **prints without comparing** — compare that column
+by eye (LESSONS 2026-08-05).
+
+**355.** Save that output to
+`plc/forklift/evidence/m5-49-node-verify-<today's date>.log`.
+*Tell me:* the file name you used.
+
+**356.** In the watch table **`Forklift M5 delta`**, add the two §14.16 rows:
+`"ForkliftWarning".ForkliftWarningFieldOccupied` (Bool) and
+`"ForkliftEnvelope".ForkliftSpeedCeiling` (Floating-point), and put the table in
+**Monitor**.
+*Tell me:* the two rows' values, and whether any row shows a monitoring-error
+icon.
+
+**357.** Read the **cold-start agreement**: the node reads **`TRUE`** and
+`#warningFieldOccupied` agrees with it.
+*Tell me:* the node's value.
+**This DB is new, so its start value applies at this first download** — the
+opposite of step 329's case, where the DB already existed and the download
+preserved what was in it. If it reads `FALSE`, take the instance **STOP → RUN**
+and read again before believing anything below.
+
+**358.** With the bridge still down, read the **ceiling row** while the envelope
+is permitted.
+*Expected:* **`0.20`** — the node reads `TRUE`, `#bridgeLinkOk` is `FALSE`, and
+the warning term is `TRUE` twice over.
+*Tell me:* the ceiling value, and the value of the enable beside it.
+**BLOCKED beyond this point, and named rather than improvised:** §14.16's full
+verification — driving the node `TRUE`/`FALSE` **from the bridge side** and
+watching the ceiling fall and return, then stopping the bridge and watching the
+ceiling fall to `0.20` within `HEARTBEAT_STALE_TIME` while the node still reads
+`FALSE` — needs the **bridge slot** for this node, which does not exist (chunk P,
+requested of the bridge agent). **Do not Modify the node from the watch table to
+imitate it**: a program-read value driven by hand in a demonstration proves the
+watch table works, which is ADR 0015's whole point. What step 358 does prove is
+the **stale direction** — the ceiling reduced with nothing alive to say
+otherwise, which is the direction that must never need a client.
+
+**359.** Screenshot the watch table showing the node `TRUE` and the ceiling at
+`0.20`, saved as `plc/forklift/evidence/m5-49-warning-ceiling.png`.
+*Tell me:* saved.
+
+**360.** Fill in every remaining row of the **record table** at the top of this
+document with its date, and rewrite the **progress block**.
+*Tell me:* done.
+
+> **Chunk X done.** The warning field has a consumer: the standard program
+> lowers the envelope ceiling while the field reads occupied. It carries **no
+> safety credit** — if this ceiling never falls, the F-side monitor demands the
+> stop on its own measurement within its onset budget, and that independence is
+> the design's point.
 
 ---
 
@@ -1753,11 +2880,21 @@ never from this stub.
 | N — call, compile, download | 168–180 | changed signature, 4 reads / 0 writes, absence proven |
 | O — in force, no writer | 181–191 | three `PT`s in force, the invalid-boot signature |
 | P — not built here | — | the writer, the field log, two safety-spec rulings |
-| Q — m5-49 delta, not yet expanded | — (192+ when its brief lands) | the click-paths in force: `forklift-safety/SPEC.md` §11.9, `forklift/SPEC.md` §14.16 |
+| Q — F8 and the seven members | 192–209 | Int instruction set recorded, `SafetyInputStandIn` at eleven members |
+| R — FB2's new inputs and outputs | 210–220 | interface Input 10, Output 6 |
+| S — statics and constants | 221–263 | interface 10 / 6 / 44 / 17 in TIA's counting |
+| T — SL1–SL20 | 264–286 | twenty networks between V7 and `CauseGone` |
+| U — re-points, D1, the sequencer | 287–301 | 49 networks, `SpeedMonitorDemand` at 40 |
+| V — call, compile, download | 302–322 | changed signature, 10 reads / 0 writes, absence re-proven |
+| W — in force, no speed source | 323–337 | ten `PT`s in force, the no-source signature |
+| X — the warning-field ceiling | 338–360 | ceiling at `0.20` with the field occupied — **gated on the interface ruling** |
 
-**191 steps.** If a step turns out to contain two actions, split it and say the
+**360 steps.** If a step turns out to contain two actions, split it and say the
 total has changed.
 
-**Steps 1–116 are the standard-program side and steps 117–191 are the F-side.**
-They are two sittings for most people, and the only ordering constraint between
-them is that **chunk H runs before chunk J**.
+**Steps 1–116 are the standard-program side, steps 117–191 and 192–337 are the
+F-side, and 338–360 return to the standard side.** They are several sittings for
+most people. The ordering constraints between them are exactly three: **chunk H
+runs before chunk J**; **chunks Q–X run after chunk O**; and **chunk X does not
+start until the interface agent has ruled on the warning node** (step 338),
+while chunks Q–W do not wait for that ruling.
