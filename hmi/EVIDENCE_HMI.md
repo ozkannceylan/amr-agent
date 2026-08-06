@@ -1936,18 +1936,20 @@ the same 405. The write surface of this process is still exactly
 
 ## J.10 What is deliberately not shown here, and the residuals
 
-- **No run against the real `viz/` service, and none is claimed.** That service
-  needs rclpy, a vehicle image and Gazebo, and it lives in WSL; this page, its
-  backend and the browser live on Windows. The double copies its surface key
-  for key and the check asserts the key sets are identical, but *the join has
-  not been made against the real process on either platform.* That is the
-  single largest residual of this section.
-- **The display ramp's two endpoints are display values, not measured ones.**
-  `V2B-DESIGN.md` §4.3 states why: the bound worth having is the inter-arrival
-  time of `/amcl_pose` **while the vehicle is moving**, and the only committed
-  capture of that topic is of a **standing** vehicle. A bound derived from one
-  confounded instance is not a bound (`docs/LESSONS.md` 2026-08-04), so it was
-  requested rather than fabricated.
+- ~~**No run against the real `viz/` service, and none is claimed.**~~
+  **CLOSED by §K (m5-53b).** The join was made: the real service, a real
+  forklift in domain 51, Gazebo, Nav2 and AMCL, across the WSL-to-Windows
+  loopback relay, with 22 checks passing and eight `v2b-real-*` captures. It
+  needed no change to `hmi/` and none to `viz/`. What §K found that this
+  section could not: across that crossing a dead service presents as a
+  **timeout**, not as the refusal the Windows-resident double produced.
+- ~~**The display ramp's two endpoints are display values, not measured
+  ones.**~~ **MEASURED in §K.4** — n = 26 / 77 / 37 over three driving runs.
+  The endpoints are unchanged here, because §K.4.2 proposes the correction and
+  does not apply it: widening a ramp makes the page claim more, which is the
+  owner's ruling to make. The finding in one line: the pose inter-arrival is
+  `update_min_d / speed`, so both endpoints are statements about a **speed**,
+  and `1000 ms` sits at the median of brisk driving rather than above it.
 - **n = 1.** One serial exists. Every path is serial-rooted and the pane reads
   the list rather than a constant, but the second vehicle is the test and it
   does not exist yet.
@@ -1959,3 +1961,322 @@ the same 405. The write surface of this process is still exactly
   matter — the write allowlist, H6 and the reset edge — is covered here by
   §J.7, §J.8 and CHECK 1/2 above. One of their checks did run and pass in
   passing: the allowlist still refuses a doctored config naming a ninth node.
+
+---
+
+# Section K — the joint run: the REAL monitoring service and a REAL vehicle (m5-53b)
+
+**This is the run §J.10 said had not been made.** Every value in §J came from
+`hmi/tools/viz_double.py`. Every value here came from `viz/monitor/service.py`
+subscribing in a real forklift's own DDS domain, across a WSL-to-Windows
+crossing, with Gazebo, Nav2 and AMCL running behind it. Where the two disagree,
+this section wins.
+
+**What is still a double, said before anything else is claimed.** The PLC is
+`hmi/tools/v2a_scenario_double.py`. The controller was not available to this
+session, so **zones A–F remain rehearsed, not proven**, exactly as in §J. Only
+the map pane is joined to reality. Nothing in this section is evidence about
+the TIA build, the F-CPU or the bridge.
+
+## K.1 The crossing, and why it needed no change to either layer
+
+The monitoring service needs `rclpy` and runs in WSL. The page, its backend and
+the browser run on Windows. How they meet is the whole task.
+
+**They meet on the address the HMI already had.** WSL2 relays the *Windows*
+loopback address to a Linux service bound to `127.0.0.1`, so
+`http://127.0.0.1:8089` on Windows reaches `viz/monitor/service.py` inside WSL
+with **no proxy, no bind change, no port forward, and no edit to `hmi/` or
+`viz/`**. `hmi/config.yaml`'s `monitor.base_url` was already
+`http://127.0.0.1:8089`, and the backend's loopback rule (`LOOPBACK_HOSTS`,
+invariant 8) is satisfied by it literally rather than by exception.
+
+Proved before anything was built on it, because the usual report is the
+opposite — that only `0.0.0.0`-bound services are relayed:
+
+```
+WSL:      python3 -m http.server 8091 --bind 127.0.0.1
+          python3 -m http.server 8092 --bind 0.0.0.0
+          LISTEN 0 5   127.0.0.1:8091
+          LISTEN 0 5     0.0.0.0:8092
+
+Windows:  port 8091 : HTTP 200      <- the 127.0.0.1-bound one is relayed too
+          port 8092 : HTTP 200
+```
+
+**What a later reader must reproduce, and the conditions it depends on.**
+
+| Condition | Value in this run | If it changes |
+|---|---|---|
+| WSL networking mode | NAT with `localhostForwarding`; kernel `5.15.167.4-microsoft-standard-WSL2` (mirrored mode needs 6.6+) | mirrored mode also works and also needs no change; a configuration with neither would need a `--bind` on the service, which is `viz/`'s call and not this layer's |
+| Windows-side listener on 8089 | none — `netstat` was checked before the run | a Windows process holding 8089 **wins** and the relay silently does not happen, so the HMI would read that process instead. Check the port is free before trusting the address |
+| The service's bind | `viz/`'s own default `127.0.0.1:8089`, unchanged | — |
+| `hmi/` change required | **none.** No file in this layer was edited to make the crossing | — |
+
+**One real fact the double could not have shown, and it matters.** When the
+real service dies, the HMI does **not** see a refused connection. The relay
+still accepts, so the fetch **times out**: the pane's reason line read
+`URLError: <urlopen error timed out>` after `1537 ms`, where the
+Windows-resident double produced an immediate `ConnectionRefusedError`. The
+pane greys and says so either way — the bounded timeout in `MonitorProxy` is
+exactly what makes the difference between "grey after 1.5 s" and "hung" — but a
+reader must not expect a refusal across this crossing.
+
+## K.2 Environment
+
+| Item | Value |
+|---|---|
+| Windows side | the showcase machine. Python 3.13.2, `asyncua` 2.0.1, Node v22.14.0, `Chrome/151.0.7922.75` headless over CDP |
+| WSL side | Ubuntu, kernel `5.15.167.4-microsoft-standard-WSL2`, ROS 2 Jazzy, `gz sim` 8.11.0 |
+| Simulation | `gz sim -r -s -v 2 sim/worlds/warehouse.sdf`, `GZ_PARTITION=m553b`, 12 gz topics |
+| Vehicle | `agv/forklift/scripts/vehicle_image.py --vehicle F001`, domain 51 from `allocation.yaml`. `process has died` count **0**; `Nav2 active.` |
+| **The monitoring service** | **`viz/monitor/service.py --status-period 10` — the real one**, started from a shell with no `ROS_DOMAIN_ID`, reporting `subs 5 publishers 0 services 0 clients 0` |
+| Playing the PLC | `hmi/tools/v2a_scenario_double.py` on `opc.tcp://127.0.0.1:4862/…` — **still a double** |
+| Software under test | `hmi/hmi_server.py` + `hmi/static/index.html`, `hmi/config-v2b-double.yaml`, `--monitor-url http://127.0.0.1:8089`, HTTP `127.0.0.1:8098` |
+| Display ramp in force | `1000 .. 5000 ms`, read back from the backend by the instrument |
+| Instrument, captures | `hmi/tools/capture_v2b_real_screens.mjs` → `hmi/evidence/capture-v2b-real-2026-08-06.log`, `screenshots/MANIFEST-v2b-real-2026-08-06.txt` |
+| Instrument, measurement | `hmi/tools/measure_pose_arrivals.py` → the four `hmi/evidence/pose-arrivals-2026-08-06-*.csv` |
+| Motion stimulus | a throwaway `rclpy` publisher, source quoted in K.6. **Not repository content**: a ROS 2 publisher has no home in `hmi/` |
+
+**Nothing under test was edited by this run.** The two new files are both
+instruments in `tools/`; `hmi_server.py` and `hmi/static/index.html` are
+byte-identical to the build §J photographed. That is also why the m5-29
+second-tab check was **not** re-run: that obligation is conditional on touching
+the posting path, and the posting path was not touched.
+
+## K.3 The states, on real data — 22 checks, all passing
+
+`hmi/evidence/capture-v2b-real-2026-08-06.log` is the full transcript. Files
+are named `v2b-real-*` so that no reader can confuse them with §J's `v2b-*`
+captures of the double, and nothing of §J's was overwritten.
+
+| Screenshot | The state, on real data |
+|---|---|
+| `v2b-real-00-map-live-real-service-2026-08-06.png` | **The whole real map, the live real pose, real lidar returns.** `v1 606 × 410 cells at 0.050 m (30.3 × 20.5 m, whole map)`; `6.99, 11.62 m −42° as of 0.6 s`; `243 distance returns 117 beyond range, 0 invalid, of 360 as of 0.0 s`; `88 ms round trip` |
+| `v2b-real-01-whole-page-real-service-2026-08-06.png` | the same, whole page: the map pane beside the (doubled) process zones |
+| `v2b-real-02-map-zoomed-real-service-2026-08-06.png` | the real map zoomed — with the eight written values compared **bit for bit** before and after: unchanged |
+| `v2b-real-03-pose-fresh-while-driven-2026-08-06.png` | the baseline: solid marker, `54 px` of marker fill, while the vehicle is under command |
+| `v2b-real-04-pose-STALE-standing-vehicle-2026-08-06.png` | **the residual, not simulated.** The stimulus simply stopped. `LAST KNOWN, as of 9.2 s`, marker fill `0 px`, the lidar layer beside it still `79 ms` old |
+| `v2b-real-05-whole-page-pose-stale-standing-2026-08-06.png` | the same standing vehicle, whole page: the process zones unaffected |
+| `v2b-real-06-real-monitoring-service-stopped-2026-08-06.png` | **the real service killed mid-session.** Pane grey, `—` in every row, canvas empty, session still `CONNECTED`, heartbeat still advancing |
+| `v2b-real-07-recovered-after-restart-2026-08-06.png` | the real service restarted: the pane recovered by itself and refetched the whole grid. No operator action |
+
+### K.3.1 The stale path, on a genuinely standing vehicle
+
+The one a double could only imitate. `viz_double.py` was *told* to stop
+publishing at a scheduled instant. Here nothing was told anything: the motion
+stimulus ended, the forklift stood, and **AMCL stopped publishing because a
+standing vehicle produces no filter update**. The page degraded by itself.
+
+```
+driven:   "5.61, 12.97 m  -46°   as of 0.5 s"                vehicleFill 54 px
+standing: "7.31, 11.46 m  -42°   LAST KNOWN, as of 9.2 s"    vehicleFill  0 px
+          obstacles at that same instant: "as of 0.1 s"
+```
+
+The assertion is at the pixel level — a census of the canvas at the marker's
+exact fill colour `#3aa0dc` — so **the picture changed**, not the caption. And
+the two ages moved independently: the lidar kept arriving at 10 Hz throughout,
+which is the fact that makes a single "vehicle alive" verdict impossible and is
+why this pane makes none.
+
+### K.3.2 The real service stopped mid-session
+
+Killed by PID in WSL while the page was up. `fetch: failed after 1537 ms`, and
+the pane's own words:
+
+> The monitoring service is not answering. No map, no position and no obstacles
+> are shown, because nothing here is old enough to be worth drawing — an
+> unreachable source is not a source of last values.
+
+Zones A–F, read before and after, were identical field for field
+(`CONNECTED / TELEOP / clear / not required / inactive`); the heartbeat kept
+advancing; the backend did not exit. The service was then restarted and the
+pane recovered with no operator action.
+
+## K.4 THE MEASUREMENT — the pose inter-arrival while the vehicle is moving
+
+`V2B-DESIGN.md` §4.3 published the display ramp's endpoints as **display
+values** and asked for exactly this: the inter-arrival distribution of the
+localization pose **while moving**, with its n.
+
+**How an arrival is timed.** Polling cannot time an arrival. But the payload
+carries `pose_age_ms`, measured by the monitoring service on its own steady
+clock at the instant it answers, so `arrival = (reply instant) − (age in that
+reply)`, and the difference of two of those is a difference of two of the
+service's own measurements. The poll rate then decides only how often a new
+arrival is *noticed* — by `messages_received.pose` increasing, never by the age
+falling, which cannot tell one new message from three. Across all four runs,
+**0 intervals spanned more than one message**, so the poll was fast enough
+everywhere.
+
+**Conditions.** Measured through the HMI backend's own `/monitor/state` — the
+path the page reads — with the vehicle, Gazebo, Nav2 and the real service in
+WSL and the backend and the PLC double on Windows. **No browser was running and
+no capture was in progress**: the measurement runs and the screenshot runs were
+kept apart deliberately (`docs/LESSONS.md` 2026-07-30 #88). Effective poll rate
+13.4–15.5 Hz against 20 Hz asked, each poll being two upstream GETs.
+
+| Run | Commanded | n (moving) | median | p90 | p95 | max | achieved speed (median) |
+|---|---|---|---|---|---|---|---|
+| run 2 | 0.35 m/s, 60 s legs | **26** | 831 ms | 1007 ms | 1205 ms | 1550 ms | 0.346 m/s |
+| run 3b | 0.35 m/s, 14 s legs | **77** | 910 ms | 1095 ms | 1502 ms | 2099 ms | 0.328 m/s |
+| run 4 | 0.15 m/s, 30 s legs | **37** | 2314 ms | 6010 ms | 6196 ms | 6446 ms | 0.120 m/s |
+
+**The structure behind those numbers is the real finding.** AMCL is
+**distance-triggered**, not periodic: `agv/forklift/amcl.yaml` sets
+`update_min_d: 0.25` and `update_min_a: 0.2`. Every measured interval covered
+0.28–0.30 m of ground, in every run, at every speed. So
+
+> the pose inter-arrival is **`update_min_d / speed`**, and a threshold written
+> in milliseconds is therefore a threshold written about a **speed**.
+
+`1000 ms` says *"fade once the vehicle is slower than 0.25 m/s"*. `5000 ms`
+says *"call it a last known position once it is slower than 0.05 m/s"*. Neither
+sentence was intended when the numbers were chosen; both are now measured
+rather than guessed.
+
+### K.4.1 Do the chosen thresholds survive it? Partly — and the failures run in the safe direction
+
+| Endpoint | Verdict |
+|---|---|
+| `POSE_AGE_RAMP_START_MS = 1000` | **Does not survive.** It sits essentially *at the median* of brisk driving (831 / 910 ms), so a vehicle driven at the commissioning speed is past the ramp start on roughly half of all cycles and is drawn perpetually part-faded. p95 is 1.2–1.5 s and the maximum 2.1 s — all above it |
+| `POSE_AGE_RAMP_FULL_MS = 5000` | **Survives brisk driving** with 2.4× margin over the measured maximum (2099 ms). **Does not survive slow driving**: at 0.15 m/s the p90 is 6010 ms and the maximum 6446 ms, so a vehicle that is genuinely being driven gets labelled `LAST KNOWN POSITION` |
+
+**Both failures are in the under-claiming direction** — the page says it knows
+less than it does, never more — which is the half of the pair `V2B-DESIGN.md`
+§4.2 chose deliberately and which `docs/LESSONS.md` 2026-08-06 #101 asks for.
+This is a **fidelity** finding, not a safety one.
+
+### K.4.2 What is proposed, and why it is proposed rather than applied
+
+Not applied. Widening a ramp makes the page claim **more**, and that is not a
+direction an agent takes on its own measurement.
+
+| Option | Change | What it buys | What it costs |
+|---|---|---|---|
+| **A — leave both** | none | the widest under-claiming margin at every speed | a vehicle driven at 0.15 m/s is labelled `LAST KNOWN POSITION` while it is visibly moving, which an operator will read as a defect |
+| **B — widen to the measurement** | `START 1000 → 2500 ms`, `FULL 5000 → 8000 ms` | 2500 ms clears the brisk population's measured maximum (2099 ms), so a normally driven vehicle stays solid; 8000 ms clears the slow population's maximum (6446 ms), so `LAST KNOWN` means *not being driven* | if the localization dies while the vehicle keeps moving at 0.35 m/s, the marker stays solid for 2.5 s instead of 1.0 s — up to **0.88 m** of undisclosed travel instead of 0.35 m |
+
+**Recommended: B**, with the two endpoints re-stated in `V2B-DESIGN.md` §4.3 as
+*derived from `update_min_d` and a named speed* rather than as bare
+milliseconds — because that is what they are, and written that way they carry
+their own re-check rule: **if `update_min_d` changes, or if a slower driving
+regime becomes normal, they are wrong again.** One such regime already exists
+in this repository: the closed-loop smoother's from-rest floor of 0.025 m/s
+(`docs/LESSONS.md` 2026-08-05 #124) implies a **~10 s** pose inter-arrival, at
+which no fixed ramp keeps a creeping vehicle solid and the honest answer is
+that the page cannot distinguish creeping from standing. It already says it
+does not guess.
+
+### K.4.3 The instrument defects the first runs found, recorded rather than quietly fixed
+
+1. **Run 1's maximum was an artifact of its own boundary.** Seeding the
+   previous arrival from whatever pose was standing when the run began made the
+   first interval span the parking time *before* the run — `132.8 s`, which
+   duly became the reported maximum of a measurement whose entire subject is
+   the moving case. `hmi/evidence/pose-arrivals-2026-08-06-run1-moving.csv` is
+   kept as the capture that showed it. Interval measurement now begins at the
+   first arrival observed **inside** the run.
+2. **"While moving" cannot be qualified by distance.** The first classifier
+   asked whether the vehicle had covered ≥ 0.20 m between two arrivals — and
+   passed **35 of 35** intervals, a 50.9-second stall included, because a
+   distance-triggered estimator makes *every* interval cover that distance by
+   construction. The classifier is now **implied speed**, it is an argument
+   with no hidden default, and both populations print side by side. Under it
+   the same run 2 splits 26 moving / 9 stalled. Both CSVs remain re-analysable
+   with `--analyse`, so the split can be moved without re-driving the vehicle.
+3. Run 3's CSV write raised `AttributeError` on a renamed argument *after* the
+   summary had printed, so its samples were lost. It was repeated as run 3b
+   rather than quoted from the console, and the empty file it left was deleted.
+
+### K.4.4 A vehicle-layer observation, offered and not acted on
+
+In every run the forklift moved for 10–17 s and then stalled for the rest of
+the leg — implied speed falling to 0.006 m/s while the traction command was
+still being published at 20 Hz — and resumed on the next reversal. It is
+visible in all four CSVs as the stalled population (24 of 132 intervals in one
+run). It is **not** a monitoring-plane or HMI matter and nothing here depends
+on it; it is recorded because it will affect anyone driving this vehicle, and
+it belongs to the vehicle layer.
+
+## K.5 What this section does *not* prove
+
+- **The PLC is still a double.** Zones A–F are rehearsed. No M4 or M5 process
+  claim is touched by this run.
+- **n = 1.** One serial. The pane reads the served list rather than a constant,
+  but the second vehicle is the test and it does not exist.
+- **The read-only claim is unchanged and unshortened.** `viz/DESIGN.md` §2 owns
+  it and it appears here only in its full form: **read-only by construction of
+  the process and proven by test; not enforced by the middleware.** This run
+  added nothing that writes — the HMI still sends `GET` and nothing else toward
+  the monitoring service, and the eight-node OPC UA write set did not grow.
+- **The crossing is a property of this machine's WSL configuration**, recorded
+  in K.1 with the conditions it depends on. It is not a property of `hmi/`.
+
+## K.6 The motion stimulus, quoted so the run is reproducible
+
+It is deliberately **not** a repository file. A ROS 2 publisher into a vehicle
+domain cannot live in `hmi/` (this layer must not access ROS 2 at all) and this
+brief may not write `agv/` or `sim/`; a permanent home for it is requested in
+the report rather than taken. It exists because
+`sim/scenarios/forklift_stimulus.py plant` shells out to `ros2 topic pub -r`,
+and `viz/EVIDENCE_MONITORING.md` §5 records that exact form failing to take —
+0.036 m of travel in 14 s (`docs/LESSONS.md` 2026-07-28 #72).
+
+```python
+# scratchpad/drive_f001.py — run as:
+#   ROS_DOMAIN_ID=51 python3 drive_f001.py --speed 0.35 --shuttle 14 --seconds 190
+import argparse, math, time
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Float64
+
+ap = argparse.ArgumentParser()
+ap.add_argument('--speed', type=float, default=0.35)
+ap.add_argument('--steer', type=float, default=0.0)
+ap.add_argument('--weave', type=float, default=0.0)
+ap.add_argument('--weave-period', type=float, default=20.0)
+ap.add_argument('--seconds', type=float, default=60.0)
+ap.add_argument('--rate', type=float, default=20.0)
+ap.add_argument('--shuttle', type=float, default=0.0)   # reverse every N s
+args = ap.parse_args()
+
+rclpy.init()
+node = Node('m553b_drive_stimulus')
+traction = node.create_publisher(Float64, '/forklift/cmd/traction_speed', 10)
+steer = node.create_publisher(Float64, '/forklift/cmd/steer_angle', 10)
+time.sleep(2.0)                      # let discovery settle before message one
+
+period, started = 1.0 / args.rate, time.monotonic()
+deadline, n, last_leg = started + args.seconds, 0, [-1]
+while time.monotonic() < deadline:
+    t = time.monotonic() - started
+    a = args.steer
+    if args.weave:
+        a += args.weave * math.sin(2.0 * math.pi * t / args.weave_period)
+    v = args.speed
+    if args.shuttle:
+        leg = int(t // args.shuttle)
+        if leg % 2:
+            v, a = -v, -a
+        if leg != last_leg[0]:
+            print('leg {} traction {:+.2f}'.format(leg, v), flush=True)
+            last_leg[0] = leg
+    traction.publish(Float64(data=float(v)))
+    steer.publish(Float64(data=float(a)))
+    n += 1
+    time.sleep(period)
+
+# THE TERMINAL VALUE, EXPLICITLY, AND HELD. A downstream consumer republishes
+# the last command at a fixed rate, so ceasing to publish is a standing order
+# to keep driving (docs/LESSONS.md 2026-08-04 #135, #136).
+stop_until = time.monotonic() + 1.5
+while time.monotonic() < stop_until:
+    traction.publish(Float64(data=0.0))
+    steer.publish(Float64(data=0.0))
+    time.sleep(period)
+print('drive_f001: {} command pairs, then zero held 1.5 s'.format(n))
+node.destroy_node()
+rclpy.shutdown()
+```

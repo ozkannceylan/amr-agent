@@ -77,7 +77,12 @@ costs:
 - **Loopback enforced at start.** A `monitor.base_url` whose host is not a
   loopback name refuses to start the process. The monitoring plane is local to
   the operator's machine; it is never a remote transport and never the tailnet
-  (invariant 8).
+  (invariant 8). **And this survived the real join** (`EVIDENCE_HMI.md` §K.1):
+  the monitoring service needs `rclpy` and runs in WSL while this backend runs
+  on Windows, and WSL2 relays the Windows loopback address to a Linux service
+  bound to `127.0.0.1` — so the two meet on `http://127.0.0.1:8089`, the
+  address this file already named, with no proxy, no bind change and no edit to
+  either layer. The rule is satisfied literally rather than by exception.
 - **Bounded, and off the critical path.** The fetch runs in the HTTP handler
   thread of the already-threaded server, never on the asyncio loop that owns
   the OPC UA session, and it carries a hard timeout. A monitoring service that
@@ -203,14 +208,27 @@ millisecond of its own — the same discipline v2a applies to
 `UI_POLL_STALE_TIME` and `WRITE_HEALTH_STALE_TIME`. They are deliberately
 **not** in `config.yaml`, whose own header forbids a threshold in that file.
 
-The honest statement of what could not be derived: the ramp's upper endpoint
-would ideally be a bound on the inter-arrival time of `/amcl_pose` **while the
-vehicle is moving**, measured with its n. No such measurement exists on this
-machine. The only committed capture of that topic
-(`viz/EVIDENCE_MONITORING.md` §8) is of a **standing** vehicle — 30 messages,
+The honest statement of what could not be derived at m5-53: the ramp's upper
+endpoint would ideally be a bound on the inter-arrival time of `/amcl_pose`
+**while the vehicle is moving**, measured with its n. No such measurement
+existed on this machine then. The only committed capture of that topic
+(`viz/EVIDENCE_MONITORING.md` §8) was of a **standing** vehicle — 30 messages,
 a 463-second age — which is the residual itself, not a sample of the moving
-case. The report requests the measurement rather than fabricating a bound from
+case. The report requested the measurement rather than fabricating a bound from
 one confounded capture (`docs/LESSONS.md` 2026-08-04 #94).
+
+> **m5-53b took that measurement** (`EVIDENCE_HMI.md` §K.4): n = 26 / 77 / 37
+> across three driving runs against the real monitoring service and a real
+> vehicle. **The two constants below are unchanged by that brief**, because
+> what it found calls for widening them and widening a ramp makes the page
+> claim *more* — an owner's ruling, not an agent's. The finding, in one line:
+> the localization is **distance-triggered** (`update_min_d: 0.25 m`), so the
+> inter-arrival is `update_min_d / speed` and each endpoint is really a
+> statement about a **speed** — `1000 ms` means "fade below 0.25 m/s" and sits
+> at the *median* of brisk driving rather than above it, while `5000 ms` means
+> "call it last-known below 0.05 m/s" and is crossed by a vehicle genuinely
+> being driven at 0.15 m/s. Both failures under-claim, which is the safe half.
+> §K.4.2 states the proposal (`2500` / `8000 ms`) and its cost.
 
 **And the consequence that is not a defect:** because AMCL publishes only on a
 filter update, a standing vehicle *always* crosses the ramp and always ends up

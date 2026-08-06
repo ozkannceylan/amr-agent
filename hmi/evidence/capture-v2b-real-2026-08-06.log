@@ -1,0 +1,67 @@
+﻿[capture-real] checking the REAL monitoring service at http://127.0.0.1:8089
+[capture-real] the real service serves ["F001"] from /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/vehicles/allocation.yaml
+[capture-real] started chrome pid 30080
+[capture-real] browser Chrome/151.0.7922.75
+[capture-real] --- pass reallive ---
+[capture-real] commanded 150 s of motion at 0.35 m/s
+[capture-real] started double pid 45012
+[capture-real] started hmi pid 8740
+[capture-real] display ramp published by the backend: 1000 .. 5000 ms; fetch of the real service 44.9 ms
+[capture-real] 00 REAL map, live pose, real returns {"serial":"F001","pose":"6.99, 11.62 m  -42°   as of 0.1 s","obstacles":"243 distance returns   117 beyond range, 0 invalid, of 360   as of 0.0 s","map":"v1   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"69 ms round trip, http://127.0.0.1:8089","staleBannerOn":false,"staleBanner":"POSE STALE — the marker shows where the vehicle WAS 6.8 s ago, not where it is. The localization publishes only when its filter updates, so this is what a standing vehicle looks like as well as what a stopped one does. This page cannot tell those apart and does not guess.","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":774,"nonBlank":268380,"vehicleFill":57,"obstacleInk":197}}
+[capture-real]   CHECK PASS  the WHOLE map arrived from the REAL service and is painted
+[capture-real]   CHECK PASS  the grid the page painted is the grid the vehicle published
+[capture-real]   CHECK PASS  the LIVE pose is drawn solid, from the vehicle's own AMCL
+[capture-real]   CHECK PASS  the pose carries its AGE and is never called live
+[capture-real]   CHECK PASS  REAL lidar returns are drawn as obstacles, in the three classes the sensor reported
+[capture-real]   CHECK PASS  the returns were placed in the map frame by the VEHICLE's own TF
+[capture-real]   CHECK PASS  the obstacle row still makes no verdict
+[capture-real]   CHECK PASS  the serial roots the pane, and it is the allocation table's
+[capture-real] shot v2b-real-00-map-live-real-service-2026-08-06.png  63540 bytes  — THE REAL THING: the whole occupancy grid, the live pose and the lidar returns have all arrived from viz/monitor/service.py subscribing in F001's own DDS domain, across the WSL-to-Windows loopback relay. Pose age at capture 636 ms, 243 distance returns. Every row carries the age of the datum it came from
+[capture-real] shot v2b-real-01-whole-page-real-service-2026-08-06.png  211328 bytes  — the whole operator page on real monitoring data. Zones A-F are driven by a PLC DOUBLE and are rehearsed, not proven; only the map pane is joined to a real vehicle, and no caption merges a value from one plane with a value from the other
+[capture-real]   CHECK PASS  zooming the REAL map is drawing: not one written value moved
+[capture-real] shot v2b-real-02-map-zoomed-real-service-2026-08-06.png  56099 bytes  — the same real map zoomed: a view transform derives no value, changes no datum and posts nothing
+[capture-real] stopped hmi
+[capture-real] stopped double
+[capture-real] --- pass realstale ---
+[capture-real] started double pid 44260
+[capture-real] started hmi pid 6740
+[capture-real] commanded 30 s of motion at 0.35 m/s
+[capture-real] 03a driven — the baseline {"serial":"F001","pose":"5.61, 12.97 m  -46°   as of 0.5 s","obstacles":"236 distance returns   124 beyond range, 0 invalid, of 360   as of 0.2 s","map":"v1   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"60 ms round trip, http://127.0.0.1:8089","staleBannerOn":false,"staleBanner":"POSE STALE — the marker shows where the vehicle WAS 5.8 s ago, not where it is. The localization publishes only when its filter updates, so this is what a standing vehicle looks like as well as what a stopped one does. This page cannot tell those apart and does not guess.","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":775,"nonBlank":268380,"vehicleFill":54,"obstacleInk":199}}
+[capture-real]   CHECK PASS  the baseline is a SOLID marker while the vehicle is being driven
+[capture-real] shot v2b-real-03-pose-fresh-while-driven-2026-08-06.png  63655 bytes  — the baseline for the stale pass: the vehicle is under command and its pose is 5.61, 12.97 m  -46°   as of 0.5 s. Solid marker, 54 px of fill
+[capture-real] the stimulus is ending; the vehicle will now STAND. Nothing is frozen.
+[capture-real] 03b STANDING — pose stale {"serial":"F001","pose":"7.31, 11.46 m  -42°   LAST KNOWN, as of 9.2 s","obstacles":"240 distance returns   120 beyond range, 0 invalid, of 360   as of 0.1 s","map":"v1   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"52 ms round trip, http://127.0.0.1:8089","staleBannerOn":true,"staleBanner":"POSE STALE — the marker shows where the vehicle WAS 9.2 s ago, not where it is. The localization publishes only when its filter updates, so this is what a standing vehicle looks like as well as what a stopped one does. This page cannot tell those apart and does not guess.","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":727,"nonBlank":268380,"vehicleFill":0,"obstacleInk":177}}
+[capture-real]   CHECK PASS  the marker has NO solid fill left — the picture changed, not the caption
+[capture-real]   CHECK PASS  the readout says LAST KNOWN and gives the age
+[capture-real]   CHECK PASS  the banner says where the vehicle WAS, not where it is
+[capture-real]   CHECK PASS  the page does not guess between a standing vehicle and a stopped one
+[capture-real]   CHECK PASS  THE OBSTACLE LAYER IS STILL FRESH at the same instant — the lidar keeps publishing while a standing vehicle produces no pose at all, and the two ages are independent
+[capture-real]   CHECK PASS  the map itself is untouched by a stale pose
+[capture-real] shot v2b-real-04-pose-STALE-standing-vehicle-2026-08-06.png  73917 bytes  — THE RESIDUAL THE DESIGN EXISTS FOR, ON REAL DATA: the forklift is STANDING, so its localization has published nothing for 9.8 s. Nothing was frozen and no staleness was simulated — the stimulus simply stopped. The marker is hollow with no fill, labelled LAST KNOWN POSITION with its age, and the lidar layer beside it is still 79 ms old
+[capture-real] shot v2b-real-05-whole-page-pose-stale-standing-2026-08-06.png  225860 bytes  — the same standing vehicle on the whole page: the process zones are unaffected, because the age of one plane says nothing about the other
+[capture-real] stopped hmi
+[capture-real] stopped double
+[capture-real] --- pass realdown ---
+[capture-real] started double pid 41300
+[capture-real] started hmi pid 19592
+[capture-real] 05a zones A-F before the outage {"strip":{"session":"CONNECTED","link":"YES","mode":"TELEOP"},"pstop":{"label":"PROCESS STOP","cls":""},"machineMode":"TELEOP","zoneC":{"pstop":"clear / clear","resetreq":"clear / not required","teleop":"clear / inactive"}}
+[capture-real]   CHECK PASS  the real service is answering before it is stopped
+[capture-real] stopping the REAL monitoring service, pid(s) 183236,217461
+[capture-real] 05b the REAL service stopped {"serial":"—","pose":"—","obstacles":"—","map":"—","fetch":"failed after 1537 ms","staleBannerOn":false,"staleBanner":"","messageOn":true,"message":"The monitoring service is not answering. No map, no position and no obstacles are shown, because nothing here is old enough to be worth drawing — an unreachable source is not a source of last values.  [URLError: <urlopen error timed out>]","canvas":{"w":630,"h":460,"colours":0,"nonBlank":0,"vehicleFill":0,"obstacleInk":0}}
+[capture-real] 05c zones A-F after the outage {"strip":{"session":"CONNECTED","link":"YES","mode":"TELEOP"},"pstop":{"label":"PROCESS STOP","cls":""},"machineMode":"TELEOP","zoneC":{"pstop":"clear / clear","resetreq":"clear / not required","teleop":"clear / inactive"}}
+[capture-real]   CHECK PASS  the pane greys and says the service is not answering
+[capture-real]   CHECK PASS  it shows NO last values — an unreachable source is not a source of last values
+[capture-real]   CHECK PASS  nothing is left drawn on the canvas
+[capture-real]   CHECK PASS  THE PROCESS PLANE IS UNTOUCHED: session still up, mode still in force
+[capture-real]   CHECK PASS  the heartbeat kept advancing across the outage
+[capture-real]   CHECK PASS  the backend did not exit when its source died
+[capture-real] shot v2b-real-06-real-monitoring-service-stopped-2026-08-06.png  203726 bytes  — THE REAL MONITORING SERVICE STOPPED MID-SESSION: the map pane greys and says so — no map, no position, no obstacles, and no last values. The process zones beside it are unchanged and the heartbeat never paused. The vehicle is still running in its own domain; what died is the operator-side reader, and the HMI says exactly that
+[capture-real] restarted the REAL monitoring service
+[capture-real] 05d recovered {"serial":"F001","pose":"6.77, 11.84 m  -45°   as of 2.7 s","obstacles":"245 distance returns   115 beyond range, 0 invalid, of 360   as of 0.0 s","map":"v1   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"49 ms round trip, http://127.0.0.1:8089","staleBannerOn":false,"staleBanner":"No pose has arrived from this vehicle since this page started watching. Nothing is drawn for it.","messageOn":false,"message":"The monitoring service is not answering. No map, no position and no obstacles are shown, because nothing here is old enough to be worth drawing — an unreachable source is not a source of last values.  [URLError: <urlopen error timed out>]","canvas":{"w":630,"h":460,"colours":780,"nonBlank":268380,"vehicleFill":0,"obstacleInk":199}}
+[capture-real]   CHECK PASS  the pane recovers by itself when the real service returns
+[capture-real] shot v2b-real-07-recovered-after-restart-2026-08-06.png  63786 bytes  — the same page after the real monitoring service was restarted: the pane recovered on its own, refetched the whole grid and resumed. No operator action, and no reset of anything on the process plane
+[capture-real] stopped hmi
+[capture-real] stopped double
+[capture-real] --- checks ---
+[capture-real] every check passed
+[capture-real] stopped chrome
