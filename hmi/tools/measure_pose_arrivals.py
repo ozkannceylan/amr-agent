@@ -6,13 +6,18 @@ localization pose, measured from the HMI's own side of the monitoring plane.
     #  THIS IS AN INSTRUMENT. IT IS NOT PART OF THE HMI.         #
     #############################################################
 
-WHY IT EXISTS. `hmi/V2B-DESIGN.md` §4.3 publishes the map pane's display ramp
+WHY IT EXISTS. `hmi/V2B-DESIGN.md` §4.3 published the map pane's display ramp
 (`POSE_AGE_RAMP_START_MS` .. `POSE_AGE_RAMP_FULL_MS`) as **display values, not
-measured ones**, and states plainly what could not be derived at the time: a
+measured ones**, and stated plainly what could not be derived at the time: a
 bound on the inter-arrival time of the localization pose **while the vehicle is
 moving**, with its n. The only capture that existed was of a STANDING vehicle
 (`viz/EVIDENCE_MONITORING.md` §8), which is the residual itself and not a
-sample of the moving case. This tool takes the missing measurement.
+sample of the moving case. This tool took the missing measurement, the owner
+ruled on it on 2026-08-06, and the two endpoints are now 2500 / 8000 ms and are
+measured rather than chosen. **This tool is still the way to re-check them**,
+and §4.3 says when that is required: the inter-arrival is `update_min_d /
+speed`, so the endpoints must be re-derived if `update_min_d` moves or if a
+slower driving regime becomes normal.
 
 WHAT IT DOES NOT DO, AND CANNOT. It creates nothing, writes nothing and decides
 nothing. It issues `GET` at a fixed rate against a URL and writes what came

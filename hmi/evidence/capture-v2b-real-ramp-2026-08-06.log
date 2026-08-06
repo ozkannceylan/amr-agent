@@ -1,0 +1,34 @@
+﻿[capture-real] checking the REAL monitoring service at http://127.0.0.1:8089
+[capture-real] the real service serves ["F001"] from /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/vehicles/allocation.yaml
+[capture-real] started chrome pid 28416
+[capture-real] browser Chrome/151.0.7922.75
+[capture-real] pass reallive SKIPPED (--passes)
+[capture-real] pass realstale SKIPPED (--passes)
+[capture-real] pass realdown SKIPPED (--passes)
+[capture-real] --- pass rampband ---
+[capture-real] started double pid 16000
+[capture-real] started hmi pid 49452
+[capture-real] ramp in force: 2500 .. 8000 ms
+[capture-real]   CHECK PASS  the ruled values are the ones the backend is publishing
+[capture-real] commanded 60 s of motion at 0.35 m/s
+[capture-real] a pose arrived; the stimulus will end and the age will walk up the ramp
+[capture-real] 06a age in the 1000..2500 ms band {"serial":"F001","pose":"6.79, 5.76 m  -178°   as of 1.1 s","obstacles":"246 distance returns   114 beyond range, 0 invalid, of 360   as of 0.0 s","map":"v2   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"121 ms round trip, http://127.0.0.1:8089","staleBannerOn":false,"staleBanner":"POSE STALE — the marker shows where the vehicle WAS 1 min 14 s ago, not where it is. The localization publishes only when its filter updates, so this is what a standing vehicle looks like as well as what a stopped one does. This page cannot tell those apart and does not guess.","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":782,"nonBlank":268380,"vehicleFill":52,"obstacleInk":202}}
+[capture-real]   CHECK PASS  the page's own displayed age is inside band 1 (1100 ms)
+[capture-real]   CHECK PASS  AND THE MARKER IS SOLID — under the old 1000 ms start this age was already fading and carried 0 px of fill
+[capture-real]   CHECK PASS  it is not called a last known position at this age
+[capture-real] shot v2b-real-ramp-08-band-1000-2500ms-now-solid-2026-08-06.png  63960 bytes  — THE LOWER ENDPOINT, MOVED: a pose 1.1 s old is drawn SOLID (52 px of marker fill). Under the previous 1000 ms start this age was already past the ramp and fading — the measured median of brisk driving is 831–910 ms, so the page was calling a normally driven vehicle stale about half the time. The age is still on the marker, as it is in every state
+[capture-real] 06b age in the 5000..8000 ms band {"serial":"F001","pose":"6.48, 5.74 m  -177°   as of 5.3 s","obstacles":"245 distance returns   115 beyond range, 0 invalid, of 360   as of 0.0 s","map":"v2   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"89 ms round trip, http://127.0.0.1:8089","staleBannerOn":false,"staleBanner":"POSE STALE — the marker shows where the vehicle WAS 1 min 14 s ago, not where it is. The localization publishes only when its filter updates, so this is what a standing vehicle looks like as well as what a stopped one does. This page cannot tell those apart and does not guess.","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":848,"nonBlank":268380,"vehicleFill":0,"obstacleInk":198}}
+[capture-real]   CHECK PASS  the page's own displayed age is inside band 2 (5300 ms)
+[capture-real]   CHECK PASS  AND IT IS NOT YET A LAST KNOWN POSITION — under the old 5000 ms full point this age was labelled one, and a vehicle genuinely being driven at 0.15 m/s reaches it (p90 6010 ms measured)
+[capture-real]   CHECK PASS  the age is still on the marker, and the page still never says live
+[capture-real] shot v2b-real-ramp-09-band-5000-8000ms-not-yet-last-known-2026-08-06.png  64156 bytes  — THE UPPER ENDPOINT, MOVED: a pose 5.3 s old is faded but is NOT labelled a last known position. Under the previous 5000 ms full point it was — and a vehicle genuinely being driven at 0.15 m/s reaches this age (p90 6010 ms, max 6446 ms measured). The cost of moving it is stated beside the constants: 0.88 m of undisclosed travel instead of 0.35 m if the localization dies mid-motion
+[capture-real] 06c past the new full point {"serial":"F001","pose":"6.79, 5.79 m  -177°   LAST KNOWN, as of 10.1 s","obstacles":"248 distance returns   112 beyond range, 0 invalid, of 360   as of 0.0 s","map":"v2   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"93 ms round trip, http://127.0.0.1:8089","staleBannerOn":true,"staleBanner":"POSE STALE — the marker shows where the vehicle WAS 10.1 s ago, not where it is. The localization publishes only when its filter updates, so this is what a standing vehicle looks like as well as what a stopped one does. This page cannot tell those apart and does not guess.","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":794,"nonBlank":268380,"vehicleFill":0,"obstacleInk":200}}
+[capture-real]   CHECK PASS  past 8000 ms it IS a last known position, with no fill at all
+[capture-real]   CHECK PASS  and the banner still refuses to guess between standing and stopped
+[capture-real]   CHECK PASS  the obstacle layer is unaffected by any of this - the ramp is the POSE's and the two ages stay independent
+[capture-real] shot v2b-real-ramp-10-past-8000ms-last-known-2026-08-06.png  75290 bytes  — past the new upper endpoint: 10.1 s old, hollow, no fill, LAST KNOWN POSITION. Widening the ramp moved when this label arrives; it did not remove it, and a standing vehicle still always reaches it
+[capture-real] stopped hmi
+[capture-real] stopped double
+[capture-real] --- checks ---
+[capture-real] every check passed
+[capture-real] stopped chrome

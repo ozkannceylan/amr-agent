@@ -227,8 +227,28 @@ def main() -> int:
         print("\n=== CHECK 4  the map: whole grid, byte-identical ===")
         s_hmi, h_hmi, body_hmi = http(hmi_base + "/monitor/map?serial=F001")
         s_viz, h_viz, body_viz = http(viz_base + "/vehicles/F001/map")
-        check("the proxied body is byte-identical to the service's",
-              body_hmi == body_viz, f"{len(body_hmi)} vs {len(body_viz)} bytes")
+        # THE ONE FIELD THAT CANNOT BE EQUAL, AND WHY THIS IS NOT A WEAKENING.
+        # These are two independent GETs, so the service compresses twice, and
+        # RFC 1952 puts a wall-clock MTIME in bytes 4..8 of every gzip header.
+        # Comparing those four bytes tests when the two requests landed relative
+        # to a second boundary and nothing else: the original form of this check
+        # passed at m5-53 and failed at m5-53b on the identical proxy path, and
+        # a probe pinned the difference to offset 4 alone with the decompressed
+        # cells equal in every case. Everything else is still compared bit for
+        # bit — the whole deflate stream included, so a re-encode by this
+        # backend would still fail — and the cells are now compared as well,
+        # which the raw comparison alone never did.
+        MTIME = slice(4, 8)
+        stripped_hmi = body_hmi[:MTIME.start] + body_hmi[MTIME.stop:]
+        stripped_viz = body_viz[:MTIME.start] + body_viz[MTIME.stop:]
+        check("the proxied body is byte-identical to the service's, but for the "
+              "gzip header's wall-clock MTIME (two compressions, RFC 1952)",
+              stripped_hmi == stripped_viz,
+              f"{len(body_hmi)} vs {len(body_viz)} bytes; "
+              f"{len(stripped_hmi)} compared")
+        check("and the CELLS themselves are identical - nothing was re-encoded",
+              gzip.decompress(body_hmi) == gzip.decompress(body_viz),
+              f"{len(gzip.decompress(body_hmi))} cells")
         cells = gzip.decompress(body_hmi)
         w, hh = int(h_hmi["X-Map-Width"]), int(h_hmi["X-Map-Height"])
         check("cells == width x height - the WHOLE map, never a crop",

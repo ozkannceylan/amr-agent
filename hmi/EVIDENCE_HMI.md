@@ -2280,3 +2280,108 @@ print('drive_f001: {} command pairs, then zero held 1.5 s'.format(n))
 node.destroy_node()
 rclpy.shutdown()
 ```
+
+## K.7 THE RULING APPLIED — the ramp moved to 2500 / 8000 ms (2026-08-06)
+
+The owner ruled on §K.4.2 and chose **option B**. `POSE_AGE_RAMP_START_MS` and
+`POSE_AGE_RAMP_FULL_MS` in `hmi_server.py` are now **2500** and **8000 ms**.
+There is no second place to change: the page reads both from
+`/monitor/state` on every poll, `config.yaml` is forbidden a threshold, and the
+sweep for a hard-coded `1000`/`5000` in `hmi/static/index.html` and the
+instruments came back empty.
+
+`V2B-DESIGN.md` §4.3 now carries the ruling, its date, the reasoning, **the
+cost**, and the re-check rule; the same is written beside the constants
+themselves. The three things that had to stay attached to the numbers:
+
+1. **Why the old pair was wrong** — `1000 ms` sat at the *median* of brisk
+   driving (831 / 910 ms measured), so the page called a normally driven vehicle
+   stale about half the time; `5000 ms` was crossed by a vehicle genuinely being
+   driven at 0.15 m/s (p90 6010 ms). Both failures under-claimed rather than
+   over-claimed, which is why this was fidelity and not safety.
+2. **The cost, carried forward** — widening a ramp makes the page claim *more*.
+   If the localization dies while the vehicle keeps moving at 0.35 m/s, the
+   marker is now solid for 2.5 s rather than 1.0 s: **up to 0.88 m of
+   undisclosed travel instead of 0.35 m**. First trade of that margin on this
+   pane, and the reason it needed an owner.
+3. **The finding that stops a blind re-tune** — the localizer is
+   *distance-triggered*, so inter-arrival = `update_min_d / speed` and each
+   endpoint is a covert statement about a speed (`2500 ms` = "fade below
+   0.10 m/s"; `8000 ms` = "last known below 0.031 m/s"). **No fixed pair
+   survives from the creep floor to full travel**: at the smoother's 0.025 m/s
+   from-rest floor the inter-arrival is ~10 s and a creeping vehicle still
+   crosses the ramp — correctly, because the page cannot tell creeping from
+   standing and says so.
+
+### K.7.1 What was re-run, and what was deliberately not
+
+**Re-run in full: the backend half.** `check_hmi_map_pane.py`, all seven checks
+**PASS**, log `hmi/evidence/check-map-pane-2026-08-06-ramp2500-8000.log`. The
+ramp check reads back `2500.0 .. 8000.0 ms`. The write allowlist is still
+exactly eight nodes and the method matrix is unchanged.
+
+**Not re-captured: the screenshots whose appearance does not change.** A pose at
+0.6 s is solid under both pairs; a pose at 9.2 s is a `LAST KNOWN POSITION`
+under both; the service-down and recovery states have no pose at all. Re-taking
+them would have destroyed a comparison for nothing (`docs/LESSONS.md`
+2026-08-06). **Exactly two age bands changed appearance, and both were
+photographed** by a new `rampband` pass under the distinct prefix
+`v2b-real-ramp-*`, so §K.3's captures are untouched and the two runs sit side by
+side.
+
+| Band | Under 1000 / 5000 | Under 2500 / 8000 | New capture |
+|---|---|---|---|
+| 1000–2500 ms | fading, 0 px of marker fill | **solid** | `v2b-real-ramp-08-band-1000-2500ms-now-solid-2026-08-06.png` — 1.1 s old, **52 px** of fill |
+| 5000–8000 ms | `LAST KNOWN POSITION` | **faded, but not last-known** | `v2b-real-ramp-09-band-5000-8000ms-not-yet-last-known-2026-08-06.png` — 5.3 s old, reads `pose as of 5.3 s` |
+| past 8000 ms | (past 5000: last-known) | still `LAST KNOWN`, no fill | `v2b-real-ramp-10-past-8000ms-last-known-2026-08-06.png` — 10.1 s old, 0 px |
+
+**The before-halves of both comparisons already exist and were not re-taken:**
+`v2b-real-07` caught a **2.7 s** pose with **0 px** of fill under the old ramp,
+and `v2b-real-04` caught a **9.2 s** pose labelled `LAST KNOWN`. Ten checks in
+the new pass, **all passing**, including that the backend is publishing exactly
+`2500 / 8000`, that the obstacle layer is unaffected (the ramp is the *pose's*
+and the two ages stay independent), and that the last-known label still arrives
+— widening moved *when* it arrives, it did not remove it. Log:
+`hmi/evidence/capture-v2b-real-ramp-2026-08-06.log`.
+
+### K.7.2 Two checks moved, and neither was weakened
+
+**CHECK 4 of the backend half was found flaky, and the mechanism was proved
+before it was attributed.** It failed on the first run after the ramp change —
+`871 vs 871 bytes` — on a proxy path the change does not touch. A probe against
+the double compressed the same grid at three inter-request gaps:
+
+```
+gap  0.0s  raw equal: True    decompressed equal: True   differing offsets: []
+gap  0.4s  raw equal: False   decompressed equal: True   differing offsets: [4]
+gap  1.1s  raw equal: False   decompressed equal: True   differing offsets: [4]
+           a[0:10]=1f8b08003eaa746a02ff   b[0:10]=1f8b08003faa746a02ff
+```
+
+**Byte 4 only** — the wall-clock `MTIME` that RFC 1952 puts in every gzip
+header. The check makes two independent GETs, so the service compresses twice;
+whether the bytes match was decided by which side of a second boundary the two
+requests landed on, and m5-53's run happened to land both inside one second. It
+was a latent flake in the instrument, **not** a regression from the ruling.
+
+The fix compares the body with those four bytes excised — the whole deflate
+stream still bit for bit, so a re-encode by this backend would still fail — and
+**adds** a comparison of the decompressed cells, which the raw test never made.
+Strictly more is checked than before.
+
+**The `rampband` pass itself failed its first attempt, correctly.** It gated on
+the *backend's* age and photographed a **0.9 s** pose while asserting it was
+inside the 1000–2500 ms band. 0.9 s is solid under both ramps, so that capture
+would have illustrated nothing about the change it exists to show. The check
+caught it; the gate now reads **the age the page is displaying**, because the
+map pane polls on its own 500 ms period and the DOM trails the backend by up to
+one poll. The re-run landed 1.1 s and 5.3 s, both inside their bands.
+
+### K.7.3 What did not move
+
+Nothing else in this file. The eight-node write set, the method matrix, the H6
+beacon exclusion, the whole-map assertions, the process-plane isolation and the
+`—`-on-unreachable behaviour are all unchanged and re-passed. The read-only
+claim is untouched and appears only in its full form: **read-only by
+construction of the process and proven by test; not enforced by the
+middleware.** No file outside `hmi/` was written.

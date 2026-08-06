@@ -6,7 +6,8 @@
  *     #  THIS IS AN INSTRUMENT. IT IS NOT PART OF THE HMI.         #
  *     #############################################################
  *
- * A NEW FILE, AND EVERY OUTPUT IT WRITES IS NAMED `v2b-real-*`.
+ * A NEW FILE, AND EVERY OUTPUT IT WRITES IS NAMED FROM `--prefix`
+ * (default `v2b-real-*`).
  * `capture_v2b_screens.mjs` and its `v2b-*` captures are the DOUBLE's evidence:
  * they are what this run is measured against, and a repeat that reuses its
  * predecessor's names destroys the comparison it exists to make
@@ -77,12 +78,19 @@ const DRIVE = arg('drive',
   + 'b8b82e36-4ca6-4a60-b4a7-22454f63880f/scratchpad/drive_f001.py');
 const SCRATCH = path.join(os.tmpdir(), 'amr-hmi-v2b-real-screens');
 
-const ALL_PASSES = ['reallive', 'realstale', 'realdown'];
-const PASSES = arg('passes', ALL_PASSES.join(',')).split(',').map((s) => s.trim());
+//: Filename stem for everything this run writes. It is an ARGUMENT so a re-run
+//: after a change to the build can be told apart from the run it is compared
+//: against, instead of overwriting it (docs/LESSONS.md 2026-08-06: an evidence
+//: filename carries the RUN that produced it).
+const PREFIX = arg('prefix', 'v2b-real');
+
+const ALL_PASSES = ['reallive', 'realstale', 'realdown', 'rampband'];
+const PASSES = arg('passes', 'reallive,realstale,realdown')
+  .split(',').map((s) => s.trim());
 
 mkdirSync(OUT, { recursive: true });
 mkdirSync(SCRATCH, { recursive: true });
-const MANIFEST = path.join(OUT, `MANIFEST-v2b-real-${DATE}.txt`);
+const MANIFEST = path.join(OUT, `MANIFEST-${PREFIX}-${DATE}.txt`);
 writeFileSync(MANIFEST,
   `HMI v2b map pane — REAL monitoring service, REAL vehicle — ${DATE}\n`
   + `produced by hmi/tools/capture_v2b_real_screens.mjs against\n`
@@ -397,13 +405,13 @@ async function passRealLive(cdp) {
   check('the serial roots the pane, and it is the allocation table\'s',
     m.serial === SERIAL, m.serial);
 
-  await cdp.shot(`v2b-real-00-map-live-real-service-${DATE}.png`,
+  await cdp.shot(`${PREFIX}-00-map-live-real-service-${DATE}.png`,
     'THE REAL THING: the whole occupancy grid, the live pose and the lidar returns '
     + `have all arrived from viz/monitor/service.py subscribing in ${SERIAL}'s own `
     + `DDS domain, across the WSL-to-Windows loopback relay. Pose age at capture `
     + `${raw.pose_age_ms.toFixed(0)} ms, ${raw.obstacles.returns.distance} distance `
     + 'returns. Every row carries the age of the datum it came from', '#mapzone');
-  await cdp.shot(`v2b-real-01-whole-page-real-service-${DATE}.png`,
+  await cdp.shot(`${PREFIX}-01-whole-page-real-service-${DATE}.png`,
     'the whole operator page on real monitoring data. Zones A-F are driven by a PLC '
     + 'DOUBLE and are rehearsed, not proven; only the map pane is joined to a real '
     + 'vehicle, and no caption merges a value from one plane with a value from the other');
@@ -416,7 +424,7 @@ async function passRealLive(cdp) {
   const after = JSON.stringify((await state()).requests);
   check('zooming the REAL map is drawing: not one written value moved',
     before === after, `${before} -> ${after}`);
-  await cdp.shot(`v2b-real-02-map-zoomed-real-service-${DATE}.png`,
+  await cdp.shot(`${PREFIX}-02-map-zoomed-real-service-${DATE}.png`,
     'the same real map zoomed: a view transform derives no value, changes no datum '
     + 'and posts nothing', '#mapzone');
   await stopStack();
@@ -444,7 +452,7 @@ async function passRealStale(cdp) {
   check('the baseline is a SOLID marker while the vehicle is being driven',
     fresh.canvas.vehicleFill > 8 && !/LAST KNOWN/.test(fresh.pose),
     `${fresh.canvas.vehicleFill} px, "${fresh.pose}"`);
-  await cdp.shot(`v2b-real-03-pose-fresh-while-driven-${DATE}.png`,
+  await cdp.shot(`${PREFIX}-03-pose-fresh-while-driven-${DATE}.png`,
     `the baseline for the stale pass: the vehicle is under command and its pose is `
     + `${fresh.pose}. Solid marker, ${fresh.canvas.vehicleFill} px of fill`, '#mapzone');
 
@@ -473,14 +481,14 @@ async function passRealStale(cdp) {
     `obstacles ${raw.obstacles_age_ms} ms vs pose ${raw.pose_age_ms} ms`);
   check('the map itself is untouched by a stale pose',
     /whole map/.test(m.map), m.map);
-  await cdp.shot(`v2b-real-04-pose-STALE-standing-vehicle-${DATE}.png`,
+  await cdp.shot(`${PREFIX}-04-pose-STALE-standing-vehicle-${DATE}.png`,
     `THE RESIDUAL THE DESIGN EXISTS FOR, ON REAL DATA: the forklift is STANDING, so `
     + `its localization has published nothing for ${(raw.pose_age_ms / 1000).toFixed(1)} s. `
     + 'Nothing was frozen and no staleness was simulated — the stimulus simply stopped. '
     + 'The marker is hollow with no fill, labelled LAST KNOWN POSITION with its age, and '
     + `the lidar layer beside it is still ${raw.obstacles_age_ms.toFixed(0)} ms old`,
     '#mapzone');
-  await cdp.shot(`v2b-real-05-whole-page-pose-stale-standing-${DATE}.png`,
+  await cdp.shot(`${PREFIX}-05-whole-page-pose-stale-standing-${DATE}.png`,
     'the same standing vehicle on the whole page: the process zones are unaffected, '
     + 'because the age of one plane says nothing about the other');
   await stopStack();
@@ -524,7 +532,7 @@ async function passRealDown(cdp) {
     `${hbBefore} -> ${s.heartbeat.value}`);
   check('the backend did not exit when its source died',
     s.session.state === 'CONNECTED', s.session.state);
-  await cdp.shot(`v2b-real-06-real-monitoring-service-stopped-${DATE}.png`,
+  await cdp.shot(`${PREFIX}-06-real-monitoring-service-stopped-${DATE}.png`,
     'THE REAL MONITORING SERVICE STOPPED MID-SESSION: the map pane greys and says so — '
     + 'no map, no position, no obstacles, and no last values. The process zones beside '
     + 'it are unchanged and the heartbeat never paused. The vehicle is still running in '
@@ -538,10 +546,139 @@ async function passRealDown(cdp) {
   const back = await mapReadout(cdp, '05d recovered');
   check('the pane recovers by itself when the real service returns',
     /whole map/.test(back.map) && back.canvas.nonBlank > 10000, back.map);
-  await cdp.shot(`v2b-real-07-recovered-after-restart-${DATE}.png`,
+  await cdp.shot(`${PREFIX}-07-recovered-after-restart-${DATE}.png`,
     'the same page after the real monitoring service was restarted: the pane recovered '
     + 'on its own, refetched the whole grid and resumed. No operator action, and no '
     + 'reset of anything on the process plane', '#mapzone');
+  await stopStack();
+}
+
+// ---- 4. THE RAMP BAND — the only appearance the 2026-08-06 ruling changed ---
+/*
+ * The owner ruled the ramp from 1000/5000 to 2500/8000 ms on the m5-53b
+ * measurement (V2B-DESIGN §4.3). Most of this file's captures are unaffected,
+ * and re-taking them would destroy a comparison for nothing: a pose at 0.6 s is
+ * solid under both pairs and a pose at 9.2 s is a LAST KNOWN POSITION under
+ * both. Exactly two age bands changed, and this pass photographs both.
+ *
+ *   1000..2500 ms  was FADING, is now SOLID
+ *   5000..8000 ms  was LAST KNOWN POSITION, is now merely fading
+ *
+ * The old-build witnesses already exist and are not re-taken:
+ * `v2b-real-07` caught a 2.7 s pose with 0 px of marker fill, and
+ * `v2b-real-04` caught a 9.2 s pose labelled LAST KNOWN. This pass is the
+ * after half of both comparisons.
+ *
+ * No staleness is simulated here either. The vehicle is driven, the stimulus
+ * ends, and the age walks up through both bands on its own.
+ */
+function ageFromPose(text) {
+  const m = /as of ([\d.]+) s/.exec(text || '');
+  return m ? parseFloat(m[1]) * 1000 : null;
+}
+/** The age THE PAGE IS SHOWING, which is the only one this pass may gate on.
+ *
+ *  A first attempt gated on the BACKEND's age and photographed a 0.9 s pose
+ *  while asserting it was inside the 1000..2500 ms band — the map pane polls on
+ *  its own 500 ms period, so the DOM trails the backend by up to a poll, and a
+ *  capture of the wrong band would have illustrated nothing about the change it
+ *  exists to show. The check caught it. The gate now reads the rendered text. */
+async function displayedAge(cdp) {
+  return cdp.evaluate(`(() => {
+    const e = document.getElementById('m_pose');
+    const t = e ? e.querySelector('.v').textContent : '';
+    const m = /as of ([\\d.]+) s/.exec(t);
+    return m ? parseFloat(m[1]) * 1000 : null;
+  })()`);
+}
+async function waitForDisplayedAge(cdp, lo, hi, timeoutMs = 150000) {
+  return waitFor(`the PAGE to show a pose age in ${lo}..${hi} ms`,
+    async () => {
+      const a = await displayedAge(cdp);
+      return a !== null && a >= lo && a < hi ? a : false;
+    }, timeoutMs);
+}
+async function passRampBand(cdp) {
+  await startStack();
+  await cdp.navigate(HMI_BASE + '/');
+  await clearLatches(cdp);
+  const ramp = (await monitor()).monitor;
+  log(`ramp in force: ${ramp.age_ramp_start_ms} .. ${ramp.age_ramp_full_ms} ms`);
+  check('the ruled values are the ones the backend is publishing',
+    ramp.age_ramp_start_ms === 2500 && ramp.age_ramp_full_ms === 8000,
+    `${ramp.age_ramp_start_ms} .. ${ramp.age_ramp_full_ms}`);
+
+  // WAIT ON THE COUNTER, NOT ON THE AGE. A first attempt gated this on
+  // `pose_age_ms < 1000` and timed out against a vehicle that was demonstrably
+  // driving: while moving, the inter-arrival is 0.8-0.9 s, so the sub-second
+  // window is only intermittently open and a poll can miss it for a long time.
+  // What this pass actually needs is proof that a pose ARRIVED during it, which
+  // is the message counter advancing — the same rule the measurement instrument
+  // uses. The age then walks up through both bands by itself.
+  const base = (await monitor()).state.messages_received.pose;
+  driveFor(60, 0.35, 12);
+  await waitFor('a pose to ARRIVE while the vehicle is driven',
+    async () => (await monitor()).state.messages_received.pose > base, 120000);
+  log('a pose arrived; the stimulus will end and the age will walk up the ramp');
+
+  // --- band 1: 1000..2500 ms. Under the OLD ramp this was already fading.
+  await waitForDisplayedAge(cdp, 1050, 2000);
+  const b1 = await mapReadout(cdp, '06a age in the 1000..2500 ms band');
+  const a1 = ageFromPose(b1.pose);
+  check(`the page's own displayed age is inside band 1 (${a1} ms)`,
+    a1 !== null && a1 >= 1000 && a1 < 2500, String(a1));
+  check('AND THE MARKER IS SOLID — under the old 1000 ms start this age was '
+    + 'already fading and carried 0 px of fill',
+    b1.canvas.vehicleFill > 8, `${b1.canvas.vehicleFill} px`);
+  check('it is not called a last known position at this age',
+    !/LAST KNOWN/.test(b1.pose) && !b1.staleBannerOn, b1.pose);
+  await cdp.shot(`${PREFIX}-08-band-1000-2500ms-now-solid-${DATE}.png`,
+    `THE LOWER ENDPOINT, MOVED: a pose ${(a1 / 1000).toFixed(1)} s old is drawn `
+    + `SOLID (${b1.canvas.vehicleFill} px of marker fill). Under the previous `
+    + '1000 ms start this age was already past the ramp and fading — the measured '
+    + 'median of brisk driving is 831–910 ms, so the page was calling a normally '
+    + 'driven vehicle stale about half the time. The age is still on the marker, '
+    + 'as it is in every state', '#mapzone');
+
+  // --- band 2: 5000..8000 ms. Under the OLD ramp this was LAST KNOWN.
+  await waitForDisplayedAge(cdp, 5200, 7400);
+  const b2 = await mapReadout(cdp, '06b age in the 5000..8000 ms band');
+  const a2 = ageFromPose(b2.pose);
+  check(`the page's own displayed age is inside band 2 (${a2} ms)`,
+    a2 !== null && a2 >= 5000 && a2 < 8000, String(a2));
+  check('AND IT IS NOT YET A LAST KNOWN POSITION — under the old 5000 ms full '
+    + 'point this age was labelled one, and a vehicle genuinely being driven at '
+    + '0.15 m/s reaches it (p90 6010 ms measured)',
+    !/LAST KNOWN/.test(b2.pose), b2.pose);
+  check('the age is still on the marker, and the page still never says live',
+    /as of /.test(b2.pose) && !/live/i.test(b2.pose), b2.pose);
+  await cdp.shot(`${PREFIX}-09-band-5000-8000ms-not-yet-last-known-${DATE}.png`,
+    `THE UPPER ENDPOINT, MOVED: a pose ${(a2 / 1000).toFixed(1)} s old is faded but `
+    + 'is NOT labelled a last known position. Under the previous 5000 ms full point '
+    + 'it was — and a vehicle genuinely being driven at 0.15 m/s reaches this age '
+    + '(p90 6010 ms, max 6446 ms measured). The cost of moving it is stated beside '
+    + 'the constants: 0.88 m of undisclosed travel instead of 0.35 m if the '
+    + 'localization dies mid-motion', '#mapzone');
+
+  // --- past 8000 ms: the label must still arrive.
+  await waitFor('the pose age to pass the NEW full point',
+    async () => (await monitor()).state.pose_age_ms > 9500, 120000);
+  await sleep(600);
+  const b3 = await mapReadout(cdp, '06c past the new full point');
+  const a3 = ageFromPose(b3.pose);
+  check('past 8000 ms it IS a last known position, with no fill at all',
+    /LAST KNOWN/.test(b3.pose) && b3.canvas.vehicleFill === 0 && b3.staleBannerOn,
+    `${a3} ms, ${b3.canvas.vehicleFill} px`);
+  check('and the banner still refuses to guess between standing and stopped',
+    /does not guess/.test(b3.staleBanner));
+  check('the obstacle layer is unaffected by any of this - the ramp is the '
+    + 'POSE\'s and the two ages stay independent',
+    /distance returns/.test(b3.obstacles) && b3.canvas.obstacleInk > 20,
+    b3.obstacles);
+  await cdp.shot(`${PREFIX}-10-past-8000ms-last-known-${DATE}.png`,
+    `past the new upper endpoint: ${(a3 / 1000).toFixed(1)} s old, hollow, no fill, `
+    + 'LAST KNOWN POSITION. Widening the ramp moved when this label arrives; it did '
+    + 'not remove it, and a standing vehicle still always reaches it', '#mapzone');
   await stopStack();
 }
 
@@ -580,7 +717,7 @@ try {
   appendFileSync(MANIFEST, `browser: ${ver.Browser}\n\n`);
 
   const RUNNERS = { reallive: passRealLive, realstale: passRealStale,
-    realdown: passRealDown };
+    realdown: passRealDown, rampband: passRampBand };
   for (const name of ALL_PASSES) {
     if (!PASSES.includes(name)) { log(`pass ${name} SKIPPED (--passes)`); continue; }
     log(`--- pass ${name} ---`);

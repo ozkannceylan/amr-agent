@@ -309,22 +309,53 @@ MONITOR_POLL_PERIOD_S = 0.5
 #: filled marker to a hollow hatched one; past the upper endpoint it is
 #: labelled a LAST KNOWN POSITION. Every step of the ramp under-claims.
 #:
-#: THEY ARE DISPLAY VALUES, NOT MEASURED VALUES (opcua-nodes.md §12.11's
-#: design-value rule). The upper endpoint would ideally bound the inter-arrival
-#: time of `/amcl_pose` WHILE THE VEHICLE IS MOVING; no such measurement exists
-#: on this machine, because the only committed capture of that topic
-#: (viz/EVIDENCE_MONITORING.md §8) is of a STANDING vehicle — 30 messages and a
-#: 463-second age — which is the residual itself and not a sample of the moving
-#: case. The measurement is requested rather than fabricated from one
-#: confounded capture (LESSONS 2026-08-04: a bound derived from a single
-#: instance is a sample, not a bound).
+#: THESE TWO ARE MEASURED, and they are the only numbers in this file that are.
+#: m5-53 chose 1000 / 5000 as display values because no capture of a MOVING
+#: vehicle existed. m5-53b took that measurement against the real monitoring
+#: service and a real forklift (EVIDENCE_HMI.md §K.4, n = 26 / 77 / 37 across
+#: three driving runs) and the owner ruled the correction in on 2026-08-06.
 #:
-#: A standing vehicle therefore always crosses this ramp, because AMCL publishes
-#: only on a filter update. That is not a defect: it is the truth about what
-#: this page knows, and a marker that stayed solid while the vehicle stood still
-#: would be flattering the data.
-POSE_AGE_RAMP_START_MS = 1000.0
-POSE_AGE_RAMP_FULL_MS = 5000.0
+#: WHAT THE MEASUREMENT SAID. The localization is DISTANCE-TRIGGERED, not
+#: periodic: `agv/forklift/amcl.yaml` sets `update_min_d: 0.25`, and every
+#: measured interval covered 0.28-0.30 m of ground at every speed. So
+#:
+#:      pose inter-arrival  =  update_min_d / speed
+#:
+#: and a threshold written in milliseconds here is a COVERT STATEMENT ABOUT A
+#: SPEED. The old 1000 ms meant "fade below 0.25 m/s" and sat at the MEDIAN of
+#: brisk driving (831 / 910 ms measured), so the page called a vehicle that was
+#: being driven normally stale about half the time. The old 5000 ms meant "call
+#: it a last known position below 0.05 m/s" and was crossed outright by a
+#: vehicle genuinely being driven at 0.15 m/s (p90 6010 ms, max 6446 ms).
+#:
+#: 2500 clears the measured maximum of the brisk population (2099 ms); 8000
+#: clears the slow population's maximum (6446 ms), so LAST KNOWN POSITION now
+#: means "not being driven" rather than "being driven slowly".
+#:
+#: THE COST, CARRIED HERE BESIDE THE NUMBERS RATHER THAN LEFT IN A REPORT.
+#: Widening a ramp makes this page claim MORE. If the localization dies while
+#: the vehicle keeps moving at 0.35 m/s, the marker is now drawn solid for
+#: 2.5 s rather than 1.0 s — up to 0.88 m of undisclosed travel instead of
+#: 0.35 m. That is the whole price of the change and it was accepted knowingly.
+#: Both of the old values' failures under-claimed; this is the first choice here
+#: that trades any of that margin away, which is why it needed an owner ruling
+#: and not an agent's arithmetic.
+#:
+#: DO NOT RE-TUNE THESE BLIND. Because the inter-arrival is a function of
+#: speed, NO fixed pair survives the whole range this vehicle can drive. At the
+#: closed-loop smoother's from-rest floor of 0.025 m/s (LESSONS 2026-08-05
+#: #124) the inter-arrival is ~10 s, past 8000 ms, so a creeping vehicle still
+#: crosses the ramp — and that is correct, because the page cannot tell creeping
+#: from standing and says so rather than guessing. Any future change re-derives
+#: both endpoints from `update_min_d` and a NAMED SPEED, and re-measures if
+#: `update_min_d` moves.
+#:
+#: A standing vehicle always crosses this ramp, because AMCL publishes only on a
+#: filter update. That is not a defect: it is the truth about what this page
+#: knows, and a marker that stayed solid while the vehicle stood still would be
+#: flattering the data.
+POSE_AGE_RAMP_START_MS = 2500.0
+POSE_AGE_RAMP_FULL_MS = 8000.0
 
 #: Host names the monitoring service may be addressed at. The monitoring plane
 #: is local to the operator's machine; it is never a remote transport and never

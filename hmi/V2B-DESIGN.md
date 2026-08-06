@@ -198,37 +198,65 @@ The judgement call is recorded rather than buried: this is a **display ramp
 over the monitoring service's own bookkeeping**, and it is the one place in
 v2b where a millisecond appears at all.
 
-### 4.3 Where the two numbers come from — and what they are not
+### 4.3 Where the two numbers come from — measured, and ruled in on 2026-08-06
 
-They are **display values, not measured values** (`opcua-nodes.md` §12.11's
-design-value rule; `docs/LESSONS.md` 2026-07-27 #46). They live in
-`hmi_server.py` as named constants beside this citation and are published to
-the page on every `/monitor/state` response, so the page invents no
-millisecond of its own — the same discipline v2a applies to
+> **THE VALUES IN FORCE: `POSE_AGE_RAMP_START_MS = 2500`,
+> `POSE_AGE_RAMP_FULL_MS = 8000`.** Owner ruling, 2026-08-06, on the m5-53b
+> measurement. They replace m5-53's 1000 / 5000, which were display values
+> chosen when no capture of a moving vehicle existed.
+
+They live in `hmi_server.py` as named constants beside the same reasoning, and
+are published to the page on every `/monitor/state` response, so the page
+invents no millisecond of its own — the same discipline v2a applies to
 `UI_POLL_STALE_TIME` and `WRITE_HEALTH_STALE_TIME`. They are deliberately
 **not** in `config.yaml`, whose own header forbids a threshold in that file.
+There is no second place to change.
 
-The honest statement of what could not be derived at m5-53: the ramp's upper
-endpoint would ideally be a bound on the inter-arrival time of `/amcl_pose`
-**while the vehicle is moving**, measured with its n. No such measurement
-existed on this machine then. The only committed capture of that topic
+**Why the old pair was wrong** (`EVIDENCE_HMI.md` §K.4, n = 26 / 77 / 37 across
+three driving runs against the real monitoring service and a real forklift):
+
+- `1000 ms` sat **at the median of brisk driving** — 831 ms and 910 ms measured
+  over two runs at 0.35 m/s — so the page called a normally driven vehicle
+  stale roughly half the time. p95 was 1.2–1.5 s and the maximum 2.1 s, all
+  above it.
+- `5000 ms` survived brisk driving with 2.4× margin but was **crossed by a
+  vehicle genuinely being driven** at 0.15 m/s: p90 6010 ms, maximum 6446 ms.
+
+`2500` clears the brisk population's measured maximum (2099 ms). `8000` clears
+the slow population's maximum (6446 ms), so `LAST KNOWN POSITION` now means
+*not being driven* rather than *being driven slowly*.
+
+**The cost, stated here and not only in a report.** Widening a ramp makes this
+page claim **more**. If the localization dies while the vehicle keeps moving at
+0.35 m/s, the marker is now drawn solid for 2.5 s instead of 1.0 s — **up to
+0.88 m of undisclosed travel instead of 0.35 m**. Both failures of the old pair
+under-claimed; this is the first choice on this pane that trades any of that
+margin away, which is why it is an owner ruling and not an agent's arithmetic.
+
+**The finding that must travel with the numbers, so a later reader does not
+re-tune them blind.** The localization is **distance-triggered, not periodic**:
+`agv/forklift/amcl.yaml` sets `update_min_d: 0.25`, and every measured interval
+covered 0.28–0.30 m of ground at every speed. Therefore
+
+> pose inter-arrival = **`update_min_d / speed`**, and a threshold written in
+> milliseconds is a covert statement about a **speed**.
+
+`2500 ms` says *"fade below 0.10 m/s"*; `8000 ms` says *"call it a last known
+position below 0.031 m/s"*. It follows that **no fixed pair survives the whole
+range this vehicle can drive**: at the closed-loop smoother's from-rest floor
+of 0.025 m/s (`docs/LESSONS.md` 2026-08-05 #124) the inter-arrival is ~10 s and
+a creeping vehicle still crosses the ramp — which is correct, because the page
+cannot tell creeping from standing and says so rather than guessing. Any future
+change re-derives both endpoints from `update_min_d` and a **named speed**, and
+re-measures if `update_min_d` moves.
+
+**The history, kept because it is the rule that produced the values.** m5-53
+could not derive them: the only committed capture of the topic
 (`viz/EVIDENCE_MONITORING.md` §8) was of a **standing** vehicle — 30 messages,
 a 463-second age — which is the residual itself, not a sample of the moving
-case. The report requested the measurement rather than fabricating a bound from
-one confounded capture (`docs/LESSONS.md` 2026-08-04 #94).
-
-> **m5-53b took that measurement** (`EVIDENCE_HMI.md` §K.4): n = 26 / 77 / 37
-> across three driving runs against the real monitoring service and a real
-> vehicle. **The two constants below are unchanged by that brief**, because
-> what it found calls for widening them and widening a ramp makes the page
-> claim *more* — an owner's ruling, not an agent's. The finding, in one line:
-> the localization is **distance-triggered** (`update_min_d: 0.25 m`), so the
-> inter-arrival is `update_min_d / speed` and each endpoint is really a
-> statement about a **speed** — `1000 ms` means "fade below 0.25 m/s" and sits
-> at the *median* of brisk driving rather than above it, while `5000 ms` means
-> "call it last-known below 0.05 m/s" and is crossed by a vehicle genuinely
-> being driven at 0.15 m/s. Both failures under-claim, which is the safe half.
-> §K.4.2 states the proposal (`2500` / `8000 ms`) and its cost.
+case, and a bound derived from one confounded instance is not a bound
+(`docs/LESSONS.md` 2026-08-04 #94). It requested the measurement rather than
+fabricating one. m5-53b took it; the owner ruled.
 
 **And the consequence that is not a defect:** because AMCL publishes only on a
 filter update, a standing vehicle *always* crosses the ramp and always ends up

@@ -186,6 +186,79 @@ classifier is now implied speed, it is an argument with no hidden default, both
 populations print side by side, and every committed CSV stays re-analysable with
 `--analyse` so the split can be moved without re-driving the vehicle.
 
+## Addendum, 2026-08-06 — the owner ruled, and the ramp was changed
+
+**Ruling: option B.** `POSE_AGE_RAMP_START_MS` and `POSE_AGE_RAMP_FULL_MS` are
+now **2500** and **8000 ms**. Open question 1 above is CLOSED; everything else
+in this report stands as written.
+
+    files_changed (addendum):
+      - hmi/hmi_server.py                  (the two constants, at their one home,
+                                            with the ruling, its date, the cost
+                                            and the re-tune rule beside them)
+      - hmi/V2B-DESIGN.md                  (§4.3 rewritten around the ruling)
+      - hmi/tools/measure_pose_arrivals.py (docstring: the values are measured
+                                            now, and this is still how to
+                                            re-check them)
+      - hmi/tools/capture_v2b_real_screens.mjs  (a `rampband` pass and a
+                                            `--prefix` so a re-run cannot
+                                            overwrite the run it is compared to)
+      - hmi/tools/check_hmi_map_pane.py    (CHECK 4's gzip-MTIME flake, fixed
+                                            by comparing MORE, not less)
+      - hmi/EVIDENCE_HMI.md                (new §K.7)
+      - hmi/evidence/check-map-pane-2026-08-06-ramp2500-8000.log
+      - hmi/evidence/capture-v2b-real-ramp-2026-08-06.log
+      - hmi/evidence/screenshots/v2b-real-ramp-08..10-*.png  (3 shots)
+      - hmi/evidence/screenshots/MANIFEST-v2b-real-ramp-2026-08-06.txt
+
+**One home, and it was verified to be one.** The page reads both endpoints from
+`/monitor/state` on every poll; `config.yaml` is forbidden a threshold by its
+own header; a sweep of `hmi/static/index.html` and the instruments for a
+hard-coded `1000`/`5000` came back empty. Nothing was changed in a second place
+because there is no second place.
+
+**The three things kept attached to the numbers**, in `V2B-DESIGN.md` §4.3 and
+again beside the constants themselves: why the old pair was wrong (`1000 ms` sat
+at the *median* of brisk driving, so the page called a driving vehicle stale
+about half the time; `5000 ms` was crossed by a vehicle genuinely driven at
+0.15 m/s; both failures under-claimed); **the cost** (0.88 m of undisclosed
+travel instead of 0.35 m if localization dies mid-motion — the first trade of
+that margin on this pane); and the finding that forbids a blind re-tune (the
+localizer is distance-triggered, so each endpoint is a covert statement about a
+**speed**, and no fixed pair survives from the 0.025 m/s creep floor to full
+travel).
+
+**Did any check move? Yes — two, and neither was weakened.**
+
+1. **`check_hmi_map_pane.py` CHECK 4 was a latent flake, not a regression.** It
+   failed on a proxy path the ruling does not touch (`871 vs 871 bytes`). A
+   probe compressed the same grid at three inter-request gaps and pinned the
+   difference to **byte 4 alone** — the wall-clock `MTIME` RFC 1952 puts in
+   every gzip header — with the decompressed cells equal every time. Two
+   independent GETs mean two compressions, so the old assertion was really
+   testing which side of a second boundary the requests landed on; m5-53's run
+   got lucky. The fix excises those four bytes (the whole deflate stream is
+   still compared bit for bit) and **adds** a comparison of the decompressed
+   cells, which the raw test never made. Seven checks, all PASS.
+2. **The new `rampband` pass failed its first attempt, correctly**, and the
+   failure was the check doing its job: it gated on the *backend's* age and
+   photographed a 0.9 s pose while claiming it was in the 1000–2500 ms band —
+   an age that is solid under both ramps and therefore illustrates nothing. The
+   gate now reads the age **the page is displaying**, since the pane polls on
+   its own 500 ms period. Re-run: 1.1 s and 5.3 s, both inside their bands, ten
+   checks all passing.
+
+**Re-captured: only what changes.** Exactly two age bands change appearance, and
+both were photographed under the distinct prefix `v2b-real-ramp-*` so §K.3's
+captures are untouched and the two runs sit side by side: 1000–2500 ms went from
+fading to **solid** (1.1 s, 52 px of fill), and 5000–8000 ms went from
+`LAST KNOWN POSITION` to **faded but not last-known** (5.3 s). A third shot
+confirms the label still arrives past 8000 ms — widening moved *when* it
+arrives, it did not remove it. The before-halves already existed and were not
+re-taken: `v2b-real-07` (2.7 s, 0 px) and `v2b-real-04` (9.2 s, `LAST KNOWN`).
+Everything else — a 0.6 s pose, the service-down and recovery states — renders
+identically under both pairs and was deliberately left alone.
+
 ## Housekeeping
 
 The evidence was written in two tranches — the measurement after its runs, the
