@@ -836,7 +836,8 @@ class WriterLink(object):
     """
 
     def __init__(self, host, port, ping_period_s, reconnect_period_s,
-                 connect_timeout_s, clear_digit, intrusion_digit, emit):
+                 connect_timeout_s, clear_digit, intrusion_digit,
+                 warn_clear_digit, warn_occupied_digit, emit):
         self.host = host
         self.port = int(port)
         self.ping_period_s = ping_period_s
@@ -844,6 +845,8 @@ class WriterLink(object):
         self.connect_timeout_s = connect_timeout_s
         self.clear_digit = int(clear_digit)
         self.intrusion_digit = int(intrusion_digit)
+        self.warn_clear_digit = int(warn_clear_digit)
+        self.warn_occupied_digit = int(warn_occupied_digit)
         self.emit = emit
 
         self.sock = None
@@ -853,6 +856,14 @@ class WriterLink(object):
         self.next_attempt = 0.0
         self.next_ping = 0.0
         self.sent_zone = None
+        # THE WARNING LEVEL LAST *SUCCESSFULLY* PUT ON THIS SOCKET, and
+        # None means "this connection has not yet carried one". It is
+        # cleared on every close and on every connect, so a clear verdict
+        # is never inherited across a link that went down: the writer
+        # drove WarningFieldClear FALSE when it lost us (SPEC 11.2), and
+        # the only thing that may raise it again is a line we send after
+        # the new connection exists.
+        self.sent_warn = None
         self.sends = 0
         self.pings = 0
         self.attempts = 0
@@ -861,9 +872,13 @@ class WriterLink(object):
         digit = self.clear_digit if clear else self.intrusion_digit
         return 'ZONE {}\n'.format(digit)
 
-    def service(self, now, clear):
+    def warn_line(self, clear):
+        digit = self.warn_clear_digit if clear else self.warn_occupied_digit
+        return 'WARN {}\n'.format(digit)
+
+    def service(self, now, clear, warning_clear):
         if self.connecting:
-            self._poll_connect(now, clear)
+            self._poll_connect(now, clear, warning_clear)
             return
         if not self.up:
             if now >= self.next_attempt:
@@ -903,7 +918,7 @@ class WriterLink(object):
             return
         self._connect_failed(os.strerror(err))
 
-    def _poll_connect(self, now, clear):
+    def _poll_connect(self, now, clear, warning_clear):
         try:
             _r, writable, _x = select.select([], [self.sock], [], 0)
         except (OSError, ValueError) as exc:
@@ -915,7 +930,7 @@ class WriterLink(object):
             if err != 0:
                 self._connect_failed(os.strerror(err))
                 return
-            self._connected(now, clear)
+            self._connected(now, clear, warning_clear)
             return
         if now >= self.connect_deadline:
             self.connecting = False
@@ -936,7 +951,7 @@ class WriterLink(object):
             'and its contract, not ours to duplicate').format(
                 self.attempts, self.host, self.port, why))
 
-    def _connected(self, now, clear):
+    def _connected(self, now, clear, warning_clear):
         try:
             self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except OSError:
@@ -944,6 +959,7 @@ class WriterLink(object):
         self.up = True
         self.next_ping = now + self.ping_period_s
         self.sent_zone = None
+        self.sent_warn = None
         self.emit('LINK', 'up: connected to the stand-in writer at {}:{}'
                   .format(self.host, self.port))
         # ONE ZONE LINE IMMEDIATELY ON (RE)CONNECT. A fresh connection is a
@@ -954,11 +970,37 @@ class WriterLink(object):
         # m5-12 report as a reading to confirm.
         self.publish(clear, 'first line on a new connection (a connection '
                             'is a transition from unknown)')
+        # AND ONE WARN LINE, FOR EXACTLY THE SAME REASON AND NEVER FOR A
+        # WEAKER ONE. The writer holds WarningFieldClear FALSE before the
+        # first WARN line of a session and drives it FALSE again whenever
+        # this link dies (STANDIN-WRITER-DESIGN section 3), so after a
+        # reconnect the permissive level exists nowhere and must be
+        # CLAIMED AFRESH. Sent second, so the protective line keeps its
+        # position in the send order exactly as the committed evidence
+        # measured it.
+        self.publish_warn(warning_clear,
+                          'first line on a new connection (the writer drove '
+                          'the warning channel FALSE when this link died; a '
+                          'clear verdict is a fresh claim, never an '
+                          'inherited one)')
 
     def publish(self, clear, why):
         line = self.zone_line(clear)
         if self._send(line, '{} -> {}'.format(line.strip(), why)):
             self.sent_zone = clear
+
+    def publish_warn(self, clear, why):
+        """Put the WARNING level on the wire. Same vocabulary, same polarity.
+
+        `sent_warn` is advanced ONLY on a successful send, so a line lost
+        to a full send buffer is retried at the next tick rather than
+        being remembered as delivered - which for a WARN 0 would mean the
+        vehicle keeping the higher ceiling on the strength of a line that
+        never left this host.
+        """
+        line = self.warn_line(clear)
+        if self._send(line, '{} -> {}'.format(line.strip(), why)):
+            self.sent_warn = clear
 
     def _send(self, text, detail):
         if not self.up or self.sock is None:
@@ -987,10 +1029,12 @@ class WriterLink(object):
         self.sock = None
         if self.up:
             self.emit('LINK', 'down ({}). The writer converts the silence '
-                              'into an open zone channel within its own 1 s '
-                              'stale window'.format(why))
+                              'into an open zone channel AND an occupied '
+                              'warning field within its own 1 s stale '
+                              'window'.format(why))
         self.up = False
         self.sent_zone = None
+        self.sent_warn = None
 
 
 # ------------------------------------------------------------------------ #
@@ -1100,6 +1144,7 @@ class FieldEvaluation(Node):
             host, link_cfg['port'], link_cfg['ping_period_s'],
             link_cfg['reconnect_period_s'], link_cfg['connect_timeout_s'],
             link_cfg['zone_clear_digit'], link_cfg['zone_intrusion_digit'],
+            link_cfg['warn_clear_digit'], link_cfg['warn_occupied_digit'],
             self.emit)
 
         # THE AGGREGATE BOOTS INTRUSION. Nothing has proved a field clear
@@ -1236,13 +1281,26 @@ class FieldEvaluation(Node):
                 host, link_cfg['port'], how, link_cfg['zone_clear_digit'],
                 link_cfg['zone_intrusion_digit']))
         self.emit('START', (
+            'the WARNING verdict rides the SAME link, same vocabulary shape, '
+            'same polarity: WARN {} = warning field clear -> '
+            'WarningFieldClear := TRUE; WARN {} = occupied -> FALSE, and the '
+            'reduced limit is selected. Sent at every transition and once on '
+            'every (re)connect, AFTER the ZONE line. There is no operator '
+            'command for it at the writer and none is wanted: a human '
+            'vouching for a field verdict is what the wire-NC discipline '
+            'refuses').format(
+                link_cfg['warn_clear_digit'],
+                link_cfg['warn_occupied_digit']))
+        self.emit('START', (
             'warning verdict: {} [std_msgs/Bool], published at the {:.1f} Hz '
             'evaluation tick and NOT on transitions, so that its ABSENCE is '
             'visible. Occupation asserts on one scan; release needs {} clear '
             'scans AND THEN the SF-04 clear-hold of {:.1f} s on this node\'s '
-            'own steady clock. Every failure rule reads OCCUPIED. NO CONSUMER '
-            'EXISTS YET, and any consumer owes a stale rule of its own: no '
-            'message inside its window means OCCUPIED, never clear').format(
+            'own steady clock. Every failure rule reads OCCUPIED. THE TOPIC '
+            'STILL HAS NO CONSUMER - the F-side consumer is fed by the WARN '
+            'line on the link, not by this topic - and any consumer of it '
+            'owes a stale rule of its own: no message inside its window '
+            'means OCCUPIED, never clear').format(
                 topics['warning_field_occupied'], field['evaluate_hz'],
                 field['clear_debounce_scans'], field['warning_clear_hold_s']))
         self.emit('START', (
@@ -1381,9 +1439,21 @@ class FieldEvaluation(Node):
             self.emit('AGGREGATE', 'unchanged ({}), reason now: {}'.format(
                 'CLEAR' if clear else 'INTRUSION', reason))
 
-        self.link.service(now_mono, clear)
+        # THE WIRE LEVEL IS THE CHANNEL LEVEL, so the warning verdict is
+        # inverted exactly once, here, at the boundary: this node reasons
+        # in OCCUPIED and the link speaks CLEAR, the same way the zone
+        # channel speaks "circuit closed" for "field clear".
+        warning_clear = not warning
+
+        self.link.service(now_mono, clear, warning_clear)
         if self.link.up and self.link.sent_zone != clear:
             self.link.publish(clear, 'aggregate transition')
+        # SENT AFTER THE ZONE LINE, ALWAYS. The protective path is
+        # measured and committed; this is additive, and it stays behind
+        # the protective line in the send order so that nothing about
+        # that path's timing is re-arranged by it.
+        if self.link.up and self.link.sent_warn != warning_clear:
+            self.link.publish_warn(warning_clear, 'warning transition')
 
     def shutdown(self):
         # The link carries LEVELS to a consumer that republishes them, so
@@ -1410,9 +1480,11 @@ class FieldEvaluation(Node):
                 self.link.attempts, self.link.sends, self.link.pings))
         self.emit('EXIT', (
             'field evaluation stopped. The writer sees the link die and '
-            'drives ZoneDeviceCircuitClosed FALSE within FIELD_LINK_STALE_MAX '
-            '= 1 s: loss of the intrusion source reads as an intrusion, never '
-            'as a clear field'))
+            'drives ZoneDeviceCircuitClosed FALSE AND WarningFieldClear '
+            'FALSE within FIELD_LINK_STALE_MAX = 1 s: loss of the field '
+            'source reads as an intrusion and as an occupied warning field, '
+            'never as a clear one. The reduced limit is therefore in force '
+            'again from that instant, which is the demanding direction'))
         self.log.close()
 
 

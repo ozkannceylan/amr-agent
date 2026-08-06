@@ -1,0 +1,83 @@
+2026-08-06T19:50:30.507Z | START | FIELD EVALUATION - a MODEL of what a safety-rated scanner does internally, feeding a STAND-IN FOR WIRING. Not a safety function; no Category, no Performance Level, no SIL, no PFH, no diagnostic coverage (ADR 0011 D5). It reports levels and latches nothing.
+2026-08-06T19:50:30.528Z | START | phases 1 and 2 of agv/forklift/FIELD-EVALUATION.md section 12: two STATIC all-direction contours - protective and warning - with no case selection and no speed enforcement anywhere in this node
+2026-08-06T19:50:30.532Z | START | config = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/config.yaml
+2026-08-06T19:50:30.536Z | START | model = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/model.sdf (scanner mounts read from it, not mirrored)
+2026-08-06T19:50:30.542Z | START | front device: topic /forklift/safety_scanner_front/measurement (NON-SAFE measurement channel), mount x=0.700 y=0.450 yaw=0.7853982 rad
+2026-08-06T19:50:30.547Z | START | rear device: topic /forklift/safety_scanner_rear/measurement (NON-SAFE measurement channel), mount x=-0.700 y=-0.450 yaw=-2.3561945 rad
+2026-08-06T19:50:30.552Z | START | protective contour: corridors x -3.225..2.210 m, y -0.550..+0.550 m in the vehicle frame - the plan outline (-1.875..0.860 m) grown by the protective depth 1.35 m fore and aft, half width 0.55 m. Intrusion opens the zone channel and stops the vehicle
+2026-08-06T19:50:30.556Z | START | warning contour: corridors x -5.225..4.210 m, y -0.550..+0.550 m in the vehicle frame - the SAME outline and the SAME half width grown by the warning depth 3.35 m, derived in section 6.1 as W = D + v*T_w + (v^2-v_c^2)/2a + Kp*[T_w+(v-v_c)/a] = 1.35 + 0.210 + 0.270 + 1.520 at v = 0.60 m/s. Occupation demands a SPEED REDUCTION to the creep ceiling and stops nothing
+2026-08-06T19:50:30.561Z | START | self-return clip: rear device, sensor frame -133.0..-71.8 deg, boundary capped at 0.040 m - FIELD GEOMETRY, not a filter applied to samples
+2026-08-06T19:50:30.568Z | START | self-return clip: front device, sensor frame +136.4..+137.6 deg, boundary capped at 1.034 m - FIELD GEOMETRY, not a filter applied to samples
+2026-08-06T19:50:30.572Z | START | failure rules: freshness 0.30 s, clear debounce 3 scans, invalid-fault threshold 5% clearing after 3 scans, evaluation tick 20.0 Hz. Unknown means INTRUSION in every one of them; an empty horizon means CLEAR, because a beyond-range return is a measurement
+2026-08-06T19:50:30.577Z | START | link: 172.19.176.1:45015 - the address was read back from this host (WSL default route (ip route show default)), never taken from a document (ADR 0006). ZONE 1 = field clear, ZONE 0 = intrusion or this evaluation's own fault: the digit is the CIRCUIT LEVEL
+2026-08-06T19:50:30.580Z | START | the WARNING verdict rides the SAME link, same vocabulary shape, same polarity: WARN 1 = warning field clear -> WarningFieldClear := TRUE; WARN 0 = occupied -> FALSE, and the reduced limit is selected. Sent at every transition and once on every (re)connect, AFTER the ZONE line. There is no operator command for it at the writer and none is wanted: a human vouching for a field verdict is what the wire-NC discipline refuses
+2026-08-06T19:50:30.584Z | START | warning verdict: /forklift/warning_field/occupied [std_msgs/Bool], published at the 20.0 Hz evaluation tick and NOT on transitions, so that its ABSENCE is visible. Occupation asserts on one scan; release needs 3 clear scans AND THEN the SF-04 clear-hold of 2.0 s on this node's own steady clock. Every failure rule reads OCCUPIED. THE TOPIC STILL HAS NO CONSUMER - the F-side consumer is fed by the WARN line on the link, not by this topic - and any consumer of it owes a stale rule of its own: no message inside its window means OCCUPIED, never clear
+2026-08-06T19:50:30.589Z | START | THE PROTECTIVE VERDICT HAS NO ROS TOPIC and never will: the safe channel has no topic on either transport (owner ruling m5-06). This log and the writer's session log are the correlated record SPEC 7.6 requires
+2026-08-06T19:50:30.593Z | START | log = /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/field_evaluation/field-evaluation-20260806T195030Z-pid261081.log
+2026-08-06T19:50:30.598Z | AGGREGATE | boot verdict INTRUSION: boot: no device has yet proved its field clear
+2026-08-06T19:50:30.603Z | WARNING | unchanged (OCCUPIED), reason now: front: no scan yet received; rear: no scan yet received
+2026-08-06T19:50:30.607Z | AGGREGATE | unchanged (INTRUSION), reason now: front: no scan yet received; rear: no scan yet received
+2026-08-06T19:50:30.658Z | LINK | up: connected to the stand-in writer at 172.19.176.1:45015
+2026-08-06T19:50:30.662Z | SEND | ZONE 0 -> first line on a new connection (a connection is a transition from unknown)
+2026-08-06T19:50:30.663Z | SEND | WARN 0 -> first line on a new connection (the writer drove the warning channel FALSE when this link died; a clear verdict is a fresh claim, never an inherited one)
+2026-08-06T19:50:30.907Z | WARNING | unchanged (OCCUPIED), reason now: the simulation clock has not advanced; front: no scan yet received; rear: no scan yet received
+2026-08-06T19:50:30.911Z | AGGREGATE | unchanged (INTRUSION), reason now: the simulation clock has not advanced for 0.304 s of this node's own steady time (limit 0.30 s), so no scan can be proved fresh; front: no scan yet received; rear: no scan yet received
+2026-08-06T19:50:32.158Z | WARNING | unchanged (OCCUPIED), reason now: front: no scan yet received; rear: no scan yet received
+2026-08-06T19:50:32.165Z | AGGREGATE | unchanged (INTRUSION), reason now: front: no scan yet received; rear: no scan yet received
+2026-08-06T19:50:32.458Z | WARNING | unchanged (OCCUPIED), reason now: the simulation clock has not advanced; front: no scan yet received; rear: no scan yet received
+2026-08-06T19:50:32.462Z | AGGREGATE | unchanged (INTRUSION), reason now: the simulation clock has not advanced for 0.300 s of this node's own steady time (limit 0.30 s), so no scan can be proved fresh; front: no scan yet received; rear: no scan yet received
+2026-08-06T19:50:33.008Z | WARNING | unchanged (OCCUPIED), reason now: front: no scan yet received; rear: no scan yet received
+2026-08-06T19:50:33.012Z | AGGREGATE | unchanged (INTRUSION), reason now: front: no scan yet received; rear: no scan yet received
+2026-08-06T19:50:33.063Z | DEVICE | front stamps advancing (seq=1 stamp=0.004000)
+2026-08-06T19:50:33.063Z | DEVICE | front protective contour built: 275 rays, 275 of them with a live field, boundary 0.100..3.925 m over the live rays, mount (x=0.700 y=0.450 yaw=0.7854 rad), scan window 0.10..5.50 m
+2026-08-06T19:50:33.064Z | DEVICE | front warning contour built: 275 rays, 275 of them with a live field, boundary 0.100..5.500 m over the live rays, mount (x=0.700 y=0.450 yaw=0.7854 rad), scan window 0.10..5.50 m
+2026-08-06T19:50:33.064Z | DEVICE | front nesting check: 0 ray(s) where the warning boundary is inside the protective one (must be 0)
+2026-08-06T19:50:33.073Z | DEVICE | rear stamps advancing (seq=1 stamp=0.004000)
+2026-08-06T19:50:33.073Z | DEVICE | rear protective contour built: 275 rays, 214 of them with a live field, boundary 0.100..2.913 m over the live rays, mount (x=-0.700 y=-0.450 yaw=-2.3562 rad), scan window 0.10..5.50 m
+2026-08-06T19:50:33.073Z | DEVICE | rear warning contour built: 275 rays, 214 of them with a live field, boundary 0.100..4.915 m over the live rays, mount (x=-0.700 y=-0.450 yaw=-2.3562 rad), scan window 0.10..5.50 m
+2026-08-06T19:50:33.073Z | DEVICE | rear nesting check: 0 ray(s) where the warning boundary is inside the protective one (must be 0)
+2026-08-06T19:50:33.107Z | WARNING | unchanged (OCCUPIED), reason now: front: warning field occupied; rear: warning field occupied
+2026-08-06T19:50:33.111Z | AGGREGATE | unchanged (INTRUSION), reason now: front: field not clear; rear: field not clear
+2026-08-06T19:50:33.293Z | WARNING | front warning field clear on 3 consecutive scans; SF-04 clear-hold of 2.0 s started (seq=3)
+2026-08-06T19:50:33.300Z | DEVICE | front CLEAR after 3 consecutive fully-valid fully-clear scans (seq=3 stamp=0.200000)
+2026-08-06T19:50:33.305Z | WARNING | rear warning field clear on 3 consecutive scans; SF-04 clear-hold of 2.0 s started (seq=3)
+2026-08-06T19:50:33.311Z | DEVICE | rear CLEAR after 3 consecutive fully-valid fully-clear scans (seq=3 stamp=0.200000)
+2026-08-06T19:50:33.311Z | AGGREGATE | CLEAR - both devices clear (front seq=3 rear seq=3)
+2026-08-06T19:50:33.317Z | SEND | ZONE 1 -> aggregate transition
+2026-08-06T19:50:35.307Z | WARNING | front warning field RELEASED after the SF-04 clear-hold: 2.014 s of continuous non-occupation on this node's own steady clock (limit 2.0 s, seq=23)
+2026-08-06T19:50:35.313Z | WARNING | rear warning field RELEASED after the SF-04 clear-hold: 2.002 s of continuous non-occupation on this node's own steady clock (limit 2.0 s, seq=23)
+2026-08-06T19:50:35.318Z | WARNING | warning field CLEAR - both devices report the warning field clear (front 0 ray(s) inside, rear 0). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
+2026-08-06T19:50:35.325Z | SEND | WARN 1 -> warning transition
+2026-08-06T19:52:14.335Z | WARNING | front warning field OCCUPIED on one scan: 9 ray(s) inside the warning contour, nearest 2.173 m (seq=1008 stamp=100.700000)
+2026-08-06T19:52:14.356Z | WARNING | warning field OCCUPIED - front: warning field occupied (front 9 ray(s) inside, rear 0). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
+2026-08-06T19:52:14.361Z | SEND | WARN 0 -> warning transition
+2026-08-06T19:52:24.934Z | WARNING | front warning field clear on 3 consecutive scans; SF-04 clear-hold of 2.0 s started (seq=1112)
+2026-08-06T19:52:26.956Z | WARNING | front warning field RELEASED after the SF-04 clear-hold: 2.021 s of continuous non-occupation on this node's own steady clock (limit 2.0 s, seq=1131)
+2026-08-06T19:52:26.961Z | WARNING | warning field CLEAR - both devices report the warning field clear (front 0 ray(s) inside, rear 0). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
+2026-08-06T19:52:26.965Z | SEND | WARN 1 -> warning transition
+2026-08-06T19:52:48.633Z | WARNING | front warning field OCCUPIED on one scan: 9 ray(s) inside the warning contour, nearest 2.173 m (seq=1345 stamp=134.400000)
+2026-08-06T19:52:48.655Z | WARNING | warning field OCCUPIED - front: warning field occupied (front 9 ray(s) inside, rear 0). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
+2026-08-06T19:52:48.660Z | SEND | WARN 0 -> warning transition
+2026-08-06T19:52:59.233Z | WARNING | front warning field clear on 3 consecutive scans; SF-04 clear-hold of 2.0 s started (seq=1449)
+2026-08-06T19:53:01.255Z | WARNING | front warning field RELEASED after the SF-04 clear-hold: 2.022 s of continuous non-occupation on this node's own steady clock (limit 2.0 s, seq=1468)
+2026-08-06T19:53:01.260Z | WARNING | warning field CLEAR - both devices report the warning field clear (front 0 ray(s) inside, rear 0). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
+2026-08-06T19:53:01.264Z | SEND | WARN 1 -> warning transition
+2026-08-06T19:53:11.550Z | WARNING | rear warning field OCCUPIED on one scan: 5 ray(s) inside the warning contour, nearest 3.464 m (seq=1570 stamp=156.900000)
+2026-08-06T19:53:11.556Z | WARNING | warning field OCCUPIED - rear: warning field occupied (front 0 ray(s) inside, rear 5). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
+2026-08-06T19:53:11.562Z | SEND | WARN 0 -> warning transition
+2026-08-06T19:53:22.150Z | WARNING | rear warning field clear on 3 consecutive scans; SF-04 clear-hold of 2.0 s started (seq=1674)
+2026-08-06T19:53:24.155Z | WARNING | rear warning field RELEASED after the SF-04 clear-hold: 2.005 s of continuous non-occupation on this node's own steady clock (limit 2.0 s, seq=1693)
+2026-08-06T19:53:24.161Z | WARNING | warning field CLEAR - both devices report the warning field clear (front 0 ray(s) inside, rear 0). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
+2026-08-06T19:53:24.166Z | SEND | WARN 1 -> warning transition
+2026-08-06T19:56:11.280Z | WARNING | front warning field OCCUPIED on one scan: 9 ray(s) inside the warning contour, nearest 2.173 m (seq=3363 stamp=336.200000)
+2026-08-06T19:56:11.302Z | WARNING | warning field OCCUPIED - front: warning field occupied (front 9 ray(s) inside, rear 0). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
+2026-08-06T19:56:11.309Z | SEND | WARN 0 -> warning transition
+2026-08-06T19:56:21.881Z | WARNING | front warning field clear on 3 consecutive scans; SF-04 clear-hold of 2.0 s started (seq=3467)
+2026-08-06T19:56:23.902Z | WARNING | front warning field RELEASED after the SF-04 clear-hold: 2.021 s of continuous non-occupation on this node's own steady clock (limit 2.0 s, seq=3486)
+2026-08-06T19:56:23.908Z | WARNING | warning field CLEAR - both devices report the warning field clear (front 0 ray(s) inside, rear 0). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
+2026-08-06T19:56:23.913Z | SEND | WARN 1 -> warning transition
+2026-08-06T19:56:44.434Z | LINK | down (this node is shutting down). The writer converts the silence into an open zone channel AND an occupied warning field within its own 1 s stale window
+2026-08-06T19:56:44.439Z | EXIT | front device: 3691 scan(s) ingested, last invalid fraction 0.00%, last protective intrusion-ray count 0, last warning-ray count 0, faulted=False
+2026-08-06T19:56:44.440Z | EXIT | rear device: 3691 scan(s) ingested, last invalid fraction 4.00%, last protective intrusion-ray count 0, last warning-ray count 0, faulted=False
+2026-08-06T19:56:44.440Z | EXIT | link: 1 connect attempt(s), 719 line(s) sent, of which 707 were PING keepalives (not logged individually - this is a transition log)
+2026-08-06T19:56:44.440Z | EXIT | field evaluation stopped. The writer sees the link die and drives ZoneDeviceCircuitClosed FALSE **and WarningFieldClear FALSE** within FIELD_LINK_STALE_MAX = 1 s: loss of the field source reads as an intrusion and as an occupied warning field, never as a clear one. The reduced limit is therefore in force again from that instant, which is the demanding direction

@@ -1,0 +1,51 @@
+2026-08-06T19:48:24.119Z | START | ENGINEERING STAND-IN WRITER -- not a safety device, not a safety path; it stands in for the WIRING of three simulated safety-input channels and carries no Category, no PL, no SIL and no PFH
+2026-08-06T19:48:24.127Z | START | instance = safecell3
+2026-08-06T19:48:24.128Z | START | dll = C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll
+2026-08-06T19:48:24.131Z | START | api version = 0x70000 (7.0)
+2026-08-06T19:48:24.132Z | START | cycle = 50 ms
+2026-08-06T19:48:24.132Z | START | field-link listener port = 45015 (zone + warning), FIELD_LINK_STALE_MAX = 1000 ms
+2026-08-06T19:48:24.133Z | START | speed-source listener port = 45016, MOTION_SILENCE_MAX = 250 ms
+2026-08-06T19:48:24.134Z | START | write set (exact and closed): SafetyInputStandIn.EStopCircuitClosed, SafetyInputStandIn.ZoneDeviceCircuitClosed, SafetyInputStandIn.ResetButtonPressed, SafetyInputStandIn.StandInHeartbeat, SafetyInputStandIn.SpeedReadingA, SafetyInputStandIn.SpeedReadingB, SafetyInputStandIn.SpeedSeqA, SafetyInputStandIn.SpeedSeqB, SafetyInputStandIn.MotionPresent, SafetyInputStandIn.MotionObservationValid, SafetyInputStandIn.WarningFieldClear
+2026-08-06T19:48:24.134Z | START | log = C:\Users\ozkan\projects\amr-agent\bridge\standin_writer\logs\standin-writer-20260806T194823Z-pid27436.log
+2026-08-06T19:48:24.134Z | START | operator console = UNAVAILABLE (no interactive console; commands cannot be entered this session)
+2026-08-06T19:48:24.136Z | START | operator command file = C:\Users\ozkan\AppData\Local\Temp\claude\C--Users-ozkan-projects-amr-agent\b8b82e36-4ca6-4a60-b4a7-22454f63880f\scratchpad\writer-cmd.txt -- appended lines are executed as typed commands, with the same vocabulary and the same refusals
+2026-08-06T19:48:24.137Z | START | boot levels: EStopCircuitClosed=False ZoneDeviceCircuitClosed=False ResetButtonPressed=False -- open, open, unpressed: the fail-safe pre-connection state
+2026-08-06T19:48:24.137Z | START | boot levels, SPEC 11.3 members: WarningFieldClear=False (the limit is in force until a source says otherwise), MotionPresent=True MotionObservationValid=False (an unobservable vehicle is moving), both speed sequences FROZEN until a live SPD line -- the writer never invents a speed and never repeats one
+2026-08-06T19:48:24.144Z | API | connected to instance 'safecell3', OperatingState = Run
+2026-08-06T19:48:24.162Z | MEMBERS | speed group present: SafetyInputStandIn.SpeedReadingA, SafetyInputStandIn.SpeedReadingB, SafetyInputStandIn.SpeedSeqA, SafetyInputStandIn.SpeedSeqB
+2026-08-06T19:48:24.163Z | MEMBERS | motion group present: SafetyInputStandIn.MotionPresent, SafetyInputStandIn.MotionObservationValid
+2026-08-06T19:48:24.164Z | MEMBERS | warning group present: SafetyInputStandIn.WarningFieldClear
+2026-08-06T19:48:24.165Z | MEMBERS | all eleven members of SPEC 11.3 are present; the speed chain has a source
+2026-08-06T19:48:24.170Z | LINK | listening on 0.0.0.0:45015 for the field evaluation; none is required -- the writer serves the cell with no field link ever arriving, and while none is up the zone channel belongs to the operator
+2026-08-06T19:48:24.171Z | SPEEDLINK | listening on 0.0.0.0:45016 for the speed source; none is required -- the writer serves the cell with no speed source ever arriving, and while none is up both sequences stay frozen and the motion channel reads MOVING
+2026-08-06T19:50:30.637Z | LINK | up: field-evaluation client 172.19.180.72:60088 connected; the zone channel now belongs to the field and is held FALSE until its first ZONE line -- a link with no verdict yet is not a clear field
+2026-08-06T19:50:30.703Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T19:50:30.705Z | FIELD | WARN 0 -> WarningFieldClear := False (warning field occupied -- the limit is selected)
+2026-08-06T19:50:33.331Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T19:50:35.339Z | FIELD | WARN 1 -> WarningFieldClear := True (warning field clear)
+2026-08-06T19:52:14.381Z | FIELD | WARN 0 -> WarningFieldClear := False (warning field occupied -- the limit is selected)
+2026-08-06T19:52:26.990Z | FIELD | WARN 1 -> WarningFieldClear := True (warning field clear)
+2026-08-06T19:52:48.685Z | FIELD | WARN 0 -> WarningFieldClear := False (warning field occupied -- the limit is selected)
+2026-08-06T19:53:01.292Z | FIELD | WARN 1 -> WarningFieldClear := True (warning field clear)
+2026-08-06T19:53:11.581Z | FIELD | WARN 0 -> WarningFieldClear := False (warning field occupied -- the limit is selected)
+2026-08-06T19:53:24.186Z | FIELD | WARN 1 -> WarningFieldClear := True (warning field clear)
+2026-08-06T19:56:11.330Z | FIELD | WARN 0 -> WarningFieldClear := False (warning field occupied -- the limit is selected)
+2026-08-06T19:56:23.947Z | FIELD | WARN 1 -> WarningFieldClear := True (warning field clear)
+2026-08-06T19:56:44.453Z | LINK | down (the field evaluation closed the connection); ZoneDeviceCircuitClosed driven FALSE (open) AND WarningFieldClear driven FALSE -- loss of the field source reads as intrusion and as warning-occupied, never as a clear field (SPEC 11.2). Ownership of the zone channel returns to the operator, who must issue a deliberate 'zone close'; the warning channel has no operator owner and stays FALSE until a live 'WARN 1'
+2026-08-06T19:57:23.887Z | LINK | up: field-evaluation client 172.19.180.72:54066 connected; the zone channel now belongs to the field and is held FALSE until its first ZONE line -- a link with no verdict yet is not a clear field
+2026-08-06T19:57:23.981Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T19:57:23.984Z | FIELD | WARN 0 -> WarningFieldClear := False (warning field occupied -- the limit is selected)
+2026-08-06T19:57:24.044Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T19:57:26.045Z | FIELD | WARN 1 -> WarningFieldClear := True (warning field clear)
+2026-08-06T19:58:52.883Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T19:58:52.886Z | FIELD | WARN 0 -> WarningFieldClear := False (warning field occupied -- the limit is selected)
+2026-08-06T19:59:04.496Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True (field clear, circuit closed)
+2026-08-06T19:59:06.485Z | FIELD | WARN 1 -> WarningFieldClear := True (warning field clear)
+2026-08-06T20:06:41.184Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-06T20:06:41.186Z | FIELD | WARN 0 -> WarningFieldClear := False (warning field occupied -- the limit is selected)
+2026-08-06T20:07:16.853Z | OPERATOR | command file: ï»¿quit
+2026-08-06T20:07:16.860Z | REFUSED | 'ï»¿quit': unrecognised command. Known: estop open|close, zone open|close, reset press|release, reset pulse <ms>, status, quit. There is deliberately no operator command for the speed readings, the motion observation or the warning field: those come from a source or they are missing, and a human typing one would be inventing a measurement
+2026-08-06T20:07:48.748Z | OPERATOR | command file: quit
+2026-08-06T20:07:48.752Z | OPERATOR | quit
+2026-08-06T20:07:48.768Z | TERMINAL | levels written in the demand direction before falling silent: the three circuits FALSE (open, open, unpressed), WarningFieldClear FALSE, MotionPresent TRUE with MotionObservationValid FALSE. The two speed readings and both sequences are deliberately left UNWRITTEN and FROZEN at SpeedSeqA=0 SpeedSeqB=0 -- a terminal zero would be an invented speed. The heartbeat now freezes and the demands latch on channels already open
+2026-08-06T20:07:48.775Z | EXIT | reason=quit cycles=23291 overruns=0 write-failures=0 final heartbeat=23291 speed cycles A=0 B=0 final sequences A=0 B=0

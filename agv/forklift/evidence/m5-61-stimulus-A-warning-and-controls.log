@@ -1,0 +1,28 @@
+2026-08-06T19:52:00.068Z | START | m5-61 stimulus: a real object in the running simulator. Vehicle at (7.0, 4.0) yaw 0, standing, never driven. Protective corridor x 3.775..9.210, warning corridor x 1.775..11.210, y 3.45..4.55
+2026-08-06T19:52:00.368Z | CREATE | box 0.30x0.30x0.60 at (10.0, 6.0): data: true
+2026-08-06T19:52:02.557Z | READBACK | created at (10.000, 6.000, 0.300), entity id 130 - resolved from the read-back, not assumed
+2026-08-06T19:52:02.841Z | STIMULUS | C1 CONTROL A - plainly visible, 1.45 m OUTSIDE the corridor: set_pose -> (10.0, 6.0) returned data: true at 2026-08-06T19:52:02.557Z
+2026-08-06T19:52:03.947Z | READBACK | C1 CONTROL A - plainly visible, 1.45 m OUTSIDE the corridor: pose read back (10.000, 6.000, 0.300) - within 0.02 m of the command
+2026-08-06T19:52:03.947Z | HOLD | C1 CONTROL A - plainly visible, 1.45 m OUTSIDE the corridor: holding 10 s
+2026-08-06T19:52:14.225Z | STIMULUS | W1 WARNING ONLY - near face 9.85, outside protective 9.21, inside warning 11.21: set_pose -> (10.0, 4.0) returned data: true at 2026-08-06T19:52:13.947Z
+2026-08-06T19:52:15.390Z | READBACK | W1 WARNING ONLY - near face 9.85, outside protective 9.21, inside warning 11.21: pose read back (10.000, 4.000, 0.300) - within 0.02 m of the command
+2026-08-06T19:52:15.390Z | HOLD | W1 WARNING ONLY - near face 9.85, outside protective 9.21, inside warning 11.21: holding 9 s
+2026-08-06T19:52:24.675Z | STIMULUS | R1 release: set_pose -> (10.0, 6.0) returned data: true at 2026-08-06T19:52:24.390Z
+2026-08-06T19:52:25.822Z | READBACK | R1 release: pose read back (10.000, 6.000, 0.300) - within 0.02 m of the command
+2026-08-06T19:52:25.822Z | HOLD | R1 release: holding 9 s
+2026-08-06T19:52:35.103Z | STIMULUS | C2 CONTROL B - IN the corridor, in the driving direction, 0.24 m OUTSIDE the warning boundary: set_pose -> (11.6, 4.0) returned data: true at 2026-08-06T19:52:34.822Z
+2026-08-06T19:52:36.255Z | READBACK | C2 CONTROL B - IN the corridor, in the driving direction, 0.24 m OUTSIDE the warning boundary: pose read back (11.600, 4.000, 0.300) - within 0.02 m of the command
+2026-08-06T19:52:36.255Z | HOLD | C2 CONTROL B - IN the corridor, in the driving direction, 0.24 m OUTSIDE the warning boundary: holding 12 s
+2026-08-06T19:52:48.530Z | STIMULUS | W2 WARNING ONLY (repeat): set_pose -> (10.0, 4.0) returned data: true at 2026-08-06T19:52:48.255Z
+2026-08-06T19:52:49.739Z | READBACK | W2 WARNING ONLY (repeat): pose read back (10.000, 4.000, 0.300) - within 0.02 m of the command
+2026-08-06T19:52:49.739Z | HOLD | W2 WARNING ONLY (repeat): holding 9 s
+2026-08-06T19:52:59.016Z | STIMULUS | C3 CONTROL B (repeat): set_pose -> (11.6, 4.0) returned data: true at 2026-08-06T19:52:58.739Z
+2026-08-06T19:53:00.178Z | READBACK | C3 CONTROL B (repeat): pose read back (11.600, 4.000, 0.300) - within 0.02 m of the command
+2026-08-06T19:53:00.178Z | HOLD | C3 CONTROL B (repeat): holding 11 s
+2026-08-06T19:53:11.465Z | STIMULUS | W3 WARNING ONLY, REAR device - far face 2.85, outside protective 3.775, inside warning 1.775: set_pose -> (2.7, 4.0) returned data: true at 2026-08-06T19:53:11.179Z
+2026-08-06T19:53:12.619Z | READBACK | W3 WARNING ONLY, REAR device - far face 2.85, outside protective 3.775, inside warning 1.775: pose read back (2.700, 4.000, 0.300) - within 0.02 m of the command
+2026-08-06T19:53:12.619Z | HOLD | W3 WARNING ONLY, REAR device - far face 2.85, outside protective 3.775, inside warning 1.775: holding 9 s
+2026-08-06T19:53:21.908Z | STIMULUS | C4 CONTROL A (repeat) - both fields clear: set_pose -> (10.0, 6.0) returned data: true at 2026-08-06T19:53:21.619Z
+2026-08-06T19:53:23.103Z | READBACK | C4 CONTROL A (repeat) - both fields clear: pose read back (10.000, 6.000, 0.300) - within 0.02 m of the command
+2026-08-06T19:53:23.103Z | HOLD | C4 CONTROL A (repeat) - both fields clear: holding 12 s
+2026-08-06T19:53:35.103Z | EXIT | stimulus sequence complete; the box is left outside both fields

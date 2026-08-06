@@ -1,0 +1,8 @@
+2026-08-06T19:56:10.920Z | START | m5-61 stimulus 2
+2026-08-06T19:56:11.205Z | STIMULUS | W4 WARNING ONLY (fourth intrusion): issued 2026-08-06T19:56:10.920Z -> (10.0, 4.0) returned data: true
+2026-08-06T19:56:12.386Z | READBACK | W4 WARNING ONLY (fourth intrusion): (10.000, 4.000, 0.300)
+2026-08-06T19:56:12.386Z | HOLD | W4 WARNING ONLY (fourth intrusion): holding 9 s
+2026-08-06T19:56:21.667Z | STIMULUS | C5 CONTROL B - in the corridor, 0.24 m outside the boundary: issued 2026-08-06T19:56:21.386Z -> (11.6, 4.0) returned data: true
+2026-08-06T19:56:22.823Z | READBACK | C5 CONTROL B - in the corridor, 0.24 m outside the boundary: (11.600, 4.000, 0.300)
+2026-08-06T19:56:22.823Z | HOLD | C5 CONTROL B - in the corridor, 0.24 m outside the boundary: holding 12 s
+2026-08-06T19:56:34.821Z | EXIT | stimulus 2 complete

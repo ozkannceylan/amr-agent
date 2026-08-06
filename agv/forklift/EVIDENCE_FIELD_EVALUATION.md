@@ -973,3 +973,371 @@ debounce scans that must precede it.**
    read-back**, and every one of the nine moves was confirmed before the
    next step. Nothing had to be discarded, which is the outcome the rule
    exists to make cheap rather than the outcome that proves it unneeded.
+
+---
+---
+
+# EVIDENCE — the WARN sender: the warning verdict reaches the stand-in writer (m5-61, 2026-08-06)
+
+**No integrity claim of any kind is made or implied here.** No Category,
+Performance Level, SIL, PFH, MTTFd, DCavg or CCF appears below, for this
+node, for the link, for the stand-in writer or for anything downstream of
+them. The evaluation is a **model** of what a safety-rated scanner does
+inside its own housing, running as standard software on a rendered depth
+image; the writer is an **engineering stand-in for wiring**, labelled as
+such throughout. Every PL and Category named anywhere in this file is a
+**PLr target** out of `docs/safety/`, never an achievement.
+
+## 18. What this session was for, in one sentence
+
+`docs/VALIDATION-M5.md` finding **F3**: *nothing sent the `WARN` line*, so
+`SafetyInputStandIn.WarningFieldClear` had been **FALSE in every session
+that has ever run**, the F-side limit selector
+`InstF_Forklift_Safety.WarningFieldClearValid` was permanently FALSE with
+it, and the reduced limit was permanently in force. The warning field
+itself was built and proven in m5-47; the protective field's sender
+already worked over the same 45015 link in the same protocol. This session
+built **the missing half of a mechanism that otherwise existed**, and it
+is the first time in this project that `WarningFieldClear` has read
+**True**.
+
+### 18.1 What was built — three edits, all additive
+
+| File | Change |
+|---|---|
+| `scripts/field_evaluation.py` | `WriterLink` gained `warn_line()`, `publish_warn()` and `sent_warn`; `service()`, `_poll_connect()` and `_connected()` carry the warning level; `_connected()` sends one `WARN` line after its `ZONE` line; `close()` clears `sent_warn`; `cb_evaluate()` inverts the node's OCCUPIED into the wire's CLEAR once, at the boundary, and publishes on transition **after** the zone line |
+| `config.yaml` | `field.link.warn_clear_digit: 1`, `warn_occupied_digit: 0`, with the derivation and the polarity argument beside them |
+| this file | sections 18–25 |
+
+**The protocol was not invented.** `bridge/STANDIN-WRITER-DESIGN.md` §3
+already defines `WARN 1` / `WARN 0` on 45015 and the writer already parses
+it; this node was made to match a receiving end that was built and
+running-tested (m5-57). Nothing in `plc/`, `bridge/`, `hmi/` or `docs/`
+was written by this brief.
+
+### 18.2 The two disciplines the design had to keep, and where each is proven
+
+| Discipline | Where it lives | Proven in |
+|---|---|---|
+| **Silence must never be readable as "clear"; a clear verdict is a fresh claim, never an inherited one** | The writer already converts silence into `WarningFieldClear := FALSE` — before the first `WARN` line of a session, and again on every field-link loss. This node adds the other half: after a reconnect the permissive level exists nowhere, so it is **claimed afresh** rather than assumed | §21, the link-loss and reconnect run: `WarningFieldClear` fell **with no `WARN 0` ever sent**, and came back only 2.06 s after the new connection, once the SF-04 clear-hold had run again on the new node |
+| **Do not disturb the protective-field path** | The `WARN` line is sent strictly **after** the `ZONE` line, in the same tick, on the same socket; no protective code path was edited | §22: four warning-only intrusions produced **zero** `ZONE` lines, and a protective intrusion run with the sender live reproduced the committed shape exactly |
+
+---
+
+## 19. Environment, and that the machine was free
+
+| Item | Value |
+|---|---|
+| Date, run window (UTC) | 2026-08-06, `19:48` to `20:05` |
+| Vehicle host | **WSL2 on the owner's Windows machine** — the target platform. Kernel `5.15.167.4-microsoft-standard-WSL2`, 20 cores, 15 GiB, Python 3.12.3, ROS 2 Jazzy |
+| Gazebo | **Sim 8.11.0**, `gz sim -r -s`, headless, llvmpipe (`libEGL … falling back to kms_swrast`, as always on this host) |
+| Isolation | `GZ_PARTITION=m561a` **and** `ROS_DOMAIN_ID=61`. Both, because gz transport is not DDS |
+| **Consumer host** | Windows, beside PLCSIM Advanced. **This is the difference from m5-47**, which ran against a throwaway TCP sink with no PLC at all |
+| CPU | PLCSIM Advanced instance **`safecell3`**, read back from `RegisteredInstanceInfo` and never assumed; `OperatingState = Run`; **269 tags** |
+| Stand-in writer | `bridge/standin_writer/standin_writer.ps1`, API 7.0, session log `standin-writer-20260806T194823Z-pid27436.log`; its `MEMBERS` probe reported **all eleven members of safety SPEC §11.3 present**, warning group included |
+| **Machine free before starting** | Checked at `19:48`: nothing listening on 45015 or 45016; the `Global\amr-standin-writer` mutex acquired free and released to prove no writer was running; no `gz sim` process. Two orphaned `nav2` nodes from an earlier session were alive on a **different** ROS domain and were left alone |
+| World | `sim/worlds/forklift_arena.sdf`, md5 `c7733d22ee66ad734c7e3ee828d4a464`, **unedited** |
+| Model | `agv/forklift/model.sdf`, md5 `42b6e7f8649c2570870cf7894c7baa6b`, **unedited by this brief**. It is not m5-47's md5: the STO work changed the file in between |
+| Vehicle pose | spawned at world **(7.000, 4.000)**, yaw 0, **never driven** — it stood there for the whole session, as in m5-47, so that both fields start clear |
+| Node session logs | `evidence/field_evaluation/field-evaluation-20260806T195030Z-pid261081.log` (before the deliberate kill) and `…-20260806T195723Z-pid262144.log` (after it) |
+
+**The startup order, and why it is the order.** m5-57 recorded that *with
+the writer running and no field source, no monitored reset can be accepted
+while the vehicle is above the reduced limit*, which has cost two earlier
+agents a run. It was planned into the sequence rather than into a
+recovery: **writer first** (it owns both listeners and refuses a second
+instance by mutex), **then** Gazebo and the field evaluation, so that a
+live `WARN 1` existed before anything else was attempted. No reset was
+needed and none was attempted; the vehicle never moved, so the reduced
+limit was never a constraint on this run.
+
+---
+
+## 20. THE INTRUSION — a real object in Gazebo, and the control case
+
+A **0.30 x 0.30 x 0.60 m box** was created in the running world and then
+**moved** with `gz service /world/forklift_arena/set_pose`. No value was
+typed anywhere in the chain, and **every reposition was read back before
+the run was allowed to continue** — `set_pose` returns `data: true` for a
+well-formed *call*, not for a moved *entity* (LESSONS 2026-08-06), so the
+driver re-read the pose through `gz model -m intruder -p` after every move
+and would have **discarded** the run, not repaired it, on a mismatch. The
+entity id (**130**) was resolved from that same read-back. **All eleven
+read-backs matched to within 0.02 m; none was rejected.**
+
+Geometry, with the vehicle at (7.0, 4.0):
+
+| Boundary | World x | Corridor |
+|---|---|---|
+| protective | **3.775** (rear) … **9.210** (front) | y 3.45 … 4.55 |
+| warning | **1.775** (rear) … **11.210** (front) | y 3.45 … 4.55 |
+
+### 20.1 The sequence, as it ran — n = 4 warning intrusions, n = 5 controls
+
+Drivers `evidence/m5-61-stimulus-driver-{A,B,C}.py`, as-run logs
+`evidence/m5-61-stimulus-{A,B,C}-*.log`.
+
+| # | Stimulus | Node verdict | `WARN` on the wire | Writer applied it |
+|---|---|---|---|---|
+| **C1** | box at **(10.0, 6.0)** — 2.77 m from the front device, plainly visible, **1.45 m outside the corridor** | **no verdict of any kind**, 10 s | none | — |
+| **W1** | to **(10.0, 4.0)** — near face 9.85, **outside** protective 9.21, **inside** warning 11.21 | `19:52:14.335` front warning OCCUPIED on one scan, **9 rays** inside, nearest 2.173 m (seq=1008) | `19:52:14.361  SEND WARN 0` | `19:52:14.381  WarningFieldClear := False` |
+| **R1** | back to **(10.0, 6.0)** | released after the 3-scan debounce **and** the SF-04 hold, measured **2.021 s** | `19:52:26.965  WARN 1` | `19:52:26.990  := True` |
+| **C2** | to **(11.6, 4.0)** — **in** the corridor, in the driving direction, plainly visible, **0.24 m outside** the warning boundary | **no verdict of any kind**, 12 s | none | — |
+| **W2** | to **(10.0, 4.0)** | `19:52:48.633`, 9 rays, nearest 2.173 m (seq=1345) | `19:52:48.660  WARN 0` | `19:52:48.685  := False` |
+| **C3** | to **(11.6, 4.0)** | released at `19:53:01.255` after **2.022 s** of hold, then nothing for 11 s | `19:53:01.264  WARN 1` | `19:53:01.292  := True` |
+| **W3** | to **(2.70, 4.0)** — far face 2.85, outside protective 3.775, inside warning 1.775 — the **rear** device | `19:53:11.550`, **5 rays**, nearest 3.464 m (seq=1570) | `19:53:11.562  WARN 0` | `19:53:11.581  := False` |
+| **C4** | to **(10.0, 6.0)** | released at `19:53:24.155` after **2.005 s** | `19:53:24.166  WARN 1` | `19:53:24.186  := True` |
+| **W4** | to **(10.0, 4.0)**, second sequence | occupied | `WARN 0` | `19:56:11.330  := False` |
+| **C5** | to **(11.6, 4.0)** | **no verdict**, 12 s. The release at `19:56:23.9` is the SF-04 hold expiring after the box left, not the control producing anything | `WARN 1` | `19:56:23.947  := True` |
+
+**The control case is what makes the intrusion mean anything.** C2, C3 and
+C5 are the sharp form: the box is **inside the corridor**, in the driving
+direction, 3.75 m from the front device and plainly visible to it — the
+same object, the same sensor, the same rays — and the **boundary
+discriminates it by 24 cm**. It produced no verdict, no line and no member
+change on any of the three occasions. C1 and C4 are the loose form, 1.45 m
+outside the corridor. **n = 5 controls, 0 verdicts; n = 4 warning
+intrusions, 4 verdicts, 4 member changes.**
+
+### 20.2 The member change, in the consumer's view
+
+`evidence/m5-61-consumer-witness-warning.log` — a **read-only** witness on
+the PLCSIM Advanced API, UTC-stamped in the writer's own log format so the
+two interleave without a parser. The verdict column is
+`InstF_Forklift_Safety.*`: **what the safety program actually computed**,
+never the writer's own read-back (LESSONS 2026-08-04).
+
+```
+19:56:04.358 | STATE  | baseline  WarningFieldClear=True WarningFieldClear=True
+                        WarningFieldClearValid=True ... StandInValid=True
+19:56:11.365 | CHANGE | WarningFieldClear: True -> False          <- W4, the writer's member
+19:56:11.382 | CHANGE | WarningFieldClear: True -> False;
+                        WarningFieldClearValid: True -> False     <- the F-program, 17 ms later
+19:56:23.984 | CHANGE | WarningFieldClear: False -> True
+19:56:24.062 | CHANGE | WarningFieldClear: False -> True;
+                        WarningFieldClearValid: False -> True
+```
+
+The first name in each line is `SafetyInputStandIn.WarningFieldClear`, the
+member the writer writes; the second and third are
+`InstF_Forklift_Safety.WarningFieldClear` and `…ClearValid`, the F-block's
+own instance data. **SL9 is `WarningFieldClear AND StandInValid`** (safety
+SPEC §11.5 SL9) and it now moves, in both directions, driven by an object
+in the simulator. It had been FALSE in every session that ever ran.
+
+The whole of sequence A was captured independently with the project's own
+instrument, `bridge/standin_writer/testing/observe_consumer.ps1`, in
+`evidence/m5-61-observe-consumer-sequenceA.log`: **six changes of columns
+[23] and [25], one for each of the six `FIELD | WARN` lines in the writer's
+log**, and nothing else moved.
+
+### 20.3 Timing observed — each figure is one draw, not a bound
+
+| Interval | W1 | W2 | W3 | W4 |
+|---|---|---|---|---|
+| `set_pose` issued → node's own `WARNING` line | 388 ms | 378 ms | 371 ms | — |
+| node `SEND` → writer's `FIELD` line (WSL → Windows TCP) | 20 ms | 25 ms | 19 ms | ~25 ms |
+| writer's `FIELD` line → the F-block's own static | — | — | — | **17 ms** |
+
+The first row contains the `gz service` call's own round trip, because the
+stamp is taken **before** the call is issued; it is an honest
+command-to-verdict figure and **not** a t2 measurement. The second row is
+FIELD-EVALUATION §11 measurement 2 (`ZONE`/`WARN` send → writer receipt),
+across four draws — **19–25 ms against a 10 ms budget** for t3. Stated as
+four samples on one machine, not a bound; per LESSONS 2026-08-05 a re-run
+will not reproduce them, and §11's budget is not revised on four draws.
+
+---
+
+## 21. Silence, and the fresh claim — the discipline tested rather than asserted
+
+The field evaluation was **`SIGTERM`ed** at `19:56:44.4` with the writer
+running, and restarted 39 s later.
+
+| Event | Observed |
+|---|---|
+| node killed | `19:56:44.439` EXIT lines written, socket closed deliberately |
+| writer notices | `19:56:44.453  LINK down (the field evaluation closed the connection); ZoneDeviceCircuitClosed driven FALSE (open) AND WarningFieldClear driven FALSE` — **14 ms**, by end-of-stream detection rather than by the 1 s staleness reaper |
+| the F-program follows | `19:56:44.568` `WarningFieldClear` and `WarningFieldClearValid` both FALSE in the consumer's view |
+| node restarted | `19:57:23.887` writer accepts the new client |
+| first two lines on the new connection | `19:57:23.981 ZONE 0`, `19:57:23.984 WARN 0` — **both in the demanding direction**, 3 ms apart, ZONE first |
+| protective verdict re-earned | `19:57:24.044 ZONE 1`, 60 ms later — three fully-valid clear scans |
+| warning verdict re-earned | `19:57:26.045 WARN 1` — **2.06 s after the connection**, because SF-04's 2 s clear-hold had to run again on the new node |
+
+**This is the whole of discipline 1, in one run.** The warning channel went
+FALSE with **no `WARN 0` ever sent for it** — the writer converted silence
+into the demanding value on its own, which is exactly why this node
+deliberately adds nothing to its own death behaviour. And the permissive
+level did not come back with the connection: it came back 2.06 s later,
+when a live source had **re-earned** it. A clear verdict on this link is
+always a fresh claim.
+
+---
+
+## 22. The protective path, undisturbed — shown rather than asserted
+
+Three independent readings, all from the same session with the `WARN`
+sender live:
+
+1. **Four warning-only intrusions produced zero `ZONE` lines.** W1–W4 and
+   their releases account for **ten** `WARN` lines in session 1's
+   transition log and **two** `ZONE` lines, both of which belong to the
+   connect sequence at `19:50:30` / `19:50:33`. The two roads stay
+   separate.
+2. **A protective intrusion still behaves exactly as committed.** Stimulus
+   **P1**, box to **(8.5, 4.0)**, near face 8.35, inside the protective
+   boundary 9.21:
+
+   ```
+   19:58:52.879 | SEND  | ZONE 0 -> aggregate transition
+   19:58:52.879 | SEND  | WARN 0 -> warning transition
+   19:58:52.883 | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False
+   19:58:52.886 | FIELD | WARN 0 -> WarningFieldClear := False
+   19:59:04.475 | SEND  | ZONE 1        19:59:06.480 | SEND | WARN 1
+   ```
+
+   **The zone line goes first, by 3 ms on the wire**, and the two verdicts
+   are nested exactly as §6.1 derives them (W > D at every bearing, so
+   every protective intrusion is also a warning occupation). The retreat
+   shows the asymmetry the whole design exists for: the **stop** releases
+   at `19:59:04.5` and the **speed reduction** holds a further 2.005 s.
+3. **The send order is structural, not incidental.** `cb_evaluate` calls
+   `link.publish()` before `link.publish_warn()`, and `_connected()` sends
+   `ZONE` before `WARN`; no protective code path was edited.
+
+**What P1 does not show.** `ZoneStopDemand` and `SafetyResetRequired` read
+`True` in the witness **before, during and after** P1
+(`evidence/m5-61-consumer-witness-protective.log`): the latch was already
+standing when this session started, from the e-stop circuit that has been
+open since before it. P1 therefore demonstrates the **channel** reaching
+the F-program, not a fresh latch forming. The fresh-latch form is m5-12b
+§4.3's and is not re-run here.
+
+---
+
+## 23. The link's traffic budget — the hazard measured rather than argued
+
+`FIELD_LINK_STALE_MAX` is **1 s** against this node's keepalive, and m5-57
+measured the link reaped as stale **10 ms before the fourth keepalive** at
+1 Hz. The brief asked whether adding a second line type to the same link
+makes that worse. **It does not, and here is the measurement.**
+
+Both node sessions report their own totals at `EXIT`; both are quoted as
+the tool printed them.
+
+| Reading | Node session 1 | Node session 2 |
+|---|---|---|
+| Link-up | `19:50:30.6` → `19:56:44.4` = **373.8 s** | `19:57:23.9` → `20:07:48.7` = **624.8 s** |
+| Lines sent (`EXIT`) | **719** | **1 191** |
+| of which keepalives | **707** | **1 182** |
+| of which verdict lines | **12** — 2 `ZONE`, **10 `WARN`** | **9** |
+| Traffic the `WARN` sender added | **10 lines in 6 min 14 s = +1.4 %** | comparable |
+
+| Whole writer session | Value |
+|---|---|
+| **Stale reaps** | **0.** Every inter-line gap across **998.6 s** of link was therefore under the 1000 ms window |
+| Writer cycles / overruns / write failures / refusals | **23 291 / 0 / 0 / 1** — the one refusal is §25.5, an operator command file written with a BOM |
+
+**And the direction is favourable by construction, not by luck.** The
+writer refreshes its link clock on *every* well-formed line, `WARN`
+included — `standin_writer.ps1` sets `$st.linkLastMs` in the `WARN` arm
+exactly as it does in the `ZONE` and `PING` arms — so an added line type
+can only ever **shorten** the maximum gap between lines. The sender cannot
+make the margin worse.
+
+**What is still not satisfied, stated plainly and not fixed here.** m5-59
+states the rule as *window >= 3 x ping period + one writer cycle*. This
+node's `ping_period_s` is **0.50 s** (2 Hz), which gives **1.55 s against a
+1 s window** — the rule is **not** satisfied, and m5-59 asks `agv/` to
+raise the keepalive to 5 Hz. **That change was not made by this brief**,
+for two reasons worth recording: it re-times the **protective** path's
+link, whose behaviour is measured and committed and which this brief is
+forbidden to disturb; and `FIELD_LINK_STALE_MAX` itself is `plc/`'s
+constant, which may not be retuned silently from here. The observation
+above is what the decision should rest on: **0 reaps in 998.6 s of link at
+2 Hz, and the run this session needed did not trip once.** That is one
+session on one machine, not a bound.
+
+---
+
+## 23.1 Teardown, and one more rule-1 confirmation that came free
+
+The chain was taken down in the order that leaves the machine as m5-57
+documented it, and one step of the teardown is itself an observation:
+
+| Time | Event |
+|---|---|
+| `20:06:35` | `gz sim` and the launch group stopped — **the scan source dies** |
+| `20:06:41.184/.186` | the node's own freshness rule fires and it sends **`ZONE 0` then `WARN 0`**, in that order. A dead sensor proves nothing about either field, and the warning channel goes to the demanding value on §8 rule 1 exactly as the protective one does |
+| `20:07:48.768` | writer `TERMINAL`: three circuits FALSE, **`WarningFieldClear` FALSE**, `MotionPresent` TRUE with `MotionObservationValid` FALSE, both speed sequences left unwritten and frozen |
+| `20:07:48.775` | writer `EXIT`, **23 291 cycles, 0 overruns, 0 write failures** |
+| `20:08:43.9` | field evaluation stopped; 28 connect attempts logged while the writer was gone, each one a refusal it correctly did not paper over |
+
+**State the machine was left in**: no writer process, `Global\amr-standin-writer`
+free, **nothing listening on 45015 or 45016**, no `gz sim`, no vehicle-side
+node, CPU `safecell3` still in `Run`. Two orphaned `nav2` nodes from an
+earlier session on a different ROS domain were found before this run and
+were left exactly as found.
+
+---
+
+## 24. What this session does NOT establish
+
+1. **No integrity claim.** No Category, PL, SIL, PFH, MTTFd, DCavg or CCF,
+   for this node, the link, the writer or anything downstream. The verdict
+   arrives at the safety program as **standard data over a stand-in path**.
+2. **The reduced limit's *effect* on the vehicle was not observed.**
+   `ForkliftStatus.ForkliftSpeedLimitActive` read **False** throughout,
+   including while the warning field was occupied. That is
+   `docs/VALIDATION-M5.md` finding **F4** — the warning ceiling is
+   autonomous-mode only, and the vehicle was not in autonomous mode — and
+   it is a `plc/` change in the owner's TIA session, not a defect in
+   anything built here. What this session establishes is the half F3 names:
+   **the limit selector `WarningFieldClearValid` now moves**, where it was
+   permanently FALSE.
+3. **No monitored reset was exercised and no latch was cleared.**
+   `ZoneStopDemand` and `SafetyResetRequired` stood `True` for the whole
+   session, as they did before it. The vehicle never moved.
+4. **`ForkliftWarning.ForkliftWarningFieldOccupied` read `True`
+   throughout**, including with both fields demonstrably clear. It is the
+   standard-side node fed by the ROS-topic carrier that **does not exist
+   yet** (§12 phase 2 hand-on 1, m5-47's own request), so it sits at its
+   start value. It is not this node's to write and was not written. Raised
+   again in the m5-61 report.
+5. **The `WARN` line's own transit was measured on four draws** (§20.3),
+   and `T_w`'s remaining stages w3–w6 are still budgets against a path that
+   is designed and not built.
+6. **Nothing was re-run for the protective path's committed figures.** They
+   were not re-measured and are not restated; §22 shows the shape, not new
+   numbers.
+
+## 25. Corrections and surprises found while running
+
+1. **The first two launch attempts failed on `set -u` in the launch
+   wrapper**, not on anything under test: `/opt/ros/jazzy/setup.bash`
+   references `AMENT_TRACE_SETUP_FILES` unset. Each attempt was given its
+   own log name (`launch-A` … `launch-D`) rather than reusing one, per
+   LESSONS 2026-08-05 on truncated logs.
+2. **A `pkill -f "scripts/field_evaluation.py"` matched its own shell** and
+   killed it, exit 15 — LESSONS 2026-08-06's "exclude the sweep from
+   itself", arriving through `pkill` rather than through a process sweep.
+   The node was killed as intended; liveness was afterwards checked with a
+   pattern that cannot match the checker.
+3. **The rear device's last ingested scan again read 4.00 % invalid
+   samples** at `EXIT`, against 0.00 % for the front — the same unexplained
+   reading m5-47 §17.4 recorded, reproduced here, still under the 5 %
+   device-fault threshold and still not explained.
+4. **The writer's `MEMBERS` probe found all eleven members present** at
+   connect, so the warning group was live for the whole session. A
+   half-built controller would have left it inert and this brief would have
+   had nothing to observe — which is why the probe is read rather than
+   assumed.
+5. **The operator command file was first written with a BOM and the `quit`
+   was refused**, `REFUSED | '﻿quit': unrecognised command`.
+   `STANDIN-WRITER-DESIGN.md` §4.1 says in as many words to write that file
+   as UTF-8 **without** a BOM, and PowerShell 5.1's `-Encoding utf8` adds
+   one; the writer offered the BOM to the grammar and refused the line
+   loudly, which is the designed behaviour and the only `REFUSED` line in
+   23 291 cycles. Re-issued through `UTF8Encoding($false)` and accepted.
+   The lesson is the design's own and is recorded here because it cost a
+   minute of teardown, not because anything is wrong.

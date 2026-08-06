@@ -1647,6 +1647,35 @@ field:
     zone_clear_digit: 1
     zone_intrusion_digit: 0
 
+    # WARN <digit>: THE SECOND VOCABULARY ENTRY ON THE SAME LINK, and the
+    # same convention - the digit is the CHANNEL LEVEL. Fixed by
+    # plc/forklift-safety/SPEC.md section 11.2 and realised in
+    # bridge/STANDIN-WRITER-DESIGN.md section 3; MATCHED here, never
+    # re-invented, because the receiving end is built and running-tested.
+    #   WARN 1 = warning field clear -> WarningFieldClear := TRUE
+    #   WARN 0 = warning field occupied, OR this evaluation's own fault
+    #            or staleness verdict -> WarningFieldClear := FALSE, and
+    #            the reduced limit is selected
+    #
+    # WHY THE PERMISSIVE DIGIT COSTS NOTHING IN SAFETY TERMS AND STILL
+    # HAS TO BE SENT. Before the first WARN line of a writer session the
+    # channel holds its start value FALSE, and the writer drives it FALSE
+    # again on every field-link loss, together with the zone channel. So
+    # SILENCE IS ALREADY OCCUPIED at the consumer and nothing here has to
+    # re-implement that; what was missing until m5-61 was the other
+    # direction - with no source ever saying WARN 1, WarningFieldClear
+    # was FALSE for every session that ever ran, the 300 mm/s limit was
+    # permanently in force, and no monitored reset could be accepted
+    # while the vehicle was above it.
+    #
+    # THE NODE SENDS THIS LINE AT EVERY TRANSITION AND ONCE ON EVERY
+    # (RE)CONNECT, after the ZONE line. The reconnect line is not
+    # redundancy: the writer drove the channel FALSE when the link died,
+    # so the clear verdict has to be CLAIMED AFRESH on the new
+    # connection rather than inherited from the old one.
+    warn_clear_digit: 1
+    warn_occupied_digit: 0
+
   # ---- the transition log (section 7, SPEC section 7.6) ----
   #
   # LOAD-BEARING EVIDENCE, NOT A NICETY. Criterion (a) is decided by

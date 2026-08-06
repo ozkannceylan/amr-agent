@@ -1,0 +1,8 @@
+2026-08-06T19:58:52.435Z | START | m5-61 stimulus 3 - the protective field, unchanged, with WARN live
+2026-08-06T19:58:52.719Z | STIMULUS | P1 PROTECTIVE - near face 8.35, INSIDE protective 9.21: issued 2026-08-06T19:58:52.435Z -> (8.5, 4.0) returned data: true
+2026-08-06T19:58:53.887Z | READBACK | P1 PROTECTIVE - near face 8.35, INSIDE protective 9.21: (8.500, 4.000, 0.300)
+2026-08-06T19:58:53.887Z | HOLD | P1 PROTECTIVE - near face 8.35, INSIDE protective 9.21: holding 10 s
+2026-08-06T19:59:04.180Z | STIMULUS | P1r retreat, both fields clear: issued 2026-08-06T19:59:03.887Z -> (10.0, 6.0) returned data: true
+2026-08-06T19:59:05.329Z | READBACK | P1r retreat, both fields clear: (10.000, 6.000, 0.300)
+2026-08-06T19:59:05.329Z | HOLD | P1r retreat, both fields clear: holding 12 s
+2026-08-06T19:59:17.329Z | EXIT | stimulus 3 complete
