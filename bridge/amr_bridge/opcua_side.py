@@ -180,6 +180,15 @@ class PlcClient:
         }
         self._output_keys = cfg.output_keys
         self._output_topic_keys = cfg.output_topic_keys
+        # Slots whose SILENCE is a value (§13.2 W1). A dict that is empty in
+        # every configuration that does not carry the warning group, so no other
+        # slot acquires a window by sharing a run with this one (§10.8 P4).
+        self._stale_asserts = cfg.stale_asserts
+        #: Per-slot: is that slot currently past its window? Kept only so the
+        #: entry and exit of a silence are LOGGED once each rather than every
+        #: cycle. It gates nothing: the value written is recomputed from the
+        #: sample's own age on every cycle, not from this flag.
+        self._silent_now: dict[str, bool] = {}
         self._write_allowlist = cfg.write_allowlist
         self._expected_types = expected_types(cfg)
 
@@ -686,11 +695,15 @@ class PlcClient:
             sample = self._slots[key].get()
             if sample is None:
                 continue
-            if self._last_on_change_written.get(key) == sample.value and key in self._written_this_session:
+            # For every slot but the warning slot this IS `sample.value`; for
+            # that one it is the sample's value while the sample is fresh and
+            # the asserted value once it is not (§13.2 W1).
+            value = self._value_for_write(key, sample, take_ns)
+            if self._last_on_change_written.get(key) == value and key in self._written_this_session:
                 continue
-            start, end = await self._write(key, sample.value, self._input_variants[key])
-            self._last_on_change_written[key] = sample.value
-            self._record_write(key, sample, cycle_start, take_ns, start, end)
+            start, end = await self._write(key, value, self._input_variants[key])
+            self._last_on_change_written[key] = value
+            self._record_write(key, sample, cycle_start, take_ns, start, end, written=value)
             written.append(key)
 
         if rewriting:
@@ -714,8 +727,66 @@ class PlcClient:
                      + (f"; R1 withheld {','.join(skipped)}" if skipped else ""),
             )
 
+    def _value_for_write(self, key: str, sample, now_ns: int):
+        """The value this cycle writes for a slot — `sample.value`, unless the
+        slot carries a silence rule and its sample is older than that rule's
+        window (`opcua-nodes.md` §13.2 **W1**).
+
+        **What is timed here is this bridge's own input channel**, never the
+        plant: the question asked is "have I heard from my producer inside my
+        window", and the answer is a property of the transport. The verdict
+        itself is the field evaluation's and is not recomputed, compared,
+        thresholded, latched or debounced anywhere in this process (§1.1); the
+        producer publishes at its evaluation tick *so that* its absence is
+        visible, and this is the last layer that can see the absence before an
+        OPC UA node — a held value by construction — turns it into a standing
+        clear (LESSONS 2026-08-04).
+
+        Recomputed from the sample's own age on **every** cycle, deliberately:
+        that is what makes the refresh paths safe. §8.1's full rewrite after a
+        detected server restart writes what this method returns, so a restart
+        that reverted the node to its non-permissive start value can never be
+        "repaired" back to a stale `FALSE` by a dead producer's last sample.
+        """
+        rule = self._stale_asserts.get(key)
+        if rule is None:
+            return sample.value
+        age_ns = now_ns - sample.recv_ns
+        silent = age_ns > int(rule.window_s * 1e9)
+        if silent != self._silent_now.get(key, False):
+            self._silent_now[key] = silent
+            self._note_silence_transition(key, rule, silent, age_ns)
+        return rule.asserted_value if silent else sample.value
+
+    def _note_silence_transition(self, key: str, rule, silent: bool, age_ns: int) -> None:
+        """Log and record the entry into and exit from a silence. Evidence only:
+        nothing downstream reads these, and the value written is derived from the
+        sample's age rather than from anything recorded here."""
+        if silent:
+            self._counters.silence_assertions += 1
+            self._counters.silence_max_age_ns = max(
+                self._counters.silence_max_age_ns, age_ns)
+            LOG.warning(
+                "SILENCE on %s: no sample for %.3f s, past the %.3f s window — "
+                "writing the asserted %s (%s). A read of this node is never an "
+                "implied clear: the silence is asserted, not held",
+                key, age_ns / 1e9, rule.window_s, rule.asserted_value, rule.reference,
+            )
+        else:
+            LOG.info(
+                "%s fresh again after %.3f s: the slot's own value is carried once "
+                "more (%s)", key, age_ns / 1e9, rule.reference,
+            )
+        self._recorder.row(
+            "silence", key, clock="-", interval_ns=age_ns,
+            value=rule.asserted_value if silent else "",
+            note=("entered: asserted value written" if silent else "left: sample carried")
+                 + f"; window {rule.window_s:.3f}s ({rule.reference})",
+        )
+
     def _record_write(
-        self, key: str, sample, cycle_start: int, take_ns: int, start: int, end: int
+        self, key: str, sample, cycle_start: int, take_ns: int, start: int, end: int,
+        written=None,
     ) -> None:
         self._slots[key].note_written()
         self._written_this_session.add(key)
@@ -736,10 +807,16 @@ class PlcClient:
             interval_ns=cycle_start - sample.recv_ns, value=sample.value,
             note="literal §9.2 reference point; may be negative, not clipped",
         )
-        # L2 input write: start of write -> server write response.
+        # L2 input write: start of write -> server write response. `value` is
+        # what actually went on the wire, which differs from the sample only for
+        # a slot inside its silence rule (§13.2 W1) — and the note says so, so
+        # the CSV never shows an asserted value as if a producer had sent it.
+        asserted = written is not None and written != sample.value
         self._recorder.row(
             "L2", key, t_start_ns=start, t_end_ns=end,
-            interval_ns=end - start, value=sample.value,
+            interval_ns=end - start,
+            value=sample.value if written is None else written,
+            note="asserted on silence, not a received sample (§13.2 W1)" if asserted else "",
         )
         # L3 = L1 + L2, computed from the same clock, not by adding statistics.
         self._recorder.row(

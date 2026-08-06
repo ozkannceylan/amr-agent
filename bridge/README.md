@@ -45,7 +45,10 @@ it.
 - **Nodes it is not allowed to write.** Only the `Input/` nodes of the signal
   groups the run configures, plus the single `DemoCell/Link/BridgeHeartbeat`
   (opcua-nodes.md §9.1, §10.1): 7 + 1 with the cell group alone, 4 + 1 with the
-  forklift group alone, **11 + 1 with both**. The allowlist is **derived** from
+  forklift group alone, **11 + 1 with both** — and, from M5, the two
+  `Forklift/Vehicle/` nodes with the envelope group and the one
+  `Forklift/Warning/` node with the warning group, which is why the M5
+  double configuration writes 8 keys (§12.2, §13). The allowlist is **derived** from
   the configured groups, never a second list maintained beside them. Every write
   goes through one helper that rejects anything else; see
   `tools/check_write_allowlist.py`.
@@ -147,10 +150,11 @@ heartbeat, one link verdict.
 | `amr_bridge/instrumentation.py` | per-event CSV recording (always on), one file per session |
 | `config/bridge.yaml` | **the commissioned PLCSIM endpoint, cell group only** — endpoint, **both** namespace URIs, BrowseName paths, topic names, cycle period, evidence paths. No thresholds, no tolerances, no timers, no namespace index |
 | `config/bridge-double-both.yaml`, `config/bridge-double-forklift.yaml` | the same shape against the **test double**, with both groups and with the forklift group alone. The `Forklift/` subtree is a design value until the owner reads it back out of TIA Portal (`opcua-nodes.md` §10.2 step 6), which is why the committed PLCSIM config does not carry it yet |
-| `test_double/` | TEST SCAFFOLDING: an OPC UA server standing in for the S7-1500, serving all 33 nodes |
+| `config/bridge-double-m5.yaml` | the M5 configuration against the double: the forklift, envelope and **warning** groups together (`opcua-nodes.md` §10, §12, §13). The warning group is deliberately its own group and is **not** in the committed PLCSIM config, because the node it addresses is created by `plc/forklift/TIA-BUILD-PROCEDURE.md` chunk X and does not exist on the controller yet |
+| `test_double/` | TEST SCAFFOLDING: an OPC UA server standing in for the S7-1500, serving all 43 nodes — §9, §10, and, from m5-55, §12 and §13 |
 | `STANDIN-WRITER-DESIGN.md`, `standin_writer/` | the Windows-side **stand-in writer** for the forklift twin's simulated safety-input channels (SPEC §7, ADR 0015): design, script and per-session logs. Not part of the translator; shares nothing with it |
-| `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check, connect-conformance check, session-lifecycle check, forklift signal-group check, read-only PLC observer (scaffolding) |
-| `EVIDENCE_LATENCY.md`, `EVIDENCE_SIGNAL_LOSS.md`, `EVIDENCE_CONNECT.md`, `EVIDENCE_LIFECYCLE.md`, `evidence/` | dated captures, each qualified by the environment that produced it |
+| `tools/` | evidence summariser, panel stimulus (scaffolding), allowlist check, connect-conformance check, session-lifecycle check, forklift signal-group check, read-only PLC observer (scaffolding), envelope-chain witness, **warning-field stimulus (scaffolding) and warning-node witness** |
+| `EVIDENCE_LATENCY.md`, `EVIDENCE_SIGNAL_LOSS.md`, `EVIDENCE_CONNECT.md`, `EVIDENCE_LIFECYCLE.md`, `EVIDENCE_ENVELOPE_BRIDGE.md`, `EVIDENCE_WARNING_SLOT.md`, `evidence/` | dated captures, each qualified by the environment that produced it |
 
 Where the no-logic rule is visible in the code:
 
@@ -407,10 +411,11 @@ namespaces, so its indices (`5` and `6`) differ from PLCSIM's. That is
 deliberate: a bridge that hardcoded an index would fail against one server or
 the other.
 
-It serves **all 33 nodes** — the 15 of `opcua-nodes.md` §9 and the 18 of §10,
-including the six the bridge must never touch, because a node absent from the
-double cannot be proven untouched. The five `Forklift/Hmi/` requests and
-`Forklift/Link/HmiHeartbeat` are served **writable**, exactly as §10.3 marks
+It serves **all 43 nodes** — the 15 of `opcua-nodes.md` §9, the 18 of §10, the 9
+of §12 and the 1 of §13 — including the eight the bridge must never touch,
+because a node absent from the double cannot be proven untouched. The five
+`Forklift/Hmi/` requests, `Forklift/Link/HmiHeartbeat` and §12's two
+HMI-written requests are served **writable**, exactly as §10.3 and §12.2 mark
 them, so a bridge write to one *would succeed*; `Output/` and `Status/` are
 served read-only, so the server-side half of the two-independent-enforcements
 arrangement is exercised too. Serving the `Hmi/` group is not playing the HMI:

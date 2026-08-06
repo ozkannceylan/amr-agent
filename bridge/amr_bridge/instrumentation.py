@@ -151,6 +151,12 @@ class Counters:
         # rather than one per signal: the per-signal detail is in the CSV's
         # `nonfinite` rows, which carry the node name.
         self.nonfinite_real_samples = 0
+        # §13.2 W1: episodes in which a slot's producer went silent past its own
+        # freshness window and the bridge wrote the asserted value instead of the
+        # held one, and the longest silence any slot reached. Zero in every
+        # configuration that carries no such slot.
+        self.silence_assertions = 0
+        self.silence_max_age_ns = 0
         self.missing_joint_name = 0
         self.empty_scan = 0
         self.publishes = 0

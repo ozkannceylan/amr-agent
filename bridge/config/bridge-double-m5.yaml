@@ -1,0 +1,125 @@
+# bridge configuration — the FORKLIFT, ENVELOPE and WARNING groups, against the
+# TEST DOUBLE.
+#
+# Added 2026-08-06 (m5-55). It is the first configuration in this directory that
+# carries `opcua-nodes.md` §13 at all, and the first that carries §12 against
+# anything but the live CPU: until the double was extended in the same round
+# (`bridge-design.md` §12 item 17), the envelope group could only ever be
+# exercised against PLCSIM Advanced.
+#
+# The configured set is therefore 7 input slots, 7 output slots, 6 diagnostics,
+# 21 nodes touched and an 8-key write allowlist — and no rule anywhere in the
+# bridge writes any of those numbers down: each is derived from the groups
+# declared here (§2.1 G2).
+#
+# The endpoint is the double's, never PLCSIM's (§10, operational rule). It is
+# its own port, so a run of this file never waits on another double's TIME_WAIT.
+
+# Four groups exist in the loader; three are declared here. The `warning` group
+# is a SEPARATE group and not four rows added to `envelope`, for the reason
+# `amr_bridge/config.py` states at WARNING_GROUP: §13 is its own node-model
+# section, and the node does not exist on the controller in force until
+# `plc/forklift/TIA-BUILD-PROCEDURE.md` chunk X creates it — so a run against
+# today's CPU must be able to leave it out without losing the envelope.
+groups: ["forklift", "envelope", "warning"]
+
+opcua:
+  endpoint: "opc.tcp://127.0.0.1:4845/amr-agent/celldouble/"
+  namespace_uris:
+    server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
+    interface: "http://DemoCell"
+  security_policy: "none"
+  certificate_path: null
+  private_key_path: null
+  username: null
+  requested_session_timeout_ms: 10000
+  session_name: "amr-agent-bridge-double-m5"
+  reconnect_interval_s: 1.0
+  reconnect_backoff_max_s: 5.0
+
+nodes:
+  interface_path:
+    - namespace: server_interfaces
+      browse_name: "ServerInterfaces"
+    - namespace: interface
+      browse_name: "DemoCell"
+
+  # One heartbeat for the whole process, whatever the group count (§2.1 G5).
+  heartbeat:
+    BridgeHeartbeat:               ["Link", "BridgeHeartbeat"]
+
+  groups:
+    forklift:
+      inputs:
+        ForkliftForkHeight:            ["Forklift", "Input", "ForkliftForkHeight"]
+        ForkliftLinearSpeed:           ["Forklift", "Input", "ForkliftLinearSpeed"]
+        ForkliftObstacleInStopZone:    ["Forklift", "Input", "ForkliftObstacleInStopZone"]
+        ForkliftObstacleMinDistance:   ["Forklift", "Input", "ForkliftObstacleMinDistance"]
+      outputs:
+        ForkliftTractionSpeedRef:      ["Forklift", "Output", "ForkliftTractionSpeedRef"]
+        ForkliftSteerAngleRef:         ["Forklift", "Output", "ForkliftSteerAngleRef"]
+        ForkliftForkSpeedRef:          ["Forklift", "Output", "ForkliftForkSpeedRef"]
+      diagnostics:
+        ForkliftTeleopActive:          ["Forklift", "Status", "ForkliftTeleopActive"]
+        ForkliftObstacleStopActive:    ["Forklift", "Status", "ForkliftObstacleStopActive"]
+        ForkliftSpeedLimitActive:      ["Forklift", "Status", "ForkliftSpeedLimitActive"]
+        ForkliftResetRequired:         ["Forklift", "Status", "ForkliftResetRequired"]
+        HmiLinkOk:                     ["Forklift", "Link", "HmiLinkOk"]
+
+    envelope:
+      inputs:
+        ForkliftVehicleModeApplied:    ["Forklift", "Vehicle", "ForkliftVehicleModeApplied"]
+        ForkliftVehicleHeartbeat:      ["Forklift", "Vehicle", "ForkliftVehicleHeartbeat"]
+      outputs:
+        ForkliftDriveModeActive:       ["Forklift", "Mode", "ForkliftDriveModeActive"]
+        ForkliftMotionEnable:          ["Forklift", "Envelope", "ForkliftMotionEnable"]
+        ForkliftSpeedCeiling:          ["Forklift", "Envelope", "ForkliftSpeedCeiling"]
+        ForkliftEquipmentPermit:       ["Forklift", "Envelope", "ForkliftEquipmentPermit"]
+      diagnostics:
+        ForkliftProcessStopActive:     ["Forklift", "ProcessStop", "ForkliftProcessStopActive"]
+
+    warning:
+      # ONE node, one direction, and its own folder and DB (`opcua-nodes.md`
+      # §13). The bridge writes it; the value is the field evaluation's.
+      inputs:
+        ForkliftWarningFieldOccupied:  ["Forklift", "Warning", "ForkliftWarningFieldOccupied"]
+
+ros:
+  node_name: "forklift_plc_bridge"
+  topics:
+    forklift:
+      fork_height:           "/forklift/fork_height"
+      linear_speed:          "/forklift/linear_speed"
+      obstacle_in_stop_zone: "/forklift/obstacle/in_stop_zone"
+      obstacle_min_distance: "/forklift/obstacle/min_distance"
+      cmd_traction_speed:    "/forklift/cmd/traction_speed"
+      cmd_steer_angle:       "/forklift/cmd/steer_angle"
+      cmd_fork_speed:        "/forklift/cmd/fork_speed"
+    envelope:
+      mode_in_force:             "/forklift/mode/in_force"
+      envelope_motion_enable:    "/forklift/envelope/motion_enable"
+      envelope_speed_ceiling:    "/forklift/envelope/speed_ceiling"
+      envelope_equipment_permit: "/forklift/envelope/equipment_permit"
+      mode_applied:              "/forklift/mode/applied"
+      vehicle_heartbeat:         "/forklift/vehicle/heartbeat"
+    warning:
+      # The producer's own topic name, `agv/forklift/config.yaml` topics: block
+      # and `opcua-nodes.md` §13.3, unchanged.
+      warning_field_occupied:    "/forklift/warning_field/occupied"
+  analog_reliability: "reliable"
+
+cycle:
+  # One cadence for the whole process: a group adds slots, never a cadence
+  # (§5.1). The warning slot's freshness window is NOT here and is deliberately
+  # not configurable — it is a named constant of the bridge (config.py,
+  # WARNING_FIELD_STALE_MAX_S), for the same reason this file carries no
+  # threshold, tolerance or debounce anywhere.
+  period_s: 0.05
+  status_poll_period_s: 1.0
+
+evidence:
+  csv_path: "evidence/latency-double-m5.csv"
+  flush_interval_s: 1.0
+
+logging:
+  level: "INFO"

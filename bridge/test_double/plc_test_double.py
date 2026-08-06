@@ -15,11 +15,12 @@ commissioned two-namespace shape of §3.1 —
                 +- Forklift/  Hmi/ Input/ Output/ Status/ Link/
 
 — with the `DemoCell/` address space of docs/interfaces/opcua-nodes.md §9 **and
-the `Forklift/` subtree of §10**: same BrowseNames, same folder paths, same data
-types, same access levels, so the bridge and the loop mechanics can be verified
-in a container without TIA Portal or PLCSIM Advanced.
+the `Forklift/` subtree of §10, §12 and §13**: same BrowseNames, same folder
+paths, same data types, same access levels, same start values, so the bridge and
+the loop mechanics can be verified in a container without TIA Portal or PLCSIM
+Advanced.
 
-**All 33 nodes, including the six the bridge never touches** — a node absent
+**All 43 nodes, including the eight the bridge never touches** — a node absent
 from the double cannot be proven untouched (§10). The five `Forklift/Hmi/`
 requests and `Forklift/Link/HmiHeartbeat` are therefore served with the
 *Writable* standing §10.3 gives them, so a bridge write to one **would
@@ -244,10 +245,68 @@ FORKLIFT_LINK = [
     ("HmiLinkOk", ua.VariantType.Boolean, False, False),
 ]
 
-#: The six nodes the bridge must never read and never write (§4.10). Served, so
-#: their being untouched is observable rather than assumed.
+# --------------------------------------------------------------------------- #
+# opcua-nodes.md §12 — the autonomy envelope, the drive mode and the operator's
+# process stop; and §13 — the warning-field verdict. Ten nodes, added 2026-08-06
+# (m5-55) to close `bridge-design.md` §12 item 17: until now the envelope group
+# was testable only against the live CPU, and a node absent from the double
+# cannot be exercised at all, let alone proven untouched (§10).
+#
+# Start values are §12.8's and §13's own, and §12.8's rule — *every start value
+# in §12 is the non-permissive one* — is transcribed here rather than
+# reinterpreted: the two `ProcessStop/` nodes and the §13 node start `TRUE`,
+# which is not the type's zero, and the rest start at zero because zero is the
+# non-permissive value for them.
+# --------------------------------------------------------------------------- #
+
+# §12.3 — the mode. The PLC's answer is read-only; the HMI's request is writable
+# and is a node the bridge must never touch, in either direction (§4.10).
+FORKLIFT_MODE = [
+    ("ForkliftDriveModeActive", ua.VariantType.UInt16, 0, False),
+    ("HmiDriveModeRequest", ua.VariantType.UInt16, 0, True),
+]
+
+# §12.4 — the three envelope elements. NOT writable: a permission is not a
+# command, and the server enforces that half independently of the bridge's own
+# allowlist (§12.2). The commissioned CPU refuses these with BadNotWritable.
+FORKLIFT_ENVELOPE = [
+    ("ForkliftMotionEnable", ua.VariantType.Boolean, False),
+    ("ForkliftSpeedCeiling", ua.VariantType.Float, 0.0),
+    ("ForkliftEquipmentPermit", ua.VariantType.Boolean, False),
+]
+
+# §12.6 — what the vehicle's control layer reports back. Client-writable: this
+# is the bridge's second input image, and the bridge writes it while the VALUE
+# belongs to the vehicle (§12.2, "value owner and node writer are different
+# roles").
+FORKLIFT_VEHICLE = [
+    ("ForkliftVehicleModeApplied", ua.VariantType.UInt16, 0),
+    ("ForkliftVehicleHeartbeat", ua.VariantType.UInt16, 0),
+]
+
+# §12.7 — the operator's process stop. Both start TRUE (§12.8).
+FORKLIFT_PROCESS_STOP = [
+    ("ForkliftProcessStopActive", ua.VariantType.Boolean, True, False),
+    ("HmiProcessStopRequest", ua.VariantType.Boolean, True, True),
+]
+
+# §13 — the warning-field verdict, in its own folder and its own one-member DB.
+# Client-writable (the bridge writes it) and START VALUE `TRUE`: before the
+# chain has ever spoken, the field reads occupied and the ceiling is reduced.
+# That start value is doing real work in this double — it is what a reader sees
+# for as long as the bridge has written nothing, and it is what a warm restart
+# reverts to (S5, `_start_values`).
+FORKLIFT_WARNING = [
+    ("ForkliftWarningFieldOccupied", ua.VariantType.Boolean, True),
+]
+
+#: The eight nodes the bridge must never read and never write (§4.10): the five
+#: `Forklift/Hmi/` requests, `Link/HmiHeartbeat`, and §12's two HMI-written
+#: requests. Served — and the two §12 ones served WRITABLE — so that their being
+#: untouched is observed rather than assumed.
 BRIDGE_MUST_NOT_TOUCH: tuple[str, ...] = tuple(
-    name for name, _, _ in FORKLIFT_HMI) + ("HmiHeartbeat",)
+    name for name, _, _ in FORKLIFT_HMI) + (
+    "HmiHeartbeat", "HmiDriveModeRequest", "HmiProcessStopRequest")
 
 
 async def build(server: Server, idx_server_interfaces: int, idx: int) -> dict:
@@ -304,6 +363,35 @@ async def build(server: Server, idx_server_interfaces: int, idx: int) -> dict:
         if writable:
             await node.set_writable()
         nodes[name] = node
+
+    # §12 and §13 — four more folders beside the five above, under the same
+    # interface node and in the same namespace: a group adds a LEVEL, never a
+    # namespace (§3.1 N7). The folder names are §12.2's and §13's own, and the
+    # commissioned CPU publishes exactly these beside the others (ten in total,
+    # `EVIDENCE_ENVELOPE_BRIDGE.md` §1).
+    m5_folders = {
+        "Mode": await forklift.add_folder(idx, "Mode"),
+        "Envelope": await forklift.add_folder(idx, "Envelope"),
+        "Vehicle": await forklift.add_folder(idx, "Vehicle"),
+        "ProcessStop": await forklift.add_folder(idx, "ProcessStop"),
+        "Warning": await forklift.add_folder(idx, "Warning"),
+    }
+    for folder, table in (("Mode", FORKLIFT_MODE), ("ProcessStop", FORKLIFT_PROCESS_STOP)):
+        for name, vtype, start, writable in table:
+            node = await m5_folders[folder].add_variable(idx, name, ua.Variant(start, vtype))
+            if writable:
+                await node.set_writable()
+            nodes[name] = node
+    for name, vtype, start in FORKLIFT_ENVELOPE:
+        # Deliberately NOT writable, so the server-side half of §12.2's two
+        # independent enforcements is exercised here as it is on the CPU.
+        nodes[name] = await m5_folders["Envelope"].add_variable(
+            idx, name, ua.Variant(start, vtype))
+    for folder, table in (("Vehicle", FORKLIFT_VEHICLE), ("Warning", FORKLIFT_WARNING)):
+        for name, vtype, start in table:
+            node = await m5_folders[folder].add_variable(idx, name, ua.Variant(start, vtype))
+            await node.set_writable()
+            nodes[name] = node
     return nodes
 
 
@@ -312,8 +400,15 @@ async def build(server: Server, idx_server_interfaces: int, idx: int) -> dict:
 #: the output nodes, not a general write facility.
 _COMMANDABLE = {
     name: vtype
-    for name, vtype, _ in list(OUTPUTS) + list(FORKLIFT_OUTPUTS)
+    for name, vtype, _ in list(OUTPUTS) + list(FORKLIFT_OUTPUTS) + list(FORKLIFT_ENVELOPE)
 }
+# The PLC-owned §12 verdicts a human may drive through the same back door: the
+# mode in force and the process-stop latch. Same standing as the setpoints —
+# a hand writing a value, with no input consulted and no condition evaluated.
+_COMMANDABLE.update({
+    "ForkliftDriveModeActive": ua.VariantType.UInt16,
+    "ForkliftProcessStopActive": ua.VariantType.Boolean,
+})
 
 
 async def scaffold_command_file(nodes: dict, path: str, period: float = 0.1) -> None:
@@ -361,9 +456,28 @@ def _parse_command_file(text: str) -> dict[str, float]:
         name, _, raw = line.partition("=")
         name = name.strip()
         if name not in _COMMANDABLE:
-            raise KeyError(f"{name!r} is not an Output/ node; commandable: {sorted(_COMMANDABLE)}")
-        values[name] = float(raw)
+            raise KeyError(f"{name!r} is not a commandable node; commandable: "
+                           f"{sorted(_COMMANDABLE)}")
+        values[name] = _coerce(name, raw.strip())
     return values
+
+
+def _coerce(name: str, raw: str):
+    """Marshal a hand-typed token into the node's own type. `Boolean` accepts
+    true/false/1/0, `UInt16` an integer, everything else a float. A token that
+    does not fit its node's type is a `ValueError`, never a silently widened
+    value: the double must not be the place where a type error is absorbed."""
+    vtype = _COMMANDABLE[name]
+    if vtype == ua.VariantType.Boolean:
+        token = raw.lower()
+        if token in ("true", "1"):
+            return True
+        if token in ("false", "0"):
+            return False
+        raise ValueError(f"{name}: {raw!r} is not a Boolean")
+    if vtype == ua.VariantType.UInt16:
+        return int(raw)
+    return float(raw)
 
 
 async def scaffold_echo(nodes: dict, key: str, period: float = 0.02) -> None:
@@ -391,6 +505,11 @@ def _start_values() -> list[tuple[str, ua.VariantType, object]]:
         + [(name, vtype, start) for name, vtype, start in FORKLIFT_OUTPUTS]
         + [(name, vtype, start) for name, vtype, start in FORKLIFT_STATUS]
         + [(name, vtype, start) for name, vtype, start, _ in FORKLIFT_LINK]
+        + [(name, vtype, start) for name, vtype, start, _ in FORKLIFT_MODE]
+        + [(name, vtype, start) for name, vtype, start in FORKLIFT_ENVELOPE]
+        + [(name, vtype, start) for name, vtype, start in FORKLIFT_VEHICLE]
+        + [(name, vtype, start) for name, vtype, start, _ in FORKLIFT_PROCESS_STOP]
+        + [(name, vtype, start) for name, vtype, start in FORKLIFT_WARNING]
     )
 
 
@@ -437,6 +556,14 @@ _OBSERVED = (
     + [name for name, _, _ in FORKLIFT_OUTPUTS]
     + [name for name, _, _ in FORKLIFT_HMI]
     + ["HmiHeartbeat"]
+    # §12 and §13. `ForkliftWarningFieldOccupied` is the column this file was
+    # extended for: a server-side record of what the "PLC" would read, taken by
+    # the server itself rather than by the client that wrote it.
+    + [name for name, _, _, _ in FORKLIFT_MODE]
+    + [name for name, _, _ in FORKLIFT_ENVELOPE]
+    + [name for name, _, _ in FORKLIFT_VEHICLE]
+    + [name for name, _, _, _ in FORKLIFT_PROCESS_STOP]
+    + [name for name, _, _ in FORKLIFT_WARNING]
 )
 
 
@@ -498,12 +625,14 @@ async def run(args: argparse.Namespace) -> None:
              INTERFACE_NAMESPACE_URI, idx)
     LOG.info("browse path: Objects/%d:ServerInterfaces/%d:DemoCell — two namespaces, "
              "indices deliberately unlike PLCSIM's", idx_server_interfaces, idx)
-    LOG.info("address space: %d nodes — %d in opcua-nodes.md §9, %d in §10; the %d the "
-             "bridge must never touch (%s) are served WRITABLE, so its refusal is the "
-             "bridge's own and not this server's",
+    LOG.info("address space: %d nodes — %d in opcua-nodes.md §9, %d in §10, %d in §12, "
+             "%d in §13; the %d the bridge must never touch (%s) are served WRITABLE, "
+             "so its refusal is the bridge's own and not this server's",
              len(nodes), len(INPUTS) + len(OUTPUTS) + len(STATUS) + len(LINK),
              len(FORKLIFT_HMI) + len(FORKLIFT_INPUTS) + len(FORKLIFT_OUTPUTS)
              + len(FORKLIFT_STATUS) + len(FORKLIFT_LINK),
+             len(FORKLIFT_MODE) + len(FORKLIFT_ENVELOPE) + len(FORKLIFT_VEHICLE)
+             + len(FORKLIFT_PROCESS_STOP), len(FORKLIFT_WARNING),
              len(BRIDGE_MUST_NOT_TOUCH), ", ".join(BRIDGE_MUST_NOT_TOUCH))
 
     # SCAFFOLDING: revise every client's requested session timeout into this

@@ -74,6 +74,65 @@ BOOL = "bool"      # S7 Bool / OPC UA Boolean
 #: `std_msgs/UInt16` needs no new dependency: a group adds slots, not kinds.
 UINT16 = "uint16"
 
+#: --------------------------------------------------------------------------
+#: The warning-field slot's freshness window (`opcua-nodes.md` §13.2 **W1**,
+#: `bridge-design.md` §4.11 row 23).
+#:
+#: The producer publishes `/forklift/warning_field/occupied` **at its evaluation
+#: tick rather than on transitions, so that its ABSENCE is visible**
+#: (`agv/forklift/FIELD-EVALUATION.md` §12 phase 2, LESSONS 2026-08-04). An OPC
+#: UA node is a held value, so the seam is by construction the republishing
+#: layer that rule exists to defeat: the bridge is the last layer that can
+#: observe the silence, and it converts it into an explicit `TRUE`.
+#:
+#: **This is a freshness window over the bridge's OWN INPUT CHANNEL** — the
+#: timer class §7.2 admits, beside the bridge's own 20 Hz cycle. It is not a
+#: debounce, not a fault delay and not a dwell over a plant value: the verdict
+#: is the field evaluation's and is never computed here; what is timed is
+#: whether this bridge has heard from its producer.
+#:
+#: **The rule is the multiple, not the millisecond** (the `UI_POLL_STALE_TIME`
+#: and `HMI_STALE_TIME` discipline, `opcua-nodes.md` §10.8 P3): ten of the
+#: producer's own ticks. If the producer's rate changes, the window is
+#: re-derived from the new tick, and if a commissioning measurement shows a
+#: worst-case inter-arrival above the window the multiple is re-derived from the
+#: measurement rather than the tick being quietly reinterpreted.
+#:
+#: **Its own constant, shared with nothing** (§10.8 P4). Four stale windows now
+#: exist in this cell and no two share a derivation: `HEARTBEAT_STALE_TIME`
+#: (PLC, 500 ms), `HMI_STALE_TIME` (PLC, 600 ms), `UI_POLL_STALE_TIME` (HMI
+#: backend, 1.0 s) and `FIELD_LINK_STALE_MAX` (the stand-in writer, 1.0 s, over
+#: the *protective* link and a different transport). Retuning one must not
+#: silently retune another.
+WARNING_PRODUCER_TICK_S = 0.05          # 20 Hz, agv/forklift/config.yaml field.evaluate_hz
+WARNING_STALE_TICK_MULTIPLE = 10        # the rule; the number below is derived from it
+WARNING_FIELD_STALE_MAX_S = WARNING_PRODUCER_TICK_S * WARNING_STALE_TICK_MULTIPLE  # 0.50 s
+
+
+@dataclass(frozen=True)
+class StaleAssert:
+    """A slot whose SILENCE is itself a value, asserted explicitly.
+
+    The ordinary slot rule is R1: no sample, no write, no default, ever. A slot
+    carrying one of these is the documented exception the node model rules for
+    one node (`opcua-nodes.md` §13.2 W1): while its latest sample is older than
+    `window_s`, the value written to the node is `asserted_value` instead of the
+    slot's value, so a reader of the node never sees a stale reading presented
+    as a fresh one.
+
+    R1 is **not** weakened: before the first sample there is still no write at
+    all, and the node's DB start value — the same non-permissive value — covers
+    those scans (W3).
+    """
+
+    node_key: str
+    window_s: float
+    #: The value silence means. Transcribed from the node model, never chosen
+    #: here: it is the node's own start value and its fail direction.
+    asserted_value: bool
+    reference: str
+
+
 #: Write cadence of an input slot (§5). Not a timer and not a policy the bridge
 #: chooses per run: it is transcribed from the node model's own cadence column,
 #: per signal, and it is why the two `Forklift/Vehicle/` nodes differ from each
@@ -120,6 +179,9 @@ class SignalGroup:
     structured_topics: tuple[str, ...]
     #: True if this group needs `ros.joint_name` (the belt encoder's joint).
     needs_joint_name: bool = False
+    #: Slots whose silence is asserted rather than held (§13.2 W1). Empty for
+    #: every group but the warning group.
+    stale_asserts: tuple[StaleAssert, ...] = ()
 
     @property
     def input_keys(self) -> tuple[str, ...]:
@@ -278,12 +340,75 @@ ENVELOPE_GROUP = SignalGroup(
     structured_topics=(),
 )
 
+#: The warning-field verdict — `opcua-nodes.md` §13, `bridge-design.md` §4.11
+#: row 23, gate M5. **One node, one topic, one direction.**
+#:
+#: `TRUE` = the warning field is occupied, **or the verdict is stale, silent or
+#: has never been heard**. The value is the field evaluation's
+#: (`agv/forklift/scripts/field_evaluation.py`, m5-47); the bridge is the node's
+#: writer and never its author (invariant 10, §12.2's "value owner and node
+#: writer are different roles"). Nothing is inverted, thresholded, latched or
+#: debounced here: the only thing this group adds beyond a carried Bool is the
+#: `StaleAssert` above, which times the bridge's own input channel.
+#:
+#: **Why a fourth group rather than three more rows in the envelope group, and
+#: what is requested of the interface agent.** `bridge-design.md` §4.11 carries
+#: row 23 inside the envelope group's section — whose title distinguishes
+#: "§12's nine nodes" from "the §13 warning slot" — and this definition is the
+#: bridge's implementation of that row, with the packaging chosen for two
+#: reasons and stated so it can be overruled in one edit:
+#:
+#: 1. §2.1's own definition of a group is "one plant and one node-model
+#:    section". §13 is its own section, its own folder `Forklift/Warning/`, its
+#:    own one-member DB `ForkliftWarning`, and its producer is the field
+#:    evaluation rather than the vehicle's control layer;
+#: 2. **the node does not exist on the controller in force.** It is created by
+#:    `plc/forklift/TIA-BUILD-PROCEDURE.md` chunk X, after step 338. A group
+#:    that is declared separately is the only shape in which the committed
+#:    `bridge/config/bridge.yaml` keeps resolving against the CPU that is
+#:    running today (`_check_group_tables` requires a configured group to name
+#:    exactly its section's nodes, so folding row 23 into the envelope group
+#:    would make every envelope run fail at node resolution until chunk X
+#:    lands). LESSONS 2026-08-06: probe the server before editing a client
+#:    config written against a different build of the program.
+#:
+#: Either way the derived consequences §4.11 states hold unchanged: the write
+#: allowlist gains exactly this one key when the group is configured, and it is
+#: still derived from the configured groups rather than hand-maintained.
+WARNING_GROUP = SignalGroup(
+    name="warning",
+    reference="opcua-nodes.md §13",
+    inputs=(
+        # Written on change — plus the explicit `TRUE` of W1 when the window
+        # expires, plus the refresh on every (re)connect and after a detected
+        # server restart (W4). The expiry needs no cadence of its own: the
+        # asserted value simply becomes the value this slot writes, so the
+        # on-change comparison emits it as the change it is.
+        ("ForkliftWarningFieldOccupied", BOOL, ON_CHANGE),
+    ),
+    outputs=(),
+    diagnostics=(),
+    scalar_inputs=(
+        ("ForkliftWarningFieldOccupied", "warning_field_occupied", BOOL),
+    ),
+    structured_topics=(),
+    stale_asserts=(
+        StaleAssert(
+            node_key="ForkliftWarningFieldOccupied",
+            window_s=WARNING_FIELD_STALE_MAX_S,
+            asserted_value=True,
+            reference="opcua-nodes.md §13.2 W1",
+        ),
+    ),
+)
+
 #: Every group this bridge knows how to carry. A config may declare any
 #: non-empty subset; the union of the declared ones is the configured signal set.
 GROUPS: dict[str, SignalGroup] = {
     CELL_GROUP.name: CELL_GROUP,
     FORKLIFT_GROUP.name: FORKLIFT_GROUP,
     ENVELOPE_GROUP.name: ENVELOPE_GROUP,
+    WARNING_GROUP.name: WARNING_GROUP,
 }
 
 #: BrowseName elements the bridge must never address, in either direction, in
@@ -391,6 +516,19 @@ class Config:
         return tuple(key for group in self.signal_groups for key in group.diagnostics)
 
     @property
+    def stale_asserts(self) -> dict[str, StaleAssert]:
+        """Node key -> the slot's silence rule, for the configured groups only.
+
+        Empty for every configuration that does not carry the warning group, so
+        no other slot acquires a window by being in the same run (§10.8 P4).
+        """
+        return {
+            rule.node_key: rule
+            for group in self.signal_groups
+            for rule in group.stale_asserts
+        }
+
+    @property
     def write_allowlist(self) -> frozenset[str]:
         """The complete set of node keys this run may write — **derived** from
         the configured groups, never hand-maintained beside them (§4.10).
@@ -423,11 +561,17 @@ class Config:
             f"{len(group.diagnostics)}diag ({group.reference})"
             for group in self.signal_groups
         )
+        silence = "; ".join(
+            f"{rule.node_key} asserts {rule.asserted_value} after "
+            f"{rule.window_s:.3f}s of silence ({rule.reference})"
+            for rule in self.stale_asserts.values()
+        )
         return (
             f"configured signal set: {'+'.join(self.groups)} — {per_group}; "
             f"{len(self.input_keys)} input slots, {len(self.output_keys)} output slots, "
             f"{len(self.diagnostic_keys)} diagnostics, {self.touched_node_count} nodes "
             f"touched, write allowlist {len(self.write_allowlist)} keys"
+            + (f"; silence rule: {silence}" if silence else "")
         )
 
     # --- addressing helpers (translation, never logic) ---------------------

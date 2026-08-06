@@ -9,19 +9,24 @@
 `plc_test_double.py` is a minimal OPC UA **server** that stands in for the
 S7-1500 on PLCSIM Advanced (`docs/interfaces/bridge-design.md` §10). It exposes
 the commissioned two-namespace shape of §3.1 with the `DemoCell/` address space
-of `docs/interfaces/opcua-nodes.md` §9 **and the `Forklift/` subtree of §10** —
-same BrowseNames, same folder paths, same data types, same access levels:
+of `docs/interfaces/opcua-nodes.md` §9 **and the `Forklift/` subtree of §10, §12
+and §13** — same BrowseNames, same folder paths, same data types, same access
+levels, same start values:
 
 ```
 Objects
   +- ServerInterfaces   ns http://www.siemens.com/simatic-s7-opcua   (vendor-fixed)
        +- DemoCell      ns http://DemoCell                           (ADR 0006)
             +- Input/ Output/ Status/ Link/   and their variables
-            +- Forklift/  Hmi/ Input/ Output/ Status/ Link/
+            +- Forklift/  Hmi/ Input/ Output/ Status/ Link/          (§10)
+                          Mode/ Envelope/ Vehicle/ ProcessStop/      (§12)
+                          Warning/                                   (§13)
 ```
 
-**All 33 nodes, including the six the bridge never touches** (§4.10): a node
-absent from the double cannot be proven untouched. The forklift group adds a
+**All 43 nodes, including the eight the bridge never touches** (§4.10): a node
+absent from the double cannot be proven untouched — and until m5-55 added the
+last ten, `opcua-nodes.md` §12 could only be exercised against the live CPU and
+§13 against nothing at all (`bridge-design.md` §12 item 17). The forklift group adds a
 *level*, not a namespace — `DemoCell/Forklift/…` sits under the same interface
 node, so the browse path still crosses exactly two namespaces (§3.1 N7).
 
@@ -102,7 +107,7 @@ the tool (§10.2 step 6).
 
 | ID | Flag | What it does | Why it is not logic |
 |---|---|---|---|
-| S1 | `--command-file PATH` | copies hand-written setpoints from a file into the `Output/` nodes: a bare float drives `DemoCell/Output/ConveyorSpeedCommand`, and `Name=value` lines drive any output node, including the three `Forklift/Output/*Ref` | A human writing setpoints through a back door. No input value is consulted; there is no condition, sequence or interlock |
+| S1 | `--command-file PATH` | copies hand-written setpoints from a file into the `Output/` nodes: a bare float drives `DemoCell/Output/ConveyorSpeedCommand`, and `Name=value` lines drive any output node, including the three `Forklift/Output/*Ref`, the three `Forklift/Envelope/` elements, `Mode/ForkliftDriveModeActive` and `ProcessStop/ForkliftProcessStopActive` | A human writing setpoints and verdicts through a back door. No input value is consulted; there is no condition, sequence or interlock. **A hand moving the envelope is not a PLC forming one** — the only place an envelope is formed is the standard program |
 | S2 | `--observe-csv PATH` | server-side log of session count, the bridge's heartbeat, both groups' input images, the setpoints and the `Hmi/` group at 5 Hz. The path is a **stem**: one file per double session, never a truncation of the last one | Pure observation. The `Hmi` columns are how "the bridge never touched them" is *observed* rather than asserted |
 | S3 | `--echo-input KEY` | copies one nominated input into `ConveyorSpeedCommand` so the closed-loop L7 interval has something to measure. Off by default | A wire, not a decision. A real PLC does nothing like it |
 | S4 | `--min-session-timeout-ms`, `--max-session-timeout-ms` | the window this double grants session timeouts within, so a request is revised in one direction or the other | Session housekeeping in a *server*, applied to no signal. It decides nothing about any value in the address space |
