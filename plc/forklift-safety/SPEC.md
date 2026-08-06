@@ -2048,6 +2048,26 @@ sits 1.83 σ below it.
 | 2 | A decoupled shaft under a vehicle **rolling below ≈ 2 mm/s** of body speed | The motion observation's own floor. Nothing here sees it, and nothing claims to |
 | 3 | Detection is now **probabilistic in the first second** (0.885) where the old value made it near-certain | The cost of excluding the healthy vehicle. The `TON` re-arms every cycle, so the expected detection is ≈ 1.1 s and the tail is short; SS1's own timeout is unaffected |
 | 4 | Any of this as integrity | N10–N15 unchanged. One shaft, two readings, standard data, a labelled stand-in for a fault exclusion. **No PL, Category, SIL or PFH is claimed or implied by this derivation or by any figure in it** |
+| 5 | **The 25 mm/s floor is not a property of this spec.** It is a numeric coincidence in three vehicle-side constants this document cannot see, and any of them can be retuned by someone with no reason to know a safety window depends on it | Named in the row below. Nothing here detects such a change; the exclusion simply stops holding, silently |
+
+**The three constants the exclusion rests on — load-bearing against this
+window.** The 25 mm/s floor is flat across every steer angle only because
+`a_v·dt` and `a_w·dt·L` are *equal*: 0.50 × 0.05 = **0.025** m/s and
+0.4762 × 0.05 × 1.05 = **0.025** m/s. Break the equality and the floor becomes
+whichever branch is smaller, at the steer angle where it bites.
+
+| Constant | Value | Where it lives | What moving it does to this window |
+|---|---|---|---|
+| Smoother acceleration limits `max_accel` (linear, angular) | `[0.50, 0.0, 0.4762]` m/s², rad/s² | `agv/forklift/nav2.yaml`, `velocity_smoother:` | Lowering the linear limit lowers the acceleration-limited branch (`a_v·dt`) proportionally; lowering the angular limit lowers the curvature-limited branch (`a_w·dt·L`) at large steer. Either drives the floor toward the `W ≤ 18.0` mm/s exclusion bound, and below it **no admissible `W` exists at all** |
+| Smoother rate `smoothing_frequency` | `20.0` Hz, so `dt` = 0.05 s | `agv/forklift/nav2.yaml`, `velocity_smoother:` | It multiplies **both** branches. Raising it shrinks `dt` and lowers the whole floor — 40 Hz halves it to 12.5 mm/s, *below* `W` = 15, so every from-rest mission latches again |
+| Wheelbase `L` | `1.05` m (mirrors `model.sdf`; `scripts/check_odometry.py` checks it there rather than trusting the file) | `agv/forklift/config.yaml`, `kinematics.wheelbase_m` | It scales the curvature-limited branch only. A shorter wheelbase lowers that branch and the flat floor becomes a dip at large steer, where the exclusion is weakest and the reading is highest |
+
+**Re-derivation trigger.** Any change to those three re-opens §11.1b's
+exclusion bound and, with it, the value of `SPEED_STANDSTILL_MAX`. Together
+with the vehicle's `motion_threshold_mps` (m5-59 OQ3, the band's lower edge)
+they are the complete set of vehicle-side values this F-constant depends on.
+None of them is visible from the F-program, and no reading on this side would
+show that one had moved.
 
 ### 11.2 The transport ruling — how the readings reach the F-program
 

@@ -1,12 +1,42 @@
 # TODO
 
-## m5-58 — full stack validation (BRIEF WRITTEN, dispatches next)
-`docs/briefs/m5-58-full-stack-validation.md`. The owner's five named
-priorities, each with a positive control: the scanner slowing then stopping,
-the e-stop, an autonomous mission, safety during autonomous, and **safety
-during teleoperation — an operator driving at a wall cannot crash**.
-Deliverable `docs/VALIDATION-M5.md`, the document the showcase is narrated
-from. Waits only on the writer's 45016 speed link, which gates AT-10/AT-11.
+## M5 — the fix round, 2026-08-06 night
+
+The full-chain validation ran (m5-58) and found four defects. All four are
+triaged in `docs/reports/m5-59-validation-fix-triage.md`; the agent halves
+landed overnight and the TIA halves are the owner's next session.
+
+**Owner, next session:** `plc/forklift/TIA-FIX-PROCEDURE.md`, 63 steps. The
+vault carries it with its session prompt. F-signature `50573CD9` signs every
+figure in `docs/VALIDATION-M5.md` and is spent by that session — the procedure
+names which validations must be re-run.
+
+Landed: m5-60 (node rows), m5-61 (WARN sender, F3 closed), m5-62 (torque-off
+bridge slot, **double-only**), m5-63 (bridge-design repairs, bridge-liveness
+ruled), m5-64 (judge, pass-with-findings).
+
+### Open, in the order they bite
+
+- **5 Hz keepalive brief — before the 1.000 m/s clip is re-recorded.** m5-64
+  finding 4: after F4 lands, one mid-clip stale reap costs a visible ~2 s
+  slowdown in the re-record. m5-61 deliberately did not raise it because it
+  re-times the protective path's link; the brief must carry a protective-path
+  re-observation in the same run. The constant is `plc/`'s.
+- **AT-11 is not runnable and no deafness claim may be made** until the CPU
+  half lands and `VALIDATION-M5.md` §6.2 is re-measured on the CPU. m5-62's
+  proof is double-only and marked so.
+- **m5-60 request 5 and m5-62 request 5** each close a half of F1 and are
+  unactioned. Neither closes the m5-11 §12 residue, which stays open below.
+- **Two `plc/` document debts**, m5-60 requests 3–4 and m5-62 request 4.
+- **The optional HMI lamp** has no home yet.
+- **Owner's ruling, unanswered:** whether ADR 0014 D4's seam (a) gains a
+  written clarification for the third item now on it (m5-60 §11.8 item 8,
+  m5-64 finding 7). An arch-docs brief if the owner wants it written.
+- **m5-64 finding 1, small:** the torque-off harness console was never
+  archived, so "25/25" survives only as prose — the m3-21 shape. Archive it
+  on the next run rather than re-running for it.
+- Autonomy stays a prototype by owner ruling; the backlog is below and the
+  public line is that the work continues.
 
 Open items only. M5 (sensored autonomous forklift, ADR 0010 D2) is the open
 gate; M4 (forklift commissioning, ADR 0008) is closing, on the owner's

@@ -101,7 +101,7 @@ design value and no gate criterion may rest on it** (ADR 0006).
 | F-collective signature **after** (step 22) — must differ from `50573CD9`, offline = online | | |
 | `SpeedLimitOnsetTimer.PT` in force **with its `IN`** (step 24) | | |
 | No-source signature re-read (step 26) | | |
-| Body diff before the paste (step 38) — expected exactly three hunks | | |
+| Body diff before the paste (step 38) — expected exactly three hunks; if a wall of hunks, the `--ignore-cr-at-eol -w` count too | | |
 | Search for `#tractionDemand * #speedCap` (step 43) — expected **zero** hits | | |
 | Standard compile result (step 44) | | |
 | Six leaves under `Forklift/Safety/`, no `_1` (step 49) | | |
@@ -388,9 +388,27 @@ silent one once cut the bridge with no error dialog** (LESSONS 2026-07-30).
 *Tell me:* how many hunks it reports, and what each one is.
 *Expected:* **exactly three** — the two mirror assignments plus the third
 conjunct, the `#teleopSpeedCap` block, and the traction statement.
-**If any other difference appears, stop and tell me what it is.** It means the
-CPU's body and the committed file have drifted, and the paste below would
-silently revert whatever drifted.
+
+**If you get a wall of hunks instead — most or every line differing — do not
+conclude drift yet. Re-run the same compare ignoring line endings and
+whitespace:**
+
+    git diff --no-index --ignore-cr-at-eol -w plc/forklift/evidence/m5-59-fb-body-before.scl plc/forklift/scl/FB_ForkliftTeleop.scl
+
+*Tell me:* the hunk count from **both** commands. Then read the result this way:
+
+| First command | Second command | What it means, and what to do |
+|---|---|---|
+| three hunks | not needed | The bodies agree outside the three deltas. **Go to step 39.** |
+| many hunks | **three hunks** | An artefact of the copy-out, not drift: TIA's editor re-indented or re-cased the body, or it came out LF against this CRLF working tree. SCL is not whitespace-sensitive and step 39 replaces the whole body anyway, so nothing is lost. **Go to step 39**, and record in the table that the first count was a whitespace artefact |
+| many hunks | **more than three** | **Real drift. Stop and tell me what the extra hunks are.** The CPU's body and the committed file differ in substance, and the paste in step 39 would silently revert whatever drifted |
+| three hunks, but not *these* three | — | **Stop and tell me.** A right count of wrong hunks is drift that happens to be the same size |
+
+**Why the fallback and not the stop rule alone.** `git diff --no-index`
+compares raw bytes, so a single editor-side normalisation makes a clean body
+read as a total rewrite — a defect that does not exist, discovered alone at
+the keyboard. The second command answers that question in one line; only when
+it still disagrees is there something to stop for.
 
 **39.** Select the **whole** FB body in TIA and paste
 `plc/forklift/scl/FB_ForkliftTeleop.scl` over it, **in one paste**.

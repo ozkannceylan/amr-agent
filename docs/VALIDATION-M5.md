@@ -244,11 +244,33 @@ correctly — the two encoder channels read **15–26 mm/s** throughout — and:
 | 4 795.1 | `ShaftDoubtTimer.Q`, **`SpeedMonitorDemand` latched**, `Ss1Demand`, `TorqueOffDemand` |
 
 **The mechanism, stated as a number.** The motion-present observation calls
-the vehicle *moving* above **1.4 mm/s**; the speed monitor calls a reading
-*near zero* below **30.8 mm/s**. Between those two thresholds a **perfectly
-healthy vehicle is, by construction, "seen moving while the shaft reads
-still" — which is exactly the shared-shaft failure the test exists to catch.**
-Every speed in 1.4 … 30.8 mm/s is inside that band.
+the vehicle *moving* above **≈ 2 mm/s** of body speed; the speed monitor calls
+a reading *near zero* below **50 mm/s** of tread speed. Between those two
+thresholds a **perfectly healthy vehicle is, by construction, "seen moving
+while the shaft reads still" — which is exactly the shared-shaft failure the
+test exists to catch.** Every speed in **≈ 2 … 50 mm/s** is inside that band.
+
+> **Correction to an earlier issue of this section (m5-59, applied m5-65).**
+> This section first published the band as *1.4 … 30.8 mm/s*. **Both ends were
+> wrong, and the band is *wider* than first reported, not narrower** — it opens
+> lower and closes higher. The upper edge in force is `SPEED_STANDSTILL_MAX` =
+> **50** mm/s (`plc/forklift-safety/SPEC.md` §11.3, build step 258); 30.784 mm/s
+> is `SPEED_DISCREPANCY_MAX`, a different constant answering a different
+> question, and it never bounded this band. The lower edge, 0.0014 m/s, is the
+> vehicle's `motion_threshold_mps` — a per-ray range **rate**, not a body speed;
+> at the worst measured rate-to-body ratio (0.715) it is a body speed of
+> **≈ 2.0 mm/s**, and that conversion is an extrapolation below 0.05 m/s.
+> **No measured figure in this document changes** — the encoder readings, the
+> timings and the 0.025 m/s smoother floor are as observed. Only the two
+> threshold values move. The derivation of both edges, and of the replacement
+> window, is `plc/forklift-safety/SPEC.md` §11.1b.
+
+**What is being done about it.** The band closes entirely on the F-side:
+`SPEED_STANDSTILL_MAX` / `_NEG` become `15` / `-15` mm/s, derived against both
+bounds in `plc/forklift-safety/SPEC.md` §11.1b; `motion_threshold_mps` does not
+move. That change is not in this run — it changes the F-collective signature, so
+**every figure in this document belongs to signature `50573CD9` and none of them
+carries across** (`plc/forklift/TIA-FIX-PROCEDURE.md` holds the re-run table).
 
 **And that is precisely where Nav2 starts.** The closed-loop velocity
 smoother's from-rest output is **0.025 m/s** (measured on this stack in this
@@ -434,7 +456,7 @@ missing is the path from the F-program to it.
 | 2 | Nothing sends the `WARN` line on the 45015 field link, so the F-side limit selector `WarningFieldClear` is permanently `FALSE`, the 300 mm/s SLS limit is permanently enforced, and the full 0.60 m/s ceiling cannot be used without tripping it. `field_evaluation.py` is the specified sender (`plc/forklift-safety/SPEC.md` §11.2) and does not implement it | `agv/` |
 | 3 | `bridge/config/bridge.yaml` did not carry the §13 warning group; the node exists on the controller in force and the group was added for this run after probing the server | done here (`bridge/`) |
 | 4 | The warning-field speed reduction is autonomous-mode only (§1.2, confirmed live in §5). Whether teleop should also be reduced is a design question, not a defect | `plc/` — a question, not a request |
-| 5 | **The shaft-doubt band** (§3): a healthy vehicle between 1.4 mm/s and 30.8 mm/s reads as *moving with a still shaft* and latches a demand, and Nav2's from-rest speed of 25 mm/s is inside it. Two thresholds derived in two documents with nobody deriving the window between them | `plc/` and `agv/` jointly — one admissible window, stated in one place |
+| 5 | **The shaft-doubt band** (§3): a healthy vehicle between **≈ 2 mm/s and 50 mm/s** reads as *moving with a still shaft* and latches a demand, and Nav2's from-rest speed of 25 mm/s is inside it. Two thresholds derived in two documents with nobody deriving the window between them. *(Earlier issue said 1.4 … 30.8 mm/s; the band is **wider** than that — see §3's correction note.)* **Answered**: `plc/forklift-safety/SPEC.md` §11.1b derives the window and takes `15` / `-15` mm/s; the change is pending the TIA session and is not in this run | `plc/` and `agv/` jointly — one admissible window, stated in one place |
 | 6 | The field evaluation fail-safe trips on scan staleness roughly every 30 s – 6 min when the whole stack runs on this machine (§3). Correct behaviour, insufficient simulation capacity | `sim/` — a capacity finding for the showcase, not a program change |
 | 7 | After a safety latch, entering a drive mode again needs a **fresh** mode-request edge; holding the request through the latch does not re-enter. Observed twice. Correct restart discipline, worth writing down because it will look like a fault on stage | note only |
 

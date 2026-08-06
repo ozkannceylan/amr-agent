@@ -8,41 +8,99 @@ sim/scenarios/forklift_commissioning.md, T6 beside them under the
 TWIN-DEMO-MAP naming discipline) followed by the m4f-09 verifier run.
 Owner queue: docs/TODO.md.
 
-## STATE OF THE WORLD — 2026-08-06 evening, read this first
+## STATE OF THE WORLD — 2026-08-06 late evening, read this first
 
-Everything below is committed on `main` (local, unpushed).
+Committed on `main` (local, unpushed) through `9fb25c0`; only the m5-65 brief is
+untracked.
 
-**The PLC is DONE.** 360 of 360 procedure steps. `safe_amr` on CPU 1513F-1 PN,
-PLCSIM instance `safecell3` at 192.168.53.1. The F-block is 49 networks:
-two-channel speed monitoring (staleness, plausibility, cross-discrepancy,
-shared-shaft doubt, limit-exceeded), one latch collecting them, and an SS1
-sequencer. Collective F-signature `50573CD9`. The standard side lowers the
-envelope ceiling to `0.20 m/s` while the warning field is occupied.
+**The PLC build is done and the whole chain has now been validated once.**
+`safe_amr` on CPU 1513F-1 PN, PLCSIM instance `safecell3` at 192.168.53.1,
+360/360 build steps. FB2 is 49 networks: two-channel speed monitoring
+(staleness, plausibility, cross-discrepancy, shared-shaft doubt,
+limit-exceeded), one latch collecting them, and an SS1 sequencer. Collective
+F-signature **`50573CD9`** — and **every figure in `docs/VALIDATION-M5.md` was
+measured against it.** The owner's TIA session changes it, so several
+validations must be re-run; `plc/forklift/TIA-FIX-PROCEDURE.md` names which.
+
+**The validation (m5-58, `docs/VALIDATION-M5.md`) — three of the owner's five
+priorities proven, two not.** Every negative claim carries a positive control in
+the same run; every figure states its n; no PL, Category, SIL or PFH is claimed
+or implied anywhere.
+
+| | Verdict |
+|---|---|
+| V1 the scanner **stops** | **PROVEN**, n = 3, closest approach 1.11–1.33 m |
+| V1 the scanner **slows** | **NOT AS ASKED** — the warning ceiling is autonomous-mode only, so a teleop vehicle does not slow (observed twice at 1.000 m/s) |
+| V2 the **e-stop** | **PROVEN**, ≈ 207 ms and ≈ 250 ms operator-to-standstill, n = 2, plus three observations of the reset discipline |
+| V3 an **autonomous mission** | **NOT ACHIEVED**, 3 attempts — each latched in its first metre |
+| V4 **safety in autonomous** | **NOT RUN**, blocked by V3 |
+| V5 the operator **drives at a wall** | **PROVEN**, n = 3 — the strongest result in the set |
+| AT-10 limit exceeded → demand | **PROVEN on the CPU** (over-limit → latch 135 ms, latch → torque-off 1 155 ms, n = 1) |
+| AT-11 torque removal → deaf | **NOT RUNNABLE YET** — see the torque-off row below |
+
+**The four findings, and how each splits** (triage and derivations: m5-59;
+procedure: `plc/forklift/TIA-FIX-PROCEDURE.md`, 63 steps, one sitting):
+
+| | Finding | TIA half | Agent half |
+|---|---|---|---|
+| F1 | SLS/SS1 demands reach neither the standard program nor the vehicle | two `ForkliftSafetyMirror` members, two copies, a third permissive conjunct, two server leaves | **LANDED**: node rows + the SD1–SD10 consumer rules (m5-60), bridge read slot and publisher (m5-62), `bridge-design.md` (m5-63) |
+| F2 | The shaft-doubt band | `SPEED_STANDSTILL_MAX` `50` → **`15`** mm/s, F-constant | none — `motion_threshold_mps` deliberately does not move |
+| F3 | Nothing sends `WARN` on the 45015 field link | none | **LANDED** (m5-61): `WarningFieldClear` read `True` for the first time in this project; the limit selector now moves both ways |
+| F4 | The warning ceiling is autonomous-mode only | teleop clamp, plus `SPEED_LIMIT_ONSET_MAX` → `T#2s300ms` | optional `hmi/` lamp |
+
+**F2 is why no autonomous mission completes.** Nav2 leaves rest at 25 mm/s of
+tread speed, which sits inside a band that diagnoses a healthy vehicle as a
+failed shaft, so every mission latches within seconds of starting. Nothing
+autonomous can be demonstrated until F2 lands at TIA.
 
 **What exists and is proven, layer by layer:**
 
 | Layer | State |
 |---|---|
 | F-program | 49 networks on the CPU; reads in the stopping direction with no measurement at all |
-| Standard program | §14 mode arbiter + envelope; §14.16 warning ceiling |
-| Stand-in writer (`bridge/standin_writer/`) | Runs; heartbeat and validity proven live. **45016 speed link INCOMPLETE (commit `11bc3f9`, wip)** |
-| Bridge (`bridge/`) | Forklift + envelope + warning groups; envelope chain proven 5× live; warning slot proven offline |
-| Scanner (`agv/`) | Protective 1.35 m + warning 3.35 m, both derived, both proven in Gazebo |
+| Standard program | §14 mode arbiter + envelope; §14.16 warning ceiling (autonomous only until F4 lands) |
+| Stand-in writer (`bridge/standin_writer/`) | Runs; heartbeat, validity and the 45016 speed link all proven live against the finished safety program (m5-57, m5-58) |
+| Bridge (`bridge/`) | Forklift, envelope, warning and safety groups; envelope chain proven live; the warning group added and probed against the controller in force |
+| Scanner (`agv/`) | Protective 1.35 m + warning 3.35 m, both derived, both proven in Gazebo; the `WARN` line now sent (m5-61) |
 | Encoder (`agv/`) | Two readings on one shaft; threshold `0.0308 m/s`, time `200 ms`, both derived |
-| Speed link client (`agv/`) | Proven against a local sink; joint run with the writer OWED |
-| Torque-off (`agv/`) | Real at the plant: after the demand the vehicle is deaf to commands |
+| Speed link client (`agv/`) | Joint run with the writer done; AT-10 measured through the whole path on the CPU |
+| Torque-off (`agv/`) | **The demand does not reach the plant on the CPU.** §6.2 measured the vehicle driving 19 s at 1.000 m/s with `SpeedMonitorDemand`, `Ss1Demand` and `TorqueOffDemand` all standing, because no path existed. The bridge half of that path was built in m5-62 and **its evidence is double-only and marked so**; the CPU half is chunks AD–AF of the TIA session. Until that session runs and §6.2 is re-measured **on the CPU**, no claim of deafness after a demand may be made. `EVIDENCE_STO.md`'s claim is about the contactor driven directly and is a different claim |
 | Monitoring (`viz/`) | Zero publishers, proven; serves map, pose, obstacles across domains |
 | HMI | v2a controls + v2b map, joined to the real `viz/`; pose drawn with its age |
 
+**`TorqueOffDemand` starts `TRUE` by ruling** (`opcua-nodes.md` §11.6, SD6), so
+at every CPU start the vehicle is torque-off until a monitored reset. That is
+no-auto-resume arriving at the plant — intended, not a defect — and it is worth
+saying on stage before it is seen rather than after.
+
+**What the TIA session changes:** six values in one sitting — three F-constants
+(F2's window, F4's onset budget, and the standstill pair), the two mirror
+members with their copies and the third permissive conjunct, the teleop warning
+clamp, and two server-interface leaves. It runs no acceptance test: every figure
+it produces is read out of the tool. What proves behaviour is the acceptance run
+afterwards, against the procedure's re-run table.
+
+**Sequencing constraints on that acceptance run** (m5-64): the 5 Hz keepalive
+brief must land before the 1.000 m/s clip is re-recorded — the field link still
+pings at 2 Hz against a 1 s window, and one stale reap now costs a visible ~2 s
+slow-down mid-clip. The live phases 1–4 of `check_torque_off_slot.py` belong to
+that run, with the F-program moving the demand, and the harness console archived.
+
+**Not blocking the session, blocking the gate:** `docs/VALIDATION-M5.md`'s
+superseded band figures (m5-65, in flight), the archived harness console, and
+these tracking files staying in step with the report directory.
+
 **The three things M5 still needs:**
-1. Finish the writer's 45016 link, then the joint run and the T7 rehearsal
-   (procedure steps 189/335)
-2. The acceptance tests — AT-02/03/04 restated for M5, AT-10, AT-11, and the
-   e-stop measured
+1. The TIA session, then the acceptance run against the procedure's re-run table
+   — which is what turns six changed values into four closed findings
+2. The remaining acceptance tests — AT-02/03/04 restated for M5, AT-11, and V3/V4
+   once F2 has landed
 3. **The owner's recorded showcase**, then gate verification (m5-19)
 
-**One small debt:** `plc/forklift-safety/SPEC.md` §11 should state `0.40 s` —
-the client's 0.15 s motion window stacks on the writer's 250 ms.
+**Two carried `plc/` document debts, neither needing TIA:**
+`plc/forklift-safety/SPEC.md` §11 should state `0.40 s` (the client's 0.15 s
+motion window stacks on the writer's 250 ms), and §7.2 should state the
+keepalive rule *window ≥ 3 × ping period + one writer cycle*.
 
 **Autonomy is a prototype by owner ruling** and gates nothing. Its backlog is in
 docs/TODO.md.
