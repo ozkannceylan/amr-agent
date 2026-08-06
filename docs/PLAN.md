@@ -8,6 +8,24 @@ sim/scenarios/forklift_commissioning.md, T6 beside them under the
 TWIN-DEMO-MAP naming discipline) followed by the m4f-09 verifier run.
 Owner queue: docs/TODO.md.
 
+## What M5 and M6 are FOR — owner framing, 2026-08-06
+
+**M5 is ONE vehicle's control, completed exactly as wanted and compliant with
+the standards.** Not a slice, not a demonstration — the finished single-vehicle
+article. **M6 clones that same vehicle into a fleet and controls the fleet.**
+
+This settles scope arguments, and it settles them against a feature-count
+reading. The case that produced it: SLS and SS1 were marked M5 with nothing
+implementing them, and a review recommended deferring them because M5 had no
+way to test them. The owner rejected that — a standards-compliant single
+vehicle HAS those functions, so they are M5 and the work is to build them.
+They also ruled the placement: **SLS and the controlled stop are the F-PLC's**,
+not the standard program's.
+
+The test for any future scope question: *would a properly finished single
+vehicle have this?* If yes it is M5. Only what exists because there are several
+vehicles — traffic, order assignment, station handshakes at scale — is M6.
+
 ## Current gate: M5 — Sensored autonomous forklift (ADR 0010 D2)
 
 Criterion: the M5 row of docs/roadmap.md — safety scanner into the F-blocks,
