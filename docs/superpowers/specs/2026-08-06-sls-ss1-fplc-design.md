@@ -2,8 +2,10 @@
 
 **Date:** 2026-08-06
 **Gate:** M5
-**Status:** approved by the owner, 2026-08-06. Standards basis **not yet
-verified** — see §7.
+**Status:** approved by the owner, 2026-08-06. Standards basis **verified the
+same day** by m5-45 (`docs/safety/SLS-STANDARDS-BASIS.md`): all five decisions
+survive, none contradicted, two wording amendments applied below. Phases 3 and 4
+**gate M5's closure** — owner ruling, 2026-08-06.
 
 ---
 
@@ -41,10 +43,22 @@ also makes the cross-comparison mean something specific: the channels observe
 the same physical quantity, so a divergence is a channel fault and not an
 ambiguity between two estimates.
 
-**The shared-shaft hole, closed deliberately.** Two channels on one shaft can
-lie together if the shaft itself fails. The design therefore adds a separate
+**Its honest name (m5-45 amendment 1).** This arrangement is a **single-channel
+tested system**, not a two-channel one. One shaft, one measurement, two readings
+of it, cross-compared — which is what real safe encoders do
+(HEIDENHAIN TI 596632: two internally generated position values cross-compared
+by the safe control). Calling it two-channel would overstate it, and the
+documents say single-channel tested wherever they describe it.
+
+**The shared-shaft hole, closed deliberately.** Two readings of one shaft lie
+together if the shaft itself fails. The design therefore adds a separate
 **motion-present check**: the F-program corroborates a claimed zero speed
 against another observation of the vehicle before trusting it.
+
+**(m5-45 amendment 2)** That check is a **stand-in**, and is labelled one. Real
+systems close this hole with a **mechanical fault exclusion** on the shaft
+coupling — an argument about construction, not a monitored signal. This project
+has no such argument available, so it substitutes an observation and says so.
 
 **The honest limit.** Speed reaches the F-program as **standard data** over the
 bridge. So this carries the same three consequences as the scanner channel: the
@@ -90,22 +104,39 @@ the owner wants the vehicle seen working first. Planned here; built in phase 4.
 | **3** | **SLS monitoring**: the dual channel, the F-program's check, the demand. **No model change** | phase 1 |
 | **4** | **SS1 and STO**: the model's brake and controller disable | phase 3 |
 
-**Open, and the owner's to rule:** whether phases 3 and 4 gate M5's closure or
-land immediately after phase 2. Both are defensible — the first is more faithful
-to "one vehicle finished to standard", the second shows a working vehicle
-sooner.
+**RULED 2026-08-06: phases 3 and 4 gate M5's closure.** The reasoning is not
+only fidelity: the SRS traceability already commits SF-10 and SF-11 to M5, and
+**SF-03's R3 residual is carried by SF-10** — so removing them would not merely
+defer two tests, it would puncture a safety argument that is already written.
+The contrary ruling was defensible but would have required a written SRS
+restatement round rather than a silent deferral.
 
-## 7. What is not yet verified
+## 7. The standards basis — verified 2026-08-06 (m5-45)
 
-The owner believes the F-PLC placement of SLS and the controlled stop is an ISO
-requirement, and the recollection here is that **IEC 61800-5-2** defines STO,
-SS1 and SLS while **ISO 3691-4** governs driverless industrial trucks. **None of
-that has been checked**, and this project's rule is that an external source is
-cited with a verification date and, where possible, a pinned reference.
+Full record with graded sources: `docs/safety/SLS-STANDARDS-BASIS.md`.
 
-A research round (m5-45) verifies it before phase 3 is briefed, and its findings
-may change §3 and §4. Until then no document may cite a clause number from this
-spec.
+**The split in §4 is the certified pattern, not our invention.** A drive
+manufacturer's safety manual places the speed-setpoint limiting in its
+**standard functions** column while the safety side monitors actual speed and
+executes the safe stop, and declares that split conformant with the drive-safety
+definition of SLS.
+
+**The owner's instinct is confirmed in effect and sharpened in mechanism.**
+Nothing reachable states a rule that these functions must live in a safety
+controller. What puts them there is that the function — measurement, monitoring
+and reaction — must meet its **required performance level**, while the limiting
+earns **no safety credit at all**. That is a stronger reason than a placement
+rule, and it is the one to give when the architecture is questioned.
+
+**Still unreached, and marked so.** The normative texts stayed behind their
+paywall. Five items (U1–U5 in the basis document) record what would settle each.
+**No clause number appears in this spec**, and none may be quoted from it — only
+from a reachable source that cites one.
+
+**Process warning from that round.** Two automated document summaries returned
+**fabricated quotations**. Every quotation in the basis document was re-verified
+against locally extracted source text, and nothing here may be quoted from a
+summariser.
 
 ## 8. What this design does not claim
 
