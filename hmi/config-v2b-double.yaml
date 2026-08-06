@@ -1,0 +1,93 @@
+# hmi/config-v2b-double.yaml - HMI v2b (the map pane) against this layer's doubles.
+#
+# `hmi/tools/v2a_scenario_double.py`. The running CPU serves the six Forklift
+# DBs and no opcua-nodes.md section 12 node (m5-23 Part B); the section 12 set
+# arrives in the owner's TIA session. v2a is therefore developed and evidenced
+# against a double that serves section 12, double-first, exactly as v1 was
+# (hmi/V2A-DESIGN.md section 10).
+#
+# The write table below is the EIGHT of section 12.1: the five section 10.4
+# requests, Link/HmiHeartbeat, Mode/HmiDriveModeRequest and
+# ProcessStop/HmiProcessStopRequest. The allowlist that admits exactly those
+# eight lives in hmi_server.py, in code; this file cannot widen it.
+#
+# Own port: 4862, beside v2a's 4861. Distinct from every port already
+# spoken for - 4840 (PLCSIM), 4842-4846 (the bridge's test doubles), 4847 (this
+# layer's own instance of the bridge double), 4850 (the PLC logic double), 4860
+# (safety_mirror_double.py), 4861 (config-v2a-double.yaml), 4897/4898 (m4f-07c's re-run instances).
+
+opcua:
+  endpoint: "opc.tcp://127.0.0.1:4862/amr-agent/v2bscenariodouble/"
+  namespace_uris:
+    server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
+    interface: "http://DemoCell"
+  security_policy: "none"
+  requested_session_timeout_ms: 10000
+  session_name: "amr-agent-hmi-v2b-double"
+  reconnect_interval_s: 1.0
+  reconnect_backoff_max_s: 5.0
+
+cycle:
+  write_period_s: 0.100
+  floor_period_s: 0.200
+  metrics_period_s: 0.200
+
+http:
+  host: "127.0.0.1"
+  port: 8095
+
+nodes:
+  interface_path:
+    - "server_interfaces:ServerInterfaces"
+    - "interface:DemoCell"
+  write:
+    HmiTractionRequest:          ["Forklift", "Hmi", "HmiTractionRequest"]
+    HmiSteerRequest:             ["Forklift", "Hmi", "HmiSteerRequest"]
+    HmiForkRequest:              ["Forklift", "Hmi", "HmiForkRequest"]
+    HmiTeleopRequest:            ["Forklift", "Hmi", "HmiTeleopRequest"]
+    HmiResetRequest:             ["Forklift", "Hmi", "HmiResetRequest"]
+    HmiDriveModeRequest:         ["Forklift", "Mode", "HmiDriveModeRequest"]
+    HmiProcessStopRequest:       ["Forklift", "ProcessStop", "HmiProcessStopRequest"]
+  heartbeat:
+    HmiHeartbeat:                ["Forklift", "Link", "HmiHeartbeat"]
+  read:
+    ForkliftForkHeight:          ["Forklift", "Input",  "ForkliftForkHeight"]
+    ForkliftLinearSpeed:         ["Forklift", "Input",  "ForkliftLinearSpeed"]
+    ForkliftObstacleInStopZone:  ["Forklift", "Input",  "ForkliftObstacleInStopZone"]
+    ForkliftObstacleMinDistance: ["Forklift", "Input",  "ForkliftObstacleMinDistance"]
+    ForkliftTractionSpeedRef:    ["Forklift", "Output", "ForkliftTractionSpeedRef"]
+    ForkliftSteerAngleRef:       ["Forklift", "Output", "ForkliftSteerAngleRef"]
+    ForkliftForkSpeedRef:        ["Forklift", "Output", "ForkliftForkSpeedRef"]
+    ForkliftTeleopActive:        ["Forklift", "Status", "ForkliftTeleopActive"]
+    ForkliftObstacleStopActive:  ["Forklift", "Status", "ForkliftObstacleStopActive"]
+    ForkliftSpeedLimitActive:    ["Forklift", "Status", "ForkliftSpeedLimitActive"]
+    ForkliftResetRequired:       ["Forklift", "Status", "ForkliftResetRequired"]
+    HmiLinkOk:                   ["Forklift", "Link",   "HmiLinkOk"]
+
+    # section 12 reads - display only, feeding no logic in this process.
+    ForkliftDriveModeActive:     ["Forklift", "Mode",        "ForkliftDriveModeActive"]
+    ForkliftMotionEnable:        ["Forklift", "Envelope",    "ForkliftMotionEnable"]
+    ForkliftSpeedCeiling:        ["Forklift", "Envelope",    "ForkliftSpeedCeiling"]
+    ForkliftEquipmentPermit:     ["Forklift", "Envelope",    "ForkliftEquipmentPermit"]
+    ForkliftVehicleModeApplied:  ["Forklift", "Vehicle",     "ForkliftVehicleModeApplied"]
+    ForkliftVehicleHeartbeat:    ["Forklift", "Vehicle",     "ForkliftVehicleHeartbeat"]
+    ForkliftProcessStopActive:   ["Forklift", "ProcessStop", "ForkliftProcessStopActive"]
+
+    # `Forklift/Safety/` (opcua-nodes.md section 11.2), optional (section 11.6).
+    # The double's --with-safety-mirrors flag decides whether these resolve.
+    EStopDemand:                 ["Forklift", "Safety",  "EStopDemand"]
+    ZoneStopDemand:              ["Forklift", "Safety",  "ZoneStopDemand"]
+    SafetyResetRequired:         ["Forklift", "Safety",  "SafetyResetRequired"]
+    SafetyResetFault:            ["Forklift", "Safety",  "SafetyResetFault"]
+
+monitor:
+  # The map pane's source. `hmi/tools/viz_double.py` stands in for the read-only
+  # monitoring service on its own port, serving the `viz/DESIGN.md` section 5
+  # surface with scripted payloads, so every state of the pane - a live pose, a
+  # stale pose, obstacles present, obstacles absent, no map yet - is reachable
+  # deterministically. Divergence resolves toward `viz/`, never toward this
+  # double.
+  base_url: "http://127.0.0.1:8099"
+
+logging:
+  level: "INFO"

@@ -15,6 +15,18 @@ preference.
   state is shared with it. The bridge and the HMI are two independent OPC UA
   clients of the same server that call no code of each other's (ADR 0005,
   ADR 0008 D1).
+- **`viz/` internals.** The v2b map pane reads the read-only monitoring service
+  over **loopback HTTP GET and nothing else** — no import, no shared state, no
+  ROS presence of any kind, and no verb but `GET` in any code path
+  (`hmi/V2B-DESIGN.md` §2). That service is `viz/DESIGN.md` §2's, and its own
+  ruling about itself is quoted rather than restated: **read-only by
+  construction of the process and proven by test; not enforced by the
+  middleware.** Nothing on that plane is a command path in either direction,
+  nothing read from it enters a request, a control or a verdict here, and no
+  value read from it is ever combined with a PLC value in a caption, a lamp or
+  a sentence (invariant 10; ADR 0011 D4). The monitoring service is addressed on
+  loopback only, enforced at start — never a remote transport and never the
+  tailnet (invariant 8).
 - **Fleet manager internals.** Nothing under `fleet/` is imported, and no
   VDA 5050, MQTT, order, traffic or zone-reservation concept appears here
   (invariants 3, 5, 6). Homing the HMI inside `fleet/` was rejected in

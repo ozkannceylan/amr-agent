@@ -1,9 +1,16 @@
 <!DOCTYPE html>
 <!--
-  amr-agent commissioning HMI — operator page, v2a (m5-28).
+  amr-agent commissioning HMI — operator page, v2a (m5-28) + v2b map pane (m5-53).
 
-  Built to hmi/V2A-DESIGN.md. One file, offline: no framework, no CDN, no web
-  font, no image, no external request of any kind.
+  Built to hmi/V2A-DESIGN.md and hmi/V2B-DESIGN.md. One file, offline: no
+  framework, no CDN, no web font, no image, no external request of any kind.
+
+  THAT LAST CLAUSE IS UNCHANGED AND STILL LITERAL, and v2b says so rather than
+  quietly widening it. The map pane reads the monitoring plane, but it reads it
+  from THIS PAGE'S OWN ORIGIN: the HMI backend fetches the read-only monitoring
+  service over loopback and re-serves it (V2B-DESIGN §2). Every request this
+  page issues goes to the origin it was served from, so there is still no
+  external request of any kind here.
 
   What the operator produces here are REQUESTS. The PLC standard program forms
   every actuator setpoint from them, applies its interlocks and owns the
@@ -53,7 +60,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>amr-agent forklift commissioning HMI &mdash; v2a</title>
+<title>amr-agent forklift commissioning HMI &mdash; v2b</title>
 <style>
   :root {
     --bg:        #0b0d10;
@@ -276,6 +283,65 @@
   .forkrow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .forkrow button { margin-bottom: 9px; }
 
+  /* ---- G: the map pane, v2b ----------------------------------------------- *
+   * The monitoring plane. Its own frame and its own banner, like zone D, and
+   * for the same reason: it is a different source with a different owner, and
+   * no caption on this page merges one of its values with a PLC value.        */
+  #mapzone { border: 1px solid var(--edge); background: var(--panel); }
+  @media (min-width: 1301px) {
+    main { grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr)
+                                  minmax(430px, 1.35fr); }
+    #mapzone { grid-column: 3; grid-row: 1 / span 3; }
+    /* With the map taking column 3, the envelope belongs under the teleop zone
+       in column 1 rather than under the F-layer zone in column 2: otherwise
+       column 1 ends short and the page carries a hole. */
+    #envzone { grid-column: 1; }
+  }
+  #mapbanner {
+    margin: -12px -12px 10px; padding: 10px 12px; background: #10222c;
+    border-bottom: 2px solid #24485a; font-size: 12px; font-weight: 700;
+    letter-spacing: .04em; color: #bfe0ef;
+  }
+  #maphead { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  #maphead .serial {
+    font-family: "Cascadia Mono", Consolas, monospace; font-weight: 700;
+    padding: 3px 10px; border-radius: 3px; border: 1px solid var(--edge-2);
+    background: #000a; font-size: 13px;
+  }
+  #mapview { display: flex; gap: 6px; margin-left: auto; }
+  #mapview button {
+    width: auto; margin: 0; padding: 5px 11px; font-size: 12px; font-weight: 600;
+    letter-spacing: .04em;
+  }
+  #mapwrap { position: relative; background: #05080a; border: 1px solid var(--edge);
+             border-radius: 3px; overflow: hidden; }
+  #mapcanvas { display: block; width: 100%; height: 460px; cursor: grab;
+               touch-action: none; }
+  #mapcanvas.drag { cursor: grabbing; }
+  #mapmsg {
+    position: absolute; inset: 0; display: none; align-items: center;
+    justify-content: center; text-align: center; padding: 24px;
+    background: repeating-linear-gradient(45deg, #14181d 0 8px, #191e24 8px 16px);
+    color: var(--ink-dim); font-size: 13px; line-height: 1.6;
+  }
+  #mapmsg.on { display: flex; }
+  /* The stale banner. Amber-on-dark attention, never red: red on this page is
+     the F-layer demand lamps and nothing else. */
+  #mapstale {
+    display: none; margin: 8px 0 0; padding: 8px 9px; border-radius: 3px;
+    background: #241b12; border: 1px solid #6a5a12; color: #f0dca5;
+    font-size: 12px; line-height: 1.5;
+  }
+  #mapstale.on { display: block; }
+  .mrow { display: flex; align-items: baseline; gap: 10px; padding: 6px 9px;
+          border: 1px solid var(--edge); border-radius: 3px; background: var(--panel-2);
+          margin-top: 6px; font-size: 12.5px; color: var(--ink-dim); }
+  .mrow .v { margin-left: auto; font-weight: 700; color: var(--ink);
+             font-family: "Cascadia Mono", Consolas, monospace; text-align: right; }
+  .mrow.unk { opacity: .55; }
+  .mrow.unk .v { color: var(--ink-dimmer); }
+  .mrow.aged .v { color: var(--warn); }
+
   /* ---- diagnostics drawer ------------------------------------------------ */
   #diag { grid-column: 1 / -1; }
   #diag summary { cursor: pointer; font-size: 11.5px; letter-spacing: .15em;
@@ -415,6 +481,40 @@
       cannot cause it. The ceiling is a bound on speed, never a setpoint or a target.</p>
   </section>
 
+  <!-- ================== G  MAP (MONITORING PLANE, v2b) ================== -->
+  <section id="mapzone">
+    <div id="mapbanner">MONITORING PLANE &mdash; READ-ONLY VIEW OF THE VEHICLE&rsquo;S ROS 2
+      GRAPH. NO COMMAND, NO SETPOINT, NO RESET; THIS PANE NEVER TOUCHES THE PLC.</div>
+    <div id="maphead">
+      <span class="k">vehicle</span><span class="serial" id="mapserial">&mdash;</span>
+      <div id="mapview">
+        <button id="mapfit" title="fit the whole map">FIT</button>
+        <button id="mapout" title="zoom out">&minus;</button>
+        <button id="mapin" title="zoom in">+</button>
+      </div>
+    </div>
+    <div id="mapwrap">
+      <canvas id="mapcanvas"></canvas>
+      <div id="mapmsg" class="on">connecting to the monitoring service&hellip;</div>
+    </div>
+    <p id="mapstale"></p>
+    <div class="mrow unk" id="m_pose">vehicle pose <span class="v">&mdash;</span></div>
+    <div class="mrow unk" id="m_obst">lidar returns <span class="v">&mdash;</span></div>
+    <div class="mrow unk" id="m_map">map <span class="v">&mdash;</span></div>
+    <div class="mrow unk" id="m_fetch">this page fetched <span class="v">&mdash;</span></div>
+    <p class="fine">Every value here is drawn <b>with the age of the datum it came
+      from</b>, and nothing on this pane is ever drawn as current. The localization
+      publishes only when its filter updates, so a standing vehicle produces no pose at
+      all &mdash; which is why a growing age is the honest reading and a still marker
+      would not be. Two ages are shown and never added: the monitoring service&rsquo;s
+      arrival age, on its clock, and this page&rsquo;s own fetch age, on ours.</p>
+    <p class="fine">The whole warehouse map, never a crop. Free, occupied and unknown are
+      the occupancy grid&rsquo;s own three values &mdash; unknown is drawn as unknown.
+      Lidar returns are shown in the three classes the sensor reports them in and are
+      classified no further: nothing here is called near, far, relevant or dangerous, and
+      no verdict, no quality judgement and no safety statement is made on this pane.</p>
+  </section>
+
   <!-- ======================= F  DIAGNOSTICS ============================= -->
   <details id="diag">
     <summary>F &nbsp;Diagnostics &mdash; raw values and counters</summary>
@@ -455,11 +555,14 @@
 </main>
 
 <footer>
-  Local commissioning HMI, v2a. OPC UA client of the PLC; it holds no server and exposes no
+  Local commissioning HMI, v2b. OPC UA client of the PLC; it holds no server and exposes no
   endpoint. Requests only &mdash; teleop routing, the fork-height speed cap, the fork soft
   travel limits and the obstacle stop are process logic in the standard program. Loss of this
   page or of this link is a degraded mode with a PLC-owned controlled stop, never a safety
   event. Nothing on this page is a safety device.
+  The map pane is a <b>read-only view of a second, separate source</b>: it carries no command,
+  no setpoint and no reset, it never touches the PLC, and no value on it is combined with a
+  PLC value anywhere on this screen.
 </footer>
 
 <script>
@@ -942,6 +1045,429 @@ function render(s) {
   }
   drop.classList.toggle("on", pageStale || seenDrops > 0);
 }
+
+/* ==========================================================================
+ * G — THE MAP PANE (v2b, m5-53). hmi/V2B-DESIGN.md.
+ *
+ * A SECOND SOURCE, NOT A SECOND OPINION. Everything below is drawn from the
+ * read-only monitoring service, read through this page's own backend over
+ * loopback (V2B-DESIGN §2), and nothing in this block touches `ctl`, `post`,
+ * `pending`, `rendered` or any control on this page. It cannot write, it
+ * cannot request, and its failure changes nothing above.
+ *
+ * THE ONE PROPERTY THIS PANE EXISTS TO PROTECT. The localization publishes a
+ * pose ONLY when its filter updates, so a vehicle standing still produces no
+ * pose stream at all — and a page that draws the last one it received as a
+ * vehicle sitting on the map is silently wrong while looking exactly like a
+ * working display. So: THERE IS NO RENDERING HERE THAT MEANS "LIVE". Every
+ * marker carries the age of the datum it came from, in the marker itself, in
+ * every state, and as that age grows the marker fades and hollows until it is
+ * labelled a LAST KNOWN POSITION. Every step of that ramp under-claims.
+ *
+ * The ramp's two endpoints are the BACKEND's, published on /monitor/state.
+ * This page invents no millisecond of its own here either, and the ramp gates
+ * nothing: it changes pixels and is read by nothing else.
+ * ======================================================================== */
+
+var MAP_COLOURS = {
+  unknown: [23, 28, 33],      /* -1 (0xFF): drawn as unknown, never as free */
+  free:    [47, 56, 65],
+  occupied:[159, 176, 191]
+};
+/* Deliberately outside this page's meaning-carrying palette (ok / live / warn /
+ * amber / F-demand red), so that no lidar return can read as a verdict about
+ * itself. It is a mark where the sensor reported a distance, and nothing more. */
+var OBSTACLE_INK = "#b98bd8";
+var VEHICLE_INK = "#3aa0dc";
+
+var mp = {
+  serial: null,
+  meta: null,            /* the map's own metadata, as the service served it   */
+  version: null,         /* the map_version the raster below was painted from  */
+  raster: null,          /* offscreen canvas, one pixel per cell, already flipped */
+  fetching: false,
+  view: { scale: null, ox: 0, oy: 0 },
+  ramp: { start: null, full: null },
+  pollMs: 500,
+  fetchedAt: null,       /* THIS page's own channel, never added to the above  */
+  state: null,
+  monitor: null,
+  drag: null
+};
+
+var mapCanvas = id("mapcanvas");
+var mapCtx = mapCanvas.getContext("2d");
+
+function mapMessage(text) {
+  var el = id("mapmsg");
+  el.classList.toggle("on", !!text);
+  if (text) el.textContent = text;
+}
+
+function setRow(x, text, tone) {
+  var el = id(x);
+  el.classList.toggle("unk", tone === "unk");
+  el.classList.toggle("aged", tone === "aged");
+  el.querySelector(".v").textContent = text;
+}
+
+/** Seconds, with one decimal below a minute and a coarser unit above it, so a
+ *  seven-minute age does not read as a four-digit number nobody parses. */
+function ageWords(ms) {
+  if (typeof ms !== "number") return "—";
+  if (ms < 60000) return (ms / 1000).toFixed(1) + " s";
+  var m = Math.floor(ms / 60000);
+  return m + " min " + Math.round((ms - m * 60000) / 1000) + " s";
+}
+
+/** Where a datum sits on the display ramp: 0 at the lower endpoint, 1 at the
+ *  upper one. A pure function of the age the SERVICE reported and the two
+ *  numbers the BACKEND published. It decides a colour and nothing else. */
+function rampT(ageMs) {
+  if (typeof ageMs !== "number") return null;
+  var a = mp.ramp.start, b = mp.ramp.full;
+  if (typeof a !== "number" || typeof b !== "number" || b <= a) return null;
+  return Math.max(0, Math.min(1, (ageMs - a) / (b - a)));
+}
+
+/* ---------------------------------------------------- the raster, painted -- */
+function buildRaster(cells, meta) {
+  var w = meta.width, h = meta.height;
+  var off = document.createElement("canvas");
+  off.width = w; off.height = h;
+  var img = off.getContext("2d").createImageData(w, h);
+  var d = img.data;
+  for (var row = 0; row < h; row++) {
+    // Occupancy grids are row-major from the ORIGIN, so grid row 0 is the
+    // BOTTOM of the picture. The flip happens once, here, rather than in every
+    // draw.
+    var src = row * w;
+    var dst = (h - 1 - row) * w;
+    for (var col = 0; col < w; col++) {
+      var v = cells[src + col];
+      var c = (v === 0) ? MAP_COLOURS.free
+            : (v === 255 || v < 0) ? MAP_COLOURS.unknown
+            : (v >= 65) ? MAP_COLOURS.occupied
+            : MAP_COLOURS.free;
+      var p = (dst + col) * 4;
+      d[p] = c[0]; d[p + 1] = c[1]; d[p + 2] = c[2]; d[p + 3] = 255;
+    }
+  }
+  off.getContext("2d").putImageData(img, 0, 0);
+  return off;
+}
+
+function fetchRaster(serial, version, meta) {
+  if (mp.fetching) return;
+  mp.fetching = true;
+  fetch("/monitor/map?serial=" + encodeURIComponent(serial), { cache: "no-store" })
+    .then(function (r) {
+      if (!r.ok) throw new Error("map " + r.status);
+      return r.arrayBuffer();
+    })
+    .then(function (buf) {
+      mp.raster = buildRaster(new Uint8Array(buf), meta);
+      mp.version = version;
+      mp.meta = meta;
+      mp.view.scale = null;         // refit whenever the map itself changed
+      mp.fetching = false;
+      drawMap();
+    })
+    .catch(function () { mp.fetching = false; });
+}
+
+/* ------------------------------------------------------- the view transform */
+function sizeCanvas() {
+  var w = Math.max(50, Math.round(mapCanvas.clientWidth));
+  var h = Math.max(50, Math.round(mapCanvas.clientHeight));
+  if (mapCanvas.width !== w || mapCanvas.height !== h) {
+    mapCanvas.width = w; mapCanvas.height = h;
+    if (mp.view.scale !== null) return true;
+  }
+  return false;
+}
+function fitView() {
+  if (!mp.raster) return;
+  var s = Math.min(mapCanvas.width / mp.raster.width,
+                   mapCanvas.height / mp.raster.height);
+  mp.view.scale = s;
+  mp.view.ox = (mapCanvas.width - mp.raster.width * s) / 2;
+  mp.view.oy = (mapCanvas.height - mp.raster.height * s) / 2;
+}
+function zoomBy(factor, cx, cy) {
+  if (!mp.raster || mp.view.scale === null) return;
+  var x = (cx - mp.view.ox) / mp.view.scale, y = (cy - mp.view.oy) / mp.view.scale;
+  mp.view.scale = Math.max(0.2, Math.min(20, mp.view.scale * factor));
+  mp.view.ox = cx - x * mp.view.scale;
+  mp.view.oy = cy - y * mp.view.scale;
+  drawMap();
+}
+/** World metres (map frame) to canvas pixels. A view transform is drawing: it
+ *  derives no value and it changes no datum. */
+function toScreen(xm, ym) {
+  var m = mp.meta, v = mp.view;
+  var cx = (xm - m.origin.x_m) / m.resolution_m;
+  var cy = (ym - m.origin.y_m) / m.resolution_m;
+  return { x: v.ox + cx * v.scale, y: v.oy + (m.height - cy) * v.scale };
+}
+
+/* -------------------------------------------------------------- the drawing */
+function drawMap() {
+  sizeCanvas();
+  var ctx = mapCtx;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+  if (!mp.raster || !mp.meta) return;
+  if (mp.view.scale === null) fitView();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(mp.raster, mp.view.ox, mp.view.oy,
+                mp.raster.width * mp.view.scale, mp.raster.height * mp.view.scale);
+
+  var s = mp.state || {};
+
+  /* ---- obstacles. Points where the sensor reported a DISTANCE, drawn where
+   *      the service placed them, with their own age on the same ramp. A stale
+   *      layer is never drawn as an empty one.                              */
+  var ob = s.obstacles;
+  var obT = rampT(s.obstacles_age_ms);
+  if (ob && ob.placed && ob.points && ob.points.length) {
+    var oa = (obT === null) ? 0.35 : (1 - 0.75 * obT);
+    ctx.globalAlpha = Math.max(0.25, oa);
+    ctx.fillStyle = OBSTACLE_INK;
+    var side = Math.max(2, Math.min(5, mp.view.scale * 1.6));
+    for (var i = 0; i < ob.points.length; i++) {
+      var p = toScreen(ob.points[i][0], ob.points[i][1]);
+      if (obT !== null && obT >= 1) {
+        ctx.strokeStyle = OBSTACLE_INK; ctx.lineWidth = 1;
+        ctx.strokeRect(p.x - side / 2, p.y - side / 2, side, side);
+      } else {
+        ctx.fillRect(p.x - side / 2, p.y - side / 2, side, side);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /* ---- the vehicle. NEVER WITHOUT ITS AGE. ------------------------------- */
+  var pose = s.pose;
+  var t = rampT(s.pose_age_ms);
+  if (!pose) return;
+  var c = toScreen(pose.x_m, pose.y_m);
+  var stale = (t !== null && t >= 1);
+  var alpha = (t === null) ? 0.35 : (1 - 0.7 * t);
+  var r = Math.max(13, Math.min(30, mp.view.scale * 11));
+
+  ctx.save();
+  ctx.translate(c.x, c.y);
+  // Screen y grows downward, so a right-handed yaw is drawn negated. This is
+  // the yaw that was published; nothing here estimates one.
+  ctx.rotate(-pose.yaw_rad);
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(-r * 0.62, r * 0.62);
+  ctx.lineTo(-r * 0.28, 0);
+  ctx.lineTo(-r * 0.62, -r * 0.62);
+  ctx.closePath();
+  ctx.globalAlpha = alpha;
+  if (!stale) {
+    ctx.fillStyle = VEHICLE_INK;
+    ctx.fill();
+  } else {
+    // Past the ramp: hollow, dashed, and no fill at all. There is nothing left
+    // that could read as a vehicle standing there now.
+    ctx.setLineDash([5, 4]);
+  }
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = stale ? "#f0dca5" : "#a6dcf7";
+  ctx.stroke();
+  ctx.restore();
+
+  /* ---- the label. It is part of the marker, not a field beside it. ------- */
+  ctx.globalAlpha = 1;
+  ctx.font = "600 12px Consolas, monospace";
+  ctx.textBaseline = "middle";
+  var label = stale
+    ? ("LAST KNOWN POSITION — as of " + ageWords(s.pose_age_ms)
+       + ", not a current position")
+    : ("pose as of " + ageWords(s.pose_age_ms));
+  var tw = ctx.measureText(label).width;
+  var lx = c.x + r + 8, ly = c.y - r - 4;
+  if (lx + tw + 8 > mapCanvas.width) lx = Math.max(4, c.x - r - 8 - tw);
+  ctx.fillStyle = "#000000cc";
+  ctx.fillRect(lx - 4, ly - 9, tw + 8, 18);
+  ctx.fillStyle = stale ? "#f0dca5" : "#cfeaf9";
+  ctx.fillText(label, lx, ly);
+}
+
+/* ------------------------------------------------------------- the readout - */
+function renderMonitor(env) {
+  var mon = env && env.monitor;
+  mp.monitor = mon || null;
+  if (mon && typeof mon.age_ramp_start_ms === "number") {
+    mp.ramp.start = mon.age_ramp_start_ms;
+    mp.ramp.full = mon.age_ramp_full_ms;
+  }
+  if (mon && typeof mon.poll_period_ms === "number") mp.pollMs = mon.poll_period_ms;
+
+  /* ---- the source itself is not answering ------------------------------- *
+   * Everything on this pane goes unknown together, and the process zones above
+   * are untouched: two planes, two sources, and the failure of one is not the
+   * failure of the other.                                                    */
+  if (!mon || !mon.configured || !mon.reachable || !env.state) {
+    mp.state = null; mp.raster = null; mp.version = null; mp.meta = null;
+    mapMessage(!mon || !mon.configured
+      ? "No monitoring service is configured for this backend. The map, the "
+        + "vehicle's position and its obstacles are not available on this page."
+      : "The monitoring service is not answering. No map, no position and no "
+        + "obstacles are shown, because nothing here is old enough to be worth "
+        + "drawing — an unreachable source is not a source of last values."
+        + (mon.reason ? "  [" + mon.reason + "]" : ""));
+    drawMap();
+    setText("mapserial", "—");
+    ["m_pose", "m_obst", "m_map"].forEach(function (x) { setRow(x, "—", "unk"); });
+    setRow("m_fetch", mon && typeof mon.fetch_ms === "number"
+      ? ("failed after " + mon.fetch_ms.toFixed(0) + " ms") : "—", "unk");
+    id("mapstale").classList.remove("on");
+    return;
+  }
+
+  mapMessage(null);
+  var s = env.state;
+  mp.state = s;
+  mp.serial = s.serial;
+  mp.fetchedAt = Date.now();
+  setText("mapserial", s.serial);
+
+  /* ---- the raster, refetched only when the map itself changed ------------ */
+  if (s.map_meta && s.map_version && s.map_version !== mp.version) {
+    fetchRaster(s.serial, s.map_version, s.map_meta);
+  }
+  if (!s.map_meta || !s.map_version) {
+    mp.raster = null; mp.version = null; mp.meta = null;
+    mapMessage("No map has arrived from this vehicle yet. Nothing is drawn: a "
+      + "position without the map it is expressed in is not a picture.");
+  }
+
+  /* ---- pose ------------------------------------------------------------- */
+  var t = rampT(s.pose_age_ms);
+  if (!s.pose) {
+    setRow("m_pose", "no pose has arrived", "unk");
+  } else {
+    var words = (t !== null && t >= 1)
+      ? ("LAST KNOWN, as of " + ageWords(s.pose_age_ms))
+      : ("as of " + ageWords(s.pose_age_ms));
+    setRow("m_pose", s.pose.x_m.toFixed(2) + ", " + s.pose.y_m.toFixed(2) + " m  "
+      + (s.pose.yaw_rad * 57.29578).toFixed(0) + "°   " + words,
+      (t !== null && t > 0) ? "aged" : null);
+  }
+  var stale = (t !== null && t >= 1);
+  id("mapstale").classList.toggle("on", stale || !s.pose);
+  if (stale) {
+    setText("mapstale", "POSE STALE — the marker shows where the vehicle WAS "
+      + ageWords(s.pose_age_ms) + " ago, not where it is. The localization publishes "
+      + "only when its filter updates, so this is what a standing vehicle looks like "
+      + "as well as what a stopped one does. This page cannot tell those apart and "
+      + "does not guess.");
+  } else if (!s.pose) {
+    setText("mapstale", "No pose has arrived from this vehicle since this page "
+      + "started watching. Nothing is drawn for it.");
+  }
+
+  /* ---- obstacles, in the three classes the sensor reports ---------------- */
+  var ob = s.obstacles, obT = rampT(s.obstacles_age_ms);
+  if (!ob) {
+    setRow("m_obst", "no scan has arrived", "unk");
+  } else if (!ob.placed) {
+    setRow("m_obst", "scan not placeable in the map frame (" + ob.source_frame
+      + ") — nothing drawn", "unk");
+  } else {
+    var rt = ob.returns || {};
+    var head = (rt.distance === 0)
+      ? "no distance returns in this scan"
+      : (rt.distance + " distance returns");
+    setRow("m_obst", head + "   " + (rt.clear_beyond_range || 0) + " beyond range, "
+      + (rt.invalid || 0) + " invalid, of " + (rt.total || 0)
+      + "   as of " + ageWords(s.obstacles_age_ms),
+      (obT !== null && obT > 0) ? "aged" : null);
+  }
+
+  /* ---- the map's own facts ---------------------------------------------- */
+  if (s.map_meta) {
+    var mm = s.map_meta;
+    setRow("m_map", "v" + s.map_version + "   " + mm.width + " x " + mm.height
+      + " cells at " + mm.resolution_m.toFixed(3) + " m  ("
+      + (mm.width * mm.resolution_m).toFixed(1) + " x "
+      + (mm.height * mm.resolution_m).toFixed(1) + " m, whole map)");
+  } else {
+    setRow("m_map", "none received", "unk");
+  }
+  setRow("m_fetch", mon.fetch_ms.toFixed(0) + " ms round trip, " + mon.base_url);
+  drawMap();
+}
+
+/* The pane's own poll. Separate from /state on purpose: it is a different
+ * source on a different plane, and neither poll's failure is the other's. It
+ * also does NOT refresh the page-liveness beacon — the backend excludes these
+ * paths, because a map refresh proves the browser is running and proves nothing
+ * about the channel that carries the operator's requests (V2B-DESIGN §2.2). */
+function pollMonitor() {
+  var q = mp.serial ? ("?serial=" + encodeURIComponent(mp.serial)) : "";
+  fetch("/monitor/state" + q, { cache: "no-store" })
+    .then(function (r) { return r.json(); })
+    .then(renderMonitor)
+    .catch(function () {
+      // This page's own backend is not answering. Same rendering as any other
+      // unattributable reading: unknown, never the last live look.
+      renderMonitor({ monitor: { configured: true, reachable: false,
+        reason: "the HMI backend is not answering on this machine" }, state: null });
+    });
+}
+
+id("mapfit").addEventListener("click", function () { fitView(); drawMap(); });
+id("mapin").addEventListener("click", function () {
+  zoomBy(1.35, mapCanvas.width / 2, mapCanvas.height / 2);
+});
+id("mapout").addEventListener("click", function () {
+  zoomBy(1 / 1.35, mapCanvas.width / 2, mapCanvas.height / 2);
+});
+mapCanvas.addEventListener("pointerdown", function (ev) {
+  mp.drag = { id: ev.pointerId, x: ev.clientX, y: ev.clientY };
+  capture(mapCanvas, ev.pointerId);
+  mapCanvas.classList.add("drag");
+});
+mapCanvas.addEventListener("pointermove", function (ev) {
+  if (!mp.drag || mp.drag.id !== ev.pointerId || mp.view.scale === null) return;
+  mp.view.ox += ev.clientX - mp.drag.x;
+  mp.view.oy += ev.clientY - mp.drag.y;
+  mp.drag.x = ev.clientX; mp.drag.y = ev.clientY;
+  drawMap();
+});
+["pointerup", "pointercancel", "lostpointercapture"].forEach(function (n) {
+  mapCanvas.addEventListener(n, function () {
+    mp.drag = null; mapCanvas.classList.remove("drag");
+  });
+});
+mapCanvas.addEventListener("wheel", function (ev) {
+  var r = mapCanvas.getBoundingClientRect();
+  zoomBy(ev.deltaY < 0 ? 1.15 : 1 / 1.15, ev.clientX - r.left, ev.clientY - r.top);
+  ev.preventDefault();
+}, { passive: false });
+window.addEventListener("resize", function () { drawMap(); });
+
+/* The pane redraws between polls as well, so an age that is growing is visibly
+ * growing rather than stepping once per fetch. It redraws the SAME values — it
+ * does not age them: the number on screen is the one the service reported at
+ * the last fetch, and this page's own fetch age is displayed beside it. */
+setInterval(function () { if (mp.state || mp.monitor) drawMap(); }, 250);
+
+/* The cadence is the BACKEND's, published on every /monitor/state response,
+ * including the failure envelope — so this pane keeps polling at the published
+ * period even while the monitoring service is down, and this page still invents
+ * no cadence of its own. 500 ms is the bootstrap value used for the very first
+ * request, before any response has been seen. */
+(function schedule() {
+  pollMonitor();
+  setTimeout(schedule, Math.max(100, mp.pollMs || 500));
+}());
 
 function poll() {
   fetch("/state", { cache: "no-store" })

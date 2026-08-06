@@ -1,0 +1,59 @@
+﻿
+=== CHECK 1  the source: one outbound request construction, and it is GET ===
+   PASS  exactly one urllib.request.Request(...) in hmi_server.py  found 1
+   PASS  and it is constructed with method="GET"  self.base_url + path, method="GET")
+   PASS  no 'http.client' anywhere in hmi_server.py
+   PASS  no 'import requests' anywhere in hmi_server.py
+   PASS  no 'socket.create_connection' anywhere in hmi_server.py
+   PASS  no 'aiohttp' anywhere in hmi_server.py
+   PASS  no 'httpx' anywhere in hmi_server.py
+   PASS  no request body is ever sent upstream: no data= on the Request
+   PASS  the OPC UA write allowlist is still exactly eight nodes  n=8
+
+=== CHECK 7  a non-loopback monitoring URL refuses to start ===
+   PASS  refused, naming invariant 8  2026-08-06 16:02:45,469 ERROR   hmi ConfigError: monitor base URL 'http://10.11.12.13:8089' is not plain http on a loopback host ['127.0.0.1', '::1', '[::1]', '
+   started viz pid 8892
+   started plc pid 17656
+   started hmi pid 35888
+
+=== CHECK 2  the method matrix ===
+   path                                   GET    POST     PUT  DELETE   PATCH OPTIONS    FROB
+   /monitor/vehicles                      200     405     405     405     405     405     405
+   /monitor/state                         200     405     405     405     405     405     405
+   /monitor/map?serial=F001               200     405     405     405     405     405     405
+   /                                      200     404     405     405     405     405     405
+   /state                                 200     404     405     405     405     405     405
+   /control                               404     200     405     405     405     405     405
+   PASS  /monitor/vehicles: GET answers, every other verb refused  [200, 405, 405, 405, 405, 405, 405]
+   PASS  /monitor/state: GET answers, every other verb refused  [200, 405, 405, 405, 405, 405, 405]
+   PASS  /monitor/map?serial=F001: GET answers, every other verb refused  [200, 405, 405, 405, 405, 405, 405]
+   PASS  POST /control is still accepted - the write surface is unchanged  [404, 200, 405, 405, 405, 405, 405]
+   PASS  POST is refused everywhere else
+
+=== CHECK 3  nothing cached; the upstream payload passes through ===
+   PASS  the two fetches carry different ages - no cache  6.5 then 41.5
+   PASS  the key set is the monitoring service's, unrenamed  identical
+   PASS  the envelope carries only THIS backend's own channel facts and the ramp  ['age_ramp_full_ms', 'age_ramp_start_ms', 'base_url', 'configured', 'fetch_ms', 'fetched_utc', 'poll_period_ms', 'reachable', 'reason', 'serial']
+   PASS  the display ramp is published to the page, not invented by it  1000.0 .. 5000.0 ms
+   PASS  /monitor/state carries no raster - the map rides as a cell COUNT  map_cells=248460; whole payload 4793 bytes; largest field obstacles at 3539 bytes
+
+=== CHECK 4  the map: whole grid, byte-identical ===
+   PASS  the proxied body is byte-identical to the service's  871 vs 871 bytes
+   PASS  cells == width x height - the WHOLE map, never a crop  248460 == 606 x 410
+   PASS  the X-Map-* headers survived the proxy  ['X-Map-Version', 'X-Map-Cells', 'X-Map-Width', 'X-Map-Height', 'X-Map-Resolution-M', 'X-Map-Origin-X-M', 'X-Map-Origin-Y-M', 'X-Map-Frame']
+   606 x 410 at 0.05 m = 30.3 x 20.5 m, 248460 cells in 871 transported bytes
+
+=== CHECK 6  the H6 beacon does not count a map fetch ===
+   PASS  polling ONLY /monitor let the page beacon go STALE  state=STALE drops=2 window=1000.0 ms
+
+=== CHECK 5  the monitoring service stopped mid-run ===
+   PASS  the pane's source reports unreachable, with a reason  URLError: <urlopen error timed out>
+   PASS  and it serves NO state at all - not a last value
+   PASS  the raster path answers a failure, never stale bytes  502
+   PASS  the PROCESS plane is untouched: session still CONNECTED  CONNECTED
+   PASS  the heartbeat kept advancing across the outage  51 -> 92
+   PASS  the backend logged no error storm about the dead service  0 lines
+
+   all children stopped
+
+MAP PANE CHECK PASS

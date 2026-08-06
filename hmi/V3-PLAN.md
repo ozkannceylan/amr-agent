@@ -41,11 +41,13 @@ stated here so the two versions cannot blur:
   external request of any kind" was written against CDNs; a local
   monitoring-plane fetch is not what it forbids, and v2b says so in its design
   rather than silently widening it. v3 inherits the restated sentence.
-- The **read-only enforcement ruling**: "read-only by construction" is today a
-  source-code property, not runtime-enforced (m5-judge finding 6, tracked in
-  TODO). m5-13 either adds real enforcement (SROS2/DDS permissions) or records
-  the limitation. Either way the phrase never stands unqualified — and v3's
-  camera selection must survive whichever ruling lands (§5).
+- The **read-only enforcement ruling**, since ruled: `viz/DESIGN.md` §2
+  rejected SROS2/DDS-Security as disproportionate and **recorded the
+  limitation**, so the phrase now reads, everywhere and in full, **read-only by
+  construction of the process and proven by test; not enforced by the
+  middleware** (m5-judge finding 6). v3's camera selection is unaffected: it is
+  subscription lifecycle only (§5), which is indifferent to whatever
+  enforcement ruling ever supersedes that one.
 
 **v3 adds, and only adds:** mode-conditional rendering of the teleop zone; map
 interaction and layers beyond the criterion minimum; the full information
@@ -283,10 +285,11 @@ impossible, not merely absent:
 3. **The page's only state-changing requests remain the existing POSTs to
    the hmi backend**, which land on the allowlist. Requests to the monitoring
    service are GETs that at most open or close an operator-side stream.
-4. **The standing qualification is inherited, not solved here**: read-only by
-   construction is a source-code property until m5-13 rules enforcement
-   (SROS2/DDS permissions) or records the limitation (TODO, judge finding 6).
-   Every v3 evidence file qualifies the phrase the way m5-13's ruling says to.
+4. **The standing qualification is inherited, not solved here**: m5-13 ruled
+   it, and the ruling is that the monitoring service is **read-only by
+   construction of the process and proven by test; not enforced by the
+   middleware** (`viz/DESIGN.md` §2). Every v3 document and evidence file
+   carries that sentence whole; the short form is never used.
 5. **Named refusals, carried on the page as v2a carries PSU6**: no goal tool
    until §12.13 item 4 is ruled; no camera control; no F-layer interaction of
    any kind; the map pane captioned display-only.

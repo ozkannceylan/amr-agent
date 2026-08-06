@@ -82,6 +82,17 @@ http:
   host: "127.0.0.1"
   port: 8088
 
+monitor:
+  # v2b (m5-53): the map pane's source. The READ-ONLY monitoring service of
+  # ADR 0011 D4, on its own port, on loopback. This backend fetches it with GET
+  # and re-serves it under this origin (hmi/V2B-DESIGN.md §2); it is not an OPC
+  # UA address, it never touches the PLC, and no command travels on it in either
+  # direction. An ADDRESS, which is what may live in this file.
+  #
+  # Absent or unreachable is not an error: the map pane greys and says so, and
+  # the process zones above are untouched. The two planes are two sources.
+  base_url: "http://127.0.0.1:8089"
+
 nodes:
   # `DemoCell` does NOT hang under `Objects`: it is a child of the
   # `ServerInterfaces` folder the S7-1500 publishes, and each element carries the

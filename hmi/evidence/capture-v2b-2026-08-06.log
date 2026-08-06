@@ -1,0 +1,160 @@
+﻿[capture] started chrome pid 33152
+[capture] browser Chrome/151.0.7922.75
+[capture] --- pass live ---
+[capture] started double pid 11136
+[capture] started viz pid 16960
+[capture] started hmi pid 36060
+[capture] 00 map live {"serial":"F001","pose":"3.10, 6.29 m  -139°   as of 0.0 s","obstacles":"201 distance returns   705 beyond range, 4 invalid, of 910   as of 0.0 s","map":"v1   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"45 ms round trip, http://127.0.0.1:8093","staleBannerOn":false,"staleBanner":"","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":513,"nonBlank":268380,"vehicleFill":54,"obstacleInk":189}}
+[capture]   CHECK PASS  the WHOLE map is painted, not a crop or a blank
+[capture]   CHECK PASS  free, occupied and UNKNOWN are all drawn — unknown is not drawn as free
+[capture]   CHECK PASS  the vehicle marker is drawn SOLID while the pose is fresh
+[capture]   CHECK PASS  the pose is labelled with its AGE and is never called live
+[capture]   CHECK PASS  obstacles are present, in the three classes the sensor reports
+[capture]   CHECK PASS  the obstacle row makes no verdict: no "clear", "safe", "danger" or "near"
+[capture]   CHECK PASS  the serial roots the pane even at n = 1
+[capture] shot v2b-00-map-live-vehicle-and-obstacles-2026-08-06.png  55944 bytes  — THE MAP PANE, LIVE: the whole 606 x 410 warehouse map at 0.05 m (30.3 x 20.5 m, never a crop), the vehicle drawn solid with "pose as of N s" attached to the marker, and the lidar returns drawn where the monitoring service placed them. Every row carries the age of the datum it came from
+[capture] shot v2b-01-whole-page-map-beside-controls-2026-08-06.png  196113 bytes  — the whole operator page with the map pane as a third column: zones A-F are unchanged — same controls, same ids, same renderings — and no caption anywhere merges a monitoring-plane value with a PLC value
+[capture] 01 zoomed in {"serial":"F001","pose":"2.62, 5.69 m  -116°   as of 0.0 s","obstacles":"201 distance returns   705 beyond range, 4 invalid, of 910   as of 0.0 s","map":"v1   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"61 ms round trip, http://127.0.0.1:8093","staleBannerOn":false,"staleBanner":"","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":510,"nonBlank":289800,"vehicleFill":206,"obstacleInk":776}}
+[capture]   CHECK PASS  zooming is drawing: not one of the eight written values moved
+[capture]   CHECK PASS  and the zoomed view is still a picture of the same map
+[capture] shot v2b-02-map-zoomed-2026-08-06.png  57999 bytes  — the same map zoomed in: a view transform is drawing. It derives no value, changes no datum and posts nothing
+[capture] stopped hmi
+[capture] stopped viz
+[capture] stopped double
+[capture] --- pass stale ---
+[capture] started double pid 30444
+[capture] started viz pid 8892
+[capture] started hmi pid 17656
+[capture] 02a before the pose froze {"serial":"F001","pose":"7.03, 7.56 m  -176°   as of 0.0 s","obstacles":"201 distance returns   705 beyond range, 4 invalid, of 910   as of 0.0 s","map":"v1   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"57 ms round trip, http://127.0.0.1:8093","staleBannerOn":false,"staleBanner":"","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":541,"nonBlank":268380,"vehicleFill":52,"obstacleInk":191}}
+[capture]   CHECK PASS  the pose is fresh before the freeze - the comparison has a baseline
+[capture] display ramp published by the backend: 1000 .. 5000 ms
+[capture] 02b pose STALE {"serial":"F001","pose":"13.49, 5.09 m  84°   LAST KNOWN, as of 8.4 s","obstacles":"201 distance returns   705 beyond range, 4 invalid, of 910   as of 0.0 s","map":"v1   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"72 ms round trip, http://127.0.0.1:8093","staleBannerOn":true,"staleBanner":"POSE STALE — the marker shows where the vehicle WAS 8.4 s ago, not where it is. The localization publishes only when its filter updates, so this is what a standing vehicle looks like as well as what a stopped one does. This page cannot tell those apart and does not guess.","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":562,"nonBlank":268380,"vehicleFill":0,"obstacleInk":181}}
+[capture]   CHECK PASS  the marker no longer has ANY solid fill — the picture changed, not only the caption
+[capture]   CHECK PASS  the readout says LAST KNOWN and gives the age
+[capture]   CHECK PASS  the banner says where the vehicle WAS, not where it is
+[capture]   CHECK PASS  the banner states the reason a standing vehicle looks like this
+[capture]   CHECK PASS  the page does not guess between a standing vehicle and a stopped one
+[capture]   CHECK PASS  the OBSTACLE layer is still fresh at the same moment — the two ages are independent and neither is inferred from the other
+[capture]   CHECK PASS  the map itself is untouched by a stale pose
+[capture] pose age at capture: 8714 ms
+[capture] shot v2b-03-pose-STALE-last-known-position-2026-08-06.png  66349 bytes  — THE STALE POSE, 8.7 s old: the marker is hollow and dashed with no fill at all, labelled LAST KNOWN POSITION with its age, and the banner says the vehicle was there, not that it is. The localization publishes only on a filter update, so this is also what a STANDING vehicle looks like — and the page says it cannot tell those apart rather than guessing
+[capture] shot v2b-04-whole-page-pose-stale-2026-08-06.png  214004 bytes  — the same stale pose on the whole page: zones A-F are unaffected, because the two planes are two sources and the age of one says nothing about the other
+[capture] stopped hmi
+[capture] stopped viz
+[capture] stopped double
+[capture] --- pass noobstacles ---
+[capture] started double pid 36060
+[capture] started viz pid 34220
+[capture] started hmi pid 30096
+[capture] 03 no distance returns {"serial":"F001","pose":"6.33, 7.49 m  -172°   as of 0.0 s","obstacles":"no distance returns in this scan   906 beyond range, 4 invalid, of 910   as of 0.0 s","map":"v1   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"58 ms round trip, http://127.0.0.1:8093","staleBannerOn":false,"staleBanner":"","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":161,"nonBlank":268380,"vehicleFill":54,"obstacleInk":0}}
+[capture]   CHECK PASS  the row says NO DISTANCE RETURNS, with the beyond-range count beside it
+[capture]   CHECK PASS  it never says clear, safe or "no obstacles" — an empty horizon is a measurement, not an absence of danger
+[capture]   CHECK PASS  nothing is drawn for the returns
+[capture]   CHECK PASS  the pose and the map are unaffected
+[capture] shot v2b-05-obstacles-absent-empty-horizon-2026-08-06.png  50909 bytes  — OBSTACLES ABSENT: every beam returned beyond its range, which is the sensor MEASURING an open horizon rather than failing. The pane reports the three classes the sensor reported and calls the result neither clear nor safe
+[capture] stopped hmi
+[capture] stopped viz
+[capture] stopped double
+[capture] --- pass scanstopped ---
+[capture] started double pid 21428
+[capture] started viz pid 31860
+[capture] started hmi pid 9288
+[capture] 04 scan stopped {"serial":"F001","pose":"2.55, 4.89 m  -74°   as of 0.0 s","obstacles":"201 distance returns   705 beyond range, 4 invalid, of 910   as of 9.1 s","map":"v1   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"50 ms round trip, http://127.0.0.1:8093","staleBannerOn":false,"staleBanner":"","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":569,"nonBlank":268380,"vehicleFill":56,"obstacleInk":0}}
+[capture]   CHECK PASS  a stale obstacle layer is NOT rendered as an empty one
+[capture]   CHECK PASS  and it carries its own age
+[capture] shot v2b-06-obstacles-stale-not-emptied-2026-08-06.png  57405 bytes  — THE SCAN STOPPED ARRIVING 9.7 s ago: the returns are drawn hollow and labelled with their age. The pane has no rendering that means "there is nothing there now", so a dead sensor can never read as an empty aisle
+[capture] stopped hmi
+[capture] stopped viz
+[capture] stopped double
+[capture] --- pass nomap ---
+[capture] started double pid 34828
+[capture] started viz pid 35396
+[capture] started hmi pid 38800
+[capture] 05 no map {"serial":"F001","pose":"6.30, 7.48 m  -172°   as of 0.0 s","obstacles":"201 distance returns   705 beyond range, 4 invalid, of 910   as of 0.0 s","map":"none received","fetch":"61 ms round trip, http://127.0.0.1:8093","staleBannerOn":false,"staleBanner":"","messageOn":true,"message":"No map has arrived from this vehicle yet. Nothing is drawn: a position without the map it is expressed in is not a picture.","canvas":{"w":630,"h":460,"colours":0,"nonBlank":0,"vehicleFill":0,"obstacleInk":0}}
+[capture]   CHECK PASS  the pane says no map has arrived and draws nothing
+[capture]   CHECK PASS  a position without its map is not drawn as a picture
+[capture] shot v2b-07-no-map-received-2026-08-06.png  62086 bytes  — NO MAP HAS ARRIVED from this vehicle yet: nothing is drawn, because a position without the map it is expressed in is not a picture
+[capture] stopped hmi
+[capture] stopped viz
+[capture] stopped double
+[capture] --- pass monitordown ---
+[capture] started double pid 8504
+[capture] started viz pid 15724
+[capture] started hmi pid 26552
+[capture] 06a zones A-F before the outage {"strip":{"session":"CONNECTED","link":"YES","mode":"TELEOP"},"pstop":{"label":"PROCESS STOP","cls":"","disabled":false},"machineMode":"TELEOP","selected":[1],"zoneC":{"pstop":"clear / clear","obstacle":"clear / clear","resetreq":"clear / not required","teleop":"clear / inactive"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)"},"requests":{"mode":"1","pstop":"false","teleop":"false","reset":"false","traction":"0.000"}}
+[capture] stopped viz
+[capture] 06b monitoring service down {"serial":"—","pose":"—","obstacles":"—","map":"—","fetch":"failed after 1528 ms","staleBannerOn":false,"staleBanner":"","messageOn":true,"message":"The monitoring service is not answering. No map, no position and no obstacles are shown, because nothing here is old enough to be worth drawing — an unreachable source is not a source of last values.  [URLError: <urlopen error timed out>]","canvas":{"w":630,"h":460,"colours":0,"nonBlank":0,"vehicleFill":0,"obstacleInk":0}}
+[capture] 06c zones A-F after the outage {"strip":{"session":"CONNECTED","link":"YES","mode":"TELEOP"},"pstop":{"label":"PROCESS STOP","cls":"","disabled":false},"machineMode":"TELEOP","selected":[1],"zoneC":{"pstop":"clear / clear","obstacle":"clear / clear","resetreq":"clear / not required","teleop":"clear / inactive"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)"},"requests":{"mode":"1","pstop":"false","teleop":"false","reset":"false","traction":"0.000"}}
+[capture]   CHECK PASS  the pane greys and says the service is not answering
+[capture]   CHECK PASS  it shows NO last values at all — an unreachable source is not a source of last values
+[capture]   CHECK PASS  nothing is left drawn on the canvas
+[capture]   CHECK PASS  THE PROCESS PLANE IS UNTOUCHED: the session is still up and the mode still in force
+[capture]   CHECK PASS  the heartbeat kept advancing across the outage
+[capture] shot v2b-08-monitoring-service-down-2026-08-06.png  198153 bytes  — THE MONITORING SERVICE STOPPED: the map pane greys and shows nothing — no map, no position, no obstacles, and no last values. The process zones beside it are unchanged and the heartbeat never paused: two planes, two sources, and the failure of one is not the failure of the other
+[capture] stopped hmi
+[capture] stopped double
+[capture] --- pass notconfigured ---
+[capture] started double pid 23532
+[capture] started hmi pid 37952
+[capture] 07 not configured {"serial":"—","pose":"—","obstacles":"—","map":"—","fetch":"—","staleBannerOn":false,"staleBanner":"","messageOn":true,"message":"No monitoring service is configured for this backend. The map, the vehicle's position and its obstacles are not available on this page.","canvas":{"w":630,"h":460,"colours":0,"nonBlank":0,"vehicleFill":0,"obstacleInk":0}}
+[capture]   CHECK PASS  the pane says no monitoring service is configured
+[capture] shot v2b-09-monitoring-not-configured-2026-08-06.png  51112 bytes  — a backend started with no monitoring service configured at all: the pane says so in words and the rest of the page is exactly the v2a page
+[capture] stopped hmi
+[capture] stopped double
+[capture] --- pass v2astates ---
+[capture] started double pid 20856
+[capture] started viz pid 17084
+[capture] started hmi pid 2848
+[capture] 08a cold start, link up {"strip":{"session":"CONNECTED","link":"YES","mode":"NONE"},"pstop":{"label":"PROCESS STOP — ENGAGED","cls":"engaged","disabled":false},"machineMode":"NONE","selected":[0],"zoneC":{"pstop":"ASSERTED / LATCHED","obstacle":"clear / clear","resetreq":"ASSERTED / REQUIRED","teleop":"clear / inactive"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)"},"requests":{"mode":"0","pstop":"true","teleop":"false","reset":"false","traction":"0.000"}}
+[capture]   CHECK PASS  v2a unbroken: the stop boots ENGAGED and looks armed
+[capture]   CHECK PASS  v2a unbroken: §14.9 signature — mode NONE, ceiling 0.00
+[capture]   CHECK PASS  v2a unbroken: connecting cleared nothing
+[capture] shot v2b-10-v2a-cold-start-unbroken-2026-08-06.png  204989 bytes  — the v2a cold start, re-photographed with the map pane present: PROCESS STOP ENGAGED and armed, process stop latched, reset required, envelope withheld. Adding a map changed none of it
+[capture] 08b stop released {"strip":{"session":"CONNECTED","link":"YES","mode":"NONE"},"pstop":{"label":"PROCESS STOP","cls":"","disabled":false},"machineMode":"NONE","selected":[0],"zoneC":{"pstop":"ASSERTED / LATCHED","obstacle":"clear / clear","resetreq":"ASSERTED / REQUIRED","teleop":"clear / inactive"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)"},"requests":{"mode":"0","pstop":"false","teleop":"false","reset":"false","traction":"0.000"}}
+[capture]   CHECK PASS  v2a unbroken: PS1 — the request cleared and the LATCH did not
+[capture] shot v2b-11-v2a-stop-released-latch-stands-2026-08-06.png  202347 bytes  — the operator releases the process stop with the map pane present: the request goes FALSE and the latch visibly does not clear. Request and latch are still two things
+[capture] 08c reset held {"strip":{"session":"CONNECTED","link":"YES","mode":"NONE"},"pstop":{"label":"PROCESS STOP","cls":"","disabled":false},"machineMode":"NONE","selected":[0],"zoneC":{"pstop":"clear / clear","obstacle":"clear / clear","resetreq":"clear / not required","teleop":"clear / inactive"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)"},"requests":{"mode":"0","pstop":"false","teleop":"false","reset":"true","traction":"0.000"}}
+[capture]   CHECK PASS  v2a unbroken: RESET is a level and is held
+[capture] 08d teleop driving {"strip":{"session":"CONNECTED","link":"YES","mode":"TELEOP"},"pstop":{"label":"PROCESS STOP","cls":"","disabled":false},"machineMode":"TELEOP","selected":[1],"zoneC":{"pstop":"clear / clear","obstacle":"clear / clear","resetreq":"clear / not required","teleop":"ASSERTED / ACTIVE"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)"},"requests":{"mode":"1","pstop":"false","teleop":"true","reset":"false","traction":"0.640"}}
+[capture]   CHECK PASS  v2a unbroken: the joystick still streams a request while the map polls
+[capture] 08e map while driving {"serial":"F001","pose":"2.67, 4.60 m  -60°   as of 0.0 s","obstacles":"201 distance returns   705 beyond range, 4 invalid, of 910   as of 0.0 s","map":"v1   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"45 ms round trip, http://127.0.0.1:8093","staleBannerOn":false,"staleBanner":"","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":554,"nonBlank":268380,"vehicleFill":51,"obstacleInk":183}}
+[capture]   CHECK PASS  and the map pane is live at the same moment
+[capture] shot v2b-12-v2a-teleop-driving-with-map-2026-08-06.png  197234 bytes  — TELEOP in force, the enable asserted and the joystick held forward, with the live map beside it. The teleop request stream and the map poll are two independent channels and neither delayed the other
+[capture] stopped hmi
+[capture] stopped viz
+[capture] stopped double
+[capture] --- pass pagestale ---
+[capture] started double pid 38252
+[capture] started viz pid 8380
+[capture] started hmi pid 28392
+[capture] 09 /state blocked, map still polling {"serial":"F001","pose":"2.53, 4.93 m  -76°   as of 0.0 s","obstacles":"201 distance returns   705 beyond range, 4 invalid, of 910   as of 0.0 s","map":"v1   606 x 410 cells at 0.050 m  (30.3 x 20.5 m, whole map)","fetch":"60 ms round trip, http://127.0.0.1:8093","staleBannerOn":false,"staleBanner":"","messageOn":false,"message":"connecting to the monitoring service…","canvas":{"w":630,"h":460,"colours":526,"nonBlank":268380,"vehicleFill":56,"obstacleInk":180}}
+[capture]   CHECK PASS  H6 fired even though the map pane was polling throughout
+[capture]   CHECK PASS  the five deadman requests went to rest, the enable included
+[capture]   CHECK PASS  the two STANDING controls were untouched by the page loss
+[capture]   CHECK PASS  the heartbeat kept running
+[capture]   CHECK PASS  and the map pane was demonstrably still fetching all the while
+[capture] shot v2b-13-page-beacon-stale-while-map-polls-2026-08-06.png  208055 bytes  — THE CONTROL CHANNEL DIED WHILE THE MAP PANE KEPT POLLING: only GET /state was blocked. The H6 deadman still fired and the enable was dropped, because the backend does not count a monitoring-plane fetch as a sign of life on the channel that carries the operator's requests
+[capture] stopped hmi
+[capture] stopped viz
+[capture] stopped double
+[capture] --- pass secondtab ---
+[capture] started double pid 31616
+[capture] started viz pid 32712
+[capture] started hmi pid 31740
+[capture]   CHECK PASS  second tab, setup: the backend holds stop RELEASED and mode TELEOP
+[capture] B1 second tab opened mid-scenario {"strip":{"session":"CONNECTED","link":"YES","mode":"TELEOP"},"pstop":{"label":"PROCESS STOP","cls":"","disabled":false},"machineMode":"TELEOP","selected":[1],"zoneC":{"pstop":"clear / clear","obstacle":"clear / clear","resetreq":"clear / not required","teleop":"clear / inactive"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)"},"requests":{"mode":"1","pstop":"false","teleop":"false","reset":"false","traction":"0.000"}}
+[capture]   CHECK PASS  a second page renders the BACKEND's standing values, not the boot values
+[capture] B2 the other tab follows the backend {"strip":{"session":"CONNECTED","link":"YES","mode":"TELEOP"},"pstop":{"label":"PROCESS STOP — ENGAGED","cls":"engaged","disabled":false},"machineMode":"TELEOP","selected":[1],"zoneC":{"pstop":"ASSERTED / LATCHED","obstacle":"clear / clear","resetreq":"ASSERTED / REQUIRED","teleop":"clear / inactive"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)"},"requests":{"mode":"1","pstop":"true","teleop":"false","reset":"false","traction":"0.000"}}
+[capture]   CHECK PASS  the other tab followed the backend and renders ENGAGED too
+[capture] B3 backgrounded — visibilityState hidden
+[capture]   CHECK PASS  backgrounding the non-acting page changed NEITHER standing value — the engaged stop is still engaged
+[capture] A after the other tab was backgrounded {"strip":{"session":"CONNECTED","link":"YES","mode":"TELEOP"},"pstop":{"label":"PROCESS STOP — ENGAGED","cls":"engaged","disabled":false},"machineMode":"TELEOP","selected":[1],"zoneC":{"pstop":"ASSERTED / LATCHED","obstacle":"clear / clear","resetreq":"ASSERTED / REQUIRED","teleop":"clear / inactive"},"zoneD":{"absent":false,"estop":"clear / clear","zone":"clear / clear"},"zoneE":{"enable":"autonomous motion WITHHELD","ceiling":"speed ceiling no motion permitted (0.00 m/s)"},"requests":{"mode":"1","pstop":"true","teleop":"false","reset":"false","traction":"0.000"}}
+[capture]   CHECK PASS  the operator's own screen and the wire still agree — ENGAGED
+[capture]   CHECK PASS  every one of the 35 write cycles after the background still wrote the stop engaged and the mode TELEOP
+[capture] shot v2b-14-second-tab-stop-stays-engaged-2026-08-06.png  197993 bytes  — THE SECOND-TAB PATH WALKED AGAIN, because v2b changed the beacon's input set: a second tab was opened, the operator engaged the stop here, and the second tab was backgrounded with its visibilitychange and blur handlers fired. The engaged stop is still engaged, on the wire and on this screen
+[capture] stopped hmi
+[capture] stopped viz
+[capture] stopped double
+[capture] --- checks ---
+[capture] every check passed
+[capture] stopped chrome

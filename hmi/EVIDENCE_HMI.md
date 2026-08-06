@@ -1668,3 +1668,294 @@ carries as `session.reason`, so the page's degraded banner says it too.
 
 No PLC was contacted for §I.7 or §I.8, and neither is evidence about the TIA
 build, a real F-CPU or the vehicle layer.
+
+---
+
+# Section J — HMI v2b, the map pane (m5-53)
+
+`hmi/V2B-DESIGN.md` is the authority for the pane recorded here. This section
+is written **as the states landed**, not assembled afterwards; the run log and
+the manifest were written by the instruments themselves, line by line, while
+they ran.
+
+Roadmap criterion (e)'s last clause is *"shows a real-time map with live
+obstacles"*. What is recorded below is that pane and, at least as important,
+**every way it can be wrong**: a pose that has stopped arriving, a scan that
+has stopped arriving, a scan with no distance returns at all, no map yet, and
+the monitoring service dead.
+
+## J.0 The one thing this section exists to prove
+
+AMCL publishes `/amcl_pose` **only on a filter update**. A standing vehicle
+therefore has no pose stream at all, and the monitoring service's own evidence
+records it: `viz/EVIDENCE_MONITORING.md` §8 shows `pose_age_ms = 463 157` —
+7 min 43 s — beside message counters frozen at 30, with everything else
+healthy. A page that draws that as a vehicle sitting on the map is **silently
+wrong and looks exactly like a working display**.
+
+So the pane has **no rendering that means "live"**. Every marker carries the
+age of the datum it came from, in the marker itself, in every state; as the age
+grows the marker fades and hollows; past the display ramp it is labelled a LAST
+KNOWN POSITION and the pane says so in words. §J.4 photographs both ends and
+asserts the difference **at the pixel level** — the solid marker is gone, not
+merely re-captioned.
+
+## J.1 Environment
+
+| Item | Value |
+|---|---|
+| Machine | the **Windows showcase machine**, not the container and not WSL |
+| Python | 3.13.2, `asyncua` 2.0.1 |
+| Node | v22.14.0 — the CDP instrument, no Playwright, no `node_modules` |
+| Browser | `Chrome/151.0.7922.75`, headless, driven over the Chrome DevTools Protocol |
+| Playing the PLC | `hmi/tools/v2a_scenario_double.py` on `opc.tcp://127.0.0.1:4862/amr-agent/v2bscenariodouble/` |
+| Playing the monitoring service | `hmi/tools/viz_double.py` on `http://127.0.0.1:8093` |
+| Software under test | `hmi/hmi_server.py` + `hmi/static/index.html`, `hmi/config-v2b-double.yaml`, HTTP `127.0.0.1:8097` |
+| Display ramp in force | `1000 .. 5000 ms`, published by the backend on every `/monitor/state` and read back by the instrument |
+| Manifest, written as the run landed | `hmi/evidence/screenshots/MANIFEST-v2b-2026-08-06.txt` |
+| Run log | `hmi/evidence/capture-v2b-2026-08-06.log` |
+| Backend-half checks | `hmi/evidence/check-map-pane-2026-08-06.log` |
+
+**No PLC and no vehicle were contacted.** No S7-1500, no PLCSIM Advanced, no
+Gazebo, no ROS 2 process and no instance of the real `viz/` service took part:
+every endpoint above is loopback and both servers are doubles.
+**Nothing in this section is evidence about the TIA build, a real F-CPU, the
+vehicle layer or the monitoring service itself**, and nothing rehearsed against
+a double closes any gate criterion. Divergence resolves toward `viz/`, never
+toward `viz_double.py`.
+
+**What the double is faithful to, and how that is known.** Every payload key,
+header, status and refusal in `viz_double.py` is copied from `viz/DESIGN.md` §5
+and `viz/EVIDENCE_MONITORING.md` §7 rather than invented, including the map
+geometry the real service actually served — 606 × 410 cells at 0.05 m, origin
+(−9.145, −4.778), which is 30.3 × 20.5 m at full extent. The backend check
+below asserts that the key set the page receives is **identical** to the key
+set the service serves, so a divergence in shape would fail rather than pass
+quietly.
+
+## J.2 What produced these, and the four roles
+
+```
+v2a_scenario_double.py   plays the PLC. It owns every verdict zones A-F show
+viz_double.py            plays the READ-ONLY MONITORING SERVICE. It owns the
+                         map, the pose, the scan and EVERY AGE. Its ages are
+                         steady-clock arithmetic, as the real service's are
+hmi_server.py            the software under test, backend half
+the browser              plays the OPERATOR, through the page, with genuine
+                         input events dispatched into the rendered DOM
+```
+
+`capture_v2b_screens.mjs` is a **new file rather than an edit of
+`capture_v2a_screens.mjs`**: that script and its captures are the v2a evidence
+this version must be shown not to have broken, and a repeat that reuses its
+predecessor's names destroys the comparison it exists to make
+(`docs/LESSONS.md` 2026-08-06). Every file here is `v2b-*` and overwrote
+nothing; `MANIFEST-2026-08-05.txt` and every `v2a-*.png` are untouched beside
+them.
+
+Two instruments, and the split is deliberate. The `.mjs` script presses the
+page; `tools/check_hmi_map_pane.py` exercises the backend half and sweeps the
+source. Section C of this document carries a residual from exactly the
+confusion the split prevents — a page's handlers can pass an endpoint test
+while being themselves unexercised — so **every visual claim below comes from
+the DOM (and in two cases from the canvas's own pixels), and every transport
+claim comes from the socket.**
+
+## J.3 The screenshots, one row per state
+
+All files are `hmi/evidence/screenshots/v2b-NN-…-2026-08-06.png`. The captions
+in `MANIFEST-v2b-2026-08-06.txt` were appended by the instrument as each shot
+landed.
+
+| # | File stem | State it shows |
+|---|---|---|
+| 00 | `map-live-vehicle-and-obstacles` | **the criterion clause, met**: the whole 606 × 410 map at 0.05 m (30.3 × 20.5 m), the vehicle drawn solid, the lidar returns drawn where the service placed them, and every row carrying an age |
+| 01 | `whole-page-map-beside-controls` | the same, on the whole page: the pane is a third column and zones A–F are unchanged |
+| 02 | `map-zoomed` | the same map zoomed: a view transform is drawing, and **not one of the eight written values moved** across the zoom |
+| 03 | `pose-STALE-last-known-position` | **the hardest state.** Pose 8.4 s old: no fill at all, hollow and dashed, `LAST KNOWN POSITION — as of 8.4 s, not a current position` on the marker, and the banner in words |
+| 04 | `whole-page-pose-stale` | the stale pose on the whole page: zones A–F unaffected |
+| 05 | `obstacles-absent-empty-horizon` | every beam beyond range: `no distance returns in this scan`, with the counts. Never "clear", never "safe", never "no obstacles" |
+| 06 | `obstacles-stale-not-emptied` | the scan stopped arriving 9.7 s ago: the returns are drawn **hollow with their age**, not deleted |
+| 07 | `no-map-received` | no map yet: nothing is drawn at all |
+| 08 | `monitoring-service-down` | the service killed mid-run: the pane greys and shows no last values; the process zones and the heartbeat are untouched |
+| 09 | `monitoring-not-configured` | a backend started with `--no-monitor`: the pane says **not configured**, which is a different fact from **not answering** |
+| 10 | `v2a-cold-start-unbroken` | the v2a cold start re-photographed with the pane present |
+| 11 | `v2a-stop-released-latch-stands` | PS1 with the pane present: request clears, latch does not |
+| 12 | `v2a-teleop-driving-with-map` | TELEOP in force, enable asserted, joystick held forward, live map beside it |
+| 13 | `page-beacon-stale-while-map-polls` | **only `GET /state` blocked**: H6 still fired and the enable was dropped while the map pane kept fetching |
+| 14 | `second-tab-stop-stays-engaged` | the m5-29 second-tab path walked again, because v2b changed the beacon's input set |
+
+## J.4 The stale pose, at the pixel level
+
+This is the check the whole version exists for, and it is deliberately not a
+check on a caption.
+
+```
+02a before the pose froze
+  pose      "7.03, 7.56 m  -176 deg   as of 0.0 s"
+  canvas    {colours: 544, nonBlank: 268380, vehicleFill: 53, obstacleInk: 186}
+
+02b pose STALE
+  pose      "13.49, 5.10 m  84 deg   LAST KNOWN, as of 8.4 s"
+  obstacles "201 distance returns   705 beyond range, 4 invalid, of 910   as of 0.0 s"
+  banner    "POSE STALE - the marker shows where the vehicle WAS 8.4 s ago, not
+             where it is. The localization publishes only when its filter
+             updates, so this is what a standing vehicle looks like as well as
+             what a stopped one does. This page cannot tell those apart and
+             does not guess."
+  canvas    {colours: 564, nonBlank: 268380, vehicleFill: 0, obstacleInk: 176}
+```
+
+`vehicleFill` counts canvas pixels at the marker's **exact** fill colour, read
+back with `getImageData` from the page's own canvas: **53 to 0**. The solid
+marker is gone from the picture, not merely re-captioned. The display ramp in
+force was `1000 .. 5000 ms`, read from the backend by the instrument rather
+than assumed.
+
+Two things in that readout matter as much as the marker:
+
+- **`obstacleInk` stayed at 176 and the obstacle row still read `as of 0.0 s`.**
+  The two ages are independent and neither is inferred from the other: the pose
+  had stopped arriving while the scan had not, and the pane said exactly that.
+- **The pose is at `13.49, 5.10 m` while the fresh sample was at `7.03, 7.56`.**
+  The vehicle in the double did not teleport — the pose simply stopped being
+  published at the instant of the freeze, which is precisely the failure this
+  section exists for: without the age, a page would have drawn a vehicle at a
+  place it left eight seconds earlier and called it a position.
+
+## J.5 The other four ways the pane can be wrong
+
+| State | What the DOM carried | The rule it shows |
+|---|---|---|
+| **obstacles absent** | `no distance returns in this scan   906 beyond range, 4 invalid, of 910   as of 0.0 s`; `obstacleInk = 0` | an empty horizon is a **measurement**, not missing data and not an absence of danger (`docs/LESSONS.md` 2026-08-06). The words *clear*, *safe*, *no obstacles* appear nowhere — asserted by the instrument, not by reading |
+| **scan stopped arriving** | `201 distance returns   705 beyond range, 4 invalid, of 910   as of 9.7 s`, drawn hollow | a stale obstacle layer is **never** rendered as an empty one. The pane has no rendering that means "there is nothing there now", so a dead sensor cannot read as an empty aisle |
+| **no map yet** | `No map has arrived from this vehicle yet`; `vehicleFill = 0`, `obstacleInk = 0` | a position without the map it is expressed in is not a picture |
+| **service unreachable** | pose `—`, obstacles `—`, map `—`, `fetch: failed after 1520 ms`, canvas entirely blank; message names the reason | an unreachable source is **not a source of last values** |
+
+## J.6 The process plane is untouched by all of it
+
+From the `monitordown` pass, with the monitoring service killed mid-run while
+the operator's mode was in force:
+
+- session `CONNECTED` before and after; machine mode and `reset required`
+  identical across the outage;
+- the heartbeat kept advancing (`49 -> 90` in the backend check's own window)
+  and `heartbeat.running` stayed `true`;
+- the backend logged **no error line at all** about the dead service across the
+  window — the check greps its log for one and finds zero.
+
+The two planes are two sources, and the failure of one is not the failure of
+the other. Nothing on the map pane feeds a control, a request, a lamp or a
+verdict on the process side, and no caption on the page combines a value from
+one plane with a value from the other.
+
+## J.7 The beacon change, and why it was made and then tested
+
+`V2B-DESIGN.md` §2.2: the three `/monitor/*` paths are **excluded** from the
+`opcua-nodes.md` §10.8 H6 page-liveness beacon. A monitoring-plane fetch proves
+the browser is running and proves nothing about the channel that carries the
+operator's requests.
+
+It was tested in the form that could only fail if the exclusion were absent —
+**`GET /state` blocked at the browser while the map pane kept polling at full
+rate**:
+
+```
+09 /state blocked, map still polling
+  page      STALE
+  requests  HmiTeleopRequest false, HmiTractionRequest 0
+  standing  HmiProcessStopRequest false, HmiDriveModeRequest 1  (untouched)
+  heartbeat running
+  map pane  "60 ms round trip, http://127.0.0.1:8093"   <- still fetching
+```
+
+The block pattern is the exact URL and not `*/state`, which would also have
+matched `/monitor/state` and stopped the map pane too — the pass would then
+have proved nothing while still reporting a result.
+
+The backend check reaches the same conclusion from the other side: polling
+**only** `/monitor/state` for 2.5 windows took the page to `STALE` with
+`drops = 2`.
+
+The exclusion can only make the beacon go stale **sooner**. That is the
+direction that fails safe, and it is why the change was acceptable at all.
+
+## J.8 The second tab, walked again
+
+v2b changed the beacon's input set, so the m5-29 finding-1 path was re-run
+rather than assumed to still hold. A second tab was opened mid-scenario, the
+operator engaged the stop in the first, and the second was backgrounded with
+its own `visibilitychange` and `blur` handlers dispatched into it:
+
+- the second tab rendered the **backend's** standing values on open, not the
+  §12.8 boot values;
+- it followed the backend to ENGAGED when the first tab acted;
+- backgrounding it moved **neither** standing value, and
+  **every one of the 33 write cycles** after the background still wrote the
+  stop engaged and the mode TELEOP — read from the backend's own per-cycle
+  evidence CSV, not from two lucky samples either side of the event.
+
+## J.9 The backend half — `check_hmi_map_pane.py`, 2026-08-06
+
+Log: `hmi/evidence/check-map-pane-2026-08-06.log`. Every line printed with the
+values it read.
+
+```
+CHECK 1  exactly one urllib.request.Request(...) in hmi_server.py, and it is
+         method="GET"; no http.client, requests, aiohttp, httpx or raw socket
+         anywhere; no data= on the Request; the OPC UA write allowlist is still
+         exactly eight nodes
+CHECK 2  path                                   GET    POST     PUT  DELETE   PATCH OPTIONS    FROB
+         /monitor/vehicles                      200     405     405     405     405     405     405
+         /monitor/state                         200     405     405     405     405     405     405
+         /monitor/map?serial=F001               200     405     405     405     405     405     405
+         /                                      200     404     405     405     405     405     405
+         /state                                 200     404     405     405     405     405     405
+         /control                               404     200     405     405     405     405     405
+CHECK 3  two fetches a second apart: pose_age 30.8 then 20.4 ms  -> no cache
+         key set identical to the monitoring service's
+         ramp published 1000.0 .. 5000.0 ms
+         map_cells=248460; whole /monitor/state payload 4806 bytes;
+         largest field "obstacles" at 3549 bytes  -> no raster on the poll
+CHECK 4  proxied body byte-identical to the service's (871 vs 871 bytes)
+         248460 cells == 606 x 410; every X-Map-* header survived
+         606 x 410 at 0.05 m = 30.3 x 20.5 m
+CHECK 5  service killed: unreachable with a reason, NO state served, raster
+         path 502; session still CONNECTED; heartbeat 49 -> 90; zero error
+         lines logged
+CHECK 6  polling ONLY /monitor: page STALE, drops=2, window 1000.0 ms
+CHECK 7  monitor.base_url on a non-loopback host refuses to start, naming
+         invariant 8
+MAP PANE CHECK PASS
+```
+
+`FROB` is in the matrix on purpose: the refusal is the handler's attribute
+lookup rather than a list of known verbs, so a verb nobody anticipated lands on
+the same 405. The write surface of this process is still exactly
+`POST /control`.
+
+## J.10 What is deliberately not shown here, and the residuals
+
+- **No run against the real `viz/` service, and none is claimed.** That service
+  needs rclpy, a vehicle image and Gazebo, and it lives in WSL; this page, its
+  backend and the browser live on Windows. The double copies its surface key
+  for key and the check asserts the key sets are identical, but *the join has
+  not been made against the real process on either platform.* That is the
+  single largest residual of this section.
+- **The display ramp's two endpoints are display values, not measured ones.**
+  `V2B-DESIGN.md` §4.3 states why: the bound worth having is the inter-arrival
+  time of `/amcl_pose` **while the vehicle is moving**, and the only committed
+  capture of that topic is of a **standing** vehicle. A bound derived from one
+  confounded instance is not a bound (`docs/LESSONS.md` 2026-08-04), so it was
+  requested rather than fabricated.
+- **n = 1.** One serial exists. Every path is serial-rooted and the pane reads
+  the list rather than a constant, but the second vehicle is the test and it
+  does not exist yet.
+- **Nothing here is evidence about the TIA build, a real F-CPU, the vehicle
+  layer, Nav2 or the monitoring service.** Two doubles produced every value.
+- `tools/check_hmi_writes.py` and `tools/check_hmi_h6_and_reset.py` are m4-era
+  harnesses that call `os.killpg` and **do not run on Windows at all**; that is
+  a pre-existing platform limitation, not a v2b regression. Their subject
+  matter — the write allowlist, H6 and the reset edge — is covered here by
+  §J.7, §J.8 and CHECK 1/2 above. One of their checks did run and pass in
+  passing: the allowlist still refuses a doctored config naming a ninth node.

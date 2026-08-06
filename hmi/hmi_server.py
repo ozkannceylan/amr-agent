@@ -88,6 +88,9 @@ import statistics
 import sys
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -261,6 +264,75 @@ UI_POLL_STALE_TIME = 5.0 * UI_POLL_PERIOD_S
 #: to the operator while the session still claims to be up.
 WRITE_HEALTH_STALE_TIME = 2.0
 
+# --------------------------------------------------------------------------- #
+# v2b (m5-53) — the map pane's window onto the monitoring plane.
+#
+# `hmi/V2B-DESIGN.md` §2: the page reads `viz/` THROUGH this process, over
+# loopback, and re-serves it under this origin. That layer sends no CORS header
+# and must not be edited so the HMI can reach it, so the `MON --o HMI` edge of
+# CLAUDE.md §3 is realised in this backend rather than in the browser. Both
+# halves are the HMI.
+#
+# Nothing below is a command path. This process sends `GET` toward the
+# monitoring service and nothing else, sends no request body, and no byte
+# produced here enters a vehicle domain.
+# --------------------------------------------------------------------------- #
+
+#: Hard ceiling on one fetch of the monitoring service. It runs on an HTTP
+#: handler thread of the already-threaded server, never on the asyncio loop that
+#: owns the OPC UA session, and it is bounded so a hung monitoring service can
+#: never stall a write cycle, a heartbeat or a keep-alive (LESSONS 2026-07-29:
+#: a harness never blocks the event loop of the session it observes).
+MONITOR_FETCH_TIMEOUT_S = 1.5
+
+#: The map pane's own poll period, published to the page so the page invents no
+#: cadence of its own. Deliberately slower than the 200 ms `/state` poll: this
+#: pane's numbers are AGES read from the monitoring service and measured by it
+#: at the instant it answers, so a slower poll makes nothing look fresher — it
+#: only means the age shown is at most one period behind, which the page also
+#: displays, separately and with its owner named.
+MONITOR_POLL_PERIOD_S = 0.5
+
+#: THE DISPLAY RAMP, and the one place in v2b where a millisecond appears.
+#: `V2B-DESIGN.md` §4.2/§4.3 argue it in full; the short form:
+#:
+#: * the age is READ from the monitoring service, which originates it — this
+#:   process runs no clock over any plant signal;
+#: * no PLC node carries a pose, a pose age or a localization verdict, so there
+#:   is no verdict here that the PLC also computes;
+#: * nothing rides on it. It changes pixels. It gates no control, latches
+#:   nothing, enters no request and is read by no other part of the page;
+#: * it is not a statement about the estimate's quality — only about how old
+#:   this page's information is.
+#:
+#: Between the two endpoints the vehicle marker fades and converts from a
+#: filled marker to a hollow hatched one; past the upper endpoint it is
+#: labelled a LAST KNOWN POSITION. Every step of the ramp under-claims.
+#:
+#: THEY ARE DISPLAY VALUES, NOT MEASURED VALUES (opcua-nodes.md §12.11's
+#: design-value rule). The upper endpoint would ideally bound the inter-arrival
+#: time of `/amcl_pose` WHILE THE VEHICLE IS MOVING; no such measurement exists
+#: on this machine, because the only committed capture of that topic
+#: (viz/EVIDENCE_MONITORING.md §8) is of a STANDING vehicle — 30 messages and a
+#: 463-second age — which is the residual itself and not a sample of the moving
+#: case. The measurement is requested rather than fabricated from one
+#: confounded capture (LESSONS 2026-08-04: a bound derived from a single
+#: instance is a sample, not a bound).
+#:
+#: A standing vehicle therefore always crosses this ramp, because AMCL publishes
+#: only on a filter update. That is not a defect: it is the truth about what
+#: this page knows, and a marker that stayed solid while the vehicle stood still
+#: would be flattering the data.
+POSE_AGE_RAMP_START_MS = 1000.0
+POSE_AGE_RAMP_FULL_MS = 5000.0
+
+#: Host names the monitoring service may be addressed at. The monitoring plane
+#: is local to the operator's machine; it is never a remote transport and never
+#: the tailnet (invariant 8). A `monitor.base_url` outside this set refuses to
+#: start the process, on the precedent of `tools/check_hmi_writes.py` refusing a
+#: non-loopback endpoint outright.
+LOOPBACK_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+
 
 class ConfigError(Exception):
     """The configuration file is not one this process will run."""
@@ -416,6 +488,16 @@ def validate_config(cfg: dict, path: Path) -> None:
             )
     if not (cfg.get("opcua") or {}).get("endpoint"):
         raise ConfigError(f"{path}: opcua.endpoint is required")
+    base = (cfg.get("monitor") or {}).get("base_url")
+    if base:
+        parsed = urllib.parse.urlsplit(str(base))
+        if parsed.scheme != "http" or (parsed.hostname or "") not in LOOPBACK_HOSTS:
+            raise ConfigError(
+                f"{path}: monitor.base_url must be plain http on a loopback host "
+                f"{sorted(LOOPBACK_HOSTS)}; this file names {base!r}. The monitoring "
+                f"plane is local to the operator's machine — it is never a remote "
+                f"transport and never the tailnet (invariant 8)"
+            )
 
 
 # --------------------------------------------------------------------------- #
@@ -790,6 +872,142 @@ def _json_default(value):
     return str(value)
 
 
+# --------------------------------------------------------------------------- #
+# The monitoring plane — read, over loopback, and re-served under this origin.
+# --------------------------------------------------------------------------- #
+
+class MonitorProxy:
+    """A **GET-only** HTTP client of the monitoring service. Nothing else.
+
+    THE ONE REQUEST CONSTRUCTION IN THIS LAYER. `_get` below builds exactly one
+    `urllib.request.Request` and builds it with `method="GET"`, written as a
+    literal at the call site. There is no other code path in `hmi/` that opens a
+    socket toward `viz/`, no body is ever sent, and `tools/check_hmi_map_pane.py`
+    proves both by sweeping this file and by exercising the socket. This is the
+    write helper's allowlist pattern of `HMI_WRITABLE_PATHS`, applied to a second
+    transport and in the opposite direction.
+
+    `viz/DESIGN.md` §2 rules that service **read-only by construction of the
+    process and proven by test; not enforced by the middleware** — that layer's
+    claim about itself, quoted whole because that is the only form it has. This
+    class adds nothing that could weaken it: it sends `GET`, and no byte it
+    produces enters a vehicle domain.
+
+    NOTHING IS CACHED. Every `/state` fetch is fresh, because the ages inside it
+    are measured by the monitoring service at the instant it answers and a cache
+    would freeze exactly the numbers the map pane exists to keep honest. The
+    raster is refetched by the page only when `map_version` changes, which is the
+    monitoring design's own rule (viz/DESIGN.md §5) and not a cache of values.
+    """
+
+    #: The exact upstream paths this proxy may ever request, as a template set.
+    #: A serial is substituted; nothing else is. A path this table does not
+    #: describe is not reachable from here.
+    UPSTREAM = {
+        "vehicles": "/vehicles",
+        "state": "/vehicles/{serial}/state",
+        "map": "/vehicles/{serial}/map",
+    }
+
+    def __init__(self, base_url: str | None, timeout: float = MONITOR_FETCH_TIMEOUT_S):
+        self.base_url = (base_url or "").rstrip("/") or None
+        self.timeout = timeout
+        if self.base_url is not None:
+            # Enforced HERE as well as in `validate_config`, because `--monitor-url`
+            # would otherwise reach the socket without passing the config check.
+            # One rule, both doors.
+            parsed = urllib.parse.urlsplit(self.base_url)
+            if parsed.scheme != "http" or (parsed.hostname or "") not in LOOPBACK_HOSTS:
+                raise ConfigError(
+                    f"monitor base URL {self.base_url!r} is not plain http on a "
+                    f"loopback host {sorted(LOOPBACK_HOSTS)} — the monitoring plane "
+                    f"is local to the operator's machine (invariant 8)")
+
+    @property
+    def configured(self) -> bool:
+        return self.base_url is not None
+
+    def _get(self, kind: str, serial: str | None = None):
+        """One upstream GET. Returns (status, headers, body) or raises."""
+        template = self.UPSTREAM[kind]                     # KeyError is a bug here
+        path = template.format(serial=urllib.parse.quote(serial or "", safe=""))
+        request = urllib.request.Request(self.base_url + path, method="GET")
+        request.add_header("Accept", "*/*")
+        # No body, no cookie, no credential, and no redirect following that could
+        # take this off loopback: an HTTPRedirectHandler is deliberately absent
+        # from the opener below.
+        opener = urllib.request.build_opener(urllib.request.HTTPHandler)
+        with opener.open(request, timeout=self.timeout) as response:
+            return response.status, dict(response.headers), response.read()
+
+    # -- what the page asks for ---------------------------------------------
+
+    def envelope(self, serial: str | None) -> dict:
+        """The map pane's poll: the serial list and one vehicle's values.
+
+        The upstream payloads are passed through **verbatim** — this process
+        renames no key, recomputes no age and derives nothing. The envelope it
+        wraps them in carries only facts about THIS process's own channel (its
+        round-trip time, whether it reached the service, why not) and the two
+        display-ramp endpoints of `POSE_AGE_RAMP_*`, so the page invents no
+        millisecond of its own.
+        """
+        meta = {
+            "configured": self.configured,
+            "base_url": self.base_url,
+            "reachable": False,
+            "reason": None,
+            "fetch_ms": None,
+            "fetched_utc": _utc_now(),
+            "poll_period_ms": round(MONITOR_POLL_PERIOD_S * 1000.0, 1),
+            "age_ramp_start_ms": POSE_AGE_RAMP_START_MS,
+            "age_ramp_full_ms": POSE_AGE_RAMP_FULL_MS,
+        }
+        if not self.configured:
+            meta["reason"] = ("no monitor.base_url in this configuration — this "
+                              "backend is not reading the monitoring service")
+            return {"monitor": meta, "vehicles": None, "state": None}
+        started = time.monotonic()
+        try:
+            _, _, raw = self._get("vehicles")
+            vehicles = json.loads(raw)
+            serials = list(vehicles.get("serials") or [])
+            chosen = serial if serial in serials else (serials[0] if serials else None)
+            state = None
+            if chosen is not None:
+                _, _, raw_state = self._get("state", chosen)
+                state = json.loads(raw_state)
+            meta["reachable"] = True
+            meta["serial"] = chosen
+            meta["fetch_ms"] = round((time.monotonic() - started) * 1000.0, 1)
+            return {"monitor": meta, "vehicles": vehicles, "state": state}
+        except Exception as exc:                       # noqa: BLE001 - see below
+            # EVERY upstream failure is one operator-visible fact: the monitoring
+            # service is not answering. It is deliberately broad — a refused
+            # connection, a timeout, a half-written body and a payload that is
+            # not JSON are the same thing to the operator, and none of them is
+            # allowed to reach the page as a stale value or to take this process
+            # down. The process plane is untouched by all of them.
+            meta["reason"] = f"{type(exc).__name__}: {exc}"
+            meta["fetch_ms"] = round((time.monotonic() - started) * 1000.0, 1)
+            return {"monitor": meta, "vehicles": None, "state": None}
+
+    def raster(self, serial: str):
+        """The WHOLE occupancy grid, passed through byte for byte.
+
+        The upstream body is gzipped and is forwarded compressed, with the
+        upstream `X-Map-*` headers copied unchanged, so the bytes the page paints
+        are the bytes the monitoring service served — which are the bytes it
+        received from the vehicle's map server. Never a crop, and never re-encoded
+        here.
+        """
+        status, headers, body = self._get("map", serial)
+        passthrough = {k: v for k, v in headers.items()
+                       if k.lower().startswith("x-map-")
+                       or k.lower() == "content-encoding"}
+        return status, passthrough, body
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
@@ -804,36 +1022,126 @@ class Handler(BaseHTTPRequestHandler):
     controls: Controls
     published: Published
     liveness: PageLiveness
+    monitor: MonitorProxy
 
-    def _seen(self) -> None:
-        """§10.8 H6: **any** request from the page refreshes the beacon.
+    #: v2b: the map pane's paths, and the ONLY paths excluded from the H6 beacon
+    #: below. `V2B-DESIGN.md` §2.2 argues it: a monitoring-plane fetch proves the
+    #: browser is running and proves NOTHING about the channel that carries the
+    #: operator's requests, which is what the deadman exists to watch. Counting
+    #: it would let a page whose `/state` poll had died keep the teleop enable
+    #: armed on the strength of a map refresh. The exclusion can only make the
+    #: beacon go stale SOONER — requests to rest sooner, the enable dropped
+    #: sooner — which is the direction that fails safe.
+    MONITOR_PATHS: frozenset[str] = frozenset({
+        "/monitor/vehicles", "/monitor/state", "/monitor/map",
+    })
 
-        Called first in both request methods, before the path is examined, so
+    def _seen(self, path: str) -> None:
+        """§10.8 H6: every request from the page refreshes the beacon, except §2.2's.
+
+        Called first in both request methods, before the path is dispatched, so
         every endpoint counts and a 404 counts too — the beacon's subject is the
         page's liveness, never which endpoint it happened to reach. It is
         deliberately not hooked into `handle_one_request`, which on a persistent
         connection runs before the next request has arrived and would credit the
         page with a request it has not yet made.
+
+        The one exclusion is the map pane's three paths, on any verb, for the
+        reason written on `MONITOR_PATHS` above.
         """
+        if path in self.MONITOR_PATHS:
+            return
         self.liveness.seen()
+
+    def __getattr__(self, name):
+        """Every verb but GET and POST is refused before any handler exists.
+
+        `__getattr__` runs only when normal attribute lookup fails, so the two
+        defined methods are found normally and never reach here; everything else
+        the stdlib dispatcher looks for — PUT, DELETE, PATCH, and any verb a
+        client invents — lands on one refusal that answers **405** and returns,
+        without a byte of any request body being read.
+
+        The stdlib's own answer would be 501, which is a refusal too. 405 with an
+        `Allow` header says the same thing in the form the monitoring service
+        already says it (`viz/monitor/http_face.py`), so one sweep over both
+        layers can assert one shape. This process's write surface remains exactly
+        what it was: `POST /control`, and nothing else, anywhere.
+        """
+        if name.startswith("do_"):
+            return self._method_not_allowed
+        raise AttributeError(name)
+
+    def _method_not_allowed(self) -> None:
+        body = json.dumps({
+            "error": "method not allowed", "allow": "GET, POST",
+            "why": "this process serves one page, two read endpoints and one "
+                   "control endpoint. It has no other write surface to reach "
+                   "with any verb.",
+        }).encode("utf-8")
+        # The connection is closed on a refusal deliberately: an unread body
+        # would otherwise be parsed as the next request on a keep-alive
+        # connection, and refusing then mis-parsing is worse than either.
+        self._send(405, body, "application/json",
+                   {"Allow": "GET, POST", "Connection": "close"})
+        self.close_connection = True
 
     def log_message(self, fmt, *args):  # noqa: A003 - stdlib signature
         LOG.debug("http %s", fmt % args)
 
-    def _send(self, code: int, body: bytes, content_type: str) -> None:
+    def _send(self, code: int, body: bytes, content_type: str,
+              extra: dict | None = None) -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for key, value in (extra or {}).items():
+            self.send_header(key, str(value))
         self.end_headers()
         self.wfile.write(body)
 
     def _json(self, code: int, payload: dict) -> None:
         self._send(code, json.dumps(payload).encode("utf-8"), "application/json")
 
+    def _query(self, name: str) -> str | None:
+        parts = self.path.split("?", 1)
+        if len(parts) < 2:
+            return None
+        values = urllib.parse.parse_qs(parts[1]).get(name)
+        return values[0] if values else None
+
+    def _monitor(self, path: str) -> bool:
+        """The map pane's three GET paths. Returns True if this handled the path.
+
+        Read-only in both directions: these three answer values the monitoring
+        service produced, and no request that reaches them carries or accepts
+        anything. They exist on `do_GET` and on no other verb.
+        """
+        if path == "/monitor/vehicles" or path == "/monitor/state":
+            self._json(200, self.monitor.envelope(self._query("serial")))
+            return True
+        if path == "/monitor/map":
+            serial = self._query("serial")
+            if not serial:
+                self._json(400, {"error": "serial is required"})
+                return True
+            try:
+                status, headers, body = self.monitor.raster(serial)
+            except Exception as exc:                   # noqa: BLE001
+                # The same one operator-visible fact as the state fetch: the
+                # monitoring service is not answering. The page greys the pane.
+                self._json(502, {"error": f"{type(exc).__name__}: {exc}",
+                                 "monitoring_service": self.monitor.base_url})
+                return True
+            self._send(status, body, "application/octet-stream", headers)
+            return True
+        return False
+
     def do_GET(self) -> None:  # noqa: N802 - stdlib signature
-        self._seen()
         path = self.path.split("?", 1)[0]
+        self._seen(path)
+        if self._monitor(path):
+            return
         if path in ("/", "/index.html"):
             try:
                 body = (STATIC_DIR / "index.html").read_bytes()
@@ -853,8 +1161,18 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "no such path"})
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib signature
-        self._seen()
-        if self.path.split("?", 1)[0] != "/control":
+        path = self.path.split("?", 1)[0]
+        self._seen(path)
+        if path in self.MONITOR_PATHS:
+            # The map pane's paths exist on GET and on no other verb. A POST at
+            # one of them is refused here, before any body is read, so this
+            # process has no write surface facing the monitoring plane in either
+            # direction.
+            self._json(405, {"error": "method not allowed", "allow": "GET",
+                             "why": "the map pane is a read-only view of the "
+                                    "monitoring plane; it has no write surface"})
+            return
+        if path != "/control":
             self._json(404, {"error": "no such path"})
             return
         try:
@@ -1459,6 +1777,9 @@ async def amain(args: argparse.Namespace) -> int:
     Handler.controls = controls
     Handler.published = published
     Handler.liveness = liveness
+    Handler.monitor = MonitorProxy(
+        None if args.no_monitor
+        else (args.monitor_url or (cfg.get("monitor") or {}).get("base_url")))
     host = (cfg.get("http") or {}).get("host", "127.0.0.1")
     port = int(args.http_port or (cfg.get("http") or {}).get("port", 8088))
     httpd = ThreadingHTTPServer((host, port), Handler)
@@ -1466,6 +1787,14 @@ async def amain(args: argparse.Namespace) -> int:
     threading.Thread(target=httpd.serve_forever, name="hmi-http", daemon=True).start()
     LOG.info("HMI UI on http://%s:%d/ — loopback only, one operator, local cell "
              "(ADR 0008 D2.7)", host, port)
+    if Handler.monitor.configured:
+        LOG.info("map pane reads the monitoring service at %s — GET only, over "
+                 "loopback, nothing cached; the display ramp is %.0f..%.0f ms and "
+                 "gates nothing (V2B-DESIGN §2, §4)", Handler.monitor.base_url,
+                 POSE_AGE_RAMP_START_MS, POSE_AGE_RAMP_FULL_MS)
+    else:
+        LOG.info("no monitor.base_url configured — the map pane renders as "
+                 "'monitoring service not configured' and nothing else changes")
     LOG.info("operator-page window UI_POLL_STALE_TIME = %.0f ms (%.0f x the page's "
              "%.0f ms GET /state); with no page talking, the five requests are held at "
              "rest and the heartbeat keeps running (§10.8 H6)",
@@ -1519,6 +1848,17 @@ def main() -> int:
                     "safety device.")
     parser.add_argument("--config", default=str(HERE / "config.yaml"))
     parser.add_argument("--http-port", type=int, default=None)
+    parser.add_argument("--monitor-url", default=None,
+                        help="base URL of the read-only monitoring service "
+                             "(viz/, GET only, loopback). Overrides "
+                             "monitor.base_url; absent means the map pane "
+                             "renders as not configured")
+    parser.add_argument("--no-monitor", action="store_true",
+                        help="read no monitoring service at all, whatever the "
+                             "config names. The map pane then says so in words "
+                             "rather than reporting an unreachable service, "
+                             "because 'not configured' and 'not answering' are "
+                             "two different facts about the operator's day")
     parser.add_argument("--evidence-csv", default=None,
                         help="per-cycle record; the path is a stem and one file per "
                              "session is written, never truncated")
