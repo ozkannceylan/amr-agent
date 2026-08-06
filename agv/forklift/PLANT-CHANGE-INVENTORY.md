@@ -354,3 +354,178 @@ No simulator was run, `model.sdf` is unedited (line 1002 still
 touched. Classifications rest on what the evidence files themselves
 state; where a file could not settle its own dependence, the entry says
 so rather than deciding.
+
+---
+
+# 2026-08-06 — what the brake and controller disable re-qualify (m5-50)
+
+The second entry in this file, taken **before** the edit, by the method
+sections 1-5 above established. At the moment of writing, `model.sdf` is at
+`md5 48e22f3fac3baa422e22b1a2d452cd9f`, its three actuator plugins still
+name `/forklift/gz/steer_cmd`, `/forklift/gz/traction_cmd` and
+`/forklift/gz/fork_cmd` (lines 1052, 1066, 1097), no simulator was run
+for this section, and the repository head is `232f3de`.
+
+## 6. What the change is, physically
+
+The obligation is `plc/forklift-safety/SPEC.md` §11.7's table and the
+design spec's §5 observable: on `TorqueOffDemand` the **joint controller
+is disabled and a holding brake is applied**, the vehicle is **deaf to
+commands**, and it **stays deaf if the envelope reopens** — authority
+returns only when the demand falls, which only the monitored reset can
+cause.
+
+**The move.** The model's three actuator plugins stop listening on the
+topics the vehicle stack publishes and listen instead on three
+**terminal** topics of their own:
+
+| Plugin | Before | After |
+|---|---|---|
+| `JointPositionController` `steer_joint` | `/forklift/gz/steer_cmd` | `/forklift/gz/actuator/steer_cmd` |
+| `JointController` `drive_wheel_joint` | `/forklift/gz/traction_cmd` | `/forklift/gz/actuator/traction_cmd` |
+| `JointPositionController` `mast_joint` | `/forklift/gz/fork_cmd` | `/forklift/gz/actuator/fork_cmd` |
+
+Nothing else in the file moves: no gain, no geometry, no mass, no
+inertia, no sensor, no rate, no joint limit. The gap the rename opens is
+filled by one new node, `scripts/sto_contactor.py`, which is the **only**
+publisher of the three terminals and which forwards the three command
+topics one-for-one while torque is present.
+
+**So the change is not additive in effect, and this is why.** It inserts
+a component into the path between every command publisher and every
+actuator. Three consequences follow, and they are what section 7
+classifies against:
+
+1. **Latency.** Every actuator command now crosses one more node. The
+   size of that hop is not predictable from the design — this repository
+   has already measured the same class of hop at between 0.4 ms and
+   24 ms on the same machine (`EVIDENCE_ENVELOPE.md` §7 and its m5-21
+   correction), so it is measured here rather than argued.
+2. **Continuity.** Five committed publishers today address the plant
+   directly — `forklift_io.py`, `localization_run.py`, `steer_bench.py`,
+   `safe_speed_bench.py` and `sim/scenarios/warehouse_mapping_route.py` —
+   besides any `ros2 topic pub` in a recipe. All of them now address a
+   subscriber that did not exist when they were written. A publisher that
+   emits once immediately after construction can lose that message to
+   discovery (LESSONS 2026-07-28, the bare `--once` entry), and after
+   this change losing it means losing it at the plant.
+3. **What "the vehicle did not move" now means.** Before the change,
+   a stationary vehicle under a command had exactly one interesting
+   cause. After it, there is a second: the contactor. That is section 8.
+
+## 7. The classification rule, and the per-figure verdict
+
+A figure is **affected** iff its value depends on (i) the **latency or
+continuity** of the actuator command path, or (ii) the **topic name** the
+model listens on, or (iii) an observation that the vehicle **failed to
+move**, which the change gives a second possible cause.
+
+A figure is **unaffected** if it is sensor-side, static geometry, TF or
+contract, computed without a simulator, taken on a stationary vehicle
+whose stillness is not the claim, or measured entirely upstream of
+`forklift_io`'s plant publication.
+
+Classes as section 1: **U** unaffected · **A** agent re-measurable ·
+**O** owner-only · **?** unclear.
+
+### 7.1 `agv/forklift/` evidence
+
+| File / figure | Class | Reason |
+|---|---|---|
+| `EVIDENCE_ENVELOPE.md` §3 enable-drop: reaction 0.0681 s, **stop distance 0.1738 m**, standstill 0.850 s | **A** | (i) directly. The edge-to-standstill interval contains the whole command path; one added hop lengthens it by the hop's latency times the speed at the edge. At 0.40 m/s a 1 ms hop is 0.4 mm and a 24 ms hop is 9.6 mm on a 173.8 mm figure — the difference between negligible and 6 %, which is why it is measured and not argued |
+| `EVIDENCE_ENVELOPE.md` §4 stale (0.3715 m) and §5 clamp (0.2187 m) stop distances | **A** | Same mechanism, same path, different trigger |
+| `EVIDENCE_ENVELOPE.md` §6 release lurch (0.0852 m creep, the LESSONS 2026-08-04 terminal-value entry) | **A** | (i) and (iii): the lurch is a continuity observation of the terminal, which is now a different topic with a different publisher |
+| `EVIDENCE_ENVELOPE.md` §7 pass-through residual `0.000e+00` and gate latency | **U** | Measured `/cmd_vel_smoothed` to `/cmd_vel_gated`, entirely **upstream** of the plant publication. The contactor is downstream of both |
+| `EVIDENCE_ENVELOPE.md` §8 permit, §9 readback | U | Envelope-side datum observations, no actuator path in them |
+| `EVIDENCE_ENVELOPE.md` §10 Nav2-goal run (stop distance, decel, code-105 abort) | **A** | A drive; its stop figures are (i) |
+| `EVIDENCE_MODEL.md` §2.1 steer step, §2.2 traction chain, §2.3/§3 fork | **A**, low priority | All three are commanded-to-observed step responses through the path. The file is a dated capture already carrying supersession notes; the honest treatment is one more note plus a confirmation that the chain still executes, not a re-run of every step |
+| `EVIDENCE_MODEL.md` §7 config/model agreement | **A** | A static comparison that **reads `model.sdf`**, which changed. Costs seconds |
+| `EVIDENCE_MODEL.md` §4 node rates, §5 straight drive to the wall, §6 obstacle matrices | U | Rate- and sensor-side |
+| `EVIDENCE_SENSOR_TF.md`, `EVIDENCE_SENSOR_COVERAGE.md`, `EVIDENCE_FIELD_EVALUATION.md` | U | Sensor geometry and scan evaluation, on a stationary or irrelevant plant. No actuator command appears in any figure |
+| `EVIDENCE_ODOM_TF.md` | U | Transport and identity properties; its drive is an illustration by the file's own statement |
+| `EVIDENCE_ODOMETRY.md` §§1–12 drift figures | U | Properties of the error model and the gyro bias, reconciled closed-form by the file itself. A millisecond of command latency does not enter them |
+| `EVIDENCE_ODOMETRY.md` §12 idle holds, §13 post-drive idle | U | At rest, no command in flight |
+| `EVIDENCE_ODOMETRY.md` §14/§15 safe-speed channel noise, sigma, the two derived constants | U | Measured on the **read** side of the shaft. `plc/forklift-safety/SPEC.md` §11.1 quotes these; nothing in the reading path moves |
+| `EVIDENCE_LOCALIZATION.md` (a) route, (b) converge | **A**, low priority | (i): case (b) is open-loop through the plant by construction, so any change in the executed trajectory changes the curve |
+| `EVIDENCE_LOCALIZATION.md` 0.141 m floor, (c) dwell | U | Registration, and a stationary vehicle |
+| `EVIDENCE_NAV2.md` §3.3 convcheck, §5.1–§5.4 cases A–D, §11.6 five repeats | **A** | Drives — and §5.4 case D is **the (iii) case**: its result is "refusal 208, vehicle moved 0.000 m". After this change that sentence no longer distinguishes a correct refusal from an unpublished terminal |
+| `EVIDENCE_NAV2.md` §1 parameter traps, §2 footprint, §3.1/§3.2 closed-form conversion, §5.5 planner bench | U | No simulator, or no plant |
+| `EVIDENCE_VEHICLE_IMAGE.md` proofs 1, 2, 4, 5 and the wiring claim | U | Graph and interface properties |
+| `EVIDENCE_VEHICLE_IMAGE.md` proof 3 (a drive inside the image) | **A**, low priority | (i), and the image must now also carry the contactor — a **composition** claim, which is what proof 3 is about |
+| `ARRIVAL-GEOMETRY.md` derived geometry (R metres-per-radian, the tolerance product) | U | Kinematic properties of the vehicle, independent of who publishes the command |
+
+### 7.2 Files this layer does not own — findings, not edits
+
+| File | Class | Finding or request |
+|---|---|---|
+| `sim/worlds/FORKLIFT_ARENA_EVIDENCE.md` §5 traction pulse, §6 steer step | **A (sim/-owned)** | Both are commanded-to-observed responses through the path. §5 also still carries the contradiction §2.1 of this file recorded; this change does not settle it |
+| `sim/scenarios/warehouse_mapping_route.py` | **request** | Publishes `gz_traction_cmd` and `gz_steer_cmd` directly. It keeps working unchanged — the contactor forwards those topics — but the scenario now depends on the contactor running, which `vehicle.launch.py` starts by default |
+| `plc/`, `bridge/`, `hmi/` evidence | U | PLC-side, HMI-to-PLC and OPC UA figures. No vehicle actuator appears in any of them |
+| `bridge/` | **request** | `TorqueOffDemand`'s mirror must reach ROS as a Bool. Section 10 states the topic and the polarity the vehicle needs |
+
+## 8. What the change might be flattering, and what it exposes
+
+The 2026-08-05 lesson attached to this file's first entry is that a fix
+un-masks as readily as it removes: restoring the steer axis's authority
+made two committed reverse cases **worse**, because a dead actuator had
+been flattering a route on which doing nothing was correct. The
+symmetric question here has two answers, and they run in opposite
+directions.
+
+**What the change could flatter.** A contactor that opens when it should
+not — or simply a contactor that is not running — produces a vehicle that
+does not move, and *every refusal-shaped observation in this repository
+reads that as a pass*. `EVIDENCE_NAV2.md` §5.4's "the vehicle moved
+0.000 m", the rotation refusals of §3.3, the creep-deadband deadlock of
+LESSONS 2026-08-05, and the whole of the SS1 observable itself all have
+the shape *nothing happened, and that is correct*. After this change none
+of them is self-validating.
+
+**The rule this forces, applied to every run in section 9:** an
+observation that the vehicle did not move is evidence only beside a
+**positive control in the same run** — a command that does move it,
+before or after, through the same path. A run without one is discarded,
+not repaired.
+
+**What the change could expose.** The reverse direction is real too. The
+contactor is the first component to sit downstream of *all* the direct
+plant publishers, so a figure that was quietly relying on a bench
+bypassing `forklift_io` now goes through a component that records what it
+forwards. Nothing is predicted from that; it is written down so that a
+surprise in section 9 is attributed rather than explained away.
+
+**What is deliberately not claimed.** The contactor and the brake are a
+**stand-in** for an onboard hardwired inhibit, written in Python, on the
+process side of the vehicle. No Category, Performance Level, SIL or PFH
+is claimed for them or implied by them (ADR 0011 D5). The safety path
+they model is hardwired and onboard in the architecture (invariant 1);
+what is built here is a simulation of its effect on the plant.
+
+## 9. The re-measurement order — by what a criterion or a design cites
+
+Taken in this order. Every run states its n; every no-motion observation
+carries its positive control; results are written into the evidence file
+as they land rather than held to the end.
+
+| # | What | Why here | Instrument |
+|---|---|---|---|
+| 0 | **Baseline, before the edit**: actuator-path latency and a stop observation on the unedited tree | There is no delta without a before, and section 7's whole first column turns on the size of one hop | `scripts/sto_bench.py --phase baseline` |
+| 1 | **The added hop**, after the edit: forwarded-command latency and one-for-one fidelity, n stated | Decides whether the A-class stop distances need re-running or only a note | `scripts/sto_bench.py --phase passthrough` |
+| 2 | **The observable** (design spec §5): a command after torque-off produces nothing; the envelope reopens and it still produces nothing; the demand falls and motion returns on a fresh command | This is the deliverable. Without it SS1's two stages are indistinguishable | `scripts/sto_bench.py --phase observable`, positive control at both ends |
+| 3 | **`EVIDENCE_ENVELOPE.md` §3 stop distance**, re-run | The one A-class figure a gate-criterion path actually cites | `envelope_run.py`, scenario `enable-drop` |
+| 4 | `EVIDENCE_MODEL.md` §7 config/model agreement | A static check that reads the changed file | `check_contract_topics.py` |
+| 5 | `EVIDENCE_NAV2.md` case set and `EVIDENCE_LOCALIZATION.md` (a)/(b) | Supporting figures; no criterion cites them and the closure plan freezes autonomy as a prototype | Deferred with the qualifier, listed in the report |
+| 6 | `sim/` ARENA §5 and §6 | Not this layer's file | Request in the report |
+
+## 10. The vehicle-side contract this change creates
+
+Written here so the consumer is built against a contract rather than
+discovered:
+
+| Item | Value |
+|---|---|
+| Demand in | `/forklift/safety/torque_off_demand`, `std_msgs/Bool`, published by the bridge from the `TorqueOffDemand` mirror |
+| Latch | Opens on an observed `TRUE`; **stays open** while `TRUE` and after it, until an observed `FALSE`. The envelope has no vote |
+| Absence of the demand | **Not torque-off.** Loss of supervision is a degraded mode, not a safety event (invariant 2), and the controlled stop it needs already exists in the envelope gate's stale rule. STO is **asserted, never inferred** — the alternative would put a safety reaction on the network's silence and would make every run without a bridge a dead vehicle |
+| While open | The traction terminal is driven to `0.0` continuously — the holding brake. Steer and fork terminals are held at their last forwarded value: explicit standing orders, because silence is a command wherever a consumer holds (LESSONS 2026-08-04) |
+| Applied state out | `/forklift/safety/torque_off_applied`, `std_msgs/Bool`, for the monitoring plane. Read-only; nothing commands from it |

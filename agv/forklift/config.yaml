@@ -726,6 +726,29 @@ topics:
   gz_traction_cmd: /forklift/gz/traction_cmd
   gz_fork_cmd: /forklift/gz/fork_cmd
 
+  # ---- THE ACTUATOR TERMINALS, BEHIND THE STO CONTACTOR (m5-50) ----
+  #
+  # These three, and not the three above, are what model.sdf's joint
+  # controllers listen on. The three above are what the vehicle stack
+  # publishes; scripts/sto_contactor.py is the ONLY publisher of the
+  # three below and it is what joins them.
+  #
+  # WHY THE MODEL MOVED RATHER THAN THE STACK. Five committed publishers
+  # address /forklift/gz/*_cmd directly - forklift_io.py,
+  # localization_run.py, steer_bench.py, safe_speed_bench.py and
+  # sim/scenarios/warehouse_mapping_route.py - so an interlock placed in
+  # any one node would be bypassed by the other four. An interlock at
+  # the MODEL's own inputs cannot be bypassed by anything that speaks
+  # ROS, which is what "the vehicle is deaf to commands" has to mean.
+  #
+  # The bridge carries these, not the stack-side names. A gz topic list
+  # therefore shows the terminals and never the commands, which is the
+  # right way round: the terminals are the motor's, the commands are the
+  # software's.
+  gz_actuator_steer_cmd: /forklift/gz/actuator/steer_cmd
+  gz_actuator_traction_cmd: /forklift/gz/actuator/traction_cmd
+  gz_actuator_fork_cmd: /forklift/gz/actuator/fork_cmd
+
   # ---- produced by gz, renamed by the bridge onto the ROS names below --
   # The gz name keeps the /forklift/gz/ prefix so that a gz side topic list
   # reads as one namespace; the ROS name is the one vehicle software uses.
@@ -1047,6 +1070,21 @@ topics:
   # answer to "what mode is the machine in" (M1, M4).
   mode_applied: /forklift/mode/applied
   vehicle_heartbeat: /forklift/vehicle/heartbeat
+
+  # ---- THE TORQUE-OFF DEMAND AND ITS APPLIED STATE (m5-50) ----
+  #
+  # THE DEMAND IS THE F-PROGRAM'S, NOT THIS LAYER'S. It is formed inside
+  # the CPU by the SS1 sequencer of plc/forklift-safety/SPEC.md section
+  # 11.7, mirrored under Forklift/Safety/TorqueOffDemand, and carried to
+  # ROS by the bridge. The vehicle consumes it and never forms it: one
+  # datum, one owner (invariant 10).
+  #
+  # THE APPLIED STATE IS A READBACK AND NOTHING COMMANDS FROM IT. It is
+  # what the contactor did, published for the monitoring plane so that
+  # "the vehicle is not moving" and "the vehicle cannot move" can be told
+  # apart on a screen.
+  safety_torque_off_demand: /forklift/safety/torque_off_demand
+  safety_torque_off_applied: /forklift/safety/torque_off_applied
 
 navigation:
   # ============ THE Twist -> TRICYCLE CONVERSION, AND ITS TWO EDGES ============
@@ -1533,3 +1571,73 @@ field:
   # a collision rather than overwriting (LESSONS 2026-07-28).
   log_dir: evidence/field_evaluation
 
+
+# ============================================================================
+# THE STO CONTACTOR - TORQUE REMOVAL AT THE PLANT (m5-50)
+# ============================================================================
+#
+# Read by scripts/sto_contactor.py, which sits between the vehicle's
+# command topics and model.sdf's actuator terminals and is the only
+# publisher of the terminals.
+#
+# WHAT THIS IS, AND WHAT IT IS NOT. It is a STAND-IN for the hardwired
+# onboard inhibit CLAUDE.md's topology draws as the thick arrow, built in
+# Python on the process side of the vehicle so that the second stage of
+# SS1 has an observable effect on the plant. It is not a safety function
+# and nothing here claims or implies a Category, a Performance Level, a
+# SIL or a PFH (ADR 0011 D5). The demand it obeys is formed in the
+# F-program; this node only executes it.
+#
+# THE TWO HALVES OF TORQUE REMOVAL, AND WHY BOTH ARE NEEDED.
+#   controller disabled  no command from any publisher reaches any
+#                        terminal while the latch is open. This is what
+#                        makes the vehicle DEAF, and it is what
+#                        distinguishes SS1 stage two from the controlled
+#                        stop the envelope already performs: the envelope
+#                        hands authority back the moment it goes
+#                        permissive again, and this does not.
+#   holding brake        the traction terminal is driven to zero
+#                        continuously rather than left silent. gz's
+#                        JointController holds its last command for ever,
+#                        so silence there is a standing order and not an
+#                        absence (LESSONS 2026-08-04); a standing zero at
+#                        the terminal is what pins the shaft.
+sto:
+  # Rate at which the standing orders are re-published while the latch is
+  # open. It is not a control rate - the plant holds the last value
+  # anyway - it is a LIVENESS rate, so that a terminal driven by this
+  # node is visibly driven and not merely quiet.
+  hold_publish_hz: 20.0
+
+  # The traction value the brake stands on. Zero, and stated as a named
+  # constant rather than a literal so that no future edit can make the
+  # brake a small non-zero creep by accident - which is exactly the
+  # defect LESSONS 2026-08-04 records against the envelope's release.
+  brake_traction_radps: 0.0
+
+  # What the steer and fork terminals do while the latch is open: they
+  # HOLD the last value that was forwarded through them, re-published at
+  # hold_publish_hz. Neither is driven to zero, and that is deliberate -
+  # zeroing the fork terminal would command the carriage to the floor,
+  # and zeroing the steer terminal would command a straightening
+  # manoeuvre, both of which are motion demanded BY the safe state. A
+  # held position is the only value that demands nothing.
+  #
+  # Before anything has been forwarded there is nothing to hold, and the
+  # node then publishes nothing on those two terminals: the model's
+  # position controllers have no command either, which is the same state
+  # a freshly spawned vehicle is in.
+  hold_last_position: true
+
+  # How long the node waits, at start, for the terminals' subscribers to
+  # appear before it begins forwarding. A publisher that emits into a
+  # graph that has not finished discovery loses the message
+  # (LESSONS 2026-07-28), and the message it would lose here is a plant
+  # command.
+  discovery_settle_s: 0.5
+
+  # Log throttle for the forwarded-command counters. Transitions of the
+  # latch are NEVER throttled: every open and every close is logged with
+  # its cause on its own line, because that log is what correlates a
+  # no-motion observation with a torque-off rather than with a dead node.
+  log_throttle_s: 5.0

@@ -76,6 +76,7 @@ _TF_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'sensor_tf.py')
 _FIELD_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'field_evaluation.py')
 _SAFE_SPEED_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts',
                                   'safe_speed_channels.py')
+_STO_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'sto_contactor.py')
 _WHEEL_ODOM_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'wheel_odometry.py')
 _IMU_GATE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'imu_gate.py')
 _EKF_YAML = os.path.join(_FORKLIFT_DIR, 'ekf.yaml')
@@ -92,9 +93,20 @@ _SPAWN = _CFG['spawn']
 _BRIDGE_ARGS = [
     '{}@rosgraph_msgs/msg/Clock[gz.msgs.Clock'.format(_TOPICS['clock']),
 
-    '{}@std_msgs/msg/Float64]gz.msgs.Double'.format(_TOPICS['gz_steer_cmd']),
-    '{}@std_msgs/msg/Float64]gz.msgs.Double'.format(_TOPICS['gz_traction_cmd']),
-    '{}@std_msgs/msg/Float64]gz.msgs.Double'.format(_TOPICS['gz_fork_cmd']),
+    # THE ACTUATOR TERMINALS, NOT THE COMMAND TOPICS (m5-50). model.sdf's
+    # three joint controllers listen on these; scripts/sto_contactor.py
+    # below is their only publisher and is what joins them to
+    # /forklift/gz/*_cmd, which every vehicle node still publishes
+    # unchanged. Bridging the terminals rather than the commands is what
+    # puts the STO contactor INSIDE the path instead of beside it: with
+    # the contactor's latch open, nothing any ROS publisher does reaches
+    # the plant.
+    '{}@std_msgs/msg/Float64]gz.msgs.Double'.format(
+        _TOPICS['gz_actuator_steer_cmd']),
+    '{}@std_msgs/msg/Float64]gz.msgs.Double'.format(
+        _TOPICS['gz_actuator_traction_cmd']),
+    '{}@std_msgs/msg/Float64]gz.msgs.Double'.format(
+        _TOPICS['gz_actuator_fork_cmd']),
 
     '{}@sensor_msgs/msg/JointState[gz.msgs.Model'.format(_TOPICS['gz_joint_state']),
     '{}@nav_msgs/msg/Odometry[gz.msgs.Odometry'.format(_TOPICS['gz_odom']),
@@ -376,6 +388,18 @@ def generate_launch_description():
         'nodes', default_value='true',
         description='Start forklift_io and obstacle_zone'))
     ld.add_action(DeclareLaunchArgument(
+        'sto_contactor', default_value='true',
+        description='Start scripts/sto_contactor.py, the STO contactor. '
+                    'model.sdf\'s joint controllers listen on the actuator '
+                    'terminals and this node is their only publisher, so '
+                    'setting it false leaves the plant with no command '
+                    'source at all and the vehicle does not move. It is '
+                    'separate from "nodes" because the benches that run '
+                    'with nodes:=false still need the plant reachable. It '
+                    'is a STAND-IN for the hardwired onboard inhibit and '
+                    'not a safety function: no Category, no Performance '
+                    'Level, no SIL, no PFH (ADR 0011 D5).'))
+    ld.add_action(DeclareLaunchArgument(
         'tf', default_value='true',
         description='Publish /tf_static for the three sensor frames. '
                     'Separate from "nodes" because SLAM and Nav2 need the '
@@ -587,6 +611,35 @@ def generate_launch_description():
         name='sensor_tf',
         output='screen',
         condition=IfCondition(tf),
+    ))
+
+    # ---- the STO contactor (m5-50) ----
+    #
+    # ON WHENEVER THE PLANT IS, AND NOT TIED TO `nodes`. model.sdf's joint
+    # controllers listen on the actuator terminals and this node is their
+    # only publisher, so without it NOTHING reaches the plant - including
+    # the four committed benches that publish the command topics directly
+    # with nodes:=false. Tying it to `nodes` would have made every one of
+    # those runs a silently dead vehicle.
+    #
+    # THE FAIL DIRECTION, AND ITS COST. This node's absence is a vehicle
+    # that cannot move, never one that moves unsupervised, so forgetting
+    # it is safe. What it is not is INVISIBLE: after this node exists,
+    # "the vehicle did not move" has a second cause, and every evidence
+    # run that asserts stillness needs a positive control in the same run
+    # (PLANT-CHANGE-INVENTORY.md section 8).
+    #
+    # IT IS A STAND-IN for the hardwired onboard inhibit, in Python, on
+    # the process side of the vehicle. No Category, Performance Level, SIL
+    # or PFH is claimed for it or implied by it (ADR 0011 D5). The demand
+    # it obeys is formed in the F-program and reaches ROS over the bridge;
+    # this node forms nothing.
+    ld.add_action(ExecuteProcess(
+        cmd=[sys.executable, _STO_SCRIPT, '--config', config,
+             '--ros-args', '-p', 'use_sim_time:=true'],
+        name='sto_contactor',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('sto_contactor')),
     ))
 
     # The two vehicle nodes. They are plain scripts on purpose: this

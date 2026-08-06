@@ -1,0 +1,36 @@
+{
+  "phase": "observable",
+  "steps": [
+    {
+      "step": "O1 positive control",
+      "pass": true,
+      "detail": "moved 1.1958 m under a direct plant command (needs > 0.1 m)"
+    },
+    {
+      "step": "O2 torque-off applied",
+      "pass": true,
+      "detail": "contactor reported applied=True within 2 s"
+    },
+    {
+      "step": "O3 deaf, direct command",
+      "pass": true,
+      "detail": "moved 0.0000 m with 161 commands delivered to the plant boundary, shaft 0.0000 rad/s"
+    },
+    {
+      "step": "O4 deaf on envelope reopen",
+      "pass": true,
+      "detail": "moved 0.0000 m while the converter formed 130 setpoints and 130 commands reached the plant boundary, last 3.3333 rad/s"
+    },
+    {
+      "step": "O5 release, no auto-resume",
+      "pass": true,
+      "detail": "contactor reported applied=False and the vehicle crept 0.0000 m in 2 s during which no non-zero command was published by anyone"
+    },
+    {
+      "step": "O6 positive control after",
+      "pass": true,
+      "detail": "moved 2.3727 m on the SAME permissive envelope and the SAME Twist that produced nothing at O4 (needs > 0.1 m)"
+    }
+  ],
+  "all_pass": true
+}

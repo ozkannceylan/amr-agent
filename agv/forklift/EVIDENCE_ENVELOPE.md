@@ -720,3 +720,60 @@ python3 agv/forklift/scripts/envelope_run.py analyse \
 and the writer was stopped before anything was copied (LESSONS
 2026-07-28): every run's processes were killed by the driver before its
 files were touched, so no archive here is a snapshot of an open stream.
+
+---
+
+## 13. 2026-08-06 — the STO contactor in the actuator path (m5-50)
+
+**What changed under this file.** `model.sdf`'s three joint controllers
+now listen on `/forklift/gz/actuator/*_cmd`, and
+`scripts/sto_contactor.py` is the terminals' only publisher, forwarding
+`/forklift/gz/*_cmd` to them while torque is present. Every command this
+file's scenarios emit therefore crosses one more node than it did when
+§§3–10 were recorded. `PLANT-CHANGE-INVENTORY.md` §7.1 classified §3, §4,
+§5, §6 and §10 as **affected** and §7, §8 and §9 as **unaffected** — the
+pass-through observation of §7 is measured `/cmd_vel_smoothed` to
+`/cmd_vel_gated`, entirely upstream of the plant publication.
+
+**The hop was measured rather than argued.** 299 of 299 matched pairs,
+residual `0.0` exactly, latency mean **0.000403 s**, max **0.000845 s**
+(`EVIDENCE_STO.md` §4.1). At the 0.40 m/s of §3's enable edge that worst
+observed hop is **0.34 mm** of extra travel.
+
+**§3 was re-run on the edited tree, and its figure stands.**
+
+| Measured | `r1`, committed | `r13`, committed repeat | `m5-50-r2`, this tree |
+|---|---|---|---|
+| first reduced gated command | 0.0681 s | — | 0.0720 s |
+| first zero gated command | 0.8051 s | — | 0.8086 s |
+| standstill after the edge | 0.850 s | — | 0.850 s |
+| **stop distance** | **0.1738 m** | **0.1719 m** | **0.1744 m** |
+
+Record: `evidence/m5-50-r2-enable-drop-clean.csv`. Three draws spanning
+2.5 mm against an added hop worth 0.34 mm: **this is a third draw of the
+same figure, not a supersession.** §3's numbers are unchanged and the
+reaction-latency sentence there — one gate period plus transport, an
+observation and not a bound — is unchanged with it.
+
+**§4, §5, §6 and §10 are qualified rather than re-run.** They share §3's
+mechanism and §3's arithmetic: the same 0.34 mm worst case against stop
+distances of 0.3715, 0.2187 and 0.0852 m. Re-running them is cheap and is
+listed as agv/ work, not as a debt this file's claims rest on.
+
+**One run of §3's scenario was discarded and is recorded rather than
+deleted.** An earlier attempt measured 0.1717 m with two `forklift_io` and
+two `cmd_vel_to_tricycle` instances alive, survivors of the previous
+session that a `pkill` had failed to kill because its pattern matched the
+killing shell's own command line. The figure lands inside the spread and
+is still discarded: its preconditions were never confirmed before the
+timed run.
+
+**A run of any scenario in this file now needs one more thing to be
+true.** With `sto_contactor` absent, nothing publishes the terminals and
+the vehicle does not move — measured, 0 of 3 commands produced motion, and
+indistinguishable from a correct stop by motion alone (`EVIDENCE_STO.md`
+§5). `agv/forklift/launch/vehicle.launch.py` starts the contactor by
+default; **`sim/launch/forklift_bringup.launch.py`, which every scenario
+in §12's reproduce block goes through, does not** — that is a request on
+sim/, and until it lands the contactor and a three-topic terminal bridge
+are started by hand, as §7 of `EVIDENCE_STO.md` records.

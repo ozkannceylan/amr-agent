@@ -74,9 +74,44 @@
   bridge, the launch file and agv/forklift/README.md all quote these
   names as a contract.
 
-    /forklift/gz/steer_cmd     gz.msgs.Double   steer angle      [rad]
-    /forklift/gz/traction_cmd  gz.msgs.Double   wheel spin rate  [rad/s]
-    /forklift/gz/fork_cmd      gz.msgs.Double   carriage travel  [m]
+    /forklift/gz/actuator/steer_cmd     gz.msgs.Double  steer angle    [rad]
+    /forklift/gz/actuator/traction_cmd  gz.msgs.Double  wheel rate   [rad/s]
+    /forklift/gz/actuator/fork_cmd      gz.msgs.Double  carriage      [m]
+
+      THESE ARE THE MOTOR TERMINALS, AND THEY ARE NOT WHAT THE VEHICLE
+      STACK PUBLISHES (m5-50). The stack still publishes
+      /forklift/gz/steer_cmd, /forklift/gz/traction_cmd and
+      /forklift/gz/fork_cmd; agv/forklift/scripts/sto_contactor.py is the
+      only publisher of the three terminals above and it is what joins
+      them, one message for one message, while torque is present.
+
+      WHY THE MODEL MOVED AND NOT THE STACK. On the safety program's
+      TorqueOffDemand the second stage of SS1 has to make this vehicle
+      DEAF TO COMMANDS and keep it deaf if the envelope reopens, or SS1's
+      two stages collapse into the controlled stop the vehicle already
+      has and no test can tell them apart. Five committed publishers
+      address the command topics directly, so an interlock inside any one
+      command node would be bypassed by the other four. An interlock at
+      the MODEL's own inputs cannot be bypassed by anything that speaks
+      ROS.
+
+      THE CONTACTOR IS A STAND-IN, and every artefact says so. The safety
+      path it models is hardwired and onboard (CLAUDE.md invariant 1);
+      what is built here is a simulation of that path's effect on the
+      plant. No Category, Performance Level, SIL or PFH is claimed for it
+      or implied by it (ADR 0011 D5).
+
+      WHAT TORQUE REMOVAL IS AT THIS PLANT, in the two halves the design
+      spec names. The CONTROLLER IS DISABLED in the sense that no command
+      from any publisher reaches any terminal while the latch is open. The
+      HOLDING BRAKE is the traction terminal driven to a standing zero
+      rather than left silent: the JointController below holds its last
+      command for ever, so a silent terminal is a standing order and not
+      an absence, and a standing zero is what pins the shaft. The steer
+      and fork terminals are held at their last forwarded value, because
+      zeroing them would command a straightening manoeuvre and a carriage
+      descent - motion demanded BY the safe state, which is the one thing
+      it must not do.
 
     /forklift/gz/joint_state   gz.msgs.Model    joint positions and rates
 
@@ -1049,7 +1084,7 @@
     <plugin filename="gz-sim-joint-position-controller-system"
             name="gz::sim::systems::JointPositionController">
       <joint_name>steer_joint</joint_name>
-      <topic>/forklift/gz/steer_cmd</topic>
+      <topic>/forklift/gz/actuator/steer_cmd</topic>
       <p_gain>60000.0</p_gain>
       <i_gain>1500.0</i_gain>
       <d_gain>30.0</d_gain>
@@ -1063,7 +1098,7 @@
     <plugin filename="gz-sim-joint-controller-system"
             name="gz::sim::systems::JointController">
       <joint_name>drive_wheel_joint</joint_name>
-      <topic>/forklift/gz/traction_cmd</topic>
+      <topic>/forklift/gz/actuator/traction_cmd</topic>
       <initial_velocity>0.0</initial_velocity>
     </plugin>
 
@@ -1094,7 +1129,7 @@
     <plugin filename="gz-sim-joint-position-controller-system"
             name="gz::sim::systems::JointPositionController">
       <joint_name>mast_joint</joint_name>
-      <topic>/forklift/gz/fork_cmd</topic>
+      <topic>/forklift/gz/actuator/fork_cmd</topic>
       <p_gain>60000.0</p_gain>
       <i_gain>2500.0</i_gain>
       <d_gain>9000.0</d_gain>

@@ -780,3 +780,44 @@ limit, no threshold and no topic name is written inline.
 7. **The steer angle was verified standing still**, which is the hardest
    case for the controller and the least representative of driving. Steer
    tracking while turning under way is not measured here.
+
+---
+
+## 2026-08-06 — third supersession note: the actuator terminals (m5-50)
+
+This file is a dated capture and is left as it was run. Three things in it
+now describe a plant that has moved, and this note says which.
+
+**1. The command topic names in §1 and §2 are no longer what the model
+listens on.** `model.sdf`'s three joint controllers listen on
+`/forklift/gz/actuator/steer_cmd`, `/forklift/gz/actuator/traction_cmd`
+and `/forklift/gz/actuator/fork_cmd`; `scripts/sto_contactor.py` is their
+only publisher and forwards `/forklift/gz/*_cmd` to them one message for
+one message while torque is present. Every command topic this file names
+still exists and is still what the vehicle stack publishes.
+
+**2. §7's topic-set comparison was re-derived on the edited tree and
+passes.** Every `<topic>` `model.sdf` declares is declared in
+`config.yaml`; the three names that are in `config.yaml` and not in
+`model.sdf` are the stack-side command topics, plus `/forklift/gz/odom`
+and `/forklift/gz/tf_ground_truth`, which the `OdometryPublisher` names
+through its own parameters rather than a `<topic>` element. The mirrored
+numeric constants — wheel radius, steer limit, fork travel, fork rate —
+are untouched by this change: no geometry, mass, inertia, gain, limit or
+rate moved, only three topic strings.
+
+**3. §2.1, §2.2 and §2.3's step responses were taken with the vehicle
+stack publishing straight into the model.** They now cross one more node.
+That hop was measured at **0.000403 s** mean and **0.000845 s** worst of
+299 matched pairs, with a residual of exactly `0.0`
+(`EVIDENCE_STO.md` §4.1), so the settle shapes those sections describe are
+unaffected at their own resolution. **Note, not re-measurement** — the
+same treatment §2.1 already received for the steer gain — and the end to
+end command-to-motion path was in any case confirmed on the edited tree
+at 12 of 12 trials (`EVIDENCE_STO.md` §4).
+
+**And one thing this file's readers now need.** With `sto_contactor` not
+running the plant receives no command from anyone and the vehicle does not
+move, which is indistinguishable by motion from a correct refusal
+(`EVIDENCE_STO.md` §5). Any re-run of a section here that asserts
+stillness needs a positive control in the same run.

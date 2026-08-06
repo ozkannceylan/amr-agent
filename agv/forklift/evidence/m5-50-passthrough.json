@@ -1,0 +1,11 @@
+{
+  "phase": "passthrough",
+  "n_sent": 299,
+  "n_terminal": 299,
+  "n_pairs": 299,
+  "max_residual": 0.0,
+  "exact_matches": 299,
+  "hop_mean_s": 0.0004033220271551888,
+  "hop_max_s": 0.0008445679559372365,
+  "hop_min_s": 0.0002417409559711814
+}

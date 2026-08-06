@@ -1,0 +1,22 @@
+{
+  "phase": "endtoend",
+  "label": "contactor-absent",
+  "n_attempted": 3,
+  "n_detected": 0,
+  "step_radps": 4.0,
+  "detect_radps": 0.5,
+  "rows": [
+    {
+      "trial": 1,
+      "detected": false
+    },
+    {
+      "trial": 2,
+      "detected": false
+    },
+    {
+      "trial": 3,
+      "detected": false
+    }
+  ]
+}
