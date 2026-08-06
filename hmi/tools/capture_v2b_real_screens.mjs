@@ -72,10 +72,10 @@ const VIZ_PORT = arg('viz-port', '8089');          // the REAL service, in WSL
 const SERIAL = arg('serial', 'F001');
 const HMI_BASE = `http://127.0.0.1:${HMI_PORT}`;
 const VIZ_BASE = `http://127.0.0.1:${VIZ_PORT}`;
-const DRIVE = arg('drive',
-  '/mnt/c/Users/ozkan/AppData/Local/Temp/claude/'
-  + 'C--Users-ozkan-projects-amr-agent/'
-  + 'b8b82e36-4ca6-4a60-b4a7-22454f63880f/scratchpad/drive_f001.py');
+// No default: the drive script is session scratch and its path must be passed
+// in. A hard-coded scratch path both rots and leaks the tooling directory it
+// was written from.
+const DRIVE = arg('drive', '');
 const SCRATCH = path.join(os.tmpdir(), 'amr-hmi-v2b-real-screens');
 
 //: Filename stem for everything this run writes. It is an ARGUMENT so a re-run
