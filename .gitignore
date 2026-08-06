@@ -18,3 +18,6 @@ check_nodes.py
 # NOTE: if a screenshot later becomes gate evidence for criterion (e), it is
 # promoted out of this directory and committed like any other evidence file.
 hmi/evidence/screenshots/
+
+# SDD workspace: per-plan scratch (ledger, briefs, review packages).
+.superpowers/
