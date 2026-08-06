@@ -1,0 +1,86 @@
+# READ-ONLY observer. It writes nothing. The verdict is the CONSUMER's view.
+# instance: safecell3   operating state: Run
+# columns, in order:
+#  [ 0] SafetyInputStandIn.EStopCircuitClosed
+#  [ 1] SafetyInputStandIn.ZoneDeviceCircuitClosed
+#  [ 2] SafetyInputStandIn.ResetButtonPressed
+#  [ 3] InstF_Forklift_Safety.EStopCircuitClosed
+#  [ 4] InstF_Forklift_Safety.ZoneDeviceCircuitClosed
+#  [ 5] InstF_Forklift_Safety.ResetButtonPressed
+#  [ 6] InstF_Forklift_Safety.HeartbeatChanged
+#  [ 7] InstF_Forklift_Safety.HeartbeatSeen
+#  [ 8] InstF_Forklift_Safety.StandInValid
+#  [ 9] InstF_Forklift_Safety.StandInStaleTimer.Q
+#  [10] InstF_Forklift_Safety.EStopClosedValid
+#  [11] InstF_Forklift_Safety.ZoneClosedValid
+#  [12] InstF_Forklift_Safety.ResetPressedValid
+#  [13] InstF_Forklift_Safety.EStopDemand
+#  [14] InstF_Forklift_Safety.ZoneStopDemand
+#  [15] InstF_Forklift_Safety.SafetyResetRequired
+#  [16] InstF_Forklift_Safety.SafetyResetFault
+#  [17] ForkliftSafetyMirror.EStopDemand
+#  [18] ForkliftSafetyMirror.ZoneStopDemand
+#  [19] ForkliftSafetyMirror.SafetyResetRequired
+#  [20] ForkliftSafetyMirror.SafetyResetFault
+#  [21] SafetyInputStandIn.MotionPresent
+#  [22] SafetyInputStandIn.MotionObservationValid
+#  [23] SafetyInputStandIn.WarningFieldClear
+#  [24] InstF_Forklift_Safety.MotionPresent
+#  [25] InstF_Forklift_Safety.WarningFieldClear
+#  [26] InstF_Forklift_Safety.SpeedSeqAChanged
+#  [27] InstF_Forklift_Safety.SpeedSeqBChanged
+#  [28] InstF_Forklift_Safety.SpeedChainSeen
+#  [29] InstF_Forklift_Safety.SpeedAValid
+#  [30] InstF_Forklift_Safety.SpeedBValid
+#  [31] InstF_Forklift_Safety.SpeedStaleNow
+#  [32] InstF_Forklift_Safety.SpeedAStaleTimer.Q
+#  [33] InstF_Forklift_Safety.SpeedBStaleTimer.Q
+#  [34] InstF_Forklift_Safety.WarningFieldClearValid
+#  [35] InstF_Forklift_Safety.SpeedDiscrepantNow
+#  [36] InstF_Forklift_Safety.SpeedDiscrepancyTimer.Q
+#  [37] InstF_Forklift_Safety.SpeedNearZero
+#  [38] InstF_Forklift_Safety.MotionPresentValid
+#  [39] InstF_Forklift_Safety.ShaftDoubtNow
+#  [40] InstF_Forklift_Safety.ShaftDoubtTimer.Q
+#  [41] InstF_Forklift_Safety.SpeedOverLimitNow
+#  [42] InstF_Forklift_Safety.SpeedOverLimitTimer.Q
+#  [43] InstF_Forklift_Safety.SpeedLimitOnsetTimer.Q
+#  [44] InstF_Forklift_Safety.SpeedCauseGone
+#  [45] InstF_Forklift_Safety.SpeedMonitorDemand
+#  [46] InstF_Forklift_Safety.Ss1Demand
+#  [47] InstF_Forklift_Safety.Ss1Timer.Q
+#  [48] InstF_Forklift_Safety.VehicleStandstillNow
+#  [49] InstF_Forklift_Safety.TorqueOffDemand
+#   int  SafetyInputStandIn.StandInHeartbeat
+#   int  InstF_Forklift_Safety.HeartbeatMemory
+#   int  SafetyInputStandIn.SpeedSeqA
+#   int  SafetyInputStandIn.SpeedSeqB
+#   int  SafetyInputStandIn.SpeedReadingA
+#   int  SafetyInputStandIn.SpeedReadingB
+#   int  InstF_Forklift_Safety.SpeedSeqA
+#   int  InstF_Forklift_Safety.SpeedSeqB
+#   int  InstF_Forklift_Safety.SpeedReadingA
+#   int  InstF_Forklift_Safety.SpeedReadingB
+#   int  InstF_Forklift_Safety.SpeedDiff
+
+        t_ms  ..................................................   hb        note
+        74.7  11011011101101110111010010001001110000100001011101   10909 10907 1715 1715 300 300 1715 1715 300 300 0 baseline
+       130.0  11011011101101110111010010001001110000100001011101   10910 10909 1715 1715 300 300 1715 1715 300 300 0 tick
+     1,156.6  11011011101101110111010010001001110000100001011101   10930 10930 1715 1715 300 300 1715 1715 300 300 0 tick
+     2,169.2  11011011101101110111010010001001110000100001011101   10951 10950 1715 1715 300 300 1715 1715 300 300 0 tick
+     2,811.5  11011011100001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 CHANGE
+     2,892.1  00000011100001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 CHANGE
+     2,959.2  00000001100001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 CHANGE
+     3,199.6  00000001100001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 tick
+     3,988.8  00000001010001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 CHANGE
+     4,226.1  00000001010001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 tick
+     5,271.9  00000001010001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 tick
+     6,275.7  00000001010001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 tick
+     7,278.5  00000001010001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 tick
+     8,286.2  00000001010001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 tick
+     9,305.4  00000001010001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 tick
+    10,307.8  00000001010001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 tick
+    11,326.3  00000001010001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 tick
+    12,344.8  00000001010001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 tick
+    13,104.6  00000001010001110111010010001001110000100001011101   10962 10962 1715 1715 300 300 1715 1715 300 300 0 final
+# done

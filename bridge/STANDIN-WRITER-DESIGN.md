@@ -8,10 +8,11 @@ FIO-FEASIBILITY §6 consequence 1). The word *stand-in* appears in its file
 name, its console banner, its log header and every tag it writes.
 
 **Authority.** `plc/forklift-safety/SPEC.md` §7 specifies this process
-completely — the rate, the level republish, the four members, the two sources,
-the command set, the failure behaviour, the log. This document chooses **how**
-to realise §7, never what it does. Where the two disagree, §7 wins and this
-document is corrected. ADR 0015 D1 fixes the mechanism (API by tag name, no
+completely — the rate, the level republish, the members, the sources, the
+command set, the failure behaviour, the log — and **§11.2 extends it** with
+the speed-source link, the seven new members and the `WARN` vocabulary. This
+document chooses **how** to realise them, never what they do. Where the two
+disagree, the SPEC wins and this document is corrected. ADR 0015 D1 fixes the mechanism (API by tag name, no
 hand at a watch table); the owner's 2026-08-05 ruling fixes the home:
 **`bridge/`**, because bridge/ is already the simulation's stand-in for field
 wiring and this is that role for the safety channel (SPEC §10 open item 8 is
@@ -33,23 +34,37 @@ correct; this process is what makes the cell startable again.
 |---|---|
 | File | `bridge/standin_writer/standin_writer.ps1` — one script, no module, no second file |
 | Runtime | **Windows PowerShell 5.1** on the Windows host, beside PLCSIM Advanced. `Add-Type -Path` on `Siemens.Simatic.Simulation.Runtime.Api.x64.dll`, API **7.0** — exactly the proven kernel of `plc/forklift-safety/evidence/m5-03b-standin-stimulus-proof.ps1` and `m5-25-standin-stimulus-repeat.ps1`. **No new dependency** |
-| Parameters | `-Instance <name>` **mandatory** (tool-derived; read from the PLCSIM Advanced control panel, never assumed — the probe ran on `FIOPROBE`, which is **not** the working project's instance; the working project read back **`safecell3`** on 2026-08-05, m5-25 log, and may change). `-Dll <path>` default `C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll` (a read-back from the m5-03 record). `-Port <n>` default `45015` (SPEC §7.2 design value). **The cycle is not a parameter**: 50 ms is settled by §7.1 and a knob would invite drift |
+| Parameters | `-SpeedPort <n>` default `45016` (SPEC §11.2 design value). `-Instance <name>` **mandatory** (tool-derived; read from the PLCSIM Advanced control panel, never assumed — the probe ran on `FIOPROBE`, which is **not** the working project's instance; the working project read back **`safecell3`** on 2026-08-05, m5-25 log, and may change). `-Dll <path>` default `C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll` (a read-back from the m5-03 record). `-Port <n>` default `45015` (SPEC §7.2 design value). **The cycle is not a parameter**: 50 ms is settled by §7.1 and a knob would invite drift |
 | Concurrency | **Single-threaded, one loop.** No runspace, no job, no timer callback, no background thread. This is load-bearing, not simplicity: the heartbeat may only advance from the same loop iteration that services commands and writes levels, so anything that stalls the process stalls the heartbeat, and §5.4 converts that into a latched demand within `STANDIN_STALE_MAX` = 1 s. A second thread that kept the heartbeat alive past a wedged main loop would defeat SPEC §7.3 row 1 |
 | Start | Manually, by the operator, from Windows PowerShell 5.1: `powershell -ExecutionPolicy Bypass -File bridge\standin_writer\standin_writer.ps1 -Instance <name>`. Start order against the CPU, the WSL bridge and the HMI is irrelevant — the republish repairs any ordering (§5) |
 | Logs | `bridge/standin_writer/logs/standin-writer-<UTC yyyyMMddTHHmmssZ>-pid<pid>.log`, created with `CreateNew` (refuse a collision, never overwrite), `AutoFlush = $true`. One file per session, unique per start (LESSONS 2026-07-28). Add `standin_writer/logs/` to `bridge/.gitignore` |
 
 ### 1.1 The write set — exact and closed
 
-The writer writes **exactly four tags** and nothing else, held as one literal
+The writer writes **exactly eleven tags** and nothing else, held as one literal
 allowlist in one place in the script; every write goes through one helper that
 takes the tag name from that list only:
 
-| Tag | Call | Value |
-|---|---|---|
-| `SafetyInputStandIn.EStopCircuitClosed` | `WriteBool` | operator-owned level |
-| `SafetyInputStandIn.ZoneDeviceCircuitClosed` | `WriteBool` | field- or operator-owned level (§3) |
-| `SafetyInputStandIn.ResetButtonPressed` | `WriteBool` | operator-owned level |
-| `SafetyInputStandIn.StandInHeartbeat` | `WriteInt16` | counter, +1 per cycle, wraps `30000 → 0` |
+| Tag | Call | Value | Group |
+|---|---|---|---|
+| `SafetyInputStandIn.EStopCircuitClosed` | `WriteBool` | operator-owned level | core |
+| `SafetyInputStandIn.ZoneDeviceCircuitClosed` | `WriteBool` | field- or operator-owned level (§3) | core |
+| `SafetyInputStandIn.ResetButtonPressed` | `WriteBool` | operator-owned level | core |
+| `SafetyInputStandIn.StandInHeartbeat` | `WriteInt16` | counter, +1 per cycle, wraps `30000 → 0` | core |
+| `SafetyInputStandIn.WarningFieldClear` | `WriteBool` | field-owned level; `FALSE` unless a live `WARN 1` says otherwise (§3) | warning |
+| `SafetyInputStandIn.MotionPresent` | `WriteBool` | source-owned level, fail direction `TRUE` (§3.1) | motion |
+| `SafetyInputStandIn.MotionObservationValid` | `WriteBool` | diagnosis only; `FALSE` whenever the observation is absent | motion |
+| `SafetyInputStandIn.SpeedReadingA` / `…B` | `WriteInt16` | mm/s, signed. **Written only in a cycle that received a fresh line** | speed |
+| `SafetyInputStandIn.SpeedSeqA` / `…B` | `WriteInt16` | freshness sequence, +1 in the same cycle, wraps `30000 → 0` | speed |
+
+**Group gating, not per-member gating.** The seven §11.3 members may not exist
+on a half-built controller. At every connect the writer reads the instance's
+own tag list and marks each of the three groups present or absent, logging the
+answer (`MEMBERS`); an absent group is **inert for the session and every
+member of it is left untouched**. All four speed members or none: a reading
+written without its sequence would hand the F-program a value with no way to
+tell whether it is current, which is the failure §11.2 exists to prevent. The
+probe is re-run at every reconnect, because a download changes the answer.
 
 S7 `Int` is 16-bit signed; the write call is the API's signed-16-bit call. If
 the installed assembly names it differently, discover the name from the
@@ -69,9 +84,27 @@ this project already refused once (§6).
 
 ## 2. The cycle — 50 ms, deadline-scheduled, level republish
 
-Per §7.1: 50 ms, logged at start-up; **all four members every cycle**, never
+Per §7.1: 50 ms, logged at start-up; **every LEVEL every cycle**, never
 write-on-change (a CPU restart reverts the DB and only a republish repairs it,
-LESSONS 2026-07-28; a level repair produces no edge).
+LESSONS 2026-07-28; a level repair produces no edge). That is eight of the
+eleven: the three circuits, the heartbeat, the warning verdict and the two
+motion members.
+
+**The two speed readings are the exception, and it is the whole point.** They
+are **not** republished. A channel writes its value and advances its sequence
+only in a cycle that received fresh source data; in every other cycle
+**neither is written**, the sequence freezes where it stands, and the
+F-program reads a frozen sequence as a **missing** reading — which is a
+demand, never a zero and never the last value (SPEC §11.2, §11.5 SL1–SL8).
+Republishing here would smooth exactly the gap the chain exists to see. Two
+consequences, both deliberate:
+
+- after a CPU restart the DB reverts both sequences to `0` while the writer's
+  own counters stand at `N`; the next fresh write puts `N+1` there, the F-side
+  `CMP <>` sees a change, and the channel comes back the moment a real reading
+  does. In the one cycle where `N+1` would itself be `0` the F-side sees no
+  change for one cycle — which fails toward *stale*, the safe direction;
+- the terminal write (§5.4) writes neither reading and neither sequence.
 
 Loop body, in order, every iteration:
 
@@ -85,26 +118,43 @@ Loop body, in order, every iteration:
    terminal write.
 2. **Field link** (§3): accept a pending connection if none is active
    (`TcpListener.Pending()`); read available bytes non-blocking
-   (`DataAvailable`); parse complete lines; apply `ZONE`/`PING`; then test
+   (`DataAvailable`); parse complete lines; apply `ZONE`/`WARN`/`PING`; test
+   whether the peer has hung up (`Test-PeerClosed`, §3.2); then test
    staleness: link up and no well-formed line for **1000 ms**
    (`FIELD_LINK_STALE_MAX`, §7.2) → link down.
+2b. **Speed link** (§3.1): the same shape on `-SpeedPort`, applying
+   `SPD`/`MOT`/`PING`, then the motion silence window.
 3. **Pulse expiry**: if a `reset pulse` is active and its commanded duration
    has elapsed, drive `ResetButtonPressed := FALSE` and log the shaped
    release. This is the one writer-generated actuation §7.2 allows.
-4. **Write**: the four tags of §1.1 through the allowlist helper, heartbeat
-   incremented **only on a fully successful write cycle** (§5.1). Log one
-   `CYCLE` line — the record of the four writes issued this cycle.
+4. **Write**: the tags of §1.1 through the allowlist helper — every level,
+   plus a fresh channel's reading and sequence — heartbeat incremented **only
+   on a fully successful write cycle** (§5.1). Log one `CYCLE` line, whose
+   `spdA=<value>@<seq>` field reads `-` in a cycle where that channel wrote
+   nothing, so the log itself carries the silence. Then clear both freshness
+   flags unconditionally, including on a failed or disconnected cycle: a
+   reading whose write was lost must never advance a sequence later.
 5. **Sleep** to the deadline: `t_next = t_start + n × 50 ms` from one
    `Stopwatch`; `Thread.Sleep(max(0, remaining))`. An overrun is logged and
    counted, **never compensated** — no catch-up burst, no skipped-cycle
    logic. Windows timer granularity (~15 ms) is jitter the design absorbs:
    `STANDIN_STALE_MAX` = 1 s is twenty cycles of headroom (SPEC §3.3).
 
-**Timers, exhaustively.** The writer owns three timers and no fourth: its own
-50 ms cycle, the staleness of its **own input channel** (the field link), and
-the operator-commanded pulse width. All three are fixed by SPEC §7. None
-watches the plant, none debounces a signal, none delays a value — a timer over
-plant state would be a process decision, and those live in the PLC.
+**Timers, exhaustively.** The writer owns four timers and no fifth: its own
+50 ms cycle, the staleness of its **own input channel** (the field link), the
+silence of its **own other input channel** (`MOTION_SILENCE_MAX` = 250 ms on
+the `MOT` line), and the operator-commanded pulse width. All four are fixed by
+SPEC §7 and §11.2. **None watches the plant**: the motion timer asks "has my
+source spoken", never "is the vehicle moving", which is the same question the
+field-link timer asks about its own source. None debounces a signal, none
+delays a value, and no threshold over a speed appears anywhere in the writer —
+the speed limit, the discrepancy threshold and every persistence delay are the
+F-program's, and a second copy here would be a process decision in the bridge.
+
+The **speed link has no staleness timer at all**, deliberately: every
+consequence of silence already runs in the demand direction, since a cycle
+with no line freezes the sequence by construction. What it does have is
+end-of-stream detection, which is socket state and not a timer (§3.2).
 
 ---
 
@@ -142,7 +192,70 @@ it), so the day m5-12's node exists it dials in with no writer change:
 | Protocol | Newline-delimited ASCII: `ZONE 0`, `ZONE 1` at every verdict transition, `PING` at 1 Hz keepalive. **Encoding, fixed by this design because §7 left the digit unassigned: the digit is the circuit level** — `ZONE 1` = field clear → `ZoneDeviceCircuitClosed := TRUE`; `ZONE 0` = intrusion (or the evaluation's own fault verdict) → `FALSE`. This matches FIELD-EVALUATION §8 rule 1, which already sends `ZONE 0` for a dead scanner. The m5-12 build must adopt this encoding (requested in the m5-36 report) |
 | Liveness | Only well-formed `ZONE`/`PING` lines refresh the link clock; garbage refreshes nothing and is logged as a refusal — bytes are not proof of a live *verdict* |
 | Link up | Ownership of the zone channel passes to the field; operator `zone` commands are **refused with a logged refusal** (§7.2). Until the first `ZONE` line arrives the channel is held `FALSE` — a link with no verdict yet is not a clear field |
-| Link down | On staleness (> 1000 ms), EOF or socket error: drive `ZoneDeviceCircuitClosed := FALSE`, log the transition, close the socket, and return ownership to the operator — who must issue a deliberate `zone close` to re-close it. Loss of the intrusion source reads as an intrusion, never as a clear field (§7.3 row 2) |
+| Link down | On staleness (> 1000 ms), EOF, hang-up or socket error: drive `ZoneDeviceCircuitClosed := FALSE` **and `WarningFieldClear := FALSE`**, log the transition, close the socket, and return ownership of the zone to the operator — who must issue a deliberate `zone close` to re-close it. Loss of the field source reads as an intrusion **and** as warning-occupied, never as a clear field (§7.3 row 2, SPEC §11.2) |
+
+**The warning verdict rides this same link** (SPEC §11.2), one vocabulary
+entry, same polarity convention as `ZONE` — the digit is the channel level:
+
+| Line | Effect |
+|---|---|
+| `WARN 1` | `WarningFieldClear := TRUE` — warning field clear |
+| `WARN 0` | `WarningFieldClear := FALSE` — occupied; the limit is selected |
+
+Before the first `WARN` line of a session the channel holds its start value
+`FALSE`: the limit is in force until a source has said otherwise.
+**There is deliberately no operator command for it**, unlike `zone`. An
+operator typing "the warning field is clear" would be a human vouching for a
+field verdict, which is exactly what the wire-NC discipline refuses; the same
+reasoning bars an operator command for either speed reading or the motion
+flag. The one consequence to know about is an operating one: with no field
+source running, the reduced limit is in force for the whole session
+(EVIDENCE_BUILD §7.8).
+
+---
+
+## 3.1 The speed-source link — port 45016
+
+SPEC §11.2's second TCP listener, the same shape as §3's and with the same
+"none is required" property: the writer starts, runs and serves the cell with
+no speed source ever arriving.
+
+| Line | Effect |
+|---|---|
+| `SPD A <int>` / `SPD B <int>` | signed drive-wheel tread speed, mm/s. Latest value wins within a cycle; the sequence advances **once** |
+| `MOT <p> <v>` | `MotionPresent := p`, `MotionObservationValid := v`, both carried **unchanged** — `p` already folds the source's own fail direction, and the verdict has one owner |
+| `PING` | keepalive, for the log only. **It refreshes no channel**: a PING is not a reading, and letting one hold a speed alive would be the repetition the whole design refuses |
+
+Refused, logged, and advancing nothing: a malformed line; a `SPD` value
+outside the S7 `Int` the DB member is. The second is **representability, not
+plausibility** — the writer applies no physical window to a reading, because
+that window is the F-program's (§11.5 SL6/SL7) and a second copy here would be
+a process decision in the bridge. Its effect is the safe one: nothing written,
+sequence frozen, channel reads as missing. `agv/`'s client reached the same
+rule independently at its own end (m5-56).
+
+**The motion channel fails toward moving.** If no `MOT` line has arrived for
+`MOTION_SILENCE_MAX` = 250 ms, or the link is down, or none has ever arrived
+this session, the writer drives `MotionPresent := TRUE` and
+`MotionObservationValid := FALSE` and logs the transition. An unobservable
+vehicle is *moving*; a false *still* is what would corroborate a lying
+encoder. Note the vehicle-side carrier stops forwarding `MOT` after its own
+0.15 s window, so the worst case from a dead observation to `MotionPresent`
+TRUE is **0.40 s**, not 0.25 — bounded, on the safe transition, and raised to
+`plc/` because §11 should state the number rather than inherit it.
+
+## 3.2 End of stream — why both links ask the socket
+
+`NetworkStream.DataAvailable` is FALSE at end of stream, so a read loop
+guarded by it never runs and never sees the zero-length read. Measured on
+2026-08-06: a source that closed cleanly left the client object held and the
+next connection was refused as a "second connection" for ever. `Test-PeerClosed`
+— `Socket.Poll(0, SelectRead)` with `Available == 0` — is the non-blocking
+end-of-stream test, and it is **socket state, not a timer**. It runs on both
+links, **after** the buffered lines are parsed so a verdict sent immediately
+before the close is still applied. The field link had been surviving this only
+because its 1 s staleness reaper eventually freed the object; the speed link
+has no reaper by design, so it needed the real test.
 
 ---
 
@@ -221,9 +334,19 @@ On `quit`, and on Ctrl+C (a key, per §2 step 1), and in a `finally` around
 the loop as best effort: **write the terminal values first, then fall
 silent** (LESSONS 2026-08-04 ×2: where a consumer holds levels, silence is
 not an absence; a state whose purpose is to stop publishing publishes its
-terminal value first). Terminal values: all three channels `FALSE` — open,
-unpressed, the demand direction — then log `TERMINAL`, `Dispose()`, close the
-log. The heartbeat then freezes, `StandInValid` falls within 1 s, and both
+terminal value first). Terminal values: the three channels `FALSE` — open,
+unpressed, the demand direction — `WarningFieldClear` `FALSE`, and
+`MotionPresent` `TRUE` with `MotionObservationValid` `FALSE`; then log
+`TERMINAL`, `Dispose()`, close the log.
+
+**The two speed readings and both sequences are written by nothing here, on
+purpose.** A terminal zero would be a speed the writer invented, and a
+terminal repeat would be the last value outliving its source. Leaving both
+sequences frozen is the honest terminal statement: from this instant the
+readings are missing, and missing is a demand. The `TERMINAL` line records
+where each sequence stopped, so the log says it rather than implying it.
+
+The heartbeat then freezes, `StandInValid` falls within 1 s, and both
 demands latch on **channels already open**, so no ambiguity about why. A
 mid-press `quit` writes the reset `FALSE` in the terminal write; even if the
 write is lost, §5.4's walkthrough refuses the dying edge in-cycle (SPEC §5.4).
@@ -241,8 +364,8 @@ config file, no log, no socket, no session, no tag.
 |---|---|---|
 | Host | WSL (Ubuntu, venv) | Windows, beside PLCSIM Advanced |
 | Reaches the CPU by | OPC UA client session (invariant 4) | PLCSIM Advanced API, by tag name — **below** any client interface |
-| Touches | The configured `Input/`/`Output/` groups + `BridgeHeartbeat` | The four members of `SafetyInputStandIn`, which the OPC UA server does not expose at all (SPEC §4.2 step 14) |
-| Listens | Never, on anything | One TCP listener, port 45015, for the field evaluation only |
+| Touches | The configured `Input/`/`Output/` groups + `BridgeHeartbeat` | The eleven members of `SafetyInputStandIn`, which the OPC UA server does not expose at all (SPEC §4.2 step 14) |
+| Listens | Never, on anything | Two TCP listeners: 45015 for the field evaluation, 45016 for the speed source. Nothing else, ever |
 | Started by | `run_bridge.py` in a WSL shell | `standin_writer.ps1` in a Windows shell |
 | Stimulates a demand | Never — carries process signals only | Yes — it is the stand-in for the safety-channel wiring |
 
@@ -262,10 +385,13 @@ One line per event, `yyyy-MM-ddTHH:mm:ss.fffZ | CLASS | detail`, classes:
 | Class | When |
 |---|---|
 | `START` | Once: stand-in banner, instance name, DLL path and API version, cycle = 50 ms (§7.1 requires the cycle logged at start-up), port, `OperatingState`, log file name |
-| `CYCLE` | Every cycle: `hb=<n> estop=<0/1> zone=<0/1> reset=<0/1>` — the record of the four writes issued (§7.2 "every API write issued"; the one line carries all four) |
+| `CYCLE` | Every cycle: `hb=<n> estop= zone= reset= warn= mot=<p>/<v> spdA=<v>@<seq> spdB=<v>@<seq>` — the record of the writes issued (§7.2 "every API write issued"; the one line carries them all). A `-` in a `spd` field is a cycle in which that channel wrote **nothing**, so the log carries the silence as directly as it carries the readings |
 | `OPERATOR` | Every console command accepted, with the value |
-| `FIELD` | Every `ZONE` line applied, with the value |
-| `LINK` | Every field-link state change: up, down (stale/EOF/error), refused second connection |
+| `FIELD` | Every `ZONE` or `WARN` line applied, with the value |
+| `SPEED` | Every speed-link event that changes state: each channel's first written reading, and every motion transition including the silence rule firing |
+| `SPEEDLINK` | Every speed-link state change: up, down (EOF/hang-up/error), refused second connection |
+| `MEMBERS` | Once per connect: which of the three SPEC §11.3 groups this CPU carries, and which are inert this session |
+| `LINK` | Every field-link state change: up, down (stale/EOF/hang-up/error), refused second connection |
 | `REFUSED` | Every refusal, with the reason (§4) |
 | `API` | Write/connect failure, each reconnect attempt, reconnect success |
 | `OVERRUN` | A cycle that missed its deadline, with the measured slip |
@@ -309,6 +435,24 @@ as T6 evidence (N5 — nothing here closes anything).
    testing waits for m5-12 or a throwaway `ncat` line-feeder — either is a
    builder's smoke test, never criterion-(a) evidence (§7.6).
 
+The §11.2 extension adds five, verified in EVIDENCE_BUILD §7:
+
+9.  **A fresh reading reaches the F-program**: with a source on 45016, both
+    `SpeedSeq` members advance in the consumer's view and `SpeedAValid` /
+    `SpeedBValid` rise. The reading on the wire, in the `CYCLE` line and in the
+    DB is the same integer, so the three can be diffed.
+10. **A silent channel freezes its own sequence and nothing else's**: one
+    channel taken silent while the other runs — the frozen one's sequence stops,
+    its value is **not** rewritten, and the F-program latches the demand.
+11. **The motion channel fails toward moving**: `MOT` stopped for longer than
+    `MOTION_SILENCE_MAX`, and on a link drop, drives `MotionPresent` TRUE with
+    `MotionObservationValid` FALSE.
+12. **`WARN` reaches `WarningFieldClear` both ways**, and a field-link loss
+    drives it FALSE together with the zone channel.
+13. **A source that hangs up can dial back in**: two source sessions back to
+    back on 45016, the second accepted rather than refused as a second client
+    (the D1 defect of §7.5).
+
 Every check is an observation in the **consumer's view or the watch table**,
 never the writer's own read-back (LESSONS 2026-08-04) — the writer has no
 read-back to consult by construction (§1.1).
@@ -321,7 +465,7 @@ Restated from `bridge/README.md`'s boundary (which this design amends) so the
 coding agent has it on the page they build from:
 
 - No OPC UA, in any role. No ROS 2. No MQTT, no VDA 5050, no fleet, no HMI.
-- No write outside the four-tag allowlist of §1.1; no read of any CPU datum
+- No write outside the eleven-tag allowlist of §1.1; no read of any CPU datum
   but `OperatingState`. Never a tag of `InstF_Forklift_Safety`, never F-data,
   never a `Modify`, never another DB.
 - No process decision: no threshold over plant state, no debounce of a

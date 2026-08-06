@@ -814,3 +814,308 @@ tidied away:**
    scope. A reader who repeats step 187 on this CPU will therefore see nine of
    its ten readings and `HeartbeatSeen` TRUE; the tenth returns after a cold
    start.
+
+---
+
+## §7 Runs C–J — the §11.2 speed link (m5-57), 2026-08-06
+
+**Same standing as everything above.** These are build checks of the writer's
+§11.2 extension. Nothing here closes a gate criterion, an acceptance test or
+an SRS item, and nothing here carries a Category, Performance Level, SIL or
+PFH — for the writer or for anything downstream of it. The readings reach the
+safety program as **standard data over a stand-in path**.
+
+Written as each observation landed.
+
+### §7.0 The build the runs ran against, read back
+
+Instance `safecell3`, `OperatingState = Run`, **269 tags** (199 at m5-41).
+Read from the live tag list before any run — and the writer asks the same
+question itself at every connect (`MEMBERS` log class) rather than assuming:
+
+```
+SafetyInputStandIn.EStopCircuitClosed          Bool
+SafetyInputStandIn.ZoneDeviceCircuitClosed     Bool
+SafetyInputStandIn.ResetButtonPressed          Bool
+SafetyInputStandIn.StandInHeartbeat            Int
+SafetyInputStandIn.SpeedReadingA               Int      <- new, §11.3
+SafetyInputStandIn.SpeedReadingB               Int      <- new
+SafetyInputStandIn.SpeedSeqA                   Int      <- new
+SafetyInputStandIn.SpeedSeqB                   Int      <- new
+SafetyInputStandIn.MotionPresent               Bool     <- new
+SafetyInputStandIn.MotionObservationValid      Bool     <- new
+SafetyInputStandIn.WarningFieldClear           Bool     <- new
+```
+
+All eleven present. The F-side statics and both new outputs
+(`SpeedMonitorDemand`, `TorqueOffDemand`) were present too, so every run below
+could be read **in the consumer's view** rather than in the writer's own.
+
+> Runs C–G ran while the owner was still building. The safety program reached
+> 360/360 with collective signature `50573CD9` **after** run G and **before**
+> run J1. **Run J1 is the only run below that ran against the finished
+> program, and it is the one the link claim rests on.**
+
+### §7.1 What each run was, and where it is
+
+| Run | Writer session | Consumer capture | What it establishes |
+|---|---|---|---|
+| C1 | pid32084 | — | double start still refused (design §8 check 1) |
+| C3 | pid32084 | `m5-57-C3-consumer.log` | the freshness sequences, a channel going silent, the motion silence rule, the three refusal shapes |
+| C4 | pid32084 | `m5-57-C4-terminal-consumer.log` | the terminal write, extended form |
+| D | pid44496 | `m5-57-D-consumer.log` | `WARN` on the 45015 link, both refusals, the link hang-up |
+| E | pid44496 | `m5-57-E-consumer.log` | source reconnect after a hang-up; discrepancy and over-limit terms live |
+| F | pid44496 | `m5-57-F-consumer.log` | one monitored reset clearing three latches; the demand re-forming from a fresh discrepancy |
+| G | pid44496 | `m5-57-G-terminal-consumer.log` | terminal write, and the `status` line for the new members |
+| **J1** | **pid14288** | **`m5-57-J1-consumer.log`** | **the joint run: the real vehicle-side client, the real writer, the finished safety program** |
+| R1, R2 | pid14288 | `m5-57-R1/R2-reset-refusal-consumer.log` | two observations of a reset **refused** while the speed world was not clear (§7.8) |
+| Z | pid14288 | `m5-57-Z-shutdown-consumer.log` | the shutdown that left the machine as §7.9 records it |
+
+Writer session logs, `CYCLE` lines stripped:
+`m5-57-writer-session-2026-08-06-pid{32084,44496,14288}-events.log`.
+The first 400 reading-carrying cycles of J1 are kept whole in
+`m5-57-J1-writer-cycles-first400.log`, because the per-cycle
+`spdA=<value>@<seq>` field is the record of the property this section exists
+to prove.
+
+### §7.2 J1 — the joint run, the one that matters
+
+**Both halves real.** The vehicle side is `agv/`'s committed carrier
+`safe_speed_link.py` (m5-56) driven by its producer `safe_speed_channels.py`
+and the rig's `plant` stimulus, in WSL. The PLC side is this writer on the
+Windows host. Nothing was modelled at either end of the seam: the client
+dialled the writer's own listener and the writer wrote the CPU's own DB.
+
+The client read the Windows address back from its own default route and
+logged it — never taken from a document (ADR 0006):
+
+```
+LINK: writer address 172.19.176.1:45016 read back from WSL default route
+LINK: up: connected to the stand-in writer at 172.19.176.1:45016 (attempt 1, connection 1)
+```
+
+The writer, same seam, same instant:
+
+```
+17:36:20.431Z | SPEEDLINK | up: speed-source client 172.19.180.72:50546 connected.
+17:36:20.513Z | SPEED | MOT 1 1 -> MotionPresent := True, MotionObservationValid := True
+17:36:20.542Z | SPEED | channel A alive: first reading written, SpeedReadingA = 299 mm/s, SpeedSeqA = 1
+17:36:20.555Z | SPEED | channel B alive: first reading written, SpeedReadingB = 299 mm/s, SpeedSeqB = 1
+```
+
+**The readings reached the F-program's own instance data.** Consumer capture,
+`InstF_Forklift_Safety` columns, while the source ran:
+
+```
+     t_ms  chainSeen Aval Bval stale  | SI seq     F reading   F SpeedDiff
+ 18,311.1      1      0    0     1    | 1022/1015   120/200       -80    <- before the source
+ 21,075.7      1      0    0     1    |    2/2      308/301        +7    <- first readings land
+ 21,153.5      1      1    1     0    |    3/3      308/301        +7    <- both channels VALID
+ 30,113.8      1      1    1     0    |  183/183    300/300         0
+ 54,102.5      1      1    1     0    |  663/663    303/295        +8
+```
+
+- **`SpeedAValid` and `SpeedBValid` were TRUE within one F-cycle of the second
+  reading**, and `SpeedStaleNow` fell in the same step.
+- Over the 686 writer cycles that carried a fresh reading the wire values ran
+  **288 … 315 mm/s**, and the F-program's own `SpeedDiff` stayed within
+  **±22 mm/s** — inside `SPEED_DISCREPANCY_MAX` = 31 without ever reaching it.
+  No discrepancy formed, which is the correct outcome for two healthy channels
+  and is the negative half of the discrepancy evidence.
+- The two sides' own counts agree: the client reports `sent SPD A 688,
+  SPD B 688, MOT 688, PING 33; refused non-finite 0, out-of-range 0`, the
+  writer reports `speed cycles A=686 B=686`. The two-line difference is the
+  pair in flight when each side stopped.
+
+**And the source going silent reached the CPU as a demand, not as a zero.**
+The client shut down at the end of its window and said so:
+
+```
+LINK: down (node shutting down). Both freshness sequences stop advancing at
+the writer within one of its cycles, and the F-program reads both channels as
+missing - a demand, not a zero
+```
+
+The writer noticed the hang-up in the same 50 ms cycle
+(`17:36:54.844Z | SPEEDLINK | down (the source closed the connection)`),
+stopped advancing both sequences, and drove `MotionPresent := TRUE` with
+`MotionObservationValid := FALSE`. **`SpeedReadingA` and `SpeedReadingB` were
+not written at all** — they still read 300 and 300 in the CPU at the end of
+the session, and that is exactly the point: *the value is not the signal, the
+sequence is.* `SpeedAValid` and `SpeedBValid` fell and `SpeedStaleNow` rose.
+
+### §7.3 The per-channel freshness rule, isolated (run C3)
+
+A feeder held channel B alive and took channel A silent for 5 s:
+
+```
+     t_ms  SeqAChg SeqBChg Aval Bval stale AstaleQ causeGone SPDdemand | SI seq
+ 16,373.6     1       1     1    1     0      0        1         0     | 215/217
+ 18,186.2     0       1     0    1     1      1        0         1     | 234/247  <- A alone
+ 22,406.0     0       1     0    1     1      1        0         1     | 234/313
+ 22,748.5     1       1     1    1     0      0        1         1     | 238/319  <- A returns
+```
+
+- `SpeedSeqA` **froze at 234** while `SpeedSeqB` advanced 247 → 313. One
+  channel's silence is one channel's problem; nothing was smoothed.
+- `SpeedMonitorDemand` went **0 → 1** on the missing reading and **stayed 1
+  after the reading returned** — a latch, cleared only by the monitored reset.
+- Later in the same run the source closed entirely: both sequences froze at
+  630/708, both channels invalid, and the readings still read 250/250 in the
+  DB while meaning nothing to the monitor.
+
+The motion rule, same run:
+
+```
+17:10:58.929Z | SPEED | motion observation unavailable (no MOT line for 250 ms)
+              -> MotionPresent := TRUE, MotionObservationValid := FALSE
+```
+
+and the three refusals, none of which advanced anything:
+
+```
+17:11:06.773Z | REFUSED | speed link: 'SPD A 99999' is outside the Int the DB member is
+17:11:07.732Z | REFUSED | speed link: malformed line 'SPD A notanumber'
+17:11:08.725Z | REFUSED | speed link: malformed line 'HELLO WORLD'
+```
+
+> The out-of-Int refusal agrees with `agv/`'s independent decision (m5-56 open
+> question 3): a reading that will not fit the S7 `Int` is **refused at both
+> ends** rather than clamped or wrapped, so it arrives as *missing*. Neither
+> end applies a plausibility window — that is the F-program's, at SL6/SL7.
+
+### §7.4 `WARN` on the field link (run D)
+
+`m5-57-D-consumer.log`, tracking the verdict from the wire to the F-block:
+
+| t_ms | line fed | `SafetyInputStandIn.WarningFieldClear` | `InstF….WarningFieldClear` | `WarningFieldClearValid` |
+|---|---|---|---|---|
+| 2,133 | `ZONE 1` | 0 | 0 | 0 |
+| 3,096 | `WARN 1` | 1 | 1 | 1 |
+| 8,142 | `WARN 0` | 0 | 0 | 0 |
+| 12,183 | `WARN 1` | 1 | 1 | 1 |
+| 22,143 | *link closed* | 0 | 0 | 0 |
+
+`WARN 2` and `WARNING` were both refused as malformed and refreshed nothing.
+On the hang-up the writer drove **both** the zone channel open **and**
+`WarningFieldClear := FALSE` in one step, and said so in one log line.
+
+### §7.5 Two defects these runs found, and what happened to each
+
+**D1 — the writer never noticed a peer hanging up (found and fixed here).**
+`NetworkStream.DataAvailable` is FALSE at end of stream, so a read loop
+guarded by it never runs and never sees the zero-length read. Measured: a
+source that closed cleanly at 17:11:18.75 left the client object held, and the
+**next** connection — as it happens, a connectivity probe from the concurrent
+m5-56 session at 17:11:19.93 — was refused as a "second connection". The data
+path was never wrong (silence is silence), but **the link could never be
+re-established**, which would have made the joint run impossible. Fixed with
+`Test-PeerClosed` (`Poll(SelectRead)` with `Available == 0`), applied to both
+links; the field link had been getting away with it only because its 1 s
+staleness reaper eventually freed the object. Re-proven in run E — two source
+sessions back to back on 45016, the second **accepted** — and again in J1.
+
+**D2 — a 1 Hz keepalive against a 1 s stale window has no margin (NOT fixed;
+it is SPEC §7.2's value, not the writer's).** The first attempt at run D had
+its field link reaped as stale after three keepalives, **10 ms before the
+fourth arrived**: the sender's interval drifts a few ms past 1.000 s and the
+writer's test is `> 1000 ms`. The failure direction is safe — the link reads
+as intrusion *and* warning-occupied — so this is a nuisance trip, not a
+hazard. It matters more than it did, because the same link now carries the
+warning verdict and a spurious drop selects the limit. **The writer implements
+the spec's value unchanged**; the test feeder gained a `-PingHz` knob so that
+a check of the `ZONE`/`WARN` vocabulary is not silently a check of that
+margin. Raised to `plc/` in the m5-57 report.
+
+### §7.6 The proven properties, re-run
+
+The three m5-41 properties this extension could have broken:
+
+| Property | Re-run | Result |
+|---|---|---|
+| Double start refused | C1 | exit code **3**, the mutex message, **no new log file** (8 before, 8 after), no API contact |
+| Terminal write before falling silent | C4, G | `TERMINAL` then `EXIT`; the three circuits FALSE, `WarningFieldClear` FALSE, `MotionPresent` TRUE with `MotionObservationValid` FALSE — and **both speed sequences deliberately left unwritten and frozen**, because a terminal zero would be a speed the writer invented |
+| Republish repairs a controller restart | **not re-run** | The level republish is unchanged and now covers eight members; it ran continuously (10 962 cycles in the J1 session, 0 write failures). **The CPU-restart form was not reproduced** — stopping the controller was out of scope. It is owed a run |
+
+Run F additionally showed **console commands entered while the loop kept
+cycling** — `estop close`, `zone close`, `reset pulse 1500` typed into the
+writer's own console from another process — with the heartbeat advancing
+throughout and no gap in the `CYCLE` lines. In the same run one monitored
+reset cleared `SpeedMonitorDemand`, `Ss1Demand` and `TorqueOffDemand`
+together, and a fresh 80 mm/s discrepancy fed afterwards re-formed the demand
+and ran the sequencer to torque-off about a second later. **That was a
+by-product of proving the writer, not a T7 rehearsal**: T7 belongs to m5-58.
+
+### §7.7 Cadence with eleven tags instead of four — measured
+
+From the `CYCLE` timestamps of the two long sessions and the writer's own
+`EXIT` counters:
+
+| Session | cycles | overruns | write failures | period median | p95 | max |
+|---|---|---|---|---|---|---|
+| pid44496 (D–G) | 7 342 | 11 (0.15 %) | 0 | 48.0 ms | 65.0 ms | 113.0 ms |
+| pid14288 (J1) | 10 962 | 8 (0.07 %) | 0 | 48.0 ms | 65.0 ms | 111.0 ms |
+
+The 50 ms anchor holds with eleven writes as it held with four, and the write
+phase failed **zero times in 18 304 cycles**. **These are timing samples from
+two sessions on one machine, not bounds** (LESSONS 2026-08-04, 2026-08-05):
+the design property — the write phase is small against the cycle, and the
+deadline anchor does not drift — will reproduce; the millisecond figures are
+two draws. The spread is Windows `Thread.Sleep` granularity, which
+`STANDIN_STALE_MAX` = 1 s absorbs twenty times over.
+
+### §7.8 An operating note that cost a run, recorded because it will cost another
+
+**With no field-evaluation source running, `WarningFieldClear` is FALSE, so
+the reduced limit is in force.** A vehicle fed at 300 mm/s is then legitimately
+over it: `SpeedOverLimitNow` chattered as the noisy readings crossed the
+selected limit, `SpeedCauseGone` followed it, and **no monitored reset could
+ever be accepted** (`m5-57-R2-reset-refusal-consumer.log`). That is the
+program behaving exactly as §11.2 specifies — loss of the field source selects
+the limit — and it is not a defect at either end.
+
+It does mean that **any procedure needing the latches to clear must either run
+a field source saying `WARN 1`, or drive below the limit in force.** Run R1 is
+the simpler form of the same observation: with no speed source at all, a reset
+was refused twice with `SpeedCauseGone` FALSE throughout.
+
+### §7.9 State the machine was left in (m5-57)
+
+Read back after the last `quit`, instance `safecell3`, `OperatingState = Run`,
+269 tags:
+
+```
+SafetyInputStandIn.EStopCircuitClosed        False
+SafetyInputStandIn.ZoneDeviceCircuitClosed   False
+SafetyInputStandIn.ResetButtonPressed        False
+SafetyInputStandIn.WarningFieldClear         False
+SafetyInputStandIn.MotionPresent              True
+SafetyInputStandIn.MotionObservationValid    False
+SafetyInputStandIn.StandInHeartbeat          10962   (frozen: no writer running)
+SafetyInputStandIn.SpeedReadingA               300   (stale by construction)
+SafetyInputStandIn.SpeedReadingB               300
+SafetyInputStandIn.SpeedSeqA                  1715   (frozen == missing)
+SafetyInputStandIn.SpeedSeqB                  1715
+InstF_Forklift_Safety.StandInValid           False
+InstF_Forklift_Safety.SpeedChainSeen          True
+InstF_Forklift_Safety.EStopDemand             True
+InstF_Forklift_Safety.ZoneStopDemand          True
+InstF_Forklift_Safety.SpeedMonitorDemand      True
+InstF_Forklift_Safety.Ss1Demand               True
+InstF_Forklift_Safety.TorqueOffDemand         True
+InstF_Forklift_Safety.SafetyResetRequired     True
+InstF_Forklift_Safety.SafetyResetFault       False
+```
+
+**No writer process is running** (the `Global\amr-standin-writer` mutex was
+acquired fresh and released to prove it), **nothing is listening on 45015 or
+45016**, and no vehicle-side process survives in WSL. **Nothing was
+downloaded, no block was compiled, no program was changed, no project was
+opened and no `plc/` file was edited.** Every write went through the writer's
+eleven-tag allowlist.
+
+Two members read a value rather than a start value, and neither is tidied
+away: `SpeedReadingA`/`B` hold 300/300 while their sequences are **frozen**,
+which is precisely what makes them meaningless to the monitor.
+`SpeedChainSeen` is TRUE and only a CPU STOP → RUN clears it — the same
+one-shot property m5-41 recorded for `HeartbeatSeen`.
