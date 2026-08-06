@@ -46,6 +46,8 @@ project can command in engineering units.
 | `scripts/forklift_io.py` | Engineering units in, raw joint commands out; joint state and odometry in, two scalars out. |
 | `scripts/obstacle_zone.py` | Forward stop-zone evaluator over the front safety scanner's **non-safe measurement channel**. |
 | `scripts/field_evaluation.py` | The protective- **and warning**-field evaluation, phases 1 and 2 of `FIELD-EVALUATION.md`. A **model of what a safety-rated scanner does inside its own housing** — two contours, per-device verdicts, OSSD-equivalent pair, union aggregation — feeding a **stand-in for wiring** over one dedicated TCP link. **Not a safety function; no Category, no PL, no SIL, no PFH** (ADR 0011 D5); SF-04, the warning function, carries no claim at all. The **protective** verdict publishes **no topic**; the **warning** verdict is process data and publishes one, `/forklift/warning_field/occupied`, at the evaluation tick so that its absence is visible. It latches nothing and enforces no speed. Evidence: `EVIDENCE_FIELD_EVALUATION.md`. |
+| `scripts/safe_speed_channels.py` | **The drive shaft, read twice, plus the corroboration a claimed zero speed is checked against.** Puts a reading head on each of `model.sdf`'s two reads of `drive_wheel_joint` — its own mounting phase on the count grid, its own read jitter — and publishes two signed tread speeds for the F-program to cross-compare. **A SINGLE-CHANNEL TESTED SYSTEM: one shaft, two readings of it, never a two-channel one.** Beside them it publishes a **motion-present STAND-IN** for the mechanical fault exclusion a real system argues on the shaft coupling, taken from the navigation lidar. **Not a safety function; no Category, no PL, no SIL, no PFH** (ADR 0011 D5) — the readings reach the F-program as **standard data**. It limits nothing and latches nothing. `--selftest` exercises the head model and the observation with no ROS. Evidence: `EVIDENCE_ODOMETRY.md` §15. |
+| `scripts/safe_speed_bench.py` | The instrument behind that section: `--drive` runs the speed profile and prints a per-segment table with an **achieved** column, so a held or blocked segment is visibly held; `--analyse` reads the recorded CSV with no ROS and prints the channel noise, the run-length of noise excursions at several thresholds, and the **derivation** of the discrepancy threshold and discrepancy time from them. |
 | `scripts/sensor_tf.py` | Publishes `/tf_static` for the four sensor frames, reading every number out of `model.sdf`. |
 | `scripts/wheel_odometry.py` | Tricycle dead reckoning from the vehicle's own joint states, through two modelled encoders. Publishes an estimate and **no transform**, plus the encoder-derived standstill verdict. |
 | `scripts/imu_gate.py` | Stops offering the gyro's yaw rate to the EKF while the encoders report the wheels standing still — the interval in which that reading is bias and not rotation. Suppresses; never rewrites a sample; **estimates no bias**; fails open. |
@@ -103,6 +105,8 @@ name.
 | `/forklift/gz/traction_cmd` | `gz.msgs.Double` | into the model | drive wheel spin rate [rad/s] |
 | `/forklift/gz/fork_cmd` | `gz.msgs.Double` | into the model | carriage travel target [m] |
 | `/forklift/gz/joint_state` | `gz.msgs.Model` | out of the model | position and rate of the three driven joints |
+| `/forklift/gz/drive_speed/read_a` | `gz.msgs.Model` | out of the model | **One of two reads of `drive_wheel_joint`**, published by its own `JointStatePublisher` instance at the physics rate. Bridged into ROS **only with `safe_speed:=true`**, un-renamed. See "One shaft, two readings" below |
+| `/forklift/gz/drive_speed/read_b` | `gz.msgs.Model` | out of the model | The second read of the **same** joint, from a second instance. Same rate, same value: it is the same shaft. What makes the two READINGS differ is the reading head, and the heads are modelled in `scripts/safe_speed_channels.py`, not here |
 | `/forklift/gz/odom` | `gz.msgs.Odometry` | out of the model | **ground-truth** pose and body twist, 20 Hz. Straight out of the simulator: no slip, no drift. See "Odometry in two phases" below |
 | `/forklift/gz/tf_ground_truth` | `gz.msgs.Pose_V` | out of the model | `forklift/odom → forklift/base_link`, 20 Hz, from the **same ground-truth pose** as the row above. **Retired as a source on 2026-07-31**: the EKF owns that edge now and `ground_truth_tf` defaults to `false`, so nothing bridges this onto `/tf`. It is still published, as the **reference** estimator error is measured against, and read only by `scripts/check_odometry.py` |
 | `/forklift/gz/imu` | `gz.msgs.IMU` | out of the model | 6-axis MEMS IMU, 100 Hz, frame `imu_link`, noise from the BMI088 datasheet. **No orientation output** — `<enable_orientation>false</>`, because gz derives orientation from the link pose and it would be ground truth. The IMU *system* is carried by the model, not the world, so no world file needs editing |
@@ -182,6 +186,70 @@ ADR 0011 forbids is a safety scanner feeding a **navigation** consumer —
 SLAM, AMCL, a costmap — and that prohibition is unchanged: **the
 navigation lidar is the only SLAM input**, on `/forklift/scan`, and no
 scanner channel reaches a costmap.
+
+### One shaft, two readings — the safe-speed encoder
+
+`model.sdf` carries **two `JointStatePublisher` instances on
+`drive_wheel_joint`**, on the two `/forklift/gz/drive_speed/read_*` topics
+above. `scripts/safe_speed_channels.py` puts a **reading head** on each —
+its own mounting phase on the count grid, its own read jitter — and
+publishes two signed drive-wheel tread speeds for the F-program to
+cross-compare.
+
+**Its honest name is a SINGLE-CHANNEL TESTED SYSTEM, and that name is
+used in every artefact.** One shaft, one measured quantity, two readings
+of it. That is what a real safe encoder is
+(`docs/safety/SLS-STANDARDS-BASIS.md` F4, which records a manufacturer's
+own classification of exactly this architecture). The arrangement is
+**never called two-channel**: both readings die together with the shaft
+they read, and the phrase would claim a redundancy that does not exist.
+
+| | |
+|---|---|
+| What the two reads buy | **Diagnostic coverage of the reading path.** A head that freezes, drifts or stops publishing is visible to a comparison; a single head's failure is not |
+| What they do **not** buy | Any cover for the shaft, its bearing or its coupling. Both readings are of one physical quantity, and a lie in that quantity is a lie in both |
+| What closes that hole | A **motion-present observation**, off the shaft entirely — see below |
+| The comparison the F-program makes | Disagreement of more than **0.0308 m/s** sustained for more than **200 ms**. Both figures are **derived from the measured channel noise** — `EVIDENCE_ODOMETRY.md` §15 — because a discrepancy time chosen for convenience is either a nuisance-demand generator or a blind window, and both failures are quiet |
+| The claim attached | **None.** No Category, no Performance Level, no SIL, no PFH (ADR 0011 D5). The readings reach the F-program as **standard data** over the process path, which is a stand-in for a safe measurement channel and is labelled one wherever it appears |
+
+**The motion-present check is a STAND-IN, and is labelled one.** Two
+readings of one shaft agree perfectly while a decoupled encoder reports
+zero and the vehicle rolls. Real systems close that hole with a
+**mechanical fault exclusion** argued on the coupling — a construction
+argument made once at design time, not a monitored signal
+(`SLS-STANDARDS-BASIS.md` F4, citing the standard's own table on loss of
+the encoder-to-motor connection). This project has no such argument
+available, so it substitutes an **observation**: the change in the
+navigation lidar's range profile between scans, which shares no shaft,
+no bearing and no cable with the drive axis. It reads the **95th
+percentile** of the per-ray change and not the median, and that choice is
+measured rather than assumed (§15.5): a wall parallel to the direction of
+travel returns the same profile from every point along it, so a majority
+of usable rays do not change while the vehicle drives, and the median
+read *not moving* for 1037 of 6538 sustained-motion samples.
+
+**Why the readings may be topics when the scanner's safe verdict may
+not.** These are readings, not verdicts. The verdict they feed — the SLS
+demand — is formed inside the F-program and has no topic on either
+transport, exactly as before. Their names carry no `safe_`, `ossd` or
+`protective` token, and that is enforced by
+`scripts/check_sensor_frames.py` section 4 rather than left to style:
+they were called `/forklift/safe_speed/*` while being built and the
+checker refused them, correctly, because a mechanical rule cannot tell a
+reading from a verdict.
+
+**Who limits and who monitors.** The **standard** program lowers the
+envelope speed ceiling; the **F-program** measures the real speed from
+these two readings and demands a stop if it is exceeded. That split is
+the certified pattern rather than this project's invention
+(`SLS-STANDARDS-BASIS.md` F5), it keeps the ceiling's single owner
+(invariant 10), and it is why **no speed value ever leaves the
+F-program** — only a demand (ADR 0014).
+
+**Off by default.** Both the bridge and the node are conditioned on
+`safe_speed:=true`, because the two reads publish at the physics rate.
+Forgetting the argument is safe: with the node absent the F-program
+receives no readings, and a missing measurement reads as a demand.
 
 ### The four sensors, and which one feeds what
 
@@ -271,6 +339,10 @@ name this file had already reserved for it,
 | `/forklift/safety_scanner_front/measurement` | `sensor_msgs/LaserScan` | 10 Hz | bridge | **The front safety scanner's non-safe measurement channel**, renamed from `/forklift/gz/safety_scanner_front/measurement`: 275 samples over 275°, plane z = 0.15 m, range 0.10–5.50 m, frame `safety_scanner_front_link`. Read by `obstacle_zone` and by `field_evaluation`. **Not a safety signal**, whatever the device is called, and forbidden to SLAM, AMCL and every costmap. |
 | `/forklift/safety_scanner_rear/measurement` | `sensor_msgs/LaserScan` | 10 Hz | bridge | **The rear safety scanner's non-safe measurement channel**, renamed from `/forklift/gz/safety_scanner_rear/measurement`: same shape as the front one, frame `safety_scanner_rear_link`. Bridged 2026-08-06 because `field_evaluation` consumes it. **Not a safety signal**, and forbidden to SLAM, AMCL and every costmap. Expect a large near-field band on this device: 61 of its 275 rays land on the vehicle's own mast rails and carriage at 0.090–0.780 m (residual **R8**, measured in `EVIDENCE_SENSOR_COVERAGE.md` §13). Those returns are real and are not filtered out anywhere; what `field_evaluation` does with them is draw its **field boundary inside them**, which is device geometry, not a filter. |
 | `/forklift/warning_field/occupied` | `std_msgs/Bool` | 20 Hz | `field_evaluation` | **The WARNING field's verdict, and the only field verdict that has a topic.** `TRUE` demands a **speed reduction** to the creep ceiling; it never stops anything, and it is not the protective verdict, which crosses only the dedicated link and appears on no transport. Derived at **3.35 m** of depth in `FIELD-EVALUATION.md` §6.1 — larger than the protective 1.35 m by exactly the distance the vehicle and a walking intruder close while the reduction runs. **`TRUE` is the demanding state and every failure reads it**: a dead, stale, frozen, discrepant or faulted device is `TRUE`, and an empty horizon is not — a beyond-range return is a measurement. Occupation asserts on one scan; release needs three clear scans **and then** SF-04's 2 s clear-hold. **Published at the evaluation tick and not on transitions**, so that its ABSENCE is visible: a consumer that republishes the last value it saw would turn this node's death into a standing order to keep driving fast, so **every consumer owes a stale rule of its own — no message inside its window means occupied**. SF-04 carries **no PL claim** and is backed unconditionally by SF-03. **No consumer exists yet** (m5-47). |
+| `/forklift/drive_speed/channel_a` | `std_msgs/Float64` | 20 Hz, **only with `safe_speed:=true`** | `safe_speed_channels` | **One of two readings of the drive shaft**, signed drive-wheel tread speed [m/s]. `model.sdf` carries two `JointStatePublisher` instances on `drive_wheel_joint`; this node puts a reading head on each — its own mounting phase on the count grid, its own read jitter — and differences the quantised angle over one publish interval. **The arrangement is a SINGLE-CHANNEL TESTED SYSTEM: one shaft, two readings of it, never a two-channel one**, because both readings die together with the shaft they read. It is a **model of what a safe encoder does**, reaching the F-program as **standard data**: no Category, no Performance Level, no SIL, no PFH (ADR 0011 D5). **Tread speed, not body speed** — the drive wheel is steered, so body speed is this × cos δ and never larger, which makes the monitor conservative and keeps the steer axis out of the measurement. **A stale channel goes SILENT rather than repeating**, so every consumer owes a stale rule: no message inside its window means **no reading**, which is a missing measurement and reads in the demanding direction. |
+| `/forklift/drive_speed/channel_b` | `std_msgs/Float64` | 20 Hz, **only with `safe_speed:=true`** | `safe_speed_channels` | The second reading of the **same** shaft, with an independently drawn mounting phase and an independently drawn jitter per sample. Everything in the row above applies. The F-program cross-compares the two and demands when they disagree by more than **0.0308 m/s** for longer than **200 ms** — both derived from the measured channel noise in `EVIDENCE_ODOMETRY.md` §15, not chosen. |
+| `/forklift/drive_speed/motion_present` | `std_msgs/Bool` | 20 Hz, **only with `safe_speed:=true`** | `safe_speed_channels` | **A STAND-IN, and labelled one.** Two readings of one shaft lie together if the shaft or its coupling fails, so a claimed zero speed is corroborated against an observation that does not pass through the shaft: the change in the **navigation lidar's** range profile between scans. Real systems close this hole with a **mechanical fault exclusion** argued on the coupling — a construction argument, not a monitored signal (`docs/safety/SLS-STANDARDS-BASIS.md` F4) — and this project has none available, so it substitutes an observation and says so. **`TRUE` is the demanding state and every uncertainty reads it**: no scan, a stale scan, too few usable ray pairs, an empty horizon. A wrong `TRUE` costs a withheld standstill confirmation, which SS1 pays for with its timeout; a wrong `FALSE` would corroborate a lying encoder. |
+| `/forklift/drive_speed/motion_observation_valid` | `std_msgs/Bool` | 20 Hz, **only with `safe_speed:=true`** | `safe_speed_channels` | Whether the observation above could be made at all. `FALSE` never softens the verdict — it accompanies `motion_present` `TRUE`. It exists so a consumer can tell *observed to be moving* from *could not observe*, which are the same demand and different diagnoses. |
 | `/forklift/obstacle/in_stop_zone` | `std_msgs/Bool` | 10 Hz | `obstacle_zone` | Something inside the forward stop zone, computed from the **front safety scanner's measurement channel** at z = 0.15 m — the low plane the M4 showcase demonstrated, not the 1.80 m navigation plane. **`TRUE` is the non-permissive state.** The ±30° sector is centred on the vehicle's driving direction, which is `obstacle.sector_centre_rad` = −45° in this sensor's own angle coordinate because the sensor is mounted on a corner at +45°. The evaluator sorts every sample in that sector into three classes: **clear** — `+inf`, or a finite range at or beyond `range_max`, which is the sensor reporting no echo inside its window and counts as a valid measurement at `range_max`; **distance** — a finite range inside `[range_min, range_max)`; **invalid** — `NaN`, `-inf`, or a range below `range_min`. `TRUE` when a distance is at or under 1.20 m, and `TRUE` as a fail-safe when there is no scan, when the newest one is older than 0.50 s, when the scan is structurally unusable, or when the sector holds no sample in **either** valid class. A dead or garbage sensor is all of those; an open horizon is none of them. |
 | `/forklift/obstacle/min_distance` | `std_msgs/Float64` | 10 Hz | `obstacle_zone` | Nearest valid range in the sector [m]: the smallest **distance**-class sample; the scan's own `range_max` when the sector is entirely **clear** beyond range; and `0.0`, the `unknown_distance_m` sentinel from `config.yaml`, in every fail-safe case above. The clear value is the scan's number and not this node's, so it follows whatever scanner `model.sdf` declares — and the consumer's plausibility window must contain it. Since this node reads the front safety scanner, that value is now **5.50 m**, comfortably inside the `0.05 … 8.10` m window of `docs/interfaces/opcua-nodes.md` §10.5, so **no interface change is owed by this consumer**. The window still bounds the *navigation* lidar's 8.00 m range, which is a separate open item. |
 | `/forklift/scan` | `sensor_msgs/LaserScan` | 10 Hz | bridge | **The navigation lidar**, renamed from `/forklift/gz/scan_nav`: 360 samples over 360°, plane z = 1.80 m, frame `nav_lidar_link`. **This is the vehicle's only SLAM, AMCL and costmap input**, and it is no longer read by `obstacle_zone`: it replaced a 181-sample 180° scanner at z = 0.25 m, so **the plane this topic reports moved up 1.55 m**, and in `sim/worlds/forklift_arena.sdf`, whose walls stop at 0.60 m and whose tallest crate stops at 1.00 m, it reports a clear horizon in front of an obstacle a process stop must see (`EVIDENCE_SENSOR_TF.md` §4 measures exactly that: 60 of 60 forward samples clear at 1.80 m with a crate 0.85 m ahead at 0.15 m). **Not gap-free.** The old scanner dropped the single sample at exactly ±45°, in the raw gz message rather than in the bridge, following vehicle orientation rather than a fixed index (m4f-03 evidence). **That was measured on the sensor this one replaced and has not been re-measured here**, so it is a warning and not a specification. The consumer rule is unchanged and stands on its own: do not assume every sample is finite, and do not read a non-finite one as a missing one — an `inf` is the sensor reporting **no echo inside its window**, which is a measurement of a clear path to `range_max`, not an absence of data. `obstacle_zone.py` classifies each sample on exactly that basis and never condemns a whole scan for containing one bad sample. |

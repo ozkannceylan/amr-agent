@@ -1788,3 +1788,370 @@ ros2 launch agv/forklift/launch/vehicle.launch.py world:=/tmp/flat.sdf \
 `launch/vehicle.launch.py` are byte-identical to their committed form.
 The only file this brief changed in `agv/` that any run above reads is
 `model.sdf` itself.
+
+---
+
+# 15. THE SAFE-SPEED READING CHANNELS — 2026-08-06 (m5-48)
+
+**One shaft, read twice, and the two numbers the F-program's
+cross-comparison needs derived from the noise those readings actually
+have.** The headline is two figures and their `n`:
+
+| | Value | Derived from |
+|---|---|---|
+| **discrepancy threshold** | **0.0308 m/s** | 4 × the measured σ of the channel difference, 13 200 paired samples over 660.0 s |
+| **discrepancy time** | **200 ms** | the measured longest run of excursions above that threshold on the F-program's own 100 ms grid: **0 samples of 6 600** |
+
+**Its honest name is a SINGLE-CHANNEL TESTED SYSTEM** — one shaft, one
+measured quantity, two readings of it, which is what a real safe encoder
+is (`docs/safety/SLS-STANDARDS-BASIS.md` F4). It is **never** called a
+two-channel system: both readings die together with the shaft they read.
+The **motion-present check** that covers that hole is a **STAND-IN** for
+the mechanical fault exclusion a real system argues on the coupling, and
+is labelled one everywhere it appears.
+
+**No claim of any kind attaches to anything in this section.** No
+Category, no Performance Level, no SIL, no PFH (ADR 0011 D5). The
+readings reach the F-program as **standard data** over the process path.
+Nothing here latches, limits, inhibits or stops anything; the protective
+stop, the e-stop chain and safe torque off are onboard and hardwired
+(invariant 1).
+
+| Item | Value |
+|---|---|
+| Date | **2026-08-06**, owner's WSL, CEST |
+| Brief | m5-48, task 2 of the re-ordered M5 closure plan |
+| Host | WSL2, kernel `5.15.167.4-microsoft-standard-WSL2`, `nproc` 20, 15.8 GiB |
+| Simulator | `gz sim --version` → **8.11.0**, headless (`-r -s`) |
+| ROS | Jazzy, `rmw_fastrtps_cpp` |
+| World | `sim/worlds/warehouse.sdf`, `world_name:=warehouse`, unedited |
+| Isolation | `GZ_PARTITION=m548meas` **and** `ROS_DOMAIN_ID=64` on every run — gz transport is not DDS |
+| Machine state | checked before each timed run and recorded in it: no simulator, no bridge, no vehicle node running; load average 0.06 or lower at bring-up |
+| Runs | **three** full profiles, 660 s each: `20260806a`, `b`, `c`. `c` is the run of the committed tree and is what every figure below is quoted from unless a spread across all three is given |
+
+## 15.1 The plant change, classified before it was made
+
+`model.sdf` has a history — the 2026-08-05 steer-gain change required the
+whole re-qualification round of `PLANT-CHANGE-INVENTORY.md` — so this
+edit was classified by that file's method **before** it was made.
+
+**What the edit is.** Two additional `JointStatePublisher` instances on
+`drive_wheel_joint`, on `/forklift/gz/drive_speed/read_a` and `read_b`.
+Nothing else: no link, joint, inertial, geometry, sensor, gain, limit,
+mass or existing topic changed.
+
+**What it touches, physically: nothing, and here is why.**
+`JointStatePublisher` is a read-only post-update system — it publishes
+joint state and writes nothing the physics integrates. The
+joint-position and joint-velocity components it requires are **already
+created for this same joint** by the instance that publishes
+`/forklift/gz/joint_state`, so the edit does not even add a component.
+By the inventory's own classification rule — *a figure is affected iff
+its value depends on the change, directly or through the trajectory the
+vehicle followed while the figure was taken* — **every figure in every
+evidence file in this directory is class U**, because none of them
+depends on how many read-only publishers exist.
+
+**The one class that is not settled by that argument, and was measured
+instead.** An additive edit can still move a figure derived from machine
+load, because two more topics publish at the physics rate. So the
+simulator's own real-time factor was measured with and without the two
+systems, **alternating**, three captures of 60 s each:
+
+| | run 1 | run 2 | run 3 | mean |
+|---|---|---|---|---|
+| without the two reads | 0.9902 | 0.9895 | 0.9913 | **0.9903** |
+| with them | 0.9886 | 0.9892 | 0.9930 | **0.9903** |
+
+n = 613 stats samples per capture; medians 0.9993–0.9997 in all six.
+**No measurable cost**, and the two means agree to four decimals. The
+probe world for this A/B is `model.sdf` spliced into a minimal world with
+physics, user-commands and scene-broadcaster only — **no rendering
+sensors** — so it isolates the two publishers rather than characterising
+a full vehicle world. Stated rather than left as a hidden condition.
+
+**What the edit does cost, measured on the other side of the bridge.**
+The two reads publish at the world rate — `ros2 topic hz` reported
+**500.011 Hz**, min 0.001 s, max 0.004 s, window 5510 — so bridging them
+is real traffic. One `parameter_bridge` process carrying the joint-state
+topic alone averaged **4.6 %** of one core; the same process carrying
+all three averaged **7.6 %**. About three percentage points of one core,
+n = 1 each, average-since-start CPU. That measured cost is why the
+bridge and the node are behind `safe_speed:=true` rather than on by
+default — and forgetting the argument is safe, because a missing reading
+reads to the F-program as a demand.
+
+## 15.2 What makes the two readings differ, and what deliberately does not
+
+The plant hands both channels **the same number**, because it is the same
+shaft. That is the design's point: the channels observe one physical
+quantity, so a divergence is a channel fault and not an ambiguity between
+two estimates.
+
+Everything that makes the readings differ is the **reading head**,
+modelled in `scripts/safe_speed_channels.py` and parameterised in
+`config.yaml`'s `safe_speed:` block:
+
+| Term | Value | Where it comes from |
+|---|---|---|
+| resolution | 4096 counts/rev, count = 1.53398e-3 rad = 0.1850 mm of tread | a **design value** of the commonest catalogue class. **No datasheet is quoted for it**, here or anywhere |
+| mounting phase | drawn once per run, uniform over one count, per head | two heads on one disc sit at their own grid positions and no assembly resolves that to better than a count. It de-correlates the two heads' **quantisation** |
+| read jitter | zero-mean Gaussian on the angle, σ = **one count**, drawn per head per sample | the smallest defensible non-zero figure, on the same reasoning `odometry.steer_zero_offset_rad` already uses in this file. A **design value**, not fitted |
+| calibrated radius | 0.1206 m | its own parameter, equal today to the process encoder's and belonging to a different device. A radius error is **common mode** and cancels from the comparison — correctly, since both heads read one shaft through one radius |
+
+**The channels are not filtered.** A filter would trade this noise for
+lag in the one measurement SLS exists to make promptly. The noise is
+rejected by the **discrepancy time** instead — which is precisely why
+that time has to be derived from the noise and may not be picked.
+
+**Predicted before it was measured**, from those parameters alone:
+σ per channel = r·√2·σ_read/dt = 0.1206 × 1.4142 × 1.53398e-3 / 0.05 =
+**5.23e-3 m/s**, and the difference √2 times that = **7.40e-3 m/s**.
+
+## 15.3 The drive, and that it drove
+
+`scripts/safe_speed_bench.py --drive`, five repetitions of a five-speed
+profile — 0.05, 0.10, 0.30, 0.60, 1.00 m/s, each forward then astern,
+segment length capped at 4 m of excursion — with 30 s of rest before and
+40 s after, and a ground-truth re-centre between pairs so a 660 s profile
+does not walk into the racking.
+
+**50 segments, 0 held or blocked.** Achieved/commanded ran 0.96 to 1.00
+across the whole range, from ground truth, per segment:
+
+```
+   L1 fwd 0.05  cmd +0.05 m/s   8.0 s  moved 0.397 m  achieved 0.050 m/s  ach/cmd 1.00
+   L1 fwd 0.30  cmd +0.30 m/s   8.0 s  moved 2.382 m  achieved 0.298 m/s  ach/cmd 0.99
+   L5 rev 1.00  cmd -1.00 m/s   4.0 s  moved 3.819 m  achieved 0.958 m/s  ach/cmd 0.96
+```
+
+The achieved column exists because a kinematic check that does not
+retrace its segments cannot tell a followed command from a blocked one
+(`docs/LESSONS.md` 2026-08-04). Full table:
+`evidence/encoder/m5-48-drive-20260806c.txt`.
+
+## 15.4 The measurement, and the derivation
+
+**Channel noise**, against the noise-free speed over the same window (a
+reference column written to the CSV and read by nothing on the vehicle):
+
+| | run a | run b | run c |
+|---|---|---|---|
+| n (paired rows) | 13 220 | 13 223 | **13 200** |
+| σ channel A | 0.005410 | 0.005383 | **0.005438** |
+| σ channel B | 0.005458 | 0.005474 | **0.005464** |
+| σ of the difference | 0.007740 | 0.007659 | **0.007696** |
+
+against the 5.23e-3 and 7.40e-3 predicted in §15.2 — the model behaves
+as its parameters say it should, within 4 %, three times. Means are zero
+to six decimals: the heads add noise, not bias.
+
+**The noise does not depend on speed**, which matters because one
+threshold has to serve the whole range. By ground-truth body-speed band,
+run c:
+
+| band | n | σ of the difference |
+|---|---|---|
+| 0.00–0.02 m/s | 6165 | 0.007731 |
+| 0.02–0.20 | 3266 | 0.007667 |
+| 0.20–0.45 | 1643 | 0.007694 |
+| 0.45–0.80 | 1357 | 0.007635 |
+| 0.80–2.00 | 769 | 0.007670 |
+
+**As the F-program sees it.** The F-OB runs at 100 ms
+(`plc/forklift-safety/SPEC.md` §4.3) and these publish at 20 Hz, so the
+monitor samples every second row: n = 6600, σ = 0.007687 m/s, **lag-1
+autocorrelation −0.0105**. Consecutive F-samples are independent draws,
+which is what makes a *run* of exceedances rare rather than expected —
+and it is measured rather than assumed, because if the noise were
+correlated the whole run-length derivation below would be wrong.
+
+**How long noise excursions actually last** — the measurement the
+discrepancy time is derived from, run c:
+
+| threshold | exceeding samples | longest run | as time |
+|---|---|---|---|
+| 1 σ = 0.007696 | 1492 of 6600 | 6 | 0.600 s |
+| 2 σ = 0.015392 | 198 | 2 | 0.200 s |
+| 3 σ = 0.023088 | 11 | 1 | 0.100 s |
+| **4 σ = 0.030783** | **0** | **0** | — |
+| 5 σ = 0.038479 | 0 | 0 | — |
+
+**The derivation, in one line each.**
+
+1. **Threshold = 4 σ of the difference = 0.0308 m/s.** Four and not
+   three because three still produced 11 single-sample exceedances in
+   6600, and every one of those would be a nuisance demand under a
+   two-cycle time; four produced none, in each of the three runs
+   (0.030962 / 0.030638 / 0.030783 — the spread is 1 %).
+2. **Time = 200 ms**, two F-cycles: the longest measured run above the
+   threshold is **0 samples**, so the floor rather than the measurement
+   sets it — and the floor is two cycles, because a single sample must
+   never be able to demand on its own.
+3. **It is not rounded.** Rounding up would buy nuisance immunity the
+   measurement already shows is not needed, at the cost of detection;
+   rounding down the reverse. The measured value needs neither.
+
+**What the threshold costs in detection, said plainly.** A channel that
+freezes while the vehicle runs shows a difference equal to the speed
+itself, so the comparison sees a frozen channel only **above 0.0308 m/s**
+of tread speed — about a tenth of the 0.3 m/s SLS regime. Below that the
+cross-comparison is blind to a frozen channel, and what covers that
+regime is the motion-present stand-in, not this threshold. The two
+mechanisms are complementary by construction and neither is a substitute
+for the other.
+
+**A real fault is caught in one discrepancy time.** A frozen, dead or
+diverging channel holds the difference above the threshold continuously
+rather than in single samples, so the demand forms after 200 ms — two
+F-cycles — with no dependence on the noise statistics above.
+
+## 15.5 The motion-present stand-in, and the statistic that was measured rather than assumed
+
+**A first version failed, and the failure is worth recording** because it
+would have been invisible in review. The observation was written to read
+the **median** of the per-ray range change between consecutive
+navigation scans, the median being chosen for robustness against a person
+or a truck crossing the field of view. Measured against ground truth over
+run **a**'s 6538 sustained-motion samples it read **0.072 of the body speed with a
+worst case of 0.00024**, and **1037 of those samples reported NOT MOVING
+while the vehicle was driving**.
+
+The mechanism is geometric, not statistical: a straight wall parallel to
+the direction of travel returns the *same* range profile from every point
+along it — `r(theta) = d / sin(theta)`, with no dependence on position —
+so in an aisle a **majority** of usable rays do not change at all while
+the vehicle drives. The median of the changes is therefore a measurement
+of the degenerate majority.
+
+**And the robustness the median was chosen for was the wrong direction to
+optimise.** An object crossing the view makes the observation say MOVING
+while the vehicle stands, which costs a withheld standstill confirmation
+that SS1 pays for with its timeout. Missing real motion is the failure
+that corroborates a lying encoder. The statistic is therefore chosen for
+**sensitivity**, and its nuisance mode is the benign one.
+
+Five statistics were logged per tick and scored on **sustained** regimes
+only — 6535 moving samples, 5644 at rest, run c — because a row taken
+while the vehicle accelerates away from rest measures the lag and not the
+statistic:
+
+| statistic | worst at rest | worst while moving | separation |
+|---|---|---|---|
+| median | 0.000000 | 0.000024 | — |
+| q75 | 0.000002 | 0.000126 | 53× |
+| q90 | 0.000010 | 0.002608 | 274× |
+| **q95** | **0.000014** | **0.088928** | **6217×** |
+| max | 0.000038 | 0.159931 | 4193× |
+
+**q95 is what the node reads.** At the slowest speed the profile drove,
+0.05 m/s, its worst observed rate was 0.088928 m/s — 1.78 times the body
+speed — and across the whole range the ratio ran 0.715 to 25.3.
+
+**The threshold, 0.0014 m/s**, sits between the two measured bounds:
+**98× above** the worst sustained-rest value and **64× below** the worst
+sustained-motion value, and **none** of the 6535 sustained-motion samples
+reads as stopped at it. At the worst measured ratio (0.715, the highest
+speed band) it corresponds to a body speed of 0.0020 m/s, which is where
+`navigation.zero_speed_mps` already puts zero — **and that conversion is
+an extrapolation below 0.05 m/s**, the slowest speed driven, stated as
+one rather than quoted as a detection limit.
+
+**The floor it sits above is the simulation's, not a real device's.**
+`model.sdf` declares no range noise on the navigation lidar, so a
+stationary vehicle in a static world produces range changes of exactly
+zero and the 0.0000143 m/s above is scan-timing residue. A real
+installation's floor is its rangefinder's noise, which is larger, and
+this threshold would be set by measuring it on the device.
+
+**The two lags, and they are asymmetric on purpose.** Over 50 motion
+onsets in run c, **none undetected**:
+
+| | min | median | max |
+|---|---|---|---|
+| onset → verdict MOVING | 0.000 s | 0.000 s | **0.050 s** |
+| stop → verdict STOPPED | 0.500 s | 0.550 s | 0.600 s |
+
+Prompt to say moving, late to say stopped — the direction that matters,
+and the release lag is the configured 0.50 s hold plus a scan. The nine
+sustained-motion samples that read NOT MOVING in run c all sit inside
+that 50 ms onset window; they are the lag, not a missed detection.
+
+**Every uncertainty resolves to MOVING.** No scan, a scan older than
+0.30 s, fewer than 36 usable ray pairs, an empty horizon: all of them
+publish `motion_present` `TRUE` with `motion_observation_valid` `FALSE`,
+so a consumer can tell *observed moving* from *could not observe* while
+both remain the same demand. A beyond-range return is a measurement of
+clear space and not missing data — it simply carries no information about
+how far anything moved, so it yields no ray pair rather than a
+comfortable one. Over run c the observation could not be made in **2 of
+13 222** ticks, both at bring-up before a second scan existed.
+
+## 15.6 What this section does not establish
+
+- **No integrity claim.** Not a Category, not a Performance Level, not a
+  SIL, not a PFH, not a diagnostic-coverage figure — for the channels,
+  for the comparison, for the stand-in, or for anything downstream.
+- **The two readings are not two channels of a redundant architecture.**
+  They share the shaft, the joint, the simulator's own number and the
+  physics that produced it. Everything they do not share is modelled in
+  one Python file.
+- **The motion-present check is a stand-in for a fault exclusion**, not a
+  substitute for one and not what a standard requires.
+- **The discrepancy constants belong to the F-program, which does not
+  exist yet.** They are derived here and are *requested* into
+  `plc/forklift-safety/SPEC.md`; nothing in `agv/` consumes them, and no
+  file in this directory implements a cross-comparison.
+- **No transport for these readings is specified here.** How they reach
+  the F-program is the next brief's; this directory publishes topics.
+- **A frozen channel below 0.0308 m/s of tread speed is not detected by
+  the comparison**, by construction — §15.4 states the figure rather than
+  leaving it to be discovered.
+
+## 15.7 Reproducing this
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export GZ_PARTITION=m548meas ROS_DOMAIN_ID=64      # BOTH, every run
+unset DISPLAY WAYLAND_DISPLAY
+
+# no ROS, no simulator - the head model and the observation
+python3 agv/forklift/scripts/safe_speed_channels.py --selftest
+
+# the run. ONE CSV PER SESSION, unique name per start: the node
+# truncates at open, so a shared path destroys the earlier run
+ros2 launch agv/forklift/launch/vehicle.launch.py \
+    world:=sim/worlds/warehouse.sdf world_name:=warehouse \
+    safe_speed:=true \
+    safe_speed_csv:=agv/forklift/evidence/encoder/m5-48-channels-STAMP.csv \
+    nodes:=false wheel_odom:=false imu_gate:=false ekf:=false
+python3 agv/forklift/scripts/safe_speed_bench.py --drive --loops 5
+
+# no ROS, no simulator - the whole derivation, printed with its arithmetic
+python3 agv/forklift/scripts/safe_speed_bench.py \
+    --analyse agv/forklift/evidence/encoder/m5-48-channels-STAMP.csv
+```
+
+`ekf:=false wheel_odom:=false` because the estimator is not in this
+question and the launch refuses a filter with no odometry source; the
+ground-truth column the CSV records comes from `/forklift/odom`, which is
+the simulator's own pose and is **written to the CSV and read by
+nothing**.
+
+The seed is **not** fixed. Each run draws its head phases and jitter
+afresh and logs the seed at start-up (`901305242` for run c), which is
+what makes three runs three draws rather than one repeated — and the
+three σ figures of §15.4 agreeing to 1 % is the statement that matters.
+`--seed` exists for the case where a single run must be replayed.
+
+Committed alongside: `evidence/encoder/m5-48-channels-20260806{a,b,c}.csv.gz`,
+`m5-48-drive-*.txt`, `m5-48-analyse-*.txt`. Run **a** predates the
+statistic instrumentation, so its analysis prints no §7 table.
+
+The three CSVs were gzipped **after** the writer was confirmed gone —
+`pgrep` empty, not assumed — and verified with `gzip -t`
+(`docs/LESSONS.md` 2026-07-28 and 2026-07-30, where a live file was
+compressed under its writer and the halves of one stream were mistaken
+for copies). `--analyse` reads the plain `.csv`, so a re-analysis
+`gunzip -k`s first. Each run has its own name: a repeat that reuses its
+predecessor's filenames destroys the comparison it exists to make.

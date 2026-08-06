@@ -279,12 +279,25 @@ def load_model(path):
                 tm = compose(ltm, pose_to_tm(parse_pose(elem.findtext('pose'))))
                 solids.append(Solid(lname, elem.get('name'), kind, tm, geom))
         for sensor in link.findall('sensor'):
+            # ONLY RAY SENSORS HAVE A COVERAGE. This script measures
+            # apertures, so a sensor without a <lidar> block - the model's
+            # IMU, added by m5-07c after this script was written - has
+            # nothing here to measure and is SKIPPED rather than parsed.
+            # Before this guard the loop read lidar/scan/horizontal off
+            # every <sensor> element and died on the IMU with an
+            # AttributeError before printing a line, which made
+            # EVIDENCE_SENSOR_COVERAGE.md unreproducible (m5-48). The
+            # guard is a filter and not a fix to any figure: skipping a
+            # sensor that declares no aperture changes no arc this script
+            # reports.
+            hor = sensor.find('lidar/scan/horizontal')
+            rng = sensor.find('lidar/range')
+            if hor is None or rng is None:
+                continue
             spose = parse_pose(sensor.findtext('pose'))
             stm = compose(ltm, pose_to_tm(spose))
             (sx, sy, sz), srot = stm
             yaw = math.atan2(srot[1][0], srot[0][0])
-            hor = sensor.find('lidar/scan/horizontal')
-            rng = sensor.find('lidar/range')
             sensors.append(Sensor(
                 sensor.get('name'), lname, sx, sy, sz, yaw,
                 float(hor.findtext('min_angle')), float(hor.findtext('max_angle')),

@@ -1,0 +1,87 @@
+safe_speed_bench.py --analyse agv/forklift/evidence/encoder/m5-48-channels-20260806a.csv
+SINGLE-CHANNEL TESTED SYSTEM: one shaft, two readings of it.
+No PL, Category, SIL or PFH is claimed for anything below.
+
+rows in file: 13221
+rows with both channels reading: 13220
+span of those rows: 660.9 s at 20.0 Hz
+
+1. CHANNEL NOISE, against the noise-free speed over the same
+   window (the reference column, read by nothing on the vehicle)
+   channel a: n=13220 mean=+0.000001 sigma=0.005410 max|e|=0.022200 m/s
+   channel b: n=13220 mean=+0.000001 sigma=0.005458 max|e|=0.022200 m/s
+
+2. THE DIFFERENCE v_a - v_b, which is what the F-program
+   cross-compares
+   n=13220 mean=+0.000000 sigma=0.007740 max|d|=0.025900 m/s
+   |d| quantiles: p50=0.003700 p99=0.018500 p99.9=0.025900 m/s
+   by |ground-truth body speed| band:
+     [0.00, 0.02) m/s: n=6182 sigma=0.007724 max|d|=0.025900
+     [0.02, 0.20) m/s: n=3264 sigma=0.007799 max|d|=0.025900
+     [0.20, 0.45) m/s: n=1650 sigma=0.007690 max|d|=0.025900
+     [0.45, 0.80) m/s: n=1357 sigma=0.007726 max|d|=0.025900
+     [0.80, 2.00) m/s: n=767 sigma=0.007773 max|d|=0.022200
+
+3. AS THE F-PROGRAM SEES IT - every 2th row, one sample per
+   100 ms F-cycle. n=6610
+   sigma on that grid = 0.007765 m/s
+   lag-1 autocorrelation on that grid = +0.0022 - near zero
+   means consecutive F-samples are independent draws, which is
+   what makes a run of exceedances rare rather than expected.
+
+4. HOW LONG NOISE EXCURSIONS ACTUALLY LAST, measured at several
+   thresholds. This is the measurement the discrepancy time is
+   derived from: an excursion that survives k F-cycles is a
+   nuisance demand if the time is set below it.
+   threshold        exceeding samples   longest run   as time
+   1 sigma = 0.007740     1507 of   6610        6   0.600 s
+   2 sigma = 0.015481      215 of   6610        3   0.300 s
+   3 sigma = 0.023221        6 of   6610        1   0.100 s
+   4 sigma = 0.030962        0 of   6610        0   0.000 s
+   5 sigma = 0.038702        0 of   6610        0   0.000 s
+
+5. THE DERIVATION
+   discrepancy threshold = 4 x sigma_d = 4 x 0.007740 = 0.030962 m/s
+   longest measured run above it, on the 100 ms grid: 0 sample(s)
+   discrepancy time = (0 + 1) cycles, floored at 2 = 2 x 100 ms = 200 ms
+   n for both figures: 13220 paired rows, 6610 F-grid samples, 660.9 s
+
+   WHAT THE THRESHOLD COSTS IN DETECTION. A channel that freezes
+   while the vehicle runs shows |d| equal to the speed itself, so
+   the comparison sees a frozen channel only above 0.030962 m/s.
+   Below that speed the comparison is blind to it, and what covers
+   that regime is the motion-present stand-in, not this threshold.
+
+6. THE MOTION-PRESENT OBSERVATION - a STAND-IN for the mechanical
+   fault exclusion a real system argues on the shaft coupling
+   at rest (|truth| < 0.001 m/s): n=6153 max=0.063139 p99=0.001414 m/s
+   moving (|truth| >= 0.02 m/s): n=7038 min=0.000000 p1=0.000033 m/s
+   observed rate / body speed: n=7038 median=0.0720 p5=0.0008
+   rows where the observation could not be made: 2 of 13221
+   rows moving at >= 0.02 m/s where the verdict said NOT moving: 1127
+   (that count is the one that matters: a wrong "moving" costs a
+    withheld standstill, a wrong "stopped" corroborates a lying
+    encoder.)
+
+7. WHICH STATISTIC THE OBSERVATION READS - chosen from this
+   table, not picked. Sustained regimes only: 6538 moving rows, 5644 at rest.
+   A statistic is usable when its WORST sustained-motion value
+   still stands clear of its WORST at-rest value.
+   statistic   rest max   motion min   motion p1   min/rest
+   median      no data
+   q75         no data
+   q90         no data
+   q95         no data
+   max         no data
+
+   the same, at the SLOWEST speed the profile drove, which is
+   what sets the minimum detectable speed:
+
+8. THE TWO LAGS OF THE MOTION VERDICT, and they are asymmetric
+   on purpose: late to say STOPPED, prompt to say MOVING.
+   motion onsets seen: 50   never detected within 3 s: 6
+   onset -> verdict MOVING:  min 0.000  median 0.050  max 0.200 s
+   stop  -> verdict STOPPED: min 0.000  median 0.500  max 0.600 s  (n=50)
+   Every sustained-motion sample reading NOT MOVING in section 6
+   sits inside the onset window above; it is the lag, not a
+   missed detection.

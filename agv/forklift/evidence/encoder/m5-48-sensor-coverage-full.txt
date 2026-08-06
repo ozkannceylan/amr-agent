@@ -1,0 +1,304 @@
+sensor_coverage.py on agv/forklift/model.sdf
+bearing step 0.10 deg; every arc below is quantised to it.
+GEOMETRY ONLY. No simulator ran. Not a safety claim.
+
+==========================================================================
+1. SENSORS, AS DECLARED IN model.sdf
+==========================================================================
+sensor                 frame (gz_frame_id)          x       y       z  yaw deg ap deg
+safety_scanner_front   safety_scanner_front_link   0.700   0.450   0.150     45.0  275.0
+safety_scanner_rear    safety_scanner_rear_link  -0.700  -0.450   0.150   -135.0  275.0
+nav_lidar              nav_lidar_link           0.550  -0.400   1.800      0.0  360.0
+
+sensor                  samples   res deg   range m  rate Hz blind deg  topic
+safety_scanner_front        275    1.0036 0.10-5.50     10.0      85.0  /forklift/gz/safety_scanner_front/measurement
+safety_scanner_rear         275    1.0036 0.10-5.50     10.0      85.0  /forklift/gz/safety_scanner_rear/measurement
+nav_lidar                   360    1.0028 0.10-8.00     10.0       0.0  /forklift/gz/scan_nav
+
+total rays per 100 ms cycle: 910  (one sensor of 181 before this layout)
+
+self check - no sensor may render its own mounting:
+   safety_scanner_front   own geometry crossing its plane: none
+   safety_scanner_rear    own geometry crossing its plane: none
+   nav_lidar              own geometry crossing its plane: none
+
+==========================================================================
+2. THE TWO SAFETY SCANNERS - PLANE, OCCLUDERS, APERTURE
+==========================================================================
+scan planes: front z = 0.150 m, rear z = 0.150 m -> COPLANAR
+safety_scanner_front   mounted ( 0.700,  0.450), boresight   45.0 deg: covers [267.5, 182.5) deg, blind [182.5, 267.5) deg
+safety_scanner_rear    mounted (-0.700, -0.450), boresight  225.0 deg: covers [ 87.5,   2.5) deg, blind [  2.5,  87.5) deg
+(vehicle bearings: 0 deg is +x, the drive end; 180 deg is the fork direction; 90 deg is +y, left)
+
+APERTURE ONLY, occlusion ignored (direction, not sight line):
+  front covers  275.0 deg   rear covers  274.9 deg
+  union         360.0 deg   overlap      189.9 deg
+  union gaps   : none
+  overlap arcs : [  87.6,  182.6)  95.0 deg, [ 267.6,    2.5)  94.9 deg
+
+==========================================================================
+3. SAFETY SCANNER SIGHT LINES - VISUAL SET (WHAT THE GPU_LIDAR SEES)
+==========================================================================
+
+-- occluders crossing z = 0.15 m, visual set (what the gpu_lidar sees), lift = 0.00 m
+   mast/mast_rail_left                x [-0.825, -0.735]  y [ 0.255,  0.345]
+   mast/mast_rail_right               x [-0.825, -0.735]  y [-0.345, -0.255]
+   steer_link/steer_yoke_visual       x [ 0.470,  0.630]  y [-0.090,  0.090]
+   drive_wheel/visual                 x [ 0.434,  0.666]  y [-0.050,  0.050]
+   rear_wheel_left/visual             x [-0.616, -0.384]  y [ 0.310,  0.410]
+   rear_wheel_right/visual            x [-0.616, -0.384]  y [-0.410, -0.310]
+   carriage/visual                    x [-0.850, -0.750]  y [-0.375,  0.375]
+
+Bearings are measured about the MODEL ORIGIN, at the stated
+radius. A circle of radius under 0.86 m lies partly inside the
+vehicle, so the near field is measured in section 4 instead.
+
+  radius     front      rear    either      both   uncovered arcs
+   1.0 m    206.0d    146.8d    317.2d     35.6d   [ 156.4,  199.2)  42.8 deg
+        safety_scanner_front   in the blind sector                 41.4 deg
+        safety_scanner_rear    occluded by mast/mast_rail_right    36.3 deg
+        safety_scanner_rear    occluded by carriage/visual          6.5 deg
+        safety_scanner_front   occluded by rear_wheel_left/visual   1.4 deg
+   2.0 m    242.0d    182.3d    355.0d     69.3d   [ 169.4,  174.4)   5.0 deg
+        safety_scanner_rear    occluded by carriage/visual          5.0 deg
+        safety_scanner_front   in the blind sector                  3.9 deg
+        safety_scanner_front   occluded by rear_wheel_left/visual   1.1 deg
+   3.0 m    253.0d    193.0d    360.0d     86.0d   none
+   4.0 m    258.3d    198.3d    360.0d     96.6d   none
+   5.0 m    240.6d    179.7d    354.3d     66.0d   [ 156.0,  161.7)   5.7 deg
+        safety_scanner_front   beyond range                         5.7 deg
+        safety_scanner_rear    occluded by carriage/visual          5.7 deg
+   5.5 m    171.3d    137.4d    308.7d      0.0d   [ 118.4,  161.0)  42.6 deg, [ 298.4,  307.1)   8.7 deg
+        safety_scanner_front   beyond range                        51.3 deg
+        safety_scanner_rear    occluded by mast/mast_rail_right    21.2 deg
+        safety_scanner_rear    beyond range                        17.4 deg
+        safety_scanner_rear    occluded by carriage/visual         12.7 deg
+(d = degrees of the 360 deg around the model origin; the
+ indented lines are why each scanner missed the uncovered
+ bearings, and they sum to more than the gap because both
+ scanners miss every one of them.)
+
+==========================================================================
+3. SAFETY SCANNER SIGHT LINES - PHYSICAL SET (VISUAL + COLLISION)
+==========================================================================
+
+-- occluders crossing z = 0.15 m, physical set (visual + collision), lift = 0.00 m
+   mast/mast_rail_left                x [-0.825, -0.735]  y [ 0.255,  0.345]
+   mast/mast_rail_right               x [-0.825, -0.735]  y [-0.345, -0.255]
+   mast/mast_collision                x [-0.830, -0.730]  y [-0.360,  0.360]
+   steer_link/steer_yoke_visual       x [ 0.470,  0.630]  y [-0.090,  0.090]
+   drive_wheel/visual                 x [ 0.434,  0.666]  y [-0.050,  0.050]
+   drive_wheel/collision              x [ 0.434,  0.666]  y [-0.050,  0.050]
+   rear_wheel_left/visual             x [-0.616, -0.384]  y [ 0.310,  0.410]
+   rear_wheel_left/collision          x [-0.616, -0.384]  y [ 0.310,  0.410]
+   rear_wheel_right/visual            x [-0.616, -0.384]  y [-0.410, -0.310]
+   rear_wheel_right/collision         x [-0.616, -0.384]  y [-0.410, -0.310]
+   carriage/visual                    x [-0.850, -0.750]  y [-0.375,  0.375]
+   carriage/collision                 x [-0.850, -0.750]  y [-0.375,  0.375]
+
+Bearings are measured about the MODEL ORIGIN, at the stated
+radius. A circle of radius under 0.86 m lies partly inside the
+vehicle, so the near field is measured in section 4 instead.
+
+  radius     front      rear    either      both   uncovered arcs
+   1.0 m    206.0d    146.1d    317.2d     34.9d   [ 156.4,  199.2)  42.8 deg
+        safety_scanner_front   in the blind sector                 41.4 deg
+        safety_scanner_rear    occluded by mast/mast_rail_right    36.3 deg
+        safety_scanner_rear    occluded by carriage/visual          3.6 deg
+        safety_scanner_rear    occluded by mast/mast_collision      2.9 deg
+        safety_scanner_front   occluded by rear_wheel_left/visual   1.4 deg
+   2.0 m    242.0d    181.9d    355.0d     68.9d   [ 169.4,  174.4)   5.0 deg
+        safety_scanner_rear    occluded by carriage/visual          5.0 deg
+        safety_scanner_front   in the blind sector                  3.9 deg
+        safety_scanner_front   occluded by rear_wheel_left/visual   1.1 deg
+   3.0 m    253.0d    192.6d    360.0d     85.6d   none
+   4.0 m    258.3d    197.9d    360.0d     96.2d   none
+   5.0 m    240.6d    179.3d    354.3d     65.6d   [ 156.0,  161.7)   5.7 deg
+        safety_scanner_front   beyond range                         5.7 deg
+        safety_scanner_rear    occluded by carriage/visual          5.7 deg
+   5.5 m    171.3d    137.4d    308.7d      0.0d   [ 118.4,  161.0)  42.6 deg, [ 298.4,  307.1)   8.7 deg
+        safety_scanner_front   beyond range                        51.3 deg
+        safety_scanner_rear    occluded by mast/mast_rail_right    21.2 deg
+        safety_scanner_rear    beyond range                        17.4 deg
+        safety_scanner_rear    occluded by carriage/visual          7.6 deg
+        safety_scanner_rear    occluded by mast/mast_collision      5.1 deg
+(d = degrees of the 360 deg around the model origin; the
+ indented lines are why each scanner missed the uncovered
+ bearings, and they sum to more than the gap because both
+ scanners miss every one of them.)
+
+DETECTION RADIUS ABOUT THE ORIGIN. The 5.50 m range is measured
+from the sensor, and both sensors sit 0.83 m off the origin, so
+the radius guaranteed all the way round is smaller. Swept at
+1.0 deg bearing steps and 0.05 m radius steps, physical set:
+  smallest all-round radius : 4.95 m, at bearing 156.0 deg
+  largest                   : 5.50 m
+  mean over bearings        : 5.46 m
+
+==========================================================================
+4. PERIMETER COVERAGE ON AN OFFSET OF THE VEHICLE OUTLINE
+==========================================================================
+plan outline (convex hull of every visual and collision shape):
+  x [-1.875,  0.860]  y [-0.450,  0.450]  8 vertices
+
+A point on the offset curve counts as covered when one scanner
+has it in aperture, in range and with a clear sight line.
+
+  offset    points     front      rear    either
+  0.10 m       408     63.0%     50.0%     93.9%
+  0.30 m       408     65.4%     52.7%     99.0%
+  0.50 m       408     65.4%     53.7%    100.0%
+  1.00 m       408     65.7%     54.2%    100.0%
+  2.00 m       408     66.4%     54.4%    100.0%
+
+  uncovered at offset 0.10 m: 25 of the sampled points,
+    x [-1.975,  0.725]  y [-0.550,  0.550]
+    safety_scanner_front   in the blind sector                  14 points
+    safety_scanner_rear    occluded by carriage/visual          11 points
+    safety_scanner_front   inside range_min                      8 points
+    safety_scanner_rear    in the blind sector                   8 points
+    safety_scanner_rear    inside range_min                      6 points
+    safety_scanner_front   occluded by rear_wheel_left/visual    3 points
+
+  uncovered at offset 0.30 m: 4 of the sampled points,
+    x [-2.175, -2.175]  y [ 0.289,  0.340]
+    safety_scanner_rear    occluded by carriage/visual           4 points
+    safety_scanner_front   in the blind sector                   3 points
+    safety_scanner_front   occluded by rear_wheel_left/visual    1 points
+
+==========================================================================
+5. WHAT THE VEHICLE'S OWN MOTION DOES TO THE SAFETY PLANE
+==========================================================================
+Carriage travel and steer angle both move geometry through the
+scan plane. Measured at radius 2.0 m, physical occluder set.
+
+  lift m    steer    either uncovered arcs                         what crosses the plane
+   0.000     0.00    355.0d [ 169.4,  174.4)   5.0 deg             carriage
+   0.040     0.00    355.0d [ 169.4,  174.4)   5.0 deg             carriage
+   0.050     0.00    339.8d [ 169.4,  189.6)  20.2 deg             carriage, fork_left, fork_right
+   0.075     0.00    339.8d [ 169.4,  189.6)  20.2 deg             fork_left, fork_right
+   0.100     0.00    339.8d [ 169.4,  189.6)  20.2 deg             fork_left, fork_right
+   0.110     0.00    360.0d none                                   no lifted part
+   0.200     0.00    360.0d none                                   no lifted part
+   0.800     0.00    360.0d none                                   no lifted part
+   1.600     0.00    360.0d none                                   no lifted part
+   0.000     1.31    355.0d [ 169.4,  174.4)   5.0 deg             carriage
+   0.000    -1.31    355.0d [ 169.4,  174.4)   5.0 deg             carriage
+
+==========================================================================
+6. LOAD OCCLUSION - A PALLET IN FRONT OF THE FORKS
+==========================================================================
+Load modelled on sim/worlds/forklift_arena.sdf's Pallet: 1.20 m
+along x, 1.00 m along y, deck 0.16 m tall. Two cases: the pallet
+standing on the floor as the forks enter it, and the pallet
+carried on the tines at a given lift.
+
+case                             lift crosses z    either   uncovered arcs
+pallet on the floor, entering    0.00       yes    320.1d   [ 164.5,  204.4)  39.9 deg
+        safety_scanner_front   in the blind sector                 33.9 deg
+        safety_scanner_rear    occluded by load/pallet             30.0 deg
+        safety_scanner_rear    occluded by carriage/visual          6.5 deg
+        safety_scanner_front   occluded by load/pallet              4.9 deg
+        safety_scanner_rear    occluded by mast/mast_collision      3.4 deg
+        safety_scanner_front   occluded by rear_wheel_left/visual   1.1 deg
+pallet on the tines              0.00       yes    320.1d   [ 164.5,  204.4)  39.9 deg
+        safety_scanner_front   in the blind sector                 33.9 deg
+        safety_scanner_rear    occluded by load/pallet             30.0 deg
+        safety_scanner_rear    occluded by carriage/visual          6.5 deg
+        safety_scanner_front   occluded by load/pallet              4.9 deg
+        safety_scanner_rear    occluded by mast/mast_collision      3.4 deg
+        safety_scanner_front   occluded by rear_wheel_left/visual   1.1 deg
+pallet on the tines              0.05       yes    320.1d   [ 164.5,  204.4)  39.9 deg
+        safety_scanner_front   in the blind sector                 33.9 deg
+        safety_scanner_rear    occluded by fork_right/visual       15.2 deg
+        safety_scanner_rear    occluded by load/pallet             14.8 deg
+        safety_scanner_rear    occluded by carriage/visual          6.5 deg
+        safety_scanner_front   occluded by load/pallet              4.9 deg
+        safety_scanner_rear    occluded by mast/mast_collision      3.4 deg
+        safety_scanner_front   occluded by rear_wheel_left/visual   1.1 deg
+pallet on the tines              0.10        no    339.8d   [ 169.4,  189.6)  20.2 deg
+        safety_scanner_front   in the blind sector                 19.1 deg
+        safety_scanner_rear    occluded by fork_right/visual       17.6 deg
+        safety_scanner_rear    occluded by fork_left/visual         2.6 deg
+        safety_scanner_front   occluded by rear_wheel_left/visual   1.1 deg
+pallet on the tines              0.30        no    360.0d   none
+pallet on the tines              1.60        no    360.0d   none
+
+A 2D scan plane is only occluded by what intersects it. This
+model's pallet clears the 0.15 m plane once the tines are above
+0.06 m of travel, and the tines themselves clear it above 0.10 m.
+That is a property of a rectangular pallet with a flat deck; a
+real load overhangs, sags and is strapped, and ISO 3691-4 treats
+load occlusion in the load direction as a residual to be handled
+by field switching and speed, not by mounting.
+
+==========================================================================
+7. NAVIGATION LIDAR - SHADOWS OF THE VEHICLE'S OWN STRUCTURE
+==========================================================================
+Bearings are measured AT THE SENSOR, which is the frame a scan
+is published in. A shadow is a bearing whose ray leaves the
+sensor and hits the vehicle.
+
+-- visual set
+   lift 0.00 m: shadow   8.9 deg, fork axis (180 deg) clear, arcs [ 149.9,  154.6)   4.7 deg, [ 173.6,  177.8)   4.2 deg
+                width of each shadow at 5 m range: 0.41 m, 0.37 m
+   lift 0.80 m: shadow   8.9 deg, fork axis (180 deg) clear, arcs [ 149.9,  154.6)   4.7 deg, [ 173.6,  177.8)   4.2 deg
+                width of each shadow at 5 m range: 0.41 m, 0.37 m
+   lift 1.18 m: shadow   8.9 deg, fork axis (180 deg) clear, arcs [ 149.9,  154.6)   4.7 deg, [ 173.6,  177.8)   4.2 deg
+                width of each shadow at 5 m range: 0.41 m, 0.37 m
+   lift 1.20 m: shadow   8.9 deg, fork axis (180 deg) clear, arcs [ 149.9,  154.6)   4.7 deg, [ 173.6,  177.8)   4.2 deg
+                width of each shadow at 5 m range: 0.41 m, 0.37 m
+   lift 1.40 m: shadow  29.8 deg, fork axis (180 deg) clear, arcs [ 149.2,  179.0)  29.8 deg
+                width of each shadow at 5 m range: 2.57 m
+   lift 1.60 m: shadow  29.8 deg, fork axis (180 deg) clear, arcs [ 149.2,  179.0)  29.8 deg
+                width of each shadow at 5 m range: 2.57 m
+
+-- physical set
+   lift 0.00 m: shadow  29.0 deg, fork axis (180 deg) clear, arcs [ 149.4,  178.4)  29.0 deg
+                width of each shadow at 5 m range: 2.50 m
+   lift 0.80 m: shadow  29.0 deg, fork axis (180 deg) clear, arcs [ 149.4,  178.4)  29.0 deg
+                width of each shadow at 5 m range: 2.50 m
+   lift 1.18 m: shadow  29.0 deg, fork axis (180 deg) clear, arcs [ 149.4,  178.4)  29.0 deg
+                width of each shadow at 5 m range: 2.50 m
+   lift 1.20 m: shadow  29.0 deg, fork axis (180 deg) clear, arcs [ 149.4,  178.4)  29.0 deg
+                width of each shadow at 5 m range: 2.50 m
+   lift 1.40 m: shadow  29.8 deg, fork axis (180 deg) clear, arcs [ 149.2,  179.0)  29.8 deg
+                width of each shadow at 5 m range: 2.57 m
+   lift 1.60 m: shadow  29.8 deg, fork axis (180 deg) clear, arcs [ 149.2,  179.0)  29.8 deg
+                width of each shadow at 5 m range: 2.57 m
+
+==========================================================================
+8. WHY THE NAVIGATION LIDAR IS MOUNTED ABOVE THE GUARD
+==========================================================================
+A 360 deg aperture is only worth its cost where the sensor
+clears the body. Same computation, same model, at candidate
+mounting heights and positions:
+
+candidate mount                                shadow     usable
+ahead of the counterweight  (0.90, 0.00, 0.55)    168.5 d    191.5 d
+beside the chassis          (0.00, 0.50, 0.55)    171.9 d    188.1 d
+inside the chassis band     (0.00, 0.00, 0.45) mount is inside base_link/chassis_visual
+on the guard deck           (0.30, -0.40, 0.75)     66.9 d    293.1 d
+under the guard roof        (0.30, -0.40, 1.20)     66.9 d    293.1 d
+on the guard roof, centred  (0.55, 0.00, 1.80)     31.5 d    328.5 d
+on the guard roof, aft      (-0.50, -0.40, 1.80)     66.2 d    293.8 d
+AS DECLARED                 (0.55, -0.40, 1.80)     29.0 d    331.0 d
+
+==========================================================================
+9. ANGULAR RESOLUTION AGAINST RANGE
+==========================================================================
+Spacing between adjacent rays, in metres, at range:
+
+sensor                   res deg      1 m      2 m      5 m      8 m
+safety_scanner_front      1.0036    0.018    0.035    0.088    0.140
+safety_scanner_rear       1.0036    0.018    0.035    0.088    0.140
+nav_lidar                 1.0028    0.018    0.035    0.088    0.140
+
+Arena features (sim/worlds/forklift_arena.sdf) against the
+navigation lidar plane, for the record:
+  perimeter walls  top z = 0.60 m
+  AisleCrate       top z = 0.90 m
+  CrateNorth       top z = 1.00 m
+  LoadBox          top z = 0.86 m
+  PillarSouth      top z = 2.60 m
+

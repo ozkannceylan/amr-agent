@@ -15,7 +15,10 @@
 # Nothing here is a safety parameter. `obstacle.stop_distance_m` is a
 # process comfort zone evaluated in Python over a network carried scan; the
 # protective stop and safe torque off are onboard and hardwired and appear
-# nowhere in this file (invariant 1).
+# nowhere in this file (invariant 1). The `field:` and `safe_speed:` blocks
+# parameterise MODELS of what safety-rated devices do inside their own
+# housings, feeding STAND-INS for wiring; each block says so in its own
+# header, and neither carries a Category, Performance Level, SIL or PFH.
 
 model:
   # Spawned model name. The gz topic names below do NOT depend on it: every
@@ -313,6 +316,290 @@ standstill:
   # 50 Hz they are published at.
   verdict_timeout_s: 0.20
 
+safe_speed:
+  # ========= THE SAFE-SPEED READING CHANNELS - A SINGLE-CHANNEL =========
+  # ================== TESTED SYSTEM, AND ITS STAND-INS ==================
+  #
+  # Read by scripts/safe_speed_channels.py, and by nothing else. The
+  # AUTHORITY for the design is
+  # docs/superpowers/specs/2026-08-06-sls-ss1-fplc-design.md section 3 and
+  # its standards basis docs/safety/SLS-STANDARDS-BASIS.md findings F3 and
+  # F4; the measurements that DERIVE the two comparison constants are
+  # EVIDENCE_ODOMETRY.md section 14. If this block and that section
+  # disagree, the evidence is right and this file is wrong.
+  #
+  # WHAT THIS IS, IN ONE SENTENCE. A model of what a safe encoder does -
+  # one shaft, two reading channels whose values an external safe control
+  # cross-compares - feeding an F-program that monitors speed against the
+  # SLS limit and demands a stop when it is exceeded.
+  #
+  # ITS HONEST NAME IS A SINGLE-CHANNEL TESTED SYSTEM. One shaft, one
+  # measured quantity, two readings of it. That is what real safe encoders
+  # are, and it is what this models; the arrangement is NEVER called
+  # two-channel, in this file or in any other, because both readings die
+  # together with the shaft they read and the phrase would claim a
+  # redundancy that does not exist.
+  #
+  # IT IS NOT A SAFETY FUNCTION AND CARRIES NO CLAIM: no Category, no
+  # Performance Level, no SIL, no PFH, no diagnostic coverage (ADR 0011
+  # D5). The readings reach the F-program as STANDARD DATA over the
+  # process path - a stand-in for a safe measurement channel, labelled one
+  # wherever it appears. The protective stop, the e-stop chain and safe
+  # torque off are onboard and hardwired (invariant 1); this node latches
+  # nothing, limits nothing and stops nothing. It publishes readings.
+  #
+  # WHO LIMITS AND WHO MONITORS, because the split is the point. The
+  # STANDARD program lowers the envelope speed ceiling; the F-program
+  # measures the real speed from these two readings and demands a stop if
+  # it is exceeded. That is the certified pattern, not this project's
+  # invention (SLS-STANDARDS-BASIS.md F5), and it is why no speed value
+  # ever leaves the F-program - only a demand (ADR 0014).
+  #
+  # WHY THESE READINGS MAY BE ON A TOPIC WHEN THE SCANNER'S SAFE VERDICT
+  # MAY NOT. The m5-06 ruling bars the SAFE CHANNEL - a formed protective
+  # verdict - from every transport. These are not verdicts; they are
+  # measurement-class readings, which the design's own honest limit
+  # already declares reach the F-program as standard data. The verdict
+  # they feed - the SLS demand - is formed inside the F-program and has no
+  # topic anywhere, on either transport, exactly as before.
+
+  # ---- what the two readings read, and at what rate ----
+  #
+  # Each channel reads its OWN gz topic, published by its own
+  # JointStatePublisher instance in model.sdf. Two publishers, two
+  # streams, two subscriptions, so a dead read path is visible to the
+  # cross-comparison instead of being shared by both copies of one.
+  #
+  # 20 Hz, and the number is the seam's, not a preference. The stand-in
+  # writer republishes every level every 50 ms (plc/forklift-safety/
+  # SPEC.md section 7.1) and the F-OB samples at 100 ms (section 4.3), so
+  # a reading published faster than 20 Hz cannot reach the F-program any
+  # fresher, and one published slower would let the writer hold a value
+  # older than its own cycle.
+  publish_hz: 20.0
+
+  # ---- the reading heads: what makes the two readings differ ----
+  #
+  # THE PLANT GIVES BOTH CHANNELS THE SAME NUMBER, because it is the same
+  # shaft; that is the design's whole point (a divergence is a channel
+  # fault and not an ambiguity between two estimates). Everything that
+  # makes the two readings differ is the READING HEAD, and it is modelled
+  # here.
+  #
+  # RESOLUTION. 1024 pulses per revolution read in quadrature = 4096
+  # counts/rev, giving a count of 2*pi/4096 = 1.53398e-3 rad, which at the
+  # 0.1206 m calibrated radius is 0.1850 mm of tread. This is a DESIGN
+  # VALUE of the commonest catalogue class, not a datasheet figure quoted
+  # from any product.
+  #
+  # IT IS ITS OWN PARAMETER AND NOT A REFERENCE TO odometry.
+  # drive_encoder_counts_per_rev, although the two are equal today. They
+  # are two devices: the process encoder that feeds wheel odometry, and
+  # the safe encoder that feeds the F-program. A real installation fits
+  # both and nothing makes them the same part. Nothing may assume the two
+  # values stay equal, and no node reads one for the other.
+  counts_per_rev: 4096
+
+  # MOUNTING PHASE. Two reading heads on one code disc sit at their own
+  # positions on the count grid, and no assembly resolves that position to
+  # better than a count. Each channel's phase is therefore drawn ONCE per
+  # run, uniformly over one count, from the node's seeded generator - the
+  # same convention model.sdf's sensor biases follow, and the reason the
+  # node takes a --seed argument. The phases are logged at start-up.
+  # A phase is not an error: it cancels out of a difference of two
+  # readings from the same head. What it does is de-correlate the
+  # QUANTISATION of the two heads, which is one of the two things that
+  # makes a cross-comparison mean anything.
+  #
+  # READ JITTER. The other one. Zero-mean Gaussian on the angle each head
+  # reads, drawn independently per head per sample, sigma = ONE COUNT =
+  # 1.53398e-3 rad. It is the smallest defensible non-zero figure - one
+  # count of read uncertainty - and it is chosen on the same reasoning
+  # this file already applies to odometry.steer_zero_offset_rad, not
+  # fitted to make any downstream number come out well. It is a DESIGN
+  # VALUE and no datasheet is quoted for it.
+  #
+  # WHAT IT COSTS, STATED BEFORE IT WAS MEASURED. A channel differences
+  # its quantised angle over one publish interval, so angle jitter is
+  # divided by dt: sigma_v = r * sqrt(2) * sigma_read / dt = 0.1206 *
+  # 1.4142 * 1.53398e-3 / 0.05 = 5.23e-3 m/s per channel, and the
+  # difference of the two readings sqrt(2) times that = 7.40e-3 m/s. The
+  # measured figures are in EVIDENCE_ODOMETRY.md section 14.3 and are what
+  # the two comparison constants below are derived from.
+  read_jitter_rad: 0.00153398
+
+  # THE CHANNELS ARE NOT FILTERED, AND THAT IS DELIBERATE. A filter would
+  # trade the noise this jitter produces for lag in the one measurement
+  # SLS exists to make promptly. The noise is rejected instead by the
+  # DISCREPANCY TIME below - the F-program demands only when the two
+  # readings disagree for longer than that - which is why that time has to
+  # be derived from the measured noise and may not be picked.
+
+  # CALIBRATED ROLLING RADIUS the safe evaluator converts wheel angle to
+  # tread speed with. 0.1206 m, the same figure and the same derivation as
+  # odometry.rolling_radius_m (a loaded PU drive tyre's effective rolling
+  # radius, 0.5 % under the 0.12 m free radius model.sdf rolls on), and
+  # for the same reason it is its own parameter: a second device carries
+  # its own calibration. That the two agree today is a fact about today.
+  #
+  # A RADIUS ERROR IS COMMON MODE AND CANCELS FROM THE CROSS-COMPARISON,
+  # which is correct and worth saying: both heads read one shaft through
+  # one radius, so a miscalibration biases both readings identically and
+  # the comparison cannot see it. It is not a channel fault and the
+  # comparison is not the instrument for it.
+  rolling_radius_m: 0.1206
+
+  # WHAT A CHANNEL REPORTS IS DRIVE-WHEEL TREAD SPEED, |omega| * r, and
+  # not body speed. The drive wheel is steered, so body speed along the
+  # heading is tread speed * cos(delta) and is therefore never larger.
+  # Monitoring tread speed against a body-speed limit is conservative in
+  # the demanding direction, and it keeps the steer axis - a second shaft,
+  # with its own faults - out of the speed measurement entirely.
+
+  # ---- the motion-present observation: A STAND-IN, AND LABELLED ONE ----
+  #
+  # WHAT HOLE IT CLOSES. Two readings of one shaft lie together if the
+  # shaft or its coupling fails: a decoupled encoder reports zero on both
+  # channels while the vehicle rolls, and the cross-comparison agrees
+  # perfectly with itself. So a claimed ZERO speed is corroborated against
+  # an observation that does not pass through the shaft at all.
+  #
+  # IT IS A STAND-IN FOR A MECHANICAL FAULT EXCLUSION. Real systems close
+  # this hole by EXCLUDING the fault - an argument about how the coupling
+  # is constructed, made once at design time, not a monitored signal
+  # (SLS-STANDARDS-BASIS.md F4, which records the standard's own table
+  # naming loss of the encoder-to-motor connection as a fault requiring
+  # consideration). This project has no construction argument available,
+  # so it substitutes an observation and says so, here and in every other
+  # artefact that carries it.
+  #
+  # WHY THE NAVIGATION LIDAR AND NOT THE IMU. The IMU measures
+  # acceleration and rotation, and a vehicle rolling at constant speed
+  # produces neither - it would corroborate nothing in exactly the regime
+  # that matters. The navigation lidar sees the world move past the
+  # vehicle at constant speed, is on another link, and shares no shaft,
+  # no bearing and no cable with the drive axis.
+  #
+  # WHY IT IS NOT `standstill:` ABOVE, WHICH ALREADY ASKS A SIMILAR
+  # QUESTION. That verdict is computed FROM THE DRIVE ENCODER COUNTS -
+  # the very shaft whose failure this observation exists to catch - and
+  # its own block says it gates one measurement channel of one estimator
+  # and nothing else. Two different data, two different owners
+  # (invariant 10), and using the encoder to corroborate the encoder
+  # would close no hole at all.
+  #
+  # THE OBSERVATION. Consecutive navigation scans, ray by ray; for every
+  # ray with a finite in-window range in BOTH scans, the absolute change;
+  # the MEDIAN of those changes, divided by the interval. The median and
+  # not the mean, so that a person or a truck crossing the field of view
+  # cannot by itself say the vehicle is moving - a majority of the
+  # horizon has to change together, which is what the vehicle moving
+  # looks like.
+
+  # HOW MANY RAY PAIRS THE OBSERVATION NEEDS BEFORE IT IS AN OBSERVATION.
+  # 36 of the lidar's 360, i.e. a tenth of the horizon. Below it the node
+  # reports the observation INVALID, and invalid is published as
+  # motion-present TRUE. The failure direction is not symmetric: an
+  # observation that wrongly says "moving" costs a withheld standstill
+  # confirmation, which SS1 pays for with its timeout; an observation
+  # that wrongly says "stopped" would corroborate a lying encoder, which
+  # is the one thing it exists to prevent. So every uncertainty resolves
+  # to moving. A horizon entirely beyond range is such an uncertainty and
+  # is treated as one: beyond-range is a measurement of clear space
+  # (LESSONS 2026-08-04) and carries no information about motion, so it
+  # yields no verdict rather than a comfortable one.
+  min_ray_pairs: 36
+
+  # WHICH QUANTILE OF THE RAY CHANGES THE OBSERVATION READS. MEASURED,
+  # not picked: EVIDENCE_ODOMETRY.md section 15.5 drove five statistics
+  # against ground truth over 6535 sustained-motion and 5644
+  # sustained-rest samples and this is the one that separates them
+  # (run 20260806c, the run of the committed tree):
+  #
+  #   statistic   worst at rest   worst while moving   separation
+  #   median       0.000000        0.000024                -
+  #   q75          0.000002        0.000126              53x
+  #   q90          0.000010        0.002608             274x
+  #   q95          0.000014        0.088928            6217x
+  #   max          0.000038        0.159931             4193x
+  #
+  # THE MEDIAN WAS TRIED FIRST AND FAILED, and the reason is geometric.
+  # A straight wall parallel to the direction of travel returns the same
+  # range profile from every point along it - r(theta) = d / sin(theta),
+  # with no dependence on position - so in an aisle a MAJORITY of the
+  # usable rays do not change while the vehicle drives. The median of
+  # the changes therefore sits at almost nothing: measured over run
+  # 20260806a at 0.072 of the body speed with a worst case of 0.00024,
+  # and 1037 of 6538 sustained-motion samples read as NOT MOVING.
+  #
+  # WHY THE HIGH QUANTILE AND NOT THE ROBUST ONE, which is the choice
+  # that looks wrong and is not. The median was chosen to be robust to a
+  # crossing object, and that is optimising the direction that does not
+  # matter: an object making the observation say MOVING while the
+  # vehicle stands costs a withheld standstill confirmation, which SS1
+  # pays for with its timeout. Missing real motion is the failure that
+  # corroborates a lying encoder. So the statistic is chosen for
+  # SENSITIVITY, and its nuisance mode is the benign one.
+  observation_quantile: 0.95
+
+  # OVER HOW MANY SCANS. One - consecutive scans, 0.1 s apart. A longer
+  # baseline would raise every rate proportionally and buy sensitivity,
+  # and it would cost the same proportion in lag at the onset of motion,
+  # which is the direction that matters. At one scan the separation
+  # measured above is already 6217x, so there is nothing to buy.
+  observation_baseline_scans: 1
+
+  # THE THRESHOLD THE OBSERVED RATE IS TESTED AGAINST. Derived from the
+  # two measured bounds of section 15.5, and it sits between them with
+  # margin at both ends:
+  #
+  #   worst rate over 5644 SUSTAINED-REST samples      0.0000143 m/s
+  #   this threshold                                   0.0014    m/s  (98x above)
+  #   worst rate over 6535 SUSTAINED-MOTION samples    0.0889    m/s  (64x below)
+  #
+  # and at that threshold NONE of the 6535 sustained-motion samples
+  # reads as stopped.
+  #
+  # WHAT SPEED IT CORRESPONDS TO, AND THE EXTRAPOLATION IN THAT
+  # SENTENCE. The observed rate runs at 0.715 to 25.3 times the body
+  # speed across the measured range, the 0.715 being the worst case
+  # (highest speed band). At that worst ratio this threshold is a body
+  # speed of 0.0014 / 0.715 = 0.0020 m/s - which is where
+  # navigation.zero_speed_mps already puts zero. That conversion is an
+  # EXTRAPOLATION below 0.05 m/s, the slowest speed the profile drove,
+  # and is stated as one rather than quoted as a detection limit.
+  #
+  # THE FLOOR IT SITS ABOVE IS THE SIMULATION'S, NOT A REAL DEVICE'S.
+  # model.sdf declares no range noise on the navigation lidar, so a
+  # stationary vehicle in a static world produces range changes of
+  # exactly zero and the 0.0000143 m/s above is scan-timing residue. A
+  # real installation's floor is its rangefinder's noise, which is
+  # larger, and this threshold would be set by measuring it on the
+  # device. Said here rather than left for a reader to discover.
+  motion_threshold_mps: 0.0014
+
+  # A SCAN OLDER THAN THIS IS NO SCAN, and the observation goes invalid,
+  # which is motion-present TRUE. 0.30 s is three missed scans at the
+  # 10 Hz the navigation lidar runs at - the same window field:
+  # scan_fresh_max_s uses on the same class of sensor.
+  scan_fresh_max_s: 0.30
+
+  # HOW LONG A MOTION VERDICT IS HELD after the observation falls below
+  # the threshold. 0.50 s, so that a momentary geometric coincidence -
+  # every ray tangential at once, which a pure rotation about the lidar
+  # would give - cannot flicker the verdict to "stopped" mid-motion. It
+  # is late to say stopped and instantaneous to say moving, which is the
+  # same asymmetry standstill.window_s carries and for the same reason.
+  motion_hold_s: 0.50
+
+  # A READING OLDER THAN THIS IS NO READING. 0.25 s is five missed
+  # publish intervals. The node stops publishing a channel whose plant
+  # topic has gone silent rather than republishing a stale value: a
+  # frozen speed is the one value a monitor must never be handed, and a
+  # channel that stops publishing is what the F-program's own validity
+  # check is there to notice.
+  read_fresh_max_s: 0.25
+
 imu:
   # Nothing in this block is a noise parameter. model.sdf owns the
   # sensor's noise, the message carries the covariance gz derives from
@@ -446,6 +733,22 @@ topics:
   gz_odom: /forklift/gz/odom
   gz_scan_nav: /forklift/gz/scan_nav
   gz_imu: /forklift/gz/imu
+
+  # THE TWO READING CHANNELS OF THE SAFE-SPEED ENCODER. One shaft, read
+  # twice: model.sdf carries two JointStatePublisher instances on
+  # drive_wheel_joint, and each of these is one of them. They are the same
+  # shaft and therefore the same number - what makes the two READINGS
+  # differ is the reading head, modelled in
+  # scripts/safe_speed_channels.py. See the `safe_speed:` block above.
+  #
+  # These names are NOT remapped onto ROS-side names, unlike every other
+  # feedback topic here, and the exception is deliberate: they are raw
+  # plant reads with exactly one consumer, and keeping the /gz/ prefix on
+  # both sides says that nothing on the vehicle treats them as a speed.
+  # The vehicle-facing quantity is the two channel topics below, which are
+  # what the reading heads produce.
+  gz_drive_speed_read_a: /forklift/gz/drive_speed/read_a
+  gz_drive_speed_read_b: /forklift/gz/drive_speed/read_b
 
   # THE GROUND-TRUTH odom -> base_link TRANSFORM. RETIRED AS A SOURCE
   # ON 2026-07-31 AND STILL DECLARED HERE, WHICH IS NOT A CONTRADICTION.
@@ -646,6 +949,50 @@ topics:
   # carrier nor the node is this directory's to create; both are requested
   # in the m5-47 report.
   warning_field_occupied: /forklift/warning_field/occupied
+
+  # ---- the safe-speed readings and their corroboration (m5-48) ----
+  #
+  # Published by scripts/safe_speed_channels.py. std_msgs/Float64 for the
+  # two readings, std_msgs/Bool for the two verdict flags.
+  #
+  # THESE ARE READINGS, NOT VERDICTS, and that is why they may be topics
+  # at all. The m5-06 ruling bars the formed SAFE CHANNEL from every
+  # transport; what crosses here is measurement-class data, which the
+  # design's own honest limit already declares reaches the F-program as
+  # standard data with no integrity claim of any kind. The verdict these
+  # feed - the SLS demand - is formed inside the F-program and has no
+  # topic on either transport. Their names carry no "safe_", "ossd" or
+  # "protective" token, for the same reason warning_field_occupied does
+  # not - and that is not only style. scripts/check_sensor_frames.py
+  # section 4 refuses any topic name matching those tokens on either
+  # transport, by machine. These were called /forklift/safe_speed/* while
+  # they were being built and the checker refused them, correctly: a
+  # mechanical rule cannot tell a reading from a verdict, so the names
+  # say `drive_speed`, which is what they are - the drive shaft's speed,
+  # read twice.
+  #
+  # A CONSUMER'S DUTY, STATED HERE BECAUSE SILENCE IS THE SIGNAL. Both
+  # readings are published at the node's tick, never on change, and a
+  # channel whose plant read has gone stale STOPS being published rather
+  # than repeating its last value. Any consumer therefore owes a stale
+  # rule: no message inside its own window means NO READING, which is a
+  # missing measurement and reads in the demanding direction - never the
+  # last value seen, and never a republish (LESSONS 2026-08-04, twice).
+  drive_speed_channel_a: /forklift/drive_speed/channel_a
+  drive_speed_channel_b: /forklift/drive_speed/channel_b
+
+  # THE MOTION-PRESENT STAND-IN, and the flag that says whether it could
+  # be observed at all. TRUE on `motion_present` means the vehicle is
+  # observed to be moving, and a claimed zero speed may NOT be trusted.
+  # `motion_observation_valid` FALSE means the horizon carried too few
+  # usable ray pairs to observe anything - in which case motion_present is
+  # published TRUE, because every uncertainty in this observation resolves
+  # to moving (see the `safe_speed:` block for the asymmetry that forces
+  # it). The observation is a STAND-IN for the mechanical fault exclusion
+  # a real system argues on the shaft coupling, and is labelled one
+  # wherever it appears.
+  drive_speed_motion_present: /forklift/drive_speed/motion_present
+  drive_speed_motion_observation_valid: /forklift/drive_speed/motion_observation_valid
 
   # ---- the Nav2 command chain (nav2.yaml, m5-10) ----
   #

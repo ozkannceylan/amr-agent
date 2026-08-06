@@ -572,7 +572,7 @@ construction. These are the ones the geometry produces.
 | **R5** | Navigation lidar, bearings 149.4–178.4° at all times, widening to 149.2–179.0° above 1.20 m of carriage travel | 29.0° physical, 2.50 m wide at 5 m; 29.8° with the carriage raised | The mast body, and above 1.20 m of travel the carriage crossing z = 1.80 | Narrowed by the lateral offset from 31.5° and moved off the fork axis, **not eliminated**. The lift component is avoided by navigating with the carriage down, which is the normal travelling posture. Localisation must tolerate a permanent 29° occlusion in the load direction — it is one sensor on a vehicle with a mast, and every forklift has this |
 | **R6** | Anything outside 4.95 m of the model origin, in the worst direction | 4.95 m all-round, 5.46 m mean, against the sensor's own 5.50 m | The 5.50 m range is measured from the sensor and both sensors are 0.83 m off the origin | Quote 4.95 m, not 5.50 m, as what the pair reaches in every direction. Nothing about a protective field follows from either number |
 | **R7** | Everything the simulated sensor sees *through* that the vehicle would block | Simulated shadow 8.9° against physical 29.0° at the navigation plane | A `gpu_lidar` renders `<visual>` geometry; the mast's 0.72 m wide body is `<collision>` only | Every claim in this document is made on the physical set. The divergence itself is an open question in the report: reconcile the mast's two representations, in one direction or the other, before any live coverage figure is quoted. **Observed 2026-07-31**, section 13.6: the navigation lidar reports the mast as two thin rail lobes of 4 rays each, the visual set exactly |
-| **R8** | **Rear scanner self-view.** Vehicle bearings 93.5–152.7°, sensor-frame −131.5° to −72.3°, indices 6–65 of 275: the rear scanner's own rays terminate on the vehicle at 0.090–0.780 m. Added 2026-07-31, **measured**, section 13 | 60 rays computed and 61 measured (indices 5–65), 21.8 % of the aperture, at carriage travel 0.000 m; 50 reported and 11 dropped below `range_min`. Worst case is the R2 window: 82 reported, 29.8 %, out to 1.022 m at 0.0738 m of travel. Best case is the carriage clear of the plane: 48 reported, mast rails only, out to 0.780 m | The mast rails (z 0.05–2.05) and the carriage (z 0.10–0.60) both cross the 0.150 m plane and both lie *outboard* of the mount in x while spanning the vehicle's full width in y, so they subtend 60.75° from the mount at 0.09–0.73 m. The drive end has nothing in the plane except the drive wheel and steer yoke, which the front scanner's blind sector hides — which is why the front scanner spends 1 ray on the vehicle and the rear one spends 60 | **Structural, and not removable by any mount angle**: the vehicle's own body subtends 129.75° from this mount in three groups against an 85° blind sector, so some group is always in the aperture (section 13.7). Costs **no coverage** — the pair's union, the R1 gap and the 0.30/0.50 m perimeter figures are identical across the whole yaw family that keeps them (section 13.7), because the front scanner covers this sector. The mitigation is a **field** one and it belongs to m5-12: the rear device's protective field must be bounded inside the self-return contour over that sector, which is field geometry configured on the device, **not** a filter applied to samples. A real scanner of this class offers the same sector as a *reference contour* for mount-integrity monitoring; that is the real-world use of this band and it is not implemented here |
+| **R8** | **Rear scanner self-view.** Vehicle bearings 93.5–152.7°, sensor-frame −131.48°…−72.26° measured (§13.2); the clip band the constraint uses is −133.0°…−71.8°, rounded to EXCLUDE — see FIELD-EVALUATION §6 and §14.4 below, indices 6–65 of 275: the rear scanner's own rays terminate on the vehicle at 0.090–0.780 m. Added 2026-07-31, **measured**, section 13 | 60 rays computed and 61 measured (indices 5–65), 21.8 % of the aperture, at carriage travel 0.000 m; 50 reported and 11 dropped below `range_min`. Worst case is the R2 window: 82 reported, 29.8 %, out to 1.022 m at 0.0738 m of travel. Best case is the carriage clear of the plane: 48 reported, mast rails only, out to 0.780 m | The mast rails (z 0.05–2.05) and the carriage (z 0.10–0.60) both cross the 0.150 m plane and both lie *outboard* of the mount in x while spanning the vehicle's full width in y, so they subtend 60.75° from the mount at 0.09–0.73 m. The drive end has nothing in the plane except the drive wheel and steer yoke, which the front scanner's blind sector hides — which is why the front scanner spends 1 ray on the vehicle and the rear one spends 60 | **Structural, and not removable by any mount angle**: the vehicle's own body subtends 129.75° from this mount in three groups against an 85° blind sector, so some group is always in the aperture (section 13.7). Costs **no coverage** — the pair's union, the R1 gap and the 0.30/0.50 m perimeter figures are identical across the whole yaw family that keeps them (section 13.7), because the front scanner covers this sector. The mitigation is a **field** one and it belongs to m5-12: the rear device's protective field must be bounded inside the self-return contour over that sector, which is field geometry configured on the device, **not** a filter applied to samples. A real scanner of this class offers the same sector as a *reference contour* for mount-integrity monitoring; that is the real-world use of this band and it is not implemented here |
 
 Two further sectors were looked for and are **not** present in this geometry,
 which is worth recording so the next reader does not re-derive them: the
@@ -905,7 +905,7 @@ What m5-12's protective-field design inherits, as a constraint, in its own
 words:
 
 1. **The rear device's protective and warning fields must be bounded inside the
-   self-return contour** over sensor-frame −131.5° to −72.3°. A field drawn
+   self-return contour** over sensor-frame −131.48°…−72.26° measured (§13.2); the clip band the constraint uses is −133.0°…−71.8°, rounded to EXCLUDE — see FIELD-EVALUATION §6 and §14.4 below. A field drawn
    past 0.090 m in that sector is permanently violated by the vehicle. This is
    **field geometry configured on the device** — the shape of the monitored
    region — and it is categorically not a filter applied to samples.
@@ -922,3 +922,96 @@ words:
    misalignment, and this band is stable, known and 0.09–0.78 m away. That is
    the positive use of it. It is named as available, not as implemented, and
    any such function would be the device's, never a node's.
+
+---
+
+# 14. THE INSTRUMENT WAS DEAD, AND IS NOT ANY MORE — 2026-08-06 (m5-48)
+
+**Sections 1 to 12 of this file are the output of
+`agv/forklift/scripts/sensor_coverage.py`, and between 2026-07-31 and
+2026-08-06 that script did not run at all.** Every figure above was
+therefore unreproducible: not wrong, not superseded — unreproducible,
+which is a different and worse thing, because the m5-47 correction of
+the rear clip band was argued against §13.2 of this file and so rested
+on evidence nobody could regenerate.
+
+This section records the fault, the fix and the re-run. **It changes no
+figure in sections 1 to 13**, and it is written so that the claim can be
+checked rather than believed.
+
+## 14.1 The fault, reproduced before it was fixed
+
+```
+$ python3 agv/forklift/scripts/sensor_coverage.py
+Traceback (most recent call last):
+  File ".../sensor_coverage.py", line 1222, in <module>
+    main()
+  File ".../sensor_coverage.py", line 1196, in main
+    solids, sensors = load_model(args.model)
+  File ".../sensor_coverage.py", line 290, in load_model
+    float(hor.findtext('min_angle')), float(hor.findtext('max_angle')),
+          ^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'findtext'
+```
+
+`load_model` iterated **every** `<sensor>` element in `model.sdf` and
+read `lidar/scan/horizontal` off each one. That held while the model
+carried three sensors and all three were `gpu_lidar`. Brief m5-07c then
+added the **IMU**, which declares no `<lidar>` block at all, `find`
+returned `None`, and the script died on the first attribute access —
+**before printing a line**, which is why the failure is total rather than
+partial and why no output of it exists from that period.
+
+## 14.2 The fix
+
+One guard, in `load_model`, with the reason written beside it: a sensor
+that declares no aperture has no coverage to measure and is **skipped**.
+It is a filter and not a correction — skipping a sensor that declares no
+aperture cannot change any arc this script reports, and section 14.3
+shows that it did not.
+
+## 14.3 The re-run, and the figure the m5-47 correction rests on
+
+```
+$ python3 agv/forklift/scripts/sensor_coverage.py            # exit 0, 304 lines
+$ python3 agv/forklift/scripts/sensor_coverage.py --self-return
+```
+
+Committed as `evidence/encoder/m5-48-sensor-coverage-full.txt` and
+`evidence/encoder/m5-48-sensor-coverage-selfreturn.txt` (under the m5-48
+prefix because that is the run which produced them —
+`docs/LESSONS.md` 2026-08-06: an evidence filename carries the run, not
+the observation).
+
+The three sensors are listed exactly as §3 lists them — front and rear at
+275.0° aperture, 1.0036° resolution, 0.10–5.50 m; the navigation lidar at
+360.0°, 1.0028°, 0.10–8.00 m — and the IMU appears nowhere, which is the
+point of the guard.
+
+**The figure that was unreproducible and now is not:** the rear scanner's
+self-return sweep reports
+
+```
+      65     -72.26    152.74    0.164  carriage/visual
+```
+
+index 65 at sensor-frame **−72.26°**, self-return **0.164 m** — the
+measurement §13.2 records and the one m5-47's clip-band correction was
+argued against. It reproduces exactly.
+
+## 14.4 One finding this re-run surfaced, and it is not this brief's to fix
+
+§13.7 (the R8 row of §11) and §13.8 item 1 both hand m5-12 the rear
+clip band as **"−131.5° to −72.3°"**. Those are §13.2's measured
+**−131.48°…−72.26°** rounded, and the −72.3 end is rounded in the
+direction that **excludes** index 65 from the sector the constraint
+covers — the identical defect m5-47 corrected in
+`FIELD-EVALUATION.md` §6, surviving in the document the correction was
+argued against. The downstream artefacts are already correct
+(`config.yaml` `field.self_return_clips`, `FIELD-EVALUATION.md` §6,
+`EVIDENCE_FIELD_EVALUATION.md`), so nothing built is wrong today; what
+is wrong is that this file still hands the next reader the rounded pair.
+Reported by m5-48 rather than edited, because the clip band is m5-47's
+subject and a rounding rule applied by a passing brief is how a sweep
+loses its owner (`docs/LESSONS.md` 2026-08-06, the sweep-by-subject
+rule).

@@ -1,0 +1,57 @@
+safe_speed_bench.py --drive: profile on the drive wheel.
+It drives; scripts/safe_speed_channels.py --csv records.
+
+   settle             rest 30 s at the start
+   L1 fwd 0.05        cmd +0.05 m/s    8.0 s  moved 0.400 m  achieved 0.050 m/s  ach/cmd 1.00  x-origin +0.40 m
+   L1 rev 0.05        cmd -0.05 m/s    8.0 s  moved 0.400 m  achieved 0.050 m/s  ach/cmd 1.00  x-origin +0.00 m
+   L1 fwd 0.10        cmd +0.10 m/s    8.0 s  moved 0.797 m  achieved 0.100 m/s  ach/cmd 1.00  x-origin +0.80 m
+   L1 rev 0.10        cmd -0.10 m/s    8.0 s  moved 0.800 m  achieved 0.099 m/s  ach/cmd 0.99  x-origin +0.00 m
+   L1 fwd 0.30        cmd +0.30 m/s    8.0 s  moved 2.382 m  achieved 0.298 m/s  ach/cmd 0.99  x-origin +2.38 m
+   L1 rev 0.30        cmd -0.30 m/s    8.0 s  moved 2.376 m  achieved 0.297 m/s  ach/cmd 0.99  x-origin +0.02 m
+   L1 fwd 0.60        cmd +0.60 m/s    6.7 s  moved 3.940 m  achieved 0.591 m/s  ach/cmd 0.98  x-origin +3.94 m
+   L1 rev 0.60        cmd -0.60 m/s    6.7 s  moved 3.928 m  achieved 0.591 m/s  ach/cmd 0.98  x-origin +0.07 m
+   L1 fwd 1.00        cmd +1.00 m/s    4.0 s  moved 3.867 m  achieved 0.958 m/s  ach/cmd 0.96  x-origin +3.87 m
+   L1 rev 1.00        cmd -1.00 m/s    4.0 s  moved 3.839 m  achieved 0.960 m/s  ach/cmd 0.96  x-origin +0.17 m
+   L2 fwd 0.05        cmd +0.05 m/s    8.0 s  moved 0.398 m  achieved 0.050 m/s  ach/cmd 1.00  x-origin +0.39 m
+   L2 rev 0.05        cmd -0.05 m/s    8.0 s  moved 0.400 m  achieved 0.050 m/s  ach/cmd 1.00  x-origin -0.01 m
+   L2 fwd 0.10        cmd +0.10 m/s    8.0 s  moved 0.797 m  achieved 0.100 m/s  ach/cmd 1.00  x-origin +0.78 m
+   L2 rev 0.10        cmd -0.10 m/s    8.0 s  moved 0.797 m  achieved 0.100 m/s  ach/cmd 1.00  x-origin -0.01 m
+   L2 fwd 0.30        cmd +0.30 m/s    8.0 s  moved 2.376 m  achieved 0.297 m/s  ach/cmd 0.99  x-origin +2.36 m
+   L2 rev 0.30        cmd -0.30 m/s    8.0 s  moved 2.388 m  achieved 0.298 m/s  ach/cmd 0.99  x-origin -0.00 m
+   L2 fwd 0.60        cmd +0.60 m/s    6.7 s  moved 3.946 m  achieved 0.590 m/s  ach/cmd 0.98  x-origin +3.93 m
+   L2 rev 0.60        cmd -0.60 m/s    6.7 s  moved 3.946 m  achieved 0.590 m/s  ach/cmd 0.98  x-origin +0.05 m
+   L2 fwd 1.00        cmd +1.00 m/s    4.0 s  moved 3.819 m  achieved 0.958 m/s  ach/cmd 0.96  x-origin +3.80 m
+   L2 rev 1.00        cmd -1.00 m/s    4.0 s  moved 3.819 m  achieved 0.958 m/s  ach/cmd 0.96  x-origin +0.17 m
+   L3 fwd 0.05        cmd +0.05 m/s    8.0 s  moved 0.400 m  achieved 0.050 m/s  ach/cmd 1.00  x-origin +0.39 m
+   L3 rev 0.05        cmd -0.05 m/s    8.0 s  moved 0.399 m  achieved 0.050 m/s  ach/cmd 1.00  x-origin -0.01 m
+   L3 fwd 0.10        cmd +0.10 m/s    8.0 s  moved 0.799 m  achieved 0.099 m/s  ach/cmd 0.99  x-origin +0.79 m
+   L3 rev 0.10        cmd -0.10 m/s    8.0 s  moved 0.797 m  achieved 0.100 m/s  ach/cmd 1.00  x-origin -0.01 m
+   L3 fwd 0.30        cmd +0.30 m/s    8.0 s  moved 2.373 m  achieved 0.298 m/s  ach/cmd 0.99  x-origin +2.36 m
+   L3 rev 0.30        cmd -0.30 m/s    8.0 s  moved 2.388 m  achieved 0.298 m/s  ach/cmd 0.99  x-origin -0.01 m
+   L3 fwd 0.60        cmd +0.60 m/s    6.7 s  moved 3.946 m  achieved 0.590 m/s  ach/cmd 0.98  x-origin +3.92 m
+   L3 rev 0.60        cmd -0.60 m/s    6.7 s  moved 3.928 m  achieved 0.591 m/s  ach/cmd 0.98  x-origin +0.06 m
+   L3 fwd 1.00        cmd +1.00 m/s    4.0 s  moved 3.869 m  achieved 0.959 m/s  ach/cmd 0.96  x-origin +3.85 m
+   L3 rev 1.00        cmd -1.00 m/s    4.0 s  moved 3.859 m  achieved 0.960 m/s  ach/cmd 0.96  x-origin +0.13 m
+   L4 fwd 0.05        cmd +0.05 m/s    8.0 s  moved 0.399 m  achieved 0.050 m/s  ach/cmd 1.00  x-origin +0.37 m
+   L4 rev 0.05        cmd -0.05 m/s    8.0 s  moved 0.398 m  achieved 0.050 m/s  ach/cmd 1.00  x-origin -0.02 m
+   L4 fwd 0.10        cmd +0.10 m/s    8.0 s  moved 0.799 m  achieved 0.100 m/s  ach/cmd 1.00  x-origin +0.77 m
+   L4 rev 0.10        cmd -0.10 m/s    8.0 s  moved 0.799 m  achieved 0.099 m/s  ach/cmd 0.99  x-origin -0.03 m
+   L4 fwd 0.30        cmd +0.30 m/s    8.0 s  moved 2.382 m  achieved 0.298 m/s  ach/cmd 0.99  x-origin +2.35 m
+   L4 rev 0.30        cmd -0.30 m/s    8.0 s  moved 2.376 m  achieved 0.297 m/s  ach/cmd 0.99  x-origin -0.00 m
+   L4 fwd 0.60        cmd +0.60 m/s    6.7 s  moved 3.940 m  achieved 0.591 m/s  ach/cmd 0.98  x-origin +3.90 m
+   L4 rev 0.60        cmd -0.60 m/s    6.7 s  moved 3.946 m  achieved 0.590 m/s  ach/cmd 0.98  x-origin +0.03 m
+   L4 fwd 1.00        cmd +1.00 m/s    4.0 s  moved 3.839 m  achieved 0.959 m/s  ach/cmd 0.96  x-origin +3.80 m
+   L4 rev 1.00        cmd -1.00 m/s    4.0 s  moved 3.869 m  achieved 0.959 m/s  ach/cmd 0.96  x-origin +0.10 m
+   L5 fwd 0.05        cmd +0.05 m/s    8.0 s  moved 0.399 m  achieved 0.050 m/s  ach/cmd 1.00  x-origin +0.35 m
+   L5 rev 0.05        cmd -0.05 m/s    8.0 s  moved 0.399 m  achieved 0.050 m/s  ach/cmd 1.00  x-origin -0.04 m
+   L5 fwd 0.10        cmd +0.10 m/s    8.0 s  moved 0.800 m  achieved 0.099 m/s  ach/cmd 0.99  x-origin +0.75 m
+   L5 rev 0.10        cmd -0.10 m/s    8.0 s  moved 0.797 m  achieved 0.100 m/s  ach/cmd 1.00  x-origin -0.04 m
+   L5 fwd 0.30        cmd +0.30 m/s    8.0 s  moved 2.376 m  achieved 0.297 m/s  ach/cmd 0.99  x-origin +2.33 m
+   L5 rev 0.30        cmd -0.30 m/s    8.0 s  moved 2.390 m  achieved 0.297 m/s  ach/cmd 0.99  x-origin -0.03 m
+   L5 fwd 0.60        cmd +0.60 m/s    6.7 s  moved 3.928 m  achieved 0.591 m/s  ach/cmd 0.98  x-origin +3.87 m
+   L5 rev 0.60        cmd -0.60 m/s    6.7 s  moved 3.940 m  achieved 0.591 m/s  ach/cmd 0.98  x-origin +0.02 m
+   L5 fwd 1.00        cmd +1.00 m/s    4.0 s  moved 3.819 m  achieved 0.958 m/s  ach/cmd 0.96  x-origin +3.76 m
+   L5 rev 1.00        cmd -1.00 m/s    4.0 s  moved 3.809 m  achieved 0.960 m/s  ach/cmd 0.96  x-origin +0.15 m
+   settle             rest 40 s at the end
+
+segments: 50  held or blocked (ach/cmd < 0.5): 0

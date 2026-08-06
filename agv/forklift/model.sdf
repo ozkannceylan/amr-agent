@@ -79,6 +79,13 @@
     /forklift/gz/fork_cmd      gz.msgs.Double   carriage travel  [m]
 
     /forklift/gz/joint_state   gz.msgs.Model    joint positions and rates
+
+    /forklift/gz/drive_speed/read_a  gz.msgs.Model  drive shaft, reading A
+    /forklift/gz/drive_speed/read_b  gz.msgs.Model  drive shaft, reading B
+      Two reading channels on ONE shaft, cross-compared downstream: a
+      SINGLE-CHANNEL TESTED SYSTEM, never a two-channel one. See the
+      block beside the two systems at the foot of this file.
+
     /forklift/gz/odom          gz.msgs.Odometry GROUND-TRUTH pose and twist
     /forklift/gz/tf_ground_truth  gz.msgs.Pose_V  odom -> base_link, from
                                                   the same ground truth
@@ -1141,6 +1148,83 @@
       <joint_name>steer_joint</joint_name>
       <joint_name>drive_wheel_joint</joint_name>
       <joint_name>mast_joint</joint_name>
+    </plugin>
+
+    <!--
+      THE SAFE-SPEED ENCODER: ONE SHAFT, TWO READING CHANNELS.
+
+      The two systems below read the SAME joint, drive_wheel_joint, and
+      publish it on two separate topics. That is the whole of what this
+      file contributes to the vehicle's speed measurement, and the shape
+      is deliberate: it models a safe encoder, which is ONE device on ONE
+      shaft carrying TWO reading channels whose values an external safe
+      control cross-compares.
+
+      ITS HONEST NAME IS A SINGLE-CHANNEL TESTED SYSTEM, and that name is
+      used in every artefact that describes it (config.yaml safe_speed,
+      scripts/safe_speed_channels.py, EVIDENCE_ODOMETRY.md section 14).
+      One shaft, one measured quantity, two readings of it. Calling the
+      arrangement "two-channel" would claim a redundancy it does not
+      have: both readings die together with the shaft they read, which
+      is exactly why the design carries a separate motion-present
+      observation beside them (see below).
+
+      WHY TWO PLUGIN INSTANCES AND NOT ONE TOPIC READ TWICE. A subscriber
+      that reads one topic twice has one reading path, and a fault in it
+      is common to both copies - the cross-comparison would then compare
+      a number with itself and pass for ever. Two instances give two
+      publishers, two message streams and two subscriptions, so the
+      failure of one read path is visible to the comparison. What the
+      instances do NOT give is independent noise: they publish the same
+      simulator value, because it IS the same shaft. The independence
+      that makes a cross-comparison mean anything lives in the reading
+      heads, and the reading heads are modelled in
+      scripts/safe_speed_channels.py - each with its own mounting phase
+      on the count grid and its own read jitter. This file supplies the
+      shaft; the node supplies the heads.
+
+      WHAT THIS IS NOT. It is not a safe measurement, it has no
+      integrity, no diagnostic coverage and no fault reaction, and no PL,
+      Category, SIL or PFH is claimed for it or for anything downstream
+      of it. The readings reach the F-program as STANDARD DATA over the
+      process path, which is a stand-in for a safe measurement channel
+      and is labelled one wherever it appears. The same rule as the
+      scanners: what this file supplies is the GEOMETRY and the SIGNAL of
+      a real installation, never a safety property.
+
+      THE MOTION-PRESENT CHECK IS NOT IN THIS FILE, AND IT IS A STAND-IN.
+      Two readings of one shaft lie together if the shaft or its coupling
+      fails, so a claimed zero speed is corroborated against an
+      observation that does not pass through the shaft at all. Real
+      systems close that hole with a MECHANICAL FAULT EXCLUSION argued on
+      the coupling - a construction argument, not a monitored signal.
+      This project has no such argument available, so it substitutes an
+      observation and says so. The observation is derived from the
+      navigation lidar by scripts/safe_speed_channels.py, and it is
+      labelled a stand-in in every artefact that carries it.
+
+      ADDITIVE, AND MEASURED TO BE SO (m5-48). These two systems are
+      read-only: JointStatePublisher publishes joint state and writes
+      nothing the physics reads. No link, joint, inertial, geometry,
+      sensor, gain, limit or existing topic changed with them, and the
+      joint-position and joint-velocity components they require are
+      already created for this same joint by the system above, so not
+      even a component is added. The one class of committed figure an
+      additive edit can still move is anything derived from machine
+      load, so that was measured rather than argued: three alternating
+      60 s captures of the simulator's own real-time factor, with and
+      without these two systems, gave mean RTF 0.9903 both ways
+      (EVIDENCE_ODOMETRY.md section 14.2).
+    -->
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>/forklift/gz/drive_speed/read_a</topic>
+      <joint_name>drive_wheel_joint</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>/forklift/gz/drive_speed/read_b</topic>
+      <joint_name>drive_wheel_joint</joint_name>
     </plugin>
 
     <!--

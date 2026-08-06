@@ -12,7 +12,11 @@
 #      robot_localization's ekf_node - the vehicle's own motion estimate,
 #      and the SOLE publisher of forklift/odom -> forklift/base_link,
 #   5. scripts/sensor_tf.py, the static TF for the four sensor frames,
-#   6. scripts/forklift_io.py and scripts/obstacle_zone.py.
+#   6. scripts/forklift_io.py and scripts/obstacle_zone.py,
+#   7. optionally (safe_speed:=true) a second bridge for model.sdf's two
+#      reads of the drive shaft and scripts/safe_speed_channels.py, which
+#      puts a reading head on each - one shaft, two readings, a
+#      SINGLE-CHANNEL TESTED SYSTEM.
 #
 # THE WORLD IS NOT OWNED HERE. agv/ owns a vehicle, not a warehouse, so the
 # world is an argument. Its default is gz's stock empty.sdf, which is enough
@@ -70,6 +74,8 @@ _IO_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'forklift_io.py')
 _ZONE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'obstacle_zone.py')
 _TF_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'sensor_tf.py')
 _FIELD_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'field_evaluation.py')
+_SAFE_SPEED_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts',
+                                  'safe_speed_channels.py')
 _WHEEL_ODOM_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'wheel_odometry.py')
 _IMU_GATE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'imu_gate.py')
 _EKF_YAML = os.path.join(_FORKLIFT_DIR, 'ekf.yaml')
@@ -191,6 +197,18 @@ _BRIDGE_ARGS = [
 # TransformListener reads, and the moving transform has to arrive there
 # while the STATIC sensor transforms arrive on /tf_static from
 # sensor_tf.py. Two topics, two halves of one tree.
+# THE TWO SAFE-SPEED READS, on their own bridge node for the same reason
+# the transform has one: they are conditional, and a conditional topic on
+# an unconditional bridge is a topic nobody can turn off. Both keep their
+# gz names on the ROS side - see the block beside the node that starts
+# this bridge.
+_SAFE_SPEED_BRIDGE_ARGS = [
+    '{}@sensor_msgs/msg/JointState[gz.msgs.Model'.format(
+        _TOPICS['gz_drive_speed_read_a']),
+    '{}@sensor_msgs/msg/JointState[gz.msgs.Model'.format(
+        _TOPICS['gz_drive_speed_read_b']),
+]
+
 _TF_BRIDGE_ARGS = [
     '{}@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V'.format(
         _TOPICS['gz_tf_ground_truth']),
@@ -408,6 +426,33 @@ def generate_launch_description():
                     'topic, /forklift/warning_field/occupied, published at '
                     'the evaluation tick so that its absence is visible.'))
     ld.add_action(DeclareLaunchArgument(
+        'safe_speed', default_value='false',
+        description='Start the safe-speed reading channels: a bridge for '
+                    'model.sdf\'s two reads of the drive shaft, and '
+                    'scripts/safe_speed_channels.py, which puts a reading '
+                    'head on each. ONE SHAFT, TWO READINGS - a '
+                    'SINGLE-CHANNEL TESTED SYSTEM, never a two-channel one. '
+                    'It is a MODEL of what a safe encoder does, reaching the '
+                    'F-program as STANDARD DATA, and it is not a safety '
+                    'function: no Category, no Performance Level, no SIL, no '
+                    'PFH (ADR 0011 D5). Beside the two readings it publishes '
+                    'a motion-present observation, which is a STAND-IN for '
+                    'the mechanical fault exclusion a real system argues on '
+                    'the shaft coupling. Off by default because the two '
+                    'reads publish at the physics rate; forgetting it is '
+                    'safe, because a missing reading reads as a demand.'))
+    ld.add_action(DeclareLaunchArgument(
+        'safe_speed_csv', default_value='',
+        description='Measurement facility. A path here makes the '
+                    'safe-speed node record every tick to it, including a '
+                    'noise-free reference column and the simulator\'s own '
+                    'body speed - both written to the CSV and read by '
+                    'nothing on the vehicle. Empty (the default) records '
+                    'nothing. ONE CSV PER SESSION, unique name per start: '
+                    'the file is truncated at open, so sharing a path '
+                    'across two runs destroys the first '
+                    '(LESSONS 2026-07-28).'))
+    ld.add_action(DeclareLaunchArgument(
         'seed', default_value='',
         description='Noise seed passed to gz sim, fixing the sign and value '
                     'each sensor bias is drawn with. Empty (the default) '
@@ -589,6 +634,54 @@ def generate_launch_description():
         name='field_evaluation',
         output='screen',
         condition=IfCondition(LaunchConfiguration('field_evaluation')),
+    ))
+
+    # ---- the safe-speed reading channels (m5-48) ----
+    #
+    # ONE SHAFT, TWO READINGS: A SINGLE-CHANNEL TESTED SYSTEM, never a
+    # two-channel one. model.sdf publishes drive_wheel_joint on two
+    # topics; this bridge carries both into ROS and the node below puts a
+    # reading head on each. Both are conditioned on `safe_speed` and both
+    # are OFF BY DEFAULT.
+    #
+    # WHY OFF BY DEFAULT, WITH THE COST MEASURED. Each read publishes at
+    # the world's physics rate - 500.011 Hz measured - so bridging the two
+    # of them costs about 3 percentage points of one core on top of the
+    # 4.6 % the joint-state topic alone costs (m5-48, EVIDENCE_ODOMETRY.md
+    # section 14.2). That is small, and it is still not something every M4
+    # and M5 run should pay for silently. Asking for it explicitly also
+    # means the SLS evidence records the argument that turned it on rather
+    # than inheriting a default, as the field evaluation above does.
+    #
+    # AND FORGETTING IT IS SAFE, WHICH IS WHY A DEFAULT IS ACCEPTABLE
+    # HERE AT ALL. With the node absent the F-program receives no
+    # readings, its own validity check finds them missing, and a missing
+    # measurement reads as a demand. A forgotten argument stops the
+    # vehicle; it does not silently disable the monitoring.
+    #
+    # NOT REMAPPED, unlike every other feedback topic on the main bridge.
+    # These are raw plant reads with exactly one consumer, and keeping the
+    # /gz/ prefix on both sides says that nothing on the vehicle treats
+    # them as a speed. The vehicle-facing quantity is what the reading
+    # heads produce, on /forklift/drive_speed/channel_a and channel_b.
+    #
+    # use_sim_time is not optional here either: the freshness rules
+    # compare simulated stamps against the node's own clock.
+    ld.add_action(Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='forklift_safe_speed_bridge',
+        output='screen',
+        arguments=_SAFE_SPEED_BRIDGE_ARGS,
+        condition=IfCondition(LaunchConfiguration('safe_speed')),
+    ))
+    ld.add_action(ExecuteProcess(
+        cmd=[sys.executable, _SAFE_SPEED_SCRIPT, '--config', config,
+             '--csv', LaunchConfiguration('safe_speed_csv'),
+             '--ros-args', '-p', 'use_sim_time:=true'],
+        name='safe_speed_channels',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('safe_speed')),
     ))
 
     return ld
