@@ -406,3 +406,373 @@ than diagnosed.
 | `bridge/evidence/m544-*.log.gz` | The bridge, HMI, arena and envelope-stack logs of the same runs |
 | `bridge/tools/probe_server_paths.py` | The read-only server probe of §1 |
 | `bridge/tools/observe_envelope_chain.py` | The subscriber-only vehicle-side witness |
+
+---
+
+# 2026-08-06 (second session) — the same chain, five times
+
+**What this section is.** m5-44, above, ran the chain **once**. Every figure it
+records is `n = 1` and its §5 says so. This section repeats the same chain on
+the same route with the same protocol **five times**, so that each of those
+figures gains a repeat count and a spread, and it closes the one gap m5-44
+named: **the ceiling clamp**, which m5-44 could not exercise because the demand
+never reached the ceiling.
+
+Nothing above this line was changed. Written **as each run landed**, run by run.
+
+## 7. Environment for this session, and what qualifies every figure in it
+
+| Item | Value |
+|---|---|
+| Date | **2026-08-06**, 07:40–09:5x UTC (09:40–11:5x local), a separate session from §0–§6 |
+| Controller | The **same** PLCSIM Advanced instance `safecell3` at `192.168.53.1`, project `safe_amr`, CPU 1513F-1 PN, downloaded 2026-08-05. **Nothing in TIA was opened, changed, compiled or downloaded for this work** — it was not launched by this session and no client here writes anything but the tags §7.1 lists |
+| Bridge host | WSL2 on the owner's Windows machine, Ubuntu 24.04, ROS 2 Jazzy, `rmw_fastrtps_cpp`; `~/amr-bridge-venv` (`asyncua==2.0.1`) |
+| Simulator | `gz sim` 8.11.0, headless, software rasterised, `sim/launch/warehouse_bringup.launch.py` at `x=-4.5 y=7.0 yaw=0.0` — **the same spawn as m5-44**, and the pose is commanded back to it between runs so "the same route" is a fact and not a hope |
+| Isolation | `ROS_DOMAIN_ID=57` **and** `GZ_PARTITION=m546`, both, always (LESSONS 2026-07-27) |
+| Machine state before the timed runs | checked and recorded, not assumed: `2026-08-06T07:40:23Z`, `uptime` load average `0.00 0.00 0.00`, and the stack script's own `pgrep` over `gz sim`, `run_bridge`, `hmi_server`, `envelope_gate`, `forklift_io`, `obstacle_zone`, `velocity_smoother`, `cmd_vel_to_tricycle` returned **nothing running**. One simulator, one session, one agent measuring (LESSONS 2026-07-30, 2026-08-04) |
+| Independent witness of the PLC | the **commissioning HMI's own OPC UA session** (`hmi/hmi_server.py --config hmi/config.yaml`), a different process, a different client and a different session from the bridge. Every "the PLC did X" verdict below is cross-read from `GET /state`'s `metrics` block, which the bridge cannot write |
+
+**What no figure here is.** Not a safety figure. The envelope, the mode, the
+process stop and the vehicle's report are **process data** (`opcua-nodes.md`
+§12.1, ADR 0011 D5); loss of any of these links is a **degraded mode, not a
+safety event** (invariant 2). No PL, SIL, Category or PFH is claimed for
+anything in this section, and the stand-in writer carries no integrity claim.
+
+### 7.1 The protocol, stated once and run unchanged five times
+
+The stack is m5-44's, from the same launch lines (`~/m544-stack.sh`, copied to
+`~/m5-46-stack.sh` with the group tag changed and `obstacle_zone.py` given its
+own case). Throwaway harness scripts live **outside the repository** in the
+owner's WSL home, as m5-44's did; nothing new was added to `bridge/`.
+
+Brought up once, held for the whole session:
+
+1. `sim/launch/warehouse_bringup.launch.py gui:=false x:=-4.5 y:=7.0 yaw:=0.0`
+2. `agv/forklift/launch/envelope.launch.py io:=true`
+3. `agv/forklift/scripts/obstacle_zone.py`
+4. `hmi/hmi_server.py --config hmi/config.yaml`
+5. `bridge/standin_writer/standin_writer.ps1 -Instance safecell3` on **Windows**,
+   through the PLCSIM API, **not** OPC UA — then `estop close`, `zone close`,
+   `reset pulse 1200`, fed into its own console by process id with
+   `standin_writer/testing/console_feed.ps1`. Every one of those is a client
+   action on a PLC **input**.
+
+Then, **once per run**, and in this order:
+
+| # | Step | Who decides |
+|---|---|---|
+| 1 | A **fresh bridge session** on the committed `bridge/config/bridge.yaml`, its own evidence CSV, unique name (LESSONS 2026-07-28) | — |
+| 2 | Cell to rest, process stop released, monitored reset tapped, `ForkliftResetRequired` seen `False` | the PLC |
+| 3 | The subscriber-only witness `bridge/tools/observe_envelope_chain.py` starts **before** the envelope | — |
+| 4 | `drive_mode := 2` (Autonomous) posted to the HMI → the envelope is formed **entirely in the standard program** | the PLC |
+| 5 | A **0.90 m/s** demand published at 20 Hz on `/cmd_vel_smoothed`, the gate's input — **above the 0.600 m/s ceiling the PLC carries**. This is the clamp exercise m5-44 could not run, and it is also what drives the vehicle down the route | — |
+| 6 | The vehicle traverses; its own protective field trips; the PLC withdraws the envelope | the PLC |
+| 7 | The demand is **held live for a further 4 s** after the withdrawal, so the gate is seen holding zero against a standing command rather than against silence | — |
+| 8 | Pose commanded back to spawn, latches cleared, mode re-selected → a **permissive** envelope again | the PLC |
+| 9 | A 0.30 m/s demand made live so the gate is **PASSING**, then `SIGTERM` to the bridge → the link-loss case | the vehicle, alone |
+
+The command source is a 20 Hz publisher on the gate's input, not the closed-loop
+smoother, for the reason m5-44 open question 4 records: the smoother cannot
+accelerate this plant from rest. That is `agv/`'s, it is unrepaired, and it is
+the same arrangement `agv/forklift/EVIDENCE_ENVELOPE.md` uses.
+
+### 7.2 One protocol correction, made before the five runs and recorded rather than hidden
+
+The first attempt (`r1a`) ran steps 1–8 and then sent `SIGTERM` **with no demand
+live**. It measured nothing at step 9: the gate counts and logs its stale close
+on the transition *out of* `PASSING`, and `PASSING` is a state it can only hold
+while a command is arriving. With no demand the gate sits in `HOLD_ZERO`, a
+link loss changes nothing it can report, and the run's log carries no
+`GATE CLOSED … envelope stale` line at all. m5-44's r4 had a live 20 Hz
+publisher at its `SIGTERM` and that is why it saw one.
+
+Step 9 gained its "make the demand live first" line and the five runs below all
+carry it. `r1a`'s files are kept under their own names — its steps 1–8 are a
+valid observation and its step 9 is a **null**, not a pass:
+
+* `bridge/evidence/latency-2026-08-06-m546-r1a-protocol-v1-…csv.gz`
+* `~/m5-46-runs/envelope-chain-2026-08-06-r1a-protocol-v1.csv`
+
+### 7.3 Two further runs discarded before the five, and why they are named here
+
+Both were failures of the **harness**, not of the chain, and both are kept
+because each one is a trap the next person will otherwise walk into.
+
+* **`r1b`** — `gz service … /world/warehouse/set_pose` **returns
+  `data: true` and does nothing** when the request carries only
+  `name: "Forklift"`. It resolves on the **entity id**. The run therefore began
+  where the previous run had ended — jammed against the wall it had stopped at,
+  inside the front scanner's blind range, so the scan read *clear* — and drove
+  a stalled vehicle for 60 s: `drive_wheel_joint` turned 162.5 rad (19.5 m of
+  wheel) while the model moved 0.63 m. The pose reset now reads the id out of
+  `dynamic_pose/info`, sends it, and **verifies the move against the pose**;
+  a service's own boolean is not evidence that it acted.
+* **`r1c`** — the corrected reset worked, and the 60 s window was simply too
+  short for the route: the vehicle reached `x = 11.7` with the field still
+  clear. Probed afterwards, the field trips at `x ≈ 14.1`. The window became
+  150 s, which is a window and not a target.
+
+Both files are kept under their own names and neither contributes a figure.
+
+---
+
+## 8. The five runs
+
+Every run below executed §7.1 steps 1–9 to completion. Each has **three
+independent records**: the vehicle-side witness CSV, the bridge's own evidence
+CSV (a separate process, a separate clock read, a separate file), and the
+envelope gate's own log.
+
+### 8.1 The route, and how repeatable it turned out to be
+
+Spawn `(-4.5, 7.0)` yaw 0, straight down the aisle at `y = 7.0` to the east
+wall, pose commanded back and **verified** before every run.
+
+| Run | Traverse to the trip | World pose at the withdrawal |
+|---|---|---|
+| r1 | 32.2 s | `(13.329, 6.978)` |
+| r2 | 144.4 s | `(13.323, 7.000)` |
+| r3 | 41.4 s | `(13.334, 6.991)` |
+| r4 | 87.3 s | `(13.337, 7.015)` |
+| r5 | 147.8 s | `(13.288, 6.990)` |
+
+**The place is repeatable to 49 mm in `x` and 37 mm in `y`; the time is not
+repeatable at all.** The same 17.8 m of route took between 32 s and 148 s, a
+factor of 4.6, at an unchanging 0.600 m/s ceiling and an unchanging clamped
+command — so the variation is in what the **plant** does with a command it is
+given, not in what the chain carries. It is `agv/`'s, it is not diagnosed here,
+and it is the reason every reaction figure below is timed **from the trip**
+rather than from the start of the run.
+
+### 8.2 Envelope arrival and gate adoption, n = 5
+
+`mode_in_force 0→2`, `motion_enable 0→1` and `speed_ceiling 0.0→0.600` are
+formed together in the standard program. The spread is how far apart they land
+on the vehicle; the adoption is `mode_applied 0→2` measured from
+`mode_in_force`.
+
+| Run | Arrival spread (3 elements) | Gate adoption |
+|---|---|---|
+| r1 | 1.6 ms | **9.7 ms** |
+| r2 | 1.2 ms | **44.5 ms** |
+| r3 | 2.1 ms | 24.8 ms |
+| r4 | 2.2 ms | 32.7 ms |
+| r5 | 1.6 ms | 28.8 ms |
+| **n = 5** | **1.2 – 2.2 ms**, mean 1.74 | **9.7 – 44.5 ms**, mean 28.1 |
+
+**What the repeat count changes about m5-44's reading.** m5-44 recorded the
+three elements arriving "within 1.8 ms of each other" and the gate adopting
+"44.5 ms later". The spread reproduces: five runs, all between 1.2 and 2.2 ms,
+one bridge cycle and one poll phase, as §4.8 and §12.4's cadence note require.
+**The adoption figure does not reproduce as a value.** 44.5 ms is not the
+adoption latency of this chain — it is the **top of its range**, and the same
+chain adopted in 9.7 ms in r1. The distribution is 4.6x wide, which is what a
+readback crossing an asynchronous 20 Hz bridge cycle and a 20 Hz gate cycle
+looks like; quoting the single m5-44 observation as *the* latency would have
+overstated it by up to a factor of four and understated nothing.
+
+`equipment_permit` is deliberately not in the spread: it goes permissive
+earlier, at the release of the process stop, and its own transition is timed in
+every run at `t ≈ 4.2 s` against a mode selection at `t ≈ 6.2 s`. It is a
+**second, independently formed** element carried on the same six slots, which is
+the point m5-44 §4.2 makes about a different cause on the same wires.
+
+### 8.3 The field trip, the PLC's round trip, and the stop, n = 5
+
+Timed across the real seam. The round trip is read from the **bridge's own**
+CSV: the `L2` row in which the server acknowledges the bridge's write of
+`ForkliftObstacleInStopZone := TRUE`, to the `read_rt` row in which the bridge
+reads `ForkliftMotionEnable` back as `FALSE`. Both stamps are
+`CLOCK_MONOTONIC` on the bridge host, differenced only against themselves
+(§9.1 C1/C2). Everything after it is the vehicle-side witness.
+
+| Run | PLC round trip | `/cmd_vel_gated` before | ceiling→0 after enable→0 | command-to-zero | standstill (settled) |
+|---|---|---|---|---|---|
+| r1 | 45.1 ms | 0.6000 m/s | 1.1 ms | 1186.6 ms | 1207.6 ms |
+| r2 | 44.6 ms | 0.6000 m/s | 0.6 ms | 1208.6 ms | 1208.3 ms |
+| r3 | 45.3 ms | 0.6000 m/s | 0.7 ms | 1194.8 ms | 1248.0 ms |
+| r4 | **37.2 ms** | 0.6000 m/s | 0.9 ms | 1191.0 ms | **1128.1 ms** |
+| r5 | 43.6 ms | 0.6000 m/s | 0.9 ms | 1156.1 ms | 1208.0 ms |
+| **n = 5** | **37.2 – 45.3 ms**, mean 43.2 | — | **0.6 – 1.1 ms** | **1156.1 – 1208.6 ms**, mean 1187.4 | **1128.1 – 1248.0 ms**, mean 1200.0 |
+
+**m5-44's 41.6 ms round trip reproduces**: it sits inside a five-run range of
+37.2 – 45.3 ms, and four of the five runs are within 1.7 ms of each other with
+r4 the low outlier. This is the one m5-44 figure that came back as a figure
+rather than as one draw.
+
+**m5-44's 162.5 ms command-to-zero does NOT reproduce, and must not be quoted
+as a stopping figure.** It is not a regression and nothing changed: the gate
+ramps at a fixed 0.50 m/s², so the time to zero is proportional to the speed it
+is ramping *from*. m5-44 withdrew at 0.1018 m/s and took 162.5 ms; these five
+withdrew at the full 0.600 m/s ceiling and took 1156 – 1209 ms. Both agree with
+`v / 0.50`: 0.204 s and 1.200 s respectively. **The figure that repeats is the
+deceleration, not the duration**, and a stopping time quoted without the speed
+it started from says nothing.
+
+**r4 behaved differently and is not averaged away.** Its first `|odom vx| <
+0.005 m/s` came at **+877.7 ms**, *before* the command reached zero — the plant
+decelerated ahead of the commanded ramp. It is not a standstill: the vehicle
+moved again afterwards, up to 0.0071 m/s in the following 3 s, and only settled
+at **+1128.1 ms**. The other four runs' first crossing and settled standstill
+are the same sample. The table quotes the **settled** figure for all five so
+the column compares like with like, and r4's transient is stated here rather
+than hidden inside it.
+
+**The gate published its terminal value and only then held zero** in all five
+runs — 0.0 reached explicitly, never by falling silent (the 2026-08-04 lesson,
+honoured in the deployed node), and the demand was still live on the gate's
+input for 4 s after every withdrawal, so the zero is held against a standing
+command and not against silence.
+
+
+## 9. THE CEILING CLAMP — the gap m5-44 left, closed
+
+m5-44 §4.1 and §5 say plainly that it could not establish the clamp: "the
+demand never reached the ceiling", the peak `/cmd_vel_gated` being 0.1018 m/s
+against a 0.600 m/s ceiling, and the clamp was measured only in
+`agv/forklift/EVIDENCE_ENVELOPE.md` §5 **against a topic double**.
+
+Here the demand is driven **above** the ceiling, on the real chain, in every
+one of the five runs: a 20 Hz publisher holds `/cmd_vel_smoothed` at
+**0.900 m/s** against the **0.600 m/s** ceiling the PLC formed and the bridge
+carried.
+
+| Run | Demand held | Non-zero gated samples in the window | max `/cmd_vel_gated` | samples exactly at the carried ceiling | samples **above** the ceiling |
+|---|---|---|---|---|---|
+| r1 | 0.900 m/s | 642 | `0.600000024` | 596 | **0** |
+| r2 | 0.900 m/s | 3122 | `0.600000024` | 3075 | **0** |
+| r3 | 0.900 m/s | 885 | `0.600000024` | 839 | **0** |
+| r4 | 0.900 m/s | 1725 | `0.600000024` | 1679 | **0** |
+| r5 | 0.900 m/s | 2978 | `0.600000024` | 2932 | **0** |
+| **n = 5** | | **9352** | — | **9121** | **0** |
+
+**Nine thousand three hundred and fifty-two consecutive opportunities to exceed
+a PLC-formed bound, and none taken.** The remaining 231 non-zero samples are
+the acceleration and the ramp at each end of the window, below the ceiling and
+passed through **exactly** — the gate reports itself unclamped for those.
+
+The gate announced it in its own words, unprompted, in every run:
+
+```
+[envelope_gate]: clamped to the ceiling: commanded +0.9000 m/s,
+  emitting +0.6000 m/s at ceiling 0.6000; the arc is unchanged and the
+  vehicle drives it slower
+```
+
+**The value the clamp lands on is the PLC's, carried and not re-created.** The
+maximum is `0.600000024` — bit for bit the `float64` widening of the PLC's
+`Real` 0.6 that the bridge read off the CPU and republished, the same
+`0.6000000238418579` that appears in every run's `speed_ceiling` transition and
+in the frozen envelope of §10. **The bridge did not round it to a nicer value**
+(§1.1) and the gate did not substitute a configured 0.6 of its own: the clamp
+output is the carried number, and that identity is what shows the bound came
+from the controller rather than from a constant on the vehicle.
+
+**What this is not.** It is not a safety-rated speed limit and not an SLS. It
+is a process bound on a process command, applied by a Python node on a network
+(invariant 1, ADR 0011 D5). And it is not a *new* claim about the gate — the
+gate's clamp arithmetic was already unit-tested and measured against a double;
+what was missing, and is now present, is that the bound the gate applies on the
+**real chain** is the one the **PLC formed**, carried unchanged across the OPC
+UA seam, with **no velocity value crossing that seam in either direction**
+(ADR 0014): what crosses is a ceiling, an enable, a permit and a mode.
+
+## 10. The link-loss case, repeated, n = 5
+
+`SIGTERM` to the bridge with a **permissive** envelope frozen on the wire and a
+**live 0.30 m/s demand** on the gate's input, so the gate is in `PASSING` and
+its stale close is a real transition (§7.2).
+
+| Run | frozen envelope at the moment of the loss | `SIGTERM` → gate's own stale close | `/cmd_vel_gated` → exactly 0.0 | held-zero samples after | all zero | `mode/applied` after |
+|---|---|---|---|---|---|---|
+| r1 | enable 1, ceiling 0.600, permit 1, mode 2 | 535.5 ms | 1074.6 ms | 321 | yes | 0 |
+| r2 | enable 1, ceiling 0.600, permit 1, mode 2 | 537.5 ms | 1079.0 ms | 321 | yes | 0 |
+| r3 | enable 1, ceiling 0.600, permit 1, mode 2 | 508.1 ms | 1065.3 ms | 322 | yes | 0 |
+| r4 | enable 1, ceiling 0.600, permit 1, mode 2 | 520.3 ms | 1077.6 ms | 322 | yes | 0 |
+| r5 | enable 1, ceiling 0.600, permit 1, mode 2 | 542.9 ms | 1091.8 ms | 320 | yes | 0 |
+| **n = 5** | **identical in all five** | **508.1 – 542.9 ms**, mean 528.9 | **1065.3 – 1091.8 ms** | 320 – 322 | **5 of 5** | **0 in 5 of 5** |
+
+Every run, the bridge went out the way §8.3 N5 requires and said so:
+
+```
+bridge signal 15: stopping; no farewell value, nothing zeroed
+session closed (clean shutdown); no farewell value written, nothing zeroed
+```
+
+and every run, the gate reached its own verdict without being told:
+
+```
+[envelope_gate]: GATE CLOSED after N stop(s): envelope stale (or never received).
+  Ramping to zero at 0.50 m/s^2. This is a degraded mode, not a safety function (invariant 2).
+```
+
+**m5-44's 519.7 ms reproduces**, sitting mid-range in 508.1 – 542.9 ms, and all
+five fall inside the gate's own `stale_window_s` of 0.500 s plus one 50 ms
+cycle — the bound is `[500, 550] ms` by construction and the measurement stays
+inside it five times out of five. The 1065 – 1092 ms to an exact zero is the
+same 0.50 m/s² ramp from 0.30 m/s (0.600 s) added to the detection.
+
+This is invariant 2 five times over: **the last thing the vehicle was told was
+that it may move at 0.600 m/s, and it stopped anyway.** Loss of supervision is
+a degraded mode handled onboard, not a safety event, and not a licence to keep
+going on the last permission granted. The gate held an **explicit zero** for
+~320 samples afterwards rather than falling silent, because in an unknown mode
+no other owner of the command is known to exist (the 2026-08-04 lesson).
+
+## 11. What this session establishes, and what it still does not
+
+| Now established, with its n | |
+|---|---|
+| The chain is **repeatable**: PLC-formed envelope → bridge → gate → vehicle drives → its field trips → PLC withdraws → vehicle stops, five times, one protocol | n = 5 |
+| **The ceiling clamp on the real chain**, against a demand 1.5x the ceiling, on the PLC's own carried value | n = 5, 9352 samples, 0 exceedances |
+| The **link-loss** degraded mode with a permissive envelope frozen | n = 5 |
+| The **PLC round trip** 37.2 – 45.3 ms | n = 5 |
+| The **arrival spread** 1.2 – 2.2 ms | n = 5 |
+
+| Still not established | Why |
+|---|---|
+| Any safety property, PL, SIL, Category or PFH | Nothing in §12 is a safety function (ADR 0011 D5, invariant 1). The stand-in writer carries no integrity claim |
+| A stopping distance or a reaction time the machine is certified to | Every figure is a process behaviour in a simulator, on a software-rasterised host under load |
+| That `bridge-design.md` carries the envelope group | **It still does not.** `opcua-nodes.md` §12.13 item 1 asks the interface agent for that round. The group definition in `amr_bridge/config.py` remains the bridge's proposal made runnable and still says so in the code; **nothing in this session changed that marking** |
+| AT-02, AT-03 or AT-04 | None was attempted |
+| The **recovery sequence** as a repeat count | It ran, correctly, before every one of the five runs — the process stop released, the monitored reset tapped, the mode re-selected — but this session did not re-time m5-44 §4.2's latch behaviour and does not claim to |
+| Why the same 17.8 m of route takes 32 s in one run and 148 s in another | §8.1. It is the plant, not the chain. Handed to `agv/`, undiagnosed |
+
+**One observation handed to `agv/` rather than explained here.** The traverse
+time varied 4.6x across five runs at an unchanging clamped 0.600 m/s command
+(§8.1), and in r4 the plant decelerated ahead of the gate's own ramp and then
+crept again (§8.3). Both are visible in the committed witness CSVs, both are
+downstream of everything the bridge owns, and both are recorded rather than
+diagnosed. Together with m5-44's open question 4 — the closed-loop smoother
+cannot accelerate this plant from rest — they say the same thing: **the plant's
+traction authority is the least settled part of this chain**, and it is the one
+part of it no figure in this file is a property of.
+
+## 12. Files, this session
+
+All gzipped **after** their writers had exited and the files had gone quiet —
+process gone by `pgrep`, timestamps checked (LESSONS 2026-07-28/29,
+2026-07-30). The stand-in writer was quit from its own console first.
+
+| File | What it is |
+|---|---|
+| `bridge/evidence/latency-2026-08-06-m546-r1…r5-…csv.gz` | The five bridge sessions, one per run, unique name per start — the `L2`/`read_rt` rows behind §8.3's round trip |
+| `bridge/evidence/m546-envelope-chain-2026-08-06-r1…r5.csv.gz` | The five vehicle-side witness captures, subscriber-only |
+| `bridge/evidence/…-r1a-protocol-v1…`, `…-r1b-jammed…`, `…-r1c-notrip…` | The three discarded runs of §7.2 and §7.3, kept under their own names. **No figure in this section comes from any of them** |
+
+**Why the witness files carry an `m546-` prefix and m5-44's do not.** They were
+first written as `envelope-chain-2026-08-06-r1…r5.csv.gz`, which is m5-44's own
+naming — **the same date, the same run letters** — and copying them into
+`bridge/evidence/` silently overwrote three committed m5-44 captures (`r1`,
+`r2`, `r3`). It was caught by `git status` before anything was committed and the
+three were restored from the index and verified with `gzip -t`; m5-44's
+`r1`, `r2`, `r3` and `r4-linkloss` are the committed files, untouched. The
+session prefix is now part of the name, which is the same rule the bridge's own
+per-session CSV suffix already follows: **a run identifier that is only unique
+within one session is not a file name.**
+| `bridge/evidence/m546-bridge-r1…r5.log.gz` | The bridge's own logs, one per session |
+| `bridge/evidence/m546-envelope-stack.log.gz` | The gate's own log — every `clamped to the ceiling`, `gate open` and `GATE CLOSED` line quoted above |
+| `bridge/evidence/m546-obstacle-zone.log.gz` | The field evaluator's own verdicts |
+| `bridge/evidence/m546-arena.log.gz`, `m546-hmi.log.gz` | The simulator and the independent OPC UA witness |
+| `bridge/evidence/m546-run-events.txt.gz` | The driver's event stamps for all runs, including the pose resets and their verification |
+| `bridge/standin_writer/logs/standin-writer-20260806T074032Z-pid38804.log` | The stand-in writer's session: `estop close`, `zone close`, `reset pulse 1200`, 41 280 cycles, 0 write failures, clean `quit` |
