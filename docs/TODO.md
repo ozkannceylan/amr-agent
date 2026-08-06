@@ -35,6 +35,22 @@ but outside the 1.35 m contour, produced **no verdict**.
   `EVIDENCE_NAV2.md`** — which now compounds with m5-40's finding that the
   reverse defect is real and un-masked. Both belong in the same reverse brief.
 
+## Deferred by the owner 2026-08-06 — do not block the presentation
+Three design decisions from m5-50, ruled deferred because none affects what the
+showcase demonstrates. Recorded so a later reader does not rediscover them as
+defects.
+
+- **Silence on the torque-off demand link is NOT torque-off.** Deliberate, and
+  the opposite of the field topic's rule. The envelope's own staleness already
+  stops the vehicle in ~520 ms; making silence trigger torque-off would demand a
+  safety reset after every network hiccup. **If asked at the presentation:** the
+  link dying stops the vehicle through the envelope; torque removal needs an
+  explicit demand.
+- **The fork does not settle under torque removal.** This is correct behaviour,
+  not a gap — a raised fork that dropped on torque loss would be a hazard.
+- **The holding brake has no slip torque.** Ideal brake, holds indefinitely. Only
+  matters on a gradient with load, which no demonstration uses.
+
 ## PLC — M5 BUILD LANDED 2026-08-05 (merge c9a4c77, local only, not pushed)
 Built in one owner-driven TIA session on `safe_amr` (CPU 1513F-1 PN, PLCSIM
 instance `safecell3`). The authoritative account is
