@@ -96,6 +96,11 @@ SURVIVOR_PATTERNS = (
     "double/server.py", "run_bridge.py", "gz sim", "parameter_bridge",
     "forklift_io.py", "obstacle_zone.py", "hmi_server.py",
     "forklift_bringup.launch.py",
+    # The STO contactor (m5-50). It is started by the bringup, so it is one
+    # of the children that survives a signal to `ros2 launch`, and it MUST
+    # be swept: a contactor left running from a previous run is a second
+    # publisher of the three actuator terminals.
+    "sto_contactor.py",
 )
 
 #: Constants of plc/forklift/SPEC.md section 3.3, quoted for the assertions in
@@ -1185,11 +1190,23 @@ def _last_bridge_diagnostics(stack):
     return found
 
 
+#: Node names the arena bringup's ros_gz_bridge has been started under. It was
+#: `forklift_arena_bridge` while sim/launch/forklift_bringup.launch.py stated
+#: its own bridge table; since 2026-08-06 that file includes
+#: agv/forklift/launch/vehicle.launch.py, whose bridge node is named
+#: `forklift_bridge`. BOTH are matched rather than the old one replaced,
+#: because this stimulus fails SILENTLY if it matches nothing - it returns
+#: False, the scan keeps flowing, and the scenario measures a stale-scan
+#: reaction that was never provoked.
+_ARENA_BRIDGE_NODE_NAMES = ("forklift_bridge", "forklift_arena_bridge")
+
+
 def _finish_arena_scan_bridge(stack, log):
     """Finish the arena's ros_gz_bridge by exact pid, so /forklift/scan stops at
     its source. Only a pid in this run's GZ_PARTITION is ever signalled."""
     for pid, command in stack.survivors():
-        if "parameter_bridge" in command and "forklift_arena_bridge" in command:
+        if "parameter_bridge" in command and any(
+                n in command for n in _ARENA_BRIDGE_NODE_NAMES):
             log("stimulus  finishing the arena scan bridge, pid {} (exact pid, "
                 "partition {})".format(pid, stack.partition))
             try:

@@ -127,7 +127,7 @@ declare -A COMPONENT_TOKEN=(
 # this run's GZ_PARTITION, so nothing outside this run is ever signalled. The
 # arena's own children are here because signalling ros2 launch leaves gz sim and
 # parameter_bridge running - measured by m4f-03 and in every rehearsal since.
-SURVIVOR_PATTERNS="gz sim|parameter_bridge|forklift_bringup.launch.py|run_bridge.py|forklift_io.py|obstacle_zone.py|hmi_server.py"
+SURVIVOR_PATTERNS="gz sim|parameter_bridge|forklift_bringup.launch.py|run_bridge.py|forklift_io.py|obstacle_zone.py|hmi_server.py|sto_contactor.py"
 
 GUI="true"   # showcase default; --headless makes it false
 

@@ -23,16 +23,30 @@
 #   world and a place to stand.
 #
 #   Consequence worth knowing before debugging: every topic, remap and
-#   parameter question about this launch is answered in
-#   forklift_bringup.launch.py, including the note on why the rear safety
-#   scanner's measurement channel is deliberately not bridged.
+#   parameter question about this launch is answered TWO files down, in
+#   agv/forklift/launch/vehicle.launch.py and agv/forklift/config.yaml.
+#   forklift_bringup.launch.py stopped stating a bridge table of its own on
+#   2026-08-06, for the reason written in its header: its copy had drifted
+#   off the actuator topics and produced a vehicle that was deaf at the
+#   plant with a clean log.
 #
 # WHAT THIS FILE ADDS THAT THE M4 BRINGUP DOES NOT: THE ESTIMATOR STACK.
 #
 #   M5 is the gate where the vehicle localises itself, and a localisation
-#   consumer needs a transform tree. So this file additionally starts four
-#   agv/-owned processes, exactly as agv/forklift/launch/vehicle.launch.py
-#   starts them:
+#   consumer needs a transform tree. So this file ASKS FOR four agv/-owned
+#   processes that the M4 bringup leaves off, with `estimator:=true`:
+#
+#   IT NO LONGER STARTS THEM ITSELF, AND THAT CHANGED ON 2026-08-06.
+#   Until then this file spawned the four processes with its own
+#   ExecuteProcess and Node actions - a second copy of a process list that
+#   agv/forklift/launch/vehicle.launch.py already stated, kept in step by
+#   hand. That is the same shape as the bridge table this file had already
+#   refused to copy, and the same shape as the one that made a vehicle deaf
+#   at the plant when m5-50 moved the actuator topics and only one of the
+#   two copies followed. So the copy is gone: `estimator` is passed down to
+#   forklift_bringup.launch.py, which passes it to vehicle.launch.py, which
+#   is the single place these four are declared, argued for and REFUSED in
+#   their invalid combinations. The four are:
 #
 #     scripts/sensor_tf.py       /tf_static, one transform per sensor frame,
 #                                read out of model.sdf so it cannot drift
@@ -78,9 +92,10 @@
 #   the simulator's own odom -> base_link, retired 2026-07-31 and off by
 #   default there; this file does not carry it at all. That is deliberate
 #   and it is the strongest form of invariant 10 available to a launch
-#   file: the M4 launch this one includes bridges no transform either, so
-#   the ONLY publisher of that edge in this whole bringup is the EKF, and
-#   there is no argument anyone can pass to add a second one. A run of this
+#   file: forklift_bringup.launch.py passes `ground_truth_tf:=false`
+#   explicitly rather than inheriting a default, so the ONLY publisher of
+#   that edge in this whole bringup is the EKF, and there is no argument
+#   anyone can pass here to add a second one. A run of this
 #   launch is expected to show `Publisher count: 1` on /tf until a mapping
 #   or localisation node is started beside it (which then adds the DISJOINT
 #   edge map -> forklift/odom, and nothing else).
@@ -108,11 +123,20 @@
 # Topics (authoritative table: agv/forklift/README.md):
 #
 #   /clock                                        rosgraph_msgs/Clock
-#   /forklift/gz/steer_cmd, traction_cmd, fork_cmd  std_msgs/Float64  (in)
+#   /forklift/gz/actuator/{steer,traction,fork}_cmd  std_msgs/Float64  (in)
+#       THE ACTUATOR TERMINALS, which is what model.sdf's joint controllers
+#       listen on since m5-50. They are NOT what a vehicle node publishes:
+#       the stack still publishes /forklift/gz/{steer,traction,fork}_cmd and
+#       agv/forklift/scripts/sto_contactor.py is the only thing that joins
+#       the two. A gz topic list therefore shows the terminals and never the
+#       commands, which is the right way round.
 #   /forklift/scan                                sensor_msgs/LaserScan
 #       the NAVIGATION lidar, 360 ranges over 360 deg, 10 Hz, z = 1.80 m
 #   /forklift/safety_scanner_front/measurement    sensor_msgs/LaserScan
-#       the front safety scanner's NON-SAFE measurement channel, z = 0.15 m
+#   /forklift/safety_scanner_rear/measurement     sensor_msgs/LaserScan
+#       the two safety scanners' NON-SAFE measurement channels, z = 0.15 m.
+#       Neither is a safe channel; the safe channel has no topic on either
+#       transport, ever (agv/forklift/README.md)
 #   /forklift/odom                                nav_msgs/Odometry, 20 Hz
 #       GROUND TRUTH. The name does not say so; agv/forklift/config.yaml
 #       has the standing rename request. Nothing that estimates or maps
@@ -147,33 +171,23 @@
 # one does (sim/setup/CONTAINER_TOOLCHAIN.md section 6).
 
 import os
-import sys
 
 from launch import LaunchDescription
-from launch.actions import (DeclareLaunchArgument, ExecuteProcess,
+from launch.actions import (DeclareLaunchArgument, GroupAction,
                             IncludeLaunchDescription)
-from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.normpath(os.path.join(_THIS_DIR, '..', '..'))
 _DEFAULT_WORLD = os.path.normpath(
     os.path.join(_THIS_DIR, '..', 'worlds', 'warehouse.sdf'))
 _FORKLIFT_BRINGUP = os.path.join(_THIS_DIR, 'forklift_bringup.launch.py')
 
-# The estimator is agv/'s, in every file. This launch starts it; it does not
-# own it, does not copy a parameter out of it and does not restate a frame
-# name. If any of the four paths below stops existing, that is agv/'s change
-# to make and this file's to follow.
-_FORKLIFT_DIR = os.path.join(_REPO_ROOT, 'agv', 'forklift')
-_MODEL_SDF = os.path.join(_FORKLIFT_DIR, 'model.sdf')
-_CONFIG_YAML = os.path.join(_FORKLIFT_DIR, 'config.yaml')
-_TF_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'sensor_tf.py')
-_WHEEL_ODOM_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'wheel_odometry.py')
-_IMU_GATE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'imu_gate.py')
-_EKF_YAML = os.path.join(_FORKLIFT_DIR, 'ekf.yaml')
+# NO agv/ PATH IS RESOLVED HERE ANY MORE. The model, the config, the three
+# scripts and ekf.yaml were named in this file until 2026-08-06, which made
+# it a second place that had to know where agv/ keeps things. It now names
+# exactly one path, the M4 bringup beside it, and every agv/ path is
+# resolved by agv/forklift/launch/vehicle.launch.py from its own location.
 
 # Spawn pose. The dock aisle south of rack row C runs along y = -5.50; x =
 # -6.00 puts the vehicle in the open west half of it, facing +x, with the
@@ -213,6 +227,17 @@ def generate_launch_description():
         'use_sim_time', default_value='true',
         description='Run the bridge on simulation time from /clock'))
     ld.add_action(DeclareLaunchArgument(
+        'seed', default_value='',
+        description='Noise seed passed to gz sim, fixing the sign and value '
+                    'each sensor bias is drawn with, so a before-and-after '
+                    'measurement compares two runs of one vehicle rather '
+                    'than two draws. Empty (the default) leaves the draw '
+                    'random, which is what a real device does and what every '
+                    'demonstration uses. Added 2026-08-06: its absence is '
+                    'why m5-10\'s forward control was handed 8x more heading '
+                    'drift than its reverse pass and the confound had to be '
+                    'named instead of removed.'))
+    ld.add_action(DeclareLaunchArgument(
         'estimator', default_value='true',
         description='Start the vehicle\'s own pose estimate: sensor_tf.py, '
                     'wheel_odometry.py, imu_gate.py and the '
@@ -227,70 +252,37 @@ def generate_launch_description():
                     'no transform tree and cannot carry SLAM, AMCL or '
                     'Nav2.'))
 
-    # The M4 bringup carries the world server, the single spawn and the one
-    # bridge that states the vehicle's whole topic contract. Everything this
-    # file adds is which world and where to stand.
-    ld.add_action(IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(_FORKLIFT_BRINGUP),
-        launch_arguments={
-            'world': LaunchConfiguration('world'),
-            'name': LaunchConfiguration('name'),
-            'x': LaunchConfiguration('x'),
-            'y': LaunchConfiguration('y'),
-            'z': LaunchConfiguration('z'),
-            'yaw': LaunchConfiguration('yaw'),
-            'gui': LaunchConfiguration('gui'),
-            'use_sim_time': LaunchConfiguration('use_sim_time'),
-        }.items(),
-    ))
-
-    # ---- the vehicle's own motion estimate, three processes ----
+    # THE ONE INCLUDE, AND THE WHOLE OF THIS FILE'S BODY. The M4 bringup
+    # carries the world server, the single spawn, the one bridge that states
+    # the vehicle's topic contract, the STO contactor and the four estimator
+    # processes. Everything this file adds is which world, where to stand,
+    # and that an M5 run wants the estimator.
     #
-    # Started here and owned by agv/. The two scripts are invoked with the
-    # interpreter running this launch file, which is /usr/bin/python3 under
-    # `ros2 launch`; the container's /usr/local/bin/python3 is 3.11 and has
-    # no rclpy (sim/setup/CONTAINER_TOOLCHAIN.md section 3.3).
+    # Scoped, because IncludeLaunchDescription does not scope launch
+    # configurations and DeclareLaunchArgument skips its default when the
+    # configuration is already set (docs/LESSONS.md 2026-08-05). Every
+    # argument the include is meant to receive is listed explicitly.
     #
-    # use_sim_time is passed to all three and is not optional. See the
-    # header.
-    estimator = LaunchConfiguration('estimator')
-
-    ld.add_action(ExecuteProcess(
-        cmd=[sys.executable, _TF_SCRIPT, '--model', _MODEL_SDF],
-        name='sensor_tf',
-        output='screen',
-        condition=IfCondition(estimator),
-    ))
-    ld.add_action(ExecuteProcess(
-        cmd=[sys.executable, _WHEEL_ODOM_SCRIPT, '--config', _CONFIG_YAML,
-             '--ros-args', '-p', 'use_sim_time:=true'],
-        name='wheel_odometry',
-        output='screen',
-        condition=IfCondition(estimator),
-    ))
-    # The gyro gate, between the bridge's IMU and the filter. It publishes
-    # /forklift/imu_gated, which is the topic ekf.yaml names as imu0, and it
-    # forwards every sample unchanged except while the wheel odometry
-    # reports both encoder counts held. It carries use_sim_time for the same
-    # reason the two nodes above do, and for one more: its freshness test
-    # compares a simulated stamp against its own clock, and on the system
-    # clock it would find every verdict 1.8e9 s stale and gate nothing,
-    # silently, for ever.
-    ld.add_action(ExecuteProcess(
-        cmd=[sys.executable, _IMU_GATE_SCRIPT, '--config', _CONFIG_YAML,
-             '--ros-args', '-p', 'use_sim_time:=true'],
-        name='imu_gate',
-        output='screen',
-        condition=IfCondition(estimator),
-    ))
-    ld.add_action(Node(
-        package='robot_localization',
-        executable='ekf_node',
-        name='forklift_ekf',
-        output='screen',
-        parameters=[_EKF_YAML, {'use_sim_time': True}],
-        remappings=[('odometry/filtered', '/forklift/odom_filtered')],
-        condition=IfCondition(estimator),
+    # `sto_contactor` is NOT passed and is not declared here. It defaults
+    # true in the M4 bringup, and a launch file whose purpose is autonomy
+    # has no business offering an argument that makes the plant unreachable.
+    ld.add_action(GroupAction(
+        scoped=True,
+        actions=[IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(_FORKLIFT_BRINGUP),
+            launch_arguments={
+                'world': LaunchConfiguration('world'),
+                'name': LaunchConfiguration('name'),
+                'x': LaunchConfiguration('x'),
+                'y': LaunchConfiguration('y'),
+                'z': LaunchConfiguration('z'),
+                'yaw': LaunchConfiguration('yaw'),
+                'gui': LaunchConfiguration('gui'),
+                'seed': LaunchConfiguration('seed'),
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
+                'estimator': LaunchConfiguration('estimator'),
+            }.items(),
+        )],
     ))
 
     return ld

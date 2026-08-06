@@ -22,7 +22,13 @@ sim/
   worlds/forklift_arena.sdf         M4 forklift commissioning arena
                                     (24 x 16 hall, drive aisle, obstacle props)
   worlds/FORKLIFT_ARENA_EVIDENCE.md dated verification record of the arena run
-  launch/forklift_bringup.launch.py one-command headless arena bringup + spawn
+  launch/forklift_bringup.launch.py one-command headless arena bringup: the
+                                    world, the spawn and the STO contactor.
+                                    States NO bridge table of its own - it
+                                    includes agv/forklift/launch/
+                                    vehicle.launch.py, which is the single
+                                    place the vehicle's ROS/gz interface is
+                                    written (2026-08-06; see below)
   worlds/warehouse.sdf              M5 autonomy world: 30 x 20 hall, three
                                     rack rows cut by a central cross aisle,
                                     two end aisles, building columns, dock
@@ -169,9 +175,10 @@ export GZ_PARTITION=myrun ROS_DOMAIN_ID=42     # isolate BOTH transports
 ros2 launch sim/launch/warehouse_bringup.launch.py
 ```
 
-That starts `agv/forklift/scripts/sensor_tf.py`, `scripts/wheel_odometry.py`
-and the `robot_localization` EKF with `agv/forklift/ekf.yaml` (all three are
-`agv/`'s; this layer starts them and owns none of them). **The EKF is the
+That asks for `agv/forklift/scripts/sensor_tf.py`, `scripts/wheel_odometry.py`,
+`scripts/imu_gate.py` and the `robot_localization` EKF with
+`agv/forklift/ekf.yaml` (all four are `agv/`'s; this layer starts them and
+owns none of them). **The EKF is the
 sole publisher of `forklift/odom -> forklift/base_link`, and no launch file
 in `sim/` bridges the simulator's ground-truth transform or offers an
 argument that would** — `ros2 topic info /tf --verbose` on this bringup
@@ -544,6 +551,36 @@ Neither world file includes the other; the coupled cell-plus-vehicle scenario is
 roadmap M6 work (the coupled AT-07 case, ADR 0010). The vehicle itself lives in
 `agv/forklift/model.sdf` — `sim/` owns worlds, `agv/` owns the vehicle — and the
 bringup spawns it in.
+
+### The bringup states no bridge table, and why that is written down
+
+`launch/forklift_bringup.launch.py` used to carry its **own** copy of the
+`ros_gz_bridge` argument list, written literally so that "this launch file
+states the whole interface it carries". A second copy of a contract drifts,
+and on **2026-08-06** the drift was found by running it: brief m5-50 moved
+`model.sdf`'s joint controllers off `/forklift/gz/{steer,traction,fork}_cmd`
+onto three **actuator terminals** behind an STO contactor, updated
+`agv/forklift/launch/vehicle.launch.py`, and could not update this file. A
+vehicle brought up here then bridged three topics the model had stopped
+listening on and started no contactor — so it was **deaf at the plant, with a
+clean log and every expected ROS topic present.**
+
+Measured, not argued. The pre-fix file was extracted from `HEAD` and run: the
+graph came up, no error appeared in any log, and a held traction command moved
+the vehicle **0.0000 m** with **0 messages** reaching the plant boundary.
+Through the fixed file, the same command on the warehouse path moved it
+**2.4192 m** and **2.4200 m** on two runs.
+
+So the two lists were made **one**. This file now includes
+`agv/forklift/launch/vehicle.launch.py` and adds what `sim/` owns: which
+world, where to stand in it, and which optional vehicle processes the run
+wants. It owns no topic name and no message type, and it must never gain one.
+
+**The check that a bringup works is a MOVED VEHICLE with its distance.** Not a
+node list, not a topic list, not a quiet log: a stopped contactor and a
+genuine torque-off produce the identical stillness (`docs/LESSONS.md`
+2026-08-06), so every no-motion observation needs a positive control in the
+same run.
 
 **Nothing here is a safety device.** The obstacle props are process furniture.
 The forklift's obstacle stop, fork-height speed cap and fork soft travel limits
