@@ -8,6 +8,22 @@ sim/scenarios/forklift_commissioning.md, T6 beside them under the
 TWIN-DEMO-MAP naming discipline) followed by the m4f-09 verifier run.
 Owner queue: docs/TODO.md.
 
+## PRIORITY, owner ruling 2026-08-06 — the safety PLC is the deliverable
+
+The presentation is **safety-PLC focused**, and what is expected of this
+project is a **properly working safety side**. So:
+
+- **The safety chain must work, and be simulated as realistically as we can
+  make it.** The encoder, the scanner and the e-stop must work **perfectly**;
+  SLS and the stop must work properly.
+- **Autonomous driving needs only a working first prototype.** It does not
+  need to be perfect. Its open defects become a stated to-do list, and the
+  honest public line is that the autonomy work continues.
+
+This re-orders the closure plan: the SLS and SS1 phases and the sensor
+realism work come FIRST; the autonomy residue in docs/TODO.md drops to a
+listed backlog and stops gating anything.
+
 ## What M5 and M6 are FOR — owner framing, 2026-08-06
 
 **M5 is ONE vehicle's control, completed exactly as wanted and compliant with
