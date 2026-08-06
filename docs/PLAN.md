@@ -8,6 +8,45 @@ sim/scenarios/forklift_commissioning.md, T6 beside them under the
 TWIN-DEMO-MAP naming discipline) followed by the m4f-09 verifier run.
 Owner queue: docs/TODO.md.
 
+## STATE OF THE WORLD — 2026-08-06 evening, read this first
+
+Everything below is committed on `main` (local, unpushed).
+
+**The PLC is DONE.** 360 of 360 procedure steps. `safe_amr` on CPU 1513F-1 PN,
+PLCSIM instance `safecell3` at 192.168.53.1. The F-block is 49 networks:
+two-channel speed monitoring (staleness, plausibility, cross-discrepancy,
+shared-shaft doubt, limit-exceeded), one latch collecting them, and an SS1
+sequencer. Collective F-signature `50573CD9`. The standard side lowers the
+envelope ceiling to `0.20 m/s` while the warning field is occupied.
+
+**What exists and is proven, layer by layer:**
+
+| Layer | State |
+|---|---|
+| F-program | 49 networks on the CPU; reads in the stopping direction with no measurement at all |
+| Standard program | §14 mode arbiter + envelope; §14.16 warning ceiling |
+| Stand-in writer (`bridge/standin_writer/`) | Runs; heartbeat and validity proven live. **45016 speed link INCOMPLETE (commit `11bc3f9`, wip)** |
+| Bridge (`bridge/`) | Forklift + envelope + warning groups; envelope chain proven 5× live; warning slot proven offline |
+| Scanner (`agv/`) | Protective 1.35 m + warning 3.35 m, both derived, both proven in Gazebo |
+| Encoder (`agv/`) | Two readings on one shaft; threshold `0.0308 m/s`, time `200 ms`, both derived |
+| Speed link client (`agv/`) | Proven against a local sink; joint run with the writer OWED |
+| Torque-off (`agv/`) | Real at the plant: after the demand the vehicle is deaf to commands |
+| Monitoring (`viz/`) | Zero publishers, proven; serves map, pose, obstacles across domains |
+| HMI | v2a controls + v2b map, joined to the real `viz/`; pose drawn with its age |
+
+**The three things M5 still needs:**
+1. Finish the writer's 45016 link, then the joint run and the T7 rehearsal
+   (procedure steps 189/335)
+2. The acceptance tests — AT-02/03/04 restated for M5, AT-10, AT-11, and the
+   e-stop measured
+3. **The owner's recorded showcase**, then gate verification (m5-19)
+
+**One small debt:** `plc/forklift-safety/SPEC.md` §11 should state `0.40 s` —
+the client's 0.15 s motion window stacks on the writer's 250 ms.
+
+**Autonomy is a prototype by owner ruling** and gates nothing. Its backlog is in
+docs/TODO.md.
+
 ## PRIORITY, owner ruling 2026-08-06 — the safety PLC is the deliverable
 
 The presentation is **safety-PLC focused**, and what is expected of this
