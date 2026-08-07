@@ -1,0 +1,17 @@
+2026-08-07T10:10:28.610362Z | LINK | writer address 172.19.176.1:45016 read back from WSL default route (ip route show default)
+2026-08-07T10:10:28.743444Z | LINK | up: connected to the stand-in writer at 172.19.176.1:45016 (attempt 1, connection 1). NO READING IS REPLAYED ONTO A NEW CONNECTION: the first SPD line a fresh link carries is the first reading that arrives after it, so a reconnect can never resurrect a value measured before the gap
+2026-08-07T10:10:28.747752Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T10:10:28.752764Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T10:10:28.758054Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T10:10:32.093509Z | SILENT | a: sending again after 3.400 s of silence (68 ticks)
+2026-08-07T10:10:32.098962Z | SILENT | b: sending again after 3.400 s of silence (68 ticks)
+2026-08-07T10:10:32.103559Z | SILENT | mot: sending again after 3.400 s of silence (68 ticks)
+2026-08-07T10:10:32.108393Z | MOTION | MOT 1 0 (present=True, observation valid=False)
+2026-08-07T10:10:32.443548Z | MOTION | MOT 1 1 (present=True, observation valid=True)
+2026-08-07T10:10:32.893426Z | MOTION | MOT 0 1 (present=False, observation valid=True)
+2026-08-07T10:10:34.443066Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T10:10:34.492987Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T10:10:52.843121Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T10:10:52.892967Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T10:13:06.864688Z | EXIT | link attempts 1, connections 1, drops 0; sent SPD A 3040, SPD B 3046, MOT 3051, PING 153; refused non-finite 0, out-of-range 0; silent ticks A 124, B 118, MOT 113; discarded stale A 0, B 0, MOT 18
+2026-08-07T10:13:06.874837Z | LINK | down (node shutting down). Both freshness sequences stop advancing at the writer within one of its cycles, and the F-program reads both channels as missing - a demand, not a zero

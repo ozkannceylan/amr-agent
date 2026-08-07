@@ -1015,3 +1015,32 @@ Reported by m5-48 rather than edited, because the clip band is m5-47's
 subject and a rounding rule applied by a passing brief is how a sweep
 loses its owner (`docs/LESSONS.md` 2026-08-06, the sweep-by-subject
 rule).
+
+## 15. The Gazebo lidar visual does NOT sit on the vehicle, and the returns do (m5-72)
+
+**2026-08-07.** The owner reported that the ray fan drawn in the Gazebo window
+for the front safety scanner sits up and to the left of the forklift, out in
+open aisle, and asked whether the sensor's pose or frame is wrong.
+
+**It is not.** Measured on the live stack at **two vehicle poses**, because one
+pose cannot tell a correct mount from a mount displaced by a constant. Every
+in-range front return, projected into `base_link` through the mount this file
+declares in section 1, agrees with the navigation lidar's view of the same
+racking to a median of **0.072 m (n = 156)** at `x=-3.000 y=-5.500 yaw=0`, and
+to **0.017 m (n = 114)** at `x=+1.500 y=-5.500 yaw=45°`. There is no constant
+offset. The mount, the link yaw and the frame are all correct and the field
+evaluation reads them correctly.
+
+**What is wrong is one field of the outgoing message.** All three
+`gz.msgs.LaserScan` streams publish `world_pose` as the **identity pose**
+while the front sensor's true world pose at the demonstration spawn is
+`(-2.30, -5.05, 0.15)`, yaw +45°. That draws the fan at the world origin,
+which at that spawn pose is 3.00 m ahead of the vehicle and 5.50 m to its
+left — exactly where it was seen. The reading is **byte-identical** after the
+vehicle is teleported 4.5 m and rotated 45°, so the fan is anchored to a fixed
+world point and does not follow the vehicle. `gz model --list` also confirms
+**one** `Forklift` in the world, so no second vehicle is involved.
+
+Nothing in `agv/` consumes that field, so no node is misled by it and no
+change is made here. The full measurement, the table of all three sensors and
+the limits of the claim are in `EVIDENCE_FIELD_EVALUATION.md` section 28.

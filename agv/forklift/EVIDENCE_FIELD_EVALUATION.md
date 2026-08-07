@@ -1341,3 +1341,247 @@ were left exactly as found.
    23 291 cycles. Re-issued through `UTF8Encoding($false)` and accepted.
    The lesson is the design's own and is recorded here because it cost a
    minute of teardown, not because anything is wrong.
+
+---
+
+# m5-72 — why the zone stop stood with the vehicle parked in open floor
+
+**Dated 2026-08-07.** Everything in sections 26 to 31 was measured on the
+owner's own live stack while it was running, from outside it. **No file in
+`agv/` was edited by this investigation and no parameter was changed** — in
+particular `field.scan_fresh_max_s`, both contour depths and both self-return
+clips are exactly as sections 1 to 25 left them. Nothing below claims or
+implies a Category, Performance Level, SIL or PFH.
+
+## 26. Environment, and that the stack was the owner's
+
+| Item | Value |
+|---|---|
+| Date | **2026-08-07**, 10:28–10:48 UTC |
+| Stack | the owner's own `./demo.sh up` session, brought up 10:28:34 UTC and **still running throughout**; nothing was restarted, killed or reconfigured |
+| Vehicle spawn | `x=-3.00 y=-5.50 z=0.05 yaw=0.0`, world `sim/worlds/warehouse.sdf`, Gazebo **GUI on** (`gui:=true`) |
+| Isolation | `GZ_PARTITION=m5demo`, `ROS_DOMAIN_ID=64`, both read out of `/proc/369296/environ` rather than assumed |
+| Nodes under observation | `field_evaluation.py` pid 369296, writer `standin_writer.ps1` pid 7004, `hmi_server.py` pid 370558, `run_bridge.py` pid 370460 |
+| Instruments | three throwaway read-only probes (a scan/pose comparator, an inter-arrival sampler, a 5 Hz `/state` sampler) plus `gz topic -e`, `gz model -p`, `gz model --list`, and the two committed logs |
+| Raw sample | the 5 Hz `/state` trace is kept at `evidence/m5-72/m5-72-state-watch-20260807T104609Z.csv`, 2217 rows. It was copied **after** its writer was verified stopped, never from under a live writer (LESSONS 2026-07-28) |
+| Vehicle repositioning | `gz service set_pose` with the **entity id 452**, and the pose **read back** every time (LESSONS 2026-08-06: without the id the call returns `true` and does nothing). The vehicle was left at the spawn pose |
+| What was written to the stack | **only** operator actions through the HMI's own `POST /control`, the same endpoint and the same payload shape the operator's page posts. No PLC node was written by any probe |
+| TIA / PLCSIM | **not opened, not started, not stopped, not downloaded and not changed.** The CPU stayed signed at 29FD2C52 |
+
+## 27. The first hypothesis, and it is dead: the front scanner is where the model says it is
+
+The brief's leading hypothesis was that the front scanner's pose or frame is
+wrong, so that it observes a place the vehicle is not — and that if that place
+holds racking, the protective field is permanently occupied and the zone stop
+can never clear. **It is refuted, three independent ways.**
+
+**(a) The returns lie on the same walls the navigation lidar sees — at two
+different vehicle poses.** Every in-range return projected into `base_link`
+through the mount declared in `model.sdf`, then measured against the nearest
+navigation-lidar return. **Two poses, because one pose cannot tell a correct
+mount from a mount displaced by a constant**: a constant offset would show as
+the same non-zero median at both.
+
+| Vehicle ground truth | Device | in-range returns | median | q90 | max |
+|---|---|---|---|---|---|
+| `x=-3.000 y=-5.500 yaw=0.0000` | front | n = 156 | **0.072 m** | 0.909 m | 1.151 m |
+| | rear | n = 151 | **0.028 m** | 0.102 m | 0.530 m |
+| `x=+1.500 y=-5.500 yaw=0.7854` | front | n = 114 | **0.017 m** | 0.429 m | 2.379 m |
+| | rear | n = 159 | **0.032 m** | 0.090 m | 0.494 m |
+
+The second pose is 4.5 m away and rotated 45°, and the front median **fell**
+from 0.072 m to 0.017 m. There is no constant. A scanner observing a place the
+vehicle is not cannot agree with a second sensor to a median of 17 mm at one
+pose and 72 mm at another. The residual is expected and is not a pose error:
+the navigation lidar scans at z = 1.800 m and the safety scanners at
+z = 0.150 m, so the two planes cut different parts of the same racking, and
+both clouds are quantised at 0.0175 rad.
+
+**So the returns do NOT carry the displacement.** Every field figure in
+sections 1 to 25 was taken through a scanner looking where the model says it
+looks.
+
+**(b) The nearest front return is the vehicle's own structure, exactly where
+the model says it will be.** `r = 1.084 m at sensor bearing +137.5°`, which
+falls inside the front self-return clip band the node logs at start,
+`+136.4 … +137.6°, boundary capped at 1.034 m`. The rear device's nearest
+return, `0.101 m at −93.3°`, likewise falls inside its own declared band
+`−133.0 … −71.8°`. Both are geometry the field already knows about.
+
+**(c) The demand's time profile is wrong for a mislocated sensor.** A scanner
+parked inside racking is occupied from boot and never clears. This one went
+`AGGREGATE | CLEAR` about 3 s after its first scan in every one of the four
+sessions logged on 2026-08-07 (10:10:32, 10:13:33, 10:22:31, 10:28:40), and
+its one genuine intrusion — 10:17:45.789, `front INTRUSION on one scan: 34
+ray(s) inside the contour, nearest 1.507 m` — arrived **52 s after the warning
+field went occupied**, which is the signature of a vehicle being driven toward
+something, not of a sensor standing in it.
+
+**So the owner's first screenshot was a true reading of a true event.** At
+10:17:45 the vehicle really had been driven up to a rack face and was standing
+1.507 m from it, inside a protective contour that reaches 2.210 m ahead of
+`base_link`. The reset attempted at 10:18:35, with the field still occupied,
+was **correctly refused**. That is the safety layer working.
+
+## 28. The lidar visual IS misplaced, and it is a rendering-frame artefact
+
+The owner's second observation is real and is not cosmetic paranoia — but it
+is not a pose error either.
+
+Every `gz.msgs.LaserScan` this model publishes carries a `world_pose` field,
+and **all three sensors publish it as the identity pose**:
+
+| Topic | `world_pose.position` | `orientation` | true sensor world pose |
+|---|---|---|---|
+| `…/safety_scanner_front/measurement` | `x 1.11e-16, y 2.78e-17, z 0` | `w 1` | `(-2.30, -5.05, 0.15)`, yaw +45° |
+| `…/safety_scanner_rear/measurement` | `y 8.33e-17`, rest 0 | `w 1` | `(-3.70, -5.95, 0.15)`, yaw −135° |
+| `…/scan_nav` | all 0 | `w 1` | `(-2.45, -5.90, 1.80)`, yaw 0 |
+
+The `frame` and `frame_id` fields are correct on all three
+(`safety_scanner_front_link` and siblings), and the `ranges` are correct —
+section 27 measures them. It is only the pose the message advertises for the
+fan that is identity.
+
+**That places the drawn fan at the world origin.** At the demonstration spawn
+pose the vehicle stands at `(-3.00, -5.50)`, so the world origin is **3.00 m
+ahead of it and 5.50 m to its left, in open aisle** — which is where the owner
+reports seeing it. The observation, the measurement and the geometry agree.
+
+**And the anchor does not move with the vehicle.** Re-read after teleporting
+the vehicle to `x=+1.500 y=-5.500 yaw=0.7854` — 4.5 m away and rotated 45° —
+the front sensor's `world_pose` came back **byte-identical**:
+`x 1.1102230246251565e-16, y 2.7755575615628914e-17, w 1`. So the fan is
+anchored to a fixed point in the world, not rigidly offset from the vehicle.
+A viewer who sees the fan "in a different place" after the vehicle moves is
+seeing a stationary fan and a moved vehicle, and the apparent offset is
+therefore **not** constant. **This is the one thing the owner can settle in a
+single look: park the vehicle somewhere else and watch whether the fan stays
+where it was.**
+
+**One competing hypothesis was checked and is dead.** `gz model --list`
+against the live world returns **exactly one** `Forklift` among 22 models, so
+no second vehicle was spawned by a composed launch.
+
+**Nothing in `agv/` produces this and nothing in `agv/` should paper over it.**
+The ranges are the product; the advertised pose is not consumed by any node in
+this repository — `field_evaluation.py`, `obstacle_zone.py` and the Nav2 stack
+all take the ROS `LaserScan` and its `frame_id` through TF. The artefact is
+confined to the simulator's own visualisation. **A reader looking at the
+Gazebo window is looking at the one channel that is wrong.**
+
+Recorded in passing, because it is on the same path and is also cosmetic:
+`gz model -p` prints four warnings of the form *"XML Element[gz_frame_id],
+child of element[sensor], not defined in SDF"* for the three lidars and the
+IMU. The frame nevertheless arrives correctly in the ROS message, which is
+what the consumers read.
+
+## 29. What actually latched the zone stop, and it is not an intrusion
+
+At 10:39:27, with the vehicle standing still at the spawn pose and **the field
+measurably clear**, the protective channel opened for 94 ms and the F-side
+latched. Both logs, independently:
+
+    field_evaluation, 10:39:27.889Z | WARNING | ... front: nothing received for
+        0.310 s (limit 0.30 s, this node's own monotonic clock)
+        (front 0 ray(s) inside, rear 0)
+    field_evaluation, 10:39:27.899Z | AGGREGATE | INTRUSION - front: nothing
+        received for 0.310 s ... (front seq=5674 rear seq=5674)
+    field_evaluation, 10:39:27.909Z | SEND | ZONE 0 -> aggregate transition
+    writer,           10:39:27.944Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False
+    writer,           10:39:28.038Z | FIELD | ZONE 1 -> ZoneDeviceCircuitClosed := True
+
+`front 0 ray(s) inside, rear 0` is the node saying, in the same line, that
+nothing was in either field. The verdict came from the **freshness rule**, not
+from a return. The channel was open for **94 ms** at the writer. That was
+enough: `ZoneStopDemand` read `False` over OPC UA at 10:38:12 and `True` at
+10:43:44, with no other event between them.
+
+**This is the answer to the brief's question.** The demand stood with the
+vehicle parked in open floor because a 310 ms gap in a 10 Hz scan stream
+latched a protective stop, and a latch does not care that the gap lasted 94 ms.
+
+**The node is right to do this.** A scan that has not arrived is unknown, and
+unknown means intrusion (`config.yaml` rule 0, and LESSONS 2026-08-06 on
+silence). Nothing here is a defect in the evaluation.
+
+### 29.1 How often, measured
+
+180 s window, vehicle standing, GUI on, inter-arrival on the sampling node's
+own `time.monotonic` — the same clock `field_evaluation` uses:
+
+| Stream | n | median | q90 | q99 | max | gaps > 0.30 s |
+|---|---|---|---|---|---|---|
+| front scan | 1591 | 0.1117 s | 0.1244 s | 0.1495 s | **0.3676 s** | **1 (0.063 %)** |
+| rear scan | 1591 | 0.1117 s | 0.1263 s | 0.1494 s | 0.3421 s | 1 (0.063 %) |
+| `/clock` | 79 467 | 0.0020 s | 0.0039 s | 0.0067 s | 0.3330 s | 1 (0.001 %) |
+
+Two things follow, and the second is the one that matters.
+
+**The stall is the whole simulator, not the topic.** `/clock` stalled 0.333 s
+in the same event. This is Gazebo hitching under llvmpipe software
+rasterisation with the GUI attached (`sim/setup/WSL_ENVIRONMENT.md` 4.7), not a
+transport problem and not a node problem.
+
+**`scan_fresh_max_s = 0.30` no longer means what its own comment says.** The
+comment reads *"THREE SCAN PERIODS"*, derived against the nominal 10 Hz. The
+**delivered** period on this machine is 0.1117 s (n = 1591), so the window in
+force is **2.69 delivered periods**, not three. Three delivered periods would
+be 0.335 s — and the observed maximum was 0.3676 s, so even the parameter's own
+stated derivation would not have covered this event.
+
+**This value was NOT changed, and should not be changed to make a demand go
+away.** It is a safety-relevant timeout whose direction is the demanding one,
+and moving it is an owner's decision with a stated derivation behind it, not an
+agent's convenience. What is recorded here is that the derivation and the
+machine now disagree, and by how much.
+
+**The mitigation that changes no safety parameter is to stop the simulator
+stalling.** `./demo.sh up --headless` removes the GUI render thread that
+produces the hitch. **This was not tested here** — testing it means restarting
+the owner's live stack, and the owner was mid-demonstration. It is the first
+thing to measure next, by re-running the table above headless.
+
+## 30. The path, end to end, watched rather than reasoned about
+
+Sampled at 5 Hz off the HMI's own `/state`, n = 626 rows. Times UTC.
+
+| Time | Observed | By what act |
+|---|---|---|
+| 10:46:09.970 | `EStopDemand=True ZoneStopDemand=True SafetyResetRequired=True`, mode 0, ceiling 0.000 | the state the owner was stuck in |
+| 10:44:53.762 | writer: `estop close -> EStopCircuitClosed := True` | **owner, at the writer console** |
+| 10:46:39.297 | writer: `reset pulse 800 -> ResetButtonPressed := True`, released 10:46:40.138 | **owner, at the writer console** |
+| 10:46:40.557 | **all three cleared in one sample**: `EStopDemand`, `ZoneStopDemand`, `SafetyResetRequired` all `False`, 0.419 s after the shaped release | the F-side monitored reset |
+| 10:46:40 to 10:48:02 | mode stayed at **0** for 82 s with every demand clear and `HmiDriveModeRequest` standing at **1 (Teleop)** | **a selection refused while a demand stood is consumed.** Clearing the demands does not revive it, and a selector left on TELEOP throughout is not a request |
+| 10:48:02.571 | `ForkliftDriveModeActive 0 -> 1`, `ForkliftVehicleModeApplied 0 -> 1` | a scripted **None -> Teleop** edge through `POST /control` |
+| 10:48:15.412 | `ForkliftTeleopActive True`, `ForkliftTractionSpeedRef 1.000`, speed rising | traction held through `POST /control` |
+| 10:48:15 to 10:48:24 | **37 consecutive samples above 0.01 m/s, peak `ForkliftLinearSpeed` 1.000 m/s** | the drive |
+| 10:48:23.988 | released: reference to 0.000, `TeleopActive` dropped, speed to 0.000 | the deadman |
+
+**The positive control, on ground truth, because stillness and motion must
+both be shown (LESSONS 2026-08-06).** `gz model -m Forklift -p` before the run
+read `[-3.000000 -5.500000]`; after it read **`[4.827640 -5.499050]`**, yaw
+0.000143 rad. **The vehicle travelled 7.83 m down the aisle.** No intrusion was
+logged during the drive — the aisle really was clear for the whole 7.83 m,
+which is the control case for section 27.
+
+**So teleoperation is not broken and never was.** Nothing in `agv/` was
+changed to produce this run.
+
+## 31. What this section does NOT establish
+
+1. **The headless mitigation is untested.** Section 29.1 recommends it from a
+   measurement of the stall, not from a run without the GUI.
+2. **The 0.063 % figure is one 180 s window on one machine at idle.** It is an
+   observed rate, not a bound, and it will be worse under load — m5-69
+   measured 6.1x. What it does establish is that the rate is **not zero**, so a
+   demonstration long enough will meet it.
+3. **The `world_pose` finding is read off the message, not off the renderer.**
+   That the message advertises identity is measured; that the Gazebo GUI plugin
+   is what consumes it is the explanation consistent with the owner's
+   observation and the spawn geometry, and it was not read out of Gazebo's
+   source.
+4. **The 800 ms reset hold was accepted.** `RUNBOOK.md` section 3 says 2000 ms.
+   Which hold the F-program actually requires was not characterised here; one
+   acceptance at 800 ms is a sample, not a limit.
+5. **Nothing here is a safety claim.** The evaluation remains a model of what a
+   safety-rated device does inside its housing, feeding a stand-in for wiring.
