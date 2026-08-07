@@ -1,0 +1,15 @@
+Requested session timeout to be 3600000ms, got 30000ms instead
+# OPC UA witness on opc.tcp://192.168.53.1:4840
+# path: Objects/ServerInterfaces/DemoCell/Forklift/Safety/
+# columns: EStopDemand, ZoneStopDemand, SafetyResetRequired, SafetyResetFault
+14:58:42.278  0110  baseline
+14:58:55.034  1110  CHANGE
+15:01:49.649  1111  CHANGE
+15:01:51.116  1110  CHANGE
+15:02:14.263  1111  CHANGE
+15:02:15.310  1110  CHANGE
+15:03:27.811  1111  CHANGE
+15:03:30.535  1110  CHANGE
+15:03:40.378  1111  CHANGE
+15:03:41.845  1110  CHANGE
+# 718729 polls over 600 s, final 1110

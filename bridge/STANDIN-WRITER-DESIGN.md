@@ -506,3 +506,150 @@ coding agent has it on the page they build from:
 - No claim: not a safety device, not a safety path, no PL, no Category, no
   SIL, no PFH — an engineering stand-in for wiring, labelled as such
   everywhere it appears.
+
+---
+
+## 10. The bench panel — 2026-08-07 (m5-74)
+
+`bridge/standin_writer/bench_panel.ps1`. A small window that drives the
+writer's operator channel by hand, so the three safety inputs no longer have
+to be typed as commands into a console. It was built because typing them cost
+a live session on 2026-08-07 (m5-72 §3).
+
+### 10.1 What it is called, and why — the owner's ruling
+
+**A bench panel, not a vehicle panel.** It imitates no real device and claims
+none exists. Its face reads **"Safety input channels — engineering stand-in"**,
+and it presents the *wiring* this process stands in for.
+
+The owner considered calling it the vehicle's control panel and ruled against
+it on 2026-08-07: the **vehicle e-stop is deferred to M6**, and `docs/safety/
+SRS.md` B4 states the cell e-stop stops no vehicle. A panel labelled as the
+vehicle's would imply a function this gate does not have. The writer's existing
+banner — **NOT A SAFETY DEVICE**, no Category, no PL, no SIL, no PFH — is on
+the panel at least as visibly as it is in the terminal: it is the second thing
+on the window, in its own strip, above every control.
+
+### 10.2 What it is mechanically — an input device and a display, and nothing else
+
+It adds **no seam**: no network path, no port, no service, no second writer.
+
+| | |
+|---|---|
+| Writes to the CPU | **Nothing.** It never loads the PLCSIM Advanced assembly, holds no API session, opens no OPC UA session and touches no tag. §1.1's allowlist still has exactly one writer |
+| Reaches the writer by | **One line appended to the writer's `-CommandFile`** (§4.1). The writer executes it through the same `Invoke-Command2` the console feeds — same grammar, same refusals, same log lines |
+| Learns the state by | **Following the writer's own session log**, tailed read-only. Every value on the panel is read out of a `CYCLE`, `LINK`, `SPEEDLINK`, `API` or `MEMBERS` line, never inferred from the button that was pressed |
+| Listens on | **Nothing.** Two files on this host, both beside the writer |
+| Process | Its own, beside the writer's. **Not inside it**: the writer's single-threaded loop is load-bearing (§1), and a message pump sharing it could stall the heartbeat — which §5.4 converts into a latched demand within 1 s |
+
+That the panel shows the *writer's* view rather than its own intent is what
+makes a dead control visibly dead. A button whose command was refused, or
+never arrived, changes nothing on the panel.
+
+### 10.3 Three things it cannot do, by construction
+
+1. **It cannot drive a link-driven channel.** There is no control for either
+   speed reading, for the motion observation or for the warning field. The
+   panel emits no such command and has no code path that could; the writer's
+   `default` arm would refuse one if it did. §3's sentence is the reason and it
+   is printed on the panel: *a human setting one would be inventing a
+   measurement.* They appear as **displays**, in their own column, under the
+   heading `READ-ONLY — arrives from a link`.
+2. **It cannot pretend to own the zone channel.** While a field link is up the
+   zone belongs to the field (§3). The panel's zone buttons are then
+   **disabled and labelled** — *"NOT IN FORCE HERE: a field link is up and owns
+   this channel"* — rather than appearing to work and doing nothing.
+3. **It cannot make the reset one click.** `reset press` is sent on
+   **mouse-down** and `reset release` on **mouse-up**; the elapsed hold is
+   shown live, in milliseconds and against a drawn 200–3000 ms band. The panel
+   **judges nothing**: it never shortens a hold, never extends one and has no
+   code path that releases one on its own. The monitored reset is a mechanism
+   this project demonstrates rather than assumes, and a one-click button would
+   hide all of it. The single exception is closing the window with the button
+   still held, which sends `reset release` — the same command the operator
+   would have sent, rather than leaving the level held at the CPU with nobody
+   to release it.
+
+**The band is a picture, not a threshold.** 200–3000 ms is drawn because the
+F-program judges against it; the panel applies it to nothing and a hold outside
+it is sent unchanged, to be refused by the program whose decision it is.
+
+### 10.4 In force, or plainly not
+
+The panel refuses to look usable when it is not connected to anything. It reads
+the running writer's `START` block, compares the command file the writer
+**named** with the one the panel **appends to**, and disables every control
+with the reason in red when they differ, when the writer was started with no
+command file at all, or when no `CYCLE` line has arrived for 1 s (the writer is
+not writing, so its heartbeat is frozen at the CPU and both demands latch).
+This is the same discipline as the zone control: a button that reaches nothing
+is worse than no button.
+
+**A writer that is not writing is not reporting either.** When no `CYCLE` line
+has arrived for 1 s, every read-only row falls to *no report* and the three
+lamps are greyed and marked *(last reported)*. Found by observation on
+2026-08-07: after the writer died, the panel went on showing *field link up —
+it owns the zone channel* from a line written before the death, which is a
+statement about the cell that was no longer true. History is now shown as
+history.
+
+### 10.5 The log is unchanged, and it is still the evidence
+
+The panel is an **input device, not a replacement**. A change made from it is
+logged by the writer in the same words the typed command would have produced —
+`OPERATOR | command file: estop close`, then the identical
+`OPERATOR | estop close -> EStopCircuitClosed := True`. Committed figures have
+been read out of these logs and they keep reading the same. The panel's own
+lower-right pane shows the writer's latest `OPERATOR`, `REFUSED`, `FIELD`,
+`SPEED`, `LINK` and `API` lines **verbatim**, so the operator sees the record
+being written as they act.
+
+The panel writes exactly one file of its own: its per-session command file,
+`standin_writer/commands/bench-panel-<UTC>-pid<pid>.cmds`, unique per start for
+the same reason the logs are (LESSONS 2026-07-28), UTF-8 without a BOM (§4.1),
+and ignored by git.
+
+### 10.6 Running it
+
+```
+# start the writer and the panel together (the writer keeps its own console,
+# so the typed vocabulary stays available beside the panel)
+powershell -ExecutionPolicy Bypass -File bridge\standin_writer\bench_panel.ps1 -Instance <name>
+
+# or attach to a writer already started with -CommandFile <path>
+powershell -ExecutionPolicy Bypass -File bridge\standin_writer\bench_panel.ps1 -CommandFile <path>
+```
+
+Windows PowerShell 5.1, WinForms out of the .NET Framework already on the host.
+**No new dependency.** `-Instance` stays tool-derived: read it back from the
+PLCSIM Advanced control panel, never assume it.
+
+### 10.7 What the panel says that the terminal did not
+
+Three facts cost the owner a live session and none of them was written where
+they would look. Two are on the panel, permanently:
+
+- **the e-stop circuit boots OPEN**, and nothing closes it until a human does —
+  not the HMI, not a link, not a restart. The lamp says which it is, and the
+  note says it boots open;
+- **the HMI's RESET is the *process* reset** (`HmiResetRequest`) and cannot
+  reach an F-latch. The F-side reset is the panel's hold button and nothing
+  else (`plc/forklift-safety/SPEC.md` §137).
+
+The third — a mode selection refused while a demand stands is **consumed, not
+held** — is not this channel and belongs in `RUNBOOK.md` beside the other two;
+it is requested in the m5-74 report. It is printed on the panel as well,
+because it is the third step of the same recovery.
+
+### 10.8 What the panel must never become
+
+- A writer. It holds no API, no OPC UA and no tag, and adding one would make
+  two writers of the same DB (invariant 10).
+- A service. No port, no socket, no listener, no remote anything: it is a
+  window on the host where the writer already runs.
+- A place for logic. It contains no threshold, no interlock, no latch, no
+  sequencing and no verdict — the reset band is drawn, not applied, and the
+  freshness ages it prints are the age of a log line, not a decision about the
+  plant. Every decision remains the F-program's.
+- A second copy of the log. It displays the writer's lines; it never writes to
+  the log, rewrites it or replaces it.

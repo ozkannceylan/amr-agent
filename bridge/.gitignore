@@ -12,3 +12,8 @@ evidence/*-pid*.csv
 # per start; they are run artefacts, not committed evidence. A capture that
 # is to be kept is copied out of here under a dated name.
 standin_writer/logs/
+
+# The bench panel's per-session command files. Same rule and same reason:
+# one file per panel start, unique name per start, a run artefact. What the
+# panel did is in the writer's log, which is the record that matters.
+standin_writer/commands/

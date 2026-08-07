@@ -1,0 +1,183 @@
+﻿# Excerpt of the two stand-in writer sessions of 2026-08-07 driven from the bench panel.
+# Every OPERATOR line below was produced by a PANEL press, through the writer's command file.
+# The full per-session logs are run artefacts (bridge/.gitignore) and are not committed.
+
+## standin-writer-20260807T125858Z-pid35904.log
+2026-08-07T12:58:59.118Z | START | ENGINEERING STAND-IN WRITER -- not a safety device, not a safety path; it stands in for the WIRING of three simulated safety-input channels and carries no Category, no PL, no SIL and no PFH
+2026-08-07T12:58:59.125Z | START | instance = safecell3
+2026-08-07T12:58:59.127Z | START | dll = C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll
+2026-08-07T12:58:59.133Z | START | api version = 0x70000 (7.0)
+2026-08-07T12:58:59.135Z | START | cycle = 50 ms
+2026-08-07T12:58:59.140Z | START | field-link listener port = 45015 (zone + warning), FIELD_LINK_STALE_MAX = 1000 ms
+2026-08-07T12:58:59.142Z | START | speed-source listener port = 45016, MOTION_SILENCE_MAX = 250 ms
+2026-08-07T12:58:59.144Z | START | write set (exact and closed): SafetyInputStandIn.EStopCircuitClosed, SafetyInputStandIn.ZoneDeviceCircuitClosed, SafetyInputStandIn.ResetButtonPressed, SafetyInputStandIn.StandInHeartbeat, SafetyInputStandIn.SpeedReadingA, SafetyInputStandIn.SpeedReadingB, SafetyInputStandIn.SpeedSeqA, SafetyInputStandIn.SpeedSeqB, SafetyInputStandIn.MotionPresent, SafetyInputStandIn.MotionObservationValid, SafetyInputStandIn.WarningFieldClear
+2026-08-07T12:58:59.148Z | START | log = C:\Users\ozkan\projects\amr-agent\bridge\standin_writer\logs\standin-writer-20260807T125858Z-pid35904.log
+2026-08-07T12:58:59.149Z | START | operator console = interactive
+2026-08-07T12:58:59.156Z | START | operator command file = C:\Users\ozkan\projects\amr-agent\bridge\standin_writer\commands\bench-panel-20260807T125857Z-pid29264.cmds -- appended lines are executed as typed commands, with the same vocabulary and the same refusals
+2026-08-07T12:58:59.158Z | START | boot levels: EStopCircuitClosed=False ZoneDeviceCircuitClosed=False ResetButtonPressed=False -- open, open, unpressed: the fail-safe pre-connection state
+2026-08-07T12:58:59.160Z | START | boot levels, SPEC 11.3 members: WarningFieldClear=False (the limit is in force until a source says otherwise), MotionPresent=True MotionObservationValid=False (an unobservable vehicle is moving), both speed sequences FROZEN until a live SPD line -- the writer never invents a speed and never repeats one
+2026-08-07T12:58:59.180Z | API | connected to instance 'safecell3', OperatingState = Run
+2026-08-07T12:58:59.245Z | MEMBERS | speed group present: SafetyInputStandIn.SpeedReadingA, SafetyInputStandIn.SpeedReadingB, SafetyInputStandIn.SpeedSeqA, SafetyInputStandIn.SpeedSeqB
+2026-08-07T12:58:59.248Z | MEMBERS | motion group present: SafetyInputStandIn.MotionPresent, SafetyInputStandIn.MotionObservationValid
+2026-08-07T12:58:59.251Z | MEMBERS | warning group present: SafetyInputStandIn.WarningFieldClear
+2026-08-07T12:58:59.256Z | MEMBERS | all eleven members of SPEC 11.3 are present; the speed chain has a source
+2026-08-07T12:58:59.270Z | LINK | listening on 0.0.0.0:45015 for the field evaluation; none is required -- the writer serves the cell with no field link ever arriving, and while none is up the zone channel belongs to the operator
+2026-08-07T12:58:59.272Z | SPEEDLINK | listening on 0.0.0.0:45016 for the speed source; none is required -- the writer serves the cell with no speed source ever arriving, and while none is up both sequences stay frozen and the motion channel reads MOVING
+2026-08-07T12:59:00.174Z | LINK | up: field-evaluation client 172.19.180.72:52072 connected; the zone channel now belongs to the field and is held FALSE until its first ZONE line -- a link with no verdict yet is not a clear field
+2026-08-07T12:59:00.220Z | FIELD | ZONE 0 -> ZoneDeviceCircuitClosed := False (intrusion or evaluation fault, circuit open)
+2026-08-07T12:59:00.227Z | FIELD | WARN 0 -> WarningFieldClear := False (warning field occupied -- the limit is selected)
+2026-08-07T12:59:00.247Z | SPEEDLINK | up: speed-source client 172.19.180.72:55918 connected. Until its first SPD line each sequence stays frozen, and until its first MOT line MotionPresent stays TRUE -- a link with no reading yet is not a speed
+2026-08-07T12:59:00.269Z | SPEED | MOT 0 1 -> MotionPresent := False, MotionObservationValid := True
+2026-08-07T12:59:00.340Z | SPEED | channel A alive: first reading written, SpeedReadingA = -4 mm/s, SpeedSeqA = 1
+2026-08-07T12:59:00.367Z | SPEED | channel B alive: first reading written, SpeedReadingB = 0 mm/s, SpeedSeqB = 1
+2026-08-07T13:00:05.614Z | OPERATOR | command file: estop close
+2026-08-07T13:00:05.633Z | OPERATOR | estop close -> EStopCircuitClosed := True
+2026-08-07T13:01:12.440Z | OPERATOR | command file: reset press
+2026-08-07T13:01:12.450Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:01:14.648Z | OPERATOR | command file: reset release
+2026-08-07T13:01:14.652Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:01:46.453Z | OPERATOR | command file: reset press
+2026-08-07T13:01:46.458Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:01:51.051Z | OPERATOR | command file: reset release
+2026-08-07T13:01:51.054Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:02:06.454Z | OPERATOR | command file: estop open
+2026-08-07T13:02:06.457Z | OPERATOR | estop open -> EStopCircuitClosed := False
+2026-08-07T13:02:09.547Z | OPERATOR | command file: estop close
+2026-08-07T13:02:09.551Z | OPERATOR | estop close -> EStopCircuitClosed := True
+2026-08-07T13:02:11.053Z | OPERATOR | command file: reset press
+2026-08-07T13:02:11.058Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:02:15.242Z | OPERATOR | command file: reset release
+2026-08-07T13:02:15.245Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:03:13.701Z | OPERATOR | command file: estop open
+2026-08-07T13:03:13.704Z | OPERATOR | estop open -> EStopCircuitClosed := False
+2026-08-07T13:03:16.888Z | OPERATOR | command file: estop close
+2026-08-07T13:03:16.893Z | OPERATOR | estop close -> EStopCircuitClosed := True
+2026-08-07T13:03:24.595Z | OPERATOR | command file: reset press
+2026-08-07T13:03:24.598Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:03:30.452Z | OPERATOR | command file: reset release
+2026-08-07T13:03:30.455Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:03:31.747Z | OPERATOR | command file: reset press
+2026-08-07T13:03:31.752Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:03:32.152Z | OPERATOR | command file: reset release
+2026-08-07T13:03:32.155Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:03:32.741Z | OPERATOR | command file: reset press
+2026-08-07T13:03:32.744Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:03:32.800Z | OPERATOR | command file: reset release
+2026-08-07T13:03:32.803Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:03:33.270Z | OPERATOR | command file: reset press
+2026-08-07T13:03:33.272Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:03:33.698Z | OPERATOR | command file: reset release
+2026-08-07T13:03:33.701Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:03:34.450Z | OPERATOR | command file: reset press
+2026-08-07T13:03:34.455Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:03:35.140Z | OPERATOR | command file: reset release
+2026-08-07T13:03:35.143Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:03:35.838Z | OPERATOR | command file: reset press
+2026-08-07T13:03:35.841Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:03:36.643Z | OPERATOR | command file: reset release
+2026-08-07T13:03:36.647Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:03:37.191Z | OPERATOR | command file: reset press
+2026-08-07T13:03:37.193Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:03:41.748Z | OPERATOR | command file: reset release
+2026-08-07T13:03:41.751Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:04:43.900Z | LINK | down (the field evaluation closed the connection); ZoneDeviceCircuitClosed driven FALSE (open) AND WarningFieldClear driven FALSE -- loss of the field source reads as intrusion and as warning-occupied, never as a clear field (SPEC 11.2). Ownership of the zone channel returns to the operator, who must issue a deliberate 'zone close'; the warning channel has no operator owner and stays FALSE until a live 'WARN 1'
+2026-08-07T13:04:43.913Z | SPEEDLINK | down (the source closed the connection); both freshness sequences stop advancing from this cycle on -- the F-program reads a frozen sequence as a MISSING reading, which is a demand. No zero and no last value is written in their place
+2026-08-07T13:04:43.917Z | SPEED | motion observation unavailable (the 45016 link is down) -> MotionPresent := TRUE, MotionObservationValid := FALSE. An unobservable vehicle is moving; a false 'still' is what would corroborate a lying encoder
+
+## standin-writer-20260807T131511Z-pid35800.log
+2026-08-07T13:15:11.523Z | START | ENGINEERING STAND-IN WRITER -- not a safety device, not a safety path; it stands in for the WIRING of three simulated safety-input channels and carries no Category, no PL, no SIL and no PFH
+2026-08-07T13:15:11.526Z | START | instance = safecell3
+2026-08-07T13:15:11.527Z | START | dll = C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\7.0\Siemens.Simatic.Simulation.Runtime.Api.x64.dll
+2026-08-07T13:15:11.530Z | START | api version = 0x70000 (7.0)
+2026-08-07T13:15:11.530Z | START | cycle = 50 ms
+2026-08-07T13:15:11.533Z | START | field-link listener port = 45015 (zone + warning), FIELD_LINK_STALE_MAX = 1000 ms
+2026-08-07T13:15:11.533Z | START | speed-source listener port = 45016, MOTION_SILENCE_MAX = 250 ms
+2026-08-07T13:15:11.534Z | START | write set (exact and closed): SafetyInputStandIn.EStopCircuitClosed, SafetyInputStandIn.ZoneDeviceCircuitClosed, SafetyInputStandIn.ResetButtonPressed, SafetyInputStandIn.StandInHeartbeat, SafetyInputStandIn.SpeedReadingA, SafetyInputStandIn.SpeedReadingB, SafetyInputStandIn.SpeedSeqA, SafetyInputStandIn.SpeedSeqB, SafetyInputStandIn.MotionPresent, SafetyInputStandIn.MotionObservationValid, SafetyInputStandIn.WarningFieldClear
+2026-08-07T13:15:11.535Z | START | log = C:\Users\ozkan\projects\amr-agent\bridge\standin_writer\logs\standin-writer-20260807T131511Z-pid35800.log
+2026-08-07T13:15:11.535Z | START | operator console = interactive
+2026-08-07T13:15:11.537Z | START | operator command file = C:\Users\ozkan\projects\amr-agent\bridge\standin_writer\commands\bench-panel-20260807T131510Z-pid13840.cmds -- appended lines are executed as typed commands, with the same vocabulary and the same refusals
+2026-08-07T13:15:11.538Z | START | boot levels: EStopCircuitClosed=False ZoneDeviceCircuitClosed=False ResetButtonPressed=False -- open, open, unpressed: the fail-safe pre-connection state
+2026-08-07T13:15:11.538Z | START | boot levels, SPEC 11.3 members: WarningFieldClear=False (the limit is in force until a source says otherwise), MotionPresent=True MotionObservationValid=False (an unobservable vehicle is moving), both speed sequences FROZEN until a live SPD line -- the writer never invents a speed and never repeats one
+2026-08-07T13:15:11.547Z | API | connected to instance 'safecell3', OperatingState = Run
+2026-08-07T13:15:11.570Z | MEMBERS | speed group present: SafetyInputStandIn.SpeedReadingA, SafetyInputStandIn.SpeedReadingB, SafetyInputStandIn.SpeedSeqA, SafetyInputStandIn.SpeedSeqB
+2026-08-07T13:15:11.571Z | MEMBERS | motion group present: SafetyInputStandIn.MotionPresent, SafetyInputStandIn.MotionObservationValid
+2026-08-07T13:15:11.572Z | MEMBERS | warning group present: SafetyInputStandIn.WarningFieldClear
+2026-08-07T13:15:11.573Z | MEMBERS | all eleven members of SPEC 11.3 are present; the speed chain has a source
+2026-08-07T13:15:11.580Z | LINK | listening on 0.0.0.0:45015 for the field evaluation; none is required -- the writer serves the cell with no field link ever arriving, and while none is up the zone channel belongs to the operator
+2026-08-07T13:15:11.581Z | SPEEDLINK | listening on 0.0.0.0:45016 for the speed source; none is required -- the writer serves the cell with no speed source ever arriving, and while none is up both sequences stay frozen and the motion channel reads MOVING
+2026-08-07T13:15:53.760Z | OPERATOR | command file: reset press
+2026-08-07T13:15:53.766Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:15:55.748Z | OPERATOR | command file: reset release
+2026-08-07T13:15:55.751Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:16:08.701Z | OPERATOR | command file: reset press
+2026-08-07T13:16:08.702Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:16:11.703Z | OPERATOR | command file: reset release
+2026-08-07T13:16:11.706Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:16:14.202Z | OPERATOR | command file: reset press
+2026-08-07T13:16:14.204Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:16:16.452Z | OPERATOR | command file: reset release
+2026-08-07T13:16:16.455Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:16:20.401Z | OPERATOR | command file: reset press
+2026-08-07T13:16:20.403Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:16:21.845Z | OPERATOR | command file: reset release
+2026-08-07T13:16:21.847Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:16:22.643Z | OPERATOR | command file: reset press
+2026-08-07T13:16:22.645Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:16:22.751Z | OPERATOR | command file: reset release
+2026-08-07T13:16:22.753Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:16:23.790Z | OPERATOR | command file: reset press
+2026-08-07T13:16:23.791Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:16:27.144Z | OPERATOR | command file: reset release
+2026-08-07T13:16:27.146Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:16:32.542Z | OPERATOR | command file: reset press
+2026-08-07T13:16:32.544Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:16:32.652Z | OPERATOR | command file: reset release
+2026-08-07T13:16:32.654Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:16:33.242Z | OPERATOR | command file: reset press
+2026-08-07T13:16:33.243Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:16:33.647Z | OPERATOR | command file: reset release
+2026-08-07T13:16:33.649Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:16:35.047Z | OPERATOR | command file: reset press
+2026-08-07T13:16:35.049Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:16:35.403Z | OPERATOR | command file: reset release
+2026-08-07T13:16:35.405Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:16:35.994Z | OPERATOR | command file: reset press
+2026-08-07T13:16:35.996Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:16:36.449Z | OPERATOR | command file: reset release
+2026-08-07T13:16:36.451Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:16:37.097Z | OPERATOR | command file: reset press
+2026-08-07T13:16:37.098Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:16:38.443Z | OPERATOR | command file: reset release
+2026-08-07T13:16:38.445Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:16:42.392Z | OPERATOR | command file: reset press
+2026-08-07T13:16:42.393Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:16:44.855Z | OPERATOR | command file: reset release
+2026-08-07T13:16:44.857Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:16:57.297Z | OPERATOR | command file: reset press
+2026-08-07T13:16:57.300Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:17:00.800Z | OPERATOR | command file: reset release
+2026-08-07T13:17:00.802Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:17:02.152Z | OPERATOR | command file: reset press
+2026-08-07T13:17:02.153Z | OPERATOR | reset press -> ResetButtonPressed := True (held until countermanded)
+2026-08-07T13:17:07.390Z | OPERATOR | command file: reset release
+2026-08-07T13:17:07.392Z | OPERATOR | reset release -> ResetButtonPressed := False
+2026-08-07T13:17:11.599Z | OPERATOR | command file: estop close
+2026-08-07T13:17:11.604Z | OPERATOR | estop close -> EStopCircuitClosed := True
+2026-08-07T13:17:16.653Z | OPERATOR | command file: estop open
+2026-08-07T13:17:16.656Z | OPERATOR | estop open -> EStopCircuitClosed := False
+2026-08-07T13:17:18.510Z | OPERATOR | command file: estop close
+2026-08-07T13:17:18.513Z | OPERATOR | estop close -> EStopCircuitClosed := True
+2026-08-07T13:17:23.753Z | OPERATOR | command file: zone open
+2026-08-07T13:17:23.756Z | OPERATOR | zone open -> ZoneDeviceCircuitClosed := False
+2026-08-07T13:17:27.291Z | OPERATOR | command file: zone open
+2026-08-07T13:17:27.292Z | OPERATOR | zone open -> ZoneDeviceCircuitClosed := False
+2026-08-07T13:17:29.342Z | OPERATOR | command file: zone close
+2026-08-07T13:17:29.344Z | OPERATOR | zone close -> ZoneDeviceCircuitClosed := True
+2026-08-07T13:17:30.245Z | OPERATOR | command file: zone close
+2026-08-07T13:17:30.246Z | OPERATOR | zone close -> ZoneDeviceCircuitClosed := True
+2026-08-07T13:17:30.354Z | OPERATOR | command file: zone close
+2026-08-07T13:17:30.355Z | OPERATOR | zone close -> ZoneDeviceCircuitClosed := True
+2026-08-07T13:17:31.554Z | OPERATOR | command file: zone open
+2026-08-07T13:17:31.556Z | OPERATOR | zone open -> ZoneDeviceCircuitClosed := False
+2026-08-07T13:17:34.648Z | OPERATOR | command file: zone close
+2026-08-07T13:17:34.650Z | OPERATOR | zone close -> ZoneDeviceCircuitClosed := True
