@@ -1,0 +1,131 @@
+# What the vehicle's scanners see, drawn where the vehicle is.
+#
+# WHY THIS EXISTS. Gazebo's Visualize Lidar plugin cannot do this on this
+# build: it anchors each fan at a fixed pose and never re-anchors, so the rays
+# stand still while the vehicle drives away from them. Measured three ways on
+# 2026-08-07, including a 6.00 m teleport with the pose read back.
+#
+# RViz draws a LaserScan by looking its frame up in TF. The scan carries the
+# sensor's frame, TF carries that frame's place on the vehicle, so the rays are
+# attached to the vehicle BY CONSTRUCTION -- there is no anchor to get wrong.
+#
+# Fixed Frame is forklift/base_link, so the vehicle stays still and the world
+# sweeps past it. That is the view for "what is my scanner seeing right now".
+# For a world-fixed view instead, change it to forklift/odom.
+#
+# NOTHING HERE IS A SAFETY DEVICE OR A SAFETY VERDICT. These are the sensors'
+# raw returns. The protective and warning field decisions are the F-program's
+# and are not drawn here; no colour on this screen means "safe" or "unsafe".
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+      Splitter Ratio: 0.5
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Name: root
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 40
+      Color: 100; 100; 100
+      Alpha: 0.3
+      Reference Frame: <Fixed Frame>
+
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Names: true
+      Show Axes: true
+      Show Arrows: false
+      Marker Scale: 0.6
+      Update Interval: 0
+
+    # The two safety scanners. These are the devices the F-program's fields are
+    # evaluated from, so they are what the safety story is about.
+    - Class: rviz_default_plugins/LaserScan
+      Name: safety scanner FRONT
+      Enabled: true
+      Topic:
+        Value: /forklift/safety_scanner_front/measurement
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+        History Policy: Keep Last
+      Style: Points
+      Size (Pixels): 3
+      Color: 255; 60; 60
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Position Transformer: XYZ
+      Alpha: 1
+
+    - Class: rviz_default_plugins/LaserScan
+      Name: safety scanner REAR
+      Enabled: true
+      Topic:
+        Value: /forklift/safety_scanner_rear/measurement
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+        History Policy: Keep Last
+      Style: Points
+      Size (Pixels): 3
+      Color: 255; 160; 40
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Position Transformer: XYZ
+      Alpha: 1
+
+    # The navigation lidar is a MEASUREMENT channel, not a safety one. It is
+    # drawn in a different colour and off by default so the two are never
+    # confused on camera.
+    - Class: rviz_default_plugins/LaserScan
+      Name: navigation lidar (measurement channel)
+      Enabled: false
+      Topic:
+        Value: /forklift/scan
+        Depth: 5
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+        History Policy: Keep Last
+      Style: Points
+      Size (Pixels): 2
+      Color: 80; 160; 255
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Position Transformer: XYZ
+      Alpha: 0.8
+
+  Global Options:
+    Background Color: 32; 32; 36
+    Fixed Frame: forklift/base_link
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 14
+      Pitch: 1.0
+      Yaw: 3.9
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Target Frame: <Fixed Frame>
+    Saved: ~
+Window Geometry:
+  Height: 900
+  Width: 1400
+  Displays:
+    collapsed: false
