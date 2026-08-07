@@ -119,7 +119,45 @@ REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # the partition is what the survivor sweep filters on at teardown.
 # --------------------------------------------------------------------------- #
 export GZ_PARTITION="${GZ_PARTITION:-m5demo}"
-export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-64}"
+
+# THE DOMAIN IS THE ALLOCATION TABLE'S, NOT THIS SCRIPT'S (invariant 10).
+#
+# agv/forklift/vehicles/allocation.yaml declares itself "THE ONE OWNER OF THE
+# serial -> DDS DOMAIN MAPPING". This script used to default to 64 and inherit
+# whatever ROS_DOMAIN_ID happened to be in the shell, which is a second owner
+# of the same datum and it was silently wrong: the monitoring service reads the
+# table and joins F001's domain, so a stack started on any other domain is
+# INAUDIBLE to it. That is why the HMI map pane had never shown anything -- it
+# was not a broken pane, it was two graphs that could not hear each other
+# (measured 2026-08-07: service on 51, stack on 73, msgs map/pose/scan/tf all 0).
+#
+# Read it from the one owner. AMR_VEHICLE_SERIAL selects which vehicle.
+AMR_VEHICLE_SERIAL="${AMR_VEHICLE_SERIAL:-F001}"
+_alloc_domain="$(cd "$REPO" && python3 -c "
+import sys
+sys.path.insert(0, 'agv/forklift/scripts')
+import vehicle_identity as vi
+print(vi.load_identity('$AMR_VEHICLE_SERIAL').domain_id)
+" 2>/dev/null)" || true
+if [ -z "$_alloc_domain" ]; then
+    printf '  FAIL  could not read the domain for %s from the allocation table.\n' \
+           "$AMR_VEHICLE_SERIAL" >&2
+    printf '  FAIL  It is the single owner of that mapping and this script will\n' >&2
+    printf '  FAIL  not invent one. See agv/forklift/vehicles/allocation.yaml\n' >&2
+    exit 1
+fi
+# A DISAGREEING ENVIRONMENT IS REFUSED, NOT OVERRIDDEN. The vehicle launch
+# already refuses to start when the environment disagrees with the file, and a
+# script that quietly won that argument would start a stack nobody can hear.
+if [ -n "${ROS_DOMAIN_ID:-}" ] && [ "$ROS_DOMAIN_ID" != "$_alloc_domain" ]; then
+    printf '  FAIL  ROS_DOMAIN_ID=%s is set in this shell, but the allocation\n' \
+           "$ROS_DOMAIN_ID" >&2
+    printf '  FAIL  table gives %s domain %s. The table owns this mapping.\n' \
+           "$AMR_VEHICLE_SERIAL" "$_alloc_domain" >&2
+    printf '  FAIL  Run "unset ROS_DOMAIN_ID" and start again.\n' >&2
+    exit 1
+fi
+export ROS_DOMAIN_ID="$_alloc_domain"
 
 # Runtime state lives outside the repository: a demonstration must not make
 # git status dirty, and on a /mnt/c checkout the Linux filesystem is the
