@@ -11,9 +11,9 @@ records the vehicle end of the chain off the ROS graph. This records the PLC
 end off the OPC UA server, which is a different protocol stack reading a
 different memory. When the two agree that the envelope was withdrawn and the
 vehicle stopped, neither is echoing the other (LESSONS 2026-08-04: look for a
-second witness on a different protocol stack). It also reads the four
-`Forklift/Safety/` mirrors, which the F-program owns and which appear on no ROS
-topic at all — so the latch state is read from the controller rather than
+second witness on a different protocol stack). It also reads the six
+`Forklift/Safety/` mirrors, which the F-program owns; four of the six appear on
+no ROS topic at all — so the latch state is read from the controller rather than
 inferred from the vehicle standing still (LESSONS 2026-08-06: stillness is not
 evidence).
 
@@ -48,11 +48,18 @@ NS_INTERFACE = "http://DemoCell"
 #: `opcua-nodes.md` §10, §12 and §13 and confirmed against the controller in
 #: force by `probe_server_paths.py` on 2026-08-06.
 PATHS = [
-    # The F-program's mirrors (§6.4). These four are the latch state.
+    # The F-program's mirrors (§6.4). SIX since the 2026-08-07 fix session
+    # (F-signature 29FD2C52): `SpeedMonitorDemand` and `TorqueOffDemand` were
+    # added by TIA-FIX-PROCEDURE chunks AD-AF and read back on the controller in
+    # force by `probe_server_paths.py` before this list was extended (LESSONS
+    # 2026-08-06: probe the server before editing a client-side path list).
+    # All six are read-only at the server, access level RD.
     ("EStopDemand", ("Forklift", "Safety", "EStopDemand")),
     ("ZoneStopDemand", ("Forklift", "Safety", "ZoneStopDemand")),
     ("SafetyResetRequired", ("Forklift", "Safety", "SafetyResetRequired")),
     ("SafetyResetFault", ("Forklift", "Safety", "SafetyResetFault")),
+    ("SpeedMonitorDemand", ("Forklift", "Safety", "SpeedMonitorDemand")),
+    ("TorqueOffDemand", ("Forklift", "Safety", "TorqueOffDemand")),
     # The envelope the standard program forms (§12).
     ("DriveModeActive", ("Forklift", "Mode", "ForkliftDriveModeActive")),
     ("MotionEnable", ("Forklift", "Envelope", "ForkliftMotionEnable")),
@@ -83,6 +90,7 @@ PATHS = [
 #: CSV only, so the console stays readable during a run.
 WATCH = (
     "EStopDemand", "ZoneStopDemand", "SafetyResetRequired", "SafetyResetFault",
+    "SpeedMonitorDemand", "TorqueOffDemand",
     "MotionEnable", "SpeedCeiling", "EquipmentPermit", "DriveModeActive",
     "WarningFieldOccupied", "ObstacleInStopZone", "TeleopActive",
     "ProcessStopActive", "SpeedLimitActive",
