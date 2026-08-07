@@ -1,0 +1,440 @@
+// ---- 0. F-data: the M5-early coupling delta (13) ------------------------
+// The ONLY place this FB touches F-data, and it only READS it. The F-program
+// owns every value in InstF_Forklift_Safety; this program writes none of them.
+
+// Four mirrors, four UNCONDITIONAL assignments, on every call, each from ONE
+// F-flag of the same name. The copy derives nothing: no threshold, no
+// combination, no inversion, no filter, no timer. A CONDITIONAL mirror write
+// would leave a display reading "clear" after a demand had formed (MR5).
+"ForkliftSafetyMirror".EStopDemand := "InstF_Forklift_Safety".EStopDemand;
+"ForkliftSafetyMirror".ZoneStopDemand := "InstF_Forklift_Safety".ZoneStopDemand;
+"ForkliftSafetyMirror".SafetyResetRequired := "InstF_Forklift_Safety".SafetyResetRequired;
+"ForkliftSafetyMirror".SafetyResetFault := "InstF_Forklift_Safety".SafetyResetFault;
+
+// The one new permissive term, in AFFIRMATIVE form. Taken from the F-DATA,
+// NEVER from the four mirrors above -- a consumer never recomputes an owned
+// value, and logic reading a mirror turns a display group into a causal
+// element. NEVER write it as NOT SafetyResetRequired either: that flag is the
+// F-side OR of the two demands, and a permissive formed from an aggregate
+// cannot say WHICH demand stands. This term sets no latch and starts no timer.
+#safetyDemandClear := NOT "InstF_Forklift_Safety".EStopDemand
+AND NOT "InstF_Forklift_Safety".ZoneStopDemand;
+
+// FB_ForkliftTeleop -- called once from OB30 (20 ms). Nowhere else, and never a
+// second instance. Source: plc/forklift/SPEC.md 7. The M5-early safety delta of
+// 13 is NOT in this version and is added later as part 0 plus one conjunct.
+
+// ---- 1. Link supervision (before anything that reads an input) ------------
+// HMI heartbeat: this FB owns HmiLinkOk.
+#hmiHbChanged := ("ForkliftLink".HmiHeartbeat <> #LastHmiHeartbeat);
+#HmiStaleTimer(IN := NOT #hmiHbChanged,
+               PT := #HMI_STALE_TIME);
+#LastHmiHeartbeat := "ForkliftLink".HmiHeartbeat;   // inequality only, never subtract
+IF #hmiHbChanged THEN
+    #HmiSeenAlive := TRUE;   // one-shot, start FALSE, non-retain
+END_IF;
+// BOTH terms. NOT staleTimer.Q alone reads "not YET proven stale", which is TRUE
+// for the first HMI_STALE_TIME of every CPU run, before any operator input has
+// arrived. NEVER write HmiLinkOk := NOT HmiStaleTimer.Q.
+"ForkliftLink".HmiLinkOk := #HmiSeenAlive AND NOT #HmiStaleTimer.Q;
+#hmiLinkOk := "ForkliftLink".HmiLinkOk;
+
+// Bridge heartbeat: the M3 cell does not exist in this project, so the verdict
+// is formed here and stays inside the FB. It reaches no server node. Same form
+// and same pessimistic boot polarity as the HMI verdict above.
+#bridgeHbChanged := ("ForkliftLink".BridgeHeartbeat <> #LastBridgeHeartbeat);
+#BridgeStaleTimer(IN := NOT #bridgeHbChanged,
+                  PT := #HEARTBEAT_STALE_TIME);
+#LastBridgeHeartbeat := "ForkliftLink".BridgeHeartbeat;
+IF #bridgeHbChanged THEN
+    #BridgeSeenAlive := TRUE;
+END_IF;
+#bridgeLinkOk := #BridgeSeenAlive AND NOT #BridgeStaleTimer.Q;
+
+IF NOT #hmiLinkOk THEN
+    #HmiLinkLostLatch := TRUE;        // degraded mode, not a safety event
+END_IF;
+IF NOT #bridgeLinkOk THEN
+    #BridgeLinkLostLatch := TRUE;     // separate latch: the watch table names the link
+END_IF;
+
+// ---- 2. Plausibility: all six Reals, affirmative, link-qualified ----------
+// Affirmative AND of two window comparisons per value; the fault is the ELSE of
+// this. NaN and inf make BOTH comparisons false, so they land in the fault
+// branch. NEVER invert into NOT(x < MIN OR x > MAX): that form returns TRUE for
+// NaN and passes a dead transducer downstream as a measurement.
+
+// 2a. Plant state (bridge-written).
+#heightValid := #bridgeLinkOk
+AND (#FORK_HEIGHT_MIN < "ForkliftInput".ForkliftForkHeight)
+AND ("ForkliftInput".ForkliftForkHeight < #FORK_HEIGHT_MAX);
+#speedValid := #bridgeLinkOk
+AND (#LINEAR_SPEED_MIN < "ForkliftInput".ForkliftLinearSpeed)
+AND ("ForkliftInput".ForkliftLinearSpeed < #LINEAR_SPEED_MAX);
+#plantInputsValid := #heightValid AND #speedValid;
+
+#PlantInvalidTimer(IN := #bridgeLinkOk AND NOT #plantInputsValid,
+                   PT := #PLANT_FAULT_DELAY);
+IF #PlantInvalidTimer.Q THEN
+    #PlantInputFaultLatch := TRUE;
+END_IF;
+
+// 2b. Lidar diagnostic distance. This is a statement about the TRANSDUCER. The
+// vehicle layer's no-data sentinel 0.0 lies outside the window on purpose.
+// There is NO comparison of this value against a stop distance anywhere in this
+// program: the field verdict belongs to the device.
+#distanceValid := #bridgeLinkOk
+AND (#OBSTACLE_DISTANCE_MIN < "ForkliftInput".ForkliftObstacleMinDistance)
+AND ("ForkliftInput".ForkliftObstacleMinDistance < #OBSTACLE_DISTANCE_MAX);
+
+#LidarInvalidTimer(IN := #bridgeLinkOk AND NOT #distanceValid,
+                   PT := #LIDAR_FAULT_DELAY);
+
+// 2c. Operator requests (HMI-written). An out-of-window request is a BROKEN
+// CLIENT, not a demand. Clamping it silently would hide exactly that.
+#requestsValid := #hmiLinkOk
+AND (#TRACTION_REQUEST_MIN < "ForkliftHmi".HmiTractionRequest)
+AND ("ForkliftHmi".HmiTractionRequest < #TRACTION_REQUEST_MAX)
+AND (#STEER_REQUEST_MIN < "ForkliftHmi".HmiSteerRequest)
+AND ("ForkliftHmi".HmiSteerRequest < #STEER_REQUEST_MAX)
+AND (#FORK_REQUEST_MIN < "ForkliftHmi".HmiForkRequest)
+AND ("ForkliftHmi".HmiForkRequest < #FORK_REQUEST_MAX);
+
+#RequestInvalidTimer(IN := #hmiLinkOk AND NOT #requestsValid,
+                     PT := #REQUEST_FAULT_DELAY);
+IF #RequestInvalidTimer.Q THEN
+    #RequestFaultLatch := TRUE;
+END_IF;
+
+// ---- 2d. The mode request, the vehicle's report, and standstill ----------
+// Mode request: AFFIRMATIVE validity against the three defined values. A value
+// outside {0,1,2} is a BROKEN WRITER, not a mode to clamp (opcua-nodes.md
+// §12.3). The literals live in the constant block and appear nowhere else.
+#modeRequest := "ForkliftMode".HmiDriveModeRequest;
+#modeRequestValid := #hmiLinkOk
+AND ((#modeRequest = #MODE_NONE)
+OR (#modeRequest = #MODE_TELEOP)
+OR (#modeRequest = #MODE_AUTONOMOUS));
+
+// Vehicle heartbeat: the THIRD watched party, with its OWN constant and its OWN
+// one-shot (opcua-nodes.md §12.6 V1-V3). Inequality only: the counter is UInt16,
+// it wraps, and it restarts from an arbitrary value at every restart of the
+// vehicle layer. NEVER write #vehicleAlive := NOT #VehicleStaleTimer.Q -- that
+// reads TRUE for the first VEHICLE_STALE_TIME of every CPU run, before the
+// vehicle layer has reported anything at all.
+#vehicleHbChanged := ("ForkliftVehicle".ForkliftVehicleHeartbeat
+<> #LastVehicleHeartbeat);
+#VehicleStaleTimer(IN := NOT #vehicleHbChanged,
+                   PT := #VEHICLE_STALE_TIME);
+#LastVehicleHeartbeat := "ForkliftVehicle".ForkliftVehicleHeartbeat;
+IF #vehicleHbChanged THEN
+    #VehicleSeenAlive := TRUE;   // one-shot, start value FALSE, non-retain
+END_IF;
+// NOT merged with #bridgeLinkOk into one "vehicle OK" flag (V4): they answer
+// different questions and §14.11 reads them apart, on their own rows.
+#vehicleAlive := #bridgeLinkOk AND #VehicleSeenAlive
+AND NOT #VehicleStaleTimer.Q;
+
+// The vehicle's applied mode is a READBACK, never a second answer (M1, M4). The
+// comparison is against #DriveModeInForce as it stands from the previous call --
+// part 5a has not run yet -- which is exactly the value the vehicle was last
+// told. An invalid report is a disagreement, never a value to adopt.
+#vehicleModeValid :=
+("ForkliftVehicle".ForkliftVehicleModeApplied = #MODE_NONE)
+OR ("ForkliftVehicle".ForkliftVehicleModeApplied = #MODE_TELEOP)
+OR ("ForkliftVehicle".ForkliftVehicleModeApplied = #MODE_AUTONOMOUS);
+#modeDisagreeRaw := #vehicleAlive
+AND NOT (#vehicleModeValid
+AND ("ForkliftVehicle".ForkliftVehicleModeApplied
+= #DriveModeInForce));
+// The RAW comparison is TRUE for the whole of the vehicle's normal adopt window,
+// so it is NEVER used as a permissive term. #ModeDisagreeTimer.Q is: it is both
+// C8 in part 4 and this latch's trigger, and the two therefore fire in the same
+// call. NEVER write "AND NOT #modeDisagreeRaw" into #worldOk -- that disarms the
+// mode one call after it was selected and makes Autonomous unreachable (§14.7).
+#ModeDisagreeTimer(IN := #modeDisagreeRaw,
+                   PT := #MODE_DISAGREE_DELAY);
+IF #ModeDisagreeTimer.Q THEN
+    #ModeDisagreeLatch := TRUE;
+END_IF;
+
+// Standstill, for the mode arbiter. AFFIRMATIVE: an implausible speed is NOT
+// standstill, which is the restrictive direction -- the §6.5 form, applied to a
+// third comparison. The timer is called unconditionally here and its Q is read
+// in part 5a: a timer that must be released by leaving a state is never called
+// inside the branch that owns the state (LESSONS 2026-07-27).
+#atStandstill := #speedValid
+AND (ABS("ForkliftInput".ForkliftLinearSpeed) < #STANDSTILL_SPEED);
+#StandstillTimer(IN := #atStandstill,
+                 PT := #STANDSTILL_TIME);
+
+// The warning field's verdict, stale-safe: a dark transport cannot report a
+// clear field (LESSONS 2026-08-04). The bridge's own rule (silence => TRUE)
+// covers topic death; this term covers transport death. TRUE = occupied.
+#warningFieldOccupied := "ForkliftWarning".ForkliftWarningFieldOccupied
+OR NOT #bridgeLinkOk;
+
+// ---- 3. Obstacle latch (PROCESS stop; not SF-03, not any SRS function) ----
+// Level, no delay, no debounce on the field bit. The bridgeLinkOk conjunct is
+// what keeps this out of the boot window: the node's START VALUE IS TRUE, so
+// without it a cold-started CPU would latch a stop no lidar ever reported.
+IF #bridgeLinkOk AND ("ForkliftInput".ForkliftObstacleInStopZone
+    OR #LidarInvalidTimer.Q) THEN
+    #ObstacleStopLatch := TRUE;
+END_IF;
+"ForkliftStatus".ForkliftObstacleStopActive := #ObstacleStopLatch;
+
+// ---- 3b. The operator's process stop (PROCESS stop; no SRS function) -----
+// Level, no delay, no debounce -- the §6.7 shape on the other client. The
+// #hmiLinkOk conjunct is what keeps this out of the boot window: the node's
+// START VALUE IS TRUE, and without it a cold-started CPU would latch a stop no
+// operator requested. The boot window is covered instead by the start value TRUE
+// on #ProcessStopLatch itself, so the published node cannot read CLEAR before
+// this program has decided anything (opcua-nodes.md §12.7, §12.8).
+IF #hmiLinkOk AND "ForkliftProcessStop".HmiProcessStopRequest THEN
+    #ProcessStopLatch := TRUE;
+END_IF;
+"ForkliftProcessStop".ForkliftProcessStopActive := #ProcessStopLatch;
+
+// ---- 4. World / permissive / cause-gone (kept distinct on purpose) -------
+#worldOk :=
+#bridgeLinkOk                                                   // C1
+AND #hmiLinkOk                                                      // C2
+AND NOT "ForkliftInput".ForkliftObstacleInStopZone                  // C3
+AND #plantInputsValid                                               // C4
+AND #distanceValid                                                  // C5
+AND #requestsValid                                                  // C6
+AND NOT "ForkliftProcessStop".HmiProcessStopRequest                 // C7
+AND NOT #ModeDisagreeTimer.Q;                                       // C8
+
+#latchPending := #ObstacleStopLatch OR #HmiLinkLostLatch
+OR #BridgeLinkLostLatch OR #PlantInputFaultLatch
+OR #RequestFaultLatch
+OR #ProcessStopLatch OR #ModeDisagreeLatch;
+"ForkliftStatus".ForkliftResetRequired := #latchPending;
+
+#motionPermissive := #worldOk AND #safetyDemandClear
+AND NOT #latchPending;            // may the machine MOVE
+#causeGone := #worldOk;                                // may a RESET clear latches
+// Latches are absent from causeGone on purpose: a latch must not be its own
+// precondition for clearing. The fork soft limits are absent from BOTH: a
+// blanket limit permissive would strand a carriage sitting on a limit, since
+// leaving one requires moving. They abort fork motion in the offending
+// direction only, in part 6 below.
+
+// ---- 5a. Mode arbitration: ONE decision per call, ahead of BOTH command
+// paths, which is what makes "the two are never both TRUE, including during a
+// transition" true by construction (opcua-nodes.md §12.3 M6) rather than by
+// inspection. #worldOk, #latchPending and #motionPermissive are already formed.
+#modeSelectRise := #modeRequestValid AND (#modeRequest <> #LastModeRequest);
+#modeEntryAdmitted := #StandstillTimer.Q AND #motionPermissive;
+
+// X4 ModeUnattributable, then X3 DeselectMode. LEAVING a mode is unconditional:
+// no latch, no demand and no motion can hold the machine in a mode the operator
+// has left or can no longer be asked about. "Not yet told" is None, never a mode.
+IF NOT #modeRequestValid THEN
+    #DriveModeInForce := #MODE_NONE;                        // X4
+ELSIF #modeRequest <> #DriveModeInForce THEN
+    #DriveModeInForce := #MODE_NONE;                        // X3
+END_IF;
+// The X3 branch also fires from None whenever the selector reads a mode that is
+// not in force -- assigning None to None. That is a no-op by construction and is
+// left as one rather than guarded, because a guard would be a second place where
+// the arbiter's state is decided.
+
+// X1 / X2 / X5. Entry is admitted ONLY from None, ONLY on a fresh selector
+// transition, ONLY at confirmed standstill and ONLY while the M4 permissive
+// holds -- and entry into Autonomous takes one further term, because a
+// supervisor does not declare a control law in force that nobody is applying.
+// A refused entry falls through and the transition is CONSUMED below: re-entry
+// needs the operator to move the selector away and back (X5).
+IF (#DriveModeInForce = #MODE_NONE) AND #modeSelectRise
+    AND #modeEntryAdmitted THEN
+    IF #modeRequest = #MODE_TELEOP THEN
+        #DriveModeInForce := #MODE_TELEOP;                  // X1
+    ELSIF (#modeRequest = #MODE_AUTONOMOUS) AND #vehicleAlive THEN
+        #DriveModeInForce := #MODE_AUTONOMOUS;              // X2
+        // The affirmative action that enables autonomous motion. This section
+        // mints NO second enable node (opcua-nodes.md §12.12): the selection IS
+        // the edge, exactly as the teleop enable's rising edge is (§12.3).
+        #AutonomousArmed := TRUE;
+    END_IF;
+END_IF;
+
+// Updated ONCE, after every test that reads it, and tracked EVEN WHILE THE
+// REQUEST IS UNATTRIBUTABLE so that a link coming back up manufactures no
+// transition. This is §10.8 P6's lesson on the other control: a selection
+// standing across an outage is not an operator's selection.
+#LastModeRequest := #modeRequest;
+
+// The autonomous cycle-running flag. Machine state and actuator command are
+// separate layers (CLAUDE.md §9): this bit says the operator has enabled the
+// autonomous control law, part 8 forms the envelope from it and the interlocks.
+// Cleared by ANY drop condition in the same OB call; set ONLY by X2 above, so a
+// returning permissive restores the PERMISSION and never the MOTION.
+IF NOT ((#DriveModeInForce = #MODE_AUTONOMOUS)
+    AND #motionPermissive AND #vehicleAlive) THEN
+    #AutonomousArmed := FALSE;
+END_IF;
+
+// ---- 5. Monitored reset, then a SEPARATE enable edge (order matters) -----
+// latchPending was computed ONCE, above, so an enable edge in the SAME call as
+// a reset still sees the latch and is refused.
+#resetRise := "ForkliftHmi".HmiResetRequest AND NOT #ResetEdgeMemory;
+#teleopRise := #hmiLinkOk AND "ForkliftHmi".HmiTeleopRequest
+AND NOT #TeleopEnableEdgeMemory;
+#ResetEdgeMemory := "ForkliftHmi".HmiResetRequest;          // start value TRUE
+#TeleopEnableEdgeMemory := "ForkliftHmi".HmiTeleopRequest;  // start value TRUE
+
+// The guard is a LEVEL verdict about the CURRENT HMI link session, re-armed at
+// every link loss -- not a once-per-run latch. Cleared only by seeing the
+// request FALSE with the link up AFTER the last outage, so a reset asserted
+// across a CPU restart or an HMI restart cannot clear a latch at link-up.
+IF NOT #hmiLinkOk THEN
+    #ResetDeviceFault := TRUE;       // re-arm; start value is TRUE for the same reason
+ELSIF NOT "ForkliftHmi".HmiResetRequest THEN
+    #ResetDeviceFault := FALSE;      // seen FALSE, in THIS link session
+END_IF;
+
+IF #resetRise AND NOT #ResetDeviceFault AND #latchPending AND #causeGone THEN
+    #ObstacleStopLatch := FALSE;
+    #HmiLinkLostLatch := FALSE;
+    #BridgeLinkLostLatch := FALSE;
+    #PlantInputFaultLatch := FALSE;
+    #RequestFaultLatch := FALSE;
+    #ProcessStopLatch := FALSE;
+    #ModeDisagreeLatch := FALSE;
+    // Reset clears latches. It energizes NOTHING: no enable, no setpoint.
+    // Enabling the machine is a SEPARATE, deliberate operator action, below.
+END_IF;
+
+IF #teleopRise AND NOT #latchPending AND #motionPermissive
+    AND (#DriveModeInForce = #MODE_TELEOP) THEN
+    "ForkliftStatus".ForkliftTeleopActive := TRUE;
+END_IF;
+
+// Dropped by ANY interlock, any latch, or the operator withdrawing the enable --
+// immediately, in the same OB call. motionPermissive already carries both link
+// verdicts and latchPending, so this one test covers every drop condition.
+IF NOT (#motionPermissive AND "ForkliftHmi".HmiTeleopRequest
+    AND (#DriveModeInForce = #MODE_TELEOP)) THEN
+    "ForkliftStatus".ForkliftTeleopActive := FALSE;
+END_IF;
+
+// ---- 6. Caps, clamps and the direction-scoped fork limits ----------------
+// (NOT heightValid) OR ... is the load-bearing half: written as a bare
+// comparison, a NaN height reads as NOT raised and hands the machine the FULL
+// speed cap -- the permissive direction on a fault.
+#forkRaised := (NOT #heightValid)
+OR ("ForkliftInput".ForkliftForkHeight > #FORK_HEIGHT_SLOW_THRESHOLD);
+
+IF #forkRaised THEN
+    #speedCap := #TRACTION_SPEED_CAP_RAISED;
+ELSE
+    #speedCap := #TRACTION_SPEED_MAX;
+END_IF;
+// "The cap is IN FORCE", not "the cap is biting": stable on a display and in a
+// recording, and it does not flicker with the operator's control.
+"ForkliftStatus".ForkliftSpeedLimitActive :=
+"ForkliftStatus".ForkliftTeleopActive AND #forkRaised;
+
+// Clamp to the ENGINEERING RANGE. A value inside the plausibility window but
+// outside this range is a legitimate +/-1.0 that narrowed upward through
+// float64 -> Real. A value outside the WINDOW is a fault and was caught in
+// part 2c -- the window and the clamp are two different decisions.
+#tractionDemand := LIMIT(MN := - #TRACTION_REQUEST_CLAMP,
+                         IN := "ForkliftHmi".HmiTractionRequest,
+                         MX := #TRACTION_REQUEST_CLAMP);
+#forkDemand := LIMIT(MN := - #FORK_REQUEST_CLAMP,
+                     IN := "ForkliftHmi".HmiForkRequest,
+                     MX := #FORK_REQUEST_CLAMP);
+
+// Direction-scoped aborts. NEVER a blanket "inside the limits" permissive: a
+// carriage on a limit can only leave it by moving, and a permissive would
+// strand it there. An implausible height blocks BOTH directions.
+#raiseBlocked := (NOT #heightValid)
+OR ("ForkliftInput".ForkliftForkHeight >= #FORK_TRAVEL_MAX);
+#lowerBlocked := (NOT #heightValid)
+OR ("ForkliftInput".ForkliftForkHeight <= #FORK_TRAVEL_MIN);
+#forkDemandAllowed := ((#forkDemand > 0.0) AND NOT #raiseBlocked)
+OR ((#forkDemand < 0.0) AND NOT #lowerBlocked);
+// forkDemand = 0.0 is not "allowed" and falls to the ELSE below: same 0.0,
+// one branch.
+
+// ---- 7. THE ONLY assignments to the three actuator setpoints ------------
+// Gating an analogue value = driving it to zero. Not a coil. Each ELSE is
+// mandatory: without it the Real keeps its last value, the bridge keeps
+// republishing it, and the machine keeps moving after the stop.
+IF "ForkliftStatus".ForkliftTeleopActive AND #motionPermissive THEN
+    "ForkliftOutput".ForkliftTractionSpeedRef := #tractionDemand * #speedCap;
+ELSE
+    "ForkliftOutput".ForkliftTractionSpeedRef := 0.0;
+END_IF;
+
+// Steering returns to CENTRE on every stop. All three assignments run in the
+// same call, so the wheel is re-aimed on a machine whose traction setpoint has
+// already gone to 0.0.
+IF "ForkliftStatus".ForkliftTeleopActive AND #motionPermissive THEN
+    "ForkliftOutput".ForkliftSteerAngleRef := LIMIT(MN := - #STEER_ANGLE_MAX,
+                                                    IN := "ForkliftHmi".HmiSteerRequest,
+                                                    MX := #STEER_ANGLE_MAX);
+ELSE
+    "ForkliftOutput".ForkliftSteerAngleRef := 0.0;
+END_IF;
+
+// 0.0 means HOLD: the plant holds the carriage against gravity.
+IF "ForkliftStatus".ForkliftTeleopActive AND #motionPermissive
+    AND #forkDemandAllowed THEN
+    "ForkliftOutput".ForkliftForkSpeedRef := #forkDemand * #FORK_SPEED_MAX;
+ELSE
+    "ForkliftOutput".ForkliftForkSpeedRef := 0.0;
+END_IF;
+
+// ---- 8. THE ONLY assignments to the mode node and the three envelope nodes
+// The published copy of the arbiter's state. One writer, one statement. No
+// consumer infers the mode from anything else, and this program never derives it
+// from the vehicle's report (opcua-nodes.md §12.3 M1, M4).
+"ForkliftMode".ForkliftDriveModeActive := #DriveModeInForce;
+
+// The enable. It PERMITS; it never commands (E6). It is TRUE only while the mode
+// in force is Autonomous, so it and ForkliftTeleopActive are never both TRUE
+// (M6) -- both are formed in this call from the one value decided in part 5a.
+#autonomousMotionPermitted :=
+(#DriveModeInForce = #MODE_AUTONOMOUS)
+AND #AutonomousArmed
+AND #motionPermissive
+AND #vehicleAlive;
+"ForkliftEnvelope".ForkliftMotionEnable := #autonomousMotionPermitted;
+
+// The ceiling is a BOUND, not a setpoint: unsigned, magnitude in either
+// direction, no demand term anywhere in it, and MIN rather than a
+// multiplication. #speedCap is §6.5's fork-height value, so the fork-height
+// clamp applies in BOTH modes. The ELSE is mandatory and unconditional: without
+// it the Real keeps its last value and the bridge keeps republishing a
+// permission this program has withdrawn (LESSONS 2026-07-27).
+// The §14.16 delta adds a THIRD bound inside this same single assignment. MIN
+// of bounds, never a multiplication, no demand term -- the ceiling stays a
+// bound and gains no second writer and no branch. Every path still assigns the
+// node exactly once per call and the outer ELSE to 0.0 is untouched.
+IF #autonomousMotionPermitted THEN
+    IF #warningFieldOccupied THEN
+        "ForkliftEnvelope".ForkliftSpeedCeiling :=
+        MIN(IN1 := MIN(IN1 := #AUTONOMOUS_SPEED_CEILING,
+                           IN2 := #speedCap),
+            IN2 := #WARNING_SPEED_CEILING);
+    ELSE
+        "ForkliftEnvelope".ForkliftSpeedCeiling :=
+        MIN(IN1 := #AUTONOMOUS_SPEED_CEILING, IN2 := #speedCap);
+    END_IF;
+ELSE
+    "ForkliftEnvelope".ForkliftSpeedCeiling := 0.0;
+END_IF;
+
+// The fixed-equipment / station permit (ADR 0012 D1). NEVER a literal TRUE. The
+// M5 register has two named members and gains four at M6 (§14.5); no member is
+// or ever becomes an order, a route, a destination or a zone reservation --
+// those are the fleet manager's data and reach no node on this server
+// (invariant 5, opcua-nodes.md §12.5 Z1-Z3).
+#equipmentPermit := #bridgeLinkOk                  // EQ1
+AND NOT #ProcessStopLatch;     // EQ2
+"ForkliftEnvelope".ForkliftEquipmentPermit := #equipmentPermit;

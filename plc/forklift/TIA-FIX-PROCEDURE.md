@@ -76,9 +76,11 @@ engineering process, over a TCP link.
 Rewrite these three fields whenever a step completes, and always before the
 session ends. Resuming then costs nothing.
 
-    chunk:               not started
-    steps done:          0 of 63
-    open:                —
+    chunk:               AA–AG done
+    steps done:          63 of 63
+    open:                nothing in TIA. The re-run table at the top of this
+                         document is owed, with the stack up, against
+                         F-signature 29FD2C52
 
 ---
 
@@ -90,24 +92,25 @@ design value and no gate criterion may rest on it** (ADR 0006).
 
 | Record | Value | Date |
 |---|---|---|
-| Project and instance read back (steps 1–2) | | |
-| F-collective signature **before** (step 3) — expected `50573CD9` | | |
-| Safety mode state before (step 4) | | |
-| Machine quiet: writer, bridge, HMI (steps 5–6) | | |
-| Interface ruling for the two new mirror leaves (step 7) | | |
-| `WARN` sender present? (step 8) | | |
-| Constant count after the three edits (step 14) — expected **17**, unchanged | | |
-| Safety compile result (step 17) | | |
-| F-collective signature **after** (step 22) — must differ from `50573CD9`, offline = online | | |
-| `SpeedLimitOnsetTimer.PT` in force **with its `IN`** (step 24) | | |
-| No-source signature re-read (step 26) | | |
-| Body diff before the paste (step 38) — expected exactly three hunks; if a wall of hunks, the `--ignore-cr-at-eol -w` count too | | |
-| Search for `#tractionDemand * #speedCap` (step 43) — expected **zero** hits | | |
-| Standard compile result (step 44) | | |
-| Six leaves under `Forklift/Safety/`, no `_1` (step 49) | | |
-| Browse-name count after the download (step 56) — expected **48** | | |
-| Write refused on a new mirror leaf, with its status code (step 59) | | |
-| Four-row mirror/F-data comparison (step 60) | | |
+| Project and instance read back (steps 1–2) | Project `safe_amr`; PLCSIM Advanced instance `safecell3` | 2026-08-07 |
+| F-collective signature **before** (step 3) — expected `50573CD9` | `50573CD9` offline = `50573CD9` online, version comparison green. Collective F-SW `50573CD8`, F-HW `00000001`, F-communication address signature `none` | 2026-08-07 |
+| Safety mode state before (step 4) | safety mode activated | 2026-08-07 |
+| Machine quiet: writer, bridge, HMI (steps 5–6) | Windows process sweep by command line: no stand-in writer, no PLCSIM Advanced API client. Only PLCSIM Advanced itself (Runtime Manager PID 22324, instance PID 14420) and two unrelated PostgreSQL `bgwriter`/`wal_writer` children the `writer` pattern matched. WSL: no bridge, no HMI, no OPC UA process | 2026-08-07 |
+| Interface ruling for the two new mirror leaves (step 7) | **Ruled, gate open.** `docs/interfaces/opcua-nodes.md` §11 is six nodes (m5-60). `SpeedMonitorDemand` Bool/`Boolean`, accessible ✔, writable ✘, start `FALSE`; `TorqueOffDemand` Bool/`Boolean`, accessible ✔, writable ✘, start `TRUE`. Ruled names agree character for character with the names requested below, so chunks AD–AF are unchanged and chunk AE is not blocked | 2026-08-07 |
+| `WARN` sender present? (step 8) | **Yes** — `docs/reports/m5-61-warn-sender.md`, status `done`. `field_evaluation.py` sends `WARN` on the 45015 link; `WarningFieldClear` read `True` for the first time, reaching `WarningFieldClearValid` 17 ms later; n = 4 intrusions / 4 member changes, n = 5 controls / 0 verdicts. After the step-52 download: full teleop speed with a clear field, 0.20 m/s while occupied, no latch | 2026-08-07 |
+| Constant count after the three edits (step 14) — expected **17**, unchanged | **17**, unchanged (rows 69–85). `SPEED_STANDSTILL_MAX` `15`, `SPEED_STANDSTILL_NEG` `-15`, `SPEED_LIMIT_ONSET_MAX` `T#2s300ms`. SL13's four comparator pins all symbolic — `#SPEED_STANDSTILL_MAX` / `#SPEED_STANDSTILL_NEG`, one pair per channel, no literal, resolving to 15 / −15 at the pin (step 15). SL17's `PT` symbolic `#SPEED_LIMIT_ONSET_MAX`, resolving to `T#2s300ms`, `IN` the negation of `#WarningFieldClearValid` (step 16) | 2026-08-07 |
+| Safety compile result (step 17) | **0 errors, 0 warnings.** Downloaded in the same action: CPU taken to STOP for the safety download, then RUN (steps 18–20) | 2026-08-07 |
+| F-collective signature **after** (step 22) — must differ from `50573CD9`, offline = online | **`29FD2C52`** offline = `29FD2C52` online, version comparison green. Collective F-SW `29FD2C51`; F-HW `00000001` **unchanged**, correctly — no hardware or F-communication change was made, only three constant values. This is the run identity every re-run in the table above must be measured against | 2026-08-07 |
+| `SpeedLimitOnsetTimer.PT` in force **with its `IN`** (step 24) | `PT` = **`T#2S_300MS`** with `IN` = **`TRUE`** — the timer is running, so the `PT` read is the value and not the instrument. `IN` is `TRUE` because no field source is running, `WarningFieldClearValid` is `FALSE` and this timer's `IN` is its negation. Safety mode read back **activated** after the download (step 23) | 2026-08-07 |
+| No-source signature re-read (step 26) | **All thirteen as the build's step 333 recorded them.** `SpeedChainSeen` `FALSE`; `SpeedAValid` `FALSE`, `SpeedBValid` `FALSE`; `SpeedStaleNow` `FALSE`, `SpeedDiscrepantNow` `FALSE`, `ShaftDoubtNow` `FALSE`, `SpeedOverLimitNow` `FALSE`; `SpeedCauseGone` **`TRUE`**; `SpeedMonitorDemand` `FALSE`; `WarningFieldClearValid` `FALSE`; `SpeedLimitOnsetTimer.ET` `T#2S_300MS` — **at `PT` and not climbing**, the new budget; `Ss1Demand` **`TRUE`**, tracking the boot-latched zone demand; `TorqueOffDemand` **`TRUE`**. Neither defect signature present. Read alongside: `SpeedDiff` `0`, `VehicleStandstillNow` `FALSE`, `Ss1Timer.ET` `T#1S` at `PT` (expired), `SpeedAStaleTimer.PT` / `SpeedBStaleTimer.PT` `T#500MS`, `SpeedDiscrepancyTimer.PT` `T#200MS`, `ShaftDoubtTimer.PT` `T#1S`, `SpeedOverLimitTimer.PT` `T#200MS`, `ShaftDoubtTimer.IN` `FALSE` (step 25) | 2026-08-07 |
+| Body diff before the paste (step 38) — expected exactly three hunks; if a wall of hunks, the `--ignore-cr-at-eol -w` count too | Body captured from TIA (440 lines) as `plc/forklift/evidence/m5-59-fb-body-before.scl`; committed file 465 lines. **Raw `git diff --no-index`: 27 hunks. With `--ignore-cr-at-eol -w`: 5.** The three expected deltas are all present and are hunks 1, 4 and 5 — (1) the two mirror assignments **and** the third `#safetyDemandClear` conjunct, together in one hunk as the procedure predicted; (4) the `#teleopSpeedCap` `IF … ELSE` block; (5) `#tractionDemand * #speedCap` → `* #teleopSpeedCap`. **Hunks 2 and 3 are not drift**: `#HmiStaleTimer(…)` and `#BridgeStaleTimer(…)` are one line in the committed file and two lines in the CPU body — identical tokens, identical arguments, a line wrap only, which `-w` cannot fold because it is a newline and not whitespace within a line. No substantive difference outside the three deltas; step 39 replaces the whole body regardless | 2026-08-07 |
+| Search for `#tractionDemand * #speedCap` (step 43) — expected **zero** hits | **0 hits**, searched in TIA over the pasted body. Read back from the same body: part 0 carries **six** unconditional mirror assignments (step 40); `#safetyDemandClear` carries **three** conjuncts, all from `"InstF_Forklift_Safety"` and none from a mirror, with `TorqueOffDemand` deliberately absent (step 41); part 7's traction statement is `#tractionDemand * #teleopSpeedCap` inside the same `IF … ELSE` whose `ELSE` still assigns `0.0` (step 42) | 2026-08-07 |
+| Standard compile result (step 44) | Compiled with **no error** — reported by the owner and corroborated by a successful download and solid green diff circles on every block; warning count not read off. **Downloaded in the same action, ahead of chunk AE**, and TIA offered **re-initialisation of `ForkliftSafetyMirror`, which was accepted** — the DB layout had moved, so this is step 52's requirement met early and the two new members took their start values rather than an old image. Safety mode read back **activated**; offline and online safety programs both consistent; collective F-signature still **`29FD2C52`** offline = online, **correctly unmoved** — a standard-program change does not touch it. Chunk AE therefore runs against a CPU that already carries the six mirrors, and the step-52 download becomes an interface-only download | 2026-08-07 |
+| Six leaves under `Forklift/Safety/`, no `_1` (step 49) | **6**, read character for character: `TorqueOffDemand`, `SpeedMonitorDemand`, `EStopDemand`, `ZoneStopDemand`, `SafetyResetRequired`, `SafetyResetFault` — **no `_1` on either new name**. All six `BOOL`, all six access level **`RD`**, read-only: no client may write any of them (step 48). Each points at its `"ForkliftSafetyMirror"` member of the same name. The two new leaves sit at the top of the folder rather than the bottom, which is display order only and is not part of any browse path | 2026-08-07 |
+| Browse-name count after the download (step 56) — expected **48** | **48**, as expected — 46 plus two leaves and **no new folder** (`Forklift` still has its eleven subfolders). The collision-suffix sweep found **none**. The nine §12 nodes all read back with their types and values; the envelope write probe was still refused `BadNotWritable`. `RESULT: PASS`. The script was **not edited** and knows nothing about the two new nodes. Run from a Windows shell outside TIA against `opc.tcp://192.168.53.1:4840`; saved as `plc/forklift/evidence/m5-59-node-verify-2026-08-07.log` (step 57) | 2026-08-07 |
+| Write refused on a new mirror leaf, with its status code (step 59) | **`BadNotWritable`** — word for word: *"The access level does not allow writing to the Node.(BadNotWritable)"*. The probe wrote back the value the node already held, so nothing could have changed had it been accepted. Read first from the same shell (step 58): `Forklift/Safety/SpeedMonitorDemand` `Boolean` **`False`**, `Forklift/Safety/TorqueOffDemand` `Boolean` **`True`**, both `access={CurrentRead}` — read-only at the server, not by convention. Evidence: `plc/forklift/evidence/m5-59-safety-leaf-probe-2026-08-07.log` and the script beside it | 2026-08-07 |
+| Four-row mirror/F-data comparison (step 60) | `"ForkliftSafetyMirror".SpeedMonitorDemand` `FALSE`; `"ForkliftSafetyMirror".TorqueOffDemand` **`TRUE`**; `"ForkliftStatus".ForkliftTeleopActive` `FALSE`; `"ForkliftOutput".ForkliftTractionSpeedRef` `0.0`. **No monitoring-error icon on any row.** **This is not evidence of the new conjunct**: with no writer running both F-demands stand for reasons that predate this session, so `TeleopActive` is `FALSE` and the setpoint `0.0` several times over. The conjunct is proven only by an acceptance run with the stack up — the re-run table at the top of this document | 2026-08-07 |
+| Mirror vs F-data, compared by eye (step 55) | **Both pairs equal.** `"ForkliftSafetyMirror".SpeedMonitorDemand` `FALSE` = `"InstF_Forklift_Safety".SpeedMonitorDemand` `FALSE`; `"ForkliftSafetyMirror".TorqueOffDemand` **`TRUE`** = `"InstF_Forklift_Safety".TorqueOffDemand` **`TRUE`**. Read after the STOP → RUN of step 54, so the mirrors are the running copy and not a stale image. `SpeedLimitOnsetTimer.PT` still `T#2S_300MS` with `IN` `TRUE` across the restart | 2026-08-07 |
 
 ---
 
