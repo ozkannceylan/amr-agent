@@ -248,12 +248,38 @@ def check_static(checker):
         for element in ET.parse(_MODEL).getroot().iter(tag):
             sdf_topics.add((element.text or '').strip())
     cfg_gz_topics = set(v for k, v in topics.items() if k.startswith('gz_'))
+    # gz_-prefixed topics OWNED BY VEHICLE SOFTWARE, not by the model.
+    # The original rule here read "every config gz_ topic exists in
+    # model.sdf", which was true until m5-50 moved the model's joint
+    # controllers onto the actuator terminals: since then the three raw
+    # command names are ROS-side topics that KEEP the /gz/ prefix to say
+    # "raw plant command", and m5-73 added three gz-transport topics
+    # published by scripts/scan_viz_repeater.cc rather than by the model.
+    # Each exception is named by config KEY with its owner, so a NEW
+    # unexplained gz_ topic still fails the check - and a second check
+    # below refuses if the model ever starts publishing one of these
+    # names itself, which would put two owners on one topic.
+    software_owned_keys = {
+        # m5-50: sto_contactor.py subscribes these on ROS and forwards to
+        # the actuator terminals; the model no longer listens here.
+        'gz_steer_cmd', 'gz_traction_cmd', 'gz_fork_cmd',
+        # m5-73: scan_viz_repeater.cc publishes these on the gz
+        # transport, world_pose repaired, for the GUI only.
+        'gz_viz_scan_nav', 'gz_viz_safety_scanner_front',
+        'gz_viz_safety_scanner_rear',
+    }
+    software_owned = set(topics[k] for k in software_owned_keys
+                         if k in topics)
     checker.check('every SDF topic is declared in config.yaml',
                   sdf_topics <= cfg_gz_topics,
                   'missing: {}'.format(sorted(sdf_topics - cfg_gz_topics)))
-    checker.check('every config gz_ topic exists in model.sdf',
-                  cfg_gz_topics <= sdf_topics,
-                  'extra: {}'.format(sorted(cfg_gz_topics - sdf_topics)))
+    checker.check('every non-software-owned config gz_ topic is in model.sdf',
+                  cfg_gz_topics - software_owned <= sdf_topics,
+                  'extra: {}'.format(
+                      sorted(cfg_gz_topics - software_owned - sdf_topics)))
+    checker.check('no software-owned gz_ topic is also published by the model',
+                  not (software_owned & sdf_topics),
+                  'two owners: {}'.format(sorted(software_owned & sdf_topics)))
 
     scanner_topics = sorted(spec['topic'] for spec in sdf_sensors.values()
                             if spec['link'].startswith('safety_scanner'))

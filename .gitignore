@@ -21,3 +21,6 @@ hmi/evidence/screenshots/
 
 # SDD workspace: per-plan scratch (ledger, briefs, review packages).
 .superpowers/
+
+# m5-73: gz-transport repeater build output, not source
+agv/forklift/scripts/build/

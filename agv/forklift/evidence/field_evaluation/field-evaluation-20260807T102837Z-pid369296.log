@@ -83,3 +83,34 @@
 2026-08-07T10:53:38.201Z | WARNING | rear warning field RELEASED after the SF-04 clear-hold: 2.016 s of continuous non-occupation on this node's own steady clock (limit 2.0 s, seq=13347)
 2026-08-07T10:53:38.207Z | WARNING | warning field CLEAR - both devices report the warning field clear (front 0 ray(s) inside, rear 0). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
 2026-08-07T10:53:38.216Z | SEND | WARN 1 -> warning transition
+2026-08-07T10:54:35.001Z | WARNING | front warning field OCCUPIED on one scan: 27 ray(s) inside the warning contour, nearest 1.240 m (seq=13859 stamp=1386.700000)
+2026-08-07T10:54:35.015Z | DEVICE | front INTRUSION on one scan: 11 ray(s) inside the contour, nearest 1.240 m (seq=13859 stamp=1386.700000)
+2026-08-07T10:54:35.025Z | WARNING | rear warning field OCCUPIED on one scan: 5 ray(s) inside the warning contour, nearest 3.473 m (seq=13859 stamp=1386.700000)
+2026-08-07T10:54:35.041Z | WARNING | warning field OCCUPIED - front: warning field occupied; rear: warning field occupied (front 27 ray(s) inside, rear 5). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
+2026-08-07T10:54:35.050Z | AGGREGATE | INTRUSION - front: field not clear (front seq=13859 rear seq=13859)
+2026-08-07T10:54:35.057Z | SEND | ZONE 0 -> aggregate transition
+2026-08-07T10:54:35.058Z | SEND | WARN 0 -> warning transition
+2026-08-07T10:55:12.307Z | WARNING | front warning field clear on 3 consecutive scans; SF-04 clear-hold of 2.0 s started (seq=14194)
+2026-08-07T10:55:12.318Z | DEVICE | front CLEAR after 3 consecutive fully-valid fully-clear scans (seq=14194 stamp=1420.200000)
+2026-08-07T10:55:12.329Z | WARNING | rear warning field clear on 3 consecutive scans; SF-04 clear-hold of 2.0 s started (seq=14194)
+2026-08-07T10:55:12.341Z | AGGREGATE | CLEAR - both devices clear (front seq=14194 rear seq=14194)
+2026-08-07T10:55:12.353Z | SEND | ZONE 1 -> aggregate transition
+2026-08-07T10:55:14.341Z | WARNING | front warning field RELEASED after the SF-04 clear-hold: 2.035 s of continuous non-occupation on this node's own steady clock (limit 2.0 s, seq=14212)
+2026-08-07T10:55:14.355Z | WARNING | rear warning field RELEASED after the SF-04 clear-hold: 2.012 s of continuous non-occupation on this node's own steady clock (limit 2.0 s, seq=14212)
+2026-08-07T10:55:14.366Z | WARNING | warning field CLEAR - both devices report the warning field clear (front 0 ray(s) inside, rear 0). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
+2026-08-07T10:55:14.376Z | SEND | WARN 1 -> warning transition
+2026-08-07T12:27:19.849Z | WARNING | rear warning field OCCUPIED on one scan: 1 ray(s) inside the warning contour, nearest 4.620 m (seq=65742 stamp=6575.000000)
+2026-08-07T12:27:19.861Z | WARNING | warning field OCCUPIED - rear: warning field occupied (front 0 ray(s) inside, rear 1). This demands a SPEED REDUCTION to the creep ceiling and stops nothing; the protective verdict is separate and is unaffected by this line
+2026-08-07T12:27:19.873Z | SEND | WARN 0 -> warning transition
+2026-08-07T12:27:19.924Z | WARNING | front warning field OCCUPIED on one scan: 1 ray(s) inside the warning contour, nearest 5.297 m (seq=65743 stamp=6575.100000)
+2026-08-07T12:27:19.955Z | WARNING | unchanged (OCCUPIED), reason now: front: warning field occupied; rear: warning field occupied
+2026-08-07T12:27:21.252Z | DEVICE | rear INTRUSION on one scan: 2 ray(s) inside the contour, nearest 2.635 m (seq=65755 stamp=6576.300000)
+2026-08-07T12:27:21.254Z | AGGREGATE | INTRUSION - rear: field not clear (front seq=65755 rear seq=65755)
+2026-08-07T12:27:21.266Z | SEND | ZONE 0 -> aggregate transition
+2026-08-07T12:58:53.865Z | LINK | down (send failed: [Errno 104] Connection reset by peer). The writer converts the silence into an open zone channel AND an occupied warning field within its own 1 s stale window
+2026-08-07T12:58:55.964Z | LINK | connect attempt 2 to 172.19.176.1:45015 failed: no completion within 2.0 s. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-07T12:58:58.014Z | LINK | connect attempt 3 to 172.19.176.1:45015 failed: no completion within 2.0 s. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-07T12:59:00.065Z | LINK | connect attempt 4 to 172.19.176.1:45015 failed: no completion within 2.0 s. While the link is down this node sends nothing and the writer drives the zone channel OPEN after its own 1 s stale window - the demanding direction, and its contract, not ours to duplicate
+2026-08-07T12:59:00.165Z | LINK | up: connected to the stand-in writer at 172.19.176.1:45015
+2026-08-07T12:59:00.179Z | SEND | ZONE 0 -> first line on a new connection (a connection is a transition from unknown)
+2026-08-07T12:59:00.180Z | SEND | WARN 0 -> first line on a new connection (the writer drove the warning channel FALSE when this link died; a clear verdict is a fresh claim, never an inherited one)

@@ -843,6 +843,20 @@ topics:
   gz_scan_nav: /forklift/gz/scan_nav
   gz_imu: /forklift/gz/imu
 
+  # THE THREE VIZ SCAN STREAMS - GUI ANCHOR REPAIR, NOT MEASUREMENT.
+  # On this stack the world_pose field of every gz LaserScan is the
+  # sensor's static SDF pose (identity here, because model.sdf writes the
+  # mount into the LINK), so the GUI's VisualizeLidar plugin anchors every
+  # fan at the world origin (m5-73, EVIDENCE_SENSOR_COVERAGE.md sec 16).
+  # scripts/scan_viz_repeater.cc republishes each scan with world_pose
+  # replaced by the sensor's LIVE world pose and NOTHING ELSE changed.
+  # These topics exist for one consumer, a human's eyes via the GUI's
+  # combo box; no vehicle node may read them, they are never bridged onto
+  # ROS, and they are on only when the GUI is (launch arg lidar_viz).
+  gz_viz_scan_nav: /forklift/gz/viz/scan_nav
+  gz_viz_safety_scanner_front: /forklift/gz/viz/safety_scanner_front
+  gz_viz_safety_scanner_rear: /forklift/gz/viz/safety_scanner_rear
+
   # THE TWO READING CHANNELS OF THE SAFE-SPEED ENCODER. One shaft, read
   # twice: model.sdf carries two JointStatePublisher instances on
   # drive_wheel_joint, and each of these is one of them. They are the same

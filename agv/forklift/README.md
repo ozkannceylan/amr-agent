@@ -51,6 +51,7 @@ project can command in engineering units.
 | `scripts/safe_speed_link.py` | **The carrier that puts those readings on the wire to the stand-in writer** (`plc/forklift-safety/SPEC.md` §11.2): one TCP connection, WSL client → Windows listener on port 45016, `SPD A/B <int mm/s>`, `MOT <p> <v>`, `PING`. It decides nothing, forms no verdict and holds no reading — **a channel goes silent rather than repeat**, so a reading that stops arriving stops being sent and the writer's frozen freshness sequence is what the F-program reads as a missing channel. Never scales and never sends a non-finite or out-of-Int-range value. Not an OPC UA client. **Not a safety function; no Category, no PL, no SIL, no PFH** (ADR 0011 D5). `--selftest` runs with no ROS and no network. Evidence: `EVIDENCE_SPEED_LINK.md`. |
 | `scripts/speed_link_rig.py` | The local proving rig behind that evidence, and **not the stand-in writer**: `sink` models the writer half of §11.2 (45016 listener, one client, 50 ms cycle, sequences that advance only on a fresh line, the 250 ms motion-silence rule) and **writes to no PLC**; `plant` stimulates the producer's two gz reads and a scan so the chain runs with no Gazebo, and can go **silent** the way a dead source does; `inject` publishes values the producer cannot emit, each with a positive control. |
 | `scripts/sensor_tf.py` | Publishes `/tf_static` for the four sensor frames, reading every number out of `model.sdf`. |
+| `scripts/scan_viz_repeater.cc` + `.sh` | **GUI anchor repair, visualization only** (m5-73): republishes each gz scan on `/forklift/gz/viz/*` with `world_pose` replaced by the sensor's **live** world pose and nothing else changed, because on this Gazebo build that field is the sensor's static SDF pose and the `VisualizeLidar` plugin anchors every fan to it — at the world origin, for this model. C++ because gz-transport has no Python bindings on this stack; the `.sh` wrapper builds the single source on first use into an uncommitted `build/`. Started by `vehicle.launch.py lidar_viz:=`, default = `gui`. No vehicle node reads the viz topics and the measurement channels are untouched (`EVIDENCE_SENSOR_COVERAGE.md` §16). Not a safety function: no Category, no PL, no SIL, no PFH. |
 | `scripts/wheel_odometry.py` | Tricycle dead reckoning from the vehicle's own joint states, through two modelled encoders. Publishes an estimate and **no transform**, plus the encoder-derived standstill verdict. |
 | `scripts/imu_gate.py` | Stops offering the gyro's yaw rate to the EKF while the encoders report the wheels standing still — the interval in which that reading is bias and not rotation. Suppresses; never rewrites a sample; **estimates no bias**; fails open. |
 | `ekf.yaml` | `robot_localization` parameters. The EKF is the **sole** publisher of `forklift/odom → forklift/base_link`. Its `imu0` is the **gated** IMU topic. |
@@ -607,7 +608,15 @@ real-time cost of that has not been measured**, and no sample count or update
 rate in `model.sdf` goes up until someone measures what it buys and writes the
 figure down. `<visualize>true</visualize>` is set on all three, which is
 necessary but not sufficient to draw the rays: the world also needs a
-`VisualizeLidar` GUI plugin, and that belongs to `sim/`. Isolate both
+`VisualizeLidar` GUI plugin, and that belongs to `sim/`. **And the topic to
+select in that plugin is one of the three `/forklift/gz/viz/*` streams, not a
+measurement channel**: on this Gazebo build the `world_pose` field the plugin
+anchors its drawing to is the sensor's static SDF pose — identity here, since
+`model.sdf` mounts every scanner via its link — so a fan drawn from a
+measurement channel stands at the world origin whatever the vehicle does.
+`scripts/scan_viz_repeater.cc` (launch argument `lidar_viz`, on whenever
+`gui` is) republishes each scan with a live anchor and nothing else changed;
+`EVIDENCE_SENSOR_COVERAGE.md` section 16 is the measurement. Isolate both
 transports whenever another simulation may be running: `ROS_DOMAIN_ID` does not
 isolate Gazebo, `GZ_PARTITION` does.
 
@@ -630,10 +639,13 @@ streams, one owner"), `imu_gate` (**default `true`**, the zero angular
 rate update; setting it false remaps the filter back onto the raw IMU and
 reproduces the m5-07c configuration exactly rather than leaving the
 filter without an IMU, and `imu_gate:=true wheel_odom:=false` is refused
-at launch), and `seed` (**default empty**, a `gz sim --seed` value that
-fixes the sign and magnitude every sensor bias is drawn with — a
-measurement facility, so that a before-and-after compares two runs of one
-vehicle rather than two draws; no node reads it).
+at launch), `lidar_viz` (**default = the value of `gui`**, the
+`/forklift/gz/viz/*` anchor-repaired scan streams the `VisualizeLidar`
+plugin should be pointed at — see the scripts table entry), and `seed`
+(**default empty**, a `gz sim --seed` value that fixes the sign and
+magnitude every sensor bias is drawn with — a measurement facility, so
+that a before-and-after compares two runs of one vehicle rather than two
+draws; no node reads it).
 
 Checking the vehicle rather than trusting it. The first two need no
 simulator and no ROS; the third needs a running graph, and the fourth

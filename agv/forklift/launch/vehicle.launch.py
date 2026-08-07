@@ -79,6 +79,7 @@ _SAFE_SPEED_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts',
 _SAFE_SPEED_LINK_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts',
                                        'safe_speed_link.py')
 _STO_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'sto_contactor.py')
+_SCAN_VIZ_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'scan_viz_repeater.sh')
 _WHEEL_ODOM_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'wheel_odometry.py')
 _IMU_GATE_SCRIPT = os.path.join(_FORKLIFT_DIR, 'scripts', 'imu_gate.py')
 _EKF_YAML = os.path.join(_FORKLIFT_DIR, 'ekf.yaml')
@@ -307,6 +308,49 @@ def _estimator_filter(context, *args, **kwargs):
     )]
 
 
+def _scan_viz_repeater(context, *args, **kwargs):
+    """The GUI anchor repair for the three lidar fans (m5-73).
+
+    gz-sensors 8.2.2 fills each LaserScan's world_pose with the sensor's
+    STATIC SDF pose - identity here, because model.sdf writes every mount
+    into the link - so the GUI's VisualizeLidar plugin, whose anchor is
+    that field, draws all three fans at the world origin. The m5-05 arena
+    captures looked right only because that vehicle spawned AT the
+    origin. scripts/scan_viz_repeater.cc republishes each scan on a
+    /forklift/gz/viz/* topic with world_pose replaced by the sensor
+    link's live world pose and nothing else changed; a viewer picks the
+    viz topic in the plugin's combo box. Visualization only: no vehicle
+    node reads these topics, they are never bridged onto ROS, and the
+    measurement channels are untouched (verified against the navigation
+    lidar at two poses, EVIDENCE_SENSOR_COVERAGE.md section 16).
+
+    Built as a function so the optional --world flag is absent entirely
+    when `world_name` is empty and the tool discovers the running world,
+    exactly as the spawn does.
+    """
+    if LaunchConfiguration('lidar_viz').perform(context).lower() != 'true':
+        return []
+    name = LaunchConfiguration('name').perform(context)
+    world_name = LaunchConfiguration('world_name').perform(context).strip()
+    frames = _CFG['frames']
+    cmd = [_SCAN_VIZ_SCRIPT, '--model', name]
+    if world_name:
+        cmd += ['--world', world_name]
+    for scan_key, frame_key, viz_key in (
+            ('gz_scan_nav', 'nav_lidar', 'gz_viz_scan_nav'),
+            ('gz_safety_scanner_front_measurement', 'safety_scanner_front',
+             'gz_viz_safety_scanner_front'),
+            ('gz_safety_scanner_rear_measurement', 'safety_scanner_rear',
+             'gz_viz_safety_scanner_rear')):
+        cmd += ['--chan', '{}={}={}'.format(
+            _TOPICS[scan_key], frames[frame_key], _TOPICS[viz_key])]
+    return [ExecuteProcess(
+        cmd=cmd,
+        name='scan_viz_repeater',
+        output='screen',
+    )]
+
+
 def _refuse_two_transform_sources(context, *args, **kwargs):
     """Abort the launch rather than put two publishers on one TF edge.
 
@@ -382,6 +426,20 @@ def generate_launch_description():
     ld.add_action(DeclareLaunchArgument(
         'gui', default_value='false',
         description='Also start the Gazebo GUI client (headless if false)'))
+    ld.add_action(DeclareLaunchArgument(
+        'lidar_viz', default_value=LaunchConfiguration('gui'),
+        description='Start scripts/scan_viz_repeater.sh, which republishes '
+                    'each gz LaserScan with the world_pose field replaced by '
+                    'the sensor\'s live world pose, on the three '
+                    '/forklift/gz/viz/* topics. GUI ANCHOR REPAIR ONLY: on '
+                    'this stack the field is the sensor\'s static SDF pose '
+                    '(identity, since model.sdf mounts each scanner via its '
+                    'LINK pose), so the VisualizeLidar plugin draws every '
+                    'fan at the world origin (m5-73). Ranges, angles, frame '
+                    'and stamp are copied untouched, and no vehicle node '
+                    'reads the viz topics. Defaults to the value of `gui` '
+                    'because the one consumer is the GUI; a headless run '
+                    'pays nothing.'))
     ld.add_action(DeclareLaunchArgument(
         'server', default_value='true',
         description='Start the gz server here. Set false to spawn into a '
@@ -536,6 +594,10 @@ def generate_launch_description():
         }.items(),
         condition=IfCondition(gui),
     ))
+
+    # The lidar-fan anchor repair, on whenever the GUI is (see the
+    # docstring of _scan_viz_repeater and the lidar_viz argument).
+    ld.add_action(OpaqueFunction(function=_scan_viz_repeater))
 
     # One spawn of the model file. It is a plain <model>, so it can be
     # dropped into any world without that world including agv/ anywhere.

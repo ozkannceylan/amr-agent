@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<sdf version="1.10">
+  <world name="probe_world">
+    <physics name="fast" type="ignored"><real_time_factor>1.0</real_time_factor></physics>
+    <plugin name="gz::sim::systems::Physics" filename="libgz-sim-physics-system.so"/>
+    <plugin name="gz::sim::systems::UserCommands" filename="libgz-sim-user-commands-system.so"/>
+    <plugin name="gz::sim::systems::SceneBroadcaster" filename="libgz-sim-scene-broadcaster-system.so"/>
+    <plugin name="gz::sim::systems::Sensors" filename="libgz-sim-sensors-system.so">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <model name="wall"><static>true</static><pose>10 0 0 0 0 0</pose>
+      <link name="l"><collision name="c"><geometry><box><size>0.2 20 2</size></box></geometry></collision>
+      <visual name="v"><geometry><box><size>0.2 20 2</size></box></geometry></visual></link>
+    </model>
+    <model name="probe">
+      <static>true</static>
+      <pose>4 -2 0 0 0 0.7</pose>
+      <link name="sensor_pose_link">
+        <sensor name="lidar_sensorpose" type="gpu_lidar">
+          <pose>1.5 2.5 0.5 0 0 1.0</pose>
+          <topic>/probe/scan_sensorpose</topic>
+          <update_rate>5</update_rate>
+          <lidar><scan><horizontal><samples>5</samples><min_angle>-0.5</min_angle><max_angle>0.5</max_angle></horizontal></scan>
+          <range><min>0.1</min><max>20.0</max></range></lidar>
+        </sensor>
+      </link>
+      <link name="link_pose_link">
+        <pose>1.5 2.5 0.5 0 0 1.0</pose>
+        <sensor name="lidar_linkpose" type="gpu_lidar">
+          <pose>0 0 0 0 0 0</pose>
+          <topic>/probe/scan_linkpose</topic>
+          <update_rate>5</update_rate>
+          <lidar><scan><horizontal><samples>5</samples><min_angle>-0.5</min_angle><max_angle>0.5</max_angle></horizontal></scan>
+          <range><min>0.1</min><max>20.0</max></range></lidar>
+        </sensor>
+      </link>
+    </model>
+  </world>
+</sdf>

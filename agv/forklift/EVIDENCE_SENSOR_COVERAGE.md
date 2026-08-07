@@ -1044,3 +1044,106 @@ world point and does not follow the vehicle. `gz model --list` also confirms
 Nothing in `agv/` consumes that field, so no node is misled by it and no
 change is made here. The full measurement, the table of all three sensors and
 the limits of the claim are in `EVIDENCE_FIELD_EVALUATION.md` section 28.
+
+## 16. Why `world_pose` is identity, when the visual "worked", and the repair (m5-73)
+
+**2026-08-07.** Section 15 located the visual fault in the `world_pose` field.
+This section answers the regression question — *when did it stop being the
+sensor's pose?* — and records the repair and the proof that the repair moved
+nothing but the drawn anchor.
+
+### 16.1 The mechanism, isolated in a two-sensor probe
+
+On this stack (gz-sim 8.11.0, gz-sensors 8.2.2) the `world_pose` field of
+`gz.msgs.LaserScan` is **not a world pose at all**: it is the sensor's static
+SDF `<pose>` relative to its parent link, copied at load and never composed
+with the model's pose. Probe (`evidence/m5-73/world_pose-probe.sdf`): one
+model spawned at `(4, -2, yaw 0.7)` carrying two lidars —
+
+| Where the SDF declares the mount | `world_pose` published | after teleport to `(-7, 5, yaw 90°)` |
+|---|---|---|
+| in the **sensor** element, `(1.5, 2.5, 0.5, yaw 1.0)` | `(1.5, 2.5, 0.5, yaw 1.0)` — the raw SDF pose, uncomposed | byte-identical |
+| in the **link** element, sensor pose identity | identity | byte-identical |
+
+`model.sdf` deliberately writes every scanner mount into the **link** pose and
+leaves the sensor pose identity, so that the measurement frame and
+`<gz_frame_id>` agree — that is the second row, and it is why all three
+streams publish identity. The teleport was verified by pose read-back both
+times.
+
+### 16.2 It never was a regression, and the owner's memory is honest
+
+The m5-05 arena captures (`assets/m5-forklift/beams-*.png`, 2026-07-30) were
+taken through `vehicle.launch.py` with the config.yaml default spawn —
+`(0, 0, 0.05, yaw 0)`, **the world origin**. An identity-anchored fan and a
+vehicle parked at the origin coincide, so the beams sat on the vehicle in
+every capture, and m5-05's own open question 4 records that **nothing was
+measured with the vehicle moving**. The sensor SDF nesting is unchanged since
+the first scanner commit (`4b623c1`); what changed is the spawn:
+`sim/launch/warehouse_bringup.launch.py` (commits `3fb88a0`, then `20efbb1`)
+moved the start pose to `(-3.00, -5.50)`, and the origin-anchored fan stayed
+behind — 3.00 m ahead and 5.50 m left of the vehicle, exactly where the owner
+saw it. **The visual never tracked the vehicle on this Gazebo build; it
+coincided with it.**
+
+### 16.3 The repair: three viz streams with a live anchor, nothing else touched
+
+`scripts/scan_viz_repeater.cc` (built and run by `scan_viz_repeater.sh`,
+started by `vehicle.launch.py lidar_viz:=`, default = `gui`) subscribes to
+`/world/<world>/pose/info`, composes the model's world pose with the sensor
+link's model-relative pose, and republishes each scan on
+`/forklift/gz/viz/{scan_nav, safety_scanner_front, safety_scanner_rear}` with
+**only `world_pose` replaced**. The viewer picks the viz topic in the
+`VisualizeLidar` combo box. The three measurement channels are not written,
+renamed or re-timed — the repeater is one more subscriber on each — and no
+vehicle node reads the viz topics. Visualization only: no Category, no
+Performance Level, no SIL, no PFH.
+
+### 16.4 Demonstrated at two poses with the vehicle driving between them
+
+Headless warehouse stack, `GZ_PARTITION=m573stack`, spawn `(-3.00, -5.50,
+yaw 0)`. All figures from `evidence/m5-73/`.
+
+* **Pose A (spawn), at rest**: viz front anchor `(-2.3000, -5.0500, 0.150,
+  yaw 45.000°)` against expected mount-composed pose — error **0.0000 m /
+  0.00000 rad** (`poseA-viz_safety_scanner_front.json`).
+* **Driven 11.2 m** under `/forklift/cmd/traction_speed 0.5`, 14 samples of
+  (model pose, viz anchor) while moving (`drive-track.csv`): the anchor
+  advances with the vehicle sample for sample; the apparent x lag equals the
+  drive speed times the sequential CLI sampling skew, and the unmoving y axis
+  shows the mount offset exact (`-5.05`).
+* **At rest after the drive**, model `(8.2260, -5.5048)`: anchor
+  `(8.9262, -5.0551)` — mount-composed expectation to sub-millimetre
+  (`poseB-drive-vizfront.txt`).
+* **Pose C = m5-72's second pose** `(1.5, -5.5, yaw 45°)`, teleport verified
+  by read-back: anchor `(1.6768, -4.6868, yaw 90.000°)`, error **0.0000 m**
+  (`poseC-viz_safety_scanner_front.json`).
+
+The one step this file cannot show is the pixel on screen: `VisualizeLidar`
+draws whatever topic a human selects, so the on-camera confirmation is
+selecting `/forklift/gz/viz/...` instead of the measurement channel. The
+plugin's anchor IS the `world_pose` field — that is what section 15 measured
+when the fan stood at the origin — so the corrected field is the corrected
+drawing.
+
+### 16.5 The fix does not move the measurement
+
+* **Same agreement, same two poses, same method as m5-72 §27(a)**
+  (`agreement.py`, captures beside it):
+
+  | Vehicle pose | front in-range | median | q90 | max | m5-72 committed |
+  |---|---|---|---|---|---|
+  | `(-3.000, -5.500, 0°)` | n = 155 | **0.072 m** | 0.909 m | 1.151 m | 0.072 m (n = 156) |
+  | `(+1.500, -5.500, 45°)` | n = 114 | **0.016 m** | 0.429 m | 2.379 m | 0.017 m (n = 114) |
+
+  The certified figures reproduce to the millimetre with the repeater
+  running.
+* **Ray-for-ray content identity**: 25 simultaneous scans paired by header
+  stamp between `/forklift/gz/safety_scanner_front/measurement` and its viz
+  twin — ranges, intensities and frame identical in **25 of 25**
+  (`pair-meas.jsonl`, `pair-viz.jsonl`).
+* **The measurement streams still publish `world_pose` identity** — they are
+  untouched, and any consumer that ever did read that field would see exactly
+  what it saw before.
+* `model.sdf` was **not modified**: no sensor pose, angle, range or ray count
+  changed. `git diff` on the file is empty for this brief.
