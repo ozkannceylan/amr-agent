@@ -120,6 +120,39 @@ REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # --------------------------------------------------------------------------- #
 export GZ_PARTITION="${GZ_PARTITION:-m5demo}"
 
+# --------------------------------------------------------------------------- #
+# THE GPU. Mesa defaults to llvmpipe under WSLg even when a GPU is reachable,
+# and this machine has been rendering the whole simulation in SOFTWARE:
+# measured 2026-08-07, GL_RENDERER = llvmpipe (LLVM 20.1.2) in Gazebo's own
+# ogre2 log, while an RTX 4050 sat idle behind /dev/dxg.
+#
+# Selecting Mesa's d3d12 driver routes GL through WSL's D3D12 shim to the real
+# adapter. Measured the same day, same machine, same glxinfo:
+#     default   Mesa / llvmpipe (LLVM 20.1.2, 256 bits)
+#     d3d12     Microsoft Corporation / D3D12 (NVIDIA GeForce RTX 4050 Laptop
+#               GPU), OpenGL 4.6 core
+#
+# WHY IT IS NOT COSMETIC. Gazebo's Visualize Lidar plugin refreshes the fan's
+# anchor only in the gap between finishing a frame and the next scan arriving
+# (VisualizeLidar.cc: the pose is re-read from the sensor ENTITY, and only when
+# !visualDirty). At 10 Hz that gap is 100 ms, and under llvmpipe the GUI was
+# measured at 355 % CPU and could not open it -- so the rays froze in place
+# while the vehicle drove away from them. The gpu_lidar sensors themselves also
+# raycast in the server's renderer, which is the same software path.
+#
+# HONEST CONSEQUENCE: this changes the rendering environment that every
+# committed timing figure is qualified by. Renderer-sensitive numbers -- RTF,
+# scan inter-arrival, anything measured with the GUI attached -- must be
+# re-measured before being cited against a run made this way.
+#
+# AMR_FORCE_SOFTWARE_GL=1 restores the old software path.
+if [ "${AMR_FORCE_SOFTWARE_GL:-0}" != "1" ] && [ -e /dev/dxg ] && \
+   [ -r /usr/lib/wsl/lib/libd3d12.so ]; then
+    export GALLIUM_DRIVER="${GALLIUM_DRIVER:-d3d12}"
+    export MESA_D3D12_DEFAULT_ADAPTER_NAME="${MESA_D3D12_DEFAULT_ADAPTER_NAME:-NVIDIA}"
+    export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
 # THE DOMAIN IS THE ALLOCATION TABLE'S, NOT THIS SCRIPT'S (invariant 10).
 #
 # agv/forklift/vehicles/allocation.yaml declares itself "THE ONE OWNER OF THE
