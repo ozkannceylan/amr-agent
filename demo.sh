@@ -1287,16 +1287,63 @@ cmd_status() {
 
 # --------------------------------------------------------------------------- #
 
+# Put the vehicle back where it started, without restarting anything.
+#
+# A protective stop is not self-clearing and must not be: while the field is
+# occupied the reset is REFUSED, which is the behaviour this cell exists to
+# demonstrate. But a vehicle that has stopped nose-to-rack cannot reverse out
+# of its own field either -- no motion is permitted -- so the only ways out
+# were a full restart or dragging the model with the mouse. This is the third.
+#
+# It moves the MODEL IN THE SIMULATOR. It clears no latch, writes no node and
+# touches neither PLC. Once the field is clear the monitored reset is the only
+# thing that restores motion, exactly as before.
+#
+# The pose comes from read_spawn_pose(), so it is the same spawn the stack was
+# brought up with rather than a second copy of those numbers.
+cmd_home() {
+    local model world before after
+    model="${AMR_DEMO_MODEL:-Forklift}"
+    world="$(basename "$WORLD" .sdf)"
+
+    # set -u is relaxed across this source: the ROS setup scripts read
+    # variables they have not set yet.
+    set +u; . "$ROS_SETUP"; set -u
+
+    read_spawn_pose
+    before="$(gz model -m "$model" -p 2>/dev/null | sed -n '/Pose/,+1p' | tail -1 | tr -s ' ')"
+
+    gz service -s "/world/$world/set_pose" \
+        --reqtype gz.msgs.Pose --reptype gz.msgs.Boolean --timeout 3000 \
+        --req "name: \"$model\", position: {x: $SPAWN_X, y: $SPAWN_Y, z: $SPAWN_Z}, orientation: {w: 1.0}" \
+        >/dev/null 2>&1
+
+    # READ IT BACK. set_pose answers `data: true` and silently does nothing
+    # when it cannot resolve the entity, so the reply is not evidence.
+    sleep 1
+    after="$(gz model -m "$model" -p 2>/dev/null | sed -n '/Pose/,+1p' | tail -1 | tr -s ' ')"
+    if [ -z "$after" ]; then
+        fail "could not read the pose back, so the move is unproven. Is the"
+        fail "simulator up, and is GZ_PARTITION=$GZ_PARTITION right?"
+        return 1
+    fi
+    printf '  was  %s\n  now  %s\n' "${before:-unknown}" "$after"
+    note "the vehicle is home. Any latched demand is STILL LATCHED -- moving"
+    note "the model clears nothing. Once the field reads clear, do the"
+    note "monitored reset at the bench panel, then re-select the mode."
+}
+
 main() {
     local action="${1:---help}"
     [ $# -gt 0 ] && shift
     case "$action" in
         (up)                cmd_up "$@" ;;
         (down)              cmd_down "$@" ;;
+        (home)              cmd_home "$@" ;;
         (status)            cmd_status "$@" ;;
         (check)             POWERSHELL="$(find_powershell || true)"; cmd_check "$@" ;;
         (-h|--help|help)    usage ;;
-        (*)                 die "unknown command '$action' (up | down | status | check)" ;;
+        (*)                 die "unknown command '$action' (up | down | home | status | check)" ;;
     esac
 }
 
