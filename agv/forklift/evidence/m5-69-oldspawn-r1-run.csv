@@ -1,0 +1,2 @@
+t_sim,gt_x,gt_y,gt_yaw,amcl_x,amcl_y,amcl_yaw,cmd_v,cmd_w,steer,traction,refusals
+53.824,-6.000000,-5.500000,-0.000000,-0.014123,0.089123,-0.007696,0.000000,0.000000,nan,nan,0

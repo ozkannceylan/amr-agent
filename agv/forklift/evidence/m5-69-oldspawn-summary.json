@@ -1,0 +1,70 @@
+{
+  "tag": "m5-69-oldspawn",
+  "repeats_requested": 1,
+  "runs": [
+    {
+      "tag": "m5-69-oldspawn-r1",
+      "index": 1,
+      "started_utc": "2026-08-07T08:46:53Z",
+      "gz_partition": "m569oldr1",
+      "ros_domain_id": "51",
+      "spawn_world": [
+        -6.0,
+        -5.5,
+        0.0
+      ],
+      "goal_world": [
+        1.0,
+        -5.5,
+        0.0
+      ],
+      "mode": "goal",
+      "guard": {
+        "processes": 0,
+        "loadavg": "1.60 1.99 1.23 1/673 306839",
+        "shm": 84
+      },
+      "spawn_map": [
+        -0.014122825931266014,
+        0.08912309134442076,
+        -0.007915259
+      ],
+      "mission_wall_s": 4.56,
+      "mission_returncode": 1,
+      "launch_alive_after_mission": {
+        "sim": true,
+        "loc": true,
+        "nav": true
+      },
+      "navigate_to_pose_present_after": "1",
+      "plan": {
+        "goal_world": [
+          1.0,
+          -5.5,
+          0.0
+        ],
+        "goal_map": [
+          6.985657895575949,
+          0.03371685689431647,
+          -0.007915259
+        ],
+        "status": "ABORTED",
+        "error_code": 205,
+        "elapsed_s": 0.04200000000000159,
+        "plans_published": 0,
+        "refusals": 0,
+        "first_plan_map": null,
+        "last_plan_map": null
+      },
+      "verdict": "ABORTED",
+      "machine": {
+        "samples": 40,
+        "peak_load1": 5.4,
+        "peak_stack_rss_mb": 1654.6,
+        "min_mem_available_mb": 13060.7
+      },
+      "processes_left_after_teardown": 0,
+      "ended_utc": "2026-08-07T08:48:02Z"
+    }
+  ]
+}

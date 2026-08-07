@@ -1,0 +1,1 @@
+{"goal_world": [1.0, -5.5, 0.0], "goal_map": [6.985657895575949, 0.03371685689431647, -0.007915259], "status": "ABORTED", "error_code": 205, "elapsed_s": 0.04200000000000159, "plans_published": 0, "refusals": 0, "first_plan_map": null, "last_plan_map": null}

@@ -189,15 +189,44 @@ _FORKLIFT_BRINGUP = os.path.join(_THIS_DIR, 'forklift_bringup.launch.py')
 # exactly one path, the M4 bringup beside it, and every agv/ path is
 # resolved by agv/forklift/launch/vehicle.launch.py from its own location.
 
-# Spawn pose. The dock aisle south of rack row C runs along y = -5.50; x =
-# -6.00 puts the vehicle in the open west half of it, facing +x, with the
-# central cross aisle ahead and both charging bays behind its right shoulder.
-# The vehicle's plan envelope there is x in [-7.875, -5.140], y in [-6.020,
-# -4.980]: clear of rack row C's south face at y = -3.80, of the building
-# column at (-4.60, -7.00) and of both charge bay outlines, which end at
-# y = -6.10 and are paint in any case. Overridable per run: a scenario that
-# wants a different start pose passes it rather than editing this file.
-_SPAWN_X = '-6.00'
+# Spawn pose. The dock aisle south of rack row C runs along y = -5.50, and
+# the vehicle stands in it facing +x, with the central cross aisle ahead and
+# both charging bays behind its right shoulder. Overridable per run: a
+# scenario that wants a different start pose passes it rather than editing
+# this file.
+#
+# x WAS -6.00 UNTIL m5-69, AND -6.00 IS A POSE NO MISSION CAN START FROM.
+#
+#   The world is open there - the argument this comment used to make, that
+#   the plan envelope x in [-7.875, -5.140] y in [-6.020, -4.980] is clear
+#   of rack row C's south face, of the column at (-4.60, -7.00) and of both
+#   charge-bay outlines, is still TRUE OF THE WORLD. It was the wrong
+#   question. Nav2 does not plan against sim/worlds/warehouse.sdf. It plans
+#   against sim/maps/warehouse/warehouse.pgm, the SLAM grid, and THE GRID
+#   DOES NOT COVER THAT CORNER: 21.6 % of it is unmapped, and the dock
+#   aisle's mapped free space begins at x = -5.00. At x = -6.00 the
+#   vehicle's padded footprint outline crosses 36 unmapped cells and its
+#   inscribed circle has 0.430 m of clearance against a 0.769 m inscribed
+#   radius, so the pose is invalid at 55 of 72 headings and fits at NONE.
+#
+#   Measured, not argued: `nav2_run.py plan` against a bare map_server and
+#   planner_server returns 205 START_OCCUPIED in 0.014 s from (-6.00,
+#   -5.50) and SUCCEEDED in 0.007 s from the pose below. m5-68's mission
+#   attempt is that refusal, seen from the far end as 0 plans in 100 s.
+#   The full geometry is agv/forklift/EVIDENCE_NAV2.md section 13 and is
+#   re-derivable with
+#
+#     python3 agv/forklift/scripts/start_pose_check.py pose --x -6 --y -5.5
+#
+#   x = -3.00 is chosen for MARGIN, not for the shortest move that works.
+#   It stands 2.00 m east of the first valid pose in this aisle, carries
+#   1.972 m of inscribed clearance - the local maximum along y = -5.50 -
+#   and lies in the grid's one large passable component, so it is not a
+#   pose a 0.661 m localisation excursion can push back out of the map.
+#   THE PLANNER'S allow_unknown STAYS false. Moving the vehicle into the
+#   mapped building is the fix; letting it plan through space nothing has
+#   ever seen is a different decision and not this file's to take.
+_SPAWN_X = '-3.00'
 _SPAWN_Y = '-5.50'
 _SPAWN_Z = '0.05'
 _SPAWN_YAW = '0.0'

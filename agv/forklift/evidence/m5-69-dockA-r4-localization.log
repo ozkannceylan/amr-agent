@@ -1,0 +1,63 @@
+# 2026-08-07T08:53:58Z
+# ros2 launch agv/forklift/launch/localization.launch.py initial_pose_x:=2.985783 initial_pose_y:=0.065378 initial_pose_yaw:=-0.007915
+[INFO] [launch]: All log files can be found below /home/ozkan/.ros/log/2026-08-07-10-53-59-603961-ozkannotebook-315863
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [map_server-1]: process started with pid [315957]
+[INFO] [amcl-2]: process started with pid [315958]
+[amcl-2] [INFO] [1786092839.957513765] [amcl]: 
+[amcl-2] 	amcl lifecycle node launched. 
+[amcl-2] 	Waiting on external lifecycle transitions to activate
+[amcl-2] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[amcl-2] [INFO] [1786092839.957883973] [amcl]: Creating
+[map_server-1] [INFO] [1786092839.958587099] [map_server]: 
+[map_server-1] 	map_server lifecycle node launched. 
+[map_server-1] 	Waiting on external lifecycle transitions to activate
+[map_server-1] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[map_server-1] [INFO] [1786092839.958674924] [map_server]: Creating
+[map_server-1] [INFO] [1786092840.409466148] [map_server]: Configuring
+[map_server-1] [INFO] [1786092840.409554746] [map_io]: Loading yaml file: /mnt/c/Users/ozkan/projects/amr-agent/sim/maps/warehouse/warehouse.yaml
+[map_server-1] [INFO] [1786092840.413251613] [map_io]: resolution: 0.05
+[map_server-1] [INFO] [1786092840.413312284] [map_io]: origin[0]: -9.145
+[map_server-1] [INFO] [1786092840.413322040] [map_io]: origin[1]: -4.778
+[map_server-1] [INFO] [1786092840.413327001] [map_io]: origin[2]: 0
+[map_server-1] [INFO] [1786092840.413332208] [map_io]: free_thresh: 0.196
+[map_server-1] [INFO] [1786092840.413336668] [map_io]: occupied_thresh: 0.65
+[map_server-1] [INFO] [1786092840.413342752] [map_io]: mode: trinary
+[map_server-1] [INFO] [1786092840.413348012] [map_io]: negate: 0
+[map_server-1] [INFO] [1786092840.413580590] [map_io]: Loading image_file: /mnt/c/Users/ozkan/projects/amr-agent/sim/maps/warehouse/warehouse.pgm
+[map_server-1] [INFO] [1786092840.427414479] [map_io]: Read map /mnt/c/Users/ozkan/projects/amr-agent/sim/maps/warehouse/warehouse.pgm: 606 X 410 map @ 0.05 m/cell
+[INFO] [launch.user]: map_server configured; activating
+[map_server-1] [INFO] [1786092840.435448814] [map_server]: Activating
+[map_server-1] [INFO] [1786092840.435698919] [map_server]: Creating bond (map_server) to lifecycle manager.
+[INFO] [launch.user]: map_server active; configuring amcl
+[amcl-2] [INFO] [1786092840.438897768] [amcl]: Configuring
+[amcl-2] [INFO] [1786092840.438975529] [amcl]: initTransforms
+[amcl-2] [INFO] [1786092840.445188819] [amcl]: initPubSub
+[amcl-2] [INFO] [1786092840.451496255] [amcl]: Subscribed to map topic.
+[INFO] [launch.user]: amcl configured; activating
+[amcl-2] [INFO] [1786092840.456879399] [amcl]: Activating
+[amcl-2] [INFO] [1786092840.456917945] [amcl]: initialPoseReceived
+[amcl-2] [INFO] [1786092840.456985525] [amcl]: Setting pose (1.676000): 2.986 0.065 -0.008
+[amcl-2] [INFO] [1786092840.457238376] [amcl]: Creating bond (amcl) to lifecycle manager.
+[INFO] [launch.user]: amcl active: map -> forklift/odom is now published by amcl and by nothing else. The check that this launch worked is that /amcl_pose and /particle_cloud appear on `ros2 topic list` and that map -> forklift/odom appears on /tf - never a clean-looking log.
+[amcl-2] [INFO] [1786092840.462408480] [amcl]: Received a 606 X 410 map @ 0.050 m/pix
+[amcl-2] [INFO] [1786092840.518688252] [amcl]: createLaserObject
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[INFO] [amcl-2]: sending signal 'SIGINT' to process[amcl-2]
+[INFO] [map_server-1]: sending signal 'SIGINT' to process[map_server-1]
+[amcl-2] [INFO] [1786092902.795261978] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[amcl-2] [INFO] [1786092902.795356823] [amcl]: Running Nav2 LifecycleNode rcl preshutdown (amcl)
+[amcl-2] [INFO] [1786092902.795493107] [amcl]: Deactivating
+[amcl-2] [INFO] [1786092902.795518091] [amcl]: Destroying bond (amcl) to lifecycle manager.
+[map_server-1] [INFO] [1786092902.795330826] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[map_server-1] [INFO] [1786092902.795401719] [map_server]: Running Nav2 LifecycleNode rcl preshutdown (map_server)
+[map_server-1] [INFO] [1786092902.795497488] [map_server]: Deactivating
+[map_server-1] [INFO] [1786092902.795513640] [map_server]: Destroying bond (map_server) to lifecycle manager.
+[ERROR] [amcl-2]: process has died [pid 315958, exit code -2, cmd '/opt/ros/jazzy/lib/nav2_amcl/amcl --ros-args -r __node:=amcl -r __ns:=/ --params-file /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/amcl.yaml --params-file /tmp/launch_params_u4za77ol'].
+[map_server-1] [INFO] [1786092902.806116545] [map_server]: Cleaning up
+[map_server-1] [INFO] [1786092902.806191785] [map_server]: Destroying bond (map_server) to lifecycle manager.
+[map_server-1] [INFO] [1786092902.816396176] [map_server]: Destroying
+[amcl-2] [INFO] [1786092902.806185588] [amcl]: Cleaning up
+[amcl-2] [INFO] [1786092902.809732820] [amcl]: Destroying bond (amcl) to lifecycle manager.
+[amcl-2] [INFO] [1786092902.818663214] [amcl]: Destroying
+[ERROR] [map_server-1]: process has died [pid 315957, exit code -2, cmd '/opt/ros/jazzy/lib/nav2_map_server/map_server --ros-args -r __node:=map_server -r __ns:=/ --params-file /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/amcl.yaml --params-file /tmp/launch_params_5w_9a5o2'].

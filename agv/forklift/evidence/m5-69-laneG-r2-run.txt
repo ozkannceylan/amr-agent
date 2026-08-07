@@ -1,0 +1,35 @@
+[2026-08-07T09:20:00Z] === repeat 2 of 5  tag m5-69-laneG-r2
+[2026-08-07T09:20:00Z] isolation GZ_PARTITION=m569laneGr2 ROS_DOMAIN_ID=92
+[2026-08-07T09:20:01Z] guard: 0 matching processes, load [2.66 1.58 1.93 1/620 336201], /dev/shm 585 entries
+[2026-08-07T09:20:01Z] stage 1 (simulator + vehicle): ros2 launch sim/launch/warehouse_bringup.launch.py x:=-3.0 y:=-5.5 yaw:=0.0 estimator:=true
+[2026-08-07T09:20:09Z]    /forklift/odom: advertised and publishing
+[2026-08-07T09:20:09Z] spawn world (-3.0000, -5.5000, +0.0000) -> map (+2.985783, +0.065378, -0.007915)
+[2026-08-07T09:20:09Z] stage 2 (localizer): ros2 launch agv/forklift/launch/localization.launch.py initial_pose_x:=2.985783 initial_pose_y:=0.065378 initial_pose_yaw:=-0.007915
+[2026-08-07T09:20:13Z]    /particle_cloud: advertised
+[2026-08-07T09:20:18Z]    map -> forklift/odom: published
+[2026-08-07T09:20:18Z] stage 3 (navigation): ros2 launch agv/forklift/launch/navigation.launch.py gate:=false cmd_topic:=/cmd_vel_smoothed
+[2026-08-07T09:20:34Z]    /plan: advertised
+[2026-08-07T09:20:34Z] settling 25 wall s before the goal
+[2026-08-07T09:20:59Z] mission: cd /mnt/c/Users/ozkan/projects/amr-agent && python3 agv/forklift/scripts/nav2_run.py goal --x 9.0 --y -7.0 --yaw 0.0 --settle 30.0 --timeout 180.0 --csv /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-69-laneG-r2-run.csv --plan /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-69-laneG-r2-plan.json --cmd-topic /cmd_vel_smoothed
+registration  theta -0.007915259 rad  t (+6.029223, +5.541460) m  FLOOR rms 0.0404 MAX 0.1411 m
+goal  world (+9.0000, -7.0000) yaw +0.0000 rad  ->  map (+14.9735, -1.5296) yaw -0.0079 rad
+goal ACCEPTED at t_sim 59.22
+
+RESULT           SUCCEEDED
+error_code       none
+elapsed          21.77 s of simulation time
+plans published  22
+refusals         0 rotation-in-place commands refused by the converter
+final BELIEVED   map (+14.7756, -1.5706) yaw +0.1210
+  carried to world (+8.8024, -7.0426) yaw +0.1289
+final TRUTH      world (+8.7934, -7.0518) yaw +0.1242
+ABSOLUTE goal error (truth vs commanded goal): 0.2130 m (1.51 x floor)
+  heading error +7.116 deg
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-69-laneG-r2-run.csv (218 samples)
+wrote /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/evidence/m5-69-laneG-r2-plan.json
+
+[2026-08-07T09:21:26Z] launch processes alive after the mission: {'sim': True, 'loc': True, 'nav': True}
+[2026-08-07T09:21:27Z] /navigate_to_pose present after the mission: 1
+[2026-08-07T09:21:27Z] VERDICT SUCCEEDED
+[2026-08-07T09:21:27Z] machine over the repeat: peak load 7.85, peak stack RSS 1672 MB, min available memory 13049.8 MB, 58 samples
+[2026-08-07T09:21:37Z] teardown: 0 matching processes remain

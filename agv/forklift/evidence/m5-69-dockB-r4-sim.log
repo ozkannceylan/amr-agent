@@ -1,0 +1,123 @@
+# 2026-08-07T09:02:02Z
+# ros2 launch sim/launch/warehouse_bringup.launch.py x:=-3.0 y:=-5.5 yaw:=0.0 estimator:=true
+[INFO] [launch]: All log files can be found below /home/ozkan/.ros/log/2026-08-07-11-02-03-305684-ozkannotebook-326302
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [gazebo-1]: process started with pid [326401]
+[INFO] [create-2]: process started with pid [326402]
+[INFO] [parameter_bridge-3]: process started with pid [326403]
+[INFO] [wheel_odometry-4]: process started with pid [326405]
+[INFO] [imu_gate-5]: process started with pid [326406]
+[INFO] [ekf_node-6]: process started with pid [326407]
+[INFO] [sensor_tf-7]: process started with pid [326408]
+[INFO] [sto_contactor-8]: process started with pid [326466]
+[create-2] [INFO] [1786093323.777719691] [spawn_forklift]: Requesting list of world names.
+[parameter_bridge-3] [INFO] [1786093323.782332266] [forklift_bridge]: Creating GZ->ROS Bridge: [/clock (gz.msgs.Clock) -> /clock (rosgraph_msgs/msg/Clock)] (Lazy 0)
+[ekf_node-6] [INFO] [1786093323.782400381] [forklift_ekf]: Waiting for clock to start...
+[parameter_bridge-3] [INFO] [1786093323.851133028] [forklift_bridge]: Creating ROS->GZ Bridge: [/forklift/gz/actuator/steer_cmd (std_msgs/msg/Float64) -> /forklift/gz/actuator/steer_cmd (gz.msgs.Double)] (Lazy 0)
+[parameter_bridge-3] [INFO] [1786093323.852384428] [forklift_bridge]: Creating ROS->GZ Bridge: [/forklift/gz/actuator/traction_cmd (std_msgs/msg/Float64) -> /forklift/gz/actuator/traction_cmd (gz.msgs.Double)] (Lazy 0)
+[parameter_bridge-3] [INFO] [1786093323.852828204] [forklift_bridge]: Creating ROS->GZ Bridge: [/forklift/gz/actuator/fork_cmd (std_msgs/msg/Float64) -> /forklift/gz/actuator/fork_cmd (gz.msgs.Double)] (Lazy 0)
+[parameter_bridge-3] [INFO] [1786093323.853177031] [forklift_bridge]: Creating GZ->ROS Bridge: [/forklift/gz/joint_state (gz.msgs.Model) -> /forklift/gz/joint_state (sensor_msgs/msg/JointState)] (Lazy 0)
+[parameter_bridge-3] [INFO] [1786093323.854720608] [forklift_bridge]: Creating GZ->ROS Bridge: [/forklift/gz/odom (gz.msgs.Odometry) -> /forklift/gz/odom (nav_msgs/msg/Odometry)] (Lazy 0)
+[parameter_bridge-3] [INFO] [1786093323.855946440] [forklift_bridge]: Creating GZ->ROS Bridge: [/forklift/gz/scan_nav (gz.msgs.LaserScan) -> /forklift/gz/scan_nav (sensor_msgs/msg/LaserScan)] (Lazy 0)
+[parameter_bridge-3] [INFO] [1786093323.856438410] [forklift_bridge]: Creating GZ->ROS Bridge: [/forklift/gz/safety_scanner_front/measurement (gz.msgs.LaserScan) -> /forklift/gz/safety_scanner_front/measurement (sensor_msgs/msg/LaserScan)] (Lazy 0)
+[parameter_bridge-3] [INFO] [1786093323.856763252] [forklift_bridge]: Creating GZ->ROS Bridge: [/forklift/gz/safety_scanner_rear/measurement (gz.msgs.LaserScan) -> /forklift/gz/safety_scanner_rear/measurement (sensor_msgs/msg/LaserScan)] (Lazy 0)
+[parameter_bridge-3] [INFO] [1786093323.857452676] [forklift_bridge]: Creating GZ->ROS Bridge: [/forklift/gz/imu (gz.msgs.IMU) -> /forklift/gz/imu (sensor_msgs/msg/Imu)] (Lazy 0)
+[sensor_tf-7] [INFO] [1786093324.434647585] [sensor_tf]: sensor_tf up: 4 static transform(s) from /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/model.sdf
+[sensor_tf-7] parent                       child                           x [m]    y [m]    z [m]  roll [d] pitch [d]   yaw [d]
+[sensor_tf-7] forklift/base_link           imu_link                      -0.5000   0.0000   0.2500    0.0000    0.0000    0.0000
+[sensor_tf-7] forklift/base_link           nav_lidar_link                 0.5500  -0.4000   1.8000    0.0000    0.0000    0.0000
+[sensor_tf-7] forklift/base_link           safety_scanner_front_link      0.7000   0.4500   0.1500    0.0000    0.0000   45.0000
+[sensor_tf-7] forklift/base_link           safety_scanner_rear_link      -0.7000  -0.4500   0.1500    0.0000    0.0000 -135.0000
+[imu_gate-5] [INFO] [1786093324.441827897] [imu_gate]: imu_gate up: /forklift/imu -> /forklift/imu_gated, closed while /forklift/wheel_standstill is true and younger than 0.200 s, FAIL OPEN otherwise. It suppresses; it never rewrites a sample, and it estimates no bias
+[sto_contactor-8] [INFO] [1786093324.448160395] [sto_contactor]: STO contactor up, latch CLOSED. Terminals: /forklift/gz/actuator/steer_cmd, /forklift/gz/actuator/traction_cmd, /forklift/gz/actuator/fork_cmd. Demand in: /forklift/safety/torque_off_demand. This is a STAND-IN for a hardwired onboard inhibit - no PL, Category, SIL or PFH is claimed.
+[create-2] [INFO] [1786093324.491593157] [spawn_forklift]: Entity creation successful.
+[wheel_odometry-4] [INFO] [1786093324.508299072] [wheel_odometry]: wheel_odometry up: wheelbase 1.050 m, base_link +0.500 m of the rear axle, rolling radius 0.1206 m (physics rolls on 0.1200), drive step 1.534e-03 rad, steer step 1.534e-03 rad, steer zero offset +1.534e-03 rad, publishing /forklift/odom_wheel at 50.0 Hz, NO transform
+[wheel_odometry-4] [INFO] [1786093324.512915156] [wheel_odometry]: standstill verdict on /forklift/wheel_standstill: over a trailing 0.500 s window the drive count moved 0 and the steer count at most 1 (drive and steer), which bounds body rotation at 0.0202 deg/s. It is an estimator input and inhibits nothing
+[INFO] [create-2]: process has finished cleanly [pid 326402]
+[gazebo-1] [1;33mWarning [Utils.cc:132][0m [/sdf/model[@name="Forklift"]/link[@name="safety_scanner_front_link"]/sensor[@name="safety_scanner_front"]/gz_frame_id:/mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/model.sdf:L358]: XML Element[gz_frame_id], child of element[sensor], not defined in SDF. Copying[gz_frame_id] as children of [sensor].
+[gazebo-1] [1;33mWarning [Utils.cc:132][0m [/sdf/model[@name="Forklift"]/link[@name="safety_scanner_rear_link"]/sensor[@name="safety_scanner_rear"]/gz_frame_id:/mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/model.sdf:L418]: XML Element[gz_frame_id], child of element[sensor], not defined in SDF. Copying[gz_frame_id] as children of [sensor].
+[gazebo-1] [1;33mWarning [Utils.cc:132][0m [/sdf/model[@name="Forklift"]/link[@name="nav_lidar_link"]/sensor[@name="nav_lidar"]/gz_frame_id:/mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/model.sdf:L496]: XML Element[gz_frame_id], child of element[sensor], not defined in SDF. Copying[gz_frame_id] as children of [sensor].
+[gazebo-1] [1;33mWarning [Utils.cc:132][0m [/sdf/model[@name="Forklift"]/link[@name="imu_link"]/sensor[@name="imu"]/gz_frame_id:/mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/model.sdf:L611]: XML Element[gz_frame_id], child of element[sensor], not defined in SDF. Copying[gz_frame_id] as children of [sensor].
+[gazebo-1] libEGL warning: egl: failed to create dri2 screen
+[gazebo-1] libEGL warning: egl: failed to create dri2 screen
+[gazebo-1] libEGL warning: NEEDS EXTENSION: falling back to kms_swrast
+[gazebo-1] libEGL warning: egl: failed to create dri2 screen
+[gazebo-1] libEGL warning: egl: failed to create dri2 screen
+[gazebo-1] libEGL warning: NEEDS EXTENSION: falling back to kms_swrast
+[imu_gate-5] [INFO] [1786093326.878421775] [imu_gate]: gyro gate CLOSED - the encoders report no motion, so the gyro is reading its own bias after 52 forwarded / 0 suppressed
+[imu_gate-5] [INFO] [1786093334.262063367] [imu_gate]: gyro gate OPEN - the wheels are turning after 52 forwarded / 704 suppressed
+[imu_gate-5] [INFO] [1786093334.268831103] [imu_gate]: gyro gate CLOSED - the encoders report no motion, so the gyro is reading its own bias after 54 forwarded / 704 suppressed
+[parameter_bridge-3] [INFO] [1786093340.091344673] [forklift_bridge]: Passing message from ROS std_msgs/msg/Float64 to Gazebo gz.msgs.Double (showing msg only once per type)
+[imu_gate-5] [INFO] [1786093381.833134130] [imu_gate]: gyro gate OPEN - the wheels are turning after 54 forwarded / 5448 suppressed
+[imu_gate-5] [INFO] [1786093391.369880991] [imu_gate]: gyro gate CLOSED - the encoders report no motion, so the gyro is reading its own bias after 986 forwarded / 5448 suppressed
+[imu_gate-5] [INFO] [1786093395.732225015] [imu_gate]: gyro gate OPEN - the wheels are turning after 986 forwarded / 5884 suppressed
+[imu_gate-5] [INFO] [1786093403.150737297] [imu_gate]: gyro gate CLOSED - the encoders report no motion, so the gyro is reading its own bias after 1728 forwarded / 5884 suppressed
+[imu_gate-5] [INFO] [1786093407.493669770] [imu_gate]: gyro gate OPEN - the wheels are turning after 1728 forwarded / 6318 suppressed
+[imu_gate-5] [INFO] [1786093409.832443385] [imu_gate]: gyro gate CLOSED - the encoders report no motion, so the gyro is reading its own bias after 1962 forwarded / 6318 suppressed
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[ekf_node-6] [INFO] [1786093417.376523215] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[INFO] [sto_contactor-8]: sending signal 'SIGINT' to process[sto_contactor-8]
+[INFO] [sensor_tf-7]: sending signal 'SIGINT' to process[sensor_tf-7]
+[INFO] [ekf_node-6]: sending signal 'SIGINT' to process[ekf_node-6]
+[INFO] [imu_gate-5]: sending signal 'SIGINT' to process[imu_gate-5]
+[INFO] [wheel_odometry-4]: sending signal 'SIGINT' to process[wheel_odometry-4]
+[INFO] [parameter_bridge-3]: sending signal 'SIGINT' to process[parameter_bridge-3]
+[ERROR] [ekf_node-6]: process has died [pid 326407, exit code -2, cmd '/opt/ros/jazzy/lib/robot_localization/ekf_node --ros-args -r __node:=forklift_ekf --params-file /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/ekf.yaml --params-file /tmp/launch_params_y050ssyb -r odometry/filtered:=/forklift/odom_filtered'].
+[INFO] [gazebo-1]: sending signal 'SIGINT' to process[gazebo-1]
+[parameter_bridge-3] [INFO] [1786093417.376643003] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[sto_contactor-8] Traceback (most recent call last):
+[sto_contactor-8]   File "/mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/scripts/sto_contactor.py", line 340, in <module>
+[sto_contactor-8]     sys.exit(main())
+[sto_contactor-8]              ^^^^^^
+[sto_contactor-8]   File "/mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/scripts/sto_contactor.py", line 331, in main
+[wheel_odometry-4] Traceback (most recent call last):
+[wheel_odometry-4]   File "/mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/scripts/wheel_odometry.py", line 672, in <module>
+[imu_gate-5] Traceback (most recent call last):
+[imu_gate-5]   File "/mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/scripts/imu_gate.py", line 226, in <module>
+[parameter_bridge-3] [INFO] [1786093417.396993272] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[sensor_tf-7] Traceback (most recent call last):
+[sensor_tf-7]   File "/mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/scripts/sensor_tf.py", line 296, in <module>
+[sto_contactor-8]     node.destroy_node()
+[sto_contactor-8]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1958, in destroy_node
+[sto_contactor-8]     self.destroy_subscription(self._subscriptions[0])
+[sto_contactor-8]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1854, in destroy_subscription
+[sto_contactor-8]     subscription.destroy()
+[sto_contactor-8]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/subscription.py", line 101, in destroy
+[sto_contactor-8]     self.handle.destroy_when_not_in_use()
+[sto_contactor-8] KeyboardInterrupt
+[imu_gate-5]     sys.exit(main())
+[imu_gate-5]              ^^^^^^
+[imu_gate-5]   File "/mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/scripts/imu_gate.py", line 219, in main
+[wheel_odometry-4]     sys.exit(main())
+[wheel_odometry-4]              ^^^^^^
+[wheel_odometry-4]   File "/mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/scripts/wheel_odometry.py", line 665, in main
+[sensor_tf-7]     sys.exit(main())
+[sensor_tf-7]              ^^^^^^
+[sensor_tf-7]   File "/mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/scripts/sensor_tf.py", line 289, in main
+[imu_gate-5]     node.destroy_node()
+[imu_gate-5]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1962, in destroy_node
+[imu_gate-5]     self.destroy_service(self._services[0])
+[imu_gate-5]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1886, in destroy_service
+[imu_gate-5]     service.destroy()
+[imu_gate-5]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/service.py", line 123, in destroy
+[imu_gate-5]     self.__service.destroy_when_not_in_use()
+[imu_gate-5] KeyboardInterrupt
+[sensor_tf-7]     node.destroy_node()
+[sensor_tf-7]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1968, in destroy_node
+[sensor_tf-7]     self.__node.destroy_when_not_in_use()
+[sensor_tf-7] KeyboardInterrupt
+[wheel_odometry-4]     node.destroy_node()
+[wheel_odometry-4]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1962, in destroy_node
+[wheel_odometry-4]     self.destroy_service(self._services[0])
+[wheel_odometry-4]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/node.py", line 1886, in destroy_service
+[wheel_odometry-4]     service.destroy()
+[wheel_odometry-4]   File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/service.py", line 123, in destroy
+[wheel_odometry-4]     self.__service.destroy_when_not_in_use()
+[wheel_odometry-4] KeyboardInterrupt
+[ERROR] [imu_gate-5]: process has died [pid 326406, exit code -2, cmd '/usr/bin/python3 /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/scripts/imu_gate.py --config /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/config.yaml --ros-args -p use_sim_time:=true'].
+[ERROR] [sensor_tf-7]: process has died [pid 326408, exit code -2, cmd '/usr/bin/python3 /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/scripts/sensor_tf.py --model /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/model.sdf'].
+[ERROR] [wheel_odometry-4]: process has died [pid 326405, exit code -2, cmd '/usr/bin/python3 /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/scripts/wheel_odometry.py --config /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/config.yaml --ros-args -p use_sim_time:=true'].
+[ERROR] [sto_contactor-8]: process has died [pid 326466, exit code -2, cmd '/usr/bin/python3 /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/scripts/sto_contactor.py --config /mnt/c/Users/ozkan/projects/amr-agent/agv/forklift/config.yaml --ros-args -p use_sim_time:=true'].
+[INFO] [parameter_bridge-3]: process has finished cleanly [pid 326403]
+[ERROR] [gazebo-1]: process has died [pid 326401, exit code -2, cmd 'ruby /opt/ros/jazzy/opt/gz_tools_vendor/bin/gz sim -r -s /mnt/c/Users/ozkan/projects/amr-agent/sim/worlds/warehouse.sdf --force-version 8'].
+[INFO] [launch]: process[gazebo-1] was required: shutting down launched system

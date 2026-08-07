@@ -3009,3 +3009,662 @@ Artefacts, all under `agv/forklift/evidence/`:
    contradicts m5-38 section 11.3 (b), and its section 6 steer step still
    describes the old plant. Both are requests to `sim/`, not findings this
    section may act on.
+
+---
+
+# 13. THE MISSION THAT WOULD NOT PLAN — 2026-08-07 (m5-69)
+
+**m5-68 issued the first autonomous mission of the project and got 0 plans in
+100 s.** The diagnosis it handed on was "the spawn pose sits at the corner of
+the committed grid". This section settles that as a geometry question, fixes
+it as one, and then does the thing this file exists to insist on: it drives the
+mission **repeatedly** and reports the rate.
+
+| Item | Value |
+|---|---|
+| Date | **2026-08-07** |
+| Brief | `docs/briefs/m5-69-autonomous-mission-unblock.md` |
+| Host | **the owner's WSL2 showcase machine** — Ubuntu 24.04.4 on kernel 5.15.167.4-microsoft-standard-WSL2, **20 cores visible, 15.4 GiB of RAM allocated to the guest** out of 31.6 GiB on the host (13th Gen Intel Core i9-13900H). Headless, `DISPLAY` and `WAYLAND_DISPLAY` unset, software rasterised |
+| nav2 | **1.3.12** — `nav2_planner`, `nav2_smac_planner`, `nav2_controller`, `nav2_bt_navigator`, `nav2_costmap_2d`, `nav2_regulated_pure_pursuit_controller`, `nav2_velocity_smoother`, `nav2_amcl`, all 1.3.12 |
+| Simulator | `gz sim` 8.11.0 |
+| Map | `sim/maps/warehouse/warehouse.pgm` md5 `a663163036c5890937f9045bcf559e72`, **unchanged**, verified by `load_registration()` at the start of every run below |
+| Under test | `sim/launch/warehouse_bringup.launch.py`'s spawn pose — **the only committed file whose behaviour changed** |
+| New tools | `agv/forklift/scripts/start_pose_check.py`, `agv/forklift/scripts/mission_repeat.py` |
+
+**The environment qualifies every figure, in the direction that matters this
+time.** Sections 1–5 are container runs; sections 8–12 and this one are WSL
+runs. **This section is the first in the file whose figures were taken on the
+platform the showcase runs on AND with nothing else on the machine** — no
+PLCSIM, no TIA, no bridge, no HMI. Section 13.5 measures what that is worth,
+because m5-68's second failure was a stack that died under exactly that load.
+
+**`allow_unknown` STAYS `false`.** No planner, controller, costmap or tolerance
+parameter was touched. `nav2.yaml`, `amcl.yaml`, `ekf.yaml`, `config.yaml`,
+the behaviour tree, `model.sdf` and both `agv/forklift/launch/` files are
+byte-identical to the tree this section started from. The single behavioural
+edit is a spawn coordinate and the comment block that argues for it.
+
+## 13.1 THE GEOMETRY, established before anything was changed
+
+The claim to test is that the vehicle starts outside the region the planner
+will plan from. That is a statement about two objects — the grid, and a pose —
+so both were measured against each other first.
+
+**The tool checks the planner's own rule, not a plausible-looking proxy.**
+`nav2_costmap_2d::FootprintCollisionChecker` traces the **outline** of the
+**padded** footprint with a Bresenham raytrace and takes the worst cell on it;
+it does not fill the polygon. `start_pose_check.py` traces the same outline,
+pads with `costmap_2d::padFootprint`'s own rule, and parses the polygon and
+the padding **out of `nav2.yaml`** rather than restating them, so the tool
+cannot disagree with the planner about the shape it is checking.
+
+### What the committed grid actually covers
+
+```
+grid       606 x 410 cells at 0.050 m = 30.30 x 20.50 m
+cells      free 188430 (75.8 %)  unknown 53603 (21.6 %)  lethal 6427 (2.6 %)
+footprint  padded 8 vertices, padding 0.270 m, inscribed radius 0.769 m
+passable components at clearance >= 0.769 m: 2 total
+   #1        230.4 m^2
+```
+
+**21.6 % of the committed grid is unmapped**, and that is the number the
+diagnosis turns on. The map is a SLAM product, not a floor plan: it covers
+what the mapping route drove past. The world file is open where the vehicle
+stood; the grid had simply never seen it.
+
+### The committed spawn, measured
+
+```
+world      (-6.000, -5.500) yaw +0.0000 rad
+map        (-0.014, +0.089) yaw -0.0079 rad   cell (182, 312)
+cell class free
+padded-footprint OUTLINE, 191 cells: free 155  UNKNOWN 36  LETHAL 0  off-grid 0
+inscribed clearance 0.430 m against inscribed radius 0.769 m -> DOES NOT FIT AT ANY YAW
+passable component 0 (none - below inscribed radius)
+VERDICT: INVALID for allow_unknown false
+yaw sweep, 72 headings: 55 of 72 INVALID
+```
+
+**36 of the 191 outline cells are unmapped**, and **0** are lethal. That
+distinction is the whole finding: the pose is not blocked by an obstacle, it
+is blocked by ignorance. The inscribed clearance of **0.430 m** against a
+**0.769 m** inscribed radius says the vehicle does not fit in the *mapped free
+space* there at **any** heading, which is why 55 of 72 headings fail and why
+turning the vehicle on the spot could never have helped.
+
+**"At the corner of the grid" was the right instinct and the wrong object.**
+Cell (182, 312) is nowhere near the corner of the 606 x 410 image. It is
+about 1 m from the edge of the **mapped region**, and the two are 9 m apart.
+
+### Where the mapped aisle actually begins
+
+Scanning the dock aisle along y = -5.50, at yaw 0, one pose every 0.5 m:
+
+| world x | free | unknown | lethal | clearance | component | verdict |
+|---|---|---|---|---|---|---|
+| -9.00 | 26 | **166** | 0 | 0.000 | 0 | invalid |
+| -8.00 | 85 | **106** | 0 | 0.050 | 0 | invalid |
+| -7.00 | 128 | **64** | 0 | 0.250 | 0 | invalid |
+| **-6.00** | 155 | **36** | 0 | **0.430** | 0 | **invalid — the committed spawn** |
+| -5.50 | 175 | 16 | 0 | 0.430 | 0 | invalid |
+| **-5.00** | **191** | **0** | 0 | 0.828 | 1 | **VALID — the first one** |
+| -4.00 | 191 | 0 | 0 | 1.518 | 1 | VALID |
+| **-3.00** | **191** | **0** | 0 | **1.972** | 1 | **VALID — the local maximum** |
+| -1.00 | 192 | 0 | 0 | 1.838 | 1 | VALID |
+| 0.00 | 191 | 0 | 0 | 1.619 | 1 | VALID |
+| 1.00 | 191 | 0 | 0 | 0.650 | 0 | VALID (outline clears; inscribed circle does not) |
+| 1.50 | 191 | 0 | 0 | 0.269 | 0 | invalid |
+
+The mapped free space in this aisle **begins at x = -5.00**. The committed
+spawn stands **1.00 m west of it**, and the unknown count falls monotonically
+from 166 to 0 across that metre — this is a boundary, not a speckle.
+
+### A second defect the diagnosis did not have
+
+m5-68's goal was world (-1.00, -3.00). Measured the same way it is **free at
+the centre cell with 0.765 m of clearance against a 0.769 m inscribed
+radius** — under it by 4 mm. So the goal was unusable too, independently of
+the start, and 13.2 shows the planner agreeing. **Both ends of that mission
+were invalid.** Had only the spawn been moved, the mission would have failed
+again for a reason nobody was looking for.
+
+## 13.2 THE PLANNER'S OWN VERDICT — the bench, no simulator
+
+The geometry above is a model of what the planner does. The planner is the
+authority, so it was asked directly: `map_server` + `planner_server` + a static
+TF tree, `nav2_run.py plan`, nothing else running. **Section 8.6 established
+that the planner is deterministic and is not the variable**, which is what
+makes n = 1 adequate here and nowhere else in this section.
+
+| # | start (world) | goal (world) | result | planning time |
+|---|---|---|---|---|
+| A | **(-6.00, -5.50)** committed spawn | (-1.00, -3.00) m5-68's goal | **ABORTED, 205 START_OCCUPIED** | 0.014 s wall |
+| B | **(-6.00, -5.50)** committed spawn | (+1.00, -5.50) | **ABORTED, 205 START_OCCUPIED** | 0.025 s wall |
+| C | (-3.00, -5.50) | (+1.00, -5.50) | **SUCCEEDED**, 4.000 m, 51 points, **0 cusps, 0.0 % reverse**, excursion 0.013 m | 0.010 s |
+| D | (-3.00, -5.50) | **(-1.00, -3.00)** m5-68's goal | **ABORTED, 207 TIMEOUT** | 2.030 s wall |
+| E | (-4.50, +7.00) → (+1.00, +7.00), the committed aisle-A route | **SUCCEEDED**, 5.693 m, 71 points, 1 cusp, 1.6 % reverse | 0.022 s |
+| F | (-3.00, -5.50) | (+10.00, -5.50) | **SUCCEEDED**, 13.442 m, 157 points, **0 cusps, 0.0 % reverse**, excursion 0.793 m | 0.042 s |
+
+**A and B settle the diagnosis.** The refusal is `START_OCCUPIED` and it costs
+14 ms — the planner never searches at all. **D settles the second defect**: from
+a valid start, m5-68's goal is not refused but searched for until the planner's
+own timeout, 145 times longer than a route that works.
+
+**E is a control and it re-measures exactly.** 5.693 m, 71 points, 1 cusp,
+1.6 % reverse — identical to section 5.1's committed plan and to 8.6's re-run.
+Nothing about the planner has changed; only the pose it was asked to start
+from.
+
+**One honest limit on the tool.** 13.1's outline model calls (-4.50, +7.00)
+invalid on **one** unknown cell, and the planner plans from it (row E). The
+tool is conservative by up to about a cell, because it bins the polygon's
+vertices to integers before tracing. It is a screen, not a verdict: **the
+planner bench is the verdict**, and `mission_repeat.py` uses the tool only to
+refuse a pose before spending a bring-up on it.
+
+## 13.3 THE FIX
+
+`sim/launch/warehouse_bringup.launch.py`, one pose:
+
+```
+_SPAWN_X = '-6.00'   ->   _SPAWN_X = '-3.00'
+_SPAWN_Y = '-5.50'   ->   _SPAWN_Y = '-5.50'   (unchanged)
+```
+
+Same aisle, same heading, same stated intent — the vehicle still stands in the
+dock aisle south of rack row C facing +x with the central cross aisle ahead.
+It stands 3.00 m further into the building.
+
+**x = -3.00 is chosen for margin, not for the shortest move that works.** It is
+**2.00 m east of the first valid pose** in the aisle, it carries **1.972 m of
+inscribed clearance** — the local maximum along y = -5.50 — and it lies in the
+grid's one large passable component. Section 8.6 measured localisation
+excursions to **0.661 m** during recovery; 2.00 m of margin means no such
+excursion can push the start pose back out of the mapped region.
+
+**What was NOT done, and why.** `allow_unknown: false` is untouched. A planner
+permitted to route through unmapped space on a vehicle that carries safety
+claims is a decision for the owner, not a step for this brief, and the
+argument for taking it would have to survive the fact that **21.6 % of this
+grid is unmapped** — the vehicle would have been free to plan through a fifth
+of the building it has never seen. The defect was a vehicle standing outside
+its map. The fix is to stand it inside.
+
+**The comment that justified -6.00 was not deleted, it was answered.** Its
+reasoning — the plan envelope is clear of rack row C, of the column at
+(-4.60, -7.00) and of both charge bays — is still **true of the world**. It was
+the wrong object: Nav2 plans against the grid, not against `warehouse.sdf`.
+That is written into the file so the next reader cannot make the same
+substitution.
+
+## 13.4 THE MISSION, DRIVEN — and the rate, not the best draw
+
+Three routes were driven, **five repeats each, on the fixed spawn**, by
+`mission_repeat.py`. Every repeat gets its own `GZ_PARTITION` and
+`ROS_DOMAIN_ID`, refuses to start unless `pgrep` over the whole autonomy
+pattern returns 0, gates each bring-up stage on a topic **carrying a
+message** (or, for AMCL, on the `map -> forklift/odom` transform, because
+AMCL is distance-triggered and a standing vehicle publishes no pose), and
+tears down to a verified zero. Nothing was changed between repeats.
+
+**The verdict of each repeat is `nav2_run.py`'s own.** This section counts
+them; it does not decide what counts as arrival.
+
+### 13.4a The reproduction — the old spawn, full stack, n = 1
+
+Before the fix was trusted, the defect was reproduced end to end from the
+**committed** spawn, `--skip-pose-check`, everything else identical:
+
+```
+RESULT           ABORTED
+error_code       205
+elapsed          0.04 s of simulation time
+plans published  0
+final TRUTH      world (-6.0000, -5.5000) yaw -0.0000
+```
+```
+[planner_server] GridBased plugin failed to plan from (-0.01, 0.09) to (6.99, 0.03): "Start occupied"
+[bt_navigator] [navigate_to_pose] [ActionServer] Aborting handle.
+```
+
+**The vehicle moved 0.000 m and the whole mission lasted 0.04 s.**
+
+**One difference from m5-68 that is worth stating rather than smoothing
+over.** m5-68 recorded `plans_published: 0` and then **100 s of silence**,
+its harness timing out with no result. Here the same invalid start produces
+an **immediate abort with a code**. The geometry defect is identical and
+proven; the *reporting* is not the same, and the difference is on the side
+m5-68 also reported as broken — a `bt_navigator` that never delivered its
+result. So m5-68's mission attempt shows **both** of its defects at once,
+and this section reproduces only the first of them. 13.5 is about the
+second.
+
+### 13.4b Route A — the 4.00 m dock leg. **5 of 5.**
+
+`(-3.00, -5.50) -> (+1.00, -5.50)`, plan 4.000 m, 51 points, **0 cusps,
+0.0 % reverse**.
+
+| repeat | result | code | elapsed (sim) | plans | travelled | final truth | truth goal error | heading error |
+|---|---|---|---|---|---|---|---|---|
+| r1 | **SUCCEEDED** | none | 8.53 s | 8 | 3.682 m | (+0.680, -5.550) | 0.3071 m | -0.328 deg |
+| r2 | **SUCCEEDED** | none | 8.46 s | 9 | 3.735 m | (+0.734, -5.536) | 0.2682 m | -0.252 deg |
+| r3 | **SUCCEEDED** | none | 8.66 s | 9 | 3.780 m | (+0.778, -5.542) | 0.2255 m | -1.192 deg |
+| r4 | **SUCCEEDED** | none | 8.49 s | 8 | 3.786 m | (+0.784, -5.519) | 0.2097 m | +1.308 deg |
+| r5 | **SUCCEEDED** | none | 8.71 s | 9 | 3.771 m | (+0.769, -5.531) | 0.2178 m | -0.219 deg |
+
+**Rate: 5 of 5.** Elapsed **8.46–8.71 s**, a spread of 0.25 s — this is not a
+distribution straddling a criterion, it is five draws of the same event. **No
+recovery behaviour ran in any repeat**, and no repeat produced a single
+rotation-in-place refusal.
+
+**Two qualifications this table carries, both of which the numbers state
+themselves.**
+
+1. **Nav2's arrival is scored against the BELIEVED pose; the last column is
+   scored against the truth.** All five satisfied `xy_goal_tolerance: 0.25`
+   as the goal checker sees it. Against ground truth the error is
+   **0.210–0.307 m**, mean 0.246 m — r1 is outside 0.25 m in truth and inside
+   it in belief. The difference is the localiser, and it is bounded below by
+   the registration's own **0.141 m** instrument floor: the errors here are
+   **1.49–2.18 x that floor**, so between a third and a half of the miss is
+   the map, not the vehicle. The section 8.3 arrival geometry is not exercised
+   at all on this route, because the approach is straight and the arrival
+   heading is within **1.31 deg** of the goal heading in every repeat.
+2. **The route ends 0.23 m short by design of the checker, not by accident.**
+   The vehicle travels 3.68–3.79 m of a 4.00 m plan and stops inside the
+   tolerance box.
+
+### 13.4c Route B — the 13.44 m dock leg. **0 of 5**, and the reason is not length
+
+`(-3.00, -5.50) -> (+10.00, -5.50)`, plan 13.442 m, 157 points, 0 cusps,
+0.0 % reverse, excursion 0.793 m. It benched clean (13.2 row F). It fails
+every time.
+
+| repeat | result | code | meaning | elapsed (sim) | travelled | stopped at (truth) |
+|---|---|---|---|---|---|---|
+| r1 | ABORTED | **205** | START_OCCUPIED on a mid-route replan | 10.57 s | 5.564 m | (+2.375, -6.782) |
+| r2 | ABORTED | **104** | FollowPath PATIENCE_EXCEEDED | 27.84 s | 3.730 m | (+0.657, -4.798) |
+| r3 | ABORTED | **205** | START_OCCUPIED on a mid-route replan | 16.22 s | 4.324 m | (+1.223, -4.962) |
+| r4 | ABORTED | **104** | FollowPath PATIENCE_EXCEEDED | 34.39 s | 4.653 m | (+0.799, -4.962) |
+| r5 | ABORTED | **104** | FollowPath PATIENCE_EXCEEDED | 27.84 s | 3.890 m | (+0.719, -4.752) |
+
+**Rate: 0 of 5.** All five stop in the same place — between x = +0.66 and
+x = +2.38 — after 3.7 to 5.6 m of a 13.0 m journey. **This is one failure
+seen five times, not five failures.**
+
+**THE MECHANISM, measured rather than inferred.** The dock aisle pinches at
+x in [1.25, 4.00]:
+
+| world x at y = -5.50 | inscribed clearance |
+|---|---|
+| +1.00 | 0.650 m |
+| +1.50 | **0.269 m** |
+| +2.00 | 0.472 m |
+| +3.00 | 0.453 m |
+| +4.00 | 0.450 m |
+
+against a **0.769 m** inscribed radius. The vehicle does not fit through that
+stretch of the aisle at any heading — and **the planner routes through it
+anyway**, because `FootprintCollisionChecker` traces the footprint's outline
+and never looks inside the polygon. This vehicle's padded footprint is
+**3.275 m long**: a rack leg can sit entirely inside it and the check still
+passes.
+
+Scoring the emitted plan pose by pose with `start_pose_check.py path`:
+
+| route | length | poses whose OUTLINE is invalid | poses whose INSCRIBED CIRCLE does not fit | min clearance | measured rate |
+|---|---|---|---|---|---|
+| **A** | 4.000 m | 0 of 51 | **2 of 51**, both at the terminus | 0.650 m | **5 of 5** |
+| **B** | 13.442 m | **38 of 157** | **13 of 157**, mid-route | 0.500 m | **0 of 5** |
+| E (aisle A, committed) | 5.693 m | 5 of 71 (the tool's ~1-cell conservatism at the start) | 0 of 71 | 1.662 m | not driven here |
+
+**r1 is the clearest single data point in the section.** It replanned from
+map (8.33, -1.22) = world (2.354, -6.743) and the planner refused its own
+vehicle's current pose:
+
+```
+world      (+2.354, -6.743)
+padded-footprint OUTLINE, 190 cells: free 186  UNKNOWN 4  LETHAL 0
+inscribed clearance 0.752 m against inscribed radius 0.769 m -> DOES NOT FIT AT ANY YAW
+VERDICT: INVALID for allow_unknown false
+```
+
+**The vehicle drove itself, along a plan the planner produced, into a pose the
+planner will not plan from.** That is not a spawn problem and it is not a
+tuning problem: it is the outline-only collision model meeting a 3.275 m
+vehicle in a 2.5 m gap.
+
+### 13.4d Route G — the 12.24 m lane leg. **5 of 5**, and the prediction was registered first
+
+The corridor-width finding above makes a prediction, so it was **written down
+before the run**:
+
+> `G (-3.00, -5.50) -> (+9.00, -7.00)` scores **0 of 143 poses outline-invalid,
+> 0 of 143 below the inscribed radius, minimum clearance 0.950 m**.
+> PREDICTION: G completes at a rate closer to A's than to B's — **at least 3 of
+> 5** — despite being **3.06 x** A's length, because length is not what killed
+> B, corridor width is.
+> FALSIFIED IF: G scores 0 or 1 of 5, which would mean route LENGTH is the
+> binding term and the check predicts nothing.
+
+**Result: 5 of 5.** Plan 12.237 m, 143 points, **0 cusps, 0.0 % reverse**.
+
+| repeat | result | code | elapsed (sim) | plans | travelled | final truth | truth goal error | heading error |
+|---|---|---|---|---|---|---|---|---|
+| r1 | **SUCCEEDED** | none | 21.77 s | 22 | 12.031 m | (+8.780, -7.043) | 0.2240 m | +5.102 deg |
+| r2 | **SUCCEEDED** | none | 21.77 s | 22 | 12.015 m | (+8.780, -7.053) | 0.2130 m | +7.116 deg |
+| r3 | **SUCCEEDED** | none | 21.71 s | 22 | 12.023 m | (+8.796, -7.004) | 0.1911 m | +3.839 deg |
+| r4 | **SUCCEEDED** | none | 21.96 s | 22 | 12.037 m | (+8.804, -7.007) | 0.1963 m | +7.547 deg |
+| r5 | **SUCCEEDED** | none | 21.46 s | 21 | 11.923 m | (+8.714, -7.048) | 0.2567 m | +4.638 deg |
+
+**Rate: 5 of 5**, elapsed **21.46–21.96 s**, a spread of 0.50 s over a route
+three times as long as A. Mean speed **0.55 m/s**. Truth goal error
+**0.191–0.257 m**, mean 0.216 m — no worse than the 4 m route despite triple
+the distance, which is what a localiser rather than an accumulating dead
+reckoner looks like.
+
+**The prediction holds and the check is now worth something**: three routes,
+three corridor-width scores, three rates, monotone in the same order. But
+**n = 3 routes is what that claim rests on**, and the check is a screen rather
+than a proof.
+
+**One thing route G costs, stated because it is the term nearest its limit.**
+The arrival heading error is **+3.84 to +7.55 deg** against the committed
+`yaw_goal_tolerance: 0.15 rad = 8.594 deg` — the worst repeat used **88 % of
+the heading budget**, where route A used at most 15 %. The difference is the
+lane change: G leaves the dock aisle for the y = -7.00 lane and RPP is still
+settling that manoeuvre when it arrives. **Section 8.7 item 2's request — an
+approach corridor driven straight along the goal heading — is what this route
+would consume if it were lengthened or if the goal were moved, and no repeat
+here had margin to spare on it.**
+
+### 13.4e The three rates in one place
+
+| route | plan | corridor min clearance | poses below inscribed | **rate** | elapsed |
+|---|---|---|---|---|---|
+| the **committed spawn**, any goal | refused | — | — | **0 of 1**, `205 START_OCCUPIED` in 0.04 s | 0.04 s |
+| **A**, 4.00 m dock leg | 4.000 m, 0 cusps | 0.650 m (at the terminus) | 2 of 51 | **5 of 5** | 8.46–8.71 s |
+| **B**, 13.44 m dock leg | 13.442 m, 0 cusps | 0.500 m (mid-route) | 13 of 157 | **0 of 5** | aborts at 10.6–34.4 s |
+| **G**, 12.24 m lane leg | 12.237 m, 0 cusps | 0.950 m | 0 of 143 | **5 of 5** | 21.46–21.96 s |
+
+**16 missions were driven for this section.** The brief's `done_when` — "a
+mission is issued, planned, and driven to completion on the showcase platform,
+repeated enough times to state a success rate rather than a single draw" — is
+met by **A at 5 of 5 and G at 5 of 5**, and the honest headline is not either
+of those numbers on its own. It is that **the rate is a property of the route,
+not of the day**: this file's own history (8.6, 9.5, 10.4) is a distribution
+straddling the criterion, and here the two routes that pass pass every time
+and the route that fails fails every time, each with a spread far tighter than
+its own margin.
+
+**What has NOT been shown by these 16 runs.** Route A and route G are both
+straight-ish legs whose goal heading is the travel heading. Nothing here
+re-opens section 8.3's arrival geometry, section 10's staged approach or
+section 12's reverse bound, and none of those figures is superseded: they were
+measured on routes with a cusp, a reverse segment or an uncontrolled arrival
+heading, and no such route was driven in this section.
+
+## 13.5 THE ACTION SERVER THAT DIED — three hypotheses, all three killed
+
+m5-68's second failure was that `/navigate_to_pose` had gone: "`planner_server`,
+`bt_navigator` and the three vehicle-side processes had died between the mode
+entry and the send, and two relaunch attempts did not bring the action server
+back inside the session." A recording cannot survive that, so it was tested.
+
+**The experiment.** The same route A, three repeats, with **K synthetic CPU
+burners** running beside it. K is the only variable; the burners match no part
+of the autonomy pattern, so the guard, the sampler and the teardown all still
+see the stack and only the stack. 20 cores are visible to the guest.
+
+| K | peak load1 | repeats | **rate** | sim elapsed | launches alive after the mission | `/navigate_to_pose` after |
+|---|---|---|---|---|---|---|
+| **0** | 3.72–7.85 | 10 (routes A and G) | **10 of 10** | 8.46–21.96 s | 3 of 3, every repeat | present, every repeat |
+| **20** | **24.96–28.95** | 3 | **3 of 3** | 8.44–8.54 s | 3 of 3, every repeat | present, every repeat |
+| **60** | **65.11–70.21** | 3 | **3 of 3** | 8.14–8.54 s | 3 of 3, every repeat | present, every repeat |
+
+**At 3.5 x CPU oversubscription the stack does not die, and the mission still
+completes.** That is 16 missions across three load levels with no process loss
+of any kind.
+
+### The three hypotheses, and what killed each
+
+**(a) The guest ran out of memory and the OOM killer took the servers —
+FALSIFIED, and this is the strongest single reading in the section.**
+
+```
+/proc/vmstat:  oom_kill 0
+uptime -s:     2026-08-03 08:44:19        (up 4 days, 3:01)
+```
+
+`oom_kill` is a **monotonic counter since boot**, and this guest has been up
+since **2026-08-03**, which spans m5-68's session on 2026-08-07. **The Linux
+OOM killer has never fired in this guest at all.** Whatever ended those
+processes, the kernel did not.
+
+**(b) The stack was starved of memory short of an OOM kill — FALSIFIED with
+the margin.** Across all 19 runs of this section the autonomy stack's total
+resident set is **1660–1683 MB** and available memory never fell below
+**13 000 MB** of the guest's 15 808 MB. The stack uses **11 %** of the memory
+the guest has, and the spread across every load level is 23 MB. There is no
+memory story here.
+
+**(c) CPU contention killed it — FALSIFIED as a KILL, and this is where the
+real finding is.** What contention does on this machine is not kill the stack.
+It stretches the time the stack takes to become usable:
+
+| K | peak load1 | simulator → `/forklift/odom` | localizer → `map -> forklift/odom` | navigation → `/plan` |
+|---|---|---|---|---|
+| 0 | 3.7–7.9 | 3–8 s | 8–12 s | **15–18 s** |
+| 20 | 25.0–29.0 | 10–11 s | 15–16 s | **36–50 s** |
+| 60 | 65.1–70.2 | 15 s | 24–26 s | **74–97 s** |
+
+**The navigation stage takes up to 6.1 x longer to advertise `/plan`** — 15 s
+becomes 97 s — and the other two stages stretch by 4 x and 2.6 x. Every stage
+still completes. **A procedure that waits a fixed interval and then sends a
+goal finds no action server**, and reports exactly what m5-68 reported: the
+action server had gone. It had not gone. It had not arrived.
+
+### The log signature is not evidence of a death, and that matters
+
+Every navigation log in this section, **including the ten runs whose stack the
+driver verified alive and serving immediately beforehand**, ends like this:
+
+```
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[ERROR] [velocity_smoother-4]: process has died [pid ...], exit code -2 ...
+[ERROR] [behavior_server-3]:   process has died [pid ...], exit code -2 ...
+[ERROR] [cmd_vel_to_tricycle-6]: process has died [pid ...], exit code -2 ...
+```
+
+against, in the same run's own record:
+
+```
+launch processes alive after the mission: {'sim': True, 'loc': True, 'nav': True}
+/navigate_to_pose present after the mission: 1
+VERDICT SUCCEEDED
+```
+
+**`exit code -2` is SIGINT, and a deliberate teardown is indistinguishable in
+the log from a crash.** `ros2 launch` is a process group attached to its
+controlling terminal; anything that signals that terminal shuts every node
+down and writes this. So m5-68's reading of its logs is not wrong, but the
+evidence it rested on **cannot separate "the stack died" from "the stack was
+shut down"** — which is the same shape as `docs/LESSONS.md` 2026-08-06's
+stopped contactor, where stillness proved nothing because two causes produce
+one observation.
+
+**What this section can and cannot conclude.** It did not have m5-68's logs and
+it does not claim to know what ended those processes. It establishes, with
+numbers, that **the three mechanisms a loaded machine is usually blamed for
+did not do it here**, that the stack survives 3.5 x oversubscription intact,
+and that the one effect load reliably produces is a **6 x longer bring-up** —
+which a fixed wait turns into "no action server" without a single process
+dying. `mission_repeat.py` gates on a topic carrying a message instead of on a
+sleep for exactly this reason, and it brought the stack up successfully at
+every load level tested.
+
+**The honest residual risk for a recording** is therefore not that the stack
+dies. It is that under the load of PLCSIM, TIA, the bridge and the HMI the
+stack may take **a minute and a half** to be ready, and an operator following a
+timed script will conclude it is broken. **Bring the autonomy stack up first,
+wait for `/plan`, and only then start the mission** — and note that the whole
+of this section ran with **no PLC-side process on the machine at all**, so the
+load levels above are synthetic CPU pressure and not a measurement of that
+stack.
+
+## 13.6 WHAT SECTION 13 ASKS THE NEXT BRIEF TO DECIDE
+
+1. **`allow_unknown` was NOT changed and the case for changing it is weaker
+   than it looks.** 21.6 % of the committed grid is unmapped. Permitting the
+   planner into it would licence routes through a fifth of a building the
+   vehicle has never observed. **The real remedy is a better grid**: a mapping
+   route that covers the south-west corner and the dock aisle's western end
+   would make the original spawn valid without touching a planner parameter.
+   That is a `sim/` question, not an `agv/` one.
+2. **THE OUTLINE-ONLY COLLISION MODEL IS THE MOST IMPORTANT FINDING HERE AND
+   IT IS UNRESOLVED.** nav2 checks the footprint's outline, never its
+   interior. This vehicle's padded footprint is 3.275 m long, so **an
+   obstacle can sit entirely inside it and be invisible to the planner and to
+   the controller alike**. Route B is that defect arriving in a drive: a plan
+   the planner emitted, 13 of whose 157 poses have less clearance than the
+   vehicle's inscribed circle, driven until the vehicle wedged. It bounds
+   every "cannot collide" statement the project makes about the process
+   layer, and it does not touch the safety layer, which is onboard and
+   hardwired and reads no costmap. **A decision is needed on whether routes
+   are pre-screened for corridor width** (`start_pose_check.py path` is a
+   screen, not a fix) **or whether the costmap gains an inflation radius that
+   covers the circumscribed radius** — nav2 warns about exactly this at every
+   plan: `inflation radius (0.550000) is smaller than the circumscribed radius
+   (2.230050)`. The second is a `nav2.yaml` change with a planning-time cost
+   and is not this brief's to make.
+3. **Route selection is now a gate criterion in disguise.** A showcase mission
+   must be screened before it is recorded: three routes, three corridor-width
+   scores, three rates, in the same order. Which route the M5 showcase drives
+   is an owner decision and route **G** is the recommendation — 12.24 m,
+   21.7 s of driving, 5 of 5 — with route A (4.00 m, 8.5 s, 5 of 5) as the
+   short alternative.
+4. **Route G spends 88 % of the heading tolerance** on its worst repeat
+   (+7.55 deg of 8.594 deg). Section 8.7 item 2's approach corridor is what
+   buys that margin back, and any goal moved further along that lane will
+   need it.
+5. **`/dev/shm` accumulates segments across runs** — 948 entries at the end of
+   this session, 32 MB of 7.8 GB used. Nothing here failed because of it and
+   no figure rests on it, but the count only ever grows, and the teardown that
+   removes processes does not remove their segments.
+6. **`sim/scenarios/warehouse_mapping_route.py` line 99** cites the spawn as
+   "(-6.00, -5.50)" inside a parenthetical about `WAREHOUSE_LANDMARKS.md`
+   section 6's sensor validation. Its live claim — that the mapping route's
+   0.40 m lidar offset matches the spawn's — is still true, because y = -5.50
+   did not move. The parenthetical is now stale as a spawn reference. **A
+   request to `sim/`, not a change made here.**
+
+## 13.7 HOW SECTION 13 WAS RUN
+
+### The machine, and what else was on it
+
+**Nothing.** No PLCSIM, no TIA, no bridge, no HMI, no `field_evaluation.py`.
+Every run refused to start unless `pgrep -af` over
+
+```
+gz[ ]sim|nav2|amcl|controller_server|bt_navigator|parameter_bridge|planner_server|
+velocity_smoother|robot_state_publisher|ekf_node|cmd_vel_to_tricycle|forklift_io|
+wheel_odometry|imu_gate|map_server|smoother_server|behavior_server|
+waypoint_follower|sensor_tf|sto_contactor|collision_monitor|ros_gz_bridge|ros_gz_sim
+```
+
+returned zero, **with the sweep excluded from itself** (`docs/LESSONS.md`
+2026-08-06), and each run printed its own load, `/dev/shm` count and UTC stamp
+into its own log. Every run verified **zero** matching processes after
+teardown; all 19 did.
+
+### Isolation
+
+`GZ_PARTITION` **and** `ROS_DOMAIN_ID`, both set, **distinct per repeat** —
+`gz transport` does not use DDS and the ROS variable does not isolate the
+simulator (`docs/LESSONS.md` 2026-07-27). Domains 51, 61–65, 81–85, 91–95,
+101–103, 111–113; partitions `m569old…`, `m569dockA…`, `m569dockB…`,
+`m569laneG…`, `m569load20…`, `m569load60…`. Headless throughout. Runs were
+**serialised**; no two simulators ever ran at once (`docs/LESSONS.md`
+2026-07-30). **No real-time factor was taken and none is quoted.**
+
+### Commands
+
+```bash
+source /opt/ros/jazzy/setup.bash
+unset DISPLAY WAYLAND_DISPLAY
+
+# 13.1 — the geometry, no ROS, no simulator
+python3 agv/forklift/scripts/start_pose_check.py coverage --sketch
+python3 agv/forklift/scripts/start_pose_check.py pose --x -6.0 --y -5.5 --yaw-sweep 72
+python3 agv/forklift/scripts/start_pose_check.py scan \
+    --x0 -9 --x1 2 --y0 -5.5 --y1 -5.5 --step 0.5
+
+# 13.2 — THE PLANNER BENCH. It needs a TF TREE as well as a map (8.8), and
+# ros2 lifecycle set must be RETRIED: the first call after a fresh CLI daemon
+# answers "Node not found" for a node that is running (docs/LESSONS.md
+# 2026-08-05). Cross-read with `ros2 node list` after `ros2 daemon stop`.
+export ROS_DOMAIN_ID=77
+ros2 run tf2_ros static_transform_publisher --x 1.58477 --y 12.576859 \
+    --yaw -0.007915 --frame-id map --child-frame-id forklift/odom &
+ros2 run tf2_ros static_transform_publisher \
+    --frame-id forklift/odom --child-frame-id forklift/base_link &
+ros2 run nav2_map_server map_server --ros-args \
+    -p yaml_filename:=sim/maps/warehouse/warehouse.yaml -p use_sim_time:=false &
+ros2 run nav2_planner planner_server --ros-args \
+    --params-file agv/forklift/nav2.yaml -p use_sim_time:=false &
+for n in /map_server /planner_server; do
+  ros2 lifecycle set $n configure; ros2 lifecycle set $n activate; done
+python3 agv/forklift/scripts/nav2_run.py plan \
+    --start-x -6.0 --start-y -5.5 --x 1.0 --y -5.5 --plan /tmp/B.json
+python3 agv/forklift/scripts/start_pose_check.py path --plan /tmp/B.json
+
+# 13.4 — the driven missions. ONE COMMAND PER ROUTE; the driver owns the
+# guard, the isolation, the staged bring-up, the sampler and the teardown.
+python3 agv/forklift/scripts/mission_repeat.py --spawn-x -6.0 --spawn-y -5.5 \
+    --x 1.0 --y -5.5 --repeats 1 --tag m5-69-oldspawn --domain 50 \
+    --partition m569old --skip-pose-check --timeout 100
+python3 agv/forklift/scripts/mission_repeat.py --spawn-x -3.0 --spawn-y -5.5 \
+    --x 1.0 --y -5.5 --repeats 5 --tag m5-69-dockA --domain 60 \
+    --partition m569dockA --timeout 120
+python3 agv/forklift/scripts/mission_repeat.py --spawn-x -3.0 --spawn-y -5.5 \
+    --x 10.0 --y -5.5 --repeats 5 --tag m5-69-dockB --domain 80 \
+    --partition m569dockB --timeout 180
+python3 agv/forklift/scripts/mission_repeat.py --spawn-x -3.0 --spawn-y -5.5 \
+    --x 9.0 --y -7.0 --repeats 5 --tag m5-69-laneG --domain 90 \
+    --partition m569laneG --timeout 180
+
+# 13.5 — THE ONE ARGUMENT THAT DIFFERS, and it is the whole experiment: K
+# busy loops running beside an otherwise identical route-A sweep.
+for i in $(seq 1 $K); do ( exec -a m569burner bash -c 'while :; do :; done' ) & done
+python3 agv/forklift/scripts/mission_repeat.py --spawn-x -3.0 --spawn-y -5.5 \
+    --x 1.0 --y -5.5 --repeats 3 --tag m5-69-load$K --domain 1$K \
+    --partition m569load$K --timeout 120 --stage-timeout 300
+pkill -f m569burner
+```
+
+### What was and was not changed in the repository
+
+**Changed**: `sim/launch/warehouse_bringup.launch.py`'s `_SPAWN_X` and the
+comment block that argues for it. **Added**:
+`agv/forklift/scripts/start_pose_check.py`,
+`agv/forklift/scripts/mission_repeat.py`, this section and its artefacts.
+
+**Byte-identical**: `nav2.yaml`, `amcl.yaml`, `ekf.yaml`, `config.yaml`, the
+behaviour tree, `model.sdf`, `cmd_vel_to_tricycle.py`, `nav2_run.py`, and both
+`agv/forklift/launch/` files. **`allow_unknown: false`,
+`xy_goal_tolerance: 0.25`, `yaw_goal_tolerance: 0.15`, `footprint_padding: 0.27`
+and `inflation_radius: 0.55` are all untouched.** No dependency was added —
+13.1's distance transform is written out in `start_pose_check.py` rather than
+imported, because `scipy` on this machine is built against numpy 1.x and the
+interpreter carries 2.4.2. `plc/`, `bridge/` and `hmi/` were not read from and
+not written to.
+
+### Artefacts
+
+All under `agv/forklift/evidence/`, one set per repeat, each carrying the run
+that produced it in its name:
+
+`m5-69-{oldspawn,dockA,dockB,laneG,load20,load60}-r<N>-{run.txt,run.csv,plan.json,machine.csv,sim.log,localization.log,navigation.log}`
+and `m5-69-<tag>-summary.json` per sweep, rewritten after **every** repeat so a
+session that dies mid-sweep still leaves its finished repeats behind.
