@@ -426,8 +426,31 @@ def generate_launch_description():
     ld.add_action(DeclareLaunchArgument(
         'gui', default_value='false',
         description='Also start the Gazebo GUI client (headless if false)'))
+    # DEFAULT OFF, 2026-08-07, on the owner's observation at the screen.
+    #
+    # m5-73 read the world_pose field, found it identity, and concluded the
+    # VisualizeLidar plugin draws every fan at the world origin because of it.
+    # The message half of that is true and reproduces. The rendering half is
+    # NOT: the plugin does not take its anchor from world_pose at all. It
+    # resolves the SENSOR ENTITY behind the topic in its own copy of the
+    # scene, which is why the three /measurement topics -- real sensors --
+    # draw correctly and track the vehicle, and why the /viz/* topics, which
+    # no sensor entity owns, draw WRONG.
+    #
+    # Measured: the vehicle was teleported 6.00 m (read back: -3.000 ->
+    # 3.000) and the viz message's world_pose followed exactly (-2.300 ->
+    # 3.700, the designed +0.70/+0.45 corner offset), while the drawn fan did
+    # not move at all. The repeater is therefore not merely useless here, it
+    # is harmful: it adds a process and puts three topics in the plugin's
+    # dropdown that render incorrectly.
+    #
+    # The fan looking "off the vehicle" on the measurement topics is the
+    # MOUNT, and it is deliberate: model.sdf puts the front scanner at the
+    # front-left chassis corner, 0.70 m forward and 0.45 m left, yawed 45 deg
+    # so the blind sector points back into the vehicle. A corner mount is
+    # what real AGVs use to cover 360 deg with two devices.
     ld.add_action(DeclareLaunchArgument(
-        'lidar_viz', default_value=LaunchConfiguration('gui'),
+        'lidar_viz', default_value='false',
         description='Start scripts/scan_viz_repeater.sh, which republishes '
                     'each gz LaserScan with the world_pose field replaced by '
                     'the sensor\'s live world pose, on the three '
