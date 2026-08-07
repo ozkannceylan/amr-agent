@@ -6,16 +6,14 @@ An operator drives a simulated forklift from a commissioning HMI while a Siemens
 S7-1500 forms every motion setpoint in between — HMI → PLC → bridge → Gazebo, and
 the state report back the same way over live OPC UA. 
 
-https://github.com/ozkannceylan/amr-agent/releases/download/demo-m5/demo_m5.mp4
+[![The M5 demonstration — a teleoperated forklift with the safety chain live (4 min 9 s)](https://img.youtube.com/vi/wl1rgWyX66s/maxresdefault.jpg)](https://youtu.be/wl1rgWyX66s)
 
-*The M5 demonstration, 4 min 9 s, one continuous run. A forklift teleoperated
-from the commissioning HMI while the S7-1500 forms every setpoint, with the
-safety layer live the whole time: the scanner drops the speed ceiling at the
-warning boundary, latches a stop at the protective one, and the monitored reset
-is **refused** while the cause still stands. If the player does not appear,
-[download it here](https://github.com/ozkannceylan/amr-agent/releases/download/demo-m5/demo_m5.mp4)
-— it is a [release asset](https://github.com/ozkannceylan/amr-agent/releases/tag/demo-m5)
-rather than a committed file, so the history stays small.*
+*▶ [**Watch the M5 demonstration**](https://youtu.be/wl1rgWyX66s) — 4 min 9 s,
+one continuous run. A forklift teleoperated from the commissioning HMI while the
+S7-1500 forms every setpoint, with the safety layer live the whole time: the
+scanner drops the speed ceiling at the warning boundary, latches a stop at the
+protective one, and the monitored reset is **refused** while the cause still
+stands.*
 
 **Nothing in that recording is a certified safety function.** The safety input
 path is an engineering stand-in on a standard data block, disclosed as one
