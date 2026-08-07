@@ -24,3 +24,7 @@ hmi/evidence/screenshots/
 
 # m5-73: gz-transport repeater build output, not source
 agv/forklift/scripts/build/
+
+# The M5 demonstration recording is hosted on a GitHub Release, not committed:
+# https://github.com/ozkannceylan/amr-agent/releases/tag/demo-m5
+assets/demo_m5.mp4

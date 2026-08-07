@@ -6,9 +6,25 @@ An operator drives a simulated forklift from a commissioning HMI while a Siemens
 S7-1500 forms every motion setpoint in between — HMI → PLC → bridge → Gazebo, and
 the state report back the same way over live OPC UA. 
 
+https://github.com/ozkannceylan/amr-agent/releases/download/demo-m5/demo_m5.mp4
+
+*The M5 demonstration, 4 min 9 s, one continuous run. A forklift teleoperated
+from the commissioning HMI while the S7-1500 forms every setpoint, with the
+safety layer live the whole time: the scanner drops the speed ceiling at the
+warning boundary, latches a stop at the protective one, and the monitored reset
+is **refused** while the cause still stands. If the player does not appear,
+[download it here](https://github.com/ozkannceylan/amr-agent/releases/download/demo-m5/demo_m5.mp4)
+— it is a [release asset](https://github.com/ozkannceylan/amr-agent/releases/tag/demo-m5)
+rather than a committed file, so the history stays small.*
+
+**Nothing in that recording is a certified safety function.** The safety input
+path is an engineering stand-in on a standard data block, disclosed as one
+wherever it appears. No Performance Level, Category, SIL or PFH is claimed,
+reached or implied anywhere in this repository — only PLr *targets*.
+
 ![Teleoperated forklift in Gazebo, driven from the commissioning HMI with the S7-1500 forming every setpoint](assets/teleop-showcase.gif)
 
-*15 s of one live commissioning run. The operator holds FORK UP; past 0.50 m the
+*15 s of an earlier commissioning run. The operator holds FORK UP; past 0.50 m the
 standard program asserts `ForkliftSpeedLimitActive` and forms the traction
 setpoint as demand × 0.30, so a full-deflection -1.0 request leaves
 `ForkliftTractionSpeedRef` at -0.300 m/s. The HMI writes requests and reads
@@ -66,7 +82,57 @@ construction rather than by assertion.*
 
 ## Run it
 
-The Linux side of the M4 commissioning stack comes up with one command:
+The M5 demonstration — the one in the recording above — comes up with one
+command, and goes down with one:
+
+```bash
+./demo.sh up              # --headless for no Gazebo GUI, --monitor for the map pane
+./demo.sh home            # put the vehicle back at its spawn, mid-run
+./demo.sh status
+./demo.sh down
+```
+
+`up` composes the whole cell out of committed files only: the warehouse world
+and the forklift, the field evaluation and the two encoder reading heads, the
+envelope gate, the bridge, the monitoring service and the commissioning HMI.
+Every readiness check waits on an **observable** — a topic that has carried a
+message, a session established, a port answering — never on a duration, because
+bring-up stretches about 6× under load and a fixed wait reports "the process is
+gone" when it has simply not arrived yet.
+
+**It refuses to start half a cell.** Before touching the Linux side it looks
+across the WSL/Windows seam for PLCSIM Advanced and for the stand-in writer, by
+the writer's own named mutex and both its listeners. A stack whose Windows half
+is missing looks like it worked and produces a vehicle that will not move, so
+`up` waits for the writer and names the command that starts it.
+
+**Three things it tells you that cost a live session to learn.** The e-stop
+circuit boots **open** — fail-safe and correct, and nothing closes it until a
+human does, not the HMI, not a link, not a restart. The HMI's RESET is the
+*process* reset and cannot reach an F-latch; the F-side reset lives on the bench
+panel. And a mode selection refused while a demand stands is **consumed, not
+held**, so after clearing you make a fresh NONE → TELEOP edge.
+
+`home` exists because a protective stop is not self-clearing and must not be:
+while the field is occupied the reset is refused, and a vehicle stopped
+nose-to-rack cannot reverse out of its own field either. It moves the model in
+the simulator, reads the pose back before reporting it, and **clears no latch** —
+it says so in its own output, because a command that appeared to clear a safety
+latch would teach the opposite of what this cell demonstrates.
+
+`down` verifies rather than assumes: no component, no survivor in the run's
+`GZ_PARTITION`, no listener on the HMI, monitor or writer ports, the writer's
+mutex free, `/dev/shm` swept. PLCSIM and TIA are never touched — they are the
+owner's, and the CPU keeps running between takes.
+
+The **DDS domain is read from
+[`agv/forklift/vehicles/allocation.yaml`](agv/forklift/vehicles/allocation.yaml)**,
+the single owner of the serial-to-domain mapping, and a disagreeing environment
+is refused rather than overridden. Two graphs on different domains do not error —
+they fall silent, which is the hardest failure to see.
+
+<details>
+<summary>The M4 commissioning stack (<code>./stack.sh</code>)</summary>
 
 ```bash
 ./stack.sh start          # add --headless to run the arena without the Gazebo GUI
@@ -102,6 +168,42 @@ choosing a file for you.
 Prerequisites are ROS 2 Jazzy, Gazebo and the two virtual environments described
 in [`bridge/README.md`](bridge/README.md) and [`hmi/README.md`](hmi/README.md);
 `start` names any that are missing and stops before spawning anything.
+</details>
+
+Both scripts share the same prerequisites and both leave the PLC alone: put the
+CPU in RUN on PLCSIM Advanced from TIA Portal on the Windows machine first, and
+every OPC UA client here is a client of that server (invariant 4). The full
+presentation-morning order — what to start by hand, what "ready" looks like, and
+what to do to make each safety function act — is [`RUNBOOK.md`](RUNBOOK.md).
+
+---
+
+## The operator page
+
+One page, served on `127.0.0.1:8088`. It writes **requests** and reads state; it
+commands no actuator, and the PLC owns what the machine does with a request.
+
+![The commissioning HMI: controls, the PLC's own stop and reset logic, and the read-only monitoring map beside them](assets/hmi/v2b-real-01-whole-page-real-service-2026-08-06.png)
+
+*The whole page against a live CPU and a live monitoring service. Left, the mode
+selector and teleop controls. Middle, the standard program's stops and reset.
+Right, the map — a **read-only** view of the vehicle's ROS 2 graph that never
+touches the PLC.*
+
+The page is built to be honest about four things that most operator screens hide.
+
+| | |
+|---|---|
+| ![A monitored reset held](assets/hmi/v2a-03-reset-held-2026-08-05.png) | **The reset is monitored, and it is a hold.** The PLC acts on the rising edge and arms that edge once per link session. No client clears a latch by writing a node, and clearing a latch energizes nothing. |
+| ![A mode selection refused by the PLC](assets/hmi/v2a-13-mode-selection-refused-2026-08-05.png) | **A refused selection is consumed, not held.** `MACHINE MODE` is the PLC's verdict and never the selector's position — so when the two disagree, the page shows the machine's answer in the larger type. |
+| ![The F-layer demand lamps with a demand standing](assets/hmi/v2a-21-safety-lamps-f-demand-active-2026-08-05.png) | **The F-layer lamps are a mirror and nothing else.** They are copied from the F-runtime group, displayed, never combined and never fed into a control. Nothing on this screen can write, clear or reset them. |
+| ![The map drawing a stale pose as last-known](assets/hmi/v2b-real-04-pose-STALE-standing-vehicle-2026-08-06.png) | **Every value is drawn with the age of the datum it came from.** The localization publishes only on a filter update, so a *standing* vehicle produces no pose at all — a growing age is the honest reading, and a still marker would not be. |
+
+Fifty-six captures of the page under fault, staleness and refusal are produced
+by the capture harness in [`hmi/tools/`](hmi/tools/), each listed in a dated
+manifest. They are **not committed** — the four above are copied into
+`assets/hmi/` for this page, and the rest are regenerated by running the
+harness rather than carried in the history.
 
 ---
 
