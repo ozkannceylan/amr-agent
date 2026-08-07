@@ -634,7 +634,7 @@ they would look. Two are on the panel, permanently:
   note says it boots open;
 - **the HMI's RESET is the *process* reset** (`HmiResetRequest`) and cannot
   reach an F-latch. The F-side reset is the panel's hold button and nothing
-  else (`plc/forklift-safety/SPEC.md` §137).
+  else (`plc/forklift-safety/SPEC.md` §1.3).
 
 The third — a mode selection refused while a demand stands is **consumed, not
 held** — is not this channel and belongs in `RUNBOOK.md` beside the other two;

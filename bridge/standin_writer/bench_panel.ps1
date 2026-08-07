@@ -465,7 +465,7 @@ $form.Controls.Add($boxR)
 # --- the two facts that cost a session --------------------------------
 $boxF = New-Box 16 692 470 90
 $boxF.Controls.Add((New-Label 'Two facts worth having on the panel' 12 6 440 16 $fHead $DIM))
-$boxF.Controls.Add((New-Label "The HMI's RESET is the PROCESS reset (HmiResetRequest). It cannot reach an F-latch. The F-side reset is this button and nothing else (SPEC 137)." 12 24 446 30 $fSmall $INK))
+$boxF.Controls.Add((New-Label "The HMI's RESET is the PROCESS reset (HmiResetRequest). It cannot reach an F-latch. The F-side reset is this button and nothing else (SPEC 1.3)." 12 24 446 30 $fSmall $INK))
 $boxF.Controls.Add((New-Label 'A mode selection refused while a demand stands is consumed, not held: after clearing, make a fresh None -> Teleop edge at the HMI.' 12 56 446 30 $fSmall $INK))
 $form.Controls.Add($boxF)
 

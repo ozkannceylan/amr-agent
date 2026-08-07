@@ -76,7 +76,7 @@ operator channel can close it. Confirmed by measurement, matching the
 coordinator's read of `standin_writer.ps1:157`.
 
 **b. The HMI RESET is not the F-side reset.** `plc/forklift-safety/SPEC.md`
-§137 states it outright: `HmiResetRequest` is the **process** reset;
+§1.3 states it outright: `HmiResetRequest` is the **process** reset;
 `SafetyInputStandIn.ResetButtonPressed` is the **SF-08** reset and is never a
 client write. The owner was pressing the one that cannot clear an F-latch.
 
@@ -180,7 +180,7 @@ side effect of the owner's run and are left in place:
 | # | Request | Owner | Blocking? |
 |---|---|---|---|
 | 1 | **`RUNBOOK.md` and `demo.sh` never say a refused mode selection is consumed.** §3's closing note says to re-edge the selector "after any latch"; it does not say that a selection made *while* a demand stands is thrown away, which is the case the owner actually hit. Add it, and have `up` print it beside the boot state it already reads from the CPU | infra | **Yes, for the showcase** |
-| 2 | **`demo.sh up` reads `EStopDemand True` from the CPU and does not tell the owner what closes it.** It prints the boot state; it should print the two commands — `estop close`, then `reset pulse 2000` at the writer — and say in one line that the HMI RESET is the *process* reset and reaches no F-latch (`plc/forklift-safety/SPEC.md` §137) | infra | **Yes, for the showcase** |
+| 2 | **`demo.sh up` reads `EStopDemand True` from the CPU and does not tell the owner what closes it.** It prints the boot state; it should print the two commands — `estop close`, then `reset pulse 2000` at the writer — and say in one line that the HMI RESET is the *process* reset and reaches no F-latch (`plc/forklift-safety/SPEC.md` §1.3) | infra | **Yes, for the showcase** |
 | 3 | **`demo.sh` declared the stack READY with `viz/` not serving.** Measured 2026-08-07 10:43: `http://127.0.0.1:8089/` returns connection refused. Whatever the ruling on whether the monitoring service should be on by default, a readiness check that passes with a declared component not answering is the gap | infra, and `viz/` for the service itself | No |
 | 4 | **Rule on `scan_fresh_max_s`.** §4 records that its stated derivation ("three scan periods") and the machine's delivered period (0.1117 s) disagree, and that the observed stall exceeded even the derivation. This is an owner decision with a safety direction attached; an agent should not take it | owner, via ADR or a ruling | No, but it will re-appear on stage |
 | 5 | **Measure the headless run.** Re-take §4's inter-arrival table under `./demo.sh up --headless` and say whether the over-limit rate goes to zero. If it does, the demonstration should be run headless and nothing else needs deciding | `agv/` or `sim/`, one short brief | No |
