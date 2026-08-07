@@ -860,7 +860,17 @@ cmd_up() {
     wait_topic "obstacle_zone.py"                        60 /forklift/obstacle/min_distance || readiness=1
     wait_topic "forklift_io.py"                          60 /forklift/fork_height || readiness=1
     wait_topic "field_evaluation.py (warning verdict)"   90 /forklift/warning_field/occupied || readiness=1
-    wait_topic "safe_speed_channels.py (reading head A)" 60 /forklift/drive_speed/channel_a || readiness=1
+    # 60 -> WAIT_PLANT. This check is the LAST link of the longest chain in the
+    # plant: gz publishes the drive-shaft joint state, the parameter bridge
+    # carries it, and only then does safe_speed_channels.py have a reading to
+    # publish. It was the one check still holding a hand-picked 60 s while
+    # every other plant check used WAIT_PLANT, and on 2026-08-07 it timed out
+    # once at exactly 60 s and killed a bringup mid-start-order -- then came up
+    # in 3 s on the retry with nothing changed. A cold D3D12 initialisation
+    # stalling the server's first frames is the likeliest cause, and it is
+    # precisely the kind of one-in-several stall that would spoil a take.
+    wait_topic "safe_speed_channels.py (reading head A)" "$WAIT_PLANT" \
+        /forklift/drive_speed/channel_a || readiness=1
     [ "$readiness" -eq 0 ] || up_abort "the plant"
 
     # ---- 2. the envelope gate --------------------------------------------- #
