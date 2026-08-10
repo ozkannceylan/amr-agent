@@ -1,42 +1,59 @@
 # TODO
 
-## M5 — the fix round, 2026-08-06 night
+## M5 — post-revalidation queue, 2026-08-10
 
-The full-chain validation ran (m5-58) and found four defects. All four are
-triaged in `docs/reports/m5-59-validation-fix-triage.md`; the agent halves
-landed overnight and the TIA halves are the owner's next session.
-
-**Owner, next session:** `plc/forklift/TIA-FIX-PROCEDURE.md`, 63 steps. The
-vault carries it with its session prompt. F-signature `50573CD9` signs every
-figure in `docs/VALIDATION-M5.md` and is spent by that session — the procedure
-names which validations must be re-run.
-
-Landed: m5-60 (node rows), m5-61 (WARN sender, F3 closed), m5-62 (torque-off
-bridge slot, **double-only**), m5-63 (bridge-design repairs, bridge-liveness
-ruled), m5-64 (judge, pass-with-findings).
+The TIA fix session ran 2026-08-07 (m5-59, 63/63) and the whole chain was
+re-validated the same morning against the new F-signature **`29FD2C52`**
+(m5-68). F2/F3/F4 are closed; F1 is closed at the plant with one half open.
+Autonomy was unblocked by m5-69 (spawn pose, not F2). The current state is
+docs/PLAN.md's 2026-08-10 block; this list is what remains.
 
 ### Open, in the order they bite
 
-- **5 Hz keepalive brief — before the 1.000 m/s clip is re-recorded.** m5-64
-  finding 4: after F4 lands, one mid-clip stale reap costs a visible ~2 s
-  slowdown in the re-record. m5-61 deliberately did not raise it because it
-  re-times the protective path's link; the brief must carry a protective-path
-  re-observation in the same run. The constant is `plc/`'s.
-- **AT-11 is not runnable and no deafness claim may be made** until the CPU
-  half lands and `VALIDATION-M5.md` §6.2 is re-measured on the CPU. m5-62's
-  proof is double-only and marked so.
-- **m5-60 request 5 and m5-62 request 5** each close a half of F1 and are
-  unactioned. Neither closes the m5-11 §12 residue, which stays open below.
-- **Two `plc/` document debts**, m5-60 requests 3–4 and m5-62 request 4.
-- **The optional HMI lamp** has no home yet.
+- **The recorded safety + autonomy showcase.** The 2026-08-07 recording is
+  teleop + safety only; the (d) autonomy leg and the ADR 0014 D5 narration
+  are on no recording, and no safety intrusion during an autonomous run has
+  ever been produced (V4). Done when one recording carries (a)–(e).
+- **The acceptance tests against `29FD2C52`:** AT-01/07/08 including the
+  standard-program-in-STOP, bridge-stopped and session-down sub-cases, and
+  AT-02/03/04 restated for M5. No run record exists on this build.
+- **F1's last half:** the standard-side third permissive conjunct was never
+  isolated alone — one open-floor run with a shaft-doubt demand and nothing
+  else standing closes it (VALIDATION-M5 §7 finding 1).
+- **5 Hz keepalive brief — before the 1.000 m/s clip is ever re-recorded.**
+  m5-64 finding 4: one mid-clip stale reap costs a visible ~2 s slowdown.
+  The brief must carry a protective-path re-observation in the same run.
+  The constant is `plc/`'s.
+- **VALIDATION-M5.md does not cite m5-69:** its mission rows still read
+  "NOT ACHIEVED / NOT RUN". Both statements are of different things
+  (mission-with-safety vs mission); done when the document says so and
+  points at m5-69.
+- **Briefed, never executed:** m5-67 (functional-safety expert review),
+  m5-70 (teleop safety hardening — raises the n = 1 narrated figures),
+  m5-75 (owner study documents).
+- **Reports owed** for the 08-07 afternoon commits (viz revert e03e7ff,
+  RViz e8ac048, DDS domain e72070c, GPU 0f36639, demo.sh home 3eb13c5,
+  README round) — or an owner ruling that commit text suffices for them.
+- **Renderer re-qualification:** 0f36639's own commit text — every
+  renderer-sensitive committed timing figure predates the d3d12 switch and
+  must be re-measured before being cited for a run made today.
+- **The spurious protective stop** (m5-72 §4, ~1 per 3 min under the GUI on
+  llvmpipe): the named mitigations (headless, now the GPU) were never
+  measured. Done when a measured rate exists for the current renderer.
+- **m5-60 request 5 and m5-62 request 5** each close a half of F1's
+  signal path and are unactioned. **Two `plc/` document debts**, m5-60
+  requests 3–4 and m5-62 request 4. **The optional HMI lamp** has no home.
 - **Owner's ruling, unanswered:** whether ADR 0014 D4's seam (a) gains a
-  written clarification for the third item now on it (m5-60 §11.8 item 8,
-  m5-64 finding 7). An arch-docs brief if the owner wants it written.
-- **m5-64 finding 1, small:** the torque-off harness console was never
-  archived, so "25/25" survives only as prose — the m3-21 shape. Archive it
-  on the next run rather than re-running for it.
+  written clarification (m5-60 §11.8 item 8, m5-64 finding 7).
+- **m5-64 finding 1, small:** archive the torque-off harness console on the
+  next run rather than re-running for it.
 - Autonomy stays a prototype by owner ruling; the backlog is below and the
   public line is that the work continues.
+
+Closed by m5-68, recorded here because the old block forbade the claims:
+AT-11's blocker is gone — torque-off is measured **on the CPU** (§6.2, six
+contactor episodes, 95 475 refused commands, same-run positive control) —
+and the teleop warning slow-down is proven at full command.
 
 Open items only. M5 (sensored autonomous forklift, ADR 0010 D2) is the open
 gate; M4 (forklift commissioning, ADR 0008) is closing, on the owner's
@@ -51,10 +68,13 @@ in the writer's session** — four transitions, all sourced `FIELD`. The control
 case is what makes it mean something: an object 2.85 m away and plainly visible,
 but outside the 1.35 m contour, produced **no verdict**.
 
-- **CRITERION (a) IS NOT CLOSED, and this is the remaining step.** The chain is
-  proven Gazebo → `ZoneDeviceCircuitClosed`. It is **not** shown through to
-  `ZoneStopDemand`, which needs a **watch table under activated safety mode** —
-  **owner work at the tool.** No gate criterion may claim the demand until then.
+- **The criterion (a) watch-table step is SUPERSEDED 2026-08-07:** the chain is
+  now shown through to the demand without any watch table — m5-58/m5-68 read
+  the F-block instance data (the consumer's view) through the PLCSIM API and
+  corroborate on the CPU's own OPC UA `Safety/` mirrors, live protective
+  latches included. What criterion (a) still lacks is the **autonomous-motion
+  half** (no F-latched stop has ever overridden autonomous motion — V4 NOT
+  RUN) and the showcase narration; both live in the lead block above.
 - **DESIGN DEFECT, correct before the next field brief:** `FIELD-EVALUATION.md`
   §6's rear clip band reads `-72.3°`, which rounds the measured `-72.26°`
   (`EVIDENCE_SENSOR_COVERAGE` §13.2) **the wrong way** and leaves indices 5 and
