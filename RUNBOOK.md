@@ -48,7 +48,8 @@ the same `-CommandFile <path>`.
 ## 2. Bring the stack up (WSL, one command)
 
     cd /mnt/c/Users/ozkan/projects/amr-agent
-    ./demo.sh up            # add --headless for no Gazebo window
+    ./demo.sh up            # add --headless for no Gazebo window,
+                            # --monitor for the HMI map pane (monitor on 8089)
 
 **What "ready" looks like.** Five numbered steps each ending in `ok`, the
 controller's own state read back over OPC UA, then `READY.` Every `ok` names
@@ -123,7 +124,12 @@ Watch three numbers on the page while you drive:
 **If the reset is refused, the cause is still standing.** The commonest case
 on stage: the vehicle has stopped in front of an obstacle, the field is still
 occupied, and it is torque-off so it cannot reverse out. Move the obstacle, or
-put the vehicle back:
+put the vehicle back with one command:
+
+    ./demo.sh home                  # moves the model to its spawn, reads the
+                                    # pose back, and clears NO latch - it says so
+
+Then do the monitored reset. The manual form, if you want a pose of your own:
 
     gz model -m Forklift -p                     # read the pose and the entity id
     gz service -s /world/warehouse/set_pose --reqtype gz.msgs.Pose \
@@ -168,6 +174,7 @@ do, that is the one thing only you can do, from PLCSIM.
 
 | Symptom | Look here |
 |---|---|
+| a protective stop with nothing near the vehicle | the scan-freshness rule firing in the demanding direction: a simulator hitch longer than `scan_fresh_max_s` (0.30 s) latches a stop with the field clear — measured ~1 per 3 min with the GUI attached on the software renderer (m5-72 §4), deliberately not retuned. Recover with the monitored reset; `--headless` and the d3d12 renderer reduce the hitches |
 | any component | `/tmp/amr-agent-demo/<component>.log` |
 | the vehicle will not move at all | did you do the monitored reset, and the None -> Teleop edge after it |
 | `up` stops at the bridge | is the CPU in RUN; `bridge.log` says whether the endpoint answered |
