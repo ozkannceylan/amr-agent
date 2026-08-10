@@ -778,3 +778,7 @@
 2026-08-07T13:00:33.235065Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
 2026-08-07T13:01:39.524611Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
 2026-08-07T13:01:39.574879Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:04:33.256935Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:04:33.306147Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:04:43.885331Z | EXIT | link attempts 5, connections 2, drops 1; sent SPD A 168199, SPD B 168156, MOT 167831, PING 9091; refused non-finite 0, out-of-range 0; silent ticks A 18944, B 18987, MOT 19210; discarded stale A 0, B 0, MOT 629
+2026-08-07T13:04:43.898215Z | LINK | down (node shutting down). Both freshness sequences stop advancing at the writer within one of its cycles, and the F-program reads both channels as missing - a demand, not a zero

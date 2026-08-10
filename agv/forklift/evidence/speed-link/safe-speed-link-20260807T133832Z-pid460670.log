@@ -1,0 +1,362 @@
+2026-08-07T13:38:32.574910Z | LINK | writer address 172.19.176.1:45016 read back from WSL default route (ip route show default)
+2026-08-07T13:38:32.717399Z | LINK | up: connected to the stand-in writer at 172.19.176.1:45016 (attempt 1, connection 1). NO READING IS REPLAYED ONTO A NEW CONNECTION: the first SPD line a fresh link carries is the first reading that arrives after it, so a reconnect can never resurrect a value measured before the gap
+2026-08-07T13:38:32.722413Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:38:32.728449Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:38:32.733527Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:38:35.360539Z | SILENT | mot: sending again after 2.699 s of silence (54 ticks)
+2026-08-07T13:38:35.369040Z | MOTION | MOT 1 0 (present=True, observation valid=False)
+2026-08-07T13:38:35.409481Z | SILENT | a: sending again after 2.749 s of silence (55 ticks)
+2026-08-07T13:38:35.418605Z | SILENT | b: sending again after 2.749 s of silence (55 ticks)
+2026-08-07T13:38:35.559631Z | MOTION | MOT 1 1 (present=True, observation valid=True)
+2026-08-07T13:38:36.059436Z | MOTION | MOT 0 1 (present=False, observation valid=True)
+2026-08-07T13:38:36.159502Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:38:36.171312Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:38:36.185098Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:38:36.209595Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:38:36.224329Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:38:36.235715Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:38:47.959858Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:38:48.009499Z | SILENT | mot: sending again after 0.099 s of silence (2 ticks)
+2026-08-07T13:39:46.450746Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:39:46.501354Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:39:57.450574Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:39:57.461332Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:39:57.474522Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:39:57.550685Z | SILENT | a: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T13:39:57.558681Z | SILENT | b: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T13:39:57.567882Z | SILENT | mot: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T13:40:05.392197Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:40:05.406393Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:40:05.416821Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:40:05.452763Z | SILENT | a: sending again after 0.110 s of silence (2 ticks)
+2026-08-07T13:40:05.469689Z | SILENT | b: sending again after 0.110 s of silence (2 ticks)
+2026-08-07T13:40:05.487633Z | SILENT | mot: sending again after 0.110 s of silence (2 ticks)
+2026-08-07T13:40:40.788475Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:40:40.838499Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:41:31.931710Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:41:31.943491Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:41:31.969348Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:41:32.033143Z | SILENT | a: sending again after 0.151 s of silence (3 ticks)
+2026-08-07T13:41:32.044251Z | SILENT | b: sending again after 0.151 s of silence (3 ticks)
+2026-08-07T13:41:32.059643Z | SILENT | mot: sending again after 0.151 s of silence (3 ticks)
+2026-08-07T13:42:17.823921Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:42:17.835252Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:42:17.842568Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:42:17.874209Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:42:17.888765Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:42:17.896745Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:42:18.524422Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:42:18.556395Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:42:18.584480Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:42:18.674063Z | SILENT | a: sending again after 0.200 s of silence (3 ticks)
+2026-08-07T13:42:18.724252Z | SILENT | b: sending again after 0.200 s of silence (3 ticks)
+2026-08-07T13:42:18.753391Z | SILENT | mot: sending again after 0.200 s of silence (3 ticks)
+2026-08-07T13:42:23.573940Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:42:23.623950Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:42:31.975661Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:42:32.024569Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:42:33.964770Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:42:33.989128Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:42:33.999250Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:42:34.014687Z | SILENT | a: sending again after 0.098 s of silence (2 ticks)
+2026-08-07T13:42:34.023154Z | SILENT | b: sending again after 0.098 s of silence (2 ticks)
+2026-08-07T13:42:34.039693Z | SILENT | mot: sending again after 0.098 s of silence (2 ticks)
+2026-08-07T13:43:14.711413Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:43:14.761469Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:44:02.755450Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:44:02.768216Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:44:02.773365Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:44:02.805455Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:44:02.810780Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:44:02.815824Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:44:35.394553Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:44:35.444813Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:44:39.444589Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:44:39.494531Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:45:03.894694Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:45:03.897962Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:45:03.903497Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:45:03.939225Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:45:03.944636Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:45:03.949711Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:45:04.088948Z | MOTION | MOT 1 1 (present=True, observation valid=True)
+2026-08-07T13:45:04.738955Z | MOTION | MOT 0 1 (present=False, observation valid=True)
+2026-08-07T13:45:06.288941Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:45:06.296004Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:45:06.304324Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:45:06.338852Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:45:06.348225Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:45:06.363084Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:45:14.288817Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:45:14.338824Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:45:48.235407Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:45:48.247047Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:45:48.261077Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:45:48.283874Z | SILENT | a: sending again after 0.099 s of silence (2 ticks)
+2026-08-07T13:45:48.293708Z | SILENT | b: sending again after 0.099 s of silence (2 ticks)
+2026-08-07T13:45:48.309406Z | SILENT | mot: sending again after 0.099 s of silence (2 ticks)
+2026-08-07T13:46:49.624101Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:46:49.632023Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:46:49.642181Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:46:49.674684Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:46:49.693182Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:46:49.707135Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:46:54.674117Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:46:54.698927Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:46:54.716709Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:46:54.774970Z | SILENT | a: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T13:46:54.786769Z | SILENT | b: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T13:46:54.802498Z | SILENT | mot: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T13:46:55.074624Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:46:55.085404Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:46:55.093241Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:46:55.174462Z | SILENT | a: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T13:46:55.200880Z | SILENT | b: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T13:46:55.219194Z | SILENT | mot: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T13:46:55.373862Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:46:55.388533Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:46:55.400465Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:46:55.474426Z | SILENT | a: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T13:46:55.487394Z | SILENT | b: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T13:46:55.494642Z | SILENT | mot: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T13:46:55.673833Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:46:55.679985Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:46:55.688402Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:46:55.724116Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:46:55.729847Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:46:55.739089Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:47:00.923995Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:47:00.929596Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:47:00.945311Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:47:00.973969Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:47:00.993354Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:47:01.006740Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:47:03.477336Z | LINK | down (recv failed: [Errno 104] Connection reset by peer). Both freshness sequences stop advancing at the writer within one of its cycles, and the F-program reads both channels as missing - a demand, not a zero
+2026-08-07T13:47:03.489470Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:47:03.498786Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:47:03.530682Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:47:05.570114Z | LINK | connect attempt 2 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T13:47:07.620163Z | LINK | connect attempt 3 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T13:47:08.720131Z | LINK | up: connected to the stand-in writer at 172.19.176.1:45016 (attempt 4, connection 2). NO READING IS REPLAYED ONTO A NEW CONNECTION: the first SPD line a fresh link carries is the first reading that arrives after it, so a reconnect can never resurrect a value measured before the gap
+2026-08-07T13:47:08.727129Z | SILENT | a: sending again after 5.299 s of silence (106 ticks)
+2026-08-07T13:47:08.731834Z | SILENT | b: sending again after 5.299 s of silence (106 ticks)
+2026-08-07T13:47:08.738615Z | SILENT | mot: sending again after 5.299 s of silence (32 ticks)
+2026-08-07T13:47:15.520189Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:47:15.527501Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:47:15.535489Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:47:15.570873Z | SILENT | a: sending again after 0.099 s of silence (2 ticks)
+2026-08-07T13:47:15.581449Z | SILENT | b: sending again after 0.099 s of silence (2 ticks)
+2026-08-07T13:47:15.588012Z | SILENT | mot: sending again after 0.099 s of silence (2 ticks)
+2026-08-07T13:47:24.270418Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:47:24.320698Z | SILENT | mot: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T13:47:47.466731Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:47:47.516820Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:47:53.067008Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:47:53.167637Z | SILENT | mot: sending again after 0.151 s of silence (3 ticks)
+2026-08-07T13:48:04.861784Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:48:04.911836Z | SILENT | mot: sending again after 0.099 s of silence (2 ticks)
+2026-08-07T13:48:24.411817Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:48:24.461829Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:49:13.450090Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:49:13.500013Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:49:46.497924Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:49:46.506451Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:49:46.528199Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:49:46.547550Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:49:46.553682Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:49:46.560955Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:49:50.447614Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:49:50.463211Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:49:50.508202Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:49:50.537771Z | SILENT | a: sending again after 0.140 s of silence (2 ticks)
+2026-08-07T13:49:50.543963Z | SILENT | b: sending again after 0.140 s of silence (2 ticks)
+2026-08-07T13:49:50.565870Z | SILENT | mot: sending again after 0.168 s of silence (3 ticks)
+2026-08-07T13:49:58.698464Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:49:58.708370Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:49:58.719030Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:49:58.748648Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:49:58.757176Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:49:58.764303Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:49:59.247500Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:49:59.258410Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:49:59.265942Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:49:59.298323Z | SILENT | a: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T13:49:59.309804Z | SILENT | b: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T13:49:59.318471Z | SILENT | mot: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T13:50:00.897446Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:50:00.905831Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:50:00.914642Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:50:00.947679Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:50:00.959169Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:50:00.976848Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:50:27.243501Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:50:27.293751Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:50:39.388257Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:50:39.396209Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:50:39.407505Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:50:39.438827Z | SILENT | a: sending again after 0.098 s of silence (2 ticks)
+2026-08-07T13:50:39.446058Z | SILENT | b: sending again after 0.098 s of silence (2 ticks)
+2026-08-07T13:50:39.453960Z | SILENT | mot: sending again after 0.098 s of silence (2 ticks)
+2026-08-07T13:50:42.338357Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:50:42.352263Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:50:42.362649Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:50:42.388198Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:50:42.401927Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:50:42.416832Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:50:53.038206Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:50:53.088141Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:51:34.677970Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:51:34.728083Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:52:10.525756Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:52:10.575883Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:52:24.175843Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:52:24.225818Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:53:16.466098Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:53:16.516047Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:53:16.616079Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:53:16.624700Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:53:16.629714Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:53:16.666176Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:53:16.672585Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:53:16.678639Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:53:52.512488Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:53:52.562706Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:53:58.212417Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:53:58.263531Z | SILENT | mot: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T13:54:48.309881Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:54:48.319281Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:54:48.333275Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:54:48.354022Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:54:48.381149Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:54:48.389061Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:54:48.453941Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:54:48.466727Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:54:48.473735Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:54:48.504880Z | SILENT | a: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T13:54:48.526129Z | SILENT | b: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T13:54:48.544945Z | SILENT | mot: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T13:54:50.554132Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:54:50.560512Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:54:50.567836Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:54:50.604581Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:54:50.617921Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:54:50.625081Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:55:11.902168Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:55:11.912640Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:55:11.927254Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:55:12.009967Z | SILENT | a: sending again after 0.156 s of silence (3 ticks)
+2026-08-07T13:55:12.027859Z | SILENT | b: sending again after 0.156 s of silence (3 ticks)
+2026-08-07T13:55:12.041540Z | SILENT | mot: sending again after 0.156 s of silence (3 ticks)
+2026-08-07T13:55:54.847218Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:55:54.897145Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:56:19.642596Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:56:19.692667Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:56:24.742440Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:56:24.792495Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:56:27.342421Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:56:27.392505Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:56:43.637912Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:56:43.692122Z | SILENT | mot: sending again after 0.103 s of silence (2 ticks)
+2026-08-07T13:56:57.587984Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:56:57.619986Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:56:57.636668Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:56:57.688970Z | SILENT | a: sending again after 0.143 s of silence (3 ticks)
+2026-08-07T13:56:57.733462Z | SILENT | b: sending again after 0.143 s of silence (3 ticks)
+2026-08-07T13:56:57.826249Z | SILENT | mot: sending again after 0.143 s of silence (3 ticks)
+2026-08-07T13:56:57.987496Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:56:57.999551Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:56:58.010487Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:56:58.037492Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:56:58.053253Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:56:58.069520Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:57:10.433099Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:57:10.456346Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:57:10.468910Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:57:10.534415Z | SILENT | a: sending again after 0.151 s of silence (3 ticks)
+2026-08-07T13:57:10.554785Z | SILENT | b: sending again after 0.151 s of silence (3 ticks)
+2026-08-07T13:57:10.573012Z | SILENT | mot: sending again after 0.151 s of silence (3 ticks)
+2026-08-07T13:57:19.382709Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:57:19.432683Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:57:36.927707Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:57:36.977743Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:57:49.977716Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:57:49.993702Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:57:50.004903Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:57:50.027677Z | SILENT | a: sending again after 0.097 s of silence (2 ticks)
+2026-08-07T13:57:50.046357Z | SILENT | b: sending again after 0.097 s of silence (2 ticks)
+2026-08-07T13:57:50.056977Z | SILENT | mot: sending again after 0.097 s of silence (2 ticks)
+2026-08-07T13:58:19.275555Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:58:19.323701Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:58:55.218269Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:58:55.268794Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:59:15.013675Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:59:15.063361Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:59:26.513605Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T13:59:26.524342Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T13:59:26.563793Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T13:59:26.572529Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T14:00:36.701233Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:00:36.751187Z | SILENT | mot: sending again after 0.098 s of silence (2 ticks)
+2026-08-07T14:02:40.031057Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:02:40.081025Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T14:04:19.872227Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:04:19.922170Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T14:07:24.140795Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:07:24.191035Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T14:08:28.781669Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:08:28.831767Z | SILENT | mot: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T14:11:27.454779Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T14:11:27.472200Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T14:11:27.486619Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:11:27.501287Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T14:11:27.525753Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T14:11:27.534847Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T14:11:30.501858Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T14:11:30.552966Z | SILENT | a: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T14:11:47.949097Z | MOTION | MOT 1 1 (present=True, observation valid=True)
+2026-08-07T14:11:48.248420Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T14:11:48.265630Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T14:11:48.275557Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:11:48.299062Z | SILENT | a: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T14:11:48.319627Z | SILENT | b: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T14:11:48.330154Z | SILENT | mot: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T14:11:49.998266Z | SILENT | channel A: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqA and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T14:11:50.008208Z | SILENT | channel B: no fresh reading, so NO LINE is sent. The writer freezes SpeedSeqB and the F-program reads the channel as missing - a demand, never a zero and never the last value
+2026-08-07T14:11:50.032161Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:11:50.048625Z | SILENT | a: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T14:11:50.059200Z | SILENT | b: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T14:11:50.098958Z | SILENT | mot: sending again after 0.150 s of silence (3 ticks)
+2026-08-07T14:11:53.098730Z | MOTION | MOT 0 1 (present=False, observation valid=True)
+2026-08-07T14:11:54.748437Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:11:54.798469Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T14:12:01.899412Z | MOTION | MOT 1 1 (present=True, observation valid=True)
+2026-08-07T14:12:09.594440Z | MOTION | MOT 0 1 (present=False, observation valid=True)
+2026-08-07T14:12:32.444513Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:12:32.494621Z | SILENT | mot: sending again after 0.099 s of silence (2 ticks)
+2026-08-07T14:13:26.585065Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:13:26.635198Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T14:13:41.032073Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:13:41.081808Z | SILENT | mot: sending again after 0.100 s of silence (2 ticks)
+2026-08-07T14:13:47.831956Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:13:47.883708Z | SILENT | mot: sending again after 0.101 s of silence (2 ticks)
+2026-08-07T14:14:14.827404Z | LINK | down (recv failed: [Errno 104] Connection reset by peer). Both freshness sequences stop advancing at the writer within one of its cycles, and the F-program reads both channels as missing - a demand, not a zero
+2026-08-07T14:14:14.839151Z | SILENT | channel A: the link would not take the line, so the reading is DROPPED. It is not queued and not resent - a queued reading arrives stale, which is the one thing this link may not deliver
+2026-08-07T14:14:14.864758Z | SILENT | channel B: the link would not take the line, so the reading is DROPPED. It is not queued and not resent - a queued reading arrives stale, which is the one thing this link may not deliver
+2026-08-07T14:14:14.879244Z | SILENT | motion: no fresh observation pair, so NO MOT LINE is sent. The writer drives MotionPresent TRUE after its own MOTION_SILENCE_MAX - an unobservable vehicle is MOVING, never still
+2026-08-07T14:14:16.927215Z | LINK | connect attempt 5 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:18.977206Z | LINK | connect attempt 6 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:21.027216Z | LINK | connect attempt 7 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:23.077152Z | LINK | connect attempt 8 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:25.127638Z | LINK | connect attempt 9 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:27.227278Z | LINK | connect attempt 10 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:29.277322Z | LINK | connect attempt 11 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:31.377101Z | LINK | connect attempt 12 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:33.477037Z | LINK | connect attempt 13 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:35.573297Z | LINK | connect attempt 14 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:37.623771Z | LINK | connect attempt 15 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:39.673981Z | LINK | connect attempt 16 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:41.725053Z | LINK | connect attempt 17 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:43.773459Z | LINK | connect attempt 18 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:45.823831Z | LINK | connect attempt 19 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:47.873456Z | LINK | connect attempt 20 to 172.19.176.1:45016 failed: no completion within 2.0 s. While the link is down this node sends nothing; the writer freezes both freshness sequences and drives MotionPresent TRUE, which is the demanding direction and its contract, not ours to duplicate
+2026-08-07T14:14:48.913662Z | EXIT | link attempts 21, connections 2, drops 2; sent SPD A 35560, SPD B 35549, MOT 35491, PING 2077; refused non-finite 0, out-of-range 0; silent ticks A 7968, B 7979, MOT 7426; discarded stale A 0, B 0, MOT 105

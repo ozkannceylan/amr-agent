@@ -114,3 +114,8 @@
 2026-08-07T12:59:00.165Z | LINK | up: connected to the stand-in writer at 172.19.176.1:45015
 2026-08-07T12:59:00.179Z | SEND | ZONE 0 -> first line on a new connection (a connection is a transition from unknown)
 2026-08-07T12:59:00.180Z | SEND | WARN 0 -> first line on a new connection (the writer drove the warning channel FALSE when this link died; a clear verdict is a fresh claim, never an inherited one)
+2026-08-07T13:04:43.882Z | LINK | down (this node is shutting down). The writer converts the silence into an open zone channel AND an occupied warning field within its own 1 s stale window
+2026-08-07T13:04:43.899Z | EXIT | front device: 84403 scan(s) ingested, last invalid fraction 0.00%, last protective intrusion-ray count 0, last warning-ray count 2, faulted=False
+2026-08-07T13:04:43.899Z | EXIT | rear device: 84402 scan(s) ingested, last invalid fraction 4.00%, last protective intrusion-ray count 2, last warning-ray count 21, faulted=False
+2026-08-07T13:04:43.900Z | EXIT | link: 5 connect attempt(s), 17702 line(s) sent, of which 17683 were PING keepalives (not logged individually - this is a transition log)
+2026-08-07T13:04:43.900Z | EXIT | field evaluation stopped. The writer sees the link die and drives ZoneDeviceCircuitClosed FALSE AND WarningFieldClear FALSE within FIELD_LINK_STALE_MAX = 1 s: loss of the field source reads as an intrusion and as an occupied warning field, never as a clear one. The reduced limit is therefore in force again from that instant, which is the demanding direction
