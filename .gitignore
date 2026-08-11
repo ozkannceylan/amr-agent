@@ -28,3 +28,7 @@ agv/forklift/scripts/build/
 # The M5 demonstration recording is published on YouTube, not committed:
 # https://youtu.be/wl1rgWyX66s
 assets/demo_m5.mp4
+
+# Step 1 run artefacts: per-run logs and the pid file step1.sh writes.
+m5_ver2/step1/logs/
+m5_ver2/step1/.step1_pids
