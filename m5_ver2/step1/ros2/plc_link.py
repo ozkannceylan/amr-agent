@@ -31,7 +31,7 @@ from std_msgs.msg import Bool, String
 # ----------------------------- CONFIG -----------------------------
 BIND_ADDR = "0.0.0.0"
 UDP_PORT = 5100
-STALE_S = 0.3
+STALE_S = 0.28
 PUBLISH_HZ = 20.0
 STATUS_TOPIC = "/plc/status"
 # ------------------------------------------------------------------
@@ -104,10 +104,17 @@ class PlcLink(Node):
 
         BOUNDED so that tick() always returns: a flood on :5100 would hold
         an unbounded loop resident and the node would fall silent while
-        still looking alive.
+        still looking alive. 64 is ~25 tick periods of the ~50 Hz sender,
+        against the ~2.5 datagrams one tick legitimately brings.
+
+        THE TRADE THE BOUND MAKES, which is new behaviour: above 64 in a
+        tick the backlog survives the call, so `newest` can be an older
+        packet stamped with this tick's `now` - stale state read as
+        FRESH. Silence is the worse failure, so that is the right way to
+        fail here, but the bound is not free and does not read as free.
         """
         newest = None
-        for _ in range(64):  # three cycles of the ~50 Hz sender
+        for _ in range(64):
             try:
                 data = self.sock.recv(512)
             except BlockingIOError:

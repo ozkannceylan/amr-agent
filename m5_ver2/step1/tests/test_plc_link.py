@@ -22,12 +22,15 @@ def test_parse_status_rejects_a_non_boolean_motor():
     # calls invalid. isinstance(1, bool) is False, which is the direction
     # needed; isinstance(True, int) also being True does not weaken it,
     # because the test is against bool and not against int.
-    assert plc_link.parse_status(b'{"estop_healthy": true, "motor": 1, "ts": 0.0}') is None
-    assert plc_link.parse_status(b'{"estop_healthy": true, "motor": "off", "ts": 0.0}') is None
+    assert plc_link.parse_status(
+        b'{"estop_healthy": true, "motor": 1, "ts": 0.0}') is None
+    assert plc_link.parse_status(
+        b'{"estop_healthy": true, "motor": "off", "ts": 0.0}') is None
 
 
 def test_parse_status_rejects_a_non_boolean_estop_healthy():
-    assert plc_link.parse_status(b'{"estop_healthy": 1, "motor": true, "ts": 0.0}') is None
+    assert plc_link.parse_status(
+        b'{"estop_healthy": 1, "motor": true, "ts": 0.0}') is None
 
 
 def test_failsafe_is_tripped_in_both_fields():
@@ -52,5 +55,20 @@ def test_is_stale_default_window_is_the_configured_constant():
     # Called with TWO arguments, so these pin STALE_S itself. Every test
     # above passes the window explicitly and would stay green if the
     # constant were edited to a wrong value; the node uses the default.
-    assert plc_link.is_stale(10.0, 10.3) is True
-    assert plc_link.is_stale(10.0, 10.29) is False
+    #
+    # The base is 0.0 so the subtraction is EXACT. From a base of 10.0 it
+    # is not: 10.28 - 10.0 is 0.27999999999999936, just under the window,
+    # so that assertion would pin the opposite answer for a reason that
+    # has nothing to do with this node.
+    assert plc_link.is_stale(0.0, 0.28) is True
+    assert plc_link.is_stale(0.0, 0.27) is False
+
+
+def test_is_stale_default_window_trips_on_the_sixth_tick_and_not_the_fifth():
+    # What the timing budget actually rests on. The node compares two TICK
+    # timestamps, so the elapsed value tested is a multiple of the 0.05 s
+    # period: 5 ticks must not trip and 6 ticks must, with margin at both
+    # ends rather than on a boundary. This is what a return to an exact
+    # multiple of the tick (0.25 or 0.30) would break.
+    assert plc_link.is_stale(0.0, 0.25) is False
+    assert plc_link.is_stale(0.0, 0.30) is True
