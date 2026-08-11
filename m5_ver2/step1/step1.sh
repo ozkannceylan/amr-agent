@@ -8,6 +8,8 @@
 # GZ_PARTITION and ROS_DOMAIN_ID are set on every child so a concurrent M5
 # demo cannot be joined by accident: a shared graph would put the old stack's
 # publishers on this one's topics. They also decide what stop may kill.
+# ROS_DOMAIN_ID does NOT isolate Gazebo - gz transport is not DDS
+# (stack.sh:52-53) - so GZ_PARTITION is the one that scopes the sweep.
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -20,6 +22,8 @@ export GZ_PARTITION="${GZ_PARTITION:-step1}"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-91}"
 # The stack as command-line patterns. gz sim is FIRST on purpose (see the
 # shutdown-order note in stop()); a pattern only NOMINATES, ours() decides.
+# MAINTENANCE OBLIGATION: anything added to the stack must be added here too,
+# or stop orphans it and still prints "down." Port 5101 arrives in a later step.
 PATTERNS=("gz sim" "step1_world.launch.py" "parameter_bridge" \
           "sto_contactor.py" "forklift_io.py" "plc_link.py" "cmd_gate.py" "hmi_node.py")
 
@@ -35,9 +39,29 @@ PATTERNS=("gz sim" "step1_world.launch.py" "parameter_bridge" \
 #   demo.sh:1046 and stack.sh:46-50 scope sweeps the same way; the old
 #   stack's is m5demo (demo.sh:121). setsid does not affect this: the check
 #   reads each candidate's OWN environ and never walks a process tree.
+# 2>/dev/null PRECEDES the input redirect on purpose. Bash applies
+# redirections left to right, so with it last the shell's own "No such file"
+# for a pid that exited between nomination and check still reaches the
+# terminal - measured: one such line per normal stop, once stop began calling
+# ours() on pids sweep TERM had just killed.
 ours() {
-    tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null \
+    tr '\0' '\n' 2>/dev/null < "/proc/$1/environ" \
         | grep -qxF "GZ_PARTITION=$GZ_PARTITION"
+}
+
+# THE PID FILE IS THE INPUT ours() DOES NOT GUARD, so it gets its own check.
+#   Only stop deletes the file, so a reboot, a `wsl --shutdown` or a closed
+#   terminal - the very case setsid was added to survive - leaves it on disk,
+#   and Linux recycles pids back through the 17xxx-18xxx range this stack
+#   lands in within minutes of a boot. A recorded number can therefore name a
+#   STRANGER, and every use of that number has to say so first. All four
+#   recorded command lines contain m5_ver2/step1 and no foreign one does, so
+#   that token is the identity test. It is deliberately the literal and not
+#   "$STEP1": if REPO ever resolves differently between the start and the
+#   stop, the looser token still matches and the partition read-back below
+#   still works, which is the failure that read-back exists to prevent.
+recorded() {
+    grep -qaF "m5_ver2/step1" "/proc/$1/cmdline" 2>/dev/null
 }
 
 sweep() {  # sweep <signal>
@@ -59,19 +83,25 @@ sweep() {  # sweep <signal>
 start() {
     local pid
     if [ -f "$PIDFILE" ]; then
+        # recorded() too: a recycled pid would make start refuse against a
+        # stack that is not there, and the message would send the operator
+        # to a stop that then has to be right about the same pid.
         while read -r pid; do
-            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            case "$pid" in ''|*[!0-9]*) continue ;; esac
+            if kill -0 "$pid" 2>/dev/null && recorded "$pid"; then
                 echo "already running (pid $pid, see $PIDFILE). Run '$0 stop' first."
                 return 1
             fi
         done < "$PIDFILE"
-        # All dead: a crashed run left it. The return above is what keeps
-        # start from ever writing to a LIVE stack.
+        # None of them is ours any more: a crashed run left the file. The
+        # return above is what keeps start from writing to a LIVE stack.
         rm -f "$PIDFILE"
     fi
     [ -f "$ROS_SETUP" ] || { echo "no $ROS_SETUP"; return 1; }
-    mkdir -p "$LOGDIR"
-    : > "$PIDFILE"
+    # Unchecked, an unwritable log dir fails all four redirections, and start
+    # would sleep its way to "up." over a stack that never began.
+    mkdir -p "$LOGDIR" || { echo "cannot create $LOGDIR"; return 1; }
+    : > "$PIDFILE"  || { echo "cannot write $PIDFILE"; return 1; }
     # ament's hook reads AMENT_TRACE_SETUP_FILES before setting it, so
     # `set -u` stands down for the source or start dies on its line 8.
     set +u
@@ -100,6 +130,25 @@ start() {
     spawn cmd_gate python3 "$STEP1/ros2/cmd_gate.py"
     spawn hmi      python3 "$STEP1/ros2/hmi_node.py"
 
+    # "A process that dies in its first fraction of a second has not started,
+    # and saying 'started' about it sends the operator to the wrong log"
+    # (stack.sh:243-244). The check is HERE and not inside spawn because the
+    # deaths that matter are not instant: the leader writes its pid before
+    # exec, and hmi_node.py with no DISPLAY still takes ~0.5 s to import
+    # rclpy and reach tk.Tk() - measured, twice, at .518 s and .494 s. A
+    # per-spawn settle would have to guess that number; by this line the
+    # youngest child is a second old and the oldest is six. recorded() is
+    # the liveness test rather than kill -0, which cannot see that an
+    # unreaped child is already a zombie.
+    sleep 1
+    local i=0 names=(world plc_link cmd_gate hmi) bad=0
+    while read -r pid; do
+        recorded "$pid" || { bad=1
+            echo "  WARNING: ${names[$i]} exited during startup, see $LOGDIR/${names[$i]}.log"; }
+        i=$(( i + 1 ))
+    done < "$PIDFILE"
+    [ "$bad" = 1 ] && echo "  THE STACK IS INCOMPLETE."
+
     echo ""
     echo "up. Now start PLCSIM Advanced instance PLC_2, then on Windows:"
     echo "  python m5_ver2\\step1\\windows\\step1.py"
@@ -108,11 +157,16 @@ start() {
 stop() {
     local pid p
     # THE PARTITION SWEPT IS THE RUNNING STACK'S, NOT THIS SHELL'S: a stop
-    # where GZ_PARTITION differs from the start would sweep nothing and
-    # print "down." over a live stack. Read it back off a pid we recorded.
+    # where GZ_PARTITION differs from the start would sweep nothing and print
+    # "down." over a live stack. Read it back off a pid we recorded - but only
+    # from a pid that is STILL OURS. Taking it from a recycled pid would be
+    # the worst bug this script could have: if that pid now belongs to the
+    # owner's live M5 demo, GZ_PARTITION becomes m5demo and the two sweeps
+    # below then take that demo down, with the mechanism built to protect it.
     if [ -f "$PIDFILE" ]; then
         p="$(while read -r pid; do
-                 tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null
+                 case "$pid" in ''|*[!0-9]*) continue ;; esac
+                 recorded "$pid" && tr '\0' '\n' 2>/dev/null < "/proc/$pid/environ"
              done < "$PIDFILE" | sed -n 's/^GZ_PARTITION=//p' | head -1)"
         [ -n "$p" ] && GZ_PARTITION="$p"
     fi
@@ -129,8 +183,14 @@ stop() {
     #   still the e-stop.
     sweep TERM
     if [ -f "$PIDFILE" ]; then
+        # ours() before kill, exactly as the sweep does at :47 - a recorded
+        # pid is a number on disk, not a promise. The residual purpose of
+        # this loop survives it: a recorded process that matches no PATTERN
+        # (a setsid wrapper whose exec failed) still carries the partition.
+        # Side effect: pids already dead from sweep TERM no longer print.
         while read -r pid; do
-            [ -n "$pid" ] && kill "$pid" 2>/dev/null && echo "  killed $pid"
+            case "$pid" in ''|*[!0-9]*) continue ;; esac
+            ours "$pid" && kill "$pid" 2>/dev/null && echo "  killed $pid"
         done < "$PIDFILE"
         rm -f "$PIDFILE"
     else
