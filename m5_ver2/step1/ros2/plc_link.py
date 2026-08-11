@@ -31,7 +31,7 @@ from std_msgs.msg import Bool, String
 # ----------------------------- CONFIG -----------------------------
 BIND_ADDR = "0.0.0.0"
 UDP_PORT = 5100
-STALE_S = 0.5
+STALE_S = 0.3
 PUBLISH_HZ = 20.0
 STATUS_TOPIC = "/plc/status"
 # ------------------------------------------------------------------
@@ -50,7 +50,9 @@ def parse_status(data):
     """Decode one datagram, or None if it is not a packet we trust.
 
     A packet missing a key is rejected rather than defaulted: defaulting
-    `motor` would be inventing an enable.
+    `motor` would be inventing an enable. The booleans must also BE
+    booleans - `not motor` on a truthy non-bool (1, or "off") would
+    publish demand False and release the contactor on an invalid packet.
     """
     try:
         msg = json.loads(data.decode())
@@ -58,6 +60,9 @@ def parse_status(data):
         return None
     if not isinstance(msg, dict) or not _REQUIRED_KEYS.issubset(msg):
         return None
+    for key in ("motor", "estop_healthy"):
+        if not isinstance(msg[key], bool):
+            return None
     return msg
 
 
@@ -95,9 +100,14 @@ class PlcLink(Node):
                 topics["safety_torque_off_demand"]))
 
     def drain(self):
-        """Take the newest datagram and discard any backlog."""
+        """Take the newest datagram and discard any backlog.
+
+        BOUNDED so that tick() always returns: a flood on :5100 would hold
+        an unbounded loop resident and the node would fall silent while
+        still looking alive.
+        """
         newest = None
-        while True:
+        for _ in range(64):  # three cycles of the ~50 Hz sender
             try:
                 data = self.sock.recv(512)
             except BlockingIOError:
@@ -109,7 +119,13 @@ class PlcLink(Node):
 
     def tick(self):
         now = time.monotonic()
-        fresh = self.drain()
+        # An exception out of tick() escapes rclpy.spin, and a dead node
+        # leaves the contactor closed and the plant enabled.
+        try:
+            fresh = self.drain()
+        except OSError as exc:
+            self.get_logger().warn("recv failed: {}".format(exc))
+            fresh = None
         if fresh is not None:
             self.last_msg, self.last_rx = fresh, now
         if is_stale(self.last_rx, now):
