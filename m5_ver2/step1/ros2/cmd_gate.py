@@ -65,7 +65,20 @@ CONFIG_YAML = os.path.normpath(
 
 
 def clamp(value, limit):
-    """Symmetric clamp to +-limit."""
+    """Symmetric clamp to +-limit. NaN becomes 0.0.
+
+    THE NaN GUARD IS NOT DEFENSIVE PADDING. Every comparison against NaN
+    is False, so min(limit, nan) and max(-limit, limit) both keep their
+    first operand and the bare clamp returns +limit: a NaN linear.x would
+    command MAXIMUM FORWARD TRACTION and a NaN angular.z the mechanical
+    stop. That inverts this file's own rule one function below - anything
+    unreadable is inhibited - by making unreadable input on the COMMAND
+    side accelerate while unreadable input on the STATUS side stops.
+    `value != value` is true only for NaN and needs no import. The
+    infinities are left alone: they have a sign and clamp correctly.
+    """
+    if value != value:
+        return 0.0
     return max(-limit, min(limit, value))
 
 

@@ -44,6 +44,35 @@ def test_clamp_is_symmetric_and_leaves_interior_values_alone():
     assert cmd_gate.clamp(-2.0, 1.31) == -1.31
 
 
+def test_nan_clamps_to_zero_and_not_to_the_limit():
+    # Every comparison against NaN is False, so min() and max() both keep
+    # their first operand and the naive clamp returns +limit: garbage in,
+    # MAXIMUM SPEED out. Zero is the only defensible answer for a value
+    # that is not a number.
+    assert cmd_gate.clamp(float("nan"), 1.31) == 0.0
+    assert cmd_gate.clamp(float("nan"), 1.50) == 0.0
+
+
+def test_infinities_still_clamp_to_the_limit():
+    # Pinned beside the NaN case so the NaN guard cannot be written in a
+    # way that also swallows the infinities, which DO have a sign and a
+    # correct clamped value.
+    assert cmd_gate.clamp(float("inf"), 1.31) == 1.31
+    assert cmd_gate.clamp(float("-inf"), 1.31) == -1.31
+
+
+def test_a_nan_traction_command_does_not_become_full_speed():
+    traction, _ = cmd_gate.gated_command(
+        float("nan"), 0.0, True, SPEED_MAX, STEER_MAX)
+    assert traction == 0.0
+
+
+def test_a_nan_steer_command_does_not_become_the_mechanical_stop():
+    _, steer = cmd_gate.gated_command(
+        0.0, float("nan"), True, SPEED_MAX, STEER_MAX)
+    assert steer == 0.0
+
+
 def test_motor_is_read_out_of_the_status_json():
     assert cmd_gate.motor_from_status(
         '{"estop_healthy": true, "motor": true, "ts": 1.0}') is True
@@ -92,9 +121,16 @@ def test_gate_timeout_is_off_the_tick_boundary():
     # Task 3's trap, encoded so an edit cannot walk back into it: a
     # timeout at an exact multiple of the tick period sits ON a boundary
     # and microseconds of jitter decide whether the Nth or the N+1th tick
-    # fires. 0.25 is 2.5 ticks, clear of both. The tolerance is what makes
-    # this catch 0.30, whose float product is 2.9999999999999996 and would
-    # slip past an equality test against round().
+    # fires. 0.25 is 2.5 ticks, clear of both.
+    #
+    # WHY A TOLERANCE AND NOT `ticks != round(ticks)`. Not for floating
+    # point reasons - 0.30 * 10.0 is EXACTLY 3.0 (0.3 as a double is
+    # 1.11e-16 under 0.3, and ten times that lands inside half an ulp of
+    # 3.0), so an equality test would catch 0.30 perfectly well. The
+    # tolerance earns its place by rejecting values NEAR a boundary as
+    # well as ON one: 0.201 and 0.299 sit a millisecond from a tick and
+    # jitter across it exactly as 0.30 would, and both sail through an
+    # equality test.
     ticks = cmd_gate.STATUS_STALE_S * cmd_gate.ZERO_HZ
     assert abs(ticks - round(ticks)) > 0.1
 
