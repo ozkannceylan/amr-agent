@@ -43,10 +43,34 @@ _STO_SCRIPT = os.path.join(_SCRIPTS, "sto_contactor.py")
 _WORLD_NAME = "warehouse"
 _SPAWN = {"x": "-3.00", "y": "-5.50", "z": "0.05", "yaw": "0.0"}
 
+# THE FOUR PATHS, CHECKED AT IMPORT, FOR THE SAME REASON THE CONFIG IS.
+# A wrong path here does not stop the launch: gz or `create` dies, the
+# bridge and both scripts keep running, and every ROS topic the Step 3
+# check looks for still EXISTS - the contactor publishes the terminals
+# whether or not anything subscribes to them. The graph would then look
+# correct while the truck did not move, which is precisely the two-causes
+# ambiguity this file exists to remove, arriving through a different door.
+# So a missing file is a refusal at import, naming the path, the way a
+# missing config key already is. _CONFIG needs no entry: open() below
+# raises FileNotFoundError naming it.
+for _path in (_WORLD, _MODEL, _IO_SCRIPT, _STO_SCRIPT):
+    if not os.path.isfile(_path):
+        raise FileNotFoundError(
+            "step1_world.launch.py: no such file: {}".format(_path))
+
 with open(_CONFIG, "r", encoding="utf-8") as _handle:
     _TOPICS = yaml.safe_load(_handle)["topics"]
 
 # '[' gz to ROS, ']' ROS to gz.
+#
+# JOINT STATES AND ODOMETRY ARE DELIBERATELY NOT BRIDGED. Nothing in
+# m5_ver2/step1/ consumes linear_speed, fork_height or joint_states, and a
+# bridged channel with no consumer is a claim the run does not make. The
+# cost is that forklift_io logs "waiting for source data:
+# joint_states=False, odom=False" every 5 s for the life of every Step 1
+# run. That warning is EXPECTED and harmless: it gates only the two derived
+# state scalars and the fork target seed, never the traction or steer
+# command path.
 _BRIDGE_ARGS = [
     "{}@rosgraph_msgs/msg/Clock[gz.msgs.Clock".format(_TOPICS["clock"]),
     "{}@std_msgs/msg/Float64]gz.msgs.Double".format(
@@ -76,6 +100,13 @@ def generate_launch_description():
         arguments=[
             "-world", _WORLD_NAME,
             "-file", _MODEL,
+            # A DELIBERATE LITERAL, AND NOT THE NAME config.yaml OWNS
+            # (config.yaml:26, model.name: Forklift). Nothing breaks: the gz
+            # topic names are name-independent by design, because every gz
+            # system in model.sdf states its topic explicitly - config.yaml
+            # :24-25 says exactly that. Tree tooling keyed on the model name
+            # WOULD mismatch, but none of it runs in Step 1 and the plan's
+            # verification greps depend on this value, so it stays.
             "-name", "forklift",
             "-x", _SPAWN["x"],
             "-y", _SPAWN["y"],
