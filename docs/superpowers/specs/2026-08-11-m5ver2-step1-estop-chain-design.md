@@ -402,12 +402,37 @@ Subscribes `/hmi/cmd_vel` and `/plc/status`.
 
 - `motor == True` → forward to `/forklift/cmd/traction_speed` and
   `/forklift/cmd/steer_angle`.
-- `motor == False`, **or** `/plc/status` stale, **or** `/plc/status` never
-  received → publish zero on both topics **continuously at 10 Hz**, not once.
-  Continuous zeros, because a single zero lets the simulated vehicle coast.
+- `motor == False`, **or** `/plc/status` stale (`STATUS_STALE_S`), **or**
+  `/plc/status` never received → publish zero on both topics **continuously at
+  10 Hz**, not once. Continuous zeros, because a single zero lets the simulated
+  vehicle coast.
 
 Initial state is `motor = False`. A gate that has not yet heard from the PLC
 must not pass a command.
+
+**Why the gate needs a staleness rule of its own, when `plc_link` already has
+one.** They cover different failures. `plc_link` failing safe *as a node* is not
+the same as `plc_link` failing safe *as a process*: on a dead UDP link it keeps
+publishing FAILSAFE at 20 Hz and the chain works, but if the process itself
+dies, `/plc/status` goes silent. Without a timeout here the gate would latch at
+its last value — and `sto_contactor` below it also holds its last state on
+silence, because it latches on an observed True and releases on an observed
+False. Silence at that layer is deliberately not a demand. So a dead `plc_link`
+would leave the vehicle enabled down the entire chain, with nothing noticing.
+
+The two paths do not compose, and only the first is on the §9 item 5 budget:
+
+| Failure | Terms | Worst case |
+|---|---|---|
+| `step1.py` dies | plc_link drain < 0.05 + detection 0.30 + gate zero tick 0.10 | < 0.45 s |
+| `plc_link` process dies | gate timeout 0.25 + gate zero tick 0.10 | < 0.35 s |
+
+When `step1.py` dies, `plc_link` keeps publishing at 20 Hz with `motor` false,
+so the gate sees *fresh* status and its own timeout never fires.
+
+`STATUS_STALE_S = 0.25` is five missed publishes at `plc_link`'s 20 Hz, so it
+cannot trip on ordinary jitter — and it is 2.5 zero-ticks, deliberately **not**
+an exact multiple of `1/ZERO_HZ`, for the tick-boundary reason in §7.2.
 
 ### 7.5 The `/hmi/cmd_vel` field contract
 
@@ -464,7 +489,8 @@ UDP_PORT  = 5100
 STALE_S   = 0.28      # NOT a multiple of 1/PUBLISH_HZ — see section 7.2
 
 # step1/ros2/cmd_gate.py
-ZERO_HZ     = 10.0
+ZERO_HZ        = 10.0     # load-bearing on the §7.2 budget — do not lower
+STATUS_STALE_S = 0.25     # the gate's own timeout on /plc/status, see §7.4
 # Resolved from __file__, so the tree can be cloned anywhere:
 #   <this file>/../../../agv/forklift/config.yaml
 CONFIG_YAML = None        # None -> the path above; a string overrides it
