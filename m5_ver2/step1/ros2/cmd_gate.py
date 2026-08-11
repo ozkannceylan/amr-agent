@@ -47,15 +47,15 @@ from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from std_msgs.msg import Float64, String
 
-import plc_link
+from status_contract import (
+    STATUS_STALE_S, STATUS_TOPIC, is_stale, parse_status)
 
 # ----------------------------- CONFIG -----------------------------
 ZERO_HZ = 10.0
-# The gate's OWN timeout on /plc/status. Five missed publishes at
-# plc_link's 20 Hz, so ordinary scheduling jitter cannot trip it, and
-# deliberately NOT a multiple of 1/ZERO_HZ: 2.5 ticks, clear of the tick
-# boundary that cost Task 3 two rounds on STALE_S.
-STATUS_STALE_S = 0.25
+# STATUS_STALE_S - the timeout on /plc/status - is imported and not
+# declared here: the screen and the vehicle have to stop trusting a
+# silent status at the same instant, so it has one home. Its derivation,
+# including why it is 2.5 of THIS file's ticks, is at that home.
 HMI_TOPIC = "/hmi/cmd_vel"
 # ------------------------------------------------------------------
 
@@ -92,18 +92,19 @@ def gated_command(linear_x, angular_z, motor_ok, speed_max, steer_max):
 def gate_is_live(motor_ok, last_rx_s, now_s, stale_s=STATUS_STALE_S):
     """The whole enable decision: enabled AND recently told so.
 
-    is_stale is plc_link's, not a second staleness rule written here, and
-    it already reads a last_rx_s of None - never received - as stale.
+    is_stale is the shared contract's, not a second staleness rule
+    written here, and it already reads a last_rx_s of None - never
+    received - as stale.
     """
     if not motor_ok:
         return False
-    return not plc_link.is_stale(last_rx_s, now_s, stale_s)
+    return not is_stale(last_rx_s, now_s, stale_s)
 
 
 def motor_from_status(json_text):
     """Read `motor` out of a /plc/status payload. Anything unreadable is
     inhibited: a gate that cannot understand the PLC does not pass."""
-    msg = plc_link.parse_status(json_text.encode())
+    msg = parse_status(json_text.encode())
     if msg is None:
         return False
     return bool(msg["motor"])
@@ -134,7 +135,7 @@ class CmdGate(Node):
         self.was_live = False
         self.cmd = (0.0, 0.0)
 
-        self.create_subscription(String, "/plc/status", self.cb_status, 10)
+        self.create_subscription(String, STATUS_TOPIC, self.cb_status, 10)
         self.create_subscription(Twist, HMI_TOPIC, self.cb_cmd, 10)
         self.create_timer(1.0 / ZERO_HZ, self.tick)
         self.get_logger().info(

@@ -1,74 +1,35 @@
-"""plc_link.py's pure functions. No ROS graph is started."""
+"""plc_link.py's own constant. No ROS graph is started.
+
+The parser, the staleness rule and FAILSAFE moved to status_contract.py
+and are tested there. What is left here is what belongs to this NODE:
+STALE_S, the UDP receive timeout, which is a different constant from the
+contract's STATUS_STALE_S and is on a different clock.
+"""
 import plc_link
+from status_contract import is_stale
 
 
-def test_parse_status_reads_a_good_packet():
-    msg = plc_link.parse_status(b'{"estop_healthy": true, "motor": true, "ts": 3.0}')
-    assert msg == {"estop_healthy": True, "motor": True, "ts": 3.0}
-
-
-def test_parse_status_rejects_malformed_json():
-    assert plc_link.parse_status(b'{not json') is None
-
-
-def test_parse_status_rejects_a_packet_missing_a_required_key():
-    # A truncated or future-format packet must not be read as healthy.
-    assert plc_link.parse_status(b'{"estop_healthy": true}') is None
-
-
-def test_parse_status_rejects_a_non_boolean_motor():
-    # JSON 1 and "off" are both TRUTHY, so `not motor` would publish demand
-    # False and release the STO contactor on a packet the wire contract
-    # calls invalid. isinstance(1, bool) is False, which is the direction
-    # needed; isinstance(True, int) also being True does not weaken it,
-    # because the test is against bool and not against int.
-    assert plc_link.parse_status(
-        b'{"estop_healthy": true, "motor": 1, "ts": 0.0}') is None
-    assert plc_link.parse_status(
-        b'{"estop_healthy": true, "motor": "off", "ts": 0.0}') is None
-
-
-def test_parse_status_rejects_a_non_boolean_estop_healthy():
-    assert plc_link.parse_status(
-        b'{"estop_healthy": 1, "motor": true, "ts": 0.0}') is None
-
-
-def test_failsafe_is_tripped_in_both_fields():
-    assert plc_link.FAILSAFE["estop_healthy"] is False
-    assert plc_link.FAILSAFE["motor"] is False
-
-
-def test_is_stale_is_false_inside_the_window():
-    assert plc_link.is_stale(10.0, 10.4, 0.5) is False
-
-
-def test_is_stale_is_true_at_the_window():
-    assert plc_link.is_stale(10.0, 10.5, 0.5) is True
-
-
-def test_is_stale_is_true_before_the_first_packet():
-    # last_rx of None means nothing has ever arrived.
-    assert plc_link.is_stale(None, 10.0, 0.5) is True
-
-
-def test_is_stale_default_window_is_the_configured_constant():
-    # Called with TWO arguments, so these pin STALE_S itself. Every test
-    # above passes the window explicitly and would stay green if the
-    # constant were edited to a wrong value; the node uses the default.
+def test_the_udp_window_is_the_configured_constant():
+    # Passes plc_link.STALE_S explicitly, exactly as the node's tick()
+    # does, so these pin the CONSTANT. Every is_stale test in
+    # test_status_contract.py passes a window of its own and would stay
+    # green if this constant were edited to a wrong value.
     #
     # The base is 0.0 so the subtraction is EXACT. From a base of 10.0 it
     # is not: 10.28 - 10.0 is 0.27999999999999936, just under the window,
     # so that assertion would pin the opposite answer for a reason that
     # has nothing to do with this node.
-    assert plc_link.is_stale(0.0, 0.28) is True
-    assert plc_link.is_stale(0.0, 0.27) is False
+    assert is_stale(0.0, 0.28, plc_link.STALE_S) is True
+    assert is_stale(0.0, 0.27, plc_link.STALE_S) is False
 
 
-def test_is_stale_default_window_trips_on_the_sixth_tick_and_not_the_fifth():
+def test_the_udp_window_trips_on_the_sixth_tick_and_not_the_fifth():
     # What the timing budget actually rests on. The node compares two TICK
     # timestamps, so the elapsed value tested is a multiple of the 0.05 s
     # period: 5 ticks must not trip and 6 ticks must, with margin at both
     # ends rather than on a boundary. This is what a return to an exact
-    # multiple of the tick (0.25 or 0.30) would break.
-    assert plc_link.is_stale(0.0, 0.25) is False
-    assert plc_link.is_stale(0.0, 0.30) is True
+    # multiple of the tick (0.25 or 0.30) would break - and 0.25 is
+    # exactly the value STATUS_STALE_S carries, so merging the two
+    # constants breaks it too.
+    assert is_stale(0.0, 0.25, plc_link.STALE_S) is False
+    assert is_stale(0.0, 0.30, plc_link.STALE_S) is True

@@ -28,49 +28,28 @@ import yaml
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
+from status_contract import (
+    FAILSAFE, STATUS_TOPIC, is_stale, parse_status)
+
 # ----------------------------- CONFIG -----------------------------
 BIND_ADDR = "0.0.0.0"
 UDP_PORT = 5100
+# THIS NODE'S OWN UDP TIMEOUT, and NOT status_contract.STATUS_STALE_S.
+# That one is the ROS-side timeout consumers of /plc/status apply to a
+# topic; this one is measured on the datagrams arriving here from
+# step1.py, on a different clock with a different budget. They are not
+# interchangeable and must not be merged. 0.28 s is deliberately off a
+# multiple of the 0.05 s tick below: 5 ticks must not trip and 6 must,
+# with margin at both ends rather than on a boundary - an exact multiple
+# (0.25 or 0.30) puts microseconds of jitter in charge of which tick
+# fires, which cost Task 3 two rounds.
 STALE_S = 0.28
 PUBLISH_HZ = 20.0
-STATUS_TOPIC = "/plc/status"
 # ------------------------------------------------------------------
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_YAML = os.path.normpath(
     os.path.join(_HERE, "..", "..", "..", "agv", "forklift", "config.yaml"))
-
-_REQUIRED_KEYS = {"estop_healthy", "motor", "ts"}
-
-#: What the vehicle is told when the link is stale or has never spoken.
-FAILSAFE = {"estop_healthy": False, "motor": False, "ts": 0.0}
-
-
-def parse_status(data):
-    """Decode one datagram, or None if it is not a packet we trust.
-
-    A packet missing a key is rejected rather than defaulted: defaulting
-    `motor` would be inventing an enable. The booleans must also BE
-    booleans - `not motor` on a truthy non-bool (1, or "off") would
-    publish demand False and release the contactor on an invalid packet.
-    """
-    try:
-        msg = json.loads(data.decode())
-    except (ValueError, UnicodeDecodeError):
-        return None
-    if not isinstance(msg, dict) or not _REQUIRED_KEYS.issubset(msg):
-        return None
-    for key in ("motor", "estop_healthy"):
-        if not isinstance(msg[key], bool):
-            return None
-    return msg
-
-
-def is_stale(last_rx_s, now_s, stale_s=STALE_S):
-    """True when nothing has arrived within the window, or ever."""
-    if last_rx_s is None:
-        return True
-    return (now_s - last_rx_s) >= stale_s
 
 
 def load_topics(path=CONFIG_YAML):
@@ -135,7 +114,7 @@ class PlcLink(Node):
             fresh = None
         if fresh is not None:
             self.last_msg, self.last_rx = fresh, now
-        if is_stale(self.last_rx, now):
+        if is_stale(self.last_rx, now, STALE_S):
             self.last_msg = dict(FAILSAFE)
 
         self.pub_status.publish(String(data=json.dumps(self.last_msg)))

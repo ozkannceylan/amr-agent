@@ -27,7 +27,8 @@ from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from std_msgs.msg import String
 
-import plc_link
+from status_contract import (
+    FAILSAFE, STATUS_STALE_S, STATUS_TOPIC, is_stale, parse_status)
 
 # ----------------------------- CONFIG -----------------------------
 PUBLISH_HZ = 20.0
@@ -39,19 +40,12 @@ PUBLISH_HZ = 20.0
 # measures 20.01 Hz. Any period with that headroom does; nothing depends
 # on this exact value, and after() is a floor rather than a period.
 SPIN_MS = 4
-# cmd_gate.STATUS_STALE_S, deliberately the same number and name, so the
-# screen and the vehicle stop trusting a silent /plc/status at the same
-# instant. A test pins them equal.
-#
-# IT IS AN EXACT MULTIPLE OF THE TICK IT IS COMPARED ON, AND THAT IS
-# ACCEPTED. display_state is reached only from the 1/PUBLISH_HZ timer, so
-# the elapsed values tested walk in 50 ms steps and 0.25 s is 5 of them:
-# depending on where the last packet fell inside a tick, the lamp turns
-# red anywhere in 0.25 to 0.30 s, which is the band measured (0.301 s).
-# The ambiguity is one tick of DISPLAY trip time and nothing else - the
-# vehicle is cmd_gate's, and it times out on this same constant - so
-# holding the two equal is worth more than shaving a tick off a lamp.
-STATUS_STALE_S = 0.25
+# STATUS_STALE_S - the timeout on /plc/status - is imported and not
+# declared here: the screen and the vehicle stop trusting a silent
+# status at the same instant because it is now literally the same
+# constant, and not two that a test holds equal. Its derivation,
+# including why an exact multiple of THIS file's tick is accepted, is at
+# that home.
 KNOB_RADIUS_PX = 100.0
 HMI_TOPIC = "/hmi/cmd_vel"
 LAMP_RED = "#c62828"
@@ -96,14 +90,14 @@ def display_state(status, last_rx_s, now_s, stale_s=STATUS_STALE_S):
     display this window exists to prevent, and cmd_gate having stopped
     the truck within 0.35 s only means it is the SCREEN that is wrong.
 
-    is_stale is plc_link's, not a third staleness rule written here, and
-    it already reads a last_rx_s of None as stale, so "never received"
-    needs no branch. That matters at start-up: a lamp reading "E-Stop
-    Inactive" before the PLC has said anything claims a healthy chain on
-    no evidence.
+    is_stale is the shared contract's, not a third staleness rule
+    written here, and it already reads a last_rx_s of None as stale, so
+    "never received" needs no branch. That matters at start-up: a lamp
+    reading "E-Stop Inactive" before the PLC has said anything claims a
+    healthy chain on no evidence.
     """
-    if plc_link.is_stale(last_rx_s, now_s, stale_s):
-        status = plc_link.FAILSAFE
+    if is_stale(last_rx_s, now_s, stale_s):
+        status = FAILSAFE
     colour, text = lamp_state(status["estop_healthy"])
     return (colour, text, enable_text(status["motor"]))
 
@@ -122,12 +116,12 @@ class Hmi(Node):
         self.steer_max = float(cfg["model"]["steer_limit_rad"])
 
         self.pub = self.create_publisher(Twist, HMI_TOPIC, 10)
-        self.create_subscription(String, "/plc/status", self.cb_status, 10)
+        self.create_subscription(String, STATUS_TOPIC, self.cb_status, 10)
         self.knob = (0.0, 0.0)
         # A window that has not heard from the PLC claims nothing about
         # the chain: last_status_rx of None reads as stale, so the first
         # display is the safe one.
-        self.status = plc_link.FAILSAFE
+        self.status = FAILSAFE
         self.last_status_rx = None
         self.create_timer(1.0 / PUBLISH_HZ, self.tick)
 
@@ -181,14 +175,14 @@ class Hmi(Node):
         because the state that matters most - a status that stopped - is
         announced by no message at all.
 
-        Anything unreadable is recorded as the SAFE state, and plc_link's
-        parser decides what readable means: a bare json.loads read `[1,2]`
-        - valid JSON, wrong shape - and raised AttributeError here, which
-        took the pump with it, leaving the window open reading "Drive
-        enable: ON" with /hmi/cmd_vel dead. Measured, not argued.
+        Anything unreadable is recorded as the SAFE state, and the shared
+        contract's parser decides what readable means: a bare json.loads
+        read `[1,2]` - valid JSON, wrong shape - and raised AttributeError
+        here, which took the pump with it, leaving the window open reading
+        "Drive enable: ON" with /hmi/cmd_vel dead. Measured, not argued.
         """
-        state = plc_link.parse_status(msg.data.encode())
-        self.status = plc_link.FAILSAFE if state is None else state
+        state = parse_status(msg.data.encode())
+        self.status = FAILSAFE if state is None else state
         self.last_status_rx = time.monotonic()
 
     def refresh(self):

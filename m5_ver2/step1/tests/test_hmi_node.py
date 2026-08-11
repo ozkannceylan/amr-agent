@@ -1,7 +1,6 @@
 """hmi_node.py's mapping and labels. No window is opened."""
 import pytest
 
-import cmd_gate
 import hmi_node
 
 R = 100.0
@@ -119,11 +118,9 @@ def test_the_display_timeout_is_the_configured_constant():
     assert hmi_node.display_state(HEALTHY, 0.0, 0.25)[0] == hmi_node.LAMP_RED
 
 
-def test_the_display_and_the_gate_time_out_together():
-    # Same number AND same name as cmd_gate's. If they drifted apart the
-    # screen and the vehicle would stop trusting a silent /plc/status at
-    # different instants, and whichever went first would be lying.
-    assert hmi_node.STATUS_STALE_S == cmd_gate.STATUS_STALE_S
+# The display and the gate cannot time out at different instants any
+# more, so no test holds them equal: STATUS_STALE_S has one home in
+# status_contract.py and both nodes import it.
 
 
 # ---- the WIRING, which is a different thing from the decision ----
@@ -206,7 +203,7 @@ class _StubHmi:
         self.knob = (0.0, 0.0)
         self.speed_max = SPEED_MAX
         self.steer_max = STEER_MAX
-        self.status = hmi_node.plc_link.FAILSAFE
+        self.status = hmi_node.FAILSAFE
         self.last_status_rx = None
         self.shown = None
 
