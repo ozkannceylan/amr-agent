@@ -180,19 +180,54 @@ worse than either extreme, and a duplicated 1350-line `model.sdf` means every
 future model fix has to be applied twice or silently diverges. The cost accepted
 is that `m5_ver2/step1/` is not independently portable.
 
-### 5.3 Decision: a dedicated 70-line launch file, not `vehicle.launch.py`
+### 5.3 Decision: `sto_contactor.py` runs, and is the interlock
 
-`agv/forklift/launch/vehicle.launch.py` starts `sto_contactor.py`,
-`safe_speed_link.py`, `field_evaluation.py` and the EKF among others — the old
-M5 OPC UA safety path. Running it would put a second process on the PLC and
-break the single-writer rule. Its launch arguments could in principle switch
-most of that off, but Step 1's isolation would then depend on a dozen toggles
-being right. A dedicated launch file that starts four things is the honest
-version.
+`forklift_io.py` does **not** publish the model's actuator terminals. It
+publishes the stack-side names, and `agv/forklift/scripts/sto_contactor.py` is
+the **only** publisher of the terminals `model.sdf` actually listens on:
+
+```
+/forklift/gz/steer_cmd     ->  /forklift/gz/actuator/steer_cmd
+/forklift/gz/traction_cmd  ->  /forklift/gz/actuator/traction_cmd
+/forklift/gz/fork_cmd      ->  /forklift/gz/actuator/fork_cmd
+```
+
+It is a plain ROS node — `std_msgs/Bool` in on
+`/forklift/safety/torque_off_demand`, `std_msgs/Bool` out on
+`/forklift/safety/torque_off_applied`, no OPC UA, no PLC connection. It is
+reused **unmodified**, and `plc_link.py` gains one publisher to feed it.
+
+Two reasons this is not optional:
+
+1. **Without it nothing publishes the terminals and the forklift cannot move
+   at all.** The alternative — having `ros_gz_bridge` rename the stack-side
+   topics onto the terminals — would work, and would silently undo the reason
+   m5-50 moved the interlock to the model's own inputs: five committed
+   publishers address the stack-side names directly, so an interlock in any
+   command node is bypassable and an interlock at the model's inputs is not.
+2. It makes the stop **two-stage**, which is what the E-Stop chain actually
+   is. `cmd_gate` performs the controlled stop (zeros the command);
+   `sto_contactor` removes torque at the plant (latches open, drives the
+   traction terminal to a standing zero, holds steer at its last value).
+
+Note its fail direction, which differs from everything else in Step 1 and is
+correct there: it latches on an **observed True** and releases on an **observed
+False**, so a demand link that never speaks leaves it *closed*. Step 1 is still
+fail-safe on link loss because `plc_link.py` does not go silent — on staleness
+it actively publishes `motor=False`, and therefore `torque_off_demand=True`.
+
+### 5.4 Decision: a dedicated launch file, not `vehicle.launch.py`
+
+`agv/forklift/launch/vehicle.launch.py` also starts `safe_speed_link.py`,
+`field_evaluation.py`, `obstacle_zone.py` and the EKF — the old M5 OPC UA
+safety path. Running it would put a second process on the PLC and break the
+single-writer rule. Its launch arguments could in principle switch most of that
+off, but Step 1's isolation would then depend on a dozen toggles being right. A
+dedicated launch file that starts five named things is the honest version.
 
 ## 6. Architecture
 
-Five processes. One writes to the PLC.
+Six processes. One writes to the PLC.
 
 ```
 WINDOWS                              │  WSL2 (ROS 2 Jazzy)
@@ -201,17 +236,28 @@ WINDOWS                              │  WSL2 (ROS 2 Jazzy)
     ▲ writes     │ reads             │
     │            ▼                   │
   step1.py ──────UDP :5100──────────►│  plc_link.py
-    ▲ stdin: es0 | es1 | a | q       │      │ /plc/status (std_msgs/String, JSON)
-                                     │      ├───────────────► hmi_node.py   (lamp)
-                                     │      └───────────────► cmd_gate.py
-                                     │
-                                     │  hmi_node.py ──/hmi/cmd_vel──► cmd_gate.py
-                                     │                                    │
-                                     │       /forklift/cmd/traction_speed │
-                                     │       /forklift/cmd/steer_angle    ▼
-                                     │                            forklift_io.py
-                                     │                                    ▼
-                                     │                      gz sim → forklift moves
+    ▲ stdin: es0 | es1 | a | q       │      │
+                                     │      ├── /plc/status ──► hmi_node.py (lamp)
+                                     │      │                ─► cmd_gate.py
+                                     │      │
+                                     │      └── /forklift/safety/torque_off_demand
+                                     │                       (Bool, = not motor)
+                                     │                            │
+                                     │  hmi_node.py               │
+                                     │      │ /hmi/cmd_vel        │
+                                     │      ▼                     │
+                                     │  cmd_gate.py   ◄─ STAGE 1: zero on !motor
+                                     │      │ /forklift/cmd/traction_speed
+                                     │      │ /forklift/cmd/steer_angle
+                                     │      ▼
+                                     │  forklift_io.py   (units + slew)
+                                     │      │ /forklift/gz/traction_cmd
+                                     │      │ /forklift/gz/steer_cmd
+                                     │      ▼
+                                     │  sto_contactor.py ◄─ STAGE 2: latch open ◄┘
+                                     │      │ /forklift/gz/actuator/*_cmd
+                                     │      ▼
+                                     │  ros_gz_bridge → gz sim → forklift moves
 ```
 
 ### 6.1 Port map (fixed for the whole project; only 5100 is implemented)
@@ -232,7 +278,7 @@ All paths relative to `m5_ver2/`.
 | `step1/ros2/plc_link.py` | 70 | UDP :5100 → `/plc/status` |
 | `step1/ros2/hmi_node.py` | 140 | tkinter joystick + E-stop lamp |
 | `step1/ros2/cmd_gate.py` | 90 | Enable-gated command forwarding |
-| `step1/gazebo/step1_world.launch.py` | 70 | gz + spawn + `ros_gz_bridge` + `forklift_io.py` |
+| `step1/gazebo/step1_world.launch.py` | 80 | gz + spawn + `ros_gz_bridge` + `forklift_io.py` + `sto_contactor.py` |
 | `step1/step1.sh` | 90 | `start` / `stop`, PIDs in `.step1_pids` |
 | `step1/README_step1.md` | — | Run order, CONFIG, validation checklist |
 
@@ -269,10 +315,20 @@ the boundary would be wrong by seconds.
 
 ### 7.2 `ros2/plc_link.py`
 
-Binds `0.0.0.0:5100`. Publishes `/plc/status` (`std_msgs/String` carrying the
-JSON as received). If no packet arrives for **0.5 s**, publishes
-`estop_healthy=False, motor=False` — and keeps publishing it, so a late
-subscriber still learns the failure.
+Binds `0.0.0.0:5100`. Publishes two topics, both at 20 Hz:
+
+| Topic | Type | Value |
+|---|---|---|
+| `/plc/status` | `std_msgs/String` | the JSON as received |
+| `/forklift/safety/torque_off_demand` | `std_msgs/Bool` | `not motor` |
+
+If no packet arrives for **0.5 s**, it publishes `estop_healthy=False,
+motor=False` and therefore `torque_off_demand=True` — and keeps publishing,
+so a late subscriber still learns the failure and `sto_contactor.py`, which
+latches only on an observed True, actually sees the demand.
+
+The demand topic name is read from `agv/forklift/config.yaml`
+(`topics.safety_torque_off_demand`), not written as a literal.
 
 ### 7.3 `ros2/hmi_node.py`
 
@@ -331,22 +387,22 @@ copied as literals, so a change to the vehicle stays in one place.
 
 ### 7.6 `gazebo/step1_world.launch.py`
 
-Starts exactly four things:
+Starts exactly five things:
 
 1. `gz sim` on `sim/worlds/warehouse.sdf`
 2. spawn `agv/forklift/model.sdf` at the same pose `sim/launch/warehouse_bringup.launch.py` uses
-3. one `ros_gz_bridge` carrying `/clock` and the two actuator command topics
+3. one `ros_gz_bridge` carrying `/clock` and the **actuator terminals**
+   (`topics.gz_actuator_steer_cmd`, `topics.gz_actuator_traction_cmd`) — the
+   bridge carries the terminals, never the stack-side command names
 4. `agv/forklift/scripts/forklift_io.py --config agv/forklift/config.yaml`
+5. `agv/forklift/scripts/sto_contactor.py --config agv/forklift/config.yaml`
 
-**Open item to resolve at implementation, not by assumption.** `model.sdf`
-names the actuator topics `/forklift/gz/actuator/steer_cmd` and
-`/forklift/gz/actuator/traction_cmd`, while `forklift_io.py`'s docstring names
-an older pair without the `actuator/` segment (`/forklift/gz/steer_cmd`,
-`/forklift/gz/traction_cmd`). `sim/launch/forklift_bringup.launch.py` records
-that command topics were moved once already, at m5-50, and that the only symptom
-of a mismatch is a bridge that advertises a topic nobody publishes — silent, no
-error. Read the committed bridge config and `forklift_io.py`'s actual publisher
-names before writing the bridge entries, and let those be ground truth.
+**Resolved: both topic names were real and neither was stale.** `config.yaml`
+defines both families — `topics.gz_steer_cmd` = `/forklift/gz/steer_cmd` (what
+`forklift_io.py` publishes) and `topics.gz_actuator_steer_cmd` =
+`/forklift/gz/actuator/steer_cmd` (what `model.sdf` listens on). They are the
+two ends of `sto_contactor.py`, not a naming error. Every topic name in the
+launch file is read from `config.yaml`; none is written as a literal.
 
 Every shell that runs `gz` must source `/opt/ros/jazzy/setup.bash` first — there
 is no `/usr/bin/gz` on this machine (`sim/setup/WSL_ENVIRONMENT.md` §4.1).
@@ -387,14 +443,22 @@ at the next WSL restart. An explicit string overrides the discovery.
    **By design.** Typing `a` once in `step1.py` turns `Motor` ON; the joystick
    now drives.
 2. **`es0`.** Within ~100 ms `Motor` goes OFF, the lamp turns red "E-Stop
-   Active", and the forklift stops **even while the joystick is held**.
+   Active", and the forklift stops **even while the joystick is held**. Both
+   stages act: `cmd_gate` zeros the command, and `sto_contactor` latches open
+   and drives the traction terminal to a standing zero.
+   `/forklift/safety/torque_off_applied` reads `True`.
 3. **`es1`.** The lamp returns to "E-Stop Inactive" **but `Motor` stays OFF and
    the forklift still does not move.** This is the ESTOP1 latch. **By design,
    not a bug.** Making this state visible — lamp inactive, drive enable OFF — is
-   a Step 1 goal.
-4. **`a`.** `Motor` ON, teleoperation works again.
-5. **Kill `step1.py` while driving.** Within 0.5 s `plc_link` fails safe, the
-   gate zeroes the command, the forklift stops, the lamp shows red.
+   a Step 1 goal. `torque_off_applied` stays `True`.
+4. **`a`.** `Motor` ON, `torque_off_demand` falls, the contactor releases, and
+   teleoperation works again. Motion resumes only on a fresh command, because
+   the value standing at the terminal is the brake's — `hmi_node.py` publishes
+   at 20 Hz continuously, so this is immediate and invisible to the operator.
+   It is stated here so that a one-cycle delay is not mistaken for a fault.
+5. **Kill `step1.py` while driving.** Within 0.5 s `plc_link` fails safe: it
+   publishes `motor=False` and `torque_off_demand=True`, the gate zeroes the
+   command, the contactor latches open, the forklift stops, the lamp shows red.
 
 ## 10. Out of scope for Step 1
 
@@ -404,8 +468,14 @@ Named so they are not built by accident:
   read by nothing in Step 1.
 - Port 5101 and any WSL → Windows traffic.
 - Nav2, SLAM, the EKF, the envelope gate, `cmd_vel_to_tricycle.py`,
-  `sto_contactor.py`, `safe_speed_link.py`.
-- The fork/mast axis.
+  `safe_speed_link.py`, `obstacle_zone.py`, `field_evaluation.py`.
+- The fork/mast axis. `sto_contactor.py` forwards `fork_cmd` as it always has;
+  nothing in Step 1 publishes it, so the mast stays where it is.
+- Showing `/forklift/safety/torque_off_applied` on the HMI. The lamp and the
+  drive-enable line are the two the brief specifies and the HMI stays at two.
+  The topic is verified from the command line instead —
+  `ros2 topic echo /forklift/safety/torque_off_applied` — and `README_step1.md`
+  says so.
 - Any change to `plc/`, to TIA Portal content, or to the existing M5 tree.
 
 ## 11. Validation checklist
