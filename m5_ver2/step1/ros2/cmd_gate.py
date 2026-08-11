@@ -22,6 +22,14 @@ THE /hmi/cmd_vel FIELD CONTRACT, WHICH IS NOT STANDARD Twist
   inhibited, so the angle is commanded directly and no geometry is
   computed anywhere in this file.
 
+THREE WAYS TO BE INHIBITED, AND SILENCE IS ONE OF THEM (spec 7.4)
+  motor false, /plc/status STALE, or /plc/status never received.
+  plc_link failing safe as a NODE is not the same as failing safe as a
+  PROCESS: on a dead UDP link it keeps publishing FAILSAFE at 20 Hz and
+  the chain works, but if the process dies the topic simply stops, and
+  sto_contactor below releases only on an OBSERVED False. Nothing
+  downstream reads silence as a demand, so the gate has to.
+
 THIS IS NOT THE ONLY INTERLOCK, AND NOT THE LAST ONE
   sto_contactor.py removes torque at the plant's own inputs and cannot be
   bypassed by any ROS publisher. This gate is the controlled stop above it.
@@ -31,6 +39,7 @@ Usage (after sourcing /opt/ros/jazzy/setup.bash):
 """
 
 import os
+import time
 
 import rclpy
 import yaml
@@ -42,6 +51,11 @@ import plc_link
 
 # ----------------------------- CONFIG -----------------------------
 ZERO_HZ = 10.0
+# The gate's OWN timeout on /plc/status. Five missed publishes at
+# plc_link's 20 Hz, so ordinary scheduling jitter cannot trip it, and
+# deliberately NOT a multiple of 1/ZERO_HZ: 2.5 ticks, clear of the tick
+# boundary that cost Task 3 two rounds on STALE_S.
+STATUS_STALE_S = 0.25
 HMI_TOPIC = "/hmi/cmd_vel"
 # ------------------------------------------------------------------
 
@@ -60,6 +74,17 @@ def gated_command(linear_x, angular_z, motor_ok, speed_max, steer_max):
     if not motor_ok:
         return (0.0, 0.0)
     return (clamp(linear_x, speed_max), clamp(angular_z, steer_max))
+
+
+def gate_is_live(motor_ok, last_rx_s, now_s, stale_s=STATUS_STALE_S):
+    """The whole enable decision: enabled AND recently told so.
+
+    is_stale is plc_link's, not a second staleness rule written here, and
+    it already reads a last_rx_s of None - never received - as stale.
+    """
+    if not motor_ok:
+        return False
+    return not plc_link.is_stale(last_rx_s, now_s, stale_s)
 
 
 def motor_from_status(json_text):
@@ -92,6 +117,8 @@ class CmdGate(Node):
 
         # A gate that has not heard from the PLC does not pass a command.
         self.motor_ok = False
+        self.last_status_rx = None
+        self.was_live = False
         self.cmd = (0.0, 0.0)
 
         self.create_subscription(String, "/plc/status", self.cb_status, 10)
@@ -102,25 +129,35 @@ class CmdGate(Node):
                 self.speed_max, self.steer_max))
 
     def cb_status(self, msg):
-        was = self.motor_ok
+        self.last_status_rx = time.monotonic()
         self.motor_ok = motor_from_status(msg.data)
-        if was != self.motor_ok:
-            self.get_logger().info(
-                "drive enable {}".format("ON" if self.motor_ok else "OFF"))
+
+    def enabled(self):
+        """The one place the clock is read. BOTH publish paths consult it,
+        so a status that stopped arriving inhibits cb_cmd's fast path too
+        and not merely the next tick."""
+        return gate_is_live(
+            self.motor_ok, self.last_status_rx, time.monotonic())
 
     def cb_cmd(self, msg):
         self.cmd = (msg.linear.x, msg.angular.z)
         self.publish()
 
     def tick(self):
-        """The 10 Hz floor. While inhibited this is what keeps the zeros
-        coming; while enabled cb_cmd publishes faster and this is harmless."""
-        if not self.motor_ok:
+        """The 10 Hz floor, and the only thing that notices a /plc/status
+        that stopped: no message arrives to announce silence, so the
+        inhibit has to be found by looking at the clock."""
+        live = self.enabled()
+        if live != self.was_live:
+            self.was_live = live
+            self.get_logger().info(
+                "drive enable {}".format("ON" if live else "OFF"))
+        if not live:
             self.publish()
 
     def publish(self):
         traction, steer = gated_command(
-            self.cmd[0], self.cmd[1], self.motor_ok,
+            self.cmd[0], self.cmd[1], self.enabled(),
             self.speed_max, self.steer_max)
         self.pub_traction.publish(Float64(data=traction))
         self.pub_steer.publish(Float64(data=steer))
