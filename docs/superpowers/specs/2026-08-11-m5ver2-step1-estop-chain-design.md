@@ -322,29 +322,48 @@ Binds `0.0.0.0:5100`. Publishes two topics, both at 20 Hz:
 | `/plc/status` | `std_msgs/String` | the JSON as received |
 | `/forklift/safety/torque_off_demand` | `std_msgs/Bool` | `not motor` |
 
-If no packet arrives for **0.3 s** (`STALE_S`), it publishes
+If no packet arrives for **0.28 s** (`STALE_S`), it publishes
 `estop_healthy=False, motor=False` and therefore `torque_off_demand=True` — and
 keeps publishing, so a late subscriber still learns the failure and
 `sto_contactor.py`, which latches only on an observed True, actually sees the
 demand.
 
-**Why 0.3 s and not the 0.5 s originally written here.** §9 item 5 requires the
-*vehicle* to stop within 0.5 s of the link dying, and detection is only the
-first term of that. Staleness is evaluated on tick boundaries, so the link's own
-detection latency is `STALE_S + 1/PUBLISH_HZ`, and the gate then needs up to one
-of its own zero-ticks:
+**Why 0.28 s, and why not a round number.** §9 item 5 requires the *vehicle* to
+stop within 0.5 s of the link dying. Detection is only the first term, and it
+carries a quantisation and a trap.
+
+The quantisation is the **drain delay**: a datagram arriving at `t` is not seen
+until the first tick at or after `t`, uniformly up to `1/PUBLISH_HZ`.
+
+The trap is that both operands of the `>=` in `is_stale` are *tick* timestamps —
+`tick()` takes `now` once, stamps `last_rx = now`, and compares the two — so the
+elapsed value tested is always an integer multiple of the tick period. **If
+`STALE_S` is an exact multiple of that period, the comparison sits precisely on
+a tick boundary and scheduling jitter of microseconds decides whether the 6th or
+the 7th tick fires.** `0.30 = 6 × 0.05` is exactly that case, and it costs a
+whole extra tick about half the time. `0.28` clears the 6th tick by 20 ms, so
+detection is deterministic.
 
 | Term | Value | Source |
 |---|---|---|
-| `STALE_S` | 0.30 | this file |
-| `+ 1/PUBLISH_HZ` | 0.05 | plc_link's 20 Hz tick |
+| drain delay | < 0.05 | plc_link's 20 Hz tick |
+| detection, `ceil(STALE_S · 20)/20` | 0.30 | deterministic at `STALE_S = 0.28` |
 | `+ 1/ZERO_HZ` | 0.10 | cmd_gate's 10 Hz zero floor |
-| **worst case** | **0.45 s** | inside the 0.5 s requirement |
+| **worst case** | **< 0.45 s** | inside the 0.5 s requirement |
 
-At `STALE_S = 0.5` the first term alone was 0.55 s, so the requirement was
-unachievable in every case, not merely usually missed — measured at 523 ms
-before the change. At the sender's ~50 Hz, 0.3 s is 15 datagrams, so this still
-tolerates a long burst of loss before tripping.
+**`ZERO_HZ = 10.0` is load-bearing on this budget.** It was a free parameter
+when the spec was written and is not one now.
+
+Two earlier values failed, and both failures were the same shape — a constant
+chosen without the tick arithmetic. `STALE_S = 0.5` put the first term alone at
+0.55 s, so the requirement was unachievable in every case rather than usually
+missed; it measured 523 ms. `STALE_S = 0.3` reached `< 0.40 s` for the link and
+`< 0.50 s` end to end — landing *on* the criterion rather than inside it.
+
+At the sender's ~50 Hz, 0.28 s is 14 datagrams, so this still tolerates a long
+burst of loss before tripping. Do not "simplify" it to 0.25: that is also an
+exact multiple, restores the knife-edge, and spends three more datagrams of loss
+tolerance for nothing.
 
 The demand topic name is read from `agv/forklift/config.yaml`
 (`topics.safety_torque_off_demand`), not written as a literal.
@@ -442,7 +461,7 @@ ACK_PULSE_S  = 0.30
 # step1/ros2/plc_link.py
 BIND_ADDR = "0.0.0.0"
 UDP_PORT  = 5100
-STALE_S   = 0.3       # see the latency budget in section 7.2
+STALE_S   = 0.28      # NOT a multiple of 1/PUBLISH_HZ — see section 7.2
 
 # step1/ros2/cmd_gate.py
 ZERO_HZ     = 10.0
