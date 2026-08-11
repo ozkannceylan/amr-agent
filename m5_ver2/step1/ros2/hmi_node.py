@@ -18,6 +18,7 @@ Usage (after sourcing /opt/ros/jazzy/setup.bash; WSLg provides DISPLAY):
 
 import math
 import os
+import time
 import tkinter as tk
 
 import rclpy
@@ -30,7 +31,23 @@ import plc_link
 
 # ----------------------------- CONFIG -----------------------------
 PUBLISH_HZ = 20.0
-SPIN_MS = 20              # tkinter's after() period for pumping rclpy
+# tkinter's after() period for pumping rclpy, derived twice over.
+# THROUGHPUT: spin_once handles ONE work item per call and a live link
+# offers 40 a second (the 20 Hz tick, the 20 Hz status). At 20 ms the
+# pump ran 49 times a second against those 40 and /hmi/cmd_vel measured
+# 16.5 Hz, missing this file's own PUBLISH_HZ. 4 ms gives ~5x headroom.
+# TICK BOUNDARY (design spec 7.2): both operands of the >= inside
+# is_stale are read during a pump, so the elapsed value tested is
+# quantised to THIS period, and STATUS_STALE_S must not be a multiple of
+# it or jitter of microseconds decides which pump trips the display.
+# 0.25 s is 62.5 pumps here, the furthest from a boundary a value can
+# sit, and that is why this is not the 5 ms that measured equally well:
+# 5 ms is exactly 50 pumps and restores the knife edge.
+SPIN_MS = 4
+# cmd_gate.STATUS_STALE_S, deliberately the same number and name, so the
+# screen and the vehicle stop trusting a silent /plc/status at the same
+# instant. A test pins them equal.
+STATUS_STALE_S = 0.25
 KNOB_RADIUS_PX = 100.0
 HMI_TOPIC = "/hmi/cmd_vel"
 LAMP_RED = "#c62828"
@@ -65,6 +82,28 @@ def enable_text(motor):
     return "Drive enable: {}".format("ON" if motor else "OFF")
 
 
+def display_state(status, last_rx_s, now_s, stale_s=STATUS_STALE_S):
+    """The whole display decision: (lamp colour, lamp text, enable text).
+
+    A /plc/status that STOPPED is shown as the safe state, not as the
+    last good one. Nothing announces silence, so the only way to see it
+    is to look at the clock on the tick; a frozen screen reading "E-Stop
+    Inactive / Drive enable: ON" over a dead link is the same lying
+    display this window exists to prevent, and cmd_gate having stopped
+    the truck within 0.35 s only means it is the SCREEN that is wrong.
+
+    is_stale is plc_link's, not a third staleness rule written here, and
+    it already reads a last_rx_s of None as stale, so "never received"
+    needs no branch. That matters at start-up: a lamp reading "E-Stop
+    Inactive" before the PLC has said anything claims a healthy chain on
+    no evidence.
+    """
+    if plc_link.is_stale(last_rx_s, now_s, stale_s):
+        status = plc_link.FAILSAFE
+    colour, text = lamp_state(status["estop_healthy"])
+    return (colour, text, enable_text(status["motor"]))
+
+
 def load_config(path=CONFIG_YAML):
     with open(path, "r", encoding="utf-8") as handle:
         return yaml.safe_load(handle)
@@ -81,7 +120,12 @@ class Hmi(Node):
         self.pub = self.create_publisher(Twist, HMI_TOPIC, 10)
         self.create_subscription(String, "/plc/status", self.cb_status, 10)
         self.knob = (0.0, 0.0)
-        self.create_timer(1.0 / PUBLISH_HZ, self.publish)
+        # A window that has not heard from the PLC claims nothing about
+        # the chain: last_status_rx of None reads as stale, so the first
+        # display is the safe one.
+        self.status = plc_link.FAILSAFE
+        self.last_status_rx = None
+        self.create_timer(1.0 / PUBLISH_HZ, self.tick)
 
         self.root = root
         root.title("Step 1 - forklift teleoperation")
@@ -99,11 +143,16 @@ class Hmi(Node):
         self.canvas.bind("<B1-Motion>", self.on_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_release)
 
+        # Built from the same decision the tick uses, so the window never
+        # shows a state it has not been told, not even for one tick.
+        self.shown = display_state(
+            self.status, self.last_status_rx, time.monotonic())
+        colour, lamp_text, enable_line = self.shown
         self.lamp = tk.Label(
-            root, text="E-Stop Inactive", fg="white", bg=LAMP_NEUTRAL,
+            root, text=lamp_text, fg="white", bg=colour,
             font=("TkDefaultFont", 16, "bold"), padx=16, pady=10)
         self.lamp.pack(fill="x", padx=10)
-        self.enable = tk.Label(root, text=enable_text(False),
+        self.enable = tk.Label(root, text=enable_line,
                                font=("TkDefaultFont", 11))
         self.enable.pack(pady=(6, 12))
 
@@ -124,22 +173,39 @@ class Hmi(Node):
         self.canvas.coords(self.dot, cx - 14, cy - 14, cx + 14, cy + 14)
 
     def cb_status(self, msg):
-        """Anything unreadable is displayed as the SAFE state, and
-        plc_link's parser decides what readable means.
+        """Record WHAT arrived and WHEN. The screen is drawn on the tick,
+        because the state that matters most - a status that stopped - is
+        announced by no message at all.
 
-        A bare json.loads read `[1,2]` - valid JSON, wrong shape - and
-        raised AttributeError in the callback, which took the pump with
-        it: window open, "Drive enable: ON", /hmi/cmd_vel dead. Measured,
-        not argued. parse_status refuses the wrong shape, a missing key
-        and a non-boolean alike, so the display and cmd_gate.py agree on
-        what a readable status IS rather than keeping two rules.
+        Anything unreadable is recorded as the SAFE state, and plc_link's
+        parser decides what readable means: a bare json.loads read `[1,2]`
+        - valid JSON, wrong shape - and raised AttributeError here, which
+        took the pump with it, leaving the window open reading "Drive
+        enable: ON" with /hmi/cmd_vel dead. Measured, not argued.
         """
         state = plc_link.parse_status(msg.data.encode())
-        if state is None:
-            state = plc_link.FAILSAFE
-        colour, text = lamp_state(state["estop_healthy"])
-        self.lamp.configure(bg=colour, text=text)
-        self.enable.configure(text=enable_text(state["motor"]))
+        self.status = plc_link.FAILSAFE if state is None else state
+        self.last_status_rx = time.monotonic()
+
+    def refresh(self):
+        """Redraw only on a CHANGE. configure() at 20 Hz would mark both
+        labels dirty every tick for a display that changes a few times a
+        session."""
+        shown = display_state(
+            self.status, self.last_status_rx, time.monotonic())
+        if shown == self.shown:
+            return
+        self.shown = shown
+        colour, lamp_text, enable_line = shown
+        self.lamp.configure(bg=colour, text=lamp_text)
+        self.enable.configure(text=enable_line)
+
+    def tick(self):
+        """The 20 Hz tick, and the only thing that can notice a
+        /plc/status that stopped: no message arrives to announce it, so
+        the silence has to be found by looking at the clock."""
+        self.publish()
+        self.refresh()
 
     def publish(self):
         linear, angular = knob_to_twist(
@@ -159,11 +225,9 @@ def main():
     def pump():
         # Ctrl-C AND SIGTERM CLOSE THE WINDOW. rcl installs its own
         # handler for both: it shuts the context down and does NOT end
-        # the process, so without this check spin_once raises "the given
-        # context is not valid" on every tick for ever - measured at
-        # 90896 lines of traceback against one SIGTERM - and the window
-        # never goes away. Leaving through mainloop is what runs the
-        # tidy-up below.
+        # the process, so without this spin_once raises "the given
+        # context is not valid" every tick for ever - 90896 lines of
+        # traceback against one SIGTERM - and the window never goes away.
         if not rclpy.ok():
             root.quit()
             return
