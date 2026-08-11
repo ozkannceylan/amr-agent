@@ -322,10 +322,29 @@ Binds `0.0.0.0:5100`. Publishes two topics, both at 20 Hz:
 | `/plc/status` | `std_msgs/String` | the JSON as received |
 | `/forklift/safety/torque_off_demand` | `std_msgs/Bool` | `not motor` |
 
-If no packet arrives for **0.5 s**, it publishes `estop_healthy=False,
-motor=False` and therefore `torque_off_demand=True` — and keeps publishing,
-so a late subscriber still learns the failure and `sto_contactor.py`, which
-latches only on an observed True, actually sees the demand.
+If no packet arrives for **0.3 s** (`STALE_S`), it publishes
+`estop_healthy=False, motor=False` and therefore `torque_off_demand=True` — and
+keeps publishing, so a late subscriber still learns the failure and
+`sto_contactor.py`, which latches only on an observed True, actually sees the
+demand.
+
+**Why 0.3 s and not the 0.5 s originally written here.** §9 item 5 requires the
+*vehicle* to stop within 0.5 s of the link dying, and detection is only the
+first term of that. Staleness is evaluated on tick boundaries, so the link's own
+detection latency is `STALE_S + 1/PUBLISH_HZ`, and the gate then needs up to one
+of its own zero-ticks:
+
+| Term | Value | Source |
+|---|---|---|
+| `STALE_S` | 0.30 | this file |
+| `+ 1/PUBLISH_HZ` | 0.05 | plc_link's 20 Hz tick |
+| `+ 1/ZERO_HZ` | 0.10 | cmd_gate's 10 Hz zero floor |
+| **worst case** | **0.45 s** | inside the 0.5 s requirement |
+
+At `STALE_S = 0.5` the first term alone was 0.55 s, so the requirement was
+unachievable in every case, not merely usually missed — measured at 523 ms
+before the change. At the sender's ~50 Hz, 0.3 s is 15 datagrams, so this still
+tolerates a long burst of loss before tripping.
 
 The demand topic name is read from `agv/forklift/config.yaml`
 (`topics.safety_torque_off_demand`), not written as a literal.
@@ -423,7 +442,7 @@ ACK_PULSE_S  = 0.30
 # step1/ros2/plc_link.py
 BIND_ADDR = "0.0.0.0"
 UDP_PORT  = 5100
-STALE_S   = 0.5
+STALE_S   = 0.3       # see the latency budget in section 7.2
 
 # step1/ros2/cmd_gate.py
 ZERO_HZ     = 10.0
