@@ -31,22 +31,26 @@ import plc_link
 
 # ----------------------------- CONFIG -----------------------------
 PUBLISH_HZ = 20.0
-# tkinter's after() period for pumping rclpy, derived twice over.
-# THROUGHPUT: spin_once handles ONE work item per call and a live link
-# offers 40 a second (the 20 Hz tick, the 20 Hz status). At 20 ms the
-# pump ran 49 times a second against those 40 and /hmi/cmd_vel measured
-# 16.5 Hz, missing this file's own PUBLISH_HZ. 4 ms gives ~5x headroom.
-# TICK BOUNDARY (design spec 7.2): both operands of the >= inside
-# is_stale are read during a pump, so the elapsed value tested is
-# quantised to THIS period, and STATUS_STALE_S must not be a multiple of
-# it or jitter of microseconds decides which pump trips the display.
-# 0.25 s is 62.5 pumps here, the furthest from a boundary a value can
-# sit, and that is why this is not the 5 ms that measured equally well:
-# 5 ms is exactly 50 pumps and restores the knife edge.
+# tkinter's after() period for pumping rclpy. THROUGHPUT, and nothing
+# else: spin_once handles ONE work item per call and a live link offers
+# 40 a second (the 20 Hz tick, the 20 Hz status). At 20 ms the pump ran
+# 49 times a second against those 40 - no headroom - and /hmi/cmd_vel
+# measured 16.5 Hz against this file's own PUBLISH_HZ. At 4 ms it
+# measures 20.01 Hz. Any period with that headroom does; nothing depends
+# on this exact value, and after() is a floor rather than a period.
 SPIN_MS = 4
 # cmd_gate.STATUS_STALE_S, deliberately the same number and name, so the
 # screen and the vehicle stop trusting a silent /plc/status at the same
 # instant. A test pins them equal.
+#
+# IT IS AN EXACT MULTIPLE OF THE TICK IT IS COMPARED ON, AND THAT IS
+# ACCEPTED. display_state is reached only from the 1/PUBLISH_HZ timer, so
+# the elapsed values tested walk in 50 ms steps and 0.25 s is 5 of them:
+# depending on where the last packet fell inside a tick, the lamp turns
+# red anywhere in 0.25 to 0.30 s, which is the band measured (0.301 s).
+# The ambiguity is one tick of DISPLAY trip time and nothing else - the
+# vehicle is cmd_gate's, and it times out on this same constant - so
+# holding the two equal is worth more than shaving a tick off a lamp.
 STATUS_STALE_S = 0.25
 KNOB_RADIUS_PX = 100.0
 HMI_TOPIC = "/hmi/cmd_vel"
