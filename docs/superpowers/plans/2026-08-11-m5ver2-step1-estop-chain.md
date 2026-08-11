@@ -1603,7 +1603,7 @@ It must contain, in this order:
    5. `./m5_ver2/step1/step1.sh stop` when finished. It does not stop the PLC; only the owner can, from PLCSIM.
 3. **The CONFIG values**, copied from §8 of the spec, with the note that `UDP_TARGET = None` auto-discovers the WSL IP because WSL2 here is NAT and the address changes on every restart.
 4. **The `/hmi/cmd_vel` field contract table** — `linear.x` is m/s, `angular.z` is a steer **angle** in rad, not a yaw rate — and one sentence on why.
-5. **Three things that are by design and are not bugs**, quoting spec §9: the acknowledge required at startup; the latch after `es1`; and steering staying live while traction is inhibited.
+5. **Four things that are by design and are not bugs**, quoting spec §9: the acknowledge required at startup; the latch after `es1`; steering staying live while traction is inhibited; and — **added after Task 5** — the HMI opening **red, "E-Stop Active", "Drive enable: OFF"** when nothing is publishing yet. The spec originally said the window comes up neutral. It no longer does: `hmi_node` and `cmd_gate` each took a staleness rule, so a display with no status shows the safe state rather than a comfortable one. It turns neutral when `step1.py` starts. An operator who reads the red startup as a fault will chase it, so the README must say this plainly.
 6. **How to see the torque removal**, since the HMI deliberately does not show it:
    ```bash
    source /opt/ros/jazzy/setup.bash
@@ -1632,7 +1632,9 @@ cd /mnt/c/Users/ozkan/projects/amr-agent
 source /opt/ros/jazzy/setup.bash
 python3 -m pytest m5_ver2/step1/tests/ -v
 ```
-Expected: 31 passed, 0 skipped. A skip here means a module failed to import and its tests silently did not run.
+Expected: **55 passed, 0 skipped.** A skip means a module failed to import and its tests silently did not run.
+
+> **This number is not the 31 originally written here.** Tasks 2-5 added tests for defects the review found in this plan's own code — a NaN clamping to full speed, a non-boolean `motor` releasing the torque contactor, a display that froze on "Drive enable: ON" after its loop died — and Task 5.5 extracted `status_contract.py` with tests of its own. The ledger at `.superpowers/sdd/2026-08-11-m5ver2-step1-estop-chain/progress.md` carries each one. Take the count from a real run, not from this line; what matters is **0 skipped**.
 
 - [ ] **Step 4: Commit**
 

@@ -275,6 +275,7 @@ All paths relative to `m5_ver2/`.
 |---|---|---|
 | `CLAUDE.md` | — | §2 agreements, §3 PLC ground truth verbatim, §6.1 port map |
 | `step1/windows/step1.py` | 130 | The only PLC writer |
+| `step1/ros2/status_contract.py` | 96 | What the three nodes agree on — see §7.7 |
 | `step1/ros2/plc_link.py` | 70 | UDP :5100 → `/plc/status` |
 | `step1/ros2/hmi_node.py` | 140 | tkinter joystick + E-stop lamp |
 | `step1/ros2/cmd_gate.py` | 90 | Enable-gated command forwarding |
@@ -312,6 +313,40 @@ A daemon terminal thread accepts:
 the WSL guest are not clock-synchronised (`w32time` is stopped —
 `sim/setup/WSL_ENVIRONMENT.md` §5 item 3), so a wall-clock timestamp crossing
 the boundary would be wrong by seconds.
+
+### 7.1a `ros2/status_contract.py` — added after an architecture review
+
+`plc_link.py` was drifting into being a shared library as well as a node: three
+consumers imported `parse_status`, `is_stale` and `FAILSAFE` out of a file whose
+name says "node". That is cheap to fix while Step 1 is the only thing standing on
+it and expensive once later steps are. So the shared decisions moved into a
+module of their own:
+
+| Name | What it settles |
+|---|---|
+| `parse_status(data)` | what an untrustworthy packet is |
+| `is_stale(last_rx_s, now_s, stale_s)` | what "too long ago" means |
+| `FAILSAFE` | what the vehicle is told when nothing is known |
+| `STATUS_TOPIC` | the one home of `/plc/status` |
+| `STATUS_STALE_S = 0.25` | the ROS-side timeout, shared by the gate and the HMI |
+
+Two properties of it are load-bearing rather than incidental.
+
+**`FAILSAFE` is a `MappingProxyType`.** `hmi_node` binds it by reference and
+`plc_link` copies it with `dict(FAILSAFE)`; as a plain dict, one careless item
+assignment would have corrupted the failsafe for every consumer in the process.
+A `failsafe()` factory was rejected because it hands out copies that *look*
+shared — the same trap mirrored — and a frozen dataclass because `status` is
+sometimes a parsed packet and must index the same way.
+
+**`is_stale` has no default `stale_s`.** It is called with two different
+constants on two different clocks: `STALE_S = 0.28` is `plc_link`'s UDP timeout
+(§7.2), `STATUS_STALE_S = 0.25` is the ROS-side one (§7.4). A default would
+silently hand 0.25 to a caller that meant 0.28.
+
+This is also where later steps land: the wire format grows here when the
+standard program enters the command path, and the reserved port 5101 contract
+belongs here rather than in a node.
 
 ### 7.2 `ros2/plc_link.py`
 
