@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-step1 = pytest.importorskip("step1")
+import step1
 
 
 def test_status_payload_has_exactly_the_three_wire_keys():

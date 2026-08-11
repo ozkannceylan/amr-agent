@@ -34,6 +34,7 @@ UDP_TARGET = None      # None -> ask `wsl.exe hostname -I`. A string overrides.
 UDP_PORT = 5100
 CYCLE_S = 0.02         # 20 ms
 ACK_PULSE_S = 0.30
+STATUS_EVERY = 10      # print the status line every Nth cycle (~5 Hz)
 # ------------------------------------------------------------------
 
 
@@ -62,6 +63,18 @@ def resolve_udp_target(configured=UDP_TARGET):
     out = subprocess.check_output(
         ["wsl.exe", "hostname", "-I"], text=True, timeout=10)
     return _first_token(out)
+
+
+def _say(msg):
+    """Print, but never let a dead stdout stop a PLC write.
+
+    An unguarded print in the shutdown path raises BrokenPipeError and skips
+    the trip writes -- the same fail-safe escape by another door.
+    """
+    try:
+        print(msg)
+    except OSError:
+        pass
 
 
 def status_payload(estop_healthy, motor, ts):
@@ -119,6 +132,7 @@ def main():
     tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     threading.Thread(target=reader, daemon=True).start()
 
+    cycle = 0
     try:
         while state["run"]:
             now = time.monotonic()
@@ -133,17 +147,25 @@ def main():
             estop_healthy = plc.ReadBool("E-Stop")
             tx.sendto(status_payload(estop_healthy, motor, now),
                       (target, UDP_PORT))
-            print("\rE-Stop={:<5} Motor={:<5} ack={:<5}   ".format(
-                str(estop_healthy), str(motor), str(now < state["ack_until"])),
-                end="", flush=True)
+            # Cosmetic, and never allowed to gate the PLC writes: an undrained
+            # pipe blocks print() without raising, which would freeze the sole
+            # writer with Motor still energised and never reach the finally.
+            cycle += 1
+            if cycle % STATUS_EVERY == 0:
+                try:
+                    print("\rE-Stop={:<5} Motor={:<5} ack={:<5}   ".format(
+                        str(estop_healthy), str(motor),
+                        str(now < state["ack_until"])), end="", flush=True)
+                except OSError:
+                    pass
             time.sleep(CYCLE_S)
     finally:
-        print("\nshutting down: writing the trip values")
+        _say("\nshutting down: writing the trip values")
         for tag in ("E-Stop", "PF_OSSD", "WF_Clear"):
             try:
                 plc.WriteBool(tag, False)
             except Exception as exc:
-                print("could not trip {}: {}".format(tag, exc))
+                _say("could not trip {}: {}".format(tag, exc))
         tx.close()
 
 
