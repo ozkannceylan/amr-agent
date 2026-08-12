@@ -36,7 +36,7 @@ from launch_ros.actions import Node
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.normpath(os.path.join(_HERE, "..", "..", ".."))
 
-# STEP 4'S OWN WORLD, NOT sim/worlds/warehouse.sdf. Owner instruction
+# STEP 5'S OWN WORLD, NOT sim/worlds/warehouse.sdf. Owner instruction
 # 2026-08-12: the source world's aisles trip the protective field while
 # driving. warehouse_ver2.sdf is this directory's open relayout (no
 # building columns, no row C, 6.50 m main aisle); the source world stays
