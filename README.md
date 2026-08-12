@@ -17,12 +17,6 @@ the truck and refuses to un-stop while the cause stands, the warning field
 dropping the speed ceiling, and an injected encoder fault caught by the
 cross-check.*
 
-**No certified safety function is claimed.** The F-logic is real STEP 7
-Safety, and everything wired into it is simulation: the scanners are rendered
-lidars, the encoder words come from a simulated drive shaft, and the PLCSIM
-Advanced API plays the field wiring. No Performance Level, Category, SIL or
-PFH is claimed, reached or implied anywhere in this repository.
-
 ---
 
 ## What is actually running
@@ -159,3 +153,10 @@ evidence trail:
 - Layers from the first build, in place and unchanged —
   [`plc/`](plc/) · [`hmi/`](hmi/) · [`bridge/`](bridge/) · [`sim/`](sim/) ·
   [`agv/`](agv/) · [`fleet/`](fleet/) · [`docs/roadmap.md`](docs/roadmap.md).
+
+---
+
+*Everything here runs in simulation — rendered scanners, a simulated drive
+shaft, PLCSIM Advanced in place of hardware. The safety functions are
+simulated to study and demonstrate them; no Performance Level, Category, SIL
+or PFH figure is claimed.*

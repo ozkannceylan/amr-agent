@@ -4,9 +4,8 @@ One page, in the order you actually do things. Two machines share the work:
 **Windows** runs TIA Portal, S7-PLCSIM Advanced and the one process allowed to
 write to the PLC; **WSL2** runs Gazebo, ROS 2 and the vehicle stack.
 
-Nothing below claims or implies an achieved Performance Level, Category, SIL
-or PFH. The scanners' measurement channels, the encoder readings and the
-PLCSIM Advanced API stand in for field wiring; the F-logic they drive is real
+The scanners' measurement channels, the encoder readings and the PLCSIM
+Advanced API stand in for field wiring; the F-logic they drive is real
 STEP 7 Safety, running on a simulated 1516F CPU.
 
 ---
