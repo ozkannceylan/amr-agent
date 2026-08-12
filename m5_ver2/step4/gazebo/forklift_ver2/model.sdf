@@ -1,0 +1,1439 @@
+<?xml version="1.0" ?>
+<!--
+  model.sdf . forklift_ver2: the in house tricycle forklift of
+  agv/forklift/model.sdf, carrying THREE safety scanners instead of two.
+
+  This is a COPY. agv/forklift/model.sdf is not modified and keeps its own
+  two-scanner layout; the M5 stack still spawns that one. The two files
+  will drift, and that is intended: this one is m5_ver2 Step 4's.
+
+  WHAT CHANGED FROM THE ORIGINAL, and nothing else did:
+    . The original's two corner scanner links, at (0.70, 0.45) and
+      (.0.70, .0.45), with their sensors and their two fixed joints, are
+      DELETED. Their names survive nowhere in this file, on purpose: a
+      grep for either of them must return nothing.
+    . safety_scanner_back_link, _left_link and _right_link replace them,
+      named in the OWNER'S FRAME (see FRAMES below), with three fixed
+      joints of their own.
+    . Their range max is 8.0 m, not the 5.5 m the deleted pair used.
+
+  This file is GEOMETRY, ACTUATION AND SENSING. It contains no control
+  logic: no sequencing, no interlock, no timer, no latch, no threshold and
+  no zone decision. A joint moves when a command topic says so, and the
+  scanner reports raw ranges whatever stands in front of it. Deciding what
+  any of that means belongs to the vehicle nodes, to the fleet manager or
+  to the PLC, never here (invariants 5, 6 and 9).
+
+  It is also NOT a safety device. Three of the four scanners below are
+  named safety_scanner_*, and that names the DEVICE CLASS THEY MODEL, not
+  a property of this file: a rendered depth image is not a protective
+  field, has no integrity, no OSSD, no fault reaction and no diagnostic
+  coverage. The protective stop, the e stop chain and safe torque off are
+  onboard, hardwired and independent of anything in this file or on any
+  network (invariant 1). What the three safety scanners give this project
+  is the GEOMETRY of a real installation plus their NON-SAFE MEASUREMENT
+  channels, which a field evaluation outside this file turns into
+  protective and warning field verdicts. Neither of those is a safety
+  property of this file, and nothing else about a safety device is
+  modelled here. No Category, Performance Level, SIL or PFH is claimed.
+
+  Original geometry, primitives only, no external mesh.
+
+  ============================ FRAMES ============================
+
+  Model origin: on the floor, at the centre of the chassis footprint.
+    +x  forward, the driving direction, the steer and drive end
+    +y  left
+    +z  up
+
+  Three wheels. The single steered wheel is also the driven wheel and it
+  leads; the two passive wheels trail. The load is therefore carried at
+  the .x end and the counterweight sits over the drive wheel, opposite
+  the load, which is what a counterweight is for.
+
+  THE SCANNER NAMES BELOW ARE THE OWNER'S FRAME, NOT THIS ONE. The
+  owner's reference drawing calls the FORK end Front, which is this
+  model's .x, and their frame is therefore this one rotated 180 deg about
+  z: the owner's Left is model .y and the owner's Right is model +y. The
+  deleted pair was named the other way round . the original file called
+  the DRIVE end "front" and put the link named for it at +0.70 . and that
+  disagreement is why the pair was deleted rather than kept. Two
+  conventions in one file eventually wires the wrong device to the PLC.
+
+  TOP VIEW (metres). SB, SL and SR are the three safety scanners; N is
+  the navigation lidar, on the overhead guard, offset to .y of the mast
+  centreline. SL is drawn BELOW the +x axis and SR above it, per the
+  frame note above.
+
+                            +y
+                             ^
+      fork tines             |            counterweight
+     .......                 |               [====]
+     |     |       SR   [rear wheel L]           |
+     |     |    [mast]  .............            |
+   . | . . | . .[||||]. |  chassis  | . [steer + drive wheel] . SB . > +x
+     |     |            |1.4 x 0.9  |     N (0.55, .0.40) at z 1.80
+     |     |       SL   ......... ...            |
+     .......            [rear wheel R]           |
+
+     SB  safety_scanner_back   ( 0.72,  0.00)  link yaw    0 deg
+     SL  safety_scanner_left   (.0.68, .0.46)  link yaw .135 deg
+     SR  safety_scanner_right  (.0.68,  0.46)  link yaw  135 deg
+
+  SIDE VIEW (metres)
+
+                          N  z = 1.80
+          overhead guard roof z = 1.71
+          ._______________________.
+          |                       |
+     [||] |                       |          mast rails to z = 2.05
+     [||] |       chassis         |[ CW ]    chassis underside z = 0.20
+     [||] |_______________________|
+    [carriage]                    |
+   ==========      SB/SL/SR safety scan plane z = 0.15
+   forks     (o)             (o)  (o)   wheels r = 0.12
+   ================================================ floor z = 0
+
+  ========================= COMMAND TOPICS =========================
+
+  Every gz system below names its topic EXPLICITLY. The model scoped
+  defaults (/model/<name>/joint/<joint>/cmd_*) are deliberately not used:
+  they change if the model is spawned under another name, and the ROS
+  bridge, the launch file and agv/forklift/README.md all quote these
+  names as a contract.
+
+    /forklift/gz/actuator/steer_cmd     gz.msgs.Double  steer angle    [rad]
+    /forklift/gz/actuator/traction_cmd  gz.msgs.Double  wheel rate   [rad/s]
+    /forklift/gz/actuator/fork_cmd      gz.msgs.Double  carriage      [m]
+
+      THESE ARE THE MOTOR TERMINALS, AND THEY ARE NOT WHAT THE VEHICLE
+      STACK PUBLISHES (m5-50). The stack still publishes
+      /forklift/gz/steer_cmd, /forklift/gz/traction_cmd and
+      /forklift/gz/fork_cmd; agv/forklift/scripts/sto_contactor.py is the
+      only publisher of the three terminals above and it is what joins
+      them, one message for one message, while torque is present.
+
+      WHY THE MODEL MOVED AND NOT THE STACK. On the safety program's
+      TorqueOffDemand the second stage of SS1 has to make this vehicle
+      DEAF TO COMMANDS and keep it deaf if the envelope reopens, or SS1's
+      two stages collapse into the controlled stop the vehicle already
+      has and no test can tell them apart. Five committed publishers
+      address the command topics directly, so an interlock inside any one
+      command node would be bypassed by the other four. An interlock at
+      the MODEL's own inputs cannot be bypassed by anything that speaks
+      ROS.
+
+      THE CONTACTOR IS A STAND-IN, and every artefact says so. The safety
+      path it models is hardwired and onboard (CLAUDE.md invariant 1);
+      what is built here is a simulation of that path's effect on the
+      plant. No Category, Performance Level, SIL or PFH is claimed for it
+      or implied by it (ADR 0011 D5).
+
+      WHAT TORQUE REMOVAL IS AT THIS PLANT, in the two halves the design
+      spec names. The CONTROLLER IS DISABLED in the sense that no command
+      from any publisher reaches any terminal while the latch is open. The
+      HOLDING BRAKE is the traction terminal driven to a standing zero
+      rather than left silent: the JointController below holds its last
+      command for ever, so a silent terminal is a standing order and not
+      an absence, and a standing zero is what pins the shaft. The steer
+      and fork terminals are held at their last forwarded value, because
+      zeroing them would command a straightening manoeuvre and a carriage
+      descent - motion demanded BY the safe state, which is the one thing
+      it must not do.
+
+    /forklift/gz/joint_state   gz.msgs.Model    joint positions and rates
+
+    /forklift/gz/drive_speed/read_a  gz.msgs.Model  drive shaft, reading A
+    /forklift/gz/drive_speed/read_b  gz.msgs.Model  drive shaft, reading B
+      Two reading channels on ONE shaft, cross-compared downstream: a
+      SINGLE-CHANNEL TESTED SYSTEM, never a two-channel one. See the
+      block beside the two systems at the foot of this file.
+
+    /forklift/gz/odom          gz.msgs.Odometry GROUND-TRUTH pose and twist
+    /forklift/gz/tf_ground_truth  gz.msgs.Pose_V  odom -> base_link, from
+                                                  the same ground truth
+
+    /forklift/gz/scan_nav           gz.msgs.LaserScan  360 deg, z = 1.80
+    /forklift/gz/imu                gz.msgs.IMU        6-axis MEMS, 100 Hz,
+                                                       NO orientation output
+
+    /forklift/gz/safety_scanner_back/measurement    275 deg, z = 0.15
+    /forklift/gz/safety_scanner_left/measurement    275 deg, z = 0.15
+    /forklift/gz/safety_scanner_right/measurement   275 deg, z = 0.15
+
+  TWO CHANNELS PER SAFETY SCANNER, AND ONLY ONE OF THEM IS A TOPIC. The
+  device class these three sensors model emits a safe output (OSSD pair,
+  or safe bits over PROFIsafe) AND a separate NON-SAFE measurement channel
+  that the datasheet provides for HMI, diagnostics and process use while
+  stating it must not be used for safety-related tasks. The gpu_lidar
+  scan below IS the measurement channel; the safe channel is DERIVED from
+  it by field evaluation, which is what the real device does internally,
+  and that derivation is not in this file. Hence the rule a later reader
+  can check mechanically:
+
+    every channel a subscriber can reach is a MEASUREMENT channel.
+    The safe channel has no topic, on gz transport or on ROS, ever.
+
+  The measurement channel is non-safe and must never implement a safety
+  function. The safe channel reaches the F-program, and it never reaches
+  it through a topic, on either transport, under any path.
+
+  BY WHICH PATH IT REACHES THE F-PROGRAM IS DESIGN INTENT, NOT SETTLED
+  FACT. ADR 0011 decision 2 makes it configured F-I/O, an ET 200SP F-DI
+  parameterised as the scanner's OSSD pair, whose channel values the
+  S7-PLCSIM Advanced API drives by tag name: this project's analogue of
+  the copper an OSSD pair runs on. That path has never been run. The two
+  tool questions it rests on, whether this PLCSIM Advanced version and
+  its safety system version simulate F-I/O at all, and whether the API
+  writes a configured F-DI's channel values by tag name, are settled in
+  the tool by plc/forklift-safety/FIO-FEASIBILITY.md under brief m5-03,
+  whose verdict section is blank as this is written. If either answers
+  no, the named fallback of ADR 0011 decision 2 is the standard-DB
+  stand-in of plc/forklift-safety/SPEC.md, labelled a stand-in wherever
+  it appears. Nothing in THIS file changes under either answer: the safe
+  channel is derived outside this file by a field evaluation and is not
+  a topic either way.
+
+  The numeric values a node needs (wheel radius, steer limit, fork travel)
+  are mirrored in config.yaml because SDF cannot be read as YAML. THIS
+  FILE IS THE AUTHORITY for the geometry; config.yaml records the same
+  numbers for the Python side and is diffed against the values below.
+
+  Sensor note: all four scanners are gz "gpu_lidar" sensors, because
+  gz sim has no CPU ray sensor. The world that spawns this model MUST
+  load gz-sim-sensors-system with a render engine. gz's stock empty.sdf
+  does not; sim/worlds/cell.sdf does. See README.md.
+
+  ONE SENSOR, ONE LINK, AND THE ROTATION LIVES IN THE LINK POSE. Each
+  scanner has its own link and its <gz_frame_id> names that link. Without
+  gz_frame_id the message carries a scoped model/link/sensor frame id and
+  a downstream TF lookup fails. The aperture rotation of the three safety
+  scanners is written into the LINK pose and the sensor pose is identity,
+  so the frame the message names is also the frame its angles are
+  measured in. Rotating the sensor inside its link would leave the two
+  disagreeing by the mount angle, with nothing to say so.
+-->
+<sdf version="1.8">
+  <model name="Forklift">
+    <static>false</static>
+    <self_collide>false</self_collide>
+
+    <!-- ========================= Chassis ========================= -->
+    <!--
+      One rigid body carrying the body shell, the counterweight, the
+      overhead guard and the safety scanner. The guard is visual only:
+      nothing in this project drives under an obstruction, and four thin
+      collision posts would cost solver time for no observable behaviour.
+    -->
+    <link name="base_link">
+      <inertial>
+        <pose>0.10 0 0.55 0 0 0</pose>
+        <mass>900.0</mass>
+        <inertia>
+          <ixx>277.5</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>363.75</iyy><iyz>0</iyz><izz>207.75</izz>
+        </inertia>
+      </inertial>
+
+      <collision name="chassis_collision">
+        <pose>0 0 0.45 0 0 0</pose>
+        <geometry><box><size>1.40 0.90 0.50</size></box></geometry>
+        <surface>
+          <friction><ode><mu>0.6</mu><mu2>0.6</mu2></ode></friction>
+        </surface>
+      </collision>
+      <visual name="chassis_visual">
+        <pose>0 0 0.45 0 0 0</pose>
+        <geometry><box><size>1.40 0.90 0.50</size></box></geometry>
+        <material>
+          <ambient>0.90 0.42 0.05 1</ambient>
+          <diffuse>0.90 0.42 0.05 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Counterweight, over the drive wheel and opposite the load. -->
+      <collision name="counterweight_collision">
+        <pose>0.74 0 0.51 0 0 0</pose>
+        <geometry><box><size>0.24 0.80 0.42</size></box></geometry>
+      </collision>
+      <visual name="counterweight_visual">
+        <pose>0.74 0 0.51 0 0 0</pose>
+        <geometry><box><size>0.24 0.80 0.42</size></box></geometry>
+        <material>
+          <ambient>0.62 0.28 0.04 1</ambient>
+          <diffuse>0.62 0.28 0.04 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Overhead guard: four posts and a roof plate, visual only. -->
+      <visual name="guard_post_fl">
+        <pose>0.55 0.38 1.175 0 0 0</pose>
+        <geometry><box><size>0.07 0.07 0.95</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="guard_post_fr">
+        <pose>0.55 -0.38 1.175 0 0 0</pose>
+        <geometry><box><size>0.07 0.07 0.95</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="guard_post_rl">
+        <pose>-0.55 0.38 1.175 0 0 0</pose>
+        <geometry><box><size>0.07 0.07 0.95</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="guard_post_rr">
+        <pose>-0.55 -0.38 1.175 0 0 0</pose>
+        <geometry><box><size>0.07 0.07 0.95</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="guard_roof">
+        <pose>0 0 1.68 0 0 0</pose>
+        <geometry><box><size>1.24 0.88 0.06</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+
+    </link>
+
+    <!-- ======================== Sensing ========================= -->
+    <!--
+      Four planar scanners, each on its own link: three safety scanners
+      and the navigation lidar. THE THREE SAFETY SCANNERS ARE NAMED IN THE
+      OWNER'S FRAME, WHICH IS THIS MODEL'S ROTATED 180 deg ABOUT z. The
+      owner's Front is the FORK end, the model's -x; the owner's Left is
+      the model's -y. Their placement comes from the owner's reference
+      drawing and not from EVIDENCE_SENSOR_COVERAGE.md, which measured the
+      superseded two-scanner layout of agv/forklift/model.sdf. The
+      navigation lidar is unchanged and its derivation is still that
+      document's.
+
+      SCAN PLANE z = 0.15 for the three safety scanners. The free window
+      at the fork end is bounded below by the lowered tine top (z = 0.10,
+      fork_left/right at z 0.075 with 0.05 height) and above by the
+      chassis underside (z = 0.20, chassis box centred 0.45 with 0.50
+      height). 0.15 is the midpoint: 50 mm of clearance each way.
+
+      POSITIONS. Back sits on the rear face at (0.72, 0), just outside the
+      chassis footprint's +0.70 edge. Left and Right sit at the fork-end
+      corners, (.0.68, .0.46) and (.0.68, 0.46), on the footprint corners
+      of the 1.40 x 0.90 chassis.
+
+      APERTURE 275 deg, modelled on a SICK microScan3 Pro, with the 85 deg
+      blind sector pointed into the vehicle body in every case: link yaw 0
+      at Back, so its blind sector is centred on 180 deg; .135 deg at Left
+      and +135 deg at Right, so each corner scanner's blind sector points
+      back across the vehicle.
+
+      NAVIGATION LIDAR z = 1.80, on the overhead guard. This one is
+      forced, not chosen. A 360 deg aperture is only worth its render
+      cost where the sensor clears the vehicle body, and the two best low
+      mountings measured lose 168.5 and 171.9 deg of it to that body,
+      against 29.0 deg here. Above the guard roof (top z = 1.71) and
+      below the mast crossmember (z = 1.95) the only permanent occluder
+      left is the mast. The .y lateral offset from the mast centreline
+      narrows that shadow and clears the fork axis. The height has a cost
+      of its own, written up in the evidence: at 1.80 m this sensor is
+      above every feature of sim/worlds/forklift_arena.sdf as it stands
+      except one pillar.
+
+      RAW RANGES ONLY, all four. No zone, no threshold and no stop
+      decision is taken in this file. m5_ver2/step4/ros2/field_eval.py
+      evaluates the protective and warning fields over these measurement
+      channels, outside this file, exactly as the real device does that
+      derivation internally.
+
+      CONSUMERS, PER CHANNEL, AS THEY STAND. All three safety measurement
+      channels are bridged into ROS and read by the field evaluator; the
+      BACK verdict is the one that reaches the F-PLC's PF_OSSD and
+      WF_Clear. No device's safe channel is a topic on any transport,
+      because the modelled counterpart's safe output is an OSSD pair on
+      copper; it is derived from the same rays as the measurement channel
+      by a field evaluation that is not in this file, and that shared
+      origin is not a second independent channel (agv/forklift/README.md,
+      "Two channels per safety scanner"). The NAVIGATION lidar is the
+      SLAM, AMCL and costmap input, and no scanner channel of either kind
+      reaches a navigation consumer.
+
+      BUDGET, and the rule that governs it. Rendering on the target
+      machine is llvmpipe software rasterisation
+      (sim/setup/WSL_ENVIRONMENT.md 4.7), so the vehicle's ray budget is
+      held down: 275 + 275 + 275 + 360 = 1185 rays per 100 ms across four
+      sensors, up from 910 across three when there were two safety
+      scanners. That cost has NOT been measured. No sample count and no
+      update rate here goes up until someone measures the real time factor
+      it buys and writes the figure down.
+    -->
+
+    <link name="safety_scanner_back_link">
+      <!-- BACK in the owner's frame: the drive/counterweight end, model +x,
+           centred on the rear face. Yaw 0 points the sensor x axis straight
+           out, so the 85 deg blind sector is centred on 180 deg, into the
+           vehicle. The owner's Front is the FORK end, model -x. -->
+      <pose>0.72 0 0.15 0 0 0</pose>
+      <inertial>
+        <mass>1.4</mass>
+        <inertia>
+          <ixx>0.004</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.004</iyy><iyz>0</iyz><izz>0.004</izz>
+        </inertia>
+      </inertial>
+      <!-- Housing top face sits 20 mm BELOW the scan plane, so the scanner
+           cannot see its own mounting. Visual only. -->
+      <visual name="housing">
+        <pose>0 0 -0.075 0 0 0</pose>
+        <geometry><box><size>0.14 0.14 0.11</size></box></geometry>
+        <material><ambient>0.72 0.55 0.05 1</ambient><diffuse>0.72 0.55 0.05 1</diffuse></material>
+      </visual>
+      <sensor name="safety_scanner_back" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>safety_scanner_back_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>10</update_rate>
+        <visualize>true</visualize>
+        <!-- NON-SAFE MEASUREMENT CHANNEL. The safe channel is not here and
+             is not a topic: 1oo2 is the fail-safe input card's property, not
+             the simulation's, and in PLCSIM the pair collapses to one
+             process-image bit (m5_ver2/CLAUDE.md section 3).
+
+             RANGE MAX IS 8.0, NOT THE 5.5 THE OLD SCANNERS USED. The debug
+             script's case 3 warning field is 6.0 m. Capped at 5.5 the test
+             `d > 6.0` can never pass, so the warning field would read as
+             permanently violated in the very case the system falls into
+             when the monitoring case is unreadable. -->
+        <topic>/forklift/gz/safety_scanner_back/measurement</topic>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>275</samples>
+              <resolution>1</resolution>
+              <min_angle>-2.3998277</min_angle>
+              <max_angle>2.3998277</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0.0</min_angle>
+              <max_angle>0.0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.10</min>
+            <max>8.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </lidar>
+      </sensor>
+    </link>
+
+    <link name="safety_scanner_left_link">
+      <!-- LEFT in the owner's frame is the model's -y, because the owner's
+           frame is the model's rotated 180 deg about z. Mounted at the
+           fork-end corner; yaw -135 deg points the sensor out along the
+           corner diagonal. -->
+      <pose>-0.68 -0.46 0.15 0 0 -2.3561945</pose>
+      <inertial>
+        <mass>1.4</mass>
+        <inertia>
+          <ixx>0.004</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.004</iyy><iyz>0</iyz><izz>0.004</izz>
+        </inertia>
+      </inertial>
+      <!-- Housing top face sits 20 mm BELOW the scan plane, so the scanner
+           cannot see its own mounting. Visual only. -->
+      <visual name="housing">
+        <pose>0 0 -0.075 0 0 0</pose>
+        <geometry><box><size>0.14 0.14 0.11</size></box></geometry>
+        <material><ambient>0.72 0.55 0.05 1</ambient><diffuse>0.72 0.55 0.05 1</diffuse></material>
+      </visual>
+      <sensor name="safety_scanner_left" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>safety_scanner_left_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>10</update_rate>
+        <visualize>true</visualize>
+        <!-- NON-SAFE MEASUREMENT CHANNEL. The safe channel is not here and
+             is not a topic: 1oo2 is the fail-safe input card's property, not
+             the simulation's, and in PLCSIM the pair collapses to one
+             process-image bit (m5_ver2/CLAUDE.md section 3).
+
+             RANGE MAX IS 8.0, NOT THE 5.5 THE OLD SCANNERS USED. The debug
+             script's case 3 warning field is 6.0 m. Capped at 5.5 the test
+             `d > 6.0` can never pass, so the warning field would read as
+             permanently violated in the very case the system falls into
+             when the monitoring case is unreadable. -->
+        <topic>/forklift/gz/safety_scanner_left/measurement</topic>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>275</samples>
+              <resolution>1</resolution>
+              <min_angle>-2.3998277</min_angle>
+              <max_angle>2.3998277</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0.0</min_angle>
+              <max_angle>0.0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.10</min>
+            <max>8.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </lidar>
+      </sensor>
+    </link>
+
+    <link name="safety_scanner_right_link">
+      <!-- RIGHT in the owner's frame is the model's +y, because the owner's
+           frame is the model's rotated 180 deg about z. Mounted at the
+           fork-end corner; yaw +135 deg points the sensor out along the
+           corner diagonal. -->
+      <pose>-0.68 0.46 0.15 0 0 2.3561945</pose>
+      <inertial>
+        <mass>1.4</mass>
+        <inertia>
+          <ixx>0.004</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.004</iyy><iyz>0</iyz><izz>0.004</izz>
+        </inertia>
+      </inertial>
+      <!-- Housing top face sits 20 mm BELOW the scan plane, so the scanner
+           cannot see its own mounting. Visual only. -->
+      <visual name="housing">
+        <pose>0 0 -0.075 0 0 0</pose>
+        <geometry><box><size>0.14 0.14 0.11</size></box></geometry>
+        <material><ambient>0.72 0.55 0.05 1</ambient><diffuse>0.72 0.55 0.05 1</diffuse></material>
+      </visual>
+      <sensor name="safety_scanner_right" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>safety_scanner_right_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>10</update_rate>
+        <visualize>true</visualize>
+        <!-- NON-SAFE MEASUREMENT CHANNEL. The safe channel is not here and
+             is not a topic: 1oo2 is the fail-safe input card's property, not
+             the simulation's, and in PLCSIM the pair collapses to one
+             process-image bit (m5_ver2/CLAUDE.md section 3).
+
+             RANGE MAX IS 8.0, NOT THE 5.5 THE OLD SCANNERS USED. The debug
+             script's case 3 warning field is 6.0 m. Capped at 5.5 the test
+             `d > 6.0` can never pass, so the warning field would read as
+             permanently violated in the very case the system falls into
+             when the monitoring case is unreadable. -->
+        <topic>/forklift/gz/safety_scanner_right/measurement</topic>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>275</samples>
+              <resolution>1</resolution>
+              <min_angle>-2.3998277</min_angle>
+              <max_angle>2.3998277</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0.0</min_angle>
+              <max_angle>0.0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.10</min>
+            <max>8.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </lidar>
+      </sensor>
+    </link>
+
+    <link name="nav_lidar_link">
+      <!-- On the overhead guard roof, offset to .y of the mast
+           centreline. UNCHANGED FROM THE ORIGINAL, including its 8.0 m
+           range max, which is where the three safety scanners' new 8.0 m
+           came from. Nothing in m5_ver2 Step 4 consumes this sensor; it
+           is kept because deleting it would change the model's ray
+           budget and its render behaviour for no reason Step 4 has.
+           Whether 8.0 m should grow for the 24 x 16 m arena is the open
+           cross-layer question of EVIDENCE_SENSOR_COVERAGE.md 1.
+
+           The mount stands over the front right overhead guard post
+           (0.55, .0.38), the stiffest point of the roof plate, displaced
+           20 mm further outboard: at y = .0.40 the straight astern ray
+           passes 0.04 m clear of the mast body, and .0.40 is also the
+           largest offset that keeps the 0.06 post inside the 1.24 x 0.88
+           roof plate. Measured in EVIDENCE_SENSOR_COVERAGE.md 7. -->
+      <pose>0.55 -0.40 1.80 0 0 0</pose>
+      <inertial>
+        <mass>1.0</mass>
+        <inertia>
+          <ixx>0.002</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.002</iyy><iyz>0</iyz><izz>0.002</izz>
+        </inertia>
+      </inertial>
+      <!-- Post and head both finish BELOW the scan plane, as the three
+           safety scanner housings do, so no sensor renders its own
+           mounting. -->
+      <visual name="post">
+        <pose>0 0 -0.065 0 0 0</pose>
+        <geometry><box><size>0.06 0.06 0.11</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="head">
+        <pose>0 0 -0.040 0 0 0</pose>
+        <geometry><cylinder><radius>0.05</radius><length>0.04</length></cylinder></geometry>
+        <material><ambient>0.10 0.10 0.12 1</ambient><diffuse>0.10 0.10 0.12 1</diffuse></material>
+      </visual>
+      <sensor name="nav_lidar" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>nav_lidar_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>10</update_rate>
+        <visualize>true</visualize>
+        <topic>/forklift/gz/scan_nav</topic>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.1415927</min_angle>
+              <max_angle>3.1415927</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0.0</min_angle>
+              <max_angle>0.0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.10</min>
+            <max>8.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </lidar>
+      </sensor>
+    </link>
+
+    <!-- =========================== IMU =========================== -->
+    <!--
+      MEMS inertial measurement unit. Six axes, no magnetometer, and NO
+      ORIENTATION OUTPUT - see the block on <enable_orientation> below,
+      which is the most important sentence in this section.
+
+      WHERE IT SITS, AND WHY THERE. On the rear axle centreline
+      (x = -0.50, the midpoint of rear_wheel_left and rear_wheel_right)
+      and low in the chassis (z = 0.25, just above the 0.20 underside).
+      A tricycle's instantaneous centre of rotation always lies on the
+      rear axle LINE, whatever the steer angle, so a device mounted on
+      that line sees no centripetal term in a steady turn and its
+      accelerometer channels stay usable for something later. The FUSED
+      quantity does not care: angular rate is the same at every point of
+      a rigid body, so yaw rate would read identically anywhere on this
+      vehicle. The mounting is chosen for the channels that are not
+      fused yet, not for the one that is.
+
+      THE NOISE NUMBERS ARE A DATASHEET, NOT A TUNING. Every value below
+      is derived from the Bosch Sensortec BMI088 data sheet,
+      BST-BMI088-DS000-19 revision 1.9, 01/2024, tables 4 and 5, read on
+      2026-07-31. That device class - a 6-axis consumer/robotics MEMS
+      IMU - is what an AGV of this size actually carries. The derivation
+      of each number, including the two places where a datasheet figure
+      is deliberately NOT used raw, is written out in
+      EVIDENCE_ODOMETRY.md section 2. Summary:
+
+        gyro white noise   stddev 0.001745 rad/s
+          = the datasheet's own "Output Noise" row, 0.1 deg/s rms at
+            BW = 47 Hz. No arithmetic: the sensor is operated at the
+            datasheet's own quoted condition (100 Hz ODR, 47 Hz BW).
+
+        gyro bias          bias_mean 0.002618 rad/s, bias_stddev 0
+          = TCO 0.015 deg/s/K x 10 K = 0.15 deg/s. NOT the datasheet's
+            +-1 deg/s zero-rate offset: that row is measured with
+            "slow and fast offset cancellation off", and every AGV
+            integration estimates the stationary bias at power-up. What
+            survives that estimate is the temperature change since it,
+            and 10 K is a device calibrated at power-up in an unheated
+            hall and run through a shift. bias_stddev 0 fixes the
+            MAGNITUDE across runs; gz still draws the SIGN at random.
+
+        accel white noise  stddev 0.01076 m/s^2 (x, y), 0.01278 (z)
+          = noise density 160 ug/sqrt(Hz) (x, y) and 190 (z) at
+            sqrt(47 Hz), times g = 9.80665.
+
+        accel bias         bias_mean 0.01961 m/s^2 (= 2 mg)
+          = TCO 0.2 mg/K x 10 K, by the same argument as the gyro: the
+            20 mg zero-g offset is removed by a levelling calibration,
+            the temperature term is not.
+
+      WHAT IS NOT MODELLED, STATED RATHER THAN OMITTED. The datasheet
+      publishes no Allan-variance bias instability, so NO in-run bias
+      random walk is modelled (<dynamic_bias_stddev> is absent, not
+      zero-by-accident). The modelled bias is constant within a run.
+      Real drift is therefore worse than what this model produces, and
+      every drift figure measured against it is a LOWER BOUND. Inventing
+      a random-walk number to close that gap would be a fabricated
+      datum, which is worse than a stated limitation.
+
+      <enable_orientation>false</enable_orientation> IS LOAD BEARING.
+      gz's IMU derives its orientation output from the LINK'S POSE IN
+      THE SIMULATOR - it is ground truth wearing a sensor's name, and
+      a real strapdown IMU with no magnetometer cannot produce an
+      absolute heading at all. Fusing it would put ground truth back
+      into the estimator through the side door and recreate exactly the
+      circularity the two-phase odometry plan exists to remove (brief
+      m5-07c, forbidden list). With this element false the message
+      carries orientation_covariance[0] = -1, the ROS convention for
+      "no orientation in this message", so a consumer that tries cannot
+      silently succeed. ekf.yaml refuses it a second time by
+      setting all three orientation entries of imu0_config false. Two
+      independent refusals, because one of them is a config file that
+      somebody could edit.
+    -->
+    <link name="imu_link">
+      <pose>-0.50 0 0.25 0 0 0</pose>
+      <inertial>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>1e-5</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1e-5</iyy><iyz>0</iyz><izz>1e-5</izz>
+        </inertia>
+      </inertial>
+      <sensor name="imu" type="imu">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>imu_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>100</update_rate>
+        <topic>/forklift/gz/imu</topic>
+        <imu>
+          <enable_orientation>false</enable_orientation>
+          <angular_velocity>
+            <x>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.001745</stddev>
+                <bias_mean>0.002618</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.001745</stddev>
+                <bias_mean>0.002618</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.001745</stddev>
+                <bias_mean>0.002618</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.01076</stddev>
+                <bias_mean>0.01961</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.01076</stddev>
+                <bias_mean>0.01961</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>0.01278</stddev>
+                <bias_mean>0.01961</bias_mean>
+                <bias_stddev>0.0</bias_stddev>
+              </noise>
+            </z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+    </link>
+
+    <!-- ========================== Mast ========================== -->
+    <!-- Fixed structure. The carriage slides on it, see mast_joint. -->
+    <link name="mast">
+      <inertial>
+        <pose>-0.78 0 1.05 0 0 0</pose>
+        <mass>120.0</mass>
+        <inertia>
+          <ixx>45.63</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>40.40</iyy><iyz>0</iyz><izz>6.03</izz>
+        </inertia>
+      </inertial>
+      <collision name="mast_collision">
+        <pose>-0.78 0 1.05 0 0 0</pose>
+        <geometry><box><size>0.10 0.72 2.00</size></box></geometry>
+      </collision>
+      <visual name="mast_rail_left">
+        <pose>-0.78 0.30 1.05 0 0 0</pose>
+        <geometry><box><size>0.09 0.09 2.00</size></box></geometry>
+        <material><ambient>0.14 0.15 0.18 1</ambient><diffuse>0.14 0.15 0.18 1</diffuse></material>
+      </visual>
+      <visual name="mast_rail_right">
+        <pose>-0.78 -0.30 1.05 0 0 0</pose>
+        <geometry><box><size>0.09 0.09 2.00</size></box></geometry>
+        <material><ambient>0.14 0.15 0.18 1</ambient><diffuse>0.14 0.15 0.18 1</diffuse></material>
+      </visual>
+      <visual name="mast_crossmember">
+        <pose>-0.78 0 2.00 0 0 0</pose>
+        <geometry><box><size>0.09 0.69 0.10</size></box></geometry>
+        <material><ambient>0.14 0.15 0.18 1</ambient><diffuse>0.14 0.15 0.18 1</diffuse></material>
+      </visual>
+    </link>
+
+    <!-- ==================== Steer and drive ===================== -->
+    <!--
+      Tricycle front assembly. The steer axis passes through the wheel
+      centre, so there is no castor trail to model and the steer angle is
+      the wheel heading exactly.
+    -->
+    <link name="steer_link">
+      <pose>0.55 0 0.24 0 0 0</pose>
+      <inertial>
+        <mass>18.0</mass>
+        <inertia>
+          <ixx>0.0768</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0768</iyy><iyz>0</iyz><izz>0.0768</izz>
+        </inertia>
+      </inertial>
+      <visual name="steer_yoke_visual">
+        <geometry><box><size>0.16 0.18 0.22</size></box></geometry>
+        <material><ambient>0.22 0.23 0.26 1</ambient><diffuse>0.22 0.23 0.26 1</diffuse></material>
+      </visual>
+    </link>
+
+    <link name="drive_wheel">
+      <pose>0.55 0 0.12 0 0 0</pose>
+      <inertial>
+        <mass>12.0</mass>
+        <inertia>
+          <ixx>0.0532</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0864</iyy><iyz>0</iyz><izz>0.0532</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.10</length></cylinder></geometry>
+        <surface>
+          <friction><ode><mu>1.0</mu><mu2>0.9</mu2></ode></friction>
+          <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.10</length></cylinder></geometry>
+        <material><ambient>0.09 0.09 0.10 1</ambient><diffuse>0.09 0.09 0.10 1</diffuse></material>
+      </visual>
+    </link>
+
+    <!-- ======================= Rear wheels ====================== -->
+    <!-- Passive. No controller is attached to either joint. -->
+    <link name="rear_wheel_left">
+      <pose>-0.50 0.36 0.12 0 0 0</pose>
+      <inertial>
+        <mass>10.0</mass>
+        <inertia>
+          <ixx>0.0443</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0720</iyy><iyz>0</iyz><izz>0.0443</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.10</length></cylinder></geometry>
+        <surface>
+          <friction><ode><mu>0.9</mu><mu2>0.4</mu2></ode></friction>
+          <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.10</length></cylinder></geometry>
+        <material><ambient>0.09 0.09 0.10 1</ambient><diffuse>0.09 0.09 0.10 1</diffuse></material>
+      </visual>
+    </link>
+
+    <link name="rear_wheel_right">
+      <pose>-0.50 -0.36 0.12 0 0 0</pose>
+      <inertial>
+        <mass>10.0</mass>
+        <inertia>
+          <ixx>0.0443</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0720</iyy><iyz>0</iyz><izz>0.0443</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.10</length></cylinder></geometry>
+        <surface>
+          <friction><ode><mu>0.9</mu><mu2>0.4</mu2></ode></friction>
+          <contact><ode><kp>1e6</kp><kd>100.0</kd></ode></contact>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.12</radius><length>0.10</length></cylinder></geometry>
+        <material><ambient>0.09 0.09 0.10 1</ambient><diffuse>0.09 0.09 0.10 1</diffuse></material>
+      </visual>
+    </link>
+
+    <!-- ==================== Carriage and forks =================== -->
+    <!-- Link poses below are the carriage at travel zero, fully lowered. -->
+    <link name="carriage">
+      <pose>-0.80 0 0.35 0 0 0</pose>
+      <inertial>
+        <mass>40.0</mass>
+        <inertia>
+          <ixx>2.708</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.867</iyy><iyz>0</iyz><izz>1.908</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><box><size>0.10 0.75 0.50</size></box></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.10 0.75 0.50</size></box></geometry>
+        <material><ambient>0.30 0.32 0.36 1</ambient><diffuse>0.30 0.32 0.36 1</diffuse></material>
+      </visual>
+    </link>
+
+    <link name="fork_left">
+      <pose>-1.35 0.28 0.075 0 0 0</pose>
+      <inertial>
+        <mass>25.0</mass>
+        <inertia>
+          <ixx>0.0352</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>2.302</iyy><iyz>0</iyz><izz>2.327</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><box><size>1.05 0.12 0.05</size></box></geometry>
+        <surface>
+          <friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>1.05 0.12 0.05</size></box></geometry>
+        <material><ambient>0.58 0.60 0.64 1</ambient><diffuse>0.58 0.60 0.64 1</diffuse></material>
+      </visual>
+    </link>
+
+    <link name="fork_right">
+      <pose>-1.35 -0.28 0.075 0 0 0</pose>
+      <inertial>
+        <mass>25.0</mass>
+        <inertia>
+          <ixx>0.0352</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>2.302</iyy><iyz>0</iyz><izz>2.327</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><box><size>1.05 0.12 0.05</size></box></geometry>
+        <surface>
+          <friction><ode><mu>0.9</mu><mu2>0.9</mu2></ode></friction>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>1.05 0.12 0.05</size></box></geometry>
+        <material><ambient>0.58 0.60 0.64 1</ambient><diffuse>0.58 0.60 0.64 1</diffuse></material>
+      </visual>
+    </link>
+
+    <!-- ========================== Joints ========================= -->
+
+    <joint name="mast_anchor" type="fixed">
+      <parent>base_link</parent>
+      <child>mast</child>
+    </joint>
+
+    <!-- Sensor mounts. Fixed, so each scanner's frame is a rigid offset
+         of base_link and the transform a consumer needs is a constant. -->
+    <joint name="safety_scanner_back_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>safety_scanner_back_link</child>
+    </joint>
+
+    <joint name="safety_scanner_left_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>safety_scanner_left_link</child>
+    </joint>
+
+    <joint name="safety_scanner_right_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>safety_scanner_right_link</child>
+    </joint>
+
+    <joint name="nav_lidar_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>nav_lidar_link</child>
+    </joint>
+
+    <joint name="imu_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>imu_link</child>
+    </joint>
+
+    <!-- Steer axis, vertical. Limit is the mechanical stop of the
+         assembly, not a control decision. -->
+    <joint name="steer_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>steer_link</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-1.31</lower>
+          <upper>1.31</upper>
+          <effort>800</effort>
+          <velocity>2.0</velocity>
+        </limit>
+        <dynamics><damping>80.0</damping><friction>0.5</friction></dynamics>
+      </axis>
+    </joint>
+
+    <!-- Traction axis. Spin is unlimited; the bounds below are the
+         continuous rotation idiom, not a travel limit. -->
+    <joint name="drive_wheel_joint" type="revolute">
+      <parent>steer_link</parent>
+      <child>drive_wheel</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-1e16</lower>
+          <upper>1e16</upper>
+          <effort>500</effort>
+          <velocity>40.0</velocity>
+        </limit>
+        <dynamics><damping>0.05</damping><friction>0.0</friction></dynamics>
+      </axis>
+    </joint>
+
+    <joint name="rear_wheel_left_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rear_wheel_left</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-1e16</lower>
+          <upper>1e16</upper>
+          <effort>200</effort>
+          <velocity>40.0</velocity>
+        </limit>
+        <dynamics><damping>0.05</damping><friction>0.0</friction></dynamics>
+      </axis>
+    </joint>
+
+    <joint name="rear_wheel_right_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rear_wheel_right</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit>
+          <lower>-1e16</lower>
+          <upper>1e16</upper>
+          <effort>200</effort>
+          <velocity>40.0</velocity>
+        </limit>
+        <dynamics><damping>0.05</damping><friction>0.0</friction></dynamics>
+      </axis>
+    </joint>
+
+    <!--
+      Mast lift. ONE prismatic joint carries the carriage and both tines.
+      Travel 0 to 1.6 m is the mechanical stop.
+
+      Two separate things shape the motion, and it is worth being clear
+      about which does what, because they are easy to confuse:
+
+        <velocity>0.15</velocity> is the RATE LIMIT and it is enforced by
+        the physics engine on the way UP, measured exactly. A raw step on
+        /forklift/gz/fork_cmd therefore ramps at 0.15 m/s instead of
+        slamming to the target.
+
+        <damping> is the hydraulic flow restriction, and it is what governs
+        the way DOWN. The rate limit was measured NOT to bind against a
+        gravity assisted descent: with the controller allowed to push down
+        hard the carriage came down at 0.170 m/s, through a limit that
+        says 0.15. So the descent is not allowed to be a push. cmd_min is
+        set so low that lowering is gravity through the restriction, which
+        is both how a lift cylinder behaves and the only version of it
+        that stays under the declared rate.
+    -->
+    <joint name="mast_joint" type="prismatic">
+      <parent>mast</parent>
+      <child>carriage</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>0.0</lower>
+          <upper>1.6</upper>
+          <effort>12000</effort>
+          <velocity>0.15</velocity>
+        </limit>
+        <dynamics><damping>8000.0</damping><friction>50.0</friction></dynamics>
+      </axis>
+    </joint>
+
+    <joint name="fork_left_joint" type="fixed">
+      <parent>carriage</parent>
+      <child>fork_left</child>
+    </joint>
+
+    <joint name="fork_right_joint" type="fixed">
+      <parent>carriage</parent>
+      <child>fork_right</child>
+    </joint>
+
+    <!-- ====================== gz systems ========================= -->
+    <!--
+      Every topic below is stated explicitly. None of these systems is
+      allowed to fall back on its model scoped default topic, because the
+      default embeds the spawned model name and this project treats the
+      names as an interface (README.md contract table).
+    -->
+
+    <!--
+      Steer angle command [rad].
+
+      THE LOAD THIS AXIS WORKS INTO. A steered wheel carrying this vehicle
+      scrubs against the floor, a resisting moment measured at roughly
+      400 N m. That moment is what sets every number in this plugin, and
+      the quantity that decides whether a command executes at all is the
+      angle error at which the proportional term first exceeds it:
+
+          e* = M_scrub / p_gain = 400 / 60000 = 0.0067 rad = 0.38 deg
+
+      Below e* the joint moves only as the integral winds up, which takes
+      seconds. p_gain is therefore not a tuning preference: it is the
+      smallest steer correction the plant can execute promptly.
+
+      WHY p_gain IS 60000 AND NOT 6000. This axis ran at 6000 through M4
+      and most of M5, which puts e* at 3.8 deg. Nav2's corrections on a
+      straight leg are 1 to 2.5 deg over a leg lasting 8 to 9 s, so none
+      of them executed and a straight leg was open loop in yaw: the
+      heading error the vehicle entered with was held, and a held heading
+      error integrates into cross track at sin(theta) per metre, measured
+      at 0.084 m/m mean magnitude over ten routes. Raising p_gain to
+      60000, the value the mast joint already uses, moves e* to 0.38 deg,
+      below every command the controller forms on a straight leg. Measured
+      on the plant bench, a 2 deg command goes from 5 percent executed to
+      76 percent executed inside 1.4 s and the body follows the joint to
+      within 1 percent; over five route repeats the mean cross track rate
+      falls from 0.089 to 0.0134 m/m. See EVIDENCE_NAV2.md sections 11.2,
+      11.3 and 11.6 (m5-38) for the static curve, the A/B that located the
+      resisting moment in the tyre contact, and the distribution.
+
+      Two honest limits on that number. No upper bracket was swept: 60000
+      is a sufficient value derived from this model's own 400 N m figure,
+      and its stability is evidenced by the absence of hunting out to
+      +/- 20 deg on the bench, not by a sweep. And the residual shortfall
+      below 0.5 deg (0.09 to 0.23 of commanded inside a 1.4 s window) is
+      settling, not a dead region; it falls smoothly with command size.
+
+      A CLAIM THIS COMMENT USED TO MAKE, AND WHY IT IS GONE. It said the
+      scrub "disappears once the vehicle rolls", which is false and was
+      falsified directly: rolling at 0.6 m/s in the warehouse, the
+      committed axis still failed every command under 3 deg. The variable
+      that removes the resisting moment is GRIP, not motion. The same
+      bench in the arena world, whose floor gives the drive wheel no
+      traction at all, reaches every commanded angle including 0.5 deg
+      inside 1.4 s. Anything measured on a surface without grip
+      characterises this axis with its load disconnected.
+
+      i_max STAYS AT 800, just above the measured scrub moment, and its
+      job has changed. Under p_gain 6000 the integral was the only term
+      that could ever break the scrub, so the clamp had to clear 400 N m
+      or a permanent error survived; the clamp is still sized that way and
+      that lower bound still holds for the standing still case, where a
+      loaded wheel is turned from rest. What the clamp no longer carries
+      is the running correction, which p_gain now executes directly. The
+      upper bound on the clamp is unchanged and was observed: a surplus
+      large enough to outlive the condition that built it hunts the joint
+      at its rate limit.
+
+      WHERE THE DAMPING LIVES, AND WHY IT IS NOT d_gain. The controller's
+      derivative term is an EXPLICIT force evaluated once per physics step,
+      so it is stable only while d_gain stays well under inertia / step,
+      which for this assembly is about 0.13 / 0.002 = 65. Larger values
+      were tried and do not damp: they chatter, and at d_gain 1200 the
+      joint stopped responding to its topic altogether. The damping that
+      actually holds this joint steady is <dynamics><damping> on the joint
+      itself, which the physics engine integrates implicitly. d_gain here
+      is a trim term, nothing more.
+
+      Joint damping has its own ceiling, found the same way. At 80 the
+      joint slews to a commanded angle and settles; raised to 400 against
+      this joint's 800 N m effort limit it stopped moving altogether while
+      still reporting a live command. Neither number was predicted; both
+      were measured, and the working value is the one below.
+    -->
+    <plugin filename="gz-sim-joint-position-controller-system"
+            name="gz::sim::systems::JointPositionController">
+      <joint_name>steer_joint</joint_name>
+      <topic>/forklift/gz/actuator/steer_cmd</topic>
+      <p_gain>60000.0</p_gain>
+      <i_gain>1500.0</i_gain>
+      <d_gain>30.0</d_gain>
+      <i_max>800.0</i_max>
+      <i_min>-800.0</i_min>
+      <cmd_max>4000.0</cmd_max>
+      <cmd_min>-4000.0</cmd_min>
+    </plugin>
+
+    <!-- Traction command [rad/s] at the wheel. Raw velocity, no ramp. -->
+    <plugin filename="gz-sim-joint-controller-system"
+            name="gz::sim::systems::JointController">
+      <joint_name>drive_wheel_joint</joint_name>
+      <topic>/forklift/gz/actuator/traction_cmd</topic>
+      <initial_velocity>0.0</initial_velocity>
+    </plugin>
+
+    <!--
+      Carriage travel command [m], measured from fully lowered.
+
+      The clamps are ASYMMETRIC, and deliberately so: gravity is. A lift
+      needs a large integral in the LIFTING direction, because holding the
+      carriage still is the integral's job once the position error has
+      gone to nothing, and it needs almost none in the lowering direction,
+      because lowering is what gravity does for free.
+
+      WHICH CLAMP IS WHICH IS NOT WHAT IT LOOKS LIKE. gz's PID forms its
+      error as (position minus target) and negates the sum, so while the
+      carriage sits BELOW its target the integral term is NEGATIVE and it
+      is i_min, the seemingly downward clamp, that bounds how hard the
+      lift can push UP. Sized the intuitive way round, with i_min small,
+      the carriage was measured to stop and hold 15.7 mm short of an
+      0.80 m target, because the integral was allowed only 200 N of the
+      882 N the assembly weighs and the rest had to come out of position
+      error. The pairing below is the corrected one.
+
+      p_gain is large for the reason a lift needs it: the last centimetre
+      of an approach is where the proportional term has to overcome the
+      whole weight to stop the carriage, and a soft gain buys that
+      stopping distance back in overshoot.
+    -->
+    <plugin filename="gz-sim-joint-position-controller-system"
+            name="gz::sim::systems::JointPositionController">
+      <joint_name>mast_joint</joint_name>
+      <topic>/forklift/gz/actuator/fork_cmd</topic>
+      <p_gain>60000.0</p_gain>
+      <i_gain>2500.0</i_gain>
+      <d_gain>9000.0</d_gain>
+      <i_max>200.0</i_max>
+      <i_min>-1500.0</i_min>
+      <cmd_max>3000.0</cmd_max>
+      <cmd_min>-100.0</cmd_min>
+    </plugin>
+
+    <!--
+      THE IMU SYSTEM, CARRIED BY THE MODEL AND NOT BY THE WORLD.
+
+      gz's IMU sensor produces nothing unless some system creates it, the
+      same way a gpu_lidar produces nothing unless gz-sim-sensors-system
+      is loaded. The usual placement for BOTH is the world file - and for
+      the rendering sensors it has to be the world, because they need a
+      render engine the world owns.
+
+      The IMU system does NOT: it scans the whole entity-component
+      manager for Imu components regardless of which entity it was
+      attached to, so a model-level declaration serves this model. That
+      was measured, not assumed - EVIDENCE_ODOMETRY.md section 3 records
+      the same model spawned into a world with no IMU system of its own,
+      publishing /forklift/gz/imu.
+
+      This is worth the two lines because of what it avoids: no world
+      file has to be edited to give this vehicle an IMU, so the sensor
+      travels with the model into sim/worlds/forklift_arena.sdf,
+      sim/worlds/warehouse.sdf and any world a later gate adds. The
+      vehicle carries its own instruments. Contrast the four scanners,
+      which go silent in a world that forgot gz-sim-sensors-system and
+      have needed that noted in every launch file since.
+    -->
+    <plugin filename="gz-sim-imu-system"
+            name="gz::sim::systems::Imu">
+    </plugin>
+
+    <!--
+      Joint feedback. Position and rate of the three driven joints.
+
+      This system has NO rate parameter and publishes once per physics
+      iteration; an <update_rate> child was tried and measured to change
+      nothing. The rate is therefore the world's, about 493 Hz in a 500 Hz
+      world, and a world that bridges this topic into ROS is choosing that
+      traffic. The vehicle nodes do not need it: they consume it at their
+      own timer rate and drop the rest.
+    -->
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>/forklift/gz/joint_state</topic>
+      <joint_name>steer_joint</joint_name>
+      <joint_name>drive_wheel_joint</joint_name>
+      <joint_name>mast_joint</joint_name>
+    </plugin>
+
+    <!--
+      THE SAFE-SPEED ENCODER: ONE SHAFT, TWO READING CHANNELS.
+
+      The two systems below read the SAME joint, drive_wheel_joint, and
+      publish it on two separate topics. That is the whole of what this
+      file contributes to the vehicle's speed measurement, and the shape
+      is deliberate: it models a safe encoder, which is ONE device on ONE
+      shaft carrying TWO reading channels whose values an external safe
+      control cross-compares.
+
+      ITS HONEST NAME IS A SINGLE-CHANNEL TESTED SYSTEM, and that name is
+      used in every artefact that describes it (config.yaml safe_speed,
+      scripts/safe_speed_channels.py, EVIDENCE_ODOMETRY.md section 14).
+      One shaft, one measured quantity, two readings of it. Calling the
+      arrangement "two-channel" would claim a redundancy it does not
+      have: both readings die together with the shaft they read, which
+      is exactly why the design carries a separate motion-present
+      observation beside them (see below).
+
+      WHY TWO PLUGIN INSTANCES AND NOT ONE TOPIC READ TWICE. A subscriber
+      that reads one topic twice has one reading path, and a fault in it
+      is common to both copies - the cross-comparison would then compare
+      a number with itself and pass for ever. Two instances give two
+      publishers, two message streams and two subscriptions, so the
+      failure of one read path is visible to the comparison. What the
+      instances do NOT give is independent noise: they publish the same
+      simulator value, because it IS the same shaft. The independence
+      that makes a cross-comparison mean anything lives in the reading
+      heads, and the reading heads are modelled in
+      scripts/safe_speed_channels.py - each with its own mounting phase
+      on the count grid and its own read jitter. This file supplies the
+      shaft; the node supplies the heads.
+
+      WHAT THIS IS NOT. It is not a safe measurement, it has no
+      integrity, no diagnostic coverage and no fault reaction, and no PL,
+      Category, SIL or PFH is claimed for it or for anything downstream
+      of it. The readings reach the F-program as STANDARD DATA over the
+      process path, which is a stand-in for a safe measurement channel
+      and is labelled one wherever it appears. The same rule as the
+      scanners: what this file supplies is the GEOMETRY and the SIGNAL of
+      a real installation, never a safety property.
+
+      THE MOTION-PRESENT CHECK IS NOT IN THIS FILE, AND IT IS A STAND-IN.
+      Two readings of one shaft lie together if the shaft or its coupling
+      fails, so a claimed zero speed is corroborated against an
+      observation that does not pass through the shaft at all. Real
+      systems close that hole with a MECHANICAL FAULT EXCLUSION argued on
+      the coupling - a construction argument, not a monitored signal.
+      This project has no such argument available, so it substitutes an
+      observation and says so. The observation is derived from the
+      navigation lidar by scripts/safe_speed_channels.py, and it is
+      labelled a stand-in in every artefact that carries it.
+
+      ADDITIVE, AND MEASURED TO BE SO (m5-48). These two systems are
+      read-only: JointStatePublisher publishes joint state and writes
+      nothing the physics reads. No link, joint, inertial, geometry,
+      sensor, gain, limit or existing topic changed with them, and the
+      joint-position and joint-velocity components they require are
+      already created for this same joint by the system above, so not
+      even a component is added. The one class of committed figure an
+      additive edit can still move is anything derived from machine
+      load, so that was measured rather than argued: three alternating
+      60 s captures of the simulator's own real-time factor, with and
+      without these two systems, gave mean RTF 0.9903 both ways
+      (EVIDENCE_ODOMETRY.md section 14.2).
+    -->
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>/forklift/gz/drive_speed/read_a</topic>
+      <joint_name>drive_wheel_joint</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-joint-state-publisher-system"
+            name="gz::sim::systems::JointStatePublisher">
+      <topic>/forklift/gz/drive_speed/read_b</topic>
+      <joint_name>drive_wheel_joint</joint_name>
+    </plugin>
+
+    <!--
+      GROUND-TRUTH odometry, and - FOR NOW - the odom -> base_link
+      transform. Read the two-phase note before using either.
+
+      THIS IS GROUND TRUTH, NOT A WHEEL ESTIMATE. This system reads the
+      model's pose out of the simulator, so the pose it reports and the
+      transform it publishes carry NO odometry error: no wheel slip, no
+      encoder quantisation, no unbounded heading drift. A real vehicle's
+      odom -> base_link drifts without bound; this one does not, ever.
+
+      TWO PHASES, AND THIS FILE IS PHASE ONE.
+
+        Phase 1, now (M5, brief m5-07b). Nothing on this vehicle can
+        estimate its own motion yet, and SLAM cannot start without a
+        motion estimate, so the ground-truth transform is bridged onto
+        /tf as an INTERIM SOURCE. It is a scaffold, not the answer.
+
+        Phase 2, next (owner ruling, 2026-07-31). An IMU joins this
+        model, wheel odometry is computed from the joint states with
+        slip and noise modelled, and an EKF fuses the two. THE EKF THEN
+        OWNS odom -> base_link. This system keeps publishing, and its
+        role becomes permanent and different: it is the REFERENCE that
+        localisation error is measured AGAINST, and it stops being an
+        input to anything that navigates.
+
+      WHY PHASE 2 IS NOT OPTIONAL. With ground-truth odometry the
+      degenerate aisle stretches of the arena cannot bite, AMCL has
+      nothing to correct, and any "error against ground truth" figure is
+      circular - AMCL scored against its own input. Ground truth is only
+      a reference while something ELSE is the estimate.
+
+      THE SEAM, so the change is a switch and not a rewrite. The gz
+      transform topic is named <tf_topic> below and carried onto /tf by
+      one dedicated bridge node in launch/vehicle.launch.py, behind the
+      launch argument ground_truth_tf. When the EKF lands it is started
+      with ground_truth_tf:=false: this system keeps publishing its
+      topics, nothing here is deleted, and the ONLY publisher of
+      odom -> base_link becomes the EKF. Nothing else in this file
+      changes.
+
+      ONE OWNER PER DATUM AT ANY TIME (invariant 10). In phase 1 the
+      transform is published by THIS system, from the same pose that
+      fills the odometry message, rather than by a node that recomputes
+      a pose from joint states - two sources would be two answers to one
+      question with nothing to say which is right. In phase 2 that one
+      owner is the EKF, and the switch above is what makes the handover
+      exclusive rather than additive.
+
+      WHY THE TOPIC IS NAMED HERE, AND WHY THE NAME SAYS "ground_truth".
+      This system publishes the transform whether or not <tf_topic> is
+      present; without it the name is the MODEL-SCOPED default
+      /model/<spawn name>/pose, which changes when the model is spawned
+      under another name - exactly what the COMMAND TOPICS note above
+      refuses for every other system in this file. Measured before this
+      element was added: the default topic was /model/Forklift/pose,
+      gz.msgs.Pose_V, carrying frame_id "forklift/odom" and
+      child_frame_id "forklift/base_link". The name carries
+      ground_truth because after phase 2 there are TWO pose streams on
+      this vehicle, and a reader must never have to guess which one is
+      the reference.
+
+      The frames are the model's own <odom_frame> and <robot_base_frame>,
+      unscoped and unaltered, so the transform lands on the same tree the
+      sensor frames of scripts/sensor_tf.py hang from - and so that the
+      EKF can take the same edge over without renaming a frame.
+    -->
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <odom_topic>/forklift/gz/odom</odom_topic>
+      <tf_topic>/forklift/gz/tf_ground_truth</tf_topic>
+      <odom_frame>forklift/odom</odom_frame>
+      <robot_base_frame>forklift/base_link</robot_base_frame>
+      <dimensions>2</dimensions>
+      <odom_publish_frequency>20</odom_publish_frequency>
+    </plugin>
+
+  </model>
+</sdf>
