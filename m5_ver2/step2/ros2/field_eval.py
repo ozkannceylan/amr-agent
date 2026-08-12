@@ -48,6 +48,37 @@ PUBLISH_HZ = 10.0
 FIELDS_TOPIC = "/forklift/safety/fields"
 SENSORS = ("back", "left", "right")
 SCAN_TOPIC = "/forklift/gz/safety_scanner_{}/measurement"
+
+# MUTED SECTORS: the rays that see the vehicle itself. Inclusive index
+# pairs into the 275-ray scan.
+#
+# A real microScan3 does not have this problem because its configured
+# field is a CONTOUR shaped around the vehicle. Step 2 evaluates a radius
+# (design section 4.1), so the equivalent has to be done here: blank the
+# angular sectors that are structure rather than surroundings. This is
+# the same thing a real integrator does when muting a sector at
+# commissioning, and it is not a workaround for a modelling error - the
+# owner's own drawing shows the left and right fans notched where the
+# body blocks them.
+#
+# MEASURED, NOT ASSUMED, on the spawn pose in an empty aisle, taking every
+# ray returning under 1.2 m:
+#   back   idx   0.. 2 and 272..274   the drive wheel, at the fan's edges
+#   left   idx   7..65               the mast and carriage, inboard-forward
+#   right  idx 209..267              the mirror image of left
+# Widened by a few rays each side so a small mount change does not leak a
+# self-return into the minimum.
+#
+# THE COST, STATED: an obstacle inside a muted sector is invisible to that
+# device. The sectors point at the vehicle's own structure, so an obstacle
+# there is already unreachable - but this is the one place in Step 2 where
+# a real object could be ignored, and it is why the sectors are listed
+# explicitly rather than derived at runtime from "whatever looks close".
+SELF_MUTE = {
+    "back": ((0, 4), (270, 274)),
+    "left": ((5, 68),),
+    "right": ((206, 269),),
+}
 # ------------------------------------------------------------------
 
 
@@ -56,19 +87,31 @@ def fields_for_case(case):
     return FIELDS[case] if case in FIELDS else FIELDS[3]
 
 
-def min_range(ranges, range_max=RANGE_MAX_M):
+def min_range(ranges, range_max=RANGE_MAX_M, mute=()):
     """Nearest real return, with non-returns treated as the horizon.
 
     gz reports a no-return as inf and can report nan. A naive min() over
     [inf, inf] gives inf and over a list holding nan gives nan, and neither
     compares usefully against a threshold. Both become range_max first.
 
+    `mute` is a sequence of inclusive (start, end) index pairs pointing at
+    the vehicle's own structure - see SELF_MUTE. Those rays are dropped
+    before the minimum, because one ray grazing the mast would otherwise
+    hold the device in PROTECTIVE for ever.
+
     An EMPTY array is a broken device, not an empty room, so it returns 0.0
-    - the violated end of the scale.
+    - the violated end of the scale. A scan that is ENTIRELY muted returns
+    0.0 too, for the same reason: nothing was actually looked at.
     """
     if not len(ranges):
         return 0.0
-    finite = [r for r in ranges if math.isfinite(r)]
+    muted = set()
+    for lo, hi in mute:
+        muted.update(range(lo, hi + 1))
+    looked = [r for i, r in enumerate(ranges) if i not in muted]
+    if not looked:
+        return 0.0
+    finite = [r for r in looked if math.isfinite(r)]
     if not finite:
         return range_max
     return min(range_max, min(finite))
@@ -100,15 +143,18 @@ class Device:
         self.pf = self.wf = False      # starts violated, like a cold OSSD
         self.pfc = self.wfc = 0
         self.last_scan = None
+        self.d = 0.0                   # last MEASURED range, for the report
 
     def update(self, d, pf_th, wf_th, now):
         self.pf, self.pfc = field_step(d, self.pf, self.pfc, pf_th)
         self.wf, self.wfc = field_step(d, self.wf, self.wfc, wf_th)
         self.last_scan = now
+        self.d = d
 
     def go_violated(self):
         self.pf = self.wf = False
         self.pfc = self.wfc = 0
+        self.d = 0.0
 
 
 class FieldEval(Node):
@@ -148,13 +194,15 @@ class FieldEval(Node):
             if raw is None and status_contract.is_stale(
                     dev.last_scan, now, SCAN_STALE_S):
                 dev.go_violated()
-                d = 0.0
-            elif raw is None:
-                d = 0.0     # no new scan yet, but not stale: hold the latch
-            else:
-                d = min_range(raw)
-                dev.update(d, pf_th, wf_th, now)
-            report[name] = {"pf": dev.pf, "wf": dev.wf, "d": round(d, 3),
+            elif raw is not None:
+                dev.update(min_range(raw, RANGE_MAX_M,
+                                     SELF_MUTE.get(name, ())),
+                           pf_th, wf_th, now)
+            # No new scan but not yet stale: hold the latch AND the last
+            # measured range. Reporting 0.0 here would print an intrusion
+            # beside a `pf` that says clear - a report that contradicts
+            # itself is worse than a stale number.
+            report[name] = {"pf": dev.pf, "wf": dev.wf, "d": round(dev.d, 3),
                             "level": level(dev.pf, dev.wf)}
             self.ranges[name] = None
         self.pub.publish(String(data=json.dumps(report)))

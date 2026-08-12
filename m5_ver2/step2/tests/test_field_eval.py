@@ -75,3 +75,23 @@ def test_level_ranks_protective_above_warning():
     assert field_eval.level(True, False) == "WARNING"
     assert field_eval.level(False, True) == "PROTECTIVE"
     assert field_eval.level(False, False) == "PROTECTIVE"
+
+
+def test_muted_rays_are_dropped_before_the_minimum():
+    # One ray grazing the mast would otherwise hold the device in
+    # PROTECTIVE for ever. Index 1 is muted, so 5.0 wins over 0.11.
+    assert field_eval.min_range([9.0, 0.11, 5.0], MAXR, ((1, 1),)) == 5.0
+
+
+def test_muting_does_not_hide_a_real_return_outside_the_sector():
+    assert field_eval.min_range([9.0, 0.11, 0.9], MAXR, ((1, 1),)) == 0.9
+
+
+def test_an_entirely_muted_scan_is_a_violation():
+    # Nothing was actually looked at, so it is not a clear horizon.
+    assert field_eval.min_range([9.0, 9.0], MAXR, ((0, 1),)) == 0.0
+
+
+def test_the_mute_table_covers_every_sensor():
+    for name in field_eval.SENSORS:
+        assert name in field_eval.SELF_MUTE
