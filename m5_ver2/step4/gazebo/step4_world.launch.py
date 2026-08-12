@@ -36,7 +36,14 @@ from launch_ros.actions import Node
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.normpath(os.path.join(_HERE, "..", "..", ".."))
 
-_WORLD = os.path.join(_REPO, "sim", "worlds", "warehouse.sdf")
+# STEP 4'S OWN WORLD, NOT sim/worlds/warehouse.sdf. Owner instruction
+# 2026-08-12: the source world's aisles trip the protective field while
+# driving. warehouse_ver2.sdf is this directory's open relayout (no
+# building columns, no row C, 6.50 m main aisle); the source world stays
+# untouched, exactly as forklift_ver2/model.sdf leaves agv/'s model alone.
+# The world NAME inside the file stays "warehouse", so _WORLD_NAME and
+# every /world/warehouse/* topic hold.
+_WORLD = os.path.join(_HERE, "warehouse_ver2.sdf")
 # STEP 2'S OWN MODEL, NOT agv/forklift/model.sdf. It carries the three
 # microScan3 scanners; agv/'s carries the old front/rear pair at 5.5 m and
 # is never modified. The path is local to this directory, so the guard
@@ -167,8 +174,30 @@ def generate_launch_description():
     #   this window tear down the server, the bridge and the contactor
     #   underneath a running e-stop test. One process, one command line,
     #   and `gz sim` in step4.sh's PATTERNS nominates it.
+    #
+    # THE GUI WAITS FOR THE SCANNERS, OR THE BEAMS ANCHOR AT THE ORIGIN.
+    #   Measured 2026-08-12 on gz-sim 8.11.0. GuiRunner discards every
+    #   /world/*/state message that arrives before its initial state_async
+    #   response is processed (GuiRunner.cc:283), and the SensorTopic
+    #   components VisualizeLidar anchors on (VisualizeLidar.cc:271) are
+    #   created by the render thread a beat AFTER the spawn. A GUI started
+    #   with the server therefore snapshots the world without SensorTopic,
+    #   the one-time change that would deliver it lands in the discard
+    #   window, nothing ever rebroadcasts it, and the plugin's entity
+    #   lookup fails for the life of the GUI ("could not be found",
+    #   printed once) - the fan then draws at the visual's default pose,
+    #   the world origin, and no refresh recovers it. Gating the client on
+    #   the back scanner's topic being advertised puts the sensors - and
+    #   their SensorTopic components, created before the advert - inside
+    #   the GUI's initial snapshot, which a late GUI receives in full.
+    #   m5-73's world_pose repair aimed at a field this plugin never
+    #   reads; the anchor is the ECM lookup above, and ordering is what
+    #   fixes it.
     ld.add_action(ExecuteProcess(
-        cmd=["gz", "sim", "-g", "-v", "2"],
+        cmd=["bash", "-c",
+             "until gz topic -l 2>/dev/null | grep -qF '{0}'; "
+             "do sleep 0.5; done; sleep 2; "
+             "exec gz sim -g -v 2".format(_SCAN_TOPICS[0])],
         name="gz_gui",
         output="screen",
         condition=IfCondition(LaunchConfiguration("gui")),
