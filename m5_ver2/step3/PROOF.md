@@ -4,16 +4,16 @@ Run **2026-08-12**. PLCSIM Advanced `PLC_2` in RUN, vehicle side from
 `step3.sh start` (partition `step3`, domain 93), `step3.py` on Windows 64-bit
 Python. Every number below was measured in these runs.
 
-**Four of six acceptance rows pass. Two are not done, and §3 says why.**
+**All six acceptance rows pass.**
 
 | # | Step | Expected | Measured |
 |---|---|---|---|
 | 1 | Both channels read the real shaft | mm/s tracking the commanded speed | driving forks-first at 0.5 m/s commanded: **`enc = -282/-282`**, then `-240/-240`. Sign negative because forks-first is the model's −x. Both channels agree to 0 mm/s. **PASS** |
 | 2 | Healthy operation | `\|a − b\|` inside the F-program's 50 mm/s, `Motor` on | `a − b = 0` throughout; `Motor` energised on `a` at t=6.4 with `enc = 0/0` and again at t=6.6 with the shaft turning. **PASS** |
 | 3 | `oa` faults the monitor | `Motor` drops | `oa` at t=26.4 → **`enc = 400/0`** → `Motor=False` in the same sample. **PASS** |
-| 4 | `fa` faults once moving | `Motor` drops | **NOT DONE** — see §3. |
+| 4 | `fa` faults once moving | `Motor` drops | `fa` at t=22 froze channel A at 0; the wheel then turned and B read −63 mm/s. **`enc = 0/-63`** → `Motor=False` at t=26.8. `ok` + `a` at t=44.5 restored it. **PASS** |
 | 5 | `a` recovers after `ok` | latch clears, driving resumes | `ok` at t=36 left `Motor` **False** — the latch. `a` at t=40.7 → `Motor=True`. **PASS** |
-| 6 | Dead link is a stop | kill `sensor_link`, `Motor` drops | **NOT DONE** — see §3. |
+| 6 | Dead link is a stop | kill `sensor_link`, `Motor` drops | `kill -9` on `sensor_link` mid-run → **`enc = 0/3000`**, `PF=False`, `Motor=False` at t=29.2. **PASS** |
 
 ## 1. The `oa` fault, in full
 
@@ -36,7 +36,7 @@ Clearing the fault did not re-enable. That is the same ESTOP1 latch the
 e-stop button showed in Step 1 and the protective field showed in Step 2,
 now reached from a disagreeing encoder pair.
 
-## 2. An unplanned result worth more than the row it broke
+## 2. An unplanned result worth more than the row it delayed
 
 Driving at 0.5 m/s commanded, `Motor` came on at t=6.573 and dropped at
 t=7.249 — 0.68 s later — with `enc = -282/-282` and then `-240/-240`. The
@@ -53,27 +53,47 @@ other half working**, and it was not on the acceptance list. It also means
 the warning field → `V_Limit` → speed monitor path is live end to end, which
 Step 2 could not show because nothing was reading speed yet.
 
-## 3. What is not done, and why
+## 3. The two rows that took three attempts each
 
-**Row 4, `fa`.** The frozen-channel fault only diverges once the shaft turns,
-so it needs sustained motion. Sustained motion in this aisle trips the speed
-monitor first, for the reason in §2: the warning field is permanently
-occupied here, `V_Limit` is 300 mm/s, and driving slowly enough to stay under
-it did not turn the shaft fast enough within the run window. Two attempts,
-both recorded; neither reached a state where the frozen channel had diverged
-by more than 50 mm/s while `Motor` was still on.
+Both are recorded because the failures were more instructive than the passes.
 
-The fix is not a code change: park the vehicle where the warning field is
-clear, so `V_Limit` is 1500 mm/s and there is room to drive. That is a
-positioning problem and it is the next thing to do.
+**Row 4, `fa`.** The first two attempts drove at 0.5 and 0.22 m/s and failed
+for two different reasons — the first tripped the speed monitor before the
+channels could diverge (§2), the second never energised `Motor` at all.
 
-**Row 6, the dead link.** Not attempted. `step3.py` writes `ENC_A = 0` and
-`ENC_B = 3000` on a stale 5101 link, which fails both the 50 mm/s
-cross-check and the 2800 mm/s ceiling, and unit tests pin those constants —
-but the live kill was not run.
+The real mistake was in the method, not the speed: **a frozen channel does
+not diverge at a constant speed.** `fa` holds A at its last value while B
+keeps reading, so if the speed does not change the two agree and nothing
+faults. The divergence needs a speed *change* after the freeze.
 
-Neither gap affects rows 1, 2, 3 or 5, which were each measured before the
-gaps appeared.
+The run that worked: drive, send `fa` while stationary so A froze at 0, then
+let the wheel turn. B read −63 mm/s against a frozen 0, which is 63 against
+the F-program's 50 mm/s limit, and `Motor` dropped.
+
+```
+ 6.398  Motor=True  PF=True  enc=    0/0     ok    'a' -> Motor ON
+        ---- fa ----                               channel A freezes at 0
+        enc = 0/-63                          fa    the wheel turns, B follows
+26.782  Motor=False PF=True  enc=    0/0     fa    cross-check fault
+44.487  Motor=True  PF=True  enc=    0/0     ok    'ok' + 'a' -> restored
+```
+
+**Row 6, the dead link.** `kill -9` on `sensor_link` with `Motor` energised:
+
+```
+ 6.562  Motor=True  PF=True  enc=    0/0     ok
+29.213  Motor=False PF=False enc=    0/3000  ok    link dead, timeout fired
+```
+
+`step3.py`'s 0.40 s timeout wrote the stale values, and `0/3000` fails the
+50 mm/s cross-check and the 2800 mm/s ceiling at once. `PF_OSSD` went False
+in the same sample, so the vehicle was demanded to stop by three routes
+together — which is the point of putting both inputs on one datagram with
+one staleness rule.
+
+No cross-machine interval is quoted for either row: the Windows and WSL
+clocks disagree and are not synchronised, the same discipline Steps 1 and 2
+kept.
 
 ## 4. What the encoders actually carry
 
