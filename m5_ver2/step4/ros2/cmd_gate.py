@@ -48,7 +48,8 @@ from rclpy.node import Node
 from std_msgs.msg import Float64, String
 
 from status_contract import (
-    STATUS_STALE_S, STATUS_TOPIC, is_stale, parse_status)
+    STATUS_STALE_S, STATUS_TOPIC, V_LIMIT_CREEP_MM_S, is_stale,
+    parse_status, speed_limit_mm_s)
 
 # ----------------------------- CONFIG -----------------------------
 ZERO_HZ = 10.0
@@ -133,7 +134,7 @@ class CmdGate(Node):
         self.motor_ok = False
         # Until the PLC says otherwise, the permission is the creep
         # ceiling. A gate that has not heard cannot grant full speed.
-        self.v_limit = status_contract.V_LIMIT_CREEP_MM_S
+        self.v_limit = V_LIMIT_CREEP_MM_S
         self.last_status_rx = None
         self.was_live = False
         self.cmd = (0.0, 0.0)
@@ -148,8 +149,8 @@ class CmdGate(Node):
     def cb_status(self, msg):
         self.last_status_rx = time.monotonic()
         self.motor_ok = motor_from_status(msg.data)
-        parsed = status_contract.parse_status(msg.data.encode())
-        self.v_limit = status_contract.speed_limit_mm_s(
+        parsed = parse_status(msg.data.encode())
+        self.v_limit = speed_limit_mm_s(
             parsed.get("v_limit") if parsed else None)
 
     def enabled(self):

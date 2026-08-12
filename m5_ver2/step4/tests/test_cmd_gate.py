@@ -163,3 +163,18 @@ def test_a_command_above_the_creep_ceiling_is_clamped_not_refused():
 def test_the_creep_ceiling_still_allows_reverse():
     traction, _ = cmd_gate.gated_command(-1.5, 0.0, True, 0.3, STEER_MAX)
     assert traction == -0.3
+
+
+def test_every_name_cmd_gate_uses_from_the_contract_is_imported():
+    """Guards the wiring, which the pure-function tests cannot see.
+
+    Step 4's first live start died with NameError: status_contract is not
+    defined - cmd_gate imports names FROM the contract rather than the
+    module, and a patch written against the module form compiled fine and
+    passed every test, because nothing here constructs the node. Importing
+    the module is the cheapest check that its module-level names resolve.
+    """
+    import cmd_gate as m
+    for name in ("V_LIMIT_CREEP_MM_S", "speed_limit_mm_s", "parse_status",
+                 "is_stale", "STATUS_TOPIC", "STATUS_STALE_S"):
+        assert hasattr(m, name), name
