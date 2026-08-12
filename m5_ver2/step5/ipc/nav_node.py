@@ -11,9 +11,11 @@ rather than as a clear road. The safe direction, same as every Step 4
 display rule.
 """
 import math
+import os
 import time
 
 import rclpy
+import yaml
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
@@ -25,14 +27,29 @@ import follower
 import nav_core
 from status_contract import (
     AUTO_CMD_TOPIC, AUTO_GOAL_TOPIC, AUTO_STATE_TOPIC, MODE_TOPIC,
-    NAV_SCAN_TOPIC, ODOM_TOPIC, STATUS_STALE_S, STATUS_TOPIC, is_stale,
-    parse_status, speed_limit_mm_s)
+    STATUS_STALE_S, STATUS_TOPIC, is_stale, parse_status, speed_limit_mm_s)
 
 # ----------------------------- CONFIG -----------------------------
 TICK_HZ = 20.0
 STATE_EVERY = 2          # /auto/state every 2nd tick -> 10 Hz
 SENSOR_STALE_S = 0.5     # odom at 20 Hz, scan at 10 Hz: 0.5 s is dead
 # ------------------------------------------------------------------
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+CONFIG_YAML = os.path.normpath(
+    os.path.join(_HERE, "..", "..", "..", "agv", "forklift", "config.yaml"))
+
+
+def load_config(path=CONFIG_YAML):
+    """The two gz source names come from the file that owns them.
+
+    topics.gz_odom and topics.gz_scan_nav, read the way encoder_link.py
+    reads the drive-speed pair. The launch file bridges them from the
+    same keys; a literal here would give one name two sources, and a
+    rename would then break the bridge and this subscriber differently.
+    """
+    with open(path, "r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
 
 
 def yaw_from_quat(z, w):
@@ -43,6 +60,7 @@ class NavNode(Node):
 
     def __init__(self):
         super().__init__("nav_node")
+        topics = load_config()["topics"]
         self.core = nav_core.NavCore()
         self.pose = None
         self.pose_rx = None
@@ -58,8 +76,10 @@ class NavNode(Node):
             depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, MODE_TOPIC, self.cb_mode, latched)
         self.create_subscription(String, AUTO_GOAL_TOPIC, self.cb_goal, 10)
-        self.create_subscription(Odometry, ODOM_TOPIC, self.cb_odom, 10)
-        self.create_subscription(LaserScan, NAV_SCAN_TOPIC, self.cb_scan, 10)
+        self.create_subscription(
+            Odometry, topics["gz_odom"], self.cb_odom, 10)
+        self.create_subscription(
+            LaserScan, topics["gz_scan_nav"], self.cb_scan, 10)
         self.create_subscription(String, STATUS_TOPIC, self.cb_status, 10)
         self.create_timer(1.0 / TICK_HZ, self.tick)
 

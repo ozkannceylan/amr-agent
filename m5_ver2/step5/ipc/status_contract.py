@@ -65,9 +65,19 @@ SCAN_TOPIC = "/forklift/gz/safety_scanner_{}/measurement"
 
 # STEP 5'S NAMES, HERE FOR THE SAME REASON. /hmi/cmd_vel moves in from
 # cmd_gate.py and hmi_node.py so the mux does not become a third
-# spelling. ODOM_TOPIC and NAV_SCAN_TOPIC are model.sdf's own explicit
-# topic names (OdometryPublisher <odom_topic>, nav_lidar <topic>);
-# config.yaml has never heard of either, so they live here.
+# spelling. Every name below is one config.yaml has never heard of: the
+# mux seam and the autonomy channels are this step's own inventions and
+# have no other home.
+#
+# THE TWO GZ SOURCE NAMES ARE NOT HERE, AND THAT IS THE POINT. They were,
+# briefly, on the reasoning that model.sdf's <odom_topic> and the nav
+# lidar's <topic> are model.sdf's own and config.yaml had never heard of
+# them. It HAS: topics.gz_odom and topics.gz_scan_nav
+# (agv/forklift/config.yaml), spelled exactly as model.sdf spells them.
+# Owner ruling 2026-08-12, applying m5_ver2/CLAUDE.md's house rule - every
+# gz and ROS topic name config.yaml owns is READ from config.yaml. A
+# second home would have been the drive-speed trap again: rename the key
+# and the bridge and the subscriber break differently.
 HMI_CMD_TOPIC = "/hmi/cmd_vel"
 VEHICLE_CMD_TOPIC = "/vehicle/cmd_vel"   # cmd_mux -> cmd_gate, the one seam
 AUTO_CMD_TOPIC = "/auto/cmd_vel"         # nav_node -> cmd_mux
@@ -76,8 +86,6 @@ AUTO_STATE_TOPIC = "/auto/state"         # nav_node -> HMI, JSON
 MODE_TOPIC = "/hmi/mode"                 # HMI -> mux & nav, latched
 MODE_TELEOP = "teleop"
 MODE_AUTO = "auto"
-ODOM_TOPIC = "/forklift/gz/odom"
-NAV_SCAN_TOPIC = "/forklift/gz/scan_nav"
 
 # The ROS-side timeout on /plc/status: how long a consumer keeps
 # believing the last thing the PLC said. ONE constant, because the

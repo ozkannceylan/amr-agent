@@ -127,11 +127,15 @@ _BRIDGE_ARGS += [
 # consumes both: nav_node navigates on the ground-truth odom (spec:
 # owner ruling, the lidar guards rather than localises) and guards on
 # the nav lidar. JOINT STATES REMAIN UNBRIDGED - still no consumer.
+# These names ARE in config.yaml (topics.gz_odom, topics.gz_scan_nav), so
+# they come from there, exactly as the drive-shaft pair below does. They
+# spent one commit in status_contract.py instead, on the belief that
+# config.yaml had never heard of them; owner ruling 2026-08-12 moved them
+# back to the house rule, and nav_node.py now reads the same two keys.
 _BRIDGE_ARGS += [
-    "{}@nav_msgs/msg/Odometry[gz.msgs.Odometry".format(
-        status_contract.ODOM_TOPIC),
+    "{}@nav_msgs/msg/Odometry[gz.msgs.Odometry".format(_TOPICS["gz_odom"]),
     "{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan".format(
-        status_contract.NAV_SCAN_TOPIC),
+        _TOPICS["gz_scan_nav"]),
 ]
 
 # The drive shaft's two reading channels, gz -> ROS. Both are
