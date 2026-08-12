@@ -1,15 +1,21 @@
-"""sensor_link.py - the Back scanner's verdict, to the PLC writer.
+"""sensor_link.py - all three scanners' verdicts, to the PLC writer.
 
-Subscribes /forklift/safety/fields and sends the BACK device's (pf, wf) to
-Windows over UDP 5101, where step4.py writes PF_OSSD and WF_Clear.
+Subscribes /forklift/safety/fields and sends the back, right and left
+devices' (pf, wf) to Windows over UDP 5101, where step4.py writes PF_OSSD,
+WF_Clear and their _right/_left counterparts.
 
-ONLY THE BACK SENSOR. The F-PLC has one sensor input configured, so left and
-right are HMI-only in this step. That is the owner's constraint, not a
-simplification, and this file is where it is enforced.
+ALL THREE SENSORS SINCE 2026-08-12. Through Step 4's build the F-PLC had
+one sensor input configured and this file enforced back-only; on that date
+the owner added PF_OSSD_right/left and WF_Clear_right/left to the F-DI and
+their ESTOP1 networks to the safety program, so right and left stop being
+HMI-only here. ALL OR NOTHING: a report missing ANY device sends no
+datagram, because pairing fresh back verdicts with invented side verdicts
+would need a second staleness rule on step4.py's side of the wire.
 
-SENDING NOTHING IS THE SAFE FAILURE. An unparseable report, a missing back
-entry or a non-boolean verdict all send no datagram, and step4.py's own
-timeout then writes both inputs False. This file never invents a verdict.
+SENDING NOTHING IS THE SAFE FAILURE. An unparseable report, a missing
+device entry or a non-boolean verdict all send no datagram, and step4.py's
+own timeout then writes all six inputs False. This file never invents a
+verdict.
 
 Usage (after sourcing /opt/ros/jazzy/setup.bash):
   python3 m5_ver2/step4/ros2/sensor_link.py
@@ -86,29 +92,37 @@ def parse_encoders(encoders_json):
 
 
 def payload(fields_json, encoders_json):
-    """The 5101 wire format, or None if either half cannot be trusted.
+    """The 5101 wire format, or None if any part cannot be trusted.
 
-    ONE DATAGRAM CARRIES BOTH so step4.py has one staleness rule rather
-    than two, and there is no state where the field verdict is fresh and
-    the encoders are not.
+    ONE DATAGRAM CARRIES EVERYTHING so step4.py has one staleness rule
+    rather than several, and there is no state where one device's verdict
+    is fresh and another's is not. Back keeps the bare "pf"/"wf" keys the
+    wire always had; right and left carry the same suffix their PLC tags
+    do.
     """
     try:
         report = json.loads(fields_json)
     except (ValueError, TypeError):
         return None
-    back = report.get("back") if isinstance(report, dict) else None
-    if not isinstance(back, dict):
+    if not isinstance(report, dict):
         return None
-    if not isinstance(back.get("pf"), bool):
-        return None
-    if not isinstance(back.get("wf"), bool):
-        return None
+    out = {}
+    for name, suffix in (("back", ""), ("right", "_right"),
+                         ("left", "_left")):
+        dev = report.get(name)
+        if not isinstance(dev, dict):
+            return None
+        if not isinstance(dev.get("pf"), bool):
+            return None
+        if not isinstance(dev.get("wf"), bool):
+            return None
+        out["pf" + suffix] = dev["pf"]
+        out["wf" + suffix] = dev["wf"]
     enc = parse_encoders(encoders_json)
     if enc is None:
         return None
-    return json.dumps({"pf": back["pf"], "wf": back["wf"],
-                       "enc_a": enc[0], "enc_b": enc[1],
-                       "ts": time.monotonic()}).encode()
+    out.update(enc_a=enc[0], enc_b=enc[1], ts=time.monotonic())
+    return json.dumps(out).encode()
 
 
 class SensorLink(Node):
@@ -125,7 +139,8 @@ class SensorLink(Node):
         self.create_subscription(
             String, status_contract.FIELDS_TOPIC, self.cb_fields, 10)
         self.get_logger().info(
-            "back scanner + encoders -> {}:{}".format(self.target, UDP_PORT))
+            "back+right+left scanners + encoders -> {}:{}".format(
+                self.target, UDP_PORT))
 
     def cb_encoders(self, msg):
         self.encoders = msg.data

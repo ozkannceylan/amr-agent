@@ -31,9 +31,17 @@ def test_the_stale_values_fail_both_f_program_checks():
 
 
 def test_parse_sensor_requires_integer_encoder_fields():
-    good = b'{"pf": true, "wf": true, "enc_a": 10, "enc_b": 12, "ts": 1.0}'
-    assert step4.parse_sensor(good)["enc_a"] == 10
-    for bad in (b'{"pf": true, "wf": true, "enc_a": "10", "enc_b": 12, "ts": 1.0}',
-                b'{"pf": true, "wf": true, "enc_a": true, "enc_b": 12, "ts": 1.0}',
-                b'{"pf": true, "wf": true, "enc_b": 12, "ts": 1.0}'):
-        assert step4.parse_sensor(bad) is None
+    import json
+
+    def packet(**enc):
+        msg = {key: True for key, _tag in step4.SENSOR_TAGS}
+        msg.update({"enc_a": 10, "enc_b": 12, "ts": 1.0})
+        msg.update(enc)
+        return json.dumps(msg).encode()
+
+    assert step4.parse_sensor(packet())["enc_a"] == 10
+    assert step4.parse_sensor(packet(enc_a="10")) is None
+    assert step4.parse_sensor(packet(enc_a=True)) is None
+    bad = json.loads(packet().decode())
+    del bad["enc_a"]
+    assert step4.parse_sensor(json.dumps(bad).encode()) is None

@@ -56,8 +56,12 @@ Facts about this simulation that are not obvious:
 | Tag         | Addr    | Type | Meaning                                           |
 |-------------|---------|------|---------------------------------------------------|
 | E-Stop      | %I0.0   | Bool | True = healthy (NC chain closed), False = pressed |
-| PF_OSSD     | %I0.1   | Bool | True = protective field clear (OSSD high)         |
-| WF_Clear    | %I0.2   | Bool | True = warning field clear                        |
+| PF_OSSD     | %I0.1   | Bool | True = protective field clear (OSSD high), BACK scanner |
+| WF_Clear    | %I0.2   | Bool | True = warning field clear, BACK scanner          |
+| PF_OSSD_right | %I0.3 | Bool | True = RIGHT protective field clear (added 2026-08-12) |
+| WF_Clear_right | %I0.4 | Bool | True = RIGHT warning field clear (added 2026-08-12) |
+| PF_OSSD_left | %I0.5  | Bool | True = LEFT protective field clear (added 2026-08-12) |
+| WF_Clear_left | %I0.6  | Bool | True = LEFT warning field clear (added 2026-08-12) |
 | Acknowledge | %I15.0  | Bool | Reset button, rising edge required                |
 | ENC_A       | %IW100  | Int  | Encoder channel A, mm/s                           |
 | ENC_B       | %IW102  | Int  | Encoder channel B, mm/s                           |
@@ -71,6 +75,13 @@ Facts about this simulation that are not obvious:
 - Three ESTOP1 instances: e-stop button, protective field, speed/encoder
   monitor (cross-check `|ENC_A - ENC_B| > 50` → fault; ceiling 2800 mm/s).
   `Motor` is the AND of all three enables.
+- **2026-08-12: the owner added ESTOP1 instances for the right and left
+  scanners** (`PF_OSSD_right` → `#pf_right`, `PF_OSSD_left` → `#pf_left`)
+  and configured `WF_Clear_right`/`WF_Clear_left` on the F-DI. How they
+  compose into `Motor` and `V_Limit` is TIA-side and not yet verified from
+  a live run. In the owner's screenshot both new instances show `ACK`
+  wired to a literal `false` (Instance_1 uses `"Acknowledge"`), which with
+  `ACK_NEC=true` would keep their Q False forever.
 - ESTOP1 semantics: **a demand latches.** The input returning to healthy does
   *not* re-enable; a rising edge on `Acknowledge` is required. `ACK_NEC=true`
   also means one `Acknowledge` is required after PLC startup before `Motor` can
@@ -94,4 +105,4 @@ Facts about this simulation that are not obvious:
 | Port | Direction | Payload | Step |
 |---|---|---|---|
 | 5100 | Windows -> WSL | {"estop_healthy","motor","case","ts"} | Step 1, `case` added in Step 2 |
-| 5101 | WSL -> Windows | {"pf","wf","enc_a","enc_b","ts"} | Step 2, encoders added in Step 3 |
+| 5101 | WSL -> Windows | {"pf","wf","pf_right","wf_right","pf_left","wf_left","enc_a","enc_b","ts"} | Step 2, encoders added in Step 3, right/left scanners added 2026-08-12 |

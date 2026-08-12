@@ -21,6 +21,31 @@ def test_status_payload_emits_real_json_booleans_not_strings():
     assert isinstance(msg["motor"], bool)
 
 
+def _sensor_msg(**overrides):
+    msg = {"pf": True, "wf": True, "pf_right": True, "wf_right": True,
+           "pf_left": True, "wf_left": False, "enc_a": 400, "enc_b": 402,
+           "ts": 1.0}
+    msg.update(overrides)
+    return json.dumps(msg).encode()
+
+
+def test_parse_sensor_accepts_the_nine_key_packet():
+    msg = step4.parse_sensor(_sensor_msg())
+    assert msg["pf_right"] is True and msg["wf_left"] is False
+
+
+def test_parse_sensor_rejects_a_packet_missing_a_side_verdict():
+    # The old five-key wire format must not pass: a sender that predates
+    # the right/left inputs would leave them at whatever this loop held.
+    old = {"pf": True, "wf": True, "enc_a": 400, "enc_b": 402, "ts": 1.0}
+    assert step4.parse_sensor(json.dumps(old).encode()) is None
+
+
+def test_parse_sensor_rejects_a_non_boolean_side_verdict():
+    assert step4.parse_sensor(_sensor_msg(pf_left=1)) is None
+    assert step4.parse_sensor(_sensor_msg(wf_right="clear")) is None
+
+
 def test_resolve_udp_target_honours_an_explicit_string():
     assert step4.resolve_udp_target("10.0.0.5") == "10.0.0.5"
 
