@@ -27,6 +27,7 @@ Copied from `m5_ver2/CLAUDE.md` and the spec — every task inherits them:
 - **Repo root:** WSL `/mnt/c/Users/ozkan/projects/amr-agent`, Windows `C:\Users\ozkan\projects\amr-agent`. Tests run in WSL: `source /opt/ros/jazzy/setup.bash && python3 -m pytest m5_ver2/step5/tests/ -q`. A **skip is a failure**.
 - **Signs:** forks-first forward = **negative** `linear.x`; `angular.z` is a steer **angle**; positive `angular.z` turns the vehicle toward the driver's right (driver faces the forks). Established by `knob_to_twist` in Step 1; locked by tests here.
 - **Commits:** one per task minimum, on the current branch (`m5-ver2-step1`), message style `feat(step5): ...` / `test(step5): ...`. Never commit `deploy/`, `logs/`, `__pycache__`.
+- **AMENDMENT (owner ruling 2026-08-12, after Task 8):** `agv/forklift/config.yaml:842-843` already owns `topics.gz_odom` and `topics.gz_scan_nav` — the plan's premise that config.yaml had never heard of these names was wrong. THE HOME IS config.yaml. `ODOM_TOPIC`/`NAV_SCAN_TOPIC` are removed from `status_contract.py`; `nav_node.py`, `hmi_node.py` and the launch file read the two names from config.yaml's `topics:` (the encoder_link pattern). Task text below predating this ruling shows the old constants; the ruling governs.
 
 ## File Structure (end state)
 
@@ -1781,9 +1782,11 @@ class MapPanel:
 - [ ] **Step 4: Wire `hmi/hmi_node.py`.** Edits, in file order:
   1. Imports: add `import json` (already there), and extend the contract
      import with `AUTO_GOAL_TOPIC, AUTO_STATE_TOPIC, MODE_TOPIC, MODE_AUTO,
-     MODE_TELEOP, ODOM_TOPIC`; add `from nav_msgs.msg import Odometry`,
+     MODE_TELEOP`; add `from nav_msgs.msg import Odometry`,
      `from rclpy.qos import DurabilityPolicy, QoSProfile`, and
-     `import map_panel`.
+     `import map_panel`. (Odom topic name comes from config.yaml per the
+     AMENDMENT in Global Constraints — `cfg["topics"]["gz_odom"]`, using
+     the `cfg` already loaded at the top of `__init__`.)
   2. Layout: in `__init__`, before the canvas is built, create
      `body = tk.Frame(root)`; `body.pack(fill="both", expand=True)`;
      `left = tk.Frame(body)`; `left.pack(side="left", anchor="n")` — and
@@ -1804,7 +1807,8 @@ class MapPanel:
             depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.pub_mode = self.create_publisher(String, MODE_TOPIC, latched)
         self.pub_goal = self.create_publisher(String, AUTO_GOAL_TOPIC, 10)
-        self.create_subscription(Odometry, ODOM_TOPIC, self.cb_odom, 10)
+        self.create_subscription(
+            Odometry, cfg["topics"]["gz_odom"], self.cb_odom, 10)
         self.create_subscription(
             String, AUTO_STATE_TOPIC, self.cb_auto_state, 10)
         self.mode = MODE_TELEOP
