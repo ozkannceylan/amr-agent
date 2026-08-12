@@ -37,8 +37,8 @@ from rclpy.node import Node
 from std_msgs.msg import String
 
 from status_contract import (
-    ENCODERS_TOPIC, FAILSAFE, FIELDS_TOPIC, STATUS_STALE_S, STATUS_TOPIC,
-    is_stale, parse_status, speed_limit_mm_s)
+    ENCODERS_TOPIC, FAILSAFE, FIELDS_TOPIC, HMI_CMD_TOPIC, STATUS_STALE_S,
+    STATUS_TOPIC, is_stale, parse_status, speed_limit_mm_s)
 
 # ----------------------------- CONFIG -----------------------------
 PUBLISH_HZ = 20.0
@@ -57,7 +57,6 @@ SPIN_MS = 4
 # including why an exact multiple of THIS file's tick is accepted, is at
 # that home.
 KNOB_RADIUS_PX = 100.0
-HMI_TOPIC = "/hmi/cmd_vel"
 LAMP_RED = "#c62828"
 LAMP_NEUTRAL = "#455a64"
 LAMP_GREEN = "#2e7d32"
@@ -183,7 +182,7 @@ class Hmi(Node):
         self.speed_max = float(cfg["limits"]["traction_speed_max_mps"])
         self.steer_max = float(cfg["model"]["steer_limit_rad"])
 
-        self.pub = self.create_publisher(Twist, HMI_TOPIC, 10)
+        self.pub = self.create_publisher(Twist, HMI_CMD_TOPIC, 10)
         self.create_subscription(String, STATUS_TOPIC, self.cb_status, 10)
         self.create_subscription(String, FIELDS_TOPIC, self.cb_fields, 10)
         self.create_subscription(

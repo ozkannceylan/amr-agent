@@ -1,8 +1,8 @@
 """cmd_gate.py - stage 1 of the stop: the command is zeroed.
 
-Forwards the HMI joystick to the vehicle's engineering-unit command topics
-while the safety program says Motor, and publishes continuous zeros when it
-does not.
+Forwards the mux's winner (`/vehicle/cmd_vel`) to the vehicle's
+engineering-unit command topics while the safety program says Motor, and
+publishes continuous zeros when it does not.
 
 CONTINUOUS ZEROS, NOT ONE ZERO
   A single zero leaves a simulated vehicle coasting: forklift_io.py
@@ -48,8 +48,8 @@ from rclpy.node import Node
 from std_msgs.msg import Float64, String
 
 from status_contract import (
-    STATUS_STALE_S, STATUS_TOPIC, V_LIMIT_CREEP_MM_S, is_stale,
-    parse_status, speed_limit_mm_s)
+    STATUS_STALE_S, STATUS_TOPIC, V_LIMIT_CREEP_MM_S, VEHICLE_CMD_TOPIC,
+    is_stale, parse_status, speed_limit_mm_s)
 
 # ----------------------------- CONFIG -----------------------------
 ZERO_HZ = 10.0
@@ -57,7 +57,6 @@ ZERO_HZ = 10.0
 # declared here: the screen and the vehicle have to stop trusting a
 # silent status at the same instant, so it has one home. Its derivation,
 # including why it is 2.5 of THIS file's ticks, is at that home.
-HMI_TOPIC = "/hmi/cmd_vel"
 # ------------------------------------------------------------------
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -140,7 +139,7 @@ class CmdGate(Node):
         self.cmd = (0.0, 0.0)
 
         self.create_subscription(String, STATUS_TOPIC, self.cb_status, 10)
-        self.create_subscription(Twist, HMI_TOPIC, self.cb_cmd, 10)
+        self.create_subscription(Twist, VEHICLE_CMD_TOPIC, self.cb_cmd, 10)
         self.create_timer(1.0 / ZERO_HZ, self.tick)
         self.get_logger().info(
             "speed limit {:.2f} m/s, steer stop +-{:.2f} rad".format(

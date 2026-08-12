@@ -45,7 +45,8 @@ GUI=true   # start's default; --headless sets it false. See the header.
 # plus a child and this line has to be revisited.
 PATTERNS=("gz sim" "step5_world.launch.py" "parameter_bridge" \
           "sto_contactor.py" "forklift_io.py" "plc_link.py" "cmd_gate.py" \
-          "hmi_node.py" "field_eval.py" "sensor_link.py" "encoder_link.py")
+          "cmd_mux.py" "hmi_node.py" "field_eval.py" "sensor_link.py" \
+          "encoder_link.py")
 
 # WHY OWNERSHIP IS DECIDED BY THE ENVIRONMENT, NOT BY THE COMMAND LINE
 #   vehicle.launch.py:738-754 starts sto_contactor.py and forklift_io.py with
@@ -198,6 +199,7 @@ start() {
     sleep 5
     spawn plc_link python3 "$STEP5/ipc/plc_link.py"
     spawn cmd_gate python3 "$STEP5/ipc/cmd_gate.py"
+    spawn cmd_mux python3 "$STEP5/ipc/cmd_mux.py"
     # field_eval BEFORE sensor_link, so the link never sends a verdict from
     # a device that has not been evaluated yet.
     spawn field_eval   python3 "$STEP5/ipc/field_eval.py"
@@ -216,7 +218,7 @@ start() {
     # the liveness test rather than kill -0, which cannot see that an
     # unreaped child is already a zombie.
     sleep 1
-    local i=0 names=(world plc_link cmd_gate field_eval encoder_link sensor_link hmi) bad=0
+    local i=0 names=(world plc_link cmd_gate cmd_mux field_eval encoder_link sensor_link hmi) bad=0
     while read -r pid; do
         recorded "$pid" || { bad=1
             echo "  WARNING: ${names[$i]} exited during startup, see $LOGDIR/${names[$i]}.log"; }
