@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
-# step1.sh - bring the Step 1 vehicle side up and down.  start | stop
+# step1.sh - bring the Step 1 vehicle side up and down.
+#   start [--headless] | stop
+#
+# start opens the Gazebo GUI client, because this script is the HUMAN entry
+# point and the point of Step 1 is watching the truck stop. The launch file's
+# own default is the other way round (gui:=false), so nothing automated that
+# calls ros2 launch directly gains a window. --headless restores that here,
+# and a run being TIMED should use it: rendering here is llvmpipe software
+# rasterisation (sim/setup/WSL_ENVIRONMENT.md 4.7), and the window costs not
+# so much average speed as regularity - measured over 60 samples, real-time
+# factor mean 0.998 headless against 0.806 with the window, but the WINDOW's
+# floor is 0.127 against 0.926. The median stays 0.997. It stalls and catches
+# up, so an interval measured with it open is worth less than one without.
 #
 # It does NOT touch PLCSIM Advanced or step1.py. Those are the owner's, on
 # the Windows side, and the single-writer rule is the reason this script has
@@ -20,10 +32,17 @@ ROS_SETUP="/opt/ros/jazzy/setup.bash"
 
 export GZ_PARTITION="${GZ_PARTITION:-step1}"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-91}"
+GUI=true   # start's default; --headless sets it false. See the header.
 # The stack as command-line patterns. gz sim is FIRST on purpose (see the
 # shutdown-order note in stop()); a pattern only NOMINATES, ours() decides.
 # MAINTENANCE OBLIGATION: anything added to the stack must be added here too,
 # or stop orphans it and still prints "down." Port 5101 arrives in a later step.
+# THE GUI CLIENT NEEDS NO ENTRY OF ITS OWN, and that was checked rather than
+# assumed: `gz sim -g` is ONE process whose command line begins with those two
+# words, so "gz sim" nominates the client and the server alike - measured,
+# `pgrep -af "gz sim"` returns both. If the client is ever started through
+# ros_gz_sim's gz_sim.launch.py instead, it becomes `sh -c ruby .../gz sim -g`
+# plus a child and this line has to be revisited.
 PATTERNS=("gz sim" "step1_world.launch.py" "parameter_bridge" \
           "sto_contactor.py" "forklift_io.py" "plc_link.py" "cmd_gate.py" "hmi_node.py")
 
@@ -123,8 +142,8 @@ start() {
             [ -n "$pid" ] && break; sleep 0.1; done
         echo "  $name pid ${pid:-UNKNOWN, see $LOGDIR/$name.log}"
     }
-    echo "starting the Step 1 vehicle side (partition $GZ_PARTITION, domain $ROS_DOMAIN_ID)"
-    spawn world  ros2 launch "$STEP1/gazebo/step1_world.launch.py"
+    echo "starting the Step 1 vehicle side (partition $GZ_PARTITION, domain $ROS_DOMAIN_ID, gui $GUI)"
+    spawn world  ros2 launch "$STEP1/gazebo/step1_world.launch.py" "gui:=$GUI"
     sleep 5
     spawn plc_link python3 "$STEP1/ros2/plc_link.py"
     spawn cmd_gate python3 "$STEP1/ros2/cmd_gate.py"
@@ -202,8 +221,21 @@ stop() {
     sweep KILL
     echo "down."
 }
+USAGE="usage: $0 start [--headless] | stop
+  start       warehouse + forklift in a Gazebo window, plus the HMI
+  --headless  no Gazebo window (gui:=false, the launch file's own default)"
 case "${1:-}" in
-    start|--start) start ;;
+    start|--start)
+        case "${2:-}" in
+            --headless) GUI=false ;;
+            # An unrecognised second word is a REFUSAL and not a shrug: the
+            # one it will be is a misspelt --headless, and silently starting
+            # a window for someone who asked for none is the failure this
+            # branch exists to prevent.
+            "") ;;
+            *) echo "$USAGE"; exit 2 ;;
+        esac
+        start ;;
     stop|--stop)   stop ;;
-    *) echo "usage: $0 start|stop"; exit 2 ;;
+    *) echo "$USAGE"; exit 2 ;;
 esac

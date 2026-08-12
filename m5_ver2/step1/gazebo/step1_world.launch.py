@@ -1,7 +1,8 @@
 """step1_world.launch.py - the plant, and only the plant.
 
 Five processes: the world server, one spawn, one bridge, the unit
-translator and the STO contactor.
+translator and the STO contactor. A sixth, the Gazebo GUI client, is
+started only by `gui:=true` and nothing in the command path reads it.
 
 WHY NOT agv/forklift/launch/vehicle.launch.py
   That file also starts safe_speed_link.py, field_evaluation.py,
@@ -18,6 +19,7 @@ WHY THE BRIDGE CARRIES THE ACTUATOR TERMINALS AND NOT THE COMMAND TOPICS
 
 Usage (after sourcing /opt/ros/jazzy/setup.bash):
   ros2 launch m5_ver2/step1/gazebo/step1_world.launch.py
+  ros2 launch m5_ver2/step1/gazebo/step1_world.launch.py gui:=true
 """
 
 import os
@@ -25,7 +27,10 @@ import sys
 
 import yaml
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess
+from launch.actions import (DeclareLaunchArgument, ExecuteProcess,
+                            OpaqueFunction)
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -80,16 +85,54 @@ _BRIDGE_ARGS = [
 ]
 
 
+def _gz_server(context, *args, **kwargs):
+    """The world server. -s is server-only; the GUI is a second process.
+
+    Built in a function rather than declared, because --headless-rendering
+    has to be ABSENT from the command line when the GUI is wanted rather
+    than present with a false value - the same reason
+    agv/forklift/launch/vehicle.launch.py:246-279 builds its server line in
+    one. With the GUI off it stays: -s alone still opens a GLX connection
+    when DISPLAY is set (sim/setup/WSL_ENVIRONMENT.md 4.7), so it is the
+    honest flag for a run that claims to be headless. With the GUI on, the
+    remaining argument list is exactly what vehicle.launch.py's `-r -s `
+    produces, which is this repo's proven GUI configuration.
+    """
+    cmd = ["gz", "sim", "-s", "-r"]
+    if LaunchConfiguration("gui").perform(context).lower() != "true":
+        cmd.append("--headless-rendering")
+    cmd += ["-v", "2", _WORLD]
+    return [ExecuteProcess(cmd=cmd, name="gz_server", output="screen")]
+
+
 def generate_launch_description():
     ld = LaunchDescription()
 
-    # --headless-rendering is the honest flag here: -s alone still opens a
-    # GLX connection when DISPLAY is set (sim/setup/WSL_ENVIRONMENT.md 4.7).
+    ld.add_action(DeclareLaunchArgument(
+        "gui", default_value="false",
+        description="Also start the Gazebo GUI client (headless if false)"))
+
+    ld.add_action(OpaqueFunction(function=_gz_server))
+
+    # THE GUI CLIENT, AND WHY IT IS A DIRECT `gz sim -g` AND NOT
+    # ros_gz_sim's gz_sim.launch.py, WHICH IS WHAT agv/ AND sim/ USE.
+    #   Those two files start the SERVER through that wrapper as well, so
+    #   using it for the client keeps one mechanism. This file does not: it
+    #   runs gz directly, and routing only the client through the wrapper
+    #   would give the two halves of one simulator two different launch
+    #   paths. The wrapper's own service is exporting
+    #   GZ_SIM_{SYSTEM_PLUGIN,RESOURCE}_PATH scraped from every installed
+    #   ROS package's manifest; Step 1 hands gz absolute paths to a world
+    #   and a model that export nothing, so that scrape buys nothing here.
+    #   And agv/ passes it on_exit_shutdown:=true, which would make closing
+    #   this window tear down the server, the bridge and the contactor
+    #   underneath a running e-stop test. One process, one command line,
+    #   and `gz sim` in step1.sh's PATTERNS nominates it.
     ld.add_action(ExecuteProcess(
-        cmd=["gz", "sim", "-s", "-r", "--headless-rendering",
-             "-v", "2", _WORLD],
-        name="gz_server",
+        cmd=["gz", "sim", "-g", "-v", "2"],
+        name="gz_gui",
         output="screen",
+        condition=IfCondition(LaunchConfiguration("gui")),
     ))
 
     ld.add_action(Node(
