@@ -18,38 +18,42 @@ def test_centre_is_a_full_stop():
         0.0, 0.0, R, SPEED_MAX, STEER_MAX) == (0.0, 0.0)
 
 
-def test_dragging_up_drives_forward():
+def test_dragging_up_drives_forks_first():
+    # THE FORK END IS FORWARD, and it is the model's -x: model.sdf puts the
+    # front safety scanner at +0.70 x and the tines at the opposite end.
     # Canvas y grows DOWNWARD, so "up" is a negative dy.
     linear, _ = hmi_node.knob_to_twist(0.0, -R, R, SPEED_MAX, STEER_MAX)
-    assert linear == pytest.approx(SPEED_MAX)
-
-
-def test_dragging_down_drives_in_reverse():
-    linear, _ = hmi_node.knob_to_twist(0.0, R, R, SPEED_MAX, STEER_MAX)
     assert linear == pytest.approx(-SPEED_MAX)
 
 
-def test_dragging_right_steers_right_which_is_negative_z():
-    # REP-103: positive z is counter-clockwise, so a right turn is negative.
+def test_dragging_down_drives_counterweight_first():
+    linear, _ = hmi_node.knob_to_twist(0.0, R, R, SPEED_MAX, STEER_MAX)
+    assert linear == pytest.approx(SPEED_MAX)
+
+
+def test_dragging_right_steers_right():
+    # The steer sign flips with the speed sign: reversing which end leads
+    # also reverses which way a given steer angle turns the vehicle as the
+    # driver sees it, so "push right, go right" needs both.
     _, angular = hmi_node.knob_to_twist(R, 0.0, R, SPEED_MAX, STEER_MAX)
-    assert angular == pytest.approx(-STEER_MAX)
-
-
-def test_dragging_left_steers_left_which_is_positive_z():
-    _, angular = hmi_node.knob_to_twist(-R, 0.0, R, SPEED_MAX, STEER_MAX)
     assert angular == pytest.approx(STEER_MAX)
+
+
+def test_dragging_left_steers_left():
+    _, angular = hmi_node.knob_to_twist(-R, 0.0, R, SPEED_MAX, STEER_MAX)
+    assert angular == pytest.approx(-STEER_MAX)
 
 
 def test_a_drag_beyond_the_ring_saturates_rather_than_exceeding():
     linear, angular = hmi_node.knob_to_twist(
         5 * R, -5 * R, R, SPEED_MAX, STEER_MAX)
-    assert linear == pytest.approx(SPEED_MAX)
-    assert angular == pytest.approx(-STEER_MAX)
+    assert linear == pytest.approx(-SPEED_MAX)
+    assert angular == pytest.approx(STEER_MAX)
 
 
 def test_half_deflection_is_half_command():
     linear, _ = hmi_node.knob_to_twist(0.0, -R / 2, R, SPEED_MAX, STEER_MAX)
-    assert linear == pytest.approx(SPEED_MAX / 2)
+    assert linear == pytest.approx(-SPEED_MAX / 2)
 
 
 def test_lamp_is_red_and_says_active_when_the_chain_is_broken():

@@ -60,13 +60,22 @@ CONFIG_YAML = os.path.normpath(
 def knob_to_twist(dx, dy, radius, speed_max, steer_max):
     """Knob offset in pixels -> (linear.x [m/s], angular.z [rad]).
 
-    Canvas y grows downward, so dragging up is a negative dy and has to be
-    negated to mean forward. Dragging right steers right, which is a
-    NEGATIVE angular.z under REP-103 (positive z is counter-clockwise).
+    THE FORK END IS FORWARD, AND IT IS THE MODEL'S -x. model.sdf puts the
+    front safety scanner at +0.70 x and the tines at the opposite end, so
+    the body +x this node commands points at the counterweight. The owner
+    drives a forklift forks-first, so dragging up commands NEGATIVE
+    linear.x.
+
+    Both signs flip together. Reversing which end leads also reverses which
+    way a given steer angle turns the vehicle as the driver sees it, so the
+    steer sign flips with the speed sign to keep "push right, go right".
+
+    Canvas y grows downward, so dragging up is already a negative dy and
+    needs no negation here.
     """
     nx = max(-1.0, min(1.0, dx / radius))
     ny = max(-1.0, min(1.0, dy / radius))
-    return (-ny * speed_max, -nx * steer_max)
+    return (ny * speed_max, nx * steer_max)
 
 
 def lamp_state(estop_healthy):
