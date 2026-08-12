@@ -224,12 +224,40 @@ start() {
     # with the PLC link missing and says so in ONE warning line among nine
     # pids (hit twice while building Task 8). Refuse first, and name the
     # holder, because "already running" is the answer the operator needs.
-    if ss -uln 2>/dev/null | grep -q ':5100 '; then
-        echo "UDP :5100 is already bound - another stack holds the PLC link:"
-        ss -ulpn 2>/dev/null | grep ':5100 '
-        echo "stop that stack first, then start this one."
-        return 1
+    #
+    # THE TEST HAS NO PIPE IN IT, AND THAT IS THE WHOLE POINT. Under this
+    # file's `set -o pipefail` any `writer | grep -q` can fail OPEN: grep -q
+    # exits at its FIRST match, the writer goes on writing into a closed pipe,
+    # SIGPIPE kills it, pipefail hands the pipeline the writer's 141 and the
+    # test takes the FALSE branch - the refusal skipped in exactly the case it
+    # exists for, a socket table long enough to still be streaming when the
+    # match lands. MEASURED over a 200k-line table: `ss -uln | grep -q` fails
+    # open (141), and so does capture-then-`printf ... | grep -q`, because the
+    # printf BUILTIN inherits the same window. Only forms with no early reader
+    # exit survive. This one is matched by the shell itself, so there is no
+    # writer, no pipe and no exit status to misread.
+    #   $'\n' sentinels: $( ) eats the trailing newline, so a capture whose
+    #   last line ends exactly at the port would have nothing after it to
+    #   match. [!0-9] rather than a literal space for the same reason and one
+    #   more - it is the non-digit, not the space, that tells :5100 from
+    #   :51000. Measured: `grep ':5100 '` MISSES a line ending at the port.
+    local udp_socks=""
+    if command -v ss >/dev/null 2>&1; then
+        udp_socks="$(ss -uln 2>/dev/null)"
+    else
+        # A guard that cannot run says so. Silence here would look identical
+        # to a free port and hand back the Task 8 symptom with no trace.
+        echo "  note: ss not found - the UDP :5100 pre-flight is SKIPPED."
     fi
+    case $'\n'"$udp_socks"$'\n' in
+        *:5100[!0-9]*)
+            echo "UDP :5100 is already bound - another stack holds the PLC link:"
+            # grep without -q reads to EOF, so this reporting pipe has no
+            # SIGPIPE window of its own; its status is not tested either way.
+            ss -ulpn 2>/dev/null | grep -E ':5100([^0-9]|$)'
+            echo "stop that stack first, then start this one."
+            return 1 ;;
+    esac
     # NO DEPLOY, NO SOFTWARE. The vehicle runs the frozen tree and only that;
     # falling back to source would make the deploy decorative.
     if [ ! -f "$DEPLOY/MANIFEST" ]; then
