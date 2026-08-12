@@ -80,14 +80,16 @@ with open(_CONFIG, "r", encoding="utf-8") as _handle:
 
 # '[' gz to ROS, ']' ROS to gz.
 #
-# JOINT STATES AND ODOMETRY ARE DELIBERATELY NOT BRIDGED. Nothing in
-# m5_ver2/step5/ consumes linear_speed, fork_height or joint_states, and a
-# bridged channel with no consumer is a claim the run does not make. The
-# cost is that forklift_io logs "waiting for source data:
-# joint_states=False, odom=False" every 5 s for the life of every Step 1
-# run. That warning is EXPECTED and harmless: it gates only the two derived
-# state scalars and the fork target seed, never the traction or steer
-# command path.
+# JOINT STATES ARE DELIBERATELY NOT BRIDGED (odometry joined the bridge in
+# Step 5, below). Nothing in m5_ver2/step5/ consumes linear_speed,
+# fork_height or joint_states, and a bridged channel with no consumer is a
+# claim the run does not make. The cost is that forklift_io logs "waiting
+# for source data: joint_states=False, odom=False" every 5 s for the life of
+# every Step 1 run - and it still says odom=False after Step 5's bridge,
+# because forklift_io subscribes to topics.odom (/forklift/odom), which is
+# the RENAMED ROS name and not the gz one this file opens. That warning is
+# EXPECTED and harmless: it gates only the two derived state scalars and the
+# fork target seed, never the traction or steer command path.
 _BRIDGE_ARGS = [
     "{}@rosgraph_msgs/msg/Clock[gz.msgs.Clock".format(_TOPICS["clock"]),
     "{}@std_msgs/msg/Float64]gz.msgs.Double".format(
@@ -117,6 +119,19 @@ _SCAN_TOPICS = tuple(
 _BRIDGE_ARGS += [
     "{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan".format(t)
     for t in _SCAN_TOPICS
+]
+
+# STEP 5 OPENS TWO CHANNELS STEP 4 LEFT CLOSED. Both producers have sat
+# in forklift_ver2/model.sdf since Step 2; nothing consumed them, so
+# bridging them would have been a claim the run did not make. Step 5
+# consumes both: nav_node navigates on the ground-truth odom (spec:
+# owner ruling, the lidar guards rather than localises) and guards on
+# the nav lidar. JOINT STATES REMAIN UNBRIDGED - still no consumer.
+_BRIDGE_ARGS += [
+    "{}@nav_msgs/msg/Odometry[gz.msgs.Odometry".format(
+        status_contract.ODOM_TOPIC),
+    "{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan".format(
+        status_contract.NAV_SCAN_TOPIC),
 ]
 
 # The drive shaft's two reading channels, gz -> ROS. Both are
