@@ -1,0 +1,117 @@
+"""follower.py's geometry. Pure math, no ROS.
+
+THE SIGN TESTS ARE THE CONTRACT. Model yaw 0 points the forks at world
+-x (hmi_node.knob_to_twist docstring); facing -x, world +y is the
+driver's RIGHT, and positive angular.z is a driver-right turn. Forward
+is negative linear.x. Every assertion below is derived from those three
+sentences; if one fails after an edit, the edit changed the vehicle's
+sign convention, not the test's opinion.
+"""
+import math
+
+import follower
+
+
+def test_travel_yaw_is_the_fork_direction():
+    assert abs(follower.norm_ang(
+        follower.travel_yaw(0.0) - math.pi)) < 1e-9
+
+
+def test_straight_ahead_needs_no_steer():
+    assert abs(follower.steer((0.0, 0.0, 0.0), (-2.0, 0.0))) < 1e-6
+
+
+def test_target_to_driver_right_steers_positive():
+    # Facing -x, target at world +y = driver's right.
+    assert follower.steer((0.0, 0.0, 0.0), (-2.0, 1.0)) > 0.05
+
+
+def test_target_to_driver_left_steers_negative():
+    assert follower.steer((0.0, 0.0, 0.0), (-2.0, -1.0)) < -0.05
+
+
+def test_target_behind_commands_a_committed_turn():
+    # Dead astern: alpha wraps to -pi and raw pursuit computes
+    # sin(pi) = 0 - "drive straight on, away from the goal". The alpha
+    # clamp turns it into a firm turn instead.
+    assert abs(follower.steer((0.0, 0.0, 0.0), (2.0, 0.0))) > 0.8
+
+
+def test_target_behind_right_turns_right():
+    # Behind and to the driver's right (facing -x, +y is right):
+    # commit to a right (positive) turn, not a left one.
+    assert follower.steer((0.0, 0.0, 0.0), (2.0, 1.0)) > 0.8
+
+
+def test_advance_walks_the_lookahead_along_the_path():
+    path = [(0.0, 0.0), (-10.0, 0.0)]
+    target, to_end = follower.advance(path, (-3.0, 0.2))
+    assert abs(target[0] - (-3.0 - follower.LOOKAHEAD_M)) < 1e-6
+    assert abs(target[1]) < 1e-9
+    assert abs(to_end - 7.0) < 1e-6
+
+
+def test_advance_clamps_to_the_path_end():
+    path = [(0.0, 0.0), (-2.0, 0.0)]
+    target, to_end = follower.advance(path, (-1.5, 0.0))
+    assert target == (-2.0, 0.0)
+    assert abs(to_end - 0.5) < 1e-6
+
+
+def test_advance_tolerates_a_zero_length_first_segment():
+    # route.plan_route duplicates the first point when the pose sits on
+    # a graph node; advance() must not divide by zero or stall there.
+    path = [(0.0, 0.0), (0.0, 0.0), (-10.0, 0.0)]
+    target, to_end = follower.advance(path, (0.0, 0.0))
+    assert abs(target[0] - (-follower.LOOKAHEAD_M)) < 1e-6
+    assert abs(to_end - 10.0) < 1e-6
+
+
+def test_cruise_on_a_straight_clear_leg():
+    v = follower.target_speed(10.0, 0.0, math.inf)
+    assert v == follower.CRUISE_MPS
+
+
+def test_corner_slows_to_corner_speed():
+    v = follower.target_speed(10.0, 0.5, math.inf)
+    assert v == follower.CORNER_MPS
+
+
+def test_approach_zone_slows_regardless_of_steer():
+    v = follower.target_speed(1.5, 0.0, math.inf)
+    assert v == follower.APPROACH_MPS
+
+
+def test_guard_slow_band_caps_speed():
+    v = follower.target_speed(10.0, 0.0, 2.5)
+    assert v == follower.GUARD_SLOW_MPS
+
+
+def test_guard_hold_band_stops():
+    assert follower.target_speed(10.0, 0.0, 1.2) == 0.0
+
+
+def test_sector_min_sees_only_the_travel_sector():
+    # 360 rays, angle_min=-pi, 1 deg steps. Travel direction is angle pi
+    # (the fork end, model -x). A 2 m return within the sector counts; a
+    # 0.5 m return behind the truck (angle 0) does not.
+    n = 360
+    inc = 2.0 * math.pi / n
+    ranges = [math.inf] * n
+    ranges[0] = 2.0          # angle_min + 0*inc = -pi == pi (wrapped): in sector
+    ranges[180] = 0.5        # angle 0: dead astern, out of sector
+    got = follower.sector_min(ranges, -math.pi, inc, 0.10, 8.0)
+    assert abs(got - 2.0) < 1e-9
+
+
+def test_sector_min_ignores_out_of_range_returns():
+    n = 360
+    inc = 2.0 * math.pi / n
+    ranges = [math.inf] * n
+    ranges[0] = 0.05         # below range_lo: sensor noise, not a wall
+    assert follower.sector_min(ranges, -math.pi, inc, 0.10, 8.0) == math.inf
+
+
+def test_arrival_is_a_quarter_metre():
+    assert follower.arrived((0.0, 0.0), (0.20, 0.10))
+    assert not follower.arrived((0.0, 0.0), (0.30, 0.0))
