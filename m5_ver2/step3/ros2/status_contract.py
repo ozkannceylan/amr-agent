@@ -72,7 +72,7 @@ STATUS_STALE_S = 0.25
 
 #: The keys of the wire format step3.py sends. `issubset` and not
 #: equality: a later sender adding a field must still pass this parser.
-#: `case` joined in Step 3 - field_eval picks its (PF, WF) pair from it,
+#: `case` joined in Step 2 - field_eval picks its (PF, WF) pair from it,
 #: and Step 1 left CASE_B0/CASE_B1 deliberately unconsumed.
 _REQUIRED_KEYS = {"estop_healthy", "motor", "case", "ts"}
 

@@ -32,3 +32,7 @@ assets/demo_m5.mp4
 # Step 1 run artefacts: per-run logs and the pid file step1.sh writes.
 m5_ver2/step1/logs/
 m5_ver2/step1/.step1_pids
+m5_ver2/step2/logs/
+m5_ver2/step2/.step2_pids
+m5_ver2/step3/logs/
+m5_ver2/step3/.step3_pids

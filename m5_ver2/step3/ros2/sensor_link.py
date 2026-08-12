@@ -24,11 +24,26 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
+import status_contract
+
 # ----------------------------- CONFIG -----------------------------
 UDP_TARGET = None       # None -> the WSL default gateway, i.e. the Windows host
 UDP_PORT = 5101
 FIELDS_TOPIC = "/forklift/safety/fields"
 ENCODERS_TOPIC = "/forklift/safety/encoders"
+# The encoder report's OWN timeout. encoder_link publishes at 20 Hz, so
+# this is five missed reports.
+#
+# WITHOUT IT this node forwards the last encoder pair for ever if
+# encoder_link dies: field_eval keeps publishing, so the datagram keeps
+# leaving and arrives at step3.py looking FRESH. At rest that pair is
+# 0/0, which step3.py and the design both name the most dangerous lie
+# available - stopped and healthy, while the vehicle may be moving.
+#
+# It is the same defect Task 4 found in cmd_gate, one layer up: a
+# consumer trusting a topic because its producer was designed never to
+# fall silent. Silence still has to be caught by the consumer.
+ENCODERS_STALE_S = 0.25
 # ------------------------------------------------------------------
 
 
@@ -105,6 +120,7 @@ class SensorLink(Node):
         self.target = resolve_udp_target()
         self.tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.encoders = None
+        self.last_encoders_rx = None
         self.create_subscription(String, ENCODERS_TOPIC, self.cb_encoders, 10)
         self.create_subscription(String, FIELDS_TOPIC, self.cb_fields, 10)
         self.get_logger().info(
@@ -112,6 +128,7 @@ class SensorLink(Node):
 
     def cb_encoders(self, msg):
         self.encoders = msg.data
+        self.last_encoders_rx = time.monotonic()
 
     def cb_fields(self, msg):
         """The field report is the clock: one datagram per evaluation.
@@ -120,6 +137,13 @@ class SensorLink(Node):
         pair a fresh speed with a stale verdict.
         """
         if self.encoders is None:
+            return
+        # A stale encoder report withholds the WHOLE datagram rather
+        # than pairing a fresh field verdict with a stale speed.
+        # step3.py's own timeout then writes the trip values for both.
+        if status_contract.is_stale(
+                self.last_encoders_rx, time.monotonic(),
+                ENCODERS_STALE_S):
             return
         data = payload(msg.data, self.encoders)
         if data is not None:

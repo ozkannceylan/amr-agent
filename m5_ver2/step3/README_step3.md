@@ -121,7 +121,7 @@ Verified against the code. Each constant has exactly one home.
 | | `KNOB_RADIUS_PX` | `100.0` | |
 | | `LAMP_RED` / `LAMP_NEUTRAL` | `#c62828` / `#455a64` | |
 | `step3.sh` | `GZ_PARTITION` | `step3` | exported to every child; it is what scopes `stop`. Overridable from the environment. The GUI client inherits it, which is what makes it show *this* world rather than an empty scene. |
-| | `ROS_DOMAIN_ID` | `92` | does **not** isolate Gazebo — gz transport is not DDS |
+| | `ROS_DOMAIN_ID` | `93` | does **not** isolate Gazebo — gz transport is not DDS |
 | | `GUI` | `true` | `start` opens the Gazebo window; `start --headless` sets it false. `gazebo/step3_world.launch.py` declares `gui` with the opposite default (`false`), so a bare `ros2 launch` is unchanged. |
 
 **`STALE_S` (0.28) and `STATUS_STALE_S` (0.25) are two different constants on two
@@ -141,7 +141,7 @@ from the command line instead:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-export GZ_PARTITION=step3 ROS_DOMAIN_ID=92
+export GZ_PARTITION=step3 ROS_DOMAIN_ID=93
 ros2 topic echo /forklift/safety/torque_off_applied
 ```
 

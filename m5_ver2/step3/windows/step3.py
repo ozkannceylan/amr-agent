@@ -8,13 +8,13 @@ WHY PF_OSSD, WF_Clear AND THE ENCODERS ARE WRITTEN EVERY CYCLE
   Motor is the AND of three ESTOP1 enables. Two of them watch the
   protective field and the encoder cross-check, so unless this loop holds
   those healthy the drive enable can never energise, no matter what the
-  e-stop button does. They are not Step 1's subject; they are its
-  precondition.
+  e-stop button does. In Step 1 they were a precondition and not the
+  subject; from Step 2 they ARE the subject and come from the plant.
 
 THE FAIL DIRECTION
   Any exception, `q`, or Ctrl-C leaves through the same `finally`: E-Stop,
   PF_OSSD and WF_Clear are written False. The vehicle side then sees the
-  link go quiet and fails safe on its own 0.5 s rule.
+  link go quiet and fails safe on its own 0.28 s rule.
 
 Usage (Windows, 64-bit Python, PLCSIM Advanced already in RUN):
   python m5_ver2\\step3\\windows\\step3.py

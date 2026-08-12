@@ -4,17 +4,16 @@
 
 Every task's requirements implicitly include this section.
 
-- **Single-writer rule.** Exactly one process — `step1.py` on Windows — opens the PLCSIM Advanced API. No ROS node, no test, no helper script may open it.
+- **Single-writer rule.** Exactly one process — the current step's `stepN.py` on Windows — opens the PLCSIM Advanced API. No ROS node, no test, no helper script may open it, and two steps' writers must never run together.
 - **Fail-safe direction.** On any exception, timeout or shutdown, boolean PLC inputs are written `False` and the vehicle command is zeroed.
 - **The PLC program is ground truth.** Never change PLC logic, tags or addresses. Never invent a tag name. Tag names are case-sensitive and may contain hyphens (`E-Stop`).
 - **PLCSIM instance name is `PLC_2`.** API DLL directory is `C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\6.0`. API error `-4` (`DoesNotExist`) means the instance is not running or the name mismatches — report it, never work around it.
-- **The bridge must hold `PF_OSSD=True`, `WF_Clear=True`, `ENC_A=0`, `ENC_B=0` every cycle**, or `Motor` can never energise.
+- **STEP 1 ONLY: the bridge held `PF_OSSD=True`, `WF_Clear=True`, `ENC_A=0`, `ENC_B=0` every cycle**, because they were a precondition for `Motor` and not the subject. **Step 2 drives PF_OSSD and WF_Clear from the back scanner and Step 3 drives ENC_A and ENC_B from the drive shaft. Do not re-pin them: doing so silently disables both chains.**
 - **Nothing is copied from the existing tree.** `sim/worlds/warehouse.sdf`, `agv/forklift/model.sdf`, `agv/forklift/config.yaml`, `agv/forklift/scripts/forklift_io.py` and `agv/forklift/scripts/sto_contactor.py` are used where they are, unmodified.
 - **No topic name is a literal.** Every ROS and gz topic name is read from `agv/forklift/config.yaml` under `topics:`. The two exceptions, which that file does not own, are `/plc/status` and `/hmi/cmd_vel`.
 - **Target < 150 lines per file.** Plain Python run with `python3`. No colcon package, no classes without need.
 - **Every shell that runs `gz` must source `/opt/ros/jazzy/setup.bash` first.** There is no `/usr/bin/gz` on this machine.
 - **Repo root in WSL:** `/mnt/c/Users/ozkan/projects/amr-agent`. On Windows: `C:\Users\ozkan\projects\amr-agent`.
-- **Do not begin Step 2.** When Task 8 is done, print the validation checklist and stop.
 
 ## 3. PLC ground truth
 
@@ -78,16 +77,21 @@ Facts about this simulation that are not obvious:
   ever be True.
 - For `Motor` to be True, all of these must hold: `E-Stop=True`, `PF_OSSD=True`,
   encoder channels plausible (equal, < 2800), and an `Acknowledge` edge after
-  the last demand. **Therefore the Step 1 bridge must constantly hold
-  `PF_OSSD=True`, `WF_Clear=True`, `ENC_A=0`, `ENC_B=0`, or `Motor` can never
-  energise.**
+  the last demand. **`WF_Clear` is NOT among them.** Measured, not assumed:
+  `step2/PROOF.md` and `step3/PROOF.md` both record `Motor=True` while
+  `WF=False`. It gates `V_Limit`, and through it the speed monitor — not the
+  enable directly.
 - Case bits binary-encode monitoring case 1..3 (01/10/11); pattern 00 is
-  deliberately invalid. `V_Limit` is 1500 when `WF_Clear` else 300. Both are
-  irrelevant to Step 1 and are consumed in later steps.
+  deliberately invalid and decodes to 0, which the vehicle maps to case 3,
+  the largest field. **`V_Limit` is 1500 when `WF_Clear` else 300, and that
+  path is LIVE:** `step3/PROOF.md` records the vehicle stopped 0.68 s after
+  enable, at 0.5 m/s commanded with racks 1.75 m away, because `WF_Clear`
+  went False and the speed monitor demanded a stop above 300 mm/s. Anything
+  commanding speed near racking meets this.
 
 ## Port map
 
 | Port | Direction | Payload | Step |
 |---|---|---|---|
-| 5100 | Windows -> WSL | PLC state JSON {"estop_healthy","motor","ts"} @ 20 Hz | Step 1 |
-| 5101 | WSL -> Windows | simulated sensors (distance, speed) | later |
+| 5100 | Windows -> WSL | {"estop_healthy","motor","case","ts"} | Step 1, `case` added in Step 2 |
+| 5101 | WSL -> Windows | {"pf","wf","enc_a","enc_b","ts"} | Step 2, encoders added in Step 3 |

@@ -1,54 +1,115 @@
-# Step 2 context
+# Step 3 context
 
-## What Step 2 adds
+The file the next step reads first. `m5_ver2/CLAUDE.md` holds the PLC tag
+table and the working agreements; this page holds what Steps 1 to 3 added on
+top and what a Step 4 implementer must not break.
 
-- Three SICK microScan3 safety scanners on `forklift_ver2` — Back at the drive
-  end, Left and Right at the fork-end corners — each a `gpu_lidar` reaching
-  8.0 m.
-- Field evaluation ported from `m5-plc-debug/microscan3.py`, unchanged: three
-  scans in, three `(pf, wf)` verdicts out, selected by the PLC's monitoring case.
-- Three HMI lamps, one per scanner, so which device is in demand is visible.
-- The **Back** sensor drives the real PLC's `PF_OSSD` and `WF_Clear`. What the
-  e-stop button did before, a sensed obstacle does here.
+## What each step added
 
-## The field logic, verbatim
+| Step | Added | Proved, against the live `PLC_2` |
+|---|---|---|
+| 1 | E-Stop chain, HMI joystick, command gate | `step1/PROOF.md`, 8 of 8 |
+| 2 | Three microScan3 scanners, field evaluation, the monitoring case | `step2/PROOF.md`, 5 of 5 |
+| 3 | Two encoder reading channels, fault injection | `step3/PROOF.md`, 6 of 6 |
 
-From `m5-plc-debug/microscan3.py`, already validated against the PLC by the
-owner. Reproduce it; do not improve it.
+Each step is a **copy** of the one before. That is the owner's ruling so
+every step runs on its own; the cost is that a fix must be made in the copy
+being worked on, and earlier copies are left frozen.
+
+**After `cp -r step3 step4`, run `diff -r step3 step4` and read every line
+the rename touched.** The whole-branch review found the code never diverged
+between copies — every constant identical, `git log` on the earlier copies
+empty — but the *prose* did, because a `sed` turned four statements from
+stale into confidently wrong. One of them was executable: a README telling
+the operator the wrong `ROS_DOMAIN_ID`.
+
+## The three chains that reach `Motor`
+
+All three are ESTOP1 instances in the F-program and `Motor` is their AND. A
+demand **latches**: clearing the cause does not re-enable, an `Acknowledge`
+edge does.
+
+```
+E-Stop button      step3.py terminal: es0 / es1
+Protective field   3 scanners -> field_eval -> sensor_link -> PF_OSSD
+Speed / encoder    drive shaft -> encoder_link -> sensor_link -> ENC_A/ENC_B
+```
+
+## The field logic, unchanged from `m5-plc-debug/microscan3.py`
 
 ```python
 FIELDS = {1: (1.0, 2.5), 2: (2.2, 3.7), 3: (4.5, 6.0)}   # case: (PF, WF) [m]
-N_SCAN = 3                                               # consecutive scans
-
-def field(d, clear, cnt, th):
-    raw = d > (th if clear else th + 0.2)                 # +0.2 m hysteresis
-    cnt = cnt + 1 if raw != clear else 0
-    return (raw, 0) if cnt >= N_SCAN else (clear, cnt)
+N_SCAN = 3          # consecutive scans before a state change
+HYSTERESIS_M = 0.20 # extra margin required to RE-CLEAR
 ```
 
-The hysteresis is asymmetric on purpose: a field that is currently **clear**
-re-tests against the bare threshold `th`, and a field that is currently
-**violated** must beat `th + 0.2` before it may clear again. A verdict only
-changes after `N_SCAN = 3` consecutive scans agree against it, and the counter
-resets the moment a scan agrees with the standing verdict.
+Three properties are load-bearing:
 
-Three properties are load-bearing and must survive the port:
+- **`pf` and `wf` are TRUE when the field is CLEAR**, matching `PF_OSSD` and
+  `WF_Clear`. Inverting this inverts the safety function.
+- **No measurement means violated.** Silence is not clear.
+- **An unreadable monitoring case selects case 3**, the largest field — the
+  value the system falls into when the case bits are unreadable, so it is
+  the fail-safe path and must work.
 
-- **TRUE means CLEAR.** `pf` and `wf` are True when the field is clear, matching
-  the PLC tags `PF_OSSD` ("True = protective field clear, OSSD high") and
-  `WF_Clear`. Getting this polarity backwards inverts the safety function.
-- **No measurement means violated.** On timeout the script sets `pf = wf =
-  False`. Silence is not "clear".
-- **An unknown monitoring case selects case 3**, the largest field. Case 3 is
-  therefore not an optional extra: it is the value the system falls into when
-  the case bits are unreadable, so it is the fail-safe path and must work. This
-  is why the scanners reach 8.0 m and not the 5.5 m the old pair used — capped
-  at 5.5, case 3's 6.0 m warning field could never pass `d > 6.0` and would read
-  as permanently violated in exactly the case the system falls back to.
+## The encoders
 
-## The port map
+`encoder_link` reads two `JointStatePublisher` systems on
+`drive_wheel_joint` and converts each independently: `omega × 0.12 m × 1000`.
+
+**A single-channel tested system, never a two-channel one.** One shaft, two
+readings, both dying with the shaft they read. No Category, no Performance
+Level, no SIL, no PFH is claimed anywhere in this tree.
+
+The F-program faults on `|ENC_A − ENC_B| > 50` mm/s and on a 2800 mm/s
+ceiling. `step3.py` injects the faults, because a broken encoder is a field
+fault and the PLCSIM API is the wiring — the vehicle sends what the shaft
+did and never lies.
+
+## What will stop a Step 4 vehicle unexpectedly
+
+**`V_Limit` is live and it is not on any acceptance list.** When `WF_Clear`
+is False the standard program computes `V_Limit = 300` mm/s instead of 1500,
+and the speed monitor demands a stop above it. Measured: driving at 0.5 m/s
+commanded with racks 1.75 m from the back scanner, `Motor` dropped 0.68 s
+after enable with the encoder channels agreeing. Anything commanding speed
+near racking meets this, and the latch holds it stopped until an
+`Acknowledge`.
+
+## Ports
 
 | Port | Direction | Payload |
 |---|---|---|
-| 5100 | Windows -> WSL | estop_healthy, motor, case, ts |
-| 5101 | WSL -> Windows | back sensor pf, wf, ts |
+| 5100 | Windows → WSL | `estop_healthy`, `motor`, `case`, `ts` |
+| 5101 | WSL → Windows | `pf`, `wf`, `enc_a`, `enc_b`, `ts` |
+
+The 5101 contract has two implementations that agree only by inspection:
+`sensor_link.payload()` writes it, `step3.py parse_sensor()` validates it.
+They are a pair. Changing one without the other is silent.
+
+## Terminal commands on `step3.py`
+
+`es0` · `es1` · `a` · `ok` · `fa` (freeze channel A) · `oa` (offset A
++400 mm/s) · `q`
+
+## Isolation
+
+`GZ_PARTITION=step3`, `ROS_DOMAIN_ID=93`. Step 4 takes `step4` / `94`, or
+two stacks share one graph and `stop` sweeps the wrong processes.
+
+## Known debt carried forward
+
+The whole-branch review's register lives in this branch's history. The items
+that survive into Step 4's tree:
+
+- Five ROS topic names are literals and three are duplicated across files;
+  `m5_ver2/CLAUDE.md` allows two. `/forklift/gz/drive_speed/read_{}` is the
+  worst — `config.yaml:873-874` owns those keys and the launch file reads
+  them from there while `encoder_link` hard-codes them. **Move them into
+  `status_contract.py` before the copy, or pay it four times.**
+- `gated_command`'s third parameter is still named `motor_ok` while every
+  caller passes the composite `enabled()`. A future edit "correcting" it
+  would reinstate a closed leak.
+- `step3.sh`'s startup name list is positional and must be hand-synced with
+  the spawn order; `stack.sh:191-203` teaches the per-component token fix.
+- No committed test covers `step3.py`'s fail-direction path.

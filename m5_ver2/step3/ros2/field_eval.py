@@ -53,7 +53,7 @@ SCAN_TOPIC = "/forklift/gz/safety_scanner_{}/measurement"
 # pairs into the 275-ray scan.
 #
 # A real microScan3 does not have this problem because its configured
-# field is a CONTOUR shaped around the vehicle. Step 3 evaluates a radius
+# field is a CONTOUR shaped around the vehicle. Step 2 evaluates a radius
 # (design section 4.1), so the equivalent has to be done here: blank the
 # angular sectors that are structure rather than surroundings. This is
 # the same thing a real integrator does when muting a sector at
@@ -164,6 +164,7 @@ class FieldEval(Node):
         self.devices = {name: Device() for name in SENSORS}
         self.ranges = {name: None for name in SENSORS}
         self.case = 3
+        self.last_status_rx = None
         self.pub = self.create_publisher(String, FIELDS_TOPIC, 10)
         for name in SENSORS:
             self.create_subscription(
@@ -182,11 +183,21 @@ class FieldEval(Node):
     def cb_status(self, msg):
         parsed = status_contract.parse_status(msg.data.encode())
         self.case = parsed.get("case") if parsed else None
+        self.last_status_rx = time.monotonic()
 
     def tick(self):
         now = time.monotonic()
-        pf_th, wf_th = fields_for_case(self.case)
-        report = {"case": self.case if self.case in FIELDS else 3,
+        # A /plc/status that STOPPED must not leave the last case
+        # standing. In every recorded run that value is 1 - the
+        # SMALLEST protective field, 1.0 m against case 3's 4.5 m - so
+        # holding it would keep telling the PLC the field is clear at
+        # ranges case 3 calls a demand. None falls through to case 3,
+        # which is the fail-safe end.
+        case = None if status_contract.is_stale(
+            self.last_status_rx, now, status_contract.STATUS_STALE_S
+        ) else self.case
+        pf_th, wf_th = fields_for_case(case)
+        report = {"case": case if case in FIELDS else 3,
                   "pf_th": pf_th, "wf_th": wf_th, "ts": now}
         for name in SENSORS:
             dev = self.devices[name]
