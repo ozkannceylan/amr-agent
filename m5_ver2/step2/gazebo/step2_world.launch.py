@@ -37,7 +37,12 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.normpath(os.path.join(_HERE, "..", "..", ".."))
 
 _WORLD = os.path.join(_REPO, "sim", "worlds", "warehouse.sdf")
-_MODEL = os.path.join(_REPO, "agv", "forklift", "model.sdf")
+# STEP 2'S OWN MODEL, NOT agv/forklift/model.sdf. It carries the three
+# microScan3 scanners; agv/'s carries the old front/rear pair at 5.5 m and
+# is never modified. The path is local to this directory, so the guard
+# below is what turns a typo into a refusal instead of a forklift that
+# spawns with the wrong sensors and looks right until Task 4 reads it.
+_MODEL = os.path.join(_HERE, "forklift_ver2", "model.sdf")
 _CONFIG = os.path.join(_REPO, "agv", "forklift", "config.yaml")
 _SCRIPTS = os.path.join(_REPO, "agv", "forklift", "scripts")
 _IO_SCRIPT = os.path.join(_SCRIPTS, "forklift_io.py")
@@ -82,6 +87,25 @@ _BRIDGE_ARGS = [
         _TOPICS["gz_actuator_steer_cmd"]),
     "{}@std_msgs/msg/Float64]gz.msgs.Double".format(
         _TOPICS["gz_actuator_traction_cmd"]),
+]
+
+# The three safety scanners, gz -> ROS. sensor_msgs/msg/LaserScan is the
+# ROS side of gz.msgs.LaserScan; the topic keeps its gz name so a gz topic
+# list and a ros2 topic list read as one namespace.
+#
+# THE ONE PLACE THESE THREE NAMES LIVE. Every other topic in this file comes
+# from config.yaml, because agv/forklift/model.sdf owns those. These three
+# belong to forklift_ver2/model.sdf, which config.yaml has never heard of,
+# so putting them there would be inventing a key in a file this step is
+# forbidden to modify.
+_SCAN_TOPICS = (
+    "/forklift/gz/safety_scanner_back/measurement",
+    "/forklift/gz/safety_scanner_left/measurement",
+    "/forklift/gz/safety_scanner_right/measurement",
+)
+_BRIDGE_ARGS += [
+    "{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan".format(t)
+    for t in _SCAN_TOPICS
 ]
 
 

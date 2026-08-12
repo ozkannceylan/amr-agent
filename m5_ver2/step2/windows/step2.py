@@ -35,6 +35,11 @@ UDP_PORT = 5100
 CYCLE_S = 0.02         # 20 ms
 ACK_PULSE_S = 0.30
 STATUS_EVERY = 10      # print the status line every Nth cycle (~5 Hz)
+SENSOR_PORT = 5101     # WSL -> Windows, the back scanner's verdict
+# Four missed sends at field_eval's 10 Hz. Budget to PF_OSSD False:
+# SENSOR_STALE_S 0.40 + CYCLE_S 0.02 = < 0.42 s, and the Step 1 chain
+# (< 0.45 s from Motor dropping) runs AFTER this one, not beside it.
+SENSOR_STALE_S = 0.40
 # ------------------------------------------------------------------
 
 
@@ -77,13 +82,44 @@ def _say(msg):
         pass
 
 
-def status_payload(estop_healthy, motor, ts):
-    """The wire format plc_link.py parses. Three keys, no more."""
+def status_payload(estop_healthy, motor, case, ts):
+    """The wire format plc_link.py parses. Four keys, no more."""
     return json.dumps({
         "estop_healthy": bool(estop_healthy),
         "motor": bool(motor),
+        "case": int(case),
         "ts": float(ts),
     }).encode()
+
+
+def decode_case(b0, b1):
+    """CASE_B0/CASE_B1 -> monitoring case.
+
+    B0 is bit 0 and B1 is bit 1, so 01 is case 1, 10 is case 2, 11 is
+    case 3. Pattern 00 is deliberately invalid in the F-program
+    (m5_ver2/CLAUDE.md section 3.2) and decodes to 0, which field_eval
+    maps to case 3 - the largest field. That is the fail-safe direction
+    and must not be "corrected" to 1.
+    """
+    return (1 if b0 else 0) + (2 if b1 else 0)
+
+
+def parse_sensor(data):
+    """One 5101 datagram from sensor_link.py, or None if untrusted.
+
+    The booleans must BE booleans: a truthy non-bool written straight to
+    PF_OSSD would enable the plant off an invalid packet.
+    """
+    try:
+        msg = json.loads(data.decode())
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(msg, dict):
+        return None
+    for key in ("pf", "wf"):
+        if not isinstance(msg.get(key), bool):
+            return None
+    return msg
 
 
 def connect_plc():
@@ -130,14 +166,43 @@ def main():
     print("streaming PLC state to {}:{}".format(target, UDP_PORT))
     plc = connect_plc()
     tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    rx.bind(("0.0.0.0", SENSOR_PORT))
+    rx.setblocking(False)
+    print("listening for the back scanner on 0.0.0.0:{}".format(SENSOR_PORT))
     threading.Thread(target=reader, daemon=True).start()
 
+    sensor_pf = sensor_wf = False
+    last_sensor_rx = float("-inf")
     cycle = 0
     try:
         while state["run"]:
             now = time.monotonic()
-            plc.WriteBool("PF_OSSD", True)
-            plc.WriteBool("WF_Clear", True)
+
+            # Drain 5101, keeping the newest trusted datagram.
+            for _ in range(64):
+                try:
+                    msg = parse_sensor(rx.recv(512))
+                except BlockingIOError:
+                    break
+                except OSError:
+                    break
+                if msg is not None:
+                    sensor_pf, sensor_wf = msg["pf"], msg["wf"]
+                    last_sensor_rx = now
+
+            # A DEAD LINK IS A VIOLATED FIELD. Holding the last value would
+            # leave the plant enabled with nothing watching the scanner -
+            # the hole Step 1's review found in cmd_gate, where a consumer
+            # trusted a topic because its producer was designed never to
+            # fall silent. Silence still has to be caught here.
+            if now - last_sensor_rx >= SENSOR_STALE_S:
+                sensor_pf = sensor_wf = False
+
+            # STEP 1 WROTE THESE TRUE UNCONDITIONALLY, BECAUSE THEY WERE A
+            # PRECONDITION AND NOT THE SUBJECT. HERE THEY ARE THE SUBJECT.
+            plc.WriteBool("PF_OSSD", sensor_pf)
+            plc.WriteBool("WF_Clear", sensor_wf)
             plc.WriteInt16("ENC_A", 0)
             plc.WriteInt16("ENC_B", 0)
             plc.WriteBool("E-Stop", state["estop"])
@@ -145,7 +210,8 @@ def main():
 
             motor = plc.ReadBool("Motor")
             estop_healthy = plc.ReadBool("E-Stop")
-            tx.sendto(status_payload(estop_healthy, motor, now),
+            case = decode_case(plc.ReadBool("CASE_B0"), plc.ReadBool("CASE_B1"))
+            tx.sendto(status_payload(estop_healthy, motor, case, now),
                       (target, UDP_PORT))
             # Cosmetic, and never allowed to gate the PLC writes: an undrained
             # pipe blocks print() without raising, which would freeze the sole
@@ -153,9 +219,12 @@ def main():
             cycle += 1
             if cycle % STATUS_EVERY == 0:
                 try:
-                    print("\rE-Stop={:<5} Motor={:<5} ack={:<5}   ".format(
-                        str(estop_healthy), str(motor),
-                        str(now < state["ack_until"])), end="", flush=True)
+                    print("\rE-Stop={:<5} Motor={:<5} PF={:<5} WF={:<5} "
+                          "case={} ack={:<5}   ".format(
+                              str(estop_healthy), str(motor),
+                              str(sensor_pf), str(sensor_wf), case,
+                              str(now < state["ack_until"])),
+                          end="", flush=True)
                 except OSError:
                     pass
             time.sleep(CYCLE_S)

@@ -10,7 +10,7 @@ STEER_MAX = 1.31
 #: What a live link is carrying when the truck is released and enabled.
 #: Displaying THIS while nothing is arriving is the failure the staleness
 #: tests below exist for.
-HEALTHY = {"estop_healthy": True, "motor": True, "ts": 0.0}
+HEALTHY = {"estop_healthy": True, "motor": True, "case": 3, "ts": 0.0}
 
 
 def test_centre_is_a_full_stop():
@@ -94,7 +94,7 @@ def test_the_latch_display_survives_the_staleness_rule():
     # show a NEUTRAL lamp over an OFF enable line. A rule that forced the
     # lamp red here would hide the latch instead of showing it.
     colour, lamp, enable = hmi_node.display_state(
-        {"estop_healthy": True, "motor": False, "ts": 0.0}, 0.0, 0.10)
+        {"estop_healthy": True, "motor": False, "case": 3, "ts": 0.0}, 0.0, 0.10)
     assert (colour, lamp) == (hmi_node.LAMP_NEUTRAL, "E-Stop Inactive")
     assert enable == "Drive enable: OFF"
 
@@ -209,10 +209,13 @@ class _StubHmi:
         self.steer_max = STEER_MAX
         self.status = hmi_node.FAILSAFE
         self.last_status_rx = None
+        self.fields = {}
+        self.last_fields_rx = None
+        self.sensor_lamps = {}
         self.shown = None
 
 
-LIVE = '{"estop_healthy": true, "motor": true, "ts": 0.0}'
+LIVE = '{"estop_healthy": true, "motor": true, "case": 3, "ts": 0.0}'
 
 
 def test_a_tick_shows_the_status_that_arrived(monkeypatch):
@@ -255,3 +258,25 @@ def test_release_snaps_the_knob_to_centre():
     # and the dot is drawn back on the centre, not left where it was
     x0, y0, x1, y1 = node.canvas.moved_to
     assert ((x0 + x1) / 2.0, (y0 + y1) / 2.0) == node.centre
+
+
+def test_sensor_lamp_texts_and_colours():
+    assert hmi_node.sensor_lamp("Back", "SAFE") == (
+        hmi_node.LAMP_GREEN, "Back Sensor : Safe")
+    assert hmi_node.sensor_lamp("Back", "WARNING") == (
+        hmi_node.LAMP_ORANGE, "Back Sensor : Warning Field")
+    assert hmi_node.sensor_lamp("Back", "PROTECTIVE") == (
+        hmi_node.LAMP_RED, "Back Sensor : Protective Field")
+
+
+def test_an_unknown_sensor_level_shows_the_safe_display():
+    # A display that has lost its source must not show a comfortable state.
+    colour, text = hmi_node.sensor_lamp("Left", None)
+    assert colour == hmi_node.LAMP_RED
+    assert text == "Left Sensor : Protective Field"
+
+
+def test_every_sensor_gets_its_own_name_in_the_text():
+    for name in ("Back", "Left", "Right"):
+        _, text = hmi_node.sensor_lamp(name, "SAFE")
+        assert text.startswith(name + " Sensor")

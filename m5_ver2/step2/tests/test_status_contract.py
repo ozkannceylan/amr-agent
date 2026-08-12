@@ -6,8 +6,8 @@ import status_contract
 
 def test_parse_status_reads_a_good_packet():
     msg = status_contract.parse_status(
-        b'{"estop_healthy": true, "motor": true, "ts": 3.0}')
-    assert msg == {"estop_healthy": True, "motor": True, "ts": 3.0}
+        b'{"estop_healthy": true, "motor": true, "case": 2, "ts": 3.0}')
+    assert msg == {"estop_healthy": True, "motor": True, "case": 2, "ts": 3.0}
 
 
 def test_parse_status_rejects_malformed_json():
@@ -26,14 +26,14 @@ def test_parse_status_rejects_a_non_boolean_motor():
     # needed; isinstance(True, int) also being True does not weaken it,
     # because the test is against bool and not against int.
     assert status_contract.parse_status(
-        b'{"estop_healthy": true, "motor": 1, "ts": 0.0}') is None
+        b'{"estop_healthy": true, "motor": 1, "case": 3, "ts": 0.0}') is None
     assert status_contract.parse_status(
-        b'{"estop_healthy": true, "motor": "off", "ts": 0.0}') is None
+        b'{"estop_healthy": true, "motor": "off", "case": 3, "ts": 0.0}') is None
 
 
 def test_parse_status_rejects_a_non_boolean_estop_healthy():
     assert status_contract.parse_status(
-        b'{"estop_healthy": 1, "motor": true, "ts": 0.0}') is None
+        b'{"estop_healthy": 1, "motor": true, "case": 3, "ts": 0.0}') is None
 
 
 def test_failsafe_is_tripped_in_both_fields():
@@ -52,7 +52,7 @@ def test_failsafe_cannot_be_rewritten_by_a_consumer():
     assert status_contract.FAILSAFE["motor"] is False
     # and it is still copyable, which is how plc_link takes a working one
     assert dict(status_contract.FAILSAFE) == {
-        "estop_healthy": False, "motor": False, "ts": 0.0}
+        "estop_healthy": False, "motor": False, "case": 3, "ts": 0.0}
 
 
 def test_is_stale_is_false_inside_the_window():
@@ -66,3 +66,27 @@ def test_is_stale_is_true_at_the_window():
 def test_is_stale_is_true_before_the_first_packet():
     # last_rx of None means nothing has ever arrived.
     assert status_contract.is_stale(None, 10.0, 0.5) is True
+
+
+def test_parse_status_rejects_a_packet_with_no_case():
+    # `case` joined the contract in Step 2. A Step 1 sender is not a Step 2
+    # one, and field_eval would otherwise get no field pair at all.
+    assert status_contract.parse_status(
+        b'{"estop_healthy": true, "motor": true, "ts": 1.0}') is None
+
+
+def test_parse_status_rejects_a_non_integer_case():
+    assert status_contract.parse_status(
+        b'{"estop_healthy": true, "motor": true, "case": "2", "ts": 1.0}') is None
+
+
+def test_parse_status_rejects_a_boolean_case():
+    # isinstance(True, int) is True in Python, so `true` would sneak through
+    # a bare int check and be read as case 1.
+    assert status_contract.parse_status(
+        b'{"estop_healthy": true, "motor": true, "case": true, "ts": 1.0}') is None
+
+
+def test_failsafe_carries_the_largest_field_case():
+    # Not knowing the case means assuming the most demanding one.
+    assert status_contract.FAILSAFE["case"] == 3

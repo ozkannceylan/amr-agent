@@ -75,9 +75,9 @@ def test_a_nan_steer_command_does_not_become_the_mechanical_stop():
 
 def test_motor_is_read_out_of_the_status_json():
     assert cmd_gate.motor_from_status(
-        '{"estop_healthy": true, "motor": true, "ts": 1.0}') is True
+        '{"estop_healthy": true, "motor": true, "case": 3, "ts": 1.0}') is True
     assert cmd_gate.motor_from_status(
-        '{"estop_healthy": true, "motor": false, "ts": 1.0}') is False
+        '{"estop_healthy": true, "motor": false, "case": 3, "ts": 1.0}') is False
 
 
 def test_unparseable_status_is_read_as_inhibited():

@@ -16,6 +16,7 @@ Usage (after sourcing /opt/ros/jazzy/setup.bash; WSLg provides DISPLAY):
   python3 m5_ver2/step2/ros2/hmi_node.py
 """
 
+import json
 import math
 import os
 import time
@@ -50,6 +51,17 @@ KNOB_RADIUS_PX = 100.0
 HMI_TOPIC = "/hmi/cmd_vel"
 LAMP_RED = "#c62828"
 LAMP_NEUTRAL = "#455a64"
+LAMP_GREEN = "#2e7d32"
+LAMP_ORANGE = "#ef6c00"
+
+FIELDS_TOPIC = "/forklift/safety/fields"
+SENSOR_NAMES = ("Back", "Left", "Right")
+
+_LEVEL_LAMP = {
+    "SAFE": (LAMP_GREEN, "Safe"),
+    "WARNING": (LAMP_ORANGE, "Warning Field"),
+    "PROTECTIVE": (LAMP_RED, "Protective Field"),
+}
 # ------------------------------------------------------------------
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -83,6 +95,18 @@ def lamp_state(estop_healthy):
     if estop_healthy:
         return (LAMP_NEUTRAL, "E-Stop Inactive")
     return (LAMP_RED, "E-Stop Active")
+
+
+def sensor_lamp(name, level):
+    """(colour, text) for one scanner lamp.
+
+    An unknown level - no message yet, a stale topic, a level this build
+    does not know - shows PROTECTIVE. A display that has lost its source
+    must not show a comfortable state, which is the rule Step 1 arrived at
+    the hard way when a dead callback left "Drive enable: ON" on screen.
+    """
+    colour, word = _LEVEL_LAMP.get(level, _LEVEL_LAMP["PROTECTIVE"])
+    return (colour, "{} Sensor : {}".format(name, word))
 
 
 def enable_text(motor):
@@ -126,6 +150,12 @@ class Hmi(Node):
 
         self.pub = self.create_publisher(Twist, HMI_TOPIC, 10)
         self.create_subscription(String, STATUS_TOPIC, self.cb_status, 10)
+        self.create_subscription(String, FIELDS_TOPIC, self.cb_fields, 10)
+        # Same rule as /plc/status: a report that stopped arriving is not a
+        # clear field. field_eval publishes at 10 Hz, so the window shares
+        # STATUS_STALE_S rather than inventing a third budget.
+        self.fields = {}
+        self.last_fields_rx = None
         self.knob = (0.0, 0.0)
         # A window that has not heard from the PLC claims nothing about
         # the chain: last_status_rx of None reads as stale, so the first
@@ -161,7 +191,16 @@ class Hmi(Node):
         self.lamp.pack(fill="x", padx=10)
         self.enable = tk.Label(root, text=enable_line,
                                font=("TkDefaultFont", 11))
-        self.enable.pack(pady=(6, 12))
+        self.enable.pack(pady=(6, 8))
+
+        self.sensor_lamps = {}
+        for name in SENSOR_NAMES:
+            colour, text = sensor_lamp(name, None)
+            w = tk.Label(root, text=text, fg="white", bg=colour,
+                         font=("TkDefaultFont", 11, "bold"), padx=10, pady=6)
+            w.pack(fill="x", padx=10, pady=2)
+            self.sensor_lamps[name] = w
+        tk.Frame(root, height=6).pack()
 
     def on_drag(self, event):
         cx, cy = self.centre
@@ -194,18 +233,36 @@ class Hmi(Node):
         self.status = FAILSAFE if state is None else state
         self.last_status_rx = time.monotonic()
 
+    def cb_fields(self, msg):
+        """Same shape as cb_status: record what and when, draw on the tick."""
+        try:
+            report = json.loads(msg.data)
+        except ValueError:
+            report = {}
+        self.fields = report if isinstance(report, dict) else {}
+        self.last_fields_rx = time.monotonic()
+
     def refresh(self):
         """Redraw only on a CHANGE. configure() at 20 Hz would mark both
         labels dirty every tick for a display that changes a few times a
         session."""
-        shown = display_state(
-            self.status, self.last_status_rx, time.monotonic())
-        if shown == self.shown:
-            return
-        self.shown = shown
-        colour, lamp_text, enable_line = shown
-        self.lamp.configure(bg=colour, text=lamp_text)
-        self.enable.configure(text=enable_line)
+        now = time.monotonic()
+        shown = display_state(self.status, self.last_status_rx, now)
+        if shown != self.shown:
+            self.shown = shown
+            colour, lamp_text, enable_line = shown
+            self.lamp.configure(bg=colour, text=lamp_text)
+            self.enable.configure(text=enable_line)
+
+        # A stale /forklift/safety/fields shows the safe display, by the
+        # same rule and the same constant as /plc/status above.
+        stale = is_stale(self.last_fields_rx, now, STATUS_STALE_S)
+        for name, widget in self.sensor_lamps.items():
+            entry = None if stale else self.fields.get(name.lower())
+            lvl = entry.get("level") if isinstance(entry, dict) else None
+            colour, text = sensor_lamp(name, lvl)
+            if widget.cget("text") != text:
+                widget.configure(bg=colour, text=text)
 
     def tick(self):
         """The 20 Hz tick, and the only thing that can notice a

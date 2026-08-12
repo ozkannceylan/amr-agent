@@ -70,15 +70,19 @@ STATUS_TOPIC = "/plc/status"
 STATUS_STALE_S = 0.25
 # ------------------------------------------------------------------
 
-#: The three keys of the wire format step2.py sends. `issubset` and not
+#: The keys of the wire format step2.py sends. `issubset` and not
 #: equality: a later sender adding a field must still pass this parser.
-_REQUIRED_KEYS = {"estop_healthy", "motor", "ts"}
+#: `case` joined in Step 2 - field_eval picks its (PF, WF) pair from it,
+#: and Step 1 left CASE_B0/CASE_B1 deliberately unconsumed.
+_REQUIRED_KEYS = {"estop_healthy", "motor", "case", "ts"}
 
 #: What the vehicle is told when the link is stale or has never spoken.
 #: Read-only on purpose - see the module docstring. Copy it with
 #: dict(FAILSAFE) before handing it anywhere that mutates.
+#: case 3 is the LARGEST field: not knowing which case applies means
+#: assuming the most demanding one (microscan3.py:16).
 FAILSAFE = MappingProxyType(
-    {"estop_healthy": False, "motor": False, "ts": 0.0})
+    {"estop_healthy": False, "motor": False, "case": 3, "ts": 0.0})
 
 
 def parse_status(data):
@@ -98,6 +102,10 @@ def parse_status(data):
     for key in ("motor", "estop_healthy"):
         if not isinstance(msg[key], bool):
             return None
+    # isinstance(True, int) is True in Python, so bool must be excluded or
+    # a JSON `true` would pass as a monitoring case.
+    if not isinstance(msg["case"], int) or isinstance(msg["case"], bool):
+        return None
     return msg
 
 

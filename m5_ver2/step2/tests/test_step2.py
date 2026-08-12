@@ -7,16 +7,16 @@ import step2
 
 
 def test_status_payload_has_exactly_the_three_wire_keys():
-    raw = step2.status_payload(True, False, 12.5)
+    raw = step2.status_payload(True, False, 2, 12.5)
     msg = json.loads(raw.decode())
-    assert set(msg) == {"estop_healthy", "motor", "ts"}
+    assert set(msg) == {"estop_healthy", "motor", "case", "ts"}
     assert msg["estop_healthy"] is True
     assert msg["motor"] is False
     assert msg["ts"] == 12.5
 
 
 def test_status_payload_emits_real_json_booleans_not_strings():
-    msg = json.loads(step2.status_payload(False, True, 0.0).decode())
+    msg = json.loads(step2.status_payload(False, True, 3, 0.0).decode())
     assert isinstance(msg["estop_healthy"], bool)
     assert isinstance(msg["motor"], bool)
 
