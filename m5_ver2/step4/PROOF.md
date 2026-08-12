@@ -8,6 +8,10 @@ two are blocked behind the failure.** The code is committed and 106 tests
 pass; what is missing is the live demonstration, and §2 says exactly what is
 unexplained.
 
+> **Superseded later the same day: see §7.** After the fixes listed there,
+> rows 3 and 4 were demonstrated live by the owner and the whole layer was
+> recorded on video. §2's oscillation was not re-examined and stays open.
+
 | # | Step | Expected | Measured |
 |---|---|---|---|
 | 1 | `V_Limit` reaches the vehicle | %MW100 on the 5100 wire | **`vlim=300`** and **`vlim=1500`** both observed in `step4.py`'s status line — the only two values the F-program computes. **PASS** |
@@ -113,3 +117,30 @@ Enabling took **three** `a` pulses in the successful run and did not enable
 at all in the run before it, with `E-Stop=True`, `PF_OSSD=True` and the
 encoder channels agreeing at 0/0 the whole time. Steps 1 to 3 always enabled
 on the first pulse. Not investigated, and it may share a cause with §2.
+
+## 7. Later the same day — rows 3 and 4 demonstrated
+
+Between the run above and this section, four things changed:
+
+- The owner added the right and left scanners to the F-DI
+  (`PF_OSSD_right/left`, `WF_Clear_right/left`) with their own ESTOP1
+  networks, and corrected their ACK wiring to the shared `Acknowledge`
+  input after the first download left it at a literal false.
+- The vehicle side grew to match: the 5101 wire carries all six verdicts,
+  and `step4.py` writes all six inputs every cycle and trips all six on
+  exit.
+- The back scanner's self-view mask was re-measured **across the steer
+  sweep** — it had been measured at steer zero only, and was the source of
+  PROTECTIVE latching in empty space the moment the truck steered
+  (`field_eval.py` SELF_MUTE, docs/LESSONS.md 2026-08-12).
+- The warehouse was relaid open (`warehouse_ver2.sdf`) and `step4.sh home`
+  added, so a latched stop no longer costs a simulator restart.
+
+Then, driven live by the owner: **in the warning field the truck creeps at
+the 300 mm/s ceiling instead of accelerating through it (row 3's expected
+behaviour, observed), full speed is available in open space (row 4), each
+scanner's protective field latches its own stop, and the `home` +
+`Acknowledge` cycle recovers without a restart.** The session is recorded
+on video, linked from the root README, and that recording is the evidence
+for this section — no per-cycle log was captured. A logged rerun of rows
+3–5, and §2's oscillation, remain the open items.
