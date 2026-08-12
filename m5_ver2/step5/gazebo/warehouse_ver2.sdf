@@ -1330,5 +1330,232 @@
       </link>
     </model>
 
+    <!-- ===================== Step 5 station paint ===================== -->
+    <!-- Ten pick/charge/dock stations. ipc/stations.py is the one home
+         for these poses; tests/test_stations_sdf.py fails the build if
+         this paint and that file disagree. Same recipe as the charge-bay
+         markings above: static, visual-only, <= 8 mm proud, so neither
+         scan plane nor the nav lidar ever sees them. The tick shows the
+         approach heading (stations.py yaw). -->
+    <model name="StationS1Paint">
+      <static>true</static>
+      <pose>-3.000 -5.500 0 0 0 0</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="StationS2Paint">
+      <static>true</static>
+      <pose>-9.800 -6.600 0 0 0 0</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.000 -0.330 0.005 0 0 -1.570796</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="StationS3Paint">
+      <static>true</static>
+      <pose>-7.400 -6.600 0 0 0 0</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.000 -0.330 0.005 0 0 -1.570796</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="StationS4Paint">
+      <static>true</static>
+      <pose>6.000 -8.000 0 0 0 0</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.000 -0.330 0.005 0 0 -1.570796</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="StationS5Paint">
+      <static>true</static>
+      <pose>13.000 5.650 0 0 0 0</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="StationS6Paint">
+      <static>true</static>
+      <pose>-8.000 7.000 0 0 0 0</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.000 0.330 0.005 0 0 1.570796</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="StationS7Paint">
+      <static>true</static>
+      <pose>8.000 7.000 0 0 0 0</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.000 0.330 0.005 0 0 1.570796</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="StationS8Paint">
+      <static>true</static>
+      <pose>-8.000 4.300 0 0 0 0</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.000 -0.330 0.005 0 0 -1.570796</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="StationS9Paint">
+      <static>true</static>
+      <pose>8.000 4.300 0 0 0 0</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.000 -0.330 0.005 0 0 -1.570796</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="StationS10Paint">
+      <static>true</static>
+      <pose>-6.000 -1.600 0 0 0 0</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.000 0.330 0.005 0 0 1.570796</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
   </world>
 </sdf>
