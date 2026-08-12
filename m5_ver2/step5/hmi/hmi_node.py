@@ -33,11 +33,15 @@ sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "ipc")))
 import rclpy
 import yaml
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 
+import map_panel
 from status_contract import (
-    ENCODERS_TOPIC, FAILSAFE, FIELDS_TOPIC, HMI_CMD_TOPIC, STATUS_STALE_S,
+    AUTO_GOAL_TOPIC, AUTO_STATE_TOPIC, ENCODERS_TOPIC, FAILSAFE, FIELDS_TOPIC,
+    HMI_CMD_TOPIC, MODE_AUTO, MODE_TELEOP, MODE_TOPIC, STATUS_STALE_S,
     STATUS_TOPIC, is_stale, parse_status, speed_limit_mm_s)
 
 # ----------------------------- CONFIG -----------------------------
@@ -57,6 +61,12 @@ SPIN_MS = 4
 # including why an exact multiple of THIS file's tick is accepted, is at
 # that home.
 KNOB_RADIUS_PX = 100.0
+# The knob greys out in auto. It is HONESTY, not a second interlock: the
+# mux stops forwarding /hmi/cmd_vel the instant auto is selected, so a
+# knob that still looked live would be the same lying display this
+# window exists to prevent.
+KNOB_TELEOP = "#37474f"
+KNOB_AUTO = "#b0bec5"
 LAMP_RED = "#c62828"
 LAMP_NEUTRAL = "#455a64"
 LAMP_GREEN = "#2e7d32"
@@ -187,6 +197,27 @@ class Hmi(Node):
         self.create_subscription(String, FIELDS_TOPIC, self.cb_fields, 10)
         self.create_subscription(
             String, ENCODERS_TOPIC, self.cb_encoders, 10)
+        # THE MODE PUBLISHER IS LATCHED, AND IT HAS TO BE. cmd_mux and
+        # nav_node both subscribe TRANSIENT_LOCAL so a node started after
+        # this window still learns the mode; a VOLATILE publisher here is
+        # incompatible with those subscriptions and delivers NOTHING to
+        # either - measured in Task 6, where the Auto button silently did
+        # nothing at all.
+        latched = QoSProfile(
+            depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.pub_mode = self.create_publisher(String, MODE_TOPIC, latched)
+        self.pub_goal = self.create_publisher(String, AUTO_GOAL_TOPIC, 10)
+        # The odom topic name is config.yaml's - the file that owns it -
+        # read the way nav_node and encoder_link read theirs.
+        self.create_subscription(
+            Odometry, cfg["topics"]["gz_odom"], self.cb_odom, 10)
+        self.create_subscription(
+            String, AUTO_STATE_TOPIC, self.cb_auto_state, 10)
+        self.mode = MODE_TELEOP
+        self.pub_mode.publish(String(data=self.mode))   # latch the default
+        self.pose = None
+        self.auto_state = None
+        self.last_auto_rx = None
         # Same rule as /plc/status: a report that stopped arriving is not a
         # clear field. field_eval publishes at 10 Hz, so the window shares
         # STATUS_STALE_S rather than inventing a third budget.
@@ -206,14 +237,23 @@ class Hmi(Node):
         root.title("Step 5 - forklift teleoperation")
         cx = cy = KNOB_RADIUS_PX + 20
 
-        self.canvas = tk.Canvas(root, width=2 * cx, height=2 * cy,
+        # Two columns: Step 4's window on the left, unchanged in every
+        # respect but its parent, and Step 5's warehouse sketch on the
+        # right. The lamps keep their order and their width.
+        body = tk.Frame(root)
+        body.pack(fill="both", expand=True)
+        left = tk.Frame(body)
+        left.pack(side="left", anchor="n")
+
+        self.canvas = tk.Canvas(left, width=2 * cx, height=2 * cy,
                                 bg="#eceff1", highlightthickness=0)
         self.canvas.pack(padx=10, pady=10)
         self.canvas.create_oval(cx - KNOB_RADIUS_PX, cy - KNOB_RADIUS_PX,
                                 cx + KNOB_RADIUS_PX, cy + KNOB_RADIUS_PX,
                                 outline="#90a4ae", width=2)
         self.dot = self.canvas.create_oval(cx - 14, cy - 14, cx + 14, cy + 14,
-                                           fill="#37474f", outline="")
+                                           fill=KNOB_TELEOP, outline="")
+        self.dot_colour = KNOB_TELEOP
         self.centre = (cx, cy)
         self.canvas.bind("<B1-Motion>", self.on_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_release)
@@ -224,28 +264,63 @@ class Hmi(Node):
             self.status, self.last_status_rx, time.monotonic())
         colour, lamp_text, enable_line = self.shown
         self.lamp = tk.Label(
-            root, text=lamp_text, fg="white", bg=colour,
+            left, text=lamp_text, fg="white", bg=colour,
             font=("TkDefaultFont", 16, "bold"), padx=16, pady=10)
         self.lamp.pack(fill="x", padx=10)
-        self.enable = tk.Label(root, text=enable_line,
+        self.enable = tk.Label(left, text=enable_line,
                                font=("TkDefaultFont", 11))
         self.enable.pack(pady=(6, 8))
 
         self.sensor_lamps = {}
         for name in SENSOR_NAMES:
             colour, text = sensor_lamp(name, None)
-            w = tk.Label(root, text=text, fg="white", bg=colour,
+            w = tk.Label(left, text=text, fg="white", bg=colour,
                          font=("TkDefaultFont", 11, "bold"), padx=10, pady=6)
             w.pack(fill="x", padx=10, pady=2)
             self.sensor_lamps[name] = w
         ecol, etext = encoder_lamp(None)
         self.encoder_widget = tk.Label(
-            root, text=etext, fg="white", bg=ecol,
+            left, text=etext, fg="white", bg=ecol,
             font=("TkDefaultFont", 11, "bold"), padx=10, pady=6)
         self.encoder_widget.pack(fill="x", padx=10, pady=(6, 2))
-        tk.Frame(root, height=6).pack()
+        tk.Frame(left, height=6).pack()
+
+        # STOP is the goal cancel, not a brake: nav_core reads an empty
+        # station id as "cancelled" and parks. The e-stop is the brake.
+        self.panel = map_panel.MapPanel(
+            body, on_mode=self.set_mode, on_go=self.send_goal,
+            on_stop=lambda: self.send_goal(""))
+        self.panel.frame.pack(side="left", anchor="n")
+
+    def set_mode(self, mode):
+        """Radio change. Leaving auto is also the goal cancel - the mux
+        stops listening to nav the same instant (its own rule), so the
+        two cannot disagree for longer than one message."""
+        self.mode = mode
+        self.pub_mode.publish(String(data=mode))
+        if mode != MODE_AUTO:
+            self.pub_goal.publish(String(data=""))
+
+    def send_goal(self, station_id):
+        self.pub_goal.publish(String(data=station_id))
+
+    def cb_odom(self, msg):
+        p, q = msg.pose.pose.position, msg.pose.pose.orientation
+        self.pose = (p.x, p.y, 2.0 * math.atan2(q.z, q.w))
+
+    def cb_auto_state(self, msg):
+        try:
+            report = json.loads(msg.data)
+        except ValueError:
+            report = None
+        self.auto_state = report if isinstance(report, dict) else None
+        self.last_auto_rx = time.monotonic()
 
     def on_drag(self, event):
+        # Display-only in auto: the mux ignores /hmi/cmd_vel there, so a
+        # knob that still moved would claim an authority it has not got.
+        if self.mode == MODE_AUTO:
+            return
         cx, cy = self.centre
         dx, dy = event.x - cx, event.y - cy
         dist = math.hypot(dx, dy)
@@ -320,6 +395,20 @@ class Hmi(Node):
         ecol, etext = encoder_lamp(healthy)
         if self.encoder_widget.cget("text") != etext:
             self.encoder_widget.configure(bg=ecol, text=etext)
+
+        knob = KNOB_AUTO if self.mode == MODE_AUTO else KNOB_TELEOP
+        if knob != self.dot_colour:
+            self.dot_colour = knob
+            self.canvas.itemconfigure(self.dot, fill=knob)
+
+        if self.pose is not None:
+            self.panel.update_pose(*self.pose)
+        # A stale /auto/state reads as NO data, not as the last state:
+        # nav goes silent exactly when it loses pose, and a screen still
+        # showing EN-ROUTE over a dead autopilot is the same lie the lamp
+        # rules above exist to remove.
+        auto_stale = is_stale(self.last_auto_rx, now, STATUS_STALE_S)
+        self.panel.update_auto(None if auto_stale else self.auto_state)
 
     def tick(self):
         """The 20 Hz tick, and the only thing that can notice a

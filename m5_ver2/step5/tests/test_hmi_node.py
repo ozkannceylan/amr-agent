@@ -161,9 +161,27 @@ class _Canvas:
 
     def __init__(self):
         self.moved_to = None
+        self.told = {}
 
     def coords(self, _item, *box):
         self.moved_to = box
+
+    def itemconfigure(self, item, **kwargs):
+        self.told[item] = kwargs
+
+
+class _Panel:
+    """Stands in for map_panel.MapPanel: refresh() feeds it, nothing more."""
+
+    def __init__(self):
+        self.pose = None
+        self.auto = "unset"
+
+    def update_pose(self, x, y, yaw):
+        self.pose = (x, y, yaw)
+
+    def update_auto(self, report):
+        self.auto = report
 
 
 class _Clock:
@@ -221,8 +239,14 @@ class _StubHmi:
         self.canvas = _Canvas()
         self.pub = _Pub()
         self.dot = "dot"
+        self.dot_colour = hmi_node.KNOB_TELEOP
         self.centre = (120.0, 120.0)
         self.knob = (0.0, 0.0)
+        self.mode = hmi_node.MODE_TELEOP
+        self.panel = _Panel()
+        self.pose = None
+        self.auto_state = None
+        self.last_auto_rx = None
         self.speed_max = SPEED_MAX
         self.steer_max = STEER_MAX
         self.status = hmi_node.FAILSAFE
