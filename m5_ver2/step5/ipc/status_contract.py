@@ -60,8 +60,24 @@ SCAN_TOPIC = "/forklift/gz/safety_scanner_{}/measurement"
 # The drive-speed channels are DELIBERATELY ABSENT. config.yaml owns
 # topics.gz_drive_speed_read_a/b, so encoder_link reads them from there
 # and this file must not become a second source for a name that
-# already has one. Only the four names config.yaml has never heard of
-# live here.
+# already has one. This is the one home for every topic name
+# config.yaml has never heard of.
+
+# STEP 5'S NAMES, HERE FOR THE SAME REASON. /hmi/cmd_vel moves in from
+# cmd_gate.py and hmi_node.py so the mux does not become a third
+# spelling. ODOM_TOPIC and NAV_SCAN_TOPIC are model.sdf's own explicit
+# topic names (OdometryPublisher <odom_topic>, nav_lidar <topic>);
+# config.yaml has never heard of either, so they live here.
+HMI_CMD_TOPIC = "/hmi/cmd_vel"
+VEHICLE_CMD_TOPIC = "/vehicle/cmd_vel"   # cmd_mux -> cmd_gate, the one seam
+AUTO_CMD_TOPIC = "/auto/cmd_vel"         # nav_node -> cmd_mux
+AUTO_GOAL_TOPIC = "/auto/goal"           # HMI -> nav_node, station id or ""
+AUTO_STATE_TOPIC = "/auto/state"         # nav_node -> HMI, JSON
+MODE_TOPIC = "/hmi/mode"                 # HMI -> mux & nav, latched
+MODE_TELEOP = "teleop"
+MODE_AUTO = "auto"
+ODOM_TOPIC = "/forklift/gz/odom"
+NAV_SCAN_TOPIC = "/forklift/gz/scan_nav"
 
 # The ROS-side timeout on /plc/status: how long a consumer keeps
 # believing the last thing the PLC said. ONE constant, because the

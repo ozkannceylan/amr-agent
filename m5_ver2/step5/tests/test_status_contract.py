@@ -123,3 +123,29 @@ def test_an_implausible_speed_limit_narrows_to_creep():
     for bad in (0, -1, -300, 3001, 32767, None, "1500", True):
         assert status_contract.speed_limit_mm_s(bad) == \
             status_contract.V_LIMIT_CREEP_MM_S
+
+
+def test_step5_topic_names_are_absolute_and_distinct():
+    names = (status_contract.HMI_CMD_TOPIC, status_contract.VEHICLE_CMD_TOPIC,
+             status_contract.AUTO_CMD_TOPIC, status_contract.AUTO_GOAL_TOPIC,
+             status_contract.AUTO_STATE_TOPIC, status_contract.MODE_TOPIC,
+             status_contract.ODOM_TOPIC, status_contract.NAV_SCAN_TOPIC)
+    assert all(n.startswith("/") for n in names)
+    assert len(set(names)) == len(names)
+
+
+def test_hmi_cmd_topic_is_the_historical_literal():
+    # /hmi/cmd_vel predates this file; moving it here must not respell it.
+    assert status_contract.HMI_CMD_TOPIC == "/hmi/cmd_vel"
+
+
+def test_gz_source_topics_match_the_model_sdf():
+    # model.sdf owns these names (sensor <topic> and <odom_topic>); this
+    # file is their one ROS-side home, so the spelling must be exact.
+    assert status_contract.ODOM_TOPIC == "/forklift/gz/odom"
+    assert status_contract.NAV_SCAN_TOPIC == "/forklift/gz/scan_nav"
+
+
+def test_mode_words_are_distinct_and_lowercase():
+    assert status_contract.MODE_TELEOP == "teleop"
+    assert status_contract.MODE_AUTO == "auto"
