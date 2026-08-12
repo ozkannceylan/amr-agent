@@ -100,6 +100,56 @@ sweep() {  # sweep <signal>
     done
 }
 
+home() {
+    # Teleport the forklift back to the launch file's spawn pose, so a
+    # latched protective field does not cost a simulator restart. gz only:
+    # nothing here touches PLCSIM or the PLC program (single-writer rule),
+    # so the ESTOP1 latches stay latched and the panel's 'a' is still the
+    # reset - this moves the PLANT, not the safety state.
+    #
+    # THE POSE COMES FROM THE LAUNCH FILE, NOT FROM A COPY. _SPAWN in
+    # step4_world.launch.py is the one home the spawn pose has; a literal
+    # here would drift the moment someone moves the spawn.
+    #
+    # THE PARTITION IS THE RUNNING STACK'S, read back off a recorded pid
+    # exactly as stop() does: a home where GZ_PARTITION differs from the
+    # start would time out against an empty bus and print a shrug over a
+    # live simulator.
+    local pid p launch="$STEP4/gazebo/step4_world.launch.py"
+    if [ -f "$PIDFILE" ]; then
+        p="$(while read -r pid; do
+                 case "$pid" in ''|*[!0-9]*) continue ;; esac
+                 recorded "$pid" && tr '\0' '\n' 2>/dev/null < "/proc/$pid/environ"
+             done < "$PIDFILE" | sed -n 's/^GZ_PARTITION=//p' | head -1)"
+        [ -n "$p" ] && GZ_PARTITION="$p"
+    fi
+    set +u; # shellcheck disable=SC1090
+    source "$ROS_SETUP"; set -u
+    local x y z yaw
+    x="$(sed -n 's/.*"x": "\([^"]*\)".*/\1/p' "$launch" | head -1)"
+    y="$(sed -n 's/.*"y": "\([^"]*\)".*/\1/p' "$launch" | head -1)"
+    z="$(sed -n 's/.*"z": "\([^"]*\)".*/\1/p' "$launch" | head -1)"
+    yaw="$(sed -n 's/.*"yaw": "\([^"]*\)".*/\1/p' "$launch" | head -1)"
+    if [ -z "$x" ] || [ -z "$y" ] || [ -z "$z" ] || [ -z "$yaw" ]; then
+        echo "cannot read _SPAWN from $launch"; return 1
+    fi
+    # Quaternion from yaw, so a later spawn with a heading still homes
+    # true. awk, because the shell has no cosine.
+    local qw qz
+    qw="$(awk "BEGIN{printf \"%.9f\", cos($yaw/2)}")"
+    qz="$(awk "BEGIN{printf \"%.9f\", sin($yaw/2)}")"
+    echo "homing forklift to ($x, $y, $z, yaw $yaw) in partition $GZ_PARTITION"
+    if gz service -s /world/warehouse/set_pose \
+        --reqtype gz.msgs.Pose --reptype gz.msgs.Boolean --timeout 3000 \
+        --req "name: \"forklift\", position: {x: $x, y: $y, z: $z}, orientation: {w: $qw, z: $qz}" \
+        | grep -q "data: true"; then
+        echo "home. The PLC latches are untouched - reset from the panel ('a')."
+    else
+        echo "set_pose refused or timed out: is the stack up ('$0 start')?"
+        return 1
+    fi
+}
+
 start() {
     local pid
     if [ -f "$PIDFILE" ]; then
@@ -227,9 +277,11 @@ stop() {
     sweep KILL
     echo "down."
 }
-USAGE="usage: $0 start [--headless] | stop
+USAGE="usage: $0 start [--headless] | stop | home
   start       warehouse + forklift in a Gazebo window, plus the HMI
-  --headless  no Gazebo window (gui:=false, the launch file's own default)"
+  --headless  no Gazebo window (gui:=false, the launch file's own default)
+  home        teleport the forklift back to the spawn pose (stack stays up;
+              PLC latches stay latched - reset from the panel)"
 case "${1:-}" in
     start|--start)
         case "${2:-}" in
@@ -243,5 +295,6 @@ case "${1:-}" in
         esac
         start ;;
     stop|--stop)   stop ;;
+    home|--home)   home ;;
     *) echo "$USAGE"; exit 2 ;;
 esac
