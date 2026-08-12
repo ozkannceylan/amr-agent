@@ -28,6 +28,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STEP5="$REPO/m5_ver2/step5"
 PIDFILE="$STEP5/.step5_pids"
 LOGDIR="$STEP5/logs"
+DEPLOY="$STEP5/deploy"
 ROS_SETUP="/opt/ros/jazzy/setup.bash"
 
 export GZ_PARTITION="${GZ_PARTITION:-step5}"
@@ -151,6 +152,55 @@ home() {
     fi
 }
 
+deploy() {
+    # The "image build": a frozen copy of the vehicle software, laid out
+    # at SOURCE depth so every relative path inside it still resolves -
+    # deploy/m5_ver2/step5/ipc/cmd_gate.py finds config.yaml at
+    # deploy/agv/forklift/config.yaml through the same ../../.. walk the
+    # source tree uses. Owner ruling 2026-08-12: Docker Desktop cannot
+    # pass DDS across its VM, so the deploy is simulated; the BOUNDARY
+    # (what ships, what stays) is the same one a container would have.
+    rm -rf "$DEPLOY"
+    mkdir -p "$DEPLOY/m5_ver2/step5" "$DEPLOY/agv/forklift"
+    cp -r "$STEP5/ipc" "$DEPLOY/m5_ver2/step5/ipc"
+    cp "$REPO/agv/forklift/config.yaml" "$DEPLOY/agv/forklift/"
+    find "$DEPLOY" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
+    ( cd "$DEPLOY" && {
+        echo "# step5 deploy - generated, do not edit"
+        echo "# source-git: $(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+        echo "# date: $(date -Iseconds)"
+        find . -type f ! -name MANIFEST -print0 | sort -z | xargs -0 sha256sum
+      } > MANIFEST )
+    echo "deployed $(grep -c '^[^#]' "$DEPLOY/MANIFEST") files to $DEPLOY"
+}
+
+stale_check() {
+    # Compare the manifest against the CURRENT source. Stale is a loud
+    # warning, not a refusal: running yesterday's build is exactly what
+    # a real vehicle does until someone redeploys, and seeing that
+    # happen is the point of the exercise.
+    local stale=0 h p s
+    while read -r h p; do
+        case "$p" in
+            ./m5_ver2/step5/ipc/*) s="$STEP5/ipc/${p#./m5_ver2/step5/ipc/}" ;;
+            ./agv/*)               s="$REPO/${p#./}" ;;
+            *)                     continue ;;
+        esac
+        [ "$(sha256sum "$s" 2>/dev/null | cut -d' ' -f1)" = "$h" ] || stale=1
+    done < <(grep -v '^#' "$DEPLOY/MANIFEST")
+    # A file added to source since the deploy is also a divergence.
+    local src_n man_n
+    src_n=$(find "$STEP5/ipc" -type f ! -path '*__pycache__*' | wc -l)
+    man_n=$(grep -c 'm5_ver2/step5/ipc' "$DEPLOY/MANIFEST")
+    [ "$src_n" != "$man_n" ] && stale=1
+    if [ "$stale" = 1 ]; then
+        echo "  ================================================="
+        echo "  WARNING: deploy is STALE - the vehicle will run"
+        echo "  the OLD software. Rerun '$0 deploy' to ship."
+        echo "  ================================================="
+    fi
+}
+
 start() {
     local pid
     if [ -f "$PIDFILE" ]; then
@@ -168,6 +218,26 @@ start() {
         # return above is what keeps start from writing to a LIVE stack.
         rm -f "$PIDFILE"
     fi
+    # UDP :5100 IS A SINGLE-HOLDER RESOURCE, AND LOSING IT IS QUIET. plc_link
+    # binds it; a step4 or step5 stack already up owns it, and the second
+    # bind dies EADDRINUSE inside the first second - the stack then comes up
+    # with the PLC link missing and says so in ONE warning line among nine
+    # pids (hit twice while building Task 8). Refuse first, and name the
+    # holder, because "already running" is the answer the operator needs.
+    if ss -uln 2>/dev/null | grep -q ':5100 '; then
+        echo "UDP :5100 is already bound - another stack holds the PLC link:"
+        ss -ulpn 2>/dev/null | grep ':5100 '
+        echo "stop that stack first, then start this one."
+        return 1
+    fi
+    # NO DEPLOY, NO SOFTWARE. The vehicle runs the frozen tree and only that;
+    # falling back to source would make the deploy decorative.
+    if [ ! -f "$DEPLOY/MANIFEST" ]; then
+        echo "no deploy found - the industrial PC has no software."
+        echo "run '$0 deploy' first."
+        return 1
+    fi
+    stale_check
     [ -f "$ROS_SETUP" ] || { echo "no $ROS_SETUP"; return 1; }
     # Unchecked, an unwritable log dir fails all four redirections, and start
     # would sleep its way to "up." over a stack that never began.
@@ -197,16 +267,22 @@ start() {
     echo "starting the Step 5 vehicle side (partition $GZ_PARTITION, domain $ROS_DOMAIN_ID, gui $GUI)"
     spawn world  ros2 launch "$STEP5/gazebo/step5_world.launch.py" "gui:=$GUI"
     sleep 5
-    spawn plc_link python3 "$STEP5/ipc/plc_link.py"
-    spawn cmd_gate python3 "$STEP5/ipc/cmd_gate.py"
-    spawn cmd_mux python3 "$STEP5/ipc/cmd_mux.py"
+    # EVERY VEHICLE NODE RUNS FROM THE DEPLOY, NOT FROM ipc/. That is the
+    # whole point of deploy(): editing a source file mid-run changes nothing
+    # until someone ships it. The HMI is the exception and stays in source -
+    # it is the operator's panel on the commissioning laptop, not software
+    # on the industrial PC, and drawing that line IS the deliverable.
+    local IPC="$DEPLOY/m5_ver2/step5/ipc"
+    spawn plc_link python3 "$IPC/plc_link.py"
+    spawn cmd_gate python3 "$IPC/cmd_gate.py"
+    spawn cmd_mux  python3 "$IPC/cmd_mux.py"
     # field_eval BEFORE sensor_link, so the link never sends a verdict from
     # a device that has not been evaluated yet.
-    spawn field_eval   python3 "$STEP5/ipc/field_eval.py"
-    spawn encoder_link python3 "$STEP5/ipc/encoder_link.py"
-    spawn sensor_link python3 "$STEP5/ipc/sensor_link.py"
-    spawn nav_node    python3 "$STEP5/ipc/nav_node.py"
-    spawn hmi         python3 "$STEP5/hmi/hmi_node.py"
+    spawn field_eval   python3 "$IPC/field_eval.py"
+    spawn encoder_link python3 "$IPC/encoder_link.py"
+    spawn sensor_link  python3 "$IPC/sensor_link.py"
+    spawn nav_node     python3 "$IPC/nav_node.py"
+    spawn hmi          python3 "$STEP5/hmi/hmi_node.py"
 
     # "A process that dies in its first fraction of a second has not started,
     # and saying 'started' about it sends the operator to the wrong log"
@@ -281,11 +357,14 @@ stop() {
     sweep KILL
     echo "down."
 }
-USAGE="usage: $0 start [--headless] | stop | home
+USAGE="usage: $0 start [--headless] | stop | home | deploy
   start       warehouse + forklift in a Gazebo window, plus the HMI
   --headless  no Gazebo window (gui:=false, the launch file's own default)
   home        teleport the forklift back to the spawn pose (stack stays up;
-              PLC latches stay latched - reset from the panel)"
+              PLC latches stay latched - reset from the panel)
+  deploy      freeze ipc/ + config.yaml into deploy/ with a sha256 MANIFEST
+              - the 'image build'. start refuses without one and warns
+              loudly when the source has moved on since."
 case "${1:-}" in
     start|--start)
         case "${2:-}" in
@@ -300,5 +379,6 @@ case "${1:-}" in
         start ;;
     stop|--stop)   stop ;;
     home|--home)   home ;;
+    deploy|--deploy) deploy ;;
     *) echo "$USAGE"; exit 2 ;;
 esac
