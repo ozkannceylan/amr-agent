@@ -59,12 +59,26 @@ SENSORS = ("back", "left", "right")
 # owner's own drawing shows the left and right fans notched where the
 # body blocks them.
 #
-# MEASURED, NOT ASSUMED, on the spawn pose in an empty aisle, taking every
-# ray returning under 1.2 m:
-#   back   idx   0.. 2 and 272..274   the drive wheel, at the fan's edges
-#   left   idx   7..65               the mast and carriage, inboard-forward
+# MEASURED, NOT ASSUMED - and measured ACROSS THE STEER SWEEP, not at one
+# pose. The 2026-08-12 audit (vehicle alone on an open floor, scans taken
+# at 13 steer angles from -1.31 to +1.31 rad and with the fork lifted)
+# found:
+#   back   idx 0..5 and 269..274, range 0.10..0.15 m. The steer yoke and
+#          drive wheel cross the z = 0.15 scan plane 0.17 m from the
+#          sensor and ROTATE: at steer 0 they sit at idx 0..2/272..274,
+#          which is why the first version of this table - measured only
+#          at the spawn pose - held (0,4)/(270,274) and every straight
+#          run passed; at +-0.35 rad their corners reach idx 5 and 269,
+#          which is why the first steering input latched PROTECTIVE in
+#          empty space. The sweep bound matches the geometry: the swept
+#          corner circle (r 0.126 m at d 0.17 m) subtends +-47.9 deg
+#          about dead astern, leaking 5.4 deg past the 85 deg blind
+#          sector on each side.
+#   left   idx   7..65               the mast and carriage, steer-proof
+#                                    (blind sector covers the drive end),
+#                                    shrinking as the fork lifts
 #   right  idx 209..267              the mirror image of left
-# Widened by a few rays each side so a small mount change does not leak a
+# Widened by two rays each side so a small mount change does not leak a
 # self-return into the minimum.
 #
 # THE COST, STATED: an obstacle inside a muted sector is invisible to that
@@ -73,7 +87,7 @@ SENSORS = ("back", "left", "right")
 # a real object could be ignored, and it is why the sectors are listed
 # explicitly rather than derived at runtime from "whatever looks close".
 SELF_MUTE = {
-    "back": ((0, 4), (270, 274)),
+    "back": ((0, 7), (267, 274)),
     "left": ((5, 68),),
     "right": ((206, 269),),
 }
@@ -86,16 +100,26 @@ def fields_for_case(case):
 
 
 def min_range(ranges, range_max=RANGE_MAX_M, mute=()):
-    """Nearest real return, with non-returns treated as the horizon.
+    """Nearest real return, with each non-return class read for what it is.
 
-    gz reports a no-return as inf and can report nan. A naive min() over
-    [inf, inf] gives inf and over a list holding nan gives nan, and neither
-    compares usefully against a threshold. Both become range_max first.
+    A ray that is not a finite distance is one of THREE things, and only
+    one of them is proof of clear space (LL-amr-agent-008: a non-return is
+    a measurement, not missing data - but WHICH measurement depends on the
+    sign):
+      +inf   no return within range_max: clear to the horizon, so it
+             becomes range_max.
+      -inf   a return CLOSER than range_min (gz's below-minimum code,
+             observed in the 2026-08-12 self-view audit): something is
+             touching the device, the most violated reading there is.
+      nan    not a measurement at all. Reading it as clear would let a
+             broken channel hold a field open.
+    -inf and nan therefore return 0.0, the violated end of the scale.
 
     `mute` is a sequence of inclusive (start, end) index pairs pointing at
     the vehicle's own structure - see SELF_MUTE. Those rays are dropped
-    before the minimum, because one ray grazing the mast would otherwise
-    hold the device in PROTECTIVE for ever.
+    FIRST, before the class check, because the machine's own contour is
+    allowed to sit below range_min (it does: the drive wheel's nearest
+    face) without that reading as an intrusion.
 
     An EMPTY array is a broken device, not an empty room, so it returns 0.0
     - the violated end of the scale. A scan that is ENTIRELY muted returns
@@ -108,6 +132,8 @@ def min_range(ranges, range_max=RANGE_MAX_M, mute=()):
         muted.update(range(lo, hi + 1))
     looked = [r for i, r in enumerate(ranges) if i not in muted]
     if not looked:
+        return 0.0
+    if any(r != r or r == -math.inf for r in looked):
         return 0.0
     finite = [r for r in looked if math.isfinite(r)]
     if not finite:

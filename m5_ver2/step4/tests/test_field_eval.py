@@ -6,14 +6,23 @@ import field_eval
 MAXR = 8.0
 
 
-def test_min_range_ignores_non_returns():
-    # gz reports a no-return as inf. Naive min() on [inf, inf] gives inf,
-    # which compares uselessly against a threshold; on a list holding nan it
-    # gives nan, which compares False against everything. Both must become
-    # the range maximum first.
+def test_min_range_reads_a_beyond_range_non_return_as_the_horizon():
+    # gz reports a no-return as +inf: clear to range_max, a measurement
+    # (LL-amr-agent-008). Naive min() on [inf, inf] gives inf, which
+    # compares uselessly against a threshold.
     assert field_eval.min_range([math.inf, math.inf], MAXR) == MAXR
-    assert field_eval.min_range([math.nan, 3.0], MAXR) == 3.0
-    assert field_eval.min_range([math.inf, 2.0, math.nan], MAXR) == 2.0
+    assert field_eval.min_range([math.inf, 2.0], MAXR) == 2.0
+
+
+def test_min_range_reads_below_minimum_and_invalid_as_violations():
+    # -inf is gz's below-range_min code: something touches the device -
+    # observed in the 2026-08-12 self-view audit, NOT hypothetical. nan is
+    # no measurement at all. Neither is proof of clear space, and before
+    # this rule both fell through to range_max - a hand on the scanner
+    # window read as an open field.
+    assert field_eval.min_range([-math.inf, 3.0], MAXR) == 0.0
+    assert field_eval.min_range([math.nan, 3.0], MAXR) == 0.0
+    assert field_eval.min_range([math.inf, 2.0, math.nan], MAXR) == 0.0
 
 
 def test_min_range_of_an_empty_scan_is_a_violation_not_a_clear_horizon():
@@ -95,3 +104,26 @@ def test_an_entirely_muted_scan_is_a_violation():
 def test_the_mute_table_covers_every_sensor():
     for name in field_eval.SENSORS:
         assert name in field_eval.SELF_MUTE
+
+
+def test_a_muted_below_minimum_return_is_not_a_violation():
+    # The machine's own contour may sit closer than range_min (the drive
+    # wheel does). Muting must drop the ray BEFORE the -inf class check,
+    # or the vehicle would trip on itself for ever.
+    assert field_eval.min_range(
+        [-math.inf, 5.0], MAXR, ((0, 0),)) == 5.0
+
+
+def test_back_mute_covers_the_measured_steer_sweep():
+    # The 2026-08-12 audit: across steer -1.31..+1.31 rad the steer yoke
+    # and drive wheel return at idx 0..5 and 269..274 (0.10..0.15 m). The
+    # first mute table, measured at steer 0 only, ended at idx 4/started
+    # at 270 - and the first steering input latched PROTECTIVE in empty
+    # space. Every measured self-return index must be muted, with the
+    # two-ray margin on top.
+    measured = list(range(0, 6)) + list(range(269, 275))
+    scan = [math.inf] * 275
+    for i in measured:
+        scan[i] = 0.12
+    assert field_eval.min_range(
+        scan, MAXR, field_eval.SELF_MUTE["back"]) == MAXR
