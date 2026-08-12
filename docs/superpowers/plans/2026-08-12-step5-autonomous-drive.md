@@ -157,7 +157,7 @@ source /opt/ros/jazzy/setup.bash
 python3 -m pytest m5_ver2/step5/tests/ -q
 ```
 
-Expected: `55 passed` — zero failed, zero skipped. Skips mean an import
+Expected: `114 passed` — zero failed, zero skipped (matches the step4 baseline; an early draft said 55). Skips mean an import
 died (usually the conftest path list or the hmi sys.path insert).
 
 - [ ] **Step 5: Commit**

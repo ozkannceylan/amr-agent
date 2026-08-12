@@ -198,7 +198,7 @@ there — one home, as in Step 4.
 
 ## Testing
 
-Carried: all 55 Step 4 tests, renamed where paths changed. New:
+Carried: all 114 Step 4 tests, renamed where paths changed. New:
 
 - `test_route.py` — graph connectivity, Dijkstra shortest paths, all 10
   stations reachable from every node, spur attachment.
