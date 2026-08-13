@@ -31,6 +31,25 @@ GUARD_SLOW_M = 3.0
 GUARD_HOLD_M = 1.5
 GUARD_SLOW_MPS = 0.3
 GUARD_HALF_ANGLE_RAD = math.radians(35.0)
+
+# THE VEHICLE'S OWN MAST, MEASURED OUT OF THE GUARD. The nav lidar
+# clears the mast body on the exact-astern ray by 0.04 m (model.sdf,
+# nav_lidar_link comment) - the neighbouring rays hit the two mast
+# uprights, body-fixed, at the bearings below (probed live 2026-08-13:
+# near upright -3..-6 deg @ 1.287-1.292 m, far -26..-29 deg @
+# 1.447-1.483 m). Real nav scanners ship the same feature as "contour
+# masking". Each window is (travel-offset lo/hi deg, ceiling m): a
+# return inside the window at or under the ceiling is the truck, not
+# the world. THE COST, STATED: a genuine obstacle inside a window and
+# under its ceiling is invisible to the guard - a sliver ~8 deg wide
+# under 1.6/1.7 m that the unmasked neighbouring beams cover for
+# anything wider than ~25 cm at that range. The uprights also shadow
+# everything behind them at these bearings, so the mask hides nothing
+# a shadowed beam could have seen anyway.
+SELF_MASK = (
+    (-9.0, -1.0, 1.6),
+    (-31.0, -23.0, 1.7),
+)
 # ------------------------------------------------------------------
 
 
@@ -110,19 +129,32 @@ def steer(pose, target_xy):
     return -math.atan2(2.0 * WHEELBASE_M * math.sin(alpha), LOOKAHEAD_M)
 
 
-def sector_min(ranges, angle_min, angle_inc, range_lo, range_hi):
+def _self_return(offset_deg, r, self_mask):
+    """True when this return is the truck's own mast: inside one of the
+    contour windows AND no further than that window's ceiling."""
+    return any(lo <= offset_deg <= hi and r <= ceiling
+               for lo, hi, ceiling in self_mask)
+
+
+def sector_min(ranges, angle_min, angle_inc, range_lo, range_hi,
+               self_mask=SELF_MASK):
     """Min valid range within +-35 deg of the travel direction (angle pi
     in the scan frame - the fork end is the model's -x). Invalid returns
     (inf, nan, outside [range_lo, range_hi]) are skipped: silence is not
     an obstacle HERE because the safety layer already treats silence as
-    a demand; this guard only shapes speed."""
+    a demand; this guard only shapes speed. Returns matching SELF_MASK
+    are skipped too - they are the vehicle's own mast (see the constant).
+    Pass self_mask=() to see the raw scan."""
     best = math.inf
     for i, r in enumerate(ranges):
         if not (range_lo <= r <= range_hi):     # False for nan and inf
             continue
-        if abs(norm_ang(angle_min + i * angle_inc - math.pi)) \
-                <= GUARD_HALF_ANGLE_RAD:
-            best = min(best, r)
+        offset = norm_ang(angle_min + i * angle_inc - math.pi)
+        if abs(offset) > GUARD_HALF_ANGLE_RAD:
+            continue
+        if _self_return(math.degrees(offset), r, self_mask):
+            continue
+        best = min(best, r)
     return best
 
 

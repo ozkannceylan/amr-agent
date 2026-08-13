@@ -112,6 +112,50 @@ def test_sector_min_ignores_out_of_range_returns():
     assert follower.sector_min(ranges, -math.pi, inc, 0.10, 8.0) == math.inf
 
 
+def _scan360():
+    """360 rays, angle_min=-pi, 1 deg steps. Index i is bearing i-180 deg;
+    travel is bearing 180 (index 0, the wrap), so travel-offset in
+    degrees is i - 360 for the indices near the end of the sweep."""
+    return [math.inf] * 360, 2.0 * math.pi / 360
+
+
+def test_self_mask_hides_the_near_mast_upright():
+    # 1.29 m at bearing 176 deg = travel-offset -4: inside the near
+    # upright's window and under its ceiling. That is the truck's own
+    # mast, not the world - the guard must see nothing at all.
+    ranges, inc = _scan360()
+    ranges[356] = 1.29
+    assert follower.sector_min(ranges, -math.pi, inc, 0.10, 8.0) == math.inf
+
+
+def test_self_mask_does_not_hide_a_real_return_beside_it():
+    # The mast return is dropped; the 2.5 m wall dead ahead still wins.
+    ranges, inc = _scan360()
+    ranges[356] = 1.29       # offset -4: mast
+    ranges[0] = 2.5          # offset 0: real
+    got = follower.sector_min(ranges, -math.pi, inc, 0.10, 8.0)
+    assert abs(got - 2.5) < 1e-9
+
+
+def test_unmasked_bearings_still_guard_between_the_uprights():
+    # Offset -15 sits BETWEEN the two windows: a 1.3 m return there is
+    # world, and it must beat the masked 1.2 m mast return.
+    ranges, inc = _scan360()
+    ranges[356] = 1.2        # offset -4: masked
+    ranges[345] = 1.3        # offset -15: unmasked, wins
+    got = follower.sector_min(ranges, -math.pi, inc, 0.10, 8.0)
+    assert abs(got - 1.3) < 1e-9
+
+
+def test_self_mask_ceiling_lets_a_far_obstacle_through():
+    # 1.9 m at offset -4 is BEYOND the 1.6 m ceiling - it cannot be the
+    # mast, so it is an obstacle and the guard must report it.
+    ranges, inc = _scan360()
+    ranges[356] = 1.9
+    got = follower.sector_min(ranges, -math.pi, inc, 0.10, 8.0)
+    assert abs(got - 1.9) < 1e-9
+
+
 def test_arrival_is_a_quarter_metre():
     assert follower.arrived((0.0, 0.0), (0.20, 0.10))
     assert not follower.arrived((0.0, 0.0), (0.30, 0.0))
