@@ -43,6 +43,63 @@ def test_target_behind_right_turns_right():
     assert follower.steer((0.0, 0.0, 0.0), (2.0, 1.0)) > 0.8
 
 
+def _target_at(pose, alpha, distance):
+    """The point `distance` away whose bearing error from pose is alpha."""
+    bearing = follower.travel_yaw(pose[2]) + alpha
+    return (pose[0] + distance * math.cos(bearing),
+            pose[1] + distance * math.sin(bearing))
+
+
+def test_a_full_lookahead_target_steers_exactly_as_before():
+    # THE LONG-LEG PIN. advance() walks LOOKAHEAD_M along the polyline,
+    # so on a straight leg the target really is LOOKAHEAD_M away and the
+    # true-distance denominator equals the old constant one. This test
+    # is what says the fix touched only the short-target case.
+    pose = (0.0, 0.0, 0.0)
+    alpha = 0.5
+    target = _target_at(pose, alpha, follower.LOOKAHEAD_M)
+    expected = -math.atan2(
+        2.0 * follower.WHEELBASE_M * math.sin(alpha), follower.LOOKAHEAD_M)
+    assert abs(follower.steer(pose, target) - expected) < 1e-9
+
+
+def test_a_short_end_clamped_target_steers_harder():
+    # THE S7 SPUR, IN NUMBERS. The spur is 0.85 m but LOOKAHEAD_M is
+    # 1.2, so advance() clamps the target to the station and the old
+    # fixed denominator threw away a third of the steer demand exactly
+    # where it was needed. Measured 2026-08-13: the truck overshot the
+    # station by 0.76 m and swung its tail into rack A.
+    pose = (8.3, 5.65, -math.pi / 2)        # forks north, 0.3 m east of it
+    target = (8.0, 6.5)                     # S7, 0.901 m away
+    alpha = follower.norm_ang(
+        math.atan2(target[1] - pose[1], target[0] - pose[0])
+        - follower.travel_yaw(pose[2]))
+    old = -math.atan2(
+        2.0 * follower.WHEELBASE_M * math.sin(alpha), follower.LOOKAHEAD_M)
+    got = follower.steer(pose, target)
+    assert abs(got) > abs(old) + 0.1        # strictly, and by a margin
+    assert got < 0.0                        # target is west = driver-left
+
+
+def test_a_short_target_dead_ahead_still_needs_no_steer():
+    # Tighter geometry must not invent a steer demand out of nothing.
+    pose = (8.0, 5.65, -math.pi / 2)
+    assert abs(follower.steer(pose, (8.0, 6.5))) < 1e-9
+
+
+def test_the_denominator_floor_keeps_the_steer_finite():
+    # At the goal point the true distance goes to zero. The floor keeps
+    # the formula defined and pins the answer to LD_MIN_M.
+    pose = (0.0, 0.0, 0.0)
+    alpha = -0.9273
+    target = _target_at(pose, alpha, 0.05)
+    got = follower.steer(pose, target)
+    assert math.isfinite(got)
+    expected = -math.atan2(
+        2.0 * follower.WHEELBASE_M * math.sin(alpha), follower.LD_MIN_M)
+    assert abs(got - expected) < 1e-6
+
+
 def test_advance_walks_the_lookahead_along_the_path():
     path = [(0.0, 0.0), (-10.0, 0.0)]
     target, to_end = follower.advance(path, (-3.0, 0.2))

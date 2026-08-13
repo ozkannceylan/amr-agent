@@ -20,6 +20,9 @@ import math
 
 # ----------------------------- CONFIG -----------------------------
 LOOKAHEAD_M = 1.2
+LD_MIN_M = 0.35         # denominator floor: below this the atan2 saturates
+                        # toward the mechanical stop anyway, and a zero
+                        # denominator at the goal point would be undefined
 WHEELBASE_M = 1.2       # front-steer tricycle, drive wheel to rear axle
 CRUISE_MPS = 0.7
 CORNER_MPS = 0.3
@@ -128,6 +131,16 @@ def steer(pose, target_xy):
     CORNER_MPS automatically (|steer| ~1.1 > CORNER_STEER_RAD). Dead
     astern exactly (alpha = -pi, the wrap's edge) turns LEFT by
     convention so the choice is deterministic, not floating-point luck.
+
+    THE DENOMINATOR IS THE TRUE DISTANCE, NOT THE CONSTANT. Textbook
+    pursuit divides by the distance to the pursuit point, and on a long
+    leg that IS LOOKAHEAD_M - advance() walks exactly that far along the
+    polyline, so nothing changes there. It differs only where advance()
+    CLAMPS the target to the path end: the S7 spur is 0.85 m long, and
+    dividing that target by a 1.2 m constant threw away a third of the
+    steer demand exactly where the truck needed it. Measured 2026-08-13:
+    the truck overshot S7 by 0.76 m and swept its tail into rack A at
+    0.989 m, inside the 1.0 m protective field.
     """
     alpha = norm_ang(
         math.atan2(target_xy[1] - pose[1], target_xy[0] - pose[0])
@@ -135,7 +148,8 @@ def steer(pose, target_xy):
     if abs(alpha) > math.pi / 2.0:
         alpha = math.copysign(
             math.pi / 2.0, alpha if alpha != -math.pi else 1.0)
-    return -math.atan2(2.0 * WHEELBASE_M * math.sin(alpha), LOOKAHEAD_M)
+    ld = max(LD_MIN_M, math.dist((pose[0], pose[1]), target_xy))
+    return -math.atan2(2.0 * WHEELBASE_M * math.sin(alpha), ld)
 
 
 def _self_return(offset_deg, r, self_mask):
