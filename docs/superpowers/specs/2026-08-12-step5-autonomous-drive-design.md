@@ -76,6 +76,16 @@ nav_node ────/auto/cmd_vel──┘      ▲
 
 ## Stations
 
+> **Amendment 2026-08-13 (live-run evidence):** the fork-tip side
+> scanner reads a rack approach ~0.8 m shorter than the vehicle centre,
+> so rack/conveyor stations moved to a 2.4 m face standoff (S5 x=11.6,
+> S6/S7 y=6.5, S8/S9 y=4.8, S10 y=-2.5) — measured: 1.5 m standoff
+> trips case-1 PF at zero tracking error. Departure from spur stations
+> reverses out (the PLC back scanner guards that direction); the
+> follower gained a hysteresis reverse phase for it. The nav lidar also
+> masks the vehicle's own two mast uprights out of the guard sector
+> (contour masking), measured live the same day.
+
 Ten stations. One source of truth: `ipc/stations.py` (id, name, x, y,
 approach yaw). The world file paints each as a flat floor disc + id ring,
 6 mm proud, no collision — the same recipe as the charge-bay markings, so
@@ -93,18 +103,18 @@ main aisle centreline y = +5.65; dock aisle centreline y = -5.5.
 | S2 | CHARGE-1 | (-9.8, -6.6) | charge bay 1 apron |
 | S3 | CHARGE-2 | (-7.4, -6.6) | charge bay 2 apron |
 | S4 | DOCK-DOOR | (6.0, -8.0) | south dock opening |
-| S5 | CONVEYOR | (13.0, 5.65) | conveyor face |
-| S6 | PICK-A-W | (-8.0, 7.0) | rack A west, main aisle |
-| S7 | PICK-A-E | (8.0, 7.0) | rack A east, main aisle |
-| S8 | PICK-B-W | (-8.0, 4.3) | rack B north face west |
-| S9 | PICK-B-E | (8.0, 4.3) | rack B north face east |
-| S10 | PICK-B-S | (-6.0, -1.6) | rack B south face |
+| S5 | CONVEYOR | (11.6, 5.65) | conveyor face |
+| S6 | PICK-A-W | (-8.0, 6.5) | rack A west, main aisle |
+| S7 | PICK-A-E | (8.0, 6.5) | rack A east, main aisle |
+| S8 | PICK-B-W | (-8.0, 4.8) | rack B north face west |
+| S9 | PICK-B-E | (8.0, 4.8) | rack B north face east |
+| S10 | PICK-B-S | (-6.0, -2.5) | rack B south face |
 
 ## Waypoint graph and routing (`ipc/route.py`, pure functions)
 
 Nodes on the aisle centrelines:
 
-- Main aisle y = 5.65: x ∈ {-12.5, -8, -3, 0, 3, 8, 12.0, 13.0}
+- Main aisle y = 5.65: x ∈ {-12.5, -8, -3, 0, 3, 8, 11.6, 12.0}
 - Dock aisle y = -5.5: x ∈ {-12.5, -9.8, -7.4, -6.0, -3, 0, 3, 6, 8, 12.0}
 - Connectors x = -12.5, 0, +12.0 join the two aisles.
 - Each station hangs off its nearest aisle node by a short spur.
