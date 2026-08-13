@@ -27,9 +27,15 @@ layer only, and can bypass no interlock.*
 
 ## Watch it run
 
-**1 · Safety + Autonomous Drive** — station-to-station runs under the
-live safety chain: reverse-out departures, pure-pursuit aisles, measured
-arrivals. *Video link pending.*
+**1 · Safety + Autonomous Drive:**
+
+[![Safety + Autonomous Drive — station-to-station runs under the live safety chain](https://img.youtube.com/vi/0svQWMT256A/maxresdefault.jpg)](https://youtu.be/0svQWMT256A)
+
+*▶ [**Watch**](https://youtu.be/0svQWMT256A) — pick a station on the
+sketch, press GO: reverse-out departures from the rack faces,
+pure-pursuit runs down the aisles, the roof lidar guarding the path —
+and the F-program holding the drive enable, the fields and the speed
+ceiling over every metre of it.*
 
 **2 · Safety + Teleoperation:**
 
