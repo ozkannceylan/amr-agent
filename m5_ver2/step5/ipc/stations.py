@@ -14,6 +14,17 @@ OBSTACLES mirrors warehouse_ver2.sdf's collision rectangles (rack faces
 from the file header's parametric table, cabinets and conveyor from
 their <pose>/<size>). The SDF stays the geometric truth; these numbers
 are its shadow, and the free-floor tests are what notice a drift.
+
+THE 2.4 m FACE STANDOFF IS A SCANNER DIMENSION, NOT A STYLE. The stations
+that face a rack or the conveyor (S5..S10) park the TRUCK CENTRE 2.4 m off
+that face. The side safety scanners sit about 0.8 m forward of centre,
+toward the fork tip, so a fork-first approach puts them 0.8 m closer to the
+face than the pose suggests: measured 2026-08-13, a 1.5-1.9 m centre
+standoff parked the right scanner 0.99 m off rack B and tripped the case-1
+protective field (1.0 m) with the truck exactly on its lane. 2.4 = 0.8
+scanner offset + 1.0 protective field + 0.2 field hysteresis + 0.4 for the
+pursuit's corner-convergence residual. test_route.py pins it so a station
+cannot drift back inside the field.
 """
 import math
 from collections import OrderedDict
@@ -25,12 +36,15 @@ STATIONS = OrderedDict((
     ("S2",  {"name": "CHARGE-1",  "x": -9.8, "y": -6.6,  "yaw": -math.pi / 2}),
     ("S3",  {"name": "CHARGE-2",  "x": -7.4, "y": -6.6,  "yaw": -math.pi / 2}),
     ("S4",  {"name": "DOCK-DOOR", "x":  6.0, "y": -8.0,  "yaw": -math.pi / 2}),
-    ("S5",  {"name": "CONVEYOR",  "x": 13.0, "y":  5.65, "yaw": 0.0}),
-    ("S6",  {"name": "PICK-A-W",  "x": -8.0, "y":  7.0,  "yaw": math.pi / 2}),
-    ("S7",  {"name": "PICK-A-E",  "x":  8.0, "y":  7.0,  "yaw": math.pi / 2}),
-    ("S8",  {"name": "PICK-B-W",  "x": -8.0, "y":  4.3,  "yaw": -math.pi / 2}),
-    ("S9",  {"name": "PICK-B-E",  "x":  8.0, "y":  4.3,  "yaw": -math.pi / 2}),
-    ("S10", {"name": "PICK-B-S",  "x": -6.0, "y": -1.6,  "yaw": math.pi / 2}),
+    # S5..S10 keep 2.4 m off the face they serve (see the module note):
+    # conveyor face x 14.00, rack A face y 8.90, rack B north face y 2.40,
+    # rack B south face y -0.10.
+    ("S5",  {"name": "CONVEYOR",  "x": 11.6, "y":  5.65, "yaw": 0.0}),
+    ("S6",  {"name": "PICK-A-W",  "x": -8.0, "y":  6.50, "yaw": math.pi / 2}),
+    ("S7",  {"name": "PICK-A-E",  "x":  8.0, "y":  6.50, "yaw": math.pi / 2}),
+    ("S8",  {"name": "PICK-B-W",  "x": -8.0, "y":  4.80, "yaw": -math.pi / 2}),
+    ("S9",  {"name": "PICK-B-E",  "x":  8.0, "y":  4.80, "yaw": -math.pi / 2}),
+    ("S10", {"name": "PICK-B-S",  "x": -6.0, "y": -2.50, "yaw": math.pi / 2}),
 ))
 
 OBSTACLES = (

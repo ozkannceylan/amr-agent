@@ -51,17 +51,17 @@ def test_every_station_reachable_from_every_station():
 
 
 def test_dijkstra_takes_the_short_way_home():
-    # S1 HOME (-3,-5.5) to S10 PICK-B-S (-6,-1.6): straight west along the
+    # S1 HOME (-3,-5.5) to S10 PICK-B-S (-6,-2.5): straight west along the
     # dock aisle then up the spur - never via the end aisles.
     graph = route.build_graph()
-    path = route.dijkstra(graph, (-3.0, -5.5), (-6.0, -1.6))
-    assert path == [(-3.0, -5.5), (-6.0, -5.5), (-6.0, -1.6)]
+    path = route.dijkstra(graph, (-3.0, -5.5), (-6.0, -2.5))
+    assert path == [(-3.0, -5.5), (-6.0, -5.5), (-6.0, -2.5)]
 
 
 def test_plan_route_starts_at_the_pose_and_ends_at_the_station():
     poly = route.plan_route((-2.7, -5.3), "S7")
     assert poly[0] == (-2.7, -5.3)
-    assert poly[-1] == (8.0, 7.0)
+    assert poly[-1] == (8.0, 6.5)
     assert len(poly) >= 3
 
 
@@ -78,6 +78,19 @@ def test_nodes_and_stations_keep_clear_of_the_racking():
             dx = max(xmin - x, 0.0, x - xmax)
             dy = max(ymin - y, 0.0, y - ymax)
             assert math.hypot(dx, dy) >= 0.6, ((x, y), name)
+
+
+def test_rack_and_conveyor_stations_keep_a_2p4_m_face_standoff():
+    # The right scanner sits ~0.8 m toward the fork tip; case-1 PF is
+    # 1.0 m. Measured 2026-08-13: a 1.5 m standoff trips the PLC at
+    # zero tracking error. 2.4 m = 0.8 + 1.0 + 0.2 hysteresis + margin.
+    for sid in ("S5", "S6", "S7", "S8", "S9", "S10"):
+        s = stations.STATIONS[sid]
+        best = min(
+            math.hypot(max(xmin - s["x"], 0.0, s["x"] - xmax),
+                       max(ymin - s["y"], 0.0, s["y"] - ymax))
+            for _n, xmin, xmax, ymin, ymax in stations.OBSTACLES)
+        assert best >= 2.39, (sid, best)
 
 
 def test_ten_stations_with_unique_names():

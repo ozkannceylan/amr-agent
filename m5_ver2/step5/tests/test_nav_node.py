@@ -24,7 +24,7 @@ def test_fresh_core_is_idle_and_still():
 def test_goal_in_auto_mode_plans_and_drives():
     core = _core_en_route()
     assert core.state == "EN-ROUTE"
-    assert core.route[-1] == (8.0, 7.0)
+    assert core.route[-1] == (8.0, 6.5)
     linear, _ = core.step(AT_S1, math.inf, True, 1500)
     assert linear < 0.0            # forks-first forward is negative
 
@@ -77,7 +77,7 @@ def test_v_limit_caps_the_command():
 
 def test_arrival_latches_until_a_new_goal():
     core = _core_en_route()
-    at_goal = (8.0, 7.0, 0.0)
+    at_goal = (8.0, 6.5, 0.0)
     assert core.step(at_goal, math.inf, True, 1500) == (0.0, 0.0)
     assert core.state == "ARRIVED"
     assert core.step(at_goal, math.inf, True, 1500) == (0.0, 0.0)
@@ -102,6 +102,6 @@ def test_state_json_carries_the_display_fields():
     report = json.loads(core.state_json(AT_S1, 4.2))
     assert report["state"] == "EN-ROUTE"
     assert report["goal"] == "S7"
-    assert report["route"][-1] == [8.0, 7.0]
+    assert report["route"][-1] == [8.0, 6.5]
     assert report["pose"] == [-3.0, -5.5, 0.0]
     assert report["guard_min"] == 4.2

@@ -1427,7 +1427,7 @@
 
     <model name="StationS5Paint">
       <static>true</static>
-      <pose>13.000 5.650 0 0 0 0</pose>
+      <pose>11.600 5.650 0 0 0 0</pose>
       <link name="link">
         <visual name="disc">
           <pose>0 0 0.003 0 0 0</pose>
@@ -1449,7 +1449,7 @@
 
     <model name="StationS6Paint">
       <static>true</static>
-      <pose>-8.000 7.000 0 0 0 0</pose>
+      <pose>-8.000 6.500 0 0 0 0</pose>
       <link name="link">
         <visual name="disc">
           <pose>0 0 0.003 0 0 0</pose>
@@ -1471,7 +1471,7 @@
 
     <model name="StationS7Paint">
       <static>true</static>
-      <pose>8.000 7.000 0 0 0 0</pose>
+      <pose>8.000 6.500 0 0 0 0</pose>
       <link name="link">
         <visual name="disc">
           <pose>0 0 0.003 0 0 0</pose>
@@ -1493,7 +1493,7 @@
 
     <model name="StationS8Paint">
       <static>true</static>
-      <pose>-8.000 4.300 0 0 0 0</pose>
+      <pose>-8.000 4.800 0 0 0 0</pose>
       <link name="link">
         <visual name="disc">
           <pose>0 0 0.003 0 0 0</pose>
@@ -1515,7 +1515,7 @@
 
     <model name="StationS9Paint">
       <static>true</static>
-      <pose>8.000 4.300 0 0 0 0</pose>
+      <pose>8.000 4.800 0 0 0 0</pose>
       <link name="link">
         <visual name="disc">
           <pose>0 0 0.003 0 0 0</pose>
@@ -1537,7 +1537,7 @@
 
     <model name="StationS10Paint">
       <static>true</static>
-      <pose>-6.000 -1.600 0 0 0 0</pose>
+      <pose>-6.000 -2.500 0 0 0 0</pose>
       <link name="link">
         <visual name="disc">
           <pose>0 0 0.003 0 0 0</pose>
