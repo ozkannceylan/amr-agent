@@ -107,7 +107,8 @@ open item 1.
 
 ## [--] Obstacle on route — DESCOPED BY THE OWNER 2026-08-13
 
-Owner ruling: **"station to station suffices; obstacle can wait."** Acceptance
+Owner ruling (paraphrased from the Turkish original): **"station to
+station suffices; the obstacle is fine to skip."** Acceptance
 for Step 5 is station-to-station driving, which the row above earns. Two facts
 were established before the descope arrived and are recorded here because
 whoever picks obstacles up next needs both.
