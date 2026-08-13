@@ -93,6 +93,21 @@ def test_rack_and_conveyor_stations_keep_a_2p4_m_face_standoff():
         assert best >= 2.39, (sid, best)
 
 
+def test_arrival_radius_follows_the_spur_length():
+    # THE RULE, NOT A LIST. A station is reached down a spur perpendicular
+    # to its aisle. Measured 2026-08-13: the truck's minimum turning
+    # radius orbits a perpendicular target at 0.643-0.742 m, so a spur
+    # too short to straighten out on cannot be hit to 0.25 m by any gain.
+    # Spur 0 (the station sits ON the aisle) needs no turn at all, so it
+    # keeps the tight radius; so does a spur long enough to align in.
+    for sid, s in stations.STATIONS.items():
+        aisle = route.MAIN_Y if abs(s["y"] - route.MAIN_Y) \
+            <= abs(s["y"] - route.DOCK_Y) else route.DOCK_Y
+        spur = abs(s["y"] - aisle)
+        want = 0.80 if 0.0 < spur < 2.0 else 0.25
+        assert s["arrive_m"] == want, (sid, spur, s["arrive_m"])
+
+
 def test_ten_stations_with_unique_names():
     assert len(stations.STATIONS) == 10
     names = [s["name"] for s in stations.STATIONS.values()]

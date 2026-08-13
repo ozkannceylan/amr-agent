@@ -10,6 +10,20 @@ yaw is the APPROACH heading - the travel direction on the spur - used to
 orient the paint tick and nothing else. Arrival is position-only: a
 tricycle cannot rotate in place (spec, "Autonomous drive").
 
+arrive_m IS GEOMETRY, NOT TOLERANCE CREEP. A station is reached down a
+spur perpendicular to its aisle, and a spur too short to straighten out
+on cannot be hit tightly by ANY gain: measured 2026-08-13 at S7, the
+truck missed the 0.85 m spur, could not converge, and settled into a
+stable orbit 0.643-0.742 m around the station - its own minimum turning
+radius (~0.69 m). A vehicle cannot reach a point inside its turning
+circle. So the short-spur stations (S2, S3 at 1.1 m; S6..S9 at 0.85 m)
+declare 0.80 m, which catches the FIRST pass before any lap begins, and
+the rest keep 0.25 m: S1, S5 sit ON their aisle and need no turn at all,
+S4 and S10 have 2.5 m and 3.0 m of spur to align in. test_route.py pins
+the rule - spur length decides, not a hand-written list. Precision stays
+proven where the floor allows it; where it does not, the number says so
+out loud instead of the truck circling forever.
+
 OBSTACLES mirrors warehouse_ver2.sdf's collision rectangles (rack faces
 from the file header's parametric table, cabinets and conveyor from
 their <pose>/<size>). The SDF stays the geometric truth; these numbers
@@ -32,19 +46,29 @@ from collections import OrderedDict
 HALL = (-15.0, 15.0, -10.0, 10.0)          # inner wall faces
 
 STATIONS = OrderedDict((
-    ("S1",  {"name": "HOME",      "x": -3.0, "y": -5.5,  "yaw": 0.0}),
-    ("S2",  {"name": "CHARGE-1",  "x": -9.8, "y": -6.6,  "yaw": -math.pi / 2}),
-    ("S3",  {"name": "CHARGE-2",  "x": -7.4, "y": -6.6,  "yaw": -math.pi / 2}),
-    ("S4",  {"name": "DOCK-DOOR", "x":  6.0, "y": -8.0,  "yaw": -math.pi / 2}),
+    ("S1",  {"name": "HOME",      "x": -3.0, "y": -5.5,  "yaw": 0.0,
+             "arrive_m": 0.25}),                    # on the dock aisle
+    ("S2",  {"name": "CHARGE-1",  "x": -9.8, "y": -6.6,  "yaw": -math.pi / 2,
+             "arrive_m": 0.80}),                    # 1.1 m spur
+    ("S3",  {"name": "CHARGE-2",  "x": -7.4, "y": -6.6,  "yaw": -math.pi / 2,
+             "arrive_m": 0.80}),                    # 1.1 m spur
+    ("S4",  {"name": "DOCK-DOOR", "x":  6.0, "y": -8.0,  "yaw": -math.pi / 2,
+             "arrive_m": 0.25}),                    # 2.5 m spur, aligns in
     # S5..S10 keep 2.4 m off the face they serve (see the module note):
     # conveyor face x 14.00, rack A face y 8.90, rack B north face y 2.40,
     # rack B south face y -0.10.
-    ("S5",  {"name": "CONVEYOR",  "x": 11.6, "y":  5.65, "yaw": 0.0}),
-    ("S6",  {"name": "PICK-A-W",  "x": -8.0, "y":  6.50, "yaw": math.pi / 2}),
-    ("S7",  {"name": "PICK-A-E",  "x":  8.0, "y":  6.50, "yaw": math.pi / 2}),
-    ("S8",  {"name": "PICK-B-W",  "x": -8.0, "y":  4.80, "yaw": -math.pi / 2}),
-    ("S9",  {"name": "PICK-B-E",  "x":  8.0, "y":  4.80, "yaw": -math.pi / 2}),
-    ("S10", {"name": "PICK-B-S",  "x": -6.0, "y": -2.50, "yaw": math.pi / 2}),
+    ("S5",  {"name": "CONVEYOR",  "x": 11.6, "y":  5.65, "yaw": 0.0,
+             "arrive_m": 0.25}),                    # on the main aisle
+    ("S6",  {"name": "PICK-A-W",  "x": -8.0, "y":  6.50, "yaw": math.pi / 2,
+             "arrive_m": 0.80}),                    # 0.85 m spur
+    ("S7",  {"name": "PICK-A-E",  "x":  8.0, "y":  6.50, "yaw": math.pi / 2,
+             "arrive_m": 0.80}),                    # 0.85 m spur
+    ("S8",  {"name": "PICK-B-W",  "x": -8.0, "y":  4.80, "yaw": -math.pi / 2,
+             "arrive_m": 0.80}),                    # 0.85 m spur
+    ("S9",  {"name": "PICK-B-E",  "x":  8.0, "y":  4.80, "yaw": -math.pi / 2,
+             "arrive_m": 0.80}),                    # 0.85 m spur
+    ("S10", {"name": "PICK-B-S",  "x": -6.0, "y": -2.50, "yaw": math.pi / 2,
+             "arrive_m": 0.25}),                    # 3.0 m spur, aligns in
 ))
 
 OBSTACLES = (

@@ -171,6 +171,27 @@ def test_the_reverse_guard_holds_the_back_out():
     assert core.state == "HOLD"
 
 
+def test_a_short_spur_station_arrives_at_its_own_radius():
+    # S7 declares 0.80 m because its 0.85 m spur is entered
+    # perpendicular. 0.7 m out is ARRIVED there...
+    core = _core_en_route()                    # goal S7, route ends (8, 6.5)
+    near = (8.0, 5.8, -math.pi / 2)            # 0.7 m from the station
+    assert core.step(near, math.inf, math.inf, True, 1500) == (0.0, 0.0)
+    assert core.state == "ARRIVED"
+
+
+def test_an_aligned_station_still_demands_the_tight_radius():
+    # ...and 0.7 m out is NOT arrived at S10, whose 3.0 m spur gives the
+    # truck room to straighten up. Same distance, different verdict.
+    core = nav_core.NavCore()
+    core.on_mode(MODE_AUTO)
+    core.on_goal("S10", AT_S1[:2])
+    near = (-6.0, -3.2, -math.pi / 2)           # 0.7 m from the station
+    linear, _ = core.step(near, math.inf, math.inf, True, 1500)
+    assert core.state == "EN-ROUTE"
+    assert linear < 0.0
+
+
 def test_a_new_goal_clears_the_reverse_phase():
     core = _core_at_s10()
     core.step(AT_S10, math.inf, math.inf, True, 1500)

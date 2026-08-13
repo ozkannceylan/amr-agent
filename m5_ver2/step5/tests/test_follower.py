@@ -272,3 +272,10 @@ def test_forward_sector_ignores_a_return_behind_the_counterweight():
 def test_arrival_is_a_quarter_metre():
     assert follower.arrived((0.0, 0.0), (0.20, 0.10))
     assert not follower.arrived((0.0, 0.0), (0.30, 0.0))
+
+
+def test_arrival_radius_can_be_widened_per_station():
+    # A short-spur station cannot be hit to 0.25 m by any gain (the truck
+    # orbits its own turning circle), so it declares its own radius.
+    assert not follower.arrived((0.0, 0.0), (0.7, 0.0))
+    assert follower.arrived((0.0, 0.0), (0.7, 0.0), 0.8)

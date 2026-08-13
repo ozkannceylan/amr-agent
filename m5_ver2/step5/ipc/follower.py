@@ -225,5 +225,8 @@ def target_speed(dist_to_end, steer_rad, guard_min_m):
     return speed
 
 
-def arrived(xy, goal_xy):
-    return math.dist(xy, goal_xy) <= ARRIVE_M
+def arrived(xy, goal_xy, radius_m=ARRIVE_M):
+    """Position-only, at the radius the STATION declares. ARRIVE_M is the
+    default and the tight case; a short-spur station passes its own
+    (stations.py arrive_m owns why)."""
+    return math.dist(xy, goal_xy) <= radius_m

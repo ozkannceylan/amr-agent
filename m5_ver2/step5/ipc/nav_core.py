@@ -34,6 +34,7 @@ import math
 
 import follower
 import route
+from stations import STATIONS
 from status_contract import MODE_AUTO
 
 IDLE, EN_ROUTE, HOLD = "IDLE", "EN-ROUTE", "HOLD"
@@ -50,6 +51,7 @@ class NavCore:
         self.route = None
         self.note = ""
         self.reversing = False
+        self.arrive_m = follower.ARRIVE_M
 
     def on_mode(self, mode):
         self.mode = mode
@@ -69,10 +71,14 @@ class NavCore:
             return
         self.goal, self.route, self.state = station_id, poly, EN_ROUTE
         self.note, self.reversing = "", False
+        # The station owns its arrival radius; its spur length set it.
+        self.arrive_m = STATIONS[station_id].get(
+            "arrive_m", follower.ARRIVE_M)
 
     def _cancel(self, why):
         self.goal, self.route, self.state, self.note = None, None, IDLE, why
         self.reversing = False
+        self.arrive_m = follower.ARRIVE_M
 
     def step(self, pose, fwd_guard_m, rev_guard_m, motor_ok, v_limit_mm_s):
         """One tick: (linear.x, angular.z) under the field contract.
@@ -85,7 +91,7 @@ class NavCore:
         if self.state in (IDLE, ARRIVED) or self.route is None:
             return (0.0, 0.0)
         xy = (pose[0], pose[1])
-        if follower.arrived(xy, self.route[-1]):
+        if follower.arrived(xy, self.route[-1], self.arrive_m):
             self.state, self.reversing = ARRIVED, False
             return (0.0, 0.0)
         if not motor_ok:
@@ -121,5 +127,6 @@ class NavCore:
             "route": [list(p) for p in self.route] if self.route else [],
             "pose": [pose[0], pose[1], pose[2]],
             "reversing": self.reversing,
+            "arrive_m": self.arrive_m,
             "guard_min": (None if guard_min_m == float("inf")
                           else guard_min_m)})
