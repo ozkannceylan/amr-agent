@@ -1,3 +1,7 @@
+> **ARCHIVED 2026-08-13.** Historical record of the claude-supervised
+> era (M0-M5 as originally planned). It is not maintained. Current
+> status and the roadmap live in the root [README](../../README.md).
+
 # Roadmap
 
 Current gate: M5 — Sensored autonomous forklift (ADR 0010 D2, architecture ruled
