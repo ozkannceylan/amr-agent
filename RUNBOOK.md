@@ -15,8 +15,10 @@ Deeper reference: [`m5_ver2/step5/README_step5.md`](m5_ver2/step5/README_step5.m
 ## 0. Prerequisites (once)
 
 **Windows**
-- TIA Portal V20 with STEP 7 Safety V20, and the project holding the
-  safety program this repo is built against.
+- TIA Portal V20 with STEP 7 Safety V20. The TIA project itself ships in
+  this repo — restore
+  [`plc/forklift-safety/amr-agent-fplc-v20.zap20`](plc/forklift-safety/amr-agent-fplc-v20.zap20)
+  (Project → Retrieve in TIA Portal).
   [`safety_summary.pdf`](safety_summary.pdf) is a Safety Administration
   printout of that program's lineage. The tag table below is the
   contract; the collective F-signature changes whenever the F-program is
