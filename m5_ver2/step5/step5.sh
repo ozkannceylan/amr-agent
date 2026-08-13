@@ -37,7 +37,7 @@ GUI=true   # start's default; --headless sets it false. See the header.
 # The stack as command-line patterns. gz sim is FIRST on purpose (see the
 # shutdown-order note in stop()); a pattern only NOMINATES, ours() decides.
 # MAINTENANCE OBLIGATION: anything added to the stack must be added here too,
-# or stop orphans it and still prints "down." Port 5101 arrives in a later step.
+# or stop orphans it and still prints "down." Port 5101 is live: sensor_link owns it.
 # THE GUI CLIENT NEEDS NO ENTRY OF ITS OWN, and that was checked rather than
 # assumed: `gz sim -g` is ONE process whose command line begins with those two
 # words, so "gz sim" nominates the client and the server alike - measured,
@@ -76,7 +76,7 @@ ours() {
 #   terminal - the very case setsid was added to survive - leaves it on disk,
 #   and Linux recycles pids back through the 17xxx-18xxx range this stack
 #   lands in within minutes of a boot. A recorded number can therefore name a
-#   STRANGER, and every use of that number has to say so first. All four
+#   STRANGER, and every use of that number has to say so first. All nine
 #   recorded command lines contain m5_ver2/step5 and no foreign one does, so
 #   that token is the identity test. It is deliberately the literal and not
 #   "$STEP5": if REPO ever resolves differently between the start and the

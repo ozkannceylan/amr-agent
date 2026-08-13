@@ -10,7 +10,7 @@ CONTINUOUS ZEROS, NOT ONE ZERO
   message and then silence. The gate therefore keeps publishing zeros at
   10 Hz for as long as the inhibit lasts.
 
-THE /hmi/cmd_vel FIELD CONTRACT, WHICH IS NOT STANDARD Twist
+THE /vehicle/cmd_vel FIELD CONTRACT (unchanged from /hmi/cmd_vel), NOT STANDARD Twist
   linear.x   traction speed  [m/s]   +-1.50  (limits.traction_speed_max_mps)
   angular.z  STEER ANGLE     [rad]   +-1.31  (model.steer_limit_rad)
 

@@ -1,6 +1,6 @@
 """Put the node directories on sys.path so the tests can import them.
 
-The Step 2 tree is deliberately not a package (m5_ver2/CLAUDE.md: no colcon
+This tree is deliberately not a package (m5_ver2/CLAUDE.md: no colcon
 package, plain files run with python3), so there is nothing to install and
 the tests reach the modules by path instead.
 """

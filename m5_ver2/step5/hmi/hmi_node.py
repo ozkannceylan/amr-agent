@@ -234,7 +234,7 @@ class Hmi(Node):
         self.create_timer(1.0 / PUBLISH_HZ, self.tick)
 
         self.root = root
-        root.title("Step 5 - forklift teleoperation")
+        root.title("Forklift 1 HMI")
         cx = cy = KNOB_RADIUS_PX + 20
 
         # Two columns: Step 4's window on the left, unchanged in every

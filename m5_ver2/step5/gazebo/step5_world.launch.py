@@ -44,7 +44,7 @@ _REPO = os.path.normpath(os.path.join(_HERE, "..", "..", ".."))
 # The world NAME inside the file stays "warehouse", so _WORLD_NAME and
 # every /world/warehouse/* topic hold.
 _WORLD = os.path.join(_HERE, "warehouse_ver2.sdf")
-# STEP 2'S OWN MODEL, NOT agv/forklift/model.sdf. It carries the three
+# THIS TREE'S OWN MODEL (built in Step 2), NOT agv/forklift/model.sdf. It carries the three
 # microScan3 scanners; agv/'s carries the old front/rear pair at 5.5 m and
 # is never modified. The path is local to this directory, so the guard
 # below is what turns a typo into a refusal instead of a forklift that
@@ -107,7 +107,7 @@ _BRIDGE_ARGS = [
 # belong to forklift_ver2/model.sdf, which config.yaml has never heard of,
 # so putting them there would be inventing a key in a file this step is
 # forbidden to modify.
-# From ipc/status_contract.py, which is the one home for the four
+# From ipc/status_contract.py, which is the one home for the
 # topic names config.yaml has never heard of. Spelling them again here
 # is how a rename breaks the bridge and the subscriber differently.
 sys.path.insert(0, os.path.join(_HERE, "..", "ipc"))

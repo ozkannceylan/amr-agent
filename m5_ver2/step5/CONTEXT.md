@@ -306,6 +306,14 @@ recorded pid rather than trusting the shell it runs in.
 
 ## Known debt carried forward
 
+- **The one silence path that fails open: `/vehicle/cmd_vel` at the gate.**
+  `cmd_gate` forwards on receipt and its tick publishes only while
+  inhibited, so if `cmd_mux` dies with Motor True the plant holds its last
+  setpoint (Step 4 measured the class at 14.8 m) while the HMI still shows
+  a live EN-ROUTE. Every other silence path in this tree fails closed; a
+  `STATUS_STALE_S`-class window on the gate's command input — zeros when
+  enabled-and-silent, symmetric with the mux's own auto-source rule — is
+  the Step 6 fix. Final whole-branch review 2026-08-13 named it.
 - **Discharged in Step 5:** the topic-literal debt. `status_contract.py` is now
   the one home for every ROS topic name `config.yaml` has never heard of —
   `/plc/status`, `/hmi/cmd_vel`, `/vehicle/cmd_vel`, `/auto/cmd_vel`,
