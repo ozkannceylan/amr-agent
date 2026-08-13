@@ -64,7 +64,8 @@ class NavNode(Node):
         self.core = nav_core.NavCore()
         self.pose = None
         self.pose_rx = None
-        self.guard = 0.0
+        self.fwd_guard = 0.0
+        self.rev_guard = 0.0
         self.guard_rx = None
         self.motor = False
         self.v_limit = 300
@@ -98,9 +99,16 @@ class NavNode(Node):
         self.pose_rx = time.monotonic()
 
     def cb_scan(self, msg):
-        self.guard = follower.sector_min(
-            msg.ranges, msg.angle_min, msg.angle_increment,
-            max(msg.range_min, 0.05), msg.range_max)
+        # BOTH ENDS, EVERY SCAN. The phase is nav_core's to decide and
+        # it decides after this callback has run, so reducing the scan
+        # to one number here would be guessing which way the truck is
+        # about to go. Two cheap passes, no guess.
+        lo, hi = max(msg.range_min, 0.05), msg.range_max
+        self.fwd_guard = follower.sector_min(
+            msg.ranges, msg.angle_min, msg.angle_increment, lo, hi)
+        self.rev_guard = follower.sector_min(
+            msg.ranges, msg.angle_min, msg.angle_increment, lo, hi,
+            forward=False)
         self.guard_rx = time.monotonic()
 
     def cb_status(self, msg):
@@ -115,19 +123,22 @@ class NavNode(Node):
         if self.pose is None or is_stale(self.pose_rx, now, SENSOR_STALE_S):
             self.pub_cmd.publish(Twist())
             return
-        guard = 0.0 if is_stale(self.guard_rx, now, SENSOR_STALE_S) \
-            else self.guard
+        dead = is_stale(self.guard_rx, now, SENSOR_STALE_S)
+        fwd = 0.0 if dead else self.fwd_guard
+        rev = 0.0 if dead else self.rev_guard
         motor = self.motor and not is_stale(
             self.status_rx, now, STATUS_STALE_S)
-        linear, steer = self.core.step(self.pose, guard, motor, self.v_limit)
+        linear, steer = self.core.step(
+            self.pose, fwd, rev, motor, self.v_limit)
         msg = Twist()
         msg.linear.x = linear
         msg.angular.z = steer
         self.pub_cmd.publish(msg)
         self.ticks += 1
         if self.ticks % STATE_EVERY == 0:
-            self.pub_state.publish(
-                String(data=self.core.state_json(self.pose, guard)))
+            # Report the guard actually in force, not the other end's.
+            self.pub_state.publish(String(data=self.core.state_json(
+                self.pose, rev if self.core.reversing else fwd)))
 
 
 def main():

@@ -156,6 +156,62 @@ def test_self_mask_ceiling_lets_a_far_obstacle_through():
     assert abs(got - 1.9) < 1e-9
 
 
+def test_reverse_phase_enters_above_120_degrees():
+    # Target dead astern: backing straight out beats a U-turn.
+    assert follower.reverse_phase(math.pi, False)
+    assert follower.reverse_phase(-math.pi, False)
+
+
+def test_reverse_phase_stays_forward_below_75_degrees():
+    assert not follower.reverse_phase(math.radians(60.0), False)
+    assert not follower.reverse_phase(math.radians(-60.0), False)
+
+
+def test_reverse_phase_holds_its_state_in_the_dead_band():
+    # 90 deg is between EXIT (75) and ENTER (120): whatever the phase
+    # was, it stays - that 45 deg band is what stops the chatter.
+    a = math.radians(90.0)
+    assert follower.reverse_phase(a, True)
+    assert not follower.reverse_phase(a, False)
+    assert follower.reverse_phase(-a, True)
+    assert not follower.reverse_phase(-a, False)
+
+
+def test_reverse_phase_exits_only_below_the_exit_angle():
+    # Reversing at 100 deg keeps reversing; at 70 deg it lets go.
+    assert follower.reverse_phase(math.radians(100.0), True)
+    assert not follower.reverse_phase(math.radians(70.0), True)
+
+
+def test_reverse_sector_watches_the_counterweight_end():
+    # forward=False centres the same +-35 deg window on angle 0, the
+    # counterweight end. A 2 m return there counts.
+    ranges, inc = _scan360()
+    ranges[180] = 2.0        # angle 0: dead astern, the way we are going
+    got = follower.sector_min(
+        ranges, -math.pi, inc, 0.10, 8.0, forward=False)
+    assert abs(got - 2.0) < 1e-9
+
+
+def test_reverse_sector_ignores_the_forward_mast_return():
+    # The mast sits on the pi side; reversing, it is not even in the
+    # sector, let alone a reason to hold.
+    ranges, inc = _scan360()
+    ranges[356] = 1.29       # the near mast upright
+    ranges[180] = 2.0
+    got = follower.sector_min(
+        ranges, -math.pi, inc, 0.10, 8.0, forward=False)
+    assert abs(got - 2.0) < 1e-9
+
+
+def test_forward_sector_ignores_a_return_behind_the_counterweight():
+    # The mirror of the above: forward, the reverse sector's obstacle is
+    # none of the guard's business.
+    ranges, inc = _scan360()
+    ranges[180] = 0.5
+    assert follower.sector_min(ranges, -math.pi, inc, 0.10, 8.0) == math.inf
+
+
 def test_arrival_is_a_quarter_metre():
     assert follower.arrived((0.0, 0.0), (0.20, 0.10))
     assert not follower.arrived((0.0, 0.0), (0.30, 0.0))

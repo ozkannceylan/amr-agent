@@ -18,8 +18,19 @@ it decelerates - and the F-program's speed monitor reads the SHAFT.
 Capping at the source means the truck approaches the limit from below
 instead of through it (Step 3 measured that trap: latched stop 0.68 s
 after enable near racking).
+
+IT BACKS OUT OF A SPUR, IT DOES NOT TURN AROUND IN ONE. A station is
+reached forks-first, so the route out of it starts dead astern. The
+pursuit's answer to that is a committed minimum-radius arc, and in a
+spur the first half of that arc drives the truck AT the rack it just
+parked in front of: measured 2026-08-13 leaving S10, 1.235 m of northing
+and the back scanner 0.938 m off rack B, inside the 1.0 m protective
+field. So the truck reverses instead - straight, steer zero, guarded by
+the counterweight-end lidar sector and by the PLC's back scanner, which
+is the primary device on that side. follower.reverse_phase owns when.
 """
 import json
+import math
 
 import follower
 import route
@@ -38,6 +49,7 @@ class NavCore:
         self.goal = None
         self.route = None
         self.note = ""
+        self.reversing = False
 
     def on_mode(self, mode):
         self.mode = mode
@@ -56,25 +68,44 @@ class NavCore:
             self.note = "goal refused: unknown station {}".format(station_id)
             return
         self.goal, self.route, self.state = station_id, poly, EN_ROUTE
-        self.note = ""
+        self.note, self.reversing = "", False
 
     def _cancel(self, why):
         self.goal, self.route, self.state, self.note = None, None, IDLE, why
+        self.reversing = False
 
-    def step(self, pose, guard_min_m, motor_ok, v_limit_mm_s):
-        """One tick: (linear.x, angular.z) under the field contract."""
+    def step(self, pose, fwd_guard_m, rev_guard_m, motor_ok, v_limit_mm_s):
+        """One tick: (linear.x, angular.z) under the field contract.
+
+        TWO GUARDS IN, ONE CHOSEN HERE. nav_node reads the scan before
+        anyone knows which way the truck is about to go, so it hands
+        over both sector minima and the phase picks. Passing one number
+        would mean guarding the end the truck is driving away from.
+        """
         if self.state in (IDLE, ARRIVED) or self.route is None:
             return (0.0, 0.0)
         xy = (pose[0], pose[1])
         if follower.arrived(xy, self.route[-1]):
-            self.state = ARRIVED
+            self.state, self.reversing = ARRIVED, False
             return (0.0, 0.0)
         if not motor_ok:
             self.state = SAFETY_STOP
             return (0.0, 0.0)
         target, to_end = follower.advance(self.route, xy)
-        steer = follower.steer(pose, target)
-        speed = follower.target_speed(to_end, steer, guard_min_m)
+        alpha = follower.norm_ang(
+            math.atan2(target[1] - pose[1], target[0] - pose[0])
+            - follower.travel_yaw(pose[2]))
+        self.reversing = follower.reverse_phase(alpha, self.reversing)
+        if self.reversing:
+            # Straight back at a walk. No steer: an arc is the very
+            # thing the back-out exists to avoid, and a reversing
+            # tricycle steers from the wrong end anyway.
+            steer = 0.0
+            speed = min(follower.target_speed(to_end, 0.0, rev_guard_m),
+                        follower.REVERSE_MPS)
+        else:
+            steer = follower.steer(pose, target)
+            speed = follower.target_speed(to_end, steer, fwd_guard_m)
         if speed == 0.0:
             # HOLD is a full zero, steer included: a stopped truck
             # sawing its steer wheel at an obstacle would look alive.
@@ -82,12 +113,13 @@ class NavCore:
             return (0.0, 0.0)
         self.state = EN_ROUTE
         speed = min(speed, v_limit_mm_s / 1000.0)
-        return (-speed, steer)
+        return ((speed if self.reversing else -speed), steer)
 
     def state_json(self, pose, guard_min_m):
         return json.dumps({
             "state": self.state, "goal": self.goal, "note": self.note,
             "route": [list(p) for p in self.route] if self.route else [],
             "pose": [pose[0], pose[1], pose[2]],
+            "reversing": self.reversing,
             "guard_min": (None if guard_min_m == float("inf")
                           else guard_min_m)})

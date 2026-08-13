@@ -31,6 +31,15 @@ GUARD_SLOW_M = 3.0
 GUARD_HOLD_M = 1.5
 GUARD_SLOW_MPS = 0.3
 GUARD_HALF_ANGLE_RAD = math.radians(35.0)
+REVERSE_MPS = 0.25
+
+# THE DEAD BAND IS WHY THE PHASE CANNOT CHATTER. Enter reverse only above
+# 120 deg, leave it only below 75 deg: the 45 deg band between them means
+# a target sitting near the perpendicular - which is exactly what a corner
+# hands you - cannot flip the truck between backing out and driving on at
+# tick rate. Inside the band the phase simply keeps whatever it was.
+REVERSE_ENTER_RAD = 2.0944      # 120 deg
+REVERSE_EXIT_RAD = 1.3090       # 75 deg
 
 # THE VEHICLE'S OWN MAST, MEASURED OUT OF THE GUARD. The nav lidar
 # clears the mast body on the exact-astern ray by 0.04 m (model.sdf,
@@ -137,25 +146,54 @@ def _self_return(offset_deg, r, self_mask):
 
 
 def sector_min(ranges, angle_min, angle_inc, range_lo, range_hi,
-               self_mask=SELF_MASK):
-    """Min valid range within +-35 deg of the travel direction (angle pi
-    in the scan frame - the fork end is the model's -x). Invalid returns
-    (inf, nan, outside [range_lo, range_hi]) are skipped: silence is not
-    an obstacle HERE because the safety layer already treats silence as
-    a demand; this guard only shapes speed. Returns matching SELF_MASK
-    are skipped too - they are the vehicle's own mast (see the constant).
-    Pass self_mask=() to see the raw scan."""
+               forward=True, self_mask=SELF_MASK):
+    """Min valid range within +-35 deg of the direction of travel.
+
+    THE SECTOR FOLLOWS THE TRUCK, NOT THE HULL. Driving forks-first the
+    sector centres on scan angle pi (the fork end is the model's -x);
+    backing out it centres on angle 0, the counterweight end we are
+    actually moving toward. Same half-angle, same bands - only the
+    centre moves, because a guard aimed at where the truck has been is
+    not a guard.
+
+    Invalid returns (inf, nan, outside [range_lo, range_hi]) are
+    skipped: silence is not an obstacle HERE because the safety layer
+    already treats silence as a demand; this guard only shapes speed.
+    SELF_MASK returns are skipped too - they are the vehicle's own mast.
+    Those windows are absolute body bearings (offsets from pi), so they
+    are checked in both directions and simply never land in the reverse
+    sector. Pass self_mask=() to see the raw scan."""
+    centre = math.pi if forward else 0.0
     best = math.inf
     for i, r in enumerate(ranges):
         if not (range_lo <= r <= range_hi):     # False for nan and inf
             continue
-        offset = norm_ang(angle_min + i * angle_inc - math.pi)
-        if abs(offset) > GUARD_HALF_ANGLE_RAD:
+        angle = angle_min + i * angle_inc
+        if abs(norm_ang(angle - centre)) > GUARD_HALF_ANGLE_RAD:
             continue
-        if _self_return(math.degrees(offset), r, self_mask):
+        if _self_return(math.degrees(norm_ang(angle - math.pi)), r,
+                        self_mask):
             continue
         best = min(best, r)
     return best
+
+
+def reverse_phase(alpha, was_reversing):
+    """Should the truck be backing up? alpha is the bearing error to the
+    lookahead target, measured from the TRAVEL heading.
+
+    A tricycle cannot rotate in place, so a target behind it is either a
+    committed forward arc or a straight reverse. In a spur the arc is
+    what put the back scanner 0.938 m off a rack (measured 2026-08-13):
+    the first half of it drives the truck at the thing it just parked in
+    front of. Backing straight out spends no floor at all, and reversing
+    is the direction this vehicle guards best - the PLC's back scanner
+    is primary there. See the ENTER/EXIT constants for the dead band."""
+    if abs(alpha) > REVERSE_ENTER_RAD:
+        return True
+    if abs(alpha) < REVERSE_EXIT_RAD:
+        return False
+    return was_reversing
 
 
 def target_speed(dist_to_end, steer_rad, guard_min_m):
