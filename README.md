@@ -20,21 +20,24 @@ running underneath them.
 
 ## Watch it run
 
-[![The F-PLC safety layer, live: e-stop, three safety scanners and the encoder cross-check against a driving forklift](https://img.youtube.com/vi/InZRcy_WUXY/maxresdefault.jpg)](https://www.youtube.com/watch?v=InZRcy_WUXY)
+**1 · Safety + Autonomous Drive** — station-to-station runs under the
+live safety chain: reverse-out departures, pure-pursuit aisles, measured
+arrivals. *Video link pending.*
 
-*▶ [**The safety layer, live**](https://www.youtube.com/watch?v=InZRcy_WUXY) —
-one continuous session: the drive enable refused until the first
-acknowledge, an e-stop that latches through its own release, a
-protective field that stops the truck and refuses to un-stop while the
-cause stands, the warning field dropping the speed ceiling, and an
-injected encoder fault caught by the cross-check.*
+**2 · Safety + Teleoperation:**
 
-*▶ **First autonomous drive** — station-to-station runs under the live
-safety chain: reverse-out departures, pure-pursuit aisles, measured
-arrivals. Video link pending.*
+[![Safety + Teleoperation — e-stop, three safety scanners and the encoder cross-check against a driving forklift](https://img.youtube.com/vi/InZRcy_WUXY/maxresdefault.jpg)](https://www.youtube.com/watch?v=InZRcy_WUXY)
 
-*▶ **Teleoperation** — the operator's joystick against the F-program's
-verdicts. Video link pending.*
+*▶ [**Watch**](https://www.youtube.com/watch?v=InZRcy_WUXY) — one
+continuous teleoperated session with the safety layer live: the drive
+enable refused until the first acknowledge, an e-stop that latches
+through its own release, a protective field that stops the truck and
+refuses to un-stop while the cause stands, the warning field dropping
+the speed ceiling, and an injected encoder fault caught by the
+cross-check.*
+
+*(The first build's own demonstration is linked from
+[its runbook](docs/claude-supervised-m5/RUNBOOK.md).)*
 
 ## The system
 

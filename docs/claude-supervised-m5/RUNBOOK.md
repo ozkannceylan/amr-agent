@@ -8,7 +8,12 @@ It predates the hand-rebuilt stack that now fronts this repo, and it is
 kept **runnable**: none of its trees moved, and its two entry scripts are
 preserved under [`.archive/`](../../.archive/).
 
-*Video: claude-supervised M5 demonstration — link pending.*
+[![The first safety demonstration — teleoperated forklift with the safety chain live (4 min 9 s)](https://img.youtube.com/vi/wl1rgWyX66s/maxresdefault.jpg)](https://youtu.be/wl1rgWyX66s)
+
+*▶ [**The first build's demonstration**](https://youtu.be/wl1rgWyX66s) —
+4 min 9 s, one continuous run: the scanner drops the speed ceiling at
+the warning boundary, latches a stop at the protective one, and the
+monitored reset is refused while the cause stands.*
 
 How this era relates to the rest of the repo:
 
