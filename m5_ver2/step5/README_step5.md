@@ -274,7 +274,7 @@ Verified against the code at `fb976b0`. Each constant has exactly one home.
 | `REVERSE_MPS` | `0.25` | backing out is a walk |
 | `REVERSE_ENTER_RAD` | `2.0944` (120°) | enter the reverse phase above this bearing error |
 | `REVERSE_EXIT_RAD` | `1.3090` (75°) | leave it below this. **The 45° dead band is what stops the phase chattering** at a corner, where the target sits near the perpendicular. |
-| `SELF_MASK` | `((-9.0, -1.0, 1.6), (-31.0, -23.0, 1.7))` | `(travel-offset lo°, hi°, ceiling m)` windows. A return inside a window at or under its ceiling is the truck's own mast, not the world. Probed live 2026-08-13: near upright -3..-6° @ 1.287-1.292 m, far -26..-29° @ 1.447-1.483 m — 2-3° and 1.9-2.9° of margin respectively. Pass `self_mask=()` to see the raw scan. |
+| `SELF_MASK` | `((-9.0, -1.0, 1.6), (-31.0, -23.0, 1.7))` | `(travel-offset lo°, hi°, ceiling m)` windows. A return inside a window at or under its ceiling is the truck's own mast, not the world. Probed live 2026-08-13: near upright -3..-6° @ 1.287-1.292 m, far -26..-29° @ 1.447-1.483 m — 2-3° and 1.9-3.1° of margin respectively. Pass `self_mask=()` to see the raw scan. |
 
 ### The arrival radius rule — `ipc/stations.py`
 
