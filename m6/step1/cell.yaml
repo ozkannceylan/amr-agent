@@ -1,0 +1,10 @@
+# cell.yaml - the cell-wide VDA 5050 facts every party reads.
+# One home: the vehicle node and the dispatcher both load this file.
+broker:
+  host: "127.0.0.1"      # mosquitto on the WSL loopback; never a PLC path
+  port: 1883
+  keepalive_s: 2         # paho notices a dead broker within ~1.5 keepalives,
+                         # so this and the vehicles' supervision_s budget
+                         # (3.0 s) are one decision made in one place
+map_id: warehouse
+manufacturer: amragent   # PLAN open decision 4; charset per spec 6.3
