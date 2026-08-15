@@ -1,11 +1,13 @@
 // FB_ESTOP1 - the Siemens ESTOP1 semantics, ported to structured text.
 //
-// CLAIM, stated here because this file is where the logic lives: this is a
-// STANDARD program modelling the F-behaviour. It demonstrates the same
-// observable semantics the F-block showed on PLCSIM Advanced; it carries
-// NO safety integrity, no PL, Category, SIL or PFH (beckhoff/RESEARCH.md
-// D3; the ADR 0011 D5 claim discipline). The authentic-safety track is the
-// TE9000 safety project in beckhoff/plc/safety/.
+// ROLE AND CLAIM, stated here because this file is where the logic lives:
+// the safety chain is AUTHORED as a TE9000 safety project - the spec is
+// beckhoff/plc/safety/SAFETY-APP.md - and this block is its STAND-IN
+// EXECUTOR for the live loop until a safety runtime (TE9100 or TwinSAFE
+// hardware) lands. It demonstrates the same observable semantics the
+// F-block showed on PLCSIM Advanced; it carries NO safety integrity, no
+// PL, Category, SIL or PFH (RESEARCH.md D3; ADR 0011 D5 discipline). The
+// parity table (RUNBOOK part 5, S1-S6) pins it to the safety project.
 //
 // The semantics, measured on the F-CPU (m5_ver2/CLAUDE.md section 3.2):
 //   - a demand LATCHES: the input returning to healthy does not re-enable

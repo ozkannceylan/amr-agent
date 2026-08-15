@@ -1,4 +1,9 @@
-// MAIN - the m5_ver2 safety-program behaviour on the standard runtime.
+// MAIN - the stand-in executor of the TE9000 safety application
+// (beckhoff/plc/safety/SAFETY-APP.md), plus the standard-program half
+// that TIA also kept standard: V_Limit and the case bits for the wire.
+// When a safety runtime lands (TE9100 / TwinSAFE hardware), the five
+// chains below reduce to mirroring the safety output into GVL_IO.Motor
+// (RUNBOOK part 6); until then this file executes the chain live.
 //
 // Motor is the AND of five FB_ESTOP1 enables: e-stop button, three
 // protective fields (back / right / left - the owner added right and left

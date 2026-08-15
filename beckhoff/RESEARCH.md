@@ -24,6 +24,7 @@ search excerpt of the named page. All verified 2026-08-15.
 | F8 | A safety project targeting **EL6910** can be **debugged without hardware** in the editor: simulated "external device" target + alias devices (EL1904/EL2904), debug mode with online value manipulation. Community-documented; explicitly does **not** work for the older EL6900 target | twincontrols.com *Creating a TwinSAFE Simulation Project* | [fetched] |
 | F9 | The 2017 **TwinCAT Safety PLC** (software safety runtime, SIL3/PL e capable) runs **only on Beckhoff IPCs** — not on a generic laptop | Beckhoff TcSafetyPLC manual 1.2.0 | [snippet] |
 | F10 | **pyads** (Python ADS wrapper, TcAdsDll on Windows) reads/writes PLC symbols by name; the local runtime is AMS `127.0.0.1.1.1`, PLC port **851** (`pyads.PORT_TC3PLC1`); list reads/writes batch multiple symbols per call | pyads.readthedocs.io; pypi.org/project/pyads | [snippet] |
+| F11 | The Safety Editor's **offline simulation** is an official capability: "the project can be simulated offline in order to considerably speed up and simplify commissioning"; online values of variables and FB states are shown in the graphical environment; alias devices decouple the safety application from hardware | beckhoff.com TE9000 page; infosys *Safety Editor* (102261259) | [snippet] |
 
 ## 2. What this decides
 
@@ -48,34 +49,31 @@ everything below them run **unchanged**. Only the PLC API swaps: PLCSIM
 Runtime API → **ADS by symbol name** over pyads (F10). The single-writer
 rule carries over verbatim: one process opens ADS toward the PLC's inputs.
 
-### D3 — The safety logic, two tracks with two different claims
+### D3 — The safety logic: authored in TE9000, executed by a stand-in until a safety runtime lands
 
-**Track A — the standard-runtime port (day 1, unblocks everything).**
-The F-program's *documented and measured* behaviour
-(m5_ver2/CLAUDE.md §3.2) is ported to structured text in the standard
-TwinCAT runtime: an `FB_ESTOP1` block with the real semantics (a demand
-latches; healthy input does not re-enable; acknowledge is a rising edge;
-`ACK_NEC` — one acknowledge required after startup), five instances
-(e-stop, back/right/left protective fields, speed monitor), the encoder
-cross-check (|A−B| > 50 → demand; 2800 mm/s ceiling), the V_Limit law
-(1500 with the warning fields clear, else 300) and the case bits.
-**Claim, stated wherever the port is described: this models the
-F-behaviour in a standard program — no safety integrity, no PL, Category,
-SIL or PFH.** It is the same claim discipline ADR 0011 D5/F6 applied to
-the stand-in path, and the same asymmetry ADR 0013 D2 planned to state
-for M8: the F-safety layer existed on the Siemens controller.
+**The safety implementation is the TE9000 safety project** (owner ruling
+2026-08-15: "TE9000 Safety Editor olacak şekilde"). The chain — four
+latching stop chains, the speed monitor, the enable AND — is authored in
+the Safety Editor as a real TwinSAFE safety application: certified FBs
+(`safeEstop` et al. — F5), EL6910 target, the editor's own verification
+pass, and the **documented offline simulation** (F8, F11) as its test
+bench. The block-by-block design is `plc/safety/SAFETY-APP.md`; the
+project artifacts are committed once verified.
 
-**Track B — the TwinSAFE artifact (authentic safety logic, staged).**
-The same chain built in the **TE9000 Safety Editor** as a real safety
-project (certified FBs, `safeEstop` et al., EL6910 target — F5), verified
-by the editor's own verification step, and exercised in the editor's
-hardware-less debug mode (F8). Execution as a *safety runtime* needs one
-of: **TE9100** when it ships (F6 — status "product announcement", to be
-asked of Beckhoff sales, quoted and dated per ADR 0013 D2), or real
-TwinSAFE hardware (EK1100 + EL1918 + EL2904 + EL6910 class — the paid
-path), or a Beckhoff IPC for the 2017 Safety PLC (F9 — out of scope).
-Only Track B on a real safety runtime would earn the words "F-logic
-executes"; until then those words are retired from the live-system claims.
+**The live-loop executor is an ST stand-in, until a safety runtime
+exists.** A hardware-less machine has no TwinSAFE runtime today: **TE9100**
+is at product-announcement status (F6 — to be asked of Beckhoff sales,
+quoted and dated per ADR 0013 D2), the 2017 Safety PLC needs a Beckhoff
+IPC (F9), and real TwinSAFE hardware is the paid path. So the standard
+runtime executes `FB_ESTOP1`/`MAIN` (`plc/*.st`) — the same semantics the
+F-CPU showed, generated from the same spec, **pinned to the safety
+project by the parity table** (RUNBOOK part 5, S1–S6). **Claim, stated
+wherever the port is described: the stand-in models the F-behaviour in a
+standard program — no safety integrity, no PL, Category, SIL or PFH**
+(ADR 0011 D5/F6 discipline; the ADR 0013 D2 asymmetry, stated and dated).
+When TE9100 or hardware arrives, the safety project binds to it unchanged
+(alias devices re-pointed), the stand-in reduces to a mirror, and only
+then do the claims widen (RUNBOOK part 6).
 
 ### D4 — Port fidelity rules
 

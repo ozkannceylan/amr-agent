@@ -90,7 +90,7 @@ its measured evidence in [`m5_ver2/step5/PROOF.md`](m5_ver2/step5/PROOF.md).
 |---|---|
 | [`m5_ver2/`](m5_ver2/) | **The current system.** Built as five frozen steps, each a verified copy of the last; [`step5/`](m5_ver2/step5/) is the one that runs. [`m5_ver2/CLAUDE.md`](m5_ver2/CLAUDE.md) holds the PLC ground truth and working agreements. |
 | [`m6/`](m6/) | **M6 in progress** — VDA 5050 fleet operations on top of step 5: the [plan](m6/PLAN.md), and [step 1](m6/step1/README_step1.md), the VDA 5050 seam at n = 1. |
-| [`beckhoff/`](beckhoff/) | **The PLC substrate after the TIA trial** — the safety chain ported to TwinCAT 3.1 (user mode runtime): [research](beckhoff/RESEARCH.md), [runbook](beckhoff/RUNBOOK.md), ST sources and the pyads writer. Same UDP wire; the WSL side runs unchanged. |
+| [`beckhoff/`](beckhoff/) | **The PLC substrate after the TIA trial** — the safety chain on TwinCAT 3.1 (user mode runtime): [research](beckhoff/RESEARCH.md), [runbook](beckhoff/RUNBOOK.md), the [TE9000 safety-application spec](beckhoff/plc/safety/SAFETY-APP.md), its ST stand-in executor and the pyads writer. Same UDP wire; the WSL side runs unchanged. |
 | [`agv/`](agv/) | Shared vehicle assets used in place by both eras: the forklift config, I/O translator and STO contactor. |
 | [`m5-plc-debug/`](m5-plc-debug/) | The hand-debug chapter: the safety-PLC ↔ Gazebo loop isolated and made to work, script by script. |
 | [`bridge/`](bridge/) · [`fleet/`](fleet/) · [`hmi/`](hmi/) · [`sim/`](sim/) · [`viz/`](viz/) · [`plc/`](plc/) | The claude-supervised layered stack — the first M5, still runnable: [its runbook](docs/claude-supervised-m5/RUNBOOK.md). |
