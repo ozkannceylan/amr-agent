@@ -304,6 +304,18 @@ recorded pid rather than trusting the shell it runs in.
 - **One subscriber per run.** More than one has stalled the 5101 link long
   enough to latch ESTOP1 (see the PLC facts above).
 
+## The virtual F-PLC rig (2026-08-20)
+
+The PLCSIM Advanced trial expired. `windows/step5.py --virtual` swaps the API
+object for `windows/virtual_fplc.py` — a behavioural model of the validated
+F-program: five latching ESTOP1 instances, ack-edge semantics, the encoder
+cross-check and ceiling, `V_Limit` and the pinned monitoring case. Two owner
+rulings are baked in (any violated warning field → `V_Limit` 300; case pinned
+at 1) — see `docs/superpowers/specs/2026-08-20-virtual-fplc-design.md`.
+Without the flag the writer still expects PLCSIM `PLC_2`, unchanged. The model
+claims no safety integrity: a Step 6 result earned on this rig is a rig result
+until re-proved against a real or licensed PLC.
+
 ## Known debt carried forward
 
 - **The one silence path that fails open: `/vehicle/cmd_vel` at the gate.**

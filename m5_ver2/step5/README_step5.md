@@ -37,6 +37,12 @@ The PLC goes first. The vehicle side cannot be enabled without it.
 | 10 | Panel | Finished: **close the window**. It writes the trip values on the way out, through the same path an exception takes. |
 | 11 | WSL | `./m5_ver2/step5/step5.sh stop` |
 
+**No PLCSIM license?** Run step 7 as `python m5_ver2\step5\windows\step5.py --virtual`
+and skip step 1 entirely: `windows/virtual_fplc.py` plays the F-PLC in-process with
+the measured semantics (design: `docs/superpowers/specs/2026-08-20-virtual-fplc-design.md`).
+The panel titles itself `VIRTUAL F-PLC (model)`; results earned this way are rig
+results, not F-program validation.
+
 **Close the panel before `stop`, in that order.** `stop` is not a brake —
 Gazebo's joint controllers hold their last setpoint, so killing the stack under
 a moving truck only leaves it moving (measured once at 14.8 m on a standing

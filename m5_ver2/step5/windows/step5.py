@@ -28,6 +28,8 @@ THE FAIL DIRECTION
 
 Usage (Windows, 64-bit Python, PLCSIM Advanced already in RUN):
   python m5_ver2\\step5\\windows\\step5.py
+With no PLCSIM license (any Python, no pythonnet):
+  python m5_ver2\\step5\\windows\\step5.py --virtual
 """
 
 import json
@@ -40,6 +42,7 @@ import tkinter as tk
 
 # ----------------------------- CONFIG -----------------------------
 PLC_INSTANCE = "PLC_2"
+VIRTUAL = "--virtual" in sys.argv  # no PLCSIM: virtual_fplc.py plays the F-PLC
 API_DLL_DIR = r"C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\6.0"
 UDP_TARGET = None      # None -> ask `wsl.exe hostname -I`. A string overrides.
 UDP_PORT = 5100
@@ -200,6 +203,10 @@ def apply_encoder_fault(a, b, mode, last_a):
 
 def connect_plc():
     """CreateInterface, with the -4 case reported rather than worked around."""
+    if VIRTUAL:
+        from virtual_fplc import VirtualFPLC
+        print("VIRTUAL F-PLC (model) - PLCSIM Advanced is not in this loop")
+        return VirtualFPLC()
     sys.path.append(API_DLL_DIR)
     import clr
     clr.AddReference("Siemens.Simatic.Simulation.Runtime.Api.x64")
@@ -333,7 +340,8 @@ def run_panel(state, live):
     """Build the panel and pump it. Returns when the window closes."""
     big = ("Segoe UI", 13, "bold")
     root = tk.Tk()
-    root.title("Forklift 1 PLC Control Panel")
+    root.title("Forklift 1 PLC Control Panel"
+               + (" - VIRTUAL F-PLC (model)" if VIRTUAL else ""))
     root.configure(bg=BG)
     root.resizable(False, False)
 
