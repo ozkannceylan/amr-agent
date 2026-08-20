@@ -38,7 +38,6 @@ Usage (after sourcing /opt/ros/jazzy/setup.bash):
   python3 m5_ver2/step6/ipc/cmd_gate.py
 """
 
-import os
 import time
 
 import rclpy
@@ -48,8 +47,8 @@ from rclpy.node import Node
 from std_msgs.msg import Float64, String
 
 from status_contract import (
-    STATUS_STALE_S, STATUS_TOPIC, V_LIMIT_CREEP_MM_S, VEHICLE_CMD_TOPIC,
-    is_stale, parse_status, speed_limit_mm_s)
+    CONFIG_PATH, STATUS_STALE_S, STATUS_TOPIC, V_LIMIT_CREEP_MM_S,
+    VEHICLE_CMD_TOPIC, is_stale, parse_status, speed_limit_mm_s)
 
 # ----------------------------- CONFIG -----------------------------
 ZERO_HZ = 10.0
@@ -58,10 +57,6 @@ ZERO_HZ = 10.0
 # silent status at the same instant, so it has one home. Its derivation,
 # including why it is 2.5 of THIS file's ticks, is at that home.
 # ------------------------------------------------------------------
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-CONFIG_YAML = os.path.normpath(
-    os.path.join(_HERE, "..", "..", "..", "agv", "forklift", "config.yaml"))
 
 
 def clamp(value, limit):
@@ -110,7 +105,7 @@ def motor_from_status(json_text):
     return bool(msg["motor"])
 
 
-def load_config(path=CONFIG_YAML):
+def load_config(path=CONFIG_PATH):
     with open(path, "r", encoding="utf-8") as handle:
         return yaml.safe_load(handle)
 

@@ -11,7 +11,6 @@ rather than as a clear road. The safe direction, same as every Step 4
 display rule.
 """
 import math
-import os
 import time
 
 import rclpy
@@ -26,8 +25,9 @@ from std_msgs.msg import String
 import follower
 import nav_core
 from status_contract import (
-    AUTO_CMD_TOPIC, AUTO_GOAL_TOPIC, AUTO_STATE_TOPIC, MODE_TOPIC,
-    STATUS_STALE_S, STATUS_TOPIC, is_stale, parse_status, speed_limit_mm_s)
+    AUTO_CMD_TOPIC, AUTO_GOAL_TOPIC, AUTO_STATE_TOPIC, CONFIG_PATH,
+    MODE_TOPIC, STATUS_STALE_S, STATUS_TOPIC, is_stale, parse_status,
+    speed_limit_mm_s)
 
 # ----------------------------- CONFIG -----------------------------
 TICK_HZ = 20.0
@@ -35,12 +35,8 @@ STATE_EVERY = 2          # /auto/state every 2nd tick -> 10 Hz
 SENSOR_STALE_S = 0.5     # odom at 20 Hz, scan at 10 Hz: 0.5 s is dead
 # ------------------------------------------------------------------
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-CONFIG_YAML = os.path.normpath(
-    os.path.join(_HERE, "..", "..", "..", "agv", "forklift", "config.yaml"))
 
-
-def load_config(path=CONFIG_YAML):
+def load_config(path=CONFIG_PATH):
     """The two gz source names come from the file that owns them.
 
     topics.gz_odom and topics.gz_scan_nav, read the way encoder_link.py

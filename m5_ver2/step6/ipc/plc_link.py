@@ -1,6 +1,7 @@
 """plc_link.py - the vehicle side of the PLC link.
 
-Binds UDP :5100, republishes what step6.py sends as two ROS topics:
+Binds its vehicle's PLC port (VEHICLES table) and republishes what
+step6.py sends as two ROS topics:
 
     /plc/status                            std_msgs/String  (the JSON)
     topics.safety_torque_off_demand        std_msgs/Bool    (= not motor)
@@ -19,7 +20,6 @@ Usage (after sourcing /opt/ros/jazzy/setup.bash):
 """
 
 import json
-import os
 import socket
 import time
 
@@ -29,11 +29,10 @@ from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
 from status_contract import (
-    FAILSAFE, STATUS_TOPIC, is_stale, parse_status)
+    CONFIG_PATH, FAILSAFE, PLC_PORT, STATUS_TOPIC, is_stale, parse_status)
 
 # ----------------------------- CONFIG -----------------------------
 BIND_ADDR = "0.0.0.0"
-UDP_PORT = 5100
 # THIS NODE'S OWN UDP TIMEOUT, and NOT status_contract.STATUS_STALE_S.
 # That one is the ROS-side timeout consumers of /plc/status apply to a
 # topic; this one is measured on the datagrams arriving here from
@@ -47,12 +46,8 @@ STALE_S = 0.28
 PUBLISH_HZ = 20.0
 # ------------------------------------------------------------------
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-CONFIG_YAML = os.path.normpath(
-    os.path.join(_HERE, "..", "..", "..", "agv", "forklift", "config.yaml"))
 
-
-def load_topics(path=CONFIG_YAML):
+def load_topics(path=CONFIG_PATH):
     with open(path, "r", encoding="utf-8") as handle:
         return yaml.safe_load(handle)["topics"]
 
@@ -67,7 +62,7 @@ class PlcLink(Node):
             Bool, topics["safety_torque_off_demand"], 10)
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind((BIND_ADDR, UDP_PORT))
+        self.sock.bind((BIND_ADDR, PLC_PORT))
         self.sock.setblocking(False)
 
         self.last_rx = None
@@ -75,13 +70,13 @@ class PlcLink(Node):
         self.create_timer(1.0 / PUBLISH_HZ, self.tick)
         self.get_logger().info(
             "bound {}:{}, publishing {} and {}".format(
-                BIND_ADDR, UDP_PORT, STATUS_TOPIC,
+                BIND_ADDR, PLC_PORT, STATUS_TOPIC,
                 topics["safety_torque_off_demand"]))
 
     def drain(self):
         """Take the newest datagram and discard any backlog.
 
-        BOUNDED so that tick() always returns: a flood on :5100 would hold
+        BOUNDED so that tick() always returns: a flood on that port would hold
         an unbounded loop resident and the node would fall silent while
         still looking alive. 64 is ~25 tick periods of the ~50 Hz sender,
         against the ~2.5 datagrams one tick legitimately brings.

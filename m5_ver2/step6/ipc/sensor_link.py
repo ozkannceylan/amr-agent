@@ -1,8 +1,9 @@
 """sensor_link.py - all three scanners' verdicts, to the PLC writer.
 
 Subscribes /forklift/safety/fields and sends the back, right and left
-devices' (pf, wf) to Windows over UDP 5101, where step6.py writes PF_OSSD,
-WF_Clear and their _right/_left counterparts.
+devices' (pf, wf) to Windows over its vehicle's sensor port (VEHICLES
+table), where step6.py writes PF_OSSD, WF_Clear and their _right/_left
+counterparts.
 
 ALL THREE SENSORS SINCE 2026-08-12. Through Step 5's build the F-PLC had
 one sensor input configured and this file enforced back-only; on that date
@@ -34,7 +35,6 @@ import status_contract
 
 # ----------------------------- CONFIG -----------------------------
 UDP_TARGET = None       # None -> the WSL default gateway, i.e. the Windows host
-UDP_PORT = 5101
 # The encoder report's OWN timeout. encoder_link publishes at 20 Hz, so
 # this is five missed reports.
 #
@@ -92,7 +92,7 @@ def parse_encoders(encoders_json):
 
 
 def payload(fields_json, encoders_json):
-    """The 5101 wire format, or None if any part cannot be trusted.
+    """The sensor-link wire format, or None if any part cannot be trusted.
 
     ONE DATAGRAM CARRIES EVERYTHING so step6.py has one staleness rule
     rather than several, and there is no state where one device's verdict
@@ -140,7 +140,7 @@ class SensorLink(Node):
             String, status_contract.FIELDS_TOPIC, self.cb_fields, 10)
         self.get_logger().info(
             "back+right+left scanners + encoders -> {}:{}".format(
-                self.target, UDP_PORT))
+                self.target, status_contract.SENSOR_PORT))
 
     def cb_encoders(self, msg):
         self.encoders = msg.data
@@ -163,7 +163,7 @@ class SensorLink(Node):
             return
         data = payload(msg.data, self.encoders)
         if data is not None:
-            self.tx.sendto(data, (self.target, UDP_PORT))
+            self.tx.sendto(data, (self.target, status_contract.SENSOR_PORT))
 
 
 def main():

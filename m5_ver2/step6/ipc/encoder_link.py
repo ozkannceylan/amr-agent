@@ -29,7 +29,6 @@ Usage (after sourcing /opt/ros/jazzy/setup.bash):
 """
 
 import json
-import os
 import time
 
 import rclpy
@@ -53,12 +52,8 @@ ENC_STALE_S = 0.3
 DISAGREE_MM_S = 50
 # ------------------------------------------------------------------
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-CONFIG_YAML = os.path.normpath(
-    os.path.join(_HERE, "..", "..", "..", "agv", "forklift", "config.yaml"))
 
-
-def load_config(path=CONFIG_YAML):
+def load_config(path=status_contract.CONFIG_PATH):
     with open(path, "r", encoding="utf-8") as handle:
         return yaml.safe_load(handle)
 

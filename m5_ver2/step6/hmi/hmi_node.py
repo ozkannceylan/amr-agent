@@ -40,9 +40,10 @@ from std_msgs.msg import String
 
 import map_panel
 from status_contract import (
-    AUTO_GOAL_TOPIC, AUTO_STATE_TOPIC, ENCODERS_TOPIC, FAILSAFE, FIELDS_TOPIC,
-    HMI_CMD_TOPIC, MODE_AUTO, MODE_TELEOP, MODE_TOPIC, STATUS_STALE_S,
-    STATUS_TOPIC, is_stale, parse_status, speed_limit_mm_s)
+    AUTO_GOAL_TOPIC, AUTO_STATE_TOPIC, CONFIG_PATH, ENCODERS_TOPIC, FAILSAFE,
+    FIELDS_TOPIC, HMI_CMD_TOPIC, MODE_AUTO, MODE_TELEOP, MODE_TOPIC,
+    STATUS_STALE_S, STATUS_TOPIC, VID, is_stale, parse_status,
+    speed_limit_mm_s)
 
 # ----------------------------- CONFIG -----------------------------
 PUBLISH_HZ = 20.0
@@ -80,9 +81,6 @@ _LEVEL_LAMP = {
     "PROTECTIVE": (LAMP_RED, "Protective Field"),
 }
 # ------------------------------------------------------------------
-
-CONFIG_YAML = os.path.normpath(
-    os.path.join(_HERE, "..", "..", "..", "agv", "forklift", "config.yaml"))
 
 
 def knob_to_twist(dx, dy, radius, speed_max, steer_max):
@@ -179,7 +177,7 @@ def display_state(status, last_rx_s, now_s, stale_s=STATUS_STALE_S):
     return (colour, text, enable_text(status["motor"], limit))
 
 
-def load_config(path=CONFIG_YAML):
+def load_config(path=CONFIG_PATH):
     with open(path, "r", encoding="utf-8") as handle:
         return yaml.safe_load(handle)
 
@@ -234,7 +232,8 @@ class Hmi(Node):
         self.create_timer(1.0 / PUBLISH_HZ, self.tick)
 
         self.root = root
-        root.title("Forklift 1 HMI")
+        # The id in the title bar: two identical cabs are open at once.
+        root.title("Forklift 1 HMI - " + VID)
         cx = cy = KNOB_RADIUS_PX + 20
 
         # Two columns: Step 4's window on the left, unchanged in every
