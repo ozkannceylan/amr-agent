@@ -316,6 +316,18 @@ Without the flag the writer still expects PLCSIM `PLC_2`, unchanged. The model
 claims no safety integrity: a Step 6 result earned on this rig is a rig result
 until re-proved against a real or licensed PLC.
 
+**What has actually been verified, and at what level.**
+`tests/test_virtual_fplc.py` pins the model's semantics;
+`tests/test_step5_virtual_loop.py` pins the loop around it, running the real
+`control_loop` over real UDP sockets with the model in the PLC's place — the
+enable after one Acknowledge and the five-key 5100 payload that reports it, a
+protective-field trip latching through the heal until the next ack, and the
+fail-safe when the 5101 link goes silent. Gazebo and Tk are the only things
+absent from that path. The **full stack has not been re-proved under
+`--virtual`**: no autonomous leg, and no scanner trip out of a real field
+evaluation, has been driven against the model. That run is the owner's first
+smoke before Step 6 work starts.
+
 ## Known debt carried forward
 
 - **The one silence path that fails open: `/vehicle/cmd_vel` at the gate.**

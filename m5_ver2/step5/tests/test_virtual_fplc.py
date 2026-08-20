@@ -134,6 +134,17 @@ def test_dead_link_picture_0_3000_trips():
     assert plc.ReadBool("Motor") is False
 
 
+def test_the_speed_instance_latches_and_one_ack_re_enables():
+    plc = enabled_plc()
+    plc.WriteInt16("ENC_A", 100)
+    plc.WriteInt16("ENC_B", 400)             # 300 apart: cross-check fault
+    assert plc.ReadBool("Motor") is False
+    plc.WriteInt16("ENC_B", 100)             # the channels agree again
+    assert plc.ReadBool("Motor") is False    # latched, like every instance
+    ack(plc)
+    assert plc.ReadBool("Motor") is True
+
+
 @pytest.mark.parametrize("wf", WARNINGS)
 def test_v_limit_is_300_when_any_single_wf_is_violated(wf):
     plc = VirtualFPLC()
@@ -141,6 +152,19 @@ def test_v_limit_is_300_when_any_single_wf_is_violated(wf):
     assert plc.ReadInt16("V_Limit") == 1500
     plc.WriteBool(wf, False)
     assert plc.ReadInt16("V_Limit") == 300
+
+
+def test_v_limit_heals_with_the_warning_field_and_never_latches():
+    # V_Limit is computed in the standard OB1, not in the safety program:
+    # it follows the warning fields both ways. Only the ESTOP1 instance
+    # the limit tripped stays latched, and that is Motor's business.
+    plc = VirtualFPLC()
+    write_healthy(plc)
+    assert plc.ReadInt16("V_Limit") == 1500
+    plc.WriteBool("WF_Clear_right", False)
+    assert plc.ReadInt16("V_Limit") == 300
+    plc.WriteBool("WF_Clear_right", True)
+    assert plc.ReadInt16("V_Limit") == 1500
 
 
 def test_case_bits_are_pinned_at_case_1():
