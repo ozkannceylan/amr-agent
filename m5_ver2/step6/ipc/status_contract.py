@@ -176,7 +176,20 @@ else:
     # only VEHICLES and contract(vid), which exist above. Anything
     # else reaching for a per-vehicle constant without the env gets
     # the refusal by name, not an ImportError shrug.
+    #
+    # DUNDERS ARE NOT PER-VEHICLE CONSTANTS. `from status_contract
+    # import VEHICLES` makes the import machinery probe
+    # hasattr(module, "__path__") to decide whether VEHICLES could be a
+    # submodule; hasattr catches AttributeError and nothing else, so
+    # answering that probe with SystemExit killed every env-free
+    # from-import - including the launch file's and
+    # tools/instantiate_vehicle.py's - before it could read the table
+    # that is right there. Dunder lookups therefore get the ordinary
+    # AttributeError the machinery expects; a real name still gets the
+    # loud refusal.
     def __getattr__(name):
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
         raise SystemExit(
             "status_contract: env VEHICLE is not set, so the "
             "per-vehicle constant {!r} does not exist. step6.sh stamps "

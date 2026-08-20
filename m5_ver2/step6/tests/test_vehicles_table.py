@@ -36,3 +36,43 @@ def test_module_constants_follow_the_env_vehicle():
 def test_unknown_vehicle_refused():
     with pytest.raises(SystemExit):
         sc.contract("f9")
+
+
+def test_env_free_from_import_reads_the_table():
+    # The launch file (both vehicles from one process) and
+    # tools/instantiate_vehicle.py import this module with no VEHICLE.
+    # A subprocess because conftest sets VEHICLE for the whole suite,
+    # which takes the guarded branch and hides the else branch entirely.
+    import os
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k != "VEHICLE"}
+    ipc = os.path.dirname(os.path.abspath(sc.__file__))
+    src = (
+        "import sys; sys.path.insert(0, {!r});"
+        "from status_contract import VEHICLES, contract;"
+        "print(sorted(VEHICLES), contract('f2')['status_topic'])"
+    ).format(ipc)
+    done = subprocess.run([sys.executable, "-c", src], env=env,
+                          capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "['f1', 'f2'] /f2/plc/status"
+
+
+def test_env_free_per_vehicle_constant_still_refused():
+    import os
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k != "VEHICLE"}
+    ipc = os.path.dirname(os.path.abspath(sc.__file__))
+    src = (
+        "import sys; sys.path.insert(0, {!r});"
+        "import status_contract; status_contract.STATUS_TOPIC"
+    ).format(ipc)
+    done = subprocess.run([sys.executable, "-c", src], env=env,
+                          capture_output=True, text=True)
+    assert done.returncode != 0
+    assert "env VEHICLE is not set" in done.stderr
+    assert "STATUS_TOPIC" in done.stderr
