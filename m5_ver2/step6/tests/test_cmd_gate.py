@@ -178,3 +178,18 @@ def test_every_name_cmd_gate_uses_from_the_contract_is_imported():
     for name in ("V_LIMIT_CREEP_MM_S", "speed_limit_mm_s", "parse_status",
                  "is_stale", "STATUS_TOPIC", "STATUS_STALE_S"):
         assert hasattr(m, name), name
+
+
+def test_command_never_received_is_zeros():
+    assert cmd_gate.command_or_zeros((0.8, 0.2), None, 100.0) == (0.0, 0.0)
+
+
+def test_fresh_command_passes():
+    assert cmd_gate.command_or_zeros((0.8, 0.2), 99.9, 100.0) == (0.8, 0.2)
+
+
+def test_stale_command_is_zeros_while_enabled():
+    # THE step4 14.8 m CLASS: mux dead, Motor True, last setpoint held.
+    # At CMD_STALE_S the gate stops repeating the corpse's command.
+    stale_at = 100.0 + cmd_gate.CMD_STALE_S
+    assert cmd_gate.command_or_zeros((0.8, 0.2), 100.0, stale_at) == (0.0, 0.0)

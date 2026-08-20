@@ -30,6 +30,15 @@ THREE WAYS TO BE INHIBITED, AND SILENCE IS ONE OF THEM (spec 7.4)
   sto_contactor below releases only on an OBSERVED False. Nothing
   downstream reads silence as a demand, so the gate has to.
 
+THE COMMAND CAN GO SILENT TOO, AND THAT IS NOT AN INHIBIT
+  The three above are reasons the ENABLE drops. A dead cmd_mux drops
+  nothing: Motor stays True and the gate is entitled to pass a command
+  it is simply no longer being given. Steps 4-5 passed the last one
+  forever and the plant ran on a corpse's setpoint (14.8 m). The
+  command therefore has its own window, CMD_STALE_S, and expiring it
+  substitutes zeros rather than dropping the enable - the truck stops,
+  the operator's e-stop lamp does not lie about why.
+
 THIS IS NOT THE ONLY INTERLOCK, AND NOT THE LAST ONE
   sto_contactor.py removes torque at the plant's own inputs and cannot be
   bypassed by any ROS publisher. This gate is the controlled stop above it.
@@ -56,6 +65,14 @@ ZERO_HZ = 10.0
 # declared here: the screen and the vehicle have to stop trusting a
 # silent status at the same instant, so it has one home. Its derivation,
 # including why it is 2.5 of THIS file's ticks, is at that home.
+#
+# THE COMMAND INPUT'S OWN TIMEOUT - the one silence path that failed
+# OPEN in steps 4-5: cb_cmd repeats on receipt, tick published only
+# while inhibited, so a dead cmd_mux with Motor True left the plant
+# holding its last setpoint (measured class: 14.8 m). Same value class
+# as STATUS_STALE_S, same shape as the mux's own auto-source rule:
+# enabled and silent -> zeros.
+CMD_STALE_S = 0.25
 # ------------------------------------------------------------------
 
 
@@ -82,6 +99,17 @@ def gated_command(linear_x, angular_z, motor_ok, speed_max, steer_max):
     if not motor_ok:
         return (0.0, 0.0)
     return (clamp(linear_x, speed_max), clamp(angular_z, steer_max))
+
+
+def command_or_zeros(cmd, last_rx_s, now_s, stale_s=CMD_STALE_S):
+    """The command to obey: the mux's, unless the mux has gone silent.
+
+    is_stale already reads never-received as stale, so a gate that has
+    heard Motor True but no command yet commands zeros, not garbage.
+    """
+    if is_stale(last_rx_s, now_s, stale_s):
+        return (0.0, 0.0)
+    return cmd
 
 
 def gate_is_live(motor_ok, last_rx_s, now_s, stale_s=STATUS_STALE_S):
@@ -132,6 +160,7 @@ class CmdGate(Node):
         self.last_status_rx = None
         self.was_live = False
         self.cmd = (0.0, 0.0)
+        self.last_cmd_rx = None
 
         self.create_subscription(String, STATUS_TOPIC, self.cb_status, 10)
         self.create_subscription(Twist, VEHICLE_CMD_TOPIC, self.cb_cmd, 10)
@@ -148,26 +177,32 @@ class CmdGate(Node):
             parsed.get("v_limit") if parsed else None)
 
     def enabled(self):
-        """The one place the clock is read. BOTH publish paths consult it,
-        so a status that stopped arriving inhibits cb_cmd's fast path too
-        and not merely the next tick."""
+        """The one place the STATUS clock is read. BOTH publish paths
+        consult it, so a status that stopped arriving inhibits cb_cmd's
+        fast path too and not merely the next tick. The command's own
+        window is read separately, in publish and in tick."""
         return gate_is_live(
             self.motor_ok, self.last_status_rx, time.monotonic())
 
     def cb_cmd(self, msg):
+        self.last_cmd_rx = time.monotonic()
         self.cmd = (msg.linear.x, msg.angular.z)
         self.publish()
 
     def tick(self):
-        """The 10 Hz floor, and the only thing that notices a /plc/status
-        that stopped: no message arrives to announce silence, so the
-        inhibit has to be found by looking at the clock."""
+        """The 10 Hz floor, and the only thing that notices EITHER input
+        going quiet: no message arrives to announce silence, so both a
+        /plc/status that stopped and a /vehicle/cmd_vel that stopped have
+        to be found by looking at the clock. The second condition is what
+        makes the zeros flow while the gate is still enabled - without it
+        publish would only be reached on a command that is not coming."""
         live = self.enabled()
         if live != self.was_live:
             self.was_live = live
             self.get_logger().info(
                 "drive enable {}".format("ON" if live else "OFF"))
-        if not live:
+        if not live or is_stale(self.last_cmd_rx, time.monotonic(),
+                                CMD_STALE_S):
             self.publish()
 
     def publish(self):
@@ -179,8 +214,9 @@ class CmdGate(Node):
         # instead of being stopped by the speed monitor for exceeding a
         # ceiling nothing was obeying.
         limit = min(self.speed_max, self.v_limit / 1000.0)
+        cmd = command_or_zeros(self.cmd, self.last_cmd_rx, time.monotonic())
         traction, steer = gated_command(
-            self.cmd[0], self.cmd[1], self.enabled(),
+            cmd[0], cmd[1], self.enabled(),
             limit, self.steer_max)
         self.pub_traction.publish(Float64(data=traction))
         self.pub_steer.publish(Float64(data=steer))
