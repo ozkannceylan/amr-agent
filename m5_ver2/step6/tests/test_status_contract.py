@@ -135,7 +135,12 @@ def test_step6_topic_names_are_absolute_and_distinct():
 
 def test_hmi_cmd_topic_is_the_historical_literal():
     # /hmi/cmd_vel predates this file; moving it here must not respell it.
-    assert status_contract.HMI_CMD_TOPIC == "/hmi/cmd_vel"
+    # M6.1 prefixes the vehicle id, so the historical spelling is now the
+    # TAIL - and the constant must come from contract(), not from a second
+    # literal here, which is the whole point of the table.
+    assert status_contract.HMI_CMD_TOPIC.endswith("/hmi/cmd_vel")
+    assert status_contract.HMI_CMD_TOPIC == \
+        status_contract.contract(status_contract.VID)["hmi_cmd_topic"]
 
 
 def test_mode_words_are_distinct_and_lowercase():

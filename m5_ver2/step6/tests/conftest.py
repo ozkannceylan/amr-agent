@@ -7,6 +7,10 @@ the tests reach the modules by path instead.
 import os
 import sys
 
+# The suite runs as one vehicle; per-vehicle behaviour is tested through
+# contract(vid), which is pure. f1 is arbitrary.
+os.environ.setdefault("VEHICLE", "f1")
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 for _sub in ("ipc", "hmi", "windows"):
     _path = os.path.normpath(os.path.join(_HERE, "..", _sub))

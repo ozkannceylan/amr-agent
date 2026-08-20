@@ -38,13 +38,80 @@ WHAT MUST NOT DRIFT
 """
 
 import json
+import os
 from types import MappingProxyType
 
 # ----------------------------- CONFIG -----------------------------
-# One of only two ROS topic names this project allows outside
-# config.yaml (m5_ver2/CLAUDE.md), so it gets exactly one home.
-STATUS_TOPIC = "/plc/status"
+# ----------------------------- VEHICLES ----------------------------
+# The one table every per-vehicle difference lives in (M6.1 spec). WSL
+# nodes read their vehicle id from env VEHICLE, stamped by step6.sh on
+# every spawn; the Windows writer sets the same variable from
+# --vehicle before importing this module. The 5100/5101 family is left
+# to step5 on purpose: an accidentally concurrent step5 stack collides
+# with nothing here and is caught by its own port guard.
+VEHICLES = {
+    "f1": {"plc_port": 5110, "sensor_port": 5111,
+           "spawn": {"x": "-3.00", "y": "-5.50", "z": "0.05", "yaw": "0.0"}},
+    "f2": {"plc_port": 5120, "sensor_port": 5121,
+           "spawn": {"x": "3.00", "y": "-5.50", "z": "0.05",
+                     "yaw": "3.14159"}},
+}
+# f1 keeps step5's proven spawn. f2 faces it from the other end of the
+# 6.50 m main aisle. Task 4 (the RTF spike) validates both live; if a
+# scanner reads PROTECTIVE at spawn the pose moves THERE, in this table.
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def vehicle_id():
+    """Env VEHICLE, refused loudly when absent or unknown."""
+    vid = os.environ.get("VEHICLE", "")
+    if vid not in VEHICLES:
+        raise SystemExit(
+            "status_contract: env VEHICLE must be one of {}, got {!r}"
+            .format(sorted(VEHICLES), vid))
+    return vid
+
+
+def contract(vid):
+    """Every per-vehicle name and number, as pure data.
+
+    The launch file serves BOTH vehicles from one process, so it calls
+    this per vid instead of reading the env-bound module constants.
+    """
+    if vid not in VEHICLES:
+        raise SystemExit(
+            "status_contract: unknown vehicle {!r}, valid: {}"
+            .format(vid, sorted(VEHICLES)))
+    v = VEHICLES[vid]
+    return {
+        "status_topic": "/{}/plc/status".format(vid),
+        "fields_topic": "/{}/safety/fields".format(vid),
+        "encoders_topic": "/{}/safety/encoders".format(vid),
+        "scan_topic": "/" + vid + "/gz/safety_scanner_{}/measurement",
+        "hmi_cmd_topic": "/{}/hmi/cmd_vel".format(vid),
+        "vehicle_cmd_topic": "/{}/vehicle/cmd_vel".format(vid),
+        "auto_cmd_topic": "/{}/auto/cmd_vel".format(vid),
+        "auto_goal_topic": "/{}/auto/goal".format(vid),
+        "auto_state_topic": "/{}/auto/state".format(vid),
+        "mode_topic": "/{}/hmi/mode".format(vid),
+        "plc_port": v["plc_port"],
+        "sensor_port": v["sensor_port"],
+        "config_path": os.path.normpath(os.path.join(
+            _HERE, "..", "vehicles", vid, "config.yaml")),
+        "spawn": v["spawn"],
+    }
+
+
+# ------------------- THE ENV VEHICLE'S OWN NAMES -------------------
+# Every reason each name below lives in this file is unchanged by M6.1
+# - only the VALUES became vehicle-scoped, and they are now read from
+# contract() rather than spelled out, so the namespacing cannot drift
+# from the table above.
+#
+# STATUS_TOPIC is one of only two ROS topic names this project allows
+# outside config.yaml (m5_ver2/CLAUDE.md), so it gets exactly one home.
+#
 # THE OTHER SAFETY TOPIC NAMES, HERE FOR THE SAME REASON STATUS_TOPIC
 # IS. m5_ver2/CLAUDE.md allows two literals outside config.yaml; by
 # Step 3 there were six, three of them spelled out in two files each,
@@ -53,16 +120,13 @@ STATUS_TOPIC = "/plc/status"
 # there, and encoder_link hard-coded them. One name, two sources, in
 # one step: rename the config key and the bridge and the subscriber
 # break differently, with a silently red encoder lamp as the symptom.
-FIELDS_TOPIC = "/forklift/safety/fields"
-ENCODERS_TOPIC = "/forklift/safety/encoders"
-SCAN_TOPIC = "/forklift/gz/safety_scanner_{}/measurement"
 #
 # The drive-speed channels are DELIBERATELY ABSENT. config.yaml owns
 # topics.gz_drive_speed_read_a/b, so encoder_link reads them from there
 # and this file must not become a second source for a name that
 # already has one. This is the one home for every topic name
 # config.yaml has never heard of.
-
+#
 # STEP 5'S NAMES, HERE FOR THE SAME REASON. /hmi/cmd_vel moves in from
 # cmd_gate.py and hmi_node.py so the mux does not become a third
 # spelling. Every name below is one config.yaml has never heard of: the
@@ -78,12 +142,49 @@ SCAN_TOPIC = "/forklift/gz/safety_scanner_{}/measurement"
 # gz and ROS topic name config.yaml owns is READ from config.yaml. A
 # second home would have been the drive-speed trap again: rename the key
 # and the bridge and the subscriber break differently.
-HMI_CMD_TOPIC = "/hmi/cmd_vel"
-VEHICLE_CMD_TOPIC = "/vehicle/cmd_vel"   # cmd_mux -> cmd_gate, the one seam
-AUTO_CMD_TOPIC = "/auto/cmd_vel"         # nav_node -> cmd_mux
-AUTO_GOAL_TOPIC = "/auto/goal"           # HMI -> nav_node, station id or ""
-AUTO_STATE_TOPIC = "/auto/state"         # nav_node -> HMI, JSON
-MODE_TOPIC = "/hmi/mode"                 # HMI -> mux & nav, latched
+#
+# WHAT EACH NAME ROUTES, kept from the literals it replaces:
+#   VEHICLE_CMD_TOPIC  cmd_mux -> cmd_gate, the one seam
+#   AUTO_CMD_TOPIC     nav_node -> cmd_mux
+#   AUTO_GOAL_TOPIC    HMI -> nav_node, station id or ""
+#   AUTO_STATE_TOPIC   nav_node -> HMI, JSON
+#   MODE_TOPIC         HMI -> mux & nav, latched
+#
+# WHY THE BINDING IS GUARDED. The LAUNCH FILE imports this module
+# env-free - it serves both vehicles through contract(vid) and must not
+# die at import. A NODE missing the env must still get a loud, naming
+# refusal, which the PEP 562 module __getattr__ in the else branch
+# provides.
+if os.environ.get("VEHICLE"):
+    VID = vehicle_id()
+    _C = contract(VID)
+    PLC_PORT = _C["plc_port"]
+    SENSOR_PORT = _C["sensor_port"]
+    CONFIG_PATH = _C["config_path"]
+    STATUS_TOPIC = _C["status_topic"]
+    FIELDS_TOPIC = _C["fields_topic"]
+    ENCODERS_TOPIC = _C["encoders_topic"]
+    SCAN_TOPIC = _C["scan_topic"]
+    HMI_CMD_TOPIC = _C["hmi_cmd_topic"]
+    VEHICLE_CMD_TOPIC = _C["vehicle_cmd_topic"]
+    AUTO_CMD_TOPIC = _C["auto_cmd_topic"]
+    AUTO_GOAL_TOPIC = _C["auto_goal_topic"]
+    AUTO_STATE_TOPIC = _C["auto_state_topic"]
+    MODE_TOPIC = _C["mode_topic"]
+else:
+    # The launch file imports this module with no VEHICLE - it reads
+    # only VEHICLES and contract(vid), which exist above. Anything
+    # else reaching for a per-vehicle constant without the env gets
+    # the refusal by name, not an ImportError shrug.
+    def __getattr__(name):
+        raise SystemExit(
+            "status_contract: env VEHICLE is not set, so the "
+            "per-vehicle constant {!r} does not exist. step6.sh stamps "
+            "VEHICLE on every node; the writer's --vehicle sets it; "
+            "env-free callers use contract(vid).".format(name))
+
+
+# The mode words are the same in every cab, so they stay unguarded.
 MODE_TELEOP = "teleop"
 MODE_AUTO = "auto"
 
