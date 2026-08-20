@@ -43,4 +43,12 @@ m5_ver2/step5/deploy/
 m5_ver2/step5/logs/
 m5_ver2/step5/.step5_pids
 m5_ver2/step5/**/__pycache__/
+# Step 6 adds vehicles/: the per-vehicle model.sdf and config.yaml are
+# derived by tools/instantiate_vehicle.py, not authored. Its deploy/ is
+# regenerated the same way; step5's committed deploy/ stays as the
+# historical deliverable it was.
+m5_ver2/step6/vehicles/
+m5_ver2/step6/deploy/
+m5_ver2/step6/logs/
+m5_ver2/step6/.step6_pids
 .archive
