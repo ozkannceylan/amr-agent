@@ -1,4 +1,6 @@
 """cmd_gate.py's gate decision. No ROS graph is started."""
+import time
+
 import cmd_gate
 
 SPEED_MAX = 1.50
@@ -193,3 +195,70 @@ def test_stale_command_is_zeros_while_enabled():
     # At CMD_STALE_S the gate stops repeating the corpse's command.
     stale_at = 100.0 + cmd_gate.CMD_STALE_S
     assert cmd_gate.command_or_zeros((0.8, 0.2), 100.0, stale_at) == (0.0, 0.0)
+
+
+# ---- the WIRING, not the decision ----
+#
+# Everything above is a pure function. Delete `or is_stale(...)` from
+# tick() and every one of them stays green while the 14.8 m class
+# reopens: command_or_zeros would still return zeros correctly, and
+# nothing would ever call it, because publish() is reachable only from a
+# command that is not coming. The two tests below drive the real tick()
+# on a skeleton node - object.__new__ skips Node.__init__, so no
+# rclpy.init, no ROS graph, no publishers - and pin the condition in
+# BOTH directions: silent -> zeros flow, fresh -> tick stays quiet.
+
+
+class _Recorder:
+    """Stands in for a real publisher and remembers what it was given."""
+
+    def __init__(self):
+        self.sent = []
+
+    def publish(self, msg):
+        self.sent.append(msg.data)
+
+
+class _NullLogger:
+
+    def info(self, *_args, **_kwargs):
+        pass
+
+
+def _skeleton(last_cmd_rx):
+    """A CmdGate with every attribute tick()/publish() touches, and
+    nothing else. v_limit is included deliberately: publish() reads it to
+    compute the effective ceiling, and a skeleton missing it would fail
+    with AttributeError rather than the assertion under test."""
+    node = object.__new__(cmd_gate.CmdGate)
+    node.motor_ok = True
+    node.last_status_rx = time.monotonic()      # status is FRESH
+    node.last_cmd_rx = last_cmd_rx
+    node.cmd = (0.8, 0.2)                       # a real, nonzero setpoint
+    node.speed_max = SPEED_MAX
+    node.steer_max = STEER_MAX
+    node.v_limit = 1500.0                       # mm/s, warning field clear
+    node.was_live = True                        # so no enable edge logs
+    node.pub_traction = _Recorder()
+    node.pub_steer = _Recorder()
+    node.get_logger = _NullLogger
+    return node
+
+
+def test_tick_publishes_zeros_when_the_command_has_gone_silent():
+    # Motor True, status fresh, command a second old: the gate is still
+    # ENABLED and must not sit quiet on the corpse's setpoint.
+    node = _skeleton(time.monotonic() - 1.0)
+    node.tick()
+    assert node.pub_traction.sent == [0.0]
+    assert node.pub_steer.sent == [0.0]
+
+
+def test_tick_stays_quiet_while_the_command_is_fresh():
+    # The other half of the same condition. Without this, `if True` in
+    # tick() would pass the test above and turn the 10 Hz floor into a
+    # second publisher fighting cb_cmd.
+    node = _skeleton(time.monotonic())
+    node.tick()
+    assert node.pub_traction.sent == []
+    assert node.pub_steer.sent == []
