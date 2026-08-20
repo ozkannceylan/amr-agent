@@ -314,7 +314,9 @@ rulings are baked in (any violated warning field → `V_Limit` 300; case pinned
 at 1) — see `docs/superpowers/specs/2026-08-20-virtual-fplc-design.md`.
 Without the flag the writer still expects PLCSIM `PLC_2`, unchanged. The model
 claims no safety integrity: a Step 6 result earned on this rig is a rig result
-until re-proved against a real or licensed PLC.
+until re-proved against a real or licensed PLC. The owner ran the
+full-stack smoke under `--virtual` on 2026-08-20 and reports it working;
+Step 6 starts on this rig.
 
 **What has actually been verified, and at what level.**
 `tests/test_virtual_fplc.py` pins the model's semantics;
