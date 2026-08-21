@@ -2,6 +2,7 @@
 import json
 import math
 
+import follower
 import nav_core
 from status_contract import MODE_AUTO, MODE_TELEOP
 
@@ -236,3 +237,39 @@ def test_empty_goal_still_cancels_an_external_route():
     core.on_route([[0.0, 0.0], [1.0, 0.0]], 0.3, "order-1")
     core.on_goal("", (0.0, 0.0))
     assert core.state == nav_core.IDLE and core.route is None
+
+
+def test_on_route_refuses_a_non_finite_coordinate():
+    # json.loads reads the bare literal NaN and float("nan") passes
+    # float(), so unchecked this installed: step() answered (-0.7, nan),
+    # cruise traction with a NaN steer, arrived() false forever, and a
+    # state_json no strict parser will read. inf goes the same way.
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        core = nav_core.NavCore(plan=lambda xy, sid: None)
+        core.on_mode(MODE_AUTO)
+        core.on_route([[0.0, 0.0], [10.0, bad]], 0.3, "order-1")
+        assert core.state == nav_core.IDLE and core.route is None
+
+
+def test_a_bad_arrive_m_refuses_the_route_instead_of_half_taking_it():
+    # The radius used to be converted AFTER goal, route and state were
+    # set, so "abc" raised with the truck EN-ROUTE and nav_node then
+    # wrote "route refused" over a driving vehicle. Zero, negative and
+    # NaN are worse: they install and arrived() is never true.
+    for bad in ("abc", -1, 0, float("nan"), float("inf")):
+        core = nav_core.NavCore(plan=lambda xy, sid: None)
+        core.on_mode(MODE_AUTO)
+        core.on_route([[0.0, 0.0], [1.0, 0.0]], bad, "order-1")
+        assert core.state == nav_core.IDLE
+        assert core.route is None and core.goal is None
+        assert "arrive_m" in core.note
+
+
+def test_an_absent_arrive_m_takes_the_follower_default():
+    # Absent is the one way to ask for the default - nav_node sends
+    # req.get("arrive_m"), so a request without the key arrives as None.
+    core = nav_core.NavCore(plan=lambda xy, sid: None)
+    core.on_mode(MODE_AUTO)
+    core.on_route([[0.0, 0.0], [1.0, 0.0]], None, "order-1")
+    assert core.state == nav_core.EN_ROUTE
+    assert core.arrive_m == follower.ARRIVE_M

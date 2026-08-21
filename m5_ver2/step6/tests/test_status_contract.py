@@ -128,6 +128,7 @@ def test_an_implausible_speed_limit_narrows_to_creep():
 def test_step6_topic_names_are_absolute_and_distinct():
     names = (status_contract.HMI_CMD_TOPIC, status_contract.VEHICLE_CMD_TOPIC,
              status_contract.AUTO_CMD_TOPIC, status_contract.AUTO_GOAL_TOPIC,
+             status_contract.AUTO_ROUTE_TOPIC,
              status_contract.AUTO_STATE_TOPIC, status_contract.MODE_TOPIC)
     assert all(n.startswith("/") for n in names)
     assert len(set(names)) == len(names)

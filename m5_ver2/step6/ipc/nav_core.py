@@ -84,21 +84,54 @@ class NavCore:
         the same machinery. This file still plans nothing here: the
         route arrives finished, and a malformed one is refused, not
         repaired.
+
+        MALFORMED INCLUDES NaN, AND THAT IS NOT THEORETICAL. json.loads
+        reads the bare literal NaN and float("nan") passes float()
+        without a murmur, so an unchecked conversion installed it:
+        measured, step() then answered (-0.7, nan) - cruise traction
+        with a NaN steer. The gate clamps the command, so the plant is
+        safe, but arrived() is false against NaN forever, so the truck
+        drives and never gets there, and state_json emits a bare NaN
+        that no strict JSON parser will read. Both coordinates must be
+        finite; inf fails the same test for the same reason.
+
+        NOTHING IS ASSIGNED UNTIL EVERYTHING HAS PASSED. arrive_m used
+        to be converted AFTER goal, route and state were already set, so
+        an unusable radius raised with the truck EN-ROUTE and nav_node's
+        handler wrote "route refused" over a vehicle that was driving -
+        a note that lies to the operator. The last three lines are the
+        only mutations in this method, and they run or none of them do.
         """
         if self.mode != MODE_AUTO:
             self.note = "route refused: not in auto mode"
             return
         try:
-            poly = [(float(p[0]), float(p[1])) for p in points]
+            poly = []
+            for p in points:
+                x, y = float(p[0]), float(p[1])
+                if not (math.isfinite(x) and math.isfinite(y)):
+                    raise ValueError("non-finite coordinate")
+                poly.append((x, y))
         except (TypeError, ValueError, IndexError):
             self.note = "route refused: malformed points"
             return
         if len(poly) < 2:
             self.note = "route refused: fewer than two points"
             return
+        try:
+            # Absent is the one way to ask for the default. A radius
+            # that is zero, negative or NaN is a fault in the sender,
+            # and arrived() would never be true against any of them.
+            radius = (follower.ARRIVE_M if arrive_m is None
+                      else float(arrive_m))
+            if not math.isfinite(radius) or radius <= 0.0:
+                raise ValueError("arrive_m out of range")
+        except (TypeError, ValueError):
+            self.note = "route refused: unusable arrive_m"
+            return
         self.goal, self.route, self.state = str(label), poly, EN_ROUTE
         self.note, self.reversing = "", False
-        self.arrive_m = float(arrive_m) if arrive_m else follower.ARRIVE_M
+        self.arrive_m = radius
 
     def _cancel(self, why):
         self.goal, self.route, self.state, self.note = None, None, IDLE, why
