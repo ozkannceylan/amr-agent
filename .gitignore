@@ -10,6 +10,7 @@ bridge/evidence/*-latest.csv
 
 # Cursor ↔ Claude Code session channel. Never commit. Append, don't fork
 # a second M6 without reading it. See the file for the branch map.
+.cursor/
 HANDOVER.local.md
 check_nodes.py
 
@@ -48,8 +49,8 @@ m5_ver2/step5/**/__pycache__/
 # derived by tools/instantiate_vehicle.py, not authored. Its deploy/ is
 # regenerated the same way; step5's committed deploy/ stays as the
 # historical deliverable it was.
-m5_ver2/step6/vehicles/
-m5_ver2/step6/deploy/
-m5_ver2/step6/logs/
-m5_ver2/step6/.step6_pids
+m6/vehicles/
+m6/deploy/
+m6/logs/
+m6/.m6_pids
 .archive

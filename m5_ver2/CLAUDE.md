@@ -1,5 +1,9 @@
 # m5_ver2
 
+The Milestone-6 system (two vehicles, VDA 5050, fleet manager) lives at
+`/m6` — it grew out of this tree as `m5_ver2/step6` and moved out on
+2026-08-21. This file remains ground truth for steps 1-5 and the PLC.
+
 If `HANDOVER.local.md` exists at the repo root, read it before any work.
 It is gitignored. Cursor and Claude Code coordinate there so they do not
 build two M6s. Do not commit it.
