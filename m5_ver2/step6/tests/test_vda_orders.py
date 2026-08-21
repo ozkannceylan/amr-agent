@@ -68,6 +68,33 @@ def test_node_actions_are_not_supported_yet():
     assert "unsupported" in vo.validate_order(bad)
 
 
+@pytest.mark.parametrize("axis", ["x", "y"])
+@pytest.mark.parametrize("value", [None, "abc", "6.0", float("nan"),
+                                   float("inf"), True])
+def test_a_coordinate_that_is_not_a_number_is_rejected(axis, value):
+    """Present is not enough. A null, a string - even a string that looks
+    like a number - or a NaN would validate, then crash the agent's
+    callback or, worse, drive and crash mid-motion in Progress."""
+    bad = order()
+    bad["nodes"][1]["nodePosition"][axis] = value
+    reason = vo.validate_order(bad)
+    assert "node 1" in reason and axis in reason
+
+
+def test_a_deviation_that_is_not_a_number_is_rejected():
+    bad = order()
+    bad["nodes"][1]["nodePosition"]["allowedDeviationXY"] = "0.25"
+    reason = vo.validate_order(bad)
+    assert "node 1" in reason and "allowedDeviationXY" in reason
+
+
+def test_a_non_positive_deviation_still_validates():
+    """Zero is a number, so it passes the door; released_route floors it."""
+    ok = order()
+    ok["nodes"][1]["nodePosition"]["allowedDeviationXY"] = 0
+    assert vo.validate_order(ok) == ""
+
+
 def test_accept_matrix():
     ok = order()
     assert vo.accept_order(ok, "", 0, False, "AUTOMATIC")[0] == "accept"

@@ -6,6 +6,10 @@ a duplicate delivery is silence, not an error; progress is monotone and
 skip-tolerant, because the pursuit cuts corners and the polyline's
 ARRIVED (nav-side) is what finally closes an order, not this counter.
 
+Numbers are checked, not merely present: an order that lies about a
+coordinate is rejected at the door, because the alternative is a crash
+in the callback that drives - or worse, a drive that crashes mid-motion.
+
 Deliberate M6.2 boundaries (spec): orderUpdateId > 0 and node actions
 are rejected - stitching and station actions land with M6.3.
 """
@@ -13,6 +17,13 @@ import math
 
 DEFAULT_DEV_M = 0.8   # intermediate waypoint pass radius; the pursuit
                       # cuts corners, and ARRIVED closes what this misses
+
+
+def _real(v):
+    """True for a real, finite number. Booleans are not numbers here -
+    the same strictness orderUpdateId already gets."""
+    return (isinstance(v, (int, float)) and not isinstance(v, bool)
+            and math.isfinite(v))
 
 
 def validate_order(msg):
@@ -42,6 +53,14 @@ def validate_order(msg):
         pos = n.get("nodePosition")
         if not isinstance(pos, dict) or not {"x", "y", "mapId"} <= set(pos):
             return "node {} missing nodePosition (mandatory for us)".format(i)
+        for axis in ("x", "y"):
+            if not _real(pos[axis]):
+                return ("node {} nodePosition {} must be a finite number, "
+                        "not {!r}".format(i, axis, pos[axis]))
+        dev = pos.get("allowedDeviationXY")
+        if dev is not None and not _real(dev):
+            return ("node {} allowedDeviationXY must be a finite number, "
+                    "not {!r}".format(i, dev))
         if n["actions"]:
             return "node {} actions unsupported until M6.3".format(i)
     for i, e in enumerate(edges):
@@ -89,7 +108,13 @@ def accept_order(msg, current_order_id, current_update_id, executing,
 
 
 def released_route(msg):
-    """(points, arrive_m, released_nodes, horizon_nodes)."""
+    """(points, arrive_m, released_nodes, horizon_nodes).
+
+    Call it on a validated order only: it reads nodePosition and the last
+    released node without re-checking either. Callers hand nav
+    [current pose] + these points, so a single released node is still a
+    drivable two-point polyline because of that prepend.
+    """
     released = [n for n in msg["nodes"] if n["released"]]
     horizon = [n for n in msg["nodes"] if not n["released"]]
     points = [(float(n["nodePosition"]["x"]), float(n["nodePosition"]["y"]))
