@@ -1,5 +1,13 @@
 # m6
 
+If `HANDOVER.local.md` exists at the repo root, read it before any work.
+It is gitignored. Cursor and Claude Code coordinate there.
+
+**This directory is not the only M6.** The measured two-vehicle + VDA stack
+lives on git branch `m6` under `m5_ver2/step6/`. This folder is the PR #3/#4
+skeleton on `main`. Do not start a parallel client until the owner picks one
+tree. See `HANDOVER.local.md`.
+
 ## Global constraints
 
 Every task's requirements implicitly include this section, **plus all of

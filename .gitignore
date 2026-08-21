@@ -8,7 +8,8 @@ __pycache__/
 # committed measured evidence and must stay visible.
 bridge/evidence/*-latest.csv
 
-# Owner's local scratch, deliberately outside the deliverable.
+# Cursor ↔ Claude Code session channel. Never commit. Append, don't fork
+# a second M6 without reading it. See the file for the branch map.
 HANDOVER.local.md
 check_nodes.py
 
