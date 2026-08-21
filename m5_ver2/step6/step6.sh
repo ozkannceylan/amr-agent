@@ -302,6 +302,11 @@ start() {
     # own guard on its own port, and checking theirs would refuse a start
     # that is perfectly legal beside them.
     #
+    # THE SENSOR PORTS ARE UNCHECKED ON PURPOSE. 5111 and 5121 are bound on
+    # the WINDOWS side - each writer's rx socket - so `ss` in WSL never sees
+    # them and a guard here could only ever pass. The realistic holder is a
+    # second step6 stack, and the plc_port test below refuses that first.
+    #
     # MAINTENANCE OBLIGATION: 5110 and 5120 are the VEHICLES table's
     # plc_port values, spelled as literals in the two case patterns below
     # because a shell cannot import the table. A port that moves there has

@@ -233,7 +233,7 @@ class Hmi(Node):
 
         self.root = root
         # The id in the title bar: two identical cabs are open at once.
-        root.title("Forklift 1 HMI - " + VID)
+        root.title("Forklift HMI - " + VID)
         cx = cy = KNOB_RADIUS_PX + 20
 
         # Two columns: Step 4's window on the left, unchanged in every

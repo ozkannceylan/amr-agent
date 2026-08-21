@@ -12,6 +12,23 @@ def test_table_has_exactly_the_two_vehicles_with_disjoint_ports():
     assert 5100 not in ports and 5101 not in ports   # step5's family
 
 
+def test_the_writers_vehicle_flag_offers_exactly_the_table():
+    """The table's one duplication, guarded against drift.
+
+    windows/step6.py spells its --vehicle choices as a literal tuple and
+    cannot read them from here: status_contract binds its per-vehicle
+    constants once, at first import, off env VEHICLE - and the writer
+    sets that env FROM the parsed flag, so the parser has to be built
+    before this module may be imported at all. This test is the price of
+    that ordering. A third vehicle in the table must reach that tuple too.
+    """
+    import step6            # conftest stamped VEHICLE, so importing is safe
+
+    # argparse keeps no public accessor for a built action.
+    choices = step6._parser._option_string_actions["--vehicle"].choices
+    assert tuple(choices) == tuple(sorted(sc.VEHICLES))
+
+
 def test_contract_namespaces_every_ros_name():
     c = sc.contract("f2")
     assert c["status_topic"] == "/f2/plc/status"

@@ -1,9 +1,11 @@
 """sensor_link.py - all three scanners' verdicts, to the PLC writer.
 
-Subscribes /forklift/safety/fields and sends the back, right and left
-devices' (pf, wf) to Windows over its vehicle's sensor port (VEHICLES
-table), where step6.py writes PF_OSSD, WF_Clear and their _right/_left
-counterparts.
+Subscribes this vehicle's fields topic - the name is
+status_contract.FIELDS_TOPIC, i.e. /f1/safety/fields for f1 and
+/f2/safety/fields for f2, never a shared /forklift/... one - and sends
+the back, right and left devices' (pf, wf) to Windows over its vehicle's
+sensor port (VEHICLES table), where step6.py writes PF_OSSD, WF_Clear
+and their _right/_left counterparts.
 
 ALL THREE SENSORS SINCE 2026-08-12. Through Step 5's build the F-PLC had
 one sensor input configured and this file enforced back-only; on that date
