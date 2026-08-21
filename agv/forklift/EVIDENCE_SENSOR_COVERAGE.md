@@ -1073,7 +1073,8 @@ times.
 
 ### 16.2 It never was a regression, and the owner's memory is honest
 
-The m5-05 arena captures (`assets/m5-forklift/beams-*.png`, 2026-07-30) were
+The m5-05 arena captures (`m5/m5_ver1/assets/m5-forklift/beams-*.png`,
+2026-07-30) were
 taken through `vehicle.launch.py` with the config.yaml default spawn —
 `(0, 0, 0.05, yaw 0)`, **the world origin**. An identity-anchored fan and a
 vehicle parked at the origin coincide, so the beams sat on the vehicle in

@@ -1,0 +1,95 @@
+# bridge configuration for the M3 demonstration cell, against the virtual PLC
+# (m5/m5_ver1/virtual_plc/). The M3-era committed config left
+# bridge/config/bridge.yaml with the cell group when the forklift group
+# arrived (that file's header comment tells the story); this file restores
+# exactly that group from git history (commit cc43369) with one change: the
+# endpoint is rendered by m3/run_cell.sh, because the CPU it meets is the
+# virtual PLC on the Windows host, not PLCSIM Advanced's 192.168.53.1:4840.
+#
+# Everything the header of bridge/config/bridge.yaml says applies here too:
+# no thresholds, no tolerances, no timers — addresses and cadences only.
+
+groups: ["cell"]
+
+opcua:
+  endpoint: "@VPLC_ENDPOINT@"     # rendered by run_cell.sh
+
+  namespace_uris:
+    server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
+    interface: "http://DemoCell"
+
+  security_policy: "none"
+  certificate_path: null
+  private_key_path: null
+  username: null
+
+  requested_session_timeout_ms: 10000
+  session_name: "amr-agent-bridge"
+
+  reconnect_interval_s: 1.0
+  reconnect_backoff_max_s: 5.0
+
+nodes:
+  interface_path:
+    - namespace: server_interfaces
+      browse_name: "ServerInterfaces"
+    - namespace: interface
+      browse_name: "DemoCell"
+
+  # ONE heartbeat for the whole process (opcua-nodes.md §9.7). WRITABLE.
+  heartbeat:
+    BridgeHeartbeat:               ["Link", "BridgeHeartbeat"]
+
+  groups:
+    cell:
+      # WRITABLE by the bridge — the cell's device state (§9.3), in that
+      # section's order (panel contacts grouped by failure direction).
+      inputs:
+        ConveyorBeltPosition:            ["Input", "ConveyorBeltPosition"]
+        ConveyorBeltSpeed:               ["Input", "ConveyorBeltSpeed"]
+        ProductSensorRange:              ["Input", "ProductSensorRange"]
+        PanelStartPressed:               ["Input", "PanelStartPressed"]
+        PanelResetPressed:               ["Input", "PanelResetPressed"]
+        PanelStopCircuitClosed:          ["Input", "PanelStopCircuitClosed"]
+        PanelProcessStopCircuitClosed:   ["Input", "PanelProcessStopCircuitClosed"]
+      # READ and applied to the cell unchanged (§9.4).
+      outputs:
+        ConveyorSpeedCommand:            ["Output", "ConveyorSpeedCommand"]
+      # READ for logging only. Applied to nothing, used in no decision (§4.4).
+      diagnostics:
+        CellCycleRunning:                ["Status", "CellCycleRunning"]
+        CellProcessStopActive:           ["Status", "CellProcessStopActive"]
+        CellResetRequired:               ["Status", "CellResetRequired"]
+        ProductPresentAtSensor:          ["Status", "ProductPresentAtSensor"]
+        ConveyorDriveFault:              ["Status", "ConveyorDriveFault"]
+        BridgeLinkOk:                    ["Link", "BridgeLinkOk"]
+
+ros:
+  node_name: "cell_plc_bridge"
+  topics:
+    cell:
+      # Subscriptions (cell → PLC).
+      joint_state:   "/cell/conveyor/joint_state"
+      product_scan:  "/cell/product_sensor/scan"
+      panel_start:   "/cell/panel/start"
+      panel_reset:   "/cell/panel/reset"
+      panel_stop:    "/cell/panel/stop"
+      panel_process_stop: "/cell/panel/process_stop"
+      # Publication (PLC → cell).
+      cmd_speed:     "/cell/conveyor/cmd_speed"
+  # Addressing, not logic (§4.5): the belt encoder's joint, matched by name.
+  joint_name: "belt_joint"
+  analog_reliability: "reliable"
+
+cycle:
+  period_s: 0.05
+  status_poll_period_s: 1.0
+
+evidence:
+  # Resolved against the parent of this file's directory: rendered into
+  # m3/runtime/, so the capture lands in m3/evidence/.
+  csv_path: "evidence/latency-session.csv"
+  flush_interval_s: 2.0
+
+logging:
+  level: "INFO"

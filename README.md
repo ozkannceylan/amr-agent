@@ -50,7 +50,8 @@ the speed ceiling, and an injected encoder fault caught by the
 cross-check.*
 
 *(The first build's own demonstration is linked from
-[its runbook](docs/claude-supervised-m5/RUNBOOK.md).)*
+[its archive](m5/m5_ver1/README.md) — and it runs again without PLCSIM,
+on a virtual PLC.)*
 
 ## The system
 
@@ -75,12 +76,12 @@ its measured evidence in [`m5_ver2/step5/PROOF.md`](m5_ver2/step5/PROOF.md).
 | Gate | Scope | Status |
 |---|---|---|
 | M0 | Repo skeleton, invariants (ADR 0001) | ✅ |
-| M1 | Interface contracts — VDA 5050 subset, OPC UA node model | ✅ |
-| M2 | Safety requirements spec | ✅ |
-| M3 | Fixed equipment I/O loop — Gazebo ↔ PLC both directions, measured | ✅ |
-| M4 | Forklift commissioning cell — teleop through the PLC standard program | ✅ |
-| M5 | Sensored autonomous forklift — the safety chain live under teleop **and** autonomy | ✅ |
-| M6 | VDA 5050 fleet at scale — 4 forklifts, 10 stations, traffic avoidance | ⏳ |
+| [M1](m1/) | Interface contracts — VDA 5050 subset, OPC UA node model | ✅ |
+| [M2](m2/) | Safety requirements spec | ✅ |
+| [M3](m3/) | Fixed equipment I/O loop — Gazebo ↔ PLC both directions, measured | ✅ |
+| [M4](m4/) | Forklift commissioning cell — teleop through the PLC standard program | ✅ |
+| [M5](m5/) | Sensored autonomous forklift — the safety chain live under teleop **and** autonomy | ✅ |
+| [M6](m6/) | VDA 5050 fleet at scale — 4 forklifts, 10 stations, traffic avoidance | ⏳ |
 | M7 | LLM operations layer + recorded end-to-end demonstration | ⏳ |
 | M8 | Beckhoff/TwinCAT vendor portability — same bridge, different PLC | ⏳ |
 
@@ -91,9 +92,11 @@ its measured evidence in [`m5_ver2/step5/PROOF.md`](m5_ver2/step5/PROOF.md).
 | [`m5_ver2/`](m5_ver2/) | **The current system.** Built as five frozen steps, each a verified copy of the last; [`step5/`](m5_ver2/step5/) is the one that runs. [`m5_ver2/CLAUDE.md`](m5_ver2/CLAUDE.md) holds the PLC ground truth and working agreements. |
 | [`m6/`](m6/) | **M6 in progress** — VDA 5050 fleet operations on top of step 5: the [plan](m6/PLAN.md), and [step 1](m6/step1/README_step1.md), the VDA 5050 seam at n = 1. |
 | [`beckhoff/`](beckhoff/) | **The PLC substrate after the TIA trial** — the safety chain on TwinCAT 3.1 (user mode runtime): [research](beckhoff/RESEARCH.md), [runbook](beckhoff/RUNBOOK.md), the [TE9000 safety-application spec](beckhoff/plc/safety/SAFETY-APP.md), its ST stand-in executor and the pyads writer. Same UDP wire; the WSL side runs unchanged. |
+| [`m5/`](m5/) | **The M5 archive.** [`m5_ver1/`](m5/m5_ver1/) — the first build (Claude-supervised): runbook, videos, HMI tour, the controller post-mortem, and the virtual PLC that runs it again without PLCSIM Advanced. |
+| [`m1/`](m1/) · [`m2/`](m2/) · [`m3/`](m3/) · [`m4/`](m4/) | **The earlier milestone archives.** M1's interface contracts and M2's safety spec (paper gates, still the live documents); M3's fixed-equipment I/O loop and M4's forklift commissioning cell — each with its evidence, photos and recorded runs, and each runnable today against the virtual PLC (see their `RUNBOOK.md`). |
 | [`agv/`](agv/) | Shared vehicle assets used in place by both eras: the forklift config, I/O translator and STO contactor. |
 | [`m5-plc-debug/`](m5-plc-debug/) | The hand-debug chapter: the safety-PLC ↔ Gazebo loop isolated and made to work, script by script. |
-| [`bridge/`](bridge/) · [`fleet/`](fleet/) · [`hmi/`](hmi/) · [`sim/`](sim/) · [`viz/`](viz/) · [`plc/`](plc/) | The claude-supervised layered stack — the first M5, still runnable: [its runbook](docs/claude-supervised-m5/RUNBOOK.md). |
+| [`bridge/`](bridge/) · [`fleet/`](fleet/) · [`hmi/`](hmi/) · [`sim/`](sim/) · [`viz/`](viz/) · [`plc/`](plc/) | The claude-supervised layered stack — the first M5, still runnable: [its archive and runbook](m5/m5_ver1/README.md). |
 | [`docs/`](docs/) | ADRs 0001–0015, interface contracts, safety spec, validation evidence, and the archived planning history — [index](docs/README.md). |
 | [`.archive/`](.archive/) | The legacy entry scripts (`demo.sh`, `stack.sh`) the claude-supervised runbook uses. |
 
@@ -107,4 +110,5 @@ verified steps: e-stop chain, safety scanners, encoder channels, the
 three-scanner teleop loop, and finally the autonomy layer. Each step is
 a frozen copy with its own proof; the last one is the system this README
 describes. The full account, and how to run the first build, is in
-[`docs/claude-supervised-m5/RUNBOOK.md`](docs/claude-supervised-m5/RUNBOOK.md).
+[`m5/m5_ver1/`](m5/m5_ver1/README.md) — including the virtual PLC that
+stands in for the expired PLCSIM Advanced trial.

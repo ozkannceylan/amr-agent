@@ -28,8 +28,15 @@ hmi/evidence/screenshots/
 agv/forklift/scripts/build/
 
 # The M5 demonstration recording is published on YouTube, not committed:
-# https://youtu.be/wl1rgWyX66s
-assets/demo_m5.mp4
+# https://youtu.be/wl1rgWyX66s  (moved 2026-08-21 into the M5 ver1 archive)
+m5/m5_ver1/assets/demo_m5.mp4
+
+# The virtual PLC's runtime artefacts: one session log per start, never
+# truncated (the writer's rule) — runtime output, not source.
+m5/m5_ver1/virtual_plc/logs/
+m5/m5_ver1/virtual_plc/__pycache__/
+m3/runtime/
+m4/runtime/
 
 # Step 1 run artefacts: per-run logs and the pid file step1.sh writes.
 m5_ver2/step1/logs/

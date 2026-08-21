@@ -1,0 +1,97 @@
+# bridge configuration for the M4 forklift commissioning cell, against the
+# virtual PLC (m5/m5_ver1/virtual_plc/). The M4-era committed config carried
+# exactly the forklift group (git history, commit 71d3b76); this file carries
+# that group plus the WARNING group, for one documented reason: the CPU in
+# force is the later, M5-commissioned build, whose standard program reads
+# `Forklift/Warning/ForkliftWarningFieldOccupied` in the teleop speed cap
+# (plc/forklift/SPEC.md §14.17). The M4 CPU had no such input. The exercise
+# (m4/verify_commissioning.py) drives the verdict clear, as the M5 field
+# evaluation would, so the M4-era caps are the visible ones. Everything the
+# header of bridge/config/bridge.yaml says applies here: addresses and
+# cadences only, no logic.
+
+groups: ["forklift", "warning"]
+
+opcua:
+  endpoint: "@VPLC_ENDPOINT@"     # rendered by run_commissioning.sh
+
+  namespace_uris:
+    server_interfaces: "http://www.siemens.com/simatic-s7-opcua"
+    interface: "http://DemoCell"
+
+  security_policy: "none"
+  certificate_path: null
+  private_key_path: null
+  username: null
+
+  requested_session_timeout_ms: 10000
+  session_name: "amr-agent-bridge"
+
+  reconnect_interval_s: 1.0
+  reconnect_backoff_max_s: 5.0
+
+nodes:
+  interface_path:
+    - namespace: server_interfaces
+      browse_name: "ServerInterfaces"
+    - namespace: interface
+      browse_name: "DemoCell"
+
+  heartbeat:
+    BridgeHeartbeat:               ["Link", "BridgeHeartbeat"]
+
+  groups:
+    forklift:
+      # WRITABLE by the bridge — the plant's state (opcua-nodes.md §10.5).
+      inputs:
+        ForkliftForkHeight:            ["Forklift", "Input", "ForkliftForkHeight"]
+        ForkliftLinearSpeed:           ["Forklift", "Input", "ForkliftLinearSpeed"]
+        ForkliftObstacleInStopZone:    ["Forklift", "Input", "ForkliftObstacleInStopZone"]
+        ForkliftObstacleMinDistance:   ["Forklift", "Input", "ForkliftObstacleMinDistance"]
+      # READ and applied to the plant unchanged (§10.6).
+      outputs:
+        ForkliftTractionSpeedRef:      ["Forklift", "Output", "ForkliftTractionSpeedRef"]
+        ForkliftSteerAngleRef:         ["Forklift", "Output", "ForkliftSteerAngleRef"]
+        ForkliftForkSpeedRef:          ["Forklift", "Output", "ForkliftForkSpeedRef"]
+      # READ for logging only (§4.9).
+      diagnostics:
+        ForkliftTeleopActive:          ["Forklift", "Status", "ForkliftTeleopActive"]
+        ForkliftObstacleStopActive:    ["Forklift", "Status", "ForkliftObstacleStopActive"]
+        ForkliftSpeedLimitActive:      ["Forklift", "Status", "ForkliftSpeedLimitActive"]
+        ForkliftResetRequired:         ["Forklift", "Status", "ForkliftResetRequired"]
+        HmiLinkOk:                     ["Forklift", "Link", "HmiLinkOk"]
+
+    warning:
+      # WRITABLE by the bridge — opcua-nodes.md §13. Carried here because the
+      # CPU in force reads it (see this file's header); the M4 cell predates
+      # the device.
+      inputs:
+        ForkliftWarningFieldOccupied:  ["Forklift", "Warning", "ForkliftWarningFieldOccupied"]
+
+ros:
+  node_name: "forklift_plc_bridge"
+  topics:
+    forklift:
+      fork_height:           "/forklift/fork_height"
+      linear_speed:          "/forklift/linear_speed"
+      obstacle_in_stop_zone: "/forklift/obstacle/in_stop_zone"
+      obstacle_min_distance: "/forklift/obstacle/min_distance"
+      cmd_traction_speed:    "/forklift/cmd/traction_speed"
+      cmd_steer_angle:       "/forklift/cmd/steer_angle"
+      cmd_fork_speed:        "/forklift/cmd/fork_speed"
+    warning:
+      warning_field_occupied:    "/forklift/warning_field/occupied"
+  analog_reliability: "reliable"
+
+cycle:
+  period_s: 0.05
+  status_poll_period_s: 1.0
+
+evidence:
+  # Resolved against the parent of this file's directory: rendered into
+  # m4/runtime/, so the capture lands in m4/evidence/.
+  csv_path: "evidence/latency-session.csv"
+  flush_interval_s: 2.0
+
+logging:
+  level: "INFO"

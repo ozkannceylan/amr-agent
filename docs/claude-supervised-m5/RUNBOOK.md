@@ -1,5 +1,13 @@
 # Claude-supervised M5 — the layered stack, and how to run it
 
+> **2026-08-21: this era has a new home — [`m5/m5_ver1/`](../../m5/m5_ver1/).**
+> Its runbook there ([`m5/m5_ver1/RUNBOOK.md`](../../m5/m5_ver1/RUNBOOK.md))
+> is the living one: the PLCSIM Advanced trial has expired, and the first
+> build now runs on a **virtual PLC** (`m5/m5_ver1/virtual_plc/`) that serves
+> the same address space, boot signature and writer surface. The videos and
+> HMI stills moved to `m5/m5_ver1/assets/` (links below that name them are
+> historical). This page is kept as the era's original entry point, frozen.
+
 This is the runbook for the **first** M5: the milestone as it was built
 under Claude supervision, layer by layer — `agv/` (vehicle), `sim/`
 (worlds), `bridge/` (ROS 2 ↔ OPC UA), `hmi/` (operator HMI), `fleet/`

@@ -1,0 +1,11 @@
+wall_s,command,belt_pos,pose_x,running,stop_active,reset_required,present,link_ok
+0.03,0.0,0.582,,False,False,False,False,True
+5.72,0.0,0.582,-0.418,False,False,False,False,True
+6.84,-0.15000000596046448,0.4323,-0.5579,True,False,False,False,True
+31.89,0.0,0.0342,-0.9658,False,False,False,False,True
+39.93,0.0,0.0342,-0.9658,False,False,False,False,True
+43.58,0.15000000596046448,0.5664,-0.4412,True,False,False,False,True
+43.69,0.0,0.5814,-0.4262,False,True,True,False,True
+45.2,0.0,0.5814,-0.4186,False,True,True,False,True
+46.31,0.0,0.5814,-0.4186,False,False,False,False,True
+48.32,0.0,0.5814,-0.4186,False,False,False,False,True
