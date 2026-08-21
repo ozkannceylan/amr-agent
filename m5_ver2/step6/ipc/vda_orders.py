@@ -1,0 +1,133 @@
+"""vda_orders.py - VDA 5050 order rules, pure. No ROS, no MQTT.
+
+The M1 subset's section 4 as executable checks. Validation names what
+is wrong instead of repairing it; acceptance is a three-way verdict so
+a duplicate delivery is silence, not an error; progress is monotone and
+skip-tolerant, because the pursuit cuts corners and the polyline's
+ARRIVED (nav-side) is what finally closes an order, not this counter.
+
+Deliberate M6.2 boundaries (spec): orderUpdateId > 0 and node actions
+are rejected - stitching and station actions land with M6.3.
+"""
+import math
+
+DEFAULT_DEV_M = 0.8   # intermediate waypoint pass radius; the pursuit
+                      # cuts corners, and ARRIVED closes what this misses
+
+
+def validate_order(msg):
+    """'' when valid, else the reason - which names the missing thing."""
+    if not isinstance(msg, dict):
+        return "not an object"
+    for key in ("orderId", "orderUpdateId", "nodes", "edges"):
+        if key not in msg:
+            return "missing {}".format(key)
+    if not isinstance(msg["orderId"], str) or not msg["orderId"]:
+        return "orderId must be a non-empty string"
+    upd = msg["orderUpdateId"]
+    if not isinstance(upd, int) or isinstance(upd, bool) or upd < 0:
+        return "orderUpdateId must be an integer >= 0"
+    nodes, edges = msg["nodes"], msg["edges"]
+    if not isinstance(nodes, list) or not nodes:
+        return "nodes must be a non-empty array"
+    if not isinstance(edges, list) or len(edges) != len(nodes) - 1:
+        return "edges must join the nodes (len(nodes)-1 of them)"
+    for i, n in enumerate(nodes):
+        for key in ("nodeId", "sequenceId", "released", "actions"):
+            if key not in n:
+                return "node {} missing {}".format(i, key)
+        if n["sequenceId"] != 2 * i:
+            return "node {} sequenceId must be {} (interleaved rule)".format(
+                i, 2 * i)
+        pos = n.get("nodePosition")
+        if not isinstance(pos, dict) or not {"x", "y", "mapId"} <= set(pos):
+            return "node {} missing nodePosition (mandatory for us)".format(i)
+        if n["actions"]:
+            return "node {} actions unsupported until M6.3".format(i)
+    for i, e in enumerate(edges):
+        for key in ("edgeId", "sequenceId", "released",
+                    "startNodeId", "endNodeId", "actions"):
+            if key not in e:
+                return "edge {} missing {}".format(i, key)
+        if e["sequenceId"] != 2 * i + 1:
+            return "edge {} sequenceId must be {} (interleaved rule)".format(
+                i, 2 * i + 1)
+        if (e["startNodeId"] != nodes[i]["nodeId"]
+                or e["endNodeId"] != nodes[i + 1]["nodeId"]):
+            return "edge {} does not join its neighbour nodes".format(i)
+    if not nodes[0]["released"]:
+        return "no released base - the first node is horizon"
+    seen_horizon = False
+    for n in nodes:
+        if seen_horizon and n["released"]:
+            return "released node after a horizon node"
+        seen_horizon = seen_horizon or not n["released"]
+    for e, end in zip(edges, nodes[1:]):
+        if bool(e["released"]) != bool(end["released"]):
+            return "edge released must match its end node"
+    return ""
+
+
+def accept_order(msg, current_order_id, current_update_id, executing,
+                 operating_mode):
+    """('accept'|'ignore'|'reject', reason)."""
+    reason = validate_order(msg)
+    if reason:
+        return ("reject", reason)
+    if (msg["orderId"] == current_order_id
+            and msg["orderUpdateId"] == current_update_id):
+        return ("ignore", "duplicate delivery")
+    if msg["orderUpdateId"] != 0:
+        return ("reject",
+                "order updates land with M6.3 - cancelOrder, then send "
+                "a fresh order")
+    if operating_mode != "AUTOMATIC":
+        return ("reject", "vehicle not in AUTOMATIC")
+    if executing:
+        return ("reject", "an order is executing - cancelOrder first")
+    return ("accept", "")
+
+
+def released_route(msg):
+    """(points, arrive_m, released_nodes, horizon_nodes)."""
+    released = [n for n in msg["nodes"] if n["released"]]
+    horizon = [n for n in msg["nodes"] if not n["released"]]
+    points = [(float(n["nodePosition"]["x"]), float(n["nodePosition"]["y"]))
+              for n in released]
+    last = released[-1]["nodePosition"]
+    # Only a positive radius is a radius: nav_core.on_route refuses
+    # anything <= 0, so a zero or negative deviation takes the default
+    # rather than costing the order its route.
+    raw = last.get("allowedDeviationXY")
+    arrive_m = float(raw) if isinstance(raw, (int, float)) \
+        and not isinstance(raw, bool) and raw > 0 else 0.25
+    return points, arrive_m, released, horizon
+
+
+class Progress:
+    """Which released nodes the truck has passed. Monotone, skips."""
+
+    def __init__(self, released_nodes):
+        self.nodes = released_nodes
+        self.reached = 0
+
+    def update(self, xy):
+        """Mark the furthest node whose deviation circle contains xy,
+        and everything before it. True when the count advanced."""
+        before = self.reached
+        for j in range(len(self.nodes) - 1, self.reached - 1, -1):
+            pos = self.nodes[j]["nodePosition"]
+            dev = float(pos.get("allowedDeviationXY", DEFAULT_DEV_M))
+            if math.hypot(xy[0] - pos["x"], xy[1] - pos["y"]) <= dev:
+                self.reached = j + 1
+                break
+        return self.reached != before
+
+    def complete(self):
+        self.reached = len(self.nodes)
+
+    def last_node(self):
+        if self.reached == 0:
+            return ("", 0)
+        node = self.nodes[self.reached - 1]
+        return (node["nodeId"], node["sequenceId"])
