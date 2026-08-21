@@ -11,6 +11,7 @@ M6.1 spec's proof gates).
 [x] Gate 4 — per-vehicle stale-link: silence half AND driving half
 [x] Gate 5 — clean lifecycle, twice
 [x] Gate 6 — the gate debt proven closed on the floor     MEASURED
+              (the driving half; the DISPLAY half is open -> M6.2)
 ```
 
 Method, per gate: 1, 4 (silence) and 5 were measured WSL-side with no
@@ -764,8 +765,29 @@ isolation is not blindness.
 
 ### Direction A — f1 trips, f2 is watched
 
-39.0 s of `/f1/plc/status`, `/f2/plc/status`, `/f1/safety/fields` and
-`/f2/safety/fields`, one recorder process, 804 / 783 / 401 / 413 samples.
+One recorder process, 42 s requested, `START 10:32:27.742` to
+`END 10:33:09.747`. What each of the four files actually holds — and
+these spans, not the event, are what every count in this section is taken
+over:
+
+```
+direction A                       first sample   last sample     samples
+  /f1/plc/status                  10:32:29.725   10:33:09.728        804
+  /f2/plc/status                  10:32:30.740   10:33:09.729        783
+  /f1/safety/fields               10:32:29.863   10:33:09.747        401
+  /f2/safety/fields               10:32:28.615   10:33:09.719        413
+direction B                       first sample   last sample     samples
+  /f1/plc/status                  10:33:56.732   10:34:36.230        793
+  /f2/plc/status                  10:33:54.758   10:34:36.230        833
+  /f1/safety/fields               10:33:56.886   10:34:36.250        396
+  /f2/safety/fields               10:33:55.620   10:34:36.220        408
+```
+
+**Every count below is file-wide**, i.e. over 39.0-41.1 s per file
+depending on when that subscription matched. That OVER-covers the event
+in both directions — the box exists for about 9 s of it — so a bystander zero
+counted this way is a stronger statement than one counted over the trip
+window alone, not a weaker one.
 The whole event, merged from those four files by timestamp. The field
 lines are FOLDED — the report's own `ts` and its `left` and `right`
 devices are cut, and both of those read SAFE throughout — and the status
@@ -810,7 +832,8 @@ heal  f1 driver: motor=False | E-Stop=True Motor=False | PF b/r/l=T/T/T  WF b/r/
 ackd  f1 driver: motor=True  | E-Stop=True Motor=True  | PF b/r/l=T/T/T  WF b/r/l=T/T/T | case=1 V_Limit=1500
 ```
 
-**And f2, over that same 39.0 s window (10:32:30.740 – 10:33:09.729):**
+**And f2, over its whole file (10:32:30.740 – 10:33:09.729, 38.99 s, which
+contains the entire 9.1 s the box was in the world):**
 
 ```
 $ grep -c '"motor": false' f2_status.txt   ->   0        (of 783 samples)
@@ -956,9 +979,10 @@ and before the goals; both trucks read `motor=True` at 10:47:28.
 | state histogram | 235 EN-ROUTE / 1045 ARRIVED / 195 IDLE | 220 / 1060 / 191 |
 
 **The overlap is the gate, and it is 21.90 s** — 10:47:35.870 to
-10:47:57.770, from the later of the two EN-ROUTE starts to the earlier of
-the two arrivals. That is f2's *entire* drive and 93 % of f1's. Over
-exactly that interval:
+10:47:57.770, from the later of the two EN-ROUTE starts to the last
+EN-ROUTE sample before the earlier of the two arrivals. That is 21.90 s
+of f2's 22.00 s drive and 93 % of f1's 23.50 s. Over exactly that
+interval:
 
 ```
 f1_status.txt  in [10:47:35.869 .. 10:47:57.769]: 438 samples, 0 contain '"motor": false'
@@ -1023,15 +1047,20 @@ kill                                       10:52:59.805225
 /f1/gz/odom      standstill at             kill + 0.599 s
 ```
 
-- **Kill → `"motor": false` on `/f1/plc/status`: 0.4236 s**, end to end.
-  The runbook's budget for the writer's half alone is `SENSOR_STALE_S`
-  0.40 + `CYCLE_S` 0.02 = **0.42 s** to writing the six field inputs
-  False. So the 0.4236 s measured here contains that whole budget AND the
-  F-model, the 5110 datagram, `plc_link` and one 20 Hz publish period —
-  23.6 ms above the 0.400 s floor for all of it together. The runbook
-  allows "about a second"; the chain took less than half of one.
-- **The truck kept its last command for exactly that window and no
-  longer.** It was doing 0.2395 m/s at the kill (mid-corner, where the
+- **Kill → `"motor": false` on `/f1/plc/status`: 0.4236 s**, end to end,
+  and that is an UPPER bound on the trip, not a decomposition of it. The
+  runbook's writer-side budget is `SENSOR_STALE_S` 0.40 + `CYCLE_S` 0.02
+  = **≤ 0.42 s** to writing the six field inputs False, and `/f1/plc/status`
+  is sampled at 20 Hz, so up to **50 ms** of the 0.4236 s is nothing but
+  the grain of the topic the answer arrived on. Two quantities this
+  capture does not contain: the phase of the last 10 Hz sensor datagram
+  before the kill (which decides where inside the 0.40 s window the
+  writer's clock actually started) and where inside a publish period the
+  first False landed. **So the chain's internal split cannot be derived
+  from this run** — what can be said is that the whole of it, writer
+  budget and publish grain included, completed in 0.4236 s against a
+  runbook that allows "about a second".
+- **The truck kept its last command for that window and no longer.** It was doing 0.2395 m/s at the kill (mid-corner, where the
   pursuit's own corner band and not the PLC sets the speed), held ~0.24
   m/s through kill+0.424, and was stopped at kill+0.599: **0.0666 m of
   travel from the kill to standstill.**
@@ -1130,7 +1159,11 @@ rc=0
   t_kill+0.846  (3.4773, -5.4996)  |v| 0.0000   <- standstill, and it stays
 ```
 
-**0.2465 m from the kill to standstill, in 0.846 s, from 0.700 m/s.**
+**0.2465 m from the kill to standstill, in 0.846 s, from 0.700 m/s** —
+measured from the **last odometry sample before the kill**, which is
+36 ms early. Extrapolating that sample forward at its own 0.7000 m/s to
+the kill instant gives **0.221 m**, and the true figure is between the
+two. Both are quoted; neither changes any verdict below.
 
 The split inside that number is the gate itself. The truck ran at a full
 0.7000 m/s until **kill + 0.255 s** and covered **0.175 m** doing it —
@@ -1139,10 +1172,20 @@ measured on the plant rather than read out of the source. The remaining
 **0.0715 m** is the drive ramping down through 0.57, 0.39, 0.22, 0.04 to
 zero.
 
-Against the runbook's bound — *0.25 s of travel plus a tick; under 0.8 m
-at the 2800 mm/s ceiling* — 0.2465 m at this vehicle's 700 mm/s cruise is
-inside it with room to spare. Against the class this gate exists to kill,
-**step4's 14.8 m**, it is **60× smaller**. The 14.8 m class is dead.
+**The runbook's bound has to be evaluated at the speed actually driven,
+not at a ceiling this vehicle never reaches.** The runbook's formula is
+`CMD_STALE_S` plus a tick, i.e. 0.35 s of travel; at the 700 mm/s the
+follower actually cruises that allows **0.245 m**, and the measured
+stale-window travel is **0.175 m** — inside it. The other **0.0715 m** is
+the drive's braking ramp, which the formula does not model at all, so the
+total 0.2465 m is not the quantity the formula bounds and is not compared
+to it here. (The runbook's own ceiling arithmetic is wrong in passing:
+0.35 s × 2.8 m/s is **0.98 m**, not "under 0.8 m". Corrected in step 14
+below. Nothing measured here was ever compared against that line.)
+
+Against the class this gate exists to kill — **step4's 14.8 m** — 0.2465 m
+is **60× smaller**, and it is that class, and only that class, this
+measurement retires.
 
 ### Motor STAYED TRUE, and that is the debt's exact signature
 
@@ -1356,7 +1399,7 @@ Run the setup first. This is the step4 14.8 m class, tested on purpose.
 11. Press Ctrl-C in the third WSL terminal.
 12. Run `grep -A2 'position:' /tmp/g6_odom.txt | grep -E '^ +(x|y):' | paste - - | cat -n > /tmp/g6_xy.txt` — one numbered `x  y` pair per odometry sample, 20 per simulated second.
 13. Open `/tmp/g6_xy.txt`. Find the last pair before the numbers stop changing (that is where f1 came to rest) and the pair from the moment you killed the mux, and record the straight-line distance between them.
-14. **The gate wants that distance to be a `CMD_STALE_S`-sized coast: 0.25 s of travel plus a tick.** At the 300 mm/s creep limit that is under 0.1 m; at the 2800 mm/s ceiling, under 0.8 m. Anything in step4's 14.8 m class is a FAIL.
+14. **The gate wants that distance to be a `CMD_STALE_S`-sized coast: 0.25 s of travel plus a tick, so 0.35 s.** At the 300 mm/s creep limit that is 0.105 m; at the 2800 mm/s ceiling, **0.98 m** (this line read "under 0.8 m" until 2026-08-21, which was an arithmetic slip and is corrected here). The formula counts the stale window only — the drive's braking ramp is on top of it. Anything in step4's 14.8 m class is a FAIL.
 15. Check f2's HMI: it must be unaffected, still `Drive enable: ON`.
 16. Run `./step6.sh stop` — f1's mux is gone and the stack is now incomplete.
 17. Write the distance into the Gate 6 section above.
