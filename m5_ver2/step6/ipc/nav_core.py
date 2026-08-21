@@ -75,6 +75,31 @@ class NavCore:
         self.arrive_m = STATIONS[station_id].get(
             "arrive_m", follower.ARRIVE_M)
 
+    def on_route(self, points, arrive_m, label):
+        """An externally planned polyline - the VDA agent's door (M6.2).
+
+        Same rules as on_goal after planning: auto mode only, the empty
+        goal stays the one cancel door, and everything downstream
+        (follower, guards, ARRIVED, SAFETY-STOP holding the route) is
+        the same machinery. This file still plans nothing here: the
+        route arrives finished, and a malformed one is refused, not
+        repaired.
+        """
+        if self.mode != MODE_AUTO:
+            self.note = "route refused: not in auto mode"
+            return
+        try:
+            poly = [(float(p[0]), float(p[1])) for p in points]
+        except (TypeError, ValueError, IndexError):
+            self.note = "route refused: malformed points"
+            return
+        if len(poly) < 2:
+            self.note = "route refused: fewer than two points"
+            return
+        self.goal, self.route, self.state = str(label), poly, EN_ROUTE
+        self.note, self.reversing = "", False
+        self.arrive_m = float(arrive_m) if arrive_m else follower.ARRIVE_M
+
     def _cancel(self, why):
         self.goal, self.route, self.state, self.note = None, None, IDLE, why
         self.reversing = False

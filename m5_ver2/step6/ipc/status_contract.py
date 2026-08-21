@@ -93,6 +93,7 @@ def contract(vid):
         "vehicle_cmd_topic": "/{}/vehicle/cmd_vel".format(vid),
         "auto_cmd_topic": "/{}/auto/cmd_vel".format(vid),
         "auto_goal_topic": "/{}/auto/goal".format(vid),
+        "auto_route_topic": "/{}/auto/route".format(vid),
         "auto_state_topic": "/{}/auto/state".format(vid),
         "mode_topic": "/{}/hmi/mode".format(vid),
         "plc_port": v["plc_port"],
@@ -147,6 +148,7 @@ def contract(vid):
 #   VEHICLE_CMD_TOPIC  cmd_mux -> cmd_gate, the one seam
 #   AUTO_CMD_TOPIC     nav_node -> cmd_mux
 #   AUTO_GOAL_TOPIC    HMI -> nav_node, station id or ""
+#   AUTO_ROUTE_TOPIC   agent -> nav_node, a finished route (M6.2)
 #   AUTO_STATE_TOPIC   nav_node -> HMI, JSON
 #   MODE_TOPIC         HMI -> mux & nav, latched
 #
@@ -169,6 +171,7 @@ if os.environ.get("VEHICLE"):
     VEHICLE_CMD_TOPIC = _C["vehicle_cmd_topic"]
     AUTO_CMD_TOPIC = _C["auto_cmd_topic"]
     AUTO_GOAL_TOPIC = _C["auto_goal_topic"]
+    AUTO_ROUTE_TOPIC = _C["auto_route_topic"]
     AUTO_STATE_TOPIC = _C["auto_state_topic"]
     MODE_TOPIC = _C["mode_topic"]
 else:

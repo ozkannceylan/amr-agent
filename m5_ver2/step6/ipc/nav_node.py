@@ -10,6 +10,7 @@ A scan or odom that STOPS parks the autopilot: no pose means no command
 rather than as a clear road. The safe direction, same as every Step 4
 display rule.
 """
+import json
 import math
 import time
 
@@ -25,9 +26,9 @@ from std_msgs.msg import String
 import follower
 import nav_core
 from status_contract import (
-    AUTO_CMD_TOPIC, AUTO_GOAL_TOPIC, AUTO_STATE_TOPIC, CONFIG_PATH,
-    MODE_TOPIC, STATUS_STALE_S, STATUS_TOPIC, is_stale, parse_status,
-    speed_limit_mm_s)
+    AUTO_CMD_TOPIC, AUTO_GOAL_TOPIC, AUTO_ROUTE_TOPIC, AUTO_STATE_TOPIC,
+    CONFIG_PATH, MODE_TOPIC, STATUS_STALE_S, STATUS_TOPIC, is_stale,
+    parse_status, speed_limit_mm_s)
 
 # ----------------------------- CONFIG -----------------------------
 TICK_HZ = 20.0
@@ -74,6 +75,8 @@ class NavNode(Node):
         self.create_subscription(String, MODE_TOPIC, self.cb_mode, latched)
         self.create_subscription(String, AUTO_GOAL_TOPIC, self.cb_goal, 10)
         self.create_subscription(
+            String, AUTO_ROUTE_TOPIC, self.cb_route, 10)
+        self.create_subscription(
             Odometry, topics["gz_odom"], self.cb_odom, 10)
         self.create_subscription(
             LaserScan, topics["gz_scan_nav"], self.cb_scan, 10)
@@ -88,6 +91,17 @@ class NavNode(Node):
             self.core.note = "goal refused: no pose yet"
             return
         self.core.on_goal(msg.data, self.pose[:2])
+
+    def cb_route(self, msg):
+        if self.pose is None:
+            self.core.note = "route refused: no pose yet"
+            return
+        try:
+            req = json.loads(msg.data)
+            self.core.on_route(
+                req["points"], req.get("arrive_m"), req.get("label", ""))
+        except (ValueError, KeyError, TypeError):
+            self.core.note = "route refused: unreadable request"
 
     def cb_odom(self, msg):
         p, q = msg.pose.pose.position, msg.pose.pose.orientation

@@ -198,3 +198,41 @@ def test_a_new_goal_clears_the_reverse_phase():
     assert core.reversing
     core.on_goal("", AT_S10[:2])
     assert not core.reversing
+
+
+# ------------------- a route that arrives already planned -------------------
+# M6.2: the VDA agent hands nav a finished polyline, so on_route enters the
+# same EN-ROUTE state on_goal reaches after planning. plan= is a lambda that
+# plans nothing, which is the point: this door must never call the planner.
+
+
+def test_on_route_installs_an_external_polyline():
+    core = nav_core.NavCore(plan=lambda xy, sid: None)
+    core.on_mode(MODE_AUTO)
+    core.on_route([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]], 0.3, "order-1")
+    assert core.state == nav_core.EN_ROUTE
+    assert core.goal == "order-1"
+    assert core.route == [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)]
+    assert core.arrive_m == 0.3
+
+
+def test_on_route_refused_outside_auto():
+    core = nav_core.NavCore(plan=lambda xy, sid: None)
+    core.on_mode(MODE_TELEOP)
+    core.on_route([[0.0, 0.0], [1.0, 0.0]], 0.3, "order-1")
+    assert core.state == nav_core.IDLE and "auto" in core.note
+
+
+def test_on_route_refuses_a_degenerate_polyline():
+    core = nav_core.NavCore(plan=lambda xy, sid: None)
+    core.on_mode(MODE_AUTO)
+    core.on_route([[0.0, 0.0]], 0.3, "order-1")
+    assert core.state == nav_core.IDLE and core.route is None
+
+
+def test_empty_goal_still_cancels_an_external_route():
+    core = nav_core.NavCore(plan=lambda xy, sid: None)
+    core.on_mode(MODE_AUTO)
+    core.on_route([[0.0, 0.0], [1.0, 0.0]], 0.3, "order-1")
+    core.on_goal("", (0.0, 0.0))
+    assert core.state == nav_core.IDLE and core.route is None
