@@ -12,12 +12,26 @@ M6.1 spec's proof gates).
 [x] Gate 5 — clean lifecycle, twice
 [x] Gate 6 — the gate debt proven closed on the floor     MEASURED
               (the driving half; the DISPLAY half is open -> M6.2)
+
+M6.2, the VDA 5050 gates (numbered VDA 1..6 so they cannot be
+confused with the six above), all measured 2026-08-21 18:31-18:49:
+
+[x] VDA 1 — MQTT-only drive, both vehicles, distinct stations   MEASURED
+[x] VDA 2 — rejections: teleop/unset, and mid-drive             MEASURED
+[x] VDA 3 — cancelOrder mid-drive                               MEASURED
+[x] VDA 4 — supervision loss mid-drive                          MEASURED
+[x] VDA 5 — connection lifecycle: ONLINE / OFFLINE / will       MEASURED
+[x] VDA 6 — state honesty under a protective-field trip         MEASURED
 ```
 
 Method, per gate: 1, 4 (silence) and 5 were measured WSL-side with no
 writer attached. **2, 3, 6 and Gate 4's driving half were measured on
 2026-08-21 by the scripted driver plus the ROS CLI — no panel, no
-human**, and every number in them is a capture off this machine.
+human**, and every number in them is a capture off this machine. **The
+six VDA gates were measured the same way on the same day**, with two
+instruments instead of one: the ROS recorder, and a paho subscriber on
+`uagv/v2/amragent/+/#` that records what a fleet manager would have
+seen. No order in that run was ever sent from an HMI.
 
 **The panels were never opened.** `windows/step6.py`'s Tk panel is still
 the owner's tool and nothing in this build has clicked it; what changed
@@ -1259,6 +1273,838 @@ survivor, and the trailing KILL-pass line is there as always.
 ```
 $ python3 -m pytest m5_ver2/step6/tests/ -q
 245 passed in 4.39s
+```
+
+---
+
+# The VDA 5050 machine run, 2026-08-21 18:31–18:49
+
+The M6.2 spec's six proof gates, **measured by the scripted driver + CLI
+— no panel, no human**, on the live twenty-pid stack. They are numbered
+here as **VDA 1..6** so they cannot be confused with the M6.1 gates
+above, which keep their own numbers and their own verdicts.
+
+```
+[x] VDA 1 — MQTT-only drive, both vehicles, distinct stations   MEASURED
+[x] VDA 2 — rejections: teleop/unset, and mid-drive             MEASURED
+[x] VDA 3 — cancelOrder mid-drive                               MEASURED
+[x] VDA 4 — supervision loss mid-drive                          MEASURED
+[x] VDA 5 — connection lifecycle: ONLINE / OFFLINE / will       MEASURED
+[x] VDA 6 — state honesty under a protective-field trip         MEASURED
+```
+
+The operator substitution is M6.1's, unchanged, plus two rows the VDA
+gates add:
+
+| Runbook action | What the machine did instead |
+|---|---|
+| Click **RESET** on `fN`'s panel | `{"ack": true}` to 127.0.0.1:5910 (f1) / :5920 (f2) |
+| Read the panel lamp | `{"status": true}` → the writer's own `motor` + status line |
+| Click **Auto** | publish `/fN/hmi/mode` `auto`, TRANSIENT_LOCAL depth 1 |
+| Click a station dot, press **GO** | **nothing — an order over MQTT is the whole point** |
+| Master control sends an order | `tools/send_order.py fN <station>` (paho, no ROS node) |
+| Master control cancels | one `instantActions` publish (paho, no ROS node) |
+| `ros2 topic echo … > file` | one recorder process, one line per sample, timestamped |
+| Watch the fleet's side | one paho subscriber on `uagv/v2/amragent/+/#`, JSONL |
+
+## Setup, verbatim
+
+```
+$ ./step6.sh deploy
+instantiated .../m5_ver2/step6/vehicles/f1
+instantiated .../m5_ver2/step6/vehicles/f2
+deployed 20 files to .../m5_ver2/step6/deploy
+
+$ ./step6.sh start --headless
+starting the Step 6 vehicle side (partition step6, domain 96, gui false)
+  broker pid 41859           world pid 41865
+  plc_link_f1 42239    cmd_gate_f1 42245     cmd_mux_f1 42253
+  field_eval_f1 42299  encoder_link_f1 42335 sensor_link_f1 42346
+  nav_node_f1 42385    vda_agent_f1 42424    hmi_f1 42479
+  plc_link_f2 42485    cmd_gate_f2 42520     cmd_mux_f2 42569
+  field_eval_f2 42573  encoder_link_f2 42612 sensor_link_f2 42660
+  nav_node_f2 42694    vda_agent_f2 42741    hmi_f2 42779
+```
+
+**Twenty pids**, no `exited during startup`. (Folded two and three to a
+row here; the real output is one per line.) Then, on Windows, one
+scripted writer per vehicle:
+
+```
+> python m5_ver2\step6\tools\scripted_writer.py --vehicle f1 --virtual --ctl-port 5910
+> python m5_ver2\step6\tools\scripted_writer.py --vehicle f2 --virtual --ctl-port 5920
+```
+
+started detached with `Start-Process … -RedirectStandardOutput
+logs\scripted_writer_f1.log`. Both were reading their sensor port before
+anything was acknowledged — `PF b/r/l=T/T/T  WF b/r/l=T/T/T` on the
+first cycle, which is a live WSL→Windows 5111/5121 link and not a
+default — and both reported `Motor=False`, which is the startup
+acknowledge the F-program demands.
+
+RESET went out at the last moment before the first order, after every
+process the gates needed was up and settled (the M6.1 rig rule, below):
+
+```
+18:34:18.334  ->127.0.0.1:5910  {"ack":true}
+18:34:18.415  ->127.0.0.1:5920  {"ack":true}
+18:34:20.557  ->127.0.0.1:5910  {"status":true}
+reply {"motor": true, "line": "E-Stop=True   Motor=True   ack=False |
+       PF b/r/l=T/T/T  WF b/r/l=T/T/T | case=1  V_Limit=1500  enc=0/0 ok"}
+18:34:20.632  ->127.0.0.1:5920  {"status":true}
+reply {"motor": true, ... identical ...}
+```
+
+## The two instruments, and what each is allowed to be
+
+**ROS side: ONE recorder process**, M6.1's `gate_rec.py` with a UDP
+control socket bolted on, because an M6.2 gate is not on a schedule — an
+order goes out over MQTT and the truck answers when it answers. Twelve
+subscriptions and two publishers, all created before the first RESET:
+
+```
+python3 rec2.py 7200 /tmp/m62/cap 5930 \
+  f1_status=/f1/plc/status=String   f2_status=/f2/plc/status=String \
+  f1_fields=/f1/safety/fields=String f2_fields=/f2/safety/fields=String \
+  f1_nav=/f1/auto/state=String      f2_nav=/f2/auto/state=String \
+  f1_goal=/f1/auto/goal=String      f2_goal=/f2/auto/goal=String \
+  f1_route=/f1/auto/route=String    f2_route=/f2/auto/route=String \
+  f1_odom=/f1/gz/odom=Odometry      f2_odom=/f2/gz/odom=Odometry \
+  pub=mode1=/f1/hmi/mode=transient_local \
+  pub=mode2=/f2/hmi/mode=transient_local
+```
+
+Its whole session, printed at the end:
+
+```
+f1_status  /f1/plc/status   18693 samples   f1_odom  /f1/gz/odom  16992
+f2_status  /f2/plc/status   18719 samples   f2_odom  /f2/gz/odom  16992
+f1_fields  /f1/safety/fields 9341           f1_nav   /f1/auto/state 9366
+f2_fields  /f2/safety/fields 9355           f2_nav   /f2/auto/state 9347
+f1_route   /f1/auto/route       5           f1_goal  /f1/auto/goal     1
+f2_route   /f2/auto/route       3           f2_goal  /f2/auto/goal     1
+```
+
+**There is no goal publisher in that command line**, and that is VDA
+Gate 1's central claim made structural rather than promised: the
+instrument could not have published an HMI goal if it had wanted to. The
+two `/fN/auto/goal` samples in the whole eighteen minutes are the
+AGENT's own empty goal — one at the cancelOrder, one at the supervision
+loss — and both are timestamped inside the gate that asked for them.
+
+**MQTT side: one paho subscriber** on `uagv/v2/amragent/+/#`, one JSONL
+line per message with the retain flag kept, started before the stack's
+first gate and left running across the broker kill and the stack stop.
+It is **not a ROS node**, so the rig rule below does not bite it, and it
+is the only reader that can say what the fleet would have seen.
+
+Two things were done from outside both instruments and neither starts a
+ROS node: a UDP datagram to a writer, and `kill`. `send_order.py` and
+the instantAction publisher are paho clients — by design, `send_order`'s
+own docstring says so: it reads the vehicle's pose off the vehicle's own
+MQTT state rather than subscribing to odom.
+
+**Instrument noise, on the record.** PowerShell strips the double quotes
+out of a native command's argument, so the first four RESET datagrams
+reached the writers as `{ack:true}` and `{status:true}`. Each cost one
+stderr line and nothing else — `logs/scripted_writer_f1.err` in full:
+
+```
+ignored b'{ack:true}': Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+ignored b'{status:true}': Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+```
+
+which is `serve()`'s guard doing exactly what its docstring promises.
+The buttons were then driven by name through a wrapper that builds the
+JSON itself, and the RESET above is that wrapper's output.
+
+## The rig rule held: no starvation, not once
+
+M6.1 measured 1.65 s and 1.94 s of `sensor_link` silence when ROS nodes
+were started while a truck could move, and both latched ESTOP1. This run
+started every ROS process before the RESET and none afterwards. The
+audit is the whole session's `"motor": false` samples, grouped into runs:
+
+```
+f1: 3839 samples in 3 runs      f2: 2848 samples in 2 runs
+  18:32:16.007 .. 18:34:18.297    18:32:14.397 .. 18:34:18.417
+      the startup acknowledge, cleared by the RESET at 18:34:18
+  18:40:48.797 .. 18:41:39.647    (none)
+      VDA Gate 6's box, cleared by that gate's ack at 18:41:39.648
+  18:47:31.947 .. 18:47:50.147    18:47:32.017 .. 18:47:50.167
+      the writers' own trip values on {"quit": true}, at teardown
+```
+
+**Every motor-false sample in eighteen minutes belongs to a run this
+file names, and none of them is an instrument.** The protective-field
+audit says the same from the other side: `"pf": false` appears 596 times
+on f1's back device and 179–180 times on every other device of both
+trucks; 180 of f1's back count and all of the others are the first
+17.9 s after start, when `field_eval`'s fail-safe direction reads "no
+scan yet" as violated, and the remaining 416 are Gate 6's box and its
+three-scan clearing straddle.
+
+---
+
+## [x] VDA Gate 1 — MQTT-only drive, both vehicles
+
+**Date:** 2026-08-21. **Verdict: PASS.** Measured by the scripted driver
++ CLI — no panel, no human.
+
+**Spec:** *both vehicles complete full-route orders (distinct stations)
+sent over MQTT with NO HMI goal involvement — ARRIVED both, 0
+motor-false each, state streams captured showing nodeStates draining and
+lastNodeId advancing.*
+
+The stations are M6.1 Gate 3's pair and for its reason: `route.plan_route`
+puts f1 → **S10 PICK-B-S** on `x ∈ [−6, −3], y ∈ [−5.5, −2.5]` and f2 →
+**S4 DOCK-DOOR** on `x ∈ [3, 6], y ∈ [−8, −5.5]`, sharing no node and no
+corridor, 6.00 m apart at their closest point. Both declare `arrive_m`
+**0.25**, the tight end of `stations.py`'s range.
+
+```
+$ python3 m5_ver2/step6/tools/send_order.py f1 S10
+sent o-5336e4a5 to f1 -> S10 (3 nodes, arrive 0.25 m)
+$ python3 m5_ver2/step6/tools/send_order.py f2 S4
+sent o-03c71ba8 to f2 -> S4 (3 nodes, arrive 0.25 m)
+```
+
+| | f1 → S10 PICK-B-S | f2 → S4 DOCK-DOOR |
+|---|---|---|
+| order | `o-5336e4a5` | `o-03c71ba8` |
+| route length | 6.00 m | 5.50 m |
+| EN-ROUTE from | 18:34:31.078 | 18:34:32.914 |
+| ARRIVED at | 18:34:53.177 | 18:34:53.514 |
+| drive time | 22.099 s | 20.600 s |
+| ARRIVED pose | (−5.9177, −2.7299) | (6.2144, −7.8801) |
+| station | (−6.00, −2.50) | (6.00, −8.00) |
+| **arrival error** | **0.2442 m** | **0.2456 m** |
+| `arrive_m` | 0.25 | 0.25 |
+| `"motor": false` over its own drive | **0 of 442** | **0 of 412** |
+| HOLD / SAFETY-STOP samples | 0 / 0 | 0 / 0 |
+
+**The overlap is 20.263 s** — 18:34:32.914 to 18:34:53.177, from the
+later EN-ROUTE to the earlier ARRIVED. That is 98.4 % of f2's drive and
+91.7 % of f1's. Over exactly that interval:
+
+```
+f1  405 status samples, 0 contain '"motor": false'
+f2  406 status samples, 0 contain '"motor": false'
+```
+
+**The state stream, both trucks, drained** — one row per change, read
+off the MQTT recorder:
+
+```
+   f1                                        f2
+   18:34:28.847  ''          rem 0           18:34:28.707  ''          rem 0
+   18:34:31.047  o-5336e4a5  rem 3           18:34:32.907  o-03c71ba8  rem 3
+   18:34:31.065  o-5336e4a5  rem 2  wp1      18:34:32.951  o-03c71ba8  rem 2  wp1
+   18:34:33.146  o-5336e4a5  rem 2  wp1  D   18:34:35.006  o-03c71ba8  rem 2  wp1  D
+   18:34:35.063  o-5336e4a5  rem 1  wp2  D   18:34:36.868  o-03c71ba8  rem 1  wp2  D
+   18:34:53.124  o-5336e4a5  rem 0  S10  D   18:34:53.428  o-03c71ba8  rem 0  S4   D
+   18:34:55.246  o-5336e4a5  rem 0  S10      18:34:55.606  o-03c71ba8  rem 0  S4
+```
+
+`rem` is `len(nodeStates)`, the third column is `lastNodeId`, `D` is
+`driving: true`. **`nodeStates` drains 3 → 2 → 1 → 0 and `lastNodeId`
+advances wp1 → wp2 → the station**, and the order id stays on the state
+after arrival, which is what `send_order --watch` reads as its finish
+line. `rem` drops to 2 within 18 ms of the order: `wp1` is the truck's
+own start point (`send_order` sends `poly[1:]`, and `plan_route` starts
+the polyline under the truck), so `Progress` marks it on the first odom
+sample.
+
+**No HMI goal was published, by either truck, at any point in the
+session:** `/f1/auto/goal` and `/f2/auto/goal` carry **one sample each
+over eighteen minutes**, at 18:38:00.846 and 18:44:11.025, and both are
+the agent's own empty-string goal in VDA Gates 3 and 4. `/fN/auto/route`
+carries 5 (f1) and 3 (f2): f1's five are its five ACCEPTED orders, f2's
+three are its two accepted orders plus VDA Gate 4's re-issue. **Not one
+rejected order produced a route** — nothing below reached nav.
+
+---
+
+## [x] VDA Gate 2 — the two rejections
+
+**Date:** 2026-08-21. **Verdict: PASS, both halves.** Measured by the
+scripted driver + CLI — no panel, no human.
+
+**Spec:** *an order in teleop mode and an order while one executes are
+both rejected with the errors[] entry, and the vehicle's current drive
+is undisturbed.*
+
+### (a) Not in AUTOMATIC — twice, from both directions
+
+First with the mode **never published at all** (`self.mode is None`,
+which `operating_mode()` reads as `MANUAL`), before any RESET:
+
+```
+18:33:03.932  order in   uagv/v2/amragent/f1/order  o-9c6fd083
+18:33:03.965  state      f1  operatingMode=MANUAL driving=False pos=(-3.0, -5.5)
+   {"errorType": "orderError", "errorLevel": "WARNING",
+    "errorDescription": "vehicle not in AUTOMATIC",
+    "errorReferences": [{"referenceKey": "orderId",
+                         "referenceValue": "o-9c6fd083"}]}
+18:33:04.327  order in   uagv/v2/amragent/f2/order  o-f81c7bbc
+18:33:04.424  state      f2  ... identical, referenceValue "o-f81c7bbc"
+```
+
+**33 ms and 97 ms from the order to the refusal on the wire.** Then with
+`teleop` explicitly in force — the mode published on the topic and at
+the QoS `hmi_node.py` declares:
+
+```
+PUB 18:33:27.022 /f2/hmi/mode <- 'teleop' (3 matched subscribers)
+18:33:31.216  order in   uagv/v2/amragent/f2/order  o-5765d3a8
+18:33:31.324  state      f2  operatingMode=MANUAL driving=False orderId=''
+   {"errorType": "orderError", "errorLevel": "WARNING",
+    "errorDescription": "vehicle not in AUTOMATIC",
+    "errorReferences": [{"referenceKey": "orderId",
+                         "referenceValue": "o-5765d3a8"}]}
+```
+
+The `3 matched subscribers` are `cmd_mux`, `nav_node` and `vda_agent`,
+all three TRANSIENT_LOCAL — a VOLATILE publisher would have reached
+none of them, which is the silent failure M6.1's Task 6 paid for once.
+
+**Nothing moved.** `agvPosition` on every state through both refusals is
+(−3.0, −5.5) and (3.0, −5.5), the spawn poses to four decimals, and
+`/fN/auto/route` gained no sample.
+
+### (b) A second order while one executes
+
+f1 was driving `o-d6a52377` (S10 → S2 CHARGE-1, 7.90 m) when a second
+order went out:
+
+```
+18:36:03.335  order in   o-d6a52377   4 nodes     (accepted)
+18:36:16.723  order in   o-39c73c51   3 nodes     (S3 CHARGE-2)
+18:36:16.766  state      f1  order=o-d6a52377 rem=3 last=wp1 driving=True
+   {"errorType": "orderError", "errorLevel": "WARNING",
+    "errorDescription": "an order is executing - cancelOrder first",
+    "errorReferences": [{"referenceKey": "orderId",
+                         "referenceValue": "o-39c73c51"}]}
+```
+
+**The refusal and the undisturbed drive are in the SAME state message:**
+`orderId` is still `o-d6a52377`, `nodeStates` is still 3 long,
+`lastNodeId` is still `wp1`, `driving` is still true, and the
+`errorReferences` name the order that was turned away, not the one
+running. f1 then reached S2 at **18:36:57.177**, pose
+(−10.5098, −6.2402) against the station's (−9.80, −6.60) — **0.7958 m**
+inside that station's declared `arrive_m` of 0.80 — with **0 of 1076**
+`"motor": false` samples across the whole 53.8 s drive.
+
+---
+
+## [x] VDA Gate 3 — cancelOrder mid-drive
+
+**Date:** 2026-08-21. **Verdict: PASS.** Measured by the scripted driver
++ CLI — no panel, no human.
+
+**Spec:** *controlled stop through the normal chain, order cleared,
+actionState FINISHED, truck restartable by a new order.*
+
+f1 was driving `o-5f204f99` (S2 → S1 HOME, 7.90 m) at 0.288 m/s. The
+instantAction is one paho publish — a scratch helper, not a repo file:
+
+```
+18:38:00.750  PUB uagv/v2/amragent/f1/instantActions <-
+  {"headerId": 1, "timestamp": "2026-08-21T16:38:00.000Z",
+   "version": "2.1.0", "manufacturer": "amragent", "serialNumber": "f1",
+   "actions": [{"actionId": "cancel-g3-1", "actionType": "cancelOrder",
+                "blockingType": "HARD", "actionParameters": []}]}
+```
+
+**The chain, in order, from three independent captures:**
+
+```
+18:38:00.750  the instantAction leaves the publisher
+18:38:00.846  /f1/auto/goal  <- ''      (the agent's empty goal)
+18:38:00.847  state: orderId '', nodeStates [], actionStates
+              [{"actionId": "cancel-g3-1", "actionType": "cancelOrder",
+                "actionStatus": "FINISHED"}]
+18:38:00.877  /f1/auto/state: IDLE, goal null, note "cancelled"
+18:38:01.126  /f1/gz/odom: |v| = 0.0000
+```
+
+**The stop is a controlled one and the number says which kind.** Odom,
+every sample, around the empty goal:
+
+```
+18:38:00.817  x=-8.9665 y=-6.5937  |v|=0.2873
+18:38:00.867  x=-8.9605 y=-6.5807  |v|=0.2869      <- goal published
+18:38:00.917  x=-8.9552 y=-6.5695  |v|=0.2062
+18:38:00.966  x=-8.9526 y=-6.5647  |v|=0.0894
+18:38:01.020  x=-8.9506 y=-6.5617  |v|=0.0655
+18:38:01.070  x=-8.9492 y=-6.5598  |v|=0.0340
+18:38:01.126  x=-8.9492 y=-6.5598  |v|=0.0000      <- at rest
+```
+
+**0.280 s and 0.038 m** from the empty goal to standing still, against
+the 14.8 m step4 class a coast with no publisher produces. **`Motor`
+never dropped: 0 of 627** `"motor": false` samples over the cancel
+window (18:37:48.677 → 18:38:20), and `errors[]` on every state through
+the cancel is empty — no `safetyStop` entry, because this was never a
+safety path.
+
+**A fresh order restarts the truck.** `send_order.py f1 S1` at
+18:38:40.355 → EN-ROUTE 18:38:42.277 → **ARRIVED 18:39:13.978** at
+(−3.2347, −5.4711), **0.2365 m** from S1's (−3.00, −5.50), inside its
+0.25 m radius, with **0 of 634** motor-false over that drive.
+
+---
+
+## [x] VDA Gate 4 — supervision loss mid-drive
+
+**Date:** 2026-08-21. **Verdict: PASS.** Measured by the scripted driver
++ CLI — no panel, no human.
+
+**Spec:** *broker (or link) down → controlled stop with order kept;
+broker back → resume from current pose → ARRIVED. Motor never drops
+(this is not a safety path — prove it).*
+
+The link was dropped by **killing the broker process, `kill -9`**, and
+the pid was verified twice — once out of `.step6_pids`, once again
+immediately before the signal:
+
+```
+$ head -1 .step6_pids
+41859
+$ tr '\0' ' ' < /proc/41859/cmdline
+/home/ozkan/.local/mosquitto-vendored/usr/sbin/mosquitto -v
+$ tr '\0' '\n' < /proc/41859/environ | grep GZ_PARTITION
+GZ_PARTITION=step6
+18:44:10.922  kill -9 41859
+$ ls /proc/41859        ->  No such file or directory
+$ ss -ltn | grep 1883   ->  (nothing listening)
+```
+
+f2 was driving `o-dcf3e202` (S4 → S10, 17.5 m, six released nodes) at
+0.213 m/s. **The loss, in order:**
+
+```
+18:44:10.922  kill -9 the broker
+18:44:10.923  the MQTT recorder's own on_disconnect fires
+18:44:10.966  vda_agent_f1 log: "broker lost - controlled stop, order kept"
+18:44:11.024  vda_agent_f2 log: the same line, 0.102 s after the kill
+18:44:11.025  /f2/auto/goal <- ''
+18:44:11.114  /f2/auto/state: IDLE, goal null, note "cancelled"
+18:44:11.666  /f2/gz/odom: |v| = 0.0000
+```
+
+Odom across the stop, folded to the samples that change:
+
+```
+18:44:11.020  x=7.0213 y=-7.0494  |v|=0.2125      <- goal published
+18:44:11.105  x=7.0144 y=-7.0529  |v|=0.1009
+18:44:11.155  x=7.0115 y=-7.0536  |v|=0.0554
+18:44:11.323  x=7.0064 y=-7.0512  |v|=0.0264
+18:44:11.666  x=7.0125 y=-7.0491  |v|=0.0000      <- at rest
+```
+
+**0.64 s, 0.009 m of net displacement**, again the empty goal through
+the ordinary chain and not a safety path — the last three samples
+include the pursuit's small settle back onto the line.
+
+**Motor never dropped, and the count covers the WHOLE gate**, order to
+arrival, both trucks:
+
+```
+f2  18:43:56.914 .. 18:46:06.013   motor-false 0 of 2582
+f1  18:43:56.914 .. 18:46:06.013   motor-false 0 of 2582
+```
+
+f1 was parked with no order and its agent still logged the loss, which
+is the same code path answering for a truck with nothing to stop.
+
+**The order was kept and the broker came back.** Respawned with
+`step6.sh`'s own spawn shape, `LD_LIBRARY_PATH` from `BROKER_LIB`, under
+`GZ_PARTITION=step6` so `stop` can still sweep it, pid appended to
+`.step6_pids`:
+
+```
+18:44:45.840  setsid bash -c 'echo $$ >> "$1"; shift; exec "$@"' _ .step6_pids \
+                env LD_LIBRARY_PATH="$BROKER_LIB" "$BROKER_BIN" -v >> logs/broker.log 2>&1 &
+              new broker pid 43889
+$ tr '\0' ' ' < /proc/43889/cmdline
+/home/ozkan/.local/mosquitto-vendored/usr/sbin/mosquitto -v
+$ ss -ltn | grep 1883
+LISTEN 0  100  127.0.0.1:1883   0.0.0.0:*
+```
+
+```
+18:44:45.932  the MQTT recorder is back on the broker
+18:45:13.977  vda_agent_f1: "broker connected - ONLINE published"
+18:45:14.013  vda_agent_f2: the same
+18:45:14.083  vda_agent_f2: "supervision back - route re-issued"
+```
+
+**The re-issued route starts from the pose the truck is standing on, not
+from where the order started** — `/f2/auto/route`, the two publishes
+side by side:
+
+```
+18:43:56.906  {"points": [[6.224398, -7.870343], [6.0,-5.5], [3.0,-5.5],
+               [0.0,-5.5], [-3.0,-5.5], [-6.0,-5.5], [-6.0,-2.5]], ...
+               "label": "o-dcf3e202"}
+18:45:14.062  {"points": [[7.012486, -7.049058], [6.0,-5.5], [3.0,-5.5],
+               [0.0,-5.5], [-3.0,-5.5], [-6.0,-5.5], [-6.0,-2.5]], ...
+               "label": "o-dcf3e202"}
+```
+
+Same label, same six remaining nodes — `Progress.reached` was still 0,
+because the truck stopped 2.6 m short of `wp1` and 2.6 m is outside the
+0.8 m default deviation — and a different first point, which is the
+current pose. The state stream across the outage, one row per change:
+
+```
+18:43:56.907  order=o-dcf3e202  rem=6  last=      driving=False
+18:43:59.006  order=o-dcf3e202  rem=6  last=      driving=True
+      ... 75.1 s with no state on the wire: 34.9 s of it with no
+          broker at all, the rest waiting on the agent's reconnect ...
+18:45:14.116  order=o-dcf3e202  rem=6  last=      driving=False
+18:45:16.106  order=o-dcf3e202  rem=6  last=      driving=True
+18:45:23.024  order=o-dcf3e202  rem=5  last=wp1   driving=True
+18:45:33.484  order=o-dcf3e202  rem=4  last=wp2   driving=True
+18:45:38.080  order=o-dcf3e202  rem=3  last=wp3   driving=True
+18:45:42.582  order=o-dcf3e202  rem=2  last=wp4   driving=True
+18:45:48.132  order=o-dcf3e202  rem=1  last=wp5   driving=True
+18:46:06.003  order=o-dcf3e202  rem=0  last=S10   driving=True
+18:46:08.106  order=o-dcf3e202  rem=0  last=S10   driving=False
+```
+
+**Same orderId on both sides of a 75-second silence.** ARRIVED at
+18:46:06.013 at (−5.9241, −2.7381), **0.2499 m** from S10's
+(−6.00, −2.50) — inside the 0.25 m the station declares, by one
+millimetre.
+
+**Measured beside the gate and not part of it: the agents took 28.1 s to
+reconnect** (broker listening 18:44:45.840, agents on at
+18:45:13.977/14.013) while the recorder took 0.09 s. The recorder calls
+`reconnect_delay_set(1, 2)`; `vda_agent` does not, so it takes paho's
+default exponential backoff, which after a 34.9 s outage had already
+grown its retry interval. Nothing in the spec bounds reconnect time and
+no gate is failed by it, but a fleet that counts a vehicle as lost after
+N seconds would want that bound stated — **carried to M6.3**.
+
+---
+
+## [x] VDA Gate 5 — connection lifecycle
+
+**Date:** 2026-08-21. **Verdict: PASS, all three states.** Measured by
+the scripted driver + CLI — no panel, no human.
+
+**Spec:** *ONLINE retained on connect; OFFLINE on clean shutdown; kill -9
+the agent → subscribers receive the broker's CONNECTIONBROKEN last will.*
+
+### ONLINE, retained, seen by a subscriber that was not there
+
+A brand-new client id on a clean session, subscribing 42 s after the
+agents connected, is handed both trucks' connection state by the BROKER:
+
+```
+$ python3 mq.py snap 2.5 connection
+18:31:47.371  fresh subscriber connected (Success)
+18:31:47.424  retain=True  uagv/v2/amragent/f1/connection
+              {"headerId": 2, "timestamp": "2026-08-21T16:31:05.245Z",
+               "serialNumber": "f1", "connectionState": "ONLINE"}
+18:31:47.424  retain=True  uagv/v2/amragent/f2/connection
+              {"headerId": 2, ... "serialNumber": "f2",
+               "connectionState": "ONLINE"}
+--- 2 message(s) in 2.5s
+```
+
+`retain=True` is the whole proof: those two were published 42 s earlier
+and replayed out of the broker's retained store. **`headerId` is 2, not
+1**, on every ONLINE this file records, and that is the will being
+built: `VdaAgent.__init__` calls `Counters.header("connection", …)` for
+`will_set` before it ever connects, so the will owns headerId 1 for the
+life of the process.
+
+### OFFLINE on a clean stop
+
+The writers were closed the way the panel window closes, then the stack
+was stopped:
+
+```
+18:47:31.628  ->127.0.0.1:5910  {"quit":true}
+18:47:31.719  ->127.0.0.1:5920  {"quit":true}
+shutting down: writing the trip values        (both writers)
+writer for f1 is down                          writer for f2 is down
+18:47:50.075  ./step6.sh stop
+```
+
+The recorder, still attached, saw both:
+
+```
+18:47:50.302  uagv/v2/amragent/f1/connection  OFFLINE  headerId 4
+18:47:50.306  uagv/v2/amragent/f2/connection  OFFLINE  headerId 4
+18:47:50.409  the recorder's own on_disconnect (the broker is gone)
+```
+
+and `logs/broker.log` shows the whole handshake, retained and
+acknowledged, before the broker itself exits:
+
+```
+1787330870: Received PUBLISH from vda-f1 (d0, q1, r1, m515, 'uagv/v2/amragent/f1/connection', ... (156 bytes))
+1787330870: Sending PUBACK to vda-f1 (m515, rc0)
+1787330870: Received DISCONNECT from vda-f1
+1787330870: Client vda-f1 disconnected.
+1787330870: Received PUBLISH from vda-f2 (d0, q1, r1, m509, 'uagv/v2/amragent/f2/connection', ...)
+1787330870: Sending PUBACK to vda-f2 (m509, rc0)
+1787330870: Received DISCONNECT from vda-f2
+1787330870: Client vda-f2 disconnected.
+1787330870: mosquitto version 2.0.18 terminating
+```
+
+`r1` is the retain flag, `q1` the QoS, and the PUBACK is the broker
+saying it took it — **0.23 s from `stop` starting to both OFFLINEs
+acknowledged**, and the agents then leave through `disconnect()` rather
+than being cut off. `close()` runs from `main()`'s `finally`: SIGTERM
+reaches rclpy's own handler, `spin()` raises `ExternalShutdownException`,
+the `finally` publishes OFFLINE, and only then does the exception
+propagate. **Each agent log therefore ends in an
+`ExternalShutdownException` traceback and that is the shutdown working**,
+not failing — the OFFLINE above went out before it.
+
+### kill -9 → the broker publishes the will
+
+The stack was restarted (no writers needed; this gate never moves a
+truck) and the agent to be killed was identified before the signal:
+
+```
+$ AP=$(sed -n '10p' .step6_pids); echo $AP
+44854
+$ tr '\0' ' ' < /proc/44854/cmdline
+python3 .../m5_ver2/step6/deploy/m5_ver2/step6/ipc/vda_agent.py
+$ tr '\0' '\n' < /proc/44854/environ | grep -E '^(VEHICLE|GZ_PARTITION)='
+GZ_PARTITION=step6
+VEHICLE=f1
+```
+
+A fresh subscriber before, and a fresh subscriber after:
+
+```
+18:49:03.524  retain=True  .../f1/connection  ONLINE  headerId 2
+18:49:03.524  retain=True  .../f2/connection  ONLINE  headerId 2
+
+18:49:15.287  kill -9 44854
+
+18:49:18.686  retain=True  .../f1/connection  CONNECTIONBROKEN  headerId 1
+18:49:18.686  retain=True  .../f2/connection  ONLINE            headerId 2
+```
+
+**headerId 1 is the will**, built at construction and never touched
+since, which is how you can tell this message came out of the broker's
+will store and not out of a process that no longer exists. The recorder
+saw it live 4 ms after the kill (18:49:15.291), and `logs/broker.log`
+records `Client vda-f1 closed its connection.` at the same second.
+**f2's retained ONLINE is untouched** — one vehicle died and the fleet's
+view of the other did not move.
+
+---
+
+## [x] VDA Gate 6 — state honesty
+
+**Date:** 2026-08-21. **Verdict: PASS.** Measured by the scripted driver
++ CLI — no panel, no human.
+
+**Spec:** *trip a protective field mid-drive (Gate-2 box) → state shows
+`fieldViolation: true`, a FATAL error, `driving: false`; heal + ack →
+error clears. The MQTT stream never CAUSES any of it.*
+
+f1 was driving `o-dd515189` (S1 → S2 CHARGE-1) down the dock aisle. M6.1
+Gate 2's box comes to the truck, but this truck is moving, so the pose
+is read live off its own odom and the box is put **4.0 m ahead along its
+heading**:
+
+```
+18:40:39.784  truck (-3.220, -5.468) th 3.123 |v| 0.241  ->  box (-7.220, -5.396)
+$ gz service -s /world/warehouse/create --reqtype gz.msgs.EntityFactory \
+    --reptype gz.msgs.Boolean --timeout 5000 \
+    --req 'sdf_filename: "/tmp/gate6_box.sdf", name: "gate6_box",
+           pose: {position: {x: -7.220, y: -5.396, z: 0.20}}'
+data: true
+```
+
+**The approach is a ramp and every metre of it is the device's own
+reading**, not geometry asserted here — every `d` f1's back scanner
+reported between the spawn and the removal, counted:
+
+```
+   2.87 .. 2.47 m   SAFE          17 values, one sample each
+   2.44 .. 0.97 m   WARNING       61 values, one or two samples each
+   0.94, 0.92 m     PROTECTIVE     2
+   0.90 m           PROTECTIVE   411   (standing still against the box)
+   4.03 m           PROTECTIVE     3   (the N_SCAN = 3 clearing straddle)
+   4.03 m           SAFE          17   (the box is gone)
+```
+
+The truck's own odom 75 ms before the first PROTECTIVE puts its back
+scanner — `model.sdf`'s (0.72, 0.00) on `base_link`, yaw 0 — at
+(−6.0774, −5.4121), which is **0.943 m off the box's near face**; the
+device said 0.903 m at the trip. The difference is 16 mm of travel plus
+the ray angle across a 0.4 m cube. Both numbers are inside the case-1
+protective field's **1.0 m**, which is the only claim the gate makes.
+
+**The trip, in causal order, from three separate captures:**
+
+```
+18:40:48.743  /f1/safety/fields  back {"pf": false, "wf": false,
+                                       "d": 0.903, "level": "PROTECTIVE"}
+18:40:48.797  /f1/plc/status     {"estop_healthy": true, "motor": false,
+                                  "case": 1, "v_limit": 300}
+18:40:48.798  MQTT state         safetyState {"eStop": "MANUAL",
+                                              "fieldViolation": true}
+                                 errors [safetyStop / FATAL]
+18:40:48.877  /f1/auto/state     SAFETY-STOP
+18:40:50.846  MQTT state         driving: false
+```
+
+and the state stream around it, one row per change:
+
+```
+18:40:46.947  driving=True   {"eStop":"NONE","fieldViolation":false}   errs []
+18:40:48.050  driving=True   {"eStop":"NONE","fieldViolation":false}   errs []
+18:40:48.798  driving=True   {"eStop":"MANUAL","fieldViolation":true}  errs [safetyStop FATAL]
+18:40:50.846  driving=False  {"eStop":"MANUAL","fieldViolation":true}  errs [safetyStop FATAL]
+```
+
+**`driving` is still true on the first tripped state and that is
+honest** — the state is published 1 ms after the status sample that
+dropped Motor, and the last odom sample before it (18:40:48.767) reads
+`|v| = 0.2500`, which is `DRIVING_MPS` (0.02) many times over. The truck
+came to rest at **18:40:48.936**, 0.139 s and **0.015 m** later, at
+(−5.3971, −5.4255). The next state, 2 s after the trip, says false.
+
+### Heal, then acknowledge — and the order survives both
+
+```
+18:41:29      gz service -s /world/warehouse/remove ... 'name: "gate6_box"'  ->  data: true
+18:41:31.946  state: fieldViolation FALSE, errors STILL [safetyStop FATAL]
+18:41:39.648  ->127.0.0.1:5910  {"ack":true}
+18:41:39.698  state: {"eStop":"NONE","fieldViolation":false}  errs []
+18:41:41.746  state: driving=True, rem=3, last=wp1
+18:41:45.404  state: rem=2  last=wp2
+18:41:56.245  state: rem=1  last=wp3
+18:42:16.577  /f1/auto/state ARRIVED at (-9.0296, -6.3874)
+```
+
+**The eight seconds between 18:41:31.946 and 18:41:39.648 are the whole
+point of an ESTOP1.** The field was clear and the state said so —
+`fieldViolation` went false the moment the box left — and the FATAL
+`safetyStop` stayed, because the demand had LATCHED and only the
+acknowledge releases it. A state that had cleared the error with the
+field would have been a lie about a truck that still could not move.
+After the ack the order kept draining: 0.7992 m from S2's (−9.80, −6.60)
+against its 0.80 m radius.
+
+### The MQTT stream caused none of it, and here is how that is known
+
+Three independent statements, all from the captures:
+
+1. **Nothing arrived.** Every message on every `uagv/v2/amragent/#`
+   topic between the order and the trip, by topic:
+   `f1/order` **1** (the order that started the drive, 10.2 s earlier),
+   `f1/state` 8, `f2/state` 6 — all three of those are OUTBOUND. No
+   `instantActions`, no second order, nothing addressed to f1 in the
+   10.2 s before Motor dropped.
+2. **The wire is the last link, not the first.** `fields` said
+   PROTECTIVE at 18:40:48.743, `plc/status` said `motor: false` 54 ms
+   later, and the MQTT state carried the news 1 ms after that. The
+   order — scanner → `field_eval` → `sensor_link` → the writer → the
+   F-model → `plc_link` → the agent — is the physical chain, and the
+   agent is at the far end of it.
+3. **The agent has nowhere to push.** Its only two ROS publishers are
+   `/auto/route` and `/auto/goal`; `/f1/auto/route` gained no sample
+   between the order and the trip, and `/f1/auto/goal` gained none in
+   the entire gate. It cannot reach the safety chain because it has no
+   publisher that touches it — which is the M1 invariant, holding.
+
+---
+
+## Full-stack RTF with twenty pids, under load — evidence, not a gate
+
+`/world/warehouse/stats` was sampled the way `tools/rtf_spike.sh` samples
+it (`stdbuf -oL gz topic -e -t /world/warehouse/stats` under
+`GZ_PARTITION=step6`), for 400 s spanning VDA Gates 1 and 2, with every
+sample stamped:
+
+| Window | Samples | Mean RTF | Min | Max |
+|---|---|---|---|---|
+| whole 400 s, 18:32:38–18:39:18 | 3752 | **0.458** | 0.025 | 1.644 |
+| 60 s, BOTH trucks driving (VDA 1) | 573 | **0.471** | 0.030 | 1.574 |
+| 60 s, one truck driving (VDA 2b) | 574 | **0.497** | 0.029 | 1.644 |
+
+Per-10 s over the two 60 s windows:
+
+```
+both driving   0.424, 0.596, 0.525, 0.434, 0.368, 0.478
+one driving    0.370, 0.469, 0.555, 0.514, 0.564, 0.514
+```
+
+**This is not comparable to the 0.734–0.755 recorded further up this
+file, and the difference is load, not a regression.** That figure was
+seventeen pids, idle, with **no writer running**. This one is twenty
+pids — the broker and two VDA agents were added — plus two Windows
+writers streaming at 50 Hz over two UDP port pairs, a twelve-subscription
+ROS recorder, a paho recorder, and one or two trucks actually driving.
+M6.1 named exactly this as the open question ("the margin to a third
+vehicle is now the interesting number"; "nothing here was run with the
+two Windows writers attached"). **The measured answer is that a working
+two-vehicle rig runs at roughly 0.46–0.50 of real time on this machine.**
+Every loop in the tree is wall-clock timed, so nothing missed its rate —
+what stretches is simulated time per wall second, and it is why a 6.00 m
+route took 22 s. A third vehicle needs a bigger machine, and that is a
+M6.3 input rather than a verdict here.
+
+## Teardown
+
+```
+> {"quit":true} -> 127.0.0.1:5910          > {"quit":true} -> 127.0.0.1:5920
+shutting down: writing the trip values     shutting down: writing the trip values
+writer for f1 is down                      writer for f2 is down
+```
+
+`Get-CimInstance Win32_Process -Filter "Name='python.exe'"` afterwards
+returns three VS Code language servers and nothing else.
+
+```
+$ ./step6.sh stop
+  swept 41872 (gz sim) ... 26 swept lines ... swept 43889 (mosquitto-vendored)
+  killed 42239 ... killed 42779                (19 killed lines)
+down.
+```
+
+**26 swept and 19 killed, against the twenty pids started, and the
+arithmetic is the point again.** Swept: the twenty recorded processes,
+plus `gz sim` itself, `parameter_bridge` and two each of
+`sto_contactor.py` and `forklift_io.py`, which the world launch starts
+and the pidfile never sees — 26. Killed: the pidfile now holds
+twenty-one lines, the twentieth-first being the broker VDA Gate 4
+respawned; **41859** (the broker that gate killed) no longer exists and
+**41865** (the world's launch process) had just gone with the sweep, so
+19 of the 21 were still there to kill. The broker in the swept list is
+**43889**, the respawned one — which is the check that Gate 4's restart
+put it back inside this stack's partition and not beside it.
+
+After the second stack (the will half of VDA Gate 5), which ran with one
+agent already `kill -9`ed:
+
+```
+$ ss -uln | grep -E ':(5110|5111|5120|5121)'  ->  (all four free)
+$ ss -ltn | grep ':1883'                      ->  (free)
+$ pgrep -af 'gz sim|plc_link.py|...|mosquitto-vendored'  ->  (nothing)
+$ test -f .step6_pids                          ->  removed
+```
+
+```
+$ python3 -m pytest m5_ver2/step6/tests/ -q
+302 passed in 36.36s
+$ python3 -m pytest m5_ver2/step5/tests/ -q
+220 passed in 2.87s
 ```
 
 ---
