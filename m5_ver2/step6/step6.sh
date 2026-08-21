@@ -78,11 +78,14 @@ VEHICLES=(f1 f2)
 # weight of the sweep on ours(). Last, because this list is the shutdown
 # order and every vehicle's MQTT client is a client OF it: taking the
 # broker down first would only fill the vehicle logs with reconnect noise
-# on the way out.
+# on the way out. That client now has a NAME - vda_agent.py, the entry
+# immediately above - so the two are adjacent here and in that order on
+# purpose: the agents go down, then the thing they were dialling.
 PATTERNS=("gz sim" "step6_world.launch.py" "parameter_bridge" \
           "sto_contactor.py" "forklift_io.py" "plc_link.py" "cmd_gate.py" \
           "cmd_mux.py" "hmi_node.py" "field_eval.py" "sensor_link.py" \
-          "encoder_link.py" "nav_node.py" "mosquitto-vendored")
+          "encoder_link.py" "nav_node.py" "vda_agent.py" \
+          "mosquitto-vendored")
 
 # WHY OWNERSHIP IS DECIDED BY THE ENVIRONMENT, NOT BY THE COMMAND LINE
 #   vehicle.launch.py:738-754 starts sto_contactor.py and forklift_io.py with
@@ -111,14 +114,14 @@ ours() {
 #   terminal - the very case setsid was added to survive - leaves it on disk,
 #   and Linux recycles pids back through the 17xxx-18xxx range this stack
 #   lands in within minutes of a boot. A recorded number can therefore name a
-#   STRANGER, and every use of that number has to say so first. Seventeen of
-#   the eighteen recorded command lines contain m5_ver2/step6 and no foreign
+#   STRANGER, and every use of that number has to say so first. Nineteen of
+#   the twenty recorded command lines contain m5_ver2/step6 and no foreign
 #   one does, so that token is the identity test. It is deliberately the
 #   literal and not "$STEP6": if REPO ever resolves differently between the
 #   start and the stop, the looser token still matches and the partition
 #   read-back below still works, which is the failure that read-back exists
 #   to prevent.
-#   THE BROKER IS THE EIGHTEENTH, and its command line is a path in the
+#   THE BROKER IS THE TWENTIETH, and its command line is a path in the
 #   user's HOME - a vendored binary is not under m5_ver2/step6 and never
 #   will be - so it needs a token of its own, or every start would report it
 #   as having exited and call the stack incomplete. mosquitto-vendored is
@@ -321,8 +324,9 @@ start() {
     # QUIET. Each vehicle's plc_link binds its own - f1 :5110, f2 :5120 -
     # and the second bind on a held one dies EADDRINUSE inside the first
     # second; that vehicle then comes up with its PLC link missing and says
-    # so in ONE warning line among seventeen pids (hit twice while building
-    # Task 8). Refuse first, and name the vehicle whose port is held,
+    # so in ONE warning line among the TWENTY this stack now prints (hit
+    # twice while building M6.1's Task 8, when there were seventeen of
+    # them). Refuse first, and name the vehicle whose port is held,
     # because "already running" is the answer the operator needs.
     #
     # WHAT REALISTICALLY HOLDS ONE: a step6 stack that is ALREADY UP - a
@@ -422,7 +426,7 @@ start() {
     fi
     stale_check
     [ -f "$ROS_SETUP" ] || { echo "no $ROS_SETUP"; return 1; }
-    # Unchecked, an unwritable log dir fails all eighteen redirections, and
+    # Unchecked, an unwritable log dir fails all twenty redirections, and
     # start would sleep its way to "up." over a stack that never began.
     mkdir -p "$LOGDIR" || { echo "cannot create $LOGDIR"; return 1; }
     : > "$PIDFILE"  || { echo "cannot write $PIDFILE"; return 1; }
@@ -455,7 +459,7 @@ start() {
     #
     # THE NAME LIST IS BUILT HERE, NOT RESTATED BELOW. The startup check
     # walks $PIDFILE and needs a name per line; keeping that list by hand
-    # made it a second spelling of the spawn order, and eighteen entries
+    # made it a second spelling of the spawn order, and twenty entries
     # is where such a list starts drifting. Appending in spawn() makes the
     # two orders the same order by construction.
     local -a SPAWNED=()
@@ -517,6 +521,14 @@ start() {
         spawn "encoder_link_$vid" "$vid" python3 "$IPC/encoder_link.py"
         spawn "sensor_link_$vid"  "$vid" python3 "$IPC/sensor_link.py"
         spawn "nav_node_$vid"     "$vid" python3 "$IPC/nav_node.py"
+        # THE AGENT AFTER NAV, because the route it publishes has to have a
+        # subscriber: it is the only node here that can be handed work by
+        # something outside this machine, and an order arriving into a
+        # /auto/route nobody reads would be accepted and then not driven.
+        # It needs no broker wait of its own: the broker was spawned
+        # before the world's five-second head start, and paho reconnects
+        # on its own besides.
+        spawn "vda_agent_$vid"    "$vid" python3 "$IPC/vda_agent.py"
         spawn "hmi_$vid"          "$vid" python3 "$STEP6/hmi/hmi_node.py"
     done
 
@@ -551,6 +563,10 @@ start() {
         echo "  python m5_ver2\\step6\\windows\\step6.py --vehicle $vid --virtual"
     done
     echo "broker: 127.0.0.1:1883 (localhost only, anonymous - $LOGDIR/broker.log)"
+    # ORDERS COME OVER MQTT NOW, and until M6.3 there is no master control
+    # to send one - so the operator is handed the tool that stands in for
+    # it. The truck has to be in AUTOMATIC, exactly as the HMI's GO does.
+    echo "orders: python3 $STEP6/tools/send_order.py f1 S4 --watch  (vehicle in AUTOMATIC)"
     echo "logs: $LOGDIR"
 }
 stop() {
@@ -603,7 +619,8 @@ stop() {
 }
 USAGE="usage: $0 start [--headless] | stop | home | deploy
   start       warehouse + BOTH forklifts in a Gazebo window, plus one HMI
-              per vehicle and the local MQTT broker on 127.0.0.1:1883
+              and one VDA 5050 agent per vehicle and the local MQTT
+              broker on 127.0.0.1:1883 - twenty processes
   --headless  no Gazebo window (gui:=false, the launch file's own default)
   home        teleport both forklifts back to their spawn poses (stack stays
               up; PLC latches stay latched - reset from the panel)

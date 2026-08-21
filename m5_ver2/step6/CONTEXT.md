@@ -73,12 +73,62 @@ license returns — `PLC_INSTANCE`'s `f2 -> "PLC_3"` half is reserved and
 unreachable. Results earned under `--virtual` are rig results, not
 F-program validation.
 
+## The VDA 5050 agent: one per truck, and it is not a safety path
+
+**M6.2 gave each vehicle `ipc/vda_agent.py`**, started by `step6.sh` beside
+that vehicle's nav node, and the stack is twenty processes now: the broker,
+the world, and nine per truck. The agent is the only door into this stack
+from off the machine.
+
+**Owner ruling 2026-08-21: full-route orders from day one.** Master control
+sends `nodes` + `edges`; the vehicle drives the released nodes exactly, in
+sequence, and does not re-route. The single-node alternative was rejected
+because M6.4's edge and zone reservation needs the route to be *in* the
+order. `tools/send_order.py` is what sends one until a fleet manager exists,
+and it plans with the same `route.plan_route` the HMI's GO uses — so the
+route the "fleet" sends is the route the vehicle would have planned, and
+full-route following is exercised without a second planner being invented.
+
+**The invariant this channel lives under: it is REPORTING and process
+command only.** `state.safetyState` narrates what the F-model already did.
+Nothing published on MQTT can stop a truck and nothing on it is in the
+safety chain — the chain is the F-program's, and the brake is the e-stop.
+The one thing that follows and is easy to get wrong: **supervision loss is
+not a safety event.** Broker gone means degraded mode, handled as a
+controlled stop through the NORMAL chain — the agent publishes the empty
+goal, nav goes IDLE and commands zero through `cmd_mux` and `cmd_gate` like
+any cancelled goal, and `Motor` never drops. The order is KEPT, not dropped:
+on reconnect the remaining released nodes are re-issued as a fresh route
+from the pose the truck is at now. `_resume` re-checks AUTOMATIC before it
+publishes, so supervision that comes back during a teleop shift holds the
+order instead of asking for a drive nav would only refuse.
+
+**The agent believes nav, not itself.** Publishing a route is a request:
+`nav_core` refuses one it cannot drive and cancels one already running when
+the mode leaves auto, and it says so in `/auto/state`'s note. So the agent
+reconciles — a nav gone IDLE with a refusal note and no goal ends
+`executing`, loudly, on the state. That reconciler is deliberately deaf for
+`NAV_SETTLE_S = 0.3` s after a route goes out (`ipc/vda_agent.py`), because
+a `/auto/state` already in flight when the route is published still
+describes the world BEFORE it, and reading that as a refusal would strand a
+truck that is about to drive. nav publishes at 10 Hz, so 0.3 s is three
+periods of margin; the cost is a bounded ~0.4 s window in which a genuine
+refusal is not yet believed, and the next state closes it.
+
+**M6.3 takes two things away from here.** The **broker** is one of them: it
+runs on this machine only because M6.2 *is* one machine, and a broker
+belongs to the fleet side — one for every truck, on a machine that is not a
+vehicle. `tools/send_order.py` is the other: it is master control's hand
+until master control exists, and M6.3 deletes it. When the broker moves,
+`PATTERNS`, `recorded()`, the `:1883` pre-flight and the two `BROKER_*`
+variables in `step6.sh` are the places that come out together.
+
 ## What is proven, and what is not
 
 **`PROOF.md` is the ledger, and it is deliberately incomplete.** Measured
 on this machine: Gate 1 (two-vehicle RTF, server-only, worst mean 0.934
-against a 0.90 gate), Gate 5 (start/stop twice, 17 pids, no orphans, no
-held ports) and the fail-safe half of Gate 4 (both vehicles sit
+against a 0.90 gate), Gate 5 (start/stop twice, 17 pids — M6.1's stack, no
+orphans, no held ports) and the fail-safe half of Gate 4 (both vehicles sit
 `motor: false, case: 3, v_limit: 300` with no writer). **Not measured:**
 gates 2, 3, 6 and Gate 4's driving half, all of which need the two Windows
 writers and a hand on two joysticks. PROOF.md carries a numbered runbook
@@ -86,13 +136,14 @@ for each; do not read an unticked gate as a passed one.
 
 Loop-level evidence sits beside it: `tests/test_step6_virtual_loop.py`
 drives the real `step6.control_loop` against `VirtualFPLC` over real UDP
-sockets, parameterised over BOTH port pairs. 239 tests pass under WSL.
+sockets, parameterised over BOTH port pairs. 302 tests pass under WSL.
 
 ## Full-stack RTF: about 0.75, and Gate 1 does not cover it
 
 Gate 1's 0.934-0.995 is **server-only** — `gz sim -s` and two models, no
-ROS stack. With the whole 17-pid stack up headless, `/world/warehouse/stats`
-means **0.755** and **0.734** over two 60 s samples (PROOF.md has the
+ROS stack. With M6.1's whole 17-pid stack up headless — before M6.2's broker
+and two agents joined it, and not re-measured since —
+`/world/warehouse/stats` means **0.755** and **0.734** over two 60 s samples (PROOF.md has the
 per-10 s buckets). That is a consistent load floor, not scheduling noise:
 the ROS side costs roughly a quarter of real time. It breaks nothing —
 every loop in the tree is wall-clock timed, so rates are unaffected and

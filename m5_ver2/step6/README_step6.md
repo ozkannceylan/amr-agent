@@ -37,16 +37,17 @@ writer, and each writer serves exactly one truck.
 |---|---|---|
 | 1 | Windows | **Nothing, for M6.1.** Both trucks run `--virtual` (step 7), so no PLCSIM instance is needed. Against a real PLC, only **f1** has one: start `PLC_2` from the Control Panel, download from TIA Portal, CPU in RUN. f2's `PLC_3` is reserved and has never run — no license. |
 | 2 | WSL | `cd /mnt/c/Users/ozkan/projects/amr-agent/m5_ver2/step6` |
-| 3 | WSL | `./step6.sh deploy` — **regenerates `vehicles/f1/` and `vehicles/f2/` first** (from `gazebo/forklift_ver2/model.sdf` + `agv/forklift/config.yaml`), then freezes `ipc/` + both derived pairs into `deploy/` with a sha256 `MANIFEST`. Prints `deployed 17 files`. **`start` refuses without one.** |
-| 4 | WSL | `./step6.sh start` — **8.8 s**, measured: the world gets a five-second head start before the vehicle nodes, then one more second before `start` checks that all seventeen are still alive. Do **not** source ROS first; the script does it. |
+| 3 | WSL | `./step6.sh deploy` — **regenerates `vehicles/f1/` and `vehicles/f2/` first** (from `gazebo/forklift_ver2/model.sdf` + `agv/forklift/config.yaml`), then freezes `ipc/` + both derived pairs into `deploy/` with a sha256 `MANIFEST`. Prints `deployed 20 files`. **`start` refuses without one.** |
+| 4 | WSL | `./step6.sh start` — **9.1 s**, measured: the broker goes up first, the world gets a five-second head start before the vehicle nodes, then one more second before `start` checks that all twenty are still alive. Do **not** source ROS first; the script does it. |
 | 4a | Screen | **Three windows:** the **Gazebo window** with the warehouse and both trucks facing each other 6.00 m apart in the south block, and **two HMIs** — `Forklift HMI - f1` and `Forklift HMI - f2`. `start --headless` skips the Gazebo one. |
-| 5 | WSL | Read the **seventeen** pid lines: `world`, then f1's eight (`plc_link cmd_gate cmd_mux field_eval encoder_link sensor_link nav_node hmi`), then f2's eight. `WARNING: <name> exited during startup` sends you to that log in `logs/`. A `THE STACK IS INCOMPLETE.` line means stop and read it. |
+| 5 | WSL | Read the **twenty** pid lines: `broker`, `world`, then f1's nine (`plc_link cmd_gate cmd_mux field_eval encoder_link sensor_link nav_node vda_agent hmi`), then f2's nine. `WARNING: <name> exited during startup` sends you to that log in `logs/`. A `THE STACK IS INCOMPLETE.` line means stop and read it. |
 | 6 | Windows | `cd C:\Users\ozkan\projects\amr-agent` |
 | 7 | Windows | `python m5_ver2\step6\windows\step6.py --vehicle f1 --virtual` — **64-bit Python** (pythonnet). A grey **panel** opens, titled `Forklift f1 PLC Control Panel - VIRTUAL F-PLC (model)`; the console prints `streaming PLC state to <wsl-ip>:5110` and `listening for the back scanner on 0.0.0.0:5111`. |
 | 8 | Windows | Open a **second** terminal, `cd` again, then `python m5_ver2\step6\windows\step6.py --vehicle f2 --virtual` — same panel titled `Forklift f2 ...`, same two lines on **5120** and **5121**. |
 | 9 | Panels | Click **RESET** on f1's panel. Once. Then **RESET** on f2's. Each lamp reads `MOTOR ENABLED`; each HMI turns neutral and reads `Drive enable: ON`. |
 | 10a | HMI windows | **Teleop:** leave a truck's radio on `Teleop` and drag *that* HMI's joystick. Only that truck moves. |
 | 10b | HMI windows | **Auto:** click `Auto`, click a station dot on that HMI's sketch, press **GO**. Both trucks can be routed at the same time. **STOP** cancels a goal — it is not a brake. |
+| 10c | WSL | **Auto, over MQTT:** `python3 m5_ver2/step6/tools/send_order.py f1 S4 --watch` sends the same drive as a VDA 5050 order. Same precondition as **GO**: that truck must be in `Auto`. See [VDA 5050](#vda-5050--orders-over-mqtt). |
 | 11 | Panels | Finished: **close both windows**. Each writes its own truck's trip values on the way out. |
 | 12 | WSL | `./step6.sh stop` |
 
@@ -62,8 +63,10 @@ measured over 60 samples on the one-vehicle stack, real-time factor mean
 **0.998 headless against 0.806 with the window**, and the window's floor is
 0.127 against 0.926. An interval measured with it open is worth less than one
 measured without. (Those are step5's numbers, and they compare the WINDOW's
-cost, not the stack's. Step 6's own headless figure under the full 17-pid
-stack is **0.75** — see [PROOF.md](PROOF.md).)
+cost, not the stack's. Step 6's own headless figure under M6.1's full
+17-pid stack — before the broker and the two VDA agents joined it — is
+**0.75**, see [PROOF.md](PROOF.md). The three processes M6.2 added are idle
+loops at 10 Hz and 0.5 Hz; the figure has not been re-measured with them.)
 
 **`vehicles/` is generated — regenerate it, do not edit it.** `deploy` runs
 `tools/instantiate_vehicle.py --all` before it freezes anything, so the image
@@ -121,14 +124,136 @@ is dragged, and the sole writer must not freeze with `Motor` energised.
 - **`start` pre-flights UDP :5110 and :5120** — the table's two `plc_port`
   values — and refuses if either is held, naming the vehicle whose port it is.
   Without that guard a second stack takes the PLC link and `plc_link` binds
-  nothing, in one warning line among seventeen — measured twice while building
-  M6.1, and silent. The guard is pipe-free and fail-closed: an `ss` that dies
-  mid-pipe cannot make it fall through, and a missing `ss` prints
-  `note: ss not found - the UDP :5110/:5120 pre-flight is SKIPPED.` rather than
-  pretending it checked. The 5100/5101 family is deliberately **not** checked —
-  it is step4's and step5's, and refusing over it would refuse a start that is
-  perfectly legal beside them. The sensor ports (5111/5121) are not checked
-  either, and cannot be: they are bound on the *Windows* side.
+  nothing, in one warning line among twenty — measured twice while building
+  M6.1, when there were seventeen of them, and silent. The guard is pipe-free
+  and fail-closed: an `ss` that dies mid-pipe cannot make it fall through, and
+  a missing `ss` prints `note: ss not found - the UDP :5110/:5120 and TCP
+  :1883 pre-flights are SKIPPED.` rather than pretending it checked. The
+  5100/5101 family is deliberately **not** checked — it is step4's and
+  step5's, and refusing over it would refuse a start that is perfectly legal
+  beside them. The sensor ports (5111/5121) are not checked either, and cannot
+  be: they are bound on the *Windows* side. **TCP :1883 joined this guard with
+  the broker**, read from its own socket table rather than a shared one — in a
+  single `ss -tuln` a TCP socket on :5110 would answer for f1's UDP link and
+  refuse a start that is perfectly legal.
+
+## VDA 5050 — orders over MQTT
+
+Each truck runs its own **VDA 5050 2.1.0 client**, `ipc/vda_agent.py`, started
+by `step6.sh` beside that truck's nav node. It is the one door into this stack
+from outside the machine: an order arrives over MQTT, the agent decides whether
+the truck may take it, and if it may, hands `nav_node` the same kind of route
+the HMI's **GO** button produces. **Owner ruling 2026-08-21: full-route orders
+from day one** — master control sends `nodes` + `edges`, the vehicle drives the
+released nodes in sequence and does not re-route.
+
+**This channel is reporting and process command only.** `state.safetyState`
+*narrates* what the F-model already did; nothing published here can stop a
+truck, and nothing here is in the safety chain. A broker that goes away is
+degraded mode, handled as a **controlled stop through the normal chain** — the
+agent publishes the empty goal, keeps the order, and re-issues the remaining
+nodes from the truck's current pose when supervision returns. The brake is
+still the e-stop.
+
+### The two things a fresh checkout does not have
+
+Neither is committed, both are per-user, and `start` refuses without the first:
+
+```bash
+bash tools/install_broker.sh                             # WSL, no sudo
+pip3 install --user --break-system-packages paho-mqtt    # 2.1.0, measured
+```
+
+`install_broker.sh` `apt-get download`s mosquitto and the four libraries its
+binary demands, then unpacks them under `~/.local/mosquitto-vendored`. Nothing
+goes system-wide and the binary is not in git — that script is how it
+reproduces. `step6.sh` starts it as the stack's first process on
+**`127.0.0.1:1883`**, localhost-only and anonymous, which is what a
+config-less mosquitto 2.x does by default and is the posture M6.2 wants.
+**M6.3 moves the broker to the fleet side**, where a broker belongs: one for
+every truck, on a machine that is not a vehicle.
+
+`--break-system-packages` is neither optional nor carelessness. Ubuntu noble
+marks this interpreter externally-managed (PEP 668), and a vehicle node that
+imports **both** `rclpy` and `paho` cannot live in a plain venv. The flag only
+bypasses the marker; the install still lands in `~/.local` and touches no OS
+site-packages. The code is written against paho **2.x** — it names
+`CallbackAPIVersion.VERSION2` explicitly, because 2.x otherwise defaults to
+the 1.x callback signatures with a warning and hands the callbacks the wrong
+argument count on the first reconnect.
+
+### The topics
+
+The root is VDA's own, `uagv/v2/<manufacturer>/<serialNumber>`, with this
+project's manufacturer and the vehicle id as the serial number:
+
+```
+uagv/v2/amragent/f1/…        uagv/v2/amragent/f2/…
+```
+
+| Topic | Direction | What rides on it |
+|---|---|---|
+| `order` | in | one full route: `nodes` + `edges`, all released. Accepted only in AUTOMATIC, only when nothing is executing, and only at `orderUpdateId` 0 — updates land with M6.3. A re-delivery of the order already held is ignored in silence (VDA's own rule); everything else refused comes back as an `orderError` on `state`. |
+| `instantActions` | in | `cancelOrder`, `stateRequest`, `factsheetRequest`. Anything else is answered `FAILED` plus an `unsupportedAction` error — the factsheet is the list. |
+| `state` | out | every 2 s, and immediately on every event worth knowing: pose, `driving`, `operatingMode`, `nodeStates` draining, `lastNodeId` advancing, `errors[]`. |
+| `connection` | out | `ONLINE` on connect, retained; the LWT makes it `CONNECTIONBROKEN` if the agent dies. |
+| `factsheet` | out | on connect and on request, retained. |
+
+### Sending one, until M6.3 exists
+
+There is no fleet manager yet, so `tools/send_order.py` is master control's
+hand — **M6.3 deletes it**:
+
+```bash
+python3 m5_ver2/step6/tools/send_order.py f1 S4 --watch
+```
+
+It reads that truck's pose off the truck's own `state` (no ROS: the
+single-writer and one-stack rules stay unbroken), plans with the same
+`route.plan_route` the HMI uses, and publishes the result as an order — so the
+route the "fleet" sends is the route the vehicle would have planned, and
+full-route following is exercised without inventing a second planner.
+`--watch` then prints the vehicle's own account once a second until `ARRIVED`.
+Station ids are `stations.py`'s: `S1`…`S10`.
+
+**The truck must be in AUTOMATIC**, exactly as **GO** requires — the writer
+running, the panel RESET, that HMI on `Auto`. Sent to a truck that is not, the
+order is refused at the door and the vehicle says so rather than going quiet:
+
+```
+sent o-bf8b6e46 to f1 -> S4 (4 nodes, arrive 0.25 m)
+  [WARN] [vda_agent]: order rejected: vehicle not in AUTOMATIC   (logs/vda_agent_f1.log)
+  state.errors[]: orderError WARNING "vehicle not in AUTOMATIC" -> orderId o-bf8b6e46
+```
+
+That error rides the one `state` published at the rejection and is not a
+standing one, so it shows up in `--watch`'s next line and not after it. With
+no order executing there is then nothing for `--watch` to wait for and it
+never reaches `ARRIVED` — Ctrl-C it. (Known, accepted: M6.3 deletes this
+tool.)
+
+### What the factsheet declares
+
+Only what is implemented — it is a *truthful* factsheet, not an aspirational
+one. Three instant actions, `cancelOrder`, `stateRequest` and
+`factsheetRequest`; `order.edge.maxSpeed` declared `NOT_SUPPORTED` (parsed,
+not enforced, until M6.4); pause, charging and `initPosition` absent because
+this vehicle has no pause pair, no battery reality, and a pose that is
+already ground truth.
+
+The geometry is measured off the truck's own model rather than rounded off a
+datasheet, and each number carries its derivation in `ipc/vda_messages.py`:
+`width` 0.90 m is the chassis box, `length` 2.735 m runs counterweight face
+to fork tip, `heightMax` 2.20 m is the carriage at full mast travel, and
+`speedMax` is read out of *that vehicle's* `config.yaml`
+(`traction_speed_max_mps`, 1.5) — so a per-vehicle limit change reaches the
+fleet's view of the truck through the same file that changes the truck.
+**Three fields are labelled sim stubs** and say so in the source, because
+neither file knows them: `maxLoadMass`, `accelerationMax`, `decelerationMax`.
+
+**The field-by-field contract is [`docs/interfaces/vda5050-subset.md`](../../docs/interfaces/vda5050-subset.md)**,
+amended 2026-08-21 for M6.2: which fields are used, which are deliberately
+omitted, and why this project's error names are camelCase.
 
 ---
 
@@ -523,7 +648,7 @@ headless, and a re-measurement of them should be too.
 
 ## Unit tests — step6's own, and the number to expect
 
-**`239 passed, 0 skipped`** under WSL:
+**`302 passed, 0 skipped`** under WSL:
 
 ```bash
 cd /mnt/c/Users/ozkan/projects/amr-agent
@@ -532,9 +657,10 @@ python3 -m pytest m5_ver2/step6/tests/ -q
 ```
 
 A **skip** is a failure here: it means a module did not import and its tests
-silently did not run. On Windows the same suite gives `147 passed, 7 errors`
-with `--continue-on-collection-errors` — the seven are `No module named
-'rclpy'`, which Windows does not have and is not supposed to.
+silently did not run. On Windows the same suite gives `199 passed, 2 skipped,
+7 errors` with `--continue-on-collection-errors` — the seven are `No module
+named 'rclpy'` and the two skips `No module named 'paho'`, neither of which
+Windows has or is supposed to.
 
 ## Validation checklist
 
