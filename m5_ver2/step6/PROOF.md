@@ -2051,6 +2051,18 @@ sample stamped:
 | whole 400 s, 18:32:38–18:39:18 | 3752 | **0.458** | 0.025 | 1.644 |
 | 60 s containing VDA 1's 20.263 s overlap (22.4 s driving) | 573 | **0.471** | 0.030 | 1.574 |
 | 60 s containing 53.8 s of VDA 2b's single-truck drive | 574 | **0.497** | 0.029 | 1.644 |
+| **VDA 1's 20.263 s both-driving overlap, alone** | 192 | **0.616** | 0.047 | 1.574 |
+| **the same window's 37.6 s of parked trucks, alone** | 342 | **0.393** | 0.030 | 1.246 |
+| **VDA 2b's 53.8 s single-truck drive, alone** | 497 | **0.495** | 0.029 | 1.644 |
+
+The last three rows are the same 400 s capture cut on the drive
+boundaries this file already prints; nothing was re-run. `gz topic -e`
+was stamped to the WHOLE SECOND, so each cut is bracketed rather than
+claimed exact — the row is the *inner* cut (buckets wholly inside the
+drive) and the *outer* cut (any bucket touching it) is **0.605** (n 211),
+**0.592** (n 221 over the two legs' union) and **0.504** (n 516). The
+brackets are within 0.011 of their rows, which is the whole of the
+timing exposure.
 
 Per-10 s over the two 60 s windows:
 
@@ -2059,14 +2071,36 @@ VDA 1 window   0.424, 0.596, 0.525, 0.434, 0.368, 0.478
 VDA 2b window  0.370, 0.469, 0.555, 0.514, 0.564, 0.514
 ```
 
-**Both are 60 s of WALL CLOCK, not 60 s of driving, and the first one is
-mostly idle.** VDA 1's two legs occupy 22.4 s of its window — 18:34:31.078
-to 18:34:53.514, the union of the two — of which 20.263 s is the overlap;
-the other 37.6 s is two parked trucks. Idle is the cheap half, so
-**0.471 is diluted UPWARD and the true both-driving figure is at or below
-it.** The second window is the least diluted number in the table, 53.8 of
-its 60 s EN-ROUTE, but it is one truck and not two, so the two rows
-measure different loads and are not each other's control.
+**Both 60 s rows are WALL CLOCK, not driving, and the first one is
+mostly parked.** VDA 1's two legs occupy 22.4 s of its window —
+18:34:31.078 to 18:34:53.514, the union of the two — of which 20.263 s
+is the overlap; the other 37.6 s is two standing trucks.
+
+**An earlier draft said "idle is the cheap half, so 0.471 is diluted
+upward and the true both-driving figure is at or below it." That was an
+unmeasured premise and the measurement contradicts it.** Cut on the
+drive boundaries, the both-driving overlap runs at **0.616** and the
+parked remainder of the very same minute at **0.393** — the driving
+seconds were the FASTER ones, the dilution was DOWNWARD, and the true
+both-driving figure is **above** 0.471, not below it. The single-truck
+row needs no correction of that kind and is the arithmetic check on the
+method: its window was already 90 % drive, and cutting it to the drive
+alone moves 0.497 to 0.495.
+
+**Why the parked seconds were the slow ones is inference and is marked
+as such.** This sampler measures the MACHINE, not the trucks, and the
+seconds in which the forklifts stood still are exactly the seconds in
+which this session's own tooling ran — `send_order.py` connecting and
+disconnecting, the capture readers walking twenty megabytes, a
+`wsl.exe` process spawn per command. Nothing here measured that, so it
+is offered as the likely reading and not as a result. What IS measured
+is the ordering: **0.616 driving, 0.471 over the minute containing it,
+0.393 parked.**
+
+The two driving rows are also not each other's control — 0.616 is two
+trucks and 0.495 is one, taken ninety seconds apart under whatever else
+the machine was doing — so the pair bounds the figure rather than
+ranking two-truck against one-truck load.
 
 **This is not comparable to the 0.734–0.755 recorded further up this
 file, and the difference is load, not a regression.** That figure was
@@ -2077,9 +2111,11 @@ ROS recorder, a paho recorder, and one or two trucks actually driving.
 M6.1 named exactly this as the open question ("the margin to a third
 vehicle is now the interesting number"; "nothing here was run with the
 two Windows writers attached"). **The measured answer is that a working
-two-vehicle rig runs at roughly 0.46–0.50 of real time on this machine,
-and the DRIVING half of that sits at the bottom of the range** — the
-windows above are diluted with idle, never with anything faster.
+two-vehicle rig holds 0.46–0.50 of real time across a minute that
+contains a drive, and 0.50–0.62 across the drive itself** — 0.616 over
+VDA 1's two-truck overlap, 0.495 over VDA 2b's single-truck leg. The
+low end of any of these is a machine busy with something other than the
+simulator, which is what the parked 0.393 says.
 Every loop in the tree is wall-clock timed, so nothing missed its rate —
 what stretches is simulated time per wall second, and it is why a 6.00 m
 route took 22 s. A third vehicle needs a bigger machine, and that is a
