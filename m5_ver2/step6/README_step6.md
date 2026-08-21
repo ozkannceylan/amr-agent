@@ -270,7 +270,7 @@ step5's. Wherever the text below says:
 | `5100` / `5101` | `5110` / `5111` for f1, `5120` / `5121` for f2 |
 | `step5.sh`, `step5.py`, `m5_ver2/step5/` | `step6.sh`, `step6.py --vehicle <vid>`, `m5_ver2/step6/` |
 | `GZ_PARTITION=step5`, `ROS_DOMAIN_ID=95` | `step6`, `96` |
-| "nine pids" | seventeen |
+| "nine pids" | twenty (seventeen before M6.2) |
 | `agv/forklift/config.yaml` as the vehicle's config | `vehicles/<vid>/config.yaml`, derived from it |
 
 **Do not copy a command out of the text below and run it.** The run order at
