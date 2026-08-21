@@ -32,7 +32,7 @@ VIRTUAL ONLY, AND REFUSED OTHERWISE
   operator has no eyes on a real plant.
 
 Usage (Windows, any Python):
-  python m5_ver2\\m6\\tools\\scripted_writer.py --vehicle f1 \\
+  python m6\\tools\\scripted_writer.py --vehicle f1 \\
       --virtual --ctl-port 5910
 """
 

@@ -37,9 +37,9 @@ THE FAIL DIRECTION
   then sees the link go quiet and fails safe on its own 0.28 s rule.
 
 Usage (Windows, 64-bit Python, PLCSIM Advanced already in RUN):
-  python m5_ver2\\m6\\windows\\m6.py --vehicle f1
+  python m6\\windows\\m6.py --vehicle f1
 With no PLCSIM license (any Python, no pythonnet):
-  python m5_ver2\\m6\\windows\\m6.py --vehicle f1 --virtual
+  python m6\\windows\\m6.py --vehicle f1 --virtual
 """
 
 import argparse

@@ -560,7 +560,7 @@ start() {
     # waits on a license, so it is not what this line tells the operator.
     echo "up. On Windows, one writer per vehicle:"
     for vid in "${VEHICLES[@]}"; do
-        echo "  python m5_ver2\\m6\\windows\\m6.py --vehicle $vid --virtual"
+        echo "  python m6\\windows\\m6.py --vehicle $vid --virtual"
     done
     echo "broker: 127.0.0.1:1883 (localhost only, anonymous - $LOGDIR/broker.log)"
     # ORDERS COME OVER MQTT NOW, and until M6.3 there is no master control
