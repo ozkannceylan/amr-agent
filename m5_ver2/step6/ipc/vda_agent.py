@@ -261,6 +261,7 @@ class VdaAgent(Node):
             vm.connection_payload(
                 self.counters.header("connection", VID), "ONLINE")),
             qos=1, retain=True)
+        self.get_logger().info("broker connected - ONLINE published")
         self.publish_factsheet()
         if self.order is not None and not self.executing \
                 and self.progress.reached < len(self.progress.nodes):
