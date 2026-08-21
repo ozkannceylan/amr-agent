@@ -168,11 +168,11 @@ class VdaAgent(Node):
     def _on_disconnect(self, client, userdata, flags, reason_code,
                        properties=None):
         if _failed(reason_code):
-            # Said HERE and not from the drain: paho retries on its own
-            # thread and this is the only place that knows a retry loop
-            # started. Logging touches no agent state, so the
-            # enqueue-only rule above still holds.
-            self.get_logger().warn("broker link down - retrying inside 1-8 s")
+            # NOTHING IS SAID FROM HERE - this thread enqueues, full
+            # stop. paho is already retrying on its own thread inside
+            # 1-8 s (reconnect_delay_set above); the drain reports that
+            # cadence about 0.1 s later, from the ROS thread, where the
+            # rest of this node speaks.
             self.inbox.put(("lost", None))
 
     def _on_message(self, client, userdata, msg):
@@ -281,7 +281,9 @@ class VdaAgent(Node):
         self.publish_state("connected")
 
     def _supervision_lost(self):
-        self.get_logger().warn("broker lost - controlled stop, order kept")
+        self.get_logger().warn(
+            "broker lost - controlled stop, order kept - paho retrying "
+            "inside 1-8 s")
         if self.executing:
             self.pub_goal.publish(String(data=""))
             self.executing = False
