@@ -1,5 +1,9 @@
 # m5_ver2
 
+If `HANDOVER.local.md` exists at the repo root, read it before any work.
+It is gitignored. Cursor and Claude Code coordinate there so they do not
+build two M6s. Do not commit it.
+
 ## Global Constraints
 
 Every task's requirements implicitly include this section.
