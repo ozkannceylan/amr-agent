@@ -373,3 +373,31 @@ spec's own example. Messages produced by this project carry **three** fraction
 digits — `YYYY-MM-DDTHH:mm:ss.fffZ`, UTC, always `Z`, never a numeric offset.
 Both forms satisfy the schemas' `format: date-time`; milliseconds are the
 resolution a state stream published at a few hertz actually needs.
+
+### (e) Project error names, and why they are camelCase
+
+Section 9 says project `errors[].errorType` values "use PascalCase". **That
+guidance yields here**, and the reason is consistency with the thing the field
+already carries: VDA 5050's own predefined error names — `orderError`,
+`noRouteError`, `validationError`, `orderUpdateError` — are camelCase, so a
+PascalCase project name sitting beside them in the same array would announce
+itself as foreign for no benefit. `actionType`, `errorLevel` and every other
+enumerated word on this wire is camelCase too. Owner ruling, M6.2: **project
+error names are camelCase**, and section 9's sentence is superseded for this
+column only. Every name below is documented before use, which is the part of
+section 9 that stands unchanged.
+
+The complete set this project emits, all of them from
+`m5_ver2/step6/ipc/vda_messages.py` and `ipc/vda_agent.py`:
+
+| errorType | errorLevel | Means |
+|---|---|---|
+| `safetyStop` | FATAL | Drive enable is down — a latched safety demand or a pending startup acknowledge. Reporting only: the F-model dropped `Motor` long before this message was built. |
+| `orderError` | WARNING | The order just delivered was refused and no route was issued; `errorDescription` is the refusal reason and `errorReferences` carries the offending `orderId`. |
+| `unsupportedAction` | WARNING | An instant action was answered `FAILED` because this milestone does not implement it; `errorReferences` carries the `actionId`. The factsheet's `agvActions` is the list that would have avoided it. |
+
+`unsupportedAction` is reported **once**, on the state that carries the
+`FAILED` actionState; that actionState is the standing record afterwards. The
+other two are recomputed on every state and therefore persist exactly as long
+as the condition does — `safetyStop` for as long as the enable is down,
+`orderError` for the single state a refusal produces.

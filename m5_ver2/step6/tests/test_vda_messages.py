@@ -85,3 +85,27 @@ def test_connection_payload():
     c = vm.Counters()
     p = vm.connection_payload(c.header("connection", "f1"), "ONLINE")
     assert p["connectionState"] == "ONLINE"
+
+
+def test_a_healthy_motor_on_an_unhealthy_chain_still_demands_an_ack():
+    # The quadrant the mapping is FOR: the contactor is in, but the
+    # E-Stop chain does not read healthy. Nothing is wrong enough to
+    # raise a FATAL error - the drive enable is up - yet eStop must not
+    # say NONE, because NONE means "nothing to acknowledge" and there
+    # is. MANUAL is the honest word for a pending acknowledge.
+    errors, safety = vm.errors_and_safety(True, False, False)
+    assert errors == []
+    assert safety == {"eStop": "MANUAL", "fieldViolation": False}
+
+
+def test_connection_payload_offline_carries_the_whole_header():
+    # OFFLINE is the deliberate goodbye main() sends on the way out,
+    # and a fleet manager tells it from CONNECTIONBROKEN (the will) by
+    # this field alone - so the payload has to be a full message, not
+    # a bare state word.
+    c = vm.Counters()
+    p = vm.connection_payload(c.header("connection", "f1"), "OFFLINE")
+    assert p["connectionState"] == "OFFLINE"
+    assert set(p) == {"headerId", "timestamp", "version", "manufacturer",
+                      "serialNumber", "connectionState"}
+    assert (p["headerId"], p["serialNumber"]) == (1, "f1")
