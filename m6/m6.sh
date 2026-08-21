@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# m6.sh - bring the Step 6 vehicle side up and down: ONE broker, ONE
-# world, TWO forklifts, and one full set of vehicle nodes per forklift.
+# m6.sh - bring the M6 cell up and down: ONE broker, ONE world, TWO
+# forklifts, one full set of vehicle nodes per forklift, and ONE fleet
+# manager over the lot of them.
 #   start [--headless] | stop
 #
 # start opens the Gazebo GUI client, because this script is the HUMAN entry
@@ -81,11 +82,18 @@ VEHICLES=(f1 f2)
 # on the way out. That client now has a NAME - vda_agent.py, the entry
 # immediately above - so the two are adjacent here and in that order on
 # purpose: the agents go down, then the thing they were dialling.
+# MASTER CONTROL GOES DOWN BEFORE THE TRUCKS IT COMMANDS, which is why
+# fleet_manager.py sits ahead of vda_agent.py here: the manager is the one
+# process that can hand a vehicle new work, and a stop that killed the
+# agents first would leave it publishing orders at trucks in the middle of
+# dying. Ending the thing that gives work first is the same reasoning that
+# puts the broker last - the order of this list is the order of the
+# shutdown, read top to bottom.
 PATTERNS=("gz sim" "m6_world.launch.py" "parameter_bridge" \
           "sto_contactor.py" "forklift_io.py" "plc_link.py" "cmd_gate.py" \
           "cmd_mux.py" "hmi_node.py" "field_eval.py" "sensor_link.py" \
-          "encoder_link.py" "nav_node.py" "vda_agent.py" \
-          "mosquitto-vendored")
+          "encoder_link.py" "nav_node.py" "fleet_manager.py" \
+          "vda_agent.py" "mosquitto-vendored")
 
 # WHY OWNERSHIP IS DECIDED BY THE ENVIRONMENT, NOT BY THE COMMAND LINE
 #   vehicle.launch.py:738-754 starts sto_contactor.py and forklift_io.py with
@@ -114,14 +122,14 @@ ours() {
 #   terminal - the very case setsid was added to survive - leaves it on disk,
 #   and Linux recycles pids back through the 17xxx-18xxx range this stack
 #   lands in within minutes of a boot. A recorded number can therefore name a
-#   STRANGER, and every use of that number has to say so first. Nineteen of
-#   the twenty recorded command lines contain m6 and no foreign
+#   STRANGER, and every use of that number has to say so first. Twenty of
+#   the twenty-one recorded command lines contain m6 and no foreign
 #   one does, so that token is the identity test. It is deliberately the
 #   literal and not "$M6": if REPO ever resolves differently between the
 #   start and the stop, the looser token still matches and the partition
 #   read-back below still works, which is the failure that read-back exists
 #   to prevent.
-#   THE BROKER IS THE TWENTIETH, and its command line is a path in the
+#   THE BROKER IS THE TWENTY-FIRST, and its command line is a path in the
 #   user's HOME - a vendored binary is not under m6 and never
 #   will be - so it needs a token of its own, or every start would report it
 #   as having exited and call the stack incomplete. mosquitto-vendored is
@@ -244,6 +252,16 @@ deploy() {
     mkdir -p "$DEPLOY/m6" "$DEPLOY/agv/forklift"
     cp -r "$M6/ipc" "$DEPLOY/m6/ipc"
     cp -r "$M6/vehicles" "$DEPLOY/m6/vehicles"
+    # THE FLEET SHIPS TOO, AND IT IS NOT VEHICLE SOFTWARE. Nothing under
+    # fleet/ ever runs on a truck - the manager is master control for the
+    # whole cell and start() launches it from SOURCE, like the HMI - but
+    # the MANIFEST is this image's bill of software, and a cell whose
+    # trucks are frozen and whose master control is not is only half
+    # described. Frozen here it gets a hash, stale_check compares it, and
+    # "what was the fleet running when that gate was measured" has an
+    # answer. When the cell gets a machine of its own, this is the
+    # directory that leaves - as an image of its own, not as a deletion.
+    cp -r "$M6/fleet" "$DEPLOY/m6/fleet"
     # THE SOURCE config.yaml STILL SHIPS, and it is now PROVENANCE rather
     # than a file anything in the image opens: every node resolves through
     # the contract's vehicles/<vid>/config.yaml above, so this is the file
@@ -280,6 +298,13 @@ stale_check() {
             # disk means the model or config it was derived FROM has moved.
             ./m6/vehicles/*)
                 s="$M6/vehicles/${p#./m6/vehicles/}" ;;
+            # The fleet is in the image as provenance, so a fleet file
+            # that has moved makes the IMAGE stale, not the running
+            # manager - that one starts from source and is always current.
+            # It is still a divergence worth the warning: the manifest no
+            # longer describes the cell it claims to.
+            ./m6/fleet/*)
+                s="$M6/fleet/${p#./m6/fleet/}" ;;
             ./agv/*)
                 s="$REPO/${p#./}" ;;
             *)
@@ -290,9 +315,9 @@ stale_check() {
     # A file added to source since the deploy is also a divergence - and a
     # VEHICLE added to the table is exactly that, two files of it.
     local src_n man_n
-    src_n=$(find "$M6/ipc" "$M6/vehicles" -type f \
+    src_n=$(find "$M6/ipc" "$M6/vehicles" "$M6/fleet" -type f \
                  ! -path '*__pycache__*' 2>/dev/null | wc -l)
-    man_n=$(grep -c -e 'm6/ipc' -e 'm6/vehicles' \
+    man_n=$(grep -c -e 'm6/ipc' -e 'm6/vehicles' -e 'm6/fleet' \
                  "$DEPLOY/MANIFEST")
     [ "$src_n" != "$man_n" ] && stale=1
     if [ "$stale" = 1 ]; then
@@ -324,7 +349,7 @@ start() {
     # QUIET. Each vehicle's plc_link binds its own - f1 :5110, f2 :5120 -
     # and the second bind on a held one dies EADDRINUSE inside the first
     # second; that vehicle then comes up with its PLC link missing and says
-    # so in ONE warning line among the TWENTY this stack now prints (hit
+    # so in ONE warning line among the TWENTY-ONE this stack now prints (hit
     # twice while building M6.1's Task 8, when there were seventeen of
     # them). Refuse first, and name the vehicle whose port is held,
     # because "already running" is the answer the operator needs.
@@ -426,7 +451,7 @@ start() {
     fi
     stale_check
     [ -f "$ROS_SETUP" ] || { echo "no $ROS_SETUP"; return 1; }
-    # Unchecked, an unwritable log dir fails all twenty redirections, and
+    # Unchecked, an unwritable log dir fails all twenty-one redirections, and
     # start would sleep its way to "up." over a stack that never began.
     mkdir -p "$LOGDIR" || { echo "cannot create $LOGDIR"; return 1; }
     : > "$PIDFILE"  || { echo "cannot write $PIDFILE"; return 1; }
@@ -459,7 +484,7 @@ start() {
     #
     # THE NAME LIST IS BUILT HERE, NOT RESTATED BELOW. The startup check
     # walks $PIDFILE and needs a name per line; keeping that list by hand
-    # made it a second spelling of the spawn order, and twenty entries
+    # made it a second spelling of the spawn order, and twenty-one entries
     # is where such a list starts drifting. Appending in spawn() makes the
     # two orders the same order by construction.
     local -a SPAWNED=()
@@ -490,10 +515,14 @@ start() {
     #   THE LOADER PATH RIDES THE `env` spawn ALREADY EXECS. A leading
     #   NAME=value is env's own syntax, so the vendored libraries cost no
     #   extra process and reach nothing but this child.
-    # M6.3 MOVES THIS OUT. A broker belongs to the FLEET side - one for all
-    # vehicles, on a machine that is not a vehicle. It is here because M6.2
-    # is one machine, and it is SPAWNED rather than assumed so that start
-    # and stop stay the only two commands an operator runs.
+    # THE BROKER IS FLEET-SIDE AND IT STAYED HERE, which M6.3 settled by
+    # arriving rather than by moving it: a broker belongs to one machine
+    # that is not a vehicle, and this rig IS one machine - the trucks, the
+    # fleet manager and the broker share it. What M6.3 changed is that
+    # something on the fleet side now dials it (the last spawn below). It
+    # is SPAWNED rather than assumed so that start and stop stay the only
+    # two commands an operator runs; when the cell ever gets its own
+    # machine, this line and BROKER_* leave together with the fleet spawn.
     spawn broker - LD_LIBRARY_PATH="$BROKER_LIB" "$BROKER_BIN" -v
     # ONE WORLD FOR BOTH TRUCKS: this single launch spawns both models,
     # bridges both vehicles' terminals and starts each one's contactor and
@@ -532,6 +561,24 @@ start() {
         spawn "hmi_$vid"          "$vid" python3 "$M6/hmi/hmi_node.py"
     done
 
+    # MASTER CONTROL GOES UP LAST, and it could have gone anywhere: the
+    # manager assigns nothing until it has a FRESH state from a truck
+    # (fleet_core's idle rule refuses a stale one), so started first it
+    # would simply wait. Last keeps the startup order legible - the plant,
+    # then the trucks, then the thing that gives them work - and it is the
+    # order the operator reads back in the pid lines.
+    #   NO VEHICLE ('-'), and that is the fleet layer's whole shape: the
+    #   manager has no VEHICLE, no ROS and no DDS domain, and its only path
+    #   to a truck is VDA 5050 over MQTT. It is not one vehicle's process.
+    #   It still carries GZ_PARTITION like every other child, because that
+    #   is what ours() reads to decide the sweep may kill it.
+    #   IT RUNS FROM SOURCE, not from $DEPLOY, for the same reason the HMI
+    #   does: the deploy is the INDUSTRIAL PC's image - what ships to a
+    #   truck - and the fleet is not a truck. deploy() freezes fleet/ into
+    #   the image all the same, as the cell's bill of software, and
+    #   stale_check compares it; what runs here is always the source.
+    spawn fleet - python3 "$M6/fleet/fleet_manager.py"
+
     # "A process that dies in its first fraction of a second has not started,
     # and saying 'started' about it sends the operator to the wrong log"
     # (stack.sh:243-244). The check is HERE and not inside spawn because the
@@ -563,10 +610,14 @@ start() {
         echo "  python m6\\windows\\m6.py --vehicle $vid --virtual"
     done
     echo "broker: 127.0.0.1:1883 (localhost only, anonymous - $LOGDIR/broker.log)"
-    # ORDERS COME OVER MQTT NOW, and until M6.3 there is no master control
-    # to send one - so the operator is handed the tool that stands in for
-    # it. The truck has to be in AUTOMATIC, exactly as the HMI's GO does.
-    echo "orders: python3 $M6/tools/send_order.py f1 S4 --watch  (vehicle in AUTOMATIC)"
+    # WORK IS SUBMITTED AS A TRANSPORT, NOT AS AN ORDER TO A TRUCK. The
+    # operator names two stations and the fleet picks the vehicle; the
+    # truck it picks still has to be in AUTOMATIC, exactly as the HMI's GO
+    # requires, or it is not idle-confirmed and the task simply waits.
+    # tools/send_order.py still exists and is superseded - a low-level
+    # probe for one truck, not the way work enters this cell.
+    echo "work:   python3 $M6/fleet/fleet_cli.py submit S1 S4   (trucks in AUTOMATIC)"
+    echo "screen: python3 $M6/fleet/fleet_cli.py status --watch"
     echo "logs: $LOGDIR"
 }
 stop() {
@@ -619,13 +670,15 @@ stop() {
 }
 USAGE="usage: $0 start [--headless] | stop | home | deploy
   start       warehouse + BOTH forklifts in a Gazebo window, plus one HMI
-              and one VDA 5050 agent per vehicle and the local MQTT
-              broker on 127.0.0.1:1883 - twenty processes
+              and one VDA 5050 agent per vehicle, the local MQTT broker on
+              127.0.0.1:1883 and the fleet manager - twenty-one processes.
+              Work goes in with fleet/fleet_cli.py submit FROM TO.
   --headless  no Gazebo window (gui:=false, the launch file's own default)
   home        teleport both forklifts back to their spawn poses (stack stays
               up; PLC latches stay latched - reset from the panel)
-  deploy      derive vehicles/, then freeze ipc/ + vehicles/ + config.yaml
-              into deploy/ with a sha256 MANIFEST - the 'image build'.
+  deploy      derive vehicles/, then freeze ipc/ + vehicles/ + fleet/ +
+              config.yaml into deploy/ with a sha256 MANIFEST - the
+              'image build'.
               start refuses without one and warns loudly when the source
               has moved on since."
 case "${1:-}" in

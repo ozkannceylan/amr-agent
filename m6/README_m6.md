@@ -20,6 +20,12 @@ Step 6 adds three things to Step 5 and closes one debt:
   *command* input has gone quiet (`CMD_STALE_S = 0.25 s`) — the one fail-open
   silence path step5's final review named.
 
+**Since M6.1 this tree has grown a fleet.** M6.2 gave each truck a VDA 5050
+client of its own, and M6.3 put one master control above both of them: work
+now enters the cell as a *transport* between two stations and the fleet
+decides which truck drives it. See **[VDA 5050](#vda-5050--orders-over-mqtt)**
+and **[Fleet manager](#fleet-manager--the-cells-master-control)**.
+
 > Something looks wrong? Read **[Not a bug](#not-a-bug)** before you debug it.
 
 **Evidence: [PROOF.md](PROOF.md) — read its ledger before you trust anything
@@ -37,17 +43,17 @@ writer, and each writer serves exactly one truck.
 |---|---|---|
 | 1 | Windows | **Nothing, for M6.1.** Both trucks run `--virtual` (step 7), so no PLCSIM instance is needed. Against a real PLC, only **f1** has one: start `PLC_2` from the Control Panel, download from TIA Portal, CPU in RUN. f2's `PLC_3` is reserved and has never run — no license. |
 | 2 | WSL | `cd /mnt/c/Users/ozkan/projects/amr-agent/m6` |
-| 3 | WSL | `./m6.sh deploy` — **regenerates `vehicles/f1/` and `vehicles/f2/` first** (from `gazebo/forklift_ver2/model.sdf` + `agv/forklift/config.yaml`), then freezes `ipc/` + both derived pairs into `deploy/` with a sha256 `MANIFEST`. Prints `deployed 20 files`. **`start` refuses without one.** |
-| 4 | WSL | `./m6.sh start` — **9.1 s**, measured: the broker goes up first, the world gets a five-second head start before the vehicle nodes, then one more second before `start` checks that all twenty are still alive. Do **not** source ROS first; the script does it. |
+| 3 | WSL | `./m6.sh deploy` — **regenerates `vehicles/f1/` and `vehicles/f2/` first** (from `gazebo/forklift_ver2/model.sdf` + `agv/forklift/config.yaml`), then freezes `ipc/` + both derived pairs + `fleet/` into `deploy/` with a sha256 `MANIFEST`. Prints `deployed 25 files`. **`start` refuses without one.** |
+| 4 | WSL | `./m6.sh start` — **9.1 s**, measured: the broker goes up first, the world gets a five-second head start before the vehicle nodes, the fleet manager goes up last, then one more second before `start` checks that all twenty-one are still alive. Do **not** source ROS first; the script does it. |
 | 4a | Screen | **Three windows:** the **Gazebo window** with the warehouse and both trucks facing each other 6.00 m apart in the south block, and **two HMIs** — `Forklift HMI - f1` and `Forklift HMI - f2`. `start --headless` skips the Gazebo one. |
-| 5 | WSL | Read the **twenty** pid lines: `broker`, `world`, then f1's nine (`plc_link cmd_gate cmd_mux field_eval encoder_link sensor_link nav_node vda_agent hmi`), then f2's nine. `WARNING: <name> exited during startup` sends you to that log in `logs/`. A `THE STACK IS INCOMPLETE.` line means stop and read it. |
+| 5 | WSL | Read the **twenty-one** pid lines: `broker`, `world`, then f1's nine (`plc_link cmd_gate cmd_mux field_eval encoder_link sensor_link nav_node vda_agent hmi`), then f2's nine, then `fleet` — the cell's master control, one for both trucks. `WARNING: <name> exited during startup` sends you to that log in `logs/`. A `THE STACK IS INCOMPLETE.` line means stop and read it. |
 | 6 | Windows | `cd C:\Users\ozkan\projects\amr-agent` |
 | 7 | Windows | `python m6\windows\m6.py --vehicle f1 --virtual` — **64-bit Python** (pythonnet). A grey **panel** opens, titled `Forklift f1 PLC Control Panel - VIRTUAL F-PLC (model)`; the console prints `streaming PLC state to <wsl-ip>:5110` and `listening for the back scanner on 0.0.0.0:5111`. |
 | 8 | Windows | Open a **second** terminal, `cd` again, then `python m6\windows\m6.py --vehicle f2 --virtual` — same panel titled `Forklift f2 ...`, same two lines on **5120** and **5121**. |
 | 9 | Panels | Click **RESET** on f1's panel. Once. Then **RESET** on f2's. Each lamp reads `MOTOR ENABLED`; each HMI turns neutral and reads `Drive enable: ON`. |
 | 10a | HMI windows | **Teleop:** leave a truck's radio on `Teleop` and drag *that* HMI's joystick. Only that truck moves. |
 | 10b | HMI windows | **Auto:** click `Auto`, click a station dot on that HMI's sketch, press **GO**. Both trucks can be routed at the same time. **STOP** cancels a goal — it is not a brake. |
-| 10c | WSL | **Auto, over MQTT:** `python3 m6/tools/send_order.py f1 S4 --watch` sends the same drive as a VDA 5050 order. Same precondition as **GO**: that truck must be in `Auto`. See [VDA 5050](#vda-5050--orders-over-mqtt). |
+| 10c | WSL | **Auto, as fleet work:** `python3 m6/fleet/fleet_cli.py submit S1 S4` queues a *transport* — you name two stations, the fleet picks the truck. Same precondition as **GO**, and the fleet enforces it: a truck not in `Auto` is not idle-confirmed, so the task waits rather than failing. Watch it with `python3 m6/fleet/fleet_cli.py status --watch`. See [Fleet manager](#fleet-manager--the-cells-master-control). |
 | 11 | Panels | Finished: **close both windows**. Each writes its own truck's trip values on the way out. |
 | 12 | WSL | `./m6.sh stop` |
 
@@ -65,8 +71,9 @@ measured over 60 samples on the one-vehicle stack, real-time factor mean
 measured without. (Those are step5's numbers, and they compare the WINDOW's
 cost, not the stack's. Step 6's own headless figure under M6.1's full
 17-pid stack — before the broker and the two VDA agents joined it — is
-**0.75**, see [PROOF.md](PROOF.md). The three processes M6.2 added are idle
-loops at 10 Hz and 0.5 Hz; the figure has not been re-measured with them.)
+**0.75**, see [PROOF.md](PROOF.md). The three processes M6.2 added and the
+one M6.3 added are idle loops at 10 Hz and 0.5 Hz; the figure has not been
+re-measured with them.)
 
 **`vehicles/` is generated — regenerate it, do not edit it.** `deploy` runs
 `tools/instantiate_vehicle.py --all` before it freezes anything, so the image
@@ -124,7 +131,7 @@ is dragged, and the sole writer must not freeze with `Motor` energised.
 - **`start` pre-flights UDP :5110 and :5120** — the table's two `plc_port`
   values — and refuses if either is held, naming the vehicle whose port it is.
   Without that guard a second stack takes the PLC link and `plc_link` binds
-  nothing, in one warning line among twenty — measured twice while building
+  nothing, in one warning line among twenty-one — measured twice while building
   M6.1, when there were seventeen of them, and silent. The guard is pipe-free
   and fail-closed: an `ss` that dies mid-pipe cannot make it fall through, and
   a missing `ss` prints `note: ss not found - the UDP :5110/:5120 and TCP
@@ -170,8 +177,11 @@ goes system-wide and the binary is not in git — that script is how it
 reproduces. `m6.sh` starts it as the stack's first process on
 **`127.0.0.1:1883`**, localhost-only and anonymous, which is what a
 config-less mosquitto 2.x does by default and is the posture M6.2 wants.
-**M6.3 moves the broker to the fleet side**, where a broker belongs: one for
-every truck, on a machine that is not a vehicle.
+**The broker is fleet-side and it stayed here**, which M6.3 settled by
+arriving rather than by moving it: a broker belongs to one machine that is not
+a vehicle, and this rig *is* one machine — the two trucks, the fleet manager
+and the broker share it. When the cell ever gets a machine of its own, the
+broker and `fleet/` leave together.
 
 `--break-system-packages` is neither optional nor carelessness. Ubuntu noble
 marks this interpreter externally-managed (PEP 668), and a vehicle node that
@@ -193,28 +203,31 @@ uagv/v2/amragent/f1/…        uagv/v2/amragent/f2/…
 
 | Topic | Direction | What rides on it |
 |---|---|---|
-| `order` | in | one full route: `nodes` + `edges`, all released. Accepted only in AUTOMATIC, only when nothing is executing, and only at `orderUpdateId` 0 — updates land with M6.3. A re-delivery of the order already held is ignored in silence (VDA's own rule); everything else refused comes back as an `orderError` on `state`. |
+| `order` | in | one full route: `nodes` + `edges`, all released. Accepted only in AUTOMATIC, only when nothing is executing, and only at `orderUpdateId` 0 — order *updates* are still not implemented, and M6.3 did not need them: the fleet sends a whole leg at a time. A re-delivery of the order already held is ignored in silence (VDA's own rule); everything else refused comes back as an `orderError` on `state`. |
 | `instantActions` | in | `cancelOrder`, `stateRequest`, `factsheetRequest`. Anything else is answered `FAILED` plus an `unsupportedAction` error — the factsheet is the list. |
 | `state` | out | every 2 s, and immediately on every event worth knowing: pose, `driving`, `operatingMode`, `nodeStates` draining, `lastNodeId` advancing, `errors[]`. |
 | `connection` | out | `ONLINE` on connect, retained; the LWT makes it `CONNECTIONBROKEN` if the agent dies. |
 | `factsheet` | out | on connect and on request, retained. |
 
-### Sending one, until M6.3 exists
+### Sending one by hand — the superseded probe
 
-There is no fleet manager yet, so `tools/send_order.py` is master control's
-hand — **M6.3 deletes it**:
+Work enters the cell as a **transport** now, through the fleet manager
+([Fleet manager](#fleet-manager--the-cells-master-control)).
+`tools/send_order.py` is what did this job before M6.3 existed and it survives
+as a **low-level probe**: one truck, one station, one order, no queue and no
+fleet between you and the vehicle's door.
 
 ```bash
-python3 m6/tools/send_order.py f1 S4 --watch
+python3 m6/tools/send_order.py f1 S4 --watch      # superseded; debugging only
 ```
 
 It reads that truck's pose off the truck's own `state` (no ROS: the
 single-writer and one-stack rules stay unbroken), plans with the same
-`route.plan_route` the HMI uses, and publishes the result as an order — so the
-route the "fleet" sends is the route the vehicle would have planned, and
-full-route following is exercised without inventing a second planner.
+`route.plan_route` the HMI uses, and publishes the result as an order.
 `--watch` then prints the vehicle's own account once a second until `ARRIVED`.
-Station ids are `stations.py`'s: `S1`…`S10`.
+Station ids are `stations.py`'s: `S1`…`S10`. Reach for it when the question is
+about ONE truck's door and the fleet's queue would only stand between you and
+the answer.
 
 **The truck must be in AUTOMATIC**, exactly as **GO** requires — the writer
 running, the panel RESET, that HMI on `Auto`. Sent to a truck that is not, the
@@ -229,8 +242,9 @@ sent o-bf8b6e46 to f1 -> S4 (4 nodes, arrive 0.25 m)
 That error rides the one `state` published at the rejection and is not a
 standing one, so it shows up in `--watch`'s next line and not after it. With
 no order executing there is then nothing for `--watch` to wait for and it
-never reaches `ARRIVED` — Ctrl-C it. (Known, accepted: M6.3 deletes this
-tool.)
+never reaches `ARRIVED` — Ctrl-C it. The fleet makes the same demand
+differently: a truck that is not in AUTOMATIC is not *idle-confirmed*, so a
+transport waits in the queue rather than being refused at a door.
 
 ### What the factsheet declares
 
@@ -255,6 +269,85 @@ neither file knows them: `maxLoadMass`, `accelerationMax`, `decelerationMax`.
 amended 2026-08-21 for M6.2: which fields are used, which are deliberately
 omitted, and why this project's error names are camelCase.
 
+## Fleet manager — the cell's master control
+
+**M6.3 gave the cell one decision-maker.** `fleet/fleet_manager.py` is a
+paho-only process — no ROS, no `VEHICLE`, no DDS domain — started by `m6.sh`
+as the stack's twenty-first pid. It turns *transports* into VDA 5050 orders
+and gives each one to the nearest idle truck. The operator names two stations;
+the fleet names the vehicle.
+
+```bash
+python3 m6/fleet/fleet_cli.py submit S1 S4        # a transport: pickup, dropoff
+python3 m6/fleet/fleet_cli.py status              # the fleet's own account
+python3 m6/fleet/fleet_cli.py status --watch      # reprinted on every update
+```
+
+`submit` prints the `ft-` task id it generated and exits 0 (`--task-id` names
+one yourself). An unknown station is refused before anything is published,
+with the ten real ids in the message. A duplicate task id is refused by the
+*manager* — the CLI has no book to check it against — and shows up in the
+screen's `REFUSED` block, which is why that block is on the screen.
+
+**A transport is two legs, and the dwell between them is the fork cycle.**
+Leg 1 drives the chosen truck to `FROM`; it stands there `DWELL_S = 3.0 s`
+(the fork cycle, simulated — owner ruling); leg 2 drives it to `TO`. The task
+is `QUEUED → ASSIGNED_LEG1 → DWELL → ASSIGNED_LEG2 → DONE`, and every leg is a
+full-route order the truck's own door (`ipc/vda_orders.py`) validates before
+it is published.
+
+**Nearest idle, by the vehicle's own router.** Every clause of *idle* is in
+`fleet/fleet_core.py` and each one is a refusal somebody has to live with:
+ONLINE, AUTOMATIC, nothing left to drive, a state no older than 3 s, not lost,
+and not standing down after a rejection or a loss-return. Distance is
+`ipc/route.plan_route` summed — the graph the truck itself would drive, not
+the crow's flight — so a station the graph cannot reach is not a candidate at
+any distance. The choice and both distances go in `logs/fleet.log` at the
+moment of choosing.
+
+**The queue is FIFO and a promise.** Only the head is ever placed: if nobody
+idle can take it, everything behind it waits. A task interrupted by a lost
+vehicle **returns to the head**, not to the back (owner ruling) — it is the
+oldest work in the cell and re-queueing it behind newer work would punish it
+twice.
+
+**The status document is the operator's screen, and its ages are computed
+when it is built.** `fleet/status` is retained, QoS 1, republished on every
+change and at least every 2 s. A feed that died shows an age that *grows* — a
+vehicle nobody has heard from can never read as EN-ROUTE. The CLI prints the
+document's own age in its header for the same reason: the manager sets no
+last-will, so a retained document going stale *is* the fleet's death
+certificate, and a stale timestamp cannot lie the way a "manager: ALIVE" flag
+can.
+
+**The screen is trimmed; the book is not.** The document carries every task in
+flight plus the last five `DONE` and a `done_count`; the manager's own list
+keeps all of them, because that list is what refuses a duplicate task id for
+the whole run. `REFUSED` keeps the last ten and each task's history the last
+twenty entries — a retained document republished every 2 s must not grow with
+the shift.
+
+**No journal, and the screen says so.** The queue is in memory. A restarted
+manager re-syncs from the wire alone — retained `connection` topics, then the
+states — and therefore has **no tasks**: the operator resubmits. A truck still
+driving one of its `ft-` legs is simply not idle, so the restarted manager
+adopts it **by waiting** and never cancels anything at startup.
+
+**`cancelOrder` exists in exactly one flow:** a vehicle that was lost comes
+back holding an order whose task the fleet has already given to somebody else.
+The M6.2 agent *resumes* a kept order on reconnect, so the returning truck may
+drive for the seconds the cancel takes to land. That window is real, it is
+logged as it happens, and PROOF.md's Gate 4 measures it rather than pretending
+it away.
+
+**Losing the fleet degrades, it does not endanger.** Kill the manager and
+every truck keeps its current order, the on-board guards keep guarding, the
+F-CPU keeps the safety chain, and the e-stop is still the brake. Nothing in
+`fleet/` can command anything but a route and a cancel. The three standing
+invariants this layer is written under are in
+**[`fleet/README.md`](fleet/README.md)**; the design is
+`docs/superpowers/specs/2026-08-21-m6-3-fleet-manager-design.md`.
+
 ---
 
 # Inherited reference — Step 5's manual, below
@@ -270,7 +363,7 @@ step5's. Wherever the text below says:
 | `5100` / `5101` | `5110` / `5111` for f1, `5120` / `5121` for f2 |
 | `step5.sh`, `step5.py`, `m5_ver2/step5/` | `m6.sh`, `m6.py --vehicle <vid>`, `m6/` |
 | `GZ_PARTITION=step5`, `ROS_DOMAIN_ID=95` | `m6`, `96` |
-| "nine pids" | twenty (seventeen before M6.2) |
+| "nine pids" | twenty-one (seventeen before M6.2, twenty before M6.3) |
 | `agv/forklift/config.yaml` as the vehicle's config | `vehicles/<vid>/config.yaml`, derived from it |
 
 **Do not copy a command out of the text below and run it.** The run order at
@@ -648,7 +741,7 @@ headless, and a re-measurement of them should be too.
 
 ## Unit tests — m6's own, and the number to expect
 
-**`302 passed, 0 skipped`** under WSL:
+**`370 passed, 0 skipped`** under WSL:
 
 ```bash
 cd /mnt/c/Users/ozkan/projects/amr-agent
@@ -657,10 +750,11 @@ python3 -m pytest m6/tests/ -q
 ```
 
 A **skip** is a failure here: it means a module did not import and its tests
-silently did not run. On Windows the same suite gives `199 passed, 2 skipped,
+silently did not run. On Windows the same suite gives `222 passed, 5 skipped,
 7 errors` with `--continue-on-collection-errors` — the seven are `No module
-named 'rclpy'` and the two skips `No module named 'paho'`, neither of which
-Windows has or is supposed to.
+named 'rclpy'` and the five skips `No module named 'paho'` (the two MQTT
+integration files, the two fleet-CLI/manager unit files and the send_order
+probe), neither of which Windows has or is supposed to.
 
 ## Validation checklist
 

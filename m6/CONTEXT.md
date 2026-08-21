@@ -83,9 +83,10 @@ F-program validation.
 ## The VDA 5050 agent: one per truck, and it is not a safety path
 
 **M6.2 gave each vehicle `ipc/vda_agent.py`**, started by `step6.sh` beside
-that vehicle's nav node, and the stack is twenty processes now: the broker,
-the world, and nine per truck. The agent is the only door into this stack
-from off the machine.
+that vehicle's nav node, and the stack was twenty processes then: the
+broker, the world, and nine per truck. M6.3 made it twenty-one — one fleet
+manager over the pair of them, in its own section below. The agent is the
+only door into this stack from off the machine.
 
 **Owner ruling 2026-08-21: full-route orders from day one.** Master control
 sends `nodes` + `edges`; the vehicle drives the released nodes exactly, in
@@ -122,13 +123,85 @@ truck that is about to drive. nav publishes at 10 Hz, so 0.3 s is three
 periods of margin; the cost is a bounded ~0.4 s window in which a genuine
 refusal is not yet believed, and the next state closes it.
 
-**M6.3 takes two things away from here.** The **broker** is one of them: it
-runs on this machine only because M6.2 *is* one machine, and a broker
-belongs to the fleet side — one for every truck, on a machine that is not a
-vehicle. `tools/send_order.py` is the other: it is master control's hand
-until master control exists, and M6.3 deletes it. When the broker moves,
-`PATTERNS`, `recorded()`, the `:1883` pre-flight and the two `BROKER_*`
-variables in `step6.sh` are the places that come out together.
+**M6.3 came for two things and took one.** `tools/send_order.py` was master
+control's hand until master control existed; it is now SUPERSEDED — kept, with
+a header saying so, as a low-level one-truck probe, because a debugging tool
+that talks straight to a vehicle's door is worth having and deleting it would
+only mean rewriting it the next time an order is refused. The **broker** did
+not move: a broker belongs to one machine that is not a vehicle, and this rig
+*is* one machine — the trucks, the fleet manager and the broker share it. When
+the cell ever gets a machine of its own, `PATTERNS`, `recorded()`, the `:1883`
+pre-flight, the two `BROKER_*` variables and the `spawn fleet` line in `m6.sh`
+are the places that come out together.
+
+## The fleet manager: one for the cell, and it is not a safety path
+
+**M6.3 put master control above the two trucks.** `fleet/fleet_manager.py` is
+paho-only — no ROS, no `VEHICLE`, no DDS domain — started by `m6.sh` as the
+stack's twenty-first pid; `fleet/fleet_cli.py` is the operator's hand and
+screen. Work enters the cell as a **transport**: two station ids,
+`fleet_cli.py submit S1 S4`. Which truck drives it is the FLEET's decision,
+made from the trucks' own reported positions over the vehicle's own route
+graph, and there is deliberately no way to name a vehicle from the CLI.
+
+**Owner rulings 2026-08-21, and they are the shape of the code:**
+
+- **A transport is TWO LEGS.** An order to the pickup, a dwell standing in for
+  the fork cycle (`DWELL_S = 3.0 s`), an order to the dropoff. That is why the
+  task machine has a `DWELL` wedged between two `ASSIGNED` states rather than
+  one order per task. There is no `dwell_done` event: a timer expiring is not
+  something that happened to the task, it is permission for the manager to
+  build leg 2, and the only thing that leaves `DWELL` is the leg-2 order
+  actually going out.
+- **On loss mid-task the task RETURNS TO THE QUEUE HEAD** and the other truck
+  may take it; the lost vehicle gets nothing until it is idle-confirmed again.
+  The interrupted transport is the oldest work in the cell, and re-queueing it
+  behind newer tasks would punish it twice.
+- **`OFFLINE` is a loss, exactly as `CONNECTIONBROKEN` is** — absorbed as a
+  ruling during M6.3's review, where it began as a deviation. A clean goodbye
+  and a will differ in how politely the link ended, not in whether the fleet
+  still has a path to that truck, and the loss ruling is about the TASK.
+
+**The loss-return race is real, and it is logged rather than pretended away.**
+A lost vehicle that comes back holding an order whose task the fleet has
+already given to somebody else is sent exactly one `cancelOrder` — the only
+flow in which the manager cancels anything at all. The M6.2 agent *resumes* a
+kept order on reconnect (see the section above), so the returning truck may
+drive for the seconds the cancel takes to land. The manager says so in its own
+log at the moment it happens and PROOF.md's Gate 4 measures the window.
+
+**Adopt-by-waiting is not a mechanism; it falls out of the idle rule.** A
+restarted manager has no journal and no tasks — the queue is in memory, it
+re-syncs from retained `connection` topics and the states that follow, and the
+operator resubmits. A truck still driving an `ft-` leg is simply *not idle*, so
+nothing is assigned to it and nothing needs cancelling; it is adopted by being
+left alone. **Startup cancels nothing, ever.** The one subtlety underneath:
+what counts as executing is an orderId AND a non-empty `nodeStates`, because
+the M6.2 agent keeps its orderId after arrival forever — orderId alone would
+mean no truck is ever idle again.
+
+**The screen is the retained document, and its ages are computed when it is
+built.** `fleet/status` (retained, QoS 1, republished on change and every 2 s)
+is the operator's only window. A dead feed therefore shows an age that GROWS
+rather than a frozen row that still reads EN-ROUTE — the Gate 6 carry-in. The
+manager sets NO last-will for itself on purpose: a truck's death is a protocol
+event, the fleet's is not, and a retained document going stale is a signal that
+cannot lie the way a "manager: ALIVE" flag can. `fleet_cli.py status` prints
+the document's own age in its header for exactly that reason.
+
+**What this layer may never become** is written down in `fleet/README.md` as
+three standing invariants, and every file under `fleet/` cites them: no ROS
+lives here; the only path to a vehicle is VDA 5050 over MQTT, so the worst
+master control can command is a route and a cancel; and losing the fleet must
+DEGRADE, never endanger — kill the manager and every truck keeps its order,
+the guards keep guarding, the F-CPU keeps the chain, and the e-stop is still
+the brake.
+
+**M6.4 takes traffic.** Two trucks in one aisle are still each other's problem:
+there is no edge or zone reservation, no deadlock resolution and no speed
+supervision between them — `order.edge.maxSpeed` is parsed and not enforced.
+The route is IN the order (the full-route ruling) precisely so that M6.4's
+reservations have something to reserve.
 
 ## What is proven, and what is not
 
@@ -143,7 +216,7 @@ for each; do not read an unticked gate as a passed one.
 
 Loop-level evidence sits beside it: `tests/test_step6_virtual_loop.py`
 drives the real `step6.control_loop` against `VirtualFPLC` over real UDP
-sockets, parameterised over BOTH port pairs. 302 tests pass under WSL.
+sockets, parameterised over BOTH port pairs. 370 tests pass under WSL.
 
 ## Full-stack RTF: about 0.75, and Gate 1 does not cover it
 

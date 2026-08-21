@@ -96,6 +96,8 @@ SUBMIT_TOPIC = "fleet/task/submit"
 STATUS_TOPIC = "fleet/status"
 REFUSED_MAX = 10         # the status document is a screen, not a log
 HISTORY_MAX = 20         # ditto, per task
+DONE_SHOWN = 5           # ditto, per finished task: the book keeps all
+WIRE_WARN_S = 2.0        # a 10 Hz retry must not write 10 Hz of log
 
 
 def _xy(pos):
@@ -144,6 +146,9 @@ class FleetManager:
         self.stop = False
         self.last_status = 0.0
         self.last_shape = None
+        self.last_wire_warn = 0.0
+        self.connected = False
+        self.screen_said = False
         self.mq = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
                               client_id="fleet-manager")
         self.mq.on_connect = self._on_connect
@@ -180,8 +185,10 @@ class FleetManager:
             except queue.Empty:
                 break
             if kind == "connected":
+                self.connected = True
                 self._subscribe()
             elif kind == "lost":
+                self.connected = False
                 self.log.warning("broker lost - retrying inside 1-8 s; "
                                  "the trucks keep their orders")
             elif kind == SUBMIT_TOPIC:
@@ -256,10 +263,22 @@ class FleetManager:
         state clears not_eligible); the cancel is about STOPPING it."""
         veh["lost"] = False
         veh["not_eligible"] = True
-        order_id = self.stale.pop(serial, None)
+        order_id = self.stale.get(serial)
         if not order_id:
             return
-        self._instant(serial, "cancelOrder")
+        if not self._instant(serial, "cancelOrder"):
+            # THE ENTRY STAYS. A cancel that never left this process is
+            # not a cancel, and forgetting the order id would leave the
+            # only record of what that truck is holding nowhere at all;
+            # kept, the next time it comes back the cancel is retried.
+            # There is no retry sooner than that, and the honest reason
+            # is that a manager whose socket is down has no way to reach
+            # the vehicle anyway - it is not driving on our word.
+            self.log.error("%s returned holding %s and the cancelOrder "
+                           "could not be published - it may resume",
+                           serial, order_id)
+            return
+        del self.stale[serial]
         self.log.warning(
             "%s returned holding %s - cancelOrder sent. The agent "
             "resumes a kept order on reconnect, so it may drive until "
@@ -437,6 +456,16 @@ class FleetManager:
         bytes. qos 0 matches what the agent's subscription grants -
         anything higher here would be reliability on the first hop
         only, which is theatre dressed as a guarantee.
+
+        AND THE RETURN CODE IS READ, because qos 0 has no memory: paho
+        DROPS a qos-0 publish made while the client is off the wire and
+        reports MQTT_ERR_NO_CONN - it does not queue it the way it
+        queues qos 1. A caller that took the call itself as delivery
+        would advance the task on an order no truck ever heard, and the
+        fleet's own dwell override would then hold that vehicle busy
+        for a leg that never began: a task stuck forever and a truck
+        with it. So a failed publish is a False, the task stays exactly
+        where it was, and the next drain sends it again.
         """
         if order is None:
             self._refuse_order(task, serial, leg, "no route")
@@ -450,8 +479,33 @@ class FleetManager:
         if reason:
             self._refuse_order(task, serial, leg, reason)
             return False
-        self.mq.publish(topic, json.dumps(order), qos=0)
+        info = self.mq.publish(topic, json.dumps(order), qos=0)
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            self._wire_failed(leg, task, serial, info.rc)
+            return False
         return True
+
+    def _wire_failed(self, leg, task, serial, rc):
+        """The broker link is down and the order did not go. NOT a
+        refusal: nothing is wrong with the order, the vehicle stays
+        eligible and the task keeps its place - this is the one failure
+        here that fixes itself, because paho reconnects inside 1-8 s
+        and the drain that follows resends.
+
+        THE LOG IS THROTTLED BECAUSE THE RETRY IS NOT. The drain runs at
+        10 Hz, so an outage of one minute would otherwise be six hundred
+        identical lines standing between the operator and the line that
+        matters. One line per WIRE_WARN_S says the same thing.
+        """
+        now = time.monotonic()
+        if now - self.last_wire_warn < WIRE_WARN_S:
+            return
+        self.last_wire_warn = now
+        self.log.warning(
+            "%s for %s not published to %s (paho rc %s) - a qos 0 "
+            "publish made off the wire is DROPPED, so %s stays %s and "
+            "the next drain resends", leg, task["task_id"], serial, rc,
+            task["task_id"], task["state"])
 
     def _refuse_order(self, task, serial, leg, why):
         """SHOULD NEVER FIRE - order_builder's suite validates all 10x9
@@ -468,13 +522,16 @@ class FleetManager:
         self._requeue(task["task_id"], "unbuildable {}: {}".format(leg, why))
 
     def _instant(self, serial, action_type):
+        """True when the action reached the socket. Same qos-0 reading
+        as _publish_order: off the wire it is dropped, not queued."""
         topic = vm.topic(serial, "instantActions")
         msg = dict(self.counters.header(topic, serial))
         msg["actions"] = [{"actionId": uuid.uuid4().hex,
                            "actionType": action_type,
                            "blockingType": "HARD",
                            "actionParameters": []}]
-        self.mq.publish(topic, json.dumps(msg), qos=0)
+        info = self.mq.publish(topic, json.dumps(msg), qos=0)
+        return info.rc == mqtt.MQTT_ERR_SUCCESS
 
     # ---- the admin wire ----
     def _on_submit(self, payload):
@@ -537,9 +594,23 @@ class FleetManager:
                 "state_age_s": None if age is None else round(age, 1),
                 "lost": bool(row["lost"]),
                 "not_eligible": bool(row["not_eligible"])}
+        # THE DOCUMENT IS TRIMMED AND THE BOOK IS NOT. Every task the
+        # fleet has ever taken stays in self.tasks - that list is what
+        # answers "is this taskId already known", and a duplicate
+        # submission has to be refused for the whole run, not until the
+        # task it collides with scrolled off a screen. What is retained
+        # is a SCREEN: the work in flight, plus the last few
+        # completions for the operator who wants to see the shift
+        # moving, plus a count of the rest. Left whole, the retained
+        # document would grow by a task every transport and be
+        # republished every 2 s for the length of a shift.
+        live = [t for t in self.tasks if t["state"] != "DONE"]
+        done = sorted((t for t in self.tasks if t["state"] == "DONE"),
+                      key=lambda t: t.get("done_ts") or 0.0)
         return {"ts": time.time(), "manager": manager,
                 "vehicles": vehicles,
-                "tasks": [dict(t) for t in self.tasks],
+                "tasks": [dict(t) for t in live + done[-DONE_SHOWN:]],
+                "done_count": len(done),
                 "queue_len": sum(1 for t in self.tasks
                                  if t["state"] == "QUEUED"),
                 "refused": list(self.refused)}
@@ -551,7 +622,7 @@ class FleetManager:
         numbers that drift."""
         return json.dumps(
             {"m": doc["manager"], "q": doc["queue_len"],
-             "r": len(doc["refused"]),
+             "r": len(doc["refused"]), "d": doc["done_count"],
              "v": {s: [r["connection"], r["operating_mode"],
                        r["executing_order"], r["lost"], r["not_eligible"]]
                    for s, r in doc["vehicles"].items()},
@@ -567,6 +638,16 @@ class FleetManager:
             return
         self.last_shape, self.last_status = shape, now
         self.mq.publish(STATUS_TOPIC, json.dumps(doc), qos=1, retain=True)
+        # SAID ONCE, AND ONLY WITH THE LINK UP, because it is the moment
+        # the operator's screen begins to exist: `fleet_cli.py status`
+        # has nothing to render until a retained document reaches the
+        # broker. Publishes made before the CONNACK are queued by paho
+        # (qos 1) and are not on the broker yet, so claiming a live
+        # screen for one of those would be the wrong kind of confident.
+        if self.connected and not self.screen_said:
+            self.screen_said = True
+            self.log.info("first status published on %s, retained - the "
+                          "operator's screen is live", STATUS_TOPIC)
 
     # ---- shutdown ----
     def _requeue(self, task_id, why):
