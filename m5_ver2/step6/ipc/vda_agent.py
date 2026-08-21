@@ -28,6 +28,23 @@ correct here because THIS PROCESS IS ONE VEHICLE. status_contract binds
 VID once at import from env VEHICLE; a second vehicle is a second
 process with its own counters. Sharing one instance across vehicles
 would merge two vehicles' headerId sequences into one - do not.
+
+THE AGENT BELIEVES NAV, NOT ITSELF. Publishing a route is a request,
+not an outcome: nav_core refuses one it cannot drive (not in auto,
+malformed, no pose yet) and cancels one already running when the mode
+leaves auto, and it says so in /auto/state's `note` while the agent,
+believing its own publish, would go on reporting a truck that drives.
+cb_nav therefore reconciles - a nav that has gone IDLE with a refusal
+or cancel note and no goal ends `executing`, loudly, on the state.
+
+  THE ORDER SURVIVES THAT. Only `executing` is cleared; order and
+  Progress stay, so the recovery path is: mode returns to AUTOMATIC ->
+  a cancelOrder clears it, or the next broker bounce reconnects and
+  _resume re-issues the remaining released nodes from the current pose
+  (it fires only when not executing, which is now true). _resume checks
+  AUTOMATIC itself before it publishes, so supervision returning during
+  a teleop shift holds the order instead of asking for a drive nav
+  would only refuse again.
 """
 import json
 import math
@@ -57,6 +74,21 @@ MQTT_PORT = int(os.environ.get("VDA_MQTT_PORT", "1883"))
 DRAIN_HZ = 10.0
 STATE_PERIOD_S = 2.0
 DRIVING_MPS = 0.02
+# HOW LONG A FRESHLY PUBLISHED ROUTE IS GIVEN BEFORE cb_nav IS ALLOWED
+# TO CALL IT REFUSED. nav_node publishes /auto/state at 10 Hz
+# (TICK_HZ 20, STATE_EVERY 2), so a state message already in flight
+# when the route goes out is at most 0.1 s old and still describes the
+# world BEFORE the route - three periods of margin.
+#
+# WITHOUT THIS THE RECONCILER EATS ITS OWN RECOVERY, and the sequence
+# is ordinary, not exotic: cancelOrder (or a supervision loss) publishes
+# the empty goal, nav answers _cancel("cancelled") - IDLE, goal None,
+# note "cancelled" - and every state it sends afterwards repeats that
+# note. Publish the next route and the in-flight one arrives looking
+# exactly like a refusal of the route that has not been read yet, so
+# the agent would stop believing a truck that is about to drive and
+# strand the order (ARRIVED is only read while executing).
+NAV_SETTLE_S = 0.3
 # ------------------------------------------------------------------
 
 
@@ -95,6 +127,7 @@ class VdaAgent(Node):
         self.executing = False
         self.action_states = []
         self.last_state_pub = 0.0
+        self.route_sent_at = 0.0     # NAV_SETTLE_S is measured from here
 
         self.pub_route = self.create_publisher(String, AUTO_ROUTE_TOPIC, 10)
         self.pub_goal = self.create_publisher(String, AUTO_GOAL_TOPIC, 10)
@@ -149,10 +182,17 @@ class VdaAgent(Node):
             self.publish_state("safety change")
 
     def cb_fields(self, msg):
+        # A report that is not an object is a report this node cannot
+        # read, and any_pf_false would answer False for it - "no
+        # violation", from a shape nobody understood. Same rule as the
+        # unreadable packet above it: not knowing reads as violated.
         try:
-            self.pf_violated = vm.any_pf_false(json.loads(msg.data))
+            report = json.loads(msg.data)
         except ValueError:
             self.pf_violated = True
+            return
+        self.pf_violated = (vm.any_pf_false(report)
+                            if isinstance(report, dict) else True)
 
     def cb_nav(self, msg):
         try:
@@ -162,14 +202,32 @@ class VdaAgent(Node):
         if not isinstance(nav, dict):
             return
         state, goal = nav.get("state", ""), nav.get("goal", "")
+        note = nav.get("note", "")
         arrived_now = (state == "ARRIVED" and self.nav_state != "ARRIVED"
                        and self.executing
                        and goal == self.order["orderId"])
+        # NAV STOPPED AND IT WAS NOT AN ARRIVAL. IDLE with a note is
+        # nav_core saying it refused the route or cancelled the drive;
+        # a route it accepted would have made `goal` our orderId, so an
+        # empty goal beside that note means nothing of ours is running.
+        # "mode left auto" is admitted by name because it is the one
+        # note that matters most and the one an operator will see.
+        refused_now = (
+            self.executing and state == "IDLE" and note
+            and (goal in ("", None) or note == "mode left auto")
+            and time.monotonic() - self.route_sent_at >= NAV_SETTLE_S)
         self.nav_state, self.nav_goal = state, goal
         if arrived_now:
             self.progress.complete()
             self.executing = False
             self.publish_state("arrived")
+        elif refused_now:
+            # The order is KEPT - only the belief that it is being
+            # driven goes. See the module docstring's recovery path.
+            self.executing = False
+            self.get_logger().warn(
+                "nav is not driving this order: {}".format(note))
+            self.publish_state("nav refused/cancelled")
 
     def cb_odom(self, msg):
         p, q = msg.pose.pose.position, msg.pose.pose.orientation
@@ -216,6 +274,22 @@ class VdaAgent(Node):
             self.executing = False
 
     def _resume(self):
+        """Re-issue the remaining released nodes from the pose we are at.
+
+        THE MODE IS CHECKED HERE AND NOWHERE ELSE ON THIS PATH. The
+        accept branch gets its AUTOMATIC guarantee from accept_order,
+        but nothing re-asks it on the way back from a broker bounce -
+        and a shift that went to teleop while the link was down would
+        have this method request a drive nav_core can only refuse. The
+        order is HELD, not dropped: the truck is standing still, the
+        released nodes are still the work, and the next reconnect in
+        AUTOMATIC issues them.
+        """
+        if self.operating_mode() != "AUTOMATIC":
+            self.get_logger().warn(
+                "supervision back but not in AUTOMATIC - order held, "
+                "not driving")
+            return
         remaining = self.progress.nodes[self.progress.reached:]
         points = [list(self.pose[:2])] + [
             [n["nodePosition"]["x"], n["nodePosition"]["y"]]
@@ -224,6 +298,7 @@ class VdaAgent(Node):
         self.pub_route.publish(String(data=json.dumps(
             {"points": points, "arrive_m": arrive_m,
              "label": self.order["orderId"]})))
+        self.route_sent_at = time.monotonic()
         self.executing = True
         self.get_logger().info("supervision back - route re-issued")
 
@@ -265,6 +340,7 @@ class VdaAgent(Node):
         self.pub_route.publish(String(data=json.dumps(
             {"points": route, "arrive_m": arrive_m,
              "label": msg["orderId"]})))
+        self.route_sent_at = time.monotonic()
         self.executing = True
         self.publish_state("order accepted")
 

@@ -55,7 +55,15 @@ def rig():
         "vendored mosquitto did not listen on {} (exit {!r}) - check "
         "LD_LIBRARY_PATH={}".format(PORT, broker.poll(), BROKER_LIB))
     os.environ["VDA_MQTT_PORT"] = PORT
-    os.environ.setdefault("VEHICLE", "f1")
+    # BOTH TRANSPORTS ARE FENCED, AND THE ROS ONE IS THE DANGEROUS HALF.
+    # MQTT is private already (its own broker on 18883). DDS is not: the
+    # live stack runs at ROS_DOMAIN_ID 96 (step6.sh:48), and this test
+    # publishes /f1/auto/route - on 96 that is a real forklift being
+    # handed a real route by a test run. 89 is nobody's. VEHICLE is SET,
+    # not defaulted, for the same reason: inheriting f2 from an operator
+    # shell would aim every topic here at the other truck.
+    os.environ["ROS_DOMAIN_ID"] = "89"
+    os.environ["VEHICLE"] = "f1"
     rclpy.init()
     import vda_agent
     agent = vda_agent.VdaAgent()
@@ -198,3 +206,73 @@ def test_unsupported_instant_action_fails_and_says_why(rig):
                 if e["errorType"] == "unsupportedAction"]
     assert said_why and said_why[0]["errorReferences"] == [
         {"referenceKey": "actionId", "referenceValue": "a-9"}]
+
+
+def test_nav_refusal_stops_the_agent_believing_it_drives(rig):
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    probe.publish("uagv/v2/amragent/f1/order",
+                  json.dumps(valid_order()), qos=0)
+    spin([agent, helper], 1.5)
+    assert agent.executing, "the order was never taken up"
+    before = len([p for t, p in caught["mqtt"] if t.endswith("/state")])
+    # What nav_core publishes when the mode leaves auto mid-drive:
+    # _cancel("mode left auto") -> IDLE, goal None, note set.
+    nav_pub.publish(String(data=json.dumps(
+        {"state": "IDLE", "goal": None, "note": "mode left auto",
+         "route": [], "pose": [0.0, 0.0, 0.0]})))
+    spin([agent, helper], 1.0)
+    assert not agent.executing, "the agent still believes it is driving"
+    states = [p for t, p in caught["mqtt"] if t.endswith("/state")]
+    assert len(states) > before, "no state told the fleet manager"
+    # The order is KEPT - only the belief that it is running is gone.
+    assert agent.order["orderId"] == "o-int-1"
+    assert agent.progress is not None
+    assert states[-1]["orderId"] == "o-int-1"
+
+
+def test_a_stale_nav_note_does_not_cancel_a_fresh_route(rig):
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    probe.publish("uagv/v2/amragent/f1/order",
+                  json.dumps(valid_order()), qos=0)
+    spin([agent, helper], 1.5)
+    assert agent.executing
+    # The cancelOrder-then-new-order sequence: nav's "cancelled" note
+    # repeats on every state it sends, so the one already in flight when
+    # the route goes out looks exactly like a refusal of a route nav has
+    # not read yet. Restamping route_sent_at IS "the route just went
+    # out" - the spin below stays inside NAV_SETTLE_S on purpose.
+    agent.route_sent_at = time.monotonic()
+    nav_pub.publish(String(data=json.dumps(
+        {"state": "IDLE", "goal": None, "note": "cancelled",
+         "route": [], "pose": [0.0, 0.0, 0.0]})))
+    spin([agent, helper], 0.2)
+    assert agent.executing, "a state older than the route cancelled it"
+
+
+def test_resume_without_automatic_holds_the_order(rig):
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    probe.publish("uagv/v2/amragent/f1/order",
+                  json.dumps(valid_order()), qos=0)
+    spin([agent, helper], 1.5)
+    routes = len(caught["route"])
+    # The shift went to teleop while the broker was down; supervision
+    # comes back and asks for the drive again.
+    agent.mode = "teleop"
+    agent.executing = False
+    agent._resume()
+    spin([agent, helper], 0.5)
+    assert len(caught["route"]) == routes, "asked nav for a refused drive"
+    assert not agent.executing
+    assert agent.order["orderId"] == "o-int-1", "the order was dropped"
