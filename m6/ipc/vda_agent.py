@@ -15,6 +15,21 @@ Supervision loss (M1 s.7): on disconnect publish the empty goal, KEEP
 the order; on reconnect re-issue the remaining released nodes as a
 fresh route from the current pose.
 
+A CANCEL IS A CONVERSATION, NOT A SHOUT (M6.3 Fleet Gate 4, measured
+2026-08-22). Every stop this node performs goes through the empty goal
+on /auto/goal, and a single publish of it is not a stop - it is a
+request that may reach nobody. It did: a respawned agent published the
+empty goal 1.1 s after creating the publisher, before DDS had matched
+nav_node's subscription; the message was dropped, the cancelOrder
+actionState still said FINISHED, and the truck drove another 37.09 s
+and 6.743 m along a route the fleet had already handed to another
+vehicle. So the empty goal is now REPUBLISHED every drain until cb_nav
+shows nav is no longer driving our route, the actionState stays RUNNING
+until that is seen, and a cancel that is never confirmed goes FAILED
+with an errors[] entry rather than quietly claiming a stop nobody
+watched. _begin_cancel / _pump_cancel own that loop and both the
+cancelOrder action and the supervision-loss stop go through it.
+
 PAHO 2.x IS WHAT IS INSTALLED (2.1.0, measured). The client is built
 with an explicit CallbackAPIVersion.VERSION2 and the callbacks carry
 that API's signatures - `reason_code` objects rather than an int `rc`.
@@ -89,6 +104,13 @@ DRIVING_MPS = 0.02
 # the agent would stop believing a truck that is about to drive and
 # strand the order (ARRIVED is only read while executing).
 NAV_SETTLE_S = 0.3
+# HOW LONG A CANCEL KEEPS ASKING BEFORE IT ADMITS IT DID NOT SEE A STOP.
+# The empty goal goes out at DRAIN_HZ, so this is fifty attempts - far
+# past any DDS discovery window (Fleet Gate 4's miss was one publish
+# inside ~1 s of node startup) and still short enough that an operator
+# reading a FAILED actionState is reading about a truck that is
+# probably still moving NOW, not one that stopped a minute ago.
+CANCEL_CONFIRM_S = 5.0
 # ------------------------------------------------------------------
 
 
@@ -126,6 +148,7 @@ class VdaAgent(Node):
         self.horizon = []
         self.executing = False
         self.action_states = []
+        self.cancel_pending = None   # the closed-loop cancel, or None
         self.last_state_pub = 0.0
         self.route_sent_at = 0.0     # NAV_SETTLE_S is measured from here
 
@@ -263,6 +286,9 @@ class VdaAgent(Node):
                 self._on_order(payload)
             elif kind.endswith("/instantActions"):
                 self._on_actions(payload)
+        # AFTER the inbox and BEFORE the periodic state: a cancel that
+        # confirms on this pass should say so on this pass's state.
+        self._pump_cancel()
         if time.monotonic() - self.last_state_pub >= STATE_PERIOD_S:
             self.publish_state("periodic")
 
@@ -285,8 +311,13 @@ class VdaAgent(Node):
             "broker lost - controlled stop, order kept - paho retrying "
             "inside 1-8 s")
         if self.executing:
-            self.pub_goal.publish(String(data=""))
-            self.executing = False
+            # THE SAME CLOSED LOOP AS A cancelOrder, minus the
+            # actionStates: nobody asked for this stop, so there is
+            # nothing to report FINISHED - but it still has to be SEEN,
+            # and this is the path that runs with the broker already
+            # gone, where nothing downstream would ever notice a goal
+            # that missed.
+            self._begin_cancel(why="broker lost")
 
     def _resume(self):
         """Re-issue the remaining released nodes from the pose we are at.
@@ -315,6 +346,14 @@ class VdaAgent(Node):
              "label": self.order["orderId"]})))
         self.route_sent_at = time.monotonic()
         self.executing = True
+        if self.cancel_pending is not None:
+            # The agent has just deliberately re-asked for this drive,
+            # so the stop it was chasing is moot. Dropping the entry
+            # here is what keeps _pump_cancel from cancelling the route
+            # this method published one line ago.
+            self.get_logger().info(
+                "resume supersedes the cancel that was still pending")
+            self.cancel_pending = None
         self.get_logger().info("supervision back - route re-issued")
 
     def operating_mode(self):
@@ -372,10 +411,18 @@ class VdaAgent(Node):
             aid = str(act.get("actionId", "?"))
             kind = act.get("actionType", "")
             if kind == "cancelOrder":
-                self.pub_goal.publish(String(data=""))
+                # THE ORDER IS DROPPED HERE AND THE STOP IS CHASED IN
+                # _pump_cancel. Ownership of the work ends the moment
+                # the fleet asks - there is no version of this where the
+                # agent keeps driving an order it was told to cancel -
+                # but the actionState stays RUNNING until nav says it
+                # stopped, because FINISHED is a claim about the truck
+                # and not about this process. _begin_cancel reads
+                # self.order for the id it is cancelling, so it goes
+                # first.
+                self._begin_cancel(action_id=aid)
                 self.order, self.progress = None, None
-                self.horizon, self.executing = [], False
-                self._set_action(aid, kind, "FINISHED")
+                self.horizon = []
             elif kind == "stateRequest":
                 self._set_action(aid, kind, "FINISHED")
             elif kind == "factsheetRequest":
@@ -398,6 +445,105 @@ class VdaAgent(Node):
                         {"referenceKey": "actionId",
                          "referenceValue": aid}]})
         self.publish_state("actions handled", extras)
+
+    # ---- the closed-loop cancel ----
+    def _begin_cancel(self, action_id=None, why=""):
+        """Start asking nav to stop, and keep asking until it says it has.
+
+        The first publish happens HERE rather than on the next drain, so
+        a cancel that nav is already listening for costs nothing extra;
+        everything after it is _pump_cancel's.
+        """
+        now = time.monotonic()
+        self.cancel_pending = {
+            "action_id": action_id,
+            "order_id": ((self.order or {}).get("orderId")
+                         or self.nav_goal or ""),
+            "began": now,
+            "deadline": now + CANCEL_CONFIRM_S,
+            "sent": 0,
+            "why": why}
+        if action_id is not None:
+            self._set_action(action_id, "cancelOrder", "RUNNING")
+        self.executing = False
+        self._pump_cancel()
+
+    def _cancel_confirmed(self):
+        """True only when nav has SAID it is not driving our route.
+
+        SILENCE IS NOT CONFIRMATION, and that is the whole lesson of
+        Fleet Gate 4: a just-restarted agent has heard no /auto/state at
+        all, and reading that emptiness as a stop is exactly the lie the
+        gate caught. So nav_state has to be something nav actually
+        published. nav_core._cancel sets IDLE with goal None from ANY
+        state including ARRIVED, so IDLE with no goal is the plain
+        answer; a goal that is no longer ours covers the case where the
+        truck has since been given other work and this cancel is moot.
+        """
+        if not self.nav_state:
+            return False
+        if self.nav_state == "IDLE" and not self.nav_goal:
+            return True
+        target = self.cancel_pending["order_id"]
+        return bool(target) and self.nav_goal != target
+
+    def _pump_cancel(self):
+        """One pass of a pending cancel: confirm it, give up, or ask again."""
+        pending = self.cancel_pending
+        if pending is None:
+            return
+        now = time.monotonic()
+        if self._cancel_confirmed():
+            self.cancel_pending = None
+            if pending["action_id"] is not None:
+                self._set_action(pending["action_id"], "cancelOrder",
+                                 "FINISHED")
+            self.get_logger().info(
+                "cancel confirmed by nav after {} publish(es), {:.2f} s"
+                .format(pending["sent"], now - pending["began"]))
+            self.publish_state("cancel confirmed")
+            return
+        if now >= pending["deadline"]:
+            self.cancel_pending = None
+            if pending["action_id"] is not None:
+                self._set_action(pending["action_id"], "cancelOrder",
+                                 "FAILED")
+            self.get_logger().error(
+                "cancel NOT confirmed in {:.1f} s and {} publishes - nav "
+                "never reported it stopped driving {!r}. Assume this "
+                "truck is STILL MOVING.".format(
+                    CANCEL_CONFIRM_S, pending["sent"],
+                    pending["order_id"] or "its route"))
+            self.publish_state("cancel unconfirmed", [{
+                "errorType": "cancelUnconfirmed",
+                "errorLevel": "WARNING",
+                "errorDescription":
+                    "the empty goal went out {} times over {:.1f} s and "
+                    "nav never reported a stop - this vehicle may still "
+                    "be driving".format(pending["sent"], CANCEL_CONFIRM_S),
+                "errorReferences": [
+                    {"referenceKey": "orderId",
+                     "referenceValue": pending["order_id"] or ""}]}])
+            return
+        if self.executing:
+            # A ROUTE IS RUNNING AGAIN - _resume or a fresh order has
+            # deliberately re-asked for a drive, and an empty goal
+            # published now would cancel THAT. The entry stays; the
+            # confirmation above reads nav's own goal and answers on a
+            # later pass.
+            return
+        if pending["sent"] == 0 \
+                and self.pub_goal.get_subscription_count() == 0:
+            # The retry loop below already covers this; the line exists
+            # for whoever reads the log next, because Fleet Gate 4 spent
+            # 37.09 s and 6.743 m inside exactly this window with
+            # nothing in any log to say so.
+            self.get_logger().warn(
+                "nav has not matched {} yet - this empty goal reaches "
+                "nobody; retrying at {:.0f} Hz until nav says it stopped"
+                .format(AUTO_GOAL_TOPIC, DRAIN_HZ))
+        self.pub_goal.publish(String(data=""))
+        pending["sent"] += 1
 
     def _set_action(self, aid, kind, status):
         self.action_states = [a for a in self.action_states

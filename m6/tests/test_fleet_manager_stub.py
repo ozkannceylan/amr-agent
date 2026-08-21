@@ -286,3 +286,83 @@ def test_a_completion_changes_the_shape_so_the_screen_is_republished(
     before = manager._shape(manager._status(now))
     _done(manager, "t-8", 1008.0)
     assert manager._shape(manager._status(now)) != before
+
+
+# ---- the cancel that has to be chased (M6.3 Fleet Gate 4) ----
+# One successful publish is not one landed cancel. The gate measured a
+# vehicle that received a cancelOrder, reported the action FINISHED and
+# kept driving for 37.09 s. The agent now confirms its own stop against
+# nav; this side keeps the manager honest about what it has SEEN, which
+# is only ever the vehicle's own state stream.
+
+
+def cancels(stub):
+    return [msg for topic, msg, _, _ in stub.published
+            if topic.endswith("/instantActions")]
+
+
+def driving(order_id, x=0.0, y=0.0):
+    return {"operatingMode": "AUTOMATIC",
+            "agvPosition": {"x": x, "y": y},
+            "orderId": order_id,
+            "nodeStates": [{"nodeId": "wp1", "sequenceId": 0,
+                            "released": True}]}
+
+
+def _returned_holding(manager, stub):
+    """A vehicle lost mid-task and back on the wire, cancel sent."""
+    now = time.monotonic()
+    row = idle(manager, "f1", "S1", now)
+    task = submit(manager, "t-chase")
+    manager._assign(now)
+    order_id = task["order_id"]
+    manager._on_connection("f1", row,
+                           {"connectionState": "CONNECTIONBROKEN"})
+    manager._on_connection("f1", row, {"connectionState": "ONLINE"})
+    assert len(cancels(stub)) == 1
+    assert "f1" not in manager.stale
+    assert manager.cancelled["f1"]["order_id"] == order_id
+    return row, order_id, now
+
+
+def test_a_cancel_the_vehicle_ignores_is_re_sent(fleet):
+    manager, stub = fleet
+    row, order_id, now = _returned_holding(manager, stub)
+    still = driving(order_id)
+
+    manager._on_state("f1", row, still, now)          # the grace starts here
+    assert len(cancels(stub)) == 1
+    manager._on_state("f1", row, still, now + 1.0)    # inside the grace
+    assert len(cancels(stub)) == 1, "shouted over the reply it waits for"
+    manager._on_state("f1", row, still, now + 4.0)    # past grace and period
+    assert len(cancels(stub)) == 2, "the cancel was never chased"
+    manager._on_state("f1", row, still, now + 5.0)    # throttled
+    assert len(cancels(stub)) == 2
+    manager._on_state("f1", row, still, now + 9.0)
+    assert len(cancels(stub)) == 3
+
+    # THE VEHICLE'S OWN STATE ENDS THE CHASE, never our publish.
+    manager._on_state("f1", row, dict(still, orderId="", nodeStates=[]),
+                      now + 10.0)
+    assert "f1" not in manager.cancelled
+    manager._on_state("f1", row, dict(still, orderId="", nodeStates=[]),
+                      now + 30.0)
+    assert len(cancels(stub)) == 3, "still chasing an order it let go of"
+
+
+def test_a_vehicle_that_never_lets_go_is_named_and_the_chase_stops(fleet):
+    manager, stub = fleet
+    row, order_id, now = _returned_holding(manager, stub)
+    still = driving(order_id)
+    for step in range(0, 40, 4):
+        manager._on_state("f1", row, still, now + step)
+    assert len(cancels(stub)) == 1 + fm.CANCEL_RETRY_MAX, (
+        "the manager kept shouting past its own cap")
+    assert "f1" not in manager.cancelled
+    named = [r for r in manager.refused if r["taskId"] == order_id]
+    assert named and "never dropped" in named[0]["why"], (
+        "a truck that ignored every cancelOrder is not on the "
+        "operator's screen")
+    # And it stays stopped: no further state re-arms the chase.
+    manager._on_state("f1", row, still, now + 100.0)
+    assert len(cancels(stub)) == 1 + fm.CANCEL_RETRY_MAX

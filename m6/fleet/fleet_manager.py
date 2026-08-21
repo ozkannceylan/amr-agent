@@ -58,6 +58,18 @@ it may drive for the seconds the cancel takes to land, and Gate 4
 measures that window instead of pretending it away. Startup cancels
 nothing, ever.
 
+AND THE CANCEL IS CHASED, because one publish is not a stop. Fleet
+Gate 4 (2026-08-22) measured a cancelOrder that the agent received,
+acknowledged and could not act on - its own goal publisher was younger
+than DDS discovery - and the truck drove 37.09 s more. The agent now
+confirms its stop against nav (vda_agent._pump_cancel); this side keeps
+the second half of the same honesty: `cancelled` remembers what each
+returning vehicle was told to drop, every state that still shows that
+order executing past a grace earns ONE more cancelOrder, throttled, and
+a vehicle that never lets go is named in the refusal list where the
+operator reads it. The manager still cannot force a stop - nothing here
+can - but it can refuse to look away.
+
 NO JOURNAL. The queue is in memory and the manager re-syncs from the
 wire alone (retained connections, then the states themselves). A
 restarted manager therefore has NO tasks, says so in the document, and
@@ -98,6 +110,15 @@ REFUSED_MAX = 10         # the status document is a screen, not a log
 HISTORY_MAX = 20         # ditto, per task
 DONE_SHOWN = 5           # ditto, per finished task: the book keeps all
 WIRE_WARN_S = 2.0        # a 10 Hz retry must not write 10 Hz of log
+# CHASING A CANCEL THE VEHICLE HAS NOT ACTED ON. The grace is the
+# agent's own confirm loop getting on with it (it republishes the empty
+# goal at 10 Hz and gives up at 5 s); only past that is silence worth a
+# second message. The retry period is two vehicle state periods, so one
+# retry is answered before the next is due, and the cap is where an
+# unheard cancel stops being a race and becomes a broken vehicle.
+CANCEL_GRACE_S = 3.0
+CANCEL_RETRY_S = 4.0
+CANCEL_RETRY_MAX = 4
 
 
 def _xy(pos):
@@ -142,6 +163,7 @@ class FleetManager:
         self.tasks = []          # index 0 is the queue head (fleet_core)
         self.refused = []        # bounded; the operator's refusal list
         self.stale = {}          # serial -> orderId a lost truck kept
+        self.cancelled = {}      # serial -> a cancel we are still chasing
         self.dwell_until = {}    # task_id -> monotonic deadline
         self.stop = False
         self.last_status = 0.0
@@ -279,6 +301,12 @@ class FleetManager:
                            serial, order_id)
             return
         del self.stale[serial]
+        # WHAT WAS SENT IS NOT WHAT WAS DONE. The entry moves rather
+        # than vanishing: `stale` answers "what is this truck holding
+        # that we have not told it about", and `cancelled` answers "what
+        # have we told it to drop and not seen it drop yet".
+        self.cancelled[serial] = {"order_id": order_id, "first": None,
+                                  "last_sent": None, "tries": 0}
         self.log.warning(
             "%s returned holding %s - cancelOrder sent. The agent "
             "resumes a kept order on reconnect, so it may drive until "
@@ -297,6 +325,7 @@ class FleetManager:
         # (module note: an arrived truck reports its orderId forever).
         veh["executing_order"] = order_id if node_states else None
         veh["state_rx"] = now
+        self._chase_cancel(serial, veh, now)
         # ELIGIBILITY IS RE-EARNED BEFORE THIS STATE'S OWN REFUSALS ARE
         # READ, so a rejection cannot clear the flag it is about to set.
         # The clause list is fleet_core's, asked with the flag itself
@@ -307,6 +336,49 @@ class FleetManager:
             self.log.info("%s re-earned eligibility", serial)
         self._check_rejection(serial, veh, msg)
         self._check_arrival(serial, order_id, node_states, now)
+
+    def _chase_cancel(self, serial, veh, now):
+        """Is the truck still driving the order we cancelled? Ask again.
+
+        ONE RETRY PER STATE THAT STILL SHOWS IT, and never faster than
+        CANCEL_RETRY_S: the vehicle answers on its own 2 s cadence and a
+        manager that shouted at 10 Hz would be talking over the reply it
+        is waiting for. The moment the order leaves the vehicle's state
+        the entry goes - that, and not our own publish, is what "the
+        cancel landed" means.
+        """
+        entry = self.cancelled.get(serial)
+        if entry is None:
+            return
+        if entry["first"] is None:
+            entry["first"] = entry["last_sent"] = now
+        if veh["executing_order"] != entry["order_id"]:
+            del self.cancelled[serial]
+            self.log.info("%s let go of %s - the cancel landed", serial,
+                          entry["order_id"])
+            return
+        if now - entry["first"] < CANCEL_GRACE_S \
+                or now - entry["last_sent"] < CANCEL_RETRY_S:
+            return
+        if entry["tries"] >= CANCEL_RETRY_MAX:
+            del self.cancelled[serial]
+            self.log.error(
+                "%s is STILL driving %s after %d cancelOrders over %.0f s "
+                "- this fleet has no other lever; the truck needs the "
+                "panel", serial, entry["order_id"], CANCEL_RETRY_MAX,
+                now - entry["first"])
+            self._note_refusal(
+                entry["order_id"],
+                "{} never dropped this order after {} cancelOrders".format(
+                    serial, CANCEL_RETRY_MAX))
+            return
+        entry["last_sent"] = now
+        entry["tries"] += 1
+        if self._instant(serial, "cancelOrder"):
+            self.log.warning(
+                "%s still shows %s executing %.1f s after the cancel - "
+                "re-sent (%d of %d)", serial, entry["order_id"],
+                now - entry["first"], entry["tries"], CANCEL_RETRY_MAX)
 
     def _check_rejection(self, serial, veh, msg):
         """An orderError naming OUR in-flight orderId. Anything else in

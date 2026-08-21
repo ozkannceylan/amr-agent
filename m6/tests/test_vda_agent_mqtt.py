@@ -276,3 +276,166 @@ def test_resume_without_automatic_holds_the_order(rig):
     assert len(caught["route"]) == routes, "asked nav for a refused drive"
     assert not agent.executing
     assert agent.order["orderId"] == "o-int-1", "the order was dropped"
+
+
+# ---- the closed-loop cancel (M6.3 Fleet Gate 4) ----
+# Fleet Gate 4 measured a cancelOrder that was received, acknowledged
+# FINISHED, and did not stop the truck: the empty goal it published went
+# out of a publisher younger than DDS discovery and reached nobody,
+# while nav drove the stale route for another 37.09 s and 6.743 m. These
+# four tests are that bug, asked four ways. THE RIG HAS NO nav_node, so
+# "unheard" is the default here and does not need faking - nothing
+# answers /auto/goal until a test publishes an /auto/state that says so.
+
+
+def cancel_action(probe, action_id="a-cancel"):
+    probe.publish("uagv/v2/amragent/f1/instantActions", json.dumps(
+        {"actions": [{"actionId": action_id, "actionType": "cancelOrder",
+                      "blockingType": "HARD", "actionParameters": []}]}),
+        qos=0)
+
+
+def action_status(caught, action_id):
+    """The last actionStatus reported for this action, or None."""
+    last = None
+    for topic, payload in caught["mqtt"]:
+        if not topic.endswith("/state"):
+            continue
+        for act in payload.get("actionStates", []):
+            if act["actionId"] == action_id:
+                last = act["actionStatus"]
+    return last
+
+
+def test_a_cancel_keeps_asking_until_nav_says_it_stopped(rig):
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    probe.publish("uagv/v2/amragent/f1/order",
+                  json.dumps(valid_order()), qos=0)
+    spin([agent, helper], 1.5)
+    assert agent.executing, "the order was never taken up"
+
+    cancel_action(probe)
+    spin([agent, helper], 1.0)
+    # NOTHING HAS ANSWERED, so the agent is still asking. One publish
+    # would have been the bug; a second is the fix.
+    unheard = len(caught["goal"])
+    assert unheard >= 5, (
+        "the empty goal went out {} times in a second - a cancel nobody "
+        "answered has to keep asking".format(unheard))
+    assert caught["goal"] == [""] * unheard
+    assert agent.cancel_pending is not None
+    assert action_status(caught, "a-cancel") == "RUNNING", (
+        "FINISHED is a claim about the truck, and no truck has said "
+        "anything yet")
+    # The order is gone from the agent all the same: it stopped owning
+    # the work the moment the fleet asked.
+    assert agent.order is None and not agent.executing
+
+    # nav_core._cancel: IDLE, goal None, note set. That is a stop SEEN.
+    nav_pub.publish(String(data=json.dumps(
+        {"state": "IDLE", "goal": None, "note": "cancelled",
+         "route": [], "pose": [0.0, 0.0, 0.0]})))
+    spin([agent, helper], 0.6)
+    assert agent.cancel_pending is None, "the cancel never closed"
+    assert action_status(caught, "a-cancel") == "FINISHED"
+    settled = len(caught["goal"])
+    spin([agent, helper], 0.5)
+    assert len(caught["goal"]) == settled, (
+        "the agent kept publishing empty goals after nav confirmed")
+
+
+def test_a_cancel_nav_never_confirms_reports_FAILED(rig, monkeypatch):
+    from std_msgs.msg import String
+    import vda_agent
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    monkeypatch.setattr(vda_agent, "CANCEL_CONFIRM_S", 0.5)
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    probe.publish("uagv/v2/amragent/f1/order",
+                  json.dumps(valid_order()), qos=0)
+    spin([agent, helper], 1.5)
+    assert agent.executing
+
+    cancel_action(probe, "a-never")
+    spin([agent, helper], 1.5)     # well past the shortened deadline
+    assert agent.cancel_pending is None, "the deadline never fired"
+    assert action_status(caught, "a-never") == "FAILED", (
+        "a stop nobody confirmed must not report FINISHED")
+    states = [p for t, p in caught["mqtt"] if t.endswith("/state")]
+    said = [e for s in states for e in s["errors"]
+            if e["errorType"] == "cancelUnconfirmed"]
+    assert said, "the state stream never told the fleet the cancel failed"
+    assert "may still be driving" in said[-1]["errorDescription"]
+
+
+def test_supervision_loss_chases_its_stop_the_same_way(rig):
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    probe.publish("uagv/v2/amragent/f1/order",
+                  json.dumps(valid_order()), qos=0)
+    spin([agent, helper], 1.5)
+    assert agent.executing
+    before = len(caught["goal"])
+
+    agent._supervision_lost()
+    spin([agent, helper], 0.8)
+    assert len(caught["goal"]) - before >= 4, (
+        "the broker-loss stop was published once and forgotten")
+    assert agent.cancel_pending is not None
+    # NOBODY ASKED FOR THIS ONE, so it wears no actionState at all.
+    assert not [a for a in agent.action_states
+                if a["actionType"] == "cancelOrder"]
+    # And the ORDER SURVIVES it - that is M1 s.7, unchanged.
+    assert agent.order["orderId"] == "o-int-1"
+
+    nav_pub.publish(String(data=json.dumps(
+        {"state": "IDLE", "goal": None, "note": "cancelled",
+         "route": [], "pose": [0.0, 0.0, 0.0]})))
+    spin([agent, helper], 0.6)
+    assert agent.cancel_pending is None
+    assert agent.order["orderId"] == "o-int-1"
+
+
+def test_an_unmatched_nav_is_named_before_the_retries_begin(rig):
+    """The belt beside the braces: the retry loop already covers a
+    publisher DDS has not matched, but Fleet Gate 4 spent 37 s inside
+    exactly that window with nothing in any log to say so."""
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+
+    class Unmatched:
+        def __init__(self):
+            self.sent = []
+
+        def get_subscription_count(self):
+            return 0
+
+        def publish(self, msg):
+            self.sent.append(msg.data)
+
+    said = []
+
+    class Log:
+        def __getattr__(self, _level):
+            return said.append
+
+    agent.pub_goal = Unmatched()
+    agent.get_logger = lambda: Log()
+    agent.executing = True
+    agent.nav_state = ""
+    agent._begin_cancel(action_id="a-blind")
+    for _ in range(4):
+        agent._pump_cancel()
+
+    assert agent.pub_goal.sent == [""] * 5, "the retry stopped at one"
+    assert any("has not matched" in m for m in said), (
+        "nothing in the log names the window the goal was lost in")
+    assert sum("has not matched" in m for m in said) == 1, (
+        "one line, not one per retry")
