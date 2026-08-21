@@ -13,6 +13,14 @@ authority, every command through `mux → gate → contactor → plant`, and the
 S7-1516F F-program (`PLC_2`) holding the enable and the speed ceiling over all
 of it. M6 adds layers **above** that chain and changes nothing below it.
 
+**Substrate note (2026-08-15).** The TIA / PLCSIM Advanced trial has expired;
+the PLC substrate under every M6 step is now **TwinCAT 3.1 (user mode
+runtime)** carrying the same chain behaviour over the same UDP wire —
+research, port and runbook in [`beckhoff/`](../beckhoff/RUNBOOK.md). The WSL
+side and every M6 layer are unaffected; the Siemens-era F-CPU evidence stands
+as the record of real F-logic execution (claims discipline in
+beckhoff/RESEARCH.md D3).
+
 The interface contract is **docs/interfaces/vda5050-subset.md** (VDA 5050
 2.1.0), written at M1 and unchanged: topics, header, the order/state/
 instantActions/connection/factsheet subsets, and the extension policy. Any
