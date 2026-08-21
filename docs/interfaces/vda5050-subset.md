@@ -301,3 +301,75 @@ topic structure is **not** an extension — it is a contract break and requires
 an ADR.
 
 **Currently used extensions: none.**
+
+## Amendment 2026-08-21 (M6.2)
+
+Additive. The sections above are unchanged and stay the field-by-field
+reference; where this amendment and an earlier table disagree, this amendment
+is in force and says so explicitly. Written when the vehicle agent
+(`m5_ver2/step6/ipc/vda_messages.py`) first put these messages on a wire.
+
+### (a) The vehicle is the step6 forklift
+
+ADR 0010 retired RB-KAIROS as the platform (accepted 2026-07-30) and put
+vehicle work on the in-house forklift twin. Section 8's table was written in
+M1, before that ruling, and its `seriesName` and `agvClass` cells name the
+retired platform. Those two cells are an **M1-era example, superseded here**:
+
+| Field | Section 8 says | In force |
+|---|---|---|
+| typeSpecification.seriesName | RB-KAIROS per ADR 0002 | `forklift_ver2` |
+| typeSpecification.agvClass | CARRIER | `FORKLIFT` |
+| typeSpecification.agvKinematic | set by the agv layer | `THREEWHEEL` (tricycle: one steered drive wheel, two rear) |
+
+`physicalParameters` width, length and heightMax are **measured off
+`m5_ver2/step6/gazebo/forklift_ver2/model.sdf`**, the file that owns the
+geometry, and are not round numbers: 0.90 m, 2.735 m, 2.20 m (carriage at full
+mast travel). `speedMax` comes from `limits.traction_speed_max_mps`.
+`accelerationMax`, `decelerationMax` and `maxLoadMass` remain declared sim
+stubs — the plant models none of the three.
+
+### (b) Actions are phased; the factsheet declares only what is implemented
+
+Section 6 lists eight supported actions and says the factsheet's
+`protocolFeatures.agvActions` is "the machine-readable statement of exactly the
+eight". **The eight remain the project target.** The factsheet, however, is a
+statement about the vehicle in front of it, and it must not advertise an action
+that would answer `FAILED`. It therefore declares the **implemented** set, and
+that set grows by milestone:
+
+| actionType | Declared from |
+|---|---|
+| cancelOrder | **M6.2** |
+| stateRequest | **M6.2** |
+| factsheetRequest | **M6.2** |
+| startPause, stopPause | M6.4 (with `paused` in `state`) |
+| startCharging, stopCharging | when a battery model exists |
+| initPosition | when localization can be re-seeded |
+
+Section 6's list of supported actions is unchanged; what this amendment fixes
+is the claim that the factsheet mirrors it in one step rather than in stages.
+
+### (c) `order.edge.maxSpeed` is parsed, not enforced, until M6.4
+
+Section 4 lists `edge.maxSpeed` under **Used fields**. As of M6.2 the vehicle
+**accepts and ignores** it: the released route handed to navigation carries
+waypoints and an arrival radius only, and speed is capped by
+`limits.traction_speed_max_mps` at the command gate, not per edge. The
+factsheet therefore declares:
+
+```json
+{"parameter": "order.edge.maxSpeed", "support": "NOT_SUPPORTED"}
+```
+
+An order carrying `maxSpeed` is **not** rejected for it. Per-edge enforcement
+lands with M6.4, at which point the declaration becomes `SUPPORTED` and this
+row of section 4 needs no further change.
+
+### (d) Timestamps carry milliseconds
+
+Section 2 writes the timestamp form as `YYYY-MM-DDTHH:mm:ss.ffZ`, quoting the
+spec's own example. Messages produced by this project carry **three** fraction
+digits — `YYYY-MM-DDTHH:mm:ss.fffZ`, UTC, always `Z`, never a numeric offset.
+Both forms satisfy the schemas' `format: date-time`; milliseconds are the
+resolution a state stream published at a few hertz actually needs.

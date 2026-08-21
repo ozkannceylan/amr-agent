@@ -96,8 +96,8 @@ def build_state(header, order_ctx, pose, driving, operating_mode,
 
 
 def build_factsheet(header, cfg):
-    """Truthful for THIS vehicle; numeric values from config.yaml where
-    it has them, labeled sim stubs where it does not."""
+    """Truthful for THIS vehicle: speed from config.yaml, size measured
+    off model.sdf, labeled sim stubs only where neither file knows."""
     limits = cfg.get("limits", {})
     fs = dict(header)
     fs.update({
@@ -113,7 +113,19 @@ def build_factsheet(header, cfg):
             "speedMax": float(limits.get("traction_speed_max_mps", 1.5)),
             "accelerationMax": 1.0,          # sim stub
             "decelerationMax": 1.0,          # sim stub
-            "heightMax": 2.4, "width": 1.4, "length": 2.6},
+            # Size is measured, not guessed: model.sdf owns the
+            # geometry (config.yaml says so in its own header).
+            #   width  0.90 = chassis box y, model.sdf:240 - the widest
+            #          link on the truck (counterweight 0.80, mast 0.72).
+            #   length 2.735 = counterweight front face 0.74 + 0.24/2
+            #          (model.sdf:256-257) back to the fork tip at
+            #          -1.35 - 1.05/2 (model.sdf:913, 922).
+            #   heightMax 2.20 = carriage top 0.35 + 0.50/2
+            #          (model.sdf:895, 904) lifted by mast_joint's full
+            #          travel, config.yaml fork_travel_max_m 1.6. The
+            #          static mast is lower, 2.05, so the raised
+            #          carriage is what a doorway has to clear.
+            "heightMax": 2.20, "width": 0.90, "length": 2.735},
         "protocolLimits": {
             "maxStringLens": {}, "maxArrayLens": {},
             "timing": {"minOrderInterval": 1.0, "minStateInterval": 0.5}},

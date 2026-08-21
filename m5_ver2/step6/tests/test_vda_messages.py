@@ -71,7 +71,12 @@ def test_factsheet_is_truthful_and_minimal():
     assert ts["agvClass"] == "FORKLIFT"
     assert ts["agvKinematic"] == "THREEWHEEL"
     assert ts["navigationTypes"] == ["AUTONOMOUS"]
-    assert fs["physicalParameters"]["speedMax"] == 1.5
+    phys = fs["physicalParameters"]
+    assert phys["speedMax"] == 1.5
+    # The truck's real size, off model.sdf - not a round number that
+    # would have a fleet planner refuse aisles this vehicle fits.
+    assert (phys["width"], phys["length"], phys["heightMax"]) == (
+        0.90, 2.735, 2.20)
     acts = {a["actionType"] for a in fs["protocolFeatures"]["agvActions"]}
     assert acts == {"cancelOrder", "stateRequest", "factsheetRequest"}
 
