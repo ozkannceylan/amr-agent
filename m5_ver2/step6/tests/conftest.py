@@ -11,6 +11,12 @@ import sys
 # contract(vid), which is pure. f1 is arbitrary.
 os.environ.setdefault("VEHICLE", "f1")
 
+# THE SUITE GETS ITS OWN DDS DOMAIN, and it is set, not defaulted: the
+# live stack runs domain 96 and PROOF's runbooks export 96 in the
+# operator's shell, so a setdefault would inherit it and let a test's
+# publisher reach a driving truck. 89 is nobody's.
+os.environ["ROS_DOMAIN_ID"] = "89"
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 for _sub in ("ipc", "hmi", "windows"):
     _path = os.path.normpath(os.path.join(_HERE, "..", _sub))

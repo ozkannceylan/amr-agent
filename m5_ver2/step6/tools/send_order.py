@@ -1,4 +1,6 @@
-"""send_order.py - a hand for master control until M6.3 exists.
+"""SUPERSEDED by fleet/fleet_cli.py + fleet/fleet_manager.py (M6.3) - kept as a low-level debug probe.
+
+send_order.py - a hand for master control until M6.3 exists.
 
 Builds a FULL-ROUTE VDA 5050 order for one vehicle and one station:
 reads the vehicle's current pose from its own MQTT state (no ROS - the

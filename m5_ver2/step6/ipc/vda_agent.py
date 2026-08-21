@@ -150,6 +150,13 @@ class VdaAgent(Node):
         self.mq.on_connect = self._on_connect
         self.mq.on_disconnect = self._on_disconnect
         self.mq.on_message = self._on_message
+        # PAHO'S DEFAULT BACKOFF IS UNBOUNDED IN PRACTICE - it doubles
+        # from 1 s to 120 s, and M6.2 Gate 4 (VDA 4) measured what that
+        # costs: 28.1 s of silence between a broker returning and this
+        # vehicle noticing. A truck standing still with an order kept is
+        # waiting on this timer, so it is capped where an operator can
+        # wait: retries every 1-8 s, forever.
+        self.mq.reconnect_delay_set(min_delay=1, max_delay=8)
         self.mq.connect_async(MQTT_HOST, MQTT_PORT)
         self.mq.loop_start()
 
@@ -161,6 +168,11 @@ class VdaAgent(Node):
     def _on_disconnect(self, client, userdata, flags, reason_code,
                        properties=None):
         if _failed(reason_code):
+            # Said HERE and not from the drain: paho retries on its own
+            # thread and this is the only place that knows a retry loop
+            # started. Logging touches no agent state, so the
+            # enqueue-only rule above still holds.
+            self.get_logger().warn("broker link down - retrying inside 1-8 s")
             self.inbox.put(("lost", None))
 
     def _on_message(self, client, userdata, msg):
