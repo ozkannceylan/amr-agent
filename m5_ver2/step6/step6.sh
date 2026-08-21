@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# step6.sh - bring the Step 6 vehicle side up and down: ONE world, TWO
-# forklifts, and one full set of vehicle nodes per forklift.
+# step6.sh - bring the Step 6 vehicle side up and down: ONE broker, ONE
+# world, TWO forklifts, and one full set of vehicle nodes per forklift.
 #   start [--headless] | stop
 #
 # start opens the Gazebo GUI client, because this script is the HUMAN entry
@@ -31,6 +31,18 @@ PIDFILE="$STEP6/.step6_pids"
 LOGDIR="$STEP6/logs"
 DEPLOY="$STEP6/deploy"
 ROS_SETUP="/opt/ros/jazzy/setup.bash"
+# THE BROKER IS VENDORED INTO THE USER'S HOME RATHER THAN INSTALLED: this
+# WSL has no usable sudo, so tools/install_broker.sh `apt-get download`s
+# mosquitto and unpacks it under ~/.local. The binary is deliberately not
+# committed and that script is how it reproduces.
+# BROKER_LIB IS NOT OPTIONAL. Those .debs put libwrap, libdlt and
+# libwebsockets somewhere the loader does not look, so the broker child is
+# handed LD_LIBRARY_PATH on its spawn line - and only that child, because
+# a vendored libwebsockets on gz sim's loader path is a debugging session
+# nobody asked for. MAINTENANCE OBLIGATION: install_broker.sh spells the
+# same two paths; a move there has to move here.
+BROKER_BIN="$HOME/.local/mosquitto-vendored/usr/sbin/mosquitto"
+BROKER_LIB="$HOME/.local/mosquitto-vendored/usr/lib/x86_64-linux-gnu"
 
 export GZ_PARTITION="${GZ_PARTITION:-step6}"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-96}"
@@ -59,10 +71,18 @@ VEHICLES=(f1 f2)
 # `pgrep -af "gz sim"` returns both. If the client is ever started through
 # ros_gz_sim's gz_sim.launch.py instead, it becomes `sh -c ruby .../gz sim -g`
 # plus a child and this line has to be revisited.
+# THE BROKER IS NOMINATED BY ITS PATH AND IT IS LAST HERE ON PURPOSE.
+# The pattern is the vendored PATH and not the basename, because
+# `mosquitto` alone would nominate any broker on the machine - a system
+# one included - and a pattern that nominates a stranger leans the whole
+# weight of the sweep on ours(). Last, because this list is the shutdown
+# order and every vehicle's MQTT client is a client OF it: taking the
+# broker down first would only fill the vehicle logs with reconnect noise
+# on the way out.
 PATTERNS=("gz sim" "step6_world.launch.py" "parameter_bridge" \
           "sto_contactor.py" "forklift_io.py" "plc_link.py" "cmd_gate.py" \
           "cmd_mux.py" "hmi_node.py" "field_eval.py" "sensor_link.py" \
-          "encoder_link.py" "nav_node.py")
+          "encoder_link.py" "nav_node.py" "mosquitto-vendored")
 
 # WHY OWNERSHIP IS DECIDED BY THE ENVIRONMENT, NOT BY THE COMMAND LINE
 #   vehicle.launch.py:738-754 starts sto_contactor.py and forklift_io.py with
@@ -91,14 +111,24 @@ ours() {
 #   terminal - the very case setsid was added to survive - leaves it on disk,
 #   and Linux recycles pids back through the 17xxx-18xxx range this stack
 #   lands in within minutes of a boot. A recorded number can therefore name a
-#   STRANGER, and every use of that number has to say so first. All seventeen
-#   recorded command lines contain m5_ver2/step6 and no foreign one does, so
-#   that token is the identity test. It is deliberately the literal and not
-#   "$STEP6": if REPO ever resolves differently between the start and the
-#   stop, the looser token still matches and the partition read-back below
-#   still works, which is the failure that read-back exists to prevent.
+#   STRANGER, and every use of that number has to say so first. Seventeen of
+#   the eighteen recorded command lines contain m5_ver2/step6 and no foreign
+#   one does, so that token is the identity test. It is deliberately the
+#   literal and not "$STEP6": if REPO ever resolves differently between the
+#   start and the stop, the looser token still matches and the partition
+#   read-back below still works, which is the failure that read-back exists
+#   to prevent.
+#   THE BROKER IS THE EIGHTEENTH, and its command line is a path in the
+#   user's HOME - a vendored binary is not under m5_ver2/step6 and never
+#   will be - so it needs a token of its own, or every start would report it
+#   as having exited and call the stack incomplete. mosquitto-vendored is
+#   the directory install_broker.sh unpacks into and nothing else writes.
+#   The exposure is the same shape as above and no larger: a recycled pid
+#   landing on another copy of THIS vendored broker reads as ours, and what
+#   that would be is a second step6 stack's broker.
 recorded() {
-    grep -qaF "m5_ver2/step6" "/proc/$1/cmdline" 2>/dev/null
+    grep -qaF -e "m5_ver2/step6" -e "mosquitto-vendored" \
+        "/proc/$1/cmdline" 2>/dev/null
 }
 
 sweep() {  # sweep <signal>
@@ -329,15 +359,21 @@ start() {
     #   more - it is the non-digit, not the space, that tells :5110 from
     #   :51100. Measured on the :5100 this guard used to check: `grep
     #   ':5100 '` MISSES a line ending at the port.
-    # ONE CAPTURE, TWO TESTS. The socket table is read once and matched
-    # twice, so the two vehicles are judged against the same instant.
-    local udp_socks=""
+    # ONE CAPTURE PER PROTOCOL, THREE TESTS. The UDP table is read once and
+    # matched twice, so the two vehicles are judged against the same instant.
+    # THE BROKER'S :1883 IS TCP AND GETS ITS OWN CAPTURE rather than folding
+    # both families into one `ss -tuln`: in a single table a TCP socket on
+    # :5110 would answer for f1's UDP link and refuse a start that is
+    # perfectly legal. Two captures, two tables, no crosstalk.
+    local udp_socks="" tcp_socks=""
     if command -v ss >/dev/null 2>&1; then
         udp_socks="$(ss -uln 2>/dev/null)"
+        tcp_socks="$(ss -tln 2>/dev/null)"
     else
         # A guard that cannot run says so. Silence here would look identical
         # to a free port and hand back the Task 8 symptom with no trace.
-        echo "  note: ss not found - the UDP :5110/:5120 pre-flight is SKIPPED."
+        echo "  note: ss not found - the UDP :5110/:5120 and TCP :1883"
+        echo "        pre-flights are SKIPPED."
     fi
     case $'\n'"$udp_socks"$'\n' in
         *:5110[!0-9]*)
@@ -355,6 +391,28 @@ start() {
             echo "stop that stack first, then start this one."
             return 1 ;;
     esac
+    # THE BROKER'S PORT IS THE SAME SINGLE-HOLDER RESOURCE, and losing it is
+    # not quiet - mosquitto exits on EADDRINUSE - but the operator would
+    # read that in broker.log only after the whole stack came up around a
+    # broker that is not there. Same realistic holder as above: a step6
+    # stack that is already up. 1883 is MQTT's registered port and this
+    # broker takes the default, so a system mosquitto would hold it too;
+    # naming the port and printing who has it is the whole answer.
+    case $'\n'"$tcp_socks"$'\n' in
+        *:1883[!0-9]*)
+            echo "TCP :1883 is already bound - something already brokers MQTT here:"
+            ss -tlpn 2>/dev/null | grep -E ':1883([^0-9]|$)'
+            echo "stop that stack first, then start this one."
+            return 1 ;;
+    esac
+    # NO BROKER, NO VDA LINK. It is vendored per-user and not committed, so
+    # a fresh checkout has none, and starting anyway would bring the stack
+    # up around a socket nothing is listening on.
+    if [ ! -x "$BROKER_BIN" ]; then
+        echo "no MQTT broker at $BROKER_BIN"
+        echo "run 'bash $STEP6/tools/install_broker.sh' first - it needs no sudo."
+        return 1
+    fi
     # NO DEPLOY, NO SOFTWARE. The vehicle runs the frozen tree and only that;
     # falling back to source would make the deploy decorative.
     if [ ! -f "$DEPLOY/MANIFEST" ]; then
@@ -364,7 +422,7 @@ start() {
     fi
     stale_check
     [ -f "$ROS_SETUP" ] || { echo "no $ROS_SETUP"; return 1; }
-    # Unchecked, an unwritable log dir fails all seventeen redirections, and
+    # Unchecked, an unwritable log dir fails all eighteen redirections, and
     # start would sleep its way to "up." over a stack that never began.
     mkdir -p "$LOGDIR" || { echo "cannot create $LOGDIR"; return 1; }
     : > "$PIDFILE"  || { echo "cannot write $PIDFILE"; return 1; }
@@ -397,7 +455,7 @@ start() {
     #
     # THE NAME LIST IS BUILT HERE, NOT RESTATED BELOW. The startup check
     # walks $PIDFILE and needs a name per line; keeping that list by hand
-    # made it a second spelling of the spawn order, and seventeen entries
+    # made it a second spelling of the spawn order, and eighteen entries
     # is where such a list starts drifting. Appending in spawn() makes the
     # two orders the same order by construction.
     local -a SPAWNED=()
@@ -414,6 +472,25 @@ start() {
         echo "  $name pid ${pid:-UNKNOWN, see $LOGDIR/$name.log}"
     }
     echo "starting the Step 6 vehicle side (partition $GZ_PARTITION, domain $ROS_DOMAIN_ID, gui $GUI)"
+    # THE BROKER GOES UP FIRST, and it is the one process here that is not
+    # ROS. Every vehicle's VDA client dials 127.0.0.1:1883, so it has to be
+    # listening before they start; mosquitto binds in milliseconds and the
+    # world's five seconds below cover that many times over.
+    #   -v IS THE LOG LEVEL, not a version flag: with no config file
+    #   mosquitto logs to stderr, and spawn already points stderr at
+    #   $LOGDIR/broker.log. A config-less mosquitto 2.x also listens on
+    #   LOCALHOST ONLY and allows anonymous local clients, which is the
+    #   posture this milestone wants - not a default anyone leaned on.
+    #   NO VEHICLE ('-'): one broker serves every truck on this machine, so
+    #   there is no vehicle it could be the broker of.
+    #   THE LOADER PATH RIDES THE `env` spawn ALREADY EXECS. A leading
+    #   NAME=value is env's own syntax, so the vendored libraries cost no
+    #   extra process and reach nothing but this child.
+    # M6.3 MOVES THIS OUT. A broker belongs to the FLEET side - one for all
+    # vehicles, on a machine that is not a vehicle. It is here because M6.2
+    # is one machine, and it is SPAWNED rather than assumed so that start
+    # and stop stay the only two commands an operator runs.
+    spawn broker - LD_LIBRARY_PATH="$BROKER_LIB" "$BROKER_BIN" -v
     # ONE WORLD FOR BOTH TRUCKS: this single launch spawns both models,
     # bridges both vehicles' terminals and starts each one's contactor and
     # unit translator. Its five seconds of head start are the plant's.
@@ -473,6 +550,7 @@ start() {
     for vid in "${VEHICLES[@]}"; do
         echo "  python m5_ver2\\step6\\windows\\step6.py --vehicle $vid --virtual"
     done
+    echo "broker: 127.0.0.1:1883 (localhost only, anonymous - $LOGDIR/broker.log)"
     echo "logs: $LOGDIR"
 }
 stop() {
@@ -525,7 +603,7 @@ stop() {
 }
 USAGE="usage: $0 start [--headless] | stop | home | deploy
   start       warehouse + BOTH forklifts in a Gazebo window, plus one HMI
-              per vehicle
+              per vehicle and the local MQTT broker on 127.0.0.1:1883
   --headless  no Gazebo window (gui:=false, the launch file's own default)
   home        teleport both forklifts back to their spawn poses (stack stays
               up; PLC latches stay latched - reset from the panel)
