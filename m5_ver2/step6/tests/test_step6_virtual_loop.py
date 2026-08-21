@@ -5,12 +5,22 @@ WHAT LEVEL OF EVIDENCE THIS IS, EXACTLY
   drives it: the real `step6.control_loop` - the same function the Windows
   writer runs against PLCSIM - over real UDP sockets, with
   `virtual_fplc.VirtualFPLC` in the PLC's place. Everything between the
-  5101 datagram and the 5100 payload is production code: the drain, the
-  staleness rule, the six field writes, the encoder writes, the ack pulse,
-  the Motor read and the wire format. Only Gazebo and Tk are absent.
+  sensor datagram and the status payload is production code: the drain,
+  the staleness rule, the six field writes, the encoder writes, the ack
+  pulse, the Motor read and the wire format. Only Gazebo and Tk are
+  absent.
 
   So: loop-level evidence, not a full-stack run. The autonomous leg under
   `--virtual` is still owed a live smoke against the ROS side.
+
+WHY EVERY SCENARIO RUNS TWICE
+  Since M6.1 the writer is one process per vehicle and the port pair is
+  the vehicle's, not the project's - so a loop that only ever ran on
+  f1's pair would leave f2's writer unproven and would happily survive a
+  VEHICLES table that handed both trucks the same port. Each scenario
+  therefore runs once per vehicle, on the pair status_contract gives
+  that vehicle, and the port literals have left this file with the rest
+  of them.
 
 HOW THE ASSERTIONS ARE TIMED
   Every wait polls for its condition against a deadline, so a slow machine
@@ -37,7 +47,7 @@ WIRE_KEYS = {"estop_healthy", "motor", "case", "v_limit", "ts"}
 
 
 def _datagram(pf=True, enc=(0, 0)):
-    """One 5101 packet: healthy, except for what the caller changes."""
+    """One sensor packet: healthy, except for what the caller changes."""
     return json.dumps({
         "pf": pf, "wf": True, "pf_right": True, "wf_right": True,
         "pf_left": True, "wf_left": True,
@@ -77,7 +87,7 @@ def _holds(predicate, seconds):
 
 
 def _status(rig, predicate, deadline_s=DEADLINE_S):
-    """The next 5100 payload matching `predicate`, or None."""
+    """The next status payload matching `predicate`, or None."""
     end = time.monotonic() + deadline_s
     while time.monotonic() < end:
         try:
@@ -115,15 +125,38 @@ def _enable(rig):
     still unhealthy clears nothing and there is no second edge.
     """
     assert _status(rig, lambda m: m["v_limit"] == 1500) is not None, (
-        "the healthy 5101 stream never reached the model: V_Limit stayed "
+        "the healthy sensor stream never reached the model: V_Limit stayed "
         "at the stale-link 300")
     _pulse_ack(rig.state)
     assert _wait(lambda: rig.live["motor"]), "Motor never enabled after ack"
 
 
+@pytest.fixture(params=["f1", "f2"])
+def vehicle_ports(request, monkeypatch):
+    """Point the module's two port constants at one vehicle's pair.
+
+    The rig below is built from `step6.UDP_PORT`, and `control_loop`
+    reads that same global on every send, so patching it here is what
+    makes each scenario run as a particular truck. SENSOR_PORT moves
+    with it to keep the module one vehicle's throughout: the loop takes
+    its rx socket as an argument (only `main` binds SENSOR_PORT), so the
+    rig keeps handing it the ephemeral port it always did.
+    """
+    from status_contract import contract
+    c = contract(request.param)
+    monkeypatch.setattr(step6, "UDP_PORT", c["plc_port"])
+    monkeypatch.setattr(step6, "SENSOR_PORT", c["sensor_port"])
+    return request.param
+
+
 @pytest.fixture
-def rig():
-    """A running control_loop with real sockets on both sides of it."""
+def rig(vehicle_ports):
+    """A running control_loop with real sockets on both sides of it.
+
+    Every test reaches it through this fixture, so `vehicle_ports`
+    parameterises the whole file - three scenarios, two vehicles, six
+    runs - without a test having to name the vehicle it is being.
+    """
     listener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         listener.bind(("127.0.0.1", step6.UDP_PORT))
@@ -165,10 +198,10 @@ def rig():
     assert state["error"] == "", state["error"]
 
 
-def test_an_ack_enables_the_motor_and_the_5100_wire_says_so(rig):
+def test_an_ack_enables_the_motor_and_the_status_wire_says_so(rig):
     _enable(rig)
     msg = _status(rig, lambda m: m["motor"] is True)
-    assert msg is not None, "no 5100 payload ever reported Motor True"
+    assert msg is not None, "no status payload ever reported Motor True"
     assert set(msg) == WIRE_KEYS
     assert msg["estop_healthy"] is True
     assert msg["case"] == 1            # the model pins the monitoring case
@@ -187,11 +220,11 @@ def test_a_protective_field_trip_latches_through_the_heal(rig):
     assert _wait(lambda: rig.live["motor"]), "the ack did not clear the latch"
 
 
-def test_a_silent_5101_link_fails_safe(rig):
+def test_a_silent_sensor_link_fails_safe(rig):
     _enable(rig)
     rig.ctl["send"] = False
     # SENSOR_STALE_S later the loop writes the six fields False and the
     # 0/3000 encoder picture, which is a demanded stop by two routes.
     assert _wait(lambda: not rig.live["motor"],
                  step6.SENSOR_STALE_S + 1.0), (
-        "Motor stayed enabled with the 5101 link silent")
+        "Motor stayed enabled with the sensor link silent")

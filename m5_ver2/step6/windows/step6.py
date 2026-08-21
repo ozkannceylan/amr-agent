@@ -1,8 +1,18 @@
-"""step6.py - the ONLY process that writes to the safety PLC.
+"""step6.py - the ONLY process that writes to ONE vehicle's safety PLC.
 
-Runs on Windows, on 64-bit Python, against S7-PLCSIM Advanced instance
-"PLC_2". Every 20 ms it writes the field-device picture the safety program
-needs and reads back the one output that matters.
+Runs on Windows, on 64-bit Python, against the S7-PLCSIM Advanced
+instance its --vehicle names ("PLC_2" for f1). Every 20 ms it writes the
+field-device picture the safety program needs and reads back the one
+output that matters.
+
+ONE WRITER PER VEHICLE, WHICH IS THE SINGLE-WRITER RULE AND NOT AN
+EXCEPTION TO IT
+  The rule is one writer per PLC, and since M6.1 each vehicle has its
+  own. --vehicle {f1|f2} is what makes this process a particular truck's
+  writer: it stamps env VEHICLE, and status_contract turns that into the
+  two UDP ports, the panel title and the PLCSIM instance name. Two
+  trucks are two of these processes, each on its own port pair, each
+  writing its own PLC. step6.sh prints both command lines on `start`.
 
 THE PANEL AND THE LOOP ARE TWO THREADS, ON PURPOSE
   Tk stops pumping events while a window is dragged or resized. If the PLC
@@ -27,12 +37,14 @@ THE FAIL DIRECTION
   then sees the link go quiet and fails safe on its own 0.28 s rule.
 
 Usage (Windows, 64-bit Python, PLCSIM Advanced already in RUN):
-  python m5_ver2\\step6\\windows\\step6.py
+  python m5_ver2\\step6\\windows\\step6.py --vehicle f1
 With no PLCSIM license (any Python, no pythonnet):
-  python m5_ver2\\step6\\windows\\step6.py --virtual
+  python m5_ver2\\step6\\windows\\step6.py --vehicle f1 --virtual
 """
 
+import argparse
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -40,16 +52,42 @@ import threading
 import time
 import tkinter as tk
 
+# ---------------------------- THE VEHICLE --------------------------
+# NOT required=True: pytest imports this module with its own argv, and
+# a hard requirement here would kill collection. The flag sets the env;
+# status_contract's import below is what refuses, loudly and by name,
+# when neither the flag nor the env named a vehicle.
+_parser = argparse.ArgumentParser(add_help=False)
+_parser.add_argument("--vehicle", choices=("f1", "f2"))
+_parser.add_argument("--virtual", action="store_true")
+_ARGS, _ = _parser.parse_known_args()
+if _ARGS.vehicle:
+    os.environ["VEHICLE"] = _ARGS.vehicle
+# THE ORDER HERE IS LOAD-BEARING. status_contract binds its per-vehicle
+# constants ONCE, at its first import, off env VEHICLE - so the env has
+# to be set BEFORE the import below, and nothing above it may import
+# that module. Set it after and this process is a writer for no vehicle
+# at all: it holds the constants refusal instead of a pair of ports.
+sys.path.insert(0, os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "ipc")))
+from status_contract import PLC_PORT, SENSOR_PORT, VID  # noqa: E402
+
 # ----------------------------- CONFIG -----------------------------
-PLC_INSTANCE = "PLC_2"
-VIRTUAL = "--virtual" in sys.argv  # no PLCSIM: virtual_fplc.py plays the F-PLC
+# PLC_3 is RESERVED and entirely unused: PLCSIM Advanced has never run
+# as f2 and cannot until a license returns, so f2 is a --virtual truck.
+PLC_INSTANCE = {"f1": "PLC_2", "f2": "PLC_3"}[VID]
+VIRTUAL = _ARGS.virtual  # no PLCSIM: virtual_fplc.py plays the F-PLC
 API_DLL_DIR = r"C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\6.0"
 UDP_TARGET = None      # None -> ask `wsl.exe hostname -I`. A string overrides.
-UDP_PORT = 5100
+UDP_PORT = PLC_PORT    # Windows -> WSL, this vehicle's status stream
 CYCLE_S = 0.02         # 20 ms
 ACK_PULSE_S = 0.30
 STATUS_EVERY = 10      # refresh the panel's status text every Nth cycle
-SENSOR_PORT = 5101     # WSL -> Windows, the back scanner's verdict
+# SENSOR_PORT - WSL -> Windows, the back scanner's verdict - is the
+# other half of the pair imported above. Neither port is a literal here:
+# both are this vehicle's, and status_contract's VEHICLES table is the
+# one place either of them is chosen.
+#
 # Four missed sends at field_eval's 10 Hz. Budget to PF_OSSD False:
 # SENSOR_STALE_S 0.40 + CYCLE_S 0.02 = < 0.42 s, and the Step 1 chain
 # (< 0.45 s from Motor dropping) runs AFTER this one, not beside it.
@@ -340,12 +378,13 @@ def run_panel(state, live):
     """Build the panel and pump it. Returns when the window closes."""
     big = ("Segoe UI", 13, "bold")
     root = tk.Tk()
-    root.title("Forklift 1 PLC Control Panel"
+    root.title("Forklift {} PLC Control Panel".format(VID)
                + (" - VIRTUAL F-PLC (model)" if VIRTUAL else ""))
     root.configure(bg=BG)
     root.resizable(False, False)
 
-    tk.Label(root, text="Forklift 1 PLC Control Panel", bg=BG, fg=FG,
+    tk.Label(root, text="Forklift {} PLC Control Panel".format(VID),
+             bg=BG, fg=FG,
              font=("Segoe UI", 19, "bold")).pack(pady=(16, 4))
 
     lamp = tk.Label(root, text="MOTOR STOPPED", fg="white", bg="#4a4a4a",
