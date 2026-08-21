@@ -21,9 +21,15 @@ DEFAULT_DEV_M = 0.8   # intermediate waypoint pass radius; the pursuit
 
 def _real(v):
     """True for a real, finite number. Booleans are not numbers here -
-    the same strictness orderUpdateId already gets."""
-    return (isinstance(v, (int, float)) and not isinstance(v, bool)
-            and math.isfinite(v))
+    the same strictness orderUpdateId already gets. A 400-digit integer
+    is legal JSON and an int Python holds happily, but no float can:
+    isfinite() raises on it, so the answer is asked for, not assumed."""
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return False
+    try:
+        return math.isfinite(v)
+    except OverflowError:        # int too large to convert to float
+        return False
 
 
 def validate_order(msg):

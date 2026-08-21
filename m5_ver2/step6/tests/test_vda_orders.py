@@ -81,6 +81,16 @@ def test_a_coordinate_that_is_not_a_number_is_rejected(axis, value):
     assert "node 1" in reason and axis in reason
 
 
+def test_a_digit_storm_is_rejected_not_raised():
+    """A 400-digit integer is legal JSON and a fine Python int, but no
+    float holds it - math.isfinite raises on it. The door must answer,
+    not crash."""
+    bad = order()
+    bad["nodes"][1]["nodePosition"]["x"] = 10 ** 400
+    reason = vo.validate_order(bad)
+    assert reason and "node 1" in reason and "x" in reason
+
+
 def test_a_deviation_that_is_not_a_number_is_rejected():
     bad = order()
     bad["nodes"][1]["nodePosition"]["allowedDeviationXY"] = "0.25"
