@@ -1,5 +1,146 @@
 # Step 6 context
 
+**Step 6 is Step 5 run twice in one world.** One warehouse, two forklifts,
+`f1` and `f2`, each with its own full vehicle stack, its own UDP port pair,
+its own commissioning HMI and its own Windows writer. They share the Gazebo
+world, the machine's CPU, and — for now — their TF frame ids (the one
+limitation, at the foot of this section). M6.1's claim is that the second
+vehicle needed no second copy of the CODE: every node is the same script
+under a different environment, and the only per-vehicle files in the tree
+are generated. `m5_ver2/CLAUDE.md` still holds the PLC tag table and the
+safety-program behaviour, unchanged, for both trucks.
+
+## The VEHICLES table is the one home for every per-vehicle difference
+
+`ipc/status_contract.py`:
+
+```python
+VEHICLES = {
+    "f1": {"plc_port": 5110, "sensor_port": 5111,
+           "spawn": {"x": "-3.00", "y": "-5.50", "z": "0.05", "yaw": "0.0"}},
+    "f2": {"plc_port": 5120, "sensor_port": 5121,
+           "spawn": {"x": "3.00", "y": "-5.50", "z": "0.05",
+                     "yaw": "3.14159"}},
+}
+```
+
+Everything else is derived from it:
+
+- **Topic names.** `contract(vid)` returns `/f1/plc/status`,
+  `/f1/safety/fields`, `/f1/vehicle/cmd_vel` and the rest. The step5
+  `/forklift/...` family exists nowhere on the wire — measured, see
+  PROOF.md.
+- **Ports.** 5110/5111 and 5120/5121. The 5100/5101 family is left to
+  step4 and step5 on purpose, so a concurrently running step5 stack
+  collides with nothing here.
+- **The env var.** WSL nodes read their vehicle from `VEHICLE`, which
+  `step6.sh` stamps on every spawn; the Windows writer sets the same
+  variable from `--vehicle` **before** importing `status_contract`. That
+  ordering is load-bearing: the module binds its per-vehicle constants
+  once, at first import, and refuses by name if `VEHICLE` is absent.
+- **`vehicles/f1/` and `vehicles/f2/`** are GENERATED, by
+  `tools/instantiate_vehicle.py`, from `gazebo/forklift_ver2/model.sdf`
+  and `agv/forklift/config.yaml`, by counted prefix rewrite. They are
+  gitignored and `step6.sh deploy` remakes them before it freezes the
+  image. **Never hand-edit a file under `vehicles/`** — edit the source
+  and redeploy. Both sources stay untouched: `config.yaml` belongs to
+  three stacks and `forklift_ver2/model.sdf` is the inherited plant.
+- **The spawn poses.** f2 faces f1 down the main aisle, 6.00 m away in
+  the open south block. Both were validated live (Gate 1): each truck
+  settles to floor level at exactly the table's coordinates, zero roll,
+  zero pitch.
+
+`step6.sh` repeats the ID LIST — `VEHICLES=(f1 f2)` — and the two PLC
+ports as literals in its pre-flight guard, because a shell cannot import
+Python. `windows/step6.py` repeats the ID list once more, as its
+`--vehicle` argparse choices, because the parser has to exist before the
+module may be imported at all. Those are the only three duplications, all
+three carry a maintenance note, and the third is now pinned by a test
+(`tests/test_vehicles_table.py`).
+
+## The writers: one process, one PLC, per truck
+
+The single-writer rule is per PLC, and each vehicle has its own:
+
+```
+python m5_ver2\step6\windows\step6.py --vehicle f1 --virtual
+python m5_ver2\step6\windows\step6.py --vehicle f2 --virtual
+```
+
+`--virtual` puts `windows/virtual_fplc.py` in the F-PLC's place, in
+process. **f2 has never run against a real PLC** and cannot until a PLCSIM
+license returns — `PLC_INSTANCE`'s `f2 -> "PLC_3"` half is reserved and
+unreachable. Results earned under `--virtual` are rig results, not
+F-program validation.
+
+## What is proven, and what is not
+
+**`PROOF.md` is the ledger, and it is deliberately incomplete.** Measured
+on this machine: Gate 1 (two-vehicle RTF, server-only, worst mean 0.934
+against a 0.90 gate), Gate 5 (start/stop twice, 17 pids, no orphans, no
+held ports) and the fail-safe half of Gate 4 (both vehicles sit
+`motor: false, case: 3, v_limit: 300` with no writer). **Not measured:**
+gates 2, 3, 6 and Gate 4's driving half, all of which need the two Windows
+writers and a hand on two joysticks. PROOF.md carries a numbered runbook
+for each; do not read an unticked gate as a passed one.
+
+Loop-level evidence sits beside it: `tests/test_step6_virtual_loop.py`
+drives the real `step6.control_loop` against `VirtualFPLC` over real UDP
+sockets, parameterised over BOTH port pairs. 239 tests pass under WSL.
+
+## Full-stack RTF: about 0.75, and Gate 1 does not cover it
+
+Gate 1's 0.934-0.995 is **server-only** — `gz sim -s` and two models, no
+ROS stack. With the whole 17-pid stack up headless, `/world/warehouse/stats`
+means **0.755** and **0.734** over two 60 s samples (PROOF.md has the
+per-10 s buckets). That is a consistent load floor, not scheduling noise:
+the ROS side costs roughly a quarter of real time. It breaks nothing —
+every loop in the tree is wall-clock timed, so rates are unaffected and
+only *simulated* time per wall second stretches — but a third vehicle's
+headroom is now the machine's, not the simulator's, and that is an M6.2
+number.
+
+## Known limitation: the TF frames are NOT namespaced
+
+`tools/instantiate_vehicle.py` rewrites topic prefixes. It does **not**
+rewrite frame ids. Both derived models still declare:
+
+```xml
+<odom_frame>forklift/odom</odom_frame>
+<robot_base_frame>forklift/base_link</robot_base_frame>
+```
+
+so `/f1/gz/odom` and `/f2/gz/odom` carry **byte-identical**
+`frame_id: forklift/odom` / `child_frame_id: forklift/base_link` —
+measured live on 2026-08-21.
+
+**Nothing in step6 reads them, which is the only reason this is not a
+defect today.** There is no `/tf` topic in the stack at all (65 topics, no
+`/tf`), no node greps `frame_id`, and the two consumers of odometry —
+`nav_node` and the HMI sketch — take `msg.pose.pose` and nothing else.
+
+**M6.2+ must namespace the frames BEFORE the first consumer appears.** The
+moment anything publishes TF, runs a costmap, or opens RViz on both
+trucks, two vehicles will be broadcasting the same `forklift/odom ->
+forklift/base_link` transform into one tree and the second one wins,
+silently. The fix belongs in `instantiate_vehicle.py` next to the topic
+rewrite, and it has to move `config.yaml`'s `odometry` frame names in the
+same pass — `config.yaml` mirrors `model.sdf`'s frames on purpose and
+neither may drift from the other.
+
+---
+
+# Inherited context — Steps 1 to 5
+
+**Everything below this line describes the ANCESTOR.** It came across with
+`cp -r step5 step6` and it is kept because the invariants it records are
+still the invariants — the self-mask bearings, the station standoffs, the
+latched `/hmi/mode`, the six live rounds of 2026-08-13. What it is NOT is
+a description of step6's wire: names below are the step5 spellings
+(`/forklift/...`, `5100`/`5101`, `step5.sh`, "nine pids") and the step6
+equivalents are the per-vehicle ones above. Read it for the WHY; read this
+file's head, `PROOF.md` and `README_step6.md` for the WHAT.
+
 The file the next step reads first. `m5_ver2/CLAUDE.md` holds the PLC tag
 table, the safety-program behaviour and the working agreements — it is the
 ground truth for anything with a tag name in it. This page holds what Steps 1

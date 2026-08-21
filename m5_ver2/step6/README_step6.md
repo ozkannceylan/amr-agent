@@ -1,60 +1,91 @@
-# Step 5 — autonomous drive on top of the safety chain
+# Step 6 — two forklifts in one warehouse
 
-Pick a station on the warehouse sketch, press **GO**, and the forklift plans a
-route through the aisle centrelines and drives it — while every command it
-issues still passes the same mux, the same `Motor`-gated `cmd_gate` and the
-same STO contactor a joystick command passes. **The autopilot is a requester,
-never an authority.** It cannot enable the drive, it cannot clear a latch, and
-a safety demand stops it exactly the way it stops a human.
+One world, two vehicles. **`f1`** and **`f2`** each run a full copy of Step 5's
+vehicle stack — mux seam, autopilot, `Motor`-gated `cmd_gate`, STO contactor,
+commissioning HMI — on its **own topic namespace, its own UDP port pair and
+its own Windows writer**. They share the Gazebo world and the machine's CPU,
+and nothing else: there is no cross-vehicle channel in M6.1, by design.
 
-Step 5 adds four things to Step 4's chain: a **mux seam** that decides which
-human-side source drives the vehicle, an **autopilot** (waypoint graph, pure
-pursuit, speed policy, lidar guard), a **warehouse sketch** in the HMI, and a
-**simulated deploy** — the vehicle software runs from a frozen, hashed copy,
-not from the source tree you are editing.
+Step 6 adds three things to Step 5 and closes one debt:
+
+- **The `VEHICLES` table** in `ipc/status_contract.py` — the single home for
+  every per-vehicle difference (ports, topic names, spawn pose, config path).
+- **Derived vehicles.** `vehicles/f1/` and `vehicles/f2/` are *generated* from
+  `gazebo/forklift_ver2/model.sdf` and `agv/forklift/config.yaml` by
+  `tools/instantiate_vehicle.py`. They are gitignored and rebuilt by `deploy`.
+  **Never hand-edit them.**
+- **A writer that takes `--vehicle`.** One process per PLC, per truck. The
+  single-writer rule holds per vehicle; it is not an exception to it.
+- **Debt closed:** `cmd_gate` now publishes zeros when it is enabled and its
+  *command* input has gone quiet (`CMD_STALE_S = 0.25 s`) — the one fail-open
+  silence path step5's final review named.
 
 > Something looks wrong? Read **[Not a bug](#not-a-bug)** before you debug it.
 
-Evidence for every claim in this file: **[PROOF.md](PROOF.md)**.
+**Evidence: [PROOF.md](PROOF.md) — read its ledger before you trust anything
+here.** Gate 1 (RTF), Gate 5 (lifecycle) and the fail-safe half of Gate 4 are
+measured. Gates 2, 3, 6 and Gate 4's driving half are **NOT RUN**: they need
+the two Windows writers and two hands, and PROOF.md carries a numbered runbook
+for each.
 
 ## Run order
 
-The PLC goes first. The vehicle side cannot be enabled without it.
+The PLC goes first, **per vehicle**. A truck cannot be enabled without its own
+writer, and each writer serves exactly one truck.
 
 | # | Where | Do this |
 |---|---|---|
-| 1 | Windows | Start PLCSIM Advanced instance **`PLC_2`** from the Control Panel, download the program from TIA Portal, CPU in RUN. |
-| 2 | WSL | `cd /mnt/c/Users/ozkan/projects/amr-agent` |
-| 3 | WSL | `./m5_ver2/step5/step5.sh deploy` — freezes `ipc/` + `config.yaml` into `deploy/` with a sha256 `MANIFEST`. Prints `deployed 13 files`. **`start` refuses without one.** |
-| 4 | WSL | `./m5_ver2/step5/step5.sh start` — takes ~7 s. Do **not** source ROS first; the script does it. |
-| 4a | Screen | Two windows appear: the **Gazebo window** with the warehouse, the ten painted station ticks and the forklift standing in the dock aisle, and the **HMI** — joystick on the left, warehouse sketch on the right. `start --headless` skips the Gazebo one. |
-| 5 | WSL | Read the **nine** pid lines it prints (`world plc_link cmd_gate cmd_mux field_eval encoder_link sensor_link nav_node hmi`). `WARNING: <name> exited during startup` sends you to that log in `m5_ver2/step5/logs/`. A `THE STACK IS INCOMPLETE.` line means stop and read it. |
+| 1 | Windows | **Nothing, for M6.1.** Both trucks run `--virtual` (step 7), so no PLCSIM instance is needed. Against a real PLC, only **f1** has one: start `PLC_2` from the Control Panel, download from TIA Portal, CPU in RUN. f2's `PLC_3` is reserved and has never run — no license. |
+| 2 | WSL | `cd /mnt/c/Users/ozkan/projects/amr-agent/m5_ver2/step6` |
+| 3 | WSL | `./step6.sh deploy` — **regenerates `vehicles/f1/` and `vehicles/f2/` first** (from `gazebo/forklift_ver2/model.sdf` + `agv/forklift/config.yaml`), then freezes `ipc/` + both derived pairs into `deploy/` with a sha256 `MANIFEST`. Prints `deployed 17 files`. **`start` refuses without one.** |
+| 4 | WSL | `./step6.sh start` — **8.8 s**, measured: the world gets a five-second head start before the vehicle nodes, then one more second before `start` checks that all seventeen are still alive. Do **not** source ROS first; the script does it. |
+| 4a | Screen | **Three windows:** the **Gazebo window** with the warehouse and both trucks facing each other 6.00 m apart in the south block, and **two HMIs** — `Forklift HMI - f1` and `Forklift HMI - f2`. `start --headless` skips the Gazebo one. |
+| 5 | WSL | Read the **seventeen** pid lines: `world`, then f1's eight (`plc_link cmd_gate cmd_mux field_eval encoder_link sensor_link nav_node hmi`), then f2's eight. `WARNING: <name> exited during startup` sends you to that log in `logs/`. A `THE STACK IS INCOMPLETE.` line means stop and read it. |
 | 6 | Windows | `cd C:\Users\ozkan\projects\amr-agent` |
-| 7 | Windows | `python m5_ver2\step5\windows\step5.py` — **64-bit Python** (pythonnet). A grey **panel window** opens; the console prints `streaming PLC state to <wsl-ip>:5100` and `listening for the back scanner on 0.0.0.0:5101`. |
-| 8 | Panel | Click **RESET**. Once. `Motor` goes True, the panel lamp reads `MOTOR ENABLED`, the HMI lamp turns neutral and the line under it reads `Drive enable: ON`. |
-| 9a | HMI window | **Teleop:** leave the radio on `Teleop` and drag the joystick. The forklift drives. |
-| 9b | HMI window | **Auto:** click `Auto`, click a station dot on the sketch (it turns orange), press **GO**. The route appears as a dashed line and the truck drives it. **STOP** cancels the goal — it is not a brake. |
-| 10 | Panel | Finished: **close the window**. It writes the trip values on the way out, through the same path an exception takes. |
-| 11 | WSL | `./m5_ver2/step5/step5.sh stop` |
+| 7 | Windows | `python m5_ver2\step6\windows\step6.py --vehicle f1 --virtual` — **64-bit Python** (pythonnet). A grey **panel** opens, titled `Forklift f1 PLC Control Panel - VIRTUAL F-PLC (model)`; the console prints `streaming PLC state to <wsl-ip>:5110` and `listening for the back scanner on 0.0.0.0:5111`. |
+| 8 | Windows | Open a **second** terminal, `cd` again, then `python m5_ver2\step6\windows\step6.py --vehicle f2 --virtual` — same panel titled `Forklift f2 ...`, same two lines on **5120** and **5121**. |
+| 9 | Panels | Click **RESET** on f1's panel. Once. Then **RESET** on f2's. Each lamp reads `MOTOR ENABLED`; each HMI turns neutral and reads `Drive enable: ON`. |
+| 10a | HMI windows | **Teleop:** leave a truck's radio on `Teleop` and drag *that* HMI's joystick. Only that truck moves. |
+| 10b | HMI windows | **Auto:** click `Auto`, click a station dot on that HMI's sketch, press **GO**. Both trucks can be routed at the same time. **STOP** cancels a goal — it is not a brake. |
+| 11 | Panels | Finished: **close both windows**. Each writes its own truck's trip values on the way out. |
+| 12 | WSL | `./step6.sh stop` |
 
-**No PLCSIM license?** Run step 7 as `python m5_ver2\step5\windows\step5.py --virtual`
-and skip step 1 entirely: `windows/virtual_fplc.py` plays the F-PLC in-process with
-the measured semantics (design: `docs/superpowers/specs/2026-08-20-virtual-fplc-design.md`).
-The panel titles itself `VIRTUAL F-PLC (model)`; results earned this way are rig
-results, not F-program validation.
+**No PLCSIM license? That is the normal case here.** `--virtual` puts
+`windows/virtual_fplc.py` in the F-PLC's place, in process, with the measured
+semantics (design: `docs/superpowers/specs/2026-08-20-virtual-fplc-design.md`).
+Results earned this way are **rig results, not F-program validation** — and f2
+has *only ever* been a virtual truck.
 
-**Close the panel before `stop`, in that order.** `stop` is not a brake —
+**`--headless` when you are timing something.** Rendering here is llvmpipe
+software rasterisation. The Gazebo window costs regularity more than speed:
+measured over 60 samples on the one-vehicle stack, real-time factor mean
+**0.998 headless against 0.806 with the window**, and the window's floor is
+0.127 against 0.926. An interval measured with it open is worth less than one
+measured without. (Those are step5's numbers, and they compare the WINDOW's
+cost, not the stack's. Step 6's own headless figure under the full 17-pid
+stack is **0.75** — see [PROOF.md](PROOF.md).)
+
+**`vehicles/` is generated — regenerate it, do not edit it.** `deploy` runs
+`tools/instantiate_vehicle.py --all` before it freezes anything, so the image
+can never ship yesterday's derivation. To change a truck, edit
+`gazebo/forklift_ver2/model.sdf` or `agv/forklift/config.yaml` and redeploy. To change
+a *port*, a *spawn pose* or a *topic prefix*, edit the `VEHICLES` table in
+`ipc/status_contract.py` — and remember `step6.sh` repeats the ID list and the
+two PLC ports as literals, with a maintenance note at each.
+
+**Close both panels before `stop`, in that order.** `stop` is not a brake —
 Gazebo's joint controllers hold their last setpoint, so killing the stack under
 a moving truck only leaves it moving (measured once at 14.8 m on a standing
 command). The e-stop is the brake.
 
-Neither script touches PLCSIM. Only you stop the PLC, from the Control Panel.
+Neither script touches PLCSIM. Only you stop a PLC, from the Control Panel.
 
 ### The Windows panel — buttons, not stdin
 
-`step5.py` is a **tkinter panel**. It has no stdin reader; typing at the
-console it was launched from does nothing. Step 4's `es0` / `es1` / `a` / `q`
-commands are these buttons now:
+`step6.py` is a **tkinter panel**, and there is one per truck. It has no
+stdin reader; typing at the console it was launched from does nothing. Every
+button below acts on the vehicle its `--vehicle` flag named, and on no other.
+Step 4's `es0` / `es1` / `a` / `q` commands are these buttons now:
 
 | Control | Effect | Was |
 |---|---|---|
@@ -70,23 +101,58 @@ PLC is being told the chain is open, however it got there. The panel and the
 PLC cycle are two threads on purpose — Tk stops pumping events while a window
 is dragged, and the sole writer must not freeze with `Motor` energised.
 
-### Three things `step5.sh` does that are easy to miss
+### Four things `step6.sh` does that are easy to miss
 
 - **`start` runs every process under `setsid`**, so the stack survives closing
   the terminal you started it from. Before that, closing it killed five of six
   and left `gz sim` alone in a live simulator.
+- **`start` stamps `VEHICLE` on every child**, and that one word is what turns
+  a shared script into f1's or f2's. `env` execs in place, so the pid recorded
+  is still the node's own. The world launch is the exception and carries no
+  `VEHICLE` at all: it serves both trucks from one process and reads the table
+  env-free.
 - **`stop` validates the PID file before it signals anything.** Each recorded
-  pid must still have `m5_ver2/step5` in its `/proc/<pid>/cmdline`, and each
+  pid must still have `m5_ver2/step6` in its `/proc/<pid>/cmdline`, and each
   candidate must carry this stack's `GZ_PARTITION`. A second stack you have
-  running — an M5 demo in partition `m5demo` — cannot be taken down by it, even
-  after a reboot has recycled the recorded pids.
-- **`start` pre-flights UDP :5100** and refuses if something already holds it,
-  naming the holder. Without that guard a concurrently running Step 4 stack
-  takes the PLC link and `plc_link` binds nothing — measured in Task 8, and
-  silent. The guard is pipe-free and fail-closed: an `ss` that dies mid-pipe
-  cannot make it fall through, and a missing `ss` prints
-  `note: ss not found - the UDP :5100 pre-flight is SKIPPED.` rather than
-  pretending it checked.
+  running — an M5 demo in partition `m5demo`, or a step5 stack — cannot be
+  taken down by it, even after a reboot has recycled the recorded pids. It
+  names every pid it sweeps and every pid it kills, then sweeps once more with
+  KILL after a two-second grace, because Tk's mainloop ignores TERM.
+- **`start` pre-flights UDP :5110 and :5120** — the table's two `plc_port`
+  values — and refuses if either is held, naming the vehicle whose port it is.
+  Without that guard a second stack takes the PLC link and `plc_link` binds
+  nothing, in one warning line among seventeen — measured twice while building
+  M6.1, and silent. The guard is pipe-free and fail-closed: an `ss` that dies
+  mid-pipe cannot make it fall through, and a missing `ss` prints
+  `note: ss not found - the UDP :5110/:5120 pre-flight is SKIPPED.` rather than
+  pretending it checked. The 5100/5101 family is deliberately **not** checked —
+  it is step4's and step5's, and refusing over it would refuse a start that is
+  perfectly legal beside them. The sensor ports (5111/5121) are not checked
+  either, and cannot be: they are bound on the *Windows* side.
+
+---
+
+# Inherited reference — Step 5's manual, below
+
+**Everything from here down came across with `cp -r step5 step6` and describes
+the ANCESTOR.** The mechanisms are step6's — the mux seam, the arrival radius
+rule, the sketch panel, the field contract, "Not a bug" — but the NAMES are
+step5's. Wherever the text below says:
+
+| It says | Step 6 means |
+|---|---|
+| `/forklift/plc/status`, `/hmi/cmd_vel`, `/vehicle/cmd_vel`, … | `/f1/...` and `/f2/...`, one set per truck |
+| `5100` / `5101` | `5110` / `5111` for f1, `5120` / `5121` for f2 |
+| `step5.sh`, `step5.py`, `m5_ver2/step5/` | `step6.sh`, `step6.py --vehicle <vid>`, `m5_ver2/step6/` |
+| `GZ_PARTITION=step5`, `ROS_DOMAIN_ID=95` | `step6`, `96` |
+| "nine pids" | seventeen |
+| `agv/forklift/config.yaml` as the vehicle's config | `vehicles/<vid>/config.yaml`, derived from it |
+
+**Do not copy a command out of the text below and run it.** The run order at
+the top of this file is the one that is current. Nothing below has been
+re-measured on this tree — the numbers in *Measured, so you know what good
+looks like* are step5's, on one vehicle, and `PROOF.md` is the only ledger for
+step6's own claims.
 
 ## How a command reaches the wheels
 
@@ -455,21 +521,30 @@ catch up, so an interval measured with the window open is worth less than the
 same interval measured without it. The timing rows above were all measured
 headless, and a re-measurement of them should be too.
 
-Unit tests: **`195 passed, 0 skipped`**.
+## Unit tests — step6's own, and the number to expect
+
+**`239 passed, 0 skipped`** under WSL:
 
 ```bash
 cd /mnt/c/Users/ozkan/projects/amr-agent
 source /opt/ros/jazzy/setup.bash
-python3 -m pytest m5_ver2/step5/tests/ -q
+python3 -m pytest m5_ver2/step6/tests/ -q
 ```
 
 A **skip** is a failure here: it means a module did not import and its tests
-silently did not run.
+silently did not run. On Windows the same suite gives `147 passed, 7 errors`
+with `--continue-on-collection-errors` — the seven are `No module named
+'rclpy'`, which Windows does not have and is not supposed to.
 
 ## Validation checklist
 
-Step 5's checklist and its evidence live in **[PROOF.md](PROOF.md)**. Six of
-its eight rows are earned with live transcripts against `PLC_2` on 2026-08-12
-and 2026-08-13; one row is PARTIAL and says exactly which half is missing, and
-one was descoped by the owner and says so. Nothing there is ticked on the
-strength of a copied file.
+**Step 6's ledger is [PROOF.md](PROOF.md), and it is deliberately unfinished.**
+Of the M6.1 spec's six proof gates: Gate 1 (two-vehicle RTF) and Gate 5 (clean
+lifecycle, twice) are measured with the output kept, Gate 4 has its fail-safe
+half measured and its driving half owed, and Gates 2, 3 and 6 are **NOT RUN** —
+they need the two Windows writers and a hand on two joysticks, which no agent
+may supply. PROOF.md gives each of the four a numbered runbook: one action per
+step, and where to write the number down.
+
+Nothing there is ticked on the strength of a copied file, and an unticked gate
+is not a passed one.
