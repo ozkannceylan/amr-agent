@@ -34,15 +34,15 @@ IDLE_FRESH_S = 3.0   # a state older than this cannot confirm idleness:
                      # silence is not stillness, and an order sent on a
                      # stale state is sent to a truck that may be driving
 
-# The task machine. dwell_done is a self-transition on purpose: the
-# timer expiring is permission to build leg 2, not a state of its own -
-# the task is still dwelling until the caller actually sends the order
-# and reports it back as leg2_sent.
+# The task machine. There is NO dwell_done event: the dwell timer is the
+# manager's, and a timer expiring is not something that happened to the
+# task - it is permission for the manager to build leg 2. The one event
+# that leaves DWELL is leg2_sent, reported once the order is actually on
+# the wire, so a dwell whose publish failed is still a dwell.
 _TRANSITIONS = {
     "QUEUED":        {"leg1_sent": "ASSIGNED_LEG1"},
     "ASSIGNED_LEG1": {"leg1_arrived": "DWELL"},
-    "DWELL":         {"dwell_done": "DWELL",
-                      "leg2_sent": "ASSIGNED_LEG2"},
+    "DWELL":         {"leg2_sent": "ASSIGNED_LEG2"},
     "ASSIGNED_LEG2": {"leg2_arrived": "DONE"},
     "DONE":          {},
 }

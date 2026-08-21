@@ -105,3 +105,7 @@ def test_state_machine_happy_path_and_illegal_moves():
         advance(t, "leg1_sent")          # DONE accepts nothing
     with pytest.raises(ValueError):
         advance(task(), "leg2_arrived")  # QUEUED can't finish
+    with pytest.raises(ValueError):
+        # The dwell timer is the manager's; its expiry is not an event
+        # the task has a transition for. leg2_sent is what leaves DWELL.
+        advance(task(state="DWELL"), "dwell_done")
