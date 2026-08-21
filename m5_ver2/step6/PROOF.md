@@ -11,7 +11,10 @@ M6.1 spec's proof gates).
 [x] Gate 4 — per-vehicle stale-link: silence half AND driving half
 [x] Gate 5 — clean lifecycle, twice
 [x] Gate 6 — the gate debt proven closed on the floor     MEASURED
-              (the driving half; the DISPLAY half is open -> M6.2)
+              (the driving half; the DISPLAY half is open -> M6.3,
+               which owns the operator-facing view: M6.2's six gates
+               are the vehicle's own wire to a fleet manager, and not
+               one of them puts anything on a screen)
 
 M6.2, the VDA 5050 gates (numbered VDA 1..6 so they cannot be
 confused with the six above), all measured 2026-08-21 18:31-18:49:
@@ -1755,9 +1758,12 @@ side by side:
 ```
 
 Same label, same six remaining nodes — `Progress.reached` was still 0,
-because the truck stopped 2.6 m short of `wp1` and 2.6 m is outside the
-0.8 m default deviation — and a different first point, which is the
-current pose. The state stream across the outage, one row per change:
+because the truck stopped **1.85 m** short of `wp1`, and 1.85 m is well
+outside the 0.8 m default deviation. That distance is the two
+coordinates above and nothing else:
+`hypot(7.012486 − 6.0, −7.049058 − (−5.5)) = hypot(1.0125, −1.5491) =
+1.8506 m`. The first point differs, and it is the current pose. The
+state stream across the outage, one row per change:
 
 ```
 18:43:56.907  order=o-dcf3e202  rem=6  last=      driving=False
@@ -1945,8 +1951,14 @@ reported between the spawn and the removal, counted:
 The truck's own odom 75 ms before the first PROTECTIVE puts its back
 scanner — `model.sdf`'s (0.72, 0.00) on `base_link`, yaw 0 — at
 (−6.0774, −5.4121), which is **0.943 m off the box's near face**; the
-device said 0.903 m at the trip. The difference is 16 mm of travel plus
-the ray angle across a 0.4 m cube. Both numbers are inside the case-1
+device said 0.903 m at the trip. **The 40 mm between them is sampling
+skew and not disagreement:** the truck was closing at 0.250 m/s, so
+40 mm is 160 ms of travel, and the two numbers come off two different
+pipelines — bridged odom on one, a bridged scan through `field_eval` on
+the other — read at two different instants. (An earlier draft blamed the
+ray angle across the cube. That is backwards: an oblique return is
+LONGER than the perpendicular one, so a ray angle would push the
+device's number UP, not down.) Both numbers are inside the case-1
 protective field's **1.0 m**, which is the only claim the gate makes.
 
 **The trip, in causal order, from three separate captures:**
@@ -2007,10 +2019,12 @@ Three independent statements, all from the captures:
 
 1. **Nothing arrived.** Every message on every `uagv/v2/amragent/#`
    topic between the order and the trip, by topic:
-   `f1/order` **1** (the order that started the drive, 10.2 s earlier),
-   `f1/state` 8, `f2/state` 6 — all three of those are OUTBOUND. No
-   `instantActions`, no second order, nothing addressed to f1 in the
-   10.2 s before Motor dropped.
+   `f1/order` **1**, `f1/state` 8, `f2/state` 6. **The two state topics
+   are the vehicles TALKING** — outbound, and an outbound message
+   commands nothing. **The one INBOUND message is the order**, and it
+   landed at 18:40:38.570, **10.2 s before** Motor dropped. No
+   `instantActions`, no second order, nothing else addressed to f1 in
+   those 10.2 s.
 2. **The wire is the last link, not the first.** `fields` said
    PROTECTIVE at 18:40:48.743, `plc/status` said `motor: false` 54 ms
    later, and the MQTT state carried the news 1 ms after that. The
@@ -2035,15 +2049,24 @@ sample stamped:
 | Window | Samples | Mean RTF | Min | Max |
 |---|---|---|---|---|
 | whole 400 s, 18:32:38–18:39:18 | 3752 | **0.458** | 0.025 | 1.644 |
-| 60 s, BOTH trucks driving (VDA 1) | 573 | **0.471** | 0.030 | 1.574 |
-| 60 s, one truck driving (VDA 2b) | 574 | **0.497** | 0.029 | 1.644 |
+| 60 s containing VDA 1's 20.263 s overlap (22.4 s driving) | 573 | **0.471** | 0.030 | 1.574 |
+| 60 s containing 53.8 s of VDA 2b's single-truck drive | 574 | **0.497** | 0.029 | 1.644 |
 
 Per-10 s over the two 60 s windows:
 
 ```
-both driving   0.424, 0.596, 0.525, 0.434, 0.368, 0.478
-one driving    0.370, 0.469, 0.555, 0.514, 0.564, 0.514
+VDA 1 window   0.424, 0.596, 0.525, 0.434, 0.368, 0.478
+VDA 2b window  0.370, 0.469, 0.555, 0.514, 0.564, 0.514
 ```
+
+**Both are 60 s of WALL CLOCK, not 60 s of driving, and the first one is
+mostly idle.** VDA 1's two legs occupy 22.4 s of its window — 18:34:31.078
+to 18:34:53.514, the union of the two — of which 20.263 s is the overlap;
+the other 37.6 s is two parked trucks. Idle is the cheap half, so
+**0.471 is diluted UPWARD and the true both-driving figure is at or below
+it.** The second window is the least diluted number in the table, 53.8 of
+its 60 s EN-ROUTE, but it is one truck and not two, so the two rows
+measure different loads and are not each other's control.
 
 **This is not comparable to the 0.734–0.755 recorded further up this
 file, and the difference is load, not a regression.** That figure was
@@ -2054,7 +2077,9 @@ ROS recorder, a paho recorder, and one or two trucks actually driving.
 M6.1 named exactly this as the open question ("the margin to a third
 vehicle is now the interesting number"; "nothing here was run with the
 two Windows writers attached"). **The measured answer is that a working
-two-vehicle rig runs at roughly 0.46–0.50 of real time on this machine.**
+two-vehicle rig runs at roughly 0.46–0.50 of real time on this machine,
+and the DRIVING half of that sits at the bottom of the range** — the
+windows above are diluted with idle, never with anything faster.
 Every loop in the tree is wall-clock timed, so nothing missed its rate —
 what stretches is simulated time per wall second, and it is why a 6.00 m
 route took 22 s. A third vehicle needs a bigger machine, and that is a
