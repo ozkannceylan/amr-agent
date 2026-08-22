@@ -816,7 +816,7 @@ def test_a_swap_deadlock_asks_the_younger_truck_to_step_aside(floor):
     assert aside, "the step-aside is nowhere on the operator's screen"
     said = aside[-1]
     assert said["vehicle"] == "f2" and said["for"] == ["f1"]
-    assert said["from"] == "(0.0,-5.5)" and said["to"] == "(0.0,5.7)"
+    assert said["from"] == "(0.0,-5.5)" and said["to"] == "(3.0,-5.5)"
     assert said["task"] == "t-2"
     assert doc["traffic"]["blocked"] == [], (
         "a floor that is being cleared is not a BLOCKED floor")
@@ -872,26 +872,31 @@ def test_the_step_aside_target_is_the_nearest_free_node_off_the_others_route(
 
     f2 stands on the dock node east of S1. Three nodes touch it: S1,
     which is f1's own body; (3.0,-5.5), which is free but is the next
-    node of f1's route; and the central connector, which is neither.
-    Nearest wins - a step aside is a move OUT OF THE WAY, not a journey
-    - but floor the trucks it is blocking still have to drive is not out
-    of the way at all, so it goes last.
+    node of f1's route; and the central connector 11.15 m north, which
+    is neither. Floor the blocked trucks still have to drive is a
+    PREFERENCE and ASIDE_MAX_M is a BOUND, so the bound wins: eleven
+    metres driven as one node with no route is not a step aside.
     """
     manager, stub = floor
     now = time.monotonic()
     f1, f2 = deadlocked(manager, stub, now)
     assert manager.floor.standing["f2"] == EAST
 
-    # With f1 named, the node on f1's route is passed over.
-    assert manager.floor.step_aside_target("f2", ["f1"]) == (0.0, 5.65)
-    # With nobody named, nothing is on anybody's route and the nearest
-    # free neighbour wins: 3.00 m against the connector's 11.15 m.
-    assert manager.floor.step_aside_target("f2", []) == (3.0, -5.5)
-    # A node somebody else owns is never offered, whoever they are.
-    manager.floor.hold("f9", [(0.0, 5.65)])
+    # The connector is 11.15 m away and is not a candidate at any price:
+    # ASIDE_MAX_M is a BOUND, not a preference, and it outranks the
+    # route rule. So the answer is the near node even though f1 has to
+    # drive it - measured 2026-08-22, preference alone sent a truck
+    # eleven metres across the cross aisle as a single node.
     assert manager.floor.step_aside_target("f2", ["f1"]) == (3.0, -5.5)
+    # With nobody named, nothing is on anybody's route and the nearest
+    # free neighbour wins, which is the same node for a second reason.
+    assert manager.floor.step_aside_target("f2", []) == (3.0, -5.5)
+    # A node somebody else owns is never offered, whoever they are - and
+    # with the near one gone the far one does NOT become the answer.
     manager.floor.hold("f9", [(3.0, -5.5)])
     assert manager.floor.step_aside_target("f2", ["f1"]) is None
+    assert manager.floor.owner_of((0.0, 5.65)) is None, (
+        "the connector was free and was still correctly refused")
 
 
 def test_a_truck_stepped_aside_too_often_stops_being_shuffled(floor):
@@ -1765,3 +1770,25 @@ def test_four_trucks_take_one_transport_each_and_the_fifth_task_waits(
     doc = manager._status(now)
     assert doc["traffic"]["enabled"] is True
     assert len(doc["vehicles"]) == 4
+
+
+def test_the_step_aside_bounds_are_the_measured_ones():
+    """The two numbers the 2026-08-22 run gave back, pinned to it.
+
+    ASIDE_S was 60 s, written against an arithmetic that used 0.30 m/s
+    and counted only the driving. The live move took 199 s end to end -
+    a cancelOrder handshake, a publish, the vehicle taking the order,
+    and a drive that creeps for most of its length - so the fleet gave
+    up on a move that was going to succeed and said the floor needed a
+    person. The rate is now the measured one and the timeout is derived
+    from it and from the longest move the distance bound allows, so the
+    two can never drift apart again.
+    """
+    assert fl.ASIDE_MAX_M == 5.0          # the longest AISLE edge
+    assert abs(fl.ASIDE_RATE_MPS - 11.15 / 199.0) < 1e-9
+    assert fl.ASIDE_S == 2.0 * fl.ASIDE_MAX_M / fl.ASIDE_RATE_MPS
+    # Which has to be long enough for the move the bound allows, at the
+    # rate the floor actually delivers, with room over.
+    assert fl.ASIDE_S > fl.ASIDE_MAX_M / fl.ASIDE_RATE_MPS
+    # And the connector, the edge that caused all this, is now out.
+    assert 11.15 > fl.ASIDE_MAX_M

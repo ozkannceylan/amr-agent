@@ -895,7 +895,7 @@ def test_a_swap_deadlock_moves_a_truck_and_says_so_on_the_screen(rig):
                    15.0, "the step-aside named in the document", rig)
     said = doc["traffic"]["aside"][-1]
     assert said["vehicle"] == "f2" and said["for"] == ["f1"]
-    assert said["from"] == "(0.0,-5.5)" and said["to"] == "(0.0,5.7)"
+    assert said["from"] == "(0.0,-5.5)" and said["to"] == "(3.0,-5.5)"
     assert said["task"] == "t-west"
     assert doc["traffic"]["blocked"] == [], (
         "a floor that is being cleared was called BLOCKED")
@@ -917,7 +917,7 @@ def test_a_swap_deadlock_moves_a_truck_and_says_so_on_the_screen(rig):
                  and m["nodes"][0]["nodeId"] == "aside"],
         15.0, "the step-aside order", rig)[-1]
     assert aside["orderId"].startswith("ft-")
-    assert aside["nodes"][0]["nodePosition"]["x"] == 0.0
-    assert aside["nodes"][0]["nodePosition"]["y"] == 5.65
+    assert aside["nodes"][0]["nodePosition"]["x"] == 3.0
+    assert aside["nodes"][0]["nodePosition"]["y"] == -5.5
     assert wait_for(lambda: f2.order_id == aside["orderId"], 15.0,
                     "f2 taking the step-aside order", rig)

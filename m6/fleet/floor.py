@@ -108,14 +108,34 @@ IDLE_SHOWN = 5           # the traffic block is a screen, not a log
 # fleet's arithmetic is not going to untangle, and the honest answer
 # then is M6.5's: name it and let a person move a truck.
 ASIDE_MAX = 3
+# A STEP ASIDE IS ONE EDGE OUT OF THE WAY AND NEVER A JOURNEY, and this
+# is the bound that says so. The graph's edges run from 0.40 m to
+# 11.15 m: the three connectors are eleven metres of open floor between
+# two aisles, and a truck sent down one of them as a SINGLE NODE with no
+# route arcs across it. Measured 2026-08-22 22:54: f2 was stepped aside
+# onto the central connector because the only nearer neighbour was on
+# the blocked truck's route, drove 11.15 m as one node, and put its left
+# scanner 1.109 m off the cross-aisle rack corner on the way. Floor the
+# other truck still has to drive is a PREFERENCE; this is a BOUND, and
+# past it the fleet says it has nowhere to go rather than inventing a
+# journey. 5.00 m is the longest aisle edge on this graph, so every
+# ordinary neighbour is still a candidate and only the connectors are
+# not.
+ASIDE_MAX_M = 5.0
+# The effective rate of a step aside, MEASURED and not derived: that
+# same 11.15 m move took 199 s end to end - the cancelOrder handshake,
+# the publish, the vehicle taking the order, and the drive itself at the
+# creep ceiling a warning field imposes for most of it. 0.056 m/s.
+ASIDE_RATE_MPS = 11.15 / 199.0
 # How long one step-aside may take from the moment the cancel goes out
-# to the moment the truck reports the move finished. It covers a
-# cancelOrder the vehicle confirms (the agent's own confirm loop gives
-# up at 5 s), an order publish, and the drive itself - 11.15 m at the
-# worst edge on this graph, at the 0.30 m/s a corner or a warning field
-# imposes, is 37 s. Past this the move is given up and the deadlock
-# gets the named refusal it would have got with nowhere to go.
-ASIDE_S = 60.0
+# to the moment the truck reports the move finished. TWICE the measured
+# time for the longest move the bound above allows, because the rate
+# already has the handshake in it and the doubling is for the corner
+# this one did not have. It was 60 s, written against an arithmetic that
+# used 0.30 m/s and ignored everything but the driving; the run gave it
+# back as 199 s. Past this the move is given up and the deadlock gets
+# the named refusal it would have got with nowhere to go.
+ASIDE_S = 2.0 * ASIDE_MAX_M / ASIDE_RATE_MPS
 ASIDE_SHOWN = 5          # the traffic block is a screen, not a log
 
 
@@ -991,6 +1011,16 @@ class Floor:
            journey: the shortest edge does the same job for the least
            driving, and this graph's edges run from 0.40 m to 11.15 m.
         4. The coordinate, so the answer is the same answer every time.
+
+        AND ONE HARD BOUND ON TOP OF THE PREFERENCES. A neighbour
+        further than ASIDE_MAX_M is not a candidate at all, however free
+        and however quiet it is. Preference 1 alone chose an 11.15 m
+        connector over a 3.00 m aisle node on 2026-08-22 because the
+        near one was on the blocked truck's route, and eleven metres
+        driven as a single node with no route is not a step aside: the
+        truck arced across the cross aisle and put a scanner 1.109 m off
+        a rack corner. Where nothing inside the bound is free the honest
+        answer is the named refusal, which is what None means here.
         """
         node = self.standing.get(serial)
         if node is None or serial in self.aside:
@@ -1010,8 +1040,11 @@ class Floor:
                 continue
             if self.owner_of(tr.edge(node, nbr)) not in (None, serial):
                 continue
+            reach = math.hypot(nbr[0] - node[0], nbr[1] - node[1])
+            if reach > ASIDE_MAX_M:
+                continue
             rank = (nbr in theirs, self.spur_entry(nbr) is not None,
-                    math.hypot(nbr[0] - node[0], nbr[1] - node[1]), nbr)
+                    reach, nbr)
             if best is None or rank < best[0]:
                 best = (rank, nbr)
         return None if best is None else best[1]
