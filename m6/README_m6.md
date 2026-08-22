@@ -1001,9 +1001,9 @@ headless, and a re-measurement of them should be too.
 
 ## Unit tests — m6's own, and the number to expect
 
-**`480 passed, 0 skipped`** under WSL (the M6.5 fix-up — it was 370 at
-M6.2, 466 at the M6.5 gate run, and the fourteen new ones are the three
-parked-truck field rules, the eight the step-aside brought with it, and
+**`481 passed, 0 skipped`** under WSL (the M6.5 fix-up — it was 370 at
+M6.2, 466 at the M6.5 gate run, and the fifteen new ones are the three
+parked-truck field rules, the nine the step-aside brought with it, and
 the three that pin the two speed bands to the field thresholds they
 protect rather than to a number):
 

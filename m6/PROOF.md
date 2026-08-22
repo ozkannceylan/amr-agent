@@ -199,6 +199,24 @@ something else entirely.
               (Gate 4 ended with four latched trucks; a kill measured
                against a stopped fleet is worth nothing. The M6.5 result
                above stands.)
+[ ] RE-RUN ON A THINNED INSTRUMENT              STOPPED ON THE FLOOR
+              (owner ruling: cut the recorders, measure the floor first,
+               stop if it is still ~0.01. 28 subs -> 20 and the MQTT
+               wildcard -> four named topics; measured before a single
+               transport with all four trucks STANDING STILL, integrated
+               0.343-0.345 with a floor of 0.008 - worse than the 0.010
+               the acceptance run died at. Same stack with the recorders
+               OFF: 0.480, floor 0.019, against 0.578 four hours
+               earlier. The recorder costs 0.137 of RTF and is still not
+               the binding constraint: gz sim is server-bound at 2.2 of
+               twenty cores rendering sixteen gpu_lidars. No instrumented
+               configuration on this machine keeps the floor above the
+               value at which the scans stop arriving.)
+[x] STEP-ASIDE BOUNDS corrected to the measured ones             FIXED
+              (ASIDE_S 60 s against a 199 s move, and a distance BOUND
+               of 5.00 m - the longest aisle edge - where there had been
+               only a distance preference that sent a truck 11.15 m down
+               a connector as a single node.)
 [x] TWO SPEED-POLICY DEFECTS found and fixed                    MEASURED
               (the guard band was read at the nav lidar, 1.23 m behind
                the scanners that evaluate the field, so 3.0 m at the
@@ -5881,6 +5899,103 @@ at 0.30 m/s instead of 0.70, because every main-aisle transit is inside
 that band for its whole length. The dock aisle (4.04 m to the nearest
 solid) is unaffected. That trade is the owner's to keep or reject; what
 it replaced was a latched truck every time an aisle was driven at speed.
+
+## The re-run the owner ruled, and the number that stopped it
+
+**Owner ruling after the run above: cut the instrumentation load and run
+the acceptance once more; measure the floor first, and if it is still
+~0.01, say so and STOP.** It is 0.008. This section is that measurement
+and nothing else, because driving trucks into it would only have
+produced a fifth capture of the same latch.
+
+### What was dropped, and what each surviving channel is for
+
+The ROS recorder went from **28 subscriptions to 20**, and the fleet-side
+one from `uagv/v2/amragent/+/#` to four named topics:
+
+| kept | what no gate can be named without it |
+|---|---|
+| `/fN/plc/status` | the Motor-false counts and their onsets - the causation spine of every gate in this file |
+| `/fN/auto/state` | ARRIVED / HOLD / EN-ROUTE, and `guard_min` |
+| `/fN/gz/odom` | distance, utilisation, and the coast/stop numbers |
+| `/fN/safety/fields` | Gate 6's naming of every onset at its own sample |
+| `/fN/safety/encoders` | the stream that distinguishes "the wheels were at 700 and V_Limit was 300" from "the scanner reported 0.000" - added this session, and it is what named the failure above |
+| `fleet/#` | the retained status document and the admin wire |
+| `+/state`, `+/connection` | the fleet's view of each truck, and the loss gate's own event |
+| `+/order`, `+/instantActions` | **kept deliberately**: Gate 6 claims no order publish falls inside any Motor onset window, and that claim cannot be made from a capture that did not record them |
+
+**Dropped: `/fN/auto/goal`, `/fN/auto/route`, and the MQTT `factsheet` and
+`visualization` topics.** goal and route are low-rate and every fact they
+carry is also in the fleet log and in `auto/state`'s own `route` field;
+factsheet and visualization have never been read by a gate in this file.
+
+**THIS RUN IS INSTRUMENTED MORE THINLY THAN M6.1-M6.4, AND WHAT THAT
+LIMITS IS WRITTEN HERE RATHER THAN DISCOVERED LATER.** With `auto/goal`
+gone, a claim of the form *"no HMI goal was published by anything at any
+point"* - which M6.5's Gate 2 and Gate 6 both made - cannot be made from
+this capture. With `auto/route` gone, the route a truck was given can be
+read from `auto/state` and from the fleet log but not from an
+independent third record. No other claim in this file loses anything.
+
+### The floor, measured twice before a single transport
+
+Four stacks up, four writers streaming, all four trucks **standing
+still**, the reduced recorder set running:
+
+```
+floor-1   537 samples   printed mean 0.341   min 0.013   integrated 0.345
+floor-2   539 samples   printed mean 0.354   min 0.008   integrated 0.343
+```
+
+**0.008.** The acceptance run above died at a floor of 0.010, with the
+trucks driving and eight more subscriptions. This is worse, with nothing
+moving.
+
+### And the recorder is not the reason, which is the finding
+
+Both recorders were then stopped and the same window taken again on the
+same stack:
+
+```
+no-recorders   567 samples   printed mean 0.477   min 0.019   integrated 0.480
+```
+
+| | integrated | floor |
+|---|---|---|
+| no recorder at all | **0.480** | 0.019 |
+| the reduced set the gates need | **0.343** | **0.008** |
+| M6.5's gate session, 24 subs, four trucks **driving** | 0.575-0.580 | 0.021 |
+
+Reading those three rows together: **the recorder costs 0.137 of
+real-time factor and roughly halves the instantaneous floor** - it is a
+real load and cutting it was worth doing - **and it is still not the
+binding constraint.** Even with no instrument at all this machine now
+gives 0.480 where it gave 0.578 four hours ago, with the trucks idle
+instead of driving.
+
+```
+$ ps -eo pcpu,etime,args --sort=-pcpu | head -2
+ 221   05:11   gz sim -s -r --headless-rendering -v 2 ... warehouse_ver2.sdf
+$ getconf _NPROCESSORS_ONLN ; cat /proc/loadavg
+20
+12.98 9.83 7.51
+```
+
+**Twenty cores, load 13, and the simulation server pinned at 2.2 of
+them.** `gz sim` is not core-starved; it is server-bound, rendering
+sixteen gpu_lidars through one pipeline. Adding trucks added lidars
+faster than this machine can draw them, and the recorder's 0.137 is the
+margin between "slow" and "the scans stop arriving".
+
+**So there is no configuration on this machine tonight that both
+instruments the gates and keeps the instantaneous floor above the value
+at which the lidars stop delivering.** That is the finding, it is a
+number and not an opinion, and it is why Gates 3, 4 and 5 were not
+re-run a third time. What it costs to fix is a rig decision - fewer
+lidar samples, a lower lidar update rate, a machine with a faster GPU
+pipeline, or accepting that a four-truck gate is measured in slow motion
+- and every one of those changes a figure already in this file, so none
+of them is a thing to do at midnight without the owner.
 
 ## Teardown
 
