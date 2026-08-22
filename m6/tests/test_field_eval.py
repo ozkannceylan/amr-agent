@@ -127,3 +127,124 @@ def test_back_mute_covers_the_measured_steer_sweep():
         scan[i] = 0.12
     assert field_eval.min_range(
         scan, MAXR, field_eval.SELF_MUTE["back"]) == MAXR
+
+
+# ---- the 0.000 names its own branch (M6.5 fix-up, owner ruling) ----
+def _min_range_before(ranges, range_max=MAXR, mute=()):
+    """min_range EXACTLY as it stood before range_fault existed.
+
+    Transcribed, not imported, and that is the point: it is the oracle
+    the refactor is measured against. If the two ever disagree on any
+    scan the refactor changed a verdict, and a verdict is the one thing
+    it was not allowed to touch.
+    """
+    if not len(ranges):
+        return 0.0
+    muted = set()
+    for lo, hi in mute:
+        muted.update(range(lo, hi + 1))
+    looked = [r for i, r in enumerate(ranges) if i not in muted]
+    if not looked:
+        return 0.0
+    if any(r != r or r == -math.inf for r in looked):
+        return 0.0
+    finite = [r for r in looked if math.isfinite(r)]
+    if not finite:
+        return range_max
+    return min(range_max, min(finite))
+
+
+_CORPUS = (
+    ([], ()),
+    ([1.0], ()),
+    ([0.0], ()),
+    ([math.inf, math.inf], ()),
+    ([math.inf, 2.0], ()),
+    ([-math.inf, 3.0], ()),
+    ([math.nan, 3.0], ()),
+    ([math.inf, 2.0, math.nan], ()),
+    ([math.nan, -math.inf], ()),
+    ([-math.inf, math.nan, 0.5], ()),
+    ([9.0, 12.0], ()),
+    ([2.0, 3.0, 4.0], ((0, 0),)),
+    ([2.0, 3.0, 4.0], ((0, 2),)),
+    ([math.nan, 3.0, 4.0], ((0, 0),)),
+    ([-math.inf, 3.0, 4.0], ((0, 0),)),
+    ([3.0, math.nan, 4.0], ((0, 0),)),
+    ([0.1] * 5 + [math.nan] * 3, ((0, 4),)),
+    ([math.inf] * 4, ((1, 2),)),
+)
+
+
+def test_min_range_is_byte_identical_to_the_version_before_the_branch():
+    """THE ONE THING THE OWNER RULED MAY NOT MOVE.
+
+    range_fault exists so a 0.000 can say which of five device faults
+    produced it. It is diagnosis. The distance min_range returns - and
+    therefore every (pf, wf) the F-model ever sees - has to be the same
+    number it was, on every scan, muted or not.
+    """
+    for ranges, mute in _CORPUS:
+        after = field_eval.min_range(list(ranges), MAXR, mute)
+        before = _min_range_before(list(ranges), MAXR, mute)
+        assert after == before or (after != after and before != before), \
+            (ranges, mute, after, before)
+
+
+def test_the_verdict_is_the_same_with_and_without_the_fault_carried():
+    """Same scans in, same (pf, wf) out - the field populated or not.
+
+    Two devices are stepped through the identical sequence; one is given
+    the fault beside every sample and the other is not. `field_step` sees
+    `d` and nothing else, and this is what says so out loud.
+    """
+    pf_th, wf_th = field_eval.FIELDS[1]
+    named, plain = field_eval.Device(), field_eval.Device()
+    scans = [[5.0]] * 4 + [[math.nan, 5.0]] * 4 + [[]] * 4 \
+        + [[5.0]] * 6 + [[2.0]] * 4 + [[-math.inf]] * 3 + [[5.0]] * 6
+    for i, ranges in enumerate(scans):
+        d = field_eval.min_range(ranges, MAXR)
+        named.update(d, pf_th, wf_th, float(i),
+                     fault=field_eval.range_fault(ranges))
+        plain.update(d, pf_th, wf_th, float(i))
+        assert (named.pf, named.wf) == (plain.pf, plain.wf), (i, ranges)
+        assert (named.pfc, named.wfc) == (plain.pfc, plain.wfc), (i, ranges)
+        assert named.d == plain.d
+    # And the diagnosis really was carried, or this test proves nothing.
+    assert named.fault is None and plain.fault is None
+    assert field_eval.range_fault([math.nan, 5.0])["why"] == "nan"
+
+
+def test_range_fault_names_each_branch_and_counts_the_rays():
+    """The four scan faults, told apart. `bad` and `of` are the point:
+    3 of 275 nan is a dropped beam and 271 of 275 is a dead render, and
+    those do not have the same fix."""
+    assert field_eval.range_fault([]) == {"why": "empty", "bad": 0, "of": 0}
+    assert field_eval.range_fault([1.0, 2.0], ((0, 1),)) == \
+        {"why": "muted", "bad": 0, "of": 2}
+    assert field_eval.range_fault([math.nan, 1.0, math.nan]) == \
+        {"why": "nan", "bad": 2, "of": 3}
+    assert field_eval.range_fault([-math.inf, 1.0]) == \
+        {"why": "below-min", "bad": 1, "of": 2}
+    # A measurement is not a fault, whatever it measured.
+    assert field_eval.range_fault([1.0, 2.0]) is None
+    assert field_eval.range_fault([math.inf, math.inf]) is None
+    assert field_eval.range_fault([0.0]) is None
+    # A muted ray is not looked at, so it cannot be a fault either.
+    assert field_eval.range_fault([math.nan, 2.0], ((0, 0),)) is None
+    # nan outranks -inf when both are there: it is the worse diagnosis,
+    # and the count would otherwise depend on which was tested first.
+    both = field_eval.range_fault([math.nan, -math.inf])
+    assert both["why"] == "nan" and both["bad"] == 1
+
+
+def test_a_stale_device_names_itself_too():
+    """The FIFTH way to read 0.000, and the one the other four were
+    confused with on 2026-08-22: no scan at all inside SCAN_STALE_S."""
+    dev = field_eval.Device()
+    dev.update(4.0, 1.0, 2.5, 1.0, fault=None)
+    assert dev.fault is None
+    dev.go_violated()
+    assert dev.d == 0.0
+    assert dev.fault == {"why": "stale", "bad": 0, "of": 0}
+    assert dev.pf is False and dev.wf is False

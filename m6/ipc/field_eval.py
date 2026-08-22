@@ -124,21 +124,70 @@ def min_range(ranges, range_max=RANGE_MAX_M, mute=()):
     An EMPTY array is a broken device, not an empty room, so it returns 0.0
     - the violated end of the scale. A scan that is ENTIRELY muted returns
     0.0 too, for the same reason: nothing was actually looked at.
+
+    WHICH of those it was is range_fault's answer, not this one's. This
+    function returns a DISTANCE and the field evaluation is decided on it
+    alone; the branch that produced a 0.0 is diagnosis and is carried
+    beside the verdict, never inside it.
     """
-    if not len(ranges):
+    if range_fault(ranges, mute) is not None:
         return 0.0
-    muted = set()
-    for lo, hi in mute:
-        muted.update(range(lo, hi + 1))
-    looked = [r for i, r in enumerate(ranges) if i not in muted]
-    if not looked:
-        return 0.0
-    if any(r != r or r == -math.inf for r in looked):
-        return 0.0
-    finite = [r for r in looked if math.isfinite(r)]
+    finite = [r for r in _looked(ranges, mute) if math.isfinite(r)]
     if not finite:
         return range_max
     return min(range_max, min(finite))
+
+
+def _looked(ranges, mute):
+    """The rays this device actually examined - everything but the ones
+    pointing at the vehicle's own structure (SELF_MUTE)."""
+    muted = set()
+    for lo, hi in mute:
+        muted.update(range(lo, hi + 1))
+    return [r for i, r in enumerate(ranges) if i not in muted]
+
+
+def range_fault(ranges, mute=()):
+    """WHY this scan reads 0.000, or None when it is a measurement.
+
+    THE ACCEPTANCE RUN OF 2026-08-22 IS WHY THIS EXISTS. All four trucks
+    latched inside 0.56 s, on eight devices, every one of them reporting
+    `d: 0.000` - and the post-mortem could say no more than "0.000 is not
+    a distance", because min_range collapses four different device faults
+    into one number. An empty array and a buffer full of nan have the
+    same verdict and completely different causes: the first is a scan
+    that never arrived, the second is one that arrived half-rendered.
+    Knowing which is the difference between a transport problem and a
+    GPU problem, and this fleet had no way to tell.
+
+    IT IS DIAGNOSIS AND IT IS NEVER A VERDICT. min_range calls it and
+    turns any non-None into the same 0.0 it always returned; nothing else
+    reads it except the report. The (pf, wf) a device publishes is
+    byte-identical with this function present and absent, and
+    test_field_eval pins that against a transcription of the original.
+
+    Returns None, or {"why": ..., "bad": n, "of": total}:
+      empty       len(ranges) == 0 - the device published nothing
+      muted       every ray is inside SELF_MUTE - nothing was looked at
+      nan         at least one examined ray is not a number
+      below-min   at least one examined ray is gz's -inf under-range code
+    `bad` and `of` are the ray counts, because "3 of 275 nan" and
+    "271 of 275 nan" are a dropped beam and a dead render, and the fix
+    for those is not the same fix.
+    """
+    total = len(ranges)
+    if not total:
+        return {"why": "empty", "bad": 0, "of": 0}
+    looked = _looked(ranges, mute)
+    if not looked:
+        return {"why": "muted", "bad": 0, "of": total}
+    nan = sum(1 for r in looked if r != r)
+    if nan:
+        return {"why": "nan", "bad": nan, "of": total}
+    low = sum(1 for r in looked if r == -math.inf)
+    if low:
+        return {"why": "below-min", "bad": low, "of": total}
+    return None
 
 
 def field_step(d, clear, cnt, th):
@@ -168,17 +217,26 @@ class Device:
         self.pfc = self.wfc = 0
         self.last_scan = None
         self.d = 0.0                   # last MEASURED range, for the report
+        self.fault = None              # WHY a 0.0, for the report only
 
-    def update(self, d, pf_th, wf_th, now):
+    def update(self, d, pf_th, wf_th, now, fault=None):
+        """`fault` is carried, never consulted. The two field_step calls
+        below see `d` and nothing else, which is what makes the verdict
+        identical with and without it."""
         self.pf, self.pfc = field_step(d, self.pf, self.pfc, pf_th)
         self.wf, self.wfc = field_step(d, self.wf, self.wfc, wf_th)
         self.last_scan = now
         self.d = d
+        self.fault = fault
 
     def go_violated(self):
         self.pf = self.wf = False
         self.pfc = self.wfc = 0
         self.d = 0.0
+        # THE FIFTH WAY TO READ 0.000, and the one the other four were
+        # confused with all night: no scan at all inside SCAN_STALE_S.
+        # It is named here for exactly the reason range_fault exists.
+        self.fault = {"why": "stale", "bad": 0, "of": 0}
 
 
 class FieldEval(Node):
@@ -232,15 +290,24 @@ class FieldEval(Node):
                     dev.last_scan, now, SCAN_STALE_S):
                 dev.go_violated()
             elif raw is not None:
-                dev.update(min_range(raw, RANGE_MAX_M,
-                                     SELF_MUTE.get(name, ())),
-                           pf_th, wf_th, now)
+                mute = SELF_MUTE.get(name, ())
+                dev.update(min_range(raw, RANGE_MAX_M, mute),
+                           pf_th, wf_th, now,
+                           fault=range_fault(raw, mute))
             # No new scan but not yet stale: hold the latch AND the last
             # measured range. Reporting 0.0 here would print an intrusion
             # beside a `pf` that says clear - a report that contradicts
             # itself is worse than a stale number.
             report[name] = {"pf": dev.pf, "wf": dev.wf, "d": round(dev.d, 3),
                             "level": level(dev.pf, dev.wf)}
+            # ONLY WHEN THERE IS ONE, so a healthy report is the same
+            # bytes it has always been and a reader written before this
+            # existed is unaffected. No new topic and no new
+            # subscription: a second subscriber on a scan topic is more
+            # render load, which is the thing this instrument exists to
+            # help us fight.
+            if dev.fault is not None:
+                report[name]["fault"] = dev.fault
             self.ranges[name] = None
         self.pub.publish(String(data=json.dumps(report)))
 
