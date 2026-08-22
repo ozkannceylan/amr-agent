@@ -21,6 +21,23 @@ message builders (ipc/vda_messages.py, which are pure), so the manager
 is reading state documents shaped exactly like a real truck's - the
 arrival test in particular (orderId ours, nodeStates empty) is only worth
 anything if nodeStates comes from the same code the agent uses.
+
+AND SINCE M6.4 IT HAS THE VEHICLE'S DOOR ON IT. An order reaching a fake
+goes through vda_orders.accept_order - the same function vda_agent calls
+- so a base extension is accepted here for the same reasons and refused
+here for the same reasons. `arrive()` therefore means "drive this order
+to the end of its RELEASED base and stop", which is what a truck given a
+horizon actually does: it stands at the last released node with nothing
+to un-stick, and the next extension carries it further with no second
+arrive(). A fake that ignored the base/horizon split would report an
+arrival the vehicle never made and the manager would believe it.
+
+TWO TRUCKS ON ONE CORRIDOR IS NOW A REAL CONSTRAINT, and the scenarios
+below say which they are. The transports that are about SEQUENCING - the
+dwell, the queue, the restart - are given disjoint corridors on purpose,
+because a test that jams while proving something else proves neither;
+the head-on and the extension have corridors of their own further down,
+where contention IS the subject.
 """
 import json
 import os
@@ -85,9 +102,12 @@ class FakeVehicle:
         self.mode = mode
         self.port = port
         self.counters = vm.Counters()
+        self.order = None
         self.order_id = ""
-        self.remaining = []
+        self.update_id = 0
+        self.reached = 0
         self.last_node = ("", 0)
+        self.driving = False
         self.errors = []
         self.cancels = []
         self.reject_next = False
@@ -149,8 +169,10 @@ class FakeVehicle:
                         continue
                     self.cancels.append(
                         (time.monotonic(), act.get("actionId")))
-                    self.order_id, self.remaining = "", []
+                    self.order, self.order_id = None, ""
+                    self.update_id, self.reached = 0, 0
                     self.last_node = ("", 0)
+                    self.driving = False
         self.publish_state()
 
     def _take(self, order):
@@ -166,39 +188,95 @@ class FakeVehicle:
                 "errorReferences": [{"referenceKey": "orderId",
                                      "referenceValue": order["orderId"]}]}]
             return
+        # THE VEHICLE'S OWN DOOR, not a shape this test invented: an
+        # extension is taken here exactly when vda_agent would take it,
+        # and a duplicate delivery is silence rather than a restart.
+        verdict, reason = vo.accept_order(order, self.order,
+                                          bool(self.node_states()),
+                                          self.mode)
+        if verdict == "ignore":
+            return
+        if verdict == "reject":
+            self.errors = [{
+                "errorType": "orderError", "errorLevel": "WARNING",
+                "errorDescription": reason,
+                "errorReferences": [{"referenceKey": "orderId",
+                                     "referenceValue": order["orderId"]}]}]
+            return
+        if verdict == "accept":
+            self.reached, self.last_node, self.driving = 0, ("", 0), False
+        self.order = order
         self.order_id = order["orderId"]
-        self.remaining = [n for n in order["nodes"] if n["released"]]
+        self.update_id = order["orderUpdateId"]
+        if self.driving:
+            # An extension reaches a truck that is already standing at
+            # the end of its base: it simply drives on.
+            self._land()
+
+    @property
+    def released(self):
+        return [] if self.order is None \
+            else [n for n in self.order["nodes"] if n["released"]]
+
+    @property
+    def horizon(self):
+        return [] if self.order is None \
+            else [n for n in self.order["nodes"] if not n["released"]]
+
+    @property
+    def remaining(self):
+        """The released nodes still to drive - what the restart test
+        means by "mid-leg"."""
+        return self.released[self.reached:]
+
+    def node_states(self):
+        return [{"nodeId": n["nodeId"], "sequenceId": n["sequenceId"],
+                 "released": True} for n in self.remaining] \
+            + [{"nodeId": n["nodeId"], "sequenceId": n["sequenceId"],
+                "released": False} for n in self.horizon]
+
+    def _land(self):
+        """Drive to the end of the RELEASED base. Called with the lock."""
+        released = self.released
+        if not released or self.reached >= len(released):
+            return
+        node = released[-1]
+        self.pose = (node["nodePosition"]["x"],
+                     node["nodePosition"]["y"], 0.0)
+        self.last_node = (node["nodeId"], node["sequenceId"])
+        self.reached = len(released)
+        if not self.horizon:
+            self.driving = False      # the order is finished, not paused
 
     def arrive(self):
-        """Land on the last node of the current order. The orderId is
-        KEPT - that is the whole reason the manager cannot read orderId
-        alone as "busy"."""
+        """Drive this order to the end of its released base and stop.
+
+        With no horizon that is the last node of the order and the truck
+        has ARRIVED - the orderId is KEPT, which is the whole reason the
+        manager cannot read orderId alone as "busy". With a horizon it is
+        the end of the base, and the truck stands there until the fleet
+        extends it; `driving` remembers that, so no second arrive() is
+        needed and none is invented.
+        """
         with self.lock:
-            if not self.remaining:
-                return
-            node = self.remaining[-1]
-            self.pose = (node["nodePosition"]["x"],
-                         node["nodePosition"]["y"], 0.0)
-            self.last_node = (node["nodeId"], node["sequenceId"])
-            self.remaining = []
+            self.driving = True
+            self._land()
         self.publish_state()
 
     def publish_state(self):
         with self.lock:
-            ctx = {"orderId": self.order_id, "orderUpdateId": 0,
+            ctx = {"orderId": self.order_id,
+                   "orderUpdateId": self.update_id,
                    "lastNodeId": self.last_node[0],
                    "lastNodeSequenceId": self.last_node[1],
-                   "nodeStates": [{"nodeId": n["nodeId"],
-                                   "sequenceId": n["sequenceId"],
-                                   "released": True}
-                                  for n in self.remaining],
+                   "nodeStates": self.node_states(),
                    "edgeStates": []}
             # errors[] is one-shot, exactly as the agent's is: the
             # rejection rides the state it produced and the standing
             # record afterwards is the absence of the order.
             errors, self.errors = self.errors, []
             payload = json.dumps(vm.build_state(
-                self._hdr("state"), ctx, self.pose, bool(self.remaining),
+                self._hdr("state"), ctx, self.pose, bool(ctx["nodeStates"]),
                 self.mode, errors,
                 {"eStop": "NONE", "fieldViolation": False}, []))
         try:
@@ -285,6 +363,16 @@ class Rig:
             return [(t, o) for t, s, o in self.orders
                     if s == serial and t >= since]
 
+    def legs_for(self, serial, since=0.0):
+        """Distinct orderIds, in the order they went out. A base
+        extension rides the SAME orderId, so counting messages would
+        count a growing base as a second leg."""
+        out = []
+        for _t, order in self.orders_for(serial, since):
+            if not out or out[-1] != order["orderId"]:
+                out.append(order["orderId"])
+        return out
+
     def actions_since(self, since=0.0):
         with self.lock:
             return [(t, s, a) for t, s, a in self.actions if t >= since]
@@ -311,12 +399,13 @@ class Rig:
         self.fakes.append(veh)
         return veh
 
-    def manager(self):
+    def manager(self, *args):
         path = os.path.join(self.logdir,
                             "manager-{}.log".format(len(self.managers)))
         handle = open(path, "wb")
         proc = subprocess.Popen(
-            [sys.executable, FLEET_MANAGER, "--port", self.port],
+            [sys.executable, FLEET_MANAGER, "--port", self.port] +
+            list(args),
             stdout=handle, stderr=subprocess.STDOUT,
             env={**os.environ, "VDA_MQTT_PORT": self.port})
         self.managers.append([proc, handle, path])
@@ -429,18 +518,26 @@ def check_leg(order, serial, station):
 
 
 def test_two_transports_walk_leg_dwell_leg_to_done(rig):
-    """Assignment, the dwell, leg 2 and DONE - twice, in parallel."""
-    f1 = rig.fake("f1", S1)          # standing on the pickup
+    """Assignment, the dwell, leg 2 and DONE - twice, in parallel.
+
+    TWO CORRIDORS, ON PURPOSE. Each truck picks up at the station it is
+    already standing on and drives a route the other never touches (the
+    dock aisle for f1, the main aisle for f2), so what is measured here
+    is the two-leg sequencing and nothing else. Sending both to one
+    station would be the head-on, which has its own test below and a
+    completely different right answer.
+    """
+    f1 = rig.fake("f1", S1)          # standing on its own pickup
     f2 = rig.fake("f2", S5)          # the far side of the hall
     rig.manager()
     wait_for(lambda: ready(rig, ("f1", "f2")), 15.0,
              "both trucks ready in the status document", rig)
     rig.submit("t-1", "S1", "S4")
-    rig.submit("t-2", "S1", "S4")
+    rig.submit("t-2", "S5", "S7")
     wait_for(lambda: rig.orders_for("f1") and rig.orders_for("f2"), 15.0,
              "one leg-1 order to each truck", rig)
-    for serial in ("f1", "f2"):
-        check_leg(rig.orders_for(serial)[0][1], serial, "S1")
+    check_leg(rig.orders_for("f1")[0][1], "f1", "S1")
+    check_leg(rig.orders_for("f2")[0][1], "f2", "S5")
     # Two tasks, two trucks, never twice on one: the second assignment
     # happens a drain pass after the first, when f1's own state has not
     # caught up yet and only the fleet's book knows it is taken.
@@ -452,13 +549,14 @@ def test_two_transports_walk_leg_dwell_leg_to_done(rig):
     arrived_at = time.monotonic()
     f1.arrive()
     f2.arrive()
-    wait_for(lambda: len(rig.orders_for("f1")) == 2
-             and len(rig.orders_for("f2")) == 2, 15.0,
+    wait_for(lambda: len(rig.legs_for("f1")) == 2
+             and len(rig.legs_for("f2")) == 2, 15.0,
              "a leg-2 order to each truck once the dwell ran out", rig)
-    for serial in ("f1", "f2"):
-        stamp, order = rig.orders_for(serial)[1]
-        check_leg(order, serial, "S4")
-        assert order["nodes"][0]["nodePosition"]["x"] == S1[0], \
+    for serial, pickup, dropoff in (("f1", S1, "S4"), ("f2", S5, "S7")):
+        stamp, order = next((t, o) for t, o in rig.orders_for(serial)
+                            if o["orderId"] == rig.legs_for(serial)[1])
+        check_leg(order, serial, dropoff)
+        assert order["nodes"][0]["nodePosition"]["x"] == pickup[0], \
             "leg 2 must start at the pickup station, not at a live pose"
         assert stamp - arrived_at >= fm.DWELL_S - 0.1, \
             "leg 2 went out before the dwell was over"
@@ -487,8 +585,12 @@ def test_a_dwelling_truck_is_not_idle_and_the_queue_waits_for_it(rig):
     rig.fake("f2", S5)
     rig.manager()
     wait_for(lambda: ready(rig, ("f1", "f2")), 15.0, "both trucks ready", rig)
-    for task_id in ("t-a", "t-b", "t-c"):
-        rig.submit(task_id, "S1", "S4")
+    # Disjoint corridors again (see the parallel-walk test): t-b is f2's
+    # own side of the hall, so the queue is what holds t-c back and not
+    # a reservation.
+    rig.submit("t-a", "S1", "S4")
+    rig.submit("t-b", "S5", "S7")
+    rig.submit("t-c", "S1", "S4")
     wait_for(lambda: when(rig, lambda d: len(
         [t for t in d["tasks"] if t["assignee"]]) == 2), 15.0,
         "two of the three tasks assigned", rig)
@@ -504,12 +606,12 @@ def test_a_dwelling_truck_is_not_idle_and_the_queue_waits_for_it(rig):
     assert task_named(doc, "t-a")["state"] == "DWELL"
     assert task_named(doc, "t-c")["assignee"] is None, \
         "a dwelling truck was handed the queued task"
-    assert len(rig.orders_for("f1")) == 1, \
+    assert len(rig.legs_for("f1")) == 1, \
         "a second order reached a truck that still owes a leg 2"
     assert doc["vehicles"]["f1"]["executing_order"], \
         "the dwelling truck must not read as idle on the screen either"
 
-    wait_for(lambda: len(rig.orders_for("f1")) == 2, 10.0,
+    wait_for(lambda: len(rig.legs_for("f1")) == 2, 10.0,
              "f1's leg-2 order once the dwell ran out", rig)
     f1.arrive()                      # t-a DONE - now f1 really is free
     doc = wait_for(lambda: when(rig, lambda d: task_named(d, "t-c")
@@ -517,7 +619,7 @@ def test_a_dwelling_truck_is_not_idle_and_the_queue_waits_for_it(rig):
                    "the queued task going to the truck that freed", rig)
     assert task_named(doc, "t-a")["state"] == "DONE"
     assert doc["queue_len"] == 0
-    assert len(rig.orders_for("f1")) == 3
+    assert len(rig.legs_for("f1")) == 3
 
 
 def test_a_rejection_requeues_to_the_head_and_the_other_truck_takes_it(rig):
@@ -639,3 +741,148 @@ def test_submissions_are_refused_with_a_reason_the_operator_can_read(rig):
     assert "unknown from station" in whys and "same station" in whys
     assert doc["tasks"] == [] and doc["queue_len"] == 0
     assert not rig.orders_for("f1"), "a refused task must reach no truck"
+
+
+# =====================================================================
+# M6.4 - the floor, against a real broker
+# =====================================================================
+# One corridor, two trucks, one station. The stub file asks the traffic
+# rules one state at a time; what is worth a broker is that the whole
+# thing survives the round trip - the horizon order is one the vehicle
+# takes, the extension is stitched rather than restarted, and the
+# operator's retained document says what happened.
+#
+# NOTHING HERE IS A COLLISION CLAIM. The fakes have no geometry and stop
+# nothing; what is measured is only ever what the FLEET asked for.
+DOCK_MID = (0.0, -5.5)         # the dock node one hop east of S1
+
+
+def base_split(order):
+    return ([n["nodeId"] for n in order["nodes"] if n["released"]],
+            [n["nodeId"] for n in order["nodes"] if not n["released"]])
+
+
+def test_a_taken_station_comes_back_as_a_horizon_and_the_base_then_grows(
+        rig):
+    """THE HEAD-ON, RESOLVED - the milestone's own scenario.
+
+    f1 stands on S1 and is sent west to S2; f2 is east of S1 and is sent
+    to S1 as well. The station is under f1, so f2 is given the part of
+    the route the floor could grant and the rest as horizon: it drives to
+    the end of its base and stops there on its own, with no pause action.
+    When f1 leaves westward the base is EXTENDED - same orderId,
+    orderUpdateId + 1, nothing already driven changed - and f2 completes
+    the transport it was given at the start.
+    """
+    f1 = rig.fake("f1", S1)              # standing on the contested station
+    f2 = rig.fake("f2", DOCK_MID)        # one hop east of it
+    rig.manager()
+    wait_for(lambda: ready(rig, ("f1", "f2")), 15.0, "both trucks ready", rig)
+    rig.submit("t-west", "S1", "S2")     # f1 picks up at S1 and leaves west
+    wait_for(lambda: rig.orders_for("f1"), 15.0, "f1 took the pickup", rig)
+    rig.submit("t-wait", "S1", "S4")     # f2 wants the same station
+    wait_for(lambda: rig.orders_for("f2"), 15.0, "f2 was given something",
+             rig)
+
+    first = rig.orders_for("f2")[0][1]
+    released, horizon = base_split(first)
+    assert horizon == ["S1"], "f2 was routed onto a station under a truck"
+    assert released and vo.validate_order(first) == "", \
+        "the horizon order is one the vehicle would reject"
+    assert first["orderUpdateId"] == 0
+    doc = wait_for(lambda: when(rig, lambda d: d["traffic"]["waiting"].get(
+        "f2")), 10.0, "the document saying what f2 is waiting for", rig)
+    assert doc["traffic"]["waiting"]["f2"] == "(-3.0,-5.5)"
+    assert doc["traffic"]["bases"]["t-wait"] == [len(released), 1]
+    assert doc["traffic"]["enabled"] is True
+
+    f2.arrive()                          # to the end of its base, and stop
+    assert f2.horizon, "f2 drove into the horizon"
+    assert f2.last_node[0] == released[-1]
+    stood = f2.last_node
+
+    f1.arrive()                          # f1 lands on S1: leg 1 done
+    wait_for(lambda: len(rig.legs_for("f1")) == 2, 15.0,
+             "f1's leg 2 out of the aisle", rig)
+    f1.arrive()                          # ...and away west to S2
+
+    # THE BASE GROWS RATHER THAN THE ORDER RESTARTING.
+    wait_for(lambda: len(rig.orders_for("f2")) == 2, 15.0,
+             "f2's base extended once S1 came free", rig)
+    grown = rig.orders_for("f2")[1][1]
+    assert rig.legs_for("f2") == [first["orderId"]], \
+        "f2 was sent a second leg instead of a longer base"
+    assert grown["orderUpdateId"] == 1
+    assert base_split(grown)[1] == [], "the horizon should be gone"
+    assert vo.accept_order(grown, first, True, "AUTOMATIC") == ("extend", "")
+    # lastNodeId NEVER GOES BACKWARDS ACROSS THE UPDATE. The truck was
+    # standing at the end of its base and simply drove on from there -
+    # no cancel, no restart, no node driven twice.
+    assert f2.last_node[0] == "S1"
+    assert f2.last_node[1] > stood[1], "the truck re-drove its base"
+    assert not f2.horizon and not f2.remaining
+
+    doc = wait_for(lambda: when(rig, lambda d: (task_named(d, "t-wait") or {})
+                                .get("state") in ("DWELL", "ASSIGNED_LEG2",
+                                                  "DONE")), 15.0,
+                   "t-wait arriving at the station it waited for", rig)
+    assert doc["traffic"]["waiting"].get("f2") is None
+    assert not doc["traffic"]["blocked"], doc["traffic"]["blocked"]
+
+
+def test_no_traffic_reproduces_the_jam_and_the_document_says_so(rig):
+    """The control run Gate 1 needs. With --no-traffic the manager is the
+    M6.3 one: nothing is reserved, no order carries a horizon, and the
+    second truck is sent onto the station the first is standing on -
+    which is the jam, deliberately."""
+    rig.fake("f1", S1)
+    rig.fake("f2", DOCK_MID)
+    rig.manager("--no-traffic")
+    wait_for(lambda: ready(rig, ("f1", "f2")), 15.0, "both trucks ready", rig)
+    rig.submit("t-west", "S1", "S2")
+    wait_for(lambda: rig.orders_for("f1"), 15.0, "f1 took the pickup", rig)
+    rig.submit("t-jam", "S1", "S4")
+    wait_for(lambda: rig.orders_for("f2"), 15.0, "f2 was sent after it", rig)
+
+    order = rig.orders_for("f2")[0][1]
+    assert base_split(order)[1] == [], "something was held back"
+    assert base_split(order)[0][-1] == "S1", \
+        "f2 must be sent all the way onto the taken station"
+    doc = rig.status()
+    assert doc["traffic"] == {"enabled": False, "holds": {}, "waiting": {},
+                              "yielded": [], "bases": {
+                                  "t-west": [len(rig.orders_for("f1")[0][1]
+                                                 ["nodes"]), 0],
+                                  "t-jam": [len(order["nodes"]), 0]},
+                              "yields": [], "blocked": []}
+
+
+def test_a_swap_deadlock_is_named_on_the_operators_screen(rig):
+    """Two trucks nose to nose, each standing on the floor the other
+    needs. Wait-die cannot break that - the youngest yields the ground
+    under itself, which frees nothing - and the fleet says so instead of
+    claiming a fix: the younger task is refused by name, requeued, and
+    the deadlock is in the traffic block where an operator reads it."""
+    f1 = rig.fake("f1", S1)
+    rig.fake("f2", DOCK_MID)
+    rig.manager()
+    wait_for(lambda: ready(rig, ("f1", "f2")), 15.0, "both trucks ready", rig)
+    rig.submit("t-east", "S1", "S4")     # f1 picks up at S1, then drives east
+    wait_for(lambda: rig.orders_for("f1"), 15.0, "f1 took the pickup", rig)
+    rig.submit("t-west", "S1", "S4")     # f2 wants S1, which f1 is on
+    wait_for(lambda: rig.orders_for("f2"), 15.0, "f2 was given something",
+             rig)
+    f1.arrive()                          # f1 is on S1 and dwelling
+    wait_for(lambda: len(rig.legs_for("f1")) == 2, 15.0,
+             "f1's leg 2, which drives east into f2", rig)
+
+    doc = wait_for(lambda: when(rig, lambda d: d["traffic"]["blocked"]),
+                   15.0, "the deadlock named in the document", rig)
+    said = doc["traffic"]["blocked"][-1]
+    assert said["vehicles"] == ["f1", "f2"]
+    assert "swap deadlock" in said["why"] and "has to be moved" in said["why"]
+    assert doc["traffic"]["yields"] == [], \
+        "a yield was claimed for a resolve that freed nothing"
+    assert any("swap deadlock" in r["why"] for r in doc["refused"])
+    assert task_named(doc, "t-west")["state"] == "QUEUED"
+    assert task_named(doc, "t-west")["assignee"] is None

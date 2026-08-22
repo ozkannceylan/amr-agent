@@ -5,6 +5,14 @@ Two commands and no state of its own:
   python3 fleet/fleet_cli.py submit S1 S4 [--task-id ...]
   python3 fleet/fleet_cli.py status [--watch]
 
+AND IT READS THE FLOOR TOO (M6.4). The status document carries a
+`traffic` block - who holds which piece of floor, who is waiting on
+whom, who yielded and how much of each task is base rather than horizon
+- and the TRAFFIC section prints it. That section is how an operator
+tells a truck that is WAITING from a truck that is broken: a held-back
+vehicle is standing at the end of its base on purpose, and the element
+it wants is named beside it.
+
 THE OPERATOR NAMES STATIONS, NEVER VEHICLES. `submit FROM TO` is a
 transport - take a pallet from here to there - and which truck does it
 is the fleet's decision, made from where the trucks actually are
@@ -156,6 +164,68 @@ def _flags(row):
     return ",".join(flags) if flags else None
 
 
+def _dict(doc, key):
+    value = doc.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _list(doc, key):
+    value = doc.get(key)
+    return value if isinstance(value, list) else []
+
+
+def traffic_lines(doc):
+    """The TRAFFIC section, or nothing at all.
+
+    NOTHING AT ALL IS A REAL ANSWER: a retained document written by a
+    pre-M6.4 manager has no `traffic` block, and a screen that answered
+    that with "(none)" would be claiming an empty floor rather than an
+    old document. The section simply is not printed.
+
+    The element strings are the MANAGER's - `(1.0,0.0)` for a node and
+    `(1.0,0.0)-(2.0,0.0)` for the floor between two - because a
+    frozenset of coordinate pairs does not survive JSON and the fleet is
+    the one that knows what it reserved. This function only lays them
+    out.
+    """
+    block = doc.get("traffic")
+    if not isinstance(block, dict):
+        return []
+    if not block.get("enabled"):
+        return ["", "TRAFFIC (OFF - --no-traffic: every route is granted "
+                    "whole, which is the M6.3 behaviour)"]
+    holds, waiting = _dict(block, "holds"), _dict(block, "waiting")
+    bases, yielded = _dict(block, "bases"), _list(block, "yielded")
+    lines = ["", "TRAFFIC (on)"]
+    if not holds and not waiting and not bases:
+        lines.append("  (nothing reserved - no truck is on the floor)")
+    for name in sorted(holds):
+        lines.append("  {} holds  {}".format(
+            _cell(name, 10), " ".join(str(e) for e in _list(holds, name))))
+    for name in sorted(waiting):
+        lines.append("  {} WAITS  {}{}".format(
+            _cell(name, 10), waiting[name],
+            "   (yielded)" if name in yielded else ""))
+    for name in sorted(set(yielded) - set(waiting)):
+        lines.append("  {} yielded - holding nothing ahead, retrying "
+                     "every pass".format(_cell(name, 10)))
+    for task_id in sorted(bases):
+        split = bases[task_id]
+        if isinstance(split, (list, tuple)) and len(split) == 2:
+            lines.append("  {} base {} released + {} horizon".format(
+                _cell(task_id, 12), split[0], split[1]))
+    for entry in _list(block, "yields"):
+        if isinstance(entry, dict):
+            lines.append("  gave way: {} ({}) to {} - youngest task in the "
+                         "deadlock".format(
+                             entry.get("vehicle"), entry.get("task"),
+                             ", ".join(entry.get("with") or [])))
+    for entry in _list(block, "blocked"):
+        if isinstance(entry, dict):
+            lines.append("  ** BLOCKED: {} **".format(entry.get("why")))
+    return lines
+
+
 def render(doc, now=None):
     """The whole screen for one status document. Pure: dict in, text out.
 
@@ -217,6 +287,8 @@ def render(doc, now=None):
             _age((now - submitted)
                  if isinstance(submitted, (int, float)) else None),
             history[-1] if isinstance(history, list) and history else None)))
+
+    lines += traffic_lines(doc)
 
     if refused:
         lines += ["", "REFUSED ({}, most recent last)".format(len(refused))]

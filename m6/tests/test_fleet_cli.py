@@ -228,3 +228,69 @@ def test_a_retained_document_from_a_dead_manager_is_not_liveness():
     assert "OFFLINE" in cli._liveness(
         json.dumps(dict(DOC, manager="OFFLINE")).encode(), NOW)
     assert "readable JSON" in cli._liveness(b"{not json", NOW)
+
+
+# ---- the floor (M6.4) ----
+# The TRAFFIC section is how an operator tells a truck that is WAITING
+# from a truck that is broken: a held-back vehicle is standing at the
+# end of its base on purpose, and the element it wants is named beside
+# it. The strings are the manager's own - a frozenset of coordinate
+# pairs is neither JSON nor a sentence - and this tool only lays them
+# out.
+TRAFFIC = {
+    "enabled": True,
+    "holds": {"f1": ["(-3.0,-5.5)"],
+              "f2": ["(0.0,-5.5)", "(0.0,-5.5)-(3.0,-5.5)", "(3.0,-5.5)"],
+              "parked:f3": ["(-6.0,-5.5)"]},
+    "waiting": {"f1": "(0.0,-5.5)"},
+    "yielded": ["f1"],
+    "bases": {"ft-1a2b3c4d": [1, 4]},
+    "yields": [{"vehicle": "f1", "with": ["f2"], "freed": 2,
+                "task": "ft-1a2b3c4d", "ts": NOW}],
+    "blocked": [],
+}
+
+
+def test_the_screen_shows_who_holds_what_and_who_is_waiting():
+    text = cli.render(dict(DOC, traffic=TRAFFIC), NOW)
+    assert "TRAFFIC (on)" in text
+    holds = _line(text, "  f2         holds")
+    assert "(0.0,-5.5)" in holds and "(0.0,-5.5)-(3.0,-5.5)" in holds
+    waits = _line(text, "  f1         WAITS")
+    assert "(0.0,-5.5)" in waits and "(yielded)" in waits
+    assert "parked:f3  holds  (-6.0,-5.5)" in text
+    assert "base 1 released + 4 horizon" in _line(text, "  ft-1a2b3c4d")
+    assert "gave way: f1 (ft-1a2b3c4d) to f2" in text
+
+
+def test_a_deadlock_the_fleet_cannot_break_is_shouted_not_hidden():
+    doc = dict(DOC, traffic=dict(TRAFFIC, blocked=[
+        {"vehicles": ["f1", "f2"], "task": "ft-1a2b3c4d", "ts": NOW,
+         "why": "swap deadlock f1 <-> f2 - a vehicle has to be moved"}]))
+    text = cli.render(doc, NOW)
+    assert "** BLOCKED: swap deadlock f1 <-> f2 - a vehicle has to be " \
+        "moved **" in text
+
+
+def test_a_fleet_running_without_traffic_says_so_on_the_screen():
+    """--no-traffic is the M6.3 manager, and an operator reading a
+    screen that simply showed an empty floor would think the fleet was
+    deconflicting when nothing was."""
+    text = cli.render(dict(DOC, traffic={
+        "enabled": False, "holds": {}, "waiting": {}, "yielded": [],
+        "bases": {}, "yields": [], "blocked": []}), NOW)
+    assert "TRAFFIC (OFF - --no-traffic" in text
+    assert "holds" not in text
+
+
+def test_an_empty_floor_and_a_pre_m6_4_document_are_different_answers():
+    """A document with no `traffic` block was written by a manager that
+    had no floor to report, and printing "(none)" for it would claim an
+    empty hall rather than an old document."""
+    empty = cli.render(dict(DOC, traffic={
+        "enabled": True, "holds": {}, "waiting": {}, "yielded": [],
+        "bases": {}, "yields": [], "blocked": []}), NOW)
+    assert "nothing reserved" in empty
+    assert "TRAFFIC" not in cli.render(DOC, NOW)
+    for junk in (None, [], "on", 7):
+        assert cli.traffic_lines(dict(DOC, traffic=junk)) == []

@@ -28,7 +28,8 @@ sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "fleet")))
 
 import route                                        # noqa: E402
 import vda_orders as vo                             # noqa: E402
-from order_builder import build_leg_order, leg2_start   # noqa: E402
+from order_builder import (build_leg_order, leg2_start,   # noqa: E402
+                           leg_points)
 from stations import STATIONS                       # noqa: E402
 
 
@@ -131,3 +132,121 @@ def test_every_ordered_station_pair_builds_an_order_the_vehicle_accepts():
             "wp{}".format(i + 1) for i in range(len(rel) - 1)], (a, b)
         pairs += 1
     assert pairs == 90
+
+
+# ---- M6.4: the base/horizon split ----
+# The fleet reserves the floor a leg needs and gets back the part it may
+# have. What it may have becomes the VDA 5050 BASE and the rest goes out
+# as horizon, so the truck drives to the end of what was granted and
+# stops there on its own. These tests are about the SHAPE of that order;
+# who decides the number is fleet_manager's business, and traffic.py's.
+
+
+def test_the_points_the_order_names_are_the_points_the_fleet_reserves():
+    """One list, not two. The ledger holds graph nodes and the order
+    names graph nodes, and a leg whose reservation was planned separately
+    from its order would reserve a corridor the truck is not driving."""
+    for start, station in (((-3.0, -5.5), "S7"), ((0.0, 0.0), "S1")):
+        msg = build_leg_order("ft-p", start, station)
+        assert leg_points(start, station) == [
+            (n["nodePosition"]["x"], n["nodePosition"]["y"])
+            for n in msg["nodes"]]
+    assert leg_points((0.0, 0.0), "S11") is None
+
+
+def test_a_horizon_order_is_one_the_vehicle_accepts():
+    """The door is the assertion, as everywhere else in this file: an
+    order whose edges disagree with their end nodes is refused by
+    validate_order ("edge released must match its end node"), and that
+    is the rule the split is easiest to get wrong."""
+    for released in range(1, len(leg_points((-3.0, -5.5), "S7")) + 1):
+        msg = build_leg_order("ft-h", (-3.0, -5.5), "S7",
+                              released_count=released)
+        assert vo.validate_order(msg) == "", released
+
+
+def test_the_released_horizon_split_lands_where_it_was_asked():
+    points = leg_points((-3.0, -5.5), "S7")
+    msg = build_leg_order("ft-h", (-3.0, -5.5), "S7", released_count=2)
+    assert [n["released"] for n in msg["nodes"]] == \
+        [True, True] + [False] * (len(points) - 2)
+    # Edge i joins node i to node i+1 and copies node i+1: only e0 (wp1
+    # to wp2) is inside the base.
+    assert [e["released"] for e in msg["edges"]] == \
+        [True] + [False] * (len(points) - 2)
+    pts, arrive, rel, hor = vo.released_route(msg)
+    assert pts == points[:2]
+    assert [n["nodeId"] for n in rel] == ["wp1", "wp2"]
+    assert [n["nodeId"] for n in hor] == \
+        ["wp{}".format(i) for i in range(3, len(points))] + ["S7"]
+    # The truck stops at wp2, so the radius it is judged by is wp2's own
+    # default and not the station's - the station is still horizon.
+    assert arrive == 0.25 != STATIONS["S7"]["arrive_m"]
+
+
+def test_released_count_none_is_the_leg_delivered_whole():
+    """The pre-M6.4 behaviour, unchanged, and what --no-traffic asks
+    for."""
+    for station in STATIONS:
+        whole = build_leg_order("ft-w", (0.0, 0.0), station)
+        asked = build_leg_order("ft-w", (0.0, 0.0), station,
+                                released_count=len(whole["nodes"]))
+        assert whole == asked
+        assert all(n["released"] for n in whole["nodes"])
+        assert all(e["released"] for e in whole["edges"])
+
+
+def test_a_released_count_past_the_end_or_below_one_is_clamped():
+    """Clamped, not crashed - the manager computes this number from a
+    granted prefix and an off-by-one there must not take the fleet's
+    drain loop down. A count of 0 is clamped to 0 and the door then
+    refuses the order out loud, which is the honest end of that path:
+    an order with no base is not an order."""
+    points = leg_points((0.0, 0.0), "S4")
+    assert build_leg_order("ft-c", (0.0, 0.0), "S4", released_count=99) == \
+        build_leg_order("ft-c", (0.0, 0.0), "S4")
+    none = build_leg_order("ft-c", (0.0, 0.0), "S4", released_count=0)
+    assert [n["released"] for n in none["nodes"]] == [False] * len(points)
+    assert vo.validate_order(none) == \
+        "no released base - the first node is horizon"
+
+
+def test_an_extension_is_the_same_order_one_update_higher():
+    """Re-built from the same three inputs, a longer base is an order
+    vda_orders calls 'extend' rather than a new one: same nodes, same
+    ids, same sequenceIds, same coordinates, nothing already driven
+    changed."""
+    first = build_leg_order("ft-x", (-3.0, -5.5), "S7", released_count=2)
+    assert first["orderUpdateId"] == 0
+    grown = build_leg_order("ft-x", (-3.0, -5.5), "S7", released_count=4,
+                            update_id=1)
+    assert grown["orderUpdateId"] == 1
+    assert vo.accept_order(grown, first, True, "AUTOMATIC") == ("extend", "")
+    whole = build_leg_order("ft-x", (-3.0, -5.5), "S7", update_id=2)
+    assert vo.accept_order(whole, grown, True, "AUTOMATIC") == ("extend", "")
+    # ...and the nodes never moved under the truck.
+    for a, b in zip(first["nodes"], whole["nodes"]):
+        assert a["nodeId"] == b["nodeId"]
+        assert a["sequenceId"] == b["sequenceId"]
+        assert a["nodePosition"]["x"] == b["nodePosition"]["x"]
+        assert a["nodePosition"]["y"] == b["nodePosition"]["y"]
+
+
+def test_the_router_never_revisits_a_node_so_the_ledger_may_key_on_one():
+    """THE BOUND ON THE LEDGER'S ELEMENT IDENTITY, pinned here.
+
+    traffic.py names a node by its (x, y) and nothing else, so a route
+    that drove through one node twice would collapse the two visits into
+    a single reservation - it would look like the truck never left. That
+    is safe today for a reason that belongs to the ROUTER, not to the
+    ledger: plan_route is a shortest path over a graph whose nodes are
+    dict keys, and dijkstra never puts one on a path twice. If route.py
+    ever gains a via-point or a re-plan, this test fails first and the
+    ledger needs a (node, visit) identity before it ships.
+    """
+    for a in STATIONS:
+        for b in STATIONS:
+            if a == b:
+                continue
+            points = leg_points(leg2_start(a), b)
+            assert len(set(points)) == len(points), (a, b)

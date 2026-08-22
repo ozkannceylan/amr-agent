@@ -86,7 +86,13 @@ class Reservations:            # the floor's ledger
   cycle is a deadlock. The resolution is **wait-die by task age**: the
   youngest task in the cycle releases every hold except the node its
   truck occupies and is marked `yielded`, which frees the element the
-  oldest was waiting for and breaks the cycle by construction. A
+  oldest was waiting for and breaks the cycle by construction.
+  **Correction (M6.4 Task 4, measured):** that holds only where the
+  yielder gives up floor AHEAD of it. Once a truck has stopped at the
+  end of its base it holds exactly the node under its own body, so a
+  swap or rotation deadlock yields nothing, the cycle re-forms every
+  pass, and the fleet must refuse the younger task by name instead —
+  which is what `fleet_manager._resolve` does. A
   yielded vehicle keeps its task and its route; it just holds nothing
   ahead and retries `hold` on every subsequent pass, so it resumes as
   soon as the corridor drains. Yielding is a state, never a re-route

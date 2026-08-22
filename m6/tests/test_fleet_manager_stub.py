@@ -17,6 +17,21 @@ the wire, and it drops the message exactly as paho drops it.
      manager's book is not. Trimming the book would weaken the
      duplicate-taskId refusal, and a taskId has to stay refused for the
      whole run rather than until its task scrolled off a display.
+
+M6.4 ADDED A THIRD REASON TO BE HERE, and it is the strongest: TRAFFIC
+IS A CLOCK-FREE DECISION. Who holds which piece of floor, whose base
+grows and who yields is decided by a pure ledger and a pass over the
+task list, and asking those questions against a real broker means
+asking them through two vehicles' publish cadences and a 10 Hz drain -
+which is how a traffic bug becomes a flaky test instead of a failing
+one. The scenarios below drive the manager one state at a time, so the
+head-on, the extension, the parked hulk and the deadlock all happen at
+a moment the test names.
+
+RESERVATION IS PROCESS DECONFLICTION AND NOTHING BELOW ASSERTS
+OTHERWISE. No test here says a truck was stopped: the scanners, the
+F-model and the onboard guards are the only things that do that, and
+what is measured here is only ever what the FLEET asked for.
 """
 import json
 import logging
@@ -32,6 +47,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "fleet")))
 
 import fleet_manager as fm                          # noqa: E402
+import traffic as tr                                # noqa: E402
+import vda_orders as vo                             # noqa: E402
+from order_builder import leg_points                # noqa: E402
 from stations import STATIONS                       # noqa: E402
 
 
@@ -366,3 +384,604 @@ def test_a_vehicle_that_never_lets_go_is_named_and_the_chase_stops(fleet):
     # And it stays stopped: no further state re-arms the chase.
     manager._on_state("f1", row, still, now + 100.0)
     assert len(cancels(stub)) == 1 + fm.CANCEL_RETRY_MAX
+
+
+# =====================================================================
+# M6.4 - the manager runs traffic
+# =====================================================================
+# The dock aisle is one straight corridor of graph nodes, which is why
+# every scenario below is staged on it: two trucks on one aisle is the
+# whole problem, and these are its coordinates.
+S1_XY = (STATIONS["S1"]["x"], STATIONS["S1"]["y"])       # (-3.0, -5.5)
+WEST = (-6.0, -5.5)          # one dock node west of S1
+EAST = (0.0, -5.5)           # one dock node east of S1
+
+
+def traffic_fleet(monkeypatch, traffic_on=True):
+    stub = StubClient()
+    monkeypatch.setattr(fm.mqtt, "Client", lambda *a, **k: stub)
+    manager = fm.FleetManager(traffic_on=traffic_on)
+    return manager, stub
+
+
+@pytest.fixture
+def floor(monkeypatch):
+    manager, stub = traffic_fleet(monkeypatch)
+    yield manager, stub
+    manager.close()
+
+
+@pytest.fixture
+def open_floor(monkeypatch):
+    """The same manager with --no-traffic: every route granted whole."""
+    manager, stub = traffic_fleet(monkeypatch, traffic_on=False)
+    yield manager, stub
+    manager.close()
+
+
+class Truck:
+    """A vehicle the manager can hear, with no broker in between.
+
+    It carries the three habits the traffic loop is built on. It takes
+    orders through the VEHICLE'S OWN DOOR (vda_orders.accept_order, the
+    same function vda_agent calls), so an order the real truck would
+    refuse is refused here too. It drives only the RELEASED part of what
+    it was given and stops at the end of it, with no pause action and
+    nothing to un-stick - which is what makes a horizon a traffic
+    primitive rather than a hint. And its orderUpdateId moves only when
+    it has taken an update, because that field is the only thing the
+    manager is allowed to read an extension back from.
+    """
+
+    def __init__(self, manager, stub, serial, xy, mode="AUTOMATIC"):
+        self.manager, self.stub, self.serial = manager, stub, serial
+        self.xy = (float(xy[0]), float(xy[1]))
+        self.mode = mode
+        self.order = None
+        self.reached = 0
+        self.last = ("", 0)
+        self.errors = []
+        self.seen = 0
+        self.row = manager.vehicles.setdefault(serial, fm._new_vehicle())
+        self.row["connection"] = "ONLINE"
+
+    # ---- what the manager said to this truck ----
+    def inbox(self):
+        topic = "uagv/v2/amragent/{}/order".format(self.serial)
+        return [m for t, m, _, _ in self.stub.published if t == topic]
+
+    def legs(self):
+        """Distinct orderIds, in the order they arrived. An extension
+        rides the SAME orderId, so counting messages would count it as
+        a leg."""
+        out = []
+        for msg in self.inbox():
+            if not out or out[-1] != msg["orderId"]:
+                out.append(msg["orderId"])
+        return out
+
+    def take(self):
+        for msg in self.inbox()[self.seen:]:
+            self._take(msg)
+        self.seen = len(self.inbox())
+        return self
+
+    def _take(self, msg):
+        verdict, reason = vo.accept_order(msg, self.order,
+                                          bool(self.node_states()), self.mode)
+        if verdict == "ignore":
+            return
+        if verdict == "reject":
+            self.errors = [{
+                "errorType": "orderError", "errorLevel": "WARNING",
+                "errorDescription": reason,
+                "errorReferences": [{"referenceKey": "orderId",
+                                     "referenceValue": msg["orderId"]}]}]
+            return
+        if verdict == "accept":
+            self.reached, self.last = 0, ("", 0)
+        self.order = msg
+
+    # ---- what this truck is driving ----
+    def released(self):
+        return [] if self.order is None \
+            else [n for n in self.order["nodes"] if n["released"]]
+
+    def horizon(self):
+        return [] if self.order is None \
+            else [n for n in self.order["nodes"] if not n["released"]]
+
+    def node_states(self):
+        return [{"nodeId": n["nodeId"], "sequenceId": n["sequenceId"],
+                 "released": True} for n in self.released()[self.reached:]] \
+            + [{"nodeId": n["nodeId"], "sequenceId": n["sequenceId"],
+                "released": False} for n in self.horizon()]
+
+    def drive(self):
+        """To the end of the released base and no further - the truck
+        stops there by itself, which is the whole point of a horizon."""
+        rel = self.released()
+        if rel:
+            node = rel[-1]
+            self.xy = (node["nodePosition"]["x"], node["nodePosition"]["y"])
+            self.last = (node["nodeId"], node["sequenceId"])
+            self.reached = len(rel)
+        return self
+
+    def refuse_next_update(self):
+        """The one refusal that is a TIMING answer: the truck cannot take
+        this update right now (a cancel in flight, a mode that flicked)
+        and says so against the order it is already driving."""
+        self.errors = [{
+            "errorType": "orderError", "errorLevel": "WARNING",
+            "errorDescription": "busy - try again",
+            "errorReferences": [{"referenceKey": "orderId",
+                                 "referenceValue": self.order["orderId"]}]}]
+        return self
+
+    def state(self, now):
+        msg = {"operatingMode": self.mode,
+               "agvPosition": {"x": self.xy[0], "y": self.xy[1]},
+               "orderId": "" if self.order is None else self.order["orderId"],
+               "orderUpdateId": 0 if self.order is None
+               else self.order["orderUpdateId"],
+               "lastNodeId": self.last[0],
+               "lastNodeSequenceId": self.last[1],
+               "nodeStates": self.node_states(), "errors": list(self.errors)}
+        self.errors = []
+        self.manager._on_state(self.serial, self.row, msg, now)
+        return msg
+
+
+def turn(manager, trucks, now):
+    """One drain's worth of work, without the inbox: every truck reports,
+    then the dwells, then the floor, then one assignment - and the trucks
+    read whatever the manager said, so a turn is a whole round trip."""
+    for truck in trucks:
+        truck.take().state(now)
+    manager._expire_dwells(now)
+    manager._traffic_pass(now)
+    manager._assign(now)
+    for truck in trucks:
+        truck.take()
+
+
+def base_of(truck):
+    return [n["nodeId"] for n in truck.released()]
+
+
+def horizon_of(truck):
+    return [n["nodeId"] for n in truck.horizon()]
+
+
+def head_on(manager, stub, now, to1="S4"):
+    """The M6.3 jam, staged: f1 west of S1 and f2 east of it, both told
+    to pick up at S1. f1's own dropoff decides whether it then drives
+    back east through f2 (the jam, `to1="S4"`) or away west (the
+    corridor draining, `to1="S2"`).
+
+    This is Gate 4's own scenario (2026-08-22: f2 held 2.65 m behind f1
+    with no way out but an operator) reduced to two trucks, one aisle
+    and no clock. Returns (f1, f2). f1 wins t-1 on the tie-break: both
+    trucks are 3.0 m from S1 and fleet_core keeps the lower serial.
+    """
+    f1 = Truck(manager, stub, "f1", WEST)
+    f2 = Truck(manager, stub, "f2", EAST)
+    submit(manager, "t-1", "S1", to1)
+    submit(manager, "t-2", "S1", "S4")
+    turn(manager, (f1, f2), now)          # f1 takes t-1: it is the nearer
+    turn(manager, (f1, f2), now)          # f2 takes t-2, or what is left
+    return f1, f2
+
+
+def drains(manager, stub, now):
+    """The same two trucks, but f1's transport takes it AWAY from f2:
+    it picks up at S1 and drives west to S2, so the node f2 is waiting
+    for comes free under it. Returns (f1, f2) with f1 already gone; one
+    more turn is what extends f2's base."""
+    f1, f2 = head_on(manager, stub, now, to1="S2")
+    f1.drive()                            # f1 lands on S1
+    turn(manager, (f1, f2), now)          # ...arrives; the dwell starts
+    manager.dwell_until["t-1"] = now - 1.0
+    turn(manager, (f1, f2), now)          # leg 2 goes out, westward
+    f1.drive()                            # and f1 drives away to S2
+    return f1, f2
+
+
+# ---- 3. the base is what the floor granted ----
+def test_a_taken_corridor_comes_back_as_a_partial_base(floor):
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = head_on(manager, stub, now)
+
+    # f1 was nearest and got its whole leg: one hop east onto S1.
+    assert base_of(f1) == ["wp1", "S1"] and horizon_of(f1) == []
+    # f2 wants S1 too, and S1 is under f1's reservation. It is given the
+    # node it is standing on and the rest as horizon - an honest wait,
+    # not a re-route and not a pause action.
+    assert horizon_of(f2) == ["S1"], "f2 was routed onto a taken node"
+    assert base_of(f2) == ["wp1"]
+    assert vo.validate_order(f2.inbox()[-1]) == "", \
+        "the manager published a horizon order the vehicle would reject"
+    doc = manager._status(now)
+    assert doc["traffic"]["enabled"] is True
+    assert doc["traffic"]["waiting"]["f2"] == "(-3.0,-5.5)"
+    assert doc["traffic"]["bases"]["t-2"] == [1, 1]
+
+
+def test_a_second_vehicle_is_held_at_a_node_and_never_given_a_zero_base(
+        floor):
+    """A grant of nothing is not an order. When even the node under the
+    truck belongs to somebody else there is no base to send, so the leg
+    simply does not go out this pass - rather than an order with a
+    horizon first node, which the vehicle's own door refuses."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", S1_XY)
+    f2 = Truck(manager, stub, "f2", S1_XY)      # nose to tail on one node
+    submit(manager, "t-1", "S1", "S4")
+    submit(manager, "t-2", "S1", "S4")
+    for _ in range(4):
+        turn(manager, (f1, f2), now)
+
+    assert len(f1.legs()) == 1
+    assert f2.inbox() == [], "an order went out on a floor grant of nothing"
+    queued = [t for t in manager.tasks if t["state"] == "QUEUED"]
+    assert [t["task_id"] for t in queued] == ["t-2"]
+    # ...and it is said once, not ten times a second.
+    assert manager.said_blocked["f2"].startswith("f2 leg1")
+
+
+def test_the_base_grows_by_one_update_id_when_the_corridor_drains(floor):
+    """The extension, end to end: f2 waits, f1 leaves S1, f2's base grows
+    and the order that carries it is orderUpdateId 1 on the SAME orderId
+    with the already-driven part untouched."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = head_on(manager, stub, now, to1="S2")
+    before = f2.inbox()[-1]
+    assert before["orderUpdateId"] == 0
+    assert horizon_of(f2) == ["S1"]
+
+    f1.drive()                              # f1 lands on S1
+    turn(manager, (f1, f2), now)            # ...arrives, dwell starts
+    assert manager.tasks[0]["state"] == "DWELL"
+    assert len(f2.inbox()) == 1, "S1 is still under f1's body"
+
+    manager.dwell_until["t-1"] = now - 1.0
+    turn(manager, (f1, f2), now)            # f1's leg 2 goes out, westward
+    assert len(f2.inbox()) == 1, "f1 has not moved off S1 yet"
+    f1.drive()                              # ...and f1 drives away to S2
+    turn(manager, (f1, f2), now)
+
+    grown = f2.inbox()[-1]
+    assert grown["orderUpdateId"] == 1
+    assert grown["orderId"] == before["orderId"], "a new leg, not a growth"
+    assert vo.accept_order(grown, before, True, "AUTOMATIC") == ("extend", "")
+    assert [n["nodeId"] for n in grown["nodes"] if n["released"]] == \
+        ["wp1", "S1"]
+    assert f2.legs() == [before["orderId"]], "the truck saw a second leg"
+    # AND THE TRUCK NEVER RE-DRIVES WHAT IT PASSED: lastNodeId only ever
+    # moves forward across the update.
+    f2.take()
+    assert f2.last == ("", 0), "the truck had not reached wp1 yet"
+    f2.drive()
+    assert f2.last[0] == "S1"
+
+
+def test_an_extension_waits_for_the_vehicle_to_confirm_the_last_one(floor):
+    """orderUpdateId must be exactly one more than the EXECUTING order,
+    so a manager that fired the next extension before the truck had
+    taken the previous one would be sending updates the vehicle is
+    required to refuse. The confirmation is read from the state's own
+    orderUpdateId - never from a route count, because a horizon-only
+    extension publishes no new route at all."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = drains(manager, stub, now)
+
+    f1.state(now)                                 # f1 is off S1
+    manager._traffic_pass(now)                    # the extension goes out
+    assert len(f2.inbox()) == 2
+    trf = next(t for t in manager.tasks
+               if t["task_id"] == "t-2")["traffic"]
+    assert trf["pending"] == (1, 2)
+    for _ in range(5):                            # f2 has not answered yet
+        manager._traffic_pass(now)
+    assert len(f2.inbox()) == 2, "a second update before the first landed"
+
+    f2.take().state(now)                          # ...now it has
+    assert trf["pending"] is None and trf["update_id"] == 1
+    assert trf["released"] == 2
+
+
+def test_a_refused_extension_is_a_timing_answer_and_the_task_survives(
+        floor):
+    """A truck may refuse an update for a reason that is pure timing.
+    The leg it is driving is untouched by that, so requeueing the whole
+    transport would throw away a job because the fleet asked half a
+    second early. The pending extension is dropped and the next pass
+    asks again."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = drains(manager, stub, now)
+    task = next(t for t in manager.tasks if t["task_id"] == "t-2")
+
+    f1.state(now)                             # f1 is off S1
+    manager._traffic_pass(now)
+    assert task["traffic"]["pending"] == (1, 2)
+    f2.seen = len(f2.inbox())                 # the update never landed
+    f2.refuse_next_update().state(now)
+
+    assert task["state"] == "ASSIGNED_LEG1", "a refused update lost the task"
+    assert task["assignee"] == "f2"
+    assert task["traffic"]["pending"] is None
+    assert task["traffic"]["ext_refused"] == 1
+    assert manager.vehicles["f2"]["not_eligible"] is False
+    manager._traffic_pass(now)                # ...and it is asked again
+    assert len(f2.inbox()) == 3
+    assert f2.inbox()[-1]["orderUpdateId"] == 1
+
+
+# ---- 4. deadlock ----
+def deadlocked(manager, stub, now):
+    """f1 stopped on S1 asking for the node east of it, f2 stopped on
+    that node asking for S1. Nose to nose, each standing on exactly what
+    the other needs.
+
+    Stopped one step SHORT of the traffic pass on purpose: the cycle is
+    what the tests below want to look at before anything is done about
+    it. Returns (f1, f2).
+    """
+    f1, f2 = head_on(manager, stub, now)
+    f1.drive()                                # f1 lands on S1
+    turn(manager, (f1, f2), now)              # arrived, dwell starts
+    manager.dwell_until["t-1"] = now - 1.0
+    for truck in (f1, f2):
+        truck.take().state(now)
+    manager._expire_dwells(now)               # leg 2 goes east, into f2
+    f1.take()
+    return f1, f2
+
+
+def test_a_swap_deadlock_is_named_and_never_pretended_resolved(floor):
+    """WAIT-DIE CANNOT BREAK THIS ONE AND THE FLEET SAYS SO.
+
+    Once every truck in a cycle has stopped at the end of its base it
+    holds exactly one element - the node under its own body, everything
+    behind it having been released as it passed. So the contested
+    element is always GROUND UNDER A VEHICLE, and the youngest yielding
+    keeps precisely that and frees nothing at all. The cycle re-forms
+    next pass, and again, and again: a livelock dressed as a resolution.
+    The manager measures what the yield freed, and when it freed nothing
+    it refuses the younger task by name instead of claiming a fix.
+    """
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = deadlocked(manager, stub, now)
+
+    assert base_of(f1) == ["wp1"], "f1's leg 2 should stop on S1 itself"
+    assert manager.floor.waiting_on("f1") == (0.0, -5.5)
+    assert manager.floor.waiting_on("f2") == S1_XY
+    assert set(manager.floor.find_cycle() or []) == {"f1", "f2"}
+
+    manager._traffic_pass(now)
+    doc = manager._status(now)
+    assert doc["traffic"]["blocked"], "the deadlock is nowhere on the screen"
+    said = doc["traffic"]["blocked"][-1]
+    assert said["vehicles"] == ["f1", "f2"] and said["task"] == "t-2"
+    assert "swap deadlock" in said["why"] and "has to be moved" in said["why"]
+    assert doc["traffic"]["yields"] == [], "a yield that freed nothing"
+    assert any("swap deadlock" in r["why"] for r in doc["refused"])
+    # The YOUNGER task is the one refused, and it goes back to the head
+    # of the queue rather than being lost.
+    assert manager.tasks[0]["task_id"] == "t-2"
+    assert manager.tasks[0]["state"] == "QUEUED"
+
+
+def test_a_yield_that_frees_floor_is_logged_and_the_task_is_kept(floor):
+    """The other half of wait-die, which IS reachable: a hold can outrun
+    the base the vehicle was told about, because the ledger grants before
+    the extension is published and an extension can fail to land (the
+    wire drops, the truck refuses it). Floor the truck was never told
+    about is floor the fleet may take back, so here the youngest yields
+    for real - and keeps its task, its route and its submit time."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = deadlocked(manager, stub, now)
+    younger = next(t for t in manager.tasks if t["task_id"] == "t-2")
+    submitted = younger["submitted_ts"]
+    # An extension that was granted and never landed: the ledger holds
+    # one element more than the truck's base.
+    manager.floor.hold("f2", tr.route_elements([(0.0, -5.5), (3.0, -5.5)]))
+    manager.floor.hold("f2", tr.route_elements([(0.0, -5.5), S1_XY]))
+    assert len(manager.floor.held_by("f2")) == 3
+
+    manager._traffic_pass(now)
+    doc = manager._status(now)
+    assert doc["traffic"]["yields"], "nothing was recorded as a yield"
+    gave = doc["traffic"]["yields"][-1]
+    assert gave["vehicle"] == "f2" and gave["with"] == ["f1"]
+    assert gave["freed"] == 2 and gave["task"] == "t-2"
+    assert doc["traffic"]["blocked"] == []
+    # THE TASK IS NOT LOST AND ITS AGE IS NOT RESTAMPED. Restamping is
+    # the livelock: the oldest task in the cell would become the
+    # youngest on the floor and yield to whoever it just gave way to.
+    assert younger["state"] == "ASSIGNED_LEG1"
+    assert younger["assignee"] == "f2"
+    assert younger["submitted_ts"] == submitted
+    assert "f2" in doc["traffic"]["yielded"]
+
+
+def test_the_retry_pass_walks_the_tasks_oldest_first(floor):
+    """THE ANTI-LIVELOCK RULE, asked directly. Walk the tasks in any
+    other order and a younger task re-grabs the corridor the older one
+    just yielded, six passes run and nothing moves. The key is the
+    SUBMIT time, and neither a yield nor a requeue rewrites it."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = head_on(manager, stub, now)
+    order = []
+    manager._retry_hold = lambda task: order.append(task["task_id"])
+    manager.tasks.sort(key=lambda t: t["task_id"], reverse=True)
+    manager._traffic_pass(now)
+    assert order == ["t-1", "t-2"], "the younger task was served first"
+
+    # A requeue puts a task back at the HEAD of the queue and leaves its
+    # submit time exactly where it was.
+    before = dict((t["task_id"], t["submitted_ts"]) for t in manager.tasks)
+    manager._requeue("t-1", "measured")
+    assert all(t["submitted_ts"] == before[t["task_id"]]
+               for t in manager.tasks)
+
+
+# ---- 5. loss, and the parked hulk ----
+def test_a_lost_truck_frees_the_corridor_and_keeps_the_node_under_it(floor):
+    """The owner's loss ruling, on the floor. The task requeues and the
+    corridor reopens - a truck that is gone must not lock a hall - but
+    the node its BODY is on stays held, under a name of its own, so
+    nobody is routed through a hulk. It comes back only on a fresh idle
+    state, which is the same clause list that re-earns eligibility."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    submit(manager, "t-1", "S1", "S4")
+    turn(manager, (f1,), now)
+    assert len(manager.floor.held_by("f1")) > 1
+
+    manager._on_connection("f1", f1.row, {"connectionState":
+                                          "CONNECTIONBROKEN"})
+    assert manager.floor.held_by("f1") == []
+    assert manager.parked["f1"] == WEST
+    assert manager.floor.owner_of(WEST) == "parked:f1"
+    assert manager.tasks[0]["state"] == "QUEUED"
+    doc = manager._status(now)
+    assert doc["traffic"]["holds"]["parked:f1"] == ["(-6.0,-5.5)"]
+
+    # A second truck may now have the aisle - but not that one node.
+    f2 = Truck(manager, stub, "f2", EAST)
+    turn(manager, (f2,), now)
+    assert manager.tasks[0]["assignee"] == "f2"
+    assert manager.floor.owner_of(WEST) == "parked:f1"
+
+    # ...and the hulk is released the moment it stands up again.
+    manager._on_connection("f1", f1.row, {"connectionState": "ONLINE"})
+    f1.order = None
+    f1.state(now)
+    assert "f1" not in manager.parked
+    assert manager.floor.owner_of(WEST) == "f1"
+
+
+def test_set_standing_runs_from_every_state_including_a_restart(floor):
+    """THE ONE WAY THIS LEDGER COULD PUT TWO TRUCKS ON ONE NODE.
+
+    resolve_deadlock frees everything the loser holds EXCEPT the node it
+    was last told the truck stands on, so a vehicle whose standing node
+    is unset gets the ground under it handed to somebody else. A
+    restarted manager is the case that bites: it has no tasks and cannot
+    know the route an adopted truck is driving (a nodeState carries no
+    position), so what it does know - the body's own node - has to reach
+    the ledger from the very first state.
+    """
+    manager, stub = floor
+    now = time.monotonic()
+    adopted = Truck(manager, stub, "f9", EAST)
+    adopted.order = {"orderId": "o-somebody-elses", "orderUpdateId": 0,
+                     "nodes": [], "edges": []}
+    adopted.state(now)                 # the first state a restart ever sees
+    assert manager.standing["f9"] == EAST
+    assert manager.floor.owner_of(EAST) == "f9"
+    assert manager.floor.held_by("f9") == [EAST]
+
+    # And it follows the truck rather than accumulating behind it.
+    adopted.xy = (3.0, -5.5)
+    adopted.state(now)
+    assert manager.floor.owner_of(EAST) is None
+    assert manager.floor.held_by("f9") == [(3.0, -5.5)]
+
+
+def test_a_hold_asks_only_for_the_route_ahead_of_the_truck(floor):
+    """Never the original full route. The elements behind the truck were
+    released as it passed them, and asking for them again would draw a
+    wait-for edge BACKWARDS - at whoever has legitimately taken the floor
+    we just left - and invent a cycle that is not there."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", (-12.5, -5.5))
+    submit(manager, "t-1", "S1", "S4")
+    turn(manager, (f1,), now)
+    trf = manager.tasks[0]["traffic"]
+    assert trf["hold_points"][0] == (-12.5, -5.5)
+
+    f1.drive()                               # to the end of its base: S1
+    turn(manager, (f1,), now)
+    index, ahead = manager._remaining(trf)
+    assert ahead == [S1_XY], "the hold would have reached back down the aisle"
+    assert index == len(trf["hold_points"]) - 1
+    assert manager.floor.held_by("f1") == [S1_XY]
+    # A second truck may take the aisle behind it without a cycle.
+    f2 = Truck(manager, stub, "f2", (-12.5, -5.5))
+    f2.state(now)
+    assert manager.floor.owner_of((-12.5, -5.5)) == "f2"
+    assert manager.floor.find_cycle() is None
+
+
+# ---- 6. --no-traffic ----
+def test_no_traffic_grants_every_route_whole(open_floor):
+    """The flag the gates use to reproduce the M6.3 jam deliberately.
+    Nothing is reserved, nothing is horizon, and two trucks are sent at
+    each other exactly as they were before M6.4 - which is what makes
+    the traffic run a contrast rather than a claim."""
+    manager, stub = open_floor
+    now = time.monotonic()
+    f1, f2 = head_on(manager, stub, now)
+
+    for truck in (f1, f2):
+        assert truck.horizon() == [], "traffic reserved something"
+        assert all(n["released"] for n in truck.inbox()[-1]["nodes"])
+    assert horizon_of(f2) == []
+    assert base_of(f2) == ["wp1", "S1"], "f2 was sent onto f1's node"
+    assert manager.floor.held_by("f1") == []
+    assert manager.floor.held_by("f2") == []
+    doc = manager._status(now)
+    assert doc["traffic"] == {"enabled": False, "holds": {}, "waiting": {},
+                              "yielded": [], "bases": {"t-1": [2, 0],
+                                                       "t-2": [2, 0]},
+                              "yields": [], "blocked": []}
+
+
+def test_the_traffic_block_is_json_and_reads_like_a_floor(floor):
+    """The retained document is the operator's record: every element in
+    it is a string a person can read, because a frozenset of coordinate
+    pairs is neither JSON nor a sentence."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = head_on(manager, stub, now)
+    doc = manager._status(now)
+    text = json.dumps(doc)              # the real test: it serialises
+    assert "traffic" in json.loads(text)
+    assert doc["traffic"]["holds"]["f1"] == [
+        "(-6.0,-5.5)", "(-6.0,-5.5)-(-3.0,-5.5)", "(-3.0,-5.5)"]
+    assert doc["traffic"]["holds"]["f2"] == ["(0.0,-5.5)"]
+    assert doc["traffic"]["waiting"] == {"f2": "(-3.0,-5.5)"}
+    assert all("traffic" not in t for t in doc["tasks"])
+    # An edge is one piece of floor whichever way you drive it, and it
+    # prints as its two ends.
+    assert fm._element_str(tr.edge((1.0, 0.0), (2.0, 0.0))) == \
+        fm._element_str(tr.edge((2.0, 0.0), (1.0, 0.0))) == \
+        "(1.0,0.0)-(2.0,0.0)"
+    assert fm._element_str((1.0, 0.0)) == "(1.0,0.0)"
+
+
+def test_the_floor_is_part_of_the_documents_shape(floor):
+    """A jam is a discrete fact and must not wait out the 2 s tick. The
+    hold LISTS are reduced to counts in the shape, though: they change
+    every time a truck passes a node, which is progress rather than
+    news."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = head_on(manager, stub, now)
+    before = manager._shape(manager._status(now))
+    manager.floor.release_all("f1", keep=S1_XY)
+    manager._traffic_pass(now)
+    assert manager._shape(manager._status(now)) != before

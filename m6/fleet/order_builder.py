@@ -18,6 +18,13 @@ again before it hands nav the polyline, and the start this was planned
 from is already stale by then. So the order carries poly[1:] - wp1..wpN-1
 and the station itself, last, wearing the station's arrival radius.
 
+M6.4 GAVE IT A HORIZON. `released_count` splits the same node list
+into the VDA 5050 base the fleet has reserved and the horizon it has
+not, and `update_id` stamps orderUpdateId so the base can be extended
+later with the same nodes. Nothing else about the order moves: the
+reservation decision belongs to fleet_manager and the ledger, and this
+file only ever writes down what it was told.
+
 THIS IS send_order.build_order's LINEAGE, OWNED FLEET-SIDE. tools/
 send_order.py is frozen as a superseded low-level probe (its own header
 says so), and the duplication between these two node loops is accepted
@@ -43,48 +50,85 @@ import route                                        # noqa: E402
 from stations import STATIONS                       # noqa: E402
 
 
-def build_leg_order(order_id, start_xy, station_id):
+def leg_points(start_xy, station_id):
+    """The graph points one leg's order names, in travel order, or None.
+
+    THE FLEET RESERVES WHAT THE ORDER NAMES, so the traffic ledger and
+    the order must be planned from one list rather than two: this is
+    that list, and build_leg_order below is its only other caller. The
+    pose is already dropped (see the module note), so every point here
+    is a graph node the truck will actually stand on - which is exactly
+    what traffic.route_elements wants.
+    """
+    poly = route.plan_route(start_xy, station_id)
+    return None if poly is None else [tuple(p) for p in poly[1:]]
+
+
+def build_leg_order(order_id, start_xy, station_id, released_count=None,
+                    update_id=0):
     """The order for one leg, or None when there is no route.
 
     None covers both refusals plan_route has - an unknown station id and
     a graph that does not join the two - because the manager's drain loop
     must survive either without dying; it requeues the task instead.
 
-    Interleaved sequenceIds (node 2i, edge 2i+1) and everything released:
-    there is no horizon in the M1 subset, so a leg is delivered whole.
-    Only the station node carries allowedDeviationXY, and it is that
-    station's spur geometry (stations.py), which says nothing about a
-    corner - the waypoints stay silent so vda_orders.Progress applies its
-    own default to them.
+    Interleaved sequenceIds (node 2i, edge 2i+1). Only the station node
+    carries allowedDeviationXY, and it is that station's spur geometry
+    (stations.py), which says nothing about a corner - the waypoints stay
+    silent so vda_orders.Progress applies its own default to them.
+
+    RELEASED_COUNT IS THE BASE, THE REST IS HORIZON. `None` keeps the
+    pre-M6.4 behaviour - a leg delivered whole - and is what a fleet with
+    traffic switched off still asks for. A number releases the first
+    `released_count` nodes and marks everything after them
+    `released: false`: the vehicle drives to the end of its base and
+    stops there on its own, with no pause action, because that is what
+    VDA 5050 already says a base end is. AN EDGE'S released FOLLOWS ITS
+    END NODE, never its start - edge i joins node i to node i+1, so it is
+    released exactly when node i+1 is, and validate_order refuses any
+    other pairing. `released_count` is clamped into 0..len(points); 0 is
+    not an order (the door refuses a first node that is horizon) and the
+    caller is expected to hold its truck rather than ask for one.
+
+    update_id STAMPS orderUpdateId, and an extension is the SAME order
+    id, the same nodes at the same indices and coordinates, one higher
+    update id and a longer base - which is precisely what
+    vda_orders.accept_order calls 'extend'. Re-building with the same
+    (order_id, start_xy, station_id) is what makes that true: the router
+    is deterministic, so the nodes cannot drift under the vehicle.
 
     NO HEADER IS STAMPED HERE. The manager stamps the common M1 header at
     publish, exactly as send_order's main does: headerId counts what went
     out on a topic and timestamp says when, and both are lies if minted
     for an order still being decided about.
     """
-    poly = route.plan_route(start_xy, station_id)
-    if poly is None:
+    points = leg_points(start_xy, station_id)
+    if points is None:
         return None
-    points = poly[1:]                       # the pose is not a node
+    cut = len(points) if released_count is None \
+        else max(0, min(int(released_count), len(points)))
     arrive_m = STATIONS[station_id]["arrive_m"]
     nodes, edges = [], []
     for i, (x, y) in enumerate(points):
         last = i == len(points) - 1
         node = {"nodeId": station_id if last else "wp{}".format(i + 1),
-                "sequenceId": 2 * i, "released": True, "actions": [],
+                "sequenceId": 2 * i, "released": i < cut, "actions": [],
                 "nodePosition": {"x": float(x), "y": float(y),
                                  "mapId": "warehouse"}}
         if last:
             node["nodePosition"]["allowedDeviationXY"] = float(arrive_m)
         nodes.append(node)
         if not last:
+            # The edge's end node is node i+1, and that is whose release
+            # it must copy.
             edges.append({"edgeId": "e{}".format(i),
-                          "sequenceId": 2 * i + 1, "released": True,
+                          "sequenceId": 2 * i + 1,
+                          "released": (i + 1) < cut,
                           "startNodeId": node["nodeId"],
                           "endNodeId": "", "actions": []})
     for edge, node in zip(edges, nodes[1:]):
         edge["endNodeId"] = node["nodeId"]
-    return {"orderId": order_id, "orderUpdateId": 0,
+    return {"orderId": order_id, "orderUpdateId": int(update_id),
             "nodes": nodes, "edges": edges}
 
 
