@@ -285,6 +285,15 @@ class FleetManager:
         # which is why this is an ordering preference and not a
         # priority system - and why nothing above claims one.
         self._traffic_pass(now)
+        # REBUILT EVERY DRAIN, never accumulated: `stuck` answers "which
+        # truck could not be started RIGHT NOW and why", and a stale
+        # entry would leave a vehicle on the operator's screen as blocked
+        # long after the task went to somebody else. It is cleared HERE
+        # rather than inside _assign because _expire_dwells runs first:
+        # a leg 2 that cannot find floor writes its sentence through the
+        # same _no_floor, and a clear inside _assign would wipe it before
+        # _publish_status ever saw it.
+        self.stuck.clear()
         self._expire_dwells(now)
         self._assign(now)
         self._publish_status(now)
@@ -577,11 +586,8 @@ class FleetManager:
 
     def _assign(self, now):
         view = self._view(now)
-        # REBUILT EVERY PASS, never accumulated: `stuck` answers "which
-        # truck could not be started RIGHT NOW and why", and a stale
-        # entry would leave a vehicle on the operator's screen as
-        # blocked long after the task went to somebody else.
-        self.stuck.clear()
+        # `stuck` is cleared in _drain, before _expire_dwells - see the
+        # comment there. It must NOT be cleared here.
         pick = fc.next_assignment(view, self.tasks, self._distance)
         if pick is None:
             return

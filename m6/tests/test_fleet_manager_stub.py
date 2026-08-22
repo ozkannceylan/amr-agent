@@ -536,9 +536,14 @@ class Truck:
 def turn(manager, trucks, now):
     """One drain's worth of work, without the inbox: every truck reports,
     then the dwells, then the floor, then one assignment - and the trucks
-    read whatever the manager said, so a turn is a whole round trip."""
+    read whatever the manager said, so a turn is a whole round trip.
+
+    `stuck` is cleared where drain() clears it - once, before the two
+    calls that write it - so a leg-2 sentence survives the turn that
+    found it, exactly as it does on the wire."""
     for truck in trucks:
         truck.take().state(now)
+    manager.stuck.clear()
     manager._expire_dwells(now)
     manager._traffic_pass(now)
     manager._assign(now)
@@ -1010,8 +1015,48 @@ def test_a_truck_that_cannot_start_is_on_the_screen_by_name(floor):
     assert "f2" not in doc["traffic"]["waiting"]
     # ...and it is not a fact that outlives the pass that found it.
     manager.tasks[:] = []
-    manager._assign(now)
+    turn(manager, (f1, f2), now)
     assert manager._status(now)["traffic"]["stuck"] == {}
+
+
+def test_a_leg_two_that_cannot_start_is_on_the_screen_too(floor):
+    """THE SENTENCE MUST SURVIVE THE PASS THAT WROTE IT, and leg 2 is
+    written by _expire_dwells - which drain() runs BEFORE _assign. A
+    clear at the top of _assign therefore erased every leg-2 sentence
+    before _publish_status could ever see it: the operator watched a
+    truck sit at a pickup with an empty `stuck`, which reads as a fleet
+    that has forgotten it. drain() clears once, up front, instead.
+
+    The floor is made to grant f1 nothing for one pass rather than
+    staged geometrically: a dwelling truck owns the node under its own
+    body, so the only way leg 2 sees a grant of nothing on this graph is
+    a truck standing where somebody else already stands - and what this
+    test is about is the ORDER of the three calls in drain(), not the
+    shape of the jam that gets there.
+    """
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = head_on(manager, stub, now, to1="S4")
+    f1.drive()                                # f1 lands on S1
+    turn(manager, (f1, f2), now)              # ...arrives; the dwell starts
+    assert manager.tasks[0]["state"] == "DWELL"
+    legs_before = len(f1.legs())
+
+    real_hold = manager.floor.hold
+    manager.floor.hold = lambda v, els: [] if v == "f1" else real_hold(v, els)
+    manager.dwell_until["t-1"] = now - 1.0
+    manager.stuck.clear()                     # drain()'s one clear, up front
+    manager._expire_dwells(now)               # ...leg 2 finds no floor
+    manager.floor.hold = real_hold
+
+    assert len(f1.legs()) == legs_before, "leg 2 went out on a grant of nothing"
+    assert manager.tasks[0]["state"] == "DWELL"
+    assert "cannot start leg2 of t-1 to S4" in manager.stuck["f1"]
+    # ...and the assignment that follows it in the same drain leaves it
+    # alone. This is the whole regression.
+    manager._assign(now)
+    doc = manager._status(now)
+    assert "cannot start leg2 of t-1 to S4" in doc["traffic"]["stuck"]["f1"]
 
 
 # ---- 7. the guarantee has to survive the vehicle's own publish cadence ----

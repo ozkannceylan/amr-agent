@@ -672,8 +672,14 @@ def test_a_lost_truck_gives_its_task_back_and_is_cancelled_on_return(rig):
 
     mark = time.monotonic()
     f1.revive()                      # back, still holding the stale order
-    wait_for(lambda: f1.cancels, 15.0,
-             "cancelOrder to the returning truck", rig)
+    # GATE ON THE WITNESS THIS TEST THEN QUESTIONS. The fake and the
+    # probe hold two separate subscriptions to instantActions and the
+    # broker's fan-out order between them is unspecified, so waiting on
+    # the fake's socket and asserting the probe's list read an empty
+    # `actions_since` roughly once in a full-file run. Wait for the
+    # probe: it is the only thing the assertions below look at.
+    wait_for(lambda: [a for _t, s, a in rig.actions_since(mark) if s == "f1"],
+             15.0, "cancelOrder to the returning truck", rig)
     sent = [(t, s, a) for t, s, a in rig.actions_since(mark) if s == "f1"]
     assert len(sent) == 1, "the cancel must be sent once, not repeatedly"
     action = sent[0][2]
@@ -848,7 +854,13 @@ def test_no_traffic_reproduces_the_jam_and_the_document_says_so(rig):
     assert base_split(order)[1] == [], "something was held back"
     assert base_split(order)[0][-1] == "S1", \
         "f2 must be sent all the way onto the taken station"
-    doc = rig.status()
+    # Gate on the DOCUMENT, not on the order that provoked it. The
+    # status is republished on a shape change or a 2 s tick, so the last
+    # retained doc can still predate the assignment we just saw on the
+    # order topic - measured once in a full-file run, as an empty
+    # "t-jam" base.
+    doc = wait_for(lambda: when(rig, lambda d: "t-jam" in d["traffic"]["bases"]),
+                   15.0, "the document catching up with t-jam", rig)
     assert doc["traffic"] == {"enabled": False, "holds": {}, "waiting": {},
                               "yielded": [], "bases": {
                                   "t-west": [len(rig.orders_for("f1")[0][1]
