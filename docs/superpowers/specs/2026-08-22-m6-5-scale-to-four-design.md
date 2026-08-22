@@ -21,27 +21,35 @@ on.
   report to the owner with the number and the options; do not lighten
   the world pre-emptively, because that would make the four-vehicle
   figures incomparable with the two-vehicle ones already recorded.
-- **MEASURED 2026-08-22, and the ruling it forced.** The spike says
-  **0.190-0.230 at four**, against 0.96 at two and 1.00 at one — a STOP.
-  The cause is not physics (four trucks' physics runs at 0.998) but
-  rendering: **gz-sim does not render a lidar nobody subscribes to**, so
-  the cost is per SUBSCRIBED lidar — 4 on 0.995, 8 on 0.981, 12 on
-  0.274, 16 on 0.195, saturating llvmpipe's serial render path. (The
-  same blind spot sits under M6.1's 0.934: that number measured two
-  trucks' physics, not their sensors. Say so where it is quoted.)
-  **Owner ruling: four vehicles exist, two drive at a time.** Since the
-  cost follows subscription rather than motion, the ruling is
-  implemented as two roles:
-  - **ACTIVE** (two at a time): full stack, scan topics bridged, drivable,
-    full safety chain.
-  - **PARKED** (the others): model in the world (physics is free), VDA
-    agent up and honest on the wire, scan topics NOT bridged — so field
-    evaluation goes stale, the writer trips ESTOP1 and the truck is
-    **latched safe where it stands**, which is what a parked truck should
-    be. The fleet must not assign to it, and its state must say why.
-  Swapping which two are ACTIVE is an operator action, measured once.
-  The milestone therefore claims a four-vehicle fleet with **two
-  concurrent drivers on this machine**, and names the hardware reason.
+- **MEASURED 2026-08-22, twice, and the second measurement retired the
+  first ruling.** The llvmpipe spike said 0.190-0.230 at four and the
+  owner ruled two concurrent drivers. Then the owner asked for the same
+  measurement on the WSLg D3D12 passthrough
+  (`GALLIUM_DRIVER=d3d12 MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA`,
+  renderer confirmed `D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU)`,
+  `Accelerated: yes`), and four vehicles with all sixteen lidars
+  subscribed measured **0.583 / 0.687 / 0.670** by the file's printed
+  statistic and **0.90** integrated — three runs, every one over the
+  0.30 gate. The twelfth-lidar cliff (0.981 → 0.274 under llvmpipe) is
+  gone.
+  Two things this taught, both recorded in PROOF with no number
+  deleted: **(i)** gz-sim renders a lidar only when something
+  subscribes, so render cost follows SUBSCRIPTION, not motion — that
+  finding stands and it is why M6.1's server-only 0.934 measured two
+  trucks' physics rather than their sensors; **(ii)** the printed
+  statistic (mean of instantaneous `real_time_factor`, this file's
+  convention since M6.1) **understates a bursty run**. Integrated
+  Δsim/Δreal from the same messages puts llvmpipe's four trucks at
+  **0.579**, not 0.190 — also over the gate. The first STOP was as much
+  the arithmetic as the machine.
+  **Owner ruling 2026-08-22 (supersedes the two-driver ruling): all
+  four vehicles drive.** No ACTIVE/PARKED roles, no concurrency cap —
+  four full stacks, sixteen lidars bridged, every truck eligible for
+  work. The condition is environmental and must be documented rather
+  than hidden: the GPU driver variables have to be in the operator's
+  shell (`~/.bashrc`), the acceptance run records the RTF it actually
+  saw under the full stack, and if that falls below the gate it is
+  reported as measured, not smoothed.
 - **Station handover: hold the junction through the dwell.** The spur
   entry node is not released on arrival; it stays held until the dwell
   ends and leg 2 goes out. Small and local (it changes what
@@ -113,12 +121,12 @@ found, it is a defect to fix and name.
 
 ## Proof gates (live, machine-run, PROOF.md)
 
-1. **RTF (the gate that ran first).** DONE, and it is the reason for the
-   two-role ruling above: 0.190-0.230 at four subscribed vehicles, GO
-   refused. What Task 4 must re-measure is the SHIPPING configuration —
-   four models spawned, eight lidars bridged (the two ACTIVE) — plus the
-   full stack under load during the acceptance run. The shipping
-   configuration must clear 0.30 or the ruling itself is unworkable.
+1. **RTF (the gate that ran first).** DONE on both renderers, and it is
+   why all four drive: llvmpipe 0.190 printed / 0.579 integrated,
+   D3D12/NVIDIA 0.583-0.687 printed / 0.90 integrated at four subscribed
+   vehicles. What remains is the SHIPPING configuration under the full
+   39-pid stack, sampled during the acceptance run and reported whatever
+   it says.
 2. **Station handover fixed.** M6.4's Gate 2 scenario, now passing: two
    trucks to one station, the second waits for the dwell to end and the
    occupant to leave, then arrives. No swap deadlock, no two-in-a-spur.
@@ -127,16 +135,15 @@ found, it is a defect to fix and name.
    extensions and waits recorded; 0 motor-false on all four; no
    deadlock refusal (or, if one occurs, it is named and honest).
 4. **The acceptance run.** Eight transports submitted back-to-back
-   across the ten stations, the two ACTIVE trucks working them to
-   completion with no operator intervention, the two PARKED trucks
-   present, latched and correctly never assigned: measure throughput
+   across the ten stations, **all four trucks working**, run to
+   completion with no operator intervention: measure throughput
    (transports/min), per-vehicle utilisation, total waiting time,
-   arrival errors, 0 motor-false, and the RTF during it. This is the
-   milestone's headline number, and it is quoted WITH the two-driver
-   condition attached.
+   arrival errors, 0 motor-false, and the RTF sampled during it. This is
+   the milestone's headline number, and it is quoted with the GPU
+   condition named.
 5. **Degradation under loss.** Mid-acceptance, kill one vehicle: its
-   task requeues, the remaining three finish everything; the fleet
-   never assigns to the dead truck; the floor is not left locked.
+   task requeues, the remaining three finish everything, the fleet never
+   assigns to the dead truck, and the floor is not left locked.
 6. **Safety untouched at four.** Same causation discipline as M6.2's
    Gate 6 and M6.4's Gate 6: every Motor drop named at its sample, no
    correlation with any fleet event, across the whole session.
@@ -157,9 +164,9 @@ found, it is a defect to fix and name.
 ## What Milestone 6 claims when this closes
 
 Four simulated forklifts, each with its own safety chain (virtual
-F-PLC, scanners, encoder cross-check), registered with a VDA 5050 fleet
+F-PLC, scanners, encoder cross-check), driven by a VDA 5050 fleet
 manager over MQTT with edge/node traffic reservation, completing
-transports over ten stations without operator intervention — **two
-driving concurrently, because this machine renders sixteen lidars at
-RTF 0.19 and eight at 0.98, measured** — with every claim traceable to a
-run in `m6/PROOF.md`, and every unfixed thing named there too.
+transports over ten stations without operator intervention — **all four
+driving, on GPU rendering (D3D12/NVIDIA), at the RTF the acceptance run
+measured** — with every claim traceable to a run in `m6/PROOF.md`, and
+every unfixed thing named there too.
