@@ -56,57 +56,112 @@ VEHICLES = {
            "spawn": {"x": "3.00", "y": "-5.50", "z": "0.05",
                      "yaw": "3.14159"}},
     "f3": {"plc_port": 5130, "sensor_port": 5131,
-           "spawn": {"x": "-12.50", "y": "5.65", "z": "0.05",
+           "spawn": {"x": "-3.00", "y": "5.65", "z": "0.05",
                      "yaw": "0.0"}},
     "f4": {"plc_port": 5140, "sensor_port": 5141,
-           "spawn": {"x": "12.00", "y": "-5.50", "z": "0.05",
+           "spawn": {"x": "8.00", "y": "-5.50", "z": "0.05",
                      "yaw": "3.14159"}},
 }
 # f1 keeps step5's proven spawn - the S1 station point itself. f2 faces it
-# from 6.00 m down the dock aisle. f3 and f4 joined at M6.5 and stand at
-# the FAR ENDS of the two aisles: f3 on the main aisle's west end
-# (x = -12.5, y = 5.65) and f4 on the dock aisle's east end (x = 12.0,
-# y = -5.5), each facing in towards the warehouse.
+# from 6.00 m down the dock aisle. f3 and f4 joined at M6.5: f3 stands on
+# the main aisle at (-3.0, 5.65), level with the west rack runs' inner
+# ends, and f4 on the dock aisle at (8.0, -5.5), north of the dock door.
+# Model yaw 0 points the FORKS at world -x (follower.travel_yaw), so f3's
+# forks face west and f4's east - each truck's fork corners point ALONG
+# its aisle, which is what the third rule below is about.
 #
 # WHERE A PARKED TRUCK MAY STAND IS A FLEET DECISION, NOT A SCENIC ONE,
-# AND M6.5 GOT IT WRONG ONCE. f3 and f4 first went in at (-8.0, 5.65) and
-# (8.0, 5.65) because those are open main-aisle floor. They are also the
-# two SPUR JUNCTIONS floor.py:250-257 names: (-8.0, 5.65) is the only way
-# into both S6 and S8, and (8.0, 5.65) into S5, S7 and S9. What that
-# costs is not theoretical, because an idle truck HOLDS the node under it
-# (floor.py _hold_standing) and IDLE_HOLD_S hands it back after 30 s with
-# the truck still standing there (_idle_floor, which says so in its own
-# warning) - so those two poses put a parked truck first across the
-# fleet's busiest junction and then invisible on it, leaving the
+# AND M6.5 GOT IT WRONG TWICE - once on the graph and once on the floor.
+#
+# THE FIRST WRONG ANSWER WAS THE GRAPH'S. f3 and f4 first went in at
+# (-8.0, 5.65) and (8.0, 5.65) because those are open main-aisle floor.
+# They are also the two SPUR JUNCTIONS floor.py names: (-8.0, 5.65) is the
+# only way into both S6 and S8, and (8.0, 5.65) into S5, S7 and S9. What
+# that costs is not theoretical, because an idle truck HOLDS the node
+# under it (floor.py _hold_standing) and IDLE_HOLD_S hands it back after
+# 30 s with the truck still standing there (_idle_floor, which says so in
+# its own warning) - so those two poses put a parked truck first across
+# the fleet's busiest junction and then invisible on it, leaving the
 # scanners as the stop. Measured over the real planner, every one of the
 # 90 station-to-station routes:
 #
-#     node            of 90 routes   nearest node   nearest station
-#     (8.0, 5.65)          46          0.85 m         0.85 m  S7   <- was f4
-#     (-8.0, 5.65)         34          0.85 m         0.85 m  S6   <- was f3
-#     (-3.0, -5.5)         42          3.00 m         0.00 m  S1   <- f1, = S1
-#     (3.0, -5.5)          12          3.00 m         3.91 m  S4   <- f2
-#     (-12.5, 5.65)        12          4.50 m         4.58 m  S6   <- f3
-#     (12.0, -5.5)          6          4.00 m         6.50 m  S4   <- f4
+#     node            of 90 routes   nearest station   clear floor
+#     (8.0, 5.65)          46           0.85 m  S7      3.25 m   <- was f4
+#     (0.0, 5.65)          44           8.05 m  S6      4.35 m
+#     (-3.0, -5.5)         42           0.00 m  S1      4.50 m   <- f1, = S1
+#     (-8.0, 5.65)         34           0.85 m  S6      3.25 m   <- was f3
+#     (-3.0, 5.65)         20           5.07 m  S6      3.25 m   <- f3
+#     (3.0, -5.5)          12           3.91 m  S4      4.50 m   <- f2
+#     (-12.5, 5.65)        12           4.58 m  S6      2.50 m   <- was f3
+#     (8.0, -5.5)           6           3.20 m  S4      4.45 m   <- f4
+#     (12.0, -5.5)          6           6.50 m  S4      3.00 m   <- was f4
+#     (12.0, 5.65)          6           0.40 m  S5      2.00 m
 #
 # NO NODE IN THIS GRAPH IS ROUTE-FREE - all 26 are on at least one of the
-# 90 - so the choice is the least-used floor, not clean floor. f3 and f4
-# now sit on the two quietest nodes there are, both degree 2, neither the
-# way in to any station. (12.0, 5.65), the main aisle's east end, was
-# rejected on the measurement above: 6 routes, but 0.40 m from S5's own
-# station point, so a truck parked there stands ON the conveyor station
-# while the ledger calls it a different node. tests/test_vehicles_table.py
-# pins both rules - no spur junction, and no pose almost-but-not-quite on
-# a station.
+# 90 - so the choice is the least-used floor, not clean floor.
+# (12.0, 5.65), the main aisle's east end, is rejected on the same table:
+# 6 routes, but 0.40 m from S5's own station point, so a truck parked
+# there stands ON the conveyor station while the ledger calls it a
+# different node.
 #
-# EVERY POSE HERE HAS BEEN SPAWNED AND LOOKED AT. M6.1 validated f1's and
-# f2's; M6.5's Gate 1 spike did the same for the first f3/f4 pair, and
-# the pair above was measured the same way when they moved - resting pose
-# read back off the running world and every safety lidar's closest return
-# compared against f1's and f2's, which are the known-good ones. A pose
-# that rests tilted, sinks, or reads unlike the others moves HERE, in this
-# table, and nowhere else - the launch file, m6.sh's `home`, the spike and
-# the fleet all read it.
+# THE SECOND WRONG ANSWER WAS THE FLOOR'S, AND IT COST THE FIRST
+# ACCEPTANCE RUN. The two quietest nodes in the table are the END-AISLE
+# ones, and the end aisles are 5.00 m wide. A fork-corner scanner sits at
+# model (-0.68, +-0.46), so a truck parked 2.50 m off the west wall stands
+# with that scanner 1.82 m from it - INSIDE its own 2.5 m warning field,
+# which is V_Limit 300 from the F-program before the truck has moved a
+# millimetre. Worse, its first turn swings the same scanner another half
+# metre out: on 2026-08-22 f3 turned south out of (-12.5, 5.65), reached
+# 0.971 m from that wall eight seconds into the acceptance run, latched
+# PROTECTIVE and never moved again (PROOF, M6.5 Gate 4). f4's old pose at
+# (12.0, -5.5) is the same fault at 2.32 m: it crawled from its first
+# cycle. Neither the route-usage table nor the raw-closest-return check
+# Task 4 used could see any of it, because the raw closest return is the
+# truck's OWN forks on every truck.
+#
+# So the third rule is CLEAR FLOOR, and it is measured off the world SDF's
+# own collision boxes at the safety scan plane, not off a list:
+#
+#     at rest   every scanner, at the pose's own yaw, further than
+#               WF + hysteresis (2.70 m) from any solid - including the
+#               other three parked trucks, whose contour is the vehicle
+#               SDF's at that plane
+#     leaving   the pose itself further than PF + hysteresis + the scanner
+#               ring (0.821 m) + the pursuit's turning circle
+#               (LOOKAHEAD_M / 2 = 0.60 m) from any solid: 2.62 m
+#
+#     truck  at-rest worst scanner            leaving
+#     f1     4.04 m  left, south wall         4.50 m   (+1.88)
+#     f2     3.67 m  left, f4's drive wheel   4.50 m   (+1.88)
+#     f3     2.84 m  both fork corners, the west rack runs' end frames
+#                                             3.25 m   (+0.63)
+#     f4     3.43 m  back, f2's carriage      4.45 m   (+1.83)
+#
+# tests/test_vehicles_table.py pins all three rules - no spur junction, no
+# pose almost-but-not-quite on a station, and no truck parked inside a
+# field it cannot clear or turn out of.
+#
+# WHAT f4'S POSE COSTS, NAMED. (8.0, -5.5)'s nearest graph neighbour is
+# (6.0, -5.5), the S4 spur junction, 2.00 m west - the closest neighbour
+# any parked truck has, against 3.00 m for the other three. Two truck
+# centres 2.00 m apart are inside each other's protective fields, so a
+# truck standing at that junction stops parked f4 until it leaves. It is
+# a property of the dock aisle's node spacing (its tightest pair is the
+# 1.40 m between (-7.4, -5.5) and (-6.0, -5.5)) and not of this pose, the
+# window is the seconds between spawn and f4's first task, and the
+# alternative is an end-aisle pose that cannot leave at all.
+#
+# EVERY POSE HERE HAS BEEN SPAWNED AND LOOKED AT, AND THE CHECK NOW READS
+# field_eval AND NOT ONLY THE RAW RANGES. M6.1 validated f1's and f2's;
+# M6.5's Gate 1 spike did the same for the first f3/f4 pair, and the pair
+# above was measured the same way when they moved - resting pose read back
+# off the running world, every safety lidar's closest return compared
+# against f1's and f2's, AND /fN/safety/fields read at rest, where all
+# three devices must show wf true, and again through the truck's first
+# turn, where all three must stay pf true. A pose that rests tilted,
+# sinks, reads unlike the others or cannot turn out of itself moves HERE,
+# in this table, and nowhere else - the launch file, m6.sh's `home`, the
+# spike and the fleet all read it.
 #
 # THE PORT FAMILIES CLIMB IN TENS AND THE SENSOR PORT IS ALWAYS +1, and
 # they are still written out rather than computed: what a reader needs

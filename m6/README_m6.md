@@ -164,48 +164,82 @@ M6.5 got this wrong once: f3 and f4 first went in at `(-8.0, 5.65)` and
 **spur junctions** — the only way in to S6 and S8, and to S5, S7 and S9.
 Measured over the real planner and all 90 station-to-station routes:
 
-| Node | On how many of the 90 routes | Nearest node | Nearest station |
+| Node | On how many of the 90 routes | Nearest station | Clear floor |
 |---|---|---|---|
-| `(8.0, 5.65)` | **46** | 0.85 m | 0.85 m (S7) |
-| `(-8.0, 5.65)` | **34** | 0.85 m | 0.85 m (S6) |
-| `(-3.0, -5.5)` — f1, *on* S1 | 42 | 3.00 m | 0.00 m (S1) |
-| `(3.0, -5.5)` — f2 | 12 | 3.00 m | 3.91 m |
-| `(-12.5, 5.65)` — **f3** | 12 | 4.50 m | 4.58 m |
-| `(12.0, -5.5)` — **f4** | **6** | 4.00 m | 6.50 m |
+| `(8.0, 5.65)` | **46** | 0.85 m (S7) | 3.25 m |
+| `(0.0, 5.65)` | 44 | 8.05 m | 4.35 m |
+| `(-3.0, -5.5)` — f1, *on* S1 | 42 | 0.00 m (S1) | 4.50 m |
+| `(-8.0, 5.65)` | **34** | 0.85 m (S6) | 3.25 m |
+| `(-3.0, 5.65)` — **f3** | 20 | 5.07 m | 3.25 m |
+| `(3.0, -5.5)` — f2 | 12 | 3.91 m | 4.50 m |
+| `(-12.5, 5.65)` — *was f3* | 12 | 4.58 m | **2.50 m** |
+| `(8.0, -5.5)` — **f4** | **6** | 3.20 m | 4.45 m |
+| `(12.0, -5.5)` — *was f4* | **6** | 6.50 m | **3.00 m** |
+| `(12.0, 5.65)` | **6** | **0.40 m** (S5) | 2.00 m |
 
 No node in this graph is route-free — all 26 carry at least one — so the rule
-is *least-used floor*, not clean floor. f3 and f4 now sit on the two quietest
-nodes there are, both degree 2, neither the way in to anything.
-`(12.0, 5.65)`, the main aisle's east end, was rejected for a reason worth
-knowing: 6 routes, but **0.40 m from S5's own station point**, so a truck
-parked there stands on the conveyor while the ledger calls it a different
-node. `tests/test_vehicles_table.py` pins both rules — no spur junction, and
-no pose almost-but-not-quite on a station — off the graph, so a station that
-moves in `stations.py` moves them with it.
+is *least-used floor*, not clean floor. `(12.0, 5.65)`, the main aisle's east
+end, is rejected for a reason worth knowing: 6 routes, but **0.40 m from S5's
+own station point**, so a truck parked there stands on the conveyor while the
+ledger calls it a different node.
 
 **And the least-used node was the wrong thing to optimise on its own. M6.5's
-gate run measured what these two poses cost, and it cost the acceptance run.**
-Both aisle-end poses sit inside their own truck's warning field before
-anything moves:
+first gate run measured what that cost, and it cost the acceptance run.** The
+two quietest nodes in that table are the **end-aisle** ones, and the end
+aisles are 5.00 m wide. The left and right scanners are mounted at the
+**fork-end corners** (`model.sdf`, `-0.68 ±0.46`), so a truck parked 2.50 m
+off the west wall stands with one of them 1.82 m from it — inside its own
+2.5 m warning field before anything moves:
 
-| | Pose | Faces | Wall | Fork corner to it | `WF b/r/l` at rest | `V_Limit` |
-|---|---|---|---|---|---|---|
-| f3 | `(-12.50, 5.65)` | west | `x = -15.0` | **1.82 m** | `T/F/F` | **300** |
-| f4 | `(12.00, -5.50)` | east | `x = 15.0` | **2.32 m** | `T/F/F` | **300** |
-| f1 | `(-3.00, -5.50)` | east | — | — | `T/T/T` | 1500 |
-| f2 | `(3.00, -5.50)` | west | — | — | `T/T/T` | 1500 |
+| | Old pose | Wall | Fork corner to it | `WF b/r/l` at rest | `V_Limit` |
+|---|---|---|---|---|---|
+| f3 | `(-12.50, 5.65)` | `x = -15.0` | **1.82 m** | `T/F/F` | **300** |
+| f4 | `(12.00, -5.50)` | `x = 15.0` | **2.32 m** | `T/F/F` | **300** |
 
-The left and right scanners are mounted at the **fork-end corners**
-(`model.sdf`, `-0.68 -0.46`), so the clearance is `15.0 - |x| - 0.68` and both
-numbers fall inside the 2.5 m warning threshold. `cmd_gate` clamps every
-command to `min(speed_max, v_limit/1000)`, so **f3 and f4 crawl at 0.30 m/s
-until they clear their own wall**. Worse, a *turn* swings the truck another
-half-metre: f3 latched its **protective** field 0.971 m from the west wall
-turning south out of this pose (PROOF, M6.5 Gate 4, 19:43:15.092), and f4 did
-the same 0.993 m from the conveyor at the `(12.0, 5.65)` junction (M6.5's
-warm-up, 19:05:43.508). **A pose has to clear its own turning swing, not just
-its own scanner ranges** — and the check that catches it is one read of
-`/fN/safety/fields` at rest, not the raw lidar minima Task 4 compared.
+`cmd_gate` clamps every command to `min(speed_max, v_limit/1000)`, so both
+crawled at 0.30 m/s from their first cycle. Worse, a *turn* swings the same
+scanner another half-metre out: **f3 latched its protective field 0.971 m from
+the west wall turning south out of that pose, eight seconds into the
+acceptance run** (PROOF, M6.5 Gate 4, 19:43:15.092), and its hulk held the
+west cross-aisle for the remaining ten minutes.
+
+**So the poses moved in off the end walls, and a third rule went into the
+guard test.** f3 now stands on the main aisle at `(-3.00, 5.65)`, level with
+the west rack runs' inner ends; f4 on the dock aisle at `(8.00, -5.50)`, north
+of the dock door. The rule is measured off the **world SDF's own collision
+boxes at the safety scan plane** — not off `stations.OBSTACLES`, which is
+documented as the SDF's shadow and which nothing tests against the file:
+
+* **at rest** — every scanner, at the pose's own yaw, further than
+  `WF + hysteresis` (2.70 m) from any solid, *including the other three
+  parked trucks*, whose contour is the vehicle SDF's at that plane (the forks
+  sit below it and the chassis above it, so neither is in the contour);
+* **leaving** — the pose itself further than
+  `PF + hysteresis + scanner ring (0.821 m) + the pursuit's turning circle
+  (LOOKAHEAD_M / 2 = 0.60 m)` = **2.62 m** from any solid.
+
+| Truck | Pose | At-rest worst scanner | Leaving | Margin |
+|---|---|---|---|---|
+| f1 | `(-3.00, -5.50)` | 4.04 m — left, south wall | 4.50 m | +1.88 |
+| f2 | `(3.00, -5.50)` | 3.67 m — left, f4's drive wheel | 4.50 m | +1.88 |
+| **f3** | `(-3.00, 5.65)` | **2.84 m** — both fork corners, the rack end frames | 3.25 m | +0.63 |
+| **f4** | `(8.00, -5.50)` | 3.43 m — back, f2's carriage | 4.45 m | +1.83 |
+
+**The rule predicts the run it was written from.** f3's old pose scores
+`2.500 − 0.821 − 0.600 = 1.079 m` of scanner clearance through the turn
+against the 1.20 m it needs; the truck measured **0.971 m** at the latch — a
+rule 0.108 m off the event it explains. `tests/test_vehicles_table.py` pins
+all three rules — no spur junction, no pose almost-but-not-quite on a station,
+and no truck parked inside a field it cannot clear or turn out of.
+
+**What f4's pose costs, named.** `(8.0, -5.5)`'s nearest graph neighbour is
+`(6.0, -5.5)`, the S4 spur junction, **2.00 m** west — the closest neighbour
+any parked truck has, against 3.00 m for the other three. Two truck centres
+2.00 m apart are inside each other's protective fields, so a truck standing at
+that junction stops parked f4 until it leaves. That is the dock aisle's node
+spacing (its tightest pair is the **1.40 m** between `(-7.4, -5.5)` and
+`(-6.0, -5.5)`), the exposure is the seconds between spawn and f4's first
+task, and the alternative is an end-aisle pose the truck cannot leave at all.
 
 **f1 is the residual, and it is deliberate.** It keeps step5's proven pose,
 which is S1 itself: 42 of the 90 routes. Being *on* a station is a legitimate
@@ -670,7 +704,7 @@ Everything in this table is deliberate. None of it should be "fixed".
 | **`start` prints a loud `WARNING: deploy is STALE`.** | A feature, and the whole point of `deploy`. The vehicle runs the frozen copy in `deploy/`; editing a file in `ipc/` changes **nothing** until you redeploy, which is exactly what a real vehicle does. The banner is a warning and not a refusal, because watching that happen is the exercise. Rerun `step5.sh deploy` to ship. |
 | **The truck creeps near racking, well under the 0.7 m/s cruise.** | `V_Limit`. With the back warning field occupied the standard program computes 300 mm/s instead of 1500, and `nav_core` obeys it at the source rather than letting the gate clamp a plant that is still doing 0.7. Step 3 measured the trap this avoids: a latched stop 0.68 s after enable, driving 0.5 m/s with racks 1.75 m away. How the **right/left** warning fields compose into `V_Limit` is TIA-side and **unmapped** — two live observations contradict a back-only rule (see PROOF.md, open item 4). The practical effect is this creep. |
 | **Auto arrivals are 0.80 m at six stations and 0.25 m elsewhere.** | Geometry, not tolerance creep. S6..S9 sit on 0.85 m spurs entered perpendicular, and S2/S3 on 1.1 m spurs; the truck must turn 90° and stop in less floor than its own turning circle. Measured 2026-08-13 at S7 with a single tight radius: the truck overshot, could not converge, and settled into a stable **limit cycle at 0.643 - 0.742 m** — its minimum turning radius, ~0.69 m — lapping indefinitely. A vehicle cannot reach a point inside its own turning circle. `stations.py` now declares the honest number per station and `test_route.py` pins the **rule** (`0.80 if 0.0 < spur < 2.0 else 0.25`), not the list. Tightening it needs longer spurs or a back-in maneuver, not a gain. |
-| **f3 and f4 crawl at 0.30 m/s for the first few metres of every run, and f1/f2 do not.** | `V_Limit` again, and this time the wall is the obstacle. Both aisle-end poses put a fork-corner scanner inside its own 2.5 m warning field before anything moves — f3 1.82 m from the west wall, f4 2.32 m from the east wall — so `V_Limit` is 300 from the first cycle and `cmd_gate` clamps to it. The trucks speed up the moment they clear it. **What is NOT correct, and is a named defect rather than a feature, is the turn out of those poses**: the swing adds another half-metre and puts the same scanner inside the 1.0 m *protective* field, which latches. f3 cannot turn south out of its own spawn pose at all (PROOF, M6.5 Gate 4). See [Where the parked trucks stand](#where-the-parked-trucks-stand-and-why-it-is-a-fleet-decision). |
+| **The four trucks do not all start at full speed.** | `V_Limit` again, and this time the floor is the obstacle. A truck whose 2.5 m warning field is occupied gets `V_Limit` 300 from the F-program and `cmd_gate` clamps to it, so a pose or a corner near a rack face means 0.30 m/s until it clears. That is the field doing its job, and `follower.CORNER_MPS` is 0.30 m/s anyway, so a warning drop *through a corner* costs nothing. **What was a defect and is now fixed is a PARKED pose inside its own field**: f3 and f4 shipped 1.82 m and 2.32 m from the end walls, crawled from their first cycle, and f3 could not turn south out of its own spawn pose without latching PROTECTIVE (PROOF, M6.5 Gate 4). Both moved; `tests/test_vehicles_table.py` now measures the rule off the world SDF. See [Where the parked trucks stand](#where-the-parked-trucks-stand-and-why-it-is-a-fleet-decision). |
 | **A box spawned into the running world is invisible to the guard — and to all three safety scanners.** | Measured on this machine: runtime-spawned models return nothing from any `gpu_lidar` here. It is a platform property, not a Step 5 defect. Obstacle work must pre-seed geometry into the world file. Obstacle HOLD as a capability was descoped by the owner on 2026-08-13; PROOF.md records the parked design and its evidence. |
 | Steering still responds while traction is dead (teleop). | Deliberate. If the joystick went dead too, you could not tell a safety stop from a broken HMI — which is the one thing this window exists to distinguish. `angular.z` is therefore a steer *angle*, commanded directly. |
 | **The joystick knob greys out and moves nothing in Auto.** | Display only. The mux ignores `/hmi/cmd_vel` while auto is selected, so the knob would be lying if it looked live. Switch the radio back to Teleop and it is live again on the next message. |
