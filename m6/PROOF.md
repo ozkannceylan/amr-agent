@@ -162,6 +162,51 @@ up at the same length as the two that did:
                of the nine +/-2 s windows. 12,720 samples per truck on
                all four at once with the ledger fully live and not one
                drop.)
+
+M6.5 fix-up, measured 2026-08-22 21:53-23:18 over four stacks after the
+owner ruled fix-and-re-run. Two of the three unticked gates were fixed
+at the level they failed at; the run they were fixed for stopped on
+something else entirely.
+
+[x] POSES clear their own fields                                MEASURED
+              (all four wf true at rest and V_Limit 1500, against the
+               old table's T/F/F and 300 on two of them. f3 and f4 read
+               2.840 m against 2.840 computed. f3's first-move turn -
+               the one that latched it at the old pose - now worst-case
+               2.790 m. A third guard rule, off the world SDF's own
+               collision boxes, that predicts the old latch to 0.108 m.)
+[x] STEP-ASIDE clears a swap deadlock                           MEASURED
+              (fired twice unprompted in two live Gate 3 runs: detection
+               to cancelOrder 2 ms, to the one-node ft- order 104 ms,
+               the vehicle's own door accepted it, and the blocked truck
+               drove the floor that freed. Two bounds want re-cutting -
+               ASIDE_S 60 s against a 199 s move, and a distance BOUND
+               instead of a distance preference.)
+[ ] M6.5 GATE 3 - four-vehicle traffic                 FAILED, 0 of 4
+              (run twice. THREE OF FOUR TRUCKS DROPPED MOTOR NOT ONCE
+               in nine minutes of driving - 0/11183, 0/11184, 0/11185 -
+               which no four-vehicle run had ever managed. Stopped by a
+               main-aisle head-on where neither truck ever reached the
+               end of its base, so the resolver correctly never fired.)
+[ ] M6.5 GATE 4 - the acceptance run                   FAILED, 0 of 8
+              (31 s in, ALL FOUR trucks latched inside 0.56 s, every one
+               of them on a scanner reporting d = 0.000 - field_eval's
+               "a broken device is not an empty room". 3 to 7 such
+               samples per truck out of 7,417, all in one second, on
+               eight devices at once. RTF integrated 0.445-0.523 with an
+               instantaneous FLOOR of 0.010. The rig, not the cell.)
+[ ] M6.5 GATE 5 - degradation under loss              NOT RE-RUN
+              (Gate 4 ended with four latched trucks; a kill measured
+               against a stopped fleet is worth nothing. The M6.5 result
+               above stands.)
+[x] TWO SPEED-POLICY DEFECTS found and fixed                    MEASURED
+              (the guard band was read at the nav lidar, 1.23 m behind
+               the scanners that evaluate the field, so 3.0 m at the
+               lidar was 1.77 m at the fork corners - inside the field
+               it existed to stay out of. And nothing guarded abeam at
+               all: f3 tripped a warning field at 2.307 m with the
+               encoders at -700/-700 and Motor went false 8 ms later,
+               latched, while the wheels needed 300 ms to comply.)
 ```
 
 **Method, per gate — M6.1 and M6.2 only** (M6.3's method is under its
@@ -5532,6 +5577,323 @@ collection errors before a single test runs — the conftest imports
 `rclpy`. That is not a regression and it is not new; it is worth one
 line here because a clean-shell run of either suite looks like a
 catastrophic failure and is nothing of the kind.
+
+---
+
+# M6.5 fix-up - the poses, the step-aside, and the run that stopped for a reason nobody had instrumented
+
+**Date: 2026-08-22, 21:53-23:18. Four stacks, four teardowns, one
+milestone still open.** The M6.5 gate run above ended with three gates
+measured and not ticked, and the owner ruled *fix and re-run*. Two fixes
+were named in that ruling; four more were bought at full price on the
+floor tonight; and the acceptance run stopped 31 seconds in, all four
+trucks at once, on something none of the previous sessions had an
+instrument for.
+
+**Everything below was measured, and none of it is a smoothed number.**
+
+| | |
+|---|---|
+| GPU renderer | `glxinfo -B` gives `D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU)`; the server's own `~/.gz/rendering/ogre2.log` at 22:52:49 gives `GL_RENDERER = D3D12 (NVIDIA ...)`. Still **not** in `~/.bashrc`; exported by hand in every shell |
+| deploy | `./m6.sh deploy` gave 31 files, `MANIFEST source-git: 77e7294` = HEAD, before the last stack started |
+| stack | `start --headless` gave 39 pid lines, 39 in `.m6_pids`, 39 alive, four agents ONLINE |
+| ROS recorder | `rec3.py`, **28 subs + 4 mode pubs** - the previous 24 plus `/fN/safety/encoders`, which is the stream this session was missing and the one that settled two arguments |
+| MQTT recorder | `uagv/v2/amragent/+/#` and `fleet/#`, one `connected`, no disconnect |
+| four writers | ctl 5910/5920/5930/5940, PF/WF live on the first cycle, all four AUTOMATIC and Motor True at 22:53:45 |
+| suites after | m6 **480 passed**, step5 **220 passed** |
+
+## [x] The poses clear their own fields, and the guard test says why
+
+M6.5's Gate 4 lost the acceptance run eight seconds in because f3 shipped
+1.82 m from the west wall - inside its own 2.5 m warning field - and its
+first southbound turn put the same scanner 0.971 m from that wall.
+`tests/test_vehicles_table.py` gained a third rule, measured off the
+**world SDF's own collision boxes at the safety scan plane** rather than
+off `stations.OBSTACLES` (documented as the SDF's shadow, tested against
+nothing):
+
+* **at rest** every scanner, at the pose's own yaw, further than
+  `WF + hysteresis` (2.70 m) from any solid - the other three parked
+  trucks included, their contour read from the vehicle SDF at that plane;
+* **leaving** the pose itself further than
+  `PF + hysteresis + scanner ring (0.821 m) + LOOKAHEAD_M/2 (0.60 m)`
+  = **2.62 m**.
+
+The rule predicts the run it was written from: f3's old pose scores
+`2.500 - 0.821 - 0.600 = 1.079 m` through the turn against the 1.20 m it
+needs, and the truck measured **0.971 m** at the latch - 0.108 m out.
+
+**Read back off the running world at rest, 22:53:** every device `wf`
+true and `V_Limit` **1500** on all four, against the old table's `T/F/F`
+and 300 on two of them.
+
+```
+f1  back 4.490  left 4.040  right 4.960     all SAFE
+f2  back 4.490  left 4.912  right 3.996     all SAFE
+f3  back 3.344  left 2.840  right 2.840     all SAFE
+f4  back 3.344  left 2.840  right 2.840     all SAFE
+```
+
+f3 and f4 measured 2.840 against **2.840 computed**. The arithmetic and
+the scanners agree to the millimetre.
+
+**And the first-move turn, live (21:56, the first stack).** f3 was sent
+east out of its new pose - the reverse-direction move that latched it at
+the old one - and drove 4.4 m with `y` drifting 0.0010 m. Worst field
+reading of the whole move **2.790 m**, against 2.70 to clear and 1.20 to
+latch. **0 motor-false and 0 PROTECTIVE on all four trucks** from the
+RESET to the end of that run.
+
+**Two more pose rules were bought on the floor and cannot be tested.**
+f4 first went to `(8.0, -5.5)` - 6 of the 90 routes, the quietest clear
+node on this plan - and could not reach S4, its own nearest station at
+4.50 m, at either yaw:
+
+```
+yaw pi  travel heading EAST, so going west is a straight REVERSE; the
+        follower leaves the reverse phase only when the next target is
+        within REVERSE_EXIT_RAD (75 deg) of its heading, and turning
+        south into a spur is 94 deg. It reversed 2.18 m, passed the
+        junction by 0.18 m, and stopped for good at 21:57:07 with nav's
+        obstacle guard 1.477 m off PARKED f2 (GUARD_HOLD_M 1.5)
+yaw 0   drove up forwards at 0.70 m/s, decelerated into the corner and
+        STALLED in it - steer joint -0.926 rad against a -2.5 rad/s
+        traction command, drive-wheel velocity 8e-5 rad/s, nav still
+        EN-ROUTE with the guard clear at 2.975 m - for seven minutes
+```
+
+2.00 m is what that node leaves between a parked truck and the S4 spur
+junction. So: **every yaw points the truck at the floor it will be sent
+to**, and **a parked truck must have room to turn into the stations it is
+nearest to**. f4 moved to `(3.0, 5.65)`, 36 of 90 routes instead of 6,
+and the four poses became a division of the floor - f1 nearest to
+S1/S3/S10/S2, f2 to S4, f3 to S6/S8, f4 to S5/S7/S9, every station within
+8.60 m of a truck.
+
+## [x] The step-aside works, on the wire, in a live deadlock
+
+M6.5's Gate 3 measured two deadlocks wait-die could not break and named
+both honestly; nothing moved, and 0 of 4 transports finished. The fleet
+now moves a truck. **It fired twice tonight, in two separate live Gate 3
+runs, unprompted:**
+
+```
+22:54:10,523  swap deadlock f1 <-> f2 - each truck stands on the floor
+              the other needs, so wait-die frees nothing that helps. f2
+              carries the youngest task and is asked to step aside from
+              (0.0,-5.5) to (0.0,5.7), which clears f1
+22:54:10,525  f2 is cancelled on ft-d263cb8c - ... It is eligible again
+              the moment its own state stops showing that order
+22:54:10,627  f2 is being moved aside to (0.0,5.7) as ft-cf94fd3a - one
+              node, no task, and it is eligible again the moment it gets
+              there
+```
+
+Two milliseconds from the detection to the cancel, 104 ms to the
+one-node order. f1's route east cleared and f1 drove it. The order is an
+`ft-` order built by `order_builder.build_step_aside_order`, validated by
+`vda_orders.validate_order` - the vehicle's own door - and published
+through the same funnel a leg goes through; the vehicle accepted it.
+
+**And the run found the bound that was set wrong.** `ASIDE_S` was 60 s,
+written against "11.15 m at the worst edge at 0.30 m/s is 37 s". The
+move took **199 s** - the truck creeps, and the connector is the longest
+edge on the graph - so the fleet gave up on its own clock at 22:55:10
+and said so, and the truck arrived at 22:57 anyway. The bound worked,
+the number was wrong, and the number is a one-line change nobody should
+make without re-measuring the creep.
+
+**The second thing it found is worse and is a design point, not a
+constant.** `step_aside_target` ranks free neighbours by
+`(on their route, is a spur junction, distance)` - distance third - so it
+chose an **11.15 m** connector over a 3.00 m aisle node that was on f1's
+route. Eleven metres driven as a single node with no route is not a step
+aside: f2 arced into the cross-aisle rack corner and its left scanner
+reached 1.109 m and falling. **The choice needs a distance BOUND, not a
+distance preference**, and with one the honest answer here would have
+been the named refusal.
+
+## [ ] Gate 3 - four-vehicle traffic: 0 of 4, twice
+
+Four transports with crossing routes, one per truck, assigned inside
+3.0 s with the nearest-idle evidence on each: `S1 S4` to f1 (0.00 m),
+`S10 S1` to f2 (12.00 m), `S6 S9` to f3 (5.85 m), `S7 S8` to f4
+(5.85 m). Run twice, 22:39 and 22:53.
+
+```
+transports completed   0 of 4          (both runs)
+travelled              f1 44.7 m  f2 14.4 m  f3 14.5 m  f4 46.1 m
+motor-false (run 2)    f1 0/11183   f3 0/11184   f4 0/11185
+                       f2 8656/11184
+```
+
+**Three of the four trucks never dropped Motor once in nine minutes of
+driving**, which is the first time that has been true of a four-vehicle
+traffic run, and it is what the two speed-policy fixes below bought.
+What stopped it: f3 and f4 met head-on on the main aisle, each holding
+the floor the other's route needed, and **neither ever reached the end of
+its base**, so `_resolve` correctly refused to yield floor a truck is
+still driving and the step-aside never got its turn. f3 sat at
+`(-2.24, 5.69)` with `traction_cmd -2.5`, `steer_cmd -0.061` - straight
+ahead, not saturated - and did not move. Not ticked.
+
+## [ ] Gate 4 - the acceptance run: 0 of 8, and the reason is new
+
+23:05:46.844 to 23:05:49.296: eight transports over the ten stations,
+`S1 S6`, `S4 S7`, `S2 S8`, `S5 S9`, `S6 S3`, `S7 S10`, `S8 S5`, `S9 S4`,
+in **2.45 s**. Four assigned one per truck inside a second, four queued.
+Four trucks at their table poses, Motor True, AUTOMATIC, every field
+clear. **No operator touched anything from that moment until 23:17:18.**
+
+**Thirty-one seconds in, all four trucks latched inside 0.56 s of each
+other**, and the recorder that was added this session says exactly why:
+
+```
+f3  motor false 23:06:17.930   enc -300/-300 for the whole second before
+    fields  23:06:17.806  SAFE SAFE SAFE   3.299 2.798 2.790
+            23:06:17.903  SAFE SAFE PROT   3.298 2.801 0.000
+f4  motor false 23:06:18.116   enc -300/-300
+            23:06:18.081  SAFE PROT SAFE   3.295 0.000 2.794
+f2  motor false 23:06:18.263   enc -250/-250
+            23:06:18.200  PROT PROT PROT   0.000 0.000 0.000
+f1  motor false 23:06:18.491   enc -300/-300 then -100 then -55
+            23:06:18.440  SAFE PROT PROT   4.482 0.000 0.000
+```
+
+**Every one of those is `d = 0.000`, and 0.000 is not a distance.** It is
+what `field_eval.min_range` returns for an empty ranges array, a scan
+that is entirely muted, or a `-inf`/`nan` return - *"a broken device is
+not an empty room"*, written into that function in Step 2 and doing
+precisely its job here. Eight devices across four trucks reported it
+inside 0.56 s. That is not eight obstacles.
+
+```
+field reports carrying a 0.000 device, per truck, over the whole run
+  f1 3 of 7417   f2 6 of 7416   f3 7 of 7418   f4 6 of 7417
+```
+
+**Three to seven samples out of seven thousand four hundred, all inside
+one second, cost the entire run** - because a protective demand LATCHES
+and only a panel RESET clears it, and the acceptance run has no operator
+in it by definition.
+
+### The headline, measured over 692 s (23:05:46 to 23:17:18)
+
+| | |
+|---|---|
+| transports completed | **0 of 8** |
+| throughput | **0.00 transports/min** |
+| distance travelled | f1 3.3 m, f2 4.7 m, f3 4.3 m, f4 4.2 m - **16.5 m in 11.5 minutes** |
+| per-vehicle utilisation | 4.5 % of the run before the latch; 0 % after |
+| total waiting time | not meaningful: no truck was ever waiting on the ledger, all four were waiting on a RESET |
+| arrival errors | **none - no leg completed** |
+| motor-false | f1 14,186 of 14,835; f2 14,191 of 14,836; f3 14,198 of 14,837; f4 14,195 of 14,838. **One onset each, all four inside 0.56 s** |
+| **full-stack RTF** | printed **0.425-0.537**, integrated **0.445-0.523**, **floor 0.010-0.025**, six consecutive 60 s windows |
+
+**The RTF is the other half of the sentence.** The M6.5 gate session
+measured integrated 0.575-0.580 with a floor of 0.021; this one measured
+0.445-0.523 with a floor of **0.010**, twice as deep. The extra load is
+this session's own: four more recorder subscriptions at 20 Hz, and a
+speed policy that keeps every main-aisle truck at 0.30 m/s so every run
+lasts longer. **Sixteen gpu_lidars rendering on a stack whose
+instantaneous real-time factor touches 0.010 do not all deliver their
+scans**, the field evaluators correctly call an undelivered scan a
+violated field, and the safety layer stops four trucks that were doing
+nothing wrong.
+
+**Not ticked, and this is the first time the reason has been the rig
+rather than the cell.** Nothing in the fleet layer, the poses or the
+traffic ledger appears anywhere in this failure. The instrument to carry
+forward is the one that found it: `/fN/safety/encoders` recorded
+alongside `/fN/safety/fields`, which is what makes "the wheels were at
+300 and V_Limit was 300" distinguishable from "the scanner reported
+0.000".
+
+## [ ] Gate 5 - degradation under loss: NOT RE-RUN
+
+Gate 4 ended with four latched trucks and no operator budget left in the
+session. Killing a vehicle in that state would have measured a loss
+against a fleet that was already stopped, which is worth nothing. M6.5's
+own Gate 5 result stands unchanged: three clauses of four, the fourth
+failing because with no agent alive nothing publishes an empty goal and
+nav drove a dead truck 8.48 m across a junction.
+
+## The two speed-policy defects this session found, and fixed
+
+Both were bought at full price and both are in the vehicle layer, not
+the fleet's. They are here because they are the reason three of four
+trucks ran a nine-minute traffic gate without a single Motor drop, and
+because the first one had been hiding behind a pose bug for two
+milestones.
+
+**1. The guard band was measured at the wrong sensor.** `follower.py`'s
+header has always stated the rule: the lidar must have the truck at the
+creep ceiling *before* a warning field can drop `V_Limit` under wheels
+still doing 0.7 m/s, because the F-program's speed monitor demands a stop
+the instant either encoder channel reads above `V_Limit` and that demand
+LATCHES. `GUARD_SLOW_M` was 3.0 m against a 2.5 m field and read as if it
+kept that rule. It did not: the field is evaluated at the **fork-corner
+scanners** (model `-0.68, +-0.46`) and the guard at the **nav lidar**
+(`0.55, -0.40`), **1.23 m further back**, so 3.0 m at the lidar is 1.77 m
+at the scanners - three quarters of a metre inside the field.
+
+```
+22:19:20  f2 westbound on the dock aisle, 0.699 m/s, nav guard 5.2 m and
+          clear; fork corners reach 2.33 m off f1 PARKED on S1; both
+          warning fields drop; V_Limit 1500 to 300 with the wheels at
+          700 mm/s; the speed monitor latches. RESET, resume, and it did
+          it again at the same place.
+```
+
+`GUARD_SLOW_M` becomes **4.3 m** = 2.50 field + 0.20 hysteresis + 1.23
+mount offset + 0.35 to slow down.
+
+**2. The nav lidar cannot see abeam, and the field can.** The band above
+keeps the truck out of a field it drives *into*; nothing kept it out of
+one it drives *past*. The guard is a +-35 deg cone about the travel
+heading and a rack face 2.75 m off the shoulder is nowhere near it:
+
+```
+22:40:28.215  f3 westbound on the main aisle, forward cone clear
+              right scanner 2.307 m off rack A -> WARNING
+              V_Limit 1500 -> 300
+     .215     encoders -700 / -700 on that same 20 Hz sample
+22:40:28.223  Motor false, and it stays false
+     .335     -509      .485  -162      .635  0
+```
+
+**Eight milliseconds**, and the wheels needed 300 ms to comply. The floor
+is why this is not a tuning problem: the main aisle gives a fork-corner
+scanner **2.79 m** of lateral clearance (3.25 m centreline to rack face,
+0.46 m mount offset) against a **2.70 m** re-clear threshold. **Nine
+centimetres.** No pursuit holds a line that well.
+
+So the speed policy gained a fourth band read at the devices that
+actually evaluate the field: `nav_node` subscribes to
+`/fN/safety/fields`, takes the closest of the three, and `target_speed`
+caps at the creep ceiling inside `FIELD_SLOW_M` = **3.3 m**. It reads the
+DISTANCE and not the verdict, because by the time the verdict flips
+`V_Limit` has flipped with it. There is no HOLD counterpart and there
+must not be: a protective stop is the F-program's to demand.
+
+**THE COST, STATED, AND IT IS LARGE.** Every main-aisle transit now runs
+at 0.30 m/s instead of 0.70, because every main-aisle transit is inside
+that band for its whole length. The dock aisle (4.04 m to the nearest
+solid) is unaffected. That trade is the owner's to keep or reject; what
+it replaced was a latched truck every time an aisle was driven at speed.
+
+## Teardown
+
+Writers first (four `{"quit": true}`), then the ROS recorder printing its
+session counts - **30,429 encoder samples and 15,216 field reports on f1
+alone** - then the MQTT recorder, then `./m6.sh stop`: all eight vehicle
+ports and 1883 free, no orphan, `.m6_pids` removed. `Get-Process python`
+afterwards returns three VS Code language servers from two days ago and
+nothing else. Suites after teardown: m6 **480 passed**, step5 **220
+passed**.
+
+Four stacks were started and stopped tonight, each with its own deploy at
+its own HEAD; every figure above names the one it came from.
 
 ---
 

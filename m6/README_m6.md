@@ -1001,12 +1001,11 @@ headless, and a re-measurement of them should be too.
 
 ## Unit tests — m6's own, and the number to expect
 
-**`466 passed, 0 skipped`** under WSL (M6.5, four vehicles — it was 370 at
-M6.2 and 453 the day before the table grew: nine of the thirteen are
-per-vehicle sweeps that now run once per truck instead of twice, and four
-are new — the spawn-pose completeness check, the parked-truck floor-plan
-guard, the four-row CLI render and the manager spreading four transports
-over four trucks):
+**`480 passed, 0 skipped`** under WSL (the M6.5 fix-up — it was 370 at
+M6.2, 466 at the M6.5 gate run, and the fourteen new ones are the three
+parked-truck field rules, the eight the step-aside brought with it, and
+the three that pin the two speed bands to the field thresholds they
+protect rather than to a number):
 
 ```bash
 cd /mnt/c/Users/ozkan/projects/amr-agent
@@ -1038,10 +1037,17 @@ then again under the full 39-pid stack during the acceptance run (see [The GPU
 condition](#the-gpu-condition--two-exports-in-your-shell)).
 
 **Three gates are measured and NOT ticked, and that is the ledger working.**
-M6.5's Gate 3 (0 of 4 transports), Gate 4 (the acceptance run, 1 of 8) and
-Gate 5 (three clauses of four) each stand `[ ]` with their run written up in
-full. M6.4's Gate 2 is closed by M6.5's Gate 2. Nothing here is ticked on the
-strength of a copied file, and **an unticked gate is not a passed one**.
+M6.5's Gate 3 (0 of 4 transports), Gate 4 (the acceptance run) and Gate 5 each
+stand `[ ]` with their runs written up in full — twice over for 3 and 4, because
+the 2026-08-22 fix-up re-ran them after the poses and the step-aside were fixed
+and **the acceptance run then stopped for a different reason**: 31 s in, all
+four trucks latched inside 0.56 s on scanners reporting `d = 0.000`, which is
+`field_eval`'s *"a broken device is not an empty room"* answering scans a stack
+at an instantaneous RTF of **0.010** never delivered. Three of the four trucks
+had by then driven a nine-minute traffic gate **without dropping Motor once**,
+which no four-vehicle run had managed before. M6.4's Gate 2 is closed by M6.5's
+Gate 2. Nothing here is ticked on the strength of a copied file, and **an
+unticked gate is not a passed one**.
 
 Every gate above was machine-measured. The numbered runbooks at the foot of
 PROOF.md are kept for the owner's hands-on re-run, which needs **four**
