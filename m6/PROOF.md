@@ -87,10 +87,11 @@ M6.4, the traffic gates (numbered TRAFFIC 1..6), measured 2026-08-22
 [x] TRAFFIC 6 - traffic never touches safety                    MEASURED
 ```
 
-Method, per gate: 1, 4 (silence) and 5 were measured WSL-side with no
-writer attached. **2, 3, 6 and Gate 4's driving half were measured on
-2026-08-21 by the scripted driver plus the ROS CLI — no panel, no
-human**, and every number in them is a capture off this machine. **The
+**Method, per gate — M6.1 and M6.2 only** (M6.3's method is under its
+own heading, M6.4's under its own): 1, 4 (silence) and 5 were measured
+WSL-side with no writer attached. **2, 3, 6 and Gate 4's driving half
+were measured on 2026-08-21 by the scripted driver plus the ROS CLI —
+no panel, no human**, and every number in them is a capture off this machine. **The
 six VDA gates were measured the same way on the same day**, with two
 instruments instead of one: the ROS recorder, and a paho subscriber on
 `uagv/v2/amragent/+/#` that records what a fleet manager would have
@@ -3386,7 +3387,7 @@ f1_fields 43849  f2_fields 43817   f1_nav   43812  f2_nav   43784
 f1_route     26  f2_route     20   f1_goal     18  f2_goal      8
 ```
 
-**There is no goal publisher in that command line.** The twenty-six
+**There is no goal publisher in that command line.** The eighteen
 samples on `/f1/auto/goal` and eight on `/f2/auto/goal` are the AGENTS'
 own empty goals answering `cancelOrder` — eight scratch cancels this
 session sent by hand to clear staged runs, two the manager sent on
@@ -3408,7 +3409,19 @@ gate below was starved. `vda_agent_f1` and `vda_agent_f2` were each
 respawned once, in Gate 5, which is that gate's own subject.
 
 **Every `motor: false` sample in the session belongs to a run this file
-names.** Eight onsets in 85,644 samples on f1 and 85,640 on f2:
+names.** Eight onsets in 85,644 samples on f1 and 85,640 on f2.
+
+**Those denominators are smaller than the recorder's own session totals
+above (87,654 / 87,649) and the gap is the sweep's, not the capture's:**
+it was run while the rig was still up, roughly a hundred seconds before
+the recorder was stopped, so the last ~2,010 samples per truck are
+outside it. What is in that tail is one more `motor: false` run per
+truck — 12:09:36.511..12:09:50.761 on f1 (286 samples) and
+12:09:36.617..12:09:50.767 on f2 (284) — **the writers' own trip values
+on `{"quit": true}`, at teardown**, which M6.3 recorded in the same
+place for the same reason. No gate is inside that tail, and re-swept
+over the finished files the counts are 4,388 of 87,654 and 10,332 of
+87,649, which is the eight below plus those two.
 
 ```
 f1  4102 samples in 3 runs        f2  10048 samples in 5 runs
@@ -3587,9 +3600,13 @@ at a node, the other passed, the held one continued, both arrived.
 **0 motor-false, both trucks, whole gate:**
 
 ```
-11:27:56 .. 11:29:58   f1  motor-false 0 of 3592
-                       f2  motor-false 0 of 3592
+11:27:56 .. 11:29:58   f1  motor-false 0 of 2440
+   (122 s at 20 Hz)    f2  motor-false 0 of 2440
 ```
+
+The denominator is checkable: `/fN/plc/status` runs at 20 Hz, the window
+is 122 s, and 122 x 20 = 2,440. It is the same window and the same count
+Gate 6's table below carries, and the 32,260 there is built from it.
 
 and the trucks were not merely far apart — **closest approach 2.947 m at
 11:29:03.337**, closer than the 3.836 m at which the control run
@@ -3703,8 +3720,10 @@ station, which is what the gate asks for.
 *Capture the `orderUpdateId` sequence and prove the vehicle never
 re-drives a passed node — `lastNodeId` monotone across the update.*
 
-**Every base extension the fleet published in this session, from the
-vehicles' own state streams**, with the last node each truck had passed
+**Every base extension a vehicle ACCEPTED in this session, from the
+vehicles' own state streams** (the 1,873 the vehicle refused in Gate 1's
+first traffic run never became a state change, and are that gate's
+evidence, not this one's), with the last node each truck had passed
 on either side of the stitch:
 
 ```
@@ -4031,7 +4050,7 @@ and that the extension the fleet has been waiting to send actually
 lands. It fails on the old clause and passes on the new one; both were
 run.
 
-## Three things this session found and did not fix
+## Five things this session found and did not fix
 
 1. **A spur station cannot be handed between two vehicles.** Gate 2 run
    A, measured: the occupant releases the junction the instant it
@@ -4054,6 +4073,22 @@ run.
    It is `stations.py`'s documented geometry meeting a follower that
    cannot converge inside its own turning circle, it predates M6.4, and
    it is what blocked Gate 2's handover on both aisle stations.
+4. **`arrived_now` still has one nav-state period of race left in it.**
+   `11bb499` reads `self.horizon`, and an extension that empties the
+   horizon can be processed in the same period the truck reaches the end
+   of the base it is still driving — in which case the ARRIVED that
+   belongs to the OLD base would complete the order early. Not reachable
+   in this session's captures (every extension arrived while the truck
+   was already at rest), and the close is one line: anchor the test on
+   `progress.reached == len(progress.nodes)` — has the truck passed the
+   last released node — rather than on the horizon being empty. **M6.5.**
+5. **The mirror of it: an update that only SHRINKS a horizon**, arriving
+   after the truck has stopped at its base end, would leave `executing`
+   true with nothing in front to drive and no arrival ever reported.
+   Unreachable through this fleet — `order_builder` only ever grows a
+   released prefix, and `_base_kept` refuses anything that moves it — so
+   it is a property of the agent read alone, not of the system. **Pin it
+   with a test in M6.5** rather than leaving it to be discovered.
 
 ## Teardown
 
