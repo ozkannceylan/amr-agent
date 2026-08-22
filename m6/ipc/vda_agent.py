@@ -52,6 +52,14 @@ believing its own publish, would go on reporting a truck that drives.
 cb_nav therefore reconciles - a nav that has gone IDLE with a refusal
 or cancel note and no goal ends `executing`, loudly, on the state.
 
+AN EXTENSION IS NOT A NEW ORDER (VDA 5050 s.6.6, M6.4). An update that
+only grows the base past what the truck has already been told to drive
+is stitched on: the order message is replaced, Progress keeps its count
+because the released prefix is unchanged BY RULE, and only the nodes
+still in front of the truck go to nav as a fresh route from the pose it
+stands at. Nothing stops, nothing is cancelled, `executing` never
+flickers - a stitch the truck can feel is a stitch done wrong.
+
   THE ORDER SURVIVES THAT. Only `executing` is cleared; order and
   Progress stay, so the recovery path is: mode returns to AUTOMATIC ->
   a cancelOrder clears it, or the next broker bounce reconnects and
@@ -122,6 +130,11 @@ def _failed(reason_code):
     a bare code again. A clean disconnect() is code 0 and not a loss.
     """
     return bool(getattr(reason_code, "is_failure", bool(reason_code)))
+
+
+def _xy(nodes):
+    """The (x, y) pairs of a list of order nodes, in travel order."""
+    return [[n["nodePosition"]["x"], n["nodePosition"]["y"]] for n in nodes]
 
 
 class VdaAgent(Node):
@@ -337,15 +350,8 @@ class VdaAgent(Node):
                 "not driving")
             return
         remaining = self.progress.nodes[self.progress.reached:]
-        points = [list(self.pose[:2])] + [
-            [n["nodePosition"]["x"], n["nodePosition"]["y"]]
-            for n in remaining]
         _, arrive_m, _, _ = vo.released_route(self.order)
-        self.pub_route.publish(String(data=json.dumps(
-            {"points": points, "arrive_m": arrive_m,
-             "label": self.order["orderId"]})))
-        self.route_sent_at = time.monotonic()
-        self.executing = True
+        self._send_route(_xy(remaining), arrive_m, self.order["orderId"])
         if self.cancel_pending is not None:
             # The agent has just deliberately re-asked for this drive,
             # so the stop it was chasing is moot. Dropping the entry
@@ -355,6 +361,32 @@ class VdaAgent(Node):
                 "resume supersedes the cancel that was still pending")
             self.cancel_pending = None
         self.get_logger().info("supervision back - route re-issued")
+
+    def _send_route(self, points, arrive_m, label):
+        """Hand nav [where we are] + `points`, and believe it is driving.
+
+        THE POSE PREPEND IS WHY THIS IS ONE METHOD AND NOT THREE.
+        nav_core refuses a polyline of fewer than two points, so every
+        route this node sends starts at the truck - which is what makes
+        a single remaining node a drivable line. All three senders need
+        exactly that: a fresh accept, a resume after a broker bounce,
+        and an extension. `executing` becomes true here for the same
+        reason in all three: a route was asked for. cb_nav is what may
+        take that belief away again.
+        """
+        self.pub_route.publish(String(data=json.dumps(
+            {"points": [list(self.pose[:2])] + [list(p) for p in points],
+             "arrive_m": arrive_m, "label": label})))
+        self.route_sent_at = time.monotonic()
+        self.executing = True
+
+    def _note_arrive_radius(self, last_node, arrive_m):
+        """Say so when the last node asked for a radius nav cannot use."""
+        raw = last_node["nodePosition"].get("allowedDeviationXY")
+        if raw is not None and raw != arrive_m:
+            self.get_logger().info(
+                "allowedDeviationXY {!r} is not a radius nav can drive - "
+                "arriving on {} m instead".format(raw, arrive_m))
 
     def operating_mode(self):
         return "AUTOMATIC" if self.mode == MODE_AUTO else "MANUAL"
@@ -372,37 +404,128 @@ class VdaAgent(Node):
             msg, self.order, self.executing, self.operating_mode())
         if verdict == "ignore":
             return
+        if verdict == "extend":
+            # _extend answers '' when it took the update, or the reason
+            # it would not - and an extension refused is a refusal like
+            # any other, reported the same way on the same state.
+            reason = self._extend(msg)
+            if not reason:
+                return
+            verdict = "reject"
         if verdict == "reject":
-            # NOT msg["orderId"]: 'not an object' is a valid rejection
-            # reason, and a list has no .get to answer it with.
-            oid = msg.get("orderId", "?") if isinstance(msg, dict) else "?"
-            self.get_logger().warn("order rejected: {}".format(reason))
-            self.publish_state("order rejected", [{
-                "errorType": "orderError", "errorLevel": "WARNING",
-                "errorDescription": reason,
-                "errorReferences": [{"referenceKey": "orderId",
-                                     "referenceValue": str(oid)}]}])
+            self._refuse(msg, reason)
             return
-        # An 'extend' verdict falls in here with the accepts for now: the
-        # base it carries is legal by rule, so re-issuing it from the
-        # pose the truck stands at drives the right floor - it just
-        # restarts the progress count. Carrying Progress across a stitch
-        # is the next change in this file.
         points, arrive_m, released, horizon = vo.released_route(msg)
-        raw_dev = released[-1]["nodePosition"].get("allowedDeviationXY")
-        if raw_dev is not None and raw_dev != arrive_m:
-            self.get_logger().info(
-                "allowedDeviationXY {!r} is not a radius nav can drive - "
-                "arriving on {} m instead".format(raw_dev, arrive_m))
+        self._note_arrive_radius(released[-1], arrive_m)
         self.order, self.horizon = msg, horizon
         self.progress = vo.Progress(released)
-        route = [list(self.pose[:2])] + [list(p) for p in points]
-        self.pub_route.publish(String(data=json.dumps(
-            {"points": route, "arrive_m": arrive_m,
-             "label": msg["orderId"]})))
-        self.route_sent_at = time.monotonic()
-        self.executing = True
+        self._send_route(points, arrive_m, msg["orderId"])
         self.publish_state("order accepted")
+
+    def _refuse(self, msg, reason):
+        """Say no on the state stream, naming the order refused."""
+        # NOT msg["orderId"]: 'not an object' is a valid rejection
+        # reason, and a list has no .get to answer it with.
+        oid = msg.get("orderId", "?") if isinstance(msg, dict) else "?"
+        self.get_logger().warn("order rejected: {}".format(reason))
+        self.publish_state("order rejected", [{
+            "errorType": "orderError", "errorLevel": "WARNING",
+            "errorDescription": reason,
+            "errorReferences": [{"referenceKey": "orderId",
+                                 "referenceValue": str(oid)}]}])
+
+    def _extend(self, msg):
+        """Stitch an update onto the order being driven (VDA 5050 s.6.6).
+
+        Returns '' when the update was taken, else the reason it was not
+        - which _on_order reports as an ordinary orderError.
+
+        THE TRUCK DOES NOT NOTICE THIS. accept_order has already proved
+        the released prefix is the base this vehicle was already
+        driving, unchanged, so nothing behind the truck moved and there
+        is nothing to stop for: no cancel, no empty goal, no
+        actionState, and `executing` - which accept_order required to be
+        true before it would say 'extend' at all - stays true from the
+        first line of this method to the last.
+
+        A CANCEL IN FLIGHT OUTRANKS AN EXTENSION. cancel_pending means
+        somebody is still waiting to see this truck stop - the fleet
+        through cancelOrder, or a lost broker - and _pump_cancel is
+        chasing that stop until nav confirms it. An extension arriving
+        into that window is a contradiction, not a refinement, and both
+        quiet ways out of it are wrong: taking it would leave a stop
+        nobody withdrew, armed and waiting for `executing` to go false
+        again (_pump_cancel holds its empty goal while a route runs - it
+        does not forget it), and clearing the cancel the way _resume
+        does would let an outside message overrule a stop THIS node has
+        already promised. _resume may do that because the drive it
+        re-asks for is its own decision; an order arriving on the wire
+        is not. So the extension is REFUSED BY NAME and the cancel is
+        left exactly as it was. The fleet reads the orderError and may
+        send a fresh order once the stop is confirmed.
+        """
+        if self.cancel_pending is not None:
+            return ("a cancel is pending on this vehicle - it cannot take "
+                    "on more of an order it is being stopped from driving")
+        _, arrive_m, released, horizon = vo.released_route(msg)
+        reached = self.progress.reached
+        # THE INVARIANT accept_order PROMISED, CHECKED HERE ANYWAY.
+        # _base_kept makes disagreement impossible today: it demands the
+        # update carry every released node of the current order at the
+        # same index with the same nodeId and sequenceId, and
+        # Progress.nodes IS that released list - so nothing arriving
+        # through accept_order can fail the comparison below (the guard
+        # is tested by doctoring Progress directly). It is written
+        # because of what being wrong would cost. `reached` is a COUNT,
+        # and a count means nothing except against the list it was
+        # counted on: if that list ever shifted underneath it,
+        # lastNodeId would name a node the truck never passed, the
+        # fleet ledger would free floor it never crossed, and the
+        # remaining nodes handed to nav would start in the wrong place.
+        # A base that moved under a driving truck is refused, loudly,
+        # not driven.
+        was = [(n["nodeId"], n["sequenceId"])
+               for n in self.progress.nodes[:reached]]
+        now = [(n["nodeId"], n["sequenceId"]) for n in released[:reached]]
+        if was != now:      # a SHORTER new prefix is a disagreement too
+            self.get_logger().error(
+                "extension refused: the {} node(s) already passed read {} "
+                "in the update and {} in the order being driven - the base "
+                "moved under a driving truck".format(reached, now, was))
+            return ("the update disagrees about the {} node(s) this "
+                    "vehicle has already passed".format(reached))
+        self.order, self.horizon = msg, horizon
+        # THE NEW NODES, THE OLD COUNT - and the new nodes on purpose.
+        # A changed allowedDeviationXY on an ALREADY-REACHED node is
+        # IGNORED, and ignored by construction rather than by a check:
+        # deviation is not position, it is the radius that decided a
+        # node was PASSED, and that decision has been made - after this
+        # rebuild Progress.update still scans j from the end down to
+        # `reached` and never reads a node below it again. On the
+        # not-yet-reached nodes and on the final one the new deviation
+        # DOES take effect, because those radii are still in front of
+        # the truck and still decide passing (Progress) and arrival
+        # (arrive_m). That is exactly why the update's node list is
+        # installed rather than the old one kept with a tail bolted on.
+        self.progress = vo.Progress(released)
+        self.progress.reached = reached
+        remaining = self.progress.nodes[reached:]
+        if remaining:
+            self._note_arrive_radius(released[-1], arrive_m)
+            self._send_route(_xy(remaining), arrive_m, msg["orderId"])
+        else:
+            # AN UPDATE THAT GREW ONLY THE HORIZON, ARRIVING AFTER THE
+            # TRUCK PASSED THE LAST RELEASED NODE. Nothing is in front
+            # to drive to, and [pose] alone is the one-point polyline
+            # nav_core refuses outright - so nothing is published and
+            # the drive already in flight stands. It still carries the
+            # right label: an extension keeps the orderId, so cb_nav
+            # goes on recognising its ARRIVED.
+            self.get_logger().info(
+                "extension released nothing ahead of the truck - the "
+                "route already in flight stands")
+        self.publish_state("order extended")
+        return ""
 
     def _on_actions(self, payload):
         try:

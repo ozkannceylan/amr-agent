@@ -439,3 +439,248 @@ def test_an_unmatched_nav_is_named_before_the_retries_begin(rig):
         "nothing in the log names the window the goal was lost in")
     assert sum("has not matched" in m for m in said) == 1, (
         "one line, not one per retry")
+
+
+# ---- the growing base (VDA 5050 s.6.6, M6.4) ----
+# An update that only adds floor past what the truck was already told to
+# drive is stitched onto the order in flight: same orderId, one higher
+# orderUpdateId, released prefix untouched. Nothing about it may be
+# visible to the truck - no stop, no cancel, and above all no count
+# reset, because lastNodeId walking backwards is a lie the fleet's
+# traffic ledger acts on (it frees the floor behind a vehicle).
+
+
+def growing_order(released_n, update_id, devs=None, order_id="o-grow"):
+    """Five nodes on a line at y=0, x = 0, 2, 4, 6, 8.
+
+    The first `released_n` are base, the rest horizon. `devs` sets
+    allowedDeviationXY per node id - the radius that decides passing
+    (Progress) and, on the last released node, arrival (arrive_m).
+    """
+    devs = devs or {}
+    nodes = []
+    for i in range(5):
+        nid = "wp{}".format(i)
+        pos = {"x": 2.0 * i, "y": 0.0, "mapId": "warehouse"}
+        if nid in devs:
+            pos["allowedDeviationXY"] = devs[nid]
+        nodes.append({"nodeId": nid, "sequenceId": 2 * i,
+                      "released": i < released_n, "actions": [],
+                      "nodePosition": pos})
+    edges = [{"edgeId": "e{}".format(i), "sequenceId": 2 * i + 1,
+              "released": i + 1 < released_n,
+              "startNodeId": "wp{}".format(i),
+              "endNodeId": "wp{}".format(i + 1), "actions": []}
+             for i in range(4)]
+    return {"orderId": order_id, "orderUpdateId": update_id,
+            "nodes": nodes, "edges": edges}
+
+
+def send_order(probe, order):
+    probe.publish("uagv/v2/amragent/f1/order", json.dumps(order), qos=0)
+
+
+def odom_publisher(helper):
+    """The truck's own odometry, on the topic config.yaml names for it."""
+    import yaml
+    from nav_msgs.msg import Odometry
+    from status_contract import CONFIG_PATH
+    with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
+        topic = yaml.safe_load(handle)["topics"]["gz_odom"]
+    return helper.create_publisher(Odometry, topic, 10)
+
+
+def drive_to(pub, x, y):
+    from nav_msgs.msg import Odometry
+    msg = Odometry()
+    msg.pose.pose.position.x = float(x)
+    msg.pose.pose.position.y = float(y)
+    msg.pose.pose.orientation.w = 1.0
+    pub.publish(msg)
+
+
+def states_of(caught, order_id):
+    return [p for t, p in caught["mqtt"]
+            if t.endswith("/state") and p["orderId"] == order_id]
+
+
+def test_an_extension_drives_only_what_is_left(rig):
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    odom = odom_publisher(helper)
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    send_order(probe, growing_order(2, 0, {"wp1": 0.25}))
+    spin([agent, helper], 1.5)
+    assert len(caught["route"]) == 1, "the first order never went to nav"
+    assert agent.executing
+    # The truck drives its two released nodes and stands on the second.
+    # wp2..wp4 are horizon: it has been told nothing about them.
+    drive_to(odom, 2.0, 0.0)
+    spin([agent, helper], 0.5)
+    assert agent.progress.reached == 2, "the truck never passed its base"
+    assert states_of(caught, "o-grow")[-1]["newBaseRequest"], (
+        "a truck standing on the end of its base with a horizon left "
+        "is asking for more of it")
+
+    before = len(caught["route"])
+    send_order(probe, growing_order(
+        4, 1, {"wp1": 2.5, "wp2": 1.5, "wp3": 0.5}))
+    spin([agent, helper], 1.5)
+    assert len(caught["route"]) == before + 1, "the extension never drove"
+    route = caught["route"][-1]
+    assert route["label"] == "o-grow", "an extension keeps its orderId"
+    assert route["points"] == [[2.0, 0.0], [4.0, 0.0], [6.0, 0.0]], (
+        "the truck was sent back over floor it had already driven: "
+        "{}".format(route["points"]))
+    assert route["arrive_m"] == 0.5, "the new final node sets arrival"
+    # NOT A STOP IN ANY FORM. No empty goal, no cancelOrder actionState,
+    # and `executing` never flickered - this is the whole point of s.6.6.
+    assert caught["goal"] == [], "an extension published a stop"
+    assert agent.executing, "an extension stopped the truck"
+    states = states_of(caught, "o-grow")
+    assert not [a for s in states for a in s["actionStates"]
+                if a["actionType"] == "cancelOrder"]
+
+    # THE COUNT SURVIVED. reached is a count, and it is still counting
+    # the same two nodes - so lastNodeId cannot have moved.
+    assert agent.progress.reached == 2
+    seq = [s["lastNodeSequenceId"] for s in states]
+    assert seq == sorted(seq), (
+        "lastNodeSequenceId walked backwards: {}".format(seq))
+    ids = [s["lastNodeId"] for s in states]
+    assert "" not in ids[ids.index("wp1"):], (
+        "lastNodeId went back to nothing: {}".format(ids))
+    updates = [s["orderUpdateId"] for s in states]
+    assert updates == sorted(updates) and updates[-1] == 1, (
+        "the state stream never followed the update: {}".format(updates))
+    assert states[-1]["nodeStates"] == [
+        {"nodeId": "wp2", "sequenceId": 4, "released": True},
+        {"nodeId": "wp3", "sequenceId": 6, "released": True},
+        {"nodeId": "wp4", "sequenceId": 8, "released": False}], (
+        "the state does not describe the grown base")
+    assert not states[-1]["newBaseRequest"], "there is base left to drive"
+
+
+def test_a_new_deviation_binds_ahead_of_the_truck_and_not_behind(rig):
+    """The M6.4 ruling on allowedDeviationXY, both halves.
+
+    _base_kept lets an update change a released node's deviation - it is
+    not position. On a node ALREADY PASSED the change is ignored: the
+    radius only ever decided whether the truck passed it, and it did.
+    On the nodes still in front, and on the final one, it takes effect,
+    because those radii still decide passing and arrival.
+    """
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    odom = odom_publisher(helper)
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    send_order(probe, growing_order(2, 0, {"wp1": 0.25}))
+    spin([agent, helper], 1.5)
+    drive_to(odom, 2.0, 0.0)
+    spin([agent, helper], 0.5)
+    assert agent.progress.reached == 2
+
+    # wp1 is behind the truck and its radius is widened tenfold; wp2 is
+    # in front and gets 1.5 m, nearly twice DEFAULT_DEV_M.
+    send_order(probe, growing_order(
+        4, 1, {"wp1": 2.5, "wp2": 1.5, "wp3": 0.5}))
+    spin([agent, helper], 1.5)
+    assert agent.progress.reached == 2, "a passed node was recounted"
+    assert agent.progress.last_node() == ("wp1", 2)
+
+    # 1.4 m short of wp2: inside the 1.5 m the update asked for, outside
+    # the 0.8 m default it would have had otherwise, and 0.6 m from wp3,
+    # which asked for 0.5 - so exactly one node has been passed.
+    drive_to(odom, 5.4, 0.0)
+    spin([agent, helper], 0.5)
+    assert agent.progress.reached == 3, (
+        "the deviation the update set on the node ahead did not bind")
+    assert agent.progress.last_node() == ("wp2", 4)
+
+
+def test_an_extension_is_refused_while_a_cancel_is_pending(rig, monkeypatch):
+    """A stop in flight outranks an order asking for more driving.
+
+    The reachable way in: a supervision loss begins a cancel and KEEPS
+    the order, so `executing` is false and cancel_pending is set; a
+    fresh order is accepted into that (only _resume clears a pending
+    cancel, and the accept path is not _resume), which leaves a truck
+    executing with an unconfirmed stop still being chased. An extension
+    of THAT order is the contradiction the guard names.
+    """
+    from std_msgs.msg import String
+    import vda_agent
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    # The rig has no nav_node, so no cancel here can ever be confirmed;
+    # the deadline is moved out of the way rather than raced.
+    monkeypatch.setattr(vda_agent, "CANCEL_CONFIRM_S", 60.0)
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    send_order(probe, growing_order(2, 0))
+    spin([agent, helper], 1.5)
+    assert agent.executing
+
+    agent._supervision_lost()
+    spin([agent, helper], 0.3)
+    assert agent.cancel_pending is not None
+    send_order(probe, growing_order(2, 0, order_id="o-mid"))
+    spin([agent, helper], 1.5)
+    assert agent.executing and agent.order["orderId"] == "o-mid"
+    assert agent.cancel_pending is not None, "the stop was already closed"
+
+    routes, goals = len(caught["route"]), len(caught["goal"])
+    send_order(probe, growing_order(4, 1, order_id="o-mid"))
+    spin([agent, helper], 1.5)
+    assert len(caught["route"]) == routes, "an extension drove into a stop"
+    assert agent.order["orderUpdateId"] == 0, "the update was taken anyway"
+    assert agent.progress.reached == 0 and len(agent.progress.nodes) == 2
+    assert agent.cancel_pending is not None, "the extension ate the cancel"
+    assert len(caught["goal"]) == goals, "the extension published a stop"
+    said = [e for s in states_of(caught, "o-mid") for e in s["errors"]
+            if e["errorType"] == "orderError"]
+    assert said, "the refusal never reached the fleet"
+    assert "cancel is pending" in said[-1]["errorDescription"]
+    assert said[-1]["errorReferences"] == [
+        {"referenceKey": "orderId", "referenceValue": "o-mid"}]
+
+
+def test_a_reached_prefix_that_disagrees_is_refused_not_driven(rig):
+    """The guard accept_order makes unreachable, fired directly.
+
+    _base_kept already refuses an update whose released prefix differs
+    from the order being driven, and Progress.nodes IS that prefix, so
+    no message on the wire can reach this branch - the disagreement has
+    to be manufactured. It is manufactured in Progress rather than in
+    the order because released_route hands back the order's own node
+    dicts BY REFERENCE: editing one in place would edit the order too,
+    and the door would refuse the update before the guard was asked.
+    """
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    odom = odom_publisher(helper)
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    send_order(probe, growing_order(2, 0, {"wp1": 0.25}))
+    spin([agent, helper], 1.5)
+    drive_to(odom, 2.0, 0.0)
+    spin([agent, helper], 0.5)
+    assert agent.progress.reached == 2
+
+    agent.progress.nodes[0] = dict(agent.progress.nodes[0], nodeId="ghost")
+    routes = len(caught["route"])
+    send_order(probe, growing_order(4, 1, {"wp1": 0.25}))
+    spin([agent, helper], 1.5)
+    assert len(caught["route"]) == routes, "a moved base was driven"
+    assert agent.order["orderUpdateId"] == 0, "the moved base was taken"
+    assert agent.progress.reached == 2, "the count was touched anyway"
+    assert agent.executing, "a refused extension must not stop the truck"
+    assert caught["goal"] == []
+    said = [e for s in states_of(caught, "o-grow") for e in s["errors"]
+            if e["errorType"] == "orderError"]
+    assert said and "already passed" in said[-1]["errorDescription"]
