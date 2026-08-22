@@ -21,6 +21,27 @@ on.
   report to the owner with the number and the options; do not lighten
   the world pre-emptively, because that would make the four-vehicle
   figures incomparable with the two-vehicle ones already recorded.
+- **MEASURED 2026-08-22, and the ruling it forced.** The spike says
+  **0.190-0.230 at four**, against 0.96 at two and 1.00 at one — a STOP.
+  The cause is not physics (four trucks' physics runs at 0.998) but
+  rendering: **gz-sim does not render a lidar nobody subscribes to**, so
+  the cost is per SUBSCRIBED lidar — 4 on 0.995, 8 on 0.981, 12 on
+  0.274, 16 on 0.195, saturating llvmpipe's serial render path. (The
+  same blind spot sits under M6.1's 0.934: that number measured two
+  trucks' physics, not their sensors. Say so where it is quoted.)
+  **Owner ruling: four vehicles exist, two drive at a time.** Since the
+  cost follows subscription rather than motion, the ruling is
+  implemented as two roles:
+  - **ACTIVE** (two at a time): full stack, scan topics bridged, drivable,
+    full safety chain.
+  - **PARKED** (the others): model in the world (physics is free), VDA
+    agent up and honest on the wire, scan topics NOT bridged — so field
+    evaluation goes stale, the writer trips ESTOP1 and the truck is
+    **latched safe where it stands**, which is what a parked truck should
+    be. The fleet must not assign to it, and its state must say why.
+  Swapping which two are ACTIVE is an operator action, measured once.
+  The milestone therefore claims a four-vehicle fleet with **two
+  concurrent drivers on this machine**, and names the hardware reason.
 - **Station handover: hold the junction through the dwell.** The spur
   entry node is not released on arrival; it stays held until the dwell
   ends and leg 2 goes out. Small and local (it changes what
@@ -92,9 +113,12 @@ found, it is a defect to fix and name.
 
 ## Proof gates (live, machine-run, PROOF.md)
 
-1. **RTF at four (the gate that runs first).** Server-only spike, four
-   derived models, measured mean; then the full 39-pid stack under load
-   during Gate 4, recorded as evidence. GO at `>= 0.30`, else STOP.
+1. **RTF (the gate that ran first).** DONE, and it is the reason for the
+   two-role ruling above: 0.190-0.230 at four subscribed vehicles, GO
+   refused. What Task 4 must re-measure is the SHIPPING configuration —
+   four models spawned, eight lidars bridged (the two ACTIVE) — plus the
+   full stack under load during the acceptance run. The shipping
+   configuration must clear 0.30 or the ruling itself is unworkable.
 2. **Station handover fixed.** M6.4's Gate 2 scenario, now passing: two
    trucks to one station, the second waits for the dwell to end and the
    occupant to leave, then arrives. No swap deadlock, no two-in-a-spur.
@@ -103,10 +127,13 @@ found, it is a defect to fix and name.
    extensions and waits recorded; 0 motor-false on all four; no
    deadlock refusal (or, if one occurs, it is named and honest).
 4. **The acceptance run.** Eight transports submitted back-to-back
-   across the ten stations, all four trucks working, run to completion
-   with no operator intervention: measure throughput (transports/min),
-   per-vehicle utilisation, total waiting time, arrival errors, and
-   0 motor-false. This is the milestone's headline number.
+   across the ten stations, the two ACTIVE trucks working them to
+   completion with no operator intervention, the two PARKED trucks
+   present, latched and correctly never assigned: measure throughput
+   (transports/min), per-vehicle utilisation, total waiting time,
+   arrival errors, 0 motor-false, and the RTF during it. This is the
+   milestone's headline number, and it is quoted WITH the two-driver
+   condition attached.
 5. **Degradation under loss.** Mid-acceptance, kill one vehicle: its
    task requeues, the remaining three finish everything; the fleet
    never assigns to the dead truck; the floor is not left locked.
@@ -130,8 +157,9 @@ found, it is a defect to fix and name.
 ## What Milestone 6 claims when this closes
 
 Four simulated forklifts, each with its own safety chain (virtual
-F-PLC, scanners, encoder cross-check), driven by a VDA 5050 fleet
+F-PLC, scanners, encoder cross-check), registered with a VDA 5050 fleet
 manager over MQTT with edge/node traffic reservation, completing
-transports over ten stations without operator intervention — with every
-claim traceable to a measured run in `m6/PROOF.md`, and every unfixed
-thing named there too.
+transports over ten stations without operator intervention — **two
+driving concurrently, because this machine renders sixteen lidars at
+RTF 0.19 and eight at 0.98, measured** — with every claim traceable to a
+run in `m6/PROOF.md`, and every unfixed thing named there too.
