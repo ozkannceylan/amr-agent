@@ -52,10 +52,21 @@ hiding it.
   document, and the operator resubmits. It adopts a truck still driving one
   of its `ft-` orders **by waiting** — a vehicle with something left to drive
   is not idle, so nothing is assigned to it and nothing is cancelled.
-- **`cancelOrder` exists in exactly one flow:** a vehicle that was lost comes
-  back holding an order whose task the fleet has already given to somebody
-  else. The M6.2 agent resumes a kept order on reconnect, so that race is
-  real and measured, not pretended away.
+- **`cancelOrder` exists in exactly two flows, and both are one sentence:**
+  the fleet has taken a task away from a truck that is still driving its
+  order. A vehicle that was lost and came back holding it (the M6.2 agent
+  resumes a kept order on reconnect, so that race is real and measured), and
+  a vehicle requeued out of a swap deadlock. Left uncancelled the second one
+  is stranded — never idle, never eligible, its node held for the rest of the
+  run — which is what M6.5's Gate 3 measured.
+- **A truck that cannot yield is asked to step aside.** Wait-die frees floor
+  *ahead* of a vehicle, so a cycle whose contested element is the ground
+  *under* one is unbreakable by yielding. The younger member is cancelled,
+  requeued and sent a one-node `ft-` order to a free neighbour — same
+  builder, same validation, same publish funnel as a leg. `step_aside_target`
+  is the whole choice and is pure; `ASIDE_MAX`, `ASIDE_S` and "no free
+  neighbour" are the three bounds, and the last of them is M6.5's named
+  refusal, unchanged.
 - **The operator names stations, never vehicles.** Which truck goes is the
   fleet's decision, made from the trucks' own reported positions over the
   vehicle's own route graph (`ipc/route.py`). There is deliberately no way to

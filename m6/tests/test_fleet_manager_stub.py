@@ -449,6 +449,7 @@ class Truck:
         self.last = ("", 0)
         self.errors = []
         self.seen = 0
+        self.seen_instant = 0
         self.row = manager.vehicles.setdefault(serial, fm._new_vehicle())
         self.row["connection"] = "ONLINE"
 
@@ -467,7 +468,21 @@ class Truck:
                 out.append(msg["orderId"])
         return out
 
+    def instants(self):
+        topic = "uagv/v2/amragent/{}/instantActions".format(self.serial)
+        return [m for t, m, _, _ in self.stub.published if t == topic]
+
     def take(self):
+        # THE CANCEL IS READ FIRST, in the order the wire delivered it:
+        # a truck that is handed a cancelOrder and a new order in the
+        # same pass has to let go before it can take the second, which
+        # is exactly what vda_orders.accept_order refuses to do the
+        # other way round ("an order is executing - cancelOrder first").
+        for msg in self.instants()[self.seen_instant:]:
+            for action in msg.get("actions") or []:
+                if action.get("actionType") == "cancelOrder":
+                    self.order, self.reached, self.last = None, 0, ("", 0)
+        self.seen_instant = len(self.instants())
         for msg in self.inbox()[self.seen:]:
             self._take(msg)
         self.seen = len(self.inbox())
@@ -566,7 +581,7 @@ def horizon_of(truck):
     return [n["nodeId"] for n in truck.horizon()]
 
 
-def head_on(manager, stub, now, to1="S4"):
+def head_on(manager, stub, now, to1="S4", to2="S4"):
     """The M6.3 jam, staged: f1 west of S1 and f2 east of it, both told
     to pick up at S1. f1's own dropoff decides whether it then drives
     back east through f2 (the jam, `to1="S4"`) or away west (the
@@ -580,7 +595,7 @@ def head_on(manager, stub, now, to1="S4"):
     f1 = Truck(manager, stub, "f1", WEST)
     f2 = Truck(manager, stub, "f2", EAST)
     submit(manager, "t-1", "S1", to1)
-    submit(manager, "t-2", "S1", "S4")
+    submit(manager, "t-2", "S1", to2)
     turn(manager, (f1, f2), now)          # f1 takes t-1: it is the nearer
     turn(manager, (f1, f2), now)          # f2 takes t-2, or what is left
     return f1, f2
@@ -736,7 +751,7 @@ def test_a_refused_extension_is_a_timing_answer_and_the_task_survives(
 
 
 # ---- 4. deadlock ----
-def deadlocked(manager, stub, now):
+def deadlocked(manager, stub, now, to2="S4"):
     """f1 stopped on S1 asking for the node east of it, f2 stopped on
     that node asking for S1. Nose to nose, each standing on exactly what
     the other needs.
@@ -745,7 +760,7 @@ def deadlocked(manager, stub, now):
     what the tests below want to look at before anything is done about
     it. Returns (f1, f2).
     """
-    f1, f2 = head_on(manager, stub, now)
+    f1, f2 = head_on(manager, stub, now, to2=to2)
     f1.drive()                                # f1 lands on S1
     turn(manager, (f1, f2), now)              # arrived, dwell starts
     manager.dwell_until["t-1"] = now - 1.0
@@ -756,17 +771,32 @@ def deadlocked(manager, stub, now):
     return f1, f2
 
 
-def test_a_swap_deadlock_is_named_and_never_pretended_resolved(floor):
-    """WAIT-DIE CANNOT BREAK THIS ONE AND THE FLEET SAYS SO.
+def boxed_in(manager, others=("f8", "f9")):
+    """Every free neighbour of f2's node taken by somebody else, so the
+    fleet has nowhere to step it aside to and must fall back on the
+    honest refusal. The two owners are ledger names, not vehicles: what
+    the choice reads is who owns the floor, and a serial that is not in
+    the registry proves it does not sneak a look at the registry."""
+    node = manager.floor.standing["f2"]
+    free = [n for n in sorted(manager.floor.graph[node])
+            if manager.floor.owner_of(n) is None]
+    for name, nbr in zip(others, free):
+        manager.floor.hold(name, [nbr])
+    return free
+
+
+def test_a_swap_deadlock_asks_the_younger_truck_to_step_aside(floor):
+    """WAIT-DIE CANNOT BREAK THIS ONE, SO THE FLEET MOVES A TRUCK.
 
     Once every truck in a cycle has stopped at the end of its base it
     holds exactly one element - the node under its own body, everything
     behind it having been released as it passed. So the contested
-    element is always GROUND UNDER A VEHICLE, and the youngest yielding
-    keeps precisely that and frees nothing at all. The cycle re-forms
-    next pass, and again, and again: a livelock dressed as a resolution.
-    The manager measures what the yield freed, and when it freed nothing
-    it refuses the younger task by name instead of claiming a fix.
+    element is GROUND UNDER A VEHICLE, and the youngest yielding keeps
+    precisely that and frees nothing at all. Naming it was M6.5's answer
+    and it left the floor jammed; this is the M6.5 fix-up's: the younger
+    truck is cancelled, requeued and sent a one-node order to a free
+    node next door, and the older one drives through the floor that
+    frees.
     """
     manager, stub = floor
     now = time.monotonic()
@@ -776,38 +806,212 @@ def test_a_swap_deadlock_is_named_and_never_pretended_resolved(floor):
     assert manager.floor.waiting_on("f1") == (0.0, -5.5)
     assert manager.floor.waiting_on("f2") == S1_XY
     assert set(manager.floor.find_cycle() or []) == {"f1", "f2"}
+    order_id = f2.order["orderId"]
 
     manager.floor.traffic_pass(now)
     doc = manager._status(now)
-    assert doc["traffic"]["blocked"], "the deadlock is nowhere on the screen"
-    said = doc["traffic"]["blocked"][-1]
-    assert said["vehicles"] == ["f1", "f2"] and said["task"] == "t-2"
-    assert "swap deadlock" in said["why"] and "has to be moved" in said["why"]
+
+    # NAMED, and named as a move rather than as a wall.
+    aside = doc["traffic"]["aside"]
+    assert aside, "the step-aside is nowhere on the operator's screen"
+    said = aside[-1]
+    assert said["vehicle"] == "f2" and said["for"] == ["f1"]
+    assert said["from"] == "(0.0,-5.5)" and said["to"] == "(0.0,5.7)"
+    assert said["task"] == "t-2"
+    assert doc["traffic"]["blocked"] == [], (
+        "a floor that is being cleared is not a BLOCKED floor")
     assert doc["traffic"]["yields"] == [], "a yield that freed nothing"
-    assert any("swap deadlock" in r["why"] for r in doc["refused"])
-    # The YOUNGER task is the one refused, and it goes back to the head
-    # of the queue rather than being lost.
+    assert any("step aside" in r["why"] for r in doc["refused"])
+
+    # The YOUNGER task is the one taken away, and it goes back to the
+    # head of the queue rather than being lost.
     assert manager.tasks[0]["task_id"] == "t-2"
     assert manager.tasks[0]["state"] == "QUEUED"
 
+    # AND THE ORDER IT WAS DRIVING IS CANCELLED. Without this the truck
+    # goes on executing an order the fleet no longer owns, never reports
+    # idle, and _idle_floor's adopted-truck exemption holds its node for
+    # ever - measured 2026-08-22, Gate 3.
+    assert manager.cancelled["f2"]["order_id"] == order_id
+    assert len(cancels(stub)) == 1
 
-def test_a_yield_that_frees_floor_is_logged_and_the_task_is_kept(floor):
-    """The other half of wait-die, which IS reachable: a hold can outrun
-    the base the vehicle was told about, because the ledger grants before
-    the extension is published and an extension can fail to land (the
-    wire drops, the truck refuses it). Floor the truck was never told
-    about is floor the fleet may take back, so here the youngest yields
-    for real - and keeps its task, its route and its submit time."""
+
+def test_a_swap_deadlock_with_nowhere_to_go_is_named_and_not_pretended(floor):
+    """The bound: no free neighbour is the honest floor, unchanged.
+
+    A fleet that could always move a truck would be claiming a floor
+    this one does not have. When every node next door belongs to
+    somebody else the answer is M6.5's - refuse the younger task by
+    name, on the screen, where an operator reads it and goes and moves a
+    truck - and the cancel still goes out, because the task has still
+    been taken away.
+    """
     manager, stub = floor
     now = time.monotonic()
     f1, f2 = deadlocked(manager, stub, now)
+    taken = boxed_in(manager)
+    assert taken, "the staging reserved nothing - this proves nothing"
+
+    manager.floor.traffic_pass(now)
+    doc = manager._status(now)
+
+    assert doc["traffic"]["aside"] == [], "moved a truck onto taken floor"
+    said = doc["traffic"]["blocked"][-1]
+    assert said["vehicles"] == ["f1", "f2"] and said["task"] == "t-2"
+    assert "swap deadlock" in said["why"]
+    assert "nowhere free next to it" in said["why"]
+    assert any("swap deadlock" in r["why"] for r in doc["refused"])
+    assert manager.tasks[0]["task_id"] == "t-2"
+    assert manager.tasks[0]["state"] == "QUEUED"
+    assert len(cancels(stub)) == 1
+
+
+def test_the_step_aside_target_is_the_nearest_free_node_off_the_others_route(
+        floor):
+    """The choice itself, asked without moving anything.
+
+    f2 stands on the dock node east of S1. Three nodes touch it: S1,
+    which is f1's own body; (3.0,-5.5), which is free but is the next
+    node of f1's route; and the central connector, which is neither.
+    Nearest wins - a step aside is a move OUT OF THE WAY, not a journey
+    - but floor the trucks it is blocking still have to drive is not out
+    of the way at all, so it goes last.
+    """
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = deadlocked(manager, stub, now)
+    assert manager.floor.standing["f2"] == EAST
+
+    # With f1 named, the node on f1's route is passed over.
+    assert manager.floor.step_aside_target("f2", ["f1"]) == (0.0, 5.65)
+    # With nobody named, nothing is on anybody's route and the nearest
+    # free neighbour wins: 3.00 m against the connector's 11.15 m.
+    assert manager.floor.step_aside_target("f2", []) == (3.0, -5.5)
+    # A node somebody else owns is never offered, whoever they are.
+    manager.floor.hold("f9", [(0.0, 5.65)])
+    assert manager.floor.step_aside_target("f2", ["f1"]) == (3.0, -5.5)
+    manager.floor.hold("f9", [(3.0, -5.5)])
+    assert manager.floor.step_aside_target("f2", ["f1"]) is None
+
+
+def test_a_truck_stepped_aside_too_often_stops_being_shuffled(floor):
+    """The other bound: a cap, so a jam the moves are not clearing is
+    named instead of turning into a shift of shunting.
+
+    The count is per vehicle and it is reset by PROGRESS - a leg that
+    actually arrives - not by the clock, because a truck that has been
+    moved three times and driven nowhere is the exact shape of a floor
+    the fleet cannot untangle.
+    """
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = deadlocked(manager, stub, now)
+    manager.floor.aside_count["f2"] = fl.ASIDE_MAX
+
+    manager.floor.traffic_pass(now)
+    doc = manager._status(now)
+
+    assert doc["traffic"]["aside"] == [], "shuffled past its own cap"
+    why = doc["traffic"]["blocked"][-1]["why"]
+    assert "swap deadlock" in why
+    assert "stepped aside {} times".format(fl.ASIDE_MAX) in why
+    assert manager.tasks[0]["task_id"] == "t-2"
+
+
+def test_a_staged_swap_deadlock_clears_and_both_transports_complete(floor):
+    """END TO END, and the only test here that asks for the whole thing.
+
+    The same nose-to-nose jam that ended M6.5's Gate 3 with 0 of 4
+    transports: f1 on S1 driving east, f2 standing on the node it needs
+    and wanting S1. The fleet cancels f2, requeues its task, moves it
+    one node onto the connector, and from there both transports finish
+    with no operator in it anywhere.
+    """
+    manager, stub = floor
+    now = time.monotonic()
+    # The two transports END at different stations on purpose. Sent to
+    # the same one, the first truck to arrive parks IN the spur and keeps
+    # it (floor._idle_floor exempts a truck parked in a station, because
+    # nothing else is ever routed there) - a real property of this floor,
+    # and one that would answer a question this test is not asking.
+    f1, f2 = deadlocked(manager, stub, now, to2="S3")
+
+    for step in range(40):
+        turn(manager, (f1, f2), now + step)
+        for truck in (f1, f2):
+            truck.drive()
+        if all(t["state"] == "DONE" for t in manager.tasks):
+            break
+    states = {t["task_id"]: t["state"] for t in manager.tasks}
+    assert states == {"t-1": "DONE", "t-2": "DONE"}, states
+    assert manager.floor.aside == {}, "a step-aside never finished"
+    assert manager.floor.asides[-1]["state"] == "done"
+
+
+NORTH = (0.0, 5.65)          # the main-aisle end of the central connector
+
+
+def crossing(manager, stub, now):
+    """The deadlock wait-die WAS designed for, and the one this fleet
+    can still resolve by yielding: two trucks whose routes cross at a
+    node NEITHER of them is standing on.
+
+    f1 stands on S1 with its leg 2 heading east through the junction;
+    f2 stands at the top of the central connector with the junction
+    reserved ahead of it and a base that stops under its own wheels. So
+    what f1 waits for is floor f2 has RESERVED and not floor f2 is
+    standing on, which is the whole difference between this and a swap.
+
+    Two pieces of staging, both of them things the fleet does to itself:
+    the junction is somebody else's for the turn f2 is assigned in, so
+    f2's leg 1 is granted its own node and no more; and the extension
+    that would have grown that base is published to a truck that never
+    reads it, which is exactly the state a dropped wire or a refused
+    update leaves behind (floor.retry_hold grants BEFORE the vehicle
+    confirms, and trf["released"] does not move until it does).
+    """
+    f1 = Truck(manager, stub, "f1", S1_XY)
+    f2 = Truck(manager, stub, "f2", NORTH)
+    submit(manager, "t-1", "S1", "S4")           # f1: east through EAST
+    submit(manager, "t-2", "S1", "S2")           # f2: south through EAST to S1
+    turn(manager, (f1, f2), now)                 # f1 takes t-1: it is on S1
+    f1.drive()
+    manager.floor.hold("f9", [EAST])
+    turn(manager, (f1, f2), now)            # f1 arrives+dwells, f2 takes t-2
+    manager.floor.release_all("f9")
+    # The ledger reaches the junction; the truck is never told, so its
+    # base stays one node long and it is parked at the end of it.
+    manager.floor.traffic_pass(now)
+    manager.dwell_until["t-1"] = now - 1.0
+    # ONLY f1 REPORTS FROM HERE. f2 reading its own extension is what
+    # would move trf["released"] on and take it off the end of its base;
+    # a truck that never read it is the state a dropped wire leaves.
+    f1.take().state(now)
+    manager._expire_dwells(now)                  # f1's leg 2, stopped on S1
+    f1.take()
+    return f1, f2
+
+
+def test_a_yield_that_frees_the_contested_floor_is_a_resolution(floor):
+    """The other half of wait-die, and it is still here.
+
+    A yield is a resolution when what it frees is what the other truck
+    was blocked on - the REACH case, where the loser gives up floor
+    AHEAD of itself. It keeps its task, its route and its submit time,
+    and the older truck drives on. Nothing is cancelled and nobody is
+    moved: a step-aside is what happens when this cannot work, not
+    instead of it.
+    """
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = crossing(manager, stub, now)
     younger = next(t for t in manager.tasks if t["task_id"] == "t-2")
     submitted = younger["submitted_ts"]
-    # An extension that was granted and never landed: the ledger holds
-    # one element more than the truck's base.
-    manager.floor.hold("f2", tr.route_elements([(0.0, -5.5), (3.0, -5.5)]))
-    manager.floor.hold("f2", tr.route_elements([(0.0, -5.5), S1_XY]))
-    assert len(manager.floor.held_by("f2")) == 3
+    assert manager.floor.standing["f2"] == NORTH, "f2 drove off the connector"
+    assert manager.floor.waiting_on("f1") == EAST
+    assert manager.floor.waiting_on("f2") == S1_XY
+    assert manager.floor.owner_of(EAST) == "f2", (
+        "the contested node is not reserved ahead of f2")
 
     manager.floor.traffic_pass(now)
     doc = manager._status(now)
@@ -816,6 +1020,9 @@ def test_a_yield_that_frees_floor_is_logged_and_the_task_is_kept(floor):
     assert gave["vehicle"] == "f2" and gave["with"] == ["f1"]
     assert gave["freed"] == 2 and gave["task"] == "t-2"
     assert doc["traffic"]["blocked"] == []
+    assert doc["traffic"]["aside"] == [], "a yield that worked moved a truck"
+    assert manager.floor.owner_of(EAST) is None, (
+        "the floor f1 was blocked on is still f2's")
     # THE TASK IS NOT LOST AND ITS AGE IS NOT RESTAMPED. Restamping is
     # the livelock: the oldest task in the cell would become the
     # youngest on the floor and yield to whoever it just gave way to.
@@ -960,7 +1167,7 @@ def test_no_traffic_grants_every_route_whole(open_floor):
                               "yielded": [], "bases": {"t-1": [2, 0],
                                                        "t-2": [2, 0]},
                               "stuck": {}, "yields": [], "blocked": [],
-                              "idle": []}
+                              "idle": [], "aside": []}
 
 
 def test_the_traffic_block_is_json_and_reads_like_a_floor(floor):

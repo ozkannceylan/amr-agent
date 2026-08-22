@@ -283,6 +283,7 @@ TRAFFIC = {
     "yields": [{"vehicle": "f1", "with": ["f2"], "freed": 2,
                 "task": "ft-1a2b3c4d", "ts": NOW}],
     "blocked": [],
+    "aside": [],
 }
 
 
@@ -312,6 +313,29 @@ def test_a_deadlock_the_fleet_cannot_break_is_shouted_not_hidden():
     text = cli.render(doc, NOW)
     assert "** BLOCKED: swap deadlock f1 <-> f2 - a vehicle has to be " \
         "moved **" in text
+
+
+def test_a_truck_the_fleet_moved_is_named_and_not_a_mystery_drive():
+    """The one order in this system with no task behind it.
+
+    A step-aside carries no taskId, no base and no assignment, so
+    without its own row an operator watching a truck leave the node it
+    had been standing on for a minute would find nothing on the screen
+    that explains it. The row names who it was moved for, which is the
+    question that would otherwise be asked out loud.
+    """
+    doc = dict(DOC, traffic=dict(TRAFFIC, aside=[
+        {"vehicle": "f3", "from": "(0.0,-5.5)", "to": "(0.0,5.7)",
+         "for": ["f2"], "task": "ft-1a2b3c4d", "state": "done", "ts": NOW}]))
+    text = cli.render(doc, NOW)
+    assert "step aside: f3 (0.0,-5.5) -> (0.0,5.7) to clear f2" in text
+    assert "(done)" not in text
+
+    moving = dict(DOC, traffic=dict(TRAFFIC, aside=[
+        {"vehicle": "f3", "from": "(0.0,-5.5)", "to": "(0.0,5.7)",
+         "for": ["f2"], "task": "ft-1a2b3c4d", "state": "cancelling",
+         "ts": NOW}]))
+    assert "(cancelling)" in _line(cli.render(moving, NOW), "  step aside")
 
 
 def test_a_fleet_running_without_traffic_says_so_on_the_screen():

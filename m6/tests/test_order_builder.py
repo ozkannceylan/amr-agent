@@ -28,8 +28,9 @@ sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "fleet")))
 
 import route                                        # noqa: E402
 import vda_orders as vo                             # noqa: E402
-from order_builder import (build_leg_order, leg2_start,   # noqa: E402
-                           leg_points)
+from order_builder import (ASIDE_ARRIVE_M,               # noqa: E402
+                           build_leg_order, build_step_aside_order,
+                           leg2_start, leg_points)
 from stations import STATIONS                       # noqa: E402
 
 
@@ -250,3 +251,53 @@ def test_the_router_never_revisits_a_node_so_the_ledger_may_key_on_one():
                 continue
             points = leg_points(leg2_start(a), b)
             assert len(set(points)) == len(points), (a, b)
+
+
+# ---- the step-aside order (M6.5 fix-up) ----
+def test_a_step_aside_order_is_one_released_node_the_door_accepts():
+    """The order the fleet sends a truck it has to move out of the way.
+
+    It is not a leg: there is no station, no dwell and no task behind
+    it - just the node next door - so it gets its own two lines in this
+    factory rather than a station id invented to fit build_leg_order.
+    What it is NOT is a second order path: the shape below is the same
+    shape validate_order takes from a leg, and the manager stamps,
+    validates and publishes it through the same funnel.
+    """
+    order = build_step_aside_order("ft-aside01", (0.0, -5.5), (3.0, -5.5))
+    assert vo.validate_order(order) == ""
+    assert order["orderId"] == "ft-aside01" and order["orderUpdateId"] == 0
+    assert order["edges"] == []
+    assert len(order["nodes"]) == 1
+    node = order["nodes"][0]
+    assert node["released"] and node["sequenceId"] == 0 and not node["actions"]
+    assert node["nodePosition"]["x"] == 3.0
+    assert node["nodePosition"]["y"] == -5.5
+    assert node["nodePosition"]["mapId"] == "warehouse"
+
+    # THE RADIUS IS THE SHORT-SPUR ONE, and for the short-spur reason: a
+    # vehicle cannot reach a point inside its own turning circle, and one
+    # node is not enough floor to straighten out on. What the fleet needs
+    # is the truck OFF the node it was standing on, which happens at the
+    # halfway mark; insisting on 0.25 m here would buy nothing and could
+    # leave the truck orbiting an order that never completes.
+    assert node["nodePosition"]["allowedDeviationXY"] == ASIDE_ARRIVE_M
+    assert ASIDE_ARRIVE_M == max(s["arrive_m"] for s in STATIONS.values())
+
+
+def test_a_step_aside_order_reads_back_as_the_polyline_it_names():
+    points, arrive_m, released, horizon = vo.released_route(
+        build_step_aside_order("ft-aside02", (0.0, -5.5), (0.0, 5.65)))
+    assert points == [(0.0, 5.65)]
+    assert arrive_m == ASIDE_ARRIVE_M
+    assert len(released) == 1 and horizon == []
+
+
+def test_every_graph_edge_can_be_a_step_aside():
+    """The input space is enumerable and small, so it is enumerated:
+    every node to every neighbour it has."""
+    graph = route.build_graph()
+    for node, neighbours in graph.items():
+        for nbr in neighbours:
+            order = build_step_aside_order("ft-x", node, nbr)
+            assert vo.validate_order(order) == "", (node, nbr)

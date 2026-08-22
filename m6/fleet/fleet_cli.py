@@ -237,6 +237,18 @@ def traffic_lines(doc):
                          "- it is still standing there".format(
                              entry.get("vehicle"), entry.get("freed"),
                              entry.get("node")))
+    for entry in _list(block, "aside"):
+        # A STEP-ASIDE IS THE ONE ORDER IN THIS SYSTEM WITH NO TASK
+        # BEHIND IT, so without this row an operator watching a truck
+        # leave its node would find nothing on the screen that explains
+        # it - no task, no base, no assignment. The sentence names who
+        # it was moved for.
+        if isinstance(entry, dict):
+            lines.append("  step aside: {} {} -> {} to clear {}{}".format(
+                entry.get("vehicle"), entry.get("from"), entry.get("to"),
+                ", ".join(entry.get("for") or []),
+                "" if entry.get("state") == "done"
+                else "   ({})".format(entry.get("state"))))
     for entry in _list(block, "blocked"):
         if isinstance(entry, dict):
             lines.append("  ** BLOCKED: {} **".format(entry.get("why")))

@@ -186,6 +186,11 @@ class FleetManager:
         self.last_status = 0.0
         self.last_shape = None
         self.last_wire_warn = 0.0
+        # The paho return code of the last publish _send_order made, for
+        # the callers that report a DROPPED message. It is not state
+        # anybody may read later: it is only ever true between that call
+        # and the caller's own next line.
+        self._last_rc = mqtt.MQTT_ERR_SUCCESS
         self.connected = False
         self.screen_said = False
         self.mq = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
@@ -492,9 +497,24 @@ class FleetManager:
             row = dict(veh, state_age_s=age)
             if row["executing_order"] is None:
                 held = self._task_of(serial)
+                aside = self.floor.aside.get(serial)
                 if held is not None:
                     row["executing_order"] = (held.get("order_id")
                                               or held["task_id"])
+                elif aside is not None:
+                    # AND A STEP-ASIDE IS NOT IDLE EITHER, for exactly
+                    # the dwell's reason one line up. A truck the fleet
+                    # is moving out of the way has no task, so between
+                    # the cancel landing and its own next state it reads
+                    # as idle - and a transport lands on it, which the
+                    # vehicle's door then refuses because it is driving
+                    # the move ("an order is executing - cancelOrder
+                    # first"). The fleet's own book knows better: it is
+                    # holding an order of ours, and the document says so
+                    # by its id rather than showing an empty cell under
+                    # a truck that is visibly driving.
+                    row["executing_order"] = (aside.get("order_id")
+                                              or "step-aside")
             view[serial] = row
         return view
 
@@ -613,19 +633,99 @@ class FleetManager:
         if order is None:
             self._refuse_order(task, serial, leg, "no route")
             return False
-        topic = vm.topic(serial, "order")
-        # M1 s.3: headerId counts what went out ON THIS TOPIC and
-        # serialNumber names the vehicle the topic addresses - the
-        # target's id, not the manager's. The manager has no serial.
-        order.update(self.counters.header(topic, serial))
-        reason = vo.validate_order(order)
+        reason, sent = self._send_order(serial, order)
         if reason:
             self._refuse_order(task, serial, leg, reason)
             return False
-        info = self.mq.publish(topic, json.dumps(order), qos=0)
-        if info.rc != mqtt.MQTT_ERR_SUCCESS:
-            self._wire_failed(leg, task, serial, info.rc)
+        if not sent:
+            self._wire_failed(leg, task, serial, self._last_rc)
             return False
+        return True
+
+    def _send_order(self, serial, order):
+        """Stamp, validate, publish. (reason, went out) - THE funnel.
+
+        Every order this fleet has ever sent goes through these six
+        lines: a leg, a base extension and a step-aside all differ in
+        what they ASK for and in what a failure means, and in nothing
+        else. They were three copies of this until the step-aside made
+        it four, which is one copy too many for a function whose whole
+        job is that the bytes on the wire are the bytes that were
+        validated.
+
+        `reason` non-empty is our own door refusing the order and is a
+        bug in whatever built it; `reason` empty with `False` is the
+        wire being down, which fixes itself. The callers answer those
+        two very differently, so they are two returns and not one.
+
+        M1 s.3: headerId counts what went out ON THIS TOPIC and
+        serialNumber names the vehicle the topic addresses - the
+        target's id, not the manager's. The manager has no serial.
+        """
+        topic = vm.topic(serial, "order")
+        order.update(self.counters.header(topic, serial))
+        reason = vo.validate_order(order)
+        if reason:
+            return reason, False
+        info = self.mq.publish(topic, json.dumps(order), qos=0)
+        self._last_rc = info.rc
+        return "", info.rc == mqtt.MQTT_ERR_SUCCESS
+
+    def _publish_aside(self, serial, order):
+        """The floor is moving a truck out of the way. True when it went.
+
+        NOT A REFUSAL AND NOT A REQUEUE, whichever way it fails: there is
+        no task behind a step-aside to punish. An order our own door will
+        not take is a bug and is loud; a wire that is down is next pass's
+        problem, and floor._pump_aside gives the whole move up on its own
+        clock if the wire never comes back.
+        """
+        reason, sent = self._send_order(serial, order)
+        if reason:
+            self.log.error("REFUSING to publish the step-aside of %s: %s",
+                           serial, reason)
+            return False
+        if not sent:
+            self.log.warning(
+                "the step-aside of %s was not published (paho rc %s) - a "
+                "qos 0 publish made off the wire is DROPPED; the next "
+                "pass asks again", serial, self._last_rc)
+        return sent
+
+    def _abandon_order(self, serial, order_id, why):
+        """The fleet has taken a task off a truck that is still driving
+        its order. Stop the truck: the alternative is measured.
+
+        M6.5's Gate 3 requeued a task out from under f2 and left f2
+        driving the order it had just lost. Nothing then brings that
+        vehicle back: `executing_order` is not None, so fleet_core will
+        not call it idle and it is never assigned again; and
+        floor._idle_floor will not age a vehicle executing an order the
+        fleet does not own - an exemption written for a RESTARTED
+        manager's adopted truck, which this is not - so its node stayed
+        held for the rest of the run. The truck was stranded by the
+        fleet's own bookkeeping, and the corridor with it.
+
+        cancelOrder is the only lever this fleet has and it already has
+        a chase behind it: the entry below is the same shape
+        `_returned` writes, so `_chase_cancel` retries it, caps the
+        retries and names a truck that never lets go. A cancel that
+        cannot even be published leaves no entry - there is nothing to
+        chase and the floor's own timeout is what answers.
+        """
+        if not order_id:
+            return False
+        if not self._instant(serial, "cancelOrder"):
+            self.log.error(
+                "%s was taken off %s and the cancelOrder could not be "
+                "published - it may go on driving an order no task owns",
+                serial, order_id)
+            return False
+        self.cancelled[serial] = {"order_id": order_id, "first": None,
+                                  "last_sent": None, "tries": 0}
+        self.log.warning(
+            "%s is cancelled on %s - %s. It is eligible again the moment "
+            "its own state stops showing that order", serial, order_id, why)
         return True
 
     def _wire_failed(self, leg, task, serial, rc):
@@ -731,16 +831,13 @@ class FleetManager:
                            "graph answered differently than it did when "
                            "the leg went out", task["order_id"])
             return False
-        topic = vm.topic(serial, "order")
-        order.update(self.counters.header(topic, serial))
-        reason = vo.validate_order(order)
+        reason, sent = self._send_order(serial, order)
         if reason:
             self.log.error("REFUSING to extend %s on %s: %s",
                            task["order_id"], serial, reason)
             return False
-        info = self.mq.publish(topic, json.dumps(order), qos=0)
-        if info.rc != mqtt.MQTT_ERR_SUCCESS:
-            self._wire_failed("extension", task, serial, info.rc)
+        if not sent:
+            self._wire_failed("extension", task, serial, self._last_rc)
             return False
         horizon = len(task["traffic"]["points"]) - released
         self.log.info("%s: base extended to %d released + %d horizon as "
@@ -817,6 +914,12 @@ class FleetManager:
              # deliberately reduced to counts: they change every time a
              # truck passes a node, which is real progress but not worth
              # a retained republish of its own.
+             # A STEP-ASIDE IS A DISCRETE FACT and each of its
+             # three moments is one: an operator watching a truck being
+             # moved must not wait out the 2 s tick to see the phase
+             # change.
+             "a": [[a["vehicle"], a["state"]]
+                   for a in doc["traffic"]["aside"]],
              "f": [doc["traffic"]["enabled"],
                    {k: len(v) for k, v in doc["traffic"]["holds"].items()},
                    doc["traffic"]["waiting"], doc["traffic"]["yielded"],

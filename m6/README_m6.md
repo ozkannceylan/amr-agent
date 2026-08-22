@@ -532,12 +532,41 @@ states — and therefore has **no tasks**: the operator resubmits. A truck still
 driving one of its `ft-` legs is simply not idle, so the restarted manager
 adopts it **by waiting** and never cancels anything at startup.
 
-**`cancelOrder` exists in exactly one flow:** a vehicle that was lost comes
-back holding an order whose task the fleet has already given to somebody else.
-The M6.2 agent *resumes* a kept order on reconnect, so the returning truck may
-drive for the seconds the cancel takes to land. That window is real, it is
-logged as it happens, and PROOF.md's Gate 4 measures it rather than pretending
-it away.
+**`cancelOrder` exists in exactly two flows, and both are the same sentence:
+the fleet has taken a task away from a truck that is still driving its
+order.** The first is a vehicle that was *lost* and comes back holding an
+order somebody else now owns — the M6.2 agent *resumes* a kept order on
+reconnect, so the returning truck may drive for the seconds the cancel takes
+to land, and PROOF.md's M6.3 Gate 4 measures that window rather than
+pretending it away. The second joined at M6.5: a truck **requeued out of a
+swap deadlock**. Without a cancel it goes on driving an order no task owns,
+never reports idle, and `_idle_floor` will not age a vehicle executing an
+order the fleet does not own — so its node stays held for the rest of the
+run. That is not a hypothesis: it is what M6.5's Gate 3 measured, and the
+cancel is the truck's path back to eligibility.
+
+**A truck that cannot yield is asked to STEP ASIDE.** Wait-die breaks a
+deadlock by making the youngest task give up floor — which works when what it
+gives up is floor *ahead* of it, and does nothing at all when the contested
+element is the **ground under a vehicle**. M6.5's Gate 3 measured both shapes
+in one run: one `UNRESOLVABLE` refusal, and the same line logged **3,180
+times at 10 Hz for five minutes** while a yield freed four elements and none
+of them was the one the blocked truck wanted. So the fleet now moves a truck:
+the younger cycle member is cancelled, its task requeued to the head, and it
+is sent a **one-node order** to a free node next door — `ft-`-prefixed, built
+by `order_builder`, validated by the vehicle's own door and published through
+the same funnel as any leg.
+
+The choice of node is pure and is tested on its own
+(`floor.step_aside_target`): a graph **neighbour** of the truck's own node,
+whose node *and* whose edge are free, preferring floor that is **not on the
+route of the trucks it is blocking**, then **not a spur junction**, then the
+**nearest**. It is bounded at both ends — **no free neighbour** falls back to
+M6.5's named refusal, which is the honest floor; **`ASIDE_MAX` (3)** moves by
+one truck without an arrival in between stops the shuffling and names it; and
+a move that has not finished in `ASIDE_S` (60 s) is given up and said out
+loud. It is never a mystery drive: the traffic block carries an `aside` row
+and the CLI prints `step aside: f3 (0.0,-5.5) -> (0.0,5.7) to clear f2`.
 
 **Losing the fleet degrades, it does not endanger.** Kill the manager and
 every truck keeps its current order, the on-board guards keep guarding, the

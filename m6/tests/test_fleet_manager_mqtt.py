@@ -867,17 +867,19 @@ def test_no_traffic_reproduces_the_jam_and_the_document_says_so(rig):
                                                  ["nodes"]), 0],
                                   "t-jam": [len(order["nodes"]), 0]},
                               "stuck": {}, "yields": [], "blocked": [],
-                              "idle": []}
+                              "idle": [], "aside": []}
 
 
-def test_a_swap_deadlock_is_named_on_the_operators_screen(rig):
+def test_a_swap_deadlock_moves_a_truck_and_says_so_on_the_screen(rig):
     """Two trucks nose to nose, each standing on the floor the other
     needs. Wait-die cannot break that - the youngest yields the ground
-    under itself, which frees nothing - and the fleet says so instead of
-    claiming a fix: the younger task is refused by name, requeued, and
-    the deadlock is in the traffic block where an operator reads it."""
+    under itself, which frees nothing - so the fleet CANCELS the younger
+    truck, requeues its task and sends it one node sideways, over the
+    real wire and through the vehicle's own door. The move is on the
+    operator's screen by name, because it is the one order in this
+    system with no task behind it."""
     f1 = rig.fake("f1", S1)
-    rig.fake("f2", DOCK_MID)
+    f2 = rig.fake("f2", DOCK_MID)
     rig.manager()
     wait_for(lambda: ready(rig, ("f1", "f2")), 15.0, "both trucks ready", rig)
     rig.submit("t-east", "S1", "S4")     # f1 picks up at S1, then drives east
@@ -889,13 +891,33 @@ def test_a_swap_deadlock_is_named_on_the_operators_screen(rig):
     wait_for(lambda: len(rig.legs_for("f1")) == 2, 15.0,
              "f1's leg 2, which drives east into f2", rig)
 
-    doc = wait_for(lambda: when(rig, lambda d: d["traffic"]["blocked"]),
-                   15.0, "the deadlock named in the document", rig)
-    said = doc["traffic"]["blocked"][-1]
-    assert said["vehicles"] == ["f1", "f2"]
-    assert "swap deadlock" in said["why"] and "has to be moved" in said["why"]
-    assert doc["traffic"]["yields"] == [], \
-        "a yield was claimed for a resolve that freed nothing"
-    assert any("swap deadlock" in r["why"] for r in doc["refused"])
+    doc = wait_for(lambda: when(rig, lambda d: d["traffic"]["aside"]),
+                   15.0, "the step-aside named in the document", rig)
+    said = doc["traffic"]["aside"][-1]
+    assert said["vehicle"] == "f2" and said["for"] == ["f1"]
+    assert said["from"] == "(0.0,-5.5)" and said["to"] == "(0.0,5.7)"
+    assert said["task"] == "t-west"
+    assert doc["traffic"]["blocked"] == [], (
+        "a floor that is being cleared was called BLOCKED")
+    assert doc["traffic"]["yields"] == [], (
+        "a yield was claimed for a resolve that freed nothing")
+    assert any("step aside" in r["why"] for r in doc["refused"])
     assert task_named(doc, "t-west")["state"] == "QUEUED"
     assert task_named(doc, "t-west")["assignee"] is None
+
+    # THE CANCEL WENT OUT ON THE REAL WIRE, and it is what gives the
+    # truck a path back: without it f2 goes on driving an order no task
+    # owns, never reports idle, and holds its node for the rest of the
+    # run (M6.5, Gate 3).
+    assert wait_for(lambda: f2.cancels, 15.0, "f2's cancelOrder", rig)
+    # And the one-node order follows it, through the vehicle's own door.
+    aside = wait_for(
+        lambda: [m for _ts, m in rig.orders_for("f2")
+                 if len(m["nodes"]) == 1
+                 and m["nodes"][0]["nodeId"] == "aside"],
+        15.0, "the step-aside order", rig)[-1]
+    assert aside["orderId"].startswith("ft-")
+    assert aside["nodes"][0]["nodePosition"]["x"] == 0.0
+    assert aside["nodes"][0]["nodePosition"]["y"] == 5.65
+    assert wait_for(lambda: f2.order_id == aside["orderId"], 15.0,
+                    "f2 taking the step-aside order", rig)

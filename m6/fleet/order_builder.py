@@ -50,6 +50,54 @@ import route                                        # noqa: E402
 from stations import STATIONS                       # noqa: E402
 
 
+# THE STEP-ASIDE'S ARRIVAL RADIUS, AND WHY IT IS THE LARGEST ONE HERE.
+# stations.py derives its radii from spur length: a vehicle cannot reach
+# a point inside its own turning circle, so the stations with 0.85-1.1 m
+# of spur declare 0.80 m and the ones with room declare 0.25 m. A step
+# aside is ONE GRAPH EDGE long - between 0.40 m and 11.15 m on this
+# floor, most of them about 3 m - and it is asked for while the truck is
+# very likely pointing the wrong way, so it has less room to straighten
+# out in than the shortest spur has. It also does not need the
+# precision: what the fleet wants is the truck OFF the node it was
+# standing on, which the ledger sees at the halfway mark, and an order
+# that never completes because the truck is orbiting its target is the
+# exact failure this whole mechanism exists to avoid. Written as the
+# largest radius the station table declares, so a floor whose spurs get
+# tighter takes this with it.
+ASIDE_ARRIVE_M = max(s["arrive_m"] for s in STATIONS.values())
+
+
+def build_step_aside_order(order_id, start_xy, node_xy):
+    """A one-node order: drive to the node next door and stop.
+
+    THE FLEET HAS EXACTLY ONE ORDER FACTORY AND THIS IS THE SECOND
+    THING IT MAKES. A step aside is not a leg - there is no station, no
+    dwell and no task behind it - so it does not fit build_leg_order,
+    and the alternative to these ten lines was inventing a station id to
+    smuggle a node through the station table. What is NOT invented is a
+    second order path: the shape below is the shape validate_order
+    takes, and fleet_manager stamps, validates and publishes it through
+    the same funnel a leg goes through.
+
+    ONE NODE AND NO EDGES IS A LEGAL ORDER. validate_order wants
+    len(edges) == len(nodes) - 1, which is zero here, and a released
+    first node, which this is; vda_orders.released_route hands nav
+    [pose] + [node], a drivable two-point polyline, because the agent
+    prepends the vehicle's own position. `start_xy` is not in the order
+    for that reason - it is here so the caller's intent reads as a move
+    FROM somewhere - and it is deliberately not checked against the
+    graph: the floor picked a neighbour of the truck's own node, and
+    this file does not get a second opinion about where the truck is.
+    """
+    x, y = float(node_xy[0]), float(node_xy[1])
+    return {"orderId": order_id, "orderUpdateId": 0, "edges": [],
+            "nodes": [{"nodeId": "aside", "sequenceId": 0, "released": True,
+                       "actions": [],
+                       "nodePosition": {"x": x, "y": y, "mapId": "warehouse",
+                                        "allowedDeviationXY":
+                                            float(ASIDE_ARRIVE_M)}}]}
+
+
 def leg_points(start_xy, station_id):
     """The graph points one leg's order names, in travel order, or None.
 
