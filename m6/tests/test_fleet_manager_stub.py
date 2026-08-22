@@ -47,6 +47,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "fleet")))
 
 import fleet_manager as fm                          # noqa: E402
+import floor as fl                                  # noqa: E402
 import traffic as tr                                # noqa: E402
 import vda_orders as vo                             # noqa: E402
 from order_builder import leg_points                # noqa: E402
@@ -549,9 +550,9 @@ def turn(manager, trucks, now):
     found it, exactly as it does on the wire."""
     for truck in trucks:
         truck.take().state(now)
-    manager.stuck.clear()
+    manager.floor.stuck.clear()
     manager._expire_dwells(now)
-    manager._traffic_pass(now)
+    manager.floor.traffic_pass(now)
     manager._assign(now)
     for truck in trucks:
         truck.take()
@@ -640,7 +641,7 @@ def test_a_second_vehicle_is_held_at_a_node_and_never_given_a_zero_base(
     queued = [t for t in manager.tasks if t["state"] == "QUEUED"]
     assert [t["task_id"] for t in queued] == ["t-2"]
     # ...and it is said once, not ten times a second.
-    assert manager.said_blocked["f2"].startswith("f2 leg1")
+    assert manager.floor.said_blocked["f2"].startswith("f2 leg1")
 
 
 def test_the_base_grows_by_one_update_id_when_the_corridor_drains(floor):
@@ -692,13 +693,13 @@ def test_an_extension_waits_for_the_vehicle_to_confirm_the_last_one(floor):
     f1, f2 = drains(manager, stub, now)
 
     f1.state(now)                                 # f1 is off S1
-    manager._traffic_pass(now)                    # the extension goes out
+    manager.floor.traffic_pass(now)                    # the extension goes out
     assert len(f2.inbox()) == 2
     trf = next(t for t in manager.tasks
                if t["task_id"] == "t-2")["traffic"]
     assert trf["pending"] == (1, 2)
     for _ in range(5):                            # f2 has not answered yet
-        manager._traffic_pass(now)
+        manager.floor.traffic_pass(now)
     assert len(f2.inbox()) == 2, "a second update before the first landed"
 
     f2.take().state(now)                          # ...now it has
@@ -719,7 +720,7 @@ def test_a_refused_extension_is_a_timing_answer_and_the_task_survives(
     task = next(t for t in manager.tasks if t["task_id"] == "t-2")
 
     f1.state(now)                             # f1 is off S1
-    manager._traffic_pass(now)
+    manager.floor.traffic_pass(now)
     assert task["traffic"]["pending"] == (1, 2)
     f2.seen = len(f2.inbox())                 # the update never landed
     f2.refuse_next_update().state(now)
@@ -729,7 +730,7 @@ def test_a_refused_extension_is_a_timing_answer_and_the_task_survives(
     assert task["traffic"]["pending"] is None
     assert task["traffic"]["ext_refused"] == 1
     assert manager.vehicles["f2"]["not_eligible"] is False
-    manager._traffic_pass(now)                # ...and it is asked again
+    manager.floor.traffic_pass(now)                # ...and it is asked again
     assert len(f2.inbox()) == 3
     assert f2.inbox()[-1]["orderUpdateId"] == 1
 
@@ -776,7 +777,7 @@ def test_a_swap_deadlock_is_named_and_never_pretended_resolved(floor):
     assert manager.floor.waiting_on("f2") == S1_XY
     assert set(manager.floor.find_cycle() or []) == {"f1", "f2"}
 
-    manager._traffic_pass(now)
+    manager.floor.traffic_pass(now)
     doc = manager._status(now)
     assert doc["traffic"]["blocked"], "the deadlock is nowhere on the screen"
     said = doc["traffic"]["blocked"][-1]
@@ -808,7 +809,7 @@ def test_a_yield_that_frees_floor_is_logged_and_the_task_is_kept(floor):
     manager.floor.hold("f2", tr.route_elements([(0.0, -5.5), S1_XY]))
     assert len(manager.floor.held_by("f2")) == 3
 
-    manager._traffic_pass(now)
+    manager.floor.traffic_pass(now)
     doc = manager._status(now)
     assert doc["traffic"]["yields"], "nothing was recorded as a yield"
     gave = doc["traffic"]["yields"][-1]
@@ -833,9 +834,9 @@ def test_the_retry_pass_walks_the_tasks_oldest_first(floor):
     now = time.monotonic()
     f1, f2 = head_on(manager, stub, now)
     order = []
-    manager._retry_hold = lambda task: order.append(task["task_id"])
+    manager.floor.retry_hold = lambda task: order.append(task["task_id"])
     manager.tasks.sort(key=lambda t: t["task_id"], reverse=True)
-    manager._traffic_pass(now)
+    manager.floor.traffic_pass(now)
     assert order == ["t-1", "t-2"], "the younger task was served first"
 
     # A requeue puts a task back at the HEAD of the queue and leaves its
@@ -863,7 +864,7 @@ def test_a_lost_truck_frees_the_corridor_and_keeps_the_node_under_it(floor):
     manager._on_connection("f1", f1.row, {"connectionState":
                                           "CONNECTIONBROKEN"})
     assert manager.floor.held_by("f1") == []
-    assert manager.parked["f1"] == WEST
+    assert manager.floor.parked["f1"] == WEST
     assert manager.floor.owner_of(WEST) == "parked:f1"
     assert manager.tasks[0]["state"] == "QUEUED"
     doc = manager._status(now)
@@ -879,7 +880,7 @@ def test_a_lost_truck_frees_the_corridor_and_keeps_the_node_under_it(floor):
     manager._on_connection("f1", f1.row, {"connectionState": "ONLINE"})
     f1.order = None
     f1.state(now)
-    assert "f1" not in manager.parked
+    assert "f1" not in manager.floor.parked
     assert manager.floor.owner_of(WEST) == "f1"
 
 
@@ -900,7 +901,7 @@ def test_set_standing_runs_from_every_state_including_a_restart(floor):
     adopted.order = {"orderId": "o-somebody-elses", "orderUpdateId": 0,
                      "nodes": [], "edges": []}
     adopted.state(now)                 # the first state a restart ever sees
-    assert manager.standing["f9"] == EAST
+    assert manager.floor.standing["f9"] == EAST
     assert manager.floor.owner_of(EAST) == "f9"
     assert manager.floor.held_by("f9") == [EAST]
 
@@ -926,7 +927,7 @@ def test_a_hold_asks_only_for_the_route_ahead_of_the_truck(floor):
 
     f1.drive()                               # to the end of its base: S1
     turn(manager, (f1,), now)
-    index, ahead = manager._remaining(trf)
+    index, ahead = manager.floor.remaining(trf)
     assert ahead == [S1_XY], "the hold would have reached back down the aisle"
     assert index == len(trf["hold_points"]) - 1
     assert manager.floor.held_by("f1") == [S1_XY]
@@ -979,10 +980,10 @@ def test_the_traffic_block_is_json_and_reads_like_a_floor(floor):
     assert all("traffic" not in t for t in doc["tasks"])
     # An edge is one piece of floor whichever way you drive it, and it
     # prints as its two ends.
-    assert fm._element_str(tr.edge((1.0, 0.0), (2.0, 0.0))) == \
-        fm._element_str(tr.edge((2.0, 0.0), (1.0, 0.0))) == \
+    assert fl._element_str(tr.edge((1.0, 0.0), (2.0, 0.0))) == \
+        fl._element_str(tr.edge((2.0, 0.0), (1.0, 0.0))) == \
         "(1.0,0.0)-(2.0,0.0)"
-    assert fm._element_str((1.0, 0.0)) == "(1.0,0.0)"
+    assert fl._element_str((1.0, 0.0)) == "(1.0,0.0)"
 
 
 def test_the_floor_is_part_of_the_documents_shape(floor):
@@ -995,7 +996,7 @@ def test_the_floor_is_part_of_the_documents_shape(floor):
     f1, f2 = drains(manager, stub, now)
     before = manager._shape(manager._status(now))
     f1.state(now)                          # f1 is off S1
-    manager._traffic_pass(now)             # ...so f2's base grows
+    manager.floor.traffic_pass(now)             # ...so f2's base grows
     assert manager._shape(manager._status(now)) != before
 
 
@@ -1052,13 +1053,13 @@ def test_a_leg_two_that_cannot_start_is_on_the_screen_too(floor):
     real_hold = manager.floor.hold
     manager.floor.hold = lambda v, els: [] if v == "f1" else real_hold(v, els)
     manager.dwell_until["t-1"] = now - 1.0
-    manager.stuck.clear()                     # drain()'s one clear, up front
+    manager.floor.stuck.clear()               # drain()'s one clear, up front
     manager._expire_dwells(now)               # ...leg 2 finds no floor
     manager.floor.hold = real_hold
 
     assert len(f1.legs()) == legs_before, "leg 2 went out on a grant of nothing"
     assert manager.tasks[0]["state"] == "DWELL"
-    assert "cannot start leg2 of t-1 to S4" in manager.stuck["f1"]
+    assert "cannot start leg2 of t-1 to S4" in manager.floor.stuck["f1"]
     # ...and the assignment that follows it in the same drain leaves it
     # alone. This is the whole regression.
     manager._assign(now)
@@ -1107,7 +1108,7 @@ def test_a_state_that_predates_the_leg_may_not_free_the_floor_it_holds(
     stale_state(f1, now)                  # published before it accepted
     assert manager.floor.held_by("f1") == granted, \
         "a state that predates the leg freed the corridor under it"
-    assert manager.standing["f1"] == WEST
+    assert manager.floor.standing["f1"] == WEST
     turn(manager, (f1,), now)
     assert manager.floor.held_by("f1") == granted
 
@@ -1164,7 +1165,7 @@ def test_a_base_the_ledger_stopped_backing_is_re_claimed_and_shouted(
     manager.log.setLevel(logging.ERROR)
     try:
         for _ in range(20):
-            manager._traffic_pass(now)
+            manager.floor.traffic_pass(now)
     finally:
         manager.log.removeHandler(catcher)
 
@@ -1206,8 +1207,8 @@ def roll(manager, trucks, now):
     for truck in trucks:
         truck.drive()
     turn(manager, trucks, now)
-    assert manager.blocked == [], (
-        "a swap deadlock was detected: {}".format(manager.blocked))
+    assert manager.floor.blocked == [], (
+        "a swap deadlock was detected: {}".format(manager.floor.blocked))
 
 
 def test_a_dwelling_truck_keeps_the_spur_junction_it_came_in_by(floor):
@@ -1257,7 +1258,7 @@ def test_a_dwelling_truck_keeps_the_spur_junction_it_came_in_by(floor):
     assert manager.tasks[1]["state"] == "DWELL", (
         "the second truck never got the station: {}".format(
             manager.tasks[1]["state"]))
-    assert manager.standing["f1"] == S4_XY
+    assert manager.floor.standing["f1"] == S4_XY
     assert manager.refused == []
 
 
@@ -1276,8 +1277,8 @@ def test_an_aisle_station_keeps_nothing_it_does_not_need(floor):
     turn(manager, (f1,), now)
     assert manager.tasks[0]["state"] == "DWELL"
     assert manager.floor.held_by("f1") == [S1_XY]
-    assert manager._spur_entry(S1_XY) is None
-    assert manager._spur_entry(S4_XY) == S4_ENTRY
+    assert manager.floor.spur_entry(S1_XY) is None
+    assert manager.floor.spur_entry(S4_XY) == S4_ENTRY
 
 
 # ---- 9. the idle hold has a clock on it (M6.5) ----
@@ -1292,10 +1293,10 @@ def test_an_idle_trucks_hold_is_given_back_after_the_timeout(floor):
     now = time.monotonic()
     f1 = Truck(manager, stub, "f1", EAST)
     f1.state(now)
-    manager._traffic_pass(now)
+    manager.floor.traffic_pass(now)
     assert manager.floor.owner_of(EAST) == "f1"
 
-    manager._traffic_pass(now + fm.IDLE_HOLD_S - 0.1)
+    manager.floor.traffic_pass(now + fl.IDLE_HOLD_S - 0.1)
     assert manager.floor.owner_of(EAST) == "f1", "the clock ran early"
 
     catcher = Catcher()
@@ -1303,8 +1304,8 @@ def test_an_idle_trucks_hold_is_given_back_after_the_timeout(floor):
     manager.log.setLevel(logging.WARNING)
     try:
         for i in range(20):
-            manager._traffic_pass(now + fm.IDLE_HOLD_S + i)
-            f1.state(now + fm.IDLE_HOLD_S + i)   # ...and it keeps reporting
+            manager.floor.traffic_pass(now + fl.IDLE_HOLD_S + i)
+            f1.state(now + fl.IDLE_HOLD_S + i)   # ...and it keeps reporting
     finally:
         manager.log.removeHandler(catcher)
 
@@ -1337,8 +1338,8 @@ def test_a_truck_parked_in_a_station_spur_keeps_its_node_forever(floor):
     f2.state(now)
     assert manager.floor.owner_of(S4_XY) == "f2"
     for i in range(5):
-        later = now + fm.IDLE_HOLD_S * (i + 1)
-        manager._traffic_pass(later)
+        later = now + fl.IDLE_HOLD_S * (i + 1)
+        manager.floor.traffic_pass(later)
         f2.state(later)
     assert manager.floor.owner_of(S4_XY) == "f2"
     assert manager._status(now)["traffic"]["idle"] == []
@@ -1356,14 +1357,14 @@ def test_a_dwelling_truck_is_not_an_idle_one(floor):
     assert manager.tasks[0]["state"] == "DWELL"
 
     for i in range(5):
-        later = now + fm.IDLE_HOLD_S * (i + 1)
-        manager._traffic_pass(later)
+        later = now + fl.IDLE_HOLD_S * (i + 1)
+        manager.floor.traffic_pass(later)
         for truck in (f1, f2):
             truck.take().state(later)
     assert manager.tasks[0]["state"] == "DWELL"
     assert manager.floor.held_by("f2") == [
         S4_ENTRY, tr.edge(S4_ENTRY, S4_XY), S4_XY]
-    assert "f2" not in manager.idle_hold
+    assert "f2" not in manager.floor.idle_hold
     assert manager._status(now)["traffic"]["idle"] == []
 
 
@@ -1384,7 +1385,7 @@ def test_a_hulk_that_returns_somewhere_else_takes_its_pin_with_it(floor):
 
     manager._on_connection("f1", f1.row,
                            {"connectionState": "CONNECTIONBROKEN"})
-    assert manager.parked["f1"] == WEST
+    assert manager.floor.parked["f1"] == WEST
     assert manager.floor.owner_of(WEST) == "parked:f1"
 
     # It comes back rolled one node west, still holding the order the
@@ -1397,7 +1398,7 @@ def test_a_hulk_that_returns_somewhere_else_takes_its_pin_with_it(floor):
 
     assert manager.vehicles["f1"]["not_eligible"] is True, \
         "the pin has to move BEFORE eligibility is re-earned"
-    assert manager.parked["f1"] == (-9.8, -5.5)
+    assert manager.floor.parked["f1"] == (-9.8, -5.5)
     assert manager.floor.owner_of((-9.8, -5.5)) == "parked:f1"
     assert manager.floor.owner_of(WEST) is None, \
         "the fleet is still routing around floor the truck has left"
@@ -1410,7 +1411,7 @@ def test_a_hulk_that_returns_somewhere_else_takes_its_pin_with_it(floor):
     f2.state(now)
     f1.xy = (-7.4, -5.5)
     f1.state(now)
-    assert "f1" not in manager.parked
+    assert "f1" not in manager.floor.parked
     assert manager.floor.owner_of((-7.4, -5.5)) == "f2"
 
 
@@ -1461,7 +1462,7 @@ def test_leg_two_out_of_a_spur_frees_nothing_under_the_truck(floor):
         f2.xy = S4_XY                             # it has NOT moved yet
         f2.last = ("wp1", 0)                      # leg 2's first node: S4
         f2.take().state(now)
-        manager._traffic_pass(now)
+        manager.floor.traffic_pass(now)
     finally:
         manager.log.removeHandler(catcher)
 
@@ -1477,7 +1478,7 @@ def test_leg_two_out_of_a_spur_frees_nothing_under_the_truck(floor):
         "the traffic path logged an error: {}".format(catcher.said))
     # ...and the truck waiting for that junction did not get it.
     assert S4_ENTRY not in manager.floor.held_by("f1")
-    assert manager.blocked == []
+    assert manager.floor.blocked == []
 
 
 def test_the_waiting_truck_is_not_handed_the_junction_when_it_is_older(
@@ -1500,11 +1501,11 @@ def test_the_waiting_truck_is_not_handed_the_junction_when_it_is_older(
     turn(manager, (f1, f2), now)
     f2.xy, f2.last = S4_XY, ("wp1", 0)
     f2.take().state(now)
-    manager._traffic_pass(now)
+    manager.floor.traffic_pass(now)
 
     assert manager.floor.owner_of(S4_ENTRY) == "f2"
     assert manager.floor.held_by("f1") == [(3.0, -5.5)]
     assert [n["nodeId"] for n in f1.released()] == ["wp1", "wp2"], (
         "the waiting truck was released onto the occupant's way out")
     assert manager.floor.find_cycle() is None
-    assert manager.blocked == []
+    assert manager.floor.blocked == []

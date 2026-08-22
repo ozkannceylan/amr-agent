@@ -22,7 +22,7 @@ M6.4 GAVE IT A HORIZON. `released_count` splits the same node list
 into the VDA 5050 base the fleet has reserved and the horizon it has
 not, and `update_id` stamps orderUpdateId so the base can be extended
 later with the same nodes. Nothing else about the order moves: the
-reservation decision belongs to fleet_manager and the ledger, and this
+reservation decision belongs to floor.py and the ledger, and this
 file only ever writes down what it was told.
 
 THIS IS send_order.build_order's LINEAGE, OWNED FLEET-SIDE. tools/

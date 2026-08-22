@@ -1,8 +1,10 @@
 # `fleet/` — the cell's master control
 
-Four files, one process and one command line. `fleet_core.py` decides who
+Six files, one process and one command line. `fleet_core.py` decides who
 drives what, purely; `order_builder.py` turns a leg into a VDA 5050 order,
-purely; `fleet_manager.py` is the service that owns a broker, a clock and a
+purely; `traffic.py` is the floor's ledger, also purely; `floor.py` runs the
+traffic loop over that ledger — holds, extensions, deadlocks, the idle
+sweep; `fleet_manager.py` is the service that owns a broker, a clock and a
 queue; `fleet_cli.py` is the operator's hand and screen.
 
 ```bash
