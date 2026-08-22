@@ -59,16 +59,65 @@ VEHICLES = {
            "spawn": {"x": "-3.00", "y": "5.65", "z": "0.05",
                      "yaw": "0.0"}},
     "f4": {"plc_port": 5140, "sensor_port": 5141,
-           "spawn": {"x": "8.00", "y": "-5.50", "z": "0.05",
+           "spawn": {"x": "3.00", "y": "5.65", "z": "0.05",
                      "yaw": "3.14159"}},
 }
 # f1 keeps step5's proven spawn - the S1 station point itself. f2 faces it
-# from 6.00 m down the dock aisle. f3 and f4 joined at M6.5: f3 stands on
-# the main aisle at (-3.0, 5.65), level with the west rack runs' inner
-# ends, and f4 on the dock aisle at (8.0, -5.5), north of the dock door.
-# Model yaw 0 points the FORKS at world -x (follower.travel_yaw), so f3's
-# forks face west and f4's east - each truck's fork corners point ALONG
-# its aisle, which is what the third rule below is about.
+# from 6.00 m down the dock aisle. f3 and f4 joined at M6.5 and stand on
+# the MAIN aisle, level with the rack runs' inner ends - f3 at
+# (-3.0, 5.65) and f4 at (3.0, 5.65), 6.00 m apart, back to back, exactly
+# as f1 and f2 stand on the dock aisle 11.15 m south of them.
+#
+# THE FOUR POSES ARE A DIVISION OF THE FLOOR, and that is the point of
+# them. Measured over the router, each truck is the nearest to the
+# stations on its own quarter and to no others:
+#
+#     f1  S1 0.00   S3 5.50   S10 6.00   S2 7.90     west dock
+#     f2  S4 5.50                                    east dock
+#     f3  S6 5.85   S8 5.85                          west main
+#     f4  S7 5.85   S9 5.85   S5 8.60                east main
+#
+# Every station has a truck within 8.60 m and no truck has to cross the
+# hall to start a transport it is chosen for.
+#
+# EVERY YAW IN THIS TABLE POINTS THE TRUCK AT THE FLOOR IT WILL BE SENT
+# TO, and that is a rule, not an accident. Model yaw 0 points the FORKS
+# at world -x, and the TRAVEL heading is the model heading flipped
+# (follower.travel_yaw), so a truck at yaw 0 drives WEST when it is
+# given work and one at yaw pi drives EAST. Where its first leg goes the
+# other way the follower does not swing round - it REVERSES, straight,
+# at REVERSE_MPS - and it stays in reverse until the next target is
+# within REVERSE_EXIT_RAD of its travel heading. On a short spur that
+# never happens: measured 2026-08-22, f4 at yaw pi was sent to S4, which
+# is 4.50 m away and WEST, reversed straight down the dock aisle, passed
+# the spur junction it should have turned at by 0.18 m, and stopped for
+# good with nav's obstacle guard 1.477 m off PARKED f2 (GUARD_HOLD_M is
+# 1.5). The truck could not reach its nearest station. So: f1 at yaw 0
+# faces west, towards S3/S10/S2, its three nearest; f2 at yaw pi faces
+# east, towards S4; f3 at yaw 0 faces west, towards the S6/S8 junction
+# 5.00 m away; and f4 at yaw pi faces east, towards the S5/S7/S9
+# junction, also 5.00 m away. No test can check this one - it is about
+# where the WORK is, not about where the walls are - so it is written
+# here instead.
+#
+# AND A PARKED TRUCK MUST HAVE ROOM TO TURN INTO THE STATIONS IT IS
+# NEAREST TO, which is the third thing the route-usage table cannot see.
+# (8.0, -5.5) is the quietest clear node on this floor - 6 of the 90
+# routes - and it is 2.00 m from the S4 spur junction, so it wins every
+# S4 transport and has two metres to set up a turn into a 2.5 m spur.
+# Measured 2026-08-22 at both yaws: at yaw pi it reversed past the
+# junction into f2's guard band; at yaw 0 it drove up at 0.70 m/s,
+# decelerated into the corner and STALLED there - steer joint at
+# -0.926 rad against the -2.5 rad/s traction command, drive wheel
+# velocity 8e-5 rad/s, nav still EN-ROUTE with the guard clear at
+# 2.975 m, for seven minutes. The same spur is reached routinely from
+# the WEST, where the approach has 3.00 m of run-up (f2 did it in the
+# M6.5 gate session, 19:14). So the parking node moved to the main aisle
+# and S4 went back to f2, whose approach is the proven one. The lesson
+# is the general one and it is why this paragraph is long: LEAST-USED
+# FLOOR IS NOT THE ONLY RULE. A pose that no truck drives through is
+# worth nothing if the truck standing on it cannot get out of it and
+# into the stations the fleet will pick it for.
 #
 # WHERE A PARKED TRUCK MAY STAND IS A FLEET DECISION, NOT A SCENIC ONE,
 # AND M6.5 GOT IT WRONG TWICE - once on the graph and once on the floor.
@@ -90,10 +139,11 @@ VEHICLES = {
 #     (0.0, 5.65)          44           8.05 m  S6      4.35 m
 #     (-3.0, -5.5)         42           0.00 m  S1      4.50 m   <- f1, = S1
 #     (-8.0, 5.65)         34           0.85 m  S6      3.25 m   <- was f3
+#     (3.0, 5.65)          36           5.07 m  S7      3.25 m   <- f4
 #     (-3.0, 5.65)         20           5.07 m  S6      3.25 m   <- f3
 #     (3.0, -5.5)          12           3.91 m  S4      4.50 m   <- f2
 #     (-12.5, 5.65)        12           4.58 m  S6      2.50 m   <- was f3
-#     (8.0, -5.5)           6           3.20 m  S4      4.45 m   <- f4
+#     (8.0, -5.5)           6           3.20 m  S4      4.45 m   <- see below
 #     (12.0, -5.5)          6           6.50 m  S4      3.00 m   <- was f4
 #     (12.0, 5.65)          6           0.40 m  S5      2.00 m
 #
@@ -132,10 +182,17 @@ VEHICLES = {
 #
 #     truck  at-rest worst scanner            leaving
 #     f1     4.04 m  left, south wall         4.50 m   (+1.88)
-#     f2     3.67 m  left, f4's drive wheel   4.50 m   (+1.88)
-#     f3     2.84 m  both fork corners, the west rack runs' end frames
+#     f2     3.99 m  right, the dock door post 4.50 m  (+1.88)
+#     f3     2.84 m  right fork corner, rack A west run's end frame
 #                                             3.25 m   (+0.63)
-#     f4     3.43 m  back, f2's carriage      4.45 m   (+1.83)
+#     f4     2.84 m  right fork corner, rack B east run's end frame
+#                                             3.25 m   (+0.63)
+#
+# Read back off the running world 2026-08-22, all four at rest,
+# /fN/safety/fields: every device wf true and V_Limit 1500 on all four,
+# which is what the old table could not say. The two main-aisle trucks
+# measured 3.34 / 2.84 / 2.84 (back/left/right) against 2.84 computed -
+# the arithmetic above and the scanners agree to the centimetre.
 #
 # tests/test_vehicles_table.py pins all three rules - no spur junction, no
 # pose almost-but-not-quite on a station, and no truck parked inside a

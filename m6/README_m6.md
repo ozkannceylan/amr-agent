@@ -170,10 +170,11 @@ Measured over the real planner and all 90 station-to-station routes:
 | `(0.0, 5.65)` | 44 | 8.05 m | 4.35 m |
 | `(-3.0, -5.5)` — f1, *on* S1 | 42 | 0.00 m (S1) | 4.50 m |
 | `(-8.0, 5.65)` | **34** | 0.85 m (S6) | 3.25 m |
+| `(3.0, 5.65)` — **f4** | 36 | 5.07 m | 3.25 m |
 | `(-3.0, 5.65)` — **f3** | 20 | 5.07 m | 3.25 m |
 | `(3.0, -5.5)` — f2 | 12 | 3.91 m | 4.50 m |
 | `(-12.5, 5.65)` — *was f3* | 12 | 4.58 m | **2.50 m** |
-| `(8.0, -5.5)` — **f4** | **6** | 3.20 m | 4.45 m |
+| `(8.0, -5.5)` — *tried for f4* | **6** | 3.20 m | 4.45 m |
 | `(12.0, -5.5)` — *was f4* | **6** | 6.50 m | **3.00 m** |
 | `(12.0, 5.65)` | **6** | **0.40 m** (S5) | 2.00 m |
 
@@ -204,9 +205,10 @@ acceptance run** (PROOF, M6.5 Gate 4, 19:43:15.092), and its hulk held the
 west cross-aisle for the remaining ten minutes.
 
 **So the poses moved in off the end walls, and a third rule went into the
-guard test.** f3 now stands on the main aisle at `(-3.00, 5.65)`, level with
-the west rack runs' inner ends; f4 on the dock aisle at `(8.00, -5.50)`, north
-of the dock door. The rule is measured off the **world SDF's own collision
+guard test.** f3 and f4 now stand on the main aisle at `(-3.00, 5.65)` and
+`(3.00, 5.65)`, level with the rack runs' inner ends and 6.00 m apart, back to
+back — exactly as f1 and f2 stand on the dock aisle 11.15 m south of them. The
+rule is measured off the **world SDF's own collision
 boxes at the safety scan plane** — not off `stations.OBSTACLES`, which is
 documented as the SDF's shadow and which nothing tests against the file:
 
@@ -220,26 +222,55 @@ documented as the SDF's shadow and which nothing tests against the file:
 
 | Truck | Pose | At-rest worst scanner | Leaving | Margin |
 |---|---|---|---|---|
-| f1 | `(-3.00, -5.50)` | 4.04 m — left, south wall | 4.50 m | +1.88 |
-| f2 | `(3.00, -5.50)` | 3.67 m — left, f4's drive wheel | 4.50 m | +1.88 |
-| **f3** | `(-3.00, 5.65)` | **2.84 m** — both fork corners, the rack end frames | 3.25 m | +0.63 |
-| **f4** | `(8.00, -5.50)` | 3.43 m — back, f2's carriage | 4.45 m | +1.83 |
+| f1 | `(-3.00, -5.50)` | 4.04 m - left, south wall | 4.50 m | +1.88 |
+| f2 | `(3.00, -5.50)` | 3.99 m - right, the dock door post | 4.50 m | +1.88 |
+| **f3** | `(-3.00, 5.65)` | **2.84 m** - right fork corner, rack A's end frame | 3.25 m | +0.63 |
+| **f4** | `(3.00, 5.65)` | **2.84 m** - right fork corner, rack B's end frame | 3.25 m | +0.63 |
+
+Read back off the running world with all four at rest: **every device `wf` true
+and `V_Limit` 1500 on all four**, which is exactly what the old table could not
+say. The two main-aisle trucks measured `3.34 / 2.84 / 2.84` (back/left/right)
+against 2.84 computed - the arithmetic and the scanners agree to the
+centimetre.
 
 **The rule predicts the run it was written from.** f3's old pose scores
-`2.500 − 0.821 − 0.600 = 1.079 m` of scanner clearance through the turn
-against the 1.20 m it needs; the truck measured **0.971 m** at the latch — a
+`2.500 - 0.821 - 0.600 = 1.079 m` of scanner clearance through the turn
+against the 1.20 m it needs; the truck measured **0.971 m** at the latch - a
 rule 0.108 m off the event it explains. `tests/test_vehicles_table.py` pins
-all three rules — no spur junction, no pose almost-but-not-quite on a station,
+all three rules - no spur junction, no pose almost-but-not-quite on a station,
 and no truck parked inside a field it cannot clear or turn out of.
 
-**What f4's pose costs, named.** `(8.0, -5.5)`'s nearest graph neighbour is
-`(6.0, -5.5)`, the S4 spur junction, **2.00 m** west — the closest neighbour
-any parked truck has, against 3.00 m for the other three. Two truck centres
-2.00 m apart are inside each other's protective fields, so a truck standing at
-that junction stops parked f4 until it leaves. That is the dock aisle's node
-spacing (its tightest pair is the **1.40 m** between `(-7.4, -5.5)` and
-`(-6.0, -5.5)`), the exposure is the seconds between spawn and f4's first
-task, and the alternative is an end-aisle pose the truck cannot leave at all.
+**The four poses are a division of the floor.** Each truck is the nearest to
+the stations on its own quarter and to no others: f1 `S1 0.00, S3 5.50,
+S10 6.00, S2 7.90`; f2 `S4 5.50`; f3 `S6 5.85, S8 5.85`; f4 `S7 5.85,
+S9 5.85, S5 8.60`. Every station has a truck within 8.60 m and no truck has to
+cross the hall to start a transport it is chosen for.
+
+**Two rules the route-usage table cannot see, both bought at full price on
+2026-08-22.** First, **every yaw points the truck at the floor it will be sent
+to**: model yaw 0 puts the forks at world `-x` and the *travel* heading is the
+model heading flipped, so a truck at yaw 0 drives **west** when it is given
+work. Where the first leg goes the other way the follower does not swing round
+- it **reverses**, straight, and stays in reverse until the next target is
+within `REVERSE_EXIT_RAD` of its travel heading, which turning into a spur
+(94 deg) never is. f4 parked at `(8.0, -5.5)` yaw pi was sent to S4, 4.50 m
+away and west, reversed straight down the dock aisle, **passed the junction it
+should have turned at by 0.18 m** and stopped for good with nav's obstacle
+guard **1.477 m off parked f2** (`GUARD_HOLD_M` is 1.5).
+
+Second, **a parked truck must have room to turn into the stations it is
+nearest to.** `(8.0, -5.5)` is the quietest clear node on this floor - 6 of
+the 90 routes - and it is **2.00 m** from the S4 spur junction, so it wins
+every S4 transport and has two metres to set up a turn into a 2.5 m spur. At
+yaw 0 f4 drove up at 0.70 m/s, decelerated into the corner and **stalled**:
+steer joint at -0.926 rad against a -2.5 rad/s traction command, drive-wheel
+velocity 8e-5 rad/s, nav still `EN-ROUTE` with the guard clear at 2.975 m, for
+seven minutes. The same spur is reached routinely from the **west**, where the
+approach has 3.00 m of run-up. So f4's parking node moved to the main aisle
+and S4 went back to f2, whose approach is the proven one. **Least-used floor
+is not the only rule**: a pose nobody drives through is worth nothing if the
+truck standing on it cannot get out of it and into the stations the fleet will
+pick it for.
 
 **f1 is the residual, and it is deliberate.** It keeps step5's proven pose,
 which is S1 itself: 42 of the 90 routes. Being *on* a station is a legitimate
