@@ -10,8 +10,13 @@ Numbers are checked, not merely present: an order that lies about a
 coordinate is rejected at the door, because the alternative is a crash
 in the callback that drives - or worse, a drive that crashes mid-motion.
 
-Deliberate M6.2 boundaries (spec): orderUpdateId > 0 and node actions
-are rejected - stitching and station actions land with M6.3.
+M6.4 STITCHES (VDA 5050 s.6.6): an update to the order the vehicle is
+already driving is a fourth verdict, 'extend', not a new order. It is
+allowed exactly when nothing the truck has already been told to drive
+changes - same orderId, orderUpdateId one higher, and every released
+node still there, at its index, at its coordinates, still released.
+Everything past that may grow: a horizon node may be released and new
+released nodes may be appended. Node actions stay rejected (M6.5).
 """
 import math
 
@@ -93,21 +98,66 @@ def validate_order(msg):
     return ""
 
 
-def accept_order(msg, current_order_id, current_update_id, executing,
-                 operating_mode):
-    """('accept'|'ignore'|'reject', reason)."""
+BASE_CHANGED = "an update may not change the part already driven"
+
+
+def _base_kept(current, msg):
+    """'' when msg preserves every released node of the current order.
+
+    The already-driven part is not a suggestion: a released node must
+    still be there, at the same index, with the same id and sequenceId,
+    at the same x/y, and still released. Where the current order goes
+    horizon the update may do as it likes - that is the whole point of
+    a horizon - so the walk stops at the first unreleased node.
+    """
+    new = msg["nodes"]
+    for i, old in enumerate(current.get("nodes", [])):
+        if not old.get("released"):
+            return ""
+        if i >= len(new):
+            return BASE_CHANGED          # a released node simply vanished
+        n, pos = new[i], new[i]["nodePosition"]
+        was = old.get("nodePosition") or {}
+        if (not n["released"]
+                or n["nodeId"] != old.get("nodeId")
+                or n["sequenceId"] != old.get("sequenceId")
+                or pos["x"] != was.get("x") or pos["y"] != was.get("y")):
+            return BASE_CHANGED
+    return ""
+
+
+def accept_order(msg, current_order, executing, operating_mode):
+    """('accept'|'extend'|'ignore'|'reject', reason).
+
+    `current_order` is the order the vehicle holds (the whole message,
+    because an extension is judged against its nodes) or None.
+    """
     reason = validate_order(msg)
     if reason:
         return ("reject", reason)
-    if (msg["orderId"] == current_order_id
-            and msg["orderUpdateId"] == current_update_id):
+    cur_id = current_order["orderId"] if current_order else ""
+    cur_upd = current_order["orderUpdateId"] if current_order else 0
+    if msg["orderId"] == cur_id and msg["orderUpdateId"] == cur_upd:
         return ("ignore", "duplicate delivery")
-    if msg["orderUpdateId"] != 0:
-        return ("reject",
-                "order updates land with M6.3 - cancelOrder, then send "
-                "a fresh order")
+    # THE MODE ANSWERS FIRST, stitch or not: an update that reaches a
+    # truck someone has just taken to teleop is still an order this
+    # vehicle cannot drive.
     if operating_mode != "AUTOMATIC":
         return ("reject", "vehicle not in AUTOMATIC")
+    if current_order and msg["orderId"] == cur_id:
+        if msg["orderUpdateId"] != cur_upd + 1:
+            return ("reject",
+                    "orderUpdateId must be {} - exactly one more than the "
+                    "executing order".format(cur_upd + 1))
+        if not executing:
+            return ("reject",
+                    "no order is executing - nothing to extend")
+        reason = _base_kept(current_order, msg)
+        return ("reject", reason) if reason else ("extend", "")
+    if msg["orderUpdateId"] != 0:
+        return ("reject",
+                "an update to an order this vehicle is not driving - "
+                "send a new order with orderUpdateId 0")
     if executing:
         return ("reject", "an order is executing - cancelOrder first")
     return ("accept", "")

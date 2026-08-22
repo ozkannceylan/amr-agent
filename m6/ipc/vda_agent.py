@@ -365,10 +365,11 @@ class VdaAgent(Node):
         except (ValueError, UnicodeDecodeError):
             self.get_logger().warn("unreadable order dropped")
             return
+        # The whole current order goes in, not just its ids: an update
+        # is judged against the nodes the truck was already told to
+        # drive (vda_orders s.6.6 stitching).
         verdict, reason = vo.accept_order(
-            msg, self.order["orderId"] if self.order else "",
-            self.order["orderUpdateId"] if self.order else 0,
-            self.executing, self.operating_mode())
+            msg, self.order, self.executing, self.operating_mode())
         if verdict == "ignore":
             return
         if verdict == "reject":
@@ -382,6 +383,11 @@ class VdaAgent(Node):
                 "errorReferences": [{"referenceKey": "orderId",
                                      "referenceValue": str(oid)}]}])
             return
+        # An 'extend' verdict falls in here with the accepts for now: the
+        # base it carries is legal by rule, so re-issuing it from the
+        # pose the truck stands at drives the right floor - it just
+        # restarts the progress count. Carrying Progress across a stitch
+        # is the next change in this file.
         points, arrive_m, released, horizon = vo.released_route(msg)
         raw_dev = released[-1]["nodePosition"].get("allowedDeviationXY")
         if raw_dev is not None and raw_dev != arrive_m:
