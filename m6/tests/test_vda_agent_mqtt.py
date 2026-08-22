@@ -563,6 +563,60 @@ def test_an_extension_drives_only_what_is_left(rig):
     assert not states[-1]["newBaseRequest"], "there is base left to drive"
 
 
+def test_navs_arrival_at_the_end_of_a_base_does_not_end_the_order(rig):
+    """THE DEFECT M6.4 GATE 1 FOUND, ON THE FLOOR, 2026-08-22.
+
+    A horizon-held truck drives its base and stops. nav, which was handed
+    the released nodes and nothing else, reports ARRIVED - and the agent
+    read that as "the order is done", cleared `executing`, and refused
+    every extension that followed with "no order is executing - nothing
+    to extend". Measured live: 1,873 refusals over 3 m 37 s, a truck
+    three metres short of floor that had been free for two minutes, and
+    a transport that never completed. A held vehicle could never be let
+    go, which is the whole of M6.4.
+
+    The base end is a WAIT, not an arrival. `executing` must survive it,
+    and the order must still be extendable afterwards.
+    """
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    odom = odom_publisher(helper)
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    send_order(probe, growing_order(2, 0, {"wp1": 0.25}))
+    spin([agent, helper], 1.5)
+    drive_to(odom, 2.0, 0.0)                 # the truck reaches wp1
+    spin([agent, helper], 0.5)
+    assert agent.progress.reached == 2
+
+    # nav finished the polyline it was given. That is all it said.
+    nav_pub.publish(String(data=json.dumps(
+        {"state": "ARRIVED", "goal": "o-grow", "note": ""})))
+    spin([agent, helper], 1.0)
+    assert agent.executing, (
+        "the end of a base was read as the end of the order - every "
+        "extension after this is refused and the truck never moves again")
+    last = states_of(caught, "o-grow")[-1]
+    assert last["newBaseRequest"], "a held truck must still be asking"
+    assert [n["nodeId"] for n in last["nodeStates"]] ==         ["wp2", "wp3", "wp4"], "the horizon was thrown away"
+
+    # ...and the extension the fleet has been waiting to send lands.
+    before = len(caught["route"])
+    send_order(probe, growing_order(5, 1, {"wp1": 0.25}))
+    spin([agent, helper], 1.5)
+    # orderError only: this rig has no PLC behind it, so a safetyStop
+    # rides every state it publishes and says nothing about the update.
+    refusals = [e for s in states_of(caught, "o-grow") for e in s["errors"]
+                if e["errorType"] == "orderError"]
+    assert refusals == [], "the extension was refused: {}".format(refusals)
+    assert len(caught["route"]) == before + 1, "the extension never drove"
+    assert caught["route"][-1]["points"] == [
+        [2.0, 0.0], [4.0, 0.0], [6.0, 0.0], [8.0, 0.0]], (
+        "the truck was not sent on from where it stood")
+    assert agent.progress.reached == 2, "the count reset on the update"
+
+
 def test_a_new_deviation_binds_ahead_of_the_truck_and_not_behind(rig):
     """The M6.4 ruling on allowedDeviationXY, both halves.
 

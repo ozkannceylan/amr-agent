@@ -251,8 +251,24 @@ class VdaAgent(Node):
             return
         state, goal = nav.get("state", ""), nav.get("goal", "")
         note = nav.get("note", "")
+        # THE END OF A BASE IS NOT THE END OF AN ORDER. A horizon left
+        # on this order means the fleet has not released the rest of the
+        # route yet; the truck stops at the last released node by
+        # construction and waits for orderUpdateId + 1, and that WAIT IS
+        # THE TRAFFIC PRIMITIVE. nav cannot know it: it was handed the
+        # released nodes and it drove all of them, so ARRIVED from nav
+        # means "the polyline I was given is finished", never "the order
+        # is finished".
+        #   MEASURED 2026-08-22, M6.4 Gate 1, live: without `not
+        #   self.horizon` the agent cleared `executing` the moment it
+        #   reached the end of its base, and every one of the 1,873
+        #   extensions the fleet published over the next 3 m 37 s came
+        #   back "no order is executing - nothing to extend". The truck
+        #   stood three metres short of a corridor that had been free
+        #   for two minutes and its transport never completed. A held
+        #   vehicle could never be let go, which is the whole of M6.4.
         arrived_now = (state == "ARRIVED" and self.nav_state != "ARRIVED"
-                       and self.executing
+                       and self.executing and not self.horizon
                        and goal == self.order["orderId"])
         # NAV STOPPED AND IT WAS NOT AN ARRIVAL. IDLE with a note is
         # nav_core saying it refused the route or cancelled the drive;
