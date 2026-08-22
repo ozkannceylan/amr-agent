@@ -138,13 +138,21 @@ class NavCore:
         self.reversing = False
         self.arrive_m = follower.ARRIVE_M
 
-    def step(self, pose, fwd_guard_m, rev_guard_m, motor_ok, v_limit_mm_s):
+    def step(self, pose, fwd_guard_m, rev_guard_m, motor_ok, v_limit_mm_s,
+             field_min_m=math.inf):
         """One tick: (linear.x, angular.z) under the field contract.
 
         TWO GUARDS IN, ONE CHOSEN HERE. nav_node reads the scan before
         anyone knows which way the truck is about to go, so it hands
         over both sector minima and the phase picks. Passing one number
         would mean guarding the end the truck is driving away from.
+
+        AND THE SAFETY SCANNERS' OWN MINIMUM, WHICH HAS NO END TO PICK.
+        Those three devices look all round and the field they feed is
+        the one that moves V_Limit, so their closest return applies in
+        both phases. It defaults to infinity so every caller that has no
+        field report - the tests, and any node built before this
+        existed - keeps exactly the behaviour it had.
         """
         if self.state in (IDLE, ARRIVED) or self.route is None:
             return (0.0, 0.0)
@@ -165,11 +173,13 @@ class NavCore:
             # thing the back-out exists to avoid, and a reversing
             # tricycle steers from the wrong end anyway.
             steer = 0.0
-            speed = min(follower.target_speed(to_end, 0.0, rev_guard_m),
+            speed = min(follower.target_speed(to_end, 0.0, rev_guard_m,
+                                              field_min_m),
                         follower.REVERSE_MPS)
         else:
             steer = follower.steer(pose, target)
-            speed = follower.target_speed(to_end, steer, fwd_guard_m)
+            speed = follower.target_speed(to_end, steer, fwd_guard_m,
+                                          field_min_m)
         if speed == 0.0:
             # HOLD is a full zero, steer included: a stopped truck
             # sawing its steer wheel at an obstacle would look alive.

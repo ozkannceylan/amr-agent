@@ -318,3 +318,47 @@ def test_arrival_radius_can_be_widened_per_station():
     # orbits its own turning circle), so it declares its own radius.
     assert not follower.arrived((0.0, 0.0), (0.7, 0.0))
     assert follower.arrived((0.0, 0.0), (0.7, 0.0), 0.8)
+
+
+def test_the_safety_scanners_have_their_own_slow_band():
+    """The band the nav lidar structurally cannot provide.
+
+    GUARD_SLOW_M keeps the truck out of a warning field it is driving
+    INTO; nothing kept it out of one it is driving PAST, because the
+    lidar guard is a +-35 deg cone about the travel heading and a rack
+    face 2.75 m off the shoulder is nowhere near it. Measured
+    2026-08-22 22:40:28.215: f3 westbound on the main aisle, right
+    scanner 2.307 m off rack A, warning dropped, V_Limit 1500 -> 300,
+    and the encoders on that same sample read -700/-700. Motor went
+    false 8 ms later and stayed false - the speed monitor's demand
+    latches - while the wheels spent 300 ms coming down to zero.
+
+    The floor is why it is not a tuning problem: the main aisle gives a
+    fork-corner scanner 2.79 m against a 2.70 m re-clear threshold, nine
+    centimetres, and no pursuit holds a line that well.
+    """
+    reclear = field_eval.FIELDS[1][1] + field_eval.HYSTERESIS_M
+    assert follower.FIELD_SLOW_M > reclear, (
+        "the band is inside the field it exists to keep the truck out of")
+    # Room to come down from cruise to the creep ceiling inside it.
+    assert follower.FIELD_SLOW_M >= reclear + 0.35
+
+    clear = follower.target_speed(10.0, 0.0, math.inf, math.inf)
+    assert clear == follower.CRUISE_MPS
+    near = follower.target_speed(10.0, 0.0, math.inf,
+                                 follower.FIELD_SLOW_M - 0.01)
+    assert near == follower.GUARD_SLOW_MPS
+    # It is a SLOW band and never a hold: a protective stop is the
+    # F-program's to demand and this file may not pre-empt it.
+    assert follower.target_speed(10.0, 0.0, math.inf, 0.0) == \
+        follower.GUARD_SLOW_MPS
+    # And it does not widen anything: the other bands still win when
+    # they are slower.
+    assert follower.target_speed(1.0, 0.0, math.inf, 0.0) == \
+        follower.APPROACH_MPS
+    assert follower.target_speed(10.0, 0.0, 1.0, math.inf) == 0.0
+
+
+def test_the_field_band_defaults_to_absent():
+    """Every caller built before this band existed keeps its behaviour."""
+    assert follower.target_speed(10.0, 0.0, math.inf) == follower.CRUISE_MPS

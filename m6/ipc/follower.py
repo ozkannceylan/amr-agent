@@ -56,6 +56,17 @@ GUARD_SLOW_M = 4.3
 # is about not driving into things, not about the speed monitor, and it
 # is the nav lidar's own last word before the scanners take over.
 GUARD_HOLD_M = 1.5
+# THE SAME RULE AT THE DEVICE THAT ACTUALLY EVALUATES THE FIELD. The
+# band above is read at the nav lidar and only inside its forward cone;
+# this one is read at the three SAFETY scanners, all round, off the
+# /fN/safety/fields report the F-model's own inputs come from. It has
+# to sit outside the re-clearing threshold with room to slow down in:
+#   2.50 field + 0.20 hysteresis + 0.60 to come down from 0.70 to
+#   0.30 m/s with margin = 3.30
+# There is NO HOLD counterpart and there must not be: a protective stop
+# is the F-program's to demand and this file may not pre-empt a safety
+# function - it only shapes speed so the PLC rarely has to say it.
+FIELD_SLOW_M = 3.3
 GUARD_SLOW_MPS = 0.3
 GUARD_HALF_ANGLE_RAD = math.radians(35.0)
 REVERSE_MPS = 0.25
@@ -234,14 +245,48 @@ def reverse_phase(alpha, was_reversing):
     return was_reversing
 
 
-def target_speed(dist_to_end, steer_rad, guard_min_m):
+def target_speed(dist_to_end, steer_rad, guard_min_m,
+                 field_min_m=math.inf):
     """The policy: slowest applicable band wins. Returns >= 0 m/s;
-    the caller applies the forward sign (negative) and the PLC cap."""
+    the caller applies the forward sign (negative) and the PLC cap.
+
+    THE FOURTH BAND IS THE SAFETY SCANNERS' OWN, AND IT EXISTS BECAUSE
+    THE NAV LIDAR CANNOT SEE ABEAM. GUARD_SLOW_M keeps the truck out of
+    a warning field it is driving INTO; nothing kept it out of one it is
+    driving PAST. The lidar guard is a +-35 deg cone about the travel
+    heading, and a rack face 2.75 m off the shoulder is nowhere near it.
+
+    Measured 2026-08-22 22:40:28.215, f3 westbound on the main aisle:
+    right scanner 2.307 m off rack A, warning dropped, V_Limit
+    1500 -> 300, and the encoders on that same 20 Hz sample read
+    -700/-700. The F-program's speed monitor demands a stop the instant
+    either channel is above V_Limit and the demand LATCHES, so Motor
+    went false 8 ms later while the wheels were still spending 300 ms
+    coming down 700 -> 509 -> 162 -> 0. A panel RESET is the only way
+    back, and the fleet has no way to press it.
+
+    THE FLOOR IS WHY THIS IS NOT A TUNING PROBLEM. The main aisle gives
+    a fork-corner scanner 2.79 m of lateral clearance (3.25 m centreline
+    to rack face, 0.46 m mount offset) against a 2.70 m re-clear
+    threshold: NINE CENTIMETRES. No pursuit holds a line that well, and
+    no band measured at the nav lidar can pre-empt it. So the truck
+    obeys the creep ceiling wherever a SAFETY scanner - the device that
+    actually evaluates the field - is inside FIELD_SLOW_M of anything.
+
+    THE COST, STATED, AND IT IS THE BIGGEST COST IN THIS FILE: every
+    main-aisle transit now runs at 0.30 m/s instead of 0.70, because
+    every main-aisle transit is inside this band the whole way. The dock
+    aisle (4.04 m to the nearest solid) is unaffected and stays at
+    cruise. The alternative measured on this floor is a latched truck
+    every time an aisle is driven at speed.
+    """
     speed = CRUISE_MPS
     if dist_to_end <= APPROACH_ZONE_M:
         speed = min(speed, APPROACH_MPS)
     if abs(steer_rad) > CORNER_STEER_RAD:
         speed = min(speed, CORNER_MPS)
+    if field_min_m < FIELD_SLOW_M:
+        speed = min(speed, GUARD_SLOW_MPS)
     if guard_min_m < GUARD_HOLD_M:
         return 0.0
     if guard_min_m < GUARD_SLOW_M:

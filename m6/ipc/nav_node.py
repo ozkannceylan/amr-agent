@@ -27,7 +27,8 @@ import follower
 import nav_core
 from status_contract import (
     AUTO_CMD_TOPIC, AUTO_GOAL_TOPIC, AUTO_ROUTE_TOPIC, AUTO_STATE_TOPIC,
-    CONFIG_PATH, MODE_TOPIC, STATUS_STALE_S, STATUS_TOPIC, is_stale,
+    CONFIG_PATH, FIELDS_TOPIC, MODE_TOPIC, STATUS_STALE_S,
+    STATUS_TOPIC, is_stale,
     parse_status, speed_limit_mm_s)
 
 # ----------------------------- CONFIG -----------------------------
@@ -64,6 +65,11 @@ class NavNode(Node):
         self.fwd_guard = 0.0
         self.rev_guard = 0.0
         self.guard_rx = None
+        # The three SAFETY scanners' closest return, off the same report
+        # the field evaluation publishes. 0.0 until one arrives, which is
+        # the creep end of the scale - see cb_fields.
+        self.field_min = 0.0
+        self.field_rx = None
         self.motor = False
         self.v_limit = 300
         self.status_rx = None
@@ -81,6 +87,7 @@ class NavNode(Node):
         self.create_subscription(
             LaserScan, topics["gz_scan_nav"], self.cb_scan, 10)
         self.create_subscription(String, STATUS_TOPIC, self.cb_status, 10)
+        self.create_subscription(String, FIELDS_TOPIC, self.cb_fields, 10)
         self.create_timer(1.0 / TICK_HZ, self.tick)
 
     def cb_mode(self, msg):
@@ -121,6 +128,27 @@ class NavNode(Node):
             forward=False)
         self.guard_rx = time.monotonic()
 
+    def cb_fields(self, msg):
+        """The closest return any SAFETY scanner has, for the speed
+        policy's fourth band (follower.FIELD_SLOW_M).
+
+        IT READS THE DISTANCE AND NOT THE VERDICT, because by the time
+        the verdict flips V_Limit has already flipped with it and the
+        wheels are already too fast - which is the whole failure this
+        band exists to prevent. `d` is what field_eval measured on the
+        sample it decided on; a device it could not measure reports
+        0.000 with its field violated, and 0.0 lands in the creep band,
+        which is the direction to fail in.
+        """
+        try:
+            report = json.loads(msg.data)
+            self.field_min = min(
+                float(report[name]["d"])
+                for name in ("back", "left", "right"))
+        except (ValueError, KeyError, TypeError):
+            self.field_min = 0.0
+        self.field_rx = time.monotonic()
+
     def cb_status(self, msg):
         state = parse_status(msg.data.encode())
         self.status_rx = time.monotonic()
@@ -138,8 +166,13 @@ class NavNode(Node):
         rev = 0.0 if dead else self.rev_guard
         motor = self.motor and not is_stale(
             self.status_rx, now, STATUS_STALE_S)
+        # A FIELDS REPORT THAT STOPPED READS AS 0.0, THE CREEP END. The
+        # field evaluation publishes at 10 Hz and fails safe on its own
+        # side; here its silence may only ever make this truck slower.
+        stale_fields = is_stale(self.field_rx, now, SENSOR_STALE_S)
+        field = 0.0 if stale_fields else self.field_min
         linear, steer = self.core.step(
-            self.pose, fwd, rev, motor, self.v_limit)
+            self.pose, fwd, rev, motor, self.v_limit, field)
         msg = Twist()
         msg.linear.x = linear
         msg.angular.z = steer
