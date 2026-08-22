@@ -1632,6 +1632,15 @@ inside that station's declared `arrive_m` of 0.80 — with **0 of 1076**
 **Spec:** *controlled stop through the normal chain, order cleared,
 actionState FINISHED, truck restartable by a new order.*
 
+> **Read forward before quoting the 97 ms below.** This gate measures
+> the agent as it was on 2026-08-21: `cancelOrder` published the empty
+> goal once and reported FINISHED immediately. M6.3's Fleet Gate 4
+> found what that costs when the goal reaches nobody, and `e3c0ddd`
+> changed the semantics - FINISHED now means nav confirmed the stop,
+> and the number to compare against is that gate's 0.23 s over five
+> publishes. Nothing measured here was re-run; it is a true record of
+> the older contract.
+
 f1 was driving `o-5f204f99` (S2 → S1 HOME, 7.90 m) at 0.288 m/s. The
 instantAction is one paho publish — a scratch helper, not a repo file:
 
@@ -2336,8 +2345,13 @@ f1  14510 samples in 5 runs        f2  17127 samples in 4 runs
       the writers' own trip values on {"quit": true}, at teardown
 ```
 
-**Fleet Gates 1, 2 (the queueing measurement), 5 and 6 contain none of
-these.** The latches are the third defect below; they are the reason
+**Fleet Gates 1, 2 (the queueing measurement) and 5 contain none of
+these, and Gate 6's Gate-1 half does not either.** Gate 6's other half
+is honest about the overlap rather than fenced off from it: its 70 s
+OFFLINE window (01:08:51-01:10:00) begins inside f1's mutual-latch run
+by about ten seconds, which is the point of that half - the document
+told the truth about a vehicle that was both latched and unreachable.
+The latches are the third defect below; they are the reason
 this session spent four RESETs and two `./m6.sh home`s on housekeeping,
 and every one of those is recorded where it happened.
 
@@ -2809,13 +2823,33 @@ the two lines that are the whole fix:
 **The first publish reached nobody — exactly as in run 1 — and the
 other four did.** The warning is run 1's 37 seconds, named in the log
 the moment it starts instead of discovered a day later in an odom file.
-The manager saw the same thing from the other side, off the vehicle's
-own state stream rather than off its own publish:
+**THE STOP'S TWO WITNESSES ARE NAV AND ODOM, AND NOTHING ELSE.** nav
+said IDLE at 01:40:12.362 and the wheels were at rest at 01:40:12.659;
+those are the numbers this gate turns on.
+
+The manager's own line is NOT a third witness and must not be read as
+one:
 
 ```
 01:40:12,169 f1 let go of ft-4c37d99b - the cancel landed
 01:40:14,475 f1 re-earned eligibility
 ```
+
+That first line fired **0.49 s BEFORE the truck stopped**, and it fired
+on the restarted agent's AMNESIA rather than on any stop: a respawned
+process has no order in memory, so its very first state reports
+`orderId ''`, the chase entry sees an order the vehicle is no longer
+executing, and it clears. **It would have printed identically in run 1**,
+where the truck then drove for another thirty-five seconds. Read it as
+what it is - the moment the manager stopped chasing - and not as
+evidence of a stop.
+
+The chase machinery is therefore not what fixed this gate; the agent's
+confirm loop is. What the chase protects is the OTHER shape of the same
+flow - a vehicle whose agent stayed alive across a broker bounce and
+came back still holding its order - where the state does keep showing
+the stale `ft-` order and a second cancelOrder is worth sending. That
+case is covered by its own tests and is not what run 2 measured.
 
 **The race window, measured the same way run 1 was:**
 
@@ -2833,8 +2867,12 @@ own state stream rather than off its own publish:
 | where it stopped | at S3, the pickup | 1.026 m off the aisle |
 
 **9.7× less time and 5.0× less distance**, and the difference is
-entirely the four republished goals: the truck was doing 0.30 m/s when
-its agent died and it kept that speed for 3.8 s.
+entirely the four republished goals. The rows below are worse for the
+bug than "it carried on at the speed it had": the truck was doing
+0.298 m/s when its agent died and **it accelerated to 0.692 m/s** with
+nobody driving it - the follower chasing a lookahead on a route no
+supervisor owned any more - before the cancel bit at 12.109 and took it
+to rest in half a second.
 
 ```
 01:40:08.845  x=-6.5188 y=-3.2156  v=0.2980   <- kill + 24 ms
@@ -3074,6 +3112,38 @@ the screen showed it as a flicker rather than as an error.
    the x = 12 connector** (6.18 laps at a mean radius of 0.6884 m
    against `arrive_m` 0.25), and **a restarted agent adopts whichever
    latched `/fN/hmi/mode` publisher reaches it first.**
+
+## Carried to M6.5 — three things this session found and did not fix
+
+Beside the two-managers finding in Gate 6, the Gate 4 re-run left two
+gaps that are wiring, not measurement, and both belong with the fleet
+layer's next pass:
+
+1. **The manager's cancel-chase cannot engage for a RESTARTED agent.**
+   `_chase_cancel` ends the moment the vehicle's state stops showing
+   the cancelled order - and a respawned agent's FIRST state already
+   says `orderId ''`, because the order lived in the dead process's
+   memory. So the retry that exists for the resume case is structurally
+   unreachable in the restart case, which is the one Gate 4 measures.
+   Measured proof: the chase cleared at 01:40:12.169, 0.49 s before the
+   truck came to rest, and it would have cleared just as fast in the
+   failed run.
+
+2. **Nothing carries the agent's own failure to the operator.** The
+   agent now reports a cancel it could not confirm as an actionState
+   `FAILED` plus a `cancelUnconfirmed` entry in `errors[]`, and the
+   manager reads neither: `_check_rejection` only looks for
+   `orderError`, and the status document renders no action or error
+   column at all. In the corner where a restarted agent ALSO never
+   gets its stop confirmed, the screen would stay quiet - the two gaps
+   compound, and the second is what makes the first invisible.
+
+3. **The refusal list's `taskId` field carries an ORDER id on the
+   chase-give-up path.** `_chase_cancel` passes `entry["order_id"]` to
+   `_note_refusal`, whose column the CLI renders as TASK. Both wear the
+   `ft-` prefix, so an operator reading that row cannot tell which one
+   they are looking at - and it is the row that says a truck ignored
+   four cancelOrders, which is the last row that should be ambiguous.
 
 ## Teardown
 
