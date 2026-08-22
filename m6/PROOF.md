@@ -97,6 +97,16 @@ and it was run first, 2026-08-22 13:02-13:45:
                render a lidar nobody listens to, which is also what
                M6.1's gate 1 was unknowingly measuring. Gates 2-6 are
                not started.)
+              RE-RUN ON THE GPU 16:03-16:21, same matrix, WSLg d3d12 on
+              the RTX 4050: four trucks hold 0.583/0.687/0.670 printed
+              and 0.903/0.899/0.712 integrated -> GO, and the twelfth
+              lidar's cliff is gone. The re-run also found that the
+              PRINTED statistic (the mean of instantaneous factors, this
+              file's convention since M6.1) is biased low on a bursty
+              run: integrated over the same captures, llvmpipe's four
+              trucks delivered 0.579, not 0.190. The gate is cleared in
+              both configurations; the ruling that stands is about the
+              renderer, not the arithmetic.
 ```
 
 **Method, per gate — M6.1 and M6.2 only** (M6.3's method is under its
@@ -4148,7 +4158,13 @@ $ python3 -m pytest m5_ver2/step5/tests/ -q
 
 # M6.5 — sizing the machine for four
 
-## [ ] Gate 1 — RTF at four: STOP
+## [x] Gate 1 — RTF at four: STOP on llvmpipe, GO on the GPU
+
+*Read both halves. The llvmpipe half below produced the STOP ruling and
+every number in it stands as measured; the GPU half at the end of the
+section re-runs the same matrix on d3d12, clears the gate at four, and
+corrects the STATISTIC the STOP was computed with. Neither half is a
+correction of the other's data.*
 
 **Date:** 2026-08-22. **Verdict: STOP.** Four forklifts with their
 sixteen lidars actually running hold mean RTF **0.190 / 0.230 / 0.230**
@@ -4440,6 +4456,230 @@ consumer at all — traffic that moves but cannot see, which the renderer
 gives away for free (0.998 at four); keep four trucks but drive fewer at
 once; or move the world to a machine with a real GPU, which is the only
 option that removes the wall rather than working around it.
+
+### The same measurement on the GPU (d3d12), 2026-08-22
+
+Everything above ran on llvmpipe. WSLg can hand Mesa to the laptop's
+discrete GPU through D3D12, and the finding above was that the ceiling is
+the SERIAL SOFTWARE RENDER PATH — so the owner asked for the same matrix
+on the GPU. Nothing above is deleted: the llvmpipe numbers are what that
+configuration does, and the comparison is the point.
+
+#### The driver is actually taken, and gz took it too
+
+```
+$ glxinfo -B                                    # the default, for contrast
+    Device: llvmpipe (LLVM 20.1.2, 256 bits) (0xffffffff)
+    Accelerated: no
+OpenGL renderer string: llvmpipe (LLVM 20.1.2, 256 bits)
+
+$ GALLIUM_DRIVER=d3d12 MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA glxinfo -B
+    Device: D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU) (0xffffffff)
+    Accelerated: yes
+    Video memory: 22118MB
+    Unified memory: no
+OpenGL vendor string: Microsoft Corporation
+OpenGL renderer string: D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU)
+```
+
+`glxinfo` proves the env var reaches Mesa; it does not prove the SERVER
+took the same path, so gz's own rendering log was read after the first
+run (`~/.gz/rendering/ogre2.log`, moved aside beforehand so the lines
+below could not be a stale llvmpipe session's):
+
+```
+16:03:50: GL_VERSION  = 4.6 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2
+16:03:50: GL_VENDOR   = Microsoft Corporation
+16:03:50: GL_RENDERER = D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU)
+```
+
+#### The command
+
+Identical to the llvmpipe runs, same script, same poses, same windows,
+same subscribed lidars — two env vars added and nothing else:
+
+```
+wsl -e bash -lc "cd /mnt/c/Users/ozkan/projects/amr-agent && \
+  GALLIUM_DRIVER=d3d12 MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA \
+  RTF_GATE=0.30 RTF_LOGDIR=/tmp/m6_gpu1 \
+  RTF_POSE_f3='-8.0 5.65 0.05 0' RTF_POSE_f4='8.0 5.65 0.05 3.14159' \
+  bash m6/tools/rtf_spike.sh f1 f2 f3 f4"
+```
+
+#### THE STATISTIC WAS WRONG, AND IT WAS WRONG IN BOTH DIRECTIONS OF THE COMPARISON
+
+Reading the GPU captures turned up something that has to come before any
+of the numbers, because it re-reads the llvmpipe ones too.
+
+`rtf_spike.sh` reports the ARITHMETIC MEAN OF THE INSTANTANEOUS
+`real_time_factor` samples — the statistic M6.1's gate 1 defined and
+every RTF figure in this file inherits. That mean is a fair estimate
+while the simulator runs smoothly and a badly biased one when it runs in
+bursts, because the samples are not evenly spaced in wall time: a stall
+publishes a cluster of near-zero factors and the catch-up that follows
+publishes very few high ones.
+
+The unbiased quantity is in the same messages and needs no new run: every
+`gz.msgs.WorldStatistics` carries `sim_time` and `real_time`, so the
+honest ratio is **(sim_time last − first) / (real_time last − first)** —
+simulated seconds delivered per wall second, integrated over the window,
+which is what "real-time factor" is supposed to mean.
+
+| Window (4 trucks, 16 lidars subscribed) | Mean of samples | INTEGRATED Δsim/Δreal |
+|---|---|---|
+| llvmpipe, run 1 / 2 / 3 | 0.190 / 0.230 / 0.230 | **0.579 / 0.580 / 0.579** |
+| llvmpipe, 3 vehicles | 0.155 / 0.140 / 0.179 | **0.778 / 0.781 / 0.775** |
+| d3d12, run 1 / 2 / 3 | 0.583 / 0.687 / 0.670 | **0.903 / 0.899 / 0.712** |
+
+**The delivered scan counts are an independent instrument and they
+confirm the integrated column, not the mean.** Each lidar is scheduled at
+10 Hz of SIM time, so scans delivered ÷ 10 = simulated seconds elapsed:
+
+- llvmpipe, four trucks: 5,558 scans ÷ 16 lidars = 347.4 per lidar →
+  **34.7 s** of sim time. The integrated ratio says 34.6 s in 59.8 s
+  (0.579). The mean-of-samples would have required 11.4 s.
+- d3d12, four trucks: 8,672 ÷ 16 = 542.0 → **54.2 s** of sim time. The
+  integrated ratio says 54.0 s in 59.8 s (0.903).
+
+Two instruments, agreeing to a fraction of a second, in both
+configurations. The mean-of-samples agrees with neither once the run is
+bursty.
+
+The same correction explains the anomaly recorded above under "It is a
+floor, not a dip" — the four-vehicle mean coming out ABOVE the
+three-vehicle mean in all three llvmpipe runs. Integrated, the series is
+monotone in load exactly as physics demands: **1.000 → 0.989 → 0.778 →
+0.579**. There was no saturation paradox; there was a biased estimator.
+
+**What this does to the STOP above: it withdraws its arithmetic and
+keeps its physics.** Against a gate of 0.30 in simulated seconds per wall
+second, llvmpipe at four vehicles delivers **0.579**, which is over the
+gate. The gate reading of 0.190 was the statistic, not the machine. What
+survives from that section unchanged is everything measured about the
+renderer: the unsubscribed-lidar finding, the ~93 scans/s CPU ceiling,
+the 3-of-20-threads serial path, and the tail — llvmpipe's instantaneous
+factor still bottoms out at 0.014 and its per-lidar delivery still runs
+at 5.8 Hz against the GPU's 9.0 Hz.
+
+#### The three GPU runs
+
+Mean-of-samples first because it is what the script prints, integrated
+second because it is what the number means:
+
+| Run | 1 vehicle, 30 s | 2 vehicles, 60 s | 3 vehicles, 60 s | 4 vehicles, 60 s |
+|---|---|---|---|---|
+| 16:03:50 | 1.002 / 1.000 (296) | 0.996 / 0.995 (592) | 0.993 / 0.995 (592) | **0.583 / 0.903** (570) |
+| 16:10:41 | 0.999 / 1.000 (295) | 0.998 / 1.000 (593) | 0.984 / 0.995 (592) | **0.687 / 0.899** (573) |
+| 16:15:33 | 0.999 / 1.000 (296) | 0.997 / 0.999 (593) | 0.805 / 0.811 (584) | **0.670 / 0.712** (565) |
+
+Run 3 is the noisy one — its third and fourth phases both sag, and its
+scan rate sags with them (97.4/s where runs 1 and 2 delivered 119.4/s at
+three trucks), which is the signature of something else on the machine
+rather than of the fourth truck.
+
+Delivered scans, GPU against CPU, at the same fleet sizes:
+
+| Subscribed lidars | Demand | llvmpipe delivered | d3d12 delivered |
+|---|---|---|---|
+| 4 (1 truck) | 40 /s | 40.0 /s | 40.0 /s |
+| 8 (2 trucks) | 80 /s | 79.1 /s | 79.7-80.1 /s |
+| 12 (3 trucks) | 120 /s | **93.4 /s** | 119.4 /s (97.4 in run 3) |
+| 16 (4 trucks) | 160 /s | **92.6 /s** | 143.9-144.5 /s |
+
+#### The ladder, re-run on the GPU
+
+Same instrument as above — four trucks spawned once, lidars switched on
+one truck at a time, server CPU from `/proc/<pid>/stat` deltas:
+
+| Window | Mean | Integrated | Server CPU | Scans | llvmpipe mean, for contrast |
+|---|---|---|---|---|---|
+| 4 trucks, 0 lidars on | 0.893 | 0.887 | 1.4 cores | 0 | 0.995 (1.0 cores) |
+| 4 trucks, 4 on | 0.952 | 0.953 | 1.7 | 40.7 /s | 0.995 (2.0) |
+| 4 trucks, 8 on | 0.941 | 0.946 | 2.1 | 82.3 /s | 0.981 (3.0) |
+| 4 trucks, 12 on | 0.786 | 0.791 | 2.7 | 102.5 /s | **0.274** (3.0) |
+| 4 trucks, 16 on | 0.686 | 0.866 | 2.5 | 148.7 /s | **0.195** (2.8) |
+
+**The cliff is gone.** On llvmpipe the twelfth lidar took the simulation
+from 0.981 to 0.274; on the GPU the same step costs 0.15 and the
+sixteenth costs a little more. The delivered scan rate keeps climbing to
+148.7/s instead of stopping dead at ~93-100/s, which is the same
+statement from the other side: the CPU renderer had a throughput ceiling
+below the fleet's demand and the GPU's ceiling is above it. Server CPU
+goes DOWN where the load goes up (2.5-2.7 cores against llvmpipe's 3.0)
+because the rasterising left the CPU.
+
+The llvmpipe ladder's raw captures were overwritten by this run, so its
+integrated column cannot be recomputed; its delivered-scan rate implies
+0.83 at twelve lidars and 0.63 at sixteen, consistent with the 0.775 and
+0.579 measured directly in the spike runs.
+
+#### Verdict on the GPU
+
+**GO. Four vehicles, sixteen lidars subscribed and rendering, three runs:
+0.583 / 0.687 / 0.670 by the printed mean and 0.903 / 0.899 / 0.712
+integrated — every one of the six figures is above the 0.30 gate**, the
+worst by a factor of 1.9 and the typical by a factor of 3.
+Two vehicles run at 0.995-1.000 and three at 0.811-0.995.
+
+This retires the two-driver compromise as a *simulation* constraint. The
+decision is the owner's; what is measured is that the machine renders
+four trucks' safety scanners at 90 % of real time when the GPU does the
+rasterising, and at 58 % when the CPU does.
+
+Three things this does NOT retire:
+
+- **The stack is still not in the number.** No ROS, no bridge, no
+  writers, no broker: 39 pids at four vehicles. The M6.4-era two-vehicle
+  stack cost about a third of real time on top of the server-only figure.
+- **The tail.** The instantaneous minimum in the GPU's four-vehicle
+  windows is 0.023-0.043, so deep stalls still happen; they are shorter
+  and rarer than llvmpipe's but `SENSOR_STALE_S` is 0.40 s and only a
+  full-stack run can say whether the safety chain rides them out.
+- **The earlier RTF figures in this file stay valid as records and must
+  be labelled by their renderer where they are quoted.** M6.1's 0.934,
+  the 0.734-0.755 full-stack pair, M6.3's and M6.4's numbers and the
+  whole llvmpipe half of this gate were all measured with **llvmpipe**
+  and, additionally, with the mean-of-samples statistic. They describe
+  what that configuration did. The *ceiling* they imply is a
+  software-render ceiling, not this machine's.
+
+#### Making it permanent, and why it is not wired in yet
+
+The two variables have to be in the environment of whatever starts the gz
+**server** — `m6.sh start` spawns the world, so the setting has to be in
+place before that, not inside a subshell that only runs the CLI. The
+minimal operator change, one file, no repo edit:
+
+```
+# ~/.bashrc of the WSL user (Ubuntu's ~/.profile sources it, and every
+# `wsl -e bash -lc` is a login shell, so m6.sh inherits both)
+export GALLIUM_DRIVER=d3d12
+export MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
+```
+
+Verify with `GALLIUM_DRIVER= glxinfo -B | grep Device` in a fresh shell
+(should read `D3D12 (NVIDIA ...)`) and, after a run, with `grep
+GL_RENDERER ~/.gz/rendering/ogre2.log`, which is the only line that
+proves the SERVER took it. The Windows-side writer needs nothing: it
+renders nothing.
+
+**Nothing was wired into `m6.sh`.** Two exports at the top of that script
+would make every m6 run depend on a GPU being present, which is a
+portability decision and an owner's call — and this measurement is not
+the place to take it.
+
+#### One defect, recorded because it is real
+
+Under d3d12 the spike's EXIT STATUS is not trustworthy: all three
+four-vehicle runs and a one-vehicle probe printed their verdict and then
+exited **139** (SIGSEGV) instead of 0. It is a teardown crash after the
+measurement, and it needs a render context to have drawn: a server
+started under d3d12 and killed WITHOUT ever rendering exits 0, one that
+has been rendering lidars does not. No window and no sample is affected —
+every phase printed, and the per-topic scan counts are equal within each
+vehicle to the last scan, so no subscriber died early. Until the tool
+handles it, **read the VERDICT line, not `$?`, on this driver**; the
+llvmpipe runs' exit statuses (0 for GO, 2 for STOP) were correct.
 
 ---
 
