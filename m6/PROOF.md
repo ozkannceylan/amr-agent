@@ -6361,36 +6361,66 @@ Each gate below is a numbered list. **One action per step.** Do them in
 order, do not skip the setup, and write the numbers you record straight
 into the gate's section above.
 
+**CORRECTED 2026-08-23, and the correction is itself the lesson.** These
+steps were written against `m5_ver2/step6` when the fleet was two trucks
+and the stack was seventeen processes. The tree is now `m6/` and the
+fleet is four, so every path, every script name and every count below
+was stale — and two steps were worse than stale. Gate 4 said "run
+`sed -n '7p' .step6_pids`, that line is `sensor_link_f1`", and Gate 6
+said line 4 is `cmd_mux_f1`. Both counted lines in a pidfile laid out for
+two vehicles. Followed today, on a pidfile laid out for four, they hand
+you **a pid belonging to a different node** — and the very next
+instruction is `kill`. A line number in a pidfile is not an identity. It
+is gone from this runbook: every process below is found by asking the
+process itself which vehicle it belongs to.
+
+The lookup is written the way it is for a reason worth one sentence.
+`pgrep -f sensor_link.py` alone **also matches the shell you typed it
+into**, because that pattern is sitting in that shell's own command line
+— measured 2026-08-23, it returned a third pid with no vehicle at all.
+So the pattern anchors on `python3.*` and the loop prints only processes
+that actually carry a `VEHICLE`, which drops both the self-match and the
+fleet manager (which has no vehicle by design).
+
+**GPU FIRST.** Every real-time-factor figure in this file was measured
+with these two variables set, and they are still not in `~/.bashrc`.
+Export them in the shell you start the world from, or you are measuring a
+different machine than the one this file describes:
+`export GALLIUM_DRIVER=d3d12 MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA`.
+
+**The gates below are M6.1's, and they are two-truck gates.** The floor
+now starts four. f3 and f4 sit at their table poses, enabled and idle,
+and take no part — that is expected, not a fault. Leave them running.
+
 ## Setup — do this once, before any gate
 
 1. Open a WSL terminal.
-2. Run `cd /mnt/c/Users/ozkan/projects/amr-agent/m5_ver2/step6`.
-3. Run `./step6.sh deploy`. It must print `deployed 17 files`.
-4. Run `./step6.sh start`. (Leave off `--headless`: you want the Gazebo window for gates 2 and 3.)
-5. Count the pid lines it printed. There must be **17**.
-6. Check no line says `exited during startup`. If one does, open that log in `logs/` and stop here.
-7. Look at the screen: **two HMI windows**, titled `Forklift HMI - f1` and `Forklift HMI - f2`.
-8. Open a Windows terminal (cmd or PowerShell).
-9. Run `cd C:\Users\ozkan\projects\amr-agent`.
-10. Run `python m5_ver2\step6\windows\step6.py --vehicle f1 --virtual`.
-11. Check its console prints `VIRTUAL F-PLC (model) - PLCSIM Advanced is not in this loop`, then `streaming PLC state to <wsl-ip>:5110` and `listening for the back scanner on 0.0.0.0:5111`.
-12. Leave that window open. Open a **second** Windows terminal.
-13. Run `cd C:\Users\ozkan\projects\amr-agent`.
-14. Run `python m5_ver2\step6\windows\step6.py --vehicle f2 --virtual`.
-15. Check its console prints the same three lines, but with **5120** and **5121**.
-16. Look at the two panels: `Forklift f1 PLC Control Panel - VIRTUAL F-PLC (model)` and `Forklift f2 PLC Control Panel - VIRTUAL F-PLC (model)`.
-17. Click **RESET** once on f1's panel. Its lamp must read `MOTOR ENABLED`.
-18. Click **RESET** once on f2's panel. Its lamp must read `MOTOR ENABLED`.
-19. Check both HMI lamps are neutral and both read `Drive enable: ON`.
+2. Run `export GALLIUM_DRIVER=d3d12 MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA`.
+3. Run `cd /mnt/c/Users/ozkan/projects/amr-agent/m6`.
+4. Run `./m6.sh deploy`. It must print `deployed 31 files`.
+5. Run `./m6.sh start`. (Leave off `--headless`: you want the Gazebo window for gates 2 and 3.)
+6. Count the pid lines it printed. There must be **39**.
+7. Check no line says `exited during startup`. If one does, open that log in `logs/` and stop here.
+8. Look at the screen: **four HMI windows**, titled `Forklift HMI - f1` through `Forklift HMI - f4`.
+9. Open a Windows terminal (cmd or PowerShell).
+10. Run `cd C:\Users\ozkan\projects\amr-agent`.
+11. Run `python m6\windows\m6.py --vehicle f1 --virtual`.
+12. Check its console prints `VIRTUAL F-PLC (model) - PLCSIM Advanced is not in this loop`, then `streaming PLC state to <wsl-ip>:5110` and `listening for the back scanner on 0.0.0.0:5111`.
+13. Leave that window open. Open a **second** Windows terminal, `cd` to the same place, and run the same command with `--vehicle f2`. Its two ports must read **5120** and **5121**.
+14. Open a **third** Windows terminal and run it with `--vehicle f3`. Ports **5130** and **5131**.
+15. Open a **fourth** Windows terminal and run it with `--vehicle f4`. Ports **5140** and **5141**.
+16. Look at the four panels, each titled `Forklift fN PLC Control Panel - VIRTUAL F-PLC (model)`.
+17. Click **RESET** once on each of the four panels. Every lamp must read `MOTOR ENABLED`.
+18. Check all four HMI lamps are neutral and every one reads `Drive enable: ON`.
 
-**Both trucks are now enabled.** Every gate below starts from here.
+**All four trucks are now enabled.** Every gate below starts from here
+and uses f1 and f2 only.
 
 ### Teardown — do this at the end of every session
 
-1. Close f1's panel window.
-2. Close f2's panel window.
-3. In the WSL terminal run `./step6.sh stop`.
-4. Check the last line is `down.`
+1. Close all four panel windows.
+2. In the WSL terminal run `./m6.sh stop`.
+3. Check the last line is `down.`
 
 ## Gate 2 — cross-isolation, both directions
 
@@ -6451,8 +6481,8 @@ Run the setup first. Start the recording BEFORE you press GO.
 
 Run the setup first. This kills f1's `sensor_link` while f2 is driving.
 
-1. In the WSL terminal, run `sed -n '7p' .step6_pids`. That line is **`sensor_link_f1`** — the pidfile is in spawn order (line 1 world, lines 2-9 f1, lines 10-17 f2).
-2. Write that pid down.
+1. In the WSL terminal, run `for p in $(pgrep -f "python3.*sensor_link\.py"); do v=$(tr '\0' '\n' < /proc/$p/environ | sed -n 's/^VEHICLE=//p'); [ -n "$v" ] && echo "$p $v"; done`. It prints four lines, one per truck, each `pid vehicle`.
+2. Write down the pid on the line that ends in **`f1`**. Read it off the vehicle name, never off a line number — see the correction at the top of this runbook.
 3. Open a third WSL terminal.
 4. Run `source /opt/ros/jazzy/setup.bash`.
 5. Run `export ROS_DOMAIN_ID=96`.
@@ -6466,15 +6496,15 @@ Run the setup first. This kills f1's `sensor_link` while f2 is driving.
 13. Press Ctrl-C in the third WSL terminal.
 14. Run `grep -c '"motor": false' /tmp/g4_f2.txt`. **Record it. The gate wants 0.**
 15. Record how long f1 took to drop (a stopwatch is enough). The writer's half of that budget is `SENSOR_STALE_S` 0.40 + `CYCLE_S` 0.02 < 0.42 s to writing the inputs False; the F-program's chain is the other half.
-16. Note that f1 stays down: `kill` removed the node, so nothing will heal it. Run `./step6.sh stop`, then the setup again, before any further gate.
+16. Note that f1 stays down: `kill` removed the node, so nothing will heal it. Run `./m6.sh stop`, then the setup again, before any further gate.
 17. Write the numbers into the Gate 4 section above.
 
 ## Gate 6 — kill the mux under Motor True
 
 Run the setup first. This is the step4 14.8 m class, tested on purpose.
 
-1. In the WSL terminal, run `sed -n '4p' .step6_pids`. That line is **`cmd_mux_f1`**.
-2. Write that pid down.
+1. In the WSL terminal, run `for p in $(pgrep -f "python3.*cmd_mux\.py"); do v=$(tr '\0' '\n' < /proc/$p/environ | sed -n 's/^VEHICLE=//p'); [ -n "$v" ] && echo "$p $v"; done`. It prints four lines, one per truck, each `pid vehicle`.
+2. Write down the pid on the line that ends in **`f1`**.
 3. Open a third WSL terminal.
 4. Run `source /opt/ros/jazzy/setup.bash`.
 5. Run `export ROS_DOMAIN_ID=96`.
@@ -6488,5 +6518,5 @@ Run the setup first. This is the step4 14.8 m class, tested on purpose.
 13. Open `/tmp/g6_xy.txt`. Find the last pair before the numbers stop changing (that is where f1 came to rest) and the pair from the moment you killed the mux, and record the straight-line distance between them.
 14. **The gate wants that distance to be a `CMD_STALE_S`-sized coast: 0.25 s of travel plus a tick, so 0.35 s.** At the 300 mm/s creep limit that is 0.105 m; at the 2800 mm/s ceiling, **0.98 m** (this line read "under 0.8 m" until 2026-08-21, which was an arithmetic slip and is corrected here). The formula counts the stale window only — the drive's braking ramp is on top of it. Anything in step4's 14.8 m class is a FAIL.
 15. Check f2's HMI: it must be unaffected, still `Drive enable: ON`.
-16. Run `./step6.sh stop` — f1's mux is gone and the stack is now incomplete.
+16. Run `./m6.sh stop` — f1's mux is gone and the stack is now incomplete.
 17. Write the distance into the Gate 6 section above.
