@@ -231,7 +231,7 @@ real time across the whole acceptance run.
 Loop-level evidence sits beside it: `tests/test_m6_virtual_loop.py` drives
 the real `m6.control_loop` against `VirtualFPLC` over real UDP sockets,
 parameterised over **every port pair in the table** — four since M6.5, so
-three scenarios become twelve runs. **481 tests pass under WSL** (370 at
+three scenarios become twelve runs. **485 tests pass under WSL** (370 at
 M6.2, 439 at M6.4, 453 before the table grew to four, 466 at the M6.5 gate
 run), and the suite needs
 `source /opt/ros/jazzy/setup.bash` first or it aborts in collection.

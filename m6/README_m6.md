@@ -1001,11 +1001,12 @@ headless, and a re-measurement of them should be too.
 
 ## Unit tests — m6's own, and the number to expect
 
-**`481 passed, 0 skipped`** under WSL (the M6.5 fix-up — it was 370 at
-M6.2, 466 at the M6.5 gate run, and the fifteen new ones are the three
-parked-truck field rules, the nine the step-aside brought with it, and
-the three that pin the two speed bands to the field thresholds they
-protect rather than to a number):
+**`485 passed, 0 skipped`** under WSL (the M6.5 fix-up — it was 370 at
+M6.2, 466 at the M6.5 gate run, and the nineteen new ones are the three
+parked-truck field rules, the nine the step-aside brought with it, the
+three that pin the two speed bands to the field thresholds they protect
+rather than to a number, and the four that hold the scan-fault branch to
+diagnosis and out of the verdict):
 
 ```bash
 cd /mnt/c/Users/ozkan/projects/amr-agent
