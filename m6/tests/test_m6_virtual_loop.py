@@ -13,14 +13,16 @@ WHAT LEVEL OF EVIDENCE THIS IS, EXACTLY
   So: loop-level evidence, not a full-stack run. The autonomous leg under
   `--virtual` is still owed a live smoke against the ROS side.
 
-WHY EVERY SCENARIO RUNS TWICE
+WHY EVERY SCENARIO RUNS ONCE PER VEHICLE
   Since M6.1 the writer is one process per vehicle and the port pair is
   the vehicle's, not the project's - so a loop that only ever ran on
-  f1's pair would leave f2's writer unproven and would happily survive a
-  VEHICLES table that handed both trucks the same port. Each scenario
-  therefore runs once per vehicle, on the pair status_contract gives
-  that vehicle, and the port literals have left this file with the rest
-  of them.
+  f1's pair would leave the other writers unproven and would happily
+  survive a VEHICLES table that handed two trucks the same port. Each
+  scenario therefore runs once per vehicle, on the pair status_contract
+  gives that vehicle, and the port literals have left this file with the
+  rest of them. The list is READ from the table rather than named here:
+  M6.5's f3 and f4 were covered by the fixture the moment they joined
+  it, which is the only way a per-vehicle sweep stays a sweep.
 
 HOW THE ASSERTIONS ARE TIMED
   Every wait polls for its condition against a deadline, so a slow machine
@@ -36,6 +38,7 @@ from types import SimpleNamespace
 import pytest
 
 import m6
+import status_contract
 from virtual_fplc import VirtualFPLC
 
 # Twice the live 10 Hz of sensor_link, so one late thread wake-up can
@@ -131,7 +134,7 @@ def _enable(rig):
     assert _wait(lambda: rig.live["motor"]), "Motor never enabled after ack"
 
 
-@pytest.fixture(params=["f1", "f2"])
+@pytest.fixture(params=sorted(status_contract.VEHICLES))
 def vehicle_ports(request, monkeypatch):
     """Point the module's two port constants at one vehicle's pair.
 
@@ -154,8 +157,9 @@ def rig(vehicle_ports):
     """A running control_loop with real sockets on both sides of it.
 
     Every test reaches it through this fixture, so `vehicle_ports`
-    parameterises the whole file - three scenarios, two vehicles, six
-    runs - without a test having to name the vehicle it is being.
+    parameterises the whole file - three scenarios times every vehicle in
+    the table, twelve runs at four - without a test having to name the
+    vehicle it is being.
     """
     listener = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:

@@ -8,15 +8,26 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "tools")))
 
 import instantiate_vehicle as iv
+import status_contract as sc      # conftest put ipc/ on sys.path
 
 
-def test_derives_both_files_with_full_prefix_rewrite(tmp_path):
-    out = iv.instantiate("f1", out_root=str(tmp_path))
+@pytest.mark.parametrize("vid", sorted(sc.VEHICLES))
+def test_derives_both_files_with_full_prefix_rewrite(tmp_path, vid):
+    """The sweep: every vehicle in the table, not one example of one.
+
+    `deploy` runs `--all`, so what has to hold is that EVERY id the table
+    holds derives a complete pair - and the count is taken from the source
+    rather than hard-coded, so a new topic in model.sdf cannot make this
+    pass by accident. Parameterised off the table for the same reason the
+    tool reads it: f3 and f4 were covered the moment M6.5 added them.
+    """
+    out = iv.instantiate(vid, out_root=str(tmp_path))
     model = open(os.path.join(out, "model.sdf"), encoding="utf-8").read()
     config = open(os.path.join(out, "config.yaml"), encoding="utf-8").read()
     assert "/forklift/" not in model and "/forklift/" not in config
-    assert model.count("/f1/") == iv.count_prefix(iv.SRC_MODEL)
-    assert config.count("/f1/") == iv.count_prefix(iv.SRC_CONFIG)
+    prefix = "/{}/".format(vid)
+    assert model.count(prefix) == iv.count_prefix(iv.SRC_MODEL)
+    assert config.count(prefix) == iv.count_prefix(iv.SRC_CONFIG)
 
 
 def test_rewrite_touches_only_the_prefix(tmp_path):

@@ -133,7 +133,13 @@ def serve(state, live, ctl):
 
 def main():
     ap = argparse.ArgumentParser(description="the panel's hands, no panel")
-    ap.add_argument("--vehicle", choices=("f1", "f2"), required=True)
+    # THE IDS ARE m6's, NOT A SECOND SPELLING OF THE TABLE. m6 already
+    # holds the guarded tuple (test_vehicles_table.py asserts it against
+    # status_contract.VEHICLES), and this parser is built after that
+    # import, so borrowing it costs nothing and cannot drift. A literal
+    # here was f1/f2 until M6.5 and would have refused f3 and f4 - the
+    # gates need four of these drivers.
+    ap.add_argument("--vehicle", choices=m6.VEHICLE_IDS, required=True)
     ap.add_argument("--virtual", action="store_true")
     ap.add_argument("--ctl-port", type=int, required=True)
     args = ap.parse_args()

@@ -4,12 +4,34 @@ import pytest
 import status_contract as sc
 
 
-def test_table_has_exactly_the_two_vehicles_with_disjoint_ports():
-    assert set(sc.VEHICLES) == {"f1", "f2"}
+def test_table_has_exactly_the_four_vehicles_with_disjoint_ports():
+    """Four since M6.5 - f3 and f4 joined with the fleet.
+
+    The membership assertion is spelled out rather than counted: this
+    table IS the fleet, and a vehicle appearing or vanishing from it
+    should have to be written down here, in a test, on purpose.
+    """
+    assert set(sc.VEHICLES) == {"f1", "f2", "f3", "f4"}
     ports = [v[k] for v in sc.VEHICLES.values()
              for k in ("plc_port", "sensor_port")]
     assert len(ports) == len(set(ports))
     assert 5100 not in ports and 5101 not in ports   # step5's family
+
+
+def test_every_vehicle_carries_a_whole_spawn_pose():
+    """A pose short of a key spawns a truck at the origin, or not at all.
+
+    The launch file and m6.sh's `home` both index all four of these by
+    name, and neither has anywhere to put a KeyError: the launch dies at
+    import for every vehicle, and home prints a shrug over a live
+    simulator. Generic over the table, so a fifth vehicle is covered the
+    moment it is added.
+    """
+    for vid, v in sc.VEHICLES.items():
+        assert set(v["spawn"]) == {"x", "y", "z", "yaw"}, vid
+        for key, text in v["spawn"].items():
+            assert isinstance(text, str), (vid, key)
+            float(text)          # every one of them is a number in a string
 
 
 def test_the_writers_vehicle_flag_offers_exactly_the_table():
@@ -20,10 +42,17 @@ def test_the_writers_vehicle_flag_offers_exactly_the_table():
     constants once, at first import, off env VEHICLE - and the writer
     sets that env FROM the parsed flag, so the parser has to be built
     before this module may be imported at all. This test is the price of
-    that ordering. A third vehicle in the table must reach that tuple too.
+    that ordering, and it has been paid once: f3 and f4 reached the table
+    at M6.5 and this failed until they reached m6.VEHICLE_IDS too. A
+    fifth vehicle must reach that tuple the same way.
+
+    tools/scripted_writer.py is NOT a third spelling: it builds its own
+    parser but takes m6.VEHICLE_IDS for the choices, so guarding this one
+    tuple guards both writers.
     """
     import m6            # conftest stamped VEHICLE, so importing is safe
 
+    assert tuple(m6.VEHICLE_IDS) == tuple(sorted(sc.VEHICLES))
     # argparse keeps no public accessor for a built action.
     choices = m6._parser._option_string_actions["--vehicle"].choices
     assert tuple(choices) == tuple(sorted(sc.VEHICLES))
@@ -74,7 +103,8 @@ def test_env_free_from_import_reads_the_table():
     done = subprocess.run([sys.executable, "-c", src], env=env,
                           capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
-    assert done.stdout.strip() == "['f1', 'f2'] /f2/plc/status"
+    assert done.stdout.strip() == \
+        "['f1', 'f2', 'f3', 'f4'] /f2/plc/status"
 
 
 def test_env_free_per_vehicle_constant_still_refused():

@@ -8,11 +8,13 @@ output that matters.
 ONE WRITER PER VEHICLE, WHICH IS THE SINGLE-WRITER RULE AND NOT AN
 EXCEPTION TO IT
   The rule is one writer per PLC, and since M6.1 each vehicle has its
-  own. --vehicle {f1|f2} is what makes this process a particular truck's
+  own. --vehicle is what makes this process a particular truck's
   writer: it stamps env VEHICLE, and status_contract turns that into the
-  two UDP ports, the panel title and the PLCSIM instance name. Two
-  trucks are two of these processes, each on its own port pair, each
-  writing its own PLC. m6.sh prints both command lines on `start`.
+  two UDP ports, the panel title and the PLCSIM instance name. A fleet
+  of N trucks is N of these processes, each on its own port pair, each
+  writing its own PLC; the ids on offer are whatever the VEHICLES table
+  holds (f1..f4 since M6.5), and m6.sh prints one command line per
+  vehicle on `start`.
 
 THE PANEL AND THE LOOP ARE TWO THREADS, ON PURPOSE
   Tk stops pumping events while a window is dragged or resized. If the PLC
@@ -57,8 +59,20 @@ import tkinter as tk
 # a hard requirement here would kill collection. The flag sets the env;
 # status_contract's import below is what refuses, loudly and by name,
 # when neither the flag nor the env named a vehicle.
+#
+# THE IDS ARE A LITERAL AND THEY CANNOT BE ANYTHING ELSE. They are the
+# VEHICLES table's keys, spelled a second time, because reading them from
+# that table would mean importing it BEFORE env VEHICLE is set - which
+# binds the module to no vehicle for the life of the process (see the
+# ordering note below). tests/test_vehicles_table.py asserts this tuple
+# against the table on every run, so the duplication is GUARDED rather
+# than trusted: a vehicle added there fails the suite until it reaches
+# here. It is a module constant and not an inline argument because
+# tools/scripted_writer.py builds a parser of its own and must offer the
+# same ids - it borrows this one rather than becoming a third spelling.
+VEHICLE_IDS = ("f1", "f2", "f3", "f4")
 _parser = argparse.ArgumentParser(add_help=False)
-_parser.add_argument("--vehicle", choices=("f1", "f2"))
+_parser.add_argument("--vehicle", choices=VEHICLE_IDS)
 _parser.add_argument("--virtual", action="store_true")
 _ARGS, _ = _parser.parse_known_args()
 if _ARGS.vehicle:
@@ -73,9 +87,20 @@ sys.path.insert(0, os.path.normpath(os.path.join(
 from status_contract import PLC_PORT, SENSOR_PORT, VID  # noqa: E402
 
 # ----------------------------- CONFIG -----------------------------
-# PLC_3 is RESERVED and entirely unused: PLCSIM Advanced has never run
-# as f2 and cannot until a license returns, so f2 is a --virtual truck.
-PLC_INSTANCE = {"f1": "PLC_2", "f2": "PLC_3"}[VID]
+# ONE PLCSIM ADVANCED INSTANCE HAS EVER EXISTED AND IT IS f1's. PLC_2 is
+# the owner's, running the real F-program. PLC_3 was RESERVED for f2 and
+# is entirely unused - there is one license and it has not returned - and
+# nothing at all was reserved for f3 or f4, which joined at M6.5. So f2,
+# f3 and f4 are --virtual trucks, and the acceptance record has to say
+# which truck proved what against real hardware: only ever f1.
+#
+# A VEHICLE WITH NO INSTANCE IS NOT A KeyError HERE. This dict indexed
+# with [VID] and f3 in the table would kill the module at import - for
+# every truck, including the --virtual ones that are this rig's normal
+# case, and including pytest's collection. .get() leaves it None and
+# connect_plc refuses by name, which is both later and narrower: the
+# only run that can hit it is one that asked for real hardware.
+PLC_INSTANCE = {"f1": "PLC_2", "f2": "PLC_3"}.get(VID)
 VIRTUAL = _ARGS.virtual  # no PLCSIM: virtual_fplc.py plays the F-PLC
 API_DLL_DIR = r"C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\6.0"
 UDP_TARGET = None      # None -> ask `wsl.exe hostname -I`. A string overrides.
@@ -245,6 +270,11 @@ def connect_plc():
         from virtual_fplc import VirtualFPLC
         print("VIRTUAL F-PLC (model) - PLCSIM Advanced is not in this loop")
         return VirtualFPLC()
+    if PLC_INSTANCE is None:
+        raise SystemExit(
+            "no PLCSIM Advanced instance is reserved for {}: PLC_2 is f1's "
+            "and it is the only one that has ever run. Start this writer "
+            "with --virtual.".format(VID))
     sys.path.append(API_DLL_DIR)
     import clr
     clr.AddReference("Siemens.Simatic.Simulation.Runtime.Api.x64")

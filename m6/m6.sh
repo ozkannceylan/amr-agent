@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# m6.sh - bring the M6 cell up and down: ONE broker, ONE world, TWO
-# forklifts, one full set of vehicle nodes per forklift, and ONE fleet
-# manager over the lot of them.
+# m6.sh - bring the M6 cell up and down: ONE broker, ONE world, EVERY
+# forklift in the VEHICLES table (four since M6.5), one full set of vehicle
+# nodes per forklift, and ONE fleet manager over the lot of them.
 #   start [--headless] | stop
 #
 # start opens the Gazebo GUI client, because this script is the HUMAN entry
@@ -48,16 +48,32 @@ BROKER_LIB="$HOME/.local/mosquitto-vendored/usr/lib/x86_64-linux-gnu"
 export GZ_PARTITION="${GZ_PARTITION:-m6}"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-96}"
 GUI=true   # start's default; --headless sets it false. See the header.
-# THE VEHICLES THIS SCRIPT STARTS, in the order it starts them. The one home
-# for every per-vehicle difference is the VEHICLES table in
-# ipc/status_contract.py - ports, topics, spawn poses and the derived
-# vehicles/<vid>/ pair all come from there, and nothing but the ID LIST is
-# repeated here, because start, home and the writer hint are three shell
-# loops and a shell cannot import Python without making `stop` depend on it.
-# MAINTENANCE OBLIGATION: a vehicle added to that table must be added here
-# too, or it is simply never started - and the ports at the two case patterns
-# in start() are that table's plc_port values (see the note there).
-VEHICLES=(f1 f2)
+# THE VEHICLES THIS SCRIPT STARTS ARE READ FROM THE TABLE, AND THE ID LIST IS
+# NOT REPEATED HERE ANY MORE. The one home for every per-vehicle difference is
+# VEHICLES in ipc/status_contract.py - ports, topics, spawn poses and the
+# derived vehicles/<vid>/ pair. Until M6.5 this file kept its own copy of the
+# id list and its own copies of the plc_port values, each under a maintenance
+# note asking the next person to remember; four vehicles is where that stopped
+# being reasonable. Both now come from one env-free read of that table, the
+# same read the launch file and tools/rtf_spike.sh do.
+#
+# IT IS A FUNCTION AND NOT A GLOBAL, AND THAT IS WHAT PROTECTS `stop`. A
+# python3 at the top of this file would make stop - the command an operator
+# runs when things have already gone wrong - depend on an interpreter, a
+# PYTHONPATH and a parseable table. stop needs no vehicle id at all (it sweeps
+# by command-line pattern and by partition), so it never calls this. start,
+# home and the writer hint do, and each refuses by name if the read comes back
+# empty rather than quietly starting a fleet of nobody.
+vehicle_table() {  # one line per vehicle: "<vid> <plc_port>", sorted
+    PYTHONPATH="$M6/ipc" python3 -c 'import status_contract
+for vid, v in sorted(status_contract.VEHICLES.items()):
+    print(vid, v["plc_port"])' 2>/dev/null
+}
+# The refusal both callers share, so the two cannot drift apart either.
+no_table() {
+    echo "cannot read the VEHICLES table from $M6/ipc/status_contract.py"
+    echo "  try it by hand: PYTHONPATH=$M6/ipc python3 -c 'import status_contract'"
+}
 # The stack as command-line patterns. gz sim is FIRST on purpose (see the
 # shutdown-order note in stop()); a pattern only NOMINATES, ours() decides.
 # MAINTENANCE OBLIGATION: anything added to the stack must be added here too,
@@ -122,14 +138,15 @@ ours() {
 #   terminal - the very case setsid was added to survive - leaves it on disk,
 #   and Linux recycles pids back through the 17xxx-18xxx range this stack
 #   lands in within minutes of a boot. A recorded number can therefore name a
-#   STRANGER, and every use of that number has to say so first. Twenty of
-#   the twenty-one recorded command lines contain m6 and no foreign
-#   one does, so that token is the identity test. It is deliberately the
-#   literal and not "$M6": if REPO ever resolves differently between the
+#   STRANGER, and every use of that number has to say so first. Every
+#   recorded command line but the broker's contains m6 - thirty-eight of the
+#   thirty-nine at four vehicles - and no foreign one does, so that token is
+#   the identity test. It is deliberately the literal
+#   and not "$M6": if REPO ever resolves differently between the
 #   start and the stop, the looser token still matches and the partition
 #   read-back below still works, which is the failure that read-back exists
 #   to prevent.
-#   THE BROKER IS THE TWENTY-FIRST, and its command line is a path in the
+#   THE BROKER IS THE ONE EXCEPTION, and its command line is a path in the
 #   user's HOME - a vendored binary is not under m6 and never
 #   will be - so it needs a token of its own, or every start would report it
 #   as having exited and call the stack incomplete. mosquitto-vendored is
@@ -159,20 +176,21 @@ sweep() {  # sweep <signal>
 }
 
 home() {
-    # Teleport BOTH forklifts back to their spawn poses, so a latched
-    # protective field does not cost a simulator restart. gz only:
+    # Teleport EVERY forklift in the table back to its spawn pose, so a
+    # latched protective field does not cost a simulator restart. gz only:
     # nothing here touches PLCSIM or the PLC program (single-writer rule),
     # so the ESTOP1 latches stay latched and the panel's 'a' is still the
     # reset - this moves the PLANT, not the safety state.
     #
-    # THE POSES COME FROM THE VEHICLES TABLE, NOT FROM A COPY. They used to
-    # be sed'd out of m6_world.launch.py's _SPAWN, which was then the one
-    # home a single spawn pose had. Two vehicles have two poses and neither
-    # belongs to the launch file: ipc/status_contract.py owns them, the
-    # launch file spawns from that table and this reads the same table, so a
-    # pose that moves moves for the spawn and for the home together.
+    # THE POSES COME FROM THE VEHICLES TABLE, NOT FROM A COPY, and since M6.5
+    # so does the list of trucks to home. They used to be sed'd out of
+    # m6_world.launch.py's _SPAWN, which was then the one home a single spawn
+    # pose had. Four vehicles have four poses and none of them belongs to the
+    # launch file: ipc/status_contract.py owns them, the launch file spawns
+    # from that table and this reads the same table, so a pose that moves
+    # moves for the spawn and for the home together.
     #
-    # A REFUSAL FOR ONE VEHICLE DOES NOT ABANDON THE OTHER: each is homed on
+    # A REFUSAL FOR ONE VEHICLE DOES NOT ABANDON THE REST: each is homed on
     # its own and the exit status is the OR of the failures, because the
     # truck that could be recovered should be, and a half-done home has to
     # still be reported as a failure.
@@ -181,7 +199,12 @@ home() {
     # exactly as stop() does: a home where GZ_PARTITION differs from the
     # start would time out against an empty bus and print a shrug over a
     # live simulator.
-    local pid p vid x y z yaw qw qz rc=0
+    local pid p vid port x y z yaw qw qz rc=0
+    local -a VEHICLES=()
+    while read -r vid port; do
+        [ -n "$vid" ] && VEHICLES+=("$vid")
+    done < <(vehicle_table)
+    [ "${#VEHICLES[@]}" -gt 0 ] || { no_table; return 1; }
     if [ -f "$PIDFILE" ]; then
         p="$(while read -r pid; do
                  case "$pid" in ''|*[!0-9]*) continue ;; esac
@@ -195,7 +218,7 @@ home() {
         # The table read is a subprocess and not an import, because a shell
         # cannot have one: PYTHONPATH points at ipc/ and status_contract is
         # read ENV-FREE, through VEHICLES, exactly as the launch file reads
-        # it. No VEHICLE is exported here - this loop is about both trucks.
+        # it. No VEHICLE is exported here - this loop is about all of them.
         read -r x y z yaw <<<"$(PYTHONPATH="$M6/ipc" python3 -c 'import sys
 import status_contract
 s = status_contract.VEHICLES[sys.argv[1]]["spawn"]
@@ -205,8 +228,8 @@ print(s["x"], s["y"], s["z"], s["yaw"])' "$vid")"
             rc=1; continue
         fi
         # Quaternion from yaw, so a spawn with a heading still homes true -
-        # f2's is pi, facing f1 down the aisle. awk, because the shell has
-        # no cosine.
+        # f2's and f4's are pi, each facing its aisle partner. awk, because
+        # the shell has no cosine.
         qw="$(awk "BEGIN{printf \"%.9f\", cos($yaw/2)}")"
         qz="$(awk "BEGIN{printf \"%.9f\", sin($yaw/2)}")"
         echo "homing forklift_$vid to ($x, $y, $z, yaw $yaw) in partition $GZ_PARTITION"
@@ -329,7 +352,17 @@ stale_check() {
 }
 
 start() {
-    local pid
+    local pid vid port
+    # THE FLEET IS READ BEFORE ANYTHING IS STARTED, because everything below
+    # this line is per-vehicle: the port pre-flight, the spawn loop and the
+    # writer hint all walk these two arrays, and a start that cannot say who
+    # the trucks are cannot do any of it.
+    local -a VEHICLES=() PLC_PORTS=()
+    while read -r vid port; do
+        [ -n "$vid" ] || continue
+        VEHICLES+=("$vid"); PLC_PORTS+=("$port")
+    done < <(vehicle_table)
+    [ "${#VEHICLES[@]}" -gt 0 ] || { no_table; return 1; }
     if [ -f "$PIDFILE" ]; then
         # recorded() too: a recycled pid would make start refuse against a
         # stack that is not there, and the message would send the operator
@@ -346,13 +379,14 @@ start() {
         rm -f "$PIDFILE"
     fi
     # A VEHICLE'S UDP PORT IS A SINGLE-HOLDER RESOURCE, AND LOSING IT IS
-    # QUIET. Each vehicle's plc_link binds its own - f1 :5110, f2 :5120 -
-    # and the second bind on a held one dies EADDRINUSE inside the first
-    # second; that vehicle then comes up with its PLC link missing and says
-    # so in ONE warning line among the TWENTY-ONE this stack now prints (hit
-    # twice while building M6.1's Task 8, when there were seventeen of
-    # them). Refuse first, and name the vehicle whose port is held,
-    # because "already running" is the answer the operator needs.
+    # QUIET. Each vehicle's plc_link binds its own - f1 :5110, f2 :5120,
+    # f3 :5130, f4 :5140 - and the second bind on a held one dies EADDRINUSE
+    # inside the first second; that vehicle then comes up with its PLC link
+    # missing and says so in ONE warning line among the nine per vehicle plus
+    # three this stack prints, THIRTY-NINE at four (hit twice while building
+    # M6.1's Task 8, when there were seventeen of them). Refuse first, and
+    # name the vehicle whose port is held, because "already running" is the
+    # answer the operator needs.
     #
     # WHAT REALISTICALLY HOLDS ONE: a m6 stack that is ALREADY UP - a
     # second copy of this script - and on this machine nothing else. The
@@ -361,15 +395,18 @@ start() {
     # own guard on its own port, and checking theirs would refuse a start
     # that is perfectly legal beside them.
     #
-    # THE SENSOR PORTS ARE UNCHECKED ON PURPOSE. 5111 and 5121 are bound on
-    # the WINDOWS side - each writer's rx socket - so `ss` in WSL never sees
-    # them and a guard here could only ever pass. The realistic holder is a
-    # second m6 stack, and the plc_port test below refuses that first.
+    # THE SENSOR PORTS ARE UNCHECKED ON PURPOSE. The odd port of each pair
+    # (5111, 5121, 5131, 5141) is bound on the WINDOWS side - each writer's
+    # rx socket - so `ss` in WSL never sees them and a guard here could only
+    # ever pass. The realistic holder is a second m6 stack, and the plc_port
+    # test below refuses that first.
     #
-    # MAINTENANCE OBLIGATION: 5110 and 5120 are the VEHICLES table's
-    # plc_port values, spelled as literals in the two case patterns below
-    # because a shell cannot import the table. A port that moves there has
-    # to move here too, or this guard goes quietly blind.
+    # THE PORTS ARE THE TABLE'S OWN, NOT LITERALS. They used to be two case
+    # patterns with a maintenance note asking that a port moved in
+    # status_contract.py be moved here as well - the kind of obligation that
+    # is honoured until it is not, and a guard that goes quietly blind is
+    # worse than no guard. vehicle_table() reads them at the top of start()
+    # and the loop below tests every one of them.
     #
     # THE TEST HAS NO PIPE IN IT, AND THAT IS THE WHOLE POINT. Under this
     # file's `set -o pipefail` any `writer | grep -q` can fail OPEN: grep -q
@@ -388,8 +425,9 @@ start() {
     #   more - it is the non-digit, not the space, that tells :5110 from
     #   :51100. Measured on the :5100 this guard used to check: `grep
     #   ':5100 '` MISSES a line ending at the port.
-    # ONE CAPTURE PER PROTOCOL, THREE TESTS. The UDP table is read once and
-    # matched twice, so the two vehicles are judged against the same instant.
+    # ONE CAPTURE PER PROTOCOL. The UDP table is read once and matched once
+    # per vehicle, so every truck is judged against the same instant - and it
+    # stays one read however many trucks the table grows.
     # THE BROKER'S :1883 IS TCP AND GETS ITS OWN CAPTURE rather than folding
     # both families into one `ss -tuln`: in a single table a TCP socket on
     # :5110 would answer for f1's UDP link and refuse a start that is
@@ -401,25 +439,25 @@ start() {
     else
         # A guard that cannot run says so. Silence here would look identical
         # to a free port and hand back the Task 8 symptom with no trace.
-        echo "  note: ss not found - the UDP :5110/:5120 and TCP :1883"
-        echo "        pre-flights are SKIPPED."
+        echo "  note: ss not found - the per-vehicle UDP PLC ports"
+        echo "        (${PLC_PORTS[*]}) and TCP :1883 pre-flights are SKIPPED."
     fi
-    case $'\n'"$udp_socks"$'\n' in
-        *:5110[!0-9]*)
-            echo "UDP :5110 is already bound - another stack holds f1's PLC link:"
-            # grep without -q reads to EOF, so this reporting pipe has no
-            # SIGPIPE window of its own; its status is not tested either way.
-            ss -ulpn 2>/dev/null | grep -E ':5110([^0-9]|$)'
-            echo "stop that stack first, then start this one."
-            return 1 ;;
-    esac
-    case $'\n'"$udp_socks"$'\n' in
-        *:5120[!0-9]*)
-            echo "UDP :5120 is already bound - another stack holds f2's PLC link:"
-            ss -ulpn 2>/dev/null | grep -E ':5120([^0-9]|$)'
-            echo "stop that stack first, then start this one."
-            return 1 ;;
-    esac
+    local i
+    for i in "${!VEHICLES[@]}"; do
+        vid="${VEHICLES[$i]}"; port="${PLC_PORTS[$i]}"
+        # "$port" is quoted so it stays a literal and only [!0-9] is a
+        # pattern; the two sentinels and the non-digit class are the same
+        # ones the note above derives, one loop instead of two cases.
+        case $'\n'"$udp_socks"$'\n' in
+            *:"$port"[!0-9]*)
+                echo "UDP :$port is already bound - another stack holds $vid's PLC link:"
+                # grep without -q reads to EOF, so this reporting pipe has no
+                # SIGPIPE window of its own; its status is not tested either way.
+                ss -ulpn 2>/dev/null | grep -E ":$port([^0-9]|\$)"
+                echo "stop that stack first, then start this one."
+                return 1 ;;
+        esac
+    done
     # THE BROKER'S PORT IS THE SAME SINGLE-HOLDER RESOURCE, and losing it is
     # not quiet - mosquitto exits on EADDRINUSE - but the operator would
     # read that in broker.log only after the whole stack came up around a
@@ -451,7 +489,8 @@ start() {
     fi
     stale_check
     [ -f "$ROS_SETUP" ] || { echo "no $ROS_SETUP"; return 1; }
-    # Unchecked, an unwritable log dir fails all twenty-one redirections, and
+    # Unchecked, an unwritable log dir fails every one of the redirections
+    # this stack opens - thirty-nine of them at four vehicles - and
     # start would sleep its way to "up." over a stack that never began.
     mkdir -p "$LOGDIR" || { echo "cannot create $LOGDIR"; return 1; }
     : > "$PIDFILE"  || { echo "cannot write $PIDFILE"; return 1; }
@@ -476,7 +515,7 @@ start() {
     # the node's own and ours() still reads GZ_PARTITION out of the same
     # environ - one more word on the command line, no extra process.
     #   '-' IS THE WORLD, and it must carry no VEHICLE at all. The launch
-    #   file serves both vehicles from one process and reads the table
+    #   file serves every vehicle from one process and reads the table
     #   env-free; an inherited VEHICLE would be a name for "the vehicle"
     #   inside the one process that does not have one.
     #   ${vid:+...} expands to NOTHING for the world, which is why '-' is
@@ -484,9 +523,10 @@ start() {
     #
     # THE NAME LIST IS BUILT HERE, NOT RESTATED BELOW. The startup check
     # walks $PIDFILE and needs a name per line; keeping that list by hand
-    # made it a second spelling of the spawn order, and twenty-one entries
-    # is where such a list starts drifting. Appending in spawn() makes the
-    # two orders the same order by construction.
+    # made it a second spelling of the spawn order, and thirty-nine entries
+    # is well past where such a list starts drifting. Appending in spawn()
+    # makes the two orders the same order by construction - and it is why
+    # a vehicle joining the table costs this function nothing at all.
     local -a SPAWNED=()
     spawn() {  # spawn <name> <vid|-> <cmd...>
         local name="$1" vid="$2" pid="" want=$(( $(wc -l < "$PIDFILE") + 1 ))
@@ -524,9 +564,11 @@ start() {
     # two commands an operator runs; when the cell ever gets its own
     # machine, this line and BROKER_* leave together with the fleet spawn.
     spawn broker - LD_LIBRARY_PATH="$BROKER_LIB" "$BROKER_BIN" -v
-    # ONE WORLD FOR BOTH TRUCKS: this single launch spawns both models,
-    # bridges both vehicles' terminals and starts each one's contactor and
-    # unit translator. Its five seconds of head start are the plant's.
+    # ONE WORLD FOR EVERY TRUCK: this single launch spawns every model in the
+    # table, bridges every vehicle's terminals and starts each one's contactor
+    # and unit translator. It reads the SAME table this script reads, so
+    # neither can spawn a truck the other has not heard of. Its five seconds
+    # of head start are the plant's.
     spawn world - ros2 launch "$M6/gazebo/m6_world.launch.py" "gui:=$GUI"
     sleep 5
     # EVERY VEHICLE NODE RUNS FROM THE DEPLOY, NOT FROM ipc/. That is the
@@ -669,12 +711,14 @@ stop() {
     echo "down."
 }
 USAGE="usage: $0 start [--headless] | stop | home | deploy
-  start       warehouse + BOTH forklifts in a Gazebo window, plus one HMI
-              and one VDA 5050 agent per vehicle, the local MQTT broker on
-              127.0.0.1:1883 and the fleet manager - twenty-one processes.
+  start       warehouse + EVERY forklift in the VEHICLES table in a Gazebo
+              window, plus one HMI and one VDA 5050 agent per vehicle, the
+              local MQTT broker on 127.0.0.1:1883 and the fleet manager -
+              nine processes per vehicle plus three, so thirty-nine at the
+              four vehicles the table has held since M6.5.
               Work goes in with fleet/fleet_cli.py submit FROM TO.
   --headless  no Gazebo window (gui:=false, the launch file's own default)
-  home        teleport both forklifts back to their spawn poses (stack stays
+  home        teleport every forklift back to its spawn pose (stack stays
               up; PLC latches stay latched - reset from the panel)
   deploy      derive vehicles/, then freeze ipc/ + vehicles/ + fleet/ +
               config.yaml into deploy/ with a sha256 MANIFEST - the

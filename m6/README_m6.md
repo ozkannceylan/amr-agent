@@ -1,19 +1,27 @@
-# Step 6 — two forklifts in one warehouse
+# Step 6 — four forklifts in one warehouse
 
-One world, two vehicles. **`f1`** and **`f2`** each run a full copy of Step 5's
-vehicle stack — mux seam, autopilot, `Motor`-gated `cmd_gate`, STO contactor,
-commissioning HMI — on its **own topic namespace, its own UDP port pair and
-its own Windows writer**. They share the Gazebo world and the machine's CPU,
-and nothing else: there is no cross-vehicle channel in M6.1, by design.
+One world, four vehicles. **`f1`**, **`f2`**, **`f3`** and **`f4`** each run a
+full copy of Step 5's vehicle stack — mux seam, autopilot, `Motor`-gated
+`cmd_gate`, STO contactor, commissioning HMI — on its **own topic namespace,
+its own UDP port pair and its own Windows writer**. They share the Gazebo
+world and the machine's CPU, and nothing else: there is no cross-vehicle
+channel below the fleet layer, by design.
+
+**It was two until M6.5 and the code did not change to make it four.** The
+`VEHICLES` table grew two rows; the launch file, the instantiation tool, the
+manager, the ledger, the CLI and `m6.sh`'s loops all read that table and
+followed. What four costs is not code but **GPU rendering** — see
+[The GPU condition](#the-gpu-condition--two-exports-in-your-shell), which every
+four-vehicle number in [PROOF.md](PROOF.md) depends on.
 
 Step 6 adds three things to Step 5 and closes one debt:
 
 - **The `VEHICLES` table** in `ipc/status_contract.py` — the single home for
   every per-vehicle difference (ports, topic names, spawn pose, config path).
-- **Derived vehicles.** `vehicles/f1/` and `vehicles/f2/` are *generated* from
-  `gazebo/forklift_ver2/model.sdf` and `agv/forklift/config.yaml` by
-  `tools/instantiate_vehicle.py`. They are gitignored and rebuilt by `deploy`.
-  **Never hand-edit them.**
+- **Derived vehicles.** `vehicles/f1/` … `vehicles/f4/` — one directory per
+  row of that table — are *generated* from `gazebo/forklift_ver2/model.sdf`
+  and `agv/forklift/config.yaml` by `tools/instantiate_vehicle.py`. They are
+  gitignored and rebuilt by `deploy`. **Never hand-edit them.**
 - **A writer that takes `--vehicle`.** One process per PLC, per truck. The
   single-writer rule holds per vehicle; it is not an exception to it.
 - **Debt closed:** `cmd_gate` now publishes zeros when it is enabled and its
@@ -21,7 +29,7 @@ Step 6 adds three things to Step 5 and closes one debt:
   silence path step5's final review named.
 
 **Since M6.1 this tree has grown a fleet.** M6.2 gave each truck a VDA 5050
-client of its own, and M6.3 put one master control above both of them: work
+client of its own, and M6.3 put one master control above all of them: work
 now enters the cell as a *transport* between two stations and the fleet
 decides which truck drives it. See **[VDA 5050](#vda-5050--orders-over-mqtt)**
 and **[Fleet manager](#fleet-manager--the-cells-master-control)**.
@@ -41,49 +49,112 @@ writer, and each writer serves exactly one truck.
 
 | # | Where | Do this |
 |---|---|---|
-| 1 | Windows | **Nothing, for M6.1.** Both trucks run `--virtual` (step 7), so no PLCSIM instance is needed. Against a real PLC, only **f1** has one: start `PLC_2` from the Control Panel, download from TIA Portal, CPU in RUN. f2's `PLC_3` is reserved and has never run — no license. |
+| 1 | Windows | **Nothing.** All four trucks run `--virtual` (step 7), so no PLCSIM instance is needed. Against a real PLC, only **f1** has one: start `PLC_2` from the Control Panel, download from TIA Portal, CPU in RUN. f2's `PLC_3` is reserved and has never run, and f3/f4 have nothing reserved at all — one license, four trucks. |
 | 2 | WSL | `cd /mnt/c/Users/ozkan/projects/amr-agent/m6` |
-| 3 | WSL | `./m6.sh deploy` — **regenerates `vehicles/f1/` and `vehicles/f2/` first** (from `gazebo/forklift_ver2/model.sdf` + `agv/forklift/config.yaml`), then freezes `ipc/` + both derived pairs + `fleet/` into `deploy/` with a sha256 `MANIFEST`. Prints `deployed 25 files`. **`start` refuses without one.** |
-| 4 | WSL | `./m6.sh start` — **9.1 s**, measured: the broker goes up first, the world gets a five-second head start before the vehicle nodes, the fleet manager goes up last, then one more second before `start` checks that all twenty-one are still alive. Do **not** source ROS first; the script does it. |
-| 4a | Screen | **Three windows:** the **Gazebo window** with the warehouse and both trucks facing each other 6.00 m apart in the south block, and **two HMIs** — `Forklift HMI - f1` and `Forklift HMI - f2`. `start --headless` skips the Gazebo one. |
-| 5 | WSL | Read the **twenty-one** pid lines: `broker`, `world`, then f1's nine (`plc_link cmd_gate cmd_mux field_eval encoder_link sensor_link nav_node vda_agent hmi`), then f2's nine, then `fleet` — the cell's master control, one for both trucks. `WARNING: <name> exited during startup` sends you to that log in `logs/`. A `THE STACK IS INCOMPLETE.` line means stop and read it. |
+| 2a | WSL | `echo $GALLIUM_DRIVER` must print `d3d12`. If it prints nothing, **stop and read [The GPU condition](#the-gpu-condition--two-exports-in-your-shell)** — four trucks on software rendering is not the configuration anything here was measured on. |
+| 3 | WSL | `./m6.sh deploy` — **regenerates `vehicles/f1/` … `vehicles/f4/` first** (from `gazebo/forklift_ver2/model.sdf` + `agv/forklift/config.yaml`), then freezes `ipc/` + every derived pair + `fleet/` into `deploy/` with a sha256 `MANIFEST`. Prints `deployed 31 files`. **`start` refuses without one.** |
+| 4 | WSL | `./m6.sh start` — the broker goes up first, the world gets a five-second head start before the vehicle nodes, the fleet manager goes up last, then one more second before `start` checks that all **thirty-nine** are still alive. Do **not** source ROS first; the script does it. |
+| 4a | Screen | **Five windows:** the **Gazebo window** with the warehouse — f1/f2 facing each other 6.00 m apart in the dock aisle, f3/f4 the same way in the main aisle — and **four HMIs**, `Forklift HMI - f1` … `- f4`. `start --headless` skips the Gazebo one. |
+| 5 | WSL | Read the **thirty-nine** pid lines: `broker`, `world`, then nine per vehicle (`plc_link cmd_gate cmd_mux field_eval encoder_link sensor_link nav_node vda_agent hmi`) for f1, f2, f3, f4 in turn, then `fleet` — the cell's master control, one for the whole fleet. `WARNING: <name> exited during startup` sends you to that log in `logs/`. A `THE STACK IS INCOMPLETE.` line means stop and read it. |
 | 6 | Windows | `cd C:\Users\ozkan\projects\amr-agent` |
 | 7 | Windows | `python m6\windows\m6.py --vehicle f1 --virtual` — **64-bit Python** (pythonnet). A grey **panel** opens, titled `Forklift f1 PLC Control Panel - VIRTUAL F-PLC (model)`; the console prints `streaming PLC state to <wsl-ip>:5110` and `listening for the back scanner on 0.0.0.0:5111`. |
-| 8 | Windows | Open a **second** terminal, `cd` again, then `python m6\windows\m6.py --vehicle f2 --virtual` — same panel titled `Forklift f2 ...`, same two lines on **5120** and **5121**. |
-| 9 | Panels | Click **RESET** on f1's panel. Once. Then **RESET** on f2's. Each lamp reads `MOTOR ENABLED`; each HMI turns neutral and reads `Drive enable: ON`. |
+| 8 | Windows | **One more terminal per remaining truck** — `--vehicle f2`, `f3`, `f4` — each `cd`'d the same way. Same panel, titled for its own truck, on **5120/5121**, **5130/5131** and **5140/5141**. `start` prints the four command lines; that list comes from the table, so it is always the right one. |
+| 9 | Panels | Click **RESET** on each panel. Once each. Every lamp reads `MOTOR ENABLED`; every HMI turns neutral and reads `Drive enable: ON`. |
 | 10a | HMI windows | **Teleop:** leave a truck's radio on `Teleop` and drag *that* HMI's joystick. Only that truck moves. |
-| 10b | HMI windows | **Auto:** click `Auto`, click a station dot on that HMI's sketch, press **GO**. Both trucks can be routed at the same time. **STOP** cancels a goal — it is not a brake. |
+| 10b | HMI windows | **Auto:** click `Auto`, click a station dot on that HMI's sketch, press **GO**. All four trucks can be routed at the same time. **STOP** cancels a goal — it is not a brake. |
 | 10c | WSL | **Auto, as fleet work:** `python3 m6/fleet/fleet_cli.py submit S1 S4` queues a *transport* — you name two stations, the fleet picks the truck. Same precondition as **GO**, and the fleet enforces it: a truck not in `Auto` is not idle-confirmed, so the task waits rather than failing. Watch it with `python3 m6/fleet/fleet_cli.py status --watch`. See [Fleet manager](#fleet-manager--the-cells-master-control). |
-| 11 | Panels | Finished: **close both windows**. Each writes its own truck's trip values on the way out. |
+| 11 | Panels | Finished: **close every panel window**. Each writes its own truck's trip values on the way out. |
 | 12 | WSL | `./m6.sh stop` |
 
 **No PLCSIM license? That is the normal case here.** `--virtual` puts
 `windows/virtual_fplc.py` in the F-PLC's place, in process, with the measured
 semantics (design: `docs/superpowers/specs/2026-08-20-virtual-fplc-design.md`).
-Results earned this way are **rig results, not F-program validation** — and f2
-has *only ever* been a virtual truck.
+Results earned this way are **rig results, not F-program validation** — and
+f2, f3 and f4 have *only ever* been virtual trucks. The acceptance record has
+to say which truck proved what: only f1 ever ran against a real F-program.
 
-**`--headless` when you are timing something.** Rendering here is llvmpipe
-software rasterisation. The Gazebo window costs regularity more than speed:
+### The GPU condition — two exports in your shell
+
+**Four vehicles need the GPU, and nothing in this repo turns it on.** Put
+these two lines in the WSL user's `~/.bashrc`:
+
+```bash
+export GALLIUM_DRIVER=d3d12
+export MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
+```
+
+**What they buy, measured** (PROOF.md, *M6.5 — sizing the machine for four*,
+2026-08-22; same world, same four trucks, same sixteen lidars subscribed,
+60 s windows):
+
+| Renderer | Four vehicles, printed RTF | Four vehicles, integrated |
+|---|---|---|
+| llvmpipe (no exports) | 0.190 / 0.230 / 0.230 | 0.579 |
+| **D3D12 / NVIDIA (exports set)** | **0.583 / 0.687 / 0.670** | **0.903 / 0.899 / 0.712** |
+
+Without them Mesa falls back to `kms_swrast` and the twelfth subscribed lidar
+takes the world off a cliff (0.981 → 0.274) — the fourth truck is where two
+of them stop fitting. With them the renderer is
+`D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU)` and that cliff is gone.
+
+**They belong to the shell, and `m6.sh` deliberately does not set them.** The
+server has to inherit them *before* `gz sim` starts, so a subshell inside the
+script would be too late for the process that matters; and two exports at the
+top of `m6.sh` would make every m6 run depend on a GPU being present, which is
+a portability decision the operator owns and a start-up script does not. The
+environment is the operator's, so the condition is *stated* rather than
+hidden: every four-vehicle number in PROOF.md is quoted with the renderer it
+was measured on.
+
+**Verify before a run, in a fresh shell:**
+
+```bash
+GALLIUM_DRIVER= glxinfo -B | grep Device      # -> D3D12 (NVIDIA ...)
+grep GL_RENDERER ~/.gz/rendering/ogre2.log    # after a run: what the SERVER took
+```
+
+The second one is the only line that proves the *server* took it. The Windows
+writers need nothing — they render nothing.
+
+**What the whole stack costs on top of that**, measured 2026-08-22 the first
+time four vehicles ran together for real (`start --headless`, thirty-nine
+pids, every scanner bridged, all four trucks standing still): two 60 s windows
+gave **0.652 and 0.587** printed, **0.613 and 0.606** integrated. That is the
+idle stack — the number under a running acceptance run belongs to Gate 4 in
+[PROOF.md](PROOF.md), and it is reported there whatever it says.
+
+Two things the exports do **not** fix, both recorded in PROOF.md: the printed
+statistic is a mean of instantaneous samples and *understates* a bursty run
+(the integrated column is the honest one, and it is why llvmpipe's four trucks
+read 0.579 rather than 0.190); and deep stalls still happen — the
+instantaneous floor in a four-vehicle window is 0.023–0.043.
+
+**`--headless` when you are timing something.** The Gazebo window costs
+regularity more than speed:
 measured over 60 samples on the one-vehicle stack, real-time factor mean
 **0.998 headless against 0.806 with the window**, and the window's floor is
 0.127 against 0.926. An interval measured with it open is worth less than one
-measured without. (Those are step5's numbers, and they compare the WINDOW's
-cost, not the stack's. Step 6's own headless figure under M6.1's full
-17-pid stack — before the broker and the two VDA agents joined it — is
-**0.75**, see [PROOF.md](PROOF.md). The three processes M6.2 added and the
-one M6.3 added are idle loops at 10 Hz and 0.5 Hz; the figure has not been
-re-measured with them.)
+measured without. (Those are step5's numbers, measured on **llvmpipe**, and
+they compare the WINDOW's cost, not the stack's. Step 6's own headless figure
+under M6.1's full 17-pid stack — before the broker and the two VDA agents
+joined it — is **0.75**, see [PROOF.md](PROOF.md). Every RTF figure in this
+file and in PROOF.md older than 2026-08-22 was measured on llvmpipe and has to
+be read as that renderer's; see the section above.)
 
 **`vehicles/` is generated — regenerate it, do not edit it.** `deploy` runs
 `tools/instantiate_vehicle.py --all` before it freezes anything, so the image
 can never ship yesterday's derivation. To change a truck, edit
 `gazebo/forklift_ver2/model.sdf` or `agv/forklift/config.yaml` and redeploy. To change
-a *port*, a *spawn pose* or a *topic prefix*, edit the `VEHICLES` table in
-`ipc/status_contract.py` — and remember `m6.sh` repeats the ID list and the
-two PLC ports as literals, with a maintenance note at each.
+a *port*, a *spawn pose* or a *topic prefix* — or to add a **vehicle** — edit
+the `VEHICLES` table in `ipc/status_contract.py` and nothing else on the WSL
+side: since M6.5 `m6.sh` reads the id list *and* the PLC ports out of that
+table (`vehicle_table()`), and the launch file, the instantiation tool and the
+RTF spike already did. The one place that still repeats it is the Windows
+writer's `--vehicle` choices, which cannot import the table before it has
+bound a vehicle — `tests/test_vehicles_table.py` fails until that tuple
+follows.
 
-**Close both panels before `stop`, in that order.** `stop` is not a brake —
+**Close every panel before `stop`, in that order.** `stop` is not a brake —
 Gazebo's joint controllers hold their last setpoint, so killing the stack under
 a moving truck only leaves it moving (measured once at 14.8 m on a standing
 command). The e-stop is the brake.
@@ -117,9 +188,9 @@ is dragged, and the sole writer must not freeze with `Motor` energised.
   the terminal you started it from. Before that, closing it killed five of six
   and left `gz sim` alone in a live simulator.
 - **`start` stamps `VEHICLE` on every child**, and that one word is what turns
-  a shared script into f1's or f2's. `env` execs in place, so the pid recorded
+  a shared script into f1's, or f3's. `env` execs in place, so the pid recorded
   is still the node's own. The world launch is the exception and carries no
-  `VEHICLE` at all: it serves both trucks from one process and reads the table
+  `VEHICLE` at all: it serves every truck from one process and reads the table
   env-free.
 - **`stop` validates the PID file before it signals anything.** Each recorded
   pid must still have `m6` in its `/proc/<pid>/cmdline`, and each
@@ -128,21 +199,21 @@ is dragged, and the sole writer must not freeze with `Motor` energised.
   taken down by it, even after a reboot has recycled the recorded pids. It
   names every pid it sweeps and every pid it kills, then sweeps once more with
   KILL after a two-second grace, because Tk's mainloop ignores TERM.
-- **`start` pre-flights UDP :5110 and :5120** — the table's two `plc_port`
-  values — and refuses if either is held, naming the vehicle whose port it is.
-  Without that guard a second stack takes the PLC link and `plc_link` binds
-  nothing, in one warning line among twenty-one — measured twice while building
-  M6.1, when there were seventeen of them, and silent. The guard is pipe-free
-  and fail-closed: an `ss` that dies mid-pipe cannot make it fall through, and
-  a missing `ss` prints `note: ss not found - the UDP :5110/:5120 and TCP
-  :1883 pre-flights are SKIPPED.` rather than pretending it checked. The
-  5100/5101 family is deliberately **not** checked — it is step4's and
+- **`start` pre-flights every vehicle's UDP PLC port** — :5110, :5120, :5130,
+  :5140, *read from the table* rather than spelled here or in the script — and
+  refuses if any is held, naming the vehicle whose port it is. Without that
+  guard a second stack takes the PLC link and `plc_link` binds nothing, in one
+  warning line among thirty-nine — measured twice while building M6.1, when
+  there were seventeen of them, and silent. The guard is pipe-free and
+  fail-closed: an `ss` that dies mid-pipe cannot make it fall through, and a
+  missing `ss` names the ports it did not check rather than pretending it did.
+  The 5100/5101 family is deliberately **not** checked — it is step4's and
   step5's, and refusing over it would refuse a start that is perfectly legal
-  beside them. The sensor ports (5111/5121) are not checked either, and cannot
-  be: they are bound on the *Windows* side. **TCP :1883 joined this guard with
-  the broker**, read from its own socket table rather than a shared one — in a
-  single `ss -tuln` a TCP socket on :5110 would answer for f1's UDP link and
-  refuse a start that is perfectly legal.
+  beside them. The sensor ports (5111/5121/5131/5141) are not checked either,
+  and cannot be: they are bound on the *Windows* side. **TCP :1883 joined this
+  guard with the broker**, read from its own socket table rather than a shared
+  one — in a single `ss -tuln` a TCP socket on :5110 would answer for f1's UDP
+  link and refuse a start that is perfectly legal.
 
 ## VDA 5050 — orders over MQTT
 
@@ -359,11 +430,11 @@ step5's. Wherever the text below says:
 
 | It says | Step 6 means |
 |---|---|
-| `/forklift/plc/status`, `/hmi/cmd_vel`, `/vehicle/cmd_vel`, … | `/f1/...` and `/f2/...`, one set per truck |
-| `5100` / `5101` | `5110` / `5111` for f1, `5120` / `5121` for f2 |
+| `/forklift/plc/status`, `/hmi/cmd_vel`, `/vehicle/cmd_vel`, … | `/f1/...` … `/f4/...`, one set per truck |
+| `5100` / `5101` | `5110` / `5111` for f1, then +10 per truck to `5140` / `5141` for f4 |
 | `step5.sh`, `step5.py`, `m5_ver2/step5/` | `m6.sh`, `m6.py --vehicle <vid>`, `m6/` |
 | `GZ_PARTITION=step5`, `ROS_DOMAIN_ID=95` | `m6`, `96` |
-| "nine pids" | twenty-one (seventeen before M6.2, twenty before M6.3) |
+| "nine pids" | thirty-nine (nine per truck + broker + world + fleet; seventeen before M6.2, twenty before M6.3, twenty-one at two trucks) |
 | `agv/forklift/config.yaml` as the vehicle's config | `vehicles/<vid>/config.yaml`, derived from it |
 
 **Do not copy a command out of the text below and run it.** The run order at
@@ -509,7 +580,7 @@ Everything in this table is deliberate. None of it should be "fixed".
 | Steering still responds while traction is dead (teleop). | Deliberate. If the joystick went dead too, you could not tell a safety stop from a broken HMI — which is the one thing this window exists to distinguish. `angular.z` is therefore a steer *angle*, commanded directly. |
 | **The joystick knob greys out and moves nothing in Auto.** | Display only. The mux ignores `/hmi/cmd_vel` while auto is selected, so the knob would be lying if it looked live. Switch the radio back to Teleop and it is live again on the next message. |
 | `forklift_io` logs `waiting for source data: joint_states=False, odom=False` every 5 s, forever — **even though Step 5 bridges odometry.** | Two different names. Step 5 bridges `topics.gz_odom` (`/forklift/gz/odom`), which is what `nav_node` and the sketch consume; `forklift_io` subscribes to `topics.odom` (`/forklift/odom`), the renamed ROS name nothing publishes here. Joint states remain deliberately unbridged — no consumer. The warning gates only two derived state scalars and the fork target seed, never the traction or steer command path. |
-| **The Gazebo window is slow, and the real-time factor in its bottom bar sits well under 1.** | Rendering on this machine is llvmpipe *software* rasterisation. WSLg exposes `/dev/dri`, OGRE binds it over EGL, and Mesa then falls back to `kms_swrast` — measured, there is no GPU here (`sim/setup/WSL_ENVIRONMENT.md` §4.7). A headless run of this same world holds ~1.0. Nothing in the command path reads the clock rate, so this costs appearance and not correctness. |
+| **The Gazebo window is slow, and the real-time factor in its bottom bar sits well under 1.** | Check `echo $GALLIUM_DRIVER` first. Empty means rendering is llvmpipe *software* rasterisation: WSLg exposes `/dev/dri`, OGRE binds it over EGL and Mesa falls back to `kms_swrast` (`sim/setup/WSL_ENVIRONMENT.md` §4.7 — which concluded "there is no GPU here", and that conclusion was **wrong**: measured 2026-08-22, the RTX 4050 is reachable through D3D12, see [The GPU condition](#the-gpu-condition--two-exports-in-your-shell)). With the exports set the renderer is the NVIDIA card and four trucks hold 0.58–0.69. Either way a headless run of this world is faster than a windowed one, and nothing in the command path reads the clock rate, so this costs appearance and not correctness. |
 | No Gazebo window appears after `start --headless`, or after `ros2 launch` run by hand. | Correct: `--headless` passes `gui:=false`, which is also the launch file's own default, and the server then runs `-s --headless-rendering` — server only, no client process. The HMI is the only window. The spawn is confirmed by `Entity creation successful.` in `logs/world.log`. |
 | `logs/plc_link.log`, `logs/cmd_gate.log` and the rest end in an `rclpy.executors.ExternalShutdownException` traceback. | That is what a clean SIGTERM looks like in these nodes — `step5.sh stop` sent it. It is the house pattern in `agv/`, and it appears *after* the node's normal startup line, not instead of it. |
 | `logs/world.log` is full of yellow `XML Element[gz_frame_id] ... not defined in SDF` and `libEGL warning: egl: failed to create dri2 screen`. | The first comes from parsing `model.sdf`; the second is Mesa refusing the DRI device and falling back to software, and it appears on **both** paths — with the GUI up it arrives from the client too, alongside `OGRE EXCEPTION ... Couldn't open X display` and a QML binding-loop warning. All of it is a property of this machine, not of this run, and nothing in the command path reads it. |
@@ -741,7 +812,11 @@ headless, and a re-measurement of them should be too.
 
 ## Unit tests — m6's own, and the number to expect
 
-**`370 passed, 0 skipped`** under WSL:
+**`465 passed, 0 skipped`** under WSL (M6.5, four vehicles — it was 370 at
+M6.2 and 453 the day before the table grew: nine of the twelve are
+per-vehicle sweeps that now run once per truck instead of twice, and three
+are new — the spawn-pose completeness check, the four-row CLI render and the
+manager spreading four transports over four trucks):
 
 ```bash
 cd /mnt/c/Users/ozkan/projects/amr-agent

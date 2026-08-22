@@ -1509,3 +1509,52 @@ def test_the_waiting_truck_is_not_handed_the_junction_when_it_is_older(
         "the waiting truck was released onto the occupant's way out")
     assert manager.floor.find_cycle() is None
     assert manager.floor.blocked == []
+
+
+# ---- 4. four vehicles ----
+# M6.5 grew the VEHICLES table to four. The manager has never read that
+# table - it learns its fleet off the wire, which is exactly why growing
+# the fleet is not a code change - so what is worth asking here is the
+# thing that IS arithmetic: with more work than trucks, does every truck
+# get one and does the surplus wait? Two trucks could not tell a fleet
+# that spreads from one that hands the nearest truck everything.
+def test_four_trucks_take_one_transport_each_and_the_fifth_task_waits(
+        floor):
+    """Assignment spreads over four; the fifth transport queues.
+
+    One truck parked near each of four pickups, five transports out at
+    once. `_assign` places at most one task per pass, so five passes are
+    given - one more than there are trucks - and the fifth task has
+    nowhere to go: every vehicle is executing an order and a busy truck
+    is not idle-confirmed.
+    """
+    manager, stub = floor
+    now = time.monotonic()
+    trucks = (Truck(manager, stub, "f1", WEST),
+              Truck(manager, stub, "f2", FAR_EAST),
+              Truck(manager, stub, "f3", (-8.0, 5.65)),
+              Truck(manager, stub, "f4", (8.0, 5.65)))
+    for i, (src, dst) in enumerate(
+            (("S2", "S1"), ("S4", "S1"), ("S6", "S10"),
+             ("S7", "S10"), ("S5", "S1"))):
+        submit(manager, "t-{}".format(i + 1), src, dst)
+    for _ in range(5):
+        turn(manager, trucks, now)
+
+    taken = [t for t in manager.tasks if t["assignee"]]
+    assert len(taken) == 4, (
+        "four idle trucks and five transports took {} tasks"
+        .format(len(taken)))
+    assert sorted(t["assignee"] for t in taken) == ["f1", "f2", "f3", "f4"], (
+        "the fleet did not spread the work: {}"
+        .format([(t["task_id"], t["assignee"]) for t in taken]))
+    waiting = [t for t in manager.tasks if t["state"] == "QUEUED"]
+    assert len(waiting) == 1 and waiting[0]["assignee"] is None
+    # Every truck was told something, and no truck was told twice.
+    for truck in trucks:
+        assert len(truck.legs()) == 1, (
+            "{} was given {} orders".format(truck.serial, len(truck.legs())))
+    # Four trucks on one floor and the ledger still owns each node once.
+    doc = manager._status(now)
+    assert doc["traffic"]["enabled"] is True
+    assert len(doc["vehicles"]) == 4

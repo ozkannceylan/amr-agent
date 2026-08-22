@@ -55,10 +55,33 @@ VEHICLES = {
     "f2": {"plc_port": 5120, "sensor_port": 5121,
            "spawn": {"x": "3.00", "y": "-5.50", "z": "0.05",
                      "yaw": "3.14159"}},
+    "f3": {"plc_port": 5130, "sensor_port": 5131,
+           "spawn": {"x": "-8.00", "y": "5.65", "z": "0.05", "yaw": "0.0"}},
+    "f4": {"plc_port": 5140, "sensor_port": 5141,
+           "spawn": {"x": "8.00", "y": "5.65", "z": "0.05",
+                     "yaw": "3.14159"}},
 }
 # f1 keeps step5's proven spawn. f2 faces it from the other end of the
-# 6.50 m main aisle. Task 4 (the RTF spike) validates both live; if a
-# scanner reads PROTECTIVE at spawn the pose moves THERE, in this table.
+# 6.50 m main aisle. f3 and f4 joined at M6.5 and stand the same way one
+# aisle over - the main aisle at y = 5.65 (ipc/route.py), one at each end
+# of it - so the four start as two facing pairs, one pair per aisle, and
+# no truck begins the run inside another's route.
+#
+# EVERY POSE HERE HAS BEEN SPAWNED AND LOOKED AT. M6.1 validated f1's and
+# f2's; M6.5's Gate 1 spike spawned all four in one server and reported
+# each one's roll, pitch and closest lidar return at rest (PROOF.md, "M6.5
+# - sizing the machine for four"): all four rest level at exactly the
+# commanded coordinates, and f3's and f4's closest returns are identical
+# to f1's and f2's - 0.122 / 0.111 / 0.111 / 1.287 m, the truck's own
+# forks and mast and nothing else. Nothing had to move.
+# A pose that DOES trip a field moves HERE, in this table, and nowhere
+# else - the launch file, m6.sh's `home` and the spike all read it.
+#
+# THE PORT FAMILIES CLIMB IN TENS AND THE SENSOR PORT IS ALWAYS +1, and
+# they are still written out rather than computed: what a reader needs
+# from this table is the number, not the rule that made it, and a fifth
+# vehicle that has to sit outside the pattern would break a formula and
+# not a list. The 5100/5101 family stays step5's (see above).
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 

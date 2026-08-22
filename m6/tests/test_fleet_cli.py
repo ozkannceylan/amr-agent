@@ -161,6 +161,39 @@ def test_the_columns_are_fixed_width_so_a_watch_does_not_reflow():
         assert {row[edge - 1] for row in rows} == {" "}, edge
 
 
+def test_four_vehicles_render_four_rows_the_columns_still_hold():
+    """M6.5 put four trucks on the floor; the screen was never told a number.
+
+    `render` walks `sorted(vehicles)` and the widths are fixed, so the
+    only things a bigger fleet can break are the count in the header and
+    a VEHICLE column too narrow for the ids - both checked here rather
+    than assumed. It is the CLI half of "the code is already N-generic".
+    """
+    doc = dict(DOC, vehicles=dict(DOC["vehicles"], **{
+        "f3": {"connection": "ONLINE", "operating_mode": "AUTOMATIC",
+               "position": [-8.0, 5.65], "executing_order": None,
+               "state_age_s": 0.5, "lost": False, "not_eligible": False},
+        "f4": {"connection": "ONLINE", "operating_mode": "MANUAL",
+               "position": [8.0, 5.65], "executing_order": None,
+               "state_age_s": 0.2, "lost": False, "not_eligible": True},
+    }))
+    text = cli.render(doc, NOW)
+    assert "VEHICLES (4)" in text
+
+    lines = text.splitlines()
+    head = lines.index(cli._head(cli.VEHICLE_COLS))
+    rows = lines[head + 1:head + 5]
+    assert [row.split()[0] for row in rows] == ["f1", "f2", "f3", "f4"]
+    # f3 and f4 are readable, not just present.
+    assert "-8.00, 5.65" in rows[2] and "AUTOMATIC" in rows[2]
+    assert "MANUAL" in rows[3] and "standby" in rows[3]
+    # And every cell boundary still lands on the same column in all five.
+    edge = 0
+    for _, width in cli.VEHICLE_COLS[:-1]:
+        edge += width + 1
+        assert {line[edge - 1] for line in [lines[head]] + rows} == {" "}, edge
+
+
 def test_a_value_too_long_for_its_column_is_visibly_cut():
     doc = dict(DOC, tasks=[dict(DOC["tasks"][0],
                                 task_id="a-very-long-operator-task-id")])
