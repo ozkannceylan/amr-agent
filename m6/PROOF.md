@@ -85,6 +85,18 @@ M6.4, the traffic gates (numbered TRAFFIC 1..6), measured 2026-08-22
                places on the operator's screen.)
 [x] TRAFFIC 5 - loss with holds                       MEASURED on run 2
 [x] TRAFFIC 6 - traffic never touches safety                    MEASURED
+
+M6.5, scale to four. Its gate 1 is a STOP gate on the machine itself
+and it was run first, 2026-08-22 13:02-13:45:
+
+[ ] M6.5 GATE 1 - RTF at four                          STOP, 0.190-0.230
+              (four trucks with their sixteen lidars rendering hold
+               0.190/0.230/0.230 against a gate of 0.30; two trucks hold
+               0.957-0.970 and the cliff is at the third. The same four
+               with nothing subscribed run 0.998 - gz-sim does not
+               render a lidar nobody listens to, which is also what
+               M6.1's gate 1 was unknowingly measuring. Gates 2-6 are
+               not started.)
 ```
 
 **Method, per gate — M6.1 and M6.2 only** (M6.3's method is under its
@@ -4132,6 +4144,304 @@ $ python3 -m pytest m5_ver2/step5/tests/ -q
 220 passed in 2.90s
 ```
 
+---
+
+# M6.5 — sizing the machine for four
+
+## [ ] Gate 1 — RTF at four: STOP
+
+**Date:** 2026-08-22. **Verdict: STOP.** Four forklifts with their
+sixteen lidars actually running hold mean RTF **0.190 / 0.230 / 0.230**
+over three 60 s runs, against a gate of **0.30**. The same four trucks
+with nothing subscribed to those lidars run at **0.998**, and that
+second number is the one M6.1's gate 1 measured — it is a measurement of
+physics with the sensors switched off. Two vehicles are still fine
+(0.957-0.970 with everything rendering). **The cliff is between the
+second truck and the third**, and it is a software renderer that stops
+scaling, not the twenty threads and not the physics.
+
+### The machine
+
+```
+kernel      5.15.167.4-microsoft-standard-WSL2
+cpu         13th Gen Intel(R) Core(TM) i9-13900H, 20 threads
+memory      15 GiB
+gz sim      8.11.0
+renderer    llvmpipe (LLVM 20.1.2, 256 bits), Mesa 25.2.8, Accelerated: no
+```
+
+Unchanged from M6.1's gate 1, which named the same rig; every lidar is
+rasterised on the CPU.
+
+### What was run
+
+`tools/rtf_spike.sh`, now taking the vehicle ids as arguments. Server
+only: `gz sim -s -r --headless-rendering` on `gazebo/warehouse_ver2.sdf`
+under `GZ_PARTITION=m6-rtf-spike`, no ROS stack, no bridge, no writers,
+no broker, no GUI. It spawns the trucks one at a time and samples
+`real_time_factor` off `/world/warehouse/stats` for 30 s after the first
+and 60 s after each of the others, so one process yields the whole
+1 / 2 / 3 / 4 series under one load order and one page cache.
+
+```
+wsl -e bash -lc "cd /mnt/c/Users/ozkan/projects/amr-agent && \
+  RTF_GATE=0.30 RTF_LOGDIR=/tmp/m6_rtf_lidar1 \
+  RTF_POSE_f3='-8.0 5.65 0.05 0' RTF_POSE_f4='8.0 5.65 0.05 3.14159' \
+  bash m6/tools/rtf_spike.sh f1 f2 f3 f4"
+```
+
+`RTF_POSE_f3/f4` exist because **Task 4 has not grown the VEHICLES table
+yet**: `status_contract.VEHICLES` owns f1 and f2 only, so the two new
+trucks are named to the spike explicitly rather than guessed at inside
+it. Their models were derived TEMPORARILY, by a scratch script that is
+not committed, applying the rule `tools/instantiate_vehicle.py` applies
+— a counted prefix rewrite of f1's derived pair, 37 occurrences in
+`model.sdf` and 62 in `config.yaml`, asserted equal both ways. Task 4
+teaches the tool f3/f4 for real.
+
+### AN UNSUBSCRIBED gpu_lidar IS NOT RENDERED
+
+This is the finding that decides the gate, and it also re-reads M6.1's.
+
+gz-sim's `Sensors` system renders a camera or lidar only while a
+connection exists on its topic. A server-only spike that spawns four
+trucks and subscribes to nothing is therefore measuring **physics and
+nothing else** — the sixteen `gpu_lidar` sensors named in M6.1's gate 1
+("eight in the two-vehicle case, all rendered in software") were never
+rendered while that gate was being measured.
+
+The A/B, in ONE server process, four trucks spawned once:
+
+| Window (60 s, 60 s, 30 s) | Samples | Mean RTF | Min | Max |
+|---|---|---|---|---|
+| four trucks, nothing subscribed | 592 | **0.996** | 0.522 | 1.257 |
+| the same four, all 16 lidars subscribed | 402 | **0.237** | 0.015 | 1.281 |
+| the same four again, subscribers killed | 296 | **0.995** | 0.519 | 1.277 |
+
+Same world, same models, same minute, nothing moved and nothing was
+reloaded: the only variable is whether anyone is listening, and it costs
+a factor of four. The recovery in the third row is what makes it a
+switch and not a drift.
+
+`rtf_spike.sh` now holds a subscriber on every `gpu_lidar` of every
+truck it spawns (`RTF_CONSUME_LIDARS=1`, the default) and counts the
+scans it is delivered, because the stack this sizing is for runs a
+bridge on every one of those topics. `RTF_CONSUME_LIDARS=0` reproduces
+the old physics-only shape and prints `scans 0`, which is the same
+finding stated as a number.
+
+### The two tables
+
+**Lidars subscribed — the gate.** Three runs, three 4-vehicle phases:
+
+| Run | 1 vehicle, 30 s | 2 vehicles, 60 s | 3 vehicles, 60 s | 4 vehicles, 60 s |
+|---|---|---|---|---|
+| 13:28:57 | 0.999 (296) | 0.962 (591) | 0.155 (482) | **0.190** (392) |
+| 13:33:36 | 1.000 (296) | 0.970 (590) | 0.140 (479) | **0.230** (399) |
+| 13:38:11 | 0.999 (296) | 0.957 (589) | 0.179 (482) | **0.230** (402) |
+
+**Nothing subscribed — the same script, the same machine, the same
+hour.** Runs 1-3 were taken before `RTF_CONSUME_LIDARS` existed (same
+sampler, same spawns, same poses); the last row is the finished tool
+told explicitly not to subscribe:
+
+| Run | 1 vehicle | 2 vehicles | 3 vehicles | 4 vehicles |
+|---|---|---|---|---|
+| 13:02:31 | 0.998 (296) | 0.998 (592) | 0.998 (593) | **1.000** (592) |
+| 13:07:02 | 1.000 (296) | 0.999 (593) | 0.998 (593) | **0.997** (592) |
+| 13:11:14 | 0.999 (296) | 0.999 (593) | 0.999 (593) | **0.997** (592) |
+| 13:44:23 `RTF_CONSUME_LIDARS=0` | 0.999 (296) | 0.999 (592) | 1.001 (593) | **0.998** (592) |
+
+The two-vehicle column of the second table (0.998-0.999) is directly
+comparable with M6.1's gate 1 (worst 0.934, best 0.995) and reproduces
+it. **The physics of four trucks is free on this machine.** Everything
+that follows is the renderer.
+
+### Run 1 of the gated three, verbatim
+
+SDF `gz_frame_id` warnings and the `libEGL ... kms_swrast` lines are
+elided (five and six per spawn, identical to M6.1's, and quoted there);
+nothing else is cut.
+
+```
+=== m6 RTF spike ===
+date        2026-08-22T13:28:57+02:00
+gz sim      8.11.0
+partition   m6-rtf-spike
+world       /mnt/c/Users/ozkan/projects/amr-agent/m6/gazebo/warehouse_ver2.sdf
+vehicles    f1 f2 f3 f4  (4)
+lidars      subscribed, so rendered
+gate        0.30, on the 4-vehicle phase
+logs        /tmp/m6_rtf_lidar1
+cpu         13th Gen Intel(R) Core(TM) i9-13900H, 20 threads
+kernel      5.15.167.4-microsoft-standard-WSL2
+spawning f1 at (-3.00, -5.50, 0.05) yaw 0.0  [table]
+  f1 rests at:
+  - Pose [ XYZ (m) ] [ RPY (rad) ]:
+    [-3.000000 -5.500000 -0.000001]
+    [0.000000 0.000000 0.000000]
+    /f1/gz/safety_scanner_back/measurement     closest 0.122 m
+    /f1/gz/safety_scanner_left/measurement     closest 0.111 m
+    /f1/gz/safety_scanner_right/measurement    closest 0.111 m
+    /f1/gz/scan_nav                            closest 1.287 m
+  f1: 4 lidars subscribed (4 total)
+sampling /world/warehouse/stats for 30s (1-vehicle)...
+1-vehicle    samples   296  mean RTF 0.999  min 0.965  max 1.015  scans   1200 (40.0 Hz)
+spawning f2 at (3.00, -5.50, 0.05) yaw 3.14159  [table]
+  f2 rests at:
+  - Pose [ XYZ (m) ] [ RPY (rad) ]:
+    [3.000000 -5.500000 -0.000001]
+    [0.000000 0.000000 3.141590]
+    /f2/gz/safety_scanner_back/measurement     closest 0.122 m
+    /f2/gz/safety_scanner_left/measurement     closest 0.111 m
+    /f2/gz/safety_scanner_right/measurement    closest 0.111 m
+    /f2/gz/scan_nav                            closest 1.287 m
+  f2: 4 lidars subscribed (8 total)
+sampling /world/warehouse/stats for 60s (2-vehicle)...
+2-vehicle    samples   591  mean RTF 0.962  min 0.047  max 1.067  scans   4748 (79.1 Hz)
+spawning f3 at (-8.0, 5.65, 0.05) yaw 0  [env RTF_POSE_f3]
+  f3 rests at:
+  - Pose [ XYZ (m) ] [ RPY (rad) ]:
+    [-8.000000 5.650000 -0.000001]
+    [0.000000 0.000000 0.000000]
+    /f3/gz/safety_scanner_back/measurement     closest 0.122 m
+    /f3/gz/safety_scanner_left/measurement     closest 0.111 m
+    /f3/gz/safety_scanner_right/measurement    closest 0.111 m
+    /f3/gz/scan_nav                            closest 1.287 m
+  f3: 4 lidars subscribed (12 total)
+sampling /world/warehouse/stats for 60s (3-vehicle)...
+3-vehicle    samples   482  mean RTF 0.155  min 0.022  max 1.535  scans   5602 (93.4 Hz)
+spawning f4 at (8.0, 5.65, 0.05) yaw 3.14159  [env RTF_POSE_f4]
+  f4 rests at:
+  - Pose [ XYZ (m) ] [ RPY (rad) ]:
+    [8.000000 5.650000 -0.000001]
+    [0.000000 0.000000 3.141590]
+    /f4/gz/safety_scanner_back/measurement     closest 0.122 m
+    /f4/gz/safety_scanner_left/measurement     closest 0.111 m
+    /f4/gz/safety_scanner_right/measurement    closest 0.111 m
+    /f4/gz/scan_nav                            closest 1.287 m
+  f4: 4 lidars subscribed (16 total)
+sampling /world/warehouse/stats for 60s (4-vehicle)...
+4-vehicle    samples   392  mean RTF 0.190  min 0.014  max 1.258  scans   5558 (92.6 Hz)
+--- gate: 4-vehicle mean RTF vs 0.30 ---
+ 1 vehicle(s)  mean RTF 0.999
+ 2 vehicle(s)  mean RTF 0.962
+ 3 vehicle(s)  mean RTF 0.155
+ 4 vehicle(s)  mean RTF 0.190
+VERDICT: STOP (0.190 < 0.30 at 4 vehicles)
+```
+
+The script exits 2 on STOP; that is the exit status the three gated runs
+returned.
+
+### It is a floor, not a dip
+
+M6.1's gate 1 diagnosed its own spread as host scheduling noise, and
+proved it by finding a two-vehicle mean ABOVE the one-vehicle mean.
+Nothing of the kind happens here. Run 1's windows, cut into sixths:
+
+```
+2 vehicles  0.923, 0.997, 0.956, 0.980, 0.956, 0.958   4 % of samples < 0.30
+3 vehicles  0.130, 0.131, 0.132, 0.169, 0.174, 0.199  91 % of samples < 0.30
+4 vehicles  0.319, 0.160, 0.089, 0.179, 0.228, 0.173  83 % of samples < 0.30
+```
+
+Every sixth of the three- and four-vehicle windows is on the floor. The
+4-vehicle mean coming out ABOVE the 3-vehicle mean (0.190 vs 0.155,
+0.230 vs 0.140, 0.230 vs 0.179 — in all three runs) is the signature of
+a saturated pipeline, not of a fourth truck that is cheaper than the
+third: past the cliff the renderer is delivering all it can and the
+extra demand simply queues.
+
+### Where the time goes
+
+A second instrument, one server, four trucks spawned once, then their
+lidars switched on ONE TRUCK AT A TIME by attaching subscribers, with
+the server's own CPU read out of `/proc/<pid>/stat` (utime+stime deltas
+over each 60 s window) separately from the subscribers':
+
+| Window | Mean RTF | Server CPU | Subscriber CPU | Scans delivered |
+|---|---|---|---|---|
+| 4 trucks, 0 lidars on | 0.995 | 1.0 cores | 0.0 | 0 |
+| 4 trucks, f1's 4 on | 0.995 | 2.0 cores | 0.1 | 43.1 /s |
+| 4 trucks, f1+f2's 8 on | 0.981 | 3.0 cores | 0.2 | 84.8 /s |
+| 4 trucks, 12 on | **0.274** | 3.0 cores | 0.3 | 99.3 /s |
+| 4 trucks, 16 on | **0.195** | 2.8 cores | 0.4 | 100.7 /s |
+
+Three things are measured here and they agree with the gate runs:
+
+- **The marginal cost of a truck is entirely its four lidars.** Physics
+  for four is 1.0 core and 0.998 RTF. The first truck's lidars cost a
+  core, the second's another, and the third's cost the simulation.
+- **The renderer never gets past ~3 of 20 threads.** The server's CPU
+  stops rising exactly where the RTF collapses, which is what a
+  serialised render path looks like: llvmpipe is rasterising every lidar
+  in turn and the other seventeen threads have nothing to do with it.
+  Adding hardware threads would not have helped; a GPU would.
+- **The delivered scan rate ceilings at ~93-101 scans/s.** Each truck
+  asks for 40 (four lidars at 10 Hz), so two trucks ask 80 and get 79,
+  three ask 120 and get 93, four ask 160 and get 93. The gap IS the RTF
+  drop: sim time is being stretched until the renderer can keep up.
+
+The subscriber column is this instrument's own cost and it is 0.4 cores
+at sixteen topics — the load is the server's, not the watcher's.
+
+### Both new trucks are where they were put, and clear
+
+| Vehicle | Pose asked for | Resting pose (XYZ / RPY) | Closest lidar returns |
+|---|---|---|---|
+| f1 | table: (-3.00, -5.50, 0.05) yaw 0.0 | (-3.000000, -5.500000, -0.000001) / (0, 0, 0.000000) | 0.122 / 0.111 / 0.111 / 1.287 |
+| f2 | table: (3.00, -5.50, 0.05) yaw 3.14159 | (3.000000, -5.500000, -0.000001) / (0, 0, 3.141590) | 0.122 / 0.111 / 0.111 / 1.287 |
+| f3 | spike: (-8.0, 5.65, 0.05) yaw 0 | (-8.000000, 5.650000, -0.000001) / (0, 0, 0.000000) | 0.122 / 0.111 / 0.111 / 1.287 |
+| f4 | spike: (8.0, 5.65, 0.05) yaw 3.14159 | (8.000000, 5.650000, -0.000001) / (0, 0, 3.141590) | 0.122 / 0.111 / 0.111 / 1.287 |
+
+Nothing tipped, nothing sank, no spawn was refused, and **no pose had to
+move**. The four closest-return rows are identical to three decimals
+because what each scanner sees at rest is the truck's own forks and mast
+— which is exactly why that column is not a protective verdict and is
+not offered as one (the verdict is `field_evaluation.py`'s, over a field
+polygon, with the ROS stack up). What it is good for is the comparison
+printed above: f3 and f4, in the main aisle, see the world the same way
+f1 and f2 do at the poses M6.1 validated. Task 4 can take these two
+poses into the table as they stand.
+
+### Verdict
+
+**STOP: 0.190 / 0.230 / 0.230 < 0.30.** This machine carries TWO
+forklifts with their sensors rendering (0.957-0.970) and does not carry
+three (0.140-0.179) or four (0.190-0.230). Task 2 is not started, the
+world was not lightened and no sensor rate was touched — those are the
+owner's calls and they are what this gate exists to ask for.
+
+Three consequences to weigh with them, the first measured and the other
+two marked as the inferences they are:
+
+- **Measured.** An acceptance run at 0.21 RTF takes about five times its
+  sim-clock duration in wall time. M6.1's note stands and gets worse:
+  every loop in this tree is wall-clock timed, so nothing misses a
+  deadline — what stretches is simulated seconds per wall second.
+- **Inference.** The per-lidar delivered rate at four trucks is
+  92.6 / 16 = **5.8 Hz**, a mean gap of 0.17 s against the writer's
+  `SENSOR_STALE_S` budget of 0.40 s. The mean holds, but the minimum RTF
+  in these windows is 0.014, and a stall that deep is a scan gap far past
+  0.40 s. M6.4's rig rule already names the failure mode (starve
+  `sensor_link` and the F-model latches ESTOP1). Whether the safety chain
+  survives four trucks is a full-stack question this server-only spike
+  cannot settle.
+- **Inference.** These numbers have NO ROS stack in them. The M6.4-era
+  two-vehicle stack (21 pids, writers attached) ran 0.46-0.62 against a
+  server-only 0.93-1.00, and the four-vehicle stack is 39 pids. Whatever
+  the fleet number becomes, the stack subtracts from it.
+
+The options, none of them taken here: drop the safety scanners'
+update rate (halving it halves the demand, and re-opens the timing
+argument in FIELD-EVALUATION.md); run some vehicles with no lidar
+consumer at all — traffic that moves but cannot see, which the renderer
+gives away for free (0.998 at four); keep four trucks but drive fewer at
+once; or move the world to a machine with a real GPU, which is the only
+option that removes the wall rather than working around it.
+
+---
 
 # The owner's runbook
 
