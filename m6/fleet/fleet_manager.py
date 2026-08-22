@@ -216,6 +216,8 @@ class FleetManager:
         self.yields = []         # bounded; who gave way to whom, and why
         self.blocked = []        # bounded; deadlocks wait-die cannot break
         self.said_blocked = {}   # serial -> the last "no floor" line said
+        self.said_lost = {}      # serial -> the last "floor went missing"
+        self.stuck = {}          # serial -> why it could not be started
         self.stop = False
         self.last_status = 0.0
         self.last_shape = None
@@ -268,12 +270,22 @@ class FleetManager:
                 self._on_submit(payload)
             else:
                 self._on_vehicle(kind, payload, now)
-        self._expire_dwells(now)
-        # BEFORE _assign, and that ordering is the anti-livelock rule
-        # again: the tasks already on the floor get their corridor back
-        # before a brand-new one - the youngest there is - takes a bite
-        # out of it.
+        # THE ORDER OF THESE THREE IS THE ANTI-LIVELOCK RULE.
+        # _traffic_pass first: every leg already on the floor gets its
+        # corridor back, oldest task first, before anything new takes a
+        # bite out of it. Then the dwelled tasks send leg 2 - also in
+        # submit order - and only then is a brand-new task assigned,
+        # which is the youngest thing in the cell by definition.
+        #
+        # WHAT THAT DOES NOT GUARANTEE, said out loud: a leg 2 and a new
+        # assignment are not part of the oldest-first pass, so floor
+        # that comes free during this drain can still go to a younger
+        # task's leg 2 rather than to an older task's retry that has
+        # already run. The retry gets it on the next pass 100 ms later,
+        # which is why this is an ordering preference and not a
+        # priority system - and why nothing above claims one.
         self._traffic_pass(now)
+        self._expire_dwells(now)
         self._assign(now)
         self._publish_status(now)
 
@@ -565,6 +577,11 @@ class FleetManager:
 
     def _assign(self, now):
         view = self._view(now)
+        # REBUILT EVERY PASS, never accumulated: `stuck` answers "which
+        # truck could not be started RIGHT NOW and why", and a stale
+        # entry would leave a vehicle on the operator's screen as
+        # blocked long after the task went to somebody else.
+        self.stuck.clear()
         pick = fc.next_assignment(view, self.tasks, self._distance)
         if pick is None:
             return
@@ -608,7 +625,12 @@ class FleetManager:
         """A dwell that has run out is PERMISSION to build leg 2 - the
         task machine has no dwell_done event, and the only thing that
         leaves DWELL is the leg-2 order actually going out."""
-        for task in list(self.tasks):
+        # Oldest submission first, for the same reason the retry pass
+        # is: two dwells expiring in one drain must not hand the aisle
+        # to whichever of them the queue happens to list first.
+        for task in sorted(self.tasks,
+                           key=lambda t: (t.get("submitted_ts") or 0.0,
+                                          t["task_id"])):
             if task["state"] != "DWELL":
                 continue
             if now < self.dwell_until.get(task["task_id"], 0.0):
@@ -863,15 +885,31 @@ class FleetManager:
         """
         task = self._task_of(serial)
         trf = task.get("traffic") if task else None
-        if trf is not None and msg.get("orderId") != task.get("order_id"):
-            trf = None                # a state about somebody else's order
-        node = self._standing_from(msg, trf, veh)
+        # A STATE THAT PREDATES THE LEG IS NOT A STATE ABOUT NO LEG, and
+        # confusing the two cost this fleet its whole guarantee once
+        # (measured 2026-08-22: one such state collapsed a fully granted
+        # corridor to the single node under the truck, and the next
+        # vehicle was then handed floor f1 was already driving onto -
+        # silently). A vehicle publishes on its own 2 s cadence and the
+        # fleet assigns at 10 Hz, so between the publish of a leg and
+        # the truck's acceptance of it EVERY state carries the previous
+        # orderId - or none at all. The same window opens again at the
+        # dwell-to-leg-2 boundary. So a stale state may say where the
+        # truck is and NOTHING ELSE: no release, no progress, and not
+        # even a node id read out of the new leg's map (leg 2's "wp2" is
+        # not leg 1's "wp2", and reading one for the other would move
+        # the truck sideways in the ledger).
+        stale = trf is not None and msg.get("orderId") != task.get("order_id")
+        node = trf["last_xy"] if stale \
+            else self._standing_from(msg, trf, veh)
         if node is None:
             return
         self.standing[serial] = node
         if not self.traffic_on:
             return
         self.floor.set_standing(serial, node)
+        if stale:
+            return                    # where it is, and nothing else
         if trf is None:
             # NO LEG OF OURS ON THIS TRUCK. A restarted manager is exactly
             # here: a nodeState carries no position, so the route an
@@ -971,6 +1009,16 @@ class FleetManager:
         at 10 Hz and a corridor stays taken for whole seconds, so the line
         repeats only when the sentence itself changes."""
         said = "{} {} {}".format(serial, leg, station_id)
+        # THE OPERATOR'S SCREEN GETS IT EVEN THOUGH THE LEDGER CANNOT.
+        # Handing the prefix back clears this vehicle's `waiting` record
+        # - it has to, or a truck with no task of its own would sit in
+        # the wait-for graph and be picked as a deadlock loser - so a
+        # truck stuck at the door would otherwise show neither a hold
+        # nor a wait, which reads as a fleet that has simply forgotten
+        # it. This says the sentence instead.
+        self.stuck[serial] = (
+            "cannot start {} of {} to {} - the route is taken".format(
+                leg, task["task_id"], station_id))
         if self.said_blocked.get(serial) == said:
             return
         self.said_blocked[serial] = said
@@ -1024,18 +1072,29 @@ class FleetManager:
         """Ask the floor again for the horizon, and publish the longer
         base when it grew."""
         trf, serial = task["traffic"], task["assignee"]
-        if trf["released"] >= len(trf["points"]):
-            return                       # nothing left to win
         if trf["pending"] is not None:
             # ONE EXTENSION IN THE AIR AT A TIME. orderUpdateId must be
             # exactly one more than the executing order, so a second
             # update sent before the truck confirmed the first is an
             # update the truck is REQUIRED to refuse.
             return
+        # THE HOLD IS RE-ASSERTED EVERY PASS, INCLUDING FOR A LEG THAT
+        # WAS GRANTED WHOLE. It is not duplicated state: the ledger is
+        # the only record of who owns what, this is the only record of
+        # what the truck was PROMISED, and asking one against the other
+        # is what turns "the fleet quietly stopped backing a base" into
+        # a line somebody reads. hold() takes nothing that is not free
+        # or already ours, so re-asking is free of consequence when
+        # nothing is wrong.
         index, pts = self._remaining(trf)
+        # MEASURED BEFORE THE RE-HOLD, because the re-hold is also the
+        # repair: ask afterwards and the hole has already closed.
+        before = self.floor.held_by(serial)
         grant = self.floor.hold(serial, tr.route_elements(pts))
         gained = (len(grant) + 1) // 2 if grant else 0
         base = index - trf["offset"]     # order index of the standing node
+        self._check_floor(serial, task, trf, base,
+                          (len(before) + 1) // 2 if before else 0, gained)
         released = max(trf["released"],
                        min(base + gained, len(trf["points"])))
         if released <= trf["released"]:
@@ -1047,6 +1106,39 @@ class FleetManager:
                                 update_id=update)
         if self._publish_extension(serial, task, order, released, update):
             trf["pending"] = (update, released)
+
+    def _check_floor(self, serial, task, trf, base, held, gained):
+        """Does the ledger still back the base this truck was given?
+
+        A RELEASED NODE IS A PROMISE THE FLEET CANNOT WITHDRAW - VDA 5050
+        has no way to shrink a base - so the reservation behind it has to
+        outlive every pass until the truck drives off it. If the re-hold
+        above came back short of what the base still covers, some floor
+        was freed that should not have been: the re-hold has just taken
+        back whatever was still free, and what is left is a line loud
+        enough to find. It is throttled per vehicle because the pass runs
+        at 10 Hz and the sentence would otherwise bury itself.
+
+        A YIELDED VEHICLE IS EXCLUDED, and that is not an exception being
+        made for a bug: resolve_deadlock gives up floor on purpose, and
+        the hole it leaves is written down in the spec and in _resolve
+        rather than re-reported here every 100 ms.
+        """
+        owed = trf["released"] - base    # base nodes still ahead of it
+        if held >= owed or self.floor.yielded(serial):
+            self.said_lost.pop(serial, None)
+            return
+        said = "{}/{}/{}".format(serial, task["order_id"], owed - held)
+        if self.said_lost.get(serial) == said:
+            return
+        self.said_lost[serial] = said
+        self.log.error(
+            "THE FLOOR UNDER A LIVE BASE WENT MISSING: %s had been "
+            "released onto %d node(s) of %s that the ledger no longer "
+            "backed; the re-hold took %d of them straight back. This is "
+            "a fleet bug, not a traffic decision - the truck is entitled "
+            "to drive there and nothing here can stop it.",
+            serial, owed - held, task["order_id"], max(0, gained - held))
 
     def _publish_extension(self, serial, task, order, released, update):
         """Stamp, validate, publish - and NEVER requeue on a failure.
@@ -1132,6 +1224,12 @@ class FleetManager:
             if not cycle:
                 return
             if not all(self._parked_at_base_end(v) for v in cycle):
+                # A cycle whose members are still driving defers the
+                # whole pass, including any OTHER cycle that is fully
+                # parked - find_cycle answers with one cycle and there
+                # is no way to ask it for the next. With two vehicles
+                # there is only ever one; M6.5's four can hold two, and
+                # this is where that has to be looked at again.
                 return
             ages = {t["assignee"]: t.get("submitted_ts") or 0.0
                     for t in self._in_flight()}
@@ -1210,6 +1308,7 @@ class FleetManager:
                     trf["released"], len(trf["points"]) - trf["released"]]
         return {"enabled": self.traffic_on, "holds": holds,
                 "waiting": waiting, "yielded": yielded, "bases": bases,
+                "stuck": dict(self.stuck) if self.traffic_on else {},
                 "yields": list(self.yields), "blocked": list(self.blocked)}
 
     # ---- the operator's screen ----
@@ -1282,7 +1381,7 @@ class FleetManager:
              "f": [doc["traffic"]["enabled"],
                    {k: len(v) for k, v in doc["traffic"]["holds"].items()},
                    doc["traffic"]["waiting"], doc["traffic"]["yielded"],
-                   doc["traffic"]["bases"],
+                   doc["traffic"]["bases"], doc["traffic"]["stuck"],
                    len(doc["traffic"]["yields"]),
                    len(doc["traffic"]["blocked"])]},
             sort_keys=True)

@@ -182,6 +182,11 @@ def traffic_lines(doc):
     that with "(none)" would be claiming an empty floor rather than an
     old document. The section simply is not printed.
 
+    A truck can be STUCK without holding or waiting for anything: when
+    not one node of a route is free the fleet hands the whole prefix
+    back rather than sit in the wait-for graph with no task, and the
+    sentence is carried in the document instead of in the ledger.
+
     The element strings are the MANAGER's - `(1.0,0.0)` for a node and
     `(1.0,0.0)-(2.0,0.0)` for the floor between two - because a
     frozenset of coordinate pairs does not survive JSON and the fleet is
@@ -197,7 +202,7 @@ def traffic_lines(doc):
     holds, waiting = _dict(block, "holds"), _dict(block, "waiting")
     bases, yielded = _dict(block, "bases"), _list(block, "yielded")
     lines = ["", "TRAFFIC (on)"]
-    if not holds and not waiting and not bases:
+    if not holds and not waiting and not bases and not _dict(block, "stuck"):
         lines.append("  (nothing reserved - no truck is on the floor)")
     for name in sorted(holds):
         lines.append("  {} holds  {}".format(
@@ -209,6 +214,9 @@ def traffic_lines(doc):
     for name in sorted(set(yielded) - set(waiting)):
         lines.append("  {} yielded - holding nothing ahead, retrying "
                      "every pass".format(_cell(name, 10)))
+    for name in sorted(_dict(block, "stuck")):
+        lines.append("  {} STUCK  {}".format(
+            _cell(name, 10), _dict(block, "stuck")[name]))
     for task_id in sorted(bases):
         split = bases[task_id]
         if isinstance(split, (list, tuple)) and len(split) == 2:

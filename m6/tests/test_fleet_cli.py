@@ -245,6 +245,8 @@ TRAFFIC = {
     "waiting": {"f1": "(0.0,-5.5)"},
     "yielded": ["f1"],
     "bases": {"ft-1a2b3c4d": [1, 4]},
+    "stuck": {"f4": "cannot start leg1 of ft-99887766 to S5 - the route "
+                    "is taken"},
     "yields": [{"vehicle": "f1", "with": ["f2"], "freed": 2,
                 "task": "ft-1a2b3c4d", "ts": NOW}],
     "blocked": [],
@@ -261,6 +263,13 @@ def test_the_screen_shows_who_holds_what_and_who_is_waiting():
     assert "parked:f3  holds  (-6.0,-5.5)" in text
     assert "base 1 released + 4 horizon" in _line(text, "  ft-1a2b3c4d")
     assert "gave way: f1 (ft-1a2b3c4d) to f2" in text
+    # A truck can be STUCK while holding and waiting for nothing: the
+    # fleet hands the whole prefix back rather than sit in the wait-for
+    # graph with no task, so the sentence is all the operator gets - and
+    # a blank row would read as a fleet that had forgotten the truck.
+    stuck = _line(text, "  f4         STUCK")
+    assert "cannot start leg1 of ft-99887766 to S5" in stuck
+    assert "f4" not in TRAFFIC["holds"] and "f4" not in TRAFFIC["waiting"]
 
 
 def test_a_deadlock_the_fleet_cannot_break_is_shouted_not_hidden():
@@ -289,7 +298,7 @@ def test_an_empty_floor_and_a_pre_m6_4_document_are_different_answers():
     empty hall rather than an old document."""
     empty = cli.render(dict(DOC, traffic={
         "enabled": True, "holds": {}, "waiting": {}, "yielded": [],
-        "bases": {}, "yields": [], "blocked": []}), NOW)
+        "bases": {}, "stuck": {}, "yields": [], "blocked": []}), NOW)
     assert "nothing reserved" in empty
     assert "TRAFFIC" not in cli.render(DOC, NOW)
     for junk in (None, [], "on", 7):

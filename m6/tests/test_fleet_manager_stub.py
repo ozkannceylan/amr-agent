@@ -947,7 +947,7 @@ def test_no_traffic_grants_every_route_whole(open_floor):
     assert doc["traffic"] == {"enabled": False, "holds": {}, "waiting": {},
                               "yielded": [], "bases": {"t-1": [2, 0],
                                                        "t-2": [2, 0]},
-                              "yields": [], "blocked": []}
+                              "stuck": {}, "yields": [], "blocked": []}
 
 
 def test_the_traffic_block_is_json_and_reads_like_a_floor(floor):
@@ -980,8 +980,143 @@ def test_the_floor_is_part_of_the_documents_shape(floor):
     news."""
     manager, stub = floor
     now = time.monotonic()
-    f1, f2 = head_on(manager, stub, now)
+    f1, f2 = drains(manager, stub, now)
     before = manager._shape(manager._status(now))
-    manager.floor.release_all("f1", keep=S1_XY)
-    manager._traffic_pass(now)
+    f1.state(now)                          # f1 is off S1
+    manager._traffic_pass(now)             # ...so f2's base grows
     assert manager._shape(manager._status(now)) != before
+
+
+def test_a_truck_that_cannot_start_is_on_the_screen_by_name(floor):
+    """Handing the whole prefix back clears the vehicle's `waiting`
+    record - it has to, or a truck with no task of its own would sit in
+    the wait-for graph and be picked as a deadlock loser - so a truck
+    stuck at the door would otherwise show neither a hold nor a wait.
+    The sentence rides the document instead, and it is rebuilt every
+    pass rather than accumulated."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", S1_XY)
+    f2 = Truck(manager, stub, "f2", S1_XY)
+    submit(manager, "t-1", "S1", "S4")
+    submit(manager, "t-2", "S1", "S4")
+    for _ in range(3):
+        turn(manager, (f1, f2), now)
+
+    doc = manager._status(now)
+    assert f2.inbox() == []
+    assert "cannot start leg1 of t-2 to S1" in doc["traffic"]["stuck"]["f2"]
+    assert "f2" not in doc["traffic"]["holds"]
+    assert "f2" not in doc["traffic"]["waiting"]
+    # ...and it is not a fact that outlives the pass that found it.
+    manager.tasks[:] = []
+    manager._assign(now)
+    assert manager._status(now)["traffic"]["stuck"] == {}
+
+
+# ---- 7. the guarantee has to survive the vehicle's own publish cadence ----
+def stale_state(truck, now, order_id=""):
+    """A state the truck published BEFORE it accepted the leg the fleet
+    just sent it: the previous orderId (or none), the previous lastNode
+    (or none), and nothing left to drive. Every real vehicle emits one -
+    it reports on a 2 s cadence and the fleet assigns at 10 Hz."""
+    truck.manager._on_state(truck.serial, truck.row, {
+        "operatingMode": truck.mode,
+        "agvPosition": {"x": truck.xy[0], "y": truck.xy[1]},
+        "orderId": order_id, "orderUpdateId": 0,
+        "lastNodeId": "", "lastNodeSequenceId": 0,
+        "nodeStates": [], "errors": []}, now)
+
+
+def test_a_state_that_predates_the_leg_may_not_free_the_floor_it_holds(
+        floor):
+    """THE GUARANTEE, AND THE ONE WAY IT WAS LOST.
+
+    Measured 2026-08-22 on this manager: a fully granted corridor
+    collapsed to the single node under the truck the first time a state
+    arrived carrying the PREVIOUS orderId, and the next vehicle was then
+    handed the floor f1 had already been released onto. Silently - no
+    log line, no refusal, nothing on the operator's screen. It was not
+    an edge case either: a vehicle publishes every 2 s and the fleet
+    assigns at 10 Hz, so almost every leg has that window, and a leg
+    granted WHOLE never healed, because there was no horizon left to
+    retry for.
+
+    A stale state says where the truck is and nothing else.
+    """
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    submit(manager, "t-1", "S1", "S4")
+    turn(manager, (f1,), now)
+    granted = manager.floor.held_by("f1")
+    assert len(granted) == 3, "the leg should have been granted whole"
+
+    stale_state(f1, now)                  # published before it accepted
+    assert manager.floor.held_by("f1") == granted, \
+        "a state that predates the leg freed the corridor under it"
+    assert manager.standing["f1"] == WEST
+    turn(manager, (f1,), now)
+    assert manager.floor.held_by("f1") == granted
+
+    # AND THE SECOND TRUCK IS STILL REFUSED THAT FLOOR.
+    f2 = Truck(manager, stub, "f2", EAST)
+    submit(manager, "t-2", "S1", "S4")
+    turn(manager, (f2, f1), now)
+    assert manager.floor.owner_of(S1_XY) == "f1"
+    assert horizon_of(f2) == ["S1"], "f2 was handed a node f1 is driving to"
+
+
+def test_the_dwell_to_leg_two_boundary_has_the_same_window(floor):
+    """The other place a stale orderId arrives: the truck is still
+    reporting leg 1 when leg 2 goes out. Reading leg 1's lastNodeId
+    against leg 2's node map would be worse than useless - leg 2's "wp2"
+    is not leg 1's "wp2" - so nothing is read from it at all."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", (-12.5, -5.5))
+    submit(manager, "t-1", "S1", "S4")
+    turn(manager, (f1,), now)
+    leg1 = f1.order["orderId"]
+    f1.drive()
+    turn(manager, (f1,), now)                       # arrived; dwell starts
+    manager.dwell_until["t-1"] = now - 1.0
+    turn(manager, (f1,), now)                       # leg 2 goes out, east
+    trf = manager.tasks[0]["traffic"]
+    granted = manager.floor.held_by("f1")
+    assert trf["last_xy"] == S1_XY and len(granted) > 1
+
+    stale_state(f1, now, order_id=leg1)             # leg 1's id, still
+    assert manager.floor.held_by("f1") == granted
+    assert trf["last_xy"] == S1_XY, "the truck moved in the ledger"
+
+
+def test_a_base_the_ledger_stopped_backing_is_re_claimed_and_shouted(
+        floor):
+    """The invariant check behind the fix. A released node is a promise
+    the fleet cannot withdraw - VDA 5050 has no way to shrink a base -
+    so the reservation behind it must outlive every pass. The retry
+    re-asserts the hold whether or not there is horizon left to win, and
+    when the ledger comes back short it says so at ERROR instead of
+    letting a silent hole ride."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    submit(manager, "t-1", "S1", "S4")
+    turn(manager, (f1,), now)
+    assert manager.tasks[0]["traffic"]["released"] == 2   # granted whole
+
+    manager.floor.release_all("f1", keep=WEST)            # the hole
+    catcher = Catcher()
+    manager.log.addHandler(catcher)
+    manager.log.setLevel(logging.ERROR)
+    try:
+        for _ in range(20):
+            manager._traffic_pass(now)
+    finally:
+        manager.log.removeHandler(catcher)
+
+    assert manager.floor.owner_of(S1_XY) == "f1", "the base was not re-taken"
+    said = [m for m in catcher.said if "WENT MISSING" in m]
+    assert len(said) == 1, "twenty passes, one line"
+    assert "f1" in said[0] and "fleet bug" in said[0]

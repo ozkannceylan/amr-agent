@@ -129,11 +129,26 @@ unchanged by rule).
   vehicle is not assigned at all if it is idle; if it is mid-route it
   stops at its current node with an empty extension — the honest wait.
 - Reservation state is in-memory: a manager restart drops the ledger.
-  On restart the manager rebuilds holds from the vehicles' reported
-  `lastNodeId` + remaining `nodeStates` before assigning anything new,
-  and refuses to assign until every ONLINE vehicle has reported one
-  state (the existing idle-confirm rule already delays it; this makes
-  the reason explicit).
+  **Correction (M6.4 Task 4, as built):** the rebuild written above
+  cannot be done on this wire subset. A `nodeState` carries `nodeId`,
+  `sequenceId` and `released` and NO position, and a restarted manager
+  has no order of its own to map those ids against — so the remaining
+  route of an adopted truck is genuinely unknowable from the wire.
+  What the manager actually does, from the very first state of every
+  vehicle: `set_standing` on the nearest graph node to the reported
+  pose and HOLD that one node under the vehicle's serial, so nobody is
+  routed through a truck that is standing there. Everything beyond the
+  body is adopted by waiting, which is the M6.3 rule already (a truck
+  with something left to drive is not idle, so it is given no new
+  task); the extra fleet-wide assignment gate is therefore not
+  implemented either — the existing idle-confirm rule is the whole
+  delay.
+  **Residual, carried to M6.5:** between a restart and the end of the
+  adopted leg, that truck's live BASE is unreserved. A task submitted
+  in that window can be routed across floor the adopted vehicle is
+  already released onto, and the fleet will not know. Closing it needs
+  either positions in `nodeStates` (a wire change) or a persisted
+  ledger (an explicit non-goal here — see "No journal").
 - Everything degrades to M6.3 behaviour if traffic is disabled by
   `--no-traffic` (a flag the gates use to reproduce the old jam
   deliberately — evidence that traffic is what fixed it).
