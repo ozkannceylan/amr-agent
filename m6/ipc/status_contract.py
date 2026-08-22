@@ -56,26 +56,57 @@ VEHICLES = {
            "spawn": {"x": "3.00", "y": "-5.50", "z": "0.05",
                      "yaw": "3.14159"}},
     "f3": {"plc_port": 5130, "sensor_port": 5131,
-           "spawn": {"x": "-8.00", "y": "5.65", "z": "0.05", "yaw": "0.0"}},
+           "spawn": {"x": "-12.50", "y": "5.65", "z": "0.05",
+                     "yaw": "0.0"}},
     "f4": {"plc_port": 5140, "sensor_port": 5141,
-           "spawn": {"x": "8.00", "y": "5.65", "z": "0.05",
+           "spawn": {"x": "12.00", "y": "-5.50", "z": "0.05",
                      "yaw": "3.14159"}},
 }
-# f1 keeps step5's proven spawn. f2 faces it from the other end of the
-# 6.50 m main aisle. f3 and f4 joined at M6.5 and stand the same way one
-# aisle over - the main aisle at y = 5.65 (ipc/route.py), one at each end
-# of it - so the four start as two facing pairs, one pair per aisle, and
-# no truck begins the run inside another's route.
+# f1 keeps step5's proven spawn - the S1 station point itself. f2 faces it
+# from 6.00 m down the dock aisle. f3 and f4 joined at M6.5 and stand at
+# the FAR ENDS of the two aisles: f3 on the main aisle's west end
+# (x = -12.5, y = 5.65) and f4 on the dock aisle's east end (x = 12.0,
+# y = -5.5), each facing in towards the warehouse.
+#
+# WHERE A PARKED TRUCK MAY STAND IS A FLEET DECISION, NOT A SCENIC ONE,
+# AND M6.5 GOT IT WRONG ONCE. f3 and f4 first went in at (-8.0, 5.65) and
+# (8.0, 5.65) because those are open main-aisle floor. They are also the
+# two SPUR JUNCTIONS floor.py:250-257 names: (-8.0, 5.65) is the only way
+# into both S6 and S8, and (8.0, 5.65) into S5, S7 and S9. What that
+# costs is not theoretical, because an idle truck HOLDS the node under it
+# (floor.py _hold_standing) and IDLE_HOLD_S hands it back after 30 s with
+# the truck still standing there (_idle_floor, which says so in its own
+# warning) - so those two poses put a parked truck first across the
+# fleet's busiest junction and then invisible on it, leaving the
+# scanners as the stop. Measured over the real planner, every one of the
+# 90 station-to-station routes:
+#
+#     node            of 90 routes   nearest node   nearest station
+#     (8.0, 5.65)          46          0.85 m         0.85 m  S7   <- was f4
+#     (-8.0, 5.65)         34          0.85 m         0.85 m  S6   <- was f3
+#     (-3.0, -5.5)         42          3.00 m         0.00 m  S1   <- f1, = S1
+#     (3.0, -5.5)          12          3.00 m         3.91 m  S4   <- f2
+#     (-12.5, 5.65)        12          4.50 m         4.58 m  S6   <- f3
+#     (12.0, -5.5)          6          4.00 m         6.50 m  S4   <- f4
+#
+# NO NODE IN THIS GRAPH IS ROUTE-FREE - all 26 are on at least one of the
+# 90 - so the choice is the least-used floor, not clean floor. f3 and f4
+# now sit on the two quietest nodes there are, both degree 2, neither the
+# way in to any station. (12.0, 5.65), the main aisle's east end, was
+# rejected on the measurement above: 6 routes, but 0.40 m from S5's own
+# station point, so a truck parked there stands ON the conveyor station
+# while the ledger calls it a different node. tests/test_vehicles_table.py
+# pins both rules - no spur junction, and no pose almost-but-not-quite on
+# a station.
 #
 # EVERY POSE HERE HAS BEEN SPAWNED AND LOOKED AT. M6.1 validated f1's and
-# f2's; M6.5's Gate 1 spike spawned all four in one server and reported
-# each one's roll, pitch and closest lidar return at rest (PROOF.md, "M6.5
-# - sizing the machine for four"): all four rest level at exactly the
-# commanded coordinates, and f3's and f4's closest returns are identical
-# to f1's and f2's - 0.122 / 0.111 / 0.111 / 1.287 m, the truck's own
-# forks and mast and nothing else. Nothing had to move.
-# A pose that DOES trip a field moves HERE, in this table, and nowhere
-# else - the launch file, m6.sh's `home` and the spike all read it.
+# f2's; M6.5's Gate 1 spike did the same for the first f3/f4 pair, and
+# the pair above was measured the same way when they moved - resting pose
+# read back off the running world and every safety lidar's closest return
+# compared against f1's and f2's, which are the known-good ones. A pose
+# that rests tilted, sinks, or reads unlike the others moves HERE, in this
+# table, and nowhere else - the launch file, m6.sh's `home`, the spike and
+# the fleet all read it.
 #
 # THE PORT FAMILIES CLIMB IN TENS AND THE SENSOR PORT IS ALWAYS +1, and
 # they are still written out rather than computed: what a reader needs

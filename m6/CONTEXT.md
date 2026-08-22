@@ -85,7 +85,8 @@ F-program validation.
 **M6.2 gave each vehicle `ipc/vda_agent.py`**, started by `step6.sh` beside
 that vehicle's nav node, and the stack was twenty processes then: the
 broker, the world, and nine per truck. M6.3 made it twenty-one — one fleet
-manager over the pair of them, in its own section below. The agent is the
+manager over the pair of them, in its own section below. **M6.5 made it
+thirty-nine**: the same three, nine per truck, four trucks. The agent is the
 only door into this stack from off the machine.
 
 **Owner ruling 2026-08-21: full-route orders from day one.** Master control
@@ -136,10 +137,12 @@ are the places that come out together.
 
 ## The fleet manager: one for the cell, and it is not a safety path
 
-**M6.3 put master control above the two trucks.** `fleet/fleet_manager.py` is
-paho-only — no ROS, no `VEHICLE`, no DDS domain — started by `m6.sh` as the
-stack's twenty-first pid; `fleet/fleet_cli.py` is the operator's hand and
-screen. Work enters the cell as a **transport**: two station ids,
+**M6.3 put master control above the trucks** — two then, four since M6.5, and
+it never had to learn the difference: it discovers its fleet on the wire and
+reads no vehicle table at all. `fleet/fleet_manager.py` is paho-only — no ROS,
+no `VEHICLE`, no DDS domain — started by `m6.sh` as the stack's last
+pid; `fleet/fleet_cli.py` is the operator's hand and screen. Work enters
+the cell as a **transport**: two station ids,
 `fleet_cli.py submit S1 S4`. Which truck drives it is the FLEET's decision,
 made from the trucks' own reported positions over the vehicle's own route
 graph, and there is deliberately no way to name a vehicle from the CLI.

@@ -1,22 +1,23 @@
 """m6_world.launch.py - the plant, and only the plant.
 
-Eight processes: the world server, one bridge, and for EACH of the two
-vehicles a spawn, the unit translator and the STO contactor. A ninth,
-the Gazebo GUI client, is started only by `gui:=true` and nothing in the
-command path reads it.
+Two processes plus three per vehicle: the world server, one bridge, and
+for EACH vehicle in the table a spawn, the unit translator and the STO
+contactor - fourteen at the four vehicles M6.5 put in that table. One
+more, the Gazebo GUI client, is started only by `gui:=true` and nothing
+in the command path reads it.
 
-ONE WORLD, TWO VEHICLES, AND THE ONE PLACE THE DIFFERENCE LIVES
+ONE WORLD, EVERY VEHICLE, AND THE ONE PLACE THE DIFFERENCE LIVES
   Every per-vehicle name and pose below comes from the VEHICLES table in
   ipc/status_contract.py, through contract(vid). This file imports that
   module ENV-FREE and has to keep doing so: VEHICLE names ONE vehicle
-  and this process serves both, so reading a per-vehicle module constant
-  here would bind the whole launch to whichever vehicle the shell
-  happened to name.
+  and this process serves all of them, so reading a per-vehicle module
+  constant here would bind the whole launch to whichever vehicle the
+  shell happened to name.
 
   What it spawns are the DERIVED models under m6/vehicles/<vid>/,
   written by tools/instantiate_vehicle.py. The shared sources spell every
   gz topic absolutely under /forklift/, so two spawns of one file would
-  share every terminal - one steer command driving both trucks. The
+  share every terminal - one steer command driving every truck at once. The
   derived files are git-ignored build products, so a missing one is a
   refusal at import that NAMES the tool, and never a fallback to the
   source: that fallback would start, look like a launch, and be wrong in
@@ -61,7 +62,7 @@ _REPO = os.path.normpath(os.path.join(_HERE, "..", ".."))
 # building columns, no row C, 6.50 m main aisle); the source world stays
 # untouched, exactly as forklift_ver2/model.sdf leaves agv/'s model alone.
 # The world NAME inside the file stays "warehouse", so _WORLD_NAME and
-# every /world/warehouse/* topic hold. ONE world for both vehicles: the
+# every /world/warehouse/* topic hold. ONE world for every vehicle: the
 # plant is the only thing they share.
 _WORLD = os.path.join(_HERE, "warehouse_ver2.sdf")
 _SCRIPTS = os.path.join(_REPO, "agv", "forklift", "scripts")
@@ -120,9 +121,10 @@ for _vid in _VIDS:
 
 # '[' gz to ROS, ']' ROS to gz.
 #
-# ONE BRIDGE PROCESS CARRIES BOTH VEHICLES. Every argument in the loop
-# below is a fully namespaced topic - /f1/... or /f2/... - so a second
-# bridge would buy nothing but a second thing to start, stop and sweep.
+# ONE BRIDGE PROCESS CARRIES EVERY VEHICLE. Every argument in the loop
+# below is a fully namespaced topic - /f1/... through /f4/... - so a
+# second bridge would buy nothing but a second thing to start, stop and
+# sweep.
 #
 # JOINT STATES ARE DELIBERATELY NOT BRIDGED (odometry joined the bridge in
 # Step 5, below). Nothing in m6/ consumes linear_speed,
@@ -178,14 +180,14 @@ for _vid in _VIDS:
         # MESSAGES ARE NOT NAMESPACED. The OdometryPublisher writes
         # frame_id "forklift/odom" and child_frame_id "forklift/base_link"
         # with NO leading slash, so instantiate_vehicle.py's /forklift/ ->
-        # /<vid>/ rewrite cannot see them and both vehicles publish the
-        # same two frame names on their own topics. It is inert today and
+        # /<vid>/ rewrite cannot see them and every vehicle publishes
+        # the same two frame names on its own topics. It is inert today and
         # that was checked rather than assumed: nothing in m6/ipc/
         # reads header.frame_id or child_frame_id (nav_node takes only the
         # pose), nothing publishes TF and there is no robot_state_
         # publisher. M6.2+ must namespace the frames in the derived model
         # BEFORE the first consumer appears - a TF tree, an EKF or a Nav2
-        # stack would silently join the two trucks into one.
+        # stack would silently join all four trucks into one.
         "{}@nav_msgs/msg/Odometry[gz.msgs.Odometry".format(_T["gz_odom"]),
         "{}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan".format(
             _T["gz_scan_nav"]),
@@ -203,10 +205,11 @@ _BRIDGE_ARGS.insert(
     0, "{}@rosgraph_msgs/msg/Clock[gz.msgs.Clock".format(_CLOCK_TOPIC))
 
 # The GUI gate waits for the back scanner of EVERY vehicle - the reason is
-# the long note in generate_launch_description(). Both spawns are
-# requested by the same launch, so waiting for the second costs nothing
-# and closes the same race for its beams that waiting for the first
-# closes for f1's.
+# the long note in generate_launch_description(). Every spawn is requested
+# by the same launch, so waiting for the last costs nothing and closes the
+# same race for its beams that waiting for the first closes for f1's. It
+# is built from _VIDS, so the gate grew from two topics to four when the
+# table did, with no edit here.
 _GUI_GATE_TOPICS = tuple(
     status_contract.contract(vid)["scan_topic"].format("back")
     for vid in _VIDS)
@@ -274,9 +277,10 @@ def generate_launch_description():
     #   m5-73's world_pose repair aimed at a field this plugin never
     #   reads; the anchor is the ECM lookup above, and ordering is what
     #   fixes it.
-    #   WITH TWO VEHICLES THE GATE WAITS FOR BOTH, and it has to: the race
-    #   is per model, so a GUI let in after f1's scanners advertised but
-    #   before f2's would draw f2's three fans at the world origin.
+    #   THE GATE WAITS FOR EVERY VEHICLE, and it has to: the race is per
+    #   model, so a GUI let in after f1's scanners advertised but before
+    #   f4's would draw f4's three fans at the world origin. Four models
+    #   is four chances at that race, not one.
     ld.add_action(ExecuteProcess(
         cmd=["bash", "-c",
              "until {}; do sleep 0.5; done; sleep 2; "
@@ -296,8 +300,9 @@ def generate_launch_description():
         arguments=_BRIDGE_ARGS,
     ))
 
-    # ONE LOOP FOR THE WHOLE VEHICLE SIDE: three processes per vehicle,
-    # all three pointed at that vehicle's DERIVED config. The two reused
+    # ONE LOOP FOR THE WHOLE VEHICLE SIDE: three processes per vehicle -
+    # twelve at four - all three pointed at that vehicle's DERIVED config.
+    # The two reused
     # vehicle nodes are started exactly as
     # agv/forklift/launch/vehicle.launch.py starts them - the contactor
     # carries use_sim_time, forklift_io does not - with one addition, a

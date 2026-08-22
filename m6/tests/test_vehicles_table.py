@@ -1,7 +1,11 @@
 """The VEHICLES table and the per-vehicle contract."""
+import math
+
 import pytest
 
+import route
 import status_contract as sc
+from stations import STATIONS
 
 
 def test_table_has_exactly_the_four_vehicles_with_disjoint_ports():
@@ -32,6 +36,55 @@ def test_every_vehicle_carries_a_whole_spawn_pose():
         for key, text in v["spawn"].items():
             assert isinstance(text, str), (vid, key)
             float(text)          # every one of them is a number in a string
+
+
+def test_no_vehicle_is_parked_where_the_fleet_has_to_drive():
+    """The poses against the floor plan, which M6.5 got wrong once.
+
+    An idle truck HOLDS the node under it (floor.py `_hold_standing`)
+    and `IDLE_HOLD_S` gives that node back after 30 s with the truck
+    still standing on it (`_idle_floor`, which says so in its own
+    warning). A spawn pose is therefore a fleet decision, not a scenic
+    one: park a truck on the junction a spur station is reached through
+    and the first half-minute of every run has the fleet's busiest node
+    held by a truck with no task, and the next half-minute has the fleet
+    routing somebody through a truck it can no longer see, with the
+    scanners left as the stop.
+
+    Two rules, both read off the graph rather than off a list of
+    coordinates, so a station that moves in stations.py moves these with
+    it:
+
+    1. NO SPUR JUNCTION. A spur station is a node with exactly one
+       neighbour (`floor.spur_entry`'s own test) and that neighbour is
+       the only way in and out of it. f3 and f4 sat on the two worst of
+       them - (-8.0, 5.65) serves S6 and S8, (8.0, 5.65) serves S5, S7
+       and S9 - until this test existed.
+    2. ON A STATION, OR CLEAR OF ONE. f1 parks exactly on S1, which is a
+       legitimate place for a truck to stand. What is not legitimate is
+       parking 0.40 m off a station point: that is the trap in
+       (12.0, 5.65), quiet floor by the ledger and the middle of S5 by
+       the tape measure.
+    """
+    graph = route.build_graph()
+    spur_junctions = {
+        junction
+        for s in STATIONS.values()
+        for junction in graph.get((s["x"], s["y"]), ())
+        if len(graph[(s["x"], s["y"])]) == 1}
+    station_points = {(s["x"], s["y"]) for s in STATIONS.values()}
+    assert spur_junctions, "the graph grew no spurs - this test proves nothing"
+
+    for vid, v in sorted(sc.VEHICLES.items()):
+        xy = (float(v["spawn"]["x"]), float(v["spawn"]["y"]))
+        assert xy not in spur_junctions, (
+            "{} spawns on {}, the only way in to a spur station"
+            .format(vid, xy))
+        for point in station_points:
+            gap = math.hypot(xy[0] - point[0], xy[1] - point[1])
+            assert gap == 0.0 or gap >= 1.0, (
+                "{} spawns {:.2f} m from station {} - either stand on it "
+                "or stand clear of it".format(vid, gap, point))
 
 
 def test_the_writers_vehicle_flag_offers_exactly_the_table():

@@ -100,6 +100,18 @@ from status_contract import PLC_PORT, SENSOR_PORT, VID  # noqa: E402
 # case, and including pytest's collection. .get() leaves it None and
 # connect_plc refuses by name, which is both later and narrower: the
 # only run that can hit it is one that asked for real hardware.
+#
+# f2 IS DELIBERATELY NOT IN THAT REFUSAL, and the asymmetry is the point.
+# PLC_3 is a RESERVED NAME: it is what f2's instance would be called the
+# day a second license exists, so `--vehicle f2` without --virtual is
+# allowed to reach the API and come back with the -4 (DoesNotExist) the
+# handler below already explains BY THAT NAME - a true answer ("that
+# instance is not running") and an actionable one if the license
+# returns. f3 and f4 have no reserved name at all, so there is nothing
+# to ask PLCSIM about and the refusal is local. Reviewed and kept
+# 2026-08-22; giving f2 the local refusal too would cost a code edit on
+# the day the license comes back, which is the wrong direction to be
+# wrong in.
 PLC_INSTANCE = {"f1": "PLC_2", "f2": "PLC_3"}.get(VID)
 VIRTUAL = _ARGS.virtual  # no PLCSIM: virtual_fplc.py plays the F-PLC
 API_DLL_DIR = r"C:\Program Files (x86)\Common Files\Siemens\PLCSIMADV\API\6.0"

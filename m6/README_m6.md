@@ -37,10 +37,13 @@ and **[Fleet manager](#fleet-manager--the-cells-master-control)**.
 > Something looks wrong? Read **[Not a bug](#not-a-bug)** before you debug it.
 
 **Evidence: [PROOF.md](PROOF.md) — read its ledger before you trust anything
-here.** Gate 1 (RTF), Gate 5 (lifecycle) and the fail-safe half of Gate 4 are
-measured. Gates 2, 3, 6 and Gate 4's driving half are **NOT RUN**: they need
-the two Windows writers and two hands, and PROOF.md carries a numbered runbook
-for each.
+here.** M6.1's six gates, M6.2's six VDA gates, M6.3's six fleet gates and
+M6.4's traffic gates are measured with their output kept. Two things are open
+and both are named there: M6.4's **Gate 2** (station contention) stands
+recorded `[ ] BLOCKED`, and M6.5's Gates 2-6 — four-vehicle traffic, the
+acceptance run, degradation under loss, safety at four — are what Milestone 6
+is judged on. M6.5's Gate 1 (RTF at four) is measured. A gate that needs hands
+needs **four** panels now, not two, and no agent may supply them.
 
 ## Run order
 
@@ -54,7 +57,7 @@ writer, and each writer serves exactly one truck.
 | 2a | WSL | `echo $GALLIUM_DRIVER` must print `d3d12`. If it prints nothing, **stop and read [The GPU condition](#the-gpu-condition--two-exports-in-your-shell)** — four trucks on software rendering is not the configuration anything here was measured on. |
 | 3 | WSL | `./m6.sh deploy` — **regenerates `vehicles/f1/` … `vehicles/f4/` first** (from `gazebo/forklift_ver2/model.sdf` + `agv/forklift/config.yaml`), then freezes `ipc/` + every derived pair + `fleet/` into `deploy/` with a sha256 `MANIFEST`. Prints `deployed 31 files`. **`start` refuses without one.** |
 | 4 | WSL | `./m6.sh start` — the broker goes up first, the world gets a five-second head start before the vehicle nodes, the fleet manager goes up last, then one more second before `start` checks that all **thirty-nine** are still alive. Do **not** source ROS first; the script does it. |
-| 4a | Screen | **Five windows:** the **Gazebo window** with the warehouse — f1/f2 facing each other 6.00 m apart in the dock aisle, f3/f4 the same way in the main aisle — and **four HMIs**, `Forklift HMI - f1` … `- f4`. `start --headless` skips the Gazebo one. |
+| 4a | Screen | **Five windows:** the **Gazebo window** with the warehouse — f1 on S1 and f2 facing it 6.00 m down the dock aisle, f3 parked at the main aisle's west end and f4 at the dock aisle's east end (they stand at the aisle ENDS on purpose — see [Where the parked trucks stand](#where-the-parked-trucks-stand-and-why-it-is-a-fleet-decision)) — and **four HMIs**, `Forklift HMI - f1` … `- f4`. `start --headless` skips the Gazebo one. |
 | 5 | WSL | Read the **thirty-nine** pid lines: `broker`, `world`, then nine per vehicle (`plc_link cmd_gate cmd_mux field_eval encoder_link sensor_link nav_node vda_agent hmi`) for f1, f2, f3, f4 in turn, then `fleet` — the cell's master control, one for the whole fleet. `WARNING: <name> exited during startup` sends you to that log in `logs/`. A `THE STACK IS INCOMPLETE.` line means stop and read it. |
 | 6 | Windows | `cd C:\Users\ozkan\projects\amr-agent` |
 | 7 | Windows | `python m6\windows\m6.py --vehicle f1 --virtual` — **64-bit Python** (pythonnet). A grey **panel** opens, titled `Forklift f1 PLC Control Panel - VIRTUAL F-PLC (model)`; the console prints `streaming PLC state to <wsl-ip>:5110` and `listening for the back scanner on 0.0.0.0:5111`. |
@@ -109,25 +112,76 @@ was measured on.
 **Verify before a run, in a fresh shell:**
 
 ```bash
-GALLIUM_DRIVER= glxinfo -B | grep Device      # -> D3D12 (NVIDIA ...)
-grep GL_RENDERER ~/.gz/rendering/ogre2.log    # after a run: what the SERVER took
+glxinfo -B | grep Device                    # your shell -> D3D12 (NVIDIA ...)
+grep GL_RENDERER ~/.gz/rendering/ogre2.log  # after a run: what the SERVER took
 ```
 
-The second one is the only line that proves the *server* took it. The Windows
-writers need nothing — they render nothing.
+The first reads **your shell** and is the one to run before a gate: it prints
+`llvmpipe` exactly when the exports are missing, which is the answer you want
+it to give. (Do **not** write `GALLIUM_DRIVER= glxinfo -B` — that empties the
+variable for that one command and prints llvmpipe on a perfectly good machine.
+To ask the question without touching your shell at all, spell both exports on
+the command line as PROOF.md ran them: `GALLIUM_DRIVER=d3d12
+MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA glxinfo -B | grep Device`.) The second
+is the only line that proves the **server** took it, and it is the one a gate
+quotes. The Windows writers need nothing — they render nothing.
 
-**What the whole stack costs on top of that**, measured 2026-08-22 the first
-time four vehicles ran together for real (`start --headless`, thirty-nine
-pids, every scanner bridged, all four trucks standing still): two 60 s windows
-gave **0.652 and 0.587** printed, **0.613 and 0.606** integrated. That is the
-idle stack — the number under a running acceptance run belongs to Gate 4 in
-[PROOF.md](PROOF.md), and it is reported there whatever it says.
+**What the whole stack costs on top of that**, measured 2026-08-22 at the
+shipped poses (`start --headless`, thirty-nine pids, every scanner bridged,
+all four trucks standing still): two 60 s windows gave **0.648 and 0.659**
+printed, **0.626 and 0.629** integrated, with an instantaneous floor of
+0.026. (Two earlier windows at the pre-review f3/f4 poses read 0.652 / 0.587
+printed and 0.613 / 0.606 integrated — the same band, which is what you would
+expect from a cost that is sixteen lidars rather than where they stand.) That
+is the **idle** stack; the number under a running acceptance run belongs to
+Gate 4 in [PROOF.md](PROOF.md), and it is reported there whatever it says.
 
 Two things the exports do **not** fix, both recorded in PROOF.md: the printed
 statistic is a mean of instantaneous samples and *understates* a bursty run
 (the integrated column is the honest one, and it is why llvmpipe's four trucks
 read 0.579 rather than 0.190); and deep stalls still happen — the
 instantaneous floor in a four-vehicle window is 0.023–0.043.
+
+### Where the parked trucks stand, and why it is a fleet decision
+
+A spawn pose is not decoration. An idle truck **holds the node it is standing
+on** (`fleet/floor.py`, `_hold_standing`), and after `IDLE_HOLD_S` (30 s) the
+floor **gives that node back with the truck still on it** (`_idle_floor`,
+which says so in its own warning). So a truck parked on a junction spends the
+first half-minute of a run blocking it and every minute after that invisible
+on it, with the scanners left as the only stop.
+
+M6.5 got this wrong once: f3 and f4 first went in at `(-8.0, 5.65)` and
+`(8.0, 5.65)`, which look like open main-aisle floor and are in fact the two
+**spur junctions** — the only way in to S6 and S8, and to S5, S7 and S9.
+Measured over the real planner and all 90 station-to-station routes:
+
+| Node | On how many of the 90 routes | Nearest node | Nearest station |
+|---|---|---|---|
+| `(8.0, 5.65)` | **46** | 0.85 m | 0.85 m (S7) |
+| `(-8.0, 5.65)` | **34** | 0.85 m | 0.85 m (S6) |
+| `(-3.0, -5.5)` — f1, *on* S1 | 42 | 3.00 m | 0.00 m (S1) |
+| `(3.0, -5.5)` — f2 | 12 | 3.00 m | 3.91 m |
+| `(-12.5, 5.65)` — **f3** | 12 | 4.50 m | 4.58 m |
+| `(12.0, -5.5)` — **f4** | **6** | 4.00 m | 6.50 m |
+
+No node in this graph is route-free — all 26 carry at least one — so the rule
+is *least-used floor*, not clean floor. f3 and f4 now sit on the two quietest
+nodes there are, both degree 2, neither the way in to anything.
+`(12.0, 5.65)`, the main aisle's east end, was rejected for a reason worth
+knowing: 6 routes, but **0.40 m from S5's own station point**, so a truck
+parked there stands on the conveyor while the ledger calls it a different
+node. `tests/test_vehicles_table.py` pins both rules — no spur junction, and
+no pose almost-but-not-quite on a station — off the graph, so a station that
+moves in `stations.py` moves them with it.
+
+**f1 is the residual, and it is deliberate.** It keeps step5's proven pose,
+which is S1 itself: 42 of the 90 routes. Being *on* a station is a legitimate
+place to stand, but S1 is an aisle station rather than a spur, so the idle
+timeout does release it — observed on the four-vehicle bring-up run:
+`idle timeout: f1 gave back 1 element(s) at (-3.0,-5.5) - it is still standing
+there`. Moving f1 would invalidate every step5 and M6.1-M6.4 figure measured
+from that pose, so it stays and is named here instead.
 
 **`--headless` when you are timing something.** The Gazebo window costs
 regularity more than speed:
@@ -153,6 +207,14 @@ RTF spike already did. The one place that still repeats it is the Windows
 writer's `--vehicle` choices, which cannot import the table before it has
 bound a vehicle — `tests/test_vehicles_table.py` fails until that tuple
 follows.
+
+**A table edit is not live until you `deploy`.** `m6.sh` and the launch file
+read `ipc/status_contract.py` from **source**, but every vehicle node runs
+from the frozen copy in `deploy/m6/ipc/` — so a pose or a port changed and not
+deployed gives you a truck spawned at the new pose by the launch and a
+`plc_link` still binding the old port, which is the *worst* half-applied state
+there is. `deploy` first, then `start`; the `WARNING: deploy is STALE` banner
+is what tells you the two have parted company.
 
 **Close every panel before `stop`, in that order.** `stop` is not a brake —
 Gazebo's joint controllers hold their last setpoint, so killing the stack under
@@ -250,7 +312,7 @@ reproduces. `m6.sh` starts it as the stack's first process on
 config-less mosquitto 2.x does by default and is the posture M6.2 wants.
 **The broker is fleet-side and it stayed here**, which M6.3 settled by
 arriving rather than by moving it: a broker belongs to one machine that is not
-a vehicle, and this rig *is* one machine — the two trucks, the fleet manager
+a vehicle, and this rig *is* one machine — the trucks, the fleet manager
 and the broker share it. When the cell ever gets a machine of its own, the
 broker and `fleet/` leave together.
 
@@ -812,11 +874,12 @@ headless, and a re-measurement of them should be too.
 
 ## Unit tests — m6's own, and the number to expect
 
-**`465 passed, 0 skipped`** under WSL (M6.5, four vehicles — it was 370 at
-M6.2 and 453 the day before the table grew: nine of the twelve are
-per-vehicle sweeps that now run once per truck instead of twice, and three
-are new — the spawn-pose completeness check, the four-row CLI render and the
-manager spreading four transports over four trucks):
+**`466 passed, 0 skipped`** under WSL (M6.5, four vehicles — it was 370 at
+M6.2 and 453 the day before the table grew: nine of the thirteen are
+per-vehicle sweeps that now run once per truck instead of twice, and four
+are new — the spawn-pose completeness check, the parked-truck floor-plan
+guard, the four-row CLI render and the manager spreading four transports
+over four trucks):
 
 ```bash
 cd /mnt/c/Users/ozkan/projects/amr-agent
@@ -834,12 +897,14 @@ probe), neither of which Windows has or is supposed to.
 ## Validation checklist
 
 **Step 6's ledger is [PROOF.md](PROOF.md), and it is deliberately unfinished.**
-Of the M6.1 spec's six proof gates: Gate 1 (two-vehicle RTF) and Gate 5 (clean
-lifecycle, twice) are measured with the output kept, Gate 4 has its fail-safe
-half measured and its driving half owed, and Gates 2, 3 and 6 are **NOT RUN** —
-they need the two Windows writers and a hand on two joysticks, which no agent
-may supply. PROOF.md gives each of the four a numbered runbook: one action per
-step, and where to write the number down.
+All six of the M6.1 spec's proof gates are measured with the output kept —
+Gate 1 of them as a *two-vehicle* RTF gate on llvmpipe, which M6.5 re-measured
+at four vehicles on the GPU (see [The GPU
+condition](#the-gpu-condition--two-exports-in-your-shell)). What is still open
+is M6.4's Gate 2 (station contention, recorded `[ ] BLOCKED`) and M6.5's
+Gates 2-6, the acceptance run among them. Those need **four** Windows writers
+and a hand on four panels, which no agent may supply; PROOF.md gives each a
+numbered runbook: one action per step, and where to write the number down.
 
 Nothing there is ticked on the strength of a copied file, and an unticked gate
 is not a passed one.
