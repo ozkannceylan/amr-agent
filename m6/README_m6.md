@@ -37,13 +37,21 @@ and **[Fleet manager](#fleet-manager--the-cells-master-control)**.
 > Something looks wrong? Read **[Not a bug](#not-a-bug)** before you debug it.
 
 **Evidence: [PROOF.md](PROOF.md) — read its ledger before you trust anything
-here.** M6.1's six gates, M6.2's six VDA gates, M6.3's six fleet gates and
-M6.4's traffic gates are measured with their output kept. Two things are open
-and both are named there: M6.4's **Gate 2** (station contention) stands
-recorded `[ ] BLOCKED`, and M6.5's Gates 2-6 — four-vehicle traffic, the
-acceptance run, degradation under loss, safety at four — are what Milestone 6
-is judged on. M6.5's Gate 1 (RTF at four) is measured. A gate that needs hands
-needs **four** panels now, not two, and no agent may supply them.
+here.** M6.1's six gates, M6.2's six VDA gates, M6.3's six fleet gates,
+M6.4's traffic gates and M6.5's five live gates are all measured with their
+output kept. **Measured is not the same as passed, and the ledger says which
+is which.** M6.5 closed M6.4's blocked **Gate 2** — a spur station is handed
+from one truck to another with the entry node never going free — and its
+Gate 6 shows the safety chain untouched at four. **Its Gate 3 (four-vehicle
+traffic) and Gate 4 (the acceptance run) FAILED and are written up at full
+length**: 0 of 4 and 1 of 8. What stopped them is floor geometry, not the
+fleet layer, and the two defects are named in this file as well —
+[Where the parked trucks
+stand](#where-the-parked-trucks-stand-and-why-it-is-a-fleet-decision) and
+[Not a bug](#not-a-bug). Read PROOF's closing section, **What Milestone 6
+claims, and what it does not**, before quoting any number from here.
+A gate that needs hands needs **four** panels now, not two, and no agent may
+supply them.
 
 ## Run order
 
@@ -174,6 +182,30 @@ parked there stands on the conveyor while the ledger calls it a different
 node. `tests/test_vehicles_table.py` pins both rules — no spur junction, and
 no pose almost-but-not-quite on a station — off the graph, so a station that
 moves in `stations.py` moves them with it.
+
+**And the least-used node was the wrong thing to optimise on its own. M6.5's
+gate run measured what these two poses cost, and it cost the acceptance run.**
+Both aisle-end poses sit inside their own truck's warning field before
+anything moves:
+
+| | Pose | Faces | Wall | Fork corner to it | `WF b/r/l` at rest | `V_Limit` |
+|---|---|---|---|---|---|---|
+| f3 | `(-12.50, 5.65)` | west | `x = -15.0` | **1.82 m** | `T/F/F` | **300** |
+| f4 | `(12.00, -5.50)` | east | `x = 15.0` | **2.32 m** | `T/F/F` | **300** |
+| f1 | `(-3.00, -5.50)` | east | — | — | `T/T/T` | 1500 |
+| f2 | `(3.00, -5.50)` | west | — | — | `T/T/T` | 1500 |
+
+The left and right scanners are mounted at the **fork-end corners**
+(`model.sdf`, `-0.68 -0.46`), so the clearance is `15.0 - |x| - 0.68` and both
+numbers fall inside the 2.5 m warning threshold. `cmd_gate` clamps every
+command to `min(speed_max, v_limit/1000)`, so **f3 and f4 crawl at 0.30 m/s
+until they clear their own wall**. Worse, a *turn* swings the truck another
+half-metre: f3 latched its **protective** field 0.971 m from the west wall
+turning south out of this pose (PROOF, M6.5 Gate 4, 19:43:15.092), and f4 did
+the same 0.993 m from the conveyor at the `(12.0, 5.65)` junction (M6.5's
+warm-up, 19:05:43.508). **A pose has to clear its own turning swing, not just
+its own scanner ranges** — and the check that catches it is one read of
+`/fN/safety/fields` at rest, not the raw lidar minima Task 4 compared.
 
 **f1 is the residual, and it is deliberate.** It keeps step5's proven pose,
 which is S1 itself: 42 of the 90 routes. Being *on* a station is a legitimate
@@ -638,6 +670,7 @@ Everything in this table is deliberate. None of it should be "fixed".
 | **`start` prints a loud `WARNING: deploy is STALE`.** | A feature, and the whole point of `deploy`. The vehicle runs the frozen copy in `deploy/`; editing a file in `ipc/` changes **nothing** until you redeploy, which is exactly what a real vehicle does. The banner is a warning and not a refusal, because watching that happen is the exercise. Rerun `step5.sh deploy` to ship. |
 | **The truck creeps near racking, well under the 0.7 m/s cruise.** | `V_Limit`. With the back warning field occupied the standard program computes 300 mm/s instead of 1500, and `nav_core` obeys it at the source rather than letting the gate clamp a plant that is still doing 0.7. Step 3 measured the trap this avoids: a latched stop 0.68 s after enable, driving 0.5 m/s with racks 1.75 m away. How the **right/left** warning fields compose into `V_Limit` is TIA-side and **unmapped** — two live observations contradict a back-only rule (see PROOF.md, open item 4). The practical effect is this creep. |
 | **Auto arrivals are 0.80 m at six stations and 0.25 m elsewhere.** | Geometry, not tolerance creep. S6..S9 sit on 0.85 m spurs entered perpendicular, and S2/S3 on 1.1 m spurs; the truck must turn 90° and stop in less floor than its own turning circle. Measured 2026-08-13 at S7 with a single tight radius: the truck overshot, could not converge, and settled into a stable **limit cycle at 0.643 - 0.742 m** — its minimum turning radius, ~0.69 m — lapping indefinitely. A vehicle cannot reach a point inside its own turning circle. `stations.py` now declares the honest number per station and `test_route.py` pins the **rule** (`0.80 if 0.0 < spur < 2.0 else 0.25`), not the list. Tightening it needs longer spurs or a back-in maneuver, not a gain. |
+| **f3 and f4 crawl at 0.30 m/s for the first few metres of every run, and f1/f2 do not.** | `V_Limit` again, and this time the wall is the obstacle. Both aisle-end poses put a fork-corner scanner inside its own 2.5 m warning field before anything moves — f3 1.82 m from the west wall, f4 2.32 m from the east wall — so `V_Limit` is 300 from the first cycle and `cmd_gate` clamps to it. The trucks speed up the moment they clear it. **What is NOT correct, and is a named defect rather than a feature, is the turn out of those poses**: the swing adds another half-metre and puts the same scanner inside the 1.0 m *protective* field, which latches. f3 cannot turn south out of its own spawn pose at all (PROOF, M6.5 Gate 4). See [Where the parked trucks stand](#where-the-parked-trucks-stand-and-why-it-is-a-fleet-decision). |
 | **A box spawned into the running world is invisible to the guard — and to all three safety scanners.** | Measured on this machine: runtime-spawned models return nothing from any `gpu_lidar` here. It is a platform property, not a Step 5 defect. Obstacle work must pre-seed geometry into the world file. Obstacle HOLD as a capability was descoped by the owner on 2026-08-13; PROOF.md records the parked design and its evidence. |
 | Steering still responds while traction is dead (teleop). | Deliberate. If the joystick went dead too, you could not tell a safety stop from a broken HMI — which is the one thing this window exists to distinguish. `angular.z` is therefore a steer *angle*, commanded directly. |
 | **The joystick knob greys out and moves nothing in Auto.** | Display only. The mux ignores `/hmi/cmd_vel` while auto is selected, so the knob would be lying if it looked live. Switch the radio back to Teleop and it is live again on the next message. |
@@ -887,6 +920,13 @@ source /opt/ros/jazzy/setup.bash
 python3 -m pytest m6/tests/ -q
 ```
 
+**The `source` line is not optional and its absence does not look like a
+missing source.** Skip it and the suite aborts with `Interrupted: 7 errors
+during collection` before a single test runs, because `tests/conftest.py`
+imports `rclpy` — the same seven errors Windows gives, for the same reason.
+`m5_ver2/step5/tests/` behaves identically. A clean-shell run of either suite
+reads like a catastrophic failure and is nothing of the kind.
+
 A **skip** is a failure here: it means a module did not import and its tests
 silently did not run. On Windows the same suite gives `222 passed, 5 skipped,
 7 errors` with `--continue-on-collection-errors` — the seven are `No module
@@ -896,15 +936,20 @@ probe), neither of which Windows has or is supposed to.
 
 ## Validation checklist
 
-**Step 6's ledger is [PROOF.md](PROOF.md), and it is deliberately unfinished.**
-All six of the M6.1 spec's proof gates are measured with the output kept —
-Gate 1 of them as a *two-vehicle* RTF gate on llvmpipe, which M6.5 re-measured
-at four vehicles on the GPU (see [The GPU
-condition](#the-gpu-condition--two-exports-in-your-shell)). What is still open
-is M6.4's Gate 2 (station contention, recorded `[ ] BLOCKED`) and M6.5's
-Gates 2-6, the acceptance run among them. Those need **four** Windows writers
-and a hand on four panels, which no agent may supply; PROOF.md gives each a
-numbered runbook: one action per step, and where to write the number down.
+**Step 6's ledger is [PROOF.md](PROOF.md), and every gate in it is now
+measured.** All six of the M6.1 spec's proof gates, M6.2's six, M6.3's six,
+M6.4's six and M6.5's five, output kept — M6.1's Gate 1 as a *two-vehicle*
+RTF gate on llvmpipe, which M6.5 re-measured at four vehicles on the GPU and
+then again under the full 39-pid stack during the acceptance run (see [The GPU
+condition](#the-gpu-condition--two-exports-in-your-shell)).
 
-Nothing there is ticked on the strength of a copied file, and an unticked gate
-is not a passed one.
+**Three gates are measured and NOT ticked, and that is the ledger working.**
+M6.5's Gate 3 (0 of 4 transports), Gate 4 (the acceptance run, 1 of 8) and
+Gate 5 (three clauses of four) each stand `[ ]` with their run written up in
+full. M6.4's Gate 2 is closed by M6.5's Gate 2. Nothing here is ticked on the
+strength of a copied file, and **an unticked gate is not a passed one**.
+
+Every gate above was machine-measured. The numbered runbooks at the foot of
+PROOF.md are kept for the owner's hands-on re-run, which needs **four**
+Windows writers and a hand on four panels: one action per step, and where to
+write the number down.

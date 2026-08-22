@@ -208,18 +208,32 @@ reservations have something to reserve.
 
 ## What is proven, and what is not
 
-**`PROOF.md` is the ledger, and it is deliberately incomplete.** Measured
-on this machine: Gate 1 (two-vehicle RTF, server-only, worst mean 0.934
-against a 0.90 gate), Gate 5 (start/stop twice, 17 pids — M6.1's stack, no
-orphans, no held ports) and the fail-safe half of Gate 4 (both vehicles sit
-`motor: false, case: 3, v_limit: 300` with no writer). **Not measured:**
-gates 2, 3, 6 and Gate 4's driving half, all of which need the two Windows
-writers and a hand on two joysticks. PROOF.md carries a numbered runbook
-for each; do not read an unticked gate as a passed one.
+**`PROOF.md` is the ledger, and every gate in it is now measured — which is
+not the same as passed.** M6.1's six, M6.2's six VDA gates, M6.3's six fleet
+gates, M6.4's six traffic gates and M6.5's five live gates all ran on this
+machine with their output kept. **Four stand measured and NOT ticked**, each
+with its run written up in full: M6.4's Gate 2 (closed later by M6.5's), and
+M6.5's Gate 3 (four crossing transports, 0 of 4 completed), Gate 4 (the
+acceptance run, 1 of 8) and Gate 5 (three clauses of four). What stopped the
+last three is floor geometry rather than the fleet layer — a spawn pose
+inside its own warning field, a turning radius wider than the corner it is
+asked to turn, and a ledger that deconflicts processes and has never claimed
+to see a body. Read PROOF's closing section, **What Milestone 6 claims, and
+what it does not**, before quoting a number out of this tree; do not read an
+unticked gate as a passed one.
 
-Loop-level evidence sits beside it: `tests/test_step6_virtual_loop.py`
-drives the real `step6.control_loop` against `VirtualFPLC` over real UDP
-sockets, parameterised over BOTH port pairs. 370 tests pass under WSL.
+**The four-truck figures are conditional on a GPU that is not configured.**
+`GALLIUM_DRIVER=d3d12` and `MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA` are not
+in this machine's `~/.bashrc`; without them the world renders on llvmpipe and
+says nothing about it. With them, the full 39-pid stack ran at 0.575–0.580 of
+real time across the whole acceptance run.
+
+Loop-level evidence sits beside it: `tests/test_m6_virtual_loop.py` drives
+the real `m6.control_loop` against `VirtualFPLC` over real UDP sockets,
+parameterised over **every port pair in the table** — four since M6.5, so
+three scenarios become twelve runs. **466 tests pass under WSL** (370 at
+M6.2, 439 at M6.4, 453 before the table grew to four), and the suite needs
+`source /opt/ros/jazzy/setup.bash` first or it aborts in collection.
 
 ## Full-stack RTF: about 0.75, and Gate 1 does not cover it
 
@@ -233,6 +247,17 @@ every loop in the tree is wall-clock timed, so rates are unaffected and
 only *simulated* time per wall second stretches — but a third vehicle's
 headroom is now the machine's, not the simulator's, and that is an M6.2
 number.
+
+**Superseded for the shipping configuration, and by measurement rather than
+argument.** Every figure in the paragraph above was taken on **llvmpipe**, at
+two vehicles, with the mean-of-instantaneous statistic that M6.5's Gate 1
+showed is biased low on a bursty run. The number that describes what ships is
+M6.5 Gate 4's: the **full 39-pid stack, four trucks, sixteen safety lidars
+subscribed and rendering, on D3D12/NVIDIA — 0.575–0.580 integrated over six
+consecutive 60 s windows**, held to within 0.005 across ten continuous
+minutes. The instantaneous floor is still 0.021–0.035, so the deep stalls are
+not gone; `SENSOR_STALE_S` at 0.40 s rode every one of them out, with zero
+stale-link events on any truck in that session.
 
 ## Known limitation: the TF frames are NOT namespaced
 

@@ -107,6 +107,61 @@ and it was run first, 2026-08-22 13:02-13:45:
               trucks delivered 0.579, not 0.190. The gate is cleared in
               both configurations; the ruling that stands is about the
               renderer, not the arithmetic.
+
+M6.5's five live gates, measured 2026-08-22 18:56-20:05 by the scripted
+driver + the fleet CLI on the GPU renderer, four trucks, thirty-nine
+pids. TWO PASSED AND THREE DID NOT; the three that did not are written
+up at the same length as the two that did:
+
+[x] M6.5 GATE 2 - station handover at a spur                    MEASURED
+              (third staging. M6.4's blocked gate is closed: ownership
+               of the entry node (-8.0,5.7) goes FREE -> f3 -> f1 ->
+               FREE with the f3->f1 step atomic - it is never free
+               between the two vehicles. The queued truck waited
+               106.18 s, arrived 0.7990 m from S6, and both transports
+               completed. 0 motor-false of 4,460 samples on all four.
+               Runs A and B are kept: A measured the wait and lost the
+               arrival to the S4 turning-radius orbit; B measured a
+               deadlock the ledger cannot see, because the blocked truck
+               was held by nav's obstacle guard and not by the ledger.)
+[ ] M6.5 GATE 3 - four-vehicle traffic                 FAILED, 0 of 4
+              (four crossing transports, one per truck, assigned inside
+               900 ms. The fleet declared one deadlock UNRESOLVABLE in
+               its own words - each truck standing on the floor the
+               other needs - and live-locked on the second, 3,180 yield
+               lines at 10 Hz that never drained, because wait-die frees
+               the floor AHEAD of a vehicle and not the floor UNDER it.
+               0 motor-false on all four; closest approach 2.513 m.)
+[ ] M6.5 GATE 4 - the acceptance run                   FAILED, 1 of 8
+              (eight transports over the ten stations, no intervention.
+               Eight seconds in, f3 latched its protective field turning
+               SOUTH OUT OF ITS OWN SPAWN POSE - 0.971 m from the west
+               wall it ships 2.5 m from - and its hulk held the west
+               cross-aisle for the rest of the run. Throughput 0.096
+               transports/min; 1,072.9 vehicle-seconds of waiting in
+               624 s; arrival errors 0.0001-0.7986 m, all inside their
+               station's arrive_m; 0 motor-false on the other three.
+               THE FULL-STACK RTF IS THE ONE FIGURE THAT CAME OUT WELL:
+               0.575-0.580 integrated over six consecutive 60 s windows,
+               four trucks, sixteen lidars rendering, against 0.30.)
+[ ] M6.5 GATE 5 - degradation under loss      THREE CLAUSES OF FOUR
+              (own run, not mid-acceptance, and the reason is named
+               there. Requeue + reassignment to another truck 132 ms
+               after the kill; the dead truck never offered work again;
+               the floor not left locked. But nav drove the dead truck
+               8.48 m across a junction while the ledger's pin stayed
+               7.2 m behind it, and the survivor stopped 2.41 m short of
+               a body the ledger could not see. M6.4 measured the same
+               defect at 2.93 m.)
+[x] M6.5 GATE 6 - safety untouched at four                      MEASURED
+              (nine Motor drops in 67 minutes, every one named at its
+               sample: four startup acknowledges and five scanners - a
+               conveyor, a rack face, a wall, another truck's parked
+               body, and a truck whose own agent was dead. 0 of the
+               session's 157 order/instantAction publishes inside any
+               of the nine +/-2 s windows. 12,720 samples per truck on
+               all four at once with the ledger fully live and not one
+               drop.)
 ```
 
 **Method, per gate — M6.1 and M6.2 only** (M6.3's method is under its
@@ -4680,6 +4735,972 @@ every phase printed, and the per-topic scan counts are equal within each
 vehicle to the last scan, so no subscriber died early. Until the tool
 handles it, **read the VERDICT line, not `$?`, on this driver**; the
 llvmpipe runs' exit statuses (0 for GO, 2 for STOP) were correct.
+
+---
+
+# M6.5 — the five live gates and the acceptance run
+
+**Date: 2026-08-22, 18:56–20:05. Measured by the scripted driver + CLI —
+no panel, no human.** One WSL session, one stack, thirty-nine pids, one
+broker, four scripted writers. Every one of the twenty-three transports
+below was submitted with `fleet/fleet_cli.py` and turned into orders by
+`fleet/fleet_manager.py`; `tools/send_order.py` was not used once.
+
+**Two of the five gates passed. Three did not, and they are written up at
+the same length as the two that did**, because what stopped them is the
+same three things every time and none of them is the fleet layer: a
+spawn pose inside its own warning field, a minimum turning radius wider
+than the floor it is asked to turn on, and a ledger that deconflicts
+processes and has never claimed to see a body.
+
+| Gate | | |
+|---|---|---|
+| 2 | station handover at a spur | **[x]** ticked on the third staging |
+| 3 | four-vehicle traffic | **[ ]** 0 of 4 completed — two deadlocks, one named UNRESOLVABLE by the fleet itself |
+| 4 | the acceptance run | **[ ]** 1 of 8 in 10.4 minutes |
+| 5 | degradation under loss | **[ ]** three clauses of four |
+| 6 | safety untouched at four | **[x]** nine drops, every one a scanner, zero correlation |
+
+## The GPU condition, verified before anything moved
+
+The two variables are **not** in this machine's `~/.bashrc` — `grep`
+finds nothing in `~/.bashrc` or `~/.profile`, and a login shell prints
+`GALLIUM_DRIVER=[]`. They were exported by hand in every shell that
+touched the stack, and the renderer was read back twice: once from the
+shell before `start`, and once from the server's own log after it.
+
+```
+$ GALLIUM_DRIVER= glxinfo -B | grep -i Device
+    Device: llvmpipe (LLVM 20.1.2, 256 bits) (0xffffffff)
+$ GALLIUM_DRIVER=d3d12 MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA \
+      glxinfo -B | grep -i Device
+    Device: D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU) (0xffffffff)
+
+$ grep GL_RENDERER ~/.gz/rendering/ogre2.log | tail -1
+18:56:34: GL_RENDERER = D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU)
+```
+
+The second line is the one that matters: it is the **server's** answer,
+written by the process that renders the sixteen lidars, eleven seconds
+after `start`. Every number in this section is conditional on it, and a
+run started from a shell without those two exports would measure a
+different machine and not say so.
+
+## Setup, verbatim
+
+```
+$ ./m6.sh deploy
+instantiated .../m6/vehicles/f1 .. f2 .. f3 .. f4
+deployed 31 files to .../m6/deploy
+$ head -3 deploy/MANIFEST
+# m6 deploy - generated, do not edit
+# source-git: ba903df
+# date: 2026-08-22T18:56:23+02:00
+$ git rev-parse --short HEAD
+ba903df
+```
+
+The deploy tree was regenerated before a truck moved and its MANIFEST
+matches HEAD — M6.4 lost a whole gate run to a tree that did not, and
+that is why this check is the first line of the section.
+
+```
+$ ./m6.sh start --headless
+  broker 134100   world 134106
+  plc_link_f1 134543 … hmi_f1 134813        (f1's nine)
+  plc_link_f2 134839 … hmi_f2 135117        (f2's nine)
+  plc_link_f3 135185 … hmi_f3 135444        (f3's nine)
+  plc_link_f4 135495 … hmi_f4 135802        (f4's nine)
+  fleet 135854
+```
+
+**Thirty-nine pid lines, thirty-nine in `.m6_pids`, thirty-nine alive a
+second later**, no `exited during startup`, no `THE STACK IS
+INCOMPLETE.` — broker + world + fleet + 9x4, which is the arithmetic
+`m6.sh` now prints in its own header. All four agents connected:
+`logs/vda_agent_f<n>.log` each says `broker connected - ONLINE
+published`, and the broker log carries `vda-f1` … `vda-f4` plus
+`fleet-manager`.
+
+## The two instruments
+
+**ROS side: ONE recorder process** — M6.1's `gate_rec` lineage,
+M6.3/M6.4's `rec3.py` unchanged, widened from twelve subscriptions to
+**twenty-four** and from two mode publishers to four, all created at
+18:57:11 — **before the first writer existed** and long before the first
+RESET, so no ROS node was started while a truck could move:
+
+```
+python3 rec3.py 14400 /tmp/m65/cap 5950 \
+  f1_status=/f1/plc/status=String   … f4_status=…      (4)
+  f1_fields=/f1/safety/fields=String … f4_fields=…     (4)
+  f1_nav=/f1/auto/state=String      … f4_nav=…         (4)
+  f1_goal=/f1/auto/goal=String      … f4_goal=…        (4)
+  f1_route=/f1/auto/route=String    … f4_route=…       (4)
+  f1_odom=/f1/gz/odom=Odometry      … f4_odom=…        (4)
+  pub=mode1=/f1/hmi/mode=transient_local … pub=mode4=… (4)
+rec3 up: 24 subs, 4 pubs
+```
+
+Its whole session, printed on `{"quit": true}`:
+
+```
+f1_status 80891  f2_status 80856  f3_status 80886  f4_status 80858
+f1_fields 40438  f2_fields 40416  f3_fields 40438  f4_fields 40421
+f1_nav    40434  f2_nav    40441  f3_nav    40430  f4_nav    40411
+f1_odom   46840  f2_odom   46840  f3_odom   46840  f4_odom   46840
+f1_route     11  f2_route      9  f3_route     10  f4_route     12
+f1_goal       4  f2_goal       8  f3_goal       6  f4_goal      10
+```
+
+**There is no goal publisher in that command line.** The twenty-eight
+samples on `/fN/auto/goal` are the agents' own empty goals answering the
+`cancelOrder`s this session sent by hand to clear staged runs. No HMI
+goal was published by anything, at any point.
+
+**MQTT side: one paho subscriber** on `uagv/v2/amragent/+/#` **and
+`fleet/#`**, one JSONL line per message with the retain flag kept, up at
+18:57:12.384. It logged exactly one `connected - subscribed` and **no
+disconnect for the whole session** — one connection, 10,188 lines,
+15.2 MB. It is not a ROS node, so the rig rule does not bite it, and it
+is the only reader that can say what the fleet saw.
+
+Then, on Windows, four scripted writers started detached, one per
+vehicle, on the ctl ports the table's port families imply:
+
+```
+> python m6\tools\scripted_writer.py --vehicle f1 --virtual --ctl-port 5910
+> … f2 … 5920      > … f3 … 5930      > … f4 … 5940
+streaming PLC state to 172.19.180.72:5110  (f2 …5120, f3 …5130, f4 …5140)
+VIRTUAL F-PLC (model) - PLCSIM Advanced is not in this loop
+listening for the back scanner on 0.0.0.0:5111  (…5121, …5131, …5141)
+control channel on 127.0.0.1:5910                (…5920, …5930, …5940)
+```
+
+`PF/WF` live on every truck's first cycle, which is a working
+WSL→Windows link on all four odd ports and not a default. **PowerShell
+strips the double quotes out of a native command's argument** (M6.2
+recorded it twice, M6.3 again, M6.4 wrapped around it), so every writer
+command in this session went through a wrapper that builds the JSON
+itself from `key=value` words. The command set is still the panel's four
+buttons, the lamp and the window close, and nothing more.
+
+The mode went out through the recorder's own transient-local
+publishers, **before** the RESET:
+
+```
+18:59:35.428  PUB /f1/hmi/mode <- 'auto' (3 matched subscribers)
+18:59:35.828  PUB /f2/hmi/mode <- 'auto' (3 matched subscribers)
+18:59:36.278  PUB /f3/hmi/mode <- 'auto' (3 matched subscribers)
+18:59:36.728  PUB /f4/hmi/mode <- 'auto' (3 matched subscribers)
+18:59:44.098..44.417  {"ack": true} -> 5910 / 5920 / 5930 / 5940
+18:59:48  all four reply  {"motor": true, …}
+```
+
+The fleet manager is the one process this session restarted, five times,
+to clear the task book between staged runs. Each restart used `m6.sh`'s
+own spawn shape (`setsid`, pid appended to `.m6_pids`), which is why
+`stop` swept every one of them.
+
+## What the bring-up measured before any gate ran
+
+`fleet_cli.py status` rendered four rows, all ONLINE and AUTOMATIC, at
+their table poses. But the four writers did not print the same line:
+
+```
+f1  E-Stop=True  Motor=True  | PF b/r/l=T/T/T  WF b/r/l=T/T/T | V_Limit=1500
+f2  E-Stop=True  Motor=True  | PF b/r/l=T/T/T  WF b/r/l=T/T/T | V_Limit=1500
+f3  E-Stop=True  Motor=True  | PF b/r/l=T/T/T  WF b/r/l=T/F/F | V_Limit=300
+f4  E-Stop=True  Motor=True  | PF b/r/l=T/T/T  WF b/r/l=T/F/F | V_Limit=300
+```
+
+**f3 and f4 ship parked inside their own warning fields**, and the field
+evaluator says by how much:
+
+```
+f3  left {d 1.82 WARNING}   right {d 1.82 WARNING}   back {d 3.717 SAFE}
+f4  left {d 2.32 WARNING}   right {d 2.32 WARNING}   back {d 4.500 SAFE}
+```
+
+Measured, not argued. The left and right scanners are mounted at the
+**fork-end corners** — `model.sdf`, `<pose>-0.68 -0.46 0.15 0 0
+-2.3561945</pose>`, with the note that the yaw points the sensor out
+along the corner diagonal. f3 stands at `(-12.50, 5.65)` facing the west
+wall at x = -15.0, so its fork corner is `15.0 - 12.5 - 0.68 = 1.82 m`
+from it. f4 stands at `(12.00, -5.50)` facing the east wall at x = 15.0:
+`15.0 - 12.0 - 0.68 = 2.32 m`. Both inside the 2.5 m warning threshold,
+to the centimetre, from the table.
+
+The consequence is not cosmetic. `cmd_gate` clamps every command to
+`min(speed_max, v_limit / 1000)`, so with `V_Limit` at 300 those two
+trucks **crawl at 0.30 m/s** until their own warning clears. Measured on
+the wire during the warm-up: `enc=-250/-250` and `enc=-300/-300` on f3
+and f4 while f1 and f2 run 0.69–0.70 m/s.
+
+**Why Task 4's rest check did not catch it, and what to check instead.**
+That check read the RAW closest lidar return on each scanner — 0.122 /
+0.111 / 0.111 / 1.287 m — and those four numbers are identical on all
+four trucks, because they are the truck's own forks and mast. What it
+did not read is `field_eval`'s answer, which is the only one the F-model
+sees. **A pose can pass a range check and fail a field check**, and the
+field check is a one-line read of `/fN/safety/fields` that costs
+nothing.
+
+## The warm-up — the first time the two new trucks ever drove
+
+`submit S6 S3` (f3, nearest at 5.35 m) and `submit S7 S4` (f4, 16.00 m),
+19:02:44.
+
+**f3 completed its first transport**: arrived S6, dwelled, arrived S3,
+DONE. Nothing to report and that is the point — the west truck works.
+
+**f4 did not.** At 19:05:43.508 its Motor dropped, and the sample says
+exactly what happened:
+
+```
+odom   19:05:43.545  x=12.4665  y=5.3688  v=0.1772
+fields 19:05:43.543  back  {pf true,  d 1.62  WARNING}
+                     left  {pf FALSE, d 0.993 PROTECTIVE}
+                     right {pf true,  d 1.914 WARNING}
+status 19:05:43.508  {"estop_healthy": true, "motor": false, "v_limit": 300}
+nav    19:05:43.535  SAFETY-STOP, route … (11.6,5.65) (12.0,5.65) (12.0,-5.5) …
+```
+
+It was turning south at the `(12.0, 5.65)` junction — the east
+cross-aisle corner — and the turn carried it to x = 12.47. The
+`Conveyor` obstacle in `stations.py` is `(14.00, 14.90, 3.50, 6.50)`, so
+the node itself is **2.00 m** from the conveyor face and clears the 1.0 m
+protective threshold with a metre to spare. The truck's swing does not:
+its fork-corner scanner reached **0.993 m**, seven millimetres inside
+the threshold. The track through the corner, one sample in six:
+
+```
+19:05:36.263  x=11.6323 y=5.8074 v=0.2102     19:05:40.662 x=12.1854 y=5.6642
+19:05:37.680  x=11.8238 y=5.8078 v=0.2051     19:05:41.618 x=12.2961 y=5.5809
+19:05:39.185  x=12.0058 y=5.7581 v=0.2173     19:05:42.580 x=12.3885 y=5.4822
+19:05:39.669  x=12.0651 y=5.7311 v=0.2175     19:05:43.545 x=12.4665 y=5.3688
+```
+
+**How structural is that corner?** Measured against the graph, not
+guessed: of the 90 station-to-station routes, **six** touch
+`(12.0, 5.65)`, and all six involve S4 — three in the fatal east→south
+direction (`S5→S4`, `S7→S4`, `S9→S4`) and three in the harmless
+south→west one. Its only neighbours are `(11.6, 5.65)` and
+`(12.0, -5.5)`, so a truck arriving from the west has **0.40 m** of
+run-up before a 90-degree right turn beside a conveyor. f4's own leg 1
+took the same junction in the other direction, from eleven metres of
+straight corridor, and made it without a flicker.
+
+Recovery was `cancelOrder`, `./m6.sh home`, RESET on all four, and a
+manager restart to clear the task book. Nothing below shares state with
+this run.
+
+## [x] Gate 2 — station handover at a spur, fixed
+
+*Two trucks to one station: the second waits for the dwell to end and
+the occupant to leave, then arrives. No swap deadlock, no
+two-in-a-spur.*
+
+**It took three stagings and the first two are kept, because each one
+measured a different thing and only the third isolated the gate's actual
+subject.** M6.4's Gate 2 was blocked partly because it was staged where
+arrival itself could not happen; repeating that mistake would have
+produced the same non-answer.
+
+**A SPUR station is the only staging that asks the question.** S1 and S5
+sit ON their aisles — `floor.spur_entry` reads that off the graph, not
+off a list — so they have no entry node to hand over and no answer to
+give. Every run below is at a spur.
+
+### Run A, 19:13:13 — S4, and the arrival is the confounder again
+
+`submit S4 S2` → f2 (5.50 m) and `submit S4 S10` → f4 (8.50 m).
+
+```
+19:13:46.871  ARRIVED f2 at S4  pose (6.2163, -7.8761)  error 0.2493 m
+19:13:46.877  ft-637c377f -> DWELL
+19:13:49.921  dwell done - f2 drives ft-637c377f to S2      (3.04 s)
+              f4 WAITS (6.0,-5.5) holding (8.0,-5.5)
+19:14:45.524  the entry node passes f2 -> f4, and f4 drives into the spur
+```
+
+**The handover itself worked, and the ownership trace says so the same
+way run C's does** — `(6.0, -5.5)` went `FREE -> f2` at 19:13:13.542 and
+`f2 -> f4` at 19:14:45.524, **never free in between**, 55.6 s after the
+occupant's leg 2 went out and it had cleared the 2.5 m spur. What the
+queued truck then did was orbit S4 at a radius of roughly 0.7 m for four minutes,
+against that station's `arrive_m` of 0.25, and never arrive:
+
+```
+19:18:18.451 x=5.2853 y=-7.9277   19:18:32.341 x=5.9972 y=-8.6864
+19:18:23.737 x=5.3795 y=-8.3540   19:18:39.436 x=6.5133 y=-8.4273
+19:18:27.433 x=5.5799 y=-8.5624   19:18:44.259 x=6.6676 y=-8.0210
+```
+
+That is M6.4's residual 3 — the minimum-turning-radius orbit — measured
+at **S4**, which M6.4's own note called a spur that "aligns in". It
+aligns in from the west, where f2 came from; it does not from the east,
+where f4 came from.
+
+**And the run measured something else, which is why it is kept.** On its
+way west to S2, f2's Motor dropped at 19:14:53.654:
+
+```
+odom   19:14:53.621  x=0.6245 y=-5.5053 v=0.6933
+fields 19:14:53.641  left {pf true, d 2.36 WARNING}   right SAFE  back SAFE
+status 19:14:53.654  {"estop_healthy": true, "motor": false, "v_limit": 300}
+```
+
+A safe-speed latch: the warning went violated, `V_Limit` fell 1500 → 300
+in the same cycle, the wheels were at 693 mm/s, and the `speed` instance
+latched 13 ms later. **What f2 saw at 2.36 m was f1's parked body on
+S1**, which the idle-hold timeout had given back to the floor thirty
+seconds after bring-up. The status document says so in its own words,
+and it is the most honest line the fleet prints:
+
+```
+idle timeout: f1 gave back 1 element(s) at (-3.0,-5.5) - it is still standing
+there … THE TRUCK IS STILL THERE: this gives up the fleet's promise not to
+route through it, not a claim that the floor is clear, and the scanners
+remain what stop anybody sent that way
+```
+
+f2 came to rest **3.62 m short of f1** and nothing touched anything. The
+ledger deconflicted two processes; the scanners stopped the truck. Not
+ticked.
+
+### Run B, 19:20:41 — S7, and a deadlock the ledger cannot see
+
+Staged at a 0.85 m spur with `arrive_m` 0.80 so that arrival could not
+be the confounder. `submit S7 S9` → f4 (16.00 m), `submit S7 S6` → f3
+(21.37 m).
+
+```
+19:22:34.152  ARRIVED f4 at S7  pose (7.6217, 5.7954)  error 0.7997 m
+19:23:15.303  ARRIVED f4 at S9  pose (8.7494, 5.0715)  error 0.7971 m  DONE
+              f3 WAITS (8.0,5.7) throughout, then takes the entry + station
+```
+
+**The occupant completed both legs, the queued truck got the floor — and
+still could not arrive.** f3 stopped at `(5.95, 5.65)` in nav **HOLD**
+with `guard_min 1.12 m`. f4's arrival at S9 had left its body at
+`(8.75, 5.07)`, **0.95 m off the junction f3 had to turn at**.
+`arrive_m` 0.80 is a tolerance, and a truck is entitled to spend all of
+it standing in the aisle.
+
+Sending f4 away with fleet work (`submit S9 S5`, taken at 0.80 m over
+f1/f2 at 23.00 m) made it worse and made it clear:
+
+```
+f3 holds (8.0,5.7) …   f4 WAITS (8.0,5.7)   f4 yielded, retrying every pass
+19:26:38  f4 gets 1 of 3 nodes to S5 as base and 2 as horizon -
+          the rest of the corridor is taken
+```
+
+f3 cannot move because f4's **body** is 1.12 m in front of it; f4 cannot
+move because f3 owns the **floor** it needs. **The deadlock resolver
+never sees it**, and it is right not to: f3 is not waiting on the ledger,
+it is waiting on nav's obstacle guard, and the resolver reads ledger
+waits. Not ticked.
+
+### Run C, 19:29:57 — S6, and the fix on the wire
+
+Same shape, one variable changed: the occupant's leg 2 leaves **west and
+away**, so its body does not end up in the junction. `submit S6 S3` → f3
+(5.35 m, chosen over f1 23.00, f2 23.00, f4 32.04), `submit S6 S8` → f1.
+
+```
+19:29:58,088  f1 gets 3 of 5 nodes to S6 as base and 2 as horizon -
+              the rest of the corridor is taken
+19:29:58.162  f1 WAITS (-8.0,5.7)
+19:30:57,401  f3 arrived at S6 - dwelling   pose (-8.7878, 6.5716) err 0.7911
+19:30:57.404  f3 holds (-8.0,5.7) (-8.0,5.7)-(-8.0,6.5) (-8.0,6.5)
+                                 ^^^^^^^^^^ THE ENTRY, THROUGH THE DWELL
+19:31:00,414  dwell done - f3 drives ft-4b69421a to S3       (3.01 s)
+19:31:44,290  ft-271bee61: base extended to 5 released + 0 horizon (upd 1)
+19:31:44.340  f1 holds (-8.0,5.7) … (-8.0,6.5)
+19:32:10,680  f1 arrived at S6 - dwelling   pose (-8.2537, 5.7424) err 0.7990
+19:32:13,691  dwell done - f1 drives ft-1e8b6b37 to S8       (3.01 s)
+19:32:54,249  f1 completed ft-1e8b6b37 at S8   pose (-7.2438, 5.0453) err 0.7950
+19:33:33,482  f3 completed ft-4b69421a at S3   pose (-6.8795, -5.9939) err 0.7990
+```
+
+**The whole of the M6.5 fix is one line, and it is this one.** Ownership
+of the entry node `(-8.0, 5.7)` across the entire run, read off the
+retained `fleet/status` rather than re-derived:
+
+```
+19:29:57.901   FREE -> f3
+19:31:44.340   f3   -> f1        <-- the handover
+19:32:54.252   f1   -> FREE
+```
+
+**It is never FREE between the two vehicles.** M6.4's run A measured the
+opposite — the occupant released the junction in the millisecond it
+arrived, the queued truck took it inside one 100 ms pass, and three
+seconds later the occupant's leg 2 asked for its only way out and got a
+swap deadlock. Here the entry stays held through the dwell and moves
+into leg 2's hold with nothing freed in between, exactly as
+`_dwell_entry` and `_release_to` were written to make it.
+
+f1 waited **106.18 s** (19:29:58.162 → 19:31:44.340) — the dwell is 3 s
+and the rest is the occupant clearing 4.5 m of spur and corridor, which
+is the ruling's accepted price and is visible here as a number rather
+than a paragraph.
+
+**Both transports completed. No swap deadlock at any point, no BLOCKED
+entry, and never two vehicles holding the spur. 0 motor-false on all
+four: 0 of 4,460 samples each.**
+
+**Ticked.**
+
+## [ ] Gate 3 — four-vehicle traffic: FAILED, twice over, in one run
+
+*Four transports with deliberately crossing routes, all four trucks
+driving; every one completes; holds, extensions and waits recorded;
+0 motor-false; no deadlock refusal — or, if one occurs, name it
+honestly.*
+
+19:35:11. Four transports, submitted back-to-back, assigned one per
+truck inside **900 ms**, each with the manager's own nearest-idle
+evidence:
+
+```
+19:35:11,792  assigned ft-a3644e79 to f1 (nearest idle to S8: f1 0.79 m
+              <-- chosen, f2 23.00 m, f3 22.34 m, f4 32.04 m)
+19:35:12,095  assigned ft-738f6727 to f3 (… f2 11.50 m, f3 0.77 m <-- chosen,
+              f4 20.54 m)
+19:35:12,298  assigned ft-199f702a to f2 (… f2 6.00 m <-- chosen, f4 15.04 m)
+19:35:12,500  assigned ft-1efbc18e to f4 (… f4 16.04 m <-- chosen)
+```
+
+The crossings were deliberate: f1 west→east on the main aisle, f4
+east→west on the same aisle head-on, f3 west→east on the dock aisle and
+then north, f2 east→west on the dock aisle head-on.
+
+**The fleet named the first failure itself, and the message is better
+than anything this file could write:**
+
+```
+19:36:01,912 fleet ERROR UNRESOLVABLE: swap deadlock f2 <-> f3 - each truck
+stands on the floor the other needs, so the youngest yielding frees nothing
+and wait-die cannot break it. A vehicle has to be moved (f2 was the youngest)
+```
+
+`ft-199f702a` was requeued to the head of the queue — and never picked
+up again for the rest of the gate, because **f2 went on executing the
+order the manager had taken away from it**, and `_idle_floor` explicitly
+does not age a vehicle that is executing an order the fleet does not own
+(that exemption exists for a restarted manager's adopted truck). So f2's
+hold on `(-3.0, -5.5)` never timed out, and f3 waited on it until the
+gate ended.
+
+**The second failure is the same shape with a different resolver
+outcome.** f1 and f4 met head-on on the main aisle, each standing on the
+node the other's route needed. Wait-die worked exactly as designed —
+f4 carried the youngest task and yielded — and it changed nothing:
+
+```
+19:37:05..19:42:04  3,180 x  "deadlock f1 -> f4 - f4 carries the youngest task
+and yields 4 element(s). It keeps its task and its route and holds again the
+moment the corridor drains"
+```
+
+at 10 Hz, for five minutes, until the run was cancelled. **Yielding frees
+the floor AHEAD of a vehicle; what f1 needed was the floor UNDER f4.**
+The corridor never drained because nothing in the policy can make a
+truck reverse.
+
+Everything the gate asked to be *recorded* was recorded — holds,
+extensions, waits, the yield, the refusal — and the safety half is
+clean:
+
+```
+transports completed          0 of 4
+motor-false                   f1 0/8260  f2 0/8260  f3 0/8260  f4 0/8260
+closest approach, any pair    2.513 m  (f2/f3 at 19:40:41)
+travelled                     f1 14.6 m  f2 5.8 m  f3 34.2 m  f4 17.4 m
+```
+
+**Not ticked.** Two deadlocks, one declared UNRESOLVABLE by the fleet
+and one live-locked in the resolver, and no transport finished.
+
+## [ ] Gate 4 — the acceptance run: FAILED, 1 of 8
+
+*Eight transports submitted back-to-back across the ten stations, all
+four trucks, no operator intervention once it starts.*
+
+19:43:06.796 → 19:43:08.813, two seconds, eight submissions, all ten
+stations: `S1→S6`, `S4→S7`, `S2→S8`, `S5→S9`, `S6→S3`, `S7→S10`,
+`S8→S5`, `S9→S4`. Four trucks at their table poses, Motor True,
+AUTOMATIC, task book empty. **No operator touched anything from that
+moment until 19:53:48.**
+
+**Eight seconds in, f3's Motor dropped, and it never moved again.**
+
+```
+odom   19:43:15.078  x=-13.2687 y=5.7846 v=0.1999
+fields 19:43:15.078  back  {pf true,  d 2.160 WARNING}
+                     left  {pf true,  d 2.006 WARNING}
+                     right {pf FALSE, d 0.971 PROTECTIVE}
+status 19:43:15.143  {"estop_healthy": true, "motor": false, "v_limit": 300}
+nav    19:43:15.150  SAFETY-STOP  route [(-12.5,5.65) (-12.5,-5.5) (-9.8,-5.5)
+                                         (-9.8,-6.6)]
+```
+
+Its transport was `S2→S8`, whose leg 1 turns **south** out of the pose
+f3 ships in. The track shows the whole thing in seven seconds — the
+truck crept west at the 0.30 m/s its own warning field had already
+imposed, swinging into the turn, and put its fork corner 0.971 m from
+the wall it was parked 2.5 m from:
+
+```
+19:43:08.005 x=-12.5326  19:43:11.104 x=-12.8217  19:43:14.081 x=-13.1743
+19:43:09.396 x=-12.6537  19:43:12.439 x=-12.9815  19:43:14.864 x=-13.2499
+19:43:10.404 x=-12.7482  19:43:13.435 x=-13.0979  19:43:15.299 v=0.0000
+```
+
+**f3 cannot turn south out of the pose it ships in.** It can go east —
+it did so in the warm-up and twice in Gate 2 — because east is away from
+the wall. The southbound turn is the one its own spawn coordinates
+forbid, and it is the first move of any task that sends f3 to the
+dock aisle.
+
+Its hulk then held the west cross-aisle for the rest of the run, and
+what the other three did with what was left is the measurement.
+
+### The headline, measured over 624 s (19:43:06 → 19:53:30)
+
+| | |
+|---|---|
+| transports completed | **1 of 8** — `S1→S6` on f1, completed 19:45:17,572 |
+| **throughput** | **0.096 transports/min** — one every 10.4 minutes |
+| per-vehicle utilisation | f1 **99.0 %**, f2 **16.0 %**, f3 **1.2 %**, f4 **99.7 %** |
+| distance travelled | f1 70.1 m, f2 16.9 m, f3 0.8 m, f4 58.7 m |
+| **total waiting time** | **1,072.9 vehicle-seconds** in 624 s of run (f1 488.0 s, f2 584.9 s) |
+| arrival errors | 0.0001 m (S1), 0.7986 and 0.7948 m (S6), 0.2487 m (S4) — every one inside its station's `arrive_m` |
+| motor-false | f1 **0**, f2 **0**, f4 **0** of 12,480 samples each; f3 **12,299 of 12,480**, one onset |
+| **full-stack RTF** | six consecutive 60 s windows — printed mean **0.552–0.583**, **integrated 0.575–0.580**, floor 0.021–0.035 |
+
+**Read the utilisation column with the bounding boxes or it will lie to
+you.** f1's 99.0 % and seventy metres were spent inside a
+**1.57 x 1.95 m** box for eight minutes; f4's 99.7 % and fifty-nine
+metres inside **1.46 x 5.48 m**. Both were orbiting — f1 the mouth of
+the S6 spur, f4 the east corner. *Moving* is not *productive*, and at
+four vehicles the gap between those two words is the entire number. A
+utilisation figure quoted without the box it was measured in would have
+called this run 74 % busy.
+
+**The waiting figure is the honest one.** 1,072.9 vehicle-seconds of
+declared waiting against 2,496 vehicle-seconds of capacity — 43 % of the
+fleet's time spent holding station for floor it never got.
+
+### The RTF, which is the one figure that came out well
+
+```
+accept-w1  576 samples  printed 0.552  min 0.035  max 1.000  integrated 0.577
+accept-w2  579          printed 0.583  min 0.029  max 1.103  integrated 0.578
+accept-w3  577          printed 0.573  min 0.027  max 1.100  integrated 0.575
+accept-w4  576          printed 0.572  min 0.026  max 1.061  integrated 0.580
+accept-w5  574          printed 0.562  min 0.031  max 1.118  integrated 0.577
+accept-w6  574          printed 0.568  min 0.021  max 1.056  integrated 0.575
+```
+
+**The full 39-pid stack, four trucks, sixteen lidars subscribed and
+rendering, D3D12/NVIDIA: 0.575–0.580 of real time, held to within
+0.005 across ten continuous minutes, against the 0.30 gate.** That is
+the shipping configuration measured under load, which is what M6.5's
+Gate 1 said was still owed, and it is nearly double the gate. Two things
+must travel with it: it is **conditional on the two GPU exports** quoted
+at the top of this section, and the instantaneous floor is still
+0.021–0.035, so the deep stalls M6.1 named have not gone away — they are
+simply short enough that `SENSOR_STALE_S` at 0.40 s rode every one of
+them out, with zero stale-link events on any truck in the whole session.
+
+**Not ticked.** One of eight is not an acceptance run. What it is, is a
+measurement of what four trucks do on this floor when one of them cannot
+leave its own parking space.
+
+## [ ] Gate 5 — degradation under loss: three clauses of four
+
+*Kill one vehicle mid-acceptance: its task requeues, the survivors
+finish everything, the fleet never assigns to the dead truck, and the
+floor is not left locked.*
+
+**Run in its own window, not inside the acceptance run, and the reason
+is Gate 4's.** That run had already lost a truck to a protective latch
+eight seconds in; killing a second one inside it would have measured two
+losses of different kinds at once and told us about neither. Its own run
+is the cleaner instrument, and this is the choice, named.
+
+19:54:53. Two transports: `S3→S2` → f1 (5.50 m), `S7→S9` → f4
+(16.00 m). f4 was killed in the x = 12 corridor deliberately — only six
+of the ninety routes use it, so the hulk would sit where it inconvenienced
+the fewest.
+
+```
+19:55:51.716  f4 at (12.019, 2.080) doing 0.300 m/s   $ kill 135784
+19:55:51,847  f4 is gone (OFFLINE) mid-ASSIGNED_LEG1                  131 ms
+19:55:51,847  f4 is holding (12.0,-5.5) where it stopped - nothing is routed
+              through a parked hulk until it reports a fresh idle state
+19:55:51,848  assigned ft-2416cf33 to f3 (nearest idle to S7: f2 23.00 m,
+              f3 21.37 m <-- chosen)                                  132 ms
+19:56:18,765  f1 completed ft-424f7262 at S2   (errors 0.7965 at S3, 0.7976 at S2)
+```
+
+**Three clauses hold, cleanly.** The task requeued and was reassigned
+**132 ms** after the kill, with no QUEUED interval at all. **f4 appears
+in no `nearest idle` list from that moment to the end of the session.**
+The floor was not locked: the ledger released f4's whole route hold and
+kept exactly one element, shown in the operator's own view as
+`parked:f4 holds (12.0,-5.5)`.
+
+**The fourth does not, and it is worse at four vehicles than M6.4
+measured it at two.** With no agent alive, nothing can publish an empty
+goal — so `nav_node` went on following the last one it was given:
+
+```
+f4 after the kill: 1141 samples  19:55:51.716 -> 19:57:29.997
+  from (12.019, 2.080) to (7.635, 5.792)
+  path length 8.48 m   straight line 5.74 m
+  last motion at 19:56:47.244  v=0.058
+```
+
+**A dead truck drove 8.48 m in 55.5 s** — up the corridor, **around the
+(12.0, 5.65) junction**, and west along the main aisle into the mouth of
+the S7 spur — before its own safe-speed instance latched at 19:56:46.359
+(right warning 2.429 m, `V_Limit` 1500 → 300, wheels at 250 mm/s and
+climbing on the turn). Meanwhile the fleet's position for f4 stayed
+frozen at `(12.03, 1.74)` — the last state the dead agent published —
+and the ledger's pin stayed at `(12.0, -5.5)`, **7.2 m from where the
+body actually came to rest**.
+
+f3, holding the entire main aisle the ledger had granted it, drove east
+and stopped at `(5.223, 5.655)` in nav **HOLD**, `guard_min 1.465 m`,
+**2.41 m short of the hulk**, and stayed there. The survivors did not
+finish everything, and the reason is not the fleet's arithmetic — it is
+that the fleet's arithmetic was about a truck that was no longer where
+the arithmetic said.
+
+M6.4 measured this at 2.93 m and called it "bounded today by how fast an
+agent comes back". At four vehicles, with longer routes, **it is 8.48 m
+and it crosses a junction**. Not ticked.
+
+## [x] Gate 6 — safety untouched at four
+
+*Every Motor drop named at its sample, no correlation with any fleet
+event, across the whole session — and say HOW you know, not that you
+looked.*
+
+**How this is known, in three steps.**
+
+**1. Where a Motor drop can come from at all.** `virtual_fplc` has five
+instances — `estop`, `pf`, `pf_right`, `pf_left`, `speed` — and Motor is
+the AND of all five being unlatched. Every one is driven by a hardware
+input the fleet has no wire to: the E-Stop bool, three OSSD bools from
+the scanners, and the two encoder channels against the live `V_Limit`.
+**The fleet manager's only path to a truck is the VDA 5050 order topic,
+and no byte of it reaches any of those five.** That is the structure;
+the rest is measurement, because structure is a claim and this file does
+not take claims.
+
+**2. Every drop in the session, named at the sample it happened.** Nine
+onsets across 79,361–79,396 samples per truck:
+
+```
+f1 18:57:12.108  wheels 0.0000, PROTECTIVE at spawn  -> startup acknowledge
+f3 18:57:12.202  wheels 0.0000                       -> ditto
+f2 18:57:14.048  wheels 0.0000                       -> ditto
+f4 18:57:14.048  wheels 0.0000                       -> ditto
+     all four cleared by the first RESET at 18:59:44
+
+f4 19:05:43.508  estop_healthy=True  wheels 0.1772  left 0.993 PROTECTIVE
+                 -> the CONVEYOR at the (12.0,5.65) junction, 2.00 m from
+                    the node, on the turn.  A static structure.
+f2 19:14:53.654  estop_healthy=True  wheels 0.6933  left 2.36 WARNING
+                 -> SAFE-SPEED: f1's PARKED BODY on S1, 3.62 m ahead
+f4 19:27:10.658  estop_healthy=True  wheels 0.0011  back 1.000 PROTECTIVE
+                 -> RackB_E, manoeuvring inside the 0.85 m S9 spur.  Static.
+f3 19:43:15.092  estop_healthy=True  wheels 0.1999  right 0.971 PROTECTIVE
+                 -> the WEST WALL, turning south out of its own spawn pose
+f4 19:56:46.359  estop_healthy=True  wheels 0.1654  right 2.429 WARNING
+                 -> SAFE-SPEED on the turn into S7, with no agent alive
+```
+
+Four are the startup acknowledge, with the wheels at rest and no order
+anywhere near. Five are a scanner reading a distance, and **every one of
+those five carries a field reading and a wheel speed on the same
+sample**: three are a truck against a static structure (a conveyor, a
+rack face, a wall), one is a truck against another truck's parked body,
+and one is a truck whose own agent was dead. **Not one of them is a
+reservation.**
+
+**3. The correlation test, run over the whole capture.** For each of the
+nine onsets, every message a **truck reads** — `uagv/v2/amragent/+/order`
+and `+/instantActions` — published within ±2 s:
+
+```
+9 motor-false onsets examined
+0 order/instantAction publishes inside any of the nine +/- 2 s windows
+(the session carried 157 of them)
+```
+
+Zero. `fleet/status` is deliberately excluded and the reason is M6.4's:
+it is republished on change and at least every 2 s, so it lands inside
+any window one cares to draw, and it is not a message a truck ever
+reads. **The messages a truck DOES read were not on the wire within two
+seconds of any Motor drop in this session.**
+
+**And the reverse direction, which is the one that matters for a fleet
+milestone** — every window in which the ledger was live, holding,
+granting, extending, refusing, yielding and once declaring itself
+UNRESOLVABLE:
+
+```
+Gate 2 run C   f1 0 of 4,460   f2 0 of 4,460   f3 0 of 4,460   f4 0 of 4,460
+Gate 3         f1 0 of 8,260   f2 0 of 8,260   f3 0 of 8,260   f4 0 of 8,260
+                               -------------
+                               0 of 12,720 per truck, all four
+Gate 4         f1 0 of 12,480  f2 0 of 12,480  f4 0 of 12,480
+                               (f3 is the west wall, named above)
+Gate 5         f1 0 of 10,140  f2 0 of 10,140  f3 0 of 10,140
+                               (f4 is the dead truck, named above)
+```
+
+**Twelve thousand seven hundred and twenty samples per truck, on all
+four trucks at once, with the floor being reserved, granted, released,
+extended, refused, yielded and deadlocked — and not one Motor drop.**
+Across the acceptance run and the loss run, the only two drops on any
+truck are the two the list above names, and both are a scanner reading a
+distance to something solid.
+
+The safe-speed latch itself remains M6.3's third defect, unchanged and
+not M6.5's: `_healthy()` demands `max(|ENC_A|,|ENC_B|) <= V_Limit`, and
+`V_Limit` drops 1500 → 300 the instant any warning field is violated
+(ruling 2026-08-20). `cmd_gate` does clamp to the new limit — measured
+here, `enc=-250/-250` on a truck whose `V_Limit` had already fallen —
+but a truck already doing 0.69 m/s cannot decelerate inside one scan
+cycle, so the instance latches on the way down. Both safe-speed drops in
+this session are that transient and neither is a traffic event.
+
+**Ticked.**
+
+## Teardown
+
+Writers first, all four:
+
+```
+> {"quit":true} -> 5910 / 5920 / 5930 / 5940
+shutting down: writing the trip values
+writer for f1 is down     (f2, f3, f4 identical)
+```
+
+`Get-CimInstance Win32_Process -Filter "Name='python.exe'"` afterwards
+returns three VS Code language servers and nothing else. Both recorders
+were stopped next, the ROS one printing the session counts quoted above.
+
+```
+$ ./m6.sh stop
+  … swept 135250 (cmd_mux.py) … 135305 … 135628 … 135659 … 135745
+down.
+$ ss -uln | grep -E ':(5110|5111|5120|5121|5130|5131|5140|5141)'  -> all free
+$ ss -ltn | grep ':1883 '                                          -> free
+$ pgrep -af 'gz sim|plc_link|vda_agent|fleet_manager|…|rec3|mqtt_rec3'
+                                                                   -> none
+$ test -f .m6_pids                                                 -> removed
+```
+
+The pidfile held **44** lines against the thirty-nine started: the extra
+five are this session's manager restarts, each appended by the same
+`setsid … echo $$ >> "$1"` shape `m6.sh` uses, which is why `stop` swept
+them all.
+
+**One process survives and it is not this stack's:** `mosquitto -p
+18883`, pid 112546, started 15:39 — a leaked private fixture from an
+earlier session's `test_vda_agent_mqtt.py`. It holds no port this stack
+wants (1883 was free before and after) and it is named here for the same
+reason Task 4 named it: it is somebody else's orphan, not this run's.
+
+```
+$ source /opt/ros/jazzy/setup.bash
+$ python3 -m pytest m6/tests/ -q            466 passed in 150.07s
+$ python3 -m pytest m5_ver2/step5/tests/ -q 220 passed in 2.48s
+```
+
+**Source ROS first.** Without `setup.bash` both suites abort with seven
+collection errors before a single test runs — the conftest imports
+`rclpy`. That is not a regression and it is not new; it is worth one
+line here because a clean-shell run of either suite looks like a
+catastrophic failure and is nothing of the kind.
+
+---
+
+# What Milestone 6 claims, and what it does not
+
+Every claim below points at the gate that measured it. Every claim
+withheld points at the run where it failed.
+
+## What it claims
+
+1. **Four simulated forklifts, each with its own complete safety chain,
+   run concurrently on one machine at 0.575–0.580 of real time.**
+   Thirty-nine processes, sixteen safety lidars subscribed and rendering,
+   ten continuous minutes, integrated Δsim/Δreal, six consecutive
+   windows within 0.005 of each other. *M6.5 Gate 4's RTF table; the
+   renderer verified in the server's own log at 18:56:34.*
+   **Conditional on `GALLIUM_DRIVER=d3d12` and
+   `MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA` being set in the shell that
+   starts the world** — see the residual below.
+
+2. **A VDA 5050 fleet manager assigns, sequences and completes
+   transports over ten stations with no operator in the loop.**
+   Twenty-three transports were submitted through `fleet_cli.py` in this
+   session and the manager built every order from them; six completed
+   end to end, each with two legs, a dwell and an arrival inside its
+   station's `arrive_m`. *M6.5 Gates 2 (run B and run C), 4 and 5;
+   M6.3's six fleet gates for the mechanism.*
+
+3. **Edge/node reservation hands a spur station from one vehicle to
+   another without ever letting the entry node go free.** The ownership
+   trace of `(-8.0, 5.7)` — `FREE → f3 → f1 → FREE`, with the
+   f3→f1 transition atomic — closes M6.4's blocked Gate 2, which is the
+   debt M6.5 existed to pay. *M6.5 Gate 2 run C.*
+
+4. **The safety chain is untouched by anything the fleet does.** Nine
+   Motor drops in a 67-minute four-truck session, every one named at its
+   sample, every one a scanner or the startup acknowledge; zero
+   order/instantAction publishes within ±2 s of any of them; 12,720
+   samples per truck on all four trucks with the ledger fully live and
+   not one drop. *M6.5 Gate 6, on M6.2's and M6.4's causation rules.*
+
+5. **A lost vehicle costs its task and nothing else, within 132 ms.**
+   Detection, hulk pinning and reassignment to another truck all landed
+   in the same two log milliseconds; the dead truck was never offered
+   work again; the floor was not left locked. *M6.5 Gate 5.*
+
+6. **The code was already N-generic and M6.5 proved it rather than
+   rewriting it.** The launch file, the instantiation tool, the manager,
+   the ledger and the CLI all took the fleet from two to four with the
+   table as the only edit; the four two-vehicle assumptions that did
+   exist were defects, are named, and are fixed. *Task 4's sweep; the
+   39-pid bring-up above.*
+
+## What it does not claim
+
+1. **It does not claim four trucks can work this floor together.** Gate
+   3 put four deliberately crossing transports on the floor and **none
+   of the four finished**. Gate 4 put eight across the ten stations and
+   **one of eight finished, in 10.4 minutes**. Both runs are in this
+   file at full length. Milestone 6 has a fleet manager that is correct
+   about the floor; it does not have a floor four trucks can share.
+
+2. **It does not claim the reservation ledger prevents collisions, and
+   it never has.** Reservation is process deconfliction. Three
+   independent measurements in this session show the difference: f2
+   stopped 3.62 m short of f1's parked body on floor the ledger had
+   granted it (Gate 2 run A); f3 stopped 1.12 m short of f4's parked
+   body on floor the ledger had granted it (Gate 2 run B); f3 stopped
+   2.41 m short of a dead truck the ledger believed was 7.2 m away
+   (Gate 5). **In all three the scanners are what stopped the truck**,
+   and in all three nothing touched anything. That is the system working
+   as designed, and the design must be quoted with the sentence
+   attached.
+
+3. **It does not claim a throughput number worth planning against.**
+   0.096 transports/min is what Gate 4 measured, and it is a measurement
+   of a floor with a dead truck across the west cross-aisle, not of a
+   fleet. The per-vehicle utilisation figures in that table (99.0 % and
+   99.7 %) are orbits inside 2 m boxes and must never be quoted without
+   the boxes.
+
+4. **f2, f3 and f4 have never run against a real PLC program.** There is
+   one PLCSIM Advanced license on this rig and it is f1's. `PLC_INSTANCE`
+   maps f1 to `PLC_2`, keeps `PLC_3` as a reserved *name* for f2, and has
+   nothing at all for f3 and f4; every truck in this session ran
+   `virtual_fplc`. The F-logic under test is the model's, and the only
+   truck that has ever driven a real F-program is f1, in M5.
+
+## The open residuals, and where each was measured
+
+1. **The four-truck figures depend on a GPU that is not configured.**
+   The two exports are not in `~/.bashrc` on this machine — checked at
+   18:55 and again in the write-up. Every RTF number in M6.5 is
+   conditional on a shell that has them; a run without them measures
+   llvmpipe and does not say so. *Measured: this section's opening; the
+   llvmpipe/D3D12 ladder in M6.5 Gate 1.*
+
+2. **f3 cannot turn south out of its own spawn pose, and f4 cannot turn
+   south at the east cross-aisle corner.** Both are the same
+   arithmetic: the left/right scanners sit at the fork corners
+   (−0.68 m, ±0.46 m), a turn swings the truck another ~0.5 m, and the
+   protective threshold is 1.0 m. f3 at `(-12.50, 5.65)` is 1.82 m from
+   the west wall before it starts; the `(12.0, 5.65)` node is 2.00 m
+   from the conveyor face with 0.40 m of run-up. Both latch. **This is
+   the single defect that cost the acceptance run.** *Measured: the
+   warm-up (f4, 19:05:43.508, 0.993 m) and Gate 4 (f3, 19:43:15.092,
+   0.971 m), both with the track and the sample.*
+
+3. **Both trucks ship parked inside their own warning fields, so they
+   crawl at 0.30 m/s until they clear them.** `V_Limit` 300 on f3 and f4
+   from the first cycle; `cmd_gate` clamps to it; measured at the
+   writers as `enc=-250/-250` and `-300/-300` against f1/f2's 0.69 m/s.
+   *Measured: the bring-up section above. The check that would have
+   caught it is `/fN/safety/fields`, not the raw scanner ranges.*
+
+4. **f1 parks ON S1, which 42 of the 90 routes touch.** The idle-hold
+   timeout gives the node back after 30 s and the status document says
+   in so many words that the truck is still there. The next truck routed
+   through it is stopped by its scanners, and — if it is doing more than
+   0.30 m/s when the warning trips — latched. *Measured: Gate 2 run A,
+   f2 at 19:14:53.654, stopped 3.62 m short.* The pose is kept because
+   moving it would invalidate every step5 and M6.1–M6.4 figure measured
+   from it; Task 4's report says so and this is the cost.
+
+5. **`arrive_m` is a tolerance, and a truck may spend all of it standing
+   in an aisle.** f4 "arrived" at S9 with an error of 0.7971 m and came
+   to rest 0.95 m off the junction the next truck had to turn at.
+   *Measured: Gate 2 run B.*
+
+6. **The minimum-turning-radius orbit still eats arrivals at
+   `arrive_m` 0.25 stations**, and it now has a fourth site: S4, which
+   M6.4's note called a spur that "aligns in". It aligns in from the
+   west and not from the east. *Measured: Gate 2 run A, f4 orbiting at
+   ~0.7 m radius for four minutes; M6.3 at S10 and S5, M6.4 at S5 and
+   S1.*
+
+7. **A parked hulk is only parked where the ledger last saw it, and at
+   four vehicles that is 8.48 m of error, not 2.93 m.** With no agent
+   alive nothing publishes an empty goal and `nav_node` keeps driving.
+   *Measured: Gate 5, f4 from (12.019, 2.080) to (7.635, 5.792) in
+   55.5 s after the kill, across a junction, while the ledger's pin
+   stayed at (12.0, −5.5).*
+
+8. **Wait-die frees the floor ahead of a vehicle and cannot free the
+   floor under it.** Two trucks standing on each other's next node is a
+   deadlock the resolver detects and cannot break; it says so itself
+   (`UNRESOLVABLE … A vehicle has to be moved`) in one direction and
+   live-locks at 10 Hz in the other. *Measured: Gate 3, 19:36:01,912 and
+   the 3,180 repeated yield lines.*
+
+9. **A task requeued out from under a vehicle leaves that vehicle
+   executing the old order and holding its node forever.** `_idle_floor`
+   does not age a vehicle executing an order the fleet does not own —
+   an exemption written for a restarted manager's adopted truck — and a
+   swap-deadlock requeue lands a vehicle in exactly that state.
+   *Measured: Gate 3, f2 holding (−3.0, −5.5) for the rest of the run
+   with `ft-199f702a` QUEUED and unassignable.*
+
+10. **A restarted manager adopts a driving truck by waiting, and does
+    not reserve the base it is already on.** Unchanged from M6.3's Fleet
+    Gate 5 and not re-measured here; five manager restarts in this
+    session were all made with the trucks at rest, deliberately, for
+    that reason.
+
+11. **The deadlock a physical body causes is invisible to the ledger, by
+    construction.** The resolver reads ledger waits; a truck held by
+    `nav`'s obstacle guard is not waiting on the ledger. *Measured: Gate
+    2 run B, f3 in nav HOLD with `guard_min 1.12` while f4 waited on the
+    node f3 owned.*
 
 ---
 
