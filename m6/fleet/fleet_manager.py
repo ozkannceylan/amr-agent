@@ -823,9 +823,16 @@ class FleetManager:
         return "parked:{}".format(serial)
 
     def _release(self, serial):
-        """Give the floor back, keeping the ground under the truck. A
-        vehicle always owns the node it is standing on - that is the one
-        reservation that is a physical fact rather than a plan."""
+        """Give the floor back, keeping the ground under the truck.
+
+        The node under a vehicle is the one reservation that is a
+        physical fact rather than a plan, and it is kept here for that
+        reason - but it is NOT true any more that a vehicle always owns
+        the node it is standing on. IDLE_HOLD_S takes that node back
+        from a truck nobody is driving, deliberately and out loud
+        (_idle_floor), which is the one place this fleet lets the ledger
+        stop describing where a truck is.
+        """
         if not self.traffic_on:
             return
         self.floor.release_all(serial, keep=self.standing.get(serial))
@@ -870,8 +877,18 @@ class FleetManager:
         So the junction stays held with the station node through the
         dwell, and leg 2's hold - which starts at the station and runs
         out through that same junction - takes it over with nothing
-        freed in between. The cost is the ruling's own: a second truck
-        bound for the same station waits the dwell out.
+        freed in between.
+
+        THE COST IS BIGGER THAN "THE NEXT TRUCK WAITS", and it is worth
+        writing down rather than discovering. Every junction on this
+        graph is an AISLE node: seven of the ten stations are spurs, and
+        their junctions have degree 3 or 4. Two of them serve two
+        stations each - (-8.0, 5.65) is the way into both S6 and S8, and
+        (8.0, 5.65) into both S7 and S9 - so a truck dwelling at S6
+        holds the only way into S8 as well, and in both cases it closes
+        the main aisle to ALL transit through that x. For DWELL_S, which
+        is 3.0 s. That is the ruling's accepted price and the thing to
+        watch first if the acceptance run's waiting time looks wrong.
 
         DERIVED, NEVER STORED. The pin exists exactly while a task of
         ours is in DWELL on this vehicle at that station, so there is no
@@ -928,6 +945,7 @@ class FleetManager:
         want = [node] if entry is None \
             else [entry, tr.edge(entry, node), node]
         if self.floor.held_by(serial) == want:
+            self.floor.clear_wait(serial)
             return
         stamp = self.idle_hold.get(serial)
         if stamp is not None and stamp["freed"] and stamp["node"] == node:
@@ -936,6 +954,14 @@ class FleetManager:
         if entry is not None and self.floor.owner_of(entry) is not None:
             want = [node]        # the junction is not this truck's to keep
         self.floor.hold(serial, want)
+        # AND IT WAITS FOR NOTHING. release_all(keep=) used to clear
+        # the wait as a side effect and this path no longer goes
+        # through it: a truck with no leg of ours running has no
+        # task, therefore no age, therefore would be picked as the
+        # youngest in any cycle it appeared in - and wait-die would
+        # free the ground under it, or the junction it is keeping
+        # for leg 2 while it dwells.
+        self.floor.clear_wait(serial)
 
     def _idle_floor(self, now):
         """The IDLE_HOLD_S sweep, once per traffic pass.
@@ -951,6 +977,22 @@ class FleetManager:
         SAID ONCE, because the pass runs at 10 Hz: the release sets the
         flag that both suppresses the line and stops _hold_standing
         taking the node straight back.
+
+        WHAT HAPPENS NEXT IS NOT PRETENDED AWAY. The truck is still
+        standing there and the ledger has stopped saying so, so:
+        * another vehicle may be routed onto that node, and what stops
+          it is its scanners - a jam an operator can see and clear,
+          which is the trade this rule makes against a corridor closed
+          for a shift by a truck nobody is driving;
+        * the freed truck re-acquires its ground the ordinary way, by
+          being given work: _leg_order asks for the whole route from its
+          standing node and takes it if it is free. If somebody else has
+          taken it in the meantime that hold comes back empty, the task
+          cannot start, and the fleet says exactly that on the operator's
+          screen (_no_floor, "the route is taken"). There is no third
+          lever here and there never was: this fleet's answer to a floor
+          it cannot untangle is to name it and let a person move a
+          truck, the same answer wait-die gives a swap deadlock.
         """
         for serial in sorted(self.vehicles):
             node = self.standing.get(serial)
@@ -1142,8 +1184,13 @@ class FleetManager:
             # wire. The fleet reserves the ONE thing it does know - the
             # ground under the body - and adopts the rest by waiting,
             # which is the M6.3 rule already. An idle truck gets the same
-            # treatment, because nobody may be routed through a parked
-            # vehicle either.
+            # treatment, because nobody may be routed through a truck
+            # standing in an aisle either - until IDLE_HOLD_S decides
+            # that one forgotten truck may not close a corridor for a
+            # whole shift and _idle_floor hands the node back. Past
+            # that, this branch stops re-taking it and the fleet WILL
+            # route another vehicle onto it: the ruling accepting a jam
+            # it can see over one it cannot.
             self._hold_standing(serial, node)
             return
         trf["last_xy"] = node

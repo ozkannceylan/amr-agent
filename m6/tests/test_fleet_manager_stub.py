@@ -1412,3 +1412,99 @@ def test_a_hulk_that_returns_somewhere_else_takes_its_pin_with_it(floor):
     f1.state(now)
     assert "f1" not in manager.parked
     assert manager.floor.owner_of((-7.4, -5.5)) == "f2"
+
+
+def contiguous(held):
+    """A hold is a RUN of floor: node, the edge to the next node, that
+    node, and so on. Anything else means release_through's index has
+    stopped being a position on the route the truck is driving."""
+    if not held or len(held) % 2 == 0:
+        return False                      # a hold never ends on an edge
+    for i, element in enumerate(held):
+        if i % 2 == 0:
+            if isinstance(element, frozenset):
+                return False
+        elif element != tr.edge(held[i - 1], held[i + 1]):
+            return False
+    return True
+
+
+def test_leg_two_out_of_a_spur_frees_nothing_under_the_truck(floor):
+    """THE STATE THE HANDOVER TESTS ABOVE DRIVE STRAIGHT PAST, and the
+    one the bug lived in: leg 2 has gone out and the truck has not moved
+    yet, so it reports the station node it is still standing on.
+
+    The ledger stores a hold in travel order and release_through frees by
+    POSITION in it. Leg 1 left `[junction, edge, station]`; leg 2 drives
+    those same three the other way. Measured 2026-08-22: without the
+    re-seat in traffic.hold the index of the station was 2, that first
+    state freed the junction the truck was about to drive onto, the
+    fleet's own invariant check shouted THE FLOOR UNDER A LIVE BASE WENT
+    MISSING, and with an older task waiting for that junction the retry
+    pass handed it over while leg 2 still had it as released base - two
+    vehicles released onto one node, and no cycle to detect it.
+    """
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = station_pair(manager, stub, now)
+    roll(manager, (f1, f2), now)                  # f2 arrives, dwells
+    manager.dwell_until["t-1"] = now - 1.0
+    for truck in (f1, f2):
+        truck.drive()
+    turn(manager, (f1, f2), now)                  # leg 2 goes out
+    assert manager.tasks[0]["state"] == "ASSIGNED_LEG2"
+
+    catcher = Catcher()
+    manager.log.addHandler(catcher)
+    manager.log.setLevel(logging.ERROR)
+    try:
+        f2.xy = S4_XY                             # it has NOT moved yet
+        f2.last = ("wp1", 0)                      # leg 2's first node: S4
+        f2.take().state(now)
+        manager._traffic_pass(now)
+    finally:
+        manager.log.removeHandler(catcher)
+
+    assert manager.floor.owner_of(S4_ENTRY) == "f2", (
+        "the junction under the truck was freed on its own leg-2 state")
+    assert contiguous(manager.floor.held_by("f2")), (
+        "the hold is not a run of floor any more: {}".format(
+            manager.floor.held_by("f2")))
+    assert manager.floor.held_by("f2")[:3] == [
+        S4_XY, tr.edge(S4_ENTRY, S4_XY), S4_ENTRY], (
+        "the hold is not in leg 2's travel order")
+    assert catcher.said == [], (
+        "the traffic path logged an error: {}".format(catcher.said))
+    # ...and the truck waiting for that junction did not get it.
+    assert S4_ENTRY not in manager.floor.held_by("f1")
+    assert manager.blocked == []
+
+
+def test_the_waiting_truck_is_not_handed_the_junction_when_it_is_older(
+        floor):
+    """The same state with the QUEUED task older than the occupant's, so
+    the oldest-first retry pass runs BEFORE the occupant's own re-hold
+    could repair a hole. That ordering is what turned the over-release
+    from a log line into two vehicles released onto one node."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = station_pair(manager, stub, now)
+    older = next(t for t in manager.tasks if t["task_id"] == "t-2")
+    occupant = next(t for t in manager.tasks if t["task_id"] == "t-1")
+    older["submitted_ts"] = occupant["submitted_ts"] - 10.0
+
+    roll(manager, (f1, f2), now)
+    manager.dwell_until["t-1"] = now - 1.0
+    for truck in (f1, f2):
+        truck.drive()
+    turn(manager, (f1, f2), now)
+    f2.xy, f2.last = S4_XY, ("wp1", 0)
+    f2.take().state(now)
+    manager._traffic_pass(now)
+
+    assert manager.floor.owner_of(S4_ENTRY) == "f2"
+    assert manager.floor.held_by("f1") == [(3.0, -5.5)]
+    assert [n["nodeId"] for n in f1.released()] == ["wp1", "wp2"], (
+        "the waiting truck was released onto the occupant's way out")
+    assert manager.floor.find_cycle() is None
+    assert manager.blocked == []

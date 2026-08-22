@@ -3,8 +3,19 @@
 The M1 subset's section 4 as executable checks. Validation names what
 is wrong instead of repairing it; acceptance is a three-way verdict so
 a duplicate delivery is silence, not an error; progress is monotone and
-skip-tolerant, because the pursuit cuts corners and the polyline's
-ARRIVED (nav-side) is what finally closes an order, not this counter.
+skip-tolerant, because the pursuit cuts corners and an intermediate
+waypoint may legitimately be passed outside its own radius.
+
+  THE LAST RELEASED NODE IS DIFFERENT, AND M6.5 MADE IT SO. `reached`
+  reaching len(nodes) is now one of the two facts that close an order
+  (vda_agent._settle_arrival); nav's ARRIVED is the other and neither
+  alone is enough. That is safe because it is the same measurement made
+  twice: both sides read the same odometry and compare it against the
+  same last node with the same radius - released_route's arrive_m IS
+  that node's allowedDeviationXY, and Progress reads it too. On the
+  intermediate nodes the two still differ, and that is the point of
+  DEFAULT_DEV_M below: skipping one of those must never stall an order,
+  and it cannot, because only the LAST node decides arrival.
 
 Numbers are checked, not merely present: an order that lies about a
 coordinate is rejected at the door, because the alternative is a crash
@@ -20,8 +31,12 @@ released nodes may be appended. Node actions stay rejected (M6.5).
 """
 import math
 
-DEFAULT_DEV_M = 0.8   # intermediate waypoint pass radius; the pursuit
-                      # cuts corners, and ARRIVED closes what this misses
+# INTERMEDIATE waypoints only, and deliberately generous: the pursuit
+# cuts corners, and a node skipped here costs a lastNodeId, never an
+# arrival. The LAST released node never uses it - it carries the
+# station's own allowedDeviationXY, and that is the radius both this
+# counter and nav's arrival are decided on (see the module note).
+DEFAULT_DEV_M = 0.8
 
 
 def _real(v):

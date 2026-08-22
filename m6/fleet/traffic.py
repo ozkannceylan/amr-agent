@@ -17,6 +17,16 @@ Three rules carry the module:
   from the vehicle's end, stops at the first element someone else owns,
   never grants a hole and never ends on an edge - a truck stops at a
   node. The prefix is the VDA 5050 base; the rest is horizon.
+  AND WHAT IS STORED IS TRAVEL ORDER, not arrival order. `release_through`
+  frees by POSITION in that list, so the list has to mean "in the
+  direction this vehicle is driving" - which is why `hold` re-seats
+  elements it already owns into the order it was just asked for instead
+  of leaving them where an earlier leg put them. A vehicle that holds a
+  spur station and the junction behind it drives OUT through that
+  junction on its next leg, so the two swap places; measured 2026-08-22,
+  without the re-seat the first state of that leg freed the junction the
+  truck was standing next to and about to drive onto, and a second
+  vehicle was handed it while the first still had it as released base.
 * **Deadlock is broken wait-die, by task age.** A blocked vehicle records
   what it waits for, which makes a wait-for graph (vehicle -> owner of
   the element it wants); a cycle in it is a deadlock. The YOUNGEST task
@@ -69,17 +79,29 @@ class Reservations:
             self._waiting.pop(vehicle, None)
         else:
             self._waiting[vehicle] = blocker
-        held = self._held.setdefault(vehicle, [])
         for element in prefix:
-            if self._owner.get(element) != vehicle:
-                self._owner[element] = vehicle
-                held.append(element)
+            self._owner[element] = vehicle
+        # RE-SEATED INTO THE ORDER JUST ASKED FOR (see rule 2 above).
+        # Anything this vehicle holds that the request does not name is
+        # floor behind it or floor granted on a request since superseded;
+        # it keeps its place, ahead of the run being driven now.
+        taken = set(prefix)
+        self._held[vehicle] = [e for e in self._held.get(vehicle, [])
+                               if e not in taken] + list(prefix)
         return prefix
 
     def release_through(self, vehicle, node):
         """Free everything held up to and including the edge arriving at
         `node`; keep `node` and everything after it. A node this vehicle
-        never held is a no-op - it is behind us or was never ours."""
+        never held is a no-op - it is behind us or was never ours.
+
+        THE PRECONDITION IS `hold`'s: the stored list is in the order
+        this vehicle drives it, so an index into it is a position on the
+        route. Nothing else here checks that, and nothing else can - the
+        ledger has no idea what a route is - so `hold` is the one place
+        it is maintained and the one place to look if this ever frees
+        floor a truck was standing on.
+        """
         held = self._held.get(vehicle, [])
         if node not in held:
             return
@@ -147,3 +169,10 @@ class Reservations:
 
     def clear_yield(self, vehicle):
         self._yielded.discard(vehicle)
+
+    def clear_wait(self, vehicle):
+        """This vehicle waits for nothing. A truck with no leg of ours
+        running on it must not be an edge in the wait-for graph: it has
+        no task, so it has no age, so wait-die would pick it as the
+        youngest and take the ground out from under it."""
+        self._waiting.pop(vehicle, None)
