@@ -866,7 +866,8 @@ def test_no_traffic_reproduces_the_jam_and_the_document_says_so(rig):
                                   "t-west": [len(rig.orders_for("f1")[0][1]
                                                  ["nodes"]), 0],
                                   "t-jam": [len(order["nodes"]), 0]},
-                              "stuck": {}, "yields": [], "blocked": []}
+                              "stuck": {}, "yields": [], "blocked": [],
+                              "idle": []}
 
 
 def test_a_swap_deadlock_is_named_on_the_operators_screen(rig):

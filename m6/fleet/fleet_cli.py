@@ -228,6 +228,15 @@ def traffic_lines(doc):
                          "deadlock".format(
                              entry.get("vehicle"), entry.get("task"),
                              ", ".join(entry.get("with") or [])))
+    for entry in _list(block, "idle"):
+        # A truck that no longer reserves the node it is standing on is
+        # the one thing on this screen an operator could otherwise read
+        # as the fleet having forgotten it.
+        if isinstance(entry, dict):
+            lines.append("  idle timeout: {} gave back {} element(s) at {} "
+                         "- it is still standing there".format(
+                             entry.get("vehicle"), entry.get("freed"),
+                             entry.get("node")))
     for entry in _list(block, "blocked"):
         if isinstance(entry, dict):
             lines.append("  ** BLOCKED: {} **".format(entry.get("why")))

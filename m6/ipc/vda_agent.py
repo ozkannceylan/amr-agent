@@ -52,6 +52,16 @@ believing its own publish, would go on reporting a truck that drives.
 cb_nav therefore reconciles - a nav that has gone IDLE with a refusal
 or cancel note and no goal ends `executing`, loudly, on the state.
 
+AN ARRIVAL IS TWO FACTS ON TWO TOPICS (M6.5). nav finishing the
+polyline it was handed says nothing about the ORDER - it was given the
+released nodes and only those - and the horizon being empty says what
+the FLEET has released, not what the truck has driven. So the order ends
+only when nav says ARRIVED for it AND `progress.reached` has counted
+every released node, and _settle_arrival is asked from both cb_nav and
+cb_odom because either topic may carry the fact that lands second. M6.4
+anchored it on the horizon alone and carried one nav period of race for
+it; that window is closed here.
+
 AN EXTENSION IS NOT A NEW ORDER (VDA 5050 s.6.6, M6.4). An update that
 only grows the base past what the truck has already been told to drive
 is stitched on: the order message is replaced, Progress keeps its count
@@ -251,25 +261,9 @@ class VdaAgent(Node):
             return
         state, goal = nav.get("state", ""), nav.get("goal", "")
         note = nav.get("note", "")
-        # THE END OF A BASE IS NOT THE END OF AN ORDER. A horizon left
-        # on this order means the fleet has not released the rest of the
-        # route yet; the truck stops at the last released node by
-        # construction and waits for orderUpdateId + 1, and that WAIT IS
-        # THE TRAFFIC PRIMITIVE. nav cannot know it: it was handed the
-        # released nodes and it drove all of them, so ARRIVED from nav
-        # means "the polyline I was given is finished", never "the order
-        # is finished".
-        #   MEASURED 2026-08-22, M6.4 Gate 1, live: without `not
-        #   self.horizon` the agent cleared `executing` the moment it
-        #   reached the end of its base, and every one of the 1,873
-        #   extensions the fleet published over the next 3 m 37 s came
-        #   back "no order is executing - nothing to extend". The truck
-        #   stood three metres short of a corridor that had been free
-        #   for two minutes and its transport never completed. A held
-        #   vehicle could never be let go, which is the whole of M6.4.
-        arrived_now = (state == "ARRIVED" and self.nav_state != "ARRIVED"
-                       and self.executing and not self.horizon
-                       and goal == self.order["orderId"])
+        # AN ARRIVAL IS TWO FACTS AND THEY LAND ON TWO TOPICS, so it is
+        # settled in one place (_settle_arrival) that both this callback
+        # and cb_odom ask.
         # NAV STOPPED AND IT WAS NOT AN ARRIVAL. IDLE with a note is
         # nav_core saying it refused the route or cancelled the drive;
         # a route it accepted would have made `goal` our orderId, so an
@@ -281,11 +275,9 @@ class VdaAgent(Node):
             and (goal in ("", None) or note == "mode left auto")
             and time.monotonic() - self.route_sent_at >= NAV_SETTLE_S)
         self.nav_state, self.nav_goal = state, goal
-        if arrived_now:
-            self.progress.complete()
-            self.executing = False
-            self.publish_state("arrived")
-        elif refused_now:
+        if self._settle_arrival():
+            return
+        if refused_now:
             # The order is KEPT - only the belief that it is being
             # driven goes. See the module docstring's recovery path.
             self.executing = False
@@ -293,12 +285,61 @@ class VdaAgent(Node):
                 "nav is not driving this order: {}".format(note))
             self.publish_state("nav refused/cancelled")
 
+    def _settle_arrival(self):
+        """The order is over. True when THIS call is what ended it.
+
+        TWO FACTS, AND NEITHER ALONE IS AN ARRIVAL.
+
+        * nav has finished the polyline it was handed, for this order.
+          It cannot mean more than that: it was given the RELEASED nodes
+          and nothing else, so its ARRIVED at the end of a held base is
+          a WAIT - the traffic primitive - and not a completion.
+          MEASURED 2026-08-22, M6.4 Gate 1, live: read as a completion,
+          the agent cleared `executing` at its base end and every one of
+          the 1,873 extensions the fleet published over the next 3 m
+          37 s came back "no order is executing - nothing to extend";
+          the truck stood three metres short of a corridor that had been
+          free for two minutes and its transport never completed.
+        * the truck has passed the last node the fleet released, by its
+          own odometry - `progress.reached == len(progress.nodes)`.
+
+        THE SECOND FACT IS THE M6.5 FIX and the first is not a
+        pre-filter for it: they are independent. An empty horizon says
+        the FLEET has released everything; a full count says the TRUCK
+        has driven everything released. M6.4 carried one nav period of
+        race between them - an extension that empties the horizon can be
+        processed in the same period the truck reaches the end of the
+        base it is still driving, and the ARRIVED that belongs to the
+        OLD base would then complete the order with three nodes still in
+        front of the forks. Asking both closes it.
+
+        AND IT IS ASKED FROM BOTH CALLBACKS RATHER THAN ON THE EDGE OF
+        nav's state. The two facts arrive on two topics with no ordering
+        between them, so whichever lands second has to be the one that
+        settles it; an edge test on nav alone would drop the arrival
+        whenever the odom sample that completes the count was processed
+        after nav's ARRIVED. `executing` is the once-only guard - it is
+        false the moment this fires, and only a new route sets it again.
+        """
+        if not self.executing or self.order is None \
+                or self.progress is None or self.horizon:
+            return False
+        if self.nav_state != "ARRIVED" \
+                or self.nav_goal != self.order["orderId"]:
+            return False
+        if self.progress.reached != len(self.progress.nodes):
+            return False
+        self.executing = False
+        self.publish_state("arrived")
+        return True
+
     def cb_odom(self, msg):
         p, q = msg.pose.pose.position, msg.pose.pose.orientation
         self.pose = (p.x, p.y, 2.0 * math.atan2(q.z, q.w))
         v = msg.twist.twist.linear
         self.speed = math.hypot(v.x, v.y)
-        if self.executing and self.progress.update(self.pose[:2]):
+        if self.executing and self.progress.update(self.pose[:2]) \
+                and not self._settle_arrival():
             self.publish_state("node reached")
 
     def drain(self):

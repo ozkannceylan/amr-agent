@@ -172,14 +172,23 @@ def test_teleop_order_is_rejected_on_the_wire(rig):
 
 
 def test_arrival_closes_the_order(rig):
+    """AN ARRIVAL IS TWO FACTS (M6.5): nav has finished the polyline it
+    was handed AND the truck's own odometry puts it past the last node
+    the fleet released. So the odometry is published here rather than
+    left at the origin - a real truck's always is, and nav_node stops a
+    truck whose pose has gone stale, so an ARRIVED with no odometry
+    behind it is not a state this vehicle can be in."""
     from std_msgs.msg import String
     agent, helper, caught, mode_pub, nav_pub, probe = rig
+    odom = odom_publisher(helper)
     spin([agent, helper], 1.5)
     mode_pub.publish(String(data="auto"))
     spin([agent, helper], 0.5)
     probe.publish("uagv/v2/amragent/f1/order",
                   json.dumps(valid_order()), qos=0)
     spin([agent, helper], 1.5)
+    drive_to(odom, 6.0, -8.0)                 # the truck reaches S4
+    spin([agent, helper], 0.5)
     nav_pub.publish(String(data=json.dumps(
         {"state": "ARRIVED", "goal": "o-int-1"})))
     spin([agent, helper], 1.0)
@@ -450,16 +459,24 @@ def test_an_unmatched_nav_is_named_before_the_retries_begin(rig):
 # traffic ledger acts on (it frees the floor behind a vehicle).
 
 
-def growing_order(released_n, update_id, devs=None, order_id="o-grow"):
+def growing_order(released_n, update_id, devs=None, order_id="o-grow",
+                  count=5):
     """Five nodes on a line at y=0, x = 0, 2, 4, 6, 8.
 
     The first `released_n` are base, the rest horizon. `devs` sets
     allowedDeviationXY per node id - the radius that decides passing
     (Progress) and, on the last released node, arrival (arrive_m).
+
+    `count` is how many of those five the message carries at all, and
+    it exists for one shape only: an update that SHRINKS the horizon.
+    This fleet's order_builder cannot make one - it rebuilds the same
+    full point list every time and only ever moves the release cut - so
+    the shrink is written here, directly, and pinned by the tests that
+    use it rather than left to be discovered.
     """
     devs = devs or {}
     nodes = []
-    for i in range(5):
+    for i in range(count):
         nid = "wp{}".format(i)
         pos = {"x": 2.0 * i, "y": 0.0, "mapId": "warehouse"}
         if nid in devs:
@@ -471,7 +488,7 @@ def growing_order(released_n, update_id, devs=None, order_id="o-grow"):
               "released": i + 1 < released_n,
               "startNodeId": "wp{}".format(i),
               "endNodeId": "wp{}".format(i + 1), "actions": []}
-             for i in range(4)]
+             for i in range(count - 1)]
     return {"orderId": order_id, "orderUpdateId": update_id,
             "nodes": nodes, "edges": edges}
 
@@ -738,3 +755,164 @@ def test_a_reached_prefix_that_disagrees_is_refused_not_driven(rig):
     said = [e for s in states_of(caught, "o-grow") for e in s["errors"]
             if e["errorType"] == "orderError"]
     assert said and "already passed" in said[-1]["errorDescription"]
+
+
+# ---- the arrival anchor (M6.5) ----
+# M6.4 carried one nav-state period of race in `arrived_now`: it asked
+# whether the HORIZON was empty, which says what the fleet has released
+# and nothing about what the truck has driven. An arrival is now two
+# facts - nav has finished the polyline it was handed, and the truck has
+# passed the last released node by its own odometry - and neither of
+# them alone ends an order.
+
+
+def nav_says(nav_pub, state, goal="o-grow", note=""):
+    from std_msgs.msg import String
+    nav_pub.publish(String(data=json.dumps(
+        {"state": state, "goal": goal, "note": note})))
+
+
+def test_an_extension_that_empties_the_horizon_does_not_arrive_early(rig):
+    """THE ONE NAV PERIOD OF RACE, STAGED.
+
+    The truck is standing at the end of a two-node base with three nodes
+    of horizon in front of it. The fleet's extension - which releases
+    all five and empties the horizon - is processed FIRST, and the
+    ARRIVED that belongs to the OLD base is processed after it, inside
+    the same nav period. There is nothing exotic about that ordering:
+    orders arrive on the MQTT inbox and are drained at 10 Hz, nav's
+    state arrives on a ROS subscription, and no rule sequences the two.
+
+    On the horizon-anchored test both conditions then read true and the
+    order completed with three nodes and six metres still in front of
+    the forks - the fleet would have been told the pallet was delivered
+    at wp4 while the truck stood at wp1.
+    """
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    odom = odom_publisher(helper)
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    send_order(probe, growing_order(2, 0, {"wp1": 0.25}))
+    spin([agent, helper], 1.5)
+    drive_to(odom, 2.0, 0.0)                     # the truck reaches wp1
+    spin([agent, helper], 0.5)
+    assert agent.progress.reached == 2
+
+    send_order(probe, growing_order(5, 1, {"wp1": 0.25}))
+    spin([agent, helper], 1.5)
+    assert agent.horizon == [], "the extension did not empty the horizon"
+    assert agent.progress.reached == 2, "the count moved on an update"
+
+    nav_says(nav_pub, "ARRIVED")                 # ...belonging to wp1
+    spin([agent, helper], 1.0)
+    assert agent.executing, (
+        "the order was completed at wp1 with wp2..wp4 still to drive - "
+        "the fleet would have been told the transport was finished")
+    assert agent.progress.reached == 2
+    last = states_of(caught, "o-grow")[-1]
+    assert [n["nodeId"] for n in last["nodeStates"]] == \
+        ["wp2", "wp3", "wp4"], "the state claimed there was nothing left"
+    assert last["lastNodeId"] == "wp1"
+
+    # ...and the real arrival, when the truck has actually driven the
+    # nodes it was given, still closes the order.
+    nav_says(nav_pub, "EN-ROUTE")
+    spin([agent, helper], 0.5)
+    drive_to(odom, 8.0, 0.0)
+    spin([agent, helper], 0.5)
+    nav_says(nav_pub, "ARRIVED")
+    spin([agent, helper], 1.0)
+    assert not agent.executing, "the anchor never let the order finish"
+    done = [s for s in states_of(caught, "o-grow") if s["nodeStates"] == []]
+    assert done and done[-1]["lastNodeId"] == "wp4"
+
+
+def test_an_update_that_only_shrinks_the_horizon_keeps_the_truck_driveable(
+        rig):
+    """THE MIRROR, PINNED (M6.4's carry item 5).
+
+    An update that takes nodes OFF the horizon and releases nothing new
+    is unreachable through this fleet - order_builder rebuilds the same
+    full point list every time and only ever moves the release cut, and
+    _base_kept refuses anything that moves the released prefix - so this
+    is a property of the agent read alone. The message is therefore
+    written by hand. What must not happen is a wedge: the truck stands
+    at its base end with nothing in front, and it has to stay executing,
+    stay unstopped and still take the next release.
+    """
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    odom = odom_publisher(helper)
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    send_order(probe, growing_order(2, 0, {"wp1": 0.25}))
+    spin([agent, helper], 1.5)
+    drive_to(odom, 2.0, 0.0)
+    spin([agent, helper], 0.5)
+    nav_says(nav_pub, "ARRIVED")                 # the base end: a WAIT
+    spin([agent, helper], 1.0)
+    assert agent.executing
+    routes = len(caught["route"])
+
+    # wp3 and wp4 are taken off the horizon; wp0 and wp1 stay released
+    # and nothing new is released, so there is nothing to drive to.
+    send_order(probe, growing_order(2, 1, {"wp1": 0.25}, count=3))
+    spin([agent, helper], 1.5)
+    refusals = [e for s in states_of(caught, "o-grow") for e in s["errors"]
+                if e["errorType"] == "orderError"]
+    assert refusals == [], "the shrink was refused: {}".format(refusals)
+    assert agent.executing, "the truck was left believing nothing drives it"
+    assert agent.progress.reached == 2, "the count reset on the shrink"
+    assert len(caught["route"]) == routes, "there was nothing to drive"
+    assert caught["goal"] == [], "a horizon shrink stopped the truck"
+    last = states_of(caught, "o-grow")[-1]
+    assert [n["nodeId"] for n in last["nodeStates"]] == ["wp2"]
+    assert last["newBaseRequest"], "a held truck must still be asking"
+
+    # AND IT IS STILL DRIVEABLE: the next release moves it.
+    send_order(probe, growing_order(3, 2, {"wp1": 0.25}, count=3))
+    spin([agent, helper], 1.5)
+    assert len(caught["route"]) == routes + 1, "the truck was wedged"
+    assert caught["route"][-1]["points"] == [[2.0, 0.0], [4.0, 0.0]]
+
+
+def test_a_horizon_shrunk_to_nothing_still_ends_the_order(rig):
+    """The same shape at its limit, and the wedge M6.4 named: an update
+    that leaves the truck with everything released and everything
+    driven, arriving AFTER nav has already reported ARRIVED at what was
+    then a base end.
+
+    Anchored on the horizon and edge-triggered on nav's state, that
+    order could never complete: the horizon condition only became true
+    after the ARRIVED that would have read it, and nav - which
+    republishes its state at 10 Hz and has nothing new to say - never
+    gives that edge again. Anchored on the count and asked from both
+    callbacks, the next state nav sends settles it.
+    """
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    odom = odom_publisher(helper)
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    send_order(probe, growing_order(2, 0, {"wp1": 0.25}))
+    spin([agent, helper], 1.5)
+    drive_to(odom, 2.0, 0.0)
+    spin([agent, helper], 0.5)
+    nav_says(nav_pub, "ARRIVED")
+    spin([agent, helper], 1.0)
+    assert agent.executing, "the base end is a wait, not an arrival"
+
+    send_order(probe, growing_order(2, 1, {"wp1": 0.25}, count=2))
+    spin([agent, helper], 1.0)
+    assert agent.horizon == []
+    nav_says(nav_pub, "ARRIVED")        # nav's next periodic state
+    spin([agent, helper], 1.0)
+    assert not agent.executing, (
+        "the truck is standing on the last node of a fully released "
+        "order and the fleet will never be told it arrived")
+    done = [s for s in states_of(caught, "o-grow") if s["nodeStates"] == []]
+    assert done and done[-1]["lastNodeId"] == "wp1"

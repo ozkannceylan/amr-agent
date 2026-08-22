@@ -84,6 +84,16 @@ piece of floor, so the guards are not the plan. `--no-traffic` skips the
 ledger entirely and grants every route whole, which is the M6.3
 behaviour and is how the gates reproduce the jam on purpose.
 
+  AND A HOLD NOW HAS TWO SHAPES M6.4 DID NOT HAVE (M6.5, both measured
+  before they were written). A truck that has arrived in a STATION SPUR
+  keeps the junction it came in by for the length of the dwell, because
+  a spur has exactly one way out and it is the same one the next truck
+  wants in - releasing it on arrival is what made M6.4's Gate 2
+  unpassable (_dwell_entry). And a truck with NO TASK stops holding the
+  aisle after IDLE_HOLD_S, because at four vehicles one forgotten truck
+  is the difference between a busy floor and a jammed one - unless it is
+  parked in a spur, which is nobody's corridor (_idle_floor).
+
 NO JOURNAL. The queue is in memory and the manager re-syncs from the
 wire alone (retained connections, then the states themselves). A
 restarted manager therefore has NO tasks, says so in the document, and
@@ -143,6 +153,21 @@ BLOCKED_SHOWN = 5        # ditto, for deadlocks wait-die cannot break
 # refusal stops being a race and is named on the operator's screen.
 EXT_REFUSED_MAX = 5
 HOLDS_SHOWN = 8          # elements per vehicle in the status document
+# AN IDLE TRUCK MAY NOT HOLD THE AISLE FOREVER (M6.5). A vehicle the
+# fleet is not driving keeps the ground under its body reserved, which
+# is right for a truck that just finished and wrong for one that has
+# been standing in a corridor since the last shift: at four vehicles
+# that single node is the difference between a busy floor and a jammed
+# one. Past this, the hold is given back and said out loud. THE TRUCK
+# IS STILL THERE - reservation is process deconfliction, so what is
+# given up is the fleet's promise not to route through it, never a
+# claim that the floor is clear. The scanners remain what stop anybody
+# sent that way. A vehicle parked IN a station spur is the exception
+# and keeps its node: nothing else is ever routed to a spur but the
+# truck being sent to that station, so the hold costs no corridor and
+# dropping it would send a second truck into an occupied dead end.
+IDLE_HOLD_S = 30.0
+IDLE_SHOWN = 5           # the traffic block is a screen, not a log
 
 
 def _node_str(node):
@@ -217,6 +242,8 @@ class FleetManager:
         self.blocked = []        # bounded; deadlocks wait-die cannot break
         self.said_blocked = {}   # serial -> the last "no floor" line said
         self.said_lost = {}      # serial -> the last "floor went missing"
+        self.idle_hold = {}      # serial -> {node, since, freed}
+        self.idle_freed = []     # bounded; idle holds the clock took back
         self.stuck = {}          # serial -> why it could not be started
         self.stop = False
         self.last_status = 0.0
@@ -540,7 +567,7 @@ class FleetManager:
             return
         if task["state"] == "ASSIGNED_LEG1":
             task["state"] = fc.advance(task, "leg1_arrived")
-            self._drop_traffic(task, serial)
+            self._end_leg1(task, serial)
             self.dwell_until[task["task_id"]] = now + DWELL_S
             task["history"].append(
                 "arrived {} - dwell {:.1f}s".format(task["from"], DWELL_S))
@@ -813,6 +840,155 @@ class FleetManager:
         if serial:
             self._release(serial)
 
+    # ---- the spur handover (M6.5, owner ruling) ----
+    def _spur_entry(self, node):
+        """The one node a spur station is reached and left through, or
+        None when the station sits on its aisle and has no such node.
+
+        IT IS READ OFF THE GRAPH, NOT OFF A LIST OF STATION IDS. A
+        station at the end of a spur has exactly ONE neighbour in
+        route.build_graph - the junction its spur lands on - and that is
+        the whole property this rule needs: the way in is the way out.
+        S1 and S5 sit ON their aisles, have two neighbours or more, and
+        are correctly not spurs; a station moved in stations.py takes
+        its answer with it.
+        """
+        neighbours = self.graph.get(node) or ()
+        return next(iter(neighbours)) if len(neighbours) == 1 else None
+
+    def _dwell_entry(self, serial):
+        """The junction a DWELLING truck keeps under the owner's ruling.
+
+        M6.4's Gate 2 measured what releasing it costs (run A, 11:34):
+        the occupant let the junction go in the millisecond it arrived,
+        the truck queued for the same station took it inside one 100 ms
+        pass, and three seconds later the occupant's leg 2 asked for its
+        only way out and got a swap deadlock wait-die cannot break. A
+        spur station therefore could not be handed from one vehicle to
+        another at all.
+
+        So the junction stays held with the station node through the
+        dwell, and leg 2's hold - which starts at the station and runs
+        out through that same junction - takes it over with nothing
+        freed in between. The cost is the ruling's own: a second truck
+        bound for the same station waits the dwell out.
+
+        DERIVED, NEVER STORED. The pin exists exactly while a task of
+        ours is in DWELL on this vehicle at that station, so there is no
+        flag to leak, nothing to clear on a requeue, and a hold that
+        some other path gives back is simply taken again by the next
+        state (_hold_standing asks this same question).
+        """
+        task = self._task_of(serial)
+        if task is None or task["state"] != "DWELL":
+            return None
+        station = STATIONS.get(task["from"])
+        if station is None:
+            return None
+        node = (station["x"], station["y"])
+        if self.standing.get(serial) != node:
+            return None
+        return self._spur_entry(node)
+
+    def _release_to(self, task, trf, node):
+        """How far release_through may free as this state is read: the
+        node under the truck, EXCEPT where leg 1 has just ended in a
+        spur, where it is the junction one step behind it. The ledger
+        therefore never sees that junction free, not even for the
+        microseconds between this release and _end_leg1's re-take."""
+        if task["state"] != "ASSIGNED_LEG1" or node != trf["points"][-1]:
+            return node
+        entry = self._spur_entry(node)
+        pts = trf["hold_points"]
+        if entry is None or entry not in pts:
+            return node
+        return entry if pts.index(entry) < pts.index(node) else node
+
+    def _end_leg1(self, task, serial):
+        """Leg 1 is over and the dwell begins. The corridor behind the
+        truck goes back to the floor - and a spur's entry node does not
+        (see _dwell_entry). A station on an aisle has no entry node and
+        this is _drop_traffic exactly as before."""
+        entry = self._dwell_entry(serial)
+        task.pop("traffic", None)
+        if not self.traffic_on:
+            return
+        if entry is None or self.floor.owner_of(entry) != serial:
+            self._release(serial)
+            return
+        self.floor.release_through(serial, entry)
+        self.floor.clear_yield(serial)
+
+    def _hold_standing(self, serial, node):
+        """What a vehicle with NO LEG OF OURS may hold: the ground under
+        its body, plus the spur junction while it dwells. An idle hold
+        the clock has already taken back is not taken again - that is
+        the whole of IDLE_HOLD_S; the truck re-earns it by moving."""
+        entry = self._dwell_entry(serial)
+        want = [node] if entry is None \
+            else [entry, tr.edge(entry, node), node]
+        if self.floor.held_by(serial) == want:
+            return
+        stamp = self.idle_hold.get(serial)
+        if stamp is not None and stamp["freed"] and stamp["node"] == node:
+            return
+        self.floor.release_all(serial)
+        if entry is not None and self.floor.owner_of(entry) is not None:
+            want = [node]        # the junction is not this truck's to keep
+        self.floor.hold(serial, want)
+
+    def _idle_floor(self, now):
+        """The IDLE_HOLD_S sweep, once per traffic pass.
+
+        The clock starts when a vehicle with no task of ours is first
+        seen standing on a node and restarts every time it moves, so a
+        truck that is working - or one an operator is driving around in
+        teleop - never ages. A vehicle executing an order the fleet does
+        not own (a restarted manager's adopted truck) is not idle
+        either: the fleet adopts it by waiting, and taking the floor out
+        from under it would be the opposite.
+
+        SAID ONCE, because the pass runs at 10 Hz: the release sets the
+        flag that both suppresses the line and stops _hold_standing
+        taking the node straight back.
+        """
+        for serial in sorted(self.vehicles):
+            node = self.standing.get(serial)
+            busy = (self._task_of(serial) is not None
+                    or self.vehicles[serial]["executing_order"] is not None)
+            stamp = self.idle_hold.get(serial)
+            if busy or node is None:
+                self.idle_hold.pop(serial, None)
+                continue
+            if stamp is not None and stamp["freed"] and stamp["node"] == node:
+                continue                       # already given back
+            held = self.floor.held_by(serial)
+            if not held:
+                self.idle_hold.pop(serial, None)
+                continue
+            if stamp is None or stamp["node"] != node:
+                self.idle_hold[serial] = {"node": node, "since": now,
+                                          "freed": False}
+                continue
+            if now - stamp["since"] < IDLE_HOLD_S:
+                continue
+            if self._spur_entry(node) is not None:
+                continue          # parked IN a station: the spur is its own
+            stamp["freed"] = True
+            self.floor.release_all(serial)
+            self.floor.clear_yield(serial)
+            self.idle_freed.append({"vehicle": serial,
+                                    "node": _node_str(node),
+                                    "freed": len(held), "ts": time.time()})
+            del self.idle_freed[:-IDLE_SHOWN]
+            self.log.warning(
+                "%s has stood on %s with no task for %.0f s - its hold is "
+                "given back so one parked truck cannot jam an aisle. THE "
+                "TRUCK IS STILL THERE: this gives up the fleet's promise "
+                "not to route through it, not a claim that the floor is "
+                "clear, and the scanners remain what stop anybody sent "
+                "that way", serial, _node_str(node), now - stamp["since"])
+
     def _park(self, serial):
         """A truck that is GONE must not lock the floor - and must not be
         driven through either.
@@ -846,6 +1022,45 @@ class FleetManager:
         self.floor.release_all(self._parked_name(serial))
         self.log.info("%s stood up again - %s is the vehicle's own node "
                       "once more", serial, _node_str(node))
+
+    def _follow_hulk(self, serial, node):
+        """THE PIN FOLLOWS THE TRUCK BACK (M6.5).
+
+        A parked pin is only parked where the ledger last SAW the
+        vehicle, and M6.4's Gate 5 run 1 measured the gap: with no agent
+        alive nothing publishes an empty goal, so nav drove a dead truck
+        2.93 m onto floor the fleet had already granted to its
+        replacement while the hulk's pin still sat where it died. The
+        pin cannot follow a vehicle that is silent - nothing can - but
+        the moment it speaks again it can, and it must do so BEFORE the
+        vehicle re-earns eligibility, because until then the fleet is
+        still routing other trucks around a node that is not the one it
+        is on.
+
+        A node somebody else legitimately took while it was away is not
+        taken back: the pin is dropped and the sentence says so, which
+        is the honest state (that is exactly the run-1 case, where the
+        hulk's own re-hold was refused).
+        """
+        pinned = self.parked.get(serial)
+        if pinned is None or pinned == node:
+            return
+        self.floor.release_all(self._parked_name(serial))
+        owner = self.floor.owner_of(node)
+        if owner is not None:
+            del self.parked[serial]
+            self.log.warning(
+                "%s came back on %s, which %s already holds - the pin is "
+                "dropped rather than moved onto somebody else's floor; "
+                "nothing is reserved under that truck until it reports a "
+                "fresh idle state", serial, _node_str(node), owner)
+            return
+        self.floor.hold(self._parked_name(serial), [node])
+        self.parked[serial] = node
+        self.log.warning(
+            "%s rolled from %s to %s while the fleet could not hear it - "
+            "the hulk's pin moves with it and %s is free again",
+            serial, _node_str(pinned), _node_str(node), _node_str(pinned))
 
     def _standing_from(self, msg, trf, veh):
         """The graph node under this truck, or None when nothing says.
@@ -914,6 +1129,10 @@ class FleetManager:
         if not self.traffic_on:
             return
         self.floor.set_standing(serial, node)
+        # BEFORE THE STALE RETURN, because a stale state still says WHERE
+        # the truck is, and where a returning hulk is happens to be the
+        # only thing this needs.
+        self._follow_hulk(serial, node)
         if stale:
             return                    # where it is, and nothing else
         if trf is None:
@@ -925,11 +1144,10 @@ class FleetManager:
             # which is the M6.3 rule already. An idle truck gets the same
             # treatment, because nobody may be routed through a parked
             # vehicle either.
-            if self.floor.held_by(serial) != [node]:
-                self.floor.release_all(serial, keep=node)
+            self._hold_standing(serial, node)
             return
         trf["last_xy"] = node
-        self.floor.release_through(serial, node)
+        self.floor.release_through(serial, self._release_to(task, trf, node))
         self._read_update(msg, trf)
 
     def _read_update(self, msg, trf):
@@ -1052,6 +1270,9 @@ class FleetManager:
         """
         if not self.traffic_on:
             return
+        # FIRST, so floor an idle truck has been sitting on since the
+        # last shift is available to the retries in this same pass.
+        self._idle_floor(now)
         for task in sorted(self._in_flight(),
                            key=lambda t: (t.get("submitted_ts") or 0.0,
                                           t["task_id"])):
@@ -1315,7 +1536,11 @@ class FleetManager:
         return {"enabled": self.traffic_on, "holds": holds,
                 "waiting": waiting, "yielded": yielded, "bases": bases,
                 "stuck": dict(self.stuck) if self.traffic_on else {},
-                "yields": list(self.yields), "blocked": list(self.blocked)}
+                "yields": list(self.yields), "blocked": list(self.blocked),
+                # An operator who finds a truck no longer reserving the
+                # node it is standing on must be able to read WHY on the
+                # same screen, and not have to go and find the log.
+                "idle": list(self.idle_freed)}
 
     # ---- the operator's screen ----
     def _status(self, now, manager="ONLINE"):
@@ -1389,7 +1614,8 @@ class FleetManager:
                    doc["traffic"]["waiting"], doc["traffic"]["yielded"],
                    doc["traffic"]["bases"], doc["traffic"]["stuck"],
                    len(doc["traffic"]["yields"]),
-                   len(doc["traffic"]["blocked"])]},
+                   len(doc["traffic"]["blocked"]),
+                   len(doc["traffic"]["idle"])]},
             sort_keys=True)
 
     def _publish_status(self, now):
