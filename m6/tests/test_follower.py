@@ -9,6 +9,7 @@ sign convention, not the test's opinion.
 """
 import math
 
+import field_eval
 import follower
 
 
@@ -142,6 +143,44 @@ def test_approach_zone_slows_regardless_of_steer():
 def test_guard_slow_band_caps_speed():
     v = follower.target_speed(10.0, 0.0, 2.5)
     assert v == follower.GUARD_SLOW_MPS
+
+
+def test_the_guard_band_sits_outside_the_warning_field_it_protects():
+    """THE BAND'S WHOLE PURPOSE, asked as arithmetic.
+
+    follower's own header states the rule: the lidar must have the truck
+    down to the creep ceiling BEFORE a warning field can drop V_Limit
+    under wheels still doing 0.7 m/s, because the F-program's speed
+    monitor demands a stop the instant either channel reads above
+    V_Limit and the demand LATCHES (virtual_fplc._healthy, measured live
+    in step 3). The band was 3.0 m against a 2.5 m field and looked like
+    it kept that rule. It did not, and the reason is that the two
+    numbers are measured from DIFFERENT SENSORS.
+
+    The warning field is evaluated at the safety scanners, and the two
+    that see an obstacle dead ahead are the FORK-CORNER pair at model
+    (-0.68, +-0.46). The guard is evaluated at the nav lidar, at model
+    (0.55, -0.40) - 1.23 m further back. So a 3.0 m guard reading is
+    1.77 m at the fork corners, three quarters of a metre INSIDE the
+    field it was supposed to stay out of.
+
+    Measured 2026-08-22, 22:19:20: f2 ran west down the dock aisle at
+    0.699 m/s with its nav guard reporting 5.2 m and clear; its fork
+    corners reached 2.33 m off parked f1 on S1, both warning fields
+    dropped, V_Limit went 1500 -> 300 with the wheels at 700 mm/s, and
+    the speed monitor latched. The truck needed a panel RESET to move
+    again, and it did it twice.
+    """
+    mount_offset = 0.55 + 0.68        # nav lidar to fork corner, model.sdf
+    reclear = field_eval.FIELDS[1][1] + field_eval.HYSTERESIS_M
+    assert follower.GUARD_SLOW_M >= reclear + mount_offset, (
+        "the guard fires {:.2f} m INSIDE the warning field at the fork "
+        "corners".format(reclear + mount_offset - follower.GUARD_SLOW_M))
+    # And it still has to leave the truck room to actually slow down:
+    # 0.70 -> 0.30 m/s took 0.35 m on the odometry of the same run.
+    assert follower.GUARD_SLOW_M >= reclear + mount_offset + 0.35
+    # The HOLD band is not touched by any of this and stays inside it.
+    assert follower.GUARD_HOLD_M < follower.GUARD_SLOW_M
 
 
 def test_guard_hold_band_stops():

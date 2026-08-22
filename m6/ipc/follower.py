@@ -30,7 +30,31 @@ APPROACH_MPS = 0.25
 APPROACH_ZONE_M = 2.0   # final-leg distance where APPROACH_MPS applies
 ARRIVE_M = 0.25
 CORNER_STEER_RAD = 0.3
-GUARD_SLOW_M = 3.0
+# THE SLOW BAND IS MEASURED AT THE NAV LIDAR AND THE FIELD IS EVALUATED
+# AT THE SAFETY SCANNERS, AND THAT DIFFERENCE IS WORTH 1.23 m. The two
+# fork-corner devices sit at model (-0.68, +-0.46) and the nav lidar at
+# (0.55, -0.40), so for an obstacle dead ahead the lidar is 1.23 m
+# further from it than they are. The band was 3.0 m against a 2.5 m
+# field and read as if it kept the rule in this file's header; it did
+# not - 3.0 m at the lidar is 1.77 m at the fork corners, three quarters
+# of a metre INSIDE the field it exists to stay out of. Measured
+# 2026-08-22 22:19:20: f2 ran west down the dock aisle at 0.699 m/s with
+# its guard reporting 5.2 m and clear, its fork corners reached 2.33 m
+# off a PARKED truck, both warning fields dropped, V_Limit went
+# 1500 -> 300 with the wheels still at 700 mm/s, and the F-program's
+# speed monitor latched (virtual_fplc._healthy: "either channel above
+# V_Limit demands a stop", measured live in step 3, and the demand
+# LATCHES). It needed a panel RESET, and it did it twice.
+#   2.50 field + 0.20 hysteresis + 1.23 mount offset + 0.35 to slow down
+#   from 0.70 to 0.30 m/s (measured on the same run's odometry) = 4.28
+# THE COST, STATED: the truck now creeps from 4.3 m out instead of 3.0 m
+# whenever something is inside its forward 70 deg cone - about 2.2 s per
+# leg that ends at a station. The alternative is a latched truck and an
+# operator with a panel, which costs the rest of the run.
+GUARD_SLOW_M = 4.3
+# THE HOLD BAND IS NOT TOUCHED BY ANY OF THAT and stays where it was: it
+# is about not driving into things, not about the speed monitor, and it
+# is the nav lidar's own last word before the scanners take over.
 GUARD_HOLD_M = 1.5
 GUARD_SLOW_MPS = 0.3
 GUARD_HALF_ANGLE_RAD = math.radians(35.0)
