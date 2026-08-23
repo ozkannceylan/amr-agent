@@ -23,6 +23,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
 
+import avoid
 import follower
 import nav_core
 from status_contract import (
@@ -64,6 +65,10 @@ class NavNode(Node):
         self.pose_rx = None
         self.fwd_guard = 0.0
         self.rev_guard = 0.0
+        # None until the first scan, and None is what the escalation
+        # reads as "no picture of the world" - the same thing a stale
+        # scan gives it.
+        self.buckets = None
         self.guard_rx = None
         # The three SAFETY scanners' closest return, off the same report
         # the field evaluation publishes. 0.0 until one arrives, which is
@@ -126,6 +131,13 @@ class NavNode(Node):
         self.rev_guard = follower.sector_min(
             msg.ranges, msg.angle_min, msg.angle_increment, lo, hi,
             forward=False)
+        # THE SAME SCAN, KEPT AS A SHAPE AND NOT ONLY AS A NUMBER. The
+        # two calls above answer "how close in the direction of travel";
+        # this one answers "where is there floor", which is what the
+        # escalation needs the moment the first answer is "too close".
+        # One extra pass over 360 numbers at 10 Hz.
+        self.buckets = avoid.buckets(
+            msg.ranges, msg.angle_min, msg.angle_increment, lo, hi)
         self.guard_rx = time.monotonic()
 
     def cb_fields(self, msg):
@@ -172,7 +184,13 @@ class NavNode(Node):
         stale_fields = is_stale(self.field_rx, now, SENSOR_STALE_S)
         field = 0.0 if stale_fields else self.field_min
         linear, steer = self.core.step(
-            self.pose, fwd, rev, motor, self.v_limit, field)
+            self.pose, fwd, rev, motor, self.v_limit, field,
+            # A DEAD SCAN OFFERS NO FLOOR. `dead` already zeroes both
+            # guards above; handing the last good buckets over with it
+            # would let the escalation drive on a picture of the world
+            # that stopped arriving, which is the one thing worse than
+            # standing still.
+            buckets=None if dead else self.buckets, now=now)
         msg = Twist()
         msg.linear.x = linear
         msg.angular.z = steer
