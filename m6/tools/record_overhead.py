@@ -21,6 +21,8 @@ Usage (after sourcing /opt/ros/jazzy/setup.bash):
   python3 m6/tools/record_overhead.py --out /tmp/m6-fleet.mp4 --seconds 620
 """
 import argparse
+import os
+import shutil
 import subprocess
 import sys
 
@@ -32,10 +34,32 @@ TOPIC = "/overhead/image"
 FPS = 20
 
 
+def _ffmpeg_binary():
+    """Where ffmpeg is, or a refusal that names the problem.
+
+    A RECORDER THAT CANNOT FIND ITS ENCODER MUST SAY SO AT STARTUP.
+    Measured 2026-08-23: this rig keeps ffmpeg in ~/bin, which a LOGIN
+    shell has on PATH and a plain `bash script.sh` does not - so a
+    ten-minute take ran to completion, the fleet drove, and the only
+    artefact was a FileNotFoundError buried in a log nobody reads until
+    the run is over. shutil.which first (the normal case), then the
+    known local install, then a refusal.
+    """
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    local = os.path.expanduser("~/bin/ffmpeg")
+    if os.path.exists(local):
+        return local
+    raise SystemExit(
+        "record_overhead: no ffmpeg on PATH and none at {}. A take "
+        "started from a non-login shell has neither.".format(local))
+
+
 def ffmpeg(path, width, height, fps=FPS):
     """A raw-frame sink. -y because a re-take overwrites its own take."""
     return subprocess.Popen(
-        ["ffmpeg", "-y", "-loglevel", "error",
+        [_ffmpeg_binary(), "-y", "-loglevel", "error",
          "-f", "rawvideo", "-pixel_format", "rgb24",
          "-video_size", "{}x{}".format(width, height),
          "-framerate", str(fps), "-i", "-",
