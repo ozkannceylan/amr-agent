@@ -80,8 +80,10 @@ it exists (`follower.target_speed`, measured 2026-08-22 22:40:28).
 
 ### 3.3 Geometry, on a 0.50 m grid
 
-Hall shell, inner wall faces: **x = ±24.00, y = ±14.00** (48 x 28 m,
-1344 m², against 600 m² today).
+Hall shell, inner wall faces: **x = ±24.00, y in [-18.00, +14.00]**
+(48 x 32 m, 1536 m², against 600 m² today — **2.56x**). The hall is not
+centred on y: the southern 4.00 m strip is a **dock annex**, a solid
+block with four bays cut through it (§3.4).
 
     RING   centrelines  x = -20.00, x = +20.00, y = -10.00, y = +10.00
            bands        8.00 m wide; wall side 4.00 m, block side 4.00 m
@@ -98,7 +100,11 @@ Hall shell, inner wall faces: **x = ±24.00, y = ±14.00** (48 x 28 m,
            north racks  y in [ 2.50,  6.00]    3.50 m deep, back to back
            south racks  y in [-6.00, -2.50]    3.50 m deep, back to back
 
-### 3.4 Station bays and wall alcoves
+    ANNEX  block        x in [-24.00, 24.00], y in [-18.00, -14.00]
+           four bays    4.00 m wide, cut through, mouths on the south
+                        ring leg's wall side
+
+### 3.4 Bays — the only way a station is reached
 
 **Every station is entered down a spur of at least 2.50 m, so every
 station declares `arrive_m` 0.25.** This is the point of the redesign
@@ -107,41 +113,57 @@ by geometry rather than by tolerance: the measured rule is that a 0.85 m
 spur cannot be hit by any gain and a 2.50-3.00 m spur is hit at 0.25 m
 (S4 and S10 prove both halves today).
 
-**Pick bays** — a 4.00 m wide, 3.50 m deep recess cut through a rack row:
+Two standoffs govern a bay, and they are different numbers because they
+guard different devices:
+
+    AHEAD  2.50 m to the face the truck drives at, and every bay is
+           drawn to give 2.60. 0.80 scanner offset + 1.00 PF + 0.20
+           hysteresis + 0.50 margin. (stations.py derives 2.40 today.
+           The floor gives 0.10 m over the threshold on purpose: at
+           exactly 2.50 the assertion sits on a float knife-edge and
+           -15.40 - -17.90 evaluates to 2.4999999999999982.)
+    ABEAM  1.66 m to each wall beside the truck.
+           1.00 PF + 0.20 hysteresis + 0.46 scanner mount offset.
+           A 4.00 m wide bay gives 2.00 m — 0.34 m of margin.
+
+**Pick bays** — 4.00 m wide, cut through a 3.50 m rack row:
 
     bay mouth      y = ±2.50 (the pick aisle edge)
-    bay back face  y = ±6.00
-    station centre y = ±3.60          (= 6.00 - 2.40 face standoff)
-    spur           3.60 m  from the pick-aisle centreline    >= 2.50 OK
-    side clearance 2.00 - 0.46 = 1.54 m  from each bay wall  >  1.20 OK
-    parked tail    y = 2.40 at the mouth — the truck is inside the bay
+    back panel     y in ±[5.90, 6.00]; the face the truck sees is ±5.90
+    station centre y = ±3.30          (= 5.90 - 2.60)
+    spur           3.30 m from the pick-aisle centreline      >= 2.50 OK
+    parked truck   y in [2.10, 4.50] — 0.40 m of tail at the mouth
 
-**Wall alcoves** — a 4.00 m wide, 1.50 m deep recess in the hall wall:
+**Annex bays** — 4.00 m wide, cut through the 4.00 m annex block:
 
-    alcove back    1.50 m outside the inner wall face
-    station centre 2.40 m off that back face
-    spur           4.00 - 2.40 + 1.50 = 3.10 m from the ring centreline
+    bay mouth      y = -14.00 (the south ring leg's wall side)
+    back panel     y in [-18.00, -17.90]; the face is -17.90
+    station centre y = -15.30         (= -17.90 + 2.60)
+    spur           5.30 m from the south ring centreline      >= 2.50 OK
+    parked truck   y in [-16.50, -14.10] — fully inside the bay
 
-The 2.40 m face standoff is unchanged and keeps its derivation
-(`stations.py`: 0.80 scanner offset + 1.00 PF + 0.20 hysteresis + 0.40
-pursuit residual).
+The annex bays are 4.00 m deep for exactly that last line. A shallower
+recess parks the truck out in the ring band, where a passer-by on the
+centreline clears it by 1.34 m — 0.14 m over PF+hysteresis. That is
+`PROOF.md` residual 3 rebuilt from scratch, and the depth is what
+prevents it.
 
 ### 3.5 The twelve stations
 
-| id | name | x | y | spur | served from |
-|---|---|---|---|---|---|
-| S1 | PICK-NW-1 | -13.00 | +3.60 | 3.60 | west pick aisle |
-| S2 | PICK-NW-2 | -7.00 | +3.60 | 3.60 | west pick aisle |
-| S3 | PICK-SW-1 | -13.00 | -3.60 | 3.60 | west pick aisle |
-| S4 | PICK-SW-2 | -7.00 | -3.60 | 3.60 | west pick aisle |
-| S5 | PICK-NE-1 | +7.00 | +3.60 | 3.60 | east pick aisle |
-| S6 | PICK-NE-2 | +13.00 | +3.60 | 3.60 | east pick aisle |
-| S7 | PICK-SE-1 | +7.00 | -3.60 | 3.60 | east pick aisle |
-| S8 | PICK-SE-2 | +13.00 | -3.60 | 3.60 | east pick aisle |
-| S9 | DOCK-DOOR | -8.00 | -13.10 | 3.10 | south ring leg |
-| S10 | CHARGE-1 | +8.00 | -13.10 | 3.10 | south ring leg |
-| S11 | CHARGE-2 | +14.00 | -13.10 | 3.10 | south ring leg |
-| S12 | CONVEYOR | +23.10 | +3.00 | 3.10 | east ring leg |
+| id | name | x | y | yaw | spur | reached from |
+|---|---|---|---|---|---|---|
+| S1 | PICK-NW-1 | -13.00 | +3.30 | +π/2 | 3.30 | pick aisle |
+| S2 | PICK-NW-2 | -7.00 | +3.30 | +π/2 | 3.30 | pick aisle |
+| S3 | PICK-SW-1 | -13.00 | -3.30 | -π/2 | 3.30 | pick aisle |
+| S4 | PICK-SW-2 | -7.00 | -3.30 | -π/2 | 3.30 | pick aisle |
+| S5 | PICK-NE-1 | +7.00 | +3.30 | +π/2 | 3.30 | pick aisle |
+| S6 | PICK-NE-2 | +13.00 | +3.30 | +π/2 | 3.30 | pick aisle |
+| S7 | PICK-SE-1 | +7.00 | -3.30 | -π/2 | 3.30 | pick aisle |
+| S8 | PICK-SE-2 | +13.00 | -3.30 | -π/2 | 3.30 | pick aisle |
+| S9 | DOCK-DOOR | -14.00 | -15.30 | -π/2 | 5.30 | south ring leg |
+| S10 | CHARGE-1 | -6.00 | -15.30 | -π/2 | 5.30 | south ring leg |
+| S11 | CHARGE-2 | +6.00 | -15.30 | -π/2 | 5.30 | south ring leg |
+| S12 | CONVEYOR | +14.00 | -15.30 | -π/2 | 5.30 | south ring leg |
 
 All twelve: `arrive_m` **0.25**.
 
@@ -154,18 +176,30 @@ The router keeps its shape: aisle centrelines only, Dijkstra, one spur
 per station, pose prepended by `plan_route`. What changes is the node
 table.
 
-    RING_X   = (-20.00, +20.00)          RING_Y = (-10.00, +10.00)
-    SPINE_X  = 0.00                      PICK_Y = 0.00
-    nodes on each run: every junction, plus every station's spur foot
+    RING_Y   = (-10.00, +10.00)      RING_X = (-20.00, +20.00)
+    SPINE_X  = 0.00                  PICK_Y = 0.00
 
-Longest single leg on this floor is **43.7 m** — S11 (+14.00, -13.10) to
-S1 (-13.00, +3.60): 3.10 spur, 14.00 west along the south ring, 10.00
-north up the spine, 13.00 west down the pick aisle, 3.60 spur. Today's
+    north ring leg  x in (-20, -12, -6, 0, 6, 12, 20)   at y = +10.00
+    south ring leg  x in (-20, -14, -6, 0, 6, 14, 20)   at y = -10.00
+    west/east legs  y in (-10, 0, +10)                  at x = ∓20.00
+    spine           y in (-10, 0, +10)                  at x = 0.00
+    pick aisle      x in (-20, -13, -7, 0, 7, 13, 20)   at y = 0.00
+    spurs           (x, ±3.30) - (x, 0.00)   for the eight pick stations
+                    (x, -15.30) - (x, -10.00) for the four annex stations
+
+The north leg's node list carries -12, -6, +6 and +12 for one reason:
+**those are the four spawn poses (§4.2), and each truck must snap to its
+own node.** Four trucks whose nearest node is the same node are four
+trucks the traffic ledger will hand one piece of floor to.
+
+Longest single leg on this floor is **45.60 m** — S12 (+14.00, -15.30) to
+S1 (-13.00, +3.30): 5.30 spur, 14.00 west along the south ring, 10.00
+north up the spine, 13.00 west down the pick aisle, 3.30 spur. Today's
 longest is 33.65 m (S2 to S5), so a leg grows by about a third and no
 more: the ring and the spine keep everything reachable, which is what
 they are for. **Route length is not where the gain is.** The gain is speed
 (0.70 against 0.30 on every highway metre), twelve stations spread over
-2.24x the floor area, and work that never stops arriving. The measured
+2.56x the floor area, and work that never stops arriving. The measured
 target is in §7.
 
 ### 3.7 What the world file carries
@@ -204,18 +238,31 @@ change the recording. YAGNI.
 The quarter-division goes. The four trucks stand in a row on the **north
 ring leg**, which carries no station:
 
-    f1 (-6.00, +10.00)   f2 (-2.00, +10.00)
-    f3 (+2.00, +10.00)   f4 (+6.00, +10.00)      all yaw = travel +x
+    f1 (-12.00, +10.00)   f2 (-6.00, +10.00)
+    f3 ( +6.00, +10.00)   f4 (+12.00, +10.00)    all yaw = travel +x
 
-Spacing is **4.00 m**, derived, not chosen: a neighbour's body edge sits
-4.00 - 0.46 - 0.52 = **3.02 m** from a scanner, outside the 2.70 m
-re-clear threshold, so four parked trucks do not sit in each other's
-warning fields and none of them starts under a reduced `V_Limit`.
+Spacing is **6.00 m**, and both of its constraints are derived, not
+chosen:
 
-`test_fleet_spawn_fairness.py` (new) asserts, over the router, that **no
-truck is the nearest to more than four of the twelve stations**. If the
-row above fails it, the row moves; the assertion is the contract, not the
-coordinates.
+* a neighbour's body edge sits 6.00 - 0.46 - 0.52 = **5.02 m** from a
+  scanner, outside the 2.70 m re-clear threshold, so four parked trucks
+  do not sit in each other's warning fields and none of them starts
+  under a reduced `V_Limit`;
+* **each pose is its own graph node** (§3.6). `route.nearest_node` and
+  `floor._standing_from` both snap a pose to the nearest node, so four
+  trucks sharing one nearest node are four trucks the ledger will hand
+  one piece of floor to at startup.
+
+`test_fleet_spawn_fairness.py` (new) asserts, over the router, that
+**every truck is nearest to at least one station and none is nearest to
+more than four** — with ties SHARED, not awarded. The floor is mirror
+symmetric about x = 0 and so is the spawn row, so f2 and f3 are exactly
+equidistant from every mirrored pair. `fleet_core.nearest_idle` breaks
+that tie by serial, deterministically and to the lower one, so a strict
+count hands f2 six stations and f3 none and is measuring alphabetical
+order rather than the floor. Shared, the row above scores **3.0 each**,
+measured. If a future row fails it, the row moves; the assertion is the
+contract, not the coordinates.
 
 ### 4.3 The work generator — `m6/fleet/work_generator.py` (new, pure)
 
@@ -274,9 +321,10 @@ ended the 0-of-8 acceptance run.
 
 `warehouse_ver3.sdf` carries a static `OverheadCam` model:
 
-    pose      (0, 0, 36, 0, 1.5708, 0)     looking straight down
+    pose      (0, -2, 38, 0, 1.5708, 0)    looking straight down
     sensor    camera, 1600 x 900, 20 Hz, horizontal fov 1.40 rad
-    coverage  2 * 36 * tan(0.70) = 60.6 m wide, 34.1 m tall — the hall fits
+    coverage  2 * 38 * tan(0.70) = 64.0 m wide, 36.0 m tall
+    the hall  48.0 m wide, 32.0 m tall, centred on y = -2.00 — it fits
 
 `m6/tools/record_overhead.py` (new) subscribes the bridged
 `sensor_msgs/Image`, pipes raw frames into `ffmpeg`, and writes H.264
@@ -381,10 +429,12 @@ make this floor work, the floor is wrong, not the constant.
    aisle; the traffic ledger serialises it and the second truck waits or
    steps aside. This is accepted — it is correct behaviour and it is
    worth seeing on the recording.
-3. **A dwelling truck's tail sits at the bay mouth** (y = 2.40 against a
-   mouth at 2.50). It is inside the bay, but only just, and a passer-by
-   in the same aisle will see it in a warning field. The ledger prevents
-   the fleet from routing one there while the other holds it.
+3. **A pick-bay truck leaves 0.40 m of tail at the mouth** (y = 2.10
+   against a mouth at 2.50), because a 3.50 m rack row is as deep as the
+   inner block allows. A passer-by in the same aisle sees it in a warning
+   field and creeps; it never sees it in a protective one. The ledger
+   prevents the fleet from routing one there while the other holds it.
+   The four ANNEX bays are 4.00 m deep and have no tail at all.
 4. **The spawn row still leans east/west** for the first four
    assignments. It washes out after two transports because trucks end at
    their dropoff. `test_fleet_spawn_fairness` bounds how far it can lean.
