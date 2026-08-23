@@ -32,6 +32,7 @@ is the primary device on that side. follower.reverse_phase owns when.
 import json
 import math
 
+import avoid
 import follower
 import route
 from stations import STATIONS
@@ -39,6 +40,39 @@ from status_contract import MODE_AUTO
 
 IDLE, EN_ROUTE, HOLD = "IDLE", "EN-ROUTE", "HOLD"
 SAFETY_STOP, ARRIVED = "SAFETY-STOP", "ARRIVED"
+# M6.7: HOLD IS NO LONGER WHERE A TRUCK GOES TO STAY. Measured
+# 2026-08-23, f2 and f3 stood at their stations indefinitely with
+# guard_min 1.4846 and 1.4722 m against a 1.500 m hold band, Motor TRUE
+# and every field clear. Nothing was broken; the autopilot's only move
+# was to wait for the world to change, and the world was a wall.
+AVOID, NUDGE, BLOCKED = "AVOID", "NUDGE", "BLOCKED"
+
+# WAIT FIRST, AND IT IS THE CHEAPEST MOVE THERE IS. At the creep ceiling
+# a truck covers 1.5 m in this, so an obstacle that was another vehicle
+# has gone. Driving round a truck that is about to leave is how a floor
+# gets two vehicles in one aisle facing each other.
+HOLD_PATIENCE_S = 5.0
+# Most of one envelope half-width: enough to change the geometry, short
+# enough to stay on the corridor. 1.6 s at follower.REVERSE_MPS.
+NUDGE_M = 0.40
+NUDGE_MAX = 2
+# A NUDGE NEEDS A DEADLINE AS WELL AS A DISTANCE, and finding that out
+# is what the escalation's own tests were for. A truck that is wedged -
+# or whose command is being refused somewhere downstream - never covers
+# NUDGE_M, so a nudge measured only in metres never ends, and the state
+# machine grows exactly the dead end it was built to remove. 0.40 m at
+# follower.REVERSE_MPS is 1.6 s; four times that leaves room for the
+# plant's ramp and for V_Limit holding the truck at the creep ceiling,
+# and still ends.
+NUDGE_TIMEOUT_S = 6.0
+# WHICH WAY A POSITIVE SCAN BEARING TURNS THE TRUCK. avoid answers in
+# the scan frame and follower.steer wants a world target, and whether
+# the two agree is a property of how the lidar is mounted rather than
+# anything either file says. It is a constant with a test on it
+# (test_nav_core_escalation.test_the_scan_sign_puts_the_steer_toward_
+# the_gap): get it wrong and the truck steers AWAY from the only free
+# floor in the room, which is worse than not moving at all.
+SCAN_SIGN = 1.0
 
 
 class NavCore:
@@ -52,6 +86,13 @@ class NavCore:
         self.note = ""
         self.reversing = False
         self.arrive_m = follower.ARRIVE_M
+        # The escalation's own memory. All three are cleared by any tick
+        # that actually drives, so a truck that got going never carries
+        # a stale nudge count into its next stop.
+        self._stop_since = None
+        self._nudges = 0
+        self._nudge_from = None
+        self._nudge_since = None
 
     def on_mode(self, mode):
         self.mode = mode
@@ -132,14 +173,104 @@ class NavCore:
         self.goal, self.route, self.state = str(label), poly, EN_ROUTE
         self.note, self.reversing = "", False
         self.arrive_m = radius
+        self._clear_escalation()
 
     def _cancel(self, why):
         self.goal, self.route, self.state, self.note = None, None, IDLE, why
         self.reversing = False
         self.arrive_m = follower.ARRIVE_M
+        self._clear_escalation()
+
+    def _clear_escalation(self):
+        """Forget everything about the stop we were in.
+
+        Called from three places and all three mean the same thing: this
+        truck is no longer in the stop it was in. A tick that drives, a
+        cancel, and a new route. Without the last one a truck that ended
+        a leg BLOCKED would start its next leg with two nudges already
+        spent against an obstacle that is no longer in front of it.
+        """
+        self._stop_since = None
+        self._nudges = 0
+        self._nudge_from = None
+        self._nudge_since = None
+
+    def _want_bearing(self):
+        """Where the route wants to go, in the SCAN frame.
+
+        The scan's fork end is angle pi and its counterweight end is 0,
+        which is the same convention follower.sector_min centres on. A
+        truck driving forwards therefore wants pi and a reversing one
+        wants 0.
+        """
+        return 0.0 if self.reversing else math.pi
+
+    def _escalate(self, pose, xy, bkts, now):
+        """A stop that has a way out of itself, or an honest BLOCKED.
+
+        Returns (linear, angular). The guard is already known to be
+        stopping the truck; what is decided here is what to do about it,
+        cheapest first: wait, then look for a way round, then change the
+        geometry, then say so and stop.
+        """
+        if now is None or bkts is None:
+            # THE COMPATIBILITY PATH, AND IT IS DELIBERATELY FIRST. A
+            # caller from before M6.7 - or a test written against the
+            # old behaviour, or a tick whose scan has gone stale - gets
+            # the HOLD it expects and nothing else. An escalation driven
+            # off a picture of the world that stopped arriving is worse
+            # than standing still.
+            self.state = HOLD
+            return (0.0, 0.0)
+        if self._stop_since is None:
+            self._stop_since = now
+        if now - self._stop_since < HOLD_PATIENCE_S:
+            self.state = HOLD
+            return (0.0, 0.0)
+        if self._nudge_from is not None:
+            far_enough = math.dist(xy, self._nudge_from) >= NUDGE_M
+            out_of_time = now - self._nudge_since >= NUDGE_TIMEOUT_S
+            if not (far_enough or out_of_time):
+                self.state = NUDGE
+                return (follower.REVERSE_MPS, 0.0)
+            # The move is spent, by distance or by clock. Start the
+            # cycle again from the top: the geometry may have changed
+            # and the cheap answers deserve another look before the
+            # expensive one. A nudge that ran out of TIME rather than
+            # distance still counts against NUDGE_MAX - a truck that
+            # cannot execute the move is exactly the truck that should
+            # stop being asked to.
+            self._nudge_from = None
+            self._nudge_since = None
+            self._stop_since = now
+            self.state = HOLD
+            return (0.0, 0.0)
+        want = self._want_bearing()
+        free = avoid.free_heading(bkts, want)
+        if free is not None:
+            self.state = AVOID
+            off = SCAN_SIGN * follower.norm_ang(free - want)
+            travel = follower.travel_yaw(pose[2])
+            target = (pose[0] + avoid.FREE_M * math.cos(travel + off),
+                      pose[1] + avoid.FREE_M * math.sin(travel + off))
+            steer = follower.steer(pose, target)
+            speed = follower.GUARD_SLOW_MPS
+            return ((speed if self.reversing else -speed), steer)
+        if self._nudges < NUDGE_MAX:
+            self._nudges += 1
+            self._nudge_from = xy
+            self._nudge_since = now
+            self.state = NUDGE
+            return (follower.REVERSE_MPS, 0.0)
+        self.state = BLOCKED
+        bearing, near = min(bkts, key=lambda pair: pair[1])
+        self.note = ("blocked: nearest {:.2f} m at {:.0f} deg, no free "
+                     "heading and {} nudges spent"
+                     .format(near, math.degrees(bearing), self._nudges))
+        return (0.0, 0.0)
 
     def step(self, pose, fwd_guard_m, rev_guard_m, motor_ok, v_limit_mm_s,
-             field_min_m=math.inf):
+             field_min_m=math.inf, buckets=None, now=None):
         """One tick: (linear.x, angular.z) under the field contract.
 
         TWO GUARDS IN, ONE CHOSEN HERE. nav_node reads the scan before
@@ -181,10 +312,12 @@ class NavCore:
             speed = follower.target_speed(to_end, steer, fwd_guard_m,
                                           field_min_m)
         if speed == 0.0:
-            # HOLD is a full zero, steer included: a stopped truck
-            # sawing its steer wheel at an obstacle would look alive.
-            self.state = HOLD
-            return (0.0, 0.0)
+            # A STOP IS NOW A DECISION AND NOT A DESTINATION. What comes
+            # back is still a full zero in the HOLD and BLOCKED cases -
+            # a stopped truck sawing its steer wheel at an obstacle
+            # would look alive - but AVOID and NUDGE are real commands.
+            return self._escalate(pose, xy, buckets, now)
+        self._clear_escalation()
         self.state = EN_ROUTE
         speed = min(speed, v_limit_mm_s / 1000.0)
         return ((speed if self.reversing else -speed), steer)
