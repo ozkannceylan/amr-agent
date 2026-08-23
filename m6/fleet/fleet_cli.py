@@ -62,6 +62,7 @@ import paho.mqtt.client as mqtt
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "ipc")))
 from stations import STATIONS                       # noqa: E402
+from work_generator import MIN_LEN_M, WorkGenerator  # noqa: E402
 
 MQTT_HOST = "127.0.0.1"
 MQTT_PORT = int(os.environ.get("VDA_MQTT_PORT", "1883"))
@@ -497,6 +498,82 @@ def cmd_status(args):
         _close(client)
 
 
+# ---- the demo driver ----
+# A RECORDING NEEDS WORK THAT DOES NOT STOP ARRIVING. `submit` is the
+# operator's command and stays exactly what it was: two station ids, one
+# transport, one line of output. `demo` is the SHIFT - it keeps
+# `--in-flight` transports alive for `--duration` seconds and gets its
+# pairs from work_generator, seeded, so the run can be shot twice and be
+# the same run both times.
+#
+# IT SUBMITS THROUGH build_submission AND SUBMIT_TOPIC, the same funnel
+# `submit` uses. There is no second wire and no second refusal list; a
+# pair the manager will not take comes back in the status document's
+# REFUSED section exactly as a typed one does.
+DEMO_POLL_S = 2.0
+
+
+def demo_plan(seed, count, min_len_m=MIN_LEN_M):
+    """The `count` submission bodies this seed would send, in order.
+
+    Pure and broker-free, which is what --dry-run prints and what the
+    tests assert against: the plan is decidable without a fleet.
+    """
+    gen = WorkGenerator(seed=seed, min_len_m=min_len_m)
+    return [build_submission(*gen.next_pair()) for _ in range(count)]
+
+
+def _in_flight(doc):
+    """How many tasks the manager is not finished with."""
+    tasks = _list(doc, "tasks")
+    return sum(1 for t in tasks
+               if isinstance(t, dict) and t.get("state") != "DONE")
+
+
+def cmd_demo(args):
+    if args.in_flight < 1:
+        return _die("--in-flight must be at least 1", 2)
+    if args.duration <= 0:
+        return _die("--duration must be positive", 2)
+    if args.dry_run:
+        for body in demo_plan(args.seed, args.count, args.min_len):
+            print("{}  {} -> {}".format(
+                body["taskId"], body["from"], body["to"]))
+        return 0
+    gen = WorkGenerator(seed=args.seed, min_len_m=args.min_len)
+    client, inbox = _status_reader(args.host, args.port, "demo")
+    if client is None:
+        return 1
+    deadline = time.time() + args.duration
+    sent, doc = 0, None
+    try:
+        while time.time() < deadline:
+            fresh = _await(inbox, DEMO_POLL_S)
+            if fresh is not None:
+                doc = _parse(fresh)
+            if doc is None:
+                continue
+            # ONE SUBMISSION PER PASS, not a burst to the target. The
+            # retained document is republished on change and on a 2 s
+            # tick, so a burst would be sized against a count the
+            # manager has not seen yet and the queue would overshoot.
+            if _in_flight(doc) >= args.in_flight:
+                continue
+            body = build_submission(*gen.next_pair())
+            client.publish(SUBMIT_TOPIC, json.dumps(body), qos=1)
+            doc = None          # do not re-count a stale document
+            sent += 1
+            print("{}  {} -> {}".format(
+                body["taskId"], body["from"], body["to"]), flush=True)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        _close(client)
+    print("demo: {} transports submitted over {:.0f} s"
+          .format(sent, args.duration))
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="the fleet's operator console - submit transports, "
@@ -518,6 +595,20 @@ def main(argv=None):
         "status", help="render the fleet's retained status document")
     status.add_argument("--watch", action="store_true",
                         help="reprint on every update until Ctrl-C")
+    demo = commands.add_parser(
+        "demo", help="keep the fleet fed for a recording")
+    demo.add_argument("--duration", type=float, default=600.0,
+                      help="seconds to keep submitting (default 600)")
+    demo.add_argument("--in-flight", type=int, default=4,
+                      help="transports to keep alive (default 4)")
+    demo.add_argument("--seed", type=int, default=7,
+                      help="the pair sequence's seed (default 7)")
+    demo.add_argument("--min-len", type=float, default=MIN_LEN_M,
+                      help="shortest route worth a transport, metres")
+    demo.add_argument("--count", type=int, default=25,
+                      help="pairs to print under --dry-run (default 25)")
+    demo.add_argument("--dry-run", action="store_true",
+                      help="print the plan and exit; needs no broker")
     args = parser.parse_args(argv)
     # required=True on add_subparsers is 3.7+, but its error message is
     # 'invalid choice' rather than a usage; the explicit check prints the
@@ -525,8 +616,11 @@ def main(argv=None):
     if args.command is None:
         parser.print_usage(sys.stderr)
         return 2
-    return cmd_submit(args) if args.command == "submit" \
-        else cmd_status(args)
+    if args.command == "submit":
+        return cmd_submit(args)
+    if args.command == "demo":
+        return cmd_demo(args)
+    return cmd_status(args)
 
 
 if __name__ == "__main__":

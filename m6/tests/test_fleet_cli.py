@@ -360,3 +360,29 @@ def test_an_empty_floor_and_a_pre_m6_4_document_are_different_answers():
     assert "TRAFFIC" not in cli.render(DOC, NOW)
     for junk in (None, [], "on", 7):
         assert cli.traffic_lines(dict(DOC, traffic=junk)) == []
+
+
+def test_demo_plan_is_deterministic_and_well_formed():
+    a = cli.demo_plan(seed=7, count=25, min_len_m=15.0)
+    b = cli.demo_plan(seed=7, count=25, min_len_m=15.0)
+    assert [(t["from"], t["to"]) for t in a] == \
+           [(t["from"], t["to"]) for t in b]
+    assert len(a) == 25
+    assert len({t["taskId"] for t in a}) == 25
+    for body in a:
+        assert body["from"] != body["to"]
+        assert set(body) == {"taskId", "from", "to"}
+
+
+def test_demo_dry_run_prints_the_plan_and_needs_no_broker(capsys):
+    rc = cli.main(["demo", "--seed", "7", "--count", "5",
+                   "--dry-run"])
+    assert rc == 0
+    out = capsys.readouterr().out.strip().splitlines()
+    assert len(out) == 5
+    for line in out:
+        assert "->" in line
+
+
+def test_demo_refuses_a_non_positive_in_flight():
+    assert cli.main(["demo", "--in-flight", "0", "--dry-run"]) == 2
