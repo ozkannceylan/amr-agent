@@ -125,7 +125,10 @@ def latch_watch(live, state, now, last_reset, hold_s=RESET_HOLD_S):
     """(press_reset, log_line). Pure - the caller owns the socket."""
     if live.get("motor"):
         return (False, None)
-    if state.get("estop"):
+    # True = healthy (NC closed), same polarity m6.py writes to "E-Stop".
+    # False is a held button; acknowledging that away would invent an
+    # operator action nobody asked for.
+    if not state.get("estop"):
         return (False, None)
     if now - last_reset < hold_s:
         return (False, None)

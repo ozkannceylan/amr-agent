@@ -73,7 +73,7 @@ from stations import STATIONS                       # noqa: E402
 
 S1 = (STATIONS["S1"]["x"], STATIONS["S1"]["y"])
 S5 = (STATIONS["S5"]["x"], STATIONS["S5"]["y"])
-DOCK_W = (-8.0, -5.5)          # a dock-aisle node, 5 m short of S1
+DOCK_W = (STATIONS["S1"]["x"], 0.0)   # S1's spur foot on the pick aisle
 
 
 def _wait_listening(port, timeout_s=5.0):
@@ -760,7 +760,13 @@ def test_submissions_are_refused_with_a_reason_the_operator_can_read(rig):
 #
 # NOTHING HERE IS A COLLISION CLAIM. The fakes have no geometry and stop
 # nothing; what is measured is only ever what the FLEET asked for.
-DOCK_MID = (0.0, -5.5)         # the dock node one hop east of S1
+DOCK_MID = (-7.0, 0.0)         # pick-aisle node one hop east of S1's foot
+# TWO hops east, and the difference matters. A truck at DOCK_MID is
+# granted its own node and stops there, waiting for the foot; a truck
+# staged ON the foot's neighbour can be granted the foot itself the
+# moment the occupant's dwell releases it, which turns the extension
+# test below into a deadlock test. PICK_MID keeps them apart.
+PICK_MID = (0.0, 0.0)
 
 
 def base_split(order):
@@ -780,11 +786,22 @@ def test_a_taken_station_comes_back_as_a_horizon_and_the_base_then_grows(
     orderUpdateId + 1, nothing already driven changed - and f2 completes
     the transport it was given at the start.
     """
-    f1 = rig.fake("f1", S1)              # standing on the contested station
-    f2 = rig.fake("f2", DOCK_MID)        # one hop east of it
+    # F1 STARTS ON THE SPUR FOOT, NOT ON S1. Staged on the station its
+    # leg 1 is a zero-length route that holds S1 and nothing else, the
+    # foot stays free, and f2 is granted it - after which f1 cannot
+    # leave its own bay and the extension this test measures can never
+    # happen. From the foot, leg 1 is [foot, S1] and f1 owns both.
+    f1 = rig.fake("f1", DOCK_W)         # one node short of the station
+    f2 = rig.fake("f2", PICK_MID)        # two hops east of it
     rig.manager()
     wait_for(lambda: ready(rig, ("f1", "f2")), 15.0, "both trucks ready", rig)
-    rig.submit("t-west", "S1", "S2")     # f1 picks up at S1 and leaves west
+    # S9 AND NOT S3. S1 and S3 are the two bays off the SAME spur foot,
+    # so a truck dropping at S3 keeps that foot as its own spur entry
+    # and never gives f2 the node it is waiting for - the extension this
+    # test exists to measure never happens and a step-aside does
+    # instead. S9 is in the dock annex, reached the other way round the
+    # west ring leg, so f1 genuinely leaves.
+    rig.submit("t-west", "S1", "S9")     # f1 picks up at S1 and leaves west
     wait_for(lambda: rig.orders_for("f1"), 15.0, "f1 took the pickup", rig)
     rig.submit("t-wait", "S1", "S4")     # f2 wants the same station
     wait_for(lambda: rig.orders_for("f2"), 15.0, "f2 was given something",
@@ -792,14 +809,18 @@ def test_a_taken_station_comes_back_as_a_horizon_and_the_base_then_grows(
 
     first = rig.orders_for("f2")[0][1]
     released, horizon = base_split(first)
-    assert horizon == ["S1"], "f2 was routed onto a station under a truck"
+    # TWO NODES OF HORIZON: from PICK_MID the route is four nodes and
+    # f1 holds the last two of them - the foot and the station.
+    assert horizon == ["wp3", "S1"],         "f2 was routed onto a station under a truck"
     assert released and vo.validate_order(first) == "", \
         "the horizon order is one the vehicle would reject"
     assert first["orderUpdateId"] == 0
     doc = wait_for(lambda: when(rig, lambda d: d["traffic"]["waiting"].get(
         "f2")), 10.0, "the document saying what f2 is waiting for", rig)
-    assert doc["traffic"]["waiting"]["f2"] == "(-3.0,-5.5)"
-    assert doc["traffic"]["bases"]["t-wait"] == [len(released), 1]
+    # THE FOOT, not the station: the foot is what the dwelling truck
+    # keeps (floor._dwell_entry) and what f2 must cross to reach S1.
+    assert doc["traffic"]["waiting"]["f2"] == "(-13.0,0.0)"
+    assert doc["traffic"]["bases"]["t-wait"] == [len(released), len(horizon)]
     assert doc["traffic"]["enabled"] is True
 
     f2.arrive()                          # to the end of its base, and stop
@@ -810,7 +831,7 @@ def test_a_taken_station_comes_back_as_a_horizon_and_the_base_then_grows(
     f1.arrive()                          # f1 lands on S1: leg 1 done
     wait_for(lambda: len(rig.legs_for("f1")) == 2, 15.0,
              "f1's leg 2 out of the aisle", rig)
-    f1.arrive()                          # ...and away west to S2
+    f1.arrive()                          # ...and away west to S9
 
     # THE BASE GROWS RATHER THAN THE ORDER RESTARTING.
     wait_for(lambda: len(rig.orders_for("f2")) == 2, 15.0,
@@ -878,7 +899,14 @@ def test_a_swap_deadlock_moves_a_truck_and_says_so_on_the_screen(rig):
     real wire and through the vehicle's own door. The move is on the
     operator's screen by name, because it is the one order in this
     system with no task behind it."""
-    f1 = rig.fake("f1", S1)
+    # F1 STARTS ON THE SPUR FOOT SO THAT IT OWNS IT. Staged on S1 its
+    # leg 1 is a zero-length route holding the station and nothing else;
+    # the foot stays free, f2 is granted it on the way in, and the jam
+    # that forms is f2-holds-the-foot rather than the nose-to-nose swap
+    # this test is about. From the foot, leg 1 is [foot, S1] and f1
+    # keeps both - the foot as its dwell entry - which is the state the
+    # step-aside exists for.
+    f1 = rig.fake("f1", DOCK_W)
     f2 = rig.fake("f2", DOCK_MID)
     rig.manager()
     wait_for(lambda: ready(rig, ("f1", "f2")), 15.0, "both trucks ready", rig)
@@ -890,12 +918,22 @@ def test_a_swap_deadlock_moves_a_truck_and_says_so_on_the_screen(rig):
     f1.arrive()                          # f1 is on S1 and dwelling
     wait_for(lambda: len(rig.legs_for("f1")) == 2, 15.0,
              "f1's leg 2, which drives east into f2", rig)
+    # AND F1 DRIVES TO THE END OF THAT BASE. floor._resolve will not
+    # touch a cycle whose members are still driving - taking a released
+    # node back is a thing VDA 5050 does not allow - and on this floor
+    # leg 2 out of a bay has a node in it before f2's: the spur foot.
+    # Without this the cycle is real, nobody is parked, and the pass
+    # correctly does nothing.
+    f1.arrive()
 
     doc = wait_for(lambda: when(rig, lambda d: d["traffic"]["aside"]),
                    15.0, "the step-aside named in the document", rig)
     said = doc["traffic"]["aside"][-1]
     assert said["vehicle"] == "f2" and said["for"] == ["f1"]
-    assert said["from"] == "(0.0,-5.5)" and said["to"] == "(3.0,-5.5)"
+    # INTO S2'S FREE BAY: 3.30 m, off f1's route, and off the aisle
+    # altogether - which is a better place to put a truck than one node
+    # further along the corridor it is blocking.
+    assert said["from"] == "(-7.0,0.0)" and said["to"] == "(-7.0,3.3)"
     assert said["task"] == "t-west"
     assert doc["traffic"]["blocked"] == [], (
         "a floor that is being cleared was called BLOCKED")
@@ -917,7 +955,7 @@ def test_a_swap_deadlock_moves_a_truck_and_says_so_on_the_screen(rig):
                  and m["nodes"][0]["nodeId"] == "aside"],
         15.0, "the step-aside order", rig)[-1]
     assert aside["orderId"].startswith("ft-")
-    assert aside["nodes"][0]["nodePosition"]["x"] == 3.0
-    assert aside["nodes"][0]["nodePosition"]["y"] == -5.5
+    assert aside["nodes"][0]["nodePosition"]["x"] == -7.0
+    assert aside["nodes"][0]["nodePosition"]["y"] == 3.3
     assert wait_for(lambda: f2.order_id == aside["orderId"], 15.0,
                     "f2 taking the step-aside order", rig)
