@@ -1689,10 +1689,20 @@ Append to `warehouse_ver3.sdf`, before `</world>`:
      frame at 20 Hz in the SERVER, so the main take can run --headless
      and spend that 0.137 on physics and the sixteen gpu_lidars instead.
      z = 38 with hfov 1.40 covers 64.0 x 36.0 m; the hall is 48 x 32 and
-     is centred on y = -2.00, which is where this sits. -->
+     is centred on y = -2.00, which is where this sits.
+
+     THE YAW IS NOT DECORATION AND IT IS NOT ZERO. A gz camera looks
+     down its own +X with image-right at -Y and image-up at +Z. Pitch
+     alone (0, pi/2, 0) lands image-right on world -Y and image-up on
+     world +X: the picture comes out rotated a quarter turn, and -
+     because hfov sizes the WIDTH - the hall's 48 m X extent is then
+     squeezed into the 36 m the SHORT axis covers, so both ends of the
+     floor are cropped and trucks drive out of frame. Yaw = +pi/2 puts
+     image-right on world +X (64.0 m for 48) and image-up on world +Y
+     (36.0 m for 32): north up, east right, whole floor. -->
 <model name="OverheadCam">
   <static>true</static>
-  <pose>0 -2 38 0 1.5707963 0</pose>
+  <pose>0 -2 38 0 1.5707963 1.5707963</pose>
   <link name="link">
     <sensor name="overhead" type="camera">
       <always_on>1</always_on>
