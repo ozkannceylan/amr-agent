@@ -90,7 +90,7 @@ def test_highway_centrelines_clear_a_scanner_by_the_field_band():
         for y in (-10.0, 0.0, 10.0):
             assert _clearance(x, y) - SCANNER_ABEAM_M >= FIELD_SLOW_M, (x, y)
     for y in route.RING_Y:
-        for x in route.NORTH_X if y > 0 else route.SOUTH_X:
+        for x in route.LEG_X:
             assert _clearance(x, y) - SCANNER_ABEAM_M >= FIELD_SLOW_M, (x, y)
     for y in route.LEG_Y:
         assert _clearance(route.SPINE_X, y) - SCANNER_ABEAM_M >= FIELD_SLOW_M
@@ -98,17 +98,30 @@ def test_highway_centrelines_clear_a_scanner_by_the_field_band():
 
 def test_pick_aisle_centreline_clears_a_scanner_by_the_protective_band():
     # A pick aisle is INSIDE the warning field on purpose and outside the
-    # protective one always. Only the four SPUR FEET are checked: PICK_X
-    # also carries the spine crossing at x = 0 and the two ring ends at
-    # x = +-20, and those are highway - 4.26 m of clearance at x = 0,
-    # which would fail a creep assertion and should.
-    feet = sorted({s["x"] for s in stations.STATIONS.values()
-                   if abs(s["y"]) < 10.0})
-    assert feet == [-13.0, -7.0, 7.0, 13.0]
-    for x in feet:
+    # protective one always. Its own two ends sit on the ring legs and
+    # are highway, so they are excluded - what is asked here is the run
+    # between them.
+    inner = [x for x in route.PICK_X if abs(x) < 20.0]
+    assert inner, "the pick aisle has no run of its own"
+    for x in inner:
         gap = _clearance(x, route.PICK_Y) - SCANNER_ABEAM_M
         assert gap >= PF_HYST_M, (x, gap)
-        assert gap < FIELD_SLOW_M, (x, gap, "this should be a creep aisle")
+    # ...and at least the middle of it is a creep corridor, which is the
+    # whole reason it is 5.00 m and not 8.00.
+    assert min(_clearance(x, route.PICK_Y) - SCANNER_ABEAM_M
+               for x in inner) < FIELD_SLOW_M
+
+
+def test_no_station_is_entered_off_the_pick_aisle():
+    """REVISION B, AND IT IS THE POINT OF IT. A tricycle cannot line up
+    a 4.00 m bay off a 5.00 m corridor: measured 2026-08-23, f1 and f2
+    both went in skewed and stopped with the back protective field
+    violated at 0.977 m, unrecoverable. Every bay opens onto the 8.00 m
+    ring instead, so every spur foot is on a ring leg."""
+    graph = route.build_graph()
+    for sid, s in stations.STATIONS.items():
+        foot = next(iter(graph[(s["x"], s["y"])]))
+        assert abs(foot[1]) == 10.0, (sid, foot)
 
 
 def test_no_node_lies_inside_or_against_the_racking():
@@ -119,17 +132,19 @@ def test_no_node_lies_inside_or_against_the_racking():
 
 
 def test_dijkstra_takes_the_short_way_home():
-    # S2 (-7, +3.30) to S4 (-7, -3.30): down the spur, straight across
-    # the pick aisle, up the other spur. Never around the ring.
+    # S1 to S2: out of the cross-aisle onto the north ring leg, east
+    # past f2's spawn node, into the next one. Never round the ring and
+    # never down the pick aisle - which carries no station at all.
     graph = route.build_graph()
-    path = route.dijkstra(graph, (-7.0, 3.30), (-7.0, -3.30))
-    assert path == [(-7.0, 3.30), (-7.0, 0.0), (-7.0, -3.30)]
+    path = route.dijkstra(graph, (-13.0, 4.25), (-7.0, 4.25))
+    assert path == [(-13.0, 4.25), (-13.0, 10.0), (-10.0, 10.0),
+                    (-7.0, 10.0), (-7.0, 4.25)]
 
 
 def test_plan_route_starts_at_the_pose_and_ends_at_the_station():
     poly = route.plan_route((0.0, 10.0), "S6")
     assert poly[0] == (0.0, 10.0)
-    assert poly[-1] == (13.0, 3.30)
+    assert poly[-1] == (13.0, 4.25)
     assert len(poly) >= 3
 
 
@@ -138,9 +153,10 @@ def test_plan_route_refuses_an_unknown_station():
 
 
 def test_the_longest_leg_is_what_the_spec_says():
-    # S12 to S1: 5.30 spur + 14.00 ring + 10.00 spine + 13.00 pick +
-    # 3.30 spur. If this moves, the floor moved and the spec is stale.
+    # S12 to S1: 4.90 spur + 17.00 west along the south ring + 20.00
+    # north up the spine + 13.00 west along the north ring + 5.75 spur.
+    # If this moves, the floor moved and the spec is stale.
     graph = route.build_graph()
-    path = route.dijkstra(graph, (14.0, -15.30), (-13.0, 3.30))
+    path = route.dijkstra(graph, (17.0, -14.90), (-13.0, 4.25))
     length = sum(math.dist(a, b) for a, b in zip(path, path[1:]))
-    assert abs(length - 45.60) < 0.01, length
+    assert abs(length - 60.65) < 0.01, length

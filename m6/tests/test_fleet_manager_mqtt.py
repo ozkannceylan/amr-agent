@@ -73,7 +73,7 @@ from stations import STATIONS                       # noqa: E402
 
 S1 = (STATIONS["S1"]["x"], STATIONS["S1"]["y"])
 S5 = (STATIONS["S5"]["x"], STATIONS["S5"]["y"])
-DOCK_W = (STATIONS["S1"]["x"], 0.0)   # S1's spur foot on the pick aisle
+DOCK_W = (STATIONS["S1"]["x"], 10.0)  # S1's spur foot on the ring
 
 
 def _wait_listening(port, timeout_s=5.0):
@@ -760,13 +760,13 @@ def test_submissions_are_refused_with_a_reason_the_operator_can_read(rig):
 #
 # NOTHING HERE IS A COLLISION CLAIM. The fakes have no geometry and stop
 # nothing; what is measured is only ever what the FLEET asked for.
-DOCK_MID = (-7.0, 0.0)         # pick-aisle node one hop east of S1's foot
+DOCK_MID = (-10.0, 10.0)       # ring node one hop east of S1's foot
 # TWO hops east, and the difference matters. A truck at DOCK_MID is
 # granted its own node and stops there, waiting for the foot; a truck
 # staged ON the foot's neighbour can be granted the foot itself the
 # moment the occupant's dwell releases it, which turns the extension
 # test below into a deadlock test. PICK_MID keeps them apart.
-PICK_MID = (0.0, 0.0)
+PICK_MID = (0.0, 10.0)
 
 
 def base_split(order):
@@ -809,9 +809,11 @@ def test_a_taken_station_comes_back_as_a_horizon_and_the_base_then_grows(
 
     first = rig.orders_for("f2")[0][1]
     released, horizon = base_split(first)
-    # TWO NODES OF HORIZON: from PICK_MID the route is four nodes and
-    # f1 holds the last two of them - the foot and the station.
-    assert horizon == ["wp3", "S1"],         "f2 was routed onto a station under a truck"
+    # THE HORIZON ENDS AT THE STATION AND THE STATION IS IN IT, which
+    # is the claim. How many nodes precede it is the floor's business
+    # and moves whenever the floor does.
+    assert horizon and horizon[-1] == "S1", \
+        "f2 was routed onto a station under a truck"
     assert released and vo.validate_order(first) == "", \
         "the horizon order is one the vehicle would reject"
     assert first["orderUpdateId"] == 0
@@ -819,7 +821,7 @@ def test_a_taken_station_comes_back_as_a_horizon_and_the_base_then_grows(
         "f2")), 10.0, "the document saying what f2 is waiting for", rig)
     # THE FOOT, not the station: the foot is what the dwelling truck
     # keeps (floor._dwell_entry) and what f2 must cross to reach S1.
-    assert doc["traffic"]["waiting"]["f2"] == "(-13.0,0.0)"
+    assert doc["traffic"]["waiting"]["f2"] == "(-13.0,10.0)"
     assert doc["traffic"]["bases"]["t-wait"] == [len(released), len(horizon)]
     assert doc["traffic"]["enabled"] is True
 
@@ -930,10 +932,12 @@ def test_a_swap_deadlock_moves_a_truck_and_says_so_on_the_screen(rig):
                    15.0, "the step-aside named in the document", rig)
     said = doc["traffic"]["aside"][-1]
     assert said["vehicle"] == "f2" and said["for"] == ["f1"]
-    # INTO S2'S FREE BAY: 3.30 m, off f1's route, and off the aisle
-    # altogether - which is a better place to put a truck than one node
-    # further along the corridor it is blocking.
-    assert said["from"] == "(-7.0,0.0)" and said["to"] == "(-7.0,3.3)"
+    # ONE NODE EAST, ONTO S2'S SPUR JUNCTION. On a ring leg a plain node
+    # has two neighbours and one of them is the truck it is deadlocked
+    # with, so there is exactly one candidate - a junction, which
+    # preference 2 would rather not block and takes anyway, because a
+    # preference is not a veto.
+    assert said["from"] == "(-10.0,10.0)" and said["to"] == "(-7.0,10.0)"
     assert said["task"] == "t-west"
     assert doc["traffic"]["blocked"] == [], (
         "a floor that is being cleared was called BLOCKED")
@@ -956,6 +960,6 @@ def test_a_swap_deadlock_moves_a_truck_and_says_so_on_the_screen(rig):
         15.0, "the step-aside order", rig)[-1]
     assert aside["orderId"].startswith("ft-")
     assert aside["nodes"][0]["nodePosition"]["x"] == -7.0
-    assert aside["nodes"][0]["nodePosition"]["y"] == 3.3
+    assert aside["nodes"][0]["nodePosition"]["y"] == 10.0
     assert wait_for(lambda: f2.order_id == aside["orderId"], 15.0,
                     "f2 taking the step-aside order", rig)

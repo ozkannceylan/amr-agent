@@ -51,16 +51,16 @@ from types import MappingProxyType
 # with nothing here and is caught by its own port guard.
 VEHICLES = {
     "f1": {"plc_port": 5110, "sensor_port": 5111,
-           "spawn": {"x": "-12.00", "y": "10.00", "z": "0.05",
+           "spawn": {"x": "-17.00", "y": "10.00", "z": "0.05",
                      "yaw": "3.14159"}},
     "f2": {"plc_port": 5120, "sensor_port": 5121,
-           "spawn": {"x": "-6.00", "y": "10.00", "z": "0.05",
+           "spawn": {"x": "-10.00", "y": "10.00", "z": "0.05",
                      "yaw": "3.14159"}},
     "f3": {"plc_port": 5130, "sensor_port": 5131,
-           "spawn": {"x": "6.00", "y": "10.00", "z": "0.05",
+           "spawn": {"x": "10.00", "y": "10.00", "z": "0.05",
                      "yaw": "3.14159"}},
     "f4": {"plc_port": 5140, "sensor_port": 5141,
-           "spawn": {"x": "12.00", "y": "10.00", "z": "0.05",
+           "spawn": {"x": "17.00", "y": "10.00", "z": "0.05",
                      "yaw": "3.14159"}},
 }
 # THE FOUR POSES ARE NOT A DIVISION OF THE FLOOR, AND THAT IS THE POINT.
@@ -72,12 +72,14 @@ VEHICLES = {
 # own work rather than by this table (a truck finishes a transport at
 # its DROPOFF station, not at a home pose).
 #
-# SPACING IS 6.00 m AND BOTH OF ITS CONSTRAINTS ARE DERIVED.
-#   A neighbour's body edge sits 6.00 - 0.46 - 0.52 = 5.02 m from a
+# SPACING IS 7.00 m AT THE CLOSEST AND BOTH CONSTRAINTS ARE DERIVED.
+#   A neighbour's body edge sits 7.00 - 0.46 - 0.52 = 6.02 m from a
 #   scanner, outside the 2.70 m re-clear threshold, so four parked
 #   trucks do not sit in each other's warning fields and none of them
 #   starts under a reduced V_Limit.
-#   Each pose IS A GRAPH NODE (route.NORTH_X carries -12, -6, +6, +12).
+#   Each pose IS A GRAPH NODE (route.LEG_X carries -17, -10, +10, +17,
+#   which are the only x-positions on the north leg that are not a bay
+#   spur foot - every station is entered off the ring since rev B).
 #   nearest_node and floor._standing_from both snap a pose to the
 #   nearest node, and four trucks whose nearest node is the same node
 #   are four trucks the traffic ledger will hand one piece of floor to.

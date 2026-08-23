@@ -35,6 +35,23 @@ OBSTACLES mirrors warehouse_ver3.sdf's collision rectangles. The SDF
 stays the geometric truth; these numbers are its shadow, and
 test_stations_sdf.py is what notices a drift.
 
+THE BAYS FACE THE RING AND NOT THE PICK AISLE, since 2026-08-23.
+A tricycle with a 1.29 m minimum turning radius cannot enter a 4.00 m
+bay squarely off a 5.00 m corridor - it goes in skewed and its back
+scanner ends up against a side wall. Measured on the first full
+four-truck run: f1 stopped at (-13.35, 3.59) and f2 at (6.65, 3.60),
+both inside their own bay with the BACK protective field violated at
+0.977 m and 0.975 m, and neither recoverable, because a monitored reset
+does not take while the cause stands. Two of four trucks were parked for
+good by minute six. The bay is still 4.00 m; what changed is that it is
+entered off the 8.00 m ring band instead, which gives the truck three
+more metres to line up in before it commits.
+
+THE STATIONS ARE IN OPEN CROSS-AISLES, NOT IN POCKETS. See OBSTACLES
+for the measurement that settled it: a truck 2.80 m long needs 1.20 m of
+protective clearance ahead, so a pocket has to be over 4.00 m deep and a
+3.50 m rack row cannot give one. The gap is cut right through instead.
+
 THE HALL IS NOT CENTRED ON y. The southern strip y in [-18.00, -14.00]
 is the dock annex - a solid block with four bays cut through it. Its
 bays are 4.00 m deep on purpose: a shallower recess parks the truck out
@@ -51,43 +68,50 @@ HALL = (-24.0, 24.0, -18.0, 14.0)          # inner wall faces: 48 x 32 m
 _N, _S = math.pi / 2, -math.pi / 2
 
 STATIONS = OrderedDict((
-    # Eight pick bays, 4.00 m wide, cut through the 3.50 m rack rows.
-    # Bay mouth at y = +-2.50 (the pick aisle edge), back panel face at
-    # +-5.90, so the station sits at +-(5.90 - 2.60) = +-3.30 and the
-    # spur from the pick-aisle centreline is 3.30 m. THE BAY IS DRAWN TO
-    # 2.60 AND THE THRESHOLD IS 2.50, deliberately: at exactly 2.50 the
-    # assertion sits on a float knife-edge - (-15.40) - (-17.90)
-    # evaluates to 2.4999999999999982 and fails a >= 2.50 test that is
-    # geometrically satisfied. 0.10 m of margin costs nothing and buys
-    # an assertion that means what it says.
-    ("S1",  {"name": "PICK-NW-1", "x": -13.0, "y":   3.30, "yaw": _N,
+    # Eight pick bays, 4.00 m wide, cut through the 3.50 m rack rows -
+    # AND THEY OPEN ONTO THE RING, WHICH IS THE WHOLE OF REVISION B.
+    # They faced the 5.00 m pick aisle until 2026-08-23, and a tricycle
+    # with a 1.29 m minimum turning radius cannot enter a 4.00 m bay
+    # squarely off a 5.00 m corridor: it goes in skewed and its back
+    # scanner ends up against a side wall. Measured on the first full
+    # run - f1 stopped at (-13.35, 3.59) and f2 at (6.65, 3.60), both
+    # inside their own bay with the BACK protective field violated at
+    # 0.977 m and 0.975 m, neither recoverable because the cause stood.
+    # Two of four trucks were parked for good by minute six.
+    #
+    # The bay is the same 4.00 m. What changed is the road it is entered
+    # from: the ring band is 8.00 m, so the truck has three more metres
+    # to line up in before it commits. Mouth at y = +-6.00 (the block
+    # edge), back panel face at +-2.60, station at +-(2.60 + 2.60) =
+    # +-5.20, spur from the ring centreline 4.80 m.
+    ("S1",  {"name": "PICK-NW-1", "x": -13.0, "y":   4.25, "yaw": _S,
              "arrive_m": 0.25}),
-    ("S2",  {"name": "PICK-NW-2", "x":  -7.0, "y":   3.30, "yaw": _N,
+    ("S2",  {"name": "PICK-NW-2", "x":  -7.0, "y":   4.25, "yaw": _S,
              "arrive_m": 0.25}),
-    ("S3",  {"name": "PICK-SW-1", "x": -13.0, "y":  -3.30, "yaw": _S,
+    ("S3",  {"name": "PICK-SW-1", "x": -13.0, "y":  -4.25, "yaw": _N,
              "arrive_m": 0.25}),
-    ("S4",  {"name": "PICK-SW-2", "x":  -7.0, "y":  -3.30, "yaw": _S,
+    ("S4",  {"name": "PICK-SW-2", "x":  -7.0, "y":  -4.25, "yaw": _N,
              "arrive_m": 0.25}),
-    ("S5",  {"name": "PICK-NE-1", "x":   7.0, "y":   3.30, "yaw": _N,
+    ("S5",  {"name": "PICK-NE-1", "x":   7.0, "y":   4.25, "yaw": _S,
              "arrive_m": 0.25}),
-    ("S6",  {"name": "PICK-NE-2", "x":  13.0, "y":   3.30, "yaw": _N,
+    ("S6",  {"name": "PICK-NE-2", "x":  13.0, "y":   4.25, "yaw": _S,
              "arrive_m": 0.25}),
-    ("S7",  {"name": "PICK-SE-1", "x":   7.0, "y":  -3.30, "yaw": _S,
+    ("S7",  {"name": "PICK-SE-1", "x":   7.0, "y":  -4.25, "yaw": _N,
              "arrive_m": 0.25}),
-    ("S8",  {"name": "PICK-SE-2", "x":  13.0, "y":  -3.30, "yaw": _S,
+    ("S8",  {"name": "PICK-SE-2", "x":  13.0, "y":  -4.25, "yaw": _N,
              "arrive_m": 0.25}),
     # Four annex bays, 4.00 m wide and 4.00 m DEEP, cut through the dock
-    # annex. Mouth at y = -14.00, back panel face at -17.90, so the
-    # station sits at -17.90 + 2.60 = -15.30 and the spur from the south
-    # ring centreline (y = -10.00) is 5.30 m. The truck parks entirely
-    # inside the bay: y in [-16.50, -14.10].
-    ("S9",  {"name": "DOCK-DOOR", "x": -14.0, "y": -15.30, "yaw": _S,
+    # annex and entered from the south ring leg's wall side - which was
+    # already an 8.00 m approach and is why these four never got stuck.
+    # Their x moved to +-17 / +-10 so that both ring legs carry the SAME
+    # node list and no junction sits 1.00 m from another.
+    ("S9",  {"name": "DOCK-DOOR", "x": -17.0, "y": -14.90, "yaw": _S,
              "arrive_m": 0.25}),
-    ("S10", {"name": "CHARGE-1",  "x":  -6.0, "y": -15.30, "yaw": _S,
+    ("S10", {"name": "CHARGE-1",  "x": -10.0, "y": -14.90, "yaw": _S,
              "arrive_m": 0.25}),
-    ("S11", {"name": "CHARGE-2",  "x":   6.0, "y": -15.30, "yaw": _S,
+    ("S11", {"name": "CHARGE-2",  "x":  10.0, "y": -14.90, "yaw": _S,
              "arrive_m": 0.25}),
-    ("S12", {"name": "CONVEYOR",  "x":  14.0, "y": -15.30, "yaw": _S,
+    ("S12", {"name": "CONVEYOR",  "x":  17.0, "y": -14.90, "yaw": _S,
              "arrive_m": 0.25}),
 ))
 
@@ -109,22 +133,16 @@ OBSTACLES = (
     ("RackSE1",     4.00,   5.00,  -6.00,  -2.50),
     ("RackSE2",     9.00,  11.00,  -6.00,  -2.50),
     ("RackSE3",    15.00,  16.00,  -6.00,  -2.50),
-    ("BayS1Back",  -15.00, -11.00,   5.90,   6.00),
-    ("BayS2Back",   -9.00,  -5.00,   5.90,   6.00),
-    ("BayS5Back",    5.00,   9.00,   5.90,   6.00),
-    ("BayS6Back",   11.00,  15.00,   5.90,   6.00),
-    ("BayS3Back",  -15.00, -11.00,  -6.00,  -5.90),
-    ("BayS4Back",   -9.00,  -5.00,  -6.00,  -5.90),
-    ("BayS7Back",    5.00,   9.00,  -6.00,  -5.90),
-    ("BayS8Back",   11.00,  15.00,  -6.00,  -5.90),
+    # The bay back panels are at the row's INNER face now, because the
+    # mouth is at its outer one. They are what the pick aisle sees.,,,,,,,,
     # The dock annex: five solid segments with four bays between them.
-    ("AnnexW",     -24.00, -16.00, -18.00, -14.00),
-    ("AnnexA",     -12.00,  -8.00, -18.00, -14.00),
-    ("AnnexB",      -4.00,   4.00, -18.00, -14.00),
-    ("AnnexC",       8.00,  12.00, -18.00, -14.00),
-    ("AnnexE",      16.00,  24.00, -18.00, -14.00),
-    ("BayS9Back",  -16.00, -12.00, -18.00, -17.90),
-    ("BayS10Back",  -8.00,  -4.00, -18.00, -17.90),
-    ("BayS11Back",   4.00,   8.00, -18.00, -17.90),
-    ("BayS12Back",  12.00,  16.00, -18.00, -17.90),
+    ("AnnexW",     -24.00, -19.00, -18.00, -14.00),
+    ("AnnexA",     -15.00, -12.00, -18.00, -14.00),
+    ("AnnexB",      -8.00,   8.00, -18.00, -14.00),
+    ("AnnexC",      12.00,  15.00, -18.00, -14.00),
+    ("AnnexE",      19.00,  24.00, -18.00, -14.00),
+    ("BayS9Back",  -19.00, -15.00, -18.00, -17.90),
+    ("BayS10Back", -12.00,  -8.00, -18.00, -17.90),
+    ("BayS11Back",   8.00,  12.00, -18.00, -17.90),
+    ("BayS12Back",  15.00,  19.00, -18.00, -17.90),
 )

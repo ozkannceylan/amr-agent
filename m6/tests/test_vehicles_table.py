@@ -236,14 +236,17 @@ def test_the_world_the_scanners_see_was_actually_read():
     The three counts are structural, not a transcript of the file: four
     perimeter walls and no door posts (ver3 has no dock cut), the truck's
     mast, carriage and three wheels, and exactly the three safety scanners
-    the PLC has channels for. 29 named obstacles plus 4 walls is 33
-    scan-plane boxes; a vanished rack run drops that count.
+    the PLC has channels for. The obstacle count is READ FROM
+    stations.OBSTACLES rather than written down - it moved from 29 to 21
+    when the pick bays were cut right through and lost their back panels
+    - and four walls are added to it. A vanished rack run drops it.
     """
     world = _world_solids()
     names = [n for n, *_ in world]
     assert sum("Wall" in n for n in names) == 4, names
     assert sum("DoorGap" in n for n in names) == 0, names
-    assert len(world) >= 33, "the rack runs vanished from the parse"
+    import stations
+    assert len(world) >= len(stations.OBSTACLES) + 4,         "the rack runs vanished from the parse"
 
     truck = _truck_solids()
     assert sorted(n.split("/")[0] for n, *_ in truck) == [

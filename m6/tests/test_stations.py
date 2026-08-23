@@ -71,4 +71,4 @@ def test_obstacle_rectangles_are_well_formed():
         assert ymin < ymax, name
         assert name not in seen, name
         seen.add(name)
-    assert len(stations.OBSTACLES) == 29
+    assert len(stations.OBSTACLES) == 21

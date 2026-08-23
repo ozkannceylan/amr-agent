@@ -394,16 +394,25 @@ def test_a_vehicle_that_never_lets_go_is_named_and_the_chase_stops(fleet):
 # every scenario below is staged on it: two trucks on one aisle is the
 # whole problem, and these are its coordinates.
 # The pick aisle (y = 0) is the new floor's one straight corridor.
-S1_XY = (STATIONS["S1"]["x"], STATIONS["S1"]["y"])       # (-13.0, 3.3)
-WEST = (STATIONS["S1"]["x"], 0.0)  # S1's spur foot - one hop from S1
-EAST = (-7.0, 0.0)           # next pick node east (S2/S4 feet)
-# S4 is the other shape a station comes in: a spur off the pick aisle,
-# so the truck that is in it has exactly one way out and that way is
-# somebody else's way in.
-S2_XY = (STATIONS["S2"]["x"], STATIONS["S2"]["y"])       # (-7.0, 3.3)
-S4_XY = (STATIONS["S4"]["x"], STATIONS["S4"]["y"])       # (-7.0, -3.3)
-S4_ENTRY = (STATIONS["S4"]["x"], 0.0)  # the junction the spur lands on
-FAR_EAST = (0.0, 0.0)        # next pick node east of that junction
+S1_XY = (STATIONS["S1"]["x"], STATIONS["S1"]["y"])       # (-13.0, 5.2)
+# THE CORRIDOR IS THE NORTH RING LEG SINCE REVISION B. Every station is
+# entered off the ring now - a tricycle cannot line up a 4.00 m bay off
+# the 5.00 m pick aisle, measured 2026-08-23 - so the leg that carries
+# four bay spurs is where two trucks meet, and the pick aisle carries
+# no station at all. Node order along it:
+#     -20  -17  -13  -10  -7   0   7   10   13   17   20
+#           f1   S1   f2   S2      S5   f3   S6   f4
+WEST = (STATIONS["S1"]["x"], 10.0)    # S1's spur foot on the ring
+EAST = (-10.0, 10.0)                  # the next ring node east of it
+# S2 is the second spur station on the same leg, and the one whose
+# junction is somebody else's way through.
+S2_XY = (STATIONS["S2"]["x"], STATIONS["S2"]["y"])       # (-7.0, 5.2)
+S2_ENTRY = (STATIONS["S2"]["x"], 10.0)   # the junction its spur lands on
+FAR_EAST = (0.0, 10.0)                # the spine junction, one node on
+# The spine's south end: a node OFF the north leg from which the only
+# way to S1 runs through it, which is what makes a crossing a crossing.
+NORTH = (0.0, -10.0)
+SPINE_MID = (0.0, 0.0)
 
 
 def traffic_fleet(monkeypatch, traffic_on=True):
@@ -583,11 +592,11 @@ def horizon_of(truck):
     return [n["nodeId"] for n in truck.horizon()]
 
 
-def head_on(manager, stub, now, to1="S4", to2="S4"):
+def head_on(manager, stub, now, to1="S2", to2="S2"):
     """The M6.3 jam, staged: f1 west of S1 and f2 east of it, both told
     to pick up at S1. f1's own dropoff decides whether it then drives
-    back east through f2 (the jam, `to1="S4"`) or away west (the
-    corridor draining, `to1="S3"`).
+    back east through f2 (the jam, `to1="S2"`) or away west (the
+    corridor draining, `to1="S9"`).
 
     This is Gate 4's own scenario (2026-08-22: f2 held 2.65 m behind f1
     with no way out but an operator) reduced to two trucks, one aisle
@@ -605,10 +614,10 @@ def head_on(manager, stub, now, to1="S4", to2="S4"):
 
 def drains(manager, stub, now):
     """The same two trucks, but f1's transport takes it AWAY from f2:
-    it picks up at S1 and drives south to S3, so the node f2 is waiting
+    it picks up at S1 and drives away to S9, so the node f2 is waiting
     for comes free under it. Returns (f1, f2) with f1 already gone; one
     more turn is what extends f2's base."""
-    f1, f2 = head_on(manager, stub, now, to1="S3")
+    f1, f2 = head_on(manager, stub, now, to1="S9")
     f1.drive()                            # f1 lands on S1
     turn(manager, (f1, f2), now)          # ...arrives; the dwell starts
     manager.dwell_until["t-1"] = now - 1.0
@@ -635,7 +644,7 @@ def test_a_taken_corridor_comes_back_as_a_partial_base(floor):
         "the manager published a horizon order the vehicle would reject"
     doc = manager._status(now)
     assert doc["traffic"]["enabled"] is True
-    assert doc["traffic"]["waiting"]["f2"] == "(-13.0,0.0)"
+    assert doc["traffic"]["waiting"]["f2"] == "(-13.0,10.0)"
     # ONE OF THREE, not one of two: on this floor S1 is down a spur, so
     # f2's route is the node under it, S1's foot, and S1.
     assert doc["traffic"]["bases"]["t-2"] == [1, 2]
@@ -651,8 +660,8 @@ def test_a_second_vehicle_is_held_at_a_node_and_never_given_a_zero_base(
     now = time.monotonic()
     f1 = Truck(manager, stub, "f1", S1_XY)
     f2 = Truck(manager, stub, "f2", S1_XY)      # nose to tail on one node
-    submit(manager, "t-1", "S1", "S4")
-    submit(manager, "t-2", "S1", "S4")
+    submit(manager, "t-1", "S1", "S2")
+    submit(manager, "t-2", "S1", "S2")
     for _ in range(4):
         turn(manager, (f1, f2), now)
 
@@ -670,7 +679,7 @@ def test_the_base_grows_by_one_update_id_when_the_corridor_drains(floor):
     with the already-driven part untouched."""
     manager, stub = floor
     now = time.monotonic()
-    f1, f2 = head_on(manager, stub, now, to1="S3")
+    f1, f2 = head_on(manager, stub, now, to1="S9")
     before = f2.inbox()[-1]
     assert before["orderUpdateId"] == 0
     assert horizon_of(f2) == ["wp2", "S1"]
@@ -756,7 +765,7 @@ def test_a_refused_extension_is_a_timing_answer_and_the_task_survives(
 
 
 # ---- 4. deadlock ----
-def deadlocked(manager, stub, now, to2="S4"):
+def deadlocked(manager, stub, now, to2="S2"):
     """f1 stopped on S1 asking for the node east of it, f2 stopped on
     that node asking for S1. Nose to nose, each standing on exactly what
     the other needs.
@@ -847,10 +856,12 @@ def test_a_swap_deadlock_asks_the_younger_truck_to_step_aside(floor):
     assert aside, "the step-aside is nowhere on the operator's screen"
     said = aside[-1]
     assert said["vehicle"] == "f2" and said["for"] == ["f1"]
-    # INTO A FREE BAY, which is the best answer this floor has: S2's
-    # spur is 3.30 m away, it is not on f1's route, and it takes the
-    # truck off the corridor entirely instead of one node along it.
-    assert said["from"] == "(-7.0,0.0)" and said["to"] == "(-7.0,3.3)"
+    # ONE NODE EAST, ONTO S2's SPUR JUNCTION. On a ring leg a plain node
+    # has two neighbours and one of them is the truck it is deadlocked
+    # with, so there is exactly one candidate - a junction, which
+    # preference 2 would rather not block and takes because a preference
+    # is not a veto.
+    assert said["from"] == "(-10.0,10.0)" and said["to"] == "(-7.0,10.0)"
     assert said["task"] == "t-2"
     assert doc["traffic"]["blocked"] == [], (
         "a floor that is being cleared is not a BLOCKED floor")
@@ -924,27 +935,22 @@ def test_the_step_aside_target_is_the_nearest_free_node_off_the_others_route(
     f1, f2 = deadlocked(manager, stub, now)
     assert manager.floor.standing["f2"] == EAST
 
-    # 1. THE PREFERENCE. S4 is 3.30 m away and so is S2; S4 is the next
-    #    node of f1's own route and S2 is nobody's, so S2 wins.
-    assert manager.floor.step_aside_target("f2", ["f1"]) == S2_XY
+    # 1. A PREFERENCE THAT RUNS OUT YIELDS RATHER THAN REFUSING. f2
+    #    stands on a plain ring node with exactly two neighbours: S1's
+    #    foot, which is f1's, and S2's foot 3.00 m east. The east one is
+    #    a SPUR JUNCTION, which preference 2 would rather not block -
+    #    and it is the only candidate, so it wins anyway. A preference
+    #    is not a veto.
+    assert manager.floor.step_aside_target("f2", ["f1"]) == S2_ENTRY
 
-    # 2. A PREFERENCE THAT RUNS OUT YIELDS, IT DOES NOT REFUSE. With S2
-    #    taken the only candidate left inside the bound is the one on
-    #    f1's route, and a truck moved onto floor the other still has to
-    #    drive is a worse answer than a jam only in theory - f1 arrives
-    #    there later, by which time f2 has its own task and is gone.
-    manager.floor.hold("f9", [S2_XY])
-    assert manager.floor.step_aside_target("f2", ["f1"]) == S4_XY
-
-    # 3. THE BOUND, WHICH IS NOT A PREFERENCE. With both bays taken the
-    #    aisle node 7.00 m east is free, quiet, and on nobody's route -
-    #    and it is still refused, because ASIDE_MAX_M is 5.00 m and
-    #    seven metres driven as a single node with no route is not a
-    #    step aside. None is the honest answer and an operator reads it.
-    manager.floor.hold("f8", [S4_XY])
+    # 2. AND WITH THAT TAKEN THERE IS NOWHERE, which is the honest
+    #    answer and the one an operator reads. The next node east is
+    #    7.00 m away, free and quiet, and still refused: ASIDE_MAX_M is
+    #    5.00 m and it outranks every preference above it.
+    manager.floor.hold("f9", [S2_ENTRY])
     assert manager.floor.step_aside_target("f2", ["f1"]) is None
     assert manager.floor.owner_of(FAR_EAST) is None, (
-        "the aisle node was free and was still correctly refused")
+        "the node 7.00 m east was free and was still correctly refused")
 
 
 def test_a_truck_stepped_aside_too_often_stops_being_shuffled(floor):
@@ -987,9 +993,13 @@ def test_a_staged_swap_deadlock_clears_and_both_transports_complete(floor):
     # it (floor._idle_floor exempts a truck parked in a station, because
     # nothing else is ever routed there) - a real property of this floor,
     # and one that would answer a question this test is not asking.
-    f1, f2 = deadlocked(manager, stub, now, to2="S3")
+    f1, f2 = deadlocked(manager, stub, now, to2="S9")
 
-    for step in range(40):
+    # SIXTY TURNS, NOT FORTY. Revision B's dropoffs are round the ring
+    # and the longest leg on this floor is 60.10 m against the old
+    # 45.60; a bound sized for the old one times out on a run that is
+    # working.
+    for step in range(120):
         turn(manager, (f1, f2), now + step)
         for truck in (f1, f2):
             truck.drive()
@@ -1005,10 +1015,8 @@ def test_a_staged_swap_deadlock_clears_and_both_transports_complete(floor):
 # only way to S1 runs through EAST, which is what makes the crossing a
 # crossing. It has to be a real graph node - route.nearest_node snaps a
 # pose to one, and a truck staged between two nodes stands on neither.
-NORTH = (0.0, 10.0)
 # The spine node under NORTH: f2's first hop, and what the crossing
 # staging holds to keep f2's leg-1 base one node long.
-SPINE_MID = (0.0, 0.0)
 
 
 def crossing(manager, stub, now):
@@ -1032,7 +1040,7 @@ def crossing(manager, stub, now):
     """
     f1 = Truck(manager, stub, "f1", S1_XY)
     f2 = Truck(manager, stub, "f2", NORTH)
-    submit(manager, "t-1", "S1", "S4")           # f1: east through EAST
+    submit(manager, "t-1", "S1", "S2")           # f1: east through EAST
     submit(manager, "t-2", "S1", "S2")           # f2: south through EAST to S1
     turn(manager, (f1, f2), now)                 # f1 takes t-1: it is on S1
     f1.drive()
@@ -1054,6 +1062,12 @@ def crossing(manager, stub, now):
     f1.take().state(now)
     manager._expire_dwells(now)                  # f1's leg 2, stopped on S1
     f1.take()
+    # AND DRIVEN TO THE END OF IT. floor._resolve defers any cycle whose
+    # members are still driving, and leg 2 out of a bay has the spur
+    # foot in it before anything of f2's - so without this the crossing
+    # is real, nobody is parked, and the pass correctly does nothing.
+    f1.drive()
+    f1.state(now)
     return f1, f2
 
 
@@ -1087,11 +1101,11 @@ def test_a_yield_that_frees_the_contested_floor_is_a_resolution(floor):
     assert doc["traffic"]["yields"], "nothing was recorded as a yield"
     gave = doc["traffic"]["yields"][-1]
     assert gave["vehicle"] == "f2" and gave["with"] == ["f1"]
-    # SIX ELEMENTS, not two: on this floor f2's reservation runs the
-    # spine and the pick aisle - three nodes and three edges - and all
-    # of it is floor AHEAD of the truck, which is what makes the yield
-    # a resolution rather than a gesture.
-    assert gave["freed"] == 6 and gave["task"] == "t-2"
+    # TWELVE ELEMENTS: on this floor f2's reservation runs the spine and
+    # then west along the north ring leg - six nodes and six edges - and
+    # all of it is floor AHEAD of the truck, which is what makes the
+    # yield a resolution rather than a gesture.
+    assert gave["freed"] == 12 and gave["task"] == "t-2"
     assert doc["traffic"]["blocked"] == []
     assert doc["traffic"]["aside"] == [], "a yield that worked moved a truck"
     assert manager.floor.owner_of(WEST) is None, (
@@ -1137,7 +1151,7 @@ def test_a_lost_truck_frees_the_corridor_and_keeps_the_node_under_it(floor):
     manager, stub = floor
     now = time.monotonic()
     f1 = Truck(manager, stub, "f1", WEST)
-    submit(manager, "t-1", "S1", "S4")
+    submit(manager, "t-1", "S1", "S2")
     turn(manager, (f1,), now)
     assert len(manager.floor.held_by("f1")) > 1
 
@@ -1148,7 +1162,7 @@ def test_a_lost_truck_frees_the_corridor_and_keeps_the_node_under_it(floor):
     assert manager.floor.owner_of(WEST) == "parked:f1"
     assert manager.tasks[0]["state"] == "QUEUED"
     doc = manager._status(now)
-    assert doc["traffic"]["holds"]["parked:f1"] == ["(-13.0,0.0)"]
+    assert doc["traffic"]["holds"]["parked:f1"] == ["(-13.0,10.0)"]
 
     # A second truck may now have the aisle - but not that one node.
     f2 = Truck(manager, stub, "f2", EAST)
@@ -1200,7 +1214,7 @@ def test_a_hold_asks_only_for_the_route_ahead_of_the_truck(floor):
     manager, stub = floor
     now = time.monotonic()
     f1 = Truck(manager, stub, "f1", (-20.0, 0.0))
-    submit(manager, "t-1", "S1", "S4")
+    submit(manager, "t-1", "S1", "S2")
     turn(manager, (f1,), now)
     trf = manager.tasks[0]["traffic"]
     assert trf["hold_points"][0] == (-20.0, 0.0)
@@ -1260,11 +1274,11 @@ def test_the_traffic_block_is_json_and_reads_like_a_floor(floor):
     text = json.dumps(doc)              # the real test: it serialises
     assert "traffic" in json.loads(text)
     assert doc["traffic"]["holds"]["f1"] == [
-        "(-13.0,0.0)", "(-13.0,0.0)-(-13.0,3.3)", "(-13.0,3.3)"]
-    assert doc["traffic"]["holds"]["f2"] == ["(-7.0,0.0)"]
+        "(-13.0,10.0)", "(-13.0,4.2)-(-13.0,10.0)", "(-13.0,4.2)"]
+    assert doc["traffic"]["holds"]["f2"] == ["(-10.0,10.0)"]
     # f2 waits on the SPUR FOOT, not on the station: the foot is what
     # f1 is holding while it dwells and what f2 must cross to reach S1.
-    assert doc["traffic"]["waiting"] == {"f2": "(-13.0,0.0)"}
+    assert doc["traffic"]["waiting"] == {"f2": "(-13.0,10.0)"}
     assert all("traffic" not in t for t in doc["tasks"])
     # An edge is one piece of floor whichever way you drive it, and it
     # prints as its two ends.
@@ -1299,8 +1313,8 @@ def test_a_truck_that_cannot_start_is_on_the_screen_by_name(floor):
     now = time.monotonic()
     f1 = Truck(manager, stub, "f1", S1_XY)
     f2 = Truck(manager, stub, "f2", S1_XY)
-    submit(manager, "t-1", "S1", "S4")
-    submit(manager, "t-2", "S1", "S4")
+    submit(manager, "t-1", "S1", "S2")
+    submit(manager, "t-2", "S1", "S2")
     for _ in range(3):
         turn(manager, (f1, f2), now)
 
@@ -1332,7 +1346,7 @@ def test_a_leg_two_that_cannot_start_is_on_the_screen_too(floor):
     """
     manager, stub = floor
     now = time.monotonic()
-    f1, f2 = head_on(manager, stub, now, to1="S4")
+    f1, f2 = head_on(manager, stub, now, to1="S2")
     f1.drive()                                # f1 lands on S1
     turn(manager, (f1, f2), now)              # ...arrives; the dwell starts
     assert manager.tasks[0]["state"] == "DWELL"
@@ -1347,12 +1361,12 @@ def test_a_leg_two_that_cannot_start_is_on_the_screen_too(floor):
 
     assert len(f1.legs()) == legs_before, "leg 2 went out on a grant of nothing"
     assert manager.tasks[0]["state"] == "DWELL"
-    assert "cannot start leg2 of t-1 to S4" in manager.floor.stuck["f1"]
+    assert "cannot start leg2 of t-1 to S2" in manager.floor.stuck["f1"]
     # ...and the assignment that follows it in the same drain leaves it
     # alone. This is the whole regression.
     manager._assign(now)
     doc = manager._status(now)
-    assert "cannot start leg2 of t-1 to S4" in doc["traffic"]["stuck"]["f1"]
+    assert "cannot start leg2 of t-1 to S2" in doc["traffic"]["stuck"]["f1"]
 
 
 # ---- 7. the guarantee has to survive the vehicle's own publish cadence ----
@@ -1388,7 +1402,7 @@ def test_a_state_that_predates_the_leg_may_not_free_the_floor_it_holds(
     manager, stub = floor
     now = time.monotonic()
     f1 = Truck(manager, stub, "f1", WEST)
-    submit(manager, "t-1", "S1", "S4")
+    submit(manager, "t-1", "S1", "S2")
     turn(manager, (f1,), now)
     granted = manager.floor.held_by("f1")
     assert len(granted) == 3, "the leg should have been granted whole"
@@ -1402,7 +1416,7 @@ def test_a_state_that_predates_the_leg_may_not_free_the_floor_it_holds(
 
     # AND THE SECOND TRUCK IS STILL REFUSED THAT FLOOR.
     f2 = Truck(manager, stub, "f2", EAST)
-    submit(manager, "t-2", "S1", "S4")
+    submit(manager, "t-2", "S1", "S2")
     turn(manager, (f2, f1), now)
     assert manager.floor.owner_of(S1_XY) == "f1"
     assert horizon_of(f2) == ["wp2", "S1"], \
@@ -1417,7 +1431,7 @@ def test_the_dwell_to_leg_two_boundary_has_the_same_window(floor):
     manager, stub = floor
     now = time.monotonic()
     f1 = Truck(manager, stub, "f1", (-20.0, 0.0))
-    submit(manager, "t-1", "S1", "S4")
+    submit(manager, "t-1", "S1", "S2")
     turn(manager, (f1,), now)
     leg1 = f1.order["orderId"]
     f1.drive()
@@ -1444,7 +1458,7 @@ def test_a_base_the_ledger_stopped_backing_is_re_claimed_and_shouted(
     manager, stub = floor
     now = time.monotonic()
     f1 = Truck(manager, stub, "f1", WEST)
-    submit(manager, "t-1", "S1", "S4")
+    submit(manager, "t-1", "S1", "S2")
     turn(manager, (f1,), now)
     assert manager.tasks[0]["traffic"]["released"] == 2   # granted whole
 
@@ -1486,10 +1500,17 @@ def station_pair(manager, stub, now):
     wins every tie in this section by standing in the doorway - which
     inverted the two roles and made the handover a test of nothing.
     """
-    f1 = Truck(manager, stub, "f1", (-20.0, 0.0))
+    # F1 ON THE SAME LEG, NOT ROUND THE CORNER. Staged at the pick
+    # aisle's west end its route to S2 is 27.8 m and it is granted the
+    # contested junction on an early pass, long before f2 has reached
+    # the spur - so the handover this section is about never happens and
+    # the test passes for the wrong reason. From (-17, 10) it is 14.8 m
+    # against f2's 11.8: f2 still wins the head task, and f1's hold
+    # meets f2's on the same pass.
+    f1 = Truck(manager, stub, "f1", (-17.0, 10.0))
     f2 = Truck(manager, stub, "f2", FAR_EAST)
-    submit(manager, "t-1", "S4", "S5")
-    submit(manager, "t-2", "S4", "S3")
+    submit(manager, "t-1", "S2", "S5")
+    submit(manager, "t-2", "S2", "S3")
     turn(manager, (f1, f2), now)          # f2 takes t-1: it is the nearer
     turn(manager, (f1, f2), now)          # f1 takes t-2, or what is left
     return f1, f2
@@ -1522,18 +1543,23 @@ def test_a_dwelling_truck_keeps_the_spur_junction_it_came_in_by(floor):
     assert manager.tasks[0]["state"] == "DWELL"
     # THE JUNCTION IS STILL THE OCCUPANT'S, and the queued truck's hold
     # is refused on it rather than granted the moment the spur filled.
-    assert manager.floor.owner_of(S4_ENTRY) == "f2"
+    assert manager.floor.owner_of(S2_ENTRY) == "f2"
     assert manager.floor.held_by("f2") == [
-        S4_ENTRY, tr.edge(S4_ENTRY, S4_XY), S4_XY]
-    assert manager.floor.waiting_on("f1") == S4_ENTRY
-    assert manager.tasks[1]["traffic"]["released"] == 2, \
+        S2_ENTRY, tr.edge(S2_ENTRY, S2_XY), S2_XY]
+    assert manager.floor.waiting_on("f1") == S2_ENTRY
+    # THE CLAIM IS ABOUT THE JUNCTION, NOT A COUNT. Pinning a number
+    # means rewriting this line every time the floor moves; the ruling
+    # is that the released prefix stops SHORT of the node the occupant
+    # is standing on the far side of.
+    trf1 = manager.tasks[1]["traffic"]
+    assert S2_ENTRY not in trf1["hold_points"][:trf1["released"]], \
         "the queued truck was handed the junction the occupant needs"
     assert manager.floor.find_cycle() is None
 
     # ...and it stays refused for as long as the dwell lasts.
     roll(manager, (f1, f2), now)
-    assert manager.floor.owner_of(S4_ENTRY) == "f2"
-    assert manager.tasks[1]["traffic"]["released"] == 2
+    assert manager.floor.owner_of(S2_ENTRY) == "f2"
+    assert S2_ENTRY not in trf1["hold_points"][:trf1["released"]]
 
     # THE DWELL ENDS AND LEG 2 TAKES THE JUNCTION OVER. Nothing was
     # freed in between, so there is no pass in which the queued truck
@@ -1541,7 +1567,7 @@ def test_a_dwelling_truck_keeps_the_spur_junction_it_came_in_by(floor):
     manager.dwell_until["t-1"] = now - 1.0
     roll(manager, (f1, f2), now)
     assert manager.tasks[0]["state"] == "ASSIGNED_LEG2"
-    assert manager.floor.owner_of(S4_ENTRY) == "f2"
+    assert manager.floor.owner_of(S2_ENTRY) == "f2"
     assert base_of(f2)[:2] == ["wp1", "wp2"], (
         "leg 2 did not get the junction it had been holding: {}".format(
             base_of(f2)))
@@ -1553,7 +1579,7 @@ def test_a_dwelling_truck_keeps_the_spur_junction_it_came_in_by(floor):
     assert manager.tasks[1]["state"] == "DWELL", (
         "the second truck never got the station: {}".format(
             manager.tasks[1]["state"]))
-    assert manager.floor.standing["f1"] == S4_XY
+    assert manager.floor.standing["f1"] == S2_XY
     assert manager.refused == []
 
 
@@ -1580,7 +1606,7 @@ def test_a_dwelling_truck_gives_back_the_corridor_behind_it(floor):
     manager, stub = floor
     now = time.monotonic()
     f1 = Truck(manager, stub, "f1", (-20.0, 0.0))
-    submit(manager, "t-1", "S1", "S4")
+    submit(manager, "t-1", "S1", "S2")
     turn(manager, (f1,), now)
     f1.drive()
     turn(manager, (f1,), now)
@@ -1593,7 +1619,7 @@ def test_a_dwelling_truck_gives_back_the_corridor_behind_it(floor):
     # plain corridor node has none, and that is the distinction the
     # ruling rests on.
     assert manager.floor.spur_entry(S1_XY) == WEST
-    assert manager.floor.spur_entry(S4_XY) == S4_ENTRY
+    assert manager.floor.spur_entry(S2_XY) == S2_ENTRY
     assert manager.floor.spur_entry(FAR_EAST) is None
 
 
@@ -1635,7 +1661,7 @@ def test_an_idle_trucks_hold_is_given_back_after_the_timeout(floor):
     doc = manager._status(now)
     shown = doc["traffic"]["idle"]
     assert [(e["vehicle"], e["node"], e["freed"]) for e in shown] == \
-        [("f1", "(-7.0,0.0)", 1)]
+        [("f1", "(-10.0,10.0)", 1)]
     assert "idle timeout" in "\n".join(fleet_cli.traffic_lines(doc))
     # ...and a second truck may now have that node.
     f2 = Truck(manager, stub, "f2", EAST)
@@ -1650,14 +1676,14 @@ def test_a_truck_parked_in_a_station_spur_keeps_its_node_forever(floor):
     occupied dead end."""
     manager, stub = floor
     now = time.monotonic()
-    f2 = Truck(manager, stub, "f2", S4_XY)
+    f2 = Truck(manager, stub, "f2", S2_XY)
     f2.state(now)
-    assert manager.floor.owner_of(S4_XY) == "f2"
+    assert manager.floor.owner_of(S2_XY) == "f2"
     for i in range(5):
         later = now + fl.IDLE_HOLD_S * (i + 1)
         manager.floor.traffic_pass(later)
         f2.state(later)
-    assert manager.floor.owner_of(S4_XY) == "f2"
+    assert manager.floor.owner_of(S2_XY) == "f2"
     assert manager._status(now)["traffic"]["idle"] == []
 
 
@@ -1679,7 +1705,7 @@ def test_a_dwelling_truck_is_not_an_idle_one(floor):
             truck.take().state(later)
     assert manager.tasks[0]["state"] == "DWELL"
     assert manager.floor.held_by("f2") == [
-        S4_ENTRY, tr.edge(S4_ENTRY, S4_XY), S4_XY]
+        S2_ENTRY, tr.edge(S2_ENTRY, S2_XY), S2_XY]
     assert "f2" not in manager.floor.idle_hold
     assert manager._status(now)["traffic"]["idle"] == []
 
@@ -1696,7 +1722,7 @@ def test_a_hulk_that_returns_somewhere_else_takes_its_pin_with_it(floor):
     manager, stub = floor
     now = time.monotonic()
     f1 = Truck(manager, stub, "f1", WEST)
-    submit(manager, "t-1", "S1", "S4")
+    submit(manager, "t-1", "S1", "S2")
     turn(manager, (f1,), now)
 
     manager._on_connection("f1", f1.row,
@@ -1779,25 +1805,25 @@ def test_leg_two_out_of_a_spur_frees_nothing_under_the_truck(floor):
     manager.log.addHandler(catcher)
     manager.log.setLevel(logging.ERROR)
     try:
-        f2.xy = S4_XY                             # it has NOT moved yet
+        f2.xy = S2_XY                             # it has NOT moved yet
         f2.last = ("wp1", 0)                      # leg 2's first node: S4
         f2.take().state(now)
         manager.floor.traffic_pass(now)
     finally:
         manager.log.removeHandler(catcher)
 
-    assert manager.floor.owner_of(S4_ENTRY) == "f2", (
+    assert manager.floor.owner_of(S2_ENTRY) == "f2", (
         "the junction under the truck was freed on its own leg-2 state")
     assert contiguous(manager.floor.held_by("f2")), (
         "the hold is not a run of floor any more: {}".format(
             manager.floor.held_by("f2")))
     assert manager.floor.held_by("f2")[:3] == [
-        S4_XY, tr.edge(S4_ENTRY, S4_XY), S4_ENTRY], (
+        S2_XY, tr.edge(S2_ENTRY, S2_XY), S2_ENTRY], (
         "the hold is not in leg 2's travel order")
     assert catcher.said == [], (
         "the traffic path logged an error: {}".format(catcher.said))
     # ...and the truck waiting for that junction did not get it.
-    assert S4_ENTRY not in manager.floor.held_by("f1")
+    assert S2_ENTRY not in manager.floor.held_by("f1")
     assert manager.floor.blocked == []
 
 
@@ -1819,17 +1845,18 @@ def test_the_waiting_truck_is_not_handed_the_junction_when_it_is_older(
     for truck in (f1, f2):
         truck.drive()
     turn(manager, (f1, f2), now)
-    f2.xy, f2.last = S4_XY, ("wp1", 0)
+    f2.xy, f2.last = S2_XY, ("wp1", 0)
     f2.take().state(now)
     manager.floor.traffic_pass(now)
 
-    assert manager.floor.owner_of(S4_ENTRY) == "f2"
-    # THE NODE UNDER IT AND NOTHING ELSE. f1 starts at the pick aisle's
-    # west end and has driven as far as S1's foot by now; what matters
-    # is that its hold stops there and does not include the junction
-    # the occupant is leaving by.
-    assert manager.floor.held_by("f1") == [WEST]
-    assert [n["nodeId"] for n in f1.released()] == ["wp1", "wp2"], (
+    assert manager.floor.owner_of(S2_ENTRY) == "f2"
+    # THE NODE UNDER IT AND NOTHING ELSE, whichever node that is by now,
+    # and the released prefix stopping short of the junction the
+    # occupant is leaving by. Both are the ruling; neither is a count.
+    assert manager.floor.held_by("f1") == [manager.floor.standing["f1"]]
+    released_xy = [(n["nodePosition"]["x"], n["nodePosition"]["y"])
+                   for n in f1.released()]
+    assert S2_ENTRY not in released_xy, (
         "the waiting truck was released onto the occupant's way out")
     assert manager.floor.find_cycle() is None
     assert manager.floor.blocked == []
@@ -1854,12 +1881,16 @@ def test_four_trucks_take_one_transport_each_and_the_fifth_task_waits(
     """
     manager, stub = floor
     now = time.monotonic()
-    trucks = (Truck(manager, stub, "f1", WEST),
-              Truck(manager, stub, "f2", FAR_EAST),
-              Truck(manager, stub, "f3", (-12.0, 10.0)),
-              Truck(manager, stub, "f4", (12.0, 10.0)))
+    # THE FOUR SPAWN POSES, and they are the four poses for a reason:
+    # they are the only x-positions on the north leg that are not a bay
+    # spur foot, so no truck starts in somebody's doorway and no two
+    # snap to the same node.
+    trucks = (Truck(manager, stub, "f1", (-17.0, 10.0)),
+              Truck(manager, stub, "f2", (-10.0, 10.0)),
+              Truck(manager, stub, "f3", (10.0, 10.0)),
+              Truck(manager, stub, "f4", (17.0, 10.0)))
     for i, (src, dst) in enumerate(
-            (("S2", "S1"), ("S4", "S1"), ("S6", "S10"),
+            (("S2", "S1"), ("S2", "S1"), ("S6", "S10"),
              ("S7", "S10"), ("S5", "S1"))):
         submit(manager, "t-{}".format(i + 1), src, dst)
     for _ in range(5):
