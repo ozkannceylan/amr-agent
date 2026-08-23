@@ -502,6 +502,82 @@ neither file knows them: `maxLoadMass`, `accelerationMax`, `decelerationMax`.
 amended 2026-08-21 for M6.2: which fields are used, which are deliberately
 omitted, and why this project's error names are camelCase.
 
+## Watching the cell — what an operator does and sees
+
+**One screen, one command:**
+
+```bash
+python3 m6/fleet/fleet_cli.py status --watch
+```
+
+It reprints on every change and on the manager's own 2 s tick. Nothing
+else needs to be open: the document it renders is RETAINED on the
+broker, so a screen opened an hour into a shift shows the shift, not a
+blank until the next event.
+
+`assets/m6-fleet/m6-fleet-07-operator-view-2026-08-24.mp4` is that
+screen beside the floor it describes, recorded from the same instants —
+`tools/record_operator.py` renders it into every overhead camera frame,
+so the two cannot drift apart. Watch a task appear in the queue, get an
+assignee, move through its states and vanish into `done`.
+
+### What the operator gives the cell
+
+**A transport, and never a vehicle.** `submit FROM TO` names two
+stations and the fleet picks the truck:
+
+```bash
+python3 m6/fleet/fleet_cli.py submit S1 S6
+```
+
+There is no way to say "send f3" and that is deliberate — the fleet
+knows which trucks are idle, where they are and what floor is free, and
+an operator who could override that would be racing it. The choice is
+logged with its arithmetic, so the screen can always answer *why that
+truck*:
+
+```
+assigned ft-cd9d2ead to f1 (nearest idle to S10:
+    f1 43.30 m, f2 37.30 m, f3 37.30 m <-- chosen)
+```
+
+For a shift rather than a single job, `demo` keeps the queue fed:
+
+```bash
+python3 m6/fleet/fleet_cli.py demo --duration 600 --in-flight 4 --seed 7
+```
+
+It draws station pairs weighted by route length, so cross-hall runs
+dominate, and it is **seeded** — the same seed is the same shift, which
+is what lets a run be shot twice and be one run.
+
+### Reading the screen, top to bottom
+
+| Section | What it answers |
+|---|---|
+| header | is the manager alive, and how old is this picture |
+| `VEHICLES` | who is ONLINE, in AUTOMATIC, where, on which order, how stale |
+| `TASKS` | every transport in flight plus the last few completions, with its state and its assignee |
+| `TRAFFIC` | who holds which floor, who WAITS on whom, whose base is how long, who yielded or was stepped aside |
+| `NOT MOVING` | trucks the fleet believes are driving and that are not (M6.7) |
+| `REFUSED` | every task the fleet would not take, and the sentence saying why |
+
+**A task's whole life is one row.** `QUEUED` → `ASSIGNED_LEG1` →
+`DWELL` → `ASSIGNED_LEG2` → `DONE`, and the `LAST` column carries the
+most recent thing that happened to it in words: `leg1 -> S12 as
+ft-b445fd9a on f4`, `base 5 released + 4 horizon`, `arrived S8 - DONE`.
+
+**`TRAFFIC` is where a slow cell explains itself.** A truck standing
+still with `WAITS (-13.0,10.0)` beside its name is not broken — the
+floor ahead belongs to somebody else and it is waiting, which is the
+whole of M6.4. A truck standing still with NOTHING against it in
+traffic, and its name under `NOT MOVING`, is the other thing entirely,
+and after `STALL_GIVE_UP_S` the fleet takes its task back and gives it
+to a truck that can drive it.
+
+**Nothing on this screen is a safety function.** The F-program decides
+what a truck may do; this is the fleet saying what it *asked* for.
+
 ## Fleet manager — the cell's master control
 
 **M6.3 gave the cell one decision-maker.** `fleet/fleet_manager.py` is a
