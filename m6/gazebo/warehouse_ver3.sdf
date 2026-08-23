@@ -1,0 +1,1224 @@
+<?xml version="1.0" ?>
+<!--
+  warehouse_ver3.sdf - M6.6's own warehouse. warehouse_ver2.sdf is FROZEN
+  and stays in this directory: every M6.1-M6.5 figure in PROOF.md was
+  measured on it. ver2 is this file's ancestor in history only, not its
+  parent in any build sense.
+
+  TWO ROAD CLASSES, sized to the follower, not the other way round.
+    clear_width / 2 - 0.46 >= 3.30  =>  cruise corridor >= 7.52 m
+    RING + SPINE  8.00 m clear  =>  scanner clearance 3.54 m  (CRUISE)
+    PICK AISLE    5.00 m clear  =>  scanner clearance 2.04 m  (CREEP)
+  A pick aisle is inside the warning field on purpose.
+
+    +y
+     ^   north wall, inner face y = +14.00
+     |  ===== RING, centreline y = +10.00, 8.00 m clear (CRUISE) =====
+     |  ####[bay]####[bay]####  |S|  ####[bay]####[bay]####   racks
+     |  ----- PICK AISLE, centreline y = 0.00, 5.00 m (CREEP) -----
+     |  ####[bay]####[bay]####  |P|  ####[bay]####[bay]####   racks
+     |  ===== RING, centreline y = -10.00, 8.00 m clear (CRUISE) =====
+     |  ####[S9]####[S10]##[S11]####[S12]####   DOCK ANNEX
+     +===========================================================> +x
+        west ring leg x = -20.00      east ring leg x = +20.00
+        spine |S|/|P| x = 0.00, 8.00 m clear, y = -10.00 to +10.00
+
+  Hall inner faces: x = +-24.00, y in [-18.00, +14.00] (48 x 32 m).
+  World name stays "warehouse": every topic, launch and script keys on it.
+-->
+<sdf version="1.8">
+  <world name="warehouse">
+
+    <!-- The arena's 2 ms fixed step at 500 Hz, so joint rates measured on
+         the M4 arena stay comparable here. -->
+    <physics type="ode">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>500</real_time_update_rate>
+    </physics>
+
+    <plugin name="gz::sim::systems::Physics" filename="libgz-sim-physics-system.so"/>
+    <plugin name="gz::sim::systems::UserCommands" filename="libgz-sim-user-commands-system.so"/>
+    <plugin name="gz::sim::systems::SceneBroadcaster" filename="libgz-sim-scene-broadcaster-system.so"/>
+
+    <!-- Required by the vehicle's three gpu_lidar sensors. Without this no
+         scan topic is ever advertised and the failure is silent. -->
+    <plugin name="gz::sim::systems::Sensors" filename="libgz-sim-sensors-system.so">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <!-- ======================= GUI CONFIGURATION ====================== -->
+    <!--
+      THIS BLOCK IS WHY THE LIDAR BEAMS ARE VISIBLE, and it is the arena's
+      block with the camera moved. worlds/forklift_arena.sdf carries the
+      full measured rationale for every plugin here and is the file to read
+      and to edit; it is not repeated line for line because two copies of a
+      long explanation drift apart. The three facts a viewer of THIS world
+      needs are repeated, because getting them wrong is silent:
+
+        1. `<visualize>true</visualize>` on a sensor is NECESSARY BUT NOT
+           SUFFICIENT on Gazebo Harmonic. VisualizeLidar is what draws laser
+           scans, it is not in gz sim's default GUI configuration, and it
+           never reads the sensor's visualize flag. Loading it is this
+           block's whole job.
+        2. Nothing is drawn until a human presses the plugin's refresh
+           button. Beams on is not the start state of this world.
+        3. Refresh selects entry ZERO of a sorted topic list, which is
+           /forklift/gz/safety_scanner_back/measurement, NOT the navigation
+           lidar. Those beams are a non safe measurement channel and are not
+           a protective field (invariant 1). A recording that leaves the
+           default selection is showing the wrong sensor with the most
+           dangerous available caption. The navigation lidar is
+           /forklift/gz/scan_nav.
+
+      The scene settings below are repeated from the world's <scene> element
+      on purpose: MinimalScene does not inherit them.
+    -->
+    <gui fullscreen="0">
+
+      <plugin filename="MinimalScene" name="3D View">
+        <gz-gui>
+          <title>3D View</title>
+          <property type="bool" key="showTitleBar">false</property>
+          <property type="string" key="state">docked</property>
+        </gz-gui>
+        <engine>ogre2</engine>
+        <scene>scene</scene>
+        <ambient_light>1.0 1.0 1.0</ambient_light>
+        <background_color>0.7 0.7 0.7</background_color>
+        <!-- Looking north east from over the south west corner, so the
+             dock apron, both charging bays and the west end of the rack
+             block are in frame with no camera move. -->
+        <camera_pose>-19.0 -16.0 12.0 0 0.52 0.72</camera_pose>
+      </plugin>
+
+      <plugin filename="GzSceneManager" name="Scene Manager">
+        <gz-gui>
+          <property key="resizable" type="bool">false</property>
+          <property key="width" type="double">5</property>
+          <property key="height" type="double">5</property>
+          <property key="state" type="string">floating</property>
+          <property key="showTitleBar" type="bool">false</property>
+        </gz-gui>
+      </plugin>
+
+      <plugin filename="InteractiveViewControl" name="Interactive view control">
+        <gz-gui>
+          <property key="resizable" type="bool">false</property>
+          <property key="width" type="double">5</property>
+          <property key="height" type="double">5</property>
+          <property key="state" type="string">floating</property>
+          <property key="showTitleBar" type="bool">false</property>
+        </gz-gui>
+      </plugin>
+
+      <plugin filename="CameraTracking" name="Camera Tracking">
+        <gz-gui>
+          <property key="resizable" type="bool">false</property>
+          <property key="width" type="double">5</property>
+          <property key="height" type="double">5</property>
+          <property key="state" type="string">floating</property>
+          <property key="showTitleBar" type="bool">false</property>
+        </gz-gui>
+      </plugin>
+
+      <plugin filename="EntityContextMenuPlugin" name="Entity context menu">
+        <gz-gui>
+          <property key="state" type="string">floating</property>
+          <property key="width" type="double">5</property>
+          <property key="height" type="double">5</property>
+          <property key="showTitleBar" type="bool">false</property>
+        </gz-gui>
+      </plugin>
+
+      <!-- NOT start_paused. The scanners are always_on but the sensors
+           system renders on simulation steps, so a paused world publishes
+           no scan, the plugin's topic list comes up empty and the beams
+           never appear. The world is launched with -r for the same
+           reason. -->
+      <plugin filename="WorldControl" name="World control">
+        <gz-gui>
+          <title>World control</title>
+          <property type="bool" key="showTitleBar">false</property>
+          <property type="bool" key="resizable">false</property>
+          <property type="double" key="height">72</property>
+          <property type="double" key="z">1</property>
+          <property type="string" key="state">floating</property>
+          <anchors target="3D View">
+            <line own="left" target="left"/>
+            <line own="bottom" target="bottom"/>
+          </anchors>
+        </gz-gui>
+        <play_pause>true</play_pause>
+        <step>true</step>
+        <start_paused>false</start_paused>
+        <use_event>true</use_event>
+      </plugin>
+
+      <!-- The real time factor readout, on screen for any recording. It is
+           NOT a measurement instrument: the value it shows is gz's smoothed
+           instantaneous factor. -->
+      <plugin filename="WorldStats" name="World stats">
+        <gz-gui>
+          <title>World stats</title>
+          <property type="bool" key="showTitleBar">false</property>
+          <property type="bool" key="resizable">false</property>
+          <property type="double" key="height">110</property>
+          <property type="double" key="width">290</property>
+          <property type="double" key="z">1</property>
+          <property type="string" key="state">floating</property>
+          <anchors target="3D View">
+            <line own="right" target="right"/>
+            <line own="bottom" target="bottom"/>
+          </anchors>
+        </gz-gui>
+        <sim_time>true</sim_time>
+        <real_time>true</real_time>
+        <real_time_factor>true</real_time_factor>
+        <iterations>true</iterations>
+      </plugin>
+
+      <!-- The beams. Docked rather than floating so the topic and display
+           type combo boxes are visible without hunting: which scanner is on
+           screen is not guessable from the picture. -->
+      <plugin filename="VisualizeLidar" name="Visualize Lidar">
+        <gz-gui>
+          <title>Visualize lidar</title>
+          <property type="string" key="state">docked</property>
+        </gz-gui>
+      </plugin>
+
+      <plugin filename="Screenshot" name="Screenshot">
+        <gz-gui>
+          <property type="bool" key="showTitleBar">false</property>
+          <property type="string" key="state">floating</property>
+          <property type="double" key="width">100</property>
+          <property type="double" key="height">50</property>
+        </gz-gui>
+      </plugin>
+
+    </gui>
+
+    <scene>
+      <ambient>1 1 1 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <shadows>false</shadows>
+      <grid>false</grid>
+    </scene>
+
+    <light name="sun" type="directional">
+      <cast_shadows>false</cast_shadows>
+      <pose>0 0 12 0 0 0</pose>
+      <diffuse>1.0 1.0 1.0 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.3 0.3 -1.0</direction>
+    </light>
+
+    <gravity>0 0 -9.8</gravity>
+
+    <!-- ============================ Floor ============================ -->
+    <!-- Plain concrete, mu 1.0 as in the arena: the tricycle has a single
+         driven wheel and a slippery floor turns traction figures into tyre
+         slip figures. Plane 48 x 32, inner hall faces. -->
+    <model name="Floor">
+      <static>true</static>
+      <pose>0 -2 0 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>48 32</size></plane>
+          </geometry>
+          <surface>
+            <friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>48 32</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.55 0.55 0.55 1</ambient>
+            <diffuse>0.55 0.55 0.55 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ======================= Perimeter walls ======================= -->
+    <!-- 0.20 thick, 4.00 high, inner faces at x = +-24.00 and
+         y = -18.00 / +14.00. No dock door cut: annex bays are the only
+         way through the south strip. -->
+    <model name="WallNorth">
+      <static>true</static>
+      <link name="link">
+        <collision name="wallnorth_collision">
+          <pose>0.000 14.100 2.000 0 0 0</pose>
+          <geometry><box><size>48.600 0.200 4.000</size></box></geometry>
+        </collision>
+        <visual name="wallnorth_visual">
+          <pose>0.000 14.100 2.000 0 0 0</pose>
+          <geometry><box><size>48.600 0.200 4.000</size></box></geometry>
+          <material><ambient>0.80 0.80 0.75 1</ambient><diffuse>0.80 0.80 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WallSouth">
+      <static>true</static>
+      <link name="link">
+        <collision name="wallsouth_collision">
+          <pose>0.000 -18.100 2.000 0 0 0</pose>
+          <geometry><box><size>48.600 0.200 4.000</size></box></geometry>
+        </collision>
+        <visual name="wallsouth_visual">
+          <pose>0.000 -18.100 2.000 0 0 0</pose>
+          <geometry><box><size>48.600 0.200 4.000</size></box></geometry>
+          <material><ambient>0.80 0.80 0.75 1</ambient><diffuse>0.80 0.80 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WallEast">
+      <static>true</static>
+      <link name="link">
+        <collision name="walleast_collision">
+          <pose>24.100 -2.000 2.000 0 0 0</pose>
+          <geometry><box><size>0.200 32.000 4.000</size></box></geometry>
+        </collision>
+        <visual name="walleast_visual">
+          <pose>24.100 -2.000 2.000 0 0 0</pose>
+          <geometry><box><size>0.200 32.000 4.000</size></box></geometry>
+          <material><ambient>0.80 0.80 0.75 1</ambient><diffuse>0.80 0.80 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WallWest">
+      <static>true</static>
+      <link name="link">
+        <collision name="wallwest_collision">
+          <pose>-24.100 -2.000 2.000 0 0 0</pose>
+          <geometry><box><size>0.200 32.000 4.000</size></box></geometry>
+        </collision>
+        <visual name="wallwest_visual">
+          <pose>-24.100 -2.000 2.000 0 0 0</pose>
+          <geometry><box><size>0.200 32.000 4.000</size></box></geometry>
+          <material><ambient>0.80 0.80 0.75 1</ambient><diffuse>0.80 0.80 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <!-- ======================= Obstacles ======================== -->
+    <model name="RackNW1">
+      <static>true</static>
+      <pose>-15.500 4.250 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW2">
+      <static>true</static>
+      <pose>-10.000 4.250 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>2.000 3.500 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>2.000 3.500 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW3">
+      <static>true</static>
+      <pose>-4.500 4.250 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE1">
+      <static>true</static>
+      <pose>4.500 4.250 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE2">
+      <static>true</static>
+      <pose>10.000 4.250 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>2.000 3.500 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>2.000 3.500 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE3">
+      <static>true</static>
+      <pose>15.500 4.250 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW1">
+      <static>true</static>
+      <pose>-15.500 -4.250 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW2">
+      <static>true</static>
+      <pose>-10.000 -4.250 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>2.000 3.500 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>2.000 3.500 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW3">
+      <static>true</static>
+      <pose>-4.500 -4.250 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE1">
+      <static>true</static>
+      <pose>4.500 -4.250 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE2">
+      <static>true</static>
+      <pose>10.000 -4.250 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>2.000 3.500 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>2.000 3.500 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE3">
+      <static>true</static>
+      <pose>15.500 -4.250 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>1.000 3.500 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS1Back">
+      <static>true</static>
+      <pose>-13.000 5.950 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS2Back">
+      <static>true</static>
+      <pose>-7.000 5.950 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS5Back">
+      <static>true</static>
+      <pose>7.000 5.950 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS6Back">
+      <static>true</static>
+      <pose>13.000 5.950 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS3Back">
+      <static>true</static>
+      <pose>-13.000 -5.950 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS4Back">
+      <static>true</static>
+      <pose>-7.000 -5.950 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS7Back">
+      <static>true</static>
+      <pose>7.000 -5.950 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS8Back">
+      <static>true</static>
+      <pose>13.000 -5.950 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexW">
+      <static>true</static>
+      <pose>-20.000 -16.000 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>8.000 4.000 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.000 4.000 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexA">
+      <static>true</static>
+      <pose>-10.000 -16.000 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 4.000 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 4.000 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexB">
+      <static>true</static>
+      <pose>0.000 -16.000 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>8.000 4.000 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.000 4.000 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexC">
+      <static>true</static>
+      <pose>10.000 -16.000 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 4.000 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 4.000 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexE">
+      <static>true</static>
+      <pose>20.000 -16.000 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>8.000 4.000 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>8.000 4.000 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS9Back">
+      <static>true</static>
+      <pose>-14.000 -17.950 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS10Back">
+      <static>true</static>
+      <pose>-6.000 -17.950 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS11Back">
+      <static>true</static>
+      <pose>6.000 -17.950 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS12Back">
+      <static>true</static>
+      <pose>14.000 -17.950 2.000 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4.000 0.100 4.000</size></box></geometry>
+          <material>
+            <ambient>0.45 0.45 0.48 1</ambient>
+            <diffuse>0.55 0.55 0.58 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <!-- ======================= Station paint ==================== -->
+    <model name="StationS1Paint">
+      <static>true</static>
+      <pose>-13.000 3.300 0 0 0 1.570796</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="StationS2Paint">
+      <static>true</static>
+      <pose>-7.000 3.300 0 0 0 1.570796</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="StationS3Paint">
+      <static>true</static>
+      <pose>-13.000 -3.300 0 0 0 -1.570796</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="StationS4Paint">
+      <static>true</static>
+      <pose>-7.000 -3.300 0 0 0 -1.570796</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="StationS5Paint">
+      <static>true</static>
+      <pose>7.000 3.300 0 0 0 1.570796</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="StationS6Paint">
+      <static>true</static>
+      <pose>13.000 3.300 0 0 0 1.570796</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="StationS7Paint">
+      <static>true</static>
+      <pose>7.000 -3.300 0 0 0 -1.570796</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="StationS8Paint">
+      <static>true</static>
+      <pose>13.000 -3.300 0 0 0 -1.570796</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="StationS9Paint">
+      <static>true</static>
+      <pose>-14.000 -15.300 0 0 0 -1.570796</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="StationS10Paint">
+      <static>true</static>
+      <pose>-6.000 -15.300 0 0 0 -1.570796</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="StationS11Paint">
+      <static>true</static>
+      <pose>6.000 -15.300 0 0 0 -1.570796</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="StationS12Paint">
+      <static>true</static>
+      <pose>14.000 -15.300 0 0 0 -1.570796</pose>
+      <link name="link">
+        <visual name="disc">
+          <pose>0 0 0.003 0 0 0</pose>
+          <geometry><cylinder><radius>0.40</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+        <visual name="core">
+          <pose>0 0 0.004 0 0 0</pose>
+          <geometry><cylinder><radius>0.26</radius><length>0.006</length></cylinder></geometry>
+          <material><ambient>0.92 0.92 0.95 1</ambient><diffuse>0.92 0.92 0.95 1</diffuse></material>
+        </visual>
+        <visual name="tick">
+          <pose>0.330 0.000 0.005 0 0 0.000</pose>
+          <geometry><box><size>0.30 0.08 0.006</size></box></geometry>
+          <material><ambient>0.10 0.35 0.75 1</ambient><diffuse>0.10 0.35 0.75 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <!-- ======================= Corridor paint ==================== -->
+    <!-- Visuals only. White 0.20 m stripe on every highway centreline;
+         yellow 0.15 m dashes on the pick-aisle centreline. -->
+    <model name="PaintRingNorth">
+      <static>true</static>
+      <pose>0.000 10.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>40.000 0.200 0.006</size></box></geometry>
+          <material>
+            <ambient>0.92 0.92 0.95 1</ambient>
+            <diffuse>0.92 0.92 0.95 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintRingSouth">
+      <static>true</static>
+      <pose>0.000 -10.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>40.000 0.200 0.006</size></box></geometry>
+          <material>
+            <ambient>0.92 0.92 0.95 1</ambient>
+            <diffuse>0.92 0.92 0.95 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintRingWest">
+      <static>true</static>
+      <pose>-20.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.200 20.000 0.006</size></box></geometry>
+          <material>
+            <ambient>0.92 0.92 0.95 1</ambient>
+            <diffuse>0.92 0.92 0.95 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintRingEast">
+      <static>true</static>
+      <pose>20.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.200 20.000 0.006</size></box></geometry>
+          <material>
+            <ambient>0.92 0.92 0.95 1</ambient>
+            <diffuse>0.92 0.92 0.95 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintSpine">
+      <static>true</static>
+      <pose>0.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.200 20.000 0.006</size></box></geometry>
+          <material>
+            <ambient>0.92 0.92 0.95 1</ambient>
+            <diffuse>0.92 0.92 0.95 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintPickDash0">
+      <static>true</static>
+      <pose>-19.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>2.000 0.150 0.006</size></box></geometry>
+          <material>
+            <ambient>0.90 0.75 0.10 1</ambient>
+            <diffuse>0.90 0.75 0.10 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintPickDash1">
+      <static>true</static>
+      <pose>-15.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>2.000 0.150 0.006</size></box></geometry>
+          <material>
+            <ambient>0.90 0.75 0.10 1</ambient>
+            <diffuse>0.90 0.75 0.10 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintPickDash2">
+      <static>true</static>
+      <pose>-11.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>2.000 0.150 0.006</size></box></geometry>
+          <material>
+            <ambient>0.90 0.75 0.10 1</ambient>
+            <diffuse>0.90 0.75 0.10 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintPickDash3">
+      <static>true</static>
+      <pose>-7.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>2.000 0.150 0.006</size></box></geometry>
+          <material>
+            <ambient>0.90 0.75 0.10 1</ambient>
+            <diffuse>0.90 0.75 0.10 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintPickDash4">
+      <static>true</static>
+      <pose>-3.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>2.000 0.150 0.006</size></box></geometry>
+          <material>
+            <ambient>0.90 0.75 0.10 1</ambient>
+            <diffuse>0.90 0.75 0.10 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintPickDash5">
+      <static>true</static>
+      <pose>1.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>2.000 0.150 0.006</size></box></geometry>
+          <material>
+            <ambient>0.90 0.75 0.10 1</ambient>
+            <diffuse>0.90 0.75 0.10 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintPickDash6">
+      <static>true</static>
+      <pose>5.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>2.000 0.150 0.006</size></box></geometry>
+          <material>
+            <ambient>0.90 0.75 0.10 1</ambient>
+            <diffuse>0.90 0.75 0.10 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintPickDash7">
+      <static>true</static>
+      <pose>9.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>2.000 0.150 0.006</size></box></geometry>
+          <material>
+            <ambient>0.90 0.75 0.10 1</ambient>
+            <diffuse>0.90 0.75 0.10 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintPickDash8">
+      <static>true</static>
+      <pose>13.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>2.000 0.150 0.006</size></box></geometry>
+          <material>
+            <ambient>0.90 0.75 0.10 1</ambient>
+            <diffuse>0.90 0.75 0.10 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="PaintPickDash9">
+      <static>true</static>
+      <pose>17.000 0.000 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>2.000 0.150 0.006</size></box></geometry>
+          <material>
+            <ambient>0.90 0.75 0.10 1</ambient>
+            <diffuse>0.90 0.75 0.10 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>
