@@ -46,7 +46,7 @@ def test_a_built_leg_order_is_one_the_vehicle_accepts():
     poly = route.plan_route((-3.0, -5.5), "S7")
     pts, arrive, rel, hor = vo.released_route(msg)
     assert pts == [tuple(p) for p in poly[1:]]
-    assert arrive == STATIONS["S7"]["arrive_m"] == 0.80
+    assert arrive == STATIONS["S7"]["arrive_m"] == 0.25
     assert hor == []
     assert rel[0]["nodeId"] == "wp1" and rel[-1]["nodeId"] == "S7"
     assert len(msg["edges"]) == len(rel) - 1
@@ -56,7 +56,7 @@ def test_a_built_leg_order_is_one_the_vehicle_accepts():
     # merely passed near. The waypoints stay silent for DEFAULT_DEV_M.
     devs = [n["nodePosition"].get("allowedDeviationXY")
             for n in msg["nodes"]]
-    assert devs == [None] * (len(msg["nodes"]) - 1) + [0.80]
+    assert devs == [None] * (len(msg["nodes"]) - 1) + [0.25]
 
 
 def test_the_builder_stamps_no_header():
@@ -103,14 +103,14 @@ def test_an_unknown_station_is_no_order_and_no_start():
     the hall. SystemExit is send_order's answer - a CLI may exit; the
     manager is a service and may not.
     """
-    assert build_leg_order("ft-x", (0.0, 0.0), "S11") is None
+    assert build_leg_order("ft-x", (0.0, 0.0), "S99") is None
     assert build_leg_order("ft-x", (0.0, 0.0), "") is None
     with pytest.raises(ValueError):
-        leg2_start("S11")
+        leg2_start("S99")
 
 
 def test_every_ordered_station_pair_builds_an_order_the_vehicle_accepts():
-    """All 90 legs a transport can be. Each is planned from the
+    """All 132 legs a transport can be. Each is planned from the
     from-station's coordinates, which is exactly how leg 2 is planned and
     close enough to leg 1 (the vehicle stands somewhere on the floor, and
     send_order's grid sweep already pinned that half). Every one must
@@ -132,7 +132,7 @@ def test_every_ordered_station_pair_builds_an_order_the_vehicle_accepts():
         assert [n["nodeId"] for n in rel[:-1]] == [
             "wp{}".format(i + 1) for i in range(len(rel) - 1)], (a, b)
         pairs += 1
-    assert pairs == 90
+    assert pairs == 132
 
 
 # ---- M6.4: the base/horizon split ----
@@ -152,7 +152,7 @@ def test_the_points_the_order_names_are_the_points_the_fleet_reserves():
         assert leg_points(start, station) == [
             (n["nodePosition"]["x"], n["nodePosition"]["y"])
             for n in msg["nodes"]]
-    assert leg_points((0.0, 0.0), "S11") is None
+    assert leg_points((0.0, 0.0), "S99") is None
 
 
 def test_a_horizon_order_is_one_the_vehicle_accepts():
@@ -182,7 +182,8 @@ def test_the_released_horizon_split_lands_where_it_was_asked():
         ["wp{}".format(i) for i in range(3, len(points))] + ["S7"]
     # The truck stops at wp2, so the radius it is judged by is wp2's own
     # default and not the station's - the station is still horizon.
-    assert arrive == 0.25 != STATIONS["S7"]["arrive_m"]
+    assert arrive == 0.25
+    assert rel[-1]["nodeId"] != "S7"
 
 
 def test_released_count_none_is_the_leg_delivered_whole():

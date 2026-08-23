@@ -13,7 +13,7 @@ from stations import STATIONS
 
 _GAZEBO = os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "gazebo"))
-_WORLD_SDF = os.path.join(_GAZEBO, "warehouse_ver2.sdf")
+_WORLD_SDF = os.path.join(_GAZEBO, "warehouse_ver3.sdf")
 _TRUCK_SDF = os.path.join(_GAZEBO, "forklift_ver2", "model.sdf")
 
 #: The safety scan plane, from forklift_ver2/model.sdf's side view. Every
@@ -84,12 +84,14 @@ def _boxes(text, scan_z, frame=(0.0, 0.0)):
 def _world_solids():
     """Everything in the hall a safety scanner can see, from the SDF.
 
-    Read out of warehouse_ver2.sdf rather than out of stations.OBSTACLES:
+    Read out of warehouse_ver3.sdf rather than out of stations.OBSTACLES:
     that tuple is documented as the SDF's shadow and nothing tests it
     against the file, so a wall that moved in the world and not in the
     shadow would leave this guard passing on stale numbers. A model's own
-    <pose> is composed in - the dock door frame is the one model that has
-    one, and its two posts are 6.00 m off the model origin.
+    <pose> is composed in. Models with no scan-plane collision (station
+    paint, the overhead camera, the floor plane) are skipped: the camera
+    is pitched to look down, the paints carry a yaw, and neither is a
+    solid a scanner can see.
     """
     text = open(_WORLD_SDF, encoding="utf-8").read()
     out = []
@@ -97,8 +99,11 @@ def _world_solids():
                              text, re.S):
         body = model.group(2)
         mp = _first_pose(body.split("<link", 1)[0])
+        solids = list(_boxes(body, _SCAN_Z, (mp[0], mp[1])))
+        if not solids:
+            continue
         assert mp[3] == mp[4] == mp[5] == 0.0, model.group(1)
-        for solid in _boxes(body, _SCAN_Z, (mp[0], mp[1])):
+        for solid in solids:
             out.append((model.group(1) + "/" + solid[0],) + solid[1:])
     return out
 
@@ -228,18 +233,17 @@ def test_the_world_the_scanners_see_was_actually_read():
     """The parser above, guarded - a regex that matches nothing passes
     every clearance test underneath it silently.
 
-    The three counts are structural, not a transcript of the file: five
-    perimeter wall segments and two door posts, the truck's mast, carriage
-    and three wheels, and exactly the three safety scanners the PLC has
-    channels for. The rack frames and stock are deliberately NOT counted:
-    they are parametric in the world header and a fourth bay would be a
-    legitimate change.
+    The three counts are structural, not a transcript of the file: four
+    perimeter walls and no door posts (ver3 has no dock cut), the truck's
+    mast, carriage and three wheels, and exactly the three safety scanners
+    the PLC has channels for. 29 named obstacles plus 4 walls is 33
+    scan-plane boxes; a vanished rack run drops that count.
     """
     world = _world_solids()
     names = [n for n, *_ in world]
-    assert sum("Wall" in n for n in names) == 5, names
-    assert sum("DoorGap" in n for n in names) == 2, names
-    assert len(world) > 50, "the rack runs vanished from the parse"
+    assert sum("Wall" in n for n in names) == 4, names
+    assert sum("DoorGap" in n for n in names) == 0, names
+    assert len(world) >= 33, "the rack runs vanished from the parse"
 
     truck = _truck_solids()
     assert sorted(n.split("/")[0] for n, *_ in truck) == [

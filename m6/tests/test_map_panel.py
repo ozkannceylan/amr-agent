@@ -4,8 +4,10 @@ import stations
 
 
 def test_world_to_canvas_maps_the_hall_corners():
-    assert map_panel.world_to_canvas(-15.0, 10.0) == (0.0, 0.0)
-    assert map_panel.world_to_canvas(15.0, -10.0) == (450.0, 300.0)
+    xmin, xmax, ymin, ymax = stations.HALL
+    assert map_panel.world_to_canvas(xmin, ymax) == (0.0, 0.0)
+    assert map_panel.world_to_canvas(xmax, ymin) == (
+        map_panel.WIDTH, map_panel.HEIGHT)
 
 
 def test_round_trip_is_identity():

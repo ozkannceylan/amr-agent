@@ -71,8 +71,8 @@
 set -euo pipefail
 
 M6="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WORLD="$M6/gazebo/warehouse_ver2.sdf"
-WORLD_NAME=warehouse                 # the name INSIDE warehouse_ver2.sdf
+WORLD="$M6/gazebo/warehouse_ver3.sdf"
+WORLD_NAME=warehouse                 # the name INSIDE warehouse_ver3.sdf
 STATS_TOPIC="/world/$WORLD_NAME/stats"
 GATE="${RTF_GATE:-0.90}"             # M6.1's two-vehicle gate by default
 LOAD_S="${RTF_LOAD_S:-8}"            # server up and world loaded

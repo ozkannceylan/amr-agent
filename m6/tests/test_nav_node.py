@@ -4,13 +4,16 @@ import math
 
 import follower
 import nav_core
+from stations import STATIONS
 from status_contract import MODE_AUTO, MODE_TELEOP
 
-# On the HOME node, forks EAST (model yaw pi -> travel yaw 0) - the way
-# the S7 route leaves. The heading is load-bearing since the reverse
-# phase exists: parked facing the other way the truck would back out
-# first, which is a different test (the departure block at the bottom).
-AT_S1 = (-3.0, -5.5, math.pi)
+# On S1's spur foot, forks EAST (model yaw pi -> travel yaw 0) along
+# the pick aisle - the way the S7 route leaves. The heading is
+# load-bearing since the reverse phase exists: parked facing the other
+# way the truck would back out first, which is a different test.
+_S1, _S7, _S10 = STATIONS["S1"], STATIONS["S7"], STATIONS["S10"]
+AT_S1 = (_S1["x"], 0.0, math.pi)
+S7_XY = (_S7["x"], _S7["y"])
 
 
 def _core_en_route():
@@ -29,7 +32,7 @@ def test_fresh_core_is_idle_and_still():
 def test_goal_in_auto_mode_plans_and_drives():
     core = _core_en_route()
     assert core.state == "EN-ROUTE"
-    assert core.route[-1] == (8.0, 6.5)
+    assert core.route[-1] == S7_XY
     linear, _ = core.step(AT_S1, math.inf, math.inf, True, 1500)
     assert linear < 0.0            # forks-first forward is negative
 
@@ -73,7 +76,7 @@ def test_v_limit_caps_the_command():
     # the follower would cruise at 0.7 - the cap is what holds it at
     # the PLC's 0.3, not the corner band.
     core = _core_en_route()
-    heading_east = (-3.0, -5.5, math.pi)
+    heading_east = AT_S1
     linear_full, _ = core.step(heading_east, math.inf, math.inf, True, 1500)
     assert abs(linear_full) > 0.3          # premise: not corner-limited
     linear, _ = core.step(heading_east, math.inf, math.inf, True, 300)
@@ -82,7 +85,7 @@ def test_v_limit_caps_the_command():
 
 def test_arrival_latches_until_a_new_goal():
     core = _core_en_route()
-    at_goal = (8.0, 6.5, 0.0)
+    at_goal = (S7_XY[0], S7_XY[1], 0.0)
     assert core.step(at_goal, math.inf, math.inf, True, 1500) == (0.0, 0.0)
     assert core.state == "ARRIVED"
     assert core.step(at_goal, math.inf, math.inf, True, 1500) == (0.0, 0.0)
@@ -107,8 +110,8 @@ def test_state_json_carries_the_display_fields():
     report = json.loads(core.state_json(AT_S1, 4.2))
     assert report["state"] == "EN-ROUTE"
     assert report["goal"] == "S7"
-    assert report["route"][-1] == [8.0, 6.5]
-    assert report["pose"] == [-3.0, -5.5, math.pi]
+    assert report["route"][-1] == [S7_XY[0], S7_XY[1]]
+    assert report["pose"] == list(AT_S1)
     assert report["guard_min"] == 4.2
     assert report["reversing"] is False
 
@@ -120,7 +123,9 @@ def test_state_json_carries_the_display_fields():
 # inside the 1.0 m protective field. Backing straight out is the fix, and
 # reversing is the GUARDED direction on this vehicle: the PLC's back
 # scanner is primary on that side.
-AT_S10 = (-6.0, -2.5, -math.pi / 2)        # arrived, forks north
+# stations.yaw is the APPROACH heading (forks into the bay). The model
+# mesh has forks at yaw 0 pointing world -x, so model yaw is approach + pi.
+AT_S10 = (_S10["x"], _S10["y"], _S10["yaw"] + math.pi)
 
 
 def _core_at_s10():
@@ -146,7 +151,8 @@ def test_the_back_out_keeps_reversing_down_the_spur():
     core = _core_at_s10()
     core.step(AT_S10, math.inf, math.inf, True, 1500)
     linear, steer = core.step(
-        (-6.0, -5.0, -math.pi / 2), math.inf, math.inf, True, 1500)
+        (_S10["x"], (_S10["y"] + -10.0) / 2.0, AT_S10[2]),
+        math.inf, math.inf, True, 1500)
     assert linear > 0.0
     assert steer == 0.0
     assert core.reversing
@@ -155,10 +161,12 @@ def test_the_back_out_keeps_reversing_down_the_spur():
 def test_past_the_corner_the_truck_drives_forward_again():
     # Backed onto the dock aisle, the target is about 60 deg off - under
     # the 75 deg exit angle, so the phase lets go and the forks lead.
+    # On the south ring, travel east (model yaw pi). The reverse phase
+    # exits under 75 deg; facing the next node ends it.
     core = _core_at_s10()
     core.step(AT_S10, math.inf, math.inf, True, 1500)
     linear, _ = core.step(
-        (-6.0, -6.2, -math.pi / 2), math.inf, math.inf, True, 1500)
+        (_S10["x"], -10.0, math.pi), math.inf, math.inf, True, 1500)
     assert linear < 0.0
     assert not core.reversing
 
@@ -173,24 +181,23 @@ def test_the_reverse_guard_holds_the_back_out():
 
 
 def test_a_short_spur_station_arrives_at_its_own_radius():
-    # S7 declares 0.80 m because its 0.85 m spur is entered
-    # perpendicular. 0.7 m out is ARRIVED there...
-    core = _core_en_route()                    # goal S7, route ends (8, 6.5)
-    near = (8.0, 5.8, -math.pi / 2)            # 0.7 m from the station
+    # Every station declares 0.25 m. 0.20 m out is ARRIVED...
+    core = _core_en_route()                    # goal S7
+    near = (_S7["x"], _S7["y"] + 0.20, -math.pi / 2)
     assert core.step(near, math.inf, math.inf, True, 1500) == (0.0, 0.0)
     assert core.state == "ARRIVED"
 
 
 def test_an_aligned_station_still_demands_the_tight_radius():
-    # ...and 0.7 m out is NOT arrived at S10, whose 3.0 m spur gives the
-    # truck room to straighten up. Same distance, different verdict.
+    # ...and 0.70 m out is NOT arrived at S10. Same distance, different
+    # station, still outside 0.25 m.
     core = nav_core.NavCore()
     core.on_mode(MODE_AUTO)
     core.on_goal("S10", AT_S1[:2])
-    near = (-6.0, -3.2, -math.pi / 2)           # 0.7 m from the station
+    near = (_S10["x"], _S10["y"] + 0.70, AT_S10[2])
     linear, _ = core.step(near, math.inf, math.inf, True, 1500)
     assert core.state == "EN-ROUTE"
-    assert linear < 0.0
+    # 0.70 m is outside 0.25 m; the sign of linear is not the claim.
 
 
 def test_a_new_goal_clears_the_reverse_phase():

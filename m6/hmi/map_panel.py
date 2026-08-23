@@ -20,8 +20,15 @@ import stations                                            # noqa: E402
 from status_contract import MODE_AUTO, MODE_TELEOP        # noqa: E402
 
 # ----------------------------- CONFIG -----------------------------
-SCALE = 15.0                       # px per metre: 30 x 20 m -> 450 x 300
-WIDTH, HEIGHT = 450.0, 300.0
+# PX PER METRE, AND THE CANVAS FOLLOWS THE FLOOR. Until M6.6 the two
+# numbers below were independent - 15.0 px/m and a hard-coded 450 x 300
+# that happened to be 30 x 20 m at that scale. A floor change then moved
+# the sketch's contents without moving its frame. Now the frame is
+# derived: 11.0 px/m over a 48 x 32 m hall gives 528 x 352, which fits
+# four HMI windows on one screen.
+SCALE = 11.0
+WIDTH = (stations.HALL[1] - stations.HALL[0]) * SCALE
+HEIGHT = (stations.HALL[3] - stations.HALL[2]) * SCALE
 PICK_RADIUS_PX = 12.0
 FLOOR, WALL = "#eceff1", "#546e7a"
 RACK, STATION, PICKED = "#90a4ae", "#1565c0", "#ef6c00"
