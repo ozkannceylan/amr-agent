@@ -98,13 +98,50 @@ def apply_command(state, msg, now, ack_pulse_s, live):
     return None
 
 
-def serve(state, live, ctl):
+# ---- the latch watchdog: a demo-only automatic operator ----
+# OWNER RULING, 2026-08-23. PROOF.md residual 10: a protective demand
+# LATCHES and only a panel RESET clears it. A ten-minute recording has no
+# operator in it, so the first latch costs a truck for the rest of the
+# run - and in the 0-of-8 acceptance run four latches inside 0.56 s cost
+# all of it. So a recording gets an automatic operator, and it SAYS SO:
+# every press below is printed with its timestamp and the line the writer
+# was reading, and the count goes into PROOF.md beside the run labelled
+# demo-only automatic operator.
+#
+# WHAT IT DOES NOT DO, AND THIS IS THE WHOLE OF THE HONESTY. It does not
+# touch a scanner, a field verdict, the nan rule or the staleness rule -
+# an undelivered scan is still a violated field and still demands a stop.
+# It presses the button a person would have pressed, after the stop has
+# already happened. And it will not press through a HELD e-stop: that is
+# the operator's own hand and acknowledging it away would be inventing an
+# action nobody asked for.
+RESET_HOLD_S = 3.0      # a press per 3 s at most: the F-program wants a
+                        # rising edge and the loop makes the falling one
+                        # ACK_PULSE_S later; pressing faster than that
+                        # stacks edges the PLC never sees separately.
+
+
+def latch_watch(live, state, now, last_reset, hold_s=RESET_HOLD_S):
+    """(press_reset, log_line). Pure - the caller owns the socket."""
+    if live.get("motor"):
+        return (False, None)
+    if state.get("estop"):
+        return (False, None)
+    if now - last_reset < hold_s:
+        return (False, None)
+    return (True, "AUTO-RESET t={:.1f} after: {}".format(
+        now, str(live.get("line", "")).replace("\n", " | ")))
+
+
+def serve(state, live, ctl, auto_reset=False, resets=None):
     """The thin shell: read a datagram, apply it, answer if asked.
 
     Nothing a caller sends may stop the writer, so the whole body is
     guarded: an unparseable datagram, an unknown command or a reply that
     cannot be delivered each cost one stderr line and the loop goes on.
     """
+    resets = [0] if resets is None else resets
+    last_reset = 0.0
     last_print = 0.0
     while state["run"]:
         now = time.monotonic()
@@ -112,6 +149,13 @@ def serve(state, live, ctl):
             last_print = now
             # One record per line so the log file greps.
             print(live["line"].replace("\n", " | "), flush=True)
+        if auto_reset:
+            press, line = latch_watch(live, state, now, last_reset)
+            if press:
+                last_reset = now
+                resets[0] += 1
+                state["ack_until"] = now + m6.ACK_PULSE_S
+                print(line, flush=True)
         try:
             data, addr = ctl.recvfrom(4096)
         except socket.timeout:
@@ -142,6 +186,9 @@ def main():
     ap.add_argument("--vehicle", choices=m6.VEHICLE_IDS, required=True)
     ap.add_argument("--virtual", action="store_true")
     ap.add_argument("--ctl-port", type=int, required=True)
+    ap.add_argument("--auto-reset", action="store_true",
+                    help="press RESET on a latched truck (recordings "
+                         "only; every press is logged)")
     args = ap.parse_args()
     if not args.virtual or not m6.VIRTUAL:
         raise SystemExit(
@@ -180,14 +227,16 @@ def main():
         target=m6.control_loop, args=(plc, target, tx, rx, state, live),
         daemon=True)
     worker.start()
+    resets = [0]
     try:
-        serve(state, live, ctl)
+        serve(state, live, ctl, auto_reset=args.auto_reset, resets=resets)
     finally:
         state["run"] = False
         worker.join(timeout=JOIN_S)   # its `finally` trips the plant first
         ctl.close()
         rx.close()
         print("writer for {} is down".format(m6.VID), flush=True)
+        print("auto-resets: {}".format(resets[0]), flush=True)
 
 
 if __name__ == "__main__":

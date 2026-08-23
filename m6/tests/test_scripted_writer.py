@@ -103,3 +103,39 @@ def test_junk_answers_nothing_and_changes_nothing():
                 {"estop": "true"}, {"quit": "yes"}, {"status": 1}):
         assert _apply(state, live, msg) is None
         assert state == before, "{!r} moved the state".format(msg)
+
+
+def test_watchdog_presses_reset_when_motor_is_down_and_estop_is_not():
+    live = {"motor": False, "line": "MOTOR STOPPED"}
+    state = {"estop": False}
+    press, line = sw.latch_watch(
+        live, state, now=100.0, last_reset=0.0, hold_s=3.0)
+    assert press is True
+    assert "RESET" in line and "100.0" in line
+
+
+def test_watchdog_is_silent_while_motor_is_up():
+    live = {"motor": True, "line": "MOTOR ENABLED"}
+    press, line = sw.latch_watch(
+        live, {"estop": False}, now=100.0, last_reset=0.0, hold_s=3.0)
+    assert press is False
+    assert line is None
+
+
+def test_watchdog_never_presses_through_a_held_estop():
+    # An e-stop is the operator's own hand. Acknowledging it away would
+    # be inventing an operator action nobody asked for.
+    live = {"motor": False, "line": "E-STOP"}
+    press, _line = sw.latch_watch(
+        live, {"estop": True}, now=100.0, last_reset=0.0, hold_s=3.0)
+    assert press is False
+
+
+def test_watchdog_waits_out_its_hold_before_pressing_again():
+    live = {"motor": False, "line": "MOTOR STOPPED"}
+    press, _line = sw.latch_watch(
+        live, {"estop": False}, now=101.0, last_reset=100.0, hold_s=3.0)
+    assert press is False
+    press, _line = sw.latch_watch(
+        live, {"estop": False}, now=104.0, last_reset=100.0, hold_s=3.0)
+    assert press is True
