@@ -1221,14 +1221,2825 @@
       </link>
     </model>
 
+    <!-- ================= DECORATION =================
+         WHAT IS DOWN HERE AND WHY IT CANNOT MOVE A FIELD.
+
+         The owner's first note on the M6 recording was that the hall
+         looks empty. It is: twelve rack segments and an annex in
+         48 x 32 m read as a test track rather than a factory. So the
+         floor is dressed - and dressed in the two places the safety
+         layer physically cannot see.
+
+         The three microScan3 fans and the nav lidar are HORIZONTAL and
+         are mounted between 0.30 and 1.50 m. The overhead camera looks
+         straight DOWN from 38 m. Everything below therefore sits either
+         ON TOP of an obstacle box (z >= 4.00) or FLAT on the floor
+         (z = 0.005), and no scanner ray can reach either. Nothing here
+         has a <collision>, nothing appears in stations.OBSTACLES, and
+         nothing extends past the footprint of a rectangle that is
+         already there.
+
+         WHAT WAS NOT DONE, AND IT IS THE REASON THIS FILE IS DULL AT
+         EYE LEVEL. The obvious way to make racking look like racking is
+         to replace each solid box with uprights and beams. gpu_lidar
+         renders VISUALS, so the gaps between those uprights would let a
+         scanner see THROUGH racking it currently cannot, and every
+         standoff measured against that racking would stop meaning what
+         it says. The boxes are untouched. -->
+    <model name="RackNW1Pallet0">
+      <static>true</static>
+      <pose>-15.500 3.083 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW1Load0">
+      <static>true</static>
+      <pose>-15.500 3.083 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW1Pallet1">
+      <static>true</static>
+      <pose>-15.500 4.250 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW1Load1">
+      <static>true</static>
+      <pose>-15.500 4.250 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.30 0.45 0.62 1</ambient><diffuse>0.30 0.45 0.62 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW1Pallet2">
+      <static>true</static>
+      <pose>-15.500 5.417 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW1Load2">
+      <static>true</static>
+      <pose>-15.500 5.417 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.72 0.35 0.28 1</ambient><diffuse>0.72 0.35 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW1Rail0">
+      <static>true</static>
+      <pose>-15.940 4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW1Rail1">
+      <static>true</static>
+      <pose>-15.060 4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW2Pallet0">
+      <static>true</static>
+      <pose>-10.000 3.083 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.440 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW2Load0">
+      <static>true</static>
+      <pose>-10.000 3.083 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.325 0.837 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW2Pallet1">
+      <static>true</static>
+      <pose>-10.000 4.250 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.440 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW2Load1">
+      <static>true</static>
+      <pose>-10.000 4.250 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.325 0.837 0.450</size></box></geometry>
+          <material><ambient>0.30 0.45 0.62 1</ambient><diffuse>0.30 0.45 0.62 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW2Pallet2">
+      <static>true</static>
+      <pose>-10.000 5.417 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.440 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW2Load2">
+      <static>true</static>
+      <pose>-10.000 5.417 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.325 0.837 0.450</size></box></geometry>
+          <material><ambient>0.72 0.35 0.28 1</ambient><diffuse>0.72 0.35 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW2Rail0">
+      <static>true</static>
+      <pose>-10.940 4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW2Rail1">
+      <static>true</static>
+      <pose>-9.060 4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW3Pallet0">
+      <static>true</static>
+      <pose>-4.500 3.083 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW3Load0">
+      <static>true</static>
+      <pose>-4.500 3.083 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW3Pallet1">
+      <static>true</static>
+      <pose>-4.500 4.250 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW3Load1">
+      <static>true</static>
+      <pose>-4.500 4.250 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.30 0.45 0.62 1</ambient><diffuse>0.30 0.45 0.62 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW3Pallet2">
+      <static>true</static>
+      <pose>-4.500 5.417 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW3Load2">
+      <static>true</static>
+      <pose>-4.500 5.417 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.72 0.35 0.28 1</ambient><diffuse>0.72 0.35 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW3Rail0">
+      <static>true</static>
+      <pose>-4.940 4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNW3Rail1">
+      <static>true</static>
+      <pose>-4.060 4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE1Pallet0">
+      <static>true</static>
+      <pose>4.500 3.083 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE1Load0">
+      <static>true</static>
+      <pose>4.500 3.083 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE1Pallet1">
+      <static>true</static>
+      <pose>4.500 4.250 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE1Load1">
+      <static>true</static>
+      <pose>4.500 4.250 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.30 0.45 0.62 1</ambient><diffuse>0.30 0.45 0.62 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE1Pallet2">
+      <static>true</static>
+      <pose>4.500 5.417 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE1Load2">
+      <static>true</static>
+      <pose>4.500 5.417 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.72 0.35 0.28 1</ambient><diffuse>0.72 0.35 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE1Rail0">
+      <static>true</static>
+      <pose>4.060 4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE1Rail1">
+      <static>true</static>
+      <pose>4.940 4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE2Pallet0">
+      <static>true</static>
+      <pose>10.000 3.083 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.440 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE2Load0">
+      <static>true</static>
+      <pose>10.000 3.083 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.325 0.837 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE2Pallet1">
+      <static>true</static>
+      <pose>10.000 4.250 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.440 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE2Load1">
+      <static>true</static>
+      <pose>10.000 4.250 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.325 0.837 0.450</size></box></geometry>
+          <material><ambient>0.30 0.45 0.62 1</ambient><diffuse>0.30 0.45 0.62 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE2Pallet2">
+      <static>true</static>
+      <pose>10.000 5.417 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.440 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE2Load2">
+      <static>true</static>
+      <pose>10.000 5.417 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.325 0.837 0.450</size></box></geometry>
+          <material><ambient>0.72 0.35 0.28 1</ambient><diffuse>0.72 0.35 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE2Rail0">
+      <static>true</static>
+      <pose>9.060 4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE2Rail1">
+      <static>true</static>
+      <pose>10.940 4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE3Pallet0">
+      <static>true</static>
+      <pose>15.500 3.083 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE3Load0">
+      <static>true</static>
+      <pose>15.500 3.083 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE3Pallet1">
+      <static>true</static>
+      <pose>15.500 4.250 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE3Load1">
+      <static>true</static>
+      <pose>15.500 4.250 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.30 0.45 0.62 1</ambient><diffuse>0.30 0.45 0.62 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE3Pallet2">
+      <static>true</static>
+      <pose>15.500 5.417 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE3Load2">
+      <static>true</static>
+      <pose>15.500 5.417 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.72 0.35 0.28 1</ambient><diffuse>0.72 0.35 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE3Rail0">
+      <static>true</static>
+      <pose>15.060 4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackNE3Rail1">
+      <static>true</static>
+      <pose>15.940 4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW1Pallet0">
+      <static>true</static>
+      <pose>-15.500 -5.417 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW1Load0">
+      <static>true</static>
+      <pose>-15.500 -5.417 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW1Pallet1">
+      <static>true</static>
+      <pose>-15.500 -4.250 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW1Load1">
+      <static>true</static>
+      <pose>-15.500 -4.250 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.30 0.45 0.62 1</ambient><diffuse>0.30 0.45 0.62 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW1Pallet2">
+      <static>true</static>
+      <pose>-15.500 -3.083 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW1Load2">
+      <static>true</static>
+      <pose>-15.500 -3.083 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.72 0.35 0.28 1</ambient><diffuse>0.72 0.35 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW1Rail0">
+      <static>true</static>
+      <pose>-15.940 -4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW1Rail1">
+      <static>true</static>
+      <pose>-15.060 -4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW2Pallet0">
+      <static>true</static>
+      <pose>-10.000 -5.417 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.440 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW2Load0">
+      <static>true</static>
+      <pose>-10.000 -5.417 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.325 0.837 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW2Pallet1">
+      <static>true</static>
+      <pose>-10.000 -4.250 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.440 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW2Load1">
+      <static>true</static>
+      <pose>-10.000 -4.250 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.325 0.837 0.450</size></box></geometry>
+          <material><ambient>0.30 0.45 0.62 1</ambient><diffuse>0.30 0.45 0.62 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW2Pallet2">
+      <static>true</static>
+      <pose>-10.000 -3.083 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.440 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW2Load2">
+      <static>true</static>
+      <pose>-10.000 -3.083 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.325 0.837 0.450</size></box></geometry>
+          <material><ambient>0.72 0.35 0.28 1</ambient><diffuse>0.72 0.35 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW2Rail0">
+      <static>true</static>
+      <pose>-10.940 -4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW2Rail1">
+      <static>true</static>
+      <pose>-9.060 -4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW3Pallet0">
+      <static>true</static>
+      <pose>-4.500 -5.417 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW3Load0">
+      <static>true</static>
+      <pose>-4.500 -5.417 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW3Pallet1">
+      <static>true</static>
+      <pose>-4.500 -4.250 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW3Load1">
+      <static>true</static>
+      <pose>-4.500 -4.250 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.30 0.45 0.62 1</ambient><diffuse>0.30 0.45 0.62 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW3Pallet2">
+      <static>true</static>
+      <pose>-4.500 -3.083 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW3Load2">
+      <static>true</static>
+      <pose>-4.500 -3.083 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.72 0.35 0.28 1</ambient><diffuse>0.72 0.35 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW3Rail0">
+      <static>true</static>
+      <pose>-4.940 -4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSW3Rail1">
+      <static>true</static>
+      <pose>-4.060 -4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE1Pallet0">
+      <static>true</static>
+      <pose>4.500 -5.417 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE1Load0">
+      <static>true</static>
+      <pose>4.500 -5.417 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE1Pallet1">
+      <static>true</static>
+      <pose>4.500 -4.250 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE1Load1">
+      <static>true</static>
+      <pose>4.500 -4.250 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.30 0.45 0.62 1</ambient><diffuse>0.30 0.45 0.62 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE1Pallet2">
+      <static>true</static>
+      <pose>4.500 -3.083 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE1Load2">
+      <static>true</static>
+      <pose>4.500 -3.083 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.72 0.35 0.28 1</ambient><diffuse>0.72 0.35 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE1Rail0">
+      <static>true</static>
+      <pose>4.060 -4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE1Rail1">
+      <static>true</static>
+      <pose>4.940 -4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE2Pallet0">
+      <static>true</static>
+      <pose>10.000 -5.417 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.440 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE2Load0">
+      <static>true</static>
+      <pose>10.000 -5.417 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.325 0.837 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE2Pallet1">
+      <static>true</static>
+      <pose>10.000 -4.250 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.440 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE2Load1">
+      <static>true</static>
+      <pose>10.000 -4.250 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.325 0.837 0.450</size></box></geometry>
+          <material><ambient>0.30 0.45 0.62 1</ambient><diffuse>0.30 0.45 0.62 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE2Pallet2">
+      <static>true</static>
+      <pose>10.000 -3.083 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.440 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE2Load2">
+      <static>true</static>
+      <pose>10.000 -3.083 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.325 0.837 0.450</size></box></geometry>
+          <material><ambient>0.72 0.35 0.28 1</ambient><diffuse>0.72 0.35 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE2Rail0">
+      <static>true</static>
+      <pose>9.060 -4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE2Rail1">
+      <static>true</static>
+      <pose>10.940 -4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE3Pallet0">
+      <static>true</static>
+      <pose>15.500 -5.417 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE3Load0">
+      <static>true</static>
+      <pose>15.500 -5.417 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE3Pallet1">
+      <static>true</static>
+      <pose>15.500 -4.250 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE3Load1">
+      <static>true</static>
+      <pose>15.500 -4.250 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.30 0.45 0.62 1</ambient><diffuse>0.30 0.45 0.62 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE3Pallet2">
+      <static>true</static>
+      <pose>15.500 -3.083 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.720 0.910 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE3Load2">
+      <static>true</static>
+      <pose>15.500 -3.083 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.662 0.837 0.450</size></box></geometry>
+          <material><ambient>0.72 0.35 0.28 1</ambient><diffuse>0.72 0.35 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE3Rail0">
+      <static>true</static>
+      <pose>15.060 -4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="RackSE3Rail1">
+      <static>true</static>
+      <pose>15.940 -4.250 4.060 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.120 3.500 0.120</size></box></geometry>
+          <material><ambient>0.85 0.55 0.15 1</ambient><diffuse>0.85 0.55 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWPallet0">
+      <static>true</static>
+      <pose>-23.429 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWLoad0">
+      <static>true</static>
+      <pose>-23.429 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWPallet1">
+      <static>true</static>
+      <pose>-22.286 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWLoad1">
+      <static>true</static>
+      <pose>-22.286 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.55 0.60 0.50 1</ambient><diffuse>0.55 0.60 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWPallet2">
+      <static>true</static>
+      <pose>-21.143 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWLoad2">
+      <static>true</static>
+      <pose>-21.143 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWPallet3">
+      <static>true</static>
+      <pose>-20.000 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWLoad3">
+      <static>true</static>
+      <pose>-20.000 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.55 0.60 0.50 1</ambient><diffuse>0.55 0.60 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWPallet4">
+      <static>true</static>
+      <pose>-18.857 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWLoad4">
+      <static>true</static>
+      <pose>-18.857 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWPallet5">
+      <static>true</static>
+      <pose>-17.714 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWLoad5">
+      <static>true</static>
+      <pose>-17.714 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.55 0.60 0.50 1</ambient><diffuse>0.55 0.60 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWPallet6">
+      <static>true</static>
+      <pose>-16.571 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexWLoad6">
+      <static>true</static>
+      <pose>-16.571 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexAPallet0">
+      <static>true</static>
+      <pose>-11.333 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.040 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexALoad0">
+      <static>true</static>
+      <pose>-11.333 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.957 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexAPallet1">
+      <static>true</static>
+      <pose>-10.000 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.040 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexALoad1">
+      <static>true</static>
+      <pose>-10.000 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.957 2.650 0.450</size></box></geometry>
+          <material><ambient>0.55 0.60 0.50 1</ambient><diffuse>0.55 0.60 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexAPallet2">
+      <static>true</static>
+      <pose>-8.667 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.040 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexALoad2">
+      <static>true</static>
+      <pose>-8.667 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.957 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBPallet0">
+      <static>true</static>
+      <pose>-3.429 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBLoad0">
+      <static>true</static>
+      <pose>-3.429 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBPallet1">
+      <static>true</static>
+      <pose>-2.286 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBLoad1">
+      <static>true</static>
+      <pose>-2.286 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.55 0.60 0.50 1</ambient><diffuse>0.55 0.60 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBPallet2">
+      <static>true</static>
+      <pose>-1.143 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBLoad2">
+      <static>true</static>
+      <pose>-1.143 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBPallet3">
+      <static>true</static>
+      <pose>0.000 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBLoad3">
+      <static>true</static>
+      <pose>0.000 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.55 0.60 0.50 1</ambient><diffuse>0.55 0.60 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBPallet4">
+      <static>true</static>
+      <pose>1.143 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBLoad4">
+      <static>true</static>
+      <pose>1.143 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBPallet5">
+      <static>true</static>
+      <pose>2.286 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBLoad5">
+      <static>true</static>
+      <pose>2.286 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.55 0.60 0.50 1</ambient><diffuse>0.55 0.60 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBPallet6">
+      <static>true</static>
+      <pose>3.429 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexBLoad6">
+      <static>true</static>
+      <pose>3.429 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexCPallet0">
+      <static>true</static>
+      <pose>8.667 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.040 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexCLoad0">
+      <static>true</static>
+      <pose>8.667 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.957 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexCPallet1">
+      <static>true</static>
+      <pose>10.000 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.040 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexCLoad1">
+      <static>true</static>
+      <pose>10.000 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.957 2.650 0.450</size></box></geometry>
+          <material><ambient>0.55 0.60 0.50 1</ambient><diffuse>0.55 0.60 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexCPallet2">
+      <static>true</static>
+      <pose>11.333 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.040 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexCLoad2">
+      <static>true</static>
+      <pose>11.333 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.957 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexEPallet0">
+      <static>true</static>
+      <pose>16.571 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexELoad0">
+      <static>true</static>
+      <pose>16.571 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexEPallet1">
+      <static>true</static>
+      <pose>17.714 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexELoad1">
+      <static>true</static>
+      <pose>17.714 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.55 0.60 0.50 1</ambient><diffuse>0.55 0.60 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexEPallet2">
+      <static>true</static>
+      <pose>18.857 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexELoad2">
+      <static>true</static>
+      <pose>18.857 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexEPallet3">
+      <static>true</static>
+      <pose>20.000 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexELoad3">
+      <static>true</static>
+      <pose>20.000 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.55 0.60 0.50 1</ambient><diffuse>0.55 0.60 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexEPallet4">
+      <static>true</static>
+      <pose>21.143 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexELoad4">
+      <static>true</static>
+      <pose>21.143 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexEPallet5">
+      <static>true</static>
+      <pose>22.286 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexELoad5">
+      <static>true</static>
+      <pose>22.286 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.55 0.60 0.50 1</ambient><diffuse>0.55 0.60 0.50 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexEPallet6">
+      <static>true</static>
+      <pose>23.429 -16.000 4.050 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.891 2.880 0.100</size></box></geometry>
+          <material><ambient>0.62 0.45 0.28 1</ambient><diffuse>0.62 0.45 0.28 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="AnnexELoad6">
+      <static>true</static>
+      <pose>23.429 -16.000 4.325 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.820 2.650 0.450</size></box></geometry>
+          <material><ambient>0.78 0.72 0.60 1</ambient><diffuse>0.78 0.72 0.60 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS9BackHeader">
+      <static>true</static>
+      <pose>-14.000 -17.950 4.250 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>4.000 0.500 0.500</size></box></geometry>
+          <material><ambient>0.25 0.45 0.70 1</ambient><diffuse>0.25 0.45 0.70 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS10BackHeader">
+      <static>true</static>
+      <pose>-6.000 -17.950 4.250 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>4.000 0.500 0.500</size></box></geometry>
+          <material><ambient>0.30 0.60 0.35 1</ambient><diffuse>0.30 0.60 0.35 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS11BackHeader">
+      <static>true</static>
+      <pose>6.000 -17.950 4.250 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>4.000 0.500 0.500</size></box></geometry>
+          <material><ambient>0.30 0.60 0.35 1</ambient><diffuse>0.30 0.60 0.35 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="BayS12BackHeader">
+      <static>true</static>
+      <pose>14.000 -17.950 4.250 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>4.000 0.500 0.500</size></box></geometry>
+          <material><ambient>0.85 0.50 0.15 1</ambient><diffuse>0.85 0.50 0.15 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkN">
+      <static>true</static>
+      <pose>0.000 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>46.000 1.200 0.006</size></box></geometry>
+          <material><ambient>0.55 0.62 0.58 1</ambient><diffuse>0.55 0.62 0.58 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH0">
+      <static>true</static>
+      <pose>-22.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH1">
+      <static>true</static>
+      <pose>-20.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH2">
+      <static>true</static>
+      <pose>-19.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH3">
+      <static>true</static>
+      <pose>-17.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH4">
+      <static>true</static>
+      <pose>-16.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH5">
+      <static>true</static>
+      <pose>-14.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH6">
+      <static>true</static>
+      <pose>-13.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH7">
+      <static>true</static>
+      <pose>-11.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH8">
+      <static>true</static>
+      <pose>-10.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH9">
+      <static>true</static>
+      <pose>-8.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH10">
+      <static>true</static>
+      <pose>-7.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH11">
+      <static>true</static>
+      <pose>-5.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH12">
+      <static>true</static>
+      <pose>-4.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH13">
+      <static>true</static>
+      <pose>-2.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH14">
+      <static>true</static>
+      <pose>-1.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH15">
+      <static>true</static>
+      <pose>0.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH16">
+      <static>true</static>
+      <pose>1.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH17">
+      <static>true</static>
+      <pose>3.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH18">
+      <static>true</static>
+      <pose>4.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH19">
+      <static>true</static>
+      <pose>6.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH20">
+      <static>true</static>
+      <pose>7.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH21">
+      <static>true</static>
+      <pose>9.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH22">
+      <static>true</static>
+      <pose>10.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH23">
+      <static>true</static>
+      <pose>12.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH24">
+      <static>true</static>
+      <pose>13.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH25">
+      <static>true</static>
+      <pose>15.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH26">
+      <static>true</static>
+      <pose>16.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH27">
+      <static>true</static>
+      <pose>18.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH28">
+      <static>true</static>
+      <pose>19.750 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkNH29">
+      <static>true</static>
+      <pose>21.250 13.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkS">
+      <static>true</static>
+      <pose>0.000 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>46.000 1.200 0.006</size></box></geometry>
+          <material><ambient>0.55 0.62 0.58 1</ambient><diffuse>0.55 0.62 0.58 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH0">
+      <static>true</static>
+      <pose>-22.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH1">
+      <static>true</static>
+      <pose>-20.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH2">
+      <static>true</static>
+      <pose>-19.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH3">
+      <static>true</static>
+      <pose>-17.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH4">
+      <static>true</static>
+      <pose>-16.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH5">
+      <static>true</static>
+      <pose>-14.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH6">
+      <static>true</static>
+      <pose>-13.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH7">
+      <static>true</static>
+      <pose>-11.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH8">
+      <static>true</static>
+      <pose>-10.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH9">
+      <static>true</static>
+      <pose>-8.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH10">
+      <static>true</static>
+      <pose>-7.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH11">
+      <static>true</static>
+      <pose>-5.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH12">
+      <static>true</static>
+      <pose>-4.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH13">
+      <static>true</static>
+      <pose>-2.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH14">
+      <static>true</static>
+      <pose>-1.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH15">
+      <static>true</static>
+      <pose>0.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH16">
+      <static>true</static>
+      <pose>1.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH17">
+      <static>true</static>
+      <pose>3.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH18">
+      <static>true</static>
+      <pose>4.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH19">
+      <static>true</static>
+      <pose>6.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH20">
+      <static>true</static>
+      <pose>7.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH21">
+      <static>true</static>
+      <pose>9.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH22">
+      <static>true</static>
+      <pose>10.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH23">
+      <static>true</static>
+      <pose>12.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH24">
+      <static>true</static>
+      <pose>13.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH25">
+      <static>true</static>
+      <pose>15.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH26">
+      <static>true</static>
+      <pose>16.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH27">
+      <static>true</static>
+      <pose>18.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH28">
+      <static>true</static>
+      <pose>19.750 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkSH29">
+      <static>true</static>
+      <pose>21.250 -17.300 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.350 1.104 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkW">
+      <static>true</static>
+      <pose>-23.300 -2.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.200 28.000 0.006</size></box></geometry>
+          <material><ambient>0.55 0.62 0.58 1</ambient><diffuse>0.55 0.62 0.58 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH0">
+      <static>true</static>
+      <pose>-23.300 -15.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH1">
+      <static>true</static>
+      <pose>-23.300 -13.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH2">
+      <static>true</static>
+      <pose>-23.300 -12.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH3">
+      <static>true</static>
+      <pose>-23.300 -10.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH4">
+      <static>true</static>
+      <pose>-23.300 -9.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH5">
+      <static>true</static>
+      <pose>-23.300 -7.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH6">
+      <static>true</static>
+      <pose>-23.300 -6.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH7">
+      <static>true</static>
+      <pose>-23.300 -4.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH8">
+      <static>true</static>
+      <pose>-23.300 -3.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH9">
+      <static>true</static>
+      <pose>-23.300 -1.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH10">
+      <static>true</static>
+      <pose>-23.300 -0.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH11">
+      <static>true</static>
+      <pose>-23.300 1.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH12">
+      <static>true</static>
+      <pose>-23.300 2.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH13">
+      <static>true</static>
+      <pose>-23.300 4.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH14">
+      <static>true</static>
+      <pose>-23.300 5.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH15">
+      <static>true</static>
+      <pose>-23.300 7.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH16">
+      <static>true</static>
+      <pose>-23.300 8.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkWH17">
+      <static>true</static>
+      <pose>-23.300 10.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkE">
+      <static>true</static>
+      <pose>23.300 -2.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.200 28.000 0.006</size></box></geometry>
+          <material><ambient>0.55 0.62 0.58 1</ambient><diffuse>0.55 0.62 0.58 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH0">
+      <static>true</static>
+      <pose>23.300 -15.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH1">
+      <static>true</static>
+      <pose>23.300 -13.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH2">
+      <static>true</static>
+      <pose>23.300 -12.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH3">
+      <static>true</static>
+      <pose>23.300 -10.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH4">
+      <static>true</static>
+      <pose>23.300 -9.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH5">
+      <static>true</static>
+      <pose>23.300 -7.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH6">
+      <static>true</static>
+      <pose>23.300 -6.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH7">
+      <static>true</static>
+      <pose>23.300 -4.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH8">
+      <static>true</static>
+      <pose>23.300 -3.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH9">
+      <static>true</static>
+      <pose>23.300 -1.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH10">
+      <static>true</static>
+      <pose>23.300 -0.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH11">
+      <static>true</static>
+      <pose>23.300 1.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH12">
+      <static>true</static>
+      <pose>23.300 2.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH13">
+      <static>true</static>
+      <pose>23.300 4.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH14">
+      <static>true</static>
+      <pose>23.300 5.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH15">
+      <static>true</static>
+      <pose>23.300 7.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH16">
+      <static>true</static>
+      <pose>23.300 8.750 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="WalkEH17">
+      <static>true</static>
+      <pose>23.300 10.250 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.104 0.350 0.006</size></box></geometry>
+          <material><ambient>0.90 0.78 0.20 1</ambient><diffuse>0.90 0.78 0.20 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowN1c0">
+      <static>true</static>
+      <pose>-10.850 10.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.220 1.100 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowN1c1">
+      <static>true</static>
+      <pose>-10.000 10.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.220 1.100 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowN1c2">
+      <static>true</static>
+      <pose>-9.150 10.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.220 1.100 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowN2c0">
+      <static>true</static>
+      <pose>9.150 10.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.220 1.100 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowN2c1">
+      <static>true</static>
+      <pose>10.000 10.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.220 1.100 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowN2c2">
+      <static>true</static>
+      <pose>10.850 10.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.220 1.100 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowS1c0">
+      <static>true</static>
+      <pose>-10.850 -10.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.220 1.100 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowS1c1">
+      <static>true</static>
+      <pose>-10.000 -10.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.220 1.100 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowS1c2">
+      <static>true</static>
+      <pose>-9.150 -10.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.220 1.100 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowS2c0">
+      <static>true</static>
+      <pose>9.150 -10.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.220 1.100 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowS2c1">
+      <static>true</static>
+      <pose>10.000 -10.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.220 1.100 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowS2c2">
+      <static>true</static>
+      <pose>10.850 -10.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>0.220 1.100 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowW1c0">
+      <static>true</static>
+      <pose>-20.000 -5.850 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.100 0.220 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowW1c1">
+      <static>true</static>
+      <pose>-20.000 -5.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.100 0.220 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowW1c2">
+      <static>true</static>
+      <pose>-20.000 -4.150 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.100 0.220 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowW2c0">
+      <static>true</static>
+      <pose>-20.000 4.150 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.100 0.220 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowW2c1">
+      <static>true</static>
+      <pose>-20.000 5.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.100 0.220 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowW2c2">
+      <static>true</static>
+      <pose>-20.000 5.850 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.100 0.220 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowE1c0">
+      <static>true</static>
+      <pose>20.000 -5.850 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.100 0.220 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowE1c1">
+      <static>true</static>
+      <pose>20.000 -5.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.100 0.220 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowE1c2">
+      <static>true</static>
+      <pose>20.000 -4.150 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.100 0.220 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowE2c0">
+      <static>true</static>
+      <pose>20.000 4.150 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.100 0.220 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowE2c1">
+      <static>true</static>
+      <pose>20.000 5.000 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.100 0.220 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="ArrowE2c2">
+      <static>true</static>
+      <pose>20.000 5.850 0.005 0 0 0.000000</pose>
+      <link name="link">
+        <visual name="v">
+          <geometry><box><size>1.100 0.220 0.006</size></box></geometry>
+          <material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <!-- ============== END DECORATION ============== -->
     <!-- THE RECORDING'S EYE, AND IT IS IN THE WORLD RATHER THAN THE GUI.
          gz sim's own video recorder needs a GUI, and the GUI costs 0.137 of
          integrated real-time factor (measured 2026-08-23) on a rig that is
          already the binding constraint. A camera sensor renders one 1600x900
          frame at 20 Hz in the SERVER, so the main take can run --headless
          and spend that 0.137 on physics and the sixteen gpu_lidars instead.
-         z = 38 with hfov 1.40 covers 64.0 x 36.0 m; the hall is 48 x 32 and
-         is centred on y = -2.00, which is where this sits.
+         z = 42 with hfov 1.40 covers 70.7 x 39.8 m; the hall is 48 x 32
+         and is centred on y = -2.00, which is where this sits. It was
+         38 m, which covers 64.0 x 36.0 and is enough for a FLAT hall -
+         but the racking and the annex are 4.00 m tall boxes and a
+         perspective projection leans them outward, so the annex row
+         clipped off the bottom of the frame. Four metres of height buys
+         the margin back.
 
          THE YAW IS NOT DECORATION AND IT IS NOT ZERO. A gz camera looks
          down its own +X with image-right at -Y and image-up at +Z. Pitch
@@ -1243,7 +4054,7 @@
          32), which is north-up, east-right, and the whole floor. -->
     <model name="OverheadCam">
       <static>true</static>
-      <pose>0 -2 38 0 1.5707963 1.5707963</pose>
+      <pose>0 -2 42 0 1.5707963 1.5707963</pose>
       <link name="link">
         <sensor name="overhead" type="camera">
           <always_on>1</always_on>
@@ -1253,7 +4064,7 @@
             <horizontal_fov>1.40</horizontal_fov>
             <image><width>1600</width><height>900</height>
                    <format>R8G8B8</format></image>
-            <clip><near>1.0</near><far>60.0</far></clip>
+            <clip><near>1.0</near><far>80.0</far></clip>
           </camera>
         </sensor>
       </link>
