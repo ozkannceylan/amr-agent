@@ -51,34 +51,43 @@ from types import MappingProxyType
 # with nothing here and is caught by its own port guard.
 VEHICLES = {
     "f1": {"plc_port": 5110, "sensor_port": 5111,
-           "spawn": {"x": "-3.00", "y": "-5.50", "z": "0.05", "yaw": "0.0"}},
+           "spawn": {"x": "-12.00", "y": "10.00", "z": "0.05",
+                     "yaw": "3.14159"}},
     "f2": {"plc_port": 5120, "sensor_port": 5121,
-           "spawn": {"x": "3.00", "y": "-5.50", "z": "0.05",
+           "spawn": {"x": "-6.00", "y": "10.00", "z": "0.05",
                      "yaw": "3.14159"}},
     "f3": {"plc_port": 5130, "sensor_port": 5131,
-           "spawn": {"x": "-3.00", "y": "5.65", "z": "0.05",
-                     "yaw": "0.0"}},
+           "spawn": {"x": "6.00", "y": "10.00", "z": "0.05",
+                     "yaw": "3.14159"}},
     "f4": {"plc_port": 5140, "sensor_port": 5141,
-           "spawn": {"x": "3.00", "y": "5.65", "z": "0.05",
+           "spawn": {"x": "12.00", "y": "10.00", "z": "0.05",
                      "yaw": "3.14159"}},
 }
-# f1 keeps step5's proven spawn - the S1 station point itself. f2 faces it
-# from 6.00 m down the dock aisle. f3 and f4 joined at M6.5 and stand on
-# the MAIN aisle, level with the rack runs' inner ends - f3 at
-# (-3.0, 5.65) and f4 at (3.0, 5.65), 6.00 m apart, back to back, exactly
-# as f1 and f2 stand on the dock aisle 11.15 m south of them.
+# THE FOUR POSES ARE NOT A DIVISION OF THE FLOOR, AND THAT IS THE POINT.
+# Until M6.6 they were: each truck stood nearest to the stations on its
+# own quarter, no truck had to cross the hall, and the recording showed
+# exactly that. The four now stand in a row on the NORTH RING LEG, which
+# carries no station at all - so the first assignment sends every one of
+# them somewhere, and after two transports the fleet is scattered by its
+# own work rather than by this table (a truck finishes a transport at
+# its DROPOFF station, not at a home pose).
 #
-# THE FOUR POSES ARE A DIVISION OF THE FLOOR, and that is the point of
-# them. Measured over the router, each truck is the nearest to the
-# stations on its own quarter and to no others:
+# SPACING IS 6.00 m AND BOTH OF ITS CONSTRAINTS ARE DERIVED.
+#   A neighbour's body edge sits 6.00 - 0.46 - 0.52 = 5.02 m from a
+#   scanner, outside the 2.70 m re-clear threshold, so four parked
+#   trucks do not sit in each other's warning fields and none of them
+#   starts under a reduced V_Limit.
+#   Each pose IS A GRAPH NODE (route.NORTH_X carries -12, -6, +6, +12).
+#   nearest_node and floor._standing_from both snap a pose to the
+#   nearest node, and four trucks whose nearest node is the same node
+#   are four trucks the traffic ledger will hand one piece of floor to.
 #
-#     f1  S1 0.00   S3 5.50   S10 6.00   S2 7.90     west dock
-#     f2  S4 5.50                                    east dock
-#     f3  S6 5.85   S8 5.85                          west main
-#     f4  S7 5.85   S9 5.85   S5 8.60                east main
+# yaw 3.14159 points the forks at world +x: model yaw 0 puts them at
+# -x, so pi is the row facing east down the north leg.
 #
-# Every station has a truck within 8.60 m and no truck has to cross the
-# hall to start a transport it is chosen for.
+# test_fleet_spawn_fairness.py holds all three of those, and it holds
+# them as RULES: if a pose has to move, move it and let the assertions
+# say whether the new one is honest.
 #
 # EVERY YAW IN THIS TABLE POINTS THE TRUCK AT THE FLOOR IT WILL BE SENT
 # TO, and that is a rule, not an accident. Model yaw 0 points the FORKS
