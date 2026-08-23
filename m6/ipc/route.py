@@ -1,29 +1,57 @@
 """route.py - the waypoint graph and the router. Pure, no ROS.
 
-THE GRAPH IS THE AISLE CENTRELINES AND NOTHING ELSE. Nodes sit on the
-main aisle (y = 5.65), the dock aisle (y = -5.5), the three connectors
-(x = -12.5, 0.0, +12.0) and one short spur per station. A route that
+THE GRAPH IS THE AISLE CENTRELINES AND NOTHING ELSE. A route that
 exists in this graph therefore drives aisle middles by construction -
-the reason the owner chose a fixed graph over grid planning (spec,
-"Owner decisions").
+the reason the owner chose a fixed graph over grid planning.
 
-Every station's (x, y) is itself a node, joined to the aisle whose
-centreline is nearer. That is why several aisle x-positions repeat
-station x-coordinates: the spur must land on a node, not between two.
+THE FLOOR HAS TWO ROAD CLASSES AND THE GRAPH KNOWS ABOUT NEITHER.
+Speed is follower.target_speed's job, decided from what the scanners
+see. What the graph does is put the truck on a centreline, and the
+centrelines are drawn so a highway gives a scanner more than
+FIELD_SLOW_M (3.30 m) and a pick aisle gives it less. test_route.py
+asserts both, which is what keeps the two files honest about each
+other.
+
+  RING   a closed loop, x = +-20.00 and y = +-10.00, 120.00 m round
+  SPINE  x = 0.00 from y = -10.00 to +10.00, joining the ring's two
+         long legs through the middle of the block area
+  PICK   y = 0.00 from x = -20.00 to +20.00, the one creep aisle
+
+THE NORTH LEG CARRIES THE SPAWN NODES. -12, -6, +6 and +12 are the four
+poses status_contract.VEHICLES declares. They are nodes because
+nearest_node and floor._standing_from both snap a pose to the nearest
+node, and four trucks whose nearest node is the same node are four
+trucks the traffic ledger will hand one piece of floor to at startup.
+
+EVERY STATION HAS EXACTLY ONE SPUR and it is at least 2.50 m long. See
+stations.py for why a shorter one cannot be arrived at.
 """
 import heapq
 import math
 
 from stations import STATIONS
 
-MAIN_Y, DOCK_Y = 5.65, -5.5
-MAIN_X = (-12.5, -8.0, -3.0, 0.0, 3.0, 8.0, 11.6, 12.0)
-DOCK_X = (-12.5, -9.8, -7.4, -6.0, -3.0, 0.0, 3.0, 6.0, 8.0, 12.0)
-CONNECT_X = (-12.5, 0.0, 12.0)
+RING_X = (-20.0, 20.0)          # the two N-S ring legs
+RING_Y = (-10.0, 10.0)          # the two E-W ring legs
+SPINE_X = 0.0
+PICK_Y = 0.0
+
+# Node x-positions along each E-W run.
+NORTH_X = (-20.0, -12.0, -6.0, 0.0, 6.0, 12.0, 20.0)   # spawns at +-12, +-6
+SOUTH_X = (-20.0, -14.0, -6.0, 0.0, 6.0, 14.0, 20.0)   # annex spur feet
+PICK_X = (-20.0, -13.0, -7.0, 0.0, 7.0, 13.0, 20.0)    # pick spur feet
+# Node y-positions along each N-S run (the ring legs and the spine).
+LEG_Y = (-10.0, 0.0, 10.0)
 
 
 def _dist(a, b):
     return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def _run(points):
+    """Consecutive pairs of a sorted run, for linking."""
+    ordered = sorted(points)
+    return zip(ordered, ordered[1:])
 
 
 def build_graph():
@@ -34,17 +62,22 @@ def build_graph():
         graph.setdefault(a, set()).add(b)
         graph.setdefault(b, set()).add(a)
 
-    for y, xs in ((MAIN_Y, MAIN_X), (DOCK_Y, DOCK_X)):
-        run = sorted(xs)
-        for a, b in zip(run, run[1:]):
-            link((a, y), (b, y))
-    for x in CONNECT_X:
-        link((x, MAIN_Y), (x, DOCK_Y))
+    for a, b in _run(NORTH_X):
+        link((a, 10.0), (b, 10.0))
+    for a, b in _run(SOUTH_X):
+        link((a, -10.0), (b, -10.0))
+    for a, b in _run(PICK_X):
+        link((a, PICK_Y), (b, PICK_Y))
+    for x in RING_X + (SPINE_X,):
+        for a, b in _run(LEG_Y):
+            link((x, a), (x, b))
+    # THE SPUR FOOT IS ON THE RUN THE STATION FACES, never the nearer
+    # one by arithmetic: a pick bay opens onto the pick aisle even
+    # though the ring is not much further, and a route that entered a
+    # bay from the ring would drive through a rack to do it.
     for s in STATIONS.values():
-        aisle_y = MAIN_Y if abs(s["y"] - MAIN_Y) <= abs(s["y"] - DOCK_Y) \
-            else DOCK_Y
-        if s["y"] != aisle_y:
-            link((s["x"], s["y"]), (s["x"], aisle_y))
+        foot_y = PICK_Y if abs(s["y"]) < 10.0 else -10.0
+        link((s["x"], s["y"]), (s["x"], foot_y))
     return graph
 
 
