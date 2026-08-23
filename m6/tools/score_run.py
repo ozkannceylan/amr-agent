@@ -35,6 +35,11 @@ SAMPLE_HZ = 5.0
 JUMP_M = 1.0
 WINDOW_S = 120.0        # the spec's "every 2-minute window"
 MOVED_M = 1.0           # what counts as a truck having moved in a window
+# The same number fleet/progress.PROGRESS_M uses, spelled here rather
+# than imported: this tool must run against a jsonl with no fleet on the
+# machine at all. If they drift, the table stops describing what the
+# fleet's watchdog was actually looking at.
+STILL_M = 0.50
 VEHICLES = ("f1", "f2", "f3", "f4")
 
 
@@ -146,6 +151,26 @@ def report(path):
             "w{} {}".format(w, v) for w, v in idle))
     else:
         print("  every truck moved in every window")
+
+    # THE LONGEST SINGLE STILL SPELL, WHICH THE WINDOW TABLE HIDES. A
+    # truck can move twenty metres in a window and still have spent
+    # ninety seconds of it stopped; M6.6's run had two trucks stopped
+    # for good and the per-window totals still showed metres. This is
+    # the same anchor rule fleet/progress.py uses, so what it prints is
+    # what the fleet's own watchdog was looking at.
+    print("\nLONGEST STILL SPELL PER TRUCK (the anchor rule: seconds "
+          "since the truck last got {:.2f} m from where it was)"
+          .format(STILL_M))
+    for vid in VEHICLES:
+        longest, anchor = 0.0, None
+        for row in rows:
+            if row["v"] != vid:
+                continue
+            xy = (row["x"], row["y"])
+            if anchor is None or math.dist(anchor[0], xy) >= STILL_M:
+                anchor = (xy, row["t"])
+            longest = max(longest, row["t"] - anchor[1])
+        print("  {}  {:8.1f} s".format(vid, longest))
     return 0
 
 
