@@ -394,6 +394,17 @@ def control_loop(plc, target, tx, rx, state, live):
             # watchdog would never press. Measured on f4, 2026-08-23.
             live["fields_clear"] = all(
                 fields[key] for key in ("pf", "pf_right", "pf_left"))
+            # HOW MANY OF THE THREE WERE FALSE, for the recording's latch
+            # accounting. All three at once is not a body - no single
+            # object is inside three fields evaluated at three different
+            # mount points - it is field_eval failing safe on scans that
+            # did not arrive. tools/scripted_writer.classify is the only
+            # reader, and it reads this at the moment Motor FALLS, not at
+            # the moment it presses: by press time the fields have
+            # re-cleared by definition and every latch looks alike.
+            live["pf_violated"] = sum(
+                1 for key in ("pf", "pf_right", "pf_left")
+                if not fields[key])
             cycle += 1
             if cycle % STATUS_EVERY == 0:
                 pf3, wf3 = ("/".join(

@@ -152,6 +152,26 @@ def latch_watch(live, state, now, last_reset, hold_s=RESET_HOLD_S):
         now, str(live.get("line", "")).replace("\n", " | ")))
 
 
+def classify(pf_at_drop):
+    """What kind of stop this was, from the protective inputs at the
+    moment Motor fell.
+
+    ALL THREE FALSE IS NOT A BODY. No single object is inside three
+    fields at once, evaluated at three different mount points on the
+    truck; that shape is field_eval failing safe on scans that did not
+    arrive. Measured 2026-08-23: the worst scan gap on the M6.6 run was
+    0.528 s against field_eval's 0.500 s rule, and most of that run's
+    fifteen recoveries were 28 ms of lateness rather than anything the
+    truck hit. Counting the two together made the number useless.
+
+    ANYTHING UNKNOWN IS A BODY, and that is the direction to be wrong
+    in: an unlabelled latch counted as a body makes a run look worse
+    than it was, and counted as starvation it makes a run hide a
+    collision.
+    """
+    return "starvation" if pf_at_drop == 3 else "body"
+
+
 def serve(state, live, ctl, auto_reset=False, resets=None):
     """The thin shell: read a datagram, apply it, answer if asked.
 
@@ -159,7 +179,8 @@ def serve(state, live, ctl, auto_reset=False, resets=None):
     guarded: an unparseable datagram, an unknown command or a reply that
     cannot be delivered each cost one stderr line and the loop goes on.
     """
-    resets = [0, 0] if resets is None else resets
+    # [enable, recover(body), recover(starvation)] - see classify().
+    resets = [0, 0, 0] if resets is None else resets
     last_reset = 0.0
     last_print = 0.0
     # AN ENABLE IS NOT A RECOVERY, AND THE COUNT HAS TO SAY WHICH.
@@ -171,8 +192,19 @@ def serve(state, live, ctl, auto_reset=False, resets=None):
     # the truck has EVER been enabled are `enable` and everything after
     # is `recover`, which is the number a recording is judged on.
     enabled_once = [False]
+    # READ AT THE FALLING EDGE, NOT AT THE PRESS. By the time the
+    # watchdog is allowed to press, the protective fields have
+    # re-cleared by definition - that is its own guard - so every latch
+    # would classify identically. What tells them apart is the picture
+    # at the instant Motor went false.
+    was_motor = True
+    pf_at_drop = None
     while state["run"]:
         now = time.monotonic()
+        motor_now = bool(live.get("motor"))
+        if was_motor and not motor_now:
+            pf_at_drop = live.get("pf_violated")
+        was_motor = motor_now
         if live.get("motor"):
             enabled_once[0] = True
         if now - last_print >= PRINT_EVERY_S:
@@ -183,8 +215,13 @@ def serve(state, live, ctl, auto_reset=False, resets=None):
             press, line = latch_watch(live, state, now, last_reset)
             if press:
                 last_reset = now
-                kind = "recover" if enabled_once[0] else "enable"
-                resets[1 if enabled_once[0] else 0] += 1
+                if enabled_once[0]:
+                    why = classify(pf_at_drop)
+                    kind = "recover({})".format(why)
+                    resets[1 if why == "body" else 2] += 1
+                else:
+                    kind = "enable"
+                    resets[0] += 1
                 state["ack_until"] = now + m6.ACK_PULSE_S
                 print(line.replace("AUTO-RESET", "AUTO-RESET " + kind),
                       flush=True)
@@ -259,7 +296,8 @@ def main():
         target=m6.control_loop, args=(plc, target, tx, rx, state, live),
         daemon=True)
     worker.start()
-    resets = [0, 0]                   # [enable, recover] - see serve()
+    # [enable, recover(body), recover(starvation)] - see serve().
+    resets = [0, 0, 0]
     try:
         serve(state, live, ctl, auto_reset=args.auto_reset, resets=resets)
     finally:
@@ -268,8 +306,11 @@ def main():
         ctl.close()
         rx.close()
         print("writer for {} is down".format(m6.VID), flush=True)
-        print("auto-resets: {} enable, {} recover".format(*resets),
-              flush=True)
+        # THE GATE READS THE MIDDLE NUMBER. An enable is the cell being
+        # turned on and a starvation is the rig being slow; only a body
+        # is the floor doing something to a truck.
+        print("auto-resets: {} enable, {} recover(body), "
+              "{} recover(starvation)".format(*resets), flush=True)
 
 
 if __name__ == "__main__":

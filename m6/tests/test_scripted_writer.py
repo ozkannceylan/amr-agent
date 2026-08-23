@@ -170,3 +170,25 @@ def test_a_writer_that_reports_no_fields_still_recovers_its_truck():
         {"motor": False, "line": ""}, {"estop": True},
         now=100.0, last_reset=0.0, hold_s=3.0)
     assert press is True
+
+
+def test_all_three_protective_fields_false_is_scan_starvation():
+    """No single body is inside three fields at once, evaluated at three
+    different mount points. All three false is field_eval failing safe on
+    scans that did not arrive - measured 2026-08-23, worst gap 0.528 s
+    against a 0.500 s rule, and it accounted for most of a run's fifteen
+    recoveries."""
+    assert sw.classify(3) == "starvation"
+
+
+def test_one_or_two_protective_fields_false_is_a_real_body():
+    assert sw.classify(1) == "body"
+    assert sw.classify(2) == "body"
+
+
+def test_an_unknown_count_is_called_a_body():
+    """The direction to be wrong in. An unlabelled latch counted as a
+    body makes a run look worse than it was; counted as starvation it
+    makes a run hide a collision."""
+    assert sw.classify(None) == "body"
+    assert sw.classify(0) == "body"
