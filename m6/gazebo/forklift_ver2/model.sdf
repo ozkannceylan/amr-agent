@@ -593,6 +593,16 @@
         <lidar>
           <scan>
             <horizontal>
+              <!-- 360, AND THE LEVER TO HALVE IT WAS PULLED AND PUT
+                   BACK. M6.6's spec named this the one thing to change
+                   if the scans stopped keeping up, and on the new floor
+                   they had: 5.13 Hz per safety scanner with four trucks
+                   against a nominal 10. Measured 2026-08-23 at 180 rays
+                   on the same stack: 5.07 Hz. It buys nothing, because
+                   what this rig is bound by is the SCENE render that gz
+                   runs once per sensor, not the ray count within it - so
+                   the resolution stays where it was measured and the
+                   finding is written down instead of the change. -->
               <samples>360</samples>
               <resolution>1</resolution>
               <min_angle>-3.1415927</min_angle>
