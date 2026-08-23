@@ -6644,3 +6644,122 @@ cross-aisles, and a dock annex with four bays.
   better than it was and it is not fixed.
 * **No GUI take was recorded.** The plan asked for a second, shorter
   take with the Gazebo window open on the same seed. It is not here.
+
+---
+
+# M6.7 — a truck that can get itself out, and a fleet that notices
+
+**Date:** 2026-08-23. **Verdict: the gate is 4 of 5 and is NOT ticked.**
+The one that fails is the one this work was least about, and it is
+written down as measured.
+
+## The run
+
+`fleet_cli.py demo --duration 600 --in-flight 4 --seed 7`, four trucks,
+headless, four `scripted_writer --auto-reset`, the overhead camera and
+`tools/score_run.py` on the four odometry topics. Video:
+`assets/m6-fleet/m6-fleet-06-recovery-2026-08-23.mp4`.
+
+## The five criteria, measured
+
+| # | Criterion | Measured | |
+|---|---|---|---|
+| 1 | no truck stands still past `STALL_GIVE_UP_S` without the fleet naming it | **held** — the one long stop was a ledger wait and was correctly not named | [x] |
+| 2 | every stall ends: self-cleared or requeued, no transport lost | **held** — six give-ups in the blocker experiment, every task reassigned | [x] |
+| 3 | `recover(body)` and `recover(starvation)` reported separately | **3 body, 0 starvation** (M6.6: 15, undifferentiated) | [x] |
+| 4 | more than four transports complete | **4** — the same as M6.6 | [ ] |
+| 5 | suite green, 0 skipped | **552 passed** | [x] |
+
+Distance 365.3 m over 630 s, against M6.6's 404.4. Per truck: f1 103.1,
+f2 88.5, f3 88.8, f4 84.9. Every truck moved in every two-minute window.
+
+**Criterion 4 fails and it is the one this work was not about.** The rig
+runs at about half real time and the longest leg is 60.65 m, so a
+transport costs three to four wall minutes; ten minutes at four trucks
+cannot hold twelve of them. The bar is left where M6.6 wrote it.
+
+## What the watchdog did, and what it deliberately did not
+
+**IT STAYED QUIET THROUGH A 250-SECOND STOP, AND THAT IS THE RESULT.**
+f4 stood still from 23:34:49 to 23:38:59. The fleet log says why:
+
+    23:34:49  f4 gets 4 of 13 nodes to S9 as base and 9 as horizon -
+              the rest of the corridor is taken
+    23:38:59  base extended to 6 released as orderUpdateId 1
+    23:39:02  base extended to 13 released as orderUpdateId 2
+    23:41:22  f4 completed ft-1f8078cb at S9
+
+`floor.waiting_on("f4")` was set for all of it, so `_stall_pass`
+excluded the truck and wrote nothing. A watchdog that named that stop
+would put a word on the operator's screen every time traffic worked, and
+a screen that cries wolf is a screen nobody reads.
+
+**AND IT FIRED SIX TIMES WHEN A BODY WAS PUT IN AN AISLE.** With a
+1.00 x 1.00 x 1.20 m obstacle spawned into the north ring leg at runtime:
+
+    23:50:25  f1 is not moving - under 0.50 m in 90 s while executing
+              ft-06d1d574. The task goes back to the queue and the truck
+              stands down until its own state says it is idle
+    23:50:25  f1 is cancelled on ft-c15604a3
+    23:51:55  assigned ft-06d1d574 to f2 (nearest idle to S4)
+
+The task was taken back, the order cancelled on the wire and the
+transport given to another truck. On the M6.6 build the same jam showed
+as `ASSIGNED_LEG2` for as long as anyone watched.
+
+**RETRO-SCORED AGAINST M6.6's OWN RUN**, `score_run`'s new column says
+f2 stood still for 107.0 s and f4 for 106.2 - both past
+`STALL_GIVE_UP_S`, both while the per-window table read "every truck
+moved in every window". That table was true and useless; this one is
+not.
+
+## The escalation was not exercised, and the honest reason
+
+`HOLD -> AVOID -> NUDGE -> BLOCKED` is implemented and has eleven unit
+tests on it. **In 630 s of driving it never fired.** The states sampled
+off `/fN/auto/state` were 12 EN-ROUTE, 7 ARRIVED and 1 SAFETY-STOP -
+not one HOLD. The M6.6 floor no longer produces the stall the escalation
+was written for, which is the right outcome and is not evidence that the
+escalation works.
+
+The blocker experiment did not close that gap either. Two obstacles were
+spawned; the first was placed on a corridor no truck then drove, and the
+second was 0.80 m off the centreline, which put it inside the guard's
+slow band (the truck read 2.56 m and slowed) but outside its hold band.
+The one HOLD recorded all evening came with `guard=0.0` - a stale scan,
+not a body.
+
+**So the escalation's field behaviour is UNMEASURED.** What the
+experiment did prove is the watchdog, and it proved it by accident: the
+body is invisible to the traffic ledger (`PROOF.md` residual 11, which
+M6.7's spec put explicitly out of scope), so the fleet went on routing
+trucks into a node they could not pass, and the watchdog is the only
+reason the cell did not silently stop.
+
+## Two defects the tests found before the rig did
+
+**A nudge measured only in metres never ends.** A wedged truck never
+covers `NUDGE_M`, so it stays in `NUDGE` for ever - the state machine
+growing exactly the dead end it was built to remove. `NUDGE_TIMEOUT_S`
+closes it, and a nudge that ran out of time still counts against
+`NUDGE_MAX`: a truck that cannot execute the move is the truck that
+should stop being asked to.
+
+**A dwelling truck is not moving either**, and it is doing precisely
+what it was told. The fork cycle is 3.0 s against a 30.0 s window so it
+cannot trip the watchdog - but that is arithmetic between two files, and
+there is now a test on it. Lengthen the dwell past the window and every
+fork cycle in the cell becomes a name on the screen.
+
+## Still open
+
+* **The escalation needs a rig test that actually reaches a truck.** The
+  obstacle has to be inside `GUARD_HOLD_M` (1.50 m) of the nav lidar's
+  travel cone, which means on the centreline and not beside it, with
+  free floor to one side. Both of tonight's placements missed.
+* **A physical body is still invisible to the ledger.** Residual 11,
+  unchanged and now demonstrated: the fleet routed three trucks into a
+  node a box was standing on, and only the watchdog stopped that from
+  being permanent.
+* **Four transports again.** Rig-bound, not floor-bound and not
+  autonomy-bound.

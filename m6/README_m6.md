@@ -658,6 +658,39 @@ command would be a dead man's setpoint, so the mux emits zeros — and keeps
 emitting them at `ZERO_HZ`, because `cmd_gate` forwards on receipt and a
 stopped stream leaves the plant holding its last setpoint.
 
+**A STOP IS A DECISION SINCE M6.7, NOT A DESTINATION.** `nav_core` used
+to set `HOLD` when the speed policy returned zero and that was the end
+of it — measured 2026-08-23, two trucks stood at their stations
+indefinitely with `guard_min` 1.4722 and 1.4846 m against a 1.500 m hold
+band, Motor TRUE and every field clear. There are four states now,
+cheapest first, and any of them ends the moment the guard reads clear:
+
+| state | what it does |
+|---|---|
+| `HOLD` | waits out `HOLD_PATIENCE_S` — the obstacle is usually another truck that leaves |
+| `AVOID` | steers to the nearest heading the vehicle's own width fits through (`ipc/avoid.py`), bounded to 60° off route |
+| `NUDGE` | backs off `NUDGE_M` to change the geometry, and gives up after `NUDGE_TIMEOUT_S` whether or not it got there |
+| `BLOCKED` | stops, and the note names the bearing and the range |
+
+`ipc/avoid.py` is what makes `AVOID` possible: `follower.sector_min`
+answers *how close*, and until M6.7 nothing answered *where*. It turns
+one scan into a polar histogram and returns the bearing nearest the one
+asked for whose **vehicle-width** window is clear — the window is
+`atan2(0.52 + 0.15, r)`, so it narrows with range, because a fixed
+angular window is how a truck steers confidently into a gap it does not
+fit through.
+
+**And the fleet notices a truck that is not moving.** `fleet/progress.py`
+keeps one anchor per vehicle — the last place it actually got to — and
+`fleet_manager._stall_pass` acts on it. **A truck the FLOOR is holding is
+never called stalled:** one parked at the end of its released base
+because the corridor ahead is somebody else's is behaving exactly as
+M6.4 designed it to, and naming it would put a word on the operator's
+screen every time traffic worked. What is left is a truck the fleet
+believes is driving and that is not; it appears in the status document's
+`NOT MOVING` section by name, and at `STALL_GIVE_UP_S` its order is
+cancelled and its task requeued so another truck can have it.
+
 **`nav_node` + `nav_core` + `follower` + `route` are the autopilot.** `route`
 plans over a fixed graph of corridor centrelines — a closed ring
 (`x = ±20.00`, `y = ±10.00`, 120 m round), a spine down `x = 0.00`, one
