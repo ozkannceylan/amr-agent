@@ -35,7 +35,8 @@ FPS = 20
 def ffmpeg(path, width, height, fps=FPS):
     """A raw-frame sink. -y because a re-take overwrites its own take."""
     return subprocess.Popen(
-        ["ffmpeg", "-y", "-f", "rawvideo", "-pixel_format", "rgb24",
+        ["ffmpeg", "-y", "-loglevel", "error",
+         "-f", "rawvideo", "-pixel_format", "rgb24",
          "-video_size", "{}x{}".format(width, height),
          "-framerate", str(fps), "-i", "-",
          "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",

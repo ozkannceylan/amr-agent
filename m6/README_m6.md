@@ -656,9 +656,9 @@ emitting them at `ZERO_HZ`, because `cmd_gate` forwards on receipt and a
 stopped stream leaves the plant holding its last setpoint.
 
 **`nav_node` + `nav_core` + `follower` + `route` are the autopilot.** `route`
-plans over a fixed graph of aisle centrelines (main aisle `y = 5.65`, dock
-aisle `y = -5.5`, three connectors at `x = -12.5 / 0.0 / +12.0`, one short spur
-per station) with plain Dijkstra, so a route that exists drives aisle middles
+plans over a fixed graph of corridor centrelines — a closed ring
+(`x = ±20.00`, `y = ±10.00`, 120 m round), a spine down `x = 0.00`, one
+pick aisle along `y = 0.00`, and one spur per station with plain Dijkstra, so a route that exists drives aisle middles
 by construction. `follower` is pure geometry: pure pursuit with the true
 target distance as its denominator, a speed policy of stacked bands (slowest
 wins), a ±35° lidar sector that follows the *direction of travel*, and a
@@ -725,20 +725,30 @@ tying all three together so they cannot drift apart silently.
 - **The status line** under the buttons reads `mode <teleop|auto>  <state>
   <goal>` plus the autopilot's note when there is one.
 
-The ten stations, with the arrival radius each one declares:
+The twelve stations, with the arrival radius each one declares — and it
+is the same radius twelve times, which is the point of M6.6's floor:
 
 | id | name | pose (x, y) | spur | `arrive_m` |
 |---|---|---|---|---|
-| S1 | HOME | (-3.0, -5.50) | 0.00 (on the dock aisle) | 0.25 |
-| S2 | CHARGE-1 | (-9.8, -6.60) | 1.10 | **0.80** |
-| S3 | CHARGE-2 | (-7.4, -6.60) | 1.10 | **0.80** |
-| S4 | DOCK-DOOR | (6.0, -8.00) | 2.50 | 0.25 |
-| S5 | CONVEYOR | (11.6, 5.65) | 0.00 (on the main aisle) | 0.25 |
-| S6 | PICK-A-W | (-8.0, 6.50) | 0.85 | **0.80** |
-| S7 | PICK-A-E | (8.0, 6.50) | 0.85 | **0.80** |
-| S8 | PICK-B-W | (-8.0, 4.80) | 0.85 | **0.80** |
-| S9 | PICK-B-E | (8.0, 4.80) | 0.85 | **0.80** |
-| S10 | PICK-B-S | (-6.0, -2.50) | 3.00 | 0.25 |
+| S1 | PICK-NW-1 | (-13.0, 3.30) | 3.30 | 0.25 |
+| S2 | PICK-NW-2 | (-7.0, 3.30) | 3.30 | 0.25 |
+| S3 | PICK-SW-1 | (-13.0, -3.30) | 3.30 | 0.25 |
+| S4 | PICK-SW-2 | (-7.0, -3.30) | 3.30 | 0.25 |
+| S5 | PICK-NE-1 | (7.0, 3.30) | 3.30 | 0.25 |
+| S6 | PICK-NE-2 | (13.0, 3.30) | 3.30 | 0.25 |
+| S7 | PICK-SE-1 | (7.0, -3.30) | 3.30 | 0.25 |
+| S8 | PICK-SE-2 | (13.0, -3.30) | 3.30 | 0.25 |
+| S9 | DOCK-DOOR | (-14.0, -15.30) | 5.30 | 0.25 |
+| S10 | CHARGE-1 | (-6.0, -15.30) | 5.30 | 0.25 |
+| S11 | CHARGE-2 | (6.0, -15.30) | 5.30 | 0.25 |
+| S12 | CONVEYOR | (14.0, -15.30) | 5.30 | 0.25 |
+
+**Nothing declares 0.80 any more, and no code was relaxed to get there.**
+A vehicle cannot reach a point inside its own turning circle: measured
+2026-08-13 at the old S7, a 0.85 m spur produced a stable orbit at
+0.643–0.742 m and six of the ten stations had to declare 0.80 m to catch
+the first pass. The floor is now drawn with no short spurs — the
+shortest is 3.30 m — so the loosened radius has nothing to apply to.
 
 S5..S10 park the truck **centre** exactly 2.400 m off the face they serve. That
 is a scanner dimension, not a style: the side safety scanners sit ~0.8 m
@@ -895,10 +905,11 @@ e-stop is the brake.
 | | `SPIN_MS` | `4` | tkinter's pump period. Throughput only: at 20 ms `/hmi/cmd_vel` measured 16.5 Hz against a declared 20. |
 | | `KNOB_RADIUS_PX` | `100.0` | |
 | | `LAMP_RED` / `LAMP_NEUTRAL` | `#c62828` / `#455a64` | |
-| `hmi/map_panel.py` | `SCALE` | `15.0` | px per metre: 30 x 20 m -> 450 x 300 px |
+| `hmi/map_panel.py` | `SCALE` | `11.0` | px per metre. WIDTH and HEIGHT are DERIVED from `stations.HALL` rather than written down, so a floor change moves the frame with its contents: 48 x 32 m -> 528 x 352 px |
 | | `PICK_RADIUS_PX` | `12.0` | click tolerance on a station dot |
-| `ipc/route.py` | `MAIN_Y` / `DOCK_Y` | `5.65` / `-5.5` | the two aisle centrelines |
-| | `MAIN_X` / `DOCK_X` / `CONNECT_X` | see the file | node x-positions; several repeat station x-coordinates because a spur must land on a node, not between two |
+| `ipc/route.py` | `RING_X` / `RING_Y` | `±20.0` / `±10.0` | the ring's four centrelines. 8.00 m clear, so `8.00/2 − 0.46 = 3.54 ≥ FIELD_SLOW_M` and a truck runs at `CRUISE_MPS` on every metre of it |
+| | `SPINE_X` / `PICK_Y` | `0.0` / `0.0` | the spine is highway at 8.00 m; the pick aisle is 5.00 m and is therefore a CREEP corridor by construction, not by accident |
+| | `NORTH_X` / `SOUTH_X` / `PICK_X` / `LEG_Y` | see the file | node positions. `NORTH_X` carries `±12` and `±6` because those are the four spawn poses and each truck must snap to its own node |
 | `step5.sh` | `GZ_PARTITION` | `step5` | exported to every child; it is what scopes `stop`. Overridable from the environment. The GUI client inherits it, which is what makes it show *this* world rather than an empty scene. |
 | | `ROS_DOMAIN_ID` | `95` | does **not** isolate Gazebo — gz transport is not DDS |
 | | `GUI` | `true` | `start` opens the Gazebo window; `start --headless` sets it false. `gazebo/step5_world.launch.py` declares `gui` with the opposite default (`false`), so a bare `ros2 launch` is unchanged. |

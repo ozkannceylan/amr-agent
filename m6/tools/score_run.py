@@ -46,7 +46,7 @@ def record(seconds, path):
     class Sampler(Node):
         def __init__(self):
             super().__init__("score_run")
-            self.handle = open(path, "w", encoding="utf-8")
+            self._fh = open(path, "w", encoding="utf-8")
             self.t0 = time.monotonic()
             self.last = {}
             self.count = 0
@@ -63,7 +63,7 @@ def record(seconds, path):
                     return
                 self.last[vid] = now
                 p = msg.pose.pose.position
-                self.handle.write(json.dumps(
+                self._fh.write(json.dumps(
                     {"t": round(now - self.t0, 3), "v": vid,
                      "x": round(p.x, 4), "y": round(p.y, 4)}) + "\n")
                 self.count += 1
@@ -74,7 +74,7 @@ def record(seconds, path):
                 raise SystemExit(0)
 
         def close(self):
-            self.handle.close()
+            self._fh.close()
             print("wrote {} samples over {:.0f} s to {}".format(
                 self.count, time.monotonic() - self.t0, path))
 

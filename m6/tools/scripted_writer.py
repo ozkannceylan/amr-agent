@@ -130,6 +130,22 @@ def latch_watch(live, state, now, last_reset, hold_s=RESET_HOLD_S):
     # operator action nobody asked for.
     if not state.get("estop"):
         return (False, None)
+    # A MONITORED RESET DOES NOT TAKE WHILE THE CAUSE STILL STANDS, and
+    # pressing into one is not what an operator does either. Measured
+    # 2026-08-23 over a 600 s run: every real protective stop cost TWO
+    # presses - one at t+0 into a field that was still violated, which
+    # did nothing, and one at t+3 that worked - so the run's press count
+    # read as twice the number of stops it had actually had. m6.py
+    # publishes `fields_clear` beside `motor` for exactly this clause -
+    # and it is the three PROTECTIVE inputs, not all six: a truck parked
+    # in a bay sits inside a warning field by design, so waiting for
+    # that to re-clear would strand it for ever.
+    # Absent - an older writer, or a unit test that does not care - it
+    # defaults to True and the guard is inert, which is the direction
+    # that leaves a truck recoverable rather than the one that leaves it
+    # stopped.
+    if not live.get("fields_clear", True):
+        return (False, None)
     if now - last_reset < hold_s:
         return (False, None)
     return (True, "AUTO-RESET t={:.1f} after: {}".format(

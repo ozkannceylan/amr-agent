@@ -140,3 +140,33 @@ def test_watchdog_waits_out_its_hold_before_pressing_again():
     press, _line = sw.latch_watch(
         live, {"estop": True}, now=104.0, last_reset=100.0, hold_s=3.0)
     assert press is True
+
+
+def test_watchdog_does_not_press_into_a_field_that_is_still_violated():
+    """A monitored reset does not take while the cause stands.
+
+    Measured 2026-08-23: without this clause every real protective stop
+    cost two presses - one into the violated field, one three seconds
+    later that worked - and the run's press count read as twice the
+    number of stops it had had.
+    """
+    live = {"motor": False, "line": "PF b/r/l=T/F/T", "fields_clear": False}
+    press, line = sw.latch_watch(
+        live, {"estop": True}, now=100.0, last_reset=0.0, hold_s=3.0)
+    assert press is False and line is None
+
+
+def test_watchdog_presses_once_the_fields_have_recleared():
+    live = {"motor": False, "line": "MOTOR STOPPED", "fields_clear": True}
+    press, _line = sw.latch_watch(
+        live, {"estop": True}, now=100.0, last_reset=0.0, hold_s=3.0)
+    assert press is True
+
+
+def test_a_writer_that_reports_no_fields_still_recovers_its_truck():
+    """The guard defaults to inert. A missing key must leave a truck
+    recoverable, not leave it stopped for ever."""
+    press, _line = sw.latch_watch(
+        {"motor": False, "line": ""}, {"estop": True},
+        now=100.0, last_reset=0.0, hold_s=3.0)
+    assert press is True

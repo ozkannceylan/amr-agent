@@ -371,6 +371,29 @@ def control_loop(plc, target, tx, rx, state, live):
                 (target, UDP_PORT))
 
             live["motor"] = bool(motor)
+            # WHAT THE WATCHDOG NEEDS, AND THE PANEL ALREADY SHOWS IT.
+            # A monitored reset does not take while the cause still
+            # stands, so tools/scripted_writer.py's auto-RESET has to
+            # know whether the six field inputs have re-cleared before
+            # it presses. Measured 2026-08-23: without this, every real
+            # protective stop cost TWO presses - one into a field that
+            # was still violated and did nothing, and one three seconds
+            # later that worked - and the recording's press count read
+            # as twice the number of stops it had actually had. It is a
+            # derived boolean beside `motor` rather than a parse of
+            # `live["line"]`, because reading a display string is
+            # reading a label.
+            # THE THREE PROTECTIVE INPUTS AND NOT THE WARNING ONES.
+            # A monitored reset is refused while a PROTECTIVE field is
+            # violated; a warning field only caps V_Limit, and a capped
+            # limit on a stopped truck is not a reason to refuse. All
+            # six was the first attempt and it strands a truck for ever:
+            # a vehicle parked in a 4.00 m bay has a wall 1.54 m off its
+            # side scanner, which is inside the 2.50 m warning field by
+            # design, so its warning input never re-clears and the
+            # watchdog would never press. Measured on f4, 2026-08-23.
+            live["fields_clear"] = all(
+                fields[key] for key in ("pf", "pf_right", "pf_left"))
             cycle += 1
             if cycle % STATUS_EVERY == 0:
                 pf3, wf3 = ("/".join(
