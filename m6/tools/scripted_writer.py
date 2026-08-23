@@ -143,11 +143,22 @@ def serve(state, live, ctl, auto_reset=False, resets=None):
     guarded: an unparseable datagram, an unknown command or a reply that
     cannot be delivered each cost one stderr line and the loop goes on.
     """
-    resets = [0] if resets is None else resets
+    resets = [0, 0] if resets is None else resets
     last_reset = 0.0
     last_print = 0.0
+    # AN ENABLE IS NOT A RECOVERY, AND THE COUNT HAS TO SAY WHICH.
+    # A truck comes up with Motor false and stays there until somebody
+    # presses RESET - the owner's runbook step 17, "click RESET once on
+    # each of the four panels". The watchdog does that press too, and
+    # counting it as a latch recovery would put two on the board for
+    # every truck before a single transport had run. So presses before
+    # the truck has EVER been enabled are `enable` and everything after
+    # is `recover`, which is the number a recording is judged on.
+    enabled_once = [False]
     while state["run"]:
         now = time.monotonic()
+        if live.get("motor"):
+            enabled_once[0] = True
         if now - last_print >= PRINT_EVERY_S:
             last_print = now
             # One record per line so the log file greps.
@@ -156,9 +167,11 @@ def serve(state, live, ctl, auto_reset=False, resets=None):
             press, line = latch_watch(live, state, now, last_reset)
             if press:
                 last_reset = now
-                resets[0] += 1
+                kind = "recover" if enabled_once[0] else "enable"
+                resets[1 if enabled_once[0] else 0] += 1
                 state["ack_until"] = now + m6.ACK_PULSE_S
-                print(line, flush=True)
+                print(line.replace("AUTO-RESET", "AUTO-RESET " + kind),
+                      flush=True)
         try:
             data, addr = ctl.recvfrom(4096)
         except socket.timeout:
@@ -230,7 +243,7 @@ def main():
         target=m6.control_loop, args=(plc, target, tx, rx, state, live),
         daemon=True)
     worker.start()
-    resets = [0]
+    resets = [0, 0]                   # [enable, recover] - see serve()
     try:
         serve(state, live, ctl, auto_reset=args.auto_reset, resets=resets)
     finally:
@@ -239,7 +252,8 @@ def main():
         ctl.close()
         rx.close()
         print("writer for {} is down".format(m6.VID), flush=True)
-        print("auto-resets: {}".format(resets[0]), flush=True)
+        print("auto-resets: {} enable, {} recover".format(*resets),
+              flush=True)
 
 
 if __name__ == "__main__":
