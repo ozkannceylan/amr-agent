@@ -320,6 +320,14 @@ def render(doc, now=None):
 
     lines += traffic_lines(doc)
 
+    stalled = _dict(doc, "stalled")
+    if stalled:
+        lines += ["", "NOT MOVING ({} - has a task, and the floor is not "
+                  "holding it)".format(len(stalled))]
+        for serial in sorted(stalled):
+            lines.append("  {}  still for {} s".format(
+                _cell(serial, 8), stalled[serial]))
+
     if refused:
         lines += ["", "REFUSED ({}, most recent last)".format(len(refused))]
         for item in refused:

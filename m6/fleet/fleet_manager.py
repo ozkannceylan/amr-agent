@@ -108,6 +108,7 @@ import fleet_core as fc                             # noqa: E402
 import route                                        # noqa: E402
 import vda_messages as vm                           # noqa: E402
 import vda_orders as vo                             # noqa: E402
+import progress as pg                              # noqa: E402
 from floor import Floor                             # noqa: E402
 from order_builder import leg2_start                # noqa: E402
 from stations import STATIONS                       # noqa: E402
@@ -174,6 +175,13 @@ class FleetManager:
         self.inbox = queue.Queue()
         self.vehicles = {}       # serial -> registry row
         self.tasks = []          # index 0 is the queue head (fleet_core)
+        # M6.7: WHETHER A TRUCK IS ACTUALLY MOVING. The registry has
+        # carried `position` since M6.3 and nothing ever asked whether
+        # it changed - which is how f2 and f3 spent 245 s at a
+        # standstill on 2026-08-23 listed as ordinary trucks executing
+        # orders.
+        self.progress = pg.Progress()
+        self.stalled = {}        # serial -> seconds since it advanced
         self.refused = []        # bounded; the operator's refusal list
         self.stale = {}          # serial -> orderId a lost truck kept
         self.cancelled = {}      # serial -> a cancel we are still chasing
@@ -264,6 +272,11 @@ class FleetManager:
         # _publish_status ever saw it.
         self.floor.stuck.clear()
         self._expire_dwells(now)
+        # BEFORE THE ASSIGNMENT AND AFTER THE FLOOR. A truck given up on
+        # here has its task requeued and becomes eligible again in the
+        # same pass, so a stall costs one transport's DELAY rather than
+        # one transport.
+        self._stall_pass(now)
         self._assign(now)
         self._publish_status(now)
 
@@ -364,6 +377,7 @@ class FleetManager:
         position = _xy(msg.get("agvPosition"))
         if position is not None:
             veh["position"] = position
+            self.progress.note(serial, position, now)
         order_id = msg.get("orderId") or None
         node_states = msg.get("nodeStates")
         node_states = node_states if isinstance(node_states, list) else []
@@ -589,6 +603,50 @@ class FleetManager:
             if now < self.dwell_until.get(task["task_id"], 0.0):
                 continue
             self._send_leg2(task)
+
+    def _stall_pass(self, now):
+        """Name the trucks that are not moving, and give up on the ones
+        that have not moved for long enough.
+
+        A TRUCK THE FLOOR IS HOLDING IS NOT STALLED, and that is the rule
+        this whole method turns on. A vehicle parked at the end of its
+        released base because the floor ahead belongs to somebody else is
+        behaving exactly as M6.4 designed it to; naming it would put a
+        word on the operator's screen every time traffic worked, and a
+        screen that cries wolf is a screen nobody reads. So the watchdog
+        looks only at trucks the fleet BELIEVES are driving: with a task,
+        with no ledger wait, and not moving.
+
+        forget() rather than skip, and the difference matters: a truck
+        released from a two-minute wait must start its clock clean, or it
+        is given up on the instant the corridor drains - the opposite of
+        what the wait was for.
+        """
+        for serial in sorted(self.vehicles):
+            task = self._task_of(serial)
+            if task is None or self.floor.waiting_on(serial) is not None:
+                self.progress.forget(serial)
+                self.stalled.pop(serial, None)
+                continue
+            held = self.progress.stalled_for(serial, now)
+            if held is None:
+                self.stalled.pop(serial, None)
+                continue
+            self.stalled[serial] = round(held, 1)
+            if held < pg.STALL_GIVE_UP_S:
+                continue
+            why = ("{} is not moving - under {:.2f} m in {:.0f} s while "
+                   "executing {}. The task goes back to the queue and the "
+                   "truck stands down until its own state says it is idle"
+                   .format(serial, pg.PROGRESS_M, held, task["task_id"]))
+            self.log.warning("%s", why)
+            self._note_refusal(task["task_id"], why)
+            order_id = task.get("order_id")
+            self._requeue(task["task_id"], why)
+            if order_id:
+                self._abandon_order(serial, order_id, why)
+            self.progress.forget(serial)
+            self.stalled.pop(serial, None)
 
     def _send_leg2(self, task):
         serial = task["assignee"]
@@ -892,6 +950,10 @@ class FleetManager:
                 "queue_len": sum(1 for t in self.tasks
                                  if t["state"] == "QUEUED"),
                 "refused": list(self.refused),
+                # M6.7: trucks the fleet believes are driving and that
+                # are not. A truck the FLOOR is holding never appears
+                # here - that one is behaving perfectly.
+                "stalled": dict(self.stalled),
                 "traffic": self.floor.doc()}
 
     def _shape(self, doc):

@@ -47,7 +47,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "fleet")))
 
 import fleet_manager as fm                          # noqa: E402
-import floor as fl                                  # noqa: E402
+import floor as fl
+import progress as fl_progress                                  # noqa: E402
 import traffic as tr                                # noqa: E402
 import vda_orders as vo                             # noqa: E402
 from order_builder import leg_points                # noqa: E402
@@ -1935,3 +1936,101 @@ def test_the_step_aside_bounds_are_the_measured_ones():
     assert fl.ASIDE_S > fl.ASIDE_MAX_M / fl.ASIDE_RATE_MPS
     # And the connector, the edge that caused all this, is now out.
     assert 11.15 > fl.ASIDE_MAX_M
+
+
+# =====================================================================
+# M6.7 - the fleet notices a truck that is not moving
+# =====================================================================
+def test_a_truck_the_floor_is_holding_is_never_called_stalled(floor):
+    """THE RULE THE WHOLE WATCHDOG TURNS ON. A vehicle parked at the end
+    of its released base because the floor ahead is somebody else's is
+    behaving perfectly. Calling that a stall would put a name on the
+    operator's screen every single time traffic worked."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = head_on(manager, stub, now)
+    assert manager.floor.waiting_on("f2") is not None, \
+        "the staging did not produce a waiting truck"
+    for step in range(10):
+        later = now + fl_progress.STALL_GIVE_UP_S * (step + 1)
+        for truck in (f1, f2):
+            truck.take().state(later)
+        manager._stall_pass(later)
+    assert "f2" not in manager.stalled
+
+
+def test_a_truck_with_no_task_is_never_called_stalled(floor):
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    for step in range(10):
+        later = now + fl_progress.STALL_GIVE_UP_S * (step + 1)
+        f1.state(later)
+        manager._stall_pass(later)
+    assert manager.stalled == {}
+
+
+def test_a_truck_that_stops_driving_is_named_on_the_screen(floor):
+    """The 245 seconds nobody saw. f1 takes a leg, drives none of it,
+    and the document says so by name."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    submit(manager, "t-1", "S1", "S2")
+    turn(manager, (f1,), now)
+    assert manager.tasks[0]["assignee"] == "f1"
+
+    later = now + fl_progress.PROGRESS_S + 1.0
+    f1.state(later)                       # same position, new state
+    manager._stall_pass(later)
+
+    assert "f1" in manager.stalled
+    assert manager.stalled["f1"] >= fl_progress.PROGRESS_S
+    assert "f1" in manager._status(later)["stalled"]
+
+
+def test_a_stall_that_runs_long_gives_the_task_back(floor):
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    submit(manager, "t-1", "S1", "S2")
+    turn(manager, (f1,), now)
+    order_id = manager.tasks[0]["order_id"]
+
+    later = now + fl_progress.STALL_GIVE_UP_S + 1.0
+    f1.state(later)
+    manager._stall_pass(later)
+
+    assert manager.tasks[0]["task_id"] == "t-1"
+    assert manager.tasks[0]["state"] == "QUEUED"
+    assert manager.tasks[0]["assignee"] is None
+    assert manager.cancelled["f1"]["order_id"] == order_id
+    assert any("not moving" in r["why"] for r in manager.refused)
+
+
+def test_a_truck_that_gets_going_again_is_forgiven(floor):
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    submit(manager, "t-1", "S1", "S2")
+    turn(manager, (f1,), now)
+
+    later = now + fl_progress.PROGRESS_S + 1.0
+    f1.state(later)
+    manager._stall_pass(later)
+    assert "f1" in manager.stalled
+
+    f1.xy = (f1.xy[0], f1.xy[1] + fl_progress.PROGRESS_M + 0.1)
+    f1.state(later + 1.0)
+    manager._stall_pass(later + 1.0)
+    assert "f1" not in manager.stalled
+
+
+def test_the_dwell_is_far_shorter_than_the_stall_window():
+    """A DWELLING TRUCK IS NOT MOVING EITHER, and it is doing exactly
+    what it was told. The fork cycle is 3.0 s against a 30.0 s window,
+    so it cannot trip the watchdog - but that is arithmetic between two
+    files, and arithmetic between two files is what this pins. Lengthen
+    the dwell past the window and every fork cycle in the cell becomes a
+    name on the operator's screen."""
+    assert fm.DWELL_S * 2 < fl_progress.PROGRESS_S
