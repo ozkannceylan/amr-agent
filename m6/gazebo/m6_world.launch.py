@@ -56,15 +56,14 @@ from launch_ros.actions import Node
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.normpath(os.path.join(_HERE, "..", ".."))
 
-# STEP 5'S OWN WORLD, NOT sim/worlds/warehouse.sdf. Owner instruction
-# 2026-08-12: the source world's aisles trip the protective field while
-# driving. warehouse_ver2.sdf is this directory's open relayout (no
-# building columns, no row C, 6.50 m main aisle); the source world stays
-# untouched, exactly as forklift_ver2/model.sdf leaves agv/'s model alone.
+# M6.6'S OWN WORLD. warehouse_ver2.sdf is FROZEN and stays in this
+# directory: every M6.1-M6.5 figure in PROOF.md was measured on it and a
+# figure whose floor was edited under it is not a figure. ver3 is the
+# 48 x 32 m two-road-class relayout (spec:
+# docs/superpowers/specs/2026-08-23-m6-6-floor-and-dispatch-design.md).
 # The world NAME inside the file stays "warehouse", so _WORLD_NAME and
-# every /world/warehouse/* topic hold. ONE world for every vehicle: the
-# plant is the only thing they share.
-_WORLD = os.path.join(_HERE, "warehouse_ver2.sdf")
+# every /world/warehouse/* topic hold. ONE world for every vehicle.
+_WORLD = os.path.join(_HERE, "warehouse_ver3.sdf")
 _SCRIPTS = os.path.join(_REPO, "agv", "forklift", "scripts")
 _IO_SCRIPT = os.path.join(_SCRIPTS, "forklift_io.py")
 _STO_SCRIPT = os.path.join(_SCRIPTS, "sto_contactor.py")
@@ -203,6 +202,11 @@ for _vid in _VIDS:
          for t in _scans]
 _BRIDGE_ARGS.insert(
     0, "{}@rosgraph_msgs/msg/Clock[gz.msgs.Clock".format(_CLOCK_TOPIC))
+# The overhead camera, gz -> ROS. ONE camera for the world, not one
+# per vehicle: it is the recording's eye, not a truck's sensor, and
+# nothing in ipc/ subscribes to it.
+_BRIDGE_ARGS.append(
+    "/overhead/image@sensor_msgs/msg/Image[gz.msgs.Image")
 
 # The GUI gate waits for the back scanner of EVERY vehicle - the reason is
 # the long note in generate_launch_description(). Every spawn is requested
