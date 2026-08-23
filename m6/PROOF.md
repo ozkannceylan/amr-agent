@@ -6520,3 +6520,127 @@ Run the setup first. This is the step4 14.8 m class, tested on purpose.
 15. Check f2's HMI: it must be unaffected, still `Drive enable: ON`.
 16. Run `./m6.sh stop` — f1's mux is gone and the stack is now incomplete.
 17. Write the distance into the Gate 6 section above.
+
+---
+
+# M6.6 — the floor rebuilt, and the four things it took to find out why
+
+**Date:** 2026-08-23. **Verdict: the gate is 2 of 6 and is NOT ticked.**
+Every number below is a capture off this machine, and the two criteria
+that pass are stated no more loudly than the four that do not.
+
+## The run
+
+`fleet_cli.py demo --duration 600 --in-flight 4 --seed 7`, four trucks,
+`m6.sh start --headless`, four `scripted_writer --auto-reset` on the
+Windows side, `tools/record_overhead.py` on the camera and
+`tools/score_run.py` on the four `/fN/gz/odom` topics. No panel was
+opened and no station was clicked; the three HMI actions were published
+on the topics `hmi_node.py` publishes, at the QoS it declares.
+
+## The six criteria, measured
+
+| # | Criterion | Measured | |
+|---|---|---|---|
+| 1 | fleet distance ≥ 800 m in 10 min | **404.4 m over 630 s** | [ ] |
+| 2 | ≥ 12 transports completed | **4 done, 9 submitted** | [ ] |
+| 3 | every truck moves in every 2-min window | **all four, all six windows** | [x] |
+| 4 | every arrival inside its own `arrive_m` | **9 arrivals, no station approached twice** | [x] |
+| 5 | integrated RTF ≥ 0.40, floor ≥ 0.020 | **0.578 / 0.021 server-only; live scan rate 5.03 Hz, worst gap 0.528 s** | [ ] |
+| 6 | auto-RESET recoveries ≤ 4 | **15 — f1 3, f2 6, f3 2, f4 4** | [ ] |
+
+Per truck: f1 115.4 m, f2 88.5 m, f3 104.7 m, f4 95.8 m.
+
+**Criterion 1 is a fail and it is still the headline.** The M6.5
+acceptance run moved 144.2 m in 1024 s; this one moved 404.4 m in 630 s,
+which is **2.8x the distance per second**. The 800 m bar was written
+against a rig running at real time and this one runs at about half, so
+the bar was wrong rather than the floor. It is left as written and
+failed rather than moved, because a criterion edited after the run is
+not a criterion.
+
+**Criterion 5's live half is the honest worry.** `field_eval` calls a
+scan older than `SCAN_STALE_S` (0.50 s) a violated field, and the worst
+gap measured on this run was 0.528 s. That is why criterion 6 reads 15:
+most of those recoveries are a scan that arrived 28 ms late, not a truck
+that drove into something.
+
+## The four defects the floor had, and how each was found
+
+None of these came from reading the code. All four came from running it
+and reading what the plant said.
+
+**1. The overhead camera filmed a quarter turn.** A gz camera looks down
+its own +X with image-right at -Y, so pitch alone put image-right on
+world -Y and image-up on world +X — and because `horizontal_fov` sizes
+the WIDTH, the hall's 48 m X extent was squeezed into the 36 m the short
+axis covers. Both ends of the floor were cropped and trucks drove out of
+frame. Yaw = +pi/2. The pose came from the M6.6 plan, so the plan was
+wrong the same way.
+
+**2. Dressing the floor cost the scanners their rate.** RTF is the wrong
+instrument for it: gz sim renders the whole scene once PER SENSOR, so
+scene complexity is multiplied by sixteen gpu_lidars.
+
+    bare world      62 models   4.22 Hz per scanner, worst gap 0.316 s
+    dressed        340 models   0.76 Hz per scanner, worst gap 2.556 s
+
+All four trucks went into a permanent protective stop inside a minute
+and stood at their spawn poses for 245 s with orders, reservations and
+no motion — and nothing in any log said anything was wrong, because
+nothing was. The decoration is now spent to a model budget: 33 models,
+5.03 Hz.
+
+**3. A pocket is not a place to park this vehicle.** The pick bays faced
+the 5.00 m pick aisle and a tricycle with a 1.29 m minimum turning
+radius could not line one up: f1 stopped at (-13.35, 3.59) and f2 at
+(6.65, 3.60), each inside its own bay with the BACK protective field
+violated and neither recoverable. Turning the bays to face the 8.00 m
+ring was not enough — the next run had f2 and f3 stopped at their
+stations reading **back 0.980, left 1.698, right 1.548**, identical to
+three decimals because the bays are identical and the pursuit is
+deterministic. The lateral fit was fine. The truck is about 2.80 m long
+and needs 1.20 m clear ahead, so a pocket must be over 4.00 m deep and a
+3.50 m rack row cannot give one. **There is no depth that works.** The
+gap is cut right through the row instead, ring to pick aisle, and the
+station sits in the middle of an open CROSS-AISLE.
+
+**4. And the cross-aisle was three centimetres too narrow.** With the
+protective stops gone, f2 and f3 still stood still — Motor TRUE, every
+field clear, wheels at zero:
+
+    f3  state HOLD  guard_min 1.4722 m  reversing True
+    f2  state HOLD  guard_min 1.4846 m  reversing True
+
+`follower.GUARD_HOLD_M` is 1.500. The nav lidar sits 0.40 m off centre,
+so reversing out of a 4.00 m gap it reads the wall just inside the band
+and the autopilot holds, exactly as it should. **A follower constant may
+not move for a floor.** It would have been one character to make it 1.4.
+The gaps are 5.00 m: 2.10 m at the nav lidar, 2.04 m at a safety
+scanner.
+
+## What the recording shows
+
+`assets/m6-fleet/m6-fleet-05-cross-aisle-floor-2026-08-23.mp4` — 154 s
+of overhead video from a 630 s run (the camera delivers at the plant's
+rate, so a slow rig makes a shorter film rather than a smoother one).
+Four trucks working a 48 x 32 m floor: a closed ring at 0.70 m/s, a
+spine through the middle, one creep aisle, twelve stations in open
+cross-aisles, and a dock annex with four bays.
+
+## Still open after this
+
+* **The 800 m bar and the 12-transport bar are rig-bound, not
+  floor-bound.** At an RTF of about 0.5 and a longest leg of 60.65 m a
+  transport costs three to four wall minutes, so ten minutes of wall
+  clock cannot hold twelve of them at four trucks.
+* **The worst scan gap is 0.528 s against a 0.500 s rule.** Every
+  auto-RESET in criterion 6 traces to that. The rig is still the binding
+  constraint and it is the same residual M6.5 closed with.
+* **The hall reads emptier than the dressed version did.** Widening the
+  cross-aisles to 5.00 m shrank the rack segments to 0.50-1.00 m
+  slivers, and the loads on top of them shrank with them. The owner's
+  first note on the M6 recording was that the hall looks empty; it is
+  better than it was and it is not fixed.
+* **No GUI take was recorded.** The plan asked for a second, shorter
+  take with the Gazebo window open on the same seed. It is not here.

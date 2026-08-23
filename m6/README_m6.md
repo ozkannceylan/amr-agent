@@ -74,6 +74,9 @@ writer, and each writer serves exactly one truck.
 | 10a | HMI windows | **Teleop:** leave a truck's radio on `Teleop` and drag *that* HMI's joystick. Only that truck moves. |
 | 10b | HMI windows | **Auto:** click `Auto`, click a station dot on that HMI's sketch, press **GO**. All four trucks can be routed at the same time. **STOP** cancels a goal — it is not a brake. |
 | 10c | WSL | **Auto, as fleet work:** `python3 m6/fleet/fleet_cli.py submit S1 S4` queues a *transport* — you name two stations, the fleet picks the truck. Same precondition as **GO**, and the fleet enforces it: a truck not in `Auto` is not idle-confirmed, so the task waits rather than failing. Watch it with `python3 m6/fleet/fleet_cli.py status --watch`. See [Fleet manager](#fleet-manager--the-cells-master-control). |
+| 10d | WSL | **A whole shift, for a recording:** `python3 m6/fleet/fleet_cli.py demo --duration 600 --in-flight 4 --seed 7` keeps four transports alive for ten minutes, drawing station pairs weighted by route length so the cross-hall runs dominate. **Seeded**, so the same run can be shot twice and be the same run both times. `--dry-run` prints the sequence and needs no broker. |
+| 10e | Windows | **For a recording only:** add `--auto-reset` to each `scripted_writer.py`. A protective demand latches and only a panel RESET clears it; the watchdog presses it once the PROTECTIVE fields have re-cleared, never into a live one, and never through a held e-stop. Every press is logged as `AUTO-RESET enable` (the truck coming up) or `AUTO-RESET recover` (a latch), and the recover count is what a run is judged on. Owner ruling, 2026-08-23. |
+| 10f | WSL | **Record it:** `python3 m6/tools/record_overhead.py --out run.mp4 --seconds 640` writes the overhead camera to mp4, and `python3 m6/tools/score_run.py --record --seconds 640 --out run.jsonl` samples the four odometry topics and prints the distance table that goes into PROOF. `--report run.jsonl` scores it again later without ROS. |
 | 11 | Panels | Finished: **close every panel window**. Each writes its own truck's trip values on the way out. |
 | 12 | WSL | `./m6.sh stop` |
 
@@ -726,22 +729,33 @@ tying all three together so they cannot drift apart silently.
   <goal>` plus the autopilot's note when there is one.
 
 The twelve stations, with the arrival radius each one declares — and it
-is the same radius twelve times, which is the point of M6.6's floor:
+is the same radius twelve times, which is the point of M6.6's floor.
+
+**Every one of them is in an open CROSS-AISLE, not in a pocket**, and
+that took two runs to learn. This vehicle is about 2.80 m long and needs
+1.20 m of protective clearance ahead of it, so a bay would have to be
+over 4.00 m deep and a 3.50 m rack row cannot give one; measured
+2026-08-23, two trucks reached their station and stopped there with the
+back protective field violated at 0.980 m, unrecoverable. The gap is cut
+right through the row instead — ring on one side, pick aisle on the
+other — and it is **5.00 m wide**, because at 4.00 m a truck reversing
+out reads `guard_min` 1.472 m against `follower.GUARD_HOLD_M` of 1.500
+and holds. See `PROOF.md`'s M6.6 section for both measurements.
 
 | id | name | pose (x, y) | spur | `arrive_m` |
 |---|---|---|---|---|
-| S1 | PICK-NW-1 | (-13.0, 3.30) | 3.30 | 0.25 |
-| S2 | PICK-NW-2 | (-7.0, 3.30) | 3.30 | 0.25 |
-| S3 | PICK-SW-1 | (-13.0, -3.30) | 3.30 | 0.25 |
-| S4 | PICK-SW-2 | (-7.0, -3.30) | 3.30 | 0.25 |
-| S5 | PICK-NE-1 | (7.0, 3.30) | 3.30 | 0.25 |
-| S6 | PICK-NE-2 | (13.0, 3.30) | 3.30 | 0.25 |
-| S7 | PICK-SE-1 | (7.0, -3.30) | 3.30 | 0.25 |
-| S8 | PICK-SE-2 | (13.0, -3.30) | 3.30 | 0.25 |
-| S9 | DOCK-DOOR | (-14.0, -15.30) | 5.30 | 0.25 |
-| S10 | CHARGE-1 | (-6.0, -15.30) | 5.30 | 0.25 |
-| S11 | CHARGE-2 | (6.0, -15.30) | 5.30 | 0.25 |
-| S12 | CONVEYOR | (14.0, -15.30) | 5.30 | 0.25 |
+| S1 | PICK-NW-1 | (-13.0, 4.25) | 5.75 | 0.25 |
+| S2 | PICK-NW-2 | (-7.0, 4.25) | 5.75 | 0.25 |
+| S3 | PICK-SW-1 | (-13.0, -4.25) | 5.75 | 0.25 |
+| S4 | PICK-SW-2 | (-7.0, -4.25) | 5.75 | 0.25 |
+| S5 | PICK-NE-1 | (7.0, 4.25) | 5.75 | 0.25 |
+| S6 | PICK-NE-2 | (13.0, 4.25) | 5.75 | 0.25 |
+| S7 | PICK-SE-1 | (7.0, -4.25) | 5.75 | 0.25 |
+| S8 | PICK-SE-2 | (13.0, -4.25) | 5.75 | 0.25 |
+| S9 | DOCK-DOOR | (-17.0, -14.90) | 4.90 | 0.25 |
+| S10 | CHARGE-1 | (-10.0, -14.90) | 4.90 | 0.25 |
+| S11 | CHARGE-2 | (10.0, -14.90) | 4.90 | 0.25 |
+| S12 | CONVEYOR | (17.0, -14.90) | 4.90 | 0.25 |
 
 **Nothing declares 0.80 any more, and no code was relaxed to get there.**
 A vehicle cannot reach a point inside its own turning circle: measured

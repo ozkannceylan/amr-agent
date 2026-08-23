@@ -81,7 +81,7 @@ its measured evidence in [`m5_ver2/step5/PROOF.md`](m5_ver2/step5/PROOF.md).
 | [M3](m3/) | Fixed equipment I/O loop — Gazebo ↔ PLC both directions, measured | ✅ |
 | [M4](m4/) | Forklift commissioning cell — teleop through the PLC standard program | ✅ |
 | [M5](m5/) | Sensored autonomous forklift — the safety chain live under teleop **and** autonomy | ✅ |
-| [M6](m6/) | VDA 5050 fleet at scale — 4 forklifts, 10 stations, traffic avoidance | ⏳ |
+| [M6](m6/) | VDA 5050 fleet at scale — 4 forklifts, 12 stations, traffic avoidance | ⏳ |
 | M7 | LLM operations layer + recorded end-to-end demonstration | ⏳ |
 | M8 | Beckhoff/TwinCAT vendor portability — same bridge, different PLC | ⏳ |
 
