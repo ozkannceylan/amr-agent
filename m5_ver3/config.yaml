@@ -1,0 +1,188 @@
+# config.yaml - every constant the m5-ver3 scripts obey, and the only
+# place any of them is written down.
+#
+# THE RULE THIS FILE EXISTS FOR: no behavioural constant lives inline in a
+# script on this track. m5v3.sh and tools/rtf_probe.sh read this file once
+# per invocation and refuse by name if they cannot - so a partition, a pose
+# or a topic that has to move moves HERE, once, and both scripts move with
+# it. A constant spelled in two places is two opinions about one number,
+# and the first one to be edited is the one that is right.
+#
+# EVERY VALUE IS A STRING WHERE A SCRIPT PASSES IT THROUGH. The spawn
+# coordinates go onto a gz service request as text; quoting them keeps
+# "-3.00" from reaching the wire as "-3.0" and keeps the evidence file's
+# comparison against the table exact rather than approximately exact.
+#
+# It grows. Task 1 owns launch and isolation; the sensor profiles, the
+# fusion parameters and the Nav2 stack of F1-F5 land under keys of their
+# own beside these.
+
+# ------------------------------ ISOLATION ------------------------------
+# WHAT KEEPS THIS TRACK OFF M6's GRAPH, and what decides what stop may
+# kill. m6 runs partition m6 on domain 96; step5 ran m5demo. Both may be
+# up on this machine at the same time as this one, and a shared graph
+# would put one stack's publishers on the other's topics.
+#   GZ_PARTITION IS THE ONE THAT SCOPES GAZEBO. gz transport is not DDS,
+#   so ROS_DOMAIN_ID does not isolate the simulator at all; it isolates
+#   the ROS side (the bridge and everything that will subscribe to it).
+#   Both are set on every child, and m5v3.sh's ours() reads GZ_PARTITION
+#   back out of a candidate process's environment to decide whether the
+#   sweep may touch it. That is why the partition is NOT overridable from
+#   the environment: start and stop must never be able to disagree about
+#   which graph this is.
+isolation:
+  gz_partition: "m5v3"
+  ros_domain_id: "97"
+
+# --------------------------------- GPU ---------------------------------
+# RENDERING ON THIS TRACK IS THE GPU's, AND THAT IS A GATE RATHER THAN A
+# PREFERENCE. WSL's default GL stack is llvmpipe - measured on this rig,
+# `glxinfo -B` with neither variable set reports
+# "llvmpipe (LLVM 20.1.2, 256 bits)" - and software rasterisation is what
+# made m6 gate a four-truck fleet at RTF 0.30. This track adds cameras and
+# a heavier lidar load to ONE truck, so it starts from the other end: the
+# two exports below select Mesa's d3d12 gallium driver and pin it to the
+# NVIDIA adapter, and m5v3.sh refuses to start anything at all unless the
+# renderer string then names required_renderer.
+#   THE REFUSAL IS THE POINT. A silent llvmpipe fallback does not fail, it
+#   just measures a different machine, and every figure taken under it is
+#   a figure about software rendering wearing this rig's name.
+gpu:
+  gallium_driver: "d3d12"
+  d3d12_adapter_name: "NVIDIA"
+  # The substring the renderer string must contain. Measured with the two
+  # exports above: "D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU)".
+  required_renderer: "NVIDIA"
+
+# -------------------------------- WORLD --------------------------------
+# M6's FLOOR, BY REFERENCE AND NOT BY COPY. warehouse_ver3.sdf is the
+# 48 x 32 m two-road-class relayout M6.6 built and M6.7 drove; it is
+# spawn-free (no vehicle include anywhere in it), so one track can spawn
+# four trucks into it and another can spawn one, and neither edits it.
+# COPYING IT WOULD BE THE MISTAKE: two floors that start identical and
+# drift are two floors, and a route table measured on one of them is then
+# a claim about neither.
+#   The world NAME inside the file is "warehouse" and stays that way -
+#   every /world/warehouse/* service and topic on this track keys on it.
+# Paths are relative to the repository root, which m5v3.sh resolves from
+# its own location.
+world:
+  file: "m6/gazebo/warehouse_ver3.sdf"
+  name: "warehouse"
+
+# ------------------------------- VEHICLE -------------------------------
+# ONE TRUCK. m5-ver3 is the showcase vehicle rebuilt around real sensors;
+# the fleet is M6's and stays M6's (vault AMR-DEC-003).
+#   THE MODEL IS THIS TRACK'S OWN FORK, gazebo/forklift_ver3/model.sdf,
+#   which is m6/gazebo/forklift_ver2/model.sdf byte for byte but for its
+#   name. It is forked rather than referenced because F1 rewrites its
+#   sensors, and m6's figures are measured on the file it was forked from.
+#
+# THE SPAWN POSE IS f1's, READ OUT OF m6/ipc/status_contract.py's VEHICLES
+# TABLE - the values that table holds TODAY, which are not the ones this
+# track's plan quoted. The plan asked for (-3.00, -5.50, 0.05) yaw 0.0.
+# That pair is real, but it is the pose of an EARLIER FLOOR: it is
+# sim/launch/warehouse_bringup.launch.py's _SPAWN_X/_SPAWN_Y, what step5
+# and M6.1 spawned at on warehouse_ver2, and M6.6's relayout put a rack
+# column across it. The table moved with the floor; the quotation did not.
+#
+# IT WAS MEASURED RATHER THAN ARGUED, AND THE ARITHMETIC AGREES WITH THE
+# MEASUREMENT TO THE MILLIMETRE (EVIDENCE_BRINGUP.md 5):
+#   The model's forks reach x = -1.875 in its own frame. At (-3.00, -5.50)
+#   with yaw 0 the fork tips therefore land at world x = -4.875, and
+#   RackSW3 stands at x in [-4.500, -4.000], y in [-6.000, -2.500], from
+#   the floor up - so the truck is spawned with 0.875 m of fork inside a
+#   rack leg. gz accepts it (`data: true` says the request was accepted,
+#   never that the truck is clear of geometry), the contact solver then
+#   ejects it, and it slides to rest at x = -2.125 - fork tips flush on
+#   the rack face at -4.000, exactly the 0.875 m of penetration undone.
+#   Measured three ways: warehouse_ver2 settles at (-3.000000, -5.500000)
+#   from the same request; warehouse_ver3 slides for m6's own
+#   forklift_ver2 model exactly as it does for this fork; and spawn z made
+#   no difference.
+#
+# WHERE THE TABLE'S POSE LANDS: the NORTH RING LEG, y = +10.00, an 8.00 m
+# clear cruise corridor with no rack, station or bay in it. The racks
+# nearest it end at y = +6.00. yaw 3.14159 points the forks at world +x
+# (model yaw 0 puts them at -x), so the truck stands facing east down the
+# leg. Measured on this world: it settles at exactly (-17.000000,
+# 10.000000, -0.000001), RPY (0, 0, 3.141590), and does not move again.
+#
+# A POSE THIS TRACK CHOOSES FOR ITSELF IS FINE - one truck does not owe a
+# fleet formation anything - but it has to be CHECKED against the floor
+# the way this one was, and the check is the fork reach above, not a look
+# at the map.
+vehicle:
+  model: "m5_ver3/gazebo/forklift_ver3/model.sdf"
+  # The name the truck is SPAWNED under, which is what a gz service
+  # addressing this one truck has to say. Independent of the <model name>
+  # inside the file; both are forklift_ver3 here so there is nothing to
+  # remember.
+  name: "forklift_ver3"
+  spawn:
+    x: "-17.00"
+    y: "10.00"
+    z: "0.05"
+    yaw: "3.14159"
+
+# -------------------------------- TOPICS -------------------------------
+# WHAT THE BRIDGE CARRIES, AND NOTHING ELSE YET. A bridged channel with no
+# consumer is a claim the run does not make, so this list is exactly what
+# Task 1 measures and F1 will grow it.
+topics:
+  # The simulation clock. One world, one clock.
+  clock: "/clock"
+  # MEASUREMENT REFERENCE ONLY. This is the OdometryPublisher system's
+  # ground-truth pose - no wheel slip, no encoder quantisation, no drift -
+  # and on this track it is an instrument, never an input. F1 deletes it
+  # from the model outright and replaces it with wheel odometry through an
+  # EKF; until then it is what a fusion estimate is scored AGAINST, and
+  # anything that navigates on it is measuring its own answer.
+  odom_ground_truth: "/forklift/gz/odom"
+  # The navigation lidar, 10 Hz, 360 deg, 8.0 m range max.
+  scan_nav: "/forklift/gz/scan_nav"
+  # NOT BRIDGED, AND NAMED HERE BECAUSE THE GUI WAITS ON IT. gz-sim's
+  # GuiRunner discards world state that arrives before its first snapshot,
+  # so a GUI client started before the model's sensors advertise anchors
+  # every lidar fan at the world origin for the life of the window
+  # (measured in m6, gazebo/m6_world.launch.py). Gating the client on this
+  # topic appearing on the gz side puts the sensors inside that snapshot.
+  gui_gate: "/forklift/gz/safety_scanner_back/measurement"
+
+# -------------------------------- PATHS --------------------------------
+# Relative to the repository root. The pidfile is what stop reads and the
+# only file it deletes; the log dir is one file per child, by name.
+paths:
+  log_dir: "m5_ver3/logs"
+  pidfile: "m5_ver3/.m5v3_pids"
+
+# -------------------------------- TIMING -------------------------------
+# Seconds. Measured on this rig rather than guessed, and every one of them
+# is a waiting budget - nothing here changes what the plant does.
+timing:
+  # Server up and warehouse_ver3.sdf loaded before the create service is
+  # called. rtf_spike.sh uses 8 s against the same world on the same rig.
+  world_load_s: "8"
+  # The truck dropped from z = 0.05 onto its wheels and stopped moving,
+  # before its resting pose is read back or anything is measured.
+  settle_s: "5"
+  # After the last spawn, before the pid file is walked for children that
+  # died on their way up. A process that dies in its first fraction of a
+  # second has not started, and saying "up" about it sends the operator to
+  # the wrong log.
+  startup_check_s: "1"
+  # Between the TERM sweep and the KILL sweep. Past this, nothing is
+  # exiting on its own.
+  stop_grace_s: "2"
+
+# ------------------------------- RTF PROBE ------------------------------
+# tools/rtf_probe.sh samples gz.msgs.WorldStatistics on the running
+# world's stats topic and reports mean, median and floor over the sample.
+#   THE TOPIC IS THE WORLD-SCOPED ONE, and `gz stats` is deliberately not
+#   used: that is Gazebo CLASSIC's verb. gz-tools for Harmonic has no
+#   stats verb at all - it prints the general help and exits 0 - so a
+#   probe built on it would report nothing on a perfectly healthy sim.
+#   30 s at the ~10 Hz that topic publishes is ~300 samples; the count
+#   sags with the RTF, so the probe prints it as a reading of its own.
+rtf_probe:
+  sample_s: "30"
