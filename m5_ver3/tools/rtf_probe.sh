@@ -65,7 +65,7 @@ stack_line() {  # every process in THIS partition that the sweep would own
         tr '\0' '\n' 2>/dev/null < "/proc/$pid/environ" \
             | grep -qxF "GZ_PARTITION=$GZ_PARTITION" || continue
         out="$out${out:+ | }${cmd:0:36}"
-    done < <(pgrep -af 'gz sim|parameter_bridge' 2>/dev/null)
+    done < <(pgrep -af 'gz sim|parameter_bridge|image_bridge' 2>/dev/null)
     printf '%s\n' "${out:-<nothing in this partition - is the stack up?>}"
 }
 

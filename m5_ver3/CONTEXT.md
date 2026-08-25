@@ -88,6 +88,7 @@ something else. A render problem is diagnosed, never downgraded.
 m5_ver3/
 ├── CONTEXT.md            this file
 ├── EVIDENCE_BRINGUP.md   Task 1's measured numbers, instrument by instrument
+├── EVIDENCE_MODEL_V3.md  F1 Task 2's: every sensor, datasheet to delivered
 ├── config.yaml           every constant the scripts obey - the one home
 ├── m5v3.sh               start [--headless] | stop | status
 ├── gazebo/
@@ -96,7 +97,9 @@ m5_ver3/
 ├── logs/                 one file per child, by name (git-ignored)
 └── tools/
     ├── _common.sh        sourced: refuse(), the config reader, source_ros()
-    └── rtf_probe.sh      real-time factor of the RUNNING world
+    ├── rtf_probe.sh      real-time factor of the RUNNING world
+    ├── noise_probe.sh    is the configured sensor noise on the wire
+    └── slip_bench.sh     slip at steady cruise, forward and astern
 ```
 
 **`config.yaml` is the one home for every constant.** No behavioural
@@ -131,28 +134,41 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 
 | Command | What it does |
 |---|---|
-| `m5v3.sh start` | GPU preflight, then the world, one `forklift_ver3`, the bridge and a Gazebo **window**. |
-| `m5v3.sh start --headless` | The same without the window. **Use this for anything being measured** — every figure in `EVIDENCE_BRINGUP.md` was taken this way. |
+| `m5v3.sh start` | GPU preflight, then the world, one `forklift_ver3`, both bridges and a Gazebo **window**. |
+| `m5v3.sh start --headless` | The same without the window. **Use this for anything being measured** — every figure in the two evidence files was taken this way. |
 | `m5v3.sh status` | Each child by name, ALIVE or DEAD, with its log. Exit 0 only if every one is alive. |
 | `m5v3.sh stop` | Ends this partition's stack, and nothing else. |
 | `tools/rtf_probe.sh` | 30 s real-time-factor sample of the world that is already running. |
+| `tools/noise_probe.sh scan\|depth <topic>` | Temporal spread of every reading on one sensor topic, vehicle **at rest**. Is the noise the SDF configures actually on the wire? |
+| `tools/slip_bench.sh` | Drives the traction terminal at cruise, forward then astern, and reports slip against the commanded and the achieved wheel rate. |
 
 `start` exits **non-zero** if any child died during startup, naming the
 child and its log; what survived is left running, because the operator's
 next command is `stop`.
 
-Three processes at Task 1: the gz server, the `ros_gz_bridge`, and the
-GUI client when there is one. **No broker, no fleet manager, no HMI, no
-PLC link** — that absence is the phase, not an omission. Nothing here
-touches PLCSIM Advanced or anything on the Windows side.
+Three processes since F1 Task 2: the gz server, `ros_gz_bridge`'s
+`parameter_bridge` and `ros_gz_image`'s `image_bridge` — plus the GUI
+client when there is one. **No broker, no fleet manager, no HMI, no PLC
+link** — that absence is the phase, not an omission. Nothing here touches
+PLCSIM Advanced or anything on the Windows side.
 
 ### What is bridged, and one word about odometry
 
-| Topic | Direction | Rate |
-|---|---|---|
-| `/clock` | gz → ROS | 500 Hz |
-| `/forklift/gz/odom` | gz → ROS | 20 Hz |
-| `/forklift/gz/scan_nav` | gz → ROS | 10 Hz |
+| Topic | Direction | Configured rate | Carried by |
+|---|---|---|---|
+| `/clock` | gz → ROS | 500 Hz | parameter bridge |
+| `/forklift/gz/odom` | gz → ROS | 20 Hz | parameter bridge |
+| `/forklift/gz/scan_nav` | gz → ROS | 15 Hz | parameter bridge |
+| `/forklift/gz/imu` | gz → ROS | 100 Hz | parameter bridge |
+| `/forklift/gz/cam/camera_info` | gz → ROS | 15 Hz | parameter bridge |
+| `/forklift/gz/cam/depth_image` | gz → ROS | 15 Hz | **image bridge** |
+
+**What is deliberately NOT bridged:** `/forklift/gz/points3d` (the 3D
+lidar), both point clouds and the camera's colour image. Their ROS
+consumers arrive in F2, gz renders a sensor only while something
+subscribes to it, and `EVIDENCE_MODEL_V3.md` §6 measures what subscribing
+to the 3D lidar costs: mean RTF 0.999 → 0.85. The delivered rates for
+every one of these, both sides, are §2 of the same file.
 
 `/forklift/gz/odom` is the model's `OdometryPublisher` — **ground truth,
 and a measurement reference ONLY**. No wheel slip, no encoder

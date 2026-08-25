@@ -14,9 +14,26 @@
   in favour of wheel odometry through an EKF - and that drift is the
   whole point of the fork.
 
-  NOTHING ELSE IS CHANGED HERE. Task 1 brings the plant up and measures
-  it; every sensor change belongs to Task 2, against a model whose only
-  difference from m6's is its name.
+  TASK 1 LEFT THIS FILE BYTE-IDENTICAL BUT FOR ITS NAME; TASK 2 IS WHERE
+  THE DRIFT STARTS, and it is this much of it:
+
+    . nav_lidar carries a SICK TiM571 profile - 15 Hz, 811 rays over
+      270 deg, 0.05 to 25.0 m, quantized gaussian noise - instead of the
+      ideal 10 Hz / 360 deg / 8.0 m scanner.
+    . the three safety_scanner_* sensors gain a gaussian noise block AND
+      NOTHING ELSE. Their aperture, sample count, rate, range and topic
+      are frozen by the field contract the PLC side is written against.
+    . nav_lidar_3d, an Ouster OS0 class 3D lidar on the guard roof, and
+      pallet_cam, a RealSense D455 class RGB-D camera on the mast, are
+      NEW. Neither existed on forklift_ver2.
+    . the drive wheel carries gz-sim-wheel-slip-system, so a wheel
+      revolution stops being exactly 2 pi r of ground.
+
+  The IMU is untouched: its noise was already derived from a data sheet
+  in m5_ver2 and there was nothing for this phase to improve. The
+  ground-truth OdometryPublisher is also untouched and stays a measurement
+  reference; taking it out of the estimator is F2's job, not this one's,
+  and the two-phase note at the foot of this file already says so.
 -->
 <!--
   model.sdf . forklift_ver2: the in house tricycle forklift of
@@ -81,15 +98,16 @@
 
   TOP VIEW (metres). SB, SL and SR are the three safety scanners; N is
   the navigation lidar, on the overhead guard, offset to .y of the mast
-  centreline. SL is drawn BELOW the +x axis and SR above it, per the
-  frame note above.
+  centreline; N3 is the 3D lidar on the roof centre and C the pallet
+  camera, outboard on the mast and looking at .x. SL is drawn BELOW the
+  +x axis and SR above it, per the frame note above.
 
                             +y
                              ^
       fork tines             |            counterweight
      .......                 |               [====]
-     |     |       SR   [rear wheel L]           |
-     |     |    [mast]  .............            |
+     |     | C     SR   [rear wheel L]           |
+     |     |    [mast]  ......N3.....            |
    . | . . | . .[||||]. |  chassis  | . [steer + drive wheel] . SB . > +x
      |     |            |1.4 x 0.9  |     N (0.55, .0.40) at z 1.80
      |     |       SL   ......... ...            |
@@ -98,17 +116,22 @@
      SB  safety_scanner_back   ( 0.72,  0.00)  link yaw    0 deg
      SL  safety_scanner_left   (.0.68, .0.46)  link yaw .135 deg
      SR  safety_scanner_right  (.0.68,  0.46)  link yaw  135 deg
+     N   nav_lidar             ( 0.55, .0.40)  link yaw    0 deg
+     N3  nav_lidar_3d          ( 0.00,  0.00)  link yaw    0 deg
+     C   pallet_cam            (.0.90,  0.40)  link yaw  180 deg,
+                                               pitch 30 deg down
 
   SIDE VIEW (metres)
 
+                       N3  z = 1.85
                           N  z = 1.80
           overhead guard roof z = 1.71
           ._______________________.
           |                       |
      [||] |                       |          mast rails to z = 2.05
-     [||] |       chassis         |[ CW ]    chassis underside z = 0.20
-     [||] |_______________________|
-    [carriage]                    |
+   C [||] |       chassis         |[ CW ]    chassis underside z = 0.20
+     [||] |_______________________|          C  z = 1.10, looking .x
+    [carriage]                    |             and 30 deg down
    ==========      SB/SL/SR safety scan plane z = 0.15
    forks     (o)             (o)  (o)   wheels r = 0.12
    ================================================ floor z = 0
@@ -172,7 +195,25 @@
     /forklift/gz/tf_ground_truth  gz.msgs.Pose_V  odom -> base_link, from
                                                   the same ground truth
 
-    /forklift/gz/scan_nav           gz.msgs.LaserScan  360 deg, z = 1.80
+    /forklift/gz/scan_nav           gz.msgs.LaserScan  270 deg, 15 Hz,
+                                                       z = 1.80, TiM571
+    /forklift/gz/points3d           gz.msgs.LaserScan  1024 x 32, 10 Hz,
+                                                       z = 1.85, OS0 class
+    /forklift/gz/points3d/points    gz.msgs.PointCloudPacked, the same
+                                                       sweep as a cloud -
+                                                       gz advertises it
+                                                       because the scan
+                                                       has 32 rows
+    /forklift/gz/cam/image          gz.msgs.Image      640 x 480 colour
+    /forklift/gz/cam/depth_image    gz.msgs.Image      640 x 480 depth
+    /forklift/gz/cam/camera_info    gz.msgs.CameraInfo
+    /forklift/gz/cam/points         gz.msgs.PointCloudPacked
+                                                       D455 class, on the
+                                                       mast, 15 Hz. The
+                                                       DEPTH IMAGE and the
+                                                       CAMERA INFO are
+                                                       what F1 bridges;
+                                                       neither cloud is.
     /forklift/gz/imu                gz.msgs.IMU        6-axis MEMS, 100 Hz,
                                                        NO orientation output
 
@@ -218,10 +259,13 @@
   FILE IS THE AUTHORITY for the geometry; config.yaml records the same
   numbers for the Python side and is diffed against the values below.
 
-  Sensor note: all four scanners are gz "gpu_lidar" sensors, because
-  gz sim has no CPU ray sensor. The world that spawns this model MUST
+  Sensor note: all FIVE scanners are gz "gpu_lidar" sensors, because
+  gz sim has no CPU ray sensor, and the pallet camera is an
+  "rgbd_camera". All six RENDER. The world that spawns this model MUST
   load gz-sim-sensors-system with a render engine. gz's stock empty.sdf
-  does not; sim/worlds/cell.sdf does. See README.md.
+  does not; sim/worlds/cell.sdf does, and so does
+  m6/gazebo/warehouse_ver3.sdf, which is the floor this track spawns
+  onto. See README.md.
 
   ONE SENSOR, ONE LINK, AND THE ROTATION LIVES IN THE LINK POSE. Each
   scanner has its own link and its <gz_frame_id> names that link. Without
@@ -316,14 +360,17 @@
     <!-- ======================== Sensing ========================= -->
     <!--
       Four planar scanners, each on its own link: three safety scanners
-      and the navigation lidar. THE THREE SAFETY SCANNERS ARE NAMED IN THE
-      OWNER'S FRAME, WHICH IS THIS MODEL'S ROTATED 180 deg ABOUT z. The
-      owner's Front is the FORK end, the model's -x; the owner's Left is
-      the model's -y. Their placement comes from the owner's reference
-      drawing and not from EVIDENCE_SENSOR_COVERAGE.md, which measured the
-      superseded two-scanner layout of agv/forklift/model.sdf. The
-      navigation lidar is unchanged and its derivation is still that
-      document's.
+      and the navigation lidar - and, since F1 Task 2, a 3D lidar and an
+      RGB-D camera on two links of their own after them. THE THREE SAFETY
+      SCANNERS ARE NAMED IN THE OWNER'S FRAME, WHICH IS THIS MODEL'S
+      ROTATED 180 deg ABOUT z. The owner's Front is the FORK end, the
+      model's -x; the owner's Left is the model's -y. Their placement
+      comes from the owner's reference drawing and not from
+      EVIDENCE_SENSOR_COVERAGE.md, which measured the superseded
+      two-scanner layout of agv/forklift/model.sdf. The navigation
+      lidar's MOUNT is unchanged and its derivation is still that
+      document's; the sensor on that mount is not, and its own block says
+      what replaced it.
 
       SCAN PLANE z = 0.15 for the three safety scanners. The free window
       at the fork end is bounded below by the lowered tine top (z = 0.10,
@@ -439,6 +486,22 @@
             <max>8.0</max>
             <resolution>0.01</resolution>
           </range>
+          <!-- THE ONLY THING F1 CHANGED ABOUT THIS SENSOR. nanoScan3-class
+               statistical error, 20 mm, as white noise on the range.
+               Everything else here - the aperture, the 275 samples, the
+               10 Hz, the 0.10 to 8.0 m and the topic - is frozen: the
+               field evaluation outside this file and the PLC's own case
+               table are written against those numbers, and a scanner
+               whose geometry moves under a committed field is a different
+               device. Plain gaussian and no bias term: what the safety
+               layer needs to see is that a range reading is not exact,
+               and a per-device systematic offset is not something any
+               artefact downstream of here has measured. -->
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.02</stddev>
+          </noise>
         </lidar>
       </sensor>
     </link>
@@ -500,6 +563,22 @@
             <max>8.0</max>
             <resolution>0.01</resolution>
           </range>
+          <!-- THE ONLY THING F1 CHANGED ABOUT THIS SENSOR. nanoScan3-class
+               statistical error, 20 mm, as white noise on the range.
+               Everything else here - the aperture, the 275 samples, the
+               10 Hz, the 0.10 to 8.0 m and the topic - is frozen: the
+               field evaluation outside this file and the PLC's own case
+               table are written against those numbers, and a scanner
+               whose geometry moves under a committed field is a different
+               device. Plain gaussian and no bias term: what the safety
+               layer needs to see is that a range reading is not exact,
+               and a per-device systematic offset is not something any
+               artefact downstream of here has measured. -->
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.02</stddev>
+          </noise>
         </lidar>
       </sensor>
     </link>
@@ -561,19 +640,38 @@
             <max>8.0</max>
             <resolution>0.01</resolution>
           </range>
+          <!-- THE ONLY THING F1 CHANGED ABOUT THIS SENSOR. nanoScan3-class
+               statistical error, 20 mm, as white noise on the range.
+               Everything else here - the aperture, the 275 samples, the
+               10 Hz, the 0.10 to 8.0 m and the topic - is frozen: the
+               field evaluation outside this file and the PLC's own case
+               table are written against those numbers, and a scanner
+               whose geometry moves under a committed field is a different
+               device. Plain gaussian and no bias term: what the safety
+               layer needs to see is that a range reading is not exact,
+               and a per-device systematic offset is not something any
+               artefact downstream of here has measured. -->
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.02</stddev>
+          </noise>
         </lidar>
       </sensor>
     </link>
 
     <link name="nav_lidar_link">
       <!-- On the overhead guard roof, offset to .y of the mast
-           centreline. UNCHANGED FROM THE ORIGINAL, including its 8.0 m
-           range max, which is where the three safety scanners' new 8.0 m
-           came from. Nothing in m5_ver2 Step 5 consumes this sensor; it
-           is kept because deleting it would change the model's ray
-           budget and its render behaviour for no reason Step 5 has.
-           Whether 8.0 m should grow for the 24 x 16 m arena is the open
-           cross-layer question of EVIDENCE_SENSOR_COVERAGE.md 1.
+           centreline. THE MOUNT IS THE ORIGINAL'S TO THE MILLIMETRE and
+           the topic is too; what F1 Task 2 replaced is the SENSOR on it,
+           from the ideal 360 deg / 10 Hz / 8.0 m scanner m5_ver2 shipped
+           to a SICK TiM571 profile - the block inside <sensor> below is
+           the derivation. The 8.0 m range max that
+           EVIDENCE_SENSOR_COVERAGE.md 1 left open for a 24 x 16 m arena
+           goes with it, answered by the device's own 25.0 m rather than
+           by a choice. The three SAFETY scanners keep the 8.0 m they
+           took from this sensor: their geometry is frozen by the PLC
+           field contract and F1 may not touch it.
 
            The mount stands over the front right overhead guard post
            (0.55, .0.38), the stiffest point of the roof plate, displaced
@@ -606,26 +704,106 @@
         <pose>0 0 0 0 0 0</pose>
         <gz_frame_id>nav_lidar_link</gz_frame_id>
         <always_on>1</always_on>
-        <update_rate>10</update_rate>
+        <update_rate>15</update_rate>
         <visualize>true</visualize>
         <topic>/forklift/gz/scan_nav</topic>
+        <!--
+          SICK TiM571-2050101, data sheet 1075091, through
+          docs/reports/m5v3-03 section 1 and its pinned source 5, read
+          2026-08-25. Every number below is that device's, and where a
+          data sheet figure is not used raw the arithmetic is written out.
+
+            update_rate 15   the device's own scan frequency. It replaces
+                             10 Hz, and the cost of the extra five renders
+                             a second was measured rather than assumed
+                             (EVIDENCE_MODEL_V3.md 6).
+
+            samples 811      0.33 deg angular resolution over 270 deg:
+                             270 / 0.33333 = 810 intervals, 811 rays.
+
+            range 0.05-25.0  the device's working range, replacing an
+                             8.0 m that was never this sensor's own
+                             figure.
+
+            resolution 0.01  unchanged.
+
+          THE RAY COUNT GOING UP IS THE OPPOSITE OF THE LEVER THIS SENSOR
+          USED TO CARRY, AND THE SAME MEASUREMENT COVERS BOTH. M6.6's spec
+          named the ray count the one thing to change if the scans stopped
+          keeping up, and on the new floor they had: 5.13 Hz per safety
+          scanner with four trucks against a nominal 10. Measured
+          2026-08-23 at 180 rays on the same stack: 5.07 Hz. Halving the
+          rays bought nothing, because what that rig is bound by is the
+          SCENE render gz runs once per sensor and not the ray count
+          within it - which is also why 360 -> 811 here is expected to be
+          nearly free and 10 -> 15 Hz is not. Expected, then measured.
+
+          THE NOISE IS THE DATA SHEET'S TWO ERROR ROWS, and they are two
+          DIFFERENT errors, which is why they land on two different
+          elements:
+
+            stddev 0.02       statistical error, < 20 mm at 90 percent
+                              remission. Shot-to-shot spread, so it is the
+                              per-ray white noise.
+
+            bias_stddev 0.02  systematic error, +-60 mm. A systematic
+                              error is a property of the DEVICE and does
+                              not resample per ray, so it is drawn once as
+                              a bias; +-60 mm read as a 3 sigma bracket
+                              puts that draw's sigma at 20 mm.
+
+            precision 0.001   the measurement telegram reports in
+                              millimetres, so nothing the device produces
+                              is finer than 1 mm. gaussian_quantized is
+                              the noise type that carries <precision> -
+                              plain gaussian ignores it in silence.
+                              Whether gz-sensors 8 honours it for a
+                              gpu_lidar was MEASURED and not assumed:
+                              EVIDENCE_MODEL_V3.md 5.
+
+          THE WINDOW, AND WHY IT IS NOT SYMMETRIC ABOUT THIS FRAME'S x.
+          A TiM571 sees 270 deg and is blind over the other 90, and where
+          that blind sector points is a MOUNTING decision, not a data
+          sheet figure. This vehicle's travel direction is model -x: model
+          yaw 0 points the forks at world -x, so the travel heading is
+          yaw + pi and forward traction is negative (m6/ipc/follower.py,
+          header). This link's pose carries no rotation, so bearing 0 in
+          the message is model +x, the counterweight end, ASTERN of
+          travel. The window is therefore centred on bearing pi:
+
+            centre     pi          = 3.1415927   model -x, dead ahead
+            half       270/2 deg   = 2.3561945
+            min_angle              = 0.7853982
+            max_angle              = 5.4977871
+
+          The blind 90 deg is then centred on model +x and the vehicle
+          drives into the full aperture. The symmetric alternative,
+          -2.3561945 to 2.3561945, was rejected for exactly that reason:
+          it points the blind sector at the direction of travel, the one
+          bearing a navigation lidar may not lose. min_angle > 0 with
+          max_angle > pi is legal SDF but it is not what anybody writes,
+          so the offset window was checked against known world geometry
+          rather than trusted - EVIDENCE_MODEL_V3.md 4 carries both the
+          check and the rejected alternative.
+
+          WHAT IS NOT MODELLED, STATED RATHER THAN OMITTED. Remission
+          dependence: the data sheet's statistical error is < 20 mm at
+          90 percent remission and < 10 mm at 10 percent to 6 m, and gz's
+          noise model has no reflectance term at all, so the LARGER figure
+          is used and the modelled scan is the pessimistic one. And
+          gz-sim issue #2743 (open, 2025-01-29): a gpu_lidar is measurably
+          less accurate than a CPU ray sensor at shallow incidence, which
+          is the rack leg and the pallet face seen obliquely. gz sim has
+          no CPU ray sensor and there is no fix upstream, so it is written
+          down here instead of worked around.
+        -->
         <lidar>
           <scan>
             <horizontal>
-              <!-- 360, AND THE LEVER TO HALVE IT WAS PULLED AND PUT
-                   BACK. M6.6's spec named this the one thing to change
-                   if the scans stopped keeping up, and on the new floor
-                   they had: 5.13 Hz per safety scanner with four trucks
-                   against a nominal 10. Measured 2026-08-23 at 180 rays
-                   on the same stack: 5.07 Hz. It buys nothing, because
-                   what this rig is bound by is the SCENE render that gz
-                   runs once per sensor, not the ray count within it - so
-                   the resolution stays where it was measured and the
-                   finding is written down instead of the change. -->
-              <samples>360</samples>
+              <samples>811</samples>
               <resolution>1</resolution>
-              <min_angle>-3.1415927</min_angle>
-              <max_angle>3.1415927</max_angle>
+              <min_angle>0.7853982</min_angle>
+              <max_angle>5.4977871</max_angle>
             </horizontal>
             <vertical>
               <samples>1</samples>
@@ -635,11 +813,313 @@
             </vertical>
           </scan>
           <range>
-            <min>0.10</min>
-            <max>8.0</max>
+            <min>0.05</min>
+            <max>25.0</max>
             <resolution>0.01</resolution>
           </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.02</stddev>
+            <bias_mean>0.0</bias_mean>
+            <bias_stddev>0.02</bias_stddev>
+          </noise>
         </lidar>
+      </sensor>
+    </link>
+
+    <!-- ====================== 3D navigation lidar ================ -->
+    <!--
+      OUSTER OS0 CLASS, AND IT IS THE ONE SENSOR HERE WITH NO ROS
+      CONSUMER YET. F2 fuses it; F1 adds it, measures what it costs and
+      bridges nothing (config.yaml topics.points3d says so in the file a
+      script would read). A channel bridged before something consumes it
+      is a claim the run does not make, and on this rig it is an
+      expensive one: bridging lidar took ros_gz issue #368's rig from
+      90 percent RTF to 40-60.
+
+      WHERE IT SITS. On the overhead guard roof, centred: the roof plate
+      is 1.24 x 0.88 at z 1.65 to 1.71 (base_link, guard_roof), so the
+      mount face is z = 1.71 and the model centreline is x = 0, y = 0.
+      The optical origin is 0.14 m above that face at z = 1.85, and the
+      housing below it is drawn to finish at 1.84 - the same rule the
+      four planar scanners follow, that no sensor renders its own
+      mounting. It holds, and it was checked rather than assumed: see the
+      row table below, where no reading in a whole sweep falls below the
+      0.300 m range minimum.
+
+      WHAT IT DOES SEE OF ITS OWN VEHICLE, because a 90 deg vertical
+      aperture on a roof cannot not. This is MEASURED, one sweep, truck
+      at rest, and the row-by-row table is EVIDENCE_MODEL_V3.md 8. The 32
+      rows are 2.903 deg apart from -45.00 to +45.00 and they read:
+
+        rows  6 to  9   -27.58 to -18.87 deg   THE ROOF PLATE, a full
+                        1024-bearing ring at 0.300 to 0.513 m. It is
+                        0.14 m below the origin, so slant = 0.14/sin
+                        (elevation) and the ring's inner edge is at the
+                        range minimum exactly.
+        rows 10 and 11  -15.97, -13.06 deg     the roof again but only
+                        720 and 528 bearings of 1024: the plate is
+                        1.24 x 0.88, so a shallower beam still reaches it
+                        fore and aft and misses it abeam.
+        row   5         -30.48 deg             the roof is at 0.276 m
+                        here, inside the minimum, and 978 of 1024
+                        bearings come back with NO READING at all.
+        rows  0 to  4   -45.00 to -33.39 deg   44 to 153 returns each at
+                        0.715 to 1.251 m: the four overhead-guard posts
+                        and the mast.
+        rows 12 to 20   -10.16 to +13.06 deg   44 to 144 returns each at
+                        0.590 to 0.915 m: the mast rails at (-0.78,
+                        +-0.30) rising to z 2.05, two narrow bearings
+                        wide, and the crossmember above them.
+        rows 27 to 31   +33.39 deg and up      nothing at all. The
+                        warehouse has no ceiling.
+
+      NOTHING IS ATTRIBUTABLE TO THIS SENSOR'S OWN POST OR HOUSING: both
+      finish below z 1.84, within 0.09 m of the origin, and no reading
+      anywhere in the sweep falls below the 0.300 m minimum.
+
+      TWO gz BEHAVIOURS THE TABLE ABOVE PINS DOWN, both worth knowing
+      before a consumer is written against this topic. A return closer
+      than <range><min> comes back CLAMPED TO THE MINIMUM and not as a
+      no-reading - 562 of the roof ring's readings are exactly 0.300 -
+      and a return closer still comes back as a no-reading rather than
+      passing through to whatever is behind it. So near geometry is
+      neither invisible nor honest here; it is a wall of readings at the
+      range minimum.
+
+      NONE OF IT IS MASKED HERE and none of it may be: this file is
+      geometry and sensing, and deciding which returns are the vehicle is
+      the consumer's job (invariants 5, 6 and 9). It is written down so
+      the F2 consumer does not discover it as a bug.
+
+      THE NUMBERS ARE THE DEVICE CLASS's (docs/reports/m5v3-03 section 4,
+      Balyo's reflectorless geoguidance runs an Ouster OS on exactly this
+      duty):
+
+        update_rate 10                    OS0 runs 10 or 20 Hz; 10 is the
+                                          cheaper of the two supported
+                                          rates and this rig pays per
+                                          render.
+        horizontal 1024 over 360 deg      the OS0's 1024-column mode.
+        vertical 32 over 90 deg           OS0-32: 32 channels, 90 deg
+                                          vertical aperture, the widest
+                                          of the Ouster line and the
+                                          reason this class is chosen for
+                                          a vehicle that must see a rack
+                                          upright and the floor at once.
+        range 0.3-50.0                    minimum range and the OS0's
+                                          practical maximum.
+        noise gaussian stddev 0.025       range precision class, 15 to
+                                          30 mm depending on target and
+                                          distance; 25 mm is the middle
+                                          of that band. NOT
+                                          gaussian_quantized: the device
+                                          reports range in millimetres
+                                          too, but the quantization is
+                                          two orders below the precision
+                                          and modelling it would claim a
+                                          fidelity nothing here has
+                                          measured.
+
+      32768 RAYS PER SWEEP IS THE LARGEST SINGLE COST IN THIS FILE and
+      the RTF with and without it is measured, not argued
+      (EVIDENCE_MODEL_V3.md 6).
+    -->
+    <link name="nav_lidar_3d_link">
+      <pose>0 0 1.85 0 0 0</pose>
+      <inertial>
+        <mass>0.5</mass>
+        <inertia>
+          <ixx>0.0004</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0004</iyy><iyz>0</iyz><izz>0.0004</izz>
+        </inertia>
+      </inertial>
+      <!-- Post from the roof face at z 1.71 to the housing at 1.76, and
+           the housing from 1.76 to 1.84 - everything below the optical
+           origin at 1.85 and everything inside the 0.3 m near clip. -->
+      <visual name="post">
+        <pose>0 0 -0.115 0 0 0</pose>
+        <geometry><box><size>0.06 0.06 0.05</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="housing">
+        <pose>0 0 -0.05 0 0 0</pose>
+        <geometry><cylinder><radius>0.045</radius><length>0.08</length></cylinder></geometry>
+        <material><ambient>0.10 0.10 0.12 1</ambient><diffuse>0.10 0.10 0.12 1</diffuse></material>
+      </visual>
+      <sensor name="nav_lidar_3d" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>nav_lidar_3d_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>10</update_rate>
+        <!-- FALSE, ALONE AMONG THE FIVE SCANNERS HERE, and it is a GUI
+             hint and not a plant property. VisualizeLidar draws one
+             marker per ray; 32768 of them at 10 Hz is a window that
+             cannot keep up, and this track's figures are taken headless
+             anyway. The other four stay true. -->
+        <visualize>false</visualize>
+        <topic>/forklift/gz/points3d</topic>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>1024</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.1415927</min_angle>
+              <max_angle>3.1415927</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>32</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.7853982</min_angle>
+              <max_angle>0.7853982</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.3</min>
+            <max>50.0</max>
+            <resolution>0.01</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.025</stddev>
+          </noise>
+        </lidar>
+      </sensor>
+    </link>
+
+    <!-- ========================= Pallet camera =================== -->
+    <!--
+      INTEL REALSENSE D455 CLASS, ON THE MAST, LOOKING DOWN THE FORKS.
+      The vendors converged on this and the sim follows them: Fox
+      Robotics builds pallet cameras into the MAST, Third Wave puts 3D
+      cameras near the forks, Balyo carries a dedicated pallet camera
+      beside its 3D lidar (docs/reports/m5v3-03 section 4).
+
+      WHICH WAY IS "THE FORK DIRECTION". Model -x. Model yaw 0 points the
+      forks at world -x and the travel heading is yaw + pi
+      (m6/ipc/follower.py, header), and the tines in this file sit at
+      x -1.875 to -0.825. A gz camera looks down its own +x, so the link
+      carries yaw pi. It also carries pitch +0.5235988 (30 deg down), and
+      that is not decoration:
+
+        vertical half aperture = atan(tan(1.518/2) x 480/640) = 35.25 deg
+        looking level from z 1.10 the floor would not enter the frame
+          until 1.10 / tan(35.25) = 1.56 m, and the fork TIPS are only
+          0.98 m ahead of the lens - a pallet camera that cannot see its
+          own tines is not one
+        pitched 30 deg down the visible floor band starts at
+          1.10 / tan(65.25) = 0.51 m ahead (slant 1.21 m, past the 0.6 m
+          near clip) and the optical axis meets the floor at 1.91 m
+        the left tine tip is then 45.5 deg below the horizon and 7.0 deg
+          off axis at 1.40 m, the right tine 34.9 deg off axis - both
+          inside the 43.5 deg horizontal and 35.25 deg vertical halves
+
+      WHERE IT SITS, AND WHY NOT ON THE CENTRELINE. The carriage is
+      0.75 m wide and travels the whole mast, x -0.85 to -0.75, z 0.10 to
+      2.20 - there is no height on this mast's centreline the carriage
+      does not sweep. So the camera goes FORWARD of the carriage's
+      travel, at x -0.90, and outboard at y 0.40, which keeps its 0.09 m
+      housing inside the 0.90 m body width (0.355 to 0.445 against a
+      half-width of 0.45). The bracket that holds it is two boxes in the
+      MAST link, where they are axis-aligned and can be read against the
+      carriage sweep: an arm at y 0.42, clear of the carriage's 0.375
+      half-width, and a lateral plate ending at x -0.749, one millimetre
+      clear of the carriage's -0.75 face.
+
+      WHAT THE NEAR CLIP DOES TO THE VEHICLE, STATED AS THE ARTEFACT IT
+      IS. Everything of this truck that lies ahead of the lens - the mast
+      rails 0.13 m away, the carriage, the bracket - is inside the 0.6 m
+      near clip, and a rasteriser does not occlude with geometry it has
+      clipped: it renders through it. A real D455 mounted here would have
+      the left rail across part of its view. This one does not, so the
+      modelled camera sees MORE than the device would, and any framing of
+      that as realism would be a lie. It is the same near clip the device
+      has as its minimum depth, and the honest statement is that this
+      camera has no opinion about anything closer than 0.6 m.
+
+      THE NUMBERS (docs/reports/m5v3-03 section 1 and pinned source 9):
+
+        640 x 480                 the D455 depth stream this class is
+                                  quoted at.
+        horizontal_fov 1.518      87 deg, the D455 depth field of view.
+        clip 0.6-6.0              the device's minimum depth and its
+                                  usable range. The far clip applies to
+                                  the colour render too, which nothing
+                                  consumes; beyond 6.0 m depth comes back
+                                  as no reading, which is what the device
+                                  does.
+        update_rate 15            m5v3-03 section 5's budget for a pallet
+                                  camera is 6 to 10 Hz at 320 x 240 for
+                                  FOUR trucks. This track has ONE, and 15
+                                  Hz at 640 x 480 is measured here rather
+                                  than assumed affordable.
+
+        noise gaussian stddev 0.008
+                                  A FLOOR, AND SAID TO BE ONE. The real
+                                  device's depth error is roughly
+                                  quadratic in range - about 1 percent at
+                                  1 m, some 4 cm RMS at 2 m - and
+                                  gz-sensors applies only ADDITIVE
+                                  gaussian noise to depth; gz-sensors
+                                  issue #416 (open since 2024-03-09)
+                                  calls that limitation "completely
+                                  useless" and proposes multiplicative
+                                  and stereo-disparity terms. 8 mm is the
+                                  near-field figure, so this camera is
+                                  OPTIMISTIC at range by construction.
+                                  The quadratic sigma(z) belongs to a
+                                  ROS-side refinement in a later phase,
+                                  not to this file, and no depth realism
+                                  is claimed from the SDF alone.
+
+      THE POINT CLOUD IS NOT BRIDGED. gz's rgbd_camera advertises
+      <topic>/points beside the image, the depth image and the camera
+      info, and it is welcome to: what F1 carries into ROS is the depth
+      image and its camera_info, and a consumer that wants a cloud builds
+      one there (docs/reports/m5v3-03 section 5, config.yaml topics).
+    -->
+    <link name="pallet_cam_link">
+      <pose>-0.90 0.40 1.10 0 0.5235988 3.1415927</pose>
+      <inertial>
+        <mass>0.2</mass>
+        <inertia>
+          <ixx>1e-4</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1e-4</iyy><iyz>0</iyz><izz>1e-4</izz>
+        </inertia>
+      </inertial>
+      <!-- The housing, BEHIND the lens in this link's own frame, so the
+           camera does not render it. Inside the 0.6 m near clip twice
+           over. -->
+      <visual name="housing">
+        <pose>-0.02 0 0 0 0 0</pose>
+        <geometry><box><size>0.030 0.090 0.030</size></box></geometry>
+        <material><ambient>0.12 0.13 0.16 1</ambient><diffuse>0.12 0.13 0.16 1</diffuse></material>
+      </visual>
+      <sensor name="pallet_cam" type="rgbd_camera">
+        <pose>0 0 0 0 0 0</pose>
+        <gz_frame_id>pallet_cam_link</gz_frame_id>
+        <always_on>1</always_on>
+        <update_rate>15</update_rate>
+        <topic>/forklift/gz/cam</topic>
+        <camera>
+          <horizontal_fov>1.518</horizontal_fov>
+          <image>
+            <width>640</width>
+            <height>480</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.6</near>
+            <far>6.0</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.008</stddev>
+          </noise>
+        </camera>
       </sensor>
     </link>
 
@@ -710,13 +1190,30 @@
       absolute heading at all. Fusing it would put ground truth back
       into the estimator through the side door and recreate exactly the
       circularity the two-phase odometry plan exists to remove (brief
-      m5-07c, forbidden list). With this element false the message
-      carries orientation_covariance[0] = -1, the ROS convention for
-      "no orientation in this message", so a consumer that tries cannot
-      silently succeed. ekf.yaml refuses it a second time by
-      setting all three orientation entries of imu0_config false. Two
-      independent refusals, because one of them is a config file that
-      somebody could edit.
+      m5-07c, forbidden list).
+
+      THE ELEMENT IS HONOURED. WHAT THIS COMMENT USED TO SAY ABOUT THE
+      MESSAGE IS NOT TRUE, AND IT WAS MEASURED (EVIDENCE_MODEL_V3.md 5).
+      It claimed the message would carry orientation_covariance[0] = -1,
+      the ROS convention for "no orientation in this message", so that a
+      consumer which tried could not silently succeed. On gz-sim 8.11.0
+      with ros_gz on Jazzy it does not. What actually arrives is:
+
+        gz side   the gz.msgs.IMU message has NO orientation field at all
+                  - protobuf omits it - and orientation_covariance is
+                  nine zeros.
+        ROS side  sensor_msgs/Imu carries the default-constructed
+                  quaternion (0, 0, 0, 0), which is not a unit quaternion
+                  and not a rotation, and orientation_covariance is nine
+                  zeros. NOT -1.
+
+      So the refusal this element makes is real - there is no oracle
+      heading on this topic - but it is NOT self-announcing, and a
+      consumer that reads the field without checking gets a zero
+      quaternion rather than a documented refusal. That is why the SECOND
+      refusal is not redundant: ekf.yaml sets all three orientation
+      entries of imu0_config false, and on this stack it is the only one
+      of the two a careless consumer cannot walk past.
     -->
     <link name="imu_link">
       <pose>-0.50 0 0.25 0 0 0</pose>
@@ -820,6 +1317,36 @@
         <pose>-0.78 0 2.00 0 0 0</pose>
         <geometry><box><size>0.09 0.69 0.10</size></box></geometry>
         <material><ambient>0.14 0.15 0.18 1</ambient><diffuse>0.14 0.15 0.18 1</diffuse></material>
+      </visual>
+      <!-- THE PALLET CAMERA'S BRACKET, IN THE LINK IT IS BOLTED TO. The
+           camera itself is pallet_cam_link, whose pose carries a yaw and
+           a pitch; geometry authored in that frame could not be read
+           against the carriage sweep, and clearing the carriage is the
+           whole reason this mounting has the shape it does. So the two
+           boxes live here, where they are axis-aligned in the model
+           frame and every clearance is arithmetic:
+
+             lateral plate  x -0.749 to -0.735, y 0.300 to 0.430
+                            takes hold of mast_rail_left (x -0.825 to
+                            -0.735, y 0.255 to 0.345) and stops 1 mm
+                            short of the carriage's -0.750 face
+             arm            x -0.900 to -0.735, y 0.4075 to 0.4325
+                            runs out past the carriage at a y the
+                            carriage's 0.375 half-width never reaches
+
+           Visual only, like the guard and the scanner housings: four
+           thin brackets would cost solver time for no observable
+           behaviour. They are not invisible to the OTHER sensors, and
+           the 3D lidar above sees this one at about 1.2 m. -->
+      <visual name="pallet_cam_bracket_plate">
+        <pose>-0.742 0.365 1.10 0 0 0</pose>
+        <geometry><box><size>0.014 0.130 0.025</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
+      </visual>
+      <visual name="pallet_cam_bracket_arm">
+        <pose>-0.8175 0.420 1.10 0 0 0</pose>
+        <geometry><box><size>0.165 0.025 0.025</size></box></geometry>
+        <material><ambient>0.20 0.21 0.24 1</ambient><diffuse>0.20 0.21 0.24 1</diffuse></material>
       </visual>
     </link>
 
@@ -1007,6 +1534,23 @@
     <joint name="nav_lidar_mount" type="fixed">
       <parent>base_link</parent>
       <child>nav_lidar_link</child>
+    </joint>
+
+    <joint name="nav_lidar_3d_mount" type="fixed">
+      <parent>base_link</parent>
+      <child>nav_lidar_3d_link</child>
+    </joint>
+
+    <!-- THE ONE SENSOR MOUNT WHOSE PARENT IS NOT base_link. The pallet
+         camera is bolted to the mast and its bracket is drawn in the
+         mast link, so the joint says the same thing the geometry does.
+         mast is itself fixed to base_link by mast_anchor, so the
+         transform a consumer needs is still a constant - but if the mast
+         ever becomes a moving stage, this camera moves with it and
+         nothing here has to be rewritten. -->
+    <joint name="pallet_cam_mount" type="fixed">
+      <parent>mast</parent>
+      <child>pallet_cam_link</child>
     </joint>
 
     <joint name="imu_mount" type="fixed">
@@ -1226,6 +1770,80 @@
       <joint_name>drive_wheel_joint</joint_name>
       <topic>/forklift/gz/actuator/traction_cmd</topic>
       <initial_velocity>0.0</initial_velocity>
+    </plugin>
+
+    <!--
+      THE TYRE IS ALLOWED TO SLIP, AND THAT IS THE POINT OF THE WHOLE
+      PHASE. Measured on this rig before this system was added
+      (EVIDENCE_MODEL_V3.md 7, the baseline row): commanded 0.700000 m/s
+      of tread, ground truth 0.699957 m/s, slip 0.003 percent. The
+      contact was rigid, so a wheel revolution WAS 2 pi r of ground,
+      exactly, for ever. Wheel odometry computed off that joint would not
+      be an estimate at all - it would be ground truth with extra steps,
+      the F2 EKF would have nothing to correct, and every localisation
+      figure taken against it would be circular. The same argument the
+      OdometryPublisher block at the foot of this file makes about the
+      ground-truth transform applies one level down, at the contact.
+
+      WHAT THIS SYSTEM DOES. It gives the drive wheel's contact patch a
+      finite compliance in the two ground-plane directions, so the patch
+      creeps under load the way a polyurethane tyre on concrete does
+      instead of gripping perfectly. Only the DRIVEN wheel carries it:
+      the two rear wheels are passive and their slip would be a claim
+      nothing here measures.
+
+      THE TWO PHYSICAL PARAMETERS ARE THIS MODEL'S OWN NUMBERS, READ OFF
+      IT, NOT CHOSEN.
+
+        wheel_radius 0.12   the drive_wheel collision cylinder's radius,
+                            above in this file. It is not a parameter of
+                            this system, it is a fact about the wheel.
+
+        wheel_normal_force  the STATIC load this wheel carries. The
+                            sixteen links of this model total 1165.95 kg;
+                            summing mass x inertial-x over all of them
+                            gives -97.151 kg m, so the centre of mass is
+                            at x = -0.083323 m. The drive contact is at
+                            x = +0.55 and the rear axle at x = -0.50, a
+                            1.05 m wheelbase, so as a static beam
+
+                              W       = 1165.95 x 9.80665 = 11434.06 N
+                              N_drive = W x (0.50 - 0.083323) / 1.05
+                                      = 11434.06 x 0.396835
+                                      = 4537.4 N
+
+                            Treating the 50 kg of wheel and steer yoke as
+                            unsprung and carrying it straight to the
+                            ground instead gives 4537.4 N as well: the
+                            two agree to 0.01 N, so the beam is used and
+                            the distinction is not drawn. Roughly 39
+                            percent of the vehicle on one wheel, which is
+                            what a counterbalance truck with its load
+                            end empty does.
+
+      THE TWO COMPLIANCES ARE MEASURED, AND THEY HAD TO BE. gz's slip
+      compliance is unitless and what it produces depends on the contact
+      solver, so no arithmetic gets from a target slip to a number: the
+      only honest route is to command the cruise and read the ground
+      truth. tools/slip_bench.sh is that instrument and
+      EVIDENCE_MODEL_V3.md 7 is the tuning table, rejected values
+      included. The target is 0.5 to 2 percent at the 0.7 m/s cruise
+      m6/ipc/follower.py drives.
+
+      LATERAL IS HELD EQUAL TO LONGITUDINAL RATHER THAN TUNED. This track
+      measures no lateral manoeuvre yet - the bench drives straight - and
+      a number tuned against nothing measured is a number invented. It is
+      written down as a value this file does not stand behind, and the
+      phase that measures a turn is the phase that gets to change it.
+    -->
+    <plugin filename="gz-sim-wheel-slip-system"
+            name="gz::sim::systems::WheelSlip">
+      <wheel link_name="drive_wheel">
+        <slip_compliance_lateral>7.0</slip_compliance_lateral>
+        <slip_compliance_longitudinal>7.0</slip_compliance_longitudinal>
+        <wheel_normal_force>4537.4</wheel_normal_force>
+        <wheel_radius>0.12</wheel_radius>
+      </wheel>
     </plugin>
 
     <!--

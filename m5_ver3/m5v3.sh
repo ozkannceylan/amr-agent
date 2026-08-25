@@ -55,6 +55,7 @@ REQUIRED_KEYS=(
     vehicle.model vehicle.name
     vehicle.spawn.x vehicle.spawn.y vehicle.spawn.z vehicle.spawn.yaw
     topics.clock topics.odom_ground_truth topics.scan_nav topics.gui_gate
+    topics.imu topics.cam_depth topics.cam_info topics.points3d
     paths.log_dir paths.pidfile
     timing.world_load_s timing.settle_s timing.startup_check_s
     timing.stop_grace_s timing.gui_gate_poll_s timing.gui_gate_settle_s
@@ -71,15 +72,18 @@ configure() {
 }
 
 # The stack as command-line patterns, and the list is short because the
-# stack is: the server, the GUI client and the bridge. A pattern only
+# stack is: the server, the GUI client and the two bridges. A pattern only
 # NOMINATES - ours() decides - and `gz sim` is FIRST because that is where
 # the motion lives (see stop()).
 #   `gz sim` NOMINATES THE CLIENT AND THE SERVER ALIKE: both command lines
 #   begin with those two words, and the gated wrapper that becomes the
 #   client carries them in its -c string until it execs.
+#   image_bridge IS A SEPARATE PATTERN and not covered by the one above
+#   it: ros_gz's depth-image bridge is its own executable with its own
+#   name, and `parameter_bridge` does not match it.
 #   MAINTENANCE OBLIGATION: a process added to start() must be added here,
 #   or stop orphans it and still prints "down."
-PATTERNS=("gz sim" "parameter_bridge")
+PATTERNS=("gz sim" "parameter_bridge" "image_bridge")
 
 # WHY OWNERSHIP IS DECIDED BY THE ENVIRONMENT AND NOT BY THE COMMAND LINE.
 # This stack's command lines are not distinctive: the world server's names
@@ -179,13 +183,34 @@ start() {
     spawn_truck
     sleep "$CFG_TIMING_SETTLE_S"
 
-    # THE BRIDGE AFTER THE TRUCK, because two of its three topics are the
-    # truck's and a bridge opened over topics that do not exist yet spends
-    # its first seconds advertising nothing.
+    # THE BRIDGES AFTER THE TRUCK, because all but one of their topics are
+    # the truck's and a bridge opened over topics that do not exist yet
+    # spends its first seconds advertising nothing.
+    #   WHAT IS CARRIED AND WHAT IS NOT. The clock, the ground-truth
+    #   odometry (a measurement reference, never an input), the nav lidar,
+    #   the IMU and the pallet camera's depth image plus its camera_info.
+    #   NOT the 3D lidar and NOT either point cloud: their ROS consumers
+    #   arrive in F2, and gz renders a sensor only while something
+    #   subscribes to it, so bridging early would cost the RTF every
+    #   figure on this track is measured against and buy nothing
+    #   (docs/reports/m5v3-03 5, ros_gz issue #368).
     spawn bridge ros2 run ros_gz_bridge parameter_bridge \
         "$CFG_TOPICS_CLOCK@rosgraph_msgs/msg/Clock[gz.msgs.Clock" \
         "$CFG_TOPICS_ODOM_GROUND_TRUTH@nav_msgs/msg/Odometry[gz.msgs.Odometry" \
-        "$CFG_TOPICS_SCAN_NAV@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan"
+        "$CFG_TOPICS_SCAN_NAV@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan" \
+        "$CFG_TOPICS_IMU@sensor_msgs/msg/Imu[gz.msgs.IMU" \
+        "$CFG_TOPICS_CAM_INFO@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo"
+
+    # THE DEPTH IMAGE GOES THROUGH A SECOND, DIFFERENT BRIDGE, and that is
+    # ros_gz's design rather than this script's choice: parameter_bridge
+    # carries an Image as a plain topic, image_bridge carries it through
+    # image_transport, which is what every ROS image consumer expects to
+    # find. camera_info stays on the parameter bridge above because
+    # image_bridge does not carry it.
+    #   IT IS ONE PROCESS FOR ONE TOPIC, and that is the honest shape: a
+    #   second image would be a second argument, and the colour image has
+    #   no consumer on this track.
+    spawn imgbridge ros2 run ros_gz_image image_bridge "$CFG_TOPICS_CAM_DEPTH"
 
     # THE GUI CLIENT LAST AND GATED, or the lidar fans anchor at the world
     # origin for the life of the window. Measured in m6 on gz-sim 8.11.0:
@@ -229,9 +254,12 @@ start() {
     fi
 
     echo ""
-    echo "up. one truck, one world, one bridge."
+    echo "up. one truck, one world, two bridges."
     echo "bridged: $CFG_TOPICS_CLOCK, $CFG_TOPICS_ODOM_GROUND_TRUTH" \
-         "(measurement reference ONLY), $CFG_TOPICS_SCAN_NAV"
+         "(measurement reference ONLY), $CFG_TOPICS_SCAN_NAV," \
+         "$CFG_TOPICS_IMU, $CFG_TOPICS_CAM_DEPTH, $CFG_TOPICS_CAM_INFO"
+    echo "gz only: $CFG_TOPICS_POINTS3D and both point clouds - no ROS"
+    echo "         consumer until F2, and gz renders what is subscribed."
     echo "check:  $0 status"
     echo "rtf:    bash $M5V3/tools/rtf_probe.sh"
     echo "logs:   $LOGDIR"
@@ -379,11 +407,11 @@ status() {
         # recycles pids within minutes of one, and a recycled number can
         # name a stranger. A stranger does not carry this partition.
         if ours "$pid"; then
-            printf '  %-8s %-7s pid %-7s %s\n' "$name" "ALIVE" "$pid" \
+            printf '  %-10s %-7s pid %-7s %s\n' "$name" "ALIVE" "$pid" \
                 "$LOGDIR/$name.log"
             alive=$(( alive + 1 ))
         else
-            printf '  %-8s %-7s pid %-7s %s\n' "$name" "DEAD" "$pid" \
+            printf '  %-10s %-7s pid %-7s %s\n' "$name" "DEAD" "$pid" \
                 "$LOGDIR/$name.log"
             dead=$(( dead + 1 ))
         fi
@@ -428,9 +456,12 @@ stop() {
 
 USAGE="usage: $0 start [--headless] | stop | status
   start       GPU preflight, then warehouse_ver3 + one forklift_ver3 in a
-              Gazebo window, plus the ros_gz bridge for the clock, the
-              ground-truth odometry (a measurement reference, never an
-              input) and the nav lidar. Three processes.
+              Gazebo window, plus TWO ros_gz bridges: the parameter bridge
+              for the clock, the ground-truth odometry (a measurement
+              reference, never an input), the nav lidar, the IMU and the
+              pallet camera's camera_info, and the image bridge for that
+              camera's depth image. Four processes.
+              The 3D lidar and both point clouds stay on the gz side.
               It refuses outright if the renderer is not the NVIDIA GPU.
   --headless  no Gazebo window. Use it for anything being MEASURED.
   status      every child by name, ALIVE or DEAD, with its log

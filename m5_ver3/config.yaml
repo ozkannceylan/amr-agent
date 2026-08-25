@@ -141,8 +141,41 @@ topics:
   # EKF; until then it is what a fusion estimate is scored AGAINST, and
   # anything that navigates on it is measuring its own answer.
   odom_ground_truth: "/forklift/gz/odom"
-  # The navigation lidar, 10 Hz, 360 deg, 8.0 m range max.
+  # The navigation lidar. 15 Hz, 270 deg, 25.0 m range max since F1 Task 2
+  # gave it the TiM571 profile - the SDF is the authority for all three
+  # and sensors.nav_lidar.rate_hz below is the figure the hz check quotes.
   scan_nav: "/forklift/gz/scan_nav"
+  # The IMU, 100 Hz, six axes and NO orientation. Bridged since F1 Task 2:
+  # it is one of the two inputs the F2 EKF fuses, and a channel that will
+  # be fused has to be watched from the run before it is.
+  imu: "/forklift/gz/imu"
+  # THE PALLET CAMERA'S TWO BRIDGED CHANNELS, AND THE POINT CLOUD IS NOT
+  # ONE OF THEM. gz's rgbd_camera also advertises <topic>/points, and
+  # bridging a point cloud is what took ros_gz issue #368's rig from 90%
+  # RTF to 31% (docs/reports/m5v3-03 5). The depth image plus its
+  # camera_info carries the same information at a fraction of the wire
+  # cost and ROS reconstructs the cloud where a consumer needs it.
+  #   THE DEPTH IMAGE GOES OVER ros_gz_image's image_bridge, not the
+  #   parameter bridge, and camera_info over the parameter bridge - they
+  #   are two different processes for that reason.
+  cam_depth: "/forklift/gz/cam/depth_image"
+  cam_info: "/forklift/gz/cam/camera_info"
+  # NOT BRIDGED, AND NOT AN OVERSIGHT. The 3D lidar's ROS consumer arrives
+  # in F2; until it does, bridging 32768 points at 10 Hz would buy nothing
+  # and cost the RTF every figure on this track is measured against. Named
+  # here because EVIDENCE_MODEL_V3.md measures its gz-side rate.
+  #   gz advertises this name as a gz.msgs.LaserScan and, because the scan
+  #   has 32 vertical samples, a companion <topic>/points cloud.
+  points3d: "/forklift/gz/points3d"
+  # THE TRACTION TERMINAL, and tools/slip_bench.sh is the only thing on
+  # this track that publishes to it. It is the MOTOR terminal, not the
+  # vehicle stack's command topic (model.sdf, COMMAND TOPICS): m5-ver3
+  # runs no vehicle stack yet, so the bench addresses the motor directly.
+  traction_cmd: "/forklift/gz/actuator/traction_cmd"
+  # The three driven joints' position and rate, published once per physics
+  # iteration. The bench reads the drive joint's ACHIEVED rate off it, so
+  # a shortfall in the controller can be told apart from slip at the tyre.
+  joint_state: "/forklift/gz/joint_state"
   # NOT BRIDGED, AND NAMED HERE BECAUSE THE GUI WAITS ON IT. gz-sim's
   # GuiRunner discards world state that arrives before its first snapshot,
   # so a GUI client started before the model's sensors advertise anchors
@@ -150,6 +183,106 @@ topics:
   # (measured in m6, gazebo/m6_world.launch.py). Gating the client on this
   # topic appearing on the gz side puts the sensors inside that snapshot.
   gui_gate: "/forklift/gz/safety_scanner_back/measurement"
+
+# ------------------------------- SENSORS -------------------------------
+# THE SDF GOVERNS EVERY SENSOR. Geometry, mount pose, sample count, field
+# of view, range, noise and update rate are written in
+# gazebo/forklift_ver3/model.sdf and nowhere else, each beside the
+# datasheet line it came from. What is repeated HERE is only what a SHELL
+# has to know to check the plant: the nominal rate a `ros2 topic hz` or a
+# `gz topic -hz` reading is compared against. A shell cannot read SDF, and
+# a rate written twice is two opinions about one number - so the rule for
+# this section is that it may hold NOTHING the SDF does not already
+# decide, and EVIDENCE_MODEL_V3.md diffs the two columns by hand.
+#   Every figure below is the CONFIGURED rate. What the plant DELIVERS is
+#   a measurement, it is lower, and it lives in the evidence file.
+sensors:
+  nav_lidar:
+    # SICK TiM571 profile: 15 Hz, 811 samples over 270 deg, 0.05-25.0 m.
+    rate_hz: "15"
+  safety_scanner:
+    # FROZEN BY THE PLC FIELD CONTRACT. 10 Hz, 275 samples over 275 deg,
+    # 0.10-8.0 m, unchanged from forklift_ver2 - F1 added a noise block to
+    # these three sensors and nothing else (Global Constraint 6).
+    rate_hz: "10"
+  lidar_3d:
+    # Ouster OS0 class: 1024 x 32 over 360 x 90 deg, 0.3-50.0 m.
+    rate_hz: "10"
+  imu:
+    # Bosch BMI088 class, six axes, no orientation.
+    rate_hz: "100"
+  pallet_cam:
+    # Intel RealSense D455 class: 640 x 480, 87 deg HFOV, 0.6-6.0 m.
+    rate_hz: "15"
+
+# ------------------------------ WHEEL SLIP -----------------------------
+# THE DRIVE WHEEL IS ALLOWED TO SLIP, AND THAT IS THE POINT OF F1's
+# ODOMETRY. Wheel odometry computed from a joint that cannot slip is
+# ground truth with extra steps: the F2 EKF would have nothing to correct
+# and every localisation figure taken against it would be circular. The
+# gz-sim-wheel-slip-system in model.sdf gives the tyre a finite
+# longitudinal and lateral compliance so the contact patch creeps under
+# traction, the way a polyurethane tyre on concrete does.
+#
+# THE TWO PHYSICAL CONSTANTS ARE DERIVED FROM THE MODEL'S OWN NUMBERS,
+# never chosen. Both derivations are written out beside the plugin in
+# model.sdf and repeated here because a shell and a report need them:
+#
+#   wheel_radius_m 0.12   is the drive_wheel collision cylinder's radius,
+#                         read from model.sdf. Not a parameter.
+#
+#   wheel_normal_force_n  is the STATIC load the drive wheel carries. The
+#                         model's sixteen links total 1165.95 kg with the
+#                         centre of mass at x = -0.083323 m; the drive
+#                         contact is at x = +0.55 and the rear axle at
+#                         x = -0.50, a 1.05 m wheelbase. So
+#                           W       = 1165.95 x 9.80665 = 11434.06 N
+#                           N_drive = W x (0.50 - 0.083323) / 1.05
+#                                   = 11434.06 x 0.396835 = 4537.4 N
+#                         Treating the 50 kg of wheel and yoke as unsprung
+#                         and carrying it straight to the ground instead
+#                         gives 4537.4 N as well - the two agree to
+#                         0.01 N - so the beam model above is used and
+#                         the distinction is not drawn.
+#
+# THE TWO COMPLIANCES ARE MEASURED, NOT DERIVED. gz's compliance is
+# unitless and the slip it produces depends on the contact solver, so the
+# only honest way to a number is to command a cruise and measure what the
+# ground truth did. The tuning table, including the rejected values, is
+# EVIDENCE_MODEL_V3.md section 7; tools/slip_bench.sh is the instrument.
+wheel_slip:
+  wheel_radius_m: "0.12"
+  wheel_normal_force_n: "4537.4"
+  # Longitudinal is the one the odometry feels: it is the traction
+  # direction, and it is what makes a wheel revolution mean slightly less
+  # than 2 pi r of ground.
+  slip_compliance_longitudinal: "7.0"
+  # Lateral is the tyre's sideways give. It is held at the same value
+  # rather than tuned: this track measures no lateral manoeuvre yet, and a
+  # number tuned against nothing is a number invented.
+  slip_compliance_lateral: "7.0"
+  # ------------------------- THE SLIP BENCH --------------------------
+  # tools/slip_bench.sh commands the traction terminal directly, lets the
+  # plant reach a steady speed, and then measures the ground truth over a
+  # window. Every constant it obeys is here.
+  bench:
+    # The cruise the fleet actually runs at (m6/ipc/follower.py
+    # CRUISE_MPS). Slip is a function of speed, so it is measured at the
+    # speed the vehicle spends its life at and not at a convenient one.
+    cruise_mps: "0.7"
+    # Discarded before the window opens: the drive joint accelerating from
+    # rest, which is where the largest slip of the whole run happens and
+    # is exactly not what "slip at steady cruise" means. 5 s at 0.7 m/s is
+    # 3.5 m, an order of magnitude more than the plant needs to settle.
+    settle_s: "5"
+    # The window itself. 10 s is 7 m of travel, so a 1 % slip shows up as
+    # 70 mm of ground-truth displacement - three orders of magnitude above
+    # the ground truth's own resolution.
+    sample_s: "10"
+    # Between the two segments: the traction terminal is commanded to a
+    # standing zero and the vehicle has to actually stop before it is
+    # driven back the other way.
+    rest_s: "3"
 
 # -------------------------------- PATHS --------------------------------
 # Relative to the repository root. The pidfile is what stop reads and the
@@ -223,3 +356,22 @@ timing:
 #   sags with the RTF, so the probe prints it as a reading of its own.
 rtf_probe:
   sample_s: "30"
+
+# ------------------------------ NOISE PROBE -----------------------------
+# tools/noise_probe.sh captures a FIXED NUMBER OF FRAMES from one sensor
+# topic, with the vehicle at rest, and reports how much each reading moves
+# about its own mean. A count and not a duration: a duration would make
+# the sample size depend on the real-time factor, and a noise figure that
+# moves with the machine's load is not a noise figure.
+noise_probe:
+  # 60 scans is 4 s of a 15 Hz lidar. The standard deviation of a
+  # standard deviation from n samples is about sigma/sqrt(2(n-1)), so at
+  # n = 60 a 20 mm figure is known to about 1.8 mm - one significant
+  # figure better than the number being checked, which is all this has to
+  # be.
+  scan_samples: "60"
+  # 40 depth frames, because each one is 640 x 480 float32 and the
+  # capture is base64 on a pipe: 40 costs about 65 MB of /tmp and 2.7 s
+  # of a 15 Hz camera, and the same sqrt rule puts an 8 mm figure inside
+  # 1 mm.
+  depth_samples: "40"
