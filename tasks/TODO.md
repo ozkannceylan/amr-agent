@@ -42,3 +42,41 @@ Suite: 583 passed, 0 skipped (guen basinda 552). Kanit: PROOF.md
       RUNNING/FINISHED -> leg2+drop -> DONE kamerada. record_e2e.py +
       fastdds_loopback.xml (DDS multicast olumu koku) + paralel preflight.
       Kural: arac kodu degisince `m6.sh deploy` sart.
+
+---
+
+# m5-ver3 — sensör füzyonlu otonom sürüş (branch: m5-ver3, main'e dokunulmaz)
+
+Karar: vault AMR-DEC-003, 2026-08-25. Araştırma: docs/reports/m5v3-01..04.
+Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
+
+- [ ] F1. Gerçek sensör paketi + gerçekçilik: nav lidar TiM571 profili
+      (15 Hz, 811 örnek, gürültü+bias+kuantizasyon), safety scanner'lara
+      nanoScan3 zarfı+gürültü, RGB-D kamera (D455 sınıfı) + AprilTag
+      istasyon işaretleri, [karar bekliyor] 3D lidar (OS0/Mid-360 sınıfı,
+      yalnız vitrin aracı). Ground-truth odom KALKAR: joint state'ten
+      enkoder-kuantizasyonlu tekerlek odometrisi + WheelSlip + %1-2 teker
+      yarıçapı hatası. Kanıt: datasheet-vs-ölçülen gürültü tablosu, RTF.
+- [ ] F2. Füzyon katmanı: çift EKF (robot_localization; odom EKF =
+      teker+IMU+rf2o twist, map EKF = AMCL pozu); fuse (factor graph)
+      paralel A/B kolu. Kanıt: WheelSlip senaryosunda EKF'li/EKF'siz
+      sürüklenme, ground truth'a karşı.
+- [ ] F3. Harita + lokalizasyon: slam_toolbox offline haritası
+      (warehouse_ver3, m5-08d yöntemi: kayıt→registration→mutlak skor);
+      AMCL vs slam_toolbox localization A/B, aynı enstrüman tabanı.
+      Kanıt: mutlak rms tablosu (m5_ver1 0.124 m referans).
+- [ ] F4. Nav2 sürüş: Smac Hybrid-A* (REEDS_SHEPP, gerçek min dönüş
+      yarıçapı) + MPPI Ackermann (RPP yedek) + tricycle BT (Spin/BackUp
+      yok) + collision monitor (VelocityPolygon) + keepout + velocity
+      smoother; PLC V_Limit → /speed_limit köprüsü (zarf mimarisi ve
+      ADR 0014 korunur). Kanıt: m6'nın sürüş vakaları Nav2 ile yeniden.
+- [ ] F5. Hassas yanaşma + palet: opennav_docking SimpleNonChargingDock +
+      AprilTag detected_dock_pose; spur çıkışı = undock (düz geri, MPPI
+      reverse riskini atlar); DetachableJoint ile palet al/bırak
+      (geometrik predicate'li attach). Opsiyonel SOTA katmanı:
+      LOCO/sdg_pallet_model öğrenilmiş palet tespiti (demo markera
+      dayanır). Kanıt: docking doğruluğu (0.25 m toleransa karşı), film.
+
+Bilinen riskler: MPPI Ackermann geri-viraj sapması (nav2 #5714, açık;
+undock ile hafifletilir) · ros_gz köprüsü RTF yer (pointcloud köprüleme,
+gz-sensors #545 hizasızlık) · gpu_lidar sığ açı hatası (gz-sim #2743).
