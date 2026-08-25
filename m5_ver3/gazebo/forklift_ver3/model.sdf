@@ -18,8 +18,10 @@
   THE DRIFT STARTS, and it is this much of it:
 
     . nav_lidar carries a SICK TiM571 profile - 15 Hz, 811 rays over
-      270 deg, 0.05 to 25.0 m, quantized gaussian noise - instead of the
-      ideal 10 Hz / 360 deg / 8.0 m scanner.
+      270 deg, 0.05 to 25.0 m, gaussian noise with a per-run bias -
+      instead of the ideal 10 Hz / 360 deg / 8.0 m scanner. The device
+      quantizes its range telegram to a millimetre and THIS MODEL DOES
+      NOT; the sensor block below says why, under WHAT IS NOT MODELLED.
     . the three safety_scanner_* sensors gain a gaussian noise block AND
       NOTHING ELSE. Their aperture, sample count, rate, range and topic
       are frozen by the field contract the PLC side is written against.
@@ -740,7 +742,9 @@
 
           THE NOISE IS THE DATA SHEET'S TWO ERROR ROWS, and they are two
           DIFFERENT errors, which is why they land on two different
-          elements:
+          elements. THESE TWO ARE THE WHOLE OF WHAT THIS SENSOR
+          CONFIGURES: the type is plain gaussian and there is no third
+          element.
 
             stddev 0.02       statistical error, < 20 mm at 90 percent
                               remission. Shot-to-shot spread, so it is the
@@ -752,14 +756,14 @@
                               a bias; +-60 mm read as a 3 sigma bracket
                               puts that draw's sigma at 20 mm.
 
-            precision 0.001   the measurement telegram reports in
-                              millimetres, so nothing the device produces
-                              is finer than 1 mm. gaussian_quantized is
-                              the noise type that carries <precision> -
-                              plain gaussian ignores it in silence.
-                              Whether gz-sensors 8 honours it for a
-                              gpu_lidar was MEASURED and not assumed:
-                              EVIDENCE_MODEL_V3.md 5.
+          THE BIAS PAIR IS NOT DECLARED BY THE SCHEMA, and is honoured
+          anyway. sdformat's lidar.sdf writes its own inline <noise>
+          element carrying only type, mean and stddev - in every SDF
+          version, 1.11 included - so gz warns at load that bias_mean and
+          bias_stddev are "not defined in SDF", copies them through, and
+          gz-sensors reads them regardless. That they genuinely produce a
+          bias, and a fresh draw of it every run, was MEASURED rather than
+          assumed: EVIDENCE_MODEL_V3.md 5.3.
 
           THE WINDOW, AND WHY IT IS NOT SYMMETRIC ABOUT THIS FRAME'S x.
           A TiM571 sees 270 deg and is blind over the other 90, and where
@@ -786,12 +790,34 @@
           rather than trusted - EVIDENCE_MODEL_V3.md 4 carries both the
           check and the rejected alternative.
 
-          WHAT IS NOT MODELLED, STATED RATHER THAN OMITTED. Remission
-          dependence: the data sheet's statistical error is < 20 mm at
-          90 percent remission and < 10 mm at 10 percent to 6 m, and gz's
-          noise model has no reflectance term at all, so the LARGER figure
-          is used and the modelled scan is the pessimistic one. And
-          gz-sim issue #2743 (open, 2025-01-29): a gpu_lidar is measurably
+          WHAT IS NOT MODELLED, STATED RATHER THAN OMITTED. Three
+          things, and the first of them is the one a reader of the noise
+          block above would otherwise assume was here.
+
+          THE MILLIMETRE QUANTIZATION. The measurement telegram reports
+          in millimetres, so nothing the real device produces is finer
+          than 1 mm - and nothing in this file reproduces that. The SDF
+          element for it is <precision>, which ONLY the
+          gaussian_quantized noise type carries, and gaussian_quantized
+          was MEASURED on this rig to produce NO NOISE AT ALL on a
+          gpu_lidar: zero temporal spread on all 710 usable beams, five
+          consecutive sweeps byte-identical, and not one warning from gz.
+          The choice was therefore between a quantized scan with no noise
+          in it and a noisy scan with no quantization, and this file takes
+          the second - <type>gaussian</type>, no <precision>, and the 1 mm
+          grid named HERE, as absent. The modelled range is thus FINER
+          than the device by 1 mm inside a channel whose noise is 20 mm,
+          which is why it is a footnote and not a defect; it is not a
+          silence either. EVIDENCE_MODEL_V3.md 5.2 carries the
+          measurement and 9.2 the root cause.
+
+          REMISSION DEPENDENCE. The data sheet's statistical error is
+          < 20 mm at 90 percent remission and < 10 mm at 10 percent to
+          6 m, and gz's noise model has no reflectance term at all, so the
+          LARGER figure is used and the modelled scan is the pessimistic
+          one.
+
+          GZ-SIM ISSUE #2743 (open, 2025-01-29). A gpu_lidar is measurably
           less accurate than a CPU ray sensor at shallow incidence, which
           is the rack leg and the pallet face seen obliquely. gz sim has
           no CPU ray sensor and there is no fix upstream, so it is written
