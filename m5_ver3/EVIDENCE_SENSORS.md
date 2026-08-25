@@ -626,9 +626,21 @@ reading `az` does not subtract the wrong number.
 
 The CSVs stay in `m5_ver3/logs/evidence/` and out of the repository —
 `.gitignore:67` covers `m5_ver3/logs/`, and one static session alone is
-16 MB (the seven together are 79 MB). `analyse` prints the md5 and the size of every file in a session
-it reads, so a figure in this file can be traced to the bytes it came
-from.
+16 MiB, the seven drive sessions another 87 MiB. `analyse` prints the md5
+and the size of every file in a session it reads, so a figure in this file
+can be traced to the bytes it came from.
+
+> **RECOUNTED IN PLACE, 2026-08-26.** This paragraph read “one static
+> session alone is 16 MB (the seven together are 79 MB)” over a table of
+> **eight** sessions, and the 79 was never re-added up. What 79 was: the
+> `drive-*` directories as they stood *before* the second `corner_creep`
+> run was recorded — six of them, 82 427 135 bytes, 78.6 MiB — counted
+> while the listing held seven directories in all. Recounted off the
+> directory as it stands: **16 744 205 bytes** static (15.97 MiB),
+> **90 989 931 bytes** across the seven drive sessions (86.78 MiB),
+> **107 734 136 bytes** for all eight (102.74 MiB). Not one figure in the
+> table below moved; the only thing that was wrong was the sum in the
+> sentence above it.
 
 | Session | File | md5 | Bytes |
 |---|---|---|---|

@@ -89,7 +89,7 @@ world:
 # column across it. The table moved with the floor; the quotation did not.
 #
 # IT WAS MEASURED RATHER THAN ARGUED, AND THE ARITHMETIC AGREES WITH THE
-# MEASUREMENT TO THE MILLIMETRE (EVIDENCE_BRINGUP.md 5):
+# MEASUREMENT TO THE MILLIMETRE (EVIDENCE_BRINGUP.md 7):
 #   The model's forks reach x = -1.875 in its own frame. At (-3.00, -5.50)
 #   with yaw 0 the fork tips therefore land at world x = -4.875, and
 #   RackSW3 stands at x in [-4.500, -4.000], y in [-6.000, -2.500], from
@@ -175,10 +175,15 @@ topics:
   clock: "/clock"
   # MEASUREMENT REFERENCE ONLY. This is the OdometryPublisher system's
   # ground-truth pose - no wheel slip, no encoder quantisation, no drift -
-  # and on this track it is an instrument, never an input. F1 deletes it
-  # from the model outright and replaces it with wheel odometry through an
-  # EKF; until then it is what a fusion estimate is scored AGAINST, and
-  # anything that navigates on it is measuring its own answer.
+  # and on this track it is an instrument, never an input.
+  #   F1 KEPT IT, AND KEEPING IT WAS THE POINT. What F1 added is the
+  #   wheel odometry below, BESIDE this channel and scored against it; a
+  #   phase that deleted its own reference in the same breath as it built
+  #   the thing that needs one would have nothing to publish a drift
+  #   figure against. Taking it out of the model belongs to whatever
+  #   phase has a fused estimate to put in its place, and the EKF that
+  #   would be that estimate is F2's. Until then anything that NAVIGATES
+  #   on it is measuring its own answer.
   odom_ground_truth: "/forklift/gz/odom"
   # The navigation lidar. 15 Hz, 270 deg, 25.0 m range max since F1 Task 2
   # gave it the TiM571 profile - the SDF is the authority for all three
@@ -229,8 +234,10 @@ topics:
   #   BRIDGED SINCE F1 TASK 3, because it is where the STEER angle is
   #   published and nodes/wheel_odometry.py cannot do tricycle kinematics
   #   without it. It carries three joints at the world's own rate, which
-  #   is the traffic a wheel odometry costs; EVIDENCE_ODOMETRY_V3.md is
-  #   where what it costs the RTF is measured rather than assumed.
+  #   is the traffic a wheel odometry costs; EVIDENCE_SENSORS.md 5 is
+  #   where what it costs the RTF is measured rather than assumed - the
+  #   full sensor set with the estimator on top of it, against the same
+  #   probe's baseline without either.
   joint_state: "/forklift/gz/joint_state"
   # THE DRIVE SHAFT'S READING CHANNEL A, and the odometry's only input
   # from the traction axis. model.sdf runs TWO JointStatePublisher

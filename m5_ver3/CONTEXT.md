@@ -145,8 +145,8 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 
 | Command | What it does |
 |---|---|
-| `m5v3.sh start` | GPU preflight, then the world, one `forklift_ver3`, both bridges and a Gazebo **window**. |
-| `m5v3.sh start --headless` | The same without the window. **Use this for anything being measured** — every figure in the two evidence files was taken this way. |
+| `m5v3.sh start` | GPU preflight, then the world, one `forklift_ver3`, both bridges, the wheel-odometry node and a Gazebo **window**. |
+| `m5v3.sh start --headless` | The same without the window. **Use this for anything being measured** — every figure in the three evidence files was taken this way. |
 | `m5v3.sh status` | Each child by name, ALIVE or DEAD, with its log. Exit 0 only if every one is alive. |
 | `m5v3.sh stop` | Ends this partition's stack, and nothing else. |
 | `tools/rtf_probe.sh` | 30 s real-time-factor sample of the world that is already running. |
@@ -160,11 +160,14 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 child and its log; what survived is left running, because the operator's
 next command is `stop`.
 
-Three processes since F1 Task 2: the gz server, `ros_gz_bridge`'s
-`parameter_bridge` and `ros_gz_image`'s `image_bridge` — plus the GUI
-client when there is one. **No broker, no fleet manager, no HMI, no PLC
-link** — that absence is the phase, not an omission. Nothing here touches
-PLCSIM Advanced or anything on the Windows side.
+**Four children since F1 Task 3**, and `status` names all four back: the
+gz server (`world`), `ros_gz_bridge`'s `parameter_bridge` (`bridge`),
+`ros_gz_image`'s `image_bridge` (`imgbridge`) and `nodes/wheel_odometry.py`
+(`odom`) — plus the gated GUI client (`gui`) when there is a window, which
+is the fifth process `m5v3.sh`'s own usage text counts. **No broker, no
+fleet manager, no HMI, no PLC link** — that absence is the phase, not an
+omission. Nothing here touches PLCSIM Advanced or anything on the Windows
+side.
 
 ### What is bridged, and one word about odometry
 
@@ -187,10 +190,12 @@ every one of these, both sides, are §2 of the same file.
 `/forklift/gz/odom` is the model's `OdometryPublisher` — **ground truth,
 and a measurement reference ONLY**. No wheel slip, no encoder
 quantisation, no drift. On this track it is an *instrument*, never an
-input: phase F1 deletes it from the model and replaces it with wheel
-odometry through an EKF, and until then anything that *navigates* on it is
-measuring its own answer. The bridge line in `m5v3.sh` says so where it
-is opened.
+input. **F1 kept it**, and keeping it was the point: F1 added the wheel
+odometry *beside* it and scored one against the other (`EVIDENCE_SENSORS.md`
+§3), which is not a thing a phase can do having deleted its own reference.
+Replacing it with a fused estimate belongs to **F2**'s EKF, and until that
+exists anything that *navigates* on it is measuring its own answer. The
+bridge line in `m5v3.sh` says so where it is opened.
 
 ---
 
@@ -202,7 +207,7 @@ truck's forks 0.875 m inside a rack leg: that pose belongs to
 `warehouse_ver2`, and M6.6's relayout put `RackSW3` across it. The model's
 forks reach `x = -1.875` in its own frame, and *that* number — not the
 look of the floor plan — is what a candidate pose has to clear.
-`EVIDENCE_BRINGUP.md` 5 carries the whole measurement.
+`EVIDENCE_BRINGUP.md` 7 carries the whole measurement.
 
 **DDS discovery on this rig has failed before.** Mid-session on
 2026-08-25 the WSL multicast path died and FastDDS discovery went with it;

@@ -62,8 +62,35 @@ tests/test_wheel_odom_core.py locks all three here with worked examples.
   contract is expressed in base_link - the MODEL frame - where a
   driver-right turn is a DECREASING yaw and therefore a NEGATIVE
   angular.z. The two are opposite on purpose and neither is wrong. An EKF
-  fed this twist must read it as base_link, and anything that compares it
-  with a follower command has to flip the sign of the yaw rate first.
+  fed this twist must read it as base_link.
+
+  AND THE MIRROR IS NOT THE ONLY THING BETWEEN THE TWO angular.z FIELDS.
+  THEY ARE NOT EVEN THE SAME QUANTITY. What this file publishes there is
+  a YAW RATE, rad/s. What a follower command carries there is a STEER
+  ANGLE, rad - m6/ipc/cmd_gate.py's field contract says so in as many
+  words, and gives its reason: the bicycle relation delta = atan(L*w/v)
+  is undefined at v = 0, and a forklift that cannot be steered while
+  stopped would make an e-stop test ambiguous, so the angle is commanded
+  directly and no geometry is computed on that path at all. Flip a sign
+  between them and what is left is rad against rad/s - a residual that
+  looks nearly right at one speed and is wrong at every other.
+    SO CONVERT BEFORE COMPARING, and there are two honest ways.
+    ANGLE TO RATE: run the commanded delta through this file's own
+    kinematics, psidot = v_w * sin(delta) / L, or equivalently
+    v_R * tan(delta) / L off the rear-axle speed, and compare THAT with
+    the published angular.z. Fed the SIGNED tread speed this file uses -
+    forward is negative - the conversion carries the mirror with it: a
+    driver-right command (+delta) comes out a negative yaw rate, which is
+    what this file publishes for that turn. Done with an unsigned speed
+    the flip is still owed by hand.
+    STEER AGAINST STEER: the commanded delta against the steer reading
+    this file was fed. No sign flip and no speed at all - the mirror
+    lives on the YAW RATE and not on the angle, which travels from the
+    console to the steer terminal unchanged (agv/forklift/scripts/
+    forklift_io.py clamps it and does nothing else to it). It is the
+    sharper of the two because it does not fold the tread speed into the
+    residual, and what it will show is wheel_odom.steer_bias_rad, which
+    is the whole of the difference by construction.
 
 THE TWO ERRORS THIS FILE EXISTS TO MAKE. An odometry computed off a joint
 that agrees with the simulator is GROUND TRUTH WITH EXTRA STEPS: the F2

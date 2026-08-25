@@ -57,6 +57,18 @@ Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
       yalnız vitrin aracı). Ground-truth odom KALKAR: joint state'ten
       enkoder-kuantizasyonlu tekerlek odometrisi + WheelSlip + %1-2 teker
       yarıçapı hatası. Kanıt: datasheet-vs-ölçülen gürültü tablosu, RTF.
+      YAPILAN (4 görev, 2026-08-25/26; m5_ver3/, kanıt EVIDENCE_BRINGUP +
+      EVIDENCE_MODEL_V3 + EVIDENCE_SENSORS): TiM571, nanoScan3 ve D455
+      profilleri kuruldu; "[karar bekliyor]" 3D lidar kararı VERİLDİ —
+      OS0 sınıfı takıldı, köprüye alınmadı (tüketicisi F2; abonelik
+      RTF'yi 0.999 → 0.85 düşürüyor); tekerlek odometrisi
+      nodes/wheel_odometry.py olarak yazıldı (1024 sayım/tur, +%1.5
+      yarıçap, +0.005 rad direksiyon biası) ve dört profilde ground
+      truth'a karşı ölçüldü. GROUND-TRUTH ODOM KALKMADI: modelde ÖLÇÜM
+      REFERANSI olarak duruyor — yerine geçecek füzyon (EKF) F2'nin işi,
+      ve F1'in kendi sürüklenme tablosu bu referans olmadan yazılamazdı.
+      AÇIK KALAN: AprilTag istasyon işaretleri (bu görev planının
+      kapsamında değildi).
 - [ ] F2. Füzyon katmanı: çift EKF (robot_localization; odom EKF =
       teker+IMU+rf2o twist, map EKF = AMCL pozu); fuse (factor graph)
       paralel A/B kolu. Kanıt: WheelSlip senaryosunda EKF'li/EKF'siz
