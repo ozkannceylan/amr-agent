@@ -2,11 +2,13 @@
 # place any of them is written down.
 #
 # THE RULE THIS FILE EXISTS FOR: no behavioural constant lives inline in a
-# script on this track. m5v3.sh and tools/rtf_probe.sh read this file once
-# per invocation and refuse by name if they cannot - so a partition, a pose
-# or a topic that has to move moves HERE, once, and both scripts move with
-# it. A constant spelled in two places is two opinions about one number,
-# and the first one to be edited is the one that is right.
+# script on this track - not a partition, not a pose, not a topic, not a
+# waiting budget, and not the path to ROS. m5v3.sh and tools/rtf_probe.sh
+# read this file once per invocation through tools/_common.sh, which
+# refuses by the key's DOTTED name if it cannot. So a constant that has to
+# move moves HERE, once, and both scripts move with it. A constant spelled
+# in two places is two opinions about one number, and the first one to be
+# edited is the one that is right.
 #
 # EVERY VALUE IS A STRING WHERE A SCRIPT PASSES IT THROUGH. The spawn
 # coordinates go onto a gz service request as text; quoting them keeps
@@ -155,6 +157,14 @@ topics:
 paths:
   log_dir: "m5_ver3/logs"
   pidfile: "m5_ver3/.m5v3_pids"
+  # THE ONLY ABSOLUTE PATH IN THIS FILE, and it is absolute because it is
+  # not this repository's: it is where ROS 2 Jazzy is installed inside
+  # WSL. Both scripts source it before they call gz - gz itself comes from
+  # gz_tools_vendor under /opt/ros, not only the ROS nodes - and both
+  # refuse by name if it is not there. It lives here rather than at the
+  # top of each script because it was written twice, and a constant
+  # written twice is two opinions about one path.
+  ros_setup: "/opt/ros/jazzy/setup.bash"
 
 # -------------------------------- TIMING -------------------------------
 # Seconds. Measured on this rig rather than guessed, and every one of them
@@ -174,6 +184,33 @@ timing:
   # Between the TERM sweep and the KILL sweep. Past this, nothing is
   # exiting on its own.
   stop_grace_s: "2"
+  # HOW OFTEN THE GUI GATE ASKS whether the scanner topic has appeared.
+  # It is a `gz topic -l` per poll against a local daemon, so the cost is
+  # nothing and the only thing this number buys is how much of the wait
+  # is spent waiting after the answer is already yes.
+  gui_gate_poll_s: "0.5"
+  # AND HOW LONG IT WAITS AFTER THE ANSWER IS YES. The gate closes a race
+  # inside gz-sim's GUI, not a race about the topic: the SensorTopic
+  # components VisualizeLidar anchors on are created by the render thread
+  # a beat after the sensor advertises, so a client let in on the advert
+  # alone can still snapshot the world without them. This is that beat,
+  # and it is m6's measured value (gazebo/m6_world.launch.py).
+  gui_gate_settle_s: "2"
+  # THE CREATE SERVICE'S OWN DEADLINE, in MILLISECONDS - that is gz
+  # service's unit, not this file's choice. It has to outlast a cold
+  # first spawn, where the model's four sensors and its physics are being
+  # built for the first time; m6's rtf_spike.sh gives the same call the
+  # same 10 s against the same model on this rig.
+  spawn_service_timeout_ms: "10000"
+  # HOW LONG spawn() WAITS FOR A CHILD TO WRITE ITS OWN PID before it
+  # reports the pid as UNKNOWN. tries x wait_s is the budget: 50 x 0.1 s
+  # = 5 s, which is two orders of magnitude more than the measured cost
+  # of setsid, a redirect and one append. It is a budget and not a
+  # deadline: a child that exceeds it is still started, still recorded
+  # and still swept - only its pid line reads UNKNOWN and points at the
+  # log. The startup check below is what decides whether it LIVED.
+  pid_wait_tries: "50"
+  pid_wait_s: "0.1"
 
 # ------------------------------- RTF PROBE ------------------------------
 # tools/rtf_probe.sh samples gz.msgs.WorldStatistics on the running

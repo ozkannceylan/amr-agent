@@ -37,50 +37,26 @@
 #   - would be lost. Line buffering costs nothing at 10 Hz and makes the
 #   sample count the honest one.
 #
-# THE CONSTANTS ARE config.yaml's, and this file reads them itself rather
+# THE CONSTANTS ARE config.yaml's, and this file reads them ITSELF rather
 # than being handed them, so it can be pointed at a stack this shell did
 # not start. It is a second READER of that file, never a second copy of
-# any value in it.
+# any value in it - and since the fix round it is not a second copy of the
+# READER either: refuse(), the parse and the ROS source are _common.sh's,
+# shared with m5v3.sh.
 set -uo pipefail
 
-M5V3="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG="$M5V3/config.yaml"
-ROS_SETUP="/opt/ros/jazzy/setup.bash"
-
-refuse() {  # refuse <check> <owning file> [line...]
-    local check="$1" owner="$2"
-    shift 2
-    echo "rtf_probe: REFUSED at check '$check'"
-    echo "           owned by: $owner"
-    [ "$#" -gt 0 ] && printf '           %s\n' "$@"
-    exit 1
-}
-
-# The same read m5v3.sh does, of the same file. See the header.
-CFG="$(python3 -c 'import shlex, sys, yaml
-def walk(node, path):
-    if isinstance(node, dict):
-        for key, value in node.items():
-            walk(value, path + [str(key)])
-    else:
-        print("CFG_{}={}".format("_".join(path).upper(), shlex.quote(str(node))))
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    walk(yaml.safe_load(handle), [])' "$CONFIG" 2>/dev/null)"
-[ -n "$CFG" ] || refuse "config.yaml is readable" "$CONFIG" \
-    "read it by hand: python3 -c 'import yaml; yaml.safe_load(open(\"$CONFIG\"))'"
-eval "$CFG"
-for key in isolation.gz_partition world.name rtf_probe.sample_s; do
-    var="CFG_$(printf '%s' "$key" | tr 'a-z.' 'A-Z_')"
-    [ -n "${!var:-}" ] || refuse "config.yaml defines $key" "$CONFIG" \
-        "the parse succeeded, so the key is missing or renamed"
-done
-
-# THE PARTITION IS WHAT MAKES THIS PROBE ASK THE RIGHT WORLD. A concurrent
-# m6 stack publishes statistics for its own four-truck world on a topic of
-# exactly the same name, and without this the sampler would take whichever
-# answered - a figure about somebody else's simulation, printed under this
-# track's name.
-export GZ_PARTITION="$CFG_ISOLATION_GZ_PARTITION"
+# _common.sh sets $REPO, $M5V3 and $CONFIG from its own location, checks
+# and exports the isolation keys, and gives this script the voice its
+# refusals speak in.
+#   THE PARTITION IT EXPORTS IS WHAT MAKES THIS PROBE ASK THE RIGHT WORLD.
+#   A concurrent m6 stack publishes statistics for its own four-truck
+#   world on a topic of exactly the same name, and without it the sampler
+#   would take whichever answered - a figure about somebody else's
+#   simulation, printed under this track's name.
+TOOL=rtf_probe
+# shellcheck source=_common.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+load_config world.name rtf_probe.sample_s
 
 stack_line() {  # every process in THIS partition that the sweep would own
     local pid cmd out=""
@@ -97,16 +73,10 @@ STATS_TOPIC="/world/$CFG_WORLD_NAME/stats"
 SAMPLE_S="${RTF_SAMPLE_S:-$CFG_RTF_PROBE_SAMPLE_S}"
 LOG="${TMPDIR:-/tmp}/m5v3_rtf_$(date +%Y%m%d-%H%M%S).log"
 
-# ROS is sourced for gz itself - gz_tools_vendor lives under /opt/ros -
-# and for no ROS node: this probe starts none. `set -u` stands down across
-# the source because the ament setup chain reads variables it has not yet
-# defined.
-[ -f "$ROS_SETUP" ] || refuse "ROS 2 Jazzy is installed" "$ROS_SETUP" \
-    "gz itself comes from gz_tools_vendor under /opt/ros"
-set +u
-# shellcheck disable=SC1091
-source "$ROS_SETUP"
-set -u
+# ROS is sourced for gz itself and for no ROS node: this probe starts
+# none. The path, the existence check and the `set -u` dance are
+# _common.sh's.
+source_ros
 
 echo "=== m5v3 RTF probe ==="
 echo "date       $(date -Is)"

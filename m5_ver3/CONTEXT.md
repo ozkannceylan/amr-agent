@@ -95,6 +95,7 @@ m5_ver3/
 │       └── model.sdf     the forked vehicle
 ├── logs/                 one file per child, by name (git-ignored)
 └── tools/
+    ├── _common.sh        sourced: refuse(), the config reader, source_ros()
     └── rtf_probe.sh      real-time factor of the RUNNING world
 ```
 
@@ -107,7 +108,14 @@ scripts move with it.
 child writes its own log under `logs/`, named for the child, and `status`
 reports the same children back by name with ALIVE or DEAD. Every refusal
 names the check that failed and the file that owns the answer it tested
-against.
+against — including a child that died on its way up, which is a refusal
+with a non-zero exit and not a warning printed above the word "up."
+
+**`tools/_common.sh` is sourced, never executed.** It is the three things
+both scripts do before they can do anything of their own: `refuse()` in
+one voice, one reader of `config.yaml` that checks required keys by their
+dotted names, and `source_ros()`. Two copies of a mechanism drift exactly
+the way two copies of a value do.
 
 ---
 
@@ -128,6 +136,10 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 | `m5v3.sh status` | Each child by name, ALIVE or DEAD, with its log. Exit 0 only if every one is alive. |
 | `m5v3.sh stop` | Ends this partition's stack, and nothing else. |
 | `tools/rtf_probe.sh` | 30 s real-time-factor sample of the world that is already running. |
+
+`start` exits **non-zero** if any child died during startup, naming the
+child and its log; what survived is left running, because the operator's
+next command is `stop`.
 
 Three processes at Task 1: the gz server, the `ros_gz_bridge`, and the
 GUI client when there is one. **No broker, no fleet manager, no HMI, no

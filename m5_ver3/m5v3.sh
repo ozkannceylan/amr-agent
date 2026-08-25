@@ -34,51 +34,22 @@
 # are not this stack's to kill and this stack cannot reach them.
 set -uo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-M5V3="$REPO/m5_ver3"
-CONFIG="$M5V3/config.yaml"
-ROS_SETUP="/opt/ros/jazzy/setup.bash"
+# refuse(), the config.yaml reader and the ROS source are SHARED with
+# tools/rtf_probe.sh and live in one file, because two copies of a
+# mechanism drift exactly the way two copies of a value do. _common.sh
+# also sets $REPO, $M5V3 and $CONFIG from its OWN location, and $TOOL is
+# the name its refusals speak under.
+TOOL=m5v3
+# shellcheck source=tools/_common.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/_common.sh"
+
 GUI=true   # start's default; --headless sets it false. See the header.
 
-# EVERY REFUSAL NAMES THE CHECK AND THE FILE THAT OWNS IT. An operator who
-# is refused needs two things - which test said no, and where the answer it
-# tested against is written - and a bare exit gives neither.
-refuse() {  # refuse <check> <owning file> [line...]
-    local check="$1" owner="$2"
-    shift 2
-    echo "m5v3: REFUSED at check '$check'"
-    echo "      owned by: $owner"
-    [ "$#" -gt 0 ] && printf '      %s\n' "$@"
-    exit 1
-}
-
-# THE ONE READER OF config.yaml, and the shape is m6.sh's vehicle_table():
-# a shell cannot import, so the table is read by a subprocess and eval'd.
-# Every scalar comes back as CFG_<DOTTED_KEY_UPPERCASED>, shell-quoted, so
-# a value with a space in it cannot become two words. Called once per
-# subcommand - stop needs the partition as much as start does.
-config_env() {
-    python3 -c 'import shlex, sys, yaml
-def walk(node, path):
-    if isinstance(node, dict):
-        for key, value in node.items():
-            walk(value, path + [str(key)])
-    else:
-        print("CFG_{}={}".format("_".join(path).upper(), shlex.quote(str(node))))
-with open(sys.argv[1], "r", encoding="utf-8") as handle:
-    walk(yaml.safe_load(handle), [])' "$CONFIG" 2>/dev/null
-}
-
-# EVERY KEY THIS SCRIPT READS, CHECKED BY NAME AFTER THE PARSE. A
-# config.yaml that parses but has been reorganised would otherwise reach
-# the sweep with an empty partition - and an empty partition matches the
-# environment of nothing at all, which is a stop that silently spares a
-# live stack. Under `set -u` a missing key aborts with bash's own message
-# about a variable nobody but this file has heard of; checked here it is
-# refused by its dotted name, which is what the operator has to go and
-# edit. MAINTENANCE OBLIGATION: a key read below is a key listed here.
+# THIS SCRIPT'S OWN REQUIRED KEYS, on top of the isolation and ROS ones
+# _common.sh checks for every script on this track. Each is refused by its
+# DOTTED name if the file has been reorganised under it.
+# MAINTENANCE OBLIGATION: a key read below is a key listed here.
 REQUIRED_KEYS=(
-    isolation.gz_partition isolation.ros_domain_id
     gpu.gallium_driver gpu.d3d12_adapter_name gpu.required_renderer
     world.file world.name
     vehicle.model vehicle.name
@@ -86,22 +57,13 @@ REQUIRED_KEYS=(
     topics.clock topics.odom_ground_truth topics.scan_nav topics.gui_gate
     paths.log_dir paths.pidfile
     timing.world_load_s timing.settle_s timing.startup_check_s
-    timing.stop_grace_s
+    timing.stop_grace_s timing.gui_gate_poll_s timing.gui_gate_settle_s
+    timing.spawn_service_timeout_ms timing.pid_wait_tries timing.pid_wait_s
 )
 
-load_config() {
-    local env key var
-    env="$(config_env)"
-    [ -n "$env" ] || refuse "config.yaml is readable" "$CONFIG" \
-        "read it by hand: python3 -c 'import yaml; yaml.safe_load(open(\"$CONFIG\"))'"
-    eval "$env"
-    for key in "${REQUIRED_KEYS[@]}"; do
-        var="CFG_$(printf '%s' "$key" | tr 'a-z.' 'A-Z_')"
-        [ -n "${!var:-}" ] || refuse "config.yaml defines $key" "$CONFIG" \
-            "the parse succeeded, so the key is missing or renamed, not unreadable"
-    done
-    export GZ_PARTITION="$CFG_ISOLATION_GZ_PARTITION"
-    export ROS_DOMAIN_ID="$CFG_ISOLATION_ROS_DOMAIN_ID"
+# The shared read, plus the four paths only this script derives from it.
+configure() {
+    load_config "${REQUIRED_KEYS[@]}"
     PIDFILE="$REPO/$CFG_PATHS_PIDFILE"
     LOGDIR="$REPO/$CFG_PATHS_LOG_DIR"
     WORLD="$REPO/$CFG_WORLD_FILE"
@@ -176,8 +138,6 @@ start() {
         "it belongs to m6 and is used BY REFERENCE - do not copy it here"
     [ -f "$MODEL" ] || refuse "the vehicle model exists" "$CONFIG" \
         "vehicle.model resolves to $MODEL"
-    [ -f "$ROS_SETUP" ] || refuse "ROS 2 Jazzy is installed" "$ROS_SETUP" \
-        "this stack runs inside WSL - see CONTEXT.md"
     # Unchecked, an unwritable log dir fails every redirection this stack
     # opens and start would sleep its way to "up." over a stack that never
     # began.
@@ -188,13 +148,14 @@ start() {
 
     : > "$PIDFILE" || refuse "the pid file is writable" "$CONFIG" \
         "paths.pidfile resolves to $PIDFILE"
-    # ament's hook reads AMENT_TRACE_SETUP_FILES before setting it, so
-    # `set -u` stands down across the source or start dies on its line 8.
-    # gz itself needs this too: gz_tools_vendor lives under /opt/ros.
-    set +u
-    # shellcheck disable=SC1090
-    source "$ROS_SETUP"
-    set -u
+    # ROS IS SOURCED AFTER THE GPU PREFLIGHT AND NOT BEFORE IT, so the
+    # renderer glxinfo reports is the one this shell had when the two
+    # exports went on: sourcing ROS rewrites LD_LIBRARY_PATH, and a gate
+    # measured through a different loader path is a different gate. The
+    # refusal for a missing ROS therefore lands here rather than at the
+    # top of start(). Nothing has been STARTED by this line either way,
+    # which is the property that matters.
+    source_ros
 
     echo "starting the m5-ver3 plant (partition $GZ_PARTITION, domain $ROS_DOMAIN_ID, gui $GUI)"
     # THE WORLD FIRST, and its load budget is the plant's.
@@ -237,8 +198,9 @@ start() {
     # bridged: the gate is a gz-side question.
     if [ "$GUI" = true ]; then
         spawn gui bash -c "until gz topic -l 2>/dev/null \
-            | grep -qF '$CFG_TOPICS_GUI_GATE'; do sleep 0.5; done; \
-            sleep 2; exec gz sim -g -v 2"
+            | grep -qF '$CFG_TOPICS_GUI_GATE'; \
+            do sleep $CFG_TIMING_GUI_GATE_POLL_S; done; \
+            sleep $CFG_TIMING_GUI_GATE_SETTLE_S; exec gz sim -g -v 2"
     fi
 
     # "A process that dies in its first fraction of a second has not
@@ -246,13 +208,25 @@ start() {
     # wrong log" (stack.sh:243-244). By this line the youngest child is a
     # second old and the world is a dozen.
     sleep "$CFG_TIMING_STARTUP_CHECK_S"
-    local bad=0
+    # A DEAD CHILD IS A REFUSAL AND NOT A WARNING. This block used to print
+    # "THE STACK IS INCOMPLETE" and then fall through to "up." and exit 0,
+    # so an operator's `start && ...` - and any script reading the status -
+    # saw a successful bringup over a stack that was missing a process.
+    # Whatever survived is STILL RUNNING, and the message has to say so,
+    # because the operator's next command is stop and not start.
+    local dead="" logs="" n
     while read -r pid name; do
         case "$pid" in ''|*[!0-9]*) continue ;; esac
-        ours "$pid" || { bad=1
-            echo "  WARNING: $name exited during startup, see $LOGDIR/$name.log"; }
+        ours "$pid" || dead="$dead${dead:+ }$name"
     done < "$PIDFILE"
-    [ "$bad" = 1 ] && echo "  THE STACK IS INCOMPLETE."
+    if [ -n "$dead" ]; then
+        for n in $dead; do logs="$logs${logs:+, }$LOGDIR/$n.log"; done
+        refuse "every child is alive ${CFG_TIMING_STARTUP_CHECK_S}s after the last spawn" \
+            "$logs" \
+            "these children exited during startup: $dead" \
+            "THE STACK IS INCOMPLETE, and what is left of it is STILL UP." \
+            "read the log named above, then '$0 stop' before trying again."
+    fi
 
     echo ""
     echo "up. one truck, one world, one bridge."
@@ -345,7 +319,7 @@ spawn_truck() {
     local reply
     reply="$(gz service -s "/world/$CFG_WORLD_NAME/create" \
         --reqtype gz.msgs.EntityFactory --reptype gz.msgs.Boolean \
-        --timeout 10000 \
+        --timeout "$CFG_TIMING_SPAWN_SERVICE_TIMEOUT_MS" \
         --req "sdf_filename: \"$MODEL\", name: \"$CFG_VEHICLE_NAME\", allow_renaming: false, pose: {position: {x: $x, y: $y, z: $z}, orientation: {w: $qw, z: $qz}}" \
         2>&1)"
     { echo "# $(date -Is) create $CFG_VEHICLE_NAME at ($x, $y, $z) yaw $yaw"
@@ -377,10 +351,15 @@ spawn() {  # spawn <name> <cmd...>
     shift
     setsid bash -c 'echo "$$ $1" >> "$2"; shift 2; exec "$@"' \
         _ "$name" "$PIDFILE" "$@" > "$LOGDIR/$name.log" 2>&1 &
-    for _ in {1..50}; do
+    # A while loop and not `for _ in {1..N}`: brace expansion happens
+    # before parameter expansion, so a count read from config.yaml cannot
+    # be spelled that way at all.
+    local tries=0
+    while [ "$tries" -lt "$CFG_TIMING_PID_WAIT_TRIES" ]; do
         pid="$(sed -n "${want}s/ .*//p" "$PIDFILE")"
         [ -n "$pid" ] && break
-        sleep 0.1
+        sleep "$CFG_TIMING_PID_WAIT_S"
+        tries=$(( tries + 1 ))
     done
     echo "  $name pid ${pid:-UNKNOWN, see $LOGDIR/$name.log}"
 }
@@ -467,8 +446,8 @@ case "${1:-}" in
             "") ;;
             *) echo "$USAGE"; exit 2 ;;
         esac
-        load_config; start ;;
-    stop|--stop)     load_config; stop ;;
-    status|--status) load_config; status ;;
+        configure; start ;;
+    stop|--stop)     configure; stop ;;
+    status|--status) configure; status ;;
     *) echo "$USAGE"; exit 2 ;;
 esac
