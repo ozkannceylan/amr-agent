@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- fastdds_loopback.xml - DDS discovery that does not need multicast.
+
+     WHY (measured 2026-08-25): mid-session, on this WSL2 rig, FastDDS
+     multicast discovery DIED - a bare `ros2 topic pub /ping` and a
+     `ros2 topic echo` on the same VM could no longer find each other -
+     and every stack boot after that lost an arbitrary subset of its
+     bridge topics, because which DDS participant pairs still saw each
+     other was a race. Eight boots failed preflight in a row, cold WSL
+     included; gz-side sensors were healthy the whole time. The
+     regression is in the host's virtual network path (the adapter is
+     literally named "vEthernet (WSL (Hyper-V firewall))"), which this
+     repo cannot fix.
+
+     WHAT THIS DOES: every participant talks UDPv4 on 127.0.0.1 ONLY,
+     and discovery is bootstrapped by unicast initial peers instead of
+     multicast. maxInitialPeersRange 64 matters: the stack is ~40
+     participants and the default range (4) would only ever announce to
+     the first four of them. Loopback-only is CORRECT for this rig -
+     every DDS node lives in the one VM; the Windows side speaks its
+     own UDP and MQTT, never DDS.
+
+     m6.sh exports FASTRTPS_DEFAULT_PROFILES_FILE to this file unless
+     the caller already set one. Verified: the /ping loopback test
+     passes under this profile on the same boot where the default
+     transport could not deliver it. -->
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <transport_descriptors>
+    <transport_descriptor>
+      <transport_id>udp-loopback</transport_id>
+      <type>UDPv4</type>
+      <interfaceWhiteList><address>127.0.0.1</address></interfaceWhiteList>
+      <maxInitialPeersRange>64</maxInitialPeersRange>
+    </transport_descriptor>
+  </transport_descriptors>
+  <participant profile_name="loopback_default" is_default_profile="true">
+    <rtps>
+      <useBuiltinTransports>false</useBuiltinTransports>
+      <userTransports><transport_id>udp-loopback</transport_id></userTransports>
+      <builtin>
+        <initialPeersList>
+          <locator><udpv4><address>127.0.0.1</address></udpv4></locator>
+        </initialPeersList>
+      </builtin>
+    </rtps>
+  </participant>
+</profiles>

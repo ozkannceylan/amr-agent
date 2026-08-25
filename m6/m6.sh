@@ -46,6 +46,13 @@ BROKER_BIN="$HOME/.local/mosquitto-vendored/usr/sbin/mosquitto"
 BROKER_LIB="$HOME/.local/mosquitto-vendored/usr/lib/x86_64-linux-gnu"
 
 export GZ_PARTITION="${GZ_PARTITION:-m6}"
+# DDS WITHOUT MULTICAST (2026-08-25). Mid-session this rig's WSL
+# multicast path died and FastDDS discovery went with it - eight boots
+# lost arbitrary bridge topics before a bare /ping pub/echo proved the
+# RMW layer itself could not deliver. The profile pins every
+# participant to unicast discovery on 127.0.0.1, which is where all of
+# them live anyway; see the file's own header for the measurement.
+export FASTRTPS_DEFAULT_PROFILES_FILE="${FASTRTPS_DEFAULT_PROFILES_FILE:-$M6/tools/fastdds_loopback.xml}"
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-96}"
 GUI=true   # start's default; --headless sets it false. See the header.
 # THE VEHICLES THIS SCRIPT STARTS ARE READ FROM THE TABLE, AND THE ID LIST IS

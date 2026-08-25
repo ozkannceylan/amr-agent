@@ -6882,3 +6882,52 @@ on 2026-08-25 the machine did not produce one in five attempts.
   stalled named beside them), ages on the idle-timeout lines that had
   stood unchanged for eleven minutes of film, and the recorder now
   stamps sim time, wall time and a windowed RTF onto every frame.
+
+---
+
+# The E2E film — 2026-08-25 afternoon: the whole cell in one take
+
+`assets/m6-fleet/m6-fleet-09-e2e-vda5050-2026-08-25.mp4` — 8 m 23 s
+(2,514 frames at 5 fps), one uncut take, three panes: the overhead
+camera, the operator's own `fleet/status` screen, and the VDA 5050 wire
+told one readable line per event (`tools/record_e2e.py`, its sentences
+pinned by tests). The scenario was staged to be READ, not to score:
+
+    11:53:45  four connections land ONLINE on the wire pane
+    11:54:15  TASK demo-1 S1 -> S8 typed at the operator console;
+              300 ms later it is ORDER ft-f8047f69 (+pick) on f2's topic
+    11:55:49  f2 arrives at S1: pick WAITING -> RUNNING -> FINISHED in
+              three lines, and leg 2 (+drop, 13 nodes) follows the
+              FINISHED - the item-3 gate, visible on the wire
+    11:55:59  demo-2 and demo-3 go in; three trucks work three tasks
+    11:57:31  the demo feed opens; all four trucks drive, the wire fills
+              with EXTENDs (base counts growing), picks and drops
+    12:00:23  f2 completes demo-1 at S8 - done ticks 1 on camera; a swap
+              deadlock resolves by step-aside in the tail, also on film
+    demo-1 and demo-3 COMPLETED inside the take; 262.1 m scored over
+    501 s across the four trucks
+
+**Making it took three fixes, all committed with it:**
+
+* **DDS itself had died mid-day** and took every "bridge lottery" boot
+  with it: a bare `ros2 topic pub /ping` and an echo on the same VM
+  could not find each other. The mid-session WSL multicast path is the
+  suspect and is not this repo's to fix;
+  `tools/fastdds_loopback.xml` (loopback-unicast discovery,
+  maxInitialPeersRange 64 for a ~40-participant stack) removes
+  multicast from the equation, and `m6.sh` exports it for every child.
+  Defect 1 of the morning's addendum is thereby re-diagnosed: the
+  bridge was never the sick organ - its DDS was.
+* **preflight now probes in parallel with a 25 s window**, because
+  under unicast discovery a FRESH participant needs 10-20 s to walk
+  the mesh - a 6 s serial probe called a 10.3 Hz topic dead and nearly
+  sent this rig to a Windows reboot it did not need.
+* **The first take found the deploy rule the hard way**: the vehicle
+  agents run the DEPLOY image, the image predated item 3, and four
+  fresh doors rejected every pick order with a message the source no
+  longer contains ("unsupported until M6.3") while the fleet re-offered
+  the task in a 2 s loop for as long as anyone watched. `m6.sh deploy`
+  closed it. Two residuals worth writing down: a stack start that says
+  "deploy is STALE" is a warning somebody has to READ, and a task every
+  vehicle rejects for the same non-timing reason cycles for ever -
+  nothing counts rejections per TASK. Neither is fixed tonight.

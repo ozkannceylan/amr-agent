@@ -38,22 +38,35 @@ PY
 )
 cd "$REPO"
 bad=0
-check() {
-    local topic="$1"
-    if timeout 6 ros2 topic hz "$topic" 2>&1 | head -1 | grep -q "average rate"; then
-        echo "  live  $topic"
-    else
-        echo "  DEAD  $topic"
-        bad=1
-    fi
-}
-echo "preflight: the feeds the cell consumes, ROS-side"
+# THE PROBES RUN IN PARALLEL WITH A LONG WINDOW, and the window is not
+# padding: under the loopback-unicast DDS profile (fastdds_loopback.xml)
+# a FRESH participant needs 10-20 s to walk the ~40-node discovery mesh
+# before data flows - measured 2026-08-25, when a 6 s serial probe
+# called a 10.3 Hz topic dead and nearly sent this rig to a Windows
+# reboot it did not need. The cell's own nodes discover once at boot
+# and stay connected; only one-shot probes pay this cost.
+PROBE_S=25
+TMPDIR="$(mktemp -d)"
+trap "rm -rf $TMPDIR" EXIT
+TOPICS=""
 for vid in $VIDS; do
-    check "/$vid/gz/odom"
-    check "/$vid/gz/scan_nav"
-    check "/$vid/gz/safety_scanner_back/measurement"
+    TOPICS="$TOPICS /$vid/gz/odom /$vid/gz/scan_nav /$vid/gz/safety_scanner_back/measurement"
 done
-check "/overhead/image"
+TOPICS="$TOPICS /overhead/image"
+echo "preflight: the feeds the cell consumes, ROS-side (parallel, ${PROBE_S}s window)"
+i=0
+for topic in $TOPICS; do
+    ( timeout "$PROBE_S" ros2 topic hz "$topic" 2>&1 | grep -q "average rate"         && echo "live" > "$TMPDIR/$i" || echo "DEAD" > "$TMPDIR/$i" ) &
+    i=$(( i + 1 ))
+done
+wait
+i=0
+for topic in $TOPICS; do
+    verdict="$(cat "$TMPDIR/$i" 2>/dev/null || echo DEAD)"
+    [ "$verdict" = "live" ] || bad=1
+    echo "  $verdict  $topic"
+    i=$(( i + 1 ))
+done
 if [ "$bad" -ne 0 ]; then
     echo "preflight: FAILED - this boot's bridge is starved. Stop the"
     echo "stack and start it again; do not time, tape or gate anything"
