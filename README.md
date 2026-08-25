@@ -71,21 +71,81 @@ on a virtual PLC.)*
 
 ## The system
 
-Three layers on two machines, each with exactly one writer:
+Since M6 the cell is a **fleet**: four of the M5 vehicle, cloned by
+manifest onto one 48 × 32 m floor with twelve stations, under one
+master control that speaks VDA 5050 and nothing else. Per vehicle the
+M5 anatomy is unchanged — three layers, each with exactly one writer:
 
 | Layer | Runs on | What |
 |---|---|---|
-| **Safety PLC** | Windows — TIA Portal, S7-PLCSIM Advanced (`PLC_2`) | The F-program: three ESTOP1 chains AND-ed into one `Motor` enable, a speed ceiling (`V_Limit`), monitoring cases. [`safety_summary.pdf`](safety_summary.pdf) is its Safety Administration printout. A control-panel window ([`m5_ver2/step5/windows/step5.py`](m5_ver2/step5/windows/)) plays the field wiring: e-stop buttons, reset, encoder fault injection. |
-| **Plant + operator** | WSL2 — Gazebo, ROS 2 Jazzy | The warehouse, the forklift model with its three safety scanners and roof nav lidar, and the operator HMI: joystick, warehouse sketch, station selector, GO/STOP. |
-| **Vehicle software** | WSL2, run **from a frozen deploy copy** | The industrial-PC layer: PLC link, sensor/field/encoder chains, the command gate, the teleop/auto mux and the autopilot — deployed by manifest exactly as a real vehicle would receive an image ([`m5_ver2/step5/deploy`](m5_ver2/step5/)). |
+| **Safety PLC** (×4) | Windows — one writer process per truck | The F-program per vehicle: three ESTOP1 chains AND-ed into one `Motor` enable, a speed ceiling (`V_Limit`), monitoring cases. M6 runs four **virtual F-PLCs** ([`m6/windows/virtual_fplc.py`](m6/windows/)) — the same chain, byte-for-byte the same verdicts, no PLCSIM licence needed; [`safety_summary.pdf`](safety_summary.pdf) is the original F-program's Safety Administration printout. The panel window ([`m6/windows/m6.py`](m6/windows/)) or its scripted stand-in ([`m6/tools/scripted_writer.py`](m6/tools/scripted_writer.py)) plays the field wiring: e-stop, reset, encoder faults. |
+| **Plant + operator** | WSL2 — Gazebo, ROS 2 Jazzy | The warehouse ([`m6/gazebo/warehouse_ver3.sdf`](m6/gazebo/)): a speed-limited ring, a spine, twelve stations in open cross-aisles, a dock annex, an overhead camera — and four forklift models, each with three safety scanners and a roof nav lidar. One commissioning HMI per vehicle. |
+| **Vehicle software** (×4) | WSL2, run **from a frozen deploy copy** | The industrial-PC layer per truck: PLC link, sensor/field/encoder chains, the command gate, the teleop/auto mux, the autopilot — plus the **VDA 5050 agent** ([`m6/ipc/vda_agent.py`](m6/ipc/vda_agent.py)), the truck's only ear to the fleet. Deployed by manifest (`m6/m6.sh deploy`) exactly as a real vehicle would receive an image. |
 
-Every command — joystick or autopilot — passes the same seam:
-`mux → gate → contactor → plant`, and the gate obeys the PLC's `Motor`
-bit and speed ceiling on every message. Silence anywhere fails closed.
+And above them, the fleet layer — **no ROS in it, by invariant**:
 
-**Quickstart: [RUNBOOK.md](RUNBOOK.md).** Depth per component:
-[`m5_ver2/step5/README_step5.md`](m5_ver2/step5/README_step5.md), with
-its measured evidence in [`m5_ver2/step5/PROOF.md`](m5_ver2/step5/PROOF.md).
+| Layer | Runs on | What |
+|---|---|---|
+| **Master control** | WSL2 — paho-mqtt only | A local mosquitto broker, the fleet manager ([`m6/fleet/fleet_manager.py`](m6/fleet/)) — FIFO queue, nearest-idle dispatch, a traffic ledger that reserves the floor edge by edge — and the operator console ([`m6/fleet/fleet_cli.py`](m6/fleet/)): submit transports, watch the retained status screen. |
+
+Every command — joystick, autopilot or fleet order — still passes the
+same seam: `mux → gate → contactor → plant`, and the gate obeys the
+PLC's `Motor` bit and speed ceiling on every message. The fleet layer
+**cannot reach a safety function**: its only path to a truck is
+VDA 5050 over MQTT, so the worst it can say is a route or a cancel —
+and losing it degrades the cell, never endangers it. Silence anywhere
+fails closed.
+
+**Quickstart: [RUNBOOK.md](RUNBOOK.md)** — the fleet cell first, the
+single M5 vehicle after it. Depth per component:
+[`m6/README_m6.md`](m6/README_m6.md) with its measured evidence in
+[`m6/PROOF.md`](m6/PROOF.md); the single vehicle in
+[`m5_ver2/step5/README_step5.md`](m5_ver2/step5/README_step5.md) and
+[`m5_ver2/step5/PROOF.md`](m5_ver2/step5/PROOF.md).
+
+## How VDA 5050 is implemented, roughly
+
+The wire is **VDA 5050 v2.1.0 over MQTT**, pinned to the official
+schemas field by field in
+[`docs/interfaces/vda5050-subset.md`](docs/interfaces/vda5050-subset.md)
+— nothing on the wire is invented, and every deliberate deviation is
+recorded there with its reason. Topics, per truck:
+
+```
+uagv/v2/amragent/<serial>/order            fleet → truck   the work
+uagv/v2/amragent/<serial>/instantActions   fleet → truck   cancelOrder, stateRequest, factsheetRequest
+uagv/v2/amragent/<serial>/state            truck → fleet   position, order progress, actionStates, errors, safety
+uagv/v2/amragent/<serial>/connection       truck → fleet   ONLINE / OFFLINE / CONNECTIONBROKEN (broker last-will, retained)
+uagv/v2/amragent/<serial>/factsheet        truck → fleet   what THIS vehicle actually implements (retained)
+```
+
+* **A transport is two orders.** Leg 1 drives to the pickup carrying a
+  `pick` action on the station node; leg 2 carries the `drop`. The
+  truck runs the fork cycle itself and reports it — `WAITING` from
+  acceptance, `RUNNING` on arrival, `FINISHED` when done — and the
+  fleet releases leg 2 on the report, never on its own clock.
+* **Traffic rides the base/horizon split.** Every leg is planned whole,
+  then held in a reservation ledger ([`m6/fleet/traffic.py`](m6/fleet/traffic.py)):
+  what the floor grants goes out `released` (the base the truck may
+  drive), the rest rides as horizon, and as corridors drain the base is
+  extended with `orderUpdateId + 1`. A truck at the end of its base
+  stops on its own — no pause action, nothing to un-stick. Reservation
+  is process deconfliction, never a collision claim: the scanners and
+  the F-model are what stop a truck.
+* **One door, used by both ends.** Order validation and acceptance live
+  in one pure module ([`m6/ipc/vda_orders.py`](m6/ipc/vda_orders.py)):
+  the vehicle validates what it receives with it, and the fleet
+  validates every order **through the same function before publishing**
+  — the two ends cannot drift apart.
+* **The state is honest.** An arrival is two facts (nav finished its
+  polyline AND odometry counted every released node); a cancel is a
+  closed loop (the actionState stays `RUNNING` until navigation
+  confirms the stop, and goes `FAILED` if it never does); a truck's
+  death is the broker's retained last-will, and the factsheet declares
+  only the actions that actually run — never what would fail.
+
+The wire pane in the video above is exactly this conversation, one
+line per event.
 
 ## Milestones
 
@@ -105,8 +165,8 @@ its measured evidence in [`m5_ver2/step5/PROOF.md`](m5_ver2/step5/PROOF.md).
 
 | Tree | What it is |
 |---|---|
-| [`m5_ver2/`](m5_ver2/) | **The current system.** Built as five frozen steps, each a verified copy of the last; [`step5/`](m5_ver2/step5/) is the one that runs. [`m5_ver2/CLAUDE.md`](m5_ver2/CLAUDE.md) holds the PLC ground truth and working agreements. |
-| [`m6/`](m6/) | **M6 in progress** — VDA 5050 fleet operations on top of step 5: the [plan](m6/PLAN.md), and [step 1](m6/step1/README_step1.md), the VDA 5050 seam at n = 1. |
+| [`m6/`](m6/) | **The current system** — the VDA 5050 fleet cell: [`m6.sh`](m6/m6.sh) brings it up, [`README_m6.md`](m6/README_m6.md) is the deep runbook, [`PROOF.md`](m6/PROOF.md) the measured evidence. `fleet/` (manager, console, traffic ledger, floor), `ipc/` (per-vehicle nodes + the VDA agent and order rules), `windows/` (panel + virtual F-PLC), `tools/` (preflight, recorders, scripted writer), `gazebo/` (the M6.6 floor). |
+| [`m5_ver2/`](m5_ver2/) | **The single vehicle M6 cloned.** Built as five frozen steps, each a verified copy of the last; [`step5/`](m5_ver2/step5/) is the one that runs alone. [`m5_ver2/CLAUDE.md`](m5_ver2/CLAUDE.md) holds the PLC ground truth and working agreements. |
 | [`beckhoff/`](beckhoff/) | **The PLC substrate after the TIA trial** — the safety chain on TwinCAT 3.1 (user mode runtime): [research](beckhoff/RESEARCH.md), [runbook](beckhoff/RUNBOOK.md), the [TE9000 safety-application spec](beckhoff/plc/safety/SAFETY-APP.md), its ST stand-in executor and the pyads writer. Same UDP wire; the WSL side runs unchanged. |
 | [`m5/`](m5/) | **The M5 archive.** [`m5_ver1/`](m5/m5_ver1/) — the first build (Claude-supervised): runbook, videos, HMI tour, the controller post-mortem, and the virtual PLC that runs it again without PLCSIM Advanced. |
 | [`m1/`](m1/) · [`m2/`](m2/) · [`m3/`](m3/) · [`m4/`](m4/) | **The earlier milestone archives.** M1's interface contracts and M2's safety spec (paper gates, still the live documents); M3's fixed-equipment I/O loop and M4's forklift commissioning cell — each with its evidence, photos and recorded runs, and each runnable today against the virtual PLC (see their `RUNBOOK.md`). |
@@ -128,3 +188,11 @@ a frozen copy with its own proof; the last one is the system this README
 describes. The full account, and how to run the first build, is in
 [`m5/m5_ver1/`](m5/m5_ver1/README.md) — including the virtual PLC that
 stands in for the expired PLCSIM Advanced trial.
+
+M6 then cloned that vehicle into a fleet, one measured sub-milestone at
+a time: the two-vehicle foundation, the VDA 5050 agent, the fleet
+manager, traffic reservation, the scale-up to four, a floor rebuilt
+around what the vehicle's own geometry demands, and an autonomy round —
+watchdog, deadlock resolution, a body-on-the-floor protocol. Every gate
+that passed and every one that did not is in
+[`m6/PROOF.md`](m6/PROOF.md), at the same length either way.
