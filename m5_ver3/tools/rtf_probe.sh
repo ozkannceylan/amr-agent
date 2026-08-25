@@ -65,7 +65,10 @@ stack_line() {  # every process in THIS partition that the sweep would own
         tr '\0' '\n' 2>/dev/null < "/proc/$pid/environ" \
             | grep -qxF "GZ_PARTITION=$GZ_PARTITION" || continue
         out="$out${out:+ | }${cmd:0:36}"
-    done < <(pgrep -af 'gz sim|parameter_bridge|image_bridge' 2>/dev/null)
+    # The stack list is _common.sh's M5V3_PATTERNS, the one m5v3.sh
+    # sweeps by. It was a copy here until F1 Task 3, and the copy is
+    # what made this line report a stack that was missing a process.
+    done < <(pgrep -af "$(patterns_re)" 2>/dev/null)
     printf '%s\n' "${out:-<nothing in this partition - is the stack up?>}"
 }
 

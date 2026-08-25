@@ -126,6 +126,37 @@ vehicle:
     y: "10.00"
     z: "0.05"
     yaw: "3.14159"
+  # ------------------------- THE GEOMETRY -------------------------
+  # THE FOUR NUMBERS A NODE NEEDS TO TURN A JOINT INTO A POSE, seeded
+  # from agv/forklift/config.yaml's `model:` block, which is ver2's
+  # mirror of model.sdf and derived every one of them there:
+  #
+  #   steer_link      <pose>  0.55 0 0.24 ...   the steer axis
+  #   rear_wheel_left <pose> -0.50 0.36 0.12    rear axle
+  #   rear_wheel_right<pose> -0.50 -0.36 0.12   rear axle
+  #
+  # so the wheelbase is 0.55 - (-0.50) = 1.05 m, and the rear axle
+  # midpoint sits at x = -0.50 in base_link.
+  #   THAT OFFSET IS NOT COSMETIC. The rear axle midpoint is the only
+  #   point of a tricycle whose velocity is purely longitudinal, so
+  #   base_link necessarily has a LATERAL velocity component d*yawrate
+  #   whenever the vehicle turns, and a wheel odometry that ignores it
+  #   reports a body twist the vehicle does not have.
+  # THEY ARE COPIED AND NOT REFERENCED because agv/ is ver2's tree and
+  # this track may not read it at run time (CONTEXT.md); the source is
+  # named above so the copy can be checked against it by hand.
+  wheelbase_m: "1.05"
+  rear_axle_offset_m: "-0.50"
+  # The drive_wheel collision cylinder's radius, read from model.sdf.
+  # Not a parameter of anything: it is what the truck rolls on. It lived
+  # under wheel_slip: until F1 Task 3, and moved here when the odometry
+  # node needed the same number - a constant spelled in two places is
+  # two opinions about one number.
+  wheel_radius_m: "0.12"
+  # steer_joint's mechanical stop, symmetric. tools/drive_route.py
+  # clamps every commanded steer angle to it, the way
+  # agv/forklift/scripts/forklift_io.py does.
+  steer_limit_rad: "1.31"
 
 # -------------------------------- TOPICS -------------------------------
 # WHAT THE BRIDGE CARRIES, AND NOTHING ELSE YET. A bridged channel with no
@@ -175,7 +206,30 @@ topics:
   # The three driven joints' position and rate, published once per physics
   # iteration. The bench reads the drive joint's ACHIEVED rate off it, so
   # a shortfall in the controller can be told apart from slip at the tyre.
+  #   BRIDGED SINCE F1 TASK 3, because it is where the STEER angle is
+  #   published and nodes/wheel_odometry.py cannot do tricycle kinematics
+  #   without it. It carries three joints at the world's own rate, which
+  #   is the traffic a wheel odometry costs; EVIDENCE_ODOMETRY_V3.md is
+  #   where what it costs the RTF is measured rather than assumed.
   joint_state: "/forklift/gz/joint_state"
+  # THE DRIVE SHAFT'S READING CHANNEL A, and the odometry's only input
+  # from the traction axis. model.sdf runs TWO JointStatePublisher
+  # systems on drive_wheel_joint and publishes read_a and read_b; what
+  # that arrangement is, in m6/ipc/encoder_link.py's own words, is a
+  # SINGLE-CHANNEL TESTED SYSTEM - one shaft, one measured quantity, two
+  # readings of it - and never a two-channel one.
+  #   SO THE ODOMETRY RIDES ONE HEAD. read_b is deliberately NOT bridged
+  #   and NOT consumed here: averaging the two would claim a redundancy
+  #   the shaft does not have, and it would halve a quantisation that is
+  #   common to both readings anyway. The cross-comparison of a against b
+  #   is the PLC's function and lives in m6, not on this track.
+  drive_speed_read_a: "/forklift/gz/drive_speed/read_a"
+  # WHERE THE ESTIMATE COMES OUT. nav_msgs/Odometry, odom -> base_link,
+  # at the rate read_a arrives at. It is an ESTIMATE and not a pose: it
+  # is scored against odom_ground_truth above and must never be compared
+  # with it by an equality - see wheel_odom: below for the two errors it
+  # is built to make.
+  wheel_odom: "/m5v3/wheel_odom"
   # NOT BRIDGED, AND NAMED HERE BECAUSE THE GUI WAITS ON IT. gz-sim's
   # GuiRunner discards world state that arrives before its first snapshot,
   # so a GUI client started before the model's sensors advertise anchors
@@ -250,8 +304,14 @@ sensors:
 # only honest way to a number is to command a cruise and measure what the
 # ground truth did. The tuning table, including the rejected values, is
 # EVIDENCE_MODEL_V3.md section 7; tools/slip_bench.sh is the instrument.
+#
+# WHERE wheel_radius_m WENT. It used to be the first key of this block.
+# F1's odometry needs the same 0.12 m, and a constant spelled in two
+# places is two opinions about one number, so it moved UP to
+# vehicle.wheel_radius_m - beside the wheelbase and the steer limit,
+# where a reader looking for the truck's geometry looks. The derivation
+# above is unchanged and still governs; only the key moved.
 wheel_slip:
-  wheel_radius_m: "0.12"
   wheel_normal_force_n: "4537.4"
   # Longitudinal is the one the odometry feels: it is the traction
   # direction, and it is what makes a wheel revolution mean slightly less
@@ -283,6 +343,394 @@ wheel_slip:
     # standing zero and the vehicle has to actually stop before it is
     # driven back the other way.
     rest_s: "3"
+
+# ----------------------------- WHEEL ODOMETRY ---------------------------
+# WHAT nodes/wheel_odometry.py OBEYS, and every one of its errors is a
+# number in this block rather than a line in that file.
+#
+# THE HONESTY RULE THAT GOVERNS EVERY VALUE BELOW is ver2's, quoted from
+# agv/forklift/config.yaml's odometry: block because it has not improved
+# with age: none of these was chosen to make the drift come out at a
+# convenient size. Each is a stated property of the modelled hardware, the
+# derivation is written beside it, and the drift that results is reported
+# whatever it turns out to be.
+#
+# WHAT IS *NOT* HERE, AND THAT IS THE POINT: WHEEL SLIP. The physics
+# engine already produces it - that is what wheel_slip: above exists for -
+# and adding a slip term here would be inventing an error the simulation
+# already has.
+wheel_odom:
+  # ---- the reading head ----
+  #
+  # ONE COUNT IS 2 pi / 1024 = 6.13592e-3 rad OF SHAFT, which at the
+  # 0.12 m wheel is 0.7363 mm of tread. That is the quantum every
+  # displacement this node reports is a whole multiple of.
+  #   WHY 1024 AND NOT ver2's 4096. agv/forklift/config.yaml records this
+  #   same shaft's encoder as 1024 pulses read in QUADRATURE, 4096
+  #   counts/rev, 0.184 mm of tread per count. This track models the LINE
+  #   grid instead of the quadrature-decoded one, and that is a choice
+  #   rather than a discovery: F1 exists to give F2's EKF something to
+  #   correct, and an error has to be VISIBLE in the run that measures it
+  #   before it is worth filtering. A 0.184 mm quantum on a 20 m aisle
+  #   run is not. The cost, stated: this encoder is four times coarser
+  #   than the one ver2's vehicle carries, and any figure compared across
+  #   the two tracks has to say which grid it was taken on.
+  counts_per_rev: "1024"
+
+  # ---- the radius the vehicle BELIEVES ----
+  #
+  # A scale on vehicle.wheel_radius_m, and it is deliberately not 1.0.
+  # A loaded polyurethane drive tyre's effective rolling radius is
+  # SMALLER than its free radius, so a truck calibrated on a free or new
+  # tyre over-reports distance for ever: 0.12 * 1.015 = 0.1218 m.
+  #   THE SIGN IS THE PESSIMISTIC ONE ON PURPOSE, and this is ver2's
+  #   argument (odometry.rolling_radius_m) applied to a plant that now
+  #   really does slip. The wheel_slip: system above makes the wheel
+  #   OVER-TURN relative to the ground, so an error that over-reports
+  #   distance COMPOUNDS with slip instead of cancelling it. The other
+  #   sign would have flattered every figure by 1.5 % and there would
+  #   have been no way to see it in the output.
+  #   1.5 % rather than ver2's 0.5 % for the reason 1024 is not 4096:
+  #   over the 20 m aisle profile it is 0.30 m of divergence, three
+  #   orders of magnitude above the ground truth's own resolution and
+  #   readable off a plot rather than out of a residual.
+  wheel_radius_scale: "1.015"
+
+  # ---- the steer zero the vehicle BELIEVES ----
+  #
+  # SENSOR SIDE, ADDED TO THE READING, never to a command. A steer
+  # encoder's zero is set against mechanical straight-ahead by a
+  # calibration, and no calibration is exact; what is modelled is that
+  # calibration's residual. The wheel goes where it is told and the
+  # estimator is wrong about where that is.
+  #   WHAT IT COSTS, WRITTEN OUT. Driving dead straight, the estimator
+  #   believes it is turning at v * tan(0.005) / L = 3.33 mrad/s at
+  #   0.7 m/s: 11.5 deg of invented heading per 60 s of straight running.
+  #   That is the term that dominates a tricycle's heading error, and it
+  #   is the one an EKF with a gyro in it exists to observe.
+  # The sign is positive and arbitrary - a real vehicle's is whatever its
+  # last calibration left - and nothing downstream may assume it.
+  steer_bias_rad: "0.005"
+
+  # ---- the error NOT in this block, and it is the biggest one ----
+  #
+  # LATERAL TYRE SCRUB, WHICH DEAD RECKONING CANNOT SEE AT ALL. The
+  # kinematics this node integrates assumes the tyres do not slide
+  # sideways. wheel_slip: above gives them a lateral compliance on
+  # purpose, so at a hard steer the contact patch scrubs and the vehicle
+  # takes a FRACTION of the yaw its steer angle promises - measured on
+  # this rig at 0.401 of it at 0.785 rad and 0.634 at 1.25 rad
+  # (drive_route: below carries the table). The node has no term for
+  # this and must not be given one: it is not modelling an instrument
+  # error, it is the vehicle failing to go where its wheels point, and
+  # nothing readable at the shaft or the steer axis contains it.
+  #   MEASURED END TO END on the square profile, 2026-08-25: the plant
+  #   turned 5.8418 rad and this node reported 10.1408 - it over-rotates
+  #   by 1.74x through four hard corners. On a STRAIGHT the same run's
+  #   heading error is 0.058 rad. That gap is the single strongest
+  #   argument for F2 existing: a gyro observes the yaw the wheels cannot,
+  #   and this is the error it is there to correct.
+
+  # ---- what the node reads and how it is framed ----
+  #
+  # The joint names as they appear in the bridged JointState. The drive
+  # name is looked for on topics.drive_speed_read_a and the steer name on
+  # topics.joint_state; a name that is not in the message is a refusal
+  # with the message's own name list in it, never a silent zero.
+  drive_joint_name: "drive_wheel_joint"
+  steer_joint_name: "steer_joint"
+  # header.frame_id and child_frame_id of the published Odometry. THE
+  # NODE BROADCASTS NO TRANSFORM on this edge and must not: odom ->
+  # base_link has exactly one owner and in F2 that owner is the EKF
+  # (ver2 invariant 10). The cheapest way to guarantee a second publisher
+  # cannot appear is for the node to contain no broadcaster at all, and
+  # it does not.
+  odom_frame: "odom"
+  base_frame: "base_link"
+  # Subscription and publication queue depth. The plant publishes both
+  # inputs once per physics step, so this is about four milliseconds of
+  # slack, which is what a python callback needs and no more: a deep
+  # queue on a 500 Hz channel does not prevent loss, it delays it and
+  # then hands the estimator stale stamps.
+  qos_depth: "10"
+  # A STEER READING OLDER THAN THIS IS NO STEER READING. Both inputs
+  # arrive once per physics step, so 0.3 s of silence is a dead
+  # publisher and not a late one (m6/ipc/encoder_link.py's ENC_STALE_S,
+  # same channel, same argument). The node then SKIPS the sample rather
+  # than integrating against a stale angle - and skipping costs nothing
+  # in distance, because the count grid is ABSOLUTE and the next accepted
+  # sample differences against the last accepted one.
+  steer_stale_s: "0.3"
+  # How often the node writes a line of its own state to its log. It is a
+  # log cadence and changes nothing the node computes; it is here rather
+  # than inline because the file's header says nothing behavioural lives
+  # inline and a cadence is close enough to the line to be argued about.
+  log_every_s: "10"
+
+  # ---- the covariances this node publishes, and their derivation ----
+  #
+  # STATIC DIAGONAL, THIS PHASE, AND THE COMMENT IS THE WHOLE OF THE
+  # CLAIM. A covariance that moved with the steer angle and the speed
+  # would be a better model; it is F2's to build if F2's EKF turns out to
+  # need one. What is published here is a constant derived at ONE named
+  # operating point, and naming the point is what makes it honest.
+  #
+  # The point: v = 0.7 m/s (wheel_slip.bench.cruise_mps, the speed this
+  # vehicle spends its life at), delta = 0, dt = 0.002 s,
+  # q = 6.13592e-3 rad, r = 0.1218 m, L = 1.05 m, d = 0.50 m.
+  #
+  #   dt IS THE WORLD'S PHYSICS STEP AND NOT A NODE RATE. The plant
+  #   publishes this channel once per physics iteration and the node runs
+  #   on every one of them, so in SIM time the interval is exactly
+  #   warehouse_ver3.sdf's max_step_size, 0.002 s. The ~493 Hz quoted
+  #   elsewhere is that same interval measured on a wall clock.
+  covariance:
+    # vx. Two terms.
+    #   quantisation: the difference of two independent uniform
+    #     quantisation errors has sigma q/sqrt(6) = 2.50498e-3 rad, so
+    #     sigma_s = r * 2.50498e-3 = 3.05107e-4 m and
+    #     sigma_v = 3.05107e-4 / 0.002 = 0.1525537 m/s
+    #   radius scale: 1.5 % of 0.7 m/s = 0.0105 m/s
+    #   sigma_vx = sqrt(0.1525537^2 + 0.0105^2) = 0.1529146 m/s
+    #
+    # READ THAT FIRST TERM AGAIN: AT THIS RATE THE REPORTED VELOCITY IS
+    # 22 % NOISE. It is not a defect in the arithmetic, it is what
+    # differencing a 0.74 mm grid over 2 ms is - at 0.7 m/s the truck
+    # covers 1.9 counts per sample, so the count either lands or it does
+    # not. ver2 ran its odometry at 50 Hz for exactly this reason
+    # ("each cycle differences a real displacement rather than quantiser
+    # dither"), where the same term falls to 0.01526 m/s, 2.2 %.
+    #   THIS NODE STILL RUNS ON EVERY SAMPLE, because the POSE does not
+    #   care - the grid is absolute, so quantisation does not accumulate
+    #   in position - and because a quantiser that skips samples is a
+    #   different device. What it costs is the TWIST, and the number
+    #   below is the node saying so out loud to whatever fuses it. If
+    #   F2's EKF cannot live with it, the fix is a decimated twist and
+    #   the arithmetic for it is in this comment.
+    vx: "2.3383e-2"
+    # vyaw. yawrate = v * tan(delta) / L, so d(yawrate)/d(delta) at
+    #   delta = 0 is v / L = 0.666667 1/s. The steer reading is NOT
+    #   quantised on this track - the bias is the whole of its error -
+    #   so there is one term and it is that bias carried through:
+    #   0.005 * 0.666667 = 3.33333e-3 rad/s.
+    #
+    #   A BIAS IN A COVARIANCE IS A PRAGMATISM AND IS LABELLED ONE. It is
+    #   a systematic error, not a noise, and no diagonal can represent it
+    #   honestly; what it buys is an EKF that does not believe this
+    #   heading more than it should. ver2 did the same with its steer
+    #   zero offset.
+    #
+    #   Compare the IMU: model.sdf declares the gyro at 1.745e-3 rad/s of
+    #   white noise, so the two sources are within a factor of two of
+    #   each other on the SAME quantity and F2's filter will genuinely
+    #   blend them rather than one drowning the other. Neither number was
+    #   moved to arrange that.
+    vyaw: "1.1111e-5"
+    # vy is not measured. It is d * yawrate exactly, a kinematic
+    # consequence of base_link standing 0.50 m forward of the rear axle,
+    # so its variance is d^2 times vyaw's: 0.25 * 1.1111e-5.
+    vy: "2.7778e-6"
+    # EVERY AXIS THIS ESTIMATE DOES NOT MEASURE, and the whole pose.
+    #   The pose of a dead-reckoned estimate has UNBOUNDED error and no
+    #   honest fixed number exists for it, so a large constant is
+    #   published and F2's EKF is to fuse the TWIST and never the pose.
+    #   The value exists so the message is well formed, and so that
+    #   anything which ignores that warning is told the pose is worth
+    #   nothing. z, roll and pitch are the same story: this vehicle's
+    #   wheels say nothing at all about them.
+    unused: "1000.0"
+
+# ------------------------------ DRIVE ROUTE -----------------------------
+# tools/drive_route.py's profiles. It is the EVIDENCE DRIVER: it puts the
+# truck through a known, repeatable manoeuvre so that the odometry and the
+# ground truth can be read against each other over it. It closes no loop,
+# reads no pose and corrects nothing - open loop is the honest shape for a
+# bench, because a controller in the loop would make every divergence a
+# statement about the controller as well.
+#
+# A SEGMENT IS (hold_s, tread_mps, steer_rad) AND THE CLOCK IS THE
+# PLANT'S. Each segment publishes its two standing orders - the steer
+# terminal first, then the traction terminal - and holds them for hold_s
+# of SIM time, read off the bridged clock. Wall time is deliberately not
+# used: the same profile then covers the same ground whatever the
+# real-time factor was on the day, which is the difference between a
+# repeatable manoeuvre and one that depends on the machine's load.
+#
+# THE SIGN IS IN THE TABLE, ONCE. Forward - forks first, the travel
+# direction - is a NEGATIVE tread speed, because model yaw 0 points the
+# forks at world -x (m6/ipc/follower.py's header). Every negative number
+# in these tables is the truck going forwards. Astern is positive.
+#
+# WHERE THESE FIT ON THE FLOOR. The truck spawns at (-17.00, 10.00) yaw
+# 3.14159, which is the NORTH RING LEG facing world +x, and the free band
+# there is y in [6.00, 14.00] by x in [-24.00, +24.00]: every rack in
+# warehouse_ver3.sdf ends at y = +6.00 (RackNW1 is a 0.5 x 3.5 m box at
+# (-15.750, 4.250), so it spans y 2.50 to 6.00) and the north wall's
+# inner face is y = +14.00. So there is 48 m of room along the leg and
+# exactly 8 m across it, and the 8 m is what sizes the square below.
+drive_route:
+  # HOW LONG THE DRIVER WILL WAIT FOR A CLOCK MESSAGE before it refuses.
+  # `gz topic -e` waits for its next message FOR EVER, so a stack that is
+  # not up would hang the driver in silence rather than refuse it -
+  # noise_probe.capture_timeout_s exists for the same reason. The clock
+  # publishes at the world rate, so anything past a couple of seconds is
+  # already an answer; 20 s is an order of magnitude of headroom over a
+  # loaded rig and still a bound.
+  clock_timeout_s: "20"
+  profiles:
+    # STRAIGHT: accelerate to cruise, hold, stop. About 11.9 m of travel
+    # in 23.5 s of sim time, from x = -17.0 to about x = -5.1 with the
+    # fork tips at -3.2 - the whole of it inside the ring band.
+    #   THE RAMP IS IN THE TABLE BECAUSE THE PLANT HAS NONE. model.sdf's
+    #   traction terminal is a raw velocity command with no ramp, so a
+    #   single step to cruise would put the largest slip of the run into
+    #   its first tenth of a second. Four quarters of cruise at 0.5 s
+    #   each is the ramp, and it is the same shape on the way down.
+    straight:
+      - {hold_s: "2.0", tread_mps: "0.000", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.175", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.350", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.525", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.700", steer_rad: "0.000"}
+      - {hold_s: "15.0", tread_mps: "-0.700", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.525", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.350", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.175", steer_rad: "0.000"}
+      - {hold_s: "3.0", tread_mps: "0.000", steer_rad: "0.000"}
+
+    # SQUARE: four straights joined by four steered corners, back towards
+    # where it started. An open-loop square's CLOSURE ERROR is the classic
+    # odometry reading, and it is why this profile exists: the truck comes
+    # back to its start and what the estimate says about that is the
+    # measurement.
+    #
+    # THE CORNER IS MEASURED AND NOT DERIVED, AND THE FIRST VERSION OF
+    # THIS TABLE IS WHY. It was written from the kinematics - delta =
+    # pi/4, R = L/tan(delta) = 1.05 m, corner = (pi/2)*L/(v*sin delta) =
+    # 7.775 s - and driven on this rig on 2026-08-25. The plant turned
+    # 2.912 rad in the four corners against the 6.283 asked for, and the
+    # truck finished 4.45 m from its start instead of on it. THE TABLE
+    # WAS NOT WRONG ARITHMETIC; IT WAS THE WRONG MODEL. A tricycle's
+    # kinematics assumes the tyres do not slide sideways, and this
+    # model's whole point is that they do (wheel_slip: above, lateral
+    # compliance 7.0). At a hard steer the contact patch scrubs, and the
+    # yaw the vehicle actually takes is a fraction of the yaw the
+    # geometry promises.
+    #
+    #   MEASURED ON THIS RIG, one steady turn per row, ground truth over
+    #   a 10 s window after the steer axis had slewed and the turn had
+    #   established (instrument: a throwaway gz-side probe commanding the
+    #   two terminals and integrating /forklift/gz/odom's yaw; the same
+    #   two numbers can be read back off any drive_route run):
+    #
+    #     steer      kinematic      MEASURED      effective   fraction
+    #     [rad]      [rad/s]        [rad/s]       R [m]       delivered
+    #     -0.785398  0.20203        0.08104       2.632       0.401
+    #     -1.250000  0.27114        0.17182       0.711       0.634
+    #
+    #   So the harder steer is not only tighter, it is also LESS lossy:
+    #   0.63 of its geometry against 0.40. That is the direction a scrub
+    #   term goes and it is why the table below uses -1.25 rad, 0.06 rad
+    #   inside the 1.31 mechanical stop.
+    #
+    # THE GEOMETRY THAT FOLLOWS FROM THAT MEASUREMENT, checked against
+    # the floor rather than chosen:
+    #   A 90 deg corner is (pi/2) / 0.17182 = 9.142 s, and the rear axle
+    #   traces it at R = 0.711 m. With 1.00 m straights the rear-axle
+    #   path is a 2.42 m rounded square (2R + A) and the run is 53.9 s.
+    #   THE BINDING CONSTRAINT IS THE TRUCK AND NOT THE SQUARE. The
+    #   corridor is 8.00 m across and the fork tips reach 1.375 m ahead
+    #   of the rear axle, so the worst point of the whole path is the
+    #   middle of the second corner, where the tips reach y = 13.19
+    #   against a wall at 14.00 - 0.81 m of margin. On the northbound
+    #   straight they reach 13.09. That is what sizes A at 1.00 m.
+    #   A 90 deg SQUARE AT pi/4 WOULD NOT FIT ANYWHERE ON THIS FLOOR:
+    #   2R = 5.26 m plus the truck's own 3.8 m envelope needs 9.06 m of
+    #   width and the widest clear road in warehouse_ver3 is 8.00 m.
+    #   IT TURNS LEFT, TOWARDS THE WALL. Left and right are symmetric on
+    #   this leg (4.00 m either way), but south of the square's own x
+    #   range stands RackNW1 at x in [-16.00, -15.50] reaching y = 6.00,
+    #   and a wall is a flatter thing to have 0.8 m away than a rack leg.
+    #   A left turn while driving FORWARD is a NEGATIVE steer angle -
+    #   positive is the driver's right (m6/tests/test_follower.py's
+    #   header) - which is why every corner below is signed as it is.
+    #   THE WHOLE SQUARE IS DRIVEN AT 0.3 m/s, the fleet's own corner
+    #   speed (m6/ipc/follower.py CORNER_MPS). Cruise is what straight:
+    #   and aisle: are for.
+    #
+    # AND IT STILL DOES NOT CLOSE EXACTLY, for a reason the table cannot
+    # remove: the steer axis has to SLEW into each corner from dead
+    # straight, and the measurement above was taken with it already
+    # there, so every corner loses the yaw of its own first fraction of a
+    # second. MEASURED OVER THE WHOLE PROFILE on this rig 2026-08-25,
+    # ground truth from spawn: the truck turned 5.8418 rad of the 6.2832
+    # asked (93.0 %) and came back to within 0.6831 m of its start.
+    #   THAT RESIDUAL IS NOT AN ERROR TO TUNE OUT. It is the plant, it is
+    #   open loop, and the ground truth is what says where the truck
+    #   went. Driving the table until the truck closed perfectly would
+    #   only mean the table had absorbed one day's slip, and the next run
+    #   at a different load or a different speed would open it again.
+    square:
+      - {hold_s: "2.0", tread_mps: "0.000", steer_rad: "0.000"}
+      - {hold_s: "3.333", tread_mps: "-0.300", steer_rad: "0.000"}
+      - {hold_s: "9.142", tread_mps: "-0.300", steer_rad: "-1.250000"}
+      - {hold_s: "3.333", tread_mps: "-0.300", steer_rad: "0.000"}
+      - {hold_s: "9.142", tread_mps: "-0.300", steer_rad: "-1.250000"}
+      - {hold_s: "3.333", tread_mps: "-0.300", steer_rad: "0.000"}
+      - {hold_s: "9.142", tread_mps: "-0.300", steer_rad: "-1.250000"}
+      - {hold_s: "3.333", tread_mps: "-0.300", steer_rad: "0.000"}
+      - {hold_s: "9.142", tread_mps: "-0.300", steer_rad: "-1.250000"}
+      - {hold_s: "2.0", tread_mps: "0.000", steer_rad: "0.000"}
+
+    # AISLE: down the free aisle in front of the spawn and back, dead
+    # straight both ways, 20.3 m each leg in about 72 s of sim time.
+    #
+    # WHICH AISLE, SAID PLAINLY. It is the NORTH RING LEG, y = +10.00 -
+    # the 8.00 m cruise corridor the truck already stands in - and NOT
+    # the pick aisle at y = 0.00, which this vehicle would have to leave
+    # the ring and thread the spine to reach. The ring leg is what "the
+    # free aisle in front of the spawn" means on this floor.
+    #
+    # THE WAYPOINTS. Forward from base_link x = -17.0 to a NOMINAL
+    # x = +3.3 (fork tips +5.2), then astern back towards x = -17.0. The
+    # east ring leg's centreline is x = +20.00 and the hall's inner face
+    # is +24.00, so the turn point stands 17 m clear of anything.
+    #   MEASURED ON THIS RIG 2026-08-25, ground truth from spawn: the
+    #   round trip ends at x = -15.330, y = 10.000 - 1.670 m SHORT of
+    #   where it began, and dead straight. The shortfall is not the
+    #   profile drifting off line, it is slip, and it does not cancel
+    #   between the two legs the way a symmetric table might suggest it
+    #   would. It is left in rather than trimmed out: what the truck
+    #   covers is the ground truth's to report, and a table tuned until
+    #   it closed would only have absorbed one day's tyre.
+    #
+    # AND IT COMES BACK ASTERN RATHER THAN TURNING ROUND, for the reason
+    # tools/slip_bench.sh gives for its own two segments: a profile that
+    # only ever drives one way walks into the racking, a three-point turn
+    # in an 8 m corridor is a manoeuvre this bench is not measuring, and
+    # reversing over ground the truck has just cleared costs nothing and
+    # catches a sign error that one leg would hide. The counterweight end
+    # leads on the way back; the return leg is retracing swept floor.
+    aisle:
+      - {hold_s: "2.0", tread_mps: "0.000", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.175", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.350", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.525", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.700", steer_rad: "0.000"}
+      - {hold_s: "27.0", tread_mps: "-0.700", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.525", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.350", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "-0.175", steer_rad: "0.000"}
+      - {hold_s: "3.0", tread_mps: "0.000", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "0.175", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "0.350", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "0.525", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "0.700", steer_rad: "0.000"}
+      - {hold_s: "27.0", tread_mps: "0.700", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "0.525", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "0.350", steer_rad: "0.000"}
+      - {hold_s: "0.5", tread_mps: "0.175", steer_rad: "0.000"}
+      - {hold_s: "3.0", tread_mps: "0.000", steer_rad: "0.000"}
 
 # -------------------------------- PATHS --------------------------------
 # Relative to the repository root. The pidfile is what stop reads and the

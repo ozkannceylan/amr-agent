@@ -56,6 +56,37 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
     walk(yaml.safe_load(handle), [])' "$CONFIG" 2>/dev/null
 }
 
+# THE STACK AS COMMAND-LINE PATTERNS, and it lives here because TWO
+# scripts ask the question. m5v3.sh sweeps by this list and rtf_probe.sh
+# prints the stack a figure was taken under by it; they carried a copy
+# each until F1 Task 3 added the odometry node to one of them and the
+# probe went on reporting a stack with no estimator in it. That is what a
+# duplicated mechanism costs when the duplicate is a LIST: nothing breaks,
+# it just quietly says something that is not true.
+#   A PATTERN ONLY NOMINATES - the caller's ours() decides - and `gz sim`
+#   is FIRST because that is where the motion lives (m5v3.sh's stop()).
+#   `gz sim` NOMINATES THE CLIENT AND THE SERVER ALIKE: both command
+#   lines begin with those two words, and the gated wrapper that becomes
+#   the client carries them in its -c string until it execs.
+#   image_bridge IS A SEPARATE PATTERN and not covered by the one before
+#   it: ros_gz's depth-image bridge is its own executable with its own
+#   name, and `parameter_bridge` does not match it.
+#   wheel_odometry.py IS ITS OWN PATTERN because it is a plain python3
+#   process: its command line begins with the interpreter, so nothing
+#   else here nominates it. The pattern is the SCRIPT NAME rather than
+#   "python3", which would nominate every python on the machine and lean
+#   the whole safety of the sweep on ours() alone.
+# MAINTENANCE OBLIGATION: a process added to m5v3.sh's start() is added
+# HERE, or stop orphans it and still prints "down."
+M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py")
+
+# The same list as one pgrep alternation, for the callers that want a
+# single pattern rather than a loop.
+patterns_re() {
+    local IFS='|'
+    printf '%s\n' "${M5V3_PATTERNS[*]}"
+}
+
 # THE KEYS EVERY m5-ver3 SCRIPT NEEDS, checked and exported here so no two
 # of them can disagree about which graph this is or where ROS lives. A
 # caller adds its own required keys as arguments.

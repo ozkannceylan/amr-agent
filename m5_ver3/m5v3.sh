@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # m5v3.sh - bring the m5-ver3 plant up and down: ONE world, ONE truck,
-# ONE bridge, and a GPU the run has proved it is using.
+# ONE bridge, ONE estimator, and a GPU the run has proved it is using.
 #   start [--headless] | stop | status
 #
 # WHAT THIS TRACK IS. m5-ver3 is the sensor-fusion rebuild of the SHOWCASE
@@ -9,10 +9,12 @@
 # back down to a single truck and shares its floor. See CONTEXT.md.
 #
 # WHAT IT IS NOT. There is no broker, no fleet manager, no HMI and no PLC
-# link here, and their absence is the phase rather than an omission: Task 1
-# is plant plus sensors, and a process started for the shape of the thing
-# would be a claim this run does not make. Nothing here touches PLCSIM
-# Advanced or anything on the Windows side.
+# link here, and their absence is the phase rather than an omission: what
+# is up is the plant, its sensors and the one node that consumes them, and
+# a process started for the shape of the thing would be a claim this run
+# does not make. There is no EKF here either: this node estimates, and
+# fusion is F2's. Nothing here touches PLCSIM Advanced or anything on the
+# Windows side.
 #
 # IT ORCHESTRATES PROCESSES AND HOLDS NO LOGIC OF ITS OWN. Every constant
 # it obeys is in config.yaml and every child it starts writes its own log
@@ -56,6 +58,7 @@ REQUIRED_KEYS=(
     vehicle.spawn.x vehicle.spawn.y vehicle.spawn.z vehicle.spawn.yaw
     topics.clock topics.odom_ground_truth topics.scan_nav topics.gui_gate
     topics.imu topics.cam_depth topics.cam_info topics.points3d
+    topics.joint_state topics.drive_speed_read_a topics.wheel_odom
     paths.log_dir paths.pidfile
     timing.world_load_s timing.settle_s timing.startup_check_s
     timing.stop_grace_s timing.gui_gate_poll_s timing.gui_gate_settle_s
@@ -71,19 +74,13 @@ configure() {
     MODEL="$REPO/$CFG_VEHICLE_MODEL"
 }
 
-# The stack as command-line patterns, and the list is short because the
-# stack is: the server, the GUI client and the two bridges. A pattern only
-# NOMINATES - ours() decides - and `gz sim` is FIRST because that is where
-# the motion lives (see stop()).
-#   `gz sim` NOMINATES THE CLIENT AND THE SERVER ALIKE: both command lines
-#   begin with those two words, and the gated wrapper that becomes the
-#   client carries them in its -c string until it execs.
-#   image_bridge IS A SEPARATE PATTERN and not covered by the one above
-#   it: ros_gz's depth-image bridge is its own executable with its own
-#   name, and `parameter_bridge` does not match it.
-#   MAINTENANCE OBLIGATION: a process added to start() must be added here,
-#   or stop orphans it and still prints "down."
-PATTERNS=("gz sim" "parameter_bridge" "image_bridge")
+# THE STACK AS COMMAND-LINE PATTERNS, AND THE LIST IS _common.sh's.
+# rtf_probe.sh asks the same question - which processes on this machine
+# belong to this stack - and it used to ask it with a copy of its own,
+# which is how it came to print a stack with no estimator in it after
+# F1 Task 3 added one here. The list, the ordering and the maintenance
+# obligation are all in that file now; this is the only line here.
+PATTERNS=("${M5V3_PATTERNS[@]}")
 
 # WHY OWNERSHIP IS DECIDED BY THE ENVIRONMENT AND NOT BY THE COMMAND LINE.
 # This stack's command lines are not distinctive: the world server's names
@@ -188,18 +185,37 @@ start() {
     # spends its first seconds advertising nothing.
     #   WHAT IS CARRIED AND WHAT IS NOT. The clock, the ground-truth
     #   odometry (a measurement reference, never an input), the nav lidar,
-    #   the IMU and the pallet camera's depth image plus its camera_info.
+    #   the IMU, the pallet camera's depth image plus its camera_info, and
+    #   the drive shaft's reading channel A plus the joint state.
     #   NOT the 3D lidar and NOT either point cloud: their ROS consumers
     #   arrive in F2, and gz renders a sensor only while something
     #   subscribes to it, so bridging early would cost the RTF every
     #   figure on this track is measured against and buy nothing
     #   (docs/reports/m5v3-03 5, ros_gz issue #368).
+    #   THE TWO JOINT CHANNELS ARE F1 TASK 3's ADDITION, and they are
+    #   the only ones on this bridge that carry the world's own rate:
+    #   gz's JointStatePublisher has no update_rate and publishes once
+    #   per physics iteration (model.sdf says an <update_rate> child was
+    #   tried and measured to change nothing), so each is about 493 Hz on
+    #   this 500 Hz world. They are carried because nodes/
+    #   wheel_odometry.py consumes both - the drive shaft's reading
+    #   channel A for the count grid, the joint state for the STEER angle
+    #   - and a tricycle's kinematics needs both or neither.
+    #     gz.msgs.Model IS THE JOINT-STATE TYPE ON THE GZ SIDE and
+    #     sensor_msgs/msg/JointState is what ros_gz maps it to;
+    #     agv/forklift/launch/vehicle.launch.py spells the same pair.
+    #     READ_B IS NOT CARRIED. It is the same shaft read a second time,
+    #     the cross-comparison of the two is the PLC's function and lives
+    #     in m6, and this track has no consumer for it - so bridging it
+    #     would be a claim this run does not make.
     spawn bridge ros2 run ros_gz_bridge parameter_bridge \
         "$CFG_TOPICS_CLOCK@rosgraph_msgs/msg/Clock[gz.msgs.Clock" \
         "$CFG_TOPICS_ODOM_GROUND_TRUTH@nav_msgs/msg/Odometry[gz.msgs.Odometry" \
         "$CFG_TOPICS_SCAN_NAV@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan" \
         "$CFG_TOPICS_IMU@sensor_msgs/msg/Imu[gz.msgs.IMU" \
-        "$CFG_TOPICS_CAM_INFO@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo"
+        "$CFG_TOPICS_CAM_INFO@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo" \
+        "$CFG_TOPICS_JOINT_STATE@sensor_msgs/msg/JointState[gz.msgs.Model" \
+        "$CFG_TOPICS_DRIVE_SPEED_READ_A@sensor_msgs/msg/JointState[gz.msgs.Model"
 
     # THE DEPTH IMAGE GOES THROUGH A SECOND, DIFFERENT BRIDGE, and that is
     # ros_gz's design rather than this script's choice: parameter_bridge
@@ -211,6 +227,25 @@ start() {
     #   second image would be a second argument, and the colour image has
     #   no consumer on this track.
     spawn imgbridge ros2 run ros_gz_image image_bridge "$CFG_TOPICS_CAM_DEPTH"
+
+    # THE WHEEL ODOMETRY, AFTER THE BRIDGE THAT FEEDS IT. It is the first
+    # process on this track that is neither the plant nor a pipe to it:
+    # it CONSUMES the bridged joint channels and publishes an estimate of
+    # the vehicle's own motion on $CFG_TOPICS_WHEEL_ODOM.
+    #   IT IS A STACK CHILD RATHER THAN A BENCH, and that is the whole
+    #   difference between it and tools/slip_bench.sh: a bench is a thing
+    #   an operator runs at a plant, and an estimator is part of the
+    #   vehicle. It goes up with the truck, it is named by `status`, and
+    #   `stop` takes it down with everything else.
+    #   IT READS NO GROUND TRUTH. $CFG_TOPICS_ODOM_GROUND_TRUTH is on the
+    #   bridge above as a measurement REFERENCE and this node has never
+    #   heard of it - an estimator that reads ground truth is not an
+    #   estimator. The node's own header carries the rule.
+    #   python3 AND NOT `ros2 run`: this track is deliberately not a
+    #   colcon package (CONTEXT.md), so its nodes are plain files. ROS is
+    #   already sourced in this shell by source_ros() above, so the child
+    #   inherits an environment that can import rclpy.
+    spawn odom python3 "$M5V3/nodes/wheel_odometry.py"
 
     # THE GUI CLIENT LAST AND GATED, or the lidar fans anchor at the world
     # origin for the life of the window. Measured in m6 on gz-sim 8.11.0:
@@ -254,14 +289,19 @@ start() {
     fi
 
     echo ""
-    echo "up. one truck, one world, two bridges."
+    echo "up. one truck, one world, two bridges, one estimator."
     echo "bridged: $CFG_TOPICS_CLOCK, $CFG_TOPICS_ODOM_GROUND_TRUTH" \
          "(measurement reference ONLY), $CFG_TOPICS_SCAN_NAV," \
-         "$CFG_TOPICS_IMU, $CFG_TOPICS_CAM_DEPTH, $CFG_TOPICS_CAM_INFO"
+         "$CFG_TOPICS_IMU, $CFG_TOPICS_CAM_DEPTH, $CFG_TOPICS_CAM_INFO," \
+         "$CFG_TOPICS_JOINT_STATE, $CFG_TOPICS_DRIVE_SPEED_READ_A"
     echo "gz only: $CFG_TOPICS_POINTS3D and both point clouds - no ROS"
     echo "         consumer until F2, and gz renders what is subscribed."
+    echo "odom:    $CFG_TOPICS_WHEEL_ODOM - an ESTIMATE, quantised and"
+    echo "         1.5 % long by design. It will NOT match the ground"
+    echo "         truth and a run where it does is a bug."
     echo "check:  $0 status"
     echo "rtf:    bash $M5V3/tools/rtf_probe.sh"
+    echo "drive:  python3 $M5V3/tools/drive_route.py straight|square|aisle"
     echo "logs:   $LOGDIR"
 }
 
@@ -458,9 +498,11 @@ USAGE="usage: $0 start [--headless] | stop | status
   start       GPU preflight, then warehouse_ver3 + one forklift_ver3 in a
               Gazebo window, plus TWO ros_gz bridges: the parameter bridge
               for the clock, the ground-truth odometry (a measurement
-              reference, never an input), the nav lidar, the IMU and the
-              pallet camera's camera_info, and the image bridge for that
-              camera's depth image. Four processes.
+              reference, never an input), the nav lidar, the IMU, the
+              pallet camera's camera_info and the two joint channels the
+              wheel odometry consumes, and the image bridge for that
+              camera's depth image. Then the wheel odometry node itself,
+              publishing /m5v3/wheel_odom. Five processes.
               The 3D lidar and both point clouds stay on the gz side.
               It refuses outright if the renderer is not the NVIDIA GPU.
   --headless  no Gazebo window. Use it for anything being MEASURED.

@@ -64,13 +64,13 @@ TOOL=slip_bench
 # MAINTENANCE OBLIGATION: a key read below is a key listed here.
 load_config \
     topics.odom_ground_truth topics.traction_cmd topics.joint_state \
-    wheel_slip.wheel_radius_m \
+    vehicle.wheel_radius_m \
     wheel_slip.bench.cruise_mps wheel_slip.bench.settle_s \
     wheel_slip.bench.sample_s wheel_slip.bench.rest_s
 
 source_ros
 
-RADIUS="$CFG_WHEEL_SLIP_WHEEL_RADIUS_M"
+RADIUS="$CFG_VEHICLE_WHEEL_RADIUS_M"
 CRUISE="$CFG_WHEEL_SLIP_BENCH_CRUISE_MPS"
 SETTLE="$CFG_WHEEL_SLIP_BENCH_SETTLE_S"
 SAMPLE="$CFG_WHEEL_SLIP_BENCH_SAMPLE_S"
