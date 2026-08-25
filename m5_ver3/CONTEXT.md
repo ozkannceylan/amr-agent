@@ -89,17 +89,28 @@ m5_ver3/
 ├── CONTEXT.md            this file
 ├── EVIDENCE_BRINGUP.md   Task 1's measured numbers, instrument by instrument
 ├── EVIDENCE_MODEL_V3.md  F1 Task 2's: every sensor, datasheet to delivered
+├── EVIDENCE_SENSORS.md   F1 Task 4's: what the plant DELIVERS, and what the
+│                         wheel odometry is worth against ground truth
 ├── config.yaml           every constant the scripts obey - the one home
 ├── m5v3.sh               start [--headless] | stop | status
 ├── gazebo/
 │   └── forklift_ver3/
 │       └── model.sdf     the forked vehicle
 ├── logs/                 one file per child, by name (git-ignored)
+│   └── evidence/         one directory per recorded session, CSVs (untracked)
+├── nodes/
+│   ├── wheel_odom_core.py   the estimate, as arithmetic. --selftest
+│   └── wheel_odometry.py    the rclpy shell around it. Wiring only.
+├── tests/                pytest, no ROS anywhere - runs on the Windows python
 └── tools/
     ├── _common.sh        sourced: refuse(), the config reader, source_ros()
+    ├── _common.py        imported: the same three things for python
     ├── rtf_probe.sh      real-time factor of the RUNNING world
     ├── noise_probe.sh    is the configured sensor noise on the wire
-    └── slip_bench.sh     slip at steady cruise, forward and astern
+    ├── slip_bench.sh     slip at steady cruise, forward and astern
+    ├── drive_route.py    drive one of config.yaml's profiles, open loop
+    ├── evidence_core.py  the arithmetic behind EVIDENCE_SENSORS.md
+    └── sensor_evidence.py  record (needs ROS) | analyse (needs nothing)
 ```
 
 **`config.yaml` is the one home for every constant.** No behavioural
@@ -141,6 +152,9 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 | `tools/rtf_probe.sh` | 30 s real-time-factor sample of the world that is already running. |
 | `tools/noise_probe.sh scan\|depth <topic>` | Temporal spread of every reading on one sensor topic, vehicle **at rest**. Is the noise the SDF configures actually on the wire? |
 | `tools/slip_bench.sh` | Drives the traction terminal at cruise, forward then astern, and reports slip against the commanded and the achieved wheel rate. |
+| `tools/drive_route.py <profile>` | Drives one of `config.yaml`'s profiles — `straight`, `square`, `aisle`, `corner_creep` — open loop, on the plant's own clock. It drives; it records nothing. |
+| `tools/sensor_evidence.py record --static\|--drive P` | Captures one run into `logs/evidence/<session>/`: one headered CSV per stream. `--drive` starts `drive_route.py` itself, so one command is one complete run. Needs ROS. |
+| `tools/sensor_evidence.py analyse [session…]` | Every table in `EVIDENCE_SENSORS.md`, from those CSVs. **Needs no ROS and no Gazebo** — it runs on the Windows python. |
 
 `start` exits **non-zero** if any child died during startup, naming the
 child and its log; what survived is left running, because the operator's

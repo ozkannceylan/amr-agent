@@ -56,7 +56,8 @@ REQUIRED_KEYS=(
     world.file world.name
     vehicle.model vehicle.name
     vehicle.spawn.x vehicle.spawn.y vehicle.spawn.z vehicle.spawn.yaw
-    topics.clock topics.odom_ground_truth topics.scan_nav topics.gui_gate
+    topics.clock topics.odom_ground_truth topics.scan_nav
+    topics.safety_scan_back
     topics.imu topics.cam_depth topics.cam_info topics.points3d
     topics.joint_state topics.drive_speed_read_a topics.wheel_odom
     paths.log_dir paths.pidfile
@@ -254,11 +255,13 @@ start() {
     # VisualizeLidar plugin anchors on are created a beat AFTER the spawn.
     # Waiting for a scanner topic to be advertised on the gz side puts
     # those components inside the snapshot a late client receives in full.
-    # config.yaml's topics.gui_gate is that topic and is deliberately NOT
-    # bridged: the gate is a gz-side question.
+    # config.yaml's topics.safety_scan_back is that topic and is
+    # deliberately NOT bridged: the gate is a gz-side question. The key is
+    # named for the SENSOR because F1 Task 4's evidence recorder captures
+    # the same channel for its noise figure - see the comment there.
     if [ "$GUI" = true ]; then
         spawn gui bash -c "until gz topic -l 2>/dev/null \
-            | grep -qF '$CFG_TOPICS_GUI_GATE'; \
+            | grep -qF '$CFG_TOPICS_SAFETY_SCAN_BACK'; \
             do sleep $CFG_TIMING_GUI_GATE_POLL_S; done; \
             sleep $CFG_TIMING_GUI_GATE_SETTLE_S; exec gz sim -g -v 2"
     fi

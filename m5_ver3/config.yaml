@@ -218,7 +218,7 @@ topics:
   #   IT IS BRIDGED. It spent F1 Task 3 spelled inline in drive_route.py
   #   under the argument that this block lists what the bridge carries -
   #   which this block does not: traction_cmd above it, points3d and
-  #   gui_gate are all here and none of them is on a bridge line. An
+  #   safety_scan_back are all here and none is on a bridge line. An
   #   address that decides WHICH ACTUATOR a bench drives is exactly the
   #   kind of constant this file's own header says may not sit inline in a
   #   script, and the header of a section is not a licence to break it.
@@ -250,13 +250,28 @@ topics:
   # with it by an equality - see wheel_odom: below for the two errors it
   # is built to make.
   wheel_odom: "/m5v3/wheel_odom"
-  # NOT BRIDGED, AND NAMED HERE BECAUSE THE GUI WAITS ON IT. gz-sim's
-  # GuiRunner discards world state that arrives before its first snapshot,
-  # so a GUI client started before the model's sensors advertise anchors
-  # every lidar fan at the world origin for the life of the window
-  # (measured in m6, gazebo/m6_world.launch.py). Gating the client on this
-  # topic appearing on the gz side puts the sensors inside that snapshot.
-  gui_gate: "/forklift/gz/safety_scanner_back/measurement"
+  # THE BACK SAFETY SCANNER'S MEASUREMENT CHANNEL, NOT BRIDGED, AND IT HAS
+  # TWO CONSUMERS ON THIS TRACK - which is why it is named for the SENSOR
+  # and not for either job.
+  #   THE GUI WAITS ON IT. gz-sim's GuiRunner discards world state that
+  #   arrives before its first snapshot, so a GUI client started before
+  #   the model's sensors advertise anchors every lidar fan at the world
+  #   origin for the life of the window (measured in m6,
+  #   gazebo/m6_world.launch.py). Gating the client on this topic
+  #   appearing on the gz side puts the sensors inside that snapshot. It
+  #   is this topic rather than another because it is the last sensor the
+  #   model brings up, not because of anything it measures.
+  #   THE EVIDENCE RECORDER CAPTURES IT. F1 Task 4 scores one safety
+  #   scanner's beam noise against the SDF, and these three sensors are
+  #   deliberately not bridged (Global Constraint 6 freezes them and F2
+  #   has their consumer), so tools/sensor_evidence.py takes them gz-side.
+  # IT WAS SPELLED `gui_gate` UNTIL F1 TASK 4, and it was renamed rather
+  # than copied for the reason wheel_radius_m moved in Task 3: a constant
+  # spelled in two places is two opinions about one number, and the first
+  # one to be edited is the one that is right. A key named after the JOB
+  # of its first consumer cannot be shared with its second without lying
+  # about one of them.
+  safety_scan_back: "/forklift/gz/safety_scanner_back/measurement"
 
 # ------------------------------- SENSORS -------------------------------
 # THE SDF GOVERNS EVERY SENSOR. Geometry, mount pose, sample count, field
@@ -752,6 +767,76 @@ drive_route:
       - {hold_s: "0.5", tread_mps: "0.175", steer_rad: "0.000"}
       - {hold_s: "3.0", tread_mps: "0.000", steer_rad: "0.000"}
 
+    # CORNER_CREEP: ONE corner, held long enough to have a steady state,
+    # and the whole profile exists to answer ONE question the owner asked
+    # on 2026-08-25: DOES THE TRICYCLE KINEMATIC MODEL HOLD AT CREEP
+    # SPEED? A real truck's does - at 0.3 m/s a polyurethane tyre has
+    # almost no lateral force to shed - so if this plant delivers a
+    # FRACTION of the yaw its steer angle promises even at a crawl, that
+    # is a statement about the wheel-slip system's lateral compliance and
+    # not about the speed. F2's EKF and F3's controller both assume the
+    # model somewhere, so the size of the gap is worth knowing.
+    #
+    # WHAT IT IS NOT: A TUNING RUN. Global constraint 7 - whatever the
+    # ratio turns out to be is RECORDED. Nothing in wheel_slip: or in
+    # square: moves because of it.
+    #
+    # THE FOUR NUMBERS AND WHERE EACH COMES FROM:
+    #
+    #   0.3 m/s     m6/ipc/follower.py CORNER_MPS, the speed the fleet
+    #               takes a corner at, and the speed square: is driven
+    #               at. Not a convenient number: the one the vehicle
+    #               spends its cornering life at.
+    #   -0.785398   pi/4, the MODERATE of the two steer angles this rig
+    #               already has a measurement at (0.401 of geometry
+    #               delivered, against 0.634 at 1.25 rad - the table in
+    #               square: above). Comparable by construction: the same
+    #               angle at the same speed, measured a second time by a
+    #               named instrument that survives the run rather than by
+    #               the throwaway probe that produced the table.
+    #               NEGATIVE IS LEFT while driving forward, and left is
+    #               towards the north wall - the same choice square:
+    #               makes and for the same reason: 4.00 m either way, and
+    #               a wall is a flatter thing to have a metre away than a
+    #               rack leg.
+    #   3.0 s       the run-in. 0.9 m of straight at creep, so the corner
+    #               starts from a vehicle that is already moving and the
+    #               steer axis slews into a rolling tyre rather than a
+    #               parked one.
+    #   14.0 s      the corner. tools/sensor_evidence.py discards the
+    #               first evidence.corner.settle_s of the HELD steer
+    #               angle - the axis has to slew, and the yaw of that
+    #               slew is not a steady state - and averages the yaw
+    #               rate over the evidence.corner.window_s after it. 14 s
+    #               leaves 10 s of held corner for a 4 s settle and a 6 s
+    #               window.
+    #
+    # IT FITS THE FLOOR AT EVERY YAW RATE IT COULD POSSIBLY DELIVER, and
+    # that is checked rather than assumed because the delivered rate is
+    # what this profile is measuring - so the geometry may not depend on
+    # it. The rear axle starts at world (-16.50, 10.00) heading +x (the
+    # spawn is base_link, 0.50 m ahead of the axle, at yaw pi). Turning
+    # left at radius R the axle reaches y = 10 + R(1 - cos theta), and
+    # the truck's own envelope corner stands 1.50 m from the axle at
+    # 23.6 deg off the travel direction (fork tips 1.375 m ahead,
+    # half-width 0.60 m). Three cases, against the north wall's inner
+    # face at y = +14.00:
+    #
+    #   delivered      R [m]   turn in 14 s   worst envelope y   margin
+    #   0.081 rad/s    2.62    65 deg         13.01              0.99 m
+    #   (Task 3's measured 0.401 fraction - the expected case)
+    #   0.14 rad/s     1.51    112 deg        12.88              1.12 m
+    #   0.202 rad/s    1.05    162 deg        12.55              1.45 m
+    #   (the full kinematic rate - the case that cannot happen)
+    #
+    # So the corridor holds it whatever the answer is, which is the
+    # property a measurement profile has to have.
+    corner_creep:
+      - {hold_s: "2.0", tread_mps: "0.000", steer_rad: "0.000"}
+      - {hold_s: "3.0", tread_mps: "-0.300", steer_rad: "0.000"}
+      - {hold_s: "14.0", tread_mps: "-0.300", steer_rad: "-0.785398"}
+      - {hold_s: "3.0", tread_mps: "0.000", steer_rad: "0.000"}
+
 # -------------------------------- PATHS --------------------------------
 # Relative to the repository root. The pidfile is what stop reads and the
 # only file it deletes; the log dir is one file per child, by name.
@@ -851,3 +936,209 @@ noise_probe:
   # subscription causes: about 7 s. 60 s is an order of magnitude of
   # headroom over that and still a bound.
   capture_timeout_s: "60"
+
+# --------------------------- SENSOR EVIDENCE ---------------------------
+# tools/sensor_evidence.py, which is F1 Task 4's instrument and the only
+# thing that writes EVIDENCE_SENSORS.md's measured column. It has two
+# halves and they are deliberately not the same program:
+#
+#   record   attaches to the running plant, subscribes what the bridge
+#            carries, and writes one headered CSV per stream under
+#            evidence.dir. `record --drive PROFILE` starts
+#            tools/drive_route.py itself so that ONE command produces ONE
+#            complete run - a recording started by hand a second after
+#            the drive is a recording with the reference pose missing
+#            from it.
+#   analyse  reads those CSVs and prints the tables. IT TOUCHES NO ROS
+#            AND NO GAZEBO AT ALL: it runs on the owner's Windows python,
+#            on a WSL shell with nothing sourced, or on a machine that
+#            has never had either, because a figure that can only be
+#            recomputed on the rig that produced it is a figure nobody
+#            can check.
+#
+# WHAT IS *NOT* IN THIS BLOCK, AND IT IS THE POINT: THE CONFIGURED NOISE.
+# The SDF governs every sensor (see the sensors: block's own header), and
+# a python program - unlike a shell - CAN read SDF. So analyse reads the
+# stddev, the bias and the update rate it compares against straight out
+# of vehicle.model, and this file holds not one of them. The sensors:
+# block above repeats the rates because a SHELL cannot do that, and it
+# says so; that exception does not extend to a program that can.
+evidence:
+  # Where a session lands: one directory per run, named for what it is
+  # and when it was taken, holding one CSV per stream plus session.txt.
+  # Under paths.log_dir, so .gitignore already covers it - the CSVs are
+  # evidence and they are BIG (a 60 s scan capture is 900 frames of 811
+  # beams), so the evidence FILE quotes their md5 and the CSVs stay out
+  # of the repository.
+  dir: "m5_ver3/logs/evidence"
+  # HOW LONG THE RECORDER WILL WAIT FOR THE FIRST MESSAGE ON EVERY STREAM
+  # BEFORE IT REFUSES. This is the bound on waiting and it is not the
+  # sample: a misspelt topic, a bridge that did not come up or a sensor
+  # nothing subscribes to would otherwise hang the recorder in silence -
+  # noise_probe.capture_timeout_s exists for exactly this and was
+  # measured by hanging the probe. The slowest stream here publishes at
+  # 10 Hz, so anything past a second is already an answer; 30 s is an
+  # order of magnitude of headroom over a cold bridge and still a bound.
+  wait_first_s: "30"
+  # Below this many rows a stream did not deliver a capture, and analyse
+  # refuses it by name rather than averaging four numbers into a figure
+  # that looks like a measurement.
+  min_samples: "5"
+  # THE SUBSCRIPTION QUEUE, AND IT IS DEEP ON PURPOSE. The recorder is
+  # one python process holding eight subscriptions, two of which arrive
+  # at the world's own 500 Hz, and a shallow queue on a channel that fast
+  # does not prevent loss - it just makes the loss happen sooner. A deep
+  # queue lets a callback that is momentarily late catch up.
+  #   IT DOES NOT MAKE THE RATE FIGURES SAFE AND NOTHING PRETENDS IT
+  #   DOES: a drop shows up in the recorded stamps as an interval several
+  #   times the median, so analyse prints dt_max beside every rate and
+  #   the evidence file reads them together.
+  qos_depth: "500"
+  static:
+    # THE VEHICLE IS AT REST FOR THIS ONE and the number is a duration
+    # rather than a frame count, which is the opposite of what
+    # noise_probe.sh does. The reason is that this capture carries EIGHT
+    # streams at five different rates: a count would mean five different
+    # durations, and the delivered-rate figures would then each be taken
+    # over a different piece of the run. 60 s is 900 nav-lidar frames,
+    # 6000 IMU samples and 900 depth frames - an order of magnitude more
+    # than the 60 the noise figure needs, and the sqrt(2(n-1)) rule puts
+    # a 20 mm spread inside 0.5 mm at that count.
+    record_s: "60"
+  drive:
+    # RECORDED BEFORE THE DRIVE STARTS, with the truck standing where it
+    # spawned. This is the reference pose every drift figure is measured
+    # from: analyse checks the recorded ground truth against
+    # vehicle.spawn and refuses if the truck is not where config says it
+    # is, because a transform built on the wrong origin produces drift
+    # figures that are wrong by a constant and look entirely plausible.
+    pre_roll_s: "4"
+    # And after drive_route.py exits, because the plant is still moving
+    # when the last segment's standing zero lands.
+    post_roll_s: "4"
+    # THE BOUND ON THE DRIVE ITSELF. The profile's own sim-time length is
+    # known from its table, and drive_route.py steps its schedule off the
+    # plant's clock - so a real-time factor of 1/3 would triple the wall
+    # time it takes. Past factor x nominal + margin the drive is not slow,
+    # it is stuck, and the recorder ends it rather than waiting for ever.
+    # The CSVs are written whatever happens: a partial recording of a run
+    # that went wrong is evidence, and deleting it would not be.
+    timeout_factor: "3"
+    timeout_margin_s: "60"
+  depth:
+    # A CENTRAL PATCH AND NOT THE WHOLE IMAGE, tools/noise_probe.sh's
+    # choice and its argument: 640 x 480 x 900 frames is 276 million
+    # floats and the statistic does not get better for it. 8 gives a
+    # 16 x 16 patch at the image centre, which is where the optical axis
+    # lands - on this camera the floor about 2.2 m ahead.
+    patch_half: "8"
+  safety:
+    # THE SAFETY SCANNER IS NOT BRIDGED (Global Constraint 6 freezes
+    # those three sensors and F2 owns their consumer), so the recorder
+    # takes it GZ-SIDE with `gz topic -e -n`, in a phase of its own after
+    # the ROS capture has finished. Separately, because subscribing makes
+    # gz render a sensor that nothing else is rendering, and an RTF or a
+    # delivered rate measured beside that subscription is a reading about
+    # a different stack (EVIDENCE_MODEL_V3.md 6).
+    # 60 frames is 6 s of a 10 Hz scanner and matches noise_probe.sh's
+    # own scan sample, so the two figures are comparable.
+    frames: "60"
+    # The bound on waiting for those frames. noise_probe.capture_timeout_s
+    # is the same number for the same reason: `gz topic -e -n N` waits
+    # for its N messages FOR EVER.
+    capture_timeout_s: "60"
+  gz_rate:
+    # THE GZ-SIDE DELIVERED RATE, `gz topic -f`, which reports a rolling
+    # 10-interval window every ten messages. It is the only instrument
+    # that can see the unbridged sensors at all, and it is what
+    # EVIDENCE_MODEL_V3.md 2's gz column was taken with.
+    #   THE TOPICS ARE NAMED BY THEIR KEY IN topics: above and never by
+    #   address, so no channel is spelled twice in this file.
+    topics: "scan_nav, imu, cam_depth, cam_info, safety_scan_back, points3d"
+    # Per topic. At 10 Hz that is ~20 windows, which is the sample size
+    # the gz column of EVIDENCE_MODEL_V3.md 2 was read over.
+    sample_s: "20"
+    # `gz topic -f` does not stop on its own - measured on this rig,
+    # `-d 8` ran until it was killed - so it is run under `timeout` and
+    # this is the bound. It is longer than sample_s because the process
+    # is ENDED at sample_s and this is only the deadline for that ending.
+    timeout_s: "40"
+  analyse:
+    # THE SPAWN POSE CHECK. The drift transform is built on vehicle.spawn,
+    # and if the truck is not standing there when the recording opens the
+    # transform is wrong by however far it moved. 0.05 m and 0.02 rad are
+    # two orders of magnitude tighter than the 0.875 m of rack penetration
+    # Task 1 measured a bad spawn slide by, and an order of magnitude
+    # looser than the ground truth's own resolution.
+    spawn_tolerance_m: "0.05"
+    spawn_tolerance_rad: "0.02"
+    # HOW FAR THE INTERPOLATION MAY REACH. The estimate arrives at
+    # ~500 Hz and the truth at 20 Hz, so the honest pairing is to
+    # interpolate the estimate onto the truth's stamps, and this is the
+    # bound on that interpolation. 0.5 s is 250 estimate samples: past
+    # it, the estimator was not publishing and the answer is a refusal
+    # rather than a straight line drawn across the gap.
+    max_pair_gap_s: "0.5"
+    # THE FACTOR THE ACCEPTANCE IS STATED IN. A measured temporal spread
+    # inside [1/1.25, 1.25] of the SDF's own stddev passes; outside it,
+    # the discrepancy is diagnosed rather than smoothed (global
+    # constraint 7). 1.25 is chosen against what the statistic can do,
+    # not against what the sensors did: the standard deviation of a
+    # standard deviation from n frames is about sigma/sqrt(2(n-1)), which
+    # at a 40-frame capture is 11 %, so a band of +-25 % is about two of
+    # those and will not fire on sampling noise alone.
+    noise_factor: "1.25"
+  corner:
+    # WHICH PROFILE THE CORNER FIGURE IS DEFINED OVER, and it is one
+    # rather than "any profile with a steer angle in it". square: holds
+    # -1.25 rad too, but for 9.142 s with the axis slewing into every
+    # corner - not long enough for the settle and the window below - so
+    # measuring it there would either refuse a good square run or average
+    # a yaw rate over a manoeuvre that never reached a steady state.
+    profile: "corner_creep"
+    # THE STEADY-STATE WINDOW corner_creep: is measured over. The steer
+    # axis has to SLEW into the corner and the yaw taken during the slew
+    # is not a steady state - config.yaml's square: block says the same
+    # thing about why that profile does not close. analyse finds the
+    # longest stretch where the steer READING is at the profile's own
+    # corner angle and the vehicle is moving, discards settle_s of it,
+    # and averages ALL of what is left.
+    settle_s: "4"
+    # window_s IS A MINIMUM AND NOT A CAP, and that was measured rather
+    # than chosen. The delivered yaw rate WANDERS inside a held corner -
+    # binned at 2 s on the first corner_creep run it ran 0.0722 to
+    # 0.0968 rad/s about a mean of 0.0812 - so a short window lands
+    # wherever it lands: the first 6 s of that run's steady state gave
+    # 0.0785 and the whole 13.6 s gave 0.0812, a 3 % swing that is the
+    # sampling and not the vehicle. So the whole steady state is
+    # averaged, this is the least of it that will be accepted, and the
+    # wander itself is REPORTED (bin_s below) rather than averaged away.
+    window_s: "6"
+    # The sub-bin the steadiness is reported at. It decides nothing about
+    # the headline figure - that is the whole window - and only how
+    # finely the wander underneath it is printed. 1 s at 0.08 rad/s is
+    # 0.08 rad of yaw, three orders of magnitude above the ground truth's
+    # own resolution, so a bin is a measurement and not a difference of
+    # two noisy numbers.
+    bin_s: "1.0"
+    # How close the steer READING has to be to the table's angle to count
+    # as held. The steer axis is a position controller with no
+    # quantisation modelled on this track, so this is about the
+    # controller's own residual and not about a sensor: 0.02 rad is
+    # 2.5 % of the 0.785398 rad corner.
+    steer_tol_rad: "0.02"
+    # And the vehicle has to be MOVING, or a stationary truck with the
+    # wheel turned would open a window and report a yaw rate of zero as
+    # a fidelity of zero. 0.05 m/s is a sixth of the creep speed.
+    speed_min_mps: "0.05"
+  sdf_names:
+    # THE <sensor name> AS model.sdf SPELLS IT, which is how analyse
+    # finds the configured noise to compare against. These are names in
+    # the model file and not topics - the topics are in topics: - and
+    # they are here because analyse has to be told WHICH sensor a
+    # recorded stream came from, which no CSV can say for itself.
+    nav_lidar: "nav_lidar"
+    safety_scanner: "safety_scanner_back"
+    pallet_cam: "pallet_cam"
+    imu: "imu"
+    lidar_3d: "nav_lidar_3d"

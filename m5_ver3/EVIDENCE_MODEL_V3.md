@@ -128,6 +128,13 @@ shape ros_gz issue #368 describes (the bridge delivering ~60 % of a
 and an F2 consumer that needs frame-accurate depth must not assume the
 image and its info arrive together.
 
+> **SEE §9.5's CORRECTION.** F1 Task 4 measured this channel with an
+> rclpy subscriber instead of `ros2 topic hz` and found **no loss at
+> all**, and the depth image and its `camera_info` frame-aligned to the
+> nanosecond. The figures in this paragraph stand as readings of
+> `ros2 topic hz`; they are not readings of the channel.
+> `EVIDENCE_SENSORS.md` §7.5 carries the three-way measurement.
+
 ---
 
 ## 3. Everything advertises, and the four children come up
@@ -634,6 +641,17 @@ the SDF alone.
 
 §2(c). 87–94 % of the gz-side rate, against 100 % for `camera_info` from
 the same sensor across the parameter bridge. Same family as ros_gz #368.
+
+> **CORRECTED BY MEASUREMENT, 2026-08-25 (F1 Task 4).** The reading above
+> is real; the attribution is not. `EVIDENCE_SENSORS.md` §7.5 shows the
+> frames are on the wire and `ros2 topic hz` is losing them: a plain
+> rclpy subscriber takes **909 of 909** depth frames over 60 s with every
+> sim-time interval exactly 0.066 s, at queue depths 1, 10 and 500 alike,
+> while `ros2 topic hz` on the same topic at the same instant reads
+> 8.98 Hz. `camera_info` is frame-aligned with the depth image to the
+> nanosecond, all 909 of them. **The bridge does not drop frames on this
+> stack; the measuring subscriber did.** §2(c)'s figures stand as
+> readings of `ros2 topic hz` and not of the channel.
 
 ### 9.6 The camera cannot see the vehicle in front of it
 
