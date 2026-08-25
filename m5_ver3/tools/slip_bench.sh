@@ -137,7 +137,10 @@ segment forward "-$OMEGA"
 segment astern  "$OMEGA"
 
 echo ""
-python3 - "$RUNDIR" "$CRUISE" "$RADIUS" "${SLIP_LABEL:-}" <<'PYTHON'
+# THE REPORT DECIDES WHETHER THIS RUN HAPPENED. It exits non-zero if
+# either segment produced no ground truth - a bench that drove a stack
+# which was not there must not print a table and return success.
+if ! python3 - "$RUNDIR" "$CRUISE" "$RADIUS" "${SLIP_LABEL:-}" <<'PYTHON'
 import json
 import math
 import os
@@ -223,8 +226,16 @@ for name in ("forward", "astern"):
     if joint is not None:
         print("%-8s %8d joint rate %.8f rad/s => %.8f m/s achieved tread" %
               ("", joint["n"], joint["rate"], joint["rate"] * radius))
-if len(rows) == 2:
-    print("")
-    print("mean slip_cmd   %.5f %%" % ((rows[0][1] + rows[1][1]) / 2.0))
-    print("mean slip_joint %.5f %%" % ((rows[0][2] + rows[1][2]) / 2.0))
+if len(rows) != 2:
+    raise SystemExit(1)
+print("")
+print("mean slip_cmd   %.5f %%" % ((rows[0][1] + rows[1][1]) / 2.0))
+print("mean slip_joint %.5f %%" % ((rows[0][2] + rows[1][2]) / 2.0))
 PYTHON
+then
+    refuse "both segments produced ground truth" \
+        "$CFG_TOPICS_ODOM_GROUND_TRUTH (the captures are in $RUNDIR)" \
+        "the odometry topic said nothing for at least one segment." \
+        "is the stack up in partition $GZ_PARTITION" \
+        "('m5_ver3/m5v3.sh status')?"
+fi

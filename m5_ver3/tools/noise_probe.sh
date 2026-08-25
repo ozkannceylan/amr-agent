@@ -49,7 +49,8 @@ set -uo pipefail
 TOOL=noise_probe
 # shellcheck source=_common.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
-load_config noise_probe.scan_samples noise_probe.depth_samples
+load_config noise_probe.scan_samples noise_probe.depth_samples \
+    noise_probe.capture_timeout_s
 
 MODE="${1:-}"
 TOPIC="${2:-}"
@@ -71,13 +72,26 @@ echo "topic      $TOPIC"
 echo "samples    $SAMPLES"
 echo "capture    $CAP"
 echo "capturing..."
-# -n rather than -d: the statistic is over a COUNT of frames and a
-# duration would make the count depend on the real-time factor, which is
-# the one thing a noise figure must not depend on.
-gz topic -e -t "$TOPIC" --json-output -n "$SAMPLES" > "$CAP" 2>/dev/null
-[ -s "$CAP" ] || refuse "the topic delivered frames" "$TOPIC" \
-    "nothing arrived in partition $GZ_PARTITION." \
-    "is the stack up ('m5_ver3/m5v3.sh status')?"
+# -n RATHER THAN -d: the statistic is over a COUNT of frames, and a
+# duration would make the sample size depend on the real-time factor,
+# which is the one thing a noise figure must not depend on.
+#   AND THEREFORE A DEADLINE AROUND IT. `gz topic -e -n N` waits for its
+#   N messages FOR EVER, so a misspelt topic, or a stack that is not up,
+#   or a sensor nothing else is subscribed to and which therefore never
+#   renders, would hang this probe silently instead of refusing. The
+#   count is the sample; the timeout is only the bound on waiting for it,
+#   and a capture that hits the bound is refused rather than analysed
+#   short (a short sample would still produce a plausible-looking
+#   standard deviation, which is the worse failure).
+timeout "$CFG_NOISE_PROBE_CAPTURE_TIMEOUT_S" \
+    gz topic -e -t "$TOPIC" --json-output -n "$SAMPLES" > "$CAP" 2>/dev/null
+GOT="$(grep -c '^{' "$CAP" 2>/dev/null || true)"
+[ "${GOT:-0}" -ge "$SAMPLES" ] || refuse \
+    "$TOPIC delivered $SAMPLES frames inside ${CFG_NOISE_PROBE_CAPTURE_TIMEOUT_S}s" \
+    "$CONFIG (noise_probe.capture_timeout_s) and $TOPIC" \
+    "$GOT of $SAMPLES frames arrived in partition $GZ_PARTITION." \
+    "check the spelling of the topic against 'gz topic -l', and that the" \
+    "stack is up ('m5_ver3/m5v3.sh status'). Partial capture left at $CAP."
 
 echo ""
 python3 - "$CAP" "$MODE" <<'PYTHON'

@@ -375,3 +375,11 @@ noise_probe:
   # of a 15 Hz camera, and the same sqrt rule puts an 8 mm figure inside
   # 1 mm.
   depth_samples: "40"
+  # THE BOUND ON WAITING, AND IT IS NOT THE SAMPLE. `gz topic -e -n N`
+  # waits for its N messages FOR EVER: a misspelt topic, or a stack that
+  # is not up, hangs the probe in silence rather than refusing - measured
+  # by hanging it. The slowest honest capture on this rig is the 3D lidar
+  # at 60 frames, 10 Hz, under the depressed real-time factor its own
+  # subscription causes: about 7 s. 60 s is an order of magnitude of
+  # headroom over that and still a bound.
+  capture_timeout_s: "60"
