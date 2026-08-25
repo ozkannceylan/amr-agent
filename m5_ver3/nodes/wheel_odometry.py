@@ -466,6 +466,7 @@ def main(argv=None):
         from builtin_interfaces.msg import Time
         from nav_msgs.msg import Odometry
         from rclpy.clock import Clock
+        from rclpy.executors import ExternalShutdownException
         from rclpy.node import Node
         from rclpy.qos import QoSProfile
         from sensor_msgs.msg import JointState
@@ -482,7 +483,16 @@ def main(argv=None):
     node = node_class(cfg)
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # SIGTERM IS HOW THIS NODE IS NORMALLY ENDED, AND IT COMES OUT OF
+        # spin(), NOT OUT OF THE TEARDOWN BELOW. m5v3.sh's stop sweeps
+        # this child with TERM, rclpy turns that into an
+        # ExternalShutdownException, and leaving it uncaught put a
+        # traceback at the end of EVERY clean stop - which is the exact
+        # failure the guard under `finally` was written to prevent, one
+        # frame too low to prevent it. An operator's Ctrl-C on a node run
+        # by hand is the same event under another name, so the two are
+        # caught together and neither is an error.
         pass
     finally:
         node.destroy_node()

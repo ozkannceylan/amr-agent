@@ -178,14 +178,26 @@ side.
 | `/forklift/gz/scan_nav` | gz → ROS | 15 Hz | parameter bridge |
 | `/forklift/gz/imu` | gz → ROS | 100 Hz | parameter bridge |
 | `/forklift/gz/cam/camera_info` | gz → ROS | 15 Hz | parameter bridge |
+| `/forklift/gz/joint_state` | gz → ROS | 500 Hz | parameter bridge |
+| `/forklift/gz/drive_speed/read_a` | gz → ROS | 500 Hz | parameter bridge |
 | `/forklift/gz/cam/depth_image` | gz → ROS | 15 Hz | **image bridge** |
 
+The two **joint** channels arrived with F1 Task 3 and are the estimator's
+two inputs. They are `JointStatePublisher` systems and not sensors, so
+their rate is the world's own physics step — one message per iteration —
+and `EVIDENCE_SENSORS.md` §1.2 measures both delivering 500.0000 Hz of
+sim time with `dt_max = dt_med`, not one message lost over 60 s.
+
 **What is deliberately NOT bridged:** `/forklift/gz/points3d` (the 3D
-lidar), both point clouds and the camera's colour image. Their ROS
-consumers arrive in F2, gz renders a sensor only while something
-subscribes to it, and `EVIDENCE_MODEL_V3.md` §6 measures what subscribing
-to the 3D lidar costs: mean RTF 0.999 → 0.85. The delivered rates for
-every one of these, both sides, are §2 of the same file.
+lidar), both point clouds, the camera's colour image, and
+`/forklift/gz/drive_speed/read_b`. The first four have no ROS consumer
+until F2, gz renders a sensor only while something subscribes to it, and
+`EVIDENCE_MODEL_V3.md` §6 measures what subscribing to the 3D lidar
+costs: mean RTF 0.999 → 0.85. `read_b` is different — it is the same
+shaft read a second time, and cross-comparing the two heads is the PLC's
+function and lives in m6 (`config.yaml`, `topics.drive_speed_read_a`).
+The delivered rates for every one of these, both sides, are §2 of the
+same file.
 
 `/forklift/gz/odom` is the model's `OdometryPublisher` — **ground truth,
 and a measurement reference ONLY**. No wheel slip, no encoder
