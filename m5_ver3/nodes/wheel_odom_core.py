@@ -209,11 +209,27 @@ class WheelOdometry(object):
         """Put base_link at a pose and forget every reading.
 
         THE DEFAULT IS THE ORIGIN, AND THAT IS THE RIGHT DEFAULT. The
-        odom frame is defined as wherever the estimate started, which is
-        also what gz's OdometryPublisher does with the ground truth this
-        estimate is scored against - so the two curves leave the same
-        point and their divergence is the reading, with no spawn pose
-        needed by either of them.
+        odom frame is defined as wherever the estimate started, and a
+        real vehicle's wheel odometry has no idea where in a building it
+        switched on. Handing this one the spawn pose out of config.yaml
+        would make it depend on a launch constant it has no business
+        knowing, so the shell does not.
+
+        THE GROUND TRUTH DOES NOT DO THE SAME THING, AND THAT WAS
+        MEASURED RATHER THAN ASSUMED. This docstring used to say that
+        gz's OdometryPublisher also starts its frame where the model
+        started, so the two curves would leave the same point. It does
+        not: on this model it publishes the WORLD pose. Read at rest on
+        2026-08-25, /forklift/gz/odom gave
+
+            x = -17.00000000000007, y = 10.0, yaw = pi
+
+        which is the spawn pose in world coordinates, while this
+        estimator was sitting at the origin of its own odom frame. SO
+        SCORING ONE AGAINST THE OTHER IS NOT A SUBTRACTION. The spawn
+        pose has to come off the ground truth and the spawn yaw has to be
+        rotated out of it before the two are comparable, and whatever
+        does that comparison is where the spawn pose belongs - not here.
         """
         self.yaw = float(yaw)
         # The rear axle, from the base_link pose asked for.
