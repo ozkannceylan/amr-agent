@@ -6763,3 +6763,122 @@ fork cycle in the cell becomes a name on the screen.
   being permanent.
 * **Four transports again.** Rig-bound, not floor-bound and not
   autonomy-bound.
+
+---
+
+# M6 review revise round — 2026-08-25: the blocker on film, and what filming it found
+
+The 2026-08-25 review (owner-ordered, report in the owner's vault) found
+that `m6-fleet-06-recovery-2026-08-23.mp4` does not contain the thing
+its name promises: the M6.7 blocker experiment was never filmed. This
+round re-ran that experiment on camera, and the day yielded four
+defects, three of them fixed with tests the same day. Every number
+below is a capture off this machine.
+
+## The take that shipped
+
+`assets/m6-fleet/m6-fleet-08-blocker-recovery-2026-08-25.mp4` — 179 s
+of overhead video covering a 630 s run (the camera delivers at the
+plant's rate). `fleet_cli.py demo --duration 600 --in-flight 4
+--seed 7`, four trucks, GPU renderer, four `scripted_writer
+--auto-reset`, `score_run` on the four odometry topics. The story, in
+the fleet's own log lines:
+
+    09:56:21  demo starts; four transports assigned inside 700 ms
+    09:58:53  a 1.0 x 1.0 x 1.2 m box is spawned into the north ring
+              leg at (0.0, 9.2) - on camera, orange, mid-frame
+    10:01:25  f2 is not moving - under 0.50 m in 90 s while executing
+              ft-5bdc2bdd. The task goes back to the queue; the order
+              is cancelled on the wire
+    10:01:57  swap deadlock f1 <-> f4 named; f1 carries the youngest
+              task and is asked to step aside (-3.5,-10) -> (-7,-10)
+    10:02:32  f3 completed ft-a3086b40 at S8 - through all of it
+    10:02:54  the box is removed
+    10:04:00  f2 - the truck the box stopped - arrives at S1 with a
+              fresh order: recovered, no hands
+    10:04:56  the step-aside of f1 was given up after 179 s (see
+              defect 3)
+
+Scored: fleet distance 309.1 m over 701 s of recording; longest still
+spells f2 98.1 s (the box), f3 196.3 s and f4 318.1 s (the tail windows
+are the post-demo drain and the given-up aside). The overhead take is
+the asset; the operator-view take of the same run was discarded (defect
+2 froze its right-hand panel) and 06 keeps its name as the record of
+what was actually filmed that day - 08 is the film 06's name promised.
+
+## The four defects, and where each now lives
+
+**1. A stack boot is a lottery, and a lost ticket looks like the cell
+failing.** The first take (09:45-09:53, thrown away) had all four
+trucks watchdogged at T+90 s without one of them ever moving: the
+`ros_gz` bridge had starved - gz-side sensors publishing, ROS-side
+silence, `NodeShared::Publish() Error: Interrupted system call` in the
+world log, and the writers reading every protective field as violated
+off scans that never arrived (`stale, 0 of 0` on all three scanners of
+all four trucks). The starvation is PER TOPIC and arbitrary: a later
+boot bridged f1's back scanner but not f1's odometry. Five stack
+restarts in a row after 10:24 could not produce a full bridge; the
+session had had six boots by then and the rig memory's degradation
+note stands. `tools/preflight.sh` now checks every feed the cell
+consumes before a run is worth taping; nothing else about this is
+fixed, and the fix is not this project's to make.
+
+**2. The operator recorder could lose its subscription and film a
+frozen screen.** The take-2 operator video's right-hand panel showed
+the pre-demo document for the whole run: a leftover recorder from the
+aborted take shared the MQTT client id, the broker kicked the new one,
+paho reconnected - and the one `subscribe()` made at startup was gone.
+`record_operator.py` now subscribes in `on_connect` (as `fleet_cli`'s
+own status reader already did) and carries a per-pid client id. Found
+by the film, fixed the same hour.
+
+**3. A given-up step-aside stranded its truck.** 10:04:56: the fleet
+gave up on f1's move after 179 s and left the one-node order on the
+vehicle. Nothing else ever takes that order away - it has no task
+behind it - so f1 reported it executing for the next ten minutes:
+never idle, never eligible, a fleet of three. `floor._end_aside`'s
+give-up branch now pulls the same lever every other take-away pulls -
+cancelOrder, chased, capped, named - with a stub test that holds the
+truck in the move until the clock runs out
+(`test_a_given_up_step_aside_does_not_strand_the_truck`).
+
+**4. The escalation is still unmeasured in the field, and this time
+the reason is named to the sensor.** Two placements were driven at a
+centreline box on the south ring ((0,-10), esc-1, S9 -> S12): the
+truck stopped both times on its SAFETY layer - left and right warning
+fields reading the box at 1.19 m, V_Limit 300 - and the watchdog
+recovered the task, but nav's guard never saw a body: `guard_min` sat
+frozen at 7.878 m while the gz-side nav lidar's last message was
+stamped sim 296 s against a live world clock. One sensor of
+seventeen, dead mid-run, on the same bridge as defect 1. The
+escalation's field test needs a boot `preflight.sh` passes end to end;
+on 2026-08-25 the machine did not produce one in five attempts.
+
+## What landed in code this round (each with tests, suite green)
+
+* **The mid-base head-on resolves** (M6.5 Gate 3's second failure
+  shape). The floor now carries a stillness clock - progress.py's own
+  arithmetic, 0.5 m / 20 s - and a cycle whose members have all
+  measurably stopped is as final as a parked one. Wait-die still may
+  not touch it (the loser's holds are released base, a promise VDA
+  5050 cannot shrink), so the pass goes straight to the step-aside's
+  cancel-requeue-move, under a story that says "head-on", not "swap".
+* **A reported body closes the floor** (residual 11, first real dent).
+  nav's BLOCKED now leaves the vehicle as ONE `pathBlocked` WARNING
+  naming the order (edge-triggered, `vda_agent`); the fleet reads it,
+  reads the node ahead off the route before the requeue drops it,
+  closes that node for 120 s - a phantom hold, so nothing is granted
+  onto the body - and plans new legs around it (`route.plan_route`
+  grew an `avoid` set that travels with the leg so extensions rebuild
+  the same route). The screen carries the closure with its clock. The
+  fleet that sent three trucks into one box on 2026-08-23 now sends
+  none, and says where the box is instead.
+* **The subset document was re-cut against the code** (its own
+  Amendment 2026-08-25): three implemented instant actions, not
+  eight; theta not sent; the +1 orderUpdateId deviation recorded;
+  `pathBlocked` added to the error table by this round.
+* **The operator's screen adds its own arithmetic**: a shift strip
+  under the header (driving / dwell / queued / done / refused, the
+  stalled named beside them), ages on the idle-timeout lines that had
+  stood unchanged for eleven minutes of film, and the recorder now
+  stamps sim time, wall time and a windowed RTF onto every frame.
