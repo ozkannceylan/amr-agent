@@ -136,7 +136,9 @@ def build_factsheet(header, cfg):
             "agvActions": [
                 {"actionType": name, "actionScopes": ["INSTANT"]}
                 for name in ("cancelOrder", "stateRequest",
-                             "factsheetRequest")]},
+                             "factsheetRequest")]
+            + [{"actionType": name, "actionScopes": ["NODE"]}
+               for name in ("pick", "drop")]},
         "agvGeometry": {},
         "loadSpecification": {"loadSets": []}})
     return fs

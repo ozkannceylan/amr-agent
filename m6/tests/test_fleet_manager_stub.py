@@ -460,6 +460,8 @@ class Truck:
         self.reached = 0
         self.last = ("", 0)
         self.errors = []
+        self.action_states = []
+        self.hold_cycle = False
         self.seen = 0
         self.seen_instant = 0
         self.row = manager.vehicles.setdefault(serial, fm._new_vehicle())
@@ -494,10 +496,22 @@ class Truck:
             for action in msg.get("actions") or []:
                 if action.get("actionType") == "cancelOrder":
                     self.order, self.reached, self.last = None, 0, ("", 0)
+                    for a in self.action_states:
+                        if a["actionStatus"] in ("WAITING", "RUNNING"):
+                            a["actionStatus"] = "FAILED"
         self.seen_instant = len(self.instants())
         for msg in self.inbox()[self.seen:]:
             self._take(msg)
         self.seen = len(self.inbox())
+        # THE CYCLE TAKES ONE TURN, like the real agent's takes 3 s: a
+        # pick that went RUNNING at arrival reports FINISHED on the
+        # truck's next turn, never in the same state as the arrival -
+        # which is exactly the gap the manager's gate has to survive.
+        # hold_cycle keeps it RUNNING for the tests that watch the gap.
+        if not self.hold_cycle:
+            for a in self.action_states:
+                if a["actionStatus"] == "RUNNING":
+                    a["actionStatus"] = "FINISHED"
         return self
 
     def _take(self, msg):
@@ -515,6 +529,16 @@ class Truck:
         if verdict == "accept":
             self.reached, self.last = 0, ("", 0)
         self.order = msg
+        # The station action rides in WAITING from the moment the order
+        # is taken - the same registration the real agent makes, keyed
+        # on the same deterministic actionId.
+        for act in msg["nodes"][-1].get("actions") or []:
+            if not any(a["actionId"] == act["actionId"]
+                       for a in self.action_states):
+                self.action_states.append(
+                    {"actionId": act["actionId"],
+                     "actionType": act["actionType"],
+                     "actionStatus": "WAITING"})
 
     # ---- what this truck is driving ----
     def released(self):
@@ -531,15 +555,34 @@ class Truck:
             + [{"nodeId": n["nodeId"], "sequenceId": n["sequenceId"],
                 "released": False} for n in self.horizon()]
 
-    def drive(self):
+    def drive(self, finish_cycle=True):
         """To the end of the released base and no further - the truck
-        stops there by itself, which is the whole point of a horizon."""
+        stops there by itself, which is the whole point of a horizon.
+
+        Reaching the FINAL node of the whole order also works the
+        station: the pick or drop the order carried reports FINISHED,
+        because a stub truck's fork cycle is instantaneous. A test that
+        wants the in-between - arrived, cycle still RUNNING - passes
+        finish_cycle=False and finishes it by hand."""
         rel = self.released()
         if rel:
             node = rel[-1]
             self.xy = (node["nodePosition"]["x"], node["nodePosition"]["y"])
             self.last = (node["nodeId"], node["sequenceId"])
             self.reached = len(rel)
+            if self.horizon() == []:
+                self.hold_cycle = not finish_cycle
+                for act in node.get("actions") or []:
+                    self.set_action(act["actionId"], "RUNNING",
+                                    keep_hold=True)
+        return self
+
+    def set_action(self, action_id, status, keep_hold=False):
+        if not keep_hold:
+            self.hold_cycle = False
+        for a in self.action_states:
+            if a["actionId"] == action_id:
+                a["actionStatus"] = status
         return self
 
     def refuse_next_update(self):
@@ -561,7 +604,9 @@ class Truck:
                else self.order["orderUpdateId"],
                "lastNodeId": self.last[0],
                "lastNodeSequenceId": self.last[1],
-               "nodeStates": self.node_states(), "errors": list(self.errors)}
+               "nodeStates": self.node_states(),
+               "actionStates": [dict(a) for a in self.action_states],
+               "errors": list(self.errors)}
         self.errors = []
         self.manager._on_state(self.serial, self.row, msg, now)
         return msg
@@ -2210,3 +2255,90 @@ def test_a_closed_node_reopens_when_its_clock_runs_out(floor):
     assert node not in manager.floor.closed
     assert manager.floor.owner_of(node) is None, \
         "the phantom hold outlived its closure"
+
+
+# ---- 7. the fork cycle gates the transport (item 3) ----
+def test_leg_two_waits_for_the_pick_and_follows_its_FINISHED(floor):
+    """The manager's clock is out of the loop: a truck that has arrived
+    but whose pick still runs is given nothing, and the moment its own
+    state says FINISHED the second leg goes out. The wire carries the
+    cycle the dwell timer used to guess at."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    submit(manager, "t-1", "S1", "S2")
+    turn(manager, (f1,), now)
+    task = manager.tasks[0]
+    f1.drive(finish_cycle=False)              # arrived; forks still moving
+    turn(manager, (f1,), now)
+    assert task["state"] == "DWELL"
+    assert task["await_action"] == "{}:pick".format(
+        f1.legs()[0] if False else task["order_id"] or f1.order["orderId"])
+    assert len(f1.legs()) == 1, "leg 2 went out under a running pick"
+    f1.set_action(f1.order["orderId"] + ":pick", "FINISHED")
+    turn(manager, (f1,), now + fm.DWELL_S + 1.0)
+    assert task["state"] == "ASSIGNED_LEG2"
+    assert len(f1.legs()) == 2
+
+
+def test_a_pick_the_truck_never_reports_is_a_requeue_with_a_name(floor):
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    submit(manager, "t-1", "S1", "S2")
+    turn(manager, (f1,), now)
+    task = manager.tasks[0]
+    f1.drive(finish_cycle=False)
+    turn(manager, (f1,), now)
+    assert task["state"] == "DWELL"
+    later = now + fm.ACTION_WAIT_S + 1.0
+    f1.state(later)
+    manager.floor.stuck.clear()
+    manager._expire_dwells(later)
+    assert task["state"] == "QUEUED"
+    assert any("unreported" in line for line in task["history"])
+
+
+def test_a_FAILED_pick_fails_the_leg_not_the_shift(floor):
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    submit(manager, "t-1", "S1", "S2")
+    turn(manager, (f1,), now)
+    task = manager.tasks[0]
+    f1.drive(finish_cycle=False)
+    turn(manager, (f1,), now)
+    f1.set_action(f1.order["orderId"] + ":pick", "FAILED")
+    turn(manager, (f1,), now + fm.DWELL_S + 1.0)
+    # The transport went back to the queue BY NAME - and the same turn
+    # may already have re-assigned it, because the truck that failed
+    # its pick is idle and eligible: failing a cycle is not a fault
+    # flag, and re-earning the same task is the fleet retrying, which
+    # is exactly the owner's loss ruling applied to a shelf.
+    assert any("requeued to head: pick FAILED" in line
+               for line in task["history"])
+    assert task["state"] in ("QUEUED", "ASSIGNED_LEG1")
+    assert len(f1.legs()) >= 1
+
+
+def test_the_drop_gates_completion(floor):
+    """Nothing left to drive says the truck is AT the dropoff; DONE
+    waits for the load to actually be down. The truck that arrives with
+    the drop still RUNNING keeps its task until the report lands."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    submit(manager, "t-1", "S1", "S2")
+    turn(manager, (f1,), now)
+    task = manager.tasks[0]
+    f1.drive()                                # leg 1; pick goes RUNNING
+    turn(manager, (f1,), now)                 # arrival lands; cycle turns
+    turn(manager, (f1,), now + fm.DWELL_S + 1.0)   # FINISHED -> leg 2 out
+    assert task["state"] == "ASSIGNED_LEG2"
+    f1.drive(finish_cycle=False)              # at S2; drop still RUNNING
+    turn(manager, (f1,), now)
+    assert task["state"] == "ASSIGNED_LEG2", \
+        "the transport completed before the load was down"
+    f1.set_action(task["order_id"] + ":drop", "FINISHED")
+    turn(manager, (f1,), now)
+    assert task["state"] == "DONE"

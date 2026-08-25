@@ -62,10 +62,58 @@ def test_released_after_horizon_is_refused():
         or "base" in vo.validate_order(order(nodes=n))
 
 
-def test_node_actions_are_not_supported_yet():
+def pick(action_id="o1:pick", kind="pick"):
+    return {"actionId": action_id, "actionType": kind,
+            "blockingType": "HARD", "actionParameters": []}
+
+
+def test_a_pick_on_the_final_node_validates():
+    """Item 3: the fork cycle rides the order as a standard node action
+    on the station node - the last released node - and nowhere else."""
+    msg = order()
+    msg["nodes"][-1]["actions"] = [pick()]
+    assert vo.validate_order(msg) == ""
+
+
+def test_a_drop_on_the_final_node_validates():
+    msg = order()
+    msg["nodes"][-1]["actions"] = [pick("o1:drop", "drop")]
+    assert vo.validate_order(msg) == ""
+
+
+def test_an_action_on_an_intermediate_node_is_refused():
+    """A waypoint is a place the pursuit may legitimately cut past
+    outside its own radius (vda_orders' own skip rule) - an action
+    there could be skipped with it. Stations are final nodes on this
+    fleet, so the door only opens where arrival is decided."""
     bad = order()
-    bad["nodes"][0]["actions"] = [{"actionType": "pick"}]
-    assert "unsupported" in vo.validate_order(bad)
+    bad["nodes"][0]["actions"] = [pick()]
+    assert "final" in vo.validate_order(bad)
+
+
+def test_an_unknown_node_action_type_is_refused_at_the_door():
+    bad = order()
+    bad["nodes"][-1]["actions"] = [pick(kind="detectObject")]
+    assert "detectObject" in vo.validate_order(bad)
+
+
+def test_a_second_action_on_one_node_is_refused():
+    bad = order()
+    bad["nodes"][-1]["actions"] = [pick(), pick("o1:drop", "drop")]
+    assert "one action" in vo.validate_order(bad)
+
+
+def test_a_node_action_missing_its_id_is_refused():
+    bad = order()
+    bad["nodes"][-1]["actions"] = [{"actionType": "pick",
+                                    "blockingType": "HARD"}]
+    assert "actionId" in vo.validate_order(bad)
+
+
+def test_an_edge_action_is_refused():
+    bad = order()
+    bad["edges"][0]["actions"] = [pick()]
+    assert "edge" in vo.validate_order(bad)
 
 
 @pytest.mark.parametrize("axis", ["x", "y"])

@@ -117,7 +117,17 @@ MQTT_HOST = "127.0.0.1"
 MQTT_PORT = int(os.environ.get("VDA_MQTT_PORT", "1883"))
 DRAIN_HZ = 10.0
 STATUS_PERIOD_S = 2.0
-DWELL_S = 3.0            # the fork cycle, simulated (owner ruling)
+DWELL_S = 3.0            # legacy: the timed dwell, kept ONLY for an
+                         # order that carried no station action - since
+                         # item 3 the fork cycle runs vehicle-side and
+                         # leg 2 waits on its FINISHED, not on a clock
+# HOW LONG AN ARRIVED PICK MAY STAY UNREPORTED before the fleet calls
+# the transport failed. The vehicle's cycle is 3.0 s and its state
+# period 2.0 s, so a healthy report lands inside ~5 s; fifteen is three
+# times that, and past it something is wrong with the truck or its
+# wire, and the honest move is the requeue - the same answer every
+# other silence gets.
+ACTION_WAIT_S = 15.0
 SUBMIT_TOPIC = "fleet/task/submit"
 STATUS_TOPIC = "fleet/status"
 REFUSED_MAX = 10         # the status document is a screen, not a log
@@ -159,6 +169,7 @@ def _xy(pos):
 def _new_vehicle():
     return {"connection": None, "operating_mode": None, "position": None,
             "executing_order": None, "state_rx": None,
+            "action_states": [],
             "lost": False, "not_eligible": False}
 
 
@@ -384,6 +395,8 @@ class FleetManager:
         # AN ORDER STILL BEING DRIVEN, not merely the last one heard of
         # (module note: an arrived truck reports its orderId forever).
         veh["executing_order"] = order_id if node_states else None
+        acts = msg.get("actionStates")
+        veh["action_states"] = acts if isinstance(acts, list) else []
         veh["state_rx"] = now
         self._chase_cancel(serial, veh, now)
         # ELIGIBILITY IS RE-EARNED BEFORE THIS STATE'S OWN REFUSALS ARE
@@ -533,14 +546,70 @@ class FleetManager:
         if order_id != task.get("order_id"):
             return
         if task["state"] == "ASSIGNED_LEG1":
+            # READ BEFORE end_leg1: the traffic record dies with the leg
+            # (end_leg1 pops it), and the action's name is on it.
+            trf = task.get("traffic") or {}
             task["state"] = fc.advance(task, "leg1_arrived")
             self.floor.end_leg1(task, serial)
-            self.dwell_until[task["task_id"]] = now + DWELL_S
-            task["history"].append(
-                "arrived {} - dwell {:.1f}s".format(task["from"], DWELL_S))
-            self.log.info("%s arrived at %s with %s - dwelling",
-                          serial, task["from"], order_id)
+            if trf.get("action"):
+                # THE PICK GATES LEG 2 (item 3): the vehicle runs the
+                # cycle and reports it, and _expire_dwells sends leg 2
+                # on FINISHED - never on this manager's clock. The
+                # deadline is the fallback for a truck that never says.
+                task["await_action"] = "{}:{}".format(order_id,
+                                                      trf["action"])
+                task["action_deadline"] = now + ACTION_WAIT_S
+                # The old clock stays as a FLOOR under the gate, not a
+                # substitute for it: leg 2 needs the report AND the
+                # dwell to have run - in practice the report is always
+                # the slower of the two, so the wire stays the gate.
+                self.dwell_until[task["task_id"]] = now + DWELL_S
+                task["history"].append(
+                    "arrived {} - {} running".format(task["from"],
+                                                     trf["action"]))
+                self.log.info("%s arrived at %s with %s - %s running",
+                              serial, task["from"], order_id,
+                              trf["action"])
+            else:
+                self.dwell_until[task["task_id"]] = now + DWELL_S
+                task["history"].append(
+                    "arrived {} - dwell {:.1f}s".format(task["from"],
+                                                        DWELL_S))
+                self.log.info("%s arrived at %s with %s - dwelling",
+                              serial, task["from"], order_id)
         elif task["state"] == "ASSIGNED_LEG2":
+            # THE DROP GATES COMPLETION (item 3). Nothing left to drive
+            # says the truck is AT the station; the transport is over
+            # when the load is down, and the vehicle's own actionStates
+            # is the only thing that knows. An order that carried no
+            # drop (a pre-item-3 order, a hand-sent one) completes on
+            # arrival exactly as before.
+            trf = task.get("traffic") or {}
+            if trf.get("action"):
+                aid = "{}:{}".format(order_id, trf["action"])
+                status = next(
+                    (a.get("actionStatus")
+                     for a in (self.vehicles[serial]["action_states"])
+                     if isinstance(a, dict) and a.get("actionId") == aid),
+                    None)
+                if status == "FAILED":
+                    self._requeue(task["task_id"],
+                                  "{} FAILED on {} at {}".format(
+                                      trf["action"], serial, task["to"]))
+                    return
+                if status != "FINISHED":
+                    if task.get("action_deadline") is None:
+                        task["action_deadline"] = now + ACTION_WAIT_S
+                        task["history"].append(
+                            "arrived {} - {} running".format(
+                                task["to"], trf["action"]))
+                    elif now >= task["action_deadline"]:
+                        self._requeue(
+                            task["task_id"],
+                            "{} unreported for {:.0f} s on {} - the "
+                            "truck never said the load was down".format(
+                                trf["action"], ACTION_WAIT_S, serial))
+                    return
             task["state"] = fc.advance(task, "leg2_arrived")
             self.floor.drop_traffic(task, serial)
             task["done_ts"] = time.time()
@@ -637,9 +706,13 @@ class FleetManager:
         return "nearest idle to {}: {}".format(station, ", ".join(parts))
 
     def _expire_dwells(self, now):
-        """A dwell that has run out is PERMISSION to build leg 2 - the
-        task machine has no dwell_done event, and the only thing that
-        leaves DWELL is the leg-2 order actually going out."""
+        """What leaves DWELL is the leg-2 order actually going out, and
+        since item 3 the permission is the VEHICLE's: the pick the leg-1
+        order carried reports FINISHED and leg 2 follows. The manager's
+        own DWELL_S clock survives only for an order that carried no
+        action. A FAILED pick - or one unreported past ACTION_WAIT_S -
+        is the transport failing at the shelf, and the honest answer is
+        the requeue, named."""
         # Oldest submission first, for the same reason the retry pass
         # is: two dwells expiring in one drain must not hand the aisle
         # to whichever of them the queue happens to list first.
@@ -647,6 +720,32 @@ class FleetManager:
                            key=lambda t: (t.get("submitted_ts") or 0.0,
                                           t["task_id"])):
             if task["state"] != "DWELL":
+                continue
+            aid = task.get("await_action")
+            if aid:
+                veh = self.vehicles.get(task["assignee"]) or {}
+                status = next(
+                    (a.get("actionStatus")
+                     for a in veh.get("action_states", [])
+                     if isinstance(a, dict) and a.get("actionId") == aid),
+                    None)
+                deadline = task.get("action_deadline")
+                if status == "FINISHED":
+                    if now < self.dwell_until.get(task["task_id"], 0.0):
+                        continue
+                    task.pop("await_action", None)
+                    task.pop("action_deadline", None)
+                    self._send_leg2(task)
+                elif status == "FAILED":
+                    self._requeue(task["task_id"],
+                                  "pick FAILED on {} at {}".format(
+                                      task["assignee"], task["from"]))
+                elif deadline is not None and now >= deadline:
+                    self._requeue(
+                        task["task_id"],
+                        "pick unreported for {:.0f} s on {} - the truck "
+                        "never said the load was up".format(
+                            ACTION_WAIT_S, task["assignee"]))
                 continue
             if now < self.dwell_until.get(task["task_id"], 0.0):
                 continue
@@ -1080,6 +1179,11 @@ class FleetManager:
         for task in self.tasks:
             if task["task_id"] == task_id:
                 task["order_id"] = None
+                # A requeued transport starts its next life whole: the
+                # action it was waiting on belonged to the order that
+                # just went away.
+                task.pop("await_action", None)
+                task.pop("action_deadline", None)
                 # The history is a screen row, not an audit trail; a
                 # task that loops between trucks must not grow the
                 # retained document without bound.
@@ -1143,8 +1247,10 @@ def main():
         format="%(asctime)s fleet %(levelname)s %(message)s")
     manager = FleetManager(args.host, args.port,
                            traffic_on=not args.no_traffic)
-    manager.log.info("fleet manager up - broker %s:%s, dwell %.1fs, "
-                     "traffic %s", args.host, args.port, DWELL_S,
+    manager.log.info("fleet manager up - broker %s:%s, fork cycle "
+                     "vehicle-reported (pick/drop node actions; legacy "
+                     "dwell %.1fs for actionless orders), traffic %s",
+                     args.host, args.port, DWELL_S,
                      "OFF (--no-traffic: every route granted whole)"
                      if args.no_traffic else "on")
     try:

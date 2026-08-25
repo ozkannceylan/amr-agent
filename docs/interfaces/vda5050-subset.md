@@ -146,7 +146,12 @@ the code's own comment.
    executing** — `cancelOrder` first, always. The spec's append case
    (new order whose first node is the end of the current base) is not
    implemented; the fleet never sends it.
-3. **Node and edge actions in orders are rejected** (`node N actions
+3. **Superseded the same day by item 3** (see section 6's node-action
+   table): an order may now carry exactly one pick or drop on its FINAL
+   node; anything else — an action on a waypoint, a second action, an
+   unknown type, any edge action — is still rejected by name. The
+   original deviation as recorded that morning: node and edge actions
+   in orders were rejected wholesale (`node N actions
    unsupported`). The transport's fork cycle is the manager's dwell timer
    for now; pick/drop as node actions is planned work, and this clause is
    where it will land.
@@ -245,10 +250,24 @@ stub, full-and-not-charging), initPosition (spawn poses come from the
 VEHICLES table; no localization-loss case in the sim). Each returns to this
 table only when its linked state becomes real.
 
-Standard actions **not in scope**: pick, drop (planned — the M6 dwell timer
-stands in for the fork cycle until they land), detectObject,
-finePositioning, waitForTrigger, logReport, enableMap, downloadMap,
-deleteMap (single static map).
+**Node actions** (added 2026-08-25, M6 review item 3 — the same shared
+action object, NODE scope):
+
+| actionType | Where | blockingType | Linked state | Use in this project |
+|---|---|---|---|---|
+| pick | final node of a leg-1 order (the pickup station) — `validate_order` refuses any action elsewhere | HARD | actionStates: WAITING from acceptance, RUNNING on the arrival state, FINISHED after the vehicle's own fork cycle | Leg 2 is sent on FINISHED — the fleet no longer times the dwell blind |
+| drop | final node of a leg-2 order (the dropoff station), same rules | HARD | same lifecycle | The transport completes on FINISHED, not on arrival |
+
+The `actionId` is deterministic — `<orderId>:<actionType>` — because a base
+extension rebuilds the whole order and a fresh id per rebuild would hand the
+vehicle a new action every time the base grew. A cancelOrder FAILs whatever
+is WAITING or RUNNING (spec 6.6.3.2). The cycle is **timed, not actuated**:
+the mast does not move yet, and `vda_agent.FORK_CYCLE_S` is where actuation
+will land.
+
+Standard actions **not in scope**: detectObject, finePositioning,
+waitForTrigger, logReport, enableMap, downloadMap, deleteMap (single
+static map).
 
 Note: cancelOrder/startPause are process commands. They are not stop functions
 in the safety sense; the safety stop path is onboard and in the F-CPU only
@@ -301,7 +320,7 @@ Source: `factsheet.schema`, spec 6.15. Retained; published on connect and on
 | protocolLimits.maxStringLens, maxArrayLens | object | yes | Populated with vehicle limits; 0/absent = no limit |
 | protocolLimits.timing.minOrderInterval, minStateInterval | number | yes | Message-rate contract between fleet manager and vehicle |
 | protocolFeatures.optionalParameters | array of {parameter, support} | yes | Declares which optional fields of section 4/5 the vehicle supports |
-| protocolFeatures.agvActions | array of {actionType, actionScopes, …} | yes | Exactly the **three implemented** actions of section 6 (amendment (b): the factsheet must not advertise what would FAIL) |
+| protocolFeatures.agvActions | array of {actionType, actionScopes, …} | yes | Exactly the **implemented** actions of section 6 — three INSTANT plus, since 2026-08-25, pick and drop with NODE scope (amendment (b): the factsheet must not advertise what would FAIL) |
 | agvGeometry.envelopes2d | array | no | **Sent empty** (`agvGeometry: {}`) — the traffic ledger derives geometry from the vehicle table, not from the wire, and M6.4's note in section 4 of this file still wants it |
 | loadSpecification.loadSets | array | no | Empty until load handling is in scope |
 
@@ -464,8 +483,12 @@ changed, so a differ knows it was deliberate:
   `safetyState.eStop` (NONE/MANUAL) recorded; `cancelUnconfirmed` added to
   the error table.
 * Section 6: rewritten around the **three implemented** instant actions;
-  the five once promised move to a named not-implemented list.
-* Section 8: `protocolFeatures.agvActions` counts three; `agvGeometry`
-  sent empty.
+  the five once promised move to a named not-implemented list. Later
+  the same day, item 3 added **pick and drop as NODE actions** with
+  their own table — the fork cycle now rides the order and gates leg 2
+  and completion, and deviation (3) of section 4 is superseded in
+  place.
+* Section 8: `protocolFeatures.agvActions` counts the implemented set
+  (three instant + two node); `agvGeometry` sent empty.
 * Section 9: the "no extensions" claim replaced by the four project
   errorType names in use.

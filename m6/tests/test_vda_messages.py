@@ -78,7 +78,12 @@ def test_factsheet_is_truthful_and_minimal():
     assert (phys["width"], phys["length"], phys["heightMax"]) == (
         0.90, 2.735, 2.20)
     acts = {a["actionType"] for a in fs["protocolFeatures"]["agvActions"]}
-    assert acts == {"cancelOrder", "stateRequest", "factsheetRequest"}
+    assert acts == {"cancelOrder", "stateRequest", "factsheetRequest",
+                    "pick", "drop"}
+    scopes = {a["actionType"]: a["actionScopes"]
+              for a in fs["protocolFeatures"]["agvActions"]}
+    assert scopes["pick"] == ["NODE"] and scopes["drop"] == ["NODE"]
+    assert scopes["cancelOrder"] == ["INSTANT"]
 
 
 def test_connection_payload():

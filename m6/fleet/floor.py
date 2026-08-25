@@ -796,6 +796,11 @@ class Floor:
         # has expired. A closure that appears mid-leg does not bend a
         # route already promised; it bends the next one.
         shut = self.closed_set()
+        # THE LEG'S STATION WORK (item 3): leg 1 picks, leg 2 drops, and
+        # anything else (there is nothing else today) drives bare. Part
+        # of the leg's identity like `avoid`: an extension rebuilds the
+        # same order, action and deterministic actionId included.
+        action = {"leg1": "pick", "leg2": "drop"}.get(leg)
         points = leg_points(start_xy, station_id, avoid=shut)
         if points is None:
             self.fleet._refuse_order(
@@ -830,7 +835,8 @@ class Floor:
             return None, None
         self.said_blocked.pop(serial, None)
         order = build_leg_order(order_id, start_xy, station_id,
-                                released_count=released, avoid=shut)
+                                released_count=released, avoid=shut,
+                                action=action)
         node_xy = {(n["nodeId"], n["sequenceId"]):
                    (n["nodePosition"]["x"], n["nodePosition"]["y"])
                    for n in order["nodes"]}
@@ -844,7 +850,7 @@ class Floor:
                        "station": station_id, "node_xy": node_xy,
                        "released": released, "update_id": 0,
                        "pending": None, "last_xy": hold_points[0],
-                       "ext_refused": 0, "avoid": shut}
+                       "ext_refused": 0, "avoid": shut, "action": action}
 
     def _no_floor(self, serial, task, leg, station_id):
         """Said ONCE per stuck truck, not ten times a second. _assign runs
@@ -954,7 +960,8 @@ class Floor:
         order = build_leg_order(task["order_id"], trf["start_xy"],
                                 trf["station"], released_count=released,
                                 update_id=update,
-                                avoid=trf.get("avoid", ()))
+                                avoid=trf.get("avoid", ()),
+                                action=trf.get("action"))
         if self.fleet._publish_extension(serial, task, order, released,
                                          update):
             trf["pending"] = (update, released)

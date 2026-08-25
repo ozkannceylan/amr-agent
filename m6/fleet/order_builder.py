@@ -120,7 +120,7 @@ def leg_points(start_xy, station_id, avoid=()):
 
 
 def build_leg_order(order_id, start_xy, station_id, released_count=None,
-                    update_id=0, avoid=()):
+                    update_id=0, avoid=(), action=None):
     """The order for one leg, or None when there is no route.
 
     None covers both refusals plan_route has - an unknown station id and
@@ -163,11 +163,22 @@ def build_leg_order(order_id, start_xy, station_id, released_count=None,
     cut = len(points) if released_count is None \
         else max(0, min(int(released_count), len(points)))
     arrive_m = STATIONS[station_id]["arrive_m"]
+    # THE FORK CYCLE RIDES THE STATION NODE (item 3): `action` is "pick"
+    # on a leg 1, "drop" on a leg 2, None on a step-aside's plain drive.
+    # The actionId is DETERMINISTIC - "<orderId>:<action>" - because an
+    # extension rebuilds this whole message: a fresh uuid per rebuild
+    # would hand the vehicle a new action every time the base grew, and
+    # its actionStates would fill with orphans no one ever runs.
+    acts = [] if action is None else [{
+        "actionId": "{}:{}".format(order_id, action),
+        "actionType": str(action), "blockingType": "HARD",
+        "actionParameters": []}]
     nodes, edges = [], []
     for i, (x, y) in enumerate(points):
         last = i == len(points) - 1
         node = {"nodeId": station_id if last else "wp{}".format(i + 1),
-                "sequenceId": 2 * i, "released": i < cut, "actions": [],
+                "sequenceId": 2 * i, "released": i < cut,
+                "actions": list(acts) if last else [],
                 "nodePosition": {"x": float(x), "y": float(y),
                                  "mapId": "warehouse"}}
         if last:

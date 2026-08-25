@@ -129,6 +129,17 @@ NAV_SETTLE_S = 0.3
 # reading a FAILED actionState is reading about a truck that is
 # probably still moving NOW, not one that stopped a minute ago.
 CANCEL_CONFIRM_S = 5.0
+# THE FORK CYCLE, VEHICLE-SIDE (item 3). The owner's 2026-08-21 ruling
+# put a dwell between a transport's two legs to stand in for the fork
+# cycle; until this round the MANAGER timed it, which meant the wire
+# never carried the pick and the fleet was guessing at its own trucks.
+# The cycle now runs here, as the node action the order carries -
+# RUNNING at arrival, FINISHED when it is done - and the manager gates
+# leg 2 on the report instead of its own clock. The 3.0 s is the same
+# ruling's number. THE MAST DOES NOT MOVE YET: the cycle is timed, not
+# actuated - wiring the fork command through the gate is its own work
+# and this constant is where it will land.
+FORK_CYCLE_S = 3.0
 # ------------------------------------------------------------------
 
 
@@ -171,6 +182,7 @@ class VdaAgent(Node):
         self.horizon = []
         self.executing = False
         self.action_states = []
+        self.node_action = None      # the running fork cycle, or None
         self.cancel_pending = None   # the closed-loop cancel, or None
         self.last_state_pub = 0.0
         self.route_sent_at = 0.0     # NAV_SETTLE_S is measured from here
@@ -355,6 +367,21 @@ class VdaAgent(Node):
         if self.progress.reached != len(self.progress.nodes):
             return False
         self.executing = False
+        # THE STATION ACTION STARTS WHERE ARRIVAL IS DECIDED (item 3).
+        # validate_order admits an action on the final node only, so
+        # this is the one place it can come due; the same state that
+        # says "arrived" says the cycle is RUNNING, and drain() reports
+        # FINISHED when the clock the plant does not have yet runs out.
+        acts = self.order["nodes"][-1].get("actions") or []
+        if acts:
+            act = acts[0]
+            self._set_action(act["actionId"], act["actionType"], "RUNNING")
+            self.node_action = {
+                "id": act["actionId"], "type": act["actionType"],
+                "until": time.monotonic() + FORK_CYCLE_S}
+            self.get_logger().info(
+                "{} started at the station - {:.1f} s cycle".format(
+                    act["actionType"], FORK_CYCLE_S))
         self.publish_state("arrived")
         return True
 
@@ -384,6 +411,12 @@ class VdaAgent(Node):
         # AFTER the inbox and BEFORE the periodic state: a cancel that
         # confirms on this pass should say so on this pass's state.
         self._pump_cancel()
+        if self.node_action is not None \
+                and time.monotonic() >= self.node_action["until"]:
+            act = self.node_action
+            self.node_action = None
+            self._set_action(act["id"], act["type"], "FINISHED")
+            self.publish_state("station action finished")
         if time.monotonic() - self.last_state_pub >= STATE_PERIOD_S:
             self.publish_state("periodic")
 
@@ -501,6 +534,7 @@ class VdaAgent(Node):
         self._note_arrive_radius(released[-1], arrive_m)
         self.order, self.horizon = msg, horizon
         self.progress = vo.Progress(released)
+        self._register_node_action(msg)
         self._send_route(points, arrive_m, msg["orderId"])
         self.publish_state("order accepted")
 
@@ -606,6 +640,7 @@ class VdaAgent(Node):
             self.get_logger().info(
                 "extension released nothing ahead of the truck - the "
                 "route already in flight stands")
+        self._register_node_action(msg)
         self.publish_state("order extended")
         return ""
 
@@ -657,6 +692,19 @@ class VdaAgent(Node):
                          "referenceValue": aid}]})
         self.publish_state("actions handled", extras)
 
+    def _register_node_action(self, msg):
+        """The station action rides in WAITING from the moment the order
+        is taken (spec 6.8: actions from orders are WAITING until they
+        run). Idempotent by actionId, because an extension rebuilds the
+        whole message with the SAME deterministic id and a re-register
+        would knock a FINISHED cycle back to WAITING."""
+        acts = msg["nodes"][-1].get("actions") or []
+        if not acts:
+            return
+        aid = acts[0]["actionId"]
+        if not any(a["actionId"] == aid for a in self.action_states):
+            self._set_action(aid, acts[0]["actionType"], "WAITING")
+
     # ---- the closed-loop cancel ----
     def _begin_cancel(self, action_id=None, why=""):
         """Start asking nav to stop, and keep asking until it says it has.
@@ -664,7 +712,17 @@ class VdaAgent(Node):
         The first publish happens HERE rather than on the next drain, so
         a cancel that nav is already listening for costs nothing extra;
         everything after it is _pump_cancel's.
+
+        A STATION ACTION DIES WITH THE ORDER (spec 6.6.3.2): whatever
+        was WAITING or RUNNING when the cancel began is FAILED - the
+        fork cycle it stood for is not going to happen. Swept before
+        the cancelOrder's own RUNNING actionState is written below, so
+        the sweep cannot eat it.
         """
+        for act in self.action_states:
+            if act["actionStatus"] in ("WAITING", "RUNNING"):
+                act["actionStatus"] = "FAILED"
+        self.node_action = None
         now = time.monotonic()
         self.cancel_pending = {
             "action_id": action_id,

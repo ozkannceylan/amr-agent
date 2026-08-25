@@ -25,9 +25,14 @@ Owner: "Sirayla basla hepsini coz; 1, 4 ve 5 cok onemli."
       gecen bir boot'ta tekrar denenecek (soguk makine / Windows reboot).
 - [x] 2. vda5050-subset.md koda esitlendi (Amendment 2026-08-25;
       pathBlocked satiri dahil).
-- [ ] 3. pick/drop node aksiyonlari; dwell zamanlayicisi yerine
-      actionState FINISHED tetiklemesi. TDD. (SIRADA)
+- [x] 3. pick/drop node aksiyonlari: order_builder son node'a
+      deterministik actionId'li aksiyon koyar; vda_orders kapisi yalniz
+      final node'da tek pick/drop kabul eder; vda_agent dongusu
+      WAITING->RUNNING(varista)->FINISHED(3.0 s) raporlar, iptal FAILED
+      eder; fleet leg 2'yi ve tamamlanmayi rapora kilitler (dwell saati
+      artik yalnizca taban). Mast HENUZ hareket etmiyor (FORK_CYCLE_S
+      aktuasyonun yeri).
 
 ## Review
-Suite: 569 passed, 0 skipped (552 + 17 yeni test). Kanit: PROOF.md
+Suite: 583 passed, 0 skipped (guen basinda 552). Kanit: PROOF.md
 "M6 review revise round" bolumu; video 08; vault raporu.

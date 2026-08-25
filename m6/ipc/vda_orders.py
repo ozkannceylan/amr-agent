@@ -52,6 +52,40 @@ def _real(v):
         return False
 
 
+# THE TWO ACTIONS A NODE MAY CARRY, AND WHERE (item 3). The fork cycle
+# rides the order as a standard action - pick at the pickup station,
+# drop at the dropoff - on the FINAL node only: a waypoint is a place
+# the pursuit may legitimately pass outside its own radius (see
+# DEFAULT_DEV_M), and an action there could be skipped with it. The
+# final node is where arrival is decided, so it is where work happens.
+NODE_ACTIONS = ("pick", "drop")
+
+
+def _node_actions_ok(actions, index, is_final):
+    """'' when this node's action list is one this vehicle can honour."""
+    if not isinstance(actions, list):
+        return "node {} actions must be an array".format(index)
+    if not actions:
+        return ""
+    if not is_final:
+        return ("node {} carries an action - only the final node may; "
+                "a waypoint can be legitimately skipped and its action "
+                "would be skipped with it".format(index))
+    if len(actions) > 1:
+        return ("node {} carries {} actions - one action per station, "
+                "a fork cycle is one move".format(index, len(actions)))
+    act = actions[0]
+    if not isinstance(act, dict):
+        return "node {} action must be an object".format(index)
+    for key in ("actionId", "actionType", "blockingType"):
+        if not isinstance(act.get(key), str) or not act.get(key):
+            return "node {} action missing {}".format(index, key)
+    if act["actionType"] not in NODE_ACTIONS:
+        return ("node {} actionType {!r} is not implemented - this "
+                "vehicle picks and drops".format(index, act["actionType"]))
+    return ""
+
+
 def validate_order(msg):
     """'' when valid, else the reason - which names the missing thing."""
     if not isinstance(msg, dict):
@@ -87,13 +121,17 @@ def validate_order(msg):
         if dev is not None and not _real(dev):
             return ("node {} allowedDeviationXY must be a finite number, "
                     "not {!r}".format(i, dev))
-        if n["actions"]:
-            return "node {} actions unsupported until M6.3".format(i)
+        reason = _node_actions_ok(n["actions"], i, i == len(nodes) - 1)
+        if reason:
+            return reason
     for i, e in enumerate(edges):
         for key in ("edgeId", "sequenceId", "released",
                     "startNodeId", "endNodeId", "actions"):
             if key not in e:
                 return "edge {} missing {}".format(i, key)
+        if e["actions"]:
+            return ("edge {} actions unsupported - this fleet acts at "
+                    "stations, not on the move".format(i))
         if e["sequenceId"] != 2 * i + 1:
             return "edge {} sequenceId must be {} (interleaved rule)".format(
                 i, 2 * i + 1)

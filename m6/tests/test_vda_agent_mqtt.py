@@ -960,3 +960,89 @@ def test_nav_blocked_is_reported_as_pathBlocked_once(rig):
     # what takes the work away
     assert agent.order["orderId"] == "o-int-1"
     assert agent.executing
+
+
+def order_with_pick():
+    msg = valid_order()
+    msg["nodes"][-1]["actions"] = [{
+        "actionId": "o-int-1:pick", "actionType": "pick",
+        "blockingType": "HARD", "actionParameters": []}]
+    return msg
+
+
+def test_the_fork_cycle_runs_at_the_station_and_reports_itself(rig):
+    """Item 3, the vehicle half: the pick rides the order as WAITING,
+    goes RUNNING on the state that says arrived, and FINISHES on the
+    vehicle's own clock - the wire carries the cycle the manager used
+    to time blind."""
+    from std_msgs.msg import String
+    import vda_agent as va
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    probe.publish("uagv/v2/amragent/f1/order",
+                  json.dumps(order_with_pick()), qos=0)
+    spin([agent, helper], 1.5)
+    assert agent.executing
+    waiting = [a for a in agent.action_states
+               if a["actionId"] == "o-int-1:pick"]
+    assert waiting and waiting[0]["actionStatus"] == "WAITING"
+    # arrival: nav says ARRIVED and odometry has counted every node
+    from nav_msgs.msg import Odometry
+    odom = helper.create_publisher(
+        Odometry, agent_topics(agent), 10)
+    msg = Odometry()
+    msg.pose.pose.position.x, msg.pose.pose.position.y = 6.0, -8.0
+    for _ in range(3):
+        odom.publish(msg)
+        spin([agent, helper], 0.3)
+    nav_pub.publish(String(data=json.dumps(
+        {"state": "ARRIVED", "goal": "o-int-1", "note": "",
+         "route": [], "pose": [6.0, -8.0, 0.0]})))
+    spin([agent, helper], 1.0)
+    assert not agent.executing, "arrival never settled"
+    running = [s for t, s in caught["mqtt"] if t.endswith("/state")
+               and any(a.get("actionId") == "o-int-1:pick"
+                       and a.get("actionStatus") == "RUNNING"
+                       for a in s.get("actionStates", []))]
+    assert running, "the cycle never reported RUNNING"
+    spin([agent, helper], va.FORK_CYCLE_S + 1.0)
+    finished = [a for a in agent.action_states
+                if a["actionId"] == "o-int-1:pick"]
+    assert finished[0]["actionStatus"] == "FINISHED"
+    states = [s for t, s in caught["mqtt"] if t.endswith("/state")]
+    assert any(any(a.get("actionId") == "o-int-1:pick"
+                   and a.get("actionStatus") == "FINISHED"
+                   for a in s.get("actionStates", []))
+               for s in states), "FINISHED never reached the wire"
+
+
+def agent_topics(agent):
+    """The odom topic the agent subscribed - read from its config, so
+    the test cannot drift from the wiring."""
+    import yaml
+    from status_contract import CONFIG_PATH
+    with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle)["topics"]["gz_odom"]
+
+
+def test_a_cancel_fails_the_cycle_it_interrupts(rig):
+    """spec 6.6.3.2: cancelOrder cancels the actions with the order. A
+    WAITING pick must go FAILED, not linger as a promise."""
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    probe.publish("uagv/v2/amragent/f1/order",
+                  json.dumps(order_with_pick()), qos=0)
+    spin([agent, helper], 1.5)
+    assert agent.executing
+    probe.publish("uagv/v2/amragent/f1/instantActions", json.dumps(
+        {"actions": [{"actionId": "cx", "actionType": "cancelOrder",
+                      "blockingType": "HARD"}]}), qos=0)
+    spin([agent, helper], 1.0)
+    pick = next(a for a in agent.action_states
+                if a["actionId"] == "o-int-1:pick")
+    assert pick["actionStatus"] == "FAILED"

@@ -317,3 +317,28 @@ def test_a_leg_order_can_be_built_around_a_closed_node():
     named = {(n["nodePosition"]["x"], n["nodePosition"]["y"])
              for n in order["nodes"]}
     assert (0.0, -10.0) not in named
+
+
+def test_a_leg_can_carry_its_fork_cycle_as_a_node_action():
+    """Item 3: leg 1 picks, leg 2 drops - a standard VDA 5050 action on
+    the station node, with a DETERMINISTIC actionId. Deterministic
+    because an extension rebuilds the whole order: a fresh uuid per
+    rebuild would be a new action to the vehicle every time the base
+    grew, and the actionState history would fill with orphans."""
+    import vda_orders as vo
+    order = build_leg_order("ft-a", (-3.0, -5.5), "S1", action="pick")
+    assert vo.validate_order(order) == ""
+    acts = order["nodes"][-1]["actions"]
+    assert len(acts) == 1
+    assert acts[0]["actionType"] == "pick"
+    assert acts[0]["actionId"] == "ft-a:pick"
+    assert acts[0]["blockingType"] == "HARD"
+    assert all(n["actions"] == [] for n in order["nodes"][:-1])
+    again = build_leg_order("ft-a", (-3.0, -5.5), "S1", action="pick",
+                            released_count=1, update_id=1)
+    assert again["nodes"][-1]["actions"][0]["actionId"] == "ft-a:pick"
+
+
+def test_a_leg_without_an_action_still_builds_bare():
+    order = build_leg_order("ft-b", (-3.0, -5.5), "S1")
+    assert all(n["actions"] == [] for n in order["nodes"])

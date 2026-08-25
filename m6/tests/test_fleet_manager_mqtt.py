@@ -109,6 +109,7 @@ class FakeVehicle:
         self.last_node = ("", 0)
         self.driving = False
         self.errors = []
+        self.action_states = []
         self.cancels = []
         self.reject_next = False
         self.manual_after_reject = False
@@ -169,6 +170,9 @@ class FakeVehicle:
                         continue
                     self.cancels.append(
                         (time.monotonic(), act.get("actionId")))
+                    for a in self.action_states:
+                        if a["actionStatus"] in ("WAITING", "RUNNING"):
+                            a["actionStatus"] = "FAILED"
                     self.order, self.order_id = None, ""
                     self.update_id, self.reached = 0, 0
                     self.last_node = ("", 0)
@@ -208,6 +212,16 @@ class FakeVehicle:
         self.order = order
         self.order_id = order["orderId"]
         self.update_id = order["orderUpdateId"]
+        # The station action rides in WAITING from acceptance, keyed on
+        # the same deterministic actionId the agent uses - idempotent,
+        # because an extension re-delivers it.
+        for act in order["nodes"][-1].get("actions") or []:
+            if not any(a["actionId"] == act["actionId"]
+                       for a in self.action_states):
+                self.action_states.append(
+                    {"actionId": act["actionId"],
+                     "actionType": act["actionType"],
+                     "actionStatus": "WAITING"})
         if self.driving:
             # An extension reaches a truck that is already standing at
             # the end of its base: it simply drives on.
@@ -247,6 +261,15 @@ class FakeVehicle:
         self.reached = len(released)
         if not self.horizon:
             self.driving = False      # the order is finished, not paused
+            # ...and the station cycle runs. A fake's forks are instant:
+            # the FINISHED lands on the same state as the arrival, which
+            # is FASTER than the real agent ever reports - the manager's
+            # dwell floor is what keeps leg 2 from outrunning the plant.
+            if self.order is not None:
+                for act in self.order["nodes"][-1].get("actions") or []:
+                    for a in self.action_states:
+                        if a["actionId"] == act["actionId"]:
+                            a["actionStatus"] = "FINISHED"
 
     def arrive(self):
         """Drive this order to the end of its released base and stop.
@@ -278,7 +301,8 @@ class FakeVehicle:
             payload = json.dumps(vm.build_state(
                 self._hdr("state"), ctx, self.pose, bool(ctx["nodeStates"]),
                 self.mode, errors,
-                {"eStop": "NONE", "fieldViolation": False}, []))
+                {"eStop": "NONE", "fieldViolation": False},
+                [dict(a) for a in self.action_states]))
         try:
             self.mq.publish(vm.topic(self.vid, "state"), payload, qos=0)
         except Exception:
