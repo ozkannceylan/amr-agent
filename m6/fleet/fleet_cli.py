@@ -175,7 +175,7 @@ def _list(doc, key):
     return value if isinstance(value, list) else []
 
 
-def traffic_lines(doc):
+def traffic_lines(doc, now=None):
     """The TRAFFIC section, or nothing at all.
 
     NOTHING AT ALL IS A REAL ANSWER: a retained document written by a
@@ -232,12 +232,20 @@ def traffic_lines(doc):
     for entry in _list(block, "idle"):
         # A truck that no longer reserves the node it is standing on is
         # the one thing on this screen an operator could otherwise read
-        # as the fleet having forgotten it.
+        # as the fleet having forgotten it. THE AGE IS PRINTED because
+        # these entries persist as long as the truck stands: on the
+        # 2026-08-24 operator recording four of them held the screen
+        # unchanged for eleven minutes and read as live warnings. The
+        # entry has carried `ts` since M6.5; this is its first reader.
         if isinstance(entry, dict):
+            ts = entry.get("ts")
+            age = ""
+            if isinstance(ts, (int, float)) and now is not None:
+                age = "   ({:.0f} s ago)".format(max(0.0, now - ts))
             lines.append("  idle timeout: {} gave back {} element(s) at {} "
-                         "- it is still standing there".format(
+                         "- it is still standing there{}".format(
                              entry.get("vehicle"), entry.get("freed"),
-                             entry.get("node")))
+                             entry.get("node"), age))
     for entry in _list(block, "aside"):
         # A STEP-ASIDE IS THE ONE ORDER IN THIS SYSTEM WITH NO TASK
         # BEHIND IT, so without this row an operator watching a truck
@@ -253,6 +261,16 @@ def traffic_lines(doc):
     for entry in _list(block, "blocked"):
         if isinstance(entry, dict):
             lines.append("  ** BLOCKED: {} **".format(entry.get("why")))
+    for entry in _list(block, "closed"):
+        # A closed node is the floor telling a PERSON where to walk: a
+        # vehicle reported a body there, nothing is granted onto it,
+        # and the clock says how long the fleet will keep planning
+        # around it before it asks again.
+        if isinstance(entry, dict):
+            lines.append("  ** CLOSED {} - body reported by {}, {} s "
+                         "left **".format(entry.get("node"),
+                                          entry.get("by"),
+                                          entry.get("left_s")))
     return lines
 
 
@@ -290,6 +308,24 @@ def render(doc, now=None):
                                                  STATUS_PERIOD_S))
         lines.append("     Every row below is that much older again. **")
 
+    # THE SHIFT STRIP: the same rows the tables below print, added up
+    # once, where a viewer's eye lands first. A recording is watched at
+    # a glance and a glance cannot count table rows (M6 review item 4).
+    states = [t.get("state") for t in tasks if isinstance(t, dict)]
+    stalled_strip = _dict(doc, "stalled")
+    strip = "  shift: {} driving · {} dwell · {} queued · {} done · " \
+            "{} refused".format(
+                sum(1 for s in states
+                    if s in ("ASSIGNED_LEG1", "ASSIGNED_LEG2")),
+                sum(1 for s in states if s == "DWELL"),
+                doc.get("queue_len", "?"), doc.get("done_count", "?"),
+                len(refused))
+    if stalled_strip:
+        strip += " · NOT MOVING: " + "  ".join(
+            "{} {:.0f}s".format(serial, stalled_strip[serial])
+            for serial in sorted(stalled_strip))
+    lines.append(strip)
+
     lines += ["", "VEHICLES ({})".format(len(vehicles)),
               _head(VEHICLE_COLS)]
     if not vehicles:
@@ -318,7 +354,7 @@ def render(doc, now=None):
                  if isinstance(submitted, (int, float)) else None),
             history[-1] if isinstance(history, list) and history else None)))
 
-    lines += traffic_lines(doc)
+    lines += traffic_lines(doc, now)
 
     stalled = _dict(doc, "stalled")
     if stalled:

@@ -58,6 +58,46 @@ FG = (222, 226, 232)
 DIM = (120, 128, 140)
 
 
+class RateClock:
+    """Sim time beside wall time, and the RECENT ratio between them.
+
+    The overhead camera stamps frames in SIM time and delivers them at
+    the plant's own pace, so the finished file plays neither at sim rate
+    nor at wall rate - and a viewer has no way to know that (M6 review
+    item 4: the 2026-08-23 recordings are ~2x wall and nothing on screen
+    says so). This strip is the fix: the sim clock, and the sim/wall
+    ratio over a sliding window, printed on every frame.
+
+    THE WINDOW IS WHY IT IS A CLASS AND NOT TWO SUBTRACTIONS. A run
+    average would let a stall five minutes ago drag the figure for the
+    rest of the take; sixty seconds is long enough to smooth scheduler
+    noise and short enough that the number describes the take the viewer
+    is watching. One sample prints the clock and stays silent about the
+    rate - a 0.00 invented from a single frame reads as a dead rig.
+    """
+
+    def __init__(self, window_s=60.0):
+        self._window_s = float(window_s)
+        self._samples = []           # (sim_s, wall_s), wall ascending
+
+    def note(self, sim_s, wall_s):
+        self._samples.append((float(sim_s), float(wall_s)))
+        cutoff = float(wall_s) - self._window_s
+        while len(self._samples) > 1 and self._samples[0][1] < cutoff:
+            self._samples.pop(0)
+
+    def line(self):
+        if not self._samples:
+            return "sim - s"
+        sim, wall = self._samples[-1]
+        out = "sim {:.1f} s".format(sim)
+        first_sim, first_wall = self._samples[0]
+        if wall > first_wall:
+            out += " · RTF {:.2f}".format(
+                (sim - first_sim) / (wall - first_wall))
+        return out
+
+
 def _font():
     """A monospace face, or a refusal that names the problem.
 
@@ -154,11 +194,21 @@ def main():
         except ValueError:
             pass
 
+    # THE SUBSCRIPTION LIVES IN on_connect AND THE CLIENT ID IS UNIQUE,
+    # and both halves were paid for on 2026-08-25: a leftover recorder
+    # from an aborted take shared the id, the broker kicked this one,
+    # paho reconnected - and the one subscribe() made at startup was
+    # gone, so the right-hand panel froze on the first document it ever
+    # saw and 700 s of takes recorded a screen from before the shift.
+    # vda_agent subscribes in _announce for exactly this reason.
+    def on_connect(client, _userdata, _flags, _reason, _properties=None):
+        client.subscribe(STATUS_TOPIC, qos=1)
+
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
-                         client_id="record-operator")
+                         client_id="record-operator-{}".format(os.getpid()))
+    client.on_connect = on_connect
     client.on_message = on_message
     client.connect(args.host, args.port)
-    client.subscribe(STATUS_TOPIC, qos=1)
     client.loop_start()
 
     class Recorder(Node):
@@ -169,6 +219,7 @@ def main():
             self._frames = 0
             self._panel = None       # the last drawn screen
             self._panel_key = None   # what it was drawn from
+            self._rate_clock = RateClock()   # NOT _clock: rclpy.Node owns that name
             self._t0 = time.monotonic()
             self._last_frame = self._t0
             self.create_subscription(ImageMsg, TOPIC, self._frame, 10)
@@ -213,6 +264,23 @@ def main():
                 "RGB", (msg.width + PANEL_W, msg.height), BG)
             frame.paste(left, (0, 0))
             frame.paste(right, (msg.width, 0))
+            # THE CLOCK STRIP GOES ON THE FRAME, NOT ON THE PANEL. The
+            # panel is cached on the document's ts precisely because
+            # drawing it per frame cost the camera its delivery
+            # (measured 2026-08-24); this strip changes every frame, so
+            # it is one short line drawn directly - a box and a string,
+            # not a sixty-line layout.
+            wall = time.time()
+            self._rate_clock.note(
+                msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                wall)
+            strip = "{} · wall {}".format(
+                self._rate_clock.line(),
+                time.strftime("%H:%M:%S", time.localtime(wall)))
+            from PIL import ImageDraw
+            draw = ImageDraw.Draw(frame)
+            draw.rectangle((0, 0, 8 + 8 * len(strip), 20), fill=BG)
+            draw.text((6, 3), strip, font=font, fill=FG)
             if self._sink is None:
                 self._sink = subprocess.Popen(
                     [_ffmpeg_binary(), "-y", "-loglevel", "error",

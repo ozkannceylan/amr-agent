@@ -386,3 +386,64 @@ def test_demo_dry_run_prints_the_plan_and_needs_no_broker(capsys):
 
 def test_demo_refuses_a_non_positive_in_flight():
     assert cli.main(["demo", "--in-flight", "0", "--dry-run"]) == 2
+
+
+# ---- M6 review item 4: the screen carries its own arithmetic ----
+
+def test_the_header_carries_the_shift_totals():
+    """One strip under the header: driving / dwell / queued / done /
+    refused, counted from the same rows the tables below print. An
+    operator glancing at a recording should not have to count table
+    rows to know whether the shift is moving."""
+    doc = json.loads(json.dumps(DOC))
+    out = cli.render(doc, now=NOW)
+    strip = next((l for l in out.split("\n") if l.strip().startswith("shift:")),
+                 None)
+    assert strip is not None, "no shift strip under the header"
+    states = [t.get("state") for t in doc["tasks"]]
+    driving = sum(1 for s in states if s in ("ASSIGNED_LEG1",
+                                             "ASSIGNED_LEG2"))
+    dwell = sum(1 for s in states if s == "DWELL")
+    assert "{} driving".format(driving) in strip
+    assert "{} dwell".format(dwell) in strip
+    assert "{} queued".format(doc["queue_len"]) in strip
+    assert "{} done".format(doc["done_count"]) in strip
+    assert "{} refused".format(len(doc["refused"])) in strip
+
+
+def test_a_stalled_truck_reaches_the_shift_strip_by_name():
+    doc = json.loads(json.dumps(DOC))
+    doc["stalled"] = {"f2": 93.4}
+    out = cli.render(doc, now=NOW)
+    strip = next(l for l in out.split("\n") if l.strip().startswith("shift:"))
+    assert "f2" in strip and "93" in strip
+
+
+def test_an_idle_timeout_line_says_how_long_ago():
+    """The idle entries have carried a ts since M6.5 and the screen
+    never printed it - measured on the 2026-08-24 operator recording,
+    where four of these lines stood unchanged for eleven minutes and
+    read as live warnings. The age is the difference."""
+    doc = json.loads(json.dumps(DOC))
+    doc["traffic"] = {"enabled": True, "holds": {}, "waiting": {},
+                      "bases": {}, "yielded": [], "stuck": {},
+                      "yields": [], "blocked": [], "aside": [],
+                      "idle": [{"vehicle": "f3", "freed": 1,
+                                "node": "(10.0,10.0)", "ts": NOW - 312.0}]}
+    out = cli.render(doc, now=NOW)
+    line = next(l for l in out.split("\n") if "idle timeout" in l)
+    assert "312 s ago" in line
+
+
+def test_an_idle_entry_without_a_ts_still_renders():
+    """A document written by an older manager has no ts on these
+    entries; the line must not crash and must not invent an age."""
+    doc = json.loads(json.dumps(DOC))
+    doc["traffic"] = {"enabled": True, "holds": {}, "waiting": {},
+                      "bases": {}, "yielded": [], "stuck": {},
+                      "yields": [], "blocked": [], "aside": [],
+                      "idle": [{"vehicle": "f3", "freed": 1,
+                                "node": "(10.0,10.0)"}]}
+    out = cli.render(doc, now=NOW)
+    line = next(l for l in out.split("\n") if "idle timeout" in l)
+    assert "ago" not in line
