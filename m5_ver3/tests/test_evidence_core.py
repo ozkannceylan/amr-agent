@@ -563,3 +563,91 @@ def test_in_a_turn_base_link_moves_faster_than_the_axle_it_pivots_on():
     assert abs(ax[-1] - axle_x[-1]) < 1e-9 and abs(ay[-1] - axle_y[-1]) < 1e-9
     assert (evidence_core.path_length(ax, ay)
             < evidence_core.path_length(xs, ys) - 0.1)
+
+
+# ----------------------------------------------------------------------
+# every held corner of a run, not only the longest one
+# ----------------------------------------------------------------------
+
+def _four_corner_trace(hold_s=9.14, straight_s=3.33, slew_s=1.0, dt=0.05,
+                       target=-1.25, speed=0.3):
+    """A square: four corners, each slewed into and held, with straights
+    between them. The shape config.yaml's square: profile drives."""
+    t, steer, spd = [], [], []
+    now = 0.0
+
+    def push(seconds, value):
+        nonlocal now
+        for _ in range(int(round(seconds / dt))):
+            t.append(now)
+            steer.append(value)
+            spd.append(speed)
+            now += dt
+
+    push(2.0, 0.0)
+    for _ in range(4):
+        push(straight_s, 0.0)
+        # the axis slews in over slew_s, then holds
+        steps = int(round(slew_s / dt))
+        for i in range(steps):
+            t.append(now)
+            steer.append(target * (i + 1) / steps)
+            spd.append(speed)
+            now += dt
+        push(hold_s - slew_s, target)
+    push(2.0, 0.0)
+    return t, steer, spd
+
+
+def test_every_held_corner_is_found_and_not_only_the_longest():
+    # The square turns four corners at ONE steer angle, and the delivered
+    # yaw differs between them - so a reduction that returns only the
+    # longest run cannot produce the per-corner table at all.
+    t, steer, speed = _four_corner_trace()
+    runs = evidence_core.steady_runs(
+        t, steer, speed, -1.25, steer_tol_rad=0.02, speed_min_mps=0.05,
+        trim_start_s=1.0, trim_end_s=0.3, min_window_s=6.0)
+    assert runs.found == 4
+    assert len(runs.windows) == 4
+
+
+def test_each_corner_is_trimmed_at_both_ends():
+    # The axis slews INTO a corner and back OUT of it, and neither is a
+    # steady state. corner_creep discards a settle at the start only,
+    # because it has one long corner and no exit inside the window; a
+    # square's corners are short enough that the exit is inside.
+    t, steer, speed = _four_corner_trace()
+    runs = evidence_core.steady_runs(
+        t, steer, speed, -1.25, steer_tol_rad=0.02, speed_min_mps=0.05,
+        trim_start_s=1.0, trim_end_s=0.3, min_window_s=6.0)
+    first = runs.windows[0]
+    # the hold begins at 2.0 + 3.33 + 1.0 (slew) and runs hold_s - slew_s
+    held_start = 2.0 + 3.33 + 1.0
+    held_end = 2.0 + 3.33 + 9.14
+    assert first.t0 >= held_start + 1.0 - 1e-9
+    assert first.t1 <= held_end - 0.3 + 1e-9
+    assert first.t1 - first.t0 >= 6.0
+
+
+def test_a_corner_too_short_after_trimming_is_dropped_and_the_count_says_so():
+    t, steer, speed = _four_corner_trace()
+    runs = evidence_core.steady_runs(
+        t, steer, speed, -1.25, steer_tol_rad=0.02, speed_min_mps=0.05,
+        trim_start_s=1.0, trim_end_s=0.3, min_window_s=30.0)
+    assert runs.found == 4
+    assert runs.windows == []
+
+
+def test_the_single_window_reduction_is_one_of_the_runs():
+    # steady_window() and steady_runs() must not be two opinions about
+    # what "held" means: the first is the longest of the second, under
+    # the same criterion.
+    t, steer, speed = _corner_trace()
+    one = evidence_core.steady_window(
+        t, steer, speed, -0.785398, steer_tol_rad=0.01, speed_min_mps=0.05,
+        settle_s=1.0, min_window_s=2.0)
+    runs = evidence_core.steady_runs(
+        t, steer, speed, -0.785398, steer_tol_rad=0.01, speed_min_mps=0.05,
+        trim_start_s=1.0, trim_end_s=0.0, min_window_s=2.0)
+    assert runs.found == 1
+    assert runs.windows[0] == one

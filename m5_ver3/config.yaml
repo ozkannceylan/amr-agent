@@ -1137,6 +1137,38 @@ evidence:
     # own resolution, so a bin is a measurement and not a difference of
     # two noisy numbers.
     bin_s: "1.0"
+    # ---- THE OTHER REDUCTION: EVERY corner of a repeated-corner run ----
+    #
+    # THE TWO ARE NOT THE SAME MEASUREMENT AND MUST NOT SHARE CONSTANTS.
+    # settle_s above is for ONE long sustained corner, where the held
+    # stretch ends when the corner does and there is nothing to trim off
+    # the far end (measured on corner_creep: the axis leaves tolerance
+    # 1.0 s AFTER the segment ends and the vehicle is still at full creep
+    # speed in every sub-bin of the window). square: is the opposite
+    # shape - four corners of 9.142 s each, at ONE steer angle and ONE
+    # speed, which is what makes it the instrument for the heading
+    # dependence in EVIDENCE_SENSORS.md 4.2 - and on a corner that short
+    # BOTH ends have to come off:
+    #
+    #   slew_in_s   the axis slewing INTO the angle. It is inside the
+    #               tolerance band for the last part of that slew, so the
+    #               criterion opens the run before the corner has
+    #               established. 1.0 s at 0.3 m/s is 0.3 m of travel.
+    #   exit_s      the axis slewing back OUT of it, and - the reason
+    #               this end needs trimming at all - the TREAD command
+    #               changes at the same instant, so the last fraction of
+    #               a second carries a yaw rate taken at a falling speed
+    #               and reads high. 0.3 s is a sixth of a 1.8 s corner
+    #               entry and an order of magnitude more than the 0.05 s
+    #               the ground truth is sampled at.
+    #
+    # A CORNER THAT HAS NOTHING LEFT AFTER THE TRIM IS DROPPED AND
+    # COUNTED, never shrunk to fit: analyse prints how many corners were
+    # FOUND beside how many were measured, so a table with three rows
+    # over a four-corner profile says so out loud. window_s below is the
+    # minimum for these too (a square corner leaves 7.8 s of the 9.142).
+    slew_in_s: "1.0"
+    exit_s: "0.3"
     # How close the steer READING has to be to the table's angle to count
     # as held. The steer axis is a position controller with no
     # quantisation modelled on this track, so this is about the

@@ -74,6 +74,13 @@ Rate = collections.namedtuple(
 #: The stretch of a run a steady-state figure was taken over.
 Window = collections.namedtuple("Window", "t0 t1 i0 i1 n")
 
+#: Every held corner of a run: the windows that survived the trimming,
+#: and how many were FOUND before it. The second number is not
+#: decoration - a corner that was driven and then dropped for being too
+#: short is a fact about the run, and it may not go missing in the gap
+#: between "four corners" and "three rows".
+Runs = collections.namedtuple("Runs", "windows found")
+
 #: What a drive profile did to the estimate. Every length is metres in the
 #: SPAWN FRAME and every one of them is absolute.
 Drift = collections.namedtuple(
@@ -437,22 +444,17 @@ def score_drift(truth_rows, est_rows, frame, max_gap_s=1.0):
 # the steady-state window a corner is measured over
 # ----------------------------------------------------------------------
 
-def steady_window(t, steer, speed, target_steer_rad, steer_tol_rad,
-                  speed_min_mps, settle_s, min_window_s):
-    """The stretch of a run where the corner had actually established.
+def _held_runs(t, steer, speed, target_steer_rad, steer_tol_rad,
+               speed_min_mps):
+    """Every contiguous stretch where the axis is AT the angle and the
+    vehicle is MOVING, as [first, last] index pairs.
 
-    FOUND IN THE DATA AND NOT COUNTED OFF THE SCHEDULE. The steer axis
-    has to SLEW into a corner - config.yaml's square: block says every
-    corner loses the yaw of its own first fraction of a second for
-    exactly this reason - and how long that takes is a property of the
-    plant, not of the table. So the window is the longest stretch where
-    the steer READING is at the target and the vehicle is moving, with
-    the first settle_s of it discarded.
-
-    A window that is never reached, or is too short to average, is a
-    refusal naming the angle that was asked for. Reporting a yaw rate
-    off two samples of a slewing axis would produce a number that looks
-    exactly like a measurement.
+    ONE CRITERION, ONE IMPLEMENTATION. steady_window() takes the longest
+    of these and steady_runs() takes all of them, and they must never
+    become two opinions about what "held" means - the per-corner table
+    and the single-corner headline are read side by side in
+    EVIDENCE_SENSORS.md 4, so a difference between them has to be the
+    VEHICLE and never the reduction.
     """
     if not (len(t) == len(steer) == len(speed)):
         raise EvidenceError(
@@ -463,17 +465,7 @@ def steady_window(t, steer, speed, target_steer_rad, steer_tol_rad,
         raise EvidenceError(
             "the corner trace has at least two samples, got {}".format(
                 len(t)))
-    def longer(run, best):
-        """Whichever of the two spans more samples. Written once and
-        called twice, because the run that is still open when the trace
-        ends has to be closed the same way as every other."""
-        if run is None:
-            return best
-        if best is None or run[1] - run[0] > best[1] - best[0]:
-            return run
-        return best
-
-    best = None
+    runs = []
     run = None
     for i in range(len(t)):
         at_target = (abs(float(steer[i]) - float(target_steer_rad))
@@ -482,21 +474,104 @@ def steady_window(t, steer, speed, target_steer_rad, steer_tol_rad,
         if at_target:
             run = [i, i] if run is None else [run[0], i]
         else:
-            best = longer(run, best)
+            if run is not None:
+                runs.append(run)
             run = None
-    best = longer(run, best)
-    if best is None:
+    if run is not None:
+        runs.append(run)
+    return runs
+
+
+def _trim(t, run, trim_start_s, trim_end_s, min_window_s):
+    """One held run with its slew-in and its exit taken off, or None.
+
+    NEITHER END OF A CORNER IS A STEADY STATE. The axis has to slew INTO
+    the angle, and on a short corner it is already slewing back OUT
+    before the table's hold time is up - the tread command changes at the
+    same instant, so the last fraction of a second carries a yaw rate at
+    a falling speed. Both ends come off by a stated amount, and a run
+    with nothing left in the middle is dropped rather than shrunk.
+    """
+    t0 = t[run[0]] + trim_start_s
+    t1 = t[run[1]] - trim_end_s
+    i0 = None
+    for i in range(run[0], run[1] + 1):
+        if t[i] >= t0:
+            i0 = i
+            break
+    i1 = None
+    for i in range(run[1], run[0] - 1, -1):
+        if t[i] <= t1:
+            i1 = i
+            break
+    if i0 is None or i1 is None or i1 <= i0:
+        return None
+    if t[i1] - t[i0] < min_window_s:
+        return None
+    return Window(t0=t[i0], t1=t[i1], i0=i0, i1=i1, n=i1 - i0 + 1)
+
+
+def steady_runs(t, steer, speed, target_steer_rad, steer_tol_rad,
+                speed_min_mps, trim_start_s, trim_end_s, min_window_s):
+    """EVERY held corner of a run, each trimmed at both ends.
+
+    THIS IS WHAT A REPEATED-CORNER PROFILE NEEDS AND THE LONGEST WINDOW
+    CANNOT GIVE. `square` turns four corners at ONE steer angle and ONE
+    speed, and they do not deliver the same yaw rate as each other - the
+    delivered fraction depends on the vehicle's HEADING
+    (EVIDENCE_SENSORS.md 4.2). A reduction that returned only the longest
+    run would average that away, or worse, report whichever corner
+    happened to last a sample longer as though it were the profile's.
+
+    `found` is how many held runs the criterion saw and `windows` is how
+    many survived the trimming and the minimum, because a corner that was
+    driven and then dropped is a fact about the run and must not go
+    missing between the two numbers.
+    """
+    runs = _held_runs(t, steer, speed, target_steer_rad, steer_tol_rad,
+                      speed_min_mps)
+    windows = []
+    for run in runs:
+        window = _trim(t, run, trim_start_s, trim_end_s, min_window_s)
+        if window is not None:
+            windows.append(window)
+    return Runs(windows=windows, found=len(runs))
+
+
+def steady_window(t, steer, speed, target_steer_rad, steer_tol_rad,
+                  speed_min_mps, settle_s, min_window_s):
+    """The single stretch of a run where the corner had established.
+
+    FOUND IN THE DATA AND NOT COUNTED OFF THE SCHEDULE. The steer axis
+    has to SLEW into a corner - config.yaml's square: block says every
+    corner loses the yaw of its own first fraction of a second for
+    exactly this reason - and how long that takes is a property of the
+    plant, not of the table. So the window is the LONGEST stretch where
+    the steer READING is at the target and the vehicle is moving, with
+    the first settle_s of it discarded.
+
+    NO EXIT IS TRIMMED HERE, and that is the difference between this
+    reduction and steady_runs(). This one is for ONE long sustained
+    corner, where the criterion's own end IS the corner's end - measured
+    on corner_creep, the axis leaves tolerance 1.0 s after the segment
+    ends and the vehicle is still at full creep speed inside every
+    sub-bin of the window.
+
+    A window that is never reached, or is too short to average, is a
+    refusal naming the angle that was asked for. Reporting a yaw rate
+    off two samples of a slewing axis would produce a number that looks
+    exactly like a measurement.
+    """
+    runs = _held_runs(t, steer, speed, target_steer_rad, steer_tol_rad,
+                      speed_min_mps)
+    if not runs:
         raise EvidenceError(
             "the steer axis reached {:+.6f} rad (within {:g}) while the "
             "vehicle was moving; it never did".format(
                 float(target_steer_rad), steer_tol_rad))
-    t0 = t[best[0]] + settle_s
-    i0 = None
-    for i in range(best[0], best[1] + 1):
-        if t[i] >= t0:
-            i0 = i
-            break
-    if i0 is None or t[best[1]] - t[i0] < min_window_s:
+    best = max(runs, key=lambda run: run[1] - run[0])
+    window = _trim(t, best, settle_s, 0.0, min_window_s)
+    if window is None:
         held = t[best[1]] - t[best[0]]
         raise EvidenceError(
             "the corner at {:+.6f} rad held for {:g}s after a {:g}s settle, "
@@ -504,8 +579,7 @@ def steady_window(t, steer, speed, target_steer_rad, steer_tol_rad,
             "it held {:.3f}s in all".format(
                 float(target_steer_rad), min_window_s, settle_s,
                 min_window_s, held))
-    return Window(t0=t[i0], t1=t[best[1]], i0=i0, i1=best[1],
-                  n=best[1] - i0 + 1)
+    return window
 
 
 def corner_fidelity(yaw_rate, steer_rad, wheelbase_m, commanded_tread_mps,

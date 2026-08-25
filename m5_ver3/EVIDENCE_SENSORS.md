@@ -21,7 +21,7 @@ nothing else running on the machine.
 |---|---|---|
 | `tools/sensor_evidence.py record` | captures one run off the live plant into CSVs | ● |
 | `tools/sensor_evidence.py analyse` | every table below, from those CSVs, **with no ROS** | ● |
-| `tools/evidence_core.py` | the arithmetic underneath, `--selftest`, 45 unit tests | ● |
+| `tools/evidence_core.py` | the arithmetic underneath, `--selftest`, 49 unit tests | ● |
 | `tools/rtf_probe.sh` | real-time factor of the running world, 30 s sample | |
 | `tools/noise_probe.sh` | Task 2's static-noise probe — cited, not re-run | |
 | `gz topic -f -t <topic>` | gz-side delivered rate | |
@@ -350,22 +350,63 @@ deterministic function of where the truck is on its arc.
 
 `square` shows why, because it turns four corners of 90° at the *same*
 steer angle and the *same* speed at four different headings.
-**Instrument:** the same ground truth, per corner, discarding 1 s of
-slew-in and 0.3 s of exit:
+
+**Instrument:** `sensor_evidence.py analyse`, its *every held corner*
+table, over `drive-square-20260825-232051/odom_truth.csv`
+(md5 `f59b511b122b1a43f43afe42d7c72a79`) and that session's
+`joint_state.csv`. The reduction is `evidence.corner.slew_in_s` **1.0 s**
+off the start of each held corner and `evidence.corner.exit_s` **0.3 s**
+off its end — the axis is inside the tolerance band for the last part of
+its slew *in*, and on the way *out* the tread command changes at the same
+instant, so the final fraction of a second carries a yaw rate at a
+falling speed. Both constants live in `config.yaml` with that reasoning
+beside them. The tool prints how many corners it **found** next to how
+many it **measured**, so a dropped one cannot go missing: `corners found
+4   measured 4`.
+
+```
+    #        window [s]    span  heading in   held rad   rear m/s    yaw rate  delivered
+    1    22.90    30.14    7.20     -2.9837  -1.258786     0.0886   +0.149675     0.5504
+    2    35.38    42.62    7.20     -1.5484  -1.257138     0.0871   +0.172101     0.6332
+    3    47.86    55.10    7.20     -0.0648  -1.255925     0.0893   +0.152368     0.5609
+    4    60.33    67.57    7.20     +1.3421  -1.255044     0.0875   +0.176503     0.6499
+  delivered       0.5504 to 0.6499 over 4 corners, spread 16.6% of the mean
+```
 
 | Corner | Heading at entry | Rear-axle speed | Yaw rate | **Delivered** |
 |---|---|---|---|---|
-| 1 | −2.98 rad (≈ world −x) | 0.0885 m/s | 0.149675 | **0.552** |
-| 2 | −1.55 rad (≈ world −y) | 0.0870 m/s | 0.172101 | **0.635** |
-| 3 | −0.06 rad (≈ world +x) | 0.0892 m/s | 0.152368 | **0.562** |
-| 4 | +1.34 rad (≈ world +y) | 0.0873 m/s | 0.176503 | **0.651** |
+| 1 | −2.98 rad (≈ world −x) | 0.0886 m/s | 0.149675 | **0.5504** |
+| 2 | −1.55 rad (≈ world −y) | 0.0871 m/s | 0.172101 | **0.6332** |
+| 3 | −0.06 rad (≈ world +x) | 0.0893 m/s | 0.152368 | **0.5609** |
+| 4 | +1.34 rad (≈ world +y) | 0.0875 m/s | 0.176503 | **0.6499** |
+
+> **These four figures were first published here as 0.552 / 0.635 /
+> 0.562 / 0.651, from a hand reduction, and they are kept beside the
+> tool's.** The measured yaw rates are *identical* in both — 0.149675,
+> 0.172101, 0.152368, 0.176503 — and so are the windows. What moved, by
+> 0.2–0.3 %, is the divisor: the hand reduction used the kinematic rate
+> at the **commanded** −1.25 rad, while the tool uses the rate at the
+> steer the axis actually **held**, which the `held rad` column shows is
+> −1.2550 to −1.2588. That is the position controller overshooting by
+> 0.005–0.009 rad, and dividing by the angle the vehicle really had is
+> the correct thing to do. The published claim is unchanged and the
+> difference is an order of magnitude below it.
 
 The pattern alternates with a period of **180°**, not 360°: the two
-corners taken along the world *y* axis deliver 0.635 and 0.651, the two
-along *x* deliver 0.552 and 0.562 — **15 % apart**, and the faster-turning
-pair is also the *slower*-travelling pair, so it is not distance. A
-period of π is an **axis**-dependent effect, not a direction-dependent
-one.
+corners taken along the world *y* axis deliver 0.6332 and 0.6499, the two
+along *x* deliver 0.5504 and 0.5609 — **16.6 % apart**, and the
+faster-turning pair is also the *slower*-travelling pair, so it is not
+distance. A period of π is an **axis**-dependent effect, not a
+direction-dependent one.
+
+**The reduction is worth 2 % and the heading is worth 16.6 %**, which is
+how far this finding is above the way it was measured. The same
+per-corner reduction run over `corner_creep`'s single corner gives
+**0.4011** and **0.4015** (runs 1 and 2) against the §4.1 headline's
+0.4098 and 0.4102: the sustained-corner reduction discards a 4 s settle
+and averages everything left, the per-corner one discards 1.0 s and 0.3 s
+and so includes the earlier, slower part of the arc. `analyse` prints
+both for that profile and neither is hidden.
 
 **Candidate mechanism, named and NOT chased:** a pyramid approximation of
 the friction cone, which is what ODE-family contact solvers use and which
@@ -374,7 +415,8 @@ solver, which is not this task's job. What is established by measurement
 is the consequence, and it is the part that matters downstream:
 
 > **One steer angle on this plant does not have one delivered fraction.**
-> It has a fraction that depends on where the truck is pointing, by 15 %.
+> It has a fraction that depends on where the truck is pointing, by
+> 16.6 %.
 > `config.yaml`'s scrub table (0.401 at 0.785 rad, 0.634 at 1.25 rad) is
 > therefore a figure *at the heading it was measured at*, and the
 > `square` profile's corner time — derived from one of those rows — is

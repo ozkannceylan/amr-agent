@@ -1118,19 +1118,34 @@ def analyse_drive(cfg, path, session, sensors):
     return score, truth, est, joints
 
 
-def analyse_corner(cfg, path, session, truth, joints):
-    """The corner profile's delivered yaw rate against its kinematics.
+#: Everything both corner reductions read, prepared once. The two
+#: reductions differ in WHICH stretches of the run they measure and in
+#: nothing else, so they may not each build their own inputs - a
+#: difference between the per-corner table and the sustained-corner
+#: headline has to be the VEHICLE and never the arithmetic.
+CornerInputs = collections.namedtuple(
+    "CornerInputs",
+    "profile target tread t_t tx ty tyaw speed t_j steer speed_at_joint")
 
-    ONLY THE PROFILE config.yaml NAMES, and that is not fussiness:
-    square: also holds a steer angle, but for 9.142 s with the axis
-    slewing into each corner, which is not long enough for the settle and
-    the window this figure is defined over. Running this over it would
-    either refuse a perfectly good square run or, worse, average a yaw
-    rate over a manoeuvre that never reached a steady state.
+
+def corner_inputs(cfg, path, session, truth, joints):
+    """The ground truth and the steer reading, ready to be reduced.
+
+    The target angle and the tread speed come from the PROFILE's own
+    table - the segment with the largest steer - because the ratio is
+    measured against what the table commanded. Everything else is
+    measured.
+
+    THE SPEED AND THE YAW RATE COME OFF THE GROUND TRUTH, differenced.
+    Not off the estimate - the estimate is the thing being scored
+    elsewhere - and not off a command, which is what the ratio is
+    measured AGAINST.
+      AND THE SPEED IS THE REAR AXLE'S, not base_link's. The ground truth
+      is base_link, which in a turn carries a lateral term the axle does
+      not; measured on corner_creep the difference is 1.7 %, on a ratio
+      quoted to three figures.
     """
     profile = session.get("profile", "")
-    if profile != cfg.s("evidence.corner.profile"):
-        return None
     rows = cfg.raw("drive_route.profiles").get(profile) or []
     target = 0.0
     tread = 0.0
@@ -1145,14 +1160,6 @@ def analyse_corner(cfg, path, session, truth, joints):
     t_j = joints.column("t_sim")
     steer = joints.column(steer_column)
 
-    # THE SPEED AND THE YAW RATE COME OFF THE GROUND TRUTH, differenced.
-    # Not off the estimate - the estimate is the thing being scored
-    # elsewhere - and not off a command, which is what the ratio is
-    # measured AGAINST.
-    #   AND THE SPEED IS THE REAR AXLE'S, not base_link's. The ground
-    #   truth is base_link, which in a turn carries a lateral term the
-    #   axle does not; measured on this profile the difference is 1.7 %,
-    #   on a ratio quoted to three figures.
     t_t = truth.column("t_sim")
     tyaw = core.unwrap(truth.column("yaw"))
     tx, ty = core.rear_axle_track(truth.column("x"), truth.column("y"),
@@ -1165,8 +1172,62 @@ def analyse_corner(cfg, path, session, truth, joints):
     try:
         speed_at_joint = core.resample(
             t_t, speed, t_j, cfg.f("evidence.analyse.max_pair_gap_s"))
+    except core.EvidenceError as exc:
+        fail(cfg, exc, path + " (config.yaml evidence.analyse.*)")
+    return CornerInputs(profile=profile, target=target, tread=tread,
+                        t_t=t_t, tx=tx, ty=ty, tyaw=tyaw, speed=speed,
+                        t_j=t_j, steer=steer, speed_at_joint=speed_at_joint)
+
+
+#: One window, measured. Written once and called from both reductions.
+CornerMeasure = collections.namedtuple(
+    "CornerMeasure", "fid yaw_rate rear held heading_in span inside")
+
+
+def measure_corner(cfg, path, inputs, window):
+    """What the vehicle did over one window of a held corner.
+
+    The yaw rate is the ENDPOINT difference over the window's own span
+    rather than a mean of per-sample rates: the ground truth is exact and
+    unwrapped, so two endpoints and a span carry no differencing noise at
+    all, while a mean of 20 Hz differences would.
+    """
+    inside = [i for i, t in enumerate(inputs.t_t)
+              if window.t0 <= t <= window.t1]
+    if len(inside) < 2:
+        cfg.refuse(
+            "the ground truth carries samples inside the steady window",
+            path, "the window is [{:.3f}, {:.3f}] s of sim time".format(
+                window.t0, window.t1))
+    span = inputs.t_t[inside[-1]] - inputs.t_t[inside[0]]
+    yaw_rate = (inputs.tyaw[inside[-1]] - inputs.tyaw[inside[0]]) / span
+    rear = core.mean([inputs.speed[i] for i in inside])
+    held = core.mean([value for t, value in zip(inputs.t_j, inputs.steer)
+                      if window.t0 <= t <= window.t1])
+    fid = core.corner_fidelity(
+        yaw_rate=yaw_rate, steer_rad=held,
+        wheelbase_m=cfg.f("vehicle.wheelbase_m"),
+        commanded_tread_mps=inputs.tread, measured_rear_mps=rear)
+    return CornerMeasure(
+        fid=fid, yaw_rate=yaw_rate, rear=rear, held=held,
+        heading_in=core.normalise_angle(inputs.tyaw[inside[0]]),
+        span=span, inside=inside)
+
+
+def analyse_corner(cfg, path, inputs):
+    """ONE sustained corner, against the kinematics it should obey.
+
+    ONLY THE PROFILE config.yaml NAMES, and that is not fussiness: this
+    reduction discards a 4 s settle and then averages everything left,
+    which is right for a 14 s corner and wrong for square's 9.142 s ones.
+    Repeated corners are analyse_corner_table()'s, with a reduction of
+    their own.
+    """
+    if inputs.profile != cfg.s("evidence.corner.profile"):
+        return None
+    try:
         window = core.steady_window(
-            t_j, steer, speed_at_joint, target,
+            inputs.t_j, inputs.steer, inputs.speed_at_joint, inputs.target,
             cfg.f("evidence.corner.steer_tol_rad"),
             cfg.f("evidence.corner.speed_min_mps"),
             cfg.f("evidence.corner.settle_s"),
@@ -1178,59 +1239,48 @@ def analyse_corner(cfg, path, session, truth, joints):
     # and that was measured rather than chosen. The delivered yaw rate
     # WANDERS inside a held corner - binned at 2 s on corner_creep it
     # runs 0.0722 to 0.0968 rad/s about a mean of 0.0812 - so a short
-    # window lands wherever it lands: the first 6 s of this run's steady
+    # window lands wherever it lands: the first 6 s of that run's steady
     # state gave 0.0785 and the whole 13.6 s gave 0.0812, a 3 % swing
     # that is the sampling and not the vehicle. window_s is therefore the
     # MINIMUM stretch that will be accepted and never a cap, and the
     # wander itself is reported below rather than averaged away.
-    t_end = window.t1
-    inside = [i for i, t in enumerate(t_t) if window.t0 <= t <= t_end]
-    if len(inside) < 2:
-        cfg.refuse(
-            "the ground truth carries samples inside the steady window",
-            path, "the window is [{:.3f}, {:.3f}] s of sim time".format(
-                window.t0, t_end))
-    span = t_t[inside[-1]] - t_t[inside[0]]
-    yaw_rate = (tyaw[inside[-1]] - tyaw[inside[0]]) / span
-    rear = core.mean([speed[i] for i in inside])
-    held = core.mean([s for t, s in zip(t_j, steer)
-                      if window.t0 <= t <= t_end])
-    fid = core.corner_fidelity(
-        yaw_rate=yaw_rate, steer_rad=held,
-        wheelbase_m=cfg.f("vehicle.wheelbase_m"),
-        commanded_tread_mps=tread, measured_rear_mps=rear)
+    got = measure_corner(cfg, path, inputs, window)
+    fid = got.fid
 
     print("")
     print("--- {} : does the tricycle model hold at creep speed? ---"
-          .format(profile))
+          .format(inputs.profile))
     print("  steady window   [{:.3f}, {:.3f}] s of sim time, {} truth "
-          "samples".format(window.t0, t_end, len(inside)))
+          "samples".format(window.t0, window.t1, len(got.inside)))
     print("  settle discarded {:g}s of held steer before it opened".format(
         cfg.f("evidence.corner.settle_s")))
     print("  steer commanded {:+.6f} rad     held (measured) {:+.6f} rad"
-          .format(target, held))
+          .format(inputs.target, got.held))
     print("  tread commanded {:+.3f} m/s     ground speed (truth) "
-          "{:.4f} m/s".format(tread, rear))
+          "{:.4f} m/s".format(inputs.tread, got.rear))
     print("  yaw rate        {:+.6f} rad/s  (ground truth, differenced "
-          "over the window)".format(yaw_rate))
+          "over the window)".format(got.yaw_rate))
     # HOW STEADY THE STEADY STATE IS, printed rather than assumed. Sub
     # bins of bin_s across the same window: if the vehicle were tracking
     # a constant yaw rate these would all be the headline figure.
     bin_s = cfg.f("evidence.corner.bin_s")
     bins = []
     edge = window.t0
-    while edge + bin_s <= t_end:
-        block = [i for i in inside if edge <= t_t[i] <= edge + bin_s]
+    while edge + bin_s <= window.t1:
+        block = [i for i in got.inside
+                 if edge <= inputs.t_t[i] <= edge + bin_s]
         if len(block) >= 2:
-            span_b = t_t[block[-1]] - t_t[block[0]]
-            bins.append((tyaw[block[-1]] - tyaw[block[0]]) / span_b)
+            span_b = inputs.t_t[block[-1]] - inputs.t_t[block[0]]
+            bins.append((inputs.tyaw[block[-1]]
+                         - inputs.tyaw[block[0]]) / span_b)
         edge += bin_s
     if len(bins) > 1:
         spread = core.summarise(bins)
         print("  its steadiness   {:g}s bins: {} of them, {:+.6f} to "
               "{:+.6f}, sd {:.6f} ({:.1%} of the mean)".format(
                   bin_s, spread.n, spread.minimum, spread.maximum,
-                  spread.sd, spread.sd / abs(yaw_rate) if yaw_rate else 0))
+                  spread.sd,
+                  spread.sd / abs(got.yaw_rate) if got.yaw_rate else 0))
     print("")
     print("  kinematic v_tread*sin(d)/L  {:.6f} rad/s -> delivered "
           "{:.4f}".format(fid.kinematic_commanded, fid.ratio_commanded))
@@ -1241,6 +1291,81 @@ def analyse_corner(cfg, path, session, truth, joints):
     print("  turning radius  kinematic {:.4f} m   MEASURED {:.4f} m".format(
         fid.kinematic_radius_m, fid.effective_radius_m))
     return fid
+
+
+def analyse_corner_table(cfg, path, inputs):
+    """EVERY held corner of the run, one row each.
+
+    THIS IS THE INSTRUMENT FOR THE HEADING DEPENDENCE, and it exists
+    because the headline reduction above cannot produce it: square turns
+    four corners at ONE steer angle and ONE speed, and they do not
+    deliver the same yaw rate as each other. EVIDENCE_SENSORS.md 4.2 uses
+    that spread to qualify every scrub figure on this track, so it has to
+    come out of the committed tool and not out of a hand reduction -
+    which is the failure section 4 of that file criticises three
+    paragraphs earlier.
+
+    Both ends of every corner are trimmed, by config.yaml's
+    evidence.corner.slew_in_s and .exit_s, and the count of corners FOUND
+    is printed beside the count measured so a dropped one cannot go
+    missing between them.
+    """
+    slew_in = cfg.f("evidence.corner.slew_in_s")
+    exit_s = cfg.f("evidence.corner.exit_s")
+    try:
+        runs = core.steady_runs(
+            inputs.t_j, inputs.steer, inputs.speed_at_joint, inputs.target,
+            cfg.f("evidence.corner.steer_tol_rad"),
+            cfg.f("evidence.corner.speed_min_mps"),
+            slew_in, exit_s, cfg.f("evidence.corner.window_s"))
+    except core.EvidenceError as exc:
+        fail(cfg, exc, path + " (config.yaml evidence.corner.*)")
+    if not runs.windows:
+        cfg.refuse(
+            "at least one held corner survived the trim",
+            path + " (config.yaml evidence.corner.slew_in_s, .exit_s, "
+                   ".window_s)",
+            "{} corner(s) were found at {:+.6f} rad and none of them kept "
+            "{:g}s after {:g}s of slew-in and {:g}s of exit came off"
+            .format(runs.found, inputs.target,
+                    cfg.f("evidence.corner.window_s"), slew_in, exit_s))
+
+    print("")
+    print("--- {} : every held corner, at the SAME steer and the SAME "
+          "speed ---".format(inputs.profile))
+    print("  reduction       {:g}s of slew-in and {:g}s of exit off each "
+          "corner".format(slew_in, exit_s))
+    print("  corners found   {}   measured {}".format(
+        runs.found, len(runs.windows)))
+    # THE HELD ANGLE IS A COLUMN AND NOT AN ASSUMPTION. The kinematic
+    # prediction every ratio is divided by uses the steer the axis
+    # ACTUALLY held, not the angle the table asked for - the position
+    # controller overshoots, and on this profile it does so by 0.009 rad,
+    # which moves the ratio by 0.3 %. Printing it is what lets a reader
+    # tell that difference from a difference in the vehicle.
+    print("  {:>3} {:>17} {:>7} {:>11} {:>10} {:>10} {:>11} {:>10}".format(
+        "#", "window [s]", "span", "heading in", "held rad", "rear m/s",
+        "yaw rate", "delivered"))
+    out = []
+    for n, window in enumerate(runs.windows, 1):
+        got = measure_corner(cfg, path, inputs, window)
+        out.append(got)
+        print("  {:>3} {:>8.2f}{:>9.2f} {:>7.2f} {:>+11.4f} {:>+10.6f} "
+              "{:>10.4f} {:>+11.6f} {:>10.4f}".format(
+                  n, window.t0, window.t1, got.span, got.heading_in,
+                  got.held, got.rear, got.yaw_rate,
+                  got.fid.ratio_commanded))
+    if len(out) > 1:
+        ratios = core.summarise([m.fid.ratio_commanded for m in out])
+        print("  delivered       {:.4f} to {:.4f} over {} corners, "
+              "spread {:.1%} of the mean".format(
+                  ratios.minimum, ratios.maximum, ratios.n,
+                  (ratios.maximum - ratios.minimum) / ratios.mean
+                  if ratios.mean else 0))
+        print("  every row is the same steer angle and the same commanded "
+              "speed. What differs is")
+        print("  the HEADING - see EVIDENCE_SENSORS.md 4.2.")
+    return out
 
 
 def analyse_session(cfg, path, sensors):
@@ -1256,7 +1381,11 @@ def analyse_session(cfg, path, sensors):
             session["drive_exit"]))
     if session.get("kind") == "drive":
         _, truth, est, joints = analyse_drive(cfg, path, session, sensors)
-        analyse_corner(cfg, path, session, truth, joints)
+        # ONE PREPARATION, TWO REDUCTIONS. See CornerInputs.
+        inputs = corner_inputs(cfg, path, session, truth, joints)
+        if inputs is not None:
+            analyse_corner(cfg, path, inputs)
+            analyse_corner_table(cfg, path, inputs)
         print("")
         print("--- delivered rates over the drive, ROS side ---")
         print("  {:<16} {:>9} {:>10} {:>10} {:>8} {:>10} {:>10} {:>7}".format(
