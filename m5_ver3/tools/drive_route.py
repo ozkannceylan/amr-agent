@@ -77,19 +77,10 @@ TOOL = "drive_route"
 # MAINTENANCE OBLIGATION: a key read below is a key listed here.
 REQUIRED_KEYS = (
     "isolation.gz_partition", "isolation.ros_domain_id", "paths.ros_setup",
-    "topics.clock", "topics.traction_cmd",
+    "topics.clock", "topics.traction_cmd", "topics.steer_cmd",
     "vehicle.wheel_radius_m", "vehicle.steer_limit_rad",
     "drive_route.clock_timeout_s", "drive_route.profiles",
 )
-# THE STEER TERMINAL IS NOT IN config.yaml's topics: BLOCK AND THAT IS THE
-# HONEST STATE OF IT. topics: is "what the bridge carries, and nothing
-# else yet" - its own header - and this terminal is deliberately not
-# bridged: it is addressed gz-side, like the traction terminal beside it,
-# which IS listed there because tools/slip_bench.sh needed it first. The
-# name is model.sdf's contract (see its COMMAND TOPICS table) and it is
-# spelled once, here, rather than added to a block whose header says it
-# lists bridged channels.
-STEER_CMD_TOPIC = "/forklift/gz/actuator/steer_cmd"
 
 
 class Segment(object):
@@ -319,7 +310,7 @@ class Terminals(object):
         self.cfg = cfg
         self.env = env
         self.traction = cfg.s("topics.traction_cmd")
-        self.steer = STEER_CMD_TOPIC
+        self.steer = cfg.s("topics.steer_cmd")
         self.radius_m = cfg.f("vehicle.wheel_radius_m")
 
     def _publish(self, topic, value, fatal=True):

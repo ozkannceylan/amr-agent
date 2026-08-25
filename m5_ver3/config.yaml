@@ -153,9 +153,17 @@ vehicle:
   # node needed the same number - a constant spelled in two places is
   # two opinions about one number.
   wheel_radius_m: "0.12"
-  # steer_joint's mechanical stop, symmetric. tools/drive_route.py
-  # clamps every commanded steer angle to it, the way
-  # agv/forklift/scripts/forklift_io.py does.
+  # steer_joint's mechanical stop, symmetric. tools/drive_route.py checks
+  # every steer angle in a profile against it before it drives anything,
+  # and REFUSES the profile if one is outside - it does not clamp.
+  #   THE DIFFERENCE IS WHICH THING IS BEING CORRECTED.
+  #   agv/forklift/scripts/forklift_io.py clamps, and is right to: it is
+  #   taking commands from a live stack in real time and has to make one
+  #   of them legal. drive_route.py is reading a table somebody wrote
+  #   down, so a clamp there would silently drive a manoeuvre the table
+  #   does not describe - and the geometry argued in drive_route:'s own
+  #   comments would then be a claim about a run nobody performed. A
+  #   table that asks for an impossible angle is a table to correct.
   steer_limit_rad: "1.31"
 
 # -------------------------------- TOPICS -------------------------------
@@ -203,6 +211,18 @@ topics:
   # vehicle stack's command topic (model.sdf, COMMAND TOPICS): m5-ver3
   # runs no vehicle stack yet, so the bench addresses the motor directly.
   traction_cmd: "/forklift/gz/actuator/traction_cmd"
+  # THE STEER TERMINAL, its pair. tools/drive_route.py publishes both, one
+  # after the other, at every segment boundary of a profile, and it is the
+  # only thing on this track that publishes to this one.
+  #   IT LIVES HERE BECAUSE IT IS A BEHAVIOURAL CONSTANT AND NOT BECAUSE
+  #   IT IS BRIDGED. It spent F1 Task 3 spelled inline in drive_route.py
+  #   under the argument that this block lists what the bridge carries -
+  #   which this block does not: traction_cmd above it, points3d and
+  #   gui_gate are all here and none of them is on a bridge line. An
+  #   address that decides WHICH ACTUATOR a bench drives is exactly the
+  #   kind of constant this file's own header says may not sit inline in a
+  #   script, and the header of a section is not a licence to break it.
+  steer_cmd: "/forklift/gz/actuator/steer_cmd"
   # The three driven joints' position and rate, published once per physics
   # iteration. The bench reads the drive joint's ACHIEVED rate off it, so
   # a shortfall in the controller can be told apart from slip at the tyre.
