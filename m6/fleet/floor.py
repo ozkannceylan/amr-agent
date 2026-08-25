@@ -65,6 +65,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 for _dir in (_HERE, os.path.normpath(os.path.join(_HERE, "..", "ipc"))):
     if _dir not in sys.path:
         sys.path.insert(0, _dir)
+import progress as pg                               # noqa: E402
 import route                                        # noqa: E402
 import traffic as tr                                # noqa: E402
 from order_builder import (build_leg_order,             # noqa: E402
@@ -138,6 +139,33 @@ ASIDE_RATE_MPS = 11.15 / 199.0
 ASIDE_S = 2.0 * ASIDE_MAX_M / ASIDE_RATE_MPS
 ASIDE_SHOWN = 5          # the traffic block is a screen, not a log
 
+# THE STILLNESS CLOCK (M6 review item 5b). M6.5 Gate 3's second run
+# stopped on a main-aisle head-on where NEITHER truck ever reached the
+# end of its base - each guard held its truck a node short of the other
+# - so _resolve's parked-at-base-end gate deferred the cycle for ever
+# and the jam stood unnamed. Parked-at-base-end was only ever a proxy
+# for "this truck is not going to move on its own"; a truck that has
+# not covered half a metre in twenty seconds mid-base is the same fact,
+# measured instead of inferred. Half a metre is the watchdog's own
+# progress quantum (progress.PROGRESS_M); twenty seconds is four
+# HOLD_PATIENCE windows, long past any polite give-way, and a third of
+# the watchdog's give-up - the floor should name a jam before the
+# watchdog starts tearing tasks off the trucks in it.
+STANDSTILL_M = 0.5
+STANDSTILL_S = 20.0
+
+# HOW LONG A NODE A BODY WAS REPORTED ON STAYS CLOSED (item 5c,
+# residual 11). When a vehicle's escalation gives up - nav's BLOCKED,
+# reported over VDA 5050 as a pathBlocked error - the fleet finally
+# KNOWS about the body, and for this long it stops granting the node
+# and plans new legs around it. Two minutes is long enough for the
+# operator the refusal list is pointing at to walk over, and short
+# enough that a box somebody moves without telling anyone does not
+# close an aisle for a shift. The closure is process decisions only,
+# like everything on this floor: nothing here claims the node is
+# CLEAR when the clock runs out - the scanners still own that.
+CLOSED_S = 120.0
+
 
 def _node_str(node):
     return "({:.1f},{:.1f})".format(node[0], node[1])
@@ -190,6 +218,13 @@ class Floor:
         self.aside = {}          # serial -> the step-aside in progress
         self.aside_count = {}    # serial -> moves since it last arrived
         self.asides = []         # bounded; the operator's record of them
+        # The stillness clock: progress.Progress, the watchdog's own
+        # arithmetic, with the floor's shorter window. Anchors move on
+        # real motion and only on it, so a truck sawing at a guard band
+        # reads as still - which it is.
+        self.still = pg.Progress(progress_m=STANDSTILL_M,
+                                 window_s=STANDSTILL_S)
+        self.closed = {}         # node -> {until, by} - bodies reported
 
     # ---- the ledger, in the floor's own name ----
     # ONE PATH TO THE LEDGER AND NO SECOND ONE. `_res` is storage and is
@@ -393,6 +428,57 @@ class Floor:
         # for leg 2 while it dwells.
         self.clear_wait(serial)
 
+    # ---- a body reported on the floor (item 5c, residual 11) ----
+    def closed_set(self):
+        """The nodes currently closed, as a frozenset for the planner."""
+        return frozenset(self.closed)
+
+    def _phantom(self, node):
+        return "closed@{}".format(_node_str(node))
+
+    def node_ahead(self, serial, task):
+        """The node in front of this truck on its own route, or None.
+
+        Read BEFORE the requeue that will drop the traffic record: the
+        route is the only thing that knows which node the reported body
+        is standing on - the truck stopped short of it by exactly the
+        guard band, so its own position names the wrong node.
+        """
+        trf = task.get("traffic") if task else None
+        if not trf:
+            return None
+        _, pts = self.remaining(trf)
+        return pts[1] if len(pts) > 1 else (pts[0] if pts else None)
+
+    def close_node(self, node, serial, now):
+        """Close a node for CLOSED_S: no grants, and new legs plan round.
+
+        The phantom hold is what stops EXTENSIONS being granted onto
+        the body; the closed set is what keeps NEW routes away from it.
+        Call it after the reporter's floor went back (the requeue), or
+        the phantom finds the node still owned and the closure is a
+        note with no teeth - hold() takes nothing that is not free.
+        """
+        self.closed[node] = {"until": now + CLOSED_S, "by": serial}
+        self.hold(self._phantom(node), [node])
+        self.log.warning(
+            "%s is CLOSED for %.0f s - %s reported a body on it. New "
+            "legs plan around it and nothing is granted onto it; nobody "
+            "is claiming it is clear when the clock runs out - the "
+            "scanners own that", _node_str(node), CLOSED_S, serial)
+
+    def _expire_closures(self, now):
+        for node, entry in list(self.closed.items()):
+            if now < entry["until"]:
+                continue
+            del self.closed[node]
+            self.release_all(self._phantom(node))
+            self.log.info(
+                "the closure of %s expired - the floor may be granted "
+                "again. The body was never seen leaving: the first "
+                "truck sent that way still stops on its own scanners",
+                _node_str(node))
+
     def _idle_floor(self, now):
         """The IDLE_HOLD_S sweep, once per traffic pass.
 
@@ -565,9 +651,12 @@ class Floor:
         pos = veh.get("position")
         return None if pos is None else route.nearest_node(self.graph, pos)
 
-    def note_state(self, serial, veh, msg):
+    def note_state(self, serial, veh, msg, now=None):
         """Where the truck is, written into the ledger - from EVERY
         state, before anything resolves.
+
+        `now` feeds the stillness clock (STANDSTILL_S); None keeps an
+        older caller working and simply teaches the clock nothing.
 
         set_standing IS NOT BOOKKEEPING. resolve_deadlock frees
         everything the loser holds EXCEPT the node it was last told the
@@ -577,6 +666,8 @@ class Floor:
         it happens first, from every state, task or no task, and on a
         restarted manager's very first state too.
         """
+        if now is not None and veh.get("position") is not None:
+            self.still.note(serial, veh["position"], now)
         task = self.fleet._task_of(serial)
         trf = task.get("traffic") if task else None
         # A STATE THAT PREDATES THE LEG IS NOT A STATE ABOUT NO LEG, and
@@ -697,9 +788,21 @@ class Floor:
         given the leg this pass. That is the spec's honest wait: no
         re-route, no pause action, no half-order.
         """
-        points = leg_points(start_xy, station_id)
+        # THE CLOSED SET IS READ ONCE AND TRAVELS WITH THE LEG. The
+        # planner and the order builder must see the same floor, and
+        # every later EXTENSION must rebuild the same route - so the
+        # set is frozen here and stored on the traffic record, and
+        # retry_hold rebuilds with it even after the closure itself
+        # has expired. A closure that appears mid-leg does not bend a
+        # route already promised; it bends the next one.
+        shut = self.closed_set()
+        points = leg_points(start_xy, station_id, avoid=shut)
         if points is None:
-            self.fleet._refuse_order(task, serial, leg, "no route")
+            self.fleet._refuse_order(
+                task, serial, leg,
+                "no route" if not shut else
+                "no route off the closed floor ({} node(s) closed)"
+                .format(len(shut)))
             return None, None
         standing = self.standing.get(serial)
         if standing is None:
@@ -727,7 +830,7 @@ class Floor:
             return None, None
         self.said_blocked.pop(serial, None)
         order = build_leg_order(order_id, start_xy, station_id,
-                                released_count=released)
+                                released_count=released, avoid=shut)
         node_xy = {(n["nodeId"], n["sequenceId"]):
                    (n["nodePosition"]["x"], n["nodePosition"]["y"])
                    for n in order["nodes"]}
@@ -741,7 +844,7 @@ class Floor:
                        "station": station_id, "node_xy": node_xy,
                        "released": released, "update_id": 0,
                        "pending": None, "last_xy": hold_points[0],
-                       "ext_refused": 0}
+                       "ext_refused": 0, "avoid": shut}
 
     def _no_floor(self, serial, task, leg, station_id):
         """Said ONCE per stuck truck, not ten times a second. _assign runs
@@ -787,6 +890,7 @@ class Floor:
             return
         # FIRST, so floor an idle truck has been sitting on since the
         # last shift is available to the retries in this same pass.
+        self._expire_closures(now)
         self._idle_floor(now)
         # AND THEN THE MOVES ALREADY UNDER WAY, before any new hold is
         # asked for: a step-aside that has just finished has given its
@@ -796,7 +900,7 @@ class Floor:
                            key=lambda t: (t.get("submitted_ts") or 0.0,
                                           t["task_id"])):
             self.retry_hold(task)
-        self._resolve()
+        self._resolve(now)
 
     def remaining(self, trf):
         """(index into hold_points, the route from the truck forward).
@@ -849,7 +953,8 @@ class Floor:
         update = trf["update_id"] + 1
         order = build_leg_order(task["order_id"], trf["start_xy"],
                                 trf["station"], released_count=released,
-                                update_id=update)
+                                update_id=update,
+                                avoid=trf.get("avoid", ()))
         if self.fleet._publish_extension(serial, task, order, released,
                                          update):
             trf["pending"] = (update, released)
@@ -902,9 +1007,13 @@ class Floor:
             return False
         return trf["last_xy"] == trf["points"][released - 1]
 
-    def _resolve(self):
+    def _resolve(self, now=None):
         """Every cycle on the floor, until there are none - and an honest
         answer where wait-die cannot break one.
+
+        `now` is the stillness clock's; None (an older caller, a test
+        that predates it) disables the mid-base branch and keeps the
+        parked-only behaviour.
 
         LOOPED, NOT ASKED ONCE: find_cycle returns ONE cycle, and four
         trucks can hold two disjoint ones at the same moment.
@@ -937,12 +1046,53 @@ class Floor:
             if not cycle:
                 return
             if not all(self._parked_at_base_end(v) for v in cycle):
-                # A cycle whose members are still driving defers the
-                # whole pass, including any OTHER cycle that is fully
-                # parked - find_cycle answers with one cycle and there
-                # is no way to ask it for the next. With two vehicles
-                # there is only ever one; M6.5's four can hold two, and
-                # this is where that has to be looked at again.
+                # NOT EVERYBODY IS PARKED. Two different facts can look
+                # like this and they get two different answers:
+                #
+                # * somebody is genuinely DRIVING - defer the whole
+                #   pass, exactly as before. This also defers any OTHER
+                #   cycle that is fully parked: find_cycle answers with
+                #   one cycle and there is no way to ask it for the
+                #   next. With two vehicles there is only ever one;
+                #   M6.5's four can hold two, and this is where that
+                #   has to be looked at again.
+                # * every member has measurably STOPPED (STANDSTILL_S
+                #   without STANDSTILL_M, the floor's own clock) but at
+                #   least one is mid-base - M6.5 Gate 3's second
+                #   failure, the main-aisle head-on, where the guards
+                #   held both trucks a node short of their base ends
+                #   and this gate deferred the jam for ever. That
+                #   deadlock is as final as a parked one, but wait-die
+                #   MAY NOT touch it: the loser's holds are RELEASED
+                #   BASE, a promise VDA 5050 cannot shrink. The one
+                #   legal move is the step-aside's - cancelOrder first,
+                #   which withdraws the whole promise, then the requeue
+                #   and the one-node move - so the pass goes straight
+                #   to _cannot_yield and skips the yield arithmetic
+                #   that would free floor a truck was told to drive.
+                if now is None or not all(
+                        self._parked_at_base_end(v)
+                        or self.still.stalled_for(v, now) is not None
+                        for v in cycle):
+                    return
+                ages = {t["assignee"]: t.get("submitted_ts") or 0.0
+                        for t in self._in_flight()}
+                loser = max(cycle,
+                            key=lambda v: (ages.get(v, float("inf")), v))
+                wanted = {v: self.waiting_on(v) for v in cycle}
+                stuck_on = [v for v in cycle
+                            if v != loser and wanted.get(v) is not None
+                            and self.owner_of(wanted[v]) == loser]
+                story = ("head-on deadlock {} - every truck has "
+                         "measurably stopped ({:.0f} s without {:.1f} m) "
+                         "with base still ahead of it, so wait-die may "
+                         "not free the floor: it is released base, a "
+                         "promise the fleet cannot shrink"
+                         .format(" <-> ".join(sorted(cycle)),
+                                 STANDSTILL_S, STANDSTILL_M))
+                self._cannot_yield(cycle, loser,
+                                   self.fleet._task_of(loser),
+                                   stuck_on, story=story)
                 return
             ages = {t["assignee"]: t.get("submitted_ts") or 0.0
                     for t in self._in_flight()}
@@ -1049,8 +1199,13 @@ class Floor:
                 best = (rank, nbr)
         return None if best is None else best[1]
 
-    def _cannot_yield(self, cycle, loser, task, stuck_on):
+    def _cannot_yield(self, cycle, loser, task, stuck_on, story=None):
         """Wait-die has nothing left: move a truck, or say so.
+
+        `story` is the sentence that names the deadlock's shape; the
+        default is the swap's, and the head-on branch brings its own -
+        an operator reading "swap" would go looking for two parked
+        trucks that are not there.
 
         Two signatures reach here and they are the same disease. The
         youngest yields and frees NOTHING, because everything it held
@@ -1061,23 +1216,29 @@ class Floor:
         10 Hz for five minutes and nothing moved. Yielding frees the
         floor AHEAD of a vehicle; neither case is ahead of anything.
         """
+        if story is None:
+            story = ("swap deadlock {} - each truck stands on the floor "
+                     "the other needs, so wait-die frees nothing that "
+                     "helps".format(" <-> ".join(sorted(cycle))))
         others = [v for v in cycle if v != loser]
         if self.aside_count.get(loser, 0) >= ASIDE_MAX:
             self._unresolvable(
                 cycle, loser, task,
                 "{} has already been stepped aside {} times without the "
                 "floor clearing, so the fleet stops shuffling it"
-                .format(loser, ASIDE_MAX))
+                .format(loser, ASIDE_MAX), story=story)
             return
         target = self.step_aside_target(loser, others)
         if target is None:
             self._unresolvable(
                 cycle, loser, task,
-                "there is nowhere free next to it to move it to")
+                "there is nowhere free next to it to move it to",
+                story=story)
             return
-        self._step_aside(cycle, loser, task, target, stuck_on)
+        self._step_aside(cycle, loser, task, target, stuck_on, story)
 
-    def _step_aside(self, cycle, loser, task, target, stuck_on):
+    def _step_aside(self, cycle, loser, task, target, stuck_on,
+                    story=None):
         """Take the task away, stop the truck, and send it one node.
 
         THE ORDER OF THESE FOUR THINGS IS THE WHOLE CORRECTNESS.
@@ -1111,12 +1272,13 @@ class Floor:
         node = self.standing[loser]
         order_id = task.get("order_id") if task else None
         others = sorted(v for v in cycle if v != loser)
-        why = ("swap deadlock {} - each truck stands on the floor the "
-               "other needs, so wait-die frees nothing that helps. {} "
-               "carries the youngest task and is asked to step aside "
-               "from {} to {}, which clears {}"
-               .format(" <-> ".join(sorted(cycle)), loser, _node_str(node),
-                       _node_str(target),
+        if story is None:
+            story = ("swap deadlock {} - each truck stands on the floor "
+                     "the other needs, so wait-die frees nothing that "
+                     "helps".format(" <-> ".join(sorted(cycle))))
+        why = ("{}. {} carries the youngest task and is asked to step "
+               "aside from {} to {}, which clears {}"
+               .format(story, loser, _node_str(node), _node_str(target),
                        ", ".join(sorted(stuck_on) or others)))
         self.log.warning("%s", why)
         if task is not None:
@@ -1218,6 +1380,22 @@ class Floor:
                                  serial, why),
                              "ts": time.time(), "task": entry["task"]})
         del self.blocked[:-BLOCKED_SHOWN]
+        # THE ORDER IS TAKEN BACK EVEN THOUGH THE MOVE FAILED. Measured
+        # 2026-08-25: a give-up that left the one-node order on the
+        # truck left `executing_order` set for the rest of the run -
+        # never idle, never eligible, a fleet of three - because
+        # nothing else ever takes that order away (it has no task
+        # behind it, so no requeue path touches it). The same lever as
+        # every other take-away: cancelOrder, chased by the manager
+        # until the truck's own state lets go. A truck that then
+        # finishes the move anyway reports idle and re-earns the
+        # ordinary way; a truck that is wedged is at least NAMED by the
+        # chase's cap instead of silently busy for ever.
+        if entry.get("order_id"):
+            self.fleet._abandon_order(
+                serial, entry["order_id"],
+                "the step-aside was given up; the truck must not be "
+                "left holding its order")
         self.release(serial)
 
     def _arrived(self, serial):
@@ -1228,12 +1406,13 @@ class Floor:
         """
         self.aside_count.pop(serial, None)
 
-    def _unresolvable(self, cycle, loser, task, because):
-        why = ("swap deadlock {} - each truck stands on the floor the "
-               "other needs, so the youngest yielding frees nothing and "
-               "wait-die cannot break it. A vehicle has to be moved, and "
-               "{}"
-               .format(" <-> ".join(sorted(cycle)), because))
+    def _unresolvable(self, cycle, loser, task, because, story=None):
+        if story is None:
+            story = ("swap deadlock {} - each truck stands on the floor "
+                     "the other needs, so the youngest yielding frees "
+                     "nothing and wait-die cannot break it"
+                     .format(" <-> ".join(sorted(cycle))))
+        why = "{}. A vehicle has to be moved, and {}".format(story, because)
         self.log.error("UNRESOLVABLE: %s (%s was the youngest)", why, loser)
         self.blocked.append({"vehicles": sorted(cycle), "why": why,
                              "ts": time.time(),
@@ -1293,6 +1472,13 @@ class Floor:
                 # node it is standing on must be able to read WHY on the
                 # same screen, and not have to go and find the log.
                 "idle": list(self.idle_freed),
+                # A CLOSED NODE IS AN INSTRUCTION TO A PERSON: something
+                # is standing there and a truck reported it. The screen
+                # carries where, who said so and for how much longer.
+                "closed": [{"node": _node_str(n), "by": e["by"],
+                            "left_s": round(max(
+                                0.0, e["until"] - time.monotonic()), 1)}
+                           for n, e in sorted(self.closed.items())],
                 # AND A TRUCK THE FLEET MOVED MUST NOT LOOK LIKE A
                 # MYSTERY DRIVE. A step-aside is the one order in this
                 # system with no task behind it, so without this row an

@@ -1261,7 +1261,7 @@ def test_no_traffic_grants_every_route_whole(open_floor):
                               "yielded": [], "bases": {"t-1": [2, 0],
                                                        "t-2": [3, 0]},
                               "stuck": {}, "yields": [], "blocked": [],
-                              "idle": [], "aside": []}
+                              "idle": [], "aside": [], "closed": []}
 
 
 def test_the_traffic_block_is_json_and_reads_like_a_floor(floor):
@@ -2034,3 +2034,179 @@ def test_the_dwell_is_far_shorter_than_the_stall_window():
     the dwell past the window and every fork cycle in the cell becomes a
     name on the operator's screen."""
     assert fm.DWELL_S * 2 < fl_progress.PROGRESS_S
+
+
+# ---- 5. the mid-base head-on (M6 review item 5b) ----
+def midbase_head_on(manager, stub, now):
+    """deadlocked() minus its last drive: the cycle is real, f1 has a
+    released spur-foot still AHEAD of it, and both trucks are stopped
+    nose to nose by their own guards - which the ledger cannot see.
+    This is M6.5 Gate 3's second failure shape: 'neither truck ever
+    reached the end of its base, so the resolver correctly never
+    fired' - and then nothing ever fired at all.
+    """
+    f1, f2 = head_on(manager, stub, now)
+    f1.drive()                                # f1 lands on S1
+    turn(manager, (f1, f2), now)              # arrived, dwell starts
+    manager.dwell_until["t-1"] = now - 1.0
+    for truck in (f1, f2):
+        truck.take().state(now)
+    manager._expire_dwells(now)               # leg 2 goes east, into f2
+    f1.take()                                 # the order, NOT the drive
+    for truck in (f1, f2):
+        truck.state(now)
+    return f1, f2
+
+
+def test_a_cycle_still_driving_is_left_alone(floor):
+    """The old guard's half that stays true: stillness takes
+    STANDSTILL_S to establish, so the pass that finds the cycle fresh
+    does nothing - a truck that stopped two seconds ago may be about to
+    move, and freeing a promised base under it would be the M6.5 bug."""
+    manager, stub = floor
+    now = time.monotonic()
+    midbase_head_on(manager, stub, now)
+    manager.floor.traffic_pass(now)
+    assert not manager.floor.aside and not manager.floor.asides
+    assert not manager.floor.blocked
+
+
+def test_a_settled_mid_base_head_on_moves_the_younger_truck(floor):
+    """Once every member of the cycle has measurably not moved for
+    STANDSTILL_S, the deadlock is as final as a parked one - but
+    wait-die may not touch it (the loser's holds are RELEASED BASE, a
+    promise VDA 5050 cannot shrink), so the fleet goes straight to the
+    step-aside: cancel, requeue, one-node move. The cancel is what
+    makes taking the base back legal."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = midbase_head_on(manager, stub, now)
+    manager.floor.traffic_pass(now)           # fresh cycle: nothing
+    later = now + fl.STANDSTILL_S + 1.0
+    for truck in (f1, f2):
+        truck.state(later)                    # same positions: still
+    manager.floor.stuck.clear()
+    manager.floor.traffic_pass(later)
+    assert manager.floor.asides, "the settled head-on was left standing"
+    move = manager.floor.asides[-1]
+    assert move["vehicle"] == "f2"            # t-2 is the youngest
+    # and the story names its shape - an operator reading 'swap' would
+    # go looking for two parked trucks that are not there
+    said = manager.floor.asides[-1]
+    task = next(t for t in manager.tasks if t["task_id"] == "t-2")
+    assert task["state"] == "QUEUED"          # requeued, not lost
+    assert any("head-on" in r["why"] for r in manager.refused)
+
+
+def test_a_settled_head_on_with_nowhere_to_go_is_named(floor):
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = midbase_head_on(manager, stub, now)
+    boxed_in(manager)
+    later = now + fl.STANDSTILL_S + 1.0
+    for truck in (f1, f2):
+        truck.state(later)
+    manager.floor.stuck.clear()
+    manager.floor.traffic_pass(later)
+    assert manager.floor.blocked, "no named refusal for the boxed head-on"
+    assert any("head-on" in b["why"] for b in manager.floor.blocked)
+
+
+def test_a_given_up_step_aside_does_not_strand_the_truck(floor):
+    """Measured 2026-08-25 on the rig: f1's step-aside was given up at
+    179 s, nothing took back the one-node order it was still holding,
+    and the truck reported it executing for the next ten minutes -
+    never idle, never eligible, a fleet of three. The give-up must pull
+    the same lever every other take-away pulls: cancelOrder, chased by
+    the manager until the truck's own state lets go."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1, f2 = deadlocked(manager, stub, now)
+    manager.floor.traffic_pass(now)       # swap named; f2 cancelled
+    f2.take().state(now)                  # the cancel lands; f2 lets go
+    manager.floor.traffic_pass(now)       # 'cancelling' -> the move goes out
+    aside_id = manager.floor.aside["f2"]["order_id"]
+    assert aside_id is not None
+    f2.take().state(now)                  # f2 drives the move... for ever
+    later = now + fl.ASIDE_S + 1.0
+    f2.state(later)
+    manager.floor.stuck.clear()
+    manager.floor.traffic_pass(later)     # the clock runs out
+    assert "f2" not in manager.floor.aside
+    assert any("given up" in b["why"] for b in manager.floor.blocked)
+    entry = manager.cancelled.get("f2")
+    assert entry is not None and entry["order_id"] == aside_id, \
+        "the aside order was not taken back - the truck is stranded"
+
+
+# ---- 6. a reported body closes the floor (item 5c, residual 11) ----
+def test_a_reported_body_closes_the_node_and_the_next_leg_goes_round(floor):
+    """The one moment the fleet LEARNS about a physical body: nav gave
+    up (BLOCKED), the agent said so as a pathBlocked error, and the
+    fleet must do more than requeue - it closes the node ahead, so it
+    stops granting floor nobody can drive and stops routing fresh
+    trucks into the same box (M6.7's blocker experiment, where it sent
+    three)."""
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    # The pickup is ACROSS the hall on purpose: the node ahead of the
+    # truck must be corridor, not the station dot itself - a body on
+    # the station is the other test's honest "no route".
+    submit(manager, "t-1", "S5", "S4")
+    turn(manager, (f1,), now)
+    task = manager.tasks[0]
+    order_id = task["order_id"]
+    node = manager.floor.node_ahead("f1", task)
+    assert node is not None
+    assert node != (STATIONS["S5"]["x"], STATIONS["S5"]["y"])
+    f1.errors = [{
+        "errorType": "pathBlocked", "errorLevel": "WARNING",
+        "errorDescription": "navigation gave up on a body in the path",
+        "errorReferences": [{"referenceKey": "orderId",
+                             "referenceValue": order_id}]}]
+    f1.state(now)
+    assert task["state"] == "QUEUED"
+    assert manager.cancelled.get("f1", {}).get("order_id") == order_id
+    assert node in manager.floor.closed
+    assert manager.floor.owner_of(node) is not None   # the phantom holds it
+    # the next leg for the same transport plans AROUND the closed node
+    f1.take().state(now)                  # the cancel lands; f1 idle again
+    manager.floor.stuck.clear()
+    manager.floor.traffic_pass(now)
+    manager._assign(now)
+    f1.take()
+    assert f1.order is not None, "the requeued task was never re-sent"
+    named = {(n["nodePosition"]["x"], n["nodePosition"]["y"])
+             for n in f1.order["nodes"]}
+    assert node not in named
+    # and the screen names the closure
+    doc = manager._status(now)
+    assert doc["traffic"]["closed"]
+    assert any("CLOSED" in line for line in cli_render_lines(doc))
+
+
+def cli_render_lines(doc):
+    import fleet_cli
+    return fleet_cli.render(json.loads(json.dumps(doc))).split("\n")
+
+
+def test_a_closed_node_reopens_when_its_clock_runs_out(floor):
+    manager, stub = floor
+    now = time.monotonic()
+    f1 = Truck(manager, stub, "f1", WEST)
+    submit(manager, "t-1", "S1", "S2")
+    turn(manager, (f1,), now)
+    task = manager.tasks[0]
+    node = manager.floor.node_ahead("f1", task)
+    f1.errors = [{
+        "errorType": "pathBlocked", "errorLevel": "WARNING",
+        "errorDescription": "body",
+        "errorReferences": [{"referenceKey": "orderId",
+                             "referenceValue": task["order_id"]}]}]
+    f1.state(now)
+    assert node in manager.floor.closed
+    manager.floor.traffic_pass(now + fl.CLOSED_S + 1.0)
+    assert node not in manager.floor.closed
+    assert manager.floor.owner_of(node) is None, \
+        "the phantom hold outlived its closure"

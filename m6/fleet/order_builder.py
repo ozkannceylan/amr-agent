@@ -98,7 +98,7 @@ def build_step_aside_order(order_id, start_xy, node_xy):
                                             float(ASIDE_ARRIVE_M)}}]}
 
 
-def leg_points(start_xy, station_id):
+def leg_points(start_xy, station_id, avoid=()):
     """The graph points one leg's order names, in travel order, or None.
 
     THE FLEET RESERVES WHAT THE ORDER NAMES, so the traffic ledger and
@@ -107,13 +107,20 @@ def leg_points(start_xy, station_id):
     pose is already dropped (see the module note), so every point here
     is a graph node the truck will actually stand on - which is exactly
     what traffic.route_elements wants.
+
+    `avoid` (item 5c) is the floor's closed set - nodes a body was
+    reported on - handed straight through to the planner. IT IS PART OF
+    THE LEG'S IDENTITY: an extension must rebuild the same route, so
+    whoever builds a leg with an avoid set must rebuild its extensions
+    with the same set (floor.leg_order records it on the traffic entry
+    for exactly that).
     """
-    poly = route.plan_route(start_xy, station_id)
+    poly = route.plan_route(start_xy, station_id, avoid=avoid)
     return None if poly is None else [tuple(p) for p in poly[1:]]
 
 
 def build_leg_order(order_id, start_xy, station_id, released_count=None,
-                    update_id=0):
+                    update_id=0, avoid=()):
     """The order for one leg, or None when there is no route.
 
     None covers both refusals plan_route has - an unknown station id and
@@ -150,7 +157,7 @@ def build_leg_order(order_id, start_xy, station_id, released_count=None,
     out on a topic and timestamp says when, and both are lies if minted
     for an order still being decided about.
     """
-    points = leg_points(start_xy, station_id)
+    points = leg_points(start_xy, station_id, avoid=avoid)
     if points is None:
         return None
     cut = len(points) if released_count is None \

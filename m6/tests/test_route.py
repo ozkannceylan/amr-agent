@@ -160,3 +160,29 @@ def test_the_longest_leg_is_what_the_spec_says():
     path = route.dijkstra(graph, (17.0, -14.90), (-13.0, 4.25))
     length = sum(math.dist(a, b) for a, b in zip(path, path[1:]))
     assert abs(length - 60.65) < 0.01, length
+
+
+def test_plan_route_can_be_asked_to_avoid_a_node():
+    """M6 review item 5c: a node a physical body was reported on is
+    closed for a while, and a NEW leg must plan around it. The S9->S12
+    leg runs the south ring; with the ring's centre node (0.0,-10.0)
+    avoided, the loop still joins the two ends the long way round, so
+    the route exists, is longer, and never names the node."""
+    direct = route.plan_route((-17.0, -14.9), "S12")
+    assert (0.0, -10.0) in direct
+    around = route.plan_route((-17.0, -14.9), "S12",
+                              avoid={(0.0, -10.0)})
+    assert around is not None
+    assert (0.0, -10.0) not in around
+    d = sum(math.dist(a, b) for a, b in zip(direct, direct[1:]))
+    a = sum(math.dist(x, y) for x, y in zip(around, around[1:]))
+    assert a > d
+
+
+def test_avoiding_the_goal_is_an_honest_none():
+    """A closed node that IS the station leaves no route, and None is
+    the answer the callers already survive - the task is held or
+    requeued, not driven into the body standing on the dot."""
+    station = (17.0, -14.9)              # S12's own node
+    assert route.plan_route((-17.0, -14.9), "S12",
+                            avoid={station}) is None

@@ -302,3 +302,18 @@ def test_every_graph_edge_can_be_a_step_aside():
         for nbr in neighbours:
             order = build_step_aside_order("ft-x", node, nbr)
             assert vo.validate_order(order) == "", (node, nbr)
+
+
+def test_a_leg_order_can_be_built_around_a_closed_node():
+    """Item 5c's plumb: the floor hands its closed set to the builder,
+    the builder hands it to the planner, and the order that comes out
+    never names the node a body was reported on. Same funnel,
+    validate_order and all."""
+    import vda_orders as vo
+    shut = {(0.0, -10.0)}
+    order = build_leg_order("ft-x", (-17.0, -14.9), "S12", avoid=shut)
+    assert order is not None
+    assert vo.validate_order(order) == ""
+    named = {(n["nodePosition"]["x"], n["nodePosition"]["y"])
+             for n in order["nodes"]}
+    assert (0.0, -10.0) not in named

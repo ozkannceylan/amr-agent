@@ -890,7 +890,7 @@ def test_no_traffic_reproduces_the_jam_and_the_document_says_so(rig):
                                                  ["nodes"]), 0],
                                   "t-jam": [len(order["nodes"]), 0]},
                               "stuck": {}, "yields": [], "blocked": [],
-                              "idle": [], "aside": []}
+                              "idle": [], "aside": [], "closed": []}
 
 
 def test_a_swap_deadlock_moves_a_truck_and_says_so_on_the_screen(rig):

@@ -916,3 +916,47 @@ def test_a_horizon_shrunk_to_nothing_still_ends_the_order(rig):
         "order and the fleet will never be told it arrived")
     done = [s for s in states_of(caught, "o-grow") if s["nodeStates"] == []]
     assert done and done[-1]["lastNodeId"] == "wp1"
+
+
+def test_nav_blocked_is_reported_as_pathBlocked_once(rig):
+    """Item 5c's vehicle half: nav's BLOCKED - the end of the
+    escalation, a body it could not get around - reaches the fleet as
+    ONE pathBlocked WARNING naming the order. Once, on the edge into
+    BLOCKED: the fleet acts on the first report, and a 10 Hz nav state
+    repeated into errors[] would bury the screen it is for. The order
+    is KEPT - what to do about a blocked route is master control's
+    decision, and its cancelOrder arrives through the ordinary door."""
+    from std_msgs.msg import String
+    agent, helper, caught, mode_pub, nav_pub, probe = rig
+    spin([agent, helper], 1.5)
+    mode_pub.publish(String(data="auto"))
+    spin([agent, helper], 0.5)
+    probe.publish("uagv/v2/amragent/f1/order",
+                  json.dumps(valid_order()), qos=0)
+    spin([agent, helper], 1.5)
+    assert agent.executing, "the order was never taken up"
+    for _ in range(3):        # a nav state repeated is one report
+        nav_pub.publish(String(data=json.dumps(
+            {"state": "BLOCKED", "goal": "o-int-1",
+             "note": "gave up after 2 nudges - body 1.1 m ahead",
+             "route": [], "pose": [3.0, -8.0, 0.0]})))
+        spin([agent, helper], 0.4)
+    states = [p for t, p in caught["mqtt"] if t.endswith("/state")]
+    reports = [s for s in states
+               if any(e.get("errorType") == "pathBlocked"
+                      for e in s.get("errors", []))]
+    assert len(reports) == 1, \
+        "expected exactly one pathBlocked report, got {}".format(
+            len(reports))
+    err = next(e for e in reports[0]["errors"]
+               if e["errorType"] == "pathBlocked")
+    assert err["errorLevel"] == "WARNING"
+    assert any(r.get("referenceKey") == "orderId"
+               and r.get("referenceValue") == "o-int-1"
+               for r in err["errorReferences"])
+    assert "body" in err["errorDescription"]
+    # the order is kept and the agent still believes it is executing -
+    # the stop already happened in the plant, and the fleet's cancel is
+    # what takes the work away
+    assert agent.order["orderId"] == "o-int-1"
+    assert agent.executing

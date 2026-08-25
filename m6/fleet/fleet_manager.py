@@ -109,7 +109,7 @@ import route                                        # noqa: E402
 import vda_messages as vm                           # noqa: E402
 import vda_orders as vo                             # noqa: E402
 import progress as pg                              # noqa: E402
-from floor import Floor                             # noqa: E402
+from floor import CLOSED_S, Floor                   # noqa: E402
 from order_builder import leg2_start                # noqa: E402
 from stations import STATIONS                       # noqa: E402
 
@@ -402,7 +402,8 @@ class FleetManager:
         if veh["not_eligible"] and fresh:
             veh["not_eligible"] = False
             self.log.info("%s re-earned eligibility", serial)
-        self.floor.note_state(serial, veh, msg)
+        self.floor.note_state(serial, veh, msg, now)
+        self._check_blocked(serial, msg, now)
         self._check_rejection(serial, veh, msg)
         self._check_arrival(serial, order_id, node_states, now)
 
@@ -448,6 +449,53 @@ class FleetManager:
                 "%s still shows %s executing %.1f s after the cancel - "
                 "re-sent (%d of %d)", serial, entry["order_id"],
                 now - entry["first"], entry["tries"], CANCEL_RETRY_MAX)
+
+    def _check_blocked(self, serial, msg, now):
+        """A pathBlocked error naming OUR order: the vehicle's own
+        escalation gave up on a body in its path (item 5c, residual 11).
+
+        This is the one moment the fleet LEARNS about a physical body -
+        the scanners stopped the truck long ago, but nothing on the
+        wire ever said WHERE until the vehicle's nav gave up and named
+        it. Four things happen, in the order that keeps the ledger
+        honest: the node ahead is read off the route BEFORE the requeue
+        drops it; the task goes back to the queue (which frees the
+        reporter's floor); the node is closed, so nothing is granted
+        onto the body and new legs plan around it; and the reporter's
+        order is taken back through the ordinary cancel chase.
+        """
+        task = self._task_of(serial)
+        if task is None or not task.get("order_id"):
+            return
+        errors = msg.get("errors")
+        for err in errors if isinstance(errors, list) else []:
+            if not isinstance(err, dict) \
+                    or err.get("errorType") != "pathBlocked":
+                continue
+            refs = err.get("errorReferences")
+            if not any(isinstance(r, dict)
+                       and r.get("referenceKey") == "orderId"
+                       and r.get("referenceValue") == task["order_id"]
+                       for r in (refs if isinstance(refs, list) else [])):
+                continue
+            node = self.floor.node_ahead(serial, task)
+            why = ("{} reports its path BLOCKED on {}: {}".format(
+                serial, task["order_id"],
+                err.get("errorDescription", "") or "no description"))
+            if node is not None:
+                why += (". The node ahead {} is closed for {:.0f} s - "
+                        "nothing is granted onto it and new legs plan "
+                        "around it".format(node, CLOSED_S))
+            self.log.warning("%s", why)
+            self._note_refusal(task["task_id"], why)
+            order_id = task.get("order_id")
+            self._requeue(task["task_id"], why)
+            if node is not None:
+                self.floor.close_node(node, serial, now)
+            if order_id:
+                self._abandon_order(serial, order_id, why)
+            self.progress.forget(serial)
+            return
 
     def _check_rejection(self, serial, veh, msg):
         """An orderError naming OUR in-flight orderId. Anything else in
@@ -988,7 +1036,10 @@ class FleetManager:
                    doc["traffic"]["bases"], doc["traffic"]["stuck"],
                    len(doc["traffic"]["yields"]),
                    len(doc["traffic"]["blocked"]),
-                   len(doc["traffic"]["idle"])]},
+                   len(doc["traffic"]["idle"]),
+                   # A closure appearing or expiring is a discrete fact
+                   # an operator must not wait out the 2 s tick for.
+                   [c["node"] for c in doc["traffic"]["closed"]]]},
             sort_keys=True)
 
     def _publish_status(self, now):

@@ -274,6 +274,19 @@ class VdaAgent(Node):
             self.executing and state == "IDLE" and note
             and (goal in ("", None) or note == "mode left auto")
             and time.monotonic() - self.route_sent_at >= NAV_SETTLE_S)
+        # NAV GAVE UP ON A BODY (M6 item 5c, PROOF residual 11). BLOCKED
+        # is the end of the escalation - HOLD, AVOID and NUDGE have all
+        # been tried - and it is the one fact only this vehicle knows:
+        # the scanners stopped the truck long ago, but nothing on the
+        # wire ever said WHERE. Edge-triggered on the transition into
+        # BLOCKED for our own order, reported once as a pathBlocked
+        # WARNING; the fleet reads it, closes the node ahead and takes
+        # the order back. The order is KEPT here - what to do about a
+        # blocked route is master control's decision, not this file's.
+        blocked_now = (
+            self.executing and state == "BLOCKED"
+            and self.nav_state != "BLOCKED"
+            and goal == (self.order or {}).get("orderId"))
         self.nav_state, self.nav_goal = state, goal
         if self._settle_arrival():
             return
@@ -284,6 +297,18 @@ class VdaAgent(Node):
             self.get_logger().warn(
                 "nav is not driving this order: {}".format(note))
             self.publish_state("nav refused/cancelled")
+            return
+        if blocked_now:
+            self.get_logger().warn(
+                "nav is BLOCKED on this order: {}".format(note))
+            self.publish_state("path blocked", [{
+                "errorType": "pathBlocked", "errorLevel": "WARNING",
+                "errorDescription":
+                    "navigation gave up on a body in the path - {}"
+                    .format(note or "no detail"),
+                "errorReferences": [
+                    {"referenceKey": "orderId",
+                     "referenceValue": self.order["orderId"]}]}])
 
     def _settle_arrival(self):
         """The order is over. True when THIS call is what ended it.

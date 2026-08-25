@@ -129,17 +129,34 @@ def nearest_node(nodes, xy):
     return min(nodes, key=lambda n: _dist(n, xy))
 
 
-def plan_route(pose_xy, station_id):
+def plan_route(pose_xy, station_id, avoid=()):
     """[pose_xy, entry node, ..., station point], or None if unknown.
 
     The pose is prepended so the follower's first segment starts under
     the truck instead of snapping it sideways onto the graph.
+
+    `avoid` (M6 item 5c) is a collection of graph nodes to plan as if
+    they were not there - the fleet closes a node for a while when a
+    vehicle reports a physical body on it (nav's BLOCKED), and a new
+    leg must go round rather than be granted floor nobody can drive.
+    The nodes leave the graph entirely, edges and all; a goal that is
+    itself avoided therefore has no route, and None is the honest
+    answer the callers already survive. The default is the empty tuple,
+    so every existing caller plans on the whole floor unchanged.
     """
     station = STATIONS.get(station_id)
     if station is None:
         return None
     graph = build_graph()
+    if avoid:
+        shut = {tuple(n) for n in avoid}
+        graph = {n: [m for m in nbrs if m not in shut]
+                 for n, nbrs in graph.items() if n not in shut}
+        if not graph:
+            return None
     goal = (station["x"], station["y"])
+    if goal not in graph:
+        return None
     path = dijkstra(graph, nearest_node(graph, pose_xy), goal)
     if path is None:
         return None
