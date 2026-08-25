@@ -1079,6 +1079,22 @@ evidence:
     # it, the estimator was not publishing and the answer is a refusal
     # rather than a straight line drawn across the gap.
     max_pair_gap_s: "0.5"
+    # HOW CLOSE TO range_min A BEAM'S OWN MEAN HAS TO BE to count as
+    # PINNED there rather than as measuring the room. gz clamps a return
+    # closer than <range><min> to the minimum instead of dropping it
+    # (EVIDENCE_MODEL_V3.md 8), and a clamped beam has no spread, so
+    # averaging it into a noise figure drags that figure down - on the
+    # back safety scanner, which sees this truck's own counterweight,
+    # by up to a third. So they are separated and BOTH counts are
+    # reported.
+    #   IT IS A FLOAT-EQUALITY EPSILON AND NOT A BAND. A clamped reading
+    #   is EXACTLY range_min in every frame, so its mean is exactly
+    #   range_min; 1e-6 m is a micrometre, four orders of magnitude below
+    #   the 0.02 m noise and far outside anything a real reading could
+    #   land on by accident. It is here rather than inline because it
+    #   decides which readings enter a published figure, and that is
+    #   behavioural whatever its size.
+    clamp_tolerance_m: "0.000001"
     # THE FACTOR THE ACCEPTANCE IS STATED IN. A measured temporal spread
     # inside [1/1.25, 1.25] of the SDF's own stddev passes; outside it,
     # the discrepancy is diagnosed rather than smoothed (global

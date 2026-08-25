@@ -109,6 +109,7 @@ REQUIRED_KEYS = (
     "evidence.analyse.spawn_tolerance_m",
     "evidence.analyse.spawn_tolerance_rad",
     "evidence.analyse.max_pair_gap_s", "evidence.analyse.noise_factor",
+    "evidence.analyse.clamp_tolerance_m",
     "evidence.corner.profile",
     "evidence.corner.settle_s", "evidence.corner.window_s",
     "evidence.corner.bin_s",
@@ -950,7 +951,8 @@ def analyse_static(cfg, path, sensors):
     def scan_noise(label, one, spec):
         series = core.finite_beam_series(one, "beam_")
         free, clamped = core.split_clamped(
-            series, spec.get("range_min", 0.0), 1e-6)
+            series, spec.get("range_min", 0.0),
+            cfg.f("evidence.analyse.clamp_tolerance_m"))
         spread, _, zeros = core.temporal_spread(free)
         noise_line(cfg, label, spread, spec["noise"]["range"]["stddev"],
                    factor,
