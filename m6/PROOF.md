@@ -6931,3 +6931,20 @@ pinned by tests). The scenario was staged to be READ, not to score:
   "deploy is STALE" is a warning somebody has to READ, and a task every
   vehicle rejects for the same non-timing reason cycles for ever -
   nothing counts rejections per TASK. Neither is fixed tonight.
+
+**Re-cut the same afternoon, on the owner's viewing notes.** The first
+cut opened on one truck working alone and played at the wall clock of a
+half-speed rig - watchable evidence, poor cinema. Take 3 replaces the
+asset: four tasks go in ten seconds apart and all four trucks are
+driving inside the first forty (job-1 f2, job-2 f3, job-3 f4, job-4 f1,
+each chosen by nearest-idle on camera), the demo feed keeps in-flight
+at four for the rest, and the film is encoded at 10 fps against the
+camera's 10 Hz SIM stamps - so it plays at the warehouse's TRUE speed,
+4 m 33 s for 500 s of wall (the rig's 0.55 RTF no longer leaks into
+the viewer's clock; the title card says so). On camera: four staggered
+TASK -> ORDER(+pick) -> WAITING/RUNNING/FINISHED -> leg-2(+drop)
+chains, EXTENDs growing bases, a swap deadlock resolved by step-aside
+at 12:24:19, job-2 completed at S3, and 316 m of fleet travel scored
+over the window. The back-and-forth a viewer sees at stations is the
+truck REVERSING OUT by design (nav_core: a spur is backed out of, not
+turned around in); at true speed it reads as the manoeuvre it is.

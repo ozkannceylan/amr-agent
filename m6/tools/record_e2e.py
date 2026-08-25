@@ -292,7 +292,7 @@ def main():
                           font=mid, fill=FG)
                 draw.text((60, msg.height - 100),
                           "Gazebo simulation - virtual F-PLC per truck "
-                          "- film runs at the plant's own pace",
+                          "- plays at the warehouse's TRUE speed",
                           font=mid, fill=DIM)
             if self._sink is None:
                 self._sink = subprocess.Popen(
