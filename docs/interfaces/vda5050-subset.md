@@ -90,7 +90,7 @@ node (required per schema: `nodeId`, `sequenceId`, `released`, `actions`):
 | released | boolean | yes | true = base (drive it), false = horizon (plan only) |
 | nodePosition | object | no (yes for us) | Target pose; we always send it (AUTONOMOUS vehicle needs goal poses) |
 | nodePosition.x, .y | number | yes (in object) | World coordinates on map |
-| nodePosition.theta | number, ±π | no | Target orientation; sent for station nodes |
+| nodePosition.theta | number, ±π | no | **Not sent** (M6 measured deviation from this table's first cut: the vehicle is AUTONOMOUS and plans its own approach; `order_builder.py` sends x/y/mapId, plus `allowedDeviationXY` on the final node only) |
 | nodePosition.allowedDeviationXY | number ≥ 0 | no | Arrival tolerance radius in m |
 | nodePosition.allowedDeviationTheta | number, ±π | no | Arrival orientation tolerance |
 | nodePosition.mapId | string | yes (in object) | Single warehouse map ID |
@@ -130,6 +130,31 @@ by instantActions):
 | edge.direction, edge.length | Line-guided vehicle fields |
 | edge.maxHeight, minHeight | No height-constrained infrastructure in the cell |
 
+### Recorded deviations — order acceptance (M6, `vda_orders.accept_order`)
+
+Measured against the code 2026-08-25; each is deliberate and the reason is
+the code's own comment.
+
+1. **An order update is accepted only when `orderUpdateId` is exactly one
+   more than the executing order's.** The spec accepts any greater value
+   (a skipped update is a discarded one); this vehicle rejects the jump
+   with a named `orderError` instead. Both ends of this cell are this
+   project's, the fleet rebuilds from the rejection, and a lost extension
+   is retried on the next traffic pass — but a third-party master that
+   skips ids will be refused. Interop work item if one ever connects.
+2. **A new order (different `orderId`) is rejected while one is
+   executing** — `cancelOrder` first, always. The spec's append case
+   (new order whose first node is the end of the current base) is not
+   implemented; the fleet never sends it.
+3. **Node and edge actions in orders are rejected** (`node N actions
+   unsupported`). The transport's fork cycle is the manager's dwell timer
+   for now; pick/drop as node actions is planned work, and this clause is
+   where it will land.
+4. **A duplicate delivery (same `orderId`, same `orderUpdateId`) is
+   ignored silently** — no state change, no error. The spec agrees
+   (discard); it is recorded here because silence is otherwise easy to
+   misread as loss.
+
 ## 5. Topic `state` (AGV → fleet manager)
 
 Source: `state.schema`. Published on the events listed in spec 6.10 and at
@@ -145,21 +170,21 @@ latest every 30 s. Header per section 3, plus:
 | lastNodeSequenceId | integer | yes | sequenceId of last reached node; 0 if none |
 | nodeStates | array | yes | Remaining nodes of the order; empty when idle |
 | nodeStates[].nodeId, .sequenceId, .released | string / integer / boolean | yes | As in order |
-| edgeStates | array | yes | Remaining edges; empty when idle |
-| edgeStates[].edgeId, .sequenceId, .released | string / integer / boolean | yes | As in order |
+| edgeStates | array | yes | **Always sent `[]`** (M6 recorded deviation: `nodeStates` alone carries the remaining route; no consumer reads edge occupancy off the wire — the fleet's ledger derives edges itself) |
+| edgeStates[].edgeId, .sequenceId, .released | string / integer / boolean | yes | Not produced — see the row above |
 | driving | boolean | yes | Vehicle is driving/rotating |
-| paused | boolean | no (sent) | Pause state, linked to startPause/stopPause |
+| paused | boolean | no (sent) | **Sent hard-false** — startPause/stopPause are not implemented (section 6) |
 | newBaseRequest | boolean | no (sent) | Vehicle near end of base; fleet manager should extend |
 | agvPosition | object | no (sent) | Vehicle pose |
 | agvPosition.x, .y, .theta | number | yes (in object) | Pose on map |
 | agvPosition.mapId | string | yes (in object) | Map ID |
 | agvPosition.positionInitialized | boolean | yes (in object) | Localization valid flag |
-| agvPosition.localizationScore | number 0..1 | no | AMCL confidence; logging/monitoring only |
-| velocity.vx, .vy, .omega | number | no | Vehicle-frame velocity; monitoring only |
-| batteryState | object | yes | Battery info |
-| batteryState.batteryCharge | number (%) | yes (in object) | Drives charging decisions in fleet manager |
-| batteryState.charging | boolean | yes (in object) | Linked state of startCharging/stopCharging |
-| operatingMode | enum AUTOMATIC / SEMIAUTOMATIC / MANUAL / SERVICE / TEACHIN | yes | Only AUTOMATIC vehicles receive orders |
+| agvPosition.localizationScore | number 0..1 | no | **Not sent** — sim ground truth has no confidence to report |
+| velocity.vx, .vy, .omega | number | no | **Not sent** — `driving` (speed over a 0.02 m/s floor) is the only motion fact on the wire |
+| batteryState | object | yes | **Honest sim stub**: always `{batteryCharge: 100.0, charging: false}` — the sim has no battery, the schema requires the object, and a number that pretends to drain would be a lie |
+| batteryState.batteryCharge | number (%) | yes (in object) | See above; drives nothing yet |
+| batteryState.charging | boolean | yes (in object) | See above; startCharging/stopCharging not implemented (section 6) |
+| operatingMode | enum AUTOMATIC / SEMIAUTOMATIC / MANUAL / SERVICE / TEACHIN | yes | Only AUTOMATIC vehicles receive orders. **Produced values: AUTOMATIC and MANUAL only** — the cab has two modes |
 | errors | array | yes | Active errors; empty array = none |
 | errors[].errorType | string | yes | Error name; extension point (section 9) |
 | errors[].errorLevel | enum WARNING / FATAL | yes | FATAL = not in running condition |
@@ -171,7 +196,7 @@ latest every 30 s. Header per section 3, plus:
 | actionStates[].actionStatus | enum WAITING / INITIALIZING / RUNNING / FINISHED / FAILED | yes | Action lifecycle |
 | actionStates[].resultDescription | string | no | Action result text |
 | safetyState | object | yes | **Status reporting only — see note below** |
-| safetyState.eStop | enum AUTOACK / MANUAL / REMOTE / NONE | yes (in object) | Which acknowledge type is pending |
+| safetyState.eStop | enum AUTOACK / MANUAL / REMOTE / NONE | yes (in object) | Which acknowledge type is pending. **Produced values: NONE and MANUAL only** — MANUAL covers both a latched demand and an unhealthy chain, because both wait on the panel's acknowledge |
 | safetyState.fieldViolation | boolean | yes (in object) | Protective field violated |
 
 **safetyState is not a safety channel.** It reports, after the fact, what the
@@ -198,24 +223,32 @@ Source: `instantActions.schema`. Header per section 3, plus required field
 `actions`: array of action objects (identical shape to section 4's action
 object; all of `actionId`, `actionType`, `blockingType` required).
 
-Supported actions — all are **predefined standard actions** from spec 6.8.1,
-instant scope, no custom names:
+**Implemented actions** (M6, measured against `vda_agent.py`) — all
+predefined standard actions from spec 6.8.1, instant scope, no custom names:
 
 | actionType | Params (per spec) | blockingType we send | Linked state | Use in this project |
 |---|---|---|---|---|
-| startPause | – | HARD | `paused` | Fleet-level hold (traffic, operator) |
-| stopPause | – | HARD | `paused` | Resume after hold |
-| cancelOrder | – | HARD | – | Abort order; vehicle stops (controlled), deletes order, cancels actions; reports FAILED if no order (spec 6.6.3.2) |
-| startCharging | – | HARD | `batteryState.charging` | Start charging at charge station (also valid as node action) |
-| stopCharging | – | HARD | `batteryState.charging` | Release vehicle from charger before new order |
-| initPosition | x, y, theta (float64); mapId, lastNodeId (string) | HARD | `agvPosition.*`, `lastNodeId` | Set initial pose in simulation / after localization loss |
+| cancelOrder | – | HARD | – | Abort order; vehicle stops (controlled, **confirmed against nav** — the actionState stays RUNNING until the stop is seen, FAILED if it never is), deletes order; reports FAILED if no order (spec 6.6.3.2) |
 | stateRequest | – | NONE | – | Force immediate state message |
 | factsheetRequest | – | NONE | – | Request factsheet publication |
 
-Standard actions **not supported**: pick, drop, detectObject, finePositioning,
-waitForTrigger, logReport, enableMap, downloadMap, deleteMap (no load handling
-device in scope, single static map). The factsheet's `protocolFeatures.agvActions`
-list is the machine-readable statement of exactly the eight actions above.
+The factsheet's `protocolFeatures.agvActions` list is the machine-readable
+statement of **exactly these three** — the vehicle must not advertise what
+would FAIL. Any other actionType is answered with a FAILED actionState plus
+an `unsupportedAction` WARNING in `errors[]` naming the actionId.
+
+**Specified in this table's first cut, NOT implemented** (this document
+claimed them before M6.2 was built; recorded 2026-08-25 when the doc was
+re-cut against the code): startPause / stopPause (state `paused` is sent
+hard-false), startCharging / stopCharging (batteryState is an honest sim
+stub, full-and-not-charging), initPosition (spawn poses come from the
+VEHICLES table; no localization-loss case in the sim). Each returns to this
+table only when its linked state becomes real.
+
+Standard actions **not in scope**: pick, drop (planned — the M6 dwell timer
+stands in for the fork cycle until they land), detectObject,
+finePositioning, waitForTrigger, logReport, enableMap, downloadMap,
+deleteMap (single static map).
 
 Note: cancelOrder/startPause are process commands. They are not stop functions
 in the safety sense; the safety stop path is onboard and in the F-CPU only
@@ -268,8 +301,8 @@ Source: `factsheet.schema`, spec 6.15. Retained; published on connect and on
 | protocolLimits.maxStringLens, maxArrayLens | object | yes | Populated with vehicle limits; 0/absent = no limit |
 | protocolLimits.timing.minOrderInterval, minStateInterval | number | yes | Message-rate contract between fleet manager and vehicle |
 | protocolFeatures.optionalParameters | array of {parameter, support} | yes | Declares which optional fields of section 4/5 the vehicle supports |
-| protocolFeatures.agvActions | array of {actionType, actionScopes, …} | yes | Exactly the eight actions of section 6 |
-| agvGeometry.envelopes2d | array | no | Footprint polygon for traffic planning |
+| protocolFeatures.agvActions | array of {actionType, actionScopes, …} | yes | Exactly the **three implemented** actions of section 6 (amendment (b): the factsheet must not advertise what would FAIL) |
+| agvGeometry.envelopes2d | array | no | **Sent empty** (`agvGeometry: {}`) — the traffic ledger derives geometry from the vehicle table, not from the wire, and M6.4's note in section 4 of this file still wants it |
 | loadSpecification.loadSets | array | no | Empty until load handling is in scope |
 
 Concrete numeric values are owned by the agv layer (single source of truth,
@@ -300,7 +333,15 @@ Adding top-level fields to any message, renaming fields, or deviating from the
 topic structure is **not** an extension — it is a contract break and requires
 an ADR.
 
-**Currently used extensions: none.**
+**Currently used extensions: project `errorType` names** (the one extension
+point in use, recorded 2026-08-25 — each is a free string per the spec and
+each is documented at its producer): `safetyStop` (drive enable down;
+`vda_messages.errors_and_safety`), `orderError` (an order or extension
+refused, spec-suggested name), `unsupportedAction` (actionType not
+implemented), `cancelUnconfirmed` (the empty goal went unanswered past its
+deadline; `vda_agent._pump_cancel`), `pathBlocked` (navigation gave up on a body; the escalation's end). The names are camelCase, matching the
+spec's own suggested error names, and section 9's "PascalCase" rule is
+corrected by this sentence.
 
 ## Amendment 2026-08-21 (M6.2)
 
@@ -343,7 +384,7 @@ that set grows by milestone:
 | cancelOrder | **M6.2** |
 | stateRequest | **M6.2** |
 | factsheetRequest | **M6.2** |
-| startPause, stopPause | M6.4 (with `paused` in `state`) |
+| startPause, stopPause | not yet — M6.4 built traffic on base/horizon instead of pause, so the planned "M6.4" date lapsed; `paused` is sent hard-false (recorded 2026-08-25) |
 | startCharging, stopCharging | when a battery model exists |
 | initPosition | when localization can be re-seeded |
 
@@ -395,9 +436,36 @@ The complete set this project emits, all of them from
 | `safetyStop` | FATAL | Drive enable is down — a latched safety demand or a pending startup acknowledge. Reporting only: the F-model dropped `Motor` long before this message was built. |
 | `orderError` | WARNING | The order just delivered was refused and no route was issued; `errorDescription` is the refusal reason and `errorReferences` carries the offending `orderId`. |
 | `unsupportedAction` | WARNING | An instant action was answered `FAILED` because this milestone does not implement it; `errorReferences` carries the `actionId`. The factsheet's `agvActions` is the list that would have avoided it. |
+| `cancelUnconfirmed` | WARNING | A cancel's empty goal went out repeatedly and navigation never reported a stop inside the deadline — this vehicle may still be moving (`vda_agent._pump_cancel`, the Fleet Gate 4 lesson). Added M6.3, recorded here 2026-08-25. |
+| `pathBlocked` | WARNING | Navigation gave up on a body in the path — the end of the HOLD→AVOID→NUDGE escalation. Reported **once**, on the edge into BLOCKED, naming the order; the fleet answers by closing the node ahead and taking the order back (cancelOrder). The order is kept until that cancel arrives. Added 2026-08-25 (M6 review item 5c). |
 
 `unsupportedAction` is reported **once**, on the state that carries the
 `FAILED` actionState; that actionState is the standing record afterwards. The
 other two are recomputed on every state and therefore persist exactly as long
 as the condition does — `safetyStop` for as long as the enable is down,
 `orderError` for the single state a refusal produces.
+
+## Amendment 2026-08-25 (M6 review) — the base tables re-cut against the code
+
+The 2026-08-25 review measured this document against the code at the M6.7
+tip and found the base tables still describing intentions where the code had
+since decided otherwise. Unlike the 2026-08-21 amendment, this one edits the
+base tables IN PLACE — a reference whose truth lives in its appendix is how
+the drift happened — and the earlier amendments stay as history. What
+changed, so a differ knows it was deliberate:
+
+* Section 4: `nodePosition.theta` marked **not sent**; a *Recorded
+  deviations — order acceptance* subsection added (orderUpdateId must be
+  exactly +1; new order rejected while executing; node/edge actions
+  rejected; duplicates ignored).
+* Section 5: `edgeStates` always `[]`; `paused` hard-false; `velocity` and
+  `localizationScore` not sent; `batteryState` named an honest stub; the
+  produced value sets of `operatingMode` (AUTOMATIC/MANUAL) and
+  `safetyState.eStop` (NONE/MANUAL) recorded; `cancelUnconfirmed` added to
+  the error table.
+* Section 6: rewritten around the **three implemented** instant actions;
+  the five once promised move to a named not-implemented list.
+* Section 8: `protocolFeatures.agvActions` counts three; `agvGeometry`
+  sent empty.
+* Section 9: the "no extensions" claim replaced by the four project
+  errorType names in use.
