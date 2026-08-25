@@ -20,10 +20,11 @@ running underneath them.
 
 ![AMR-AGENT — the layer pyramid: deterministic safety at the base, teleoperation over PLC↔ROS 2, autonomy, VDA 5050 fleet, LLM supervision on top; safety never traverses the network](assets/amr-agent-infographic.png)
 
-*The stack, bottom-up: the three lower layers are running today (M5);
-the fleet and LLM layers are the road ahead (M6, M7). Safety never
-traverses the network — the LLM sees everything, acts through the fleet
-layer only, and can bypass no interlock.*
+*The stack, bottom-up: the four lower layers are running today (M6 —
+four forklifts under a VDA 5050 fleet manager); the LLM layer is the
+road ahead (M7). Safety never traverses the network — the LLM sees
+everything, acts through the fleet layer only, and can bypass no
+interlock.*
 
 ## Watch it run
 
@@ -48,6 +49,21 @@ through its own release, a protective field that stops the truck and
 refuses to un-stop while the cause stands, the warning field dropping
 the speed ceiling, and an injected encoder fault caught by the
 cross-check.*
+
+**3 · VDA 5050 Fleet Management:**
+
+[![VDA 5050 fleet management — four forklifts, the operator's screen and the MQTT wire itself, one uncut take at the warehouse's true speed](https://img.youtube.com/vi/RGjbhj6Tb70/maxresdefault.jpg)](https://www.youtube.com/watch?v=RGjbhj6Tb70)
+
+*▶ [**Watch**](https://www.youtube.com/watch?v=RGjbhj6Tb70) — the M6
+cell in one take, three panels: the floor from above, the operator's
+own fleet screen, and the VDA 5050 wire told one readable line per
+event. Four transport tasks typed at the console ten seconds apart,
+each assigned to the nearest idle truck; every order carries its pick,
+the trucks report the cycle WAITING → RUNNING → FINISHED and leg 2
+follows the report; corridors are reserved edge by edge and grow as
+they drain; a swap deadlock resolves itself by a step-aside on camera.
+Plays at the plant's true speed — and the reversing at stations is the
+forklift backing out of a spur by design.*
 
 *(The first build's own demonstration is linked from
 [its archive](m5/m5_ver1/README.md) — and it runs again without PLCSIM,
@@ -81,7 +97,7 @@ its measured evidence in [`m5_ver2/step5/PROOF.md`](m5_ver2/step5/PROOF.md).
 | [M3](m3/) | Fixed equipment I/O loop — Gazebo ↔ PLC both directions, measured | ✅ |
 | [M4](m4/) | Forklift commissioning cell — teleop through the PLC standard program | ✅ |
 | [M5](m5/) | Sensored autonomous forklift — the safety chain live under teleop **and** autonomy | ✅ |
-| [M6](m6/) | VDA 5050 fleet at scale — 4 forklifts, 12 stations, traffic avoidance | ⏳ |
+| [M6](m6/) | VDA 5050 fleet at scale — 4 forklifts, 12 stations, traffic reservation, pick/drop on the wire | ✅ |
 | M7 | LLM operations layer + recorded end-to-end demonstration | ⏳ |
 | M8 | Beckhoff/TwinCAT vendor portability — same bridge, different PLC | ⏳ |
 
