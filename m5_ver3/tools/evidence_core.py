@@ -370,13 +370,23 @@ def resample(source_t, source_v, at_t, max_gap_s):
 # drift
 # ----------------------------------------------------------------------
 
-def score_drift(truth_rows, est_rows, frame, max_gap_s=1.0):
+def score_drift(truth_rows, est_rows, frame, max_gap_s):
     """The estimate against the ground truth, over a whole drive.
 
     Both arguments are sequences of (t, x, y, yaw): the truth in WORLD
     coordinates as the plant publishes it, the estimate in its own odom
     frame as the node publishes it. The frame is what makes them
     comparable and nothing else here touches coordinates.
+
+    max_gap_s HAS NO DEFAULT, and that is the point of it. It is
+    resample()'s bound - how far the estimate may be reached across
+    before a gap in it is a refusal rather than a straight line - so it
+    decides which recordings are scoreable at all, and a caller that
+    took a default would be scoring against a number written in this
+    file instead of the one in config.yaml (evidence.analyse.
+    max_pair_gap_s, 0.5 s, which is 250 estimate samples on this rig).
+    resample() below already requires it; this function used to carry a
+    1.0 that silently disagreed with the only caller that mattered.
 
     THE SCORE IS ABSOLUTE. The error at every sample is the estimate
     minus the transformed truth, full stop - no initial offset is
@@ -975,8 +985,12 @@ def _selftest():
           abs(rate.hz_mean - 15.0) < 1e-9)
 
     still = [(i * 0.05, -17.0, 10.0, math.pi) for i in range(21)]
+    # The gap bound is spelled here rather than defaulted, because the
+    # function has no default - see score_drift's own docstring. 1.0 s is
+    # generous against a synthetic trace sampled every 0.05 s: it is the
+    # scorer being exercised, not the bound.
     score = score_drift(still, [(i * 0.05, 0.40, 0.0, 0.0)
-                                for i in range(21)], frame)
+                                for i in range(21)], frame, 1.0)
     check("a 0.40 m offset that never grows still scores 0.40 m",
           abs(score.end_error_m - 0.40) < 1e-9
           and abs(score.rms_m - 0.40) < 1e-9)

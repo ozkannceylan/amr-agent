@@ -26,6 +26,10 @@
 #                                      (r/p): a quantized channel gives
 #                                      ~0, an unquantized one gives a
 #                                      uniform spread over +-0.5.
+#                                      p is config.yaml's
+#                                      noise_probe.quantization_grid_m,
+#                                      which carries the reason this
+#                                      model's lidars cannot declare it.
 #
 # IT DOES NOT ANSWER THE BIAS QUESTION and cannot. gz draws a
 # <bias_mean>/<bias_stddev> ONCE per sensor at load and adds the same
@@ -49,8 +53,10 @@ set -uo pipefail
 TOOL=noise_probe
 # shellcheck source=_common.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
+# MAINTENANCE OBLIGATION: a key read below is a key listed here.
 load_config noise_probe.scan_samples noise_probe.depth_samples \
-    noise_probe.capture_timeout_s
+    noise_probe.capture_timeout_s noise_probe.quantization_grid_m \
+    evidence.depth.patch_half
 
 MODE="${1:-}"
 TOPIC="${2:-}"
@@ -94,7 +100,13 @@ GOT="$(grep -c '^{' "$CAP" 2>/dev/null || true)"
     "stack is up ('m5_ver3/m5v3.sh status'). Partial capture left at $CAP."
 
 echo ""
-python3 - "$CAP" "$MODE" <<'PYTHON'
+# THE TWO REDUCTION CONSTANTS GO IN THROUGH argv, because a heredoc
+# quoted 'PYTHON' - which is what stops the shell expanding $ inside a
+# python program - also stops it expanding the ones that should be. The
+# grid the quantization test measures against and the size of the depth
+# patch are both behavioural, so neither may be spelled below.
+python3 - "$CAP" "$MODE" "$CFG_NOISE_PROBE_QUANTIZATION_GRID_M" \
+    "$CFG_EVIDENCE_DEPTH_PATCH_HALF" <<'PYTHON'
 import base64
 import json
 import math
@@ -102,6 +114,7 @@ import struct
 import sys
 
 path, mode = sys.argv[1], sys.argv[2]
+grid_m, half = float(sys.argv[3]), int(sys.argv[4])
 
 frames = []
 with open(path, "r", encoding="utf-8") as handle:
@@ -197,7 +210,7 @@ if mode == "scan":
     if not series:
         print("no beam returned a finite range in every frame")
         raise SystemExit(1)
-    report_series(series, "[m]", 0.001)
+    report_series(series, "[m]", grid_m)
 else:
     head = frames[0]
     width, height = int(head.get("width", 0)), int(head.get("height", 0))
@@ -207,8 +220,10 @@ else:
     # A CENTRAL PATCH, not the whole image: 640 x 480 x 40 frames is
     # 12 million floats and the statistic does not get better for it. The
     # patch is where the optical axis lands, which on this camera is the
-    # floor about 1.9 m ahead.
-    half = 8
+    # floor a couple of metres ahead. HOW BIG IT IS is
+    # evidence.depth.patch_half's answer and arrives in argv above -
+    # sensor_evidence.py reduces the same patch of the same camera, and
+    # two figures taken over two different windows are not comparable.
     xs = range(width // 2 - half, width // 2 + half)
     ys = range(height // 2 - half, height // 2 + half)
     planes = []
@@ -230,5 +245,5 @@ else:
     depths = [sum(h) / len(h) for h in series]
     print("patch depth            mean %.6f m  min %.6f  max %.6f" %
           (sum(depths) / len(depths), min(depths), max(depths)))
-    report_series(series, "[m]", 0.001)
+    report_series(series, "[m]", grid_m)
 PYTHON

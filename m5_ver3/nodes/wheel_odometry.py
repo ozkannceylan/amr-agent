@@ -36,6 +36,23 @@ velocity is 22 % quantiser dither, and config.yaml's covariance.vx
 comment carries that arithmetic and the number F2 needs if its EKF cannot
 live with it. The node does not hide the cost; it publishes it.
 
+TWO HEARTBEATS, AND THE SECOND EXISTS BECAUSE THE FIRST CANNOT REACH THE
+FAILURE IT WAS WRITTEN FOR. heartbeat() rides the OUTPUT - it is called
+after publish(), on the plant's own clock, and it is what makes
+logs/odom.log readable as a run rather than as a banner. But the state an
+operator most needs this log for is an estimator that is ALIVE and
+publishing NOTHING: a dead steer topic leaves the held angle at None and
+every drive sample is skipped for ever, and on that path publish() is
+never reached, so the one line that would have said so never prints.
+alive() is the second heartbeat and it is a TIMER, on the MACHINE's own
+monotonic clock and not the plant's, so it ticks whether or not there is
+a world running. It says nothing while the publish count is moving. When
+the count stops it prints the counters and NAMES THE REASON - nothing on
+either input, a joint state that carries no position for the steer joint,
+no steer reading accepted yet, or a steer reading too old to integrate
+against - and escalates from info to warn once the silence has lasted
+longer than a bringup takes.
+
 IT NEVER SUBSCRIBES THE GROUND TRUTH, and that is a rule and not an
 oversight. /forklift/gz/odom is the simulator's own pose - no slip, no
 quantisation, no drift - and on this track it is an INSTRUMENT that this
@@ -65,6 +82,7 @@ the shape.
 import math
 import os
 import sys
+import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 for _sub in (_HERE, os.path.normpath(os.path.join(_HERE, os.pardir, "tools"))):
@@ -90,6 +108,7 @@ REQUIRED_KEYS = (
     "wheel_odom.odom_frame", "wheel_odom.base_frame",
     "wheel_odom.qos_depth", "wheel_odom.steer_stale_s",
     "wheel_odom.log_every_s",
+    "wheel_odom.alive_every_s", "wheel_odom.alive_warn_after_s",
     "wheel_odom.covariance.vx", "wheel_odom.covariance.vy",
     "wheel_odom.covariance.vyaw", "wheel_odom.covariance.unused",
 )
@@ -146,7 +165,7 @@ def seconds_to_stamp(Time, t_s):
     return out
 
 
-def _make_node_class(Node, JointState, Odometry, QoSProfile, Time):
+def _make_node_class(Node, JointState, Odometry, QoSProfile, Time, Clock):
     """Build the node class once the ROS types are in hand.
 
     The types are arguments rather than module-level imports so that this
@@ -172,6 +191,8 @@ def _make_node_class(Node, JointState, Odometry, QoSProfile, Time):
             self.base_frame = cfg.s("wheel_odom.base_frame")
             self.steer_stale_s = cfg.f("wheel_odom.steer_stale_s")
             self.log_every_s = cfg.f("wheel_odom.log_every_s")
+            self.alive_every_s = cfg.f("wheel_odom.alive_every_s")
+            self.alive_warn_after_s = cfg.f("wheel_odom.alive_warn_after_s")
 
             self._Time = Time
             unused = cfg.f("wheel_odom.covariance.unused")
@@ -191,6 +212,22 @@ def _make_node_class(Node, JointState, Odometry, QoSProfile, Time):
             self._skipped_stale = 0
             self._skipped_no_steer = 0
             self._last_log_t = None
+            # THE ARRIVAL COUNTERS, and they are not the skip counters.
+            # A skip counter can only rise once a message has arrived, so
+            # on a dead topic every one of them stays at zero and says
+            # the same nothing as a node that was never started. These
+            # three separate "no message" from "a message this node could
+            # not use", which is the whole of what alive() has to tell an
+            # operator apart.
+            self._drive_msgs = 0
+            self._steer_msgs = 0
+            self._steer_no_position = 0
+            # alive()'s own state, on the machine's clock. _alive_t is
+            # the last instant the OUTPUT was seen moving, and it starts
+            # at construction so the first silence is measured from a
+            # real moment rather than from zero.
+            self._alive_published = 0
+            self._alive_t = time.monotonic()
 
             qos = QoSProfile(depth=cfg.i("wheel_odom.qos_depth"))
             self.pub = self.create_publisher(
@@ -219,13 +256,27 @@ def _make_node_class(Node, JointState, Odometry, QoSProfile, Time):
                     self.steer_joint, cfg.s("topics.joint_state"),
                     cfg.s("topics.wheel_odom"),
                     self.odom_frame, self.base_frame))
+            # THE ONE CLOCK IN THIS FILE THAT IS NOT THE PLANT'S, and
+            # that is the point of it: a timer on sim time stops when the
+            # world stops, and a world that has stopped is one of the
+            # states this timer exists to report. Clock() is SYSTEM_TIME
+            # by construction and is passed EXPLICITLY rather than left
+            # to the node's default, because that default follows a
+            # use_sim_time parameter which anything on the graph may set.
+            self.create_timer(self.alive_every_s, self.alive, clock=Clock())
+
             self.get_logger().info(
                 "this node reads NO ground truth and broadcasts NO "
                 "transform - see the file header for both reasons")
+            self.get_logger().info(
+                "alive check every {:g} s of wall clock, warning after "
+                "{:g} s with no estimate published".format(
+                    self.alive_every_s, self.alive_warn_after_s))
 
         # ---------------------------- inputs --------------------------
 
         def cb_steer(self, msg):
+            self._steer_msgs += 1
             index = joint_index(msg, self.steer_joint)
             if index is None:
                 self.cfg.refuse(
@@ -236,11 +287,22 @@ def _make_node_class(Node, JointState, Odometry, QoSProfile, Time):
                     "config.yaml wheel_odom.steer_joint_name reads "
                     "{!r}".format(self.steer_joint))
             if index >= len(msg.position):
+                # THE MESSAGE NAMED THE JOINT AND CARRIED NO ANGLE FOR
+                # IT, which is not a refusal - a JointState is allowed to
+                # publish names without positions and the next one may
+                # well carry both - but it is not nothing either: a plant
+                # that only ever does this leaves the held steer at None
+                # for ever and every drive sample is then skipped. It is
+                # COUNTED so alive() can name it as the reason, which is
+                # the difference between a silent return and a silent
+                # node.
+                self._steer_no_position += 1
                 return
             self._steer_rad = float(msg.position[index])
             self._steer_t = stamp_to_s(msg.header.stamp)
 
         def cb_drive(self, msg):
+            self._drive_msgs += 1
             index = joint_index(msg, self.drive_joint)
             if index is None:
                 self.cfg.refuse(
@@ -324,6 +386,76 @@ def _make_node_class(Node, JointState, Odometry, QoSProfile, Time):
                     est.count, self._published,
                     self._skipped_no_steer, self._skipped_stale))
 
+        # --------------------------- liveness -------------------------
+
+        def why_silent(self):
+            """The one sentence a reader of odom.log needs, in the order
+            the causes have to be ruled out.
+
+            IT IS A DIAGNOSIS AND NOT A GUESS. Every branch below is
+            decided by a counter this node kept itself; none of them
+            infers anything from the absence of another. The order runs
+            from the plant outwards - no message at all, then a message
+            this node could not use, then a reading too old to use -
+            because that is the order an operator would check them in.
+            """
+            if self._drive_msgs == 0 and self._steer_msgs == 0:
+                return ("neither input has delivered a message - the "
+                        "bridge or the world is the place to look, not "
+                        "this node")
+            if self._drive_msgs == 0:
+                return "nothing has arrived on " + self.cfg.s(
+                    "topics.drive_speed_read_a")
+            if self._steer_msgs == 0:
+                return "nothing has arrived on " + self.cfg.s(
+                    "topics.joint_state")
+            if self._steer_rad is None:
+                if self._steer_no_position:
+                    return ("{} joint states named {} and carried no "
+                            "position for it".format(
+                                self._steer_no_position, self.steer_joint))
+                return "no steer reading has been accepted yet"
+            if self._skipped_stale:
+                return ("the held steer reading is older than {:g} s "
+                        "against the drive stamp".format(self.steer_stale_s))
+            return ("both inputs are arriving and nothing is coming out - "
+                    "read the counters")
+
+        def alive(self):
+            """The node's own pulse, on the machine's clock.
+
+            IT IS SILENT WHILE THE OUTPUT MOVES. A run that is working
+            already has heartbeat()'s line every log_every_s of sim time,
+            and a second cadence over the top of it would only make that
+            one harder to read. This one speaks exactly when the other
+            cannot: the publish count has not moved since the last tick.
+
+            INFO FIRST, WARN AFTER. A stack coming up is silent for as
+            long as the world takes to advertise, and calling that a
+            fault would teach the operator to ignore the line - which is
+            the one thing a watchdog may not do (m6's own escalation
+            rule). So the first ticks are info and the level rises only
+            once the silence has outlasted a bringup.
+            """
+            now = time.monotonic()
+            if self._published != self._alive_published:
+                self._alive_published = self._published
+                self._alive_t = now
+                return
+            silent_s = now - self._alive_t
+            line = ("NO ESTIMATE PUBLISHED for {:.1f} s of wall clock: "
+                    "{} | published {} | drive msgs {} | steer msgs {} "
+                    "({} with no position) | skipped {} (no steer yet) + "
+                    "{} (stale steer)".format(
+                        silent_s, self.why_silent(), self._published,
+                        self._drive_msgs, self._steer_msgs,
+                        self._steer_no_position, self._skipped_no_steer,
+                        self._skipped_stale))
+            if silent_s >= self.alive_warn_after_s:
+                self.get_logger().warn(line)
+            else:
+                self.get_logger().info(line)
+
     return WheelOdometryNode
 
 
@@ -333,6 +465,7 @@ def main(argv=None):
         import rclpy
         from builtin_interfaces.msg import Time
         from nav_msgs.msg import Odometry
+        from rclpy.clock import Clock
         from rclpy.node import Node
         from rclpy.qos import QoSProfile
         from sensor_msgs.msg import JointState
@@ -345,7 +478,7 @@ def main(argv=None):
 
     rclpy.init(args=argv)
     node_class = _make_node_class(Node, JointState, Odometry, QoSProfile,
-                                  Time)
+                                  Time, Clock)
     node = node_class(cfg)
     try:
         rclpy.spin(node)

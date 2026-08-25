@@ -508,6 +508,33 @@ wheel_odom:
   # than inline because the file's header says nothing behavioural lives
   # inline and a cadence is close enough to the line to be argued about.
   log_every_s: "10"
+  # THE SECOND HEARTBEAT'S CADENCE, AND IT IS THE ONE CLOCK ON THIS NODE
+  # THAT IS NOT THE PLANT'S. log_every_s above rides the OUTPUT - it is
+  # reached through publish() - so the state it can never report is the
+  # one the log is most needed for: a node that is ALIVE and publishing
+  # NOTHING, which is exactly what a dead steer topic produces (the held
+  # angle stays None and every drive sample is skipped for ever).
+  # nodes/wheel_odometry.py's alive() is a TIMER instead, on the
+  # machine's own clock, so it ticks with the world stopped.
+  #   5 s IS CHOSEN AGAINST THE OPERATOR AND NOT AGAINST THE PLANT.
+  #   `m5v3.sh status` reports the child ALIVE, and the next thing an
+  #   operator does is open logs/odom.log - which has to have something
+  #   in it by then or the two instruments disagree. It costs one line
+  #   per 5 s and only while the output is stopped: a run that is
+  #   publishing never reaches the print at all.
+  alive_every_s: "5"
+  # HOW LONG SILENCE IS ALLOWED TO BE NORMAL BEFORE IT IS CALLED A FAULT.
+  # The node is spawned before the world has necessarily advertised its
+  # joint channels, so the first quiet seconds are a bringup and not a
+  # defect - timing.startup_check_s (1 s) bounds a child DYING, not a
+  # child becoming useful. A watchdog that cries at a normal start
+  # teaches the operator to ignore it, which is the failure m6's own
+  # escalation rule exists to prevent, so alive() prints info until this
+  # much CONTINUOUS silence has passed and warn afterwards. Three ticks
+  # of the cadence above: long enough that a world still loading is not
+  # a fault, short enough that a stack which will never publish says so
+  # inside the time it takes to read the log.
+  alive_warn_after_s: "15"
 
   # ---- the covariances this node publishes, and their derivation ----
   #
@@ -943,6 +970,24 @@ noise_probe:
   # subscription causes: about 7 s. 60 s is an order of magnitude of
   # headroom over that and still a bound.
   capture_timeout_s: "60"
+  # THE GRID THE QUANTIZATION TEST MEASURES AGAINST, IN METRES, AND IT IS
+  # NOT A PROPERTY OF THE PROBE. It is the <precision> a gz
+  # gaussian_quantized noise would round every reading onto, and 1 mm is
+  # what these sensors would declare if they could: it is the range
+  # precision class of the instruments they model.
+  #   THEY CANNOT, AND THE PROBE THEREFORE EXPECTS TO FAIL ITS OWN TEST.
+  #   A gpu_lidar configured gaussian_quantized produces no noise at all
+  #   on this gz - measured, all 710 beams byte-identical across five
+  #   sweeps (EVIDENCE_MODEL_V3.md 9.2) - so the model declares plain
+  #   gaussian and STATES the quantization it does not model rather than
+  #   omitting it. The residual the probe prints against this grid,
+  #   ~0.25 mean and ~0.5 max, is the evidence that the grid is absent
+  #   from the wire; EVIDENCE_MODEL_V3.md 5.2 tabulates all four
+  #   channels reading exactly that.
+  #   ONE VALUE FOR BOTH MODES, because both are ranges in metres: the
+  #   scan branch and the depth branch ask the same question of the same
+  #   unit, and two keys would be two places for one answer to drift.
+  quantization_grid_m: "0.001"
 
 # --------------------------- SENSOR EVIDENCE ---------------------------
 # tools/sensor_evidence.py, which is F1 Task 4's instrument and the only

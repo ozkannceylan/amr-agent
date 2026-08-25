@@ -64,7 +64,7 @@ TOOL=slip_bench
 # MAINTENANCE OBLIGATION: a key read below is a key listed here.
 load_config \
     topics.odom_ground_truth topics.traction_cmd topics.joint_state \
-    vehicle.wheel_radius_m \
+    vehicle.wheel_radius_m wheel_odom.drive_joint_name \
     wheel_slip.bench.cruise_mps wheel_slip.bench.settle_s \
     wheel_slip.bench.sample_s wheel_slip.bench.rest_s
 
@@ -75,6 +75,13 @@ CRUISE="$CFG_WHEEL_SLIP_BENCH_CRUISE_MPS"
 SETTLE="$CFG_WHEEL_SLIP_BENCH_SETTLE_S"
 SAMPLE="$CFG_WHEEL_SLIP_BENCH_SAMPLE_S"
 REST="$CFG_WHEEL_SLIP_BENCH_REST_S"
+# THE JOINT WHOSE ACHIEVED RATE IS READ, and it is nodes/wheel_odometry.py's
+# own key rather than a name of this bench's. There is ONE drive joint on
+# this truck, the estimator and the bench have to read the same one, and a
+# name spelled here would be a second copy of that answer - the first of
+# the two to be fixed would then be the right one, which is exactly what
+# _common.sh's own header says a duplicate costs.
+DRIVE_JOINT="$CFG_WHEEL_ODOM_DRIVE_JOINT_NAME"
 # The wheel rate that asks for the cruise. awk, because the shell has no
 # division (m5v3.sh's spawn_truck does the same for its quaternion).
 OMEGA="$(awk "BEGIN{printf \"%.6f\", $CRUISE / $RADIUS}")"
@@ -140,13 +147,15 @@ echo ""
 # THE REPORT DECIDES WHETHER THIS RUN HAPPENED. It exits non-zero if
 # either segment produced no ground truth - a bench that drove a stack
 # which was not there must not print a table and return success.
-if ! python3 - "$RUNDIR" "$CRUISE" "$RADIUS" "${SLIP_LABEL:-}" <<'PYTHON'
+if ! python3 - "$RUNDIR" "$CRUISE" "$RADIUS" "${SLIP_LABEL:-}" \
+        "$DRIVE_JOINT" <<'PYTHON'
 import json
 import math
 import os
 import sys
 
 rundir, cruise, radius, label = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), sys.argv[4]
+drive_joint = sys.argv[5]
 
 
 def stamp(msg):
@@ -190,8 +199,13 @@ def ground_speed(path):
             "speed": math.hypot(dx, dy) / dt}
 
 
-def joint_rate(path, name="drive_wheel_joint"):
-    """Mean |rate| of the named joint over the same window."""
+def joint_rate(path, name):
+    """Mean |rate| of the named joint over the same window.
+
+    The name is an ARGUMENT with no default: it arrives through argv from
+    config.yaml's wheel_odom.drive_joint_name, so this bench and the
+    estimator cannot end up reading different shafts.
+    """
     rates = []
     for msg in read(path):
         for joint in msg.get("joint", []):
@@ -204,13 +218,15 @@ def joint_rate(path, name="drive_wheel_joint"):
 
 print("label       %s" % (label or "<none>"))
 print("commanded   %.4f m/s tread (%.6f rad/s x %.3f m)" % (cruise, cruise / radius, radius))
+print("drive joint %s" % drive_joint)
 print("")
 print("%-8s %8s %9s %9s %13s %11s %12s" %
       ("segment", "samples", "dist_m", "window_s", "ground_mps", "slip_cmd_%", "slip_joint_%"))
 rows = []
 for name in ("forward", "astern"):
     odom = ground_speed(os.path.join(rundir, "%s.odom.json" % name))
-    joint = joint_rate(os.path.join(rundir, "%s.joint.json" % name))
+    joint = joint_rate(os.path.join(rundir, "%s.joint.json" % name),
+                       drive_joint)
     if odom is None:
         print("%-8s %8s" % (name, "NO DATA - the odometry topic said nothing"))
         continue

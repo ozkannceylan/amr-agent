@@ -184,11 +184,19 @@ def _still(t):
     return [(v, -17.0, 10.0, math.pi) for v in t]
 
 
+# score_drift's gap bound carries NO DEFAULT - it is the number that
+# decides which recordings are scoreable at all, so evidence_core refuses
+# to own one and every caller spells it. 1.0 s is deliberately generous
+# against traces sampled every 0.05 s below: what these tests exercise is
+# the SCORE, and the bound itself is tested against resample() above.
+_GAP_S = 1.0
+
+
 def test_a_perfect_estimate_of_a_stationary_truck_drifts_nothing():
     t = [i * 0.05 for i in range(21)]
     score = evidence_core.score_drift(
         _still(t), [(v, 0.0, 0.0, 0.0) for v in t],
-        evidence_core.SpawnFrame(-17.0, 10.0, math.pi))
+        evidence_core.SpawnFrame(-17.0, 10.0, math.pi), _GAP_S)
     assert score.end_error_m < 1e-9
     assert score.rms_m < 1e-9
 
@@ -201,7 +209,7 @@ def test_the_score_is_absolute_and_is_not_anchored_to_the_first_sample():
     t = [i * 0.05 for i in range(21)]
     score = evidence_core.score_drift(
         _still(t), [(v, 0.40, 0.0, 0.0) for v in t],
-        evidence_core.SpawnFrame(-17.0, 10.0, math.pi))
+        evidence_core.SpawnFrame(-17.0, 10.0, math.pi), _GAP_S)
     assert abs(score.end_error_m - 0.40) < 1e-9
     assert abs(score.rms_m - 0.40) < 1e-9
     assert abs(score.max_error_m - 0.40) < 1e-9
@@ -212,7 +220,8 @@ def test_the_end_error_is_the_estimate_minus_the_truth_in_the_spawn_frame():
     # world +1 m of x is -1 m in the spawn frame; the estimate says -1.10
     est = [(0.0, 0.0, 0.0, 0.0), (1.0, -1.10, 0.0, 0.0)]
     score = evidence_core.score_drift(
-        truth, est, evidence_core.SpawnFrame(-17.0, 10.0, math.pi))
+        truth, est, evidence_core.SpawnFrame(-17.0, 10.0, math.pi),
+        _GAP_S)
     assert abs(score.end_dx - (-0.10)) < 1e-9
     assert abs(score.end_error_m - 0.10) < 1e-9
 
@@ -221,7 +230,8 @@ def test_the_heading_error_folds_and_does_not_read_two_pi():
     truth = [(0.0, -17.0, 10.0, math.pi), (1.0, -17.0, 10.0, math.pi)]
     est = [(0.0, 0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 2 * math.pi - 0.05)]
     score = evidence_core.score_drift(
-        truth, est, evidence_core.SpawnFrame(-17.0, 10.0, math.pi))
+        truth, est, evidence_core.SpawnFrame(-17.0, 10.0, math.pi),
+        _GAP_S)
     assert abs(score.end_yaw_error_rad - (-0.05)) < 1e-9
 
 
@@ -233,7 +243,8 @@ def test_the_path_length_is_the_sum_of_the_steps_and_not_the_displacement():
              (2.0, -17.0, 10.0, math.pi)]
     est = [(0.0, 0.0, 0.0, 0.0), (1.0, -1.0, 0.0, 0.0), (2.0, 0.0, 0.0, 0.0)]
     score = evidence_core.score_drift(
-        truth, est, evidence_core.SpawnFrame(-17.0, 10.0, math.pi))
+        truth, est, evidence_core.SpawnFrame(-17.0, 10.0, math.pi),
+        _GAP_S)
     assert abs(score.truth_path_m - 2.0) < 1e-9
     assert abs(score.est_path_m - 2.0) < 1e-9
 

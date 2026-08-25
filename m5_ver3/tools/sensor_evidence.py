@@ -1460,6 +1460,42 @@ def analyse(cfg, args):
             print("  WARNING config.yaml sensors.{}.rate_hz is {} and the "
                   "model says {}".format(key, configured, actual))
 
+    # THE ESTIMATOR'S OWN SETTINGS, PRINTED RATHER THAN COPIED BY HAND.
+    # EVIDENCE_SENSORS.md 3 opens with this line because every drift
+    # figure under it is a figure about THIS estimator - and a settings
+    # line typed into a markdown file is a claim that nothing re-checks.
+    # These are the same keys nodes/wheel_odometry.py hands to
+    # wheel_odom_core.WheelOdometry, read from the same file, so a
+    # config.yaml retuned since the CSVs were recorded shows up here as a
+    # disagreement with the evidence file instead of quietly scoring the
+    # old run under the new numbers.
+    #   IT IS NOT READ OUT OF THE MODEL, and that is the difference
+    #   between this block and the one above it. The SDF owns the PLANT;
+    #   config.yaml owns what the vehicle BELIEVES about itself, and the
+    #   gap between the two is the entire subject of section 3.
+    counts = cfg.i("wheel_odom.counts_per_rev")
+    radius = cfg.f("vehicle.wheel_radius_m")
+    scale = cfg.f("wheel_odom.wheel_radius_scale")
+    quantum_rad = 2.0 * math.pi / counts
+    print("")
+    print("--- the estimator's settings, read out of config.yaml and NOT "
+          "out of the model ---")
+    print("  vehicle          {}".format(cfg.s("vehicle.name")))
+    print("  encoder          {} counts/rev   one count {:.5e} rad of "
+          "shaft, {:.4f} mm of tread".format(
+              counts, quantum_rad, quantum_rad * radius * 1000.0))
+    print("    (the tread figure is at the PLANT's {:.3f} m wheel; the "
+          "estimator steps {:.4f} mm".format(
+              radius, quantum_rad * radius * scale * 1000.0))
+    print("     per count because it believes the radius below)")
+    print("  believed radius  {:.4f} m   = {:.3f} x {:.4f}, a deliberate "
+          "{:+.1f} % scale error".format(
+              radius * scale, radius, scale, (scale - 1.0) * 100.0))
+    print("  steer bias       {:+.4f} rad, added to the READING and never "
+          "to a command".format(cfg.f("wheel_odom.steer_bias_rad")))
+    print("  no slip term, no ground truth, no transform - the plant "
+          "produces the slip and F2 owns the edge")
+
     root = session_root(cfg)
     if args.session:
         paths = [os.path.abspath(p) for p in args.session]

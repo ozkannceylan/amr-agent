@@ -184,6 +184,20 @@ grid, 0.7363 mm of tread per count), believed wheel radius **0.12 ×
 produces the slip). The node reads no ground truth and broadcasts no
 transform.
 
+> **TOOL-PRINTED AS OF 2026-08-26.** The paragraph above was a HAND COPY
+> of `config.yaml`'s `wheel_odom:` block — a settings line nothing
+> re-checked, over a table of figures that are only about those settings.
+> `sensor_evidence.py analyse` now reads the five keys itself and prints
+> them ahead of every session it scores, so a `config.yaml` retuned since
+> these CSVs were recorded shows up as a disagreement with this file
+> rather than scoring an old run under new numbers. Its output against
+> `drive-corner_creep-20260825-232401`: vehicle `forklift_ver3`,
+> **1024 counts/rev** (one count `6.13592e-03` rad of shaft, **0.7363 mm**
+> of tread at the plant's 0.120 m wheel, 0.7474 mm as the estimator steps
+> it), believed radius **0.1218 m** = `0.120 × 1.0150`, steer bias
+> **+0.0050 rad**. Not one figure above moved; this note records where
+> they now come from.
+
 **The frame, and it is where this measurement is won or lost.** The
 ground truth is the model's `OdometryPublisher` and it publishes the
 **world** pose; the estimate is in an odom frame that starts at the
