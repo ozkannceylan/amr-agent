@@ -50,7 +50,7 @@ Suite: 583 passed, 0 skipped (guen basinda 552). Kanit: PROOF.md
 Karar: vault AMR-DEC-003, 2026-08-25. Araştırma: docs/reports/m5v3-01..04.
 Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
 
-- [ ] F1. Gerçek sensör paketi + gerçekçilik: nav lidar TiM571 profili
+- [x] F1. Gerçek sensör paketi + gerçekçilik: nav lidar TiM571 profili
       (15 Hz, 811 örnek, gürültü+bias+kuantizasyon), safety scanner'lara
       nanoScan3 zarfı+gürültü, RGB-D kamera (D455 sınıfı) + AprilTag
       istasyon işaretleri, [karar bekliyor] 3D lidar (OS0/Mid-360 sınıfı,
