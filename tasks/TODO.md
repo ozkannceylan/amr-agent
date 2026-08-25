@@ -36,3 +36,9 @@ Owner: "Sirayla basla hepsini coz; 1, 4 ve 5 cok onemli."
 ## Review
 Suite: 583 passed, 0 skipped (guen basinda 552). Kanit: PROOF.md
 "M6 review revise round" bolumu; video 08; vault raporu.
+
+- [x] E2E vitrin filmi (owner istegi, 25 og.s.): m6-fleet-09-e2e-vda5050-
+      2026-08-25.mp4 - 8m23s tek cekim; konsol gorevi -> ORDER+pick ->
+      RUNNING/FINISHED -> leg2+drop -> DONE kamerada. record_e2e.py +
+      fastdds_loopback.xml (DDS multicast olumu koku) + paralel preflight.
+      Kural: arac kodu degisince `m6.sh deploy` sart.
