@@ -30,7 +30,7 @@ parameter was moved to improve it**, and §7 says what it found.
 | **DRY, absolute END heading error** | **0.0020 – 0.0315 rad** (0.11° – 1.81°) |
 | **THE DEBT — dry `straight`**, along-track | EKF **+0.489 / +0.475 / +0.476 m** → absolute **−0.021 / −0.022 / −0.164 m** = **95.7 % / 95.4 % / 65.6 % removed** |
 | **THE DEBT — wet `straight`**, along-track | EKF **+1.062 m per 11.0 m** → absolute **+0.176 / −0.305 m** = **83.4 % / 71.3 % removed** |
-| **what it cost, jump statistics** | 17 – 44 corrections per run; step **mean 0.027 – 0.084 m**, **median 0.019 – 0.047 m**, **WORST single 0.0592 m dry / 0.4927 m wet** |
+| **what it cost, jump statistics** | 17 – 44 corrections per run; step **mean 0.027 – 0.084 m**, **median 0.019 – 0.047 m**, **WORST single 0.2591 m dry / 0.4927 m wet** |
 | **what it costs the rig** | amcl **5.00 %** of one core, map_server **3.00 %**, against the estimator's **12.00 %**; RTF mean **0.9984** |
 | comparison row, DIFFERENT FLOOR AND RIG | m5_ver1 AMCL: rms 0.124 m, max 0.263 m, final 0.093 m, on a floor of 0.1411 m |
 
@@ -1051,10 +1051,20 @@ along-track error survives on the slippery plant, against a floor of
 trajectory is the odometry plus a train of steps, and the steps add
 length; the position error is the figure, the path error is not.
 
-**One map, one day, one rig.** Eight scored sessions on 2026-08-26, all
-against `warehouse_v3` md5 `735cdbc6…`, all on the default estimator arm.
-Nothing here says what AMCL does on the `--rf2o` or `--fuse` arms, and
-nothing here is a second opinion about the map.
+**One map, one day, one rig — and one batch, run in order.** Eight scored
+sessions on 2026-08-26, all against `warehouse_v3` md5 `735cdbc6…`, all on
+the default estimator arm. **They were driven sequentially and NOT
+interleaved: the five dry runs first, then the three slippery ones**, each
+with the stack stopped and restarted. F2's divergence protocol (F3 global
+constraint 17) allows a bringup-failure, divergence-rate or
+convergence-rate claim only from an interleaved batch, and **no such claim
+is made anywhere in this file** — nothing here counts bringups, failures
+or time-to-converge. What the shape does bear on is every dry-against-wet
+comparison: §7's debt percentages and §9.2's "decisive pair" are two
+groups of runs taken minutes apart rather than alternately, so anything
+that drifted over those twenty minutes sits inside them. Nothing here says
+what AMCL does on the `--rf2o` or `--fuse` arms, and nothing here is a
+second opinion about the map.
 
 **The jump statistics are sizes, not consequences.** §8. Nothing consumes
 `map` → `base_link` yet, so whether a 0.49 m step matters is a question
