@@ -1249,9 +1249,9 @@ not heard of.
 RUN on this arm, and the gate says so** rather than reporting a pass it
 never tested — `ekf_health.py`'s statement on the `--fuse` arm (§11.2c of
 EVIDENCE_FUSION.md), one layer up. It is a WHEN and not a WHAT: once the
-truck moves, `/pose` carries a real covariance and a small one (0.0047 –
-0.0472 m² on the x diagonal across the eight runs, against the seed's own
-0.25).
+truck moves, `/pose` carries a real covariance and a small one (0.0045 –
+0.0472 m² on the x diagonal across the eight runs, against the seed's
+own 0.25).
 
 **And the gate must NOT publish a seed on this arm, which is the one
 thing that looks like a simplification and is not.** That node *does*
@@ -1691,14 +1691,22 @@ begins from the spawn pose; `drive_route.py` exited **0** on all eight.
 
 | session | profile | plant | loc | `pose` rows | `map_odom` rows | scan rows |
 |---|---|---|---|---|---|---|
-| `drive-straight-20260827-010451` | `straight` | nominal | `slam@4bb88852` | 25 | 2023 | 620 |
-| `drive-straight-20260827-010632` | `straight` | nominal | `slam@4bb88852` | 25 | 2121 | 638 |
-| `drive-straight-20260827-010818` | `straight` | nominal | `slam@4bb88852` | 25 | 2046 | 631 |
-| `drive-square-20260827-010959` | `square` | nominal | `slam@4bb88852` | 25 | 2610 | 782 |
-| `drive-corner_creep-20260827-011154` | `corner_creep` | nominal | `slam@4bb88852` | 15 | 1588 | 499 |
-| `drive-straight-20260827-011328` | `straight` | **slippery** | `slam@4bb88852` | 25 | 2052 | 627 |
-| `drive-straight-20260827-011514` | `straight` | **slippery** | `slam@4bb88852` | 25 | 2078 | 658 |
-| `drive-square-20260827-011700` | `square` | **slippery** | `slam@4bb88852` | 25 | 2562 | 792 |
+| `drive-straight-20260827-010451` | `straight` | nominal | `slam@4bb88852` | 25 | 2023 | 639 |
+| `drive-straight-20260827-010632` | `straight` | nominal | `slam@4bb88852` | 25 | 2121 | 613 |
+| `drive-straight-20260827-010818` | `straight` | nominal | `slam@4bb88852` | 25 | 2046 | 619 |
+| `drive-square-20260827-010959` | `square` | nominal | `slam@4bb88852` | 25 | 2610 | 784 |
+| `drive-corner_creep-20260827-011154` | `corner_creep` | nominal | `slam@4bb88852` | 15 | 1588 | 481 |
+| `drive-straight-20260827-011328` | `straight` | **slippery** | `slam@4bb88852` | 25 | 2052 | 621 |
+| `drive-straight-20260827-011514` | `straight` | **slippery** | `slam@4bb88852` | 25 | 2078 | 619 |
+| `drive-square-20260827-011700` | `square` | **slippery** | `slam@4bb88852` | 25 | 2562 | 797 |
+
+Every `pose` column above is the count in that session's
+`amcl_pose.csv` — **the CSV keeps its name on both arms**, which is
+`ekf_odom.csv`'s rule (that stream is filled by a factor graph on the
+`--fuse` arm and is still called `ekf_odom`): renaming a stream by arm
+would make the two arms' sessions structurally different, and two
+sessions that are not the same shape are not an A/B. The session's own
+`loc=` line says which localiser filled it.
 
 Every figure here is re-derivable with **no ROS and no Gazebo**:
 
