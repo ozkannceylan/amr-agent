@@ -10,11 +10,13 @@
 #
 # WHAT IT IS NOT. There is no broker, no fleet manager, no HMI and no PLC
 # link here, and their absence is the phase rather than an omission: what
-# is up is the plant, its sensors and the one node that consumes them, and
-# a process started for the shape of the thing would be a claim this run
-# does not make. There is no EKF here either: this node estimates, and
-# fusion is F2's. Nothing here touches PLCSIM Advanced or anything on the
-# Windows side.
+# is up is the plant, its sensors, the node that estimates the vehicle's
+# motion from them and the filter that fuses that estimate with the IMU.
+# A process started for the shape of the thing would be a claim this run
+# does not make. There is no MAP and no localisation here - the EKF's
+# world frame is the odom frame, so it publishes odom -> base_link and
+# never map -> odom, and that edge is F3's. Nothing here touches PLCSIM
+# Advanced or anything on the Windows side.
 #
 # IT ORCHESTRATES PROCESSES AND HOLDS NO LOGIC OF ITS OWN. Every constant
 # it obeys is in config.yaml and every child it starts writes its own log
@@ -56,10 +58,14 @@ REQUIRED_KEYS=(
     world.file world.name
     vehicle.model vehicle.name
     vehicle.spawn.x vehicle.spawn.y vehicle.spawn.z vehicle.spawn.yaw
+    vehicle.imu_mount.x vehicle.imu_mount.y vehicle.imu_mount.z
     topics.clock topics.odom_ground_truth topics.scan_nav
     topics.safety_scan_back
     topics.imu topics.cam_depth topics.cam_info topics.points3d
     topics.joint_state topics.drive_speed_read_a topics.wheel_odom
+    topics.odometry_filtered
+    frames.odom frames.base_link frames.imu frames.map
+    ekf.params_file ekf.node_name ekf.frequency_hz
     paths.log_dir paths.pidfile
     timing.world_load_s timing.settle_s timing.startup_check_s
     timing.stop_grace_s timing.gui_gate_poll_s timing.gui_gate_settle_s
@@ -73,6 +79,7 @@ configure() {
     LOGDIR="$REPO/$CFG_PATHS_LOG_DIR"
     WORLD="$REPO/$CFG_WORLD_FILE"
     MODEL="$REPO/$CFG_VEHICLE_MODEL"
+    EKF_PARAMS="$REPO/$CFG_EKF_PARAMS_FILE"
 }
 
 # THE STACK AS COMMAND-LINE PATTERNS, AND THE LIST IS _common.sh's.
@@ -140,6 +147,17 @@ start() {
         "it belongs to m6 and is used BY REFERENCE - do not copy it here"
     [ -f "$MODEL" ] || refuse "the vehicle model exists" "$CONFIG" \
         "vehicle.model resolves to $MODEL"
+    # THE FILTER'S PARAMETER FILE IS CHECKED HERE AND NOT BY ekf_node.
+    # A --params-file that does not exist is a hard error from rclcpp,
+    # which is the good case; the case this check is for is the file
+    # being MOVED, because then ekf_node starts on its own defaults - a
+    # filter that fuses nothing, publishes a transform that never moves,
+    # and says nothing about either. Refusing before anything is started
+    # is cheaper than reading that.
+    [ -f "$EKF_PARAMS" ] || refuse "the EKF parameter file exists" \
+        "$CONFIG" "ekf.params_file resolves to $EKF_PARAMS" \
+        "without it ekf_node would start on its own defaults, fuse" \
+        "nothing at all, and report nothing about it."
     # Unchecked, an unwritable log dir fails every redirection this stack
     # opens and start would sleep its way to "up." over a stack that never
     # began.
@@ -248,6 +266,62 @@ start() {
     #   inherits an environment that can import rclpy.
     spawn odom python3 "$M5V3/nodes/wheel_odometry.py"
 
+    # THE VEHICLE'S OWN GEOMETRY, ON /tf_static, AND IT IS NOT THE EKF.
+    # The IMU stamps its messages with model.sdf's <gz_frame_id>,
+    # imu_link, and robot_localization transforms every sample into
+    # base_link before it will fuse it. With no base_link -> imu_link
+    # transform on the graph it drops the ENTIRE SENSOR and logs nothing
+    # at all - measured on this rig 2026-08-26, EVIDENCE_FUSION.md 2.2:
+    # the filter runs, publishes, and its yaw never leaves zero.
+    #   IT IS A CHILD OF ITS OWN BECAUSE IT IS A DIFFERENT CLAIM. This
+    #   edge is where a sensor is BOLTED, which a robot_state_publisher
+    #   would own if this track carried a URDF; the EKF's edge is where
+    #   the vehicle IS, which is an estimate. One process per claim, one
+    #   log per process.
+    #   NO use_sim_time ON IT, DELIBERATELY. tf2 stores a static
+    #   transform in a cache that answers for ANY query time, so the
+    #   stamp is never consulted and a clock this process does not have
+    #   cannot go wrong. It publishes once, latched (transient local), so
+    #   the EKF may start before or after it.
+    spawn imutf ros2 run tf2_ros static_transform_publisher \
+        --x "$CFG_VEHICLE_IMU_MOUNT_X" \
+        --y "$CFG_VEHICLE_IMU_MOUNT_Y" \
+        --z "$CFG_VEHICLE_IMU_MOUNT_Z" \
+        --frame-id "$CFG_FRAMES_BASE_LINK" \
+        --child-frame-id "$CFG_FRAMES_IMU"
+
+    # THE FILTER, AND IT IS THE FIRST THING ON THIS TRACK THAT PUBLISHES
+    # A POSE ANYTHING COULD NAVIGATE ON. robot_localization 3.8.3's
+    # ekf_node fuses the wheel odometry's TWIST with the IMU's yaw rate
+    # and forward acceleration, and owns odom -> base_link.
+    #   WHAT IS ON THIS COMMAND LINE AND WHAT IS IN THE FILE. Everything
+    #   here is a name or a rate that is already written down elsewhere
+    #   on this track - the topics, the frames, the output rate - and is
+    #   passed as a `-p` override so that ekf.yaml cannot hold a second
+    #   copy of it. ekf.yaml holds what is fused and what is refused, and
+    #   the argument for each. config.yaml's ekf: block states the split.
+    #   use_sim_time IS NOT OPTIONAL. Every message on this stack is
+    #   stamped from the plant's own clock, and a filter comparing those
+    #   stamps against a wall clock would reject all of them as
+    #   impossibly old. It is not in ekf.yaml because it is a fact about
+    #   THIS STACK - there is a bridged /clock - and not about the
+    #   filter.
+    #   THE OUTPUT TOPIC IS A REMAP because ekf_node's publisher is named
+    #   `odometry/filtered` in its own source and the package offers no
+    #   parameter to rename it.
+    spawn ekf ros2 run robot_localization ekf_node --ros-args \
+        -r __node:="$CFG_EKF_NODE_NAME" \
+        --params-file "$EKF_PARAMS" \
+        -p use_sim_time:=true \
+        -p frequency:="$CFG_EKF_FREQUENCY_HZ" \
+        -p map_frame:="$CFG_FRAMES_MAP" \
+        -p odom_frame:="$CFG_FRAMES_ODOM" \
+        -p base_link_frame:="$CFG_FRAMES_BASE_LINK" \
+        -p world_frame:="$CFG_FRAMES_ODOM" \
+        -p odom0:="$CFG_TOPICS_WHEEL_ODOM" \
+        -p imu0:="$CFG_TOPICS_IMU" \
+        -r /odometry/filtered:="$CFG_TOPICS_ODOMETRY_FILTERED"
+
     # THE GUI CLIENT LAST AND GATED, or the lidar fans anchor at the world
     # origin for the life of the window. Measured in m6 on gz-sim 8.11.0:
     # GuiRunner discards every world-state message that arrives before its
@@ -292,16 +366,23 @@ start() {
     fi
 
     echo ""
-    echo "up. one truck, one world, two bridges, one estimator."
+    echo "up. one truck, one world, two bridges, one estimator, one filter."
     echo "bridged: $CFG_TOPICS_CLOCK, $CFG_TOPICS_ODOM_GROUND_TRUTH" \
          "(measurement reference ONLY), $CFG_TOPICS_SCAN_NAV," \
          "$CFG_TOPICS_IMU, $CFG_TOPICS_CAM_DEPTH, $CFG_TOPICS_CAM_INFO," \
          "$CFG_TOPICS_JOINT_STATE, $CFG_TOPICS_DRIVE_SPEED_READ_A"
     echo "gz only: $CFG_TOPICS_POINTS3D and both point clouds - no ROS"
-    echo "         consumer until F2, and gz renders what is subscribed."
+    echo "         consumer yet, and gz renders what is subscribed."
     echo "odom:    $CFG_TOPICS_WHEEL_ODOM - an ESTIMATE, quantised and"
     echo "         1.5 % long by design. It will NOT match the ground"
     echo "         truth and a run where it does is a bug."
+    echo "ekf:     $CFG_TOPICS_ODOMETRY_FILTERED at" \
+         "${CFG_EKF_FREQUENCY_HZ} Hz, plus the"
+    echo "         $CFG_FRAMES_ODOM -> $CFG_FRAMES_BASE_LINK transform." \
+         "Wheel TWIST (vx, vyaw)"
+    echo "         + IMU (yaw rate, ax). It reads no pose and no ground"
+    echo "         truth. ekf_node is SILENT about an input that never"
+    echo "         arrives - check the topic, not the log."
     echo "check:  $0 status"
     echo "rtf:    bash $M5V3/tools/rtf_probe.sh"
     echo "drive:  python3 $M5V3/tools/drive_route.py straight|square|aisle"
@@ -505,7 +586,11 @@ USAGE="usage: $0 start [--headless] | stop | status
               pallet camera's camera_info and the two joint channels the
               wheel odometry consumes, and the image bridge for that
               camera's depth image. Then the wheel odometry node itself,
-              publishing /m5v3/wheel_odom. Five processes.
+              publishing /m5v3/wheel_odom, the static base_link -> imu_link
+              transform the filter needs before it will fuse the IMU, and
+              robot_localization's ekf_node, publishing
+              /m5v3/odometry/filtered and odom -> base_link.
+              SEVEN processes with a window, six without.
               The 3D lidar and both point clouds stay on the gz side.
               It refuses outright if the renderer is not the NVIDIA GPU.
   --headless  no Gazebo window. Use it for anything being MEASURED.

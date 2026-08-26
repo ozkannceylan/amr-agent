@@ -1,0 +1,283 @@
+# ekf.yaml - what m5-ver3's state estimator FUSES, and what it refuses.
+#
+# robot_localization 3.8.3's `ekf_node`, started by m5v3.sh as the stack
+# child named `ekf`. It is the single owner of the odom -> base_link
+# transform on this track and the first process here that publishes a
+# transform at all.
+#
+# THIS IS NOT config.yaml AND IT IS NOT ALLOWED TO BECOME IT. This track's
+# rule is that every behavioural constant lives in config.yaml once
+# (config.yaml's own header). This file exists because ekf_node reads a
+# ROS *parameter* file - a top-level node name, a `ros__parameters:`
+# mapping, fifteen-entry boolean arrays - and config.yaml is not one and
+# must not be bent into one. So the split is by OWNERSHIP and no number
+# appears in both:
+#
+#   config.yaml ekf: + topics: + frames:   the topic names, the frame
+#       names, the output rate, this file's path and the node name below.
+#       m5v3.sh passes every one of them on the command line as a `-p`
+#       override, so this file contains NO topic, NO frame and NO rate.
+#   this file                              what is fused and what is
+#       refused, and why. The two configuration matrices, the sensor
+#       timeout, two_d_mode, the transform publication.
+#
+# THE TOP-LEVEL KEY IS THE NODE'S NAME AND THE TWO MUST MATCH. ekf_node
+# is started with `-r __node:=m5v3_ekf`, from config.yaml's
+# ekf.node_name. If either moves without the other, every parameter below
+# belongs to a node that does not exist and ekf_node runs on its own
+# defaults - which is a filter that fuses NOTHING and says nothing about
+# it. MAINTENANCE OBLIGATION: these two strings move together.
+#
+# ------------------------------------------------------------------
+# WHAT IS DELIBERATELY NOT IN THIS FILE
+#
+#   NO GROUND TRUTH. /forklift/gz/odom is the simulator's own pose - no
+#   slip, no quantisation, no drift - and it is an INSTRUMENT on this
+#   track, never an input (F2 global constraint 13). No odomN, poseN or
+#   twistN entry below names it, and there is exactly one odomN and one
+#   imuN in this file so there is nowhere for a third to hide. An
+#   estimator that reads ground truth is scored against its own input and
+#   cannot be wrong.
+#
+#   NO process_noise_covariance AND NO initial_estimate_covariance. Both
+#   are left at the package defaults ON PURPOSE, which is prior art's
+#   ruling (agv/forklift/ekf.yaml) and is right for the same reason here:
+#   they are the two knobs a drift figure is most easily flattered with,
+#   and this task's job is to MEASURE what a gyro buys, not to arrange
+#   it. A later task that has a reason to move them states the reason and
+#   re-measures.
+#     THE DEFAULT initial_estimate_covariance IS ALSO CORRECT HERE, which
+#     is worth saying rather than leaving as luck. It is ~1e-9 on the
+#     diagonal - the filter is nearly certain it starts at the origin -
+#     and on this track that is TRUE BY DEFINITION: the odom frame IS
+#     wherever the estimate started, so the pose at t0 is (0, 0, 0) with
+#     no uncertainty at all. The number would be a lie in a map frame.
+#
+#   NO COVARIANCE OF ANY KIND, and that is where they belong.
+#   robot_localization reads each measurement's covariance out of the
+#   MESSAGE, so the weighting between the two sensors is set by:
+#     wheel odometry - config.yaml's wheel_odom.covariance block, derived
+#       from F1's measured quantiser dither at a named operating point
+#       (EVIDENCE_SENSORS.md §3, and the derivation is in the comments
+#       beside the numbers). vx 2.3383e-2, vyaw 1.1111e-5.
+#     IMU - ros_gz fills angular_velocity_covariance and
+#       linear_acceleration_covariance from the stddevs model.sdf
+#       declares. MEASURED ON THE WIRE 2026-08-26 rather than assumed,
+#       because prior art ASSERTS this and an assertion about another
+#       track's bridge is not a measurement of this one:
+#       3.0450250960711855e-06 against 0.001745^2 and
+#       1.1577759869396687e-04 against 0.01076^2 - the model's numbers to
+#       one part in 1e8, which is a float32 round-trip and not an exact
+#       double. EVIDENCE_FUSION.md 2.1.
+#   So the blend is two datasheet-derived numbers and no hand in this
+#   file. That is the design; §2.5 measures what it produces.
+#
+#   ONE CONSEQUENCE OF THAT, STATED RATHER THAN HIDDEN - TWICE OVER.
+#   (a) The gyro's covariance is its WHITE NOISE only. model.sdf declares
+#       a bias too - bias_mean 0.002618 rad/s with bias_stddev 0, which
+#       fixes the MAGNITUDE across runs and lets gz draw the SIGN per run
+#       (EVIDENCE_SENSORS.md §2 measured all six axes and the signs do
+#       not agree). So this filter trusts the gyro's rate more than the
+#       bias justifies, exactly as a real integration of an
+#       uncompensated MEMS gyro does, and the sign of the error is not
+#       repeatable across runs. Nothing below reduces it and no term
+#       estimates it.
+#         (The F2 brief quotes a "bias_stddev 0.0087 class" figure. That
+#         is docs/reports/m5v3-03's REFERENCE profile, not this model:
+#         forklift_ver3 declares bias_stddev 0.0 on all six axes and a
+#         bias_mean of 0.002618 rad/s on the gyro. The measured numbers
+#         above are this plant's.)
+#   (b) The wheel odometry's vyaw covariance is derived from its STEER
+#       BIAS and from nothing else, because the error that actually
+#       dominates a corner - the tyres scrubbing, so the vehicle takes a
+#       fraction of the yaw its steer angle promises - is not readable at
+#       the shaft or the steer axis and config.yaml refuses to invent a
+#       term for it. So at a corner this filter believes the wheel
+#       odometry's yaw rate MORE than that reading deserves. That is the
+#       honest consequence of publishing an honest covariance, and it
+#       bounds how much of the corner error fusion can remove.
+# ------------------------------------------------------------------
+
+m5v3_ekf:
+  ros__parameters:
+
+    # A sensor silent for longer than this stops contributing.
+    # 0.2 s is 100 missed wheel-odometry samples and 20 missed IMU
+    # samples on this plant - long past "late" and into "gone" - and it
+    # is prior art's value on a vehicle whose wheel odometry ran ten
+    # times slower, so it is if anything generous here.
+    sensor_timeout: 0.2
+
+    # A FORKLIFT ON A WAREHOUSE FLOOR. z, roll, pitch and their rates are
+    # held at zero rather than estimated out of noise. The floor is flat
+    # (m6/gazebo/warehouse_ver3.sdf) and nothing this filter fuses
+    # observes any of them: the wheel odometry says nothing at all about
+    # them by construction, and the IMU's orientation channel does not
+    # exist (see imu0_config).
+    two_d_mode: true
+
+    # THE FIRST TRANSFORM THIS TRACK PUBLISHES. odom -> base_link, at
+    # config.yaml's ekf.frequency_hz. Nothing else on this stack
+    # broadcasts it and nothing else may: nodes/wheel_odometry.py
+    # contains no broadcaster at all so that a second publisher of this
+    # edge cannot appear by accident (ver2 invariant 10). F3's
+    # map -> odom stacks on top of this one and is not this file's.
+    publish_tf: true
+    # No AccelWithCovarianceStamped on /accel/filtered: nothing on this
+    # track consumes one, and a topic with no consumer is a claim the run
+    # does not make.
+    publish_acceleration: false
+
+    # DIAGNOSTICS OFF, AND THE REASON IS NOT THAT THEY ARE USELESS.
+    # `print_diagnostics: true` makes ekf_node publish /diagnostics
+    # messages, and there is no diagnostic aggregator on this stack to
+    # read them - so it would be information written to nobody. What
+    # answers "is the filter actually being fed" on this track is named
+    # in EVIDENCE_FUSION.md §2.2, and it is `m5v3.sh status` plus the
+    # evidence recorder's own refusal by stream name, because ekf_node
+    # itself is SILENT about an input that never arrives (measured).
+    print_diagnostics: false
+
+    # ---------------- sensor 0: the wheel odometry ----------------
+    #
+    # nodes/wheel_odometry.py. Tricycle dead reckoning off this vehicle's
+    # own joint states, carrying its 1024-count encoder quantisation, its
+    # +0.005 rad steer zero offset, its +1.5 % rolling-radius calibration
+    # error and whatever the physics engine's wheel slip did to it.
+    #
+    # THE TWIST IS FUSED AND THE POSE IS NOT, AND THE NODE SAYS SO FIRST.
+    # A dead-reckoned pose has unbounded error and no honest fixed
+    # covariance exists for it, so the node publishes 1000.0 on all six
+    # pose axes as a do-not-fuse flag (config.yaml,
+    # wheel_odom.covariance.unused). The six false flags below are the
+    # SECOND refusal: a flag is not a mechanism, and a filter configured
+    # to fuse a pose would fuse it however loudly the covariance
+    # complained.
+    #
+    # Order of the 15 flags:
+    #   x, y, z, roll, pitch, yaw,
+    #   vx, vy, vz, vroll, vpitch, vyaw,
+    #   ax, ay, az
+    #
+    # TWO ENTRIES TRUE, AND vy IS THE ONE THAT NEEDED DECIDING.
+    #   vx  - the rear axle's forward speed. The only velocity a
+    #         tricycle's drive shaft measures.
+    #   vyaw- v*tan(delta)/L, the yaw rate the steer angle implies.
+    #   vy  - REFUSED BY OWNER RULING (F2 Task 1 brief). It is worth
+    #         writing down exactly what that costs, because the node's
+    #         own vy is NOT noise: wheel_odom_core.py computes it as
+    #         d * yaw_rate with d = 0.50 m, the lateral velocity
+    #         base_link genuinely has because it stands 0.50 m forward of
+    #         the rear axle, and that file's header warns that dropping
+    #         the term "quietly drops the lateral term and there is no
+    #         symptom until something fuses the twist". This is that
+    #         something. robot_localization's motion model is
+    #         omnidirectional and knows nothing about d, so with vy
+    #         unobserved the filter integrates base_link as though it
+    #         were the rear axle. On a profile that ENDS ON ITS STARTING
+    #         HEADING the offset is a function of heading and cancels; on
+    #         one that does not, it is d*|u(yaw_end) - u(yaw_0)|, up to
+    #         2d = 1.00 m. EVIDENCE_FUSION.md §4 measures it against the
+    #         same filter with vy true, on the same runs, and the ruling
+    #         stands until the owner reads that table.
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  false, false,
+                   false, false, true,
+                   false, false, false]
+    # ABSOLUTE, NOT DIFFERENTIAL, AND NOT RELATIVE. `differential` would
+    # turn the fused velocities into differences of successive
+    # measurements - which is what a POSE input needs to stop its drift
+    # entering the filter, and is meaningless for a twist that is already
+    # a rate. `relative` subtracts the first measurement, which for a
+    # velocity that starts at zero is a no-op that would hide a start
+    # transient rather than show it.
+    odom0_differential: false
+    odom0_relative: false
+    # Ten samples is 20 ms of this 500 Hz channel, which is one filter
+    # cycle at 50 Hz. Deeper would not prevent loss, it would delay it
+    # and then hand the filter stale stamps - nodes/wheel_odometry.py's
+    # own qos_depth argument, one hop downstream.
+    odom0_queue_size: 10
+
+    # -------------------- sensor 1: the IMU --------------------
+    #
+    # /forklift/gz/imu, bridged from model.sdf's Bosch BMI088-class
+    # profile: gyro sigma 0.001745 rad/s, accel 0.01076 / 0.01278 m/s2,
+    # both verified against the model on this rig to within x1.25
+    # (EVIDENCE_SENSORS.md §1, §2) after each axis's own per-run bias
+    # mean was removed - and the bias itself is a per-run draw whose SIGN
+    # is not repeatable, see the header.
+    #
+    # ORIENTATION IS REFUSED AND THERE IS NONE TO REFUSE. model.sdf sets
+    # <enable_orientation>false</enable_orientation> because gz derives
+    # an IMU's orientation from the link's pose in the simulator - it is
+    # ground truth wearing a sensor's name - and a real strapdown IMU
+    # with no magnetometer cannot produce an absolute heading at all.
+    # The three flags below are the second, independent refusal, because
+    # that SDF element is one edit away from being flipped back.
+    #   WHAT THE DEVICE ACTUALLY PUTS ON THE WIRE, MEASURED: an all-zero
+    #   quaternion (0,0,0,0) with an all-zero orientation_covariance.
+    #   That is not identity and it is not a valid rotation; see
+    #   imu0_remove_gravitational_acceleration below, which is where it
+    #   bites.
+    #
+    # wz IS THE POINT OF THIS SENSOR. The gyro observes the yaw the
+    # wheels cannot: the vehicle takes a fraction of the yaw its steer
+    # angle promises whenever the tyres scrub, dead reckoning is blind to
+    # that by construction, and F1 measured 0.53 rad of heading error
+    # over a 42 s square because of it (EVIDENCE_SENSORS.md §3). This
+    # channel is the whole reason F2 exists.
+    #
+    # ax IS FUSED BY OWNER RULING, and the case against it is prior art's
+    # (agv/forklift/ekf.yaml refuses it): a bias integrated twice is
+    # 0.5*b*t^2, so the modelled 0.01961 m/s2 becomes 98 m of position
+    # error over 100 s WITH NO OTHER AIDING. What is different here is
+    # that vx is aided, at 500 Hz, by a wheel odometry whose own vx
+    # covariance is 2.3383e-2 - so the accelerometer is a fast predictor
+    # between corrections and not an unaided double integration. Two
+    # things it does bring, measured rather than argued in
+    # EVIDENCE_FUSION.md §2.4 and §4:
+    #   THE LEVER ARM, AND IT LANDS ON THE FUSED AXIS. The IMU sits
+    #   0.50 m behind base_link, and robot_localization ROTATES an
+    #   acceleration into base_link without correcting that offset -
+    #   there is a `@todo` saying so in its own source. For a mounting
+    #   straight behind the origin the centripetal term w^2*d is on
+    #   body +x, which IS ax; the tangential term is on ay, which is
+    #   not fused. Measured peak yaw rate on this plant is 0.2687 rad/s
+    #   (square), so w^2*d peaks at 0.0361 m/s2 - 3.4x the
+    #   accelerometer's own noise sigma and 1.8x its modelled bias.
+    #   Present only while the vehicle turns. EVIDENCE_FUSION.md 2.4.
+    #   THE BIAS. 0.01961 m/s2, sign drawn per run, never estimated.
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  true,  false, false]
+    imu0_differential: false
+    imu0_relative: false
+    # 100 Hz sensor, 50 Hz filter: two samples per cycle, and ten is five
+    # cycles of slack.
+    imu0_queue_size: 10
+    # FALSE, AND IT IS NOT AN OPTIMISATION - IT IS THE ONLY SAFE VALUE ON
+    # THIS PLANT, MEASURED. robot_localization removes gravity by
+    # rotating (0,0,g) by the IMU's OWN orientation quaternion, and it
+    # only falls back to the filter's estimated attitude when the message
+    # marks its orientation absent the REP-145 way, with
+    # orientation_covariance[0] = -1. gz marks nothing: it publishes a
+    # (0,0,0,0) quaternion and a zero covariance. robot_localization then
+    # finds a quaternion of length 0, tries to normalise it, and divides
+    # by zero.
+    #   WHAT THAT DOES, MEASURED ON THIS RIG 2026-08-26 (§2.3): the node
+    #   logs "An input was not normalized, this should NOT happen, but
+    #   will normalize" ONCE, and from then on the acceleration channel
+    #   is dead - the filter's vx reads exactly 0.0 at rest where with
+    #   this parameter false it reads -5.8e-4 m/s. The gyro carries on
+    #   working. So the failure is SILENT, PARTIAL and looks like a
+    #   working filter.
+    #   AND NOTHING IS LOST BY TURNING IT OFF. Gravity is entirely in az
+    #   on a level vehicle on a flat floor; az is not fused (the flag
+    #   above is false) and is not estimated (two_d_mode holds it at
+    #   zero). The channel that IS fused, ax, has no gravity in it to
+    #   remove.
+    imu0_remove_gravitational_acceleration: false

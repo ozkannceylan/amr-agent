@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """sensor_evidence.py - what this plant's sensors actually deliver, and
-what its own estimate of its motion is worth. F1 Task 4's instrument.
+what its own estimates of its motion are worth. F1 Task 4's instrument,
+extended by F2 Task 1 to score the SECOND estimate beside the first.
+
+THREE STREAMS, ONE RUN, ONE TRUTH. The ground truth
+(/forklift/gz/odom, an instrument and never an input), the raw wheel
+odometry (/m5v3/wheel_odom) and the EKF that fuses it with the IMU
+(/m5v3/odometry/filtered) are captured together, scored against the same
+transformed truth by the same function, and then subtracted from each
+other - so "how much of the raw estimate's error did fusing remove" is
+answered inside one session and never by comparing two runs. The
+subtraction is evidence_core.compare_drift() and it is tested there.
+EVIDENCE_FUSION.md is what it produces; EVIDENCE_SENSORS.md is what the
+one-estimate version produced and its sessions still read, with the
+missing third stream NAMED rather than skipped.
 
     source /opt/ros/jazzy/setup.bash               # record only
     python3 m5_ver3/tools/sensor_evidence.py record --static
@@ -89,7 +102,11 @@ REQUIRED_KEYS = (
     "topics.clock", "topics.odom_ground_truth", "topics.scan_nav",
     "topics.imu", "topics.cam_depth", "topics.cam_info",
     "topics.joint_state", "topics.drive_speed_read_a", "topics.wheel_odom",
+    "topics.odometry_filtered",
     "topics.safety_scan_back", "topics.points3d",
+    "frames.odom", "frames.base_link", "frames.imu",
+    "vehicle.imu_mount.x", "vehicle.imu_mount.y", "vehicle.imu_mount.z",
+    "ekf.frequency_hz", "ekf.params_file",
     "world.file", "vehicle.model", "vehicle.name",
     "vehicle.spawn.x", "vehicle.spawn.y", "vehicle.spawn.yaw",
     "vehicle.wheelbase_m", "vehicle.wheel_radius_m",
@@ -130,6 +147,11 @@ FILES = {
     "clock": "clock.csv",
     "odom_truth": "odom_truth.csv",
     "wheel_odom": "wheel_odom.csv",
+    # F2 TASK 1's THIRD STREAM. The EKF's own output, recorded beside the
+    # raw estimate it is built from and the truth both are scored
+    # against, so one session answers "how much did fusing buy" without
+    # comparing two runs.
+    "ekf_odom": "ekf_odom.csv",
     "scan_nav": "scan_nav.csv",
     "imu": "imu.csv",
     "depth": "depth.csv",
@@ -472,7 +494,8 @@ def _make_recorder(cfg, Node, QoSProfile, types):
             self.session = session
             self.writers = collections.OrderedDict(
                 (name, Writer(os.path.join(session, FILES[name])))
-                for name in ("clock", "odom_truth", "wheel_odom", "scan_nav",
+                for name in ("clock", "odom_truth", "wheel_odom",
+                             "ekf_odom", "scan_nav",
                              "imu", "depth", "cam_info", "joint_state",
                              "drive_read_a"))
             self.patch_half = cfg.i("evidence.depth.patch_half")
@@ -489,6 +512,15 @@ def _make_recorder(cfg, Node, QoSProfile, types):
             self.create_subscription(
                 types.Odometry, cfg.s("topics.wheel_odom"),
                 self.cb_estimate, qos)
+            # THE FUSED ESTIMATE, AND IT IS A REQUIRED STREAM. A run
+            # recorded without it is not a fusion run, and `missing()`
+            # below refuses by this stream's name if nothing arrives -
+            # which is this stack's answer to ekf_node being SILENT about
+            # an input it never receives (EVIDENCE_FUSION.md 2.2). The
+            # recorder is one of the three instruments that CAN say so.
+            self.create_subscription(
+                types.Odometry, cfg.s("topics.odometry_filtered"),
+                self.cb_fused, qos)
             self.create_subscription(
                 types.LaserScan, cfg.s("topics.scan_nav"), self.cb_scan, qos)
             self.create_subscription(types.Imu, cfg.s("topics.imu"),
@@ -536,6 +568,12 @@ def _make_recorder(cfg, Node, QoSProfile, types):
 
         def cb_estimate(self, msg):
             self._odometry(self.writers["wheel_odom"], msg, twist=True)
+
+        def cb_fused(self, msg):
+            # SAME COLUMNS AS THE RAW ESTIMATE, on purpose: the two are
+            # read by the same reduction and a column that existed on one
+            # and not the other would be a reduction with a branch in it.
+            self._odometry(self.writers["ekf_odom"], msg, twist=True)
 
         def cb_scan(self, msg):
             writer = self.writers["scan_nav"]
@@ -1127,7 +1165,98 @@ def analyse_drive(cfg, path, session, sensors):
           "estimate {:.4f} m from its".format(
               core.closure(truth.column("x"), truth.column("y")),
               core.closure(est.column("x"), est.column("y"))))
+    analyse_fused(cfg, path, profile, spawn, truth, score)
     return score, truth, est, joints
+
+
+def analyse_fused(cfg, path, profile, spawn, truth, raw):
+    """The EKF's own output, scored against the same truth, and then
+    against the raw estimate it was built from.
+
+    THE THIRD STREAM IS OPTIONAL AND THAT IS NOT A SOFTNESS. F1's seven
+    drive sessions were recorded before this filter existed, and their
+    figures are the ones F2's own tables are compared against - so
+    `analyse` has to be able to re-derive them, from those CSVs, and say
+    plainly that there is no filter in them. What is NOT optional is the
+    RECORDING: record() lists ekf_odom among the streams every run must
+    deliver, and refuses by name if nothing arrives on it.
+
+    THE SAME FRAME AND THE SAME TRANSFORM. Both estimates publish in the
+    odom frame, both odom frames are the spawn pose (the stack is
+    stopped and restarted before every drive), so the SpawnFrame that
+    scores one scores the other. Nothing here is re-anchored.
+    """
+    full = os.path.join(path, FILES["ekf_odom"])
+    if not os.path.isfile(full):
+        print("")
+        print("--- {} : NO FUSED ESTIMATE IN THIS SESSION ---".format(
+            profile))
+        print("  {} is not in this capture. It was recorded before F2 "
+              "Task 1".format(FILES["ekf_odom"]))
+        print("  added the EKF child, and the figures above are the raw "
+              "wheel odometry's")
+        print("  exactly as EVIDENCE_SENSORS.md 3 published them. Nothing "
+              "is missing from")
+        print("  this run; the filter had not been built when it was "
+              "driven.")
+        return None
+    fused = table(full, cfg, cfg.i("evidence.min_samples"))
+    print("")
+    print("--- {} : the FUSED estimate against the same ground truth "
+          "---".format(profile))
+    print("  EKF opens at    ({:.6f}, {:.6f}) yaw {:.6f}".format(
+        fused.column("x")[0], fused.column("y")[0], fused.column("yaw")[0]))
+    try:
+        score = core.score_drift(
+            truth.rows("t_sim", "x", "y", "yaw"),
+            fused.rows("t_sim", "x", "y", "yaw"), spawn,
+            cfg.f("evidence.analyse.max_pair_gap_s"))
+    except core.EvidenceError as exc:
+        fail(cfg, exc, full)
+    print("  paired samples  {} over {:.3f} s of sim time".format(
+        score.n, score.t1 - score.t0))
+    print("  ground truth    {:.4f} m of path, turned {:+.4f} rad".format(
+        score.truth_path_m, score.truth_turned_rad))
+    print("  EKF             {:.4f} m of path, turned {:+.4f} rad  "
+          "({:+.2f} % of path)".format(
+              score.est_path_m, score.est_turned_rad,
+              100.0 * (score.est_path_m / score.truth_path_m - 1.0)
+              if score.truth_path_m else float("nan")))
+    print("  END ERROR       {:.4f} m   (dx {:+.4f}, dy {:+.4f}), heading "
+          "{:+.4f} rad".format(score.end_error_m, score.end_dx, score.end_dy,
+                               score.end_yaw_error_rad))
+    print("  rms over run    {:.4f} m        worst {:.4f} m".format(
+        score.rms_m, score.max_error_m))
+    print("  CLOSURE         EKF {:.4f} m from its own start".format(
+        core.closure(fused.column("x"), fused.column("y"))))
+
+    # AND THE ONE TABLE THIS WHOLE PHASE EXISTS FOR.
+    out = core.compare_drift(raw, score)
+    print("")
+    print("--- {} : what fusing bought (raw wheel odom -> EKF) ---".format(
+        profile))
+    print("  {:<16} {:>12} {:>12} {:>12} {:>10}".format(
+        "figure", "raw", "EKF", "removed", "of raw"))
+    for label, unit, one in (("end error", "m", out.end_error),
+                             ("END HEADING", "rad", out.end_yaw),
+                             ("rms over run", "m", out.rms),
+                             ("worst", "m", out.max_error)):
+        print("  {:<16} {:>+12.4f} {:>+12.4f} {:>+12.4f} {:>9.1f}% "
+              "[{}]".format(label, one.before, one.after, one.removed,
+                            100.0 * one.fraction, unit))
+    print("  a NEGATIVE `removed` is the filter making that figure WORSE, "
+          "and is not clamped.")
+    print("  `removed` and the percentage are MAGNITUDES; the two columns "
+          "before them keep")
+    print("  their signs, which is what says WHICH WAY each estimate was "
+          "wrong.")
+    print("  the two scores span windows that differ by {:.3f} s at the "
+          "start and {:.3f} s".format(out.span_gap_start_s,
+                                      out.span_gap_end_s))
+    print("  at the end: each is clipped to its own estimate's span, and "
+          "the EKF joins the")
+    print("  graph later than the wheel odometry does.")
+    return score
 
 
 #: Everything both corner reductions read, prepared once. The two
@@ -1505,10 +1634,18 @@ def analyse_session(cfg, path, sensors):
         print("  {:<16} {:>9} {:>10} {:>10} {:>8} {:>10} {:>10} {:>7}".format(
             "stream", "samples", "hz_sim", "hz_wall", "of conf", "dt_med",
             "dt_max", "rtf"))
-        for name in ("clock", "odom_truth", "wheel_odom", "joint_state",
+        for name in ("clock", "odom_truth", "wheel_odom", "ekf_odom",
+                     "joint_state",
                      "drive_read_a", "scan_nav", "imu", "depth", "cam_info"):
-            one = table(os.path.join(path, FILES[name]), cfg,
-                        cfg.i("evidence.min_samples"))
+            full = os.path.join(path, FILES[name])
+            # ekf_odom is the one stream a pre-F2 session does not carry.
+            # It is skipped rather than refused, and analyse_fused() has
+            # already said so in full above; a second refusal here would
+            # make F1's own sessions unreadable by the tool that produced
+            # their figures.
+            if name == "ekf_odom" and not os.path.isfile(full):
+                continue
+            one = table(full, cfg, cfg.i("evidence.min_samples"))
             rate_line(cfg, name, one.column("t_sim"), one.column("t_wall"))
         # THE FIRST SUBSCRIPTION MADE CAN CATCH A BACKLOG, and it shows up
         # here rather than being trimmed away. Measured on a straight run:
@@ -1609,6 +1746,53 @@ def analyse(cfg, args):
           "to a command".format(cfg.f("wheel_odom.steer_bias_rad")))
     print("  no slip term, no ground truth, no transform - the plant "
           "produces the slip and F2 owns the edge")
+
+    # THE FILTER'S OWN SETTINGS, PRINTED FOR THE REASON THE BLOCK ABOVE
+    # IS. EVIDENCE_FUSION.md's tables are figures about ONE filter
+    # configuration, and a configuration line typed into a markdown file
+    # is a claim nothing re-checks. What is printed is what m5v3.sh
+    # actually passes ekf_node: the two topics it reads, the one it
+    # writes, the transform it owns and the rate it runs at. What is
+    # FUSED is ekf.yaml's - two fifteen-entry matrices this file will not
+    # paraphrase - and the path to it is printed so a reader can open the
+    # file that decides it.
+    print("")
+    print("--- the filter's settings, read out of config.yaml and NOT out "
+          "of ekf.yaml ---")
+    print("  in               {}  (twist only; its pose covariance is a "
+          "do-not-fuse flag)".format(cfg.s("topics.wheel_odom")))
+    print("                   {}  (yaw rate and ax; no orientation "
+          "exists)".format(cfg.s("topics.imu")))
+    print("  out              {} at {} Hz".format(
+        cfg.s("topics.odometry_filtered"), cfg.s("ekf.frequency_hz")))
+    print("  transform        {} -> {}   (the only one this stack "
+          "publishes)".format(cfg.s("frames.odom"),
+                              cfg.s("frames.base_link")))
+    print("  static transform {} -> {} at ({}, {}, {}) - without it "
+          "robot_localization".format(
+              cfg.s("frames.base_link"), cfg.s("frames.imu"),
+              cfg.s("vehicle.imu_mount.x"), cfg.s("vehicle.imu_mount.y"),
+              cfg.s("vehicle.imu_mount.z")))
+    print("                   drops the IMU entirely and logs nothing")
+    print("  what is fused    {} - two matrices, and the argument for "
+          "each entry".format(cfg.s("ekf.params_file")))
+    # THE SAME CROSS-CHECK THE RATES GET, AND FOR THE SAME REASON. The
+    # SDF decides where the IMU is bolted; config.yaml copies it because
+    # a shell cannot read XML. A disagreement is a copy that has gone
+    # stale, and it would move a transform this filter depends on.
+    try:
+        pose = core.sdf_link_pose(model, cfg.s("frames.imu"))
+    except core.EvidenceError as exc:
+        fail(cfg, exc, model)
+    for i, axis in enumerate(("x", "y", "z")):
+        configured = cfg.f("vehicle.imu_mount." + axis)
+        if abs(configured - pose[i]) > 1e-9:
+            print("  WARNING config.yaml vehicle.imu_mount.{} is {} and "
+                  "the model says {}".format(axis, configured, pose[i]))
+    if any(abs(value) > 1e-9 for value in pose[3:]):
+        print("  WARNING the model mounts {} with a ROTATION {} and the "
+              "static transform publishes none".format(
+                  cfg.s("frames.imu"), pose[3:]))
 
     root = session_root(cfg)
     if args.session:

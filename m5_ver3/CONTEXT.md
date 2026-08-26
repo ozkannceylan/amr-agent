@@ -103,7 +103,12 @@ m5_ver3/
 ├── EVIDENCE_LATERAL_TUNE.md  F1.5's: where the corner's yaw was being lost,
 │                         the WheelSlip ladder that fixed it, and the
 │                         before/after of everything the fix could break
+├── EVIDENCE_FUSION.md     F2 Task 1's: the EKF against the raw wheel
+│                         odometry against the truth, profile by profile
 ├── config.yaml           every constant the scripts obey - the one home
+├── ekf.yaml              what the FILTER fuses and what it refuses. A ROS
+│                         parameter file, which config.yaml is not and may
+│                         not become - the split is argued in both files
 ├── m5v3.sh               start [--headless] | stop | status
 ├── gazebo/
 │   └── forklift_ver3/
@@ -129,6 +134,15 @@ m5_ver3/
 number is written inline in a script on this track. A partition, a pose,
 a topic or a timing budget that has to move moves there, once, and both
 scripts move with it.
+  **`ekf.yaml` is the one file beside it, and the split is by OWNERSHIP
+  rather than by convenience.** `robot_localization`'s `ekf_node` reads a
+  ROS *parameter* file — a top-level node name, a `ros__parameters:`
+  mapping, fifteen-entry boolean arrays — and `config.yaml` is not one
+  and is not bent into one. So `config.yaml` keeps the topics, the
+  frames, the output rate and the path to the other file, `m5v3.sh`
+  passes all of those on the filter's command line, and `ekf.yaml` holds
+  what is FUSED and what is REFUSED and nothing else. **No number is in
+  both**, and each file's header says which one owns what.
 
 **`m5v3.sh` orchestrates processes and holds no logic of its own.** Every
 child writes its own log under `logs/`, named for the child, and `status`
@@ -157,7 +171,7 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 
 | Command | What it does |
 |---|---|
-| `m5v3.sh start` | GPU preflight, then the world, one `forklift_ver3`, both bridges, the wheel-odometry node and a Gazebo **window**. |
+| `m5v3.sh start` | GPU preflight, then the world, one `forklift_ver3`, both bridges, the wheel-odometry node, the static IMU transform, the EKF and a Gazebo **window**. |
 | `m5v3.sh start --headless` | The same without the window. **Use this for anything being measured** — every figure in the three evidence files was taken this way. |
 | `m5v3.sh status` | Each child by name, ALIVE or DEAD, with its log. Exit 0 only if every one is alive. |
 | `m5v3.sh stop` | Ends this partition's stack, and nothing else. |
@@ -166,20 +180,36 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 | `tools/slip_bench.sh` | Drives the traction terminal at cruise, forward then astern, and reports slip against the commanded and the achieved wheel rate. |
 | `tools/drive_route.py <profile>` | Drives one of `config.yaml`'s profiles — `straight`, `square`, `aisle`, `corner_creep` — open loop, on the plant's own clock. It drives; it records nothing. |
 | `tools/sensor_evidence.py record --static\|--drive P` | Captures one run into `logs/evidence/<session>/`: one headered CSV per stream. `--drive` starts `drive_route.py` itself, so one command is one complete run. Needs ROS. |
-| `tools/sensor_evidence.py analyse [session…]` | Every table in `EVIDENCE_SENSORS.md`, from those CSVs. **Needs no ROS and no Gazebo** — it runs on the Windows python. |
+| `tools/sensor_evidence.py analyse [session…]` | Every table in `EVIDENCE_SENSORS.md` and `EVIDENCE_FUSION.md`, from those CSVs — including the EKF scored against the same truth as the raw estimate, and the two subtracted. **Needs no ROS and no Gazebo** — it runs on the Windows python. |
 
 `start` exits **non-zero** if any child died during startup, naming the
 child and its log; what survived is left running, because the operator's
 next command is `stop`.
 
-**Four children since F1 Task 3**, and `status` names all four back: the
+**Six children since F2 Task 1**, and `status` names all six back: the
 gz server (`world`), `ros_gz_bridge`'s `parameter_bridge` (`bridge`),
-`ros_gz_image`'s `image_bridge` (`imgbridge`) and `nodes/wheel_odometry.py`
-(`odom`) — plus the gated GUI client (`gui`) when there is a window, which
-is the fifth process `m5v3.sh`'s own usage text counts. **No broker, no
-fleet manager, no HMI, no PLC link** — that absence is the phase, not an
-omission. Nothing here touches PLCSIM Advanced or anything on the Windows
-side.
+`ros_gz_image`'s `image_bridge` (`imgbridge`), `nodes/wheel_odometry.py`
+(`odom`), the static `base_link` → `imu_link` transform (`imutf`) and
+`robot_localization`'s `ekf_node` (`ekf`) — plus the gated GUI client
+(`gui`) when there is a window, which is the seventh process `m5v3.sh`'s
+own usage text counts. **No broker, no fleet manager, no HMI, no PLC
+link** — that absence is the phase, not an omission. Nothing here
+touches PLCSIM Advanced or anything on the Windows side.
+
+**The two newest children are one filter and the geometry it cannot work
+without.** `ekf` fuses the wheel odometry's TWIST (`vx` and yaw rate,
+never its pose — the node publishes a covariance of 1000 there as a
+do-not-fuse flag) with the IMU's yaw rate and forward acceleration, and
+publishes `/m5v3/odometry/filtered` plus **the first transform this stack
+has ever emitted, `odom` → `base_link`**. F3's `map` → `odom` stacks on
+top of it, and nothing in F2 may become that edge's owner — so the
+filter's `world_frame` IS the odom frame and it publishes exactly one
+transform. `imutf` publishes where the IMU is bolted, and it is a child
+of its own rather than a line in the filter's configuration because it is
+a different claim: `robot_state_publisher` would own it if this track
+carried a URDF. Without it `robot_localization` **drops the entire IMU
+and logs nothing at all** — measured on this rig, `EVIDENCE_FUSION.md`
+§2.2.
 
 ### What is bridged, and one word about odometry
 
@@ -202,8 +232,10 @@ sim time with `dt_max = dt_med`, not one message lost over 60 s.
 
 **What is deliberately NOT bridged:** `/forklift/gz/points3d` (the 3D
 lidar), both point clouds, the camera's colour image, and
-`/forklift/gz/drive_speed/read_b`. The first four have no ROS consumer
-until F2, gz renders a sensor only while something subscribes to it, and
+`/forklift/gz/drive_speed/read_b`. The first four still have no ROS
+consumer — F2 Task 1's EKF fuses the IMU and the wheel odometry and
+nothing that renders — gz renders a sensor only while something
+subscribes to it, and
 `EVIDENCE_MODEL_V3.md` §6 measures what subscribing to the 3D lidar
 costs: mean RTF 0.999 → 0.85. `read_b` is different — it is the same
 shaft read a second time, and cross-comparing the two heads is the PLC's
@@ -217,11 +249,33 @@ quantisation, no drift. On this track it is an *instrument*, never an
 input. **F1 kept it**, and keeping it was the point: F1 added the wheel
 odometry *beside* it and scored one against the other (`EVIDENCE_SENSORS.md`
 §3), which is not a thing a phase can do having deleted its own reference.
-Replacing it with a fused estimate belongs to **F2**'s EKF, and until that
-exists anything that *navigates* on it is measuring its own answer. The
-bridge line in `m5v3.sh` says so where it is opened.
+**F2 Task 1 built the fused estimate that replaces it as the thing
+anything would navigate on** — `/m5v3/odometry/filtered`, scored against
+this same reference in `EVIDENCE_FUSION.md` — and the ground truth stays
+bridged, still an instrument, still never an input to any estimator (F2
+global constraint 13). The EKF's own configuration carries no `odomN` or
+`poseN` entry naming it and there is exactly one of each in that file, so
+there is nowhere for a third to hide. The bridge line in `m5v3.sh` says
+so where it is opened.
 
 ---
+
+## Three things worth knowing before the next phase
+
+**The EKF's `vy` channel is refused by ruling, and the ruling is
+measured.** `ekf.yaml` fuses the wheel odometry's `vx` and `vyaw` only
+(F2 Task 1 brief). `vy` is not a noise channel on this vehicle — it is
+`d · yaw_rate` with `d = 0.50 m`, the lateral velocity `base_link` has
+because it stands half a metre forward of the rear axle — and
+`robot_localization`'s motion model does not know `d`, so with `vy`
+unobserved the filter integrates `base_link` as though it were the rear
+axle. Measured both ways on the same profiles
+(`EVIDENCE_FUSION.md` §4): refusing it costs **+0.90 m of end error on
+`corner_creep`** and **doubles the rms on `square`**, and with it fused
+the filter beats raw dead reckoning on every figure of both cornering
+profiles. **Anything in F2 that scores this filter's POSITION is
+scoring that flag as much as the fusion.** It is one line of
+`ekf.yaml` and the owner's to move.
 
 ## Two things worth knowing before the next phase
 

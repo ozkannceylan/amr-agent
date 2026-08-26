@@ -71,10 +71,14 @@ estimate is scored AGAINST. An estimator that reads ground truth is not an
 estimator, and the cheapest way to guarantee this one cannot is for the
 file to contain no subscription to it. It does not.
 
-IT BROADCASTS NO TRANSFORM. odom -> base_link has exactly one owner and in
-F2 that owner is the EKF (ver2 invariant 10). A second publisher of that
-edge is the failure the whole two-phase odometry plan exists to prevent,
-so this file contains no transform broadcaster at all.
+IT BROADCASTS NO TRANSFORM. odom -> base_link has exactly one owner, and
+since F2 Task 1 that owner EXISTS: robot_localization's ekf_node, started
+by m5v3.sh as the child named `ekf`, which fuses this node's twist with
+the IMU. A second publisher of that edge is the failure the whole
+two-phase odometry plan exists to prevent (ver2 invariant 10), so this
+file contains no transform broadcaster at all - and the frame NAMES it
+stamps on its messages now live in config.yaml's frames: block, where the
+filter reads the same two strings.
 
 WHAT IT IS NOT. Not the vehicle's pose - one sensor's opinion of it,
 published so F2's filter can fuse it with the IMU. Not a safety function
@@ -118,7 +122,7 @@ REQUIRED_KEYS = (
     "wheel_odom.counts_per_rev", "wheel_odom.wheel_radius_scale",
     "wheel_odom.steer_bias_rad",
     "wheel_odom.drive_joint_name", "wheel_odom.steer_joint_name",
-    "wheel_odom.odom_frame", "wheel_odom.base_frame",
+    "frames.odom", "frames.base_link",
     "wheel_odom.qos_depth", "wheel_odom.steer_stale_s",
     "wheel_odom.log_every_s",
     "wheel_odom.alive_every_s", "wheel_odom.alive_warn_after_s",
@@ -256,8 +260,13 @@ def _make_node_class(Node, JointState, Odometry, QoSProfile, Time, Clock,
                 steer_bias_rad=cfg.f("wheel_odom.steer_bias_rad"))
             self.drive_joint = cfg.s("wheel_odom.drive_joint_name")
             self.steer_joint = cfg.s("wheel_odom.steer_joint_name")
-            self.odom_frame = cfg.s("wheel_odom.odom_frame")
-            self.base_frame = cfg.s("wheel_odom.base_frame")
+            # THE FRAME NAMES ARE frames:'s AND NOT THIS BLOCK'S SINCE
+            # F2. They were this node's alone while nothing on the track
+            # broadcast a transform; the EKF now stamps the same two
+            # names on odom -> base_link, and one name with two writers
+            # is one place for it to live.
+            self.odom_frame = cfg.s("frames.odom")
+            self.base_frame = cfg.s("frames.base_link")
             self.steer_stale_s = cfg.f("wheel_odom.steer_stale_s")
             self.log_every_s = cfg.f("wheel_odom.log_every_s")
             self.alive_every_s = cfg.f("wheel_odom.alive_every_s")

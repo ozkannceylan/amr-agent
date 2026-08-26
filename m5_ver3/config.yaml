@@ -153,6 +153,34 @@ vehicle:
   # node needed the same number - a constant spelled in two places is
   # two opinions about one number.
   wheel_radius_m: "0.12"
+  # ---- WHERE THE IMU IS BOLTED, and why a shell needs to know ----
+  #
+  # model.sdf's `imu_link` <pose>, repeated here for the reason the
+  # sensors: block repeats the update rates: a SHELL cannot read XML, and
+  # F2's stack has to put this offset on the wire as a TF before
+  # robot_localization will accept a single IMU sample.
+  #   IT IS CHECKED AGAINST THE MODEL AND NOT TRUSTED. `sensor_evidence.py
+  #   analyse` reads imu_link's pose out of vehicle.model and prints a
+  #   WARNING if these three numbers disagree with it, exactly as it
+  #   already does for the sensor rates. So this is a copy that says when
+  #   it has gone stale.
+  #   WHY THE STACK NEEDS IT AT ALL. The IMU stamps its messages
+  #   `imu_link` (model.sdf's <gz_frame_id>), and robot_localization
+  #   transforms every sample into base_link_frame before fusing it. With
+  #   no base_link -> imu_link transform on /tf it drops the whole sensor
+  #   AND SAYS NOTHING - measured on this rig 2026-08-26, EVIDENCE_FUSION
+  #   §2.2 - so this is not decoration, it is the difference between a
+  #   filter with a gyro in it and one without.
+  #   ONLY THE ROTATION REACHES THE FILTER, and the rotation is identity:
+  #   robot_localization rotates an IMU's angular velocity and linear
+  #   acceleration into base_link and does NOT correct for the lever arm
+  #   (there is a `@todo` in its own source saying so). §2.4 measures
+  #   what that costs. The translation below is what makes the lookup
+  #   succeed and is otherwise unused by the filter.
+  imu_mount:
+    x: "-0.50"
+    y: "0.00"
+    z: "0.25"
   # steer_joint's mechanical stop, symmetric. tools/drive_route.py checks
   # every steer angle in a profile against it before it drives anything,
   # and REFUSES the profile if one is outside - it does not clamp.
@@ -257,6 +285,16 @@ topics:
   # with it by an equality - see wheel_odom: below for the two errors it
   # is built to make.
   wheel_odom: "/m5v3/wheel_odom"
+  # WHERE THE FUSED ESTIMATE COMES OUT - F2 Task 1's addition, and the
+  # first thing on this track that is a pose the vehicle could navigate
+  # on. robot_localization's ekf_node publishes it, fusing the wheel
+  # odometry's TWIST with the IMU's yaw rate; see the ekf: block below
+  # for what is fused and ekf.yaml for the matrices that say so.
+  #   IT IS A REMAP AND NOT A PARAMETER. ekf_node's publisher is named
+  #   `odometry/filtered` in its own source and the package offers no
+  #   parameter to rename it, so m5v3.sh remaps it to this address on
+  #   the command line. The name lives here either way, once.
+  odometry_filtered: "/m5v3/odometry/filtered"
   # THE BACK SAFETY SCANNER'S MEASUREMENT CHANNEL, NOT BRIDGED, AND IT HAS
   # TWO CONSUMERS ON THIS TRACK - which is why it is named for the SENSOR
   # and not for either job.
@@ -279,6 +317,46 @@ topics:
   # of its first consumer cannot be shared with its second without lying
   # about one of them.
   safety_scan_back: "/forklift/gz/safety_scanner_back/measurement"
+
+# -------------------------------- FRAMES -------------------------------
+# THE COORDINATE FRAMES THIS STACK NAMES, AND THEY HAVE TWO READERS NOW.
+# They lived under wheel_odom: until F2 Task 1, where they were one
+# node's private business: nothing broadcast a transform and the names
+# were only strings in a message header. F2's EKF publishes the first
+# TRANSFORM on this track - odom -> base_link - and it has to stamp it
+# with the same two names the wheel odometry stamps its Odometry with, or
+# the filter is fusing a message from a frame it has never heard of.
+#   A KEY NAMED FOR ITS FIRST CONSUMER CANNOT BE SHARED WITH ITS SECOND
+#   WITHOUT LYING ABOUT ONE OF THEM - which is topics.safety_scan_back's
+#   argument, applied a second time. So they moved here, once, and
+#   nodes/wheel_odometry.py and m5v3.sh both read them from this block.
+#
+# THE NAMES ARE REP-105's AND ARE NOT NAMESPACED. m5-ver2's vehicle
+# spelled them `forklift/odom` and `forklift/base_link` because it was
+# one truck in a FLEET graph and the prefix is what kept four trucks'
+# transform trees apart. This track has one truck in a partition of its
+# own, so the prefix would be ceremony: there is nothing here for it to
+# disambiguate, and REP-105's bare names are what every off-the-shelf
+# consumer (Nav2, rviz, robot_localization's own defaults) expects.
+frames:
+  # WHERE THE ESTIMATE LIVES. Continuous and drifting, by definition -
+  # it is the frame a dead-reckoned pose is honest in.
+  odom: "odom"
+  # THE VEHICLE. base_link stands 0.50 m FORWARD of the rear axle
+  # (vehicle.rear_axle_offset_m) and the model's canonical link carries
+  # the same name.
+  base_link: "base_link"
+  # THE IMU's OWN FRAME, and it is model.sdf's <gz_frame_id> spelled
+  # again for the shell - the bridged message arrives stamped with it and
+  # the static transform m5v3.sh publishes has to name the same string.
+  imu: "imu_link"
+  # DECLARED, NEVER PUBLISHED, AND THAT IS DELIBERATE. ekf_node requires
+  # a map_frame parameter to exist; this stack's world_frame is the odom
+  # frame above, so the filter publishes exactly ONE transform and never
+  # map -> odom. That edge belongs to F3's localisation and nothing in F2
+  # may quietly become its owner (ver2 invariant 10, and prior art
+  # agv/forklift/ekf.yaml says the same about the same parameter).
+  map: "map"
 
 # ------------------------------- SENSORS -------------------------------
 # THE SDF GOVERNS EVERY SENSOR. Geometry, mount pose, sample count, field
@@ -552,14 +630,16 @@ wheel_odom:
   # with the message's own name list in it, never a silent zero.
   drive_joint_name: "drive_wheel_joint"
   steer_joint_name: "steer_joint"
-  # header.frame_id and child_frame_id of the published Odometry. THE
-  # NODE BROADCASTS NO TRANSFORM on this edge and must not: odom ->
-  # base_link has exactly one owner and in F2 that owner is the EKF
-  # (ver2 invariant 10). The cheapest way to guarantee a second publisher
-  # cannot appear is for the node to contain no broadcaster at all, and
-  # it does not.
-  odom_frame: "odom"
-  base_frame: "base_link"
+  # THE FRAME NAMES MOVED TO frames: IN F2 TASK 1 and are not repeated
+  # here. They were this node's alone while nothing broadcast a
+  # transform; F2's EKF now stamps the same two names on the odom ->
+  # base_link TF and had to read them from somewhere, and a name spelled
+  # in two places is two opinions about one frame.
+  #   WHAT HAS NOT CHANGED: THIS NODE BROADCASTS NO TRANSFORM and must
+  #   not. That edge has exactly one owner and since F2 it is the EKF
+  #   (ver2 invariant 10). The cheapest way to guarantee a second
+  #   publisher cannot appear is for the node to contain no broadcaster
+  #   at all, and it still does not.
   # Subscription and publication queue depth. The plant publishes both
   # inputs once per physics step, so this is about four milliseconds of
   # slack, which is what a python callback needs and no more: a deep
@@ -698,6 +778,73 @@ wheel_odom:
     #   nothing. z, roll and pitch are the same story: this vehicle's
     #   wheels say nothing at all about them.
     unused: "1000.0"
+
+# --------------------------------- EKF ---------------------------------
+# THE FUSED ESTIMATE, AND THIS BLOCK IS DELIBERATELY NOT ALL OF IT.
+# F2 Task 1 adds robot_localization's `ekf_node` (3.8.3, installed on the
+# rig) as a stack child. Its parameters are a ROS parameter file with a
+# shape this file does not have and cannot borrow - a top-level node name,
+# a `ros__parameters:` mapping, fifteen-entry boolean arrays - so they
+# live in their own file, `m5_ver3/ekf.yaml`, which ekf_node reads
+# directly.
+#
+# WHICH FILE OWNS WHAT, AND NO NUMBER IS IN BOTH.
+#
+#   HERE:      the topic names, the frame names (frames: above), the
+#              output rate, the node's name and the path to the other
+#              file. Everything a SHELL has to know to start the child,
+#              plus everything that is already spelled somewhere else on
+#              this track and must not be spelled twice.
+#   ekf.yaml:  what is fused and what is refused - the two fifteen-entry
+#              configuration matrices - the sensor timeout, two_d_mode,
+#              and the arguments for all of it. Everything that is about
+#              the FILTER rather than about this stack.
+#
+# m5v3.sh passes the first group on ekf_node's command line as `-p`
+# overrides, so ekf.yaml carries no topic, no frame and no rate at all
+# and cannot drift away from the rest of this file.
+#
+# THE COVARIANCES ARE IN NEITHER FILE, AND THAT IS THE RIGHT PLACE FOR
+# THEM. robot_localization reads each measurement's covariance out of the
+# MESSAGE. The wheel odometry's is wheel_odom.covariance above, derived
+# from F1's measured quantiser dither; the IMU's is filled by ros_gz from
+# the stddevs model.sdf declares, and EVIDENCE_FUSION.md §2.1 measures
+# what arrives on the wire against them. So the weighting between the two
+# sensors is set by two measured numbers and by no hand in a launch file.
+ekf:
+  # The parameter file, relative to the repository root.
+  params_file: "m5_ver3/ekf.yaml"
+  # The node's name, and it has to match ekf.yaml's top-level key or the
+  # parameters in that file belong to nobody. m5v3.sh renames the process
+  # to this with `-r __node:=`; ekf.yaml's own header carries the same
+  # obligation from the other side.
+  node_name: "m5v3_ekf"
+  # HOW OFTEN THE FILTER PREDICTS AND PUBLISHES, in Hz.
+  #
+  # 50 AND NOT 500, AND THE ARGUMENT IS ABOUT INFORMATION AND NOT COST.
+  # The inputs are a 500 Hz wheel odometry and a 100 Hz IMU. Nothing is
+  # lost by publishing slower than either: robot_localization queues every
+  # measurement and integrates all of them, in stamp order, inside the
+  # cycle they land in - so a 50 Hz cycle consumes ten wheel-odom samples
+  # and two IMU samples rather than discarding eight and one.
+  #   500 Hz OUTPUT WOULD BE WASTE AND WORSE THAN WASTE. The wheel
+  #   odometry publishes at the world's physics step because a quantiser
+  #   that skips samples is a different device (nodes/wheel_odometry.py's
+  #   header), and it pays for that with a twist that is 22 % quantiser
+  #   dither at 2 ms. A filter that re-published at the same rate would
+  #   be emitting more opinions per second than there is information in
+  #   the inputs, and every consumer downstream would pay to transport
+  #   them.
+  #   50 Hz IS WHAT THE CONSUMERS WANT. It is the rate m5-ver2's forklift
+  #   EKF ran at (agv/forklift/ekf.yaml), so a figure compared across the
+  #   two tracks is compared at the same output cadence; and it is 2.5x
+  #   Nav2's controller rate and 25x its costmap rate, which is what F4
+  #   will ask this transform for.
+  #   IT IS THE TF RATE TOO. publish_tf is on, so this is how often
+  #   odom -> base_link is stamped and how stale the freshest transform
+  #   can be: 20 ms, against a vehicle that covers 14 mm in that time at
+  #   its 0.7 m/s cruise.
+  frequency_hz: "50.0"
 
 # ------------------------------ DRIVE ROUTE -----------------------------
 # tools/drive_route.py's profiles. It is the EVIDENCE DRIVER: it puts the

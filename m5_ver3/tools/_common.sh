@@ -76,9 +76,15 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 #   else here nominates it. The pattern is the SCRIPT NAME rather than
 #   "python3", which would nominate every python on the machine and lean
 #   the whole safety of the sweep on ours() alone.
+#   ekf_node AND static_transform_publisher ARE F2 TASK 1's, and each is
+#   its own pattern for wheel_odometry.py's reason: both are started
+#   through `ros2 run`, so the surviving process is the EXECUTABLE and
+#   its command line begins with the path to it. Neither is nominated by
+#   anything above.
 # MAINTENANCE OBLIGATION: a process added to m5v3.sh's start() is added
 # HERE, or stop orphans it and still prints "down."
-M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py")
+M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py"
+               "static_transform_publisher" "ekf_node")
 
 # The same list as one pgrep alternation, for the callers that want a
 # single pattern rather than a loop.

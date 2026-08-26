@@ -804,3 +804,160 @@ def test_a_closure_needs_a_start_and_an_end():
         evidence_core.closure([1.0], [1.0])
     with pytest.raises(evidence_core.EvidenceError):
         evidence_core.closure([1.0, 2.0], [1.0])
+
+
+# ----------------------------------------------------------------------
+# the third stream: one estimate against another, over the same truth
+# ----------------------------------------------------------------------
+#
+# F2 Task 1's extension. The instrument scored ONE estimate against the
+# ground truth; there are two now - the raw wheel odometry and the EKF
+# that fuses it with the IMU - and the question the evidence file exists
+# to answer is not "how far out is the filter" but "how much of the raw
+# estimate's error did it remove". That subtraction is arithmetic and it
+# is here, where a sign error in it cannot reach a published table.
+
+def _drift(end_error_m=1.0, end_yaw_error_rad=0.5, rms_m=0.8,
+           max_error_m=1.2, t0=0.0, t1=40.0):
+    """A Drift with only the fields compare_drift() reads set."""
+    return evidence_core.Drift(
+        n=100, t0=t0, t1=t1, end_dx=0.0, end_dy=0.0,
+        end_error_m=end_error_m, end_yaw_error_rad=end_yaw_error_rad,
+        rms_m=rms_m, max_error_m=max_error_m, truth_path_m=10.0,
+        est_path_m=10.0, truth_turned_rad=1.0, est_turned_rad=1.0)
+
+
+def test_the_error_removed_is_a_difference_and_a_fraction_of_the_first():
+    out = evidence_core.compare_drift(
+        _drift(end_error_m=1.0), _drift(end_error_m=0.25))
+    assert abs(out.end_error.before - 1.0) < 1e-12
+    assert abs(out.end_error.after - 0.25) < 1e-12
+    assert abs(out.end_error.removed - 0.75) < 1e-12
+    assert abs(out.end_error.fraction - 0.75) < 1e-12
+
+
+def test_a_filter_that_made_it_worse_reads_NEGATIVE_and_is_never_clamped():
+    """THE ONE THAT MATTERS. An estimate that is worse than its own input
+    is a result, and a fraction floored at zero would publish it as "no
+    improvement" - which is a different and flattering claim."""
+    out = evidence_core.compare_drift(
+        _drift(end_error_m=0.20), _drift(end_error_m=0.50))
+    assert out.end_error.removed < 0.0
+    assert abs(out.end_error.removed + 0.30) < 1e-12
+    assert abs(out.end_error.fraction + 1.5) < 1e-12
+
+
+def test_the_yaw_is_compared_by_MAGNITUDE_and_keeps_its_SIGN():
+    """A heading error of -1.73 rad becoming +0.02 rad is 98.8 % removed,
+    not 101 %: the improvement is in the magnitude. But the signs are
+    what say WHICH WAY each estimate was wrong, and a table that lost
+    them could not tell an over-rotation from an under-rotation."""
+    out = evidence_core.compare_drift(
+        _drift(end_yaw_error_rad=-1.7326),
+        _drift(end_yaw_error_rad=+0.0156))
+    assert out.end_yaw.before == -1.7326
+    assert out.end_yaw.after == +0.0156
+    assert abs(out.end_yaw.removed - (1.7326 - 0.0156)) < 1e-12
+    assert 0.99 < out.end_yaw.fraction < 0.992
+
+
+def test_an_error_that_was_already_zero_has_no_fraction_rather_than_infinity():
+    out = evidence_core.compare_drift(
+        _drift(end_error_m=0.0), _drift(end_error_m=0.1))
+    assert abs(out.end_error.removed + 0.1) < 1e-12
+    assert math.isnan(out.end_error.fraction)
+
+
+def test_all_four_figures_are_compared_and_none_is_dropped():
+    out = evidence_core.compare_drift(
+        _drift(end_error_m=1.0, end_yaw_error_rad=0.4, rms_m=0.8,
+               max_error_m=1.4),
+        _drift(end_error_m=0.5, end_yaw_error_rad=0.1, rms_m=0.2,
+               max_error_m=0.7))
+    assert abs(out.end_error.fraction - 0.50) < 1e-12
+    assert abs(out.end_yaw.fraction - 0.75) < 1e-12
+    assert abs(out.rms.fraction - 0.75) < 1e-12
+    assert abs(out.max_error.fraction - 0.50) < 1e-12
+
+
+def test_the_two_scores_report_how_far_apart_their_windows_START_and_END():
+    """THE TWO STREAMS ARE NOT SCORED OVER THE SAME SAMPLES AND CANNOT BE.
+    Each score() clips the truth to its own estimate's span, and the EKF
+    joins the graph later than the wheel odometry does - it waits for a
+    clock. The difference is small and it is REPORTED rather than
+    assumed small, because a comparison over two different windows is
+    what an rms figure is most easily wrong about."""
+    out = evidence_core.compare_drift(
+        _drift(t0=10.0, t1=50.0), _drift(t0=10.6, t1=50.0))
+    assert abs(out.span_gap_start_s - 0.6) < 1e-12
+    assert abs(out.span_gap_end_s - 0.0) < 1e-12
+
+
+def test_the_gaps_are_magnitudes_whichever_stream_started_first():
+    out = evidence_core.compare_drift(
+        _drift(t0=11.0, t1=49.5), _drift(t0=10.0, t1=50.0))
+    assert abs(out.span_gap_start_s - 1.0) < 1e-12
+    assert abs(out.span_gap_end_s - 0.5) < 1e-12
+
+
+# ----------------------------------------------------------------------
+# the model's link poses: where a sensor is BOLTED
+# ----------------------------------------------------------------------
+#
+# config.yaml repeats imu_link's pose because a SHELL has to put it on
+# /tf before robot_localization will fuse a single IMU sample, and a
+# shell cannot read XML. This is the same cross-check `analyse` already
+# does for the sensor rates: the SDF decides, config.yaml copies, and the
+# instrument says when the copy has gone stale.
+
+_LINK_SDF = """<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="m">
+    <link name="base_link"/>
+    <link name="imu_link">
+      <pose>-0.50 0 0.25 0 0 0</pose>
+    </link>
+    <link name="tilted">
+      <pose>1 2 3 0.1 0.2 0.3</pose>
+    </link>
+  </model>
+</sdf>
+"""
+
+
+def _link_model(tmp_path, text=_LINK_SDF):
+    path = os.path.join(str(tmp_path), "model.sdf")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return path
+
+
+def test_a_link_pose_is_read_as_six_numbers(tmp_path):
+    pose = evidence_core.sdf_link_pose(_link_model(tmp_path), "imu_link")
+    assert pose == (-0.50, 0.0, 0.25, 0.0, 0.0, 0.0)
+
+
+def test_a_link_pose_carries_its_rotation_too(tmp_path):
+    pose = evidence_core.sdf_link_pose(_link_model(tmp_path), "tilted")
+    assert pose == (1.0, 2.0, 3.0, 0.1, 0.2, 0.3)
+
+
+def test_a_link_with_no_pose_is_at_the_models_origin(tmp_path):
+    """SDF's default and not a guess: a <link> without a <pose> IS at the
+    model frame's origin, which is why base_link carries none."""
+    pose = evidence_core.sdf_link_pose(_link_model(tmp_path), "base_link")
+    assert pose == (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+
+def test_a_link_the_model_does_not_carry_is_refused_by_name(tmp_path):
+    with pytest.raises(evidence_core.EvidenceError) as exc:
+        evidence_core.sdf_link_pose(_link_model(tmp_path), "nope")
+    assert "imu_link" in str(exc.value)
+
+
+def test_a_pose_that_is_not_six_numbers_is_refused_rather_than_padded(
+        tmp_path):
+    text = _LINK_SDF.replace("<pose>-0.50 0 0.25 0 0 0</pose>",
+                             "<pose>-0.50 0 0.25</pose>")
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.sdf_link_pose(_link_model(tmp_path, text), "imu_link")

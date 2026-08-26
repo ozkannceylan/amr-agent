@@ -88,6 +88,21 @@ Drift = collections.namedtuple(
              "rms_m max_error_m truth_path_m est_path_m "
              "truth_turned_rad est_turned_rad")
 
+#: ONE FIGURE OF ONE ESTIMATE AGAINST THE SAME FIGURE OF ANOTHER.
+#: `before` and `after` are kept as they were measured, SIGNS AND ALL -
+#: a heading error says which way the estimate was wrong and that is not
+#: information a comparison may throw away. `removed` and `fraction` are
+#: about MAGNITUDES, because an error of -1.73 rad becoming +0.02 rad is
+#: an improvement of 1.71 and not of 1.75.
+Removed = collections.namedtuple("Removed", "before after removed fraction")
+
+#: What fusing bought, over one run, on the four figures the drift table
+#: publishes - plus how far apart the two scores' windows were, which is
+#: not decoration. See compare_drift().
+Comparison = collections.namedtuple(
+    "Comparison", "end_error end_yaw rms max_error "
+                  "span_gap_start_s span_gap_end_s")
+
 #: A corner, against the kinematics it was supposed to obey.
 Fidelity = collections.namedtuple(
     "Fidelity", "yaw_rate steer_rad kinematic_commanded kinematic_measured "
@@ -483,6 +498,66 @@ def score_drift(truth_rows, est_rows, frame, max_gap_s):
         est_path_m=path_length(rx, ry),
         truth_turned_rad=tyaw[last] - tyaw[keep[0]],
         est_turned_rad=ryaw[-1] - ryaw[0])
+
+
+def _removed(before, after):
+    """One figure, before against after.
+
+    THE FRACTION IS NOT CLAMPED AND MUST NEVER BE. An estimate that is
+    WORSE than the one it was built from is a result - it is the result
+    F2's evidence file most needs to be able to state - and a fraction
+    floored at zero would publish it as "no improvement", which is a
+    different and flattering claim about the same measurement.
+
+    A `before` of exactly zero has NO fraction, and nan is the honest
+    answer rather than a division. There is no percentage of nothing:
+    the absolute `removed` still says everything there is to say.
+    """
+    before = float(before)
+    after = float(after)
+    removed = abs(before) - abs(after)
+    if abs(before) == 0.0:
+        fraction = float("nan")
+    else:
+        fraction = removed / abs(before)
+    return Removed(before=before, after=after, removed=removed,
+                   fraction=fraction)
+
+
+def compare_drift(raw, fused):
+    """Two Drifts of the SAME RUN against the SAME TRUTH, subtracted.
+
+    F2 Task 1's addition, and the question it exists for: the evidence
+    file's headline is not how far out the filter is, it is HOW MUCH OF
+    THE RAW ESTIMATE'S ERROR THE FILTER REMOVED - the corner yaw error
+    above all, because that is the error a gyro observes and dead
+    reckoning cannot. Both arguments come from score_drift(), so both are
+    already absolute and already in the spawn frame; this only subtracts.
+
+    THE TWO SCORES ARE NOT OVER THE SAME SAMPLES AND CANNOT BE. Each one
+    clips the ground truth to its own estimate's span, and the two
+    estimates do not start together: on this stack the wheel odometry
+    publishes as soon as the joint channels do, and the EKF waits for a
+    clock and for its first measurement of each sensor. So the two window
+    edges are REPORTED - span_gap_start_s and span_gap_end_s, both
+    magnitudes - rather than assumed to be small. An end error over a
+    window that closed half a second early is an end error at a different
+    place, and an rms over a shorter window is an rms over a different
+    run; a reader who is shown the gaps can see whether either matters.
+
+    NOTHING HERE PAIRS, RESAMPLES OR RE-SCORES. If the two Drifts came
+    from different truths or different runs, this function will happily
+    subtract them - it is arithmetic and has no way to know. The caller
+    (tools/sensor_evidence.py) reads both out of ONE session directory,
+    which is where that guarantee lives.
+    """
+    return Comparison(
+        end_error=_removed(raw.end_error_m, fused.end_error_m),
+        end_yaw=_removed(raw.end_yaw_error_rad, fused.end_yaw_error_rad),
+        rms=_removed(raw.rms_m, fused.rms_m),
+        max_error=_removed(raw.max_error_m, fused.max_error_m),
+        span_gap_start_s=abs(float(fused.t0) - float(raw.t0)),
+        span_gap_end_s=abs(float(fused.t1) - float(raw.t1)))
 
 
 # ----------------------------------------------------------------------
@@ -1005,6 +1080,53 @@ def sdf_sensors(path):
     return out
 
 
+def sdf_link_pose(path, name):
+    """One <link>'s <pose> in its model frame, as six floats.
+
+    WHY A LINK POSE IS A CONFIGURED FIGURE LIKE ANY OTHER. F2's stack has
+    to publish base_link -> imu_link on /tf before robot_localization
+    will fuse a single IMU sample, and a SHELL cannot read XML - so
+    config.yaml carries a copy of imu_link's pose under
+    vehicle.imu_mount, exactly as its sensors: block carries a copy of
+    the update rates and for the same stated reason. This is what lets
+    `analyse` diff the copy against the file that decides it, so the copy
+    says when it has gone stale instead of quietly describing a mount
+    that moved.
+
+    A LINK WITH NO <pose> IS AT THE MODEL ORIGIN, which is SDF's own
+    default and not a guess this function makes - forklift_ver3's
+    base_link carries none for that reason. A pose that is present but is
+    not six numbers is refused: SDF allows a shorter pose in some
+    contexts and padding one here would invent a rotation.
+    """
+    from xml.etree import ElementTree
+
+    if not os.path.isfile(path):
+        raise EvidenceError("the model {} exists".format(path))
+    try:
+        root = ElementTree.parse(path).getroot()
+    except ElementTree.ParseError as exc:
+        raise EvidenceError(
+            "the model {} is well-formed XML: {}".format(path, exc))
+    names = []
+    for link in root.iter("link"):
+        names.append(link.get("name"))
+        if link.get("name") != name:
+            continue
+        text = link.findtext("pose")
+        if text is None:
+            return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        parts = text.split()
+        if len(parts) != 6:
+            raise EvidenceError(
+                "link {!r} in {} carries a six-number <pose>; it carries "
+                "{} ({!r})".format(name, path, len(parts), text.strip()))
+        return tuple(float(value) for value in parts)
+    raise EvidenceError(
+        "the model {} declares a link named {!r}; it declares {}".format(
+            path, name, ", ".join(repr(n) for n in names)))
+
+
 def sdf_gravity(path):
     """The magnitude of a world's own gravity vector.
 
@@ -1229,6 +1351,58 @@ def _selftest():
     else:
         check("one reading is refused rather than given a spread of zero",
               False)
+
+    # F2's third stream: one estimate against another. The two checks are
+    # the two ways a comparison can flatter a filter - clamping a
+    # negative improvement to zero, and comparing a signed heading error
+    # by its value rather than by its magnitude.
+    def _d(end, yaw, rms_v, worst, t0=0.0, t1=40.0):
+        return Drift(n=100, t0=t0, t1=t1, end_dx=0.0, end_dy=0.0,
+                     end_error_m=end, end_yaw_error_rad=yaw, rms_m=rms_v,
+                     max_error_m=worst, truth_path_m=10.0, est_path_m=10.0,
+                     truth_turned_rad=1.0, est_turned_rad=1.0)
+
+    worse = compare_drift(_d(0.20, 0.1, 0.1, 0.3),
+                          _d(0.50, 0.1, 0.1, 0.3))
+    check("a filter that made the error worse reads a NEGATIVE fraction",
+          worse.end_error.removed < 0.0
+          and abs(worse.end_error.fraction + 1.5) < 1e-12)
+    flipped = compare_drift(_d(1.0, -1.7326, 0.9, 1.8),
+                            _d(1.0, +0.0156, 0.9, 1.8))
+    check("a heading error is compared by magnitude and keeps its sign",
+          flipped.end_yaw.before < 0.0 and flipped.end_yaw.after > 0.0
+          and abs(flipped.end_yaw.removed - (1.7326 - 0.0156)) < 1e-12)
+    late = compare_drift(_d(1.0, 0.1, 0.9, 1.8, t0=10.0, t1=50.0),
+                         _d(1.0, 0.1, 0.9, 1.8, t0=10.6, t1=49.5))
+    check("the two scores report how far apart their windows were",
+          abs(late.span_gap_start_s - 0.6) < 1e-12
+          and abs(late.span_gap_end_s - 0.5) < 1e-12)
+
+    # And the model's link poses, which is how config.yaml's copy of the
+    # IMU mount is checked against the file that decides it.
+    handle, path = tempfile.mkstemp(suffix="_link.sdf", text=True)
+    os.close(handle)
+    try:
+        with open(path, "w", encoding="utf-8") as out:
+            out.write('<sdf version="1.9"><model name="m">'
+                      '<link name="base_link"/>'
+                      '<link name="imu_link"><pose>-0.50 0 0.25 0 0 0</pose>'
+                      '</link></model></sdf>')
+        check("a link pose is read as six numbers out of the model",
+              sdf_link_pose(path, "imu_link") == (-0.5, 0.0, 0.25,
+                                                  0.0, 0.0, 0.0))
+        check("a link with no pose sits at the model origin, per SDF",
+              sdf_link_pose(path, "base_link") == (0.0,) * 6)
+        try:
+            sdf_link_pose(path, "no_such_link")
+        except EvidenceError as exc:
+            check("a link the model does not carry is refused by name",
+                  "imu_link" in str(exc))
+        else:
+            check("a link the model does not carry is refused by name",
+                  False)
+    finally:
+        os.remove(path)
 
     for name in ran:
         print("{}  {}".format("FAIL" if name in fails else "pass", name))
