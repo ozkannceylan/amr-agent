@@ -1149,7 +1149,22 @@ of the origin:**
 | **`imu0_config[12]` (`ax`) dropped, everything else shipped** | **4** | **0** |
 
 **Thirteen of fourteen on the shipped configuration; zero of four with
-the accelerometer channel out.** It is the IMU's linear-acceleration
+the accelerometer channel out.**
+
+**AND THE RATE MOVES THROUGH THE DAY, which is stated so that two lucky
+bringups are not read as a refutation.** The eleven-for-eleven row was
+taken between 09:50 and 10:20; by 11:00 the three sessions of §8.7 cost
+**4, 1 and 2** bringups, and a fourth had not landed in six. Whatever
+sets the odds is not identified — it is not the WSL's uptime (a machine
+cold-booted seconds before still gave 2 of 3), not the machine's memory
+(12 GiB free), and not the plant (the IMU at rest is identical on both,
+mean ±0.0195 m/s² and sd 0.0103). What does NOT move is the ladder: with
+`ax` out, four of four bringups were clean, and the eleven-row table
+above was taken as consecutive sets rather than cherry-picked. **The
+claim is that this configuration fails often and silently, not that it
+fails every time** — and a filter that starts correctly two times in
+three is not a filter this track can publish figures from without the
+check §8.6 added. It is the IMU's linear-acceleration
 channel, and it is a numerical instability rather than bad data: the two
 configurations that stop it are the one that removes `ax` and the one
 that makes the node thirty times slower, and the discriminator between a
