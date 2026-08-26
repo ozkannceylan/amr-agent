@@ -35,6 +35,21 @@
 isolation:
   gz_partition: "m5v3"
   ros_domain_id: "97"
+  # ---- WHERE AN OFFLINE REPLAY LIVES, AND IT IS NOT HERE ----
+  #
+  # F3 Task 1's map is built by playing a recorded bag into slam_toolbox,
+  # and that bag CARRIES /tf. Replaying it onto domain 97 would put a
+  # second publisher of odom -> base_link on the same graph as the live
+  # EKF - the exact failure F2's whole one-authority-per-edge argument is
+  # about, with the difference that tf2 would not complain, it would just
+  # carry whichever message arrived last.
+  #   SO THE REPLAY IS A DIFFERENT GRAPH AND NOT A CAREFUL ONE.
+  #   tools/build_map.sh sets this domain on every child it starts and
+  #   refuses if the two values are equal, so the offline run cannot
+  #   reach the live stack even while the live stack is up.
+  #   THERE IS NO GZ_PARTITION FOR IT because there is no simulator in
+  #   it: an offline SLAM run is a bag, a mapper and two transforms.
+  map_ros_domain_id: "98"
 
 # --------------------------------- GPU ---------------------------------
 # RENDERING ON THIS TRACK IS THE GPU's, AND THAT IS A GATE RATHER THAN A
@@ -407,6 +422,20 @@ topics:
   # of its first consumer cannot be shared with its second without lying
   # about one of them.
   safety_scan_back: "/forklift/gz/safety_scanner_back/measurement"
+  # ---- THE TRANSFORM TREE ITSELF, F3 Task 1's addition ----
+  #
+  # NOT A SENSOR AND NOT A BRIDGE LINE. /tf is where the ONE transform
+  # this stack emits comes out - the EKF's odom -> base_link, 50 Hz - and
+  # /tf_static is where the IMU's mount sits. They are named here for one
+  # reason: tools/sensor_evidence.py's `record --bag` has to name the
+  # topics it puts in a rosbag2, and an OFFLINE SLAM RUN is a consumer of
+  # the transform tree exactly as it is a consumer of the scan. A topic
+  # this track records is a topic this file spells.
+  #   THE NAMES ARE tf2_ros's OWN and are not namespaced, for frames:'s
+  #   reason one level up: every off-the-shelf consumer - tf2, rviz,
+  #   slam_toolbox, Nav2 - looks for /tf and /tf_static and nothing else.
+  tf: "/tf"
+  tf_static: "/tf_static"
 
 # -------------------------------- FRAMES -------------------------------
 # THE COORDINATE FRAMES THIS STACK NAMES, AND THEY HAVE TWO READERS NOW.
@@ -1743,6 +1772,261 @@ drive_route:
       - {hold_s: "14.0", tread_mps: "-0.300", steer_rad: "-0.785398"}
       - {hold_s: "3.0", tread_mps: "0.000", steer_rad: "0.000"}
 
+    # MAPPING: THE COMMISSIONING DRIVE. F3 Task 1's profile, and the only
+    # one on this track that is not a bench manoeuvre - it exists to put
+    # the nav lidar over every piece of drivable floor in
+    # warehouse_ver3 once, so that an offline SLAM run has a recording to
+    # build a map out of. 227.0 m of straight, nine 90 deg corners,
+    # 774.7 s of sim time, and it ends where the route ends rather than
+    # where it started.
+    #
+    # THE ROUTE IS THE FLEET'S OWN ROAD GRAPH AND NOT A SHAPE. It is
+    # m6/ipc/route.py's `build_graph()` - read READ-ONLY, the way this
+    # track reads the floor - which is the aisle centrelines of
+    # warehouse_ver3 and nothing else. Twelve edges, 180.00 m:
+    #
+    #   RING   x = +-20.00 and y = +-10.00, a closed loop 120.00 m round,
+    #          8.00 m clear (the CRUISE road class)
+    #   SPINE  x = 0.00 from y = -10.00 to +10.00, 20.00 m, 8.00 m clear
+    #   PICK   y = 0.00 from x = -20.00 to +20.00, 40.00 m, and it is the
+    #          one corridor that is 5.00 m clear (the CREEP class)
+    #
+    # THE WALK, AND WHY IT IS 227 m RATHER THAN 180. Four of the graph's
+    # junctions have ODD degree - (0, 10), (0, -10), (+20, 0) and
+    # (-20, 0) each carry three edges - so no walk traverses every edge
+    # exactly once (Euler). Some edges have to be driven twice, and the
+    # table below drives the ring's four legs a second time. The route,
+    # junction by junction, with the turn each one takes:
+    #
+    #     leg  from          to            m     road        corner at the far end
+    #     L1   (-17, +10)    ( 0, +10)    17.0   ring N      C1 RIGHT  E -> S
+    #     L2   (  0, +10)    ( 0, -10)    20.0   SPINE       C2 RIGHT  S -> W
+    #     L3   (  0, -10)    (-20, -10)   20.0   ring S      C3 RIGHT  W -> N
+    #     L4   (-20, -10)    (-20,  0)    10.0   ring W      C4 RIGHT  N -> E
+    #     L5   (-20,   0)    (+20,  0)    40.0   PICK        C5 LEFT   E -> N
+    #     L6   (+20,   0)    (+20, +10)   10.0   ring E      C6 LEFT   N -> W
+    #     L7   (+20, +10)    (-20, +10)   40.0   ring N      C7 LEFT   W -> S
+    #     L8   (-20, +10)    (-20, -10)   20.0   ring W      C8 LEFT   S -> E
+    #     L9   (-20, -10)    (+20, -10)   40.0   ring S      C9 LEFT   E -> N
+    #     L10  (+20, -10)    (+20,   0)   10.0   ring E      (stops)
+    #
+    # Every graph edge is covered: the north leg by L1 + L7, the east by
+    # L6 + L10, the south by L3 + L9, the west by L4 + L8, the spine by
+    # L2 and the pick aisle by L5. L2 drives straight THROUGH the
+    # crossing at (0, 0) and L5 drives straight through it the other way,
+    # which is why neither costs a corner.
+    #
+    # THE PICK AISLE IS DRIVEN FIFTH, AND THAT ORDERING IS THE SAFETY
+    # ARGUMENT. It is the only 5.00 m corridor on this floor: the rack
+    # faces stand at y = +-2.50 and the truck is 1.20 m wide, so the rear
+    # axle has +-1.90 m of room, against +-3.40 m in every 8.00 m
+    # corridor. This is an OPEN LOOP profile - nothing reads a pose and
+    # nothing corrects - so the error budget is spent as the run goes on,
+    # and the tightest corridor is therefore driven while four corners
+    # and 67 m have been spent rather than nine and 200 m. The route was
+    # re-ordered for that reason and for no other.
+    #
+    # IT ALSO CLOSES LOOPS ON PURPOSE, which no other profile here does.
+    # L7 re-drives the north leg the run started on, 180 m later; L8
+    # re-drives L4's floor and L9 re-drives L3's. Those revisits are what
+    # slam_toolbox's loop closure has to work with, and a mapping drive
+    # that never crosses its own track hands the optimiser nothing to
+    # close (m5_ver3/slam.yaml, do_loop_closing).
+    #
+    # ---- THE FOUR PLANT CONSTANTS THE TABLE IS BUILT FROM ----
+    #
+    # MEASURED ON THIS RIG 2026-08-26, on the F1.5 tuned plant, nominal
+    # traction, default arm, ground truth only. The instrument was a
+    # throwaway probe of tools/drive_route.py's own two classes
+    # (SimClock + Terminals) with `gz topic -e` on
+    # topics.odom_ground_truth beside it - the same shape of throwaway
+    # probe the square: table above was first sized by, and every figure
+    # it produced is reproduced by any run of THIS profile because
+    # tools/sensor_evidence.py records the same stream.
+    #
+    #   1. STRAIGHT GROUND SPEED AT A COMMANDED 0.300 m/s: 0.2990 m/s.
+    #      60 s of held command, four disjoint 5-20 s windows after the
+    #      first 10 s, all four reading 0.2990. 0.33 % of slip, which is
+    #      the same order as the 0.95 % EVIDENCE_FUSION 8.1 measures at
+    #      cruise. Lateral drift over the 17.24 m: -0.0138 m, and the
+    #      heading moved -0.00007 rad. A straight leg on this plant is
+    #      straight; what it is not is the length the command asks for.
+    #
+    #   2. START-UP DEFICIT 0.704 m and STOP COAST 0.555 m. From rest the
+    #      first 5 s of a 0.300 command covers 0.7907 m against the
+    #      1.4950 m steady travel would give - a deficit of 0.704 m - and
+    #      after the command returns to zero the truck runs on for
+    #      0.5548 m before it stops. THE TWO DO NOT CANCEL and neither is
+    #      ignored: L1 below is lengthened by the first and L10 is
+    #      shortened by the second, each once.
+    #        A STANDING ZERO ON THIS MODEL IS THEREFORE NOT A BRAKE, and
+    #        tools/drive_route.py's header should be read with that
+    #        beside it. It is a standing order to stop DRIVING, which is
+    #        what stops the truck running away; it is not 0.5 m of
+    #        stopping distance the profile may spend somewhere else.
+    #
+    #   3. THE pi/4 CORNER, BOTH HANDS, AND THEY ARE THE SAME CORNER.
+    #      Two full circles at a held steer of -0.785398 and +0.785398,
+    #      0.300 m/s, 31 s each - one revolution and a bit, so the rate
+    #      is averaged over every heading rather than one:
+    #
+    #        hand    steady yaw rate      base_link radius   circle fit
+    #        LEFT    +0.203658 rad/s      1.1190 m           rms 0.00041
+    #        RIGHT   -0.203887 rad/s      1.1171 m           rms 0.00059
+    #
+    #      0.11 % apart. THAT SYMMETRY IS WHY THIS ROUTE MAY TURN BOTH
+    #      WAYS: square: and corner_creep: only ever turn left, so
+    #      nothing on this track had measured a right-hand corner before,
+    #      and a route round a ring cannot avoid one hand or the other.
+    #      Four of the nine corners below are right and five are left.
+    #        THE RADIUS IS base_link's AND NOT THE REAR AXLE'S, and it is
+    #        1.119 m rather than the 1.05 m the wheelbase promises
+    #        because this vehicle's STEERED WHEEL TRAILS: model.sdf puts
+    #        steer_link at x = +0.55 and the two load wheels at x = -0.50,
+    #        and the travel direction is model -x, so the wheel that
+    #        steers is at the counterweight end and base_link swings 0.13
+    #        m the WRONG WAY at the start of every corner before it comes
+    #        round. Measured, and it is why the corner's geometry below
+    #        is taken from the recording rather than from R.
+    #
+    #   4. THE CORNER BLOCK, MEASURED WHOLE RATHER THAN DERIVED. The
+    #      steer axis has to slew in and slew out, and neither is a
+    #      steady state: over the first 5 s of a held steer the truck
+    #      takes 0.27706 rad LESS than the steady rate accounts for, and
+    #      after the steer returns to zero it takes 0.27781 rad MORE
+    #      while the axis slews back out (LEFT hand; RIGHT reads -0.27426
+    #      and -0.28037). THE TWO CANCEL to 0.00075 rad, so a corner is
+    #      (hold at the steer) + (a straight segment long enough for the
+    #      axis to come out), and the pair turns the vehicle by the
+    #      steady rate times the hold. The slew-out is complete inside
+    #      3.0 s at 0.300 m/s - the following segment reads 0.0008 rad of
+    #      further yaw - and every corner below is followed by a straight
+    #      segment of at least that.
+    #
+    #      SO A 90 deg CORNER IS A 7.748 s HOLD. Measured directly rather
+    #      than divided: a 7.7086 s hold plus its 3.0 s slew-out turned
+    #      the truck 1.55919 rad (LEFT) and 1.56649 rad (RIGHT) against
+    #      the 1.5707963 asked, so both hands want 0.021-0.057 s more and
+    #      the table carries the mean. The residual spread is 0.42 deg
+    #      between the hands and it is NOT tuned out: it is the plant,
+    #      and what it costs is 0.42 deg of heading per corner, which
+    #      over the longest leg that follows one (40.00 m) is 0.29 m of
+    #      lateral - inside every margin below.
+    #
+    #      AND THE LANE IT CONSUMES IS MEASURED THE SAME WAY. Over the
+    #      whole block (hold + slew-out) the truck's displacement in the
+    #      frame it entered on is
+    #
+    #        forward along the ENTRY lane   1.95 m
+    #        sideways along the EXIT lane   0.93 m
+    #
+    #      which is not (R, R) and could not be, for the trailing-steer
+    #      reason in 3 above. So a corner at junction J is COMMANDED
+    #      1.95 m BEFORE J, and when the block ends the truck is already
+    #      0.93 m PAST J on the new lane. That is the whole of the
+    #      arithmetic below.
+    #
+    # ---- THE TABLE, LEG BY LEG ----
+    #
+    # A straight row between two corners holds for
+    #
+    #     3.000 s  (the slew-out of the corner it follows)
+    #   + (D - 0.93 - 1.95) / 0.2990        D = the leg's length
+    #
+    # L1 starts from rest, so it carries the 0.704 m start-up deficit and
+    # no slew-out: (17.00 - 1.95 + 0.704) / 0.2990 = 52.689 s.
+    # L10 ends at rest, so it carries the 0.555 m coast instead of a
+    # corner at its far end: 3.000 + (10.00 - 0.93 - 0.555) / 0.2990.
+    #
+    #     leg   D [m]   straight [m]   hold_s
+    #     L1    17.00   15.754*        52.689     * includes the deficit
+    #     L2    20.00   17.12          60.257
+    #     L3    20.00   17.12          60.257
+    #     L4    10.00    7.12          26.813
+    #     L5    40.00   37.12         127.147
+    #     L6    10.00    7.12          26.813
+    #     L7    40.00   37.12         127.147
+    #     L8    20.00   17.12          60.257
+    #     L9    40.00   37.12         127.147
+    #     L10   10.00    8.515         31.478
+    #
+    # ---- WHERE IT FITS, CHECKED CORRIDOR BY CORRIDOR ----
+    #
+    # The truck's envelope is 1.20 m wide and its fork tips reach 1.375 m
+    # ahead of the rear axle; the circumscribed radius about the axle is
+    # 1.50 m at 23.6 deg off the travel direction, which is the bound
+    # square: and corner_creep: both use. Against that bound:
+    #
+    #     corridor          clear    axle budget   nominal margin
+    #     ring, all four    8.00 m   +-2.50 m      2.50 m
+    #     spine             8.00 m   +-2.50 m      2.50 m
+    #     PICK AISLE        5.00 m   +-1.00 m      1.00 m
+    #
+    # and taking the true outline instead of the circumscribed circle the
+    # pick aisle's budget is +-1.90 m, because the 1.375 m of fork
+    # overhang is LONGITUDINAL and a straight leg does not point it at a
+    # rack. The nine corners all happen where two corridors cross - an
+    # 8.00 x 8.00 m box at the four ring corners, and the spine and pick
+    # aisle mouths - so the corner sweep itself is never the binding
+    # case. WHAT THE OPEN LOOP SPENDS IS CHECKED AFTER THE FACT AND NOT
+    # ASSUMED: EVIDENCE_MAP_V3.md carries the clearance of the recorded
+    # ground truth against every obstacle rectangle in
+    # m6/gazebo/warehouse_ver3.sdf, which is the measurement this
+    # paragraph is a prediction of.
+    #
+    # AND IT IS DRIVEN AT ONE SPEED FROM END TO END, which none of the
+    # other profiles is. 0.300 m/s everywhere: no cruise leg, no ramp,
+    # no speed change at a corner. Three reasons and they all point the
+    # same way. The pick aisle is a CREEP corridor in the floor's own
+    # spec, so part of the route is at this speed whatever happens. Every
+    # constant in 1-4 above was measured AT this speed, and a profile
+    # that changed speed would need the corner block measured again at
+    # the other one. And a slower drive is a denser recording - 15 Hz of
+    # nav lidar over 774.7 s is about 11,600 scans over 227 m, which is
+    # one scan per 20 mm of travel. A commissioning map is not a lap
+    # time.
+    mapping:
+      - {hold_s: "2.0", tread_mps: "0.000", steer_rad: "0.000"}
+      # L1  (-17, +10) -> ( 0, +10)   north ring leg, east
+      - {hold_s: "52.689", tread_mps: "-0.300", steer_rad: "0.000"}
+      # C1  RIGHT at ( 0, +10)   E -> S, onto the spine
+      - {hold_s: "7.748", tread_mps: "-0.300", steer_rad: "0.785398"}
+      # L2  ( 0, +10) -> ( 0, -10)   the SPINE, through the crossing
+      - {hold_s: "60.257", tread_mps: "-0.300", steer_rad: "0.000"}
+      # C2  RIGHT at ( 0, -10)   S -> W
+      - {hold_s: "7.748", tread_mps: "-0.300", steer_rad: "0.785398"}
+      # L3  ( 0, -10) -> (-20, -10)  south ring leg, west
+      - {hold_s: "60.257", tread_mps: "-0.300", steer_rad: "0.000"}
+      # C3  RIGHT at (-20, -10)  W -> N
+      - {hold_s: "7.748", tread_mps: "-0.300", steer_rad: "0.785398"}
+      # L4  (-20, -10) -> (-20, 0)   west ring leg, north
+      - {hold_s: "26.813", tread_mps: "-0.300", steer_rad: "0.000"}
+      # C4  RIGHT at (-20, 0)    N -> E, onto the PICK AISLE
+      - {hold_s: "7.748", tread_mps: "-0.300", steer_rad: "0.785398"}
+      # L5  (-20, 0) -> (+20, 0)     the PICK AISLE, through the crossing
+      - {hold_s: "127.147", tread_mps: "-0.300", steer_rad: "0.000"}
+      # C5  LEFT at (+20, 0)     E -> N
+      - {hold_s: "7.748", tread_mps: "-0.300", steer_rad: "-0.785398"}
+      # L6  (+20, 0) -> (+20, +10)   east ring leg, north
+      - {hold_s: "26.813", tread_mps: "-0.300", steer_rad: "0.000"}
+      # C6  LEFT at (+20, +10)   N -> W
+      - {hold_s: "7.748", tread_mps: "-0.300", steer_rad: "-0.785398"}
+      # L7  (+20, +10) -> (-20, +10) north ring leg, west - THE LOOP
+      - {hold_s: "127.147", tread_mps: "-0.300", steer_rad: "0.000"}
+      # C7  LEFT at (-20, +10)   W -> S
+      - {hold_s: "7.748", tread_mps: "-0.300", steer_rad: "-0.785398"}
+      # L8  (-20, +10) -> (-20, -10) west ring leg, south
+      - {hold_s: "60.257", tread_mps: "-0.300", steer_rad: "0.000"}
+      # C8  LEFT at (-20, -10)   S -> E
+      - {hold_s: "7.748", tread_mps: "-0.300", steer_rad: "-0.785398"}
+      # L9  (-20, -10) -> (+20, -10) south ring leg, east
+      - {hold_s: "127.147", tread_mps: "-0.300", steer_rad: "0.000"}
+      # C9  LEFT at (+20, -10)   E -> N
+      - {hold_s: "7.748", tread_mps: "-0.300", steer_rad: "-0.785398"}
+      # L10 (+20, -10) -> (+20, 0)   east ring leg, north, and it stops
+      - {hold_s: "31.478", tread_mps: "-0.300", steer_rad: "0.000"}
+      - {hold_s: "3.0", tread_mps: "0.000", steer_rad: "0.000"}
+
 # -------------------------------- PATHS --------------------------------
 # Relative to the repository root. The pidfile is what stop reads and the
 # only file it deletes; the log dir is one file per child, by name.
@@ -1984,6 +2268,72 @@ evidence:
     # is the same number for the same reason: `gz topic -e -n N` waits
     # for its N messages FOR EVER.
     capture_timeout_s: "60"
+  # ---- THE ROSBAG, F3 Task 1's addition, AND IT IS OPT-IN ----
+  #
+  # WHY A BAG AT ALL WHEN THIS TOOL ALREADY WRITES CSVs. The CSVs are an
+  # ANALYSIS format - one row per message, one column per number, read by
+  # `analyse` on a machine with no ROS on it - and nothing can replay
+  # them into a ROS graph. F3's map is built by slam_toolbox from a
+  # RECORDING, offline and sync, which is the only shape of SLAM run that
+  # gives the same map twice (docs/reports/m5v3-01 a), and slam_toolbox
+  # consumes ROS messages on a wire. rosbag2 is the container that turns
+  # one into the other, so `record --bag` starts `ros2 bag record` inside
+  # the session directory and stops it with the rest of the run.
+  #   IT IS THE SAME SESSION AND THAT IS THE POINT. The bag lands beside
+  #   the CSVs, under the same session.txt, carrying the same traction
+  #   and arm labels and refused by the same two refusals - so a map
+  #   built from a slippery run or from the --fuse arm cannot become an
+  #   unlabelled artifact. A second recorder with a second directory
+  #   naming scheme would have been a second place for a label to go
+  #   missing.
+  #   IT IS OFF BY DEFAULT because it is not free: 15 Hz of 811-beam scan
+  #   and 500 Hz of clock is about 150 MB over a 775 s mapping drive, and
+  #   the eight sessions EVIDENCE_FUSION 10 is built from want none of it.
+  bag:
+    # WHICH TOPICS, BY THEIR DOTTED KEY IN topics: ABOVE rather than by
+    # their address. One spelling of /clock in this file, and a bag that
+    # cannot name a topic the stack does not carry.
+    #   THESE FOUR AND NO MORE, and each is something the offline SLAM
+    #   run reads:
+    #     clock       slam_toolbox runs use_sim_time; without the plant's
+    #                 own clock on the wire every stamp in the bag is in
+    #                 the future and every TF lookup fails.
+    #     scan_nav    the measurement. The TiM571-profile nav lidar, and
+    #                 the ONLY sensor in the map.
+    #     tf          odom -> base_link, the EKF's. This is the odometry
+    #                 slam_toolbox corrects; it is F2's estimate and not
+    #                 the ground truth, which is the whole point of
+    #                 building the map from the real sensor chain.
+    #     tf_static   the IMU's mount. Recorded for provenance and NOT
+    #                 depended on: it is published transient-local before
+    #                 this recorder subscribes, so rosbag2 may or may not
+    #                 catch it, and the offline run needs the nav lidar's
+    #                 mount rather than the IMU's - which the default arm
+    #                 does not publish at all and tools/build_map.sh
+    #                 puts on the replay's own wire.
+    #   THE GROUND TRUTH IS DELIBERATELY NOT IN IT. /forklift/gz/odom is
+    #   a measurement reference (topics: above, F2 global constraint 13)
+    #   and a bag that carried it into a SLAM run would be one careless
+    #   remap away from being the thing the map was built on. It is in
+    #   the session's CSVs, where nothing can replay it.
+    topics: "clock, scan_nav, tf, tf_static"
+    # The bag's directory INSIDE the session. rosbag2 makes it itself and
+    # refuses to write into one that exists, which is a check and not an
+    # obstacle: a session directory is created fresh by new_session().
+    dir: "bag"
+    # rosbag2's storage plugin. mcap is Jazzy's own default and is what
+    # `ros2 bag play` reads without being told; it is written here rather
+    # than left implicit so the evidence can say what the container was.
+    storage: "mcap"
+    # HOW LONG THE RECORDER WAITS FOR `ros2 bag record` TO BE UP before
+    # it refuses - measured by the bag's own metadata file appearing.
+    # Starting the drive first would put the first seconds of the run
+    # outside the recording, and the reference pose is in those seconds.
+    start_timeout_s: "30"
+    # And how long it waits for the bag to CLOSE after the SIGINT. mcap
+    # is finalised on shutdown; a bag killed before it finishes writing
+    # its summary is a bag `ros2 bag play` refuses.
+    stop_timeout_s: "60"
   gz_rate:
     # THE GZ-SIDE DELIVERED RATE, `gz topic -f`, which reports a rolling
     # 10-interval window every ten messages. It is the only instrument
@@ -2191,3 +2541,255 @@ evidence:
     pallet_cam: "pallet_cam"
     imu: "imu"
     lidar_3d: "nav_lidar_3d"
+
+# --------------------------------- MAP ---------------------------------
+# F3 TASK 1's BLOCK: what the map is built FROM, what it is scored
+# AGAINST, and where the frozen artifact lives. Two programs read it -
+# tools/build_map.sh, which runs the offline SLAM, and
+# tools/map_register.py, which fits the result to the building and scores
+# it - and neither carries a constant of its own.
+#
+# THE MAP IS FROZEN ONCE IT IS SCORED (F3 global constraint 16). The grid,
+# the pose graph and the registration are committed together with their
+# md5s in EVIDENCE_MAP_V3.md, and `load_registration` refuses a
+# registration whose grid has changed underneath it. A REBUILD IS A NEW
+# ARTIFACT UNDER A NEW NAME and never an overwrite: build_map.sh refuses
+# an output directory that already exists, which is the mechanism behind
+# that sentence rather than a note asking people to be careful.
+map:
+  # Where frozen maps live, one directory per named artifact.
+  dir: "m5_ver3/maps"
+  # THIS artifact's name. It names the directory, the .pgm, the .yaml and
+  # the two pose-graph files, so a map and its graph cannot be separated
+  # by a rename.
+  name: "warehouse_v3"
+  slam:
+    # The ROS parameter file. It is a SECOND file beside config.yaml for
+    # ekf.yaml's reason, spelled out in that block's own header:
+    # slam_toolbox reads a `<node>: ros__parameters:` mapping and this
+    # file is not one and is not bent into one. m5_ver3/slam.yaml holds
+    # what the MAPPER does and nothing else; what is here is what the
+    # SHELL has to know to run it, and no number is in both.
+    params_file: "m5_ver3/slam.yaml"
+    package: "slam_toolbox"
+    # SYNC AND NOT ASYNC, and the reason is repeatability rather than
+    # accuracy. The async node drops scans when it cannot keep up, so two
+    # runs of the same recording process different scans and produce
+    # different maps; the sync node queues them and processes every one.
+    # docs/reports/m5v3-01 (a) ranks offline-sync first for exactly this
+    # and calls it "deterministic - repeatable evidence, no dropped
+    # scans". EVIDENCE_MAP_V3.md checks the claim rather than repeating
+    # it: the map is built TWICE from the same bag and the two grids'
+    # md5s are compared.
+    executable: "sync_slam_toolbox_node"
+    node_name: "slam_toolbox"
+    # HOW FAST THE BAG IS PLAYED BACK. Not 1.0: the mapper is doing work
+    # per scan that the plant was not doing per scan when it recorded
+    # them, and a replay that outruns the subscriber loses messages at
+    # the QoS layer where no queue inside slam_toolbox can catch them.
+    # Half speed is about 8 scans a second into a matcher that is offline
+    # and has nowhere to be. It is a REPEATABILITY setting and not a
+    # quality one, and the md5 comparison above is what says whether it
+    # is slow enough.
+    play_rate: "0.5"
+    # sync_slam_toolbox_node is a LIFECYCLE node: it declares its
+    # parameters in on_configure and advertises serialize_map only after
+    # on_activate. build_map.sh drives both transitions itself rather
+    # than through slam_toolbox's own launch file, for the reason
+    # m5v3.sh spawns children rather than launching them - one process,
+    # one log, one refusal that names it.
+    lifecycle_timeout_s: "60"
+    # AFTER THE BAG ENDS, BEFORE ANYTHING IS SAVED. The mapper is still
+    # working through its queue when the last message is played, and the
+    # occupancy grid is only re-rastered every map_update_interval
+    # (slam.yaml). Saving into that gap would freeze a map missing its
+    # last stretch of floor - which would look like a map.
+    settle_s: "30"
+    serialize_timeout_s: "180"
+    save_timeout_s: "180"
+    # AND THE SAVER'S OWN INTERNAL DEADLINE, WHICH IS A DIFFERENT NUMBER
+    # FROM THE ONE ABOVE AND HAD TO BE MEASURED. nav2's map_saver_cli
+    # declares `save_map_timeout` at 2.0 s and gives up on the
+    # subscription when it expires - "Failed to spin map subscription",
+    # exit 1, no file. Measured on this rig 2026-08-26: against
+    # slam_toolbox's /map at the end of a 750-node run the default 2.0 s
+    # is NOT enough and the build refused at the last step with a
+    # complete pose graph already on disk. save_timeout_s above is the
+    # shell's bound on the whole process and cannot help: the process
+    # exits on its own, quickly and non-zero.
+    #   AND IT IS SPELLED WITH A DECIMAL POINT ON PURPOSE. The parameter
+    #   is declared as a DOUBLE, and `-p save_map_timeout:=120` is parsed
+    #   as an integer: "Wrong parameter type, parameter
+    #   {save_map_timeout} is of type {double}, setting it to {integer}
+    #   is not allowed", exit 255, no file. Measured the same way the
+    #   2.0 s default was - by losing a build to it.
+    save_map_timeout_s: "120.0"
+    # ---- THE TWO THRESHOLDS THE SAVED GRID CARRIES, AND THEY ARE
+    #      map_saver_cli's OWN AND NOT THIS FILE'S ----
+    #
+    # nav2 1.3.12's map_saver_cli advertises `--occ <threshold_occupied>`
+    # and `--free <threshold_free>` in its own --help and then IGNORES
+    # BOTH. Measured on this rig 2026-08-26 against a grid published by
+    # hand: saved with `--occ 0.77 --free 0.33`, the yaml it writes reads
+    # `occupied_thresh: 0.65` and `free_thresh: 0.196` - its defaults,
+    # unchanged, with no warning.
+    #   SO THESE ARE NOT PASSED, THEY ARE CHECKED. tools/build_map.sh
+    #   saves the grid with no threshold flags at all and then READS THE
+    #   WRITTEN YAML BACK and refuses if either value is not the one
+    #   below. A flag that does nothing is worse than no flag: it makes
+    #   the shell look like it decided something.
+    #   AND WHICH VALUE LANDED MATTERS, which is why this is not a
+    #   footnote. slam_toolbox writes 0, 205 and 254 into the grid for
+    #   occupied, unknown and free; 205 is a shade of 50/255 = 0.19608,
+    #   which is a whisker ABOVE 0.196 - so a consumer reading this yaml
+    #   classifies the unknown cells as UNKNOWN, correctly. Had the free
+    #   threshold been the 0.25 this file first asked for, every one of
+    #   the 1,484,112 unknown cells in warehouse_v3 would have read as
+    #   FREE FLOOR. The right value landed, and it did not land because
+    #   this file asked for it.
+    occupied_thresh: "0.65"
+    free_thresh: "0.196"
+  registration:
+    # The committed transform, beside the grid it belongs to.
+    file: "registration.yaml"
+    # THE TRIM, IN CELLS. It has to sit ABOVE the wall's own scatter and
+    # BELOW the standoff of the nearest surface that is not the wall. On
+    # this floor the nearest non-wall surface to any FITTED wall is a
+    # long way off - the rack block ends 8.00 m from the north wall and
+    # the ring corridors are 8.00 m wide - so the upper bound is
+    # generous and the lower one is what binds: 3 cells is 0.15 m against
+    # a scan whose statistical error is 0.02 m and whose per-run bias
+    # draw is another 0.02 (model.sdf, nav_lidar). tests/test_map_core.py
+    # asserts the answer does not move across 2-6 cells; the SEED is what
+    # is load-bearing, not this.
+    trim_cells: "3"
+    # Below this many surviving candidates a wall is a REMNANT and is
+    # refused rather than fitted. Each fitted wall here is 32-48 m long
+    # at 0.05 m, so a healthy one carries 600-960 candidates; 100 is an
+    # order of magnitude under that and still an order over the number
+    # that would fit a straight line to anything.
+    min_points: "100"
+    # The rotation search, in degrees either side of zero, and how many
+    # steps. No initial guess is trusted; a minimum that lands on the
+    # scan's own EDGE is refused rather than reported.
+    span_deg: "8"
+    steps: "401"
+    # ---- WHICH WALLS ANCHOR THE FIT, AND WHICH ONE CANNOT ----
+    #
+    # `nx`/`ny` is the OUTWARD normal - the direction the wall faces AWAY
+    # from the hall - and tools/map_core.py takes the inner face as
+    # min(n.p) over the model's own box, so the offset is read out of the
+    # world rather than typed in here. warehouse_ver3's floor is centred
+    # on y = -2.00 and not on the origin, which is why the face is
+    # computed from the box and not from abs(centre) - half.
+    #
+    # THREE WALLS AND NOT FOUR. The south wall of this hall is NOT
+    # OBSERVABLE from the drivable floor, and that is a property of the
+    # building rather than of the drive:
+    #   - the dock annex (AnnexW/A/B/C/E) stands from y = -18.00 to
+    #     -14.00 and is 4.00 m tall, so over 28.00 m of the wall's 48.60
+    #     m length the nav lidar sees the ANNEX FRONT at y = -14.00 and
+    #     nothing behind it;
+    #   - in the four bay openings the bay backs (BayS9-12Back) stand at
+    #     y = -17.90, one tenth of a metre in front of the wall, over the
+    #     other 20.00 m.
+    # So the outermost occupied cell in -y is a different true surface
+    # depending on where you look, and a single line fitted to all of
+    # them would be a line through neither. Three walls spanning two
+    # directions determine a rigid SE(2) completely (map_core's
+    # solve_translation refuses a set that does not), so nothing is lost
+    # but the north-south redundancy - and what replaces that redundancy
+    # is better than it was: the annex front becomes a HELD-OUT surface
+    # the fit never sees, which is the closest thing to an independent
+    # check this method has.
+    walls:
+      - {model: "WallNorth", nx: "0", ny: "1"}
+      - {model: "WallEast", nx: "1", ny: "0"}
+      - {model: "WallWest", nx: "-1", ny: "0"}
+    # ---- WHAT THE FIT IS NOT ALLOWED TO SEE ----
+    #
+    # The annex front, extracted from the columns the derived transform
+    # says stand in front of an annex, and measured against the north
+    # wall. IT IS NOT IN walls: ABOVE, so no part of the transform was
+    # solved to make this number come out - which is what makes it worth
+    # quoting. The window is the annex models' OWN x extents, taken from
+    # the world SDF and pushed through the transform; it is a selection
+    # along the wall and never across it (map_core.extract_extremes'
+    # header carries the measurement that says why the difference
+    # matters).
+    held_out:
+      name: "annex_front"
+      nx: "0"
+      ny: "-1"
+      models: "AnnexW, AnnexA, AnnexB, AnnexC, AnnexE"
+      # Which fitted wall it is measured against, and what the world says
+      # that distance is. 14.000 + 14.000 by construction of the floor.
+      against: "WallNorth"
+  score:
+    # ---- THE ABSOLUTE SPANS, AND THEY NEED NO TRANSFORM ----
+    #
+    # A span is a distance between two surfaces INSIDE the map, so the
+    # registration cannot flatter it: a grid whose metres are one per
+    # cent long reports a 48.00 m hall as 48.48 m however it is
+    # registered. THIS IS THE SCORE. The m5_ver1 lineage's whole lesson
+    # (WAREHOUSE_SLAM_EVIDENCE.md 12.8) is that a figure taken by
+    # anchoring an estimate onto truth is zero at the anchor by
+    # construction; nothing here is anchored to anything.
+    #   `true_m` is what the WORLD says, and it is written here so the
+    #   check can be read without an SDF open. tools/map_register.py
+    #   RE-DERIVES both numbers from m6/gazebo/warehouse_ver3.sdf and
+    #   refuses if they disagree with these, so this is a copy that says
+    #   when it has gone stale rather than a second opinion.
+    spans:
+      - {name: "hall width, east to west", a: "WallEast", b: "WallWest",
+         true_m: "48.000"}
+      - {name: "north wall to annex front", a: "WallNorth",
+         b: "annex_front", true_m: "28.000"}
+    # ---- DOES THE MAP COVER THE DRIVABLE FLOOR ----
+    #
+    # The four faces of the hall, as models and the direction each one
+    # faces AWAY from the inside. tools/map_core.py turns each into a
+    # half-plane (n.p <= d) and the four into a rectangle, so the
+    # building's inner extent is READ OUT OF THE WORLD and not typed
+    # here. WallSouth appears in this list and NOT in
+    # registration.walls: above - it is not observable from the drivable
+    # floor and cannot anchor a fit, but where it IS is still a fact
+    # about the building.
+    #   WHAT IT IS FOR. Every cell of the saved grid is classified once -
+    #   occupied, free or unknown - and the ones that are not unknown are
+    #   pushed back through the registration and asked whether they fall
+    #   inside this rectangle. Two numbers come out and they answer
+    #   different halves of one question: how much of the open floor the
+    #   map marks FREE, which is coverage, and how much of what the map
+    #   claims falls OUTSIDE the building at all, which is the shape a
+    #   diverged run takes and should be zero.
+    hall:
+      - {model: "WallWest", nx: "-1", ny: "0"}
+      - {model: "WallEast", nx: "1", ny: "0"}
+      - {model: "WallSouth", nx: "0", ny: "-1"}
+      - {model: "WallNorth", nx: "0", ny: "1"}
+  # ---- DOES THE DRIVE FIT THE FLOOR ----
+  #
+  # The vehicle's outline, for the clearance the mapping drive is
+  # measured against. It is a BOUND and not the model's silhouette:
+  # tools/map_core.py sweeps this rectangle along the recorded GROUND
+  # TRUTH and reports the worst gap to any obstacle in the world, and a
+  # rectangle that is too small would report a clearance the truck did
+  # not have.
+  #   fore   1.875   the fork tips, in base_link. The rear axle stands at
+  #                  x = -0.50 (vehicle.rear_axle_offset_m) and the tips
+  #                  reach 1.375 m ahead of it. TOWARDS MODEL -x, which
+  #                  is the travel direction.
+  #   aft    0.90    the counterweight's far face is at x = +0.86
+  #                  (model.sdf, counterweight_collision at 0.74 with a
+  #                  0.24 box); rounded out, and it is behind the back
+  #                  safety scanner at +0.72.
+  #   half   0.60    the widest thing modelled is +-0.46 (the two outer
+  #                  safety scanner mounts) and the overhead guard roof
+  #                  is 0.88 wide. 0.60 is the bound square: and
+  #                  corner_creep: already argue their own floor checks
+  #                  with, kept the same so the three read together.
+  clearance:
+    fore_m: "1.875"
+    aft_m: "0.90"
+    half_width_m: "0.60"

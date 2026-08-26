@@ -88,6 +88,7 @@ import hashlib
 import json
 import math
 import os
+import signal
 import struct
 import subprocess
 import sys
@@ -113,6 +114,12 @@ REQUIRED_KEYS = (
     "topics.odometry_filtered", "topics.rf2o_odom",
     "topics.fuse_odometry_filtered",
     "topics.safety_scan_back", "topics.points3d",
+    # F3 TASK 1's TWO, AND THEY ARE NOT SUBSCRIBED BY THIS PROCESS AT
+    # ALL - `record --bag` hands them to `ros2 bag record` on its command
+    # line. Listed here anyway, by the obligation above: a key this file
+    # READS is a key this tuple names, and where the read lands is not
+    # what the obligation is about.
+    "topics.tf", "topics.tf_static",
     "frames.odom", "frames.base_link", "frames.imu",
     "vehicle.imu_mount.x", "vehicle.imu_mount.y", "vehicle.imu_mount.z",
     "ekf.frequency_hz", "ekf.params_file", "fuse.params_file",
@@ -142,6 +149,8 @@ REQUIRED_KEYS = (
     "evidence.safety.frames", "evidence.safety.capture_timeout_s",
     "evidence.gz_rate.topics", "evidence.gz_rate.sample_s",
     "evidence.gz_rate.timeout_s",
+    "evidence.bag.topics", "evidence.bag.dir", "evidence.bag.storage",
+    "evidence.bag.start_timeout_s", "evidence.bag.stop_timeout_s",
     "evidence.analyse.fused_sanity_m",
     "evidence.analyse.spawn_tolerance_m",
     "evidence.analyse.spawn_tolerance_rad",
@@ -199,6 +208,12 @@ FILES = {
     "gz_rates": "gz_rates.csv",
     "session": "session.txt",
 }
+#: THE ROSBAG IS NOT IN THAT TABLE and its absence is deliberate. Every
+#: entry above is a FILE this program opens and writes rows into; the bag
+#: is a DIRECTORY `ros2 bag record` owns from the outside, its name is
+#: config.yaml's (evidence.bag.dir) because tools/build_map.sh has to
+#: read it too, and putting a directory in a table of CSV names would
+#: make `FILES[x]` mean two things.
 
 
 def fail(cfg, exc, owner):
@@ -319,7 +334,7 @@ def write_session_file(path, fields):
 
 
 def describe_session(cfg, session, node, profile, started_wall, exit_code,
-                     safety_rows, traction):
+                     safety_rows, traction, bag=None):
     """What this run was, written beside what it recorded.
 
     IT IS WHAT MAKES A DIRECTORY OF CSVs A SESSION. `analyse` reads
@@ -361,6 +376,18 @@ def describe_session(cfg, session, node, profile, started_wall, exit_code,
         ("drive_started_wall", started_wall),
         ("drive_exit", exit_code),
         ("safety_frames", safety_rows),
+        # AND SINCE F3 TASK 1 IT SAYS WHETHER THERE IS A ROSBAG IN HERE,
+        # because that is the one artifact of a session that another
+        # program consumes rather than reads. `bag_dir` empty means
+        # `--bag` was not given; a `bag_dir` with no `bag_files` beside
+        # it means the recorder could not finalise it, which is a bag
+        # `ros2 bag play` refuses and a reader has to be told about
+        # BEFORE they spend an hour on the map it would not build.
+        ("bag_dir", (bag or {}).get("dir", "")),
+        ("bag_topics", (bag or {}).get("topics", "")),
+        ("bag_storage", (bag or {}).get("storage", "")),
+        ("bag_files", (bag or {}).get("files", "")),
+        ("bag_bytes", (bag or {}).get("bytes", "")),
     ] + [("rows_" + name, count) for name, count in node.counts()])
 
 
@@ -483,6 +510,134 @@ def require_gz(cfg):
                "  source {}".format(cfg.s("paths.ros_setup")),
                "then run this command again. See CONTEXT.md - this stack "
                "lives inside WSL.")
+
+
+class BagRecorder(object):
+    """`ros2 bag record` inside the session, for the OFFLINE SLAM run.
+
+    WHY A SUBPROCESS AND NOT A rosbag2_py WRITER IN THIS PROCESS. This
+    recorder already holds ten subscriptions and writes ten CSVs on one
+    thread; adding 15 Hz of 811-beam scan and 500 Hz of clock to the same
+    executor would put the bag's write latency inside every rate figure
+    the CSVs are used to compute. `ros2 bag record` is a separate process
+    with its own executor and its own thread, exactly as
+    tools/drive_route.py is a separate process rather than a function
+    call - and for the same reason: one run, several instruments, none of
+    them in each other's way.
+
+    IT RECORDS THE SAME RUN AND NOT ITS OWN. It is started after every
+    stream has arrived and after the filter has been checked, before the
+    pre-roll, and it is stopped after the post-roll - so the bag spans
+    the reference pose, the whole drive and the settle, which is what an
+    offline SLAM run needs and is the same span the CSVs cover.
+
+    IT IS STOPPED WITH SIGINT AND NOT SIGTERM, and the difference is the
+    artifact. rosbag2 finalises its storage and writes metadata.yaml in
+    its shutdown handler; a bag killed before that runs has no metadata
+    and `ros2 bag play` refuses it by name. So the process is started in
+    a session of its own (setsid) and the signal goes to the whole
+    process group - `ros2` is a python launcher and the recorder is what
+    it runs.
+    """
+
+    def __init__(self, cfg, session):
+        self.cfg = cfg
+        self.path = os.path.join(session, cfg.s("evidence.bag.dir"))
+        self.keys = [k.strip() for k in cfg.s("evidence.bag.topics").split(",")
+                     if k.strip()]
+        # BY DOTTED KEY AND NOT BY ADDRESS. config.yaml names each topic
+        # once; this resolves the key, which also means a bag list that
+        # asks for a topic this stack does not carry is refused by
+        # _common's own "config.yaml defines topics.X" before anything
+        # is started.
+        self.topics = [cfg.s("topics." + key) for key in self.keys]
+        self.storage = cfg.s("evidence.bag.storage")
+        self.proc = None
+
+    def start(self):
+        """Bring the bag up, and refuse if it does not start writing."""
+        self.proc = subprocess.Popen(
+            ["ros2", "bag", "record", "--storage", self.storage,
+             "--output", self.path] + self.topics,
+            stdout=open(self.path + ".log", "w", encoding="utf-8"),
+            stderr=subprocess.STDOUT, start_new_session=True,
+            env=dict(os.environ), cwd=_common.REPO)
+        budget = self.cfg.f("evidence.bag.start_timeout_s")
+        deadline = time.time() + budget
+        while time.time() < deadline:
+            if self.proc.poll() is not None:
+                self.cfg.refuse(
+                    "`ros2 bag record` stayed up", self.path + ".log",
+                    "it exited {} before it wrote anything.".format(
+                        self.proc.returncode),
+                    "NOTHING WAS DRIVEN.")
+            if self._writing():
+                return
+            time.sleep(0.2)
+        self.stop()
+        self.cfg.refuse(
+            "`ros2 bag record` began writing inside {:g}s".format(budget),
+            self.path + ".log (config.yaml evidence.bag.start_timeout_s)",
+            "no storage file appeared under {}".format(self.path),
+            "STARTING THE DRIVE ANYWAY WOULD PUT THE REFERENCE POSE "
+            "OUTSIDE THE BAG.")
+
+    def _writing(self):
+        if not os.path.isdir(self.path):
+            return False
+        return any(name.endswith("." + self.storage)
+                   for name in os.listdir(self.path))
+
+    def stop(self):
+        """SIGINT the group, then wait for metadata.yaml. See the header."""
+        if self.proc is None:
+            return None
+        if self.proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGINT)
+            except OSError:
+                pass
+        budget = self.cfg.f("evidence.bag.stop_timeout_s")
+        deadline = time.time() + budget
+        meta = os.path.join(self.path, "metadata.yaml")
+        while time.time() < deadline:
+            if self.proc.poll() is not None and os.path.isfile(meta):
+                return self.summary()
+            time.sleep(0.2)
+        # A BAG THAT WOULD NOT CLOSE IS REPORTED AND NOT REFUSED HERE.
+        # The CSVs of this run are complete and are evidence; what is
+        # unusable is the bag, and the session file says so in the one
+        # place a later reader will look.
+        try:
+            self.proc.kill()
+        except OSError:
+            pass
+        for line in (
+                "WARNING - the bag did not finalise inside "
+                "{:g}s.".format(budget),
+                "          {} has no metadata.yaml, so "
+                "`ros2 bag play` will refuse it.".format(self.path),
+                "          {}.log is what it said. The CSVs of this run "
+                "are complete.".format(self.path)):
+            sys.stderr.write("sensor_evidence: {}\n".format(line))
+        sys.stderr.flush()
+        return None
+
+    def summary(self):
+        """Bytes and storage files, for the session file. No parsing."""
+        total = 0
+        files = 0
+        for name in sorted(os.listdir(self.path)):
+            full = os.path.join(self.path, name)
+            if os.path.isfile(full):
+                total += os.path.getsize(full)
+                if name.endswith("." + self.storage):
+                    files += 1
+        return {"dir": os.path.basename(self.path),
+                "topics": ", ".join(self.topics),
+                "storage": self.storage,
+                "files": files,
+                "bytes": total}
 
 
 def gz_stamp(message):
@@ -966,6 +1121,13 @@ def record(cfg, args):
         session, traction.get("arm", ""))
     drive_exit = ""
     drive_started_wall = ""
+    # THE BAG IS BUILT HERE AND STARTED LATER. Constructing it resolves
+    # every topic key through config.yaml, so a bag list naming a topic
+    # this stack does not carry is refused now - before a session's worth
+    # of run is spent on it - rather than by `ros2 bag record` shrugging
+    # and recording nothing.
+    bag = BagRecorder(cfg, session) if args.bag else None
+    bag_summary = None
     try:
         # PHASE 1: EVERY STREAM HAS TO ARRIVE BEFORE ANYTHING IS TIMED.
         # A capture that opened while one bridge was still coming up
@@ -1010,7 +1172,7 @@ def record(cfg, args):
                 node.close()
                 describe_session(cfg, session, node, args.drive,
                                  drive_started_wall, "NOT STARTED", 0,
-                                 traction)
+                                 traction, bag_summary)
                 cfg.refuse(
                     "the filter had not diverged before the drive began",
                     "{} (evidence.analyse.fused_sanity_m) and {}".format(
@@ -1024,6 +1186,14 @@ def record(cfg, args):
                     "recur on every bringup.",
                     "the empty session is in {}".format(session))
             print("filter sane at spawn: ({:.6f}, {:.6f}).".format(*fused))
+            sys.stdout.flush()
+
+        if bag is not None:
+            print("rosbag2: {} -> {}".format(
+                ", ".join(bag.topics), bag.path))
+            sys.stdout.flush()
+            bag.start()
+            print("  recording ({} storage).".format(bag.storage))
             sys.stdout.flush()
 
         if args.drive:
@@ -1060,10 +1230,20 @@ def record(cfg, args):
                     # what the refusal just told them to go and look at.
                     proc.kill()
                     proc.wait()
+                    # AND THE BAG CLOSES ON THIS PATH TOO, before the
+                    # session file is written - so a run that timed out
+                    # still leaves a playable recording of what DID
+                    # happen, and the session file still says how big it
+                    # is. The finally: below sees bag_summary already set
+                    # and stop() is idempotent on a process that has
+                    # exited.
+                    if bag is not None:
+                        bag_summary = bag.stop()
+                        bag = None
                     node.close()
                     describe_session(cfg, session, node, args.drive,
                                      drive_started_wall, "TIMED OUT", 0,
-                                     traction)
+                                     traction, bag_summary)
                     cfg.refuse(
                         "drive_route.py finished {} inside {:.0f}s".format(
                             args.drive, budget),
@@ -1084,6 +1264,12 @@ def record(cfg, args):
             sys.stdout.flush()
             spin_until(rclpy, node, lambda: False, time.time() + seconds)
     finally:
+        # THE BAG CLOSES FIRST, WHILE THE STREAMS ARE STILL LIVE. It is
+        # a separate process and its shutdown takes time; closing the
+        # CSVs first would only mean the bag ended up with seconds of
+        # run the CSVs do not have.
+        if bag is not None:
+            bag_summary = bag.stop()
         node.close()
         node.destroy_node()
         try:
@@ -1143,7 +1329,12 @@ def record(cfg, args):
                 sys.stdout.flush()
 
     describe_session(cfg, session, node, args.drive, drive_started_wall,
-                     drive_exit, safety_rows, traction)
+                     drive_exit, safety_rows, traction, bag_summary)
+    if bag_summary is not None:
+        print("")
+        print("rosbag2: {} storage file(s), {:.1f} MB in {}".format(
+            bag_summary["files"], bag_summary["bytes"] / 1048576.0,
+            bag_summary["dir"]))
 
     if drive_exit not in ("", "0"):
         cfg.refuse("drive_route.py exited 0",
@@ -2341,6 +2532,13 @@ def main(argv=None):
                        else [],
                        help="drive one of config.yaml's profiles and record "
                             "the whole of it")
+    recorder.add_argument(
+        "--bag", action="store_true",
+        help="ALSO write a rosbag2 of config.yaml's evidence.bag.topics "
+             "into the session, for an OFFLINE consumer - F3's "
+             "slam_toolbox run is the one there is. Off by default: it "
+             "is about 150 MB over a mapping drive and nothing in "
+             "EVIDENCE_SENSORS or EVIDENCE_FUSION reads it.")
     reader = subparsers.add_parser(
         "analyse", help="read recorded sessions and print the tables "
                         "(no ROS, no Gazebo)")
