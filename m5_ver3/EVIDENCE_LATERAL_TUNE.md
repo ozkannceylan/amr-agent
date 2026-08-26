@@ -26,7 +26,7 @@ broken. The headline:
 | yaw-rate wander inside one held corner | 10.1 % of its mean | **0.0 %** (sd 0.000045 rad/s) |
 | longitudinal slip at 0.7 m/s cruise | 0.96162 % | **0.95603 %** |
 | `square` ground-truth closure | 0.6786 m | **0.0670 m** |
-| `square` four-corner heading spread | 16.6 % | 11.5 % |
+| `square` four-corner heading spread | 16.6 % | 11.5 % (see §4.3.3 on comparing the two) |
 | `straight` wheel-odometry end error | 0.5800 m | 0.5778 m |
 
 **And the change that produced it is not a tuned number.** Neither
@@ -468,7 +468,7 @@ by 3.3°.
 | ground truth turned, of 6.2832 asked | 5.8506 rad (93.1 %) | **6.3124 rad (100.5 %)** |
 | **ground-truth closure** | **0.6786 m** | **0.0670 m** |
 | four-corner delivered | 0.5504 – 0.6499 | 0.8553 – 0.9599 |
-| **heading spread** | **16.6 %** | **11.5 %** |
+| **heading spread** | **16.6 %** | **11.5 %** (window caveat below) |
 | estimate turned | 10.1532 rad (1.74× the plant) | 6.8416 rad (1.084×) |
 | estimate end error | 1.8707 m | 0.6712 m |
 
@@ -493,7 +493,24 @@ world *y* heading deliver 0.9599 and 0.9507, the two along *x* deliver
 0.8676 and 0.8553 — the same 180° period, the same faster pair. So the
 axis-aligned effect of §3.3 is not fully removed by making the contacts
 isotropic; it is removed at moderate steer and reduced by a third at the
-mechanical stop. **One steer angle on this plant still does not have one
+mechanical stop.
+
+**16.6 % and 11.5 % are not measured over equal windows, and the caveat
+belongs with the comparison.** The untuned square's corners were 9.142 s
+long and its per-corner reduction averaged **7.20 s** stretches; the tuned
+one's are 6.145 s and average **4.15–4.25 s**. Both are the same
+reduction, run by the same tool, over whatever each corner left after the
+same 1.0 s slew-in and 0.3 s exit came off — **no figure was recomputed,
+re-windowed or retro-altered to make the pair line up**, and shrinking the
+minimum from 6 s to 3 s (§6.1) admitted the shorter corners without
+touching the longer ones. What a shorter window costs is comparability of
+the two NUMBERS: a 4.2 s average sits on a different part of each arc than
+a 7.2 s one, so 16.6 → 11.5 is not a clean ratio of like for like. **The
+shape argument does not depend on the windows and is what this file rests
+on**: the alternation is still 180°-periodic, the world-*y* pair is still
+the faster one, and the effect is still there at −1.25 rad after it has
+gone at π/4. Read the two percentages as "large, and smaller" rather than
+as "down 31 %". **One steer angle on this plant still does not have one
 delivered fraction at −1.25 rad**, and `config.yaml`'s corner time is
 therefore sized from the mean of the four with the spread stated beside
 it.
@@ -535,11 +552,14 @@ run-to-run spread on this profile.
 ```
 
 74 → 82 tests: eight new ones over the two reductions this gate added.
-Four lock the yaw-budget identity (a kinematic corner charges nothing to
-either patch; a crabbing axle is charged to the rear and not the front;
-the identity closes on a trace that obeys no model; the untuned plant's
-own 99.5/0.5 split is reproduced from its measured `u`, `w` and `ψ̇`), and
-four lock the closure reduction against being confused with path length.
+**Five** are the split: a kinematic corner charges nothing to either
+patch; a crabbing axle is charged to the rear and not the front; the
+identity closes on a trace that obeys no model; the untuned plant's own
+99.5/0.5 split is reproduced from its measured `u`, `w` and `ψ̇`; and a
+trace too short to difference, or a window with no tread speed to score
+against, is refused rather than answered. **Three** are the closure,
+keeping it from being confused with path length and refusing a
+one-sample trajectory.
 `evidence_core.py --selftest` gained three checks over the same ground so
 the rig has them without pytest.
 
@@ -606,48 +626,60 @@ wrong.
 
 ---
 
-## 7. Parked: the model's centre of mass may be 3.1 mm behind where two files say
+## 7. RETRACTED: the centre of mass is where `EVIDENCE_MODEL_V3.md` says
 
-**Not acted on. Recorded with the arithmetic so the gate that owns the
-mass distribution can act on it.**
+**This section was published on 2026-08-26 claiming the model's centre of
+mass sits 3.1 mm behind where two files put it, that `N_drive` should be
+4503.8 N rather than 4537.4, and that `base_link`'s centre of mass is at
+z = 1.10 m. All three are WRONG and they are struck here rather than
+deleted, because the claim was published and a retraction that vanishes
+is not one.** Found in review the same day; the arithmetic below is the
+check that settles it.
 
-`base_link` and `mast` each carry an `<inertial><pose>` that repeats their
-own `<link><pose>` — `0.10 0 0.55` and `-0.78 0 1.05` respectively, in
-both elements. SDFormat defines `<inertial><pose>` **relative to the link
-frame**, so the two compose rather than one replacing the other, and the
-centre of mass gz uses is not the one obtained by summing link poses
-alone. Summing the composed poses over all sixteen links:
+**What the retracted section said.** That `base_link` and `mast` each
+carry an `<inertial><pose>` *repeating* their own `<link><pose>`, that
+SDFormat composes the two, and that summing the composed poses gives
+`sum(m x) = −100.751 kg·m` and `com x = −0.086411` against
+`EVIDENCE_MODEL_V3.md` §7.1's −97.151 and −0.083323.
+
+**Why it is wrong: `base_link` and `mast` have no `<link><pose>` at
+all.** `model.sdf`:293 opens `<link name="base_link">` and the next
+element is `<inertial>`; `model.sdf`:1319 does the same for `mast`. There
+is nothing for their inertial poses to compose *with*, so those poses are
+already model-frame positions. The reduction that produced −100.751 took
+the first `<pose>` inside each link body as the link pose — which for
+these two IS the inertial pose — and then added the inertial pose a
+second time. A double count, 900 × 0.10 + 120 × (−0.78) = −3.600 kg·m of
+it, which is exactly the gap between −97.151 and −100.751.
+
+**The check, both ways round.** No link in this model carries both poses:
+fourteen have a `<link><pose>` and no `<inertial><pose>`, and `base_link`
+and `mast` have an `<inertial><pose>` and no `<link><pose>`.
 
 ```
-  link poses only  (EVIDENCE_MODEL_V3.md 7.1)   sum(m x) -97.151   com x -0.083323
-  composed poses                                sum(m x) -100.751  com x -0.086411
+  link poses alone (drops base_link's +0.10 and mast's -0.78)
+                                     sum(m x)  -93.551   com x -0.080236
+  composed, which is what SDFormat means and what gz uses
+                                     sum(m x)  -97.151   com x -0.083323
+  W = 1165.95 x 9.80665                                = 11434.06357 N
+  N_drive = W x (0.50 - 0.083323) / 1.05               =  4537.4342 N
+  N_rear_each = (W - N_drive) / 2                      =  3448.3147 N
 ```
 
-which through the same static beam gives
+**So the constants in use are already the composed ones and are already
+right.** `EVIDENCE_MODEL_V3.md` §7.1's 4537.4 N is confirmed, not
+questioned; this gate's 3448.3 N per rear wheel is derived from the same
+composed sum by the same beam; and the whole longitudinal ladder was
+measured against a correct normal force. The corollary the retracted
+section drew — `base_link`'s centre of mass at z = 1.10 m and the mast's
+at z = 2.10 m, "a statement about this truck's roll behaviour" — is the
+same double count in z and is equally false: they are at 0.55 m and
+1.05 m, which is where the visuals put them.
 
-```
-  N_drive     4537.4 N  ->  4503.8 N      (-0.74 %)
-  N_rear_each 3448.3 N  ->  3465.1 N      (+0.49 %)
-```
-
-**Why this gate did not change it.** Three reasons, in order of weight.
-The masses and inertial poses are out of scope by constraint 12 and this
-is a defect in one of them, not in a WheelSlip parameter. The plan
-directed the rear derivation to come from *the model's own
-mass-distribution comment*, which is the link-pose sum, and a rear wheel
-derived by a different method from the drive wheel beside it would be two
-opinions about one vehicle. And `wheel_normal_force` enters the compliance
-linearly — 0.74 % of a normal force is 0.74 % of a compliance, which on a
-0.956 % slip is **0.007 percentage points**, well inside the 0.5–2 % band
-and three times the figure's own run-to-run repeatability.
-
-**What acting on it would mean**, for whoever does: `EVIDENCE_MODEL_V3.md`
-§7's whole longitudinal ladder was measured at 4537.4 N, so correcting the
-constant means re-driving that table, not editing its rows. And the
-duplication itself is the larger question — it also puts `base_link`'s
-centre of mass at z = 1.10 m and the mast's at z = 2.10 m, which is a
-statement about this truck's roll behaviour that nothing on this track has
-measured.
+**Nothing is parked by this gate as a result.** The retraction is marked
+in the four other places the claim reached: `EVIDENCE_MODEL_V3.md` §7.1,
+`config.yaml`'s `wheel_slip:` block, `model.sdf`'s WheelSlip comment and
+`tasks/TODO.md`.
 
 ---
 
@@ -660,8 +692,10 @@ measured.
 - **It did not touch the estimator.** `nodes/wheel_odom_core.py` is
   unchanged and gains no scrub term. Its errors got smaller because the
   vehicle stopped scrubbing, which is the only honest way for them to.
-- **It did not re-open F1's three parked residuals**, the EKF, Nav2, or
-  the mass distribution (§7).
+- **It did not re-open F1's three parked residuals**, the EKF or Nav2.
+  It parked nothing of its own either: the one candidate it raised —
+  a centre-of-mass error — was retracted in review the same day and the
+  constant it questioned is confirmed correct (§7).
 - **It did not re-drive `aisle`.** Nothing about a dead-straight
   out-and-back is a lateral manoeuvre, and §4.4 re-measures the straight
   path this gate could plausibly have moved.

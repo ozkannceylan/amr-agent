@@ -1838,9 +1838,17 @@
       the number and false of the OMISSION: leaving the entry out is not
       neutral, it asserts a rigid tyre, and a rigid tyre on a vehicle
       that turns is the stronger claim. All three contacts carry the
-      plugin now, at the SAME compliance, because they are the same
-      polyurethane tyre - what differs per wheel is the load, which is
-      what wheel_normal_force is for.
+      plugin now, at the SAME compliance value, and NOT because the three
+      wheels are the same tyre - they are not, quite: the rear pair's
+      friction reads mu 0.9 / mu2 0.4 against the drive wheel's 1.0 /
+      0.9. What is shared is the thing the compliance value is a property
+      of. This system's slip is param x radius x |spin| / normal force,
+      and mu appears nowhere in it: it is a give per newton of load, so
+      the same value on three wheels of the same 0.12 m radius is the
+      same GIVE, scaled by whatever each wheel is carrying. That is what
+      wheel_normal_force below is for, and it is why 7.0 needed no
+      re-tuning to be handed to the rear pair. Their mu is a separate
+      parameter, unchanged by this gate and out of its scope.
 
       THE TWO PHYSICAL PARAMETERS ARE THIS MODEL'S OWN NUMBERS, READ OFF
       IT, NOT CHOSEN.
@@ -1883,28 +1891,28 @@
                             30 percent of the vehicle each, which with
                             the drive wheel's 39 percent accounts for
                             the whole 1165.95 kg and nothing else.
-                              A QUESTION THIS DERIVATION LEAVES OPEN AND
-                              DOES NOT ANSWER: base_link and mast each
-                              carry an <inertial><pose> that repeats
-                              their own <link><pose>, and SDFormat
-                              composes those two rather than replacing
-                              one with the other. Summing the composed
-                              poses gives sum(m x) = -100.751 kg m and a
-                              centre of mass at x = -0.086411, where the
-                              derivation above (link poses only) gives
-                              -97.151 and -0.083323. That would put
-                              N_drive at 4503.8 N and N_rear_each at
-                              3465.1 N - 0.74 percent from the values
-                              this file carries. It is NOT changed here:
-                              the masses and the inertial poses are out
-                              of this gate's scope, the constant above is
-                              what EVIDENCE_MODEL_V3.md 7's whole tuning
-                              table was measured against, and 0.74
-                              percent of a normal force is 0.74 percent
-                              of a compliance, which on a 0.956 percent
-                              slip is 0.007 points. Recorded in
-                              EVIDENCE_LATERAL_TUNE.md 7 for the gate
-                              that owns the mass distribution.
+                              AND THE SUM IS THE COMPOSED ONE, CHECKED
+                              2026-08-26: SDFormat reads an
+                              <inertial><pose> in the LINK frame, so a
+                              link's centre of mass is its <link><pose>
+                              composed with it. NO LINK IN THIS MODEL
+                              HAS BOTH: fourteen carry a <link><pose>
+                              and no <inertial><pose>, and base_link and
+                              mast carry an <inertial><pose> and no
+                              <link><pose>. So nothing composes with
+                              anything anywhere here, and those two
+                              inertial poses ARE their model-frame
+                              positions. Summed the
+                              other way - link poses alone, which would
+                              drop base_link's +0.10 and the mast's
+                              -0.78 - the total reads -93.551 kg m, and
+                              it is not what the -97.151 above is. So
+                              the -97.151, the -0.083323 and the 4537.4
+                              are already composed and already right.
+                              EVIDENCE_LATERAL_TUNE.md 7 carries the
+                              check, and the retraction of a claim to
+                              the contrary that this comment briefly
+                              made on the same day.
 
       THE TWO COMPLIANCES ARE MEASURED, AND THEY HAD TO BE. gz's slip
       compliance is unitless and what it produces depends on the contact
@@ -1920,6 +1928,21 @@
       a number tuned against nothing measured is a number invented. It is
       written down as a value this file does not stand behind, and the
       phase that measures a turn is the phase that gets to change it.
+
+      AND THE TWO ELEMENT NAMES ARE THE WRONG WAY ROUND, MEASURED. On
+      this rig it is <slip_compliance_lateral> that governs this wheel's
+      ROLLING direction: moved alone it takes the straight-line
+      longitudinal slip from 0.96162 to 0.10688 and 0.01070 percent,
+      while <slip_compliance_longitudinal> moved alone leaves it at
+      0.95842 and 0.96140 - unchanged. Scope of that reading, so it is
+      not over-read: gz-sim 8.11.0, the gz-sim-wheel-slip-system as
+      configured below, this vehicle, this rig; whether the plugin emits
+      the pair in the other order or the solver's friction directions are
+      simply not the wheel's was not chased. EVIDENCE_LATERAL_TUNE.md 3.1
+      is the measurement. It reaches nothing while both are 7.0 and the
+      contact is isotropic - and it is a trap the moment anyone sets them
+      apart, which is why it is written here beside the values and not
+      only in an evidence file.
 
       THAT PHASE WAS F1.5, AND IT LEFT THE NUMBER WHERE IT WAS. The
       turn is measured now (EVIDENCE_LATERAL_TUNE.md) and lateral 7.0 is

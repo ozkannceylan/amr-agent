@@ -744,12 +744,12 @@ def test_the_yaw_budget_is_an_identity_and_closes_on_any_trace():
 
 
 def test_the_split_reproduces_the_untuned_plants_measured_deficit():
-    # THE NUMBERS ARE THE RIG'S, not invented: EVIDENCE_LATERAL_TUNE.md 2
+    # THE NUMBERS ARE THE RIG'S, not invented: EVIDENCE_LATERAL_TUNE.md 2.2
     # measures the untuned plant at u = -0.209242 m/s, w = +0.000673 m/s
-    # and psidot = +0.083009 rad/s at a held -0.788546 rad. Fed those, the
+    # and psidot = +0.083067 rad/s at a held -0.788531 rad. Fed those, the
     # reduction has to return the steered wheel's 99.5 % share.
-    delta = -0.788546
-    u, w, omega = -0.209242, 0.000673, 0.083009
+    delta = -0.788531
+    u, w, omega = -0.209242, 0.000673, 0.083067
     dt = 0.05
     t, xs, ys, yaws, steer = [], [], [], [], []
     x = y = yaw = 0.0

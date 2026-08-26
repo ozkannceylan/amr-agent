@@ -90,10 +90,13 @@ Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
       YAN BULGU (kayda geçti, düzeltilmedi): <slip_compliance_lateral>
       ile <slip_compliance_longitudinal> etkileri ADLARIYLA TERS —
       düz gidişteki boyuna kaymayı "lateral" olan belirliyor.
-      PARK EDİLDİ: base_link ve mast'ta <inertial><pose> kendi
-      <link><pose>'unu tekrarlıyor; SDFormat bunları birleştirdiği için
-      kütle merkezi 3.1 mm arkada olabilir (N_drive 4537.4 → 4503.8 N,
-      %0.74). Kütle dağılımı bu kapsamda değildi.
+      GERİ ÇEKİLDİ (aynı gün, incelemede): "base_link ve mast'ta
+      <inertial><pose> kendi <link><pose>'unu tekrarlıyor, kütle merkezi
+      3.1 mm arkada" iddiası YANLIŞTI — o iki linkte <link><pose> hiç
+      yok, dolayısıyla birleşecek bir şey de yok; hesap iki eylemsizlik
+      ofsetini ikinci kez ekliyordu. Doğrusu: yalnız link pozları
+      -93.551, birleşik -97.151 kg m → N_drive 4537.4 N. Yani kullanılan
+      sabit ZATEN birleşik olan ve DOĞRU. Park edilen bir şey yok.
 - [ ] F2. Füzyon katmanı: çift EKF (robot_localization; odom EKF =
       teker+IMU+rf2o twist, map EKF = AMCL pozu); fuse (factor graph)
       paralel A/B kolu. Kanıt: WheelSlip senaryosunda EKF'li/EKF'siz

@@ -496,20 +496,23 @@ that gets to change it.
 
 ### 7.1 `wheel_normal_force`, derived from the model's own numbers
 
-> **QUESTIONED BY MEASUREMENT 2026-08-26 (F1.5) AND NOT CHANGED —
-> `EVIDENCE_LATERAL_TUNE.md` §7.** `base_link` and `mast` each carry an
-> `<inertial><pose>` that repeats their own `<link><pose>`, and SDFormat
-> composes those two rather than replacing one with the other. The sum
-> below is over the link poses alone, so if the composition is what gz
-> uses then `sum(m x)` is −100.751 kg·m, the centre of mass is at
-> x = −0.086411 m, and `N_drive` is **4503.8 N** rather than 4537.4 —
-> 0.74 % away, which is 0.74 % of a compliance and 0.007 points of the
-> slip figure above. The constant is left alone: the masses and inertial
-> poses are outside F1.5's scope, and this whole table was measured
-> against 4537.4 N, so correcting it means re-driving the table and not
-> editing its rows. The rear pair added in F1.5 is derived by the SAME
-> method as below, from the same numbers, so the three normal forces are
-> one opinion about one vehicle.
+> **CONFIRMED 2026-08-26 (F1.5), after F1.5 first questioned it and was
+> wrong — `EVIDENCE_LATERAL_TUNE.md` §7 carries the retraction.** The
+> claim, published for part of that day, was that `base_link` and `mast`
+> each carry an `<inertial><pose>` *repeating* their own `<link><pose>`,
+> that SDFormat composes the two, and that the sum below therefore
+> understates: `sum(m x) = −100.751` and `N_drive = 4503.8 N`. **It was a
+> double count.** Neither link has a `<link><pose>` at all
+> (`model.sdf`:293 and :1319 open the link and go straight to
+> `<inertial>`), so their inertial poses are already model-frame and
+> there is nothing to compose with. Summed the other way — link poses
+> alone, dropping `base_link`'s +0.10 and the mast's −0.78 — the total
+> reads **−93.551 kg·m**, not −97.151. **So the −97.151 below IS the
+> composed sum and the 4537.4 N IS correct**, which also means this
+> section's whole tuning table was measured against a right number.
+> F1.5's rear pair (3448.3 N each) is derived from the same composed sum
+> by the same beam, so the three normal forces are one opinion about one
+> vehicle.
 
 Read out of `model.sdf` by script and checked against the file:
 

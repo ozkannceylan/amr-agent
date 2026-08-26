@@ -373,16 +373,38 @@ wheel_slip:
   # y = -0.27 mm), so it halves without a lateral term. 3448.3 N each is
   # 30 % of the vehicle per rear wheel against the drive wheel's 39 %,
   # and the three account for the whole of it.
-  #   ONE OPEN QUESTION, RECORDED AND NOT ACTED ON: two links carry an
-  #   <inertial><pose> that repeats their <link><pose>, which SDFormat
-  #   composes rather than replaces, and under the composed parse these
-  #   two figures become 4503.8 N and 3465.1 N - 0.74 % away.
-  #   EVIDENCE_LATERAL_TUNE.md 7 has the arithmetic, the sensitivity and
-  #   why this gate records it instead of changing it.
+  #   AND THE SUM BEHIND THEM IS THE COMPOSED ONE, checked 2026-08-26:
+  #   SDFormat reads an <inertial><pose> in the LINK frame, so a link's
+  #   centre of mass is <link><pose> composed with it. base_link and mast
+  #   carry ONLY an <inertial><pose> and no <link><pose>, so for those two
+  #   there is nothing to compose and their inertial poses are already
+  #   model-frame. Summed the wrong way - link poses alone - the total is
+  #   -93.551 kg m, not the -97.151 above. Both -97.151 and 4537.4 are
+  #   therefore correct as they stand. EVIDENCE_LATERAL_TUNE.md 7 carries
+  #   the check and retracts a claim to the contrary this file briefly
+  #   made on the same day.
   rear_wheel_normal_force_n: "3448.3"
   # Longitudinal is the one the odometry feels: it is the traction
   # direction, and it is what makes a wheel revolution mean slightly less
   # than 2 pi r of ground.
+  #   CORRECTED BY MEASUREMENT 2026-08-26 (F1.5): THAT IS THE OTHER KEY.
+  #   EVIDENCE_LATERAL_TUNE.md 3.1. The sentence above describes what the
+  #   NAME promises, and on this rig the two elements' effects are swapped
+  #   relative to their names: moving <slip_compliance_lateral> alone
+  #   takes the straight-line longitudinal slip from 0.96162 % to
+  #   0.10688 % and 0.01070 %, while moving <slip_compliance_longitudinal>
+  #   alone leaves it at 0.95842 % and 0.96140 % - unchanged to within the
+  #   figure's own repeatability. So it is the key BELOW, the one named
+  #   lateral, that the wheel odometry actually feels.
+  #     SCOPE OF THAT MEASUREMENT, STATED SO IT IS NOT OVER-READ: gz-sim
+  #     8.11.0, the gz-sim-wheel-slip-system as this model configures it,
+  #     this vehicle, this rig. Whether the plugin emits the pair in the
+  #     other order or the solver's two friction directions are simply not
+  #     the wheel's was NOT chased - EVIDENCE_LATERAL_TUNE.md 3.1 says so.
+  #   WHY IT CHANGES NOTHING HERE AND EVERYTHING FOR AN EDITOR: both keys
+  #   are 7.0, so the plant is isotropic and the labels do not reach it.
+  #   The moment anyone sets them apart the names will lie. Measure, do
+  #   not assume, and read that section first.
   slip_compliance_longitudinal: "7.0"
   # Lateral is the tyre's sideways give. It is held at the same value
   # rather than tuned: this track measures no lateral manoeuvre yet, and a
@@ -1338,9 +1360,10 @@ evidence:
     # therefore have REFUSED every corner of the re-tabled square, which
     # is a reduction sized against a plant that no longer exists.
     #   3 s is what the figure needs and not the largest number that
-    #   still fits: at the re-tabled corner's 0.2715 rad/s it is 0.81 rad
-    #   of yaw, six orders of magnitude above the ground truth's own
-    #   1e-6 rad, and the tuned plant's wander inside a held corner is
+    #   still fits: at the yaw rate the re-tabled corner actually
+    #   DELIVERS - 0.246312 rad/s, the mean of its four corners, not the
+    #   0.2715 the kinematics promises - 3 s is 0.74 rad of yaw, six
+    #   orders of magnitude above the ground truth's own 1e-6 rad, and the tuned plant's wander inside a held corner is
     #   0.0 % (sd 0.000045 rad/s over nine 1 s bins of corner_creep), so
     #   there is nothing left for a longer window to average out. It also
     #   keeps 0.8 s of margin under the shortest corner this profile
