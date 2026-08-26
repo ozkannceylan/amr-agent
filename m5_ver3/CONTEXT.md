@@ -134,7 +134,11 @@ m5_ver3/
 │                         against ground truth through the committed
 │                         registration - dry and wet, with the debt
 │                         F2 handed over and what the corrections cost
-│                         in jitter
+│                         in jitter. F3 Task 3 adds §13: the SECOND
+│                         localiser - slam_toolbox's localization mode
+│                         over the same frozen pose graph - the A/B the
+│                         published research could not settle, and the
+│                         recommendation that closes the phase
 ├── config.yaml           every constant the scripts obey - the one home
 ├── ekf.yaml              what the FILTER fuses and what it refuses. A ROS
 │                         parameter file, which config.yaml is not and may
@@ -146,15 +150,20 @@ m5_ver3/
 │                         and it is ekf.yaml's split applied to the second
 │                         estimator. Read only by --fuse; on that arm
 │                         ekf.yaml is not read at all
-├── slam.yaml             what the MAPPER does, and ekf.yaml's split a
-│                         third time. Read only by tools/build_map.sh,
-│                         never by anything the live stack runs
-├── amcl.yaml             what the LOCALISER does, and ekf.yaml's split a
+├── slam.yaml             TWO BLOCKS, and ekf.yaml's split a third time.
+│                         `slam_toolbox:` is what the MAPPER does, read
+│                         only by tools/build_map.sh; `slam_loc:` is
+│                         what the LOCALISER does, read only by
+│                         `--localize slam`. amcl.yaml's two-nodes-in-
+│                         one-file shape a second time, and the second
+│                         block is the first one RE-ARGUED for a node
+│                         that tracks in a graph rather than builds one
+├── amcl.yaml             what the OTHER LOCALISER does, and ekf.yaml's split a
 │                         FOURTH time - two nodes addressed in one file,
 │                         both greped for before anything starts. Every
 │                         value argued from the model, from F2's MEASURED
 │                         error, from the map's own measured support, or
-│                         from the seed. Read only by --localize
+│                         from the seed. Read only by --localize amcl
 ├── maps/
 │   └── warehouse_v3/     THE FROZEN MAP. grid (.pgm + .yaml), pose graph
 │                         (.posegraph + .data), build.txt and the
@@ -254,7 +263,7 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 | `m5v3.sh start --slippery` | **A different plant from the same model file.** After the truck is spawned, every wheel's slip compliance is overridden through gz-sim's own `wheel_slip` service to `config.yaml`'s `slippery:` values — `model.sdf` is not edited and no variant of it is generated. Longitudinal slip at cruise goes from 0.95 % to 6.18 %. Combines with `--headless`, in either order. |
 | `m5v3.sh start --rf2o` | **A DIFFERENT ESTIMATOR ON THE SAME PLANT**, which is `--slippery`'s mirror image. Three more children — the nav lidar's static transform, `rf2o_laser_odometry_node` matching consecutive scans, and the relay that puts a MEASURED covariance on its twist and corrects two frame errors upstream does not — plus a second `--params-file` giving the filter an `odom1` it fuses `vx` and `vyaw` from. Default OFF, and without it the stack is the six children `EVIDENCE_FUSION.md` §9.3 measured, off one unchanged parameter file. Build the package first with `tools/install_rf2o.sh`. Combines with the other two flags, in any order. |
 | `m5v3.sh start --fuse` | **A DIFFERENT ESTIMATOR, IN THE FILTER'S PLACE.** `fuse`'s `fixed_lag_smoother_node` goes up and the `ekf` child does **not** — six children either way, with `fuse` where `ekf` was. It fuses the SAME channels off the SAME two topics (wheel twist `vx`, `vy`, `vyaw` + gyro yaw rate) and publishes its own `odom` → `base_link`, on `topics.fuse_odometry_filtered` and never on the shipping address. Where `--rf2o` adds a sensor, this replaces the estimator, so the two are **mutually exclusive and refused together by name**. Vendor it first with `tools/install_fuse.sh`. Default OFF, and `EVIDENCE_FUSION.md` §11 is the A/B that says why. Combines with `--headless` and `--slippery`. |
-| `m5v3.sh start --localize` | **A LAYER ABOVE THE ESTIMATOR, AND THE FIRST THING ON THIS TRACK THAT KNOWS WHERE THE VEHICLE IS.** Three more children — the nav lidar's static transform, `nav2_map_server` serving the FROZEN grid in `maps/warehouse_v3`, and `nav2_amcl` localising in it — plus two lifecycle transitions this script drives itself and a gate that refuses a localiser which came up merely alive. AMCL becomes the **sole publisher of `map` → `odom`**, the one edge F3 adds; the estimator keeps `odom` → `base_link` and neither can become the other. The grid's md5 is checked against the committed registration **before anything is started** — a rebuilt map is a new artifact, never an overwrite. The initial pose is PUBLISHED on `/initialpose` at bringup: `vehicle.spawn` carried through that registration, which is the measurement harness standing in for an operator. **No kidnapped-robot recovery is claimed.** Combines with all three flags above. `EVIDENCE_LOCALIZATION_V3.md` is what it produced. |
+| `m5v3.sh start --localize [amcl\|slam]` | **A LAYER ABOVE THE ESTIMATOR, AND THE FIRST THING ON THIS TRACK THAT KNOWS WHERE THE VEHICLE IS.** Whichever localiser is named becomes the **sole publisher of `map` → `odom`**, the one edge F3 adds; the estimator keeps `odom` → `base_link` and neither can become the other. **The two are never alive together** — the exclusion is a `case` with two branches, not two flags — and the value is optional (`localization.default_arm` says which it means without one). **`amcl`** is three more children: the nav lidar's static transform, `nav2_map_server` serving the FROZEN GRID, and `nav2_amcl` localising in it, seeded by a MESSAGE on `/initialpose`. **`slam`** is two: that same static transform and `slam_toolbox`'s `localization_slam_toolbox_node`, which deserialises the FROZEN POSE GRAPH, rasters its own grid onto `/map` (so no `map_server`) and is seeded by the `map_start_pose` PARAMETER. Either way the artifacts THAT arm opens are md5-checked **before anything is started** — the grid against the committed registration, the pose graph against `build.txt` — a rebuilt map is a new artifact, never an overwrite; every lifecycle node is driven to ACTIVE by this script; and a gate refuses a localiser which came up merely alive. **No kidnapped-robot recovery is claimed on either arm.** Combines with all three flags above. `EVIDENCE_LOCALIZATION_V3.md` is what both produced, and §13 is the A/B. |
 | `m5v3.sh status` | Each child by name, ALIVE or DEAD, with its log, **which traction the running plant is on**, **which estimator arm is up** and **which absolute layer**. Exit 0 only if every one is alive. |
 | `m5v3.sh stop` | Ends this partition's stack, and nothing else. |
 | `tools/rtf_probe.sh` | 30 s real-time-factor sample of the world that is already running. |
@@ -262,7 +271,7 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 | `tools/slip_bench.sh` | Drives the traction terminal at cruise, forward then astern, and reports slip against the commanded and the achieved wheel rate. |
 | `tools/install_rf2o.sh` | Builds `rf2o_laser_odometry` from source, at `config.yaml`'s **pinned commit**, into a colcon workspace under `$HOME`. No sudo at any point, idempotent, refuses by name, and writes a manifest of what it fetched beside the build. Run once; `start --rf2o` refuses by name if it has not been. |
 | `tools/install_fuse.sh` | Fetches the nine `fuse` packages at `config.yaml`'s **pinned versions** and unpacks them into a prefix under `$HOME`. `apt-get download` + `dpkg-deb -x`, never `apt-get install`: the packages are in the Jazzy archive and this rig has no sudo. Idempotent through a probe that loads a `fuse_models` plugin, refuses by name, `ldd`-checks what it unpacked, and writes a manifest beside the tree. Run once; `start --fuse` refuses by name if it has not been. |
-| `tools/localization_health.py` | Did the LOCALISER come up **localised**, or come up merely alive? It subscribes to the pose topic, publishes the bringup's initial pose, and reads back the filter's own first answer — **in that order**, because with the truck standing still AMCL publishes exactly one pose per seed and a reader that arrived late would wait for a second that never comes. Two checks: the covariance against a ceiling, and the pose against the seed — and the second is the one the first cannot make, because a localiser that never heard the seed answers from nav2's own prior, which carries the same 0.25 m². **`start --localize` runs it for you.** |
+| `tools/localization_health.py` | Did the LOCALISER come up **localised**, or come up merely alive? **On the `amcl` arm** it subscribes to the pose topic, publishes the bringup's initial pose, and reads back the filter's own first answer — **in that order**, because with the truck standing still AMCL publishes exactly one pose per seed and a reader that arrived late would wait for a second that never comes. Two checks: the covariance against a ceiling, and the pose against the seed — and the second is the one the first cannot make, because a localiser that never heard the seed answers from nav2's own prior, which carries the same 0.25 m². **On the `slam` arm all three of those change and every one of the changes is measured** (`EVIDENCE_LOCALIZATION_V3.md` §13.2): it sends **no** seed (that node reads `map_start_pose` on its configure transition, and seeding it here would make the check below a check on the gate); it reads the `map` → `odom` **edge** composed onto the estimator's, because that node's pose topic is travel-gated and publishes **nothing** at rest; and the covariance check therefore **does not run**, which the gate prints rather than passing silently. `evidence_core`'s four localiser tables are where those differences live, and each **refuses** an arm it has never heard of. **`start --localize` runs it for you.** |
 | `tools/ekf_health.py` | One bounded read of **the ACTIVE arm's** output, and a refusal if its covariance is over `ekf.startup_check.covariance_max`. It reads the `arm=` line `start` has already written and picks the topic from it (`evidence_core.fused_topic_key`), so one gate covers both estimators. **`start` runs it for you** — it exists because `ekf_node` can diverge during its first cycles and stay ALIVE, at rate, saying nothing (`EVIDENCE_FUSION.md` §8.6, §9). On the `--fuse` arm the first messages carry a covariance of 36 zeros, which no ceiling can fail, so there it gates on the **pose** against `evidence.analyse.fused_sanity_m` instead and prints which check it ran (§11.2c). |
 | `tools/drive_route.py <profile>` | Drives one of `config.yaml`'s profiles — `straight`, `square`, `aisle`, `corner_creep`, `mapping` — open loop, on the plant's own clock. It drives; it records nothing. **`mapping` is F3's and is not a bench manoeuvre**: 227.0 m over the whole of `m6/ipc/route.py`'s road graph, nine 90° corners, 774.7 s, at one speed from end to end, so an offline SLAM run has a recording to build a map from. |
 | `tools/sensor_evidence.py record --static\|--drive P [--bag]` | Captures one run into `logs/evidence/<session>/`: one headered CSV per stream. `--drive` starts `drive_route.py` itself, so one command is one complete run. It stamps the session with **which plant it was taken on** and refuses if the stack cannot say, and it refuses **before the drive** if the filter has already diverged. `--bag` ALSO writes a rosbag2 of `/clock`, the nav scan and `/tf` into the same session — the container an OFFLINE consumer needs, off by default because nothing in EVIDENCE_SENSORS or EVIDENCE_FUSION reads it. Needs ROS. |
@@ -346,16 +355,29 @@ run with an unlocalised one. All four combinations are legitimate runs.
   in one table with nothing in the numbers to say so — and the same
   eight characters are what let `analyse` refuse to score a session
   through a registration that no longer belongs to it.
+  **AND SINCE F3 TASK 3 THE LOCALISER HALF HAS TWO VALUES, WHICH IS THE
+  SAME ARGUMENT ONE STEP FURTHER ALONG.** `loc=amcl@735cdbc6` and
+  `loc=slam@4bb88852` are two runs on the same floor, the same
+  estimator, the same profiles and the same build of the same map, with
+  CSVs of identical shape — nothing but the label can tell them apart,
+  and one of each in one table would read as one localiser with a wide
+  spread rather than as the A/B it destroyed. `analyse` refuses that mix
+  by name too. **The md5s are of DIFFERENT FILES**: AMCL localises in
+  the grid, whose hash the registration carries; slam_toolbox
+  deserialises the pose graph, whose hash is in `build.txt` beside it.
+  `evidence_core.loc_md5_artifact()` is the one place that says which,
+  and it refuses a localiser it has never heard of.
   **AND `none` IS A VALUE WHERE A MISSING LINE IS NOT.** A stack brought
   up without the flag writes `loc=none`; a state file with no `loc=` line
   was written by a script older than this arm. The two are different
   facts and neither is inferred from the other, which is the traction
   label's own rule twice removed.
 
-**Six children by default, NINE with `--rf2o`, six again with `--fuse`
-and NINE with `--localize`** — `--fuse` swaps a child rather than
-adding one, so the count is unchanged and `fuse` stands where `ekf` did,
-while `--localize` adds three (`lasertf`, `map_server`, `amcl`).
+**Six children by default, NINE with `--rf2o`, six again with `--fuse`,
+NINE with `--localize amcl` and EIGHT with `--localize slam`** —
+`--fuse` swaps a child rather than adding one, so the count is unchanged
+and `fuse` stands where `ekf` did, while `--localize` adds three on one
+arm and two on the other.
 `status` names them all back: the
 gz server (`world`), `ros_gz_bridge`'s `parameter_bridge` (`bridge`),
 `ros_gz_image`'s `image_bridge` (`imgbridge`), `nodes/wheel_odometry.py`
@@ -379,7 +401,15 @@ reason: AMCL's scan subscription is a tf2 `MessageFilter`, which QUEUES
 what it cannot yet transform, so it has nothing to lose by starting late
 — while `map_server` has a 1712 × 1196 grid to read and AMCL blocks in
 `on_activate` waiting for it, which makes the two lifecycle transitions
-the slow part of that arm. **No broker, no fleet manager, no HMI, no
+the slow part of that arm. **With `--localize slam` there are TWO more
+instead**: the same `lasertf`, and `slam_toolbox`'s
+`localization_slam_toolbox_node` (`slam_loc`) — and there is no
+`map_server` because that node deserialises the pose graph itself and
+rasters its own grid onto `/map`, which is the same service for the same
+downstream consumer out of a different artifact. Its CONFIGURE
+transition is where a 48.7 MB pose graph is read off disk, so the slow
+part of that arm is one transition rather than four. **No broker, no
+fleet manager, no HMI, no
 PLC link** — that absence is the phase, not an omission. Nothing here
 touches PLCSIM Advanced or anything on the Windows side.
 

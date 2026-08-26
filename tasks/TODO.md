@@ -117,10 +117,37 @@ Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
       gecikme). VARSAYILAN ESTIMATOR: robot_localization kalır. Map-EKF
       (AMCL pozu) F3'e taşındı — harita olmadan skorlanamaz. Suite
       82→239; faz-sonu dal incelemesi + tek düzeltme dalgası temiz.
-- [ ] F3. Harita + lokalizasyon: slam_toolbox offline haritası
+- [x] F3. Harita + lokalizasyon: slam_toolbox offline haritası
       (warehouse_ver3, m5-08d yöntemi: kayıt→registration→mutlak skor);
       AMCL vs slam_toolbox localization A/B, aynı enstrüman tabanı.
       Kanıt: mutlak rms tablosu (m5_ver1 0.124 m referans).
+      YAPILAN (3 görev, 2026-08-26/27; kanıt m5_ver3/EVIDENCE_MAP_V3.md
+      ve EVIDENCE_LOCALIZATION_V3.md): 227 m'lik commissioning sürüşü
+      bag'e alındı, slam_toolbox sync ile ÇEVRİMDIŞI harita kuruldu ve
+      DONDURULDU (maps/warehouse_v3, md5'li build.txt + committed
+      registration); registration duvar-fit ile TÜREVLENDİ, enstrüman
+      TABANI rms 0.0291 / MAX 0.1179 m, mutlak açıklıklar 48.019/28.036
+      m (gerçeği 48.000/28.000). --localize amcl: nav2_amcl + map_server,
+      her parametre bir ÖLÇÜMDEN argümanlı (sigma_hit ve z_rand haritanın
+      kendi desteğinden), map→odom tek sahipli, md5 kapısı + lokalizasyon
+      sağlık kapısı + üçüncü etiket (loc=) ve karışım refusal'ı. KURU
+      kabul: END 0.0382–0.1954 m (medyan 0.0395), F2'nin borcu %95.7
+      ödendi; ISLAK stretch: %71–83. --localize slam (F3.3): AYNI donmuş
+      poz grafiği üzerinde slam_toolbox localization; A/B tek enstrümanla.
+      SONUÇ İKİ MAKALEYİ DE DOĞRULADI, farklı yarımlarda: koridorda poz
+      grafiği HAREKET HALİNDEKİ along-track ofseti 0.27–0.33 m (kuru) ve
+      0.69–0.79 m (ıslak) yerine 0.07–0.09 m'ye indiriyor (3–11 kat);
+      DÖNÜŞTE ise AMCL kazanıyor (corner_creep END 0.0382'ye karşı
+      0.3301 m, ıslak square'de 0.1326 rad'lık yön sıçraması). CPU:
+      7.85–10.49 % (amcl kolu) / 13.25–14.86 % (slam kolu). Snap
+      relokalizasyon GÖZLENMEDİ — sanılan bir tanesi, stop'un
+      süpürmediği ZOMBI düğümlerdi (tools/_common.sh desen listesi
+      düzeltildi + tests/test_sweep_patterns.py o sınıfı kilitliyor).
+      TAVSİYE (EVIDENCE_LOCALIZATION_V3.md §13.10): F4 için VARSAYILAN
+      AMCL kalır (forklift dönüyor); poz grafiği kolu ağaçta, bir
+      bayrak uzakta. Map-EKF ERTELENDİ: medyan düzeltme 19–94 mm,
+      yumuşatıcı gecikme ekler ve okunmayan bir sayıyı iyileştirmek için
+      manşet sayıyı bozar (§13.11). Suite 239→438; selftest 30→44.
 - [ ] F4. Nav2 sürüş: Smac Hybrid-A* (REEDS_SHEPP, gerçek min dönüş
       yarıçapı) + MPPI Ackermann (RPP yedek) + tricycle BT (Spin/BackUp
       yok) + collision monitor (VelocityPolygon) + keepout + velocity
