@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # m5v3.sh - bring the m5-ver3 plant up and down: ONE world, ONE truck,
 # ONE bridge, ONE estimator, and a GPU the run has proved it is using.
-#   start [--headless] [--slippery] | stop | status
+#   start [--headless] [--slippery] [--rf2o] | stop | status
 #
 # WHAT THIS TRACK IS. m5-ver3 is the sensor-fusion rebuild of the SHOWCASE
 # vehicle (vault AMR-DEC-003): one forklift, real instrument profiles, a
@@ -42,6 +42,19 @@
 # reaches the no-slip tables unlabelled is the one failure this whole
 # mechanism is shaped to prevent.
 #
+# --rf2o ADDS A SECOND ESTIMATOR TO THE SAME PLANT, which is the mirror
+# image of what --slippery does and is labelled by the same mechanism for
+# the same reason. Three more children go up - the nav lidar's static
+# transform, rf2o_laser_odometry_node matching consecutive scans, and the
+# relay that puts a MEASURED covariance on its twist (it publishes none)
+# and corrects the lever arm between the scanner and base_link (it
+# corrects none) - and the filter is handed a second --params-file that
+# gives it an odom1. Without the flag none of that is reached, ekf.yaml is
+# the whole of the filter's configuration, and this is the six-child stack
+# EVIDENCE_FUSION.md 9.3's figures were taken on. The package is built
+# from source into the user's own home by tools/install_rf2o.sh, without
+# root; `start --rf2o` refuses by name if that has not been run.
+#
 # THE PARTITION IS NOT OVERRIDABLE FROM THE ENVIRONMENT, unlike m6.sh's.
 # It is read from config.yaml by start, by stop and by status alike, so
 # the three cannot disagree about which graph this is - and ours() reads
@@ -68,6 +81,18 @@ GUI=true   # start's default; --headless sets it false. See the header.
 # figure taken off one of them has to say which, which is what
 # $TRACTIONFILE is for - see write_traction().
 SLIPPERY=false
+# THE OPTIONAL LASER-ODOMETRY ARM, F2 Task 3, and it is OFF unless the
+# command line says otherwise. --rf2o adds three children - the nav
+# lidar's static transform, rf2o_laser_odometry_node and the twist relay
+# that puts a measured covariance on its output - and one extra
+# --params-file on the filter. Without the flag not one line of any of
+# that is reached and the stack is the six children EVIDENCE_FUSION.md
+# 9.3's figures were taken on. Like --slippery, the answer is written to
+# the state file so that every instrument downstream can say WHICH
+# ESTIMATOR a figure came off; unlike --slippery it changes the
+# ESTIMATE and not the PLANT, which is why the two labels are separate
+# lines and not one.
+RF2O=false
 
 # THIS SCRIPT'S OWN REQUIRED KEYS, on top of the isolation and ROS ones
 # _common.sh checks for every script on this track. Each is refused by its
@@ -79,13 +104,17 @@ REQUIRED_KEYS=(
     vehicle.model vehicle.name
     vehicle.spawn.x vehicle.spawn.y vehicle.spawn.z vehicle.spawn.yaw
     vehicle.imu_mount.x vehicle.imu_mount.y vehicle.imu_mount.z
+    vehicle.nav_lidar_mount.x vehicle.nav_lidar_mount.y
+    vehicle.nav_lidar_mount.z
     topics.clock topics.odom_ground_truth topics.scan_nav
     topics.safety_scan_back
     topics.imu topics.cam_depth topics.cam_info topics.points3d
     topics.joint_state topics.drive_speed_read_a topics.wheel_odom
-    topics.odometry_filtered
+    topics.odometry_filtered topics.rf2o_odom_raw topics.rf2o_odom
     frames.odom frames.base_link frames.imu frames.map
-    ekf.params_file ekf.node_name ekf.frequency_hz
+    frames.nav_lidar frames.rf2o_odom
+    ekf.params_file ekf.rf2o_params_file ekf.node_name ekf.frequency_hz
+    rf2o.workspace rf2o.package rf2o.executable rf2o.freq_hz rf2o.commit
     slippery.slip_compliance_lateral slippery.slip_compliance_longitudinal
     slippery.service_timeout_ms
     paths.log_dir paths.pidfile paths.traction_file
@@ -103,6 +132,15 @@ configure() {
     WORLD="$REPO/$CFG_WORLD_FILE"
     MODEL="$REPO/$CFG_VEHICLE_MODEL"
     EKF_PARAMS="$REPO/$CFG_EKF_PARAMS_FILE"
+    EKF_RF2O_PARAMS="$REPO/$CFG_EKF_RF2O_PARAMS_FILE"
+    # THE ONE PATH ON THIS TRACK THAT IS NOT UNDER $REPO. The rf2o build
+    # tree is the USER's - tools/install_rf2o.sh's argument, and F2
+    # constraint 14's - so config.yaml writes it with a leading ~/ and
+    # both readers expand it against $HOME the same way. Derived
+    # unconditionally: it costs a string, and a variable that exists only
+    # on one branch is a variable `set -u` aborts on from the other.
+    RF2O_WS="${CFG_RF2O_WORKSPACE/#\~/$HOME}"
+    RF2O_BIN="$RF2O_WS/install/$CFG_RF2O_PACKAGE/lib/$CFG_RF2O_PACKAGE/$CFG_RF2O_EXECUTABLE"
 }
 
 # THE STACK AS COMMAND-LINE PATTERNS, AND THE LIST IS _common.sh's.
@@ -147,6 +185,87 @@ sweep() {  # sweep <signal>
     done
 }
 
+# A ROS PARAMETER FILE HAS TO BE ADDRESSED TO THE NODE THIS SCRIPT
+# STARTS, and since F2 Task 3 there can be TWO of them - ekf.yaml always,
+# ekf_rf2o.yaml with --rf2o - so the check is a function rather than two
+# copies of one grep (tools/_common.sh's rule, applied inside this file).
+#
+# WHY IT IS CHECKED AND NOT WRITTEN DOWN. A parameter file is keyed by
+# the node's name, and rclcpp does NOT complain about a block addressed
+# to somebody else - it applies nothing and starts. That failure is worse
+# than a missing file, because the `-p` overrides below still land: the
+# topics, the frames and the rate are all set, so ekf_node comes up on
+# its PACKAGE DEFAULTS, subscribes nothing, fuses nothing, and publishes
+# 50 Hz of a pose that never moves and an identity transform. `status`
+# says ALIVE, the topic is there at its configured rate, the evidence
+# recorder's stream arrives - EVERY instrument this track named would
+# report a healthy stack. A misspelt key INSIDE the file is the same
+# failure by another route, and rclcpp is equally silent about it.
+#   ekf.yaml's header carried this as a MAINTENANCE OBLIGATION in prose,
+#   which is the one form of guarantee this track accepts nowhere else:
+#   the imu_mount copy is diffed against the model that decides it, every
+#   config key is checked by its dotted name, the child list lives in one
+#   file. This is that idiom, one grep, before anything starts.
+#   AND THE OVERLAY IS THE EASIER ONE TO GET WRONG, which is why it gets
+#   the same check rather than a lighter one: it is read SECOND, so a
+#   block addressed to nobody would leave the filter correctly configured
+#   for the shipping arm with an odom1 topic on its command line and no
+#   odom1_config anywhere - an rf2o run that fused no rf2o, reported by
+#   nothing.
+check_ekf_params() {  # check_ekf_params <file> <the config key naming it>
+    local file="$1" key="$2"
+    grep -q "^${CFG_EKF_NODE_NAME}:" "$file" || refuse         "the EKF parameter file is addressed to $CFG_EKF_NODE_NAME"         "$file and $CONFIG (ekf.node_name, $key)"         "there is no top-level '$CFG_EKF_NODE_NAME:' key in that file, so"         "every parameter in it belongs to a node that is never started."         "ekf_node would come up on its PACKAGE DEFAULTS with the topic,"         "frame and rate overrides still applied: 50 Hz of a pose that"         "never moves, an identity transform, and 'status' ALIVE."         "the top-level keys that file does define:"         "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$file" || echo '(none)')"
+}
+
+# DID THE SCAN MATCHER FIND OUT WHERE IT IS BOLTED? A refusal, not a
+# warning, and it is asked of the child's own log because that is the
+# only place the answer exists.
+#
+# WHAT IT IS ASKING. rf2o looks up base_link <- the scan's frame ONCE,
+# in the handler for its first scan. On a failure it logs the tf2
+# exception and CARRIES ON with a default-constructed transform, so
+# the scanner is taken to be at base_link and every pose it publishes
+# afterwards is the LASER's. Nothing else on the stack changes: the
+# process is alive, the topic is at rate, the relay is forwarding, the
+# filter is fusing, `status` reads 9 alive - and the arm is quietly
+# describing a scanner 0.55 m and 0.40 m from where it is. Measured on
+# this rig 2026-08-26 before the arm was moved ahead of the bridges,
+# EVIDENCE_FUSION.md 10.1.
+#   THE INSTRUMENT IS THE ERROR LEVEL AND NOT THE MESSAGE TEXT.
+#   rf2o_laser_odometry contains exactly ONE RCLCPP_ERROR in the whole
+#   package (src/CLaserOdometry2DNode.cpp:125, at the pinned commit)
+#   and it is inside that catch block - so an ERROR line in this
+#   child's log IS that lookup having failed, whatever tf2's wording
+#   for the particular failure was. Grepping the text would tie this
+#   check to one of tf2's several exception strings.
+#   THE TWIST WOULD SURVIVE IT AND THAT IS NOT A REASON TO LET IT PASS.
+#   rf2o's lin_speed and ang_speed are both computed from the
+#   scan-to-scan increment and are independent of the mount, so THIS
+#   phase - which fuses twist only - would not measurably notice.
+#   A stack that publishes a wrong thing nobody currently reads is a
+#   trap set for whoever reads it next.
+check_rf2o_transform() {
+    local log="$LOGDIR/rf2o.log"
+    # The log is created by spawn's own redirection, so it exists by this
+    # line whatever the child did; 2>/dev/null is for the one case where
+    # it does not - a spawn that never ran at all - which the dead-child
+    # check above has already refused with a better message.
+    grep -q "^\[ERROR\]" "$log" 2>/dev/null || return 0
+    refuse "rf2o found the transform for $CFG_FRAMES_NAV_LIDAR" \
+        "$log and $0 (the lasertf child)" \
+        "its log carries an ERROR, and this package logs one in exactly" \
+        "one place: the base_link <- scan-frame lookup it makes once, on" \
+        "its first scan. What it printed:" \
+        "$(grep -m1 "^\[ERROR\]" "$log")" \
+        "IT DID NOT STOP. rf2o carries on with a default-constructed" \
+        "transform, so the scanner is taken to be AT base_link and every" \
+        "pose it publishes is the LASER's. Nothing else looks wrong -" \
+        "the child is alive, the topic is at rate, the filter is fusing." \
+        "THE STACK IS INCOMPLETE, and what is left of it is STILL UP." \
+        "'$0 stop', then start again - the lookup is a race this script" \
+        "wins by starting the arm before the bridge that carries the scan."
+}
+
 start() {
     local pid name
     # A LIVE STACK IS NOT STARTED OVER. ours() is the liveness test rather
@@ -181,34 +300,35 @@ start() {
         "$CONFIG" "ekf.params_file resolves to $EKF_PARAMS" \
         "without it ekf_node would start on its own defaults, fuse" \
         "nothing at all, and report nothing about it."
-    # AND THE FILE HAS TO BE ADDRESSED TO THE NODE THIS SCRIPT STARTS.
-    # A ROS parameter file is keyed by the node's name, and rclcpp does
-    # NOT complain about a block addressed to somebody else - it applies
-    # nothing and starts. That failure is worse than a missing file,
-    # because the `-p` overrides below still land: the topics, the frames
-    # and the rate are all set, so ekf_node comes up on its PACKAGE
-    # DEFAULTS, subscribes nothing, fuses nothing, and publishes 50 Hz of
-    # a pose that never moves and an identity transform. `status` says
-    # ALIVE, the topic is there at its configured rate, the evidence
-    # recorder's stream arrives - EVERY instrument this track named would
-    # report a healthy stack. A misspelt key INSIDE the file is the same
-    # failure by another route, and rclcpp is equally silent about it.
-    #   SO THE COUPLING IS CHECKED AND NOT WRITTEN DOWN. ekf.yaml's header
-    #   carried this as a MAINTENANCE OBLIGATION in prose, which is the
-    #   one form of guarantee this track accepts nowhere else: the
-    #   imu_mount copy is diffed against the model that decides it, every
-    #   config key is checked by its dotted name, the child list lives in
-    #   one file. This is that idiom, one grep, before anything starts.
-    grep -q "^${CFG_EKF_NODE_NAME}:" "$EKF_PARAMS" || refuse \
-        "the EKF parameter file is addressed to $CFG_EKF_NODE_NAME" \
-        "$EKF_PARAMS and $CONFIG (ekf.node_name)" \
-        "there is no top-level '$CFG_EKF_NODE_NAME:' key in that file, so" \
-        "every parameter in it belongs to a node that is never started." \
-        "ekf_node would come up on its PACKAGE DEFAULTS with the topic," \
-        "frame and rate overrides still applied: 50 Hz of a pose that" \
-        "never moves, an identity transform, and 'status' ALIVE." \
-        "the top-level keys that file does define:" \
-        "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$EKF_PARAMS" || echo '(none)')"
+    # AND THE FILE HAS TO BE ADDRESSED TO THE NODE THIS SCRIPT STARTS -
+    # see check_ekf_params() above, which is where that argument lives
+    # now that TWO files have to pass it.
+    check_ekf_params "$EKF_PARAMS" "ekf.params_file"
+    # THE OPTIONAL ARM'S OWN THREE CHECKS, AND THEY ARE ONLY MADE WHEN
+    # THE FLAG WAS GIVEN. Every one of them is about a file or a binary
+    # that the default stack neither reads nor starts, so making them
+    # unconditionally would let a rig that has never run
+    # tools/install_rf2o.sh refuse a bringup that does not need it.
+    if [ "$RF2O" = true ]; then
+        [ -x "$RF2O_BIN" ] || refuse \
+            "rf2o_laser_odometry is built" \
+            "$CONFIG (rf2o.workspace) and $M5V3/tools/install_rf2o.sh" \
+            "there is no executable at $RF2O_BIN" \
+            "it is built FROM SOURCE, in your own home, without sudo -" \
+            "the package is not in the Jazzy archive for any distro:" \
+            "  bash $M5V3/tools/install_rf2o.sh" \
+            "NOTHING WAS STARTED. Drop --rf2o to bring up the stack" \
+            "EVIDENCE_FUSION.md 9.3 was measured on."
+        [ -f "$EKF_RF2O_PARAMS" ] || refuse \
+            "the optional arm's EKF overlay exists" \
+            "$CONFIG (ekf.rf2o_params_file)" \
+            "it resolves to $EKF_RF2O_PARAMS" \
+            "without it ekf_node would start with odom1 named on its" \
+            "command line and NO odom1_config to say what to fuse from" \
+            "it - which robot_localization reads as 'fuse nothing from" \
+            "that sensor' and reports as nothing at all."
+        check_ekf_params "$EKF_RF2O_PARAMS" "ekf.rf2o_params_file"
+    fi
     # Unchecked, an unwritable log dir fails every redirection this stack
     # opens and start would sleep its way to "up." over a stack that never
     # began.
@@ -261,6 +381,112 @@ start() {
         apply_slippery
     fi
     write_traction
+
+    # ------------------ THE OPTIONAL LASER-ODOMETRY ARM ------------------
+    # THREE CHILDREN, AND NOT ONE OF THEM EXISTS WITHOUT --rf2o. The
+    # whole block is skipped by the default stack, which is the claim
+    # EVIDENCE_FUSION.md 10.3 has to be able to make: `start` without
+    # the flag spawns the same six processes, hands the filter the same
+    # one parameter file, and publishes nothing on either rf2o topic.
+    #
+    # AND IT GOES HERE, BEFORE THE BRIDGES, WHICH IS A MEASURED
+    # ORDERING AND NOT A TIDY ONE. rf2o looks up base_link <- the
+    # scan's own frame EXACTLY ONCE, in the handler for its FIRST
+    # scan, and on a failed lookup it logs the exception and then uses
+    # the default-constructed transform anyway - so the scanner is
+    # silently taken to be AT base_link and every pose it publishes
+    # for the rest of the run is the LASER's rather than the
+    # vehicle's. There is no retry.
+    #   MEASURED ON THIS RIG 2026-08-26 with this block sitting after
+    #   the bridges: rf2o came up at a moment when scans were already
+    #   flowing, its first scan arrived 106 ms later, and the latched
+    #   /tf_static message had not reached its listener yet -
+    #   `"base_link" passed to lookupTransform argument target_frame
+    #   does not exist`, once, and thereafter `Laser odom` and
+    #   `Robot-base odom` printed IDENTICAL numbers for the whole
+    #   session, which is what an identity mount looks like.
+    #   EVIDENCE_FUSION.md 10.1.
+    #   STARTED HERE THERE IS NO SCAN YET. The parameter bridge that
+    #   carries the nav lidar is not up, so rf2o sits in `Waiting for
+    #   laser_scans` through the bridge, the image bridge, the wheel
+    #   odometry and the IMU transform - ten seconds of real work, not
+    #   a sleep - and the static transform is long since in its buffer
+    #   when the first scan finally arrives. A jump in /clock does not
+    #   undo it: tf2 stores static transforms in a cache whose
+    #   clearList() is a no-op, which is why they answer for any query
+    #   time in the first place.
+    #   AND IT IS CHECKED ANYWAY, AFTER THE STARTUP GATE. An ordering
+    #   with a large margin is still an ordering with a margin;
+    #   check_rf2o_transform() below reads the child's own log for the
+    #   one ERROR this package can emit and refuses the bringup.
+    if [ "$RF2O" = true ]; then
+        # WHERE THE SCANNER IS BOLTED, ON /tf_static, AND IT IS THE IMU
+        # TRANSFORM'S ARGUMENT A SECOND TIME. This edge is where a
+        # SENSOR is, which a robot_state_publisher would own if this
+        # track carried a URDF; where the VEHICLE is is a different
+        # claim and a different process. No use_sim_time on it, for
+        # imutf's reason: tf2 answers a static transform for any query
+        # time, so the stamp is never consulted and a clock this
+        # process does not have cannot go wrong.
+        spawn lasertf ros2 run tf2_ros static_transform_publisher \
+            --x "$CFG_VEHICLE_NAV_LIDAR_MOUNT_X" \
+            --y "$CFG_VEHICLE_NAV_LIDAR_MOUNT_Y" \
+            --z "$CFG_VEHICLE_NAV_LIDAR_MOUNT_Z" \
+            --frame-id "$CFG_FRAMES_BASE_LINK" \
+            --child-frame-id "$CFG_FRAMES_NAV_LIDAR"
+
+        # THE SCAN MATCHER. Built from source into the user's own home
+        # by tools/install_rf2o.sh and executed by ABSOLUTE PATH rather
+        # than through `ros2 run`: the package installs exactly one
+        # executable, it links no library of its own (the one CMake
+        # builds beside it is neither installed nor linked), and every
+        # shared object it needs is already on the loader path from
+        # source_ros() above. So there is no second workspace to source
+        # and no wrapper shell between this script and the child.
+        #   FOUR OF ITS SEVEN PARAMETERS ARE NOT DEFAULTS, AND EACH IS
+        #   A REFUSAL OF SOMETHING THIS TRACK WILL NOT HAVE:
+        #     publish_tf false - it defaults TRUE and would broadcast
+        #       odom -> base_link. That edge has exactly one owner on
+        #       this stack (ekf_node), and a second publisher of it is
+        #       the failure the whole two-phase odometry plan exists to
+        #       prevent (ver2 invariant 10).
+        #     init_pose_from_topic empty - it defaults to
+        #       /base_pose_ground_truth. Left alone, an ESTIMATOR on
+        #       this stack would subscribe to a ground-truth pose, and
+        #       that is F2 global constraint 13 broken by a default. It
+        #       is spelled as YAML's empty string because rcl cannot
+        #       parse a bare `-p key:=` at all - measured, it aborts.
+        #     odom_frame_id - frames.rf2o_odom and NOT frames.odom, so
+        #       a second opinion about the vehicle's pose cannot wear
+        #       the name of the edge the filter owns, even in a header.
+        #     freq - config.yaml rf2o.freq_hz, twice the nav lidar's
+        #       rate, because this node's main loop consumes at most
+        #       one buffered scan per pass. The argument is there.
+        spawn rf2o "$RF2O_BIN" --ros-args \
+            -p use_sim_time:=true \
+            -p laser_scan_topic:="$CFG_TOPICS_SCAN_NAV" \
+            -p odom_topic:="$CFG_TOPICS_RF2O_ODOM_RAW" \
+            -p base_frame_id:="$CFG_FRAMES_BASE_LINK" \
+            -p odom_frame_id:="$CFG_FRAMES_RF2O_ODOM" \
+            -p publish_tf:=false \
+            -p 'init_pose_from_topic:=""' \
+            -p freq:="$CFG_RF2O_FREQ_HZ"
+
+        # AND THE ONE THING BETWEEN IT AND THE FILTER. rf2o publishes a
+        # twist covariance of 36 zeros - never assigned, and no
+        # parameter to set it - and a `linear.x` that is the SCANNER's
+        # forward speed stamped with base_link's name.
+        # robot_localization does not ignore a zero variance on a
+        # channel it is fusing; it substitutes a very small one. So
+        # without this child the arm would arrive trusted orders of
+        # magnitude above the wheel odometry it exists to be checked
+        # against, carrying 0.107 m/s of lever-arm error through every
+        # corner. nodes/rf2o_twist.py's header is the whole argument
+        # and nodes/rf2o_twist_core.py is where the arithmetic is
+        # tested. python3 and not `ros2 run`, for wheel_odometry.py's
+        # reason: this track is deliberately not a colcon package.
+        spawn rf2ocov python3 "$M5V3/nodes/rf2o_twist.py"
+    fi
 
     # THE BRIDGES AFTER THE TRUCK, because all but one of their topics are
     # the truck's and a bridge opened over topics that do not exist yet
@@ -374,9 +600,30 @@ start() {
     #   THE OUTPUT TOPIC IS A REMAP because ekf_node's publisher is named
     #   `odometry/filtered` in its own source and the package offers no
     #   parameter to rename it.
+    #   AND THE OPTIONAL ARM IS TWO EXTRA ARGUMENTS AND NOTHING ELSE.
+    #   With --rf2o the filter is handed a SECOND --params-file and one
+    #   more `-p odomN:=`; without it neither string is built and the
+    #   command line below is character for character the one
+    #   EVIDENCE_FUSION.md 9.3's eight sessions were recorded under. An
+    #   ARRAY rather than two copies of a twelve-argument invocation in
+    #   an if/else, because the copy that is edited is the one that is
+    #   right and the other one is the bug.
+    #     THE OVERLAY GOES AFTER ekf.yaml, which is how rclcpp merges
+    #     parameter files: later ones win per key, and this one defines
+    #     only keys the first does not.
+    #     AN EMPTY ARRAY EXPANDS TO NOTHING under `set -u` because it is
+    #     quoted as "${ekf_arm[@]}"; unquoted, or under bash 4.3, an
+    #     empty array is an unbound variable and the whole bringup would
+    #     abort on the OFF path - which is the path that must not change.
+    local ekf_arm=()
+    if [ "$RF2O" = true ]; then
+        ekf_arm=(--params-file "$EKF_RF2O_PARAMS"
+                 -p odom1:="$CFG_TOPICS_RF2O_ODOM")
+    fi
     spawn ekf ros2 run robot_localization ekf_node --ros-args \
         -r __node:="$CFG_EKF_NODE_NAME" \
         --params-file "$EKF_PARAMS" \
+        ${ekf_arm[@]+"${ekf_arm[@]}"} \
         -p use_sim_time:=true \
         -p frequency:="$CFG_EKF_FREQUENCY_HZ" \
         -p map_frame:="$CFG_FRAMES_MAP" \
@@ -430,6 +677,14 @@ start() {
             "read the log named above, then '$0 stop' before trying again."
     fi
 
+    # AND ON THE rf2o ARM, ONE MORE THING THAT IS ALIVE-BUT-WRONG.
+    # Same shape as the filter's gate below and for the same reason:
+    # every check above is green over a scan matcher that never found
+    # out where it is mounted. See check_rf2o_transform().
+    if [ "$RF2O" = true ]; then
+        check_rf2o_transform
+    fi
+
     # AND THE FILTER IS ASKED WHETHER IT IS STILL ONE. Every child is
     # alive by this line, which on this stack is NOT the same as every
     # child working: ekf_node can diverge during its first cycles -
@@ -445,7 +700,12 @@ start() {
     fi
 
     echo ""
-    echo "up. one truck, one world, two bridges, one estimator, one filter."
+    if [ "$RF2O" = true ]; then
+        echo "up. one truck, one world, two bridges, TWO estimators,"
+        echo "    one filter."
+    else
+        echo "up. one truck, one world, two bridges, one estimator, one filter."
+    fi
     if [ "$SLIPPERY" = true ]; then
         echo "THIS IS THE SLIPPERY PLANT." \
              "slip compliance $CFG_SLIPPERY_SLIP_COMPLIANCE_LATERAL /" \
@@ -473,6 +733,18 @@ start() {
     echo "         refused, EVIDENCE_FUSION.md 9). It reads no pose and"
     echo "         no ground truth. ekf_node is SILENT about an input"
     echo "         that never arrives - check the topic, not the log."
+    if [ "$RF2O" = true ]; then
+        echo "rf2o:    THE OPTIONAL LASER-ODOMETRY ARM IS ON." \
+             "$CFG_TOPICS_SCAN_NAV ->"
+        echo "         $CFG_TOPICS_RF2O_ODOM_RAW -> $CFG_TOPICS_RF2O_ODOM -> the filter's odom1."
+        echo "         rf2o publishes NO covariance and a scanner-frame vx;"
+        echo "         nodes/rf2o_twist.py puts config.yaml rf2o.covariance on it"
+        echo "         and corrects the lever arm. vx and vyaw only - its vy is a"
+        echo "         hard-coded 0.0 upstream. $CFG_EKF_RF2O_PARAMS_FILE says so."
+        echo "         THIS IS NOT THE STACK EVIDENCE_FUSION.md 9.3 MEASURED:"
+        echo "         every session recorded on it is LABELLED wheel+imu+rf2o and"
+        echo "         must not be tabled beside a wheel+imu run. analyse refuses to."
+    fi
     echo "check:  $0 status"
     echo "rtf:    bash $M5V3/tools/rtf_probe.sh"
     echo "drive:  python3 $M5V3/tools/drive_route.py straight|square|aisle"
@@ -711,6 +983,22 @@ write_traction() {
       echo "slip_compliance_longitudinal=$lon"
       echo "wheels=$(wheel_links | paste -sd' ')"
       echo "source=$source"
+      # WHICH ESTIMATOR IS UP, AND IT IS THE TRACTION LABEL'S ARGUMENT
+      # APPLIED TO THE OTHER HALF OF THE STACK (F2 Task 3). --slippery
+      # changes the PLANT and this file already said so; --rf2o changes
+      # the ESTIMATOR, and a run of one arm sitting in the other's table
+      # is the identical failure - a row that looks exactly like a good
+      # one. Nothing else can tell them apart afterwards: same model,
+      # same floor, same profiles, same CSV columns, and even the fused
+      # topic is the same address. So it is written here by the only
+      # thing that knows, copied into every session by
+      # tools/sensor_evidence.py's `record`, printed by `status`, and
+      # `analyse` refuses a set of sessions that mixes the two.
+      #   IT IS A SEPARATE LINE FROM traction= BECAUSE IT IS A SEPARATE
+      #   QUESTION. The four combinations are all legitimate runs and
+      #   EVIDENCE_FUSION.md 10 uses three of them.
+      echo "arm=$([ "$RF2O" = true ] && echo wheel+imu+rf2o || echo wheel+imu)"
+      echo "arm_source=$([ "$RF2O" = true ] && echo "$0 --rf2o, $CFG_EKF_PARAMS_FILE + $CFG_EKF_RF2O_PARAMS_FILE, rf2o pinned at $CFG_RF2O_COMMIT" || echo "$CFG_EKF_PARAMS_FILE alone (no --rf2o)")"
       echo "partition=$GZ_PARTITION"
       echo "started=$(date -Is)"; } > "$TRACTIONFILE" \
         || refuse "the traction state file is writable" "$CONFIG" \
@@ -766,9 +1054,25 @@ status() {
         printf '  %-10s %-7s %s\n' "traction" \
             "$(sed -n 's/^traction=//p' "$TRACTIONFILE")" \
             "slip compliance $(sed -n 's/^slip_compliance_lateral=//p' "$TRACTIONFILE") / $(sed -n 's/^slip_compliance_longitudinal=//p' "$TRACTIONFILE") on $(sed -n 's/^wheels=//p' "$TRACTIONFILE")"
+        # AND WHICH ESTIMATOR, for the traction line's reason: the two
+        # arms are the same six or nine children with the same names, on
+        # the same topics, and the fused output is at the same address.
+        # An operator who cannot see the arm here would have to read
+        # ekf.log to find out which filter they are looking at.
+        #   A STATE FILE WRITTEN BEFORE F2 TASK 3 HAS NO arm= LINE, and
+        #   it is reported as UNKNOWN rather than as wheel+imu. Every
+        #   such stack WAS wheel+imu - --rf2o did not exist - and saying
+        #   so here would be inferring the label from an absence, which
+        #   is exactly the habit tools/sensor_evidence.py's UNLABELLED
+        #   refuses on the same question.
+        printf '  %-10s %-7s %s\n' "arm" \
+            "$(sed -n 's/^arm=//p' "$TRACTIONFILE" | grep . || echo UNKNOWN)" \
+            "$(sed -n 's/^arm_source=//p' "$TRACTIONFILE" | grep . || echo "no arm= line - this state file predates F2 Task 3")"
     else
         printf '  %-10s %-7s %s\n' "traction" "UNKNOWN" \
             "no $TRACTIONFILE - this stack was not started by '$0 start'"
+        printf '  %-10s %-7s %s\n' "arm" "UNKNOWN" \
+            "same file, same reason"
     fi
     local pid name alive=0 dead=0
     while read -r pid name; do
@@ -831,7 +1135,7 @@ stop() {
     echo "down."
 }
 
-USAGE="usage: $0 start [--headless] [--slippery] | stop | status
+USAGE="usage: $0 start [--headless] [--slippery] [--rf2o] | stop | status
   start       GPU preflight, then warehouse_ver3 + one forklift_ver3 in a
               Gazebo window, plus TWO ros_gz bridges: the parameter bridge
               for the clock, the ground-truth odometry (a measurement
@@ -855,22 +1159,36 @@ USAGE="usage: $0 start [--headless] [--slippery] | stop | status
               odometry's distance goes badly long, and 'status' and every
               recorded evidence session say so by name. Do not mix its
               runs with nominal ones in one table; 'analyse' refuses to.
-  status      every child by name, ALIVE or DEAD, with its log, and which
-              traction the running plant is on
+  --rf2o      THE OPTIONAL LASER-ODOMETRY ARM. Three more children - the
+              nav lidar's static transform, rf2o_laser_odometry_node
+              matching consecutive scans, and the relay that puts a
+              MEASURED covariance on its twist and corrects the lever arm
+              upstream does not - and a second --params-file giving the
+              filter an odom1 it fuses vx and vyaw from. It is a
+              DIFFERENT ESTIMATOR on the same plant, exactly as
+              --slippery is the same estimator on a different plant, and
+              'status' and every recorded session say which by name;
+              'analyse' refuses a set that mixes the two arms.
+              Build it first: bash tools/install_rf2o.sh
+              TEN processes with a window, nine without.
+  status      every child by name, ALIVE or DEAD, with its log, which
+              traction the running plant is on and which estimator arm
   stop        end this partition's stack and nothing else"
 case "${1:-}" in
     start|--start)
         shift
-        # THE TWO FLAGS ARE INDEPENDENT AND MAY COME IN EITHER ORDER, and
+        # THE THREE FLAGS ARE INDEPENDENT AND MAY COME IN ANY ORDER, and
         # an unrecognised word is a REFUSAL and not a shrug: the one it
-        # will be is a misspelt --headless or --slippery, and silently
-        # opening a window for someone who asked for none - or bringing
-        # up the DRY plant for someone who asked for the wet one - is
-        # what this loop exists to prevent.
+        # will be is a misspelt --headless, --slippery or --rf2o, and
+        # silently opening a window for someone who asked for none -
+        # or bringing up the DRY plant for someone who asked for the wet
+        # one, or the two-sensor filter for someone measuring the three-
+        # sensor one - is what this loop exists to prevent.
         while [ "$#" -gt 0 ]; do
             case "$1" in
                 --headless) GUI=false ;;
                 --slippery) SLIPPERY=true ;;
+                --rf2o) RF2O=true ;;
                 *) echo "$USAGE"; exit 2 ;;
             esac
             shift

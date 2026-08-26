@@ -1,0 +1,129 @@
+# ekf_rf2o.yaml - the OPTIONAL laser-odometry arm, and nothing else.
+#
+# F2 Task 3. `m5v3.sh start --rf2o` passes this to robot_localization's
+# ekf_node as a SECOND --params-file, after ekf.yaml; `m5v3.sh start`
+# without the flag never names it on any command line and it is never
+# read at all.
+#
+# WHY IT IS A SEPARATE FILE AND NOT A SECTION OF ekf.yaml.
+# EVIDENCE_FUSION.md 9.3's figures are the shipping filter's, and the
+# claim this task has to be able to make is that the default stack is
+# still exactly that filter. With the odom1 block living in ekf.yaml,
+# "the arm is off" would rest on a topic parameter being absent from a
+# command line - and ekf_node auto-declares every override it is handed,
+# so an `odom1:` line that ever appeared in that file would switch the
+# arm on with the flag doing nothing. Kept here, the OFF path reads one
+# unchanged file and the ON path reads two, which is a difference
+# anybody can check with `ls` and a diff rather than by reasoning about
+# rclcpp's parameter loading.
+#   THE TOP-LEVEL KEY IS THE NODE'S NAME AND m5v3.sh CHECKS THIS FILE
+#   FOR IT TOO, by the same grep it already runs over ekf.yaml and for
+#   the same reason: a parameter file addressed to a node that is never
+#   started applies nothing and says nothing about it.
+#
+# WHAT IT MAY CONTAIN. Exactly the odom1 entries. Every parameter that
+# is about the FILTER rather than about this sensor - two_d_mode, the
+# timeout, the transform, the process noise that is deliberately left at
+# its default - stays in ekf.yaml, once, so that turning this arm on
+# cannot quietly change anything else. And no topic name and no frame
+# name appears here, exactly as none appears in ekf.yaml: m5v3.sh passes
+# `-p odom1:=` from config.yaml's topics.rf2o_odom, which is where every
+# name on this track lives.
+#
+# ------------------------------------------------------------------
+# WHAT THIS ARM IS, IN ONE PARAGRAPH.
+#
+# `rf2o_laser_odometry` (config.yaml rf2o.commit; built by
+# tools/install_rf2o.sh) estimates the vehicle's planar motion by
+# matching consecutive scans of the nav lidar - a SICK TiM571 profile,
+# 15 Hz, 811 beams over 270 deg, gaussian sigma 0.02 m with a per-run
+# bias of the same size (model.sdf). It is the only estimator on this
+# stack that observes the FLOOR: the wheel odometry observes a shaft and
+# the IMU observes the chassis, and neither can tell that the tyre is
+# creeping. That is the whole reason it is here and EVIDENCE_FUSION.md
+# 10.5 is whether it paid for itself.
+#
+# WHAT IS FUSED IS THE TWIST, AND ONLY TWO COMPONENTS OF IT.
+# It does not reach this filter directly: nodes/rf2o_twist.py stands
+# between them, because the upstream node publishes a covariance of 36
+# zeros and a `linear.x` that is the SCANNER's forward speed wearing
+# base_link's name. That file's header is the whole argument; what
+# arrives on topics.rf2o_odom is the corrected twist with a MEASURED
+# covariance (config.yaml rf2o.covariance, EVIDENCE_FUSION.md 10.2).
+# ------------------------------------------------------------------
+
+m5v3_ekf:
+  ros__parameters:
+
+    # ---------------- sensor 2: the laser odometry ----------------
+    #
+    # Order of the 15 flags:
+    #   x, y, z, roll, pitch, yaw,
+    #   vx, vy, vz, vroll, vpitch, vyaw,
+    #   ax, ay, az
+    #
+    # THE POSE IS REFUSED IN ALL SIX AXES, and this is the third
+    # estimator on this track to be refused it. rf2o integrates its own
+    # scan-matched dead reckoning and the relay forwards that pose
+    # untouched, with 1000.0 on every axis as a do-not-fuse flag
+    # (config.yaml rf2o.covariance.unused) - the same flag
+    # nodes/wheel_odometry.py raises on its own. These six flags are the
+    # SECOND refusal, because a flag is not a mechanism: a filter
+    # configured to fuse a pose would fuse it however loudly the
+    # covariance complained. F2 global constraint 13.
+    #
+    # TWO ENTRIES TRUE, AND vy IS THE ONE THAT LOOKS LIKE AN OMISSION.
+    #   vx  - base_link's forward speed, scan-matched. It is the
+    #         SECOND independent measurement of the one quantity this
+    #         stack could not previously check: the wheel odometry
+    #         measures a shaft, believes a radius 1.5 % too big, and on
+    #         the slippery plant runs 9.6 % long with nothing on the
+    #         vehicle able to contradict it (EVIDENCE_FUSION.md 8.4).
+    #         The gyro cannot - it observes heading. This channel is the
+    #         only thing on this stack that observes DISTANCE against
+    #         the world, which is why 8.5's "fusion cannot reach
+    #         along-track" is the claim this whole arm exists to test.
+    #   vyaw- the scan-matched yaw rate, a third opinion beside the
+    #         gyro's and the steer angle's. rf2o derives it from its own
+    #         ROBOT pose, which it does compose through the mount, so
+    #         unlike vx it needs no lever-arm correction and the relay
+    #         passes it through.
+    #   vy  - FALSE, AND NOT BECAUSE LATERAL VELOCITY IS UNOBSERVABLE
+    #         OR UNIMPORTANT. It is neither: base_link genuinely
+    #         translates sideways at d*yaw_rate in every turn, and
+    #         ekf.yaml's odom0_config fuses exactly that from the wheel
+    #         odometry after the first cut of this track refused it and
+    #         was reversed on a measured +0.90 m. The reason is narrower
+    #         and it is in the upstream source: rf2o computes a local
+    #         lateral velocity (`kai_loc_(1)`) and then writes a LITERAL
+    #         0.0 into `twist.linear.y` instead of publishing it. So the
+    #         number on the wire is a hard-coded constant, not an
+    #         estimate; fusing it would be fusing an assertion that this
+    #         vehicle never moves sideways, against a filter that
+    #         already knows from a better source that it does. The relay
+    #         puts the do-not-fuse flag on that axis and this flag is
+    #         the second refusal.
+    #         IT COULD BE RECOVERED ONLY BY PATCHING rf2o. The scanner's
+    #         own vy never leaves that process, so no arithmetic outside
+    #         it can reconstruct base_link's. A later task that wants
+    #         this channel changes rf2o.commit to a patched revision and
+    #         re-measures; it does not synthesise a number here.
+    odom1_config: [false, false, false,
+                   false, false, false,
+                   true,  false, false,
+                   false, false, true,
+                   false, false, false]
+    # ABSOLUTE, NOT DIFFERENTIAL, AND NOT RELATIVE - ekf.yaml's odom0
+    # note, and it holds for the same reason: `differential` turns a
+    # fused quantity into differences of successive measurements, which
+    # is what a POSE input needs and is meaningless for a rate, and
+    # `relative` subtracts the first measurement, which for a velocity
+    # that starts at zero hides a start transient rather than showing
+    # it.
+    odom1_differential: false
+    odom1_relative: false
+    # A 15 Hz CHANNEL INTO A 50 Hz FILTER, so most cycles see no sample
+    # at all and none sees more than one. Ten is a long way past enough;
+    # it is ekf.yaml's depth for both existing sensors and there is no
+    # reason for this one to differ.
+    odom1_queue_size: 10

@@ -81,10 +81,21 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 #   through `ros2 run`, so the surviving process is the EXECUTABLE and
 #   its command line begins with the path to it. Neither is nominated by
 #   anything above.
+#     static_transform_publisher NOMINATES BOTH OF THEM since F2 Task 3:
+#     the IMU's mount and - with --rf2o - the nav lidar's are two
+#     processes of the same executable, and one pattern finds both.
+#   THE LAST TWO ARE F2 TASK 3's OPTIONAL ARM and they are listed
+#   UNCONDITIONALLY, which is the safe direction: a pattern that
+#   nominates nothing costs one pgrep, and a pattern that is missing
+#   when the flag WAS given orphans a live child. rf2o's executable
+#   lives under the user's $HOME (config.yaml rf2o.workspace) so its
+#   command line begins with that path; rf2o_twist.py is a plain python3
+#   process and is named by its SCRIPT, exactly as wheel_odometry.py is.
 # MAINTENANCE OBLIGATION: a process added to m5v3.sh's start() is added
 # HERE, or stop orphans it and still prints "down."
 M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py"
-               "static_transform_publisher" "ekf_node")
+               "static_transform_publisher" "ekf_node"
+               "rf2o_laser_odometry_node" "rf2o_twist.py")
 
 # The same list as one pgrep alternation, for the callers that want a
 # single pattern rather than a loop.
