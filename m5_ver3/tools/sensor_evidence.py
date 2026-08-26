@@ -132,11 +132,10 @@ REQUIRED_KEYS = (
     # F3 TASK 2's, AND topics.tf IS NOW READ BY THIS PROCESS RATHER THAN
     # ONLY HANDED TO `ros2 bag record`: the localiser's edge is captured
     # off /tf by a subscription of this recorder's own.
-    "topics.amcl_pose", "topics.map",
+    "topics.amcl_pose", "topics.initialpose", "topics.map",
     "frames.map",
     "map.dir", "map.name", "map.registration.file",
-    "localization.label", "localization.params_file",
-    "localization.analyse.map_gap_s",
+    "localization.params_file", "localization.analyse.map_gap_s",
     "frames.odom", "frames.base_link", "frames.imu",
     "vehicle.imu_mount.x", "vehicle.imu_mount.y", "vehicle.imu_mount.z",
     "ekf.frequency_hz", "ekf.params_file", "fuse.params_file",

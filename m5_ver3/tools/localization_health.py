@@ -209,7 +209,7 @@ def main(argv=None):
     node = Node("m5v3_localization_health")
     received = []
     node.create_subscription(PoseWithCovarianceStamped, pose_topic,
-                            received.append, QoSProfile(depth=10))
+                             received.append, QoSProfile(depth=10))
     publisher = node.create_publisher(PoseWithCovarianceStamped, seed_topic,
                                       QoSProfile(depth=1))
 
@@ -242,7 +242,7 @@ def main(argv=None):
     covariance[35] = cfg.f("localization.initial_pose.cov_yaw_rad2")
     message.pose.covariance = covariance
 
-    print("  loc: {} seeded at map ({:+.4f}, {:+.4f}) yaw {:+.5f}".format(
+    print("  loc: {} seeding at map ({:+.4f}, {:+.4f}) yaw {:+.5f}".format(
         loc, seed[0], seed[1], seed[2]))
     print("       = world ({:+.3f}, {:+.3f}) yaw {:+.5f} through the "
           "committed registration".format(

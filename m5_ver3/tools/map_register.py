@@ -78,6 +78,8 @@ REQUIRED_KEYS = (
     # four frames down instead of a refusal by its dotted name.
     "vehicle.model", "vehicle.nav_lidar_mount.x",
     "vehicle.nav_lidar_mount.y", "evidence.sdf_names.nav_lidar",
+    "localization.analyse.support_every",
+    "localization.analyse.support_radius_m",
 )
 
 #: The m5_ver1 map's registration, for the comparison row and NOTHING
@@ -1047,16 +1049,24 @@ def main(argv=None):
     support.add_argument("session", help="a session directory under "
                                          "evidence.dir")
     support.add_argument("--name", help="artifact name (default: map.name)")
+    # THE TWO DEFAULTS ARE config.yaml's AND NOT THIS FILE'S, which is
+    # this track's rule about behavioural numbers: they decide the two
+    # figures amcl.yaml quotes, so a copy here would be a second opinion
+    # about a value the evidence file names.
     support.add_argument(
-        "--every", type=int, default=25, metavar="N",
-        help="use one scan in N (default 25). The reading is over "
+        "--every", type=int, metavar="N",
+        default=cfg.i("localization.analyse.support_every"),
+        help="use one scan in N (config.yaml "
+             "localization.analyse.support_every). The reading is over "
              "hundreds of thousands of beams either way; this is what "
-             "keeps a 775 s drive to a minute of arithmetic.")
+             "keeps a 775 s drive to seconds of arithmetic.")
     support.add_argument(
-        "--radius-m", type=float, default=0.30, metavar="M",
+        "--radius-m", type=float, metavar="M",
+        default=cfg.f("localization.analyse.support_radius_m"),
         help="how far from a return a mapped surface may be and still "
-             "explain it (default 0.30). Beyond this the return is "
-             "UNEXPLAINED - see the command's own note.")
+             "explain it (config.yaml "
+             "localization.analyse.support_radius_m). Beyond this the "
+             "return is UNEXPLAINED - see the command's own note.")
 
     args = parser.parse_args(argv)
     if args.command == "derive":

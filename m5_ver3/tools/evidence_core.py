@@ -470,10 +470,11 @@ class MapFrame(object):
         """The one sentence every absolute figure has to be read with."""
         if self.residual_max_m is None:
             return "no registration residual was stated with this transform"
+        rms = (float("nan") if self.residual_rms_m is None
+               else self.residual_rms_m)
         return ("registration residual rms {:.4f} m, MAX {:.4f} m - no "
                 "figure at or below the MAX is a measurement of the "
-                "localiser".format(self.residual_rms_m or float("nan"),
-                                   self.residual_max_m))
+                "localiser".format(rms, self.residual_max_m))
 
 
 # ----------------------------------------------------------------------
