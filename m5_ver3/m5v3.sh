@@ -1535,8 +1535,15 @@ case "${1:-}" in
         #   to be uniform in it. A third combination would need a third
         #   label, a column in every table in EVIDENCE_FUSION.md 10 and
         #   11, and a measurement - which is a task and not a flag.
-        # It is refused BEFORE configure(), so nothing has been read and
-        # certainly nothing has been started.
+        # IT CALLS configure() AND THEN REFUSES, and the order is on
+        # purpose rather than an oversight: the refusal below quotes
+        # $CONFIG and the two frame names, so the config has to have been
+        # READ before it can be spoken. What has NOT happened by that
+        # line is the part that matters - configure() only loads
+        # config.yaml and derives paths, so no GPU preflight, no ROS
+        # source, no pidfile, no state file and NO CHILD has been
+        # started. The refusal is still "nothing was started"; it is not
+        # "nothing was read".
         if [ "$RF2O" = true ] && [ "$FUSE" = true ]; then
             configure
             refuse "exactly one estimator arm was asked for" \

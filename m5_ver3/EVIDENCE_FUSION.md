@@ -1,4 +1,4 @@
-# EVIDENCE — m5-ver3 fusion: the odom-frame EKF (F2 Task 1), the slip scenario (F2 Task 2, §8), the `ax` reversal (§9) and the laser-odometry arm (F2 Task 3, §10)
+# EVIDENCE — m5-ver3 fusion: the odom-frame EKF (F2 Task 1), the slip scenario (F2 Task 2, §8), the `ax` reversal (§9), the laser-odometry arm (F2 Task 3, §10) and the factor-graph A/B that chose the phase's estimator (F2 Task 4, §11)
 
 Every number below was measured on this rig on **2026-08-26**, and the
 instrument that produced it is named beside it. A *configured* figure is
@@ -47,6 +47,23 @@ nothing else running on the machine.
 | `m5v3.sh` `check_rf2o_transform()` | did the scan matcher find out where it is bolted? A refusal, beside §9.4's covariance gate | ● |
 | `tools/sensor_evidence.py` | stamps every session with its ARM as well as its plant, refuses to record without one, and refuses to read two arms into one document | extended |
 | the suite | 148 → **194** tests; a fourth selftest, `rf2o_twist_core --selftest`, **22/22** | extended |
+
+**And what F2 Task 4 added on top, all of it §11's:**
+
+| Tool | What it answers | New there |
+|---|---|---|
+| `m5v3.sh start --fuse` | a SECOND ESTIMATOR in the filter's place - `fuse`'s fixed-lag smoother, a factor graph re-solved over a 0.5 s window - behind a flag that is off by default, and mutually exclusive with `--rf2o` because both own `odom` → `base_link` | ● |
+| `tools/install_fuse.sh` | how nine `fuse` packages reproduce on a rig with **no sudo**: `apt-get download` + `dpkg-deb -x` into a prefix under `$HOME`, versions pinned, `ldd`-checked, manifest written | ● |
+| `m5_ver3/fuse.yaml` | what the factor graph fuses and what it refuses - the same channels `ekf.yaml` fuses, so that the A/B varies the estimator and nothing else | ● |
+| `m5v3.sh` `check_fuse_params()` | the refusal that holds constraint 13 on a node where a refused channel is an ABSENCE: no pose dimensions, no acceleration dimensions, ever | ● |
+| `tools/ekf_health.py` | now gates **whichever arm is up**, picking its topic from the `arm=` line (`evidence_core.fused_topic_key()`); and, on an arm that publishes 36 zeros for a covariance, gates on the POSE instead and says which check it ran | extended |
+| `tools/sensor_evidence.py` | the fused subscription follows the arm to its own address, and the third arm label `fuse:wheel+imu` flows the whole chain | extended |
+| the suite | 194 → **228** tests; `evidence_core --selftest` 26 → **30** checks | extended |
+
+**§11 carries this phase's shipping recommendation**, which none of the
+sections above do: `robot_localization` **stays** m5-ver3's default
+estimator and the factor-graph arm ships **off** behind its flag. §11.6
+is the argument and §11.5 is what it rests on.
 
 **The preamble the tables below cannot be read without.**
 
@@ -1263,10 +1280,15 @@ rather than an absence of them. Two guards were added, both on
 - **`analyse` refuses to score a session whose fused stream left the
   building**, naming the sample and the bound. `config.yaml`'s
   `evidence.analyse.fused_sanity_m` is **100.0** m — the floor's longest
-  diagonal is 57.7 m and the worst end error ever measured on this track
-  is 1.29 m, so the bound has seventy-seven times the headroom of the
-  largest honest figure while the failure misses it by **forty-five
-  orders of magnitude**.
+  diagonal is 57.7 m, and the bound is on the distance an estimate
+  reaches **from its own origin**, not on an end error. Measured over
+  every fused stream this track has recorded, the largest honest such
+  distance is **12.13 m** (a `straight` run, which drives 11.6 m and
+  believes it drove 12.1), so the bound is **8.2×** the largest true
+  value while the failure misses it by **forty-seven orders of
+  magnitude** (1e48 m). `config.yaml`'s own note beside the key carries
+  the same pair; an earlier draft of this bullet quoted a worst END ERROR
+  of 1.29 m and got both figures wrong from it.
 
 **How the sessions in §8.3–§8.5 were obtained, stated plainly.** Each was
 taken by bringing the stack up, reading the filter's pose with the truck
@@ -1326,7 +1348,11 @@ every fused figure, and **exits non-zero**.
 ### 8.8 What this section did not do
 
 - **It did not rule on `ax`.** §8.6 is a finding with a measurement
-  attached, not a change. `ekf.yaml` is untouched by this task.
+  attached, not a change, and `ekf.yaml` was untouched **when this
+  section was written**. It did not stay that way: the ruling was made
+  a few hours later in the same task's tree, `imu0_config`'s `ax` entry
+  went `false`, and **§9 is that reversal** — so this bullet describes
+  the state §8's tables were taken in and not the state the file is in.
 - **It did not re-measure `corner_creep` under slip.** `straight` and
   `square` are what the brief names and what the two halves of the claim
   need; a third profile would have been a third of the rig time for a
@@ -1334,9 +1360,10 @@ every fused figure, and **exits non-zero**.
 - **It did not tune the slippery values for a nicer table.** The ladder
   is in §8.2 with its rejected rows, the acceptance was the requirement's
   own floor, and the chosen row is the lowest one that clears it.
-- **It did not touch `model.sdf`, `ekf.yaml`, or anything outside
-  `m5_ver3/`.** Constraint 12's first rung held, so the generated-variant
-  branch was never taken.
+- **It did not touch `model.sdf` or anything outside `m5_ver3/`.**
+  Constraint 12's first rung held, so the generated-variant branch was
+  never taken. (`ekf.yaml` was untouched here too and then was not —
+  see the first bullet and §9.)
 
 ---
 
@@ -3400,7 +3427,7 @@ topic mapping, the state-file parse, and four that read the committed
 `tests/test_evidence_core.py` (`covariance_is_absent`, `position_of`).
 `evidence_core`'s operator selftest went 26 → 30.
 
-**The four that would have caught a real bug**, and why they exist:
+**The five that would have caught a real bug**, and why they exist:
 
 * `test_an_unknown_estimator_is_refused_BY_NAME_and_not_defaulted` — a
   `dict.get(arm, DEFAULT)` in `fused_topic_key()` would point the gate

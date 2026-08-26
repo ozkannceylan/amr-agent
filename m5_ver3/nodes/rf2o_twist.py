@@ -104,6 +104,7 @@ REQUIRED_KEYS = (
     "vehicle.nav_lidar_mount.x", "vehicle.nav_lidar_mount.y",
     "vehicle.nav_lidar_mount.z",
     "rf2o.covariance.vx", "rf2o.covariance.vyaw", "rf2o.covariance.unused",
+    "rf2o.aperture_sin_epsilon",
     "rf2o.qos_depth", "rf2o.log_every_s",
 )
 
@@ -193,7 +194,7 @@ def _make_node_class(Node, Odometry, LaserScan, QoSProfile):
             self._pose_cov = wheel_odometry.covariance_diagonal([unused] * 6)
             # vy IS `unused` AND NOT A MEASURED NUMBER, and that is the
             # one entry here worth reading twice. rf2o writes a literal
-            # 0.0 into twist.linear.y - measured, all 911 samples of a
+            # 0.0 into twist.linear.y - measured, all 912 samples of a
             # 60 s capture - while the vehicle's real lateral velocity is
             # d*yaw_rate and is nowhere near zero in a turn (ekf.yaml
             # odom0_config). Publishing a covariance for a hard-coded
@@ -275,6 +276,56 @@ def _make_node_class(Node, Odometry, LaserScan, QoSProfile):
                     msg.angle_min, msg.angle_max,
                     math.degrees(abs(msg.angle_max - msg.angle_min)),
                     centre, math.degrees(centre)))
+            # IS THE CORRECTION THIS NODE IS ABOUT TO APPLY EXACT ON
+            # THIS APERTURE? A refusal, here, once, on the first scan -
+            # before a single sample has been relayed.
+            #   WHAT IT GUARDS. decide()'s rotation computes
+            #   `vx*cos(c) - vy*sin(c)`, and the vy it gets is
+            #   upstream's hard-coded 0.0 rather than the scanner's real
+            #   lateral speed, which never leaves that process. So the
+            #   `-vy*sin(c)` term is always missing and the answer is
+            #   right only where it vanishes - sin(c) = 0, an aperture
+            #   centred on 0 or pi. This plant's is centred on pi on
+            #   purpose (model.sdf) and clears the epsilon by ~19x.
+            #   WHY IT IS A REFUSAL AND NOT A WARNING. On any other
+            #   aperture the leak is a BIAS on the one channel this arm
+            #   contributes, through every turn, and there is nothing
+            #   downstream that could see it: the twist is at rate, the
+            #   covariance is the measured one, `status` reads nine
+            #   alive and every table would print. It is the shape of
+            #   failure check_rf2o_transform() exists for, one frame in.
+            #   IT IS CHECKED ON THE WIRE AND NOT ON model.sdf, because
+            #   the aperture that matters is the one rf2o is reading.
+            epsilon = self.cfg.f("rf2o.aperture_sin_epsilon")
+            if not rf2o_twist_core.aperture_is_recoverable(centre, epsilon):
+                self.cfg.refuse(
+                    "this aperture is one the frame correction is exact "
+                    "on",
+                    "{} and {} (rf2o.aperture_sin_epsilon)".format(
+                        self.cfg.s("topics.scan_nav"), _common.CONFIG),
+                    "the window is centred on {:+.7f} rad, whose |sin| "
+                    "is {:.6g}".format(centre, abs(math.sin(centre))),
+                    "against a ceiling of {:g}.".format(epsilon),
+                    "rf2o publishes a hard-coded 0.0 for its own lateral "
+                    "velocity, so the",
+                    "`- vy*sin(centre)` term of the rotation back into "
+                    "the scanner's frame is",
+                    "ALWAYS MISSING. It only cancels where sin(centre) "
+                    "is zero - an aperture",
+                    "centred on 0 (symmetric, the correction is the "
+                    "identity) or on pi (this",
+                    "plant's). Here it does not cancel, and what leaks "
+                    "through is the SCANNER's",
+                    "unknown lateral speed, landing on the fused forward "
+                    "speed as a bias through",
+                    "every turn that no instrument on this stack could "
+                    "attribute.",
+                    "NOTHING HAS BEEN RELAYED. Recovering it needs rf2o's "
+                    "own vy, which means a",
+                    "patched rf2o at a new rf2o.commit and a re-measure - "
+                    "not a number invented",
+                    "here. EVIDENCE_FUSION.md 10.1(a) and "
+                    "nodes/rf2o_twist_core.py's header.")
             if abs(centre) < 1e-12:
                 self.get_logger().info(
                     "that is a conventionally symmetric window, so the "

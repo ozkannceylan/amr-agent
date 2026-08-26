@@ -25,10 +25,23 @@ parameters and not one of them is about any of these:
      are). So rf2o's whole solution is the true one rotated by the
      window's centre bearing, and MEASURED ON THIS RIG the truck driving
      forwards at 0.695 m/s came out as `linear.x` **+0.58**: right
-     magnitude, wrong sign, because cos(pi) = -1. A rotation is exactly
-     recoverable and scan_centre_rad() below recovers it, from the same
-     `angle_min`/`angle_max` the scan itself carries rather than from a
-     constant typed into a config file.
+     magnitude, wrong sign, because cos(pi) = -1. scan_centre_rad()
+     below recovers the angle, from the same `angle_min`/`angle_max` the
+     scan itself carries rather than from a constant typed into a config
+     file.
+       AND THE RECOVERY IS EXACT ONLY ON AN APERTURE CENTRED ON 0 OR pi,
+       WHICH IS A LIMITATION AND NOT A PROPERTY OF ROTATIONS. The x
+       component of a plane rotation is `vx*cos(c) - vy*sin(c)`, and the
+       `vy` this file is handed is ALWAYS the hard-coded zero of the
+       paragraph below - not because the scanner has no lateral speed
+       but because upstream throws its own away. So the `-vy*sin(c)`
+       term is always missing, and the answer is right only where that
+       term VANISHES: sin(c) = 0. This plant's window is centred on pi
+       on purpose (model.sdf), so it does; anywhere else the SAME code
+       would quietly leak the scanner's unknown vy into the one channel
+       this arm contributes, as a bias through every turn, with nothing
+       downstream able to see it. aperture_is_recoverable() below is
+       that condition and nodes/rf2o_twist.py REFUSES the bringup on it.
 
   2. THE COVARIANCE IS ALL ZEROS - measured on the wire, all 36 entries
      of both matrices. `publish()` default-constructs the message and
@@ -55,7 +68,7 @@ parameters and not one of them is about any of these:
   AND `twist.linear.y` IS A HARD-CODED 0.0, WHICH IS WHY NOTHING HERE
   CORRECTS IT. Upstream computes a local lateral velocity
   (`kai_loc_(1)`) and then writes a literal zero into the message
-  instead - measured, all 911 samples of a 60 s capture are exactly
+  instead - measured, all 912 samples of a 60 s capture are exactly
   0.0. The lateral half of the lever arm needs the scanner's OWN vy,
   which never leaves that process, so no arithmetic outside it can
   reconstruct base_link's vy. The honest answer is not to invent one:
@@ -232,6 +245,42 @@ def covariance_is_absent(covariance):
     return all(value == 0.0 for value in covariance)
 
 
+def aperture_is_recoverable(centre_rad, sin_epsilon):
+    """Is this aperture one decide()'s rotation is EXACT on?
+
+    THE CONDITION IS |sin(centre)| = 0, AND THE REASON IS THE MISSING
+    vy. decide() computes the scanner-frame forward speed as
+    `vx*cos(c) - vy*sin(c)`, and the `vy` it is given is upstream's
+    hard-coded 0.0 rather than the scanner's real lateral velocity (see
+    the file header). The term that is missing is therefore
+    `vy_true*sin(c)`, and the result is right exactly when `sin(c)` is
+    zero - an aperture centred on 0 (a conventionally symmetric window,
+    where the whole correction is the identity) or on pi (this plant's,
+    where it is a sign flip). At any other centre the correction is
+    WRONG by an amount nothing on this stack can measure, because the
+    quantity it needs never leaves rf2o.
+
+    IT IS A REFUSAL AND NOT A CORRECTION, for mount_rotation_is_zero's
+    reason one line down: correcting it needs the scanner's vy, and
+    inventing one would be a hand in the arm's own numbers.
+
+    THE CHECK IS ON THE SINE AND NOT ON THE ANGLE. Writing it as
+    "near 0 or near pi" would refuse -pi and 3*pi, which are the same
+    aperture and equally exact; the quantity that matters is the one
+    that multiplies the missing term.
+
+    AND IT HAS A TOLERANCE WHERE mount_rotation_is_zero HAS NONE,
+    BECAUSE THIS ONE IS MEASURED AND THAT ONE IS COPIED. The centre
+    comes off a `sensor_msgs/LaserScan`, whose `angle_min` and
+    `angle_max` are float32: the quantum near pi is 2^-22 = 2.384e-07,
+    so a window that IS centred on pi arrives a little off it. Measured
+    on this rig, the wire carries +3.1415926 rad, |sin| = 5.359e-08.
+    config.yaml's rf2o.aperture_sin_epsilon is the ceiling and the
+    derivation is beside it there.
+    """
+    return abs(math.sin(float(centre_rad))) <= float(sin_epsilon)
+
+
 def mount_rotation_is_zero(rpy):
     """Is the scanner bolted square to the vehicle?
 
@@ -341,6 +390,20 @@ def _selftest():
     check("any mount rotation is refused, to any size",
           not mount_rotation_is_zero((0.0, 0.0, 1e-9))
           and not mount_rotation_is_zero((0.1, 0.0, 0.0)))
+
+    # THE APERTURE THE ROTATION IS EXACT ON, in the OPERATOR's selftest
+    # and not only in pytest, because the way this can be wrong is on a
+    # RIG whose lidar is spelled differently - and that is a rig where
+    # somebody is running this file by hand.
+    check("an aperture centred on 0 or pi is recoverable, and this rig's"
+          " float32 pi is too",
+          aperture_is_recoverable(0.0, 1e-6)
+          and aperture_is_recoverable(math.pi, 1e-6)
+          and aperture_is_recoverable(3.1415926, 1e-6))
+    check("any other aperture is refused, because the missing vy leaks "
+          "through sin(centre)",
+          not aperture_is_recoverable(math.pi / 2, 1e-6)
+          and not aperture_is_recoverable(math.pi + 1e-4, 1e-6))
 
     for name in ran:
         print("{}  {}".format("FAIL" if name in fails else "pass", name))

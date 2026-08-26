@@ -187,9 +187,19 @@ vehicle:
   # imu_mount above is: a SHELL cannot read XML, and the optional rf2o
   # arm has to put this offset on the wire as a TF before
   # rf2o_laser_odometry will produce anything meaningful at all.
-  #   IT IS CHECKED AGAINST THE MODEL AND NOT TRUSTED, by the same
-  #   `sensor_evidence.py analyse` cross-check that already warns when
-  #   imu_mount has drifted from the SDF.
+  #   IT IS CHECKED AGAINST THE MODEL AND NOT TRUSTED - BUT NOT BY THE
+  #   CHECK imu_mount GETS, and the difference matters. `analyse`'s
+  #   cross-check reads imu_mount and WARNS; it does not read this key at
+  #   all. What checks this one is `nodes/rf2o_twist.py`'s
+  #   mount_from_model(), which reads nav_lidar_link's pose out of
+  #   model.sdf at startup, compares it with the copy below, and REFUSES
+  #   the bringup by name on a disagreement - a refusal rather than a
+  #   warning, because the correction that node applies is a geometry
+  #   claim and a stale copy would silently move the lever arm it is
+  #   built on.
+  #   IT IS THEREFORE ONLY CHECKED ON THE --rf2o ARM. Nothing else on
+  #   this track reads this key, so on the default stack and on --fuse a
+  #   drifted copy sits here unremarked until the arm is next brought up.
   #   WHY THE ARM NEEDS IT, AND THE FAILURE IS WORSE THAN THE IMU's.
   #   rf2o looks up base_link <- the scan's own frame ONCE, on its first
   #   scan, in CLaserOdometry2DNode::setLaserPoseFromTf(). On a failed
@@ -1143,8 +1153,10 @@ rf2o:
   # WHAT THESE NUMBERS DO NOT CONTAIN, STATED RATHER THAN HIDDEN, and it
   # is the single most important line in this block. A covariance
   # describes DISPERSION. rf2o also has a large SCALE error on this
-  # plant - it reports about three quarters of the vehicle's true
-  # forward speed, measured - and that is a BIAS, which no covariance
+  # plant - it under-reports the vehicle's true forward speed by
+  # 9.5 - 17.4 %, measured over eight sessions (EVIDENCE_FUSION.md 10.5;
+  # nodes/rf2o_twist_core.py's header calls it "about a sixth") - and
+  # that is a BIAS, which no covariance
   # can express and which this block deliberately does not inflate
   # itself to disguise.
   #   THAT IS wheel_odom.covariance's OWN RULING, APPLIED AGAIN. That
@@ -1153,7 +1165,8 @@ rf2o:
   #   because inventing one would be a hand in the weighting. The same
   #   rule here means the filter is told rf2o's vx is PRECISE - eight
   #   times more precise than the wheel odometry's quantiser dither -
-  #   while it is also 25 % low, and it will weight it accordingly.
+  #   while it is also 9.5 - 17.4 % low, and it will weight it
+  #   accordingly.
   #   EVIDENCE_FUSION.md 10.5 measures what that costs, and the answer
   #   is the whole verdict on this arm. A gain fitted against the ground
   #   truth would have made the arm's own error vanish into a constant
@@ -1170,6 +1183,37 @@ rf2o:
     # exists for it. ekf_rf2o.yaml's six false pose flags are the second,
     # independent refusal.
     unused: "1000.0"
+  # HOW FAR THE APERTURE'S CENTRE MAY BE FROM 0 OR pi BEFORE THE ARM IS
+  # REFUSED, as |sin(centre)| rather than as an angle.
+  #
+  # WHAT IT GUARDS. nodes/rf2o_twist_core.py turns rf2o's velocity by
+  # the aperture's centre bearing, and the x component of that rotation
+  # is `vx*cos(c) - vy*sin(c)`. The `vy` it is handed is upstream's
+  # hard-coded 0.0 - not the scanner's real lateral speed, which never
+  # leaves that process - so the `-vy*sin(c)` term is ALWAYS missing and
+  # the correction is exact only where it vanishes: sin(c) = 0. This
+  # plant's window is centred on pi on purpose (model.sdf) so it does.
+  # On a vehicle whose lidar is centred anywhere else the same code
+  # would leak the scanner's unknown lateral speed into the one channel
+  # this arm contributes, as a BIAS through every turn, with nothing
+  # downstream able to see it. So it is a refusal at bringup and not a
+  # comment in a header.
+  #   IT IS A SINE AND NOT AN ANGLE so that -pi and 3*pi - the same
+  #   aperture, equally exact - are accepted rather than refused by an
+  #   `abs(c) < eps or abs(c - pi) < eps` written the obvious way.
+  #   1e-6 AND NOT ZERO, AND THE SIZE IS DERIVED. sensor_msgs/LaserScan
+  #   carries angle_min and angle_max as FLOAT32, whose quantum near pi
+  #   is 2^-22 = 2.384e-07, so a window that IS centred on pi arrives a
+  #   little off it: measured on this rig the wire reads +3.1415926 rad,
+  #   |sin| = 5.359e-08, which this clears by about 19x.
+  #   AND WHAT IT LETS THROUGH IS BELOW THE NOISE. At |sin(c)| = 1e-6 a
+  #   scanner lateral speed of 1 m/s leaks 1e-6 m/s onto the fused
+  #   forward speed - six orders of magnitude under the 0.0514 m/s
+  #   dispersion rf2o.covariance.vx above is derived from. A larger
+  #   tolerance would start hiding a real misalignment, which is the
+  #   failure this exists for: a BIG one shows up as a wrong-signed
+  #   speed on the first drive, and only a small one needs a check.
+  aperture_sin_epsilon: "1e-6"
   # The relay's subscription and publication depth. 10 is two thirds of a
   # second of this 15 Hz stream and the same depth every other node on
   # this track uses.

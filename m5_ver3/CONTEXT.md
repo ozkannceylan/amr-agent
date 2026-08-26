@@ -297,9 +297,9 @@ PLC link** — that absence is the phase, not an omission. Nothing here
 touches PLCSIM Advanced or anything on the Windows side.
 
 **The two newest children are one filter and the geometry it cannot work
-without.** `ekf` fuses the wheel odometry's TWIST (`vx` and yaw rate,
-never its pose — the node publishes a covariance of 1000 there as a
-do-not-fuse flag) with the IMU's yaw rate, and
+without.** `ekf` fuses the wheel odometry's TWIST (`vx`, `vy` and yaw
+rate, never its pose — the node publishes a covariance of 1000 there as
+a do-not-fuse flag) with the IMU's yaw rate, and
 publishes `/m5v3/odometry/filtered` plus **the first transform this stack
 has ever emitted, `odom` → `base_link`**. F3's `map` → `odom` stacks on
 top of it, and nothing in F2 may become that edge's owner — so the
@@ -360,7 +360,7 @@ so where it is opened.
 
 ---
 
-## Four things worth knowing before the next phase
+## Five things worth knowing before the next phase
 
 **The EKF fuses THREE twist components, and the third one was ruled out
 and then ruled back in on a measurement.** `ekf.yaml` fuses the wheel
@@ -418,8 +418,6 @@ EKF cannot represent (out-of-order measurements, loop closures,
 landmarks seen twice) and **two in-order twist sensors give it none of
 them**. The place to try it again is F3's `map` → `odom`, which is that
 problem; this stack is not.
-
-## Two things worth knowing before the next phase
 
 **A spawn pose has to be checked against the floor, not against the map.**
 Task 1 was handed the pose `(-3.00, -5.50)` and measured it spawning the

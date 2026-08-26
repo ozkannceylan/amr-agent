@@ -284,3 +284,76 @@ def test_ANY_mount_rotation_is_refused_because_the_two_term_form_is_wrong(rpy):
 
 def test_the_mount_rotation_check_has_no_tolerance_to_hide_a_small_error():
     assert core.mount_rotation_is_zero((0.0, 0.0, 1e-9)) is False
+
+
+# ----------------------------------------------------------------------
+# is the aperture one this correction is EXACT on?
+# ----------------------------------------------------------------------
+#
+# THE TRAP THIS CLOSES. decide() turns rf2o's (vx, vy) by the aperture's
+# centre bearing, and the x component of that rotation is
+# `vx*cos(c) - vy*sin(c)`. Upstream hard-codes `twist.linear.y` to a
+# literal 0.0, so the `vy` this file is handed is ALWAYS zero and the
+# `-vy*sin(c)` term is always absent. It should not be: the scanner's
+# real lateral speed is not zero in a turn, it is just unpublished. The
+# correction is therefore exact only where that term VANISHES - where
+# `sin(c) = 0`, i.e. an aperture centred on 0 or pi.
+#
+# forklift_ver3's is centred on pi, deliberately (model.sdf), so this
+# arm's numbers are exact and EVIDENCE_FUSION.md 10's tables stand. On a
+# vehicle whose lidar is centred anywhere else, the SAME code would leak
+# the scanner's unknown vy into the fused forward speed with no symptom
+# at all - which is why this is a refusal by name at bringup and not a
+# comment in a header.
+
+def test_a_conventionally_symmetric_aperture_is_recoverable():
+    # centre 0: cos(0) = 1 and sin(0) = 0, so the rotation is the
+    # identity and there is nothing for the missing vy to leak through.
+    assert core.aperture_is_recoverable(0.0, 1e-6) is True
+
+
+def test_this_plants_aperture_centred_on_pi_is_recoverable():
+    # R(pi) flips the sign of vx and multiplies the missing vy by
+    # sin(pi) = 0. That is why 10.1's +0.58 for a 0.695 m/s truck is a
+    # sign error and not a lost component.
+    assert core.aperture_is_recoverable(math.pi, 1e-6) is True
+
+
+def test_the_aperture_this_rig_actually_puts_on_the_wire_is_recoverable():
+    # LaserScan's angle_min/angle_max are float32. Measured on this rig,
+    # the centre arrives as +3.1415926 rad, whose |sin| is 5.359e-08 -
+    # inside the epsilon by a factor of about 19, and the epsilon is
+    # sized for exactly this (config.yaml rf2o.aperture_sin_epsilon).
+    assert core.aperture_is_recoverable(3.1415926, 1e-6) is True
+
+
+@pytest.mark.parametrize("centre", [math.pi / 2, -math.pi / 2,
+                                    math.pi / 4, 2.0, 0.01])
+def test_any_other_aperture_is_REFUSED_and_not_silently_corrected(centre):
+    # The whole point. At these centres `sin(c)` is not zero, the
+    # missing vy multiplies it, and the leaked term lands on the ONE
+    # channel this arm contributes - the fused forward speed - as a bias
+    # through every turn, with nothing downstream able to see it.
+    assert core.aperture_is_recoverable(centre, 1e-6) is False
+
+
+def test_the_check_is_on_the_SINE_and_not_on_the_angle():
+    # A check written as `abs(centre) < eps or abs(centre - pi) < eps`
+    # would refuse a scanner centred on -pi or on 3*pi, which are the
+    # same aperture and are equally exact. The quantity that matters is
+    # the one that multiplies the missing vy.
+    assert core.aperture_is_recoverable(-math.pi, 1e-6) is True
+    assert core.aperture_is_recoverable(3.0 * math.pi, 1e-6) is True
+
+
+def test_a_tiny_offset_from_pi_is_refused_once_it_exceeds_the_epsilon():
+    # The failure this guards is a SMALL misalignment, because a large
+    # one shows up as a wrong-signed speed on the first drive and a
+    # small one only bends a corner. 1e-4 rad off pi leaks 1e-4 of the
+    # scanner's vy and would never be noticed.
+    assert core.aperture_is_recoverable(math.pi + 1e-4, 1e-6) is False
+
+
+def test_the_epsilon_is_the_callers_and_not_a_constant_in_the_check():
+    # config.yaml owns it, like every other behavioural number here.
+    assert core.aperture_is_recoverable(math.pi + 1e-4, 1e-3) is True
