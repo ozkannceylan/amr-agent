@@ -379,7 +379,7 @@ start() {
     echo "ekf:     $CFG_TOPICS_ODOMETRY_FILTERED at" \
          "${CFG_EKF_FREQUENCY_HZ} Hz, plus the"
     echo "         $CFG_FRAMES_ODOM -> $CFG_FRAMES_BASE_LINK transform." \
-         "Wheel TWIST (vx, vyaw)"
+         "Wheel TWIST (vx, vy, vyaw)"
     echo "         + IMU (yaw rate, ax). It reads no pose and no ground"
     echo "         truth. ekf_node is SILENT about an input that never"
     echo "         arrives - check the topic, not the log."

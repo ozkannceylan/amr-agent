@@ -159,30 +159,49 @@ m5v3_ekf:
     #   vx, vy, vz, vroll, vpitch, vyaw,
     #   ax, ay, az
     #
-    # TWO ENTRIES TRUE, AND vy IS THE ONE THAT NEEDED DECIDING.
+    # THREE ENTRIES TRUE, AND vy IS THE ONE THAT WAS DECIDED TWICE.
     #   vx  - the rear axle's forward speed. The only velocity a
     #         tricycle's drive shaft measures.
     #   vyaw- v*tan(delta)/L, the yaw rate the steer angle implies.
-    #   vy  - REFUSED BY OWNER RULING (F2 Task 1 brief). It is worth
-    #         writing down exactly what that costs, because the node's
-    #         own vy is NOT noise: wheel_odom_core.py computes it as
-    #         d * yaw_rate with d = 0.50 m, the lateral velocity
-    #         base_link genuinely has because it stands 0.50 m forward of
-    #         the rear axle, and that file's header warns that dropping
-    #         the term "quietly drops the lateral term and there is no
-    #         symptom until something fuses the twist". This is that
-    #         something. robot_localization's motion model is
-    #         omnidirectional and knows nothing about d, so with vy
-    #         unobserved the filter integrates base_link as though it
-    #         were the rear axle. On a profile that ENDS ON ITS STARTING
-    #         HEADING the offset is a function of heading and cancels; on
-    #         one that does not, it is d*|u(yaw_end) - u(yaw_0)|, up to
-    #         2d = 1.00 m. EVIDENCE_FUSION.md §4 measures it against the
-    #         same filter with vy true, on the same runs, and the ruling
-    #         stands until the owner reads that table.
+    #   vy  - THE base_link-FRAME LATERAL VELOCITY INDUCED BY THE REAR
+    #         AXLE OFFSET, and it is a real component of the twist rather
+    #         than noise. wheel_odom_core.py computes it as d * yaw_rate
+    #         with d = 0.50 m (config.yaml vehicle.rear_axle_offset_m,
+    #         sign flipped there once): the rear axle midpoint is the only
+    #         point of a tricycle whose velocity is purely longitudinal,
+    #         and base_link stands half a metre in FRONT of it, so
+    #         base_link genuinely translates sideways in every turn.
+    #         WHY IT HAS TO BE FUSED AND CANNOT BE INFERRED.
+    #         robot_localization's motion model is omnidirectional and
+    #         knows nothing about d, so this channel is the only way the
+    #         filter learns that lateral motion at all. With vy
+    #         unobserved it integrates base_link AS THOUGH IT WERE THE
+    #         REAR AXLE - which is exactly the failure
+    #         nodes/wheel_odom_core.py's own header warns about:
+    #         integrating base_link directly "quietly drops the lateral
+    #         term and there is no symptom until something fuses the
+    #         twist."
+    #         REFUSED IN THE FIRST CUT OF THIS FILE, ON A RATIONALE THAT
+    #         WAS WRONG ("the measured vy is quantiser noise"), AND
+    #         REVERSED ON THE MEASUREMENT. The cost of refusing it was
+    #         predicted from the kinematics before it was run -
+    #         d*|u(yaw_end) - u(yaw_0)|, which cancels on a profile that
+    #         ends on its starting heading and reaches 2d = 1.00 m on one
+    #         that ends reversed - and then measured on the same profiles
+    #         with the same instrument: predicted 0.9894 m, MEASURED
+    #         0.9008 m of extra end error on corner_creep's 163 deg turn,
+    #         and a DOUBLED rms over the square. EVIDENCE_FUSION.md 4 and
+    #         .superpowers/sdd/2026-08-26-m5v3-f2-fusion/task-1-report.md
+    #         6 carry the whole table; both are kept rather than deleted,
+    #         because a wrong turn that has been measured is worth more
+    #         than one that has been tidied away.
+    #         IT IS STILL TWIST-ONLY. Fusing vy fuses no pose: the six
+    #         pose flags above stay false and the node's own covariance
+    #         of 1000 still says do-not-fuse. F2 global constraint 13
+    #         governs the POSE and never excluded a velocity component.
     odom0_config: [false, false, false,
                    false, false, false,
-                   true,  false, false,
+                   true,  true,  false,
                    false, false, true,
                    false, false, false]
     # ABSOLUTE, NOT DIFFERENTIAL, AND NOT RELATIVE. `differential` would

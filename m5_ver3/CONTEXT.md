@@ -262,20 +262,23 @@ so where it is opened.
 
 ## Three things worth knowing before the next phase
 
-**The EKF's `vy` channel is refused by ruling, and the ruling is
-measured.** `ekf.yaml` fuses the wheel odometry's `vx` and `vyaw` only
-(F2 Task 1 brief). `vy` is not a noise channel on this vehicle — it is
-`d · yaw_rate` with `d = 0.50 m`, the lateral velocity `base_link` has
-because it stands half a metre forward of the rear axle — and
-`robot_localization`'s motion model does not know `d`, so with `vy`
-unobserved the filter integrates `base_link` as though it were the rear
-axle. Measured both ways on the same profiles
-(`EVIDENCE_FUSION.md` §4): refusing it costs **+0.90 m of end error on
-`corner_creep`** and **doubles the rms on `square`**, and with it fused
-the filter beats raw dead reckoning on every figure of both cornering
-profiles. **Anything in F2 that scores this filter's POSITION is
-scoring that flag as much as the fusion.** It is one line of
-`ekf.yaml` and the owner's to move.
+**The EKF fuses THREE twist components, and the third one was ruled out
+and then ruled back in on a measurement.** `ekf.yaml` fuses the wheel
+odometry's `vx`, **`vy`** and `vyaw`. `vy` is not a noise channel on this
+vehicle — it is `d · yaw_rate` with `d = 0.50 m`, the lateral velocity
+`base_link` genuinely has because it stands half a metre forward of the
+rear axle, and `robot_localization`'s motion model does not know `d`, so
+that channel is the only way the filter learns about it at all. The first
+cut of `ekf.yaml` refused it on a rationale that was wrong ("the measured
+`vy` is quantiser noise"); the cost was predicted from the kinematics,
+then measured on the same profiles with the same instrument — **+0.90 m
+of end error on `corner_creep`'s 163° turn and a doubled rms on
+`square`** — and the ruling was reversed on that measurement.
+`EVIDENCE_FUSION.md` §4 keeps the whole before/after, because a wrong
+turn that has been measured is worth more than one that has been tidied
+away. **It is still twist-only**: the six pose flags are false and the
+node's own covariance of 1000 still says do-not-fuse. F2 global
+constraint 13 governs the POSE and never excluded a velocity component.
 
 ## Two things worth knowing before the next phase
 

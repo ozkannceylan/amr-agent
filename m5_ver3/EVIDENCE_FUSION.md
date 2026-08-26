@@ -37,21 +37,27 @@ has unbounded error and no honest fixed number exists for it
 `false`, so a filter configured against this stack cannot fuse that pose
 however the covariance is edited.
 
-**Two entries of fifteen are true on the twist**, and that is the whole
+**Three entries of fifteen are true on the twist**, and that is the whole
 of what the wheel odometry contributes:
 
 ```
    x     y     z    roll  pitch  yaw    vx    vy    vz   vroll vpitch vyaw   ax   ay   az
- false false false false false false  TRUE  false false false false TRUE  false false false
+ false false false false false false  TRUE  TRUE  false false false TRUE  false false false
 ```
 
-`vy` is `false` **by owner ruling**, and §4 measures what that costs on
-this vehicle. It is not a noise channel: `wheel_odom_core.py` computes
-`vy = d · yaw_rate` with `d = 0.50 m`, the lateral velocity `base_link`
-genuinely has because it stands half a metre forward of the rear axle,
-and that file's own header warns that dropping the term *"quietly drops
-the lateral term and there is no symptom until something fuses the
-twist."* This is that something.
+**`vy` was `false` in the first cut of this file and was ruled back in on
+the measurement in §4**, which is kept rather than deleted. It is not a
+noise channel: `wheel_odom_core.py` computes `vy = d · yaw_rate` with
+`d = 0.50 m`, the lateral velocity `base_link` genuinely has because it
+stands half a metre forward of the rear axle, and that file's own header
+warns that dropping the term *"quietly drops the lateral term and there
+is no symptom until something fuses the twist."* §4 is that something,
+measured: refusing it cost **+0.90 m of end error** on a 163° turn and
+**doubled the rms** over a square.
+
+**Fusing `vy` is still twist-only.** The six pose flags stay `false` and
+the node's covariance of 1000 still says do-not-fuse; F2 global
+constraint 13 governs the POSE and never excluded a velocity component.
 
 **The IMU contributes two entries and has no orientation to contribute.**
 `model.sdf` sets `<enable_orientation>false</enable_orientation>` because
@@ -251,11 +257,18 @@ pose, before `drive_route.py` is started.
 | `…-083216` | square | **−0.002670** rad/s | +0.019177 m/s² |
 | `…-083330` | corner_creep | **−0.002633** rad/s | +0.019175 m/s² |
 | `…-083525` | straight (A/B) | **−0.002729** rad/s | −0.018866 m/s² |
+| `…-085033` | straight 1 (shipped) | **−0.002618** rad/s | — |
+| `…-085135` | straight 2 (shipped) | **+0.002462** rad/s | — |
+| `…-085238` | straight 3 (shipped) | **+0.002656** rad/s | — |
+| `…-085338` | square (shipped) | **−0.002544** rad/s | — |
+| `…-085450` | corner_creep (shipped) | **+0.002764** rad/s | — |
 
-Magnitude against `model.sdf`'s configured `bias_mean 0.002618`: the six
-draws read 0.99–1.07 of it. **The sign is not repeatable and a consumer
-may not assume it** — which `EVIDENCE_SENSORS.md` §2 established at rest,
-and §3.1 below shows deciding the *direction* of what fusion buys.
+Magnitude against `model.sdf`'s configured `bias_mean 0.002618`: the
+eleven gyro draws read **0.94–1.07** of it, and **six are positive and
+five negative**. **The sign is not repeatable and a consumer may not
+assume it** — which `EVIDENCE_SENSORS.md` §2 established at rest, and
+which §3.1 and §3.4 below show deciding the *direction* of what fusion
+buys on eleven of the thirteen runs in this file.
 
 ### 2.6 `ekf_node` is silent about an input that never arrives
 
@@ -303,209 +316,265 @@ scored against the **same** ground truth by the **same** function
 ABSOLUTE**: no initial offset is removed and no per-run constant is
 fitted.
 
+**These are the SHIPPED configuration's runs — `vy` fused.** The five
+sessions are `…085033`, `…085135`, `…085238`, `…085338`, `…085450`,
+recorded after the flag was flipped. §4 keeps the refused-`vy` set beside
+them.
+
 `analyse` refuses a drive session whose first ground-truth sample is more
-than 0.05 m or 0.02 rad from `vehicle.spawn`; all eight sessions read
-**exactly** `(-17.000000, 10.000000) yaw 3.141590`, 0.0000 m and
-0.00000 rad off.
+than 0.05 m or 0.02 rad from `vehicle.spawn`; all thirteen sessions in
+this file read **exactly** `(-17.000000, 10.000000) yaw 3.141590`,
+0.0000 m and 0.00000 rad off.
 
 ### 3.0 The raw wheel odometry did not move, and that is the control
 
-Adding two children to a stack whose figures are all measured under a
-real-time factor is a change to the plant until it is shown not to be.
-The raw wheel-odometry row is the same estimator, the same settings and
-the same instrument as F1.5's re-measured table
-(`EVIDENCE_SENSORS.md` §3), and it repeats:
+Two new children on a stack whose figures are all taken under a real-time
+factor is a change to the plant until it is shown not to be — and an EKF
+configuration flag must not be able to reach the estimate that feeds it
+at all. The raw wheel-odometry row is the same estimator, the same
+settings and the same instrument across **all thirteen F2 sessions and
+both `vy` settings**:
 
-| Profile | figure | F1.5, no EKF in the stack | **F2 Task 1, EKF running** |
-|---|---|---|---|
-| `straight` | path error | +4.23 % | **+4.22 %** (all three runs) |
-| | end error | 0.5778 m | **0.5806 / 0.5806 / 0.5808 m** |
-| | end heading | −0.0574 rad | **−0.0576 / −0.0577 / −0.0577 rad** |
-| `square` | path error | +9.78 % | **+9.78 %** |
-| | end error | 0.6712 m | **0.6724 m** |
-| | end heading | +0.5291 rad | **+0.5269 rad** |
-| `corner_creep` | path error | +7.65 % | **+7.65 %** |
-| | end error | 0.1945 m | **0.1943 m** |
-| | end heading | +0.0156 rad | **+0.0150 rad** |
+| Profile | runs | raw end error, min–max | **spread** | as % of truth path | raw end heading spread |
+|---|---|---|---|---|---|
+| `straight` | 7 | 0.5800 – 0.5826 m | **2.6 mm** | 5.0022 – 5.0095 % (0.0073 pp) | **0.0003 rad** |
+| `corner_creep` | 3 | 0.1941 – 0.1943 m | **0.2 mm** | 4.8924 – 4.8953 % (0.0029 pp) | **0.0006 rad** |
+| `square` | 3 | 0.6724 – 0.6831 m | 10.7 mm | 8.9230 – 9.0614 % (0.138 pp) | 0.1247 rad |
 
-Every figure repeats to **≤3 mm and ≤0.0022 rad**. The `straight` × 3
-spread of the raw end error is **0.2 mm** over 11.6 m. The two new
-children cost the plant nothing measurable, and every difference in the
-tables below is the filter and not the load.
+**`straight` and `corner_creep` repeat to 2.6 mm and 0.2 mm, and the `vy`
+flag is nowhere in them** — it is a property of the filter, and the raw
+estimate never passes through the filter. Against F1.5's own re-measured
+figures (`EVIDENCE_SENSORS.md` §3): straight 0.5778 m, square 0.6712 m,
+corner_creep 0.1945 m.
+
+**`square`'s wider spread is the PLANT and not the instrument**, and the
+normalised column is what shows it. That profile's *delivered* turn
+varies between runs — **+6.2082, +6.2875, +6.3012 rad** — because it is
+an open-loop table of held commands and the contact solver does not
+repeat a four-corner manoeuvre to the milliradian. The raw end error
+tracks it: the run that turned 0.093 rad short (`…083626`) is the run
+whose raw heading error reads +0.6476 instead of ≈+0.523. As a fraction
+of the distance travelled the raw estimate is **8.92–9.06 %** on all
+three.
 
 ### 3.1 `straight` × 3 — and the answer depends on which way the bias fell
 
-23.5 s of profile, ≈11.6 m, no steer input at all. The wheel odometry's
-heading error here is its **steer bias** carried through: +0.005 rad of
-believed steer that is not there, integrated over the **18.5 s** the
-profile is actually moving (`config.yaml` predicts 3.33 mrad/s at
-0.7 m/s; the ramps run slower, and the measured −0.0577 rad is what that
-comes to).
+23.5 s of profile, ≈11.6 m, no steer input at all, **18.5 s of it
+moving**. The wheel odometry's heading error here is its **steer bias**
+carried through: +0.005 rad of believed steer that is not there
+(`config.yaml` predicts 3.33 mrad/s at 0.7 m/s; the ramps run slower, and
+the measured −0.058 rad is what that comes to).
 
 | Run | gyro bias draw | raw end error | **EKF end error** | raw end heading | **EKF end heading** | heading removed |
 |---|---|---|---|---|---|---|
-| 1 `…082850` | **+0.002617** | 0.5806 m | **0.5080 m** | −0.0576 rad | **−0.0227 rad** | **60.7 %** |
-| 2 `…083007` | **+0.002588** | 0.5806 m | **0.5090 m** | −0.0577 rad | **−0.0237 rad** | **58.9 %** |
-| 3 `…083112` | **−0.002789** | 0.5808 m | **0.6393 m** | −0.0577 rad | **−0.0691 rad** | **−19.9 %** |
+| 1 `…085033` | **−0.002618** | 0.5808 m | **0.6213 m** | −0.0577 rad | **−0.0688 rad** | **−19.2 %** |
+| 2 `…085135` | **+0.002462** | 0.5800 m | **0.4997 m** | −0.0576 rad | **−0.0223 rad** | **+61.3 %** |
+| 3 `…085238` | **+0.002656** | 0.5826 m | **0.5010 m** | −0.0579 rad | **−0.0229 rad** | **+60.4 %** |
 
 | Run | raw rms | EKF rms | raw worst | EKF worst | raw path | EKF path |
 |---|---|---|---|---|---|---|
-| 1 | 0.5244 m | **0.4946 m** | 0.8020 m | **0.7780 m** | +4.22 % | +4.23 % |
-| 2 | 0.5156 m | **0.4935 m** | 0.8023 m | **0.7768 m** | +4.22 % | +4.22 % |
-| 3 | 0.5236 m | **0.5506 m** | 0.8009 m | **0.8269 m** | +4.22 % | +4.23 % |
+| 1 | 0.5240 m | 0.5425 m | 0.8026 m | 0.8197 m | +4.22 % | +4.23 % |
+| 2 | 0.5240 m | **0.4905 m** | 0.8019 m | **0.7748 m** | +4.22 % | +4.23 % |
+| 3 | 0.5256 m | **0.4919 m** | 0.8033 m | **0.7750 m** | +4.21 % | +4.21 % |
 
 **The sign of what fusion buys on a straight line is the sign of that
 run's gyro bias draw, and it went both ways in three runs.** The wheel
 odometry's heading error is **negative** on every run (the steer bias
-turns it one way, and that is deterministic to 0.0001 rad). A
-**positive** bias draw opposes it and the fused heading is pulled towards
-truth; a **negative** draw adds to it and the fused heading is pushed
-further out. Run 3 is the second case, and so is the A/B `straight` of
-§4 (bias −0.002729, heading −19.0 %): **four straight-type runs, four
-times the sign of the gain equals the sign of the draw.**
+turns it one way, and that is deterministic to 0.0003 rad across seven
+runs). A **positive** bias draw opposes it and the fused heading is
+pulled towards truth; a **negative** draw adds to it and the fused
+heading is pushed further out. §3.4 is the same reading over all thirteen
+runs.
 
-This is not a defect in the filter and it is not corrected here. It is
-what fusing an **uncompensated** MEMS gyro with a **biased** steer
-encoder does: two systematic errors, neither of which any diagonal
-covariance can represent, and the filter is blending their *noise*
-models. `ekf.yaml` says so at the top of the file; this is the
-measurement of it. **A three-run convention is what made it visible** —
-one run would have published "fusion removes 60 % of the straight-line
-heading error" and been wrong about the vehicle.
-
-The **magnitudes** are not symmetric (run 1 moves +0.0349 rad, run 3
-moves −0.0114 rad) and this file does not claim to explain that; the
-sign is the claim.
+**A three-run convention is what made it visible.** One run would have
+published "fusion removes 60 % of the straight-line heading error" and
+been wrong about the vehicle. This is not a defect in the filter and it
+is not corrected here: it is what fusing an **uncompensated** MEMS gyro
+with a **biased** steer encoder does — two systematic errors, neither of
+which any diagonal covariance can represent, and the filter is blending
+their *noise* models. `ekf.yaml` says so at the top of the file; this is
+the measurement of it.
 
 ### 3.2 `square` — four hard corners, and the heading is what fusion is for
 
-Session `drive-square-20260826-083216`, 40.9 s of profile, gyro bias draw
-−0.002670 rad/s. The plant turned **+6.2875 rad** — 0.0043 rad **past** a
-full turn (2π = 6.283185), so this profile returns to within a quarter of
-a degree of its **starting heading**, which matters for §4.
+Session `drive-square-20260826-085338`, 40.9 s of profile (**37.9 s
+moving**), gyro bias draw −0.002544 rad/s. The plant turned
+**+6.3012 rad** — 0.018 rad past a full turn (2π = 6.283185), so this
+profile returns to within a degree of its **starting heading**.
 
 | Figure | ground truth | raw wheel odom | **EKF** | removed | of raw |
 |---|---|---|---|---|---|
-| path | 7.5352 m | 8.2723 m (**+9.78 %**) | 6.5846 m (**−12.62 %**) | — | — |
-| turned | +6.2875 rad | +6.8144 rad | +6.6773 rad | — | — |
-| **end error** | — | **0.6724 m** | **0.4515 m** | +0.2208 m | **32.8 %** |
-| **END HEADING** | — | **+0.5269 rad** | **+0.3887 rad** | +0.1382 rad | **26.2 %** |
-| rms over run | — | 0.3956 m | 0.7838 m | −0.3882 m | **−98.1 %** |
-| worst | — | 0.6920 m | 1.3251 m | −0.6331 m | **−91.5 %** |
-| closure | 0.0995 m | 0.5925 m | 0.3563 m | — | — |
+| path | 7.5499 m | 8.2883 m (**+9.78 %**) | 8.2890 m (**+9.79 %**) | — | — |
+| turned | +6.3012 rad | +6.8241 rad | +6.6881 rad | — | — |
+| **end error** | — | **0.6831 m** | **0.5448 m** | +0.1383 m | **20.2 %** |
+| **END HEADING** | — | **+0.5229 rad** | **+0.3862 rad** | +0.1367 rad | **26.1 %** |
+| rms over run | — | 0.4003 m | **0.3100 m** | +0.0904 m | **22.6 %** |
+| worst | — | 0.7038 m | **0.5557 m** | +0.1481 m | **21.0 %** |
+| closure | 0.1019 m | 0.6570 m | **0.5256 m** | — | — |
 
-**The headline and the warning are in the same table.** The gyro removes
-**26.2 % of the four-corner heading error** and **32.8 % of the end
-position error** — and the filter's **rms doubles** and its path comes
-out **12.6 % SHORT** where the raw estimate is 9.8 % long. A path that is
-short is the signature of a missing lateral velocity, not of a noisy one:
-§4.
+**This is the headline of the phase.** The gyro removes **26.1 % of the
+four-corner heading error** and the filter is better than its own input
+on **every one of the four figures** — end error, heading, rms and worst
+— by 20–26 %. Its path error now **matches** the raw estimate's to
+0.01 pp (+9.79 % against +9.78 %), which is the signature of a filter
+that has the vehicle's lateral velocity: with `vy` refused this same
+column read **−12.62 %**, a path 12 % *short* (§4).
+
+The 26 % ceiling is set by an honesty this track already committed to:
+the wheel odometry's `vyaw` covariance is derived from its **steer bias
+alone**, because the scrub error that dominates a corner is not readable
+at the shaft and `config.yaml` refuses to invent a term for it — so at a
+corner this filter believes the wheel odometry's yaw rate more than that
+reading deserves. `ekf.yaml` states the consequence beside the
+configuration; it is not tuned around.
 
 ### 3.3 `corner_creep` — one sustained corner, and the plant is already honest
 
-Session `drive-corner_creep-20260826-083330`, 22 s of profile, one
-0.785 rad steer held for 14 s at 0.3 m/s, gyro bias draw −0.002633 rad/s.
-The plant turned **+2.8508 rad** = 163°, so this profile ends **nowhere
-near** its starting heading.
+Session `drive-corner_creep-20260826-085450`, 22 s of profile (**17 s
+moving**), one 0.785 rad steer held for 14 s at 0.3 m/s, gyro bias draw
+**+0.002764 rad/s**. The plant turned **+2.8519 rad** = 163°, so this
+profile ends nowhere near its starting heading.
 
 | Figure | ground truth | raw wheel odom | **EKF** | removed | of raw |
 |---|---|---|---|---|---|
-| path | 3.9697 m | 4.2731 m (**+7.65 %**) | 3.9540 m (**−0.39 %**) | — | — |
-| turned | +2.8508 rad | +2.8659 rad | +2.8460 rad | — | — |
-| end error | — | **0.1943 m** | **1.0565 m** | −0.8621 m | **−443.6 %** |
-| **END HEADING** | — | **+0.0150 rad** | **−0.0070 rad** | +0.0081 rad | **53.7 %** |
-| rms over run | — | 0.1594 m | 0.6768 m | −0.5174 m | **−324.6 %** |
-| worst | — | 0.2115 m | 1.0640 m | −0.8524 m | **−403.0 %** |
+| path | 3.9673 m | 4.2704 m (**+7.64 %**) | 4.2708 m (**+7.65 %**) | — | — |
+| turned | +2.8519 rad | +2.8675 rad | +2.8813 rad | — | — |
+| end error | — | **0.1941 m** | **0.1918 m** | +0.0023 m | **1.2 %** |
+| END HEADING | — | **+0.0156 rad** | **+0.0309 rad** | −0.0153 rad | **−98.1 %** |
+| rms over run | — | 0.1594 m | 0.1590 m | +0.0004 m | **0.3 %** |
+| worst | — | 0.2115 m | 0.2121 m | −0.0005 m | **−0.2 %** |
 
-**There was almost no corner heading error left to remove, and the filter
-removed half of what there was.** F1.5 retuned this plant so the truck
-takes 1.005 of its kinematic yaw at creep (`EVIDENCE_LATERAL_TUNE.md`);
-the raw estimate's heading is already only **0.0150 rad** out over a 163°
-turn, and the EKF takes it to **−0.0070 rad**. That is 53.7 % of a
-number that was already small — and it is the honest reading of the
-gyro's value on a floor with no slip in it. **F2 Task 2's slippery
-variant is where this column is supposed to earn its keep**, because
-scrub is exactly the error dead reckoning cannot see and a gyro can.
+**There is almost nothing here for a gyro to remove, and on this run's
+bias draw it added instead.** F1.5 retuned this plant so the truck takes
+1.005 of its kinematic yaw at creep (`EVIDENCE_LATERAL_TUNE.md`), so the
+raw estimate's heading is already only **0.0156 rad** out over a 163°
+turn — smaller than what a 0.0026 rad/s bias contributes over 17 s of
+motion. This run drew a **positive** bias against a **positive** raw
+error, so the two added: +0.0156 → +0.0309 rad. The two earlier
+`corner_creep` runs drew **negative** biases and improved by 53.7 % and
+64.0 % (§4). Position is a wash either way — 1.2 % better on end error,
+0.3 % on rms — which is the honest reading of a filter on a profile whose
+input was already nearly right.
 
-**And the position figures are catastrophic, by a mechanism that was
-predicted before it was measured.** −0.86 m of end error, four times the
-rms. §4.
+**F2 Task 2's slippery variant is where this profile is supposed to
+separate the two estimates**, because scrub is exactly the error dead
+reckoning cannot see and a gyro can. On a floor with no slip left in it,
+there is nothing to see.
 
----
+### 3.4 The rule, over all thirteen runs
 
-## 4. What refusing `vy` costs, measured both ways
+Every drive session in this file, with the sign of its gyro bias draw
+against the sign of the raw estimate's heading error:
 
-`ekf.yaml` fuses the wheel odometry's `vx` and `vyaw` and **refuses
-`vy`**, by owner ruling (F2 Task 1 brief). This section is the same
-filter, the same profiles and the same instrument with the single flag
-`odom0_config[7]` flipped to `true`, so the ruling can be re-decided
-against a measurement rather than against an argument.
-
-**The prediction, written from the kinematics before the runs.**
-`base_link` stands `d = 0.50 m` forward of the rear axle, so its
-body-frame velocity is `(v_rear, d·ω)` — the `vy` term is a **kinematic
-identity**, not noise. `robot_localization`'s motion model is
-omnidirectional and knows nothing about `d`, so with `vy` unobserved the
-filter integrates `base_link` **as though it were the rear axle**. The
-resulting position error is `d·|û(ψ_end) − û(ψ₀)|`: it **cancels** on a
-profile that ends on its starting heading and reaches `2d = 1.00 m` on
-one that ends reversed. For `corner_creep`'s 2.8508 rad that predicts
-**0.99 m**.
-
-| Profile | figure | raw wheel odom | **EKF, `vy` FALSE (as ruled)** | **EKF, `vy` TRUE** |
+| Profile | raw heading error | runs | draws that **OPPOSE** it | draws that **ADD** to it |
 |---|---|---|---|---|
-| `straight` | end error | 0.5806 m | 0.5080 m | 0.6198 m ¹ |
-| | rms | 0.5244 m | 0.4946 m | 0.5421 m ¹ |
-| `square` | path error | +9.78 % | **−12.62 %** | **+12.25 %** |
-| | end error | 0.6724 / 0.6777 m | **0.4515 m** (−32.8 %) | **0.5897 m** (−13.0 %) |
-| | END HEADING | +0.5269 / +0.6476 rad | **+0.3887 rad** (−26.2 %) | **+0.5485 rad** (−15.3 %) |
-| | rms | 0.3956 / 0.3984 m | **0.7838 m** (**+98 %**) | **0.3430 m** (−13.9 %) |
-| | worst | 0.6920 / 0.7049 m | **1.3251 m** (**+92 %**) | **0.6095 m** (−13.5 %) |
-| `corner_creep` | path error | +7.65 / +7.64 % | **−0.39 %** | **+7.67 %** |
-| | end error | 0.1943 m | **1.0565 m** (**+444 %**) | **0.1557 m** (−19.9 %) |
-| | END HEADING | +0.0150 / +0.0155 rad | −0.0070 rad (−53.7 %) | −0.0056 rad (−64.0 %) |
-| | rms | 0.1594 m | **0.6768 m** (**+325 %**) | **0.1410 m** (−11.5 %) |
-| | worst | 0.2115 m | **1.0640 m** (**+403 %**) | **0.1885 m** (−10.9 %) |
+| `straight` | **negative**, ≈−0.058 rad | 7 | +0.002617 → +60.7 % · +0.002588 → +58.9 % · +0.002462 → +61.3 % · +0.002656 → +60.4 % | −0.002789 → −19.9 % · −0.002729 → −19.0 % · −0.002618 → −19.2 % |
+| `corner_creep` | **positive**, ≈+0.015 rad | 3 | −0.002633 → +53.7 % · −0.002673 → +64.0 % | +0.002764 → −98.1 % |
+| `square` | **positive**, ≈+0.52 rad | 3 | −0.002670 → +26.2 % · −0.002544 → **+26.1 %** | +0.002571 → **+15.3 %** |
 
-¹ the `vy`-true `straight` drew a **negative** gyro bias (−0.002729), so
-it is §3.1's second case and is not comparable with the `vy`-false
-straights that drew positive ones. On a straight line `ω ≈ 0` and
-therefore `vy = d·ω ≈ 0`, so this flag cannot be what moved it — which is
-itself the control: **the flag changes nothing on a profile with no
-corner in it.**
+**Thirteen for thirteen: the gyro helps when its per-run bias draw
+opposes the wheel odometry's heading error and hurts when it adds.** The
+sign only *decides* the outcome when the two are comparable in size, and
+the ratio says exactly when that is — a 0.0026 rad/s bias integrated over
+the seconds the profile is moving, against the raw error it is being
+blended with:
 
-**Three readings, and they agree with the prediction.**
+| Profile | moving | bias × time | raw heading error | ratio |
+|---|---|---|---|---|
+| `straight` | 18.5 s | 0.048 rad | 0.058 rad | **0.83** — comparable, so the sign decides |
+| `corner_creep` | 17.0 s | 0.044 rad | 0.016 rad | **2.8** — the bias dominates, so the sign decides |
+| `square` | 37.9 s | 0.099 rad | 0.523 rad | **0.19** — the real error dominates, so the gyro helps **whichever way the draw fell** (+15.3 % to +26.2 %) |
 
-1. **The predicted offset is there and it is the right size.**
-   `corner_creep`'s end error moves 1.0565 → 0.1557 m when `vy` is fused:
-   **0.9008 m**, against the formula's **0.9894 m**. The formula is a
-   ceiling — it assumes the whole offset is still owed at the end — and
-   the measurement lands **9 % under** it, because the profile's heading
-   history is not one clean arc and part of the offset is spent before
-   the run stops. It is the right size and the right sign, which is what
-   was being tested.
-2. **`square` hides it in the end error and shows it in the rms.** That
-   profile turns +6.2875 rad — within 0.0043 rad of a full turn — so
-   `d·û(ψ)` returns to where it started and the **end** error barely
-   feels it (0.4515 vs 0.5897 m, and the `vy`-false run happens to read
-   *better*). Over the run it is not hidden at all: the rms **doubles**
-   and the worst error **nearly doubles**. A reader with only the end
-   error would have drawn the opposite conclusion, which is why this
-   instrument prints four figures and not one.
-3. **`vy` true makes every figure on every cornering profile better than
-   the raw estimate it was built from; `vy` false does not.** With the
-   flag on, the filter beats raw dead reckoning on end error, heading,
-   rms and worst, on both cornering profiles. With it off, it beats raw
-   on heading and loses on rms and worst.
-
-**The shipped configuration is `vy` FALSE, as ruled.** The measurement is
-recorded here so the ruling can be revisited on one line of `ekf.yaml`,
-and this file makes no claim about which the owner should choose. What it
-does claim, with numbers: on this vehicle `vy` is **not** a noise channel
-and refusing it costs **0.90 m of end error on a 163° turn** and
-**doubles the rms over a square**.
+That is the honest scope of this phase's headline. **Fusion removes a
+quarter of the heading error on the profile that HAS a heading error**,
+and on profiles whose heading was already good to a few milliradians it
+substitutes one unmodelled systematic term for another, with a sign drawn
+at model load. Nothing in `ekf.yaml` estimates that bias, and the comment
+beside `imu0_config` says so.
 
 ---
+
+## 4. What refusing `vy` cost — the ruling that was reversed
+
+**This section records a wrong turn, and it is kept rather than tidied
+away.** The first cut of `ekf.yaml` refused the wheel odometry's `vy`, on
+the rationale that *"the tricycle cannot move laterally and the measured
+`vy` is quantiser noise"*. That rationale is wrong for this node; the
+cost was predicted from the kinematics and then measured on the same
+profiles with the same instrument; and the ruling was **reversed on the
+measurement**. §3 above is the shipped configuration. This is what the
+refused one did.
+
+**Why `vy` is not noise.** `wheel_odom_core.py` computes
+
+```
+vy = base_offset_m * yaw_rate          # d = 0.50 m, exactly
+```
+
+The rear axle midpoint is the only point of a tricycle whose velocity is
+purely longitudinal, and `base_link` stands half a metre in **front** of
+it — so `base_link` genuinely translates sideways in every turn, and that
+term is a kinematic identity rather than a measurement of anything noisy.
+`robot_localization`'s motion model is **omnidirectional and knows
+nothing about `d`**, so this channel is the only way the filter learns
+about that motion at all. With `vy` unobserved it integrates `base_link`
+**as though it were the rear axle** — which is precisely the failure
+`nodes/wheel_odom_core.py`'s own header warns about.
+
+**The prediction, written before the runs.** The resulting position error
+is `d·|û(ψ_end) − û(ψ₀)|`: it **cancels** on a profile that ends on its
+starting heading and reaches `2d = 1.00 m` on one that ends reversed. For
+`corner_creep`'s 2.8508 rad that is **0.9894 m**.
+
+| Profile | figure | raw wheel odom | **`vy` REFUSED** | **`vy` FUSED (shipped)** |
+|---|---|---|---|---|
+| `straight` | end error | 0.5800 – 0.5826 m | 0.5080 / 0.5090 / 0.6393 m | 0.6213 / 0.4997 / 0.5010 m |
+| | rms | 0.5240 – 0.5256 m | 0.4946 / 0.4935 / 0.5506 m | 0.5425 / 0.4905 / 0.4919 m |
+| `square` | path error | +9.78 % | **−12.62 %** | **+9.79 %** |
+| | end error | 0.6724 / 0.6831 m | 0.4515 m (−32.8 %) | 0.5448 m (−20.2 %) |
+| | END HEADING | +0.5269 / +0.5229 rad | +0.3887 rad (−26.2 %) | +0.3862 rad (−26.1 %) |
+| | rms | 0.3956 / 0.4003 m | **0.7838 m (+98 %)** | **0.3100 m (−22.6 %)** |
+| | worst | 0.6920 / 0.7038 m | **1.3251 m (+92 %)** | **0.5557 m (−21.0 %)** |
+| `corner_creep` | path error | +7.65 / +7.64 % | **−0.39 %** | **+7.65 %** |
+| | end error | 0.1943 / 0.1941 m | **1.0565 m (+444 %)** | **0.1918 m (−1.2 %)** |
+| | rms | 0.1594 m | **0.6768 m (+325 %)** | **0.1590 m (−0.3 %)** |
+| | worst | 0.2115 m | **1.0640 m (+403 %)** | **0.2121 m (+0.2 %)** |
+
+**Four readings, and they agree with the prediction.**
+
+1. **The predicted offset is there and it is the right size.** Comparing
+   the two filters on `corner_creep`: 1.0565 m refused against 0.1557 m
+   fused on the paired A/B run — a **0.9008 m** gap against the formula's
+   **0.9894 m** ceiling. The formula assumes the whole offset is still
+   owed at the end; the measurement lands **9 % under** it because the
+   profile's heading history is not one clean arc. Right size, right
+   sign, which is what was being tested.
+2. **`square` hides it in the end error and shows it in the rms.** That
+   profile returns to within a degree of its starting heading, so
+   `d·û(ψ)` comes back to where it started and the **end** error barely
+   feels it — the refused-`vy` run even reads *better* on that one figure
+   (0.4515 against 0.5448 m). Over the run it is not hidden at all: the
+   rms **doubles** and the worst error **nearly doubles**. A reader with
+   only the end error would have drawn the opposite conclusion, which is
+   why this instrument prints four figures and not one.
+3. **The path length is the tell that needs no reference.** With `vy`
+   refused the filter's path comes out **12.6 % short** on `square` and
+   **0.4 % short** on `corner_creep`, where the raw estimate it is built
+   from is 9.8 % and 7.6 % **long**. A filter cannot make its input's
+   distance error disappear — nothing it fuses observes distance (§5) —
+   so a path that shortens is a filter losing motion, not correcting it.
+   With `vy` fused the column reads +9.79 % and +7.65 %: the raw
+   estimate's own figures, to 0.01 pp.
+4. **The heading is untouched by the flag, exactly as it should be.**
+   `square`'s heading improvement is **26.2 %** refused and **26.1 %**
+   fused. `vy` is a translation channel; it moves position and leaves the
+   yaw alone, and the measurement says so to a tenth of a percentage
+   point. That is also why §3's headline did not move when the ruling
+   did.
+
+**The refused-`vy` sessions are kept in §6** and re-analysable with the
+same command as every other row in this file. Reproducing that column
+needs one edit — `odom0_config`'s eighth entry — and nothing else.
 
 ## 5. What fusion cannot fix, and the F3 handoff
 
@@ -518,9 +587,12 @@ the integral of a biased rate is a pose whose error has no ceiling:
   1024-line grid; the accelerometer cannot correct a distance (its own
   bias double-integrates to 98 m over 100 s unaided), and the gyro says
   nothing about distance at all. The EKF's `straight` path error is
-  **+4.22 to +4.23 %**, which is the raw estimate's, unchanged, on every
-  run.
-- **Heading is bounded only by which way the bias fell.** §3.1.
+  **+4.21 to +4.23 %**, which is the raw estimate's, unchanged, on every
+  run — and on `square` and `corner_creep` it is +9.79 % and +7.65 %
+  against the raw estimate's +9.78 % and +7.64 %. **A filter cannot make
+  its input's distance error go away**, and one whose path *shortens* is
+  losing motion rather than correcting it (§4, reading 3).
+- **Heading is bounded only by which way the bias fell.** §3.1, §3.4.
 - **Nothing here observes an absolute position**, because nothing here
   is *outside* the vehicle. The odom frame is where the truck switched
   on, and a continuous, jump-free, drifting estimate is exactly what an
@@ -536,9 +608,13 @@ quietly become that edge's owner.
 
 ## 6. The capture
 
-Eight drive sessions, all under `m5_ver3/logs/evidence/` and all
+Thirteen drive sessions, all under `m5_ver3/logs/evidence/` and all
 untracked. The stack was stopped and restarted before every one, so each
-begins from the spawn pose; `drive_route.py` exited **0** on all eight.
+begins from the spawn pose; `drive_route.py` exited **0** on all thirteen.
+The `vy` column is `odom0_config`'s eighth entry: **the five `true` rows
+at the bottom are the shipped configuration and §3's tables**, the three
+marked A/B are the pair that decided the ruling, and the five `false`
+rows are §4's.
 
 | Session | profile | `vy` | `ekf_odom` rows | md5 of `ekf_odom.csv` |
 |---|---|---|---|---|
@@ -550,28 +626,34 @@ begins from the spawn pose; `drive_route.py` exited **0** on all eight.
 | `drive-straight-20260826-083525` | straight (A/B) | **true** | 2010 | `17305c2911a0567b6baf492d4826aa5a` |
 | `drive-square-20260826-083626` | square (A/B) | **true** | 2619 | `3a6a4acbc083e0492d39d82a812d0fbf` |
 | `drive-corner_creep-20260826-083739` | corner_creep (A/B) | **true** | 1558 | `9da95872d7c6435544b71fe21abbff63` |
+| `drive-straight-20260826-085033` | straight 1 | **true** | 2013 | `4058b44936a82caee8e96c0fae2c93eb` |
+| `drive-straight-20260826-085135` | straight 2 | **true** | 2015 | `397dc0f625dc60198e036d77aa71ae53` |
+| `drive-straight-20260826-085238` | straight 3 | **true** | 2014 | `7bb626ce240876e28beeb1fefb2cf603` |
+| `drive-square-20260826-085338` | square | **true** | 2554 | `1682c2bd0ab978a337b1e30a37afa2ef` |
+| `drive-corner_creep-20260826-085450` | corner_creep | **true** | 1556 | `081cf14fa7357f518b1df9380b67b4ff` |
 
-**Delivered rates over a drive, ROS side** (`analyse`, session
-`…-082850`; the plant's own sim stamps):
+**Delivered rates over a drive, ROS side** (`analyse`, shipped session
+`…-085033`; the plant's own sim stamps):
 
 ```
   stream             samples     hz_sim    hz_wall  of conf     dt_med     dt_max     rtf
-  clock                20171   500.0000   501.8108             0.00200    0.00200  1.0036
-  odom_truth             803    20.0000    19.9898             0.05000    0.05000  0.9995
-  wheel_odom           20090   500.0000   499.8360             0.00200    0.00200  0.9997
-  ekf_odom              2009    50.0000    49.9761             0.02000    0.02200  0.9995
-  joint_state          20087   500.0000   499.8583             0.00200    0.00200  0.9997
-  drive_read_a         20087   500.0000   499.8727             0.00200    0.00200  0.9997
-  scan_nav               608    15.1515    15.1446             0.06600    0.06600  0.9995
-  imu                   4018   100.0000    99.9620             0.01000    0.01000  0.9996
-  depth                  608    15.1515    15.1447             0.06600    0.06600  0.9995
-  cam_info               609    15.1515    15.1435             0.06600    0.06600  0.9995
+  clock                20143   500.0000   500.2218             0.00200    0.00200  1.0004
+  odom_truth             805    20.0000    19.9943             0.05000    0.05000  0.9997
+  wheel_odom           20137   500.0000   499.9810             0.00200    0.00200  1.0000
+  ekf_odom              2013    50.0000    49.9942             0.02000    0.02200  0.9999
+  joint_state          20134   500.0000   499.9730             0.00200    0.00200  0.9999
+  drive_read_a         20134   500.0000   499.9918             0.00200    0.00200  1.0000
+  scan_nav               610    15.1515    15.1488             0.06600    0.06600  0.9998
+  imu                   4027   100.0000    99.9854             0.01000    0.01000  0.9999
+  depth                  610    15.1515    15.1539             0.06600    0.06600  1.0002
+  cam_info               610    15.1515    15.1486             0.06600    0.06600  0.9998
 ```
 
-`rtf` **0.9995–0.9997** on every stream with the two new children up, and
-`dt_max = dt_med` on nine of the ten — **not one message lost** on any
-bridged stream over the run. The tenth is the filter's own output and its
-one late cycle is §1.
+`rtf` **0.9997–1.0002** on every stream with the two new children up and
+the third twist channel fused, and `dt_max = dt_med` on nine of the ten —
+**not one message lost** on any bridged stream over the run. The tenth is
+the filter's own output and its one late cycle is §1. **Fusing `vy` cost
+the filter nothing measurable**: same 50.0000 Hz, same `dt_max`.
 
 **Reproducing any row of this file needs no simulator.** The CSVs are
 where the tables come from and `analyse` runs on a python with no ROS:
