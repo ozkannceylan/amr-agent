@@ -1608,9 +1608,8 @@ these, in the order they weigh:
    position step of a few centimetres is absorbed by any controller with
    a lookahead; a heading step of 7.6° is a steering command.
 3. **It costs about 1.6 times the arm.** 13.25 – 14.86 % of a core
-   against 7.85 – 10.49 %,
-   for a stack that has not yet started Nav2, a costmap, a planner or a
-   controller. F4 adds all four.
+   against 7.85 – 10.49 %, for a stack that has not yet started Nav2, a
+   costmap, a planner or a controller. F4 adds all four.
 4. **Two operational asymmetries favour AMCL, and the one that looks
    like a third does not.** The frozen artifact it consumes is **2.0 MB**
    rather than **62.5 MB**, which is what a git repository and a
