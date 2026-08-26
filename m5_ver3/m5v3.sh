@@ -158,6 +158,34 @@ start() {
         "$CONFIG" "ekf.params_file resolves to $EKF_PARAMS" \
         "without it ekf_node would start on its own defaults, fuse" \
         "nothing at all, and report nothing about it."
+    # AND THE FILE HAS TO BE ADDRESSED TO THE NODE THIS SCRIPT STARTS.
+    # A ROS parameter file is keyed by the node's name, and rclcpp does
+    # NOT complain about a block addressed to somebody else - it applies
+    # nothing and starts. That failure is worse than a missing file,
+    # because the `-p` overrides below still land: the topics, the frames
+    # and the rate are all set, so ekf_node comes up on its PACKAGE
+    # DEFAULTS, subscribes nothing, fuses nothing, and publishes 50 Hz of
+    # a pose that never moves and an identity transform. `status` says
+    # ALIVE, the topic is there at its configured rate, the evidence
+    # recorder's stream arrives - EVERY instrument this track named would
+    # report a healthy stack. A misspelt key INSIDE the file is the same
+    # failure by another route, and rclcpp is equally silent about it.
+    #   SO THE COUPLING IS CHECKED AND NOT WRITTEN DOWN. ekf.yaml's header
+    #   carried this as a MAINTENANCE OBLIGATION in prose, which is the
+    #   one form of guarantee this track accepts nowhere else: the
+    #   imu_mount copy is diffed against the model that decides it, every
+    #   config key is checked by its dotted name, the child list lives in
+    #   one file. This is that idiom, one grep, before anything starts.
+    grep -q "^${CFG_EKF_NODE_NAME}:" "$EKF_PARAMS" || refuse \
+        "the EKF parameter file is addressed to $CFG_EKF_NODE_NAME" \
+        "$EKF_PARAMS and $CONFIG (ekf.node_name)" \
+        "there is no top-level '$CFG_EKF_NODE_NAME:' key in that file, so" \
+        "every parameter in it belongs to a node that is never started." \
+        "ekf_node would come up on its PACKAGE DEFAULTS with the topic," \
+        "frame and rate overrides still applied: 50 Hz of a pose that" \
+        "never moves, an identity transform, and 'status' ALIVE." \
+        "the top-level keys that file does define:" \
+        "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$EKF_PARAMS" || echo '(none)')"
     # Unchecked, an unwritable log dir fails every redirection this stack
     # opens and start would sleep its way to "up." over a stack that never
     # began.

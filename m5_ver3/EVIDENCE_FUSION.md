@@ -264,8 +264,8 @@ pose, before `drive_route.py` is started.
 | `…-085450` | corner_creep (shipped) | **+0.002764** rad/s | — |
 
 Magnitude against `model.sdf`'s configured `bias_mean 0.002618`: the
-eleven gyro draws read **0.94–1.07** of it, and **six are positive and
-five negative**. **The sign is not repeatable and a consumer may not
+eleven gyro draws read **0.94–1.07** of it, and **five are positive and
+six negative**. **The sign is not repeatable and a consumer may not
 assume it** — which `EVIDENCE_SENSORS.md` §2 established at rest, and
 which §3.1 and §3.4 below show deciding the *direction* of what fusion
 buys on eleven of the thirteen runs in this file.
@@ -472,12 +472,16 @@ against the sign of the raw estimate's heading error:
 | `corner_creep` | **positive**, ≈+0.015 rad | 3 | −0.002633 → +53.7 % · −0.002673 → +64.0 % | +0.002764 → −98.1 % |
 | `square` | **positive**, ≈+0.52 rad | 3 | −0.002670 → +26.2 % · −0.002544 → **+26.1 %** | +0.002571 → **+15.3 %** |
 
-**Thirteen for thirteen: the gyro helps when its per-run bias draw
-opposes the wheel odometry's heading error and hurts when it adds.** The
-sign only *decides* the outcome when the two are comparable in size, and
-the ratio says exactly when that is — a 0.0026 rad/s bias integrated over
-the seconds the profile is moving, against the raw error it is being
-blended with:
+**Twelve of thirteen: the gyro helps when its per-run bias draw opposes
+the wheel odometry's heading error and hurts when it adds — and the
+thirteenth is the one that shows why that is not the rule.** The
+exception is in the table above: `square`'s +0.002571 draw **added** to a
+positive heading error and the gyro **still removed 15.3 %** of it,
+because on that profile the error being corrected is five times what the
+bias can reach. So the sign is not what decides; the **ratio** is, and
+the sign only decides when that ratio is near 1 — a 0.0026 rad/s bias
+integrated over the seconds the profile is moving, against the raw error
+it is being blended with:
 
 | Profile | moving | bias × time | raw heading error | ratio |
 |---|---|---|---|---|

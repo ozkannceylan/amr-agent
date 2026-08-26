@@ -21,12 +21,21 @@
 #       refused, and why. The two configuration matrices, the sensor
 #       timeout, two_d_mode, the transform publication.
 #
-# THE TOP-LEVEL KEY IS THE NODE'S NAME AND THE TWO MUST MATCH. ekf_node
+# THE TOP-LEVEL KEY IS THE NODE'S NAME AND m5v3.sh CHECKS IT. ekf_node
 # is started with `-r __node:=m5v3_ekf`, from config.yaml's
 # ekf.node_name. If either moves without the other, every parameter below
 # belongs to a node that does not exist and ekf_node runs on its own
-# defaults - which is a filter that fuses NOTHING and says nothing about
-# it. MAINTENANCE OBLIGATION: these two strings move together.
+# defaults - a filter that fuses NOTHING, publishes 50 Hz of a pose that
+# never moves and an identity transform, and reports ALIVE the whole
+# time, because the topic and frame overrides on its command line still
+# land. rclcpp says nothing about it, and neither would any instrument on
+# this track.
+#   THAT IS TOO EXPENSIVE TO LEAVE AS A MAINTENANCE OBLIGATION, and it
+#   used to be one. m5v3.sh greps this file for the key before it starts
+#   anything, and refuses by name with the top-level keys this file does
+#   define - the same idiom as the imu_mount pose diffed against the
+#   model and the config keys checked by dotted name. A coupling written
+#   down is not a coupling checked.
 #
 # ------------------------------------------------------------------
 # WHAT IS DELIBERATELY NOT IN THIS FILE
