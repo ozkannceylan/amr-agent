@@ -384,6 +384,64 @@ def test_an_empty_transform_stream_is_refused_and_not_scored_as_still():
 
 
 # ----------------------------------------------------------------------
+# the bringup gate's two questions
+# ----------------------------------------------------------------------
+
+def test_the_worst_covariance_entry_is_the_largest_magnitude():
+    # A diverged filter on this stack publishes 5.74e87 on the xx
+    # diagonal and -5.08e91 off it; a gate reading entry 0 would read the
+    # smaller of the two by four orders of magnitude.
+    values = [5.74e87] + [0.0] * 6 + [-5.08e91] + [0.0] * 28
+    assert evidence_core.worst_of(values) == 5.08e91
+
+
+def test_an_empty_covariance_is_refused_and_not_scored_as_certain():
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.worst_of([])
+
+
+def test_a_non_finite_covariance_is_refused_rather_than_compared():
+    # A comparison against nan is false in both directions, so a ceiling
+    # test written the obvious way round would PASS a blown-up filter.
+    with pytest.raises(evidence_core.EvidenceError) as exc:
+        evidence_core.worst_of([0.1, float("nan")])
+    assert "finite" in str(exc.value)
+
+
+def test_a_covariance_under_the_ceiling_returns_what_it_checked():
+    assert evidence_core.require_worst_under(0.23, 1.0, "the localiser") \
+        == 0.23
+
+
+def test_a_covariance_over_the_ceiling_is_refused_by_name():
+    with pytest.raises(evidence_core.EvidenceError) as exc:
+        evidence_core.require_worst_under(192.0, 1.0, "the localiser")
+    assert "the localiser" in str(exc.value)
+
+
+def test_a_pose_near_its_seed_passes_and_returns_the_distance():
+    got = evidence_core.require_pose_near(-0.10, -0.11, -0.08, -0.15,
+                                          0.50, "amcl")
+    assert _close(got, math.hypot(0.02, 0.04), 1e-12)
+
+
+def test_a_localiser_answering_from_its_own_prior_is_refused():
+    # THE FAILURE THE COVARIANCE CEILING CANNOT SEE. nav2_amcl's
+    # untouched prior carries the same 0.25 m2 the bringup seeds with, so
+    # a filter that never received the seed passes every covariance test
+    # and sits at the map origin.
+    with pytest.raises(evidence_core.EvidenceError) as exc:
+        evidence_core.require_pose_near(0.0, 0.0, -12.0, 4.0, 0.50, "amcl")
+    assert "seed" in str(exc.value)
+
+
+def test_a_non_finite_pose_is_refused_rather_than_compared():
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.require_pose_near(float("nan"), 0.0, 0.0, 0.0,
+                                        0.50, "amcl")
+
+
+# ----------------------------------------------------------------------
 # what the map has to say about a scan - sigma_hit and z_rand, derived
 # ----------------------------------------------------------------------
 

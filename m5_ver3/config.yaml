@@ -436,6 +436,27 @@ topics:
   #   slam_toolbox, Nav2 - looks for /tf and /tf_static and nothing else.
   tf: "/tf"
   tf_static: "/tf_static"
+  # ---- THE LOCALISATION ARM'S THREE, F3 Task 2's addition ----
+  #
+  # PRESENT ONLY WITH `--localize`, and nothing publishes or subscribes
+  # any of them on the default stack. They are spelled here for
+  # topics.rf2o_odom's reason: a topic this track RECORDS or a topic a
+  # tool has to reach is a topic this file names, whether or not today's
+  # bringup carries it.
+  #   THE NAMES ARE nav2_amcl's OWN and are not namespaced. That node
+  #   advertises `amcl_pose` and `particle_cloud` and subscribes
+  #   `initialpose` and `map` in its own private namespace, which is the
+  #   root here because m5v3.sh starts it with no namespace at all -
+  #   frames:'s argument applied to topics, and the same one that keeps
+  #   /tf bare.
+  #   `map` IS SERVED AND NOT MEASURED. map_server publishes the frozen
+  #   grid there, transient-local, and amcl reads it once. Nothing on
+  #   this track records it: the artifact is committed and its md5 is
+  #   checked at bringup, so a recording of the same 2.0 MB in every
+  #   session would be a copy that could not disagree with anything.
+  amcl_pose: "/amcl_pose"
+  initialpose: "/initialpose"
+  map: "/map"
 
 # -------------------------------- FRAMES -------------------------------
 # THE COORDINATE FRAMES THIS STACK NAMES, AND THEY HAVE TWO READERS NOW.
@@ -2793,3 +2814,185 @@ map:
     fore_m: "1.875"
     aft_m: "0.90"
     half_width_m: "0.60"
+
+# ----------------------------- LOCALISATION -----------------------------
+# F3 Task 2's ARM, AND IT IS THE FIRST THING ON THIS TRACK THAT KNOWS
+# WHERE THE VEHICLE IS RATHER THAN HOW FAR IT HAS COME.
+#
+# `m5v3.sh start --localize` puts three more children up - the nav
+# lidar's static transform, nav2's map_server serving maps/warehouse_v3,
+# and nav2_amcl localising in it - and AMCL becomes the sole publisher of
+# `map` -> `odom`. F2's EKF keeps `odom` -> `base_link` and nothing here
+# may become that edge's owner (F3 global constraint 15: this phase adds
+# exactly ONE transform).
+#
+# WHAT IS HERE AND WHAT IS IN amcl.yaml, AND IT IS ekf.yaml's SPLIT A
+# FOURTH TIME. nav2_amcl and nav2_map_server read ROS *parameter* files -
+# a top-level node name, a `ros__parameters:` mapping - and this file is
+# not one and is not bent into one. So m5_ver3/amcl.yaml holds what the
+# LOCALISER DOES: its motion model, its sensor model, its particle
+# counts, and the argument for every one of them. What is HERE is what
+# the SHELL has to know: which package, which executable, which node
+# name, which artifact, which budget. **No number is in both.**
+#   AND THE ADDRESSES ARE OVERRIDES, NOT COPIES. m5v3.sh passes the scan
+#   topic and the three frame names on the command line as `-p`
+#   overrides, exactly as it does for ekf_node and as build_map.sh does
+#   for slam_toolbox, so amcl.yaml cannot hold a second spelling of a
+#   name config.yaml already owns. An override WINS over a params file,
+#   which is the safe direction: a copy that reappears in amcl.yaml is
+#   inert rather than authoritative.
+localization:
+  # The localiser's ROS parameter file. Both nodes are addressed in it,
+  # by the node names below, and m5v3.sh greps for both before it starts
+  # anything - check_ekf_params()'s idiom, which exists because rclcpp
+  # applies NOTHING from a block addressed to somebody else and says
+  # nothing at all about it.
+  params_file: "m5_ver3/amcl.yaml"
+  # WHICH LOCALISER THIS ARM IS, as the label every downstream instrument
+  # reads. F3 Task 3 adds a SECOND localiser over the same frozen map -
+  # slam_toolbox's localization mode - and the two produce sessions that
+  # are identical in every respect a table can see: same floor, same
+  # profiles, same CSV columns, same map -> odom edge. So the arm is
+  # named HERE, written into paths.traction_file by `start`, copied into
+  # every session by `record`, and `analyse` refuses a set that mixes
+  # two of them. It is the traction and estimator chain's argument
+  # applied to a third axis.
+  #   THE LABEL CARRIES THE MAP's md5 AND THAT IS NOT DECORATION. A score
+  #   through a registration is a score against ONE grid (F3 constraint
+  #   16), and the whole freeze mechanism is worthless if a session can
+  #   be tabled beside one taken against a rebuilt map.
+  #   `loc=amcl@735cdbc6` says which, in eight characters, in every
+  #   session file this arm produces.
+  label: "amcl"
+  map_server:
+    package: "nav2_map_server"
+    executable: "map_server"
+    node_name: "map_server"
+  amcl:
+    package: "nav2_amcl"
+    executable: "amcl"
+    node_name: "amcl"
+  # BOTH ARE LIFECYCLE NODES AND BOTH MUST BE TRANSITIONED, and this is
+  # the silent failure this budget exists to bound. Started and left
+  # UNCONFIGURED, amcl subscribes to no scan, advertises no /amcl_pose
+  # and publishes no transform, while logging nothing that looks wrong -
+  # `status` reads ALIVE and every other check on the stack is green.
+  # tools/build_map.sh drives slam_toolbox's two transitions the same way
+  # and for the same reason: one process, one log, one refusal that names
+  # it. There is no nav2 lifecycle_manager here - see amcl.yaml's note on
+  # the bond.
+  #   THE ORDER IS map_server FIRST AND IT IS NOT TIDINESS. amcl's
+  #   on_activate waits for a map on the latched `map` topic and an
+  #   INACTIVE map_server never publishes one, so configuring amcl first
+  #   leaves it blocked in a transition with no error at all
+  #   (agv/forklift/launch/localization.launch.py records the same
+  #   ordering, measured on the m5_ver1 rig).
+  lifecycle_timeout_s: "60"
+  # ---- THE INITIAL POSE ----
+  #
+  # THE BRINGUP TELLS AMCL WHERE IT IS, ONCE, AND THAT IS AN HONEST
+  # LABEL RATHER THAN A CAPABILITY. What is published on
+  # topics.initialpose is vehicle.spawn carried into the map frame
+  # through the COMMITTED registration - the same transform every score
+  # in EVIDENCE_LOCALIZATION_V3.md passes through - because a map pose is
+  # the only thing amcl will accept and this simulation is the only place
+  # a world pose exists at all.
+  #   IT IS THE MEASUREMENT HARNESS AND NOT THE VEHICLE. On a real
+  #   forklift there is no world frame and no world -> map transform;
+  #   what there is is an operator typing a pose into a screen, and that
+  #   is exactly what this stands in for.
+  #   agv/forklift/launch/localization.launch.py makes the same split and
+  #   keeps the conversion out of the vehicle's own launch file.
+  #   A KIDNAPPED-ROBOT RECOVERY IS NOT CLAIMED. amcl.yaml runs with
+  #   recovery_alpha_slow/fast at zero and set_initial_pose false, so
+  #   this stack cannot relocalise from nothing and does not pretend to.
+  #   EVIDENCE_LOCALIZATION_V3.md records it as a known limitation.
+  initial_pose:
+    # THE PRIOR'S OWN UNCERTAINTY, AND IT IS THE OPERATOR'S AND NOT THE
+    # SIMULATOR'S. The harness knows the spawn pose exactly; a prior that
+    # SAID so - a covariance of 1e-9 - would be a claim no field bringup
+    # can make, and it would start the filter so peaked that its first
+    # scan could not move it. These are nav2's own figures for an RViz
+    # "2D Pose Estimate", which is the gesture being stood in for: half a
+    # metre of standoff each way and fifteen degrees of heading.
+    #   THEY ARE VARIANCES AND NOT SIGMAS. The message carries a 6x6
+    #   covariance; 0.25 is (0.50 m)^2 and 0.06854 is (pi/12 rad)^2.
+    cov_x_m2: "0.25"
+    cov_y_m2: "0.25"
+    cov_yaw_rad2: "0.06854"
+  # ---- THE BRINGUP GATE ----
+  #
+  # ekf.startup_check's ARGUMENT, APPLIED TO THE LAYER ABOVE IT. That
+  # gate exists because ekf_node can diverge in its first cycles and stay
+  # ALIVE, at rate, saying nothing. This one exists because a lifecycle
+  # node can be ALIVE and never have been configured at all, and because
+  # a localiser whose seed was lost still publishes a pose - from
+  # wherever it last saved one. Both failures are silent and both look
+  # exactly like a healthy stack from every other angle.
+  startup_check:
+    # HOW LONG THE GATE WAITS FOR AMCL'S FIRST ANSWER. It is generous
+    # because what has to happen inside it is a 1712 x 1196 grid being
+    # read, two lifecycle transitions, a scan arriving and a filter
+    # update - and because the alternative to a bound is
+    # tools/noise_probe.sh's lesson: a `--once` read waits FOR EVER, so a
+    # localiser that never published would hang the bringup in silence
+    # instead of refusing it.
+    timeout_s: "30"
+    # THE CEILING THE FIRST POSE'S COVARIANCE HAS TO BE UNDER, and it is
+    # derived from the seed above rather than from nav2. The prior this
+    # bringup publishes has 0.25 m2 as its largest entry, so a filter
+    # that received it reports about that and less; a filter that did NOT
+    # receive it and fell back on a GLOBAL prior would report the
+    # variance of a uniform distribution over a 48 m hall, which is
+    # 48^2/12 = 192 m2. 1.0 sits four times above the seed and two
+    # hundred times below the failure, which is the gap a ceiling wants
+    # to sit in.
+    covariance_max: "1.0"
+    # AND HOW FAR THE FIRST POSE MAY BE FROM THE POSE IT WAS SEEDED WITH.
+    # This is the check that catches a LOST seed, which the covariance
+    # cannot: amcl's own untouched prior carries the same 0.25 m2, so a
+    # filter that never heard the bringup would pass a covariance ceiling
+    # while sitting at the map origin. 0.50 m is the seed's own one
+    # sigma - the filter may move the pose by as much as the prior said
+    # it was unsure by, and no further, with the truck standing where it
+    # was spawned and nothing having commanded it.
+    pose_tolerance_m: "0.50"
+    # HOW LONG THE GATE WAITS BEFORE IT SENDS THE SEED A SECOND TIME.
+    # The gate does not send until BOTH ends are discovered - amcl
+    # subscribed to topics.initialpose and advertising topics.amcl_pose -
+    # so the ordinary case needs one seed and gets one answer, and the
+    # printed line says how many went out. This exists for the case that
+    # discovery reports a match a beat before the transport can carry
+    # one, which is a race no count can close from the outside.
+    #   RE-SEEDING IS HARMLESS AND IS NOT A RETRY LOOP. Each seed is the
+    #   SAME pose, so a filter that took the first is re-initialised
+    #   where it already was; three of them inside the 30 s budget is
+    #   the most this can ever send, and the line it prints says so
+    #   rather than hiding it.
+    reseed_s: "10"
+  # ---- WHAT THE EVIDENCE READS ----
+  analyse:
+    # THE SEARCH RADIUS `map_register.py support` USES, and it is the
+    # bound that separates the SENSOR's error from the MAP's silence. A
+    # return within it of a mapped surface is a noisy hit and belongs in
+    # sigma_hit; one beyond it is a surface the grid does not contain and
+    # belongs in z_rand. 0.30 m is ten times the measured hit rms
+    # (0.0292 m) and two and a half times the registration's own MAX
+    # residual (0.1179 m), and the reading barely moves when it is raised
+    # to 1.00 m - 7.31 % unexplained against 7.37 % - which is what says
+    # the two populations are genuinely separate and not a threshold
+    # effect.
+    support_radius_m: "0.30"
+    # ONE SCAN IN N, for the same reading. The whole mapping drive is
+    # 11901 scans of 811 beams; one in 200 is 60 scans and 48660 beams,
+    # which is three orders of magnitude more than any figure here needs
+    # and under three seconds of arithmetic.
+    support_every: "200"
+    # HOW FAR APART TWO `map` -> `odom` BROADCASTS MAY BE before the gap
+    # is a refusal rather than an interpolation. amcl re-sends that edge
+    # on every scan, so the nominal interval is 1/15 s = 0.0667 s and
+    # this is fifteen of them. A localiser that went quiet for longer
+    # than a second did not slow down, and a straight line drawn through
+    # that second would be a jitter figure about the instrument rather
+    # than about the stack.
+    map_gap_s: "1.0"

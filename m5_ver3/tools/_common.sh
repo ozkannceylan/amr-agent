@@ -98,10 +98,19 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 #   that path rather than with the launcher's.
 # MAINTENANCE OBLIGATION: a process added to m5v3.sh's start() is added
 # HERE, or stop orphans it and still prints "down."
+#   THE LAST TWO ARE F3 TASK 2's LOCALISATION ARM, and they are the
+#   PACKAGE names rather than the executables' - `map_server` and `amcl`
+#   are ordinary enough words to nominate a stranger, and the package
+#   name appears in BOTH command lines this arm produces: `ros2 run`
+#   forks, so the wrapper's line reads `ros2 run nav2_amcl amcl` and the
+#   node's own reads /opt/ros/jazzy/lib/nav2_amcl/amcl. One pattern
+#   finds both, and ours() is what keeps either from reaching a process
+#   that does not carry GZ_PARTITION=m5v3 in its environment.
 M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py"
                "static_transform_publisher" "ekf_node"
                "rf2o_laser_odometry_node" "rf2o_twist.py"
-               "fixed_lag_smoother_node")
+               "fixed_lag_smoother_node"
+               "nav2_map_server" "nav2_amcl")
 
 # The same list as one pgrep alternation, for the callers that want a
 # single pattern rather than a loop.

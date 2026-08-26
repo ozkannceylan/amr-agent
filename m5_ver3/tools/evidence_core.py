@@ -761,7 +761,21 @@ def require_covariance_under(text, ceiling, what):
     Returns the figure when it passes, so the caller can print what it
     checked rather than only that it checked.
     """
-    worst = worst_covariance(text)
+    return require_worst_under(worst_covariance(text), ceiling, what)
+
+
+def require_worst_under(worst, ceiling, what):
+    """One covariance figure against one ceiling, as a refusal.
+
+    IT TAKES A NUMBER BECAUSE THE SECOND GATE HAS ONE. The F2 bringup
+    gate shells out to `ros2 topic echo` and parses text
+    (worst_covariance above); F3's localisation gate holds a MESSAGE,
+    because it has to publish an initial pose before it can read one and
+    a subprocess cannot be made to do both in the right order. The
+    comparison and the sentence it refuses in are the same either way,
+    and this is where they are, once.
+    """
+    worst = float(worst)
     if worst > float(ceiling):
         raise EvidenceError(
             "{} published a covariance inside {:g}, and it did not: the "
@@ -769,6 +783,75 @@ def require_covariance_under(text, ceiling, what):
             "is a filter that has diverged - see EVIDENCE_FUSION.md 8.6 "
             "and 9.".format(what, float(ceiling), worst))
     return worst
+
+
+def worst_of(values):
+    """The largest MAGNITUDE in a covariance already in hand.
+
+    THE LARGEST AND NOT THE FIRST, for worst_covariance()'s reason: a
+    diverged filter on this stack publishes 5.74e87 on the xx diagonal
+    and -5.08e91 off it, so a gate reading entry 0 would read the
+    smaller of the two by four orders of magnitude. The sign is dropped
+    because an off-diagonal is allowed to be negative and a ceiling is a
+    comparison against a magnitude.
+
+    AN EMPTY MATRIX IS A REFUSAL AND NEVER A ZERO, exactly as an empty
+    read is: "no numbers, so the worst is 0, so it is healthy" is the
+    gate failing OPEN on the case it was written for.
+    """
+    values = [abs(float(v)) for v in values]
+    if not values:
+        raise EvidenceError(
+            "the message carries a covariance: it has no entries at all. "
+            "An empty matrix is not a certain estimate.")
+    if not all(math.isfinite(v) for v in values):
+        raise EvidenceError(
+            "the covariance is finite, and it is not: it carries "
+            "{}. A non-finite entry is what a filter that has blown up "
+            "publishes.".format(
+                ", ".join(repr(v) for v in values
+                          if not math.isfinite(v))[:120]))
+    return max(values)
+
+
+def require_pose_near(x, y, ref_x, ref_y, tolerance_m, what):
+    """One pose against the pose it was SUPPOSED to be at, as a refusal.
+
+    WHY A LOCALISER NEEDS THIS AND A FILTER DOES NOT. F2's bringup gate
+    asks whether the estimator's covariance is sane, because an estimator
+    that has diverged says so in its covariance. A LOCALISER that never
+    received its initial pose does not diverge - it reports a perfectly
+    ordinary pose, with a perfectly ordinary covariance, from wherever
+    its own default prior put it. The covariance ceiling cannot see that
+    at all: nav2_amcl's untouched prior carries the same 0.25 m2 the
+    bringup's seed does.
+
+    SO THE CHECK IS AGAINST THE SEED AND NOT AGAINST ZERO. The bringup
+    told the localiser where it was; this asks whether the answer that
+    came back is anywhere near what it was told, with the truck standing
+    where it was spawned and nothing having commanded it. It is the only
+    check on this stack that can tell a localiser which HEARD the
+    bringup from one which did not.
+
+    Returns the distance when it passes, so the caller can print what it
+    measured rather than only that it checked.
+    """
+    off = math.hypot(float(x) - float(ref_x), float(y) - float(ref_y))
+    if not math.isfinite(off):
+        raise EvidenceError(
+            "{} published a finite pose, and it read ({!r}, {!r})".format(
+                what, x, y))
+    if off > float(tolerance_m):
+        raise EvidenceError(
+            "{} answered within {:g} m of the pose it was seeded with, "
+            "and it did not: it reports ({:.4f}, {:.4f}) against a seed "
+            "of ({:.4f}, {:.4f}), which is {:.4f} m away. With the truck "
+            "standing where it was spawned that is not a correction - it "
+            "is a localiser that never received the seed and is "
+            "answering from its own prior.".format(
+                what, float(tolerance_m), float(x), float(y),
+                float(ref_x), float(ref_y), off))
+    return off
 
 
 # WHICH ESTIMATOR PUBLISHES WHERE, AS A GRAMMAR OVER THE ARM LABEL.

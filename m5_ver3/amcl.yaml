@@ -1,0 +1,516 @@
+# amcl.yaml - what the LOCALISER does, and what it refuses.
+#
+# A ROS PARAMETER FILE, WHICH config.yaml IS NOT AND MAY NOT BECOME. Two
+# nodes are addressed here by the names m5v3.sh starts them under -
+# `map_server`, which serves the frozen grid, and `amcl`, which localises
+# in it - and rclcpp applies NOTHING from a block addressed to somebody
+# else and says nothing at all about it. `m5v3.sh start --localize` greps
+# for both top-level keys before it starts anything, which is
+# check_ekf_params()'s idiom applied to a third parameter file.
+#
+# ---- WHAT IS HERE AND WHAT IS ON THE COMMAND LINE ----
+#
+# This file holds what the localiser DOES: its motion model, its sensor
+# model, its particle counts and its update thresholds. It holds NO
+# ADDRESS. The scan topic, the three frame names, the map topic and the
+# path to the grid are all things config.yaml already owns, and m5v3.sh
+# passes every one of them as a `-p` override - exactly as it does for
+# ekf_node and as tools/build_map.sh does for slam_toolbox. **No name and
+# no number is in both files.**
+#   AN OVERRIDE WINS OVER A PARAMS FILE, which is why this direction is
+#   the safe one: if a frame name ever reappears here it is inert rather
+#   than authoritative, and the grep above is what catches the file being
+#   ignored entirely.
+#
+# ---- WHAT REACHES THIS LOCALISER. EXACTLY TWO THINGS ----
+#
+#   1. topics.scan_nav - the NAVIGATION lidar on the overhead guard roof
+#      at z = 1.80 m: a SICK TiM571 profile, 811 beams over 270 deg at
+#      15 Hz, 0.05-25.0 m, sigma 0.02 m of white noise plus a per-run
+#      bias draw of the same size (gazebo/forklift_ver3/model.sdf).
+#   2. `odom` -> `base_link` on /tf - F2's EKF, at 50 Hz, and the EKF is
+#      the sole publisher of that edge (ekf.yaml, F3 constraint 15).
+#
+#   AND NOTHING ELSE. In particular:
+#
+#   - NO GROUND TRUTH. topics.odom_ground_truth is the simulator's own
+#     pose and it is a MEASUREMENT REFERENCE ONLY (F2 global constraint
+#     13). It is not in this file, it is not in ekf.yaml, and no
+#     parameter here can reach it. The one place a world pose enters this
+#     arm at all is the initial-pose seed, and that is the measurement
+#     HARNESS standing in for an operator - see "THE INITIAL POSE" below.
+#   - NEITHER SAFETY SCANNER. Those are frozen instruments on this track
+#     (F1 global constraint 6) and only one of them is even bridged. A
+#     localiser that consumed one would create the impression that a
+#     safety device carries a process function.
+#   - NOT THE 3D LIDAR AND NOT THE DEPTH CAMERA. `scan_topic` names one
+#     topic, and gz renders a sensor only while something subscribes to
+#     it (EVIDENCE_MODEL_V3.md 6: subscribing to the 3D lidar takes the
+#     real-time factor from 0.999 to 0.85).
+#
+# ---- WHERE THE NUMBERS COME FROM, AND THE ORDER THEY WERE FIXED IN ----
+#
+# Every value below was fixed BEFORE the first scored localisation run,
+# from one of exactly four sources, and the evidence records the run
+# order so that the claim is checkable:
+#
+#   the SENSOR      gazebo/forklift_ver3/model.sdf, read out of the model
+#                   rather than copied into a table
+#   the FILTER'S    EVIDENCE_FUSION.md 5, 8.5 and 9.3 - what F2's EKF's
+#   MEASURED ERROR  pose is actually worth, which is what this motion
+#                   model has to be able to swallow
+#   the MAP         `map_register.py support`, run from the GROUND TRUTH
+#                   pose over the whole mapping drive: what this grid
+#                   explains of a scan and what it does not
+#   the SEED        localization.initial_pose in config.yaml
+#
+# NOTHING HERE WAS TUNED AGAINST A LOCALISATION RESULT. Where a value
+# equals nav2's own default it is written anyway and marked DEFAULT-KEPT
+# with the reason for keeping it, because a default that decides a
+# measurement is a choice too. Where nav2's default is WRONG for this
+# vehicle the departure is stated with the measurement it came from.
+
+map_server:
+  ros__parameters:
+    use_sim_time: true
+
+    # NOT SET HERE. `yaml_filename` is the path to the frozen artifact
+    # and it belongs to config.yaml (map.dir, map.name); m5v3.sh passes
+    # it, and md5-checks the grid and its yaml against the committed
+    # registration BEFORE anything starts (F3 constraint 16). Neither is
+    # `topic_name` or `frame_id`: those are topics.map and frames.map.
+
+    # NON-DEFAULT (nav2: 0.1). THE BOND IS A HEARTBEAT TO NOBODY HERE
+    # AND IT IS SWITCHED OFF RATHER THAN LEFT BEATING. nav2_util's
+    # LifecycleNode creates a bond to a lifecycle_manager on activation;
+    # this stack has no manager, for the reason tools/build_map.sh gives
+    # about slam_toolbox and sim/launch/warehouse_slam.launch.py measured
+    # on the older rig - a bond heartbeat starves at the real-time
+    # factors a simulation reaches, and a manager that declares a healthy
+    # node dead is worse than no manager. m5v3.sh drives both transitions
+    # itself, so one process is one log and one refusal that names it.
+    # Zero disables the bond; left at 0.1 the node prints "Creating bond
+    # (map_server) to lifecycle manager" and then publishes a heartbeat
+    # nothing reads for the life of the run.
+    bond_heartbeat_period: 0.0
+
+amcl:
+  ros__parameters:
+    use_sim_time: true
+
+    # NOT SET HERE, ALL FIVE. `scan_topic`, `map_topic`,
+    # `base_frame_id`, `odom_frame_id` and `global_frame_id` are
+    # config.yaml's (topics.scan_nav, topics.map, frames.base_link,
+    # frames.odom, frames.map) and m5v3.sh passes them as `-p`
+    # overrides. See this file's header.
+
+    # NON-DEFAULT (nav2: 0.1), for map_server's reason above.
+    bond_heartbeat_period: 0.0
+
+    # ---------------------------------------------------------------
+    # THE MOTION MODEL
+    # ---------------------------------------------------------------
+
+    # NON-DEFAULT IN INTENT AND DEFAULT IN VALUE, AND THE ARGUMENT HAS TO
+    # BE MADE AGAIN FOR THIS VEHICLE RATHER THAN INHERITED.
+    #
+    # This is a TRICYCLE: one steered, driven wheel leading, two passive
+    # wheels trailing (gazebo/forklift_ver3/model.sdf). It cannot
+    # translate sideways - the rear axle midpoint's velocity is purely
+    # longitudinal - and that is exactly the constraint the differential
+    # model encodes and exactly the one `nav2_amcl::OmniMotionModel`
+    # removes. The omni model adds an independent lateral noise term, so
+    # its particles would spread into poses this vehicle cannot reach and
+    # AMCL would be free to explain a scan with a sideways slide that
+    # never happened.
+    #   AND THE ONE THING THAT LOOKS LIKE A COUNTER-ARGUMENT IS NOT ONE.
+    #   `base_link` on this truck stands 0.50 m FORWARD of the rear axle
+    #   (vehicle.rear_axle_offset_m), so base_link genuinely HAS a
+    #   lateral velocity - it is d.yaw_rate, and it is the whole reason
+    #   ekf.yaml fuses the wheel odometry's `vy` (EVIDENCE_FUSION.md 4).
+    #   That does not reach here. This model decomposes an odometry
+    #   DELTA into rotate-translate-rotate, which represents any planar
+    #   motion exactly, including an arc taken about a point half a metre
+    #   astern. What it constrains is the NOISE structure, and the noise
+    #   structure is still right: this vehicle's lateral displacement is
+    #   determined by its rotation and is not free.
+    # The differential model is ALSO nav2's default. That is a
+    # coincidence and not the reason, and it is written out so that
+    # "same as default" cannot be read as "not chosen".
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+
+    # ---- THE FOUR NOISE TERMS, DERIVED FROM WHAT F2 MEASURED ----
+    #
+    # nav2's DifferentialMotionModel samples
+    #
+    #   d_rot1  ~ N(delta_rot1,  alpha1.rot1^2 + alpha2.trans^2)
+    #   d_trans ~ N(delta_trans, alpha3.trans^2 + alpha4.(rot1^2+rot2^2))
+    #   d_rot2  ~ N(delta_rot2,  alpha1.rot2^2 + alpha2.trans^2)
+    #
+    # so each alpha is a VARIANCE RATIO and its square root is the 1
+    # sigma error per unit of whatever drives it. nav2 ships 0.2 on all
+    # five, which is a 1 sigma of 0.447 - 45 % of every distance and 45 %
+    # of every turn. THAT IS NOT THIS VEHICLE. What this model has to
+    # swallow is the error of F2's EKF, not of a tutorial robot's wheel
+    # encoders, and F2 measured it:
+    #
+    #   straight, EKF   path error +4.22 % dry, +9.62 % wet; heading
+    #                   error -0.0577 rad over 11.02 m of travel and
+    #                   ~0 rad of turn                (9.3, 8.5)
+    #   square, EKF     heading error +0.6116 rad on +6.1438 rad
+    #                   delivered dry; +0.7014 rad on +6.0192 rad wet;
+    #                   cross-track -0.2381 m dry, -0.3521 m wet   (8.5, 9.3)
+    #   corner_creep    heading error -0.0077 rad on ~2.85 rad     (9.3)
+    #
+    # THE WET FIGURES ARE THE ONES USED, because one file serves both
+    # plants: `--localize --slippery` reads exactly this file, and a
+    # noise model that could not represent the wet floor's error would
+    # put the truth outside its own particle cloud on the runs that need
+    # it most. The dry error then sits at half a sigma, which is where a
+    # motion model should put a well-behaved input.
+
+    # ROTATION ERROR PER UNIT ROTATION. `square` on the wet floor:
+    # 0.7014 rad of heading error over 6.0192 rad delivered = 11.65 %,
+    # so 1 sigma = 0.1165 and alpha1 = 0.1165^2 = 0.0136. Rounded UP to
+    # three places. corner_creep - one sustained corner rather than four
+    # hard ones - reads 0.27 % on the same figure, so this is the worst
+    # case of the two profiles and not their average.
+    alpha1: 0.014
+
+    # ROTATION ERROR PER UNIT TRANSLATION, rad^2 per m^2. `straight`
+    # turns nothing, so its whole heading error is this term: the EKF's
+    # worst is about 0.072 rad over 11.02 m = 0.0065 rad/m, and
+    # alpha2 = 0.0065^2 = 4.3e-5. This is the term nav2's 0.2 is most
+    # wrong about - it would let a particle's heading wander 0.447 rad
+    # over a single metre of straight driving, which is 68 times what
+    # this vehicle's gyro-corrected heading actually does.
+    alpha2: 0.00005
+
+    # TRANSLATION ERROR PER UNIT TRANSLATION. This is the DEBT F3 exists
+    # to pay: the wheel odometry's distance is long by design (a 1.5 %
+    # believed-radius error on a 1024-line encoder) and the EKF cannot
+    # touch it, because both of its inputs are rates and nothing on the
+    # vehicle observes distance (EVIDENCE_FUSION.md 5). Measured path
+    # error +9.62 % on the wet `straight`, so 1 sigma = 0.0962 and
+    # alpha3 = 0.00926. Rounded to 0.010, which is a 1 sigma of exactly
+    # 10 % of distance travelled: the dry floor's +4.22 % then sits at
+    # 0.42 sigma and the wet floor's +9.62 % at 0.96 sigma.
+    alpha3: 0.010
+
+    # TRANSLATION ERROR PER UNIT ROTATION, m^2 per rad^2. `square` on
+    # the wet floor: 0.3521 m of cross-track error over 6.0192 rad =
+    # 0.0585 m/rad, so alpha4 = 0.00342. Rounded to 0.0035.
+    #   IT IS PARTLY DOUBLE-COUNTED WITH alpha1 AND THAT IS THE SAFE
+    #   DIRECTION. Most of a cross-track error on a turning profile IS
+    #   the heading error rotating the trajectory (EVIDENCE_FUSION.md
+    #   8.5 says so where it explains why `straight` is the profile the
+    #   split is stated on), so some of this variance is alpha1's
+    #   already. A motion model that is slightly generous costs a
+    #   slightly wider particle cloud; one that is too tight puts the
+    #   truth outside it, and the failure mode there is particle
+    #   depletion rather than a large number.
+    alpha4: 0.0035
+
+    # alpha5 IS DELIBERATELY ABSENT. It is the OmniMotionModel's strafe
+    # term and `nav2_amcl::DifferentialMotionModel` never reads it, so a
+    # value here would be a number that decides nothing - and this track
+    # does not write those. The m5_ver1 file wrote it as DEFAULT-KEPT;
+    # that was one of the things re-argued rather than copied.
+
+    # ---------------------------------------------------------------
+    # THE SENSOR MODEL
+    # ---------------------------------------------------------------
+
+    # DEFAULT-KEPT. The likelihood field: each return is weighed by its
+    # distance to the nearest occupied cell. The beam model's
+    # alternative raycasts every ray through the grid per particle, and
+    # at 271 beams x 2000 particles x 15 Hz on a rig that is also
+    # rendering four sensors that is not a trade this stack can make.
+    #   THE CHOICE DECIDES WHICH PARAMETERS BELOW ARE LIVE and that is
+    #   stated where it matters - see the z_short/z_max note.
+    laser_model_type: "likelihood_field"
+
+    # NON-DEFAULT (nav2: -1.0 and 100.0). THE SENSOR'S OWN LIMITS, out
+    # of gazebo/forklift_ver3/model.sdf's `nav_lidar` <range>: 0.05 m and
+    # 25.0 m. A max range four times the real one changes which returns
+    # are treated as "saw nothing" - nav2_amcl's likelihood field skips
+    # every beam at or beyond `laser_max_range` by name ("This model
+    # ignores max range readings") - and it also scales the z_rand term,
+    # which is divided by exactly this number.
+    #   AND THE MINIMUM IS THE SENSOR'S AND NOT A MASK, WHICH IS A RULING
+    #   AND NOT AN OVERSIGHT. This vehicle's nav lidar SEES ITSELF: 49 of
+    #   its 811 beams - bearing indices 286 to 398 - hold a constant
+    #   range through a 163 deg turn, out to 1.476 m, which is the
+    #   overhead guard and the mast in its own aperture (measured, and
+    #   6.5 % of usable returns). Raising `laser_min_range` above them
+    #   would remove them, and it would also remove genuine returns: the
+    #   mapping drive came within 1.0732 m of an obstacle
+    #   (EVIDENCE_MAP_V3.md, `map_register.py clearance`), so the two
+    #   populations OVERLAP and no min-range can separate them on this
+    #   truck. They are carried by z_rand below instead, which was
+    #   derived from them.
+    laser_min_range: 0.05
+    laser_max_range: 25.0
+
+    # NON-DEFAULT (nav2: 60). ONE BEAM PER DEGREE, AND THE ARITHMETIC IS
+    # EXACT. The scan is 811 beams over 270 deg - 0.333 deg apart - and
+    # nav2 subsamples with `step = (count - 1) / (max_beams - 1)`, so 271
+    # gives step = 810/270 = 3 exactly and keeps beam 0, 3, 6 ... 810.
+    # No beam is weighted twice and none of the aperture is unsampled.
+    #   WHY NOT THE DEFAULT 60. sim/worlds/WAREHOUSE_LANDMARKS.md 5
+    #   measured on the m5_ver1 floor that in a long aisle "the only
+    #   along-aisle information in the scan is carried by ten rays or
+    #   fewer", and one ray in thirteen of ten rays is under one. This
+    #   floor's aisles are 8.00 m wide and 48 m long and the rack pitch
+    #   repeats every 5.75 m, so the along-aisle information is exactly
+    #   as thin here.
+    #   WHY NOT ALL 811. Two reasons, one of them arithmetic. A
+    #   likelihood field treats beams as INDEPENDENT and a wall's
+    #   returns are not: sampling the same surface three times over
+    #   makes the posterior three times more peaked than the information
+    #   in it, which is an over-confident filter rather than an accurate
+    #   one. And the cost is linear - the measured 7.00 % of one core at
+    #   271 beams would be 21 % at 811, against the EKF's own 10.4 %
+    #   (EVIDENCE_FUSION.md 10.4's instrument, /proc/<pid>/stat fields
+    #   14 and 15).
+    max_beams: 271
+
+    # ---- THE MIXTURE, AND IT WAS MEASURED RATHER THAN CHOSEN ----
+    #
+    # nav2's likelihood field weighs one beam as
+    #
+    #     z_hit . exp(-d^2 / 2.sigma_hit^2)   +   z_rand / laser_max_range
+    #
+    # with `d` the distance from the beam's endpoint to the nearest
+    # occupied cell. Both terms are statements about THIS map and THIS
+    # sensor, so both were measured with `map_register.py support`, which
+    # places every beam of a recorded drive on the frozen grid from the
+    # GROUND TRUTH pose (an instrument's reading of a reference, never an
+    # input to anything the vehicle runs). Over the whole mapping drive -
+    # 60 scans, 48660 beams, 45210 of them usable:
+    #
+    #     EXPLAINED     93.42 %   a mapped surface within 0.30 m
+    #     UNEXPLAINED    6.58 %   of which
+    #        free floor  6.54 %       an obstacle the map does not carry
+    #        unknown     0.03 %       never observed while mapping
+    #        off-raster  0.00 %
+    #     endpoint-to-surface distance, explained beams:
+    #                   rms 0.0292 m, mean 0.0236 m, worst 0.2993 m
+    #
+    # and on the `straight` profile these runs actually drive, 7.37 %
+    # unexplained at an rms of 0.0240 m.
+
+    # NON-DEFAULT (nav2: 0.5 / 0.5). THE MEASURED SHARE, and the larger
+    # of the two readings above: 7.4 % of usable returns have no mapped
+    # surface under them, so 7.4 % of the mixture is the term that says
+    # "this return came from something the map does not contain" and
+    # 92.6 % is the term that says it came from a mapped surface.
+    #   WHAT THAT 7.4 % ACTUALLY IS, STATED. Almost all of it is the
+    #   truck seeing ITSELF (see laser_min_range above) - a fixed 49
+    #   beams that no map of a warehouse can ever explain. A little of it
+    #   is the building: warehouse_v3 HAS NO SOUTH WALL, because the dock
+    #   annex stands 4.00 m in front of it over 28 m of its length and
+    #   the bay backs 0.10 m in front over the other 20 m
+    #   (EVIDENCE_MAP_V3.md 9), and returns from behind them land in
+    #   unmapped space. That cost is measured and it is 0.03 % of usable
+    #   returns over the whole floor - real, small, and not hidden.
+    #   nav2's shipped 0.5/0.5 would charge SEVEN TIMES the measured
+    #   share of the scan to noise, which flattens the posterior and
+    #   throws away the map this phase spent a task building.
+    z_hit: 0.926
+    z_rand: 0.074
+
+    # NON-DEFAULT (nav2: 0.2). THE MEASURED SPREAD OF `d` WITH THE POSE
+    # RIGHT: rms 0.0292 m over 42237 explained beams, rounded to 0.029.
+    # It is not a datasheet sum and it does not need to be - it already
+    # contains everything that puts a return away from a mapped surface:
+    # the sensor's 0.02 m white noise, its 0.02 m per-run bias draw, the
+    # 0.05 m cell the map is rastered on, and the map's own internal
+    # shear. That it lands within a millimetre of the registration's
+    # residual rms (0.0291 m, EVIDENCE_MAP_V3.md 6.4) is a coincidence
+    # of two different measurements of the same grid, and it is worth
+    # saying so rather than presenting it as a derivation.
+    #   IT IS SEVEN TIMES TIGHTER THAN nav2's DEFAULT, and that is the
+    #   point: 0.2 m describes a scanner and a map that this stack
+    #   measured itself not to have, and it would let a particle half a
+    #   cell out score as well as one that is right.
+    #   THE RISK IT CARRIES, STATED. A sigma this tight means a pose more
+    #   than about 3 sigma - 0.09 m - out of position gets a weight that
+    #   is small in every beam at once, so a filter that is badly wrong
+    #   cannot climb back. That is the same property that makes it
+    #   accurate when it is right, and it is why recovery is OFF and
+    #   honest rather than on and pretending.
+    sigma_hit: 0.029
+
+    # DEFAULT-KEPT (2.0 m), AND THE DEFAULT IS RIGHT FOR THIS SEED. It is
+    # how far out the likelihood field is computed; beyond it `d`
+    # saturates and every pose scores the same. It therefore has to cover
+    # the error the filter must be able to CLIMB OUT OF, which on this
+    # stack is the initial-pose prior: localization.initial_pose is 0.50 m
+    # of sigma each way, so 3 sigma is 1.5 m and 2.0 m covers it.
+    laser_likelihood_max_dist: 2.0
+
+    # z_short, z_max AND lambda_short ARE DELIBERATELY ABSENT, and the
+    # reason is not preference. They are the BEAM model's parameters -
+    # the short-reading and max-reading terms of a full raycast mixture -
+    # and `nav2_amcl::LikelihoodFieldModel::sensorFunction` reads
+    # neither: its whole per-beam weight is the two terms written out
+    # above. Writing them would be three numbers that decide nothing, in
+    # the file this track keeps for numbers that decide things. The
+    # question they exist to answer - what happens to a return the map
+    # cannot explain - IS answered here, by z_rand, and it was measured.
+
+    # DEFAULT-KEPT (off). Beam skipping discards rays that disagree with
+    # the majority of particles. In an aisle whose along-aisle
+    # information is carried by a handful of rays, those are precisely
+    # the rays it would discard - and on this vehicle the 49 self-return
+    # beams disagree with everything, every scan, so a skip rule tuned by
+    # them would be tuned by the truck's own bodywork.
+    do_beamskip: false
+
+    # ---------------------------------------------------------------
+    # THE PARTICLE FILTER
+    # ---------------------------------------------------------------
+
+    # DEFAULT IN VALUE, DERIVED IN ARGUMENT, AND THE DERIVATION IS WHAT
+    # SAYS THE VALUE IS ENOUGH. This bringup SEEDS the filter with a
+    # 0.50 m prior rather than asking it to localise globally, so the
+    # particle set has one job: represent that prior finely enough that
+    # its own sampling noise is not the error being reported. The
+    # standard error of a mean over N samples of a 0.50 m Gaussian is
+    # 0.50/sqrt(N), which at N = 500 is 0.022 m - HALF A MAP CELL, and a
+    # fifth of the registration's MAX residual (0.1179 m, the floor every
+    # figure this arm produces is read against). Monte-Carlo noise
+    # therefore cannot be what limits an absolute score here, which is
+    # the only thing this number had to buy.
+    min_particles: 500
+    # AND THE CEILING IS A CPU BOUND. The sensor model is linear in
+    # particles x beams: 2000 x 271 at 15 Hz measured 7.00 % of one core
+    # on this rig, against the EKF's 10.4 %. KLD resampling collapses
+    # towards the floor once the posterior is tight, so this is what the
+    # filter is ALLOWED to spend and not what it spends.
+    max_particles: 2000
+
+    # DEFAULT-KEPT, both. The KLD bound: with probability pf_z the
+    # sampling error of the represented distribution is under pf_err.
+    # Nothing measured on this floor argues for moving them, and moving
+    # them to improve a score is the tuning this file's header refuses.
+    pf_err: 0.05
+    pf_z: 0.99
+
+    # DEFAULT-KEPT (1), AND THE REASON IS THIS FILTER'S UPDATE RATE AND
+    # NOT nav2's. Resampling every update impoverishes a sample set when
+    # updates come at sensor rate; this one updates only after
+    # update_min_d of travel, which on the `straight` profile is about
+    # 2.2 times a second (measured) rather than 15. An interval of 2
+    # would mean resampling every half metre.
+    resample_interval: 1
+
+    # DEFAULT-KEPT (0.25 m, 0.2 rad), AND DERIVED RATHER THAN INHERITED.
+    # AMCL runs the filter only after the vehicle has moved this far, so
+    # this is the distance over which the odometry is left unopposed.
+    # F2's measured along-track error is +4.22 % of path dry and +9.62 %
+    # wet, so 0.25 m of travel accumulates 10.6 mm dry and 24 mm wet -
+    # both UNDER the map's own residual rms of 0.0291 m. A finer update
+    # threshold would be correcting against distances this map cannot
+    # resolve, at 15 Hz, for the CPU of a full filter update each time.
+    #   AND IT IS WHAT MAKES A STANDING VEHICLE GET NO CORRECTION AT ALL:
+    #   `map` -> `odom` is held and re-broadcast, and whatever the
+    #   odometry does during a dwell passes through to the absolute pose
+    #   unopposed. That is a property of this configuration and
+    #   EVIDENCE_LOCALIZATION_V3.md states it rather than hiding it.
+    update_min_d: 0.25
+    update_min_a: 0.2
+
+    # DEFAULT-KEPT (both zero = augmented-MCL recovery DISABLED), AND IT
+    # IS A POSITION RATHER THAN AN OMISSION. Recovery injects random
+    # particles when the short-term likelihood average falls below the
+    # long-term one. This floor's rack block repeats every 5.75 m
+    # (EVIDENCE_MAP_V3.md 9), so a particle injected one bay along scores
+    # very nearly as well as the truth - and recovery could relocate the
+    # filter to an equally likely WRONG pose, producing an error curve
+    # with a clean jump in it that READS as a recovery. With it off, a
+    # divergence stays visible as a divergence, which is what an evidence
+    # file needs.
+    #   THIS IS ALSO WHY A KIDNAPPED-ROBOT RECOVERY IS NOT CLAIMED
+    #   ANYWHERE IN THIS PHASE. This arm is seeded once and tracks; it
+    #   cannot find itself from nothing and does not pretend to.
+    recovery_alpha_slow: 0.0
+    recovery_alpha_fast: 0.0
+
+    # ---------------------------------------------------------------
+    # THE TRANSFORM
+    # ---------------------------------------------------------------
+
+    # DEFAULT-KEPT, AND IT IS F3's WHOLE POINT. AMCL owns `map` ->
+    # `odom` and publishes it; F2's EKF owns `odom` -> `base_link` and
+    # publishes that. Two publishers, two DISJOINT edges, which is F3
+    # global constraint 15 - and the count is CAPTURED in the evidence
+    # rather than asserted, because two publishers of the SAME edge is a
+    # coin toss at whatever rate they run.
+    tf_broadcast: true
+
+    # DEFAULT-KEPT (1.0 s), AND THE DEFAULT IS RIGHT FOR THIS SCAN RATE.
+    # AMCL stamps the transform it broadcasts this far into the future so
+    # that a consumer can look it up without waiting for the next
+    # correction. It therefore has to exceed the interval between
+    # broadcasts, which on this stack is one scan period - 1/15 s =
+    # 0.067 s - so 1.0 s is fifteen periods of margin. What it costs is
+    # how long a stale correction is served after the localiser stops,
+    # and a localiser that has stopped is a refusal here rather than a
+    # tolerance question.
+    transform_tolerance: 1.0
+
+    # ---------------------------------------------------------------
+    # THE INITIAL POSE
+    # ---------------------------------------------------------------
+
+    # NON-DEFAULT IN MEANING THOUGH NOT IN VALUE (nav2: false), AND IT IS
+    # THE OPPOSITE OF WHAT THE m5_ver1 FILE DID. There the pose was
+    # supplied as three PARAMETERS; here the bringup publishes it on
+    # topics.initialpose after the node is active. One mechanism, and
+    # this is the one, for two measured reasons:
+    #   IT MAKES THE SEED AN EVENT WITH A TIME. Measured on this rig:
+    #   with `set_initial_pose` false and no message, amcl processes NO
+    #   scan, publishes NO pose and broadcasts NO transform - it logs
+    #   "Waiting for the initial pose" and nothing else. So the first
+    #   thing this localiser ever says is its answer to a seed the
+    #   bringup can point at, rather than an answer to a parameter that
+    #   was already there.
+    #   AND IT IS WHAT LETS THE GATE SEE ANYTHING AT ALL. amcl publishes
+    #   on `amcl_pose` when it RESAMPLES or when publication is forced,
+    #   and with the truck standing at spawn it never resamples
+    #   (update_min_d above). An initial pose forces exactly one
+    #   publication, on the next scan - so tools/localization_health.py
+    #   subscribes FIRST and seeds SECOND, and the message it reads is
+    #   the filter's own answer rather than a copy of the seed.
+    set_initial_pose: false
+
+    # NON-DEFAULT (nav2: false). With this true amcl is REQUIRED to be
+    # given a pose whenever the filter is reset instead of quietly
+    # re-initialising from the last pose it saved into its own
+    # parameters. The stated seed is then the only thing a run can start
+    # from, which is the property every convergence figure in
+    # EVIDENCE_LOCALIZATION_V3.md depends on: a filter that silently
+    # began where the previous activation ended would measure nothing.
+    always_reset_initial_pose: true
+
+    # DEFAULT-KEPT (0.5 Hz), AND NOT BY CHOICE - THE VALUE THAT WAS
+    # WANTED DOES NOT WORK. The intent was 0.0, to stop amcl writing its
+    # current pose back into its own initial_pose_* parameters at all.
+    # nav2_amcl computes save_pose_period_ = durationFromSec(1.0 /
+    # save_pose_rate) with no guard, so 0.0 gives an infinite period and
+    # the CONFIGURE transition dies with "Input t_sec is too large or too
+    # small for tf2::Duration", leaving the node unconfigured and silent.
+    # Reproduced on the m5_ver1 rig outside any stack
+    # (agv/forklift/amcl.yaml carries the reproduction); 0.5 configures
+    # cleanly. always_reset_initial_pose above is what makes the saved
+    # pose harmless.
+    save_pose_rate: 0.5
+
+    # DEFAULT-KEPT. The grid is frozen and served once, transient-local;
+    # this only matters if a second map ever arrived, which on this stack
+    # it cannot - map_server is started with one `yaml_filename` whose
+    # md5 the bringup has already checked against the committed
+    # registration.
+    first_map_only: false

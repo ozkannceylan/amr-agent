@@ -13,10 +13,14 @@
 # is up is the plant, its sensors, the node that estimates the vehicle's
 # motion from them and the filter that fuses that estimate with the IMU.
 # A process started for the shape of the thing would be a claim this run
-# does not make. There is no MAP and no localisation here - the EKF's
-# world frame is the odom frame, so it publishes odom -> base_link and
-# never map -> odom, and that edge is F3's. Nothing here touches PLCSIM
-# Advanced or anything on the Windows side.
+# does not make. Nothing here touches PLCSIM Advanced or anything on the
+# Windows side.
+#
+# THE MAP AND THE ABSOLUTE POSE ARE F3's AND THEY ARE OPTIONAL. The
+# default stack has NO localisation in it at all: the estimator's world
+# frame is the odom frame, so it publishes odom -> base_link and never
+# map -> odom. `--localize` is what adds that edge, and it adds exactly
+# that one - AMCL owns it and the estimator keeps its own.
 #
 # IT ORCHESTRATES PROCESSES AND HOLDS NO LOGIC OF ITS OWN. Every constant
 # it obeys is in config.yaml and every child it starts writes its own log
@@ -75,6 +79,20 @@
 #   apt-get download, dpkg-deb -x into $HOME - and `start --fuse`
 #   refuses by name if it has not been run.
 #
+# --localize ADDS A LAYER RATHER THAN CHANGING ONE, which is what makes
+# it different in kind from all three flags above: --slippery changes the
+# PLANT, --rf2o adds a SENSOR, --fuse swaps the ESTIMATOR, and this one
+# puts something ABOVE the estimator that knows where the vehicle IS.
+# nav2's map_server serves the frozen grid in maps/warehouse_v3 and
+# nav2_amcl localises in it, publishing map -> odom - the one edge F3
+# adds (constraint 15) - on top of the odom -> base_link the estimator
+# already owns. The grid's md5 is checked against the committed
+# registration BEFORE anything starts, both lifecycle nodes are
+# transitioned by this script, and a gate refuses a localiser that came
+# up merely alive. Its answer is written to the state file as loc=, so
+# every instrument downstream can say whether a figure is absolute; it
+# combines with all three other flags.
+#
 # THE PARTITION IS NOT OVERRIDABLE FROM THE ENVIRONMENT, unlike m6.sh's.
 # It is read from config.yaml by start, by stop and by status alike, so
 # the three cannot disagree about which graph this is - and ours() reads
@@ -124,6 +142,18 @@ RF2O=false
 # like --rf2o it is an ESTIMATOR label, so the two share the arm= line
 # and cannot both be on.
 FUSE=false
+# THE OPTIONAL LOCALISATION ARM, F3 Task 2, and it is OFF unless the
+# command line says otherwise. --localize puts nav2's map_server and
+# nav2_amcl up over the FROZEN map in maps/warehouse_v3 and gives this
+# stack its first ABSOLUTE pose: AMCL becomes the sole publisher of
+# map -> odom, on top of the odom -> base_link the estimator already
+# owns. It is different in kind from all three flags above - --slippery
+# changes the PLANT, --rf2o adds a SENSOR, --fuse swaps the ESTIMATOR,
+# and this one adds a LAYER - so it is a label of its own (loc=) rather
+# than a third value on the arm= line, and it combines with every one of
+# them. F3 Task 3 will make it take an argument, when there is a second
+# localiser to name.
+LOCALIZE=false
 
 # THIS SCRIPT'S OWN REQUIRED KEYS, on top of the isolation and ROS ones
 # _common.sh checks for every script on this track. Each is refused by its
@@ -143,8 +173,16 @@ REQUIRED_KEYS=(
     topics.joint_state topics.drive_speed_read_a topics.wheel_odom
     topics.odometry_filtered topics.rf2o_odom_raw topics.rf2o_odom
     topics.fuse_odometry_filtered
+    topics.amcl_pose topics.initialpose topics.map
     frames.odom frames.base_link frames.imu frames.map
     frames.nav_lidar frames.rf2o_odom
+    map.dir map.name map.registration.file
+    localization.params_file localization.label
+    localization.map_server.package localization.map_server.executable
+    localization.map_server.node_name
+    localization.amcl.package localization.amcl.executable
+    localization.amcl.node_name
+    localization.lifecycle_timeout_s
     ekf.params_file ekf.rf2o_params_file ekf.node_name ekf.frequency_hz
     rf2o.workspace rf2o.package rf2o.executable rf2o.freq_hz rf2o.commit
     fuse.prefix fuse.deb_prefix fuse.package fuse.executable
@@ -177,6 +215,13 @@ configure() {
     RF2O_WS="${CFG_RF2O_WORKSPACE/#\~/$HOME}"
     RF2O_BIN="$RF2O_WS/install/$CFG_RF2O_PACKAGE/lib/$CFG_RF2O_PACKAGE/$CFG_RF2O_EXECUTABLE"
     FUSE_PARAMS="$REPO/$CFG_FUSE_PARAMS_FILE"
+    # F3 TASK 2's THREE, AND THEY ARE DERIVED UNCONDITIONALLY for
+    # RF2O_WS's reason: a variable that exists only on one branch is a
+    # variable `set -u` aborts on from the other. Nothing here is READ
+    # unless --localize was given.
+    AMCL_PARAMS="$REPO/$CFG_LOCALIZATION_PARAMS_FILE"
+    MAP_DIR="$REPO/$CFG_MAP_DIR/$CFG_MAP_NAME"
+    MAP_YAML="$MAP_DIR/$CFG_MAP_NAME.yaml"
     # THE SECOND PATH THAT IS NOT UNDER $REPO, AND ITS ARITHMETIC IS
     # _common.sh's RATHER THAN A SECOND COPY OF IT. fuse_paths() sets
     # FUSE_PREFIX, FUSE_ROS_PREFIX, FUSE_BIN and FUSE_MANIFEST off the
@@ -347,6 +392,115 @@ check_fuse_params() {  # check_fuse_params <file>
         "this check - not with a line in a parameter file."
 }
 
+# THE LOCALISER'S PARAMETER FILE HAS TO BE ADDRESSED TO **BOTH** NODES
+# THIS ARM STARTS, and that is check_ekf_params()'s argument with one
+# more thing to go wrong. amcl.yaml carries a `map_server:` block and an
+# `amcl:` block; rclcpp applies NOTHING from a block addressed to
+# somebody else and says nothing about it, so a misspelt top-level key
+# would leave that node on its PACKAGE DEFAULTS with the `-p` overrides
+# still landing.
+#
+# WHAT EACH ONE WOULD LOOK LIKE, WHICH IS WHY BOTH ARE CHECKED. A
+# map_server on its defaults still serves the grid (its `yaml_filename`
+# is an override) and would differ only in its bond - quiet, and nearly
+# harmless. An AMCL on its defaults is the dangerous one: it would run
+# the OMNI-capable defaults this file argues against on every count -
+# alphas of 0.2 (45 % of every distance), 60 beams instead of 271,
+# sigma_hit 0.2 instead of the measured 0.029, z_rand 0.5 instead of the
+# measured 0.074 - and it would publish map -> odom the whole time,
+# looking exactly like a localiser. Every figure taken off it would be a
+# figure about nav2's defaults wearing this file's name.
+check_amcl_params() {  # check_amcl_params <file>
+    local file="$1" node
+    for node in "$CFG_LOCALIZATION_MAP_SERVER_NODE_NAME" \
+                "$CFG_LOCALIZATION_AMCL_NODE_NAME"; do
+        grep -q "^${node}:" "$file" || refuse \
+            "the localiser's parameter file is addressed to $node" \
+            "$file and $CONFIG (localization.params_file,"\
+"localization.*.node_name)" \
+            "there is no top-level '$node:' key in that file, so every" \
+            "parameter meant for that node belongs to one that is never" \
+            "started. rclcpp applies nothing and reports nothing: the" \
+            "node comes up on its PACKAGE DEFAULTS with the topic and" \
+            "frame overrides still applied, publishes map -> odom, and" \
+            "looks exactly like a localiser." \
+            "the top-level keys that file does define:" \
+            "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$file" || echo '(none)')"
+    done
+}
+
+# IS THE MAP ON DISK THE MAP THE COMMITTED REGISTRATION WAS FITTED TO?
+# F3 constraint 16 says the map is FROZEN once scored, and a freeze is a
+# MECHANISM rather than a promise - so this is the mechanism, at the
+# bringup, before a single process is started.
+#
+# WHAT IT PREVENTS. Every absolute figure this arm produces is a map pose
+# carried into the building by maps/<name>/registration.yaml, and that
+# transform belongs to ONE grid: a rebuilt map has its own rotation from
+# the building, off by whatever the two builds differ by, and NOTHING
+# downstream would notice. The registration carries the md5 of the .pgm
+# it was fitted to for exactly this, and tools/map_register.py's
+# load_registration() refuses a mismatch on the ANALYSIS side - but that
+# is an hour after the run, and by then the recording exists and looks
+# like every other recording.
+#
+# WHY IT IS HERE AND NOT ONLY THERE. This is the only place that can say
+# "NOTHING WAS STARTED". It is also the only place that can catch the
+# other half of the pair: `map_yaml_md5`, which map_server READS (the
+# resolution, the origin and the two thresholds all come out of it) and
+# which no consumer of the registration ever hashes.
+#   THE POSE GRAPH IS DELIBERATELY NOT HASHED HERE. maps/<name>/*.
+#   posegraph and .data are 62.5 MB and NOTHING ON THIS ARM READS THEM -
+#   AMCL localises in the grid. build.txt is their record and F3 Task 3's
+#   arm, which does read them, is where their check belongs.
+check_frozen_map() {
+    local reg="$MAP_DIR/$CFG_MAP_REGISTRATION_FILE" file key want got
+    [ -d "$MAP_DIR" ] || refuse "the frozen map is on disk" \
+        "$CONFIG (map.dir, map.name)" \
+        "there is no directory at $MAP_DIR" \
+        "it is COMMITTED - grid, pose graph, build.txt and the" \
+        "registration - and this arm consumes it read-only." \
+        "NOTHING WAS STARTED."
+    for file in "$MAP_YAML" "$MAP_DIR/$CFG_MAP_NAME.pgm" "$reg"; do
+        [ -f "$file" ] || refuse "the frozen map is complete" "$MAP_DIR" \
+            "$file is missing." \
+            "EVIDENCE_MAP_V3.md 8 lists what a map artifact is; a" \
+            "directory with a hole in it is not one." \
+            "NOTHING WAS STARTED."
+    done
+    command -v md5sum >/dev/null 2>&1 || refuse \
+        "md5sum is installed" "$0 (check_frozen_map)" \
+        "without it this bringup cannot check that the grid on disk is" \
+        "the grid the committed registration was fitted to, and a" \
+        "localisation run against an unverified map is a run whose" \
+        "every absolute figure is unattributable: apt install coreutils"
+    for key in map_md5:pgm map_yaml_md5:yaml; do
+        want="$(sed -n "s/^${key%%:*}: *//p" "$reg" | head -1)"
+        file="$MAP_DIR/$CFG_MAP_NAME.${key##*:}"
+        [ -n "$want" ] || refuse \
+            "the committed registration states ${key%%:*}" "$reg" \
+            "there is no '${key%%:*}:' line in it, so it is not a" \
+            "registration tools/map_register.py wrote - or it is a" \
+            "truncated one. Re-derive it:" \
+            "  python3 $M5V3/tools/map_register.py derive --write" \
+            "NOTHING WAS STARTED."
+        got="$(md5sum "$file" | cut -d' ' -f1)"
+        [ "$got" = "$want" ] || refuse \
+            "the map on disk is the map the registration was fitted to" \
+            "$reg (${key%%:*}) and $file" \
+            "that file hashes to $got and the registration names $want." \
+            "A REBUILT MAP HAS ITS OWN ROTATION FROM THE BUILDING. Every" \
+            "absolute figure this arm produces is a map pose carried" \
+            "through that registration, so a run against this grid would" \
+            "be off by whatever the two builds differ by and nothing" \
+            "downstream would notice." \
+            "A rebuild is a NEW artifact under a new map.name with its" \
+            "own registration (F3 constraint 16), never an overwrite:" \
+            "  python3 $M5V3/tools/map_register.py derive --write" \
+            "NOTHING WAS STARTED."
+    done
+}
+
 # DID THE SCAN MATCHER FIND OUT WHERE IT IS BOLTED? A refusal, not a
 # warning, and it is asked of the child's own log because that is the
 # only place the answer exists.
@@ -394,6 +548,65 @@ check_rf2o_transform() {
         "THE STACK IS INCOMPLETE, and what is left of it is STILL UP." \
         "'$0 stop', then start again - the lookup is a race this script" \
         "wins by starting the arm before the bridge that carries the scan."
+}
+
+# THE TWO LIFECYCLE NODES, DRIVEN, IN THE ORDER THAT WORKS.
+#
+# WHY THIS SCRIPT DRIVES THEM. Both are nav2 lifecycle nodes: started,
+# they sit UNCONFIGURED - amcl subscribes to no scan, advertises no
+# amcl_pose and publishes no transform - and log nothing that looks
+# wrong. `status` reads ALIVE. tools/build_map.sh drives slam_toolbox's
+# two transitions the same way and for the same reason: one process, one
+# log, one refusal that names it.
+#
+# WHY NOT A nav2 lifecycle_manager. Its bond is a heartbeat with a
+# deadline, and a deadline starves at the real-time factors a simulation
+# reaches - a manager that declares a healthy node dead is worse than no
+# manager (sim/launch/warehouse_slam.launch.py measured it on the older
+# rig, and agv/forklift/launch/localization.launch.py made the same call
+# for these two nodes). amcl.yaml switches the bond off at both ends.
+#
+# THE WAIT IS ON THE NODE APPEARING AND NOT ON A SLEEP, and each
+# transition is checked. A `ros2 lifecycle set` against a node that is
+# not on the graph yet fails immediately with "Node not found", which
+# under a sleep-and-hope would be a bringup that reported success over
+# an unconfigured localiser.
+localize_lifecycle() {
+    local deadline node transition
+    for node in "$CFG_LOCALIZATION_MAP_SERVER_NODE_NAME" \
+                "$CFG_LOCALIZATION_AMCL_NODE_NAME"; do
+        deadline=$(( $(date +%s) + CFG_LOCALIZATION_LIFECYCLE_TIMEOUT_S ))
+        until ros2 node list 2>/dev/null | grep -q "^/$node$"; do
+            [ "$(date +%s)" -lt "$deadline" ] || refuse \
+                "/$node appeared inside ${CFG_LOCALIZATION_LIFECYCLE_TIMEOUT_S}s" \
+                "$LOGDIR/$node.log (config.yaml localization.lifecycle_timeout_s)" \
+                "nothing by that name is on domain $ROS_DOMAIN_ID." \
+                "THE STACK IS INCOMPLETE, and what is left of it is STILL UP."
+            sleep 1
+        done
+    done
+    # map_server ALL THE WAY UP FIRST, then amcl. amcl's on_activate
+    # waits for a map on the latched topic and an INACTIVE map_server
+    # never publishes one, so the wrong order leaves amcl blocked in a
+    # transition with no error at all.
+    for node in "$CFG_LOCALIZATION_MAP_SERVER_NODE_NAME" \
+                "$CFG_LOCALIZATION_AMCL_NODE_NAME"; do
+        for transition in configure activate; do
+            ros2 lifecycle set "/$node" "$transition" \
+                >> "$LOGDIR/$node.log" 2>&1 || refuse \
+                "the $node $transition transition succeeded" \
+                "$LOGDIR/$node.log" \
+                "both localisation nodes are nav2 LIFECYCLE nodes and" \
+                "this script drives them directly rather than through a" \
+                "lifecycle_manager, so one process is one log and one" \
+                "refusal that names it." \
+                "LEFT UNCONFIGURED, amcl subscribes to no scan," \
+                "advertises no $CFG_TOPICS_AMCL_POSE and publishes no" \
+                "transform, and logs nothing that looks wrong." \
+                "THE STACK IS INCOMPLETE, and what is left of it is STILL UP."
+            echo "  $node $transition ok"
+        done
+    done
 }
 
 start() {
@@ -488,6 +701,26 @@ start() {
             "started is cheaper than reading that."
         check_fuse_params "$FUSE_PARAMS"
     fi
+    # AND THE LOCALISATION ARM'S THREE, ON THE SAME TERMS AND FOR THE
+    # SAME REASON: a rig with no frozen map must still be able to bring
+    # up the stack EVIDENCE_FUSION.md 9.3 was measured on.
+    if [ "$LOCALIZE" = true ]; then
+        [ -f "$AMCL_PARAMS" ] || refuse \
+            "the localiser's parameter file exists" \
+            "$CONFIG (localization.params_file)" \
+            "it resolves to $AMCL_PARAMS" \
+            "a --params-file that does not exist IS a hard error from" \
+            "rclcpp, which is the good case; the case this check is for" \
+            "is the file being MOVED, because then nav2_amcl comes up on" \
+            "its own defaults - alphas of 0.2, 60 beams, sigma_hit 0.2 -" \
+            "and publishes map -> odom looking exactly like a localiser." \
+            "NOTHING WAS STARTED."
+        check_amcl_params "$AMCL_PARAMS"
+        # THE FREEZE, ENFORCED BEFORE ANYTHING IS STARTED. See
+        # check_frozen_map(): this is the only place that can still say
+        # nothing has begun.
+        check_frozen_map
+    fi
     # Unchecked, an unwritable log dir fails every redirection this stack
     # opens and start would sleep its way to "up." over a stack that never
     # began.
@@ -578,22 +811,36 @@ start() {
     #   with a large margin is still an ordering with a margin;
     #   check_rf2o_transform() below reads the child's own log for the
     #   one ERROR this package can emit and refuses the bringup.
-    if [ "$RF2O" = true ]; then
-        # WHERE THE SCANNER IS BOLTED, ON /tf_static, AND IT IS THE IMU
-        # TRANSFORM'S ARGUMENT A SECOND TIME. This edge is where a
-        # SENSOR is, which a robot_state_publisher would own if this
-        # track carried a URDF; where the VEHICLE is is a different
-        # claim and a different process. No use_sim_time on it, for
-        # imutf's reason: tf2 answers a static transform for any query
-        # time, so the stamp is never consulted and a clock this
-        # process does not have cannot go wrong.
+    # WHERE THE SCANNER IS BOLTED, ON /tf_static, AND IT IS THE IMU
+    # TRANSFORM'S ARGUMENT A SECOND TIME. This edge is where a SENSOR
+    # is, which a robot_state_publisher would own if this track carried a
+    # URDF; where the VEHICLE is is a different claim and a different
+    # process. No use_sim_time on it, for imutf's reason: tf2 answers a
+    # static transform for any query time, so the stamp is never
+    # consulted and a clock this process does not have cannot go wrong.
+    #   TWO ARMS NEED IT AND THERE IS ONE OF IT. --rf2o needs it because
+    #   its scan matcher looks the mount up once and carries on with a
+    #   garbage transform if the lookup fails; --localize needs it
+    #   because AMCL's scan is stamped `nav_lidar_link` and its tf2
+    #   MessageFilter will not release a single message until the chain
+    #   odom -> base_link -> nav_lidar_link closes. MEASURED, 2026-08-26,
+    #   with this child absent: amcl logs "Message Filter dropping
+    #   message: frame 'nav_lidar_link' ... queue is full" every few
+    #   seconds, processes NO scan, publishes NO pose and broadcasts NO
+    #   transform - and `status` reads every child ALIVE.
+    #   IT IS SPAWNED HERE, BEFORE THE BRIDGES, WHICH IS A MEASURED
+    #   ORDERING AND NOT A TIDY ONE - see the rf2o block below for the
+    #   session that measured it.
+    if [ "$RF2O" = true ] || [ "$LOCALIZE" = true ]; then
         spawn lasertf ros2 run tf2_ros static_transform_publisher \
             --x "$CFG_VEHICLE_NAV_LIDAR_MOUNT_X" \
             --y "$CFG_VEHICLE_NAV_LIDAR_MOUNT_Y" \
             --z "$CFG_VEHICLE_NAV_LIDAR_MOUNT_Z" \
             --frame-id "$CFG_FRAMES_BASE_LINK" \
             --child-frame-id "$CFG_FRAMES_NAV_LIDAR"
+    fi
 
+    if [ "$RF2O" = true ]; then
         # THE SCAN MATCHER. Built from source into the user's own home
         # by tools/install_rf2o.sh and executed by ABSOLUTE PATH rather
         # than through `ros2 run`: the package installs exactly one
@@ -860,6 +1107,68 @@ start() {
             -r /odometry/filtered:="$CFG_TOPICS_ODOMETRY_FILTERED"
     fi
 
+    # ------------------- THE OPTIONAL LOCALISATION ARM -------------------
+    # TWO MORE CHILDREN, AND NEITHER EXISTS WITHOUT --localize. The whole
+    # block is skipped by the default stack, which is the claim
+    # EVIDENCE_LOCALIZATION_V3.md has to be able to make: `start` without
+    # the flag spawns the same six processes, hands the estimator the
+    # same parameter files, and publishes nothing on `map` -> `odom` or
+    # on either amcl topic.
+    #
+    # AND THEY GO **AFTER** THE ESTIMATOR, WHICH IS THE OPPOSITE OF THE
+    # rf2o ARM'S ORDERING AND FOR THE OPPOSITE REASON. rf2o has one
+    # unretried TF lookup and has to be started before there is anything
+    # to trigger it; AMCL's scan subscription is a tf2 MessageFilter,
+    # which QUEUES what it cannot yet transform and releases it when the
+    # chain closes - so starting it before `odom` -> `base_link` exists
+    # costs nothing but a few dropped scans, and starting it after costs
+    # nothing at all. What decides the order is the OTHER end: map_server
+    # reads a 1712 x 1196 grid on its configure transition and AMCL
+    # blocks in on_activate waiting for that map, so the two transitions
+    # below are the slow part of this arm and they belong last, where
+    # the rest of the stack is already up and can be reported on.
+    if [ "$LOCALIZE" = true ]; then
+        # THE FROZEN GRID, SERVED. Everything on this command line is an
+        # ADDRESS config.yaml already owns - the artifact's path, the
+        # topic and the frame - passed as `-p` overrides so amcl.yaml
+        # cannot hold a second copy of any of them (that file's header
+        # carries the split). The grid's md5 was checked against the
+        # committed registration before this function started anything.
+        spawn "$CFG_LOCALIZATION_MAP_SERVER_NODE_NAME" \
+            ros2 run "$CFG_LOCALIZATION_MAP_SERVER_PACKAGE" \
+            "$CFG_LOCALIZATION_MAP_SERVER_EXECUTABLE" --ros-args \
+            -r __node:="$CFG_LOCALIZATION_MAP_SERVER_NODE_NAME" \
+            --params-file "$AMCL_PARAMS" \
+            -p use_sim_time:=true \
+            -p yaml_filename:="$MAP_YAML" \
+            -p topic_name:="$CFG_TOPICS_MAP" \
+            -p frame_id:="$CFG_FRAMES_MAP"
+
+        # AND THE LOCALISER. Same split: the scan topic, the map topic
+        # and the three frames are config.yaml's and arrive as
+        # overrides; what is FUSED - the motion model, the sensor model,
+        # the particle counts and the argument for every one of them -
+        # is amcl.yaml's and is not repeated here.
+        #   THE THREE FRAMES ARE THE WHOLE OF F3 CONSTRAINT 15 ON ONE
+        #   COMMAND LINE. global_frame_id is `map` and odom_frame_id is
+        #   `odom`, so the edge this node publishes is map -> odom and
+        #   nothing else; base_link_frame is where it thinks the vehicle
+        #   is. The estimator's own world_frame is the ODOM frame
+        #   (ekf.yaml), so the two publishers own two disjoint edges and
+        #   neither can become the other.
+        spawn "$CFG_LOCALIZATION_AMCL_NODE_NAME" \
+            ros2 run "$CFG_LOCALIZATION_AMCL_PACKAGE" \
+            "$CFG_LOCALIZATION_AMCL_EXECUTABLE" --ros-args \
+            -r __node:="$CFG_LOCALIZATION_AMCL_NODE_NAME" \
+            --params-file "$AMCL_PARAMS" \
+            -p use_sim_time:=true \
+            -p scan_topic:="$CFG_TOPICS_SCAN_NAV" \
+            -p map_topic:="$CFG_TOPICS_MAP" \
+            -p base_frame_id:="$CFG_FRAMES_BASE_LINK" \
+            -p odom_frame_id:="$CFG_FRAMES_ODOM" \
+            -p global_frame_id:="$CFG_FRAMES_MAP"
+    fi
+
     # THE GUI CLIENT LAST AND GATED, or the lidar fans anchor at the world
     # origin for the life of the window. Measured in m6 on gz-sim 8.11.0:
     # GuiRunner discards every world-state message that arrives before its
@@ -940,6 +1249,45 @@ start() {
             "'$0 stop', then start again - this does not recur every time."
     fi
 
+    # AND ON THE LOCALISATION ARM, THE TWO LIFECYCLE TRANSITIONS AND THE
+    # GATE BEHIND THEM. Both nodes are ALIVE by this line and neither has
+    # done anything at all: a nav2 lifecycle node that is started and
+    # left UNCONFIGURED subscribes to nothing, advertises nothing and
+    # publishes no transform, while logging nothing that reads as an
+    # error. That is the failure sim/launch/warehouse_slam.launch.py
+    # recorded for slam_toolbox and agv/forklift/launch/
+    # localization.launch.py recorded for these two, and it is why they
+    # are driven here rather than by a nav2 lifecycle_manager (whose bond
+    # starves at simulation real-time factors - config.yaml's
+    # localization: block and amcl.yaml's bond note carry the argument).
+    #   THE ORDER IS MEASURED. map_server is configured AND ACTIVATED
+    #   before amcl is configured, because amcl's on_activate waits for a
+    #   map on the latched topic and an inactive map_server never
+    #   publishes one - configure amcl first and it blocks in a
+    #   transition with no error.
+    if [ "$LOCALIZE" = true ]; then
+        localize_lifecycle
+        # AND THEN THE ONE QUESTION THAT IS LEFT: is this a localiser, or
+        # a node that is merely running? tools/localization_health.py
+        # subscribes to the pose topic, publishes the initial pose the
+        # bringup knows, and reads back the filter's own first answer -
+        # in that order, because with the truck standing still AMCL
+        # publishes exactly ONE pose per seed and a reader that arrived
+        # late would wait for a second one that never comes. It checks
+        # the covariance against a ceiling and the pose against the seed,
+        # and it refuses by name. The arithmetic is evidence_core's,
+        # where tests reach it without a simulator.
+        if ! python3 "$M5V3/tools/localization_health.py"; then
+            refuse "the localiser came up localised, and not merely alive" \
+                "$M5V3/tools/localization_health.py (its refusal is printed above)" \
+                "every other check on this stack has passed: both nodes" \
+                "are ALIVE, both lifecycle transitions returned success," \
+                "and the estimator underneath is sane." \
+                "THE STACK IS INCOMPLETE, and what is left of it is STILL UP." \
+                "'$0 stop', then read $LOGDIR/amcl.log."
+        fi
+    fi
+
     echo ""
     if [ "$RF2O" = true ]; then
         echo "up. one truck, one world, two bridges, TWO estimators,"
@@ -949,6 +1297,9 @@ start() {
         echo "    one FACTOR GRAPH - and no ekf_node."
     else
         echo "up. one truck, one world, two bridges, one estimator, one filter."
+    fi
+    if [ "$LOCALIZE" = true ]; then
+        echo "    AND A MAP: this stack knows where it is."
     fi
     if [ "$SLIPPERY" = true ]; then
         echo "THIS IS THE SLIPPERY PLANT." \
@@ -1011,6 +1362,31 @@ start() {
         echo "         THIS IS NOT THE STACK EVIDENCE_FUSION.md 9.3 MEASURED:"
         echo "         every session recorded on it is LABELLED wheel+imu+rf2o and"
         echo "         must not be tabled beside a wheel+imu run. analyse refuses to."
+    fi
+    if [ "$LOCALIZE" = true ]; then
+        echo "loc:     THE LOCALISATION ARM IS ON." \
+             "$CFG_MAP_DIR/$CFG_MAP_NAME served on"
+        echo "         $CFG_TOPICS_MAP," \
+             "$CFG_LOCALIZATION_AMCL_NODE_NAME localising in it and" \
+             "publishing"
+        echo "         $CFG_FRAMES_MAP -> $CFG_FRAMES_ODOM - the ONE" \
+             "edge this phase adds. The estimator"
+        echo "         keeps $CFG_FRAMES_ODOM ->" \
+             "$CFG_FRAMES_BASE_LINK and neither is the other's."
+        echo "         The grid's md5 was checked against" \
+             "$CFG_MAP_REGISTRATION_FILE before"
+        echo "         anything started. The initial pose was PUBLISHED" \
+             "on $CFG_TOPICS_INITIALPOSE:"
+        echo "         it is vehicle.spawn carried through that" \
+             "registration - the measurement"
+        echo "         harness standing in for an operator, and NOT a" \
+             "kidnapped-robot recovery,"
+        echo "         which this configuration does not do and does" \
+             "not claim."
+        echo "         Every session recorded on it is LABELLED" \
+             "loc=$CFG_LOCALIZATION_LABEL@... and must"
+        echo "         not be tabled beside an unlocalised run -" \
+             "analyse refuses to."
     fi
     echo "check:  $0 status"
     echo "rtf:    bash $M5V3/tools/rtf_probe.sh"
@@ -1235,7 +1611,7 @@ apply_slippery() {
 #   for the shells. `sort -u` collapses the three wheels' entries to the
 #   distinct values, so a model that is NOT isotropic shows as two.
 write_traction() {
-    local lat lon source arm arm_source
+    local lat lon source arm arm_source loc loc_source map_md5
     # WHICH ESTIMATOR IS UP, decided before the heredoc rather than
     # inside it: an `echo "$(...)"` with a conditional in it is a line
     # nobody can read and the refusals in this file are not written that
@@ -1275,6 +1651,36 @@ write_traction() {
         arm="wheel+imu"
         arm_source="$CFG_EKF_PARAMS_FILE alone (no --rf2o, no --fuse)"
     fi
+    # WHICH ABSOLUTE LAYER IS UP, AND IT IS A THIRD LINE BECAUSE IT IS A
+    # THIRD QUESTION. traction= says which PLANT, arm= says which
+    # ESTIMATOR of the vehicle's own motion, and this says whether
+    # anything at all knows where that vehicle IS. All the combinations
+    # are legitimate runs and EVIDENCE_LOCALIZATION_V3.md's tables are
+    # every one of them read apart.
+    #   `none` IS WRITTEN AND NOT LEFT BLANK, which is the whole habit of
+    #   this file: an ABSENT line means a stack brought up by a script
+    #   that predates this arm, and a stack that ran WITHOUT the arm is a
+    #   different fact. tools/sensor_evidence.py refuses to infer either
+    #   from the other.
+    #   AND THE MAP's md5 IS PART OF THE LABEL. Every absolute figure is
+    #   a map pose carried through ONE grid's registration (F3 constraint
+    #   16); a session that could not say which grid could be tabled
+    #   beside one taken against a rebuild, and nothing in the numbers
+    #   would say so. Eight characters, in every session file.
+    if [ "$LOCALIZE" = true ]; then
+        map_md5="$(md5sum "$MAP_DIR/$CFG_MAP_NAME.pgm" | cut -c1-8)"
+        loc="$CFG_LOCALIZATION_LABEL@$map_md5"
+        loc_source="$0 --localize, $CFG_LOCALIZATION_PARAMS_FILE,"
+        loc_source="$loc_source $CFG_MAP_DIR/$CFG_MAP_NAME"
+        loc_source="$loc_source (registration verified at bringup),"
+        loc_source="$loc_source $CFG_FRAMES_MAP -> $CFG_FRAMES_ODOM owned"
+        loc_source="$loc_source by $CFG_LOCALIZATION_AMCL_NODE_NAME"
+    else
+        loc="none"
+        loc_source="no --localize: nothing publishes"
+        loc_source="$loc_source $CFG_FRAMES_MAP -> $CFG_FRAMES_ODOM and"
+        loc_source="$loc_source this stack has no absolute pose"
+    fi
     if [ "$SLIPPERY" = true ]; then
         lat="$CFG_SLIPPERY_SLIP_COMPLIANCE_LATERAL"
         lon="$CFG_SLIPPERY_SLIP_COMPLIANCE_LONGITUDINAL"
@@ -1305,6 +1711,10 @@ write_traction() {
       #   EVIDENCE_FUSION.md 10 uses three of them.
       echo "arm=$arm"
       echo "arm_source=$arm_source"
+      # F3 TASK 2's LINE. See the block above for why it is separate
+      # from arm= and why it carries the map's md5.
+      echo "loc=$loc"
+      echo "loc_source=$loc_source"
       echo "partition=$GZ_PARTITION"
       echo "started=$(date -Is)"; } > "$TRACTIONFILE" \
         || refuse "the traction state file is writable" "$CONFIG" \
@@ -1371,15 +1781,26 @@ status() {
         #   so here would be inferring the label from an absence, which
         #   is exactly the habit tools/sensor_evidence.py's UNLABELLED
         #   refuses on the same question.
-        local arm arm_source
+        local arm arm_source loc loc_source
         arm="$(sed -n 's/^arm=//p' "$TRACTIONFILE")"
         arm_source="$(sed -n 's/^arm_source=//p' "$TRACTIONFILE")"
         printf '  %-10s %-7s %s\n' "arm" "${arm:-UNKNOWN}" \
             "${arm_source:-no arm= line - this state file predates F2 Task 3}"
+        # AND WHICH ABSOLUTE LAYER, for the arm line's reason one level
+        # up. A localised stack looks identical to an unlocalised one
+        # from every other angle in this report - the same six children
+        # are alive under two more, on the same topics - and the ONE
+        # difference is an edge on /tf that `status` does not read.
+        loc="$(sed -n 's/^loc=//p' "$TRACTIONFILE")"
+        loc_source="$(sed -n 's/^loc_source=//p' "$TRACTIONFILE")"
+        printf '  %-10s %-7s %s\n' "loc" "${loc:-UNKNOWN}" \
+            "${loc_source:-no loc= line - this state file predates F3 Task 2}"
     else
         printf '  %-10s %-7s %s\n' "traction" "UNKNOWN" \
             "no $TRACTIONFILE - this stack was not started by '$0 start'"
         printf '  %-10s %-7s %s\n' "arm" "UNKNOWN" \
+            "same file, same reason"
+        printf '  %-10s %-7s %s\n' "loc" "UNKNOWN" \
             "same file, same reason"
     fi
     local pid name alive=0 dead=0
@@ -1443,7 +1864,7 @@ stop() {
     echo "down."
 }
 
-USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] | stop | status
+USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize] | stop | status
   start       GPU preflight, then warehouse_ver3 + one forklift_ver3 in a
               Gazebo window, plus TWO ros_gz bridges: the parameter bridge
               for the clock, the ground-truth odometry (a measurement
@@ -1491,29 +1912,53 @@ USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] | stop | status
               where 'ekf' was, and 'status' and every recorded session
               say fuse:wheel+imu by name.
               Vendor it first: bash tools/install_fuse.sh
+  --localize  THE OPTIONAL LOCALISATION ARM, AND THE FIRST THING ON THIS
+              TRACK THAT KNOWS WHERE THE VEHICLE IS. nav2's map_server
+              serves the FROZEN grid in maps/warehouse_v3 and nav2_amcl
+              localises in it, so AMCL becomes the sole publisher of
+              map -> odom on top of the odom -> base_link the estimator
+              already owns - exactly ONE new edge. Three more children
+              (the nav lidar's static transform, map_server, amcl), two
+              lifecycle transitions this script drives itself, and a
+              gate that refuses a localiser which came up merely alive.
+              The grid's md5 is checked against the committed
+              registration BEFORE anything starts: a rebuilt map is a
+              new artifact, never an overwrite.
+              It combines with all three flags above - it adds a LAYER
+              where they change the plant, the sensors or the estimator
+              - and 'status' and every recorded session say
+              loc=amcl@<map md5> by name; 'analyse' refuses a set that
+              mixes a localised run with an unlocalised one.
+              TEN processes with a window, nine without - and with
+              --rf2o as well, twelve and eleven.
   status      every child by name, ALIVE or DEAD, with its log, which
-              traction the running plant is on and which estimator arm
+              traction the running plant is on, which estimator arm, and
+              which absolute layer
   stop        end this partition's stack and nothing else"
 case "${1:-}" in
     start|--start)
         shift
         # THE FLAGS MAY COME IN ANY ORDER, and an unrecognised word is a
         # REFUSAL and not a shrug: the one it will be is a misspelt
-        # --headless, --slippery, --rf2o or --fuse, and silently opening
-        # a window for someone who asked for none - or bringing up the
-        # DRY plant for someone who asked for the wet one, or the
-        # two-sensor filter for someone measuring the three-sensor one -
-        # is what this loop exists to prevent.
-        #   THREE OF THE FOUR ARE INDEPENDENT AND TWO OF THEM ARE NOT.
-        #   --headless is about drawing and --slippery is about the
-        #   PLANT, so either combines with anything; --rf2o and --fuse
-        #   are both about the ESTIMATOR and are refused together below.
+        # --headless, --slippery, --rf2o, --fuse or --localize, and
+        # silently opening a window for someone who asked for none - or
+        # bringing up the DRY plant for someone who asked for the wet
+        # one, the two-sensor filter for someone measuring the
+        # three-sensor one, or an UNLOCALISED stack for someone about to
+        # record absolute figures off it - is what this loop exists to
+        # prevent.
+        #   FOUR OF THE FIVE ARE INDEPENDENT AND TWO OF THEM ARE NOT.
+        #   --headless is about drawing, --slippery is about the PLANT
+        #   and --localize adds a LAYER above the estimator, so each of
+        #   those combines with anything; --rf2o and --fuse are both
+        #   about the ESTIMATOR ITSELF and are refused together below.
         while [ "$#" -gt 0 ]; do
             case "$1" in
                 --headless) GUI=false ;;
                 --slippery) SLIPPERY=true ;;
                 --rf2o) RF2O=true ;;
                 --fuse) FUSE=true ;;
+                --localize) LOCALIZE=true ;;
                 *) echo "$USAGE"; exit 2 ;;
             esac
             shift
