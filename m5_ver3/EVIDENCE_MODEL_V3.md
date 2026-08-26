@@ -400,6 +400,31 @@ at once, mean 0.80–0.83, floor 0.04–0.06.
 
 ## 7. WheelSlip tuning
 
+> **CORRECTED BY MEASUREMENT 2026-08-26 (phase F1.5) —
+> `EVIDENCE_LATERAL_TUNE.md`. Not one figure below is rewritten and every
+> one of them still repeats on the rig.** Three things in this section
+> read differently after the corner was measured, and each is marked
+> again where it appears:
+>
+> 1. **The plant this table was measured on had the wheel-slip system on
+>    ONE wheel of three.** The two rear wheels now carry it too, at the
+>    same 7.0 and at their own normal force, because with them rigid the
+>    truck delivered 0.410 of its kinematic yaw at creep and 99.5 % of
+>    that deficit was the steered wheel sliding to overcome them. The
+>    accepted longitudinal slip is unchanged by the addition: **0.95603 %
+>    against this section's 0.96037 %**, re-measured with the same bench.
+> 2. **The two elements' effects are swapped relative to their names.**
+>    Every row of the table below moved `slip_compliance_lateral` and
+>    `slip_compliance_longitudinal` together, so it could not tell them
+>    apart; moved separately, it is the element named *lateral* that
+>    carries the whole of this figure. `EVIDENCE_LATERAL_TUNE.md` §3.1
+>    has the five-row measurement, and its 1.0 and 0.1 rows land on
+>    **0.10688 %** and **0.01070 %** — this table's own values.
+> 3. **"It costs nothing on a straight run" is the one inference here
+>    that was wrong.** The measurement under it — two micrometres of
+>    lateral wander over 21 m — is right and reproduces. See the marked
+>    paragraph at the foot of this section.
+
 **Instrument:** `m5_ver3/tools/slip_bench.sh`. It commands the traction
 terminal directly (`/forklift/gz/actuator/traction_cmd`, the motor
 terminal, since m5-ver3 runs no vehicle stack yet), discards a 5 s
@@ -455,7 +480,36 @@ wander in a straight line. What it does in a *turn* is unmeasured, and
 the model comment says so: the phase that measures a turn is the phase
 that gets to change it.
 
+> **CORRECTED BY MEASUREMENT 2026-08-26 (F1.5), and the two micrometres
+> are not what is corrected.** `EVIDENCE_LATERAL_TUNE.md` §3.1. Held at
+> 7.0 while `slip_compliance_longitudinal` alone was taken to 1.0 and to
+> 0.1, this bench reads 0.95842 % and 0.96140 % — unchanged. Held at 7.0
+> while `slip_compliance_lateral` alone was taken to 1.0 and to 0.1, it
+> reads **0.10688 %** and **0.01070 %**. So lateral compliance does not
+> cost this vehicle sideways wander, exactly as measured above, and it
+> costs the straight run **the whole of its 0.96 % of longitudinal
+> slip** — which is the sentence's inference and not its measurement.
+> The phase that measured the turn was F1.5 and it left the value at
+> 7.0: the corner selects it too, and every setting that made the two
+> unequal brought back the heading dependence of
+> `EVIDENCE_SENSORS.md` §4.2.
+
 ### 7.1 `wheel_normal_force`, derived from the model's own numbers
+
+> **QUESTIONED BY MEASUREMENT 2026-08-26 (F1.5) AND NOT CHANGED —
+> `EVIDENCE_LATERAL_TUNE.md` §7.** `base_link` and `mast` each carry an
+> `<inertial><pose>` that repeats their own `<link><pose>`, and SDFormat
+> composes those two rather than replacing one with the other. The sum
+> below is over the link poses alone, so if the composition is what gz
+> uses then `sum(m x)` is −100.751 kg·m, the centre of mass is at
+> x = −0.086411 m, and `N_drive` is **4503.8 N** rather than 4537.4 —
+> 0.74 % away, which is 0.74 % of a compliance and 0.007 points of the
+> slip figure above. The constant is left alone: the masses and inertial
+> poses are outside F1.5's scope, and this whole table was measured
+> against 4537.4 N, so correcting it means re-driving the table and not
+> editing its rows. The rear pair added in F1.5 is derived by the SAME
+> method as below, from the same numbers, so the three normal forces are
+> one opinion about one vehicle.
 
 Read out of `model.sdf` by script and checked against the file:
 

@@ -221,6 +221,29 @@ its first sample and never worse scores 0.40 m, not 0).
 | `aisle` | 1 | 38.1178 m | 39.4361 m | **+3.46 %** | **0.0399 m** | 0.6506 m | **1.2276 m** | −0.0087 rad |
 | `corner_creep` | 2 | 3.7701 / 3.7694 m | 4.2707 / 4.2705 m | **+13.28 / +13.29 %** | **1.8140 / 1.8177 m** | 0.9648 / 0.9572 m | 1.8140 / 1.8177 m | +1.7310 / +1.7326 rad |
 
+> **THE PLANT UNDER THIS TABLE CHANGED ON 2026-08-26 (phase F1.5) —
+> `EVIDENCE_LATERAL_TUNE.md`. Every row above is kept and none is
+> rewritten: they are what this estimator scored on the plant F1
+> measured, and that is the plant `EVIDENCE_MODEL_V3.md` describes.**
+> The two rear wheels now carry the wheel-slip system, so the vehicle
+> takes very nearly the yaw its steer angle promises, and the two rows
+> with corners in them move a long way while the two straight ones do
+> not. Re-measured, same instrument, one run each:
+>
+> | Profile | Truth path | Path error | End error | End heading error |
+> |---|---|---|---|---|
+> | `straight` | 11.5479 m | +4.23 % | **0.5778 m** | −0.0574 rad |
+> | `square` (re-tabled, 6.145 s corners) | 7.5242 m | +9.78 % | **0.6712 m** | +0.5291 rad |
+> | `corner_creep` | 3.9700 m | +7.65 % | **0.1945 m** | +0.0156 rad |
+>
+> `aisle` was not re-driven (it is dead straight both ways).
+> **`corner_creep`'s end error falls from 1.8172 m to 0.1945 m and its
+> heading error from +1.7326 rad to +0.0156 rad**, which is the sharpest
+> reading in this file about what §4 was measuring: the estimator did not
+> improve and not one of its settings moved — the VEHICLE stopped
+> scrubbing, and dead reckoning is only blind to a scrub that is there.
+> §3.1(c)'s argument survives it intact and is marked in place.
+
 **Repeatability, `straight` × 3.** End error **0.5800, 0.5798, 0.5792 m**
 — a spread of **0.8 mm**, 0.14 % of the figure. The ground truth itself
 repeats to 5.1 mm over 11.59 m (0.04 %). This plant and this estimator
@@ -271,9 +294,47 @@ run (it measured 5.8418 and 10.1408). Dead reckoning cannot see lateral
 tyre scrub — nothing readable at the shaft or the steer axis contains it
 — and this is the single strongest argument for F2's gyro.
 
+> **RE-MEASURED 2026-08-26 (F1.5): 1.084×, and the argument is
+> unchanged.** `EVIDENCE_LATERAL_TUNE.md` §4.3.3. On the tuned plant the
+> re-tabled square turns **6.3124 rad** and the estimate reports
+> **6.8416 rad**. The factor collapsed because the scrub did, not because
+> anything in the estimator learned to see it — no term was added and no
+> setting moved. What is left is still 0.53 rad of heading error over a
+> 42 s square, which is not an estimate anything may navigate on, so the
+> conclusion above stands with a smaller number under it.
+
 ---
 
 ## 4. Does the tricycle kinematic model hold at creep speed?
+
+> **ANSWERED HERE, ACTED ON IN F1.5 — `EVIDENCE_LATERAL_TUNE.md`,
+> 2026-08-26. This section is NOT rewritten.** It is the measurement that
+> caused the tune, and a measurement that has been acted on is still the
+> measurement. Everything below describes the plant as it stood at commit
+> `32c8964`; the plant it describes no longer exists, and the numbers that
+> replaced it are:
+>
+> | | this section | after F1.5 |
+> |---|---|---|
+> | delivered at π/4, 0.3 m/s | **0.4098 / 0.4102** | **1.0054** (three runs, identical) |
+> | effective radius vs kinematic 1.0434 m | 2.5194 m | 0.9859 m |
+> | in-corner wander (§4.2) | 10.2 % of the mean | **0.0 %**, sd 0.000045 rad/s |
+> | four-corner spread at −1.25 rad (§4.2) | 16.6 % | 11.5 %, same 180° period |
+>
+> **What the tune was, in one line:** the two rear wheels had no
+> wheel-slip entry, so their contact patches were rigid; two rigid patches
+> cannot be yawed about their own vertical axes without sliding, and the
+> steered wheel was sliding at 22° to overcome them. §4.1's own
+> instrument now prints that split (`analyse`'s *where the yaw went*
+> block), and on the run below it charges **99.5 % of the deficit to the
+> steered wheel and 0.5 % to the rear axle** — which is the reading that
+> located the repair at the wheels that were NOT sliding.
+>
+> **§4.2's finding is the one that half survives.** The heading dependence
+> vanishes at π/4 and shrinks by a third at −1.25 rad, and the candidate
+> mechanism named below — an axis-aligned friction pyramid — is what the
+> shrinking is consistent with: it goes away exactly when every contact is
+> made isotropic. It is still not chased.
 
 The owner's question, 2026-08-25, and the reason `corner_creep` exists:
 **a real truck's kinematics holds at 0.3 m/s** — at a crawl a
@@ -340,6 +401,11 @@ means:
   pure-pursuit follower — will command a corner **2.4× tighter** than it
   gets on this simulator. That is F3's problem and it is now a measured
   number rather than a surprise.
+  > **F1.5: 5.8 % WIDER, and the sign has flipped.** The tuned plant
+  > corners at 0.9859 m where the kinematics says 1.0434 m, so a planner
+  > now gets slightly *more* corner than it asks for instead of 2.4×
+  > less. Still a number to design against: a tenth the size of this one,
+  > and the other way round. `EVIDENCE_LATERAL_TUNE.md` §4.1.
 - The figure reproduces Task 3's 0.401 to within the wander (§4.2), from
   a different run, a different instrument and a stated window. Task 3's
   came from a throwaway probe that no longer exists; this one is a
@@ -435,6 +501,15 @@ is the consequence, and it is the part that matters downstream:
 > therefore a figure *at the heading it was measured at*, and the
 > `square` profile's corner time — derived from one of those rows — is
 > the reason that profile closes to 0.68 m rather than to zero.
+
+**F1.5 re-tabled that corner on the tuned plant and the square closes to
+0.0670 m** (`EVIDENCE_LATERAL_TUNE.md` §4.3). The sentence above is still
+right about *why* it did not close, and it is right in a second way it
+did not intend: the re-tabled corner is sized from the **mean of the four
+headings** with the 11.5 % spread stated beside it, because at −1.25 rad
+one steer angle still does not have one delivered fraction. The 0.62 m
+that came out of the closure was the plant; the 11.5 % that stayed is
+this section's finding, and no corner time can remove it.
 
 ---
 

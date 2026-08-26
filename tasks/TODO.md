@@ -69,6 +69,31 @@ Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
       ve F1'in kendi sürüklenme tablosu bu referans olmadan yazılamazdı.
       AÇIK KALAN: AprilTag istasyon işaretleri (bu görev planının
       kapsamında değildi).
+- [x] F1.5. Yanal kayma (lateral scrub) teşhisi ve ayarı — sahip onayı
+      2026-08-26, F1'in ölçtüğü 0.410'un üzerine. Tek görev; ayar yüzeyi
+      YALNIZCA WheelSlip parametreleri (mu, kütle, atalet, geometri
+      kapsam dışı). Kanıt: m5_ver3/EVIDENCE_LATERAL_TUNE.md.
+      TEŞHİS (yeni araç: evidence_core.scrub_split, analyse basıyor):
+      creep'te kaybolan yaw'ın %99.5'i DİREKSİYONLU tekerlekte, %0.5'i
+      arka akstaydı — ama arka aks kaymıyordu ÇÜNKÜ kayamıyordu: iki
+      arka tekerlekte WheelSlip girdisi yoktu, rijit temas yamaları
+      kendi dikey ekseni etrafında dönemez, ve bedelini kayabilen tek
+      yama (direksiyonlu olan, 22° kayarak) ödüyordu.
+      AYAR: hiçbir uyumluluk değeri değişmedi — iki arka tekerleğe aynı
+      7.0, kendi normal kuvvetleriyle (3448.3 N) eklendi.
+      SONUÇ: creep oranı 0.410 → 1.0054 (3 koşu, aynı); köşe içi yaw
+      salınımı %10.1 → %0.0; boyuna kayma %0.96162 → %0.95603 (0.5-2
+      bandında); square yeniden tablolandı (köşe 9.142 s → 6.145 s) ve
+      kapanış 0.6786 m → 0.0670 m; başlık bağımlılığı %16.6 → %11.5
+      (kaybolmadı, kayda geçti); straight sürüklenmesi değişmedi
+      (0.5800 → 0.5778 m); RTF 0.9989; 82 pytest + iki selftest yeşil.
+      YAN BULGU (kayda geçti, düzeltilmedi): <slip_compliance_lateral>
+      ile <slip_compliance_longitudinal> etkileri ADLARIYLA TERS —
+      düz gidişteki boyuna kaymayı "lateral" olan belirliyor.
+      PARK EDİLDİ: base_link ve mast'ta <inertial><pose> kendi
+      <link><pose>'unu tekrarlıyor; SDFormat bunları birleştirdiği için
+      kütle merkezi 3.1 mm arkada olabilir (N_drive 4537.4 → 4503.8 N,
+      %0.74). Kütle dağılımı bu kapsamda değildi.
 - [ ] F2. Füzyon katmanı: çift EKF (robot_localization; odom EKF =
       teker+IMU+rf2o twist, map EKF = AMCL pozu); fuse (factor graph)
       paralel A/B kolu. Kanıt: WheelSlip senaryosunda EKF'li/EKF'siz

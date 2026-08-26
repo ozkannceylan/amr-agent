@@ -32,6 +32,15 @@ instrument profiles and takes the ground-truth odometry away. m6's
 published figures are measured on `forklift_ver2`, so that file is not
 this track's to touch.
 
+**The vehicle has drifted, and F1.5 is where the plant itself moved.**
+Phase F1 replaced the ideal sensors and kept the ground truth beside the
+new estimate; phase **F1.5** (owner-approved 2026-08-26) then changed the
+*physics*: the two rear wheels carry `gz-sim-wheel-slip-system` now, so
+the truck delivers 1.005 of its kinematic yaw at creep where it delivered
+0.410. Any figure on this track taken before 2026-08-26 that involves a
+**corner** is a figure about a different plant, and the three evidence
+files say so where it happens. `EVIDENCE_LATERAL_TUNE.md` is the record.
+
 **Nothing outside `m5_ver3/` is modified by this track.** Not `m6/`, not
 `m5_ver2/`, not `m5/`, `agv/`, `sim/`, `plc/`, `hmi/`, `fleet/`,
 `bridge/` or `docs/adr/`. Reading them is expected; writing to them is
@@ -91,6 +100,9 @@ m5_ver3/
 ├── EVIDENCE_MODEL_V3.md  F1 Task 2's: every sensor, datasheet to delivered
 ├── EVIDENCE_SENSORS.md   F1 Task 4's: what the plant DELIVERS, and what the
 │                         wheel odometry is worth against ground truth
+├── EVIDENCE_LATERAL_TUNE.md  F1.5's: where the corner's yaw was being lost,
+│                         the WheelSlip ladder that fixed it, and the
+│                         before/after of everything the fix could break
 ├── config.yaml           every constant the scripts obey - the one home
 ├── m5v3.sh               start [--headless] | stop | status
 ├── gazebo/

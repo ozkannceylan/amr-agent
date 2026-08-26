@@ -1818,6 +1818,30 @@
       the two rear wheels are passive and their slip would be a claim
       nothing here measures.
 
+      CORRECTED BY MEASUREMENT 2026-08-26 (F1.5), and the paragraph above
+      is kept because it is what this file believed and it is exactly the
+      belief that was wrong. EVIDENCE_LATERAL_TUNE.md 2 measures the
+      corner the plugin never had: at 0.3 m/s and pi/4 of steer the truck
+      delivered 0.410 of the yaw its geometry promises, and the split of
+      that deficit is 99.5 percent at the STEERED wheel's contact and
+      0.5 percent at the rear axle. The rear axle was not sliding - and
+      that was the whole problem. Two rigid contact patches 0.10 m wide
+      cannot be yawed about their own vertical axes without sliding, so
+      with no compliance on them they resisted the vehicle's yaw with a
+      Coulomb couple the steered wheel then had to overcome by sliding
+      sideways. Measured, one variable at a time, on this rig:
+
+        rear wheels with NO entry here (the paragraph above)  0.410
+        the same 7.0 given to both of them                    1.005
+
+      So "their slip would be a claim nothing here measures" was true of
+      the number and false of the OMISSION: leaving the entry out is not
+      neutral, it asserts a rigid tyre, and a rigid tyre on a vehicle
+      that turns is the stronger claim. All three contacts carry the
+      plugin now, at the SAME compliance, because they are the same
+      polyurethane tyre - what differs per wheel is the load, which is
+      what wheel_normal_force is for.
+
       THE TWO PHYSICAL PARAMETERS ARE THIS MODEL'S OWN NUMBERS, READ OFF
       IT, NOT CHOSEN.
 
@@ -1847,6 +1871,41 @@
                             what a counterbalance truck with its load
                             end empty does.
 
+                            THE REAR PAIR, ADDED 2026-08-26 (F1.5), by
+                            the same beam and out of the same numbers:
+                              N_rear_total = W - N_drive
+                                           = 11434.06 - 4537.4
+                                           = 6896.66 N
+                            and the model's centre of mass is on the
+                            centreline, so it halves:
+                              N_rear_each  = 3448.3 N
+                            Two wheels at 0.36 m either side of y = 0,
+                            30 percent of the vehicle each, which with
+                            the drive wheel's 39 percent accounts for
+                            the whole 1165.95 kg and nothing else.
+                              A QUESTION THIS DERIVATION LEAVES OPEN AND
+                              DOES NOT ANSWER: base_link and mast each
+                              carry an <inertial><pose> that repeats
+                              their own <link><pose>, and SDFormat
+                              composes those two rather than replacing
+                              one with the other. Summing the composed
+                              poses gives sum(m x) = -100.751 kg m and a
+                              centre of mass at x = -0.086411, where the
+                              derivation above (link poses only) gives
+                              -97.151 and -0.083323. That would put
+                              N_drive at 4503.8 N and N_rear_each at
+                              3465.1 N - 0.74 percent from the values
+                              this file carries. It is NOT changed here:
+                              the masses and the inertial poses are out
+                              of this gate's scope, the constant above is
+                              what EVIDENCE_MODEL_V3.md 7's whole tuning
+                              table was measured against, and 0.74
+                              percent of a normal force is 0.74 percent
+                              of a compliance, which on a 0.956 percent
+                              slip is 0.007 points. Recorded in
+                              EVIDENCE_LATERAL_TUNE.md 7 for the gate
+                              that owns the mass distribution.
+
       THE TWO COMPLIANCES ARE MEASURED, AND THEY HAD TO BE. gz's slip
       compliance is unitless and what it produces depends on the contact
       solver, so no arithmetic gets from a target slip to a number: the
@@ -1861,6 +1920,30 @@
       a number tuned against nothing measured is a number invented. It is
       written down as a value this file does not stand behind, and the
       phase that measures a turn is the phase that gets to change it.
+
+      THAT PHASE WAS F1.5, AND IT LEFT THE NUMBER WHERE IT WAS. The
+      turn is measured now (EVIDENCE_LATERAL_TUNE.md) and lateral 7.0 is
+      no longer a value this file does not stand behind - it is the
+      value the corner selects. The ladder is in that file with every
+      rejected row; the three that matter here are that dropping the
+      steered wheel's lateral compliance to 1.0 took the delivered
+      fraction from 0.410 only to 0.713 and to 0.1 took it BACK DOWN to
+      0.697, while giving the rear wheels the compliance they never had
+      took it to 1.005 with the lateral left at 7.0.
+        AND EQUAL IS NOT A COINCIDENCE, IT IS THE READING. Every value
+        that made one direction of a contact stiffer than the other
+        brought back the heading dependence EVIDENCE_SENSORS.md 4.2
+        measures: the yaw rate inside one held corner wanders 10.1
+        percent of its own mean on the untuned plant, 1.0 percent with
+        the steered wheel at lateral 3.0 / longitudinal 7.0, and 0.0
+        percent (sd 0.000045 rad/s over nine 1 s bins) with all six
+        compliances equal. That is what EVIDENCE_SENSORS.md 4.2's named
+        and unchased candidate predicts - an axis-aligned friction
+        pyramid, which is a set of directions the WHEEL does not turn
+        with - and an anisotropic contact patch on such a solver is a
+        tyre whose grip depends on which way the truck is pointing. The
+        mechanism is still not chased here; what is measured is that six
+        equal numbers is the only setting free of it.
     -->
     <plugin filename="gz-sim-wheel-slip-system"
             name="gz::sim::systems::WheelSlip">
@@ -1868,6 +1951,18 @@
         <slip_compliance_lateral>7.0</slip_compliance_lateral>
         <slip_compliance_longitudinal>7.0</slip_compliance_longitudinal>
         <wheel_normal_force>4537.4</wheel_normal_force>
+        <wheel_radius>0.12</wheel_radius>
+      </wheel>
+      <wheel link_name="rear_wheel_left">
+        <slip_compliance_lateral>7.0</slip_compliance_lateral>
+        <slip_compliance_longitudinal>7.0</slip_compliance_longitudinal>
+        <wheel_normal_force>3448.3</wheel_normal_force>
+        <wheel_radius>0.12</wheel_radius>
+      </wheel>
+      <wheel link_name="rear_wheel_right">
+        <slip_compliance_lateral>7.0</slip_compliance_lateral>
+        <slip_compliance_longitudinal>7.0</slip_compliance_longitudinal>
+        <wheel_normal_force>3448.3</wheel_normal_force>
         <wheel_radius>0.12</wheel_radius>
       </wheel>
     </plugin>
