@@ -111,10 +111,11 @@ REQUIRED_KEYS = (
     "topics.imu", "topics.cam_depth", "topics.cam_info",
     "topics.joint_state", "topics.drive_speed_read_a", "topics.wheel_odom",
     "topics.odometry_filtered", "topics.rf2o_odom",
+    "topics.fuse_odometry_filtered",
     "topics.safety_scan_back", "topics.points3d",
     "frames.odom", "frames.base_link", "frames.imu",
     "vehicle.imu_mount.x", "vehicle.imu_mount.y", "vehicle.imu_mount.z",
-    "ekf.frequency_hz", "ekf.params_file",
+    "ekf.frequency_hz", "ekf.params_file", "fuse.params_file",
     "world.file", "vehicle.model", "vehicle.name",
     "vehicle.spawn.x", "vehicle.spawn.y", "vehicle.spawn.yaw",
     "vehicle.wheelbase_m", "vehicle.wheel_radius_m",
@@ -649,8 +650,23 @@ def _make_recorder(cfg, Node, QoSProfile, types):
             # which is this stack's answer to ekf_node being SILENT about
             # an input it never receives (EVIDENCE_FUSION.md 2.2). The
             # recorder is one of the three instruments that CAN say so.
+            #   ITS ADDRESS FOLLOWS THE ARM SINCE F2 TASK 4, because the
+            #   two estimators do not publish on the same topic: ekf_node
+            #   writes topics.odometry_filtered and fuse's fixed-lag
+            #   smoother writes topics.fuse_odometry_filtered. The
+            #   mapping is evidence_core.fused_topic_key() - the same one
+            #   tools/ekf_health.py's gate uses, tested without ROS - and
+            #   it REFUSES an arm it does not recognise rather than
+            #   defaulting, because a subscription to the wrong arm's
+            #   address does not fail, it simply never fires.
+            #   THE CSV KEEPS ITS NAME. `ekf_odom` is what every session
+            #   since F2 Task 1 calls the fused stream and what
+            #   analyse_fused() reads; renaming it by arm would make the
+            #   two arms' sessions structurally different, which is
+            #   exactly what an A/B may not have. The session's own
+            #   `arm=` line says which estimator filled it.
             self.create_subscription(
-                types.Odometry, cfg.s("topics.odometry_filtered"),
+                types.Odometry, cfg.s(core.fused_topic_key(arm)),
                 self.cb_fused, qos)
             # THE LASER ODOMETRY, ON THE ARM THAT HAS ONE. What is
             # recorded is the RELAY's output - the twist the filter
@@ -890,6 +906,24 @@ def record(cfg, args):
     # stack that cannot say leaves no half-written session behind, and
     # the operator is refused before they have spent a run on it.
     traction = read_traction(cfg)
+    # AND WHICH ESTIMATOR, WHICH SINCE F2 TASK 4 DECIDES AN ADDRESS AND
+    # NOT ONLY A LABEL. The two arms publish their fused estimate on
+    # different topics, so an arm this recorder cannot map is an arm it
+    # cannot subscribe to - and the failure would be a session that
+    # records everything except the one stream it exists to record. It is
+    # resolved HERE, before the session directory is created, for
+    # read_traction()'s reason.
+    try:
+        core.fused_topic_key(traction.get("arm", ""))
+    except core.EvidenceError as exc:
+        cfg.refuse(
+            "this recorder knows where the running arm publishes",
+            "{} (the arm= line) and tools/evidence_core.py "
+            "(fused_topic_key)".format(
+                os.path.join(_common.REPO, cfg.s("paths.traction_file"))),
+            str(exc),
+            "the arm= line says: {!r}".format(traction.get("arm", "")),
+            "NOTHING WAS RECORDED.")
 
     kind = "drive" if args.drive else "static"
     name = args.drive or "rest"
@@ -2180,6 +2214,17 @@ def analyse(cfg, args):
           "wheel+imu+rf2o - {})".format(cfg.s("ekf.rf2o_params_file")))
     print("  out              {} at {} Hz".format(
         cfg.s("topics.odometry_filtered"), cfg.s("ekf.frequency_hz")))
+    # AND THE OTHER ESTIMATOR'S OUT, WHICH IS A DIFFERENT ADDRESS AND
+    # NOT A DIFFERENT COLUMN. On a `fuse:` session the `ekf_odom` stream
+    # below was filled from this topic by a factor graph and not by
+    # ekf_node; the CSV keeps its name so that the two arms' sessions are
+    # structurally identical, which is what makes them comparable, and
+    # the ARM line under each session is what says which. F2 Task 4,
+    # EVIDENCE_FUSION.md 11.
+    print("  out, on --fuse   {} at the same {} Hz, from fuse's".format(
+        cfg.s("topics.fuse_odometry_filtered"), cfg.s("ekf.frequency_hz")))
+    print("                   fixed-lag smoother instead - ekf_node is "
+          "not started on that arm ({})".format(cfg.s("fuse.params_file")))
     print("  transform        {} -> {}   (the only one this stack "
           "publishes)".format(cfg.s("frames.odom"),
                               cfg.s("frames.base_link")))

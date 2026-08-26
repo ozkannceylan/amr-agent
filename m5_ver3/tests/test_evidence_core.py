@@ -1269,6 +1269,111 @@ def test_a_message_with_no_covariance_at_all_is_refused_not_zero():
         evidence_core.worst_covariance("header:\n  frame_id: odom\n")
 
 
+# ----------------------------------------------------------------------
+# an estimator that publishes NO covariance, which is not the same thing
+# ----------------------------------------------------------------------
+#
+# F2 TASK 4 FOUND ONE, ON THIS RIG, AND THE GATE ABOVE IS BLIND TO IT.
+# `fuse_models::Odometry2DPublisher` 1.1.5 publishes a
+# nav_msgs/Odometry whose pose AND twist covariances are 36 zeros each -
+# measured on the running stack, with and without
+# predict_to_current_time, with and without covariance_throttle_period,
+# and with no warning in its log (EVIDENCE_FUSION.md 11.2). So on the
+# --fuse arm `worst_covariance` returns 0.0, which is under EVERY
+# ceiling, and a gate that only asked that question would pass a wreck
+# as cheerfully as it passes a healthy smoother.
+#   IT IS THE SAME DEFECT rf2o HAS ONE LEVEL UP (EVIDENCE_FUSION.md
+#   10.1b) and it is answered the same way: a zero matrix is read as
+#   ABSENT rather than as CERTAIN, said out loud, and something else is
+#   asked instead.
+#   THE SHORT-MATRIX TRAP IS THE SAME ONE TOO. rf2o_twist_core's suite
+#   locks that a non-36 array must not be read as "all zeros, so
+#   absent"; here the input is text off `ros2 topic echo` and the
+#   equivalent trap is a message whose covariance was CUT OFF by a
+#   `head` in the pipeline - which would read as absent and lose a real
+#   reading.
+
+_ECHO_ZERO_COVARIANCE = """header:
+  frame_id: odom
+pose:
+  pose:
+    position:
+      x: 7.636162275473652e-16
+      y: 8.971172575135713e-16
+      z: 0.0
+  covariance:
+  - 0.0
+  - 0.0
+  - 0.0
+twist:
+  covariance:
+  - 0.0
+"""
+
+
+def test_an_all_zero_covariance_reads_as_ABSENT_and_not_as_certain():
+    assert evidence_core.covariance_is_absent(_ECHO_ZERO_COVARIANCE)
+
+
+def test_a_real_covariance_does_not_read_as_absent():
+    assert not evidence_core.covariance_is_absent(_ECHO_BLOCK)
+
+
+def test_a_covariance_that_is_zero_except_for_one_entry_is_NOT_absent():
+    # One live entry is an estimator that publishes a covariance and
+    # happens to be certain about five of six axes; reading that as
+    # "absent" would throw away the one number that could refuse.
+    assert not evidence_core.covariance_is_absent(
+        "pose:\n  covariance:\n  - 0.0\n  - 0.0\n  - 1e-9\n")
+
+
+def test_a_negative_zero_still_reads_as_absent():
+    # -0.0 == 0.0 in IEEE754 and a formatter is allowed to print either.
+    assert evidence_core.covariance_is_absent(
+        "pose:\n  covariance:\n  - -0.0\n  - 0.0\n")
+
+
+def test_a_message_with_no_covariance_is_refused_rather_than_called_absent():
+    # "absent" here means THE ESTIMATOR PUBLISHED ZEROS. A read with no
+    # covariance in it at all is a topic nobody published on, and that is
+    # worst_covariance's refusal - not a quiet True that would send the
+    # gate down its fallback path over an empty read.
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.covariance_is_absent("")
+
+
+# ----------------------------------------------------------------------
+# and the pose, which is what the gate has left when there is no
+# covariance
+# ----------------------------------------------------------------------
+
+def test_the_position_is_read_out_of_the_first_pose_block():
+    x, y = evidence_core.position_of(_ECHO_ZERO_COVARIANCE)
+    assert abs(x - 7.636162275473652e-16) < 1e-30
+    assert abs(y - 8.971172575135713e-16) < 1e-30
+
+
+def test_the_position_is_the_POSE_and_not_the_twist():
+    # `ros2 topic echo` on a nav_msgs/Odometry prints pose.pose.position
+    # and then twist.twist.linear, both as `x:`/`y:` pairs. A parse that
+    # took the last one would gate on a VELOCITY and pass any pose at
+    # all.
+    text = ("pose:\n  pose:\n    position:\n      x: 12.0\n      y: -3.0\n"
+            "twist:\n  twist:\n    linear:\n      x: 0.7\n      y: 0.0\n")
+    assert evidence_core.position_of(text) == (12.0, -3.0)
+
+
+def test_a_message_with_no_position_is_refused():
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.position_of("header:\n  frame_id: odom\n")
+
+
+def test_a_position_that_is_not_a_number_is_refused_and_not_skipped():
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.position_of(
+            "pose:\n  pose:\n    position:\n      x: .nan\n      y: 0.0\n")
+
+
 def test_an_EMPTY_read_is_refused_rather_than_passing_the_gate():
     # `ros2 topic echo` printing nothing is what a topic nobody publishes
     # looks like; passing that as "covariance 0, healthy" would make the

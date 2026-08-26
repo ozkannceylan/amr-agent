@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # m5v3.sh - bring the m5-ver3 plant up and down: ONE world, ONE truck,
 # ONE bridge, ONE estimator, and a GPU the run has proved it is using.
-#   start [--headless] [--slippery] [--rf2o] | stop | status
+#   start [--headless] [--slippery] [--rf2o|--fuse] | stop | status
 #
 # WHAT THIS TRACK IS. m5-ver3 is the sensor-fusion rebuild of the SHOWCASE
 # vehicle (vault AMR-DEC-003): one forklift, real instrument profiles, a
@@ -55,6 +55,26 @@
 # from source into the user's own home by tools/install_rf2o.sh, without
 # root; `start --rf2o` refuses by name if that has not been run.
 #
+# --fuse REPLACES THE ESTIMATOR ENTIRELY, which is the one thing neither
+# other flag does. `fuse`'s fixed-lag smoother goes up in ekf_node's
+# place - the `ekf` child is NOT SPAWNED - fusing the same two topics,
+# the same three wheel-odometry channels and the same one gyro channel,
+# and publishing its own odom -> base_link. It is a FACTOR GRAPH rather
+# than a Kalman filter: every measurement inside a 0.5 s window is kept
+# as a factor and the whole window is re-solved, and re-linearised, on
+# every optimisation pass. EVIDENCE_FUSION.md 11 is the A/B against
+# EVIDENCE_FUSION.md 9.3's baseline and the recommendation it produced.
+#   IT IS MUTUALLY EXCLUSIVE WITH --rf2o AND THE COMBINATION IS REFUSED
+#   BY NAME. Two reasons, either sufficient: the rf2o arm's second
+#   parameter file is a robot_localization parameter file that this node
+#   cannot read, and a three-way arm is not a thing any table in
+#   EVIDENCE_FUSION.md has a column for.
+#   IT IS VENDORED, NOT BUILT. Every package it needs is in the Jazzy
+#   archive; what this rig has no permission to do is install one. So
+#   tools/install_fuse.sh is m6/tools/install_broker.sh's shape -
+#   apt-get download, dpkg-deb -x into $HOME - and `start --fuse`
+#   refuses by name if it has not been run.
+#
 # THE PARTITION IS NOT OVERRIDABLE FROM THE ENVIRONMENT, unlike m6.sh's.
 # It is read from config.yaml by start, by stop and by status alike, so
 # the three cannot disagree about which graph this is - and ours() reads
@@ -93,6 +113,17 @@ SLIPPERY=false
 # ESTIMATE and not the PLANT, which is why the two labels are separate
 # lines and not one.
 RF2O=false
+# THE OPTIONAL FACTOR-GRAPH ARM, F2 Task 4, and it is OFF unless the
+# command line says otherwise. --fuse REPLACES ekf_node with fuse's
+# fixed-lag smoother rather than adding a child beside it, which is what
+# makes it different in kind from the two flags above: --slippery changes
+# the PLANT, --rf2o adds a SENSOR, and this one changes the ESTIMATOR.
+# The child count is therefore the same six, with `fuse` where `ekf` was.
+# Like both of them the answer is written to the state file, so every
+# instrument downstream can say which estimator a figure came off; and
+# like --rf2o it is an ESTIMATOR label, so the two share the arm= line
+# and cannot both be on.
+FUSE=false
 
 # THIS SCRIPT'S OWN REQUIRED KEYS, on top of the isolation and ROS ones
 # _common.sh checks for every script on this track. Each is refused by its
@@ -111,10 +142,14 @@ REQUIRED_KEYS=(
     topics.imu topics.cam_depth topics.cam_info topics.points3d
     topics.joint_state topics.drive_speed_read_a topics.wheel_odom
     topics.odometry_filtered topics.rf2o_odom_raw topics.rf2o_odom
+    topics.fuse_odometry_filtered
     frames.odom frames.base_link frames.imu frames.map
     frames.nav_lidar frames.rf2o_odom
     ekf.params_file ekf.rf2o_params_file ekf.node_name ekf.frequency_hz
     rf2o.workspace rf2o.package rf2o.executable rf2o.freq_hz rf2o.commit
+    fuse.prefix fuse.deb_prefix fuse.package fuse.executable
+    fuse.node_name fuse.params_file fuse.lag_duration_s
+    fuse.optimization_frequency_hz fuse.transaction_timeout_s
     slippery.slip_compliance_lateral slippery.slip_compliance_longitudinal
     slippery.service_timeout_ms
     paths.log_dir paths.pidfile paths.traction_file
@@ -141,6 +176,18 @@ configure() {
     # on one branch is a variable `set -u` aborts on from the other.
     RF2O_WS="${CFG_RF2O_WORKSPACE/#\~/$HOME}"
     RF2O_BIN="$RF2O_WS/install/$CFG_RF2O_PACKAGE/lib/$CFG_RF2O_PACKAGE/$CFG_RF2O_EXECUTABLE"
+    FUSE_PARAMS="$REPO/$CFG_FUSE_PARAMS_FILE"
+    # THE SECOND PATH THAT IS NOT UNDER $REPO, AND ITS ARITHMETIC IS
+    # _common.sh's RATHER THAN A SECOND COPY OF IT. fuse_paths() sets
+    # FUSE_PREFIX, FUSE_ROS_PREFIX, FUSE_BIN and FUSE_MANIFEST off the
+    # same four config keys tools/install_fuse.sh reads them off, so the
+    # unpacker and the launcher cannot disagree about where the tree is.
+    # (The rf2o line above is the older habit - two scripts, two copies -
+    # and is left alone rather than churned by this task.)
+    #   CALLED UNCONDITIONALLY, for RF2O_WS's reason: it costs four
+    #   string operations, and a variable that exists only on one branch
+    #   is a variable `set -u` aborts on from the other.
+    fuse_paths
 }
 
 # THE STACK AS COMMAND-LINE PATTERNS, AND THE LIST IS _common.sh's.
@@ -224,6 +271,80 @@ check_ekf_params() {  # check_ekf_params <file> <the config key naming it>
         "never moves, an identity transform, and 'status' ALIVE." \
         "the top-level keys that file does define:" \
         "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$file" || echo '(none)')"
+}
+
+# THE FACTOR GRAPH'S PARAMETER FILE, CHECKED THE SAME WAY AND THEN ONCE
+# MORE - because on that arm one of the two things that must be true is
+# said by an ABSENCE, and an absence is not a mechanism.
+#
+# THE FIRST HALF IS check_ekf_params()'s, IN THIS NODE'S CURRENCY. A ROS
+# parameter file is keyed by the node's name; a file addressed to
+# somebody else applies nothing. This node is EXACTLY AS QUIET ABOUT IT
+# as ekf_node, which was measured rather than assumed and went the other
+# way from the first guess: pointed at fuse.yaml under a different node
+# name it starts, prints "No ignition sensors were specified.
+# Optimization will begin immediately.", and then does NOTHING - no
+# sensor models, no motion model, no publisher, no topic advertised, and
+# `status` ALIVE. There is no required parameter to miss because there
+# is no sensor declared to require it. EVIDENCE_FUSION.md 11.2(a).
+#
+# THE SECOND HALF IS F2 GLOBAL CONSTRAINT 13, HELD BY A CHECK.
+# robot_localization refuses a pose with six `false` entries in an array
+# that is always fifteen long, so ekf.yaml can SAY the refusal. fuse's
+# sensor models take LISTS OF DIMENSION NAMES, and the way to fuse no
+# position and no orientation is for the key not to exist: an empty YAML
+# list is not a substitute, because rclcpp cannot infer a type for `[]`
+# and the node aborts with `parameter_value_from failed ... No parameter
+# value set` (measured, EVIDENCE_FUSION.md 11.2). So the refusal is an
+# absence, and a refusal that is an absence is one careless line away
+# from being reversed by somebody who thinks they are adding a feature.
+#   THE THREE KEYS IT REFUSES, AND WHY EACH ONE IS THERE:
+#     position_dimensions / orientation_dimensions - the POSE. Fusing a
+#       dead-reckoned pose means scoring an estimator against its own
+#       input; the wheel odometry publishes 1000.0 on all six pose axes
+#       as a do-not-fuse flag and this is the second, independent
+#       refusal that ekf.yaml gets from its six false flags.
+#     linear_acceleration_dimensions - the ACCELEROMETER. F2 Task 2
+#       measured that channel diverging the other arm's filter at
+#       startup and reversed the ruling that fused it
+#       (EVIDENCE_FUSION.md 9); the lever arm this vehicle has would
+#       land on exactly that axis. It is the entry a future editor is
+#       most likely to add back, because it looks like free information.
+#   IT IS A GREP OVER THE WHOLE FILE AND NOT A YAML QUERY, deliberately:
+#   a shell cannot parse YAML, and a key that appears anywhere in this
+#   file - under any sensor, commented back in, spelled in a block this
+#   check does not understand - is a thing whose author has to come and
+#   argue with this refusal. Every mention of the three inside fuse.yaml
+#   is therefore in PROSE that does not begin a key, which is what the
+#   pattern below tests for.
+check_fuse_params() {  # check_fuse_params <file>
+    local file="$1" hit
+    grep -q "^${CFG_FUSE_NODE_NAME}:" "$file" || refuse \
+        "the fuse parameter file is addressed to $CFG_FUSE_NODE_NAME" \
+        "$file and $CONFIG (fuse.node_name, fuse.params_file)" \
+        "there is no top-level '$CFG_FUSE_NODE_NAME:' key in that file, so" \
+        "every parameter in it belongs to a node that is never started." \
+        "the top-level keys that file does define:" \
+        "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$file" || echo '(none)')"
+    local refused='position_dimensions\|orientation_dimensions'
+    refused="$refused\|linear_acceleration_dimensions"
+    hit="$(grep -n "^[[:space:]]*\($refused\)[[:space:]]*:" "$file" || true)"
+    [ -z "$hit" ] || refuse \
+        "the factor graph fuses no pose and no acceleration" \
+        "$file (F2 global constraint 13, and EVIDENCE_FUSION.md 9 for ax)" \
+        "one of the three dimension lists this arm REFUSES is set here:" \
+        "$hit" \
+        "on this node a refusal is an ABSENCE - fuse takes lists of" \
+        "dimension names and an empty YAML list will not load at all -" \
+        "so the key being present IS the channel being fused." \
+        "the POSE is refused because a dead-reckoned pose has unbounded" \
+        "error and fusing it scores an estimator against its own input;" \
+        "the ACCELERATION because F2 Task 2 measured that channel" \
+        "diverging the other arm at startup and reversed the ruling that" \
+        "fused it, and because the IMU's 0.50 m lever arm lands on it." \
+        "NOTHING WAS STARTED. If this is deliberate it is a RULING, and" \
+        "a ruling on this track arrives with a measurement and an edit to" \
+        "this check - not with a line in a parameter file."
 }
 
 # DID THE SCAN MATCHER FIND OUT WHERE IT IS BOLTED? A refusal, not a
@@ -337,6 +458,35 @@ start() {
             "it - which robot_localization reads as 'fuse nothing from" \
             "that sensor' and reports as nothing at all."
         check_ekf_params "$EKF_RF2O_PARAMS" "ekf.rf2o_params_file"
+    fi
+    # AND THE FACTOR-GRAPH ARM'S TWO, ON THE SAME TERMS. Only when the
+    # flag was given, for the block above's reason: a rig that has never
+    # run tools/install_fuse.sh must still be able to bring up the stack
+    # EVIDENCE_FUSION.md 9.3 was measured on.
+    if [ "$FUSE" = true ]; then
+        [ -x "$FUSE_BIN" ] || refuse \
+            "the fuse packages are vendored" \
+            "$CONFIG (fuse.prefix, fuse.packages) and" \
+            "$M5V3/tools/install_fuse.sh" \
+            "there is no executable at $FUSE_BIN" \
+            "the packages ARE in the Jazzy archive - what this rig has no" \
+            "permission to do is install one (F2 constraint 14), so they" \
+            "are fetched and unpacked into your own home instead:" \
+            "  bash $M5V3/tools/install_fuse.sh" \
+            "NOTHING WAS STARTED. Drop --fuse to bring up the stack" \
+            "EVIDENCE_FUSION.md 9.3 was measured on."
+        [ -f "$FUSE_PARAMS" ] || refuse \
+            "the factor graph's parameter file exists" \
+            "$CONFIG (fuse.params_file)" \
+            "it resolves to $FUSE_PARAMS" \
+            "a --params-file that does not exist IS a hard error from" \
+            "rclcpp, which is the good case; the case this check is for" \
+            "is the file being MOVED, because then the node comes up" \
+            "with NO sensor models, NO publisher and NO topic advertised" \
+            "and reports ALIVE the whole time - measured," \
+            "EVIDENCE_FUSION.md 11.2(a). Refusing before anything is" \
+            "started is cheaper than reading that."
+        check_fuse_params "$FUSE_PARAMS"
     fi
     # Unchecked, an unwritable log dir fails every redirection this stack
     # opens and start would sleep its way to "up." over a stack that never
@@ -624,24 +774,91 @@ start() {
     #     quoted as "${ekf_arm[@]}"; unquoted, or under bash 4.3, an
     #     empty array is an unbound variable and the whole bringup would
     #     abort on the OFF path - which is the path that must not change.
-    local ekf_arm=()
-    if [ "$RF2O" = true ]; then
-        ekf_arm=(--params-file "$EKF_RF2O_PARAMS"
-                 -p odom1:="$CFG_TOPICS_RF2O_ODOM")
+    #   AND ON THE --fuse ARM THIS WHOLE CHILD IS SOMEBODY ELSE. F2 Task
+    #   4's factor graph goes up in ekf_node's PLACE, not beside it:
+    #   both publish odom -> base_link, tf2 has no notion of two
+    #   authorities for one edge, and two of them would produce a coin
+    #   toss at 50 Hz rather than a comparison. Everything the two arms
+    #   have in common is passed to both from the same config keys - the
+    #   two input topics, the three frames, the output rate - so the
+    #   A/B's controlled variables are controlled HERE, on these two
+    #   command lines, and not by two parameter files agreeing.
+    if [ "$FUSE" = true ]; then
+        # THE TWO SEARCH PATHS, BUILT NOW AND PLACED ON ONE COMMAND LINE.
+        # fuse_env() prepends the vendored prefix to what source_ros()
+        # exported; it is called here rather than beside fuse_paths()
+        # because before that line AMENT_PREFIX_PATH has no ROS in it.
+        #   THROUGH `env` AND NOT THROUGH export, DELIBERATELY. An export
+        #   at this point in start() would land on every child spawned
+        #   after it - here, the gz GUI client - and this arm's business
+        #   is with exactly one process. `env` execs the binary in place,
+        #   so the pid spawn() records is still the node's own.
+        fuse_env
+        # THE TWO SENSORS' TARGET FRAME IS base_link ON BOTH, and it is
+        # bound to a local so the two `-p` lines below fit a line. It is
+        # where the EKF arm's hard dependency on `imutf` shows up on this
+        # one: the IMU stamps its messages imu_link, this node transforms
+        # every twist into the target frame before it will fuse it, and
+        # without the static transform the samples are dropped
+        # (EVIDENCE_FUSION.md 2.2 is the same failure on the other arm).
+        local base="$CFG_FRAMES_BASE_LINK"
+        # WHY THE BINARY IS NAMED BY ABSOLUTE PATH rather than run
+        # through `ros2 run`: `ros2 run` would find it now that
+        # AMENT_PREFIX_PATH names the prefix, and it FORKS - the pid this
+        # script records would be a python wrapper and the process doing
+        # the work would be its child, which is exactly the complication
+        # EVIDENCE_FUSION.md 10.4 had to work around to measure the EKF's
+        # CPU. install_rf2o.sh's arm is spawned the same way.
+        #   AND ITS OUTPUT RATE IS ekf.frequency_hz, WHICH IS NOT A
+        #   BORROWED KEY - IT IS THE A/B's CONTROLLED VARIABLE. There is
+        #   ONE output rate on this track and both estimators publish at
+        #   it. A second key would be a second copy of 50.0 that could
+        #   drift, and an arm publishing at a different rate from the one
+        #   it is compared with would move the latency and the
+        #   delivered-rate rows for a reason that is not the estimator.
+        #   config.yaml's ekf.frequency_hz carries the argument for the
+        #   number itself, and it is about the CONSUMERS rather than
+        #   about robot_localization.
+        spawn fuse env "AMENT_PREFIX_PATH=$FUSE_AMENT_PREFIX_PATH" \
+            "LD_LIBRARY_PATH=$FUSE_LD_LIBRARY_PATH" \
+            "$FUSE_BIN" --ros-args \
+            -r __node:="$CFG_FUSE_NODE_NAME" \
+            --params-file "$FUSE_PARAMS" \
+            -p use_sim_time:=true \
+            -p optimization_frequency:="$CFG_FUSE_OPTIMIZATION_FREQUENCY_HZ" \
+            -p lag_duration:="$CFG_FUSE_LAG_DURATION_S" \
+            -p transaction_timeout:="$CFG_FUSE_TRANSACTION_TIMEOUT_S" \
+            -p wheel_odometry_sensor.topic:="$CFG_TOPICS_WHEEL_ODOM" \
+            -p wheel_odometry_sensor.twist_target_frame:="$base" \
+            -p imu_sensor.topic:="$CFG_TOPICS_IMU" \
+            -p imu_sensor.twist_target_frame:="$base" \
+            -p filtered_publisher.topic:="$CFG_TOPICS_FUSE_ODOMETRY_FILTERED" \
+            -p filtered_publisher.publish_frequency:="$CFG_EKF_FREQUENCY_HZ" \
+            -p filtered_publisher.map_frame_id:="$CFG_FRAMES_MAP" \
+            -p filtered_publisher.odom_frame_id:="$CFG_FRAMES_ODOM" \
+            -p filtered_publisher.base_link_frame_id:="$base" \
+            -p filtered_publisher.base_link_output_frame_id:="$base" \
+            -p filtered_publisher.world_frame_id:="$CFG_FRAMES_ODOM"
+    else
+        local ekf_arm=()
+        if [ "$RF2O" = true ]; then
+            ekf_arm=(--params-file "$EKF_RF2O_PARAMS"
+                     -p odom1:="$CFG_TOPICS_RF2O_ODOM")
+        fi
+        spawn ekf ros2 run robot_localization ekf_node --ros-args \
+            -r __node:="$CFG_EKF_NODE_NAME" \
+            --params-file "$EKF_PARAMS" \
+            ${ekf_arm[@]+"${ekf_arm[@]}"} \
+            -p use_sim_time:=true \
+            -p frequency:="$CFG_EKF_FREQUENCY_HZ" \
+            -p map_frame:="$CFG_FRAMES_MAP" \
+            -p odom_frame:="$CFG_FRAMES_ODOM" \
+            -p base_link_frame:="$CFG_FRAMES_BASE_LINK" \
+            -p world_frame:="$CFG_FRAMES_ODOM" \
+            -p odom0:="$CFG_TOPICS_WHEEL_ODOM" \
+            -p imu0:="$CFG_TOPICS_IMU" \
+            -r /odometry/filtered:="$CFG_TOPICS_ODOMETRY_FILTERED"
     fi
-    spawn ekf ros2 run robot_localization ekf_node --ros-args \
-        -r __node:="$CFG_EKF_NODE_NAME" \
-        --params-file "$EKF_PARAMS" \
-        ${ekf_arm[@]+"${ekf_arm[@]}"} \
-        -p use_sim_time:=true \
-        -p frequency:="$CFG_EKF_FREQUENCY_HZ" \
-        -p map_frame:="$CFG_FRAMES_MAP" \
-        -p odom_frame:="$CFG_FRAMES_ODOM" \
-        -p base_link_frame:="$CFG_FRAMES_BASE_LINK" \
-        -p world_frame:="$CFG_FRAMES_ODOM" \
-        -p odom0:="$CFG_TOPICS_WHEEL_ODOM" \
-        -p imu0:="$CFG_TOPICS_IMU" \
-        -r /odometry/filtered:="$CFG_TOPICS_ODOMETRY_FILTERED"
 
     # THE GUI CLIENT LAST AND GATED, or the lidar fans anchor at the world
     # origin for the life of the window. Measured in m6 on gz-sim 8.11.0:
@@ -694,7 +911,15 @@ start() {
         check_rf2o_transform
     fi
 
-    # AND THE FILTER IS ASKED WHETHER IT IS STILL ONE. Every child is
+    # AND THE ESTIMATOR IS ASKED WHETHER IT IS STILL ONE - WHICHEVER
+    # ESTIMATOR IT IS. tools/ekf_health.py reads the arm off the state
+    # file write_traction() has already written by this line and picks
+    # the topic from it, so the ONE gate covers both arms and neither has
+    # a copy of the other's arithmetic (tools/evidence_core.py's
+    # fused_topic_key(), tested there without ROS). The ceiling it
+    # compares against is ekf.startup_check.covariance_max on both arms,
+    # and config.yaml's fuse: block argues why there is not a second one.
+    # Every child is
     # alive by this line, which on this stack is NOT the same as every
     # child working: ekf_node can diverge during its first cycles -
     # covariance to 1e84 in a single 20 ms step - and stay up, at rate,
@@ -719,6 +944,9 @@ start() {
     if [ "$RF2O" = true ]; then
         echo "up. one truck, one world, two bridges, TWO estimators,"
         echo "    one filter."
+    elif [ "$FUSE" = true ]; then
+        echo "up. one truck, one world, two bridges, one estimator,"
+        echo "    one FACTOR GRAPH - and no ekf_node."
     else
         echo "up. one truck, one world, two bridges, one estimator, one filter."
     fi
@@ -741,14 +969,37 @@ start() {
     echo "odom:    $CFG_TOPICS_WHEEL_ODOM - an ESTIMATE, quantised and"
     echo "         1.5 % long by design. It will NOT match the ground"
     echo "         truth and a run where it does is a bug."
-    echo "ekf:     $CFG_TOPICS_ODOMETRY_FILTERED at" \
-         "${CFG_EKF_FREQUENCY_HZ} Hz, plus the"
-    echo "         $CFG_FRAMES_ODOM -> $CFG_FRAMES_BASE_LINK transform." \
-         "Wheel TWIST (vx, vy, vyaw)"
-    echo "         + IMU (yaw rate only - the acceleration channel is"
-    echo "         refused, EVIDENCE_FUSION.md 9). It reads no pose and"
-    echo "         no ground truth. ekf_node is SILENT about an input"
-    echo "         that never arrives - check the topic, not the log."
+    if [ "$FUSE" = true ]; then
+        echo "fuse:    THE FACTOR-GRAPH ARM IS ON AND ekf_node IS NOT" \
+             "RUNNING."
+        echo "         $CFG_TOPICS_FUSE_ODOMETRY_FILTERED at" \
+             "${CFG_EKF_FREQUENCY_HZ} Hz, plus the"
+        echo "         $CFG_FRAMES_ODOM -> $CFG_FRAMES_BASE_LINK" \
+             "transform - which on this arm it OWNS,"
+        echo "         because the filter that usually owns it was" \
+             "never spawned."
+        echo "         The SAME channels the EKF fuses: wheel TWIST" \
+             "(vx, vy, vyaw) + IMU"
+        echo "         (yaw rate only), off the same two topics." \
+             "$CFG_FUSE_PARAMS_FILE says so."
+        echo "         A ${CFG_FUSE_LAG_DURATION_S} s window," \
+             "re-solved at ${CFG_FUSE_OPTIMIZATION_FREQUENCY_HZ} Hz."
+        echo "         NOTHING is published on" \
+             "$CFG_TOPICS_ODOMETRY_FILTERED on this arm."
+        echo "         THIS IS NOT THE STACK EVIDENCE_FUSION.md 9.3 MEASURED:"
+        echo "         every session recorded on it is LABELLED fuse:wheel+imu"
+        echo "         and must not be tabled beside a wheel+imu run -"
+        echo "         analyse refuses to."
+    else
+        echo "ekf:     $CFG_TOPICS_ODOMETRY_FILTERED at" \
+             "${CFG_EKF_FREQUENCY_HZ} Hz, plus the"
+        echo "         $CFG_FRAMES_ODOM -> $CFG_FRAMES_BASE_LINK transform." \
+             "Wheel TWIST (vx, vy, vyaw)"
+        echo "         + IMU (yaw rate only - the acceleration channel is"
+        echo "         refused, EVIDENCE_FUSION.md 9). It reads no pose and"
+        echo "         no ground truth. ekf_node is SILENT about an input"
+        echo "         that never arrives - check the topic, not the log."
+    fi
     if [ "$RF2O" = true ]; then
         echo "rf2o:    THE OPTIONAL LASER-ODOMETRY ARM IS ON." \
              "$CFG_TOPICS_SCAN_NAV ->"
@@ -994,9 +1245,35 @@ write_traction() {
         arm_source="$0 --rf2o, $CFG_EKF_PARAMS_FILE +"
         arm_source="$arm_source $CFG_EKF_RF2O_PARAMS_FILE,"
         arm_source="$arm_source rf2o pinned at $CFG_RF2O_COMMIT"
+    elif [ "$FUSE" = true ]; then
+        # THE ESTIMATOR IS IN FRONT OF THE COLON AND THE CHANNELS ARE
+        # BEHIND IT, AND THAT IS WHAT THIS LABEL IS FOR. The two labels
+        # that existed before this one - `wheel+imu` and
+        # `wheel+imu+rf2o` - both name a SENSOR SET on an estimator that
+        # was never in question, because there was only ever one.
+        # F2 Task 4 varies the other term: the same three wheel-odometry
+        # channels and the same one gyro channel, through a different
+        # estimator. So the label says which estimator, then which
+        # channels, and `fuse:wheel+imu` beside `wheel+imu` reads as the
+        # A/B it is - the same right-hand side, a different left-hand
+        # one.
+        #   IT IS NOT `wheel+imu+fuse`. That spelling would put the
+        #   estimator in the position the other two labels reserve for a
+        #   SENSOR, and would read as a stack that fuses the wheels, the
+        #   IMU and a third thing called fuse - which is exactly what the
+        #   rf2o label DOES mean and this one does not.
+        #   NOTHING GREPS IT BY SUBSTRING BY ACCIDENT: `rf2o` does not
+        #   occur in it and `fuse` does not occur in either of the other
+        #   two, which is what tools/sensor_evidence.py's stream list and
+        #   tools/evidence_core.py's fused_topic_key() test on.
+        arm="fuse:wheel+imu"
+        arm_source="$0 --fuse, $CFG_FUSE_PARAMS_FILE"
+        arm_source="$arm_source ($CFG_FUSE_PACKAGE/$CFG_FUSE_EXECUTABLE"
+        arm_source="$arm_source vendored at $FUSE_PREFIX),"
+        arm_source="$arm_source ekf_node NOT started"
     else
         arm="wheel+imu"
-        arm_source="$CFG_EKF_PARAMS_FILE alone (no --rf2o)"
+        arm_source="$CFG_EKF_PARAMS_FILE alone (no --rf2o, no --fuse)"
     fi
     if [ "$SLIPPERY" = true ]; then
         lat="$CFG_SLIPPERY_SLIP_COMPLIANCE_LATERAL"
@@ -1166,7 +1443,7 @@ stop() {
     echo "down."
 }
 
-USAGE="usage: $0 start [--headless] [--slippery] [--rf2o] | stop | status
+USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] | stop | status
   start       GPU preflight, then warehouse_ver3 + one forklift_ver3 in a
               Gazebo window, plus TWO ros_gz bridges: the parameter bridge
               for the clock, the ground-truth odometry (a measurement
@@ -1202,28 +1479,79 @@ USAGE="usage: $0 start [--headless] [--slippery] [--rf2o] | stop | status
               'analyse' refuses a set that mixes the two arms.
               Build it first: bash tools/install_rf2o.sh
               TEN processes with a window, nine without.
+  --fuse      THE OPTIONAL FACTOR-GRAPH ARM, AND IT REPLACES THE FILTER.
+              fuse's fixed-lag smoother goes up INSTEAD of ekf_node -
+              same two input topics, same three wheel-odometry channels,
+              same one gyro channel, same output rate - keeping every
+              measurement in a sliding window as a factor in a graph and
+              re-solving the whole window on every pass. It publishes
+              its own odom -> base_link, which is why the two are never
+              up together. MUTUALLY EXCLUSIVE with --rf2o, refused by
+              name. Same child count as the default stack, with 'fuse'
+              where 'ekf' was, and 'status' and every recorded session
+              say fuse:wheel+imu by name.
+              Vendor it first: bash tools/install_fuse.sh
   status      every child by name, ALIVE or DEAD, with its log, which
               traction the running plant is on and which estimator arm
   stop        end this partition's stack and nothing else"
 case "${1:-}" in
     start|--start)
         shift
-        # THE THREE FLAGS ARE INDEPENDENT AND MAY COME IN ANY ORDER, and
-        # an unrecognised word is a REFUSAL and not a shrug: the one it
-        # will be is a misspelt --headless, --slippery or --rf2o, and
-        # silently opening a window for someone who asked for none -
-        # or bringing up the DRY plant for someone who asked for the wet
-        # one, or the two-sensor filter for someone measuring the three-
-        # sensor one - is what this loop exists to prevent.
+        # THE FLAGS MAY COME IN ANY ORDER, and an unrecognised word is a
+        # REFUSAL and not a shrug: the one it will be is a misspelt
+        # --headless, --slippery, --rf2o or --fuse, and silently opening
+        # a window for someone who asked for none - or bringing up the
+        # DRY plant for someone who asked for the wet one, or the
+        # two-sensor filter for someone measuring the three-sensor one -
+        # is what this loop exists to prevent.
+        #   THREE OF THE FOUR ARE INDEPENDENT AND TWO OF THEM ARE NOT.
+        #   --headless is about drawing and --slippery is about the
+        #   PLANT, so either combines with anything; --rf2o and --fuse
+        #   are both about the ESTIMATOR and are refused together below.
         while [ "$#" -gt 0 ]; do
             case "$1" in
                 --headless) GUI=false ;;
                 --slippery) SLIPPERY=true ;;
                 --rf2o) RF2O=true ;;
+                --fuse) FUSE=true ;;
                 *) echo "$USAGE"; exit 2 ;;
             esac
             shift
         done
+        # ONE ESTIMATOR ARM AT A TIME, AND THE COMBINATION IS REFUSED BY
+        # NAME RATHER THAN RESOLVED BY PRECEDENCE. Three reasons, any one
+        # of them sufficient:
+        #   THE TF EDGE. Both arms publish odom -> base_link and tf2 has
+        #   no notion of two authorities for one edge - every listener
+        #   simply reads whichever arrived last. That is not a
+        #   three-sensor estimate, it is a coin toss at 50 Hz.
+        #   THE OVERLAY. --rf2o's second --params-file is a
+        #   robot_localization parameter file. fuse's node cannot read
+        #   one, so `--rf2o --fuse` could only ever mean "start the
+        #   factor graph and silently drop the laser odometry", which is
+        #   a run that would record itself under a label naming a sensor
+        #   it never fused.
+        #   THE LABEL. There is ONE arm= line and a set of sessions has
+        #   to be uniform in it. A third combination would need a third
+        #   label, a column in every table in EVIDENCE_FUSION.md 10 and
+        #   11, and a measurement - which is a task and not a flag.
+        # It is refused BEFORE configure(), so nothing has been read and
+        # certainly nothing has been started.
+        if [ "$RF2O" = true ] && [ "$FUSE" = true ]; then
+            configure
+            refuse "exactly one estimator arm was asked for" \
+                "$0 (the start flags) and $CONFIG (fuse:, rf2o:)" \
+                "--rf2o and --fuse are both ESTIMATOR flags and they are" \
+                "alternatives, not layers. --rf2o adds a third SENSOR to" \
+                "robot_localization's filter; --fuse replaces that filter" \
+                "with a factor graph. Together they would put two" \
+                "publishers on $CFG_FRAMES_ODOM -> $CFG_FRAMES_BASE_LINK," \
+                "and tf2 would carry whichever arrived last." \
+                "NOTHING WAS STARTED. Pick one:" \
+                "  $0 start --headless --rf2o     # the laser-odometry arm" \
+                "  $0 start --headless --fuse     # the factor-graph arm" \
+                "(--slippery and --headless combine with either.)"
+        fi
         configure; start ;;
     stop|--stop)     configure; stop ;;
     status|--status) configure; status ;;

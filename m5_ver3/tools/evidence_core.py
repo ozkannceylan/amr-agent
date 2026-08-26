@@ -543,6 +543,74 @@ def worst_covariance(text):
     return max(values)
 
 
+def covariance_is_absent(text):
+    """Did the estimator publish a covariance, or 36 zeros?
+
+    A ZERO MATRIX IS ABSENT AND NOT CERTAIN, and this track has now met
+    the distinction twice. `rf2o_laser_odometry` never assigns its twist
+    covariance and ships 36 zeros (EVIDENCE_FUSION.md 10.1b);
+    `fuse_models::Odometry2DPublisher` 1.1.5 does the same with the pose
+    AND the twist of everything it publishes on this stack, measured with
+    and without predict_to_current_time and with no warning in its log
+    (EVIDENCE_FUSION.md 11.2). Read as a covariance, that says the
+    estimate is EXACTLY right, which no estimator has ever meant.
+
+    WHY THE BRINGUP GATE NEEDS TO ASK. require_covariance_under() is
+    this stack's answer to a filter that diverges silently, and against
+    an all-zero matrix it cannot fail: 0.0 is under every ceiling. A
+    gate that cannot fail is worse than no gate, because it is READ as
+    an answer. So tools/ekf_health.py asks this first and, on an arm
+    that publishes nothing, says so and gates on the POSE instead.
+
+    NOT A COVARIANCE AT ALL IS STILL A REFUSAL. This delegates the parse
+    to worst_covariance(), so an empty read - a topic nobody published on
+    - raises there rather than returning True and quietly sending the
+    gate down its fallback path.
+    """
+    return worst_covariance(text) == 0.0
+
+
+def position_of(text):
+    """(x, y) out of the POSE of a nav_msgs/Odometry printed by
+    `ros2 topic echo`.
+
+    THE FIRST `position:` BLOCK AND NOTHING ELSE. That message carries
+    two `x:`/`y:` pairs at the same indentation - pose.pose.position and
+    twist.twist.linear - and a parse that took the last one would gate on
+    a VELOCITY, which at bringup is near zero on a healthy stack AND on a
+    wreck whose pose is 1e48 m from the origin.
+
+    A VALUE THAT IS NOT A NUMBER IS A REFUSAL. `ros2 topic echo` prints a
+    NaN as `.nan`, which float() will not read, and skipping it would
+    hand the caller the next number down - which is `z`, and is always
+    0.0 on this plant.
+    """
+    where = text.find("position:")
+    if where < 0:
+        raise EvidenceError(
+            "the message carries a pose: no 'position:' appears in {} "
+            "character(s) of output.".format(len(text)))
+    found = {}
+    for line in text[where:].splitlines()[1:]:
+        stripped = line.strip()
+        for axis in ("x", "y"):
+            if axis in found or not stripped.startswith(axis + ":"):
+                continue
+            token = stripped.split(":", 1)[1].strip()
+            try:
+                found[axis] = float(token)
+            except ValueError:
+                raise EvidenceError(
+                    "the pose's {} is a number, and it reads {!r}. A "
+                    "non-finite pose is what a diverged estimator "
+                    "publishes.".format(axis, token))
+        if len(found) == 2:
+            return found["x"], found["y"]
+    raise EvidenceError(
+        "the message's pose carries an x and a y: 'position:' appears "
+        "and {} of the two follow it.".format(len(found)))
+
+
 def require_covariance_under(text, ceiling, what):
     """worst_covariance(), as the refusal a bringup gate has to answer.
 
@@ -557,6 +625,114 @@ def require_covariance_under(text, ceiling, what):
             "is a filter that has diverged - see EVIDENCE_FUSION.md 8.6 "
             "and 9.".format(what, float(ceiling), worst))
     return worst
+
+
+# WHICH ESTIMATOR PUBLISHES WHERE, AS A GRAMMAR OVER THE ARM LABEL.
+#
+# F2 Task 4 put a SECOND estimator on this track and the two do not
+# publish on the same address: robot_localization's ekf_node writes
+# topics.odometry_filtered and fuse's fixed-lag smoother writes
+# topics.fuse_odometry_filtered (config.yaml argues why it is not one
+# address wearing two meanings). So every instrument that reads a FUSED
+# estimate has to know which arm is up before it can subscribe: the
+# bringup gate tools/ekf_health.py and the recorder in
+# tools/sensor_evidence.py both do, and this is the one place either of
+# them asks.
+#
+# THE LABEL IS PARSED AND NOT LOOKED UP. `m5v3.sh` writes
+# `[<estimator>:]<channels>` - `wheel+imu`, `wheel+imu+rf2o`,
+# `fuse:wheel+imu` - where the part before the colon names the ESTIMATOR
+# and its absence means robot_localization, and the part after names the
+# CHANNELS. A table keyed by whole labels would map a future
+# `fuse:wheel+imu+rf2o` onto the EKF's topic on its first bringup,
+# silently, and the symptom would be a recorded session with an empty
+# fused stream under a label naming the estimator that did not fill it.
+#
+# AND AN ESTIMATOR IT HAS NEVER HEARD OF IS A REFUSAL, NOT A DEFAULT.
+# The whole of this track's labelling chain exists because an unlabelled
+# run does not look like a failure - it looks like a row - and a `.get()`
+# with a fallback here would put that failure back one layer down, where
+# no refusal can see it. tests/test_fuse_arm.py locks it.
+_FUSED_TOPIC_KEYS = {
+    # no colon: robot_localization's ekf_node, with or without the rf2o
+    # arm's third sensor. Both are the SAME filter on the same address,
+    # which is why EVIDENCE_FUSION.md 10 needed no change here.
+    "": "topics.odometry_filtered",
+    "fuse": "topics.fuse_odometry_filtered",
+}
+
+
+def estimator_of(arm):
+    """The estimator half of an arm label: the part before the first
+    colon, or "" when there is none.
+    """
+    arm = str(arm).strip()
+    if ":" not in arm:
+        return ""
+    return arm.split(":", 1)[0].strip()
+
+
+def fused_topic_key(arm):
+    """The dotted config.yaml key naming the topic THIS arm's fused
+    estimate comes out on.
+
+    Returns a key rather than a topic because this file reads no
+    config.yaml - the caller has the loaded config and this has the
+    mapping, which is the same split every other function here is under.
+    """
+    text = str(arm).strip()
+    if not text:
+        raise EvidenceError(
+            "the running stack says which ESTIMATOR ARM it is on, and it "
+            "said nothing. m5v3.sh writes an `arm=` line on every bringup; "
+            "an empty one is a truncated write, and this mapping will not "
+            "guess a topic from it - a fused stream read off the wrong "
+            "arm's address is EMPTY, not wrong, and an empty stream under "
+            "a label is the failure the whole arm chain exists to "
+            "prevent.")
+    estimator = estimator_of(text)
+    if ":" in text and not text.split(":", 1)[1].strip():
+        raise EvidenceError(
+            "the arm label {!r} names its channels as well as its "
+            "estimator, and it does not. The grammar is "
+            "[<estimator>:]<channels>.".format(text))
+    if estimator not in _FUSED_TOPIC_KEYS:
+        known = ", ".join(
+            repr(name) if name else "'' (robot_localization)"
+            for name in sorted(_FUSED_TOPIC_KEYS))
+        raise EvidenceError(
+            "the estimator named by this arm label publishes somewhere "
+            "this file knows about: {!r} names estimator {!r}, and the "
+            "ones with an address here are {}. An arm added to m5v3.sh "
+            "is an entry added here - defaulting to the shipping "
+            "filter's topic would subscribe to a topic that arm does not "
+            "publish on and read an empty stream.".format(
+                text, estimator, known))
+    return _FUSED_TOPIC_KEYS[estimator]
+
+
+def parse_state_file(text):
+    """m5v3.sh's `key=value` state file, as a dict.
+
+    THE SAME GRAMMAR TWO INSTRUMENTS ALREADY READ BY HAND. `m5v3.sh
+    start` writes paths.traction_file whole on every bringup - the
+    traction, the arm, the partition, the timestamp - and `status`,
+    tools/sensor_evidence.py's `record` and tools/ekf_health.py all read
+    it. It is here so the PARSE is one thing that a test can reach; the
+    REFUSALS stay with each caller, because what a missing key means
+    differs: a recorder without an arm may not record, and a gate without
+    one may not gate.
+      A VALUE MAY CONTAIN '=' AND arm_source DOES. The split is on the
+      first one only.
+    """
+    fields = collections.OrderedDict()
+    for line in str(text).splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        fields[key] = value
+    return fields
 
 
 def travel_projection(xs, ys, yaws):
@@ -1667,6 +1843,31 @@ def _selftest():
           "along-track",
           abs(heading_only.along.removed) < 1e-12
           and abs(heading_only.cross.removed - 0.25) < 1e-12)
+
+    # AND WHICH ESTIMATOR PUBLISHES WHERE - F2 Task 4. It is in the
+    # OPERATOR's selftest and not only in pytest because the two callers
+    # are a bringup gate and a recorder, both run on the rig, and the way
+    # this can be wrong is that an instrument subscribes to a topic
+    # nobody publishes on and reads an EMPTY stream.
+    check("the rf2o arm reads the same fused topic as the default arm",
+          fused_topic_key("wheel+imu")
+          == fused_topic_key("wheel+imu+rf2o")
+          == "topics.odometry_filtered")
+    check("the fuse arm reads its own fused topic",
+          fused_topic_key("fuse:wheel+imu")
+          == "topics.fuse_odometry_filtered")
+    try:
+        fused_topic_key("ukf:wheel+imu")
+    except EvidenceError as exc:
+        check("an estimator with no address here is REFUSED, not "
+              "defaulted to the shipping filter's topic",
+              "ukf" in str(exc))
+    else:
+        check("an estimator with no address here is REFUSED, not "
+              "defaulted to the shipping filter's topic", False)
+    check("a state file's value may contain '=' and is not truncated",
+          parse_state_file("arm=fuse:wheel+imu\nsource=a=b\n")["source"]
+          == "a=b")
 
     # And the model's link poses, which is how config.yaml's copy of the
     # IMU mount is checked against the file that decides it.
