@@ -181,6 +181,33 @@ vehicle:
     x: "-0.50"
     y: "0.00"
     z: "0.25"
+  # ---- WHERE THE NAV LIDAR IS BOLTED - F2 Task 3's addition ----
+  #
+  # model.sdf's `nav_lidar_link` <pose>, repeated here for the reason
+  # imu_mount above is: a SHELL cannot read XML, and the optional rf2o
+  # arm has to put this offset on the wire as a TF before
+  # rf2o_laser_odometry will produce anything meaningful at all.
+  #   IT IS CHECKED AGAINST THE MODEL AND NOT TRUSTED, by the same
+  #   `sensor_evidence.py analyse` cross-check that already warns when
+  #   imu_mount has drifted from the SDF.
+  #   WHY THE ARM NEEDS IT, AND THE FAILURE IS WORSE THAN THE IMU's.
+  #   rf2o looks up base_link <- the scan's own frame ONCE, on its first
+  #   scan, in CLaserOdometry2DNode::setLaserPoseFromTf(). On a failed
+  #   lookup it logs the exception and then USES THE DEFAULT-CONSTRUCTED
+  #   TransformStamped anyway - an all-zero quaternion, which is not a
+  #   rotation - so the laser pose becomes a zero matrix and every pose
+  #   it ever publishes is built on it. The IMU's version of this
+  #   failure is silent; this one is a single ERROR line at bringup
+  #   followed by numbers.
+  #   BOTH THE TRANSLATION AND THE ROTATION MATTER HERE, unlike the
+  #   IMU's. The mount has no rotation in this model, and that is what
+  #   lets nodes/rf2o_twist_core.py's lever-arm correction be two terms
+  #   rather than a full frame transform; the node refuses if the model
+  #   ever grows one.
+  nav_lidar_mount:
+    x: "0.55"
+    y: "-0.40"
+    z: "1.80"
   # steer_joint's mechanical stop, symmetric. tools/drive_route.py checks
   # every steer angle in a profile against it before it drives anything,
   # and REFUSES the profile if one is outside - it does not clamp.
@@ -295,6 +322,30 @@ topics:
   #   parameter to rename it, so m5v3.sh remaps it to this address on
   #   the command line. The name lives here either way, once.
   odometry_filtered: "/m5v3/odometry/filtered"
+  # ---- THE OPTIONAL LASER-ODOMETRY ARM, F2 Task 3 - TWO TOPICS ----
+  #
+  # NOTHING PUBLISHES ON EITHER OF THESE UNLESS `m5v3.sh start --rf2o`
+  # WAS GIVEN. Without the flag the two children that own them are never
+  # spawned, ekf.yaml is the whole of the filter's configuration, and the
+  # stack is the one EVIDENCE_FUSION.md 9.3 measured.
+  #
+  # WHY THERE ARE TWO AND NOT ONE. rf2o_laser_odometry publishes an
+  # Odometry whose twist covariance is ALL ZEROS - it is never assigned
+  # in the upstream node, and there is no parameter to set it (pinned
+  # commit b38c68e, src/CLaserOdometry2DNode.cpp publish()). A zero
+  # variance on a channel robot_localization is fusing is not ignored: it
+  # is replaced by 1e-9 and the filter then believes that channel almost
+  # absolutely. So the raw stream is consumed by nodes/rf2o_twist.py,
+  # which puts a MEASURED covariance on it (rf2o.covariance below) and
+  # corrects the lever arm the upstream node does not, and the FILTER
+  # reads only the second topic. EVIDENCE_FUSION.md 10.2 is the
+  # derivation and 10.1 is what the raw stream actually contains.
+  #   THE RAW ONE IS NOT BRIDGED, RECORDED OR SCORED. It has exactly one
+  #   consumer, the relay, and the relay's output is what every
+  #   instrument on this track reads - so there is one stream in the
+  #   evidence and it is the one the filter fused.
+  rf2o_odom_raw: "/m5v3/rf2o/odom_raw"
+  rf2o_odom: "/m5v3/rf2o/odom"
   # THE BACK SAFETY SCANNER'S MEASUREMENT CHANNEL, NOT BRIDGED, AND IT HAS
   # TWO CONSUMERS ON THIS TRACK - which is why it is named for the SENSOR
   # and not for either job.
@@ -350,6 +401,21 @@ frames:
   # again for the shell - the bridged message arrives stamped with it and
   # the static transform m5v3.sh publishes has to name the same string.
   imu: "imu_link"
+  # THE NAV LIDAR'S OWN FRAME - model.sdf's <gz_frame_id> for the same
+  # reason imu above is: the bridged LaserScan arrives stamped with it,
+  # and with `--rf2o` the static transform m5v3.sh publishes has to name
+  # the same string or rf2o's one and only TF lookup fails.
+  nav_lidar: "nav_lidar_link"
+  # WHERE THE LASER ODOMETRY'S OWN POSE LIVES, AND IT IS DELIBERATELY NOT
+  # `odom`. rf2o integrates its own drifting pose and stamps it with
+  # whatever odom_frame_id it is given; if that were this stack's odom
+  # frame there would be two different estimates of the same edge wearing
+  # one name, and the fact that this stack fuses only rf2o's TWIST would
+  # be the only thing keeping them apart. A separate name makes the
+  # separation structural: nothing broadcasts this frame (rf2o runs with
+  # publish_tf false), nothing looks it up, and it appears only in the
+  # header of a message whose pose is flagged do-not-fuse.
+  rf2o_odom: "rf2o_odom"
   # DECLARED, NEVER PUBLISHED, AND THAT IS DELIBERATE. ekf_node requires
   # a map_frame parameter to exist; this stack's world_frame is the odom
   # frame above, so the filter publishes exactly ONE transform and never
@@ -868,6 +934,22 @@ wheel_odom:
 ekf:
   # The parameter file, relative to the repository root.
   params_file: "m5_ver3/ekf.yaml"
+  # THE OPTIONAL ARM'S OVERLAY, AND IT IS A SECOND FILE RATHER THAN A
+  # SECOND SECTION OF THE FIRST ONE. `m5v3.sh start --rf2o` passes this
+  # as a SECOND --params-file after the one above; without the flag it is
+  # never named on any command line and never read, so the default
+  # stack's parameter set is not merely equivalent to the shipping
+  # filter's - it is the same bytes, off the same one file.
+  #   WHY NOT ONE FILE WITH THE odom1 BLOCK ALWAYS IN IT. ekf_node
+  #   auto-declares every override it is handed, so an `odom1:` line
+  #   sitting in ekf.yaml would be FOUND by robot_localization's sensor
+  #   loop and the arm would be on by default with the flag doing
+  #   nothing. Keeping the arm's entries in their own file means the
+  #   OFF path cannot be reached by a typo in the ON path's block.
+  #   THE TOPIC ITSELF IS STILL ON THE COMMAND LINE, exactly as odom0
+  #   and imu0 are: this track's split is that ekf.yaml (and this
+  #   overlay) hold what is FUSED, and config.yaml holds every name.
+  rf2o_params_file: "m5_ver3/ekf_rf2o.yaml"
   # The node's name, and it has to match ekf.yaml's top-level key or the
   # parameters in that file belong to nobody. m5v3.sh renames the process
   # to this with `-r __node:=`; ekf.yaml's own header carries the same
@@ -945,6 +1027,128 @@ ekf:
     # 20 s is the same budget drive_route.clock_timeout_s takes for the
     # same shape of question, and this topic publishes at 50 Hz.
     timeout_s: "20"
+
+# --------------------- THE OPTIONAL LASER-ODOMETRY ARM -------------------
+# F2 Task 3. `rf2o_laser_odometry` estimates the vehicle's planar motion
+# by matching consecutive scans of the nav lidar - a THIRD opinion about
+# the twist, alongside the wheel odometry's and the gyro's, and the only
+# one on this stack that observes the FLOOR rather than the vehicle.
+#
+# IT IS OFF BY DEFAULT AND THAT IS THE WHOLE POINT OF THE FLAG.
+# `m5v3.sh start` brings up exactly the six children EVIDENCE_FUSION.md
+# 9.3's figures were taken on; `--rf2o` adds three more and one extra
+# --params-file. Nothing in this block is read at all without it.
+#
+# IT IS BUILT FROM SOURCE, IN THE USER'S HOME, WITHOUT ROOT.
+# tools/install_rf2o.sh is how it reproduces and F2 constraint 14 is why
+# that is a committed script rather than a paragraph. The package is not
+# in the Jazzy archive for any distribution, so there is nothing to
+# apt-get and m6/tools/install_broker.sh's vendoring shape has nothing to
+# vendor; what this track keeps from it is its discipline.
+rf2o:
+  repo: "https://github.com/MAPIRlab/rf2o_laser_odometry"
+  # THE PIN. `ros2` is a moving branch and this is the revision every
+  # number in EVIDENCE_FUSION.md 10 was measured on: the branch tip on
+  # 2026-08-26, authored 2023-04-28. install_rf2o.sh detaches onto it and
+  # then reads the revision back off the tree, because `git checkout`
+  # accepts a branch name and an abbreviated sha alike.
+  commit: "b38c68e46387b98845ecbfeb6660292f967a00d3"
+  # THE BUILD TREE, AND IT IS THE USER'S AND NOT THE REPOSITORY'S. Under
+  # m5_ver3/ it would be a hundred megabytes of object files one stray
+  # `git add` from being committed. The leading ~/ is expanded against
+  # $HOME by both readers - tools/install_rf2o.sh and m5v3.sh - and the
+  # path is written once so the two cannot disagree about where the
+  # binary is.
+  workspace: "~/m5v3_rf2o_ws"
+  package: "rf2o_laser_odometry"
+  executable: "rf2o_laser_odometry_node"
+  # Release, and it is not a preference. This node solves a weighted
+  # least-squares system over 811 beams at five pyramid levels five times
+  # per scan; EVIDENCE_FUSION.md 10.4 measures what that costs on this
+  # rig and a debug build would be measuring a different program.
+  build_type: "Release"
+  # THE NODE'S OWN LOOP RATE, in Hz, and it is NOT the scan rate.
+  # rf2o's main() is a `while(ok) { spin_some; process; rate.sleep; }`
+  # loop on the WALL clock: process() consumes at most one buffered scan
+  # per pass and warns when there is none. Below the scan rate it drops
+  # scans; at exactly the scan rate it would drop one whenever the two
+  # cadences beat. 30 is twice the nav lidar's 15 Hz, so every scan is
+  # taken on the pass after it lands, and the cost of the extra passes is
+  # a WARN line and a predicate.
+  #   IT IS A WALL-CLOCK RATE ON A SIM-TIME STACK, unavoidably -
+  #   rclcpp::Rate does not follow /clock - so what this number really
+  #   bounds is passes per second of the MACHINE. At this rig's ~1.0
+  #   real-time factor the two coincide; on a slower one the margin is
+  #   larger, not smaller, which is the safe direction.
+  freq_hz: "30.0"
+  # ---------------- WHAT THE RELAY BELIEVES THE ARM IS WORTH ------------
+  # THE COVARIANCE rf2o DOES NOT PUBLISH. The upstream node default-
+  # constructs its Odometry and never assigns twist.covariance, so every
+  # message carries 36 zeros, and it exposes no parameter to change that
+  # (pinned commit, src/CLaserOdometry2DNode.cpp). robot_localization
+  # does not ignore a zero variance on a channel it is fusing - it
+  # substitutes 1e-9 - so the arm would arrive weighted about seven
+  # orders of magnitude above the wheel odometry it is supposed to be
+  # checked against.
+  #
+  # SO THESE ARE MEASURED, AND THEY ARE MEASURED WITHOUT GROUND TRUTH.
+  # The derivation is EVIDENCE_FUSION.md 10.2 and it is two readings of
+  # rf2o's OWN output, the larger of the two taken per channel:
+  #   AT REST   the temporal spread of the whole twist over a 60 s
+  #             `record --static`, 912 samples. The reference is that the
+  #             truck is not moving, which is a fact about the experiment
+  #             and not a signal.
+  #   AT CRUISE the residual of the same channel about a 2 s moving mean
+  #             of ITSELF, over the steady window of a `straight` run
+  #             (the wheel odometry within 5 % of its own peak), 231
+  #             samples. The reference is the signal's own local level.
+  # Neither reading touches /forklift/gz/odom, so F2 global constraint 13
+  # holds inside the calibration and not only at run time.
+  # tools/noise_probe.sh takes the plant's own sensor noise by exactly
+  # this instrument, at rest, for exactly this reason.
+  #
+  #   channel   at rest       at cruise     SHIPPED
+  #   vx        2.6403e-03    2.2663e-03    2.6403e-03   (sd 0.0514 m/s)
+  #   vyaw      9.3723e-05    2.5445e-05    9.3723e-05   (sd 0.00968 rad/s)
+  #
+  # WHAT THESE NUMBERS DO NOT CONTAIN, STATED RATHER THAN HIDDEN, and it
+  # is the single most important line in this block. A covariance
+  # describes DISPERSION. rf2o also has a large SCALE error on this
+  # plant - it reports about three quarters of the vehicle's true
+  # forward speed, measured - and that is a BIAS, which no covariance
+  # can express and which this block deliberately does not inflate
+  # itself to disguise.
+  #   THAT IS wheel_odom.covariance's OWN RULING, APPLIED AGAIN. That
+  #   block derives its vyaw from the steer bias alone and refuses to
+  #   invent a term for the tyre scrub that actually dominates a corner,
+  #   because inventing one would be a hand in the weighting. The same
+  #   rule here means the filter is told rf2o's vx is PRECISE - eight
+  #   times more precise than the wheel odometry's quantiser dither -
+  #   while it is also 25 % low, and it will weight it accordingly.
+  #   EVIDENCE_FUSION.md 10.5 measures what that costs, and the answer
+  #   is the whole verdict on this arm. A gain fitted against the ground
+  #   truth would have made the arm's own error vanish into a constant
+  #   and left nothing to A/B.
+  #   VALUES ARE VARIANCES, in (m/s)^2 and (rad/s)^2, to match the
+  #   wheel_odom.covariance block above.
+  covariance:
+    vx: "2.6403e-03"
+    vyaw: "9.3723e-05"
+    # THE DO-NOT-FUSE FLAG, and it is wheel_odom.covariance.unused's
+    # number for wheel_odom.covariance.unused's reason. rf2o integrates
+    # a POSE and this relay passes it through untouched, so the message
+    # has one; it has unbounded error and no honest fixed covariance
+    # exists for it. ekf_rf2o.yaml's six false pose flags are the second,
+    # independent refusal.
+    unused: "1000.0"
+  # The relay's subscription and publication depth. 10 is two thirds of a
+  # second of this 15 Hz stream and the same depth every other node on
+  # this track uses.
+  qos_depth: "10"
+  # One line in logs/rf2ocov.log every this many seconds of SIM time -
+  # nodes/wheel_odometry.py's heartbeat, at the same cadence, so a child
+  # that is up and producing nothing is readable as such.
+  log_every_s: "10"
 
 # ------------------------------ DRIVE ROUTE -----------------------------
 # tools/drive_route.py's profiles. It is the EVIDENCE DRIVER: it puts the
