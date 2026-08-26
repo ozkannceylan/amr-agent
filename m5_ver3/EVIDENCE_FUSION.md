@@ -937,11 +937,11 @@ slippery column is `…095639`, `…095748`, `…095853`, `…110130`, `…11041
 | ground-truth path | 11.5871 – 11.6443 m | 10.8467 – 11.0367 m | the truck covers **less ground for the same commands** |
 | estimate's path | 12.0764 – 12.1347 m | 11.8769 – 12.0966 m | **the same distance** — the wheel turned the same |
 | **path error** | **+4.21 … +4.23 %** | **+9.50 … +9.64 %** | **×2.28** |
-| end error | 0.5800 – 0.5826 m | 1.0709 – 1.1052 m | ×1.87 |
-| **ALONG-track** | **+0.4834 … +0.4844 m** | **+1.0244 … +1.0567 m** | **×2.18** |
+| end error | 0.5800 – 0.5826 m | 1.0709 – 1.1052 m | ×1.89 |
+| **ALONG-track** | **+0.4834 … +0.4844 m** | **+1.0244 … +1.0567 m** | **×2.17** |
 | **CROSS-track** | **−0.3204 … −0.3237 m** | **−0.3120 … −0.3242 m** | **unchanged** |
 | **end heading** | **−0.0576 … −0.0579 rad** | **−0.0569 … −0.0579 rad** | **unchanged** |
-| rms over run | 0.5217 – 0.5256 m | 1.0090 – 1.0452 m | ×1.96 |
+| rms over run | 0.5217 – 0.5256 m | 1.0090 – 1.0452 m | ×1.98 |
 
 **The two columns that do not move are the measurement.** Longitudinal
 slip is a lie about how far a revolution carries the truck; the wheel
@@ -1070,7 +1070,7 @@ one needs no frame at all.
 #### The honest handoff, and it is F3's by name
 
 **The residual this phase cannot remove is the along-track error**, and
-on the slippery plant it is **+1.054 to +1.058 m over 11.02 m of travel
+on the slippery plant it is **+1.055 to +1.058 m over 11.02 m of travel
 — +9.62 % of path** on `straight`, and **+1.006 m on +19.33 %** of a
 6.88 m `square`. It grows without bound with distance driven, and no line
 of `ekf.yaml` changes that: both of this filter's inputs are **rates**,
