@@ -94,6 +94,17 @@ Fidelity = collections.namedtuple(
                 "ratio_commanded ratio_measured effective_radius_m "
                 "kinematic_radius_m")
 
+#: WHERE the missing yaw of a corner went: the steered wheel sliding
+#: sideways, the rear axle sliding sideways, or both. Every field is a
+#: mean over the window. See scrub_split() for the identity that ties
+#: them together and for what `residual` is worth.
+ScrubSplit = collections.namedtuple(
+    "ScrubSplit", "n u_mps rear_lat_mps front_lat_mps front_along_mps "
+                  "front_slip_mps front_slip_off_plane_rad tread_slip "
+                  "yaw_rate kinematic front_term rear_term deficit "
+                  "front_share rear_share front_slip_angle_rad "
+                  "rear_slip_angle_rad residual")
+
 
 # ----------------------------------------------------------------------
 # statistics
@@ -173,6 +184,30 @@ def path_length(xs, ys):
 # ----------------------------------------------------------------------
 # angles
 # ----------------------------------------------------------------------
+
+def closure(xs, ys):
+    """How far from its own start a trajectory finished.
+
+    THE CLASSIC OPEN-LOOP READING, and it is a fact about the PLANT when
+    it is taken over the ground truth: a profile written to come back to
+    where it started either does or does not, and the gap is what the
+    table's corner times were worth. It is NOT a drift figure and must
+    not be read as one - EVIDENCE_SENSORS.md 3.1(b) measures an
+    out-and-back profile whose ESTIMATE closes to 0.04 m while being
+    1.23 m out at the far end - so this returns the closure of whichever
+    trajectory it is handed and the caller says which one that was.
+    """
+    if len(xs) != len(ys):
+        raise EvidenceError(
+            "a trajectory has one y per x, got {} and {}".format(
+                len(xs), len(ys)))
+    if len(xs) < 2:
+        raise EvidenceError(
+            "a closure needs a start and an end, got {} sample(s)".format(
+                len(xs)))
+    return math.hypot(float(xs[-1]) - float(xs[0]),
+                      float(ys[-1]) - float(ys[0]))
+
 
 def rear_axle_track(xs, ys, yaws, rear_axle_offset_m):
     """A base_link trajectory, moved onto the rear axle.
@@ -642,6 +677,132 @@ def corner_fidelity(yaw_rate, steer_rad, wheelbase_m, commanded_tread_mps,
         kinematic_radius_m=wheelbase_m / math.tan(delta))
 
 
+def scrub_split(t, x_rear, y_rear, yaw, steer, wheelbase_m, tread_mps):
+    r"""A corner's missing yaw, charged to the contact patch that lost it.
+
+    corner_fidelity() says HOW MUCH yaw went missing. This says WHERE,
+    and the two candidates are not the same repair: a steered wheel that
+    slides sideways is a tyre parameter on THAT wheel, a rear axle that
+    slides sideways is a tyre parameter on the other two, and a plant
+    that does both is neither on its own.
+
+    THE IDENTITY IS EXACT AND IT IS NOT A FIT. Take the rear-axle
+    midpoint P, body x forward, and write its ground velocity in body
+    axes as (u, w) with yaw rate psidot. The steered contact stands L
+    ahead of P, so its ground velocity is (u, w + psidot*L), and
+    resolving that across the wheel plane at steer angle d gives the two
+    slip velocities the tyres actually see:
+
+        s_f = -u*sin(d) + (w + psidot*L)*cos(d)   across the steered wheel
+        s_r = w                                    across the rear axle
+
+    Rearranging for psidot - no assumption, just algebra -
+
+        psidot = u*tan(d)/L  +  s_f/(L*cos(d))  -  s_r/L
+                 \_________/    \____________/     \_____/
+                  kinematic      front term         rear term
+
+    so the deficit (kinematic - delivered) is exactly -front_term minus
+    rear_term, and `front_share` and `rear_share` are those two as
+    fractions of it. A plant whose rear axle holds reports a rear share
+    near zero and a front share near one.
+
+    `residual` is the identity's own closure - kinematic + front + rear
+    minus the measured yaw rate - and it is reported rather than assumed.
+    It is arithmetic, so it should be at the rounding of the inputs; a
+    residual that is not is a bug in the reduction and not a finding
+    about the vehicle.
+
+    TWO SLIPS AT THE STEERED WHEEL, AND THE SECOND ONE IS NOT LATERAL.
+    `front_along_mps` is the contact's speed ALONG its own wheel plane,
+    which the tread speed is supposed to equal; `tread_slip` scores one
+    against the other, and it is the corner's longitudinal slip at the
+    driven contact - the same quantity tools/slip_bench.sh measures on a
+    straight, measured where the wheel is steered. `front_slip_mps` is
+    the magnitude of the two together and `front_slip_off_plane_rad` how
+    far that slide sits off the wheel plane - zero is a patch sliding
+    purely along its own tread, a quarter turn is one sliding purely
+    sideways - because a contact patch does not know which of a
+    reduction's axes it is sliding along.
+
+    Every argument is a series on ONE clock, the ground truth's, with the
+    steer reading already resampled onto it. x_rear and y_rear are the
+    REAR AXLE's track (rear_axle_track() moves base_link onto it) because
+    the identity above is written at P and nowhere else.
+    """
+    n = len(t)
+    if not (n == len(x_rear) == len(y_rear) == len(yaw) == len(steer)):
+        raise EvidenceError(
+            "the corner trace has one position, one heading and one steer "
+            "reading per stamp: {} stamps, {} x, {} y, {} yaw, {} steer"
+            .format(n, len(x_rear), len(y_rear), len(yaw), len(steer)))
+    if n < 3:
+        raise EvidenceError(
+            "a scrub split differences the track, so it needs at least "
+            "three samples; got {}".format(n))
+    wheelbase_m = float(wheelbase_m)
+    if wheelbase_m <= 0.0:
+        raise EvidenceError(
+            "the wheelbase is positive, got {!r}".format(wheelbase_m))
+    tread_mps = float(tread_mps)
+    if tread_mps == 0.0:
+        raise EvidenceError(
+            "the longitudinal slip is scored against the commanded tread "
+            "speed, which is zero on this window")
+
+    us, ws, oms, sfs, alongs, kins, fronts, rears, deltas = (
+        [], [], [], [], [], [], [], [], [])
+    for i in range(1, n):
+        dt = float(t[i]) - float(t[i - 1])
+        if dt <= 0.0:
+            raise EvidenceError(
+                "the ground truth's stamps increase; sample {} is {:.6f}s "
+                "after {:.6f}s".format(i, float(t[i]), float(t[i - 1])))
+        vx = (float(x_rear[i]) - float(x_rear[i - 1])) / dt
+        vy = (float(y_rear[i]) - float(y_rear[i - 1])) / dt
+        om = (float(yaw[i]) - float(yaw[i - 1])) / dt
+        psi = 0.5 * (float(yaw[i]) + float(yaw[i - 1]))
+        delta = 0.5 * (float(steer[i]) + float(steer[i - 1]))
+        if abs(math.cos(delta)) < 1e-9:
+            raise EvidenceError(
+                "the steer angle is inside a quarter turn; this window "
+                "reads {:.6f} rad".format(delta))
+        u = vx * math.cos(psi) + vy * math.sin(psi)
+        w = -vx * math.sin(psi) + vy * math.cos(psi)
+        s_f = -u * math.sin(delta) + (w + om * wheelbase_m) * math.cos(delta)
+        along = u * math.cos(delta) + (w + om * wheelbase_m) * math.sin(delta)
+        us.append(u)
+        ws.append(w)
+        oms.append(om)
+        sfs.append(s_f)
+        alongs.append(along)
+        deltas.append(delta)
+        kins.append(u * math.tan(delta) / wheelbase_m)
+        fronts.append(s_f / (wheelbase_m * math.cos(delta)))
+        rears.append(-w / wheelbase_m)
+
+    u_m, w_m, om_m = mean(us), mean(ws), mean(oms)
+    sf_m, along_m = mean(sfs), mean(alongs)
+    kin_m, front_m, rear_m = mean(kins), mean(fronts), mean(rears)
+    deficit = kin_m - om_m
+    speed_m = math.hypot(u_m, w_m)
+    return ScrubSplit(
+        n=len(us), u_mps=u_m, rear_lat_mps=w_m, front_lat_mps=sf_m,
+        front_along_mps=along_m,
+        front_slip_mps=math.hypot(sf_m, tread_mps - along_m),
+        front_slip_off_plane_rad=math.atan2(abs(sf_m),
+                                            abs(tread_mps - along_m)),
+        tread_slip=(tread_mps - along_m) / tread_mps,
+        yaw_rate=om_m, kinematic=kin_m, front_term=front_m, rear_term=rear_m,
+        deficit=deficit,
+        front_share=(-front_m / deficit) if deficit else float("nan"),
+        rear_share=(-rear_m / deficit) if deficit else float("nan"),
+        front_slip_angle_rad=math.atan2(sf_m, abs(along_m)),
+        rear_slip_angle_rad=(math.atan2(w_m, abs(u_m)) if speed_m > 0.0
+                             else 0.0),
+        residual=(kin_m + front_m + rear_m) - om_m)
+
+
 # ----------------------------------------------------------------------
 # the CSVs the recorder writes
 # ----------------------------------------------------------------------
@@ -1002,6 +1163,37 @@ def _selftest():
     check("an ideal tricycle scores a fidelity of 1 both ways",
           abs(fid.ratio_commanded - 1.0) < 1e-12
           and abs(fid.ratio_measured - 1.0) < 1e-12)
+
+    # THE SAME IDEAL TRICYCLE, THROUGH THE SPLIT. A rear axle driven at
+    # exactly u*tan(delta)/L slides nowhere, so both slip terms are zero
+    # and the deficit is nothing to charge to either wheel.
+    u, delta = 0.2114, -0.785398
+    omega = u * math.tan(delta) / 1.05
+    t, tx, ty, tyaw, tsteer = [], [], [], [], []
+    for i in range(121):
+        now, yaw = i * 0.05, omega * i * 0.05
+        t.append(now)
+        tx.append((u / omega) * math.sin(yaw))
+        ty.append((u / omega) * (1.0 - math.cos(yaw)))
+        tyaw.append(yaw)
+        tsteer.append(delta)
+    split = scrub_split(t, tx, ty, tyaw, tsteer, 1.05, 0.3)
+    check("a kinematic corner charges nothing to either contact patch",
+          abs(split.front_lat_mps) < 1e-6 and abs(split.rear_lat_mps) < 1e-6
+          and abs(split.residual) < 1e-12)
+    # AND THE CRABBING ONE, where the axle slides and the split has to
+    # say so - it is the reading that decides which wheel gets tuned.
+    tx = [x + (0.03 / omega) * (math.cos(a) - 1.0)
+          for x, a in zip(tx, tyaw)]
+    ty = [y + (0.03 / omega) * math.sin(a) for y, a in zip(ty, tyaw)]
+    crab = scrub_split(t, tx, ty, tyaw, tsteer, 1.05, 0.3)
+    check("an axle that crabs is charged to the rear and not the front",
+          abs(crab.rear_lat_mps - 0.03) < 1e-6)
+
+    check("a square that closes reads zero and an open leg reads its gap",
+          closure([0.0, 1.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 1.0, 0.0])
+          < 1e-12
+          and abs(closure([0.0, 3.0], [0.0, 4.0]) - 5.0) < 1e-12)
 
     # A CSV of the shape the recorder writes, read back and measured.
     handle, path = tempfile.mkstemp(suffix="_scan_nav.csv", text=True)

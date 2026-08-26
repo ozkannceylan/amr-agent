@@ -1115,6 +1115,18 @@ def analyse_drive(cfg, path, session, sensors):
     print("  rms over run    {:.4f} m        worst {:.4f} m".format(
         score.rms_m, score.max_error_m))
     print("  ABSOLUTE, not anchored: no initial offset is removed.")
+    # AND WHAT THE PLANT ITSELF DID ABOUT COMING HOME. The ground truth's
+    # closure is a reading on the PROFILE's table - square: is written to
+    # return the truck to its start and either it does or it does not -
+    # and it is a different question from the estimate's drift, which is
+    # everything above. Both are printed because on an out-and-back
+    # profile they disagree spectacularly (EVIDENCE_SENSORS.md 3.1(b):
+    # aisle's estimate closes to 0.04 m while it is 1.23 m out at the far
+    # end), and a reader who has only one of them can be misled by it.
+    print("  CLOSURE         ground truth {:.4f} m from its own start   "
+          "estimate {:.4f} m from its".format(
+              core.closure(truth.column("x"), truth.column("y")),
+              core.closure(est.column("x"), est.column("y"))))
     return score, truth, est, joints
 
 
@@ -1174,6 +1186,16 @@ def corner_inputs(cfg, path, session, truth, joints):
             t_t, speed, t_j, cfg.f("evidence.analyse.max_pair_gap_s"))
     except core.EvidenceError as exc:
         fail(cfg, exc, path + " (config.yaml evidence.analyse.*)")
+    # THE STEER READING GOES THE OTHER WAY, ONTO THE TRUTH'S CLOCK, and
+    # it is resampled PER WINDOW rather than here. The scrub split
+    # differences the ground truth's own track, so its clock is the 20 Hz
+    # one - but the two streams do not open on the same sim stamp (the
+    # bridge connects them one at a time, and measured on
+    # drive-corner_creep-20260826-071656 the joint stream opened 0.626 s
+    # after the truth's). Resampling the WHOLE run would refuse on the
+    # handful of truth samples before the joints existed, which no
+    # reduction reads; a corner window is inside the held steer by
+    # construction and therefore inside both spans. See measure_corner().
     return CornerInputs(profile=profile, target=target, tread=tread,
                         t_t=t_t, tx=tx, ty=ty, tyaw=tyaw, speed=speed,
                         t_j=t_j, steer=steer, speed_at_joint=speed_at_joint)
@@ -1181,7 +1203,7 @@ def corner_inputs(cfg, path, session, truth, joints):
 
 #: One window, measured. Written once and called from both reductions.
 CornerMeasure = collections.namedtuple(
-    "CornerMeasure", "fid yaw_rate rear held heading_in span inside")
+    "CornerMeasure", "fid yaw_rate rear held heading_in span inside split")
 
 
 def measure_corner(cfg, path, inputs, window):
@@ -1208,10 +1230,25 @@ def measure_corner(cfg, path, inputs, window):
         yaw_rate=yaw_rate, steer_rad=held,
         wheelbase_m=cfg.f("vehicle.wheelbase_m"),
         commanded_tread_mps=inputs.tread, measured_rear_mps=rear)
+    # AND WHERE THE MISSING YAW WENT, over the same window and off the
+    # same samples. fid says how much; this says which contact patch lost
+    # it, and the two may not come from different windows.
+    stamps = [inputs.t_t[i] for i in inside]
+    try:
+        split = core.scrub_split(
+            stamps, [inputs.tx[i] for i in inside],
+            [inputs.ty[i] for i in inside],
+            [inputs.tyaw[i] for i in inside],
+            core.resample(inputs.t_j, inputs.steer, stamps,
+                          cfg.f("evidence.analyse.max_pair_gap_s")),
+            wheelbase_m=cfg.f("vehicle.wheelbase_m"),
+            tread_mps=inputs.tread)
+    except core.EvidenceError as exc:
+        fail(cfg, exc, path)
     return CornerMeasure(
         fid=fid, yaw_rate=yaw_rate, rear=rear, held=held,
         heading_in=core.normalise_angle(inputs.tyaw[inside[0]]),
-        span=span, inside=inside)
+        span=span, inside=inside, split=split)
 
 
 def analyse_corner(cfg, path, inputs):
@@ -1290,7 +1327,70 @@ def analyse_corner(cfg, path, inputs):
           "second only scrub.")
     print("  turning radius  kinematic {:.4f} m   MEASURED {:.4f} m".format(
         fid.kinematic_radius_m, fid.effective_radius_m))
+    print_scrub_split(got.split, cfg.f("evidence.corner.split_min_deficit"))
     return fid
+
+
+def split_is_informative(split, min_fraction):
+    """Is the deficit big enough for a PERCENTAGE of it to mean anything?
+
+    config.yaml's evidence.corner.split_min_deficit carries the whole
+    reasoning. One predicate, used by both reductions, so the headline
+    block and the per-corner table cannot disagree about when a share
+    stops being a measurement.
+    """
+    if not split.kinematic:
+        return False
+    return abs(split.deficit / split.kinematic) >= min_fraction
+
+
+def print_scrub_split(split, min_fraction):
+    """WHICH CONTACT PATCH LOST THE YAW, printed under the ratio.
+
+    A delivered fraction on its own does not say what to change. This
+    block charges the deficit to the steered wheel and to the rear axle
+    by an exact identity (evidence_core.scrub_split()), and the residual
+    is printed so a reader can see the identity close rather than take
+    it on the file's word.
+    """
+    print("")
+    print("  --- where the yaw went: the steered wheel, or the rear axle? "
+          "---")
+    print("  rear-axle velocity in its own body frame: along {:+.6f} m/s, "
+          "across {:+.6f} m/s".format(split.u_mps, split.rear_lat_mps))
+    print("  steered contact:  across the wheel plane {:+.6f} m/s, along "
+          "it {:+.6f} m/s".format(split.front_lat_mps,
+                                  split.front_along_mps))
+    print("  slip angles     steered {:+.4f} rad ({:+.2f} deg)   rear "
+          "{:+.4f} rad ({:+.2f} deg)".format(
+              split.front_slip_angle_rad,
+              math.degrees(split.front_slip_angle_rad),
+              split.rear_slip_angle_rad,
+              math.degrees(split.rear_slip_angle_rad)))
+    print("  the driven patch slides {:.6f} m/s in all, {:.1f} deg off its "
+          "own wheel plane".format(
+              split.front_slip_mps,
+              math.degrees(split.front_slip_off_plane_rad)))
+    print("  longitudinal slip AT THE STEERED CONTACT, in this corner: "
+          "{:.4%}".format(split.tread_slip))
+    print("  yaw budget      kinematic {:+.6f} = steered {:+.6f} + rear "
+          "{:+.6f} + delivered {:+.6f}".format(
+              split.kinematic, -split.front_term, -split.rear_term,
+              split.yaw_rate))
+    share = split.kinematic and split.deficit / split.kinematic
+    if split_is_informative(split, min_fraction):
+        print("  DEFICIT         {:+.6f} rad/s ({:.1%} of kinematic): "
+              "steered wheel {:.1%}, rear axle {:.1%}".format(
+                  split.deficit, share,
+                  split.front_share, split.rear_share))
+    else:
+        print("  DEFICIT         {:+.6f} rad/s ({:.1%} of kinematic) - "
+              "under config.yaml's".format(split.deficit, share))
+        print("                  evidence.corner.split_min_deficit, so the "
+              "two terms above are the reading")
+        print("                  and no percentage of them is printed.")
+    print("  identity closes to {:.3e} rad/s ({} intervals) - it is "
+          "algebra, so this is rounding.".format(split.residual, split.n))
 
 
 def analyse_corner_table(cfg, path, inputs):
@@ -1312,6 +1412,7 @@ def analyse_corner_table(cfg, path, inputs):
     """
     slew_in = cfg.f("evidence.corner.slew_in_s")
     exit_s = cfg.f("evidence.corner.exit_s")
+    min_fraction = cfg.f("evidence.corner.split_min_deficit")
     try:
         runs = core.steady_runs(
             inputs.t_j, inputs.steer, inputs.speed_at_joint, inputs.target,
@@ -1343,18 +1444,31 @@ def analyse_corner_table(cfg, path, inputs):
     # controller overshoots, and on this profile it does so by 0.009 rad,
     # which moves the ratio by 0.3 %. Printing it is what lets a reader
     # tell that difference from a difference in the vehicle.
-    print("  {:>3} {:>17} {:>7} {:>11} {:>10} {:>10} {:>11} {:>10}".format(
-        "#", "window [s]", "span", "heading in", "held rad", "rear m/s",
-        "yaw rate", "delivered"))
+    print("  {:>3} {:>17} {:>7} {:>11} {:>10} {:>10} {:>11} {:>10} "
+          "{:>10} {:>10} {:>7}".format(
+              "#", "window [s]", "span", "heading in", "held rad",
+              "rear m/s", "yaw rate", "delivered", "steer lat", "rear lat",
+              "front%"))
     out = []
     for n, window in enumerate(runs.windows, 1):
         got = measure_corner(cfg, path, inputs, window)
         out.append(got)
+        # THE LAST THREE COLUMNS ARE THE SPLIT, ONE ROW PER CORNER. The
+        # heading dependence is a fact about the delivered fraction, and
+        # the question it raises immediately is whether the SAME contact
+        # patch loses the yaw at every heading. Two slip velocities and
+        # the steered wheel's share of the deficit answer it in the same
+        # table rather than in a second reduction over the same windows.
+        share = ("{:>6.1%}".format(got.split.front_share)
+                 if split_is_informative(got.split, min_fraction) else
+                 "{:>6}".format("-"))
         print("  {:>3} {:>8.2f}{:>9.2f} {:>7.2f} {:>+11.4f} {:>+10.6f} "
-              "{:>10.4f} {:>+11.6f} {:>10.4f}".format(
+              "{:>10.4f} {:>+11.6f} {:>10.4f} {:>+10.6f} {:>+10.6f} "
+              "{}".format(
                   n, window.t0, window.t1, got.span, got.heading_in,
                   got.held, got.rear, got.yaw_rate,
-                  got.fid.ratio_commanded))
+                  got.fid.ratio_commanded, got.split.front_lat_mps,
+                  got.split.rear_lat_mps, share))
     if len(out) > 1:
         ratios = core.summarise([m.fid.ratio_commanded for m in out])
         print("  delivered       {:.4f} to {:.4f} over {} corners, "

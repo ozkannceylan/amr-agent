@@ -662,3 +662,145 @@ def test_the_single_window_reduction_is_one_of_the_runs():
         trim_start_s=1.0, trim_end_s=0.0, min_window_s=2.0)
     assert runs.found == 1
     assert runs.windows[0] == one
+
+
+# ----------------------------------------------------------------------
+# where a corner's missing yaw actually went
+# ----------------------------------------------------------------------
+
+def _arc(u_mps, steer_rad, wheelbase_m=1.05, seconds=6.0, dt=0.05,
+         side_slip_mps=0.0, extra_yaw_rate=0.0):
+    """A rear axle driven at a constant body velocity and a constant yaw
+    rate, integrated in CLOSED FORM so the trace carries no integrator
+    error of its own.
+
+    THE TRACK IS ALL THE REDUCTION GETS. scrub_split() sees positions and
+    headings and has to recover the two slip velocities from them, which
+    is exactly its job on a real CSV - so the generator writes the motion
+    and never the answer.
+
+    With no side slip and no extra yaw rate the motion is the tricycle's
+    own: yaw rate u*tan(delta)/L, both slip terms zero.
+    """
+    omega = u_mps * math.tan(steer_rad) / wheelbase_m + extra_yaw_rate
+    t, xs, ys, yaws, steer = [], [], [], [], []
+    n = int(round(seconds / dt))
+    for i in range(n + 1):
+        now = i * dt
+        yaw = omega * now
+        if omega:
+            x = (u_mps / omega) * math.sin(yaw) + (
+                side_slip_mps / omega) * (math.cos(yaw) - 1.0)
+            y = (u_mps / omega) * (1.0 - math.cos(yaw)) + (
+                side_slip_mps / omega) * math.sin(yaw)
+        else:
+            x, y = u_mps * now, side_slip_mps * now
+        t.append(now)
+        xs.append(x)
+        ys.append(y)
+        yaws.append(yaw)
+        steer.append(steer_rad)
+    return t, xs, ys, yaws, steer
+
+
+def test_a_corner_that_obeys_the_kinematics_charges_nothing_to_either_wheel():
+    # An arc whose radius IS L/tan(delta), driven with no lateral slip at
+    # the axle: both slip terms must come out at zero and the delivered
+    # yaw must equal the kinematic one.
+    delta = -0.785398
+    t, xs, ys, yaws, steer = _arc(0.2114, delta)
+    split = evidence_core.scrub_split(t, xs, ys, yaws, steer,
+                                      wheelbase_m=1.05, tread_mps=0.3)
+    assert abs(split.rear_lat_mps) < 1e-6
+    assert abs(split.front_lat_mps) < 1e-6
+    assert abs(split.deficit / split.kinematic) < 1e-5
+
+
+def test_a_rear_axle_that_slides_is_charged_to_the_rear_and_not_the_front():
+    # THE SAME ARC, with the axle crabbing sideways. The rear term has to
+    # pick that up: a plant whose rear axle slides is a different repair
+    # from one whose steered wheel does, and a split that could not tell
+    # them apart would send the tuning to the wrong wheel.
+    delta = -0.785398
+    t, xs, ys, yaws, steer = _arc(0.2114, delta, side_slip_mps=0.03)
+    split = evidence_core.scrub_split(t, xs, ys, yaws, steer,
+                                      wheelbase_m=1.05, tread_mps=0.3)
+    assert abs(split.rear_lat_mps - 0.03) < 1e-6
+    assert abs(split.rear_term + 0.03 / 1.05) < 1e-6
+
+
+def test_the_yaw_budget_is_an_identity_and_closes_on_any_trace():
+    # kinematic + front + rear - delivered is algebra, not a fit, so it
+    # closes on a trace that obeys no model at all. This is the check the
+    # printed block quotes as `residual`.
+    delta = -0.9
+    t, xs, ys, yaws, steer = _arc(0.25, delta, side_slip_mps=-0.05,
+                                  extra_yaw_rate=0.04)
+    split = evidence_core.scrub_split(t, xs, ys, yaws, steer,
+                                      wheelbase_m=1.05, tread_mps=0.3)
+    assert abs(split.residual) < 1e-12
+    assert abs((split.kinematic + split.front_term + split.rear_term)
+               - split.yaw_rate) < 1e-12
+
+
+def test_the_split_reproduces_the_untuned_plants_measured_deficit():
+    # THE NUMBERS ARE THE RIG'S, not invented: EVIDENCE_LATERAL_TUNE.md 2
+    # measures the untuned plant at u = -0.209242 m/s, w = +0.000673 m/s
+    # and psidot = +0.083009 rad/s at a held -0.788546 rad. Fed those, the
+    # reduction has to return the steered wheel's 99.5 % share.
+    delta = -0.788546
+    u, w, omega = -0.209242, 0.000673, 0.083009
+    dt = 0.05
+    t, xs, ys, yaws, steer = [], [], [], [], []
+    x = y = yaw = 0.0
+    for i in range(200):
+        t.append(i * dt)
+        xs.append(x)
+        ys.append(y)
+        yaws.append(yaw)
+        steer.append(delta)
+        x += (u * math.cos(yaw) - w * math.sin(yaw)) * dt
+        y += (u * math.sin(yaw) + w * math.cos(yaw)) * dt
+        yaw += omega * dt
+    split = evidence_core.scrub_split(t, xs, ys, yaws, steer,
+                                      wheelbase_m=1.05, tread_mps=-0.300)
+    assert abs(split.front_share - 0.995) < 0.005
+    assert abs(split.rear_share - 0.005) < 0.005
+    assert abs(split.deficit / split.kinematic - 0.586) < 0.005
+    # and the corner's longitudinal slip at the driven contact, which is
+    # 0.96 % on a straight and thirty times that here.
+    assert abs(split.tread_slip - 0.3006) < 0.002
+
+
+def test_a_scrub_split_refuses_a_trace_it_cannot_difference():
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.scrub_split([0.0, 0.1], [0.0, 0.1], [0.0, 0.0],
+                                  [0.0, 0.0], [0.0, 0.0], 1.05, 0.3)
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.scrub_split([0.0, 0.1, 0.2], [0.0, 0.1, 0.2],
+                                  [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+                                  [0.0, 0.0, 0.0], 1.05, 0.0)
+
+
+# ----------------------------------------------------------------------
+# closure: what the profile's own table was worth
+# ----------------------------------------------------------------------
+
+def test_a_closed_loop_closes_and_an_open_one_does_not():
+    square = ([0.0, 1.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 1.0, 0.0])
+    assert evidence_core.closure(*square) < 1e-12
+    assert abs(evidence_core.closure([0.0, 3.0], [0.0, 4.0]) - 5.0) < 1e-12
+
+
+def test_closure_is_not_path_length_and_an_out_and_back_shows_it():
+    xs = [0.0, 5.0, 0.1]
+    ys = [0.0, 0.0, 0.0]
+    assert abs(evidence_core.path_length(xs, ys) - 9.9) < 1e-12
+    assert abs(evidence_core.closure(xs, ys) - 0.1) < 1e-12
+
+
+def test_a_closure_needs_a_start_and_an_end():
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.closure([1.0], [1.0])
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.closure([1.0, 2.0], [1.0])
