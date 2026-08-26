@@ -214,7 +214,16 @@ sweep() {  # sweep <signal>
 #   nothing.
 check_ekf_params() {  # check_ekf_params <file> <the config key naming it>
     local file="$1" key="$2"
-    grep -q "^${CFG_EKF_NODE_NAME}:" "$file" || refuse         "the EKF parameter file is addressed to $CFG_EKF_NODE_NAME"         "$file and $CONFIG (ekf.node_name, $key)"         "there is no top-level '$CFG_EKF_NODE_NAME:' key in that file, so"         "every parameter in it belongs to a node that is never started."         "ekf_node would come up on its PACKAGE DEFAULTS with the topic,"         "frame and rate overrides still applied: 50 Hz of a pose that"         "never moves, an identity transform, and 'status' ALIVE."         "the top-level keys that file does define:"         "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$file" || echo '(none)')"
+    grep -q "^${CFG_EKF_NODE_NAME}:" "$file" || refuse \
+        "the EKF parameter file is addressed to $CFG_EKF_NODE_NAME" \
+        "$file and $CONFIG (ekf.node_name, $key)" \
+        "there is no top-level '$CFG_EKF_NODE_NAME:' key in that file, so" \
+        "every parameter in it belongs to a node that is never started." \
+        "ekf_node would come up on its PACKAGE DEFAULTS with the topic," \
+        "frame and rate overrides still applied: 50 Hz of a pose that" \
+        "never moves, an identity transform, and 'status' ALIVE." \
+        "the top-level keys that file does define:" \
+        "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$file" || echo '(none)')"
 }
 
 # DID THE SCAN MATCHER FIND OUT WHERE IT IS BOLTED? A refusal, not a
@@ -696,7 +705,14 @@ start() {
     # tools/ekf_health.py and evidence_core, where a test reaches them
     # without a simulator; this line is the orchestration.
     if ! python3 "$M5V3/tools/ekf_health.py"; then
-        refuse "the filter came up sane, and not merely alive"             "$M5V3/tools/ekf_health.py (its refusal is printed above)"             "the covariance check above is what said no, and it is the"             "ONLY check on this stack that can: the process is running,"             "the topic is at its configured rate and every other test"             "here has passed."             "THE STACK IS INCOMPLETE, and what is left of it is STILL UP."             "'$0 stop', then start again - this does not recur every time."
+        refuse "the filter came up sane, and not merely alive" \
+            "$M5V3/tools/ekf_health.py (its refusal is printed above)" \
+            "the covariance check above is what said no, and it is the" \
+            "ONLY check on this stack that can: the process is running," \
+            "the topic is at its configured rate and every other test" \
+            "here has passed." \
+            "THE STACK IS INCOMPLETE, and what is left of it is STILL UP." \
+            "'$0 stop', then start again - this does not recur every time."
     fi
 
     echo ""
@@ -968,7 +984,20 @@ apply_slippery() {
 #   for the shells. `sort -u` collapses the three wheels' entries to the
 #   distinct values, so a model that is NOT isotropic shows as two.
 write_traction() {
-    local lat lon source
+    local lat lon source arm arm_source
+    # WHICH ESTIMATOR IS UP, decided before the heredoc rather than
+    # inside it: an `echo "$(...)"` with a conditional in it is a line
+    # nobody can read and the refusals in this file are not written that
+    # way either.
+    if [ "$RF2O" = true ]; then
+        arm="wheel+imu+rf2o"
+        arm_source="$0 --rf2o, $CFG_EKF_PARAMS_FILE +"
+        arm_source="$arm_source $CFG_EKF_RF2O_PARAMS_FILE,"
+        arm_source="$arm_source rf2o pinned at $CFG_RF2O_COMMIT"
+    else
+        arm="wheel+imu"
+        arm_source="$CFG_EKF_PARAMS_FILE alone (no --rf2o)"
+    fi
     if [ "$SLIPPERY" = true ]; then
         lat="$CFG_SLIPPERY_SLIP_COMPLIANCE_LATERAL"
         lon="$CFG_SLIPPERY_SLIP_COMPLIANCE_LONGITUDINAL"
@@ -997,8 +1026,8 @@ write_traction() {
       #   IT IS A SEPARATE LINE FROM traction= BECAUSE IT IS A SEPARATE
       #   QUESTION. The four combinations are all legitimate runs and
       #   EVIDENCE_FUSION.md 10 uses three of them.
-      echo "arm=$([ "$RF2O" = true ] && echo wheel+imu+rf2o || echo wheel+imu)"
-      echo "arm_source=$([ "$RF2O" = true ] && echo "$0 --rf2o, $CFG_EKF_PARAMS_FILE + $CFG_EKF_RF2O_PARAMS_FILE, rf2o pinned at $CFG_RF2O_COMMIT" || echo "$CFG_EKF_PARAMS_FILE alone (no --rf2o)")"
+      echo "arm=$arm"
+      echo "arm_source=$arm_source"
       echo "partition=$GZ_PARTITION"
       echo "started=$(date -Is)"; } > "$TRACTIONFILE" \
         || refuse "the traction state file is writable" "$CONFIG" \
@@ -1065,9 +1094,11 @@ status() {
         #   so here would be inferring the label from an absence, which
         #   is exactly the habit tools/sensor_evidence.py's UNLABELLED
         #   refuses on the same question.
-        printf '  %-10s %-7s %s\n' "arm" \
-            "$(sed -n 's/^arm=//p' "$TRACTIONFILE" | grep . || echo UNKNOWN)" \
-            "$(sed -n 's/^arm_source=//p' "$TRACTIONFILE" | grep . || echo "no arm= line - this state file predates F2 Task 3")"
+        local arm arm_source
+        arm="$(sed -n 's/^arm=//p' "$TRACTIONFILE")"
+        arm_source="$(sed -n 's/^arm_source=//p' "$TRACTIONFILE")"
+        printf '  %-10s %-7s %s\n' "arm" "${arm:-UNKNOWN}" \
+            "${arm_source:-no arm= line - this state file predates F2 Task 3}"
     else
         printf '  %-10s %-7s %s\n' "traction" "UNKNOWN" \
             "no $TRACTIONFILE - this stack was not started by '$0 start'"
