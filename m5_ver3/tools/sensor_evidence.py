@@ -135,7 +135,17 @@ REQUIRED_KEYS = (
     "topics.amcl_pose", "topics.initialpose", "topics.map",
     "frames.map",
     "map.dir", "map.name", "map.registration.file",
-    "localization.params_file", "localization.analyse.map_gap_s",
+    # F3 TASK 3's, AND EVERY ONE OF THEM IS THERE BECAUSE THERE ARE TWO
+    # LOCALISERS NOW. topics.slam_pose is where the second one publishes
+    # its own pose (nav2_amcl says `amcl_pose`, slam_toolbox says
+    # `pose`), map.build_file is where the POSE GRAPH's md5 is committed
+    # - the registration carries the grid's and nothing else - and each
+    # arm names its own parameter file, which `analyse` prints so a
+    # reader can open the file that decided the numbers.
+    "topics.slam_pose", "map.build_file",
+    "localization.amcl.label", "localization.amcl.params_file",
+    "localization.slam.label", "localization.slam.params_file",
+    "localization.analyse.map_gap_s",
     "frames.odom", "frames.base_link", "frames.imu",
     "vehicle.imu_mount.x", "vehicle.imu_mount.y", "vehicle.imu_mount.z",
     "ekf.frequency_hz", "ekf.params_file", "fuse.params_file",
@@ -381,27 +391,22 @@ def read_traction(cfg):
     return fields
 
 
-def localizer_of(label):
-    """The localiser half of a `loc=` label: the part before the `@`.
-
-    THE GRAMMAR IS `<localiser>@<map md5>` OR THE WORD `none`, and it is
-    parsed rather than looked up for evidence_core.fused_topic_key()'s
-    reason: F3 Task 3 adds a second localiser over the same frozen map,
-    and a table keyed by whole labels would stop working the first time
-    a map is rebuilt.
-    """
-    text = str(label).strip()
-    if not text or text == "none":
-        return ""
-    return text.split("@", 1)[0].strip()
-
-
-def map_md5_of(label):
-    """The map half of a `loc=` label: the part after the `@`, or ""."""
-    text = str(label).strip()
-    if "@" not in text:
-        return ""
-    return text.split("@", 1)[1].strip()
+#: THE `loc=` GRAMMAR, AND SINCE F3 TASK 3 IT LIVES IN evidence_core.
+#: The grammar is `<localiser>@<artifact md5>` or the word `none`, and it
+#: is parsed rather than looked up for evidence_core.fused_topic_key()'s
+#: reason: a rebuilt map changes the md5 and nothing else, and a table
+#: keyed by whole labels would stop working the first time one is.
+#:   IT MOVED BECAUSE A THIRD READER APPEARED. F3 Task 2 had two -
+#: this file and tools/localization_health.py, which split the string by
+#: hand - and Task 3 added the questions that CANNOT be answered by
+#: splitting: which topic this arm's pose comes out on, and which frozen
+#: artifact the md5 belongs to. Those needed a table, tests reach a
+#: table in evidence_core without a simulator, and a grammar with its
+#: table in one module and its split in another is two files that can
+#: disagree about one label. These two names stay here so that every
+#: call site in this file reads the same as it did.
+localizer_of = core.localizer_of
+map_md5_of = core.loc_md5_of
 
 
 def write_session_file(path, fields):
@@ -890,7 +895,20 @@ def _make_recorder(cfg, Node, QoSProfile, types):
             # the failure this list exists to catch, and a list built by
             # looking would exclude the stream in exactly that case.
             self.loc = loc
-            self.localized = bool(localizer_of(loc))
+            self.localizer = localizer_of(loc)
+            self.localized = bool(self.localizer)
+            # AND WHICH ADDRESS THAT LOCALISER PUBLISHES ITS OWN POSE ON,
+            # WHICH IS NOT THE SAME FOR THE TWO ARMS. nav2_amcl advertises
+            # `amcl_pose`; slam_toolbox's localisation node advertises
+            # `pose`. The mapping is evidence_core.loc_pose_topic_key() -
+            # the same file that maps an ESTIMATOR arm onto its fused
+            # topic, and it REFUSES a localiser it has not heard of rather
+            # than defaulting, because a subscription to the other arm's
+            # address does not fail: it records an empty stream under a
+            # label naming a localiser that was publishing all along.
+            self.loc_pose_topic = (
+                cfg.s(core.loc_pose_topic_key(self.localizer))
+                if self.localized else "")
             self.map_frame = cfg.s("frames.map")
             self.odom_frame = cfg.s("frames.odom")
             names = ["clock", "odom_truth", "wheel_odom", "ekf_odom"]
@@ -983,7 +1001,7 @@ def _make_recorder(cfg, Node, QoSProfile, types):
                 # opens.
                 self.create_subscription(
                     types.PoseWithCovarianceStamped,
-                    cfg.s("topics.amcl_pose"), self.cb_amcl_pose, qos)
+                    self.loc_pose_topic, self.cb_amcl_pose, qos)
                 # AND THE EDGE ITSELF, OFF /tf. It is the transform a
                 # consumer of this stack would look up, captured where
                 # the consumer would find it rather than re-derived from
@@ -1496,10 +1514,11 @@ def record(cfg, args):
                              bag_summary)
             cfg.refuse(
                 "the localiser updated at least once during the drive",
-                "{} ({}) and {} (update_min_d)".format(
+                "{} ({}) and {} (the travel gate)".format(
                     os.path.join(session, FILES["amcl_pose"]),
-                    cfg.s("topics.amcl_pose"),
-                    cfg.s("localization.params_file")),
+                    node.loc_pose_topic,
+                    cfg.s("localization.{}.params_file".format(
+                        node.localizer))),
                 "not one pose was published over the whole of "
                 "{}.".format(args.drive),
                 "THE CAPTURE IS COMPLETE AND IS IN {}".format(session),
@@ -2074,18 +2093,50 @@ def analyse_localization(cfg, path, profile, session, truth, fused,
         frame = core.MapFrame.from_registration(record)
     except (map_core.MapError, core.EvidenceError) as exc:
         fail(cfg, exc, reg_path)
+    # WHICH FROZEN ARTIFACT THIS SESSION's LABEL IS AN md5 OF, AND THE
+    # TWO ARMS DO NOT ANSWER THE SAME. AMCL localises in the GRID, whose
+    # md5 the committed registration carries because that is what it was
+    # FITTED to; slam_toolbox localises in the POSE GRAPH, which the
+    # registration says nothing about and which tools/build_map.sh
+    # hashed into build.txt beside it. Each arm's label binds to the file
+    # it actually opened.
+    #   THE CHAIN IS STILL CLOSED ON BOTH ARMS, and on the slam arm it is
+    #   one link longer: the session binds to the pose graph, build.txt
+    #   binds that graph to the grid it was saved with, and
+    #   load_registration() above has already bound the grid to this
+    #   transform. A rebuild would break it at the first link.
     want = map_md5_of(loc)
-    got = str(record.get("map_md5", ""))
+    try:
+        which = core.loc_md5_artifact(localizer_of(loc))
+    except core.EvidenceError as exc:
+        fail(cfg, exc, os.path.join(path, FILES["session"]))
+    if which == "grid":
+        got = str(record.get("map_md5", ""))
+        owner = reg_path
+        artifact_name = "a grid"
+        owner_says = "the committed registration belongs to"
+    else:
+        build_path = os.path.join(_common.REPO, cfg.s("map.dir"),
+                                  cfg.s("map.name"),
+                                  cfg.s("map.build_file"))
+        try:
+            manifest = map_register.load_build_manifest(build_path)
+        except (map_core.MapError, OSError) as exc:
+            fail(cfg, exc, build_path)
+        got = str(manifest.get(
+            "md5_{}.{}".format(cfg.s("map.name"), which), ""))
+        owner = build_path
+        artifact_name = "a pose graph"
+        owner_says = "the committed build manifest names one that"
     if want and not got.startswith(want):
         cfg.refuse(
             "this session was recorded against the map that is committed "
             "now",
             "{} (the loc= line) and {}".format(
-                os.path.join(path, FILES["session"]), reg_path),
-            "the session says it localised against a grid whose md5 "
-            "begins {!r};".format(want),
-            "the committed registration belongs to one that begins "
-            "{!r}.".format(got[:8]),
+                os.path.join(path, FILES["session"]), owner),
+            "the session says it localised in {} whose md5 begins "
+            "{!r};".format(artifact_name, want),
+            "{} begins {!r}.".format(owner_says, got[:8]),
             "A REBUILT MAP HAS ITS OWN ROTATION FROM THE BUILDING (F3 "
             "constraint 16), so",
             "every absolute figure this session could produce would be a "
@@ -2201,14 +2252,25 @@ def analyse_localization(cfg, path, profile, session, truth, fused,
     except core.EvidenceError as exc:
         fail(cfg, exc, edge_path)
     print("")
+    # WHY THE BROADCAST RATE IS NOT A CORRECTION RATE, AND THE TWO ARMS
+    # ARRIVE AT THAT FROM OPPOSITE DIRECTIONS. nav2_amcl re-sends this
+    # edge on every SCAN (15 Hz); slam_toolbox re-sends it on a TIMER
+    # (transform_publish_period, 50 Hz). Neither number counts
+    # corrections and the line below has to say which one it is printing,
+    # or a reader compares 15 with 50 and concludes something about the
+    # localisers.
     print("--- {} : what the correction COST - map -> odom jump "
           "statistics ---".format(profile))
-    print("  broadcasts      {} over {:.3f} s  ({:.2f} Hz - amcl re-sends "
-          "this edge on EVERY".format(
+    print("  broadcasts      {} over {:.3f} s  ({:.2f} Hz - the {} arm "
+          "re-sends this edge".format(
               jumps.samples, jumps.span_s,
               (jumps.samples - 1) / jumps.span_s if jumps.span_s else
-              float("nan")))
-    print("                  scan whether or not it corrected)")
+              float("nan"), localizer_of(loc)))
+    print("                  {}, whether or not it "
+          "corrected)".format(
+              "on a TIMER, transform_publish_period"
+              if localizer_of(loc) == cfg.s("localization.slam.label")
+              else "on EVERY SCAN"))
     if not jumps.n:
         print("  CORRECTIONS     0. The edge never changed: this "
               "localiser held the pose it")
@@ -2230,9 +2292,14 @@ def analyse_localization(cfg, path, profile, session, truth, fused,
               "not thousands.")
 
     # AND WHAT THE LOCALISER ITSELF SAID, WHICH IS NOT THE SAME STREAM.
-    # The edge above is what a consumer reads; this is what the particle
-    # filter believes, with its own covariance, published only when the
-    # filter UPDATES.
+    # The edge above is what a consumer reads; this is what the LOCALISER
+    # believes, with its own covariance, published only when it updated.
+    #   THE FILE KEEPS ITS NAME ON BOTH ARMS, which is `ekf_odom.csv`'s
+    #   rule (that stream is filled by a factor graph on the --fuse arm
+    #   and is still called ekf_odom): renaming a stream by arm would
+    #   make the two arms' sessions structurally different, and two
+    #   sessions that are not the same shape are not an A/B. The
+    #   session's own `loc=` line says which localiser filled it.
     pose_path = os.path.join(path, FILES["amcl_pose"])
     if os.path.isfile(pose_path):
         poses = table(pose_path, cfg, 1)
@@ -2246,10 +2313,23 @@ def analyse_localization(cfg, path, profile, session, truth, fused,
             rate = core.rate_from_stamps(stamps)
             print("                  {:.3f} Hz mean, longest gap "
                   "{:.3f} s".format(rate.hz_mean, rate.dt_max))
-            print("                  (it publishes when the particle "
-                  "filter RESAMPLES, which is")
-            print("                   after update_min_d of travel and "
-                  "not on a timer)")
+            # AND WHY IT PUBLISHES, WHICH IS ALSO NOT THE SAME. Both
+            # arms are TRAVEL-gated rather than timed, and that is the
+            # part worth saying twice - the gap column below is a
+            # property of the ROUTE and the speed, not of the localiser's
+            # health. What differs is the mechanism: amcl publishes when
+            # the particle filter RESAMPLES, slam_toolbox on every scan
+            # it PROCESSES.
+            if localizer_of(loc) == cfg.s("localization.slam.label"):
+                print("                  (it publishes on every scan it "
+                      "PROCESSES, which is after")
+                print("                   minimum_travel_distance of "
+                      "travel and not on a timer)")
+            else:
+                print("                  (it publishes when the particle "
+                      "filter RESAMPLES, which is")
+                print("                   after update_min_d of travel "
+                      "and not on a timer)")
         for axis, column in (("x", "cov_xx"), ("y", "cov_yy"),
                              ("yaw", "cov_yawyaw")):
             values = poses.column(column)
@@ -3006,6 +3086,21 @@ def analyse(cfg, args):
         fail(cfg, exc, cfg.s("map.dir"))
     print("  grid md5         {}  (verified against the committed "
           "registration)".format(_reg.get("map_md5", "?")))
+    # AND THE POSE GRAPH's, WHICH THE REGISTRATION DOES NOT CARRY. The
+    # slam arm opens the .posegraph and the .data and never the grid, so
+    # its label is an md5 of the graph and build.txt is where that hash
+    # is committed. It is printed on BOTH arms: the manifest is what says
+    # the two artifacts came out of one build, and a reader comparing the
+    # two arms' tables needs to see that they did.
+    try:
+        _build = map_register.load_build_manifest(
+            os.path.join(_common.REPO, cfg.s("map.dir"), cfg.s("map.name"),
+                         cfg.s("map.build_file")))
+    except (map_core.MapError, OSError) as exc:
+        fail(cfg, exc, cfg.s("map.build_file"))
+    print("  graph md5        {}  ({}, the same build)".format(
+        _build.get("md5_{}.posegraph".format(cfg.s("map.name")), "?"),
+        cfg.s("map.build_file")))
     print("  registration     theta {:+.9f} rad, t ({:+.6f}, {:+.6f}) m"
           .format(_reg["theta_rad"], _reg["t_x_m"], _reg["t_y_m"]))
     print("  INSTRUMENT FLOOR residual rms {:.4f} m, MAX {:.4f} m - NO "
@@ -3022,17 +3117,42 @@ def analyse(cfg, args):
     print("  out              {} -> {} on {} - the ONE edge this phase "
           "adds,".format(cfg.s("frames.map"), cfg.s("frames.odom"),
                          cfg.s("topics.tf")))
-    print("                   plus {} when the filter updates".format(
-        cfg.s("topics.amcl_pose")))
-    print("  seeded on        {} at bringup, from vehicle.spawn through "
-          "the registration".format(cfg.s("topics.initialpose")))
-    print("                   above. NOT a kidnapped-robot recovery: "
-          "both recovery alphas")
-    print("                   are zero and this arm tracks from a known "
-          "start.")
+    # AND THE LAST THREE ROWS ARE PRINTED FOR BOTH ARMS, WHICH IS WHAT
+    # THIS BLOCK IS. It is the CONFIGURATION read out of config.yaml, not
+    # a description of the set below it - the set says which arm it was
+    # on, once per session, on its own LOC line - and since F3 Task 3
+    # there are two localisers that differ in exactly the three things a
+    # reader would otherwise have to guess: where each publishes its own
+    # pose, how each is told where it starts, and which file decides what
+    # it does.
+    print("                   plus, on the {} arm, {} when the filter "
+          "updates".format(cfg.s("localization.amcl.label"),
+                           cfg.s("topics.amcl_pose")))
+    print("                   plus, on the {} arm, {} on every processed "
+          "scan".format(cfg.s("localization.slam.label"),
+                        cfg.s("topics.slam_pose")))
+    print("  seeded, {:<8} {} at bringup, from vehicle.spawn through the "
+          "registration".format(cfg.s("localization.amcl.label"),
+                                cfg.s("topics.initialpose")))
+    print("                   above - a MESSAGE, and this stack's "
+          "operator gesture")
+    print("  seeded, {:<8} map_start_pose, a PARAMETER read on the "
+          "configure transition,".format(cfg.s("localization.slam.label")))
+    print("                   from the same spawn pose through the same "
+          "registration.")
+    print("                   Nothing is published on {} on that "
+          "arm.".format(cfg.s("topics.initialpose")))
+    print("                   NEITHER IS A KIDNAPPED-ROBOT RECOVERY. Both "
+          "arms track from")
+    print("                   a known start and no figure below is "
+          "evidence they could not.")
     print("  what it does     {} - the motion model, the sensor model "
-          "and the".format(cfg.s("localization.params_file")))
+          "and the".format(cfg.s("localization.amcl.params_file")))
     print("                   argument for every value in both")
+    print("                   {} (the slam_loc: block) - the mode, the "
+          "travel".format(cfg.s("localization.slam.params_file")))
+    print("                   gates, the running scan and the loop "
+          "closure")
     # THE SAME CROSS-CHECK THE RATES GET, AND FOR THE SAME REASON. The
     # SDF decides where the IMU is bolted; config.yaml copies it because
     # a shell cannot read XML. A disagreement is a copy that has gone

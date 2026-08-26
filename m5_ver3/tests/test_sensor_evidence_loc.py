@@ -208,3 +208,66 @@ def test_the_refusal_prints_a_command_per_group():
             cfg, ["/e/one", "/e/two"], [_LOCALIZED, _PLAIN])
     text = "\n".join(cfg.lines)
     assert text.count("sensor_evidence.py analyse") == 2
+
+
+# ----------------------------------------------------------------------
+# TWO LOCALISERS, ONE FLAG - F3 Task 3
+# ----------------------------------------------------------------------
+#
+# The mix this section exists for is the one the whole task produces: an
+# `amcl` session and a `slam` session, taken on the same floor with the
+# same estimator against the same build of the same map, driving the same
+# profiles into CSVs of the same shape. NOTHING BUT THE LABEL CAN TELL
+# THEM APART, and a table with one of each in it would read as one
+# localiser with a wide spread rather than as the A/B it destroyed.
+
+_SLAM = dict(_BASE, loc="slam@4bb88852")
+
+
+def test_the_two_arms_labels_are_read_apart():
+    assert sensor_evidence.localizer_of("slam@4bb88852") == "slam"
+    assert sensor_evidence.map_md5_of("slam@4bb88852") == "4bb88852"
+    assert sensor_evidence.loc_of(_SLAM) != sensor_evidence.loc_of(_LOCALIZED)
+
+
+def test_an_amcl_session_and_a_slam_session_are_REFUSED_in_one_table():
+    cfg = _Cfg()
+    with pytest.raises(_Cfg.Refused):
+        sensor_evidence.refuse_mixed_loc(
+            cfg, ["/e/amcl_run", "/e/slam_run"], [_LOCALIZED, _SLAM])
+    text = "\n".join(cfg.lines)
+    assert "amcl@735cdbc6" in text and "slam@4bb88852" in text
+    assert "amcl_run" in text and "slam_run" in text
+
+
+def test_a_set_that_is_all_slam_is_not_refused():
+    cfg = _Cfg()
+    sensor_evidence.refuse_mixed_loc(cfg, ["a", "b", "c"],
+                                     [_SLAM, _SLAM, _SLAM])
+    assert cfg.lines == []
+
+
+def test_the_two_arms_are_uniform_in_TRACTION_and_ARM_and_still_a_mix():
+    # THE THIRD AXIS DOING THE WORK THE OTHER TWO CANNOT. Both sessions
+    # here are nominal and wheel+imu; the localiser is the only thing
+    # that differs and it is the only thing that would change the
+    # numbers.
+    cfg = _Cfg()
+    paths, sessions = ["a", "b"], [_LOCALIZED, _SLAM]
+    sensor_evidence.refuse_mixed_traction(cfg, paths, sessions)
+    sensor_evidence.refuse_mixed_arm(cfg, paths, sessions)
+    assert cfg.lines == []
+    with pytest.raises(_Cfg.Refused):
+        sensor_evidence.refuse_mixed_loc(cfg, paths, sessions)
+
+
+def test_the_md5_halves_of_the_two_arms_are_of_DIFFERENT_ARTIFACTS():
+    # They are not two hashes of one file that happen to differ: the
+    # amcl label carries the grid's and the slam label the pose graph's,
+    # out of one build (evidence_core.loc_md5_artifact). It is why
+    # `analyse` checks each against a different manifest.
+    import evidence_core as core
+    assert core.loc_md5_artifact(
+        sensor_evidence.localizer_of(_LOCALIZED["loc"])) == "grid"
+    assert core.loc_md5_artifact(
+        sensor_evidence.localizer_of(_SLAM["loc"])) == "posegraph"

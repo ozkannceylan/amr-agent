@@ -5,6 +5,7 @@ fits it, and whether the drive that made it fitted the floor.
     python3 m5_ver3/tools/map_register.py derive                 # print
     python3 m5_ver3/tools/map_register.py derive --write         # commit
     python3 m5_ver3/tools/map_register.py show
+    python3 m5_ver3/tools/map_register.py seed [--verbose]
     python3 m5_ver3/tools/map_register.py clearance <session>
     python3 m5_ver3/tools/map_register.py support   <session>
 
@@ -70,7 +71,13 @@ REQUIRED_KEYS = (
     "map.clearance.fore_m", "map.clearance.aft_m",
     "map.clearance.half_width_m",
     "evidence.dir", "evidence.analyse.max_pair_gap_s",
-    "vehicle.rear_axle_offset_m", "vehicle.spawn.yaw",
+    "vehicle.rear_axle_offset_m",
+    # THE SPAWN POSE, ALL THREE OF IT. `derive` reads the yaw alone (it
+    # is where the rotation search starts, because the map frame IS the
+    # odom frame and the odom frame is the vehicle at spawn); F3 Task
+    # 3's `seed` reads all three, because that is the pose a localiser
+    # is started at.
+    "vehicle.spawn.x", "vehicle.spawn.y", "vehicle.spawn.yaw",
     # F3 TASK 2's FOUR, read by `support` alone. They are listed
     # unconditionally, which is the safe direction: a key that a
     # subcommand does not reach costs one dict lookup at load, and a key
@@ -686,6 +693,99 @@ def load_registration(path, verify=True):
     return record
 
 
+def load_build_manifest(path):
+    """maps/<name>/build.txt, as a dict.
+
+    THE POSE GRAPH's HALF OF THE FREEZE, AND IT EXISTS BECAUSE THE
+    REGISTRATION CANNOT CARRY IT. registration.yaml states the md5 of the
+    .pgm it was FITTED TO and of the .yaml that grid's consumer reads,
+    and it says nothing at all about the .posegraph and .data - correctly,
+    because nav2_amcl never opens them. `--localize slam` opens exactly
+    those two and nothing else, so the artifact IT consumes needs a
+    committed hash of its own, and tools/build_map.sh has been writing
+    one into this file since F3 Task 1.
+      IT IS ALSO WHAT BINDS THE TWO ARMS TO ONE BUILD. The slam arm
+      localises in the graph and is scored through a registration fitted
+      to the grid; this manifest is the only place that says the two came
+      out of the same run.
+      THE GRAMMAR IS `key: value`, one per line, `#` for comments - the
+      same shape load_registration() reads, and deliberately not YAML:
+      what writes it is a shell script's `echo`s.
+    """
+    record = {}
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#") or ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            record[key.strip()] = value.strip()
+    if "name" not in record:
+        raise mc.MapError(
+            "{} carries no name: it is not a build manifest "
+            "tools/build_map.sh wrote".format(path))
+    return record
+
+
+def seed_pose(cfg):
+    """`vehicle.spawn`, in the MAP frame, through the committed
+    registration - and the registration verified on the way past.
+
+    ONE PIECE OF ARITHMETIC WITH TWO CALLERS, WHICH IS WHY IT IS HERE
+    RATHER THAN IN EITHER OF THEM. tools/localization_health.py needs it
+    to know what pose to compare a localiser's first answer against, and
+    `m5v3.sh start --localize slam` needs it because slam_toolbox's
+    localisation node takes its start pose as a PARAMETER on its command
+    line rather than as a message. Two copies of this would be two
+    spellings of where the vehicle is, and the failure would be silent on
+    both arms: a localiser seeded at one pose and gated against another
+    is a localiser that is refused for being right.
+
+    THE REGISTRATION IS VERIFIED HERE TOO, and that is not a duplicate of
+    the bringup's md5 check - it is the other half of it. `m5v3.sh`
+    hashes the grid and its yaml against the registration BEFORE it
+    starts anything; load_registration() hashes the grid again at the
+    moment the transform is USED. The first says nothing was started
+    against a stale map; the second says no NUMBER was produced through
+    one. F3 constraint 16 is both.
+
+    Returns (MapFrame, (x, y, yaw)).
+    """
+    path = os.path.join(_common.REPO, cfg.s("map.dir"), cfg.s("map.name"),
+                        cfg.s("map.registration.file"))
+    try:
+        record = load_registration(path)
+        frame = core.MapFrame.from_registration(record)
+    except (mc.MapError, core.EvidenceError) as exc:
+        cfg.refuse("the committed registration belongs to the grid on "
+                   "disk", path, str(exc))
+    return frame, frame.to_map(cfg.f("vehicle.spawn.x"),
+                               cfg.f("vehicle.spawn.y"),
+                               cfg.f("vehicle.spawn.yaw"))
+
+
+def cmd_seed(cfg, args):
+    """The seed, as three numbers a shell can read.
+
+    `m5v3.sh start --localize slam` reads this line and passes it as
+    `-p map_start_pose:=[x,y,yaw]`, which is how that node is told where
+    it starts. The default output is the bare triple precisely so that a
+    shell substitution cannot pick up a label by accident; --verbose is
+    for an operator.
+    """
+    frame, seed = seed_pose(cfg)
+    if args.verbose:
+        print("seed  map ({:+.6f}, {:+.6f}) yaw {:+.6f}".format(*seed))
+        print("      = world ({:+.3f}, {:+.3f}) yaw {:+.5f} through the "
+              "committed registration".format(
+                  cfg.f("vehicle.spawn.x"), cfg.f("vehicle.spawn.y"),
+                  cfg.f("vehicle.spawn.yaw")))
+        print("      {}".format(frame.floor()))
+        return 0
+    print("{:.9f} {:.9f} {:.9f}".format(*seed))
+    return 0
+
+
 def cmd_show(cfg, args):
     out_dir, _ = artifact(cfg, args.name)
     path = args.out or os.path.join(out_dir, cfg.s("map.registration.file"))
@@ -1030,6 +1130,16 @@ def main(argv=None):
         help="do not check the grid's md5. For inspecting a SUPERSEDED "
              "registration only.")
 
+    seed = subs.add_parser(
+        "seed",
+        help="vehicle.spawn in the MAP frame, through the committed "
+             "registration - the pose a localiser is started at")
+    seed.add_argument(
+        "--verbose", action="store_true",
+        help="print the world pose and the instrument floor beside it. "
+             "Without it the output is the bare `x y yaw` triple, which "
+             "is what `m5v3.sh start --localize slam` reads.")
+
     clear = subs.add_parser(
         "clearance",
         help="sweep a recorded drive's ground truth against the world's "
@@ -1073,6 +1183,8 @@ def main(argv=None):
         return cmd_derive(cfg, args)
     if args.command == "show":
         return cmd_show(cfg, args)
+    if args.command == "seed":
+        return cmd_seed(cfg, args)
     if args.command == "clearance":
         return cmd_clearance(cfg, args)
     if args.command == "support":

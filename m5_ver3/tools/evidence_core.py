@@ -715,6 +715,21 @@ def covariance_is_absent(text):
     return worst_covariance(text) == 0.0
 
 
+def covariance_absent_in(values):
+    """covariance_is_absent(), for a covariance already IN HAND.
+
+    THE SECOND GATE HOLDS A MESSAGE, which is require_worst_under()'s
+    reason word for word: tools/ekf_health.py shells out to `ros2 topic
+    echo` and parses text, tools/localization_health.py subscribes and
+    holds the 36 floats. The question is the same one and the answer is
+    read the same way - an all-zero matrix is ABSENT and not CERTAIN,
+    and a ceiling cannot fail against it, so a gate that did not ask
+    would report a pass it never tested.
+      AN EMPTY MATRIX RAISES HERE TOO, through worst_of().
+    """
+    return worst_of(values) == 0.0
+
+
 def position_of(text):
     """(x, y) out of the POSE of a nav_msgs/Odometry printed by
     `ros2 topic echo`.
@@ -937,6 +952,175 @@ def fused_topic_key(arm):
             "publish on and read an empty stream.".format(
                 text, estimator, known))
     return _FUSED_TOPIC_KEYS[estimator]
+
+
+# ----------------------------------------------------------------------
+# WHICH LOCALISER, AS A GRAMMAR OVER THE `loc=` LABEL
+# ----------------------------------------------------------------------
+#
+# F3 TASK 3 PUT A SECOND LOCALISER ON THIS TRACK AND IT IS
+# fused_topic_key()'s PROBLEM ONE LAYER UP. `m5v3.sh` writes
+# `<localiser>@<md5>` or the word `none`, and the two arms differ in two
+# things a downstream instrument cannot guess:
+#
+#   WHERE EACH ONE PUBLISHES ITS OWN POSE. nav2_amcl advertises
+#   `amcl_pose`; slam_toolbox's localisation node advertises `pose`. A
+#   recorder that subscribed to the other arm's address would not fail -
+#   it would record an EMPTY stream under a label naming a localiser that
+#   was publishing all along.
+#
+#   WHICH ARTIFACT THE md5 IN THE LABEL NAMES. AMCL localises in the
+#   GRID, whose md5 the committed registration carries; slam_toolbox
+#   localises in the POSE GRAPH, whose md5 is in the build manifest
+#   beside it. They are two files out of one build, and the label binds
+#   each arm to the one it actually opened (F3 constraint 16).
+#
+# AND A LOCALISER THIS FILE HAS NEVER HEARD OF IS A REFUSAL RATHER THAN A
+# DEFAULT, for fused_topic_key()'s reason exactly: a `.get()` with a
+# fallback here would put the failure one layer down, where no refusal
+# can see it. An arm added to m5v3.sh is an entry added to both tables.
+_LOC_POSE_TOPIC_KEYS = {
+    "amcl": "topics.amcl_pose",
+    "slam": "topics.slam_pose",
+}
+#: Which frozen artifact the md5 half of each arm's label is taken from.
+#: `grid` is the .pgm, hashed by the committed registration's `map_md5`;
+#: `posegraph` is the .posegraph, hashed by build.txt's own line. The
+#: VALUES are names this file owns and the CALLER turns into a file - the
+#: same split every other function here is under: no path lives in this
+#: module.
+_LOC_MD5_ARTIFACTS = {
+    "amcl": "grid",
+    "slam": "posegraph",
+}
+#: HOW EACH ARM IS TOLD WHERE IT STARTS, and it is a third table for the
+#: same reason the two above are tables: it is a property of the
+#: LOCALISER, the bringup gate has to know it, and getting it wrong is
+#: silent both ways.
+#:   `message`  nav2_amcl. It publishes on its pose topic when the
+#:              particle filter resamples OR when a publication is
+#:              FORCED, and what forces one is an initial pose - so with
+#:              the truck standing at spawn there is exactly one message
+#:              per seed, and the gate must subscribe BEFORE it seeds or
+#:              it will wait for a second that never comes.
+#:   `parameter` slam_toolbox's localisation node. `map_start_pose` is
+#:              read on the configure transition, before the gate exists.
+#:              That node DOES subscribe to the same initial-pose topic -
+#:              it is how a running localiser is re-placed - and THAT IS
+#:              EXACTLY WHY THE GATE MUST NOT PUBLISH ONE HERE: seeding
+#:              it would move the localiser to the pose the gate already
+#:              believes, and the gate's own pose-against-seed check
+#:              would then be a check on the gate. On this arm the check
+#:              is whether `map_start_pose` arrived at all.
+_LOC_SEED_MECHANISMS = {
+    "amcl": "message",
+    "slam": "parameter",
+}
+#: WHAT THE BRINGUP GATE CAN ACTUALLY READ ON EACH ARM, WITH THE TRUCK
+#: STANDING AT ITS SPAWN POSE - and this one is a MEASUREMENT rather than
+#: a preference (EVIDENCE_LOCALIZATION_V3.md 13.2).
+#:   `pose`  nav2_amcl. It publishes on its pose topic when the filter
+#:           resamples or when a publication is forced, and the seed
+#:           forces one - so there is exactly one message to read, it
+#:           carries a covariance, and BOTH checks can run on it.
+#:   `edge`  slam_toolbox's localisation node. Its pose topic is
+#:           TRAVEL-GATED: `minimum_travel_distance` is 0.25 m and
+#:           nothing has commanded the vehicle, so it publishes NOTHING
+#:           at rest - measured on this rig, 30 s of subscription with
+#:           the node ACTIVE, the graph deserialised and the sensor
+#:           registered. What it does publish from the moment it
+#:           activates is `map` -> `odom`, on a 50 Hz timer. So the gate
+#:           reads THE EDGE there: composed onto the estimator's
+#:           `odom` -> `base_link`, that is map -> base_link, which is
+#:           what a consumer of this stack reads anyway.
+#:           THE COST IS THE COVARIANCE CHECK, and it is stated rather
+#:           than papered over: a transform carries no covariance, so on
+#:           that arm only the pose-against-seed bound runs and the gate
+#:           SAYS SO. (That node's pose topic does carry a real
+#:           covariance once the truck moves - 0.033 m2 on the diagonal,
+#:           measured - which is why this is about WHEN it publishes and
+#:           not about what it publishes.)
+_LOC_GATE_SOURCES = {
+    "amcl": "pose",
+    "slam": "edge",
+}
+
+
+def localizer_of(label):
+    """The localiser half of a `loc=` label: the part before the `@`.
+
+    The grammar is `<localiser>@<artifact md5>` or the word `none`, and
+    it is PARSED rather than looked up so that a rebuilt map - which
+    changes the md5 and nothing else - does not need a table entry.
+    An empty string means "no absolute layer", which is a value.
+    """
+    text = str(label).strip()
+    if not text or text == "none":
+        return ""
+    return text.split("@", 1)[0].strip()
+
+
+def loc_md5_of(label):
+    """The artifact-md5 half of a `loc=` label: after the `@`, or ""."""
+    text = str(label).strip()
+    if "@" not in text:
+        return ""
+    return text.split("@", 1)[1].strip()
+
+
+def _loc_lookup(table, localizer, what):
+    name = str(localizer).strip()
+    if not name:
+        raise EvidenceError(
+            "the session or the running stack says which LOCALISER it is "
+            "on, and it said nothing. m5v3.sh writes a `loc=` line on "
+            "every bringup - `none` or `<localiser>@<md5>` - and this "
+            "mapping will not guess {} from an empty one.".format(what))
+    if name not in table:
+        raise EvidenceError(
+            "the localiser named by this loc= label has {} this file "
+            "knows about: {!r} is not one of {}. An arm added to m5v3.sh "
+            "is an entry added here - defaulting to the other arm's "
+            "answer would read an empty stream, or score a session "
+            "against an artifact it never opened.".format(
+                what, name, ", ".join(repr(k) for k in sorted(table))))
+    return table[name]
+
+
+def loc_pose_topic_key(localizer):
+    """The dotted config.yaml key naming the topic THIS localiser
+    publishes its own pose on.
+
+    Returns a KEY rather than a topic because this file reads no
+    config.yaml - the caller has the loaded config and this has the
+    mapping, which is fused_topic_key()'s split exactly.
+    """
+    return _loc_lookup(_LOC_POSE_TOPIC_KEYS, localizer, "a pose topic")
+
+
+def loc_md5_artifact(localizer):
+    """Which frozen artifact the md5 in THIS localiser's label is of:
+    `grid` (the .pgm, hashed by the registration) or `posegraph` (hashed
+    by the build manifest).
+    """
+    return _loc_lookup(_LOC_MD5_ARTIFACTS, localizer, "an artifact")
+
+
+def loc_seed_mechanism(localizer):
+    """How THIS localiser is told where it starts: `message` (published
+    on topics.initialpose by the bringup gate) or `parameter` (read off
+    its own command line on the configure transition).
+    """
+    return _loc_lookup(_LOC_SEED_MECHANISMS, localizer, "a seed mechanism")
+
+
+def loc_gate_source(localizer):
+    """What the bringup gate reads on THIS arm with the truck at rest:
+    `pose` (the localiser's own pose topic, covariance included) or
+    `edge` (`map` -> `odom` off /tf, composed onto the estimator's
+    `odom` -> `base_link`).
+    """
+    return _loc_lookup(_LOC_GATE_SOURCES, localizer, "a gate source")
 
 
 def parse_state_file(text):
@@ -2391,6 +2575,41 @@ def _selftest():
                   False)
     finally:
         os.remove(path)
+
+    # ---- F3 TASK 3's FOUR LOCALISER TABLES, ON THE RIG ----
+    #
+    # tests/test_localizer_arms.py is the real suite; these are the
+    # checks an operator standing in front of a stack that will not come
+    # up needs, and they are the ones a wrong answer is silent about: a
+    # recorder that subscribed to the other arm's pose topic writes an
+    # EMPTY stream under a label naming a localiser that was publishing
+    # all along, and a gate that seeded the wrong arm would be checking
+    # itself.
+    check("the two localisers do not publish their pose at one address",
+          loc_pose_topic_key("amcl") == "topics.amcl_pose"
+          and loc_pose_topic_key("slam") == "topics.slam_pose")
+    check("each arm's label md5 names the artifact THAT arm opens",
+          loc_md5_artifact("amcl") == "grid"
+          and loc_md5_artifact("slam") == "posegraph")
+    check("only the arm seeded by MESSAGE may be sent one",
+          loc_seed_mechanism("amcl") == "message"
+          and loc_seed_mechanism("slam") == "parameter")
+    check("the arm seeded by parameter is gated on the EDGE, not a pose",
+          loc_gate_source("slam") == "edge"
+          and loc_gate_source("amcl") == "pose")
+    for _table in (loc_pose_topic_key, loc_md5_artifact, loc_seed_mechanism,
+                   loc_gate_source):
+        try:
+            _table("cartographer")
+        except EvidenceError:
+            check("a localiser this file has never heard of is REFUSED "
+                  "by {}".format(_table.__name__), True)
+        else:
+            check("a localiser this file has never heard of is REFUSED "
+                  "by {}".format(_table.__name__), False)
+    check("36 zeros are an ABSENT covariance and not a certain one",
+          covariance_absent_in([0.0] * 36) is True
+          and covariance_absent_in([0.0] * 35 + [0.5]) is False)
 
     for name in ran:
         print("{}  {}".format("FAIL" if name in fails else "pass", name))
