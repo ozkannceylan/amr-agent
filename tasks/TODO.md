@@ -97,10 +97,26 @@ Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
       ofsetini ikinci kez ekliyordu. Doğrusu: yalnız link pozları
       -93.551, birleşik -97.151 kg m → N_drive 4537.4 N. Yani kullanılan
       sabit ZATEN birleşik olan ve DOĞRU. Park edilen bir şey yok.
-- [ ] F2. Füzyon katmanı: çift EKF (robot_localization; odom EKF =
+- [x] F2. Füzyon katmanı: çift EKF (robot_localization; odom EKF =
       teker+IMU+rf2o twist, map EKF = AMCL pozu); fuse (factor graph)
       paralel A/B kolu. Kanıt: WheelSlip senaryosunda EKF'li/EKF'siz
       sürüklenme, ground truth'a karşı.
+      YAPILAN (4 görev, 2026-08-26; kanıt m5_ver3/EVIDENCE_FUSION.md
+      §1-§11): odom-EKF gemide — teker twist [vx,vy,vyaw] + IMU [wz];
+      iki karar ölçümle tersindi (vy AÇILDI: d·yaw_rate gerçek sinyal,
+      corner_creep 1.06→0.19 m; ax DÜŞTÜ: tek çevrimde 5e-4→2.4e84
+      sessiz patlama, ortam-hızına bağlı, kalıcı çözüm KOVARYANS SAĞLIK
+      KAPISI — patlayan filtre start'ı isimli refusal'la düşürür).
+      --slippery çalışma-zamanı çekiş override'ı (model bayt-aynı) +
+      oturum etiketleme/karışım refusal'ı; ıslak zeminde jiroskop rotayı
+      kurtarıyor, mesafeyi kurtaramıyor (F3'e ölçülü devir: 11 m'de
+      +1.06 m along-track). rf2o kaynaktan pinli derlendi (--rf2o,
+      VARSAYILAN KAPALI: kuru yol hatası +4.2→+1.3% ama corner_creep
+      kötü, 11.6% çekirdek); fuse sudo'suz vendorlandı (--fuse,
+      VARSAYILAN KAPALI: doğruluk berabere, 3.5× CPU, 25× dürüst
+      gecikme). VARSAYILAN ESTIMATOR: robot_localization kalır. Map-EKF
+      (AMCL pozu) F3'e taşındı — harita olmadan skorlanamaz. Suite
+      82→239; faz-sonu dal incelemesi + tek düzeltme dalgası temiz.
 - [ ] F3. Harita + lokalizasyon: slam_toolbox offline haritası
       (warehouse_ver3, m5-08d yöntemi: kayıt→registration→mutlak skor);
       AMCL vs slam_toolbox localization A/B, aynı enstrüman tabanı.
