@@ -70,6 +70,16 @@ Neither value is overridable from the environment. They live in
 `config.yaml` and are read by `start`, `stop` and `status` alike, so the
 three cannot disagree about which graph this is.
 
+**And since F3 there is a THIRD graph, which is not a stack at all.**
+`tools/build_map.sh` replays a recorded bag into `slam_toolbox`, and that
+bag carries `/tf` — the EKF's `odom → base_link`. Replayed onto domain 97
+it would be a **second publisher of an edge that has exactly one owner**,
+and tf2 does not refuse that: it carries whichever message arrived last.
+So the offline replay lives on `isolation.map_ros_domain_id` (**98**),
+with no `GZ_PARTITION` at all because there is no simulator in it, and
+`build_map.sh` refuses if the two domain numbers are ever made equal. The
+live stack can be up or down; the replay cannot reach it either way.
+
 ### 2. The GPU is mandatory, and the refusal is the point
 
 Every launch exports
@@ -114,6 +124,10 @@ m5_ver3/
 │                         §11: a SECOND ESTIMATOR - fuse's factor graph -
 │                         on the same inputs, and the A/B that decided
 │                         which one ships
+├── EVIDENCE_MAP_V3.md    F3 Task 1's: the commissioning drive, the
+│                         offline SLAM run that consumed it, the wall fit
+│                         against warehouse_ver3's TRUE geometry, and the
+│                         absolutely-scored map that came out
 ├── config.yaml           every constant the scripts obey - the one home
 ├── ekf.yaml              what the FILTER fuses and what it refuses. A ROS
 │                         parameter file, which config.yaml is not and may
@@ -125,6 +139,14 @@ m5_ver3/
 │                         and it is ekf.yaml's split applied to the second
 │                         estimator. Read only by --fuse; on that arm
 │                         ekf.yaml is not read at all
+├── slam.yaml             what the MAPPER does, and ekf.yaml's split a
+│                         third time. Read only by tools/build_map.sh,
+│                         never by anything the live stack runs
+├── maps/
+│   └── warehouse_v3/     THE FROZEN MAP. grid (.pgm + .yaml), pose graph
+│                         (.posegraph + .data), build.txt and the
+│                         committed registration.yaml. A rebuild is a NEW
+│                         directory and never an overwrite
 ├── m5v3.sh               start [--headless] [--slippery] [--rf2o|--fuse]
 │                         | stop | status
 ├── gazebo/
@@ -155,7 +177,13 @@ m5_ver3/
     │                     bounded read at bringup; m5v3.sh refuses on it
     ├── drive_route.py    drive one of config.yaml's profiles, open loop
     ├── evidence_core.py  the arithmetic behind EVIDENCE_SENSORS.md
-    └── sensor_evidence.py  record (needs ROS) | analyse (needs nothing)
+    ├── sensor_evidence.py  record (needs ROS) | analyse (needs nothing)
+    ├── build_map.sh      the OFFLINE slam run: a recorded bag, a mapper
+    │                     and two transforms, on a ROS domain of its own
+    ├── map_core.py       the arithmetic behind EVIDENCE_MAP_V3.md - the
+    │                     grid, the wall fit, the rigid transform and the
+    │                     world's own rectangles. --selftest
+    └── map_register.py   derive | show | clearance. Needs nothing
 ```
 
 **`config.yaml` is the one home for every constant.** No behavioural
@@ -212,9 +240,12 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 | `tools/install_rf2o.sh` | Builds `rf2o_laser_odometry` from source, at `config.yaml`'s **pinned commit**, into a colcon workspace under `$HOME`. No sudo at any point, idempotent, refuses by name, and writes a manifest of what it fetched beside the build. Run once; `start --rf2o` refuses by name if it has not been. |
 | `tools/install_fuse.sh` | Fetches the nine `fuse` packages at `config.yaml`'s **pinned versions** and unpacks them into a prefix under `$HOME`. `apt-get download` + `dpkg-deb -x`, never `apt-get install`: the packages are in the Jazzy archive and this rig has no sudo. Idempotent through a probe that loads a `fuse_models` plugin, refuses by name, `ldd`-checks what it unpacked, and writes a manifest beside the tree. Run once; `start --fuse` refuses by name if it has not been. |
 | `tools/ekf_health.py` | One bounded read of **the ACTIVE arm's** output, and a refusal if its covariance is over `ekf.startup_check.covariance_max`. It reads the `arm=` line `start` has already written and picks the topic from it (`evidence_core.fused_topic_key`), so one gate covers both estimators. **`start` runs it for you** — it exists because `ekf_node` can diverge during its first cycles and stay ALIVE, at rate, saying nothing (`EVIDENCE_FUSION.md` §8.6, §9). On the `--fuse` arm the first messages carry a covariance of 36 zeros, which no ceiling can fail, so there it gates on the **pose** against `evidence.analyse.fused_sanity_m` instead and prints which check it ran (§11.2c). |
-| `tools/drive_route.py <profile>` | Drives one of `config.yaml`'s profiles — `straight`, `square`, `aisle`, `corner_creep` — open loop, on the plant's own clock. It drives; it records nothing. |
-| `tools/sensor_evidence.py record --static\|--drive P` | Captures one run into `logs/evidence/<session>/`: one headered CSV per stream. `--drive` starts `drive_route.py` itself, so one command is one complete run. It stamps the session with **which plant it was taken on** and refuses if the stack cannot say, and it refuses **before the drive** if the filter has already diverged. Needs ROS. |
+| `tools/drive_route.py <profile>` | Drives one of `config.yaml`'s profiles — `straight`, `square`, `aisle`, `corner_creep`, `mapping` — open loop, on the plant's own clock. It drives; it records nothing. **`mapping` is F3's and is not a bench manoeuvre**: 227.0 m over the whole of `m6/ipc/route.py`'s road graph, nine 90° corners, 774.7 s, at one speed from end to end, so an offline SLAM run has a recording to build a map from. |
+| `tools/sensor_evidence.py record --static\|--drive P [--bag]` | Captures one run into `logs/evidence/<session>/`: one headered CSV per stream. `--drive` starts `drive_route.py` itself, so one command is one complete run. It stamps the session with **which plant it was taken on** and refuses if the stack cannot say, and it refuses **before the drive** if the filter has already diverged. `--bag` ALSO writes a rosbag2 of `/clock`, the nav scan and `/tf` into the same session — the container an OFFLINE consumer needs, off by default because nothing in EVIDENCE_SENSORS or EVIDENCE_FUSION reads it. Needs ROS. |
 | `tools/sensor_evidence.py analyse [session…]` | Every table in `EVIDENCE_SENSORS.md` and `EVIDENCE_FUSION.md`, from those CSVs — including the EKF scored against the same truth as the raw estimate, and the two subtracted. **Needs no ROS and no Gazebo** — it runs on the Windows python. |
+| `tools/build_map.sh <session>` | **The map, built OFFLINE from a recording and frozen.** `slam_toolbox`'s sync node reads a bag `record --bag` wrote — no world, no truck, no live anything — and the products are `maps/<name>/<name>.{pgm,yaml,posegraph,data}` plus a `build.txt` of md5s. It runs on `isolation.map_ros_domain_id` and **refuses if that equals the live domain**, because the bag carries `/tf` and a replay on the live graph would be a second publisher of `odom → base_link`. It **refuses an output directory that already exists**: a rebuild is a new artifact, never an overwrite. |
+| `tools/map_register.py derive [--write]` | Fits the map's walls to `warehouse_ver3`'s TRUE geometry, prints **the instrument floor first**, then the ABSOLUTE score — spans measured inside the map against the world's own dimensions, which no registration can flatter. `--write` commits `registration.yaml`; without it nothing is written. Needs nothing. |
+| `tools/map_register.py clearance <session>` | Sweeps a recorded drive's **ground truth** along the world's own obstacle rectangles and reports the worst gap and what it was to. It is the measurement `config.yaml`'s corridor arithmetic is a prediction of. |
 
 `start` exits **non-zero** if any child died during startup, naming the
 child and its log; what survived is left running, because the operator's
@@ -426,6 +457,27 @@ truck's forks 0.875 m inside a rack leg: that pose belongs to
 forks reach `x = -1.875` in its own frame, and *that* number — not the
 look of the floor plan — is what a candidate pose has to clear.
 `EVIDENCE_BRINGUP.md` 7 carries the whole measurement.
+
+**F3's map is FROZEN, and the freeze is a mechanism rather than a
+promise.** `maps/warehouse_v3/` holds a grid, a pose graph, a `build.txt`
+naming the session and the parameters it came from, and a
+`registration.yaml` that carries the **md5 of the .pgm it was fitted to**.
+`map_register.load_registration()` refuses a registration whose grid has
+changed underneath it, and `build_map.sh` refuses to write into a
+directory that already exists — so a rebuilt map is a new artifact under
+a new name, and nothing downstream can carry the old rotation across it.
+A rebuilt map has its own rotation from the building; that is the whole
+reason, and `EVIDENCE_MAP_V3.md` is where the two are compared if there
+is ever a second.
+
+**The map is built from the REAL sensor chain and the REAL estimate, and
+the ground truth is not in the bag.** What `slam_toolbox` corrects is
+F2's EKF — which drifts 9.86 m of position and 23.4° of heading over the
+225.0 m of the mapping drive — off the TiM571-profile nav lidar with its
+noise and its per-run bias draw. `/forklift/gz/odom` is deliberately
+absent from `evidence.bag.topics`: it is a measurement reference (F2
+global constraint 13) and a bag that carried it into a SLAM run would be
+one careless remap away from being the thing the map was built on.
 
 **DDS discovery on this rig has failed before.** Mid-session on
 2026-08-25 the WSL multicast path died and FastDDS discovery went with it;

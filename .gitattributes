@@ -37,4 +37,9 @@
 # The pose graph exists so mapping can resume rather than restart, so silent
 # corruption would be discovered only at the run that needed it.
 *.posegraph -text
-sim/maps/**/*.data -text
+# The .data half was path-scoped to sim/maps/ and F3's map lives in
+# m5_ver3/maps/, where it fell back on the heuristic the rule above
+# exists to distrust. It is scoped by EXTENSION now, for the reason the
+# posegraph rule beside it gives: the two files are one artifact and a
+# rule that covers one of them is a rule that covers neither.
+*.data -text
