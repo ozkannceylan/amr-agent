@@ -116,6 +116,15 @@ REQUIRED_KEYS = (
     "frames.odom", "frames.base_link", "frames.imu",
     "vehicle.imu_mount.x", "vehicle.imu_mount.y", "vehicle.imu_mount.z",
     "ekf.frequency_hz", "ekf.params_file", "fuse.params_file",
+    # ekf.rf2o_params_file IS READ BY analyse's settings block and was
+    # listed by NEITHER tuple until F2 Task 4's second audit. It is the
+    # item T3's report ledgered, and the first audit MISSED IT INSIDE
+    # THE FILE IT WAS AUDITING - the sweep matched cfg.f()/cfg.s() calls
+    # and this one is inside a .format() argument on a continuation
+    # line, so a regex that stopped at the call boundary never saw it.
+    # A sweep is not a proof; what makes this tuple right is that every
+    # key is refused by its DOTTED name before a subscription is made.
+    "ekf.rf2o_params_file",
     "world.file", "vehicle.model", "vehicle.name",
     "vehicle.spawn.x", "vehicle.spawn.y", "vehicle.spawn.yaw",
     "vehicle.wheelbase_m", "vehicle.wheel_radius_m",

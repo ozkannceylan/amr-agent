@@ -1632,7 +1632,7 @@ its own refusal, naming the topic.
 
 | | Result |
 |---|---|
-| shipping filter, healthy | `ekf: healthy, worst covariance 0.22464 against a ceiling of 100` — bringup continues, exit 0 |
+| shipping filter, healthy | `ekf: healthy, worst covariance 0.22464 against a ceiling of 100` — bringup continues, exit 0. **[F2 Task 4] the line now ends `  (/m5v3/odometry/filtered)`**: the gate picks its topic by arm and says which it read (§11.2c). The check, the ceiling and the figure are unchanged. |
 | ceiling temporarily lowered to 0.001, real message from a real filter | `ekf_health: REFUSED at check 'the filter came up without diverging'` … *"the largest entry is 0.1116"*, then `m5v3: REFUSED at check 'the filter came up sane, and not merely alive'`, `THE STACK IS INCOMPLETE`, **exit 1** — and `status` still reports **6 alive, 0 dead**, which is the whole point |
 | a captured diverged message (5.74e87 / −5.08e91) | refused by `evidence_core.require_covariance_under()` in the suite, no simulator |
 | an **empty** read | refused, not passed as "covariance 0, healthy" — a gate that failed open on a silent topic would fail open on exactly the case it exists for |
@@ -2044,7 +2044,9 @@ arguments:
 ```
 
 **§9.4's covariance gate still gates the start with the arm live.** Every
-bringup in this section ran it: `ekf: healthy, worst covariance 0.0942 –
+bringup in this section ran it (**[F2 Task 4] the line now ends
+`  (/m5v3/odometry/filtered)`** — see §11.2c; the check and the ceiling
+are unchanged): `ekf: healthy, worst covariance 0.0942 –
 0.20604 against a ceiling of 100`, the same band as §9.4's measured
 0.08244 – 0.22776, and it **refused** bringups in this section too — see
 §10.7.
@@ -2691,9 +2693,21 @@ has commanded the truck. Both lines are printed verbatim:
 ```
 
 **The other arm is untouched by this.** On `robot_localization`'s arm
-`covariance_is_absent()` is false, the branch is not taken, and the
-check, the ceiling and the printed line are character for character what
-§9.4 and §10 measured — which §11.3's OFF-path row shows.
+`covariance_is_absent()` is false, the branch is not taken, and **the
+check and the ceiling are §9.4's** — which §11.3's OFF-path row shows.
+  **The printed LINE is not §9.4's, and the first draft of this
+  paragraph said it was.** Both branches now append the topic they read:
+
+```
+  ekf: healthy, worst covariance 0.10968 against a ceiling of 100  (/m5v3/odometry/filtered)
+                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^ new
+```
+
+A gate that picks its topic by arm has to say which one it picked, so
+the suffix is deliberate; what it is not is unchanged output. §9.4's and
+§10.3's quoted lines predate it and are annotated there. The FIGURE and
+the ceiling either side of the suffix are §9.4's, and those are what a
+reader compares.
 
 **And the covariance the smoother does publish is real and grows at the
 process noise.** Read off a stack that had been standing at spawn for
@@ -2759,7 +2773,7 @@ was vendored and wired:**
 | the filter's command line | dumped from `/proc/<pid>/cmdline`: **one** `--params-file`, `m5_ver3/ekf.yaml`, no `odom1`, no `fuse` anything — character for character §9.3's and §10.3's |
 | `fuse.yaml` | never named on any command line, never read |
 | the vendored prefix | never on `LD_LIBRARY_PATH` or `AMENT_PREFIX_PATH` of any child — it is passed through `env` on the fuse child's own command line and never exported |
-| the health gate | `ekf: healthy, worst covariance 0.10812 against a ceiling of 100  (/m5v3/odometry/filtered)` — the **covariance** branch, §9.4's line, §9.4's topic |
+| the health gate | `ekf: healthy, worst covariance 0.10812 against a ceiling of 100  (/m5v3/odometry/filtered)` — the **covariance** branch, §9.4's check, ceiling and topic, with the topic now appended to the line |
 
 That last row is the one that had to be checked rather than reasoned
 about. §11.2(c) grew the gate a second instrument for an arm that
@@ -2767,7 +2781,9 @@ publishes no covariance, and the risk of a fallback is that it starts
 firing on the arm it was not written for. It does not: on
 `robot_localization`'s arm `covariance_is_absent()` is false on every
 bringup of this section, the fallback branch is unreachable, and the
-line printed is the one §9.4 and §10.3 quote.
+check, the ceiling and the reading are §9.4's — **with the topic now
+appended to the line**, which §11.2(c) shows and §9.4 and §10.3 are
+annotated for.
 
 **The arm's OFF-ness is structural in three independent places**, which
 is `ekf_rf2o.yaml`-as-a-separate-file's argument applied one level up:
@@ -2874,6 +2890,17 @@ cancel in the comparison. Over the eight sessions of each arm:
 |---|---|---|---|---|---|
 | `wheel+imu` (§9.3's eight sessions, re-read) | 16 765 | **+1.46 ms** | +1.42 | +1.90 | +168.06 |
 | `fuse:wheel+imu` (this section's eight) | 16 765 | **−0.62 ms** | −0.70 | +0.54 | +6.09 |
+
+**THE TWO `n` COLUMNS ARE THE SAME NUMBER AND THAT IS A COINCIDENCE, not
+a copied figure.** There is no truncation and no pairing of session
+against session: **every fused row in every session** is matched to the
+newest `wheel_odom` row whose stamp is `≤` its own, and the only rows
+dropped are any fused rows stamped before the first wheel-odometry row
+arrived. The per-session counts differ between the arms exactly as the
+delivered-rate table says they do — `2022, 2010, 2027, 2569, 1558, 2012,
+2012, 2555` on the filter against `2015, 2014, 2013, 2555, 1568, 2014,
+2008, 2578` on the smoother — and both happen to total **16 765**. The
+figure was checked by re-adding the columns rather than trusted.
 
 **A NEGATIVE latency is not a fast estimator — it is a stamp written
 ahead of the information in it.** `fuse.yaml` sets the publisher's
@@ -3058,17 +3085,45 @@ filter removed 69.7 – 70.1 % and the smoother 69.2 % on one run and
 **90.2 % on the other** — which is **above** the filter's best observed
 value on the shipping configuration.
 
-**That one run is a draw and not a result, and it is worth saying why
-rather than dropping it.** How much of the cross-track error the gyro
-removes is not a coin toss between two outcomes: it is a continuous
-function of how nearly the run's gyro-bias draw cancels the wheel
-odometry's heading error. `…144023` drew one that cancelled −0.0579 rad
-down to −0.0166 — a 71.3 % heading removal, against §9.3's best of
-62.7 % and §8.5's `ax`-fused wet best of **71.5 %** (`…110416`), which is
-the same number on the *other* arm. With five straights per arm, one run
-at the top of a continuous range is what a wide distribution looks like,
-not a difference between estimators; the honest statement is the one
-§9.3 already made about `square` — **two samples cannot separate two
+**That one run is a draw and not a result, and there is a sixth sample
+to say so with.** How much of the cross-track error the gyro removes is
+not a coin toss between two outcomes: it is a continuous function of how
+nearly the run's gyro-bias draw cancels the wheel odometry's heading
+error. `…144023` drew one that cancelled −0.0579 rad down to −0.0166 — a
+71.3 % heading removal, against §9.3's best of 62.7 % and §8.5's
+`ax`-fused wet best of **71.5 %** (`…110416`), which is the same number
+on the *other* arm.
+
+**And the excluded session is evidence here, which is the one place it
+is.** `…142326` is excluded from every table for a reason that has
+nothing to do with its data — its BRINGUP GATE crashed while the stack
+itself was healthy (§11.7) — so its CSVs are as good as any and it is a
+third opposing draw on this arm. Read off them: raw cross-track
+**−0.3202 m → −0.1078 m**, **66.3 % removed**, heading −0.0576 →
+−0.0230 rad (**60.1 %**), end error 1.0993 → 1.0616 m (**3.4 %**). So
+the six opposing draws this track has recorded, both arms and both
+`ax` settings, are:
+
+| session | arm | plant | cross-track removed |
+|---|---|---|---|
+| `…113330` | `wheel+imu` | dry | +70.1 % |
+| `…113435` | `wheel+imu` | dry | +69.7 % |
+| `…110416` | `wheel+imu`, `ax` fused (§8.5) | wet | +71.5 % |
+| `…142221` | **`fuse`** | wet | +69.2 % |
+| `…142326` | **`fuse`** (excluded elsewhere) | wet | **+66.3 %** |
+| `…144023` | **`fuse`** | wet | **+90.2 %** |
+
+**What this settles:** the smoother's opposing draws are not shifted as a
+group. Two of its three sit at 66.3 % and 69.2 %, straddling the filter's
+69.7 – 71.5 %, so **+90.2 % is an outlier inside this arm's own three
+runs and not the level the arm operates at** — which is what the row
+would have implied on two samples.
+**What it does not settle:** whether the smoother has a heavier upper
+tail. One run in three at +90.2 % is a real tail or a lucky draw, and
+n = 3 per arm cannot tell those apart. Separating them needs a batch
+sized for the distribution rather than for the profile set, and that is
+not what §11's eight-session shape is. The honest statement is §9.3's,
+about `square`, applied here: **a handful of samples cannot separate two
 arms on a figure this spread.**
   (The `end removed` column splits by PLANT and not by arm — on the wet
   plant the along-track error dominates the endpoint, so a cross-track
@@ -3139,7 +3194,7 @@ the `ax` reversal was measured on it.
 |---|---|---|---|
 | end error removed, the matched wet `square` | **15.55 %** | **15.56 %** | tie |
 | heading removed, same pair | **17.25 %** | **17.14 %** | tie |
-| cross-track removed, opposing bias draw | +69.7 … +70.1 % | +69.2 %, +90.2 % | tie — see §11.5 on the second one |
+| cross-track removed, opposing bias draw | +69.7 … +71.5 % (3 runs) | +66.3 %, +69.2 %, +90.2 % (3 runs) | tie — two straddle the filter's band; §11.5 on the third |
 | cross-track removed, adding bias draw | −22.8 … −30.7 % | −23.7 … −26.6 % | tie |
 | along-track removed, `straight` | ±1.0 % | ±0.6 % | tie (both nothing) |
 | `corner_creep` end error removed | 22.2 % | 23.7 % | tie |
@@ -3147,7 +3202,7 @@ the `ax` reversal was measured on it.
 | **path error passed through** | +4.22 → **+4.22 %** | +4.22 → **+4.33 %** | **EKF** |
 | **output jitter, `straight`** | **0.0 mm** | **27.8 mm** | **EKF** |
 | **output jitter, `square`** | 27.9 mm (chord) | **478.8 / 516.0 mm** | **EKF** |
-| **latency, stamp → arrival** | **+1.46 ms** median | **+37.47 ms** honest / −0.63 ms stamped | **EKF, by ~26×** |
+| **latency, stamp → arrival** | **+1.46 ms** median | **+37.47 ms** honest / −0.62 ms stamped | **EKF, by ~26×** |
 | **CPU, one core** | **10.36 %** at rest, 10.62 % driving | **36.51 %** at rest, 38.56 % driving | **EKF, by 3.5×** |
 | delivered rate | 50.0000 Hz sim, `dt_max` 0.024 | 50.0000 Hz sim, `dt_max` 0.032 | tie |
 | real-time factor | 1.0019 / 0.9999 | 0.9994 / 0.9999 | tie |
@@ -3181,7 +3236,7 @@ handed a problem on which they are the same estimator.
 2. **26× the latency, and the default configuration hides it.**
    37.5 ms median against 1.46 ms, because the output is one optimisation
    period behind the graph. `predict_to_current_time: true` makes the
-   number *look* better than the filter's (−0.63 ms — a stamp written
+   number *look* better than the filter's (−0.62 ms — a stamp written
    ahead of its own information) and pays for it with **28 mm of jitter
    on a straight line and half a metre on a square**. That trade is not
    free and neither side of it is good.
@@ -3255,10 +3310,14 @@ why:**
   bringup on it; the stack itself was healthy (six children alive,
   `record`'s own `filter sane at spawn` check passed) and the session's
   figures agree with its two neighbours to **0.5 mm** of raw end error.
-  It is excluded anyway, and `drive-straight-20260826-144023` was
-  recorded to replace it on a clean bringup with the fixed gate. The bug
-  and the fix are in §11.2(c)'s note and the refusal it produces now is
-  quoted below.
+  It is excluded from every table anyway, and
+  `drive-straight-20260826-144023` was recorded to replace it on a clean
+  bringup with the fixed gate. The bug and the fix are in §11.2(c)'s note
+  and the refusal it produces now is quoted below.
+  **Its data is used in exactly one place**: §11.5 quotes its cross-track
+  figure as the sixth opposing gyro-bias draw, because the question there
+  is what this arm's spread looks like and a session whose only defect was
+  in its GATE is a legitimate sample of that.
 * `drive-straight-20260826-143221` — the `predict_to_current_time: false`
   **diagnostic** of §11.4. It came off a differently-configured filter
   wearing the same `arm=` string, which is exactly the hole §10.7 named
@@ -3294,6 +3353,30 @@ argued:**
 | `the factor graph fuses no pose and no acceleration` | `position_dimensions: [x]` added to a sensor | quoted the offending line **with its line number**, nothing started |
 | `the read off … carried a message to check` | gate run against a stopped stack | quoted what `ros2 topic echo` returned, **exit 1** |
 | `every session in this analyse is off the SAME estimator arm` | one §9.3 session + one `fuse:` session | named both groups and both commands, **exit 1** |
+
+**And an audit of the REQUIRED_KEYS tuples, which found four and missed
+one of them on the first pass.** Every script on this track lists EVERY
+config key it reads, checked by its DOTTED name before anything starts,
+so that a `config.yaml` which parses but has been reorganised is refused
+by the key an operator has to go and edit rather than dying halfway
+through a table. Sweeping each tuple against the `cfg.f()`/`cfg.s()` and
+`$CFG_*` uses in its own file found **three keys missing from
+`tools/sensor_evidence.py`** — `evidence.corner.slew_in_s`, `.exit_s` and
+`.split_min_deficit`, read by `print_scrub_split()` and
+`print_corner_table()` since F1.5.
+
+**The first sweep then missed a fourth key in the file it was auditing**,
+and that is worth more than the three it found. `ekf.rf2o_params_file` is
+read at `analyse`'s settings block **inside a `.format()` argument on a
+continuation line**, and a regex anchored on the call boundary never saw
+it — it is the item §10.7 ledgered, and the audit written to close it
+walked past it. It is listed now. **A sweep is not a proof**: what makes
+these tuples right is the refusal by dotted name at load, and what makes
+them complete is somebody reading them.
+
+`m5v3.sh`, `tools/install_fuse.sh`, `tools/install_rf2o.sh` and
+`tools/ekf_health.py` came back clean on the same sweep, with the caveat
+above attached to that word.
 
 **The suite**, extended again:
 

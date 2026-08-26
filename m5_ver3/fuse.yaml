@@ -226,6 +226,28 @@ m5v3_fuse:
     # +0.005 rad steer zero offset, its +1.5 % rolling-radius error and
     # whatever the physics engine's wheel slip did to it.
     #
+    # IT IS Odometry2D AND THE TASK BRIEF RULED Twist2D, SO THE REASON
+    # LIVES HERE RATHER THAN ONLY IN A REPORT.
+    #   Twist2D subscribes to geometry_msgs/TwistWithCovarianceStamped
+    #   (fuse_models/twist_2d.hpp:46, 102, 140) and topics.wheel_odom is
+    #   a nav_msgs/Odometry. The ruling named a sensor model and a topic
+    #   that cannot be connected to each other.
+    #   HONOURING THE SENSOR MODEL WOULD HAVE COST A RELAY - a fourth
+    #   child, republishing this exact stream as a TwistWithCovariance
+    #   - and it would have stood in the FUSE arm's input path while the
+    #   EKF arm had nothing there. The one thing EVIDENCE_FUSION.md 11
+    #   is for is a comparison whose only difference is the estimator,
+    #   and a process on one side of it is a difference.
+    #   SO: Odometry2D on the same topic, the same message and the same
+    #   instants ekf.yaml's odom0 reads, with the pose refused by the
+    #   ABSENCE of position_dimensions and orientation_dimensions below.
+    #   What Twist2D would have given for free - a sensor with no pose
+    #   channel to refuse - is bought instead by m5v3.sh's
+    #   check_fuse_params(), which refuses the bringup if either key
+    #   ever appears; and that check is STRONGER than Twist2D, because
+    #   it also guards linear_acceleration_dimensions, which Twist2D
+    #   would have left to the IMU block alone.
+    #
     # THE TWIST IS FUSED AND THE POSE IS NOT, AND HERE THAT IS SAID BY AN
     # ABSENCE - WHICH IS WHY m5v3.sh CHECKS FOR IT.
     #   ekf.yaml refuses the pose with six `false` entries in a

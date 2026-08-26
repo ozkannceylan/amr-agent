@@ -199,9 +199,17 @@ def main(argv=None):
     #   instruments draw the line in the same place.
     #   THE ARM WITH A COVARIANCE IS UNTOUCHED BY THIS. On
     #   robot_localization's arm covariance_is_absent() is false, this
-    #   branch is not taken, and the check, the ceiling and the printed
-    #   line are character for character what EVIDENCE_FUSION.md 9.4 and
-    #   10 measured.
+    #   branch is not taken, and the CHECK and the CEILING are what
+    #   EVIDENCE_FUSION.md 9.4 and 10 measured.
+    #     THE PRINTED LINE IS NOT CHARACTER FOR CHARACTER 9.4's, AND
+    #     SAYING SO COST A CORRECTION. Both branches now append the
+    #     topic - "  (/m5v3/odometry/filtered)" - because a gate that
+    #     picks its topic by arm has to say which one it read, and a
+    #     comment claiming the output was unchanged would have been the
+    #     kind of stale line 9.3's own settings block was written to
+    #     stop. The FIGURE and the ceiling either side of it are 9.4's;
+    #     the suffix is new and 9.4 and 10.3 are annotated where they
+    #     quote the old form.
     #   AND THE CLASSIFICATION ITSELF IS INSIDE A REFUSAL, because it
     #   can fail. covariance_is_absent() delegates its parse to
     #   worst_covariance(), which RAISES on a read with no covariance in
