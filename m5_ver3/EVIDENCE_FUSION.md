@@ -2408,3 +2408,960 @@ backwards produces a plausible number on every profile.
   did not move.
 - **It did not measure `aisle`**, or a `--static` capture on the shipping
   covariance, or the arm at any other lidar rate.
+
+## 11. The factor-graph arm — a different estimator, the same inputs, and which one ships (F2 Task 4)
+
+**`fuse` against `robot_localization`, on one plant, with every other
+variable held.** `robot_localization`'s `ekf_node` carries one state and
+one covariance forward and linearises each measurement once, about
+whatever the estimate happened to be when it arrived. `fuse` keeps every
+measurement inside a sliding window as a **factor in a graph** and
+re-solves the whole window with Ceres on every pass, so every variable in
+the window is **re-linearised** each time. What that is supposed to buy
+on a vehicle like this one is the corner: a yaw estimate that was wrong
+when the first samples of a turn were linearised gets corrected
+retrospectively rather than only going forward. This section is whether
+it does.
+
+> **EVERY FIGURE IN §11 IS OFF A DIFFERENT ESTIMATOR FROM EVERY FIGURE
+> ABOVE IT — AND A DIFFERENT ONE FROM §10's, TOO.** `m5v3.sh start
+> --fuse` runs `fuse`'s fixed-lag smoother **INSTEAD OF** `ekf_node`;
+> the `ekf` child is not spawned at all. It is labelled by the chain §8
+> and §10 built: `start` writes `arm=fuse:wheel+imu` to
+> `paths.traction_file`, `status` prints it, `record` copies it into
+> every `session.txt` and **refuses to record without it**, and
+> `analyse` **refuses a set of sessions that mixes the arms**, naming
+> both groups. §9.3's eight sessions carry no `arm=` line at all and are
+> reported as *"unrecorded (session predates F2 Task 3's arm label)"* —
+> which is what the mixed-arm refusal printed when it was run against
+> one of each, exit **1**.
+>
+> **The label puts the ESTIMATOR in front of the colon**, which the two
+> older labels do not have. `wheel+imu` and `wheel+imu+rf2o` name two
+> SENSOR SETS on an estimator that was never in question because there
+> was only ever one. This arm varies the other term — the same three
+> wheel-odometry channels and the same one gyro channel, through a
+> different estimator — so it reads `fuse:wheel+imu`, and `wheel+imu`
+> beside it reads as the A/B it is: the same right-hand side, a
+> different left-hand one. It is **not** `wheel+imu+fuse`, which would
+> put the estimator in the slot the other labels reserve for a sensor.
+
+**Why the A/B is worth anything: the two arms fuse the same things.**
+Same two topics (`/m5v3/wheel_odom` twist and `/forklift/gz/imu`), same
+three velocity channels off the first (`vx`, `vy`, `vyaw`) and the same
+one off the second (yaw rate, no `ax` — §9's reversal carried across),
+same message covariances (`robot_localization` and `fuse` both read the
+weighting out of the message, so the blend is `config.yaml`'s measured
+`wheel_odom.covariance` and `model.sdf`'s declared gyro sigma on **both**
+arms), same frames, same 50 Hz output, same `odom → base_link`. The
+process noise is the same too, and that took an argument — see §11.5's
+first paragraph.
+
+---
+
+### 11.1 Vendoring nine packages without root
+
+**The packages exist; the permission does not.** Unlike §10's `rf2o` —
+which is in no ROS archive for any distribution and had to be built from
+source — every package this arm needs is in the Jazzy archive this rig is
+already configured for. What this rig has is **no sudo** (F2 constraint
+14, verified), so `apt-get install` is not available and neither is
+anything that writes under `/opt` or `/usr`.
+`m6/tools/install_broker.sh` is this repository's precedent for the way
+out and `tools/install_fuse.sh` is that shape with
+`tools/install_rf2o.sh`'s discipline: every constant from `config.yaml`,
+a refusal by name for every way it can fail, idempotence through a
+**behavioural** probe, and a manifest beside the tree.
+
+**Nine packages, pinned to the exact `.deb` version every figure below
+was measured on:**
+
+| package | version |
+|---|---|
+| `ros-jazzy-fuse-msgs` | `1.1.5-1noble.20260615.111618` |
+| `ros-jazzy-fuse-core` | `1.1.5-1noble.20260615.142407` |
+| `ros-jazzy-fuse-variables` | `1.1.5-1noble.20260615.155054` |
+| `ros-jazzy-fuse-graphs` | `1.1.5-1noble.20260615.154436` |
+| `ros-jazzy-fuse-constraints` | `1.1.5-1noble.20260615.155948` |
+| `ros-jazzy-fuse-publishers` | `1.1.5-1noble.20260615.155943` |
+| `ros-jazzy-fuse-optimizers` | `1.1.5-1noble.20260615.161308` |
+| `ros-jazzy-fuse-models` | `1.1.5-1noble.20260615.161302` |
+| `ros-jazzy-tf2-2d` | `1.4.1-1noble.20260615.153930` |
+
+**Nine and not six hundred and fifty-four.** `apt-cache depends
+--recurse --no-recommends --no-suggests --no-conflicts --no-breaks
+--no-replaces --no-enhances --important` over the seven `fuse-*` packages
+names **654** distinct packages, because it follows every *alternative*
+of every `Depends` line — six versions of `flang`, five of `gcc`, three
+DDS implementations nothing here uses. Asked per package with
+`dpkg-query -W` against what is installed, the genuinely missing set is
+the eight `fuse-*` packages plus `tf2_2d`. **Everything else the
+`Depends` lines name was already on this rig**, and it was checked rather
+than assumed:
+
+| runtime dependency | version already installed here |
+|---|---|
+| `libceres4t64` | 2.2.0+dfsg-4.1ubuntu2 |
+| `libcholmod5`, `libccolamd3`, `libcamd3`, `libamd3`, `libcolamd3`, `libspqr4`, `libcxsparse4`, `libsuitesparseconfig7` | 1:7.6.1+dfsg-1build1 |
+| `libgoogle-glog0v6t64` | 0.6.0-2.1build1 |
+| `libboost-serialization1.83.0` | 1.83.0-2.1ubuntu3.2 |
+| `liborocos-kdl1.5` | 1.5.1-4build1 |
+| `libtinyxml2-10` | 10.0.0+dfsg-2 |
+| `libconsole-bridge1.0` | 1.0.1+dfsg2-3build1 |
+| `ros-jazzy-diagnostic-updater`, `-pluginlib`, `-rclcpp-components`, `-tf2-ros`, `-tf2-geometry-msgs`, `-nav-msgs`, `-sensor-msgs`, `-std-srvs`, `-fastcdr` | the rig's Jazzy install |
+
+**The `-dev` packages are deliberately not vendored.**
+`ros-jazzy-fuse-core` `Depends` on `libceres-dev`, `libboost-all-dev`,
+`libeigen3-dev` and `libgoogle-glog-dev` — build dependencies that ROS's
+packaging promotes to runtime `Depends`. `dpkg-deb -x` runs **no
+dependency resolution at all**, and a node that is already linked needs
+headers from none of them; vendoring them would be fetching hundreds of
+megabytes to satisfy a checker that is not running.
+
+**So the real dependency check is `ldd`, and it is run.** With
+`LD_LIBRARY_PATH` set to exactly what `m5v3.sh` hands the child,
+`ldd .../fixed_lag_smoother_node` reports **no unresolved object**. That
+check is in the script, and its refusal lists the sonames it could not
+find — because that is the message that tells the next operator what to
+add to `fuse.packages`.
+
+**The plumbing, which is the only interesting part.** A ROS `.deb`'s
+payload is rooted at `/opt/ros/jazzy`, so `dpkg-deb -x pkg.deb $prefix`
+produces `$prefix/opt/ros/jazzy/{lib,share,include}` and **two** search
+paths have to name that directory:
+
+* `LD_LIBRARY_PATH` — for `libfuse_core.so` and the eight beside it. The
+  executable is linked by SONAME with no RPATH reaching outside
+  `/opt/ros/jazzy`.
+* `AMENT_PREFIX_PATH` — for everything `pluginlib` does. `fuse` loads its
+  motion models, sensor models and publishers as pluginlib classes, and
+  pluginlib does **not** search the loader path: it asks the ament index
+  for the `fuse_core__pluginlib__plugin` resource, reads the owning
+  package's `package.xml` out of `<prefix>/share`, and only then
+  `dlopen()`s the library. **With the loader path alone the node starts
+  and loads no plugin at all.**
+
+Both are built by `tools/_common.sh`'s `fuse_paths()` / `fuse_env()` —
+one mechanism, read by the installer and by the launcher, because two
+copies of path arithmetic drift the way two copies of a list did. No
+`PYTHONPATH`: `fuse_msgs` ships python bindings and nothing on this track
+imports them.
+  **`m5v3.sh` passes them through `env` on the child's own command line
+  and never exports them**, so no other child on the stack — the gz GUI
+  client in particular — inherits a loader path it has no business with.
+
+**Measured, on this rig:**
+
+| | |
+|---|---|
+| clean vendor, nine packages | **12.2 s** wall, 2884 kB fetched, **21 MB** unpacked |
+| a second run | **0.9 s**, `already installed`, nothing fetched |
+| `sudo` invocations | **zero**, and none attempted |
+| dpkg database | **untouched** — `dpkg-deb -x` writes no state |
+| anything under `/opt` or `/usr` | **untouched** |
+
+**The idempotence test is behavioural and it has to be.** The executable
+is present the moment the *first* deb is unpacked, and every way this
+install can be half done — a missing shared object, a `share/` tree the
+ament index cannot see, one deb fetched and the next one not — leaves a
+binary that starts and then cannot load `fuse_models`. So the probe runs
+a self-contained parameter file whose ignition sensor and publisher are
+**both** `fuse_models` plugins and reads back the one line that only
+exists on the far side of pluginlib having resolved them, `dlopen()`ed
+them and run their `onInit`:
+
+```
+Received a set_pose request (stamp: 1787745217945164449, x: 0, y: 0, yaw: 0)
+```
+
+The probe runs under a node name of its own (**not** `fuse.node_name`),
+with `publish_tf` **false** and a topic nothing subscribes to, because
+this script is quoted in `m5v3.sh`'s own refusal and is therefore run by
+people checking whether they need to run it — which is a thing done with
+the stack up. A health check that broadcast `odom → base_link` onto a
+live stack would be the one edge this track guards most, broken by a
+probe.
+---
+
+### 11.2 What `fuse` actually does on this plant — five things, measured
+
+**None of the five is in its documentation and three of them changed a
+file in this tree.** §10.1 is the same paragraph about `rf2o`; the habit
+is the point.
+
+#### (a) A parameter file addressed to the wrong node does NOT throw — it comes up with NO SENSORS AT ALL
+
+The first cut of `fuse.yaml`'s header said this node "fails LOUDER than
+`ekf_node` does — `topic` is a required parameter on every sensor here,
+so a misaddressed file aborts at load rather than coming up on
+defaults." **That is false, and it was falsified by accident**, while
+running a second copy of the node under a different name to probe
+something else: pointed at `fuse.yaml` (top-level key `m5v3_fuse:`) but
+renamed to `m5v3_fuse_probe2`, it started, printed
+
+```
+[INFO] [...] [m5v3_fuse_probe2]: No ignition sensors were specified. Optimization will begin immediately.
+```
+
+and then did nothing at all — **no sensor models, no motion model, no
+publisher, and no topic advertised.** There is no required parameter to
+miss because there is no sensor declared to require it. `status` would
+read ALIVE.
+
+**So the coupling is checked and not written down.** `m5v3.sh`'s
+`check_fuse_params()` greps the file for `config.yaml`'s
+`fuse.node_name` before anything starts and refuses by name with the
+top-level keys the file *does* define — which is exactly
+`check_ekf_params()`'s argument, arrived at independently on the other
+estimator, and `tests/test_fuse_arm.py` asserts the same coupling where
+`pytest` can see it.
+
+#### (b) The way to refuse a channel is for the key NOT TO EXIST, and an absence is not a mechanism
+
+`robot_localization` refuses a pose with six `false` entries in an array
+that is always fifteen long, so `ekf.yaml` can **say** its refusal.
+`fuse`'s sensor models take **lists of dimension names**, and the way to
+fuse no position and no orientation is for `position_dimensions` and
+`orientation_dimensions` not to be there. An empty YAML list is not a
+substitute — measured:
+
+```
+terminate called after throwing an instance of 'rclcpp::exceptions::InvalidParameterValueException'
+  what():  parameter_value_from failed for parameter
+           'wheel_odometry_sensor.position_dimensions': No parameter value set
+```
+
+`rclcpp` cannot infer a type for `[]`, and the node aborts at load. The
+header comment in `fuse_models/parameters/parameter_base.hpp` says it
+outright: *"a vector with the dimension indices, that would be empty if
+the parameter does not exist"*.
+
+**A refusal that is an absence is one careless line from being
+reversed**, so `check_fuse_params()` refuses the bringup if
+`position_dimensions`, `orientation_dimensions` or
+`linear_acceleration_dimensions` appears in `fuse.yaml` at all, and
+`tests/test_fuse_arm.py` asserts the same three. The first two are F2
+global constraint 13. The third is **§9's `ax` reversal carried across**,
+and it is the one a future editor is most likely to add back because it
+looks like free information — the same 0.50 m lever arm would land the
+centripetal term on exactly that axis here as it does there.
+  **It is refused on the ARCHITECTURE half of §9's argument and not on
+  the divergence half.** "`vx` is measured directly at 500 Hz, so an
+  accelerometer is a redundant predictor between corrections 2 ms apart"
+  is a claim about the inputs and holds whatever reads them. "It diverges
+  `ekf_node` at startup" is a claim about `robot_localization`, and
+  claiming it about this node would need re-measuring on this node.
+
+#### (c) The first messages after a bringup carry a covariance of 36 zeros — which is the window the health gate reads in
+
+`fuse_models::Odometry2DPublisher` fills the pose **and** twist
+covariances of the messages it publishes before its first covariance
+solve with zeros, and says nothing about it. Measured over a 30 s window
+opened at bringup: **2 of the first 1451 messages carried an all-zero
+pose covariance and 1449 carried a real one (99.9 %)** — and the two
+zeros were **the first two received.**
+
+That is a small window and the bringup gate reads inside it. §9.4's
+`tools/ekf_health.py` takes **one** `ros2 topic echo --once`, which
+subscribes and returns the first message it gets, and across the
+bringups of this section it landed on a zero-covariance message **on
+most of them** (the printed lines are in §11.7). **A zero covariance is
+under every ceiling**, so on those bringups §9.4's check could not have
+failed — and a gate that cannot fail is worse than no gate, because the
+line it prints is read as an answer.
+
+**So the gate grew a second instrument, and it says which one it used.**
+`evidence_core.covariance_is_absent()` reads an all-zero matrix as
+**ABSENT rather than CERTAIN** — §10.1(b)'s ruling about `rf2o`'s 36
+zeros, one level up — and on such a message the gate checks the **POSE**
+against `evidence.analyse.fused_sanity_m` (100 m) instead, with
+`evidence_core.require_not_diverged()`, which is the same bound and the
+same arithmetic `analyse` refuses a diverged session's fused figures
+with. The ambiguity `ekf_health`'s own docstring rejects the pose for —
+*"the truck could legitimately have been driven"* — does not exist there:
+this runs from `m5v3.sh start`, seconds after the spawn, before anything
+has commanded the truck. Both lines are printed verbatim:
+
+```
+  ekf: healthy, worst covariance 0.20436 against a ceiling of 100  (/m5v3/fuse/odometry/filtered)
+
+  ekf: healthy, pose 4.47472e-17 m from the odom origin against a bound of 100  (/m5v3/fuse/odometry/filtered)
+       THIS ARM PUBLISHES NO COVARIANCE (36 zeros, measured - EVIDENCE_FUSION.md 11.2),
+       so the covariance ceiling was NOT the check. The pose was.
+```
+
+**The other arm is untouched by this.** On `robot_localization`'s arm
+`covariance_is_absent()` is false, the branch is not taken, and the
+check, the ceiling and the printed line are character for character what
+§9.4 and §10 measured — which §11.3's OFF-path row shows.
+
+**And the covariance the smoother does publish is real and grows at the
+process noise.** Read off a stack that had been standing at spawn for
+about six minutes: worst entry **19.0084**, against `0.05 /s × ≈ 380 s =
+19`, which is `unicycle_motion_model`'s `process_noise_diagonal[0]`
+integrating with nothing observing position. That is the same behaviour
+`config.yaml`'s `ekf.startup_check.covariance_max` note describes for the
+other arm and the same reason its ceiling is 100 and not 1.
+
+#### (d) Nothing in this package defaults to a ground-truth topic — and that was checked, not assumed
+
+§10 had to argue `rf2o` out of one: its `init_pose_from_topic` defaults
+to `/base_pose_ground_truth`, so an estimator on this stack would have
+subscribed to a ground-truth pose with nobody having asked for it (F2
+global constraint 13, broken by a default). Every default in the whole
+vendored include tree was checked for the same trap:
+
+```
+$ grep -rn 'ground_truth\|base_pose' ~/m5v3_fuse_prefix/opt/ros/jazzy/include/
+(no output)
+```
+
+The one pose-shaped input this node has is
+`fuse_models::Unicycle2DIgnition`'s `set_pose` topic and its two
+services — a **manual initialisation interface**, with no publisher and
+no caller anywhere on this stack. It is named explicitly in `fuse.yaml`
+rather than left to a default anyway, because §10's lesson is that an
+estimator's pose-shaped inputs get spelled out on this track.
+
+#### (e) It aborts on SIGTERM, and `m5v3.sh stop` is what sends one
+
+On shutdown the node throws out of its own destructor path:
+
+```
+terminate called after throwing an instance of 'rclcpp::exceptions::RCLError'
+  what():  failed to create guard condition: the given context is not valid,
+           either rcl_init() was not called or rcl_shutdown() was called.,
+           at ./src/rcl/guard_condition.c:67
+```
+
+**It is a shutdown-only fault and nothing on this track reads it.** The
+process is being killed; `stop` sweeps by pattern and by partition and
+does not consult exit statuses, no evidence session is open, and the
+`--once` reads that gate a bringup are long finished. It is recorded here
+because a stack trace in `logs/fuse.log` after a clean `stop` is exactly
+the kind of thing that costs somebody an hour six months from now, and
+because it is the one thing in this section that would matter if this arm
+ever shipped ON: a node that cannot exit cleanly is a node whose last
+window of measurements is not flushed.
+---
+
+### 11.3 The default stack is not merely equivalent to §9.3's — it is the same
+
+**`start` without `--fuse` was verified inert, on the rig, after the arm
+was vendored and wired:**
+
+| check | result |
+|---|---|
+| children | **6 alive, 0 dead** — `world bridge imgbridge odom imutf ekf`. No `fuse`. |
+| `status` | `arm  wheel+imu  m5_ver3/ekf.yaml alone (no --rf2o, no --fuse)` |
+| fuse topics on the graph | `ros2 topic list \| grep -i "fuse\|rf2o"` → **nothing** |
+| `fixed_lag_smoother_node` processes | `pgrep -af fixed_lag_smoother_node` → **none** |
+| the filter's command line | dumped from `/proc/<pid>/cmdline`: **one** `--params-file`, `m5_ver3/ekf.yaml`, no `odom1`, no `fuse` anything — character for character §9.3's and §10.3's |
+| `fuse.yaml` | never named on any command line, never read |
+| the vendored prefix | never on `LD_LIBRARY_PATH` or `AMENT_PREFIX_PATH` of any child — it is passed through `env` on the fuse child's own command line and never exported |
+| the health gate | `ekf: healthy, worst covariance 0.10812 against a ceiling of 100  (/m5v3/odometry/filtered)` — the **covariance** branch, §9.4's line, §9.4's topic |
+
+That last row is the one that had to be checked rather than reasoned
+about. §11.2(c) grew the gate a second instrument for an arm that
+publishes no covariance, and the risk of a fallback is that it starts
+firing on the arm it was not written for. It does not: on
+`robot_localization`'s arm `covariance_is_absent()` is false on every
+bringup of this section, the fallback branch is unreachable, and the
+line printed is the one §9.4 and §10.3 quote.
+
+**The arm's OFF-ness is structural in three independent places**, which
+is `ekf_rf2o.yaml`-as-a-separate-file's argument applied one level up:
+
+* the `fuse` child is inside `if [ "$FUSE" = true ]`, in the **`else`
+  branch of which** the `ekf` spawn is unchanged;
+* `fuse.yaml` is a file `m5v3.sh` names nowhere else, so the OFF path
+  cannot reach it by a typo in the ON path's block;
+* the vendored prefix is not on any search path unless the flag was
+  given, so a rig that has run `install_fuse.sh` and a rig that has not
+  bring up an identical default stack.
+
+**The two estimator flags refuse each other, by name, before anything is
+read:**
+
+```
+$ bash m5_ver3/m5v3.sh start --rf2o --fuse
+m5v3: REFUSED at check 'exactly one estimator arm was asked for'
+      owned by: m5_ver3/m5v3.sh (the start flags) and .../config.yaml (fuse:, rf2o:)
+      --rf2o and --fuse are both ESTIMATOR flags and they are
+      alternatives, not layers. --rf2o adds a third SENSOR to
+      robot_localization's filter; --fuse replaces that filter
+      with a factor graph. Together they would put two
+      publishers on odom -> base_link,
+      and tf2 would carry whichever arrived last.
+      NOTHING WAS STARTED. Pick one:
+        m5_ver3/m5v3.sh start --headless --rf2o     # the laser-odometry arm
+        m5_ver3/m5v3.sh start --headless --fuse     # the factor-graph arm
+      (--slippery and --headless combine with either.)
+$ echo $?
+1
+```
+
+**One TF authority at a time, and it is enforced by not spawning the
+other one.** `tf2` has no notion of two authorities for one edge — every
+listener simply reads whichever transform arrived last — so two
+estimators broadcasting `odom → base_link` at 50 Hz would not produce a
+three-sensor estimate, it would produce a coin toss. The `--fuse` arm's
+`Odometry2DPublisher` has `publish_tf: true` **because `ekf_node` is not
+running**; `install_fuse.sh`'s probe, which can be run while the stack is
+up, has `publish_tf: false` for the same reason from the other side.
+---
+
+### 11.4 What the arm costs this rig — CPU, latency, jitter, delivered rate
+
+**The instrument is `/proc/<pid>/stat` fields 14 and 15** — `utime` and
+`stime`, the process's own accumulated user and system CPU time in clock
+ticks (`getconf CLK_TCK` = 100 here) — read before and after a bounded
+interval and differenced, which is §10.4's instrument unchanged. **`ros2
+run` forks the executable**, so the pid `m5v3.sh` records for `ekf` is an
+idle python wrapper and the real child is found by pattern and filtered
+by `GZ_PARTITION`; the `fuse` child is spawned by absolute path through
+`env` and does not fork, so its pidfile entry *is* the worker.
+`m5_ver3/logs/cpu_probe.sh` is the bench (under `logs/`, git-ignored,
+like the batch runners — not a committed tool).
+
+**Both arms, back to back on one rig session, 2026-08-26 14:24–14:31:**
+
+| process | `wheel+imu` at rest, 60.014 s | **`fuse:wheel+imu` at rest, 60.014 s** | `wheel+imu` driving a `square`, 35.014 s | **`fuse:wheel+imu` driving, 35.010 s** |
+|---|---|---|---|---|
+| **the estimator** | `ekf_node` 6.220 s — **10.36 %** | `fixed_lag_smoother_node` 21.910 s — **36.51 %** | 3.720 s — **10.62 %** | 13.500 s — **38.56 %** |
+| `wheel_odometry.py` | 15.900 s — 26.49 % | 17.110 s — 28.51 % | 9.380 s — 26.79 % | 10.120 s — 28.91 % |
+| `parameter_bridge` | 8.670 s — 14.45 % | 8.960 s — 14.93 % | 5.120 s — 14.62 % | 5.340 s — 15.25 % |
+| `image_bridge` | 1.680 s — 2.80 % | 1.690 s — 2.82 % | 0.970 s — 2.77 % | 0.980 s — 2.80 % |
+| gz server (`world`) | 46.170 s — 76.93 % | 47.120 s — 78.52 % | 29.080 s — 83.05 % | 29.780 s — 85.06 % |
+
+**The estimator costs 3.5× what the filter costs: +26.15 pp at rest,
++27.94 pp driving.** That is one Ceres solve over a 0.5 s window, 20
+times a second, against a 15×15 matrix update 50 times a second, and the
+ratio is what a factor graph costs by construction rather than a defect.
+For scale: 36.51 % of one core is **1.83 % of this 20-thread machine**,
+against `rf2o`'s whole arm at 0.58 % (§10.4). **It is still not visible in
+the real-time factor**, `tools/rtf_probe.sh`, 30 s, 296 samples each, back
+to back:
+
+| | mean RTF | median | floor | ceiling |
+|---|---|---|---|---|
+| `wheel+imu` | 1.0019 | 0.9999 | 0.9506 | 1.6884 |
+| `fuse:wheel+imu` | 0.9994 | 0.9999 | 0.9436 | 1.0314 |
+
+**And the estimator's own cost RISES with the motion where the filter's
+does not** — 36.51 → 38.56 % against 10.36 → 10.62 %. A Ceres solve over
+a window in which the state is actually moving takes more iterations to
+converge; an EKF's arithmetic is the same whatever the numbers are.
+
+#### Latency, and the reason there are two answers
+
+**The instrument is the recorder's own two clocks.**
+`tools/sensor_evidence.py` stamps every row with both the message's
+sim-time header stamp (`t_sim`) and the wall clock of the moment **it**
+received the message (`t_wall`, one `time.time()`, one process, every
+stream). So for information stamped at sim time *t*:
+
+```
+    t_wall of the FUSED row carrying stamp t
+  − t_wall of the newest wheel_odom row whose stamp is ≤ t
+```
+
+is the wall time the estimator took to turn that input into an output,
+plus two deliveries into the recorder that are identical on both arms and
+cancel in the comparison. Over the eight sessions of each arm:
+
+| arm | n | median | mean | p95 | max |
+|---|---|---|---|---|---|
+| `wheel+imu` (§9.3's eight sessions, re-read) | 16 765 | **+1.46 ms** | +1.42 | +1.90 | +168.06 |
+| `fuse:wheel+imu` (this section's eight) | 16 765 | **−0.62 ms** | −0.70 | +0.54 | +6.09 |
+
+**A NEGATIVE latency is not a fast estimator — it is a stamp written
+ahead of the information in it.** `fuse.yaml` sets the publisher's
+`predict_to_current_time: true`, which stamps the output at *now* and
+propagates the last **solved** state forward with the motion model. So
+the message stamped *t* leaves the node before the wheel-odometry sample
+stamped *t* has even reached the recorder, and what it contains is an
+extrapolation from a solve up to one optimisation period old.
+
+**Measured, by turning that one parameter off** (one diagnostic session,
+`drive-straight-20260826-143221`, named and excluded from every table in
+§11.5):
+
+| | `predict_to_current_time: true` | **`false`** | `wheel+imu` |
+|---|---|---|---|
+| stamp → arrival, median | −0.62 ms | **+37.47 ms** | +1.46 ms |
+| p95 | +0.54 ms | **+58.27 ms** | +1.90 ms |
+| distinct output stamps, `dt_med` | 0.020 s | **0.050 s** | 0.020 s |
+| path over the run, 1× vs 25× decimation | 12.0976 → 12.0698 m | **12.0955 → 12.0939 m** | 12.1205 → 12.1205 m |
+| **jitter (1× − 25×)** | **27.8 mm** | **1.7 mm** | **0.0 mm** |
+| path error | +4.22 → **+4.33 %** | +4.22 → **+4.24 %** | +4.22 → **+4.22 %** |
+| end error | 0.6281 / 0.6250 / 0.6224 m | 0.6206 m | — |
+
+**So the honest latency of this arm is 37.5 ms median, 58.3 ms p95 —
+about 26× the filter's — and `predict_to_current_time` does not remove
+it, it HIDES it and charges jitter for the hiding.** 37.5 ms is 0.75 of
+the 50 ms optimisation period, which is exactly what republishing a
+20 Hz solve at 50 Hz gives; and with the parameter off the fused stream's
+*distinct* stamps step in 50 ms, so its information rate is the
+optimisation rate and not the publication rate.
+
+#### The jitter, which is the one accuracy figure that is not a wash
+
+A path length summed over consecutive samples counts every wobble twice,
+so summing the same path after **decimating** the stream separates a
+longer *route* from a shakier one: a real detour survives decimation and
+sample-to-sample jitter does not.
+
+| profile | arm | 1× (m) | 5× (m) | 25× (m) | **1× − 25×** |
+|---|---|---|---|---|---|
+| `straight` dry | `wheel+imu` | 12.1205 | 12.1205 | 12.1205 | **0.0 mm** |
+| | **`fuse`** | 12.0976 | 12.0705 | 12.0698 | **27.8 mm** |
+| `square` dry | `wheel+imu` | 8.2498 | 8.2484 | 8.2220 | 27.9 mm |
+| | **`fuse`** | 8.7314 | 8.3088 | 8.2526 | **478.8 mm** |
+| `corner_creep` | `wheel+imu` | 4.2732 | 4.2728 | 4.2688 | 4.4 mm |
+| | **`fuse`** | 4.4522 | 4.2838 | 4.2670 | **185.2 mm** |
+| `square` wet | `wheel+imu` | 8.2549 | 8.2534 | 8.2262 | 28.7 mm |
+| | **`fuse`** | 8.7758 | 8.3405 | 8.2598 | **516.0 mm** |
+
+The filter's few tens of millimetres on the turning profiles are the
+geometric chord effect — a curve is shorter across 25 samples than along
+them — and the straight line's is **exactly zero**. The smoother's is
+**28 mm on a straight line and 0.45 – 0.52 m on a square**, and it
+collapses to 1.7 mm with `predict_to_current_time` off. It is the
+sawtooth of extrapolate-then-correct: every solve moves the state under
+an output that has been running ahead of it.
+  **It is invisible in the end-error tables and it matters to a
+  controller.** Nothing in §11.5 moves because of it — an endpoint does
+  not care how shakily it was reached — but anything downstream that
+  DIFFERENTIATES this pose, which is what a path-follower does, sees
+  half a metre of phantom motion per square.
+
+#### Delivered rate: both arms hold 50 Hz
+
+| | samples | hz_sim | hz_wall | dt_med | dt_max |
+|---|---|---|---|---|---|
+| `wheel+imu`, `straight` | 2022 | 50.0000 | 50.1688 | 0.020 | 0.024 |
+| `fuse`, `straight` | 2015 | 50.0000 | 49.9967 | 0.020 | 0.032 |
+| `wheel+imu`, `square` | 2569 | 50.0000 | 50.2564 | 0.020 | 0.022 |
+| `fuse`, `square` | 2555 | 49.9961 | 49.9790 | 0.020 | 0.030 |
+
+**No message is dropped on either arm** and the sim-time rate is the
+configured one to four decimals. The smoother's `dt_max` is 8–10 ms
+longer, which is one publish period of slack around a solve.
+---
+
+### 11.5 The A/B — does the factor graph estimate better?
+
+**The `wheel+imu` columns are §9.3's eight sessions and were NOT re-run;
+they are re-read off their own CSVs by the same `analyse`.** The
+`fuse:wheel+imu` columns are eight fresh sessions on the same profiles,
+the same two plants, one bringup per drive, taken 2026-08-26 14:16–14:25.
+Three further sessions — a validation run on a stale stack, one whose
+bringup gate raised instead of answering, and the
+`predict_to_current_time` diagnostic — are **excluded from every table
+here** and each is named, with its reason, in §11.7.
+
+**One knob had to be set, and it was set to the other arm's default.**
+`ekf.yaml` leaves `process_noise_covariance` at `robot_localization`'s
+shipped diagonal on purpose — §"the two knobs a drift figure is most
+easily flattered with" — which means the EKF arm's process noise is
+nobody's opinion. `fuse`'s `Unicycle2D` has **no default**: it reads
+`process_noise_diagonal` and will not start without one. So the honest
+way to hold that variable across the A/B was to hand this arm the *same
+numbers*, read off this rig's own
+`/opt/ros/jazzy/share/robot_localization/params/ekf.yaml` and projected
+onto the 8-element 2D state — `[0.05, 0.05, 0.06, 0.025, 0.025, 0.02,
+0.01, 0.01]`, and `tests/test_fuse_arm.py` pins them against that source.
+Likewise the ignition prior: `robot_localization`'s default
+`initial_estimate_covariance` is 1e-9 as a **variance** and `fuse` takes a
+**sigma**, so `fuse.yaml` carries `sqrt(1e-9) = 3.16227766e-05` rather
+than `fuse`'s own 1e-9 sigma, which would have been a prior a billion
+times tighter than the arm it is compared with.
+  **The same numbers are not provably the same weighting**, and that is
+  the honest limit of the control: `robot_localization` scales its Q by
+  `dt` and adds it after each predict, `fuse`'s `Unicycle2D` builds a
+  per-segment covariance from these values and the segment's duration,
+  and the two need not agree term for term. What **is** controlled is
+  that neither arm's process noise was tuned for this vehicle — which is
+  what would have turned this into a comparison of two tuning efforts.
+
+#### The control first: the raw wheel odometry did not move
+
+An estimator must not be able to reach the estimator that feeds it. §3.0,
+§9.3 and §10.5 all made this check; it is made again across the swap:
+
+| profile | plant | figure | `wheel+imu` (§9.3) | **`fuse:wheel+imu`** | verdict |
+|---|---|---|---|---|---|
+| `straight` | dry | raw end error | 0.5807 – 0.5821 m | **0.5793 – 0.5803 m** | inside, spread **2.8 mm** over all six |
+| | | raw path error | +4.22 % ×3 | **+4.22, +4.22, +4.23 %** | inside |
+| | | raw end heading | −0.0577 … −0.0578 rad | **−0.0575 … −0.0576** | inside |
+| `straight` | wet | raw end error | 1.1040 – 1.1050 m | **1.0993 – 1.0994 m** | inside §9.3's own five-run band 1.0709 – 1.1052 |
+| | | raw path error | +9.62 … +9.63 % | **+9.58 … +9.66 %** | inside |
+| `corner_creep` | dry | raw end error | 0.1943 m | **0.1943 m** | **identical to the digit** |
+| | | raw path error | +7.64 % | **+7.65 %** | inside |
+| `square` | either | raw end error | 1.1161 / 1.3057 m | **0.6850 / 1.3044 m** | see below — it is the PLANT |
+
+`square`'s dry raw end error is not a figure that reproduces on this
+plant: §9.3 measured **+5.9060 to +6.3124 rad** of delivered turn across
+six nominal squares, and today's two are **+6.1438** (§9.3's) and
+**+6.2004** (this section's). The truck turned more this time, the
+estimator went on believing its steer angle, and the raw end error fell
+accordingly. **The wet square is the pair the plant DID match** — +6.0192
+against +5.9998 rad, raw end error 1.3057 against 1.3044 m — and it is
+where the A/B is read.
+
+#### The pair the plant matched: `square`, wet
+
+| figure | `wheel+imu` (`…114011`) | **`fuse:wheel+imu` (`…142431`)** |
+|---|---|---|
+| ground truth: turn delivered | +6.0192 rad | **+5.9998 rad** |
+| raw end error | 1.3057 m | **1.3044 m** |
+| raw end heading | +0.8471 rad | **+0.8511 rad** |
+| **end error removed** | **15.55 %** | **15.56 %** |
+| **heading removed** | **17.25 %** | **17.14 %** |
+| along-track removed | 16.8 % | **16.8 %** |
+| cross-track removed | 2.4 % | **2.4 %** |
+| rms removed | 16.1 % | **15.7 %** |
+| path error | +19.14 → **+19.14 %** | +19.13 → **+19.98 %** |
+
+**Same corner to 0.019 rad, same raw error to 1.3 mm, and the two
+estimators removed the same fractions to the second decimal place.** Only
+the path-error row separates them, and §11.4 has already shown what that
+row is: 0.52 m of extrapolation jitter, not 0.52 m of route.
+
+#### `straight`, and the gyro-bias lottery it is read through
+
+§3.4 established that this plant draws the SIGN of the gyro's bias per
+run, so on a straight line the filter either removes 60–70 % of the
+cross-track error or makes it 20–30 % worse, and which one is a coin
+toss. Both arms are in that lottery and neither controls it. Across the
+ten straights of both arms, sorted by which side the coin came down:
+
+| draw | arm | plant | session | cross-track removed | heading removed | end removed |
+|---|---|---|---|---|---|---|
+| **opposing** (helps) | `wheel+imu` | dry | `…113330` | **+70.1 %** | +62.7 % | +14.3 % |
+| | `wheel+imu` | dry | `…113435` | **+69.7 %** | +62.6 % | +14.2 % |
+| | **`fuse`** | wet | `…142221` | **+69.2 %** | +61.7 % | +3.5 % |
+| | **`fuse`** | wet | `…144023` | **+90.2 %** | +71.3 % | +4.0 % |
+| **adding** (hurts) | `wheel+imu` | dry | `…113225` | −24.4 % | −20.4 % | −7.8 % |
+| | `wheel+imu` | wet | `…113755` | −30.7 % | −23.8 % | −2.7 % |
+| | `wheel+imu` | wet | `…113903` | −22.8 % | −19.9 % | −2.0 % |
+| | **`fuse`** | dry | `…141648` | −26.6 % | −22.6 % | −8.4 % |
+| | **`fuse`** | dry | `…141753` | −24.4 % | −20.3 % | −7.7 % |
+| | **`fuse`** | dry | `…141858` | −23.7 % | −21.2 % | −7.4 % |
+
+**Read by draw rather than by arm, the two estimators are the same
+estimator — with one run to declare.** Adding draws: the filter made the
+cross-track error 22.8 – 30.7 % worse and the smoother 23.7 – 26.6 %, and
+every `fuse` figure is inside the filter's spread. Opposing draws: the
+filter removed 69.7 – 70.1 % and the smoother 69.2 % on one run and
+**90.2 % on the other** — which is **above** the filter's best observed
+value on the shipping configuration.
+
+**That one run is a draw and not a result, and it is worth saying why
+rather than dropping it.** How much of the cross-track error the gyro
+removes is not a coin toss between two outcomes: it is a continuous
+function of how nearly the run's gyro-bias draw cancels the wheel
+odometry's heading error. `…144023` drew one that cancelled −0.0579 rad
+down to −0.0166 — a 71.3 % heading removal, against §9.3's best of
+62.7 % and §8.5's `ax`-fused wet best of **71.5 %** (`…110416`), which is
+the same number on the *other* arm. With five straights per arm, one run
+at the top of a continuous range is what a wide distribution looks like,
+not a difference between estimators; the honest statement is the one
+§9.3 already made about `square` — **two samples cannot separate two
+arms on a figure this spread.**
+  (The `end removed` column splits by PLANT and not by arm — on the wet
+  plant the along-track error dominates the endpoint, so a cross-track
+  fix moves the end error less. That is §8.5's finding, not this arm's.)
+
+**And along-track is untouched on both arms, which is §8.5's handoff
+holding:**
+
+| plant | `wheel+imu` | **`fuse:wheel+imu`** |
+|---|---|---|
+| dry `straight` | +0.5 %, −1.0 %, −1.0 % | **+0.6 %, +0.5 %, +0.5 %** |
+| wet `straight` | +0.3 %, +0.2 % | **−0.4 %, −0.5 %** |
+
+Both arms sit inside ±1 percentage point of nothing. §8.5 handed
+along-track error to F3 as unreachable by a stack that observes only the
+shaft and the chassis; **changing the estimator does not change what the
+stack observes**, and §10's `rf2o` — which added an observation of the
+FLOOR — remains the only thing on this track that has ever moved that
+row.
+
+#### `corner_creep`, the profile the corner argument was supposed to be won on
+
+The one profile whose raw figures repeat to the digit, and the one where
+re-linearisation over a window should have shown up: a slow sustained
+163° turn, which is what a forklift actually does.
+
+| figure | raw | `wheel+imu` (`…113659`) | **`fuse` (`…142122`)** |
+|---|---|---|---|
+| turn delivered (truth) | | +2.8487 rad | +2.8495 rad |
+| end error | 0.1943 m | 0.1512 m — **22.2 % removed** | 0.1482 m — **23.7 % removed** |
+| end heading | +0.0155 rad | −0.0077 — **50.3 %** | −0.0090 — **41.9 %** |
+| along-track | +0.1285 m | +0.0679 — 47.2 % | +0.0649 — **49.5 %** |
+| cross-track | −0.1457 m | −0.1351 — 7.3 % | −0.1333 — **8.5 %** |
+| rms over run | 0.1593 m | 0.1387 — 12.9 % | 0.1365 — **13.9 %** |
+| path error | +7.64 % | → **+7.64 %** | → **+9.12 %** |
+
+**31 mm of end error and 1.5 percentage points of removed fraction
+apart, in opposite directions on different rows** — the smoother is very
+slightly ahead on the endpoint and behind on the heading, and both gaps
+are far inside §3.4's per-run spread for this figure (+53.7 %, +64.0 %,
+−98.1 % across three `ax`-fused runs of the same profile). **There is no
+corner advantage in these numbers.** The path-error row is again the
+jitter: +1.47 pp of a 3.97 m path is 58 mm of wobble, and §11.4's
+decimation puts 185 mm of it in this session.
+
+#### `square`, dry — reported, and not comparable
+
+| figure | raw | `wheel+imu` (`…113540`, turn +6.1438) | **`fuse` (`…142005`, turn +6.2004)** |
+|---|---|---|---|
+| end error | 1.1161 / **0.6850** m | 0.9377 — 16.0 % | 0.5968 — **12.9 %** |
+| end heading | +0.7342 / **+0.6510** rad | +0.6116 — 16.7 % | +0.5466 — **16.0 %** |
+| rms | 0.6013 / **0.4037** m | 0.4997 — 16.9 % | 0.3489 — **13.6 %** |
+| path error | +10.77 / **+10.48 %** | → +10.78 % | → **+13.39 %** |
+
+The plant handed the two runs different corners (0.057 rad apart, inside
+its own 0.41 rad spread) and the raw errors differ by 63 %. Both removed
+fractions sit inside T1's three-run band for this profile (+15.3 %,
++26.1 %, +26.2 %). **Two samples from a wide distribution cannot separate
+two arms**, which is exactly what §9.3 said about the same profile when
+the `ax` reversal was measured on it.
+---
+
+### 11.6 The verdict, and the recommendation
+
+**The comparative table, one line per question:**
+
+| question | `wheel+imu` (robot_localization) | **`fuse:wheel+imu`** | winner |
+|---|---|---|---|
+| end error removed, the matched wet `square` | **15.55 %** | **15.56 %** | tie |
+| heading removed, same pair | **17.25 %** | **17.14 %** | tie |
+| cross-track removed, opposing bias draw | +69.7 … +70.1 % | +69.2 %, +90.2 % | tie — see §11.5 on the second one |
+| cross-track removed, adding bias draw | −22.8 … −30.7 % | −23.7 … −26.6 % | tie |
+| along-track removed, `straight` | ±1.0 % | ±0.6 % | tie (both nothing) |
+| `corner_creep` end error removed | 22.2 % | 23.7 % | tie |
+| `corner_creep` heading removed | 50.3 % | 41.9 % | tie |
+| **path error passed through** | +4.22 → **+4.22 %** | +4.22 → **+4.33 %** | **EKF** |
+| **output jitter, `straight`** | **0.0 mm** | **27.8 mm** | **EKF** |
+| **output jitter, `square`** | 27.9 mm (chord) | **478.8 / 516.0 mm** | **EKF** |
+| **latency, stamp → arrival** | **+1.46 ms** median | **+37.47 ms** honest / −0.63 ms stamped | **EKF, by ~26×** |
+| **CPU, one core** | **10.36 %** at rest, 10.62 % driving | **36.51 %** at rest, 38.56 % driving | **EKF, by 3.5×** |
+| delivered rate | 50.0000 Hz sim, `dt_max` 0.024 | 50.0000 Hz sim, `dt_max` 0.032 | tie |
+| real-time factor | 1.0019 / 0.9999 | 0.9994 / 0.9999 | tie |
+| covariance at the bringup gate | published, 0.09 – 0.12 | **36 zeros on most bringups** | **EKF** |
+| clean exit under SIGTERM | yes | aborts (3/3) when waiting on a clock | **EKF** |
+| what it costs to install | in the archive, already installed | 9 vendored debs, 21 MB, no sudo | **EKF** |
+
+**RECOMMENDATION: `robot_localization` stays m5-ver3's default
+estimator, and the factor-graph arm ships OFF behind `--fuse`, exactly as
+`--rf2o` does.** This task changes no default — that is a phase-level
+decision and it is the owner's — and the recommendation it is asked for
+is **do not swap**.
+
+**The reason is not the CPU and it is not the latency.** It is that
+**this A/B asked a smoother to do a filter's job on a filter's inputs,
+and it did it identically.** A factor graph's advantage is that it can
+represent constraints an EKF cannot — a measurement that arrives out of
+order, a loop closure, a landmark seen twice, a re-linearisation of a
+variable a later observation contradicts — and **this stack gave it none
+of those.** Two twist sensors on one vehicle at 500 Hz and 100 Hz, both
+arriving in order, both already linear in the state they observe: there
+is nothing in a 0.5 s window for a re-solve to change its mind about.
+Every accuracy row above is a tie because the two estimators are being
+handed a problem on which they are the same estimator.
+
+**What it costs to have asked, stated plainly:**
+
+1. **3.5× the CPU** — 36.51 % of one core against 10.36 %, 1.83 % of this
+   20-thread machine, invisible in the RTF. Not disqualifying on this rig
+   and it would be on four trucks.
+2. **26× the latency, and the default configuration hides it.**
+   37.5 ms median against 1.46 ms, because the output is one optimisation
+   period behind the graph. `predict_to_current_time: true` makes the
+   number *look* better than the filter's (−0.63 ms — a stamp written
+   ahead of its own information) and pays for it with **28 mm of jitter
+   on a straight line and half a metre on a square**. That trade is not
+   free and neither side of it is good.
+3. **No covariance in the window the bringup gate reads**, which cost
+   `tools/ekf_health.py` a second instrument (§11.2c).
+4. **21 MB of vendored packages and a `sudo`-free install script** that
+   now has to be maintained.
+
+**What would make it ship-on, in order:**
+
+1. **Give it something an EKF cannot represent.** F3's `map → odom` with
+   a scan matcher and loop closures is the shape a factor graph is for,
+   and `fuse` is a reasonable candidate *there* — where re-linearising a
+   pose graph against a closure is the whole algorithm and an EKF has no
+   answer at all. Nothing in §11 argues against that; it argues that
+   two twist sensors is not that problem.
+2. **Raise `optimization_frequency` to the output rate** and re-measure.
+   The 37.5 ms is one optimisation period; at 50 Hz it would be 15 ms,
+   and the jitter would fall with it because the extrapolation gets
+   shorter. It costs the CPU row, which is already the worst one.
+3. **Then ask why the covariance is absent at bringup**, because an
+   estimator whose uncertainty a consumer cannot read is an estimator
+   Nav2's controller cannot weight.
+
+**And what §11 does NOT say.** It does not say `fuse` is a worse
+estimator; on every figure that repeats it is the same estimator. It does
+not say a factor graph is the wrong architecture for this vehicle. It
+says that **on the inputs this stack has today, the fixed-lag smoother
+buys nothing measurable and costs 3.5× the CPU and 26× the latency** —
+and that a change with no measurable benefit and a measurable cost is not
+a change to make on architecture alone. That is §10.6's verdict on the
+laser-odometry arm reached by a different road: the arm exists, it is
+reproducible, it is measured, and it is off.
+---
+
+### 11.7 The capture, the refusals, the suite, and what this section did not do
+
+**Eight sessions, all on the factor-graph arm, all untracked under
+`m5_ver3/logs/evidence/`, all headless, one bringup per drive,
+`drive_route` exit 0 on every one, every fused stream sane, and every one
+carrying both labels:**
+
+| Session | profile | traction | arm |
+|---|---|---|---|
+| `drive-straight-20260826-141648` | straight | nominal 7.0 / 7.0 | `fuse:wheel+imu` |
+| `drive-straight-20260826-141753` | straight | nominal 7.0 / 7.0 | `fuse:wheel+imu` |
+| `drive-straight-20260826-141858` | straight | nominal 7.0 / 7.0 | `fuse:wheel+imu` |
+| `drive-square-20260826-142005` | square | nominal 7.0 / 7.0 | `fuse:wheel+imu` |
+| `drive-corner_creep-20260826-142122` | corner_creep | nominal 7.0 / 7.0 | `fuse:wheel+imu` |
+| `drive-straight-20260826-142221` | straight | **slippery 16.0 / 16.0** | `fuse:wheel+imu` |
+| `drive-straight-20260826-144023` | straight | **slippery 16.0 / 16.0** | `fuse:wheel+imu` |
+| `drive-square-20260826-142431` | square | **slippery 16.0 / 16.0** | `fuse:wheel+imu` |
+
+**Three more sessions were recorded and are in NO table above. Each is
+named here because a session that exists and is not used has to say
+why:**
+
+* `drive-straight-20260826-141425` — the first end-to-end validation of
+  the recorder on this arm, taken on a stack that had been standing at
+  spawn for **five minutes** while §11.2(c)'s covariance sampling ran.
+  The smoother had been integrating the gyro's bias that whole time and
+  opened the run at **yaw 0.0546 rad** where a fresh bringup opens at
+  0.000. Every session in the table above is one bringup per drive, which
+  is §9.3's protocol; this one is not comparable with any of them and is
+  not compared.
+* `drive-straight-20260826-142326` — a **valid session off a bringup
+  whose GATE crashed.** `tools/ekf_health.py` had just grown §11.2(c)'s
+  fallback and the classification call was outside a refusal, so a read
+  that came back before the publisher had been discovered escaped as a
+  **traceback** rather than a refusal. `m5v3.sh` correctly refused the
+  bringup on it; the stack itself was healthy (six children alive,
+  `record`'s own `filter sane at spawn` check passed) and the session's
+  figures agree with its two neighbours to **0.5 mm** of raw end error.
+  It is excluded anyway, and `drive-straight-20260826-144023` was
+  recorded to replace it on a clean bringup with the fixed gate. The bug
+  and the fix are in §11.2(c)'s note and the refusal it produces now is
+  quoted below.
+* `drive-straight-20260826-143221` — the `predict_to_current_time: false`
+  **diagnostic** of §11.4. It came off a differently-configured filter
+  wearing the same `arm=` string, which is exactly the hole §10.7 named
+  in the arm label, and it is named here for the same reason.
+
+**Nine bringups produced the eight sessions in the table**, plus the
+replacement bringup, plus two cost bringups (§11.4) and one diagnostic.
+**The health gate answered on every one of them**, and this section is
+the first place its two branches are both visible:
+
+```
+  ekf: healthy, worst covariance 0.20436 against a ceiling of 100  (/m5v3/fuse/odometry/filtered)
+  ekf: healthy, worst covariance 0.1986  against a ceiling of 100  (/m5v3/fuse/odometry/filtered)
+  ekf: healthy, pose 4.47472e-17 m from the odom origin against a bound of 100  (...)
+  ekf: healthy, pose 2.55658e-16 m from the odom origin against a bound of 100  (...)
+  ekf: healthy, pose 1.11418e-16 m from the odom origin against a bound of 100  (...)
+  ekf: healthy, pose 3.87289e-16 m from the odom origin against a bound of 100  (...)
+  ekf: healthy, pose 1.8483e-16  m from the odom origin against a bound of 100  (...)
+```
+
+**Two of seven read a covariance and five read 36 zeros** — which is
+§11.2(c)'s finding stated the other way round, and the reason the
+fallback exists.
+
+**Every refusal this task added was demonstrated on the rig, not only
+argued:**
+
+| refusal | how it was provoked | result |
+|---|---|---|
+| `exactly one estimator arm was asked for` | `start --rf2o --fuse` | named both flags, printed the two commands that would have been right, **exit 1**, nothing started |
+| `the fuse packages are vendored` | the prefix moved aside | named the missing binary and `install_fuse.sh`, **exit 1**, nothing started |
+| `the fuse parameter file is addressed to m5v3_fuse` | top-level key renamed to `m5v3_fuse_typo:` | named the key it wanted and the key the file has, nothing started |
+| `the factor graph fuses no pose and no acceleration` | `position_dimensions: [x]` added to a sensor | quoted the offending line **with its line number**, nothing started |
+| `the read off … carried a message to check` | gate run against a stopped stack | quoted what `ros2 topic echo` returned, **exit 1** |
+| `every session in this analyse is off the SAME estimator arm` | one §9.3 session + one `fuse:` session | named both groups and both commands, **exit 1** |
+
+**The suite**, extended again:
+
+```
+$ python -m pytest m5_ver3/tests/ -q
+228 passed
+
+$ python m5_ver3/tools/evidence_core.py --selftest
+30/30 checks passed
+
+$ python m5_ver3/nodes/wheel_odom_core.py --selftest
+12/12 checks passed
+
+$ python m5_ver3/nodes/rf2o_twist_core.py --selftest
+22/22 checks passed
+```
+
+194 → **228**: 25 in `tests/test_fuse_arm.py` (the arm-label grammar, the
+topic mapping, the state-file parse, and four that read the committed
+`fuse.yaml` the way `check_fuse_params()` reads it) and 9 in
+`tests/test_evidence_core.py` (`covariance_is_absent`, `position_of`).
+`evidence_core`'s operator selftest went 26 → 30.
+
+**The four that would have caught a real bug**, and why they exist:
+
+* `test_an_unknown_estimator_is_refused_BY_NAME_and_not_defaulted` — a
+  `dict.get(arm, DEFAULT)` in `fused_topic_key()` would point the gate
+  and the recorder at a topic a future arm does not publish on, and the
+  symptom is an EMPTY stream rather than a wrong one.
+* `test_a_future_fuse_arm_with_more_channels_still_reads_the_fuse_topic`
+  — the payoff of parsing the label as a grammar instead of looking it
+  up in a table: `fuse:wheel+imu+rf2o` would have gone to the EKF's
+  topic, silently, on its first bringup.
+* `test_a_covariance_that_is_zero_except_for_one_entry_is_NOT_absent` —
+  reading "mostly zeros" as absent would throw away the one number that
+  could have refused.
+* `test_the_position_is_the_POSE_and_not_the_twist` — `ros2 topic echo`
+  on a `nav_msgs/Odometry` prints two `x:`/`y:` pairs at the same
+  indentation, and a parse that took the last one would gate on a
+  VELOCITY, which is near zero at bringup on a healthy stack **and** on a
+  wreck whose pose is 1e48 m from the origin.
+* `test_the_process_noise_is_robot_localizations_default_projected_to_2d`
+  — the A/B's one controlled knob, pinned against the source it was read
+  from, so that tuning this arm cannot happen quietly.
+
+**What this section did not do:**
+
+- **It did not re-run §9.3.** The `wheel+imu` columns are those eight
+  sessions' own CSVs, re-read by the same `analyse` and the same two
+  scratch instruments. No bringup of the shipping arm was made for an
+  accuracy figure in §11.5; the two that were made (§11.4's cost pair)
+  measured CPU and RTF and drove no scored profile.
+- **It did not change the default.** `m5v3.sh start` is `ekf_node`, and
+  §11.6's recommendation is a recommendation. Whether m5-ver3's default
+  estimator changes is the owner's, at phase level.
+- **It did not tune anything.** `solver_options` is untouched,
+  `process_noise_diagonal` is the other arm's default projected, and
+  `lag_duration` / `optimization_frequency` were set once, before the
+  first measurement, and never moved. There is no run in this section
+  taken on a configuration that was chosen after seeing a number.
+- **It did not touch `model.sdf`, `ekf.yaml`, `ekf_rf2o.yaml` or
+  anything outside `m5_ver3/`.** The plant is byte-identical to F1.5's
+  and the shipping filter's configuration is byte-identical to §9.3's.
+- **It did not measure the fuse arm's startup stability.** §9.4's gate
+  refused nothing on this arm in eleven bringups, but §9.2's warning
+  applies with more force here: the ambient divergence rate on this rig
+  moves by an order of magnitude through a day, eleven un-paired
+  bringups establish nothing, and on five of them the covariance the
+  gate would have read was not published at all.
+- **It did not try `fuse` where a factor graph is actually for.**
+  §11.6's first recommendation is F3's, and this section is not it.

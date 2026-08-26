@@ -110,7 +110,10 @@ m5_ver3/
 │                         own startup divergence, measured. §9 is the
 │                         `ax` reversal and the bringup gate it left
 │                         behind; §10 is the OPTIONAL laser-odometry arm
-│                         and whether it pays for its CPU
+│                         and whether it pays for its CPU. F2 Task 4 adds
+│                         §11: a SECOND ESTIMATOR - fuse's factor graph -
+│                         on the same inputs, and the A/B that decided
+│                         which one ships
 ├── config.yaml           every constant the scripts obey - the one home
 ├── ekf.yaml              what the FILTER fuses and what it refuses. A ROS
 │                         parameter file, which config.yaml is not and may
@@ -118,7 +121,11 @@ m5_ver3/
 ├── ekf_rf2o.yaml         the OPTIONAL arm's overlay and NOTHING else. A
 │                         SECOND --params-file, passed only by --rf2o, so
 │                         the default stack reads one unchanged file
-├── m5v3.sh               start [--headless] [--slippery] [--rf2o]
+├── fuse.yaml             what the FACTOR GRAPH fuses and what it refuses,
+│                         and it is ekf.yaml's split applied to the second
+│                         estimator. Read only by --fuse; on that arm
+│                         ekf.yaml is not read at all
+├── m5v3.sh               start [--headless] [--slippery] [--rf2o|--fuse]
 │                         | stop | status
 ├── gazebo/
 │   └── forklift_ver3/
@@ -137,6 +144,9 @@ m5_ver3/
     ├── _common.sh        sourced: refuse(), the config reader, source_ros()
     ├── install_rf2o.sh   rf2o_laser_odometry from source, at a PINNED
     │                     commit, into the user's own $HOME, without sudo
+    ├── install_fuse.sh   the nine `fuse` debs, at PINNED versions, into
+    │                     a prefix under $HOME, without sudo. apt-get
+    │                     download + dpkg-deb -x, never apt-get install
     ├── _common.py        imported: the same three things for python
     ├── rtf_probe.sh      real-time factor of the RUNNING world
     ├── noise_probe.sh    is the configured sensor noise on the wire
@@ -193,13 +203,15 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 | `m5v3.sh start --headless` | The same without the window. **Use this for anything being measured** — every figure in the three evidence files was taken this way. |
 | `m5v3.sh start --slippery` | **A different plant from the same model file.** After the truck is spawned, every wheel's slip compliance is overridden through gz-sim's own `wheel_slip` service to `config.yaml`'s `slippery:` values — `model.sdf` is not edited and no variant of it is generated. Longitudinal slip at cruise goes from 0.95 % to 6.18 %. Combines with `--headless`, in either order. |
 | `m5v3.sh start --rf2o` | **A DIFFERENT ESTIMATOR ON THE SAME PLANT**, which is `--slippery`'s mirror image. Three more children — the nav lidar's static transform, `rf2o_laser_odometry_node` matching consecutive scans, and the relay that puts a MEASURED covariance on its twist and corrects two frame errors upstream does not — plus a second `--params-file` giving the filter an `odom1` it fuses `vx` and `vyaw` from. Default OFF, and without it the stack is the six children `EVIDENCE_FUSION.md` §9.3 measured, off one unchanged parameter file. Build the package first with `tools/install_rf2o.sh`. Combines with the other two flags, in any order. |
+| `m5v3.sh start --fuse` | **A DIFFERENT ESTIMATOR, IN THE FILTER'S PLACE.** `fuse`'s `fixed_lag_smoother_node` goes up and the `ekf` child does **not** — six children either way, with `fuse` where `ekf` was. It fuses the SAME channels off the SAME two topics (wheel twist `vx`, `vy`, `vyaw` + gyro yaw rate) and publishes its own `odom` → `base_link`, on `topics.fuse_odometry_filtered` and never on the shipping address. Where `--rf2o` adds a sensor, this replaces the estimator, so the two are **mutually exclusive and refused together by name**. Vendor it first with `tools/install_fuse.sh`. Default OFF, and `EVIDENCE_FUSION.md` §11 is the A/B that says why. Combines with `--headless` and `--slippery`. |
 | `m5v3.sh status` | Each child by name, ALIVE or DEAD, with its log, **which traction the running plant is on** and **which estimator arm is up**. Exit 0 only if every one is alive. |
 | `m5v3.sh stop` | Ends this partition's stack, and nothing else. |
 | `tools/rtf_probe.sh` | 30 s real-time-factor sample of the world that is already running. |
 | `tools/noise_probe.sh scan\|depth <topic>` | Temporal spread of every reading on one sensor topic, vehicle **at rest**. Is the noise the SDF configures actually on the wire? |
 | `tools/slip_bench.sh` | Drives the traction terminal at cruise, forward then astern, and reports slip against the commanded and the achieved wheel rate. |
 | `tools/install_rf2o.sh` | Builds `rf2o_laser_odometry` from source, at `config.yaml`'s **pinned commit**, into a colcon workspace under `$HOME`. No sudo at any point, idempotent, refuses by name, and writes a manifest of what it fetched beside the build. Run once; `start --rf2o` refuses by name if it has not been. |
-| `tools/ekf_health.py` | One bounded read of the filter's output, and a refusal if its covariance is over `ekf.startup_check.covariance_max`. **`start` runs it for you** — it exists because `ekf_node` can diverge during its first cycles and stay ALIVE, at rate, saying nothing (`EVIDENCE_FUSION.md` §8.6, §9). |
+| `tools/install_fuse.sh` | Fetches the nine `fuse` packages at `config.yaml`'s **pinned versions** and unpacks them into a prefix under `$HOME`. `apt-get download` + `dpkg-deb -x`, never `apt-get install`: the packages are in the Jazzy archive and this rig has no sudo. Idempotent through a probe that loads a `fuse_models` plugin, refuses by name, `ldd`-checks what it unpacked, and writes a manifest beside the tree. Run once; `start --fuse` refuses by name if it has not been. |
+| `tools/ekf_health.py` | One bounded read of **the ACTIVE arm's** output, and a refusal if its covariance is over `ekf.startup_check.covariance_max`. It reads the `arm=` line `start` has already written and picks the topic from it (`evidence_core.fused_topic_key`), so one gate covers both estimators. **`start` runs it for you** — it exists because `ekf_node` can diverge during its first cycles and stay ALIVE, at rate, saying nothing (`EVIDENCE_FUSION.md` §8.6, §9). On the `--fuse` arm the first messages carry a covariance of 36 zeros, which no ceiling can fail, so there it gates on the **pose** against `evidence.analyse.fused_sanity_m` instead and prints which check it ran (§11.2c). |
 | `tools/drive_route.py <profile>` | Drives one of `config.yaml`'s profiles — `straight`, `square`, `aisle`, `corner_creep` — open loop, on the plant's own clock. It drives; it records nothing. |
 | `tools/sensor_evidence.py record --static\|--drive P` | Captures one run into `logs/evidence/<session>/`: one headered CSV per stream. `--drive` starts `drive_route.py` itself, so one command is one complete run. It stamps the session with **which plant it was taken on** and refuses if the stack cannot say, and it refuses **before the drive** if the filter has already diverged. Needs ROS. |
 | `tools/sensor_evidence.py analyse [session…]` | Every table in `EVIDENCE_SENSORS.md` and `EVIDENCE_FUSION.md`, from those CSVs — including the EKF scored against the same truth as the raw estimate, and the two subtracted. **Needs no ROS and no Gazebo** — it runs on the Windows python. |
@@ -243,7 +255,29 @@ questions and there are two refusals**: a set can be all-nominal and
 still be half `wheel+imu` and half `wheel+imu+rf2o`, which is the mix
 `EVIDENCE_FUSION.md` §10's whole A/B would be destroyed by.
 
-**Six children by default and NINE with `--rf2o`**, and `status` names
+**And since F2 Task 4 there are THREE arms on that one label, because
+the third one changes the ESTIMATOR rather than its inputs.** `--fuse`
+replaces `robot_localization`'s `ekf_node` with `fuse`'s fixed-lag
+smoother — a factor graph over a 0.5 s window, re-solved with Ceres 20
+times a second — fusing exactly the same channels off exactly the same
+two topics. The `ekf` child is **not spawned**, because both publish
+`odom` → `base_link` and tf2 has no notion of two authorities for one
+edge; `--rf2o` and `--fuse` are therefore **mutually exclusive and
+refused together by name**, before anything is read.
+  **Its label puts the estimator in front of a colon — `fuse:wheel+imu`
+  — and that is a grammar rather than a spelling.** The two older labels
+  name a SENSOR SET on an estimator that was never in question; this one
+  holds the sensor set and varies the estimator, so `fuse:wheel+imu`
+  beside `wheel+imu` reads as the A/B it is. `tools/evidence_core.py`'s
+  `fused_topic_key()` parses that grammar to decide **which topic** an
+  instrument should read, because the two arms publish their fused
+  estimate at different addresses — and it **refuses** an estimator it
+  has never heard of rather than defaulting to the shipping filter's
+  address, where the symptom would be an empty stream and not an error.
+
+**Six children by default, NINE with `--rf2o`, and six again with
+`--fuse`** — that flag swaps a child rather than adding one, so the
+count is unchanged and `fuse` stands where `ekf` did. `status` names
 them all back: the
 gz server (`world`), `ros_gz_bridge`'s `parameter_bridge` (`bridge`),
 `ros_gz_image`'s `image_bridge` (`imgbridge`), `nodes/wheel_odometry.py`
@@ -326,7 +360,7 @@ so where it is opened.
 
 ---
 
-## Three things worth knowing before the next phase
+## Four things worth knowing before the next phase
 
 **The EKF fuses THREE twist components, and the third one was ruled out
 and then ruled back in on a measurement.** `ekf.yaml` fuses the wheel
@@ -362,6 +396,28 @@ sessions old against a baseline that is a phase old. **Its yaw rate is
 the most accurate channel on this vehicle** (under 1.2 % of integrated
 turn) and this filter weights it 31× below the gyro, which is the first
 thing a later task should change.
+
+**A SECOND ESTIMATOR exists too, it is also OFF, and what it measured is
+an architecture answer rather than a number.** `--fuse` runs `fuse`'s
+fixed-lag smoother — a factor graph over a 0.5 s window, re-solved with
+Ceres 20 times a second — **instead of** `ekf_node`, on exactly the same
+channels off exactly the same two topics. On every accuracy figure that
+repeats it is **the same estimator**: on the one `square` the plant
+handed both arms the same corner it removed **15.56 %** of the end error
+against the filter's **15.55 %**, and 17.14 % of the heading against
+17.25 %. It costs **36.5 % of one core against 10.4 %**, its honest
+output latency is **37.5 ms against 1.46 ms** (one optimisation period —
+and `predict_to_current_time` hides that behind a motion-model
+extrapolation that puts **28 mm of jitter into a straight line and half
+a metre into a square**), and the first messages it publishes carry a
+covariance of 36 zeros, which cost the bringup gate a second instrument.
+`EVIDENCE_FUSION.md` §11 is the whole A/B and §11.6 is the
+recommendation: **`robot_localization` stays the default.** The reason
+is not the CPU — it is that a factor graph's advantage is constraints an
+EKF cannot represent (out-of-order measurements, loop closures,
+landmarks seen twice) and **two in-order twist sensors give it none of
+them**. The place to try it again is F3's `map` → `odom`, which is that
+problem; this stack is not.
 
 ## Two things worth knowing before the next phase
 
