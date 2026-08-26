@@ -111,6 +111,16 @@ Comparison = collections.namedtuple(
     "Comparison", "end_error end_yaw along cross rms max_error "
                   "span_gap_start_s span_gap_end_s")
 
+#: WHAT AN ABSOLUTE LOCALISER COSTS THE THING THAT READS IT. F3's
+#: `map` -> `odom` is re-broadcast on every scan and CHANGES only when
+#: the filter corrects, so a run's worth of that edge is a few dozen
+#: steps buried in a few thousand repeats. `n` counts the steps, `dpos`
+#: and `dyaw` are their sizes, and `samples` is what they were found in -
+#: because "four corrections" means nothing without "in 372 broadcasts
+#: over 24.6 s". See tf_jumps().
+Jumps = collections.namedtuple(
+    "Jumps", "n samples span_s dpos dyaw max_dpos_m max_dyaw_rad per_s")
+
 #: A corner, against the kinematics it was supposed to obey.
 Fidelity = collections.namedtuple(
     "Fidelity", "yaw_rate steer_rad kinematic_commanded kinematic_measured "
@@ -330,6 +340,140 @@ class SpawnFrame(object):
         return (self.x0 + self._c * x - self._s * y,
                 self.y0 + self._s * x + self._c * y,
                 normalise_angle(float(yaw) + self.yaw0))
+
+
+def world_frame():
+    """The frame that does nothing, for a score taken in WORLD metres.
+
+    WHY AN ABSOLUTE SCORE NEEDS ONE AT ALL. score_drift() transforms the
+    TRUTH and compares it against an estimate already in the target
+    frame, because F1 and F2 scored an estimate born in the odom frame -
+    the vehicle at spawn - and the truth had to be brought to it. F3's
+    estimate is born in the MAP frame and is carried into the BUILDING
+    by the committed registration (rows_to_world), so by the time it
+    reaches the scorer both sides are already in world metres and the
+    truth must be left exactly as the plant published it.
+
+    IT IS A SpawnFrame AT THE ORIGIN AND NOT A SECOND CLASS. The
+    arithmetic of "subtract nothing and rotate by nothing" is the
+    arithmetic tests/test_evidence_core.py already locks; a second
+    implementation of the identity would be a second thing that could
+    stop being one.
+
+    AND THE SCORE IS THE SAME SIZE EITHER WAY, which is worth saying
+    because it looks like a choice that could move a number. Every
+    figure score_drift() returns is either a distance, an angle, or a
+    projection of one onto the other, and a rigid transform applied to
+    BOTH sides changes none of them. What the world frame buys is that
+    the printed dx/dy are metres east and north in the building, which
+    is what a reader of an absolute figure is entitled to.
+    """
+    return SpawnFrame(0.0, 0.0, 0.0)
+
+
+# ----------------------------------------------------------------------
+# the map frame
+# ----------------------------------------------------------------------
+
+class MapFrame(object):
+    """The committed registration, as a transform anything may apply.
+
+        p_map = R(theta) . p_world + t
+        yaw_map = yaw_world + theta
+
+    and `to_world` is that inverted. It is the ONE spelling of the
+    world <-> map transform on this track: tools/map_core.py's
+    world_to_map() and map_to_world() delegate here rather than carrying
+    a second copy, because two copies of a MECHANISM drift the way two
+    copies of a VALUE do and the copy that gets fixed is the one that was
+    already right (tools/_common.sh's own argument).
+
+    WHY IT LIVES IN THIS FILE AND NOT IN map_core. map_core imports this
+    module - MapError is an EvidenceError - so the dependency can only
+    run one way, and the transform is needed on THIS side: F3's absolute
+    score carries a map-frame pose into the building, and that score is
+    evidence arithmetic. What stays in map_core is what the transform is
+    DERIVED from: grids, wall fits and the world's own rectangles.
+
+    THE HALF TURN IS WHY THIS IS TESTED AT TWO ANGLES. warehouse_v3's
+    theta is -179.813 deg, and at a half turn a rotation is very nearly
+    its own inverse - so applying the wrong one leaves every magnitude
+    EXACTLY right and puts the answer on the other side of the map. That
+    is SpawnFrame's trap, one frame further out, and the suite runs every
+    case here at a quarter turn as well.
+
+    THE INSTRUMENT FLOOR TRAVELS WITH IT. `residual_rms_m` and
+    `residual_max_m` are the registration's own residual against the
+    building (EVIDENCE_MAP_V3.md 6.4) and no absolute figure derived
+    through this transform may be printed without them. They are carried
+    here so that the print site has them in hand rather than looking them
+    up again; a frame built from three bare numbers has None, because
+    "no floor stated" is a different thing from "a floor of zero".
+    """
+
+    #: The three the transform cannot exist without. A registration that
+    #: is missing one is refused by the NAME of the missing key - it is
+    #: either not a registration this track wrote or it is a truncated
+    #: one, and both are things the operator has to go and look at.
+    REQUIRED = ("theta_rad", "t_x_m", "t_y_m")
+
+    def __init__(self, theta_rad, t_x_m, t_y_m,
+                 residual_rms_m=None, residual_max_m=None):
+        self.theta_rad = float(theta_rad)
+        self.t_x_m = float(t_x_m)
+        self.t_y_m = float(t_y_m)
+        self.residual_rms_m = (None if residual_rms_m is None
+                               else float(residual_rms_m))
+        self.residual_max_m = (None if residual_max_m is None
+                               else float(residual_max_m))
+        self._c = math.cos(self.theta_rad)
+        self._s = math.sin(self.theta_rad)
+
+    @classmethod
+    def from_registration(cls, record):
+        """A MapFrame out of what map_register.load_registration() read.
+
+        The record is a plain dict of the committed file's scalars. What
+        binds it to a GRID is not this function - it is
+        load_registration(), which refuses a registration whose .pgm has
+        changed underneath it (F3 constraint 16). This only refuses a
+        record that is not a registration at all.
+        """
+        for key in cls.REQUIRED:
+            if key not in record:
+                raise EvidenceError(
+                    "the registration carries {}: it is not a "
+                    "registration this track wrote, or it is a truncated "
+                    "one. What it does carry: {}".format(
+                        key, ", ".join(sorted(record)) or "(nothing)"))
+        return cls(record["theta_rad"], record["t_x_m"], record["t_y_m"],
+                   record.get("residual_rms_m"),
+                   record.get("residual_max_m"))
+
+    def to_map(self, x, y, yaw=None):
+        mx = self._c * float(x) - self._s * float(y) + self.t_x_m
+        my = self._s * float(x) + self._c * float(y) + self.t_y_m
+        if yaw is None:
+            return (mx, my)
+        return (mx, my, normalise_angle(float(yaw) + self.theta_rad))
+
+    def to_world(self, x, y, yaw=None):
+        dx = float(x) - self.t_x_m
+        dy = float(y) - self.t_y_m
+        wx = self._c * dx + self._s * dy
+        wy = -self._s * dx + self._c * dy
+        if yaw is None:
+            return (wx, wy)
+        return (wx, wy, normalise_angle(float(yaw) - self.theta_rad))
+
+    def floor(self):
+        """The one sentence every absolute figure has to be read with."""
+        if self.residual_max_m is None:
+            return "no registration residual was stated with this transform"
+        return ("registration residual rms {:.4f} m, MAX {:.4f} m - no "
+                "figure at or below the MAX is a measurement of the "
+                "localiser".format(self.residual_rms_m or float("nan"),
+                                   self.residual_max_m))
 
 
 # ----------------------------------------------------------------------
@@ -993,6 +1137,225 @@ def compare_drift(raw, fused):
 
 
 # ----------------------------------------------------------------------
+# the absolute pose: two transforms, composed, and carried to the world
+# ----------------------------------------------------------------------
+
+def compose_se2(parent, child):
+    """`child` expressed in `parent`'s own parent frame.
+
+    Both are (x, y, yaw). On this stack the call that matters is
+
+        map -> base_link  =  (map -> odom)  o  (odom -> base_link)
+
+    and the failure it exists to prevent is the one that LOOKS RIGHT:
+    adding the two translations and adding the two yaws. That is this
+    composition with the rotation left out, and it is EXACT whenever the
+    parent's yaw is zero - which is what `map` -> `odom` is at bringup,
+    on a stack whose odom frame has not drifted yet. So the wrong
+    arithmetic agrees with the right one for the first few seconds of
+    every run and then quietly stops.
+
+    THE YAW IS WRAPPED, because these are composed thousands of times
+    down a run and an unwrapped sum walks off the circle. Nothing here
+    unwraps FOR the caller: a series that has to be differenced is
+    unwrapped by the caller with unwrap(), which is where that decision
+    already lives.
+    """
+    px, py, pyaw = (float(v) for v in parent)
+    cx, cy, cyaw = (float(v) for v in child)
+    c = math.cos(pyaw)
+    s = math.sin(pyaw)
+    return (px + c * cx - s * cy,
+            py + s * cx + c * cy,
+            normalise_angle(pyaw + cyaw))
+
+
+def invert_se2(pose):
+    """The transform that undoes `pose`. Exists so a composition can be
+    round-tripped in a test rather than only read - SpawnFrame.unapply()
+    is here for the same reason."""
+    x, y, yaw = (float(v) for v in pose)
+    c = math.cos(yaw)
+    s = math.sin(yaw)
+    return (-(c * x + s * y), -(-s * x + c * y), normalise_angle(-yaw))
+
+
+def compose_rows(parent_rows, child_rows, max_gap_s):
+    """Two stamped transform streams, composed on the CHILD's timeline.
+
+    Both arguments are sequences of (t, x, y, yaw). On this stack the
+    parent is `map` -> `odom` as the localiser broadcasts it - once per
+    scan, 15 Hz - and the child is `odom` -> `base_link` as the filter
+    publishes it, at 50 Hz. What comes out is `map` -> `base_link`: the
+    answer a tf2 listener would have got, at the rate the vehicle's own
+    motion is carried at.
+
+    THE PARENT IS INTERPOLATED AND THAT IS NOT AN APPROXIMATION OF tf2 -
+    IT IS WHAT tf2 DOES. A listener asking for a transform between two
+    stamped messages gets a linear interpolation of the two, whatever
+    the transform means; a zero-order hold would be a DIFFERENT answer
+    from the one any consumer of this stack would receive, and the
+    jitter figures this file is asked for are figures about what a
+    consumer receives. tf_jumps() is where the STEPS are counted, on the
+    parent's own samples, before any interpolation touches them.
+
+    THE YAW IS UNWRAPPED BEFORE IT IS RESAMPLED. `map` -> `odom` on this
+    vehicle passes through pi during a `square`, and interpolating a
+    wrapped series between +3.13 and -3.13 sweeps the estimate the whole
+    way round the circle over one 67 ms step.
+
+    max_gap_s HAS NO DEFAULT, for score_drift()'s reason: it is
+    resample()'s bound and it decides which recordings are scoreable at
+    all. On this pair the gap that matters is the localiser's, and a
+    localiser that stopped broadcasting for longer than that did not
+    slow down - it stopped.
+
+    CHILD SAMPLES OUTSIDE THE PARENT'S SPAN ARE DROPPED. map_server has a
+    1712 x 1196 grid to read before the localiser can say anything, so
+    the first stretch of every session has an odom pose and no map pose.
+    Those samples are not scoreable and dropping them makes the run
+    SHORTER rather than WRONG, which is score_drift()'s own rule one
+    layer up.
+    """
+    parent_rows = list(parent_rows)
+    child_rows = list(child_rows)
+    if len(parent_rows) < 2:
+        raise EvidenceError(
+            "the localiser broadcast at least two transforms, got "
+            "{}".format(len(parent_rows)))
+    if len(child_rows) < 1:
+        raise EvidenceError(
+            "the filter published at least one pose, got 0")
+    pt = [float(r[0]) for r in parent_rows]
+    px = [float(r[1]) for r in parent_rows]
+    py = [float(r[2]) for r in parent_rows]
+    pyaw = unwrap([float(r[3]) for r in parent_rows])
+
+    keep = [row for row in child_rows if pt[0] <= float(row[0]) <= pt[-1]]
+    if not keep:
+        raise EvidenceError(
+            "the two transform streams overlap in time: the localiser "
+            "spans [{:.3f}, {:.3f}] and the filter [{:.3f}, {:.3f}]".format(
+                pt[0], pt[-1], float(child_rows[0][0]),
+                float(child_rows[-1][0])))
+    at = [float(row[0]) for row in keep]
+    # A HOLE IN THE PARENT IS A REFUSAL AND resample() WILL NOT CATCH IT.
+    # That function refuses a query outside the source's whole SPAN,
+    # which is the right rule for a dense stream with ragged ends; it
+    # says nothing about a hole in the middle, and a localiser that
+    # stopped broadcasting for five seconds has one. Interpolated
+    # across, that hole becomes a smooth ramp between two corrections -
+    # a straight line drawn through the exact stretch of run where
+    # nothing was known - and every jitter figure taken over it would be
+    # a figure about this function.
+    for lo, hi in zip(pt, pt[1:]):
+        if hi - lo <= max_gap_s or hi < at[0] or lo > at[-1]:
+            continue
+        raise EvidenceError(
+            "the localiser broadcast without a gap wider than {:g}s, and "
+            "it did not: nothing between {:.3f} and {:.3f} ({:.3f}s). "
+            "Interpolating that would draw a straight line through the "
+            "stretch of the run where the absolute pose was "
+            "unknown.".format(max_gap_s, lo, hi, hi - lo))
+    rx = resample(pt, px, at, max_gap_s)
+    ry = resample(pt, py, at, max_gap_s)
+    ryaw = resample(pt, pyaw, at, max_gap_s)
+    out = []
+    for i, row in enumerate(keep):
+        x, y, yaw = compose_se2((rx[i], ry[i], ryaw[i]),
+                                (float(row[1]), float(row[2]),
+                                 float(row[3])))
+        out.append((at[i], x, y, yaw))
+    return out
+
+
+def rows_to_world(rows, frame):
+    """A map-frame trajectory, carried into the BUILDING's own frame.
+
+    THIS IS THE STEP THAT MAKES AN ABSOLUTE SCORE POSSIBLE AND IT IS THE
+    ONE THAT CAN BE SILENTLY WRONG. The localiser reports where the
+    vehicle is in a GRID; the ground truth says where it is in a
+    BUILDING; the committed registration is the only thing that relates
+    the two, and it was DERIVED (EVIDENCE_MAP_V3.md 6) rather than
+    asserted. Nothing here is anchored, fitted or offset: the transform
+    is the frozen one and the score that follows is the difference
+    between two poses in one frame.
+
+    AND WHAT THE TRANSFORM CANNOT DO IS THE POINT. It is RIGID. A grid
+    whose metres are not the building's - warehouse_v3 has 0.265 deg of
+    internal shear - cannot be made to fit by any rotation and
+    translation, so a localiser that is PERFECT in that grid is wrong in
+    the building by whatever the grid is wrong by. That error lands in
+    the FIGURE, which is why the registration residual is stated beside
+    every figure as the floor (MapFrame.floor()).
+    """
+    return [(float(row[0]),) + frame.to_world(row[1], row[2], row[3])
+            for row in rows]
+
+
+def tf_jumps(rows, tolerance=0.0):
+    """Every CHANGE in a re-broadcast transform, as the correction it is.
+
+    THE QUESTION THIS ANSWERS IS NOT "HOW ACCURATE" BUT "HOW SMOOTH", and
+    it is the number a later phase's architecture decision turns on: an
+    absolute localiser pays its debt in DISCONTINUITIES, because a
+    particle filter's answer moves in steps and `map` -> `odom` moves
+    with it. A controller reading map -> base_link sees those steps as
+    the vehicle teleporting.
+
+    A REPEAT IS NOT A CORRECTION. nav2_amcl re-sends `map` -> `odom` on
+    EVERY scan whether or not the filter updated (laserReceived's
+    latest_tf_valid_ branch), and it updates only after
+    `update_min_d` of travel - so a 25 s run carries some 370 broadcasts
+    and a few dozen actual corrections. Counting broadcasts would report
+    a correction rate of 15 Hz and a mean correction of zero, which is
+    the smoothest possible localiser and a complete fiction.
+
+    `tolerance` IS 0.0 BY DEFAULT AND THAT IS THE HONEST SETTING. The
+    recorder writes six decimals, so a genuine re-broadcast is EXACTLY
+    equal and needs no epsilon; a tolerance above zero would be a
+    threshold below which a jump is called a repeat, and that is a
+    choice a reader has to be told about rather than a default.
+
+    AN EMPTY STREAM IS A REFUSAL AND NEVER "NO JUMPS". A localiser that
+    never broadcast at all is not a localiser that never corrected, and
+    reporting the second about the first is the failure this whole file
+    is written against. One sample is not a refusal - it is a stream
+    with no PAIR in it - and it returns n = 0 with no statistics, which
+    says the same thing without inventing a spread.
+    """
+    rows = list(rows)
+    if not rows:
+        raise EvidenceError(
+            "the localiser broadcast at least one transform, and the "
+            "stream is empty. A localiser that never broadcast is not a "
+            "localiser that never corrected.")
+    span = float(rows[-1][0]) - float(rows[0][0])
+    if len(rows) < 2:
+        return Jumps(n=0, samples=len(rows), span_s=span, dpos=None,
+                     dyaw=None, max_dpos_m=None, max_dyaw_rad=None,
+                     per_s=None)
+    dpos = []
+    dyaw = []
+    for before, after in zip(rows, rows[1:]):
+        step = math.hypot(float(after[1]) - float(before[1]),
+                          float(after[2]) - float(before[2]))
+        turn = abs(normalise_angle(float(after[3]) - float(before[3])))
+        if step <= tolerance and turn <= tolerance:
+            continue
+        dpos.append(step)
+        dyaw.append(turn)
+    if not dpos:
+        return Jumps(n=0, samples=len(rows), span_s=span, dpos=None,
+                     dyaw=None, max_dpos_m=0.0, max_dyaw_rad=0.0,
+                     per_s=0.0 if span > 0.0 else None)
+    return Jumps(n=len(dpos), samples=len(rows), span_s=span,
+                 dpos=summarise(dpos), dyaw=summarise(dyaw),
+                 max_dpos_m=max(dpos), max_dyaw_rad=max(dyaw),
+                 per_s=(len(dpos) / span) if span > 0.0 else None)
+
+
+# ----------------------------------------------------------------------
 # the steady-state window a corner is measured over
 # ----------------------------------------------------------------------
 
@@ -1485,6 +1848,21 @@ def sdf_sensors(path):
             samples = block.findtext("./scan/horizontal/samples")
             if samples is not None:
                 entry["samples"] = int(samples)
+            # THE APERTURE, AND IT IS READ RATHER THAN ASSUMED FOR THE
+            # SAME REASON THE SAMPLE COUNT IS. F3 Task 2 has to place
+            # every beam of a recorded scan on the map, and the bearing
+            # of beam i is angle_min + i * (max - min)/(samples - 1). On
+            # THIS vehicle the window is not symmetric about the sensor's
+            # own +x - a TiM571 is blind over 90 deg and the mount points
+            # that blind sector ASTERN, so min_angle is +0.785 and
+            # max_angle is +5.498 (model.sdf carries the whole argument).
+            # A reader that assumed -half..+half would put every beam of
+            # every scan a half turn from where it was taken.
+            for edge in ("min", "max"):
+                text = block.findtext("./scan/horizontal/{}_angle".format(
+                    edge))
+                if text is not None:
+                    entry["angle_" + edge] = float(text)
             for edge in ("min", "max"):
                 text = block.findtext("./range/" + edge)
                 if text is not None:
@@ -1868,6 +2246,41 @@ def _selftest():
     check("a state file's value may contain '=' and is not truncated",
           parse_state_file("arm=fuse:wheel+imu\nsource=a=b\n")["source"]
           == "a=b")
+
+    # F3 TASK 2's THREE TRANSFORMS, AND THE HALF TURN THAT HIDES A SIGN
+    # ERROR IN ALL OF THEM. warehouse_v3's registration is -179.813 deg
+    # and this vehicle spawns at yaw pi, so a rotation applied the wrong
+    # way round leaves every magnitude EXACTLY right and puts the answer
+    # on the other side of the map. It is in the OPERATOR's selftest
+    # because it is the one thing an absolute figure cannot survive.
+    warehouse_v3 = MapFrame(-3.138328398, -17.111857467, 9.798692466,
+                            0.029052, 0.117891)
+    spawn_in_map = warehouse_v3.to_map(-17.0, 10.0, math.pi)
+    check("the committed registration carries the spawn pose onto the "
+          "map origin, which is what says it is not nonsense",
+          math.hypot(spawn_in_map[0], spawn_in_map[1]) < 0.30
+          and abs(normalise_angle(spawn_in_map[2])) < 0.01)
+    back = warehouse_v3.to_world(*spawn_in_map)
+    check("the map transform round-trips at the half turn AND at a "
+          "quarter, where a reversed rotation is visible",
+          abs(back[0] + 17.0) < 1e-9 and abs(back[1] - 10.0) < 1e-9
+          and MapFrame(math.pi / 2.0, 3.0, -4.0).to_map(2.0, 0.0)
+          == (3.0, -2.0))
+    check("map -> base_link is the PRODUCT of the two transforms and not "
+          "the sum: a quarter-turn parent turns the child's translation",
+          compose_se2((0.0, 0.0, math.pi / 2.0), (2.0, 0.0, 0.0))[1]
+          == 2.0)
+    # AND THE ONE THE JITTER FIGURE DEPENDS ON. amcl re-sends map -> odom
+    # on every scan whether or not it corrected; counting the repeats
+    # would report a 15 Hz correction rate and a mean jump of zero.
+    repeats = [(0.1 * i, 1.0, 2.0, 0.3) for i in range(30)]
+    check("a re-broadcast transform is not a correction",
+          tf_jumps(repeats).n == 0 and tf_jumps(repeats).samples == 30)
+    check("a correction is measured at its own size, the short way round "
+          "the circle",
+          abs(tf_jumps([(0.0, 0.0, 0.0, math.pi - 0.05),
+                        (0.1, 0.0, 0.0, -math.pi + 0.05)]).max_dyaw_rad
+              - 0.1) < 1e-9)
 
     # And the model's link poses, which is how config.yaml's copy of the
     # IMU mount is checked against the file that decides it.

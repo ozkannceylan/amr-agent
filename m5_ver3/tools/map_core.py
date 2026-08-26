@@ -544,26 +544,25 @@ def derive_transform(walls, hint=0.0, span_rad=DEFAULT_SPAN_RAD,
 
 
 def world_to_map(reg, x, y, yaw=None):
-    """A world pose through a derived registration. See derive_transform."""
-    theta = reg["theta_rad"]
-    c, s = math.cos(theta), math.sin(theta)
-    mx = c * x - s * y + reg["t_x_m"]
-    my = s * x + c * y + reg["t_y_m"]
-    if yaw is None:
-        return (mx, my)
-    return (mx, my, core.normalise_angle(yaw + theta))
+    """A world pose through a derived registration. See derive_transform.
+
+    THE ARITHMETIC MOVED AND THE NAME DID NOT. F3 Task 2 needs this same
+    transform on the evidence side - an absolute pose is a MAP pose
+    carried into the building - and evidence_core.MapFrame is where it
+    is spelled now, once, with its tests. This wrapper stays because
+    map_register.py and 82 tests call it by name and because a
+    registration RECORD is this module's currency; what it no longer
+    carries is a second copy of a cos/sin that could stop agreeing with
+    the first.
+    """
+    return core.MapFrame(reg["theta_rad"], reg["t_x_m"],
+                         reg["t_y_m"]).to_map(x, y, yaw)
 
 
 def map_to_world(reg, x, y, yaw=None):
-    theta = reg["theta_rad"]
-    c, s = math.cos(theta), math.sin(theta)
-    dx = x - reg["t_x_m"]
-    dy = y - reg["t_y_m"]
-    wx = c * dx + s * dy
-    wy = -s * dx + c * dy
-    if yaw is None:
-        return (wx, wy)
-    return (wx, wy, core.normalise_angle(yaw - theta))
+    """world_to_map inverted. See its note about where the arithmetic is."""
+    return core.MapFrame(reg["theta_rad"], reg["t_x_m"],
+                         reg["t_y_m"]).to_world(x, y, yaw)
 
 
 # ----------------------------------------------------------------------
@@ -947,6 +946,227 @@ def wall_rotation(fit, world_normal):
 
 
 # ----------------------------------------------------------------------
+# what this map has to say about a scan taken in it
+# ----------------------------------------------------------------------
+
+#: WHAT A MAP EXPLAINS OF A SCAN, AND WHAT IT DOES NOT. Every field is a
+#: count of BEAMS except the last three, which are metres.
+#:   n_beams      everything the sensor sent
+#:   n_range      dropped before any map was consulted: non-finite, at or
+#:                beyond range_max, or below range_min. nav2_amcl's
+#:                likelihood field drops exactly these, by name.
+#:   n_used       the beams a localiser actually weighs
+#:   n_explained  a return whose endpoint has an OCCUPIED cell within the
+#:                search radius: a mapped surface, seen where the map
+#:                says it is
+#:   n_unexplained  a return the map has nothing to put under, split into
+#:                where it landed instead: FREE floor, UNKNOWN space, or
+#:                off the grid entirely
+#:   rms_m/max_m/mean_m  the endpoint-to-surface distances of the
+#:                EXPLAINED beams, and None when there are none - "no
+#:                explained beam" is a different fact from "0.0 m away"
+ScanSupport = collections.namedtuple(
+    "ScanSupport",
+    "n_beams n_range n_used n_explained n_unexplained n_free n_unknown "
+    "n_off_grid rms_m max_m mean_m sum_sq")
+
+
+def nearest_occupied_distance(mask, width, height, meta, x_m, y_m,
+                              max_cells):
+    """How far the nearest OCCUPIED cell is from a point in map metres.
+
+    THIS IS nav2_amcl's LIKELIHOOD FIELD, ASKED ONE POINT AT A TIME.
+    That node precomputes the whole field to `laser_likelihood_max_dist`
+    and looks it up; this searches a box of `max_cells` around the point
+    instead, because the question here is asked for a few hundred
+    thousand beam endpoints and not for two million cells - and because
+    the answer only matters where it is SMALL. A search box is the same
+    arithmetic restricted to where the answer is used.
+
+    NOTHING FOUND RETURNS None AND NOT A LARGE NUMBER. "There is no
+    mapped surface within 0.30 m of this return" is a different fact
+    from "the nearest one is 0.31 m away", and the caller counts the two
+    separately: the first is the map failing to contain something, which
+    is what z_rand is for, and the second is the sensor's own error,
+    which is what sigma_hit is for. Collapsing them would put the
+    building's missing south wall into the range-noise figure.
+
+    A POINT OFF THE GRID IS None TOO, and does not raise: a nav lidar
+    with 25 m of range standing 20 m from the edge of a raster will put
+    returns outside it, and that is a fact about the map's extent rather
+    than an error in the reading.
+    """
+    res = float(meta["resolution"])
+    ox, oy = float(meta["origin"][0]), float(meta["origin"][1])
+    col0 = int(math.floor((float(x_m) - ox) / res))
+    # cell_centre()'s row flip, inverted: row 0 is the TOP of the image
+    # and the origin is its LOWER-left corner.
+    row0 = height - 1 - int(math.floor((float(y_m) - oy) / res))
+    best = None
+    limit = int(max_cells)
+    for row in range(row0 - limit, row0 + limit + 1):
+        if row < 0 or row >= height:
+            continue
+        base = row * width
+        for col in range(col0 - limit, col0 + limit + 1):
+            if col < 0 or col >= width:
+                continue
+            if not mask[base + col]:
+                continue
+            cx, cy = cell_centre(meta, height, col, row)
+            distance = math.hypot(cx - float(x_m), cy - float(y_m))
+            if best is None or distance < best:
+                best = distance
+    if best is not None and best > limit * res:
+        # The box is square and the answer is Euclidean, so a hit in a
+        # corner of it can be further away than the radius the caller
+        # asked about. Reporting it would make the radius mean two
+        # different things depending on the bearing.
+        return None
+    return best
+
+
+def cell_class(grid, meta, x_m, y_m):
+    """OCCUPIED, FREE, UNKNOWN or None (off the grid), by the map's OWN
+    thresholds.
+
+    THE THRESHOLDS ARE THE ARTIFACT'S AND NOT THIS FILE'S, exactly as
+    occupied_mask()'s are. warehouse_v3 ships free_thresh 0.196 and
+    slam_toolbox writes 205 for unknown, which is a shade of 0.19608 -
+    a whisker ABOVE it. One decimal place the other way and every
+    unknown cell in this grid would classify as FREE FLOOR, which is
+    the failure config.yaml's map.slam block records having nearly had.
+    """
+    res = float(meta["resolution"])
+    ox, oy = float(meta["origin"][0]), float(meta["origin"][1])
+    col = int(math.floor((float(x_m) - ox) / res))
+    row = grid.height - 1 - int(math.floor((float(y_m) - oy) / res))
+    if col < 0 or col >= grid.width or row < 0 or row >= grid.height:
+        return None
+    value = grid.pixels[row * grid.width + col]
+    negate = meta.get("negate", 0.0) > 0.5
+    shade = value if negate else (grid.maxval - value)
+    shade /= float(grid.maxval)
+    if shade > meta["occupied_thresh"]:
+        return "occupied"
+    if shade < meta["free_thresh"]:
+        return "free"
+    return "unknown"
+
+
+def scan_support(mask, width, height, meta, pose, ranges, angles,
+                 range_min, range_max, max_cells, grid=None):
+    """One scan, from a KNOWN pose, against this map.
+
+    THIS IS WHERE amcl.yaml's SENSOR MODEL COMES FROM, and it is the
+    reason the derivation is not a guess. nav2_amcl's likelihood field
+    weighs a beam as
+
+        z_hit . exp(-d^2 / 2.sigma_hit^2)  +  z_rand / range_max
+
+    where `d` is the distance from the beam's endpoint to the nearest
+    occupied cell. Both parameters are therefore statements about THIS
+    map and THIS sensor: sigma_hit is the spread of `d` when the pose is
+    right, and z_rand is the share of returns for which no `d` exists at
+    all. Run at the GROUND TRUTH pose - a measurement reference and
+    never an input - this function measures both, before a localiser has
+    been asked to do anything.
+
+    `pose` is (x, y, yaw) in MAP metres and `angles` are the beam
+    bearings in the sensor's own frame. THE CALLER OWNS THE MOUNT: on
+    this vehicle the nav lidar stands 0.55 m forward, 0.40 m to one side
+    and 1.80 m up of base_link, and a scan placed at base_link would put
+    every endpoint half a metre from where it was taken.
+
+    THE MAX-RANGE RETURNS ARE DROPPED AND NOT SCORED, because the model
+    this derives for drops them - "This model ignores max range
+    readings", nav2_amcl's own comment. Charging a blind return to the
+    map would inflate z_rand with the sensor's aperture.
+
+    `grid` is optional and is only needed to say WHERE an unexplained
+    return landed (free floor, unknown space, off the raster). Without
+    it the count is still made; the split is left at zero.
+    """
+    x0, y0, yaw0 = (float(v) for v in pose)
+    n_beams = 0
+    n_range = 0
+    n_explained = 0
+    n_free = 0
+    n_unknown = 0
+    n_off_grid = 0
+    distances = []
+    for i, value in enumerate(ranges):
+        n_beams += 1
+        try:
+            r = float(value)
+        except (TypeError, ValueError):
+            n_range += 1
+            continue
+        if not math.isfinite(r) or r >= float(range_max) \
+                or r < float(range_min):
+            n_range += 1
+            continue
+        bearing = yaw0 + float(angles[i])
+        ex = x0 + r * math.cos(bearing)
+        ey = y0 + r * math.sin(bearing)
+        distance = nearest_occupied_distance(mask, width, height, meta,
+                                             ex, ey, max_cells)
+        if distance is not None:
+            n_explained += 1
+            distances.append(distance)
+            continue
+        if grid is None:
+            continue
+        where = cell_class(grid, meta, ex, ey)
+        if where is None:
+            n_off_grid += 1
+        elif where == "unknown":
+            n_unknown += 1
+        else:
+            n_free += 1
+    n_used = n_beams - n_range
+    sum_sq = math.fsum(d * d for d in distances)
+    return ScanSupport(
+        n_beams=n_beams, n_range=n_range, n_used=n_used,
+        n_explained=n_explained, n_unexplained=n_used - n_explained,
+        n_free=n_free, n_unknown=n_unknown, n_off_grid=n_off_grid,
+        rms_m=math.sqrt(sum_sq / n_explained) if n_explained else None,
+        max_m=max(distances) if distances else None,
+        mean_m=core.mean(distances) if distances else None,
+        sum_sq=sum_sq)
+
+
+def add_support(a, b):
+    """Two ScanSupports, added.
+
+    THE rms IS RE-DERIVED FROM THE SUM OF SQUARES AND NOT AVERAGED. An
+    average of two rms figures is not the rms of the union unless the
+    two carry the same count, and a scan whose beams mostly went out of
+    the aperture carries far fewer. `sum_sq` exists in the tuple for
+    exactly this: it is the only field here that is not a reading in its
+    own right.
+    """
+    n_explained = a.n_explained + b.n_explained
+    sum_sq = a.sum_sq + b.sum_sq
+    maxima = [v for v in (a.max_m, b.max_m) if v is not None]
+    if n_explained:
+        mean_m = ((0.0 if a.mean_m is None else a.mean_m * a.n_explained)
+                  + (0.0 if b.mean_m is None else b.mean_m * b.n_explained)
+                  ) / n_explained
+    else:
+        mean_m = None
+    return ScanSupport(
+        n_beams=a.n_beams + b.n_beams, n_range=a.n_range + b.n_range,
+        n_used=a.n_used + b.n_used, n_explained=n_explained,
+        n_unexplained=a.n_unexplained + b.n_unexplained,
+        n_free=a.n_free + b.n_free, n_unknown=a.n_unknown + b.n_unknown,
+        n_off_grid=a.n_off_grid + b.n_off_grid,
+        rms_m=math.sqrt(sum_sq / n_explained) if n_explained else None,
+        max_m=max(maxima) if maxima else None,
+        mean_m=mean_m, sum_sq=sum_sq)
+
+
+# ----------------------------------------------------------------------
 # --selftest
 # ----------------------------------------------------------------------
 
@@ -961,8 +1181,10 @@ def _selftest():
     WALL, and that an overlap reads zero.
     """
     failures = []
+    made = []
 
     def check(label, ok):
+        made.append(label)
         if not ok:
             failures.append(label)
 
@@ -998,6 +1220,37 @@ def _selftest():
     check("and the least-squares fit of the same points is dragged",
           dragged < 13.95)
 
+    # F3 TASK 2's DERIVATION OF amcl.yaml's SENSOR MODEL. A grid whose
+    # only occupied cells are one column, and a scan driven at it from a
+    # known pose: the endpoint-to-surface distance IS the range error
+    # (sigma_hit) and a return with no surface under it is the share the
+    # map cannot explain (z_rand). It is in the OPERATOR's selftest
+    # because the half-turn trap reaches here too - a scan placed with
+    # the yaw reversed misses the wall entirely and reports every beam
+    # unexplained, which reads as a bad map rather than as a bad frame.
+    pixels = bytearray([254] * (200 * 200))
+    for row in range(200):
+        pixels[row * 200 + 100] = 0
+    grid = Grid(200, 200, 255, pixels)
+    meta = {"resolution": 0.05, "origin": (0.0, 0.0, 0.0),
+            "occupied_thresh": 0.65, "free_thresh": 0.196, "negate": 0.0}
+    mask = occupied_mask(grid, meta)
+    wall_x, row_y = (100 + 0.5) * 0.05, (200 - 1 - 150 + 0.5) * 0.05
+    hit = scan_support(mask, 200, 200, meta, (wall_x - 2.0, row_y, 0.0),
+                       [2.0, 2.05, 1.0], [0.0, 0.0, 0.0], 0.05, 25.0, 6,
+                       grid)
+    check("the endpoint-to-surface distance is the range error, and a "
+          "return with no surface under it is UNEXPLAINED and not a "
+          "large distance",
+          hit.n_used == 3 and hit.n_explained == 2
+          and hit.n_unexplained == 1 and hit.n_free == 1
+          and abs(hit.max_m - 0.05) < 1e-9)
+    away = scan_support(mask, 200, 200, meta, (wall_x + 2.0, row_y, 0.0),
+                        [2.0], [0.0], 0.05, 25.0, 6, grid)
+    check("a scan placed with its yaw reversed misses the wall, which is "
+          "what says the pose and not the map is being tested",
+          away.n_explained == 0 and away.n_unexplained == 1)
+
     box = Box("b", -1.0, 1.0, -1.0, 1.0)
     check("an overlap is zero clearance",
           polygon_distance(truck_polygon(0.0, 0.0, 0.0, 1.9, 0.9, 0.6),
@@ -1010,7 +1263,10 @@ def _selftest():
         sys.stderr.write("map_core --selftest FAILED: {}\n".format(label))
     if failures:
         return 1
-    print("map_core --selftest: 6 checks passed.")
+    # COUNTED AND NOT TYPED. The number here was a literal 6 until F3
+    # Task 2 added two checks beside it, which is exactly how a count in
+    # a print statement stops being true.
+    print("map_core --selftest: {} checks passed.".format(len(made)))
     return 0
 
 

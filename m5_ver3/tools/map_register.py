@@ -6,6 +6,7 @@ fits it, and whether the drive that made it fitted the floor.
     python3 m5_ver3/tools/map_register.py derive --write         # commit
     python3 m5_ver3/tools/map_register.py show
     python3 m5_ver3/tools/map_register.py clearance <session>
+    python3 m5_ver3/tools/map_register.py support   <session>
 
 NEEDS NO ROS, NO GAZEBO AND NO RIG. It reads a .pgm, a .yaml, an .sdf and
 a CSV, and it runs on the owner's Windows python exactly as
@@ -70,6 +71,13 @@ REQUIRED_KEYS = (
     "map.clearance.half_width_m",
     "evidence.dir", "evidence.analyse.max_pair_gap_s",
     "vehicle.rear_axle_offset_m", "vehicle.spawn.yaw",
+    # F3 TASK 2's FOUR, read by `support` alone. They are listed
+    # unconditionally, which is the safe direction: a key that a
+    # subcommand does not reach costs one dict lookup at load, and a key
+    # that is missing when the subcommand IS reached would be a KeyError
+    # four frames down instead of a refusal by its dotted name.
+    "vehicle.model", "vehicle.nav_lidar_mount.x",
+    "vehicle.nav_lidar_mount.y", "evidence.sdf_names.nav_lidar",
 )
 
 #: The m5_ver1 map's registration, for the comparison row and NOTHING
@@ -791,6 +799,198 @@ def cmd_clearance(cfg, args):
 
 
 # ----------------------------------------------------------------------
+# support - what this map has to say about the scans taken on this floor
+# ----------------------------------------------------------------------
+
+def cmd_support(cfg, args):
+    """Every beam of a recorded drive, placed on this map from the TRUE
+    pose, and asked whether the map has anything to put under it.
+
+    THIS IS WHERE amcl.yaml's TWO SENSOR-MODEL NUMBERS COME FROM.
+    nav2_amcl's likelihood field weighs a beam as
+
+        z_hit . exp(-d^2 / 2.sigma_hit^2)   +   z_rand / range_max
+
+    with `d` the distance from the endpoint to the nearest occupied cell.
+    Both terms are statements about THIS map and THIS sensor and neither
+    is a preference:
+
+      sigma_hit  is the spread of `d` when the pose is RIGHT. Run from
+                 the ground truth it is the range error plus whatever the
+                 grid is wrong by, measured rather than added up out of
+                 datasheet lines.
+      z_rand     is the share of returns for which no `d` exists at all -
+                 a surface the map does not contain. On this floor that
+                 is not hypothetical: warehouse_v3 HAS NO SOUTH WALL
+                 (EVIDENCE_MAP_V3.md 9), because the dock annex and the
+                 bay backs stand in front of it, and every return from
+                 unmapped space is charged to this term.
+
+    IT READS THE GROUND TRUTH AND THAT IS THE POINT, exactly as
+    `clearance` does. The question is what the MAP is worth against a
+    scan taken from a known place; putting an estimate in that slot
+    would measure the estimator instead, which is what the localisation
+    runs are for. F1 global constraint 13 stands: this is an
+    INSTRUMENT's reading of a reference, not an input to anything the
+    vehicle runs.
+
+    THE PARAMETERS IT DERIVES ARE FIXED BEFORE THE FIRST SCORED RUN and
+    the evidence records the order, which is the m5_ver1 discipline
+    amcl.yaml's header states: nothing here is tuned against a
+    localisation result.
+    """
+    session = os.path.abspath(args.session)
+    scan_path = os.path.join(session, "scan_nav.csv")
+    truth_path = os.path.join(session, "odom_truth.csv")
+    for path in (scan_path, truth_path):
+        if not os.path.isfile(path):
+            cfg.refuse("the session carries a recorded scan and ground "
+                       "truth", path,
+                       "both are written by tools/sensor_evidence.py "
+                       "record.")
+    out_dir, name = artifact(cfg, args.name)
+    reg_path = os.path.join(out_dir, cfg.s("map.registration.file"))
+    try:
+        # VERIFIED, so this cannot be a reading of one grid through
+        # another grid's transform (F3 constraint 16).
+        record = load_registration(reg_path)
+    except mc.MapError as exc:
+        fail(cfg, exc, reg_path)
+    frame = core.MapFrame.from_registration(record)
+
+    map_yaml = os.path.join(out_dir, name + ".yaml")
+    meta, _, grid, mask = load_grid(cfg, map_yaml)
+
+    model = os.path.join(_common.REPO, cfg.s("vehicle.model"))
+    try:
+        sensors = core.sdf_sensors(model)
+        lidar = core.sdf_sensor(sensors,
+                                cfg.s("evidence.sdf_names.nav_lidar"))
+    except core.EvidenceError as exc:
+        fail(cfg, exc, model)
+    for key in ("samples", "angle_min", "angle_max", "range_min",
+                "range_max"):
+        if key not in lidar:
+            cfg.refuse("the model states the nav lidar's " + key, model,
+                       "without it a beam has no bearing and no bound.")
+    n_beams = int(lidar["samples"])
+    step = ((lidar["angle_max"] - lidar["angle_min"])
+            / float(n_beams - 1))
+    angles = [lidar["angle_min"] + i * step for i in range(n_beams)]
+
+    # WHERE THE SCANNER IS BOLTED. A scan placed at base_link would put
+    # every endpoint 0.68 m from where it was taken, which on a 0.05 m
+    # grid is thirteen cells - and the whole reading would be about the
+    # mount rather than about the map. The lever arm is applied in the
+    # VEHICLE's frame and then rotated by the vehicle's heading, which
+    # is the same composition an absolute pose is built with.
+    mount = (cfg.f("vehicle.nav_lidar_mount.x"),
+             cfg.f("vehicle.nav_lidar_mount.y"), 0.0)
+
+    try:
+        scans = core.read_csv(scan_path)
+        truth = core.read_csv(truth_path)
+    except core.EvidenceError as exc:
+        fail(cfg, exc, session)
+    beam_columns = [c for c in scans.names if c.startswith("beam_")]
+    if len(beam_columns) != n_beams:
+        cfg.refuse(
+            "the recorded scan is the width the model configures",
+            "{} and {}".format(scan_path, model),
+            "the CSV carries {} beam columns and the model declares "
+            "{}".format(len(beam_columns), n_beams),
+            "a scan of a different width cannot be placed by these "
+            "bearings.")
+
+    stamps = scans.column("t_sim")
+    gap = cfg.f("evidence.analyse.max_pair_gap_s")
+    try:
+        tx = core.resample(truth.column("t_sim"), truth.column("x"),
+                           stamps, gap)
+        ty = core.resample(truth.column("t_sim"), truth.column("y"),
+                           stamps, gap)
+        tyaw = core.resample(truth.column("t_sim"),
+                             core.unwrap(truth.column("yaw")), stamps, gap)
+    except core.EvidenceError as exc:
+        fail(cfg, exc, session)
+
+    every = max(1, int(args.every))
+    radius = float(args.radius_m)
+    max_cells = int(math.ceil(radius / meta["resolution"]))
+    print("=== m5v3 map support ===")
+    print("session    {}".format(os.path.relpath(session, _common.REPO)))
+    print("map        {}  (md5 {})".format(record.get("map_image", "?"),
+                                           record.get("map_md5", "?")[:8]))
+    print("floor      {}".format(frame.floor()))
+    print("sensor     {}: {} beams over {:.4f} rad, "
+          "{:.3f}-{:.3f} m".format(
+              lidar["name"], n_beams,
+              lidar["angle_max"] - lidar["angle_min"],
+              lidar["range_min"], lidar["range_max"]))
+    print("mount      ({:+.3f}, {:+.3f}) m in base_link".format(
+        mount[0], mount[1]))
+    print("search     {:.3f} m ({} cells at {:.3f} m). Beyond it a return "
+          "is UNEXPLAINED".format(radius, max_cells, meta["resolution"]))
+    print("scans      every {} of {} recorded".format(
+        every, len(stamps)))
+    print("")
+    total = None
+    used = 0
+    for i in range(0, len(stamps), every):
+        pose_world = core.compose_se2((tx[i], ty[i], tyaw[i]), mount)
+        pose_map = frame.to_map(pose_world[0], pose_world[1], pose_world[2])
+        ranges = [scans.column(c)[i] for c in beam_columns]
+        one = mc.scan_support(mask, grid.width, grid.height, meta, pose_map,
+                              ranges, angles, lidar["range_min"],
+                              lidar["range_max"], max_cells, grid)
+        total = one if total is None else mc.add_support(total, one)
+        used += 1
+    if total is None or not total.n_used:
+        cfg.refuse("the recording carries a scan with a usable return in "
+                   "it", scan_path,
+                   "every beam of every sampled scan was non-finite or at "
+                   "the sensor's own range bound.")
+    print("{} scans, {} beams, {} usable ({} at or beyond the sensor's "
+          "range bound".format(used, total.n_beams, total.n_used,
+                               total.n_range))
+    print("  or non-finite - nav2_amcl's likelihood field drops exactly "
+          "these, by name)")
+    print("")
+    print("  EXPLAINED    {:>8}  {:6.2f} % of usable - a mapped surface "
+          "within {:.3f} m".format(
+              total.n_explained,
+              100.0 * total.n_explained / total.n_used, radius))
+    print("  UNEXPLAINED  {:>8}  {:6.2f} %".format(
+        total.n_unexplained, 100.0 * total.n_unexplained / total.n_used))
+    print("     on FREE floor      {:>8}  {:6.2f} %   an obstacle the map "
+          "does not carry".format(
+              total.n_free, 100.0 * total.n_free / total.n_used))
+    print("     in UNKNOWN space   {:>8}  {:6.2f} %   never observed "
+          "while mapping".format(
+              total.n_unknown, 100.0 * total.n_unknown / total.n_used))
+    print("     off the raster     {:>8}  {:6.2f} %   beyond the grid's "
+          "own extent".format(
+              total.n_off_grid, 100.0 * total.n_off_grid / total.n_used))
+    print("")
+    print("  endpoint-to-surface distance, over the EXPLAINED beams:")
+    print("     rms  {:.4f} m      mean {:.4f} m      worst {:.4f} m"
+          .format(total.rms_m, total.mean_m, total.max_m))
+    print("")
+    print("  -> amcl.yaml sigma_hit    {:.4f}  (the rms above)".format(
+        total.rms_m))
+    print("  -> amcl.yaml z_rand       {:.4f}  (the unexplained share)"
+          .format(total.n_unexplained / float(total.n_used)))
+    print("     z_hit                  {:.4f}  (1 - z_rand)".format(
+        1.0 - total.n_unexplained / float(total.n_used)))
+    print("")
+    print("BOTH ARE DERIVED AND NEITHER IS TUNED. This runs from the")
+    print("GROUND TRUTH pose, so it measures the MAP and the SENSOR and")
+    print("not a localiser; amcl.yaml states the values it took from a")
+    print("run of this command and the session it was taken on.")
+    return 0
+
+
+# ----------------------------------------------------------------------
 
 def main(argv=None):
     cfg = _common.load_config(TOOL, REQUIRED_KEYS)
@@ -839,6 +1039,25 @@ def main(argv=None):
                        help="also list every obstacle the drive came "
                             "within this many metres of (default 3.0)")
 
+    support = subs.add_parser(
+        "support",
+        help="place every beam of a recorded drive on this map from the "
+             "TRUE pose, and derive amcl.yaml's sigma_hit and z_rand "
+             "from what the map does and does not explain")
+    support.add_argument("session", help="a session directory under "
+                                         "evidence.dir")
+    support.add_argument("--name", help="artifact name (default: map.name)")
+    support.add_argument(
+        "--every", type=int, default=25, metavar="N",
+        help="use one scan in N (default 25). The reading is over "
+             "hundreds of thousands of beams either way; this is what "
+             "keeps a 775 s drive to a minute of arithmetic.")
+    support.add_argument(
+        "--radius-m", type=float, default=0.30, metavar="M",
+        help="how far from a return a mapped surface may be and still "
+             "explain it (default 0.30). Beyond this the return is "
+             "UNEXPLAINED - see the command's own note.")
+
     args = parser.parse_args(argv)
     if args.command == "derive":
         return cmd_derive(cfg, args)
@@ -846,6 +1065,8 @@ def main(argv=None):
         return cmd_show(cfg, args)
     if args.command == "clearance":
         return cmd_clearance(cfg, args)
+    if args.command == "support":
+        return cmd_support(cfg, args)
     parser.print_help()
     return 2
 
