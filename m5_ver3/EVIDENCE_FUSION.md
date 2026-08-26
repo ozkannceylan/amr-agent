@@ -1,4 +1,4 @@
-# EVIDENCE — m5-ver3 fusion: the odom-frame EKF (F2 Task 1)
+# EVIDENCE — m5-ver3 fusion: the odom-frame EKF (F2 Task 1), and the slip scenario (F2 Task 2, §8)
 
 Every number below was measured on this rig on **2026-08-26**, and the
 instrument that produced it is named beside it. A *configured* figure is
@@ -25,6 +25,15 @@ nothing else running on the machine.
 | `tools/sensor_evidence.py record` | now captures the fused stream beside the raw one and the truth | extended |
 | `tools/sensor_evidence.py analyse` | scores the fused stream and **subtracts the two**, with no ROS | extended |
 | `tools/evidence_core.py` | `compare_drift()`, `sdf_link_pose()` — the new arithmetic. Suite 82 → **106** tests, selftest 16 → **22** checks | extended |
+
+**And what F2 Task 2 added on top, all of it §8's:**
+
+| Tool | What it answers | New there |
+|---|---|---|
+| `m5v3.sh start --slippery` | a floor the truck cannot grip, from the SAME model file, through gz's own `wheel_slip` service | ● |
+| `config.yaml` `slippery:` + `paths.traction_file` | the override's two values, and which plant the running stack is on | ● |
+| `tools/sensor_evidence.py` | stamps every session with its plant and **refuses to record without one**; refuses to read two plants into one document; refuses a diverged filter before the drive is spent | extended |
+| `tools/evidence_core.py` | `track_error()` / `track_error_of()` / `travel_projection()` — the end error split ALONG the direction of travel; `diverged_at()` / `require_not_diverged()` — a broken filter told from a drifting one. Suite 106 → **138** tests, selftest 22 → **26** checks | extended |
 
 **The preamble the tables below cannot be read without.**
 
@@ -326,6 +335,15 @@ than 0.05 m or 0.02 rad from `vehicle.spawn`; all thirteen sessions in
 this file read **exactly** `(-17.000000, 10.000000) yaw 3.141590`,
 0.0000 m and 0.00000 rad off.
 
+**CHECKED AGAINST §8.6's BOUND, 2026-08-26 (F2 Task 2).** That task
+measured `ekf_node` diverging at startup on most bringups of this stack
+and added a check for it; every one of the thirteen fused streams below
+passes, with the largest distance any of them reaches from its own origin
+being **12.13 m** against a bound of 100 m. **The figures in this section
+are figures about a filter that ran.** What §8.6 puts in question is
+whether they can be *reproduced* on this rig today, which is a different
+statement and is made there.
+
 ### 3.0 The raw wheel odometry did not move, and that is the control
 
 Two new children on a stack whose figures are all taken under a real-time
@@ -608,6 +626,13 @@ is not published by anything in this phase — `ekf.yaml`'s `world_frame`
 is the odom frame, so the filter emits exactly one transform and cannot
 quietly become that edge's owner.
 
+**F2 Task 2 measured the two halves apart and put a number on the one
+that is handed over.** §8.5 splits every end error into along-track and
+cross-track in the ground truth's own frame: fusion moves cross-track by
+up to 68 % and along-track by **1.5 percentage points across four runs**,
+which is nothing. On the slippery plant of §8 that untouchable half is
+**+1.02 to +1.06 m over 11 m**, more than double this section's figure.
+
 ---
 
 ## 6. The capture
@@ -687,6 +712,8 @@ figure `EVIDENCE_SENSORS.md` §3 published, to the digit.
 
 ## 7. The suite
 
+**As F2 Task 1 left it:**
+
 ```
 $ python -m pytest m5_ver3/tests/ -q
 106 passed
@@ -702,6 +729,31 @@ $ python m5_ver3/nodes/wheel_odom_core.py --selftest
 and the shell's other pure helpers, 12 for `compare_drift()` and
 `sdf_link_pose()`. The selftest went from 16 checks to 22.
 
+**EXTENDED BY F2 TASK 2 to 138 and 26** — see §8 for what each addition
+is for:
+
+```
+$ python -m pytest m5_ver3/tests/ -q
+138 passed
+
+$ python m5_ver3/tools/evidence_core.py --selftest
+26/26 checks passed
+
+$ python m5_ver3/nodes/wheel_odom_core.py --selftest
+12/12 checks passed
+```
+
+19 for the along/cross-track split and the travel sense it is taken in
+(`track_error`, `track_error_of`, `travel_projection`), 6 for the
+divergence bound (`diverged_at`, `require_not_diverged`) and 13 in a new
+file, `tests/test_sensor_evidence_traction.py`, for the traction label —
+the one piece of logic that decides whether two recordings may be read
+into one document. The selftest gained the two checks that would have
+caught the two ways this task got its own arithmetic wrong: an
+along-track split taken on the nose of a truck that drives forks-trailing
+(every sign reversed), and a broken filter told apart from a drifting one
+by the reader instead of by a bound.
+
 **The two tests that exist because a comparison is the easiest thing in
 this file to flatter:**
 
@@ -712,3 +764,493 @@ this file to flatter:**
 - *the yaw is compared by MAGNITUDE and keeps its SIGN* — −1.73 rad
   becoming +0.02 rad is 98.8 % removed and not 101 %, and the signs are
   what say **which way** each estimate was wrong.
+
+---
+
+## 8. The slip scenario — why fusion earns its keep, and where it does not (F2 Task 2)
+
+Everything under this heading was measured on **2026-08-26**, on the rig
+named at the top of this file, with the stack **stopped and restarted
+before every run** and every session recorded headless. It answers one
+question: on a floor the truck cannot grip, **the gyro keeps the heading
+honest while the wheel odometry lies about distance** — how much of each,
+before and after fusion, and what fusion cannot touch.
+
+**Two plants and one model file.** `gazebo/forklift_ver3/model.sdf` is
+byte-identical between the two columns of every table below; the
+difference is three service calls made after the truck is spawned. §8.1
+is the mechanism and the control that proves it is the same thing as
+editing the model. §8.6 is a defect in `ekf_node` that this task found
+while trying to measure the rest, and it governs how the sessions here
+were obtained.
+
+### 8.1 The mechanism: a runtime override, and the reply is checked
+
+F2's constraint 12 gives a ladder — investigate a runtime override first,
+generate a model variant only if the override provably fails. **It does
+not fail.** gz-sim 8.11's `UserCommands` system advertises
+
+```
+/world/warehouse/wheel_slip            gz.msgs.WheelSlipParametersCmd -> gz.msgs.Boolean
+/world/warehouse/wheel_slip/blocking   gz.msgs.WheelSlipParametersCmd -> gz.msgs.Boolean
+```
+
+on every world this stack starts (`gz service -l`, partition `m5v3`).
+`m5v3.sh start --slippery` calls the **blocking** variant once per wheel
+after the spawn and before any bridge is opened, so no consumer ever sees
+a message from the un-overridden plant.
+
+**Three things make the reply worth believing, and each is measured.**
+
+| # | Check | Measured |
+|---|---|---|
+| 1 | The **blocking** endpoint returns only after the command has run inside the simulation loop and found the entity | `forklift_ver3::drive_wheel` → `data: true` |
+| 2 | A link the model does not carry comes back **empty** — and `gz service` still exits **0** | `forklift_ver3::no_such_wheel` → *(no output)*, `rc=0`; `no_such_model::rear_wheel_right` → *(no output)*, `rc=0` |
+| 3 | The override at the model's own value reproduces the model's own slip | §8.2 row 1 |
+
+Check 2 is why `m5v3.sh` tests the reply's **text** and never the exit
+status, and why the refusal says an empty reply is how this service
+reports an entity it could not find. Check 3 is the control: **the same
+7.0 applied through the service gives 0.95434 % where the model's own
+7.0 gives 0.95299 %** — 0.00135 percentage points apart, inside the
+0.003 pp run-to-run repeatability `EVIDENCE_LATERAL_TUNE.md` §3.1 already
+established for this bench. The runtime path and the SDF path are the
+same physics.
+
+**The wheels are read out of the model and not listed anywhere else.**
+`m5v3.sh`'s `wheel_links()` greps `<wheel link_name="...">` out of
+`model.sdf` — the WheelSlip plugin's own element, and the only place that
+attribute appears in that file — so the override cannot come to name a
+different set of wheels from the plugin it is overriding. The applied
+count is compared against the found count and a wheel that replies
+anything but `data: true` is a refusal naming the log, the model and the
+half-overridden state it leaves behind.
+
+**The values are in EFFECT space, and the file says so three times.**
+`EVIDENCE_LATERAL_TUNE.md` §3.1 measured that on this rig the element
+named `<slip_compliance_lateral>` is the one that governs the wheel's
+**longitudinal** slip. The same swap is in this message's two fields,
+because they reach the same code. Both are therefore set to the **same**
+number — which is also what `wheel_slip:` ships, and for the measured
+reason that every setting making one direction of a contact stiffer than
+the other brought back the heading dependence of `EVIDENCE_SENSORS.md`
+§4.2. Six equal compliances. **The normal forces are not overridden**:
+the truck's weight did not change, only the floor under it.
+
+**The label is a mechanism.** `start` writes `paths.traction_file` on
+every bringup — nominal ones included, so a nominal run cannot inherit
+yesterday's slippery answer; `stop` deletes it; `status` prints it;
+`record` copies it into `session.txt` and **refuses to record without
+it**; and `analyse` **refuses a set of sessions that mixes the two
+plants**, naming both groups and printing the two commands that would
+have been right. A slippery run that reached §3's tables unlabelled would
+not look like a failure. It would look like a row.
+
+### 8.2 The ladder
+
+Every row is one `stop` / edit `config.yaml`'s `slippery:` / fresh
+`start --headless --slippery` cycle, and one `tools/slip_bench.sh` at the
+0.7 m/s cruise **from the spawn pose** (`EVIDENCE_LATERAL_TUNE.md` §6.2
+says why that sentence is here). `slip_cmd` is
+`(commanded tread speed − ground truth speed) / commanded tread speed`;
+forward and astern are both driven and both reported, because an
+asymmetry between them is how this bench says it measured a wall rather
+than a tyre.
+
+| # | compliance (both keys, EFFECT space) | applied by | forward | astern | **mean slip at cruise** | verdict |
+|---|---|---|---|---|---|---|
+| 0 | 7.0 / 7.0 | *model.sdf, no override* | 0.95550 % | 0.95048 % | **0.95299 %** | the nominal plant — the reference, not a candidate |
+| 1 | 7.0 / 7.0 | `--slippery` | 0.95346 % | 0.95522 % | **0.95434 %** | **the mechanism control** — 0.00135 pp from row 0 |
+| 2 | 12.0 / 12.0 | `--slippery` | 3.17749 % | 3.19263 % | **3.18506 %** | rejected: 3.19 % does not clear the 5 % the brief asks for |
+| 3 | **16.0 / 16.0** | `--slippery` | 6.16768 % | 6.18977 % | **6.17873 %** | **ACCEPTED** |
+| 4 | 20.0 / 20.0 | `--slippery` | 9.74487 % | 9.77062 % | **9.75774 %** | rejected: clears the bar twice over, and nothing asked for that |
+| 5 | 40.0 / 40.0 | `--slippery` | 28.24009 % | 28.16399 % | **28.20204 %** | rejected: 0.70 m/s commanded delivers 0.50 m/s of ground — a different vehicle, not a wet patch |
+
+**Why 16.0 and not 20.0.** The requirement is a floor, not a target:
+`straight` must show **more than 5 %** longitudinal slip and the truck
+must still finish its profiles. Row 3 is the **lowest row that clears
+it**, with 24 % of margin over the bar. Every further point of slip is a
+larger departure from the plant every other figure in this file, in
+`EVIDENCE_SENSORS.md` and in `EVIDENCE_LATERAL_TUNE.md` was measured on,
+and buys nothing the question needs. Row 4 is not wrong; it is
+unmotivated, and a value chosen past a requirement is a value chosen for
+its look.
+
+**The response is markedly non-linear, which is why there is a ladder and
+not an interpolation.** Slip per unit of compliance runs 0.136, 0.266,
+0.386, 0.488 and 0.705 %/unit across rows 0–5: doubling the compliance
+from 7 to 16 multiplies the slip by **6.5**. A value predicted from row 0
+by proportion would have been 2.2 % and would have missed the bar
+entirely.
+
+### 8.3 The accepted plant, and that the truck can still drive on it
+
+**Longitudinal slip at the 0.7 m/s cruise: 0.95299 % → 6.17873 %**, a
+factor of 6.5, on all three wheels, with the normal forces and every
+other property of the vehicle unchanged.
+
+**Drivable, and the floor check is the one `config.yaml`'s `square:`
+block already specifies.** The slippery `square` finishes — `drive_route`
+exits 0 on every run below — and the bound is the rear axle's worst
+position plus the whole 1.50 m envelope radius at every bearing at once,
+which is a bound and not a reconstruction:
+
+| | rear axle, x | rear axle, y | envelope bound, y max | margin to `WallNorth` at y = 14.00 |
+|---|---|---|---|---|
+| nominal `square` (`…085338`) | −16.9820 … −15.3150 | 9.9298 … 11.6515 | 13.1515 | **0.8485 m** |
+| slippery `square` (`…110235`) | −17.2314 … −15.3735 | 9.9955 … 11.7357 | 13.2357 | **0.7643 m** |
+| slippery `square` (`…095306`) | −17.2861 … −15.3613 | 9.9955 … 11.8018 | 13.3018 | **0.6982 m** |
+
+The slippery path is **wider**, and the reason is in the same runs' own
+numbers rather than assumed: the plant delivers **5.985** and **6.022
+rad** of turn over the four corners against the nominal **6.301 rad**, so
+each corner comes out long and the square opens up. The fork tips — the
+point that sizes this profile — reach y = 12.639 and 12.665 slippery
+against **12.740** nominal, so the tips are if anything **further** from
+the wall; the axle-envelope bound above is the conservative one and the
+worse of the two slippery runs still leaves **0.70 m**.
+
+**What "drivable" is not.** It is not "the run completed": an open-loop
+table of held commands completes whatever the truck does, which is why
+`EVIDENCE_LATERAL_TUNE.md` §6.2 has a bench that measured a wall. It is
+the ground truth staying inside the corridor, which is what the table
+above reads, and the vehicle still reaching a steady cruise, which is
+what §8.2's `slip_bench` rows read — 0.6567 m/s of ground at a 0.7000 m/s
+command, against row 5's 0.5026 m/s.
+
+### 8.4 What slip does to the wheel odometry, before any filter touches it
+
+**This half of the claim needs no EKF at all**, which is why it is stated
+first and separately: it is a property of dead reckoning, and every
+figure is `sensor_evidence.py analyse`'s, on the same instrument and the
+same absolute spawn-frame transform as §3.
+
+#### `straight` — the tyre creeps and only the DISTANCE moves
+
+Four runs against five. The no-slip column is `…085033`, `…085135`,
+`…085238` (§3.1's own runs, re-analysed with this task's added columns)
+plus `…103638`, a fourth taken today and carrying the traction label; the
+slippery column is `…095639`, `…095748`, `…095853`, `…110130`, `…110416`.
+
+| figure | no slip, ×4 | **slippery 16.0, ×5** | change |
+|---|---|---|---|
+| ground-truth path | 11.5871 – 11.6443 m | 10.8467 – 11.0367 m | the truck covers **less ground for the same commands** |
+| estimate's path | 12.0764 – 12.1347 m | 11.8769 – 12.0966 m | **the same distance** — the wheel turned the same |
+| **path error** | **+4.21 … +4.23 %** | **+9.50 … +9.64 %** | **×2.28** |
+| end error | 0.5800 – 0.5826 m | 1.0709 – 1.1052 m | ×1.87 |
+| **ALONG-track** | **+0.4834 … +0.4844 m** | **+1.0244 … +1.0567 m** | **×2.18** |
+| **CROSS-track** | **−0.3204 … −0.3237 m** | **−0.3120 … −0.3242 m** | **unchanged** |
+| **end heading** | **−0.0576 … −0.0579 rad** | **−0.0569 … −0.0579 rad** | **unchanged** |
+| rms over run | 0.5217 – 0.5256 m | 1.0090 – 1.0452 m | ×1.96 |
+
+**The two columns that do not move are the measurement.** Longitudinal
+slip is a lie about how far a revolution carries the truck; the wheel
+odometry's heading comes from integrating the STEER angle and not the
+tread, so it does not feel the tyre creeping at all. Cross-track and end
+heading are inside their own no-slip run-to-run spread — 0.0032 m and
+0.0010 rad — while the along-track error more than doubles. **That is
+"the wheel odometry lies about distance" as an isolated reading**, and it
+is why the split was worth adding to the instrument: the end-error row alone (×1.87) mixes the two and understates
+the one that actually moved.
+
+**Predicted before it was measured, and it lands.** The estimate's path
+over the truth's is `k / (1 − s)` with `s` the cruise slip and `k`
+everything else the estimator gets wrong (the believed radius, the count
+grid). From the no-slip runs, `k = 1.0422 × (1 − 0.0095299) = 1.03224`.
+At `s = 0.0617873` that gives **+10.02 %**, against a measured **+9.50 to
++9.64 %**. The 0.4 pp gap is the profile's ramps: `slip_bench` measures at
+a steady 0.7 m/s and `straight` spends 4 s of its 18.5 s of motion below
+that, where the slip is smaller.
+
+#### `square` — slip takes the heading too, and the reason is the plant
+
+One run against two: `…085338` against `…110235` and `…095306`.
+
+| figure | no slip | **slippery 16.0** | **slippery 16.0** |
+|---|---|---|---|
+| session | `…085338` | `…110235` | `…095306` |
+| ground truth: path | 7.5499 m | 6.8839 m | 6.9445 m |
+| ground truth: **turn delivered** | **+6.3012 rad** | **+6.0224 rad** | **+5.9847 rad** |
+| ground truth: closure | 0.1019 m | 0.5976 m | 0.7034 m |
+| estimate's path | 8.2883 m | 8.2137 m | 8.2676 m |
+| **path error** | **+9.78 %** | **+19.32 %** | **+19.05 %** |
+| end error | 0.6831 m | 1.3144 m | 1.2845 m |
+| ALONG-track | +0.6284 m | +1.2651 m | +1.2292 m |
+| CROSS-track | −0.2679 m | −0.3567 m | −0.3731 m |
+| **end heading error** | **+0.5229 rad** | **+0.8641 rad** | **+0.8423 rad** |
+| rms over run | 0.4003 m | 0.7008 m | 0.6934 m |
+
+**Here the heading DOES move, and it is not the estimator that changed.**
+The plant delivers **6.0224** and **5.9847 rad** of turn where it
+delivered 6.3012 — a compliant contact patch scrubs more, so each corner
+comes out long — and the wheel odometry, which believes its steer angle,
+goes on reporting the turn the geometry promises. **The yaw the plant did
+not take is almost exactly the yaw error that appeared**: 0.2788 rad
+missing against 0.3412 rad of extra heading error on `…110235`, and
+0.3165 against 0.3194 on `…095306`.
+
+**So the two profiles ask different questions of the filter**, and that
+is exactly what §8.5 needs them for: on `straight`, slip is a pure
+distance lie and the gyro has nothing new to correct; on `square`, slip
+adds a heading error on top of the distance lie, and the gyro is the only
+thing on this vehicle that observes it.
+
+### 8.5 What fusion fixes, what it does not, and the F3 handoff
+
+**The two halves of a dead-reckoned position error have different cures,
+and the split added by this task measures them apart.**
+
+#### `straight` — the profile that isolates them
+
+`straight` ends on its starting heading, so along-track *is* the distance
+lie and cross-track *is* the heading lie, with no mixing between them.
+Six runs, four nominal and two slippery, every column `analyse`'s own
+`removed`:
+
+| run | plant | **along-track** | cross-track | end heading |
+|---|---|---|---|---|
+| `…085033` | nominal | **+0.2 %** | −21.7 % | −19.2 % |
+| `…085135` | nominal | **−1.2 %** | +68.2 % | +61.3 % |
+| `…085238` | nominal | **−0.8 %** | +65.5 % | +60.4 % |
+| `…103638` | nominal | **+0.3 %** | −24.3 % | −20.8 % |
+| `…110130` | **slippery** | **+0.2 %** | −28.9 % | −23.0 % |
+| `…110416` | **slippery** | **−0.4 %** | +71.5 % | +63.4 % |
+
+**Cross-track moves with the heading — run for run, sign for sign, to
+within a few percentage points — and along-track does not move at all.**
+Across six runs and both plants the along-track column spans **1.5
+percentage points**; the cross-track column spans **100**. The gyro
+observes heading, so heading is what fusion reaches; nothing on this
+vehicle observes distance, so the distance error passes through the
+filter untouched, on the dry floor and the wet one alike.
+
+**Which way the heading goes is the bias draw and not the plant.** §3.4
+measured that lottery on the nominal plant; the two slippery runs above
+drew one of each — `…110130` got a bias that added to the wheel
+odometry's heading error (−28.9 %) and `…110416` got one that opposed it
+(+71.5 %) — on a heading error slip did not change. **Slip does not
+touch this column at all**, which is the point of §8.4's second-to-last
+row.
+
+#### `square` — the profile that HAS a heading error, and what slip does to the bargain
+
+| figure | nominal raw | nominal EKF | removed | **slippery raw** | **slippery EKF** | **removed** |
+|---|---|---|---|---|---|---|
+| **end heading** | +0.5229 rad | +0.3862 rad | **26.1 %** | **+0.8641 rad** | **+0.6554 rad** | **24.1 %** |
+| end error | 0.6831 m | 0.5448 m | 20.2 % | 1.3144 m | 1.0657 m | 18.9 % |
+| along-track | +0.6284 m | +0.4900 m | 22.0 % | +1.2651 m | +1.0058 m | 20.5 % |
+| cross-track | −0.2679 m | −0.2381 m | 11.1 % | −0.3567 m | −0.3521 m | 1.3 % |
+| rms over run | 0.4003 m | 0.3100 m | 22.6 % | 0.7008 m | 0.5571 m | 20.5 % |
+| **path error** | **+9.78 %** | **+9.79 %** | — | **+19.32 %** | **+19.33 %** | — |
+
+**This is where fusion earns its keep, and the fraction is not the
+reading — the metres are.** The gyro removes about a quarter of the
+heading error on both plants (26.1 % dry, 24.1 % wet), but slip made that
+error 65 % bigger, so what the same quarter is worth grows from
+**0.137 rad to 0.209 rad**. On the profile that has a heading error, the
+worse the floor, the more the gyro is carrying.
+
+**And the row that does not move is the whole of §8.5's other half.**
+The path error is reproduced from the filter's input to **one hundredth
+of a percentage point** on both plants — +9.78 → +9.79 % dry, +19.32 →
++19.33 % wet. A filter cannot make its input's distance error go away,
+and one whose path *shortens* is losing motion rather than correcting it
+(§4, reading 3).
+
+**Why along-track improves 20.5 % here and 0.2 % on `straight`, stated
+because it looks like a contradiction and is not.** The split is taken at
+the ground truth's END course. On a profile that turns 6 rad, a heading
+error rotates the estimate's whole trajectory, so the end-position error
+resolved on that final axis carries a heading component in BOTH of its
+parts. **The split separates distance from heading only on a run that
+does not turn** — which is exactly why `straight` is the profile the
+claim is stated on, and why the path-error row is carried beside it: that
+one needs no frame at all.
+
+#### The honest handoff, and it is F3's by name
+
+**The residual this phase cannot remove is the along-track error**, and
+on the slippery plant it is **+1.054 to +1.058 m over 11.02 m of travel
+— +9.62 % of path** on `straight`, and **+1.006 m on +19.33 %** of a
+6.88 m `square`. It grows without bound with distance driven, and no line
+of `ekf.yaml` changes that: both of this filter's inputs are **rates**,
+and the integral of a biased rate is a pose whose error has no ceiling.
+The accelerometer cannot correct a distance (its own bias
+double-integrates to 98 m over 100 s unaided) and the gyro says nothing
+about distance at all.
+
+Bounding it needs a measurement of where the vehicle actually **is**,
+which means something **outside** the vehicle: **F3's map and AMCL**,
+stacking `map` → `odom` on the transform this phase publishes. Nothing in
+F2 observes absolute position, and `ekf.yaml`'s `world_frame` is the odom
+frame precisely so that this filter cannot quietly become that edge's
+owner. **The number F3 is being handed is +1.06 m of along-track error
+per 11 m driven on a wet floor, and it is the number to score `map` →
+`odom` against.**
+
+### 8.6 THE FILTER DIVERGES AT STARTUP, SILENTLY, AND THE CHANNEL IS MEASURED
+
+**This is a defect in the F2 Task 1 deliverable, found by Task 2 while
+trying to measure it, and it is recorded before the tables it governs
+rather than after them.**
+
+On **2026-08-26 from about 09:50 onward**, `robot_localization`'s
+`ekf_node` — the same binary, the same `ekf.yaml`, the same committed
+code that produced §3's thirteen sessions that morning — **blows up
+during its first cycles on most bringups of this stack**. It does so on
+the nominal plant and the slippery one alike, and it says **nothing at
+all**.
+
+**The signature, captured off the wire from before the child starts**
+(one bringup, subscriber attached ahead of `start`, sim-time stamps):
+
+| EKF output | sim | x [m] | vx [m/s] | pose covariance `xx` |
+|---|---|---|---|---|
+| first | 10.210 | 0 | 0 | 5.00001e-4 |
+| **second** | 10.230 | **−1.33917e+48** | **−1.58214e+50** | **2.42253e+84** |
+| third | 10.252 | −3.34259e+48 | −1.54222e+50 | 1.36916e+86 |
+| … | … | saturates at −5.7379e+48 | decays back to sane over ~8 s | 2.9127e+87 |
+
+One 20 ms cycle takes the covariance from 5e-4 to **2.4e84** and the
+velocity state to **1.6e50**. The position saturates and then never
+moves again for the rest of the run while the **yaw carries on working
+normally** — so the published pose is a plausible-looking heading bolted
+to a position 5.7e48 m from the origin.
+
+**What it is NOT.** Every candidate that would make this a data problem
+was measured and excluded on the same rig:
+
+- **The clock never goes backwards**: 0 inversions in 15 480 `/clock`
+  messages over a bringup.
+- **The accelerometer is clean**: `ax` over a whole run reads
+  −0.0209 to +0.0550 m/s² — a bias plus noise, exactly the model's
+  profile — with `linear_acceleration_covariance[0]` a constant
+  1.15778e-4 and `angular_velocity_covariance[8]` a constant 3.04503e-6
+  on every message, including the first.
+- **It is not the wheel odometry's `vy`** (F2 Task 1's reversed ruling,
+  the last thing to change in this filter).
+- **It is not the initial covariance**, at either of two values.
+- **It is not the filter's own rate.**
+
+**What it IS — the ladder, every row a run of fresh bringups on the
+committed code, counting how many published a first pose outside 100 m
+of the origin:**
+
+| Configuration | bringups | diverged |
+|---|---|---|
+| shipped `ekf.yaml` | 11 | **11** |
+| shipped, on a WSL cold-booted seconds before | 3 | 2 |
+| shipped, `frequency` 20 Hz instead of 50 | 3 | 3 |
+| shipped, `initial_estimate_covariance` 1e-6 | 3 | 2 |
+| shipped, `initial_estimate_covariance` 1e-3 | 4 | 4 |
+| shipped, a 10 s delay before the `ekf` child | 5 | 3 |
+| shipped, `odom0_config[7]` (**`vy`**) dropped | 4 | 4 |
+| shipped + `debug: true` (the node runs ~30× slower) | 3 | **0** |
+| **`imu0_config[12]` (`ax`) dropped, everything else shipped** | **4** | **0** |
+
+**Thirteen of fourteen on the shipped configuration; zero of four with
+the accelerometer channel out.** It is the IMU's linear-acceleration
+channel, and it is a numerical instability rather than bad data: the two
+configurations that stop it are the one that removes `ax` and the one
+that makes the node thirty times slower, and the discriminator between a
+clean bringup and a diverged one is **how soon the filter's first
+CORRECTION lands after its first PREDICT** — clean runs correct three
+cycles in with the covariance grown to ~4.6e-3, diverged runs correct on
+the next cycle with it still at 5.0e-4.
+
+**This gate does NOT change what is fused.** `ekf.yaml` records that
+*"`ax` IS FUSED BY OWNER RULING"*, and an owner ruling is not an
+implementer's to reverse on a Tuesday. The finding is filed here with the
+measurement that would settle it; §5 already states that the
+accelerometer cannot correct a distance on this stack, and §2.3 and §2.4
+already record two other ways this same channel misbehaves on this
+device, so a ruling has three independent measurements to weigh.
+
+**What this gate DID change is that the failure can no longer reach a
+table.** `EVIDENCE_FUSION.md` §2.6 named three ways this filter fails
+silently; this is the fourth, and the first that produces *numbers*
+rather than an absence of them. Two guards were added, both on
+`evidence_core.diverged_at()`, both tested without a simulator:
+
+- **`record` checks the filter with the truck standing still at the
+  spawn pose, before the drive is spent.** Nothing has moved, so the
+  fused estimate must still be at the origin of its own odom frame. A
+  diverged filter is refused there, naming the check, and no run is
+  driven.
+- **`analyse` refuses to score a session whose fused stream left the
+  building**, naming the sample and the bound. `config.yaml`'s
+  `evidence.analyse.fused_sanity_m` is **100.0** m — the floor's longest
+  diagonal is 57.7 m and the worst end error ever measured on this track
+  is 1.29 m, so the bound has seventy-seven times the headroom of the
+  largest honest figure while the failure misses it by **forty-five
+  orders of magnitude**.
+
+**How the sessions in §8.3–§8.5 were obtained, stated plainly.** Each was
+taken by bringing the stack up, reading the filter's pose with the truck
+at rest, and **stopping and starting again if it had diverged** — the
+retry counts are in §8.7. That is not selection among measurements: a
+bringup in which the filter blew up before the vehicle moved is a
+bringup that failed, in the same class as a child that died during
+startup, and this stack already refuses those. No run was ever discarded
+after it was driven, and no run was discarded for what it measured.
+
+### 8.7 The capture
+
+All sessions are under `m5_ver3/logs/evidence/` and all are untracked.
+Every one was taken headless, from a stack stopped and started for it, and
+every one carries its traction in `session.txt` — the four re-analysed
+`…0850xx`/`…085338` runs are §3's own and predate the label, which
+`analyse` reports as *unrecorded* rather than reading as nominal.
+
+| Session | profile | traction | `drive_route` | fused stream |
+|---|---|---|---|---|
+| `drive-straight-20260826-085033` | straight | *unrecorded* (nominal by provenance) | 0 | sane |
+| `drive-straight-20260826-085135` | straight | *unrecorded* (nominal by provenance) | 0 | sane |
+| `drive-straight-20260826-085238` | straight | *unrecorded* (nominal by provenance) | 0 | sane |
+| `drive-square-20260826-085338` | square | *unrecorded* (nominal by provenance) | 0 | sane |
+| `drive-straight-20260826-103638` | straight | **nominal 7.0 / 7.0** | 0 | sane |
+| `drive-straight-20260826-095639` | straight | **slippery 16.0 / 16.0** | 0 | **DIVERGED** |
+| `drive-straight-20260826-095748` | straight | **slippery 16.0 / 16.0** | 0 | **DIVERGED** |
+| `drive-straight-20260826-095853` | straight | **slippery 16.0 / 16.0** | 0 | **DIVERGED** |
+| `drive-square-20260826-095306` | square | **slippery 16.0 / 16.0** | 0 | **DIVERGED** |
+| `drive-straight-20260826-110130` | straight | **slippery 16.0 / 16.0** | 0 | sane |
+| `drive-straight-20260826-110416` | straight | **slippery 16.0 / 16.0** | 0 | sane |
+| `drive-square-20260826-110235` | square | **slippery 16.0 / 16.0** | 0 | sane |
+
+The four **DIVERGED** rows are §8.6, and they are kept rather than
+deleted: their ground truth and their raw wheel odometry are four of the
+five slippery `straight`/`square` runs §8.4 is measured on, and `analyse`
+prints exactly those and withholds the rest. The three **sane** rows are
+where §8.5's fused columns come from, and the bringups each one cost are
+**4, 1 and 2** — with a fourth run, a second slippery `square`, still
+being retried when this section was written. That is the incidence of
+§8.6 as it stood on the afternoon of 2026-08-26, from the other side.
+
+**Reproducing any row of §8.4 needs no simulator**, exactly as §6 says of
+§3 — and it needs one command per plant, because the tool will not read
+the two into one document:
+
+```
+python3 m5_ver3/tools/sensor_evidence.py analyse \
+    m5_ver3/logs/evidence/drive-straight-20260826-095639
+```
+
+Asked for a mixed set it refuses, names both groups and prints the two
+commands that would have been right. Asked for a session whose filter
+diverged it prints the ground truth and the raw wheel odometry, withholds
+every fused figure, and **exits non-zero**.
+
+### 8.8 What this section did not do
+
+- **It did not rule on `ax`.** §8.6 is a finding with a measurement
+  attached, not a change. `ekf.yaml` is untouched by this task.
+- **It did not re-measure `corner_creep` under slip.** `straight` and
+  `square` are what the brief names and what the two halves of the claim
+  need; a third profile would have been a third of the rig time for a
+  reading neither half is missing.
+- **It did not tune the slippery values for a nicer table.** The ladder
+  is in §8.2 with its rejected rows, the acceptance was the requirement's
+  own floor, and the chosen row is the lowest one that clears it.
+- **It did not touch `model.sdf`, `ekf.yaml`, or anything outside
+  `m5_ver3/`.** Constraint 12's first rung held, so the generated-variant
+  branch was never taken.
