@@ -106,11 +106,33 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 #   node's own reads /opt/ros/jazzy/lib/nav2_amcl/amcl. One pattern
 #   finds both, and ours() is what keeps either from reaching a process
 #   that does not carry GZ_PARTITION=m5v3 in its environment.
+#   AND THE LAST IS F3 TASK 3's OTHER LOCALISER, ADDED AFTER IT COST A
+#   WHOLE MEASUREMENT SESSION. It is the EXECUTABLE and not the package,
+#   which is the opposite of the two above and for a stated reason:
+#   `slam_toolbox` also names the OFFLINE mapper tools/build_map.sh runs
+#   on domain 98, and a pattern that nominates that would lean the whole
+#   safety of the sweep on ours() rather than on the pattern.
+#     WHAT ITS ABSENCE DID, MEASURED 2026-08-27. `spawn` records the pid
+#     of the `ros2 run` WRAPPER; that wrapper forks the real executable,
+#     so `stop`'s pidfile pass kills the wrapper and the NODE survives.
+#     The sweep is what catches that for every other child here - and
+#     with no pattern for this one, NINE localisation nodes accumulated
+#     across nine bringups, every one of them still publishing
+#     `map` -> `odom` on domain 97 out of a world that no longer existed.
+#     The symptoms were an EKF that "never came up" (its topic lost in a
+#     graph with nine stale participants in it) and a localiser answering
+#     0.66 m from its seed, IDENTICALLY, on three consecutive bringups -
+#     which is what a stale publisher looks like from the inside, and
+#     which for an afternoon looked exactly like the snap-relocalisation
+#     pathology docs/reports/m5v3-04 predicts for this arm.
+#     A LIST IS THE ONE THING A DUPLICATED MECHANISM CANNOT SURVIVE, and
+#     that is this file's own header two paragraphs up. It was right.
 M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py"
                "static_transform_publisher" "ekf_node"
                "rf2o_laser_odometry_node" "rf2o_twist.py"
                "fixed_lag_smoother_node"
-               "nav2_map_server" "nav2_amcl")
+               "nav2_map_server" "nav2_amcl"
+               "localization_slam_toolbox_node")
 
 # The same list as one pgrep alternation, for the callers that want a
 # single pattern rather than a loop.
