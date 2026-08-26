@@ -239,7 +239,14 @@ is nav2's own figure for an RViz *2D Pose Estimate*: 0.25 m² each way
 **It is a MESSAGE and not the `set_initial_pose` parameter, and the
 reason is measured.** With `set_initial_pose: false` and no message, AMCL
 processes **no scan**, publishes **no pose** and broadcasts **no
-transform** — it logs `Waiting for the initial pose` and nothing else.
+transform** — with the scanner's static transform PRESENT and **zero**
+message-filter drops, so it is the seed and not the geometry that is
+missing. What it logs, every two seconds, is
+
+```
+[WARN] [amcl]: AMCL cannot publish a pose or update the transform.
+       Please set the initial pose...
+```
 Two things follow. The first thing this localiser ever says is its answer
 to a seed the bringup can point at, rather than an answer to a parameter
 that was already there; and the gate in §3 can subscribe *before* the

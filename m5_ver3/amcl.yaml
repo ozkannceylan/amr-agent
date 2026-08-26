@@ -476,7 +476,11 @@ amcl:
     #   IT MAKES THE SEED AN EVENT WITH A TIME. Measured on this rig:
     #   with `set_initial_pose` false and no message, amcl processes NO
     #   scan, publishes NO pose and broadcasts NO transform - it logs
-    #   "Waiting for the initial pose" and nothing else. So the first
+    #   "AMCL cannot publish a pose or update the transform. Please set
+    #   the initial pose..." every two seconds and nothing else - with
+    #   the scanner's transform PRESENT and not one message filter drop,
+    #   which is what says the seed and not the geometry is what is
+    #   missing. So the first
     #   thing this localiser ever says is its answer to a seed the
     #   bringup can point at, rather than an answer to a parameter that
     #   was already there.

@@ -33,9 +33,12 @@ that is in fact perfectly healthy.
 MEASURED ON THIS RIG, 2026-08-26, and it is why the seed is a message
 rather than nav2's `set_initial_pose` parameter: with that parameter
 false and no message, amcl processes no scan, publishes no pose and
-broadcasts no transform at all - it logs "Waiting for the initial pose"
-and nothing else. So the first thing this localiser ever says is its
-answer to a seed this gate can point at.
+broadcasts no transform at all - with the scanner's transform PRESENT
+and not one message-filter drop, so it is the seed and not the geometry
+that is missing. What it logs, every two seconds, is "AMCL cannot publish
+a pose or update the transform. Please set the initial pose...". So the
+first thing this localiser ever says is its answer to a seed this gate
+can point at.
 
 ---- THE SEED IS THE MEASUREMENT HARNESS AND IT IS LABELLED AS SUCH ----
 
@@ -299,8 +302,10 @@ def main(argv=None):
                 "but not ACTIVATED,",
                 "    and amcl blocks in on_activate waiting for one.",
                 "  - it never received this seed, in which case its log "
-                "says 'Waiting for the",
-                "    initial pose' every two seconds.",
+                "says 'AMCL cannot",
+                "    publish a pose or update the transform. Please set "
+                "the initial pose...'",
+                "    every two seconds.",
                 "read the amcl log named above, then stop the stack.")
         latest = received[-1]
         quaternion = latest.pose.pose.orientation
