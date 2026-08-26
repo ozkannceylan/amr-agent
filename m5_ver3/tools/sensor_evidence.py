@@ -110,7 +110,7 @@ REQUIRED_KEYS = (
     "topics.clock", "topics.odom_ground_truth", "topics.scan_nav",
     "topics.imu", "topics.cam_depth", "topics.cam_info",
     "topics.joint_state", "topics.drive_speed_read_a", "topics.wheel_odom",
-    "topics.odometry_filtered",
+    "topics.odometry_filtered", "topics.rf2o_odom",
     "topics.safety_scan_back", "topics.points3d",
     "frames.odom", "frames.base_link", "frames.imu",
     "vehicle.imu_mount.x", "vehicle.imu_mount.y", "vehicle.imu_mount.z",
@@ -162,6 +162,14 @@ FILES = {
     # against, so one session answers "how much did fusing buy" without
     # comparing two runs.
     "ekf_odom": "ekf_odom.csv",
+    # F2 TASK 3's STREAM, AND IT IS THERE ONLY ON THE rf2o ARM. What is
+    # recorded is the RELAY's output - the twist the filter actually
+    # fused, lever arm corrected, covariance attached - and not
+    # rf2o's raw topic, because the raw one has exactly one consumer and
+    # the corrected one is exactly `vx_raw + vyaw * mount_y`, so a
+    # reader who wants the raw number has it by arithmetic rather than
+    # by a second CSV that could disagree with the first.
+    "rf2o_odom": "rf2o_odom.csv",
     "scan_nav": "scan_nav.csv",
     "imu": "imu.csv",
     "depth": "depth.csv",
@@ -261,6 +269,26 @@ def read_traction(cfg):
                    "m5v3.sh's",
                    "write_traction(); a file without that key is a "
                    "truncated write.")
+    # AND THE ESTIMATOR ARM, BY THE SAME RULE AND FOR THE SAME REASON
+    # (F2 Task 3). `--rf2o` puts a second estimator on the same plant:
+    # same model, same floor, same profiles, same CSV columns, same
+    # fused topic. An unlabelled session cannot be told from a wheel+imu
+    # one afterwards, which is exactly what the traction label exists to
+    # prevent on the other axis - so it is a REFUSAL and not a default,
+    # and it is not inferred from the absence of the flag either.
+    if not fields.get("arm"):
+        cfg.refuse("the state file names the estimator arm", path,
+                   "it has no 'arm=' line. m5v3.sh has written one on "
+                   "every bringup",
+                   "since F2 Task 3 - `wheel+imu` or `wheel+imu+rf2o` - "
+                   "so this stack was",
+                   "brought up by an older copy of that script, or the "
+                   "file is a truncated",
+                   "write. RECORDING WITHOUT IT IS NOT ALLOWED: the two "
+                   "arms produce",
+                   "sessions that are identical in every other respect. "
+                   "Stop the stack and",
+                   "start it again with the m5v3.sh in this tree.")
     return fields
 
 
@@ -300,6 +328,14 @@ def describe_session(cfg, session, node, profile, started_wall, exit_code,
          traction.get("slip_compliance_lateral", "")),
         ("slip_compliance_longitudinal",
          traction.get("slip_compliance_longitudinal", "")),
+        # AND SINCE F2 TASK 3 IT CARRIES THE ESTIMATOR ARM TOO, for the
+        # traction label's reason applied to the other half of the
+        # stack. `arm_source` is the provenance the arm alone cannot
+        # give: which parameter files the filter was handed and which
+        # revision of rf2o was in the loop, so a row in EVIDENCE_FUSION
+        # 10 can be traced to a pinned commit rather than to a name.
+        ("arm", traction.get("arm", "")),
+        ("arm_source", traction.get("arm_source", "")),
         ("spawn", "{} {} {}".format(cfg.s("vehicle.spawn.x"),
                                     cfg.s("vehicle.spawn.y"),
                                     cfg.s("vehicle.spawn.yaw"))),
@@ -567,16 +603,32 @@ def _make_recorder(cfg, Node, QoSProfile, types):
 
     class Recorder(Node):
 
-        def __init__(self, session):
+        def __init__(self, session, arm):
             super().__init__("m5v3_sensor_evidence")
             self.cfg = cfg
             self.session = session
+            # THE STREAM LIST FOLLOWS THE ARM THE STACK SAYS IT IS ON,
+            # and it follows it in BOTH directions. On the rf2o arm the
+            # relay's output is a REQUIRED stream, so a run whose
+            # rf2o child died on its way up is refused by name rather
+            # than recorded as a wheel+imu run wearing an rf2o label; on
+            # the default arm the stream is not subscribed at all, so
+            # `missing()` cannot hold a bringup open waiting for a topic
+            # nothing on that stack publishes.
+            #   THE ARM IS READ OFF THE STATE FILE m5v3.sh WROTE, not
+            #   guessed from whether the topic happens to be up: a
+            #   relay that is alive but silent is precisely the failure
+            #   this list exists to catch, and a list built by looking
+            #   would exclude the stream in exactly that case.
+            self.arm = arm
+            names = ["clock", "odom_truth", "wheel_odom", "ekf_odom"]
+            if "rf2o" in arm:
+                names.append("rf2o_odom")
+            names += ["scan_nav", "imu", "depth", "cam_info", "joint_state",
+                      "drive_read_a"]
             self.writers = collections.OrderedDict(
                 (name, Writer(os.path.join(session, FILES[name])))
-                for name in ("clock", "odom_truth", "wheel_odom",
-                             "ekf_odom", "scan_nav",
-                             "imu", "depth", "cam_info", "joint_state",
-                             "drive_read_a"))
+                for name in names)
             self.patch_half = cfg.i("evidence.depth.patch_half")
             self.drive_joint = cfg.s("wheel_odom.drive_joint_name")
             self.steer_joint = cfg.s("wheel_odom.steer_joint_name")
@@ -600,6 +652,15 @@ def _make_recorder(cfg, Node, QoSProfile, types):
             self.create_subscription(
                 types.Odometry, cfg.s("topics.odometry_filtered"),
                 self.cb_fused, qos)
+            # THE LASER ODOMETRY, ON THE ARM THAT HAS ONE. What is
+            # recorded is the RELAY's output - the twist the filter
+            # fused, with its lever arm corrected and its measured
+            # covariance attached - and there is no subscription at all
+            # on the default arm.
+            if "rf2o" in arm:
+                self.create_subscription(
+                    types.Odometry, cfg.s("topics.rf2o_odom"),
+                    self.cb_rf2o, qos)
             self.create_subscription(
                 types.LaserScan, cfg.s("topics.scan_nav"), self.cb_scan, qos)
             self.create_subscription(types.Imu, cfg.s("topics.imu"),
@@ -658,6 +719,15 @@ def _make_recorder(cfg, Node, QoSProfile, types):
             # and EVIDENCE_FUSION.md 8.6.
             self.last_fused = (msg.pose.pose.position.x,
                                msg.pose.pose.position.y)
+
+        def cb_rf2o(self, msg):
+            # SAME COLUMNS AS THE OTHER TWO ODOMETRIES, on purpose: one
+            # reduction reads all three, and a column that existed on
+            # one and not the others would be a reduction with a branch
+            # in it. The pose here is rf2o's own scan-matched dead
+            # reckoning, carried in its own frame and flagged
+            # do-not-fuse; the twist is what reaches the filter.
+            self._odometry(self.writers["rf2o_odom"], msg, twist=True)
 
         def fused_pose(self):
             return getattr(self, "last_fused", None)
@@ -833,12 +903,15 @@ def record(cfg, args):
         traction.get("slip_compliance_lateral", "?"),
         traction.get("slip_compliance_longitudinal", "?"),
         traction.get("wheels", "?")))
+    print("arm        {}".format(traction.get("arm")))
+    print("           {}".format(traction.get("arm_source", "?")))
     print("mode       {}".format(
         "drive " + args.drive if args.drive else "static, vehicle at rest"))
     sys.stdout.flush()
 
     rclpy.init(args=None)
-    node = _make_recorder(cfg, Node, QoSProfile, types)(session)
+    node = _make_recorder(cfg, Node, QoSProfile, types)(
+        session, traction.get("arm", ""))
     drive_exit = ""
     drive_started_wall = ""
     try:
@@ -1835,27 +1908,60 @@ def traction_of(session):
         session.get("slip_compliance_longitudinal", "?"))
 
 
-def refuse_mixed_traction(cfg, paths, sessions):
-    """One `analyse` invocation, one plant.
+#: What a session says about the ESTIMATOR that produced its fused
+#: stream, when it was recorded before F2 Task 3 existed to label it.
+#: Every one of those runs was in fact wheel+imu - `--rf2o` had not been
+#: written - and this file will NOT write that over a blank, for
+#: UNLABELLED's reason: the label is worth something only because it was
+#: read off the running stack, and inferring it from an absence is
+#: exactly the habit the whole chain guards against.
+UNLABELLED_ARM = "unrecorded (session predates F2 Task 3's arm label)"
 
-    THE FAILURE THIS EXISTS TO PREVENT IS NOT A CRASH. `--slippery`
-    brings up a truck whose wheel odometry is wrong in a completely
-    different way, on the same floor, from the same model file, driving
-    the same profiles, writing CSVs of the same shape into a directory of
-    the same name. Nothing downstream of the session file can tell one
-    from the other - so the moment a run of each is read out by one
-    command into one document, the only thing standing between a reader
-    and a table with rows from two plants in it is that reader's
-    attention.
 
-    SO THE TOOL WILL NOT PRODUCE THAT DOCUMENT. It refuses, names both
-    groups, and prints the two commands that would have been right. It is
-    deliberately not a warning: a warning scrolls off the top of a long
-    analyse run, and every row under it still gets printed.
+def arm_of(session):
+    """One session's estimator arm, as the one string everything
+    compares by.
+
+    THE SECOND AXIS OF THE SAME QUESTION. `traction_of` says which PLANT
+    a run was taken on; this says which ESTIMATOR was on it. The two are
+    independent - all four combinations are legitimate runs and
+    EVIDENCE_FUSION.md 10 uses three of them - so they are two labels
+    and not one, and a set has to be uniform in both before it may be
+    read out into one document.
+    """
+    label = session.get("arm", "")
+    if not label:
+        return UNLABELLED_ARM
+    return label
+
+
+def _refuse_mixed(cfg, paths, sessions, label_of, subject, owner, why):
+    """One `analyse` invocation, one <subject>.
+
+    THE FAILURE THIS EXISTS TO PREVENT IS NOT A CRASH. Both `--slippery`
+    and `--rf2o` produce a run that is identical to its opposite in
+    every respect a table can see: same floor, same model file, same
+    profiles, same CSV shape, same directory naming, same fused topic.
+    Nothing downstream of the session file can tell one from the other -
+    so the moment a run of each is read out by one command into one
+    document, the only thing standing between a reader and a table with
+    rows from two different things in it is that reader's attention.
+
+    SO THE TOOL WILL NOT PRODUCE THAT DOCUMENT. It refuses, names every
+    group and every session in it, and prints the commands that would
+    have been right. It is deliberately not a warning: a warning scrolls
+    off the top of a long analyse run, and every row under it still gets
+    printed.
+
+    ONE MECHANISM, TWO QUESTIONS. It was written for the traction label
+    and generalised when the arm label needed exactly the same thing -
+    because two copies of a MECHANISM drift the way two copies of a
+    VALUE do, and the copy that gets fixed is the one that was right
+    (tools/_common.sh's own argument).
     """
     groups = collections.OrderedDict()
     for path, session in zip(paths, sessions):
-        groups.setdefault(traction_of(session), []).append(
+        groups.setdefault(label_of(session), []).append(
             os.path.basename(path))
     if len(groups) < 2:
         return
@@ -1864,18 +1970,41 @@ def refuse_mixed_traction(cfg, paths, sessions):
         lines.append("  {} - {} session(s):".format(label, len(names)))
         lines.extend("      " + name for name in names)
     lines.append("")
-    lines.append("run one command per plant, for example:")
+    lines.append("run one command per {}, for example:".format(subject))
     for label, names in groups.items():
         lines.append("  # {}".format(label))
         lines.append("  python3 m5_ver3/tools/sensor_evidence.py analyse \\")
         lines.append("      " + " \\\n      ".join(
             os.path.join(cfg.s("evidence.dir"), name) for name in names))
     cfg.refuse(
-        "every session in this analyse is off the SAME plant",
-        "{} (the session.txt of each) and {} (paths.traction_file)".format(
-            session_root(cfg), _common.CONFIG),
-        "{} different tractions are in this set:".format(len(groups)),
+        "every session in this analyse is off the SAME {}".format(subject),
+        "{} (the session.txt of each) and {}".format(
+            session_root(cfg), owner),
+        "{} different {}s are in this set:".format(len(groups), why),
         *lines)
+
+
+def refuse_mixed_traction(cfg, paths, sessions):
+    """One `analyse` invocation, one plant. See _refuse_mixed."""
+    _refuse_mixed(cfg, paths, sessions, traction_of, "plant",
+                  "{} (paths.traction_file)".format(_common.CONFIG),
+                  "traction")
+
+
+def refuse_mixed_arm(cfg, paths, sessions):
+    """One `analyse` invocation, one estimator. See _refuse_mixed.
+
+    THE ARM IS THE MORE DANGEROUS OF THE TWO TO MIX, because the whole
+    of EVIDENCE_FUSION.md 10 is an A/B between the arms and its columns
+    are the SAME columns. A slippery run in a dry table at least reads
+    oddly; a wheel+imu run in an rf2o table reads as the arm making no
+    difference, which is one of the answers the A/B could honestly have
+    reached, and there would be nothing in the numbers to say it was not
+    the one measured.
+    """
+    _refuse_mixed(cfg, paths, sessions, arm_of, "estimator arm",
+                  "{} (the arm= line m5v3.sh writes)".format(_common.CONFIG),
+                  "estimator arm")
 
 
 def analyse_session(cfg, path, sensors, diverged):
@@ -1887,6 +2016,9 @@ def analyse_session(cfg, path, sensors, diverged):
         session.get("kind", "?"), session.get("profile", "-"),
         session.get("recorded", "?")))
     print("TRACTION {}".format(traction_of(session)))
+    print("ARM      {}".format(arm_of(session)))
+    if session.get("arm_source"):
+        print("         {}".format(session["arm_source"]))
     if session.get("drive_exit", "") not in ("", "0"):
         print("WARNING  drive_route.py exited {} on this run".format(
             session["drive_exit"]))
@@ -1904,15 +2036,19 @@ def analyse_session(cfg, path, sensors, diverged):
             "stream", "samples", "hz_sim", "hz_wall", "of conf", "dt_med",
             "dt_max", "rtf"))
         for name in ("clock", "odom_truth", "wheel_odom", "ekf_odom",
-                     "joint_state",
+                     "rf2o_odom", "joint_state",
                      "drive_read_a", "scan_nav", "imu", "depth", "cam_info"):
             full = os.path.join(path, FILES[name])
-            # ekf_odom is the one stream a pre-F2 session does not carry.
-            # It is skipped rather than refused, and analyse_fused() has
-            # already said so in full above; a second refusal here would
-            # make F1's own sessions unreadable by the tool that produced
-            # their figures.
-            if name == "ekf_odom" and not os.path.isfile(full):
+            # ekf_odom is the one stream a pre-F2 session does not carry
+            # and rf2o_odom is the one only the rf2o arm has. Both are
+            # skipped rather than refused, and analyse_fused() has
+            # already said so in full above for the first; a refusal here
+            # would make F1's own sessions unreadable by the tool that
+            # produced their figures, and every wheel+imu session
+            # unreadable by the tool that produced the A/B they are half
+            # of. The ARM line at the top of this session's block is
+            # what says which of the two an absent rf2o_odom means.
+            if name in ("ekf_odom", "rf2o_odom") and not os.path.isfile(full):
                 continue
             one = table(full, cfg, cfg.i("evidence.min_samples"))
             rate_line(cfg, name, one.column("t_sim"), one.column("t_wall"))
@@ -2030,8 +2166,18 @@ def analyse(cfg, args):
           "of ekf.yaml ---")
     print("  in               {}  (twist only; its pose covariance is a "
           "do-not-fuse flag)".format(cfg.s("topics.wheel_odom")))
-    print("                   {}  (yaw rate and ax; no orientation "
-          "exists)".format(cfg.s("topics.imu")))
+    # "yaw rate and ax" UNTIL F2 TASK 3 READ IT, and it had been wrong
+    # since F2 Task 2 reversed the ax ruling on a measurement
+    # (EVIDENCE_FUSION.md 9). A settings line that describes a channel
+    # the filter has not fused since the day before is the exact failure
+    # this whole block exists to prevent, one level up.
+    print("                   {}  (yaw rate ONLY - the acceleration "
+          "channel is refused, EVIDENCE_FUSION.md 9)".format(
+              cfg.s("topics.imu")))
+    print("  in, optionally   {}  (the rf2o arm's twist, vx and vyaw; "
+          "present only on a".format(cfg.s("topics.rf2o_odom")))
+    print("                   session whose ARM line below says "
+          "wheel+imu+rf2o - {})".format(cfg.s("ekf.rf2o_params_file")))
     print("  out              {} at {} Hz".format(
         cfg.s("topics.odometry_filtered"), cfg.s("ekf.frequency_hz")))
     print("  transform        {} -> {}   (the only one this stack "
@@ -2079,8 +2225,14 @@ def analyse(cfg, args):
     # produce a healthy-looking session, so the guard has to be up front:
     # refusing halfway through leaves the reader with a document that is
     # already half wrong and no obvious mark where it went bad.
-    refuse_mixed_traction(cfg, paths,
-                          [read_session_file(cfg, p) for p in paths])
+    #   AND THE SET IS CHECKED ON BOTH AXES. Since F2 Task 3 a session
+    #   also carries which ESTIMATOR produced its fused stream, and the
+    #   two questions are independent: a set can be all-nominal and
+    #   still be half wheel+imu and half wheel+imu+rf2o, which is the
+    #   mix EVIDENCE_FUSION.md 10's whole A/B would be destroyed by.
+    _sessions = [read_session_file(cfg, p) for p in paths]
+    refuse_mixed_traction(cfg, paths, _sessions)
+    refuse_mixed_arm(cfg, paths, _sessions)
     # EVERY SESSION WHOSE FILTER HAD BLOWN UP, COLLECTED WHILE THE
     # TABLES ARE PRINTED AND REPORTED IN THE EXIT STATUS. See
     # analyse_fused(): the run's ground truth and raw wheel odometry are
