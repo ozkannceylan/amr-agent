@@ -142,6 +142,15 @@ REQUIRED_KEYS = (
     "evidence.corner.settle_s", "evidence.corner.window_s",
     "evidence.corner.bin_s",
     "evidence.corner.steer_tol_rad", "evidence.corner.speed_min_mps",
+    # THESE THREE WERE READ AND NOT LISTED until F2 Task 4 audited this
+    # tuple against the cfg.f()/cfg.s() calls in this file. They are the
+    # per-corner window's trims and the scrub-split predicate, read at
+    # print_scrub_split() and print_corner_table(); a config.yaml that
+    # parses but has lost one of them would have reached those calls and
+    # died on _common's KeyError rather than being refused by its DOTTED
+    # name at load, which is what the obligation above exists for.
+    "evidence.corner.slew_in_s", "evidence.corner.exit_s",
+    "evidence.corner.split_min_deficit",
     "sensors.nav_lidar.rate_hz", "sensors.safety_scanner.rate_hz",
     "sensors.lidar_3d.rate_hz", "sensors.imu.rate_hz",
     "sensors.pallet_cam.rate_hz",
