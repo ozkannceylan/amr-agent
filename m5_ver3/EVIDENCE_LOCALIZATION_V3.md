@@ -1479,13 +1479,16 @@ tail is nonetheless the pose graph's.**
 - **No relocalisation event of any kind was observed.** Not one
   correction in the eight runs is an order of magnitude above its run's
   median; the largest ratio is 10.8× (`corner_creep`, 0.2419 against
-  0.0224) and the rest sit between 2.4× and 3.3×. On AMCL the same ratio
+  0.0224) and the rest sit between 2.7× and 3.4×. On AMCL the same ratio
   runs to 8.6× (§8, `…230652`: 0.2591 against 0.0301). Neither arm
   teleports.
-- **The typical step is the same size on both arms**: 36 – 94 mm median
-  here against 19 – 47 mm on AMCL — the pose graph's typical correction
-  is about twice AMCL's, which is what a matcher that corrects 25 times
-  instead of 43 over the same 11.6 m must do.
+- **The typical step is of the same ORDER on both arms and the ranges
+  overlap**: the median correction is 22 – 135 mm here against 19 – 47 mm
+  on AMCL, and run for run the pose graph's is about twice AMCL's — which
+  is what a matcher that corrects 25 times instead of 43 over the same
+  11.6 m must do. The two ends of that range are its two extremes:
+  `corner_creep`'s 22 mm (fifteen corrections, most of them tiny, one of
+  them the 0.2419 m tail) and the wet `square`'s 135 mm.
 - **The dry tail is smaller and the wet tail is larger.** Dry, AMCL's
   worst is 0.2591 m and this arm's is 0.2419; wet, AMCL's is 0.4927 m
   (§8, `…231453`) and this arm's is 0.3864. **In HEADING it is the other
@@ -1532,7 +1535,13 @@ read 3.05 %, and is not in this table for that reason.
 | real-time factor, mean | 0.9985 / 0.9965 / 0.9993 | 0.9993 / 0.9997 / 0.9986 |
 | … floor | 0.9262 / **0.2200** / 0.9623 | 0.9420 / 0.9116 / 0.9406 |
 | message-filter drops during the drive | 0 | **0** |
-| resident memory, the localiser | — | **110 – 127 MB** (the deserialised graph) |
+| resident memory, the arm | `map_server` **55.2 MB** + `amcl` **66.5 MB** = **121.7 MB** | `slam_loc` **117.8 MB** (the deserialised graph) |
+
+**THE MEMORY ROW IS A NON-DIFFERENCE AND IS PRINTED FOR THAT REASON.**
+A 62.5 MB pose graph in one process and a 2.0 MB grid served to a
+particle filter in two come out within 4 MB of each other, and the
+obvious guess (the graph is thirty times the artifact, so it must cost
+memory) is wrong. It is here so that §13.10 cannot lean on it.
 
 **§10's single sample reads 5.00 % and 3.00 % and this reads 4.58 – 6.13
 and 3.27 – 4.36**, which is the same arm measured three times instead of
@@ -1602,11 +1611,13 @@ these, in the order they weigh:
    against 7.85 – 10.49 %,
    for a stack that has not yet started Nav2, a costmap, a planner or a
    controller. F4 adds all four.
-4. **The operational asymmetries all favour AMCL and none of them is a
-   number in the table.** The frozen artifact it consumes is 2.0 MB
-   rather than 62.5 MB; it holds 110 – 127 MB resident where the grid
-   server holds a raster; and its bringup answer is 0.034 – 0.053 m
-   from a known start rather than 0.147 – 0.157.
+4. **Two operational asymmetries favour AMCL, and the one that looks
+   like a third does not.** The frozen artifact it consumes is **2.0 MB**
+   rather than **62.5 MB**, which is what a git repository and a
+   deployment image care about; and its bringup answer is **0.034 –
+   0.053 m** from a known start rather than **0.147 – 0.157 m**.
+   **RESIDENT MEMORY IS NOT ONE OF THEM** — 121.7 MB across two processes
+   against 117.8 MB in one, measured — and this ruling does not use it.
 5. **And the honest one: the pose graph's advantage is REAL and it is
    large.** m5v3-01 was right about corridors — a three-to-eleven-fold
    reduction in the moving along-track offset, and a wet floor it does
@@ -1640,13 +1651,14 @@ number that says so is the MEDIAN step rather than the worst.**
 
 | | AMCL | slam |
 |---|---|---|
-| median correction | 19 – 47 mm | 36 – 94 mm |
+| median correction | 19 – 47 mm | 22 – 135 mm |
 | corrections per second | 0.53 – 1.07 | 0.47 – 0.62 |
 | worst single step, dry | 0.2591 m | 0.2419 m |
 | worst single step, wet | 0.4927 m | 0.3864 m |
 | worst heading step | 0.0764 rad | 0.1326 rad |
 
-- **Half of every correction on the shipping arm is under a map cell**,
+- **Half of every correction on the SHIPPING arm is under a map cell**
+  (19 – 47 mm against a 50 mm cell),
   and a smoother whose input moves 19 – 47 mm about once a second has
   almost nothing to smooth. What it would add is LAG — and lag in a
   map-frame pose is exactly the dynamic offset §13.6 says the shipping
