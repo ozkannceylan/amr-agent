@@ -188,9 +188,14 @@ transform.
 > of `config.yaml`'s `wheel_odom:` block — a settings line nothing
 > re-checked, over a table of figures that are only about those settings.
 > `sensor_evidence.py analyse` now reads the five keys itself and prints
-> them ahead of every session it scores, so a `config.yaml` retuned since
-> these CSVs were recorded shows up as a disagreement with this file
-> rather than scoring an old run under new numbers. Its output against
+> them **once per invocation, ahead of the sessions it scores** — one
+> block, before the session loop, and not once per session (the wording
+> here said "ahead of every session it scores", which describes a
+> different program; corrected 2026-08-26, F2 Task 1). The keys are read
+> at that one moment and every session in the run is scored under them,
+> so a `config.yaml` retuned since these CSVs were recorded shows up as a
+> disagreement with this file rather than scoring an old run under new
+> numbers. Its output against
 > `drive-corner_creep-20260825-232401`: vehicle `forklift_ver3`,
 > **1024 counts/rev** (one count `6.13592e-03` rad of shaft, **0.7363 mm**
 > of tread at the plant's 0.120 m wheel, 0.7474 mm as the estimator steps

@@ -52,6 +52,17 @@ either input, a joint state that carries no position for the steer joint,
 no steer reading accepted yet, or a steer reading too old to integrate
 against - and escalates from info to warn once the silence has lasted
 longer than a bringup takes.
+  ITS WARN STREAM IS BOUNDED IN TOTAL AND NOT ONLY IN RATE. A watchdog
+  that prints one line every 5 s for ever writes 17 280 identical lines
+  into a log an operator will open once, and the line they need - the
+  FIRST one, with the reason in it - is then the hardest one in the file
+  to find. So the full cadence is capped (alive_warn_max) and what
+  follows is one line per alive_warn_backoff_s. It never goes silent:
+  a watchdog that stops printing makes its last line's timestamp look
+  like the moment the fault ended. alive_tick() below is that decision,
+  as a function of six numbers, and tests/test_wheel_odometry_shell.py
+  is where it is checked - because the state it decides in is a state no
+  test can put a live node into.
 
 IT NEVER SUBSCRIBES THE GROUND TRUTH, and that is a rule and not an
 oversight. /forklift/gz/odom is the simulator's own pose - no slip, no
@@ -72,13 +83,15 @@ inhibits nothing and latches nothing.
 
 WHY THE ROS IMPORTS ARE INSIDE main(). This track's pytest runs on the
 owner's Windows python, where there is no rclpy, and the suite's conftest
-puts this directory on sys.path. Nothing collects this module today, but
-an import of rclpy at the top of a file in a directory pytest can see is
-one `import wheel_odometry` away from breaking the whole suite on a
-machine that can never fix it. agv/forklift/scripts/safe_speed_channels.py
+puts this directory on sys.path. Since F2 Task 1 the suite DOES import
+this module - tests/test_wheel_odometry_shell.py exercises the pure
+helpers below, alive_tick() first among them - so the property is no
+longer theoretical: an rclpy import at the top of this file stops the
+whole suite collecting, on a machine that can never fix it. agv/forklift/scripts/safe_speed_channels.py
 takes the ROS types as arguments for the same reason and this file copies
 the shape.
 """
+import collections
 import math
 import os
 import sys
@@ -109,6 +122,7 @@ REQUIRED_KEYS = (
     "wheel_odom.qos_depth", "wheel_odom.steer_stale_s",
     "wheel_odom.log_every_s",
     "wheel_odom.alive_every_s", "wheel_odom.alive_warn_after_s",
+    "wheel_odom.alive_warn_max", "wheel_odom.alive_warn_backoff_s",
     "wheel_odom.covariance.vx", "wheel_odom.covariance.vy",
     "wheel_odom.covariance.vyaw", "wheel_odom.covariance.unused",
 )
@@ -147,6 +161,60 @@ def covariance_diagonal(diagonal):
     return out
 
 
+#: What one tick of the watchdog does: whether it speaks at all, at which
+#: level, and whether the line it speaks is a BACKED-OFF one (which the
+#: line says out loud, so a reader knows there were suppressed ticks
+#: between it and the one before).
+AliveTick = collections.namedtuple("AliveTick", "speak level backed_off")
+
+
+def alive_tick(silent_s, warn_after_s, warns, warn_max, backoff_s,
+               last_warn_s):
+    """One watchdog tick, decided. Pure - no clock, no logger, no node.
+
+    THE SHAPE, AND THE ARGUMENT FOR IT. The failure this watchdog exists
+    for - a node ALIVE and publishing nothing - does not clear itself,
+    so its output is a stream with no end. Three regimes, and each is
+    answering a different reader:
+
+      silence < warn_after_s        INFO, every tick. A stack coming up
+                                    is silent, and a fault called on a
+                                    normal bringup teaches the operator
+                                    to ignore the line (m6's escalation
+                                    rule). Bounded by warn_after_s
+                                    itself: three ticks, not a stream.
+      the next warn_max ticks       WARN, every tick. This is the minute
+                                    an operator is actually reading the
+                                    log - `m5v3.sh status` said ALIVE
+                                    and they opened odom.log - and
+                                    nothing in it may be throttled.
+      after that                    WARN, one line per backoff_s. The
+                                    reason has been stated warn_max
+                                    times by now; what is left to say is
+                                    "still", and "still" is worth one
+                                    line every few minutes.
+
+    IT NEVER FALLS SILENT, and that is the one thing a cap must not do.
+    A log that stops has a last line whose timestamp reads like the
+    moment the fault ended, and the next reader dates the failure from
+    it. The backoff keeps the statement current at 12 lines an hour
+    against 720.
+
+    last_warn_s is the silent_s AT WHICH THE LAST WARN WAS SPOKEN, on
+    the same clock as silent_s, or None if none has been. Measuring the
+    interval against the line that reached the log - and not against the
+    tick that was suppressed, nor against the cap - is what makes the
+    output exactly one line per backoff_s for as long as it lasts.
+    """
+    if silent_s < warn_after_s:
+        return AliveTick(speak=True, level="info", backed_off=False)
+    if warns < warn_max:
+        return AliveTick(speak=True, level="warn", backed_off=False)
+    if last_warn_s is None or silent_s - last_warn_s >= backoff_s:
+        return AliveTick(speak=True, level="warn", backed_off=True)
+    return AliveTick(speak=False, level="warn", backed_off=True)
+
+
 def seconds_to_stamp(Time, t_s):
     """Seconds as a builtin_interfaces/Time.
 
@@ -165,7 +233,8 @@ def seconds_to_stamp(Time, t_s):
     return out
 
 
-def _make_node_class(Node, JointState, Odometry, QoSProfile, Time, Clock):
+def _make_node_class(Node, JointState, Odometry, QoSProfile, Time, Clock,
+                     ClockType):
     """Build the node class once the ROS types are in hand.
 
     The types are arguments rather than module-level imports so that this
@@ -193,6 +262,9 @@ def _make_node_class(Node, JointState, Odometry, QoSProfile, Time, Clock):
             self.log_every_s = cfg.f("wheel_odom.log_every_s")
             self.alive_every_s = cfg.f("wheel_odom.alive_every_s")
             self.alive_warn_after_s = cfg.f("wheel_odom.alive_warn_after_s")
+            self.alive_warn_max = cfg.i("wheel_odom.alive_warn_max")
+            self.alive_warn_backoff_s = cfg.f(
+                "wheel_odom.alive_warn_backoff_s")
 
             self._Time = Time
             unused = cfg.f("wheel_odom.covariance.unused")
@@ -228,6 +300,12 @@ def _make_node_class(Node, JointState, Odometry, QoSProfile, Time, Clock):
             # real moment rather than from zero.
             self._alive_published = 0
             self._alive_t = time.monotonic()
+            # The warn stream's own state, and it is reset with _alive_t:
+            # a silence that ends and a NEW one that begins are two
+            # faults, and the second one gets its full cadence back.
+            self._alive_warns = 0
+            self._alive_last_warn_s = None
+            self._alive_suppressed = 0
 
             qos = QoSProfile(depth=cfg.i("wheel_odom.qos_depth"))
             self.pub = self.create_publisher(
@@ -259,19 +337,33 @@ def _make_node_class(Node, JointState, Odometry, QoSProfile, Time, Clock):
             # THE ONE CLOCK IN THIS FILE THAT IS NOT THE PLANT'S, and
             # that is the point of it: a timer on sim time stops when the
             # world stops, and a world that has stopped is one of the
-            # states this timer exists to report. Clock() is SYSTEM_TIME
-            # by construction and is passed EXPLICITLY rather than left
-            # to the node's default, because that default follows a
-            # use_sim_time parameter which anything on the graph may set.
-            self.create_timer(self.alive_every_s, self.alive, clock=Clock())
+            # states this timer exists to report. It is passed EXPLICITLY
+            # rather than left to the node's default, because that
+            # default follows a use_sim_time parameter which anything on
+            # the graph may set.
+            #   STEADY_TIME AND NOT SYSTEM_TIME, corrected 2026-08-26.
+            #   This line read `Clock()`, which is SYSTEM_TIME, while
+            #   every comment around it - and the docstring of alive()
+            #   itself - promised the machine's own MONOTONIC clock. The
+            #   two differ exactly when it matters: WSL's wall clock is
+            #   stepped by the host on resume and by NTP, and a watchdog
+            #   whose cadence is a settable clock can fire a hundred
+            #   ticks at once or none for an hour, on a stack that has
+            #   done nothing. silent_s below is time.monotonic() and
+            #   always was; this makes the TIMER agree with it.
+            self.create_timer(
+                self.alive_every_s, self.alive,
+                clock=Clock(clock_type=ClockType.STEADY_TIME))
 
             self.get_logger().info(
                 "this node reads NO ground truth and broadcasts NO "
                 "transform - see the file header for both reasons")
             self.get_logger().info(
-                "alive check every {:g} s of wall clock, warning after "
-                "{:g} s with no estimate published".format(
-                    self.alive_every_s, self.alive_warn_after_s))
+                "alive check every {:g} s of steady clock, warning after "
+                "{:g} s with no estimate published, then {} warns at that "
+                "cadence and one per {:g} s after".format(
+                    self.alive_every_s, self.alive_warn_after_s,
+                    self.alive_warn_max, self.alive_warn_backoff_s))
 
         # ---------------------------- inputs --------------------------
 
@@ -430,20 +522,43 @@ def _make_node_class(Node, JointState, Odometry, QoSProfile, Time, Clock):
             one harder to read. This one speaks exactly when the other
             cannot: the publish count has not moved since the last tick.
 
-            INFO FIRST, WARN AFTER. A stack coming up is silent for as
-            long as the world takes to advertise, and calling that a
-            fault would teach the operator to ignore the line - which is
-            the one thing a watchdog may not do (m6's own escalation
-            rule). So the first ticks are info and the level rises only
-            once the silence has outlasted a bringup.
+            INFO FIRST, WARN AFTER, THEN LESS OFTEN. A stack coming up is
+            silent for as long as the world takes to advertise, and
+            calling that a fault would teach the operator to ignore the
+            line - which is the one thing a watchdog may not do (m6's own
+            escalation rule). So the first ticks are info and the level
+            rises only once the silence has outlasted a bringup; and
+            because the fault it reports does not clear itself, the warn
+            cadence is capped and backs off rather than running for ever.
+            alive_tick() holds that decision and the tests hold it to it.
+
+            THE COUNTERS ARE THIS FUNCTION'S; THE DECISION IS NOT. What
+            is left here is reading a clock, formatting a line and
+            calling a logger - which is the same split as the rest of
+            this file, and for the same reason.
             """
             now = time.monotonic()
             if self._published != self._alive_published:
+                # THE OUTPUT MOVED. A silence that ends and a new one
+                # that begins are two faults, so the warn budget resets
+                # with the clock: the second fault gets its full cadence
+                # and is not throttled by the first one's history.
                 self._alive_published = self._published
                 self._alive_t = now
+                self._alive_warns = 0
+                self._alive_last_warn_s = None
+                self._alive_suppressed = 0
                 return
             silent_s = now - self._alive_t
-            line = ("NO ESTIMATE PUBLISHED for {:.1f} s of wall clock: "
+            tick = alive_tick(
+                silent_s=silent_s, warn_after_s=self.alive_warn_after_s,
+                warns=self._alive_warns, warn_max=self.alive_warn_max,
+                backoff_s=self.alive_warn_backoff_s,
+                last_warn_s=self._alive_last_warn_s)
+            if not tick.speak:
+                self._alive_suppressed += 1
+                return
+            line = ("NO ESTIMATE PUBLISHED for {:.1f} s of steady clock: "
                     "{} | published {} | drive msgs {} | steer msgs {} "
                     "({} with no position) | skipped {} (no steer yet) + "
                     "{} (stale steer)".format(
@@ -451,7 +566,19 @@ def _make_node_class(Node, JointState, Odometry, QoSProfile, Time, Clock):
                         self._drive_msgs, self._steer_msgs,
                         self._steer_no_position, self._skipped_no_steer,
                         self._skipped_stale))
-            if silent_s >= self.alive_warn_after_s:
+            if tick.backed_off:
+                # THE SUPPRESSED TICKS ARE NAMED IN THE LINE THAT
+                # FOLLOWS THEM. A reader who sees a five-minute gap
+                # between two identical lines has to be told the gap is
+                # this watchdog's doing and not the fault pausing.
+                line += (" | backed off: {} tick(s) suppressed, one line "
+                         "per {:g} s while this lasts".format(
+                             self._alive_suppressed,
+                             self.alive_warn_backoff_s))
+                self._alive_suppressed = 0
+            if tick.level == "warn":
+                self._alive_warns += 1
+                self._alive_last_warn_s = silent_s
                 self.get_logger().warn(line)
             else:
                 self.get_logger().info(line)
@@ -465,7 +592,7 @@ def main(argv=None):
         import rclpy
         from builtin_interfaces.msg import Time
         from nav_msgs.msg import Odometry
-        from rclpy.clock import Clock
+        from rclpy.clock import Clock, ClockType
         from rclpy.executors import ExternalShutdownException
         from rclpy.node import Node
         from rclpy.qos import QoSProfile
@@ -479,7 +606,7 @@ def main(argv=None):
 
     rclpy.init(args=argv)
     node_class = _make_node_class(Node, JointState, Odometry, QoSProfile,
-                                  Time, Clock)
+                                  Time, Clock, ClockType)
     node = node_class(cfg)
     try:
         rclpy.spin(node)

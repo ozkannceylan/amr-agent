@@ -183,6 +183,21 @@ nothing else should be until something consumes it.
 `/forklift/gz/odom` is **ground truth and a measurement reference only**.
 See CONTEXT.md; F1 removes it.
 
+> **RETRACTED BY DECISION 2026-08-25 (F1), FILED 2026-08-26 (F2 Task 1)
+> — "F1 removes it" is wrong and F1 kept it on purpose.** Three other
+> copies of this sentence were corrected when the decision was taken
+> (commit `1db2013`, *three files said F1 would delete the ground
+> truth*); this fourth one was missed and is corrected here rather than
+> deleted, so the claim stays visible where it was made. **CONTEXT.md's
+> *"What is bridged, and one word about odometry"* is the corrected
+> paragraph and owns the answer.** In short: F1 added the wheel odometry
+> *beside* the ground truth and scored one against the other
+> (`EVIDENCE_SENSORS.md` §3), which is not a measurement a phase can
+> make having deleted its own reference. Replacing it as the thing the
+> vehicle *navigates* on is **F2**'s EKF, and `/forklift/gz/odom` stays
+> bridged as an instrument. The rest of this line — reference **only**,
+> never an input — was true when it was written and is still true.
+
 ---
 
 ## 6. `stop` kills this partition and nothing else
