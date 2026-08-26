@@ -1,4 +1,4 @@
-# EVIDENCE — m5-ver3 fusion: the odom-frame EKF (F2 Task 1), and the slip scenario (F2 Task 2, §8)
+# EVIDENCE — m5-ver3 fusion: the odom-frame EKF (F2 Task 1), the slip scenario (F2 Task 2, §8), the `ax` reversal (§9) and the laser-odometry arm (F2 Task 3, §10)
 
 Every number below was measured on this rig on **2026-08-26**, and the
 instrument that produced it is named beside it. A *configured* figure is
@@ -34,6 +34,19 @@ nothing else running on the machine.
 | `config.yaml` `slippery:` + `paths.traction_file` | the override's two values, and which plant the running stack is on | ● |
 | `tools/sensor_evidence.py` | stamps every session with its plant and **refuses to record without one**; refuses to read two plants into one document; refuses a diverged filter before the drive is spent | extended |
 | `tools/evidence_core.py` | `track_error()` / `track_error_of()` / `travel_projection()` — the end error split ALONG the direction of travel; `diverged_at()` / `require_not_diverged()` — a broken filter told from a drifting one. Suite 106 → **138** tests, selftest 22 → **26** checks | extended |
+
+**And what F2 Task 3 added on top, all of it §10's:**
+
+| Tool | What it answers | New there |
+|---|---|---|
+| `m5v3.sh start --rf2o` | a THIRD estimator on the same plant - `rf2o_laser_odometry` matching consecutive nav-lidar scans - behind a flag that is off by default | ● |
+| `tools/install_rf2o.sh` | how that package reproduces: from source, in the user's own `$HOME`, at a pinned commit, without root | ● |
+| `nodes/rf2o_twist.py` + `nodes/rf2o_twist_core.py` | the four things upstream publishes that a filter may not be handed as they stand, and the arithmetic that fixes three of them | ● |
+| `m5_ver3/ekf_rf2o.yaml` | what the arm is fused from - `vx` and `vyaw` only - in a file the default stack never reads | ● |
+| `config.yaml` `rf2o:` + the `arm=` line | the pin, the measured covariance, and which ESTIMATOR the running stack is | ● |
+| `m5v3.sh` `check_rf2o_transform()` | did the scan matcher find out where it is bolted? A refusal, beside §9.4's covariance gate | ● |
+| `tools/sensor_evidence.py` | stamps every session with its ARM as well as its plant, refuses to record without one, and refuses to read two arms into one document | extended |
+| the suite | 148 → **194** tests; a fourth selftest, `rf2o_twist_core --selftest`, **22/22** | extended |
 
 **The preamble the tables below cannot be read without.**
 
@@ -1694,3 +1707,704 @@ magnitude bigger off the diagonal than on it.
   the reversed ruling's record, each labelled where it starts, for the
   reason §4 was kept when the `vy` ruling went the other way.
 - **It did not touch `model.sdf`.** The plant is byte-identical to F1.5's.
+
+## 10. The laser-odometry arm — the third opinion, and whether it pays (F2 Task 3)
+
+**A scan matcher on the nav lidar, behind a flag, measured against §9.3.**
+`rf2o_laser_odometry` estimates the vehicle's planar motion by aligning
+consecutive scans. It is the only estimator this stack has ever carried
+that observes the **floor**: the wheel odometry observes a shaft, the IMU
+observes the chassis, and neither can tell that the tyre is creeping.
+§8.5's headline — *"nothing on this stack observes distance, so fusion
+cannot reach the along-track error"* — is a claim about a stack with two
+sensors in it, and this section is the third.
+
+> **EVERY FIGURE IN §10 IS OFF A DIFFERENT ESTIMATOR FROM EVERY FIGURE
+> ABOVE IT.** `m5v3.sh start --rf2o` is a **different filter** on the
+> same plant, exactly as `--slippery` is the same filter on a different
+> plant, and it is labelled by the same mechanism: `start` writes
+> `arm=wheel+imu+rf2o` to `paths.traction_file`, `status` prints it,
+> `record` copies it into every `session.txt` and **refuses to record
+> without it**, and `analyse` **refuses a set of sessions that mixes the
+> two arms**, naming both groups and printing the two commands that
+> would have been right. §9.3's eight sessions carry no `arm=` line at
+> all — the label did not exist — and they are reported as
+> *"unrecorded (session predates F2 Task 3's arm label)"* rather than as
+> `wheel+imu`, for the reason §8's `UNLABELLED` gives: a label is worth
+> something only because it was READ off the running stack.
+
+**The package, pinned.** MAPIRlab/rf2o_laser_odometry, branch `ros2`,
+commit **`b38c68e46387b98845ecbfeb6660292f967a00d3`** (that branch's tip
+on 2026-08-26; authored 2023-04-28). It is **not in the Jazzy archive for
+any distribution**, so there was nothing to `apt-get` and
+`m6/tools/install_broker.sh`'s vendoring shape had nothing to vendor.
+`tools/install_rf2o.sh` is how it reproduces — no sudo at any point, a
+colcon workspace under the user's own `$HOME`
+(`config.yaml` `rf2o.workspace`), idempotent, refusing by name at every
+step, and writing a manifest beside the build that records what it
+fetched. **Nothing had to be vendored and no `sudo` was attempted:**
+every dependency the package names was already on the rig — `ament_cmake`
+and `eigen3_cmake_module` under `/opt/ros/jazzy`, Eigen's headers at
+`/usr/include/eigen3`, Boost's headers, `colcon`, `cmake` 3.28.3 and
+`g++` 13.3.0. Clean build, `-DCMAKE_BUILD_TYPE=Release`, **21.8 s**; a
+second run of the script prints `already installed` and rebuilds nothing.
+
+---
+
+### 10.1 What rf2o actually publishes on this plant — four defects, measured
+
+**None of the four is reachable from a parameter.** The node declares
+seven and not one of them is about any of these. `nodes/rf2o_twist.py` —
+the stack child `rf2ocov` — is the smallest honest thing between the scan
+matcher and the filter, and `nodes/rf2o_twist_core.py` holds every
+decision it makes as arithmetic a test can reach without a simulator.
+
+#### (a) The frame its numbers are in is rotated by π from the scan's
+
+`rf2o` builds its point cloud with beam bearings running from `-fovh/2`
+to `+fovh/2` about the sensor's own x axis — it computes
+`fovh = |angle_max - angle_min|` and **never reads `angle_min`**.
+`forklift_ver3`'s nav lidar is a 270° window from **+0.7853982** to
+**+5.4977871 rad**, centred on model −x *on purpose*, so that the blind
+90° points astern and the truck drives into the full aperture
+(`model.sdf` argues it where the numbers are, and
+`EVIDENCE_MODEL_V3.md` §4 checks the offset window against known world
+geometry). Read off the wire:
+
+```
+angle_min: 0.7853981852531433   angle_max: 5.497786998748779
+angle_increment: 0.005817763973027468   frame_id: nav_lidar_link
+```
+
+So rf2o's whole solution is the true one turned by the window's centre
+bearing, **π**. Measured on `drive-straight-20260826-123131`: the truck
+driving **forwards** at a ground-truth body `vx` of **−0.6948 m/s** —
+forward is `base_link` −x on this vehicle, which is why the wheel
+odometry reads **−0.7473** — was published by rf2o as
+`twist.linear.x = +0.58`. Right magnitude, wrong sign, because
+cos(π) = −1.
+
+**The correction is exact and it is derived, not asserted.** The relay
+reads `angle_min` and `angle_max` off the **same message rf2o consumed**
+and rotates by `0.5·(angle_min + angle_max)` — which is **0.0 for every
+lidar written the conventional symmetric way**, so the correction is the
+identity on any plant that never had this problem. It publishes nothing
+until that first scan has arrived and says so in its log:
+
+```
+aperture 0.7853982 .. 5.4977870 rad (270.0 deg wide), centred on +3.1415926 rad = +180.0 deg
+rf2o's own frame is therefore rotated +180.0 deg from nav_lidar_link, and every twist
+and pose it publishes is turned back by that before it leaves here
+```
+
+**Verified against the ground truth on all eight A/B sessions**, not
+merely reasoned about — the sign of the corrected `vx` against the sign
+of the truth's body `vx`, over every sample where the truck was actually
+moving:
+
+| session | profile | paired samples, \|truth\| > 0.2 m/s | signs agree |
+|---|---|---|---|
+| `…124609` `…124717` `…124823` | dry `straight` | 386 each | **386 / 386, three times** |
+| `…124929` | dry `square` | 258 | **258 / 258** |
+| `…125046` | dry `corner_creep` | 329 | **329 / 329** |
+| `…125244` `…125347` | wet `straight` | 403 each | **403 / 403, twice** |
+| `…125451` | wet `square` | 226 | **226 / 226** |
+
+#### (b) The covariance is 36 zeros, and a zero is not read as "unknown"
+
+`publish()` default-constructs the message and assigns position,
+orientation, `linear.x`, `linear.y` and `angular.z` — and nothing else.
+Read off the wire with `ros2 topic echo --once /m5v3/rf2o/odom_raw`:
+**all 36 entries of the pose covariance and all 36 of the twist
+covariance are `0.0`.**
+
+`robot_localization` takes each measurement's covariance out of the
+MESSAGE — there is no per-sensor override parameter, by design — and it
+does **not** treat a zero variance on a channel it has been configured to
+fuse as "ignore this". §10.2 measures which of the two it does.
+
+#### (c) The published `linear.x` is the SCANNER's forward speed
+
+Upstream computes `lin_speed = acu_trans(0,2) / dt`, where `acu_trans` is
+the accumulated scan-to-scan transform **in the laser's frame**, and then
+stamps the message `child_frame_id: base_frame_id`. The POSE it publishes
+*is* composed through the mount
+(`robot_pose_ = laser_pose_ * laser_pose_on_robot_inv_`); the TWIST is
+not. The scanner stands **0.55 m forward and 0.40 m to starboard** of
+`base_link`, so in a turn the two speeds differ by `yaw_rate · mount_y`:
+at §2.4's measured peak yaw rate of 0.2687 rad/s that is **0.1075 m/s**
+of forward speed the vehicle does not have — **15 % of cruise**, and a
+BIAS across the whole of a corner rather than noise about it. The relay
+applies the rigid-body relation, **after** the frame rotation and not
+before (the two orders differ by twice the term).
+
+#### (d) `twist.linear.y` is a hard-coded `0.0`, so it is not fused
+
+Upstream computes a local lateral velocity (`kai_loc_(1)`) and then
+writes a literal zero into the message instead. **Measured: all 912
+samples of a 60 s `--static` capture read exactly 0.0**, and so does
+every sample of every drive. The lateral half of the lever arm needs the
+scanner's OWN `vy`, which never leaves that process, so no arithmetic
+outside it can reconstruct `base_link`'s.
+
+**So `ekf_rf2o.yaml` leaves this arm's `vy` flag `false`, and that is not
+§4's ruling reversed.** `base_link` genuinely translates sideways at
+`d · yaw_rate` in every turn and the wheel odometry's `vy` channel is
+still fused for exactly that reason. What is refused here is a **hard-
+coded constant wearing a measurement's name**: fusing it would be fusing
+an assertion that this vehicle never moves sideways, against a filter
+that already knows better from a source that computes it. Recovering it
+would need a patched rf2o, which is a later task's `rf2o.commit` and not
+a number invented in a relay.
+
+```
+   x     y     z    roll  pitch  yaw    vx    vy    vz   vroll vpitch vyaw   ax   ay   az
+ false false false false false false  TRUE false false false false TRUE  false false false
+```
+
+#### And what does NOT need correcting: the yaw rate
+
+A constant rotation of the frame does not change an angular velocity, and
+neither does a lever arm — so the relay passes `angular.z` through
+untouched. That it is right to is **measured against the ground truth
+rather than argued**, on every sample where the truck was actually
+turning:
+
+| session | paired samples, \|truth\| > 0.05 rad/s | signs agree | mean rf2o / truth |
+|---|---|---|---|
+| dry `square` `…124929` | 543 | **543 / 543** | **0.9943** |
+| dry `corner_creep` `…125046` | 287 | **287 / 287** | **1.0004** |
+| wet `square` `…125451` | 565 | **565 / 565** | **0.9881** |
+
+**rf2o's yaw rate is the best single channel on this vehicle.** Over a
+whole dry `square` its integrated turn is **−0.65 %** against the ground
+truth's +6.2200 rad, where the wheel odometry's is **+10.7 %**. It is
+also the channel this filter weights *least* — see §10.6.
+
+#### (e) …and one that is not rf2o's, but is fatal on this stack
+
+**rf2o looks up `base_link` ← the scan's frame EXACTLY ONCE**, in the
+handler for its first scan, and on a failed lookup it logs the exception
+and then **carries on with the default-constructed transform**. There is
+no retry.
+
+Measured on this rig on 2026-08-26 with the arm's children spawned
+*after* the bridges, which is where they were first put: rf2o came up at
+a moment when scans were already flowing, its first scan arrived
+**106 ms** later, and the latched `/tf_static` message had not reached
+its listener yet —
+
+```
+[ERROR] [...] [CLaserOdometry2DNode]: "base_link" passed to lookupTransform argument
+                                       target_frame does not exist.
+[INFO]  [...] [CLaserOdometry2D]: Got first Laser Scan .... Configuring node
+```
+
+— and for the rest of that session `Laser odom [x,y,yaw]` and
+`Robot-base odom [x,y,yaw]` printed **identical numbers**, which is what
+an identity mount looks like. Nothing else was wrong: the child was
+alive, the topic was at rate, the relay was forwarding, the filter was
+fusing, `status` read **9 alive, 0 dead**.
+
+**Two changes, and the second one is the mechanism.**
+- **The arm is spawned BEFORE the bridges.** There is then no scan
+  publisher at all while rf2o comes up, so it sits in
+  `Waiting for laser_scans` through the bridge, the image bridge, the
+  wheel odometry and the IMU transform — **ten seconds of real work, not
+  a sleep** — and the static transform is long since in its buffer when
+  the first scan arrives. A jump in `/clock` does not undo it: tf2 stores
+  static transforms in a cache whose `clearList()` is a no-op, which is
+  why they answer for any query time in the first place.
+- **`m5v3.sh` reads the child's log and refuses.** `rf2o_laser_odometry`
+  contains **exactly one `RCLCPP_ERROR` in the whole package**
+  (`src/CLaserOdometry2DNode.cpp:125`, at the pinned commit) and it is
+  inside that catch block — so an `[ERROR]` line in `logs/rf2o.log` **is**
+  that lookup having failed, whatever tf2's wording for the particular
+  failure was. `check_rf2o_transform()` runs after the dead-child check
+  and beside §9.4's covariance gate, and refuses the bringup by name.
+  Grepping the *message text* would have tied the check to one of tf2's
+  several exception strings; the ERROR level is the property that holds.
+
+> **The twist would have survived it, and that is not a reason to let it
+> pass.** rf2o's `lin_speed` and `ang_speed` are both computed from the
+> scan-to-scan increment and are independent of the mount, so THIS phase
+> — which fuses twist only — would not measurably have noticed. A stack
+> that publishes a wrong thing nobody currently reads is a trap set for
+> whoever reads it next.
+
+With the ordering fixed, `Laser odom` and `Robot-base odom` differ by
+exactly the mount, and `logs/rf2o.log` carries **0 ERROR lines** on every
+one of the eight A/B bringups:
+
+```
+Laser odom      [x,y,yaw]=[0.582632 -0.381852 0.000431]
+Robot-base odom [x,y,yaw]=[0.032459  0.017911 0.000431]
+```
+
+---
+
+### 10.2 The covariance, derived — and the control that shows it matters
+
+**Both readings are of rf2o's OWN output and neither touches the ground
+truth**, so F2 global constraint 13 holds inside the calibration and not
+only at run time. `tools/noise_probe.sh` takes the plant's own sensor
+noise by exactly this instrument, at rest, for exactly this reason.
+
+| channel | at rest, 912 samples over 60 s | at cruise, 231 samples | **SHIPPED** |
+|---|---|---|---|
+| `vx` | **2.6403e-03** (sd 0.0514 m/s) | 2.2663e-03 | **2.6403e-03** |
+| `vyaw` | **9.3723e-05** (sd 0.00968 rad/s) | 2.5445e-05 | **9.3723e-05** |
+| `vy` | 0.0 exactly, 912 of 912 | 0.0 exactly | not fused |
+
+- **at rest** — the temporal spread of the whole twist over a 60 s
+  `record --static` (`static-rest-20260826-124015`). The reference is
+  that the truck is not moving, which is a fact about the experiment and
+  not a signal.
+- **at cruise** — the residual of the same channel about a **2 s moving
+  mean of itself**, over the steady window of a `straight` run
+  (`drive-straight-20260826-124323`, the window where the wheel odometry
+  is within 5 % of its own peak, sim 222.33 – 237.57 s). The reference is
+  the signal's own local level.
+- **the larger of the two is taken**, per channel — the honest direction.
+
+**For scale:** the wheel odometry's own `vx` covariance is **2.3383e-2**
+(sd 0.153 m/s, F1's measured quantiser dither at 2 ms), so this filter is
+told rf2o's forward speed is **8.9× more precise**. Its `vyaw` covariance
+is 1.1111e-5 and the IMU's gyro is 3.045e-6, so rf2o's yaw rate is the
+**least** trusted of the three by 8× and 31×.
+
+> **WHAT THESE NUMBERS DELIBERATELY DO NOT CONTAIN.** A covariance
+> describes DISPERSION. rf2o also has a large **scale error** on this
+> plant — §10.5's table — and that is a BIAS, which no covariance can
+> express and which this block does not inflate itself to disguise. That
+> is `wheel_odom.covariance`'s own ruling applied again: it derives its
+> `vyaw` from the steer bias alone and refuses to invent a term for the
+> tyre scrub that actually dominates a corner, *"because inventing one
+> would be a hand in the weighting."* A gain fitted against the ground
+> truth would have made this arm's own error vanish into a constant and
+> left nothing to A/B.
+
+#### The control: a zero covariance is BELIEVED, not ignored
+
+**A second `ekf_node`, on the same live stack, at the same time,
+identical to the shipping filter in every parameter except which rf2o
+topic it reads.** It publishes to a topic of its own and broadcasts no
+transform, so it cannot disturb what it is measured beside. Both filters
+saw the same 500 Hz wheel odometry, the same IMU and the same drive.
+
+| | reads | twist covariance | x after an 11.601 m forward `straight` |
+|---|---|---|---|
+| ground truth | — | — | **11.601 m travelled** (world −17.000 → −5.399) |
+| shipping filter | `/m5v3/rf2o/odom` (the relay) | **measured**, above | **−11.606 m** — 5 mm out |
+| control | `/m5v3/rf2o/odom_raw` (rf2o's own) | **36 zeros** | **+6.032 m** — *the wrong way* |
+
+**Both defects land in that one row.** The control's estimate is dragged
+**backwards by more than half the true distance** by a 15 Hz sensor,
+against a 500 Hz wheel odometry saying the opposite — which is not what a
+filter that ignored an unset covariance would produce, and settles §10.1(b)
+by measurement. And it is dragged backwards rather than merely short,
+which is §10.1(a) with the correction taken out.
+
+> `robot_localization` says **nothing at WARN or above** about either.
+> The control node's entire log for the run is one *"Waiting for clock to
+> start…"* and two *"Failed to meet update rate"* — the substitution it
+> makes for a zero variance is at DEBUG. This is §2.6 again: the filter
+> is silent about what it is being fed.
+
+---
+
+### 10.3 The default stack is not merely equivalent to §9.3's — it is the same
+
+**`start` without `--rf2o` was verified inert, on the rig, after the arm
+was built and wired:**
+
+| check | result |
+|---|---|
+| children | **6 alive, 0 dead** — `world bridge imgbridge odom imutf ekf`. No `lasertf`, no `rf2o`, no `rf2ocov`. |
+| `status` | `arm  wheel+imu  m5_ver3/ekf.yaml alone (no --rf2o)` |
+| rf2o topics on the graph | `ros2 topic list \| grep rf2o` → **nothing** |
+| the filter's command line | **one** `--params-file`, `m5_ver3/ekf.yaml`, and **no `odom1`** — character for character §9.3's |
+| `ekf_rf2o.yaml` | never named on any command line, never read |
+
+That last row is why the overlay is a **separate file** rather than a
+block inside `ekf.yaml`. `ekf_node` auto-declares every override it is
+handed, so an `odom1:` line sitting in the shipping parameter file would
+be *found* by `robot_localization`'s sensor loop and the arm would be on
+by default with the flag doing nothing. Kept apart, the OFF path reads
+one unchanged file and the ON path reads two — a difference anybody can
+check with `ls` and a diff rather than by reasoning about rclcpp's
+parameter loading. With the flag, the same command line gains exactly two
+arguments:
+
+```
+--params-file .../m5_ver3/ekf.yaml
+--params-file .../m5_ver3/ekf_rf2o.yaml        <- only with --rf2o
+-p odom1:=/m5v3/rf2o/odom                      <- only with --rf2o
+-p use_sim_time:=true  -p frequency:=50.0  ...
+```
+
+**§9.4's covariance gate still gates the start with the arm live.** Every
+bringup in this section ran it: `ekf: healthy, worst covariance 0.0942 –
+0.20604 against a ceiling of 100`, the same band as §9.4's measured
+0.08244 – 0.22776, and it **refused** bringups in this section too — see
+§10.7.
+
+---
+
+### 10.4 What the arm costs this rig
+
+**The instrument is `/proc/<pid>/stat` fields 14 and 15** — `utime` and
+`stime`, the process's own accumulated user and system CPU time in clock
+ticks (`getconf CLK_TCK` = 100 here). Read before and after a bounded
+interval and differenced, that is exactly the CPU seconds that process
+spent, with no sampling error and nothing inferred from a load average.
+Divided by the scans delivered in the same interval it is the per-scan
+cost. **`ros2 run` forks the executable**, so the pid `m5v3.sh` records
+for `ekf` and `bridge` is an idle python wrapper and these are the real
+children, found by pattern and filtered by `GZ_PARTITION`.
+
+| process | truck AT REST, 60.238 s | truck DRIVING a `square`, 35.186 s |
+|---|---|---|
+| `rf2o_laser_odometry_node` | 5.130 s — **8.52 % of one core** | 2.920 s — **8.30 % of one core** |
+| `rf2o_twist.py` (the relay) | 1.020 s — 1.69 % | 0.580 s — 1.65 % |
+| `ekf_node` | 7.100 s — 11.79 % | 4.130 s — 11.74 % |
+| `wheel_odometry.py` | 16.240 s — 26.96 % | 9.500 s — 27.00 % |
+| `parameter_bridge` | 9.350 s — 15.52 % | 5.490 s — 15.60 % |
+| `image_bridge` | 1.800 s — 2.99 % | 1.000 s — 2.84 % |
+| gz server (`world`) | 47.350 s — 78.59 % | — |
+
+**Per scan, at 15.15 Hz delivered:** `5.130 / (60.238 × 15.15)` =
+**5.62 ms** at rest and `2.920 / (35.186 × 15.15)` = **5.48 ms** while
+driving. **The cost does not depend on the motion**, which is the
+algorithm and not a coincidence: it runs a fixed 5-level coarse-to-fine
+pyramid with 5 IRLS iterations per level on every scan, whatever the
+vehicle is doing.
+
+**The whole arm against the same stack without it**, measured back to
+back on the same bringup pair:
+
+| | `wheel+imu` | `wheel+imu+rf2o` | delta |
+|---|---|---|---|
+| `rf2o_laser_odometry_node` | — | 8.52 % | **+8.52 pp** |
+| `rf2o_twist.py` | — | 1.69 % | **+1.69 pp** |
+| `ekf_node` (a third sensor to fuse) | 10.45 % | 11.79 % | **+1.34 pp** |
+| `wheel_odometry.py` | 26.74 % | 26.96 % | +0.22 pp |
+| `parameter_bridge` | 14.60 % | 15.52 % | +0.92 pp |
+| **the arm, total** | | | **≈ 11.6 % of one core** |
+
+**11.6 % of one core is 0.58 % of this 20-thread machine, and the
+real-time factor cannot see it** (`tools/rtf_probe.sh`, 30 s, 296
+samples each, back to back):
+
+| | mean RTF | median | floor | ceiling |
+|---|---|---|---|---|
+| `wheel+imu` | 0.9991 | 0.9999 | 0.9531 | 1.0504 |
+| `wheel+imu+rf2o` | 0.9988 | 0.9999 | 0.9498 | 1.0126 |
+
+**And the GPU pays nothing at all**, which is worth saying because it is
+the resource `EVIDENCE_MODEL_V3.md` §6 measured the 3D lidar costing
+0.999 → 0.85 of. The nav lidar was **already bridged and already
+rendering** before this arm existed — gz renders a sensor while something
+subscribes, and `parameter_bridge` has subscribed to it since F1. This
+arm adds a ROS-side consumer of a stream that was already being produced.
+
+**Delivered rate: every scan is used.** `analyse`'s own rate table, over
+the eight A/B sessions: `rf2o_odom` at **15.1372 – 15.3066 Hz** of sim
+time against the nav lidar's 15.1515, `dt_max = dt_med = 0.066 s`, and
+the row count matches `scan_nav`'s to within one message on every
+session. `rf2o.freq_hz` is 30 — twice the scan rate — because rf2o's main
+loop consumes at most one buffered scan per pass; the cost of the extra
+passes is a `WARN` line and a predicate.
+
+---
+
+### 10.5 The A/B — does scan-matching odometry pay for its CPU here?
+
+**The `wheel+IMU` columns are §9.3's and were NOT re-run.** The `+rf2o`
+columns are eight fresh sessions on the same profiles, same plants, same
+tool, one bringup per drive, taken 2026-08-26 12:46 – 12:55.
+
+#### The control first: the raw wheel odometry did not move
+
+An arm the filter fuses must not be able to reach the estimator that
+feeds it. §3.0 made this check across two `vy` settings and §9.3 across
+the `ax` reversal; here it is across the third sensor:
+
+| profile | figure | `wheel+imu` (§9.3) | **`+rf2o`** | verdict |
+|---|---|---|---|---|
+| dry `straight` | raw end error | 0.5807 – 0.5821 m (3) | **0.5796 – 0.5807 m** (3) | inside, spread **2.5 mm** over all six |
+| | raw path error | +4.22 % | **+4.22 … +4.23 %** | inside |
+| | raw end heading | −0.0577 … −0.0578 rad | **−0.0576 rad** ×3 | inside |
+| wet `straight` | raw end error | 1.1040 – 1.1050 m (2) | **1.0972 – 1.1019 m** (2) | inside |
+| | raw path error | +9.62 … +9.63 % | **+9.56 … +9.58 %** | inside |
+| dry `corner_creep` | raw end error | 0.1943 m | **0.1943 m** | inside, to the digit |
+| dry / wet `square` | raw end error | 1.1161 / 1.3057 m | **0.6914 / 1.3063 m** | wet inside; **dry OUTSIDE — and it is the PLANT** |
+
+The dry `square` row is §9.3's own caveat again and not a regression:
+that profile is an open-loop table of held commands and its **delivered
+turn does not repeat**. §9.3 measured +5.9060 to +6.3124 rad across six
+runs; today's delivered **+6.2200 rad** against §9.3's **+6.1438**, and
+the raw end error follows it. `straight` and `corner_creep` — which do
+repeat, to 2.5 mm and to the digit — are where "did anything move" is
+actually answered, and nothing did.
+
+#### The row that has never moved before
+
+**§8.5's headline and §9.3's control both say the same thing about the
+path-error row: fusion passes it straight through, because nothing on the
+stack observes distance.** Here is that row on both arms:
+
+| profile | plant | `wheel+imu` raw → EKF | **`+rf2o` raw → EKF** |
+|---|---|---|---|
+| `straight` | dry | +4.22 → **+4.22 %** | +4.23 → **+1.30 %** |
+| | | | +4.22 → **+1.36 %** |
+| | | | +4.22 → **+1.51 %** |
+| `square` | dry | +10.77 → **+10.78 %** | +10.56 → **+8.40 %** |
+| `corner_creep` | dry | +7.64 → **+7.64 %** | +7.63 → **+6.67 %** |
+| `straight` | **wet** | +9.63 → **+9.63 %** | +9.58 → **+5.63 %** |
+| | | +9.62 → **+9.62 %** | +9.56 → **+5.71 %** |
+| `square` | **wet** | +19.14 → **+19.14 %** | +19.14 → **+15.20 %** |
+
+**Eight rows, and the third sensor moves every one of them.** It is the
+first time anything on this track has.
+
+#### The along-track error, which is what that row buys
+
+`analyse`'s own `removed` column, magnitudes, a negative meaning the
+filter made it worse:
+
+| profile | plant | session | ALONG-track | CROSS-track | end heading | rms | end error |
+|---|---|---|---|---|---|---|---|
+| `straight` | dry | §9.3 `…113225` | +0.5 % | −24.4 % | −20.5 % | −4.0 % | −7.8 % |
+| | | §9.3 `…113330` | −1.0 % | +70.1 % | +62.7 % | +6.5 % | +14.3 % |
+| | | §9.3 `…113435` | −1.0 % | +69.7 % | +62.5 % | +6.5 % | +14.2 % |
+| | | **`…124609`** | **+99.6 %** | −28.7 % | −24.2 % | **+37.8 %** | +28.9 % |
+| | | **`…124717`** | **+96.5 %** | +82.1 % | +67.8 % | **+63.6 %** | +89.7 % |
+| | | **`…124823`** | **+97.9 %** | −18.1 % | −20.0 % | **+40.7 %** | +34.7 % |
+| `square` | dry | §9.3 `…113540` | +17.4 % | +8.2 % | +16.7 % | +16.9 % | +16.0 % |
+| | | **`…124929`** | **+27.8 %** | +7.7 % | +25.8 % | **+28.4 %** | +25.0 % |
+| `corner_creep` | dry | §9.3 `…113659` | +47.2 % | +7.3 % | +50.4 % | +13.0 % | +22.2 % |
+| | | **`…125046`** | **−34.0 %** | +41.4 % | **−104.1 %** | +17.3 % | +1.1 % |
+| `straight` | **wet** | §9.3 `…113755` | +0.3 % | −30.7 % | −23.9 % | −1.2 % | −2.7 % |
+| | | §9.3 `…113903` | +0.2 % | −22.7 % | −19.9 % | −0.9 % | −2.0 % |
+| | | **`…125244`** | **+54.1 %** | +67.2 % | +60.3 % | **+40.4 %** | +55.1 % |
+| | | **`…125347`** | **+55.0 %** | −19.5 % | −20.4 % | **+37.1 %** | +44.4 % |
+| `square` | **wet** | §9.3 `…114011` | +16.8 % | +2.4 % | +17.2 % | +16.1 % | +15.6 % |
+| | | **`…125451`** | **+23.8 %** | +4.3 % | +24.5 % | **+24.9 %** | +22.0 % |
+
+**Read the ALONG-track column and nothing else, and the answer is
+unambiguous.** Three dry `straight`s: **+0.5 / −1.0 / −1.0 %** becomes
+**+99.6 / +96.5 / +97.9 %**. Two wet `straight`s: **+0.3 / +0.2 %**
+becomes **+54.1 / +55.0 %**. The rms column follows it — dry `straight`
+**−4.0 / +6.5 / +6.5 %** becomes **+37.8 / +63.6 / +40.7 %** — because on
+a straight run the along-track error IS most of the error.
+
+**The cross-track and heading columns are unchanged in character**, and
+they should be: they are §3.4's gyro-bias lottery, whose sign is drawn
+per run and which this arm does not touch. Both arms have runs at
++60 – 82 % and runs at −18 – −31 %, and the rf2o runs are drawn from the
+same distribution.
+
+**`corner_creep` is the one profile the arm makes worse**, and by the
+biggest single margin in the table: −34.0 % along-track and −104.1 % on
+the heading, on a run whose end error nevertheless came out 1.1 % better.
+That is the profile with the smallest travel (3.97 m), the slowest speed
+and the largest sustained yaw rate — where the lever-arm term is the
+largest fraction of the signal and where the wheel odometry was already
+nearly right (raw end error 0.1943 m, a quarter of `straight`'s). **The
+arm has the least to add there and the most to disturb.**
+
+#### And rf2o ON ITS OWN, which is why the fused numbers are what they are
+
+| session | profile | rf2o `vx` / truth `vx`, mean over the run | rf2o's own end displacement vs truth | rf2o's own integrated turn vs truth |
+|---|---|---|---|---|
+| `…124609` | dry `straight` | **0.8263** | −17.20 % | — |
+| `…124717` | dry `straight` | **0.8307** | −17.63 % | — |
+| `…124823` | dry `straight` | **0.8365** | −16.25 % | — |
+| `…124929` | dry `square` | 0.8688 | (wanders) | **−0.65 %** |
+| `…125046` | dry `corner_creep` | 0.9047 | +46.08 % | **+0.17 %** |
+| `…125244` | wet `straight` | 0.8409 | −16.82 % | — |
+| `…125347` | wet `straight` | 0.8494 | −16.44 % | — |
+| `…125451` | wet `square` | 0.8512 | (wanders) | **−1.14 %** |
+
+**rf2o under-reports this vehicle's forward speed by 9.5 – 17.4 %.** Its
+own dead-reckoned pose is worse than the wheel odometry's on a straight
+(−17 % against +4.2 %) and far worse on a `square`, where its path length
+runs to +86 – 87 % because its internal lateral estimate wanders. **Its
+yaw, by contrast, is the most accurate on the vehicle** — under 1.2 % of
+integrated turn on every profile that has one.
+
+> **SO THE ALONG-TRACK RESULT ON `straight` IS PARTLY A CANCELLATION, AND
+> IT HAS TO BE READ THAT WAY.** The wheel odometry runs **+4.22 %** long
+> and rf2o runs **≈ −17 %** short. The filter blended them to
+> **+1.3 … +1.5 %**, which solves for rf2o carrying about **13 %** of the
+> effective weight on distance — the variance ratio (8.9 : 1 in rf2o's
+> favour) pulled back by the sample-rate ratio (500 Hz against 15). Two
+> biases of opposite sign at that weight land near zero **on this
+> vehicle, at this speed, on this floor**. Change the believed wheel
+> radius, or the floor's geometry, or the cruise speed, and the same
+> honest covariance lands somewhere else. **What is robust is the
+> direction and not the magnitude**: rf2o is the only channel here that
+> observes the world, so it is the only one that can pull the distance
+> anywhere at all — and on the WET plant, where the wheel odometry is
+> 9.6 % long for a reason no calibration can remove, it removed **54 –
+> 55 %** of an error the two-sensor filter could not touch by 0.3 %.
+
+---
+
+### 10.6 The verdict
+
+**`docs/reports/m5v3-04` predicted little steady-state gain on a low-slip
+floor, with the slip scenario as the arm's chance to earn its place. That
+is half right and the half it got wrong is the more interesting one.**
+
+**Confirmed:** on the dry `corner_creep`, which is this track's
+low-slip, well-behaved profile, the arm is a **net loss** — −34 % on
+along-track and −104 % on heading. On the dry `square` it is a modest
+gain over an arm that was already gaining (27.8 % against 17.4 %).
+
+**Refuted:** the arm's gain on the dry `straight` is not small. It is the
+**along-track error going to zero**, +0.5 % → +99.6 %, on a profile with
+no slip in it at all. The prediction assumed the wheel odometry's dry
+error was small; it is not — it is the deliberate **+1.5 % believed
+radius** compounding to +4.22 % of path, and that is a *systematic*
+error, not a slip. Anything that observes the world removes it, wet floor
+or dry.
+
+**Where it earns its place is exactly where §8.5 said the stack had a
+hole.** That section closes with an honest handoff — *"nothing on this
+stack observes distance… fusion cannot reach along-track… that is F3's"*
+— and this arm reaches it, on the plant where it matters most: **54 –
+55 % of the wet `straight`'s along-track error removed, against 0.3 %.**
+
+**And it costs almost nothing on this rig.** 11.6 % of one core, 0.58 %
+of the machine, 5.5 ms per scan, no GPU at all, and a real-time factor
+that cannot tell the two arms apart (0.9991 against 0.9988).
+
+#### Ship-on or ship-off?
+
+**SHIP IT OFF BY DEFAULT — and the reason is not the CPU.** Three
+reasons, in the order they matter:
+
+1. **It is not a general result yet.** The `straight` headline rests on
+   two biases of opposite sign cancelling at a weight nobody chose (the
+   box above). Until the arm's own **−17 % scale error** is understood —
+   is it the aperture, the range-flow regularisation on a floor whose
+   long walls give little longitudinal parallax, the 25 m range against a
+   48 × 32 m arena? — a default-on arm is a default-on cancellation.
+2. **It makes one of the five profiles worse**, and it is the profile a
+   forklift spends its time in: a slow sustained corner into a pallet.
+3. **It is one bringup old.** §9.3's baselines are the product of a phase
+   of shaking out; this arm has eight sessions and one afternoon.
+
+**What would make it ship-on**, in the order a later task should attack
+it:
+
+- **Fuse the yaw and not the distance.** rf2o's yaw rate is the most
+  accurate channel on this vehicle (0.65 – 1.14 % of integrated turn) and
+  this filter weights it **31× below the gyro**, because its measured
+  dispersion is 31× the gyro's white noise — while the gyro's covariance
+  contains no term for its per-run bias, which is the error that actually
+  dominates a heading (`ekf.yaml`, and §2.5 measured the draw). An arm
+  configured `vyaw`-only, with a covariance that accounted for the gyro's
+  bias honestly, is a different and probably better experiment.
+- **Find the −17 %.** A scale error that repeats to ±1 % across eight
+  sessions is a *systematic* and therefore a fixable one. It is not a
+  gain to fit; it is a question to answer.
+- **Then re-run this table.**
+
+---
+
+### 10.7 The capture, the suite, and what this section did not do
+
+**Eight A/B sessions, all on the `wheel+imu+rf2o` arm, all 2026-08-26,
+all untracked under `m5_ver3/logs/evidence/`, all headless, one bringup
+per drive, `drive_route` exit 0 on every one and every fused stream
+sane:**
+
+| Session | profile | traction | arm |
+|---|---|---|---|
+| `drive-straight-20260826-124609` | straight | nominal 7.0 / 7.0 | wheel+imu+rf2o |
+| `drive-straight-20260826-124717` | straight | nominal 7.0 / 7.0 | wheel+imu+rf2o |
+| `drive-straight-20260826-124823` | straight | nominal 7.0 / 7.0 | wheel+imu+rf2o |
+| `drive-square-20260826-124929` | square | nominal 7.0 / 7.0 | wheel+imu+rf2o |
+| `drive-corner_creep-20260826-125046` | corner_creep | nominal 7.0 / 7.0 | wheel+imu+rf2o |
+| `drive-straight-20260826-125244` | straight | **slippery 16.0 / 16.0** | wheel+imu+rf2o |
+| `drive-straight-20260826-125347` | straight | **slippery 16.0 / 16.0** | wheel+imu+rf2o |
+| `drive-square-20260826-125451` | square | **slippery 16.0 / 16.0** | wheel+imu+rf2o |
+
+**Two more sessions produced §10.2's covariance and are NOT in any table
+above**, because they were recorded before that covariance was set and so
+came off a filter weighted differently: `static-rest-20260826-124015` and
+`drive-straight-20260826-124323`. The `arm=` label cannot tell them apart
+from the eight — it names the sensors, not their weights — so they are
+named here instead.
+
+**§9.4's gate refused bringups in this batch too.** The captured tail of
+the run log shows the first slippery `straight` taking **four bringups,
+three of them refused** by the covariance gate on `the filter came up
+without diverging`; the earlier runs' attempts scrolled out of the
+captured log and are not claimed.
+
+**So the obvious question was asked properly: does the third sensor make
+the filter less likely to start?** §9.2's ruling is that an un-paired
+ladder measures the day and not the configuration, because the
+divergence rate on this rig drifts by an order of magnitude through one,
+so this was run **interleaved** — sixteen bringups, alternating arms, in
+one window, the instrument being `m5v3.sh start`'s own exit status:
+
+| arm | refused by §9.4's gate | worst covariance at the gate, across the eight |
+|---|---|---|
+| `wheel+imu` | **0 of 8** | 0.08496 – 0.20772 |
+| `wheel+imu+rf2o` | **0 of 8** | 0.09144 – 0.23772 |
+
+**That is a NULL result and it is reported as one**, exactly as §9.2's
+interleaved test was (0 of 6 against 0 of 6): the rate had collapsed
+again in that window, so sixteen healthy bringups separate nothing. What
+it does establish is the second column — **the arm does not move the
+covariance the gate reads**, which sits in §9.4's measured healthy band
+of 0.08244 – 0.22776 either way, so the ceiling of 100 is as far from
+both arms as it was from one.
+
+**The suite:**
+
+```
+$ python -m pytest m5_ver3/tests/ -q
+194 passed
+
+$ python m5_ver3/tools/evidence_core.py --selftest
+26/26 checks passed
+
+$ python m5_ver3/nodes/wheel_odom_core.py --selftest
+12/12 checks passed
+
+$ python m5_ver3/nodes/rf2o_twist_core.py --selftest
+22/22 checks passed
+```
+
+148 → **194**: twenty-three for `nodes/rf2o_twist_core.py` — the aperture
+rotation, the lever arm, the order the two are applied in, the non-finite
+guard and the covariance-absence test — and thirteen for the arm label
+and the mixed-set refusal it shares a mechanism with. **The one that
+matters most is `test_the_rotation_is_applied_BEFORE_the_lever_arm`**:
+the two orders differ by twice the lever-arm term, and on this plant —
+where the rotation is π and therefore its own inverse — getting it
+backwards produces a plausible number on every profile.
+
+**What this section did not do:**
+
+- **It did not patch rf2o.** The pin is upstream's tree, unmodified;
+  every correction is outside it, in a relay whose arithmetic is tested.
+  Recovering the lateral velocity upstream throws away would need a
+  patch, and that is a later task's `rf2o.commit`.
+- **It did not identify the −17 % scale error.** §10.6 names it as the
+  first thing to attack and does not guess at it here.
+- **It did not re-run §9.3.** Those figures are cited, not reproduced,
+  and the arm label is the mechanism that stops the two sets being read
+  into one document by accident.
+- **It did not touch `model.sdf`, the floor, or any figure in
+  `EVIDENCE_SENSORS.md` / `EVIDENCE_MODEL_V3.md`.** The plant is
+  byte-identical to F1.5's and §10.5's control shows the raw estimator
+  did not move.
+- **It did not measure `aisle`**, or a `--static` capture on the shipping
+  covariance, or the arm at any other lidar rate.

@@ -107,12 +107,19 @@ m5_ver3/
 │                         odometry against the truth, profile by profile.
 │                         F2 Task 2 adds §8: the same three streams on a
 │                         floor the truck cannot grip, and the filter's
-│                         own startup divergence, measured
+│                         own startup divergence, measured. §9 is the
+│                         `ax` reversal and the bringup gate it left
+│                         behind; §10 is the OPTIONAL laser-odometry arm
+│                         and whether it pays for its CPU
 ├── config.yaml           every constant the scripts obey - the one home
 ├── ekf.yaml              what the FILTER fuses and what it refuses. A ROS
 │                         parameter file, which config.yaml is not and may
 │                         not become - the split is argued in both files
-├── m5v3.sh               start [--headless] [--slippery] | stop | status
+├── ekf_rf2o.yaml         the OPTIONAL arm's overlay and NOTHING else. A
+│                         SECOND --params-file, passed only by --rf2o, so
+│                         the default stack reads one unchanged file
+├── m5v3.sh               start [--headless] [--slippery] [--rf2o]
+│                         | stop | status
 ├── gazebo/
 │   └── forklift_ver3/
 │       └── model.sdf     the forked vehicle
@@ -120,10 +127,16 @@ m5_ver3/
 │   └── evidence/         one directory per recorded session, CSVs (untracked)
 ├── nodes/
 │   ├── wheel_odom_core.py   the estimate, as arithmetic. --selftest
-│   └── wheel_odometry.py    the rclpy shell around it. Wiring only.
+│   ├── wheel_odometry.py    the rclpy shell around it. Wiring only.
+│   ├── rf2o_twist_core.py   what the laser odometry's output has to have
+│   │                        done to it before a filter may read it, as
+│   │                        arithmetic. --selftest
+│   └── rf2o_twist.py        the rclpy shell around it. Wiring only.
 ├── tests/                pytest, no ROS anywhere - runs on the Windows python
 └── tools/
     ├── _common.sh        sourced: refuse(), the config reader, source_ros()
+    ├── install_rf2o.sh   rf2o_laser_odometry from source, at a PINNED
+    │                     commit, into the user's own $HOME, without sudo
     ├── _common.py        imported: the same three things for python
     ├── rtf_probe.sh      real-time factor of the RUNNING world
     ├── noise_probe.sh    is the configured sensor noise on the wire
@@ -179,11 +192,13 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 | `m5v3.sh start` | GPU preflight, then the world, one `forklift_ver3`, both bridges, the wheel-odometry node, the static IMU transform, the EKF and a Gazebo **window**. |
 | `m5v3.sh start --headless` | The same without the window. **Use this for anything being measured** — every figure in the three evidence files was taken this way. |
 | `m5v3.sh start --slippery` | **A different plant from the same model file.** After the truck is spawned, every wheel's slip compliance is overridden through gz-sim's own `wheel_slip` service to `config.yaml`'s `slippery:` values — `model.sdf` is not edited and no variant of it is generated. Longitudinal slip at cruise goes from 0.95 % to 6.18 %. Combines with `--headless`, in either order. |
-| `m5v3.sh status` | Each child by name, ALIVE or DEAD, with its log, and **which traction the running plant is on**. Exit 0 only if every one is alive. |
+| `m5v3.sh start --rf2o` | **A DIFFERENT ESTIMATOR ON THE SAME PLANT**, which is `--slippery`'s mirror image. Three more children — the nav lidar's static transform, `rf2o_laser_odometry_node` matching consecutive scans, and the relay that puts a MEASURED covariance on its twist and corrects two frame errors upstream does not — plus a second `--params-file` giving the filter an `odom1` it fuses `vx` and `vyaw` from. Default OFF, and without it the stack is the six children `EVIDENCE_FUSION.md` §9.3 measured, off one unchanged parameter file. Build the package first with `tools/install_rf2o.sh`. Combines with the other two flags, in any order. |
+| `m5v3.sh status` | Each child by name, ALIVE or DEAD, with its log, **which traction the running plant is on** and **which estimator arm is up**. Exit 0 only if every one is alive. |
 | `m5v3.sh stop` | Ends this partition's stack, and nothing else. |
 | `tools/rtf_probe.sh` | 30 s real-time-factor sample of the world that is already running. |
 | `tools/noise_probe.sh scan\|depth <topic>` | Temporal spread of every reading on one sensor topic, vehicle **at rest**. Is the noise the SDF configures actually on the wire? |
 | `tools/slip_bench.sh` | Drives the traction terminal at cruise, forward then astern, and reports slip against the commanded and the achieved wheel rate. |
+| `tools/install_rf2o.sh` | Builds `rf2o_laser_odometry` from source, at `config.yaml`'s **pinned commit**, into a colcon workspace under `$HOME`. No sudo at any point, idempotent, refuses by name, and writes a manifest of what it fetched beside the build. Run once; `start --rf2o` refuses by name if it has not been. |
 | `tools/ekf_health.py` | One bounded read of the filter's output, and a refusal if its covariance is over `ekf.startup_check.covariance_max`. **`start` runs it for you** — it exists because `ekf_node` can diverge during its first cycles and stay ALIVE, at rate, saying nothing (`EVIDENCE_FUSION.md` §8.6, §9). |
 | `tools/drive_route.py <profile>` | Drives one of `config.yaml`'s profiles — `straight`, `square`, `aisle`, `corner_creep` — open loop, on the plant's own clock. It drives; it records nothing. |
 | `tools/sensor_evidence.py record --static\|--drive P` | Captures one run into `logs/evidence/<session>/`: one headered CSV per stream. `--drive` starts `drive_route.py` itself, so one command is one complete run. It stamps the session with **which plant it was taken on** and refuses if the stack cannot say, and it refuses **before the drive** if the filter has already diverged. Needs ROS. |
@@ -214,14 +229,37 @@ reproducing the model's own 0.95 % slip to 0.0014 percentage points.
   would not look like a failure — it would look like a row — and that is
   the whole reason the chain exists.
 
-**Six children since F2 Task 1**, and `status` names all six back: the
+**And since F2 Task 3 there are TWO ESTIMATORS as well, labelled by the
+same chain and for the same reason.** `--rf2o` is `--slippery`'s mirror
+image: it changes the ESTIMATE where that changes the PLANT, and the
+failure it could cause is identical — a run of one arm sitting in the
+other's table, on the same floor, from the same model file, driving the
+same profiles, publishing on the same fused topic, writing CSVs of the
+same shape into a directory of the same name. So `start` writes `arm=` to
+the same state file on every bringup, `status` prints it, `record` copies
+it into every session and refuses without it, and `analyse` refuses a set
+of sessions that mixes the two arms. **The two labels are independent
+questions and there are two refusals**: a set can be all-nominal and
+still be half `wheel+imu` and half `wheel+imu+rf2o`, which is the mix
+`EVIDENCE_FUSION.md` §10's whole A/B would be destroyed by.
+
+**Six children by default and NINE with `--rf2o`**, and `status` names
+them all back: the
 gz server (`world`), `ros_gz_bridge`'s `parameter_bridge` (`bridge`),
 `ros_gz_image`'s `image_bridge` (`imgbridge`), `nodes/wheel_odometry.py`
 (`odom`), the static `base_link` → `imu_link` transform (`imutf`) and
 `robot_localization`'s `ekf_node` (`ekf`) — plus the gated GUI client
 (`gui`) when there is a window, which is the seventh process `m5v3.sh`'s
-own usage text counts. **No broker, no fleet manager, no HMI, no PLC
-link** — that absence is the phase, not an omission. Nothing here
+own usage text counts. With `--rf2o` there are three more, and they go up
+BEFORE the bridges rather than after: the static `base_link` →
+`nav_lidar_link` transform (`lasertf`), `rf2o_laser_odometry_node`
+(`rf2o`) and `nodes/rf2o_twist.py` (`rf2ocov`). **The ordering is
+measured and not tidy** — rf2o looks up the scanner's mount exactly once,
+on its first scan, and carries on with a garbage transform if the lookup
+fails, so it is started while there is no scan publisher at all and the
+latched transform has ten seconds of real work to arrive in
+(`EVIDENCE_FUSION.md` §10.1). **No broker, no fleet manager, no HMI, no
+PLC link** — that absence is the phase, not an omission. Nothing here
 touches PLCSIM Advanced or anything on the Windows side.
 
 **The two newest children are one filter and the geometry it cannot work
@@ -307,6 +345,23 @@ turn that has been measured is worth more than one that has been tidied
 away. **It is still twist-only**: the six pose flags are false and the
 node's own covariance of 1000 still says do-not-fuse. F2 global
 constraint 13 governs the POSE and never excluded a velocity component.
+
+**A third estimator exists, it is OFF, and the reason it is off is in the
+numbers rather than in the cost.** `--rf2o` matches consecutive nav-lidar
+scans and is the first thing on this track that observes the FLOOR —
+which is why it is also the first thing that has ever moved the
+**path-error row**, the one §8.5 handed to F3 as unreachable: **+9.63 %
+→ +5.63 %** on the slippery `straight`, against the two-sensor filter's
++9.63 % → +9.63 %. It costs **11.6 % of one core** and the real-time
+factor cannot see it. It ships **off** anyway, for three reasons in
+`EVIDENCE_FUSION.md` §10.6: its own forward speed is 9.5–17.4 % low and
+the dry `straight` headline is partly two opposite biases cancelling at a
+weight nobody chose; it makes `corner_creep` — a slow sustained corner,
+which is what a forklift does — measurably worse; and it is eight
+sessions old against a baseline that is a phase old. **Its yaw rate is
+the most accurate channel on this vehicle** (under 1.2 % of integrated
+turn) and this filter weights it 31× below the gyro, which is the first
+thing a later task should change.
 
 ## Two things worth knowing before the next phase
 
