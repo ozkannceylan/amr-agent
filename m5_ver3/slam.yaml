@@ -71,32 +71,55 @@ slam_toolbox:
     ceres_dogleg_type: TRADITIONAL_DOGLEG
     ceres_loss_function: None
 
-    # ================= THE CONTRACT =================
-    # These four are not tuning. They are the names this stack already
-    # uses, and getting one of them wrong is a mapper that silently
-    # receives nothing.
+    # ================= THE CONTRACT, AND IT IS NOT IN THIS FILE =========
     #
-    # scan_topic   NON-DEFAULT (`/scan`). config.yaml topics.scan_nav.
-    #              The bridged nav lidar and the ONLY sensor in this map:
-    #              the 3D lidar is not bridged, the three safety scanners
-    #              are frozen by the PLC field contract, and the depth
-    #              camera is not a 2D scan.
-    # base_frame   NON-DEFAULT (`base_footprint`). config.yaml
-    #              frames.base_link. This track carries no URDF and no
-    #              robot_state_publisher, so there IS no base_footprint
-    #              frame: the odometry, the filter and the static sensor
-    #              mounts all name base_link. The default would make
-    #              every transform lookup fail.
-    # odom_frame   default, and it is F2's EKF that owns odom ->
-    #              base_link. THIS NODE OWNS map -> odom AND NOTHING
-    #              ELSE, which is the whole of F3 constraint 15: two
-    #              publishers of one edge is a tree tf2 resolves by
-    #              arrival order.
-    # map_frame    default.
-    scan_topic: /forklift/gz/scan_nav
-    base_frame: base_link
-    odom_frame: odom
-    map_frame: map
+    # FOUR NAMES BELONG HERE BY SUBJECT AND ARE ABSENT BY RULE:
+    #
+    #     scan_topic   config.yaml topics.scan_nav      /forklift/gz/scan_nav
+    #     base_frame   config.yaml frames.base_link     base_link
+    #     odom_frame   config.yaml frames.odom          odom
+    #     map_frame    config.yaml frames.map           map
+    #
+    # tools/build_map.sh passes all four on the mapper's command line as
+    # `-p` OVERRIDES, read from those config.yaml keys. THIS FILE MAY NOT
+    # HOLD A COPY OF THEM, and the values in the middle column above are
+    # written here to be READ rather than to be applied - an override
+    # wins over a params file, so a copy in this file would not even fail
+    # loudly, it would sit here disagreeing with the stack until somebody
+    # believed it.
+    #   IT IS m5v3.sh's RULE FOR ekf.yaml AND fuse.yaml, APPLIED A THIRD
+    #   TIME (m5v3.sh, the ekf child: "everything here is a name or a
+    #   rate that is already written down elsewhere on this track ... and
+    #   is passed as a `-p` override so that ekf.yaml cannot hold a
+    #   second copy of it"). What ekf.yaml holds is what is FUSED and
+    #   what is REFUSED; what this file holds is what the MAPPER DOES.
+    #   Neither holds an address.
+    #   AND THE COST OF THE COPY WAS NOT HYPOTHETICAL HERE. Until F3's
+    #   first fix round these four were keys in this file AND four
+    #   `load_config` entries in build_map.sh that were only printed into
+    #   build.txt - so a divergence would have produced a manifest
+    #   describing a map that had been built with the other four values.
+    #
+    # WHY EACH ONE IS NOT THE PACKAGE DEFAULT, which is the part that IS
+    # this file's business:
+    #
+    #   scan_topic   slam_toolbox defaults to `/scan`. The bridged nav
+    #                lidar is the ONLY sensor in this map: the 3D lidar
+    #                is not bridged, the three safety scanners are frozen
+    #                by the PLC field contract, and the depth camera is
+    #                not a 2D scan.
+    #   base_frame   slam_toolbox defaults to `base_footprint`. This
+    #                track carries no URDF and no robot_state_publisher,
+    #                so there IS no base_footprint frame - the odometry,
+    #                the filter and the static sensor mounts all name
+    #                base_link, and the default would make every
+    #                transform lookup fail.
+    #   odom_frame   the package default happens to match, and it is
+    #                F2's EKF that owns odom -> base_link. THIS NODE OWNS
+    #                map -> odom AND NOTHING ELSE, which is the whole of
+    #                F3 constraint 15: two publishers of one edge is a
+    #                tree tf2 resolves by arrival order.
+    #   map_frame    the package default happens to match.
 
     # THE RUN IS OFFLINE AND THE CLOCK IS THE PLANT'S. The bag carries
     # /clock as it was recorded, `ros2 bag play` republishes it, and every

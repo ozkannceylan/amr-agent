@@ -173,6 +173,39 @@ ros2 pkg prefix nav2_map_server >/dev/null 2>&1 || refuse \
     "nav2_map_server is installed" "the rig" \
     "map_saver_cli is the ONE map exporter this track uses."
 
+# IS THE MAPPER'S PARAMETER FILE ADDRESSED TO THE MAPPER, and it is
+# m5v3.sh's check_ekf_params() in this node's currency.
+#
+# WHY IT IS CHECKED AND NOT WRITTEN DOWN. A ROS parameter file is keyed
+# by the node's name, and rclcpp does NOT complain about a block
+# addressed to somebody else - it applies nothing and starts. Here that
+# failure is worse than a missing file, because the `-p` overrides below
+# still land: the scan topic and all three frames would be set, so
+# sync_slam_toolbox_node would come up on its PACKAGE DEFAULTS - a 0.5 m
+# travel gate, a 10-scan running buffer, a 3.0 m loop-closure radius, no
+# raised message-filter queue - subscribe the right topic in the right
+# frames, and build A MAP. A worse map, quietly, of the right floor. The
+# node would advertise, both lifecycle transitions would succeed, the bag
+# would play, the pose graph would serialize and the grid would save;
+# every check downstream of this line would pass, and the only thing
+# saying which parameters had been used would be build.txt, which records
+# the file's PATH and its md5 rather than whether anything read it.
+#   A MISSPELT TOP-LEVEL KEY IS THE SAME FAILURE BY ANOTHER ROUTE and
+#   rclcpp is equally silent about it. One grep, before anything starts.
+grep -q "^${CFG_MAP_SLAM_NODE_NAME}:" "$REPO/$CFG_MAP_SLAM_PARAMS_FILE" \
+    || refuse \
+    "the mapper parameter file is addressed to $CFG_MAP_SLAM_NODE_NAME" \
+    "$CFG_MAP_SLAM_PARAMS_FILE and $CONFIG (map.slam.node_name, map.slam.params_file)" \
+    "there is no top-level '$CFG_MAP_SLAM_NODE_NAME:' key in that file, so" \
+    "every parameter in it belongs to a node that is never started." \
+    "sync_slam_toolbox_node would come up on its PACKAGE DEFAULTS with" \
+    "the scan topic and all three frames still overridden below, and" \
+    "would build a QUIETLY WORSE map of the right floor: nothing after" \
+    "this line can tell the two apart." \
+    "the top-level keys that file does define:" \
+    "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$REPO/$CFG_MAP_SLAM_PARAMS_FILE" \
+       || echo '(none)')"
+
 # ---------------------------------------------------------------- children
 PIDS=()
 NAMES=()
@@ -229,10 +262,30 @@ spawn lasertf ros2 run tf2_ros static_transform_publisher \
 #    its parameters in on_configure and does not subscribe until
 #    on_activate, so a bag that started first would have its opening
 #    seconds - which are the reference pose - go nowhere.
+#    WHAT IS ON THIS COMMAND LINE AND WHAT IS IN THE FILE, and it is
+#    m5v3.sh's split for ekf.yaml applied a third time. Everything here
+#    is a NAME that is already written down elsewhere on this track - the
+#    scan topic and the three frames - and it is passed as a `-p`
+#    OVERRIDE so that slam.yaml cannot hold a second copy of it.
+#    slam.yaml holds what the MAPPER DOES and the argument for each
+#    value; config.yaml holds the addresses. No name is in both, and
+#    these four `load_config` keys are now READ by the command line
+#    rather than only printed into build.txt - which is what they did
+#    until F3's first fix round, so a divergence would have produced a
+#    manifest describing a map built with the other four values.
+#      AN OVERRIDE WINS OVER A PARAMS FILE, which is why this direction
+#      is the safe one: if slam.yaml ever grows a copy again, the stack
+#      still runs on config.yaml's value and the copy is inert rather
+#      than authoritative. The grep above is what catches the file being
+#      ignored ENTIRELY; this is what keeps the four names single.
 spawn slam ros2 run "$CFG_MAP_SLAM_PACKAGE" "$CFG_MAP_SLAM_EXECUTABLE" \
     --ros-args \
     --params-file "$REPO/$CFG_MAP_SLAM_PARAMS_FILE" \
     -p use_lifecycle_manager:=false \
+    -p scan_topic:="$CFG_TOPICS_SCAN_NAV" \
+    -p base_frame:="$CFG_FRAMES_BASE_LINK" \
+    -p odom_frame:="$CFG_FRAMES_ODOM" \
+    -p map_frame:="$CFG_FRAMES_MAP" \
     -r __node:="$CFG_MAP_SLAM_NODE_NAME"
 
 echo ""

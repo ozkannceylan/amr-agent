@@ -427,7 +427,29 @@ a session recorded without `--bag`.
 `m5_ver3/slam.yaml` is a ROS **parameter** file and is a second file
 beside `config.yaml` for `ekf.yaml`'s reason: `sync_slam_toolbox_node`
 reads a `<node>: ros__parameters:` mapping and `config.yaml` is not one
-and is not bent into one. No number is in both.
+and is not bent into one.
+
+**And the split is held by the same two mechanisms `ekf.yaml` gets, not
+by prose.** Every value that is a NAME already written down elsewhere on
+this track — `scan_topic`, `base_frame`, `odom_frame`, `map_frame` — is
+**absent from `slam.yaml`** and passed by `build_map.sh` as a `-p`
+override read from `topics.scan_nav`, `frames.base_link`, `frames.odom`
+and `frames.map`. No name is in both files, and an override wins over a
+params file, so a copy that reappeared in `slam.yaml` would be inert
+rather than authoritative. What `slam.yaml` holds is what the mapper
+DOES; what `config.yaml` holds is the addresses.
+
+**And `build_map.sh` greps that `slam.yaml` is addressed to
+`map.slam.node_name` before it starts anything**, which is
+`m5v3.sh`'s `check_ekf_params()` in this node's currency. A ROS parameter
+file keyed to a node that is never started applies nothing and rclcpp
+says nothing — and here that is worse than a missing file, because the
+four overrides above still land: the mapper would come up on its PACKAGE
+defaults (0.5 m travel gate, 10-scan buffer, 3.0 m closure radius),
+subscribe the right topic in the right frames, and **build a quietly
+worse map of the right floor.** Every check downstream of that line would
+pass. The refusal was exercised on a deliberately misspelt
+`map.slam.node_name`, with the config restored byte-for-byte afterwards.
 
 **Every default quoted below was read off the running node** on this rig
 (`ros2 param get /slam_toolbox <name>` after the configure **and**
@@ -545,7 +567,7 @@ and the inputs those came from:
 
 | input | md5 |
 |---|---|
-| `m5_ver3/slam.yaml` | `076ae1e9d38fbbab7c7d6c03dc296975` |
+| `m5_ver3/slam.yaml` **as it was at the build** | `076ae1e9d38fbbab7c7d6c03dc296975` |
 | `m6/gazebo/warehouse_ver3.sdf` | `9157227ad44f06ac7f487e25ad7c7eda` |
 | the recording's `bag_0.mcap` (untracked) | `dc2f21c8c875970d5dfc820fb2896ada` |
 | the recording's `scan_nav.csv` (untracked) | `bf3473c8f3b2d9ef4fea3f9a8254ca6f` |
@@ -555,6 +577,36 @@ The grid is **1712 × 1196 cells at 0.050 m = 85.60 × 59.80 m**, which is
 larger than the 48 × 32 m hall. **That is unknown padding and not
 geometry** — §7.3 counts it: 72.5 % of the raster is unknown, and every
 occupied and every free cell in it falls inside the building.
+
+> **`slam.yaml`'s md5 has moved since the build and the map has not.**
+> `build.txt` records `076ae1e9d38fbbab7c7d6c03dc296975`, which is what
+> that file hashed to when this map was made; it now hashes to
+> **`32e00dc551e879b0e8f7461e991ccc13`**. `build.txt` is a record of what
+> WAS read and is left alone; this is the note that stops the difference
+> being a mystery.
+>
+> **The change cannot have changed the map, and that is checkable rather
+> than asserted.** F3's first fix round removed four keys from
+> `slam.yaml` — `scan_topic`, `base_frame`, `odom_frame`, `map_frame` —
+> because they were a second copy of `topics.scan_nav`,
+> `frames.base_link`, `frames.odom` and `frames.map`, and
+> `tools/build_map.sh` now passes all four as `-p` overrides from
+> `config.yaml` instead. **The four pairs were identical at the moment
+> they were separated**, so the mapper is handed the same four strings it
+> was handed then:
+>
+> | key | value at the build (in `slam.yaml`) | value now (from `config.yaml`) |
+> |---|---|---|
+> | `scan_topic` | `/forklift/gz/scan_nav` | `/forklift/gz/scan_nav` |
+> | `base_frame` | `base_link` | `base_link` |
+> | `odom_frame` | `odom` | `odom` |
+> | `map_frame` | `map` | `map` |
+>
+> Nothing else in the file moved: the other 54 parameters are unchanged,
+> which `git diff` shows and which is why **the map was NOT rebuilt** —
+> F3 constraint 16 freezes it, and a rebuild to chase a comment would
+> have replaced a scored artifact for no measurable reason. The six
+> frozen files are byte-identical to the ones in `c02e3ff`.
 
 ### 5.3 It repeats — measured, not asserted
 
