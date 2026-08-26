@@ -1721,7 +1721,7 @@ session refusing to share a table).
 | `slam.yaml` not addressed to `slam_loc` | `check_loc_params()`, per node per arm, before anything starts |
 | a lifecycle node that never reached ACTIVE | `localize_lifecycle()` now drives towards a STATE rather than firing two transitions, and refuses by the node's LAST state — the shape came from a bringup that refused because the node was already `active` |
 | a localiser whose composed pose is over `pose_tolerance_m` from the seed | fired on the rig, three times, during §13.2b — on a stale publisher, which is exactly the failure the check is for |
-| a set mixing the two LOCALISERS | `tests/test_sensor_evidence_loc.py`, on two labelled sessions |
+| a set mixing the two LOCALISERS | fired on **two real sessions** that agree in traction and in arm — `drive-straight-20260826-230652` (`amcl@735cdbc6`) beside `drive-straight-20260827-010451` (`slam@4bb88852`): *"2 different absolute layers are in this set"*, both named, a command printed per layer, **exit 1**. Locked in `tests/test_sensor_evidence_loc.py` as well |
 | a localiser `evidence_core` has never heard of | four tables, both directions, `tests/test_localizer_arms.py` and `--selftest` |
 
 **ONE BATCH, RUN IN ORDER, AND IT IS THE SAME SHAPE AS §11's.** Five dry
