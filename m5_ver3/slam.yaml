@@ -1,0 +1,315 @@
+# slam.yaml - what the MAPPER does, and nothing else.
+#
+# WHY IT IS A SECOND FILE BESIDE config.yaml, and it is ekf.yaml's
+# argument applied a third time. slam_toolbox's sync_slam_toolbox_node
+# reads a ROS *parameter* file - a top-level node name, a
+# `ros__parameters:` mapping, and names it declares itself - and
+# config.yaml is not one and is not bent into one. So config.yaml keeps
+# the paths, the playback rate, the timeouts and the name of this file,
+# tools/build_map.sh passes them on the command line, and THIS file holds
+# what the mapper is configured to do. NO NUMBER IS IN BOTH.
+#
+# THE VERSION IS 2.8.5, jazzy, and it matters twice below. Every default
+# quoted here was READ OFF THE RUNNING NODE on this rig 2026-08-26
+# (`ros2 param get /slam_toolbox <name>` after the configure and
+# activate transitions - a lifecycle node declares nothing before them),
+# not copied from a README - which is how the two paragraphs about
+# missing parameters below came to be written at all.
+#
+# NOTHING IN THIS FILE WAS MOVED BECAUSE THE MAP LOOKED BETTER
+# AFTERWARDS. Each non-default below is argued from a MEASURED property
+# of this sensor, this vehicle or this floor, and each would be the same
+# value if the map had come out worse. The knobs a map is most easily
+# flattered with - the correlation search space, the loop-closure
+# response thresholds and the scan-matcher penalties - are left at their
+# shipped values ENTIRELY, and that is a deliberate refusal: this gate's
+# job was to find out what warehouse_ver3 does to a scan matcher, not to
+# arrange it.
+#
+# ---- TWO PARAMETERS THE SHIPPED OFFLINE FILE HAS AND THIS BUILD DOES
+#      NOT DECLARE, WHICH IS WHY THEY ARE ABSENT RATHER THAN SET ----
+#
+# /opt/ros/jazzy/share/slam_toolbox/config/mapper_params_offline.yaml
+# carries `min_laser_range: 0.0` and `max_laser_range: 20.0`. This build
+# declares NEITHER. Measured on this rig 2026-08-26: the node was started
+# bare, driven through configure AND activate, and
+# `ros2 param list /slam_toolbox` then returns 68 names (the four
+# qos_overrides aside) - among them `map_update_interval` and
+# `transform_publish_period`, which are declared in on_activate rather
+# than on_configure, and NOT either laser range. Both keys in the vendor
+# file are therefore read by nothing. Setting them here would have looked
+# like a decision about how far this map ray-traces and would have been a
+# comment.
+#   WHAT DECIDES THE RANGE INSTEAD IS THE SCAN MESSAGE. The nav lidar
+#   publishes range_min 0.05 and range_max 25.0 (the TiM571 profile in
+#   gazebo/forklift_ver3/model.sdf), and those two fields are what the
+#   mapper is given. EVIDENCE_MAP_V3.md checks that rather than asserting
+#   it: the built grid carries returns from the far side of a 48 m hall
+#   seen from the ring, which is only reachable at more than 20 m.
+#
+# ---- WHAT IS NOT CONFIGURED HERE AT ALL ----
+#
+# The offline run's WIRING - which bag, which topics, which frames get a
+# static transform, which domain the replay lives on - is
+# tools/build_map.sh and config.yaml's map: block. This file would be the
+# same file if the recording had been made a different way.
+
+slam_toolbox:
+  ros__parameters:
+
+    # ================= SOLVER =================
+    # THE SHIPPED BLOCK, UNCHANGED, ALL FIVE LINES. Ceres with a sparse
+    # normal Cholesky and Levenberg-Marquardt is what every slam_toolbox
+    # config in the package ships and what the package is tuned around.
+    # A different linear solver is a different optimiser and would make
+    # this map incomparable with anything, for no reason anybody here
+    # has.
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ================= THE CONTRACT =================
+    # These four are not tuning. They are the names this stack already
+    # uses, and getting one of them wrong is a mapper that silently
+    # receives nothing.
+    #
+    # scan_topic   NON-DEFAULT (`/scan`). config.yaml topics.scan_nav.
+    #              The bridged nav lidar and the ONLY sensor in this map:
+    #              the 3D lidar is not bridged, the three safety scanners
+    #              are frozen by the PLC field contract, and the depth
+    #              camera is not a 2D scan.
+    # base_frame   NON-DEFAULT (`base_footprint`). config.yaml
+    #              frames.base_link. This track carries no URDF and no
+    #              robot_state_publisher, so there IS no base_footprint
+    #              frame: the odometry, the filter and the static sensor
+    #              mounts all name base_link. The default would make
+    #              every transform lookup fail.
+    # odom_frame   default, and it is F2's EKF that owns odom ->
+    #              base_link. THIS NODE OWNS map -> odom AND NOTHING
+    #              ELSE, which is the whole of F3 constraint 15: two
+    #              publishers of one edge is a tree tf2 resolves by
+    #              arrival order.
+    # map_frame    default.
+    scan_topic: /forklift/gz/scan_nav
+    base_frame: base_link
+    odom_frame: odom
+    map_frame: map
+
+    # THE RUN IS OFFLINE AND THE CLOCK IS THE PLANT'S. The bag carries
+    # /clock as it was recorded, `ros2 bag play` republishes it, and every
+    # stamp in the recording is on that timeline. With use_sim_time false
+    # this node's now() would be wall time, every recorded transform
+    # would look hours stale, and the tf2 message filter would drop the
+    # entire scan stream.
+    use_sim_time: true
+
+    mode: mapping
+    debug_logging: false
+    # EVERY SCAN IS OFFERED TO THE MAPPER (default). Throttling here
+    # would be a second, blunter travel gate on top of the three below,
+    # and it would make the node spacing depend on the SPEED the profile
+    # happened to drive at.
+    throttle_scans: 1
+    # map -> odom, at 50 Hz. Nothing consumes it in an offline run - the
+    # bag is the only source of motion - but it is what the same
+    # parameter file would publish live, and it costs nothing.
+    transform_publish_period: 0.02
+    # The shipped offline file's value, and this parameter carries no
+    # default of its own - `ros2 param get` on a node that was given none
+    # answers "Parameter not set" - so it is given rather than assumed.
+    #   IT IS A RASTER OF THE WHOLE GRAPH EACH TIME, so it is not free:
+    #   at the end of this run the graph is about 800 nodes of 811 beams.
+    #   It does not change the map that is finally saved - the saved grid
+    #   is the LAST one published, and config.yaml's map.slam.settle_s
+    #   keeps the node alive long enough after the bag ends for at least
+    #   one more.
+    map_update_interval: 10.0
+    # 0.05 m cells, the default, and it is a CONTRACT rather than a
+    # taste: whatever localises against this map later has to raster its
+    # own costmaps at a resolution that divides into it, and 0.05 is what
+    # every Nav2 default in this repository already assumes.
+    #   IT IS ALSO THE INSTRUMENT FLOOR'S FIRST TERM. A cell is 0.05 m,
+    #   so a wall's position in this grid is quantised to +-0.025 m
+    #   before any noise, any drift or any fit is considered.
+    resolution: 0.05
+    restamp_tf: false
+    transform_timeout: 0.5
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000
+    # NO RVIZ AND NO HUMAN. An offline replay has no interactive markers
+    # to serve and nothing to drag; the default is already false and it
+    # is written down because `mapper_params_offline.yaml` ships it TRUE
+    # and a reader comparing the two files should see the difference is
+    # meant.
+    enable_interactive_mode: false
+    # NON-DEFAULT (true). THERE IS EXACTLY ONE MAP EXPORTER AND IT IS
+    # nav2's map_saver_cli, run by tools/build_map.sh with the two
+    # thresholds config.yaml's map.slam block states. slam_toolbox's own
+    # saver would be a second path to the same artifact with its own
+    # unstated thresholds, and a grid is the thing everything downstream
+    # is scored against.
+    use_map_saver: false
+
+    # ================= WHEN A SCAN BECOMES A NODE =================
+    #
+    # THREE GATES AND ALL THREE HAVE TO PASS. A scan enters the graph
+    # only when it is far enough, turned enough AND late enough since the
+    # last one, so the slowest of the three is what actually decides the
+    # spacing. That is why the time gate is here at all: at this
+    # profile's 0.2990 m/s the shipped 0.5 s would fix the spacing at
+    # 0.15 m and the travel gates below would never get a vote.
+    #
+    # minimum_travel_distance  NON-DEFAULT, 0.5 -> 0.30
+    #   The floor's own scale. warehouse_ver3's rack bays repeat every
+    #   5.75 m and its rack segments are 0.50 and 1.00 m long, so the
+    #   along-corridor features a scan matcher can use on the ring are
+    #   the rack ENDS - and at 0.50 m spacing a 0.50 m rack segment can
+    #   be crossed between two nodes. 0.30 m puts at least two nodes on
+    #   the shortest feature the floor has. Over the 225.0 m the mapping
+    #   drive covered it is about 750 nodes, which is a graph Ceres
+    #   solves in well under a second.
+    # minimum_travel_heading   NON-DEFAULT, 0.5 -> 0.20 rad
+    #   The mapping drive takes NINE 90 degree corners
+    #   (config.yaml drive_route.profiles.mapping). At the shipped
+    #   0.5 rad a corner is three nodes about 28.6 degrees apart, which
+    #   is inside coarse_search_angle_offset (0.349 rad = 20.0 deg) by
+    #   nothing at all - the coarse match would be searching from an
+    #   angle further away than its own window. 0.20 rad makes a corner
+    #   eight nodes and every one of them a match the search window
+    #   comfortably contains.
+    # minimum_time_interval    NON-DEFAULT, 0.5 -> 0.20 s
+    #   Two scan periods at this sensor's 15 Hz (0.1333 s), so it is a
+    #   floor that never binds at any speed this vehicle drives: at
+    #   0.2990 m/s the distance gate wants a node every 1.00 s and at the
+    #   0.7 m/s the other profiles use it wants one every 0.43 s. It is
+    #   here to stop a STOPPED truck filling the graph, and for nothing
+    #   else.
+    minimum_travel_distance: 0.30
+    minimum_travel_heading: 0.20
+    minimum_time_interval: 0.20
+    check_min_dist_and_heading_precisely: false
+
+    # ================= THE RUNNING SCAN =================
+    #
+    # scan_buffer_size  NON-DEFAULT, 10 -> 30
+    #   The chain of recent nodes each new scan is matched against. At
+    #   0.30 m spacing the shipped 10 is 3.0 m of history against a
+    #   sensor that sees 25.0 m, so the running scan would be a small
+    #   patch inside a horizon it cannot fill. 30 nodes is 9.0 m, which
+    #   is longer than the 8.00 m width of every cruise corridor on this
+    #   floor and longer than the 5.75 m rack pitch - so the running scan
+    #   always contains at least one rack END, which is the only
+    #   along-corridor feature there is.
+    #   IT DOES NOT FIX A DEGENERATE CORRIDOR AND NOTHING CAN. Where a
+    #   scan carries no along-aisle information, a longer memory only
+    #   remembers more of the same; what it buys is that the memory
+    #   spans the pitch of the features that DO exist.
+    # scan_buffer_maximum_scan_distance  NON-DEFAULT, 10.0 -> 25.0
+    #   Nodes further than this from the running scan's barycentre are
+    #   dropped out of the chain. The shipped 10.0 is BELOW this
+    #   sensor's own 25.0 m range, so it would throw away exactly the
+    #   long-range returns - the far wall of a 48 m hall - that carry
+    #   the most geometry. It is set to the scanner's range and not past
+    #   it: a value larger than what the sensor can see would only keep
+    #   nodes whose scans do not overlap.
+    scan_buffer_size: 30
+    scan_buffer_maximum_scan_distance: 25.0
+    # NON-DEFAULT, 1 -> 10. The tf2 message filter's queue: how many
+    # scans may wait for their transform before the oldest is dropped.
+    # Live, at 15 Hz against a 50 Hz transform, nothing ever waits and 1
+    # is right. IN A REPLAY the interleaving of two recorded topics is
+    # not the interleaving the plant produced - rosbag2 plays by receive
+    # time - so a scan CAN arrive a beat before the transform that
+    # brackets it. A queue of 10 costs 10 scans of memory and removes the
+    # one place a replay could silently drop a measurement the plant
+    # delivered, which is the property the whole offline-sync choice was
+    # made for.
+    scan_queue_size: 10
+
+    # ================= SCAN MATCHING =================
+    # Both default. use_scan_matching false would make this dead
+    # reckoning with a raster on top, and the odometry it would be dead
+    # reckoning on accumulates 9.86 m over this drive (EVIDENCE_MAP_V3).
+    use_scan_matching: true
+    use_scan_barycenter: true
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+
+    # ================= LOOP CLOSURE =================
+    #
+    # THE DRIVE CROSSES ITS OWN TRACK ON PURPOSE and this is what reads
+    # that. config.yaml's mapping: profile re-drives the north leg 180 m
+    # after it started, and the west and south legs after that; the spine
+    # and the pick aisle cross at (0, 0) and the drive passes through
+    # that crossing twice, about 200 s apart.
+    #
+    # loop_search_maximum_distance  NON-DEFAULT, 3.0 -> 5.0
+    #   How far from the current pose a candidate for closure may be. It
+    #   has to be LARGER than the drift the corrected trajectory has
+    #   accumulated when it comes back, and SMALLER than the distance at
+    #   which this floor starts to look like itself.
+    #     THE UPPER BOUND IS THE FLOOR'S OWN PITCH AND IT IS 5.75 m. The
+    #     rack segments stand at x = +-4.25, +-10.00 and +-15.75, so the
+    #     rack block repeats every 5.75 m along both rack rows and a
+    #     search radius past that can find a bay that is not the bay it
+    #     is standing in. 5.0 m is inside it.
+    #     THE LOWER BOUND IS MEASURED. The odometry this map is built on
+    #     - F2's EKF, which is what the recording carries - drifts
+    #     9.86 m of position and 23.4 degrees of heading over the 225.0 m
+    #     of this drive (EVIDENCE_MAP_V3.md 3). The CORRECTED trajectory
+    #     is not that bad, because every node is scan-matched onto the
+    #     running map before it is added - but 3.0 m is smaller than the
+    #     raw drift over even a quarter of the run (1.70 m at 25 %,
+    #     6.44 m at 50 %), so the shipped value is a radius that could
+    #     plausibly be smaller than the error closure exists to remove.
+    #     THE COST IS STATED RATHER THAN HIDDEN: between 3.0 m and 5.0 m
+    #     nothing in this configuration answers the aliasing question,
+    #     and what guards it is that BOTH response thresholds below are
+    #     left at their shipped values, so a bay that merely resembles
+    #     the right one still has to beat 0.35 coarse and 0.45 fine.
+    # loop_search_space_dimension   NON-DEFAULT, 8.0 -> 10.0
+    #   The side of the correlation grid the candidate chain is matched
+    #   in. It brackets the search radius above: +-5.0 m needs 10.0 m of
+    #   grid, and the shipped 8.0 would have made the last metre of the
+    #   radius unreachable - a radius that admits candidates the
+    #   correlator cannot then look at is a radius that is not really
+    #   there.
+    # EVERY OTHER LINE IN THIS BLOCK IS SHIPPED AND UNTOUCHED, including
+    # both response thresholds and the chain size, for the reason in the
+    # header: these are the numbers a map is flattered with.
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+    loop_search_maximum_distance: 5.0
+
+    # ================= CORRELATION, ALL SHIPPED =================
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    loop_search_space_dimension: 10.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # ================= PENALTIES, ALL SHIPPED =================
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true
+    min_pass_through: 2
+    occupancy_threshold: 0.1
+    # The covariance the pose graph is handed for each constraint,
+    # unscaled. Both default. Scaling them is how a factor graph is told
+    # to trust the matcher more or less than the odometry, and this run
+    # has no reading that would justify moving either.
+    position_covariance_scale: 1.0
+    yaw_covariance_scale: 1.0

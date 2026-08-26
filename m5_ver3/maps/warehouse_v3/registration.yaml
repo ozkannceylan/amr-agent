@@ -1,0 +1,108 @@
+# registration.yaml - DERIVED, NOT ASSERTED.
+#
+# This is the rigid transform that carries warehouse_ver3's TRUE geometry
+# onto this occupancy grid:
+#
+#     p_map = R(theta) . p_world + t
+#
+# It was FITTED, by m5_ver3/tools/map_register.py, to the walls of the
+# grid named below against the same walls in the world SDF named below.
+# Nothing here was typed in, and nothing here is a target.
+#
+# THE RESIDUAL IS THE FLOOR. `residual_max_m` is the largest distance
+# between a kept grid wall point and where this transform says that wall
+# is. No rigid transform fits this grid to this building better than
+# that, so NO LOCALISATION ERROR AT OR BELOW IT IS A MEASUREMENT OF THE
+# LOCALISER. Most of it is `shear_deg`: the amount by which the grid is
+# not a rigid copy of the building, which a rigid transform cannot absorb
+# by construction and is not asked to.
+#
+# IT BELONGS TO ONE GRID AND THE BINDING IS ENFORCED. `map_md5` is the
+# md5 of the .pgm this was fitted to, and map_register.load_registration()
+# REFUSES a transform whose grid has changed underneath it. A rebuilt map
+# is a new artifact with its own rotation from the building; nothing
+# downstream may carry this transform across a rebuild.
+#
+# THE SPANS AT THE BOTTOM ARE THE SCORE AND THEY DO NOT USE THIS
+# TRANSFORM. A span is a distance between two surfaces inside the map,
+# so no choice made while fitting can flatter it.
+
+map_yaml: m5_ver3/maps/warehouse_v3/warehouse_v3.yaml
+map_image: m5_ver3/maps/warehouse_v3/warehouse_v3.pgm
+map_md5: 735cdbc68cfde4971e03f509347839d6
+map_yaml_md5: a3c76218755a9ffe97c0d9f71fb1b19e
+world_sdf: m6/gazebo/warehouse_ver3.sdf
+world_md5: 9157227ad44f06ac7f487e25ad7c7eda
+derived_utc: 2026-08-26T19:46:47Z
+tool: m5_ver3/tools/map_register.py derive
+
+theta_rad: -3.138328398
+theta_deg: -179.812971942
+t_x_m: -17.111857467
+t_y_m: 9.798692466
+
+residual_rms_m: 0.029052
+residual_max_m: 0.117891
+shear_deg: 0.265003
+n_wall_points: 2084
+trim_cells: 3.0
+min_points: 100
+
+walls:
+  - name: WallNorth
+    points: 960
+    dropped: 3
+    own_rotation_deg: 0.0227
+    fit_rms_m: 0.0219
+    residual_rms_m: 0.0226
+    residual_max_m: 0.0915
+  - name: WallEast
+    points: 563
+    dropped: 81
+    own_rotation_deg: -0.1881
+    fit_rms_m: 0.0260
+    residual_rms_m: 0.0395
+    residual_max_m: 0.1179
+  - name: WallWest
+    points: 561
+    dropped: 83
+    own_rotation_deg: 0.0769
+    fit_rms_m: 0.0201
+    residual_rms_m: 0.0264
+    residual_max_m: 0.0736
+
+held_out:
+  # NOT IN THE FIT. The transform above was solved
+  # without these points, which is what makes the
+  # span they carry an independent check.
+  name: annex_front
+  models: AnnexW, AnnexA, AnnexB, AnnexC, AnnexE
+  true_face_m: 14.0000
+  fit_rms_m: 0.0338
+  own_rotation_deg: -0.1199
+  points: 537
+  dropped: 23
+
+coverage:
+  hall_m: 48.000 x 32.000
+  open_floor_m2: 1394.00
+  mapped_free_m2: 1369.01
+  mapped_free_fraction: 0.9821
+  cells_occupied: 15757
+  cells_free: 547683
+  cells_unknown: 1484112
+  occupied_in_the_wall_fabric: 933
+  occupied_outside_the_building: 0
+  free_outside_the_building: 0
+
+spans:
+  - name: hall width, east to west
+    between: WallEast and WallWest
+    true_m: 48.0000
+    measured_m: 48.0194
+    error_m: +0.0194
+  - name: north wall to annex front
+    between: WallNorth and annex_front
+    true_m: 28.0000
+    measured_m: 28.0361
+    error_m: +0.0361

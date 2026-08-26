@@ -1,0 +1,23 @@
+# built by tools/build_map.sh on 2026-08-26T18:20:34Z
+name: warehouse_v3
+session: m5_ver3/logs/evidence/drive-mapping-20260826-174815
+profile: mapping
+traction: nominal
+arm: wheel+imu
+bag_storage: mcap
+slam_package: slam_toolbox 2.8.5
+slam_executable: sync_slam_toolbox_node
+slam_params: m5_ver3/slam.yaml
+slam_params_md5: 076ae1e9d38fbbab7c7d6c03dc296975
+play_rate: 0.5
+occupied_thresh: 0.65
+free_thresh: 0.196
+scan_topic: /forklift/gz/scan_nav
+base_frame: base_link
+odom_frame: odom
+map_frame: map
+nav_lidar_mount: 0.55 -0.40 1.80
+md5_warehouse_v3.pgm: 735cdbc68cfde4971e03f509347839d6
+md5_warehouse_v3.yaml: a3c76218755a9ffe97c0d9f71fb1b19e
+md5_warehouse_v3.posegraph: 4bb88852b2f176ff90f812cbb9f2c176
+md5_warehouse_v3.data: e2d3c013b4a31d4158f1ed40f4565fd5
