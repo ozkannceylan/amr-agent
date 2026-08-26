@@ -100,6 +100,15 @@ if _HERE not in sys.path:
 
 import _common                                        # noqa: E402
 import evidence_core as core                          # noqa: E402
+# F3 TASK 2's TWO, AND NEITHER OF THEM IMPORTS ROS EITHER. `analyse` has
+# to carry a map-frame pose into the building, and the transform that
+# does it - with the md5 gate that binds it to one grid - lives in
+# map_register/map_core. They read a .pgm, a .yaml and a text file and
+# nothing else, so the `analyse` half still runs on the owner's Windows
+# python with nothing sourced, which is the property that makes these
+# figures checkable off the rig.
+import map_core                                       # noqa: E402
+import map_register                                   # noqa: E402
 
 TOOL = "sensor_evidence"
 
@@ -120,6 +129,14 @@ REQUIRED_KEYS = (
     # READS is a key this tuple names, and where the read lands is not
     # what the obligation is about.
     "topics.tf", "topics.tf_static",
+    # F3 TASK 2's, AND topics.tf IS NOW READ BY THIS PROCESS RATHER THAN
+    # ONLY HANDED TO `ros2 bag record`: the localiser's edge is captured
+    # off /tf by a subscription of this recorder's own.
+    "topics.amcl_pose", "topics.map",
+    "frames.map",
+    "map.dir", "map.name", "map.registration.file",
+    "localization.label", "localization.params_file",
+    "localization.analyse.map_gap_s",
     "frames.odom", "frames.base_link", "frames.imu",
     "vehicle.imu_mount.x", "vehicle.imu_mount.y", "vehicle.imu_mount.z",
     "ekf.frequency_hz", "ekf.params_file", "fuse.params_file",
@@ -198,6 +215,19 @@ FILES = {
     # reader who wants the raw number has it by arithmetic rather than
     # by a second CSV that could disagree with the first.
     "rf2o_odom": "rf2o_odom.csv",
+    # F3 TASK 2's TWO, AND THEY ARE THERE ONLY ON THE LOCALISED ARM.
+    # `map_odom` is the localiser's own edge - `map` -> `odom` as it
+    # broadcasts it, once per scan - and `amcl_pose` is what the particle
+    # filter believes about the vehicle, with its covariance, published
+    # only when the filter UPDATES.
+    #   THE TWO ARE NOT ONE STREAM WITH TWO RATES. The edge is what a
+    #   consumer of this stack reads and what the absolute score is
+    #   composed from; the pose is what the localiser SAYS, and its
+    #   cadence and its covariance are figures of their own. A recorder
+    #   that kept only one of them could answer only half of
+    #   EVIDENCE_LOCALIZATION_V3.md.
+    "amcl_pose": "amcl_pose.csv",
+    "map_odom": "map_odom.csv",
     "scan_nav": "scan_nav.csv",
     "imu": "imu.csv",
     "depth": "depth.csv",
@@ -323,7 +353,56 @@ def read_traction(cfg):
                    "sessions that are identical in every other respect. "
                    "Stop the stack and",
                    "start it again with the m5v3.sh in this tree.")
+    # AND THE ABSOLUTE LAYER, BY THE SAME RULE AND FOR A THIRD REASON
+    # (F3 Task 2). `--localize` puts a localiser above the same
+    # estimator on the same plant: same model, same floor, same
+    # profiles, same CSV columns, same fused topic, and the only visible
+    # difference is an edge on /tf that no table has a column for. An
+    # unlabelled session cannot be told from an unlocalised one
+    # afterwards.
+    #   `none` IS A VALUE AND A MISSING LINE IS NOT. A stack brought up
+    #   without the flag writes loc=none; a state file with no loc= line
+    #   at all was written by a script that predates this arm, and the
+    #   two are different facts about the run. Neither is inferred from
+    #   the other.
+    if not fields.get("loc"):
+        cfg.refuse("the state file names the absolute layer", path,
+                   "it has no 'loc=' line. m5v3.sh has written one on "
+                   "every bringup since",
+                   "F3 Task 2 - `none` or `<localiser>@<map md5>` - so "
+                   "this stack was brought",
+                   "up by an older copy of that script, or the file is a "
+                   "truncated write.",
+                   "RECORDING WITHOUT IT IS NOT ALLOWED: a localised run "
+                   "and an unlocalised",
+                   "one differ by one edge on /tf and by nothing a CSV "
+                   "can see. Stop the",
+                   "stack and start it again with the m5v3.sh in this "
+                   "tree.")
     return fields
+
+
+def localizer_of(label):
+    """The localiser half of a `loc=` label: the part before the `@`.
+
+    THE GRAMMAR IS `<localiser>@<map md5>` OR THE WORD `none`, and it is
+    parsed rather than looked up for evidence_core.fused_topic_key()'s
+    reason: F3 Task 3 adds a second localiser over the same frozen map,
+    and a table keyed by whole labels would stop working the first time
+    a map is rebuilt.
+    """
+    text = str(label).strip()
+    if not text or text == "none":
+        return ""
+    return text.split("@", 1)[0].strip()
+
+
+def map_md5_of(label):
+    """The map half of a `loc=` label: the part after the `@`, or ""."""
+    text = str(label).strip()
+    if "@" not in text:
+        return ""
+    return text.split("@", 1)[1].strip()
 
 
 def write_session_file(path, fields):
@@ -370,6 +449,14 @@ def describe_session(cfg, session, node, profile, started_wall, exit_code,
         # 10 can be traced to a pinned commit rather than to a name.
         ("arm", traction.get("arm", "")),
         ("arm_source", traction.get("arm_source", "")),
+        # AND SINCE F3 TASK 2 IT CARRIES THE ABSOLUTE LAYER, for the arm
+        # label's reason applied one layer up. `loc` is
+        # `<localiser>@<map md5>` or the word `none`, and the md5 half is
+        # what binds every absolute figure from this session to ONE grid
+        # (F3 constraint 16) - `analyse` refuses to score a session
+        # through a registration that belongs to a different one.
+        ("loc", traction.get("loc", "")),
+        ("loc_source", traction.get("loc_source", "")),
         ("spawn", "{} {} {}".format(cfg.s("vehicle.spawn.x"),
                                     cfg.s("vehicle.spawn.y"),
                                     cfg.s("vehicle.spawn.yaw"))),
@@ -777,7 +864,7 @@ def _make_recorder(cfg, Node, QoSProfile, types):
 
     class Recorder(Node):
 
-        def __init__(self, session, arm):
+        def __init__(self, session, arm, loc=""):
             super().__init__("m5v3_sensor_evidence")
             self.cfg = cfg
             self.session = session
@@ -795,11 +882,45 @@ def _make_recorder(cfg, Node, QoSProfile, types):
             #   this list exists to catch, and a list built by looking
             #   would exclude the stream in exactly that case.
             self.arm = arm
+            # AND THE SAME QUESTION ON THE ABSOLUTE AXIS. `loc` is the
+            # state file's own label - `<localiser>@<map md5>` or `none`
+            # - and it decides two subscriptions and one required
+            # stream. Read off the state file rather than guessed from
+            # whether the topics happen to be up, for the arm list's
+            # reason: a localiser that is alive but silent is precisely
+            # the failure this list exists to catch, and a list built by
+            # looking would exclude the stream in exactly that case.
+            self.loc = loc
+            self.localized = bool(localizer_of(loc))
+            self.map_frame = cfg.s("frames.map")
+            self.odom_frame = cfg.s("frames.odom")
             names = ["clock", "odom_truth", "wheel_odom", "ekf_odom"]
             if "rf2o" in arm:
                 names.append("rf2o_odom")
+            # THE LOCALISER'S EDGE IS A REQUIRED STREAM AND ITS POSE IS
+            # NOT, AND THAT ASYMMETRY IS THE SENSOR MODEL AND NOT A
+            # SOFTNESS. amcl re-broadcasts `map` -> `odom` on EVERY scan
+            # whether or not it corrected, so on a healthy stack it
+            # arrives at 15 Hz within a second and its ABSENCE means the
+            # localiser is not broadcasting - which is a bringup that
+            # should never have been recorded against.
+            #   `amcl_pose` is published only when the particle filter
+            #   RESAMPLES, and with the truck standing at its spawn pose
+            #   it never does (amcl.yaml's update_min_d is 0.25 m). The
+            #   bringup gate consumed the one publication the initial
+            #   pose forced, so by the time this recorder attaches there
+            #   is nothing left to wait for. Requiring it here would hang
+            #   every static capture and every drive's pre-roll on a
+            #   message that arrives only once the truck moves - so it is
+            #   subscribed, recorded, and checked AFTER the drive
+            #   instead, where its absence means the filter never
+            #   updated (see record()).
+            if self.localized:
+                names.append("map_odom")
             names += ["scan_nav", "imu", "depth", "cam_info", "joint_state",
                       "drive_read_a"]
+            if self.localized:
+                names.append("amcl_pose")
             self.writers = collections.OrderedDict(
                 (name, Writer(os.path.join(session, FILES[name])))
                 for name in names)
@@ -850,6 +971,33 @@ def _make_recorder(cfg, Node, QoSProfile, types):
                 self.create_subscription(
                     types.Odometry, cfg.s("topics.rf2o_odom"),
                     self.cb_rf2o, qos)
+            # THE ABSOLUTE LAYER'S TWO, AND THERE IS NO SUBSCRIPTION AT
+            # ALL WITHOUT IT. On the default stack neither topic has a
+            # publisher, so a subscription would sit there forever
+            # holding an empty writer open - which is what the `loc`
+            # label is read for.
+            if self.localized:
+                # THE LOCALISER'S OWN POSE, WITH THE THREE COVARIANCE
+                # ENTRIES A 2D POSE HAS. The full 6x6 is 36 numbers of
+                # which 33 are structurally zero on a planar filter, and
+                # a CSV that carried all of them would be a CSV nobody
+                # opens.
+                self.create_subscription(
+                    types.PoseWithCovarianceStamped,
+                    cfg.s("topics.amcl_pose"), self.cb_amcl_pose, qos)
+                # AND THE EDGE ITSELF, OFF /tf. It is the transform a
+                # consumer of this stack would look up, captured where
+                # the consumer would find it rather than re-derived from
+                # the pose - the two are not the same thing: amcl
+                # computes the edge from its pose and the odometry AT
+                # THE SCAN'S STAMP, and it re-broadcasts that edge
+                # between updates while the pose stays silent.
+                #   A DEEPER QUEUE THAN THE REST. /tf carries the EKF's
+                #   50 Hz edge as well as the localiser's 15 Hz one, so
+                #   this subscription sees about 65 messages a second of
+                #   which it keeps a fifth.
+                self.create_subscription(
+                    types.TFMessage, cfg.s("topics.tf"), self.cb_tf, qos)
             self.create_subscription(
                 types.LaserScan, cfg.s("topics.scan_nav"), self.cb_scan, qos)
             self.create_subscription(types.Imu, cfg.s("topics.imu"),
@@ -920,6 +1068,39 @@ def _make_recorder(cfg, Node, QoSProfile, types):
 
         def fused_pose(self):
             return getattr(self, "last_fused", None)
+
+        def cb_amcl_pose(self, msg):
+            writer = self.writers["amcl_pose"]
+            if not writer.is_open:
+                writer.open(["t_sim", "t_wall", "x", "y", "yaw",
+                             "cov_xx", "cov_yy", "cov_yawyaw"])
+            covariance = list(msg.pose.covariance)
+            writer.row([stamp_of(msg.header), time.time(),
+                        msg.pose.pose.position.x, msg.pose.pose.position.y,
+                        yaw_of(msg.pose.pose.orientation),
+                        covariance[0], covariance[7], covariance[35]])
+
+        def cb_tf(self, msg):
+            # ONE EDGE OUT OF A TOPIC THAT CARRIES EVERY EDGE, and the
+            # match is on BOTH frame names. /tf on a localised stack
+            # carries the estimator's `odom` -> `base_link` at 50 Hz and
+            # the localiser's `map` -> `odom` at the scan rate; matching
+            # on the child alone would take the estimator's messages too
+            # on any future stack that gave `odom` a second parent, and
+            # matching on the parent alone would take a `map` -> anything
+            # a costmap decided to publish.
+            for transform in msg.transforms:
+                if transform.header.frame_id != self.map_frame:
+                    continue
+                if transform.child_frame_id != self.odom_frame:
+                    continue
+                writer = self.writers["map_odom"]
+                if not writer.is_open:
+                    writer.open(["t_sim", "t_wall", "x", "y", "yaw"])
+                writer.row([stamp_of(transform.header), time.time(),
+                            transform.transform.translation.x,
+                            transform.transform.translation.y,
+                            yaw_of(transform.transform.rotation)])
 
         def cb_scan(self, msg):
             writer = self.writers["scan_nav"]
@@ -1010,9 +1191,18 @@ def _make_recorder(cfg, Node, QoSProfile, types):
 
         # ------------------------------ control ------------------------
 
+        #: THE ONE RECORDED STREAM THAT IS NOT REQUIRED TO ARRIVE BEFORE
+        #: THE RUN STARTS. See the stream list above: amcl publishes a
+        #: pose when its filter UPDATES, and a filter whose vehicle is
+        #: standing at spawn does not update. Everything else on this
+        #: recorder is a sensor, a bridge or a publisher that runs on a
+        #: timer, and an absent one is a stack that is not up.
+        OPTIONAL_BEFORE_THE_RUN = ("amcl_pose",)
+
         def missing(self):
             return [name for name, writer in self.writers.items()
-                    if writer.n == 0]
+                    if writer.n == 0
+                    and name not in self.OPTIONAL_BEFORE_THE_RUN]
 
         def close(self):
             for writer in self.writers.values():
@@ -1057,12 +1247,14 @@ def record(cfg, args):
     apply_isolation(cfg)
     try:
         import rclpy
+        from geometry_msgs.msg import PoseWithCovarianceStamped
         from nav_msgs.msg import Odometry
         from rclpy.node import Node
         from rclpy.qos import QoSProfile
         from rosgraph_msgs.msg import Clock
         from sensor_msgs.msg import (CameraInfo, Image, Imu, JointState,
                                      LaserScan)
+        from tf2_msgs.msg import TFMessage
     except ImportError as exc:
         _common.refuse(
             TOOL, "rclpy is importable", _common.CONFIG + " (paths.ros_setup)",
@@ -1072,8 +1264,10 @@ def record(cfg, args):
             "`analyse` needs none of this and runs anywhere.")
 
     types = collections.namedtuple(
-        "Types", "Clock Odometry LaserScan Imu Image CameraInfo JointState")(
-            Clock, Odometry, LaserScan, Imu, Image, CameraInfo, JointState)
+        "Types", "Clock Odometry LaserScan Imu Image CameraInfo JointState "
+                 "PoseWithCovarianceStamped TFMessage")(
+            Clock, Odometry, LaserScan, Imu, Image, CameraInfo, JointState,
+            PoseWithCovarianceStamped, TFMessage)
 
     # WHICH PLANT THIS IS, READ BEFORE THE DIRECTORY IS EVEN CREATED. A
     # stack that cannot say leaves no half-written session behind, and
@@ -1112,13 +1306,15 @@ def record(cfg, args):
         traction.get("wheels", "?")))
     print("arm        {}".format(traction.get("arm")))
     print("           {}".format(traction.get("arm_source", "?")))
+    print("loc        {}".format(traction.get("loc")))
+    print("           {}".format(traction.get("loc_source", "?")))
     print("mode       {}".format(
         "drive " + args.drive if args.drive else "static, vehicle at rest"))
     sys.stdout.flush()
 
     rclpy.init(args=None)
     node = _make_recorder(cfg, Node, QoSProfile, types)(
-        session, traction.get("arm", ""))
+        session, traction.get("arm", ""), traction.get("loc", ""))
     drive_exit = ""
     drive_started_wall = ""
     # THE BAG IS BUILT HERE AND STARTED LATER. Constructing it resolves
@@ -1281,6 +1477,44 @@ def record(cfg, args):
     print("recorded (rows per stream):")
     for name_, count in node.counts():
         print("  {:<14} {:>7}".format(name_, count))
+
+    # AND THE ONE STREAM THAT COULD NOT BE CHECKED BEFORE THE RUN IS
+    # CHECKED AFTER IT. amcl publishes a pose when its particle filter
+    # UPDATES, and it updates after amcl.yaml's update_min_d of travel -
+    # so a DRIVE on the localised arm that produced not one pose is a
+    # localiser that never corrected, and every absolute figure from
+    # that session would be the seed re-broadcast for the length of the
+    # run. It looks exactly like a good session: the edge is on /tf at
+    # 15 Hz, the CSV is full, the rate table is green.
+    #   ONLY ON A DRIVE. A `--static` capture has the truck standing
+    #   still by definition and an empty amcl_pose there is the
+    #   configuration working, not failing.
+    if args.drive and node.localized:
+        rows = dict(node.counts()).get("amcl_pose", 0)
+        if not rows:
+            describe_session(cfg, session, node, args.drive,
+                             drive_started_wall, drive_exit, 0, traction,
+                             bag_summary)
+            cfg.refuse(
+                "the localiser updated at least once during the drive",
+                "{} ({}) and {} (update_min_d)".format(
+                    os.path.join(session, FILES["amcl_pose"]),
+                    cfg.s("topics.amcl_pose"),
+                    cfg.s("localization.params_file")),
+                "not one pose was published over the whole of "
+                "{}.".format(args.drive),
+                "THE CAPTURE IS COMPLETE AND IS IN {}".format(session),
+                "but every absolute figure in it would be the initial "
+                "pose, re-broadcast",
+                "for the length of the run - which looks exactly like a "
+                "localised session:",
+                "the edge is on /tf at the scan rate and the CSV is "
+                "full.",
+                "read the amcl log: a filter that received scans it "
+                "could not transform",
+                "says 'Message Filter dropping message', and one that "
+                "never received the",
+                "map says nothing at all.")
 
     # PHASE 2: THE GZ SIDE, AFTER THE ROS RECORDING HAS CLOSED. The
     # safety scanner and the 3D lidar are not bridged, and gz renders a
@@ -1561,7 +1795,7 @@ def print_track(score, who):
           "turned by pi)")
 
 
-def analyse_drive(cfg, path, session, sensors, diverged):
+def analyse_drive(cfg, path, session, sensors, diverged, withheld):
     profile = session.get("profile", "")
     spawn = core.SpawnFrame(cfg.f("vehicle.spawn.x"), cfg.f("vehicle.spawn.y"),
                             cfg.f("vehicle.spawn.yaw"))
@@ -1641,7 +1875,16 @@ def analyse_drive(cfg, path, session, sensors, diverged):
           "estimate {:.4f} m from its".format(
               core.closure(truth.column("x"), truth.column("y")),
               core.closure(est.column("x"), est.column("y"))))
-    analyse_fused(cfg, path, profile, spawn, truth, score, diverged)
+    fused = analyse_fused(cfg, path, profile, spawn, truth, score,
+                          diverged)
+    # AND THE LAYER ABOVE IT, WHICH IS THE ONLY ONE THAT KNOWS WHERE THE
+    # VEHICLE IS. It is passed the FUSED score rather than the raw one
+    # because that is what the absolute layer is stacked on: AMCL
+    # corrects the estimator's edge, not the wheel odometry's, and the
+    # subtraction that answers "did the map pay F2's debt" has to be
+    # against the thing F2 shipped.
+    analyse_localization(cfg, path, profile, session, truth, fused,
+                         withheld)
     return score, truth, est, joints
 
 
@@ -1779,6 +2022,246 @@ def analyse_fused(cfg, path, profile, spawn, truth, raw, diverged):
     print("  at the end: each is clipped to its own estimate's span, and "
           "the EKF joins the")
     print("  graph later than the wheel odometry does.")
+    return score
+
+
+def analyse_localization(cfg, path, profile, session, truth, fused,
+                         withheld):
+    """The ABSOLUTE pose - where the vehicle IS - against the same
+    ground truth, and what the localiser cost to get it.
+
+    THE SCORE IS THREE TRANSFORMS DEEP AND EVERY ONE OF THEM IS
+    MEASURED, NONE OF THEM FITTED:
+
+        map -> odom       the localiser's own edge, off /tf, as a
+                          consumer of this stack would read it
+        odom -> base_link the estimator's, at 50 Hz, composed onto it
+        world <- map      the COMMITTED registration, derived once in
+                          F3 Task 1 and frozen
+
+    and what comes out is where this stack believes the vehicle is, in
+    the building's own metres, beside where it actually was.
+
+    NOTHING IS ANCHORED. No initial offset is removed, no per-run
+    constant is fitted, and the estimate is not brought onto the truth at
+    its first sample - which is global constraint 5 and the m5_ver1
+    lineage's own withdrawn figure (WAREHOUSE_SLAM_EVIDENCE.md 12.8: an
+    error measured by anchoring at the first sample is zero at the anchor
+    BY CONSTRUCTION, and an estimator that is consistently 0.3 m wrong
+    scores near zero).
+
+    AND THE FLOOR IS STATED WITH THE FIGURE, EVERY TIME. The registration
+    residual is the largest distance between a kept grid wall point and
+    where the rigid transform says that wall is; no rigid transform fits
+    this grid to this building better than that, so NO FIGURE AT OR BELOW
+    IT IS A MEASUREMENT OF THE LOCALISER (EVIDENCE_MAP_V3.md 6.4). It is
+    carried by the MapFrame itself so that this print site has it in hand.
+
+    THE GRID IS CHECKED TWICE AND THE TWO CHECKS ARE DIFFERENT. The
+    registration's own md5 gate says the transform belongs to the grid on
+    disk NOW; the session's `loc=` label says which grid the RUN was
+    taken against. A session recorded before a rebuild would pass the
+    first and fail the second, and the figure it produced would be a map
+    pose carried through a transform fitted to a different building.
+    """
+    loc = session.get("loc", "")
+    if not localizer_of(loc):
+        return None
+    reg_path = os.path.join(_common.REPO, cfg.s("map.dir"),
+                            cfg.s("map.name"),
+                            cfg.s("map.registration.file"))
+    try:
+        record = map_register.load_registration(reg_path)
+        frame = core.MapFrame.from_registration(record)
+    except (map_core.MapError, core.EvidenceError) as exc:
+        fail(cfg, exc, reg_path)
+    want = map_md5_of(loc)
+    got = str(record.get("map_md5", ""))
+    if want and not got.startswith(want):
+        cfg.refuse(
+            "this session was recorded against the map that is committed "
+            "now",
+            "{} (the loc= line) and {}".format(
+                os.path.join(path, FILES["session"]), reg_path),
+            "the session says it localised against a grid whose md5 "
+            "begins {!r};".format(want),
+            "the committed registration belongs to one that begins "
+            "{!r}.".format(got[:8]),
+            "A REBUILT MAP HAS ITS OWN ROTATION FROM THE BUILDING (F3 "
+            "constraint 16), so",
+            "every absolute figure this session could produce would be a "
+            "map pose carried",
+            "through a transform fitted to a different grid - wrong by "
+            "the difference,",
+            "and with nothing in the numbers to say so.",
+            "The ground truth, the raw wheel odometry and the fused "
+            "estimate in this",
+            "session are UNAFFECTED and are still its evidence.")
+
+    edge_path = os.path.join(path, FILES["map_odom"])
+    fused_path = os.path.join(path, FILES["ekf_odom"])
+    if not os.path.isfile(edge_path) or not os.path.isfile(fused_path):
+        print("")
+        print("--- {} : NO ABSOLUTE POSE IN THIS SESSION ---".format(
+            profile))
+        print("  it is labelled {} and {} is not in the capture. Every "
+              "figure above is".format(loc, FILES["map_odom"]))
+        print("  the estimate in its OWN frame; nothing here says where "
+              "the vehicle was.")
+        withheld.append(os.path.basename(path))
+        return None
+    edge = table(edge_path, cfg, cfg.i("evidence.min_samples"))
+    filtered = table(fused_path, cfg, cfg.i("evidence.min_samples"))
+
+    print("")
+    print("--- {} : the ABSOLUTE pose, against the same ground truth "
+          "---".format(profile))
+    print("  localiser       {}".format(loc))
+    print("  registration    theta {:+.6f} rad, t ({:+.4f}, {:+.4f}) m "
+          "- DERIVED, not asserted".format(
+              frame.theta_rad, frame.t_x_m, frame.t_y_m))
+    print("  INSTRUMENT FLOOR  {}".format(frame.floor()))
+
+    try:
+        in_map = core.compose_rows(
+            edge.rows("t_sim", "x", "y", "yaw"),
+            filtered.rows("t_sim", "x", "y", "yaw"),
+            cfg.f("localization.analyse.map_gap_s"))
+        in_world = core.rows_to_world(in_map, frame)
+        score = core.score_drift(
+            truth.rows("t_sim", "x", "y", "yaw"), in_world,
+            core.world_frame(), cfg.f("evidence.analyse.max_pair_gap_s"))
+    except core.EvidenceError as exc:
+        fail(cfg, exc, path)
+
+    print("  paired samples  {} over {:.3f} s of sim time".format(
+        score.n, score.t1 - score.t0))
+    print("  ground truth    {:.4f} m of path, turned {:+.4f} rad".format(
+        score.truth_path_m, score.truth_turned_rad))
+    print("  ABSOLUTE        {:.4f} m of path, turned {:+.4f} rad  "
+          "({:+.2f} % of path)".format(
+              score.est_path_m, score.est_turned_rad,
+              100.0 * (score.est_path_m / score.truth_path_m - 1.0)
+              if score.truth_path_m else float("nan")))
+    print("  END ERROR       {:.4f} m   (dx {:+.4f}, dy {:+.4f}), heading "
+          "{:+.4f} rad".format(score.end_error_m, score.end_dx, score.end_dy,
+                               score.end_yaw_error_rad))
+    print_track(score, "the absolute pose")
+    print("  rms over run    {:.4f} m        worst {:.4f} m".format(
+        score.rms_m, score.max_error_m))
+    print("  ABSOLUTE IN BOTH SENSES: it is a position in the BUILDING, "
+          "and no initial")
+    print("  offset is removed from it. Read every figure above against "
+          "the floor.")
+
+    # WHAT THE ABSOLUTE LAYER BOUGHT, AND IT IS THE TABLE THIS PHASE
+    # EXISTS FOR. F2 handed F3 a debt - an along-track error that grows
+    # without bound because both of the filter's inputs are RATES
+    # (EVIDENCE_FUSION.md 5, 8.5) - and this is the subtraction that says
+    # whether the map paid it. compare_drift() is the same arithmetic
+    # that measured what fusing bought over the raw estimate.
+    if fused is not None:
+        out = core.compare_drift(fused, score)
+        print("")
+        print("--- {} : what the MAP bought (odom-frame EKF -> absolute "
+              "pose) ---".format(profile))
+        print("  {:<16} {:>12} {:>12} {:>12} {:>10}".format(
+            "figure", "EKF", "ABSOLUTE", "removed", "of EKF"))
+        for label, unit, one in (("end error", "m", out.end_error),
+                                 ("END HEADING", "rad", out.end_yaw),
+                                 ("ALONG-track", "m", out.along),
+                                 ("CROSS-track", "m", out.cross),
+                                 ("rms over run", "m", out.rms),
+                                 ("worst", "m", out.max_error)):
+            print("  {:<16} {:>+12.4f} {:>+12.4f} {:>+12.4f} {:>9.1f}% "
+                  "[{}]".format(label, one.before, one.after, one.removed,
+                                100.0 * one.fraction, unit))
+        print("  THE ALONG-TRACK ROW IS THE DEBT. Nothing in F2 could "
+              "move it - no line of")
+        print("  ekf.yaml changes the integral of a biased rate - and a "
+              "map is the first")
+        print("  thing on this track that observes where the vehicle IS.")
+        print("  a NEGATIVE `removed` is the map making that figure "
+              "WORSE, and is not clamped.")
+        print("  the two scores span windows that differ by {:.3f} s at "
+              "the start and {:.3f} s".format(out.span_gap_start_s,
+                                              out.span_gap_end_s))
+        print("  at the end: the localiser joins the graph after the "
+              "filter does, because")
+        print("  map_server has a 1712 x 1196 grid to read first.")
+
+    # AND WHAT IT COST, WHICH IS THE OTHER HALF OF THE ANSWER. An
+    # absolute localiser does not correct smoothly: a particle filter's
+    # answer moves in STEPS and `map` -> `odom` moves with it, so a
+    # controller reading map -> base_link sees the vehicle teleport. This
+    # is the number a later phase's architecture decision turns on -
+    # whether the absolute pose needs a second filter smoothing it - and
+    # it is measured here rather than assumed either way.
+    try:
+        jumps = core.tf_jumps(edge.rows("t_sim", "x", "y", "yaw"))
+    except core.EvidenceError as exc:
+        fail(cfg, exc, edge_path)
+    print("")
+    print("--- {} : what the correction COST - map -> odom jump "
+          "statistics ---".format(profile))
+    print("  broadcasts      {} over {:.3f} s  ({:.2f} Hz - amcl re-sends "
+          "this edge on EVERY".format(
+              jumps.samples, jumps.span_s,
+              (jumps.samples - 1) / jumps.span_s if jumps.span_s else
+              float("nan")))
+    print("                  scan whether or not it corrected)")
+    if not jumps.n:
+        print("  CORRECTIONS     0. The edge never changed: this "
+              "localiser held the pose it")
+        print("                  was seeded with for the whole run and "
+              "corrected nothing.")
+    else:
+        print("  CORRECTIONS     {}  ({:.2f} per second of the run)".format(
+            jumps.n, jumps.per_s if jumps.per_s is not None
+            else float("nan")))
+        print("  position step   mean {:.4f} m   median {:.4f} m   "
+              "WORST {:.4f} m".format(
+                  jumps.dpos.mean, jumps.dpos.median, jumps.max_dpos_m))
+        print("  heading step    mean {:.5f} rad median {:.5f} rad  "
+              "WORST {:.5f} rad".format(
+                  jumps.dyaw.mean, jumps.dyaw.median, jumps.max_dyaw_rad))
+        print("  a REPEAT IS NOT A CORRECTION: only a broadcast that "
+              "DIFFERS from the one")
+        print("  before it is counted, which is why these are dozens and "
+              "not thousands.")
+
+    # AND WHAT THE LOCALISER ITSELF SAID, WHICH IS NOT THE SAME STREAM.
+    # The edge above is what a consumer reads; this is what the particle
+    # filter believes, with its own covariance, published only when the
+    # filter UPDATES.
+    pose_path = os.path.join(path, FILES["amcl_pose"])
+    if os.path.isfile(pose_path):
+        poses = table(pose_path, cfg, 1)
+        stamps = poses.column("t_sim")
+        print("")
+        print("--- {} : what the LOCALISER said about itself ---".format(
+            profile))
+        print("  updates         {} over {:.3f} s of sim time".format(
+            len(stamps), stamps[-1] - stamps[0] if len(stamps) > 1 else 0.0))
+        if len(stamps) > 1:
+            rate = core.rate_from_stamps(stamps)
+            print("                  {:.3f} Hz mean, longest gap "
+                  "{:.3f} s".format(rate.hz_mean, rate.dt_max))
+            print("                  (it publishes when the particle "
+                  "filter RESAMPLES, which is")
+            print("                   after update_min_d of travel and "
+                  "not on a timer)")
+        for axis, column in (("x", "cov_xx"), ("y", "cov_yy"),
+                             ("yaw", "cov_yawyaw")):
+            values = poses.column(column)
+            stats = core.summarise(values)
+            print("  covariance {:<4} first {:.6g}   last {:.6g}   worst "
+                  "{:.6g}".format(axis, values[0], values[-1],
+                                  stats.maximum))
+        print("  THE COVARIANCE IS THE FILTER'S OWN OPINION AND NOT A "
+              "SCORE. What it is worth")
+        print("  against the truth is the table above; this says whether "
+              "it knew.")
     return score
 
 
@@ -2178,6 +2661,38 @@ def arm_of(session):
     return label
 
 
+#: What a session says about the ABSOLUTE LAYER when it was recorded
+#: before F3 Task 2 existed to label it. Every one of those runs had no
+#: localiser on it - `--localize` had not been written - and this file
+#: will NOT write `none` over a blank, for UNLABELLED's reason: the
+#: label is worth something only because it was read off the running
+#: stack, and inferring it from an absence is exactly the habit the whole
+#: chain guards against.
+UNLABELLED_LOC = "unrecorded (session predates F3 Task 2's loc label)"
+
+
+def loc_of(session):
+    """One session's absolute layer, as the one string everything
+    compares by.
+
+    THE THIRD AXIS OF THE SAME QUESTION. `traction_of` says which PLANT,
+    `arm_of` says which ESTIMATOR of the vehicle's own motion, and this
+    says whether anything at all knew where that vehicle WAS - and
+    against which map. All three are independent, all the combinations
+    are legitimate runs, and a set has to be uniform in every one of
+    them before it may be read out into one document.
+
+    THE MAP's md5 IS PART OF THE KEY AND NOT DECORATION, exactly as the
+    slip compliances are part of traction_of's. Two runs against two
+    different grids are two different measurements, and a rebuilt map
+    has its own rotation from the building (F3 constraint 16).
+    """
+    label = session.get("loc", "")
+    if not label:
+        return UNLABELLED_LOC
+    return label
+
+
 def _refuse_mixed(cfg, paths, sessions, label_of, subject, owner, why):
     """One `analyse` invocation, one <subject>.
 
@@ -2250,7 +2765,26 @@ def refuse_mixed_arm(cfg, paths, sessions):
                   "estimator arm")
 
 
-def analyse_session(cfg, path, sensors, diverged):
+def refuse_mixed_loc(cfg, paths, sessions):
+    """One `analyse` invocation, one absolute layer. See _refuse_mixed.
+
+    AND IT IS THE ONE WHOSE MIX IS HARDEST TO SEE. A slippery run in a
+    dry table at least reads oddly and a wheel+imu run in an rf2o table
+    reads as the arm making no difference; a localised run beside an
+    unlocalised one produces tables that are simply MISSING a block for
+    half the set, which reads as a recording that went wrong rather than
+    as two different experiments in one document.
+      IT ALSO SEPARATES TWO MAPS. The label carries the grid's md5, so a
+      set half-recorded against a rebuild is refused by the same
+      mechanism - which is what makes F3 constraint 16 reach the
+      analysis and not only the bringup.
+    """
+    _refuse_mixed(cfg, paths, sessions, loc_of, "absolute layer",
+                  "{} (the loc= line m5v3.sh writes)".format(_common.CONFIG),
+                  "absolute layer")
+
+
+def analyse_session(cfg, path, sensors, diverged, withheld):
     session = read_session_file(cfg, path)
     print("")
     print("=" * 72)
@@ -2260,6 +2794,9 @@ def analyse_session(cfg, path, sensors, diverged):
         session.get("recorded", "?")))
     print("TRACTION {}".format(traction_of(session)))
     print("ARM      {}".format(arm_of(session)))
+    print("LOC      {}".format(loc_of(session)))
+    if session.get("loc_source"):
+        print("         {}".format(session["loc_source"]))
     if session.get("arm_source"):
         print("         {}".format(session["arm_source"]))
     if session.get("drive_exit", "") not in ("", "0"):
@@ -2267,7 +2804,7 @@ def analyse_session(cfg, path, sensors, diverged):
             session["drive_exit"]))
     if session.get("kind") == "drive":
         _, truth, est, joints = analyse_drive(cfg, path, session,
-                                              sensors, diverged)
+                                              sensors, diverged, withheld)
         # ONE PREPARATION, TWO REDUCTIONS. See CornerInputs.
         inputs = corner_inputs(cfg, path, session, truth, joints)
         if inputs is not None:
@@ -2279,7 +2816,7 @@ def analyse_session(cfg, path, sensors, diverged):
             "stream", "samples", "hz_sim", "hz_wall", "of conf", "dt_med",
             "dt_max", "rtf"))
         for name in ("clock", "odom_truth", "wheel_odom", "ekf_odom",
-                     "rf2o_odom", "joint_state",
+                     "rf2o_odom", "map_odom", "amcl_pose", "joint_state",
                      "drive_read_a", "scan_nav", "imu", "depth", "cam_info"):
             full = os.path.join(path, FILES[name])
             # ekf_odom is the one stream a pre-F2 session does not carry
@@ -2291,7 +2828,8 @@ def analyse_session(cfg, path, sensors, diverged):
             # unreadable by the tool that produced the A/B they are half
             # of. The ARM line at the top of this session's block is
             # what says which of the two an absent rf2o_odom means.
-            if name in ("ekf_odom", "rf2o_odom") and not os.path.isfile(full):
+            if name in ("ekf_odom", "rf2o_odom", "map_odom",
+                        "amcl_pose") and not os.path.isfile(full):
                 continue
             one = table(full, cfg, cfg.i("evidence.min_samples"))
             rate_line(cfg, name, one.column("t_sim"), one.column("t_wall"))
@@ -2445,6 +2983,57 @@ def analyse(cfg, args):
     print("                   drops the IMU entirely and logs nothing")
     print("  what is fused    {} - two matrices, and the argument for "
           "each entry".format(cfg.s("ekf.params_file")))
+
+    # AND THE LOCALISER'S, FOR THE TWO BLOCKS ABOVE'S REASON. Every
+    # absolute figure below is a figure about ONE map and ONE parameter
+    # file, and a configuration line typed into a markdown file is a
+    # claim nothing re-checks. What is printed is what m5v3.sh actually
+    # passes the two nodes - the artifact, the topics, the frames and the
+    # edge - plus the md5 of the grid on disk, which is what binds the
+    # numbers to an artifact rather than to a name. What the LOCALISER
+    # DOES is amcl.yaml's, and the path to it is printed so a reader can
+    # open the file that decides it.
+    print("")
+    print("--- the localiser's settings, read out of config.yaml and NOT "
+          "out of amcl.yaml ---")
+    print("  map              {}/{}  ({})".format(
+        cfg.s("map.dir"), cfg.s("map.name"),
+        cfg.s("map.registration.file")))
+    try:
+        _reg = map_register.load_registration(
+            os.path.join(_common.REPO, cfg.s("map.dir"), cfg.s("map.name"),
+                         cfg.s("map.registration.file")))
+    except (map_core.MapError, core.EvidenceError) as exc:
+        fail(cfg, exc, cfg.s("map.dir"))
+    print("  grid md5         {}  (verified against the committed "
+          "registration)".format(_reg.get("map_md5", "?")))
+    print("  registration     theta {:+.9f} rad, t ({:+.6f}, {:+.6f}) m"
+          .format(_reg["theta_rad"], _reg["t_x_m"], _reg["t_y_m"]))
+    print("  INSTRUMENT FLOOR residual rms {:.4f} m, MAX {:.4f} m - NO "
+          "ABSOLUTE FIGURE".format(_reg["residual_rms_m"],
+                                   _reg["residual_max_m"]))
+    print("                   AT OR BELOW THE MAX IS A MEASUREMENT OF "
+          "THE LOCALISER")
+    print("  in               {}  (the nav lidar, and nothing else - no "
+          "safety scanner,".format(cfg.s("topics.scan_nav")))
+    print("                   no 3D lidar, no ground truth)")
+    print("                   {} -> {} on {}, published by the "
+          "estimator".format(cfg.s("frames.odom"), cfg.s("frames.base_link"),
+                             cfg.s("topics.tf")))
+    print("  out              {} -> {} on {} - the ONE edge this phase "
+          "adds,".format(cfg.s("frames.map"), cfg.s("frames.odom"),
+                         cfg.s("topics.tf")))
+    print("                   plus {} when the filter updates".format(
+        cfg.s("topics.amcl_pose")))
+    print("  seeded on        {} at bringup, from vehicle.spawn through "
+          "the registration".format(cfg.s("topics.initialpose")))
+    print("                   above. NOT a kidnapped-robot recovery: "
+          "both recovery alphas")
+    print("                   are zero and this arm tracks from a known "
+          "start.")
+    print("  what it does     {} - the motion model, the sensor model "
+          "and the".format(cfg.s("localization.params_file")))
+    print("                   argument for every value in both")
     # THE SAME CROSS-CHECK THE RATES GET, AND FOR THE SAME REASON. The
     # SDF decides where the IMU is bolted; config.yaml copies it because
     # a shell cannot read XML. A disagreement is a copy that has gone
@@ -2487,6 +3076,12 @@ def analyse(cfg, args):
     _sessions = [read_session_file(cfg, p) for p in paths]
     refuse_mixed_traction(cfg, paths, _sessions)
     refuse_mixed_arm(cfg, paths, _sessions)
+    # AND ON THE THIRD AXIS SINCE F3 TASK 2. A set can be all-nominal and
+    # all-wheel+imu and still be half localised, which is the mix
+    # EVIDENCE_LOCALIZATION_V3.md's whole comparison would be destroyed
+    # by - and the difference between the two is one edge on /tf that no
+    # table has a column for.
+    refuse_mixed_loc(cfg, paths, _sessions)
     # EVERY SESSION WHOSE FILTER HAD BLOWN UP, COLLECTED WHILE THE
     # TABLES ARE PRINTED AND REPORTED IN THE EXIT STATUS. See
     # analyse_fused(): the run's ground truth and raw wheel odometry are
@@ -2494,8 +3089,22 @@ def analyse(cfg, args):
     # is. A reader who scrolled past the block gets it again at the end;
     # a SCRIPT gets it in `$?`, which is the reader that never scrolls.
     diverged = []
+    # AND EVERY SESSION WHOSE ABSOLUTE FIGURES WERE WITHHELD, kept apart
+    # from the diverged ones because they are a different fault: a
+    # session labelled as localised whose localiser stream is not in the
+    # capture. The exit is non-zero either way, and the two are named
+    # separately so a reader is not sent to the wrong log.
+    withheld = []
     for path in paths:
-        analyse_session(cfg, path, sensors, diverged)
+        analyse_session(cfg, path, sensors, diverged, withheld)
+    if withheld:
+        print("")
+        print("=" * 72)
+        print("{} of the {} session(s) above are LABELLED LOCALISED and "
+              "carry no absolute".format(len(withheld), len(paths)))
+        print("figures: {}".format(", ".join(withheld)))
+        print("their localiser stream is not in the capture. This exit "
+              "is NON-ZERO.")
     if diverged:
         print("")
         print("=" * 72)
@@ -2504,6 +3113,7 @@ def analyse(cfg, args):
         print("figures: {}".format(", ".join(diverged)))
         print("ekf_node's startup divergence, EVIDENCE_FUSION.md 8.6. "
               "This exit is NON-ZERO.")
+    if diverged or withheld:
         return 1
     return 0
 

@@ -269,10 +269,12 @@ amcl:
     #   returns are not: sampling the same surface three times over
     #   makes the posterior three times more peaked than the information
     #   in it, which is an over-confident filter rather than an accurate
-    #   one. And the cost is linear - the measured 7.00 % of one core at
-    #   271 beams would be 21 % at 811, against the EKF's own 10.4 %
+    #   one. And the cost is linear in beams - this configuration
+    #   measures 5.00 % of one core over a `straight` drive against the
+    #   estimator's own 12.00 %, so all 811 would be about 15 %
     #   (EVIDENCE_FUSION.md 10.4's instrument, /proc/<pid>/stat fields
-    #   14 and 15).
+    #   14 and 15, and EVIDENCE_LOCALIZATION_V3.md is where the reading
+    #   is recorded).
     max_beams: 271
 
     # ---- THE MIXTURE, AND IT WAS MEASURED RATHER THAN CHOSEN ----
@@ -385,10 +387,11 @@ amcl:
     # the only thing this number had to buy.
     min_particles: 500
     # AND THE CEILING IS A CPU BOUND. The sensor model is linear in
-    # particles x beams: 2000 x 271 at 15 Hz measured 7.00 % of one core
-    # on this rig, against the EKF's 10.4 %. KLD resampling collapses
-    # towards the floor once the posterior is tight, so this is what the
-    # filter is ALLOWED to spend and not what it spends.
+    # particles x beams: 2000 x 271 at 15 Hz measured 5.00 % of one core
+    # on this rig over a `straight` drive, against the estimator's
+    # 12.00 % on the same window. KLD resampling collapses towards the
+    # floor once the posterior is tight, so this is what the filter is
+    # ALLOWED to spend and not what it spends.
     max_particles: 2000
 
     # DEFAULT-KEPT, both. The KLD bound: with probability pf_z the
