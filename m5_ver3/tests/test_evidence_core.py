@@ -1193,3 +1193,114 @@ def test_a_diverged_series_is_refused_by_the_scorer_and_not_averaged():
     with pytest.raises(evidence_core.EvidenceError):
         evidence_core.require_not_diverged([0.0, -3.6e47], [0.0, 2.0e44],
                                            100.0, "the fused estimate")
+
+
+# ----------------------------------------------------------------------
+# the covariance a starting filter publishes, read off `ros2 topic echo`
+# ----------------------------------------------------------------------
+#
+# F2 Task 2's startup gate. `m5v3.sh` reads ONE message off
+# /m5v3/odometry/filtered once the EKF child is up and refuses if the
+# covariance is over config.yaml's ceiling - because a filter that has
+# blown up stays ALIVE, publishes at its configured rate, and says
+# nothing (EVIDENCE_FUSION.md 8.6, 9). A shell cannot parse that
+# message, so the parsing is here, where a test reaches it without a
+# simulator and without ROS.
+
+_ECHO_BLOCK = """header:
+  stamp:
+    sec: 13
+    nanosec: 436000000
+  frame_id: odom
+pose:
+  pose:
+    position:
+      x: -0.000307146114405845
+  covariance:
+  - 0.0005000010000000001
+  - 0.0
+  - -1.2e-09
+  - 0.0
+  - 0.0
+  - 3.4e-07
+twist:
+  covariance:
+  - 0.023383
+"""
+
+_ECHO_INLINE = ("pose:\n  covariance: [0.0005000010000000001, 0.0, -1.2e-09, 0.0, "
+                "0.0, 3.4e-07]\n")
+
+_ECHO_DIVERGED = """pose:
+  covariance:
+  - 5.738026045760525e+87
+  - -5.075350271586103e+91
+  - 0.0
+"""
+
+
+def test_the_worst_covariance_is_the_largest_MAGNITUDE_and_not_the_first():
+    # The xx entry is not the biggest one in the diverged message, and a
+    # gate reading only [0] would pass a matrix that is 1e91 off-diagonal.
+    assert abs(evidence_core.worst_covariance(_ECHO_BLOCK)
+               - 0.0005000010000000001) < 1e-18
+    assert abs(evidence_core.worst_covariance(_ECHO_DIVERGED)
+               - 5.075350271586103e+91) < 1e78
+
+
+def test_the_block_and_inline_spellings_read_the_same():
+    assert abs(evidence_core.worst_covariance(_ECHO_BLOCK)
+               - evidence_core.worst_covariance(_ECHO_INLINE)) < 1e-12
+
+
+def test_a_NEGATIVE_off_diagonal_is_read_by_its_magnitude():
+    assert abs(evidence_core.worst_covariance(
+        "covariance:\n- -7.5\n- 0.5\n") - 7.5) < 1e-12
+
+
+def test_only_the_COVARIANCE_numbers_are_read_and_not_the_pose():
+    # The position in _ECHO_BLOCK is -0.0003 and the stamp is 13; neither
+    # is a covariance and neither may reach the answer.
+    assert evidence_core.worst_covariance(_ECHO_BLOCK) < 1.0
+
+
+def test_a_message_with_no_covariance_at_all_is_refused_not_zero():
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.worst_covariance("header:\n  frame_id: odom\n")
+
+
+def test_an_EMPTY_read_is_refused_rather_than_passing_the_gate():
+    # `ros2 topic echo` printing nothing is what a topic nobody publishes
+    # looks like; passing that as "covariance 0, healthy" would make the
+    # gate fail OPEN on exactly the case it exists for.
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.worst_covariance("")
+
+
+def test_a_covariance_under_the_ceiling_passes_and_returns_the_figure():
+    assert abs(evidence_core.require_covariance_under(
+        _ECHO_BLOCK, 1.0, "the filter") - 0.0005000010000000001) < 1e-15
+
+
+def test_a_covariance_OVER_the_ceiling_is_refused_by_name():
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.require_covariance_under(_ECHO_DIVERGED, 1.0,
+                                               "the filter")
+
+
+def test_the_refusal_carries_the_figure_AND_the_ceiling():
+    try:
+        evidence_core.require_covariance_under(_ECHO_DIVERGED, 1.0,
+                                               "the filter at spawn")
+    except evidence_core.EvidenceError as exc:
+        text = str(exc)
+        assert "the filter at spawn" in text
+        assert "5.07535e+91" in text or "5.075350271586103e+91" in text
+        assert "1" in text
+    else:
+        raise AssertionError("it should have refused")
+
+
+def test_exactly_ON_the_ceiling_passes():
+    assert evidence_core.require_covariance_under(
+        "covariance:\n- 100.0\n", 100.0, "x") == 100.0

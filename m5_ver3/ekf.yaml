@@ -257,31 +257,80 @@ m5v3_ekf:
     # over a 42 s square because of it (EVIDENCE_SENSORS.md §3). This
     # channel is the whole reason F2 exists.
     #
-    # ax IS FUSED BY OWNER RULING, and the case against it is prior art's
-    # (agv/forklift/ekf.yaml refuses it): a bias integrated twice is
-    # 0.5*b*t^2, so the modelled 0.01961 m/s2 becomes 98 m of position
-    # error over 100 s WITH NO OTHER AIDING. What is different here is
-    # that vx is aided, at 500 Hz, by a wheel odometry whose own vx
-    # covariance is 2.3383e-2 - so the accelerometer is a fast predictor
-    # between corrections and not an unaided double integration. Two
-    # things it does bring, measured rather than argued in
-    # EVIDENCE_FUSION.md §2.4 and §4:
-    #   THE LEVER ARM, AND IT LANDS ON THE FUSED AXIS. The IMU sits
-    #   0.50 m behind base_link, and robot_localization ROTATES an
-    #   acceleration into base_link without correcting that offset -
-    #   there is a `@todo` saying so in its own source. For a mounting
-    #   straight behind the origin the centripetal term w^2*d is on
-    #   body +x, which IS ax; the tangential term is on ay, which is
-    #   not fused. Measured peak yaw rate on this plant is 0.2687 rad/s
-    #   (square), so w^2*d peaks at 0.0361 m/s2 - 3.4x the
-    #   accelerometer's own noise sigma and 1.8x its modelled bias.
-    #   Present only while the vehicle turns. EVIDENCE_FUSION.md 2.4.
-    #   THE BIAS. 0.01961 m/s2, sign drawn per run, never estimated.
+    # ax IS REFUSED, AND IT WAS FUSED UNTIL F2 TASK 2 MEASURED WHAT IT
+    # COSTS. The ruling that put it here is reversed on a measurement,
+    # the same way odom0_config's vy ruling was reversed INTO the filter
+    # a day earlier and in the opposite direction; both reversals are in
+    # this track's ruling ledger,
+    # .superpowers/sdd/2026-08-26-m5v3-f2-fusion/progress.md, and the
+    # tables the old setting produced are KEPT rather than deleted
+    # (EVIDENCE_FUSION.md 4 for vy, 8.6 and 9 for this one).
+    #
+    #   WHAT IT IS SUSPECTED OF: THE FILTER NOT STARTING. With this
+    #   entry true,
+    #   ekf_node's covariance goes from 5.0e-4 to 2.42e84 and its
+    #   velocity state to 1.6e50 in ONE 20 ms cycle, during its first
+    #   cycles, and it never recovers - the position saturates for the
+    #   rest of the run while the yaw carries on working, so what is
+    #   published is a plausible heading bolted to a pose 5.7e48 m from
+    #   the origin. It logs NOTHING. Measured on this rig 2026-08-26:
+    #   13 of 14 bringups of the shipped configuration, 6 of 6 on the
+    #   exact tree that produced this file's section 3 tables, and 0 of
+    #   4 with this entry false. EVIDENCE_FUSION.md 8.6 and 9.
+    #
+    #   AND THE ATTRIBUTION IS SUGGESTIVE RATHER THAN PROVEN - READ
+    #   EVIDENCE_FUSION.md 9.2 BEFORE QUOTING ANY OF THOSE RATIOS. The
+    #   divergence rate on this rig drifts by an order of magnitude
+    #   through a day, every row of that ladder was taken UN-PAIRED, and
+    #   the interleaved test that would have settled it came back NULL
+    #   (0 of 6 against 0 of 6, in a window where the rate had
+    #   collapsed). The 0-of-4 row is p ~ 3e-4 against a bracketed 87 %,
+    #   on n = 4.
+    #     THE ENTRY IS FALSE ANYWAY, and not because of that ratio: the
+    #     paragraph below is the reason, and it is an architecture
+    #     argument that a null result cannot touch. A channel that buys
+    #     nothing measurable and is SUSPECTED of a catastrophic failure
+    #     is not a channel to keep.
+    #     AND IT IS A MITIGATION, NOT A CURE. One shipping bringup in
+    #     fifteen still diverged after this went false, which is why
+    #     m5v3.sh asks tools/ekf_health.py at EVERY bringup. That check
+    #     is right whether or not this entry was the cause.
+    #
+    #   IT IS NOT THE TUNING, by elimination over eleven
+    #   configurations: not odom0_config's vy, not
+    #   initial_estimate_covariance at 1e-6 or 1e-3, not the filter's own
+    #   rate, not the bringup order, not a delay before the child, not a
+    #   cold machine. The only two settings that stop it are removing
+    #   this entry and making the whole node thirty times slower.
+    #
+    #   AND NOTHING MEASURABLE IS LOST, which is why the reversal is
+    #   cheap. vx is measured DIRECTLY at 500 Hz by a wheel odometry
+    #   whose own vx covariance is derived from measured quantiser
+    #   dither (2.3383e-2), so an accelerometer channel is a redundant
+    #   predictor between corrections that arrive every 2 ms. Section 5
+    #   of the evidence already said the accelerometer cannot correct a
+    #   DISTANCE here - its own 0.01961 m/s2 bias double-integrates to
+    #   98 m over 100 s unaided - and section 9 measures the estimate
+    #   with and without it: the raw wheel odometry is untouched and the
+    #   fused figures move by less than the run-to-run spread.
+    #
+    #   THE TWO THINGS IT DID BRING ARE WHY IT WAS NEVER FREE, and both
+    #   are still measured in EVIDENCE_FUSION.md 2.3 and 2.4:
+    #     THE LEVER ARM, LANDING ON THE FUSED AXIS. The IMU sits 0.50 m
+    #     behind base_link and robot_localization ROTATES an
+    #     acceleration into base_link without correcting that offset -
+    #     there is a `@todo` saying so in its own source. For a mounting
+    #     straight behind the origin the centripetal term w^2*d is on
+    #     body +x, which IS ax. Measured peak yaw rate 0.2687 rad/s
+    #     (square), so w^2*d peaks at 0.0361 m/s2 - 3.4x the
+    #     accelerometer's own noise sigma and 1.8x its modelled bias.
+    #     THE BIAS. 0.01961 m/s2, sign drawn per run, never estimated.
+    #   With this entry false, neither reaches the estimate at all.
     imu0_config: [false, false, false,
                   false, false, false,
                   false, false, false,
                   false, false, true,
-                  true,  false, false]
+                  false, false, false]
     imu0_differential: false
     imu0_relative: false
     # 100 Hz sensor, 50 Hz filter: two samples per cycle, and ten is five
@@ -306,6 +355,13 @@ m5v3_ekf:
     #   AND NOTHING IS LOST BY TURNING IT OFF. Gravity is entirely in az
     #   on a level vehicle on a flat floor; az is not fused (the flag
     #   above is false) and is not estimated (two_d_mode holds it at
-    #   zero). The channel that IS fused, ax, has no gravity in it to
-    #   remove.
+    #   zero).
+    #   SINCE F2 TASK 2 NO ACCELERATION IS FUSED AT ALL, so this
+    #   parameter reaches nothing: imu0_config's ax entry is false and
+    #   the measurement of section 2.3 that put this flag here is now a
+    #   record of how this device behaves rather than a live dependency.
+    #   It is left FALSE rather than deleted because the failure it
+    #   avoids - a zero-length quaternion normalised into a division by
+    #   zero - is a property of this device that a later task turning an
+    #   acceleration channel back on would walk straight back into.
     imu0_remove_gravitational_acceleration: false

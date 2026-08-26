@@ -128,6 +128,8 @@ m5_ver3/
     ├── rtf_probe.sh      real-time factor of the RUNNING world
     ├── noise_probe.sh    is the configured sensor noise on the wire
     ├── slip_bench.sh     slip at steady cruise, forward and astern
+    ├── ekf_health.py     did the FILTER come up, or come up broken? One
+    │                     bounded read at bringup; m5v3.sh refuses on it
     ├── drive_route.py    drive one of config.yaml's profiles, open loop
     ├── evidence_core.py  the arithmetic behind EVIDENCE_SENSORS.md
     └── sensor_evidence.py  record (needs ROS) | analyse (needs nothing)
@@ -182,6 +184,7 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 | `tools/rtf_probe.sh` | 30 s real-time-factor sample of the world that is already running. |
 | `tools/noise_probe.sh scan\|depth <topic>` | Temporal spread of every reading on one sensor topic, vehicle **at rest**. Is the noise the SDF configures actually on the wire? |
 | `tools/slip_bench.sh` | Drives the traction terminal at cruise, forward then astern, and reports slip against the commanded and the achieved wheel rate. |
+| `tools/ekf_health.py` | One bounded read of the filter's output, and a refusal if its covariance is over `ekf.startup_check.covariance_max`. **`start` runs it for you** — it exists because `ekf_node` can diverge during its first cycles and stay ALIVE, at rate, saying nothing (`EVIDENCE_FUSION.md` §8.6, §9). |
 | `tools/drive_route.py <profile>` | Drives one of `config.yaml`'s profiles — `straight`, `square`, `aisle`, `corner_creep` — open loop, on the plant's own clock. It drives; it records nothing. |
 | `tools/sensor_evidence.py record --static\|--drive P` | Captures one run into `logs/evidence/<session>/`: one headered CSV per stream. `--drive` starts `drive_route.py` itself, so one command is one complete run. It stamps the session with **which plant it was taken on** and refuses if the stack cannot say, and it refuses **before the drive** if the filter has already diverged. Needs ROS. |
 | `tools/sensor_evidence.py analyse [session…]` | Every table in `EVIDENCE_SENSORS.md` and `EVIDENCE_FUSION.md`, from those CSVs — including the EKF scored against the same truth as the raw estimate, and the two subtracted. **Needs no ROS and no Gazebo** — it runs on the Windows python. |
@@ -224,7 +227,7 @@ touches PLCSIM Advanced or anything on the Windows side.
 **The two newest children are one filter and the geometry it cannot work
 without.** `ekf` fuses the wheel odometry's TWIST (`vx` and yaw rate,
 never its pose — the node publishes a covariance of 1000 there as a
-do-not-fuse flag) with the IMU's yaw rate and forward acceleration, and
+do-not-fuse flag) with the IMU's yaw rate, and
 publishes `/m5v3/odometry/filtered` plus **the first transform this stack
 has ever emitted, `odom` → `base_link`**. F3's `map` → `odom` stacks on
 top of it, and nothing in F2 may become that edge's owner — so the

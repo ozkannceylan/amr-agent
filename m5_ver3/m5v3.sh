@@ -356,7 +356,9 @@ start() {
     # THE FILTER, AND IT IS THE FIRST THING ON THIS TRACK THAT PUBLISHES
     # A POSE ANYTHING COULD NAVIGATE ON. robot_localization 3.8.3's
     # ekf_node fuses the wheel odometry's TWIST with the IMU's yaw rate
-    # and forward acceleration, and owns odom -> base_link.
+    # and owns odom -> base_link. The IMU's ACCELERATION is not fused:
+    # F2 Task 2 measured that channel diverging the filter at startup
+    # and the ruling that fused it was reversed (EVIDENCE_FUSION.md 9).
     #   WHAT IS ON THIS COMMAND LINE AND WHAT IS IN THE FILE. Everything
     #   here is a name or a rate that is already written down elsewhere
     #   on this track - the topics, the frames, the output rate - and is
@@ -428,6 +430,20 @@ start() {
             "read the log named above, then '$0 stop' before trying again."
     fi
 
+    # AND THE FILTER IS ASKED WHETHER IT IS STILL ONE. Every child is
+    # alive by this line, which on this stack is NOT the same as every
+    # child working: ekf_node can diverge during its first cycles -
+    # covariance to 1e84 in a single 20 ms step - and stay up, at rate,
+    # saying nothing, so that every other check here is green over a
+    # filter that has stopped being one (EVIDENCE_FUSION.md 8.6, 9).
+    # One read of one message, bounded, with the truck still standing
+    # where it was spawned. The logic and the parse are
+    # tools/ekf_health.py and evidence_core, where a test reaches them
+    # without a simulator; this line is the orchestration.
+    if ! python3 "$M5V3/tools/ekf_health.py"; then
+        refuse "the filter came up sane, and not merely alive"             "$M5V3/tools/ekf_health.py (its refusal is printed above)"             "the covariance check above is what said no, and it is the"             "ONLY check on this stack that can: the process is running,"             "the topic is at its configured rate and every other test"             "here has passed."             "THE STACK IS INCOMPLETE, and what is left of it is STILL UP."             "'$0 stop', then start again - this does not recur every time."
+    fi
+
     echo ""
     echo "up. one truck, one world, two bridges, one estimator, one filter."
     if [ "$SLIPPERY" = true ]; then
@@ -453,9 +469,10 @@ start() {
          "${CFG_EKF_FREQUENCY_HZ} Hz, plus the"
     echo "         $CFG_FRAMES_ODOM -> $CFG_FRAMES_BASE_LINK transform." \
          "Wheel TWIST (vx, vy, vyaw)"
-    echo "         + IMU (yaw rate, ax). It reads no pose and no ground"
-    echo "         truth. ekf_node is SILENT about an input that never"
-    echo "         arrives - check the topic, not the log."
+    echo "         + IMU (yaw rate only - the acceleration channel is"
+    echo "         refused, EVIDENCE_FUSION.md 9). It reads no pose and"
+    echo "         no ground truth. ekf_node is SILENT about an input"
+    echo "         that never arrives - check the topic, not the log."
     echo "check:  $0 status"
     echo "rtf:    bash $M5V3/tools/rtf_probe.sh"
     echo "drive:  python3 $M5V3/tools/drive_route.py straight|square|aisle"

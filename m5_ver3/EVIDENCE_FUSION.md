@@ -68,11 +68,18 @@ measured: refusing it cost **+0.90 m of end error** on a 163° turn and
 the node's covariance of 1000 still says do-not-fuse; F2 global
 constraint 13 governs the POSE and never excluded a velocity component.
 
-**The IMU contributes two entries and has no orientation to contribute.**
+**The IMU contributes ONE entry and has no orientation to contribute.**
 `model.sdf` sets `<enable_orientation>false</enable_orientation>` because
 gz derives an IMU's orientation from the link's pose in the simulator —
 ground truth wearing a sensor's name. `imu0_config` fuses `vyaw` (the
-gyro's z axis) and `ax`, and refuses all three orientation entries.
+gyro's z axis) and refuses all three orientation entries.
+
+> **IT FUSED TWO UNTIL F2 TASK 2, AND `ax` WAS THE SECOND.** Every table
+> in §2, §3 and §4 was measured with the accelerometer channel fused;
+> §9 is the reversal, the measurement that forced it, and the same
+> figures re-measured on the shipping filter. Those sections are **kept
+> as the reversed ruling's record**, exactly as §4 keeps the refused-`vy`
+> column, and each says so where it starts.
 
 **Ground truth is the reference and never an input.**
 `/forklift/gz/odom` appears in no `odomN`, `poseN` or `twistN` entry of
@@ -317,6 +324,16 @@ information written to nobody is not an instrument.
 
 ## 3. Drift, per profile: raw wheel odometry vs EKF vs ground truth
 
+> **THIS SECTION IS THE `ax`-FUSED FILTER'S, AND THAT FILTER NO LONGER
+> SHIPS.** F2 Task 2 measured the IMU's acceleration channel making
+> `ekf_node` diverge during its first cycles and the ruling that fused it
+> was reversed (§8.6, §9). Everything below stands as measured — the runs
+> happened, the filter ran, and every one of the thirteen fused streams
+> passes §9's covariance gate — but the **shipping** figures are §9.3's,
+> re-measured on `wz`-only. This section is kept for the reason §4 keeps
+> the refused-`vy` column: a ruling that was reversed on a measurement is
+> worth more where it happened than tidied away.
+
 **Instrument:** `sensor_evidence.py record --drive <profile>` then
 `analyse`, five sessions, stack restarted before each. Both estimates are
 scored against the **same** ground truth by the **same** function
@@ -374,6 +391,18 @@ tracks it: the run that turned 0.093 rad short (`…083626`) is the run
 whose raw heading error reads +0.6476 instead of ≈+0.523. As a fraction
 of the distance travelled the raw estimate is **8.92–9.06 %** on all
 three.
+
+**CORRECTED BY MEASUREMENT 2026-08-26 (F2 Task 2) — THAT SPREAD IS THREE
+RUNS' AND THE PLANT'S IS WIDER.** The paragraph above is right about the
+mechanism and understates it. Over **all six** post-F1.5 nominal `square`
+runs this track has recorded, the delivered turn is **+5.9060 to
++6.3124 rad** — 0.41 rad, three times the range quoted here — and the raw
+end error tracks it out to **1.1161 m** on the run that turned +6.1438
+(§9.3). So `square`'s raw end error is not a figure that reproduces run
+to run **at all**, and any before/after fraction taken from a single
+square carries that spread underneath it. `straight` (2.6 mm over ten
+runs) and `corner_creep` (0.2 mm over four) are the profiles that repeat,
+and they are where a claim about the ESTIMATOR should be made.
 
 ### 3.1 `straight` × 3 — and the answer depends on which way the bias fell
 
@@ -517,6 +546,13 @@ beside `imu0_config` says so.
 ---
 
 ## 4. What refusing `vy` cost — the ruling that was reversed
+
+> **AND THE SECOND REVERSAL WENT THE OTHER WAY.** This section records a
+> channel ruled OUT and then ruled back IN on a measurement; §9 records
+> one ruled IN and then ruled back OUT on another. Both sit in this
+> track's ruling ledger,
+> `.superpowers/sdd/2026-08-26-m5v3-f2-fusion/progress.md`. The tables
+> below were all taken with `ax` fused.
 
 **This section records a wrong turn, and it is kept rather than tidied
 away.** The first cut of `ekf.yaml` refused the wheel odometry's `vy`, on
@@ -997,6 +1033,11 @@ thing on this vehicle that observes it.
 
 ### 8.5 What fusion fixes, what it does not, and the F3 handoff
 
+> **THE FUSED COLUMNS BELOW ARE THE `ax`-FUSED FILTER'S.** §9.3 is the
+> same measurement on the shipping filter, and the reading does not
+> change: the along-track column still moves by nothing and the
+> cross-track column still follows the heading. Kept for §3's reason.
+
 **The two halves of a dead-reckoned position error have different cures,
 and the split added by this task measures them apart.**
 
@@ -1151,6 +1192,15 @@ of the origin:**
 **Thirteen of fourteen on the shipped configuration; zero of four with
 the accelerometer channel out.**
 
+> **HOW STRONG THAT IS, MEASURED LATER AND WEAKER THAN THIS SECTION
+> IMPLIES: §9.2.** Every row of this ladder is UN-PAIRED, and the base
+> rate drifts by an order of magnitude through the day. The `ax` row is
+> 0 of 4 against a bracketed 87 % — p ≈ 3e-4 on n = 4 — and the
+> interleaved follow-up that would have settled it came back **null**
+> (0 of 6 against 0 of 6, in a window where the rate had collapsed).
+> Read this table as *suggestive*, not as proof, and read §9.2 before
+> quoting it.
+
 **AND THE RATE MOVES THROUGH THE DAY, which is stated so that two lucky
 bringups are not read as a refutation.** The eleven-for-eleven row was
 taken between 09:50 and 10:20; by 11:00 the three sessions of §8.7 cost
@@ -1164,22 +1214,27 @@ above was taken as consecutive sets rather than cherry-picked. **The
 claim is that this configuration fails often and silently, not that it
 fails every time** — and a filter that starts correctly two times in
 three is not a filter this track can publish figures from without the
-check §8.6 added. It is the IMU's linear-acceleration
-channel, and it is a numerical instability rather than bad data: the two
-configurations that stop it are the one that removes `ax` and the one
-that makes the node thirty times slower, and the discriminator between a
-clean bringup and a diverged one is **how soon the filter's first
-CORRECTION lands after its first PREDICT** — clean runs correct three
+check §8.6 added. **The best candidate is the IMU's
+linear-acceleration channel** - the two configurations that stop it are
+the one that removes `ax` and the one that makes the node thirty times
+slower - and whatever it is, it is a numerical instability rather than
+bad data. §9.2 is how strong that candidacy is once the drifting base
+rate is accounted for, and the answer is *suggestive, not proven*. What
+IS solid is the discriminator between a clean bringup and a diverged
+one: **how soon the filter's first CORRECTION lands after its first
+PREDICT** — clean runs correct three
 cycles in with the covariance grown to ~4.6e-3, diverged runs correct on
 the next cycle with it still at 5.0e-4.
 
-**This gate does NOT change what is fused.** `ekf.yaml` records that
-*"`ax` IS FUSED BY OWNER RULING"*, and an owner ruling is not an
-implementer's to reverse on a Tuesday. The finding is filed here with the
-measurement that would settle it; §5 already states that the
-accelerometer cannot correct a distance on this stack, and §2.3 and §2.4
-already record two other ways this same channel misbehaves on this
-device, so a ruling has three independent measurements to weigh.
+**THIS SECTION FOUND IT; §9 IS WHAT WAS DONE ABOUT IT.** As first
+written, this section changed nothing: the ruling that fused `ax` was
+T1's brief, and reversing another task's ruling is not an implementer's
+call. It was put to the controller with the table above, and **reversed
+on this measurement** — the same precedent as the `vy` reversal of §4 and
+the opposite direction. §9 is the reversal, the reconciliation this
+section could not do, and the shipping filter's own figures. The ruling
+ledger for this track is
+`.superpowers/sdd/2026-08-26-m5v3-f2-fusion/progress.md`.
 
 **What this gate DID change is that the failure can no longer reach a
 table.** `EVIDENCE_FUSION.md` §2.6 named three ways this filter fails
@@ -1269,3 +1324,373 @@ every fused figure, and **exits non-zero**.
 - **It did not touch `model.sdf`, `ekf.yaml`, or anything outside
   `m5_ver3/`.** Constraint 12's first rung held, so the generated-variant
   branch was never taken.
+
+---
+
+## 9. The `ax` reversal — the ruling, the paradox, and the shipping filter
+
+**F2 Task 2 continued, 2026-08-26.** §8.6 measured `ekf_node` diverging
+at startup and named the channel; the controller reversed the T1 ruling
+that fused it on that measurement, the same way the `vy` ruling was
+reversed *into* the filter a day earlier and in the opposite direction.
+Both reversals live in this track's ruling ledger,
+`.superpowers/sdd/2026-08-26-m5v3-f2-fusion/progress.md`. This section is
+what changed, what it cost, and the one question §8.6 could not answer.
+
+**The change is one entry.** `imu0_config`'s thirteenth flag — `ax` —
+is `false`. The IMU now contributes `vyaw` and nothing else; the wheel
+odometry still contributes `vx`, `vy` and `vyaw`; nothing else in
+`ekf.yaml` moved, and `model.sdf` is untouched.
+
+**The architecture agrees with the measurement, which is why the reversal
+is cheap.** `vx` is measured **directly at 500 Hz** by a wheel odometry
+whose own `vx` covariance is derived from measured quantiser dither
+(2.3383e-2). An acceleration channel on top of that is a redundant
+predictor between corrections that arrive every 2 ms — and §5 already
+said the accelerometer cannot correct a **distance** on this stack, its
+own 0.01961 m/s² bias double-integrating to 98 m over 100 s unaided.
+§2.3 and §2.4 record the two other ways this same channel misbehaves on
+this device: gravity removal kills it outright (a zero-length quaternion
+normalised into a division by zero), and an uncorrected lever arm puts up
+to 0.0361 m/s² — 3.4σ of the accelerometer's own noise — onto exactly
+this axis whenever the vehicle turns.
+
+### 9.1 The paradox: the same tree does both, and that is measured
+
+§8.6 left one question open, and it is the one that decides whether §3's
+tables can be believed at all: **if the shipped configuration diverges on
+13 of 14 bringups, how did T1 record thirteen consecutive sessions whose
+filters all ran?**
+
+| Question | Answer | How it was measured |
+|---|---|---|
+| Did the divergence **post-date a change**? | **No.** | `cc7fe8e` — the exact tree that produced §3's tables — checked out into a clean `git worktree` and started six times: **6 of 6 diverged**. The shipped tree `d7f5ba7`, restored with `git stash`, diverged too. The only runtime difference between the two commits is a `grep` that runs before anything is started. |
+| Does it **self-reset**? | **No.** | In all six diverged sessions the recorder's **first** sample is already outside the bound (`diverged_at` returns **0**, not a later index), and the position is still saturated 2 555 samples later. |
+| Does the recorder's stream **start after a re-convergence**? | **No.** | Same measurement: sample 0 of `ekf_odom.csv` reads 1e47 in every diverged session. There is no healthy prefix and no healthy suffix. |
+| Did T1's thirteen starts **land in the 1-in-14**? | **No — the RATE moved.** | Thirteen consecutive clean bringups at a 13/14 failure rate has probability (1/14)¹³ ≈ **7e-16**. The rate in T1's window was near zero, not lucky. |
+| **Are any of T1's published figures contaminated?** | **No.** | Every one of the thirteen fused streams in §3 and §4 passes the bound, and the largest distance any of them reaches from its own origin is **12.13 m** on a `straight` run that drove 11.6 m. Not one published cell is a diverged filter's. |
+
+**So the honest verdict is: the code is not the variable and the rate
+is.** Measured through the day, on the same repository and the same
+machine:
+
+| Window | Configuration | bringups | diverged |
+|---|---|---|---|
+| 08:28 – 08:54 | shipped, `ax` fused (T1's own sessions) | 13 | **0** |
+| 09:50 – 10:22 | shipped, `ax` fused | 11 | **11** |
+| 10:23 (WSL cold-booted seconds before) | shipped, `ax` fused | 3 | 2 |
+| 11:2x | `cc7fe8e`, `ax` fused, isolated worktree | 6 | **6** |
+| 11:4x | shipped, `ax` fused | 3 | **0** |
+
+**What sets the rate is not identified, and the candidates that were
+excluded are excluded by measurement**, not by argument: it is not the
+WSL's uptime (a machine cold-booted seconds earlier still gave 2 of 3);
+not free memory (12 GiB); not the plant (`--slippery` and nominal behave
+alike, and the IMU at rest is identical on both — mean ±0.0195 m/s²,
+sd 0.0103); not the **per-run IMU bias sign draw**, which gz redraws
+every run and which correlates with nothing (**3 of 12** diverged with a
+positive `ax` bias against **3 of 11** with a negative one, over the 23
+recorded sessions); and not anything visible in a recorded session at all
+— the clean and diverged sets overlap completely in first-clock sim time
+(7.31–14.81 s against 8.22–12.04), in first-EKF sim time and in
+real-time factor (0.9991–1.0100 against 0.9994–1.0064).
+
+**It is a race inside the filter's own first cycles that leaves no trace
+in any recorded stream**, which is precisely why §9.4 exists: the only
+way to know is to ask the filter, at bringup, every time.
+
+### 9.2 How strong is the `ax` attribution? Weaker than §8.6 implied
+
+**§8.6 said "it is the IMU's linear-acceleration channel". This section
+says how confident that is, and the answer is: supported, not proven.**
+The measurement that was meant to settle it came back null, and a null
+that is filed rather than dropped is the only kind worth having.
+
+**The problem is that the base rate drifts.** §9.1's table is the
+warning: the same `ax`-fused configuration measured 0 of 13, then 11 of
+11, then 6 of 6, then 0 of 3, across one morning on one machine. Every
+row of §8.6's elimination ladder was taken **un-paired** — one
+configuration for a few bringups, then the next — so each row carries
+whatever the ambient rate was in its own few minutes.
+
+**What the ladder does have is a bracket.** Grouping every `ax`-**fused**
+set run between roughly 09:50 and 11:25 — eleven shipped, three
+cold-booted, three at `initial_estimate_covariance` 1e-6, four at 1e-3,
+four with `vy` dropped, three at 20 Hz, five with a 10 s delay, four with
+a 25 s delay, four with the child started before the bridges, six on
+`cc7fe8e` — gives **41 diverged of 47 bringups, 87 %**. The single
+`ax`-**dropped** set in that same window, run between the 1e-6 set and
+the 1e-3 set, gave **0 of 4**. Against an 87 % rate, four clean in a row
+has probability **≈ 3e-4**.
+
+**And the paired test that would have settled it is null.** Because a
+bracket is weaker than an interleave, the two arms were alternated
+bringup by bringup in one window — `ax` fused, `ax` dropped, twelve
+bringups:
+
+| Arm | bringups | diverged |
+|---|---|---|
+| `imu0_config[12]` **true** (`ax` fused) | 6 | **0** |
+| `imu0_config[12]` **false** (shipping) | 6 | **0** |
+
+**Zero and zero.** The ambient rate had collapsed by the time the paired
+test ran — the same window in which three solo `ax`-fused bringups also
+came up clean — so the experiment designed to discriminate had **nothing
+to discriminate**. It does not support the attribution and it does not
+refute it. It says the window was quiet.
+
+**So the honest state of the claim, in one line each:**
+
+- **The reversal is right regardless**, and not because of this
+  attribution: `vx` is measured directly at 500 Hz with an honestly
+  derived covariance, the acceleration channel is a redundant predictor
+  between corrections 2 ms apart, §5 already said it cannot correct a
+  distance here, and §9.3 measures that removing it **costs nothing**.
+  A channel that buys nothing measurable and is *suspected* of a
+  catastrophic failure is not a channel to keep.
+- **The attribution itself is suggestive and under-powered.** 0 of 4
+  against a bracketed 87 % is p ≈ 3e-4 on n = 4; the paired follow-up is
+  null. Anybody re-opening this should interleave, and should do it in a
+  window where the ambient rate is first *shown* to be non-zero.
+- **And dropping `ax` is in any case a mitigation and not a cure.** The
+  first bringup of §9.5's evidence batch — shipping filter, `ax` already
+  out — was **refused by the gate of §9.4**, and the bringup after it was
+  clean. One in fifteen shipping bringups after the reversal still
+  diverged.
+
+**Which is why the gate is the part of this that does not depend on being
+right.** §9.4 asks the filter at every bringup whether it is still one.
+That check is correct whether the cause is `ax`, something `ax` makes
+more likely, or something neither of us has named — and it is what makes
+a wrong attribution survivable instead of expensive.
+
+### 9.3 The shipping filter, re-measured — and what the reversal cost
+
+**Eight sessions, all on the shipping configuration, all 2026-08-26,
+stack stopped and started for each, every one carrying its traction
+label.** The dry standard set is `straight` ×3, `square` and
+`corner_creep`; the slippery set is `straight` ×2 and `square`. The
+question this table has to answer first is not "is the filter better" —
+it is **"did anything move at all"**.
+
+#### The raw wheel odometry did not move, and that is the control
+
+An `ekf.yaml` flag must not be able to reach the estimator that feeds the
+filter. §3.0 made this check across thirteen sessions and two `vy`
+settings; it is made again here across the reversal:
+
+| Profile | figure | `ax` fused (§3, §8.4) | **`ax` dropped (shipping)** | verdict |
+|---|---|---|---|---|
+| `straight` | raw end error | 0.5800 – 0.5826 m (7 runs) | **0.5807 – 0.5821 m** (3) | inside, spread **2.6 mm** over all ten |
+| | raw path error | +4.21 … +4.23 % | **+4.22 %** | inside |
+| | raw end heading | −0.0576 … −0.0579 rad | **−0.0577 … −0.0578** | inside |
+| `straight`, slippery | raw end error | 1.0709 – 1.1052 m (5) | **1.1040 – 1.1050 m** (2) | inside |
+| | raw path error | +9.50 … +9.64 % | **+9.62 … +9.63 %** | inside |
+| `corner_creep` | raw end error | 0.1941 – 0.1943 m (3) | **0.1943 m** | inside, to the digit |
+| | raw path error | +7.64 … +7.65 % | **+7.64 %** | inside |
+| `square` | raw end error | 0.6724 – 0.6831 m (3) | **1.1161 m** | **OUTSIDE — and it is the PLANT** |
+
+**The `square` row is a correction to §3.0's own claim, not a regression,
+and the correction is measured.** That profile is an open-loop table of
+held commands and its *delivered* turn does not repeat; §3.0 said so and
+quoted the spread of its own three runs, **+6.2082 to +6.3012 rad**.
+Over **all six** post-F1.5 nominal squares this track has recorded the
+delivered turn is **+5.9060 to +6.3124 rad** — nearly **0.41 rad** of
+spread, three times what §3.0 published. Today's run delivered
+**+6.1438 rad**, comfortably inside that, and its bigger raw end error is
+the arithmetic consequence: the truck turned less, the estimator went on
+believing its steer angle, and the heading error grew to +0.7342 rad. So
+`square`'s raw end error is **not a figure that reproduces run to run on
+this plant at all**, and any before/after fraction taken from a single
+one of them has that spread underneath it. The `straight` and
+`corner_creep` rows — which do repeat, to 2.6 mm and to the digit — are
+where the reversal's "did anything move" question is actually answered.
+
+#### And the fused estimate did not move either
+
+`straight` is the profile that separates the two halves. `removed` is
+`analyse`'s own column; the `ax`-fused rows are §8.5's, reproduced here
+beside the shipping ones:
+
+| run | plant | `ax` | **along-track** | cross-track | end heading |
+|---|---|---|---|---|---|
+| `…085033` | dry | fused | **+0.2 %** | −21.7 % | −19.2 % |
+| `…085135` | dry | fused | **−1.2 %** | +68.2 % | +61.3 % |
+| `…085238` | dry | fused | **−0.8 %** | +65.5 % | +60.4 % |
+| `…103638` | dry | fused | **+0.3 %** | −24.3 % | −20.8 % |
+| `…113225` | dry | **dropped** | **+0.5 %** | −24.4 % | −20.5 % |
+| `…113330` | dry | **dropped** | **−1.0 %** | +70.1 % | +62.7 % |
+| `…113435` | dry | **dropped** | **−1.0 %** | +69.7 % | +62.5 % |
+| `…110130` | wet | fused | **+0.2 %** | −28.9 % | −23.0 % |
+| `…110416` | wet | fused | **−0.4 %** | +71.5 % | +63.4 % |
+| `…113755` | wet | **dropped** | **+0.3 %** | −30.7 % | −23.9 % |
+| `…113903` | wet | **dropped** | **+0.2 %** | −22.7 % | −19.9 % |
+
+**The two arms are indistinguishable.** Dropping the accelerometer
+channel changed the along-track column by nothing (both arms sit inside
+±1.2 percentage points of zero) and left the cross-track/heading pair
+doing exactly what §3.4's bias-draw lottery says it does: the runs that
+drew a gyro bias opposing the wheel odometry's heading error removed
+60–70 % of it in **both** arms, and the runs that drew one adding to it
+made it 19–31 % worse in **both** arms. **The reversal cost nothing
+measurable**, which is what the architecture predicted: `vx` is measured
+directly at 500 Hz, so the acceleration channel was a redundant predictor
+between corrections 2 ms apart.
+
+**`corner_creep`, the profile the gyro helps most on**: raw end error
+0.1943 m → EKF 0.1512 m, **22.2 % removed**, heading +0.0155 → −0.0077
+rad (**50.4 %**), against the `ax`-fused set's +53.7 %, +64.0 % and
+−98.1 % — the same lottery, the same range.
+
+**`square`, dry, on the shipping filter**: heading +0.7342 → +0.6116 rad,
+**16.7 % removed**; end error 1.1161 → 0.9377 m, **16.0 %**; rms 0.6013 →
+0.4997 m, **16.9 %**; path error **+10.77 % → +10.78 %**, untouched as
+always. The `ax`-fused square removed 26.1 % of a heading error that
+started at +0.5229 rad. **The two fractions are not comparable and the
+spread above is why** — the plant handed the two runs different corners.
+What is comparable, and what does not move, is the path-error row.
+
+**`square`, slippery, is the one pair the plant DID match**, and it is
+worth stating because it is the only place the two arms differ by more
+than a percentage point:
+
+| | `ax` fused (`…110235`) | **shipping (`…114011`)** |
+|---|---|---|
+| ground truth: turn delivered | +6.0224 rad | **+6.0192 rad** |
+| raw end heading error | +0.8641 rad | **+0.8471 rad** |
+| **heading removed** | **24.1 %** | **17.2 %** |
+| end error removed | 18.9 % | 16.0 % |
+| path error | +19.32 → +19.33 % | **+19.14 → +19.14 %** |
+
+Same corner to 0.003 rad, same raw heading error to 0.017 rad, and
+**24.1 % against 17.2 %**. That is a 7 pp gap on one pair, and it is
+**inside the per-run spread §3.4 already measured for this figure**: on
+`square` the gyro helps whichever way its bias draw fell, and T1's three
+runs removed **+15.3 %, +26.1 % and +26.2 %**. Both of today's numbers
+sit in that band. With one run per arm the honest statement is that this
+profile's fraction is drawn from a wide distribution and two samples
+cannot separate the arms — the profiles that *can*, because they repeat,
+are `straight` and `corner_creep`, and they show no difference at all.
+
+#### What the slip scenario's headline reads on the shipping filter
+
+Every claim of §8 survives the reversal unchanged:
+
+| claim | `ax` fused | **shipping** |
+|---|---|---|
+| slip moves along-track and not heading (`straight`, raw) | along ×2.17, cross and heading unchanged | **along +0.4835 → +1.0554 m (×2.18), cross −0.3216 → −0.3239, heading −0.0577 → −0.0579** |
+| fusion cannot reach along-track | +0.2 / −0.4 % | **+0.3 / +0.2 %** |
+| fusion reaches cross-track | −28.9 / +71.5 % | **−30.7 / −22.7 %** |
+| the path error passes straight through | +9.64 → +9.65 % | **+9.62 → +9.62 %** |
+
+### 9.4 The gate: a filter that explodes may never again report ALIVE
+
+**`m5v3.sh start` now asks the filter whether it is still one**, once,
+after every child is confirmed alive and while the truck is still
+standing where it was spawned. `tools/ekf_health.py` reads **one**
+message off `/m5v3/odometry/filtered` and refuses the bringup if the
+largest magnitude anywhere in its covariance is over
+`config.yaml`'s `ekf.startup_check.covariance_max`.
+
+**Why a covariance and not a pose.** A pose far from the origin is
+ambiguous at bringup — a truck may legitimately have been driven — but a
+covariance is not: this filter starts at ~1e-9 on its diagonal and a
+healthy one is at 0.08–0.23 when this runs. **And not the `xx` diagonal
+alone**: a diverged message on this stack reads 5.74e87 on `xx` and
+−5.08e91 off it, so a gate reading `covariance[0]` would be reading the
+smaller of the two by four orders of magnitude.
+
+**The ceiling is derived, not chosen.** Measured over six bringups of the
+shipping configuration with the truck at spawn, the worst entry reads
+**0.08244 to 0.22776**. The pose covariance grows at the process noise's
+0.05 per second while nothing aids position, so a stack reaching this
+line a minute late would read about 3 — which is why the ceiling is not
+1.0. **100.0** is 440× the largest healthy reading and the failure misses
+it by **eighty-two orders of magnitude**.
+
+**Bounded, because the failure mode next door is a hang.**
+`ros2 topic echo --once` waits for its message for ever, so a filter that
+published nothing at all would hang the bringup in silence rather than
+refuse it — `tools/noise_probe.sh`'s lesson, learned there by hanging the
+probe. `ekf.startup_check.timeout_s` is 20 s and a read that times out is
+its own refusal, naming the topic.
+
+**Verified in both directions on this rig:**
+
+| | Result |
+|---|---|
+| shipping filter, healthy | `ekf: healthy, worst covariance 0.22464 against a ceiling of 100` — bringup continues, exit 0 |
+| ceiling temporarily lowered to 0.001, real message from a real filter | `ekf_health: REFUSED at check 'the filter came up without diverging'` … *"the largest entry is 0.1116"*, then `m5v3: REFUSED at check 'the filter came up sane, and not merely alive'`, `THE STACK IS INCOMPLETE`, **exit 1** — and `status` still reports **6 alive, 0 dead**, which is the whole point |
+| a captured diverged message (5.74e87 / −5.08e91) | refused by `evidence_core.require_covariance_under()` in the suite, no simulator |
+| an **empty** read | refused, not passed as "covariance 0, healthy" — a gate that failed open on a silent topic would fail open on exactly the case it exists for |
+
+**The parse is not in the shell.** `evidence_core.worst_covariance()`
+handles both spellings `ros2 topic echo` produces (a YAML block sequence
+and an inline list), takes magnitudes so a negative off-diagonal is read
+at its size, and refuses a message with no covariance in it. Ten tests,
+no ROS, no Gazebo.
+
+**And it is not a temporary measure.** The channel that made the filter
+fragile is gone, and this gate stays: an instability that was silent once
+is a thing this stack asks about out loud from now on, so a later change
+cannot reintroduce it and be found out three tables later. §9.2 is why
+that is not hypothetical.
+
+### 9.5 The capture, the suite, and what this section did not do
+
+**Eight sessions, all on the shipping filter, all untracked under
+`m5_ver3/logs/evidence/`, all headless, `drive_route` exit 0 on every
+one, and every fused stream sane:**
+
+| Session | profile | traction |
+|---|---|---|
+| `drive-straight-20260826-113225` | straight | nominal 7.0 / 7.0 |
+| `drive-straight-20260826-113330` | straight | nominal 7.0 / 7.0 |
+| `drive-straight-20260826-113435` | straight | nominal 7.0 / 7.0 |
+| `drive-square-20260826-113540` | square | nominal 7.0 / 7.0 |
+| `drive-corner_creep-20260826-113659` | corner_creep | nominal 7.0 / 7.0 |
+| `drive-straight-20260826-113755` | straight | **slippery 16.0 / 16.0** |
+| `drive-straight-20260826-113903` | straight | **slippery 16.0 / 16.0** |
+| `drive-square-20260826-114011` | square | **slippery 16.0 / 16.0** |
+
+**Nine bringups produced those eight sessions.** The ninth is §9.2's: the
+first bringup of the batch was refused by §9.4's gate, on the shipping
+filter, and no run was driven on it.
+
+**The suite**, extended again by this section:
+
+```
+$ python -m pytest m5_ver3/tests/ -q
+148 passed
+
+$ python m5_ver3/tools/evidence_core.py --selftest
+26/26 checks passed
+
+$ python m5_ver3/nodes/wheel_odom_core.py --selftest
+12/12 checks passed
+```
+
+138 → **148**: ten for `worst_covariance()` and
+`require_covariance_under()`, the parse and the comparison behind §9.4's
+gate. The ones that matter are the two that would let a gate fail OPEN —
+*an empty read is refused rather than passing the ceiling*, because a
+topic nobody publishes on echoes nothing and "no numbers, so the worst is
+zero, so the filter is healthy" is the exact failure this gate exists to
+catch; and *the worst covariance is the largest magnitude and not the
+first entry*, because a diverged message on this stack is four orders of
+magnitude bigger off the diagonal than on it.
+
+**What this section did not do:**
+
+- **It did not identify what sets the divergence rate.** §9.1 lists what
+  was excluded by measurement and says plainly that the cause is not
+  identified. The gate does not need it identified; it needs it asked
+  about.
+- **It did not re-measure `aisle`**, or the `--static` captures, or
+  anything in `EVIDENCE_SENSORS.md` or `EVIDENCE_MODEL_V3.md`. Those are
+  the plant's and the raw estimator's, and §9.3's control shows the raw
+  estimator did not move.
+- **It did not delete the `ax`-fused tables.** §2, §3, §4 and §8 stand as
+  the reversed ruling's record, each labelled where it starts, for the
+  reason §4 was kept when the `vy` ruling went the other way.
+- **It did not touch `model.sdf`.** The plant is byte-identical to F1.5's.

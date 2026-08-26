@@ -900,6 +900,52 @@ ekf:
   #   its 0.7 m/s cruise.
   frequency_hz: "50.0"
 
+  # ------------------- DID THE FILTER COME UP BROKEN? -------------------
+  # WHAT tools/ekf_health.py OBEYS, and it is a BRINGUP GATE rather than
+  # an instrument: m5v3.sh runs it once, after every child is confirmed
+  # alive and while the truck is still standing where it was spawned, and
+  # refuses the whole bringup if it says no.
+  #
+  # IT EXISTS BECAUSE THIS FILTER FAILED SILENTLY AND NOTHING ASKED.
+  # robot_localization's ekf_node can diverge during its first cycles on
+  # this stack - covariance 5.0e-4 to 2.42e84 in ONE 20 ms cycle, the
+  # pose to 1e48 m - while the process stays up, `status` reads ALIVE,
+  # the publisher holds its configured rate and the evidence recorder's
+  # stream arrives on time. Every check this stack had was GREEN over a
+  # filter that had already stopped being one. EVIDENCE_FUSION.md 8.6
+  # measured it at 13 of 14 bringups with the IMU's ax channel fused and
+  # 6 of 6 on the exact tree that produced section 3's tables; section 9
+  # is what dropping that channel did.
+  #   THE CHANNEL IS GONE AND THIS GATE STAYS. An instability that was
+  #   silent once is a thing this stack asks about out loud from now on,
+  #   so that a later change cannot reintroduce it and be found out three
+  #   tables later.
+  startup_check:
+    # THE CEILING, ON THE LARGEST MAGNITUDE ANYWHERE IN THE PUBLISHED
+    # COVARIANCE - not on the pose, which is ambiguous at bringup (a
+    # truck may legitimately have been driven), and not on the xx
+    # diagonal alone, which on a diverged message reads 5.74e87 against
+    # an off-diagonal 5.08e91 and is therefore the SMALLER of the two by
+    # four orders of magnitude.
+    #   MEASURED, 6 bringups of the shipping configuration with the truck
+    #   at spawn: the worst entry reads 0.08244 to 0.22776. The filter's
+    #   pose covariance grows at the process noise's 0.05 per second
+    #   while the vehicle is not aided in position, so a stack that
+    #   reached this line a minute late would read about 3 - which is why
+    #   the ceiling is not 1.0.
+    #   100.0 is 440x the largest healthy reading and the failure misses
+    #   it by EIGHTY-TWO ORDERS OF MAGNITUDE, so nothing rides on the
+    #   exact number. It is a line between an estimate and a wreck, not a
+    #   tolerance, and nothing is compared against it.
+    covariance_max: "100.0"
+    # How long that one read may wait. `ros2 topic echo --once` waits for
+    # its message FOR EVER, so a filter that never published at all would
+    # hang the bringup in silence instead of refusing it - which is
+    # tools/noise_probe.sh's lesson, learned there by hanging the probe.
+    # 20 s is the same budget drive_route.clock_timeout_s takes for the
+    # same shape of question, and this topic publishes at 50 Hz.
+    timeout_s: "20"
+
 # ------------------------------ DRIVE ROUTE -----------------------------
 # tools/drive_route.py's profiles. It is the EVIDENCE DRIVER: it puts the
 # truck through a known, repeatable manoeuvre so that the odometry and the

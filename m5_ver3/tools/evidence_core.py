@@ -477,6 +477,88 @@ def require_not_diverged(xs, ys, limit_m, what):
             float(list(ys)[i])))
 
 
+def worst_covariance(text):
+    """The largest MAGNITUDE in a covariance printed by `ros2 topic echo`.
+
+    WHY A SHELL CANNOT DO THIS AND WHY IT IS NOT IN THE SHELL ANYWAY.
+    m5v3.sh's startup gate reads one message off the filter's output
+    topic and has to decide whether the thing that published it is a
+    filter or a wreck. That decision is a parse and a comparison, both of
+    which are logic, and this track keeps logic where a test can reach it
+    without a simulator - so the shell runs `ros2 topic echo`, and this
+    reads what came back. tools/ekf_health.py is the two-line shell
+    around it.
+
+    THE LARGEST MAGNITUDE AND NOT THE FIRST ENTRY. A diverged filter on
+    this stack publishes 5.74e87 on the xx diagonal and -5.08e91 off it,
+    so a gate reading covariance[0] would be reading the SMALLER of the
+    two by four orders of magnitude. It is also the reason the sign is
+    dropped: an off-diagonal is allowed to be negative and a magnitude is
+    what a ceiling can be compared against. Nothing here checks that the
+    matrix is a valid covariance - a diverged one is not, and finding out
+    which way it is invalid is not what a bringup gate is for.
+
+    BOTH SPELLINGS, because `ros2 topic echo` prints a float array as a
+    YAML block sequence and `--field` prints it as an inline list, and a
+    gate that only understood one of them would fail the day somebody
+    made the call more specific.
+
+    AN EMPTY OR COVARIANCE-FREE READ IS A REFUSAL AND NEVER A ZERO. A
+    topic nobody publishes echoes nothing at all, and "no numbers, so
+    the worst is 0, so the filter is healthy" is the gate failing OPEN on
+    exactly the case it was written for.
+    """
+    body = text[text.index("covariance"):] if "covariance" in text else ""
+    if not body:
+        raise EvidenceError(
+            "the message carries a covariance: no 'covariance' appears in "
+            "{} character(s) of output. An empty read is a topic nobody "
+            "published on, not a healthy filter.".format(len(text)))
+    # Everything from the first `covariance` to the next key that is not
+    # part of one: a block sequence item starts with `-`, an inline list
+    # is on the `covariance:` line itself.
+    values = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("covariance"):
+            stripped = stripped.split(":", 1)[-1]
+        elif stripped.startswith("- "):
+            stripped = stripped[2:]
+        elif stripped == "-":
+            continue
+        else:
+            if values:
+                break
+            continue
+        for token in stripped.replace("[", " ").replace("]", " ").replace(
+                ",", " ").split():
+            try:
+                values.append(abs(float(token)))
+            except ValueError:
+                continue
+    if not values:
+        raise EvidenceError(
+            "the message's covariance carries numbers: 'covariance' "
+            "appears but no value follows it.")
+    return max(values)
+
+
+def require_covariance_under(text, ceiling, what):
+    """worst_covariance(), as the refusal a bringup gate has to answer.
+
+    Returns the figure when it passes, so the caller can print what it
+    checked rather than only that it checked.
+    """
+    worst = worst_covariance(text)
+    if worst > float(ceiling):
+        raise EvidenceError(
+            "{} published a covariance inside {:g}, and it did not: the "
+            "largest entry is {:g}. That is not an uncertain estimate, it "
+            "is a filter that has diverged - see EVIDENCE_FUSION.md 8.6 "
+            "and 9.".format(what, float(ceiling), worst))
+    return worst
+
+
 def travel_projection(xs, ys, yaws):
     """How far the vehicle went NOSE-FIRST: metres, and the sign is the
     reading.
