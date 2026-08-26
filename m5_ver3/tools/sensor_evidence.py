@@ -30,6 +30,14 @@ TWO HALVES, AND THEY ARE DELIBERATELY NOT THE SAME PROGRAM.
            drive began is a recording with the reference pose missing
            from it, and the reference pose is what every drift figure in
            EVIDENCE_SENSORS.md is measured from.
+           SINCE F2 TASK 2 IT ALSO STAMPS THE PLANT. `m5v3.sh start
+           --slippery` brings up a truck with a different floor under it
+           from the SAME committed model, so `record` reads
+           paths.traction_file - the state file that bringup writes -
+           into every session it produces and REFUSES if it is not
+           there. An unlabelled session cannot be told from a nominal
+           one afterwards, and that is the one failure this instrument
+           has no way to catch later.
   analyse  reads those CSVs and prints the tables. IT IMPORTS NO ROS AND
            CALLS NO GAZEBO. It runs on the owner's Windows python, on a
            WSL shell with nothing sourced, and on a machine that has
@@ -115,6 +123,7 @@ REQUIRED_KEYS = (
     "wheel_odom.counts_per_rev", "wheel_odom.wheel_radius_scale",
     "wheel_odom.steer_bias_rad",
     "drive_route.profiles",
+    "paths.traction_file",
     "evidence.dir", "evidence.wait_first_s", "evidence.min_samples",
     "evidence.qos_depth", "evidence.static.record_s",
     "evidence.drive.pre_roll_s", "evidence.drive.post_roll_s",
@@ -123,6 +132,7 @@ REQUIRED_KEYS = (
     "evidence.safety.frames", "evidence.safety.capture_timeout_s",
     "evidence.gz_rate.topics", "evidence.gz_rate.sample_s",
     "evidence.gz_rate.timeout_s",
+    "evidence.analyse.fused_sanity_m",
     "evidence.analyse.spawn_tolerance_m",
     "evidence.analyse.spawn_tolerance_rad",
     "evidence.analyse.max_pair_gap_s", "evidence.analyse.noise_factor",
@@ -197,6 +207,63 @@ def new_session(cfg, kind, name):
     return path
 
 
+#: What a session says about a plant that was recorded before F2 Task 2
+#: existed to label it. Those runs are all nominal - `--slippery` had not
+#: been written - but this file will NOT write "nominal" over a blank,
+#: because the whole point of the label is that it was READ off the plant
+#: and not inferred. A reader gets the honest answer and the reason.
+UNLABELLED = "unrecorded (session predates F2 Task 2's traction label)"
+
+
+def read_traction(cfg):
+    """Which plant is up, read off the state file m5v3.sh wrote.
+
+    THE LABEL COMES FROM THE THING THAT SET THE PLANT, and this is the
+    whole of that chain: `m5v3.sh start` decides the traction, writes it
+    to paths.traction_file, and `record` copies it into the session it is
+    about to write. Nothing here asks the simulator, and nothing here
+    guesses.
+
+    A MISSING FILE IS A REFUSAL AND NOT A DEFAULT. After F2 Task 2 the
+    same `start` brings up two different plants, and a session recorded
+    without a label is not a session with a gap in it - it is a row that
+    will sit in the no-slip tables looking exactly like one of them. The
+    file is written by EVERY start, nominal runs included, and deleted by
+    stop, so its absence means this stack was not brought up by m5v3.sh -
+    which is a thing the operator has to know before they measure it.
+    """
+    path = os.path.join(_common.REPO, cfg.s("paths.traction_file"))
+    if not os.path.isfile(path):
+        cfg.refuse(
+            "the running stack says which traction it is on", path,
+            "paths.traction_file is not there. `m5v3.sh start` writes it "
+            "on every",
+            "bringup - nominal and --slippery alike - and `stop` deletes "
+            "it, so this",
+            "stack was not started by m5v3.sh (or was stopped under this "
+            "recorder).",
+            "RECORDING WITHOUT IT IS NOT ALLOWED: an unlabelled session "
+            "cannot be told",
+            "apart from a nominal one afterwards, and EVIDENCE_FUSION.md "
+            "8 is a table",
+            "of two plants. Bring the stack up with "
+            "'bash m5_ver3/m5v3.sh start --headless'.")
+    fields = {}
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if line and "=" in line:
+                key, value = line.split("=", 1)
+                fields[key] = value
+    if not fields.get("traction"):
+        cfg.refuse("the traction state file names a traction", path,
+                   "it has no 'traction=' line. It is written whole by "
+                   "m5v3.sh's",
+                   "write_traction(); a file without that key is a "
+                   "truncated write.")
+    return fields
+
+
 def write_session_file(path, fields):
     with open(os.path.join(path, FILES["session"]), "w",
               encoding="utf-8") as handle:
@@ -205,7 +272,7 @@ def write_session_file(path, fields):
 
 
 def describe_session(cfg, session, node, profile, started_wall, exit_code,
-                     safety_rows):
+                     safety_rows, traction):
     """What this run was, written beside what it recorded.
 
     IT IS WHAT MAKES A DIRECTORY OF CSVs A SESSION. `analyse` reads
@@ -214,6 +281,13 @@ def describe_session(cfg, session, node, profile, started_wall, exit_code,
     from - neither of which any CSV can say for itself. It is written on
     the way out of EVERY path, including the two that refuse, so a run
     that went wrong is still a run somebody can open.
+
+    AND SINCE F2 TASK 2 IT ALSO CARRIES THE TRACTION, for the same
+    reason and one worse. `model` below names the file the truck was
+    spawned from, and after `--slippery` that file is IDENTICAL between a
+    nominal run and a slippery one - the compliances were overridden
+    afterwards, through a service. So the model line no longer says which
+    plant this was, and these three do.
     """
     write_session_file(session, [
         ("kind", "drive" if profile else "static"),
@@ -221,6 +295,11 @@ def describe_session(cfg, session, node, profile, started_wall, exit_code,
         ("recorded", datetime.datetime.now().isoformat()),
         ("partition", cfg.s("isolation.gz_partition")),
         ("model", cfg.s("vehicle.model")),
+        ("traction", traction.get("traction", "")),
+        ("slip_compliance_lateral",
+         traction.get("slip_compliance_lateral", "")),
+        ("slip_compliance_longitudinal",
+         traction.get("slip_compliance_longitudinal", "")),
         ("spawn", "{} {} {}".format(cfg.s("vehicle.spawn.x"),
                                     cfg.s("vehicle.spawn.y"),
                                     cfg.s("vehicle.spawn.yaw"))),
@@ -574,6 +653,14 @@ def _make_recorder(cfg, Node, QoSProfile, types):
             # read by the same reduction and a column that existed on one
             # and not the other would be a reduction with a branch in it.
             self._odometry(self.writers["ekf_odom"], msg, twist=True)
+            # AND THE LAST ONE IS KEPT so the drive is not spent on a
+            # filter that has already blown up. See fused_pose() below
+            # and EVIDENCE_FUSION.md 8.6.
+            self.last_fused = (msg.pose.pose.position.x,
+                               msg.pose.pose.position.y)
+
+        def fused_pose(self):
+            return getattr(self, "last_fused", None)
 
         def cb_scan(self, msg):
             writer = self.writers["scan_nav"]
@@ -729,6 +816,11 @@ def record(cfg, args):
         "Types", "Clock Odometry LaserScan Imu Image CameraInfo JointState")(
             Clock, Odometry, LaserScan, Imu, Image, CameraInfo, JointState)
 
+    # WHICH PLANT THIS IS, READ BEFORE THE DIRECTORY IS EVEN CREATED. A
+    # stack that cannot say leaves no half-written session behind, and
+    # the operator is refused before they have spent a run on it.
+    traction = read_traction(cfg)
+
     kind = "drive" if args.drive else "static"
     name = args.drive or "rest"
     session = new_session(cfg, kind, name)
@@ -736,6 +828,11 @@ def record(cfg, args):
     print("date       {}".format(datetime.datetime.now().isoformat()))
     print("partition  {}".format(cfg.s("isolation.gz_partition")))
     print("session    {}".format(session))
+    print("traction   {}   slip compliance {} / {} on {}".format(
+        traction.get("traction"),
+        traction.get("slip_compliance_lateral", "?"),
+        traction.get("slip_compliance_longitudinal", "?"),
+        traction.get("wheels", "?")))
     print("mode       {}".format(
         "drive " + args.drive if args.drive else "static, vehicle at rest"))
     sys.stdout.flush()
@@ -768,6 +865,41 @@ def record(cfg, args):
                 "what did arrive is left in {}".format(session))
         print("all {} streams alive.".format(len(node.writers)))
         sys.stdout.flush()
+
+        # THE FILTER IS CHECKED BEFORE THE DRIVE IS SPENT, and the truck
+        # standing at its spawn pose is the strongest moment to check it:
+        # nothing has moved, so the fused estimate must still be at the
+        # origin of its own odom frame. ekf_node diverges at startup on
+        # most bringups of this stack and reports NOTHING - ALIVE, at
+        # rate, stream arriving (EVIDENCE_FUSION.md 8.6) - so without
+        # this the operator finds out sixty seconds later, in `analyse`,
+        # or not at all.
+        fused = node.fused_pose()
+        if fused is not None:
+            try:
+                core.require_not_diverged(
+                    [fused[0]], [fused[1]],
+                    cfg.f("evidence.analyse.fused_sanity_m"),
+                    "the filter, with the truck standing still at spawn,")
+            except core.EvidenceError as exc:
+                node.close()
+                describe_session(cfg, session, node, args.drive,
+                                 drive_started_wall, "NOT STARTED", 0,
+                                 traction)
+                cfg.refuse(
+                    "the filter had not diverged before the drive began",
+                    "{} (evidence.analyse.fused_sanity_m) and {}".format(
+                        _common.CONFIG, cfg.s("ekf.params_file")),
+                    str(exc),
+                    "NOTHING WAS DRIVEN. ekf_node says nothing about "
+                    "this: it stays ALIVE and",
+                    "publishes at its configured rate. Stop the stack "
+                    "and start it again -",
+                    "the divergence is a startup race and it does not "
+                    "recur on every bringup.",
+                    "the empty session is in {}".format(session))
+            print("filter sane at spawn: ({:.6f}, {:.6f}).".format(*fused))
+            sys.stdout.flush()
 
         if args.drive:
             pre = cfg.f("evidence.drive.pre_roll_s")
@@ -805,7 +937,8 @@ def record(cfg, args):
                     proc.wait()
                     node.close()
                     describe_session(cfg, session, node, args.drive,
-                                     drive_started_wall, "TIMED OUT", 0)
+                                     drive_started_wall, "TIMED OUT", 0,
+                                     traction)
                     cfg.refuse(
                         "drive_route.py finished {} inside {:.0f}s".format(
                             args.drive, budget),
@@ -885,7 +1018,7 @@ def record(cfg, args):
                 sys.stdout.flush()
 
     describe_session(cfg, session, node, args.drive, drive_started_wall,
-                     drive_exit, safety_rows)
+                     drive_exit, safety_rows, traction)
 
     if drive_exit not in ("", "0"):
         cfg.refuse("drive_route.py exited 0",
@@ -1086,7 +1219,33 @@ def analyse_static(cfg, path, sensors):
                       rates.column("hz_max")[i]))
 
 
-def analyse_drive(cfg, path, session, sensors):
+def print_track(score, who):
+    """The end error split along the direction the truck was FACING.
+
+    WHY THE SPLIT IS PRINTED AND NOT ONLY THE MAGNITUDE. F2 Task 2's
+    whole claim is that the two halves of a dead-reckoned position error
+    have different causes and different cures - the along-track half is
+    the wheel odometry lying about DISTANCE, which nothing in this phase
+    observes, and the cross-track half is mostly HEADING, which the gyro
+    does observe. A single end error adds them and hides which moved.
+    The arithmetic is evidence_core.track_error(), tested there.
+    """
+    split = core.track_error_of(score)
+    print("  ALONG-TRACK     {:+.4f} m  ({} ran {}),   CROSS-TRACK "
+          "{:+.4f} m  ({} of the path)".format(
+              split.along, who, "LONG" if split.along >= 0 else "SHORT",
+              split.cross, "LEFT" if split.cross >= 0 else "RIGHT"))
+    print("                  split on the ground truth's COURSE: nose "
+          "{:+.4f} rad, driven {:+.2f} m nose-first".format(
+              core.normalise_angle(score.truth_end_yaw_rad),
+              score.truth_nose_forward_m))
+    print("                  (this truck drives FORKS-TRAILING, so a "
+          "negative figure there is the")
+    print("                   normal case and the axis is the nose "
+          "turned by pi)")
+
+
+def analyse_drive(cfg, path, session, sensors, diverged):
     profile = session.get("profile", "")
     spawn = core.SpawnFrame(cfg.f("vehicle.spawn.x"), cfg.f("vehicle.spawn.y"),
                             cfg.f("vehicle.spawn.yaw"))
@@ -1150,6 +1309,7 @@ def analyse_drive(cfg, path, session, sensors):
     print("  END ERROR       {:.4f} m   (dx {:+.4f}, dy {:+.4f}), heading "
           "{:+.4f} rad".format(score.end_error_m, score.end_dx, score.end_dy,
                                score.end_yaw_error_rad))
+    print_track(score, "estimate")
     print("  rms over run    {:.4f} m        worst {:.4f} m".format(
         score.rms_m, score.max_error_m))
     print("  ABSOLUTE, not anchored: no initial offset is removed.")
@@ -1165,11 +1325,11 @@ def analyse_drive(cfg, path, session, sensors):
           "estimate {:.4f} m from its".format(
               core.closure(truth.column("x"), truth.column("y")),
               core.closure(est.column("x"), est.column("y"))))
-    analyse_fused(cfg, path, profile, spawn, truth, score)
+    analyse_fused(cfg, path, profile, spawn, truth, score, diverged)
     return score, truth, est, joints
 
 
-def analyse_fused(cfg, path, profile, spawn, truth, raw):
+def analyse_fused(cfg, path, profile, spawn, truth, raw, diverged):
     """The EKF's own output, scored against the same truth, and then
     against the raw estimate it was built from.
 
@@ -1201,6 +1361,44 @@ def analyse_fused(cfg, path, profile, spawn, truth, raw):
               "driven.")
         return None
     fused = table(full, cfg, cfg.i("evidence.min_samples"))
+    # THE FILTER IS CHECKED FOR HAVING RUN AT ALL BEFORE IT IS SCORED.
+    # A diverged ekf_node publishes 1e48 m at its configured rate and
+    # logs nothing; scored, it produces a full drift table of numbers
+    # about nothing and a `removed` column of -1e50 %. See
+    # evidence_core.diverged_at() and EVIDENCE_FUSION.md 8.6.
+    #   THE FUSED TABLE IS DROPPED AND THE SESSION IS NOT. The ground
+    #   truth and the raw wheel odometry in a run whose FILTER blew up
+    #   are untouched by that - they are different processes - and they
+    #   are evidence. What must not survive is any FUSED claim about the
+    #   run, so the block below is replaced by a named refusal, the
+    #   comparison is not computed at all, and analyse() exits NON-ZERO
+    #   at the end naming every session this happened in. A warning
+    #   scrolls off the top of a long run; an exit status does not.
+    gone = core.diverged_at(fused.column("x"), fused.column("y"),
+                            cfg.f("evidence.analyse.fused_sanity_m"))
+    if gone is not None:
+        print("")
+        print("--- {} : THE FILTER DIVERGED IN THIS SESSION - NO FUSED "
+              "FIGURES ---".format(profile))
+        print("  sample {} of {} of {} reads ({:g}, {:g}), and "
+              "config.yaml's".format(
+                  gone, len(fused.column("x")), FILES["ekf_odom"],
+                  fused.column("x")[gone], fused.column("y")[gone]))
+        print("  evidence.analyse.fused_sanity_m is {:g} m. That is not "
+              "drift - the whole".format(
+                  cfg.f("evidence.analyse.fused_sanity_m")))
+        print("  floor is 48 m by 32 m - it is ekf_node's startup "
+              "divergence, measured and")
+        print("  tabulated in EVIDENCE_FUSION.md 8.6. ekf_node logs "
+              "NOTHING about it.")
+        print("  The ground truth and the raw wheel odometry above are "
+              "UNAFFECTED and are")
+        print("  this run's evidence; every FUSED figure is withheld and "
+              "`analyse` will exit")
+        print("  non-zero. Stop the stack and start it again - it does "
+              "not recur every time.")
+        diverged.append(os.path.basename(path))
+        return None
     print("")
     print("--- {} : the FUSED estimate against the same ground truth "
           "---".format(profile))
@@ -1225,6 +1423,7 @@ def analyse_fused(cfg, path, profile, spawn, truth, raw):
     print("  END ERROR       {:.4f} m   (dx {:+.4f}, dy {:+.4f}), heading "
           "{:+.4f} rad".format(score.end_error_m, score.end_dx, score.end_dy,
                                score.end_yaw_error_rad))
+    print_track(score, "EKF")
     print("  rms over run    {:.4f} m        worst {:.4f} m".format(
         score.rms_m, score.max_error_m))
     print("  CLOSURE         EKF {:.4f} m from its own start".format(
@@ -1239,6 +1438,14 @@ def analyse_fused(cfg, path, profile, spawn, truth, raw):
         "figure", "raw", "EKF", "removed", "of raw"))
     for label, unit, one in (("end error", "m", out.end_error),
                              ("END HEADING", "rad", out.end_yaw),
+                             # F2 TASK 2's TWO ROWS, and they are the two
+                             # the slip scenario is read on: the gyro can
+                             # move CROSS-track because heading is what it
+                             # observes, and nothing on this stack can
+                             # move ALONG-track because nothing on it
+                             # observes distance (EVIDENCE_FUSION.md 8.5).
+                             ("ALONG-track", "m", out.along),
+                             ("CROSS-track", "m", out.cross),
                              ("rms over run", "m", out.rms),
                              ("worst", "m", out.max_error)):
         print("  {:<16} {:>+12.4f} {:>+12.4f} {:>+12.4f} {:>9.1f}% "
@@ -1611,7 +1818,67 @@ def analyse_corner_table(cfg, path, inputs):
     return out
 
 
-def analyse_session(cfg, path, sensors):
+def traction_of(session):
+    """One session's traction, as the one string everything compares by.
+
+    The compliances are part of the key and not decoration: two slippery
+    runs at different compliances are two different plants, and a table
+    that mixed them would be as wrong as one that mixed wet with dry.
+    A session written before F2 Task 2 has no key at all and says so
+    rather than being read as nominal - see UNLABELLED.
+    """
+    label = session.get("traction", "")
+    if not label:
+        return UNLABELLED
+    return "{} (slip compliance {} / {})".format(
+        label, session.get("slip_compliance_lateral", "?"),
+        session.get("slip_compliance_longitudinal", "?"))
+
+
+def refuse_mixed_traction(cfg, paths, sessions):
+    """One `analyse` invocation, one plant.
+
+    THE FAILURE THIS EXISTS TO PREVENT IS NOT A CRASH. `--slippery`
+    brings up a truck whose wheel odometry is wrong in a completely
+    different way, on the same floor, from the same model file, driving
+    the same profiles, writing CSVs of the same shape into a directory of
+    the same name. Nothing downstream of the session file can tell one
+    from the other - so the moment a run of each is read out by one
+    command into one document, the only thing standing between a reader
+    and a table with rows from two plants in it is that reader's
+    attention.
+
+    SO THE TOOL WILL NOT PRODUCE THAT DOCUMENT. It refuses, names both
+    groups, and prints the two commands that would have been right. It is
+    deliberately not a warning: a warning scrolls off the top of a long
+    analyse run, and every row under it still gets printed.
+    """
+    groups = collections.OrderedDict()
+    for path, session in zip(paths, sessions):
+        groups.setdefault(traction_of(session), []).append(
+            os.path.basename(path))
+    if len(groups) < 2:
+        return
+    lines = []
+    for label, names in groups.items():
+        lines.append("  {} - {} session(s):".format(label, len(names)))
+        lines.extend("      " + name for name in names)
+    lines.append("")
+    lines.append("run one command per plant, for example:")
+    for label, names in groups.items():
+        lines.append("  # {}".format(label))
+        lines.append("  python3 m5_ver3/tools/sensor_evidence.py analyse \\")
+        lines.append("      " + " \\\n      ".join(
+            os.path.join(cfg.s("evidence.dir"), name) for name in names))
+    cfg.refuse(
+        "every session in this analyse is off the SAME plant",
+        "{} (the session.txt of each) and {} (paths.traction_file)".format(
+            session_root(cfg), _common.CONFIG),
+        "{} different tractions are in this set:".format(len(groups)),
+        *lines)
+
+
+def analyse_session(cfg, path, sensors, diverged):
     session = read_session_file(cfg, path)
     print("")
     print("=" * 72)
@@ -1619,11 +1886,13 @@ def analyse_session(cfg, path, sensors):
     print("kind     {}   profile {}   recorded {}".format(
         session.get("kind", "?"), session.get("profile", "-"),
         session.get("recorded", "?")))
+    print("TRACTION {}".format(traction_of(session)))
     if session.get("drive_exit", "") not in ("", "0"):
         print("WARNING  drive_route.py exited {} on this run".format(
             session["drive_exit"]))
     if session.get("kind") == "drive":
-        _, truth, est, joints = analyse_drive(cfg, path, session, sensors)
+        _, truth, est, joints = analyse_drive(cfg, path, session,
+                                              sensors, diverged)
         # ONE PREPARATION, TWO REDUCTIONS. See CornerInputs.
         inputs = corner_inputs(cfg, path, session, truth, joints)
         if inputs is not None:
@@ -1806,8 +2075,30 @@ def analyse(cfg, args):
     if not paths:
         cfg.refuse("there is a session to analyse", root,
                    "the directory is empty - run `record` first.")
+    # THE SET IS CHECKED BEFORE THE FIRST TABLE IS PRINTED. Both plants
+    # produce a healthy-looking session, so the guard has to be up front:
+    # refusing halfway through leaves the reader with a document that is
+    # already half wrong and no obvious mark where it went bad.
+    refuse_mixed_traction(cfg, paths,
+                          [read_session_file(cfg, p) for p in paths])
+    # EVERY SESSION WHOSE FILTER HAD BLOWN UP, COLLECTED WHILE THE
+    # TABLES ARE PRINTED AND REPORTED IN THE EXIT STATUS. See
+    # analyse_fused(): the run's ground truth and raw wheel odometry are
+    # still evidence and are still printed, and no FUSED figure from it
+    # is. A reader who scrolled past the block gets it again at the end;
+    # a SCRIPT gets it in `$?`, which is the reader that never scrolls.
+    diverged = []
     for path in paths:
-        analyse_session(cfg, path, sensors)
+        analyse_session(cfg, path, sensors, diverged)
+    if diverged:
+        print("")
+        print("=" * 72)
+        print("{} of the {} session(s) above had a DIVERGED FILTER and "
+              "carry no fused".format(len(diverged), len(paths)))
+        print("figures: {}".format(", ".join(diverged)))
+        print("ekf_node's startup divergence, EVIDENCE_FUSION.md 8.6. "
+              "This exit is NON-ZERO.")
+        return 1
     return 0
 
 
@@ -1840,7 +2131,11 @@ def main(argv=None):
                         "(no ROS, no Gazebo)")
     reader.add_argument("session", nargs="*",
                         help="session directories; default is every session "
-                             "under evidence.dir")
+                             "under evidence.dir. ONE PLANT PER "
+                             "INVOCATION: a set mixing nominal and "
+                             "--slippery sessions is refused, with both "
+                             "groups named and the two commands that "
+                             "would have been right")
     args = parser.parse_args(argv)
     if args.command == "record":
         return record(cfg, args)

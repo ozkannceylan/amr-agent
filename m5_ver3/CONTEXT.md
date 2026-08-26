@@ -104,12 +104,15 @@ m5_ver3/
 │                         the WheelSlip ladder that fixed it, and the
 │                         before/after of everything the fix could break
 ├── EVIDENCE_FUSION.md     F2 Task 1's: the EKF against the raw wheel
-│                         odometry against the truth, profile by profile
+│                         odometry against the truth, profile by profile.
+│                         F2 Task 2 adds §8: the same three streams on a
+│                         floor the truck cannot grip, and the filter's
+│                         own startup divergence, measured
 ├── config.yaml           every constant the scripts obey - the one home
 ├── ekf.yaml              what the FILTER fuses and what it refuses. A ROS
 │                         parameter file, which config.yaml is not and may
 │                         not become - the split is argued in both files
-├── m5v3.sh               start [--headless] | stop | status
+├── m5v3.sh               start [--headless] [--slippery] | stop | status
 ├── gazebo/
 │   └── forklift_ver3/
 │       └── model.sdf     the forked vehicle
@@ -173,18 +176,40 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 |---|---|
 | `m5v3.sh start` | GPU preflight, then the world, one `forklift_ver3`, both bridges, the wheel-odometry node, the static IMU transform, the EKF and a Gazebo **window**. |
 | `m5v3.sh start --headless` | The same without the window. **Use this for anything being measured** — every figure in the three evidence files was taken this way. |
-| `m5v3.sh status` | Each child by name, ALIVE or DEAD, with its log. Exit 0 only if every one is alive. |
+| `m5v3.sh start --slippery` | **A different plant from the same model file.** After the truck is spawned, every wheel's slip compliance is overridden through gz-sim's own `wheel_slip` service to `config.yaml`'s `slippery:` values — `model.sdf` is not edited and no variant of it is generated. Longitudinal slip at cruise goes from 0.95 % to 6.18 %. Combines with `--headless`, in either order. |
+| `m5v3.sh status` | Each child by name, ALIVE or DEAD, with its log, and **which traction the running plant is on**. Exit 0 only if every one is alive. |
 | `m5v3.sh stop` | Ends this partition's stack, and nothing else. |
 | `tools/rtf_probe.sh` | 30 s real-time-factor sample of the world that is already running. |
 | `tools/noise_probe.sh scan\|depth <topic>` | Temporal spread of every reading on one sensor topic, vehicle **at rest**. Is the noise the SDF configures actually on the wire? |
 | `tools/slip_bench.sh` | Drives the traction terminal at cruise, forward then astern, and reports slip against the commanded and the achieved wheel rate. |
 | `tools/drive_route.py <profile>` | Drives one of `config.yaml`'s profiles — `straight`, `square`, `aisle`, `corner_creep` — open loop, on the plant's own clock. It drives; it records nothing. |
-| `tools/sensor_evidence.py record --static\|--drive P` | Captures one run into `logs/evidence/<session>/`: one headered CSV per stream. `--drive` starts `drive_route.py` itself, so one command is one complete run. Needs ROS. |
+| `tools/sensor_evidence.py record --static\|--drive P` | Captures one run into `logs/evidence/<session>/`: one headered CSV per stream. `--drive` starts `drive_route.py` itself, so one command is one complete run. It stamps the session with **which plant it was taken on** and refuses if the stack cannot say, and it refuses **before the drive** if the filter has already diverged. Needs ROS. |
 | `tools/sensor_evidence.py analyse [session…]` | Every table in `EVIDENCE_SENSORS.md` and `EVIDENCE_FUSION.md`, from those CSVs — including the EKF scored against the same truth as the raw estimate, and the two subtracted. **Needs no ROS and no Gazebo** — it runs on the Windows python. |
 
 `start` exits **non-zero** if any child died during startup, naming the
 child and its log; what survived is left running, because the operator's
 next command is `stop`.
+
+**Since F2 Task 2 there are TWO PLANTS and one model file, and every
+measured thing has to say which it was taken on.** `--slippery` changes
+the *physics* after the spawn — gz-sim 8.11's UserCommands system
+advertises `/world/<world>/wheel_slip/blocking`, and `m5v3.sh` calls it
+once per wheel with `config.yaml`'s `slippery:` values, checking the
+reply for each. `gazebo/forklift_ver3/model.sdf` is **byte-identical**
+between the two runs; the difference is three service calls, and the
+committed model stays the one plant anybody reading it sees. F2's
+constraint 12 allows a generated model variant if the runtime override
+provably cannot be made to work — it can, and `EVIDENCE_FUSION.md` §8.1
+is the measurement, including the control that shows a 7.0 override
+reproducing the model's own 0.95 % slip to 0.0014 percentage points.
+  **The label is a mechanism and not a convention.** `start` writes
+  `paths.traction_file` on every bringup, nominal ones included; `stop`
+  deletes it; `status` prints it; `sensor_evidence.py record` copies it
+  into every session and **refuses to record without it**; and `analyse`
+  **refuses a set of sessions that mixes the two plants**, naming both
+  groups. A slippery run that reached the no-slip tables unlabelled
+  would not look like a failure — it would look like a row — and that is
+  the whole reason the chain exists.
 
 **Six children since F2 Task 1**, and `status` names all six back: the
 gz server (`world`), `ros_gz_bridge`'s `parameter_bridge` (`bridge`),

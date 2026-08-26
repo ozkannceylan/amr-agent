@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # m5v3.sh - bring the m5-ver3 plant up and down: ONE world, ONE truck,
 # ONE bridge, ONE estimator, and a GPU the run has proved it is using.
-#   start [--headless] | stop | status
+#   start [--headless] [--slippery] | stop | status
 #
 # WHAT THIS TRACK IS. m5-ver3 is the sensor-fusion rebuild of the SHOWCASE
 # vehicle (vault AMR-DEC-003): one forklift, real instrument profiles, a
@@ -29,6 +29,19 @@
 # it is not free, and every figure in EVIDENCE_BRINGUP.md was taken
 # headless so the next one can be compared with it.
 #
+# --slippery BRINGS UP A DIFFERENT PLANT FROM THE SAME MODEL FILE, and it
+# is the one flag here that changes what is being measured rather than how
+# much of it is drawn. It overrides every wheel's slip compliance through
+# gz-sim's own wheel_slip service after the spawn (F2 Task 2; config.yaml
+# slippery:), so the tyre creeps and the wheel odometry's distance goes
+# long by an order of magnitude more than the believed radius does on its
+# own. THE COMMITTED model.sdf IS NOT EDITED and no variant of it is
+# generated. What the plant ended up on is written to
+# paths.traction_file, reported by `status`, and copied into every
+# evidence session recorded against it - because a slippery run that
+# reaches the no-slip tables unlabelled is the one failure this whole
+# mechanism is shaped to prevent.
+#
 # THE PARTITION IS NOT OVERRIDABLE FROM THE ENVIRONMENT, unlike m6.sh's.
 # It is read from config.yaml by start, by stop and by status alike, so
 # the three cannot disagree about which graph this is - and ours() reads
@@ -48,6 +61,13 @@ TOOL=m5v3
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tools/_common.sh"
 
 GUI=true   # start's default; --headless sets it false. See the header.
+# THE PLANT'S TRACTION, and it is the one thing about this stack that the
+# COMMAND LINE decides rather than config.yaml. --slippery overrides the
+# three wheels' slip compliances after the truck is spawned, so the same
+# committed model.sdf brings up two measurably different plants. Every
+# figure taken off one of them has to say which, which is what
+# $TRACTIONFILE is for - see write_traction().
+SLIPPERY=false
 
 # THIS SCRIPT'S OWN REQUIRED KEYS, on top of the isolation and ROS ones
 # _common.sh checks for every script on this track. Each is refused by its
@@ -66,7 +86,9 @@ REQUIRED_KEYS=(
     topics.odometry_filtered
     frames.odom frames.base_link frames.imu frames.map
     ekf.params_file ekf.node_name ekf.frequency_hz
-    paths.log_dir paths.pidfile
+    slippery.slip_compliance_lateral slippery.slip_compliance_longitudinal
+    slippery.service_timeout_ms
+    paths.log_dir paths.pidfile paths.traction_file
     timing.world_load_s timing.settle_s timing.startup_check_s
     timing.stop_grace_s timing.gui_gate_poll_s timing.gui_gate_settle_s
     timing.spawn_service_timeout_ms timing.pid_wait_tries timing.pid_wait_s
@@ -76,6 +98,7 @@ REQUIRED_KEYS=(
 configure() {
     load_config "${REQUIRED_KEYS[@]}"
     PIDFILE="$REPO/$CFG_PATHS_PIDFILE"
+    TRACTIONFILE="$REPO/$CFG_PATHS_TRACTION_FILE"
     LOGDIR="$REPO/$CFG_PATHS_LOG_DIR"
     WORLD="$REPO/$CFG_WORLD_FILE"
     MODEL="$REPO/$CFG_VEHICLE_MODEL"
@@ -226,6 +249,18 @@ start() {
     # returns and the truck belongs to the server.
     spawn_truck
     sleep "$CFG_TIMING_SETTLE_S"
+
+    # THE FLOOR, AFTER THE TRUCK IS STANDING ON IT. --slippery is the
+    # only thing on this stack that changes the PLANT, and it changes it
+    # here: after the settle, so the wheels are loaded and the model
+    # entity certainly exists, and before any bridge is opened, so no
+    # consumer can ever see a message from the un-overridden plant.
+    # Whichever way it went, the answer is written down before anything
+    # that MEASURES this stack is started.
+    if [ "$SLIPPERY" = true ]; then
+        apply_slippery
+    fi
+    write_traction
 
     # THE BRIDGES AFTER THE TRUCK, because all but one of their topics are
     # the truck's and a bridge opened over topics that do not exist yet
@@ -395,6 +430,16 @@ start() {
 
     echo ""
     echo "up. one truck, one world, two bridges, one estimator, one filter."
+    if [ "$SLIPPERY" = true ]; then
+        echo "THIS IS THE SLIPPERY PLANT." \
+             "slip compliance $CFG_SLIPPERY_SLIP_COMPLIANCE_LATERAL /" \
+             "$CFG_SLIPPERY_SLIP_COMPLIANCE_LONGITUDINAL on every wheel,"
+        echo "         applied through gz's own wheel_slip service -" \
+             "$CFG_VEHICLE_MODEL is untouched."
+        echo "         Every session recorded against it is LABELLED" \
+             "slippery and must not be"
+        echo "         tabled beside a nominal run. EVIDENCE_FUSION.md 8."
+    fi
     echo "bridged: $CFG_TOPICS_CLOCK, $CFG_TOPICS_ODOM_GROUND_TRUTH" \
          "(measurement reference ONLY), $CFG_TOPICS_SCAN_NAV," \
          "$CFG_TOPICS_IMU, $CFG_TOPICS_CAM_DEPTH, $CFG_TOPICS_CAM_INFO," \
@@ -514,6 +559,149 @@ spawn_truck() {
         "run '$0 stop' before trying again."
 }
 
+# THE WHEELS THE OVERRIDE APPLIES TO ARE READ OUT OF THE MODEL, and they
+# are not listed in config.yaml. model.sdf's WheelSlip plugin is the file
+# that decides which links have a slip compliance at all, and a list
+# spelled here would be a second opinion about it - the kind that does not
+# break, it just quietly stops matching. `<wheel link_name="...">` is the
+# plugin's own element and the only place that attribute appears in this
+# model, so one sed is the whole reader.
+#   ONE NAME PER <wheel> ELEMENT, AND THE TWO COUNTS ARE COMPARED. sed's
+#   `.*` is greedy, so two `<wheel>` elements on ONE line would yield one
+#   name and the override would quietly reach fewer wheels than the
+#   plugin has - and the applied-vs-found check below could not see it,
+#   because both sides would be derived from the same short list. So the
+#   number of names is checked against the number of `<wheel ` openings
+#   in the file, which is a different reading of it.
+wheel_links() {
+    sed -n 's/.*<wheel link_name="\([^"]*\)".*/\1/p' "$MODEL"
+}
+
+wheel_count() {
+    grep -c '<wheel ' "$MODEL"
+}
+
+# THE SAME THREE COMPLIANCES, ON A FLOOR THAT CANNOT BE GRIPPED.
+# gz-sim 8.11's UserCommands system advertises a per-model wheel-slip
+# service and this is the whole of --slippery: three calls, one per wheel,
+# after the spawn. model.sdf is NOT edited and no variant of it is
+# generated - F2 constraint 12's first rung, and it holds.
+#
+# THE BLOCKING VARIANT IS THE ONE CALLED, and that is what makes the
+# reply worth checking. `/world/<w>/wheel_slip` returns as soon as the
+# command is QUEUED; `/world/<w>/wheel_slip/blocking` returns after it has
+# run inside the simulation loop, so `data: true` means an entity of that
+# name was found and its compliances were set. Measured on this rig
+# (EVIDENCE_FUSION.md 8.1): a link name the model does not carry comes
+# back with NO reply at all and `gz service` still exits 0 - so the test
+# is the reply's text and never the exit status.
+#
+# THE VALUES ARE IN EFFECT SPACE. config.yaml's slippery: block says why
+# both keys carry the same number and why the names lie; do not set them
+# apart here or anywhere without reading EVIDENCE_LATERAL_TUNE.md 3.1.
+apply_slippery() {
+    local lat="$CFG_SLIPPERY_SLIP_COMPLIANCE_LATERAL"
+    local lon="$CFG_SLIPPERY_SLIP_COMPLIANCE_LONGITUDINAL"
+    local links link reply found=0 applied=0
+    links="$(wheel_links)"
+    [ -n "$links" ] || refuse "the model names the wheels to override" \
+        "$MODEL" \
+        "no <wheel link_name=\"...\"> element was found in it, so there" \
+        "is no gz-sim-wheel-slip-system entry to override and --slippery" \
+        "would bring up the NOMINAL plant while saying it was slippery."
+    local named opened
+    named="$(printf '%s\n' "$links" | wc -l)"
+    opened="$(wheel_count)"
+    [ "$named" = "$opened" ] || refuse \
+        "every <wheel> element in the model yielded a link name" \
+        "$MODEL" \
+        "the file opens $opened <wheel> element(s) and this script read" \
+        "$named link name(s) out of it. The reader takes ONE name per" \
+        "LINE; a reformat that put two on one line would silently leave" \
+        "a wheel on the nominal plant while 'status' said slippery."
+    echo "  slippery: overriding slip compliance to $lat / $lon (EFFECT" \
+         "space - config.yaml slippery:)"
+    for link in $links; do
+        found=$(( found + 1 ))
+        reply="$(gz service -s "/world/$CFG_WORLD_NAME/wheel_slip/blocking" \
+            --reqtype gz.msgs.WheelSlipParametersCmd \
+            --reptype gz.msgs.Boolean \
+            --timeout "$CFG_SLIPPERY_SERVICE_TIMEOUT_MS" \
+            --req "entity: {name: \"$CFG_VEHICLE_NAME::$link\", type: LINK}, slip_compliance_lateral: $lat, slip_compliance_longitudinal: $lon" \
+            2>&1)"
+        { echo "# $(date -Is) wheel_slip $CFG_VEHICLE_NAME::$link" \
+               "lateral $lat longitudinal $lon"
+          printf '%s\n' "$reply"; } >> "$LOGDIR/slippery.log"
+        case "$reply" in
+            *"data: true"*)
+                applied=$(( applied + 1 ))
+                echo "    $link  applied" ;;
+            *)
+                refuse "the wheel_slip service applied the override to $link" \
+                    "$LOGDIR/slippery.log (the reply) and $MODEL (the link)" \
+                    "the service replied: ${reply:-<nothing at all>}" \
+                    "an EMPTY reply is how this service reports an entity" \
+                    "it could not find: the command returns false and the" \
+                    "client prints no message and still exits 0." \
+                    "$applied of $found wheels had been overridden when it" \
+                    "failed, so the plant is now HALF slippery and no" \
+                    "figure taken on it is a figure about either setting." \
+                    "the stack is STILL UP: run '$0 stop' before trying again." ;;
+        esac
+    done
+    # A COUNTED REWRITE, and the count is the model's rather than a
+    # number written here: every link the plugin names got a reply that
+    # said yes, or the loop above already refused.
+    [ "$applied" = "$found" ] || refuse \
+        "every wheel the model names was overridden" \
+        "$LOGDIR/slippery.log and $MODEL" \
+        "the model names $found wheel(s) and $applied were applied."
+    echo "  slippery: $applied of $found wheels, from $CONFIG"
+}
+
+# WHAT PLANT THIS IS, WRITTEN DOWN WHERE AN INSTRUMENT CAN READ IT.
+# After --slippery, `m5v3.sh start` can bring up two different plants from
+# one committed model, and the difference does not show in the pidfile,
+# the logs, the topic list or the model file. An evidence session recorded
+# against the wrong one is not a failed measurement - it is a row that
+# looks exactly like a good one, in a table it does not belong in. So the
+# answer is written once, here, by the only thing that knows it, and
+# tools/sensor_evidence.py's `record` copies it into every session it
+# writes and REFUSES if this file is missing.
+#   IT IS RUNTIME STATE AND stop DELETES IT, exactly as it does the
+#   pidfile. A file left behind by a crash is a file `start` overwrites
+#   before anything can read it, because start writes it every time -
+#   nominal runs included, and a nominal run that wrote nothing would
+#   leave yesterday's slippery answer standing.
+#   THE NOMINAL VALUES ARE READ OUT OF THE MODEL, not out of config.yaml:
+#   model.sdf's plugin is what the plant actually has when nothing has
+#   overridden it, and config.yaml's wheel_slip: block is a copy of it
+#   for the shells. `sort -u` collapses the three wheels' entries to the
+#   distinct values, so a model that is NOT isotropic shows as two.
+write_traction() {
+    local lat lon source
+    if [ "$SLIPPERY" = true ]; then
+        lat="$CFG_SLIPPERY_SLIP_COMPLIANCE_LATERAL"
+        lon="$CFG_SLIPPERY_SLIP_COMPLIANCE_LONGITUDINAL"
+        source="$0 --slippery, values from $CONFIG (slippery:), applied to the running plant through gz's wheel_slip service"
+    else
+        lat="$(sed -n 's:.*<slip_compliance_lateral>\(.*\)</slip_compliance_lateral>.*:\1:p' "$MODEL" | sort -u | paste -sd,)"
+        lon="$(sed -n 's:.*<slip_compliance_longitudinal>\(.*\)</slip_compliance_longitudinal>.*:\1:p' "$MODEL" | sort -u | paste -sd,)"
+        source="$CFG_VEHICLE_MODEL (no override was applied)"
+    fi
+    { echo "traction=$([ "$SLIPPERY" = true ] && echo slippery || echo nominal)"
+      echo "slip_compliance_lateral=$lat"
+      echo "slip_compliance_longitudinal=$lon"
+      echo "wheels=$(wheel_links | paste -sd' ')"
+      echo "source=$source"
+      echo "partition=$GZ_PARTITION"
+      echo "started=$(date -Is)"; } > "$TRACTIONFILE" \
+        || refuse "the traction state file is writable" "$CONFIG" \
+            "paths.traction_file resolves to $TRACTIONFILE" \
+            "without it no recorded session can say which plant it was" \
+            "taken on, and an unlabelled session is worse than none."
+}
+
 # EVERY CHILD IN ITS OWN SESSION AND ITS OWN LOG.
 #   setsid, so the stack outlives the terminal that started it: measured
 #   in m6 before it was added, closing that terminal killed five of six
@@ -551,6 +739,19 @@ status() {
     if [ ! -f "$PIDFILE" ]; then
         echo "not running (no pid file)."
         return 1
+    fi
+    # WHICH PLANT IS UP, AND IT IS THE FIRST THING AN OPERATOR NEEDS.
+    # The slippery stack looks identical to the nominal one from every
+    # other angle: same children, same topics, same model file. It is
+    # read here with the same key=value grammar
+    # tools/sensor_evidence.py's `record` reads it with.
+    if [ -f "$TRACTIONFILE" ]; then
+        printf '  %-10s %-7s %s\n' "traction" \
+            "$(sed -n 's/^traction=//p' "$TRACTIONFILE")" \
+            "slip compliance $(sed -n 's/^slip_compliance_lateral=//p' "$TRACTIONFILE") / $(sed -n 's/^slip_compliance_longitudinal=//p' "$TRACTIONFILE") on $(sed -n 's/^wheels=//p' "$TRACTIONFILE")"
+    else
+        printf '  %-10s %-7s %s\n' "traction" "UNKNOWN" \
+            "no $TRACTIONFILE - this stack was not started by '$0 start'"
     fi
     local pid name alive=0 dead=0
     while read -r pid name; do
@@ -600,13 +801,20 @@ stop() {
     else
         echo "nothing to stop."
     fi
+    # THE TRACTION STATE GOES WITH THE STACK IT DESCRIBED. Left behind it
+    # would answer for the NEXT stack, and the next stack may be the other
+    # plant - so `status` would name a traction nothing is running on and
+    # `record` would stamp it onto a session it has nothing to do with.
+    # It is removed whether or not there was a pidfile, because a crash
+    # leaves one without the other.
+    rm -f "$TRACTIONFILE"
     # Past the grace, nothing is exiting on its own.
     sleep "$CFG_TIMING_STOP_GRACE_S"
     sweep KILL
     echo "down."
 }
 
-USAGE="usage: $0 start [--headless] | stop | status
+USAGE="usage: $0 start [--headless] [--slippery] | stop | status
   start       GPU preflight, then warehouse_ver3 + one forklift_ver3 in a
               Gazebo window, plus TWO ros_gz bridges: the parameter bridge
               for the clock, the ground-truth odometry (a measurement
@@ -622,19 +830,34 @@ USAGE="usage: $0 start [--headless] | stop | status
               The 3D lidar and both point clouds stay on the gz side.
               It refuses outright if the renderer is not the NVIDIA GPU.
   --headless  no Gazebo window. Use it for anything being MEASURED.
-  status      every child by name, ALIVE or DEAD, with its log
+  --slippery  THE WET PATCH. After the truck is spawned, override every
+              wheel's slip compliance to config.yaml's slippery: values
+              through gz-sim's own wheel_slip service - the committed
+              model.sdf is not touched and no variant of it is written.
+              It is a DIFFERENT PLANT: the tyre creeps, the wheel
+              odometry's distance goes badly long, and 'status' and every
+              recorded evidence session say so by name. Do not mix its
+              runs with nominal ones in one table; 'analyse' refuses to.
+  status      every child by name, ALIVE or DEAD, with its log, and which
+              traction the running plant is on
   stop        end this partition's stack and nothing else"
 case "${1:-}" in
     start|--start)
-        case "${2:-}" in
-            --headless) GUI=false ;;
-            # An unrecognised second word is a REFUSAL and not a shrug: the
-            # one it will be is a misspelt --headless, and silently opening
-            # a window for someone who asked for none is what this branch
-            # exists to prevent.
-            "") ;;
-            *) echo "$USAGE"; exit 2 ;;
-        esac
+        shift
+        # THE TWO FLAGS ARE INDEPENDENT AND MAY COME IN EITHER ORDER, and
+        # an unrecognised word is a REFUSAL and not a shrug: the one it
+        # will be is a misspelt --headless or --slippery, and silently
+        # opening a window for someone who asked for none - or bringing
+        # up the DRY plant for someone who asked for the wet one - is
+        # what this loop exists to prevent.
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --headless) GUI=false ;;
+                --slippery) SLIPPERY=true ;;
+                *) echo "$USAGE"; exit 2 ;;
+            esac
+            shift
+        done
         configure; start ;;
     stop|--stop)     configure; stop ;;
     status|--status) configure; status ;;

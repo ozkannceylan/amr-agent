@@ -86,7 +86,15 @@ Runs = collections.namedtuple("Runs", "windows found")
 Drift = collections.namedtuple(
     "Drift", "n t0 t1 end_dx end_dy end_error_m end_yaw_error_rad "
              "rms_m max_error_m truth_path_m est_path_m "
-             "truth_turned_rad est_turned_rad")
+             "truth_turned_rad est_turned_rad truth_end_yaw_rad "
+             "truth_nose_forward_m")
+
+#: ONE POSITION ERROR, SPLIT ALONG THE DIRECTION THE TRUCK WAS FACING.
+#: `along` is the estimate running LONG (+) or SHORT (-) of where the
+#: vehicle actually got to; `cross` is it sitting to the LEFT (+) or the
+#: RIGHT (-) of the path. See track_error() for why the split is taken in
+#: the ground truth's frame and not the estimate's.
+TrackError = collections.namedtuple("TrackError", "along cross")
 
 #: ONE FIGURE OF ONE ESTIMATE AGAINST THE SAME FIGURE OF ANOTHER.
 #: `before` and `after` are kept as they were measured, SIGNS AND ALL -
@@ -100,7 +108,7 @@ Removed = collections.namedtuple("Removed", "before after removed fraction")
 #: publishes - plus how far apart the two scores' windows were, which is
 #: not decoration. See compare_drift().
 Comparison = collections.namedtuple(
-    "Comparison", "end_error end_yaw rms max_error "
+    "Comparison", "end_error end_yaw along cross rms max_error "
                   "span_gap_start_s span_gap_end_s")
 
 #: A corner, against the kinematics it was supposed to obey.
@@ -420,6 +428,148 @@ def resample(source_t, source_v, at_t, max_gap_s):
 # drift
 # ----------------------------------------------------------------------
 
+def diverged_at(xs, ys, limit_m):
+    """The index of the first sample that has left the building, or None.
+
+    A FILTER THAT HAS BLOWN UP IS NOT A FILTER WITH A LARGE ERROR, and
+    this is the only place on this track that draws that line. Every
+    other score here is ABSOLUTE and unbounded on purpose: a
+    dead-reckoned pose is ALLOWED to drift without limit and saying so
+    is the whole of §5. What it is not allowed to do is leave the
+    warehouse. The floor is 48 m x 32 m, so an odom-frame estimate a
+    hundred metres from where the vehicle switched on has not drifted -
+    it has broken - and the two must not share a table.
+
+    WHY IT EXISTS, MEASURED. `robot_localization` 3.8.3 diverges at
+    startup on most bringups of this stack: its covariance reaches 1e84
+    in a single cycle and its pose 1e48 m, and it logs NOTHING. `status`
+    reads ALIVE, the topic is at its configured rate, and the recorder's
+    stream arrives - so every instrument this track already had would
+    call that a healthy run (EVIDENCE_FUSION.md §2.6 named three such
+    failures; §8.6 is the fourth). Without this check the drift table is
+    printed with 1e48 in it and the reader is the guard.
+
+    NON-FINITE IS DIVERGED WHATEVER THE BOUND, because a comparison
+    against nan is false in both directions and would pass a bound test
+    written the obvious way round.
+    """
+    limit = float(limit_m)
+    for i, (x, y) in enumerate(zip(xs, ys)):
+        x = float(x)
+        y = float(y)
+        if not (math.isfinite(x) and math.isfinite(y)):
+            return i
+        if math.hypot(x, y) > limit:
+            return i
+    return None
+
+
+def require_not_diverged(xs, ys, limit_m, what):
+    """diverged_at(), as the refusal the caller has to answer."""
+    i = diverged_at(xs, ys, limit_m)
+    if i is None:
+        return
+    raise EvidenceError(
+        "{} stayed inside {:g} m of where it started, and it did not: "
+        "sample {} of {} reads ({:g}, {:g}). That is not drift, it is a "
+        "filter that has diverged - see EVIDENCE_FUSION.md 8.6".format(
+            what, float(limit_m), i, len(list(xs)), float(list(xs)[i]),
+            float(list(ys)[i])))
+
+
+def travel_projection(xs, ys, yaws):
+    """How far the vehicle went NOSE-FIRST: metres, and the sign is the
+    reading.
+
+    THE FORKLIFT DRIVES BACKWARDS AND THAT IS NOT A FIGURE OF SPEECH.
+    `forklift_ver3` travels forks-trailing: model yaw 0 points the forks
+    at world -x, the travel heading is yaw + pi, and every profile in
+    config.yaml's `drive_route:` is driven at a NEGATIVE tread speed
+    (m6/ipc/follower.py carries the same convention for the fleet). So on
+    this vehicle the HEADING and the COURSE are a half-turn apart, and an
+    along-track error split on the heading comes out with its sign
+    reversed - an estimate that ran 0.48 m long reads -0.48 and the
+    reader is told it ran short.
+
+    IT IS MEASURED AND NOT ASSUMED. Nothing here knows about forklifts:
+    each step of the path is projected onto the heading the vehicle
+    HAD when it took that step, and the projections are summed. A run
+    driven nose-first returns a positive number close to its path
+    length; this truck's runs return the path length NEGATED. A vehicle
+    that never moved returns exactly zero and track_error_of() then falls
+    back on the nose, because the split of a stationary truck's error is
+    arbitrary whichever way it is taken.
+
+    THE PROJECTION IS PER STEP AND NOT ON THE NET DISPLACEMENT, which is
+    the whole reason it works on `square`: that profile ends where it
+    started, so its net displacement is nothing at all while every one of
+    its four sides was driven forks-trailing.
+    """
+    xs = [float(v) for v in xs]
+    ys = [float(v) for v in ys]
+    yaws = [float(v) for v in yaws]
+    if not (len(xs) == len(ys) == len(yaws)):
+        raise EvidenceError(
+            "the path and the headings are the same length, got "
+            "{}, {} and {}".format(len(xs), len(ys), len(yaws)))
+    total = 0.0
+    for i in range(1, len(xs)):
+        total += ((xs[i] - xs[i - 1]) * math.cos(yaws[i - 1])
+                  + (ys[i] - ys[i - 1]) * math.sin(yaws[i - 1]))
+    return total
+
+
+def track_error(dx, dy, heading_rad):
+    """A position error split into ALONG-track and CROSS-track.
+
+    WHY A MAGNITUDE IS NOT ENOUGH, AND F2 TASK 2 IS WHY IT IS HERE. An
+    end error of 0.60 m says nothing about WHICH of the two things went
+    wrong, and under slip the two go wrong for different reasons and
+    have different cures: the wheel odometry lies about DISTANCE (the
+    tyre creeps, so a revolution buys less ground than the estimator
+    believes) and it lies about HEADING (the corner scrubs). Projected
+    onto the direction the vehicle was actually facing they come apart:
+
+        along = +e . u(psi)      the estimate ran LONG (+) or SHORT (-)
+        cross = +e . u(psi+pi/2) the estimate is LEFT (+) or RIGHT (-)
+
+    THE HEADING IS THE GROUND TRUTH's AND NEVER THE ESTIMATE's. The
+    question is where the estimate is relative to where the truck REALLY
+    went, so the frame has to be the truck's; taking it from the estimate
+    would rotate the split by exactly the heading error being measured
+    and mix the two components back together - which is the failure this
+    function exists to avoid.
+
+    IT IS A ROTATION AND NOTHING ELSE, so hypot(along, cross) is the same
+    end error the caller already has. Nothing is normalised, clamped or
+    fitted here.
+    """
+    dx = float(dx)
+    dy = float(dy)
+    c = math.cos(float(heading_rad))
+    s = math.sin(float(heading_rad))
+    return TrackError(along=c * dx + s * dy, cross=-s * dx + c * dy)
+
+
+def track_error_of(drift):
+    """One Drift's end error, split along the direction the vehicle was
+    actually TRAVELLING at the end of the window.
+
+    THE COURSE AND NOT THE HEADING. travel_projection() says which way
+    this run was driven relative to the nose; on `forklift_ver3` that is
+    forks-trailing on every profile, so the axis the error is split along
+    is the heading turned by pi. It is ONE function because two callers
+    ask - the printed per-estimate line and compare_drift's two columns -
+    and a track split that disagreed with itself between the two would be
+    the worst kind of duplicate: both halves plausible, one of them
+    backwards.
+    """
+    heading = float(drift.truth_end_yaw_rad)
+    if float(drift.truth_nose_forward_m) < 0.0:
+        heading += math.pi
+    return track_error(drift.end_dx, drift.end_dy, heading)
+
+
 def score_drift(truth_rows, est_rows, frame, max_gap_s):
     """The estimate against the ground truth, over a whole drive.
 
@@ -497,7 +647,20 @@ def score_drift(truth_rows, est_rows, frame, max_gap_s):
                                  [ty[i] for i in keep]),
         est_path_m=path_length(rx, ry),
         truth_turned_rad=tyaw[last] - tyaw[keep[0]],
-        est_turned_rad=ryaw[-1] - ryaw[0])
+        est_turned_rad=ryaw[-1] - ryaw[0],
+        # THE DIRECTION THE TRUCK WAS ACTUALLY FACING WHEN THE WINDOW
+        # CLOSED, carried so the end error can be split along it without
+        # a second pass over the CSVs. It is the TRUTH's heading and it
+        # is the unwrapped one - cos and sin do not care, and a wrapped
+        # copy would be one more number to keep in step with tyaw.
+        truth_end_yaw_rad=tyaw[last],
+        # AND WHICH WAY THE TRUCK WAS FACING RELATIVE TO WHERE IT WENT,
+        # over the same paired window and off the TRUTH alone. See
+        # travel_projection(): on this vehicle it comes out NEGATIVE, and
+        # an along-track error split without it reads backwards.
+        truth_nose_forward_m=travel_projection(
+            [tx[i] for i in keep], [ty[i] for i in keep],
+            [tyaw[i] for i in keep]))
 
 
 def _removed(before, after):
@@ -551,9 +714,20 @@ def compare_drift(raw, fused):
     (tools/sensor_evidence.py) reads both out of ONE session directory,
     which is where that guarantee lives.
     """
+    raw_track = track_error_of(raw)
+    fused_track = track_error_of(fused)
     return Comparison(
         end_error=_removed(raw.end_error_m, fused.end_error_m),
         end_yaw=_removed(raw.end_yaw_error_rad, fused.end_yaw_error_rad),
+        # F2 TASK 2's TWO COLUMNS, and each score is split along ITS OWN
+        # window's truth heading rather than a shared one. The two
+        # windows close at different sim times (see below), so the truck
+        # is not pointing exactly the same way at the end of each, and
+        # borrowing one heading for both would charge that difference to
+        # the filter. On a straight profile the two headings agree to
+        # milliradians and it makes no difference; on a corner it would.
+        along=_removed(raw_track.along, fused_track.along),
+        cross=_removed(raw_track.cross, fused_track.cross),
         rms=_removed(raw.rms_m, fused.rms_m),
         max_error=_removed(raw.max_error_m, fused.max_error_m),
         span_gap_start_s=abs(float(fused.t0) - float(raw.t0)),
@@ -1356,11 +1530,13 @@ def _selftest():
     # the two ways a comparison can flatter a filter - clamping a
     # negative improvement to zero, and comparing a signed heading error
     # by its value rather than by its magnitude.
-    def _d(end, yaw, rms_v, worst, t0=0.0, t1=40.0):
-        return Drift(n=100, t0=t0, t1=t1, end_dx=0.0, end_dy=0.0,
+    def _d(end, yaw, rms_v, worst, t0=0.0, t1=40.0, dx=0.0, dy=0.0,
+           truth_yaw=0.0, nose=10.0):
+        return Drift(n=100, t0=t0, t1=t1, end_dx=dx, end_dy=dy,
                      end_error_m=end, end_yaw_error_rad=yaw, rms_m=rms_v,
                      max_error_m=worst, truth_path_m=10.0, est_path_m=10.0,
-                     truth_turned_rad=1.0, est_turned_rad=1.0)
+                     truth_turned_rad=1.0, est_turned_rad=1.0,
+                     truth_end_yaw_rad=truth_yaw, truth_nose_forward_m=nose)
 
     worse = compare_drift(_d(0.20, 0.1, 0.1, 0.3),
                           _d(0.50, 0.1, 0.1, 0.3))
@@ -1377,6 +1553,38 @@ def _selftest():
     check("the two scores report how far apart their windows were",
           abs(late.span_gap_start_s - 0.6) < 1e-12
           and abs(late.span_gap_end_s - 0.5) < 1e-12)
+
+    # F2 TASK 2's SPLIT. The slip scenario's whole claim is that the two
+    # halves of one end error move for different reasons, so the two
+    # checks here are the two ways the split can be got wrong: taking it
+    # in the wrong frame, and letting the along-track column report an
+    # improvement the filter did not make.
+    split = track_error(0.60, 0.0, math.pi)
+    check("the end error is split in the TRUTH's frame, so +x at yaw pi "
+          "runs SHORT",
+          abs(split.along + 0.60) < 1e-12 and abs(split.cross) < 1e-12)
+    # AND THE ONE THAT COST A RE-CUT. This truck drives forks-trailing,
+    # so the axis is the COURSE and not the nose - split on the nose the
+    # sign of every along-track figure in EVIDENCE_FUSION.md 8 is wrong.
+    # AND THE GUARD THAT EXISTS BECAUSE THE FILTER BLOWS UP SILENTLY.
+    check("a broken filter is told apart from a drifting one by the bound "
+          "and not by the reader",
+          diverged_at([0.0, 1.0, -12.0], [0.0, 0.5, 3.0], 100.0) is None
+          and diverged_at([0.0, -3.6e47], [0.0, 2.0e44], 100.0) == 1
+          and diverged_at([0.0, float("nan")], [0.0, 0.0], 1e300) == 1)
+    check("a forks-trailing run is split on its COURSE and not its nose",
+          travel_projection([0.0, -1.0, -2.0], [0.0, 0.0, 0.0],
+                            [0.0, 0.0, 0.0]) < 0.0
+          and abs(track_error_of(
+              _d(0.2, 0.0, 0.1, 0.2, dx=-0.2, nose=-2.0)).along - 0.2)
+          < 1e-12)
+    heading_only = compare_drift(
+        _d(1.24, 0.30, 0.9, 1.8, dx=1.20, dy=0.30),
+        _d(1.20, 0.02, 0.9, 1.8, dx=1.20, dy=0.05))
+    check("a filter that fixes only the heading removes NOTHING "
+          "along-track",
+          abs(heading_only.along.removed) < 1e-12
+          and abs(heading_only.cross.removed - 0.25) < 1e-12)
 
     # And the model's link poses, which is how config.yaml's copy of the
     # IMU mount is checked against the file that decides it.

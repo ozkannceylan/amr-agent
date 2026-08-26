@@ -818,13 +818,16 @@ def test_a_closure_needs_a_start_and_an_end():
 # is here, where a sign error in it cannot reach a published table.
 
 def _drift(end_error_m=1.0, end_yaw_error_rad=0.5, rms_m=0.8,
-           max_error_m=1.2, t0=0.0, t1=40.0):
+           max_error_m=1.2, t0=0.0, t1=40.0, end_dx=0.0, end_dy=0.0,
+           truth_end_yaw_rad=0.0, truth_nose_forward_m=10.0):
     """A Drift with only the fields compare_drift() reads set."""
     return evidence_core.Drift(
-        n=100, t0=t0, t1=t1, end_dx=0.0, end_dy=0.0,
+        n=100, t0=t0, t1=t1, end_dx=end_dx, end_dy=end_dy,
         end_error_m=end_error_m, end_yaw_error_rad=end_yaw_error_rad,
         rms_m=rms_m, max_error_m=max_error_m, truth_path_m=10.0,
-        est_path_m=10.0, truth_turned_rad=1.0, est_turned_rad=1.0)
+        est_path_m=10.0, truth_turned_rad=1.0, est_turned_rad=1.0,
+        truth_end_yaw_rad=truth_end_yaw_rad,
+        truth_nose_forward_m=truth_nose_forward_m)
 
 
 def test_the_error_removed_is_a_difference_and_a_fraction_of_the_first():
@@ -901,6 +904,180 @@ def test_the_gaps_are_magnitudes_whichever_stream_started_first():
 
 
 # ----------------------------------------------------------------------
+# along-track and cross-track: WHICH WAY the position error points
+# ----------------------------------------------------------------------
+#
+# F2 Task 2's addition, and the claim it exists to test. Under slip the
+# wheel odometry lies about DISTANCE and the gyro keeps the HEADING
+# honest - two different errors that a single end-error magnitude adds
+# together and hides. Splitting the end error along the ground truth's
+# own heading separates them: `along` is the estimate running long or
+# short of where the truck actually got to, `cross` is it being beside
+# the truck's path. A filter that fixes heading moves `cross`; nothing
+# in this phase can move `along` (EVIDENCE_FUSION.md 8.5).
+
+def test_an_estimate_that_ran_long_is_ALL_along_track_and_no_cross():
+    out = evidence_core.track_error(0.60, 0.0, 0.0)
+    assert abs(out.along - 0.60) < 1e-12
+    assert abs(out.cross - 0.0) < 1e-12
+
+
+def test_the_split_is_taken_in_the_TRUTHS_frame_and_rotates_with_it():
+    # The same world-frame error, with the truck pointing at world -x:
+    # running +x is now running BACKWARDS along the track.
+    out = evidence_core.track_error(0.60, 0.0, math.pi)
+    assert abs(out.along + 0.60) < 1e-12
+    assert abs(out.cross - 0.0) < 1e-12
+
+
+def test_an_estimate_beside_the_path_is_ALL_cross_track_and_no_along():
+    out = evidence_core.track_error(0.0, 0.25, 0.0)
+    assert abs(out.along - 0.0) < 1e-12
+    assert abs(out.cross - 0.25) < 1e-12
+
+
+def test_cross_track_is_POSITIVE_to_the_LEFT_of_the_truths_heading():
+    # Heading +pi/2 is world +y, so its left is world -x.
+    out = evidence_core.track_error(-1.0, 0.0, math.pi / 2.0)
+    assert abs(out.along - 0.0) < 1e-12
+    assert abs(out.cross - 1.0) < 1e-12
+
+
+def test_the_two_components_recompose_to_the_error_they_were_split_from():
+    dx, dy, yaw = 0.37, -0.84, 2.1
+    out = evidence_core.track_error(dx, dy, yaw)
+    assert abs(math.hypot(out.along, out.cross) - math.hypot(dx, dy)) < 1e-12
+
+
+def test_the_drift_carries_the_TRUTHS_end_heading_and_not_the_estimates():
+    # The truck drives +x and ends at yaw 0.30; the estimate believes it
+    # ended at yaw 0.90. The split is taken in the TRUTH's frame.
+    truth = [(0.0, 0.0, 0.0, 0.0), (1.0, 1.0, 0.0, 0.30)]
+    est = [(0.0, 0.0, 0.0, 0.0), (1.0, 1.6, 0.0, 0.90)]
+    score = evidence_core.score_drift(
+        truth, est, evidence_core.SpawnFrame(0.0, 0.0, 0.0), 0.5)
+    assert abs(score.truth_end_yaw_rad - 0.30) < 1e-12
+    out = evidence_core.track_error(score.end_dx, score.end_dy,
+                                    score.truth_end_yaw_rad)
+    assert abs(out.along - 0.6 * math.cos(0.30)) < 1e-12
+    assert abs(out.cross + 0.6 * math.sin(0.30)) < 1e-12
+
+
+def test_the_comparison_carries_along_and_cross_beside_the_four_figures():
+    raw = _drift(end_dx=0.60, end_dy=0.10, truth_end_yaw_rad=0.0)
+    fused = _drift(end_dx=0.58, end_dy=0.02, truth_end_yaw_rad=0.0)
+    out = evidence_core.compare_drift(raw, fused)
+    assert abs(out.along.before - 0.60) < 1e-12
+    assert abs(out.along.after - 0.58) < 1e-12
+    assert abs(out.along.removed - 0.02) < 1e-12
+    assert abs(out.cross.before - 0.10) < 1e-12
+    assert abs(out.cross.after - 0.02) < 1e-12
+    assert abs(out.cross.fraction - 0.8) < 1e-12
+
+
+def test_a_filter_that_only_fixes_heading_leaves_the_along_track_alone():
+    # The measured shape of the slip scenario: the two estimates run the
+    # same distance long and differ only in where they think they are
+    # ACROSS the path. `removed` on along-track must read ~nothing, and
+    # a comparison that reported an improvement there would be flattering
+    # the filter with a number it did not earn.
+    raw = _drift(end_dx=1.20, end_dy=0.30, truth_end_yaw_rad=0.0)
+    fused = _drift(end_dx=1.20, end_dy=0.05, truth_end_yaw_rad=0.0)
+    out = evidence_core.compare_drift(raw, fused)
+    assert abs(out.along.removed) < 1e-12
+    assert abs(out.cross.removed - 0.25) < 1e-12
+
+
+# ----------------------------------------------------------------------
+# and WHICH WAY the truck was going, which is not where its nose pointed
+# ----------------------------------------------------------------------
+#
+# THE TRAP THIS PAIR OF FUNCTIONS EXISTS FOR, and it is this vehicle's
+# and not an abstract one. forklift_ver3 travels FORKS-TRAILING: model
+# yaw 0 points the forks at world -x and the travel heading is yaw + pi
+# (m6/ipc/follower.py; config.yaml drive_route: drives every profile at a
+# NEGATIVE tread speed). So an along-track error split on the heading
+# comes out with the sign reversed - an estimate that ran 0.48 m LONG
+# reads -0.48 and a reader is told it ran short. The sense is therefore
+# MEASURED off the ground truth rather than assumed either way.
+
+def test_a_vehicle_that_drives_where_its_nose_points_reads_POSITIVE():
+    xs = [0.0, 1.0, 2.0]
+    ys = [0.0, 0.0, 0.0]
+    yaws = [0.0, 0.0, 0.0]
+    assert abs(evidence_core.travel_projection(xs, ys, yaws) - 2.0) < 1e-12
+
+
+def test_a_vehicle_that_drives_FORKS_TRAILING_reads_NEGATIVE():
+    # This truck: nose at yaw 0, travelling towards -x.
+    xs = [0.0, -1.0, -2.0]
+    ys = [0.0, 0.0, 0.0]
+    yaws = [0.0, 0.0, 0.0]
+    assert abs(evidence_core.travel_projection(xs, ys, yaws) + 2.0) < 1e-12
+
+
+def test_each_step_is_projected_on_the_heading_it_was_TAKEN_at():
+    # A quarter circle driven nose-first: every step is along the nose of
+    # its own moment, so the projection is the arc and not the chord.
+    n = 64
+    xs, ys, yaws = [], [], []
+    for i in range(n + 1):
+        a = (math.pi / 2.0) * i / n
+        xs.append(math.sin(a))
+        ys.append(1.0 - math.cos(a))
+        yaws.append(a)
+    out = evidence_core.travel_projection(xs, ys, yaws)
+    assert abs(out - math.pi / 2.0) < 1e-3
+    assert out > math.hypot(1.0, 1.0)      # the arc, not the chord
+
+
+def test_a_truck_that_never_moved_projects_nothing_and_does_not_divide():
+    assert evidence_core.travel_projection([1.0, 1.0], [2.0, 2.0],
+                                           [0.3, 0.3]) == 0.0
+
+
+def test_the_drift_records_how_far_the_truth_went_NOSE_FIRST():
+    # Forks-trailing: the truth drives to -x with its nose at yaw 0.
+    truth = [(0.0, 0.0, 0.0, 0.0), (1.0, -1.0, 0.0, 0.0),
+             (2.0, -2.0, 0.0, 0.0)]
+    est = [(0.0, 0.0, 0.0, 0.0), (1.0, -1.1, 0.0, 0.0),
+           (2.0, -2.2, 0.0, 0.0)]
+    score = evidence_core.score_drift(
+        truth, est, evidence_core.SpawnFrame(0.0, 0.0, 0.0), 0.5)
+    assert abs(score.truth_nose_forward_m + 2.0) < 1e-12
+
+
+def test_the_split_of_a_forks_trailing_run_says_LONG_when_it_ran_LONG():
+    truth = [(0.0, 0.0, 0.0, 0.0), (1.0, -1.0, 0.0, 0.0),
+             (2.0, -2.0, 0.0, 0.0)]
+    est = [(0.0, 0.0, 0.0, 0.0), (1.0, -1.1, 0.0, 0.0),
+           (2.0, -2.2, 0.0, 0.0)]
+    score = evidence_core.score_drift(
+        truth, est, evidence_core.SpawnFrame(0.0, 0.0, 0.0), 0.5)
+    # The estimate is 0.2 m further along the direction of TRAVEL.
+    assert abs(score.end_dx + 0.2) < 1e-12
+    split = evidence_core.track_error_of(score)
+    assert abs(split.along - 0.2) < 1e-12
+    assert abs(split.cross) < 1e-12
+
+
+def test_the_same_run_driven_NOSE_FIRST_reads_the_same_way_round():
+    # Spawned at yaw pi and driving where the nose points: in the spawn
+    # frame the truth runs +x, and so does the estimate, which is already
+    # in its own odom frame and is NOT transformed.
+    truth = [(0.0, 0.0, 0.0, math.pi), (1.0, -1.0, 0.0, math.pi),
+             (2.0, -2.0, 0.0, math.pi)]
+    est = [(0.0, 0.0, 0.0, 0.0), (1.0, 1.1, 0.0, 0.0),
+           (2.0, 2.2, 0.0, 0.0)]
+    score = evidence_core.score_drift(
+        truth, est, evidence_core.SpawnFrame(0.0, 0.0, math.pi), 0.5)
+    assert score.truth_nose_forward_m > 0.0
+    assert abs(score.end_dx - 0.2) < 1e-12
+    split = evidence_core.track_error_of(score)
+    assert abs(split.along - 0.2) < 1e-12
+
+
+# ----------------------------------------------------------------------
 # the model's link poses: where a sensor is BOLTED
 # ----------------------------------------------------------------------
 #
@@ -961,3 +1138,58 @@ def test_a_pose_that_is_not_six_numbers_is_refused_rather_than_padded(
                              "<pose>-0.50 0 0.25</pose>")
     with pytest.raises(evidence_core.EvidenceError):
         evidence_core.sdf_link_pose(_link_model(tmp_path, text), "imu_link")
+
+
+# ----------------------------------------------------------------------
+# a filter that has BLOWN UP is not a filter with a large error
+# ----------------------------------------------------------------------
+#
+# MEASURED ON THIS RIG 2026-08-26, F2 Task 2: `robot_localization`'s
+# ekf_node diverges at startup on most bringups of this stack - its
+# covariance goes to 1e84 in one cycle and its pose to 1e48 m - and it
+# says NOTHING about it. `status` reads ALIVE, the topic is at its
+# configured rate, the recorder's stream arrives, and `analyse` will
+# happily print a drift table with 1e48 in it. EVIDENCE_FUSION.md 8.6.
+#
+# THE BOUND IS NOT A TOLERANCE. A dead-reckoned estimate is ALLOWED to
+# drift without limit and this file scores that drift absolutely; what it
+# is not allowed to do is leave the building. The floor is 48 m x 32 m,
+# so an odom-frame estimate a hundred metres from where the vehicle
+# switched on has not drifted - it has broken - and the two are different
+# findings that must not share a table.
+
+def test_an_estimate_inside_the_bound_is_not_diverged():
+    xs = [0.0, 1.0, -12.0]
+    ys = [0.0, 0.5, 3.0]
+    assert evidence_core.diverged_at(xs, ys, 100.0) is None
+
+
+def test_the_first_sample_outside_the_bound_is_named_by_INDEX():
+    xs = [0.0, 1.0, -3.6e47, -3.6e47]
+    ys = [0.0, 0.5, 2.0e44, 2.0e44]
+    assert evidence_core.diverged_at(xs, ys, 100.0) == 2
+
+
+def test_the_bound_is_on_the_RADIUS_and_not_on_either_axis_alone():
+    # 80 and 80 are each inside 100 and together are not.
+    assert evidence_core.diverged_at([0.0, 80.0], [0.0, 80.0], 100.0) == 1
+    assert evidence_core.diverged_at([0.0, 80.0], [0.0, 0.0], 100.0) is None
+
+
+def test_a_value_that_is_not_FINITE_is_diverged_whatever_the_bound():
+    assert evidence_core.diverged_at([0.0, float("inf")], [0.0, 0.0],
+                                     1e300) == 1
+    assert evidence_core.diverged_at([0.0, 0.0], [0.0, float("nan")],
+                                     1e300) == 1
+
+
+def test_exactly_on_the_bound_is_not_diverged_yet():
+    assert evidence_core.diverged_at([0.0, 100.0], [0.0, 0.0], 100.0) is None
+
+
+def test_a_diverged_series_is_refused_by_the_scorer_and_not_averaged():
+    # score_drift() must not be asked to compare a broken filter with a
+    # truth: every figure it returns would be a number about nothing.
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.require_not_diverged([0.0, -3.6e47], [0.0, 2.0e44],
+                                           100.0, "the fused estimate")

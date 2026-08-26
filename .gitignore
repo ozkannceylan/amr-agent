@@ -62,8 +62,11 @@ m6/logs/
 m6/.m6_pids
 
 # m5-ver3 run artefacts: one log per child, written by m5v3.sh, plus the
-# pid file it and only it deletes. Both are what a RUN leaves behind, not
-# what the track is - the same line every step above draws.
+# pid file it and only it deletes, plus the traction state file that says
+# which plant the running stack is on (F2 Task 2's --slippery). All three
+# are what a RUN leaves behind, not what the track is - the same line
+# every step above draws.
 m5_ver3/logs/
 m5_ver3/.m5v3_pids
+m5_ver3/.m5v3_traction
 .archive

@@ -522,6 +522,60 @@ wheel_slip:
     # driven back the other way.
     rest_s: "3"
 
+# ------------------------------ THE WET PATCH ---------------------------
+# `m5v3.sh start --slippery` - THE SAME TRUCK ON A FLOOR IT CANNOT GRIP,
+# and the scenario F2 Task 2 exists to measure. The plant above is a
+# polyurethane tyre on dry concrete and it slips 0.956 % at cruise, which
+# is small enough that the wheel odometry's DISTANCE error is dominated by
+# the believed radius (wheel_odom.wheel_radius_scale) rather than by the
+# tyre. Raise the compliance and the tyre takes over: the revolution the
+# encoder counts buys steadily less ground, the estimator has no way to
+# know, and the two errors fusion CAN and CANNOT fix come apart where an
+# evidence table can see them (EVIDENCE_FUSION.md 8).
+#
+# IT IS A RUNTIME OVERRIDE AND model.sdf IS NOT TOUCHED, which is F2's
+# constraint 12 and also the only honest way to run both plants in one
+# afternoon. gz-sim 8.11's UserCommands system advertises
+#
+#     /world/<world>/wheel_slip/blocking
+#         gz.msgs.WheelSlipParametersCmd -> gz.msgs.Boolean
+#
+# and m5v3.sh calls it once per wheel AFTER the truck is spawned. The
+# committed model stays byte-identical between a nominal run and a
+# slippery one; the difference is three service calls and nothing else.
+# EVIDENCE_FUSION.md 8.1 records the investigation, including the two
+# checks that make the reply worth believing.
+#
+# THE VALUES ARE IN EFFECT SPACE, AND THAT SENTENCE IS LOAD-BEARING.
+# EVIDENCE_LATERAL_TUNE.md 3.1 measured that on this rig the element
+# named <slip_compliance_lateral> is the one that governs the wheel's
+# LONGITUDINAL slip - the two are swapped relative to their names - and
+# the same swap is in this message's two fields, because they reach the
+# same code. Both keys below are therefore set to the SAME number, which
+# is the setting wheel_slip: above also ships and for the same measured
+# reason: every value that made one direction of a contact stiffer than
+# the other brought back the heading dependence of EVIDENCE_SENSORS.md
+# 4.2. Six equal compliances, three per-wheel normal forces, and the
+# normal forces are NOT overridden - the truck's weight did not change,
+# only the floor under it.
+#
+# THE LADDER THAT CHOSE THE NUMBER, every row one fresh
+# `start --headless --slippery` and one tools/slip_bench.sh, is
+# EVIDENCE_FUSION.md 8.2 with the rejected rows kept. The target was
+# > 5 % longitudinal slip at the 0.7 m/s cruise with the truck still
+# able to finish `straight` and `square`.
+slippery:
+  slip_compliance_lateral: "16.0"
+  slip_compliance_longitudinal: "16.0"
+  # How long a wheel_slip service call may take before the bringup
+  # refuses. It is a BLOCKING call - the reply comes back after the
+  # command has run inside the simulation loop and found the entity,
+  # which is what makes `data: true` worth checking - so the budget has
+  # to cover one server iteration and not just a round trip. The spawn
+  # service next door is given 10 s for a heavier job; 5 s here is the
+  # same order and still a bound.
+  service_timeout_ms: "5000"
+
 # ----------------------------- WHEEL ODOMETRY ---------------------------
 # WHAT nodes/wheel_odometry.py OBEYS, and every one of its errors is a
 # number in this block rather than a line in that file.
@@ -1210,6 +1264,19 @@ drive_route:
 paths:
   log_dir: "m5_ver3/logs"
   pidfile: "m5_ver3/.m5v3_pids"
+  # WHAT TRACTION THE RUNNING PLANT IS ON, written by `start` and deleted
+  # by `stop` exactly as the pidfile is. It is NOT a constant and it is
+  # not configuration: it is the one piece of RUNTIME state this stack
+  # keeps, because after F2 Task 2 the same command can bring up two
+  # different plants (see slippery: above) and every figure taken off one
+  # of them has to say which.
+  #   IT EXISTS SO THAT NO SESSION CAN BE UNLABELLED.
+  #   tools/sensor_evidence.py's `record` reads it and writes what it
+  #   says into the session's own session.txt, and REFUSES if it is not
+  #   there - a slippery run recorded without a label is a row that would
+  #   sit in the no-slip tables looking like one of them, which is the
+  #   single worst thing this section can produce.
+  traction_file: "m5_ver3/.m5v3_traction"
   # THE ONLY ABSOLUTE PATH IN THIS FILE, and it is absolute because it is
   # not this repository's: it is where ROS 2 Jazzy is installed inside
   # WSL. Both scripts source it before they call gz - gz itself comes from
@@ -1449,6 +1516,30 @@ evidence:
     # is ENDED at sample_s and this is only the deadline for that ending.
     timeout_s: "40"
   analyse:
+    # HOW FAR AN ESTIMATE MAY BE FROM WHERE THE VEHICLE SWITCHED ON
+    # BEFORE IT IS A BROKEN FILTER RATHER THAN A DRIFTING ONE. Every
+    # other score on this track is ABSOLUTE and deliberately unbounded -
+    # a dead-reckoned pose may drift as far as it likes and
+    # EVIDENCE_FUSION.md 5 is about exactly that - so this is not a
+    # tolerance and nothing is compared against it. It is the line
+    # between an estimate and a number.
+    #   THE VALUE IS THE FLOOR's. warehouse_ver3 is 48 m by 32 m, so its
+    #   longest diagonal is 57.7 m; an odom-frame estimate a hundred
+    #   metres from its own origin describes a place the vehicle could
+    #   not be even if every metre of the run had been driven wrong.
+    #   MEASURED HEADROOM, over every fused stream this track has
+    #   recorded: the largest distance an honest estimate ever reaches
+    #   from its own origin is 12.13 m (a `straight` run, which drives
+    #   11.6 m and believes it drove 12.1), so the bound is 8.2x the
+    #   largest true value - and the failure it catches misses it by
+    #   FORTY-SEVEN ORDERS OF MAGNITUDE (1e48 m). Nothing is riding on
+    #   the exact number.
+    #   WHY IT HAD TO EXIST, MEASURED 2026-08-26: ekf_node diverges at
+    #   startup on most bringups of this stack and says nothing at all -
+    #   ALIVE, at rate, stream arriving. EVIDENCE_FUSION.md 8.6.
+    #   `record` checks it BEFORE the drive is spent and `analyse`
+    #   refuses to score a session that failed it.
+    fused_sanity_m: "100.0"
     # THE SPAWN POSE CHECK. The drift transform is built on vehicle.spawn,
     # and if the truck is not standing there when the recording opens the
     # transform is wrong by however far it moved. 0.05 m and 0.02 rad are
