@@ -1,0 +1,376 @@
+# fuse.yaml - what m5-ver3's OPTIONAL factor-graph estimator FUSES, and
+# what it refuses.
+#
+# `fuse` 1.1.5's `fixed_lag_smoother_node` (fuse_optimizers), started by
+# `m5v3.sh start --fuse` as the stack child named `fuse`. On that arm it
+# is the single owner of the odom -> base_link transform and the `ekf`
+# child is NOT SPAWNED AT ALL - see config.yaml's fuse: block for why
+# two owners of one tf edge is a coin toss at 50 Hz rather than a
+# comparison.
+#
+# THIS IS NOT config.yaml AND IT IS NOT ALLOWED TO BECOME IT, and it is
+# ekf.yaml's split applied to the second estimator, key for key:
+#
+#   config.yaml fuse: + topics: + frames:   the topic names, the frame
+#       names, the output rate, this file's path, the node name, the
+#       window and the optimisation rate. m5v3.sh passes every one of
+#       them on the command line as a `-p` override, so this file
+#       contains NO topic, NO frame and NO rate.
+#   this file                              what is fused and what is
+#       refused, and why. The plugin roster, the motion model's process
+#       noise, the ignition prior, the per-sensor dimension lists.
+#
+# THE TOP-LEVEL KEY IS THE NODE'S NAME AND m5v3.sh CHECKS IT, by the same
+# grep it runs over ekf.yaml and for the same reason: a ROS parameter
+# file addressed to a node that is never started applies nothing and
+# rclcpp says nothing about it.
+#   THE FIRST CUT OF THIS PARAGRAPH SAID THIS NODE FAILS LOUDER THAN
+#   ekf_node - "`topic` is a required parameter on every sensor here, so
+#   a misaddressed file aborts at load rather than coming up on
+#   defaults". THAT IS FALSE and it was falsified by accident on this
+#   rig: pointed at this file under a different node name, the process
+#   started, printed "No ignition sensors were specified. Optimization
+#   will begin immediately." and then did NOTHING - no sensor models, no
+#   motion model, no publisher, no topic advertised, `status` ALIVE.
+#   There is no required parameter to miss because there is no sensor
+#   declared to require it. It fails EXACTLY as quietly as ekf_node
+#   does, and EVIDENCE_FUSION.md 11.2(a) is the measurement.
+# check_fuse_params() in m5v3.sh is where the check lives, and
+# tests/test_fuse_arm.py asserts the same coupling where pytest can see
+# it.
+#
+# ------------------------------------------------------------------
+# WHY THIS ARM EXISTS AND WHAT WOULD MAKE IT WIN
+#
+# `robot_localization`'s ekf_node carries one state and one covariance
+# forward and linearises each measurement once, about whatever the
+# estimate happened to be when it arrived. `fuse` keeps every measurement
+# inside a sliding window as a factor in a graph and re-solves the whole
+# window with Ceres on every pass, so every variable in the window is
+# RE-LINEARISED each time. What that is supposed to buy on a vehicle like
+# this one is the corner: a yaw estimate that was wrong when the first
+# samples of a turn were linearised is corrected retrospectively rather
+# than only going forward. EVIDENCE_FUSION.md 11 is whether it does, on
+# this plant, against 9.3's baseline.
+#
+# THE A/B IS ONLY WORTH ANYTHING IF THE TWO ARMS FUSE THE SAME THINGS,
+# and that governs every number below. The channel set is EXACTLY
+# ekf.yaml's - the wheel odometry's vx, vy and vyaw, and the IMU's yaw
+# rate and nothing else - off the same two topics, at the same instants,
+# with the same message covariances, publishing at the same 50 Hz. What
+# differs is the ESTIMATOR and, as far as this file can arrange it,
+# nothing else.
+#
+# ------------------------------------------------------------------
+# WHAT IS DELIBERATELY NOT IN THIS FILE
+#
+#   NO GROUND TRUTH, AND fuse HAS NO DEFAULT THAT WOULD SNEAK ONE IN.
+#   /forklift/gz/odom is the simulator's own pose and it is an INSTRUMENT
+#   on this track, never an input (F2 global constraint 13). rf2o had to
+#   be argued out of one - its init_pose_from_topic defaults to
+#   /base_pose_ground_truth - so every default in this package was
+#   checked for the same trap before this file was written: `grep -rn
+#   'ground_truth\|base_pose'` over the whole vendored include tree
+#   returns NOTHING (measured, EVIDENCE_FUSION.md 11.2). The one
+#   pose-shaped input this node has is the ignition sensor's `set_pose`
+#   topic, which is a MANUAL initialisation interface, is named
+#   explicitly below rather than left to a default, and has no publisher
+#   anywhere on this stack.
+#
+#   NO COVARIANCE OF ANY KIND, and that is where they belong - ekf.yaml's
+#   rule, unchanged. fuse reads each measurement's covariance out of the
+#   MESSAGE exactly as robot_localization does, so the blend between the
+#   two sensors is set by config.yaml's wheel_odom.covariance block
+#   (vx 2.3383e-2, vy 2.7778e-6, vyaw 1.1111e-5, derived from F1's
+#   measured quantiser dither) and by the stddevs model.sdf declares for
+#   the IMU, measured on the wire in EVIDENCE_FUSION.md 2.1. No hand in
+#   this file, and the SAME two sets of numbers the EKF arm blends by.
+#
+#   NO SOLVER OPTIONS. fuse exposes Ceres' whole option struct under
+#   `solver_options`; every one of them is left at the package default.
+#   They are the knobs a factor-graph drift figure is most easily
+#   flattered with, which is ekf.yaml's argument for leaving
+#   process_noise_covariance and initial_estimate_covariance alone, and
+#   it applies here with more force because there are more of them.
+# ------------------------------------------------------------------
+
+m5v3_fuse:
+  ros__parameters:
+
+    # ------------------------- THE MOTION MODEL ------------------------
+    #
+    # ONE MOTION MODEL, AND EVERY SENSOR IS ATTACHED TO IT. fuse's
+    # motion models generate the constraints BETWEEN the states two
+    # measurements land on; a sensor with no motion model listed
+    # contributes a variable nothing connects to.
+    motion_models:
+      unicycle_motion_model:
+        type: fuse_models::Unicycle2D
+
+    unicycle_motion_model:
+      # THE PROCESS NOISE, AND EVERY NUMBER IS robot_localization's OWN
+      # DEFAULT, PROJECTED ONTO THIS STATE.
+      #
+      # ekf.yaml leaves process_noise_covariance at the package default
+      # on purpose - "the two knobs a drift figure is most easily
+      # flattered with" - which means the EKF arm's process noise is
+      # robot_localization's shipped diagonal and nobody's opinion.
+      # `fuse` has no default: Unicycle2D reads process_noise_diagonal
+      # and will not start without it. So the honest way to hold this
+      # variable constant across the A/B is to give this arm the SAME
+      # numbers, and that is what these are.
+      #
+      # SOURCE, READ OFF THIS RIG AND NOT REMEMBERED:
+      # /opt/ros/jazzy/share/robot_localization/params/ekf.yaml, the
+      # process_noise_covariance block, whose comment says "Defaults to
+      # the matrix below if unspecified". Its diagonal is ordered
+      #   x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw,
+      #   ax, ay, az
+      # = 0.05, 0.05, 0.06, 0.03, 0.03, 0.06, 0.025, 0.025, 0.04,
+      #   0.01, 0.01, 0.02, 0.01, 0.01, 0.015
+      # Unicycle2D's state is the 2D subset, ordered
+      #   x, y, yaw, vx, vy, vyaw, ax, ay
+      # so the eight below are that diagonal's x, y, yaw, vx, vy, vyaw,
+      # ax, ay entries and nothing has been chosen. The six 3D entries
+      # (z, roll, pitch, vz, vroll, vpitch) have no variable here at all,
+      # which is two_d_mode's situation in the other arm.
+      #
+      # THE SAME NUMBERS ARE NOT PROVABLY THE SAME WEIGHTING, and this is
+      # the honest limit of the control. robot_localization scales its Q
+      # by dt and adds it after each predict; fuse's Unicycle2D builds a
+      # per-segment covariance from these values and the segment's own
+      # duration, and the two do not have to agree term for term. What is
+      # controlled is that NEITHER arm's process noise was tuned for this
+      # vehicle, on this floor, against these profiles - which is the
+      # thing that would have made the A/B a comparison of two tuning
+      # efforts rather than of two estimators. EVIDENCE_FUSION.md 11.6
+      # says so where the verdict is drawn.
+      process_noise_diagonal: [0.05, 0.05, 0.06, 0.025, 0.025, 0.02, 0.01, 0.01]
+      # HOW MUCH HISTORY THE MOTION MODEL KEEPS, in seconds. It has to
+      # cover the window (config.yaml fuse.lag_duration_s, 0.5 s) with
+      # room for a late measurement; 3.0 is fuse's own default and six
+      # times the window. Left at the default for the solver_options
+      # reason above.
+      buffer_length: 3.0
+
+    # ------------------------- THE SENSOR MODELS -----------------------
+    #
+    # THREE ENTRIES, AND ONE OF THEM IS NOT A SENSOR. The ignition is how
+    # a factor graph is told where the vehicle starts; without it this
+    # node logs "No ignition sensors were specified. Optimization will
+    # begin immediately." and solves a graph with no prior on its first
+    # state.
+    sensor_models:
+      ignition_sensor:
+        type: fuse_models::Unicycle2DIgnition
+        motion_models: [unicycle_motion_model]
+        # WHAT `ignition` MEANS: this sensor's transaction may create the
+        # graph's first variables rather than having to attach to
+        # existing ones. Exactly one sensor may be marked it.
+        ignition: true
+      wheel_odometry_sensor:
+        type: fuse_models::Odometry2D
+        motion_models: [unicycle_motion_model]
+      imu_sensor:
+        type: fuse_models::Imu2D
+        motion_models: [unicycle_motion_model]
+
+    # ---------------- sensor 0: where the estimate starts --------------
+    #
+    # THE PRIOR AT t0, AND ON THIS TRACK IT IS TRUE BY DEFINITION. The
+    # odom frame IS wherever the estimate started, so the pose at t0 is
+    # (0, 0, 0) with no uncertainty at all - which is precisely the
+    # argument ekf.yaml makes for leaving robot_localization's
+    # initial_estimate_covariance at its ~1e-9 default. The number would
+    # be a lie in a map frame and F3 owns that edge.
+    ignition_sensor:
+      # PUBLISHED ONCE, AT STARTUP, WITHOUT WAITING FOR ANYBODY. The
+      # alternative is a graph that does not exist until a human calls
+      # the set_pose service, which would make `m5v3.sh start --fuse`
+      # come up alive and silent - the exact failure shape
+      # EVIDENCE_FUSION.md 2.2 and 9.4 built two gates against.
+      publish_on_startup: true
+      # Order: x, y, yaw, vx, vy, vyaw, ax, ay. All zero: the truck is
+      # standing where it was spawned and the odom frame is defined at
+      # that pose.
+      initial_state: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      # THE SAME PRIOR AS THE OTHER ARM'S, CONVERTED - AND THE
+      # CONVERSION IS THE POINT. robot_localization's
+      # initial_estimate_covariance defaults to 1e-9, and that is a
+      # VARIANCE. fuse takes a SIGMA. sqrt(1e-9) = 3.16227766e-05, so
+      # these eight are the same prior expressed in the units this node
+      # asks for; fuse's own default of 1e-9 SIGMA would have been a
+      # prior a billion times tighter than the arm it is being compared
+      # with, on the one variable that decides how fast the first
+      # measurements can move the estimate.
+      initial_sigma: [3.16227766e-05, 3.16227766e-05, 3.16227766e-05,
+                      3.16227766e-05, 3.16227766e-05, 3.16227766e-05,
+                      3.16227766e-05, 3.16227766e-05]
+      # THE MANUAL INITIALISATION INTERFACE, NAMED RATHER THAN LEFT TO A
+      # DEFAULT. Nothing on this stack publishes to it or calls either
+      # service, and no default here is a ground-truth address - but the
+      # rf2o arm was one unset parameter away from subscribing to
+      # /base_pose_ground_truth (F2 constraint 13, tools/install_rf2o.sh
+      # and m5v3.sh both say so), so an estimator's pose-shaped inputs
+      # are spelled out on this track rather than inherited.
+      topic: "set_pose"
+      set_pose_service: "set_pose"
+      set_pose_deprecated_service: "set_pose_deprecated"
+
+    # ---------------- sensor 1: the wheel odometry ----------------
+    #
+    # nodes/wheel_odometry.py, on config.yaml's topics.wheel_odom - the
+    # SAME topic, the same message and the same instants ekf.yaml's
+    # odom0 reads. Tricycle dead reckoning off this vehicle's own joint
+    # states, carrying its 1024-count encoder quantisation, its
+    # +0.005 rad steer zero offset, its +1.5 % rolling-radius error and
+    # whatever the physics engine's wheel slip did to it.
+    #
+    # THE TWIST IS FUSED AND THE POSE IS NOT, AND HERE THAT IS SAID BY AN
+    # ABSENCE - WHICH IS WHY m5v3.sh CHECKS FOR IT.
+    #   ekf.yaml refuses the pose with six `false` entries in a
+    #   fifteen-entry array. fuse's sensor models take LISTS OF DIMENSION
+    #   NAMES, and the way to fuse no position and no orientation is for
+    #   `position_dimensions` and `orientation_dimensions` NOT TO EXIST.
+    #   An empty YAML list is not a substitute: rclcpp cannot infer a
+    #   type for `[]` and the node aborts at load with
+    #   `InvalidParameterValueException: parameter_value_from failed for
+    #   parameter 'wheel_odometry_sensor.position_dimensions': No
+    #   parameter value set` - measured, EVIDENCE_FUSION.md 11.2.
+    #   AN ABSENCE IS NOT A MECHANISM, so it is made into one.
+    #   m5v3.sh's check_fuse_params() greps this file before anything
+    #   starts and REFUSES the bringup if `position_dimensions`,
+    #   `orientation_dimensions` or `linear_acceleration_dimensions`
+    #   appears in it at all. That is F2 global constraint 13 held by a
+    #   check rather than by this comment, and it also holds F2 Task 2's
+    #   `ax` reversal (see the IMU below), which is the entry a future
+    #   editor is most likely to add back.
+    #   THE NODE'S OWN COVARIANCE STILL SAYS DO-NOT-FUSE. wheel_odometry
+    #   publishes 1000.0 on all six pose axes (config.yaml
+    #   wheel_odom.covariance.unused) whichever arm reads it, so the flag
+    #   and the mechanism are both here, exactly as on the other arm.
+    wheel_odometry_sensor:
+      # THREE CHANNELS, AND THEY ARE ekf.yaml's odom0_config's THREE
+      # `true` ENTRIES, NAME FOR NAME.
+      #   x   - vx, the rear axle's forward speed, the only velocity a
+      #         tricycle's drive shaft measures.
+      #   y   - vy, the base_link-frame LATERAL velocity the rear-axle
+      #         offset induces: d * yaw_rate with d = 0.50 m. It is a
+      #         real component of the twist and not noise, it was
+      #         refused in ekf.yaml's first cut on a rationale that was
+      #         wrong, and the reversal was made on a measured +0.90 m
+      #         of end error on corner_creep (EVIDENCE_FUSION.md 4).
+      #         Fusing it here is not a new ruling - it is the same
+      #         ruling, because an arm that fused a different channel set
+      #         would not be an A/B.
+      #   yaw - vyaw, v*tan(delta)/L, the yaw rate the steer angle
+      #         implies.
+      linear_velocity_dimensions: ['x', 'y']
+      angular_velocity_dimensions: ['yaw']
+      # ABSOLUTE, NOT DIFFERENTIAL - ekf.yaml's odom0_differential note,
+      # and it holds for the same reason: `differential` turns a fused
+      # quantity into differences of successive measurements, which is
+      # what a POSE input needs to stop its drift entering the filter and
+      # is meaningless for a twist that is already a rate.
+      differential: false
+      # A 500 Hz CHANNEL INTO A 20 Hz OPTIMISER. ekf.yaml's depth for the
+      # same stream is 10 and there is no reason for this one to differ:
+      # deeper would not prevent loss, it would delay it and then hand
+      # the graph stale stamps.
+      queue_size: 10
+
+    # -------------------- sensor 2: the IMU --------------------
+    #
+    # /forklift/gz/imu, the same topic ekf.yaml's imu0 reads, bridged
+    # from model.sdf's Bosch BMI088-class profile: gyro sigma
+    # 0.001745 rad/s with a bias_mean of 0.002618 rad/s whose SIGN is
+    # drawn per run (EVIDENCE_SENSORS.md 2, EVIDENCE_FUSION.md 2.5).
+    #
+    # THE YAW RATE AND NOTHING ELSE, WHICH IS imu0_config's ONE `true`.
+    # The gyro observes the yaw the wheels cannot: the vehicle takes a
+    # fraction of the yaw its steer angle promises whenever the tyres
+    # scrub, dead reckoning is blind to that by construction, and F1
+    # measured 0.53 rad of heading error over a 42 s square because of
+    # it. This channel is the whole reason F2 exists, on either arm.
+    #
+    # ORIENTATION IS REFUSED AND THERE IS NONE TO REFUSE.
+    # model.sdf sets <enable_orientation>false</enable_orientation> - gz
+    # derives an IMU's orientation from the link's pose in the simulator,
+    # which is ground truth wearing a sensor's name - and what the device
+    # actually puts on the wire is an all-zero quaternion with an
+    # all-zero covariance (measured, EVIDENCE_FUSION.md 2.3). So
+    # `orientation_dimensions` is absent, and check_fuse_params() refuses
+    # this file if it ever appears.
+    #
+    # AND ax IS REFUSED, WHICH IS F2 TASK 2's RULING CARRIED ACROSS.
+    # `linear_acceleration_dimensions` is absent for the same reason
+    # ekf.yaml's ax entry is false: that channel was measured diverging
+    # the other arm's filter at startup - covariance 5.0e-4 to 2.42e84 in
+    # one 20 ms cycle - and it buys nothing measurable, because vx is
+    # measured DIRECTLY at 500 Hz by a wheel odometry whose own vx
+    # covariance is derived from measured quantiser dither
+    # (EVIDENCE_FUSION.md 9). It is refused here on the ARCHITECTURE
+    # half of that argument, which a different estimator does not change,
+    # and NOT on the divergence half, which is robot_localization's and
+    # would have to be re-measured to be claimed about this node.
+    #   THE LEVER ARM WOULD LAND ON IT HERE TOO. The IMU sits 0.50 m
+    #   behind base_link; fuse's Imu2D rotates an acceleration into the
+    #   target frame and, like robot_localization, does not correct that
+    #   offset, so the centripetal term w^2*d - 0.0361 m/s2 at this
+    #   plant's measured peak yaw rate, 3.4x the accelerometer's own
+    #   noise sigma - would sit on body +x, which IS ax.
+    imu_sensor:
+      angular_velocity_dimensions: ['yaw']
+      differential: false
+      # FALSE, AND IT REACHES NOTHING, AND IT IS WRITTEN DOWN ANYWAY -
+      # ekf.yaml's imu0_remove_gravitational_acceleration note, exactly.
+      # No acceleration is fused on either arm, so this parameter has
+      # nothing to act on; it is spelled out because the failure it
+      # avoids is a property of THIS DEVICE that any later task turning
+      # an acceleration channel back on would walk straight into. Gravity
+      # removal rotates (0,0,g) by the message's own orientation
+      # quaternion, this device publishes a quaternion of length zero,
+      # and normalising that is a division by zero.
+      remove_gravitational_acceleration: false
+      # 100 Hz sensor, 20 Hz optimiser: five samples a pass, and ten is
+      # two passes of slack. ekf.yaml's depth for the same stream.
+      queue_size: 10
+
+    # ------------------------- THE PUBLISHER --------------------------
+    #
+    # ONE PUBLISHER, AND ON THIS ARM IT IS THE ONLY THING THAT
+    # BROADCASTS odom -> base_link. `m5v3.sh start --fuse` does not
+    # spawn ekf_node, so there is exactly one owner of that edge at any
+    # moment, exactly as there is on the default arm. F3's map -> odom
+    # stacks on top of it and nothing in F2 may become that edge's owner,
+    # which is why the publisher's world frame IS the odom frame - it is
+    # passed as `-p filtered_publisher.world_frame_id:=` from
+    # config.yaml's frames.odom and appears nowhere in this file.
+    publishers:
+      filtered_publisher:
+        type: fuse_models::Odometry2DPublisher
+
+    filtered_publisher:
+      publish_tf: true
+      # THE OUTPUT IS PREDICTED FORWARD TO THE CURRENT TIME, AND THAT IS
+      # WHAT MAKES THE LATENCY COMPARISON FAIR. Left false - fuse's own
+      # default - this publisher emits the last SOLVED state stamped at
+      # the time it was solved, so its output would trail the graph's
+      # newest measurement by up to one optimisation period (50 ms at
+      # config.yaml's fuse.optimization_frequency_hz) and the arm would
+      # lose a latency A/B to a property of its default rather than to
+      # its architecture. True, it propagates that state to now with the
+      # motion model, which is precisely the EKF's predict step and the
+      # reason the EKF can publish at 50 Hz off inputs it has not yet
+      # corrected against.
+      predict_to_current_time: true
+      # AND IT PREDICTS WITH THE VELOCITY ONLY. The acceleration state
+      # exists in Unicycle2D but nothing observes it here - no
+      # accelerometer channel is fused on either arm - so extrapolating
+      # with it would be extrapolating with a variable driven entirely by
+      # process noise.
+      predict_with_acceleration: false
+      # One message deep on the way out. fuse's default; a queue on a
+      # publisher whose consumers are a tf listener and a recorder buys
+      # nothing but staleness.
+      queue_size: 1

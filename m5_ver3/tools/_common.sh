@@ -84,18 +84,24 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 #     static_transform_publisher NOMINATES BOTH OF THEM since F2 Task 3:
 #     the IMU's mount and - with --rf2o - the nav lidar's are two
 #     processes of the same executable, and one pattern finds both.
-#   THE LAST TWO ARE F2 TASK 3's OPTIONAL ARM and they are listed
+#   THE LAST THREE ARE THE OPTIONAL ARMS' and they are listed
 #   UNCONDITIONALLY, which is the safe direction: a pattern that
 #   nominates nothing costs one pgrep, and a pattern that is missing
 #   when the flag WAS given orphans a live child. rf2o's executable
 #   lives under the user's $HOME (config.yaml rf2o.workspace) so its
 #   command line begins with that path; rf2o_twist.py is a plain python3
 #   process and is named by its SCRIPT, exactly as wheel_odometry.py is.
+#   fixed_lag_smoother_node IS F2 TASK 4's and it is here for both
+#   reasons at once: it lives under the user's $HOME too (config.yaml
+#   fuse.prefix, unpacked from a .deb by tools/install_fuse.sh), and
+#   m5v3.sh spawns it through `env` so its command line begins with
+#   that path rather than with the launcher's.
 # MAINTENANCE OBLIGATION: a process added to m5v3.sh's start() is added
 # HERE, or stop orphans it and still prints "down."
 M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py"
                "static_transform_publisher" "ekf_node"
-               "rf2o_laser_odometry_node" "rf2o_twist.py")
+               "rf2o_laser_odometry_node" "rf2o_twist.py"
+               "fixed_lag_smoother_node")
 
 # The same list as one pgrep alternation, for the callers that want a
 # single pattern rather than a loop.
@@ -137,6 +143,51 @@ load_config() {  # load_config <extra required dotted key>...
     export GZ_PARTITION="$CFG_ISOLATION_GZ_PARTITION"
     export ROS_DOMAIN_ID="$CFG_ISOLATION_ROS_DOMAIN_ID"
     ROS_SETUP="$CFG_PATHS_ROS_SETUP"
+}
+
+# WHERE THE VENDORED `fuse` TREE IS, AND HOW A PROCESS IS MADE TO FIND
+# IT. F2 Task 4's arm is not built from source and it is not installed
+# system-wide either - there is no sudo on this rig - so it lives as an
+# unpacked .deb payload under the user's own $HOME and two search paths
+# have to be told about it. BOTH SCRIPTS THAT CARE ASK HERE:
+# tools/install_fuse.sh, which unpacks it and probes it, and m5v3.sh,
+# which spawns the child. That is this file's whole reason for existing
+# (see the header): the rf2o arm has its build-tree arithmetic written
+# out twice, once in each script, and this one does not repeat that.
+#
+#   fuse_paths()  is pure string arithmetic off config.yaml and needs no
+#                 ROS. Callers may use it before source_ros - m5v3.sh's
+#                 configure() does, so `start --fuse` can refuse a
+#                 missing binary before it starts anything at all.
+#   fuse_env()    builds the two search paths and MUST be called after
+#                 source_ros, because it PREPENDS to what
+#                 /opt/ros/jazzy/setup.bash exported. Called before, it
+#                 would produce a prefix path with the whole of ROS
+#                 missing from it.
+#
+# WHY AMENT_PREFIX_PATH AND NOT ONLY LD_LIBRARY_PATH. fuse loads its
+# motion models, sensor models and publishers as pluginlib classes, and
+# pluginlib does not search the loader path: it asks the ament index for
+# the `fuse_core__pluginlib__plugin` resource, reads the owning package's
+# package.xml out of <prefix>/share, and only then dlopen()s the library.
+# With the loader path alone the node starts and loads no plugin at all.
+#
+# NEITHER FUNCTION EXPORTS ANYTHING. The variables are set for the
+# caller to place where it wants them, because m5v3.sh must NOT put them
+# on its own environment: every child spawned after that point would
+# inherit them, including the gz GUI client, and this arm's business is
+# with one process. m5v3.sh passes them through `env` on that one command
+# line; install_fuse.sh puts them on the probe's.
+fuse_paths() {
+    FUSE_PREFIX="${CFG_FUSE_PREFIX/#\~/$HOME}"
+    FUSE_ROS_PREFIX="$FUSE_PREFIX/$CFG_FUSE_DEB_PREFIX"
+    FUSE_BIN="$FUSE_ROS_PREFIX/lib/$CFG_FUSE_PACKAGE/$CFG_FUSE_EXECUTABLE"
+    FUSE_MANIFEST="$FUSE_PREFIX/m5v3_fuse.manifest"
+}
+
+fuse_env() {
+    FUSE_AMENT_PREFIX_PATH="$FUSE_ROS_PREFIX${AMENT_PREFIX_PATH:+:$AMENT_PREFIX_PATH}"
+    FUSE_LD_LIBRARY_PATH="$FUSE_ROS_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 }
 
 # ROS IS SOURCED FOR gz ITSELF, not only for ROS nodes: gz_tools_vendor

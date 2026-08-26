@@ -346,6 +346,35 @@ topics:
   #   evidence and it is the one the filter fused.
   rf2o_odom_raw: "/m5v3/rf2o/odom_raw"
   rf2o_odom: "/m5v3/rf2o/odom"
+  # ---- THE OPTIONAL FACTOR-GRAPH ARM'S OUTPUT, F2 Task 4 - ONE TOPIC ---
+  #
+  # NOTHING PUBLISHES ON THIS UNLESS `m5v3.sh start --fuse` WAS GIVEN.
+  # That flag runs `fuse`'s fixed-lag smoother INSTEAD OF ekf_node, so on
+  # that arm nothing publishes on odometry_filtered above either: the two
+  # estimators are alternatives and never neighbours, because they would
+  # otherwise both claim odom -> base_link and tf2 would carry whichever
+  # arrived last.
+  #
+  # WHY IT IS A SECOND ADDRESS AND NOT THE SAME ONE. It would have been
+  # cheaper to publish the smoother's output on odometry_filtered and let
+  # the arm= label carry the whole difference - every instrument
+  # downstream would then need no change at all. It is a second address
+  # for frames.rf2o_odom's reason, one level up: a second opinion about
+  # this vehicle's pose may not wear the name of the estimate the
+  # shipping stack publishes, not even while the shipping estimator is
+  # not running. An operator with `ros2 topic echo` open, a recorded bag,
+  # or a later task that runs the two side by side all read the address
+  # before they read any label, and an address that means two different
+  # things depending on a flag is the failure the arm label exists to
+  # prevent, moved one layer down where no refusal can see it.
+  #   AND THE INSTRUMENTS ARE PARAMETERISED BY ARM RATHER THAN FORKED.
+  #   tools/ekf_health.py and tools/sensor_evidence.py both read the
+  #   running stack's arm= line and pick the topic from it
+  #   (evidence_core.fused_topic_key), so there is ONE gate and ONE
+  #   recorder and neither has a copy of the other's arithmetic. The
+  #   recorded CSV keeps its name - the fused stream is the fused stream
+  #   - and the session's arm= line says which estimator filled it.
+  fuse_odometry_filtered: "/m5v3/fuse/odometry/filtered"
   # THE BACK SAFETY SCANNER'S MEASUREMENT CHANNEL, NOT BRIDGED, AND IT HAS
   # TWO CONSUMERS ON THIS TRACK - which is why it is named for the SENSOR
   # and not for either job.
@@ -1150,6 +1179,168 @@ rf2o:
   # that is up and producing nothing is readable as such.
   log_every_s: "10"
 
+# --------------------- THE OPTIONAL FACTOR-GRAPH ARM ---------------------
+# F2 Task 4. `fuse` is a nonlinear least-squares state estimator: it does
+# not carry a state and a covariance forward the way an extended Kalman
+# filter does, it builds a FACTOR GRAPH of every measurement inside a
+# sliding window and re-solves the whole window with Ceres each time it
+# optimises. The variables are re-linearised at each solve, so a
+# measurement that arrives late, or out of order, or that would have been
+# linearised about a bad estimate, is not stuck with the linearisation
+# point it happened to land on.
+#
+# IT REPLACES ekf_node RATHER THAN JOINING IT, AND THAT IS ENFORCED.
+# `m5v3.sh start --fuse` does not spawn the `ekf` child at all. Both
+# estimators publish odom -> base_link and tf2 has no notion of two
+# authorities for one edge - whichever transform arrived last is the one
+# every listener reads - so running them together would not produce a
+# comparison, it would produce a coin toss at 50 Hz. `--fuse` and
+# `--rf2o` are refused TOGETHER for the same reason one level up: a
+# three-way arm is not this task's, and the overlay ekf_rf2o.yaml is a
+# robot_localization parameter file that this node cannot read.
+#
+# IT IS OFF BY DEFAULT AND NOTHING IN THIS BLOCK IS READ WITHOUT THE FLAG.
+# `m5v3.sh start` brings up exactly the six children EVIDENCE_FUSION.md
+# 9.3's figures were taken on, hands the filter one --params-file, and
+# never names fuse.yaml, the vendored prefix or this block's topic.
+#
+# IT IS VENDORED INTO THE USER'S HOME WITHOUT ROOT, AND THAT IS THE OTHER
+# HALF OF WHY IT IS A BLOCK HERE. Unlike rf2o - which is in no ROS
+# archive for any distribution and therefore had to be built from source -
+# every package this arm needs IS in the Jazzy archive, so
+# tools/install_fuse.sh is m6/tools/install_broker.sh's shape rather than
+# tools/install_rf2o.sh's: `apt-get download` + `dpkg-deb -x` into a
+# prefix under $HOME, no sudo at any point, and the exact versions pinned
+# below. F2 constraint 14 is why that is a committed script and not a
+# paragraph in a report.
+fuse:
+  # EVERY PACKAGE THIS ARM ADDS TO THE RIG, PINNED TO THE EXACT VERSION
+  # EVIDENCE_FUSION.md 11 WAS MEASURED ON, as `name=version` pairs.
+  #
+  # WHY A STRING AND NOT A YAML LIST. tools/_common.sh's config reader
+  # walks this file to `CFG_<DOTTED_KEY>` shell scalars, and a shell has
+  # no arrays that survive that trip; a mapping keyed by package name
+  # would produce variable names containing hyphens, which are not
+  # variable names at all. One scalar, split on whitespace by the one
+  # script that reads it.
+  #
+  # HOW THIS LIST WAS ARRIVED AT, AND WHY IT IS NINE AND NOT A HUNDRED.
+  # `apt-cache depends --recurse` over the seven fuse packages names 654
+  # distinct packages, because it follows every alternative of every
+  # Depends line - six versions of flang, five of gcc, three DDS
+  # implementations this rig does not use. What was actually MISSING on
+  # this rig, checked one by one with `dpkg-query -W`, is the eight fuse
+  # packages plus `tf2_2d`, and nothing else: libceres4t64 2.2.0,
+  # libsuitesparse's libcholmod5 / libccolamd3 / libspqr3, libgoogle-glog,
+  # libboost-serialization1.83.0, liborocos-kdl1.5, libtinyxml2-10 and
+  # libconsole-bridge1.0 were all already installed here, and `ldd` over
+  # the vendored binary reports no unresolved object. install_fuse.sh
+  # re-runs that check and vendors ONLY what its own rig is missing, so a
+  # rig without them fetches them and this list records what THIS one
+  # needed. EVIDENCE_FUSION.md 11.1.
+  #   THE -dev PACKAGES ARE DELIBERATELY NOT HERE. ros-jazzy-fuse-core
+  #   Depends on libceres-dev, libboost-all-dev, libeigen3-dev and
+  #   libgoogle-glog-dev - build dependencies that ROS's packaging
+  #   promotes to runtime Depends. `dpkg-deb -x` runs no dependency
+  #   resolution at all, and a node that is already linked needs headers
+  #   from none of them. Vendoring them would be fetching 400 MB to
+  #   satisfy a checker that is not running.
+  packages: >-
+    ros-jazzy-fuse-msgs=1.1.5-1noble.20260615.111618
+    ros-jazzy-fuse-core=1.1.5-1noble.20260615.142407
+    ros-jazzy-fuse-variables=1.1.5-1noble.20260615.155054
+    ros-jazzy-fuse-graphs=1.1.5-1noble.20260615.154436
+    ros-jazzy-fuse-constraints=1.1.5-1noble.20260615.155948
+    ros-jazzy-fuse-publishers=1.1.5-1noble.20260615.155943
+    ros-jazzy-fuse-optimizers=1.1.5-1noble.20260615.161308
+    ros-jazzy-fuse-models=1.1.5-1noble.20260615.161302
+    ros-jazzy-tf2-2d=1.4.1-1noble.20260615.153930
+  # WHERE THE EXTRACTED TREE LIVES, AND IT IS THE USER'S AND NOT THE
+  # REPOSITORY'S - rf2o.workspace's argument, and the same leading ~/
+  # expanded against $HOME by both readers (tools/install_fuse.sh and
+  # m5v3.sh). Under m5_ver3/ it would be forty megabytes of shared
+  # objects one stray `git add` from being committed, and it must not
+  # need root, which rules out /opt and /usr alike.
+  prefix: "~/m5v3_fuse_prefix"
+  # WHERE INSIDE THAT PREFIX THE ROS TREE LANDS. A ROS deb's payload is
+  # rooted at /opt/ros/jazzy, so `dpkg-deb -x pkg.deb $prefix` produces
+  # $prefix/opt/ros/jazzy/{lib,share,include} - and THAT path, not
+  # $prefix, is what AMENT_PREFIX_PATH and LD_LIBRARY_PATH have to name.
+  # It is spelled here rather than derived from paths.ros_setup because
+  # it is a fact about the DEBIAN PACKAGE's layout and not about where
+  # this rig installed ROS; the two agree today and are not the same
+  # claim.
+  deb_prefix: "opt/ros/jazzy"
+  # The package and executable m5v3.sh spawns, by absolute path under the
+  # prefix - `ros2 run` would work once AMENT_PREFIX_PATH names the
+  # prefix, and is not used, for the reason install_rf2o.sh gives: there
+  # is then no wrapper shell between this script and the child, and the
+  # pid in the pidfile is the process doing the work.
+  package: "fuse_optimizers"
+  executable: "fixed_lag_smoother_node"
+  # The node's name, and it has to match fuse.yaml's top-level key or
+  # every parameter in that file belongs to nobody at all. m5v3.sh
+  # renames the process to this with `-r __node:=` and greps the file for
+  # it before anything starts - check_fuse_params(), which is
+  # check_ekf_params()'s argument applied to this node.
+  node_name: "m5v3_fuse"
+  # The parameter file, relative to the repository root. It holds what is
+  # FUSED and what is REFUSED and nothing else - no topic, no frame, no
+  # rate - exactly as ekf.yaml does, and for the same reason: this is a
+  # ROS parameter file and config.yaml is not one.
+  params_file: "m5_ver3/fuse.yaml"
+
+  # ---------------------- WHAT THE SMOOTHER DOES ------------------------
+  # HOW LONG THE WINDOW IS, in seconds of sim time. This is the one
+  # number that makes this arm a SMOOTHER rather than a filter: every
+  # measurement inside the window is re-solved, and re-linearised, on
+  # every optimisation pass, and everything older is marginalised out
+  # into a prior.
+  #   0.5 s HERE, AND IT IS A RULING RATHER THAN A MEASUREMENT. Longer
+  #   buys more re-linearisation and costs Ceres a bigger problem on
+  #   every pass; shorter converges on the EKF, which would make the A/B
+  #   compare two spellings of the same thing. 0.5 s is 25 optimisation
+  #   passes of overlap at optimization_frequency_hz below, 250 wheel
+  #   odometry samples and 50 IMU samples - a window with real history in
+  #   it on a vehicle that covers 0.35 m of its 0.7 m/s cruise inside it.
+  #   What it COSTS is measured rather than argued: EVIDENCE_FUSION.md
+  #   11.4 is the CPU, against the EKF's on the same bringup pair.
+  lag_duration_s: "0.5"
+  # HOW OFTEN THE GRAPH IS RE-SOLVED, in Hz. It is NOT the output rate:
+  # the publisher below runs at ekf.frequency_hz and predicts forward
+  # from the last solved state with the motion model between passes,
+  # which is the smoother's analogue of the EKF's predict step.
+  #   20 Hz AGAINST THE EKF's 50. An optimisation pass is a Ceres solve
+  #   over the whole window and not a 15x15 matrix update, so this is the
+  #   knob that decides what the arm costs. 20 Hz gives every pass 50 ms
+  #   of wall budget at RTF 1.0 and every measurement at most 50 ms of
+  #   sim time before it is first solved - a quarter of ekf.yaml's
+  #   sensor_timeout and well inside the window above.
+  optimization_frequency_hz: "20.0"
+  # HOW LONG A SENSOR MAY MAKE THE GRAPH WAIT for a motion-model segment
+  # to be generated for its stamp, in seconds. A transaction that cannot
+  # be connected to the graph inside this is dropped with a log line.
+  #   0.10 s IS fuse's OWN DEFAULT and it is left there deliberately, for
+  #   ekf.yaml's process-noise reason: it is a knob a drift figure can be
+  #   flattered with, and this task's job is to measure what a factor
+  #   graph buys on this vehicle rather than to arrange it.
+  transaction_timeout_s: "0.10"
+
+  # ------------------- DID THE SMOOTHER COME UP BROKEN? ----------------
+  # THERE IS NO fuse.startup_check BLOCK, AND ITS ABSENCE IS A DECISION.
+  # tools/ekf_health.py gates EVERY bringup on both arms, and it reads
+  # ekf.startup_check.covariance_max on both - because that ceiling is a
+  # claim about A FILTER THAT HAS JUST STARTED WITH THE TRUCK AT SPAWN
+  # (100.0, against a measured healthy band of 0.08 to 0.23 and a
+  # divergence that misses it by eighty-two orders of magnitude), and not
+  # a claim about robot_localization. A second copy of that number,
+  # keyed by arm, would be a second thing to keep in step with the first
+  # and would let one arm's ceiling drift away from the other's - which
+  # on an A/B is a way of grading the two estimators against different
+  # standards without anybody deciding to. What IS parameterised by arm
+  # is the TOPIC the gate reads, because the two arms publish on
+  # different addresses; that mapping is
+  # tools/evidence_core.py's fused_topic_key() and it is tested there.
 # ------------------------------ DRIVE ROUTE -----------------------------
 # tools/drive_route.py's profiles. It is the EVIDENCE DRIVER: it puts the
 # truck through a known, repeatable manoeuvre so that the odometry and the
