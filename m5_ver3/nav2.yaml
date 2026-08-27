@@ -99,9 +99,23 @@
 #   worst absolute error, any axis      0.5321 m   (6.1, `worst`)
 #   worst CROSS-track error             0.1044 m   (6.1, `square`)
 #   END error at rest              0.0382-0.1954 m (6.1)
-#   worst single map -> odom step       0.2591 m   (8)
+#   worst single map -> odom step       0.8310 m   (13.10a)  <- AMENDED
 #   worst single heading step           0.0764 rad (8)
 #   instrument floor            rms 0.0291 m / MAX 0.1179 m
+#
+# THE JUMP FIGURE IS AMENDED AND THE AMENDMENT IS F4's OWN, WHICH IS WHY
+# IT IS FLAGGED HERE RATHER THAN QUIETLY SUBSTITUTED. 13.10's 0.2591 m
+# was measured OPEN LOOP - tools/drive_route.py driving a table, with
+# nothing reading the localiser's answer. F4 Task 2 put a controller on
+# the other end of it and the worst single correction across all 37
+# driven-goal sessions is 0.8310 m, 3.21x that figure - on a run that
+# ARRIVED, driving the longest route in the goal table; the HEADING half
+# of the contract survived at 0.0641 rad against 0.0764. The originals
+# are intact in EVIDENCE_LOCALIZATION_V3.md 8 and 13.10 and the
+# closed-loop measurement is the labelled addendum 13.10a.
+#   EVERY DERIVATION BELOW THAT USED 0.2591 STILL CLEARS AT 0.6490 and
+# each says so where it sits. Nothing in this file changed VALUE because
+# of this amendment - what changed is the margin each of them has.
 #
 # THE PEAK IS ANISOTROPIC AND THE ANISOTROPY IS WHAT DECIDES WHICH
 # PARAMETER GETS WHICH NUMBER. Section 9 of that file measured the
@@ -120,10 +134,14 @@
 #       INSCRIBED radius, or the layer is a hard band and not a
 #       gradient; and below that again by the LATERAL surprise - the
 #       worst cross-track error 0.1044 m plus the worst single
-#       map -> odom step 0.2591 m, which can be entirely lateral and
-#       arrives in one 66 ms tick. What it is actually SET from is the
-#       FLOOR rather than the error budget, and the local_costmap
-#       section carries that argument.
+#       map -> odom step, which can be entirely lateral and arrives in
+#       one 66 ms tick. AT THE AMENDED 0.8310 m THAT SUM IS 0.9354 m
+#       against 0.3635 m before, and 2.60 m of inflation clears it
+#       either way with 2.8x to spare. What it is actually SET from is
+#       the FLOOR rather than the error budget, and the local_costmap
+#       section carries that argument - so the amendment does not move
+#       this number, it only shrinks the margin, and the CONCLUSION is
+#       unchanged and is stated rather than assumed.
 #   xy_goal_tolerance  <- the END error, which is taken AT REST after
 #       the corrections have closed the gap. The moving peak does NOT
 #       bind it and section (E) says why.
@@ -634,6 +652,74 @@ controller_server:
       #   plugin does not have is the honest way to say that this stack
       #   does not hold a heading.
       plugin: "nav2_controller::PositionGoalChecker"
+      #
+      # ================================================================
+      # RE-EXAMINED AFTER THE CONTROLLER FIX, F4 TASK 2.5, AND THE
+      # RULING STANDS ON A STRONGER MEASUREMENT THAN THE ONE THAT MADE
+      # IT. EVIDENCE_NAV_V3.md 16.6.
+      #
+      # The two runs quoted above missed the heading by 1.82 and 1.11
+      # rad, and BOTH were driven by a controller that was not following
+      # its path at all (PathAlignCritic, below - it never scored). The
+      # honest reading of them in 2026-08-27's evidence was therefore
+      # "the pair is unreachable", with a confound nobody could see.
+      #
+      # SO THE QUESTION WAS ASKED AGAIN WITH THE CONTROLLER FIXED, AND
+      # ONCE WITH THE PAIR ACTUALLY CONFIGURED. Run `...165050` is
+      # `nav2_controller::SimpleGoalChecker` at 0.25 m / 0.15 rad - the
+      # station class, both halves - on the fixed controller:
+      #
+      #   it reached the goal POSITION to 0.0062 m of BELIEF and
+      #   0.0478 m of TRUTH. Six millimetres. The position half of the
+      #   station class is MET by this stack now.
+      #   it never latched, because the heading THERE was 0.324 rad
+      #   out, and it then drove 454 s and 441 plans and aborted.
+      #
+      # AND THE REASON IS A CURVE RATHER THAN A NUMBER.
+      # `tools/drive_goal.py analyse`'s CORRIDOR block walks that same
+      # approach and reports the heading error at the moment the BELIEF
+      # first came inside each candidate box:
+      #
+      #     box     believed   truth    |heading error|
+      #     2.00 m   1.9995   2.0916    0.0752 rad   ( 4.3 deg)
+      #     1.50 m   1.4947   1.5939    0.0239 rad   ( 1.4 deg)
+      #     1.00 m   0.9969   1.1093    0.1078 rad   ( 6.2 deg)
+      #     0.75 m   0.7457   0.8480    0.1896 rad   (10.9 deg)
+      #     0.60 m   0.5996   0.6942    0.2456 rad   (14.1 deg)
+      #     0.50 m   0.4983   0.5857    0.2815 rad   (16.1 deg)
+      #     0.40 m   0.3977   0.4802    0.3204 rad   (18.4 deg)
+      #     0.30 m   0.2988   0.3777    0.3658 rad   (21.0 deg)
+      #     0.25 m   0.2492   0.3274    0.3941 rad   (22.6 deg)
+      #     0.15 m   0.1488   0.2080    0.4428 rad   (25.4 deg)
+      #
+      # THE HEADING GETS WORSE THE CLOSER IT GETS, MONOTONICALLY, AND
+      # THAT IS KINEMATICS AND NOT TUNING. Inside 1.4 m PathFollowCritic
+      # and GoalCritic have swapped places (both carry
+      # threshold_to_consider 1.4) and inside 0.5 m PathAlignCritic and
+      # PathAngleCritic have stopped: the last metre and a half is
+      # steered by a POINT ATTRACTION with no path and no heading in it.
+      # A tricycle nulling a residual lateral offset against a 1.25 m
+      # minimum radius pays for it in yaw, and the smaller the box the
+      # more of it it has to pay.
+      #
+      # SO: POSITION-ONLY STAYS, AND WHAT CHANGED IS THE ARGUMENT.
+      # It is no longer "the pair is unreachable" - the position half is
+      # reachable to six millimetres. It is: THE PAIR IS NOT REACHABLE
+      # IN ONE APPROACH, because closing the position costs the heading
+      # at a measured rate. F5's docking inherits exactly that, with the
+      # number that decides it: a station-class arrival needs a STRAIGHT
+      # FINAL LEG along the dock axis, and the table above is what says
+      # how long it has to be.
+      #   AND THE POSITION-ONLY BOX BUYS THE HEADING BACK. On run
+      #   `...164701`, position-only at 0.60 m on the fixed controller,
+      #   the box latched at 0.5792 m of belief with the heading
+      #   0.0363 rad out - 2.1 deg - because it latched while the
+      #   vehicle was still on the straight approach leg and never
+      #   entered the point attraction at all. The arrival heading on
+      #   that run was 0.0329 rad, against 1.6920 rad on F4 Task 2's
+      #   one arrival. A position-only checker on a fixed controller
+      #   delivers a BETTER heading than a heading-aware one on this
+      #   machine, and that is the whole ruling in one sentence.
       # ---------------------------------------------------------------
       # 0.60 m, AND F3's PEAK IS WHAT BINDS IT. THE 0.25 m STATION CLASS
       # IS NOT MET BY AN APPROACH POSE ON THIS STACK, AND SAYING SO IS
@@ -698,11 +784,16 @@ controller_server:
       # goal box as well, because the box is evaluated on a moving
       # vehicle.
       xy_goal_tolerance: 0.60
-      # 0.15 rad = 8.6 deg. The measured END heading errors on the five
-      # dry runs are 0.0020 to 0.0315 rad, so this is 4.8 x the worst of
-      # them. It has to be reachable WITHOUT rotating in place, because
-      # this vehicle cannot: the final heading is whatever the
-      # Reeds-Shepp path's last segment delivers.
+      # ---------------------------------------------------------------
+      # AND THERE IS NO `yaw_goal_tolerance` LINE, DELIBERATELY. The
+      # plugin above does not declare one, so a line here would be
+      # applied to nothing and reported by nothing - which is the
+      # failure mode 14.5's whole read-back exists for. F4 Task 2 left
+      # a paragraph here describing a 0.15 rad tolerance after removing
+      # the parameter it described; that paragraph was a comment about
+      # a line that was not there and it is DELETED rather than
+      # corrected. The heading ruling is argued above the plugin.
+      # ---------------------------------------------------------------
       # TRUE, and on a POSITION-ONLY checker it means the one thing it
       # can mean: once the vehicle has been inside the box, it has
       # ARRIVED. Without it the check is re-evaluated every tick and a
@@ -719,10 +810,65 @@ controller_server:
       # actually executes (m5v3-02 2). 1/20 = 0.05.
       # tests/test_nav2_params.py multiplies the two and asserts 1.0.
       model_dt: 0.05
-      # 56 * 0.05 = 2.80 s of horizon, which at the -0.700 m/s transit
-      # ceiling is 1.96 m of look-ahead - just under the 2.415 m the
-      # PADDED fork tips already reach ahead of base_link. DEFAULT-KEPT.
-      time_steps: 56
+      # ================================================================
+      # 134, AND IT IS THE NUMBER F4 TASK 2.5's DIAGNOSIS MOVED FIRST.
+      # THE HORIZON IS A DISTANCE AND THIS PARAMETER IS A COUNT, WHICH
+      # IS THE WHOLE TRAP.
+      #
+      # 134 * 0.05 = 6.70 s, which at the -0.300 m/s transit ceiling is
+      # 2.01 m of look-ahead. THE TARGET IS 2.00 m AND 134 IS
+      # ceil(2.00 / (0.300 * 0.05)). What 2.00 m has to clear:
+      #
+      #   1.25 m  THE VEHICLE'S OWN MINIMUM TURNING RADIUS
+      #           (AckermannConstraints.min_turning_r below). A sampled
+      #           trajectory shorter than the radius it is allowed to
+      #           turn on cannot show the optimiser where a turn LEADS -
+      #           inside such a horizon every turn looks nearly free and
+      #           the cost surface is blind to it. THIS IS THE ONE THE
+      #           SHIPPED FILE FAILED, at 0.84 m.
+      #   1.96 m  A QUARTER TURN AT THAT RADIUS, pi/2 * 1.25 = 1.9635 m,
+      #           and it is the binding one. It is the arc over which a
+      #           turn at full authority delivers its whole lateral
+      #           displacement rate, so it is the shortest window in
+      #           which turning and not turning have visibly different
+      #           outcomes. 2.00 m is that rounded up.
+      #
+      # AND ONE THING IT DELIBERATELY DOES NOT CLEAR, BECAUSE IT DOES
+      # NOT HAVE TO. The lateral correction the miss actually needed is
+      # LONGER than this horizon: two arcs at 1.25 m that move the
+      # vehicle the measured 0.96 m sideways subtend
+      # 2 * 1.25 * acos(1 - 0.96/(2*1.25)) = 2.269 m of path, and
+      # EVIDENCE_NAV_V3.md 16 reads the planner's own standing plan at
+      # that moment as 2.71 m long against a straight-line 1.06 m. MPPI
+      # is a RECEDING-horizon optimiser and re-solves twenty times a
+      # second: it does not need the whole manoeuvre inside one window,
+      # only enough of it that starting the manoeuvre scores better than
+      # not starting it. Requiring the full 2.27 m would be 152 steps
+      # and 13 % more work per tick for a guarantee nothing needs.
+      #   THAT IS AN ARGUMENT AND THE MEASUREMENT IS THE EVIDENCE. At
+      # 2.01 m of horizon the same goal that had been missed by
+      # 1.59 m ACROSS its travel heading was tracked to 0.15 m
+      # (EVIDENCE_NAV_V3.md 16.4, rung D).
+      #
+      # WHAT IT WAS, AND WHY 56 STOPPED BEING RIGHT WITHOUT ANYTHING
+      # SAYING SO. This line used to read 56 and its derivation used to
+      # read "2.80 s of horizon, which at the -0.700 m/s transit ceiling
+      # is 1.96 m of look-ahead". That was TRUE WHEN IT WAS WRITTEN.
+      # EVIDENCE_NAV_V3.md 15.2 rung 11 then took the transit ceiling
+      # from 0.700 m/s to 0.300 m/s - correctly, on the stop table - and
+      # a count of steps multiplied by a smaller speed is a SHORTER
+      # DISTANCE: 0.84 m. Nothing in this file recomputed, because
+      # nothing in this file knew the two were coupled.
+      #   0.84 m is BELOW the 1.25 m turning radius, and it is what
+      # switched PathAlignCritic off through the gate that critic keeps
+      # (see PathAlignCritic.offset_from_furthest). EVIDENCE_NAV_V3.md
+      # 16 is the diagnosis; this is the number it moved.
+      #
+      # tests/test_nav2_params.py recomputes 134 from config.yaml's
+      # navcmd transit ceiling, this file's model_dt and
+      # min_turning_r, and fails if the horizon falls under the
+      # manoeuvre length again.
+      time_steps: 134
       # 1000 AND NOT THE 2000 nav2_bringup SHIPS. Halving the sample
       # budget halves the per-tick cost, and this vehicle's admissible
       # twist space is very nearly ONE-dimensional: vy is not sampled at
@@ -845,12 +991,21 @@ controller_server:
       az_max: 0.28
 
       # ---- the path handler ------------------------------------------
-      # 2.0 m against the shipped 1.7: the pruned path must be at least
-      # as long as the horizon the critics score over, which is 1.96 m
-      # at the transit ceiling. At 1.7 the last two tenths of every
-      # sampled trajectory would be scored against a path that had
-      # already been cut.
-      prune_distance: 2.0
+      # 2.5 m against the shipped 1.7, and it is `time_steps` seen from
+      # the path's side. THE PRUNED PATH MUST BE LONGER THAN THE HORIZON
+      # THE CRITICS SCORE OVER, which is 2.01 m at the transit ceiling
+      # (time_steps above). A pruned path shorter than the trajectories
+      # would have the tail of every sample scored against a path that
+      # had already been cut - and, worse, would cap
+      # `furthest_reached_path_point` at the cut and put PathAlignCritic
+      # back behind its own gate.
+      #   0.5 m of margin over 2.01: the path handler prunes by
+      # INTEGRATED distance from the closest pose, and a Reeds-Shepp
+      # path curves, so the straight-line reach of a sample can sit
+      # further along the path than its own arc length suggests.
+      # 2.0 m - the value F4 Task 2 shipped, derived against the 0.700
+      # m/s ceiling that rung 11 withdrew - left no margin at all.
+      prune_distance: 2.5
       transform_tolerance: 0.2
       # TRUE, and it is the parameter a Reeds-Shepp path needs most.
       # With it the path handler SPLITS at each cusp and hands the
@@ -975,14 +1130,131 @@ controller_server:
         near_goal_distance: 1.0
         trajectory_point_step: 2
       PathAlignCritic:
+        # ==============================================================
+        # THIS CRITIC IS THE HEAVIEST IN THE FILE AND FOR THE WHOLE OF
+        # F4 TASK 2 IT NEVER SCORED ONCE. EVIDENCE_NAV_V3.md 16 IS THE
+        # DIAGNOSIS AND `offset_from_furthest` BELOW IS THE PARAMETER.
+        #
+        # It is the only critic here that penalises deviation ALONG the
+        # path. GoalCritic pulls a trajectory's endpoint at the goal,
+        # PathFollowCritic pulls it at ONE path point ahead, and
+        # PathAngleCritic only wakes past max_angle_to_furthest. None of
+        # the three costs a vehicle for driving parallel to its path,
+        # half a metre to the side of it - which is exactly what this
+        # vehicle did for five shipped runs.
         enabled: true
         cost_power: 1
         cost_weight: 14.0
         max_path_occupancy_ratio: 0.05
         trajectory_point_step: 4
         threshold_to_consider: 0.5
-        offset_from_furthest: 20
-        use_path_orientations: false
+        # ==============================================================
+        # 12, DOWN FROM THE UPSTREAM DEFAULT OF 20, AND IT IS A GATE AND
+        # NOT AN OFFSET. THIS IS THE LINE THE PHASE TURNED ON.
+        #
+        # nav2 1.3.12, nav2_mppi_controller/src/critics/
+        # path_align_critic.cpp, the third statement of score():
+        #
+        #     // Don't apply when first getting bearing w.r.t. the path
+        #     utils::setPathFurthestPointIfNotSet(data);
+        #     const size_t path_segments_count =
+        #         *data.furthest_reached_path_point;
+        #     if (path_segments_count < offset_from_furthest_) {
+        #       return;
+        #     }
+        #
+        # `furthest_reached_path_point` is not a tunable. utils.hpp's
+        # findPathFurthestReachedPoint() takes the LAST point of every
+        # sampled trajectory, finds the path index nearest it, and
+        # returns the largest over the batch - so it is the PREDICTION
+        # HORIZON measured in path points, and nothing else.
+        #
+        # WHAT THAT MEANT ON THE SHIPPED FILE, MEASURED OFF THE RECORDED
+        # SESSIONS AND NOT INFERRED. At time_steps 56 and the 0.300 m/s
+        # transit ceiling the horizon reached 0.84 m; SmacPlannerHybrid
+        # emits this floor's plans at 0.083-0.105 m per pose; so the
+        # furthest path index reachable in one horizon was 8 at the
+        # median and 13 at its very best. Against a gate of 20:
+        #
+        #   0 of 1005 plans in the five shipped runs could clear it.
+        #   11 of 275 could on the 0.700 m/s configuration rung 11
+        #   withdrew - which is the same fact from the other side.
+        #
+        # AND IT WAS PROVED TWICE ON THE RIG BEFORE ANYTHING MOVED.
+        # cost_weight was multiplied by ONE HUNDRED with the gate left
+        # at 20 and the run was indistinguishable from the baseline (a
+        # critic that scores nothing cannot be weighted); then the gate
+        # alone was dropped to 5 and the vehicle's behaviour changed
+        # completely - into a limit cycle, because a 0.84 m horizon
+        # aligning to a 0.5 m stub of path on a 1.25 m turning radius is
+        # not a corridor, it is a point attractor. Both rungs are in
+        # EVIDENCE_NAV_V3.md 16.
+        #
+        # WHY 12 AND NOT 20 AND NOT 5. The gate's own job - its comment
+        # says so - is to keep the critic quiet until the trajectories
+        # span enough path to have a BEARING on it. On this vehicle the
+        # shortest path length over which alignment can mean anything is
+        # its own minimum turning radius, 1.25 m: below that the
+        # vehicle cannot act on what the critic is asking for. At this
+        # floor's measured 0.10 m plan spacing that is 12.5 path points,
+        # so 12. The horizon above then reaches index 19 at the median,
+        # which clears 12 with margin at cruise and still falls behind
+        # it as the vehicle slows into the goal - which is where
+        # threshold_to_consider takes over anyway.
+        # tests/test_nav2_params.py derives 12 from min_turning_r and
+        # the plan spacing and requires the horizon to clear it.
+        offset_from_furthest: 12
+        # ==============================================================
+        # TRUE, AGAINST THE UPSTREAM DEFAULT OF FALSE, AND IT IS THE
+        # DAMPING TERM. IT IS THE SECOND RUNG OF THE FIX AND IT WAS
+        # FORCED BY A MEASUREMENT (EVIDENCE_NAV_V3.md 16.5, rung F).
+        #
+        # WHAT THE CRITIC COSTS WITH IT FALSE (path_align_critic.cpp):
+        #
+        #     summed_path_dist += sqrtf(dx * dx + dy * dy);
+        #
+        # - the DISTANCE from each trajectory point to the path point at
+        # the same arc length, and nothing else. That is proportional
+        # feedback on cross-track error, and cross-track error on a
+        # steered vehicle is a DOUBLE integrator of the steer angle:
+        # steer changes heading, heading changes cross-track rate. Pure
+        # proportional feedback round a double integrator oscillates,
+        # and the only thing damping it here is however far MPPI can
+        # see - 2.01 m, against a 1.25 m turning radius. That is thin.
+        #
+        # AND IT OSCILLATED, MEASURED. With this false, `spine_north`
+        # (17 m) arrived three times out of three, but `ring_corner` -
+        # the SAME straight leg carried on to 37 m - grew a cross-track
+        # swing of +-0.3 rad with a period near 20 s and a rising
+        # amplitude, reached 1.5 m off the line at t+35 s and entered a
+        # limit cycle at the minimum turning radius. The longer leg is
+        # not a harder leg; it is the same leg with room for the
+        # oscillation to develop.
+        #
+        # WITH IT TRUE the critic costs
+        #
+        #     dyaw = shortest_angular_distance(pose.theta, T_yaw(t, p));
+        #     summed_path_dist += sqrtf(dx*dx + dy*dy + dyaw*dyaw);
+        #
+        # - the path's own per-pose HEADING enters the cost, which is
+        # the rate term the loop was missing. A trajectory that is
+        # heading across the path is now penalised for it before it has
+        # got anywhere, which is what stops the overshoot rather than
+        # waiting for the overshoot to appear as distance.
+        #   THE UNITS ARE COMMENSURATE BY CONSTRUCTION AND WORTH SAYING:
+        # the sum is under one square root, so a radian of heading error
+        # weighs as a metre of position error, and this vehicle's whole
+        # heading budget at a goal (0.15 rad class) weighs as 0.15 m -
+        # the same order as the cross-track errors being corrected.
+        #
+        # AND THE PLAN'S ORIENTATIONS ARE WORTH READING HERE, which is
+        # not true of every planner. SmacPlannerHybrid is a FEASIBLE
+        # planner: each pose carries the heading a vehicle of this
+        # turning radius would actually hold there, and PathAngleCritic
+        # mode 2 below already reads the same field for the same reason.
+        # On a planner that emitted geometric waypoints with no headings
+        # this would be scoring noise.
+        use_path_orientations: true
       PathFollowCritic:
         enabled: true
         cost_power: 1
@@ -1185,8 +1457,13 @@ local_costmap:
         # radius is 0.6143 m: below that the layer is a hard band with
         # no slope (section C). And the LATERAL SURPRISE of section (A)
         # - the worst cross-track error 0.1044 m plus the worst single
-        # map -> odom step 0.2591 m, which arrives in one tick and can
-        # be entirely lateral - is 0.3635 m.
+        # map -> odom step, which arrives in one tick and can be
+        # entirely lateral - is 0.9354 m at the AMENDED closed-loop jump
+        # of 0.8310 m (EVIDENCE_LOCALIZATION_V3.md 13.10a), against
+        # 0.3635 m at the open-loop 0.2591 m this line used to read.
+        # 2.60 m clears both; the amendment costs this derivation margin
+        # and not its answer, and it is written down rather than left to
+        # a reader to notice.
         #
         # WHAT IT DOES NOT DO IS CLOSE THE PICK AISLE, and inflation
         # cannot: it is never LETHAL. A vehicle on that aisle's own

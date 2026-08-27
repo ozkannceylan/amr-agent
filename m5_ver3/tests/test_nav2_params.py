@@ -56,8 +56,18 @@ DELIVERED_MIN_REAR_RADIUS_M = 0.4154
 #: and 13.10), dry, on the shipping `amcl` arm. Same reason as above.
 WORST_ABSOLUTE_ERROR_M = 0.5321
 WORST_CROSS_TRACK_M = 0.1044
-WORST_MAP_ODOM_STEP_M = 0.2591
 WORST_END_ERROR_M = 0.1954
+
+#: AND THE ONE F4 TASK 2.5 AMENDED, WHICH IS WHY IT SITS APART FROM THE
+#: FOUR ABOVE. F3's 0.2591 m was measured OPEN LOOP - a table of twists
+#: driven with nothing reading the localiser. Under a CLOSED loop the
+#: worst single correction over all 37 driven-goal sessions is 0.8310 m,
+#: 3.21x that, and EVIDENCE_LOCALIZATION_V3.md 13.10a is the labelled
+#: addendum. The old value is kept beside it so the test below can show
+#: that its conclusion holds at BOTH - which is the only honest way to
+#: report a bound that moved under a derivation that did not.
+WORST_MAP_ODOM_STEP_M = 0.8310
+WORST_MAP_ODOM_STEP_OPEN_LOOP_M = 0.2591
 
 #: The pick aisle: the only 5.00 m corridor on this floor, rack faces at
 #: y = +-2.50 (m6/gazebo/warehouse_ver3.sdf, and EVIDENCE_MAP_V3.md 2.1).
@@ -66,6 +76,30 @@ PICK_AISLE_HALF_WIDTH_M = 2.50
 #: The station-class arrival tolerance this floor's twelve stations are
 #: specified to (m6/ipc/stations.py).
 STATION_TOLERANCE_M = 0.25
+
+#: The lateral miss the diagnosis measured, and the manoeuvre the
+#: prediction horizon has to be able to contain. EVIDENCE_NAV_V3.md 16:
+#: run `...131222` passed 0.9596 m ACROSS its goal's own travel heading
+#: having tracked its plan to a mean of 0.0427 m.
+MEASURED_LATERAL_MISS_M = 0.96
+
+#: What SmacPlannerHybrid puts between the poses of a plan on this
+#: floor, measured over the 1005 plans of the five shipped runs
+#: (0.0675-0.1060 m, medians 0.083-0.105). The align critic's gate is a
+#: count of path points and this is what turns it into a distance.
+PLAN_POSE_SPACING_M = 0.10
+
+#: What the prediction horizon is sized to reach at the transit ceiling:
+#: a quarter turn at the minimum radius (pi/2 * 1.25 = 1.9635 m) rounded
+#: up. nav2.yaml's time_steps derivation is this number divided by
+#: vx_max * model_dt.
+#:   2.2679 m - the WHOLE lateral-correction manoeuvre - was TRIED as
+#: this target and REJECTED on measurement. EVIDENCE_NAV_V3.md 16.4c:
+#: at 152 steps `ring_corner` arrived once in two against twice in
+#: three at 134, and the oscillation statistic the change was made to
+#: move did not move (0.2255 / 0.5703 rad against 0.2072 / 0.1957 /
+#: 0.5447). 13 % more work per tick for no measurable difference.
+HORIZON_TARGET_M = 2.00
 
 
 def read(*parts):
@@ -435,7 +469,13 @@ def test_the_inflation_is_a_GRADIENT_and_not_a_HARD_BAND(costmaps):
 
 
 def test_the_inflation_covers_the_LATERAL_surprise(costmaps):
+    # ON THE AMENDED JUMP FIGURE, AND THAT IS THE POINT OF THE
+    # AMENDMENT. F4 Task 2.5 measured the worst map -> odom correction
+    # under a closed loop at 0.8310 m against the 0.2591 m F3 handed
+    # over open-loop, so this bound is 0.9354 m where it used to be
+    # 0.3635 m. The radius did not move; its margin did.
     lateral = WORST_CROSS_TRACK_M + WORST_MAP_ODOM_STEP_M
+    assert lateral == pytest.approx(0.9354)
     for name, params in costmaps.items():
         radius = float(params["inflation_layer"]["inflation_radius"])
         assert radius > lateral, (
@@ -444,6 +484,19 @@ def test_the_inflation_covers_the_LATERAL_surprise(costmaps):
             "which arrives in one tick and can be entirely "
             "lateral".format(name, radius, WORST_CROSS_TRACK_M,
                              WORST_MAP_ODOM_STEP_M))
+
+
+def test_the_inflation_would_have_cleared_the_OPEN_LOOP_bound_TOO(
+        costmaps):
+    # THE CONCLUSION IS UNCHANGED BY THE AMENDMENT AND THIS IS WHAT SAYS
+    # SO. A bound that moved 3.2x and left every derivation standing is
+    # a fact worth a test rather than a sentence: the next task to touch
+    # the inflation radius can see at a glance that neither figure binds
+    # it, and that the FLOOR is what set it (the local_costmap section).
+    old_bound = WORST_CROSS_TRACK_M + WORST_MAP_ODOM_STEP_OPEN_LOOP_M
+    assert old_bound == pytest.approx(0.3635)
+    for params in costmaps.values():
+        assert float(params["inflation_layer"]["inflation_radius"]) > old_bound
 
 
 def test_the_inflation_TELLS_THE_PLANNER_ABOUT_THE_TWO_ROAD_CLASSES(
@@ -816,12 +869,56 @@ def road_graph():
 def test_every_goal_is_a_NODE_of_the_road_graph(cfg):
     graph = road_graph()
     for name, goal in cfg["nav"]["goals"].items():
+        if goal.get("route_node") is False:
+            continue
         node = (float(goal["x"]), float(goal["y"]))
         assert node in graph, (
             "nav.goals.{} is {} and m6/ipc/route.py's graph has no such "
             "node. The graph is read-only to this track and these poses "
             "are a COPY of it; this is the copy saying it has gone "
             "stale.".format(name, node))
+
+
+def test_a_goal_marked_NOT_a_route_node_really_is_not_one(cfg):
+    # THE EXEMPTION IS CHECKED IN THE OTHER DIRECTION TOO. F4 Task 2.5's
+    # fail-fast demonstration needs a goal that CANNOT be reached, and a
+    # demonstration goal that had quietly become reachable - a graph
+    # that grew a node there, a rack that moved - would pass every test
+    # in this file and demonstrate nothing at all.
+    graph = road_graph()
+    exempt = [name for name, goal in cfg["nav"]["goals"].items()
+              if goal.get("route_node") is False]
+    assert exempt, "the fail-fast demonstration goal is gone"
+    for name in exempt:
+        goal = cfg["nav"]["goals"][name]
+        node = (float(goal["x"]), float(goal["y"]))
+        assert node not in graph, (
+            "nav.goals.{} is marked route_node: false and IS a node of "
+            "the road graph".format(name))
+        assert int(goal["repeat"]) == 0, (
+            "an unreachable goal is not part of the evidence set")
+
+
+def test_the_unreachable_goal_is_inside_a_RACK_and_the_rack_is_real(cfg):
+    # NOT "somewhere empty-looking". It is read out of the world file
+    # that the frozen map was built from, so the claim "no configuration
+    # of this stack can drive there" is a geometric fact and not a
+    # guess. m6/gazebo/warehouse_ver3.sdf is read-only to this track.
+    world = open(os.path.join(_REPO, "m6", "gazebo",
+                              "warehouse_ver3.sdf"), encoding="utf-8").read()
+    block = world[world.index('<model name="RackSW3">'):]
+    block = block[:block.index("</model>")]
+    pose = [float(v) for v in
+            re.search(r"<pose>([^<]+)</pose>", block).group(1).split()]
+    size = [float(v) for v in
+            re.search(r"<size>([^<]+)</size>", block).group(1).split()]
+    goal = cfg["nav"]["goals"]["rack_sw3"]
+    assert float(goal["x"]) == pytest.approx(pose[0])
+    assert float(goal["y"]) == pytest.approx(pose[1])
+    # and the box really does enclose it
+    assert size[0] > 0.0 and size[1] > 0.0
+    assert abs(float(goal["x"]) - pose[0]) < size[0] / 2.0
+    assert abs(float(goal["y"]) - pose[1]) < size[1] / 2.0
 
 
 def test_the_default_goal_is_one_of_them_and_is_the_repeated_one(cfg):
@@ -832,8 +929,12 @@ def test_the_default_goal_is_one_of_them_and_is_the_repeated_one(cfg):
         "the headline goal is the one the repeatability claim is made "
         "on, so it is the one that is repeated")
     for name, goal in goals.items():
-        if name != default:
-            assert int(goal["repeat"]) == 1
+        if name == default or goal.get("route_node") is False:
+            # the unreachable goal is a DEMONSTRATION and not a rung of
+            # the evidence set - test_a_goal_marked_NOT_a_route_node...
+            # is what holds it to `repeat: 0`.
+            continue
+        assert int(goal["repeat"]) == 1
 
 
 def test_no_two_goals_are_the_same_pose(cfg):
@@ -892,3 +993,206 @@ def test_only_ONE_navigator_is_declared(nav):
         "navigate_to_pose"], (
         "navigate_through_poses is a pose SEQUENCE, which is an ORDER, "
         "and orders are VDA 5050's at m6")
+
+
+# ----------------------------------------------------------------------
+# THE PREDICTION HORIZON, F4 Task 2.5
+#
+# `time_steps` is a COUNT and the horizon is a DISTANCE, and the trap
+# this phase fell into is the gap between the two: a count left alone
+# while the transit ceiling was lowered is a horizon that got shorter
+# with nothing saying so. These tests are the derivation, executable.
+# ----------------------------------------------------------------------
+
+def horizon_m(nav, controller):
+    """How far one sampled trajectory reaches at the transit ceiling."""
+    return (float(controller["time_steps"]) * float(controller["model_dt"])
+            * float(controller["vx_max"]))
+
+
+def test_the_horizon_clears_the_vehicles_own_MINIMUM_TURNING_RADIUS(
+        nav, controller):
+    # A trajectory shorter than the radius it is allowed to turn on
+    # cannot show the optimiser where a turn LEADS. This is the binding
+    # constraint and the one the shipped file failed: at time_steps 56
+    # and 0.300 m/s the horizon was 0.84 m against a 1.25 m radius.
+    radius = float(controller["AckermannConstraints"]["min_turning_r"])
+    assert horizon_m(nav, controller) > radius
+
+
+def test_the_horizon_covers_a_QUARTER_TURN_at_that_radius(nav, controller):
+    # The arc over which a turn at full authority delivers its whole
+    # lateral displacement rate, and so the shortest window in which
+    # turning and not turning have visibly different outcomes. It is the
+    # binding constraint and 2.00 m is it rounded up.
+    radius = float(controller["AckermannConstraints"]["min_turning_r"])
+    quarter = math.pi / 2.0 * radius
+    assert quarter == pytest.approx(1.9635, abs=1e-3)
+    assert horizon_m(nav, controller) >= quarter
+
+
+def test_time_steps_is_the_HORIZON_TARGET_divided_by_the_speed(
+        nav, controller):
+    # THE DERIVATION AS ARITHMETIC, AND IT IS THE POINT OF THIS TEST.
+    # `time_steps` is a COUNT and the horizon is a DISTANCE. F4 Task 2
+    # lowered the transit ceiling from 0.700 to 0.300 m/s and left the
+    # count alone, which took the horizon from 1.96 m to 0.84 m with
+    # nothing saying so - and that is what disabled PathAlignCritic. A
+    # later task that moves the speed and not the count now fails HERE
+    # rather than in a goal that misses by a metre.
+    needed = math.ceil(HORIZON_TARGET_M / (float(controller["vx_max"])
+                                           * float(controller["model_dt"])))
+    assert int(controller["time_steps"]) == needed
+    assert needed == 134
+
+
+def test_the_horizon_does_NOT_have_to_contain_the_WHOLE_correction(
+        nav, controller):
+    # STATED AS A TEST BECAUSE IT IS AN ARGUMENT AND NOT AN OVERSIGHT,
+    # AND BECAUSE THE ARGUMENT WAS PUT TO THE RIG. The lateral
+    # correction the miss needed is 2.27 m of path and the horizon is
+    # 2.01 m. MPPI re-solves twenty times a second, so it needs enough
+    # of a manoeuvre to prefer starting it, not all of it.
+    #   THE OTHER SIDE WAS DRIVEN. `time_steps` was raised to 152 -
+    # 2.28 m, the whole manoeuvre - and `ring_corner` arrived once in
+    # two against twice in three at 134, with the oscillation statistic
+    # unchanged. EVIDENCE_NAV_V3.md 16.4c is the rejected rung. The
+    # horizon is not the remaining lever and this bound stays where its
+    # own derivation puts it.
+    radius = float(controller["AckermannConstraints"]["min_turning_r"])
+    manoeuvre = 2.0 * radius * math.acos(1.0 - MEASURED_LATERAL_MISS_M
+                                         / (2.0 * radius))
+    assert manoeuvre == pytest.approx(2.2679, abs=1e-3)
+    assert horizon_m(nav, controller) < manoeuvre
+    assert horizon_m(nav, controller) > manoeuvre * 0.85
+
+
+def test_the_pruned_path_is_LONGER_than_the_horizon_it_is_scored_over(
+        nav, controller):
+    # A pruned path shorter than the trajectories caps
+    # furthest_reached_path_point at the cut, which puts PathAlignCritic
+    # straight back behind its own gate.
+    assert float(controller["prune_distance"]) > horizon_m(nav, controller)
+
+
+# ----------------------------------------------------------------------
+# THE ALIGN CRITIC'S GATE - the line the diagnosis moved
+# ----------------------------------------------------------------------
+
+def test_the_align_gate_is_the_TURNING_RADIUS_in_plan_points(controller):
+    # PathAlignCritic returns without scoring unless
+    # furthest_reached_path_point >= offset_from_furthest. Its job is to
+    # keep the critic quiet until the trajectories span enough path to
+    # have a bearing on it, and on this vehicle the shortest path length
+    # over which alignment can mean anything is its own minimum turning
+    # radius: below that it cannot act on what the critic asks for.
+    radius = float(controller["AckermannConstraints"]["min_turning_r"])
+    gate = int(controller["PathAlignCritic"]["offset_from_furthest"])
+    assert gate == int(radius / PLAN_POSE_SPACING_M)
+
+
+def test_the_horizon_actually_CLEARS_that_gate_at_the_transit_ceiling(
+        nav, controller):
+    # The two numbers are useless apart: a gate the horizon cannot reach
+    # is a critic that never scores, which is exactly what F4 Task 2
+    # shipped (a gate of 20 against a horizon that reached index 13 at
+    # its very best, on 0 of 1005 plans).
+    reachable = horizon_m(nav, controller) / PLAN_POSE_SPACING_M
+    gate = int(controller["PathAlignCritic"]["offset_from_furthest"])
+    assert reachable > gate * 1.5
+
+
+def test_the_critic_that_holds_the_path_is_still_ENABLED(controller):
+    align = controller["PathAlignCritic"]
+    assert align["enabled"] is True
+    assert "PathAlignCritic" in controller["critics"]
+    assert float(align["cost_weight"]) > 0.0
+
+
+# ----------------------------------------------------------------------
+# THE NAVIGATION BUDGET - config.yaml's derivation against the tree
+# ----------------------------------------------------------------------
+
+def test_the_tree_carries_the_budget_config_yaml_DERIVES(cfg, controller):
+    budget = cfg["nav"]["budget"]
+    want = math.ceil(
+        float(budget["longest_route_m"])
+        / (float(controller["vx_max"]) * float(budget["speed_fraction"]))
+        + float(budget["recovery_allowance_s"]))
+    body = read(cfg["nav"]["bt_xml"].split("/", 1)[1])
+    found = re.search(r'<Timeout[^>]*msec="([0-9]+)"', body)
+    assert found is not None, "the tree has no navigation budget in it"
+    assert int(found.group(1)) == want * 1000
+    assert want == 335
+
+
+def test_the_budget_is_OUTSIDE_the_top_level_RecoveryNode(cfg):
+    # Inside it, each of the six retries re-arms the decorator and the
+    # bound becomes seven times the number written.
+    body = re.sub(r"<!--.*?-->", "",
+                  read(cfg["nav"]["bt_xml"].split("/", 1)[1]),
+                  flags=re.DOTALL)
+    assert body.index("<Timeout") < body.index("<RecoveryNode")
+    assert body.rindex("</Timeout>") > body.rindex("</RecoveryNode>")
+
+
+def test_the_budget_is_longer_than_a_HEALTHY_run_of_the_longest_goal(
+        cfg, controller):
+    # It has to bound a failure without ever cutting a success. The
+    # longest route at the FULL ceiling is the fastest it could go.
+    budget = cfg["nav"]["budget"]
+    fastest = float(budget["longest_route_m"]) / float(controller["vx_max"])
+    want = math.ceil(
+        fastest / float(budget["speed_fraction"])
+        + float(budget["recovery_allowance_s"]))
+    assert want > fastest * 2.0
+
+
+def test_the_bench_gives_up_BEFORE_its_own_last_resort_timeout(cfg):
+    # nav.goal_timeout_s is the bench abandoning a run nobody is
+    # watching. Both fail-fast guards have to land inside it or neither
+    # of them is a fail-fast.
+    assert float(cfg["nav"]["budget"]["recovery_allowance_s"]) > 0.0
+    watchdog = cfg["nav"]["watchdog"]
+    assert float(watchdog["closing_allowance_s"]) < float(
+        cfg["nav"]["goal_timeout_s"])
+
+
+def test_the_no_progress_margin_is_above_the_worst_CLOSED_LOOP_jump(cfg):
+    # Not because a jump could provoke the guard - it cannot, the rule
+    # is a failure to IMPROVE - but because a margin under the jump size
+    # would let a single correction reset the mark and hand the run
+    # another whole allowance.
+    assert float(cfg["nav"]["watchdog"]["required_closing_m"]) >= 0.5
+
+
+def test_the_allowance_is_a_real_distance_at_the_transit_ceiling(
+        cfg, controller):
+    # 30 s at 0.300 m/s is 9.0 m of travel for less than half a metre of
+    # net approach. Stating it as a distance is what makes it arguable.
+    travelled = (float(cfg["nav"]["watchdog"]["closing_allowance_s"])
+                 * float(controller["vx_max"]))
+    assert travelled == pytest.approx(9.0)
+    assert travelled > float(cfg["nav"]["watchdog"]["required_closing_m"]) * 10
+
+
+# ----------------------------------------------------------------------
+# THE GOAL CHECKER, re-examined
+# ----------------------------------------------------------------------
+
+def test_there_is_no_yaw_tolerance_and_no_comment_claiming_one(nav):
+    checker = nav["controller_server"]["ros__parameters"][
+        "general_goal_checker"]
+    assert checker["plugin"] == "nav2_controller::PositionGoalChecker"
+    assert "yaw_goal_tolerance" not in checker
+    # AND THE ORPHANED PARAGRAPH IS GONE. F4 Task 2 removed the
+    # parameter and left a comment describing it; a reader who trusted
+    # that comment would believe this stack holds an arrival heading.
+    body = read("nav2.yaml")
+    assert "0.15 rad = 8.6 deg" not in body
+
+
+def test_the_station_class_is_still_NOT_claimed_by_the_box(controller, nav):
+    checker = nav["controller_server"]["ros__parameters"][
+        "general_goal_checker"]
+    assert float(checker["xy_goal_tolerance"]) > STATION_TOLERANCE_M

@@ -77,6 +77,57 @@
   not there. They are kept because they are how a later task adds a
   second controller without editing this file.
 
+  ---- THE NAVIGATION BUDGET, F4 TASK 2.5 ----
+
+  `<Timeout msec="335000">` wraps the WHOLE tree, and it is the answer
+  to EVIDENCE_NAV_V3.md 15.7 item 2: "a goal that cannot be reached
+  should fail FAST, and nothing in this configuration makes it."
+  Measured, before it existed: 130.199 m driven and 459 plans published
+  for a goal 2.910 m away, and a second run that reached 479.7 s and was
+  cancelled by the bench rather than failed by the stack.
+
+  IT IS OUTSIDE THE TOP-LEVEL RecoveryNode AND THAT IS THE WHOLE POINT.
+  BT.CPP's ReactiveSequence halts every non-running child on every tick
+  ("reset the previous children, to make sure that they are in IDLE
+  state the next time we tick them"), and nav2's own `<TimeExpired>`
+  re-anchors its clock the moment it is halted - so the obvious
+  construction, a ReactiveSequence with an inverted TimeExpired beside
+  the pipeline, is a timer that can never expire. `<Timeout>` is a
+  DECORATOR: it arms once when its child starts running, halts that
+  child when the period elapses and returns FAILURE. Placed INSIDE the
+  RecoveryNode it would be re-armed by each of the six retries and the
+  bound would be seven times the number written; placed outside, the
+  number written is the bound.
+
+  WHEN IT FIRES THE TREE RETURNS FAILURE AND navigate_to_pose ABORTS.
+  That is a nav2-side abort, so it protects any consumer of the action
+  and not just tools/drive_goal.py.
+
+  THE NUMBER IS DERIVED AND config.yaml OWNS THE DERIVATION.
+  nav.budget: longest_route_m 45.709 (aisle_end's first plan, the road
+  graph's own route), speed_fraction 0.5 (the route driven at half the
+  0.300 m/s transit ceiling from end to end) and recovery_allowance_s
+  30.0 (six retries of this tree's own Wait 5.0):
+
+      ceil(45.709 / (0.300 * 0.5) + 30.0) = 335 s = 335000 ms
+
+  tests/test_nav2_params.py recomputes it from config.yaml and
+  nav2.yaml and fails if this attribute and that arithmetic disagree.
+
+  TWO THINGS IT IS NOT.
+    - It is a TIME bound and not a progress bound. It cannot tell a slow
+      legitimate route from a vehicle orbiting its goal. The
+      goal-relative guard is the bench's (config.yaml nav.watchdog), and
+      the two are complementary by design: this one bounds ANY consumer
+      crudely, that one names the actual failure precisely.
+    - Its clock is BT.CPP's TimerQueue, which is std::chrono::steady -
+      WALL time, where everything else on this track is the plant's.
+      They are the real-time factor apart, and the RTF measured over
+      these drives is 0.9963-1.0000 (EVIDENCE_NAV_V3.md 15.4, 16.5), so
+      the budget is 335 s of wall clock and at worst 333.8 s of sim.
+      That is recorded rather than hidden, and it is why the number is
+      a bound with 2x of margin rather than a tight one.
+
   THIS FILE CONTAINS NO SAFETY LOGIC. Protective stop, e-stop and safe
   torque off are onboard and hardwired in the plant this models and
   appear in no behaviour tree. The collision monitor - which F4 Task 2
@@ -86,43 +137,45 @@
 -->
 <root BTCPP_format="4" main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
-    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
-      <PipelineSequence name="NavigateWithReplanning">
-        <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
-        <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
-        <RateController hz="1.0">
-          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
-            <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
+    <Timeout msec="335000" name="NavigationBudget">
+      <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+        <PipelineSequence name="NavigateWithReplanning">
+          <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
+          <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
+          <RateController hz="1.0">
+            <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+              <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
+              <Sequence>
+                <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+                <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+              </Sequence>
+            </RecoveryNode>
+          </RateController>
+          <RecoveryNode number_of_retries="1" name="FollowPath">
+            <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}"/>
             <Sequence>
-              <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
-              <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+              <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
+              <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
             </Sequence>
           </RecoveryNode>
-        </RateController>
-        <RecoveryNode number_of_retries="1" name="FollowPath">
-          <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}"/>
-          <Sequence>
+        </PipelineSequence>
+        <Sequence>
+          <Fallback>
             <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
-            <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
-          </Sequence>
-        </RecoveryNode>
-      </PipelineSequence>
-      <Sequence>
-        <Fallback>
-          <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
-          <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
-        </Fallback>
-        <ReactiveFallback name="RecoveryFallback">
-          <GoalUpdated/>
-          <RoundRobin name="RecoveryActions">
-            <Sequence name="ClearingActions">
-              <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
-              <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
-            </Sequence>
-            <Wait wait_duration="5.0"/>
-          </RoundRobin>
-        </ReactiveFallback>
-      </Sequence>
-    </RecoveryNode>
+            <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+          </Fallback>
+          <ReactiveFallback name="RecoveryFallback">
+            <GoalUpdated/>
+            <RoundRobin name="RecoveryActions">
+              <Sequence name="ClearingActions">
+                <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+                <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+              </Sequence>
+              <Wait wait_duration="5.0"/>
+            </RoundRobin>
+          </ReactiveFallback>
+        </Sequence>
+      </RecoveryNode>
+    </Timeout>
   </BehaviorTree>
 </root>

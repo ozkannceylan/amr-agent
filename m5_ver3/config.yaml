@@ -3864,6 +3864,35 @@ nav:
       travel_yaw_rad: "-1.5707963"
       repeat: "1"
       note: "the pick aisle's EAST end, on the ring's east leg"
+    # ------------------------------------------------------------------
+    # AND ONE GOAL THAT CANNOT BE REACHED, WHICH IS THE ONLY ONE OF THESE
+    # THAT IS NOT A PLACE TO DRIVE TO. F4 Task 2.5's fail-fast has to be
+    # demonstrated in BOTH directions and a guard that has only ever been
+    # seen not firing is not a guard that has been seen.
+    #
+    # (-4.250, -4.250) IS THE CENTRE OF RackSW3, a 0.500 x 3.500 x 4.000
+    # box in m6/gazebo/warehouse_ver3.sdf - a real object on this floor
+    # with a name, spanning x -4.50..-4.00 and y -6.00..-2.50. It is
+    # LETHAL in the frozen grid, it is a metre and a half inside the
+    # nearest thing a 3.815 m truck could stand in, and no configuration
+    # of this stack can drive there. It is the same rack CONTEXT.md
+    # records being put across the m5_ver2 spawn pose.
+    #   IT IS DELIBERATELY NOT A NODE OF THE ROAD GRAPH and it carries
+    # `route_node: false` to say so. tests/test_nav2_params.py checks
+    # BOTH directions off that flag: every other goal must still be a
+    # node of m6/ipc/route.py's graph, and this one must still NOT be,
+    # because a demonstration of an unreachable goal that had quietly
+    # become reachable would pass every test and demonstrate nothing.
+    #   `repeat: 0` because it is not part of the shipped evidence set -
+    # the acceptance set is spine_north x3, ring_corner and aisle_end.
+    # ------------------------------------------------------------------
+    rack_sw3:
+      x: "-4.250"
+      y: "-4.250"
+      travel_yaw_rad: "0.0"
+      repeat: "0"
+      route_node: false
+      note: "INSIDE RackSW3 - unreachable BY CONSTRUCTION, the fail-fast demonstration"
   # ONE GOAL IS DRIVEN ONCE PER `record`, AND THE HEADLINE IS DRIVEN
   # THREE TIMES. `repeat` above is not a loop this bench runs - it is
   # what the EVIDENCE has to contain, and tools/drive_goal.py's
@@ -3879,6 +3908,86 @@ nav:
   # a budget for a stack that is struggling rather than one that is
   # stuck.
   goal_timeout_s: 480
+
+  # --------------------- THE FAIL-FAST, F4 TASK 2.5 --------------------
+  # `goal_timeout_s` above is a LAST RESORT and not a fail-fast: it is
+  # the bench giving up, three times the driving time, on a run nobody
+  # is watching. EVIDENCE_NAV_V3.md 15.7 item 2 is the finding it is the
+  # wrong answer to - "a goal that cannot be reached should fail FAST,
+  # and nothing in this configuration makes it" - measured as 130.199 m
+  # driven and 459 plans published for a goal 2.910 m away.
+  #
+  # THERE ARE TWO GUARDS AND THEY ANSWER DIFFERENT QUESTIONS. Neither is
+  # a safety function and neither inhibits motion.
+  budget:
+    # THE TREE'S GUARD - a BT.CPP `<Timeout>` decorator wrapping the
+    # whole of behavior_trees/navigate_to_pose_tricycle_v3.xml. It is
+    # nav2-side, so it protects ANY consumer of navigate_to_pose and not
+    # only this bench, and when it fires the action ABORTS.
+    #   It is a TIME bound and it is honest about that: it cannot tell a
+    # slow legitimate route from an orbit. What it bounds is the thing
+    # that must never happen again - an unbounded drive.
+    #
+    # THE NUMBER, AND tests/test_nav2_params.py RECOMPUTES IT FROM THESE
+    # THREE AND THE XML:
+    #
+    #   budget_s = ceil(longest_route_m / (vx_max * speed_fraction)
+    #                   + recovery_allowance_s)
+    #            = ceil(45.709 / (0.300 * 0.5) + 30.0)
+    #            = ceil(334.73) = 335
+    #
+    # 45.709 m is the longest FIRST PLAN this track has measured -
+    # aisle_end's, which is the road graph's own 47 m route
+    # (EVIDENCE_NAV_V3.md 15.5). vx_max is nav2.yaml's transit ceiling
+    # and is read from there, because that file owns it.
+    longest_route_m: "45.709"
+    # HALF the transit ceiling, averaged over the whole route. A healthy
+    # run averages far more than that - the fixed controller drove
+    # 16.554 m in 57.5 s, 0.288 m/s, 96 % of the ceiling - so this
+    # allows a route to be half-speed from end to end and still arrive.
+    speed_fraction: "0.5"
+    # The tree's own recovery set: six retries of a `Wait 5.0`.
+    recovery_allowance_s: "30.0"
+  watchdog:
+    # THE BENCH'S GUARD, and it is the GOAL-RELATIVE one. It watches the
+    # BELIEVED pose - map -> base_link, the same pose the goal checker
+    # sees - and requires the vehicle to keep CLOSING on the goal.
+    #   A vehicle that has driven past its goal and is orbiting satisfies
+    # nav2's own SimpleProgressChecker completely (any 0.30 m of movement
+    # in 15 s), which is why that checker cannot be the answer: it asks
+    # whether the vehicle MOVED, and the question is whether it moved
+    # TOWARD anything.
+    #
+    # THE RULE: from the last mark, the straight-line distance to the
+    # goal must improve by at least `required_closing_m` within
+    # `closing_allowance_s`, or the run is abandoned as `no_progress` -
+    # a NAMED outcome in the session file, not a timeout.
+    #
+    # BOTH NUMBERS ARE SIZED ON THE RECORDED FAILURES AND THE RULE WAS
+    # RUN AGAINST ALL TWELVE SESSIONS ON DISK BEFORE IT WAS WRITTEN
+    # (EVIDENCE_NAV_V3.md 16.7): it fires on every one of the ten runs
+    # that did not arrive and on NEITHER of the two that did.
+    #   30.0 s is 9.0 m of travel at the transit ceiling for less than
+    # half a metre of net approach, which no legitimate leg of this
+    # floor's road graph does. 0.50 m is the separation the twelve
+    # sessions gave: the arrivals never go 30 s without closing half a
+    # metre and the failures always do.
+    #   A LOCALISATION JUMP CANNOT FALSELY TRIP IT, and the asymmetry is
+    # why. The rule fires on a FAILURE TO IMPROVE. A map -> odom
+    # correction that moves the belief AWAY from the goal cannot satisfy
+    # the improvement test and so cannot reset the mark either - it
+    # simply is not an improvement; one that moves the belief TOWARD the
+    # goal resets the mark and makes the rule MORE lenient. The worst
+    # such correction measured under a closed loop is 0.6490 m
+    # (EVIDENCE_LOCALIZATION_V3.md 13.10's closed-loop addendum), and in
+    # either direction it can only delay this guard, never provoke it.
+    #
+    # WHAT IT ASSUMES, STATED: that the route CLOSES on the goal. A goal
+    # whose road-graph route must first travel AWAY from it would trip
+    # this rule legitimately, and the tree's time budget above is the
+    # guard that covers that case. None of nav.goals is such a route.
+    required_closing_m: "0.50"
+    closing_allowance_s: 30.0
   # After the action returns, keep recording. The result arrives when
   # the GOAL CHECKER passes, and the truck is still moving then: it
   # takes up to 2.07 s and 1.02 m to stop from cruise
@@ -3911,6 +4020,37 @@ nav:
     # absolute pose was unknown. It is localization.analyse.map_gap_s's
     # number and its argument: fifteen scan periods.
     map_gap_s: "1.0"
+    # THE SPEED BELOW WHICH A COMMAND IS NOT SCORED FOR CURVATURE
+    # FOLLOWING. The plan's curvature is a demand PER METRE and the yaw
+    # rate it implies is that demand times the speed, so at a stop the
+    # demand is real and the yaw rate it asks for is zero. A vehicle
+    # standing at a cusp would contribute a pile of (0, 0) pairs and
+    # flatter any gain towards its own intercept. 0.05 m/s is a sixth of
+    # the transit ceiling and ten times the cusp deadband below.
+    follow_speed_mps: "0.05"
+    # HOW MANY PLAN POSES THE CURVATURE IS TAKEN OVER. One segment is a
+    # difference of two yaws over 0.1 m and carries the planner's own
+    # quantisation; four poses is about 0.4 m on this floor's measured
+    # 0.083-0.105 m spacing - well inside the 1.25 m radius being
+    # measured and well outside the spacing.
+    curvature_span: 4
+    # THE CANDIDATE GOAL BOXES THE APPROACH CORRIDOR IS REPORTED AT.
+    # These are not tolerances and nothing is evaluated against them:
+    # they are the rungs of a table that says what each WOULD have cost
+    # in arrival heading, because a smaller box drives the vehicle
+    # deeper into an endgame that has no heading term in it. 0.25 is the
+    # station class (m6/ipc/stations.py) and 0.60 is the box this file's
+    # nav2.yaml actually ships; the rest bracket them.
+    corridor_boxes: ["2.00", "1.50", "1.00", "0.75", "0.60", "0.50",
+                     "0.40", "0.30", "0.25", "0.20", "0.15", "0.10"]
+    # A run that misses comes BACK at its goal, through a Reeds-Shepp
+    # loop, from a heading the first pass never had. The corridor is a
+    # table about ONE approach, so the walk is cut at the first local
+    # minimum the run then backs this far out of. Half a metre is above
+    # the worst closed-loop map -> odom correction measured (0.6490 m
+    # is a step, not a walk) and well under the loop it would be cut
+    # before.
+    corridor_give_up_m: "0.50"
     # A CUSP is a sign change in the commanded linear.x. Below this the
     # command is inside the converter's own creep deadband and its sign
     # is not a direction, so a crossing is counted only where a real
