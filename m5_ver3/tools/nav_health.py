@@ -87,7 +87,13 @@ import map_register                                   # noqa: E402
 
 TOOL = "nav_health"
 
-# MAINTENANCE OBLIGATION: a key read below is a key listed here.
+# MAINTENANCE OBLIGATION: a key read below is a key listed here - AND
+# THE CONVERSE. The six map/spawn keys are not read in this file: they
+# are read by map_register.seed_pose(), THROUGH THE cfg THIS FILE HANDS
+# IT, so they are keys this program reads and they are listed here for
+# the reason the obligation exists - load_config() refuses a missing one
+# by its dotted name before anything is started, where seed_pose would
+# refuse it four frames down with the localiser already up.
 REQUIRED_KEYS = (
     "isolation.ros_domain_id",
     "frames.map",

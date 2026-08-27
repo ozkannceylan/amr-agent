@@ -3721,12 +3721,6 @@ nav:
   # window and a CIRCULAR footprint of radius 0.1 m.
   costmap_sections: "local_costmap global_costmap"
 
-  # How long every nav lifecycle node has to reach ACTIVE. It is longer
-  # than localization.lifecycle_timeout_s because there are six
-  # lifecycle nodes behind four names here - each costmap is one of its
-  # own - and the global costmap has to take a copy of the same
-  # 1712 x 1196 grid that map_server spent that budget reading off disk.
-  active_timeout_s: 120
 
   # ---------------------- THE BRINGUP GATE -----------------------------
   # tools/nav_health.py, and it is ekf_health.py's and

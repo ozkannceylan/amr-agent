@@ -113,7 +113,7 @@ REQUIRED_KEYS = (
     "topics.steer_cmd", "topics.traction_cmd",
     "topics.odom_ground_truth", "topics.tf",
     "frames.map", "frames.odom", "frames.base_link",
-    "vehicle.wheelbase_m", "vehicle.spawn.x", "vehicle.spawn.y",
+    "vehicle.spawn.x", "vehicle.spawn.y",
     "vehicle.spawn.yaw",
     "map.dir", "map.name", "map.registration.file",
     "nav.params_file", "nav.goals", "nav.default_goal",
