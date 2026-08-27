@@ -1440,14 +1440,19 @@ start() {
         # without the static transform the samples are dropped
         # (EVIDENCE_FUSION.md 2.2 is the same failure on the other arm).
         local base="$CFG_FRAMES_BASE_LINK"
-        # WHERE THE FUSED ESTIMATE COMES OUT ON THIS ARM, bound here so
-        # the smoother below can close its loop on it. The two arms
-        # publish at two addresses (config.yaml topics.
-        # fuse_odometry_filtered argues why) and the CLOSED_LOOP
-        # smoother has to be told which - a parameter file cannot know.
-        # It is the shell's half of tools/evidence_core.py's
-        # fused_topic_key(), which is where every INSTRUMENT on this
-        # track asks the same question.
+        # WHERE THE FUSED ESTIMATE COMES OUT ON THIS ARM, bound here
+        # because it is what the smoother below is handed as its
+        # `odom_topic`. The two arms publish at two addresses
+        # (config.yaml topics.fuse_odometry_filtered argues why) and a
+        # parameter file cannot know which is up. It is the shell's half
+        # of tools/evidence_core.py's fused_topic_key(), which is where
+        # every INSTRUMENT on this track asks the same question.
+        #   THE SHIPPING SMOOTHER DOES NOT READ IT. smoother.yaml is
+        #   feedback: OPEN_LOOP since the A/B in EVIDENCE_NAV_V3.md 6.3.
+        #   It is passed anyway so the arm cannot drift away from the
+        #   address while that ruling is revisitable - and so that the
+        #   ONE thing it may never be, the ground truth, is decided here
+        #   rather than in a parameter file.
         FUSED_TOPIC="$CFG_TOPICS_FUSE_ODOMETRY_FILTERED"
         # WHY THE BINARY IS NAMED BY ABSOLUTE PATH rather than run
         # through `ros2 run`: `ros2 run` would find it now that
@@ -1538,12 +1543,17 @@ start() {
     #   and RTF this pair actually costs.
     #
     # THE SMOOTHER FIRST, AND IT IS AFTER THE ESTIMATOR ON PURPOSE. It is
-    # feedback: CLOSED_LOOP, so it subscribes the fused estimate -
-    # whichever arm is up, which is what $FUSED_TOPIC carries - and a
-    # subscriber started before its publisher only spends its first
-    # moments limiting against nothing. It NEVER subscribes the ground
-    # truth: F2 constraint 13 and F4 constraint 18, and the address it
-    # is given here is the one thing that could break that.
+    # handed the fused estimate as its `odom_topic` - whichever arm is
+    # up, which is what $FUSED_TOPIC carries - and a subscriber started
+    # before its publisher only spends its first moments limiting
+    # against nothing. It NEVER subscribes the ground truth: F2
+    # constraint 13 and F4 constraint 18, and the address it is given
+    # here is the one thing that could break that.
+    #   AND ON THE SHIPPING RULING IT DOES NOT SUBSCRIBE AT ALL.
+    #   smoother.yaml is feedback: OPEN_LOOP - the crib specifies
+    #   CLOSED_LOOP and EVIDENCE_NAV_V3.md 6.3 is the A/B that reversed
+    #   it on this vehicle, whose estimate is deliberately a bad
+    #   instrument for a limiter to close on.
     #   EVERYTHING ON THIS COMMAND LINE IS AN ADDRESS OR A LIFECYCLE
     #   FACT. What is LIMITED and to what is smoother.yaml's, checked
     #   above for the node name it is addressed to; use_sim_time is a

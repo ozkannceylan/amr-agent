@@ -346,11 +346,15 @@ def _make_node_class(Node, Twist, Float64, JointState, SpeedLimit,
                 # this vehicle genuinely HAS a lateral velocity of
                 # d * yaw_rate whenever it turns - it is the term
                 # nodes/wheel_odom_core.py publishes and the EKF fuses,
-                # and the smoother COPIES IT THROUGH from the estimate
-                # (measured on this rig 2026-08-27, in isolation on domain
-                # 99: with CLOSED_LOOP feedback and a zero acceleration
-                # limit on that axis, a measured vy of 0.0200 m/s comes
-                # out as 0.0200 m/s whatever is commanded).
+                # and a CLOSED_LOOP smoother COPIES IT THROUGH from the
+                # estimate (measured on this rig 2026-08-27, in isolation
+                # on domain 99: with that feedback and a zero
+                # acceleration limit on the lateral axis, a measured vy
+                # of 0.0200 m/s comes out as 0.0200 m/s whatever is
+                # commanded). smoother.yaml ships OPEN_LOOP, so on
+                # today's stack the term can only have been PUT there -
+                # which is what makes the residual below the right thing
+                # to print and the wrong thing to threshold.
                 #   SO A WARNING WOULD BE WRONG ABOUT ITS OWN SUBJECT.
                 #   The crib warns here because "something upstream
                 #   believes this base is holonomic"; on THIS chain the

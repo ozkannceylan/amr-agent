@@ -195,11 +195,11 @@ def test_the_smoother_dead_man_is_LONGER_than_the_converters():
 
 def test_no_topic_or_frame_is_spelled_in_the_parameter_file():
     # The ownership split, as an assertion. Every ADDRESS on this chain
-    # is config.yaml's and reaches this node as a `-p` override.
-    p = params()
-    for key in p:
-        assert "topic" not in key or key == "odom_topic" and False, key
-    for value in p.values():
+    # is config.yaml's and reaches this node as a `-p` override from
+    # m5v3.sh - including odom_topic, which has to follow the estimator
+    # arm and therefore cannot be pinned here at all.
+    for key, value in params().items():
+        assert "topic" not in key, key
         assert not (isinstance(value, str) and value.startswith("/")), value
 
 

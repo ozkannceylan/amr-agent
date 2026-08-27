@@ -3250,9 +3250,12 @@ localization:
 #                  = model.sdf's own motor terminals
 #
 # There is no bypass and no branch. GROUND TRUTH IS NOT IN IT: nothing on
-# this path subscribes topics.odom_ground_truth, and the one thing that
-# closes a loop here - the smoother's CLOSED_LOOP feedback - closes it on
-# the ESTIMATE (F2 global constraint 13).
+# this path subscribes topics.odom_ground_truth. The one thing that COULD
+# have closed a loop here - the smoother's feedback - is handed the
+# ESTIMATE and never the reference (F2 global constraint 13), and since
+# smoother.yaml's A/B it ships OPEN_LOOP and does not read even that. The
+# whole path is open loop; every correction it will ever make is F4 Task
+# 2's controller, one layer up.
 #
 # NOTHING HERE IS A SAFETY PARAMETER. The converter inhibits nothing,
 # latches nothing and stops nothing; a refused command is a command not
