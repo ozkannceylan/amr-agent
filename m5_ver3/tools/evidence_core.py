@@ -188,6 +188,34 @@ def summarise(values):
                  minimum=min(values), maximum=max(values))
 
 
+def correlation(xs, ys):
+    """Pearson's r of two equal-length series, or None where it has none.
+
+    NONE AND NOT ZERO WHEN EITHER SERIES IS FLAT. r is a covariance
+    divided by two spreads, and a series with no spread has no
+    correlation with anything - reporting 0.0 there would read as "these
+    two are unrelated", which is a claim, where the truth is that the
+    question was not asked. tools/drive_goal.py's curvature_following
+    prints it beside a regression slope and the pair is only readable if
+    a missing r looks missing.
+    """
+    xs = [float(v) for v in xs]
+    ys = [float(v) for v in ys]
+    if len(xs) != len(ys):
+        raise EvidenceError(
+            "correlation: {} against {} - these are two readings of the "
+            "SAME samples".format(len(xs), len(ys)))
+    if len(xs) < 2:
+        return None
+    mx, my = mean(xs), mean(ys)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    sxx = math.sqrt(sum((x - mx) ** 2 for x in xs))
+    syy = math.sqrt(sum((y - my) ** 2 for y in ys))
+    if sxx < 1e-12 or syy < 1e-12:
+        return None
+    return sxy / (sxx * syy)
+
+
 def remove_mean(values):
     """The readings about their own mean.
 
@@ -2060,12 +2088,22 @@ class Table(object):
         return list(zip(*cols))
 
 
-def read_csv(path):
+def read_csv(path, allow_empty=False):
     """One headered CSV, as columns.
 
     AN EMPTY CAPTURE IS A REFUSAL AND NOT AN EMPTY TABLE. A stream that
     delivered a header and no rows would otherwise reach a statistic and
     come back as a plausible-looking zero.
+
+    `allow_empty` IS FOR THE ONE CASE WHERE THE EMPTINESS IS THE
+    MEASUREMENT, and it has exactly one caller. F4 Task 2.5's fail-fast
+    is demonstrated on a goal inside a rack: the planner refuses it, so
+    the controller publishes NOTHING and four of tools/drive_goal.py's
+    nine streams are empty for the reason being demonstrated. That
+    caller passes True for those four streams only, still requires the
+    POSE streams (which come from the plant and the estimator and run
+    whether or not anything is commanded), and then prints the run as a
+    vehicle that never moved rather than as a table of zeros.
     """
     if not os.path.isfile(path):
         raise EvidenceError("the capture {} exists".format(path))
@@ -2092,7 +2130,7 @@ def read_csv(path):
                 except ValueError:
                     columns[name].append(cell)
             n += 1
-    if n == 0:
+    if n == 0 and not allow_empty:
         raise EvidenceError(
             "the capture {} recorded at least one sample; it has a header "
             "and no rows".format(path))
@@ -2925,6 +2963,14 @@ def _selftest():
     check("a path deviation is measured to the SEGMENT and not to the "
           "line it lies on",
           point_to_polyline(3.0, 0.0, [(0.0, 0.0), (1.0, 0.0)]) == 2.0)
+    check("r is +1 on a series against itself",
+          abs(correlation([1.0, 2.0, 5.0], [1.0, 2.0, 5.0]) - 1.0) < 1e-12)
+    check("r is -1 on a series against its own negative",
+          abs(correlation([1.0, 2.0, 5.0], [-1.0, -2.0, -5.0]) + 1.0) < 1e-12)
+    check("a FLAT series has no correlation rather than a zero one",
+          correlation([2.0, 2.0, 2.0], [1.0, 2.0, 3.0]) is None)
+    check("one sample is not a correlation",
+          correlation([1.0], [1.0]) is None)
     check("a cusp is a SIGN CHANGE above the creep deadband, and a ramp "
           "through zero is not several of them",
           sign_changes([-0.7, -0.3, -0.001, 0.0, 0.002, 0.3, 0.7],

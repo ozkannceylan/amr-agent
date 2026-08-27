@@ -94,6 +94,7 @@ import datetime
 import hashlib
 import math
 import os
+import re
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -116,11 +117,14 @@ REQUIRED_KEYS = (
     "vehicle.spawn.x", "vehicle.spawn.y",
     "vehicle.spawn.yaw",
     "map.dir", "map.name", "map.registration.file",
-    "nav.params_file", "nav.goals", "nav.default_goal",
+    "nav.params_file", "nav.bt_xml", "nav.goals", "nav.default_goal",
     "nav.goal_timeout_s", "nav.settle_s", "nav.prelude_s",
+    "nav.watchdog.required_closing_m", "nav.watchdog.closing_allowance_s",
     "nav.analyse.arrival_window_s", "nav.analyse.at_rest_mps",
     "nav.analyse.jump_response_s", "nav.analyse.map_gap_s",
-    "nav.analyse.cusp_speed_mps",
+    "nav.analyse.cusp_speed_mps", "nav.analyse.follow_speed_mps",
+    "nav.analyse.corridor_boxes", "nav.analyse.corridor_give_up_m",
+    "nav.analyse.curvature_span",
     "evidence.dir", "evidence.wait_first_s", "evidence.min_samples",
     "paths.traction_file",
 )
@@ -147,6 +151,21 @@ STREAMS = collections.OrderedDict((
     ("feedback", ("t_s", "distance_remaining", "navigation_time",
                   "recoveries")),
 ))
+
+#: The streams that exist only because NAV2 PRODUCED SOMETHING - a plan,
+#: or a twist. All five are empty on a goal the planner refuses, and
+#: that emptiness is the measurement rather than a fault: see load(),
+#: analyse_session() and config.yaml nav.goals.rack_sw3. The five that
+#: are NOT here come from the plant and the estimator, which run whether
+#: or not anything was commanded, and are still refused empty by name.
+NAV_OUTPUT_STREAMS = ("cmd_vel", "cmd_vel_smoothed", "steer_cmd",
+                      "traction_cmd", "plan")
+
+#: The subset of those that a MOVING vehicle must have. `plan` is not
+#: one: a planner can plan a path the controller then refuses to follow,
+#: and that is a different failure from this one.
+COMMANDED_STREAMS = ("cmd_vel", "cmd_vel_smoothed", "steer_cmd",
+                     "traction_cmd")
 
 #: One goal, resolved. `pose_yaw` is what goes on the wire; `travel_yaw`
 #: is what the table said and what a reader pictures.
@@ -231,10 +250,61 @@ def nav_label(cfg):
     path = os.path.join(_common.REPO, cfg.s("nav.params_file"))
     with open(path, "rb") as handle:
         raw = handle.read()
+    tree_path = os.path.join(_common.REPO, cfg.s("nav.bt_xml"))
+    with open(tree_path, "rb") as handle:
+        tree_raw = handle.read()
+    found = re.search(rb'<Timeout[^>]*msec="([0-9]+)"', tree_raw)
     return collections.OrderedDict((
         ("nav_params", cfg.s("nav.params_file")),
         ("nav_params_md5", hashlib.md5(raw).hexdigest()[:8]),
+        # AND THE SAME FILE HASHED AS A CONFIGURATION RATHER THAN AS
+        # BYTES, WHICH IS THE ONE THAT MEANS WHAT THE LABEL IS FOR.
+        # `nav=on@<md5>` is the raw bytes, so a DOCUMENTATION-ONLY edit
+        # re-labels a configuration and `analyse` then refuses to table
+        # a measured set beside the very file it was measured on. That
+        # is not hypothetical: it happened to F4 Task 2's shipped set
+        # (`d430334b` -> `6555ac39`, comments only) and twice more
+        # during F4 Task 2.5.
+        #   This is the parsed parameter tree, dumped canonically with
+        # its keys sorted, so it changes if and only if a VALUE changes.
+        # Two sessions with the same `nav_config_md5` were driven by the
+        # same stack whatever the comments around it said, and a reader
+        # can prove it rather than argue it.
+        #   THE `nav=` LABEL IS NOT CHANGED and this does not replace
+        # it: that label is written by m5v3.sh, which cannot
+        # canonicalise YAML in bash, and the two have to agree. This is
+        # recorded BESIDE it.
+        ("nav_config_md5", config_md5(path)),
+        # AND THE TREE, WHICH THE `nav=` LABEL DOES NOT CARRY. `nav=on@
+        # <md5>` is nav2.yaml's hash alone, so two runs behind two
+        # DIFFERENT behaviour trees wear the same label and `analyse`
+        # would table them together. F4 Task 2.5 put a navigation budget
+        # in the tree, which makes that a live hazard rather than a
+        # theoretical one, so the tree's own hash and the budget it
+        # carries are written beside it. A session recorded before this
+        # existed simply has no such lines, which is `loc=none`'s rule:
+        # a missing line is an older bench and not a value.
+        ("nav_bt", cfg.s("nav.bt_xml")),
+        ("nav_bt_md5", hashlib.md5(tree_raw).hexdigest()[:8]),
+        ("nav_budget_ms", int(found.group(1)) if found else 0),
     ))
+
+
+def config_md5(path):
+    """The md5 of a ROS parameter file's PARAMETERS, not of its bytes.
+
+    Comments and whitespace are not configuration. `yaml.safe_load` then
+    a canonical `yaml.safe_dump` with sorted keys reduces the file to
+    exactly what rclcpp will apply, and hashing that gives a label that
+    moves when the STACK moves and stays still when only the argument
+    for it is rewritten.
+    """
+    import yaml
+    with open(path, "r", encoding="utf-8") as handle:
+        parsed = yaml.safe_load(handle)
+    canonical = yaml.safe_dump(parsed, default_flow_style=False,
+                               sort_keys=True).encode("utf-8")
+    return hashlib.md5(canonical).hexdigest()[:8]
 
 
 def describe(cfg, goal):
@@ -297,7 +367,15 @@ def sessions_in(cfg):
 
 def load(cfg, session):
     path = session_dir(cfg, session)
-    tables = {name: ec.read_csv(os.path.join(path, name + ".csv"))
+    # THE FOUR COMMAND STREAMS MAY BE EMPTY AND THE FIVE POSE STREAMS
+    # MAY NOT. A goal the planner refuses produces a recording in which
+    # the controller published nothing at all - which is the fail-fast's
+    # own demonstration (config.yaml nav.goals.rack_sw3) - and a reader
+    # that refused it would be a bench unable to read its own most
+    # important run. Every other stream comes from the plant or the
+    # estimator and is still refused empty by name.
+    tables = {name: ec.read_csv(os.path.join(path, name + ".csv"),
+                                allow_empty=name in NAV_OUTPUT_STREAMS)
               for name in STREAMS}
     with open(os.path.join(path, "session.txt"), encoding="utf-8") as handle:
         fields = ec.parse_state_file(handle.read())
@@ -448,6 +526,289 @@ def closest_approach(goal, rows, lo, hi):
                     split.along, split.cross)
 
 
+#: Where a run stopped closing on its goal, and what the distance was
+#: there. `t` is the plant's clock; `distance` is straight-line metres
+#: from the BELIEVED pose to the goal, which is the pose the goal
+#: checker sees.
+Stalled = collections.namedtuple("Stalled", "t distance mark since_s")
+
+
+class ClosingWatch:
+    """Is this run still getting CLOSER to its goal?
+
+    THE QUESTION nav2's OWN PROGRESS CHECKER CANNOT ASK.
+    `nav2_controller::SimpleProgressChecker` is satisfied by
+    `required_movement_radius` of MOVEMENT in `movement_time_allowance`,
+    and a vehicle that has driven past its goal and is orbiting it
+    satisfies that completely - it moves 0.30 m every second. The
+    failure F4 Task 2 measured is 130.199 m driven and 459 plans
+    published for a goal 2.910 m away, and no amount of tightening a
+    movement test reaches it, because the vehicle was moving the whole
+    time. This asks about the GOAL instead.
+
+    THE RULE, AND IT IS A FAILURE TO IMPROVE RATHER THAN A SPEED.
+    A MARK is kept: the smallest distance the run has earned. Whenever
+    the vehicle beats the mark by at least `closing_m` the mark moves
+    and the clock restarts. If `allowance_s` passes without the mark
+    moving, the run has stopped closing and `step` returns the verdict.
+
+    WHY THE MARGIN AND NOT ANY IMPROVEMENT AT ALL. A vehicle creeping in
+    at a millimetre a second improves on its mark forever, and a rule
+    that reset on that would never fire on the one case it exists for.
+
+    AND WHY A LOCALISATION JUMP CANNOT PROVOKE IT. A `map` -> `odom`
+    correction that moves the belief AWAY from the goal is not an
+    improvement, so it neither moves the mark nor counts as progress;
+    one that moves the belief TOWARD the goal moves the mark and makes
+    the rule more lenient. Either way it can only delay this guard.
+
+    IT COMMANDS NOTHING AND IT IS NOT A SAFETY FUNCTION. What it
+    produces is a verdict; what the caller does with it - cancel, or
+    write it down - is the caller's.
+    """
+
+    def __init__(self, closing_m, allowance_s):
+        self.closing_m = float(closing_m)
+        self.allowance_s = float(allowance_s)
+        self.mark = None
+        self.t_mark = None
+
+    def step(self, t, distance):
+        """None while it is still closing; a `Stalled` when it is not."""
+        t = float(t)
+        distance = float(distance)
+        if self.mark is None or distance <= self.mark - self.closing_m:
+            self.mark = distance
+            self.t_mark = t
+            return None
+        since = t - self.t_mark
+        if since > self.allowance_s:
+            return Stalled(t=t, distance=distance, mark=self.mark,
+                           since_s=since)
+        return None
+
+
+def no_progress_at(samples, closing_m, allowance_s):
+    """`ClosingWatch` run over a whole recording, or None.
+
+    ONE IMPLEMENTATION AND TWO ENTRY POINTS. `record` steps the watch
+    live off /tf and `analyse` runs this over a session already on disk.
+    Two copies of a rule drift exactly the way two copies of a value do,
+    so this is a loop over the same object and not a second rule.
+
+    THE RULE IS THE SAME OBJECT AND THE INPUT IS NOT QUITE, WHICH IS
+    WORTH SAYING BECAUSE IT HAS ALREADY MATTERED ONCE. Live, `record`
+    composes `map` -> `base_link` on every `odom` -> `base_link` message
+    using the LATEST `map` -> `odom` - a zero-order hold, which is all a
+    running node can do. Offline, `analyse` uses
+    evidence_core.compose_rows(), which INTERPOLATES the parent because
+    that is what a tf2 listener would have returned. The two differ by
+    centimetres, and on a run whose distance-to-goal is swinging by
+    metres that is enough to move a mark across the threshold: session
+    `goal-ring_corner-20260827-180823` was abandoned by the live watch
+    and is not caught by this replay of it. Neither reading is wrong and
+    the difference is the reconstruction, not the rule.
+    """
+    watch = ClosingWatch(closing_m, allowance_s)
+    for t, distance in samples:
+        verdict = watch.step(t, distance)
+        if verdict is not None:
+            return verdict
+    return None
+
+
+#: How much of the yaw rate the PLAN required did the controller
+#: actually command. `gain` is None when the plan asked for no turn at
+#: all over the whole window, because there is then nothing to be a
+#: fraction of.
+Following = collections.namedtuple(
+    "Following", "n gain r demand_rms required commanded")
+
+
+def plan_curvature_at(poses, x, y, span):
+    """The PLAN's own curvature, 1/m, at the pose nearest (x, y).
+
+    A PLANNED PATH CARRIES A HEADING PER POSE and the rate that heading
+    turns per metre of path IS the curvature the vehicle would have to
+    hold to stay on it. Taken over ONE segment that is a difference of
+    two noisy yaws over 0.1 m; `span` poses of it is the same quantity
+    with the quantisation averaged out, and on this floor's 0.083-0.105
+    m plan spacing four poses is about 0.4 m - well inside the 1.25 m
+    radius being measured and well outside the spacing.
+
+    None where the span has no length in it: the tail of a path, or a
+    cusp where consecutive poses sit on top of each other.
+    """
+    if len(poses) < 2:
+        return None
+    points = [(px, py) for px, py, _ in poses]
+    near = min(range(len(points)),
+               key=lambda i: math.hypot(points[i][0] - x, points[i][1] - y))
+    far = min(near + int(span), len(poses) - 1)
+    if far <= near:
+        return None
+    arc = ec.polyline_length(points[near:far + 1])
+    if arc < 1e-6:
+        return None
+    return ec.normalise_angle(poses[far][2] - poses[near][2]) / arc
+
+
+def curvature_demand(cmd_rows, truth_rows, plans, lo, hi, deadband, span):
+    """(required, commanded) yaw rates over a run, sample for sample.
+
+    THE MERGE IS A WALK AND NOT A SEARCH, because both streams are in
+    time order and a run that did not arrive carries ten thousand
+    commands against ten thousand truth samples and four hundred plans.
+
+    SAMPLES BELOW `deadband` ARE DROPPED. Curvature is a demand PER
+    METRE and the yaw rate it implies is that demand times the speed;
+    at a stop the demand is real and the yaw rate it asks for is zero,
+    so a vehicle standing at a cusp would contribute a pile of (0, 0)
+    pairs that flatter any gain towards whatever the intercept is.
+    """
+    required, commanded = [], []
+    truth_i, plan_i = 0, -1
+    for row in cmd_rows:
+        t = row[0]
+        if not (lo <= t <= hi):
+            continue
+        while (truth_i + 1 < len(truth_rows)
+               and truth_rows[truth_i + 1][0] <= t):
+            truth_i += 1
+        while plan_i + 1 < len(plans) and plans[plan_i + 1][0] <= t:
+            plan_i += 1
+        if plan_i < 0 or not truth_rows or abs(row[2]) < deadband:
+            continue
+        here = truth_rows[truth_i]
+        demand = plan_curvature_at(plans[plan_i][1], here[1], here[2], span)
+        if demand is None:
+            continue
+        required.append(demand * abs(row[2]))
+        commanded.append(row[3])
+    return (required, commanded)
+
+
+def curvature_following(required, commanded):
+    """The gain of the commanded yaw rate on the yaw rate the plan needed.
+
+    WHY THE DEVIATION FIGURE CANNOT ANSWER THIS AND THIS CAN. The tree
+    replans at 1 Hz and every plan is anchored at the vehicle's own
+    pose, so the vehicle is ON its path by construction and a deviation
+    measured against the plan standing at the time can be small on a
+    controller that is not steering the path at all - which is exactly
+    what F4 Task 2 measured (mean 0.040-0.113 m) on runs that missed
+    their goals by a metre. This asks the other question: the plan
+    carries a curvature at the vehicle, that curvature times the
+    vehicle's speed IS a yaw rate, and the controller either commanded
+    it or did not.
+
+    THE GAIN IS A REGRESSION THROUGH THE ORIGIN AND NOT A RATIO OF
+    MEANS. A leg that turns one way and then the other has a mean
+    demand near zero, and a ratio of means would read a perfect
+    controller as a dead one. sum(a*b)/sum(a*a) is the least-squares
+    slope of commanded on required with no intercept - it is 1.0 for a
+    controller that obeys, 0.0 for one that ignores.
+
+    `r` IS BESIDE IT BECAUSE THE TWO SAY DIFFERENT THINGS. A gain near
+    zero with a correlation near zero is a controller not listening; a
+    gain near zero with a high correlation is one listening and
+    saturated. Both were seen while this instrument was being written.
+    """
+    required = [float(v) for v in required]
+    commanded = [float(v) for v in commanded]
+    if not required:
+        raise ec.EvidenceError(
+            "curvature_following: an empty window has no gain in it")
+    if len(required) != len(commanded):
+        raise ec.EvidenceError(
+            "curvature_following: {} required against {} commanded - "
+            "these are two readings of the SAME samples".format(
+                len(required), len(commanded)))
+    denominator = sum(value * value for value in required)
+    gain = (sum(a * b for a, b in zip(required, commanded)) / denominator
+            if denominator > 1e-12 else None)
+    return Following(n=len(required), gain=gain,
+                     r=ec.correlation(required, commanded),
+                     demand_rms=math.sqrt(denominator / len(required)),
+                     required=ec.summarise(required),
+                     commanded=ec.summarise(commanded))
+
+
+#: One rung of the approach corridor: the moment the BELIEVED pose
+#: first came inside a candidate goal box, and what the heading was
+#: doing there. `truth` is the ground truth at that same moment.
+Rung = collections.namedtuple("Rung", "box t believed truth dyaw")
+
+
+def first_approach(goal, rows, lo, hi, give_up_m):
+    """The rows of the FIRST run at the goal, cut where it gave up.
+
+    A RUN THAT MISSES ITS GOAL COMES BACK AT IT, and on this vehicle it
+    comes back through a Reeds-Shepp loop with the heading anywhere at
+    all. Every rung of the corridor below has to be read off ONE pass,
+    because what it is a table about is what an approach COSTS - and a
+    second pass is a different approach, from a different heading,
+    after a manoeuvre the first one did not make.
+
+    The cut is the first local minimum the run then walks `give_up_m`
+    back out of. A run that arrives is never cut and returns whole.
+    """
+    inside = [row for row in rows if lo <= float(row[0]) <= hi]
+    best = None
+    for i, row in enumerate(inside):
+        distance = math.hypot(float(row[1]) - goal.x, float(row[2]) - goal.y)
+        if best is None or distance < best:
+            best = distance
+        elif distance > best + give_up_m:
+            return inside[:i]
+    return inside
+
+
+def approach_corridor(goal, believed, truth, lo, hi, boxes, give_up_m):
+    """What each candidate goal box would have cost in HEADING.
+
+    THE QUESTION F5's DOCKING INHERITS, AND IT IS A CURVE RATHER THAN A
+    NUMBER. A goal box is latched on the BELIEVED pose the first time
+    the vehicle is inside it, so the box decides how far into its own
+    endgame the vehicle drives - and on a tricycle the endgame is where
+    the heading is spent. Inside `GoalCritic.threshold_to_consider` the
+    path critics have handed over to a point attraction with no heading
+    in it, and nulling a residual lateral offset against a 1.25 m
+    minimum radius costs yaw at a rate this table measures.
+
+    For each box: the first BELIEVED row inside it, the TRUTH at that
+    same moment, and the heading error against the goal's pose yaw. A
+    box the run never reached is absent rather than reported as its own
+    closest approach, which would read as a rung that was met.
+    """
+    walk = first_approach(goal, believed, lo, hi, give_up_m)
+    if not walk:
+        return ([], None)
+    closest = min(math.hypot(float(r[1]) - goal.x, float(r[2]) - goal.y)
+                  for r in walk)
+    out = []
+    for box in sorted((float(b) for b in boxes), reverse=True):
+        for row in walk:
+            distance = math.hypot(float(row[1]) - goal.x,
+                                  float(row[2]) - goal.y)
+            if distance > box:
+                continue
+            here = None
+            for candidate in truth:
+                if float(candidate[0]) <= float(row[0]):
+                    here = candidate
+                else:
+                    break
+            out.append(Rung(
+                box=box, t=float(row[0]), believed=distance,
+                truth=(math.hypot(float(here[1]) - goal.x,
+                                  float(here[2]) - goal.y)
+                       if here is not None else None),
+                dyaw=abs(ec.normalise_angle(float(row[3]) - goal.pose_yaw))))
+            break
+    return (out, closest)
+
+
 def steer_activity(rows):
     """Total travel, worst step and range of the steer terminal.
 
@@ -522,9 +883,69 @@ def analyse_session(cfg, session):
     print("result    status {}  error_code {}  {}".format(
         fields.get("action_status", "?"), fields.get("error_code", "?"),
         "(cancelled by this bench)" if fields.get("cancelled") == "1" else ""))
+    # AND WHY IT ENDED, BY NAME. A session recorded before F4 Task 2.5
+    # has no `outcome` line at all, which is `loc=none`'s rule: a
+    # missing line is an older bench and not a value, so it is named as
+    # such rather than defaulted to `ran`.
+    outcome = fields.get("outcome")
+    if outcome is None:
+        print("outcome   UNRECORDED - this session predates the "
+              "fail-fast guards")
+    elif outcome == "no_progress":
+        print("outcome   NO PROGRESS - the bench's watchdog abandoned it. "
+              "It was {} m".format(fields.get("no_progress_distance_m", "?")))
+        print("          from the goal in the pose the checker sees, "
+              "having gone {} s".format(fields.get("no_progress_since_s",
+                                                   "?")))
+        print("          without closing {} m on its best of {} m. "
+              "config.yaml".format(
+                  cfg.s("nav.watchdog.required_closing_m"),
+                  fields.get("no_progress_mark_m", "?")))
+        print("          nav.watchdog owns the rule; "
+              "drive_goal.ClosingWatch is it.")
+    elif outcome == "timeout":
+        print("outcome   TIMEOUT - nav.goal_timeout_s, which is the LAST "
+              "resort and not")
+        print("          a fail-fast. A run that reaches it got past both "
+              "guards.")
+    else:
+        print("outcome   {} - nav2 finished this run itself".format(outcome))
+    if fields.get("nav_config_md5"):
+        same = fields.get("nav_params_md5") == fields.get("nav_config_md5")
+        print("config    the PARAMETERS this run was driven by hash to "
+              "{}".format(fields["nav_config_md5"]))
+        if not same:
+            print("          (the FILE hashes to {} - the difference "
+                  "between the two is".format(
+                      fields.get("nav_params_md5", "?")))
+            print("          comments, and only the first of them is a "
+                  "claim about the stack)")
+    if fields.get("nav_budget_ms"):
+        print("budget    the tree carries a {:g} s navigation budget "
+              "({}@{})".format(
+                  float(fields["nav_budget_ms"]) / 1000.0,
+                  os.path.basename(fields.get("nav_bt", "?")),
+                  fields.get("nav_bt_md5", "?")))
 
+    # A RUN IN WHICH THE VEHICLE NEVER MOVED IS A RECORDING AND NOT A
+    # BROKEN ONE, and F4 Task 2.5 is why this exception exists. The
+    # fail-fast has to be demonstrated on a goal that CANNOT be reached;
+    # `nav.goals.rack_sw3` is inside a rack, the planner refuses it
+    # ("no valid path found") and the controller therefore publishes
+    # nothing at all - so `cmd_vel`, `cmd_vel_smoothed` and both
+    # terminals are EMPTY. Refusing that session would mean this bench
+    # could not read its own most important demonstration, and the
+    # streams that are empty are empty for the reason being
+    # demonstrated.
+    #   THE POSE STREAMS ARE STILL REQUIRED. Ground truth and both /tf
+    # edges come from the plant and the estimator, which run whether or
+    # not anything is commanded, so a session missing THOSE is a
+    # recording that went wrong and is still refused by name.
+    commanded = tables["cmd_vel"].n > 0
     for stream, table in tables.items():
         if stream in ("plan", "feedback"):
+            continue
+        if not commanded and stream in COMMANDED_STREAMS:
             continue
         if table.n < cfg.i("evidence.min_samples"):
             raise ec.EvidenceError(
@@ -632,6 +1053,56 @@ def analyse_session(cfg, session):
                   math.hypot(near.x - nearb.x, near.y - nearb.y)
                   if near is not None else float("nan")))
 
+    # ---- AND WHAT EACH CANDIDATE BOX WOULD HAVE COST IN HEADING ------
+    # DELIVERABLE 4's INSTRUMENT. The CLOSEST row above says where the
+    # vehicle got to. This says what it would have cost to demand more:
+    # the box decides how far into the endgame the vehicle drives, and
+    # the endgame is where a tricycle spends its heading. nav2.yaml's
+    # general_goal_checker quotes this table and F5's docking inherits
+    # the ruling it carries.
+    if world:
+        rungs, closest_seen = approach_corridor(
+            goal, world, truth, t_sent, t_done,
+            cfg.raw("nav.analyse.corridor_boxes"),
+            cfg.f("nav.analyse.corridor_give_up_m"))
+        if rungs:
+            print("CORRIDOR  the FIRST approach, cut where it gave up. "
+                  "Closest belief on it:")
+            print("          {:.4f} m.  box | believed | truth | "
+                  "|heading error|".format(closest_seen))
+            for rung in rungs:
+                print("          {:5.2f} m  {:8.4f}  {:8s}  {:.4f} rad "
+                      "({:4.1f} deg)  t+{:.1f}s".format(
+                          rung.box, rung.believed,
+                          "{:.4f}".format(rung.truth)
+                          if rung.truth is not None else "-",
+                          rung.dyaw, math.degrees(rung.dyaw),
+                          rung.t - t_sent))
+            print("          A BOX THE RUN NEVER REACHED IS ABSENT and "
+                  "not reported as its")
+            print("          own closest approach. The heading column is "
+                  "what a tighter box")
+            print("          would have had to accept - it is not "
+                  "required by this checker")
+            print("          (nav2.yaml general_goal_checker is "
+                  "position-only) and it is")
+            print("          what a station-class arrival would have to "
+                  "buy back with a")
+            print("          STRAIGHT final leg. EVIDENCE_NAV_V3.md 16.6.")
+
+    if not commanded:
+        print("")
+        print("STILL     THE CONTROLLER NEVER PUBLISHED A TWIST, so every "
+              "block below this")
+        print("          one is absent rather than empty. {} plan(s) were "
+              "published and".format(len(plans_of(tables["plan"]))))
+        print("          the vehicle did not move: on this track that is "
+              "what a goal the")
+        print("          planner REFUSES looks like from the outside. Read "
+              "the outcome")
+        print("          line above and m5_ver3/logs/planner_server.log.")
+        return
+
     # ---- what the controller did -------------------------------------
     print("")
     hz = ec.rate_from_stamps([row[0] for row in cmd])
@@ -714,6 +1185,54 @@ def analyse_session(cfg, session):
               "{:.3f} m straight line".format(length, straight))
     print("          the goal took {:.2f} s of sim time from send to "
           "result".format(t_done - t_sent))
+
+    # ---- IS THE CONTROLLER STEERING THE PATH, OR MERELY ON IT? -------
+    # THE QUESTION THE DEVIATION FIGURE ABOVE CANNOT ASK. Every plan is
+    # anchored at the vehicle's own pose, so a vehicle that never turns
+    # is on its path by construction and the deviation stays small. F4
+    # Task 2 measured 0.040-0.113 m of it on runs that missed by a
+    # metre. This takes the plan's own curvature at the vehicle, turns
+    # it into the yaw rate that curvature requires at the speed being
+    # driven, and asks what fraction of it the controller commanded.
+    # EVIDENCE_NAV_V3.md 16 is what it found.
+    if plans and cmd:
+        required, commanded = curvature_demand(
+            cmd, truth, plans, t_sent, t_done,
+            cfg.f("nav.analyse.follow_speed_mps"),
+            cfg.i("nav.analyse.curvature_span"))
+        if required:
+            follow = curvature_following(required, commanded)
+            print("          CURVATURE FOLLOWING over {} commanded twists "
+                  "above the creep".format(follow.n))
+            print("            the plan required   {}".format(
+                follow.required))
+            print("            the controller gave {}".format(
+                follow.commanded))
+            print("            DEMAND rms {:.4f} rad/s   GAIN {}   "
+                  "r {}".format(
+                      follow.demand_rms,
+                      "{:.4f}".format(follow.gain)
+                      if follow.gain is not None
+                      else "none (the plan asked for no turn at all)",
+                      "{:+.3f}".format(follow.r) if follow.r is not None
+                      else "none"))
+            print("          GAIN 1.0 is a controller that obeys its "
+                  "plan's curvature and")
+            print("          0.0 is one that ignores it - but IT IS ONLY "
+                  "A MEASUREMENT OF THE")
+            print("          CONTROLLER WHERE THE DEMAND IS REAL, so the "
+                  "two are read")
+            print("          together. F4 Task 2's runs asked for a "
+                  "demand rms of 0.06-0.09")
+            print("          rad/s - a quarter of wz_max - and got gains "
+                  "of 0.049, -0.011")
+            print("          and -0.052. A CLOSED LOOP ASKS FOR ALMOST "
+                  "NOTHING, because it")
+            print("          never leaves the line, so a small gain over "
+                  "a small demand is a")
+            print("          plan with no correction in it - which is "
+                  "the point rather than")
+            print("          a fault. EVIDENCE_NAV_V3.md 16.2.")
 
     # ---- the jumps, and what the controller did about them -----------
     print("")
@@ -930,6 +1449,15 @@ def record(cfg, args):
              msg.pose.pose.position.y, yaw_of(q),
              msg.twist.twist.linear.x, msg.twist.twist.angular.z))
 
+    # THE BELIEVED POSE, LIVE. `analyse` composes these two edges off the
+    # CSVs afterwards (evidence_core.compose_rows); the watchdog below
+    # needs the same pose while the run is still happening, so the
+    # newest of each edge is kept and composed on arrival. It is the MAP
+    # frame throughout and no registration is in it - the goal was
+    # carried into the map before it was sent, and the goal checker
+    # works in exactly that frame.
+    latest = {"map_odom": None, "odom_base": None}
+
     def on_tf(msg):
         # ONE EDGE OUT OF A TOPIC THAT CARRIES EVERY EDGE, matched on
         # BOTH frame names - tools/sensor_evidence.py's rule and its
@@ -944,9 +1472,20 @@ def record(cfg, args):
                 name = "odom_base"
             else:
                 continue
-            captured[name].append(
-                (stamp_s(tr.header), tr.transform.translation.x,
-                 tr.transform.translation.y, yaw_of(tr.transform.rotation)))
+            row = (stamp_s(tr.header), tr.transform.translation.x,
+                   tr.transform.translation.y, yaw_of(tr.transform.rotation))
+            captured[name].append(row)
+            latest[name] = row
+            if name == "odom_base" and watching[0]:
+                anchor = latest["map_odom"]
+                if anchor is not None:
+                    cos_p = math.cos(anchor[3])
+                    sin_p = math.sin(anchor[3])
+                    bx = anchor[1] + cos_p * row[1] - sin_p * row[2]
+                    by = anchor[2] + sin_p * row[1] + cos_p * row[2]
+                    believed_track.append(
+                        (row[0], math.hypot(bx - at_map[0],
+                                            by - at_map[1])))
 
     def on_plan(msg):
         plan_index[0] += 1
@@ -966,6 +1505,11 @@ def record(cfg, args):
                              on_truth, qos)
     node.create_subscription(TFMessage, cfg.s("topics.tf"), on_tf, qos)
     node.create_subscription(Path, PLAN_TOPIC, on_plan, qos)
+
+    watching = [False]
+    believed_track = []
+    watch = ClosingWatch(cfg.f("nav.watchdog.required_closing_m"),
+                         cfg.f("nav.watchdog.closing_allowance_s"))
 
     def spin_until(predicate, budget_s, what, owner, *lines):
         deadline = time.monotonic() + budget_s
@@ -1035,6 +1579,7 @@ def record(cfg, args):
              float(fb.number_of_recoveries)))
 
     t_sent = now_s()
+    watching[0] = True
     send = action.send_goal_async(request, feedback_callback=on_feedback)
     rclpy.spin_until_future_complete(node, send, timeout_sec=wait_s)
     handle = send.result() if send.done() else None
@@ -1054,16 +1599,52 @@ def record(cfg, args):
     result_future = handle.get_result_async()
     budget_s = cfg.f("nav.goal_timeout_s")
     deadline = time.monotonic() + budget_s
+    outcome_name = "ran"
+    stalled = None
     while not result_future.done():
+        # THE NO-PROGRESS GUARD, F4 Task 2.5. Stepped on the pose the
+        # GOAL CHECKER sees, it gives up on a run that has stopped
+        # closing on its goal - the failure nav2's own progress checker
+        # cannot see, because that one asks whether the vehicle MOVED.
+        # config.yaml nav.watchdog owns both numbers and ClosingWatch
+        # is the rule.
+        #   IT PUBLISHES NOTHING. It cancels the action, exactly as the
+        # timeout below does, and the controller's own
+        # publish_zero_velocity leaves the standing zero on /cmd_vel
+        # (F4 constraint 18).
+        while believed_track and stalled is None:
+            stalled = watch.step(*believed_track.pop(0))
+        if stalled is not None:
+            print("")
+            print("NO PROGRESS  the goal has not come {:.2f} m closer in "
+                  "{:.0f} s -".format(watch.closing_m, watch.allowance_s))
+            print("             ABANDONING. believed distance "
+                  "{:.4f} m at t = {:.3f} s;".format(
+                      stalled.distance, stalled.t))
+            print("             the best it ever earned was {:.4f} m, "
+                  "{:.1f} s earlier.".format(stalled.mark, stalled.since_s))
+            print("             This is a NAMED failure and not a "
+                  "timeout: it is written")
+            print("             into the session as outcome=no_progress "
+                  "and config.yaml")
+            print("             nav.watchdog owns the two numbers "
+                  "above.")
+            outcome_name = "no_progress"
+            cancelled = 1
+            cancel = handle.cancel_goal_async()
+            rclpy.spin_until_future_complete(node, cancel, timeout_sec=10.0)
+            break
         if time.monotonic() > deadline:
             print("")
             print("TIMEOUT    {:g}s elapsed and the goal has not "
                   "returned - CANCELLING.".format(budget_s))
+            outcome_name = "timeout"
             cancelled = 1
             cancel = handle.cancel_goal_async()
             rclpy.spin_until_future_complete(node, cancel, timeout_sec=10.0)
             break
         rclpy.spin_once(node, timeout_sec=0.05)
+    watching[0] = False
     t_done = now_s()
     if result_future.done() and result_future.result() is not None:
         outcome = result_future.result()
@@ -1108,6 +1689,21 @@ def record(cfg, args):
         handle_out.write("action_status={}\n".format(status))
         handle_out.write("error_code={}\n".format(error_code))
         handle_out.write("cancelled={}\n".format(cancelled))
+        # WHY THE RUN ENDED, BY NAME. `action_status` says what nav2
+        # returned and `cancelled` says whether this bench asked for
+        # it; neither says WHICH of the bench's guards asked. `ran` is
+        # a run nav2 finished by itself - arrived, or aborted.
+        handle_out.write("outcome={}\n".format(outcome_name))
+        if stalled is not None:
+            handle_out.write("no_progress_t_s={:.9f}\n".format(
+                stalled.t))
+            handle_out.write(
+                "no_progress_distance_m={:.9f}\n".format(
+                    stalled.distance))
+            handle_out.write("no_progress_mark_m={:.9f}\n".format(
+                stalled.mark))
+            handle_out.write("no_progress_since_s={:.9f}\n".format(
+                stalled.since_s))
         handle_out.write("idle_cmd_vel={}\n".format(idle_cmds))
         for key, value in state.items():
             handle_out.write("{}={}\n".format(key, value))
