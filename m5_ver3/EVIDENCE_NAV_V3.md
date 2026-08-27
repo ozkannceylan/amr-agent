@@ -2653,3 +2653,1294 @@ glance that neither binds it.
 - **It did not re-run §15's set.** §15's figures stand as F4 Task 2 took
   them; §16's are a different `nav2.yaml` and `analyse` refuses to table
   the two together, which is the label doing its job.
+
+---
+
+## 17. THE DRIVING CASES
+
+### 17.0 The answer, before the working
+
+| | |
+|---|---|
+| what a CASE is | one or two goals and a rule for the second — `config.yaml nav.cases`, driven by `tools/drive_goal.py record --case C` |
+| **the headline, `aisle_transit`** | an aisle transit RE-TASKED mid-path. **2 of 3 arrived**, and a fourth run of it is §18's flip |
+| **and what the re-task cost** | **at most one controller tick.** Worst gap in the command stream **0.0500 – 0.0540 s** against a 0.0500 s median period; the commanded speed never fell below **0.2929 m/s**; back to 95 % of its pre-switch mean in **0.000 – 0.040 s**; a plan ending at the NEW goal in **0.314 – 1.064 s** |
+| `ring_stress` | **2 of 3**, which is §16.4c's own result reproduced run for run |
+| **and the residual now has a sample** | ψ swing **0.2085 / 0.2544** on the two that arrived and **0.4674** on the one that did not — six runs across two tasks, **four arrivals, and no run between 0.2544 and 0.4674**. §17.5 |
+| `station_approach` | **1 of 2**, and the failure is `error_code 205` — `ComputePathToPose::START_OCCUPIED`, the planner refusing to replan a truck standing in a 4.00 m bay |
+| **`reverse_out`, and it is the #5714 case** | leg 1 arrived at the station; **leg 2 is the first leg this track has ever driven COUNTERWEIGHT-FIRST**, its plans carry genuine cusps, one cusp was driven, and the leg ended on the same `205` |
+| **tracking through the driven cusp** | **mean 0.0566 m, max 0.0888 m** over ±1 s |
+| **nav2 FORWARD against nav2 REVERSE on one run** | deviation **mean 0.0756 / max 0.2314 m** counterweight-first against **0.0522 / 0.1615 m** forks-first — the OPPOSITE of what #5714 predicts, on this vehicle |
+| the label | every run below: `traction=nominal arm=wheel+imu loc=amcl@735cdbc6 nav=on@ebe9ca34 monitor=off`, `nav_config_md5 53a33d67` |
+
+**AND THAT LAST ROW IS THE POINT OF THE FIRST COMMIT OF THIS TASK.**
+`nav=on@ebe9ca34` is a DIFFERENT byte hash from §16.5's `3148d052`, and
+`nav_config_md5` is **`53a33d67`** on both. The four stale comment sites
+§16 left behind were fixed before anything here was driven; the
+parameter tree did not move, and that is demonstrated rather than
+asserted. **Every case below is driven by the configuration §16.5's
+acceptance set was measured on.**
+
+### 17.1 What a case is, and why the goal table could not be one
+
+`nav.goals` is a POSE. Every figure in §15 and §16 comes off one of them
+sent once to a standing vehicle and scored at rest. That does not
+exercise three things m6's autopilot cases exercised, and `nav.cases` is
+those three plus the one §16 left at 2 of 3:
+
+| case | goals | rule | repeat |
+|---|---|---|---|
+| **`aisle_transit`** | `spine_north` → `aisle_end` | `preempt` at a believed **8.00 m** | **×3** |
+| `station_approach` | `station_s5` | — | ×1 |
+| `reverse_out` | `station_s5` → `ring_s5_junction` | `after` | ×1 |
+| `ring_stress` | `ring_corner` | — | **×3** |
+
+**THE SECOND GOAL ARRIVES BY ONE OF EXACTLY TWO RULES AND A CASE WITH
+NEITHER IS REFUSED BY NAME.** `preempt` sends it while the first is
+still running; `after` sends it once the first has returned and the
+vehicle has settled. A second goal with no rule is two different
+experiments wearing one name, and `read_case()` refuses it before the
+stack is touched.
+
+**THE TRIGGER IS THE BELIEVED POSE AND NOT THE GROUND TRUTH.**
+`map` → `base_link`, composed live — the same pose the goal checker and
+the no-progress watchdog see, so the three cannot disagree about where
+the vehicle was when the switch happened. Ground truth stays an
+instrument (F2 constraint 13).
+
+**8.00 m IS CHOSEN TO LAND IN A TRANSIT AND NOT IN AN ENDGAME.** It is a
+little under half of the 17.00 m first leg, and it is more than five
+times `GoalCritic`'s `threshold_to_consider` of 1.4 m — inside that the
+path critics have handed over to a point attraction (§16.6) and a
+preemption landing there would be a measurement of an endgame wearing a
+transit's name. `tests/test_nav2_params.py` reads the threshold out of
+`nav2.yaml` and asserts the trigger clears twice it, and that it is
+inside the leg.
+
+**AND TWO GOALS WERE ADDED TO `nav.goals` FOR THESE CASES.**
+`station_s5` — world (+7.00, +4.25), m6's own S5 / PICK-NE-1, declared
+`arrive_m 0.25`, entered SOUTHWARD off the ring band down a 4.80 m spur
+— and `ring_s5_junction`, (+7.00, +10.00), the only node the spur
+connects to. Both are nodes of `m6/ipc/route.py`'s graph and the test
+that checks that for every other goal checks it for these. Both carry
+`case_only: true` and `repeat: 0`, because the CASE owns the count, and
+a test holds **both directions** of that flag: a `case_only` goal no
+case names is a pose nothing will ever drive, and a goal a case names
+that is not flagged would be counted twice.
+
+### 17.2 THE HEADLINE: an aisle transit, re-tasked mid-path
+
+Stack stopped and started before every one; headless, dry.
+
+| session | result | sim s | driven | arrival TRUTH | BELIEF | heading | closest (belief) | deviation, mean |
+|---|---|---|---|---|---|---|---|---|
+| `…201613` | **abandoned** `no_progress` | 198.5 | 56.125 m | 1.3580 m | 1.3676 m | −2.8092 rad | 0.8299 m | 0.0531 m |
+| `…202100` | **SUCCESS** | 160.7 | 47.166 m | **0.5729 m** | 0.5167 m | −0.0415 rad | **0.5921 m** | 0.0823 m |
+| `…202507` | **SUCCESS** | 155.4 | 45.656 m | **0.6174 m** | 0.4887 m | +0.4895 rad | **0.5849 m** | 0.0572 m |
+
+**TWO IN THREE, AND THE ARRIVALS ARE §16.5's ARRIVALS.** 0.5729 and
+0.6174 m of truth against §16.5's 0.4474 – 0.5859 m band, in the same
+0.60 m box, off the same parameter tree. The re-task did not move the
+arrival.
+
+**THE ONE THAT DID NOT ARRIVE WAS ABANDONED BY THE WATCHDOG AT 1.5401 m
+OF BELIEVED DISTANCE**, which is the guard doing exactly what §16.7b
+built it for and is the first time it has fired that close to a goal.
+Its closest approach was 0.8299 m of belief against a 0.60 m box — a run
+that got most of the way and then stopped closing.
+
+#### 17.2a WHAT THE PREEMPTION COST, which is the case's whole point
+
+`drive_goal.preempt_response()`, over ±1 s of `topics.cmd_vel` around
+the switch — the CONTROLLER's own output, not the plant's:
+
+| session | worst gap | median period | smallest \|v\| after | mean \|v\| before → after | back to 95 % | plan to goal 2 |
+|---|---|---|---|---|---|---|
+| `…201613` | **0.0520 s** | 0.0500 s | 0.2929 m/s | 0.2998 → 0.2972 | **0.002 s** | 0.314 s |
+| `…202100` | **0.0520 s** | 0.0500 s | 0.2965 m/s | 0.2997 → 0.2992 | **0.016 s** | 1.064 s |
+| `…202507` | **0.0500 s** | 0.0500 s | 0.2975 m/s | 0.2998 → 0.2997 | **0.000 s** | 0.890 s |
+| `…204724` (§18, slam) | **0.0540 s** | 0.0500 s | 0.2947 m/s | 0.2994 → 0.2987 | 0.040 s | 0.322 s |
+
+**A GAP AT THE CONTROLLER'S OWN PERIOD IS NO GAP AT ALL.** The worst
+interruption in the command stream across four preemptions is
+**0.0540 s** against a 0.0500 s median — one tick, and on one run not
+even that. The commanded speed never fell below **0.2929 m/s**, which is
+97.6 % of the transit ceiling: **the vehicle did not brake.**
+
+**AND NOTHING CANCELLED ANYTHING.** `navigate_to_pose` is a SINGLE-GOAL
+action server, so sending the second goal displaces the first: nav2
+aborts it itself. That is the `leg1_status 6` (ABORTED) on every one of
+the four runs, recorded off the first goal's own result future, which
+the bench keeps in flight across the switch precisely so that it can be
+read. The bench cancels nothing and publishes no twist on any path (F4
+constraint 18).
+
+**THE NEW PLAN ARRIVES IN UNDER A SECOND AND A HALF.** 0.314 – 1.064 s
+from the switch to the first `/plan` whose last pose is goal 2, against
+a tree that replans at 1 Hz — so the spread is one `RateController`
+period and the planner is not the slow part.
+
+**WHAT IS NOT MEASURED HERE.** A preemption to a goal BEHIND the
+vehicle, which would need a cusp and a stop, and a preemption inside
+1.4 m, which is the endgame this trigger was chosen to avoid. Both are
+named and neither is driven.
+
+### 17.3 `station_approach`: what F5 inherits, in numbers
+
+**THE STATION CLASS IS A 0.25 m BOX AND THIS STACK SHIPS A 0.60 m ONE**
+(§16.6). What this case measures is the APPROACH: where the truck ends
+and which way it is pointed when a position-only 0.60 m box latches at
+the end of a 4.80 m spur.
+
+| session | result | sim s | driven | arrival TRUTH | BELIEF | **heading** | closest (belief) |
+|---|---|---|---|---|---|---|---|
+| `…193729` | **SUCCESS** | 94.3 | 27.098 m | **0.5451 m** | 0.5280 m | **−0.8765 rad (−50.2°)** | 0.5975 m |
+| `…204049` | **ABORT, `error_code 205`** | 100.1 | 29.078 m | 4.6226 m | 4.5955 m | −1.8222 rad | 1.9542 m |
+
+**ONE IN TWO, AND THE TWO RUNS CARRY DIFFERENT LABELS.** `…193729` was
+recorded before the `monitor=` line existed and reads `UNLABELLED` on
+it; `…204049` reads `monitor=off`. `analyse` refuses to table them
+together and this section prints them as two rows rather than pretending
+otherwise. Nothing else about the two stacks differs.
+
+**THE ARRIVAL HEADING IS THE FIGURE F5 INHERITS AND IT IS THE WORST ON
+THIS TRACK.** −0.8765 rad — fifty degrees off the dock axis — on a run
+that ARRIVED inside the box. §16.5's straight approaches deliver
+−0.0126 to +0.0817 rad. The difference is the manoeuvre: a station
+approach turns 90° off the ring into a spur and the box latches while
+the vehicle is still coming round.
+
+**AND THE CORRIDOR TABLE SAYS THE SAME THING WITH A SLOPE ON IT**
+(`drive_goal`'s CORRIDOR block, `…193729`, the first approach, cut where
+the run gave up):
+
+| box | believed | truth | heading error |
+|---|---|---|---|
+| 2.00 m | 1.9975 | 2.0455 | 0.3390 rad (19.4°) |
+| **1.50 m** | 1.4964 | 1.5930 | **0.0925 rad (5.3°)** |
+| 1.00 m | 0.9945 | 1.1114 | 0.4855 rad (27.8°) |
+| 0.75 m | 0.7500 | 0.8589 | 0.6341 rad (36.3°) |
+| **0.60 m** | 0.5975 | 0.7012 | **0.7538 rad (43.2°)** |
+
+§16.6's own curve on a straight approach read 0.0239 rad at 1.50 m and
+0.2456 rad at 0.60 m. **On a station spur the same two rungs are
+0.0925 and 0.7538 — three times worse at the box** — and the shape is
+the same: the heading is best at about 1.5 m out and falls apart inside
+it. §16.6's ruling — *a station-class arrival needs a straight final leg
+of about a metre and a half* — survives contact with a real station and
+the number it needs is now measured on one.
+
+**AND `error_code 205` IS `ComputePathToPose::START_OCCUPIED`, WHICH
+THIS FILE HAS NEVER DECODED BEFORE.** `nav2_msgs/action/ComputePathToPose`
+numbers its own codes from 200 (`UNKNOWN=200`, `START_OCCUPIED=205`,
+`NO_VALID_PATH=208`) while `FollowPath` numbers from 100 — so every
+"ABORT 205" in §15.2's ladder and §16.5's table is the PLANNER refusing
+a replan because the vehicle's own footprint is in collision at its
+start pose, and not the controller giving up. `config.yaml`'s goal-table
+comment already recorded "START_OCCUPIED twice" from F4 Task 2's first
+runs; the code was never carried into the tables. **It is the same
+mechanism twice in this section**: the truck standing in a 4.00 m bay
+with a footprint grown to 2.735 × 1.338 m, inside an inflation layer of
+2.60 m.
+
+### 17.4 `reverse_out`: the #5714 case, and what it took to get one
+
+**A REEDS-SHEPP CUSP CANNOT BE ORDERED FROM THE SPAWN AND THAT WAS
+MEASURED RATHER THAN ASSUMED.** `drive_goal.py probe` asks the planner
+alone — `compute_path_to_pose`, no motion, no controller — and scores
+what comes back with the same two functions `analyse` uses on a recorded
+plan. From the spawn, in the middle of an 8.00 m corridor:
+
+```
+station_s5        263 poses, 26.975 m, 0 forward / 262 REVERSE segments   CUSPS 0
+ring_s5_junction  243 poses, 24.854 m, 2 forward / 240 REVERSE segments   CUSPS 3
+                    +5.243,+11.289  22.345 m along   <- 0.073 m, ONE POSE
+                    +5.171,+11.291  22.418 m along   <- lattice noise
+                    +7.072, +9.998  24.782 m along
+```
+
+**AND TWO OF THOSE THREE ARE NOT MANOEUVRES.** They are one-pose blips —
+forward 0.07 m and back — which is a sign change in the arithmetic and
+nothing at all in the vehicle. That reading is why `plan_cusps()` now
+returns a fifth field, the RUN after each cusp: on this floor the
+planner's pose spacing is 0.067 – 0.106 m, so a run at or under one
+spacing is one pose. The instrument reports it and does not filter,
+because a threshold is a policy.
+
+**SO THE CASE PARKS THE TRUCK FIRST.** Leg 1 drives INTO the bay; leg 2
+asks for the ring junction it came from, with the forks 4.00 m from a
+back panel and a 1.25 m minimum turning radius. There is no way out that
+is not counterweight-first.
+
+| leg | goal | sim s | driven | status |
+|---|---|---|---|---|
+| 1 | `station_s5` | 96.71 | 26.992 m | **4 SUCCEEDED** |
+| 2 | `ring_s5_junction` | 33.00 | 4.868 m | **6 ABORTED, `error_code 205`** |
+
+**LEG 2's PLANS CARRY REAL CUSPS.** Its first plan: 127 poses, 12.00 m,
+**92 nav2-FORWARD segments and 34 REVERSE**, with cusps at 0.22 m (then
+9.44 m the other way) and 9.66 m (then 2.26 m) — a 9.4 m
+counterweight-first run out of the bay and up the spur, a cusp, and a
+2.3 m forks-first turn onto the ring. That is the manoeuvre a forklift
+actually makes and it is the first one this track has planned.
+
+**ONE CUSP WAS DRIVEN**, and `drive_goal.driven_cusps()` puts it at
+t+96.87 s: the command goes **−0.2599 → +0.0120 m/s**, forks-first to
+counterweight-first, which is the handover from leg 1's arrival into
+leg 2's exit. **Tracking through it: mean 0.0566 m, max 0.0888 m over
+±1 s** — the deviation from the plan standing at the time, the same
+instrument every other tracking figure on this track comes from.
+
+**AND THE #5714 A/B FELL OUT OF THE SAME RUN.** Leg 2 is the FIRST LEG
+THIS TRACK HAS EVER DRIVEN with positive `linear.x` — 658 commands, all
+counterweight-first, worst +0.3005 m/s, and not one sample the other
+way. So one session carries both directions on one vehicle, one floor
+and one parameter tree:
+
+| leg | direction | n | deviation, mean | deviation, max |
+|---|---|---|---|---|
+| 1 | forks-first (**nav2 REVERSE**) | 1934 | **0.0522 m** | **0.1615 m** |
+| 2 | counterweight-first (**nav2 FORWARD**) | 660 | **0.0756 m** | **0.2314 m** |
+
+**nav2's FORWARD TRACKS 45 % WORSE IN THE MEAN AND 43 % WORSE AT THE
+PEAK THAN ITS REVERSE, ON THIS VEHICLE** — which is the opposite of what
+issue #5714 predicts. F4 constraint 19 says measure it and record it, so
+it is recorded: **the defect this phase was told to watch for does not
+appear on this plant, and the direction it does appear in is the one
+nav2 considers normal.**
+
+**THE COMPARISON IS NOT LIKE FOR LIKE AND THIS SENTENCE IS THE HONEST
+FORM OF IT.** Leg 1 is a 27 m transit down a ring band into a spur; leg
+2 is a 4.9 m extraction from a 4.00 m bay, which is the tightest
+geometry on this floor. Some of the 45 % is the manoeuvre and not the
+direction, and separating the two needs a counterweight-first leg down
+an open corridor — which no goal in this table produces and which is
+named as open rather than estimated.
+
+**LEG 2 ENDED ON `205` AT WORLD (+8.443, +9.199)**, which is ON the ring
+band and not in the bay: it had already backed 4.868 m of the planned
+9.44 m out. At that pose the grown footprint's tail reaches about
+y = +6.8 against a rack face at y = +6.00 and an inscribed band that
+reaches +6.61 — margin, but not much of one. **The same `START_OCCUPIED`
+that ended `station_approach`, at the same place, for the same reason.**
+
+### 17.5 `ring_stress`: §16.4c's residual gets its sample
+
+Three more runs on the shipped parameter tree, which takes §16.4c's
+n = 3 to **n = 6**.
+
+| session | task | ψ sd | ψ worst | result |
+|---|---|---|---|---|
+| `goal-ring_corner-…173139` | §16.4c | **0.2038** | 0.5759 | ARRIVED |
+| `goal-ring_corner-…174429` | §16.4c | **0.1926** | 0.4873 | ARRIVED |
+| `goal-ring_corner-…180823` | §16.4c | **0.5356** | 1.2113 | abandoned |
+| `case-ring_stress-…202918` | **this task** | **0.4674** | 1.1842 | abandoned |
+| `case-ring_stress-…203338` | **this task** | **0.2085** | 0.4828 | ARRIVED |
+| `case-ring_stress-…203714` | **this task** | **0.2544** | 0.7265 | ARRIVED |
+
+**FOUR ARRIVALS IN SIX, AND NO RUN BETWEEN 0.2544 AND 0.4674.** The
+bimodality §16.4c asserted off three runs is a measured separation off
+six: every arrival is inside [0.193, 0.255] and every failure inside
+[0.467, 0.536]. There is no middle.
+
+> **THE THREE §16.4c FIGURES ARE RESTATED FROM THE COMMITTED
+> INSTRUMENT AND THEY MOVED IN THE THIRD DECIMAL** (0.2038 / 0.1926 /
+> 0.5356 against the 0.2072 / 0.1957 / 0.5447 that section printed).
+> Those three were computed by hand for that table;
+> `drive_goal.heading_swing()` drops samples under
+> `nav.analyse.follow_speed_mps` and windows on the goal's own send and
+> result, which is a rule rather than a choice. **Neither reading
+> changes the finding**, and the instrument's are the ones that stand,
+> because they can be re-run.
+
+**THE ARRIVALS ARE §16.5's ARRIVALS.** Truth 0.4361 and 0.4537 m,
+belief 0.4866 and 0.4597 m, closest belief 0.5924 and 0.5920 m against a
+0.60 m box, deviation mean 0.0575 and 0.0767 m — the same numbers, one
+task later, on the same configuration.
+
+#### 17.5a WHEN it diverges, which is new and which kills one hypothesis
+
+ψ's standard deviation over three twenty-second windows of each run:
+
+| session | 0–20 s | 20–40 s | 40–60 s | whole run | result |
+|---|---|---|---|---|---|
+| `…173139` | 0.1168 | 0.1363 | 0.0189 | 0.2038 | ARRIVED |
+| `…174429` | 0.0880 | 0.1858 | 0.1550 | 0.1926 | ARRIVED |
+| `…180823` | 0.1573 | **0.4415** | **0.5416** | 0.5356 | abandoned |
+| `…202918` | 0.1729 | 0.1589 | 0.1272 | 0.4674 | **abandoned** |
+| `…203338` | 0.1243 | 0.2027 | 0.1943 | 0.2085 | ARRIVED |
+| `…203714` | 0.1293 | 0.1721 | 0.1450 | 0.2544 | ARRIVED |
+
+**THE TWO FAILURES DIVERGE AT DIFFERENT TIMES AND THAT RULES SOMETHING
+OUT.** `…180823` is already at 0.44 by t+20–40 s; `…202918` is at 0.13
+through t+40–60 s and diverges only after it. **The outcome is therefore
+not decided by the initial conditions** — there is no early signature
+that separates the populations — and "the run starts wrong" is dead as
+an explanation. What is left is a loop that is marginally stable and
+whose oscillation grows from wherever the noise puts it, which is what
+§16.4a's analysis of `PathAlignCritic` as proportional feedback around a
+double integrator predicts.
+
+**AND EVERY ARRIVAL STAYS UNDER 0.26 IN EVERY WINDOW.** No arriving run
+ever visits the failing band and comes back. Whatever the boundary is,
+crossing it is not recoverable on this leg.
+
+### 17.6 What every case shares, and the two rows that say the stack held
+
+| | `…202100` | `…202507` | `…203338` | `…203714` | `…204404` |
+|---|---|---|---|---|---|
+| deviation from plan, mean | 0.0823 m | 0.0572 m | 0.0575 m | 0.0767 m | 0.0581 m |
+| worst steer step | 0.100000 rad | 0.100000 | 0.100000 | 0.100000 | 0.100000 |
+| controller rate, mean | 19.996 Hz | — | — | — | — |
+| RTF over the drive | 0.9994 | — | — | — | — |
+
+**THE COMMAND PATH IS UNTOUCHED AND SAYS SO.** The worst steer step is
+**0.100000 rad/tick** on every case run — F4 Task 1's 2.0 rad/s ramp at
+0.05 s, exactly, as on every run in §15.4 and §16.5. Two goals in one
+session, a preemption, a station spur and a counterweight-first
+extraction changed nothing about the line below the controller.
+
+**AND THE CONTROLLER HELD ITS RATE THROUGH A GOAL SWITCH.** 19.996 Hz
+mean over 3213 commands on `…202100`, with the real-time factor at
+0.9994 over a 160 s drive on the sixteen-child stack.
+
+---
+
+## 18. THE FLIP EXPERIMENT
+
+### 18.0 The question, and the answer
+
+F3 §13 ran an A/B between the two localisers and could not settle what
+the published research could not settle either. §13.10 handed F4 the
+`amcl` arm's peaks as a consumption contract and F4 measured what a
+CLOSED loop did to the jump half of it (§13.10a). **The question left
+open was whether `slam_toolbox`'s corridor advantage — measured OPEN
+LOOP — survives a controller closing a loop round it.**
+
+**ONE RUN, RECORDED, NO TUNING.** The headline case, `aisle_transit`,
+on `--localize slam --nav`: `case-aisle_transit-20260827-204724`,
+`traction=nominal arm=wheel+imu loc=slam@4bb88852 nav=on@ebe9ca34
+monitor=off`. Nothing was changed for it. `nav2.yaml` is the same file
+§17's three amcl runs were driven behind, and the nav children read the
+localiser only through `/tf`.
+
+| | |
+|---|---|
+| **it arrived** | SUCCESS, 156.4 s, 45.450 m driven |
+| **and the arrival is the best of the four** | truth **0.4586 m**, belief 0.5019 m, heading **−0.0119 rad** |
+| **the corridor advantage SURVIVES** | worst single `map` → `odom` step **0.8845 m** against the amcl arm's **1.1919 m** on the same case, and **0.748 corrections/s against 1.052** |
+| **and the controller notices** | worst yaw-rate swing after any jump **0.0604 rad/s** against amcl's **0.1665** — less than half |
+| the one thing that is worse | the MEDIAN step, **0.0705 m against 0.0359 – 0.0572 m** |
+| the preemption | identical: worst gap 0.0540 s against a 0.0500 s period, back to 95 % in 0.040 s |
+
+### 18.1 The two arms on one case, side by side
+
+Four runs of `aisle_transit`, one file, one plant, one estimator, one
+goal table. The only thing that differs is which node owns
+`map` → `odom`.
+
+| | `…201613` amcl | `…202100` amcl | `…202507` amcl | **`…204724` slam** |
+|---|---|---|---|---|
+| result | abandoned | SUCCESS | SUCCESS | **SUCCESS** |
+| sim time | 198.5 s | 160.7 s | 155.4 s | **156.4 s** |
+| driven | 56.125 m | 47.166 m | 45.656 m | **45.450 m** |
+| arrival TRUTH | 1.3580 m | 0.5729 m | 0.6174 m | **0.4586 m** |
+| arrival BELIEF | 1.3676 m | 0.5167 m | 0.4887 m | **0.5019 m** |
+| arrival heading | −2.8092 rad | −0.0415 | +0.4895 | **−0.0119** |
+| closest (belief) | 0.8299 m | 0.5921 m | 0.5849 m | **0.5940 m** |
+| deviation from plan, mean | 0.0531 m | 0.0823 m | 0.0572 m | **0.0679 m** |
+| controller rate, mean | — | 19.996 Hz | — | **19.965 Hz** |
+| RTF over the drive | — | 0.9994 | — | **0.9970** |
+| **corrections** | 212 | 178 | 175 | **123** |
+| **broadcasts** | — | 2565 | — | **8250** |
+| **broadcast rate** | 15.16 Hz | 15.16 Hz | 15.16 Hz | **50.16 Hz** |
+| **corrections per second** | — | **1.052** | — | **0.748** |
+| **worst position step** | 0.9300 m | **1.1919 m** | 0.7347 m | **0.8845 m** |
+| median position step | 0.0572 m | 0.0542 m | 0.0359 m | **0.0705 m** |
+| worst heading step | 0.0250 rad | 0.0355 rad | 0.0204 rad | **0.0279 rad** |
+| worst w swing after a jump | — | **0.1665 rad/s** | — | **0.0604 rad/s** |
+
+**THE BROADCAST RATES ARE A PROPERTY OF THE TWO NODES AND NOT OF THIS
+RUN.** AMCL publishes `map` → `odom` on its own scan-driven cycle,
+15.16 Hz here; `slam_toolbox`'s localiser re-broadcasts at the
+estimator's rate, 50.16 Hz. `evidence_core.tf_jumps()` counts
+CORRECTIONS and not re-broadcasts, which is the only reason the two
+columns can be compared at all — 8250 broadcasts carrying 123
+corrections against 2565 carrying 178.
+
+### 18.2 What the closed loop did to each arm's jump profile
+
+**THE ANSWER TO THE BRIEF'S QUESTION IS YES, WITH ONE QUALIFICATION.**
+
+**THE TAIL IS SMALLER ON THE `slam` ARM.** 0.8845 m against 1.1919 m on
+the same case, and 0.748 corrections a second against 1.052. §16.8
+established that the ROUTE sorts the worst correction rather than the
+driving — a run that gets further crosses more of this floor and
+accumulates more odometry error between updates — and these four runs
+are the same 47 m route, so the route term is held fixed and what is
+left is the localiser.
+
+**AND THE CONTROLLER'S ANSWER TO A JUMP IS HALF AS VIOLENT.** The worst
+yaw-rate swing in the second after any correction is **0.0604 rad/s** on
+the slam arm against **0.1665 rad/s** on the amcl arm — a quarter of
+`wz_max` against two thirds of it. That is the closed-loop half of the
+corridor advantage and it is the figure §13's open-loop A/B could not
+produce, because nothing was closing a loop when it was taken.
+
+**THE QUALIFICATION IS THE MEDIAN.** 0.0705 m against 0.0359 – 0.0572 m:
+the `slam` arm corrects LESS OFTEN and by MORE each time, which is what
+a pose-graph tracker doing a scan match against a frozen graph at a
+lower effective update rate looks like. Read together with §8's own
+0.019 – 0.047 m band, the amcl arm sits inside it and the slam arm sits
+just above. **What moved between the arms is the shape of the
+distribution and not only its tail.**
+
+**ONE RUN IS ONE RUN.** n = 1 on the slam arm against n = 3 on the amcl
+arm, and the amcl arm's own worst step varies from 0.7347 to 1.1919 m
+across its three. **0.8845 m is inside that spread**, so the tail
+comparison is suggestive and not settled; the corrections-per-second,
+the median and the controller's response are the three that separate
+cleanly. The brief asked for one run, recorded, with no tuning, and this
+is exactly that and no more.
+
+### 18.3 The jump budget moves again, and this is the supersede
+
+§13.10 handed over **0.2591 m** open loop. §16.8 amended it to
+**0.8310 m** closed loop over all 44 driven-goal sessions then on disk.
+**This task's own case set carries a bigger one.**
+
+| | | |
+|---|---|---|
+| §13.10, OPEN LOOP | 0.2591 m | `drive_route` driving a table, nothing reading the localiser |
+| §16.8, CLOSED LOOP, 44 sessions | 0.8310 m | 3.21× |
+| **§18, CLOSED LOOP, this task's set** | **1.1919 m** | **4.60×** — `case-aisle_transit-20260827-202100`, amcl, the 47 m route |
+
+**IT IS THE SAME FINDING AND NOT A NEW ONE.** §16.8's own conclusion was
+that the ROUTE sorts the worst correction and the driving does not: the
+biggest step in that corpus was `aisle_end`'s, on a run that ARRIVED,
+down the longest route in the goal table. 1.1919 m is the same route
+again, on a run that arrived again, one task later. **What moved is the
+number; the reason it moves is the one §16.8 already gave.**
+
+**THE THREE CONSUMERS STILL CLEAR IT AND EACH SAYS SO.** The lateral
+surprise `nav2.yaml` §(A)'s inflation bound is built on — worst
+cross-track 0.1044 m plus the worst single step — goes from **0.9354 m
+to 1.2963 m**, and `inflation_radius: 2.60` clears it with **2.01×** to
+spare against the 2.78× §16.8 recorded. `tests/test_nav2_params.py`
+carries the amended constant and keeps **both** older bounds beside it,
+so the test shows at a glance that none of the three binds the
+derivation. **No value in this tree moved because of the amendment;
+what moved is the margin, and every site says so.**
+
+**AND THE `slam` ARM'S OWN WORST IS 0.8845 m**, which is what a consumer
+sizing an allowance for THAT arm should use. §13.10a's actionable
+sentence — *size a jump allowance on 0.85 m dry* — was written off the
+amcl arm and is now **wrong for it and right for the other one**. The
+sentence a consumer needs is: **1.20 m dry on `amcl`, 0.89 m dry on
+`slam`**, and `EVIDENCE_LOCALIZATION_V3.md` §13.10b carries the
+amendment where the contract lives.
+
+### 18.4 What the flip did NOT settle
+
+- **ONE RUN.** No repeatability claim is made for the `slam` arm on a
+  driven goal, and none should be read into §18.1's arrival column.
+- **NO WET SET, and no `ring_corner` on this arm.** The residual §17.5
+  measures is an `amcl`-arm residual; whether the marginally stable leg
+  behaves the same behind a different localiser is not known and is one
+  run away from being known.
+- **THE `slam` ARM'S OWN ARRIVAL SPREAD.** 0.4586 m is one sample from a
+  distribution the `amcl` arm needed eleven runs to characterise.
+- **AND THE COVERAGE CLAIM §16.5 MADE IS NOW DISCHARGED.** That section
+  recorded "`--localize slam` was NOT re-driven … but it was not driven,
+  and this sentence is the honest form of that." It has been driven
+  now, on the nav arm, and it arrived.
+
+---
+
+## 19. THE COLLISION MONITOR
+
+### 19.0 The answer, before the working
+
+| | |
+|---|---|
+| **what it is** | `nav2_collision_monitor` 1.3.12 as a `--monitor` child, between the velocity smoother and the tricycle converter |
+| **and what it is NOT** | nav2's own words for it, verbatim: it **"does not provide hard real-time safety certifications"**. It does not replace a safety-rated PLC. It complements the F-PLC; it is not the F-PLC |
+| the polygons | two `velocity_polygon` sets — a STOP and a SLOWDOWN — every vertex a body edge off `model.sdf`'s own hull plus a MEASURED stopping distance, recomputed by `tests/test_collision_monitor_params.py` |
+| **the slowdown, demonstrated** | fired with the fork tips **1.833 m** from the box's near face against a **1.800 m** zone — **+0.033 m** |
+| **the stop, demonstrated** | fired at **1.033 m** against a **1.050 m** zone — **−0.017 m** |
+| where it came to rest | **0.807 m** from the box, having entered the zone at 0.300 m/s |
+| **the release, demonstrated** | the box removed at t+20.00 s, the truck moving again at **t+20.50 s** and back to **0.6943 m/s** against a commanded 0.700 |
+| the relay identity | with nothing in any zone, `cmd_vel_monitored` ÷ `cmd_vel_smoothed` = **1.000000** |
+| **and the thing it did before it guarded anything** | with the `lasertf` child absent it **CUT THE COMMAND PATH** — 703 twists in, **0 out**, 0 at either terminal, every child ALIVE — and the bringup gate PASSED, truthfully, 9.9 s before the failure existed. §19.5 |
+| the ship decision | **OFF by default**, and §19.7 is why |
+
+### 19.1 The disclaimer, verbatim, and where it lives
+
+F4 constraint 18 asks for it in the design prose. It is a QUOTATION and
+a paraphrase is not one, so the exact string is required by a test in
+every file that makes the claim
+(`test_the_disclaimer_is_verbatim_everywhere_it_appears`):
+
+> **"does not provide hard real-time safety certifications"**
+
+`collision_monitor.yaml` (the first block in the file), `config.yaml`
+(`monitor:`), `tools/monitor_demo.py` (its header, its `describe` and
+its `analyse`), `m5v3.sh` (the `--monitor` usage entry, the start
+banner, `monitor_active`'s refusal and `check_monitor_transform`'s).
+
+**AND THE FULL FORM OF THE CLAIM.** It does not replace a safety-rated
+PLC. It complements the F-PLC; it is not the F-PLC. Protective stop,
+e-stop and safe torque off are onboard and hardwired in the plant this
+models, and no message on any topic in this section can trigger or
+release one. What this node is: a ROS node that reads a 15 Hz
+`LaserScan` over a DDS graph in a simulator and multiplies a `Twist` by
+a number. No diverse channel, no self-test, no latching fault, no
+performance level, no certified reaction time. **Every figure below is a
+measurement of a convenience function.**
+
+### 19.2 Where it sits, and why there rather than anywhere else
+
+```
+Nav2 controller (or a bench)  ->  /cmd_vel
+  nav2_velocity_smoother      ->  /cmd_vel_smoothed
+    collision_monitor         ->  /cmd_vel_monitored     <- --monitor only
+      nodes/cmd_vel_tricycle.py ->  the two motor terminals
+```
+
+**AFTER THE CONVERTER IS NOT A PLACE THIS NODE CAN STAND.** It
+subscribes a `Twist` and publishes a `Twist`; everything downstream of
+the converter is a `Float64` at an actuator terminal in wheel-domain
+units. **BEFORE THE SMOOTHER IS WORSE THAN USELESS**: a stop the monitor
+asked for would be handed to a limiter that softens it back into a
+0.35 m/s² ramp, which is the one thing that must not be done to a
+guard's output. So it is last but one — which is also nav2's own
+placement for it.
+
+**THE CONVERTER IS REMAPPED, NOT THE SMOOTHER'S OUTPUT RE-POINTED.**
+Either would insert the node. Re-pointing the smoother would leave a
+topic called `/cmd_vel_smoothed` that the smoother does not publish, and
+an address whose name is a lie is what most of this stack's checks exist
+to prevent. Remapping the LAST node keeps every existing address meaning
+what it says and adds exactly one new name. The remap is written
+UNCONDITIONALLY — with no `--monitor` the two strings are equal and it is
+an identity — because a command line that differs between arms is a
+command line two arms cannot be compared through.
+
+**F4 CONSTRAINT 18 HOLDS AND THE LINE IS ONE LINK LONGER.** One path
+from the controller to the terminals, no bypass, no ground truth in it:
+this node subscribes a twist and a scan and nothing else. What changed
+is that on this arm the path has four nodes in it instead of three, and
+every session recorded on it is labelled `monitor=on@<md5>` so that no
+figure taken through the longer path can sit in a table with one taken
+through the shorter. That is `nav=`'s own rule one link further down.
+
+**WHY IT IS A FLAG OF ITS OWN AND NOT PART OF `--nav`.** Three reasons,
+and the first is the evidence's. §16.5's acceptance set and §17's
+driving cases go through a command path with nothing inserted in it; a
+monitor that went up on every `--nav` bringup would put a fourth node in
+that path and every arrival figure on this track would become a figure
+about a different line. Second, **this node knows nothing about nav2** —
+no planner, no costmap, no goal, no map — so tying it to the arm that
+has those would be a dependency claim that is false, and it would make
+§19.4's open-loop demonstration impossible, because that one wants the
+command path with no Nav2 in the room (F4 Task 1's own rule). Third,
+`--rf2o` and `--fuse` are the precedent: an optional arm, off, with the
+measurement that says why.
+
+### 19.3 The polygons, and every number in them
+
+**THE BODY, off `gazebo/forklift_ver3/model.sdf`'s own convex hull**
+(`evidence_core.sdf_footprint`, §14.3): fork tips `x = −1.875`,
+counterweight `x = +0.860`, half width `±0.559`.
+
+**AND IT IS THE REAL HULL AND NOT THE GROWN ONE `nav2.yaml`'s COSTMAPS
+CARRY.** That growth is +0.54 m along and +0.11 m across and it is F3's
+LOCALISATION error: it belongs to a costmap that places a truck on a map
+through an estimated pose. This node has no map, no localiser and no
+pose — it transforms scan points into `base_link` and asks whether they
+are inside a rectangle — so the only geometry it is entitled to is the
+truck's own. **Adding a localisation margin here would be an error
+budget applied twice, in a frame where it does not exist.**
+
+**THE ONE MARGIN THAT IS ADDED IS THE SCANNER'S**: 3σ of the nav lidar's
+own per-ray range noise, `stddev 0.02` in `model.sdf`, so
+0.559 + 0.061 = **0.620 m** of half width on every polygon. A test
+asserts it is at least 3σ and strictly under the costmap's own
+cross-track growth.
+
+**THE DEPTHS ARE THE MEASURED STOPPING DISTANCES AND NOT `v²/2a`.** §8
+measured **1.019 m** and **1.041 m** from 0.700 m/s against the ramp's
+own prediction of 0.690 m — the 48 % is DEAD TIME, about 0.25 s at speed
+after the zero arrives — and **0.208 m** from 0.300 m/s.
+
+| zone | band (`linear.x`) | depth | base_link x |
+|---|---|---|---|
+| STOP forks transit | −0.300 … 0.0 | **0.25 m** | −1.875 → −2.125 |
+| STOP forks cruise | −1.000 … −0.300 | **1.05 m** | −1.875 → −2.925 |
+| STOP c/w transit | 0.0 … +0.300 | 0.25 m | +0.860 → +1.110 |
+| STOP c/w cruise | +0.300 … +1.000 | 1.05 m | +0.860 → +1.910 |
+| SLOWDOWN forks transit | −0.300 … 0.0 | **0.50 m** | −1.875 → −2.375 |
+| SLOWDOWN forks cruise | −1.000 … −0.300 | **1.80 m** | −1.875 → −3.675 |
+| SLOWDOWN c/w transit | 0.0 … +0.300 | 0.50 m | +0.860 → +1.360 |
+| SLOWDOWN c/w cruise | +0.300 … +1.000 | 1.80 m | +0.860 → +2.660 |
+| either, `stopped` fallback | −1.000 … +1.000 | the FRONT transit rectangle | −1.875 → −2.125 / −2.375 |
+
+**THE CRUISE SLOWDOWN IS DERIVED AND A TEST RECOMPUTES IT:**
+1.05 (the stop zone) + 0.25 s of dead time at 0.700 (0.175 m) +
+(0.700² − 0.300²) / (2 × 0.35) = 0.571 m → **1.796, rounded to 1.80** —
+so a vehicle warned at the edge of the slowdown zone is at the transit
+ceiling by the time it reaches the stop zone. **The transit slowdown
+zone buys no braking at all** — there is nothing below 0.300 m/s this
+converter will still deliver — and it is one stop zone deep again, as a
+warning band.
+
+**THE SLOWDOWN RATIO IS A RATIO BETWEEN TWO MEASURED SPEEDS AND NOT A
+CHOSEN FRACTION**: 0.300 / 0.700 = **0.428571**, the transit ceiling
+over the command path's own cruise. A cruise command slowed by it IS the
+transit ceiling, which is the speed the small polygons are sized for.
+
+**THE SIGN IS THE VEHICLE'S.** Forks-first is NEGATIVE `linear.x` —
+nav2's REVERSE, and this truck's ordinary direction of travel — so the
+−x rectangles carry the negative bands. Getting that backwards would
+guard the counterweight while the tines led.
+
+**THE ORDER IS NOT ALPHABETICAL AND A TEST HOLDS IT.** `VelocityPolygon`
+takes the FIRST sub-polygon whose band contains the command, and the
+bands share their endpoints, so the SMALL ones are listed first: a
+command at exactly `−0.300` — which is every driven goal on this track —
+must get the 0.25 m transit rectangle and not the 1.05 m cruise one. A
+test reads `vx_max` out of `nav2.yaml` and asserts the transit band
+contains it, because off by a hair a 4.00 m station bay is unenterable.
+
+**AND THE TRANSIT MARGIN IS 0.042 m, DELIBERATELY.** 0.25 m of zone
+against a measured 0.208 m of stopping distance is four centimetres, and
+it is four centimetres because a deeper zone cannot be entered: a 4.00 m
+station bay is 2.60 m from mouth to back panel, and a truck that stopped
+1.05 m short of every wall could not dock at all.
+
+#### 19.3a Why every zone starts at a BODY EDGE, and why `approach` is absent
+
+**THE SCANNER SEES ITS OWN TRUCK.** §14.4 measured it off one scan at
+the spawn: 50 of 811 rays land on `nav_lidar_3d`'s housing at base_link
+(+0.026, −0.019) and on the two mast rails at (−0.747, +0.285) and
+(−0.746, −0.302). The local costmap's obstacle layer paints its own
+footprint FREE before the layers combine and is honest because of it;
+**this node has no such mechanism.** A polygon that enclosed the vehicle
+would contain three of its own parts and report an obstacle on every
+cycle for ever.
+
+So every rectangle begins OUTSIDE the hull and
+`test_NO_zone_contains_any_part_of_the_truck_the_scanner_can_see`
+asserts all three measured returns are outside all ten polygons.
+**nav2's own example wraps the robot at the `stopped` rung**; here that
+polygon is the front transit rectangle instead, and the argument is that
+a stopped vehicle has no direction of travel to guard — so the honest
+thing is to guard the one it had.
+
+**AND IT IS WHY `action_type: approach` IS NOT USED, WHICH IS THE
+LIMITATION AND NOT A PREFERENCE.** `approach` projects the ROBOT'S OWN
+FOOTPRINT forward along the commanded velocity and is the only type that
+follows a TURN correctly. On this vehicle it would find the mast rails
+inside the footprint at t = 0 on every tick. **The consequence is stated
+and not solved: THESE RECTANGLES DO NOT COVER THE SWEPT PATH IN A
+TURN.** At the 1.25 m minimum turning radius the fork tips move 0.025 m
+sideways over the 0.25 m transit stop zone — inside the 0.061 m margin —
+but **0.42 m over the 1.05 m cruise zone**, which is outside it. A
+monitor that has to guard a cornering vehicle at cruise needs
+`approach`, and therefore needs a self-occlusion mask on the scan first.
+§19.6 item 2.
+
+#### 19.3b What it cannot see, which is the largest limitation here
+
+**THE SCAN PLANE IS z = 1.80 m.** The two safety scanners at z = 0.15 m
+are in `model.sdf` and are NOT bridged to ROS (`topics:`), so at the
+height this node watches, **a pallet, a dropped load and a person are
+all invisible.** Its honest scope is STRUCTURE ABOVE 1.80 m.
+
+The demonstration's box is **2.40 m tall for exactly that reason**, a
+test asserts it is taller than the scan plane, and `describe` prints the
+sentence rather than leaving the reader to notice. A shorter box would
+have produced a run in which the monitor never fired — which looks
+identical to a monitor that is not working.
+
+### 19.4 THE OPEN-LOOP DEMONSTRATION, and it predicted itself to millimetres
+
+`tools/monitor_demo.py record`, session `monitor-20260827-201228`,
+`traction=nominal arm=wheel+imu loc=none nav=off`,
+**`monitor=on@567b321c`** — which is the committed file's own md5.
+
+A 0.60 × 0.60 × 2.40 m static box is spawned at world (−9.00, +10.00)
+through gz-sim's own `/world/warehouse/create`; the bench then publishes
+a CONSTANT −0.700 m/s twist at 20 Hz into `/cmd_vel` and records both
+sides of the monitor. **It drives a twist rather than a goal** because
+the measurement is the ratio of two adjacent streams and a speed that
+changes for a controller's own reasons makes that ratio a measurement of
+nothing — `drive_twist.py`'s argument applied to a node that responds.
+It is the ONLY publisher on `/cmd_vel` while it runs, and it **refuses a
+`nav=on` stack by name**: a controller and a bench on one address is a
+race, not an experiment.
+
+| what the monitor said | at | out ÷ in over the phase |
+|---|---|---|
+| `SLOWDOWN` | t+7.70 s | **0.4286** |
+| `STOP` | t+8.95 s | **0.0000** |
+| `DO_NOTHING` | t+20.25 s | **1.0000** |
+
+**THE THREE RATIOS ARE THE CONFIGURED NUMBERS EXACTLY** — 0.428571
+configured, 0.4286 delivered; 0.0 and 1.0 at the other two rungs.
+`cmd_vel_monitored ÷ cmd_vel_smoothed`, both recorded off the wire.
+
+**AND THE GEOMETRY PREDICTED ITSELF.** The gap from the FORK TIPS to the
+box's near face at each handover, against the zone that is supposed to
+have caused it:
+
+| action | gap at the handover | zone depth | difference |
+|---|---|---|---|
+| `SLOWDOWN` | **1.833 m** | 1.800 m | **+0.033 m** |
+| `STOP` | **1.033 m** | 1.050 m | **−0.017 m** |
+
+Thirty-three and seventeen millimetres, on a 15 Hz scan and a 20 Hz
+command loop, against depths derived from a hull in an SDF file and a
+stopping distance measured three sections ago.
+
+**WHERE IT STOPPED.** At t+9.80 s, at rest, fork tips **0.807 m** from
+the box's near face — the 1.05 m stop zone less the 0.243 m the truck
+took to stop from the 0.300 m/s the slowdown had already put it at.
+
+**THE RELEASE.** The box removed at t+20.00 s; the truck moving again at
+**t+20.50 s**, 0.50 s later, and back to **0.6943 m/s** against the
+commanded 0.700. A guard that cannot be released is worse than none, so
+this is a measured phase and not an assumption.
+
+**THE RELAY IDENTITY.** Over the phase before the box was in any zone,
+`out ÷ in` = **1.000000**. The node in the line is a wire when it has
+nothing to say.
+
+**AT THE TERMINAL, WHICH IS THE ONLY PLACE THIS IS REAL.** 521 samples
+on `topics.traction_cmd`, max 5.8333 rad/s, **90 of them exactly zero** —
+every hop above the terminal is a topic, and this row is the plant.
+
+#### 19.4a The finding the demonstration was not designed to produce
+
+**nav2's `VelocityPolygon` SELECTS ON THE INCOMING COMMAND, NOT ON THE
+OUTGOING ONE.** Both rows of the geometry table above are the CRUISE
+zone, because this bench holds `−0.700 m/s` at the monitor's input for
+the whole run: **the node's own slowdown does not shrink its own zone.**
+
+That is not a defect and it is not what `collision_monitor.yaml`'s first
+draft said. What shrinks the zone is a COMMANDER that asks for less —
+which is what nav2's controller does when it plans slower, and what a
+`/speed_limit` does (§19.6), and what this bench is built not to do. The
+distinction matters to anyone sizing these polygons for a different
+consumer, so the yaml now says it where the parameter is and this
+section is the measurement.
+
+### 19.5 IT CUT THE COMMAND PATH BEFORE IT GUARDED ANYTHING
+
+**THE FIRST `--monitor` BRINGUP CAME UP HEALTHY AND THE TRUCK COULD NOT
+MOVE.** Measured 2026-08-27, before the fix:
+
+```
+  cmd_vel            698 rows      <- the bench published
+  cmd_vel_smoothed   702 rows      <- the smoother forwarded
+  cmd_vel_monitored    0 rows      <- THE MONITOR PUBLISHED NOTHING
+  steer_cmd            0 rows
+  traction_cmd         0 rows
+  state                0 rows
+```
+
+Every child ALIVE, `collision_monitor` ACTIVE, every parameter reading
+back correctly off the running node, and `m5_ver3/logs/monitor.log`
+carrying one line three times a second:
+
+```
+[ERROR] [getTransform]: Failed to get "nav_lidar_link"->"base_link" frame
+        transform: "nav_lidar_link" passed to lookupTransform argument
+        source_frame does not exist.
+```
+
+**THE CAUSE IS AN ARM DEPENDENCY NOTHING DECLARED.** The monitor
+transforms every scan point into `base_frame_id` before it tests a
+polygon, and the nav lidar's scan is stamped `nav_lidar_link`. The
+`lasertf` child that publishes that mount existed only on `--rf2o` and
+`--localize`. **On a failed transform this node publishes nothing at
+all** — and on this arm it is IN the command path, so the converter sat
+subscribed to a topic with no publisher, four hops from anything that
+would say so.
+
+**AND THE BRINGUP GATE PASSED, TRUTHFULLY.** `tools/navcmd_health.py`
+publishes one zero twist and reads the far end of the chain, and it
+reported the path was a line. It was:
+
+| | |
+|---|---|
+| node activated | t + 0.02 s |
+| **`navcmd_health` asked and was told yes** | inside the first few seconds |
+| first `getTransform` ERROR | **t + 9.9 s** |
+| the same gate, re-run three minutes later | **REFUSED** |
+
+Until the first scan reaches it there is nothing to fail on and the node
+relays every twist. **A gate that runs once cannot see a failure that
+has not happened yet.**
+
+**TWO THINGS CHANGED AND BOTH ARE MECHANISMS.** `--monitor` now starts
+`lasertf` — one child, shared with the two arms that already needed it,
+and a test asserts the guard names all three arms. And
+`check_monitor_transform()` **WATCHES** the log for
+`monitor.transform_check_s` = 15 s (the measured 9.9 s with half again)
+instead of reading it once, refusing by name on the ERROR. That is
+`check_rf2o_transform()`'s argument in a second currency, with the one
+difference stated: rf2o's lookup happens on its first scan and its ERROR
+is already on disk by the time anything asks; this node's arrives ten
+seconds late.
+
+**ON THE FIXED ARM `monitor.log` CARRIES ZERO ERROR LINES** over the
+whole demonstration bringup, which is the control for this section.
+
+### 19.6 `/speed_limit`, and how the three ceilings compose
+
+§9 wired nav2's `/speed_limit` into the converter and demonstrated it;
+§14.5 read the controller subscribing the same topic. **The collision
+monitor is a THIRD ceiling on the same quantity and it does not talk to
+either of the other two.**
+
+| where | what it clamps | how it is told |
+|---|---|---|
+| `controller_server` | the speed it PLANS at | `nav2_msgs/SpeedLimit` on `/speed_limit` |
+| `collision_monitor` | the speed it PASSES ON | a scan, in `base_link`, on its own |
+| `cmd_vel_tricycle.py` | the speed it DELIVERS | the same `/speed_limit` |
+
+**THEY COMPOSE AS A PRODUCT AND NOT AS A RACE**, which is §9's own
+argument with one more term. The monitor multiplies whatever reaches it,
+so a `/speed_limit` of 0.300 m/s and a monitor slowdown of 0.4286 on a
+0.700 m/s command give 0.300 × 0.4286 = 0.129 m/s at the terminal. **The
+monitor has no `/speed_limit` subscription of its own** and this file
+does not give it one: the limit's own two consumers clamp above and
+below it, and a fourth subscriber would be a fourth opinion about one
+number.
+
+**AND THE INTERACTION RUNS IN ONE DIRECTION.** A `/speed_limit` that
+lowers the COMMANDED speed also **shrinks the monitor's zone**, because
+the zone is selected on the incoming command (§19.4a) — so a limited
+vehicle is guarded by the polygon that matches the stop it is actually
+committed to. The reverse is not true: the monitor's own slowdown
+changes nothing about `/speed_limit` and nothing about its own zone.
+That asymmetry is the whole of the interaction and it is stated here
+rather than left for a reader to derive.
+
+### 19.7 What is open on this node, named
+
+1. **IT WATCHES ONE PLANE AT 1.80 m.** A pallet, a dropped load and a
+   person are invisible to it. The sensors that would see them are the
+   two safety scanners at z = 0.15 m, which exist in `model.sdf` and are
+   not bridged to ROS at all. Bridging them is its own brief and its own
+   measurement — and the moment they exist, `observation_sources` grows
+   a second entry and every depth in §19.3 has to be re-argued against a
+   sensor with a different range and a different rate.
+2. **THE RECTANGLES DO NOT COVER A TURN.** §19.3a: 0.42 m of fork-tip
+   excursion over the cruise stop zone at the minimum turning radius,
+   against a 0.061 m lateral margin. `action_type: approach` is the type
+   that solves it and it is unusable until the scan carries a
+   self-occlusion mask — which is §14.4's own open item, and the two
+   should be taken together.
+3. **THE ZONE FOLLOWS THE COMMAND AND NOT THE VEHICLE.** §19.4a. On this
+   stack the two agree, because nav2's controller commands what it
+   intends to drive; a consumer that commanded a speed it did not intend
+   to reach would be guarded by the wrong rectangle.
+4. **NOTHING MEASURES WHAT IT COSTS THE RTF OR THE CPU.** §14.7 tabled
+   every other child's idle load and this one has no row. It is one more
+   node in a sixteen-child stack and the number is not guessed here.
+5. **THE `stop_pub_timeout` FIRES ON EVERY IDLE STACK.** The command
+   path is silent at rest by construction, so 2.0 s after the last twist
+   this node publishes one zero — into a converter that is already
+   holding one. It is harmless and it is nav2's own default; it is named
+   because a reader watching `topics.cmd_vel_monitored` on an idle stack
+   will see it.
+
+### 19.8 The ship decision, and both arms
+
+**IT SHIPS OFF, AND THE REASON IS THE EVIDENCE'S RATHER THAN THE CPU'S.**
+§16.5's acceptance set and §17's driving cases are measured through a
+three-node command path. Turning this on by default would put a fourth
+node in that path and every arrival figure on this track would silently
+become a figure about a different line. `--rf2o` and `--fuse` are the
+precedent and this is their argument a third time.
+
+**WHAT WOULD HAVE TO HAPPEN FOR IT TO SHIP ON**, named rather than left
+implicit: the acceptance set re-driven through the longer path, so that
+the arrival table and the monitor are measured together; a
+self-occlusion mask on the scan, so that `approach` becomes usable and
+the guard covers a turn; and a source that can see below 1.80 m, because
+the objects this floor's operators care about are all under it. None of
+the three is a parameter change.
+
+**BOTH ARMS, F4 CONSTRAINT 20.** Every arm this change can reach,
+brought up on the committed tree, headless:
+
+| arm | children | result |
+|---|---|---|
+| **`--monitor`** (no localiser, no nav) | **9** | all ALIVE; `ekf` healthy 0.22968 against a ceiling of 100; `velocity_smoother active`; **`collision_monitor active`**; navcmd gate passed through FOUR hops; `monitor=on@567b321c`; §19.4's demonstration |
+| **no `--monitor`** (the default stack) | **8** | unchanged — the converter subscribes `topics.cmd_vel_smoothed` through an identity remap, and F4 Task 1's measured path is byte for byte the one it was |
+| **`--localize amcl --nav`, no `--monitor`** | **16** | §17's case runs and §18's flip run, `monitor=off` on every one |
+| **`--localize amcl --nav --monitor`** | **17** | §19.9 |
+
+**AND THE SWEEP TOOK IT DOWN.** `collision_monitor` is in
+`tools/_common.sh`'s pattern list — the EXECUTABLE, which is a substring
+of both the `ros2 run` wrapper's command line and the node's own — and
+`tests/test_sweep_patterns.py` parses `m5v3.sh` for the spawn and
+requires a pattern for it. **Orphaning this one is the worst of the
+list**: a stale `controller_server` publishes a twist, and a stale
+`collision_monitor` publishes a twist **on the topic the converter reads
+on this arm**, computed off a scan out of a world that no longer exists.
+
+### 19.9 THE CLOSED-LOOP DEMONSTRATION, and the guard never got the chance
+
+`--localize amcl --nav --monitor`, **seventeen children**, headless:
+`world lasertf bridge imgbridge odom imutf ekf smoother monitor navcmd
+map_server amcl planner_server controller_server behavior_server
+bt_navigator nav_lifecycle_manager`. `collision_monitor active`, the
+navcmd gate passed through four hops, and `monitor.log` carries **zero
+ERROR lines** for the whole run.
+
+`tools/drive_goal.py record --goal spine_north` on that stack, with the
+same box placed on the route 22 s into the drive and removed 30 s later
+by `monitor_demo.py obstacle place|remove` — the same two gz service
+calls and the same `config.yaml` row the open-loop demonstration uses,
+so the two cannot disagree about where the box is.
+
+**THE MONITOR NEVER FIRED, AND THAT IS THE MEASUREMENT.** It published
+**no state transition at all** — the node publishes one only when its
+action CHANGES — so it stayed at `DO_NOTHING` for the whole run. What
+happened instead, off the recorded session:
+
+| t+ | commanded v | traction terminal | truth vx | world x |
+|---|---|---|---|---|
+| 0 s | +0.0000 | +0.0000 | +0.0000 | −17.000 |
+| 5 s | **−0.2998** | −2.5161 | −0.2787 | −16.253 |
+| 15 s | **−0.2999** | −2.4846 | −0.2979 | −13.291 |
+| 20 s | −0.1306 | −1.6203 | −0.1577 | −12.038 |
+| 25 s | **+0.0858** | +0.6649 | +0.0833 | −11.951 |
+| 50 s | +0.0818 | +0.6733 | +0.0857 | −13.946 |
+
+**nav2's OWN LOCAL COSTMAP REACTED FIRST, AND BY A CLEAR MARGIN.** At
+t+20 s the fork tips were **0.86 m** from the box's near face. At the
+transit ceiling the monitor's zones are 0.50 m (slowdown) and 0.25 m
+(stop) — so the vehicle was still **0.36 m outside the outermost zone
+the monitor would have used** when the controller had already begun
+backing off. From t+25 s the command is POSITIVE: the truck is reversing
+away from the obstacle, counterweight-first, and the monitor's rear zone
+is empty. **It was right not to fire.**
+
+**SO ON THIS STACK THE MONITOR IS A BACKSTOP THE PLANNER PRE-EMPTS**, at
+the transit ceiling, for an obstacle the scan can see. It earns its keep
+where the costmap cannot: a commander faster than 0.300 m/s (the zones
+grow to 1.80 / 1.05 m there, outside the local costmap's own reaction),
+an obstacle that appears inside the costmap's update, or a consumer of
+the command path that is not nav2 at all. That is a narrower claim than
+"it guards the vehicle" and it is the one the measurement supports.
+
+**AND THE RUN ITSELF FAILED, FOR A REASON THAT IS NOT THE MONITOR'S.**
+The watchdog abandoned it at t+50 s as `no_progress`. The mechanism is
+the global/local split: **the global costmap has no obstacle layer** —
+§14.5's read-back lists a static layer and an inflation layer and
+nothing else — so the frozen map does not contain the box, the global
+plan goes straight through it, and MPPI, which DOES see it in the local
+costmap, cannot follow that plan. The vehicle backed off and orbited.
+**An obstacle that is not in the frozen map is not in the global plan,
+and the local costmap alone will not route round it.** That is a
+property of this arm rather than of this task's change, it was not known
+before this run, and §20.6 carries it as open.
+
+---
+
+## 20. THE PHASE VERDICT
+
+### 20.0 What F4 delivered
+
+| | |
+|---|---|
+| **the command path** | one line, four verified hops, no bypass, no ground truth in it. Worst steer step **0.100000 rad/tick** on every driven run of §15, §16 and §17 — F4 Task 1's 2.0 rad/s ramp, exactly, never once above it |
+| **the nav arm** | sixteen children on `--localize amcl --nav`, six lifecycle nodes ACTIVE, a plan in 0.008 – 0.014 s on every bringup, and a gate that refuses a server which came up merely active |
+| **the driving** | **10 of 11** on §16.5's acceptance set and **7 of 11 legs** on §17's case set, one parameter tree, `nav_config_md5 53a33d67` |
+| **the arrival** | truth **0.4361 – 0.6174 m** on every arrival across both sets, in an unchanged **0.60 m** position-only box, with belief and truth agreeing to **0.006 – 0.13 m** at rest |
+| **the fail-fast** | a goal-relative watchdog at ~30 s, the tree's own recovery at ~91 s, a 335 s budget behind both. **0 false positives across 24 arrivals; it fired on every failure in §17** |
+| **what is NOT delivered** | the station class. §17.3: the position half is reachable to six millimetres and the pair is not reachable in ONE approach, and a real station spur delivers **0.7538 rad** of heading error at the 0.60 m box |
+| **the residual** | `ring_corner` is **4 of 6** and the loop is marginally stable there. §20.4 |
+
+### 20.1 THE ACCEPTANCE TABLE — cases against criteria, dry
+
+Every row `traction=nominal arm=wheel+imu loc=amcl@735cdbc6
+nav=on@ebe9ca34 monitor=off`, headless, stack stopped and started before
+each run. The criteria are the ones F4's plan and §16 set.
+
+| criterion | where it was set | measured | verdict |
+|---|---|---|---|
+| the arm comes up able to PLAN | F4 Task 2 | 6 lifecycle nodes ACTIVE, 29 poses in 0.008 – 0.014 s, every bringup of §17 | **MET** |
+| the headline goal arrives repeatably | §16, ≥3/3 | `spine_north` **6 of 6** (§16.5) | **MET** |
+| the shipped goal set arrives | §16, 5/5 | **10 of 11** (§16.5) | **NOT MET — `ring_corner` 2 of 3** |
+| **an aisle transit re-tasked mid-path** | F4 Task 3 | **2 of 3** arrivals; the re-task itself costs **≤ 1 controller tick** | **MET for the preemption, NOT for the arrival** |
+| **a forks-first station-class approach** | F4 Task 3 | **1 of 2**; arrival heading **−0.8765 rad** inside a 0.60 m box | **APPROACH MEASURED, station class NOT MET** |
+| **a genuine Reeds-Shepp reverse leg** | F4 Task 3 / #5714 | planned cusps produced, **one driven**, tracking **0.0888 m** max through it | **MET** |
+| **the corner-heavy leg, ×3** | F4 Task 3 | **2 of 3**, and **4 of 6** over two tasks | **NOT MET** |
+| the controller holds its rate | `controller_frequency: 20.0` | **19.965 – 20.056 Hz** mean, 20.000 median, across every run of §16.5 and §17 | **MET** |
+| the RTF survives the stack | — | **0.9963 – 0.9999** over the drives themselves | **MET** |
+| the command path is untouched | F4 constraint 18 | worst steer step **0.100000 rad/tick**, every run | **MET** |
+| a miss is a NAMED failure, fast | §16.7 | fired on 3 of 3 failures in §17; **0 of 24 arrivals** | **MET** |
+| both arms up on the committed tree | F4 constraint 20 | §17 (amcl+nav), §18 (slam+nav), §19.8 (four command-path arms) | **MET** |
+
+**THE BAR IS NOT MET AND THE ONE ROW THAT MISSES IT IS THE SAME ROW
+§16.5 MISSED.** `ring_corner` was 2 of 3 then and is 2 of 3 now; nothing
+else regressed and nothing else is open on the arrival criterion.
+
+### 20.2 THE #5714 FINDING
+
+nav2 issue #5714 says MPPI's Ackermann motion model tracks worse in
+turns, worst in REVERSE. **On this vehicle nav2's REVERSE is ordinary
+travel**, because the forks are at model −x — so if the defect were
+present here it would be present on every leg, and F4 constraint 19 says
+measure it and record it rather than tune around it.
+
+**IT IS NOT PRESENT, AND THE DIRECTION IT IS PRESENT IN IS THE OTHER
+ONE.** §17.4's `reverse_out` is the first session on this track carrying
+both directions, and it carries them on one vehicle, one floor and one
+parameter tree:
+
+| leg | direction | n | deviation, mean | deviation, max |
+|---|---|---|---|---|
+| forks-first | **nav2 REVERSE** — every ordinary leg | 1934 | **0.0522 m** | **0.1615 m** |
+| counterweight-first | **nav2 FORWARD** | 660 | **0.0756 m** | **0.2314 m** |
+
+**45 % worse in the mean and 43 % worse at the peak, the wrong way
+round.** And through the CUSP itself — the direction change the defect
+is really about — the deviation is **mean 0.0566 m, max 0.0888 m** over
+±1 s, which is better than either leg's own peak.
+
+**THE HONEST QUALIFICATION IS §17.4's AND IT STANDS HERE.** Leg 2 is a
+4.9 m extraction from a 4.00 m bay and leg 1 is a 27 m transit down an
+8.00 m band; part of the 45 % is geometry rather than direction, and
+separating them needs a counterweight-first leg down an open corridor,
+which no goal in this table produces.
+
+**WHAT DID BITE, TWICE, IS NOT #5714.** Both `station_approach`'s
+failure and `reverse_out`'s leg 2 ended on `error_code 205` —
+`ComputePathToPose::START_OCCUPIED` — the planner refusing to replan a
+truck whose grown footprint is inside the inflated band of a 4.00 m bay.
+That is a costmap-geometry limit and it is §20.5's first handoff.
+
+### 20.3 THE FLIP ROW
+
+| | `amcl`, n = 3 | **`slam`, n = 1** |
+|---|---|---|
+| arrived | 2 of 3 | **1 of 1** |
+| arrival TRUTH | 0.5729, 0.6174 m | **0.4586 m** |
+| corrections per second | **1.052** | **0.748** |
+| worst position step | **1.1919 m** | **0.8845 m** |
+| median position step | 0.0359 – 0.0572 m | 0.0705 m |
+| **worst yaw-rate swing after a jump** | **0.1665 rad/s** | **0.0604 rad/s** |
+
+**THE CORRIDOR ADVANTAGE SURVIVES THE CLOSED LOOP.** Fewer corrections,
+a smaller tail, and a controller response less than half as violent — on
+the same case, the same route and the same `nav2.yaml`. The
+qualification is the median, which is larger on the `slam` arm: it
+corrects less often and by more each time. **One run is one run** and
+§18.2 says so where the claim is made.
+
+### 20.4 `ring_corner`: THE DISPOSITION
+
+**IT IS 4 OF 6 AND IT IS PARKED, WITH ONE MORE LEVER NOW ELIMINATED.**
+
+**WHAT IS NOW MEASURED RATHER THAN ASSERTED.** §16.4c called the outcome
+bimodal off three runs. Six runs across two tasks put every arrival in
+**ψ sd [0.193, 0.255]** and every failure in **[0.458, 0.536]**, with
+**no run in between**. The separation is a measured fact and
+`drive_goal.heading_swing()` is the instrument, which §16.4c did not
+have.
+
+**AND ONE HYPOTHESIS IS DEAD.** §17.5a windows ψ's spread over the first
+sixty seconds of each run: one failure is already diverging by t+20–40 s
+and the other is still at 0.13 through t+40–60 s. **The outcome is not
+decided by the initial conditions** — there is no early signature that
+separates the populations — so "the run starts wrong" is dead, and what
+is left is a loop that is marginally stable and whose oscillation grows
+from wherever the noise puts it.
+
+**THAT POINTED AT A LEVER AND THE LEVER WAS PULLED, ONCE, BOUNDED.**
+§16.9 item 1 named two: `PathAlignCritic.cost_weight` (14.0, the
+upstream default for a differential base with an order more angular
+authority than this vehicle's 0.24 rad/s) and the tree's 1 Hz
+`RateController`. A marginally stable loop is a GAIN question, and
+§16.4a already established that this critic is proportional feedback on
+cross-track error around a double integrator — so the first lever is the
+one the data points at.
+
+**RUNG 8 — `cost_weight` 14.0 → 7.0, `ring_corner` ×3,
+`nav=on@7f28f5b6`. REJECTED.**
+
+| run | ψ sd | ψ worst | closest (belief) | result |
+|---|---|---|---|---|
+| `case-ring_stress-…205930` | **0.4576** | 0.9947 | 8.0652 m | abandoned `no_progress` |
+| `case-ring_stress-…210329` | **0.2825** | 0.8662 | 0.5990 m | ARRIVED |
+| `case-ring_stress-…210709` | **0.2641** | 1.1111 | 0.5912 m | ARRIVED |
+
+**TWO IN THREE, WHICH IS EXACTLY WHAT THE SHIPPED FILE DOES.** The
+arrival rate did not move. And the statistic the change was made to move
+moved the WRONG WAY: both arriving runs sit at **0.2641 and 0.2825**,
+**above every arrival the shipped weight has ever produced** (0.193 –
+0.255 over six runs), and the gap between the two clusters narrowed from
+0.2544 → 0.4674 to 0.2825 → 0.4576.
+
+**IT DID NOT MOVE THE STATISTIC THE CHANGE WAS MADE TO MOVE, AND THE
+DIRECTION IT DID MOVE IT IS THE WRONG ONE.** Halving the
+proportional gain on cross-track error did not stabilise the loop — the
+arrival rate is unchanged at 2 of 3 — and it cost the runs that DID
+arrive a third more heading swing, because a lighter align critic
+follows its path less firmly. **So `PathAlignCritic.cost_weight` is not
+the destabilising gain**, and the double-integrator reading of §16.4a
+does not survive the test its own logic suggested. The failing run also
+diverged EARLIER than any run on the shipped file — 0.2670 in its first
+twenty seconds against 0.157 – 0.173 — which is the same direction: less
+authority, not more stability.
+
+**SO `nav2.yaml` IS REVERTED AND THE SHIPPED FILE IS UNCHANGED**, which
+is §16.4c rung 7's own outcome and for the same reason: a rung that
+bought nothing measurable is a rung that goes back. What the experiment
+bought is an ELIMINATION — `PathAlignCritic.cost_weight` is not the
+destabilising gain — and that is worth more to the next task than an
+untried lever.
+
+**WHAT IS STILL OPEN, NAMED.**
+1. **The tree's 1 Hz `RateController`**, which is the second lever and
+   is untouched. §16.4c's own description of the residual is a
+   planner-controller loop at 1 Hz around the 20 Hz one: the tree
+   replans from the vehicle's own heading, so a heading that is swinging
+   produces a path that swings. Nothing in this task tested it.
+2. **The mechanism is STILL NOT CONFIRMED.** What is known is that the
+   outcome is bimodal with a clean gap, that it needs about 20 m of
+   straight leg to develop, that the divergence time is not fixed, that
+   the prediction horizon is not the lever (§16.4c rung 7) and that the
+   align critic's weight is not the lever either (rung 8). Four things
+   ruled out is not a mechanism.
+3. **AND THE RESIDUAL IS A `ring_corner` RESIDUAL.** It has never been
+   driven on the `slam` arm, on a wet floor, or with the collision
+   monitor in the path. One run of each would say whether it is a
+   property of the controller or of the whole stack.
+
+### 20.5 THE F5 HANDOFF
+
+Everything a docking phase inherits, with the number and the section it
+comes from.
+
+**1. THE APPROACH POSE, MEASURED ON A REAL STATION.** m6's S5 /
+PICK-NE-1, entered off the ring band down its own 4.80 m spur, with the
+shipped position-only 0.60 m checker:
+
+| | |
+|---|---|
+| arrival position, TRUTH | **0.5451 m** |
+| arrival position, BELIEF | 0.5280 m |
+| **arrival HEADING** | **−0.8765 rad (−50.2°)** |
+| closest approach, belief | 0.5975 m |
+| repeatability | **1 of 2** |
+
+**THE HEADING IS THE NUMBER THAT DECIDES F5's ARCHITECTURE.** Fifty
+degrees off the dock axis on a run that arrived inside the box.
+
+**2. AND THE TWO-STAGE APPROACH IS A REQUIREMENT AND NOT A PREFERENCE.**
+§16.6 ruled that the (position, heading) pair is *not reachable in ONE
+APPROACH, because closing the position costs the heading at a measured
+rate*. §17.3 re-measured that curve on a station spur:
+
+| box | heading error, straight approach (§16.6) | **heading error, STATION spur (§17.3)** |
+|---|---|---|
+| 1.50 m | 0.0239 rad | **0.0925 rad** |
+| 0.60 m | 0.2456 rad | **0.7538 rad** |
+| 0.25 m | 0.3941 rad | *(never reached)* |
+
+**F5 NEEDS A STRAIGHT FINAL LEG OF ABOUT A METRE AND A HALF ALONG THE
+DOCK AXIS**, which is where the heading is still inside 0.10 rad on a
+station spur — a docking server's `slowdown_radius` / `v_linear_min`
+run-in (`docs/reports/m5v3-02` §3). That is now a number measured on the
+station it will dock at.
+
+**3. THE PLANNER WILL NOT REPLAN A TRUCK STANDING IN A BAY.** Both
+station-class failures in §17 ended on `ComputePathToPose::START_OCCUPIED`
+(205), once on the way in and once on the way out. The mechanism is
+geometry: a footprint grown to 2.735 × 1.338 m (F3's anisotropic
+localisation margin, §14.3) inside an `inflation_radius` of 2.60 m, in a
+bay 4.00 m wide and 2.60 m from mouth to back panel. **A docking server
+that hands control back to the planner from inside a bay will meet
+this**, and the two knobs are the grown footprint and the inflation —
+neither of which can be lowered without re-arguing §14.3 and §15.2 rungs
+2–4.
+
+**4. THE COMMAND PATH'S FLOOR.** Everything F5 commands goes through the
+line §3–§10 measured and §17 confirmed untouched:
+
+| | |
+|---|---|
+| steer rate at the terminal | 2.0 rad/s — worst step **0.100000 rad/tick**, every run of three tasks |
+| tread acceleration | 0.35 m/s² configured, **0.331 – 0.344** delivered |
+| **stop from the transit ceiling** | **0.208 m**, 0.97 s |
+| **stop from cruise** | **1.019 – 1.041 m**, 2.07 s, of which ~0.25 s is DEAD TIME |
+| curvature ceiling | 1.25 rad of steer, measured, inside the 1.31 rad stop |
+| minimum turning radius | **1.25 m**, and it is what makes a 4.00 m bay tight |
+| `/speed_limit` | wired at the controller AND the converter; a `min()`, idempotent, demonstrated (§9) |
+
+**5. THE COLLISION MONITOR'S POLYGONS**, if F5 keeps the guard:
+
+| zone | transit (≤0.300 m/s) | cruise (≤0.700 m/s) |
+|---|---|---|
+| STOP, beyond the fork tips | **0.25 m** | **1.05 m** |
+| SLOWDOWN, beyond the fork tips | 0.50 m | 1.80 m |
+| half width | **0.620 m** on every polygon | |
+
+**AND THE 0.25 m TRANSIT STOP ZONE IS SIZED FOR EXACTLY THIS PROBLEM.**
+A fixed cruise-sized zone would stop the truck 1.05 m from every wall
+and no bay could be entered at all; 0.25 m against a measured 0.208 m of
+stopping distance leaves four centimetres, which is the whole margin a
+docking approach has. **The monitor sees nothing below z = 1.80 m** —
+not a pallet, not a load, not a person — so it is not a docking sensor
+and F5 should not treat it as one.
+
+**6. THE JUMP BUDGET, AMENDED TWICE AND NOW ARM-SPECIFIC.**
+
+| | worst single `map` → `odom` step |
+|---|---|
+| §13.10, open loop | 0.2591 m |
+| §16.8, closed loop, 44 sessions | 0.8310 m |
+| **§18.3, closed loop, `amcl`** | **1.1919 m** |
+| **§18.3, closed loop, `slam`** | **0.8845 m** |
+
+**SIZE A JUMP ALLOWANCE ON 1.20 m DRY ON `amcl` AND 0.89 m ON `slam`.**
+A docking server holding a pose 0.25 m from a rack face must survive a
+correction larger than the tolerance it is holding — which is the
+strongest single argument in this file for a docking loop that closes on
+something other than `map` → `base_link`.
+
+### 20.6 What F4 did NOT do, whole
+
+- **No wet set.** Every figure in §14–§20 is `traction=nominal`.
+  §13.10a's wet partner still does not exist, and §8's own wet numbers
+  were never carried into a driven goal.
+- **No `--rf2o` and no `--fuse` driven goal.** Both arms are alive and
+  neither has ever had a planner over it. F4 Task 1's constraint-20
+  exemption for them was recorded as sound but unrun, and it is still
+  unrun.
+- **No `nav2_route`.** §15.7 item 3 and §16.9 item 2: the freespace
+  planner bows `ring_corner`'s route 1.2 – 1.5 m off the road-graph line
+  for the middle of its length. It costs nothing today and it is still
+  not the road graph.
+- **No obstacle layer on the GLOBAL costmap**, and §19.9 measured what
+  that costs: an obstacle that is not in the frozen map is not in the
+  global plan, and the local costmap alone made the vehicle back off
+  rather than route round it.
+- **No docking, no `/speed_limit` from a PLC, no fleet, no HMI.** That
+  absence is the phase.
+- **The 5.09 s control tick** (§15.4), once in 21 500, still
+  unexplained. Nothing in this task's further 30 000-odd commands
+  reproduced it.
+- **`monitor=` is a fifth label and the sessions recorded before it
+  exists read `UNLABELLED`.** Two of §17's runs — `…193729` and the two
+  earliest `aisle_transit` runs — are in that group, and `analyse`
+  refuses to table them with the rest. That is the label working on its
+  first day and it is stated rather than smoothed.

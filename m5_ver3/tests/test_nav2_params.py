@@ -62,13 +62,20 @@ WORST_END_ERROR_M = 0.1954
 #: FOUR ABOVE. F3's 0.2591 m was measured OPEN LOOP - a table of twists
 #: driven with nothing reading the localiser. Under a CLOSED loop the
 #: worst single correction over the corpus 16.8 measured - all 44
-#: driven-goal sessions on disk at that time - is 0.8310 m,
+#: driven-goal sessions on disk at that time - was 0.8310 m,
 #: 3.21x that, and EVIDENCE_LOCALIZATION_V3.md 13.10a is the labelled
-#: addendum. The old value is kept beside it so the test below can show
-#: that its conclusion holds at BOTH - which is the only honest way to
-#: report a bound that moved under a derivation that did not.
-WORST_MAP_ODOM_STEP_M = 0.8310
+#: addendum. F4 TASK 3 AMENDED IT AGAIN: its own case set carries
+#: 1.1919 m, 4.60x, on a run that ARRIVED down the same 47 m route
+#: (EVIDENCE_NAV_V3.md 18.3, 13.10b). BOTH older values are kept beside
+#: it so the test below can show the conclusion holds at ALL THREE -
+#: which is the only honest way to report a bound that has moved twice
+#: under a derivation that has not moved at all.
+WORST_MAP_ODOM_STEP_M = 1.1919
+WORST_MAP_ODOM_STEP_CLOSED_LOOP_T25_M = 0.8310
 WORST_MAP_ODOM_STEP_OPEN_LOOP_M = 0.2591
+#: AND THE OTHER ARM'S, which is smaller and is what a consumer on it
+#: should size on (EVIDENCE_NAV_V3.md 18.1).
+WORST_MAP_ODOM_STEP_SLAM_M = 0.8845
 
 #: The pick aisle: the only 5.00 m corridor on this floor, rack faces at
 #: y = +-2.50 (m6/gazebo/warehouse_ver3.sdf, and EVIDENCE_MAP_V3.md 2.1).
@@ -470,13 +477,13 @@ def test_the_inflation_is_a_GRADIENT_and_not_a_HARD_BAND(costmaps):
 
 
 def test_the_inflation_covers_the_LATERAL_surprise(costmaps):
-    # ON THE AMENDED JUMP FIGURE, AND THAT IS THE POINT OF THE
-    # AMENDMENT. F4 Task 2.5 measured the worst map -> odom correction
-    # under a closed loop at 0.8310 m against the 0.2591 m F3 handed
-    # over open-loop, so this bound is 0.9354 m where it used to be
-    # 0.3635 m. The radius did not move; its margin did.
+    # ON THE TWICE-AMENDED JUMP FIGURE, AND THAT IS THE POINT OF BOTH
+    # AMENDMENTS. F3 handed over 0.2591 m open loop; F4 Task 2.5
+    # measured 0.8310 m under a closed one; F4 Task 3's own case set
+    # carries 1.1919 m. So this bound is 1.2963 m where it was 0.9354
+    # and 0.3635. The radius has never moved; its margin has, twice.
     lateral = WORST_CROSS_TRACK_M + WORST_MAP_ODOM_STEP_M
-    assert lateral == pytest.approx(0.9354)
+    assert lateral == pytest.approx(1.2963)
     for name, params in costmaps.items():
         radius = float(params["inflation_layer"]["inflation_radius"])
         assert radius > lateral, (
@@ -496,8 +503,23 @@ def test_the_inflation_would_have_cleared_the_OPEN_LOOP_bound_TOO(
     # it, and that the FLOOR is what set it (the local_costmap section).
     old_bound = WORST_CROSS_TRACK_M + WORST_MAP_ODOM_STEP_OPEN_LOOP_M
     assert old_bound == pytest.approx(0.3635)
+    # AND THE MIDDLE ONE TOO, which is F4 Task 2.5's. Three bounds now:
+    # 0.3635 open loop, 0.9354 at 13.10a's closed-loop figure and 1.2963
+    # at 13.10b's. The radius has never moved and none of the three
+    # binds it, which is what makes the FLOOR argument in the
+    # local_costmap section the one that actually set it.
+    middle = WORST_CROSS_TRACK_M + WORST_MAP_ODOM_STEP_CLOSED_LOOP_T25_M
+    assert middle == pytest.approx(0.9354)
+    # AND THE OTHER LOCALISER'S, because a consumer on that arm sizes on
+    # its own number and it is smaller (EVIDENCE_NAV_V3.md 18.1).
+    slam = WORST_CROSS_TRACK_M + WORST_MAP_ODOM_STEP_SLAM_M
+    assert slam == pytest.approx(0.9889)
+    assert slam < WORST_CROSS_TRACK_M + WORST_MAP_ODOM_STEP_M
     for params in costmaps.values():
-        assert float(params["inflation_layer"]["inflation_radius"]) > old_bound
+        radius = float(params["inflation_layer"]["inflation_radius"])
+        assert radius > old_bound
+        assert radius > middle
+        assert radius > slam
 
 
 def test_the_inflation_TELLS_THE_PLANNER_ABOUT_THE_TWO_ROAD_CLASSES(

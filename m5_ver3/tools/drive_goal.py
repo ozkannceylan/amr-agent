@@ -2043,8 +2043,18 @@ def analyse(cfg, names):
     seen = collections.OrderedDict()
     for name in found:
         _tables, fields = load(cfg, name)
+        # AND `monitor` IS THE FIFTH SINCE F4 TASK 3, for nav='s reason
+        # one link further down the command path: a session recorded
+        # with a guard between the smoother and the converter went
+        # through a DIFFERENT LINE from one recorded without, and the
+        # two produce CSVs of identical shape off identical topics.
+        #   A SESSION WITH NO monitor= LINE READS `UNLABELLED` AND IS
+        # NOT INFERRED TO BE `off`. It was recorded by a bench older
+        # than the label, which is a fact about the BENCH; `loc=none`'s
+        # rule, one label over.
         key = "  ".join(fields.get(k, "UNLABELLED")
-                        for k in ("traction", "arm", "loc", "nav"))
+                        for k in ("traction", "arm", "loc", "nav",
+                                  "monitor"))
         seen.setdefault(key, []).append(name)
     if len(seen) > 1:
         lines = []
@@ -2056,8 +2066,8 @@ def analyse(cfg, names):
                    "chain)".format(os.path.join(_common.REPO,
                                                 cfg.s("evidence.dir")),
                                    _common.CONFIG),
-                   "{} different traction/arm/loc/nav combinations are in "
-                   "this set:".format(len(seen)), *lines)
+                   "{} different traction/arm/loc/nav/monitor combinations "
+                   "are in this set:".format(len(seen)), *lines)
     # AND THE REPEAT COUNT, PRINTED BESIDE WHAT WAS ACTUALLY FOUND.
     # config.yaml's nav.goals[].repeat says what the EVIDENCE has to
     # contain; this is what it does contain, so a repeatability claim

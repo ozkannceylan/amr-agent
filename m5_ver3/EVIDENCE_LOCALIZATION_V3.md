@@ -1615,11 +1615,13 @@ this file is a tracking figure.
 
 ### 13.10 THE RECOMMENDATION — what F4 should consume
 
-> **READ §13.10a WITH THIS SECTION.** Its jump figures were measured
-> OPEN LOOP. F4 Task 2.5 measured the same quantity with a
+> **READ §13.10a AND §13.10b WITH THIS SECTION.** Its jump figures were
+> measured OPEN LOOP. F4 Task 2.5 measured the same quantity with a
 > controller closing a loop on it and the worst position step is
-> **0.8310 m, 3.21× the 0.2591 m below**. The heading figure held.
-> Nothing in this section has been altered.
+> **0.8310 m, 3.21× the 0.2591 m below**; F4 Task 3's own case set then
+> moved it again to **1.1919 m, 4.60×** on the `amcl` arm, and measured
+> the OTHER arm's for the first time at **0.8845 m**. The heading figure
+> has held through all three. Nothing in this section has been altered.
 
 **`--localize amcl` remains m5v3's default, and the pose graph is the
 arm F4 should measure against a controller in the loop.**
@@ -1783,6 +1785,72 @@ parameters: nothing in `amcl.yaml` was touched by F4 and no figure above
 MEDIAN correction over these sessions is **0.0115 – 0.0933 m**, which
 straddles §8's own 0.019 – 0.047 m band rather than leaving it. What
 moved is the TAIL.
+
+
+#### 13.10b ADDENDUM — THE SAME BOUND, MOVED AGAIN, AND NOW PER ARM
+
+**ADDED 2026-08-27 BY F4 TASK 3. THIS IS A SECOND CROSS-PHASE EDIT AND
+NOTHING ABOVE IT HAS BEEN CHANGED** — §13.10 is F3's, §13.10a is F4 Task
+2.5's, and both stand exactly as they were written. This is a third
+measurement of the same quantity over a set neither of them had.
+
+**THE BOUND MOVED AGAIN AND IT MOVED THE SAME WAY, FOR THE REASON
+§13.10a's OWN CORRECTION GAVE.** F4 Task 3's driving cases
+(`EVIDENCE_NAV_V3.md` §17) put four runs of a 47 m route on the `amcl`
+arm, and `evidence_core.tf_jumps()` over them reports:
+
+| | worst single position step | worst single heading step |
+|---|---|---|
+| §13.10, OPEN LOOP | 0.2591 m | 0.0764 rad |
+| §13.10a, CLOSED LOOP, 44 sessions | 0.8310 m — 3.21× | 0.0641 rad |
+| **§13.10b, CLOSED LOOP, `amcl`** | **1.1919 m — 4.60×** | 0.0355 rad |
+| **§13.10b, CLOSED LOOP, `slam`** | **0.8845 m — 3.41×** | 0.0279 rad |
+
+**IT IS THE SAME FINDING RATHER THAN A NEW ONE.** §13.10a's conclusion —
+after it withdrew its own first reading — was that **the ROUTE sorts the
+worst correction and the driving does not**: a run that gets further
+crosses more of this floor and AMCL corrects more accumulated odometry
+error in one step. 1.1919 m is `case-aisle_transit-20260827-202100`, the
+47 m route again, on a run that ARRIVED again. The reason has not
+changed; only the number has.
+
+**AND THE TWO ARMS SEPARATE, WHICH §13.10a COULD NOT SEE.** That
+addendum was measured over the `amcl` arm alone. On the SAME case, the
+same route and the same `nav2.yaml`, `slam_toolbox`'s localiser
+corrected **123 times in 164.5 s against AMCL's 178 in 169.2 s** —
+0.748/s against 1.052/s — with a worst step of **0.8845 m against
+1.1919 m** and a worst yaw-rate response from the controller of
+**0.0604 rad/s against 0.1665 rad/s**. Its MEDIAN step is larger
+(0.0705 m against 0.0359 – 0.0572 m): it corrects less often and by more
+each time. `EVIDENCE_NAV_V3.md` §18 is the whole comparison and says
+plainly that it is one run against three.
+
+**THE ACTIONABLE SENTENCE, AMENDED AGAIN AND NOW SPLIT.** §13.10a said
+*size a jump allowance on 0.85 m dry*. That was written off the `amcl`
+arm and is now wrong for it:
+
+> **Size a jump allowance on 1.20 m dry on the `amcl` arm and 0.89 m dry
+> on the `slam` arm.** The heading half of §13.10's contract has now
+> survived three measurements and is still under its 0.0764 rad.
+
+**AND EVERY CONSUMER STILL CLEARS IT.** `nav2.yaml`'s §(A) error-budget
+table, its `inflation_radius` lower bound and
+`tests/test_nav2_params.py`'s `WORST_MAP_ODOM_STEP_M` all carry 1.1919
+and assert it. The lateral surprise those derivations are built on —
+worst cross-track 0.1044 m plus the worst single step — goes from
+0.9354 m to **1.2963 m**, and `inflation_radius: 2.60` clears it with
+**2.01×** to spare against 2.78× at §13.10a's figure. **No value in
+either tree moved because of this amendment; what moved is the margin,
+and a test now asserts the conclusion at all four bounds** — open loop,
+§13.10a's, `slam`'s and `amcl`'s.
+
+**WHAT THIS DOES NOT SAY.** It does not say the bound has stopped
+moving. Three measurements over three tasks have gone 0.2591 → 0.8310 →
+1.1919 as the corpus grew, every one of them on the longest route in the
+goal table, and nothing here establishes a maximum — only that the
+derivations in `nav2.yaml` have a factor of two of room at the newest
+one. A phase that drives a route longer than `aisle_end`'s 47 m should
+expect to move it again.
 
 ### 13.11 THE DEFERRED MAP-EKF QUESTION
 

@@ -171,6 +171,16 @@ m5_ver3/
 │                         three addresses two SUB-NODE costmaps cannot
 │                         be handed on a command line are CHECKED back
 │                         against config.yaml before anything starts
+├── collision_monitor.yaml    what the COLLISION MONITOR watches and what
+│                         it does about it, and it is ekf.yaml's split a
+│                         SEVENTH time. Read only by --monitor. Two
+│                         VELOCITY POLYGON sets - a stop and a slowdown -
+│                         whose every vertex is a body edge off
+│                         model.sdf's own hull plus a MEASURED stopping
+│                         distance, and tests/test_collision_monitor_
+│                         params.py recomputes all ten of them from
+│                         config.yaml. IT IS NOT A SAFETY FUNCTION and
+│                         the file opens with nav2's own words for it
 ├── behavior_trees/
 │   └── navigate_to_pose_tricycle_v3.xml
 │                         the tricycle tree: no Spin, no BackUp, no
@@ -218,7 +228,12 @@ m5_ver3/
 │                         DIAGNOSIS - why one goal in five arrived, the
 │                         critic that never scored, the two-sided proof,
 │                         the ladder, the re-measured set and the
-│                         fail-fast
+│                         fail-fast. 17-20 are Task 3's: the DRIVING
+│                         CASES (a goal re-tasked mid-path, a station
+│                         approach, a Reeds-Shepp reverse leg and the
+│                         corner-heavy leg x3), the FLIP experiment on
+│                         the other localiser, the COLLISION MONITOR,
+│                         and the PHASE VERDICT with the F5 handoff
 ├── nodes/
 │   ├── wheel_odom_core.py   the estimate, as arithmetic. --selftest
 │   ├── wheel_odometry.py    the rclpy shell around it. Wiring only.
@@ -295,6 +310,18 @@ m5_ver3/
     │                     cannot give; and the approach CORRIDOR, what
     │                     each candidate goal box would have cost in
     │                     arrival heading
+    ├── monitor_demo.py   THE COLLISION MONITOR'S OWN BENCH, F4 Task 3.
+    │                     describe | record | obstacle place|remove |
+    │                     analyse. It spawns a 2.40 m box into the
+    │                     RUNNING world through gz's own /create, drives
+    │                     a CONSTANT twist at the top of the command
+    │                     path, and scores the RATIO of the two streams
+    │                     either side of the monitor. A twist and not a
+    │                     goal, because a speed that changes for a
+    │                     controller's own reasons makes that ratio a
+    │                     measurement of nothing - and it REFUSES a
+    │                     `nav=on` stack, because a controller and a
+    │                     bench on one /cmd_vel is a race
     └── map_register.py   derive | show | clearance | support. Needs
                           nothing. `support` places every beam of a
                           recorded drive on the frozen map from the TRUE
@@ -350,6 +377,8 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 | `m5v3.sh start --fuse` | **A DIFFERENT ESTIMATOR, IN THE FILTER'S PLACE.** `fuse`'s `fixed_lag_smoother_node` goes up and the `ekf` child does **not** — six children either way, with `fuse` where `ekf` was. It fuses the SAME channels off the SAME two topics (wheel twist `vx`, `vy`, `vyaw` + gyro yaw rate) and publishes its own `odom` → `base_link`, on `topics.fuse_odometry_filtered` and never on the shipping address. Where `--rf2o` adds a sensor, this replaces the estimator, so the two are **mutually exclusive and refused together by name**. Vendor it first with `tools/install_fuse.sh`. Default OFF, and `EVIDENCE_FUSION.md` §11 is the A/B that says why. Combines with `--headless` and `--slippery`. |
 | `m5v3.sh start --localize [amcl\|slam]` | **A LAYER ABOVE THE ESTIMATOR, AND THE FIRST THING ON THIS TRACK THAT KNOWS WHERE THE VEHICLE IS.** Whichever localiser is named becomes the **sole publisher of `map` → `odom`**, the one edge F3 adds; the estimator keeps `odom` → `base_link` and neither can become the other. **The two are never alive together** — the exclusion is a `case` with two branches, not two flags — and the value is optional (`localization.default_arm` says which it means without one). **`amcl`** is three more children: the nav lidar's static transform, `nav2_map_server` serving the FROZEN GRID, and `nav2_amcl` localising in it, seeded by a MESSAGE on `/initialpose`. **`slam`** is two: that same static transform and `slam_toolbox`'s `localization_slam_toolbox_node`, which deserialises the FROZEN POSE GRAPH, rasters its own grid onto `/map` (so no `map_server`) and is seeded by the `map_start_pose` PARAMETER. Either way the artifacts THAT arm opens are md5-checked **before anything is started** — the grid against the committed registration, the pose graph against `build.txt` — a rebuilt map is a new artifact, never an overwrite; every lifecycle node is driven to ACTIVE by this script; and a gate refuses a localiser which came up merely alive. **No kidnapped-robot recovery is claimed on either arm.** Combines with all three flags above. `EVIDENCE_LOCALIZATION_V3.md` is what both produced, and §13 is the A/B. **§13.10 IS F4's CONSUMPTION CONTRACT**: consume `map` -> `base_link` off `/tf` on the `amcl` arm, and size the controller's corridor on the PEAKS rather than the means - moving along-track offset up to **0.523 m dry / 1.250 m wet**, worst single `map` -> `odom` step **0.2591 m dry / 0.4927 m wet**, worst heading step **0.0764 rad**, all of it against an instrument floor of **rms 0.0291 m / MAX 0.1179 m** below which no figure is a measurement of the localiser. **AND §13.10a AMENDS THE JUMP HALF OF THAT CONTRACT**: those steps were measured OPEN LOOP, and with a controller closing a loop on the same arm the worst single position step is **0.8310 m — 3.21×**, on a run that ARRIVED down the longest route in the goal table (the heading half held, at 0.0641 rad). Size a jump allowance on 0.85 m dry. |
 | `m5v3.sh start --localize --nav` | **THE LAYER THAT DECIDES WHERE THE VEHICLE GOES, F4 Task 2, AND THE FIRST FLAG HERE THAT DEPENDS ON ANOTHER.** Five more children - nav2's `planner_server` (`SmacPlannerHybrid`, `REEDS_SHEPP`, a 1.25 m turning radius DERIVED from the worst corner this plant actually delivered), `controller_server` (`MPPI` with `AckermannConstraints`), `bt_navigator` on a TRICYCLE TREE with no `Spin` and no `BackUp`, `behavior_server` running only `wait`, and ONE `nav_lifecycle_manager` for the four with its BOND SWITCHED OFF at both ends. Costmaps: global = the frozen grid the `--localize` arm is already serving (**no second `map_server`**), local = a rolling window on the nav lidar - and the obstacle layer is honest only because `footprint_clearing_enabled` removes the three pieces of this truck the scanner can see, which is MEASURED (`EVIDENCE_NAV_V3.md` §14.4). **It is REFUSED without `--localize` by name**: the global costmap's activation BLOCKS until `map` -> `base_link` resolves. It adds a PUBLISHER to the top of a command path that is already there and changes nothing about it (F4 constraint 18). `status` and every recorded session say `nav=on@<nav2.yaml md5>`; `analyse` refuses a set that mixes two of them. SIXTEEN processes headless on the `amcl` arm, seventeen with a window. |
+| `m5v3.sh start --monitor` | **A LINK IN THE COMMAND PATH RATHER THAN A LAYER OVER IT, F4 TASK 3.** One more child: `nav2_collision_monitor` between the velocity smoother and the tricycle converter, with the CONVERTER'S INPUT remapped onto its output - so the line becomes `/cmd_vel` -> smoother -> `/cmd_vel_smoothed` -> **collision_monitor** -> `/cmd_vel_monitored` -> converter -> the terminals, and without the flag the converter reads the smoother through an identity remap and NOTHING about the path changes. Two **velocity-polygon** sets, a stop and a slowdown, sized off the REAL footprint hull and the MEASURED stopping distances (1.05 m from 0.700 m/s, 0.25 m from the 0.300 m/s transit ceiling) and selected by the INCOMING command's own speed. Every zone starts at a BODY EDGE, because the nav scanner sees three pieces of this truck and this node has no footprint clearing. It **depends on no other flag** and combines with all of them; it also starts `lasertf`, without which it cannot transform a scan and publishes NOTHING - which on this arm is a CUT COMMAND PATH, and it cost a whole demonstration run to find (EVIDENCE_NAV_V3.md 19.5). **IT IS NOT A SAFETY FUNCTION**: nav2's own words are that it "does not provide hard real-time safety certifications", it does not replace a safety-rated PLC, and it sees NOTHING below the nav lidar's 1.80 m scan plane - not a pallet, not a load, not a person. Default OFF, and EVIDENCE_NAV_V3.md 19.8 is why. `status` and every recorded session say `monitor=on@<md5>`. |
+| `tools/monitor_demo.py` | **THE GUARD'S OWN BENCH.** `describe` prints every polygon and where the box goes and needs nothing; `record` spawns the box, drives the path and scores it; `obstacle place` and `obstacle remove` are the same two gz calls for the CLOSED-loop run `record` refuses to make; `analyse` needs no ROS. |
 | `tools/nav_health.py` | Did the NAV ARM come up able to **PLAN**? SIX lifecycle nodes - each costmap is one of its own inside its server - and then ONE trivial `compute_path_to_pose`, because a server that is ACTIVE over an EMPTY costmap plans nothing and says nothing about it. It commands NO motion. **`start --nav` runs it for you.** |
 | `tools/drive_goal.py` | **THE DRIVEN GOAL'S OWN BENCH, F4 Task 2.** `describe`, `record --goal G` and `analyse`. It publishes exactly ONE thing - a `navigate_to_pose` goal, carried into the map frame by the committed registration - and records the controller's own `/cmd_vel`, both terminals, both `/tf` edges, EVERY `/plan` with its poses and the action's feedback. `analyse` scores the arrival **twice** (the ground truth, and what the stack BELIEVED - which is the only one the goal checker ever saw), the deviation from the plan STANDING AT THE TIME, the steer activity, the cusps, the controller frequency, the real-time factor and every `map` -> `odom` correction with what the controller did about it. It needs no ROS and it **refuses a stack whose state file says `nav=off`**. |
 | `tools/drive_twist.py` | **THE COMMAND PATH'S OWN BENCH, F4 Task 1.** `describe`, `record --profile P` and `analyse` - a config-tabled TWIST profile published into `/cmd_vel`, through the velocity smoother and the tricycle converter, with every joint of the chain recorded: what was commanded, what the smoother made of it, what each terminal carried, what the axes did and what the truck did. `analyse` needs no ROS. It **REFUSES a table** the converter would have to clamp (unless the row says `expect_clamp`), which is `drive_route.py`'s own line between a table and a live command. |
@@ -533,7 +562,11 @@ one for the localiser does not refuse this one. Five children,
   30 s rather than 130 m and 459 plans.
 
 **EIGHT children by default, ELEVEN with `--rf2o`, eight again with
-`--fuse`, ELEVEN with `--localize amcl` and TEN with `--localize slam`**
+`--fuse`, ELEVEN with `--localize amcl`, TEN with `--localize slam`,
+SIXTEEN with `--localize amcl --nav` and SEVENTEEN with `--monitor` on
+top of that** - the last flag adds `collision_monitor`, and on a stack
+with no localiser and no nav arm it adds `lasertf` as well, which is
+NINE
 (six, nine, six, nine and eight of them before F4 Task 1 added the two
 above) —
 `--fuse` swaps a child rather than adding one, so the count is unchanged

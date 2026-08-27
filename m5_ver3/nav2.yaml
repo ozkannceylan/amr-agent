@@ -99,7 +99,8 @@
 #   worst absolute error, any axis      0.5321 m   (6.1, `worst`)
 #   worst CROSS-track error             0.1044 m   (6.1, `square`)
 #   END error at rest              0.0382-0.1954 m (6.1)
-#   worst single map -> odom step       0.8310 m   (13.10a)  <- AMENDED
+#   worst single map -> odom step       1.1919 m   (13.10b)  <- AMENDED
+#                                       TWICE (0.2591 -> 0.8310 -> 1.1919)
 #   worst single heading step           0.0764 rad (8)
 #   instrument floor            rms 0.0291 m / MAX 0.1179 m
 #
@@ -114,7 +115,16 @@
 # of the contract survived at 0.0641 rad against 0.0764. The originals
 # are intact in EVIDENCE_LOCALIZATION_V3.md 8 and 13.10 and the
 # closed-loop measurement is the labelled addendum 13.10a.
-#   EVERY DERIVATION BELOW THAT USED 0.2591 STILL CLEARS AT 0.8310 and
+#   AND F4 TASK 3 AMENDED IT AGAIN, TO 1.1919 m - 4.60x the open-loop
+# figure - on a run of its own case set that ARRIVED down the same 47 m
+# route (EVIDENCE_NAV_V3.md 18.3, EVIDENCE_LOCALIZATION_V3.md 13.10b).
+# That is the SAME finding rather than a new one: 16.8's conclusion was
+# that the ROUTE sorts the worst correction and the driving does not,
+# and the longest route produced it again one task later.
+#   AND IT IS ARM-SPECIFIC NOW. 1.1919 m is the `amcl` arm's; the same
+# case on `slam` gave 0.8845 m with fewer corrections and half the
+# controller response (18.1). A consumer sizes on its own arm.
+#   EVERY DERIVATION BELOW THAT USED 0.2591 STILL CLEARS AT 1.1919 and
 # each says so where it sits. Nothing in this file changed VALUE because
 # of this amendment - what changed is the margin each of them has.
 #   THE COUNT IS WRITTEN AS "THE CORPUS 16.8 MEASURED" ON PURPOSE. It
@@ -143,9 +153,10 @@
 #       gradient; and below that again by the LATERAL surprise - the
 #       worst cross-track error 0.1044 m plus the worst single
 #       map -> odom step, which can be entirely lateral and arrives in
-#       one 66 ms tick. AT THE AMENDED 0.8310 m THAT SUM IS 0.9354 m
-#       against 0.3635 m before, and 2.60 m of inflation clears it
-#       either way with 2.8x to spare. What it is actually SET from is
+#       one 66 ms tick. AT THE TWICE-AMENDED 1.1919 m THAT SUM IS
+#       1.2963 m, against 0.9354 m at F4 Task 2.5's figure and 0.3635 m
+#       at F3's, and 2.60 m of inflation clears all three - with 2.01x
+#       to spare at the newest bound against 2.78x at the last one. What it is actually SET from is
 #       the FLOOR rather than the error budget, and the local_costmap
 #       section carries that argument - so the amendment does not move
 #       this number, it only shrinks the margin, and the CONCLUSION is
@@ -1475,12 +1486,13 @@ local_costmap:
         # no slope (section C). And the LATERAL SURPRISE of section (A)
         # - the worst cross-track error 0.1044 m plus the worst single
         # map -> odom step, which arrives in one tick and can be
-        # entirely lateral - is 0.9354 m at the AMENDED closed-loop jump
-        # of 0.8310 m (EVIDENCE_LOCALIZATION_V3.md 13.10a), against
-        # 0.3635 m at the open-loop 0.2591 m this line used to read.
-        # 2.60 m clears both; the amendment costs this derivation margin
-        # and not its answer, and it is written down rather than left to
-        # a reader to notice.
+        # entirely lateral - is 1.2963 m at the TWICE-AMENDED closed-loop
+        # jump of 1.1919 m (EVIDENCE_LOCALIZATION_V3.md 13.10b), against
+        # 0.9354 m at 13.10a's 0.8310 m and 0.3635 m at the open-loop
+        # 0.2591 m this line first read. 2.60 m clears all three; each
+        # amendment costs this derivation margin and not its answer -
+        # 2.01x at the newest bound - and it is written down rather than
+        # left to a reader to notice.
         #
         # WHAT IT DOES NOT DO IS CLOSE THE PICK AISLE, and inflation
         # cannot: it is never LETHAL. A vehicle on that aisle's own
