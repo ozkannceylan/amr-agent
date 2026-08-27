@@ -651,3 +651,738 @@ spawns and requires a pattern for each, in both estimator scopes.
   that.
 - **No repeatability set.** Each profile is one run. The two `straight`
   runs in §6 are the only pair, and they differ by design.
+
+---
+
+# F4 TASK 2 — THE PLANNER, THE CONTROLLER AND THE FIRST DRIVEN GOALS
+
+**§14 – §15 are F4 Task 2.** Everything above is the COMMAND PATH with
+no Nav2 in the room. This is Nav2 in the room: a planner, a controller,
+two costmaps, a behaviour tree and one lifecycle manager over the stack
+that already knew where it was — and a `navigate_to_pose` goal driven
+down the line §1–§12 measured.
+
+Everything below was measured on **this rig** (WSL Ubuntu 24.04, ROS 2
+Jazzy, nav2 **1.3.12**, gz-sim 8.11.0, RTX 4050) on **2026-08-27**,
+**headless**, on the **nominal plant** (`traction=nominal`), the
+**default estimator arm** (`arm=wheel+imu`) and on the **shipping
+localiser** (`loc=amcl@735cdbc6`). Every figure names the instrument
+that produced it.
+
+**The dry bar is what this task is accepted on** (F4 constraint 19), and
+nothing here is a safety claim. `footprint_padding`, every inflation
+radius and every tolerance in `nav2.yaml` are PROCESS values evaluated
+in a costmap built over a network-carried scan. No safety scanner
+appears in any costmap, by name or by topic — none of the three is
+bridged to ROS at all. The collision monitor, which **this task does not
+run**, "does not provide hard real-time safety certifications" and does
+not replace a safety-rated PLC. It complements the F-PLC; it is not the
+F-PLC.
+
+---
+
+## 14. THE NAV ARM
+
+### 14.1 What `--nav` starts, and the one thing it refuses
+
+Five more children, none of which exists without the flag:
+
+| child | what it is |
+|---|---|
+| `planner_server` | `nav2_smac_planner::SmacPlannerHybrid`, `REEDS_SHEPP` |
+| `controller_server` | `nav2_mppi_controller::MPPIController`, `motion_model: Ackermann` |
+| `behavior_server` | one behaviour, `nav2_behaviors::Wait`, which does not move the vehicle |
+| `bt_navigator` | on `behavior_trees/navigate_to_pose_tricycle_v3.xml` — no `Spin`, no `BackUp` |
+| `nav_lifecycle_manager` | the ONLY nav2 lifecycle manager on this track, with its bond switched off |
+
+**SIXTEEN children headless on the `--localize amcl --nav` stack**,
+seventeen with a window — eleven of them F1–F4 Task 1's and five this
+arm's. `status` names every one.
+
+**`--nav` REQUIRES `--localize` AND IS REFUSED WITHOUT IT BY NAME**,
+before the GPU preflight and before any child:
+
+```
+m5v3: REFUSED at check '--nav was given with a localiser'
+      owned by: ./m5_ver3/m5v3.sh (the start flags)
+      --nav puts a planner and a controller over a stack that
+      does not know where it is. THIS IS NOT A PREFERENCE.
+      The global costmap's frame is map, and
+      Costmap2DROS::on_activate BLOCKS until it can transform
+      map -> base_link. Without a
+      localiser NOTHING publishes map -> odom at all, so that
+      transition never returns:
+      five children ALIVE for ever, one of them wedged in a
+      lifecycle transition, and no log line that reads as an
+      error.
+      NOTHING WAS STARTED. Add a localiser:
+        ./m5_ver3/m5v3.sh start --headless --localize --nav
+        ./m5_ver3/m5v3.sh start --headless --localize slam --nav
+```
+
+**AND THE FIVE GO UP LAST, AFTER THE LOCALISER IS ACTIVE.** That is the
+same refusal's mechanism used as an ordering rather than as a message:
+`Costmap2DROS::on_activate` blocks in a `canTransform` loop until its
+own `global_frame` → `robot_base_frame` resolves, and for
+`global_costmap` that is `map` → `base_link`. `localize_lifecycle()`
+runs at the end of `start()`, so the nav children are spawned after it
+and `assert_children_alive` — which used to be a block inside `start()`
+— is a function now, because the same question has to be asked twice.
+
+### 14.2 The bringup gate, and the question nothing else can ask
+
+`tools/nav_health.py` runs on every `--nav` bringup. Two checks, and the
+second is the one five ALIVE processes cannot answer between them:
+
+```
+  nav:    6 lifecycle nodes ACTIVE - controller_server, planner_server,
+          behavior_server, bt_navigator, local_costmap/local_costmap,
+          global_costmap/global_costmap
+  nav:    the planner PLANS. 2 m ahead of the seed, 29 poses in 0.0100 s
+          map (-0.0793, -0.1458) -> (+1.9207, -0.1392), planner_id GridBased
+          NOTHING WAS COMMANDED: compute_path_to_pose is the PLANNER's action
+          and never reaches the controller. The truck did not move.
+```
+
+**SIX LIFECYCLE NODES BEHIND FOUR NAMES.** Each costmap is a lifecycle
+node of its own inside its server, in a namespace of its own; a costmap
+stalled in `configuring` leaves its parent reporting `active` and
+`status` reporting ALIVE.
+
+**AND THE PLAN IS THE POINT.** A `global_costmap` whose static layer
+never received the frozen grid is wall-to-wall `NO_INFORMATION`, and
+with `allow_unknown: false` the planner then refuses every goal — after
+`max_planning_time`, once, into its own log. Every process up, every
+log clean, and the first anybody would hear of it is a goal that times
+out minutes into a measured run.
+
+The gate commands no motion: `compute_path_to_pose` is the planner's
+action and never reaches the controller.
+
+### 14.3 The footprint, computed off the model and grown per axis
+
+`evidence_core.sdf_footprint()` reads
+`gazebo/forklift_ver3/model.sdf`, carries every `<collision>` and every
+`<visual>` of every `<link>` through that link's pose and its own,
+projects them onto z = 0 and hulls them. Eight vertices:
+
+```
+  [-1.875000,-0.340000]   the LEFT tine's tip and outer edge  (a VISUAL)
+  [-0.680000,-0.558995]   safety_scanner_left's housing corner:
+                          0.46 + 0.07*sqrt(2), a 0.14 m box at 45 deg
+  [ 0.700000,-0.450000]   the chassis corner (1.40 x 0.90)
+  [ 0.860000,-0.400000]   the counterweight corner (0.24 x 0.80 at 0.74)
+  ... and the same four mirrored in +y
+```
+
+circumscribed **1.9056 m**, inscribed **0.5037 m**, 2.735 × 1.118 m.
+
+**THE VISUALS COUNT.** Both tines, the two mast rails, the four
+overhead-guard posts and the pallet camera's bracket are modelled as
+visuals; a hull taken off the collisions alone is a footprint a metre
+short at the fork end, and a footprint that is too SMALL looks exactly
+like a correct one from every angle a costmap has.
+
+**AND IT IS GROWN PER AXIS, WHICH IS §15.2's SECOND RUNG.** +0.54 m on
+x (F3's worst absolute error, 0.5321 m) and +0.11 m on y (its worst
+cross-track error, 0.1044 m), because
+`EVIDENCE_LOCALIZATION_V3.md` §9 measured the two to be **five times
+apart** and on this vehicle the body's x axis IS the direction of travel.
+`footprint_padding` cannot express that — nav2's `padFootprint` moves
+both axes by one number — so the POLYGON carries it and the padding is
+**0.0**:
+
+| | model hull | grown per axis | the same margin ISOTROPIC at 0.54 |
+|---|---|---|---|
+| x | [−1.8750, +0.8600] | [−2.4150, +1.4000] | [−2.4150, +1.4000] |
+| y | ±0.5590 | **±0.6690** | ±1.0990 |
+| circumscribed | 1.9056 | **2.4566** | 2.5703 |
+| **inscribed** | 0.5037 | **0.6143** | **1.0439** |
+
+The inscribed radius is the row that mattered: nav2 marks every cell
+within it of an obstacle `INSCRIBED_INFLATED_OBSTACLE`, so an inflation
+radius below it is a hard band with no slope in it at all. §15.2 rung 2
+is what that cost.
+
+`tests/test_nav2_params.py` recomputes the hull from the model, applies
+the two margins and fails on a disagreement over a micrometre.
+
+### 14.4 THE SCANNER SEES ITS OWN TRUCK, and the obstacle layer clears it
+
+The local costmap's obstacle layer marks and clears from
+`/forklift/gz/scan_nav`. The crib turned its own obstacle layer OFF over
+exactly this and measured "9 of 360 rays at 1.334 m and 1.503 m". Here,
+one scan off the running stack, truck at the spawn:
+
+```
+angle_min 0.7853982  angle_max 5.4977870  inc 0.0058178  n=811
+returns under 2.0 m: 50 of 811
+   23 rays  bearing +2.4493..+2.5773 rad (7.33 deg)  range 0.6004..0.6939 m
+        mid ray lands at base_link (+0.026, -0.019)
+   14 rays  bearing +2.6180..+2.6936 rad (4.33 deg)  range 1.4149..1.4990 m
+        mid ray lands at base_link (-0.747, +0.285)
+   13 rays  bearing +3.0311..+3.1009 rad (4.00 deg)  range 1.2485..1.3527 m
+        mid ray lands at base_link (-0.746, -0.302)
+```
+
+Three pieces of this truck stand in the z = 1.80 m scan plane and the
+ray count places each one to within 3 cm of where `model.sdf` puts it:
+**nav_lidar_3d's housing** (r = 0.045 at base_link, z 1.76–1.84),
+**mast_rail_left** (0.09 sq at (−0.78, +0.30), z 0.05–2.05) and
+**mast_rail_right**. Bearing π in that frame is DEAD AHEAD OF TRAVEL, so
+all three are in the forward quarter, 0.60–1.50 m out.
+
+**WHAT MAKES THE LAYER HONEST IS `footprint_clearing_enabled`, AND IT IS
+MEASURED RATHER THAN ARGUED.** All three land INSIDE the footprint
+polygon, and nav2's obstacle layer paints its own footprint FREE on
+every update before the layers are combined. One read of
+`/local_costmap/costmap` with the truck standing at the spawn:
+
+```
+local costmap 200x200 at 0.050 m, origin (-4.950, -4.950) frame odom
+  3D lidar housing     odom (+0.000, +0.000)  cost 0
+  mast rail left       odom (-0.780, +0.300)  cost 0
+  mast rail right      odom (-0.780, -0.300)  cost 0
+  fork tip             odom (-1.875, +0.000)  cost 0
+  counterweight        odom (+0.860, +0.000)  cost 0
+  cells: lethal(100) 770, inscribed(99) 6047, unknown(-1) 0, free(0) 33183
+```
+
+The 770 lethal cells are the north wall, 4.00 m away and inside the
+10 × 10 m rolling window. Not one of them is the vehicle.
+
+**THE COVERAGE HOLE IS STATED AND NOT SOLVED.** A ray that STOPS on a
+mast rail does not clear beyond it. The three obstructions subtend
+7.33°, 4.33° and 4.00° — **15.66° of the aperture's 270°, 50 of 811
+rays** — and a real obstacle in those three narrow sectors would be
+neither marked nor cleared. The fix is a self-occlusion mask on the
+scan, which is its own brief and its own measurement.
+
+**AND IT CANNOT SEE WHAT MATTERS MOST.** At z = 1.80 m a pallet, a
+dropped load and a person are all invisible. The sensor that could see
+them is a safety scanner, and none of the three is bridged to ROS at
+all. This layer's honest scope is STRUCTURE ABOVE 1.80 m that the frozen
+map does not carry.
+
+### 14.5 Every parameter, verified on the running node
+
+**READ BACK, NOT TRUSTED.** `nav2.yaml` is `--params-file`d into four
+servers, and rclcpp applies NOTHING from a block addressed to the wrong
+node and says nothing about it. Worse, a parameter this build does not
+DECLARE is ignored in silence — which is what `enforce_path_inversion`
+would have been if Jazzy 1.3.12 had not carried it. On the shipping
+stack (`nav=on@d430334b`):
+
+```
+FollowPath.enforce_path_inversion         Boolean value is: True
+FollowPath.PathAngleCritic.mode           Integer value is: 2
+FollowPath.CostCritic.consider_footprint  Boolean value is: True
+FollowPath.motion_model                   String value is: Ackermann
+FollowPath.AckermannConstraints.min_turning_r   Double value is: 1.25
+FollowPath.vx_min                         Double value is: -0.3
+FollowPath.vx_max                         Double value is: 0.3
+FollowPath.wz_max                         Double value is: 0.24
+FollowPath.model_dt                       Double value is: 0.05
+FollowPath.batch_size                     Integer value is: 1000
+general_goal_checker.plugin
+                    String value is: nav2_controller::PositionGoalChecker
+general_goal_checker.xy_goal_tolerance    Double value is: 0.6
+controller_frequency                      Double value is: 20.0
+enable_stamped_cmd_vel                    Boolean value is: False
+odom_topic                    String value is: /m5v3/odometry/filtered
+speed_limit_topic                         String value is: /speed_limit
+GridBased.motion_model_for_search         String value is: REEDS_SHEPP
+GridBased.minimum_turning_radius          Double value is: 1.25
+GridBased.reverse_penalty                 Double value is: 1.0
+GridBased.cost_penalty                    Double value is: 6.0
+GridBased.allow_unknown                   Boolean value is: False
+GridBased.tolerance                       Double value is: 0.1
+/global_costmap  inflation_layer.inflation_radius      Double: 2.6
+/global_costmap  inflation_layer.cost_scaling_factor   Double: 1.1
+/global_costmap  footprint  [[-2.415000,-0.450000],[-1.220000,-0.668995],
+                             [1.240000,-0.560000],[1.400000,-0.510000],
+                             [1.400000,0.510000],[1.240000,0.560000],
+                             [-1.220000,0.668995],[-2.415000,0.450000]]
+/global_costmap  footprint_padding 0.0   robot_base_frame  base_link
+/global_costmap  global_frame  map       static_layer.map_topic  /map
+/local_costmap   global_frame  odom
+/local_costmap   obstacle_layer.scan.topic  /forklift/gz/scan_nav
+```
+
+**FIVE THINGS THAT MATTER IN THAT LIST.** `enforce_path_inversion` IS
+declared by this build and is on — it splits a Reeds-Shepp path at its
+cusps and hands the optimiser one directional segment at a time.
+`PathAngleCritic.mode` is 2 and not the shipped 0, which on a vehicle
+whose ordinary leg is a nav2 REVERSE leg would have penalised every one
+of them. `enable_stamped_cmd_vel` is FALSE on both sides of `/cmd_vel`,
+which §6.1 fact 1 measured rather than read from a table. The goal
+checker is the POSITION-ONLY one and it has no `yaw_goal_tolerance` to
+read back, which is §15.2 rung 13. And the `odom_topic` the controller
+closes on is the ESTIMATOR's, passed from `m5v3.sh` per arm, never the
+ground truth (F2 constraint 13, F4 constraint 18).
+
+### 14.6 THREE nav2 COMPLAINTS, AND THE SHIPPED FILE HAS NONE OF THEM
+
+At the first three configurations this task tried, nav2 said three
+things about the costmaps — twice at ERROR — and it was right all three
+times:
+
+```
+[ERROR] [global_costmap]: The configured inflation radius (0.600) is
+        smaller than the computed inscribed radius (1.044) of your
+        footprint ...
+[ERROR] [computeCircumscribedCost]: The inflation radius (0.600000) is
+        smaller than the circumscribed radius (2.570336) If this is an
+        SE2-collision checking plugin, it cannot use costmap potential
+        field to speed up collision checking ... This may significantly
+        slow down planning times!
+[WARN]  [controller_server]: Inconsistent configuration in collision
+        checking. Please verify the robot's shape settings in both the
+        costmap and the cost critic.
+```
+
+The first said the inflation layer was a hard band with no slope in it.
+The second said the planner was doing a full-footprint check on every
+expansion. The third said the cost critic was scoring the CENTRE of a
+truck whose front is 2.415 m away from it. §15.2's ladder is what each
+of them cost.
+
+**ON THE SHIPPED FILE, ALL FIVE NAV LOGS ARE CLEAN**, on a bringup taken
+for this line:
+
+```
+--- planner_server              (nothing)
+--- controller_server
+[WARN]  [controller_server]: Parameter controller_server.verbose not found
+--- bt_navigator               (nothing)
+--- behavior_server            (nothing)
+--- nav_lifecycle_manager      (nothing)
+```
+
+The one survivor is nav2 looking for a parameter of its own that this
+file does not set, and it is recorded rather than silenced.
+
+### 14.7 What the arm costs this rig
+
+Measured over 30 s of wall clock on the `--localize amcl --nav` stack
+(sixteen children), reading each node's own `/proc` — the NODE's and not
+the `ros2 run` wrapper's, which is `EVIDENCE_FUSION.md` §10.4's
+instrument:
+
+| child | idle CPU, % of one core |
+|---|---|
+| `world` (gz server) | 88.35 % |
+| `odom` | 29.36 % |
+| `bridge` | 20.63 % |
+| `ekf` | 13.80 % |
+| **`controller_server`** | **11.66 %** |
+| **`planner_server`** | **11.20 %** |
+| **`bt_navigator`** | **8.60 %** |
+| **`behavior_server`** | **7.77 %** |
+| `amcl` | 5.67 % |
+| **`nav_lifecycle_manager`** | **4.43 %** |
+| `map_server` | 4.27 % |
+| `smoother` | 4.17 % |
+| `navcmd` | 0.87 % |
+| **THE NAV ARM, TOTAL** | **43.66 %** |
+
+**43.66 % OF ONE CORE WITH NOTHING TO DO**, against the localisation
+arm's 9.94 % and the command path's 5.04 %. That is five idle event
+loops and not MPPI: the optimiser does not run until a goal arrives, and
+§15.4 reports the rate it held when one had.
+
+RTF on that stack, idle, `tools/rtf_probe.sh`: **mean 0.9976, median
+0.9999, floor 0.8535** over 295 samples in 30 s — against the
+eleven-child localisation stack's 0.9984 / 0.9999 / 0.9284 (§10). The
+median does not move; the floor does.
+
+### 14.8 The refusals this task added, and how each was exercised
+
+Every one lands **before the GPU preflight** and every one printed
+"NOTHING WAS STARTED". Run with the stack down, `m5v3.sh status`
+afterwards reading `not running (no pid file)`:
+
+| # | what was broken | the check that said no |
+|---|---|---|
+| 1 | `--nav` with no `--localize` | `--nav was given with a localiser` |
+| 2 | `local_costmap:` misspelt in `nav2.yaml` | `the nav parameter file is addressed to local_costmap` |
+| 3 | `map_topic: /map_v2` against `config.yaml`'s `/map` | `nav2.yaml's map_topic is config.yaml's topics.map` |
+| 4 | the behaviour tree moved away | `the behaviour tree exists` |
+
+**NUMBER 2 IS THE ONE NOTHING ELSE COULD HAVE CAUGHT.** `local_costmap`
+is a SUB-NODE: it has no process, `status` never names it and the sweep
+never nominates it. On nav2's defaults it is a 3 × 3 m window with a
+CIRCULAR footprint of radius 0.10 m — a fifth of this vehicle's
+inscribed radius — and it would report every path through every rack as
+clear.
+
+**NUMBER 3 IS THE READ-BACK EARNING ITS KEEP.** The refusal quotes the
+line and its number:
+
+```
+m5v3: REFUSED at check 'nav2.yaml's map_topic is .../config.yaml's topics.map'
+      config.yaml says '/map' and these lines say something else:
+      1230:        map_topic: /map_v2
+      global_costmap's static layer subscribes there. Wrong, it
+      waits for a latched message that has already been published
+      and the costmap stays wall-to-wall NO_INFORMATION - which
+      with allow_unknown: false refuses every goal.
+```
+
+### 14.9 Both arms, and the sweep
+
+F4 constraint 20. Every arm this change can reach, brought up on the
+committed tree, headless:
+
+| arm | children | result |
+|---|---|---|
+| **`--localize amcl --nav`** | **16** | all ALIVE; `ekf` healthy; `velocity_smoother active`; navcmd gate passed; `map_server`/`amcl` active, `loc: healthy` (0.242 / ceiling 1); **six nav lifecycle nodes ACTIVE, 29 poses planned in 0.0080 s**; `nav=on@d430334b` |
+| **`--localize amcl`, NO `--nav`** | **11** | all ALIVE; `ekf` healthy (0.22404 / 100); navcmd gate passed; `loc: healthy` (0.24219 / 1); **`nav=off`** |
+| **`--localize slam`, NO `--nav`** | **10** | all ALIVE; `ekf` healthy (0.22488 / 100); navcmd gate passed; `loc: healthy`, covariance check correctly NOT run; `loc=slam@4bb88852`; **`nav=off`** |
+
+**NOTHING REGRESSED ON THE ARMS THIS TASK DID NOT TOUCH.** The eleven-
+and ten-child stacks are the ones F3 measured, with one line added to
+their state file.
+
+**AND `stop` FINDS ALL FIVE NEW CHILDREN, WRAPPER AND NODE.** `ros2 run`
+forks, so each is two processes and the pidfile knows about one. From
+the `--nav` stack:
+
+```
+  swept 91451 (planner_server)          <- the `ros2 run` wrapper
+  swept 91462 (planner_server)          <- the node itself
+  swept 91459 (controller_server)
+  swept 91487 (controller_server)
+  swept 91484 (behavior_server)
+  swept 91512 (behavior_server)
+  swept 91509 (bt_navigator)
+  swept 91532 (bt_navigator)
+  swept 91529 (nav2_lifecycle_manager)
+  swept 91548 (nav2_lifecycle_manager)
+  ...
+  survivors: 0
+```
+
+`tests/test_sweep_patterns.py` **parses `m5v3.sh` itself** for all five
+new spawns and requires a pattern for each; a second test requires every
+one of them to sit inside a condition naming the `NAV` arm, which is
+AMR-LES-023's own lesson applied to a SPAWN rather than to a check —
+and F4 Task 2 is the first phase where getting it wrong would START a
+process rather than refuse one. A stale `controller_server` on domain 97
+does not merely publish: it publishes a TWIST, and the command path
+takes it.
+
+
+---
+
+## 15. THE FIRST DRIVEN GOALS
+
+### 15.0 The answer, before the working
+
+| | |
+|---|---|
+| **the arm comes up and PLANS** | six lifecycle nodes ACTIVE, 29 poses in 0.010–0.014 s, on every bringup |
+| **the controller HOLDS ITS RATE** | 20.017 Hz mean, 20.000 median, over 1182 commands of a 59 s drive — against `controller_frequency: 20.0` |
+| **the controller TRACKS ITS PLAN** | deviation from the plan standing at the time: **mean 0.040–0.113 m, max 0.182–0.414 m** over five runs and 21 500 commands |
+| **the RTF survives the whole stack** | **0.9963 – 0.9998** measured over the drives themselves, sixteen children up |
+| **the command path is untouched** | worst steer step **0.100000 rad/tick** on every run — F4 Task 1's 2.0 rad/s ramp, exactly, never above it |
+| **THE ARRIVAL IS NOT REPEATABLE, AND THAT IS THE PHASE'S HEADLINE** | the headline goal, three times: **SUCCESS, ABORT, CANCELLED**. `ring_corner` and `aisle_end`: ABORT |
+| **the one arrival, scored absolutely** | truth **0.5348 m** from the goal, believed **0.5411 m**, the two **0.0141 m** apart |
+| **the jumps went OVER the budget** | worst single `map` → `odom` step **0.6490 m** against the **0.2591 m** §13.10 handed over — 2.5× |
+| **and the largest single finding** | a FREESPACE planner does not reproduce the road graph, and eight aborted goals are the measurement of it |
+
+**THIS SECTION IS MOSTLY A LADDER OF FAILURES AND IT IS KEPT WHOLE.**
+Thirteen goals were driven for this task and three of them arrived. Each
+failure named a different thing, every named thing became a derivation
+in `nav2.yaml`, and the ones that are still open are named as open. A
+wrong turn that has been measured is worth more than one that has been
+tidied away (`EVIDENCE_FUSION.md` §4's rule).
+
+### 15.1 The three goals, and where they came from
+
+`config.yaml`'s `nav.goals:`. Every one is a NODE of `m6/ipc/route.py`'s
+road graph — read-only to this track, copied here as values, and
+`tests/test_nav2_params.py` rebuilds the graph and asserts each pose is
+in it, so the copy says when it has gone stale.
+
+| goal | world | travel heading | route | repeat |
+|---|---|---|---|---|
+| `spine_north` | (0.00, +10.00) | +0.0000 (EAST) | 17 m straight down the ring's north leg | **×3** |
+| `ring_corner` | (+20.00, +10.00) | +0.0000 (EAST) | 37 m of the same leg | ×1 |
+| `aisle_end` | (+20.00, 0.00) | −1.5708 (SOUTH) | 47 m: the north leg, the NE corner, the east leg | ×1 |
+
+**THE HEADING IS WRITTEN AS A TRAVEL HEADING AND NOT AS A POSE YAW, AND
+THAT IS THE ONE PLACE THE TABLE COULD SILENTLY LIE.** This vehicle's
+forks are at model −x, so the direction it TRAVELS is `yaw + π`. A table
+of pose yaws would have every entry a half turn from the direction a
+reader pictures, and an entry written the obvious way would arrive
+COUNTERWEIGHT-FIRST, with the nav lidar's 90° blind sector leading, and
+would still report SUCCESS. `drive_goal.pose_yaw()` is the one function
+that adds the π and `tests/test_drive_goal.py` locks it four ways.
+
+**AND THE FIRST CUT OF THE TABLE DID EXACTLY THAT.** `vehicle.spawn.yaw`
+is π, so the counterweight points west and the FORKS POINT EAST: from
+the spawn, forks-first travel is EASTWARD, which is what
+`EVIDENCE_MAP_V3.md` §2.2's first leg ("ring N east") has said all
+along. The first three goals were all put WEST and SOUTH of the spawn —
+every one of them behind the forks. §15.2 rung 1 is what that measured.
+
+### 15.2 THE LADDER — thirteen goals, and what each rung moved
+
+`nav` is the `nav=on@<md5>` label `m5v3.sh` writes off `nav2.yaml` at the
+moment of the bringup. **Every rung below is a different `nav2.yaml`,
+and `analyse` refuses to table two of them together** — which it did,
+five ways, when this task ran it over the whole set:
+
+```
+drive_goal: REFUSED at check 'every session in this analyse is off the SAME stack'
+            5 different traction/arm/loc/nav combinations are in this set:
+              nominal  wheel+imu  amcl@735cdbc6  on@1a7e99f1 - 2 session(s)
+              nominal  wheel+imu  amcl@735cdbc6  on@b570a292 - 1 session(s)
+              nominal  wheel+imu  amcl@735cdbc6  on@502a93f5 - 1 session(s)
+              nominal  wheel+imu  amcl@735cdbc6  on@9ed03df7 - 4 session(s)
+              nominal  wheel+imu  amcl@735cdbc6  on@5cc02ba3 - 2 session(s)
+```
+
+| # | `nav2.yaml` | goal | result | driven | what it measured, and what moved |
+|---|---|---|---|---|---|
+| 1 | `1a7e99f1` | `aisle_end` (−20, 0) | ABORT 205 | 5.23 m | **the goal table was a half turn out.** All three goals were behind the forks; the planner solved this one COUNTERWEIGHT-FIRST (361 of 361 commands positive) at the creep cap. And the analyser compared a MAP-frame plan against WORLD-frame truth and read 20 m of "deviation" for a vehicle tracking to 0.065 m. → the table, and `plans_of()` takes the registration |
+| 2 | `1a7e99f1` | `spine_cross` (0, 0) | ABORT 205 | 7.30 m | **the margin was the wrong SHAPE.** Tracking mean 0.100 m / max 0.376 m, and the ISOTROPIC 0.54 m padding put the polygon over RackNW2's corner. Its inscribed radius was 1.0439 m — above the inflation, so the layer was a hard band with no slope. → the polygon carries the margin per axis (+0.54 x, +0.11 y), padding 0.0, `consider_footprint: true` |
+| 3 | `b570a292` | `spine_cross` | ABORT 205 | 8.11 m | inflation at 1.00 m still left a 3.00 m uninflated strip down a 5.00 m rack gap → 2.00 m |
+| 4 | `502a93f5` | `spine_cross` | ABORT 104 | 12.01 m | **MPPI reported every one of 1000 sampled trajectories in collision** inside that gap: `Optimizer fail to compute path`, then `Controller patience exceeded`, and the control loop at **4.76 Hz**. → inflation 2.60 m, `cost_scaling_factor` 3.0 → 1.10, `cost_penalty` 2.0 → 6.0 |
+| 5 | `9ed03df7` | `spine_cross` | ABORT 205 | 27.26 m | **a freespace planner is not a road graph.** It threaded the gap anyway, drove past the goal and looped to the south ring leg. → the GOALS moved to where the two routes agree |
+| 6 | `9ed03df7` | `spine_north` | **SUCCESS** | 17.51 m | truth error 0.4787 m, believed 0.3355 m; deviation mean 0.109 / max 0.685 m |
+| 7 | `9ed03df7` | `spine_north` | **SUCCESS** | 17.64 m | truth error 0.6073 m, believed 0.4457 m; deviation mean 0.097 / max 0.552 m |
+| 8 | `9ed03df7` | `spine_north` | ABORT 205 | — | **two of three is not a repeatability claim.** → `GoalCritic`/`PathFollowCritic` 1.4 → 2.50 m |
+| 9 | `5cc02ba3` | `spine_north` | ABORT 205 | — | **worse.** `PathFollowCritic`'s threshold is the range inside which path-following STOPS; 2.50 m takes it away for most of an approach |
+| 10 | `5cc02ba3` | `spine_north` | CANCELLED | — | worse again → reverted to 1.4 |
+| 11 | `16963750` | `spine_north` | CANCELLED | 21 m east | **the box was smaller than the error the pose carries WHILE MOVING.** Closest approach 0.3398 m against a 0.25 m box; the checker never latched and MPPI did not turn the vehicle round — it drove 260 s into the far wall. → the transit ceiling to 0.300 m/s (a speed the truck can stop out of), then the box to 0.60 m |
+| 12 | `8712475c` | `spine_north` | ABORT 205 | — | reached the goal POSITION to **0.152 m** and could not finish: heading 1.82 rad out |
+| 13 | `8712475c` | `spine_north` | CANCELLED | — | reached it to **0.010 m** and could not finish: heading 1.11 rad out. → `nav2_controller::PositionGoalChecker` |
+
+Rungs 12 and 13 are the crib's own finding, reproduced independently:
+`agv/forklift/nav2.yaml` carries a `staging_goal_checker` because
+`EVIDENCE_NAV2.md` §8.3 measured the `(xy, yaw)` pair to be **jointly
+unreachable in an endgame correction** on this kinematic machine —
+heading costs 2.1–2.6 m of travel per radian. That is a fact about a
+tricycle rather than about a floor, and it transfers.
+
+### 15.3 THE SHIPPED SET — five runs, one `nav2.yaml`, `nav=on@d430334b`
+
+Stack stopped and started before every one; `traction=nominal`,
+`arm=wheel+imu`, `loc=amcl@735cdbc6`, headless.
+
+| session | goal | result | sim time | driven | arrival (TRUTH) | arrival (BELIEVED) | truth − believed |
+|---|---|---|---|---|---|---|---|
+| `…130956` | `spine_north` | **SUCCESS** | 59.06 s | 17.295 m | **0.5348 m**, +1.6920 rad | 0.5411 m | **0.0141 m** |
+| `…131222` | `spine_north` | ABORT 205 | 130.5 s | 23.759 m | 6.6691 m | 6.7128 m | 0.0461 m |
+| `…131600` | `spine_north` | CANCELLED | 479.5 s | **130.199 m** | 14.2651 m | 14.2706 m | 0.0768 m |
+| `…132535` | `ring_corner` | ABORT 205 | 212.8 s | 37.050 m | 12.7769 m | 12.7613 m | 0.0304 m |
+| `…133039` | `aisle_end` | ABORT 205 | 222.7 s | 26.563 m | 40.2602 m | 40.2198 m | 0.0768 m |
+
+**ONE ARRIVAL IN FIVE, AND THE HEADLINE GOAL IS ONE IN THREE.** The
+`repeat: 3` this table was asked for was recorded; what it repeats is
+not an arrival.
+
+**THE ONE ARRIVAL, SCORED THE WAY F3 SCORES ANYTHING.** Ground truth
+against the goal in the BUILDING's frame, and beside it the pose the
+stack BELIEVED — `map` → `base_link` off `/tf`, composed on the
+estimator's timeline and carried into the building by the committed
+registration, nothing anchored. The goal checker only ever saw the
+second one.
+
+  truth 0.5348 m, believed 0.5411 m, and **the two are 0.0141 m apart** —
+  which is under `registration.yaml`'s own instrument floor
+  (rms 0.0291 m). At the moment of arrival the localiser was as good as
+  the ruler. **The 0.53 m is the CONTROLLER and not the localiser.**
+
+**AND THE HEADING WAS 1.6920 rad OUT.** The position-only checker
+allowed it, deliberately (§14's `general_goal_checker`), and
+`drive_goal.py` prints it because nothing else would. An approach pose
+on this stack today delivers a POSITION and not a heading.
+
+### 15.4 What the controller did, and it is not what failed
+
+| | `…130956` | `…131222` | `…131600` | `…132535` | `…133039` |
+|---|---|---|---|---|---|
+| `/cmd_vel` messages | 1182 | 2620 | 9599 | 4162 | 4462 |
+| rate, mean / median | 20.017 / 20.000 | 20.070 / 20.000 | 20.017 / 20.000 | 19.559 / 20.000 | 20.034 / 20.000 |
+| worst tick | 0.058 s | 0.052 s | 0.210 s | **5.090 s** | 0.064 s |
+| RTF over the drive | 0.9998 | 0.9963 | 0.9988 | 0.9968 | 0.9982 |
+| **deviation from plan, mean** | **0.0445 m** | **0.0427 m** | 0.1131 m | 0.0402 m | 0.1125 m |
+| deviation, max | 0.1816 m | 0.2320 m | 0.3803 m | 0.2445 m | 0.4143 m |
+| steer travel | 20.06 rad | 48.68 rad | 164.57 rad | 82.34 rad | 142.87 rad |
+| worst steer step | **0.100000** | **0.100000** | **0.100000** | **0.100000** | **0.100000** |
+| cusps (direction changes) | 0 | 0 | 1 | **16** | 2 |
+
+**THE CONTROLLER HELD ITS RATE AND HELD ITS PATH.** 20.0 Hz median on
+every run, and a deviation from the plan standing at the time of
+**0.040–0.113 m mean** over 21 500 commanded twists. nav2 issue #5714
+says Ackermann robots deviate from the global path in turns, worst in
+REVERSE turns, and on this vehicle **every ordinary leg is a nav2
+reverse leg** — 100 % of the commands on three of the five runs.
+**THIS STACK DOES NOT REPRODUCE #5714 AT THIS ENVELOPE**, and the honest
+form of that is: at 0.300 m/s on 1.25 m arcs the deviation stayed under
+0.42 m at its worst, and nothing here is a measurement of what it does
+at 0.700 m/s, which is where §15.2 rung 11 was and where the runs were
+too short to separate tracking from the arrival failure.
+
+**THE WORST STEER STEP IS THE RAMP, EXACTLY, ON EVERY RUN.**
+0.100000 rad per tick is F4 Task 1's 2.0 rad/s at 0.05 s
+(`EVIDENCE_NAV_V3.md` §5). The command path below the controller is
+unchanged and still enforces every limit it enforced with a table
+driving it.
+
+**ONE TICK IN 4162 TOOK 5.09 SECONDS**, on `ring_corner`, and it is
+recorded rather than explained: the controller's own log carries no
+error at that moment and the RTF over the same drive was 0.9968. It is
+the only tick over 0.21 s in 21 500.
+
+### 15.5 What the planner did, and it is what failed
+
+| | `…130956` | `…131222` | `…131600` | `…132535` | `…133039` |
+|---|---|---|---|---|---|
+| plans published | 58 | 127 | **459** | 138 | 95 |
+| first plan | 170 poses, 16.989 m | 170, 17.000 m | 170, 16.960 m | 358, **37.338 m** | 434, **45.709 m** |
+| first plan direction | 0 fwd / 169 **REV** | 0 / 169 | 0 / 169 | 0 / 357 | 0 / 433 |
+| last plan direction | 7 / 19 | **75 fwd** / 0 | 2 / 147 | **187 fwd** / 4 | **444 fwd** / 26 |
+
+**EVERY FIRST PLAN IS FORKS-FIRST AND SOME LAST PLANS ARE NOT.** The
+planner opens with the route a reader would draw — the ring leg, driven
+the way the truck faces — and after the vehicle has overshot or been
+turned round it solves the new problem counterweight-first. That is
+correct Reeds-Shepp behaviour and it is also how a missed goal becomes
+a 130 m drive: `…131600` published **459 plans in 479 s** and drove
+**130.199 m** to cover a straight-line 2.910 m.
+
+**AND `aisle_end`'s FIRST PLAN IS 45.709 m, WHICH IS THE ROAD GRAPH's
+OWN ROUTE.** The graph's route for that goal is about 47 m — the north
+leg, the north-east corner, the east leg — and the freespace shortcut
+across the rack block is 38 m. At the shipped inflation the planner took
+the long way. **That is §15.2 rung 5's fix working**, and it is the one
+place in this task where the costmap successfully told a freespace
+planner about a road graph.
+
+### 15.6 The jumps, and what the controller did about them
+
+`evidence_core.tf_jumps()` counts CORRECTIONS and not re-broadcasts:
+nav2_amcl re-sends `map` → `odom` on every scan whether or not the
+filter updated, so counting broadcasts would report a 15 Hz correction
+rate and a mean jump of zero.
+
+| session | corrections / broadcasts | per s | worst step | worst heading step |
+|---|---|---|---|---|
+| `…130956` | 66 / 1017 over 67.1 s | 0.98 | 0.2071 m | 0.0135 rad |
+| `…131222` | 93 / 2100 over 138.5 s | 0.67 | 0.1561 m | 0.0088 rad |
+| `…131600` | 473 / 7388 over 487.5 s | 0.97 | 0.1123 m | 0.0215 rad |
+| `…132535` | 138 / 3345 over 220.7 s | 0.63 | **0.6490 m** | 0.0234 rad |
+| `…133039` | 95 / 3504 over 231.2 s | 0.41 | 0.0630 m | 0.0087 rad |
+| **§13.10's budget** | | | **0.2591 m** | **0.0764 rad** |
+
+**THE HEADING STEPS STAYED WELL INSIDE THE BUDGET AND THE POSITION STEPS
+DID NOT.** `ring_corner`'s worst single `map` → `odom` correction was
+**0.6490 m — 2.5× the peak F3 handed over**, on the same arm, the same
+map and the same plant. F3 measured its peaks with `drive_route.py`
+driving a table; this is the same localiser with a CONTROLLER CLOSING A
+LOOP ON IT, and the loop feeds the localiser a different motion history.
+**The budget §13.10 handed over is not conservative once the loop is
+closed**, and that is the answer to the question the contract asked.
+
+**AND WHAT THE CONTROLLER DID ABOUT THEM IS BOUNDED.** The window is
+`nav.analyse.jump_response_s` = 1.0 s, which is 20 controller ticks and
+15 scan periods:
+
+| session | jumps with a response | largest response | worst `w` swing after any jump |
+|---|---|---|---|
+| `…130956` | 64 of 66 | a 0.0142 m step moved `v` by 0.3003 m/s and `w` by 0.1929 rad/s | 0.1929 rad/s |
+| `…131222` | 93 of 93 | a 0.0373 m step moved `v` by 0.0905 m/s and `w` by 0.0029 rad/s | 0.0653 rad/s |
+| `…131600` | 473 of 473 | a 0.0233 m step moved `v` by 0.2714 m/s and `w` by 0.2091 rad/s | 0.2091 rad/s |
+
+**THE RESPONSE IS A RANGE AND NOT A DIFFERENCE OF ENDPOINTS**, because a
+controller that swings and comes back inside the window would show
+nothing in a first-to-last subtraction — and a swing is exactly what a
+jump is expected to produce. The worst yaw-rate swing measured after any
+correction is **0.2091 rad/s**, which is 87 % of `wz_max` (0.240) — so a
+jump CAN saturate this controller's angular envelope. It did not
+destabilise it: the deviation from the plan over those same runs is the
+table in §15.4.
+
+**AND THE LARGEST `v` SWING IS THE WHOLE ENVELOPE.** 0.3003 m/s after a
+0.0142 m step, on the run that arrived. That is not the jump — it is the
+GoalCritic pulling the speed down 1.4 m from the goal, and the window
+happened to contain it. A jump-response figure taken near a goal is a
+figure about the arrival.
+
+### 15.7 What is still open, named
+
+1. **THE ARRIVAL.** One in five, one in three on the headline. The
+   measured causes, in the order they were seen: the box is smaller than
+   the error the pose carries while moving (fixed, §15.2 rung 11); the
+   `(xy, yaw)` pair is jointly unreachable (fixed, rung 13); and a
+   CROSS-TRACK closed-loop error at the goal of **0.15 – 0.97 m across
+   runs**, which is comparable with any box argued from F3's own budget
+   and is NOT fixed. Run `…131222` tracked its plan to a mean of
+   0.043 m and still passed 0.968 m south of the goal, because the plan
+   itself was being drawn from a pose that had drifted.
+2. **WHAT HAPPENS AFTER A MISS.** Nav2 does not stop. The tree replans,
+   the planner solves the new problem, and a vehicle 6 m past its goal
+   drives 130 m and 459 plans trying to come back. A goal that cannot be
+   reached should fail FAST, and nothing in this configuration makes it.
+3. **THE FREESPACE PLANNER AND THE ROAD GRAPH.** Moved, not removed
+   (§15.2 rung 5, §15.5). The answer is nav2's Route Server
+   (`docs/reports/m5v3-02` §4), which is edge-constrained and maps onto
+   `m6/ipc/route.py`'s graph one edge for one edge. It is a whole server
+   and it belongs to a later phase.
+4. **THE 5.09 s CONTROL TICK**, once in 21 500.
+5. **THE 0.6490 m JUMP.** §13.10's budget is not conservative under a
+   closed loop.
+
+### 15.8 What this task did NOT do
+
+- **No collision monitor**, and therefore no polygon, no slowdown and no
+  stop action. F4 Task 3 owns it, and §14.4's coverage hole is one of
+  the things it is for.
+- **No wet set.** Every figure here is `traction=nominal`. The stopping
+  distance the whole envelope is derived from is a dry figure and the
+  slippery plant's is not measured.
+- **No `--rf2o` or `--fuse` arm, and no `--localize slam` GOAL.** The
+  nav children read the estimator arm only as an address
+  (`odom_topic`), and the localiser only through `/tf`, so neither arm
+  can change a figure here — but neither was DRIVEN, and this sentence
+  is the honest form of that. F4 Task 3's flip experiment is the slam
+  arm's.
+- **No mid-path goal update, no station-class approach and no
+  deliberate reverse-out segment.** Those are Task 3's driving cases.
+- **No docking claim of any kind.** The goals are road-graph nodes in
+  open corridors; the 0.25 m tolerance is the station CLASS and not a
+  station, and §15.3's arrival errors are what an approach pose costs
+  today.
+- **No `nav2_route`.** §15.2's largest finding names it as the answer
+  and this task did not run it.
+
+### 15.9 What F4 Task 3 inherits
+
+1. **THE ARRIVAL IS THE OPEN PROBLEM AND IT IS NOT THE CONTROLLER'S
+   TRACKING.** One goal in five arrived; the controller held 20.0 Hz and
+   0.040–0.113 m of deviation on every run. §15.7 lists the three
+   measured causes and which two are fixed. A driving case that assumes
+   a goal completes has to read that list first.
+2. **The envelope is CREEP in both directions, 0.300 m/s**, from §8's
+   own stop table against the goal box. A case that wants transit speed
+   back has to say what it does about the arrival.
+3. **The goal checker holds a POSITION and no heading**, and §15.2 rungs
+   12–13 are why. An arrival heading is F5's, through the docking
+   server's straight final leg.
+4. **A freespace planner is not the road graph, measured.** §15.2's
+   ladder and §15.5. Any case whose route crosses the rack block is a
+   case about that finding rather than about the controller.
+5. **The `nav=on@<md5>` label is live and `analyse` refuses across it.**
+   Five different `nav2.yaml`s were refused into one table during this
+   task; a case set that retunes anything has to re-record.
+6. **`consider_footprint: true` on the CostCritic**, and the 43.66 % of
+   a core the arm costs idle. A case that adds critics starts there.
+7. **THE JUMP BUDGET DID NOT SURVIVE CONTACT.** §15.6: the worst single
+   `map` → `odom` correction under a closed loop was **0.6490 m**
+   against the **0.2591 m** `EVIDENCE_LOCALIZATION_V3.md` §13.10 handed
+   over. The heading steps stayed well inside. A phase that sizes
+   anything on that contract should size it on 0.65 m.
