@@ -1,12 +1,88 @@
-# RUNBOOK — the current system, start to finish
+# RUNBOOK — start to finish
 
-One page, in the order you actually do things. Two machines share the
-work: **Windows** runs TIA Portal, S7-PLCSIM Advanced and the one process
-allowed to write to the PLC; **WSL2** runs Gazebo, ROS 2 and the vehicle
-stack. The vehicle software itself runs from a **frozen deploy copy** —
-build it first, or `start` will refuse.
+Two systems run from this repo. **The fleet cell (M6)** — four
+forklifts under a VDA 5050 fleet manager — is the current one and comes
+first. **The single M5 vehicle** with the real TIA/PLCSIM safety PLC
+follows, unchanged. Two machines share the work either way: **Windows**
+runs the PLC side (real or virtual) and the one process allowed to
+write to it; **WSL2** runs Gazebo, ROS 2 and the vehicle stack.
 
-Deeper reference: [`m5_ver2/step5/README_step5.md`](m5_ver2/step5/README_step5.md)
+---
+
+## The fleet cell (M6) — quickstart
+
+No PLCSIM needed here: each truck gets a **virtual F-PLC** on the
+Windows side — the same chain, the same verdicts. Every WSL shell
+below wants `source /opt/ros/jazzy/setup.bash` and
+`export ROS_DOMAIN_ID=96` first (`m6.sh` exports the domain — and the
+FastDDS loopback profile, see the note at the end — for its own
+children on its own).
+
+**Once:**
+
+```bash
+bash m6/tools/install_broker.sh     # vendors mosquitto into ~/.local (this WSL has no sudo)
+bash m6/m6.sh deploy                # freeze the vehicle image the trucks run from
+```
+
+Re-run `deploy` after **any** change under `m6/ipc/` or `m6/windows/`.
+The trucks run the frozen image, not the source: a stale image refuses
+new work in ways that look exactly like fleet bugs (measured 2026-08-25
+— four fresh doors rejected every order carrying the new pick action,
+and the fleet re-offered the task in a 2 s loop for as long as anyone
+watched).
+
+**Every run:**
+
+```bash
+# 1 · WSL — the world, four vehicle stacks, broker and fleet manager
+export GALLIUM_DRIVER=d3d12 MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA   # GPU lidars; without these, four trucks fall to ~0.2 RTF
+bash m6/m6.sh start --headless        # drop --headless for the Gazebo window
+
+# 2 · WSL — is this boot actually delivering? (~30 s, parallel probes)
+bash m6/tools/preflight.sh            # must end "preflight: OK";
+                                      # if not: m6.sh stop, start again —
+                                      # never time, tape or gate on a failed boot
+
+# 3 · Windows — one writer per truck (ctl ports 5910/5920/5930/5940 for f1..f4)
+python m6\windows\m6.py --vehicle f1 --virtual                                       # the owner's panel, or:
+python m6\tools\scripted_writer.py --vehicle f1 --virtual --ctl-port 5910 --auto-reset   # the scripted stand-in (recordings)
+# panel: click RESET once per truck; --auto-reset presses it for you
+
+# 4 · WSL — every cab to AUTOMATIC (or click Auto on each HMI window)
+python3 m6/tools/all_auto.py
+
+# 5 · Work
+python3 m6/fleet/fleet_cli.py submit S1 S8            # one transport
+python3 m6/fleet/fleet_cli.py demo --duration 600 --in-flight 4 --seed 7   # a whole shift
+python3 m6/fleet/fleet_cli.py status --watch          # the operator's screen
+
+# 6 · Film it (optional): floor + operator screen + the VDA 5050 wire, one file
+python3 m6/tools/record_e2e.py --out run.mp4 --seconds 500 --fps 10   # fps 10 = true plant speed
+
+# 7 · Down
+bash m6/m6.sh stop
+```
+
+The deep runbook — every step with its reasons and its measured
+failure modes — is [`m6/README_m6.md`](m6/README_m6.md); the evidence
+ledger is [`m6/PROOF.md`](m6/PROOF.md).
+
+**DDS note.** `m6.sh` pins FastDDS to loopback-unicast discovery
+([`m6/tools/fastdds_loopback.xml`](m6/tools/fastdds_loopback.xml)):
+this rig's WSL multicast path has died mid-session before and took
+arbitrary topics with it. Under unicast discovery a *fresh* CLI
+participant needs 10–20 s to walk the ~40-node mesh — `preflight.sh`
+and `all_auto.py` already wait that long; your own one-off `ros2 topic`
+probes should too.
+
+---
+
+## The single vehicle (M5), start to finish
+
+The original system, unchanged — TIA Portal, S7-PLCSIM Advanced and
+one truck. Deeper reference:
+[`m5_ver2/step5/README_step5.md`](m5_ver2/step5/README_step5.md)
 (run order, field contract, "Not a bug" table, CONFIG). Evidence:
 [`m5_ver2/step5/PROOF.md`](m5_ver2/step5/PROOF.md).
 
