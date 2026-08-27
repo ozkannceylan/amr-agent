@@ -1334,3 +1334,134 @@ def test_a_case_session_and_a_goal_session_are_BOTH_found(cfg, tmp_path,
     found = drive_goal.sessions_in(_Cfg())
     assert found == ["case-aisle_transit-20260827-130000",
                      "goal-spine_north-20260827-120000"]
+
+
+# ======================================================================
+# F4 TASK 3 - THE THREE INSTRUMENTS THE CASES NEEDED
+# ======================================================================
+
+def test_preempt_response_reads_a_switch_that_cost_NOTHING():
+    # 20 Hz either side, the same speed throughout: a controller that
+    # never noticed. The gap is one period and the recovery is instant.
+    rows = [(t / 20.0, 0.0, -0.300, 0.0) for t in range(0, 80)]
+    got = drive_goal.preempt_response(rows, 2.0, 1.0)
+    assert got.gap_s == pytest.approx(0.05)
+    assert got.min_v_after == pytest.approx(0.300)
+    assert got.mean_v_before == pytest.approx(0.300)
+    assert got.mean_v_after == pytest.approx(0.300)
+    assert got.recover_s == pytest.approx(0.0)
+    assert got.n_before == 20 and got.n_after == 20
+
+
+def test_preempt_response_finds_a_HOLE_in_the_command_stream():
+    # The failure this block exists to catch: nav2 aborts the running
+    # goal, the tree halts, and nothing publishes for a while - which at
+    # the terminals is a vehicle braking in the middle of an aisle for a
+    # re-task that changed nothing about where it was going next.
+    before = [(t / 20.0, 0.0, -0.300, 0.0) for t in range(0, 40)]
+    after = [(2.0 + 0.4 + t / 20.0, 0.0, -0.300, 0.0) for t in range(0, 12)]
+    got = drive_goal.preempt_response(before + after, 2.0, 1.0)
+    assert got.gap_s == pytest.approx(0.45, abs=1e-9)
+    assert got.n_after == 12
+
+
+def test_preempt_response_reports_a_STOP_and_how_long_it_lasted():
+    before = [(t / 20.0, 0.0, -0.300, 0.0) for t in range(0, 40)]
+    after = ([(2.0 + t / 20.0, 0.0, 0.0, 0.0) for t in range(0, 10)]
+             + [(2.5 + t / 20.0, 0.0, -0.300, 0.0) for t in range(0, 10)])
+    got = drive_goal.preempt_response(before + after, 2.0, 1.0)
+    assert got.min_v_after == pytest.approx(0.0)
+    assert got.recover_s == pytest.approx(0.5, abs=1e-9)
+
+
+def test_preempt_response_is_None_when_the_window_has_no_two_sides():
+    rows = [(t / 20.0, 0.0, -0.300, 0.0) for t in range(0, 20)]
+    assert drive_goal.preempt_response(rows, 5.0, 1.0) is None
+    assert drive_goal.preempt_response(rows, -5.0, 1.0) is None
+
+
+def test_the_mean_either_side_is_reported_so_min_v_can_be_READ(cfg):
+    # A small `min_v_after` on a leg that was slowing anyway is not a
+    # preemption cost, which is why the two means are in the tuple.
+    before = [(t / 20.0, 0.0, -0.300, 0.0) for t in range(0, 40)]
+    after = [(2.0 + t / 20.0, 0.0, -0.030, 0.0) for t in range(0, 20)]
+    got = drive_goal.preempt_response(before + after, 2.0, 1.0)
+    assert got.mean_v_before == pytest.approx(0.300)
+    assert got.mean_v_after == pytest.approx(0.030)
+    assert got.recover_s is None
+
+
+def test_driven_cusps_finds_the_sign_change_and_ignores_the_deadband():
+    rows = ([(t / 20.0, 0.0, -0.300, 0.0) for t in range(0, 10)]
+            + [(0.5 + t / 20.0, 0.0, 0.001, 0.0) for t in range(0, 4)]
+            + [(0.7 + t / 20.0, 0.0, +0.300, 0.0) for t in range(0, 10)])
+    got = drive_goal.driven_cusps(rows, 0.005)
+    assert len(got) == 1
+    t_c, v_a, v_b = got[0]
+    assert t_c == pytest.approx(0.7)
+    assert v_a == pytest.approx(-0.300)
+    assert v_b == pytest.approx(+0.300)
+
+
+def test_driven_cusps_counts_NOTHING_in_a_one_direction_run():
+    rows = [(t / 20.0, 0.0, -0.300, 0.0) for t in range(0, 40)]
+    assert drive_goal.driven_cusps(rows, 0.005) == []
+
+
+def test_a_crossing_INSIDE_the_deadband_is_not_a_direction(cfg):
+    # navcmd.creep_speed_mps: under it the converter answers with a
+    # standing zero and a HELD steer axis, so the sign of the command is
+    # not a direction the vehicle ever took.
+    rows = [(t / 20.0, 0.0, v, 0.0) for t, v in
+            enumerate([-0.3, -0.3, -0.002, +0.002, -0.3, -0.3])]
+    assert drive_goal.driven_cusps(rows, 0.005) == []
+
+
+def test_heading_swing_is_zero_on_a_run_that_held_its_route():
+    # travel heading = pose yaw + pi, so a pose yaw of pi is a travel
+    # heading of 0 - which is what the goal below asks for.
+    truth = [(float(i), 0.0, 0.0, math.pi) for i in range(20)]
+    speeds = [0.300] * 20
+    got = drive_goal.heading_swing(0.0, truth, speeds, 0.0, 19.0, 0.05)
+    assert got.n == 20
+    assert got.sd == pytest.approx(0.0, abs=1e-12)
+    assert got.worst == pytest.approx(0.0, abs=1e-12)
+
+
+def test_heading_swing_drops_the_samples_the_vehicle_was_NOT_driving():
+    # A heading held at a standstill is not a heading the vehicle is
+    # driving, and a run that stops for thirty seconds would otherwise
+    # report whatever it was pointing at, thirty seconds' worth.
+    truth = ([(float(i), 0.0, 0.0, math.pi) for i in range(10)]
+             + [(float(10 + i), 0.0, 0.0, math.pi + 1.0) for i in range(10)])
+    speeds = [0.300] * 10 + [0.0] * 10
+    got = drive_goal.heading_swing(0.0, truth, speeds, 0.0, 19.0, 0.05)
+    assert got.n == 10
+    assert got.worst == pytest.approx(0.0, abs=1e-12)
+
+
+def test_heading_swing_windows_on_the_TIMES_it_is_given():
+    truth = [(float(i), 0.0, 0.0, math.pi + (0.4 if i >= 10 else 0.0))
+             for i in range(20)]
+    speeds = [0.300] * 20
+    early = drive_goal.heading_swing(0.0, truth, speeds, 0.0, 9.0, 0.05)
+    late = drive_goal.heading_swing(0.0, truth, speeds, 10.0, 19.0, 0.05)
+    assert early.worst == pytest.approx(0.0, abs=1e-12)
+    assert late.worst == pytest.approx(0.4)
+    assert late.sd == pytest.approx(0.0, abs=1e-12)
+
+
+def test_heading_swing_wraps_at_pi_rather_than_reporting_2pi_of_swing():
+    # The one arithmetic that could make a straight run look unstable: a
+    # travel heading either side of +-pi is a hair of swing, not a whole
+    # turn.
+    truth = [(0.0, 0.0, 0.0, 0.0 + 0.01), (1.0, 0.0, 0.0, 0.0 - 0.01)]
+    speeds = [0.300, 0.300]
+    got = drive_goal.heading_swing(math.pi, truth, speeds, 0.0, 1.0, 0.05)
+    assert got.worst < 0.02
+
+
+def test_heading_swing_is_None_when_nothing_was_driven():
+    truth = [(float(i), 0.0, 0.0, math.pi) for i in range(5)]
+    assert drive_goal.heading_swing(0.0, truth, [0.0] * 5, 0.0, 4.0,
+                                    0.05) is None

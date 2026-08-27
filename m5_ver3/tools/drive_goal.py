@@ -615,6 +615,119 @@ def plan_directions(poses):
     return (forward, reverse)
 
 
+#: What a goal SWITCH cost the command stream. F4 Task 3.
+Preempt = collections.namedtuple(
+    "Preempt", "gap_s min_v_after mean_v_before mean_v_after recover_s "
+               "n_before n_after")
+
+
+def preempt_response(cmd_rows, t_switch, span_s):
+    """What the CONTROLLER's own output did across a goal switch.
+
+    THE MEASUREMENT PREEMPT SEMANTICS COMES DOWN TO. `navigate_to_pose`
+    is a single-goal action server, so a second goal DISPLACES the first
+    one: nav2 aborts it, the tree halts, a new tree ticks and a new plan
+    is computed. Every one of those is a chance for the command stream
+    to stop - and a command stream that stops is a vehicle that brakes
+    in the middle of an aisle for a re-task that changed nothing about
+    where it is going next.
+
+    Four numbers, all off `topics.cmd_vel` and none off the plant:
+      `gap_s`         the largest interval between two consecutive
+                      commands in the window. At `controller_frequency`
+                      20.0 this is 0.05 s when nothing happened.
+      `min_v_after`   the smallest |v| commanded after the switch. Zero
+                      is a controller that published a stop.
+      `mean_v_*`      the mean |v| either side, so the two can be read
+                      together - a small `min_v_after` on a leg that was
+                      slowing anyway is not a preemption cost.
+      `recover_s`     how long until |v| came back to 95 % of the mean
+                      it held before the switch, or None if it never did
+                      inside the window.
+    """
+    before = [row for row in cmd_rows if t_switch - span_s <= row[0] < t_switch]
+    after = [row for row in cmd_rows if t_switch <= row[0] < t_switch + span_s]
+    if not before or not after:
+        return None
+    stamps = [row[0] for row in before + after]
+    gap = max(b - a for a, b in zip(stamps, stamps[1:])) if len(stamps) > 1 \
+        else 0.0
+    mean_before = math.fsum(abs(row[2]) for row in before) / len(before)
+    mean_after = math.fsum(abs(row[2]) for row in after) / len(after)
+    recover = None
+    for row in after:
+        if mean_before > 0.0 and abs(row[2]) >= 0.95 * mean_before:
+            recover = row[0] - t_switch
+            break
+    return Preempt(gap_s=gap,
+                   min_v_after=min(abs(row[2]) for row in after),
+                   mean_v_before=mean_before, mean_v_after=mean_after,
+                   recover_s=recover, n_before=len(before),
+                   n_after=len(after))
+
+
+#: psi's spread over the driven part of a run. F4 Task 3.
+Swing = collections.namedtuple("Swing", "n mean sd worst")
+
+
+def heading_swing(goal_travel_yaw, truth_rows, speeds, lo, hi, min_speed):
+    """How far the TRAVEL HEADING wandered from the route's own, as psi.
+
+    THE STATISTIC 16.4c's RESIDUAL IS BIMODAL IN, AND UNTIL F4 TASK 3 IT
+    HAD NO INSTRUMENT. That section reported a psi standard deviation of
+    0.2072 and 0.1957 on two runs that arrived and 0.5447 on one that
+    did not, and every one of those three was computed by hand for the
+    table. A residual that a later task has to decide about needs a
+    figure it can re-run, so this is that figure.
+
+    psi is the vehicle's TRAVEL heading - pose yaw + pi, because the
+    forks are at model -x - against the goal's own travel heading, off
+    the GROUND TRUTH. Samples under  are dropped for
+    `curvature_demand`'s reason: a heading held at a standstill is not a
+    heading the vehicle is driving, and a run that stops for thirty
+    seconds would otherwise report whatever it happened to be pointing
+    at, thirty seconds' worth.
+    """
+    psis = []
+    for i, row in enumerate(truth_rows):
+        if not (lo <= row[0] <= hi):
+            continue
+        if abs(speeds[i]) < min_speed:
+            continue
+        travel = ec.normalise_angle(row[3] + math.pi)
+        psis.append(ec.normalise_angle(travel - goal_travel_yaw))
+    if not psis:
+        return None
+    mean = math.fsum(psis) / len(psis)
+    sd = math.sqrt(math.fsum((p - mean) ** 2 for p in psis) / len(psis))
+    return Swing(n=len(psis), mean=mean, sd=sd,
+                 worst=max(abs(p) for p in psis))
+
+
+def driven_cusps(cmd_rows, deadband):
+    """Where the COMMAND changed direction, as (t, v_before, v_after).
+
+    A CUSP IN THE PLAN IS A PLANNER'S INTENTION; THIS IS THE VEHICLE'S.
+    `analyse` already counts these - "direction changes in the command" -
+    and this says WHERE each one is, because what a reverse leg costs is
+    a question about the samples around it and not about the count.
+    Below `deadband` the sign of a command is not a direction
+    (`navcmd.creep_speed_mps`), so a crossing is only counted where a
+    real command changed hands.
+    """
+    out = []
+    last = None
+    for row in cmd_rows:
+        v = row[2]
+        if abs(v) <= deadband:
+            continue
+        sign = 1 if v > 0.0 else -1
+        if last is not None and sign != last[0]:
+            out.append((row[0], last[1], v))
+        last = (sign, v)
+    return out
+
+
 def plan_standing_at(plans, t):
     """The most recent plan at or before `t`, or None."""
     standing = None
@@ -1293,6 +1406,28 @@ def analyse_session(cfg, session):
                 "{}: {} recorded {} rows, under evidence.min_samples"
                 .format(session, stream, table.n))
 
+    # ---- the case, if this session is one -----------------------------
+    # F4 TASK 3. A session with no `case=` line is a ONE-GOAL run and
+    # every block below reads exactly as it always has; `loc=none`'s
+    # rule, one label over.
+    if fields.get("case"):
+        print("case      {}  -  {}".format(
+            fields["case"],
+            (cfg.raw("nav.cases").get(fields["case"]) or {}).get("note", "")))
+        print("          goal 1 {}, sent at t+0.000 s".format(
+            fields.get("case_first", "?")))
+        if fields.get("case_second"):
+            print("          goal 2 {}, {}".format(
+                fields["case_second"],
+                "PREEMPT at a believed {} m"
+                .format(fields.get("case_preempt_at_m", "?"))
+                if fields.get("case_when") == "preempt"
+                else "sent AFTER goal 1 returned"))
+            print("          THE ARRIVAL BELOW IS SCORED AGAINST GOAL 2, "
+                  "which is where the")
+            print("          vehicle ended. Goal 1's own result is in the "
+                  "LEGS block.")
+
     truth = rows_of(tables["ground_truth"], ("t_s", "x", "y", "yaw"))
     speed = tables["ground_truth"].column("vx")
     parent = rows_of(tables["map_odom"], ("t_s", "x", "y", "yaw"))
@@ -1713,6 +1848,183 @@ def analyse_session(cfg, session):
         print("JUMPS     the map -> odom stream is EMPTY. This session was "
               "not localised,")
         print("          and no absolute figure above is one.")
+
+    # ---- how far the heading wandered, which 16.4c had no instrument
+    # for ------------------------------------------------------------
+    # THE WINDOW IS THE LAST LEG'S AND NOT THE WHOLE RUN'S, because psi
+    # is measured against the GOAL's travel heading and a two-goal case
+    # spends its first leg driving somewhere else. On a one-goal run the
+    # two are the same instant.
+    t_swing = float(fields["t_goal2_sent_s"])         if fields.get("t_goal2_sent_s") else t_sent
+    swing = heading_swing(goal.travel_yaw, truth, speed, t_swing, t_done,
+                          cfg.f("nav.analyse.follow_speed_mps"))
+    if swing is not None:
+        print("")
+        print("SWING     psi, the vehicle's TRAVEL heading against the "
+              "goal's own, off the")
+        print("          ground truth, over the {} samples above "
+              "{:g} m/s{}".format(
+                  swing.n, cfg.f("nav.analyse.follow_speed_mps"),
+                  " of the LAST leg" if t_swing != t_sent else ""))
+        print("          mean {:+.4f}   sd {:.4f}   worst |psi| {:.4f} rad"
+              .format(swing.mean, swing.sd, swing.worst))
+        print("          IT IS ONLY A SWING ON A STRAIGHT LEG. A route "
+              "with a corner in it")
+        print("          spends part of its run legitimately pointed "
+              "somewhere else, and this")
+        print("          statistic reads that as spread: `spine_north` "
+              "and `ring_corner` are")
+        print("          straight, `aisle_end` and the station goals are "
+              "not.")
+        print("          16.4c's RESIDUAL IS BIMODAL IN THIS STATISTIC: "
+              "a run either locks")
+        print("          onto its route at about 0.20 rad of swing or "
+              "oscillates at about")
+        print("          0.55 and does not recover. It is which side of "
+              "a stability")
+        print("          boundary the run landed on, not a degradation.")
+
+    # ---- the legs, the switch and the cusps ---------------------------
+    # F4 TASK 3, AND ALL THREE ARE ABSENT ON A ONE-GOAL RUN WITH NO
+    # DIRECTION CHANGE IN IT - which is every session §15 and §16
+    # recorded. Nothing above this line moved.
+    if fields.get("case") and commanded:
+        t_leg1 = float(fields.get("t_leg1_end_s", t_sent))
+        t_two = float(fields["t_goal2_sent_s"]) \
+            if fields.get("t_goal2_sent_s") else None
+        print("")
+        print("LEGS      what each errand cost, off the ground truth and "
+              "the action's own")
+        print("          status. nav2's codes: 4 SUCCEEDED, 5 CANCELED, "
+              "6 ABORTED.")
+        legs = [("1 " + fields.get("case_first", "?"), t_sent,
+                 t_two if t_two is not None else t_leg1,
+                 int(fields.get("leg1_status", -1)),
+                 int(fields.get("leg1_error_code", -1)))]
+        if t_two is not None:
+            legs.append(("2 " + fields.get("case_second", "?"), t_two,
+                         t_done, int(fields.get("action_status", -1)),
+                         int(fields.get("error_code", -1))))
+        for label, lo, hi, status, code in legs:
+            inside = [row for row in truth if lo <= row[0] <= hi]
+            driven = math.fsum(
+                math.hypot(b[1] - a[1], b[2] - a[2])
+                for a, b in zip(inside, inside[1:])) if len(inside) > 1 else 0.0
+            print("          leg {:<22} {:7.2f} s  {:7.3f} m  status {:>2}"
+                  "  error {}".format(label, hi - lo, driven, status, code))
+
+        if fields.get("t_preempt_s"):
+            t_switch = float(fields["t_preempt_s"])
+            print("")
+            print("PREEMPT   goal 2 was sent at t+{:.3f} s, with goal 1 "
+                  "still running and".format(t_switch - t_sent))
+            print("          the believed distance to goal 1 at {:.4f} m "
+                  "(trigger {} m)".format(
+                      float(fields["preempt_distance_m"]),
+                      fields.get("case_preempt_at_m", "?")))
+            print("          NOTHING WAS CANCELLED AND NOTHING WAS "
+                  "PUBLISHED BY THIS BENCH.")
+            print("          navigate_to_pose is a single-goal server: "
+                  "nav2 aborted goal 1")
+            print("          itself, which is the `status {}` on the leg "
+                  "above.".format(fields.get("leg1_status", "?")))
+            span = cfg.f("nav.analyse.jump_response_s")
+            answer = preempt_response(cmd, t_switch, span)
+            if answer is None:
+                print("          (no commands either side of the switch "
+                      "inside {:g} s)".format(span))
+            else:
+                print("          over +-{:g} s of {}: {} commands before, "
+                      "{} after".format(span, cfg.s("topics.cmd_vel"),
+                                        answer.n_before, answer.n_after))
+                # THE COMPARISON IS THE RUN'S OWN MEDIAN PERIOD AND
+                # NOT A NUMBER OUT OF A FILE, because what a gap has to
+                # be read against is what this controller was actually
+                # holding on this run.
+                stamps = sorted(row[0] for row in cmd)
+                steps = sorted(b - a for a, b in zip(stamps, stamps[1:]))
+                median_dt = steps[len(steps) // 2] if steps else 0.0
+                print("          WORST GAP IN THE COMMAND STREAM  "
+                      "{:.4f} s  (this run's median period {:.4f} s)"
+                      .format(answer.gap_s, median_dt))
+                print("          smallest |v| commanded AFTER the switch "
+                      "{:.4f} m/s".format(answer.min_v_after))
+                print("          mean |v| before {:.4f} -> after {:.4f} "
+                      "m/s".format(answer.mean_v_before,
+                                   answer.mean_v_after))
+                print("          back to 95 % of the pre-switch mean in "
+                      "{}".format(
+                          "{:.3f} s".format(answer.recover_s)
+                          if answer.recover_s is not None
+                          else "NEVER, inside the window"))
+                print("          A GAP AT THE CONTROLLER'S OWN PERIOD IS "
+                      "NO GAP AT ALL. What this")
+                print("          block is looking for is a vehicle that "
+                      "BRAKED for a re-task")
+                print("          that changed nothing about where it was "
+                      "going next.")
+            # AND WHEN THE NEW GOAL'S PLAN EXISTED, which is the other
+            # half of a preemption: a command stream that never stopped
+            # is worth nothing if it was following the old path.
+            first_new = None
+            for at, poses in plans:
+                if at < t_switch or not poses:
+                    continue
+                end = poses[-1]
+                if math.hypot(end[0] - goal.x, end[1] - goal.y) < 0.5:
+                    first_new = at
+                    break
+            print("          a plan ENDING AT GOAL 2 was published {}"
+                  .format("{:.3f} s after the switch".format(
+                      first_new - t_switch) if first_new is not None
+                      else "NEVER on this run"))
+
+    if commanded:
+        cusps_driven = driven_cusps(
+            cmd, cfg.f("nav.analyse.cusp_speed_mps"))
+        plan_now = plan_standing_at(plans, t_done) if plans else None
+        cusps_planned = plan_cusps(plan_now) if plan_now else []
+        if cusps_driven or cusps_planned:
+            print("")
+            print("CUSPS     a Reeds-Shepp cusp is a direction change the "
+                  "vehicle has to stop")
+            print("          at, slew the steer axis across and set off "
+                  "the other way for.")
+            print("          nav2 issue #5714 is open on tracking through "
+                  "exactly these, worst")
+            print("          in REVERSE turns - and on this vehicle every "
+                  "ordinary leg IS a")
+            print("          nav2 reverse leg. F4 constraint 19: measured, "
+                  "not tuned around.")
+            print("          DRIVEN (a sign change in the commanded v, "
+                  "above the {:g} m/s".format(
+                      cfg.f("nav.analyse.cusp_speed_mps")))
+            print("          deadband): {}".format(len(cusps_driven)))
+            span = cfg.f("nav.analyse.jump_response_s")
+            for t_c, v_a, v_b in cusps_driven:
+                inside = [row for row in truth
+                          if t_c - span <= row[0] < t_c + span]
+                errs = []
+                for row in inside:
+                    standing = plan_standing_at(plans, row[0])
+                    if standing:
+                        errs.append(min(math.hypot(row[1] - p[0],
+                                                   row[2] - p[1])
+                                        for p in standing))
+                print("            t+{:7.2f} s  {:+.4f} -> {:+.4f} m/s   "
+                      "deviation over +-{:g} s: {}".format(
+                          t_c - t_sent, v_a, v_b, span,
+                          "mean {:.4f} max {:.4f} m".format(
+                              math.fsum(errs) / len(errs), max(errs))
+                          if errs else "(no plan standing)"))
+            print("          PLANNED (the last plan of the run): {}".format(
+                len(cusps_planned)))
+            for _i, x, y, s, run in cusps_planned:
+                print("            world ({:+.3f}, {:+.3f})  {:.3f} m "
+                      "along it, then {:.3f} m the other way{}".format(
+                          x, y, s, run,
+                          "   <- ONE POSE, lattice noise"
+                          if run <= 0.11 else ""))
     return 0
 
 
