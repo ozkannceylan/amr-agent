@@ -2695,6 +2695,24 @@ parameter tree did not move, and that is demonstrated rather than
 asserted. **Every case below is driven by the configuration §16.5's
 acceptance set was measured on.**
 
+**AND THE FILE HAS MOVED ONE MORE TIME SINCE, FOR THE THIRD TIME AND
+THE SAME REASON.** §18.3's amendment to the jump budget back-annotated
+`nav2.yaml`'s §(A) comments, so the committed file now hashes to
+**`97fe63af`** — and its parameter tree still hashes to **`53a33d67`**.
+So the label chain across this whole phase reads
+
+| `nav=` (bytes) | `nav_config_md5` (values) | what it was |
+|---|---|---|
+| `3148d052` | `53a33d67` | §16.5's acceptance set |
+| `ebe9ca34` | `53a33d67` | **§17's case set, §18's flip** |
+| `97fe63af` | `53a33d67` | the committed tree today |
+
+**Three byte hashes, one configuration, and only one of the two columns
+is a claim about the stack.** A reader comparing a session's `nav=`
+label against the file on disk will find them different and should:
+`nav_config_md5` is the one that says whether the STACK moved, and it
+has not moved since §16's fix landed.
+
 ### 17.1 What a case is, and why the goal table could not be one
 
 `nav.goals` is a POSE. Every figure in §15 and §16 comes off one of them
