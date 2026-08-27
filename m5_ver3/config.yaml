@@ -3804,44 +3804,66 @@ nav:
   #   turn out. Every one of them was therefore BEHIND the forks, the
   #   freespace planner solved the first one counterweight-first, and
   #   EVIDENCE_NAV_V3.md's first-goals section carries what that run
-  #   measured - including the abort it ended in. The table below is the
-  #   correction; the run is kept because a wrong turn that has been
-  #   measured is worth more than one that has been tidied away.
+  #   measured. The run is kept: a wrong turn that has been measured is
+  #   worth more than one that has been tidied away.
+  #
+  # AND THE SECOND CUT WAS CORRECTED BY A MEASUREMENT TOO, WHICH IS THE
+  # PHASE'S LARGEST FINDING. SmacPlannerHybrid is a FREESPACE planner
+  # and m6/ipc/route.py's road graph is an OPERATIONAL constraint, not
+  # a geometric one: the floor between two rack blocks is genuinely
+  # open, so a straight line from the spawn to anything south of the
+  # racks cuts diagonally through a 5.00 m gap. Four runs measured what
+  # that costs a 3.815 m vehicle - START_OCCUPIED twice and MPPI
+  # reporting every one of 1000 sampled trajectories in collision once -
+  # and nav2.yaml's inflation and cost_penalty were re-derived from the
+  # floor's two road classes because of them. It moved the boundary and
+  # it did not remove it: at the inflation that separates a 5.00 m
+  # corridor from an 8.00 m one, a diagonal that saves 5 m still beats
+  # the ring. The goals below are therefore chosen so that the
+  # FREESPACE route and the ROAD GRAPH route are the same route, and
+  # `aisle_end` is deliberately the one where they are not.
+  #   THE RIGHT ANSWER IS NOT A COSTMAP PARAMETER. It is nav2's Route
+  #   Server (docs/reports/m5v3-02 4), which is edge-constrained and
+  #   maps onto this graph one edge for one edge. It is a whole server
+  #   and it belongs to a later phase.
   goals:
-    # THE HEADLINE, AND IT IS THE ONE THAT IS REPEATED. East along the
-    # north ring leg to the SPINE junction, then south down the spine to
-    # the crossing at the centre of the block area. About 27 m of route
-    # and one 90 degree change of heading, forks-first from end to end,
-    # ending pointed down the southern half of the spine.
-    #   ARRIVING HEADED SOUTH means the forks point at -y, so the pose
-    #   yaw is +pi/2 - and tools/drive_goal.py is what adds the pi.
-    #   IT IS THE SHORTEST OF THE THREE AND THE ONLY ONE WITH A CORNER
-    #   IN IT, which is why it is the one repeated: transit, a corner
-    #   and an arrival are the three things a controller can get wrong,
-    #   and a repeatability claim wants all three in every run.
-    spine_cross:
+    # THE HEADLINE, AND IT IS THE ONE THAT IS REPEATED. 17.00 m due east
+    # along the north ring leg to the SPINE's north junction, arriving
+    # still headed east - the pose a truck stands in before it turns
+    # down the spine. Forks-first from end to end, in an 8.00 m cruise
+    # corridor whose freespace straight line IS the graph's own edge.
+    #   ARRIVING HEADED EAST means the forks point at +x, so the pose
+    #   yaw is pi - and tools/drive_goal.py is what adds it.
+    #   IT IS THE SHORTEST OF THE THREE, WHICH IS WHY IT IS THE ONE
+    #   REPEATED: a repeatability claim wants three runs of the same
+    #   thing more than it wants one run of a longer thing.
+    spine_north:
       x: "0.00"
-      y: "0.00"
-      travel_yaw_rad: "-1.5707963"
+      y: "10.00"
+      travel_yaw_rad: "0.0"
       repeat: "3"
-      note: "the spine and pick-aisle crossing, down the spine"
-    # THE TRANSIT ONE. 37 m due east along the north ring leg to the
-    # ring's north-east corner, arriving still headed east - the pose a
-    # truck stands in before it takes that corner. It is the goal that
-    # spends the most time at the transit ceiling, so it is where the
+      note: "the SPINE's north junction, straight down the ring's north leg"
+    # THE TRANSIT ONE. 37.00 m due east along the same leg to the ring's
+    # north-east corner, arriving still headed east - the pose a truck
+    # stands in before it takes that corner. It is the goal that spends
+    # the most time at the transit ceiling, so it is where the
     # along-track offset of EVIDENCE_LOCALIZATION_V3.md 9 has the most
-    # room to build, and it is the one that says what this controller
-    # does with a long straight.
+    # room to build, and it is what says what this controller does with
+    # a long straight.
     ring_corner:
       x: "20.00"
       y: "10.00"
       travel_yaw_rad: "0.0"
       repeat: "1"
       note: "the ring's NORTH-EAST corner, approached along the north leg"
-    # THE LONG ONE. The pick aisle's EAST end, where it meets the ring's
-    # east leg: east along the north leg, round the corner above, and
-    # south down the east leg. About 47 m of route and the widest span
-    # of this floor a single goal covers.
+    # THE ONE WHERE THE FREESPACE ROUTE AND THE GRAPH ROUTE DISAGREE,
+    # AND IT IS IN THE TABLE FOR THAT REASON. The pick aisle's EAST end,
+    # where it meets the ring's east leg. The graph's route is 47 m -
+    # east along the north leg, round the corner above, south down the
+    # east leg - and every metre of it is in an 8.00 m corridor. The
+    # freespace route is 38 m and threads the rack block. Nav2 is free
+    # to choose and this is the goal that reports which it chose and
+    # what happened.
     aisle_end:
       x: "20.00"
       y: "0.00"
@@ -3853,7 +3875,7 @@ nav:
   # what the EVIDENCE has to contain, and tools/drive_goal.py's
   # `analyse` prints it beside the number of sessions it actually found,
   # so a repeatability claim cannot be made over one run by accident.
-  default_goal: "spine_cross"
+  default_goal: "spine_north"
 
   # ------------------------- THE DRIVEN RUN ----------------------------
   # How long ONE navigate_to_pose may take before the bench cancels it.

@@ -329,7 +329,7 @@ def test_a_goal_that_is_not_in_the_table_is_REFUSED_by_name(cfg):
     # THE REFUSAL LISTS THE ONES THAT DO EXIST, which is this track's
     # rule everywhere: an operator who is refused needs the answer and
     # not only the complaint.
-    for name in ("aisle_end", "ring_corner", "spine_cross"):
+    for name in cfg.raw("nav.goals"):
         assert name in text
 
 
