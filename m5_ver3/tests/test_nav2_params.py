@@ -522,6 +522,35 @@ def test_the_goal_tolerance_is_the_STATION_CLASS_and_that_is_what_binds(
     assert WORST_END_ERROR_M < STATION_TOLERANCE_M
 
 
+#: What this vehicle takes to stop from its transit ceiling, measured
+#: (EVIDENCE_NAV_V3.md 8) - 1.02 m and 2.07 s, of which about 0.25 s is
+#: dead time in the chain. F4 Task 1's handover.
+STOPPING_DISTANCE_M = 1.02
+
+
+def test_the_goal_pull_starts_further_out_than_the_vehicle_can_STOP(
+        controller):
+    # THE FIGURE THAT DECIDES WHETHER A GOAL IS REACHED AT ALL. The goal
+    # critic is what pulls the speed down; below its threshold the
+    # controller is still tracking the path at whatever the envelope
+    # allows. A threshold under (stopping distance + tolerance) asks the
+    # vehicle to come to rest inside a box it is still travelling
+    # through. Measured at the shipped 1.4 m: the same goal succeeded
+    # twice and missed once.
+    need = STOPPING_DISTANCE_M + STATION_TOLERANCE_M
+    for critic in ("GoalCritic", "PathFollowCritic"):
+        threshold = float(controller[critic]["threshold_to_consider"])
+        assert threshold > need, (
+            "{}: {:.2f} m against a {:.2f} m stopping distance and a "
+            "{:.2f} m goal box".format(critic, threshold,
+                                       STOPPING_DISTANCE_M,
+                                       STATION_TOLERANCE_M))
+    # AND THE TWO ARE ONE HAND-OFF. nav2_bringup ships them equal; a gap
+    # between them is a band where both critics pull.
+    assert (controller["GoalCritic"]["threshold_to_consider"]
+            == controller["PathFollowCritic"]["threshold_to_consider"])
+
+
 def test_the_goal_checker_LATCHES_because_this_vehicle_cannot_pirouette(
         nav):
     checker = nav["controller_server"]["ros__parameters"][
