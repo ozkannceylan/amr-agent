@@ -526,7 +526,12 @@ def test_the_parse_finds_the_children_this_stack_actually_starts():
                   # than a stale localiser: `controller_server`
                   # PUBLISHES A TWIST, and the command path takes it.
                   "planner_server", "controller_server", "bt_navigator",
-                  "behavior_server", "nav_lifecycle_manager"):
+                  "behavior_server", "nav_lifecycle_manager",
+                  # F4 Task 3's ONE, which is arm-gated too (--monitor)
+                  # and is the worst of the lot to orphan: a stale
+                  # collision_monitor publishes a twist ON THE TOPIC THE
+                  # CONVERTER READS on that arm, off a stale scan.
+                  "monitor"):
         assert child in names, "the parse lost the `{}` child".format(child)
 
 

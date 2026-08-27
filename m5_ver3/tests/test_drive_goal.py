@@ -406,7 +406,12 @@ def test_every_goal_in_config_yaml_reads_back(cfg):
         # that fails; it carries `repeat: 0` because it is not part of
         # the shipped set, and `route_node: false` because it is not a
         # place on the road graph.
-        if cfg.raw("nav.goals")[name].get("route_node") is False:
+        # AND F4 TASK 3 ADDED A SECOND KIND OF ZERO. A goal reached only
+        # through nav.cases carries `case_only: true` and no repeat of
+        # its own, because the CASE owns that count -
+        # tests/test_nav2_params.py holds both directions of that flag.
+        row = cfg.raw("nav.goals")[name]
+        if row.get("route_node") is False or row.get("case_only") is True:
             assert goal.repeat == 0
         else:
             assert goal.repeat >= 1

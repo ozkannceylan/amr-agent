@@ -528,6 +528,35 @@ topics:
   # stack child publishing zeros twenty times a second.
   cmd_vel: "/cmd_vel"
   cmd_vel_smoothed: "/cmd_vel_smoothed"
+  # THE COLLISION MONITOR'S OUTPUT, AND IT EXISTS ONLY ON THE --monitor
+  # ARM. F4 Task 3 puts nav2_collision_monitor between the smoother and
+  # the converter - which is the only place on this track a Twist still
+  # exists downstream of the smoother, because everything after the
+  # converter is a Float64 at an actuator terminal. With the flag the
+  # line is
+  #
+  #   /cmd_vel -> smoother -> /cmd_vel_smoothed -> collision_monitor
+  #            -> /cmd_vel_monitored -> converter -> the two terminals
+  #
+  # and WITHOUT it the converter subscribes /cmd_vel_smoothed exactly as
+  # it always has. The insertion is done by REMAPPING THE CONVERTER'S
+  # INPUT on its command line - not by re-pointing the smoother's output
+  # - so every address above keeps meaning what its name says and the
+  # only thing that moves is which topic the last node reads. F4
+  # constraint 18 is still one line with no bypass; it is one link
+  # longer on this arm and m5v3.sh says so where it spawns.
+  #   NOTHING ON THIS PATH IS A SAFETY FUNCTION. nav2's own
+  #   documentation for this node is quoted verbatim in
+  #   collision_monitor.yaml and in EVIDENCE_NAV_V3.md: it "does not
+  #   provide hard real-time safety certifications" and does not replace
+  #   a safety-rated PLC. It complements the F-PLC; it is not the F-PLC.
+  cmd_vel_monitored: "/cmd_vel_monitored"
+  # WHAT THE MONITOR SAYS IT IS DOING. nav2_msgs/CollisionMonitorState -
+  # the action type in force and the polygon that caused it - published
+  # on every processing cycle. It is namespaced for topics.navcmd_status'
+  # reason: it is THIS stack's business and nothing off the shelf looks
+  # for it.
+  collision_monitor_state: "/m5v3/collision_monitor/state"
   # THE ENVELOPE HOOK. nav2_msgs/SpeedLimit, and F4 constraint 18 says
   # what it is and what it is not: it is WIRED and DEMONSTRATED here, by
   # a test publisher, because the PLC that will drive it arrives in a
@@ -3490,6 +3519,243 @@ smoother:
   # against a different mechanism.
   active_timeout_s: "30"
 
+# =========================== COLLISION MONITOR ==========================
+# F4 TASK 3, AND IT IS AN OPTIONAL LINK IN A LINE THAT IS ALREADY THERE.
+# `--monitor` puts nav2_collision_monitor between the velocity smoother
+# and the tricycle converter; without the flag nothing changes and the
+# command path is byte for byte the one F4 Task 1 measured.
+#
+# ------------------------- THE DISCLAIMER, VERBATIM --------------------
+# nav2's own documentation for this node, quoted and not paraphrased:
+#
+#   "does not provide hard real-time safety certifications"
+#
+# It does not replace a safety-rated PLC. It complements the F-PLC; it
+# is not the F-PLC. Protective stop, e-stop and safe torque off are
+# onboard and hardwired in the plant this models, and nothing on this
+# path can trigger or release one. What this node does is slow and stop
+# an AUTONOMY command stream on a scan it reads at 15 Hz over a ROS
+# graph, in a simulator, with no diverse channel, no self-test, no
+# latching fault and no performance level. Every figure this track
+# publishes about it is a measurement of a convenience function.
+#
+# ---------------- WHY IT IS A FLAG AND NOT PART OF --nav ---------------
+# THREE REASONS, AND THE FIRST IS THE EVIDENCE'S.
+#   THE ACCEPTANCE SET WAS DRIVEN WITHOUT IT. EVIDENCE_NAV_V3.md 16.5's
+# eleven runs and F4 Task 3's own driving cases go through the F4 Task 1
+# command path with nothing inserted in it. A monitor that went up with
+# --nav would put an extra node between the smoother and the converter
+# on every one of those runs, and every arrival figure would then be a
+# figure about a different path.
+#   IT KNOWS NOTHING ABOUT NAV2. It subscribes a Twist and a LaserScan
+# and publishes a Twist. There is no planner, no costmap and no goal in
+# it, so tying it to the arm that has those would be a claim about its
+# dependencies that is not true - and it would make the honest
+# open-loop demonstration below impossible, because that one wants the
+# path with NO Nav2 in the room (F4 Task 1's own rule).
+#   AND THE SHIPPING DECISION IS A MEASUREMENT AND NOT A DEFAULT.
+# --rf2o and --fuse are the precedent: an optional arm, off, with the
+# A/B that says why in the evidence. EVIDENCE_NAV_V3.md 19.7 is this
+# one's.
+#
+# --------------------- WHAT IT CAN AND CANNOT SEE ----------------------
+# THE ONLY PERCEPTION ON THIS TRACK IS THE NAV LIDAR AT z = 1.80 m.
+# The two safety scanners at z = 0.15 m are in model.sdf and are NOT
+# bridged to ROS (topics:, and EVIDENCE_MODEL_V3.md 2), so at the height
+# this monitor watches, a pallet, a dropped load and a person are all
+# invisible. Its honest scope is STRUCTURE ABOVE 1.80 m - and the
+# obstacle the demonstration spawns is 2.40 m tall for exactly that
+# reason, which is stated in the evidence rather than arranged quietly.
+#   AND IT CANNOT USE THE `approach` ACTION TYPE, WHICH IS THE ONE THAT
+# WOULD HANDLE A TURN. `approach` projects the ROBOT'S OWN FOOTPRINT
+# forward along the commanded velocity, and this truck's footprint
+# contains three pieces of itself that the nav scanner sees:
+# nav_lidar_3d's housing at base_link (+0.026, -0.019) and the two mast
+# rails at (-0.747, +0.285) and (-0.746, -0.302), 50 of 811 rays
+# (EVIDENCE_NAV_V3.md 14.4). The costmap's obstacle layer clears them
+# with footprint_clearing_enabled; this node has no such mechanism, so
+# an `approach` polygon would report a collision with the vehicle at
+# t = 0 on every cycle for ever. THAT IS WHY THE POLYGONS BELOW ARE
+# RECTANGLES BEYOND THE BODY rather than a swept footprint, and it is
+# also the reason each of them starts at a body EDGE: every zone here
+# is outside the hull, so none of them contains a self-return.
+monitor:
+  package: "nav2_collision_monitor"
+  executable: "collision_monitor"
+  # The name the parameter file has to be addressed to. smoother's rule
+  # and its reason: rclcpp applies nothing from a block addressed to a
+  # node that is not running and says nothing about it, and this node's
+  # package defaults are a 0.3 x 0.3 m box at the origin - which on this
+  # vehicle sits inside the chassis and would fire on the mast rails.
+  node_name: "collision_monitor"
+  params_file: "m5_ver3/collision_monitor.yaml"
+  # How long m5v3.sh waits for it to reach ACTIVE. It is a lifecycle
+  # node with no manager on this track - the same shape as `smoother`,
+  # and driven the same way.
+  active_timeout_s: "30"
+  # AND HOW LONG THE BRINGUP WATCHES ITS LOG AFTERWARDS, which is a
+  # SECOND question and the only one that catches the failure below.
+  #   MEASURED 2026-08-27, with the `lasertf` child absent: the node
+  # activated at t+0.02 s, RELAYED EVERY TWIST for ten seconds, and then
+  # published nothing at all from the moment the first scan it could not
+  # transform arrived - first ERROR at t+9.9 s. tools/navcmd_health.py
+  # ran inside that window and PASSED, truthfully, over a command path
+  # that was cut ten seconds later; the same gate re-run three minutes
+  # afterwards refused. Every child was ALIVE, the node was ACTIVE and
+  # every parameter read back correctly.
+  #   15 s IS THE 9.9 s WITH HALF AGAIN. It is the only bringup cost
+  # this arm carries and it buys the difference between a refusal and a
+  # stack that reports itself healthy with its command path cut.
+  transform_check_s: "15"
+
+  # -------------------- THE NUMBERS THE POLYGONS ARE ------------------
+  # EVERY ONE OF THESE IS MEASURED ON THIS RIG AND
+  # tests/test_collision_monitor_params.py RECOMPUTES EVERY POLYGON IN
+  # collision_monitor.yaml FROM THEM. A polygon edited by hand and not
+  # here is a test failure.
+  geometry:
+    # THE BODY EDGES, off gazebo/forklift_ver3/model.sdf's own convex
+    # hull (evidence_core.sdf_footprint, EVIDENCE_NAV_V3.md 14.3). They
+    # are the REAL hull and NOT the grown one nav2.yaml's costmaps
+    # carry: that growth is F3's LOCALISATION error, +0.54 m along and
+    # +0.11 m across, and this node has no map, no localiser and no
+    # pose. It works in base_link off a live scan, so the only geometry
+    # it is entitled to is the truck's own.
+    fork_tip_x_m: "-1.875"
+    counterweight_x_m: "0.860"
+    half_width_m: "0.559"
+    # AND THE ONE MARGIN THAT IS ADDED TO THE WIDTH, which is the
+    # SCANNER'S and not the vehicle's: 3 sigma of the nav lidar's own
+    # per-ray range noise, 0.02 m in model.sdf. 0.559 + 0.060 = 0.619,
+    # rounded up.
+    lateral_margin_m: "0.061"
+  speeds:
+    # THE TWO SPEEDS THE STOP TABLE WAS MEASURED AT
+    # (EVIDENCE_NAV_V3.md 8), and they are the two bands the velocity
+    # polygons switch between.
+    #   transit 0.300 m/s IS nav2.yaml's own vx_max and is what every
+    #   driven goal on this track runs at; 8's `creep` profile measured
+    #   it stopping in 0.208 m.
+    #   cruise 0.700 m/s is what the COMMAND PATH can deliver - a bench
+    #   publishing a twist, or a future consumer that is not nav2 - and
+    #   8's `straight` profile measured 1.019 m and `speed_limit`
+    #   1.041 m, dead time included.
+    transit_mps: "0.300"
+    cruise_mps: "0.700"
+  stop_m:
+    # THE MEASURED STOPPING DISTANCES, ROUNDED UP. Not v^2/2a: 8
+    # measured 1.019-1.041 m against the ramp's own prediction of
+    # 0.690 m, and the 48 % is DEAD TIME - the truck holds its speed for
+    # about 0.25 s after the zero arrives. A polygon sized on the
+    # arithmetic would be 0.33 m short at cruise.
+    transit: "0.25"
+    cruise: "1.05"
+  slowdown_m:
+    # THE SLOWDOWN ZONE IS THE STOP ZONE PLUS THE DISTANCE IT TAKES TO
+    # GET DOWN TO THE OTHER BAND, so that a vehicle warned at cruise is
+    # already at transit speed by the time it reaches the stop zone -
+    # at which point the velocity polygon has SHRUNK to the transit
+    # rectangle, which is the whole reason this is a velocity polygon
+    # and not a fixed one.
+    #   cruise: 1.05 (the stop zone) + 0.25 s of dead time at 0.700
+    #   (0.175 m) + (0.700^2 - 0.300^2) / (2 x 0.35) = 0.571 m
+    #   = 1.796, rounded up to 1.80.
+    #   transit: there is nothing below 0.300 m/s this converter will
+    #   still deliver - navcmd.creep_speed_mps is the deadband - so the
+    #   transit slowdown zone buys no braking at all. It is a WARNING
+    #   band and it is one stop zone deep again, so the state topic
+    #   says `something is close` a full stopping distance before the
+    #   stop zone is entered.
+    transit: "0.50"
+    cruise: "1.80"
+  # WHAT A SLOWDOWN MULTIPLIES THE COMMAND BY, and it is a ratio between
+  # two numbers this file already holds: transit / cruise = 0.300 /
+  # 0.700 = 0.428571. A cruise command slowed by it IS the transit
+  # ceiling, which is the speed the small polygons are sized for.
+  slowdown_ratio: "0.428571"
+  # HOW MANY SCAN POINTS INSIDE A POLYGON COUNT AS AN OBSTACLE. The nav
+  # lidar puts 811 rays over 270 deg, 0.0058178 rad apart, so a 0.40 m
+  # wide object at 3.50 m subtends 0.114 rad and about 19 rays; at the
+  # stop zone's own 0.25 m from the tips it is hundreds. FOUR is a
+  # quarter of what the smallest interesting object returns at the
+  # furthest interesting range, and it is above any single-ray noise
+  # excursion - the range noise is 0.02 m and moves a ray ALONG its own
+  # bearing, never across it.
+  min_points: "4"
+  # HOW LONG A SOURCE MAY BE SILENT before the monitor treats it as
+  # failed and stops the vehicle. The nav lidar is 15 Hz, so 1.0 s is
+  # fifteen periods - localization.analyse.map_gap_s's own argument, one
+  # sensor over.
+  source_timeout_s: "1.0"
+  # HOW LONG WITHOUT AN INPUT TWIST before it publishes one stop message
+  # of its own. The command path is silent at rest by construction
+  # (topics.cmd_vel_smoothed), so this fires on every idle stack - and
+  # what it publishes is a ZERO, into a converter that is already
+  # holding one. 2.0 s is nav2's own default and nothing here needs it
+  # to be different.
+  stop_pub_timeout_s: "2.0"
+
+  # ------------------- THE DEMONSTRATION'S OBSTACLE -------------------
+  # A BOX SPAWNED INTO THE RUNNING WORLD, through gz-sim's own
+  # /world/<name>/create service, and REMOVED again through /remove. It
+  # is not in warehouse_ver3.sdf and this track does not edit that file
+  # (CONTEXT.md: the floor is referenced, never copied, never edited).
+  obstacle:
+    name: "m5v3_monitor_box"
+    # 2.40 m TALL, AND THE HEIGHT IS THE WHOLE POINT. The nav lidar's
+    # scan plane is z = 1.80 m; a box shorter than that is invisible to
+    # this monitor and the demonstration would measure nothing. Stating
+    # it here is the honest form of the limitation above.
+    size_x_m: "0.60"
+    size_y_m: "0.60"
+    size_z_m: "2.40"
+    # WHERE, and it is on the north ring leg east of the spawn - the
+    # headline route's own corridor, y = +10.00 on the centreline, so a
+    # truck driving east down the leg meets it head on. 8.00 m from the
+    # spawn is far enough that the vehicle is at its commanded speed
+    # before the first polygon reaches the box.
+    x_m: "-9.00"
+    y_m: "10.00"
+    # It is spawned STATIC: a box with mass that the truck could push is
+    # a collision experiment, and this is a monitor experiment.
+    static: true
+
+  # ---------------------- THE DEMONSTRATION ITSELF --------------------
+  # tools/monitor_demo.py's own table. It drives a CONSTANT twist at the
+  # top of the command path - not a goal - because the measurement is
+  # the RATIO of two adjacent streams and a speed that changes for the
+  # controller's own reasons makes that ratio a measurement of nothing.
+  demo:
+    # AT CRUISE AND NOT AT THE TRANSIT CEILING, and the choice is what
+    # makes both actions observable. At 0.300 m/s the slowdown zone is
+    # 0.50 m deep and the slowdown would take the command to 0.129 m/s;
+    # at 0.700 m/s the zone is 1.80 m and the slowdown lands exactly on
+    # the transit ceiling, which is the speed the small polygons are
+    # sized for. It is written as a SPEED and monitor_demo.py adds the
+    # sign: forks-first is NEGATIVE linear.x on this vehicle.
+    speed_mps: "0.700"
+    # HOW LONG THE BOX STANDS. The fork tips start 5.825 m from its near
+    # face and the drive covers that in about 8.3 s, so 20 s leaves the
+    # vehicle standing in the stop zone for about ten seconds - which is
+    # what makes `held` distinguishable from `stopped once`.
+    approach_s: "20.0"
+    # AND HOW LONG THE SAME COMMAND RUNS AFTER IT IS REMOVED. A guard
+    # that cannot be released is worse than none, so the release is a
+    # measured phase and not an assumption. 10 s at 0.700 m/s is 7 m,
+    # which the north ring leg has east of the box.
+    release_s: "10.0"
+    # Standing still before the drive and after the standing zero. It is
+    # what gives the relay identity check a phase with nothing in any
+    # zone, and what lets the truck actually stop before the recording
+    # ends (1.02 m and 2.07 s from cruise, EVIDENCE_NAV_V3.md 8).
+    settle_s: "5.0"
+    # THE PUBLISH RATE, and it is the controller's own 20 Hz
+    # (nav2.yaml controller_frequency) rather than a number of this
+    # bench's choosing: what this demonstration stands in for is a
+    # controller publishing at that rate, and the smoother's own
+    # behaviour depends on how often it is fed.
+    rate_hz: "20.0"
+
 # ============================== TWIST ROUTE =============================
 # THE COMMAND PATH'S OWN BENCH, F4 Task 1, read by tools/drive_twist.py.
 #
@@ -3865,6 +4131,60 @@ nav:
       repeat: "1"
       note: "the pick aisle's EAST end, on the ring's east leg"
     # ------------------------------------------------------------------
+    # AND SINCE F4 TASK 3, TWO MORE - BOTH ROAD-GRAPH NODES, BOTH ADDED
+    # FOR THE DRIVING CASES BELOW rather than for the acceptance set.
+    # `repeat: 0` and `case_only: true` on each: what has to be repeated
+    # is a CASE and nav.cases owns that count, so a goal that is only
+    # ever reached through a case carries no repeat of its own.
+    #   `case_only` IS A FLAG AND NOT AN INFERENCE, for `route_node:
+    # false`'s reason one row down. `repeat: 0` alone would be
+    # indistinguishable from a goal somebody forgot to count, and
+    # tests/test_nav2_params.py checks BOTH directions of this flag too:
+    # a case_only goal must be named by at least one case and must carry
+    # repeat 0, and a goal that is NOT case_only must carry repeat >= 1.
+    # ------------------------------------------------------------------
+    # THE STATION CLASS, AND IT IS A REAL STATION. S5 / PICK-NE-1 in
+    # m6/ipc/stations.py, world (+7.00, +4.25), declared arrive_m 0.25 -
+    # entered SOUTHWARD off the ring band through a 4.00 m bay mouth at
+    # y = +6.00, on a 4.80 m spur from the ring centreline. It is a node
+    # of the road graph (route.py links (7.0, 4.25) to (7.0, 10.0)) and
+    # tests/test_nav2_params.py checks that, like every other goal here.
+    #   IT IS AN APPROACH AND NOT A DOCK. EVIDENCE_NAV_V3.md 16.6
+    #   measured that the (position, heading) pair is not reachable in
+    #   ONE approach on this machine, and the goal checker this stack
+    #   ships is position-only at 0.60 m. So what this goal measures is
+    #   the APPROACH: where the truck ends and which way it is pointed
+    #   when a 0.60 m box latches on a 4.80 m spur. Docking precision is
+    #   F5's and inherits the numbers, not the tolerance.
+    #   THE TRAVEL HEADING IS SOUTH because the bays face the ring
+    #   (stations.py, revision B): a truck enters forks-first off the
+    #   8.00 m ring band, which is the geometry m6 rebuilt the floor to
+    #   get. -1.5707963 is stations.py's own _S.
+    station_s5:
+      x: "7.00"
+      y: "4.25"
+      travel_yaw_rad: "-1.5707963"
+      repeat: "0"
+      case_only: true
+      note: "S5 / PICK-NE-1 - the station class, entered off the ring"
+    # AND THE WAY BACK OUT OF IT, WHICH IS THE ONE THAT CANNOT BE DRIVEN
+    # FORKS-FIRST. (7.00, +10.00) is the ring junction directly above S5
+    # and the only node the spur connects to. A truck standing in the
+    # bay has its forks pointed SOUTH at a wall 4.00 m deep and its
+    # minimum turning radius is 1.25 m: it cannot turn round in there,
+    # so the first segment of any route out is COUNTERWEIGHT-FIRST -
+    # nav2's own FORWARD - and the leg that follows it, eastward along
+    # the ring, is forks-first again. The direction change between them
+    # is a Reeds-Shepp CUSP, which is what nav.cases.reverse_out exists
+    # to drive and what nav2 issue #5714 is about (F4 constraint 19).
+    ring_s5_junction:
+      x: "7.00"
+      y: "10.00"
+      travel_yaw_rad: "0.0"
+      repeat: "0"
+      case_only: true
+      note: "the ring junction above S5 - the way OUT of the bay"
+    # ------------------------------------------------------------------
     # AND ONE GOAL THAT CANNOT BE REACHED, WHICH IS THE ONLY ONE OF THESE
     # THAT IS NOT A PLACE TO DRIVE TO. F4 Task 2.5's fail-fast has to be
     # demonstrated in BOTH directions and a guard that has only ever been
@@ -3899,6 +4219,101 @@ nav:
   # `analyse` prints it beside the number of sessions it actually found,
   # so a repeatability claim cannot be made over one run by accident.
   default_goal: "spine_north"
+
+  # -------------------------- THE CASE TABLE ---------------------------
+  # F4 TASK 3. A GOAL IS A POSE; A CASE IS WHAT AN OPERATOR ASKS FOR.
+  # nav.goals above is the acceptance set - one pose, sent once, scored
+  # at rest - and every figure in EVIDENCE_NAV_V3.md 16 is off it. It
+  # does not exercise three things m6's autopilot cases did, and this
+  # table is those three plus the one the acceptance set left at 2 of 3:
+  #
+  #   a goal that CHANGES while the vehicle is driving       (preempt)
+  #   an approach into a STATION-class pose                   (approach)
+  #   a leg the vehicle can only drive COUNTERWEIGHT-FIRST    (#5714)
+  #   the leg that is marginally stable, repeated             (residual)
+  #
+  # A CASE IS ONE OR TWO GOALS AND ONE RULE FOR THE SECOND. `goal` is
+  # sent first; if `then` is present, `when` says how the second arrives:
+  #
+  #   when: preempt   the second goal is sent WHILE the first is still
+  #                   running, the moment the BELIEVED distance to the
+  #                   first falls below preempt_at_m. navigate_to_pose
+  #                   is a single-goal action server, so this is a real
+  #                   preemption: nav2 aborts the running goal and takes
+  #                   the new one. What that costs at the terminals -
+  #                   whether the truck stops, how long the command
+  #                   stream is interrupted, how long until a plan to
+  #                   the new goal exists - is the measurement.
+  #   when: after     the second goal is sent once the first has
+  #                   RETURNED and the vehicle has settled. It is not a
+  #                   preemption; it is a second errand from wherever
+  #                   the first one ended, which is the only way this
+  #                   bench can start a run from a pose that is not the
+  #                   spawn.
+  #
+  # THE TRIGGER IS THE BELIEVED POSE AND NOT THE GROUND TRUTH, and that
+  # is deliberate even though this is a bench and not a controller: the
+  # pose the trigger fires on is map -> base_link, the same one the goal
+  # checker and the no-progress watchdog see, so the three cannot
+  # disagree about where the vehicle was. Ground truth stays an
+  # instrument (F2 constraint 13).
+  cases:
+    # THE HEADLINE, AND IT IS THE ONE REPEATED THREE TIMES. A truck is
+    # sent down the ring's north leg to the spine junction and re-tasked
+    # half way there to the pick aisle's east end - the ordinary fleet
+    # event that nav.goals cannot produce, because every goal in it is
+    # sent to a standing vehicle.
+    #   BOTH ENDS ARE KNOWN GROUND: spine_north arrived 6 of 6 and
+    #   aisle_end 2 of 2 in 16.5, so what this case adds over them is
+    #   the SWITCH and nothing else.
+    #   8.00 m OF REMAINING DISTANCE is a little under half of the
+    #   17.00 m first leg. It is chosen to fire while the vehicle is at
+    #   the transit ceiling and well outside GoalCritic's 1.4 m
+    #   threshold_to_consider, so the preemption lands in the middle of
+    #   a transit rather than in an endgame - which would be a different
+    #   measurement wearing this one's name.
+    aisle_transit:
+      goal: "spine_north"
+      then: "aisle_end"
+      when: "preempt"
+      preempt_at_m: "8.00"
+      repeat: "3"
+      note: "aisle transit, re-tasked mid-path (the HEADLINE case)"
+    # THE APPROACH. One goal, the station class, scored the way 16.6
+    # scores an approach: where the 0.60 m box latched, what the heading
+    # was there, and what the whole corridor table would have cost.
+    station_approach:
+      goal: "station_s5"
+      repeat: "1"
+      note: "forks-first into S5 - approach semantics, not docking"
+    # THE REVERSE LEG, AND THE ONLY WAY TO GET ONE ON THIS FLOOR IS TO
+    # PARK THE TRUCK FIRST. A Reeds-Shepp cusp needs a start pose from
+    # which the goal cannot be reached in one direction, and from the
+    # spawn - the middle of an 8.00 m corridor - there is no such goal
+    # on the road graph: the planner always has room to arc. So the
+    # first leg drives INTO the bay and the second asks for the ring
+    # junction it came from, with the truck's forks 4.00 m from a back
+    # panel and its turning radius 1.25 m.
+    #   IF THE PLANNER STILL REFUSES TO PRODUCE A CUSP, THAT IS THE
+    #   FINDING AND IT IS RECORDED AS ONE. `drive_goal.py probe` asks
+    #   the planner alone, commands no motion, and reports the cusp
+    #   count of the path it would drive - which is how this pair was
+    #   chosen rather than guessed.
+    reverse_out:
+      goal: "station_s5"
+      then: "ring_s5_junction"
+      when: "after"
+      repeat: "1"
+      note: "into the bay, then OUT of it - the #5714 reverse leg"
+    # THE RESIDUAL. 16.4c left ring_corner at 2 of 3 with the mechanism
+    # UNCONFIRMED and two levers deliberately unpulled. Three more runs
+    # on the same parameter tree take that sample from 3 to 6, which is
+    # what a bimodal outcome needs before anything is changed on account
+    # of it.
+    ring_stress:
+      goal: "ring_corner"
+      repeat: "3"
+      note: "the 37 m leg, x3 - 16.4c's residual gets its sample"
 
   # ------------------------- THE DRIVEN RUN ----------------------------
   # How long ONE navigate_to_pose may take before the bench cancels it.

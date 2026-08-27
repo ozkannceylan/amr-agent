@@ -160,6 +160,20 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 #     is an ordinary word. `lifecycle_manager` on its own IS ordinary
 #     enough to nominate a stranger, so the manager gets
 #     `nav2_lifecycle_manager` - which is on both of its lines too.
+#   AND THE LAST IS F4 TASK 3's COLLISION MONITOR, which is a flag of
+#   its own (--monitor) and is listed unconditionally with the rest.
+#   `collision_monitor` is the EXECUTABLE, which is a substring of both
+#   of its command lines (`ros2 run nav2_collision_monitor
+#   collision_monitor` and the node's own
+#   /opt/ros/jazzy/lib/nav2_collision_monitor/collision_monitor) and is
+#   not an ordinary word.
+#     AND ORPHANING THIS ONE IS THE WORST OF THE LOT, WHICH IS WHY THE
+#     PATTERN GOES IN WITH THE SPAWN AND NOT AFTER IT FIRST BITES. A
+#     stale controller_server publishes a twist; a stale
+#     collision_monitor publishes a twist ON THE TOPIC THE CONVERTER
+#     READS on the --monitor arm, computed off a stale scan out of a
+#     world that no longer exists - so the next stack's truck would be
+#     taking commands from a guard watching a floor that is gone.
 M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py"
                "static_transform_publisher" "ekf_node"
                "rf2o_laser_odometry_node" "rf2o_twist.py"
@@ -168,7 +182,8 @@ M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py"
                "localization_slam_toolbox_node"
                "velocity_smoother" "cmd_vel_tricycle.py"
                "planner_server" "controller_server" "bt_navigator"
-               "behavior_server" "nav2_lifecycle_manager")
+               "behavior_server" "nav2_lifecycle_manager"
+               "collision_monitor")
 
 # The same list as one pgrep alternation, for the callers that want a
 # single pattern rather than a loop.

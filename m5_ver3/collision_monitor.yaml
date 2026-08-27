@@ -1,0 +1,342 @@
+# m5_ver3/collision_monitor.yaml - what the COLLISION MONITOR watches,
+# what it does about it, and what it is NOT. F4 Task 3.
+#
+# READ ONLY BY `--monitor`. Without that flag this file is not opened,
+# no such node exists, and the command path is byte for byte the one
+# EVIDENCE_NAV_V3.md sections 3-10 measured with no Nav2 in the room.
+#
+# =======================================================================
+# THE DISCLAIMER, VERBATIM, AND IT IS THE FIRST THING IN THE FILE
+# =======================================================================
+# nav2's own documentation for this node, quoted and not paraphrased:
+#
+#   "does not provide hard real-time safety certifications"
+#
+# It does not replace a safety-rated PLC. It complements the F-PLC; it is
+# not the F-PLC. Protective stop, e-stop and safe torque off are onboard
+# and hardwired in the plant this models, and no message on any topic
+# below can trigger or release one.
+#   WHAT THIS NODE ACTUALLY IS: a ROS node that reads a 15 Hz LaserScan
+# over a DDS graph in a simulator and multiplies a Twist by a number. No
+# diverse channel, no self-test, no latching fault, no performance level,
+# no certified reaction time. Every figure this track publishes about it
+# is a measurement of a CONVENIENCE function, and EVIDENCE_NAV_V3.md 19
+# says so in the same words.
+#
+# =======================================================================
+# THE SPLIT, WHICH IS ekf.yaml's SEVENTH TIME
+# =======================================================================
+# config.yaml holds the ADDRESSES, the frames, the lifecycle facts and -
+# because they are DERIVATIONS and not tuning - every number the polygons
+# below are computed from (config.yaml monitor:). This file holds what is
+# WATCHED and what is DONE about it. No number is in both:
+# tests/test_collision_monitor_params.py recomputes every vertex here
+# from config.yaml's `monitor.geometry`, `monitor.stop_m` and
+# `monitor.slowdown_m` and fails on a disagreement over a micrometre, so
+# a polygon edited here and not there is a test failure rather than a
+# quiet divergence.
+#   THE TOPICS ARE PASSED ON THE COMMAND LINE and are deliberately absent
+# from this file, which is the smoother's own rule: an address that
+# decides which chain this node sits in is m5v3.sh's to hand over, off
+# config.yaml's topics:, where the converter reads the other end of it.
+#
+# =======================================================================
+# WHERE THE POLYGONS COME FROM
+# =======================================================================
+# THE BODY, off gazebo/forklift_ver3/model.sdf's own convex hull
+# (evidence_core.sdf_footprint, EVIDENCE_NAV_V3.md 14.3):
+#
+#   fork tips        x = -1.875     (a VISUAL, and the tines count)
+#   counterweight    x = +0.860
+#   half width       y = +-0.559    (safety_scanner_left's housing corner)
+#
+# AND IT IS THE REAL HULL AND NOT THE GROWN ONE nav2.yaml's costmaps
+# carry. That growth is +0.54 m along and +0.11 m across, and it is F3's
+# LOCALISATION error: it belongs to a costmap that places a truck on a
+# map through an estimated pose. This node has no map, no localiser and
+# no pose - it transforms scan points into base_link and asks whether
+# they are inside a rectangle - so the only geometry it is entitled to is
+# the truck's own. Adding a localisation margin here would be an error
+# budget applied twice, in a frame where it does not exist.
+#
+# THE ONE MARGIN THAT IS ADDED IS THE SCANNER'S: 3 sigma of the nav
+# lidar's own per-ray range noise, 0.02 m in model.sdf, so
+# 0.559 + 0.061 = 0.620 m of half width on every polygon here.
+#
+# THE DEPTHS ARE THE MEASURED STOPPING DISTANCES AND NOT v^2/2a.
+# EVIDENCE_NAV_V3.md 8 measured 1.019 m and 1.041 m from 0.700 m/s
+# against the ramp's own prediction of 0.690 m - the 48 % is DEAD TIME,
+# about 0.25 s at speed after the zero arrives - and 0.208 m from
+# 0.300 m/s. Rounded up: 1.05 m and 0.25 m.
+#
+# =======================================================================
+# WHY EVERY ZONE STARTS AT A BODY EDGE, AND WHY `approach` IS NOT USED
+# =======================================================================
+# THE SCANNER SEES ITS OWN TRUCK. EVIDENCE_NAV_V3.md 14.4 measured it:
+# 50 of 811 rays land on nav_lidar_3d's housing at base_link
+# (+0.026, -0.019) and on the two mast rails at (-0.747, +0.285) and
+# (-0.746, -0.302). The local costmap's obstacle layer paints its own
+# footprint FREE before the layers combine (`footprint_clearing_enabled`)
+# and is honest because of it; THIS NODE HAS NO SUCH MECHANISM. A polygon
+# that enclosed the vehicle would contain three of its own parts and
+# would report an obstacle on every cycle for ever.
+#   SO EVERY RECTANGLE BELOW BEGINS OUTSIDE THE HULL - at x = -1.875 in
+# front of the tines or x = +0.860 behind the counterweight - and none of
+# them contains a self-return. That is a constraint on the design and it
+# is stated here rather than discovered in a log.
+#   AND IT IS WHY `action_type: approach` IS ABSENT. That type projects
+# the ROBOT'S OWN FOOTPRINT forward along the commanded velocity and is
+# the only type that follows a TURN correctly. On this vehicle it would
+# find the mast rails inside the footprint at t = 0 on every tick. The
+# consequence is stated and not solved: THESE RECTANGLES DO NOT COVER THE
+# SWEPT PATH IN A TURN. At the minimum turning radius of 1.25 m the fork
+# tips move 0.025 m sideways over the 0.25 m transit stop zone - inside
+# the 0.061 m margin - but 0.42 m over the 1.05 m cruise zone, which is
+# outside it. A monitor that has to guard a cornering vehicle at cruise
+# needs `approach` and therefore needs a self-occlusion mask on the scan
+# first. EVIDENCE_NAV_V3.md 19.6 is where that sits as named and open.
+#
+# =======================================================================
+# WHY A VELOCITY POLYGON RATHER THAN A FIXED ONE
+# =======================================================================
+# BECAUSE THE ZONE HAS TO SHRINK WHEN THE COMMANDER ASKS FOR LESS, or the
+# truck stops a metre short of everything it approaches. A fixed zone
+# sized for cruise (1.05 m beyond the tines) would stop a transit-speed
+# vehicle five times its own stopping distance away and would make a
+# 4.00 m station bay unenterable; one sized for transit would be 0.80 m
+# short at cruise. The sub-polygons below switch on linear.x, so the
+# guard is the size of the stop the COMMANDED speed is committed to.
+#   AND IT SWITCHES ON THE INCOMING COMMAND, NOT ON THE OUTGOING ONE,
+# WHICH IS A DISTINCTION WITH A CONSEQUENCE. nav2's VelocityPolygon is
+# handed `cmd_vel_in` - the twist that arrived - so this node's OWN
+# slowdown does not shrink its own zone: a commander holding 0.700 m/s
+# through a slowdown keeps the 1.05 m stop zone even while the vehicle
+# is being run at 0.300. What shrinks the zone is a COMMANDER that asks
+# for less, which is what nav2's controller does when it plans slower.
+# EVIDENCE_NAV_V3.md 19.4 measures it happening, because the
+# demonstration bench is exactly the commander that does not back off.
+#   THE SIGN IS THE VEHICLE'S AND NOT A CONVENTION. Forks-first is
+# NEGATIVE linear.x - nav2's REVERSE, and this truck's ordinary direction
+# of travel, because the forks are at model -x. So the -x rectangles
+# carry the negative bands and the +x rectangles the positive ones, and
+# getting that backwards would guard the counterweight while the tines
+# led.
+#   THE ORDER MATTERS AND IS NOT ALPHABETICAL. VelocityPolygon takes the
+# FIRST sub-polygon whose band contains the command, and the bands share
+# their endpoints (-0.300 is in both `forks_transit` and `forks_cruise`),
+# so the SMALL ones are listed first: a command at exactly the transit
+# ceiling - which is every driven goal on this track - must get the
+# transit rectangle. `stopped` is last and covers the whole range, which
+# is what nav2 asks a fallback to do.
+#
+# =======================================================================
+# WHAT IT CANNOT SEE, AND IT IS THE LARGEST LIMITATION HERE
+# =======================================================================
+# THE SCAN PLANE IS z = 1.80 m. The two safety scanners at z = 0.15 m
+# exist in model.sdf and are NOT bridged to ROS. At 1.80 m a pallet, a
+# dropped load and a person are all invisible. This node's honest scope
+# is STRUCTURE ABOVE 1.80 m, the demonstration's own obstacle is 2.40 m
+# tall for that reason, and none of that is a safety argument - see the
+# top of this file.
+
+collision_monitor:
+  ros__parameters:
+    # THE STACK FACT. There is a bridged /clock and everything on this
+    # track runs on the plant's time.
+    use_sim_time: true
+    # AND THE LIFECYCLE FACT, WHICH IS smoother.yaml's OWN AND FOR THE
+    # SAME REASON. There is no nav2 lifecycle manager over this node -
+    # the only one on this track is --nav's, and its bond is switched
+    # off at both ends because a heartbeat with a deadline starves at
+    # the real-time factors a simulation reaches. So the node brings
+    # itself up, and m5v3.sh's monitor_active() only ASKS whether it
+    # did: left in UNCONFIGURED it subscribes to nothing and publishes
+    # nothing, and on this arm that is not a missing guard, it is a CUT
+    # COMMAND PATH.
+    #   MEASURED ON THIS RIG 2026-08-27: without this line the node sits
+    #   in `unconfigured` for the whole 30 s budget and the bringup
+    #   refuses by name. That refusal is what found it.
+    autostart_node: true
+
+    # ---------------------------- FRAMES ---------------------------
+    # base_link IS THE FRAME THE POLYGONS ARE WRITTEN IN and it is the
+    # frame model.sdf's hull is measured in, which is the only reason
+    # the vertices below can be read off a datasheet.
+    base_frame_id: "base_link"
+    # AND odom IS WHAT `base_shift_correction` NEEDS. A scan is stamped
+    # when it was taken; by the time it is processed the vehicle has
+    # moved, and at 0.700 m/s a 15 Hz scan period is 0.047 m. With this
+    # on, the monitor carries each source's points forward through
+    # odom -> base_link to the moment of processing. The estimator owns
+    # that edge (EVIDENCE_FUSION.md), the localiser does not appear
+    # here at all, and this node therefore works identically on every
+    # localisation arm and on none.
+    odom_frame_id: "odom"
+    base_shift_correction: true
+    # HOW STALE A TRANSFORM MAY BE. The estimator publishes
+    # odom -> base_link at 50 Hz; 0.30 s is fifteen periods, which is
+    # the same fifteen-period rule source_timeout below is sized by.
+    transform_tolerance: 0.3
+
+    # -------------------------- THE STREAMS -------------------------
+    # HOW LONG A SOURCE MAY BE SILENT before the monitor treats it as
+    # failed and stops the vehicle. config.yaml monitor.source_timeout_s
+    # owns the number and the argument: the nav lidar is 15 Hz, so 1.0 s
+    # is fifteen periods.
+    source_timeout: 1.0
+    # HOW LONG WITHOUT AN INPUT TWIST before it publishes one stop of
+    # its own. This path is SILENT at rest by construction, so this
+    # fires on every idle stack - and what it publishes is a zero into a
+    # converter that is already holding one (config.yaml
+    # monitor.stop_pub_timeout_s).
+    stop_pub_timeout: 2.0
+    # THE MESSAGE TYPE ON BOTH SIDES, AND IT IS FALSE ON PURPOSE.
+    # EVIDENCE_NAV_V3.md 6.1 fact 1 MEASURED this chain to be unstamped
+    # geometry_msgs/Twist end to end - the controller's
+    # enable_stamped_cmd_vel is false, the smoother's is false, and
+    # nodes/cmd_vel_tricycle.py subscribes a Twist. A node inserted into
+    # that chain publishing TwistStamped would be a publisher nothing
+    # subscribes to, on a topic that would look alive from `ros2 topic
+    # list` and would deliver nothing to the terminals.
+    enable_stamped_cmd_vel: false
+
+    # -------------------------- THE POLYGONS ------------------------
+    # TWO SETS, AND THE ORDER HERE IS NOT THE ONE THAT DECIDES. nav2
+    # evaluates every polygon each cycle and takes the most restrictive
+    # action any of them asks for, so a point in both zones stops the
+    # vehicle rather than slowing it.
+    polygons: ["MonitorSlowdown", "MonitorStop"]
+
+    # ---------------------------------------------------------------
+    # THE SLOWDOWN SET. Depths: config.yaml monitor.slowdown_m.
+    #   cruise 1.80 m = the 1.05 m stop zone + 0.25 s of dead time at
+    #   0.700 m/s (0.175 m) + (0.700^2 - 0.300^2) / (2 x 0.35) =
+    #   0.571 m, so a vehicle warned at the edge of this zone is at the
+    #   transit ceiling by the time it reaches the stop zone - at which
+    #   point the velocity polygon has SHRUNK to the 0.25 m rectangle.
+    #   That handover is the whole argument for a velocity polygon.
+    #   transit 0.50 m: there is nothing below 0.300 m/s this converter
+    #   will still deliver, so this band buys no braking. It is a
+    #   WARNING and it is one stop zone deep again.
+    # ---------------------------------------------------------------
+    MonitorSlowdown:
+      type: "velocity_polygon"
+      action_type: "slowdown"
+      # WHAT A SLOWDOWN MULTIPLIES THE COMMAND BY, and it is a ratio
+      # between two measured speeds rather than a chosen fraction:
+      # 0.300 / 0.700, the transit ceiling over the command path's own
+      # cruise. A cruise command slowed by it IS the transit ceiling,
+      # which is the speed the small polygons are sized for.
+      slowdown_ratio: 0.428571
+      min_points: 4
+      visualize: true
+      polygon_pub_topic: "polygon_slowdown"
+      enabled: true
+      holonomic: false
+      velocity_polygons: ["forks_transit", "cw_transit",
+                          "forks_cruise", "cw_cruise", "stopped"]
+      forks_transit:
+        points: "[[-1.875, 0.620], [-2.375, 0.620], [-2.375, -0.620], [-1.875, -0.620]]"
+        linear_min: -0.300
+        linear_max: 0.0
+        theta_min: -3.15
+        theta_max: 3.15
+      cw_transit:
+        points: "[[0.860, 0.620], [1.360, 0.620], [1.360, -0.620], [0.860, -0.620]]"
+        linear_min: 0.0
+        linear_max: 0.300
+        theta_min: -3.15
+        theta_max: 3.15
+      forks_cruise:
+        points: "[[-1.875, 0.620], [-3.675, 0.620], [-3.675, -0.620], [-1.875, -0.620]]"
+        linear_min: -1.000
+        linear_max: -0.300
+        theta_min: -3.15
+        theta_max: 3.15
+      cw_cruise:
+        points: "[[0.860, 0.620], [2.660, 0.620], [2.660, -0.620], [0.860, -0.620]]"
+        linear_min: 0.300
+        linear_max: 1.000
+        theta_min: -3.15
+        theta_max: 3.15
+      # THE FALLBACK, AND IT IS THE FRONT TRANSIT RECTANGLE RATHER THAN
+      # A RING ROUND THE TRUCK. nav2's own example wraps the robot at
+      # this rung; here that polygon would contain the mast rails and
+      # the 3D lidar housing and would fire for ever. A stopped vehicle
+      # has no direction of travel to guard, and the honest form of
+      # that is to guard the one it had.
+      stopped:
+        points: "[[-1.875, 0.620], [-2.375, 0.620], [-2.375, -0.620], [-1.875, -0.620]]"
+        linear_min: -1.000
+        linear_max: 1.000
+        theta_min: -3.15
+        theta_max: 3.15
+
+    # ---------------------------------------------------------------
+    # THE STOP SET. Depths: config.yaml monitor.stop_m - the MEASURED
+    # stopping distances rounded up, 1.05 m from 0.700 m/s and 0.25 m
+    # from 0.300 m/s (EVIDENCE_NAV_V3.md 8).
+    #   THE TRANSIT MARGIN IS 0.042 m AND THAT IS DELIBERATE. 0.25 m of
+    # zone against a measured 0.208 m of stopping distance leaves four
+    # centimetres, and it is four centimetres because a deeper zone
+    # cannot be entered: a 4.00 m station bay is 2.60 m from mouth to
+    # back panel and a truck that stopped 1.05 m short of every wall
+    # could not dock at all. The demonstration measures the gap this
+    # actually leaves rather than asserting it.
+    # ---------------------------------------------------------------
+    MonitorStop:
+      type: "velocity_polygon"
+      action_type: "stop"
+      min_points: 4
+      visualize: true
+      polygon_pub_topic: "polygon_stop"
+      enabled: true
+      holonomic: false
+      velocity_polygons: ["forks_transit", "cw_transit",
+                          "forks_cruise", "cw_cruise", "stopped"]
+      forks_transit:
+        points: "[[-1.875, 0.620], [-2.125, 0.620], [-2.125, -0.620], [-1.875, -0.620]]"
+        linear_min: -0.300
+        linear_max: 0.0
+        theta_min: -3.15
+        theta_max: 3.15
+      cw_transit:
+        points: "[[0.860, 0.620], [1.110, 0.620], [1.110, -0.620], [0.860, -0.620]]"
+        linear_min: 0.0
+        linear_max: 0.300
+        theta_min: -3.15
+        theta_max: 3.15
+      forks_cruise:
+        points: "[[-1.875, 0.620], [-2.925, 0.620], [-2.925, -0.620], [-1.875, -0.620]]"
+        linear_min: -1.000
+        linear_max: -0.300
+        theta_min: -3.15
+        theta_max: 3.15
+      cw_cruise:
+        points: "[[0.860, 0.620], [1.910, 0.620], [1.910, -0.620], [0.860, -0.620]]"
+        linear_min: 0.300
+        linear_max: 1.000
+        theta_min: -3.15
+        theta_max: 3.15
+      stopped:
+        points: "[[-1.875, 0.620], [-2.125, 0.620], [-2.125, -0.620], [-1.875, -0.620]]"
+        linear_min: -1.000
+        linear_max: 1.000
+        theta_min: -3.15
+        theta_max: 3.15
+
+    # -------------------------- THE SOURCE --------------------------
+    # ONE, AND IT IS THE ONLY PERCEPTION BRIDGED ON THIS TRACK. The nav
+    # lidar, 811 rays over 270 deg at 15 Hz, mounted at z = 1.80 m. Its
+    # ADDRESS is passed on the command line off config.yaml
+    # topics.scan_nav, for the reason at the top of this file; what is
+    # here is that it exists and that it is a `scan`.
+    #   THE TWO SAFETY SCANNERS ARE NOT HERE BECAUSE THEY ARE NOT
+    #   BRIDGED. They sit at z = 0.15 m in model.sdf, which is the
+    #   height at which a pallet or a person is visible, and no ROS
+    #   consumer has ever subscribed to them on this track. Naming them
+    #   here would be a claim that this node watches the floor.
+    observation_sources: ["scan"]
+    scan:
+      type: "scan"
+      enabled: true

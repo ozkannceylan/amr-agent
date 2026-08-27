@@ -935,7 +935,74 @@ def test_the_default_goal_is_one_of_them_and_is_the_repeated_one(cfg):
             # the evidence set - test_a_goal_marked_NOT_a_route_node...
             # is what holds it to `repeat: 0`.
             continue
+        if goal.get("case_only") is True:
+            # F4 Task 3. A goal reached only through nav.cases carries no
+            # repeat of its own, because the CASE owns that count - and
+            # the two tests below hold both directions of the flag.
+            continue
         assert int(goal["repeat"]) == 1
+
+
+def test_a_case_only_goal_carries_no_repeat_and_IS_named_by_a_case(cfg):
+    # BOTH DIRECTIONS, which is `route_node: false`'s own rule one row
+    # over. A goal flagged case_only that no case names is a pose nothing
+    # will ever drive; a goal a case names that is NOT flagged would be
+    # counted twice - once by nav.goals' repeat and once by the case's.
+    goals = cfg["nav"]["goals"]
+    cases = cfg["nav"]["cases"]
+    named = set()
+    for case in cases.values():
+        named.add(case["goal"])
+        if case.get("then"):
+            named.add(case["then"])
+    for name, goal in goals.items():
+        if goal.get("case_only") is True:
+            assert int(goal["repeat"]) == 0, name
+            assert name in named, (
+                "{} is flagged case_only and no case names it".format(name))
+
+
+def test_every_case_names_goals_that_exist_and_a_rule_for_the_second(cfg):
+    goals = cfg["nav"]["goals"]
+    cases = cfg["nav"]["cases"]
+    assert cases, "F4 Task 3's case table is not optional"
+    for name, case in cases.items():
+        assert case["goal"] in goals, name
+        assert int(case["repeat"]) >= 1, name
+        assert case.get("note"), name
+        if case.get("then"):
+            assert case["then"] in goals, name
+            assert case.get("when") in ("preempt", "after"), name
+            if case["when"] == "preempt":
+                # a preemption with no trigger never fires
+                assert float(case["preempt_at_m"]) > 0.0, name
+        else:
+            assert "when" not in case, name
+            assert "preempt_at_m" not in case, name
+
+
+def test_the_preempt_trigger_fires_in_a_TRANSIT_and_not_in_an_endgame(
+        cfg, controller):
+    # EVIDENCE_NAV_V3.md 16.6: inside GoalCritic's threshold_to_consider
+    # the path critics have handed over to a point attraction, and a
+    # preemption landing there would be a measurement of an endgame
+    # wearing a transit's name. The trigger has to be well outside it.
+    threshold = float(controller["GoalCritic"]["threshold_to_consider"])
+    for name, case in cfg["nav"]["cases"].items():
+        if case.get("when") != "preempt":
+            continue
+        trigger = float(case["preempt_at_m"])
+        assert trigger > 2.0 * threshold, (
+            "{}: the preempt trigger {} m is inside twice GoalCritic's "
+            "{} m".format(name, trigger, threshold))
+        # and it has to be inside the leg, or it fires before the run
+        # has started
+        goal = cfg["nav"]["goals"][case["goal"]]
+        leg = math.hypot(float(goal["x"]) - float(cfg["vehicle"]["spawn"]["x"]),
+                         float(goal["y"]) - float(cfg["vehicle"]["spawn"]["y"]))
+        assert trigger < leg, (
+            "{}: the trigger {} m is beyond the {:.2f} m leg".format(
+                name, trigger, leg))
 
 
 def test_no_two_goals_are_the_same_pose(cfg):

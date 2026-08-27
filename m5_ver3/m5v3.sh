@@ -221,6 +221,30 @@ LOCALIZER=""
 #   them.
 NAV=false
 
+# --monitor: THE COLLISION MONITOR, F4 TASK 3, AND IT IS THE COMMAND
+# PATH'S OPTIONAL ARM RATHER THAN THE NAV ARM'S. It subscribes a Twist
+# and a LaserScan and publishes a Twist: no planner, no costmap, no goal
+# and no map are in it, so tying it to --nav would be a dependency claim
+# that is not true - and it would make the honest open-loop
+# demonstration impossible, because that one wants the command path with
+# NO Nav2 in the room, which is F4 Task 1's own rule.
+#   IT IS OFF BY DEFAULT AND THE REASON IS THE EVIDENCE'S.
+#   EVIDENCE_NAV_V3.md 16.5's acceptance set and 17's driving cases go
+#   through a command path with nothing inserted in it; a monitor that
+#   went up on every --nav bringup would put a fourth node in that path
+#   and every arrival figure on this track would become a figure about a
+#   different line. --rf2o and --fuse are the precedent: an optional
+#   arm, off, with the measurement that says why.
+#   ITS LABEL IS ITS OWN LINE (monitor=) for nav='s reason one layer
+#   down: it is an independent question, both answers are legitimate
+#   runs, and a session that cannot say whether a guard was in the
+#   command path is a row that would sit in the wrong table.
+#   NOTHING HERE IS A SAFETY FUNCTION. nav2's own words for this node,
+#   verbatim: it "does not provide hard real-time safety
+#   certifications". It does not replace a safety-rated PLC. It
+#   complements the F-PLC; it is not the F-PLC.
+MONITOR=false
+
 # THIS SCRIPT'S OWN REQUIRED KEYS, on top of the isolation and ROS ones
 # _common.sh checks for every script on this track. Each is refused by its
 # DOTTED name if the file has been reorganised under it.
@@ -251,6 +275,7 @@ REQUIRED_KEYS=(
     topics.initialpose topics.map
     topics.steer_cmd topics.traction_cmd
     topics.cmd_vel topics.cmd_vel_smoothed topics.speed_limit
+    topics.cmd_vel_monitored topics.collision_monitor_state
     topics.navcmd_status
     vehicle.steer_limit_rad vehicle.steer_rate_limit_radps
     navcmd.accel_mps2 navcmd.steer_command_limit_rad
@@ -275,6 +300,9 @@ REQUIRED_KEYS=(
     fuse.optimization_frequency_hz fuse.transaction_timeout_s
     smoother.package smoother.executable smoother.node_name
     smoother.params_file smoother.active_timeout_s
+    monitor.package monitor.executable monitor.node_name
+    monitor.params_file monitor.active_timeout_s
+    monitor.transform_check_s
     nav.params_file nav.bt_xml nav.costmap_sections
     nav.planner.package nav.planner.executable nav.planner.node_name
     nav.controller.package nav.controller.executable
@@ -305,6 +333,13 @@ configure() {
     # command path is not an arm and there is no branch on which this
     # variable does not exist.
     SMOOTHER_PARAMS="$REPO/$CFG_SMOOTHER_PARAMS_FILE"
+    # F4 TASK 3's, derived unconditionally for the same reason and READ
+    # only on --monitor. The collision monitor is the smoother's sibling
+    # rather than a nav child: it subscribes a Twist and a LaserScan and
+    # publishes a Twist, and there is no planner, no costmap and no goal
+    # in it - which is why it is a flag of its own and not part of --nav
+    # (config.yaml monitor:).
+    MONITOR_PARAMS="$REPO/$CFG_MONITOR_PARAMS_FILE"
     # F4 TASK 2's TWO, DERIVED UNCONDITIONALLY for RF2O_WS's reason: a
     # variable that exists only on one branch is a variable `set -u`
     # aborts on from the other. Neither is READ unless --nav was given.
@@ -515,6 +550,43 @@ check_smoother_params() {  # check_smoother_params <file>
         "changes the commanded arc." \
         "the top-level keys that file does define:" \
         "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$file" || echo '(none)')"
+}
+
+# AND THE COLLISION MONITOR'S, F4 Task 3. Same check, and the package
+# defaults it guards against are worse here than the smoother's: a
+# collision_monitor that never received this file comes up with NO
+# polygons and NO observation sources at all - a node that relays every
+# twist untouched, publishes a state topic saying DO_NOTHING for ever,
+# and looks from the outside exactly like a monitor watching an empty
+# floor.
+#   IT ALSO CHECKS THE TWO POLYGON SETS BY NAME, because a `polygons:`
+# list naming a block that does not exist is one nav2 warning and a node
+# that comes up anyway. The two names are collision_monitor.yaml's own
+# and they are checked HERE rather than only in a test for the reason
+# every check in this script exists: a test says the file on disk is
+# right, and this says the file being USED is.
+check_monitor_params() {  # check_monitor_params <file>
+    local file="$1" want
+    grep -q "^${CFG_MONITOR_NODE_NAME}:" "$file" || refuse \
+        "the monitor parameter file is addressed to $CFG_MONITOR_NODE_NAME" \
+        "$file and $CONFIG (monitor.node_name, monitor.params_file)" \
+        "there is no top-level '$CFG_MONITOR_NODE_NAME:' key in that" \
+        "file, so every parameter in it belongs to a node that is never" \
+        "started - and nav2_collision_monitor would come up with NO" \
+        "polygons and NO observation sources: a node that relays every" \
+        "twist untouched and reports DO_NOTHING for ever, which looks" \
+        "exactly like a monitor watching an empty floor." \
+        "the top-level keys that file does define:" \
+        "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$file" || echo '(none)')"
+    for want in MonitorStop MonitorSlowdown; do
+        grep -q "^ *${want}:" "$file" || refuse \
+            "collision_monitor.yaml defines the polygon set '$want'" \
+            "$file" \
+            "its 'polygons:' list names $want and there is no block by" \
+            "that name in the file. nav2 warns once and comes up" \
+            "without it, so the stop zone or the slowdown zone would" \
+            "simply not exist and nothing downstream would say so."
+    done
 }
 
 # THE FACTOR GRAPH'S PARAMETER FILE, CHECKED THE SAME WAY AND THEN ONCE
@@ -968,6 +1040,64 @@ check_frozen_map() {
 #   phase - which fuses twist only - would not measurably notice.
 #   A stack that publishes a wrong thing nobody currently reads is a
 #   trap set for whoever reads it next.
+# AND THE COLLISION MONITOR'S, WHICH IS THE SAME GATE FOR A FAILURE THAT
+# ARRIVES TEN SECONDS LATE. F4 Task 3, and it exists because the failure
+# below was measured on this rig before the check was written.
+#
+# WHAT HAPPENS WITHOUT THE `lasertf` CHILD. nav2_collision_monitor
+# transforms every scan point into base_link before it tests a polygon,
+# and the nav lidar's scan is stamped `nav_lidar_link`. With no such
+# frame the node logs
+#     [ERROR] [getTransform]: Failed to get "nav_lidar_link"->"base_link"
+# three times a second and PUBLISHES NOTHING AT ALL on its cmd_vel_out -
+# which, on an arm where the converter reads that topic, is a CUT
+# COMMAND PATH with every child ALIVE and every parameter correct.
+#
+# AND WHY THE STARTUP GATE CANNOT CATCH IT. Measured 2026-08-27: the
+# node activated at t+0.02 s and the first transform error arrived at
+# t+9.9 s, because until the first scan reaches it there is nothing to
+# fail on and it relays every twist. tools/navcmd_health.py ran inside
+# that window and passed - TRUTHFULLY, the path was a line when it was
+# asked - and the same gate re-run three minutes later refused. A gate
+# that runs once cannot see a failure that has not happened yet; the
+# ERROR line is what it leaves behind, so that is what is read.
+#
+# SO IT IS A WATCH AND NOT A LOOK, WHICH IS THE ONE THING THIS GATE HAS
+# THAT check_rf2o_transform() DOES NOT NEED. rf2o's lookup happens on its
+# FIRST scan and its ERROR is therefore already on disk by the time
+# anything asks; this node's arrives when the first scan reaches it,
+# which was 9.9 s after activation on the run that measured it. So the
+# check spends config.yaml monitor.transform_check_s watching the log
+# rather than reading it once - the only bringup cost this arm carries,
+# and it buys the difference between a refusal and a stack that comes up
+# "healthy" with its command path cut.
+check_monitor_transform() {
+    local log="$LOGDIR/monitor.log" deadline
+    deadline=$(( $(date +%s) + CFG_MONITOR_TRANSFORM_CHECK_S ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        grep -q "^\[ERROR\]" "$log" 2>/dev/null && break
+        sleep 1
+    done
+    grep -q "^\[ERROR\]" "$log" 2>/dev/null || return 0
+    refuse "the collision monitor can transform the scan it reads" \
+        "$log and $0 (the lasertf child)" \
+        "its log carries an ERROR. What it printed:" \
+        "$(grep -m1 "^\[ERROR\]" "$log")" \
+        "IT DID NOT STOP AND IT DID NOT STAY A RELAY. On a failed" \
+        "transform this node publishes NOTHING on" \
+        "$CFG_TOPICS_CMD_VEL_MONITORED - and on this arm that is the" \
+        "topic nodes/cmd_vel_tricycle.py subscribes to, so the command" \
+        "path is CUT four hops from anything that would say so: the" \
+        "truck does not move, every child is ALIVE, and every parameter" \
+        "reads back correctly." \
+        "AND THIS IS NOT A SAFETY REFUSAL. nav2's own words for this" \
+        "node are that it 'does not provide hard real-time safety" \
+        "certifications'; what is broken here is a command path, not a" \
+        "guard." \
+        "THE STACK IS INCOMPLETE, and what is left of it is STILL UP." \
+        "'$0 stop', then start again."
+}
+
 check_rf2o_transform() {
     local log="$LOGDIR/rf2o.log"
     # The log is created by spawn's own redirection, so it exists by this
@@ -1112,30 +1242,68 @@ localize_lifecycle() {
 #   that reads as an error, and `status` says ALIVE. On this node that
 #   would be a command path with no smoother in it - every twist a step,
 #   and no dead-man at all.
-smoother_active() {
+#   AND IT TAKES ITS NODE, BECAUSE F4 TASK 3 ASKS THE SAME QUESTION OF A
+#   SECOND ONE. nav2_collision_monitor is a nav2_util::LifecycleNode too
+#   and collision_monitor.yaml sets the same `autostart_node`; what
+#   differs between the two callers is only WHAT IS MISSING from the
+#   command path when the answer is no, so that is what is passed in and
+#   everything else is one copy. Two copies of a mechanism drift exactly
+#   the way two copies of a value do (tools/_common.sh's own rule).
+autostart_active() {
+    local node="$1" budget="$2" log="$3" params="$4" key="$5"
+    shift 5
     local deadline state=""
-    deadline=$(( $(date +%s) + CFG_SMOOTHER_ACTIVE_TIMEOUT_S ))
+    deadline=$(( $(date +%s) + budget ))
     until [ "$state" = active ]; do
-        state="$(ros2 lifecycle get "/$CFG_SMOOTHER_NODE_NAME" 2>/dev/null \
+        state="$(ros2 lifecycle get "/$node" 2>/dev/null \
                  | cut -d' ' -f1)"
         [ "$state" = active ] && break
         [ "$(date +%s)" -lt "$deadline" ] || refuse \
-            "$CFG_SMOOTHER_NODE_NAME reached ACTIVE on its own inside ${CFG_SMOOTHER_ACTIVE_TIMEOUT_S}s" \
-            "$LOGDIR/smoother.log (config.yaml smoother.active_timeout_s)" \
+            "$node reached ACTIVE on its own inside ${budget}s" \
+            "$log (config.yaml $key)" \
             "it is in state '${state:-unreadable}' and NOTHING IS DRIVING" \
-            "IT - $CFG_SMOOTHER_PARAMS_FILE sets autostart_node and this" \
+            "IT - $params sets autostart_node and this" \
             "script only watches. A state of 'unconfigured' therefore" \
             "means that parameter did not reach the node, which is what" \
             "a --params-file addressed to the wrong node name looks" \
             "like from the outside." \
-            "LEFT SHORT OF ACTIVE IT SUBSCRIBES TO NOTHING AND PUBLISHES" \
-            "NOTHING, while logging nothing that reads as an error - so" \
-            "the command path would have no smoother in it at all: every" \
-            "twist a step at a terminal with no ramp, and no dead-man." \
+            "$@" \
             "THE STACK IS INCOMPLETE, and what is left of it is STILL UP."
         sleep 1
     done
-    echo "  $CFG_SMOOTHER_NODE_NAME active"
+    echo "  $node active"
+}
+
+smoother_active() {
+    autostart_active "$CFG_SMOOTHER_NODE_NAME" \
+        "$CFG_SMOOTHER_ACTIVE_TIMEOUT_S" "$LOGDIR/smoother.log" \
+        "$CFG_SMOOTHER_PARAMS_FILE" "smoother.active_timeout_s" \
+        "LEFT SHORT OF ACTIVE IT SUBSCRIBES TO NOTHING AND PUBLISHES" \
+        "NOTHING, while logging nothing that reads as an error - so" \
+        "the command path would have no smoother in it at all: every" \
+        "twist a step at a terminal with no ramp, and no dead-man."
+}
+
+# AND THE COLLISION MONITOR'S OWN, F4 Task 3. Same mechanism, and the
+# consequence of a `no` is the one that matters most here: this node is
+# IN the command path on this arm - the converter is remapped to its
+# output - so a monitor that never reached ACTIVE is not a guard that is
+# missing, it is a COMMAND PATH THAT IS CUT. The converter would sit
+# subscribed to a topic nobody publishes and the truck would not move at
+# all, which is a failure that looks like a planner problem from every
+# angle except this one.
+monitor_active() {
+    autostart_active "$CFG_MONITOR_NODE_NAME" \
+        "$CFG_MONITOR_ACTIVE_TIMEOUT_S" "$LOGDIR/monitor.log" \
+        "$CFG_MONITOR_PARAMS_FILE" "monitor.active_timeout_s" \
+        "AND ON THIS ARM IT IS IN THE COMMAND PATH RATHER THAN BESIDE" \
+        "IT. --monitor remaps the converter's input to this node's" \
+        "output, so a monitor short of ACTIVE publishes nothing at all" \
+        "and the converter waits for ever on a topic with no publisher:" \
+        "the truck does not move, and nothing in any log says why." \
+        "IT IS NOT A SAFETY FUNCTION AND THIS IS NOT A SAFETY REFUSAL." \
+        "nav2's own words for this node are that it 'does not provide" \
+        "hard real-time safety certifications'."
 }
 
 # EVERY CHILD IN THE PIDFILE, STILL RUNNING - OR A REFUSAL NAMING THE
@@ -1223,6 +1391,14 @@ start() {
         "which on a nonholonomic vehicle changes the commanded arc" \
         "without changing anything an instrument can see."
     check_smoother_params "$SMOOTHER_PARAMS"
+    # AND THE MONITOR'S, ONLY WHEN THE FLAG WAS GIVEN. It is the
+    # optional arms' rule and not the command path's: the default stack
+    # never opens this file and never starts this node, so an
+    # unconditional check would refuse a bringup that does not need it.
+    if [ "$MONITOR" = true ]; then
+        [ -f "$MONITOR_PARAMS" ] || refuse             "the collision monitor's parameter file exists"             "$CONFIG (monitor.params_file)"             "it resolves to $MONITOR_PARAMS"             "NOTHING WAS STARTED. Drop --monitor to bring up the"             "command path EVIDENCE_NAV_V3.md 3-10 measured, which is"             "this one with nothing inserted in it."
+        check_monitor_params "$MONITOR_PARAMS"
+    fi
     # THE OPTIONAL ARM'S OWN THREE CHECKS, AND THEY ARE ONLY MADE WHEN
     # THE FLAG WAS GIVEN. Every one of them is about a file or a binary
     # that the default stack neither reads nor starts, so making them
@@ -1464,7 +1640,7 @@ start() {
     # process. No use_sim_time on it, for imutf's reason: tf2 answers a
     # static transform for any query time, so the stamp is never
     # consulted and a clock this process does not have cannot go wrong.
-    #   TWO ARMS NEED IT AND THERE IS ONE OF IT. --rf2o needs it because
+    #   THREE ARMS NEED IT AND THERE IS ONE OF IT. --rf2o needs it because
     #   its scan matcher looks the mount up once and carries on with a
     #   garbage transform if the lookup fails; --localize needs it
     #   because AMCL's scan is stamped `nav_lidar_link` and its tf2
@@ -1474,10 +1650,27 @@ start() {
     #   message: frame 'nav_lidar_link' ... queue is full" every few
     #   seconds, processes NO scan, publishes NO pose and broadcasts NO
     #   transform - and `status` reads every child ALIVE.
+    #   AND SINCE F4 TASK 3 --monitor NEEDS IT TOO, WHICH COST A WHOLE
+    #   DEMONSTRATION RUN TO LEARN. nav2_collision_monitor transforms
+    #   every scan point into `base_frame_id` before it tests a polygon,
+    #   and the scan is stamped `nav_lidar_link`. With this child absent
+    #   the node logs, three times a second and for ever:
+    #       [ERROR] [getTransform]: Failed to get "nav_lidar_link"->
+    #       "base_link" frame transform: "nav_lidar_link" passed to
+    #       lookupTransform argument source_frame does not exist.
+    #   - and then publishes NOTHING AT ALL on its cmd_vel_out. On this
+    #   arm that node is IN the command path, so the converter waits for
+    #   ever on a topic with no publisher and the truck does not move.
+    #   MEASURED 2026-08-27, `--monitor` alone: 703 twists into the
+    #   monitor, 0 out, 0 at either terminal, 0 state messages, and
+    #   every child ALIVE. The gate that would have caught it does not
+    #   exist - `monitor_active` asks about the LIFECYCLE state and this
+    #   node reaches ACTIVE perfectly well without a transform.
     #   IT IS SPAWNED HERE, BEFORE THE BRIDGES, WHICH IS A MEASURED
     #   ORDERING AND NOT A TIDY ONE - see the rf2o block below for the
     #   session that measured it.
-    if [ "$RF2O" = true ] || [ "$LOCALIZE" = true ]; then
+    if [ "$RF2O" = true ] || [ "$LOCALIZE" = true ] \
+       || [ "$MONITOR" = true ]; then
         spawn lasertf ros2 run tf2_ros static_transform_publisher \
             --x "$CFG_VEHICLE_NAV_LIDAR_MOUNT_X" \
             --y "$CFG_VEHICLE_NAV_LIDAR_MOUNT_Y" \
@@ -1858,7 +2051,55 @@ start() {
     #   track is deliberately not a colcon package.
     #   IT READS NO GROUND TRUTH AND NO POSE. It measures nothing and
     #   corrects nothing; the same twist twice gives the same pair twice.
-    spawn navcmd python3 "$M5V3/nodes/cmd_vel_tricycle.py"
+    #
+    # -------------- AND ON --monitor, ONE LINK IN BETWEEN --------------
+    # F4 TASK 3. nav2_collision_monitor goes up HERE - after the
+    # smoother, before the converter - and the converter's INPUT is
+    # remapped onto its output. Both halves of that sentence are choices
+    # and both are argued.
+    #   WHY BETWEEN THE SMOOTHER AND THE CONVERTER, AND NOT ANYWHERE
+    #   ELSE. This node subscribes a Twist and publishes a Twist. After
+    #   the converter there is no Twist at all - the two terminals carry
+    #   Float64 in wheel-domain units - so "between the converter and
+    #   the plant" is not a place this node can stand. Before the
+    #   smoother it would be re-ramped: a stop the monitor asked for
+    #   would be handed to a limiter that softens it back into a 0.35
+    #   m/s^2 ramp, which is the one thing a guard must not have done to
+    #   it. So it is last but one, which is also nav2's own
+    #   recommendation for it.
+    #   WHY THE CONVERTER IS REMAPPED RATHER THAN THE SMOOTHER'S OUTPUT
+    #   RE-POINTED. Either would insert the node. Re-pointing the
+    #   smoother would leave a topic called $CFG_TOPICS_CMD_VEL_SMOOTHED
+    #   that the smoother does not publish, and an address whose name is
+    #   a lie is the thing this track spends most of its checks
+    #   preventing. Remapping the LAST node keeps every existing address
+    #   meaning exactly what it says and adds one new name.
+    #   F4 CONSTRAINT 18 STILL HOLDS AND THE LINE IS ONE LINK LONGER.
+    #   There is one path from the controller to the terminals, no
+    #   bypass, and no ground truth in it - the monitor subscribes a
+    #   twist and a scan and nothing else. What changed is that on this
+    #   arm the path has four nodes in it instead of three, and every
+    #   session recorded on it is labelled monitor=on@<md5> so that no
+    #   figure taken through the longer path can sit in a table with one
+    #   taken through the shorter.
+    #   AND IT IS NOT A SAFETY FUNCTION. nav2's own words, verbatim:
+    #   it "does not provide hard real-time safety certifications". It
+    #   does not replace a safety-rated PLC. It complements the F-PLC;
+    #   it is not the F-PLC.
+    local navcmd_in="$CFG_TOPICS_CMD_VEL_SMOOTHED"
+    if [ "$MONITOR" = true ]; then
+        spawn monitor ros2 run "$CFG_MONITOR_PACKAGE"             "$CFG_MONITOR_EXECUTABLE" --ros-args             -r __node:="$CFG_MONITOR_NODE_NAME"             --params-file "$MONITOR_PARAMS"             -p cmd_vel_in_topic:="$CFG_TOPICS_CMD_VEL_SMOOTHED"             -p cmd_vel_out_topic:="$CFG_TOPICS_CMD_VEL_MONITORED"             -p state_topic:="$CFG_TOPICS_COLLISION_MONITOR_STATE"             -p scan.topic:="$CFG_TOPICS_SCAN_NAV"
+        navcmd_in="$CFG_TOPICS_CMD_VEL_MONITORED"
+    fi
+    # THE REMAP IS A ROS REMAP AND NOT A SECOND CONFIG KEY, which is the
+    # smoother's and the controller's own idiom one node further down:
+    # the address a node reads is decided on the command line by the
+    # thing that knows which arm this is, and config.yaml keeps both
+    # names. With no --monitor the two strings are equal and the remap
+    # is an identity, which is why it is written unconditionally rather
+    # than inside the branch - a command line that differs between arms
+    # is a command line two arms cannot be compared through.
+    spawn navcmd python3 "$M5V3/nodes/cmd_vel_tricycle.py" --ros-args         -r "$CFG_TOPICS_CMD_VEL_SMOOTHED":="$navcmd_in"
 
     # ------------------- THE OPTIONAL LOCALISATION ARM -------------------
     # TWO MORE CHILDREN, AND NEITHER EXISTS WITHOUT --localize. The whole
@@ -2011,6 +2252,7 @@ start() {
         check_rf2o_transform
     fi
 
+
     # AND THE ESTIMATOR IS ASKED WHETHER IT IS STILL ONE - WHICHEVER
     # ESTIMATOR IT IS. tools/ekf_health.py reads the arm off the state
     # file write_traction() has already written by this line and picks
@@ -2048,6 +2290,12 @@ start() {
     #   sitting in UNCONFIGURED here is a parameter that did not land,
     #   and the symptom is a command path with no smoother in it.
     smoother_active
+    #   AND ON --monitor, THE SAME QUESTION OF THE NODE BETWEEN THEM.
+    #   It is asked BEFORE the line is tested below, because on this arm
+    #   a monitor short of ACTIVE is not a missing guard - it is a CUT
+    #   COMMAND PATH, and navcmd_health.py's zero twist would then time
+    #   out on a symptom four hops from its cause.
+    if [ "$MONITOR" = true ]; then monitor_active; fi
     #   SECOND: DOES A COMMAND ACTUALLY REACH THE TERMINALS? Every check
     #   above is satisfied by three processes that have never spoken to
     #   each other: the smoother ACTIVE with nothing subscribed to its
@@ -2068,6 +2316,20 @@ start() {
             "working one publishes nothing either." \
             "THE STACK IS INCOMPLETE, and what is left of it is STILL UP." \
             "'$0 stop', then read $LOGDIR/smoother.log and $LOGDIR/navcmd.log."
+    fi
+
+    #   AND ON --monitor, THIRD: THE ONE FAILURE THAT ARRIVES AFTER THE
+    #   GATE ABOVE HAS ALREADY PASSED. It is LAST rather than beside
+    #   monitor_active for a measured reason - the collision monitor
+    #   relays every twist until the first scan it cannot transform
+    #   reaches it, which was 9.9 s after activation on the run that
+    #   found this, and the zero-twist gate above ran inside that window
+    #   and passed truthfully over a path that was cut ten seconds
+    #   later. check_monitor_transform() therefore WATCHES rather than
+    #   looks, and it is placed here so its watch overlaps the twists
+    #   the gate above has just finished publishing.
+    if [ "$MONITOR" = true ]; then
+        check_monitor_transform
     fi
 
     # AND ON THE LOCALISATION ARM, THE TWO LIFECYCLE TRANSITIONS AND THE
@@ -2412,8 +2674,15 @@ start() {
     fi
     echo "navcmd: THE COMMAND PATH IS UP AND IDLE." \
          "$CFG_TOPICS_CMD_VEL -> velocity_smoother"
+    if [ "$MONITOR" = true ]; then
+    echo "         -> $CFG_TOPICS_CMD_VEL_SMOOTHED ->" \
+         "$CFG_MONITOR_NODE_NAME ->"
+    echo "         $CFG_TOPICS_CMD_VEL_MONITORED ->" \
+         "nodes/cmd_vel_tricycle.py -> the two"
+    else
     echo "         -> $CFG_TOPICS_CMD_VEL_SMOOTHED ->" \
          "nodes/cmd_vel_tricycle.py -> the two"
+    fi
     echo "         motor terminals, over the bridge. ONE LINE, no bypass," \
          "and no ground"
     echo "         truth in it - the smoother closes its loop on" \
@@ -2429,6 +2698,30 @@ start() {
          "inside the"
     echo "         ${CFG_VEHICLE_STEER_LIMIT_RAD} rad mechanical stop." \
          "Counters: $CFG_TOPICS_NAVCMD_STATUS."
+    if [ "$MONITOR" = true ]; then
+    echo "guard:  THE COLLISION MONITOR IS IN THAT LINE, and it is NOT a" \
+         "safety function."
+    echo "         nav2's own words for this node, verbatim: it 'does" \
+         "not provide hard"
+    echo "         real-time safety certifications'. It does not" \
+         "replace a safety-rated"
+    echo "         PLC. It complements the F-PLC; it is not the F-PLC." \
+         "Protective stop,"
+    echo "         e-stop and safe torque off are onboard and hardwired" \
+         "in the plant this"
+    echo "         models, and nothing on this path can trigger or" \
+         "release one."
+    echo "         Two velocity-polygon sets - a STOP and a SLOWDOWN -" \
+         "off the REAL"
+    echo "         footprint hull and the MEASURED stopping distances," \
+         "shrinking with the"
+    echo "         commanded speed. It sees ONE sensor, the nav lidar at" \
+         "z = 1.80 m, so a"
+    echo "         pallet, a dropped load and a person are INVISIBLE to" \
+         "it. State:"
+    echo "         $CFG_TOPICS_COLLISION_MONITOR_STATE. Config:" \
+         "$CFG_MONITOR_PARAMS_FILE."
+    fi
     echo "limit:  $CFG_TOPICS_SPEED_LIMIT (nav2_msgs/SpeedLimit) is" \
          "WIRED and DEMONSTRATED."
     echo "         It is an INTERFACE and not a safety claim - the PLC" \
@@ -2664,7 +2957,7 @@ apply_slippery() {
 #   distinct values, so a model that is NOT isotropic shows as two.
 write_traction() {
     local lat lon source arm arm_source loc loc_source map_md5
-    local nav nav_source
+    local nav nav_source monitor monitor_source
     # WHICH ESTIMATOR IS UP, decided before the heredoc rather than
     # inside it: an `echo "$(...)"` with a conditional in it is a line
     # nobody can read and the refusals in this file are not written that
@@ -2787,6 +3080,39 @@ write_traction() {
         nav_source="$nav_source the only thing that has ever published"
         nav_source="$nav_source $CFG_TOPICS_CMD_VEL on this stack is a bench"
     fi
+    # WHETHER A GUARD WAS IN THE COMMAND PATH, F4 Task 3, AND IT IS A
+    # FIFTH LINE BECAUSE IT IS A FIFTH QUESTION. traction= says which
+    # PLANT, arm= which ESTIMATOR, loc= whether anything knew WHERE the
+    # vehicle was, nav= whether anything was DECIDING where it went -
+    # and this says whether anything could TAKE THE COMMAND AWAY on the
+    # way to the terminals.
+    #   IT IS NOT COSMETIC AND IT IS NOT A SAFETY CLAIM EITHER. With
+    #   --monitor the path from the smoother to the converter runs
+    #   through a fourth node that may multiply the twist by a ratio or
+    #   replace it with a zero. Two sessions either side of that are two
+    #   different command paths producing CSVs of identical shape off
+    #   identical topics - which is exactly the failure the other four
+    #   labels exist for, one link further down.
+    #   IT CARRIES collision_monitor.yaml's md5 FOR nav='s REASON: the
+    #   polygons and the actions are decided there, and eight characters
+    #   is what lets an instrument refuse to table two of them together.
+    if [ "$MONITOR" = true ]; then
+        monitor="on@$(md5sum "$MONITOR_PARAMS" | cut -c1-8)"
+        monitor_source="$0 --monitor, $CFG_MONITOR_PARAMS_FILE,"
+        monitor_source="$monitor_source $CFG_MONITOR_NODE_NAME between"
+        monitor_source="$monitor_source $CFG_TOPICS_CMD_VEL_SMOOTHED and"
+        monitor_source="$monitor_source $CFG_TOPICS_CMD_VEL_MONITORED,"
+        monitor_source="$monitor_source which is what navcmd reads."
+        monitor_source="$monitor_source NOT a safety function: nav2's own"
+        monitor_source="$monitor_source words are that it does not provide"
+        monitor_source="$monitor_source hard real-time safety certifications"
+    else
+        monitor="off"
+        monitor_source="no --monitor: the command path is the three-node"
+        monitor_source="$monitor_source line EVIDENCE_NAV_V3.md 3-10"
+        monitor_source="$monitor_source measured, with nothing inserted"
+        monitor_source="$monitor_source in it"
+    fi
     if [ "$SLIPPERY" = true ]; then
         lat="$CFG_SLIPPERY_SLIP_COMPLIANCE_LATERAL"
         lon="$CFG_SLIPPERY_SLIP_COMPLIANCE_LONGITUDINAL"
@@ -2825,6 +3151,10 @@ write_traction() {
       # from loc= and why it carries nav2.yaml's md5.
       echo "nav=$nav"
       echo "nav_source=$nav_source"
+      # F4 TASK 3's LINE. See the block above for why it is separate
+      # from nav= and why it carries collision_monitor.yaml's md5.
+      echo "monitor=$monitor"
+      echo "monitor_source=$monitor_source"
       echo "partition=$GZ_PARTITION"
       echo "started=$(date -Is)"; } > "$TRACTIONFILE" \
         || refuse "the traction state file is writable" "$CONFIG" \
@@ -2892,6 +3222,7 @@ status() {
         #   is exactly the habit tools/sensor_evidence.py's UNLABELLED
         #   refuses on the same question.
         local arm arm_source loc loc_source nav nav_source
+        local monitor monitor_source
         arm="$(sed -n 's/^arm=//p' "$TRACTIONFILE")"
         arm_source="$(sed -n 's/^arm_source=//p' "$TRACTIONFILE")"
         printf '  %-10s %-7s %s\n' "arm" "${arm:-UNKNOWN}" \
@@ -2915,6 +3246,17 @@ status() {
         nav_source="$(sed -n 's/^nav_source=//p' "$TRACTIONFILE")"
         printf '  %-10s %-7s %s\n' "nav" "${nav:-UNKNOWN}" \
             "${nav_source:-no nav= line - this state file predates F4 Task 2}"
+        # AND WHETHER ANYTHING CAN TAKE THE COMMAND AWAY, which is the
+        # nav line's reason one link down the same path. A --monitor
+        # stack has a FOURTH node between the smoother and the converter
+        # and looks identical from every other angle in this report:
+        # the same children, the same topics, the same terminals - and
+        # a twist that may have been multiplied by a ratio or replaced
+        # by a zero on its way through.
+        monitor="$(sed -n 's/^monitor=//p' "$TRACTIONFILE")"
+        monitor_source="$(sed -n 's/^monitor_source=//p' "$TRACTIONFILE")"
+        printf '  %-10s %-7s %s\n' "monitor" "${monitor:-UNKNOWN}" \
+            "${monitor_source:-no monitor= line - this state file predates F4 Task 3}"
     else
         printf '  %-10s %-7s %s\n' "traction" "UNKNOWN" \
             "no $TRACTIONFILE - this stack was not started by '$0 start'"
@@ -2923,6 +3265,8 @@ status() {
         printf '  %-10s %-7s %s\n' "loc" "UNKNOWN" \
             "same file, same reason"
         printf '  %-10s %-7s %s\n' "nav" "UNKNOWN" \
+            "same file, same reason"
+        printf '  %-10s %-7s %s\n' "monitor" "UNKNOWN" \
             "same file, same reason"
     fi
     local pid name alive=0 dead=0
@@ -2986,7 +3330,7 @@ stop() {
     echo "down."
 }
 
-USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [amcl|slam]] [--nav] | stop | status
+USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [amcl|slam]] [--nav] [--monitor] | stop | status
   start       GPU preflight, then warehouse_ver3 + one forklift_ver3 in a
               Gazebo window, plus TWO ros_gz bridges: the parameter bridge
               for the clock, the ground-truth odometry (a measurement
@@ -3100,9 +3444,38 @@ USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [am
               with an unplanned one.
               SEVENTEEN processes with a window and SIXTEEN without, on
               the amcl arm.
+  --monitor   THE COLLISION MONITOR, AND IT IS A LINK IN THE COMMAND
+              PATH RATHER THAN A LAYER OVER IT. One more child:
+              nav2_collision_monitor between the velocity smoother and
+              the tricycle converter, with the converter's input
+              remapped onto its output - so with the flag the line is
+              smoother -> collision_monitor -> converter -> terminals,
+              and without it the converter reads the smoother directly
+              and NOTHING about the path changes.
+              Two VELOCITY POLYGON sets, a stop and a slowdown, sized
+              off the REAL footprint hull and the MEASURED stopping
+              distances (1.05 m from 0.700 m/s, 0.25 m from the 0.300
+              m/s transit ceiling) and switching between the two as the
+              commanded speed does. It sees ONE sensor, the nav lidar at
+              z = 1.80 m, so a pallet, a dropped load and a person are
+              all invisible to it: its honest scope is structure above
+              1.80 m.
+              IT IS NOT A SAFETY FUNCTION. nav2's own words, verbatim:
+              it 'does not provide hard real-time safety
+              certifications'. It
+              does not replace a safety-rated PLC. It complements the
+              F-PLC; it is not the F-PLC. Protective stop, e-stop and
+              safe torque off are onboard and hardwired, and nothing on
+              this path can trigger or release one.
+              It depends on no other flag and combines with all of
+              them. 'status' and every recorded session say
+              monitor=on@<md5> by name; a session recorded through the
+              longer path must not be tabled beside one recorded
+              through the shorter.
   status      every child by name, ALIVE or DEAD, with its log, which
               traction the running plant is on, which estimator arm,
-              which absolute layer, and whether anything is planning
+              which absolute layer, whether anything is planning, and
+              whether anything can take the command away
   stop        end this partition's stack and nothing else"
 case "${1:-}" in
     start|--start)
@@ -3158,6 +3531,11 @@ case "${1:-}" in
                 # been READ before it can be spoken. Nothing has been
                 # started by that line either way.
                 --nav) NAV=true ;;
+                # AND THE ONE THAT DEPENDS ON NOTHING. --monitor works
+                # on every arm this script has, including the bare
+                # stack: the node it starts needs a scan and a twist and
+                # neither is behind a flag.
+                --monitor) MONITOR=true ;;
                 *) echo "$USAGE"; exit 2 ;;
             esac
             shift

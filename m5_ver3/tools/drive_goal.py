@@ -118,6 +118,7 @@ REQUIRED_KEYS = (
     "vehicle.spawn.yaw",
     "map.dir", "map.name", "map.registration.file",
     "nav.params_file", "nav.bt_xml", "nav.goals", "nav.default_goal",
+    "nav.cases", "nav.health.action_timeout_s",
     "nav.goal_timeout_s", "nav.settle_s", "nav.prelude_s",
     "nav.watchdog.required_closing_m", "nav.watchdog.closing_allowance_s",
     "nav.analyse.arrival_window_s", "nav.analyse.at_rest_mps",
@@ -173,6 +174,20 @@ COMMANDED_STREAMS = ("cmd_vel", "cmd_vel_smoothed", "steer_cmd",
 Goal = collections.namedtuple(
     "Goal", "name x y travel_yaw pose_yaw repeat note")
 
+#: One CASE, resolved - F4 Task 3. A goal is a pose; a case is what an
+#: operator asks for, which on this floor is sometimes two poses and a
+#: rule for when the second arrives. `second` is None for a one-goal
+#: case, and then `when` and `preempt_at_m` mean nothing and are not
+#: read.
+Case = collections.namedtuple(
+    "Case", "name first second when preempt_at_m repeat note")
+
+#: The two rules a second goal can arrive by, and there is no third.
+#: `preempt` sends it while the first is still running (navigate_to_pose
+#: is a single-goal server, so nav2 aborts the first); `after` sends it
+#: once the first has returned and the vehicle has settled.
+CASE_WHEN = ("preempt", "after")
+
 
 # ----------------------------------------------------------------------
 # the table
@@ -218,6 +233,116 @@ def read_goal(cfg, name):
     return Goal(name=name, x=float(row["x"]), y=float(row["y"]),
                 travel_yaw=travel, pose_yaw=pose_yaw(travel),
                 repeat=int(row["repeat"]), note=str(row.get("note", "")))
+
+
+def read_case(cfg, name):
+    """One row of config.yaml's nav.cases, or a refusal naming them all.
+
+    A CASE IS ONE OR TWO GOALS AND ONE RULE, and every one of the three
+    parts is checked here rather than at the moment it is used: a case
+    that names a goal the table does not hold is a refusal before the
+    stack is touched, not an exception forty metres into a drive.
+    """
+    cases = cfg.raw("nav.cases")
+    if not isinstance(cases, dict) or not cases:
+        cfg.refuse("config.yaml's nav.cases is a table of cases",
+                   _common.CONFIG,
+                   "it reads {!r}".format(cases))
+    if name not in cases:
+        cfg.refuse("nav.cases names the case that was asked for",
+                   _common.CONFIG + " (nav.cases)",
+                   "there is no case called {!r}. The table holds:".format(
+                       name),
+                   *["  {:<18} {}".format(key, row.get("note", ""))
+                     for key, row in cases.items()])
+    row = cases[name]
+    for key in ("goal", "repeat"):
+        if key not in row:
+            cfg.refuse("nav.cases.{} carries {}".format(name, key),
+                       _common.CONFIG + " (nav.cases)",
+                       "that row reads {!r}".format(row))
+    first = read_goal(cfg, str(row["goal"]))
+    second = None
+    when = None
+    preempt_at = None
+    if row.get("then"):
+        second = read_goal(cfg, str(row["then"]))
+        when = str(row.get("when", ""))
+        if when not in CASE_WHEN:
+            cfg.refuse("nav.cases.{}'s `when` is one of {}".format(
+                           name, "/".join(CASE_WHEN)),
+                       _common.CONFIG + " (nav.cases)",
+                       "it reads {!r}, and a second goal with no rule "
+                       "for when it arrives".format(when),
+                       "is two different experiments wearing one name.")
+        if when == "preempt":
+            if "preempt_at_m" not in row:
+                cfg.refuse("nav.cases.{} carries preempt_at_m".format(name),
+                           _common.CONFIG + " (nav.cases)",
+                           "`when: preempt` needs the believed distance "
+                           "to the FIRST goal at which",
+                           "the second is sent. Without it there is no "
+                           "trigger and nothing fires.")
+            preempt_at = float(row["preempt_at_m"])
+            if preempt_at <= 0.0:
+                cfg.refuse("nav.cases.{}'s preempt_at_m is positive".format(
+                               name),
+                           _common.CONFIG + " (nav.cases)",
+                           "it reads {!r}. It is a REMAINING distance, "
+                           "so zero would fire".format(row["preempt_at_m"]),
+                           "only on a goal already reached and negative "
+                           "would never fire at all.")
+    return Case(name=name, first=first, second=second, when=when,
+                preempt_at_m=preempt_at, repeat=int(row["repeat"]),
+                note=str(row.get("note", "")))
+
+
+def plan_cusps(poses):
+    """Where a planned path CHANGES DIRECTION, as (index, x, y, s).
+
+    `plan_directions` counts the segments each way; this says WHERE the
+    changes are, which is the only form the question can be asked in
+    when what is wanted is what the vehicle did AROUND one. A cusp is a
+    sign change in the segment's travel direction against the pose's own
+    heading - nav2 FORWARD (counterweight-first here) to nav2 REVERSE
+    (forks-first) or back - and the vehicle has to come to a standstill
+    at every one of them, slew the steer axis across and set off again.
+
+    `s` is the arc length from the start of the path to the cusp, which
+    is what says whether a cusp is on the way to the goal or a flourish
+    at the end of it: a position-only goal checker latches on the box
+    and a cusp beyond that point is planned and never driven.
+
+    `run` IS THE FIFTH FIELD AND IT IS THE ONE THAT SEPARATES A
+    MANOEUVRE FROM LATTICE NOISE. It is how far the path travels in the
+    NEW direction before the next cusp or the end, and a Reeds-Shepp
+    path off an SE2 lattice routinely carries a one-pose blip - forward
+    for 0.07 m and back again - which is a sign change in the
+    arithmetic and nothing at all in the vehicle. Measured on this
+    floor the planner's pose spacing is 0.067-0.106 m
+    (EVIDENCE_NAV_V3.md 16.2), so a run at or under one spacing is one
+    pose. A caller that wants real direction changes filters on this;
+    this function does not, because a threshold is a policy and this is
+    an instrument.
+    """
+    out = []
+    marks = []
+    sign = 0
+    s = 0.0
+    for i, (a, b) in enumerate(zip(poses, poses[1:])):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        step = math.hypot(dx, dy)
+        if step == 0.0:
+            continue
+        this = 1 if math.cos(a[2]) * dx + math.sin(a[2]) * dy > 0.0 else -1
+        if sign != 0 and this != sign:
+            marks.append((i, a[0], a[1], s))
+        sign = this
+        s += step
+    for n, mark in enumerate(marks):
+        end = marks[n + 1][3] if n + 1 < len(marks) else s
+        out.append(mark + (end - mark[3],))
+    return out
 
 
 def goal_in_map(cfg, goal):
@@ -346,6 +471,44 @@ def describe(cfg, goal):
     return at
 
 
+def describe_case(cfg, case):
+    """What a CASE is: one or two goals, and the rule for the second."""
+    print("case       {}".format(case.name))
+    if case.note:
+        print("           {}".format(case.note))
+    print("repeat     {} session(s) required for the evidence".format(
+        case.repeat))
+    print("")
+    print("--- goal 1 of {} ---".format(1 if case.second is None else 2))
+    first = describe(cfg, case.first)
+    if case.second is None:
+        print("")
+        print("ONE GOAL. This case is the acceptance set's own shape and "
+              "what it adds is")
+        print("the POSE, not the sequence.")
+        return (first, None)
+    print("")
+    if case.when == "preempt":
+        print("--- goal 2 of 2, sent WHILE goal 1 is still running ---")
+        print("trigger    the BELIEVED distance to goal 1 falls below "
+              "{:.2f} m".format(case.preempt_at_m))
+        print("           map -> base_link, the pose the goal checker "
+              "and the watchdog see.")
+        print("           navigate_to_pose is a SINGLE-GOAL server: nav2 "
+              "aborts goal 1 and")
+        print("           takes goal 2. Nothing here cancels anything.")
+    else:
+        print("--- goal 2 of 2, sent AFTER goal 1 has returned ---")
+        print("trigger    goal 1's result, then {:g} s of settle".format(
+            cfg.f("nav.settle_s")))
+        print("           It is a second errand from wherever the first "
+              "one ended, which is")
+        print("           the only way this bench can start a run from a "
+              "pose that is not the spawn.")
+    second = describe(cfg, case.second)
+    return (first, second)
+
+
 # ----------------------------------------------------------------------
 # the session on disk
 # ----------------------------------------------------------------------
@@ -372,7 +535,7 @@ def sessions_in(cfg):
     if not os.path.isdir(root):
         return []
     return sorted(name for name in os.listdir(root)
-                  if name.startswith("goal-")
+                  if (name.startswith("goal-") or name.startswith("case-"))
                   and os.path.isfile(os.path.join(root, name,
                                                   "session.txt")))
 
@@ -1605,6 +1768,132 @@ def analyse(cfg, names):
 # record
 # ----------------------------------------------------------------------
 
+def probe(cfg, goal):
+    """Ask the PLANNER alone what it would do, and command no motion.
+
+    F4 TASK 3, AND IT EXISTS BECAUSE A CASE HAS TO BE CHOSEN RATHER THAN
+    GUESSED. The reverse-leg case needs a start/goal pair the planner
+    solves with a CUSP; whether any given pair produces one is a
+    property of SmacPlannerHybrid's Reeds-Shepp expansion over this
+    floor's inflation, and the only honest way to find out is to ask it.
+
+    IT IS tools/nav_health.py's ACTION AND NOT drive_goal's.
+    `compute_path_to_pose` is the PLANNER's; it never reaches the
+    controller, nothing is published on /cmd_vel and the truck does not
+    move. What comes back is scored by the same two committed functions
+    `analyse` uses on a recorded plan - `plan_directions` and
+    `plan_cusps` - so a probe and a drive cannot disagree about what a
+    cusp is.
+    """
+    try:
+        import rclpy
+        from nav2_msgs.action import ComputePathToPose
+        from geometry_msgs.msg import PoseStamped
+        from rclpy.action import ActionClient
+        from rclpy.node import Node
+    except ImportError as exc:
+        cfg.refuse("rclpy and nav2_msgs are importable",
+                   _common.CONFIG + " (paths.ros_setup)",
+                   "python3 could not import what this bench needs: "
+                   "{}".format(exc),
+                   "it runs INSIDE WSL with /opt/ros/jazzy sourced.")
+
+    print("=== m5v3 nav plan probe ===")
+    frame, at_map = goal_in_map(cfg, goal)
+    describe(cfg, goal)
+    print("")
+    print("NOTHING IS COMMANDED. compute_path_to_pose is the PLANNER's "
+          "action and never")
+    print("reaches the controller. The truck does not move.")
+    print("")
+
+    rclpy.init(args=None)
+    node = Node("m5v3_plan_probe")
+    node.set_parameters([rclpy.parameter.Parameter(
+        "use_sim_time", rclpy.Parameter.Type.BOOL, True)])
+    wait_s = cfg.f("evidence.wait_first_s")
+    action = ActionClient(node, ComputePathToPose, "compute_path_to_pose")
+    if not action.wait_for_server(timeout_sec=wait_s):
+        cfg.refuse("planner_server advertised compute_path_to_pose "
+                   "within {:g}s".format(wait_s),
+                   "compute_path_to_pose on domain {}".format(
+                       cfg.s("isolation.ros_domain_id")),
+                   "is the nav arm up? "
+                   "'bash m5_ver3/m5v3.sh status'")
+    request = ComputePathToPose.Goal()
+    request.goal = PoseStamped()
+    request.goal.header.frame_id = cfg.s("frames.map")
+    request.goal.pose.position.x = float(at_map[0])
+    request.goal.pose.position.y = float(at_map[1])
+    request.goal.pose.orientation.z = math.sin(float(at_map[2]) / 2.0)
+    request.goal.pose.orientation.w = math.cos(float(at_map[2]) / 2.0)
+    # use_start FALSE: plan from where the vehicle IS, which is what a
+    # driven goal would do. There is no start pose in this request.
+    request.use_start = False
+    send = action.send_goal_async(request)
+    rclpy.spin_until_future_complete(node, send, timeout_sec=wait_s)
+    handle = send.result() if send.done() else None
+    if handle is None or not handle.accepted:
+        print("REFUSED    planner_server did not accept the request.")
+        node.destroy_node()
+        rclpy.shutdown()
+        return 1
+    result_future = handle.get_result_async()
+    rclpy.spin_until_future_complete(node, result_future,
+                                     timeout_sec=cfg.f("nav.health."
+                                                       "action_timeout_s"))
+    outcome = result_future.result() if result_future.done() else None
+    if outcome is None:
+        print("REFUSED    the planner did not answer inside the budget.")
+        node.destroy_node()
+        rclpy.shutdown()
+        return 1
+    status = int(outcome.status)
+    poses = [(p.pose.position.x, p.pose.position.y,
+              math.atan2(2.0 * (p.pose.orientation.w * p.pose.orientation.z),
+                         1.0 - 2.0 * (p.pose.orientation.z ** 2)))
+             for p in outcome.result.path.poses]
+    node.destroy_node()
+    try:
+        rclpy.shutdown()
+    except Exception:
+        pass
+    if status != 4 or not poses:
+        print("NO PATH    action status {}, error_code {} - the planner "
+              "REFUSED this goal.".format(
+                  status, int(getattr(outcome.result, "error_code", -1))))
+        print("           That is a measurement: read "
+              "m5_ver3/logs/planner_server.log.")
+        return 1
+    world = [frame.to_world(*pose) for pose in poses]
+    length = math.fsum(math.hypot(b[0] - a[0], b[1] - a[1])
+                       for a, b in zip(world, world[1:]))
+    forward, reverse = plan_directions(world)
+    cusps = plan_cusps(world)
+    print("PLAN       {} poses, {:.3f} m of path, status {}".format(
+        len(poses), length, status))
+    print("           first world ({:+.3f}, {:+.3f})  last ({:+.3f}, "
+          "{:+.3f})".format(world[0][0], world[0][1],
+                            world[-1][0], world[-1][1]))
+    print("           segments: {} nav2-FORWARD (counterweight-first), "
+          "{} nav2-REVERSE".format(forward, reverse))
+    print("           (forks-first, which is this truck's ordinary "
+          "direction of travel)")
+    print("CUSPS      {}".format(len(cusps)))
+    for i, x, y, s, run in cusps:
+        print("           pose {:>4}  world ({:+.3f}, {:+.3f})  "
+              "{:.3f} m along the path, then {:.3f} m the other "
+              "way{}".format(i, x, y, s, run,
+                             "   <- ONE POSE, lattice noise"
+                             if run <= 0.11 else ""))
+    if not cusps:
+        print("           none - the planner solved this pair in ONE "
+              "direction. A pair")
+        print("           that cannot produce a cusp cannot measure "
+              "tracking through one.")
+    return 0
+
+
 def record(cfg, args):
     """One goal, sent and scored."""
     try:
@@ -1627,9 +1916,22 @@ def record(cfg, args):
                    "it runs INSIDE WSL with /opt/ros/jazzy sourced. "
                    "`analyse` needs neither.")
 
-    goal = read_goal(cfg, args.goal)
-    print("=== m5v3 nav goal ===")
-    at_map = describe(cfg, goal)
+    # ONE GOAL, OR A CASE THAT IS TWO OF THEM AND A RULE. F4 Task 3.
+    # `goal` below is always the goal the ARRIVAL is scored against,
+    # which is the LAST one sent either way; `first` is what is sent at
+    # t_sent. On a one-goal run the two are the same object.
+    case = getattr(args, "case_row", None)
+    if case is None:
+        goal = first_goal = read_goal(cfg, args.goal)
+        print("=== m5v3 nav goal ===")
+        at_map = at_first = describe(cfg, goal)
+        at_second = None
+    else:
+        print("=== m5v3 nav case ===")
+        at_first, at_second = describe_case(cfg, case)
+        first_goal = case.first
+        goal = case.second or case.first
+        at_map = at_second if at_second is not None else at_first
     print("")
 
     # THE LABEL CHAIN, AND A RUN WITHOUT ONE IS NOT RECORDED. It is
@@ -1668,7 +1970,12 @@ def record(cfg, args):
                    "map -> odom to carry one.")
 
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    session = "goal-{}-{}".format(goal.name, stamp)
+    # A CASE'S SESSION IS NAMED FOR THE CASE AND NOT FOR ONE OF ITS TWO
+    # GOALS, because neither of them is what was driven. `sessions_in`
+    # takes both prefixes and `analyse` reads the goal off session.txt,
+    # never off the directory name.
+    session = "{}-{}-{}".format("case" if case else "goal",
+                                case.name if case else goal.name, stamp)
     path = session_dir(cfg, session)
     os.makedirs(path)
     print("session    {}".format(path))
@@ -1753,8 +2060,8 @@ def record(cfg, args):
                     bx = anchor[1] + cos_p * row[1] - sin_p * row[2]
                     by = anchor[2] + sin_p * row[1] + cos_p * row[2]
                     believed_track.append(
-                        (row[0], math.hypot(bx - at_map[0],
-                                            by - at_map[1])))
+                        (row[0], math.hypot(bx - target[0][0],
+                                            by - target[0][1]), bx, by))
 
     def on_plan(msg):
         plan_index[0] += 1
@@ -1777,8 +2084,13 @@ def record(cfg, args):
 
     watching = [False]
     believed_track = []
-    watch = ClosingWatch(cfg.f("nav.watchdog.required_closing_m"),
-                         cfg.f("nav.watchdog.closing_allowance_s"))
+    # WHICH GOAL THE BELIEVED DISTANCE IS MEASURED TO, and it MOVES on a
+    # two-goal case. The watchdog, the preempt trigger and the goal
+    # checker all have to be asking about the same pose at the same
+    # moment, so there is one place that says which pose that is.
+    target = [at_first]
+    watch = [ClosingWatch(cfg.f("nav.watchdog.required_closing_m"),
+                          cfg.f("nav.watchdog.closing_allowance_s"))]
 
     def spin_until(predicate, budget_s, what, owner, *lines):
         deadline = time.monotonic() + budget_s
@@ -1832,13 +2144,6 @@ def record(cfg, args):
     idle_cmds = len(captured["cmd_vel"])
 
     from geometry_msgs.msg import PoseStamped
-    request = NavigateToPose.Goal()
-    request.pose = PoseStamped()
-    request.pose.header.frame_id = map_frame
-    request.pose.pose.position.x = float(at_map[0])
-    request.pose.pose.position.y = float(at_map[1])
-    request.pose.pose.orientation.z = math.sin(float(at_map[2]) / 2.0)
-    request.pose.pose.orientation.w = math.cos(float(at_map[2]) / 2.0)
 
     def on_feedback(msg):
         fb = msg.feedback
@@ -1847,29 +2152,68 @@ def record(cfg, args):
              fb.navigation_time.sec + fb.navigation_time.nanosec * 1e-9,
              float(fb.number_of_recoveries)))
 
+    def send_goal(which, at):
+        """One navigate_to_pose goal on the wire. Returns its handle."""
+        request = NavigateToPose.Goal()
+        request.pose = PoseStamped()
+        request.pose.header.frame_id = map_frame
+        request.pose.pose.position.x = float(at[0])
+        request.pose.pose.position.y = float(at[1])
+        request.pose.pose.orientation.z = math.sin(float(at[2]) / 2.0)
+        request.pose.pose.orientation.w = math.cos(float(at[2]) / 2.0)
+        send = action.send_goal_async(request, feedback_callback=on_feedback)
+        rclpy.spin_until_future_complete(node, send, timeout_sec=wait_s)
+        got = send.result() if send.done() else None
+        if got is None or not got.accepted:
+            cfg.refuse("bt_navigator ACCEPTED the goal",
+                       "{} and {} (nav.goals.{})".format(
+                           NAV_ACTION, _common.CONFIG, which.name),
+                       "map ({:+.4f}, {:+.4f}) yaw {:+.4f} was {}.".format(
+                           at[0], at[1], at[2],
+                           "not answered" if got is None else "REJECTED"),
+                       "nothing further was driven.")
+        return got
+
+    # ---- LEG 1 --------------------------------------------------------
     t_sent = now_s()
     watching[0] = True
-    send = action.send_goal_async(request, feedback_callback=on_feedback)
-    rclpy.spin_until_future_complete(node, send, timeout_sec=wait_s)
-    handle = send.result() if send.done() else None
+    handle = send_goal(first_goal, at_first)
     cancelled = 0
     status = -1
     error_code = -1
-    if handle is None or not handle.accepted:
-        cfg.refuse("bt_navigator ACCEPTED the goal",
-                   "{} and {} (nav.goals.{})".format(NAV_ACTION,
-                                                     _common.CONFIG,
-                                                     goal.name),
-                   "map ({:+.4f}, {:+.4f}) yaw {:+.4f} was {}.".format(
-                       at_map[0], at_map[1], at_map[2],
-                       "not answered" if handle is None else "REJECTED"),
-                   "nothing was driven and nothing was recorded.")
-    print("goal sent  t = {:.3f} s of sim time".format(t_sent))
+    print("goal sent  {} at t = {:.3f} s of sim time".format(
+        first_goal.name, t_sent))
     result_future = handle.get_result_async()
     budget_s = cfg.f("nav.goal_timeout_s")
     deadline = time.monotonic() + budget_s
     outcome_name = "ran"
     stalled = None
+    # THE PREEMPT TRIGGER, F4 Task 3. Armed only on `when: preempt`, and
+    # it fires exactly once: the moment the BELIEVED distance to goal 1
+    # first falls below the case's own threshold, goal 2 goes on the
+    # wire while goal 1 is still running. navigate_to_pose is a
+    # SINGLE-GOAL server, so nav2 aborts goal 1 itself - this bench
+    # cancels nothing and publishes no twist (F4 constraint 18).
+    preempt_armed = bool(case and case.when == "preempt")
+    leg1 = {"status": -1, "error_code": -1, "t_end": None,
+            "trigger_distance": None}
+    preempt = {"t_s": None, "distance_m": None}
+    leg1_future = None
+
+    def drain(queue):
+        """One believed sample through the trigger and then the watch."""
+        while queue and stalled is None:
+            sample = queue.pop(0)
+            if preempt_armed and preempt["t_s"] is None \
+                    and sample[1] <= case.preempt_at_m:
+                preempt["t_s"] = sample[0]
+                preempt["distance_m"] = sample[1]
+                return "preempt"
+            hit = watch[0].step(sample[0], sample[1])
+            if hit is not None:
+                return hit
+        return None
+
     while not result_future.done():
         # THE NO-PROGRESS GUARD, F4 Task 2.5. Stepped on the pose the
         # GOAL CHECKER sees, it gives up on a run that has stopped
@@ -1881,12 +2225,32 @@ def record(cfg, args):
         # timeout below does, and the controller's own
         # publish_zero_velocity leaves the standing zero on /cmd_vel
         # (F4 constraint 18).
-        while believed_track and stalled is None:
-            stalled = watch.step(*believed_track.pop(0))
+        hit = drain(believed_track)
+        if hit == "preempt":
+            print("")
+            print("PREEMPT    the believed distance to {} reached "
+                  "{:.4f} m at t = {:.3f} s".format(
+                      first_goal.name, preempt["distance_m"],
+                      preempt["t_s"]))
+            print("           (trigger {:.2f} m, config.yaml "
+                  "nav.cases.{}.preempt_at_m)".format(
+                      case.preempt_at_m, case.name))
+            print("           sending {} NOW, with {} still running. "
+                  "Nothing is cancelled".format(case.second.name,
+                                                first_goal.name))
+            print("           and nothing is published on the command "
+                  "path: navigate_to_pose is a")
+            print("           SINGLE-GOAL server and nav2 aborts the "
+                  "first goal itself.")
+            leg1["trigger_distance"] = preempt["distance_m"]
+            break
+        if hit is not None:
+            stalled = hit
         if stalled is not None:
             print("")
             print("NO PROGRESS  the goal has not come {:.2f} m closer in "
-                  "{:.0f} s -".format(watch.closing_m, watch.allowance_s))
+                  "{:.0f} s -".format(watch[0].closing_m,
+                                      watch[0].allowance_s))
             print("             ABANDONING. believed distance "
                   "{:.4f} m at t = {:.3f} s;".format(
                       stalled.distance, stalled.t))
@@ -1913,14 +2277,104 @@ def record(cfg, args):
             rclpy.spin_until_future_complete(node, cancel, timeout_sec=10.0)
             break
         rclpy.spin_once(node, timeout_sec=0.05)
-    watching[0] = False
-    t_done = now_s()
+    t_leg1 = now_s()
     if result_future.done() and result_future.result() is not None:
         outcome = result_future.result()
         status = int(outcome.status)
         error_code = int(getattr(outcome.result, "error_code", -1))
-    print("result     t = {:.3f} s, status {}, error_code {}".format(
-        t_done, status, error_code))
+    leg1["status"] = status
+    leg1["error_code"] = error_code
+    leg1["t_end"] = t_leg1
+    t_sent2 = None
+    if case is None or case.second is None:
+        print("result     t = {:.3f} s, status {}, error_code {}".format(
+            t_leg1, status, error_code))
+        t_done = t_leg1
+    else:
+        print("leg 1      t = {:.3f} s, status {}, error_code {}".format(
+            t_leg1, status, error_code))
+        # ---- LEG 2 ----------------------------------------------------
+        # `after` settles first, because the second errand starts from
+        # where the first one ENDED and a vehicle still rolling has not
+        # ended anywhere yet (config.yaml nav.settle_s, and the same
+        # 1.02 m of stopping distance the arrival is settled for).
+        if case.when == "after" and stalled is None:
+            settle_first = cfg.f("nav.settle_s")
+            print("settle     {:g} s before the second goal".format(
+                settle_first))
+            end = now_s() + settle_first
+            while now_s() < end:
+                rclpy.spin_once(node, timeout_sec=0.05)
+        if stalled is not None:
+            print("SKIPPED    goal 2 is NOT sent: the watchdog abandoned "
+                  "goal 1, and a second")
+            print("           errand from a vehicle that never finished "
+                  "the first one would be")
+            print("           a measurement of neither.")
+            t_done = t_leg1
+        else:
+            # LEG 1's OWN RESULT IS STILL IN FLIGHT ON A PREEMPTION and
+            # it is the measurement: what nav2 does to a goal that is
+            # displaced by another is what "preempt semantics" means.
+            # The future is kept and read after the run.
+            leg1_future = result_future
+            target[0] = at_second
+            watch[0] = ClosingWatch(
+                cfg.f("nav.watchdog.required_closing_m"),
+                cfg.f("nav.watchdog.closing_allowance_s"))
+            believed_track[:] = []
+            t_sent2 = now_s()
+            handle = send_goal(case.second, at_second)
+            print("goal sent  {} at t = {:.3f} s of sim time".format(
+                case.second.name, t_sent2))
+            result_future = handle.get_result_async()
+            deadline = time.monotonic() + budget_s
+            while not result_future.done():
+                hit = drain(believed_track)
+                if hit is not None:
+                    stalled = hit
+                    print("")
+                    print("NO PROGRESS  on goal 2. believed distance "
+                          "{:.4f} m at t = {:.3f} s;".format(
+                              stalled.distance, stalled.t))
+                    print("             best {:.4f} m, {:.1f} s "
+                          "earlier. ABANDONING.".format(
+                              stalled.mark, stalled.since_s))
+                    outcome_name = "no_progress"
+                    cancelled = 1
+                    cancel = handle.cancel_goal_async()
+                    rclpy.spin_until_future_complete(node, cancel,
+                                                     timeout_sec=10.0)
+                    break
+                if time.monotonic() > deadline:
+                    print("")
+                    print("TIMEOUT    {:g}s on goal 2 - CANCELLING."
+                          .format(budget_s))
+                    outcome_name = "timeout"
+                    cancelled = 1
+                    cancel = handle.cancel_goal_async()
+                    rclpy.spin_until_future_complete(node, cancel,
+                                                     timeout_sec=10.0)
+                    break
+                rclpy.spin_once(node, timeout_sec=0.05)
+            t_done = now_s()
+            status = -1
+            error_code = -1
+            if result_future.done() and result_future.result() is not None:
+                outcome = result_future.result()
+                status = int(outcome.status)
+                error_code = int(getattr(outcome.result, "error_code", -1))
+            print("result     t = {:.3f} s, status {}, error_code "
+                  "{}".format(t_done, status, error_code))
+            if leg1_future is not None and leg1_future.done() \
+                    and leg1_future.result() is not None:
+                leg1["status"] = int(leg1_future.result().status)
+                leg1["error_code"] = int(getattr(
+                    leg1_future.result().result, "error_code", -1))
+                print("leg 1      the DISPLACED goal returned status {}, "
+                      "error_code {}".format(leg1["status"],
+                                             leg1["error_code"]))
+    watching[0] = False
 
     # THE SETTLE. The result arrives when the GOAL CHECKER passes, and
     # the truck is still moving then - up to 2.07 s and 1.02 m from
@@ -1947,6 +2401,32 @@ def record(cfg, args):
     with open(os.path.join(path, "session.txt"), "w",
               encoding="utf-8") as handle_out:
         handle_out.write("kind=goal\n")
+        # F4 TASK 3'S FIVE LINES, AND A SESSION WITHOUT THEM IS A
+        # ONE-GOAL RUN rather than a case whose second leg went missing.
+        # `loc=none`'s rule: a missing line is an older bench, not a
+        # value. `goal=` stays the goal the ARRIVAL is scored against,
+        # which is what every consumer of this field already means by
+        # it.
+        if case is not None:
+            handle_out.write("case={}\n".format(case.name))
+            handle_out.write("case_first={}\n".format(case.first.name))
+            if case.second is not None:
+                handle_out.write("case_second={}\n".format(case.second.name))
+                handle_out.write("case_when={}\n".format(case.when))
+                if case.when == "preempt":
+                    handle_out.write("case_preempt_at_m={:.6f}\n".format(
+                        case.preempt_at_m))
+            handle_out.write("leg1_status={}\n".format(leg1["status"]))
+            handle_out.write("leg1_error_code={}\n".format(
+                leg1["error_code"]))
+            handle_out.write("t_leg1_end_s={:.9f}\n".format(leg1["t_end"]))
+            if preempt["t_s"] is not None:
+                handle_out.write("t_preempt_s={:.9f}\n".format(
+                    preempt["t_s"]))
+                handle_out.write("preempt_distance_m={:.9f}\n".format(
+                    preempt["distance_m"]))
+            if t_sent2 is not None:
+                handle_out.write("t_goal2_sent_s={:.9f}\n".format(t_sent2))
         handle_out.write("goal={}\n".format(goal.name))
         handle_out.write("goal_world={:.6f} {:.6f} {:.6f}\n".format(
             goal.x, goal.y, goal.travel_yaw))
@@ -2001,18 +2481,45 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="drive_goal.py", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd")
-    for name in ("describe", "record"):
+    for name in ("describe", "record", "probe"):
         one = sub.add_parser(name)
         one.add_argument("--goal", default=None)
+        # A CASE IS TWO GOALS AND A RULE (config.yaml nav.cases). It is
+        # mutually exclusive with --goal by the refusal below rather
+        # than by argparse, because the refusal can say why.
+        one.add_argument("--case", default=None)
     ana = sub.add_parser("analyse")
     ana.add_argument("sessions", nargs="*")
     args = parser.parse_args(argv)
     cfg = _common.load_config(TOOL, REQUIRED_KEYS)
+    if args.cmd in ("describe", "record", "probe"):
+        if args.goal and args.case:
+            cfg.refuse("exactly one of --goal and --case was given",
+                       _common.CONFIG + " (nav.goals, nav.cases)",
+                       "--goal {} and --case {} were both given. A case "
+                       "NAMES its goals;".format(args.goal, args.case),
+                       "a --goal beside one would be a second opinion "
+                       "about which pose this is.")
     if args.cmd == "describe":
+        if args.case:
+            case = read_case(cfg, args.case)
+            describe_case(cfg, case)
+            return 0
         describe(cfg, read_goal(cfg, args.goal or cfg.s("nav.default_goal")))
         return 0
+    if args.cmd == "probe":
+        if args.case:
+            case = read_case(cfg, args.case)
+            return probe(cfg, case.second or case.first)
+        return probe(cfg, read_goal(cfg, args.goal
+                                    or cfg.s("nav.default_goal")))
     if args.cmd == "record":
-        args.goal = args.goal or cfg.s("nav.default_goal")
+        if args.case:
+            args.case_row = read_case(cfg, args.case)
+            args.goal = args.case_row.first.name
+        else:
+            args.case_row = None
+            args.goal = args.goal or cfg.s("nav.default_goal")
         return record(cfg, args)
     if args.cmd == "analyse":
         return analyse(cfg, args.sessions)
