@@ -273,12 +273,26 @@ def session_dir(cfg, name):
 
 
 def sessions_in(cfg):
+    """Every FINISHED goal session under evidence.dir.
+
+    A DIRECTORY WITHOUT A session.txt IS A RECORDING THAT DID NOT
+    FINISH, and it is skipped rather than half-read. `record` makes the
+    directory before it subscribes to anything and writes every CSV and
+    the session file together at the end, so an interrupted run - a
+    Ctrl-C, a stack that went down mid-drive - leaves an empty
+    directory. Reading one raises out of the CSV reader four frames
+    down, naming a file rather than the run.
+      NAMED SESSIONS ARE NOT FILTERED. An operator who asks for one by
+    name gets that reader's refusal, which is the right answer to
+    "analyse this particular thing".
+    """
     root = os.path.join(_common.REPO, cfg.s("evidence.dir"))
     if not os.path.isdir(root):
         return []
     return sorted(name for name in os.listdir(root)
                   if name.startswith("goal-")
-                  and os.path.isdir(os.path.join(root, name)))
+                  and os.path.isfile(os.path.join(root, name,
+                                                  "session.txt")))
 
 
 def load(cfg, session):
