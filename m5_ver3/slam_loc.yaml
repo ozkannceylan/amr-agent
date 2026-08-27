@@ -1,0 +1,381 @@
+# slam_loc.yaml - what the LOCALISER does, and nothing else.
+#
+# `m5v3.sh start --localize slam` runs slam_toolbox's
+# localization_slam_toolbox_node over the SAME frozen pose graph
+# m5_ver3/slam.yaml's mapper built, as the alternative to nav2_amcl over
+# the same build's grid. The research this phase is built on could not
+# settle which is better: docs/reports/m5v3-01 ranks pose-graph
+# localisation ABOVE AMCL on a published comparison, m5v3-04 ranks it
+# BELOW on field reports of imprecision and "snap" relocalisations
+# (slam_toolbox issue #285). EVIDENCE_LOCALIZATION_V3.md 13 is this
+# rig's answer.
+#
+# WHY IT IS A THIRD FILE AND NOT A SECOND BLOCK IN slam.yaml, WHICH IS
+# THE ONE THING ABOUT THIS FILE WORTH READING TWICE. It began as a
+# `slam_loc:` block appended to slam.yaml - amcl.yaml's shape, two nodes
+# addressed in one file - and that was wrong for a reason no rule about
+# tidiness would have caught: **slam.yaml is an INPUT THE FROZEN MAP's
+# MANIFEST HASHES**. tools/build_map.sh writes `slam_params_md5` into
+# maps/<name>/build.txt, that manifest is COMMITTED and read-only (F3
+# constraint 16), and tools/map_register.py's load_build_manifest() feeds
+# it to the bringup gate and to `analyse`. Appending to a file a frozen
+# manifest names moves that file's hash away from the record, and a
+# manifest whose lines are known-false is a manifest nothing downstream
+# can lean on.
+#   SO THE LOCALISER'S PARAMETERS LIVE HERE, WHERE NOTHING HASHES THEM,
+#   and slam.yaml is left at the bytes it had before this arm existed.
+#   ekf.yaml / ekf_rf2o.yaml is the same split for the same reason one
+#   layer down: the arm that is OPTIONAL gets its own file, so the file
+#   the default path reads is never edited to add one.
+#   WHAT THIS DOES **NOT** FIX, and EVIDENCE_MAP_V3.md 8 owns it: that
+#   manifest line was ALREADY not the hash of slam.yaml before F3 Task 3
+#   began. F3's own first fix round removed four duplicated key names
+#   from the mapper block (076ae1e9... -> 32e00dc5...), and that note
+#   states both hashes and proves the four values were identical at the
+#   moment they were separated. This file's move takes THIS task's drift
+#   back out of it; it cannot take that one out, and it does not pretend
+#   to.
+#
+# WHY IT IS A ROS PARAMETER FILE BESIDE config.yaml, and it is ekf.yaml's
+# argument applied a fourth time. slam_toolbox's node reads a top-level
+# NODE NAME, a `ros__parameters:` mapping and names it declares itself;
+# config.yaml is not one and is not bent into one. So config.yaml keeps
+# the addresses, the artifact paths and the name of this file, m5v3.sh
+# passes them on the command line, and THIS file holds what the localiser
+# is configured to DO. NO NUMBER IS IN BOTH.
+#
+# THE TOP-LEVEL KEY IS `slam_loc:` AND IT IS THE NODE'S NAME. rclcpp
+# applies NOTHING from a block addressed to somebody else and says
+# nothing at all about it, so m5v3.sh greps for it before it starts
+# anything - check_loc_params(), which is check_ekf_params()'s idiom.
+# A localiser that missed this block would come up in the package default
+# MODE, which is MAPPING: it would deserialise nothing, start an EMPTY
+# graph, build a new map of whatever it could see and publish
+# map -> odom out of it, looking exactly like a localiser.
+#
+# THE VERSION IS 2.8.5, jazzy. Every default named below was READ OFF THE
+# RUNNING NODE on this rig 2026-08-27 (`ros2 param list` / `ros2 param
+# get` after the configure and activate transitions - a lifecycle node
+# declares nothing before them), not copied from a README.
+
+# ---- WHAT IS *NOT* IN THIS FILE, AND WHY ----
+#
+# SEVEN NAMES BELONG HERE BY SUBJECT AND ARE ABSENT BY RULE - the four
+# slam.yaml's mapper block lists for the same reason, plus three of
+# this arm's own:
+#
+#     scan_topic     config.yaml topics.scan_nav     /forklift/gz/scan_nav
+#     base_frame     config.yaml frames.base_link    base_link
+#     odom_frame     config.yaml frames.odom         odom
+#     map_frame      config.yaml frames.map          map
+#     map_name       config.yaml topics.map          /map
+#     map_file_name  config.yaml map.dir + map.name  the frozen graph,
+#                                                    without its suffix
+#     map_start_pose vehicle.spawn THROUGH the committed registration
+#
+# m5v3.sh passes all seven as `-p` OVERRIDES. The first five are
+# ADDRESSES config.yaml already owns; the sixth is the path to a frozen
+# artifact whose md5 that script checks against build.txt before it
+# starts anything; and the seventh is DERIVED at bringup and could not
+# be written down here even if the rule allowed it.
+#   map_start_pose IS THE SEED, AND ITS MECHANISM DIFFERS FROM AMCL's.
+#   This node reads it in loadPoseGraphByParams() on the CONFIGURE
+#   transition - before there is a graph to be lost in - and with
+#   neither it nor map_start_at_dock it logs "Map starting pose not
+#   specified" and starts at the graph's own origin. So the slam arm is
+#   seeded by a PARAMETER where the amcl arm is seeded by a MESSAGE on
+#   topics.initialpose, with the same three numbers out of the same
+#   registration. config.yaml's localization.initial_pose block carries
+#   the difference and what follows from it (the covariance that message
+#   carries has no counterpart here, and the bringup gate must not
+#   publish a seed on this arm or its own pose-against-seed check would
+#   be checking the gate).
+#   map_start_at_dock IS NEVER SET. The binary's own string for it reads
+#   "Starting localization at first node (dock) is correctly not
+#   supported"; the graph's first node is where the MAPPING drive
+#   started, which is not where a run starts.
+#
+# ---- WHAT IS DELIBERATELY THE SAME AS THE AMCL ARM, AND WHY ----
+#
+# THE CORRECTION CADENCE. minimum_travel_distance below is 0.25 m and
+# minimum_travel_heading is 0.20 rad, which are amcl.yaml's update_min_d
+# and update_min_a exactly. That is not laziness and it is not
+# inheritance from the mapper (which uses 0.30): it is what makes the A/B
+# an A/B. Two localisers that corrected at different cadences would
+# differ in accuracy AND in CPU for a reason that is a configuration
+# choice rather than a property of either algorithm, and neither column
+# of EVIDENCE_LOCALIZATION_V3.md 13 could then be read.
+#   THE UNDERLYING DERIVATION IS THE SAME ONE AND IT SURVIVES THE MOVE.
+#   Over 0.25 m of travel F2's EKF accumulates 10.6 mm of along-track
+#   error dry and 24 mm wet (EVIDENCE_FUSION.md 8.5), both UNDER this
+#   map's own registration residual of 0.0291 m rms. A finer threshold
+#   would correct against distances this map cannot resolve. And 0.25 m
+#   is still under the 0.50 m shortest rack segment on this floor, which
+#   is the property the mapper's 0.30 was chosen for.
+#
+# ---- AND WHAT IS DELIBERATELY DIFFERENT FROM THE MAPPER ----
+#
+# THE LOOP-CLOSURE SEARCH RADIUS GOES BACK TO THE SHIPPED 3.0 m. The
+# mapper block raised it to 5.0 with a measurement: the raw odometry it
+# was correcting drifts 9.86 m over the 225.0 m mapping drive, so a
+# 3.0 m radius could be smaller than the error closure exists to remove.
+# A LOCALISATION run has no such drift to close - it starts from a seed
+# whose own prior is 0.50 m and is corrected against a finished graph
+# every 0.25 m of travel - so the lower bound that forced 5.0 m is
+# simply absent, while the UPPER bound is unchanged and is the floor's:
+# the rack block repeats every 5.75 m, and a search radius past that can
+# find a bay that is not the bay the truck is standing in. 3.0 m sits
+# further inside that than 5.0 did, so the non-tuned choice and the
+# better-argued one are the same choice here.
+#
+# THE SCAN BUFFER IS SIZED IN METRES AND THE METRES CHANGED. 32 nodes at
+# the 0.25 m cadence above is 8.00 m of running history, which is the
+# width of every cruise corridor on this floor and 1.39 rack pitches -
+# so the buffer always spans at least one rack END, the only
+# along-corridor feature there is. The mapper's 30 was the same
+# arithmetic at its own 0.30 m spacing (9.0 m); the number moved because
+# the spacing did, and the property did not.
+#
+# ---- WHAT IS NOT TOUCHED, AND THE REFUSAL IS THE POINT ----
+#
+# LOOP CLOSURE IS LEFT ON. docs/reports/m5v3-04's whole prediction
+# against this arm is snap relocalisation - a localiser that jumps when
+# the graph decides it is somewhere else - and the mechanism that does
+# that is loop closure against a candidate chain. Turning it off would
+# answer the question this task was set by assumption instead of by
+# measurement, and would also be a configuration nobody ships. Both
+# response thresholds are shipped and untouched for the same reason:
+# they are the numbers a localiser is flattered with, and
+# EVIDENCE_LOCALIZATION_V3.md 8 measures what the jumps actually are.
+#
+# NOTHING IN THIS FILE WAS MOVED BECAUSE A RUN CAME OUT BETTER. Every
+# value was fixed before the first scored run on this arm, and the
+# finding that most obviously invites tuning (the same dynamic
+# along-track offset the amcl arm has, EVIDENCE_LOCALIZATION_V3.md 9) is
+# recorded rather than tuned away, exactly as amcl.yaml's header
+# promises for the other arm.
+
+slam_loc:
+  ros__parameters:
+
+    # ================= SOLVER =================
+    # THE SAME SIX LINES AS THE MAPPER, AND THAT IS THE ARGUMENT. A
+    # different linear solver is a different optimiser: the graph below
+    # is the one slam.yaml's mapper built, and re-optimising it under
+    # another back-end would make every figure in the A/B a statement
+    # about two things at once.
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ================= THE MODE, WHICH IS THE WHOLE ARM =================
+    # NON-DEFAULT (mapping). `localization` is what makes
+    # loadPoseGraphByParams() deserialise map_file_name instead of
+    # starting an empty graph, what makes every processed scan a
+    # LOCALIZATION scan that is added to the graph and then removed
+    # again, and what makes the serialize service refuse
+    # ("LocalizationSlamToolbox: Cannot call serialize map in
+    # localization mode!"). The frozen artifact is therefore read-only by
+    # the vendor's own construction and not only by this track's
+    # discipline - F3 constraint 16, enforced one layer further down than
+    # it is anywhere else on this stack.
+    mode: localization
+
+    # THE CLOCK IS THE PLANT'S. Live rather than replayed this time, but
+    # the reason is slam.yaml's word for word: with use_sim_time
+    # false this node's now() would be wall time, every stamped scan and
+    # transform would look hours stale, and the tf2 message filter would
+    # drop the entire scan stream.
+    use_sim_time: true
+
+    debug_logging: false
+    # EVERY SCAN IS OFFERED (default). The travel gates below are what
+    # decide the correction cadence; a second, blunter gate here would
+    # make it depend on the SPEED the profile happened to drive at.
+    throttle_scans: 1
+
+    # map -> odom, at 50 Hz. THIS IS THE EDGE THIS ARM EXISTS TO PUBLISH
+    # and here it is live rather than ornamental - it is the one
+    # transform F3 adds (global constraint 15), and the estimator keeps
+    # odom -> base_link underneath it.
+    #   IT IS NOT nav2_amcl's CADENCE AND THE DIFFERENCE IS MEASURED
+    #   RATHER THAN EQUALISED. amcl re-broadcasts on every scan (15 Hz);
+    #   this node re-broadcasts on a timer at 50 Hz. Both re-send an
+    #   UNCHANGED edge between corrections, so neither number is a
+    #   correction rate - EVIDENCE_LOCALIZATION_V3.md counts only
+    #   broadcasts that DIFFER - and both are reported as the delivered
+    #   rate a consumer would see. The value is the package's own and is
+    #   not moved to make a table symmetrical.
+    transform_publish_period: 0.02
+
+    # THE RASTER, AND IT IS WHY THIS ARM NEEDS NO map_server. This node
+    # publishes an occupancy grid rendered from the graph it deserialised
+    # on config.yaml's topics.map, which is the service nav2_map_server
+    # performs on the other arm for a measured 3.00 % of one core. Same
+    # interval as the mapper used, so the two arms deliver the same thing
+    # to any downstream consumer and the CPU column of the A/B compares
+    # like with like.
+    #   NOTHING ON THIS TRACK CONSUMES IT YET. It is here for parity and
+    #   for F4, and what it costs is measured rather than assumed
+    #   (EVIDENCE_LOCALIZATION_V3.md 13).
+    map_update_interval: 10.0
+    # 0.05 m cells - the same contract the frozen grid carries, so the
+    # raster this node publishes and the one map_server serves are the
+    # same resolution and a costmap downstream divides into either.
+    resolution: 0.05
+
+    restamp_tf: false
+    # THE LOOKUP BUDGET, AND IT IS THE SHIPPED LOCALISATION VALUE RATHER
+    # THAN THE MAPPER'S 0.5. The mapper's number was a REPLAY number:
+    # rosbag2 plays by receive time, so a scan could arrive a long way
+    # from the transform that brackets it. Live, base_link -> odom is on
+    # the graph at 50 Hz and the tf2 message filter has already held the
+    # scan until it can be transformed, so 0.2 s is ten periods of the
+    # edge this lookup reads and the timeout never binds.
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    # 40 MB of stack. NOT ORNAMENTAL HERE: this node deserialises a
+    # 48.7 MB pose graph on its configure transition, and the recursion
+    # in karto's serializer is what this exists for.
+    stack_size_to_use: 40000000
+    # NO RVIZ AND NO HUMAN, and on this arm that is a safety property
+    # rather than a tidiness one: interactive mode is how a pose graph is
+    # DRAGGED, and the graph under this node is frozen.
+    enable_interactive_mode: false
+    # NOTHING HERE MAY WRITE A MAP. The localisation node refuses to
+    # serialise anyway (see `mode`), and this is the same refusal said
+    # once more where a reader is looking.
+    use_map_saver: false
+    # NO BOND, WHICH IS amcl.yaml's ARGUMENT ON THIS NODE. With
+    # use_lifecycle_manager true this node bonds to a nav2
+    # lifecycle_manager, and a bond is a heartbeat with a deadline: a
+    # deadline starves at the real-time factors a simulation reaches, and
+    # a manager that declares a healthy node dead is worse than no
+    # manager. m5v3.sh drives the two transitions itself, so there is no
+    # manager for it to bond to and the default is the right value -
+    # written down because it decides whether a bond exists at all.
+    use_lifecycle_manager: false
+
+    # ================= WHEN A SCAN CORRECTS THE POSE =================
+    #
+    # THE CADENCE IS amcl.yaml's, DELIBERATELY. See the header: two
+    # localisers that corrected at different cadences would differ in
+    # accuracy and in CPU for a reason that belongs to neither
+    # algorithm. 0.25 m is also what F2's measured error makes
+    # meaningful - 10.6 mm dry and 24 mm wet of accumulated along-track
+    # error over that distance, both under this map's 0.0291 m residual
+    # rms - and it is under the 0.50 m shortest rack segment this floor
+    # has.
+    #   THE TIME GATE IS THE MAPPER'S AND IS THERE FOR THE MAPPER'S
+    #   REASON: two scan periods at this sensor's 15 Hz, a floor that
+    #   never binds at any speed this vehicle drives, and the thing that
+    #   stops a STOPPED truck re-processing the same view.
+    minimum_travel_distance: 0.25
+    minimum_travel_heading: 0.20
+    minimum_time_interval: 0.20
+    check_min_dist_and_heading_precisely: false
+
+    # ================= THE RUNNING SCAN =================
+    #
+    # 32 NODES AT 0.25 m IS 8.00 m, AND THE METRES ARE THE ARGUMENT. That
+    # is the width of every cruise corridor on this floor and 1.39 rack
+    # pitches (5.75 m), so the running chain always spans at least one
+    # rack END - the only along-corridor feature a scan matcher has here.
+    # The mapper's 30 was this same arithmetic at its own 0.30 m spacing;
+    # the count moved because the spacing did.
+    #   IT DOES NOT FIX A DEGENERATE CORRIDOR AND NOTHING CAN. Where a
+    #   scan carries no along-aisle information a longer memory only
+    #   remembers more of the same. EVIDENCE_LOCALIZATION_V3.md 9 is what
+    #   that costs, on both arms.
+    scan_buffer_size: 32
+    # The scanner's own range, for the mapper's reason: the shipped 10.0
+    # is BELOW this sensor's 25.0 m and would throw away exactly the
+    # long-range returns - the far wall of a 48 m hall - that carry the
+    # most geometry.
+    scan_buffer_maximum_scan_distance: 25.0
+    # THE tf2 MESSAGE FILTER'S QUEUE, AND LIVE IT IS A BRINGUP NUMBER
+    # RATHER THAN A REPLAY ONE. Once the stack is up, base_link -> odom
+    # is on the graph at 50 Hz against a 15 Hz scan and nothing ever
+    # waits. What this covers is the first second: the bridges carry
+    # scans as soon as the world is up, and a queue of 1 would drop
+    # everything that arrived before the chain closed. Ten scans is
+    # 0.67 s of holding and costs ten scans of memory.
+    scan_queue_size: 10
+
+    # ================= SCAN MATCHING =================
+    # Both default, and on this arm scan matching is not optional at all:
+    # with it off this node would be dead reckoning on F2's EKF with a
+    # frozen graph it never consulted, which is the DEFAULT stack wearing
+    # a localiser's label.
+    use_scan_matching: true
+    use_scan_barycenter: true
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+
+    # ================= LOOP CLOSURE =================
+    #
+    # LEFT ON, AND THAT IS THE MEASUREMENT AND NOT AN OVERSIGHT. See the
+    # header: the pathology docs/reports/m5v3-04 predicts for this arm is
+    # the snap relocalisation loop closure produces, and a configuration
+    # that disabled it would answer the question by assumption.
+    #
+    # loop_search_maximum_distance  SHIPPED 3.0, and NOT the mapper's 5.0
+    #   The mapper raised it because the raw odometry it was correcting
+    #   had drifted 9.86 m by the end of the drive. This node starts from
+    #   a seed with a 0.50 m prior and is corrected every 0.25 m, so
+    #   there is no such drift for a radius to have to cover - while the
+    #   floor's own 5.75 m rack pitch, which is the UPPER bound, has not
+    #   moved. The shipped value sits further inside it.
+    # loop_search_space_dimension   SHIPPED 8.0
+    #   The correlation grid the candidate chain is matched in. It has to
+    #   bracket the radius above: +-3.0 m needs 6.0 m of grid and 8.0
+    #   gives a metre of margin either side.
+    # loop_match_minimum_chain_size  10, the mapper's and not the shipped
+    #   localisation file's 3
+    #   How many linked scans a closure candidate must present. It is the
+    #   aliasing guard on a floor that repeats every 5.75 m: a chain of
+    #   three can be assembled inside one bay, and ten cannot. The
+    #   32-scan buffer above always has ten to offer.
+    # BOTH RESPONSE THRESHOLDS ARE SHIPPED AND UNTOUCHED, for the header's
+    # reason.
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+    loop_search_maximum_distance: 3.0
+
+    # ================= CORRELATION, ALL SHIPPED =================
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # ================= PENALTIES, ALL SHIPPED =================
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true
+    min_pass_through: 2
+    occupancy_threshold: 0.1
+    # WHAT THIS NODE PUTS IN THE COVARIANCE IT PUBLISHES, UNSCALED. Both
+    # default. These scale the scan matcher's own response covariance
+    # before it reaches the graph and the `pose` topic, and scaling them
+    # is how a factor graph is told to trust the matcher more or less
+    # than the odometry - a reading this rig has not taken. What the
+    # covariance that comes out is actually WORTH is measured in
+    # EVIDENCE_LOCALIZATION_V3.md 13, and the bringup gate is built on
+    # that measurement rather than on the assumption that it means what
+    # nav2_amcl's means.
+    position_covariance_scale: 1.0
+    yaw_covariance_scale: 1.0

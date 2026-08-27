@@ -81,7 +81,7 @@ subject of §9.
 | artifact | what it is |
 |---|---|
 | `m5v3.sh start --localize [amcl\|slam]` | the flag takes a value; the two localisers are structurally exclusive, each with its own label, node, parameter block and md5 gate — §13.1 |
-| `slam.yaml`'s `slam_loc:` block | what the SECOND localiser does. The mapper's values RE-ARGUED for a node that tracks in a graph rather than builds one, and the two that came out different said so — §13.1 |
+| `slam_loc.yaml` | what the SECOND localiser does. `slam.yaml`'s values RE-ARGUED for a node that tracks in a graph rather than builds one, and the two that came out different say so. A FILE of its own, because `slam.yaml` is an input the frozen map's `build.txt` hashes — §13.1 |
 | `tools/evidence_core.py`'s four localiser tables | where each arm publishes its pose, which artifact its md5 is of, how it is seeded, and what the gate can read at rest. Each refuses an arm it has never heard of — §13.2 |
 | `tools/map_register.py seed` + `load_build_manifest` | the seed as ONE piece of arithmetic with two callers, and the pose graph's committed hash — §13.1 |
 | `tests/test_localizer_arms.py`, `tests/test_sweep_patterns.py` | 48 tests, and the second file is the one that would have caught §13.2b |
@@ -1193,6 +1193,22 @@ table.**
 | the seed | a MESSAGE on `/initialpose` | the `map_start_pose` **PARAMETER**, on the node's command line |
 | its own pose | `/amcl_pose` | `/pose` |
 
+**ITS PARAMETERS ARE IN A FILE OF THEIR OWN, AND THAT IS THE FROZEN
+MANIFEST'S DOING.** They began as a `slam_loc:` block appended to
+`slam.yaml` — amcl.yaml's shape, two nodes in one file — and were moved
+into `m5_ver3/slam_loc.yaml` because `slam.yaml` is an INPUT the frozen
+map's `build.txt` hashes (`slam_params_md5`), that manifest is committed
+and read-only, and `map_register.load_build_manifest()` feeds it to the
+bringup gate and to `analyse`. **`slam.yaml` therefore hashes to
+`32e00dc551e879b0e8f7461e991ccc13` on disk today — the same bytes it had
+before this arm existed — so this task moved that input not at all.**
+(`build.txt` records `076ae1e9…`, which is a SEPARATE and older
+divergence: F3's own first fix round removed four duplicated key names
+from the mapper block, and EVIDENCE_MAP_V3.md §8 states both hashes and
+proves the four values were identical at the moment they were separated.
+That note is where the difference is owned; this arm neither widened it
+nor rewrote a frozen file to hide it.)
+
 **There is no `map_server` on this arm and that is a decision rather than
 an omission.** The localisation node publishes an occupancy grid rendered
 from the graph it opened, on the same `topics.map`, at the same 0.05 m
@@ -1778,7 +1794,7 @@ this section. A task that wanted to move that recommendation should
 repeat it first, three times per arm, before it moves anything else.
 
 **The pose graph's parameters were fixed before the first scored run and
-none was moved after.** `slam.yaml`'s `slam_loc:` block carries the
+none was moved after.** `slam_loc.yaml` carries the
 argument for every one; the values that would most obviously improve
 §13.3's `corner_creep` row — a finer travel gate, a larger correlation
 search space — are named there as untouched and the reason is

@@ -150,14 +150,19 @@ m5_ver3/
 │                         and it is ekf.yaml's split applied to the second
 │                         estimator. Read only by --fuse; on that arm
 │                         ekf.yaml is not read at all
-├── slam.yaml             TWO BLOCKS, and ekf.yaml's split a third time.
-│                         `slam_toolbox:` is what the MAPPER does, read
-│                         only by tools/build_map.sh; `slam_loc:` is
-│                         what the LOCALISER does, read only by
-│                         `--localize slam`. amcl.yaml's two-nodes-in-
-│                         one-file shape a second time, and the second
-│                         block is the first one RE-ARGUED for a node
-│                         that tracks in a graph rather than builds one
+├── slam.yaml             what the MAPPER does, and ekf.yaml's split a
+│                         third time. Read only by tools/build_map.sh,
+│                         never by anything the live stack runs - and
+│                         NOT EDITED BY THE ARM BELOW, because it is an
+│                         input the frozen map's build.txt hashes
+├── slam_loc.yaml         what the LOCALISER slam_toolbox ships does,
+│                         read only by `--localize slam`. It is
+│                         slam.yaml RE-ARGUED for a node that tracks in
+│                         a frozen graph rather than one that builds
+│                         one, and it is a FILE of its own rather than a
+│                         second block for the reason its header opens
+│                         with - ekf.yaml / ekf_rf2o.yaml's split, one
+│                         layer down
 ├── amcl.yaml             what the OTHER LOCALISER does, and ekf.yaml's split a
 │                         FOURTH time - two nodes addressed in one file,
 │                         both greped for before anything starts. Every

@@ -489,10 +489,11 @@ check_fuse_params() {  # check_fuse_params <file>
 # figure about nav2's defaults wearing this file's name.
 #
 # AND ON THE slam ARM IT IS THE SAME CHECK WITH MORE AT STAKE, WHICH IS
-# WHY THE NODE LIST IS AN ARGUMENT AND NOT A CONSTANT. slam.yaml carries
-# TWO top-level blocks - `slam_toolbox:` for the mapper that built the
-# frozen map and `slam_loc:` for the localiser - and the second one is
-# where `mode: localization` lives. A localiser that missed its block
+# WHY THE NODE LIST IS AN ARGUMENT AND NOT A CONSTANT. m5_ver3/
+# slam_loc.yaml is addressed to `slam_loc:` and that block is where
+# `mode: localization` lives - the mapper that built the frozen map has
+# its own file (slam.yaml, `slam_toolbox:`) and this arm never reads it.
+# A localiser that missed its block
 # would come up in the package default MODE, which is MAPPING: it would
 # deserialise nothing, start an EMPTY graph, build a new map of whatever
 # it could see and publish map -> odom out of it. Nothing would look

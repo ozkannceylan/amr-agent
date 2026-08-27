@@ -2933,19 +2933,26 @@ localization:
     node_name: "amcl"
   slam:
     label: "slam"
-    # THE SAME FILE THE MAPPER READS, ADDRESSED TO A DIFFERENT NODE.
-    # m5_ver3/slam.yaml carries a `slam_toolbox:` block - what the
-    # MAPPER does, which tools/build_map.sh reads - and a `slam_loc:`
-    # block, which is this arm's. It is amcl.yaml's shape exactly: two
-    # nodes in one file, both greped for by name before anything starts.
-    #   THE TWO BLOCKS ARE WRITTEN OUT AND NOT SHARED, and that is
-    #   forced twice over. rcl_yaml_param_parser does not implement YAML
-    #   anchors or merge keys at all, so `<<: *mapper` is not available;
-    #   and every value in the localisation block had to be argued for a
-    #   node that TRACKS in a frozen graph rather than one that BUILDS
-    #   one, which is a different argument even where it lands on the
-    #   same number. slam.yaml's own header says which values moved.
-    params_file: "m5_ver3/slam.yaml"
+    # A FILE OF ITS OWN, AND NOT A SECOND BLOCK IN slam.yaml. It began as
+    # one - amcl.yaml's shape, two nodes addressed in one file - and it
+    # was moved out because slam.yaml is an INPUT THE FROZEN MAP's
+    # MANIFEST HASHES: tools/build_map.sh writes `slam_params_md5` into
+    # maps/<name>/build.txt, that manifest is COMMITTED and read-only (F3
+    # constraint 16), and tools/map_register.py's load_build_manifest()
+    # feeds it to the bringup gate and to `analyse`. Editing a file a
+    # frozen manifest names moves that file's hash off the record, and a
+    # manifest with known-false lines in it is one nothing downstream can
+    # lean on. So the optional arm gets its own file and the default
+    # path's file is left alone - which is ekf.yaml / ekf_rf2o.yaml's
+    # split, one layer down, for the same reason.
+    #   THE VALUES ARE NOT SHARED WITH THE MAPPER'S AND COULD NOT BE.
+    #   rcl_yaml_param_parser implements no YAML anchors or merge keys at
+    #   all, so `<<: *mapper` is not available at any price; and every
+    #   value had to be argued again for a node that TRACKS in a frozen
+    #   graph rather than one that BUILDS one, which is a different
+    #   argument even where it lands on the same number. slam_loc.yaml's
+    #   own header says which ones came out different.
+    params_file: "m5_ver3/slam_loc.yaml"
     package: "slam_toolbox"
     # LOCALIZATION AND NOT map_and_localization. slam_toolbox 2.8.5 ships
     # five node executables; `localization_slam_toolbox_node` is the one

@@ -3149,10 +3149,9 @@ def analyse(cfg, args):
     print("  what it does     {} - the motion model, the sensor model "
           "and the".format(cfg.s("localization.amcl.params_file")))
     print("                   argument for every value in both")
-    print("                   {} (the slam_loc: block) - the mode, the "
-          "travel".format(cfg.s("localization.slam.params_file")))
-    print("                   gates, the running scan and the loop "
-          "closure")
+    print("                   {} - the mode, the travel gates, the "
+          "running".format(cfg.s("localization.slam.params_file")))
+    print("                   scan and the loop closure")
     # THE SAME CROSS-CHECK THE RATES GET, AND FOR THE SAME REASON. The
     # SDF decides where the IMU is bolted; config.yaml copies it because
     # a shell cannot read XML. A disagreement is a copy that has gone
