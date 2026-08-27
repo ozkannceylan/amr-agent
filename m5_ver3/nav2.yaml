@@ -573,36 +573,60 @@ controller_server:
     general_goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
       # ---------------------------------------------------------------
-      # 0.25 m, AND THE STATION CLASS IS WHAT BINDS IT - NOT THE
-      # LOCALISER. Both candidates were computed:
+      # 0.60 m, AND F3's PEAK IS WHAT BINDS IT. THE 0.25 m STATION CLASS
+      # IS NOT MET BY AN APPROACH POSE ON THIS STACK, AND SAYING SO IS
+      # THE ANSWER TO THE QUESTION RATHER THAN A FAILURE TO REPORT ONE.
+      #
+      # Three candidates were computed and the largest of them wins,
+      # because a goal box is a criterion the vehicle has to be able to
+      # SATISFY and not one somebody would like:
       #
       #   the station class          0.25 m   (m6/ipc/stations.py's
-      #                                        0.25 m arrival tolerance,
-      #                                        the class this floor's
-      #                                        twelve stations are
-      #                                        specified to)
-      #   the localiser's END error  0.1954 m (worst of five dry runs,
+      #                                        arrival tolerance, the
+      #                                        class this floor's twelve
+      #                                        stations are specified to)
+      #   the localiser's END error  0.1954 m (worst of five dry runs at
+      #                                        REST,
       #                                        EVIDENCE_LOCALIZATION_V3
-      #                                        6.1) - and the instrument
-      #                                        floor under it is 0.1179 m
+      #                                        6.1)
+      #   the localiser's WORST      0.5321 m (6.1's `worst` column -
+      #     ABSOLUTE error, MOVING              the error the pose
+      #                                         carries at the moment a
+      #                                         MOVING vehicle passes
+      #                                         through the box)
       #
-      # 0.1954 < 0.25, so the tolerance this stack can MEASURE is
-      # tighter than the tolerance the floor ASKS FOR, and the station
-      # class is the binding constraint. Had it gone the other way the
-      # honest answer would have been the localiser's number and a note
-      # that the floor's class is not met.
+      # THE THIRD IS THE ONE THAT APPLIES AND IT TOOK SIX RUNS TO SEE
+      # WHY. `stateful` latches the position test the first time the
+      # vehicle is inside the box - and this vehicle is MOVING when that
+      # happens, because it cannot stop inside a box it has not yet
+      # reached. So the pose being tested carries the MOVING error and
+      # not the at-rest one, and 0.1954 m was never the right number.
+      #   MEASURED. On the run that decided it the truck tracked a
+      #   straight 17 m plan and its CLOSEST APPROACH to the goal was
+      #   0.3398 m - outside a 0.25 m box by 0.09 m. The checker never
+      #   latched, and what happened next is section 15's largest
+      #   controller finding: MPPI did not turn the vehicle round. It
+      #   drove another 260 s and 21 m east, into the far wall.
       #
-      # AND THE 0.523 m MOVING PEAK DOES NOT BIND IT, which is the
-      # comparison 13.10 asks for explicitly. That peak is an
-      # ALONG-TRACK offset present only WHILE THE VEHICLE IS MOVING: it
-      # builds over the cruise and collapses over the final metre and a
-      # half of every run measured, ending at -0.016 m
-      # (EVIDENCE_LOCALIZATION_V3 9.1). A goal is checked at REST, after
-      # the deceleration that collapses it, and `stateful` below latches
-      # the position test once it is met. Sizing a goal box on a moving
-      # lag would be sizing it on a number that is gone by the time the
-      # box is evaluated.
-      xy_goal_tolerance: 0.25
+      # 0.60 m IS 0.5321 ROUNDED UP TO A HANDS-WIDTH, and it is 2.4
+      # times the station class. WHAT THAT MEANS IS WRITTEN DOWN RATHER
+      # THAN LEFT TO A READER: an approach pose on this stack today
+      # arrives within 0.60 m of where it was asked for, plus whatever
+      # the vehicle coasts after the latch (0.208 m at this envelope,
+      # EVIDENCE_NAV_V3.md 8). A STATION IS NOT THAT, and F5's docking
+      # server - `slowdown_radius`, `v_linear_min`, and a local sensor
+      # closing on the station itself rather than on a map pose - is
+      # what a station needs. docs/reports/m5v3-02 3.
+      #
+      # AND THE 0.523 m MOVING ALONG-TRACK OFFSET IS THE SAME NUMBER
+      # SEEN FROM THE OTHER SIDE, which is the comparison 13.10 asks for
+      # explicitly. 6.1's `worst` column and 13.6's per-run max are two
+      # readings of one phenomenon: a systematic offset present only
+      # while the vehicle is MOVING. 13.10 said "F4 sizes the corridor
+      # against 0.52 m dry" and this is that sentence applied to the
+      # goal box as well, because the box is evaluated on a moving
+      # vehicle.
+      xy_goal_tolerance: 0.60
       # 0.15 rad = 8.6 deg. The measured END heading errors on the five
       # dry runs are 0.0020 to 0.0315 rad, so this is 4.8 x the worst of
       # them. It has to be reachable WITHOUT rotating in place, because

@@ -530,26 +530,33 @@ def test_both_costmaps_inflate_by_the_SAME_radius(costmaps):
 # the goal checker, argued against the station class AND F3's END error
 # ----------------------------------------------------------------------
 
-def test_the_goal_tolerance_is_the_STATION_CLASS_and_that_is_what_binds(
-        nav):
+def test_the_goal_box_is_one_a_MOVING_vehicle_can_be_judged_in(nav):
+    # THE COMPARISON THE TOLERANCE HAS TO SURVIVE, and six runs are why.
+    # `stateful` latches the position test the first time the vehicle is
+    # inside the box, and the vehicle is MOVING then - it cannot stop
+    # inside a box it has not reached. So the pose being tested carries
+    # the localiser's MOVING error and not its at-rest one.
     checker = nav["controller_server"]["ros__parameters"][
         "general_goal_checker"]
-    assert float(checker["xy_goal_tolerance"]) == STATION_TOLERANCE_M
-    # AND THE COMPARISON THAT SAYS WHICH ONE BINDS. The localiser's own
-    # worst END error, at rest, is TIGHTER than the class the floor asks
-    # for - so the floor binds. Had it gone the other way the honest
-    # answer would have been the localiser's number.
-    assert WORST_END_ERROR_M < STATION_TOLERANCE_M
-
-
-#: What this vehicle takes to stop from its transit ceiling, measured
-#: (EVIDENCE_NAV_V3.md 8) - 1.02 m and 2.07 s, of which about 0.25 s is
-#: dead time in the chain. F4 Task 1's handover.
-STOPPING_DISTANCE_M = 1.02
+    box = float(checker["xy_goal_tolerance"])
+    assert box >= WORST_ABSOLUTE_ERROR_M, (
+        "a {:.2f} m box against a worst measured MOVING absolute error "
+        "of {:.4f} m asks the vehicle to satisfy a criterion its own "
+        "pose estimate cannot resolve".format(box, WORST_ABSOLUTE_ERROR_M))
+    # AND THE STATION CLASS IS NOT MET, WHICH IS AN ANSWER AND NOT A
+    # FAILURE TO REPORT ONE. This assertion exists so that the day it
+    # stops holding, somebody has to come and delete it deliberately.
+    assert box > STATION_TOLERANCE_M, (
+        "the box is inside the station class - if that is real, "
+        "EVIDENCE_NAV_V3.md's arrival table and F5's docking brief both "
+        "need rewriting")
+    assert WORST_END_ERROR_M < STATION_TOLERANCE_M, (
+        "the AT-REST error is the number a docking phase gets to work "
+        "with, and it is inside the class; the moving one is not")
 
 
 def test_the_goal_pull_starts_further_out_than_the_vehicle_can_STOP(
-        controller):
+        nav, controller):
     # THE FIGURE THAT DECIDES WHETHER A GOAL IS REACHED AT ALL. The goal
     # critic is what pulls the speed down; below its threshold the
     # controller is still tracking the path at whatever the envelope
@@ -557,14 +564,18 @@ def test_the_goal_pull_starts_further_out_than_the_vehicle_can_STOP(
     # vehicle to come to rest inside a box it is still travelling
     # through. Measured at the shipped 1.4 m: the same goal succeeded
     # twice and missed once.
-    need = STOPPING_DISTANCE_M + STATION_TOLERANCE_M
+    box = float(nav["controller_server"]["ros__parameters"]
+                ["general_goal_checker"]["xy_goal_tolerance"])
+    ceiling = abs(float(controller["vx_min"]))
+    need = STOPPING_DISTANCE_BY_SPEED_M[round(ceiling, 3)] + box
     for critic in ("GoalCritic", "PathFollowCritic"):
         threshold = float(controller[critic]["threshold_to_consider"])
         assert threshold > need, (
-            "{}: {:.2f} m against a {:.2f} m stopping distance and a "
-            "{:.2f} m goal box".format(critic, threshold,
-                                       STOPPING_DISTANCE_M,
-                                       STATION_TOLERANCE_M))
+            "{}: {:.2f} m against a {:.3f} m stopping distance and "
+            "a {:.2f} m goal box".format(
+                critic, threshold,
+                STOPPING_DISTANCE_BY_SPEED_M[round(ceiling, 3)],
+                box))
     # AND THE TWO ARE ONE HAND-OFF. nav2_bringup ships them equal; a gap
     # between them is a band where both critics pull.
     assert (controller["GoalCritic"]["threshold_to_consider"]
