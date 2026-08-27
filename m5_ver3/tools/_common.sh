@@ -127,12 +127,28 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 #     pathology docs/reports/m5v3-04 predicts for this arm.
 #     A LIST IS THE ONE THING A DUPLICATED MECHANISM CANNOT SURVIVE, and
 #     that is this file's own header two paragraphs up. It was right.
+#   AND THE LAST TWO ARE F4 TASK 1's COMMAND PATH, which is not an arm:
+#   both children go up with every bringup, so both patterns are load
+#   bearing on every stop rather than only on a flag.
+#     `velocity_smoother` IS THE EXECUTABLE AND NOT THE PACKAGE, which is
+#     the opposite of the two localisation patterns above and for the
+#     opposite reason: `nav2_velocity_smoother` appears on the `ros2 run`
+#     WRAPPER's line but the node's own line is
+#     /opt/ros/jazzy/lib/nav2_velocity_smoother/velocity_smoother, and
+#     the executable name is a substring of BOTH. One pattern, both
+#     processes - which is the property this whole list is for.
+#     `cmd_vel_tricycle.py` IS THE SCRIPT NAME, exactly as
+#     wheel_odometry.py and rf2o_twist.py are: it is a plain python3
+#     process whose command line begins with the interpreter, so nothing
+#     else here nominates it, and naming "python3" instead would nominate
+#     every python on the machine.
 M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py"
                "static_transform_publisher" "ekf_node"
                "rf2o_laser_odometry_node" "rf2o_twist.py"
                "fixed_lag_smoother_node"
                "nav2_map_server" "nav2_amcl"
-               "localization_slam_toolbox_node")
+               "localization_slam_toolbox_node"
+               "velocity_smoother" "cmd_vel_tricycle.py")
 
 # The same list as one pgrep alternation, for the callers that want a
 # single pattern rather than a loop.

@@ -516,7 +516,11 @@ def test_the_parse_finds_the_children_this_stack_actually_starts():
         names.update(label.split("|"))
     for child in ("world", "bridge", "imgbridge", "odom", "imutf", "ekf",
                   "gui", "lasertf", "rf2o", "rf2ocov", "fuse",
-                  "map_server", "amcl", "slam_loc"):
+                  "map_server", "amcl", "slam_loc",
+                  # F4 Task 1's two, and they are NOT arm-gated: the
+                  # command path is one line and a line that exists on
+                  # some arms is not one.
+                  "smoother", "navcmd"):
         assert child in names, "the parse lost the `{}` child".format(child)
 
 

@@ -205,6 +205,11 @@ REQUIRED_KEYS=(
     topics.odometry_filtered topics.rf2o_odom_raw topics.rf2o_odom
     topics.fuse_odometry_filtered
     topics.initialpose topics.map
+    topics.steer_cmd topics.traction_cmd
+    topics.cmd_vel topics.cmd_vel_smoothed topics.speed_limit
+    topics.navcmd_status
+    vehicle.steer_limit_rad vehicle.steer_rate_limit_radps
+    navcmd.accel_mps2 navcmd.steer_command_limit_rad
     frames.odom frames.base_link frames.imu frames.map
     frames.nav_lidar frames.rf2o_odom
     map.dir map.name map.registration.file map.build_file
@@ -224,6 +229,8 @@ REQUIRED_KEYS=(
     fuse.prefix fuse.deb_prefix fuse.package fuse.executable
     fuse.node_name fuse.params_file fuse.lag_duration_s
     fuse.optimization_frequency_hz fuse.transaction_timeout_s
+    smoother.package smoother.executable smoother.node_name
+    smoother.params_file smoother.active_timeout_s
     slippery.slip_compliance_lateral slippery.slip_compliance_longitudinal
     slippery.service_timeout_ms
     paths.log_dir paths.pidfile paths.traction_file
@@ -242,6 +249,10 @@ configure() {
     MODEL="$REPO/$CFG_VEHICLE_MODEL"
     EKF_PARAMS="$REPO/$CFG_EKF_PARAMS_FILE"
     EKF_RF2O_PARAMS="$REPO/$CFG_EKF_RF2O_PARAMS_FILE"
+    # F4 TASK 1's, and it is derived unconditionally like the rest: the
+    # command path is not an arm and there is no branch on which this
+    # variable does not exist.
+    SMOOTHER_PARAMS="$REPO/$CFG_SMOOTHER_PARAMS_FILE"
     # THE ONE PATH ON THIS TRACK THAT IS NOT UNDER $REPO. The rf2o build
     # tree is the USER's - tools/install_rf2o.sh's argument, and F2
     # constraint 14's - so config.yaml writes it with a leading ~/ and
@@ -401,6 +412,32 @@ check_ekf_params() {  # check_ekf_params <file> <the config key naming it>
         "ekf_node would come up on its PACKAGE DEFAULTS with the topic," \
         "frame and rate overrides still applied: 50 Hz of a pose that" \
         "never moves, an identity transform, and 'status' ALIVE." \
+        "the top-level keys that file does define:" \
+        "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$file" || echo '(none)')"
+}
+
+# AND THE SMOOTHER'S, F4 TASK 1, FOR check_ekf_params()'s REASON IN A
+# DIFFERENT CURRENCY. nav2_velocity_smoother is a rclcpp lifecycle node,
+# so a parameter file addressed to somebody else applies NOTHING and it
+# does not complain: the node comes up on its PACKAGE DEFAULTS -
+# 0.5 m/s, 2.5 rad/s, OPEN_LOOP feedback, scale_velocities FALSE - and
+# every one of those is wrong here in a way nothing downstream can see.
+# The vehicle would still drive: slower than commanded, on a curvature
+# corrupted by two axes limited independently, ramping against this
+# node's own last command rather than against the vehicle's measured
+# twist. `status` would read ALIVE, /cmd_vel_smoothed would be at rate,
+# and the converter would faithfully convert the wrong twist.
+check_smoother_params() {  # check_smoother_params <file>
+    local file="$1"
+    grep -q "^${CFG_SMOOTHER_NODE_NAME}:" "$file" || refuse \
+        "the smoother parameter file is addressed to $CFG_SMOOTHER_NODE_NAME" \
+        "$file and $CONFIG (smoother.node_name, smoother.params_file)" \
+        "there is no top-level '$CFG_SMOOTHER_NODE_NAME:' key in that" \
+        "file, so every parameter in it belongs to a node that is never" \
+        "started - and nav2_velocity_smoother would come up on its" \
+        "PACKAGE DEFAULTS: 0.5 m/s, 2.5 rad/s, OPEN_LOOP, and vx and wz" \
+        "limited INDEPENDENTLY, which on a nonholonomic vehicle silently" \
+        "changes the commanded arc." \
         "the top-level keys that file does define:" \
         "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$file" || echo '(none)')"
 }
@@ -857,6 +894,48 @@ localize_lifecycle() {
     done
 }
 
+# THE SMOOTHER REACHES ACTIVE ON ITS OWN, AND THIS ONLY ASKS WHETHER IT
+# DID. F4 Task 1, and it is deliberately NOT localize_lifecycle() a
+# second time: that function DRIVES transitions because nav2_amcl,
+# nav2_map_server and slam_toolbox's localiser all sit in UNCONFIGURED
+# for ever unless something moves them. nav2_velocity_smoother takes
+# `autostart_node`, and smoother.yaml sets it - MEASURED on this rig
+# 2026-08-27, the node logs "Auto-starting node", "Configuring",
+# "Activating" and `ros2 lifecycle get` reads `active [3]` with nothing
+# external touching it.
+#   SO THE MECHANISM IS A POLL AND NOT A DRIVE, which is a different
+#   thing rather than a copy of one. What it still has to catch is the
+#   failure every lifecycle node on this stack shares: left short of
+#   ACTIVE it subscribes to nothing, publishes nothing and logs nothing
+#   that reads as an error, and `status` says ALIVE. On this node that
+#   would be a command path with no smoother in it - every twist a step,
+#   and no dead-man at all.
+smoother_active() {
+    local deadline state=""
+    deadline=$(( $(date +%s) + CFG_SMOOTHER_ACTIVE_TIMEOUT_S ))
+    until [ "$state" = active ]; do
+        state="$(ros2 lifecycle get "/$CFG_SMOOTHER_NODE_NAME" 2>/dev/null \
+                 | cut -d' ' -f1)"
+        [ "$state" = active ] && break
+        [ "$(date +%s)" -lt "$deadline" ] || refuse \
+            "$CFG_SMOOTHER_NODE_NAME reached ACTIVE on its own inside ${CFG_SMOOTHER_ACTIVE_TIMEOUT_S}s" \
+            "$LOGDIR/smoother.log (config.yaml smoother.active_timeout_s)" \
+            "it is in state '${state:-unreadable}' and NOTHING IS DRIVING" \
+            "IT - $CFG_SMOOTHER_PARAMS_FILE sets autostart_node and this" \
+            "script only watches. A state of 'unconfigured' therefore" \
+            "means that parameter did not reach the node, which is what" \
+            "a --params-file addressed to the wrong node name looks" \
+            "like from the outside." \
+            "LEFT SHORT OF ACTIVE IT SUBSCRIBES TO NOTHING AND PUBLISHES" \
+            "NOTHING, while logging nothing that reads as an error - so" \
+            "the command path would have no smoother in it at all: every" \
+            "twist a step at a terminal with no ramp, and no dead-man." \
+            "THE STACK IS INCOMPLETE, and what is left of it is STILL UP."
+        sleep 1
+    done
+    echo "  $CFG_SMOOTHER_NODE_NAME active"
+}
+
 start() {
     local pid name
     # A LIVE STACK IS NOT STARTED OVER. ours() is the liveness test rather
@@ -895,6 +974,23 @@ start() {
     # see check_ekf_params() above, which is where that argument lives
     # now that TWO files have to pass it.
     check_ekf_params "$EKF_PARAMS" "ekf.params_file"
+    # AND THE SMOOTHER'S, ON THE SAME TERMS AND UNCONDITIONALLY - the
+    # command path is not an arm. F4 constraint 18: there is one command
+    # line from the controller to the terminals and no bypass, so the
+    # two children that make it up go up with the stack and are checked
+    # with it. See check_smoother_params() for what a file addressed to
+    # the wrong node costs here.
+    [ -f "$SMOOTHER_PARAMS" ] || refuse \
+        "the velocity smoother's parameter file exists" \
+        "$CONFIG (smoother.params_file)" \
+        "it resolves to $SMOOTHER_PARAMS" \
+        "a --params-file that does not exist IS a hard error from" \
+        "rclcpp, which is the good case; the case this check is for is" \
+        "the file being MOVED, because then the smoother comes up on" \
+        "its PACKAGE DEFAULTS and limits vx and wz INDEPENDENTLY -" \
+        "which on a nonholonomic vehicle changes the commanded arc" \
+        "without changing anything an instrument can see."
+    check_smoother_params "$SMOOTHER_PARAMS"
     # THE OPTIONAL ARM'S OWN THREE CHECKS, AND THEY ARE ONLY MADE WHEN
     # THE FLAG WAS GIVEN. Every one of them is about a file or a binary
     # that the default stack neither reads nor starts, so making them
@@ -1200,7 +1296,31 @@ start() {
         "$CFG_TOPICS_IMU@sensor_msgs/msg/Imu[gz.msgs.IMU" \
         "$CFG_TOPICS_CAM_INFO@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo" \
         "$CFG_TOPICS_JOINT_STATE@sensor_msgs/msg/JointState[gz.msgs.Model" \
-        "$CFG_TOPICS_DRIVE_SPEED_READ_A@sensor_msgs/msg/JointState[gz.msgs.Model"
+        "$CFG_TOPICS_DRIVE_SPEED_READ_A@sensor_msgs/msg/JointState[gz.msgs.Model" \
+        "$CFG_TOPICS_STEER_CMD@std_msgs/msg/Float64]gz.msgs.Double" \
+        "$CFG_TOPICS_TRACTION_CMD@std_msgs/msg/Float64]gz.msgs.Double"
+
+    # THE LAST TWO LINES ABOVE ARE THE ONLY ONES ON THIS BRIDGE THAT RUN
+    # THE OTHER WAY, and F4 Task 1 added them. `]` is ROS -> gz where `[`
+    # is gz -> ROS, and what they carry is model.sdf's own two MOTOR
+    # TERMINALS: the steer angle in rad and the drive shaft's rate in
+    # rad/s. Without them nodes/cmd_vel_tricycle.py would have nowhere
+    # to publish - a python process cannot speak gz transport - and the
+    # command path would end one hop short of the plant.
+    #   THEY COST NOTHING WHEN NOTHING IS COMMANDING. A ROS -> gz bridge
+    #   line is a subscription on the ROS side and a publisher on the gz
+    #   side; with no publisher on the ROS topic it carries no traffic at
+    #   all, which is why they are on the DEFAULT bridge rather than
+    #   behind a flag.
+    #   AND tools/drive_route.py AND tools/slip_bench.sh STILL WORK. They
+    #   address the gz side of these same two topics directly, and gz
+    #   transport takes the last write - so what keeps the two from
+    #   fighting is not the bridge, it is that the converter publishes
+    #   NOTHING until a twist arrives (config.yaml navcmd:, engagement).
+    #   THE ROS AND GZ NAMES ARE THE SAME NAME. ros_gz maps a topic to
+    #   itself unless told otherwise, so config.yaml's topics.steer_cmd
+    #   is the address on both sides and there is no second spelling of
+    #   a terminal to keep in step.
 
     # THE DEPTH IMAGE GOES THROUGH A SECOND, DIFFERENT BRIDGE, and that is
     # ros_gz's design rather than this script's choice: parameter_bridge
@@ -1320,6 +1440,15 @@ start() {
         # without the static transform the samples are dropped
         # (EVIDENCE_FUSION.md 2.2 is the same failure on the other arm).
         local base="$CFG_FRAMES_BASE_LINK"
+        # WHERE THE FUSED ESTIMATE COMES OUT ON THIS ARM, bound here so
+        # the smoother below can close its loop on it. The two arms
+        # publish at two addresses (config.yaml topics.
+        # fuse_odometry_filtered argues why) and the CLOSED_LOOP
+        # smoother has to be told which - a parameter file cannot know.
+        # It is the shell's half of tools/evidence_core.py's
+        # fused_topic_key(), which is where every INSTRUMENT on this
+        # track asks the same question.
+        FUSED_TOPIC="$CFG_TOPICS_FUSE_ODOMETRY_FILTERED"
         # WHY THE BINARY IS NAMED BY ABSOLUTE PATH rather than run
         # through `ros2 run`: `ros2 run` would find it now that
         # AMENT_PREFIX_PATH names the prefix, and it FORKS - the pid this
@@ -1358,6 +1487,10 @@ start() {
             -p filtered_publisher.base_link_output_frame_id:="$base" \
             -p filtered_publisher.world_frame_id:="$CFG_FRAMES_ODOM"
     else
+        # THE SHIPPING FILTER'S ADDRESS, and the smoother's feedback
+        # follows it exactly as it follows the other arm's. See the
+        # --fuse branch above for the whole argument.
+        FUSED_TOPIC="$CFG_TOPICS_ODOMETRY_FILTERED"
         local ekf_arm=()
         if [ "$RF2O" = true ]; then
             ekf_arm=(--params-file "$EKF_RF2O_PARAMS"
@@ -1377,6 +1510,66 @@ start() {
             -p imu0:="$CFG_TOPICS_IMU" \
             -r /odometry/filtered:="$CFG_TOPICS_ODOMETRY_FILTERED"
     fi
+
+    # ---------------------- THE COMMAND PATH, F4 ----------------------
+    # TWO CHILDREN, AND NEITHER IS BEHIND A FLAG. F4 constraint 18: the
+    # command path is ONE LINE with no bypass -
+    #
+    #   Nav2's controller (F4 Task 2) -> $CFG_TOPICS_CMD_VEL
+    #     -> velocity_smoother        -> $CFG_TOPICS_CMD_VEL_SMOOTHED
+    #       -> nodes/cmd_vel_tricycle.py
+    #         -> $CFG_TOPICS_STEER_CMD + $CFG_TOPICS_TRACTION_CMD
+    #
+    # - and a line that exists on some arms and not others is not one
+    # line. There is no `--nav` gate on THESE two for three reasons:
+    #   THE PATH HAS TO BE VERIFIABLE WITHOUT NAV2. F4 Task 1's whole
+    #   evidence is an OPEN-LOOP drive - a scripted twist profile through
+    #   the smoother and the converter, scored against ground truth -
+    #   and a converter that only exists on the arm that also brings up a
+    #   planner cannot be measured apart from one.
+    #   F4 TASK 2's ARM ASSUMES IT. `--nav` adds the planner, the
+    #   controller and the BT navigator ON TOP of a path that is already
+    #   there, which is the same shape --localize has over the estimator.
+    #   AND IT COSTS NOTHING IDLE. The smoother publishes nothing with
+    #   nothing commanding (measured, config.yaml smoother:) and the
+    #   converter publishes nothing until it is engaged (config.yaml
+    #   navcmd:), so the default stack's two gz-side benches keep the
+    #   terminals to themselves and EVIDENCE_NAV_V3.md carries the CPU
+    #   and RTF this pair actually costs.
+    #
+    # THE SMOOTHER FIRST, AND IT IS AFTER THE ESTIMATOR ON PURPOSE. It is
+    # feedback: CLOSED_LOOP, so it subscribes the fused estimate -
+    # whichever arm is up, which is what $FUSED_TOPIC carries - and a
+    # subscriber started before its publisher only spends its first
+    # moments limiting against nothing. It NEVER subscribes the ground
+    # truth: F2 constraint 13 and F4 constraint 18, and the address it
+    # is given here is the one thing that could break that.
+    #   EVERYTHING ON THIS COMMAND LINE IS AN ADDRESS OR A LIFECYCLE
+    #   FACT. What is LIMITED and to what is smoother.yaml's, checked
+    #   above for the node name it is addressed to; use_sim_time is a
+    #   fact about THIS STACK (there is a bridged /clock) and not about
+    #   the smoother, which is ekf_node's own split.
+    spawn smoother ros2 run "$CFG_SMOOTHER_PACKAGE" \
+        "$CFG_SMOOTHER_EXECUTABLE" --ros-args \
+        -r __node:="$CFG_SMOOTHER_NODE_NAME" \
+        --params-file "$SMOOTHER_PARAMS" \
+        -p use_sim_time:=true \
+        -p odom_topic:="$FUSED_TOPIC" \
+        -r /cmd_vel:="$CFG_TOPICS_CMD_VEL" \
+        -r /cmd_vel_smoothed:="$CFG_TOPICS_CMD_VEL_SMOOTHED"
+
+    # AND THE CONVERTER, WHICH IS THE LAST THING BEFORE THE PLANT. It
+    # turns a base_link twist into the steer angle and wheel rate
+    # model.sdf's two terminals carry, ramps both at the plant's own
+    # actuator limits, and is the one place on this stack that enforces
+    # the MEASURED curvature ceiling. nodes/cmd_vel_tricycle_core.py is
+    # the arithmetic and is the INVERSE of what nodes/wheel_odom_core.py
+    # integrates - the same sign discipline, cited in its header.
+    #   python3 AND NOT `ros2 run`, for wheel_odometry.py's reason: this
+    #   track is deliberately not a colcon package.
+    #   IT READS NO GROUND TRUTH AND NO POSE. It measures nothing and
+    #   corrects nothing; the same twist twice gives the same pair twice.
+    spawn navcmd python3 "$M5V3/nodes/cmd_vel_tricycle.py"
 
     # ------------------- THE OPTIONAL LOCALISATION ARM -------------------
     # TWO MORE CHILDREN, AND NEITHER EXISTS WITHOUT --localize. The whole
@@ -1576,6 +1769,36 @@ start() {
             "'$0 stop', then start again - this does not recur every time."
     fi
 
+    # AND THE COMMAND PATH IS ASKED WHETHER IT IS ONE. F4 Task 1, and it
+    # is two questions rather than one, because the path has two ways of
+    # being alive and broken at the same time.
+    #   FIRST: DID THE SMOOTHER REACH ACTIVE? Nothing drives it - it
+    #   self-transitions off smoother.yaml's autostart_node - so a node
+    #   sitting in UNCONFIGURED here is a parameter that did not land,
+    #   and the symptom is a command path with no smoother in it.
+    smoother_active
+    #   SECOND: DOES A COMMAND ACTUALLY REACH THE TERMINALS? Every check
+    #   above is satisfied by three processes that have never spoken to
+    #   each other: the smoother ACTIVE with nothing subscribed to its
+    #   output, a converter ALIVE with a misspelt subscription, a bridge
+    #   line pointing the wrong way. tools/navcmd_health.py publishes ONE
+    #   twist - a ZERO twist, the only command that cannot move this
+    #   vehicle - and reads the answer back off the two terminals. It is
+    #   the smallest possible demonstration that the line is a line.
+    if ! python3 "$M5V3/tools/navcmd_health.py"; then
+        refuse "one command reached the plant's own terminals" \
+            "$M5V3/tools/navcmd_health.py (its refusal is printed above)" \
+            "every other check on this stack has passed: both command" \
+            "path children are ALIVE, the smoother is ACTIVE and the" \
+            "estimator underneath is sane." \
+            "WHAT THAT LEAVES is three processes that have never spoken" \
+            "to each other - and nothing else on this stack can tell" \
+            "that apart from a working command path, because at rest a" \
+            "working one publishes nothing either." \
+            "THE STACK IS INCOMPLETE, and what is left of it is STILL UP." \
+            "'$0 stop', then read $LOGDIR/smoother.log and $LOGDIR/navcmd.log."
+    fi
+
     # AND ON THE LOCALISATION ARM, THE TWO LIFECYCLE TRANSITIONS AND THE
     # GATE BEHIND THEM. Both nodes are ALIVE by this line and neither has
     # done anything at all: a nav2 lifecycle node that is started and
@@ -1735,9 +1958,39 @@ start() {
              "other localiser's -"
         echo "         analyse refuses both."
     fi
+    echo "navcmd: THE COMMAND PATH IS UP AND IDLE." \
+         "$CFG_TOPICS_CMD_VEL -> velocity_smoother"
+    echo "         -> $CFG_TOPICS_CMD_VEL_SMOOTHED ->" \
+         "nodes/cmd_vel_tricycle.py -> the two"
+    echo "         motor terminals, over the bridge. ONE LINE, no bypass," \
+         "and no ground"
+    echo "         truth in it - the smoother closes its loop on" \
+         "$FUSED_TOPIC."
+    echo "         NOTHING IS PUBLISHED until a twist arrives, so" \
+         "drive_route.py and"
+    echo "         slip_bench.sh still own the gz side of those" \
+         "terminals. Steer is"
+    echo "         ramped at ${CFG_VEHICLE_STEER_RATE_LIMIT_RADPS} rad/s" \
+         "and tread at ${CFG_NAVCMD_ACCEL_MPS2} m/s^2;"
+    echo "         the curvature ceiling is" \
+         "${CFG_NAVCMD_STEER_COMMAND_LIMIT_RAD} rad of steer, MEASURED," \
+         "inside the"
+    echo "         ${CFG_VEHICLE_STEER_LIMIT_RAD} rad mechanical stop." \
+         "Counters: $CFG_TOPICS_NAVCMD_STATUS."
+    echo "limit:  $CFG_TOPICS_SPEED_LIMIT (nav2_msgs/SpeedLimit) is" \
+         "WIRED and DEMONSTRATED."
+    echo "         It is an INTERFACE and not a safety claim - the PLC" \
+         "that will drive"
+    echo "         it arrives in a later phase, nothing on this path" \
+         "inhibits motion,"
+    echo "         and the collision monitor 'does not provide hard" \
+         "real-time safety"
+    echo "         certifications' and does not replace a safety-rated" \
+         "PLC."
     echo "check:  $0 status"
     echo "rtf:    bash $M5V3/tools/rtf_probe.sh"
     echo "drive:  python3 $M5V3/tools/drive_route.py straight|square|aisle"
+    echo "twist:  python3 $M5V3/tools/drive_twist.py record --profile straight"
     echo "logs:   $LOGDIR"
 }
 
@@ -2239,8 +2492,15 @@ USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [am
               publishing /m5v3/wheel_odom, the static base_link -> imu_link
               transform the filter needs before it will fuse the IMU, and
               robot_localization's ekf_node, publishing
-              /m5v3/odometry/filtered and odom -> base_link.
-              SEVEN processes with a window, six without.
+              /m5v3/odometry/filtered and odom -> base_link. Then THE
+              COMMAND PATH, which is not behind a flag and is one line
+              with no bypass: nav2's velocity smoother on /cmd_vel and
+              nodes/cmd_vel_tricycle.py converting its output onto the
+              model's two motor terminals. Both are IDLE until something
+              publishes a twist - nothing is written to either terminal
+              until then, so tools/drive_route.py and tools/slip_bench.sh
+              still own the gz side of them.
+              NINE processes with a window, eight without.
               The 3D lidar and both point clouds stay on the gz side.
               It refuses outright if the renderer is not the NVIDIA GPU.
   --headless  no Gazebo window. Use it for anything being MEASURED.
