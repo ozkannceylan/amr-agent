@@ -163,6 +163,20 @@ m5_ver3/
 │                         second block for the reason its header opens
 │                         with - ekf.yaml / ekf_rf2o.yaml's split, one
 │                         layer down
+├── nav2.yaml             what the PLANNER, the CONTROLLER, the two
+│                         COSTMAPS, the BT NAVIGATOR and the BEHAVIOUR
+│                         SERVER do, and ekf.yaml's split a SIXTH time.
+│                         Read only by --nav. Every number derived from
+│                         a measurement this track already took, and the
+│                         three addresses two SUB-NODE costmaps cannot
+│                         be handed on a command line are CHECKED back
+│                         against config.yaml before anything starts
+├── behavior_trees/
+│   └── navigate_to_pose_tricycle_v3.xml
+│                         the tricycle tree: no Spin, no BackUp, no
+│                         DriveOnHeading. Clear the costmaps, wait,
+│                         replan - and if it still cannot plan, STOP
+│                         AND REPORT
 ├── smoother.yaml         what the VELOCITY SMOOTHER limits, and to what, and
 │                         it is ekf.yaml's split a FIFTH time. Read only by
 │                         the `smoother` child - which is not an arm and is
@@ -245,6 +259,22 @@ m5_ver3/
     ├── map_core.py       the arithmetic behind EVIDENCE_MAP_V3.md - the
     │                     grid, the wall fit, the rigid transform and the
     │                     world's own rectangles. --selftest
+    ├── nav_health.py     did the NAV ARM come up able to PLAN, or come
+    │                     up merely active? SIX lifecycle nodes - each
+    │                     costmap is one of its own inside its server -
+    │                     and then ONE trivial compute_path_to_pose,
+    │                     because an ACTIVE server over an EMPTY costmap
+    │                     plans nothing and says nothing about it.
+    │                     It commands no motion. m5v3.sh refuses on it
+    ├── drive_goal.py     send Nav2 a GOAL and score what the truck did.
+    │                     describe | record --goal G | analyse. It
+    │                     publishes exactly ONE thing - an action goal -
+    │                     and records the controller's own output, both
+    │                     terminals, both tf edges, EVERY plan with its
+    │                     poses, and the action's feedback. `analyse`
+    │                     needs nothing. drive_twist's sibling: that one
+    │                     drives a table that cannot respond, this one
+    │                     measures the response
     └── map_register.py   derive | show | clearance | support. Needs
                           nothing. `support` places every beam of a
                           recorded drive on the frozen map from the TRUE
@@ -299,6 +329,9 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 | `m5v3.sh start --rf2o` | **A DIFFERENT ESTIMATOR ON THE SAME PLANT**, which is `--slippery`'s mirror image. Three more children — the nav lidar's static transform, `rf2o_laser_odometry_node` matching consecutive scans, and the relay that puts a MEASURED covariance on its twist and corrects two frame errors upstream does not — plus a second `--params-file` giving the filter an `odom1` it fuses `vx` and `vyaw` from. Default OFF, and without it the stack is the six children `EVIDENCE_FUSION.md` §9.3 measured, off one unchanged parameter file. Build the package first with `tools/install_rf2o.sh`. Combines with the other two flags, in any order. |
 | `m5v3.sh start --fuse` | **A DIFFERENT ESTIMATOR, IN THE FILTER'S PLACE.** `fuse`'s `fixed_lag_smoother_node` goes up and the `ekf` child does **not** — six children either way, with `fuse` where `ekf` was. It fuses the SAME channels off the SAME two topics (wheel twist `vx`, `vy`, `vyaw` + gyro yaw rate) and publishes its own `odom` → `base_link`, on `topics.fuse_odometry_filtered` and never on the shipping address. Where `--rf2o` adds a sensor, this replaces the estimator, so the two are **mutually exclusive and refused together by name**. Vendor it first with `tools/install_fuse.sh`. Default OFF, and `EVIDENCE_FUSION.md` §11 is the A/B that says why. Combines with `--headless` and `--slippery`. |
 | `m5v3.sh start --localize [amcl\|slam]` | **A LAYER ABOVE THE ESTIMATOR, AND THE FIRST THING ON THIS TRACK THAT KNOWS WHERE THE VEHICLE IS.** Whichever localiser is named becomes the **sole publisher of `map` → `odom`**, the one edge F3 adds; the estimator keeps `odom` → `base_link` and neither can become the other. **The two are never alive together** — the exclusion is a `case` with two branches, not two flags — and the value is optional (`localization.default_arm` says which it means without one). **`amcl`** is three more children: the nav lidar's static transform, `nav2_map_server` serving the FROZEN GRID, and `nav2_amcl` localising in it, seeded by a MESSAGE on `/initialpose`. **`slam`** is two: that same static transform and `slam_toolbox`'s `localization_slam_toolbox_node`, which deserialises the FROZEN POSE GRAPH, rasters its own grid onto `/map` (so no `map_server`) and is seeded by the `map_start_pose` PARAMETER. Either way the artifacts THAT arm opens are md5-checked **before anything is started** — the grid against the committed registration, the pose graph against `build.txt` — a rebuilt map is a new artifact, never an overwrite; every lifecycle node is driven to ACTIVE by this script; and a gate refuses a localiser which came up merely alive. **No kidnapped-robot recovery is claimed on either arm.** Combines with all three flags above. `EVIDENCE_LOCALIZATION_V3.md` is what both produced, and §13 is the A/B. **§13.10 IS F4's CONSUMPTION CONTRACT**: consume `map` -> `base_link` off `/tf` on the `amcl` arm, and size the controller's corridor on the PEAKS rather than the means - moving along-track offset up to **0.523 m dry / 1.250 m wet**, worst single `map` -> `odom` step **0.2591 m dry / 0.4927 m wet**, worst heading step **0.0764 rad**, all of it against an instrument floor of **rms 0.0291 m / MAX 0.1179 m** below which no figure is a measurement of the localiser. |
+| `m5v3.sh start --localize --nav` | **THE LAYER THAT DECIDES WHERE THE VEHICLE GOES, F4 Task 2, AND THE FIRST FLAG HERE THAT DEPENDS ON ANOTHER.** Five more children - nav2's `planner_server` (`SmacPlannerHybrid`, `REEDS_SHEPP`, a 1.25 m turning radius DERIVED from the worst corner this plant actually delivered), `controller_server` (`MPPI` with `AckermannConstraints`), `bt_navigator` on a TRICYCLE TREE with no `Spin` and no `BackUp`, `behavior_server` running only `wait`, and ONE `nav_lifecycle_manager` for the four with its BOND SWITCHED OFF at both ends. Costmaps: global = the frozen grid the `--localize` arm is already serving (**no second `map_server`**), local = a rolling window on the nav lidar - and the obstacle layer is honest only because `footprint_clearing_enabled` removes the three pieces of this truck the scanner can see, which is MEASURED (`EVIDENCE_NAV_V3.md` §14.4). **It is REFUSED without `--localize` by name**: the global costmap's activation BLOCKS until `map` -> `base_link` resolves. It adds a PUBLISHER to the top of a command path that is already there and changes nothing about it (F4 constraint 18). `status` and every recorded session say `nav=on@<nav2.yaml md5>`; `analyse` refuses a set that mixes two of them. SIXTEEN processes headless on the `amcl` arm, seventeen with a window. |
+| `tools/nav_health.py` | Did the NAV ARM come up able to **PLAN**? SIX lifecycle nodes - each costmap is one of its own inside its server - and then ONE trivial `compute_path_to_pose`, because a server that is ACTIVE over an EMPTY costmap plans nothing and says nothing about it. It commands NO motion. **`start --nav` runs it for you.** |
+| `tools/drive_goal.py` | **THE DRIVEN GOAL'S OWN BENCH, F4 Task 2.** `describe`, `record --goal G` and `analyse`. It publishes exactly ONE thing - a `navigate_to_pose` goal, carried into the map frame by the committed registration - and records the controller's own `/cmd_vel`, both terminals, both `/tf` edges, EVERY `/plan` with its poses and the action's feedback. `analyse` scores the arrival **twice** (the ground truth, and what the stack BELIEVED - which is the only one the goal checker ever saw), the deviation from the plan STANDING AT THE TIME, the steer activity, the cusps, the controller frequency, the real-time factor and every `map` -> `odom` correction with what the controller did about it. It needs no ROS and it **refuses a stack whose state file says `nav=off`**. |
 | `tools/drive_twist.py` | **THE COMMAND PATH'S OWN BENCH, F4 Task 1.** `describe`, `record --profile P` and `analyse` - a config-tabled TWIST profile published into `/cmd_vel`, through the velocity smoother and the tricycle converter, with every joint of the chain recorded: what was commanded, what the smoother made of it, what each terminal carried, what the axes did and what the truck did. `analyse` needs no ROS. It **REFUSES a table** the converter would have to clamp (unless the row says `expect_clamp`), which is `drive_route.py`'s own line between a table and a live command. |
 | `tools/navcmd_health.py` | Did the COMMAND PATH come up as a LINE? It publishes ONE zero twist - the only command that cannot move this vehicle - and reads the answer off the **gz side** of the traction terminal, four hops away. Every other check on the stack is satisfied by three processes that have never spoken to each other. **`start` runs it for you.** |
 | `m5v3.sh status` | Each child by name, ALIVE or DEAD, with its log, **which traction the running plant is on**, **which estimator arm is up** and **which absolute layer**. Exit 0 only if every one is alive. |
@@ -429,6 +462,38 @@ working exactly as they did. `EVIDENCE_NAV_V3.md` is what the path
 delivers, and §6.3 is the one ruling it reversed: the velocity smoother
 ships `OPEN_LOOP` against the crib's `CLOSED_LOOP`, because a limiter
 closed on THIS track's deliberately bad estimate inherits its lag.
+
+**AND SINCE F4 TASK 2 THERE IS A NAV ARM, WHICH IS THE FIRST FLAG HERE
+THAT DEPENDS ON ANOTHER.** `--nav` puts nav2's planner
+(`SmacPlannerHybrid`, `REEDS_SHEPP`), controller (`MPPI` with
+`AckermannConstraints`), BT navigator (on a tricycle tree with **no
+`Spin` and no `BackUp`**) and behaviour server (running only `wait`)
+over the localised stack, with **one lifecycle manager** for the four —
+the only nav2 lifecycle manager on this track, and its bond is switched
+off at both ends, which is the whole reason the argument that refused
+one for the localiser does not refuse this one. Five children,
+`m5_ver3/nav2.yaml`, `m5_ver3/behavior_trees/`.
+  **IT IS REFUSED WITHOUT `--localize`, BY NAME, AND THE REASON IS
+  MECHANICAL.** The global costmap's frame is `map` and
+  `Costmap2DROS::on_activate` BLOCKS until it can transform
+  `map` → `base_link`; with no localiser nothing publishes `map` →
+  `odom` at all, so that transition never returns and five processes sit
+  ALIVE for ever with nothing in any log that reads as an error. The
+  same fact is also an ORDERING: the five go up **after** the localiser
+  has been driven to ACTIVE, which is why `assert_children_alive` is a
+  function called twice rather than a block.
+  **NAV2's FORWARD IS THIS TRUCK's REVERSE**, because the forks are at
+  model −x, and `nav2.yaml` section (D) is the four parameters that
+  reach. **The footprint is COMPUTED off `model.sdf`** — the convex hull
+  of every collision and visual, tines included — and **grown per axis**,
+  +0.54 m along track and +0.11 m across it, because F3's measured error
+  is anisotropic by five times and `footprint_padding` cannot say that.
+  **The label is `nav=`**, a fourth line on the state file carrying
+  `nav2.yaml`'s own md5, and `analyse` refuses a set that mixes two of
+  them — which it did, five ways, during the task that wrote it.
+  `EVIDENCE_NAV_V3.md` §14–§15 is the arm and the first driven goals,
+  and §15.2 is the ladder of aborted runs each of that file's
+  derivations came off.
 
 **EIGHT children by default, ELEVEN with `--rf2o`, eight again with
 `--fuse`, ELEVEN with `--localize amcl` and TEN with `--localize slam`**
