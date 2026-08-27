@@ -2953,6 +2953,28 @@ localization:
     #   argument even where it lands on the same number. slam_loc.yaml's
     #   own header says which ones came out different.
     params_file: "m5_ver3/slam_loc.yaml"
+    # ---- WHAT THE FILE ABOVE MUST SAY, AND IT IS CHECKED RATHER THAN
+    #      PASSED ----
+    #
+    # `mode` is the single line that makes that file a LOCALISER's
+    # rather than a MAPPER's: it is what makes
+    # loadPoseGraphByParams() deserialise map_file_name instead of
+    # starting an empty graph, and what makes the serialize service
+    # refuse. slam_toolbox's package default is `mapping`, so a file
+    # that lost this one line would leave the node building a NEW map
+    # of whatever it could see and publishing map -> odom out of it -
+    # alive, at rate, looking exactly like a localiser, and every
+    # absolute figure a pose in a map that was invented as the truck
+    # drove.
+    #   IT IS NOT PASSED AS AN OVERRIDE, WHICH WOULD BE THE OTHER WAY
+    #   TO GUARANTEE IT. An override would make the parameter file
+    #   silently optional on the one line it cannot be optional on,
+    #   and slam_loc.yaml would then describe a node this stack does
+    #   not run. So the file OWNS the value and m5v3.sh READS IT BACK
+    #   and refuses - which is exactly map.slam.occupied_thresh /
+    #   free_thresh's shape ("these are not passed, they are
+    #   CHECKED"), one arm over.
+    required_mode: "localization"
     package: "slam_toolbox"
     # LOCALIZATION AND NOT map_and_localization. slam_toolbox 2.8.5 ships
     # five node executables; `localization_slam_toolbox_node` is the one

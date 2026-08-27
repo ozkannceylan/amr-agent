@@ -132,7 +132,15 @@ REQUIRED_KEYS = (
     # F3 TASK 2's, AND topics.tf IS NOW READ BY THIS PROCESS RATHER THAN
     # ONLY HANDED TO `ros2 bag record`: the localiser's edge is captured
     # off /tf by a subscription of this recorder's own.
-    "topics.amcl_pose", "topics.initialpose", "topics.map",
+    # topics.map IS NOT HERE AND THAT IS THE POINT. This program never
+    # subscribes the grid - the FILES table above says why: the
+    # artifact is committed and md5-gated, so a copy of the same
+    # 2.0 MB in every session could not disagree with anything - and
+    # who serves it on which topic is m5v3.sh's business. It was
+    # listed here and read nowhere until F3's phase-end sweep, which
+    # is the same class 095a91f swept and the one that survives every
+    # test: the load succeeds and the list becomes a wish.
+    "topics.amcl_pose", "topics.initialpose",
     "frames.map",
     "map.dir", "map.name", "map.registration.file",
     # F3 TASK 3's, AND EVERY ONE OF THEM IS THERE BECAUSE THERE ARE TWO
@@ -1009,10 +1017,23 @@ def _make_recorder(cfg, Node, QoSProfile, types):
                 # computes the edge from its pose and the odometry AT
                 # THE SCAN'S STAMP, and it re-broadcasts that edge
                 # between updates while the pose stays silent.
-                #   A DEEPER QUEUE THAN THE REST. /tf carries the EKF's
-                #   50 Hz edge as well as the localiser's 15 Hz one, so
-                #   this subscription sees about 65 messages a second of
-                #   which it keeps a fifth.
+                #   THE SAME QUEUE AS EVERY OTHER STREAM, AND IT IS
+                #   ALREADY THE DEEP ONE. This comment used to claim a
+                #   deeper queue than the rest and there is no such
+                #   thing here: every subscription in this recorder
+                #   takes `qos`, which is evidence.qos_depth = 500,
+                #   sized in config.yaml for the two 500 Hz joint
+                #   channels. /tf carries the EKF's 50 Hz edge and the
+                #   localiser's 15 or 50 Hz one - about 65 to 100
+                #   messages a second, of which this keeps the
+                #   localiser's - so 500 is seven seconds of backlog on
+                #   the busiest thing it could be asked to hold.
+                #   MEASURED RATHER THAN ARGUED: across F3's sixteen
+                #   scored sessions the `map_odom` stream's dt_max
+                #   EQUALS its dt_med (0.066 s / 0.020 s), and
+                #   compose_rows()' localization.analyse.map_gap_s
+                #   refusal - a hole wider than 1.0 s - never fired.
+                #   Nothing was dropped, so nothing needs deepening.
                 self.create_subscription(
                     types.TFMessage, cfg.s("topics.tf"), self.cb_tf, qos)
             self.create_subscription(

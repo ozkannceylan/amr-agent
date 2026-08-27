@@ -180,7 +180,16 @@ LOCALIZER=""
 # THIS SCRIPT'S OWN REQUIRED KEYS, on top of the isolation and ROS ones
 # _common.sh checks for every script on this track. Each is refused by its
 # DOTTED name if the file has been reorganised under it.
-# MAINTENANCE OBLIGATION: a key read below is a key listed here.
+# MAINTENANCE OBLIGATION: a key read below is a key listed here - AND
+# THE CONVERSE, which is the half that rots quietly. A key listed and
+# never read is a claim about THIS script that is not true, and it
+# survives every test: the load succeeds, the run is correct, and the
+# list has become a wish. topics.amcl_pose and topics.slam_pose were
+# exactly that until F3's phase-end sweep - this script passes no
+# override for either pose topic (they are the two localiser nodes'
+# OWN advertised names, config.yaml's topics: block argues why they
+# are left unnamespaced) and the three programs that DO subscribe them
+# list them in their own REQUIRED_KEYS.
 REQUIRED_KEYS=(
     gpu.gallium_driver gpu.d3d12_adapter_name gpu.required_renderer
     world.file world.name
@@ -195,7 +204,7 @@ REQUIRED_KEYS=(
     topics.joint_state topics.drive_speed_read_a topics.wheel_odom
     topics.odometry_filtered topics.rf2o_odom_raw topics.rf2o_odom
     topics.fuse_odometry_filtered
-    topics.amcl_pose topics.slam_pose topics.initialpose topics.map
+    topics.initialpose topics.map
     frames.odom frames.base_link frames.imu frames.map
     frames.nav_lidar frames.rf2o_odom
     map.dir map.name map.registration.file map.build_file
@@ -206,6 +215,7 @@ REQUIRED_KEYS=(
     localization.amcl.package localization.amcl.executable
     localization.amcl.node_name
     localization.slam.label localization.slam.params_file
+    localization.slam.required_mode
     localization.slam.package localization.slam.executable
     localization.slam.node_name
     localization.lifecycle_timeout_s
@@ -500,6 +510,43 @@ check_fuse_params() {  # check_fuse_params <file>
 # wrong from any other angle, and every absolute figure would be a pose
 # in a map that was made up as the truck drove, scored through a
 # registration belonging to one it never opened.
+# AND ON THE slam ARM, THE ONE LINE THAT MAKES THAT FILE A LOCALISER'S.
+# check_loc_params() above proves the parameter file is ADDRESSED to the
+# node this arm starts; this proves it says the one thing that node
+# cannot come up without. They are two different failures and the first
+# cannot see the second: a `slam_loc:` block that parses and applies but
+# carries no `mode:` leaves slam_toolbox on its PACKAGE DEFAULT, which is
+# MAPPING - it would deserialise nothing, start an EMPTY graph, build a
+# new map of whatever it could see and publish map -> odom out of it.
+# Alive, at rate, ALL of the other localisation checks green, and every
+# absolute figure a pose in a map that was invented as the truck drove.
+#   THE EXPECTED VALUE IS config.yaml's AND THE ACTUAL IS THE FILE's,
+#   which is the whole point of a read-back: two copies that are COMPARED
+#   cannot drift silently, where one copy passed as a `-p` override
+#   cannot be wrong and cannot be checked either - and would make
+#   slam_loc.yaml describe a node this stack does not run. It is
+#   tools/build_map.sh's occupied_thresh / free_thresh idiom - "these are
+#   not passed, they are CHECKED" - one arm over.
+#   THE GREP TOLERATES YAML SPACING AND NOTHING ELSE. Leading indent and
+#   any run of spaces after the colon are fine, and a trailing comment is
+#   fine; `mode: localization_extra` is NOT, which is what the
+#   end-of-token bound is for.
+check_slam_mode() {
+    grep -qE "^[[:space:]]*mode:[[:space:]]+$CFG_LOCALIZATION_SLAM_REQUIRED_MODE([[:space:]]|$)" \
+        "$LOC_PARAMS" || refuse \
+        "the localiser's parameter file says mode: $CFG_LOCALIZATION_SLAM_REQUIRED_MODE" \
+        "$LOC_PARAMS and $CONFIG (localization.slam.required_mode)" \
+        "no such line is in it. What that file says instead:" \
+        "$(grep -nE '^[[:space:]]*mode:' "$LOC_PARAMS" || echo '(no mode: line at all)')" \
+        "$CFG_LOCALIZATION_SLAM_PACKAGE's DEFAULT MODE IS MAPPING. Without" \
+        "this line $CFG_LOCALIZATION_SLAM_EXECUTABLE deserialises NOTHING," \
+        "starts an EMPTY graph, builds a new map of whatever it can see and" \
+        "publishes $CFG_FRAMES_MAP -> $CFG_FRAMES_ODOM out of it - alive, at" \
+        "rate, every other check on this arm green, and every absolute" \
+        "figure a pose in a map invented as the truck drove." \
+        "NOTHING WAS STARTED."
+}
+
 check_loc_params() {  # check_loc_params <file> <node>...
     local file="$1" node
     shift
@@ -921,6 +968,7 @@ start() {
             "NOTHING WAS STARTED."
         # shellcheck disable=SC2086
         check_loc_params "$LOC_PARAMS" $LOC_NODES
+        check_slam_mode
         # THE FREEZE, ENFORCED BEFORE ANYTHING IS STARTED. See
         # check_frozen_map(): this is the only place that can still say
         # nothing has begun.
