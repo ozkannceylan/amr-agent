@@ -657,31 +657,67 @@ controller_server:
 
       # ---- the speed envelope, and it is ASYMMETRIC on purpose -------
       #
-      # vx_min IS THE TRANSIT CEILING AND vx_max IS NOT. Section (D):
-      # negative vx is FORKS-FIRST, which is this vehicle's ordinary
-      # travel direction and the one the nav lidar's 270 deg aperture is
-      # centred on. -0.700 m/s is config.yaml
-      # drive_route.profiles.straight's cruise - the speed every
-      # straight-line figure on this track was measured at, and the
-      # converter's own traction ceiling (config.yaml
-      # navcmd.speed_max_mps).
-      vx_min: -0.700
-      # +0.300 m/s is COUNTERWEIGHT-FIRST, and it is capped at
-      # drive_route.profiles.corner_creep's creep speed rather than at
-      # the motor's 0.700. The cap is the SCANNER APERTURE and not the
-      # motor: the nav lidar is blind over 90 deg centred on model +x
-      # (model.sdf, the window derivation), so a counterweight-first leg
-      # is a leg driven with the blind sector leading. The planner needs
-      # both directions to solve Reeds-Shepp geometry at all - a cusp is
-      # a direction change and this vehicle reverses out of things - so
-      # the direction is permitted, at creep, and not forbidden.
+      # THE ENVELOPE IS CREEP IN BOTH DIRECTIONS, AND THE GOAL BOX IS
+      # WHAT DECIDES IT. This is the last number in this file that moved
+      # and it moved on the plainest measurement of the lot.
+      #
+      # EVIDENCE_NAV_V3.md 8, F4 Task 1's own stop table:
+      #
+      #   from 0.700 m/s   terminal to zero 2.03 s, at rest 2.07 s,
+      #                    TRAVELLED 1.019 m
+      #   from 0.300 m/s   terminal to zero 0.91 s, at rest 0.97 s,
+      #                    TRAVELLED 0.208 m
+      #
+      # and the goal box is 0.25 m (section E). A vehicle travelling at
+      # 0.700 m/s cannot come to rest inside a 0.25 m box: it needs four
+      # times the box to stop in, so whether a goal succeeds turns on
+      # whether the trajectory happens to PASS THROUGH the box on the
+      # way past - `stateful` latches if it does and the vehicle drives
+      # on if it does not.
+      #   MEASURED, FIVE TIMES, AT -0.700. Two arrivals, at 0.4787 m and
+      #   0.6073 m of truth error against a 0.25 m box; and three runs
+      #   that missed the box entirely, drove up to 2.6 m past it, and
+      #   were sent round Reeds-Shepp loops that took 122 to 370 s and
+      #   ended in aborts. That is a coin toss and not a controller.
+      #   AT 0.300 m/s THE STOP FITS: 0.208 m inside a 0.25 m box, with
+      #   0.042 m to spare, and the figure already includes the 0.25 s
+      #   of dead time the chain carries.
+      #
+      # WHAT IT COSTS IS STATED: transit at 0.300 m/s rather than 0.700,
+      # so a 37 m leg takes 123 s instead of 53. The 0.700 m/s ceiling
+      # is what this vehicle CAN do - EVIDENCE_NAV_V3.md 7 measured the
+      # whole command path delivering it - and what it cannot do is stop
+      # out of it into this box.
+      #   AND THE REAL ANSWER IS NOT THIS NUMBER EITHER. MPPI has no
+      #   approach-velocity scaling: nothing in it corresponds to RPP's
+      #   `approach_velocity_scaling_dist`, so the choice is between
+      #   transit speed and arrival accuracy for the WHOLE run rather
+      #   than for the last two metres of it. The docking server
+      #   (docs/reports/m5v3-02 3) has `slowdown_radius` and
+      #   `v_linear_min` for exactly this, and it is F5's.
+      vx_min: -0.300
+      # +0.300 m/s is COUNTERWEIGHT-FIRST, and it was capped at
+      # drive_route.profiles.corner_creep's creep speed before the line
+      # above joined it there. Two arguments now hold it, and either
+      # would: the goal box above, and the SCANNER APERTURE - the nav
+      # lidar is blind over 90 deg centred on model +x (model.sdf, the
+      # window derivation), so a counterweight-first leg is a leg driven
+      # with the blind sector leading. The planner needs both directions
+      # to solve Reeds-Shepp geometry at all - a cusp is a direction
+      # change and this vehicle reverses out of things - so the
+      # direction is permitted, at creep, and not forbidden.
+      #   THE ENVELOPE IS SYMMETRIC NOW AND THAT IS AN OUTCOME RATHER
+      #   THAN A CHOICE. If the box ever stops binding - a docking
+      #   server for the last two metres, or a speed limit lifted on a
+      #   straight - the FORKS-FIRST side is the one that goes back up,
+      #   because it is the one the aperture faces.
       #   IT IS NOT A SAFETY LIMIT. Nothing here inhibits motion.
       vx_max: 0.300
-      # 0.700 / 1.25 = 0.560 rad/s: the fastest yaw rate this envelope
-      # can produce at the transit ceiling on the tightest permitted
-      # arc. A larger figure would let MPPI emit a (vx, wz) pair whose
-      # implied steer angle is past what the planner planned for.
-      wz_max: 0.560
+      # 0.300 / 1.25 = 0.240 rad/s: the fastest yaw rate this envelope
+      # can produce at its own ceiling on the tightest permitted arc. A
+      # larger figure would let MPPI emit a (vx, wz) pair whose implied
+      # steer angle is past what the planner planned for.
+      wz_max: 0.240
       # Unread on a non-holonomic motion model - MPPI does not sample vy
       # at all unless motion_model is Omni - and stated as 0.0 rather
       # than left at the package's 0.5 so that a future reader cannot

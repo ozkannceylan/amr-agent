@@ -333,24 +333,44 @@ def test_the_acceleration_is_the_PLANTs_own_ramp(cfg, controller):
     assert float(controller["ax_min"]) == pytest.approx(-accel)
 
 
-def test_the_two_speed_limits_are_TWO_ROWS_OF_config_yaml(cfg, controller):
-    # vx_min is the FORKS-FIRST transit ceiling, which is
-    # drive_route.profiles.straight's cruise and the converter's own
-    # traction ceiling. vx_max is COUNTERWEIGHT-FIRST and is capped at
-    # corner_creep's creep speed, because that direction leads with the
-    # nav lidar's blind sector.
+#: What this vehicle takes to come to rest from each of the two speeds
+#: config.yaml tables, measured at the terminals and at the truck
+#: (EVIDENCE_NAV_V3.md 8). F4 Task 1's handover.
+STOPPING_DISTANCE_BY_SPEED_M = {0.700: 1.019, 0.300: 0.208}
+
+
+def test_the_speed_envelope_is_ONE_config_yaml_TABLES(cfg, controller):
+    # Both ends of the envelope are drive_route.profiles.corner_creep's
+    # own speed. Neither is a number somebody chose.
     profiles = cfg["drive_route"]["profiles"]
-    cruise = max(abs(float(row["tread_mps"]))
-                 for row in profiles["straight"])
     creep = max(abs(float(row["tread_mps"]))
                 for row in profiles["corner_creep"])
-    assert float(controller["vx_min"]) == pytest.approx(-cruise)
-    assert float(controller["vx_min"]) == pytest.approx(
-        -float(cfg["navcmd"]["speed_max_mps"]))
+    assert float(controller["vx_min"]) == pytest.approx(-creep)
     assert float(controller["vx_max"]) == pytest.approx(creep)
-    assert abs(float(controller["vx_min"])) > float(controller["vx_max"]), (
-        "the envelope is asymmetric ON PURPOSE and this vehicle's "
-        "TRANSIT direction is the negative one")
+    # AND IT IS INSIDE THE CONVERTER'S OWN CEILING, which is the speed
+    # the command path was measured delivering.
+    assert abs(float(controller["vx_min"])) <= float(
+        cfg["navcmd"]["speed_max_mps"])
+
+
+def test_the_vehicle_can_STOP_from_its_own_transit_ceiling_INSIDE_the_box(
+        nav, controller):
+    # THE MEASUREMENT THAT DECIDES THE ENVELOPE, and five runs at the
+    # other value are why. `stateful` latches when the trajectory passes
+    # through the goal box; a vehicle that needs four times the box to
+    # stop in only arrives when it happens to pass through, which is a
+    # coin toss and not a controller.
+    box = float(nav["controller_server"]["ros__parameters"]
+                ["general_goal_checker"]["xy_goal_tolerance"])
+    ceiling = abs(float(controller["vx_min"]))
+    stop = STOPPING_DISTANCE_BY_SPEED_M.get(round(ceiling, 3))
+    assert stop is not None, (
+        "{:.3f} m/s is not a speed EVIDENCE_NAV_V3.md 8 measured a stop "
+        "from - the two it tables are {}".format(
+            ceiling, sorted(STOPPING_DISTANCE_BY_SPEED_M)))
+    assert stop < box, (
+        "the vehicle needs {:.3f} m to come to rest from {:.3f} m/s and "
+        "the goal box is {:.3f} m".format(stop, ceiling, box))
 
 
 def test_the_horizon_fits_inside_the_pruned_path(controller):

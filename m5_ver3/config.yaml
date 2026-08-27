@@ -3879,12 +3879,12 @@ nav:
 
   # ------------------------- THE DRIVEN RUN ----------------------------
   # How long ONE navigate_to_pose may take before the bench cancels it.
-  # The longest goal here is about 33 m; at the transit ceiling of
-  # 0.700 m/s that is 47 s of driving, and the corners, any cusps and
-  # the 1.02 m stop are on top. 300 s is six times the driving time -
+  # The longest goal here is about 47 m; at the transit ceiling of
+  # 0.300 m/s that is 157 s of driving, and the corners, any cusps and
+  # the stop are on top. 480 s is three times the driving time -
   # a budget for a stack that is struggling rather than one that is
   # stuck.
-  goal_timeout_s: 300
+  goal_timeout_s: 480
   # After the action returns, keep recording. The result arrives when
   # the GOAL CHECKER passes, and the truck is still moving then: it
   # takes up to 2.07 s and 1.02 m to stop from cruise
