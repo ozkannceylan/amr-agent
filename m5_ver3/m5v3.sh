@@ -2396,8 +2396,10 @@ start() {
              "$CFG_TOPICS_MAP, local = a rolling"
         echo "         window on $CFG_TOPICS_SCAN_NAV. Both carry the" \
              "REAL footprint polygon"
-        echo "         with the forks, padded 0.54 m - the worst" \
-             "absolute error F3 measured."
+        echo "         with the forks, GROWN PER AXIS: +0.54 m along" \
+             "track and +0.11 m across"
+        echo "         it, which is F3's own measured anisotropy and" \
+             "not one number twice."
         echo "         NAV2's FORWARD IS THIS TRUCK's REVERSE (the forks" \
              "are at model -x), and"
         echo "         $CFG_NAV_PARAMS_FILE says so where it reaches a" \
@@ -3096,7 +3098,7 @@ USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [am
               'status' and every recorded session say nav=on@<md5> by
               name; 'analyse' refuses a set that mixes a planned run
               with an unplanned one.
-              FIFTEEN processes with a window and fourteen without, on
+              SEVENTEEN processes with a window and SIXTEEN without, on
               the amcl arm.
   status      every child by name, ALIVE or DEAD, with its log, which
               traction the running plant is on, which estimator arm,

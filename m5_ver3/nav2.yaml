@@ -110,17 +110,18 @@
 # AMCL's own covariance says so, with an along/across 1-sigma ratio of
 # 11 to 15 on a straight. So:
 #
-#   footprint_padding  <- the WORST ABSOLUTE error, 0.5321 m. The
-#       costmap places the polygon where the stack BELIEVES the vehicle
-#       is; the vehicle is really within that of it. Padding is
-#       ISOTROPIC (nav2's padFootprint moves each vertex by the padding
-#       along each axis), so a padding sized on the along-track peak is
-#       five times what the cross-track error needs - and section (C)
-#       computes what that generosity costs in the tightest corridor on
-#       this floor, which is nothing.
-#   inflation_radius   <- the LATERAL surprise: the worst cross-track
-#       error 0.1044 m plus the worst single map -> odom step 0.2591 m,
-#       which can be entirely lateral and arrives in one 66 ms tick.
+#   the footprint MARGIN  <- +0.54 m on the body's x axis (the worst
+#       absolute error, 0.5321 m, rounded up) and +0.11 m on its y axis
+#       (the worst cross-track error, 0.1044 m, rounded up). Section (C)
+#       is why it is the POLYGON that carries it and not
+#       `footprint_padding`, and what two aborted runs paid to establish
+#       that.
+#   inflation_radius   <- bounded BELOW by the padded polygon's own
+#       INSCRIBED radius, or the layer is a hard band and not a
+#       gradient; and below that again by the LATERAL surprise - the
+#       worst cross-track error 0.1044 m plus the worst single
+#       map -> odom step 0.2591 m, which can be entirely lateral and
+#       arrives in one 66 ms tick. Bounded ABOVE by the pick aisle.
 #   xy_goal_tolerance  <- the END error, which is taken AT REST after
 #       the corrections have closed the gap. The moving peak does NOT
 #       bind it and section (E) says why.
@@ -157,27 +158,68 @@
 #   footprint on ~/footprint when laden; this track carries no load and
 #   makes no such claim.
 #
-# ================= (C) THE PADDING, AND WHAT IT COSTS =================
+# ============ (C) THE MARGIN, AND WHY IT IS NOT `footprint_padding` ====
 #
-# footprint_padding: 0.54, from section (A): the worst measured dry
-# absolute error 0.5321 m, rounded up to the centimetre.
+# THE POLYGON THE COSTMAPS CARRY IS THE MODEL's HULL GROWN PER AXIS, and
+# `footprint_padding` is 0.0 in both. The growth is
 #
-#   THE PADDED POLYGON:  x [-2.4150, +1.4000], y [+-1.0990]
-#   circumscribed 2.5703 m, inscribed 1.0439 m (unpadded: 1.9056 /
-#   0.5037).
+#     +0.54 m on x   the worst measured dry ABSOLUTE error, 0.5321 m
+#     +0.11 m on y   the worst measured dry CROSS-TRACK error, 0.1044 m
 #
-# WHAT THE ISOTROPY COSTS, IN THE TIGHTEST CORRIDOR ON THIS FLOOR. The
+# and the two are five times apart because THE ERROR IS. Section (A):
+# EVIDENCE_LOCALIZATION_V3.md 9 measured the half-metre peak to be along
+# the direction of travel almost in its entirety, with cross-track at
+# 0.02-0.08 m for the whole of every run, and AMCL's own covariance
+# agreeing at an along/across 1-sigma ratio of 11 to 15 on a straight.
+#
+# THE ANISOTROPY LANDS ON THE POLYGON's OWN AXES, WHICH IS WHY THIS
+# WORKS AT ALL. On this vehicle the body x axis IS the direction of
+# travel and y IS across it, so "along-track" and "cross-track" are
+# exactly the two axes nav2's padFootprint moves a vertex along - it
+# just moves them by the SAME number. docs/reports/m5v3-02 5 says the
+# same thing from the other end: "Prefer footprint geometry over
+# footprint_padding, which inflates isotropically and will forbid legal
+# spur entries."
+#
+#   THE GROWN POLYGON:  x [-2.4150, +1.4000], y [+-0.6690]
+#   circumscribed 2.4566 m, INSCRIBED 0.6143 m
+#   (the model's own hull: 1.9056 / 0.5037; the same margins applied
+#    ISOTROPICALLY at 0.54: 2.5703 / 1.0439)
+#
+# TWO ABORTED RUNS ARE WHAT ESTABLISHED IT AND THEY ARE IN THE EVIDENCE.
+# The first cut of this file used `footprint_padding: 0.54`, isotropic.
+# Both of the first two driven goals ended the same way: the vehicle,
+# tracking its plan to a measured 0.10 m mean and 0.38 m worst,
+# put the padded polygon over a rack corner and the planner refused the
+# next replan with START_OCCUPIED (error_code 205). The mechanism was
+# not the tracking - it was that an isotropic 0.54 m doubled the
+# INSCRIBED radius to 1.0439 m, which is above the inflation radius, so
+# EVERY inflated cell was INSCRIBED_INFLATED_OBSTACLE and the inflation
+# layer was a hard band rather than a gradient. A planner with no
+# gradient has no reason to stand off a rack corner, and a vehicle 0.38 m
+# off a plan that hugs one is a vehicle in collision.
+# EVIDENCE_NAV_V3.md's first-goals section carries both runs.
+#
+# WHAT THE ANISOTROPY BUYS, IN THE TIGHTEST CORRIDOR ON THIS FLOOR. The
 # pick aisle is 5.00 m wide - m6/gazebo/warehouse_ver3.sdf puts the rack
 # faces at y = +-2.50 - and it is the only 5.00 m corridor here; every
-# other one is 8.00 m (EVIDENCE_MAP_V3.md 2.1). The padded half-width is
-# 1.0990 m, so the centreline keeps 1.4010 m of lateral slack each side.
-# The generosity is free, and this is the arithmetic that says so.
+# other one is 8.00 m (EVIDENCE_MAP_V3.md 2.1). The grown half-width is
+# 0.6690 m, so the centreline keeps 1.8310 m of lateral slack each side
+# against the 1.4010 m the isotropic version left - and, far more
+# importantly, an inscribed radius of 0.6143 m is a radius the inflation
+# layer can be set ABOVE.
 #
-# WHAT IT DOES NOT BUY, STATED. Padding converts localisation error into
-# a REFUSAL: it grows the collision polygon, so a path that would have
-# put the true vehicle inside a rack is rejected instead of driven. It
-# does not make the vehicle's belief better and it is not a substitute
-# for the collision monitor F4 Task 3 owns.
+# WHAT IT DOES NOT BUY, STATED. Growing the polygon converts
+# localisation error into a REFUSAL: a path that would have put the true
+# vehicle inside a rack is rejected instead of driven. It does not make
+# the vehicle's belief better and it is not a substitute for the
+# collision monitor F4 Task 3 owns.
+#
+# THE MODEL's OWN HULL IS STILL THE THING THIS IS DERIVED FROM AND THE
+# TEST STILL CHECKS IT. tests/test_nav2_params.py recomputes
+# evidence_core.sdf_footprint(), applies the two margins above, and
+# fails on any disagreement with the polygon below - so a link that
+# moves in model.sdf still moves this file.
 #
 # ================== (D) NAV2's FORWARD IS THIS TRUCK's REVERSE ========
 #
@@ -720,19 +762,27 @@ controller_server:
         cost_weight: 3.81
         near_collision_cost: 253
         critical_cost: 300.0
-        # FALSE, and what it leaves open is stated rather than implied.
-        # With it false this critic scores the costmap cost at the
-        # trajectory's CENTRE POINT, not over the 3.815 m padded
-        # polygon. The HARD guarantee that a path fits comes from the
-        # planner, which does a full-footprint collision check on the
-        # global costmap; what this critic adds is a soft standoff from
-        # the inflation gradient. Turning it true multiplies the per-tick
-        # cost by the footprint's vertex count on every one of 1000 x 56
-        # samples, and this task reports the controller frequency it
-        # actually achieved - a controller that misses its rate is a
-        # worse guarantee than a cheap critic. F4 Task 3's collision
-        # monitor is what closes the gap on the live scan.
-        consider_footprint: false
+        # TRUE, AND IT WAS FALSE UNTIL TWO RUNS SAID OTHERWISE. With it
+        # false this critic scores the costmap cost at the trajectory's
+        # CENTRE POINT and never at the 3.815 x 1.338 m polygon, and
+        # nav2 says so itself the moment the costmap carries a polygon:
+        #
+        #   [WARN] [controller_server]: Inconsistent configuration in
+        #   collision checking. Please verify the robot's shape settings
+        #   in both the costmap and the cost critic.
+        #
+        # - measured on this stack, 2026-08-27, and it is the same
+        # inconsistency that let the vehicle track its plan to 0.10 m
+        # and still put a fork tip over a rack corner (section C).
+        # The centre of this truck is 2.415 m from the front of it.
+        #   WHAT IT COSTS IS MEASURED AND NOT ASSUMED. It multiplies the
+        #   per-tick work by the footprint's eight vertices on every one
+        #   of `batch_size` x `time_steps` / `trajectory_point_step`
+        #   samples, and EVIDENCE_NAV_V3.md reports the controller
+        #   frequency this stack actually achieved with it on. A
+        #   controller that misses its rate would be a worse guarantee
+        #   than a cheap critic, and that is the number that decides it.
+        consider_footprint: true
         collision_cost: 1000000.0
         near_goal_distance: 1.0
         trajectory_point_step: 2
@@ -842,10 +892,10 @@ local_costmap:
 
       # SECTION (B)'s POLYGON, computed off gazebo/forklift_ver3/
       # model.sdf and checked against it by tests/test_nav2_params.py.
-      footprint: "[[-1.875000,-0.340000],[-0.680000,-0.558995],[0.700000,-0.450000],[0.860000,-0.400000],[0.860000,0.400000],[0.700000,0.450000],[-0.680000,0.558995],[-1.875000,0.340000]]"
+      footprint: "[[-2.415000,-0.450000],[-1.220000,-0.668995],[1.240000,-0.560000],[1.400000,-0.510000],[1.400000,0.510000],[1.240000,0.560000],[-1.220000,0.668995],[-2.415000,0.450000]]"
       # SECTION (C): the worst measured dry absolute error, 0.5321 m,
       # rounded up.
-      footprint_padding: 0.54
+      footprint_padding: 0.0
 
       plugins: ["obstacle_layer", "inflation_layer"]
 
@@ -901,7 +951,7 @@ local_costmap:
         #   corridor of 2 * (2.50 - 0.60) = 3.80 m down the middle -
         #   1.7 x the padded footprint's 2.198 m width. Anything above
         #   1.40 m would close that corridor entirely.
-        inflation_radius: 0.60
+        inflation_radius: 1.00
         cost_scaling_factor: 3.0
 
       always_send_full_costmap: true
@@ -936,8 +986,8 @@ global_costmap:
       # genuinely unknown.
       track_unknown_space: true
 
-      footprint: "[[-1.875000,-0.340000],[-0.680000,-0.558995],[0.700000,-0.450000],[0.860000,-0.400000],[0.860000,0.400000],[0.700000,0.450000],[-0.680000,0.558995],[-1.875000,0.340000]]"
-      footprint_padding: 0.54
+      footprint: "[[-2.415000,-0.450000],[-1.220000,-0.668995],[1.240000,-0.560000],[1.400000,-0.510000],[1.400000,0.510000],[1.240000,0.560000],[-1.220000,0.668995],[-2.415000,0.450000]]"
+      footprint_padding: 0.0
 
       plugins: ["static_layer", "inflation_layer"]
 
@@ -958,7 +1008,7 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         enabled: true
-        inflation_radius: 0.60
+        inflation_radius: 1.00
         cost_scaling_factor: 3.0
 
       always_send_full_costmap: true

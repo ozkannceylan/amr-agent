@@ -146,20 +146,62 @@ def test_every_section_declares_use_sim_time(nav):
 # the footprint, recomputed off the model
 # ----------------------------------------------------------------------
 
+#: THE MARGIN THE POLYGON CARRIES, per axis, and the whole of section
+#: (C)'s argument in two numbers. On this vehicle the body x axis IS the
+#: direction of travel and y IS across it, so F3's measured anisotropy
+#: lands on the polygon's own axes: +0.54 m of along-track error and
+#: +0.11 m of cross-track. `footprint_padding` cannot express that -
+#: nav2's padFootprint moves both axes by one number - so the POLYGON
+#: carries it and the padding is 0.0.
+MARGIN_X_M = 0.54
+MARGIN_Y_M = 0.11
+
+
+def grow(poly, mx, my):
+    """The model's hull, grown per axis, which is nav2's padFootprint
+    with two numbers instead of one."""
+    def sign0(value):
+        return 0.0 if value == 0.0 else math.copysign(1.0, value)
+    return [(x + sign0(x) * mx, y + sign0(y) * my) for x, y in poly]
+
+
 def test_the_footprint_is_the_MODEL_and_not_a_number_somebody_typed(
         cfg, costmaps):
     model = os.path.join(_REPO, cfg["vehicle"]["model"])
-    want = core.sdf_footprint(model)
+    want = grow(core.sdf_footprint(model), MARGIN_X_M, MARGIN_Y_M)
     for name, params in costmaps.items():
         got = polygon(params["footprint"])
         assert len(got) == len(want), name
         for (gx, gy), (wx, wy) in zip(got, want):
             assert abs(gx - wx) < 1e-6 and abs(gy - wy) < 1e-6, (
-                "{}: nav2.yaml has ({:+.6f}, {:+.6f}) where {} computes "
-                "({:+.6f}, {:+.6f}). The polygon is the convex hull of "
-                "every collision and visual in the model; if the model "
-                "moved, this file has to move with it.".format(
-                    name, gx, gy, cfg["vehicle"]["model"], wx, wy))
+                "{}: nav2.yaml has ({:+.6f}, {:+.6f}) where {} grown by "
+                "({:g}, {:g}) computes ({:+.6f}, {:+.6f}). The polygon "
+                "is the convex hull of every collision and visual in the "
+                "model plus the measured margin; if the model moved, "
+                "this file has to move with it.".format(
+                    name, gx, gy, cfg["vehicle"]["model"], MARGIN_X_M,
+                    MARGIN_Y_M, wx, wy))
+
+
+def test_the_margin_is_ANISOTROPIC_because_the_measured_error_is(cfg,
+                                                                  costmaps):
+    # THE ARGUMENT, AS ARITHMETIC. The along-track margin has to cover
+    # F3's worst absolute error and the cross-track one its worst
+    # cross-track error, and those are five times apart
+    # (EVIDENCE_LOCALIZATION_V3.md 9). An isotropic padding sized on the
+    # larger doubled the polygon's INSCRIBED radius, which is what put
+    # the inflation layer below it and cost two runs.
+    assert MARGIN_X_M >= WORST_ABSOLUTE_ERROR_M
+    assert MARGIN_X_M < WORST_ABSOLUTE_ERROR_M + 0.01
+    assert MARGIN_Y_M >= WORST_CROSS_TRACK_M
+    assert MARGIN_Y_M < WORST_CROSS_TRACK_M + 0.01
+    assert MARGIN_X_M > 4.0 * MARGIN_Y_M
+    for name, params in costmaps.items():
+        assert float(params["footprint_padding"]) == 0.0, (
+            "{}: the margin is in the POLYGON. nav2's padFootprint moves "
+            "both axes by one number and would put {:g} m on the "
+            "cross-track axis, where the measurement asks for {:g}"
+            .format(name, MARGIN_X_M, MARGIN_Y_M))
 
 
 def test_the_two_costmaps_carry_the_SAME_polygon_and_the_SAME_padding(
@@ -177,34 +219,24 @@ def test_the_footprint_reaches_the_FORK_TIPS_and_the_COUNTERWEIGHT(
     # visuals on this model - and a footprint 1.0 m short at the fork end
     # looks exactly like a correct one.
     poly = polygon(costmaps["global_costmap"]["footprint"])
-    assert min(x for x, _ in poly) == pytest.approx(-1.875, abs=1e-6)
-    assert max(x for x, _ in poly) == pytest.approx(0.860, abs=1e-6)
+    assert min(x for x, _ in poly) == pytest.approx(
+        -1.875 - MARGIN_X_M, abs=1e-6)
+    assert max(x for x, _ in poly) == pytest.approx(
+        0.860 + MARGIN_X_M, abs=1e-6)
 
 
-def test_the_padding_is_F3s_WORST_ABSOLUTE_ERROR_rounded_up(costmaps):
-    padding = costmaps["global_costmap"]["footprint_padding"]
-    assert padding >= WORST_ABSOLUTE_ERROR_M, (
-        "the costmap places the polygon where the stack BELIEVES the "
-        "vehicle is, and F3 measured it up to {:.4f} m from where it "
-        "IS".format(WORST_ABSOLUTE_ERROR_M))
-    assert padding < WORST_ABSOLUTE_ERROR_M + 0.01, (
-        "rounded up to the centimetre and no further - padding is "
-        "isotropic and every extra centimetre is a centimetre off both "
-        "sides of every corridor")
-
-
-def test_the_padded_footprint_still_fits_the_PICK_AISLE(costmaps):
-    # The isotropy costs something and this is the arithmetic that says
-    # how much: the tightest corridor on this floor is 5.00 m and the
-    # padded half-width has to leave a centreline in it.
+def test_the_grown_footprint_still_fits_the_PICK_AISLE(costmaps):
+    # The tightest corridor on this floor is 5.00 m and the grown
+    # half-width has to leave a centreline in it - with room for the
+    # inflation layer above.
     params = costmaps["global_costmap"]
     poly = pad(polygon(params["footprint"]), params["footprint_padding"])
     half = max(abs(y) for _, y in poly)
     assert half < PICK_AISLE_HALF_WIDTH_M, (
-        "the padded half-width is {:.4f} m against rack faces at "
+        "the grown half-width is {:.4f} m against rack faces at "
         "{:.2f} m".format(half, PICK_AISLE_HALF_WIDTH_M))
     slack = PICK_AISLE_HALF_WIDTH_M - half
-    assert slack > 1.0, (
+    assert slack > 1.5, (
         "only {:.4f} m of lateral slack in the pick aisle".format(slack))
 
 
@@ -343,6 +375,38 @@ def test_the_local_costmap_contains_the_padded_truck_AND_the_horizon(
 # floor in the other
 # ----------------------------------------------------------------------
 
+def inscribed(poly):
+    """The largest circle about the origin inside a convex polygon."""
+    best = float("inf")
+    n = len(poly)
+    for i in range(n):
+        ax, ay = poly[i]
+        bx, by = poly[(i + 1) % n]
+        ex, ey = bx - ax, by - ay
+        length = math.hypot(ex, ey)
+        if length:
+            best = min(best, abs(ex * ay - ax * ey) / length)
+    return best
+
+
+def test_the_inflation_is_a_GRADIENT_and_not_a_HARD_BAND(costmaps):
+    # THE FIGURE TWO ABORTED RUNS BOUGHT. nav2 marks every cell within
+    # the footprint's INSCRIBED radius of an obstacle as
+    # INSCRIBED_INFLATED_OBSTACLE. If the inflation radius is below that,
+    # EVERY inflated cell carries that one cost and the layer is a hard
+    # band with no slope in it - so the planner has no reason at all to
+    # stand off a rack corner, and a vehicle a third of a metre off a
+    # plan that hugs one is a vehicle in collision.
+    for name, params in costmaps.items():
+        radius = float(params["inflation_layer"]["inflation_radius"])
+        inner = inscribed(polygon(params["footprint"]))
+        assert radius > inner, (
+            "{}: inflation {:.2f} m is inside the grown footprint's own "
+            "inscribed radius {:.4f} m, so every inflated cell is "
+            "INSCRIBED_INFLATED_OBSTACLE and there is no gradient at "
+            "all".format(name, radius, inner))
+
+
 def test_the_inflation_covers_the_LATERAL_surprise(costmaps):
     lateral = WORST_CROSS_TRACK_M + WORST_MAP_ODOM_STEP_M
     for name, params in costmaps.items():
@@ -469,6 +533,15 @@ def test_the_global_costmap_has_NO_obstacle_layer(costmaps):
     # and the smear does not clear.
     assert costmaps["global_costmap"]["plugins"] == [
         "static_layer", "inflation_layer"]
+
+
+def test_the_cost_critic_and_the_costmap_AGREE_about_the_robots_shape(
+        controller):
+    # nav2 prints "Inconsistent configuration in collision checking" the
+    # moment a polygon costmap meets a point-scoring cost critic, and it
+    # is right: the centre of this truck is 2.415 m from the front of
+    # it. Measured on this stack before it was turned on.
+    assert controller["CostCritic"]["consider_footprint"] is True
 
 
 def test_the_local_costmap_obstacle_layer_CLEARS_ITS_OWN_FOOTPRINT(
