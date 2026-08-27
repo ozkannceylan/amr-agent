@@ -2681,11 +2681,40 @@ glance that neither binds it.
 | **and what the re-task cost** | **at most one controller tick.** Worst gap in the command stream **0.0500 – 0.0540 s** against a 0.0500 s median period; the commanded speed never fell below **0.2929 m/s**; back to 95 % of its pre-switch mean in **0.000 – 0.040 s**; a plan ending at the NEW goal in **0.314 – 1.064 s** |
 | `ring_stress` | **2 of 3**, which is §16.4c's own result reproduced run for run |
 | **and the residual now has a sample** | ψ swing **0.2085 / 0.2544** on the two that arrived and **0.4674** on the one that did not — six runs across two tasks, **four arrivals, and no run between 0.2544 and 0.4674**. §17.5 |
-| `station_approach` | **1 of 2**, and the failure is `error_code 205` — `ComputePathToPose::START_OCCUPIED`, the planner refusing to replan a truck standing in a 4.00 m bay |
+| `station_approach` | **0 of 1 in the case set** (**1 of 2** across both runs of the case — §17.0a), and the failure is `error_code 205` — `ComputePathToPose::START_OCCUPIED`, the planner refusing to replan a truck standing in a 4.00 m bay |
 | **`reverse_out`, and it is the #5714 case** | leg 1 arrived at the station; **leg 2 is the first leg this track has ever driven COUNTERWEIGHT-FIRST**, its plans carry genuine cusps, one cusp was driven, and the leg ended on the same `205` |
 | **tracking through the driven cusp** | **mean 0.0566 m, max 0.0888 m** over ±1 s |
-| **nav2 FORWARD against nav2 REVERSE on one run** | deviation **mean 0.0756 / max 0.2314 m** counterweight-first against **0.0522 / 0.1615 m** forks-first — the OPPOSITE of what #5714 predicts, on this vehicle |
-| the label | every run below: `traction=nominal arm=wheel+imu loc=amcl@735cdbc6 nav=on@ebe9ca34 monitor=off`, `nav_config_md5 53a33d67` |
+| **nav2 FORWARD against nav2 REVERSE on one run** | deviation **mean 0.0756 / max 0.2314 m** counterweight-first against **0.0503 / 0.1615 m** forks-first — the OPPOSITE of what #5714 predicts, on this vehicle. `drive_goal.deviation_by_direction()`, printed by the LEGS block |
+| **the label, and it is the denominator** | **`traction=nominal arm=wheel+imu loc=amcl@735cdbc6 nav=on@ebe9ca34 monitor=off`** on **eight** runs — `nav_config_md5 53a33d67`. **THE CASE SET IS THOSE EIGHT AND NOTHING ELSE**, and §17.0a is the rule |
+
+### 17.0a THE DENOMINATOR, stated once and applied everywhere
+
+**A RUN IS IN THE CASE SET IF AND ONLY IF `analyse` WILL TABLE IT WITH
+THE REST.** That is not a convention invented for this section — it is
+the label chain's own rule, and the chain now has five links
+(`traction`, `arm`, `loc`, `nav`, `monitor`). The eight runs that share
+one label are the case set:
+
+| | runs | in the set? | why |
+|---|---|---|---|
+| `aisle_transit` ×3, `ring_stress` ×3, `station_approach` ×1, `reverse_out` ×1 | **8** | **YES** | one label, `nav=on@ebe9ca34 monitor=off loc=amcl@735cdbc6` |
+| `case-aisle_transit-…204724` | 1 | no | `loc=slam@4bb88852` — it is **§18's flip** and the whole point of it is that the label differs |
+| `case-ring_stress-…205930/210329/210709` | 3 | no | `nav=on@7f28f5b6` — **§20.4's rejected rung 8**, a different parameter tree |
+| `case-station_approach-…193729` | 1 | **no** | **it carries NO `monitor=` line at all**, so `analyse` reads it `UNLABELLED` and refuses the mix |
+| `case-aisle_transit-…194053`, `…194833` | 2 | no | same — recorded before the label existed, and **not cited in any table in this file** |
+
+**SO EVERY COUNT IN §17 AND §20 IS OUT OF EIGHT**: `aisle_transit`
+**2 of 3**, `ring_stress` **2 of 3**, `station_approach` **0 of 1**,
+`reverse_out` **0 of 1** (its leg 1 arrived; the run did not) —
+**4 of 8**.
+
+**AND THE ONE PLACE A RUN OUTSIDE THE SET IS CITED ANYWAY IS
+§17.3/§20.5, DELIBERATELY.** `…193729` is the ONLY station-class arrival
+this track has ever produced. Its numbers are the ones F5 inherits and
+there is no second opinion about them, so they are quoted — **outside
+the denominator, with the label difference stated at both sites**. A
+figure that is the only one of its kind is worth quoting; a figure
+quietly folded into a count it does not belong to is not.
 
 **AND THAT LAST ROW IS THE POINT OF THE FIRST COMMIT OF THIS TASK.**
 `nav=on@ebe9ca34` is a DIFFERENT byte hash from §16.5's `3148d052`, and
@@ -2705,9 +2734,10 @@ So the label chain across this whole phase reads
 |---|---|---|
 | `3148d052` | `53a33d67` | §16.5's acceptance set |
 | `ebe9ca34` | `53a33d67` | **§17's case set, §18's flip** |
-| `97fe63af` | `53a33d67` | the committed tree today |
+| `97fe63af` | `53a33d67` | after §18.3's jump-budget back-annotation |
+| `9d30cd42` | `53a33d67` | the committed tree today, after §19.9's `global_costmap` note |
 
-**Three byte hashes, one configuration, and only one of the two columns
+**Four byte hashes, one configuration, and only one of the two columns
 is a claim about the stack.** A reader comparing a session's `nav=`
 label against the file on disk will find them different and should:
 `nav_config_md5` is the one that says whether the STACK moved, and it
@@ -2829,11 +2859,21 @@ the end of a 4.80 m spur.
 | `…193729` | **SUCCESS** | 94.3 | 27.098 m | **0.5451 m** | 0.5280 m | **−0.8765 rad (−50.2°)** | 0.5975 m |
 | `…204049` | **ABORT, `error_code 205`** | 100.1 | 29.078 m | 4.6226 m | 4.5955 m | −1.8222 rad | 1.9542 m |
 
-**ONE IN TWO, AND THE TWO RUNS CARRY DIFFERENT LABELS.** `…193729` was
-recorded before the `monitor=` line existed and reads `UNLABELLED` on
-it; `…204049` reads `monitor=off`. `analyse` refuses to table them
-together and this section prints them as two rows rather than pretending
-otherwise. Nothing else about the two stacks differs.
+**ONE IN TWO ACROSS BOTH RUNS, AND `station_approach` IS 0 OF 1 IN THE
+CASE SET.** The two rows carry different labels: `…193729` was recorded
+before the `monitor=` line existed and reads `UNLABELLED` on it;
+`…204049` reads `monitor=off`. `analyse` refuses to table them together,
+**so §17.0a's rule puts only `…204049` in the denominator** and §20.1's
+`4 of 8` counts this case as **0 of 1**. Nothing else about the two
+stacks differs — the `monitor=` line was added between them and no
+`--monitor` child ran on either.
+
+**AND `…193729` IS QUOTED ANYWAY, WHICH IS A DECISION AND NOT AN
+OVERSIGHT.** It is the ONLY station-class arrival this track has ever
+produced. §20.5 hands F5 its arrival heading because there is no second
+measurement of that quantity anywhere, and it says so where it hands it
+over. **Quoting the only figure of its kind is not the same as counting
+it in a rate**, and this file does the first and not the second.
 
 **THE ARRIVAL HEADING IS THE FIGURE F5 INHERITS AND IT IS THE WORST ON
 THIS TRACK.** −0.8765 rad — fifty degrees off the dock axis — on a run
@@ -2929,22 +2969,49 @@ counterweight-first, worst +0.3005 m/s, and not one sample the other
 way. So one session carries both directions on one vehicle, one floor
 and one parameter tree:
 
+`drive_goal.deviation_by_direction()`, printed by the LEGS block on
+every case session, attributing each truth sample to what the CONTROLLER
+was asking for at that moment and scoring it against the plan standing
+at the time:
+
+```
+          leg 1 station_s5             96.71 s   26.992 m  status  4  error 0
+            nav2 REVERSE  (forks-first)    n  1832  deviation mean 0.0503  max 0.1615 m
+            nav2 FORWARD  (counterweight)  not driven on this leg
+          leg 2 ring_s5_junction       33.00 s    4.868 m  status  6  error 205
+            nav2 REVERSE  (forks-first)    not driven on this leg
+            nav2 FORWARD  (counterweight)  n   657  deviation mean 0.0756  max 0.2314 m
+```
+
 | leg | direction | n | deviation, mean | deviation, max |
 |---|---|---|---|---|
-| 1 | forks-first (**nav2 REVERSE**) | 1934 | **0.0522 m** | **0.1615 m** |
-| 2 | counterweight-first (**nav2 FORWARD**) | 660 | **0.0756 m** | **0.2314 m** |
+| 1 | forks-first (**nav2 REVERSE**) | 1832 | **0.0503 m** | **0.1615 m** |
+| 2 | counterweight-first (**nav2 FORWARD**) | 657 | **0.0756 m** | **0.2314 m** |
 
-**nav2's FORWARD TRACKS 45 % WORSE IN THE MEAN AND 43 % WORSE AT THE
+**nav2's FORWARD TRACKS 50 % WORSE IN THE MEAN AND 43 % WORSE AT THE
 PEAK THAN ITS REVERSE, ON THIS VEHICLE** — which is the opposite of what
 issue #5714 predicts. F4 constraint 19 says measure it and record it, so
 it is recorded: **the defect this phase was told to watch for does not
 appear on this plant, and the direction it does appear in is the one
 nav2 considers normal.**
 
+> **THESE ARE THE COMMITTED INSTRUMENT'S FIGURES AND THEY MOVED FROM THE
+> HAND-CUT SPLIT THIS SECTION WAS FIRST WRITTEN FROM** (n 1934, mean
+> 0.0522 on the REVERSE half; n 660, mean 0.07558 on the FORWARD one).
+> One rule changed when the split became a function: it drops samples
+> where the commanded speed is inside `nav.analyse.cusp_speed_mps`,
+> because there the sign of a command is not a direction and the
+> converter is holding a standing zero — 102 samples at the end of leg 1
+> where the truck was arriving, and 3 at the start of leg 2. **Both
+> maxima are identical to four decimals and the FORWARD mean is
+> unchanged**; what moved is the REVERSE mean, from 0.0522 to 0.0503,
+> because the dropped samples were the arrival's. The finding is the
+> same and 45 % has become 50 %.
+
 **THE COMPARISON IS NOT LIKE FOR LIKE AND THIS SENTENCE IS THE HONEST
 FORM OF IT.** Leg 1 is a 27 m transit down a ring band into a spur; leg
 2 is a 4.9 m extraction from a 4.00 m bay, which is the tightest
-geometry on this floor. Some of the 45 % is the manoeuvre and not the
+geometry on this floor. Some of the 50 % is the manoeuvre and not the
 direction, and separating the two needs a counterweight-first leg down
 an open corridor — which no goal in this table produces and which is
 named as open rather than estimated.
@@ -3070,6 +3137,17 @@ localiser only through `/tf`.
 Four runs of `aisle_transit`, one file, one plant, one estimator, one
 goal table. The only thing that differs is which node owns
 `map` → `odom`.
+
+**AND THAT IS EXACTLY THE MIX `analyse` REFUSES, WHICH IS WHY THIS TABLE
+IS ASSEMBLED BY HAND.** All four carry `nav=on@ebe9ca34 monitor=off
+traction=nominal arm=wheel+imu` and they differ in ONE link of the
+five-link chain: `loc=amcl@735cdbc6` on three, `loc=slam@4bb88852` on
+the fourth. `analyse` will not table them together — that refusal is
+F3's own and it exists precisely so that one localiser's spread cannot
+be read as two — so this section prints them side by side deliberately,
+names the difference, and is the only place in this file that does.
+**No other label differs**, and in particular none of the four is one of
+the three sessions on disk that predate the `monitor=` line (§17.0a).
 
 | | `…201613` amcl | `…202100` amcl | `…202507` amcl | **`…204724` slam** |
 |---|---|---|---|---|
@@ -3265,6 +3343,28 @@ is that on this arm the path has four nodes in it instead of three, and
 every session recorded on it is labelled `monitor=on@<md5>` so that no
 figure taken through the longer path can sit in a table with one taken
 through the shorter. That is `nav=`'s own rule one link further down.
+
+#### 19.2a THE DEVIATION FROM THE BRIEF, AND THE RULING ON IT
+
+**THE TASK BRIEF SAID THE MONITOR WOULD BE A `--nav` CHILD; IT IS A FLAG
+OF ITS OWN.** That is a deviation, it was taken deliberately, and it was
+put to the owner rather than folded in quietly.
+
+**THE ARGUMENT WAS RE-BASING.** §16.5's eleven-run acceptance set and
+§17's eight-run case set are measured through a three-node command path
+against `nav_config_md5 53a33d67`. A monitor that went up on every
+`--nav` bringup would put a fourth node in that path, and every arrival
+figure on this track would silently become a figure about a different
+line — nineteen driven runs' worth, re-measured to say the same thing.
+
+**RULING: ACCEPTED** (owner, fix round 1, 2026-08-27). The re-basing
+argument holds, and the combination the brief actually wanted
+demonstrated is exercised: **§19.9 drives a goal on
+`--localize amcl --nav --monitor`, seventeen children, with the guard in
+the command path.** What the deviation buys is that §16.5's and §17's
+numbers stay numbers about the shipped path; what it costs is that the
+guard is not in that path by default, and §19.8 is the argument for
+that and the list of what would have to change to reverse it.
 
 **WHY IT IS A FLAG OF ITS OWN AND NOT PART OF `--nav`.** Three reasons,
 and the first is the evidence's. §16.5's acceptance set and §17's
@@ -3680,8 +3780,42 @@ plan goes straight through it, and MPPI, which DOES see it in the local
 costmap, cannot follow that plan. The vehicle backed off and orbited.
 **An obstacle that is not in the frozen map is not in the global plan,
 and the local costmap alone will not route round it.** That is a
-property of this arm rather than of this task's change, it was not known
-before this run, and §20.6 carries it as open.
+property of this arm rather than of this task's change, and it was not
+known before this run.
+
+**AND THE BLAST RADIUS IS NIL FOR EVERYTHING ALREADY IN THIS FILE,
+WHICH IS THE FIRST QUESTION AND IS ARGUED RATHER THAN ASSERTED.** Every
+driven run in §15, §16 and §17 crossed a floor whose obstacles are ALL
+in the frozen grid: the map was built from a 227 m commissioning drive
+of `warehouse_ver3` and fitted to that world's own geometry
+(`EVIDENCE_MAP_V3.md`), and the one object those runs were ever aimed
+at is `RackSW3`, which §16.7d records as **LETHAL in the frozen grid**
+and which the planner refused by name. **Nothing was ever added to
+that floor except this section's box.** So the global costmap had
+COMPLETE obstacle knowledge on every run this file reports, the gap was
+unexercised until t+22 s of this one, and **no conclusion in §15, §16,
+§17, §18 or §20 rests on it.** The demonstration is the first and only
+run on this track to put an object on the floor that the map does not
+contain.
+
+**AND IT IS HANDED ON RATHER THAN FIXED HERE, FOR THREE REASONS.**
+*One:* adding an `obstacle_layer` to `global_costmap` moves a VALUE in
+`nav2.yaml`, which moves `nav_config_md5` off `53a33d67` — and that
+label is the only thing making §16.5's eleven runs and §17's eight one
+measured set. Re-establishing it costs nineteen driven runs, which is a
+task and not a line. *Two:* it changes what the PLANNER plans through
+on every goal on every arm, which F4 constraint 20 makes a
+re-measurement rather than a parameter. *Three*, and this is the
+technical one: the local costmap is a 10 × 10 m ROLLING window and the
+global one is not. Marking a 15 Hz planar scan into a costmap with no
+rolling window leaves marks that nothing clears once the vehicle has
+driven past them — raytrace clearing only clears what a beam currently
+passes through — so the obvious fix introduces a phantom obstacle that
+persists on the grid every goal is planned against. **That is a failure
+mode which needs its own measurement**, and it is exactly the shape of
+thing §14.4's coverage hole and §19.7 item 2's self-occlusion mask
+belong with. `nav2.yaml`'s `global_costmap` section carries a note where
+an editor will look.
 
 ---
 
@@ -3693,7 +3827,7 @@ before this run, and §20.6 carries it as open.
 |---|---|
 | **the command path** | one line, four verified hops, no bypass, no ground truth in it. Worst steer step **0.100000 rad/tick** on every driven run of §15, §16 and §17 — F4 Task 1's 2.0 rad/s ramp, exactly, never once above it |
 | **the nav arm** | sixteen children on `--localize amcl --nav`, six lifecycle nodes ACTIVE, a plan in 0.008 – 0.014 s on every bringup, and a gate that refuses a server which came up merely active |
-| **the driving** | **10 of 11** on §16.5's acceptance set and **4 of 8** on §17's case set, one parameter tree, `nav_config_md5 53a33d67` |
+| **the driving** | **10 of 11** on §16.5's acceptance set and **4 of 8** on §17's case set (`aisle_transit` 2/3 + `ring_stress` 2/3 + `station_approach` 0/1 + `reverse_out` 0/1 — **§17.0a is the denominator rule and it is one label**), one parameter tree, `nav_config_md5 53a33d67` |
 | **the arrival** | truth **0.4361 – 0.6174 m** on every arrival across both sets, in an unchanged **0.60 m** position-only box, with belief and truth agreeing to **0.006 – 0.13 m** at rest |
 | **the fail-fast** | a goal-relative watchdog at ~30 s, the tree's own recovery at ~91 s, a 335 s budget behind both. **0 false positives on §16.7b's 20-arrival replay and on the 10 arrivals this task drove live**; §20.1 is which failures it caught and which nav2 caught first |
 | **what is NOT delivered** | the station class. §17.3: the position half is reachable to six millimetres and the pair is not reachable in ONE approach, and a real station spur delivers **0.7538 rad** of heading error at the 0.60 m box |
@@ -3711,7 +3845,7 @@ each run. The criteria are the ones F4's plan and §16 set.
 | the headline goal arrives repeatably | §16, ≥3/3 | `spine_north` **6 of 6** (§16.5) | **MET** |
 | the shipped goal set arrives | §16, 5/5 | **10 of 11** (§16.5) | **NOT MET — `ring_corner` 2 of 3** |
 | **an aisle transit re-tasked mid-path** | F4 Task 3 | **2 of 3** arrivals; the re-task itself costs **≤ 1 controller tick** | **MET for the preemption, NOT for the arrival** |
-| **a forks-first station-class approach** | F4 Task 3 | **1 of 2**; arrival heading **−0.8765 rad** inside a 0.60 m box | **APPROACH MEASURED, station class NOT MET** |
+| **a forks-first station-class approach** | F4 Task 3 | **0 of 1 in the case set**; the one arrival this track has (`…193729`, outside the set per §17.0a) put the heading at **−0.8765 rad** inside a 0.60 m box | **APPROACH MEASURED, station class NOT MET** |
 | **a genuine Reeds-Shepp reverse leg** | F4 Task 3 / #5714 | planned cusps produced, **one driven**, tracking **0.0888 m** max through it | **MET** |
 | **the corner-heavy leg, ×3** | F4 Task 3 | **2 of 3**, and **4 of 6** over two tasks | **NOT MET** |
 | the controller holds its rate | `controller_frequency: 20.0` | **19.965 – 20.056 Hz** mean, 20.000 median, across every run of §16.5 and §17 | **MET** |
@@ -3725,8 +3859,15 @@ MISSES IT.** `ring_corner` was 2 of 3 then and is 2 of 3 now. Nothing
 §16.5 measured regressed: the arrivals in §17 sit inside §16.5's own
 arrival band on every column. **What is new is the two rows the case set
 added and the acceptance set could not** — a station-class approach at
-1 of 2 and a preempted transit at 2 of 3 — and neither of those is a
-regression, because neither had ever been driven.
+0 of 1 in the set (1 of 2 across both its runs) and a preempted transit
+at 2 of 3 — and neither of those is a regression, because neither had
+ever been driven.
+
+**AND THE COUNTS IN THIS TABLE ARE ALL OUT OF §17.0a's EIGHT.** The
+station row reads 0 of 1 here and §17.3 reads 1 of 2 there, and the two
+are not in conflict: §17.3 is reporting both runs of that case and this
+is reporting the case set. One label, one denominator, and the run
+outside it is named at both sites.
 
 **AND THE FAIL-FAST ROW IS WORTH READING TWICE.** Four failures in §17,
 and the two guards split them: the watchdog named `…201613` and
@@ -3752,17 +3893,18 @@ parameter tree:
 
 | leg | direction | n | deviation, mean | deviation, max |
 |---|---|---|---|---|
-| forks-first | **nav2 REVERSE** — every ordinary leg | 1934 | **0.0522 m** | **0.1615 m** |
-| counterweight-first | **nav2 FORWARD** | 660 | **0.0756 m** | **0.2314 m** |
+| forks-first | **nav2 REVERSE** — every ordinary leg | 1832 | **0.0503 m** | **0.1615 m** |
+| counterweight-first | **nav2 FORWARD** | 657 | **0.0756 m** | **0.2314 m** |
 
-**45 % worse in the mean and 43 % worse at the peak, the wrong way
+`drive_goal.deviation_by_direction()`, printed by §17.4's LEGS block.
+**50 % worse in the mean and 43 % worse at the peak, the wrong way
 round.** And through the CUSP itself — the direction change the defect
 is really about — the deviation is **mean 0.0566 m, max 0.0888 m** over
 ±1 s, which is better than either leg's own peak.
 
 **THE HONEST QUALIFICATION IS §17.4's AND IT STANDS HERE.** Leg 2 is a
 4.9 m extraction from a 4.00 m bay and leg 1 is a 27 m transit down an
-8.00 m band; part of the 45 % is geometry rather than direction, and
+8.00 m band; part of the 50 % is geometry rather than direction, and
 separating them needs a counterweight-first leg down an open corridor,
 which no goal in this table produces.
 
@@ -3885,10 +4027,22 @@ shipped position-only 0.60 m checker:
 | arrival position, BELIEF | 0.5280 m |
 | **arrival HEADING** | **−0.8765 rad (−50.2°)** |
 | closest approach, belief | 0.5975 m |
-| repeatability | **1 of 2** |
+| repeatability | **1 of 2** across both runs of the case; **0 of 1 inside the case set** |
 
 **THE HEADING IS THE NUMBER THAT DECIDES F5's ARCHITECTURE.** Fifty
 degrees off the dock axis on a run that arrived inside the box.
+
+**AND THE RUN IT COMES FROM IS OUTSIDE §17.0a's DENOMINATOR, WHICH IS
+STATED HERE BECAUSE IT IS THE ONE PLACE IT MATTERS.**
+`case-station_approach-20260827-193729` carries no `monitor=` line — it
+predates the label — so `analyse` will not table it with the case set
+and §20.1 counts this case as 0 of 1. **It is quoted anyway because it
+is the ONLY station-class arrival this track has ever produced**, and a
+handoff that omitted the only measurement of the quantity it is handing
+over would be worse than one that quotes it with its provenance. Nothing
+about that stack differs from the case set's except the missing line:
+same plant, same estimator, same localiser, same `nav2.yaml`, no
+`--monitor` child on either. **F5 should read this row as n = 1.**
 
 **2. AND THE TWO-STAGE APPROACH IS A REQUIREMENT AND NOT A PREFERENCE.**
 §16.6 ruled that the (position, heading) pair is *not reachable in ONE
@@ -3979,13 +4133,39 @@ something other than `map` → `base_link`.
   that costs: an obstacle that is not in the frozen map is not in the
   global plan, and the local costmap alone made the vehicle back off
   rather than route round it.
+    **THE SCOPE, STATED, BECAUSE A GAP WITHOUT ONE READS AS A TAINT.**
+    Every driven run in §15, §16 and §17 crossed a floor whose obstacles
+    are ALL in the frozen grid — it was built from a commissioning drive
+    of `warehouse_ver3` and fitted to that world's own geometry, and the
+    one object those runs were aimed at, `RackSW3`, is LETHAL in it
+    (§16.7d). **Nothing was ever put on that floor except §19's box.**
+    So the global costmap had complete obstacle knowledge on every run
+    this file reports and **no conclusion in §15–§18 or §20 rests on
+    this gap.** It is a limit on what the arm can be ASKED to do next,
+    not a doubt about what it has already been measured doing.
+    **AND IT IS HANDED ON RATHER THAN CLOSED HERE**, argued in §19.9:
+    the change moves a VALUE in `nav2.yaml` and therefore unmeasures
+    nineteen driven runs against `nav_config_md5 53a33d67`; it changes
+    what the planner plans through on every arm, which constraint 20
+    makes a re-measurement; and marking a planar scan into a costmap
+    with NO rolling window leaves marks nothing clears, which is a new
+    failure mode rather than a fix. `nav2.yaml`'s `global_costmap`
+    section carries the note where an editor will look.
 - **No docking, no `/speed_limit` from a PLC, no fleet, no HMI.** That
   absence is the phase.
 - **The 5.09 s control tick** (§15.4), once in 21 500, still
   unexplained. Nothing in this task's further 30 000-odd commands
   reproduced it.
 - **`monitor=` is a fifth label and the sessions recorded before it
-  exists read `UNLABELLED`.** Two of §17's runs — `…193729` and the two
-  earliest `aisle_transit` runs — are in that group, and `analyse`
-  refuses to table them with the rest. That is the label working on its
-  first day and it is stated rather than smoothed.
+  existed read `UNLABELLED`.** **THREE** sessions on disk are in that
+  group and this is the ledger of them, corrected:
+  `case-station_approach-20260827-193729`,
+  `case-aisle_transit-20260827-194053` and
+  `case-aisle_transit-20260827-194833`. **Only the FIRST is cited
+  anywhere in this file** — in §17.3's table and §20.5's handoff, both
+  times with the label difference stated — and §17.0a puts it outside
+  the case set's denominator. The two `aisle_transit` runs are the
+  bench's own first validation runs, they are on disk, and **no table in
+  this file quotes a figure from either**. Every other case session,
+  including all four of §18.1's, carries `monitor=off`. That is the
+  label working on its first day and it is stated rather than smoothed.

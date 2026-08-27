@@ -704,6 +704,66 @@ def heading_swing(goal_travel_yaw, truth_rows, speeds, lo, hi, min_speed):
                  worst=max(abs(p) for p in psis))
 
 
+#: One direction's deviation population. F4 Task 3, fix round 1.
+Split = collections.namedtuple("Split", "n mean worst")
+
+
+def deviation_by_direction(truth_rows, cmd_rows, plans, lo, hi, deadband):
+    """(nav2 FORWARD, nav2 REVERSE) deviation from the plan, split.
+
+    THE #5714 A/B AS A COMMITTED INSTRUMENT, AND IT EXISTS BECAUSE THE
+    FIRST CUT OF EVIDENCE_NAV_V3.md 17.4 COMPUTED IT BY HAND. nav2 issue
+    #5714 says MPPI's Ackermann model tracks worse in REVERSE; on this
+    vehicle nav2's REVERSE is ordinary travel, because the forks are at
+    model -x - so the only way to ask the question is a session that
+    drove BOTH ways, and the only honest way to answer it is one
+    function that both populations come out of.
+
+    EACH TRUTH SAMPLE IS ATTRIBUTED TO WHAT THE CONTROLLER WAS ASKING
+    FOR AT THAT MOMENT, not to a window somebody cut. The most recent
+    `/cmd_vel` at or before the sample decides which population it joins;
+    below `deadband` the sign of a command is not a direction
+    (`navcmd.creep_speed_mps` - the converter answers a standing zero and
+    a HELD steer axis there) and the sample joins neither. The deviation
+    itself is the same figure `analyse` reports for the whole run: the
+    distance from the truth to the plan STANDING AT THE TIME.
+
+    A DIRECTION THAT WAS NEVER DRIVEN READS None AND NOT ZERO. Almost
+    every session on this track is forks-first from end to end, so the
+    FORWARD half is absent on all of them, and reporting 0.0 for it
+    would be a tracking claim about a leg that does not exist.
+    """
+    both = {1: [], -1: []}
+    cmd_i = 0
+    sign = 0
+    for row in truth_rows:
+        t = float(row[0])
+        if not (lo <= t <= hi):
+            continue
+        while cmd_i < len(cmd_rows) and float(cmd_rows[cmd_i][0]) <= t:
+            v = float(cmd_rows[cmd_i][2])
+            if abs(v) > deadband:
+                sign = 1 if v > 0.0 else -1
+            else:
+                sign = 0
+            cmd_i += 1
+        if sign == 0:
+            continue
+        standing = plan_standing_at(plans, t)
+        if not standing:
+            continue
+        both[sign].append(min(math.hypot(row[1] - p[0], row[2] - p[1])
+                              for p in standing))
+
+    def stat(values):
+        if not values:
+            return None
+        return Split(n=len(values),
+                     mean=math.fsum(values) / len(values),
+                     worst=max(values))
+    return (stat(both[1]), stat(both[-1]))
+
+
 def driven_cusps(cmd_rows, deadband):
     """Where the COMMAND changed direction, as (t, v_before, v_after).
 
@@ -1912,6 +1972,24 @@ def analyse_session(cfg, session):
                 for a, b in zip(inside, inside[1:])) if len(inside) > 1 else 0.0
             print("          leg {:<22} {:7.2f} s  {:7.3f} m  status {:>2}"
                   "  error {}".format(label, hi - lo, driven, status, code))
+            # AND THE #5714 SPLIT, PER LEG. nav2's FORWARD is
+            # counterweight-first on this vehicle and its REVERSE is
+            # ordinary travel, so a leg that drove one way prints one
+            # row and a session that drove both ways prints the A/B
+            # issue #5714 is about. A direction never driven is ABSENT
+            # and not zero.
+            fwd, rev = deviation_by_direction(
+                truth, cmd, plans, lo, hi,
+                cfg.f("nav.analyse.cusp_speed_mps"))
+            for name, half in (("nav2 REVERSE  (forks-first)", rev),
+                               ("nav2 FORWARD  (counterweight)", fwd)):
+                if half is None:
+                    print("            {:<30} not driven on this leg"
+                          .format(name))
+                else:
+                    print("            {:<30} n {:>5}  deviation mean "
+                          "{:.4f}  max {:.4f} m".format(
+                              name, half.n, half.mean, half.worst))
 
         if fields.get("t_preempt_s"):
             t_switch = float(fields["t_preempt_s"])

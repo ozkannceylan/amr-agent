@@ -1540,6 +1540,25 @@ global_costmap:
       footprint: "[[-2.415000,-0.450000],[-1.220000,-0.668995],[1.240000,-0.560000],[1.400000,-0.510000],[1.400000,0.510000],[1.240000,0.560000],[-1.220000,0.668995],[-2.415000,0.450000]]"
       footprint_padding: 0.0
 
+      # TWO LAYERS, AND THERE IS NO `obstacle_layer` HERE - WHICH IS A
+      # DECISION AND F4 TASK 3 MEASURED WHAT IT COSTS. This costmap
+      # knows only what the FROZEN MAP knows, so an obstacle that is not
+      # in that grid is not in any global plan; the local costmap sees
+      # it and MPPI then cannot follow a path that goes through it.
+      # EVIDENCE_NAV_V3.md 19.9 is a run where exactly that happened -
+      # the vehicle backed off a spawned box and the watchdog named it -
+      # and 20.6 carries the scope: every driven run in 15, 16 and 17
+      # crossed a floor whose obstacles are ALL in the frozen grid
+      # (RackSW3 included, 16.7d), so no conclusion in this file rests
+      # on this gap.
+      #   IT IS HANDED ON RATHER THAN ADDED HERE FOR THREE REASONS,
+      # ARGUED IN 20.6: adding it moves nav_config_md5 off 53a33d67 and
+      # unmeasures both driven sets; it changes what the PLANNER plans
+      # through on every arm, which is a re-measurement and not a
+      # parameter; and marking a 15 Hz planar scan into a costmap with
+      # NO rolling window leaves marks that nothing clears once the
+      # vehicle drives past them, which is a failure mode that needs its
+      # own measurement rather than a line here.
       plugins: ["static_layer", "inflation_layer"]
 
       static_layer:

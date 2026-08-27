@@ -1465,3 +1465,88 @@ def test_heading_swing_is_None_when_nothing_was_driven():
     truth = [(float(i), 0.0, 0.0, math.pi) for i in range(5)]
     assert drive_goal.heading_swing(0.0, truth, [0.0] * 5, 0.0, 4.0,
                                     0.05) is None
+
+
+# ======================================================================
+# F4 TASK 3 FIX ROUND 1 - THE DIRECTION SPLIT (#5714's own instrument)
+# ======================================================================
+
+def test_deviation_by_direction_splits_a_run_that_went_both_ways():
+    # THE #5714 A/B AS ARITHMETIC. Each truth sample is attributed to the
+    # direction the CONTROLLER was commanding at the time, and scored
+    # against the plan standing at the time - so one run that reverses
+    # gives two populations off one instrument, and neither of them is a
+    # hand-cut window.
+    plans = [(0.0, [(i / 10.0, 0.0, 0.0) for i in range(101)])]
+    truth = [(float(i), float(i), 0.10 if i < 5 else 0.30, 0.0)
+             for i in range(10)]
+    cmd = [(float(i), 0.0, -0.30 if i < 5 else +0.30, 0.0)
+           for i in range(10)]
+    fwd, rev = drive_goal.deviation_by_direction(
+        truth, cmd, plans, 0.0, 9.0, 0.005)
+    # nav2 FORWARD is positive linear.x; nav2 REVERSE is negative
+    assert rev.n == 5 and fwd.n == 5
+    assert rev.mean == pytest.approx(0.10)
+    assert fwd.mean == pytest.approx(0.30)
+    assert rev.worst == pytest.approx(0.10)
+    assert fwd.worst == pytest.approx(0.30)
+
+
+def test_deviation_by_direction_gives_None_for_a_direction_never_driven():
+    # Every ordinary leg on this track is a nav2 REVERSE leg, so the
+    # FORWARD half is empty on almost every session and must read as
+    # absent rather than as zero.
+    plans = [(0.0, [(i / 10.0, 0.0, 0.0) for i in range(101)])]
+    truth = [(float(i), float(i), 0.05, 0.0) for i in range(6)]
+    cmd = [(float(i), 0.0, -0.30, 0.0) for i in range(6)]
+    fwd, rev = drive_goal.deviation_by_direction(
+        truth, cmd, plans, 0.0, 5.0, 0.005)
+    assert fwd is None
+    assert rev.n == 6
+
+
+def test_deviation_by_direction_ignores_the_creep_deadband():
+    # Below navcmd.creep_speed_mps the sign of a command is not a
+    # direction (the converter answers with a standing zero and a HELD
+    # steer axis), so those samples belong to neither population.
+    plans = [(0.0, [(i / 10.0, 0.0, 0.0) for i in range(101)])]
+    truth = [(float(i), float(i), 0.05, 0.0) for i in range(6)]
+    cmd = [(0.0, 0.0, -0.30, 0.0), (1.0, 0.0, -0.30, 0.0),
+           (2.0, 0.0, 0.001, 0.0), (3.0, 0.0, -0.001, 0.0),
+           (4.0, 0.0, -0.30, 0.0), (5.0, 0.0, -0.30, 0.0)]
+    fwd, rev = drive_goal.deviation_by_direction(
+        truth, cmd, plans, 0.0, 5.0, 0.005)
+    assert fwd is None
+    assert rev.n == 4
+
+
+def test_deviation_by_direction_uses_the_plan_STANDING_at_each_sample():
+    # The same rule every other deviation figure on this track obeys: the
+    # tree replans at 1 Hz and a sample is scored against the path that
+    # existed when it was taken, never against the first or the last.
+    plans = [(0.0, [(i / 10.0, 0.0, 0.0) for i in range(101)]),
+             (3.0, [(i / 10.0, 1.0, 0.0) for i in range(101)])]
+    truth = [(float(i), float(i), 0.0, 0.0) for i in range(6)]
+    cmd = [(float(i), 0.0, -0.30, 0.0) for i in range(6)]
+    _fwd, rev = drive_goal.deviation_by_direction(
+        truth, cmd, plans, 0.0, 5.0, 0.005)
+    # samples 0-2 are 0.0 from the first plan, 3-5 are 1.0 from the second
+    assert rev.n == 6
+    assert rev.mean == pytest.approx(0.5)
+    assert rev.worst == pytest.approx(1.0)
+
+
+def test_deviation_by_direction_windows_on_the_times_it_is_given():
+    plans = [(0.0, [(i / 10.0, 0.0, 0.0) for i in range(101)])]
+    truth = [(float(i), float(i), 0.10, 0.0) for i in range(10)]
+    cmd = [(float(i), 0.0, -0.30, 0.0) for i in range(10)]
+    _f, rev = drive_goal.deviation_by_direction(
+        truth, cmd, plans, 2.0, 4.0, 0.005)
+    assert rev.n == 3
+
+
+def test_deviation_by_direction_is_empty_both_ways_with_no_plan():
+    fwd, rev = drive_goal.deviation_by_direction(
+        [(0.0, 0.0, 0.0, 0.0)], [(0.0, 0.0, -0.3, 0.0)], [], 0.0, 1.0,
+        0.005)
+    assert fwd is None and rev is None
