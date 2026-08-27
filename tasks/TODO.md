@@ -145,7 +145,8 @@ Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
       düzeltildi + tests/test_sweep_patterns.py o sınıfı kilitliyor).
       TAVSİYE (EVIDENCE_LOCALIZATION_V3.md §13.10): F4 için VARSAYILAN
       AMCL kalır (forklift dönüyor); poz grafiği kolu ağaçta, bir
-      bayrak uzakta. Map-EKF ERTELENDİ: medyan düzeltme 19–94 mm,
+      bayrak uzakta. Map-EKF ERTELENDİ: medyan düzeltme AMCL'de
+      19–47 mm (harita hücresi 50 mm), slam kolunda 22–135 mm;
       yumuşatıcı gecikme ekler ve okunmayan bir sayıyı iyileştirmek için
       manşet sayıyı bozar (§13.11). Suite 239→438; selftest 30→44.
 - [ ] F4. Nav2 sürüş: Smac Hybrid-A* (REEDS_SHEPP, gerçek min dönüş

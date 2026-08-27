@@ -1616,7 +1616,12 @@ these, in the order they weigh:
    warehouse turns through most of its life; the m5_ver1 lineage's whole
    docking phase is a slow sustained corner. On that profile AMCL ends
    **0.0382 m** out and the pose graph **0.3301 m**, its rms is 0.0846
-   against 0.2744, and its moving offset is 0.050 m against 0.181. A
+   against 0.2744, and its moving offset is 0.050 m against 0.181.
+   **THAT IS ONE SESSION ON EACH ARM AND THE HEAVIEST GROUND HERE RESTS
+   ON IT** — the widest gap in this section, measured once per arm, and
+   §13.12 says so again where the capture is. A task that wants to move
+   this ruling repeats `corner_creep` three times per arm FIRST and
+   moves nothing else until it has. A
    localiser that is three times better down a corridor and three times
    worse in a corner is not better for a truck that corners.
 2. **The heading jumps go the wrong way for a path follower.** 0.1326 rad
