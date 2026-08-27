@@ -240,6 +240,13 @@ def test_the_grown_footprint_still_fits_the_PICK_AISLE(costmaps):
         "only {:.4f} m of lateral slack in the pick aisle".format(slack))
 
 
+#: The floor's own two road classes (m6/ipc/route.py's header): the ring
+#: and the spine are 8.00 m, the pick aisle is 5.00, and the gaps
+#: between two rack blocks are 5.00 as well.
+CRUISE_CORRIDOR_M = 8.00
+CREEP_CORRIDOR_M = 5.00
+
+
 # ----------------------------------------------------------------------
 # the turning radius, derived
 # ----------------------------------------------------------------------
@@ -419,15 +426,78 @@ def test_the_inflation_covers_the_LATERAL_surprise(costmaps):
                              WORST_MAP_ODOM_STEP_M))
 
 
-def test_the_inflation_leaves_a_CORRIDOR_down_the_pick_aisle(costmaps):
+def test_the_inflation_TELLS_THE_PLANNER_ABOUT_THE_TWO_ROAD_CLASSES(
+        costmaps):
+    # SmacPlannerHybrid is a FREESPACE planner and knows nothing about
+    # m6/ipc/route.py's road graph. This is the only currency it reads,
+    # and the floor's own design is: 8.00 m cruise corridors, and 5.00 m
+    # gaps that are not for driving a 3.815 m truck diagonally through.
+    # At 1.00 m it did exactly that and put its outline over a rack
+    # corner 8 m into a run.
     params = costmaps["global_costmap"]
     radius = float(params["inflation_layer"]["inflation_radius"])
     poly = pad(polygon(params["footprint"]), params["footprint_padding"])
     width = 2.0 * max(abs(y) for _, y in poly)
-    free = 2.0 * (PICK_AISLE_HALF_WIDTH_M - radius)
-    assert free > width, (
-        "inflation at {:.2f} m leaves {:.2f} m of uninflated aisle for a "
-        "padded footprint {:.2f} m wide".format(radius, free, width))
+    cruise_free = CRUISE_CORRIDOR_M - 2.0 * radius
+    creep_free = CREEP_CORRIDOR_M - 2.0 * radius
+    assert cruise_free > 2.0 * width, (
+        "a {:.2f} m corridor keeps only {:.2f} m of uninflated band for "
+        "a {:.2f} m vehicle - the class this truck belongs in has to be "
+        "comfortable".format(CRUISE_CORRIDOR_M, cruise_free, width))
+    assert creep_free <= 0.0, (
+        "a {:.2f} m gap keeps {:.2f} m of UNINFLATED centreline, so "
+        "cutting diagonally through one costs the planner nothing at "
+        "all - which is the run this number was derived from".format(
+            CREEP_CORRIDOR_M, creep_free))
+
+
+def test_the_planner_can_use_its_POTENTIAL_FIELD_SHORTCUT(costmaps):
+    # nav2 prints an ERROR at every inflation radius below the
+    # footprint's CIRCUMSCRIBED radius: an SE2 collision checker cannot
+    # skip the full-footprint check unless the inflation reaches that
+    # far. Measured on this stack at 0.60, 1.00 and 2.00 m; the value
+    # that separates this floor's two road classes happens to clear it.
+    for name, params in costmaps.items():
+        radius = float(params["inflation_layer"]["inflation_radius"])
+        poly = polygon(params["footprint"])
+        circumscribed = max(math.hypot(x, y) for x, y in poly)
+        assert radius > circumscribed, (
+            "{}: inflation {:.2f} m against a circumscribed radius of "
+            "{:.4f} m".format(name, radius, circumscribed))
+
+
+def test_the_cost_scaling_factor_makes_the_RADIUS_MEAN_SOMETHING(
+        costmaps):
+    # THE HALF OF THE ARGUMENT THAT IS EASY TO MISS. nav2's inflation
+    # cost is 252 * exp(-k * (distance - inscribed)); at the shipped
+    # k = 3.0 the cost at the centre of a 5.00 m corridor is 0.88, which
+    # is ZERO once it is a cell value - so a 2.60 m radius with a 3.0
+    # scaling factor is a 0.9 m radius wearing a bigger number.
+    for name, params in costmaps.items():
+        k = float(params["inflation_layer"]["cost_scaling_factor"])
+        inner = inscribed(polygon(params["footprint"]))
+        at_creep_centre = 252.0 * math.exp(
+            -k * (CREEP_CORRIDOR_M / 2.0 - inner))
+        assert at_creep_centre >= 10.0, (
+            "{}: the centre of a {:.2f} m creep corridor costs {:.2f} of "
+            "252 at cost_scaling_factor {:g} - which rounds to nothing "
+            "and leaves the inflation radius decorative".format(
+                name, CREEP_CORRIDOR_M, at_creep_centre, k))
+
+
+def test_the_inflation_CANNOT_close_the_pick_aisle_whatever_it_is_set_to(
+        costmaps):
+    # Inflation is never LETHAL. The only cost a collision check reads
+    # is INSCRIBED_INFLATED, which reaches the grown polygon's own
+    # inscribed radius in from a face - so a vehicle on the aisle's
+    # centreline is clear of it by a margin this radius cannot touch.
+    params = costmaps["global_costmap"]
+    poly = pad(polygon(params["footprint"]), params["footprint_padding"])
+    half = max(abs(y) for _, y in poly)
+    band = PICK_AISLE_HALF_WIDTH_M - inscribed(poly)
+    assert half < band, (
+        "a centred vehicle reaches {:.4f} m and the INSCRIBED_INFLATED "
+        "band starts at {:.4f} m".format(half, band))
 
 
 def test_both_costmaps_inflate_by_the_SAME_radius(costmaps):

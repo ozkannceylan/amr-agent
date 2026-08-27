@@ -116,12 +116,14 @@
 #       is why it is the POLYGON that carries it and not
 #       `footprint_padding`, and what two aborted runs paid to establish
 #       that.
-#   inflation_radius   <- bounded BELOW by the padded polygon's own
+#   inflation_radius   <- bounded BELOW by the grown polygon's own
 #       INSCRIBED radius, or the layer is a hard band and not a
 #       gradient; and below that again by the LATERAL surprise - the
 #       worst cross-track error 0.1044 m plus the worst single
 #       map -> odom step 0.2591 m, which can be entirely lateral and
-#       arrives in one 66 ms tick. Bounded ABOVE by the pick aisle.
+#       arrives in one 66 ms tick. What it is actually SET from is the
+#       FLOOR rather than the error budget, and the local_costmap
+#       section carries that argument.
 #   xy_goal_tolerance  <- the END error, which is taken AT REST after
 #       the corrections have closed the gap. The moving peak does NOT
 #       bind it and section (E) says why.
@@ -414,7 +416,32 @@ planner_server:
       reverse_penalty: 1.0
       change_penalty: 0.0         # DEFAULT-KEPT
       non_straight_penalty: 1.20  # DEFAULT-KEPT: straight is cheaper
-      cost_penalty: 2.0           # DEFAULT-KEPT: weight on costmap cost
+      # 6.0 AGAINST A DEFAULT OF 2.0, AND IT IS THE OTHER HALF OF THE
+      # INFLATION ARGUMENT IN THE local_costmap SECTION. `cost_penalty`
+      # is how much a metre of inflated floor costs against a metre of
+      # clear floor: travel_cost is multiplied by
+      # `cost_penalty * cost/252 + 1`. The floor's two road classes are
+      # 5.00 m and 8.00 m wide, and at the inflation this file sets the
+      # centre of a 5.00 m gap carries a cost of 31 while the centre of
+      # an 8.00 m corridor carries 0. The route arithmetic from the
+      # spawn to `nav.goals.spine_cross` is then:
+      #
+      #   the diagonal through a rack gap  ~22 m, ~10 of them inflated
+      #   the ring and the spine           ~27 m, none of it inflated
+      #
+      # At the default 2.0 the diagonal costs 24.5 against the ring's
+      # 27.0 and the planner takes it - MEASURED, twice, and both runs
+      # ended with a 3.815 m vehicle stuck in a 5.00 m gap. At 6.0 the
+      # diagonal costs 29.4 and the ring wins.
+      #   IT IS FITTED TO THIS FLOOR AND THIS FILE SAYS SO. What it
+      #   encodes is m6/ipc/route.py's road graph - the thing the owner
+      #   chose a fixed graph FOR - expressed in the only currency a
+      #   freespace planner reads. The right answer is nav2's Route
+      #   Server (docs/reports/m5v3-02 4), which is edge-constrained and
+      #   maps onto that graph one for one; it is a whole server and
+      #   belongs to a later phase. Until then this is the lever, and a
+      #   floor with different corridor widths would need it re-derived.
+      cost_penalty: 6.0
       retrospective_penalty: 0.015
       use_quadratic_cost_penalty: false
       allow_primitive_interpolation: false
@@ -939,20 +966,77 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         enabled: true
-        # 0.60 m, AND IT IS NOT A SECOND COPY OF THE PADDING. The
-        # padding is a HARD collision margin; this is a SOFT preference
-        # that keeps the vehicle off rack faces when it has a choice.
-        #   THE LOWER BOUND IS THE LATERAL SURPRISE, section (A): the
-        #   worst measured cross-track error 0.1044 m plus the worst
-        #   single map -> odom step 0.2591 m, which arrives in one tick
-        #   and can be entirely lateral. 0.3635 m; 0.60 is 1.65 x it.
-        #   THE UPPER BOUND IS THE PICK AISLE. Rack faces at y = +-2.50
-        #   and a padded half-width of 1.0990 m leave an UNINFLATED
-        #   corridor of 2 * (2.50 - 0.60) = 3.80 m down the middle -
-        #   1.7 x the padded footprint's 2.198 m width. Anything above
-        #   1.40 m would close that corridor entirely.
-        inflation_radius: 1.00
-        cost_scaling_factor: 3.0
+        # 2.60 m, AND IT IS NOT A SECOND COPY OF THE MARGIN. The margin
+        # in section (C) is a HARD collision bound carried by the
+        # polygon; this is a SOFT preference that keeps the vehicle off
+        # rack faces WHEN IT HAS A CHOICE - and on this floor the whole
+        # question is whether it takes the choice.
+        #
+        # THE FLOOR HAS TWO ROAD CLASSES AND THIS IS THE PARAMETER THAT
+        # TELLS A FREESPACE PLANNER ABOUT THEM. m6/ipc/route.py's header
+        # is the floor's own design: 8.00 m cruise corridors - the ring
+        # and the spine - and ONE 5.00 m pick aisle, with a road graph
+        # over them "so a route drives aisle middles by construction,
+        # the reason the owner chose a fixed graph over grid planning".
+        # SmacPlannerHybrid knows nothing about any of that. It knows
+        # costmap cost, and 2.60 m is the ONE number that separates the
+        # two classes:
+        #
+        #   it is above HALF OF THE CREEP CLASS (2.50 m), so no 5.00 m
+        #     gap and no 5.00 m aisle has an uninflated centreline left
+        #     in it - every pose in one costs something
+        #   it is below HALF OF THE CRUISE CLASS (4.00 m), so every
+        #     8.00 m corridor keeps an uninflated band 2.80 m wide down
+        #     its middle - twice the grown footprint's 1.338 m
+        #   and it is above the grown polygon's CIRCUMSCRIBED radius
+        #     (2.4566 m), which is the threshold nav2 needs before
+        #     SmacPlannerHybrid may use its potential-field shortcut and
+        #     stop full-footprint-checking every expansion
+        #
+        # THREE OF THOSE FOUR PROPERTIES HOLD AT ONCE AND THAT IS WHY IT
+        # IS THIS NUMBER, and the fourth - the shortcut - is the one
+        # nav2 had been printing an ERROR about at every smaller value.
+        #
+        # THIS IS THE THIRD VALUE AND THE FIRST TWO ARE IN THE EVIDENCE.
+        # At 0.60 m the layer was not a gradient at all (section C). At
+        # 2.00 m it was, and a 5.00 m gap still kept a 1.00 m uninflated
+        # strip down its middle, so the planner cut diagonally through
+        # the gap between RackNW2 and RackNW3 - a 3.815 m vehicle
+        # through a gap 1.3 times its own length - and the run ended
+        # with MPPI reporting every one of 1000 sampled trajectories in
+        # collision ("Optimizer fail to compute path", then "Controller
+        # patience exceeded"). EVIDENCE_NAV_V3.md's first-goals section
+        # carries both runs.
+        #
+        # AND THE RADIUS IS ONLY HALF OF IT - `cost_scaling_factor` IS
+        # THE OTHER HALF, AND AT THE SHIPPED 3.0 THE RADIUS MEANS
+        # NOTHING. nav2's inflation cost is
+        # 252 * exp(-k * (distance - inscribed)), so at k = 3.0 the cost
+        # 2.50 m from a rack face is 252 * exp(-3 * 1.886) = 0.88, which
+        # is ZERO after the cast to a cell value. A 2.60 m radius with a
+        # 3.0 scaling factor is a 0.9 m radius wearing a bigger number.
+        # At k = 1.10 that same cell carries 31 of 252 - an eighth of
+        # the way to the inscribed band - and the centre of an 8.00 m
+        # corridor still carries 0. THAT is the separation, and
+        # `cost_penalty` in the planner section is what prices it.
+        #
+        # THE LOWER BOUNDS IT CLEARS. The grown polygon's INSCRIBED
+        # radius is 0.6143 m: below that the layer is a hard band with
+        # no slope (section C). And the LATERAL SURPRISE of section (A)
+        # - the worst cross-track error 0.1044 m plus the worst single
+        # map -> odom step 0.2591 m, which arrives in one tick and can
+        # be entirely lateral - is 0.3635 m.
+        #
+        # WHAT IT DOES NOT DO IS CLOSE THE PICK AISLE, and inflation
+        # cannot: it is never LETHAL. A vehicle on that aisle's own
+        # centreline reaches 0.6690 m either side, and the
+        # INSCRIBED_INFLATED band - the only cost a collision check
+        # reads - reaches 0.6143 m in from faces at +-2.50 m. The
+        # outline therefore stands 1.2167 m clear of it whatever this
+        # radius is. The aisle stays legal and becomes dear, which is
+        # exactly what a creep corridor should be.
+        inflation_radius: 2.60
+        cost_scaling_factor: 1.10
 
       always_send_full_costmap: true
 
@@ -1008,8 +1092,8 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         enabled: true
-        inflation_radius: 1.00
-        cost_scaling_factor: 3.0
+        inflation_radius: 2.60
+        cost_scaling_factor: 1.10
 
       always_send_full_costmap: true
 
