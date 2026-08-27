@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # m5v3.sh - bring the m5-ver3 plant up and down: ONE world, ONE truck,
 # ONE bridge, ONE estimator, and a GPU the run has proved it is using.
-#   start [--headless] [--slippery] [--rf2o|--fuse] | stop | status
+#   start [--headless] [--slippery] [--rf2o|--fuse]
+#         [--localize [amcl|slam]] [--nav] | stop | status
 #
 # WHAT THIS TRACK IS. m5-ver3 is the sensor-fusion rebuild of the SHOWCASE
 # vehicle (vault AMR-DEC-003): one forklift, real instrument profiles, a
@@ -102,6 +103,33 @@
 #   arm carries its own loc= label. EVIDENCE_LOCALIZATION_V3.md 13 is
 #   the A/B between them and the recommendation it produced.
 #
+# --nav STACKS ON TOP OF --localize AND IS REFUSED WITHOUT IT, which is
+# the first flag here that depends on another. It is the same shape
+# --localize already has over the estimator: --slippery changes the
+# PLANT, --rf2o adds a SENSOR, --fuse swaps the ESTIMATOR, --localize
+# adds a LAYER that knows where the vehicle IS, and this one adds the
+# layer that decides where it GOES. Five more children - nav2's planner,
+# controller, behaviour and BT-navigator servers plus ONE lifecycle
+# manager for the four of them - reading m5_ver3/nav2.yaml and
+# m5_ver3/behavior_trees/navigate_to_pose_tricycle_v3.xml.
+#   THE DEPENDENCY IS STRUCTURAL AND NOT A CONVENIENCE. The global
+#   costmap's frame is `map`, and Costmap2DROS::on_activate BLOCKS until
+#   it can transform map -> base_link. Without a localiser nothing
+#   publishes map -> odom at all, so that transition never completes and
+#   every process sits ALIVE for ever. It is refused BY NAME instead,
+#   before anything is started.
+#   THE COMMAND PATH IS ALREADY THERE AND IS NOT PART OF THIS ARM. F4
+#   Task 1's smoother and converter go up on EVERY bringup (F4
+#   constraint 18: one line, no bypass), so --nav adds a publisher to
+#   the top of a path that already exists and has already been measured
+#   end to end with no Nav2 in the room.
+#   IT GOES UP LAST, AFTER THE LOCALISER IS ACTIVE, and that ordering is
+#   the on_activate block above rather than tidiness.
+#   ITS LABEL IS nav= AND IT IS A FOURTH LINE ON THE STATE FILE, for the
+#   loc= line's reason one layer further up: a session recorded with a
+#   planner in the room is a different measurement from one recorded
+#   without, and nothing else in the CSVs says which.
+#
 # THE PARTITION IS NOT OVERRIDABLE FROM THE ENVIRONMENT, unlike m6.sh's.
 # It is read from config.yaml by start, by stop and by status alike, so
 # the three cannot disagree about which graph this is - and ours() reads
@@ -176,6 +204,22 @@ LOCALIZE=false
 #   shape (an else-branch of the `ekf` child) rather than --rf2o's (a
 #   flag that is refused beside another).
 LOCALIZER=""
+# THE OPTIONAL NAV ARM, F4 Task 2, and it is OFF unless the command line
+# says otherwise. --nav puts nav2's planner, controller, behaviour and
+# BT-navigator servers up over the localised stack, with one lifecycle
+# manager driving the four of them, and gives this track its first
+# closed loop: a goal in, a path out, and a twist down the command path
+# F4 Task 1 already built and measured.
+#   IT REQUIRES --localize AND IS REFUSED WITHOUT IT BY NAME. See the
+#   header: the global costmap's frame is `map` and its activation
+#   blocks until map -> base_link resolves, which nothing publishes
+#   without a localiser.
+#   ITS LABEL IS ITS OWN LINE (nav=) for the same reason loc= is: it is
+#   an independent question, all the combinations are legitimate runs,
+#   and a session that cannot say whether a planner was in the room is a
+#   row that would sit in the wrong table looking exactly like one of
+#   them.
+NAV=false
 
 # THIS SCRIPT'S OWN REQUIRED KEYS, on top of the isolation and ROS ones
 # _common.sh checks for every script on this track. Each is refused by its
@@ -231,6 +275,14 @@ REQUIRED_KEYS=(
     fuse.optimization_frequency_hz fuse.transaction_timeout_s
     smoother.package smoother.executable smoother.node_name
     smoother.params_file smoother.active_timeout_s
+    nav.params_file nav.bt_xml nav.costmap_sections
+    nav.planner.package nav.planner.executable nav.planner.node_name
+    nav.controller.package nav.controller.executable
+    nav.controller.node_name
+    nav.behavior.package nav.behavior.executable nav.behavior.node_name
+    nav.bt.package nav.bt.executable nav.bt.node_name
+    nav.lifecycle.package nav.lifecycle.executable
+    nav.lifecycle.node_name nav.default_goal
     slippery.slip_compliance_lateral slippery.slip_compliance_longitudinal
     slippery.service_timeout_ms
     paths.log_dir paths.pidfile paths.traction_file
@@ -253,6 +305,29 @@ configure() {
     # command path is not an arm and there is no branch on which this
     # variable does not exist.
     SMOOTHER_PARAMS="$REPO/$CFG_SMOOTHER_PARAMS_FILE"
+    # F4 TASK 2's TWO, DERIVED UNCONDITIONALLY for RF2O_WS's reason: a
+    # variable that exists only on one branch is a variable `set -u`
+    # aborts on from the other. Neither is READ unless --nav was given.
+    #   THE TREE IS AN ABSOLUTE PATH AND THAT IS NOT COSMETIC.
+    #   bt_navigator resolves `default_nav_to_pose_bt_xml` against the
+    #   PROCESS's working directory, and this script may be run from
+    #   anywhere; a relative name would be a file bt_navigator looks for
+    #   wherever the operator's shell happened to be standing, and a
+    #   tree it cannot open is a navigator that falls back to nav2's own
+    #   - which has Spin and BackUp in it.
+    NAV_PARAMS="$REPO/$CFG_NAV_PARAMS_FILE"
+    NAV_BT="$REPO/$CFG_NAV_BT_XML"
+    # THE SIX SECTIONS nav2.yaml HAS TO BE ADDRESSED TO, in one string
+    # because check_nav_params() takes them as arguments. FOUR are the
+    # servers this script starts; TWO are the costmap SUB-NODES those
+    # servers construct, which have no process, are never named by
+    # `status` and are never swept - and which come up on the package
+    # defaults, in silence, if their block is addressed to nobody.
+    NAV_SECTIONS="$CFG_NAV_PLANNER_NODE_NAME $CFG_NAV_CONTROLLER_NODE_NAME"
+    NAV_SECTIONS="$NAV_SECTIONS $CFG_NAV_BEHAVIOR_NODE_NAME"
+    NAV_SECTIONS="$NAV_SECTIONS $CFG_NAV_BT_NODE_NAME"
+    NAV_SECTIONS="$NAV_SECTIONS $CFG_NAV_LIFECYCLE_NODE_NAME"
+    NAV_SECTIONS="$NAV_SECTIONS $CFG_NAV_COSTMAP_SECTIONS"
     # THE ONE PATH ON THIS TRACK THAT IS NOT UNDER $REPO. The rf2o build
     # tree is the USER's - tools/install_rf2o.sh's argument, and F2
     # constraint 14's - so config.yaml writes it with a leading ~/ and
@@ -603,6 +678,133 @@ check_loc_params() {  # check_loc_params <file> <node>...
     done
 }
 
+# THE NAV ARM'S PARAMETER FILE HAS TO BE ADDRESSED TO **SIX** NODES,
+# AND TWO OF THEM ARE NOT PROCESSES. That is check_loc_params()'s
+# argument with the stakes raised twice over.
+#
+# THE FOUR SERVERS ARE check_ekf_params()'s CASE, FOUR TIMES. rclcpp
+# applies NOTHING from a block addressed to somebody else and says
+# nothing about it, so a misspelt top-level key leaves that server on its
+# PACKAGE DEFAULTS with the `-p` overrides still landing. A
+# controller_server on nav2's defaults runs a DiffDrive MPPI at 0.5 m/s
+# with no Ackermann constraint at all - it would command curvatures this
+# vehicle cannot steer and the converter would clamp every one of them.
+# A planner_server on its defaults is DUBIN rather than REEDS_SHEPP, a
+# 0.4 m turning radius and `allow_unknown: true`: forward-only paths, at
+# a radius the plant cannot deliver, straight through unsurveyed floor.
+#
+# AND THE TWO COSTMAPS ARE WORSE, BECAUSE NOTHING ELSE ON THIS STACK CAN
+# SEE THEM AT ALL. `local_costmap` and `global_costmap` are
+# nav2_costmap_2d SUB-NODES constructed inside those servers, in
+# namespaces of their own: they have no process, `status` never names
+# them and the sweep never nominates them. On the package defaults a
+# costmap is a 3 x 3 m window with a CIRCULAR footprint of radius 0.10 m
+# - a fifth of this vehicle's inscribed radius and a nineteenth of its
+# circumscribed one - and it would report every path through every rack
+# as clear. Every process ALIVE, every lifecycle node ACTIVE, and the
+# planner planning happily through the building.
+#
+# THE THREE ADDRESSES ARE READ BACK, AND THAT IS BECAUSE A `-p` CANNOT
+# REACH A SUB-NODE. Every other parameter file on this track is handed
+# its topics and frames on a command line so that config.yaml stays the
+# one home for them; the costmaps have no command line, so nav2.yaml
+# holds those three strings and this compares them with config.yaml's
+# before anything starts. It is tools/build_map.sh's own idiom - "these
+# are not passed, they are CHECKED" - and the failure it prevents is
+# silent at every other level: a static layer subscribed to a map topic
+# nobody publishes stays empty for ever, and with `allow_unknown: false`
+# the planner then refuses every goal after max_planning_time, once,
+# into its own log.
+#   THE PER-SECTION FRAME CHECKS ARE tests/test_nav2_params.py's, and
+#   the split is by what each tool can do. A shell cannot parse YAML, so
+#   it cannot tell local_costmap's `global_frame: odom` from
+#   global_costmap's `global_frame: map`; pytest loads the file and
+#   checks each section by name. What is HERE is what has to run before
+#   a process starts.
+check_nav_params() {  # check_nav_params <file> <section>...
+    local file="$1" node
+    shift
+    for node in "$@"; do
+        grep -q "^${node}:" "$file" || refuse \
+            "the nav parameter file is addressed to $node" \
+            "$file and $CONFIG (nav.*.node_name, nav.costmap_sections)" \
+            "there is no top-level '$node:' key in that file, so every" \
+            "parameter meant for it belongs to a node that is never" \
+            "configured. rclcpp applies nothing and reports nothing." \
+            "ON A SERVER that means nav2's own defaults with this" \
+            "script's overrides still applied - a DiffDrive controller" \
+            "on a tricycle, or a DUBIN planner at a 0.4 m radius" \
+            "through unsurveyed floor." \
+            "ON A COSTMAP it is worse: they are SUB-NODES with no" \
+            "process, so 'status' never names them and nothing else" \
+            "here can see them. The default is a 3 x 3 m window and a" \
+            "CIRCULAR footprint of radius 0.10 m, which reports every" \
+            "path through every rack as clear." \
+            "the top-level keys that file does define:" \
+            "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$file" || echo '(none)')" \
+            "NOTHING WAS STARTED."
+    done
+    check_address "$file" map_topic "$CFG_TOPICS_MAP" \
+        "topics.map" \
+        "global_costmap's static layer subscribes there. Wrong, it" \
+        "waits for a latched message that has already been published" \
+        "and the costmap stays wall-to-wall NO_INFORMATION - which" \
+        "with allow_unknown: false refuses every goal." \
+        "IT IS IN THAT FILE AT ALL only because nav2's costmaps are" \
+        "SUB-NODES with no command line, so a '-p' override cannot" \
+        "reach them."
+    check_address "$file" topic "$CFG_TOPICS_SCAN_NAV" \
+        "topics.scan_nav" \
+        "local_costmap's obstacle layer marks and clears from there." \
+        "Wrong, the layer is empty and the rolling costmap carries no" \
+        "live perception at all - which looks exactly like a floor" \
+        "with nothing on it." \
+        "IT IS IN THAT FILE AT ALL only because nav2's costmaps are" \
+        "SUB-NODES with no command line, so a '-p' override cannot" \
+        "reach them."
+    check_address "$file" robot_base_frame "$CFG_FRAMES_BASE_LINK" \
+        "frames.base_link" \
+        "every costmap and both navigators place the vehicle by that" \
+        "frame. Wrong, they find no transform and report it as a tf" \
+        "timeout - and Costmap2DROS::on_activate BLOCKS on it, so the" \
+        "lifecycle transition never returns."
+}
+
+# ONE ADDRESS IN A PARAMETER FILE, COMPARED WITH config.yaml's. Every
+# line carrying <key> must name <want>, and at least one must exist: a
+# key that is absent is a package default silently in force, and a key
+# present twice with two values is worse than either.
+#
+# IT IS ARM-AGNOSTIC ON PURPOSE. What it knows is "config.yaml owns
+# every address on this track, and this file has a copy" - which is a
+# fact about the SPLIT rather than about any one arm. The reason a copy
+# exists at all is the CALLER's to state, and every call above states
+# it.
+check_address() {  # check_address <file> <key> <want> <cfgkey> <line>...
+    local file="$1" key="$2" want="$3" cfgkey="$4" found other
+    shift 4
+    found="$(grep -nE "^[[:space:]]*${key}:[[:space:]]" "$file" || true)"
+    [ -n "$found" ] || refuse \
+        "$(basename "$file") sets $key" "$file and $CONFIG ($cfgkey)" \
+        "there is no '$key:' line in that file at all, so the package" \
+        "default is in force and nothing downstream would say so." \
+        "$@" \
+        "NOTHING WAS STARTED."
+    other="$(printf '%s\n' "$found" \
+             | grep -vE ":[[:space:]]*${key}:[[:space:]]+\"?${want}\"?[[:space:]]*(#.*)?$" \
+             || true)"
+    [ -z "$other" ] || refuse \
+        "$(basename "$file")'s $key is $CONFIG's $cfgkey" \
+        "$file ($key) and $CONFIG ($cfgkey)" \
+        "config.yaml says '$want' and these lines say something else:" \
+        "$other" \
+        "$@" \
+        "config.yaml IS THE ONE HOME FOR EVERY ADDRESS ON THIS TRACK," \
+        "and a copy that cannot say when it has gone stale is a copy" \
+        "that will." \
+        "NOTHING WAS STARTED."
+}
+
 # IS THE MAP ON DISK THE MAP THE COMMITTED REGISTRATION WAS FITTED TO?
 # F3 constraint 16 says the map is FROZEN once scored, and a freeze is a
 # MECHANISM rather than a promise - so this is the mechanism, at the
@@ -936,6 +1138,36 @@ smoother_active() {
     echo "  $CFG_SMOOTHER_NODE_NAME active"
 }
 
+# EVERY CHILD IN THE PIDFILE, STILL RUNNING - OR A REFUSAL NAMING THE
+# ONES THAT ARE NOT.
+#
+# A DEAD CHILD IS A REFUSAL AND NOT A WARNING. This used to print "THE
+# STACK IS INCOMPLETE" and then fall through to "up." and exit 0, so an
+# operator's `start && ...` - and any script reading the exit status -
+# saw a successful bringup over a stack that was missing a process.
+# Whatever survived is STILL RUNNING and the message says so, because
+# the operator's next command is stop and not start.
+#
+# IT IS A FUNCTION BECAUSE F4 TASK 2 ASKS IT TWICE. The nav arm's five
+# children go up AFTER the localiser has been driven to ACTIVE - which
+# is after the first call - because a global costmap in the `map` frame
+# blocks its own activation until map -> base_link resolves. A second
+# copy of this block would be the copy that stops being edited.
+assert_children_alive() {
+    local pid name dead="" logs="" n
+    while read -r pid name; do
+        case "$pid" in ''|*[!0-9]*) continue ;; esac
+        ours "$pid" || dead="$dead${dead:+ }$name"
+    done < "$PIDFILE"
+    [ -n "$dead" ] || return 0
+    for n in $dead; do logs="$logs${logs:+, }$LOGDIR/$n.log"; done
+    refuse "every child is alive ${CFG_TIMING_STARTUP_CHECK_S}s after the last spawn" \
+        "$logs" \
+        "these children exited during startup: $dead" \
+        "THE STACK IS INCOMPLETE, and what is left of it is STILL UP." \
+        "read the log named above, then '$0 stop' before trying again."
+}
+
 start() {
     local pid name
     # A LIVE STACK IS NOT STARTED OVER. ours() is the liveness test rather
@@ -1087,6 +1319,53 @@ start() {
         # check_frozen_map(): this is the only place that can still say
         # nothing has begun.
         check_frozen_map
+    fi
+    # AND THE NAV ARM'S THREE, ON THE SAME TERMS AND FOR THE SAME REASON
+    # AS EVERY OPTIONAL ARM ABOVE: a rig that never intends to run a
+    # planner must still be able to bring up the stack every earlier
+    # phase's figures were measured on.
+    if [ "$NAV" = true ]; then
+        # THE DEPENDENCY FIRST, BECAUSE IT IS THE ONE AN OPERATOR IS
+        # MOST LIKELY TO HIT AND THE ONE THAT NEEDS NO FILE ON DISK.
+        [ "$LOCALIZE" = true ] || refuse \
+            "--nav was given with a localiser" \
+            "$0 (the start flags)" \
+            "--nav puts a planner and a controller over a stack that" \
+            "does not know where it is. THIS IS NOT A PREFERENCE." \
+            "The global costmap's frame is $CFG_FRAMES_MAP, and" \
+            "Costmap2DROS::on_activate BLOCKS until it can transform" \
+            "$CFG_FRAMES_MAP -> $CFG_FRAMES_BASE_LINK. Without a" \
+            "localiser NOTHING publishes $CFG_FRAMES_MAP ->" \
+            "$CFG_FRAMES_ODOM at all, so that transition never returns:" \
+            "five children ALIVE for ever, one of them wedged in a" \
+            "lifecycle transition, and no log line that reads as an" \
+            "error." \
+            "NOTHING WAS STARTED. Add a localiser:" \
+            "  $0 start --headless --localize --nav" \
+            "  $0 start --headless --localize $CFG_LOCALIZATION_SLAM_LABEL --nav"
+        [ -f "$NAV_PARAMS" ] || refuse \
+            "the nav parameter file exists" "$CONFIG (nav.params_file)" \
+            "it resolves to $NAV_PARAMS" \
+            "a --params-file that does not exist IS a hard error from" \
+            "rclcpp, which is the good case; the case this check is for" \
+            "is the file being MOVED, because then all four servers" \
+            "come up on nav2's own PACKAGE DEFAULTS - a DiffDrive MPPI" \
+            "on a tricycle, a DUBIN planner at a 0.4 m radius, and two" \
+            "3 x 3 m costmaps carrying a CIRCULAR footprint of radius" \
+            "0.10 m." \
+            "NOTHING WAS STARTED."
+        [ -f "$NAV_BT" ] || refuse \
+            "the behaviour tree exists" "$CONFIG (nav.bt_xml)" \
+            "it resolves to $NAV_BT" \
+            "without it bt_navigator falls back to nav2's OWN tree," \
+            "which ends its recovery round robin with Spin and BackUp." \
+            "This vehicle cannot rotate in place -" \
+            "nodes/cmd_vel_tricycle_core.py REFUSES a yaw rate at a" \
+            "standstill by name - so a Spin recovery would stand still" \
+            "for the whole behaviour and then report SUCCESS." \
+            "NOTHING WAS STARTED."
+        # shellcheck disable=SC2086
+        check_nav_params "$NAV_PARAMS" $NAV_SECTIONS
     fi
     # Unchecked, an unwritable log dir fails every redirection this stack
     # opens and start would sleep its way to "up." over a stack that never
@@ -1722,25 +2001,7 @@ start() {
     # wrong log" (stack.sh:243-244). By this line the youngest child is a
     # second old and the world is a dozen.
     sleep "$CFG_TIMING_STARTUP_CHECK_S"
-    # A DEAD CHILD IS A REFUSAL AND NOT A WARNING. This block used to print
-    # "THE STACK IS INCOMPLETE" and then fall through to "up." and exit 0,
-    # so an operator's `start && ...` - and any script reading the status -
-    # saw a successful bringup over a stack that was missing a process.
-    # Whatever survived is STILL RUNNING, and the message has to say so,
-    # because the operator's next command is stop and not start.
-    local dead="" logs="" n
-    while read -r pid name; do
-        case "$pid" in ''|*[!0-9]*) continue ;; esac
-        ours "$pid" || dead="$dead${dead:+ }$name"
-    done < "$PIDFILE"
-    if [ -n "$dead" ]; then
-        for n in $dead; do logs="$logs${logs:+, }$LOGDIR/$n.log"; done
-        refuse "every child is alive ${CFG_TIMING_STARTUP_CHECK_S}s after the last spawn" \
-            "$logs" \
-            "these children exited during startup: $dead" \
-            "THE STACK IS INCOMPLETE, and what is left of it is STILL UP." \
-            "read the log named above, then '$0 stop' before trying again."
-    fi
+    assert_children_alive
 
     # AND ON THE rf2o ARM, ONE MORE THING THAT IS ALIVE-BUT-WRONG.
     # Same shape as the filter's gate below and for the same reason:
@@ -1848,6 +2109,153 @@ start() {
         fi
     fi
 
+    # ------------------------ THE NAV ARM, F4 TASK 2 --------------------
+    # FIVE MORE CHILDREN, AND NOT ONE OF THEM EXISTS WITHOUT --nav.
+    #
+    # AND THEY GO UP **HERE**, AFTER THE LOCALISER HAS REACHED ACTIVE,
+    # WHICH IS THE LAST THING IN THIS FUNCTION AND IS NOT TIDINESS.
+    # nav2_costmap_2d's Costmap2DROS::on_activate BLOCKS in a
+    # canTransform() loop until it can resolve its own global_frame ->
+    # robot_base_frame. For `global_costmap` that is map -> base_link,
+    # and map -> odom does not exist until the localiser is ACTIVE - so
+    # a nav arm started earlier would sit wedged in a lifecycle
+    # transition with five ALIVE processes and nothing in any log that
+    # reads as an error. That is the same class of failure the
+    # map_server-before-amcl ordering above exists for, one layer up.
+    #   IT IS ALSO WHY assert_children_alive IS A FUNCTION. These five
+    #   are spawned after the first startup check has already run, so
+    #   the same question has to be asked a second time.
+    #   THE MANAGER IS SPAWNED LAST OF THE FIVE. It looks up each
+    #   server's change_state service and starts transitioning as soon
+    #   as it can; started first it would spend its whole
+    #   wait_for_service budget on nodes that do not exist yet.
+    if [ "$NAV" = true ]; then
+        # THE PLANNER. Everything on this command line is an ADDRESS or
+        # a lifecycle fact; what is PLANNED - the motion model, the
+        # turning radius, the penalties, the costmap layers - is
+        # nav2.yaml's and is not repeated here. use_sim_time is in that
+        # file rather than here, which is the opposite of every other
+        # node on this stack and is argued in its header: two of the six
+        # sections it addresses are SUB-NODES with no command line, so
+        # the stack fact is written once in one place instead of four
+        # times here and twice there.
+        spawn "$CFG_NAV_PLANNER_NODE_NAME" \
+            ros2 run "$CFG_NAV_PLANNER_PACKAGE" \
+            "$CFG_NAV_PLANNER_EXECUTABLE" --ros-args \
+            -r __node:="$CFG_NAV_PLANNER_NODE_NAME" \
+            --params-file "$NAV_PARAMS"
+
+        # THE CONTROLLER, AND THE ONE OVERRIDE IT NEEDS IS THE ESTIMATOR
+        # ARM'S ADDRESS. $FUSED_TOPIC is whichever estimator went up -
+        # the shell's half of tools/evidence_core.py's fused_topic_key()
+        # - and a parameter file cannot know which. It is passed HERE
+        # for the smoother's reason: the one thing this topic may never
+        # be is the GROUND TRUTH (F2 constraint 13, F4 constraint 18),
+        # and that is decided on this line rather than in a file
+        # somebody could edit.
+        #   THE CONTROLLER PUBLISHES INTO THE TOP OF F4 TASK 1's LINE.
+        #   /cmd_vel is remapped to config.yaml's topics.cmd_vel, which
+        #   is where the velocity smoother is already listening - the
+        #   path below it is unchanged and was measured end to end with
+        #   no Nav2 in the room (EVIDENCE_NAV_V3.md 4).
+        #   AND IT SUBSCRIBES THE SAME SPEED LIMIT THE CONVERTER DOES.
+        #   Two ceilings on one quantity is a min(), which is
+        #   idempotent: the controller clamps the speed it PLANS at and
+        #   the converter clamps the speed it DELIVERS, last, where no
+        #   upstream publisher can get round it (EVIDENCE_NAV_V3.md 9).
+        spawn "$CFG_NAV_CONTROLLER_NODE_NAME" \
+            ros2 run "$CFG_NAV_CONTROLLER_PACKAGE" \
+            "$CFG_NAV_CONTROLLER_EXECUTABLE" --ros-args \
+            -r __node:="$CFG_NAV_CONTROLLER_NODE_NAME" \
+            --params-file "$NAV_PARAMS" \
+            -p odom_topic:="$FUSED_TOPIC" \
+            -p speed_limit_topic:="$CFG_TOPICS_SPEED_LIMIT" \
+            -r /cmd_vel:="$CFG_TOPICS_CMD_VEL"
+
+        # THE BEHAVIOUR SERVER, which on this vehicle runs exactly one
+        # behaviour and it does not move the truck. nav2.yaml's
+        # behavior_server section carries the whole argument for why
+        # `spin`, `backup` and `drive_on_heading` are all absent.
+        #   ITS /cmd_vel IS REMAPPED ANYWAY. `wait` publishes nothing,
+        #   so the remap carries no traffic - but a behaviour server
+        #   left on nav2's default topic name would be a SECOND
+        #   publisher on an address the whole command path is built
+        #   around, and an address that is only right because nothing
+        #   uses it is not right.
+        spawn "$CFG_NAV_BEHAVIOR_NODE_NAME" \
+            ros2 run "$CFG_NAV_BEHAVIOR_PACKAGE" \
+            "$CFG_NAV_BEHAVIOR_EXECUTABLE" --ros-args \
+            -r __node:="$CFG_NAV_BEHAVIOR_NODE_NAME" \
+            --params-file "$NAV_PARAMS" \
+            -r /cmd_vel:="$CFG_TOPICS_CMD_VEL"
+
+        # THE BT NAVIGATOR, and the TREE is the thing it must not get
+        # wrong. `default_nav_to_pose_bt_xml` is resolved against the
+        # PROCESS's working directory, so it is passed as an ABSOLUTE
+        # path built from $REPO - a relative name would be a file this
+        # node looks for wherever the operator's shell was standing,
+        # and a tree it cannot open is a navigator that falls back to
+        # nav2's own, which has Spin and BackUp in it.
+        spawn "$CFG_NAV_BT_NODE_NAME" \
+            ros2 run "$CFG_NAV_BT_PACKAGE" \
+            "$CFG_NAV_BT_EXECUTABLE" --ros-args \
+            -r __node:="$CFG_NAV_BT_NODE_NAME" \
+            --params-file "$NAV_PARAMS" \
+            -p odom_topic:="$FUSED_TOPIC" \
+            -p default_nav_to_pose_bt_xml:="$NAV_BT"
+
+        # AND THE ONE LIFECYCLE MANAGER, WHICH IS THE ONLY ONE ON THIS
+        # TRACK. localize_lifecycle() drives amcl and map_server by hand
+        # because a manager's BOND is a heartbeat with a deadline and a
+        # deadline starves at the real-time factors a simulation
+        # reaches. That argument is about the BOND and not about the
+        # manager: nav2.yaml switches it off at this end
+        # (`bond_timeout: 0.0`) and every server above carries
+        # nav2.yaml's own defaults at theirs. What is left is what a
+        # manager is actually for here - SIX lifecycle nodes behind FOUR
+        # names, transitioned in a fixed order by one process instead of
+        # by four more shell loops.
+        #   THE VELOCITY SMOOTHER IS NOT IN ITS LIST. It is part of the
+        #   COMMAND PATH and not of this arm (F4 constraint 18): it goes
+        #   up on every bringup and drives itself to ACTIVE off
+        #   smoother.yaml's autostart_node. A manager that owned it
+        #   would own a node that exists on arms the manager does not.
+        spawn "$CFG_NAV_LIFECYCLE_NODE_NAME" \
+            ros2 run "$CFG_NAV_LIFECYCLE_PACKAGE" \
+            "$CFG_NAV_LIFECYCLE_EXECUTABLE" --ros-args \
+            -r __node:="$CFG_NAV_LIFECYCLE_NODE_NAME" \
+            --params-file "$NAV_PARAMS"
+
+        sleep "$CFG_TIMING_STARTUP_CHECK_S"
+        assert_children_alive
+
+        # AND THE ONE QUESTION THAT IS LEFT: can it PLAN? Every check
+        # above is satisfied by five processes that have never spoken to
+        # each other, and the failure they hide is specific and silent -
+        # a global costmap whose static layer never received the frozen
+        # grid is wall-to-wall NO_INFORMATION, and with
+        # `allow_unknown: false` the planner then refuses every goal
+        # after max_planning_time, once, into its own log. Every node
+        # ACTIVE, every log clean, and the first anybody hears of it is
+        # a goal that times out several minutes into a measured run.
+        # tools/nav_health.py waits for all SIX lifecycle nodes - the
+        # two costmaps are lifecycle nodes of their own inside their
+        # servers - and then computes ONE trivial path. It commands no
+        # motion: compute_path_to_pose is the PLANNER's action and never
+        # reaches the controller.
+        if ! python3 "$M5V3/tools/nav_health.py"; then
+            refuse "the nav arm came up able to PLAN, and not merely active" \
+                "$M5V3/tools/nav_health.py (its refusal is printed above)" \
+                "every other check on this stack has passed: all five" \
+                "nav children are ALIVE, the localiser underneath is" \
+                "healthy, the estimator is sane and the command path is" \
+                "one line." \
+                "THE STACK IS INCOMPLETE, and what is left of it is STILL UP." \
+                "'$0 stop', then read $LOGDIR/$CFG_NAV_PLANNER_NODE_NAME.log" \
+                "and $LOGDIR/$CFG_NAV_LIFECYCLE_NODE_NAME.log."
+        fi
+    fi
+
     echo ""
     if [ "$RF2O" = true ]; then
         echo "up. one truck, one world, two bridges, TWO estimators,"
@@ -1860,6 +2268,9 @@ start() {
     fi
     if [ "$LOCALIZE" = true ]; then
         echo "    AND A MAP: this stack knows where it is."
+    fi
+    if [ "$NAV" = true ]; then
+        echo "    AND A PLANNER: this stack decides where it goes."
     fi
     if [ "$SLIPPERY" = true ]; then
         echo "THIS IS THE SLIPPERY PLANT." \
@@ -1967,6 +2378,35 @@ start() {
         echo "         tabled beside an unlocalised run OR beside the" \
              "other localiser's -"
         echo "         analyse refuses both."
+    fi
+    if [ "$NAV" = true ]; then
+        echo "nav:     THE NAV ARM IS ON. $CFG_NAV_PLANNER_NODE_NAME" \
+             "(SmacPlannerHybrid, REEDS_SHEPP,"
+        echo "         a 1.25 m turning radius DERIVED from the plant's" \
+             "own worst measured"
+        echo "         corner), $CFG_NAV_CONTROLLER_NODE_NAME (MPPI with" \
+             "AckermannConstraints),"
+        echo "         $CFG_NAV_BT_NODE_NAME on" \
+             "$CFG_NAV_BT_XML - a tricycle tree with"
+        echo "         NO Spin and NO BackUp - and" \
+             "$CFG_NAV_BEHAVIOR_NODE_NAME running only 'wait'."
+        echo "         One $CFG_NAV_LIFECYCLE_NODE_NAME drives all four," \
+             "with its BOND SWITCHED OFF."
+        echo "         Costmaps: global = the FROZEN grid on" \
+             "$CFG_TOPICS_MAP, local = a rolling"
+        echo "         window on $CFG_TOPICS_SCAN_NAV. Both carry the" \
+             "REAL footprint polygon"
+        echo "         with the forks, padded 0.54 m - the worst" \
+             "absolute error F3 measured."
+        echo "         NAV2's FORWARD IS THIS TRUCK's REVERSE (the forks" \
+             "are at model -x), and"
+        echo "         $CFG_NAV_PARAMS_FILE says so where it reaches a" \
+             "parameter."
+        echo "         Every session recorded on it is LABELLED nav=on" \
+             "and must not be tabled"
+        echo "         beside a run with no planner in the room."
+        echo "         Send it a goal: python3" \
+             "$M5V3/tools/drive_goal.py record --goal $CFG_NAV_DEFAULT_GOAL"
     fi
     echo "navcmd: THE COMMAND PATH IS UP AND IDLE." \
          "$CFG_TOPICS_CMD_VEL -> velocity_smoother"
@@ -2222,6 +2662,7 @@ apply_slippery() {
 #   distinct values, so a model that is NOT isotropic shows as two.
 write_traction() {
     local lat lon source arm arm_source loc loc_source map_md5
+    local nav nav_source
     # WHICH ESTIMATOR IS UP, decided before the heredoc rather than
     # inside it: an `echo "$(...)"` with a conditional in it is a line
     # nobody can read and the refusals in this file are not written that
@@ -2308,6 +2749,42 @@ write_traction() {
         loc_source="$loc_source $CFG_FRAMES_MAP -> $CFG_FRAMES_ODOM and"
         loc_source="$loc_source this stack has no absolute pose"
     fi
+    # WHETHER A PLANNER WAS IN THE ROOM, AND IT IS A FOURTH LINE BECAUSE
+    # IT IS A FOURTH QUESTION. traction= says which PLANT, arm= says
+    # which ESTIMATOR of the vehicle's own motion, loc= says whether
+    # anything knew where that vehicle WAS - and this says whether
+    # anything was DECIDING where it went. All four are independent and
+    # every combination is a legitimate run.
+    #   WHAT IT PREVENTS IS NOT AN ODD-LOOKING ROW. A nav run and a
+    #   drive_route run on the same plant, the same estimator and the
+    #   same localiser produce CSVs of identical shape off identical
+    #   topics: the difference is only that in one of them the twists
+    #   came from a controller closing a loop on the localiser's own
+    #   output, and in the other from a table. Every figure about the
+    #   ESTIMATE is a different measurement in the two cases, because
+    #   the second one has a feedback path through the thing being
+    #   measured.
+    #   IT CARRIES THE PARAMS FILE's md5 FOR THE loc= LABEL'S REASON.
+    #   nav2.yaml is where every planned arc and every followed one is
+    #   decided; two runs against two versions of it are two different
+    #   measurements, and eight characters is what lets an instrument
+    #   downstream refuse to table them together. It is hashed off the
+    #   file ON DISK at the moment it was used, which is what binds a
+    #   session to what actually ran.
+    if [ "$NAV" = true ]; then
+        nav="on@$(md5sum "$NAV_PARAMS" | cut -c1-8)"
+        nav_source="$0 --nav, $CFG_NAV_PARAMS_FILE + $CFG_NAV_BT_XML,"
+        nav_source="$nav_source $CFG_NAV_PLANNER_NODE_NAME +"
+        nav_source="$nav_source $CFG_NAV_CONTROLLER_NODE_NAME +"
+        nav_source="$nav_source $CFG_NAV_BT_NODE_NAME +"
+        nav_source="$nav_source $CFG_NAV_BEHAVIOR_NODE_NAME under"
+        nav_source="$nav_source $CFG_NAV_LIFECYCLE_NODE_NAME"
+    else
+        nav="off"
+        nav_source="no --nav: nothing plans, nothing follows a path, and"
+        nav_source="$nav_source the only thing that has ever published"
+        nav_source="$nav_source $CFG_TOPICS_CMD_VEL on this stack is a bench"
+    fi
     if [ "$SLIPPERY" = true ]; then
         lat="$CFG_SLIPPERY_SLIP_COMPLIANCE_LATERAL"
         lon="$CFG_SLIPPERY_SLIP_COMPLIANCE_LONGITUDINAL"
@@ -2342,6 +2819,10 @@ write_traction() {
       # from arm= and why it carries the map's md5.
       echo "loc=$loc"
       echo "loc_source=$loc_source"
+      # F4 TASK 2's LINE. See the block above for why it is separate
+      # from loc= and why it carries nav2.yaml's md5.
+      echo "nav=$nav"
+      echo "nav_source=$nav_source"
       echo "partition=$GZ_PARTITION"
       echo "started=$(date -Is)"; } > "$TRACTIONFILE" \
         || refuse "the traction state file is writable" "$CONFIG" \
@@ -2408,7 +2889,7 @@ status() {
         #   so here would be inferring the label from an absence, which
         #   is exactly the habit tools/sensor_evidence.py's UNLABELLED
         #   refuses on the same question.
-        local arm arm_source loc loc_source
+        local arm arm_source loc loc_source nav nav_source
         arm="$(sed -n 's/^arm=//p' "$TRACTIONFILE")"
         arm_source="$(sed -n 's/^arm_source=//p' "$TRACTIONFILE")"
         printf '  %-10s %-7s %s\n' "arm" "${arm:-UNKNOWN}" \
@@ -2422,12 +2903,24 @@ status() {
         loc_source="$(sed -n 's/^loc_source=//p' "$TRACTIONFILE")"
         printf '  %-10s %-7s %s\n' "loc" "${loc:-UNKNOWN}" \
             "${loc_source:-no loc= line - this state file predates F3 Task 2}"
+        # AND WHETHER ANYTHING IS DECIDING WHERE IT GOES, for the loc
+        # line's reason one layer further up. A nav stack looks
+        # identical to a localised one from every other angle in this
+        # report - the eleven children are alive under five more, on the
+        # same topics - and the difference is a closed loop that
+        # `status` cannot see.
+        nav="$(sed -n 's/^nav=//p' "$TRACTIONFILE")"
+        nav_source="$(sed -n 's/^nav_source=//p' "$TRACTIONFILE")"
+        printf '  %-10s %-7s %s\n' "nav" "${nav:-UNKNOWN}" \
+            "${nav_source:-no nav= line - this state file predates F4 Task 2}"
     else
         printf '  %-10s %-7s %s\n' "traction" "UNKNOWN" \
             "no $TRACTIONFILE - this stack was not started by '$0 start'"
         printf '  %-10s %-7s %s\n' "arm" "UNKNOWN" \
             "same file, same reason"
         printf '  %-10s %-7s %s\n' "loc" "UNKNOWN" \
+            "same file, same reason"
+        printf '  %-10s %-7s %s\n' "nav" "UNKNOWN" \
             "same file, same reason"
     fi
     local pid name alive=0 dead=0
@@ -2491,7 +2984,7 @@ stop() {
     echo "down."
 }
 
-USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [amcl|slam]] | stop | status
+USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [amcl|slam]] [--nav] | stop | status
   start       GPU preflight, then warehouse_ver3 + one forklift_ver3 in a
               Gazebo window, plus TWO ros_gz bridges: the parameter bridge
               for the clock, the ground-truth odometry (a measurement
@@ -2581,27 +3074,55 @@ USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [am
               TEN processes with a window and nine without on the amcl
               arm, nine and eight on the slam one - and with --rf2o as
               well, three more of each.
+  --nav       THE NAV ARM, AND THE FIRST THING HERE THAT DECIDES WHERE
+              THE VEHICLE GOES. Five more children: nav2's planner
+              (SmacPlannerHybrid, REEDS_SHEPP, a turning radius DERIVED
+              from the worst corner this plant actually delivered),
+              controller (MPPI with AckermannConstraints), BT navigator
+              on a TRICYCLE TREE with no Spin and no BackUp, behaviour
+              server running only 'wait', and ONE lifecycle manager for
+              the four of them - the only one on this track, with its
+              bond switched off at both ends. Costmaps: global = the
+              frozen grid the --localize arm is already serving, local =
+              a rolling window on the nav lidar, both carrying the REAL
+              footprint polygon with the forks.
+              IT REQUIRES --localize AND IS REFUSED WITHOUT IT BY NAME:
+              the global costmap's frame is map, and its activation
+              BLOCKS until map -> base_link resolves, which nothing
+              publishes without a localiser.
+              It adds a PUBLISHER to the top of the command path that is
+              already there on every bringup - no node is inserted into
+              that line and nothing about it changes.
+              'status' and every recorded session say nav=on@<md5> by
+              name; 'analyse' refuses a set that mixes a planned run
+              with an unplanned one.
+              FIFTEEN processes with a window and fourteen without, on
+              the amcl arm.
   status      every child by name, ALIVE or DEAD, with its log, which
-              traction the running plant is on, which estimator arm, and
-              which absolute layer
+              traction the running plant is on, which estimator arm,
+              which absolute layer, and whether anything is planning
   stop        end this partition's stack and nothing else"
 case "${1:-}" in
     start|--start)
         shift
         # THE FLAGS MAY COME IN ANY ORDER, and an unrecognised word is a
         # REFUSAL and not a shrug: the one it will be is a misspelt
-        # --headless, --slippery, --rf2o, --fuse or --localize, and
-        # silently opening a window for someone who asked for none - or
-        # bringing up the DRY plant for someone who asked for the wet
+        # --headless, --slippery, --rf2o, --fuse, --localize or --nav,
+        # and silently opening a window for someone who asked for none -
+        # or bringing up the DRY plant for someone who asked for the wet
         # one, the two-sensor filter for someone measuring the
-        # three-sensor one, or an UNLOCALISED stack for someone about to
-        # record absolute figures off it - is what this loop exists to
+        # three-sensor one, an UNLOCALISED stack for someone about to
+        # record absolute figures off it, or a stack with NO PLANNER for
+        # someone about to send it a goal - is what this loop exists to
         # prevent.
-        #   FOUR OF THE FIVE ARE INDEPENDENT AND TWO OF THEM ARE NOT.
+        #   THERE ARE SIX FLAGS AND EXACTLY TWO RELATIONS BETWEEN THEM.
         #   --headless is about drawing, --slippery is about the PLANT
         #   and --localize adds a LAYER above the estimator, so each of
         #   those combines with anything; --rf2o and --fuse are both
-        #   about the ESTIMATOR ITSELF and are refused together below.
+        #   about the ESTIMATOR ITSELF and are refused TOGETHER below;
+        #   and --nav REQUIRES --localize, which is refused inside
+        #   start() where config.yaml has been read and the message can
+        #   name the frames.
         while [ "$#" -gt 0 ]; do
             case "$1" in
                 --headless) GUI=false ;;
@@ -2627,6 +3148,14 @@ case "${1:-}" in
                         ""|--*) ;;
                         *) LOCALIZER="$2"; shift ;;
                     esac ;;
+                # THE ONE FLAG THAT DEPENDS ON ANOTHER. It takes no
+                # value; what it needs is --localize, and that is
+                # refused inside start() rather than here, for the
+                # --localize value's reason: the refusal quotes
+                # config.yaml's frame names and the config has to have
+                # been READ before it can be spoken. Nothing has been
+                # started by that line either way.
+                --nav) NAV=true ;;
                 *) echo "$USAGE"; exit 2 ;;
             esac
             shift

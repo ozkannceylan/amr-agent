@@ -1,0 +1,128 @@
+<!--
+  navigate_to_pose_tricycle_v3.xml - m5-ver3's navigate-to-pose tree.
+  F4 Task 2. Read only by `m5v3.sh start --nav`, through bt_navigator's
+  `default_nav_to_pose_bt_xml`, which config.yaml owns (nav.bt_xml) and
+  m5v3.sh passes as an absolute path.
+
+  IT IS DERIVED FROM agv/forklift/behavior_trees/
+  navigate_to_pose_tricycle.xml AND THAT FILE IS READ-ONLY TO THIS TRACK
+  (CONTEXT.md). What is taken is the ARGUMENT - which recoveries a
+  vehicle that cannot rotate in place may have - because that argument
+  is about a tricycle rather than about a floor, and this vehicle is the
+  same kinematic machine. What is NOT taken is the crib's third
+  selector: it carries a GoalCheckerSelector for a staged docking
+  approach, and this track has ONE goal checker and no docking claim
+  (nav2.yaml, controller_server). A selector with nothing to select
+  between is a moving part that can only go wrong.
+
+  ---- WHY THERE IS A TREE HERE AT ALL ----
+
+  nav2's default tree, nav2_bt_navigator/behavior_trees/
+  navigate_to_pose_w_replanning_and_recovery.xml, ends its recovery
+  RoundRobin with
+
+      <Spin spin_dist="1.57" .../>
+      <Wait wait_duration="5.0"/>
+      <BackUp backup_dist="0.30" backup_speed="0.15" .../>
+
+  and both of the motion recoveries assume a base this vehicle is not.
+
+  SPIN IS IMPOSSIBLE HERE AND THE REFUSAL IS MEASURED. It commands
+  angular.z with linear.x = 0. One steered wheel a wheelbase ahead of
+  the rear axle cannot turn the body without travelling, so there is no
+  (steer, tread) pair that produces that twist -
+  nodes/cmd_vel_tricycle_core.twist_to_tricycle REFUSES it by name and
+  counts the refusal on /m5v3/navcmd/status. With Spin left in the tree
+  the vehicle would stand still for the whole behaviour and the
+  behaviour would then report SUCCESS. The counter on that status topic
+  is how EVIDENCE_NAV_V3.md proves this tree never asked.
+
+  BACKUP IS POSSIBLE AND IS STILL REMOVED, which is the less obvious
+  half. nav2_behaviors' DriveOnHeading publishes linear.x with
+  angular.z = 0 - a straight line, which this vehicle drives in both
+  directions. It is out for three reasons, none of them kinematic:
+
+    - Its collision check simulates a STRAIGHT line from the current
+      pose. The steer axis is wherever the controller last left it and
+      takes up to 0.625 s to slew back to centre (1.25 rad at
+      model.sdf's 2.0 rad/s, and EVIDENCE_NAV_V3.md 5 measured the
+      terminal carrying exactly that ramp), so the vehicle drives an ARC
+      through space the check never examined.
+    - 0.30 m is 11 % of this vehicle's 2.735 m length. Sized to actually
+      change the situation it would be metres, and a blind multi-metre
+      move with 1.875 m of fork leading is not something a machine this
+      size should do because a plan failed.
+    - Reverse on this vehicle is not a recovery, it is the ORDINARY
+      DIRECTION OF TRAVEL: the forks are at model -x and every profile
+      this track has driven commands a negative linear.x (nav2.yaml
+      section D). The Reeds-Shepp planner emits it against the map
+      whenever it is the right answer. A blind reverse recovery
+      duplicates the planner without the map, which is strictly worse.
+
+  WHAT IS LEFT, AND IT IS THE POINT RATHER THAN A LOSS: clear the
+  costmaps, wait, replan - and if it still cannot plan, STOP AND REPORT.
+  A planner that refuses is better than one that silently fails or
+  routes through a rack, and a tree with no motion recovery is what
+  makes the refusal prompt and quiet instead of a machine milling about
+  in an aisle.
+
+  ---- WHAT IS STOCK, DELIBERATELY ----
+
+  The 1 Hz replan rate, the six top-level retries, the two per-branch
+  costmap clears, the ControllerSelector/PlannerSelector pair and the
+  two error codes are nav2's own and are not re-argued here. The
+  selectors have nothing publishing to them on this stack, so each falls
+  back to its default - `FollowPath` and `GridBased`, which are the only
+  plugins nav2.yaml declares - and the tree behaves as though they were
+  not there. They are kept because they are how a later task adds a
+  second controller without editing this file.
+
+  THIS FILE CONTAINS NO SAFETY LOGIC. Protective stop, e-stop and safe
+  torque off are onboard and hardwired in the plant this models and
+  appear in no behaviour tree. The collision monitor - which F4 Task 2
+  does not run - "does not provide hard real-time safety
+  certifications" and does not replace a safety-rated PLC. It
+  complements the F-PLC; it is not the F-PLC.
+-->
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
+        <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
+            <Sequence>
+              <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+              <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+            </Sequence>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}"/>
+          <Sequence>
+            <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
+            <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+          </Sequence>
+        </RecoveryNode>
+      </PipelineSequence>
+      <Sequence>
+        <Fallback>
+          <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
+          <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+        </Fallback>
+        <ReactiveFallback name="RecoveryFallback">
+          <GoalUpdated/>
+          <RoundRobin name="RecoveryActions">
+            <Sequence name="ClearingActions">
+              <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+              <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+            </Sequence>
+            <Wait wait_duration="5.0"/>
+          </RoundRobin>
+        </ReactiveFallback>
+      </Sequence>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

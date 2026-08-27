@@ -396,6 +396,32 @@ def read_traction(cfg):
                    "can see. Stop the",
                    "stack and start it again with the m5v3.sh in this "
                    "tree.")
+    # AND SINCE F4 TASK 2 THERE IS A FOURTH LINE, for the loc= line's
+    # reason one layer further up. `--nav` puts a planner and a
+    # controller over the localised stack, so the twists that drove the
+    # run came from a loop CLOSED ON THE THING THIS FILE IS MEASURING
+    # rather than from a table - and every figure about the estimate is
+    # a different measurement in the two cases. The CSVs are identical
+    # in shape, the topics are identical, and nothing but this line says
+    # which.
+    #   `off` IS A VALUE AND A MISSING LINE IS NOT, exactly as `none` is
+    #   on the line above.
+    if not fields.get("nav"):
+        cfg.refuse("the state file says whether a planner was in the room",
+                   path,
+                   "it has no 'nav=' line. m5v3.sh has written one on "
+                   "every bringup since",
+                   "F4 Task 2 - `off` or `on@<nav2.yaml md5>` - so this "
+                   "stack was brought up",
+                   "by an older copy of that script, or the file is a "
+                   "truncated write.",
+                   "RECORDING WITHOUT IT IS NOT ALLOWED: a run driven by "
+                   "a controller closing",
+                   "a loop on the localiser and a run driven by a table "
+                   "produce CSVs of the",
+                   "same shape off the same topics. Stop the stack and "
+                   "start it again with",
+                   "the m5v3.sh in this tree.")
     return fields
 
 
@@ -469,6 +495,15 @@ def describe_session(cfg, session, node, profile, started_wall, exit_code,
         # through a registration that belongs to a different one.
         ("loc", traction.get("loc", "")),
         ("loc_source", traction.get("loc_source", "")),
+        # AND SINCE F4 TASK 2 IT CARRIES WHETHER ANYTHING WAS PLANNING.
+        # `nav` is `off` or `on@<nav2.yaml md5>`, and the md5 half is
+        # the loc label's argument applied to the file where every
+        # planned arc and every followed one is decided: two runs
+        # against two versions of nav2.yaml are two measurements, and
+        # eight characters is what lets `analyse` refuse to table them
+        # together.
+        ("nav", traction.get("nav", "")),
+        ("nav_source", traction.get("nav_source", "")),
         ("spawn", "{} {} {}".format(cfg.s("vehicle.spawn.x"),
                                     cfg.s("vehicle.spawn.y"),
                                     cfg.s("vehicle.spawn.yaw"))),
@@ -2793,6 +2828,40 @@ def loc_of(session):
     return label
 
 
+#: What a session says about the NAV ARM when it was recorded before F4
+#: Task 2 existed to label it. Every one of those runs had no planner on
+#: it - `--nav` had not been written - and this file will NOT write
+#: `off` over a blank, for UNLABELLED's reason.
+UNLABELLED_NAV = "unrecorded (session predates F4 Task 2's nav label)"
+
+
+def nav_of(session):
+    """One session's nav arm, as the one string everything compares by.
+
+    THE FOURTH AXIS, AND IT IS THE ONE THAT CHANGES WHAT THE RUN *IS*
+    RATHER THAN WHAT IT IS MEASURED WITH. `traction_of` says which
+    PLANT, `arm_of` which ESTIMATOR, `loc_of` whether anything knew
+    where the vehicle WAS - and this says whether the twists that drove
+    it came from a CONTROLLER CLOSING A LOOP on that estimate, or from a
+    table in config.yaml.
+
+    That difference does not show up anywhere else. The topics are the
+    same, the CSV columns are the same, the profile field can be empty
+    on either. And it is not cosmetic: a run whose commands are a
+    function of the estimate has a feedback path through the very thing
+    a fusion table is reporting on, so an estimator figure from one is
+    not comparable with the same figure from the other.
+
+    THE md5 HALF IS PART OF THE KEY, exactly as the map's is in
+    `loc_of`. nav2.yaml decides every planned arc and every followed
+    one; two runs against two versions of it are two experiments.
+    """
+    label = session.get("nav", "")
+    if not label:
+        return UNLABELLED_NAV
+    return label
+
+
 def _refuse_mixed(cfg, paths, sessions, label_of, subject, owner, why):
     """One `analyse` invocation, one <subject>.
 
@@ -2884,6 +2953,26 @@ def refuse_mixed_loc(cfg, paths, sessions):
                   "absolute layer")
 
 
+def refuse_mixed_nav(cfg, paths, sessions):
+    """One `analyse` invocation, one nav arm. See _refuse_mixed.
+
+    AND THIS ONE SEPARATES TWO DIFFERENT EXPERIMENTS RATHER THAN TWO
+    SETTINGS OF ONE. The other three labels vary how a run was
+    INSTRUMENTED or what plant it was on; this one varies where the
+    COMMANDS came from. A `nav=off` session was driven by a table in
+    config.yaml with nothing reading a pose; a `nav=on@...` session was
+    driven by a controller closing a loop on the localiser's own output.
+    Every estimator figure in the second has a feedback path through the
+    quantity being reported, and there is nothing in a CSV to say so.
+      IT ALSO SEPARATES TWO PARAMETER FILES, through the md5 half - a
+      set half-recorded against an edited nav2.yaml is refused by the
+      same mechanism that refuses a rebuilt map.
+    """
+    _refuse_mixed(cfg, paths, sessions, nav_of, "nav arm",
+                  "{} (the nav= line m5v3.sh writes)".format(_common.CONFIG),
+                  "nav arm")
+
+
 def analyse_session(cfg, path, sensors, diverged, withheld):
     session = read_session_file(cfg, path)
     print("")
@@ -2895,6 +2984,9 @@ def analyse_session(cfg, path, sensors, diverged, withheld):
     print("TRACTION {}".format(traction_of(session)))
     print("ARM      {}".format(arm_of(session)))
     print("LOC      {}".format(loc_of(session)))
+    print("NAV      {}".format(nav_of(session)))
+    if session.get("nav_source"):
+        print("         {}".format(session["nav_source"]))
     if session.get("loc_source"):
         print("         {}".format(session["loc_source"]))
     if session.get("arm_source"):
@@ -3221,6 +3313,12 @@ def analyse(cfg, args):
     # by - and the difference between the two is one edge on /tf that no
     # table has a column for.
     refuse_mixed_loc(cfg, paths, _sessions)
+    # AND ON THE FOURTH SINCE F4 TASK 2. A set can be all-nominal, all
+    # wheel+imu and all localised against one grid and still be half
+    # driven by a table and half driven by a CONTROLLER closing a loop
+    # on that grid - which is not a setting, it is a different
+    # experiment, and no column anywhere says which.
+    refuse_mixed_nav(cfg, paths, _sessions)
     # EVERY SESSION WHOSE FILTER HAD BLOWN UP, COLLECTED WHILE THE
     # TABLES ARE PRINTED AND REPORTED IN THE EXIT STATUS. See
     # analyse_fused(): the run's ground truth and raw wheel odometry are

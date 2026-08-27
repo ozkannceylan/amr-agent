@@ -520,7 +520,13 @@ def test_the_parse_finds_the_children_this_stack_actually_starts():
                   # F4 Task 1's two, and they are NOT arm-gated: the
                   # command path is one line and a line that exists on
                   # some arms is not one.
-                  "smoother", "navcmd"):
+                  "smoother", "navcmd",
+                  # F4 Task 2's FIVE, which ARE arm-gated - none of them
+                  # exists without --nav. A stale one of these is worse
+                  # than a stale localiser: `controller_server`
+                  # PUBLISHES A TWIST, and the command path takes it.
+                  "planner_server", "controller_server", "bt_navigator",
+                  "behavior_server", "nav_lifecycle_manager"):
         assert child in names, "the parse lost the `{}` child".format(child)
 
 
@@ -655,6 +661,23 @@ def test_an_unguarded_arm_check_is_what_this_would_have_caught():
                 and any("SLAM" in one.upper() for one in c)]
 
 
+def arm_guard_tokens():
+    """arm token -> the strings a guard on that arm may be spelled with.
+
+    THREE ARMS NOW AND NOT TWO. The two localisers are named by
+    config.yaml, and the script may spell either the literal or the
+    CFG_ variable that holds it. F4 Task 2's nav arm is not a localiser
+    and has no label in config.yaml - it is a boolean flag - so what a
+    guard on it says is the SHELL VARIABLE's name, and that is the token
+    listed. The mechanism is the same and the failure it prevents is
+    identical: a check only one arm can survive, reached from another.
+    """
+    env = config_env()
+    return {arm: (env["CFG_LOCALIZATION_{}_LABEL".format(arm.upper())][0],
+                  arm.upper() + "_LABEL")
+            for arm in ("amcl", "slam")}
+
+
 def test_every_arm_named_check_is_called_inside_its_arm_guard():
     # A function whose NAME carries an arm label runs code that only that
     # arm can survive, and the other arm reaching it is not a redundant
@@ -662,23 +685,80 @@ def test_every_arm_named_check_is_called_inside_its_arm_guard():
     # to mention is that arm's label; `$CFG_LOCALIZATION_SLAM_LABEL` and
     # the literal both count, because config.yaml owns the value and the
     # script may spell either.
+    #   THE `nav` ARM IS IN THIS TABLE TOO SINCE F4 TASK 2, and its
+    #   token is the shell variable rather than a config label: --nav is
+    #   a boolean flag and there is nothing in config.yaml to name. A
+    #   check_nav_* function reached from a bringup that has no planner
+    #   in it is check_slam_mode()'s regression exactly - it would refuse
+    #   every default bringup on this track.
     script = read("m5v3.sh")
-    labels = {arm: config_env()["CFG_LOCALIZATION_{}_LABEL".format(
-        arm.upper())][0] for arm in ("amcl", "slam")}
+    labels = dict(arm_guard_tokens())
+    labels["nav"] = ("NAV",)
     definitions = set(re.findall(r"(?m)^([a-z_]+)\(\) *\{", script))
     arm_named = {name: arm for name in definitions
                  for arm in labels if arm in name.split("_")}
     assert arm_named, "no arm-named check function found to check"
+    assert any(arm == "nav" for arm in arm_named.values()), (
+        "no nav-named function found - F4 Task 2 added check_nav_params()"
+        " and this test is meant to be covering it")
     for number, line, scope in conditions_at(script):
+        # A TRAILING COMMENT IS NOT A CALL, and this file's check_*
+        # functions all carry their signature as one: `check_nav_params()
+        # {  # check_nav_params <file> <section>...`. The definition
+        # itself is excluded by the `(?![\w(])` below - a definition is
+        # followed by `(` - but the comment after it is not, and reading
+        # it as a call reported the DEFINITION as unguarded.
+        # conditions_at() strips whole-line comments (its own tracker
+        # would unwind on the prose otherwise) and deliberately not
+        # trailing ones, because a `#` inside a refusal's quoted text is
+        # not a comment at all - so the strip happens here, where all it
+        # can do is truncate a string this search does not care about.
+        code = line.split("#", 1)[0]
         for name, arm in arm_named.items():
-            if not re.search(r"(?<![\w])" + name + r"(?![\w(])", line):
+            if not re.search(r"(?<![\w])" + name + r"(?![\w(])", code):
                 continue
-            wanted = (labels[arm], arm.upper() + "_LABEL")
+            wanted = labels[arm]
             assert any(any(w in one for w in wanted) for one in scope), (
                 "m5v3.sh:{} calls {}() with nothing in scope naming the "
                 "`{}` arm - the conditions here are {}. An arm-specific "
-                "check reached from the other arm does not merely pass: "
+                "check reached from another arm does not merely pass: "
                 "check_slam_mode() refused every `--localize {}` bringup, "
                 "because amcl.yaml has no `mode:` line at "
                 "all.".format(number, name, arm, scope or "(none)",
-                              labels["amcl"]))
+                              arm_guard_tokens()["amcl"][0]))
+
+
+def test_every_nav_child_is_spawned_inside_the_nav_guard():
+    # THE OTHER HALF OF THE SAME LESSON, ON THE OTHER KIND OF STATEMENT.
+    # The test above covers arm-named CHECKS; this covers arm-gated
+    # SPAWNS, and F4 Task 2 is the first phase where getting that wrong
+    # would start a process rather than refuse one. A controller_server
+    # spawned on a stack with no localiser publishes a twist into a
+    # command path that will faithfully drive it, off a costmap wedged
+    # in a lifecycle transition.
+    script = read("m5v3.sh")
+    env = config_env()
+    # THE VARIABLE NAME AND THE VALUE BOTH COUNT, because m5v3.sh spawns
+    # each of these as `spawn "$CFG_NAV_PLANNER_NODE_NAME" ...` and a
+    # later edit could just as well write the literal.
+    parts = ("PLANNER", "CONTROLLER", "BEHAVIOR", "BT", "LIFECYCLE")
+    wanted = {part: (env["CFG_NAV_{}_NODE_NAME".format(part)][0],
+                     "CFG_NAV_{}_NODE_NAME".format(part))
+              for part in parts}
+    seen = set()
+    for number, line, scope in conditions_at(script):
+        stripped = line.strip()
+        if not stripped.startswith("spawn ") or stripped.startswith("spawn()"):
+            continue
+        for part, spellings in wanted.items():
+            if not any(word in stripped for word in spellings):
+                continue
+            seen.add(part)
+            assert any("NAV" in one for one in scope), (
+                "m5v3.sh:{} spawns the `{}` child with nothing in scope "
+                "naming the nav arm - the conditions here are {}. Every "
+                "one of these five exists ONLY under --nav.".format(
+                    number, spellings[0], scope or "(none)"))
+    assert seen == set(parts), (
+        "this test did not find every nav child in m5v3.sh: missing "
+        "{}".format(sorted(set(parts) - seen)))

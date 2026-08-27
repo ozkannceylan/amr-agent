@@ -142,13 +142,33 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 #     process whose command line begins with the interpreter, so nothing
 #     else here nominates it, and naming "python3" instead would nominate
 #     every python on the machine.
+#   AND THE LAST FIVE ARE F4 TASK 2's NAV ARM, which IS a flag - none of
+#   the five exists without --nav - and they are listed unconditionally
+#   for the reason the whole list is: a pattern that nominates nothing
+#   costs one pgrep, and a pattern that is missing when the flag WAS
+#   given orphans a live child. F3 Task 3 paid a whole measurement
+#   session to learn that, and the nav arm would be worse: a stale
+#   controller_server on domain 97 does not merely publish - it
+#   PUBLISHES A TWIST, and the command path takes it.
+#     THE FOUR SERVERS ARE NAMED BY THEIR EXECUTABLES and the manager by
+#     its PACKAGE, which is the two arguments above applied one each.
+#     `planner_server`, `controller_server`, `bt_navigator` and
+#     `behavior_server` are each a substring of BOTH command lines
+#     (`ros2 run` forks, so the wrapper reads `ros2 run nav2_planner
+#     planner_server` and the node's own reads
+#     /opt/ros/jazzy/lib/nav2_planner/planner_server) and none of them
+#     is an ordinary word. `lifecycle_manager` on its own IS ordinary
+#     enough to nominate a stranger, so the manager gets
+#     `nav2_lifecycle_manager` - which is on both of its lines too.
 M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py"
                "static_transform_publisher" "ekf_node"
                "rf2o_laser_odometry_node" "rf2o_twist.py"
                "fixed_lag_smoother_node"
                "nav2_map_server" "nav2_amcl"
                "localization_slam_toolbox_node"
-               "velocity_smoother" "cmd_vel_tricycle.py")
+               "velocity_smoother" "cmd_vel_tricycle.py"
+               "planner_server" "controller_server" "bt_navigator"
+               "behavior_server" "nav2_lifecycle_manager")
 
 # The same list as one pgrep alternation, for the callers that want a
 # single pattern rather than a loop.

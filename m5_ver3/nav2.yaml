@@ -1,0 +1,1088 @@
+# nav2.yaml - what the PLANNER, the CONTROLLER, the two COSTMAPS, the
+# BEHAVIOUR TREE NAVIGATOR and the BEHAVIOUR SERVER do on m5-ver3.
+# F4 Task 2. Read only by `m5v3.sh start --nav`, and by nothing else.
+#
+# ======================== WHAT THIS FILE OWNS ========================
+#
+# It is ekf.yaml's split a SIXTH time, and the split is by OWNERSHIP.
+# config.yaml keeps every ADDRESS and every path; this file keeps what is
+# PLANNED, what is FOLLOWED and what is refused, and the argument for
+# each number. Where the two must agree - the map topic, the scan topic,
+# the three frames - the value is written HERE and CHECKED against
+# config.yaml by m5v3.sh's check_nav_params() before anything starts.
+#
+#   WHY A CHECK RATHER THAN A `-p` OVERRIDE, WHICH IS WHAT EVERY OTHER
+#   PARAMETER FILE ON THIS TRACK GETS. Four of the six sections below
+#   address a node with a command line; the other two do not exist as
+#   processes at all. `local_costmap` and `global_costmap` are SUB-NODES
+#   that nav2_costmap_2d constructs inside controller_server and
+#   planner_server, in namespaces of their own, and a `-p` on the
+#   parent's command line does not reach them - the only thing that does
+#   is this file. So the addresses those two need are written here, and
+#   the read-back is what keeps them from drifting away from
+#   config.yaml. It is tools/build_map.sh's own idiom - "these are not
+#   passed, they are CHECKED" - and check_slam_mode()'s, one file over.
+#
+#   AND use_sim_time IS IN THIS FILE FOR THE SAME REASON, where it is on
+#   the COMMAND LINE for ekf_node, amcl and the smoother. It is a fact
+#   about THIS STACK - there is a bridged /clock - rather than about any
+#   of these nodes, and on those three it is written where a reader of
+#   the file cannot mistake it for a tuning choice. Here it would have
+#   to be written four times on four command lines and twice in this
+#   file anyway, because the two costmaps have no command line; so it is
+#   written once per section, six times, in one place.
+#
+# ======================== NOTHING WAS MIGRATED ========================
+#
+# `agv/forklift/nav2.yaml` is the CRIB and it is READ-ONLY to this track
+# (CONTEXT.md). It is the same nav2 - 1.3.12, verified - on a DIFFERENT
+# floor, a different generation of the vehicle and a different
+# localiser, and its measured figures describe none of those three here.
+# What is taken from it is METHOD: the plugin names it verified against
+# this build, the failure modes it recorded, and the shape of an
+# argument. Every NUMBER below is re-derived from a measurement on THIS
+# track and names the file the measurement is in.
+#
+# The one place the crib is followed and not re-derived is the list of
+# things that DO NOT EXIST in this build, because that is a fact about
+# nav2 1.3.12 rather than about a vehicle:
+#   - the plugin name is `nav2_smac_planner::SmacPlannerHybrid`, WITH
+#     COLONS. The slash form every older tutorial uses does not exist
+#     here and the server silently falls back to NavfnPlanner.
+#   - `allow_reverse_expansion` is NOT a SmacPlannerHybrid parameter. It
+#     belongs to SmacPlannerLattice. Reverse comes from the MOTION
+#     MODEL: REEDS_SHEPP reverses, DUBIN does not.
+#   - `goal_heading_mode` is NOT in Jazzy (docs/reports/m5v3-02 1).
+#
+# ==================== THE VEHICLE, IN FIVE SENTENCES ==================
+#
+#   ONE STEERED, DRIVEN WHEEL LEADS and two passive wheels trail.
+#   Wheelbase L = 1.05 m; the rear axle midpoint is at x = -0.50 in
+#   base_link, so base_link is NOT on the axis every arc turns about.
+#   IT CANNOT ROTATE IN PLACE. nodes/cmd_vel_tricycle_core.py REFUSES a
+#   yaw rate at a standstill rather than faking it, so a `Spin` left in
+#   a tree would stand still and then report success.
+#   ITS TRAVEL DIRECTION IS MODEL -x, WHICH IS NAV2's REVERSE. The forks
+#   are at -x, the counterweight at +x, and every profile this track has
+#   ever driven commands a NEGATIVE linear.x. Section (D) below is the
+#   whole consequence and it reaches four parameters.
+#   ITS TIGHTEST DELIVERED ARC IS 0.4154 m OF REAR-AXLE RADIUS, measured
+#   (EVIDENCE_NAV_V3.md 2.1) - not the 0.3489 m the commanded steer
+#   ceiling implies and not the 0.2802 m the mechanical stop implies.
+#   IT STOPS FROM CRUISE IN 1.02 m, measured, against the 0.690 m that
+#   v^2/2a predicts: about 0.25 s of the chain is dead time
+#   (EVIDENCE_NAV_V3.md 8).
+#
+# ==================== WHAT THIS FILE IS NOT =========================
+#
+# It is not a safety function and it contains no safety parameter.
+# `footprint_padding`, every inflation radius and every tolerance below
+# are PROCESS values evaluated in a costmap built over a network-carried
+# scan. Protective stop, e-stop and safe torque off are onboard and
+# hardwired in the plant this models and appear nowhere here. No safety
+# scanner appears in any costmap in this file, by name or by topic - the
+# three of them are on the gz side and are not bridged at all. The
+# collision monitor - which THIS TASK DOES NOT RUN - "does not provide
+# hard real-time safety certifications" and does not replace a
+# safety-rated PLC. It complements the F-PLC; it is not the F-PLC.
+#
+# NO DOCKING CLAIM IS MADE ANYWHERE. The goals in config.yaml's nav:
+# block are ROAD-GRAPH nodes in open corridors, and the tolerance below
+# is the 0.25 m station CLASS rather than a station. Docking is F5's.
+#
+# ============ (A) THE ERROR BUDGET THIS FILE IS SIZED ON =============
+#
+# EVIDENCE_LOCALIZATION_V3.md 13.10 is F4's consumption contract and it
+# hands over PEAKS rather than means. On the shipping `amcl` arm, dry:
+#
+#   moving along-track offset      up to 0.523 m   (13.6, per-run max)
+#   worst absolute error, any axis      0.5321 m   (6.1, `worst`)
+#   worst CROSS-track error             0.1044 m   (6.1, `square`)
+#   END error at rest              0.0382-0.1954 m (6.1)
+#   worst single map -> odom step       0.2591 m   (8)
+#   worst single heading step           0.0764 rad (8)
+#   instrument floor            rms 0.0291 m / MAX 0.1179 m
+#
+# THE PEAK IS ANISOTROPIC AND THE ANISOTROPY IS WHAT DECIDES WHICH
+# PARAMETER GETS WHICH NUMBER. Section 9 of that file measured the
+# 0.5 m offset to be ALONG the direction of travel almost in its
+# entirety - cross-track is 0.02-0.08 m for the whole of every run, and
+# AMCL's own covariance says so, with an along/across 1-sigma ratio of
+# 11 to 15 on a straight. So:
+#
+#   footprint_padding  <- the WORST ABSOLUTE error, 0.5321 m. The
+#       costmap places the polygon where the stack BELIEVES the vehicle
+#       is; the vehicle is really within that of it. Padding is
+#       ISOTROPIC (nav2's padFootprint moves each vertex by the padding
+#       along each axis), so a padding sized on the along-track peak is
+#       five times what the cross-track error needs - and section (C)
+#       computes what that generosity costs in the tightest corridor on
+#       this floor, which is nothing.
+#   inflation_radius   <- the LATERAL surprise: the worst cross-track
+#       error 0.1044 m plus the worst single map -> odom step 0.2591 m,
+#       which can be entirely lateral and arrives in one 66 ms tick.
+#   xy_goal_tolerance  <- the END error, which is taken AT REST after
+#       the corrections have closed the gap. The moving peak does NOT
+#       bind it and section (E) says why.
+#
+# ============== (B) THE FOOTPRINT, COMPUTED OFF THE MODEL =============
+#
+# THE REAL POLYGON AND NOT A RADIUS. This vehicle's circumscribed circle
+# has radius 1.9056 m - wider than half the 5.00 m pick aisle - so a
+# radius model refuses that corridor outright. nav2's own footprint
+# guide says the same thing for the same reason (m5v3-02 5).
+#
+# IT IS COMPUTED AND NOT EYEBALLED. `evidence_core.sdf_footprint()`
+# reads gazebo/forklift_ver3/model.sdf, carries every <collision> and
+# every <visual> of every <link> through that link's pose and its own,
+# projects them onto z = 0 and hulls them.
+# tests/test_nav2_params.py recomputes it and fails if the eight
+# vertices below have drifted from the model by more than a micrometre.
+#
+#   [-1.875000, -0.340000]   the LEFT fork tine's tip and outer edge
+#   [-0.680000, -0.558995]   safety_scanner_left's housing corner: a
+#                            0.14 m box at 45 deg about (-0.68, -0.46),
+#                            so 0.46 + 0.07*sqrt(2) = 0.558995
+#   [ 0.700000, -0.450000]   the chassis corner (1.40 x 0.90)
+#   [ 0.860000, -0.400000]   the counterweight corner (0.24 x 0.80 at
+#                            x = 0.74)
+#   ... and the same four mirrored in +y.
+#
+#   THE VISUALS COUNT AND NOT ONLY THE COLLISIONS. Both fork tines, the
+#   two mast rails, the four overhead-guard posts and the pallet
+#   camera's bracket are modelled as visuals; a rack face does not care
+#   which element of an SDF a piece of steel was written in. The tines
+#   are the whole -1.875 m of the front of this polygon.
+#   IT IS THE UNLADEN OUTLINE. nav2 documents republishing a LARGER
+#   footprint on ~/footprint when laden; this track carries no load and
+#   makes no such claim.
+#
+# ================= (C) THE PADDING, AND WHAT IT COSTS =================
+#
+# footprint_padding: 0.54, from section (A): the worst measured dry
+# absolute error 0.5321 m, rounded up to the centimetre.
+#
+#   THE PADDED POLYGON:  x [-2.4150, +1.4000], y [+-1.0990]
+#   circumscribed 2.5703 m, inscribed 1.0439 m (unpadded: 1.9056 /
+#   0.5037).
+#
+# WHAT THE ISOTROPY COSTS, IN THE TIGHTEST CORRIDOR ON THIS FLOOR. The
+# pick aisle is 5.00 m wide - m6/gazebo/warehouse_ver3.sdf puts the rack
+# faces at y = +-2.50 - and it is the only 5.00 m corridor here; every
+# other one is 8.00 m (EVIDENCE_MAP_V3.md 2.1). The padded half-width is
+# 1.0990 m, so the centreline keeps 1.4010 m of lateral slack each side.
+# The generosity is free, and this is the arithmetic that says so.
+#
+# WHAT IT DOES NOT BUY, STATED. Padding converts localisation error into
+# a REFUSAL: it grows the collision polygon, so a path that would have
+# put the true vehicle inside a rack is rejected instead of driven. It
+# does not make the vehicle's belief better and it is not a substitute
+# for the collision monitor F4 Task 3 owns.
+#
+# ================== (D) NAV2's FORWARD IS THIS TRUCK's REVERSE ========
+#
+# THE SINGLE MOST CONSEQUENTIAL FACT IN THIS FILE, and it is measured
+# rather than argued. gazebo/forklift_ver3/model.sdf: "yaw 0 points the
+# forks at world -x, so the travel heading is yaw + pi and forward
+# traction is NEGATIVE". EVIDENCE_NAV_V3.md 7 is every profile this
+# track has ever driven and the commanded linear.x is negative in all of
+# them. So an ordinary transit on this vehicle is a path nav2 calls
+# REVERSE, and four parameters that look like defaults would each be
+# pointing the wrong way if that were not written down:
+#
+#   reverse_penalty         2.0 by default, and the research says raise
+#                           it to 3.0-5.0 so the planner reverses only
+#                           where it must. Here that would make the
+#                           planner prefer COUNTERWEIGHT-FIRST travel.
+#                           It ships at 1.0 - see the planner section.
+#   PreferForwardCritic     biases +vx, which here is counterweight
+#                           first, with the nav lidar's 90 deg BLIND
+#                           SECTOR leading. DISABLED - see the
+#                           controller section.
+#   PathAngleCritic mode    0 is FORWARD_PREFERENCE and would penalise
+#                           every ordinary leg on this vehicle.
+#   vx_max / vx_min         are not symmetric here, and the asymmetry is
+#                           the scanner aperture rather than the motor.
+#
+# THE OTHER WAY OUT WAS CONSIDERED AND REJECTED. A static base_link ->
+# base_nav transform turned pi about z would give nav2 a frame whose +x
+# is the direction of travel - and the twist the controller then
+# published would be in THAT frame, so the tricycle converter, which
+# reads /cmd_vel_smoothed as base_link, would drive the truck backwards.
+# Fixing that needs a sign flip between the two, which is a NODE in the
+# command path. F4 constraint 18 says the path is one line with no
+# bypass, and EVIDENCE_NAV_V3.md 4 measured that line end to end at
+# 4.0e-11. The line does not move for a naming convenience.
+#
+# ================ (E) FRAMES, AND THE TWO tf EDGES ====================
+#
+#   map        the FROZEN grid maps/warehouse_v3, served by the
+#              map_server the --localize arm already runs. --nav does
+#              NOT start a second one: one artifact, one publisher.
+#   odom       published by the ACTIVE localiser as map -> odom
+#   base_link  published by the estimator as odom -> base_link
+#
+# `--nav` REQUIRES `--localize` and m5v3.sh refuses the combination by
+# name. Without it there is no map -> odom at all: the global costmap
+# would find no transform and report it as a tf timeout, and every
+# figure this file could produce would be about an odom-frame pose
+# wearing the map frame's name.
+
+# =====================================================================
+# planner_server - SmacPlannerHybrid, Reeds-Shepp
+# =====================================================================
+#
+# WHY THIS PLANNER, on this installation:
+#   NavFn / Theta* / SmacPlanner2D  8-connected grid paths. Every corner
+#                                   is a heading discontinuity a steered
+#                                   wheel cannot execute.
+#   SmacPlannerLattice              feasible and reversible, but it
+#                                   needs a control set generated for
+#                                   THIS turning radius. This install
+#                                   ships two sample sets (0.5 m and
+#                                   1 m at 5 cm); generating one is a
+#                                   tool and a dependency this task may
+#                                   not add.
+#   SmacPlannerHybrid + REEDS_SHEPP chosen. Curvature-bounded Hybrid-A*,
+#                                   forward AND reverse, with the
+#                                   turning radius as a parameter.
+planner_server:
+  ros__parameters:
+    use_sim_time: true
+    # The tree replans at 1 Hz (see the BT), so this is what the server
+    # is TOLD to expect and is used only for its own warning.
+    expected_planner_frequency: 1.0
+    costmap_update_timeout: 1.0
+    planner_plugins: ["GridBased"]
+
+    GridBased:
+      plugin: "nav2_smac_planner::SmacPlannerHybrid"
+      tolerance: 0.10
+      downsample_costmap: false
+      downsampling_factor: 1
+
+      # ----------------------------------------------------------------
+      # REVERSE LIVES IN THE MOTION MODEL AND NOWHERE ELSE. DUBIN is
+      # forward-only, and on a vehicle whose ordinary transit is nav2's
+      # reverse (section D) a forward-only planner would refuse most of
+      # this floor or turn the truck round to reach it.
+      motion_model_for_search: "REEDS_SHEPP"
+
+      # ----------------------------------------------------------------
+      # THE MINIMUM TURNING RADIUS, DERIVED - AND IT IS base_link's
+      # RADIUS, WHICH IS NOT THE ONE THE PLANT DELIVERS.
+      #
+      # THREE RADII EXIST AND ONLY ONE OF THEM IS ACHIEVABLE:
+      #   0.2802 m   L/tan(1.31), the MECHANICAL stop. Nothing on this
+      #              track has ever driven there.
+      #   0.3489 m   L/tan(1.25), the COMMANDED ceiling - the converter's
+      #              own clamp (config.yaml navcmd.steer_command_limit_rad,
+      #              which is drive_route.profiles.square's four corners).
+      #   0.4154 m   what the PLANT DELIVERED at that ceiling, worst
+      #              single corner of four (EVIDENCE_NAV_V3.md 2.1). The
+      #              four corners are 11.5 % apart because they are at
+      #              four different headings, and no single number
+      #              removes that - so the worst one is the floor.
+      # A planner sized on either of the first two plans arcs this
+      # vehicle cannot drive.
+      #
+      # AND THE FRAME MATTERS, WHICH IS A FINDING RATHER THAN A DETAIL.
+      # This parameter bounds the curvature of the path of
+      # `robot_base_frame`, which is base_link. Every arc this tricycle
+      # drives turns about a centre on the REAR AXLE line, and the rear
+      # axle midpoint is 0.50 m from base_link - so on one circle the
+      # two radii differ:
+      #
+      #     R_rear = sqrt(R_base^2 - 0.50^2)
+      #
+      # At the 1.25 m below that is R_rear = 1.1456 m, a rear-axle
+      # curvature of 0.8729 1/m against the 2.4071 1/m the plant
+      # delivered: a curvature RESERVE OF 2.76. The steer angle the arc
+      # asks for is atan(1.05/1.1456) = 0.7419 rad (42.51 deg), inside
+      # the 1.25 rad commanded ceiling with 0.508 rad to spare.
+      #
+      # THE CONTROLLER'S min_turning_r IS THE SAME NUMBER AND MEANS THE
+      # OTHER RADIUS, AND THAT IS DELIBERATE. MPPI's AckermannConstraints
+      # bounds |vx| / |wz|, and the converter reads exactly that ratio as
+      # a steer angle - so 1.25 there is a REAR-AXLE radius. The
+      # controller is therefore allowed an arc slightly TIGHTER than any
+      # the planner may emit (1.1456 m against 1.25 m), which is the safe
+      # direction: the controller can always tighten to recover the path
+      # the planner drew. One number, two meanings, and the inequality
+      # runs the right way.
+      #
+      # THE SIDESLIP THIS LEAVES, STATED RATHER THAN DISCOVERED. On a
+      # 1.25 m base_link arc the body is not tangent to the path: the
+      # rear axle is, and base_link carries vy = 0.50 * w, so the heading
+      # leads the path tangent by atan(0.50/1.1456) = 23.6 deg. Nav2
+      # assumes a tangent base. That mismatch is the controller's to
+      # absorb, and EVIDENCE_NAV_V3.md's first-goals section is where it
+      # is measured rather than assumed away.
+      #
+      # WHAT IT COSTS, STATED: about the ICR of a 1.25 m arc the PADDED
+      # polygon sweeps a band from 0.72 m to 2.82 m, so the padded swept
+      # circle is 5.64 m across and THIS VEHICLE CANNOT TURN ROUND
+      # INSIDE THE 5.00 m PICK AISLE. That is correct behaviour for a
+      # forklift and is what makes a refusal, if one comes, a
+      # measurement rather than a contrivance.
+      minimum_turning_radius: 1.25
+
+      # 5 deg of heading resolution. DEFAULT-KEPT and load bearing: the
+      # motion primitive length is R * 2*pi/bins = 1.25 * 0.0873 =
+      # 0.1091 m, which is 2.2 cells of the 0.05 m grid - so a primitive
+      # still moves the vehicle more than one cell and the search does
+      # not stall on sub-cell expansions.
+      angle_quantization_bins: 72
+
+      # FALSE, against the nav2 default of true, and it is the most
+      # important non-default here after the padding. The map is a
+      # SURVEYED, FROZEN grid of a building (F3 constraint 16); a cell
+      # that is unknown in it is a cell nothing has ever seen, and
+      # planning through unknown space is how a planner returns a route
+      # through a rack. With this false a goal off the surveyed floor is
+      # REFUSED rather than optimistically reached for - and the global
+      # costmap's `track_unknown_space: true` is what makes it mean
+      # something.
+      allow_unknown: false
+
+      max_iterations: 1000000
+      max_on_approach_iterations: 1000
+      max_planning_time: 5.0
+      terminal_checking_interval: 5000
+
+      # ---- the penalties, and the first of them is REVERSED ----------
+      #
+      # reverse_penalty 1.0 AGAINST A DEFAULT OF 2.0 AND A RESEARCH
+      # RECOMMENDATION OF 3.0-5.0, and section (D) is the reason: nav2's
+      # "reverse" is this vehicle's ORDINARY TRAVEL DIRECTION. Raising
+      # it would make the planner prefer counterweight-first legs, with
+      # the nav lidar's 90 deg blind sector leading - which is the exact
+      # mounting the model rejected when it centred the aperture on
+      # model -x.
+      #   1.0 IS INDIFFERENCE AND NOT A PREFERENCE THE OTHER WAY. The two
+      #   directions are mechanically symmetric on this plant to within
+      #   0.4 % (EVIDENCE_NAV_V3.md 7's `delivered / commanded` column,
+      #   0.9841 ahead and 0.9884 at creep), so a penalty on either of
+      #   them is a claim the measurements do not support. The asymmetry
+      #   that IS real is PERCEPTION, and it belongs to a costmap layer
+      #   and to the collision monitor rather than to a search cost -
+      #   neither of which exists yet on the reverse side. Written down
+      #   here as the thing F4 Task 3 should revisit with the monitor's
+      #   polygons in hand.
+      reverse_penalty: 1.0
+      change_penalty: 0.0         # DEFAULT-KEPT
+      non_straight_penalty: 1.20  # DEFAULT-KEPT: straight is cheaper
+      cost_penalty: 2.0           # DEFAULT-KEPT: weight on costmap cost
+      retrospective_penalty: 0.015
+      use_quadratic_cost_penalty: false
+      allow_primitive_interpolation: false
+
+      # ---- the analytic (Reeds-Shepp) expansion ----------------------
+      # ALL DEFAULT-KEPT, and the one that would have to move is named.
+      # `analytic_expansion_max_length` is the length of the final
+      # Reeds-Shepp shot to goal: a spur deeper than this truncates the
+      # shot and the planner refuses it. Every station spur on
+      # m6/ipc/route.py's graph is at least 2.50 m, so 3.0 m already
+      # covers the deepest one this floor has - stated now so that F5's
+      # docking phase finds the arithmetic rather than the symptom.
+      # None of THIS task's three goals is a spur: they are road-graph
+      # nodes in open corridors.
+      analytic_expansion_ratio: 3.5
+      analytic_expansion_max_length: 3.0
+      analytic_expansion_max_cost: 200.0
+      analytic_expansion_max_cost_override: false
+
+      # FALSE, and not by omission. The cached obstacle heuristic is
+      # valid only while the costmap does not change. The global costmap
+      # here is static-only, so caching WOULD be valid today - and a
+      # later task adding a live layer to it would silently invalidate
+      # every plan without touching this line. The planning times this
+      # task measures do not need the saving.
+      cache_obstacle_heuristic: false
+      downsample_obstacle_heuristic: true
+      lookup_table_size: 20.0
+
+      # The planner's own smoother. ON: it removes the
+      # primitive-to-primitive corners the search leaves behind, and it
+      # SPLITS the path at cusps rather than smoothing through them,
+      # which is what keeps a reverse segment a reverse segment - and on
+      # this vehicle most segments are reverse ones.
+      smooth_path: true
+      smoother:
+        max_iterations: 1000
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-10
+        do_refinement: true
+        refinement_num: 2
+
+# =====================================================================
+# controller_server - MPPI with AckermannConstraints
+# =====================================================================
+#
+# WHY THIS CONTROLLER, and the crib chose the other one.
+#   DWB       samples a differential/omni twist space with no steering
+#             constraint at all: it proposes twists this vehicle cannot
+#             execute and then scores them.
+#   RPP       the CRIB's choice, and its reason was the host: 4 cores
+#             under a software-rasterised Gazebo, where MPPI would have
+#             made every figure a measurement of the machine. THIS rig
+#             is GPU-gated (CONTEXT.md) and idles at RTF 0.9984 with
+#             eleven children, so that reason does not transfer - and
+#             docs/reports/m5v3-02 0 recommends MPPI for exactly this
+#             vehicle class. The plan ships MPPI; RPP stays the named
+#             fallback if the fleet ever needs four of these.
+#   Graceful  drives an egocentric polar control law and assumes the
+#             vehicle can turn to face its target.
+#   MPPI      chosen. It is the only controller in this installation
+#             with a real Ackermann trajectory model, native reverse
+#             through vx_min, and dynamic-obstacle avoidance in one.
+#
+# THE OPEN DEFECT THIS RUNS INTO, NAMED BEFORE IT IS MEASURED. nav2
+# issue #5714 (open, last update 2025-11-24): Ackermann/bicycle robots
+# deviate from the global path in turns, WORST IN REVERSE TURNS, with no
+# maintainer fix and no published workaround. On this vehicle every
+# ordinary leg is a reverse leg (section D), so this stack does not meet
+# that defect in a corner case - it meets it on every goal. F4
+# constraint 19 is the ruling: it is MEASURED and RECORDED, not tuned
+# around, unless a dry acceptance criterion fails.
+controller_server:
+  ros__parameters:
+    use_sim_time: true
+
+    # 20 Hz, and it is not a free choice on this stack: the tricycle
+    # converter runs at config.yaml navcmd.rate_hz = 20 and the velocity
+    # smoother at smoother.yaml smoothing_frequency = 20. A controller
+    # faster than the smoother would have commands coalesced; slower,
+    # and the smoother would ramp between them on its own. One rate down
+    # the whole line. tests/test_nav2_params.py asserts all three agree.
+    controller_frequency: 20.0
+    costmap_update_timeout: 0.30
+
+    # FALSE, AND IT IS MEASURED RATHER THAN ASSUMED. EVIDENCE_NAV_V3.md
+    # 6.1 fact 1: `ros2 node info /velocity_smoother` on THIS Jazzy reads
+    # `geometry_msgs/msg/Twist` on /cmd_vel, not TwistStamped - which
+    # corrects docs/reports/m5v3-02 5. The two message types are
+    # silently incompatible: a subscriber of the wrong type simply never
+    # receives anything, and the truck would sit still through a
+    # perfectly healthy goal.
+    enable_stamped_cmd_vel: false
+
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.5    # this vehicle HAS no commanded vy;
+                                     # the threshold keeps a stray
+                                     # lateral term from reading as
+                                     # motion. It is NOT noise - it is
+                                     # 0.50 * yaw rate, the lateral
+                                     # velocity base_link genuinely has
+                                     # (config.yaml vehicle.
+                                     # rear_axle_offset_m).
+    min_theta_velocity_threshold: 0.001
+
+    failure_tolerance: 0.3
+    publish_zero_velocity: true      # a finished goal ends with an
+                                     # explicit zero rather than with
+                                     # the smoother's 1.0 s timeout
+
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      # 0.30 m in 15 s, both moved from the nav2 default (0.5 m in 10 s)
+      # and both for one reason: a Reeds-Shepp path has CUSPS. At a cusp
+      # this vehicle stops, slews the steer axis across - up to 1.25 rad
+      # at the measured 2.0 rad/s ramp, 0.625 s - and sets off the other
+      # way, and the stop before it costs up to 1.02 m and 2.07 s from
+      # cruise (EVIDENCE_NAV_V3.md 8). A checker demanding half a metre
+      # every ten seconds can trip on a legitimate cusp and abort a
+      # correct path.
+      required_movement_radius: 0.30
+      movement_time_allowance: 15.0
+
+    general_goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      # ---------------------------------------------------------------
+      # 0.25 m, AND THE STATION CLASS IS WHAT BINDS IT - NOT THE
+      # LOCALISER. Both candidates were computed:
+      #
+      #   the station class          0.25 m   (m6/ipc/stations.py's
+      #                                        0.25 m arrival tolerance,
+      #                                        the class this floor's
+      #                                        twelve stations are
+      #                                        specified to)
+      #   the localiser's END error  0.1954 m (worst of five dry runs,
+      #                                        EVIDENCE_LOCALIZATION_V3
+      #                                        6.1) - and the instrument
+      #                                        floor under it is 0.1179 m
+      #
+      # 0.1954 < 0.25, so the tolerance this stack can MEASURE is
+      # tighter than the tolerance the floor ASKS FOR, and the station
+      # class is the binding constraint. Had it gone the other way the
+      # honest answer would have been the localiser's number and a note
+      # that the floor's class is not met.
+      #
+      # AND THE 0.523 m MOVING PEAK DOES NOT BIND IT, which is the
+      # comparison 13.10 asks for explicitly. That peak is an
+      # ALONG-TRACK offset present only WHILE THE VEHICLE IS MOVING: it
+      # builds over the cruise and collapses over the final metre and a
+      # half of every run measured, ending at -0.016 m
+      # (EVIDENCE_LOCALIZATION_V3 9.1). A goal is checked at REST, after
+      # the deceleration that collapses it, and `stateful` below latches
+      # the position test once it is met. Sizing a goal box on a moving
+      # lag would be sizing it on a number that is gone by the time the
+      # box is evaluated.
+      xy_goal_tolerance: 0.25
+      # 0.15 rad = 8.6 deg. The measured END heading errors on the five
+      # dry runs are 0.0020 to 0.0315 rad, so this is 4.8 x the worst of
+      # them. It has to be reachable WITHOUT rotating in place, because
+      # this vehicle cannot: the final heading is whatever the
+      # Reeds-Shepp path's last segment delivers.
+      yaw_goal_tolerance: 0.15
+      # TRUE, and for a reason specific to this vehicle: once inside the
+      # position tolerance the check latches and only heading remains.
+      # On a base that can rotate in place that is a licence to
+      # pirouette; on this one it is the opposite - it stops the
+      # controller driving BACK OUT of the tolerance circle to chase a
+      # heading it is already holding.
+      stateful: true
+
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+
+      # ---- the trajectory model --------------------------------------
+      # `model_dt` MUST equal 1/controller_frequency or every sampled
+      # trajectory describes a different horizon from the one the loop
+      # actually executes (m5v3-02 2). 1/20 = 0.05.
+      # tests/test_nav2_params.py multiplies the two and asserts 1.0.
+      model_dt: 0.05
+      # 56 * 0.05 = 2.80 s of horizon, which at the -0.700 m/s transit
+      # ceiling is 1.96 m of look-ahead - just under the 2.415 m the
+      # PADDED fork tips already reach ahead of base_link. DEFAULT-KEPT.
+      time_steps: 56
+      # 1000 AND NOT THE 2000 nav2_bringup SHIPS. Halving the sample
+      # budget halves the per-tick cost, and this vehicle's admissible
+      # twist space is very nearly ONE-dimensional: vy is not sampled at
+      # all on a non-holonomic motion model, and wz is pinned to vx by
+      # AckermannConstraints below. A sample budget sized for an omni
+      # base is spent on a space this one does not have.
+      # docs/reports/m5v3-02 2 quotes 1000 as the upstream default.
+      batch_size: 1000
+      iteration_count: 1
+      temperature: 0.3
+      gamma: 0.015
+
+      # ---- the motion model, and it is the whole reason for MPPI -----
+      motion_model: "Ackermann"
+      AckermannConstraints:
+        # THE SAME 1.25 AS THE PLANNER'S, AND IT MEANS THE REAR AXLE'S
+        # RADIUS - see the planner's derivation for why one number with
+        # two meanings is the safe direction here. What this bounds is
+        # |vx| / |wz|, and nodes/cmd_vel_tricycle_core.twist_to_tricycle
+        # reads exactly that ratio: at 1.25 m the steer angle asked for
+        # is atan(1.05/1.25) = 0.6987 rad (40.03 deg), which is 1.79 x
+        # inside the 1.25 rad commanded ceiling and 1.87 x inside the
+        # 1.31 rad mechanical stop.
+        min_turning_r: 1.25
+
+      # ---- the speed envelope, and it is ASYMMETRIC on purpose -------
+      #
+      # vx_min IS THE TRANSIT CEILING AND vx_max IS NOT. Section (D):
+      # negative vx is FORKS-FIRST, which is this vehicle's ordinary
+      # travel direction and the one the nav lidar's 270 deg aperture is
+      # centred on. -0.700 m/s is config.yaml
+      # drive_route.profiles.straight's cruise - the speed every
+      # straight-line figure on this track was measured at, and the
+      # converter's own traction ceiling (config.yaml
+      # navcmd.speed_max_mps).
+      vx_min: -0.700
+      # +0.300 m/s is COUNTERWEIGHT-FIRST, and it is capped at
+      # drive_route.profiles.corner_creep's creep speed rather than at
+      # the motor's 0.700. The cap is the SCANNER APERTURE and not the
+      # motor: the nav lidar is blind over 90 deg centred on model +x
+      # (model.sdf, the window derivation), so a counterweight-first leg
+      # is a leg driven with the blind sector leading. The planner needs
+      # both directions to solve Reeds-Shepp geometry at all - a cusp is
+      # a direction change and this vehicle reverses out of things - so
+      # the direction is permitted, at creep, and not forbidden.
+      #   IT IS NOT A SAFETY LIMIT. Nothing here inhibits motion.
+      vx_max: 0.300
+      # 0.700 / 1.25 = 0.560 rad/s: the fastest yaw rate this envelope
+      # can produce at the transit ceiling on the tightest permitted
+      # arc. A larger figure would let MPPI emit a (vx, wz) pair whose
+      # implied steer angle is past what the planner planned for.
+      wz_max: 0.560
+      # Unread on a non-holonomic motion model - MPPI does not sample vy
+      # at all unless motion_model is Omni - and stated as 0.0 rather
+      # than left at the package's 0.5 so that a future reader cannot
+      # take the default for a claim about this vehicle.
+      vy_max: 0.0
+
+      # ---- the sampling spread ---------------------------------------
+      # vx_std 0.2 over a 1.00 m/s envelope is the shipped ratio.
+      # wz_std IS HALVED from the shipped 0.4, because 0.4 is 71 % of
+      # this vehicle's whole wz_max: a spread that wide spends most of
+      # its samples on trajectories AckermannConstraints then clamps
+      # back onto the same boundary. 0.2 is 36 % of the envelope.
+      vx_std: 0.2
+      wz_std: 0.2
+      vy_std: 0.2                 # unread, as vy_max above
+      regenerate_noises: true     # nav2_bringup's own value: fresh
+                                  # noise every tick rather than a
+                                  # rotated buffer. It costs CPU and the
+                                  # cost is measured in EVIDENCE_NAV_V3.
+
+      # ---- the acceleration envelope, from the PLANT -----------------
+      # 0.35 m/s^2 is config.yaml navcmd.accel_mps2 - the ramp
+      # drive_route.profiles.straight was built on and the one the
+      # converter and the smoother both enforce (EVIDENCE_NAV_V3.md 5
+      # measured the terminals at 0.017500 m/s per 0.05 s tick, exactly).
+      # nav2's own default is 3.0, which is 8.6 x this plant.
+      ax_max: 0.35
+      ax_min: -0.35
+      ay_max: 0.0                 # unread; no lateral axis exists
+      # 0.35 / 1.25 = 0.28 rad/s^2, the same ratio as the linear one, so
+      # a proportional ramp holds the curvature through it.
+      az_max: 0.28
+
+      # ---- the path handler ------------------------------------------
+      # 2.0 m against the shipped 1.7: the pruned path must be at least
+      # as long as the horizon the critics score over, which is 1.96 m
+      # at the transit ceiling. At 1.7 the last two tenths of every
+      # sampled trajectory would be scored against a path that had
+      # already been cut.
+      prune_distance: 2.0
+      transform_tolerance: 0.2
+      # TRUE, and it is the parameter a Reeds-Shepp path needs most.
+      # With it the path handler SPLITS at each cusp and hands the
+      # optimiser one directional segment at a time; without it the
+      # critics score a path that reverses direction inside their own
+      # horizon, which is the shape nav2 #5714 reports worst.
+      # VERIFIED ON THE RUNNING NODE rather than trusted - a parameter
+      # this build does not declare is IGNORED IN SILENCE, and
+      # EVIDENCE_NAV_V3.md's bringup section carries the `ros2 param
+      # get` that read it back.
+      enforce_path_inversion: true
+      inversion_xy_tolerance: 0.2
+      inversion_yaw_tolerance: 0.4
+
+      # FALSE. Nothing on this stack subscribes to the candidate
+      # trajectory cloud, and publishing 1000 x 56 poses at 20 Hz costs
+      # this rig's real-time factor - which is itself a figure this task
+      # reports. nav2_bringup ships it true for RViz.
+      visualize: false
+      TrajectoryVisualizer:
+        trajectory_step: 5
+        time_step: 3
+
+      # ---- the critics -----------------------------------------------
+      # SEVEN OF THE EIGHT nav2_bringup SHIPS. PreferForwardCritic is
+      # removed by name and section (D) is why: it biases +vx, which on
+      # this vehicle is counterweight-first with the blind sector
+      # leading. It is listed below as `enabled: false` rather than
+      # deleted, so that a reader finds the argument where they would go
+      # looking for the parameter.
+      critics: [
+        "ConstraintCritic", "CostCritic", "GoalCritic",
+        "GoalAngleCritic", "PathAlignCritic", "PathFollowCritic",
+        "PathAngleCritic"]
+
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 1.4
+      GoalAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.0
+        # 0.5 m out, start caring about the goal heading. On a vehicle
+        # that cannot rotate in place the heading is whatever the last
+        # path segment delivers, so this critic can only bias the
+        # approach and never fix an arrival - which is what the staged
+        # approach in F5 exists for.
+        threshold_to_consider: 0.5
+      PreferForwardCritic:
+        # DISABLED BY NAME. See section (D). On this vehicle "forward"
+        # is counterweight-first.
+        enabled: false
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 0.5
+      CostCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.81
+        near_collision_cost: 253
+        critical_cost: 300.0
+        # FALSE, and what it leaves open is stated rather than implied.
+        # With it false this critic scores the costmap cost at the
+        # trajectory's CENTRE POINT, not over the 3.815 m padded
+        # polygon. The HARD guarantee that a path fits comes from the
+        # planner, which does a full-footprint collision check on the
+        # global costmap; what this critic adds is a soft standoff from
+        # the inflation gradient. Turning it true multiplies the per-tick
+        # cost by the footprint's vertex count on every one of 1000 x 56
+        # samples, and this task reports the controller frequency it
+        # actually achieved - a controller that misses its rate is a
+        # worse guarantee than a cheap critic. F4 Task 3's collision
+        # monitor is what closes the gap on the live scan.
+        consider_footprint: false
+        collision_cost: 1000000.0
+        near_goal_distance: 1.0
+        trajectory_point_step: 2
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 14.0
+        max_path_occupancy_ratio: 0.05
+        trajectory_point_step: 4
+        threshold_to_consider: 0.5
+        offset_from_furthest: 20
+        use_path_orientations: false
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        offset_from_furthest: 5
+        threshold_to_consider: 1.4
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 2.0
+        offset_from_furthest: 4
+        threshold_to_consider: 0.5
+        max_angle_to_furthest: 1.0
+        # MODE 2, CONSIDER_FEASIBLE_PATH_ORIENTATIONS, against a default
+        # of 0 = FORWARD_PREFERENCE. Mode 0 penalises any trajectory
+        # whose heading is more than max_angle_to_furthest from the
+        # bearing to the path point - which on this vehicle is EVERY
+        # ordinary leg, because the body faces 180 deg from the
+        # direction it is travelling (section D). Mode 2 reads the
+        # planner's own per-pose ORIENTATIONS instead, and a
+        # SmacPlannerHybrid path carries the drive direction in them.
+        # docs/reports/m5v3-02 2 names mode 1 or 2 for Reeds-Shepp paths
+        # and says mode 0 will fight reverse segments; here it would
+        # fight all of them.
+        mode: 2
+
+# =====================================================================
+# local_costmap - ROLLING, and it is the only live perception here
+# =====================================================================
+#
+# THE OBSTACLE LAYER IS ON, AND THE THING THAT MAKES THAT SAFE IS
+# MEASURED. This scanner SEES ITS OWN VEHICLE. The nav lidar sits at
+# z = 1.80 m on (0.55, -0.40) and three pieces of this truck stand in
+# that plane:
+#
+#   nav_lidar_3d's housing   r = 0.045 at (0.00, 0.00), z 1.76-1.84
+#                            -> 0.635 m at bearing 2.512 rad
+#   mast_rail_right          0.09 sq at (-0.78, -0.30), z 0.05-2.05
+#                            -> 1.334 m at bearing 3.067 rad
+#   mast_rail_left           0.09 sq at (-0.78, +0.30)
+#                            -> 1.503 m at bearing 2.658 rad
+#
+# and bearing pi in that frame is DEAD AHEAD OF TRAVEL, so all three sit
+# in the forward quarter. The crib turned its obstacle layer OFF over
+# exactly this (agv/forklift/nav2.yaml, 9 of 360 rays at 1.334 m and
+# 1.503 m). What makes the layer honest here instead is
+# `footprint_clearing_enabled`: every one of those three returns lands
+# INSIDE the footprint polygon in section (B) - the polygon spans
+# x [-1.875, 0.860], y [+-0.559] and all three points are inside it - and
+# nav2's obstacle layer paints its own footprint FREE on every update,
+# before the layers are combined. So the self-returns are cleared by
+# construction rather than by a range gate that would blind the layer to
+# everything inside 1.5 m.
+#
+#   WHAT IT DOES NOT FIX, AND THIS IS A COVERAGE HOLE, NOT A SOLVED
+#   PROBLEM. A ray that STOPS on a mast rail does not clear beyond it.
+#   The three obstructions subtend about 3.9, 3.9 and 7.6 degrees, so
+#   roughly 15 of the aperture's 270 degrees never see past 1.5 m and a
+#   real obstacle in those three narrow sectors would be neither marked
+#   nor cleared. EVIDENCE_NAV_V3.md's bringup section measures the
+#   actual ray count and bearings rather than quoting this arithmetic.
+#   The fix is a self-occlusion mask on the scan, which is its own brief
+#   and its own measurement.
+#
+#   AND IT CANNOT SEE WHAT MATTERS MOST. At z = 1.80 m a pallet, a
+#   dropped load and a person are all invisible. The sensor that could
+#   see them is a safety scanner, and feeding a safety scanner into a
+#   costmap is forbidden on this lineage and is not done here: none of
+#   the three is bridged to ROS at all. This layer's honest scope is
+#   STRUCTURE ABOVE 1.80 m that the frozen map does not carry.
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: true
+      global_frame: odom
+      robot_base_frame: base_link
+      rolling_window: true
+      update_frequency: 5.0
+      publish_frequency: 2.0
+
+      # 10 x 10 m, so +-5.00 m about base_link, against a nav2 default of
+      # 3 x 3 which is smaller than this vehicle's PADDED footprint is
+      # long (3.815 m). What has to fit: the padded polygon reaches
+      # 2.415 m ahead of base_link, MPPI's horizon adds 1.96 m beyond
+      # that at the transit ceiling, and the total is 4.375 m - inside
+      # 5.00 with 0.625 m to spare. A local costmap that does not
+      # contain the whole horizon makes the critics score cells that are
+      # not there.
+      width: 10
+      height: 10
+      # The frozen grid's own resolution. A local costmap coarser than
+      # the map it sits beside loses the rack uprights, and a finer one
+      # would be inventing detail the scan cannot support.
+      resolution: 0.05
+
+      # SECTION (B)'s POLYGON, computed off gazebo/forklift_ver3/
+      # model.sdf and checked against it by tests/test_nav2_params.py.
+      footprint: "[[-1.875000,-0.340000],[-0.680000,-0.558995],[0.700000,-0.450000],[0.860000,-0.400000],[0.860000,0.400000],[0.700000,0.450000],[-0.680000,0.558995],[-1.875000,0.340000]]"
+      # SECTION (C): the worst measured dry absolute error, 0.5321 m,
+      # rounded up.
+      footprint_padding: 0.54
+
+      plugins: ["obstacle_layer", "inflation_layer"]
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        # THE ONE THING THAT MAKES THE SELF-RETURNS SURVIVABLE. See the
+        # header of this section.
+        footprint_clearing_enabled: true
+        combination_method: 1
+        observation_sources: scan
+        scan:
+          # config.yaml topics.scan_nav - CHECKED against it by
+          # m5v3.sh's check_nav_params(), because a `-p` cannot reach a
+          # costmap sub-node.
+          topic: /forklift/gz/scan_nav
+          # The TiM571 profile's own working range (model.sdf: 0.05 to
+          # 25.0 m). MARKING is allowed to the full 25 m; RAYTRACING -
+          # which CLEARS - is cut to 12.0 m, because a 25 m ray at this
+          # scanner's 0.33 deg spacing is 0.144 m between neighbours,
+          # wider than two costmap cells, and clearing along it punches
+          # holes through obstacles it stepped over. 12.0 m still spans
+          # the 10 x 10 m window corner to corner (7.07 m).
+          obstacle_max_range: 25.0
+          obstacle_min_range: 0.0
+          raytrace_max_range: 12.0
+          raytrace_min_range: 0.0
+          max_obstacle_height: 2.0
+          min_obstacle_height: 0.0
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+          # 0.5 s = 7.5 scan periods at the sensor's 15 Hz. A source
+          # that has stopped for longer than that is a source this layer
+          # should stop trusting; the nav2 default of 0.0 means "never
+          # expire", which on a simulation whose clock can stall is a
+          # costmap frozen at the last thing it saw.
+          expected_update_rate: 0.5
+          inf_is_valid: false
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        enabled: true
+        # 0.60 m, AND IT IS NOT A SECOND COPY OF THE PADDING. The
+        # padding is a HARD collision margin; this is a SOFT preference
+        # that keeps the vehicle off rack faces when it has a choice.
+        #   THE LOWER BOUND IS THE LATERAL SURPRISE, section (A): the
+        #   worst measured cross-track error 0.1044 m plus the worst
+        #   single map -> odom step 0.2591 m, which arrives in one tick
+        #   and can be entirely lateral. 0.3635 m; 0.60 is 1.65 x it.
+        #   THE UPPER BOUND IS THE PICK AISLE. Rack faces at y = +-2.50
+        #   and a padded half-width of 1.0990 m leave an UNINFLATED
+        #   corridor of 2 * (2.50 - 0.60) = 3.80 m down the middle -
+        #   1.7 x the padded footprint's 2.198 m width. Anything above
+        #   1.40 m would close that corridor entirely.
+        inflation_radius: 0.60
+        cost_scaling_factor: 3.0
+
+      always_send_full_costmap: true
+
+# =====================================================================
+# global_costmap - the FROZEN map, and nothing live at all
+# =====================================================================
+#
+# STATIC AND INFLATION ONLY, and the absence of an obstacle layer here
+# is a decision rather than an omission. Marking live scan returns into
+# a MAP-FRAME costmap smears every rack face by the localisation error
+# this whole file is dimensioned against - up to 0.5321 m - and the
+# smear does not clear, because the next scan of the same face is
+# smeared by a different amount in a different direction. The live scan
+# belongs in the rolling costmap, where it is referenced to `odom` and
+# ages out of the window.
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: true
+      global_frame: map
+      robot_base_frame: base_link
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      resolution: 0.05
+
+      # TRUE, and it is what makes the planner's `allow_unknown: false`
+      # mean anything at all. With it false every never-observed cell
+      # reads as FREE and the planner will happily leave the surveyed
+      # floor. The frozen grid is 98.21 % of the open floor
+      # (registration.yaml coverage) and the rest of the world is
+      # genuinely unknown.
+      track_unknown_space: true
+
+      footprint: "[[-1.875000,-0.340000],[-0.680000,-0.558995],[0.700000,-0.450000],[0.860000,-0.400000],[0.860000,0.400000],[0.700000,0.450000],[-0.680000,0.558995],[-1.875000,0.340000]]"
+      footprint_padding: 0.54
+
+      plugins: ["static_layer", "inflation_layer"]
+
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        enabled: true
+        # THE MAP THE --localize ARM IS ALREADY SERVING. `--nav` starts
+        # NO SECOND map_server: one frozen artifact, one publisher, one
+        # md5 in the session label. config.yaml topics.map - CHECKED
+        # against it by m5v3.sh's check_nav_params().
+        map_topic: /map
+        # The grid is published ONCE, latched. Without transient-local
+        # durability this layer subscribes after the publication and
+        # waits for ever, and the costmap stays empty while every node
+        # reports ACTIVE.
+        map_subscribe_transient_local: true
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        enabled: true
+        inflation_radius: 0.60
+        cost_scaling_factor: 3.0
+
+      always_send_full_costmap: true
+
+# =====================================================================
+# bt_navigator
+# =====================================================================
+bt_navigator:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: map
+    robot_base_frame: base_link
+
+    # 0.2 s = 3 scan periods at the nav lidar's 15 Hz, which is the
+    # slowest thing in the chain that carries the pose (AMCL
+    # re-broadcasts map -> odom on every scan, measured at 15.15 Hz,
+    # EVIDENCE_LOCALIZATION_V3 5).
+    transform_tolerance: 0.2
+
+    bt_loop_duration: 10          # ms, DEFAULT-KEPT
+    default_server_timeout: 20    # ms, DEFAULT-KEPT
+    wait_for_service_timeout: 1000
+    action_server_result_timeout: 900.0
+
+    # ONE NAVIGATOR. `navigate_through_poses` is NOT declared: one goal
+    # at a time is the whole of this phase's autonomy claim, and a pose
+    # sequence is an ORDER - orders are VDA 5050's and belong to m6.
+    navigators: ["navigate_to_pose"]
+    navigate_to_pose:
+      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
+
+    error_code_names:
+      - compute_path_error_code
+      - follow_path_error_code
+
+# =====================================================================
+# behavior_server
+# =====================================================================
+#
+# ONE BEHAVIOUR, AND IT DOES NOT MOVE THE VEHICLE.
+#
+# `spin` is REMOVED. It commands angular.z with linear.x = 0, and
+# nodes/cmd_vel_tricycle_core.twist_to_tricycle REFUSES exactly that
+# pair by name ("one steered wheel a wheelbase ahead of the rear axle
+# cannot turn the body without travelling"). Left in the tree it would
+# produce a vehicle that stands still for the whole behaviour and then
+# reports success - and the refusal counter on /m5v3/navcmd/status is
+# how EVIDENCE_NAV_V3.md proves it never happened.
+#
+# `backup` and `drive_on_heading` are REMOVED TOO, and that is the less
+# obvious half. DriveOnHeading publishes linear.x with angular.z = 0,
+# which is a straight line this vehicle drives in both directions. They
+# are out on three grounds, none of them kinematic:
+#   - Their collision check simulates a STRAIGHT line from the current
+#     pose. The steer axis is wherever the controller last left it and
+#     takes up to 0.625 s to slew back to centre at the measured
+#     2.0 rad/s, so the vehicle drives an ARC through space the check
+#     never examined.
+#   - 0.30 m is 11 % of this vehicle's 2.735 m length. Sized to actually
+#     change the situation it would be metres, and a blind multi-metre
+#     move with 1.875 m of fork leading is not a thing a machine this
+#     size should do because a plan failed.
+#   - Reverse here is a PLANNED manoeuvre, and on this vehicle it is
+#     the ORDINARY one. The Reeds-Shepp planner emits it against the
+#     map; a blind recovery duplicates that without the map.
+#
+# WHAT IS LEFT IS THE POINT AND NOT A LOSS: clear the costmaps, wait,
+# replan - and if it still cannot plan, STOP AND REPORT.
+behavior_server:
+  ros__parameters:
+    use_sim_time: true
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_footprint_topic: global_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: ["wait"]
+    wait:
+      plugin: "nav2_behaviors::Wait"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_link
+    transform_tolerance: 0.2
+    enable_stamped_cmd_vel: false
+
+# =====================================================================
+# nav_lifecycle_manager
+# =====================================================================
+#
+# THE ONE PLACE THIS TRACK USES A nav2 LIFECYCLE MANAGER, AND THE
+# REASON IT WAS REFUSED FOR THE LOCALISER IS SWITCHED OFF HERE BY NAME.
+# `m5v3.sh`'s localize_lifecycle() drives amcl and map_server by hand
+# because a manager's BOND is a heartbeat with a deadline and a deadline
+# starves at the real-time factors a simulation reaches - a manager that
+# declares a healthy node dead is worse than no manager. That argument
+# is about the BOND and not about the manager, so:
+#
+#   bond_timeout: 0.0  switches the bond off at the manager's end, and
+#                      every node below carries bond_heartbeat_period 0
+#                      at its own. Nothing is being watched by a
+#                      deadline, so nothing can starve.
+#
+# WHAT IS LEFT IS WHAT A MANAGER IS ACTUALLY FOR HERE: FOUR nodes with
+# SIX lifecycle nodes behind them - each costmap is a lifecycle node of
+# its own inside its server - transitioned in a fixed order in one
+# process, instead of four more `ros2 lifecycle set` loops in a shell.
+#
+# THE VELOCITY SMOOTHER IS NOT IN THE LIST, deliberately. It is part of
+# the COMMAND PATH and not of the nav arm (F4 constraint 18): it goes up
+# on every bringup, with or without --nav, and it drives itself to
+# ACTIVE off smoother.yaml's `autostart_node`. A manager that owned it
+# would own a node that exists on arms the manager does not.
+nav_lifecycle_manager:
+  ros__parameters:
+    use_sim_time: true
+    autostart: true
+    # THE ORDER IS nav2's OWN AND IT IS NOT ALPHABETICAL. The manager
+    # brings this list up in order and takes it down in reverse, and
+    # bt_navigator is LAST because it is the only one of the four that
+    # calls the other three.
+    node_names:
+      - controller_server
+      - planner_server
+      - behavior_server
+      - bt_navigator
+    bond_timeout: 0.0
+    attempt_respawn_reconnection: false

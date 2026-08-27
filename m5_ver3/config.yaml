@@ -3646,3 +3646,239 @@ twist_route:
       - {hold_s: "8.0", v_mps: "-0.700", w_radps: "0.000",
          speed_limit_mps: "0.000"}
       - {hold_s: "4.0", v_mps: "0.000", w_radps: "0.000"}
+
+# ============================== THE NAV ARM ============================
+# F4 Task 2, and it is the first thing on this track that DECIDES where
+# the vehicle goes. Everything before it either drives a table
+# (drive_route, drive_twist) or answers where the vehicle IS
+# (--localize); this block is the addresses, the paths and the goal
+# table for a planner and a controller that close the loop between the
+# two.
+#
+# WHAT IS HERE AND WHAT IS IN nav2.yaml. The split is ekf.yaml's, a
+# sixth time: this block holds ADDRESSES - packages, executables, node
+# names, file paths - and the GOAL TABLE, which is a set of poses
+# somebody chose and has to defend. nav2.yaml holds what is PLANNED and
+# what is FOLLOWED, and the argument for every number in it. No number
+# is in both.
+#   WITH ONE EXCEPTION THAT IS A CHECK RATHER THAN A COPY. nav2's two
+#   COSTMAPS are sub-nodes with no command line of their own, so the
+#   addresses they need - topics.map, topics.scan_nav, frames.map,
+#   frames.odom, frames.base_link - can only be written in nav2.yaml.
+#   m5v3.sh's check_nav_params() READS THEM BACK and refuses a
+#   disagreement before anything starts. That is tools/build_map.sh's
+#   own idiom: these are not passed, they are CHECKED.
+nav:
+  # THE ARM'S TWO FILES. Both are consumed read-only; neither is written
+  # by anything at run time.
+  params_file: "m5_ver3/nav2.yaml"
+  # THE TREE, AND IT IS PASSED AS AN ABSOLUTE PATH. bt_navigator's
+  # default_nav_to_pose_bt_xml is resolved against the PROCESS's working
+  # directory, and m5v3.sh may be run from anywhere - so the path is
+  # built from $REPO and handed over on the command line rather than
+  # written into nav2.yaml, where it would be a claim about where
+  # somebody's shell was standing.
+  bt_xml: "m5_ver3/behavior_trees/navigate_to_pose_tricycle_v3.xml"
+
+  # ---------------------- THE FIVE CHILDREN ----------------------------
+  # Four servers and one lifecycle manager. Every one of them is a
+  # `ros2 run <package> <executable>`, which FORKS - so the pid m5v3.sh
+  # records is the wrapper's and the sweep in tools/_common.sh is what
+  # catches the node itself. The patterns there are the four EXECUTABLE
+  # names (each a substring of both command lines, and none of them an
+  # ordinary word) and the manager's PACKAGE name, because
+  # `lifecycle_manager` on its own is ordinary enough to nominate a
+  # stranger - which is nav2_amcl's argument and velocity_smoother's,
+  # one each way.
+  planner:
+    package: "nav2_planner"
+    executable: "planner_server"
+    node_name: "planner_server"
+  controller:
+    package: "nav2_controller"
+    executable: "controller_server"
+    node_name: "controller_server"
+  behavior:
+    package: "nav2_behaviors"
+    executable: "behavior_server"
+    node_name: "behavior_server"
+  bt:
+    package: "nav2_bt_navigator"
+    executable: "bt_navigator"
+    node_name: "bt_navigator"
+  lifecycle:
+    package: "nav2_lifecycle_manager"
+    executable: "lifecycle_manager"
+    node_name: "nav_lifecycle_manager"
+
+  # THE TWO COSTMAP SECTIONS, WHICH ARE NOT CHILDREN. They are
+  # nav2_costmap_2d sub-nodes constructed inside controller_server and
+  # planner_server, in namespaces of their own - so they have no process
+  # and no command line, and `status` never names them. They are listed
+  # because check_nav_params() has to prove nav2.yaml is ADDRESSED to
+  # them: a costmap block under a misspelt top-level key applies nothing
+  # and the server comes up on the package defaults, which is a 3 x 3 m
+  # window and a CIRCULAR footprint of radius 0.1 m.
+  costmap_sections: "local_costmap global_costmap"
+
+  # How long every nav lifecycle node has to reach ACTIVE. It is longer
+  # than localization.lifecycle_timeout_s because there are six
+  # lifecycle nodes behind four names here - each costmap is one of its
+  # own - and the global costmap has to take a copy of the same
+  # 1712 x 1196 grid that map_server spent that budget reading off disk.
+  active_timeout_s: 120
+
+  # ---------------------- THE BRINGUP GATE -----------------------------
+  # tools/nav_health.py, and it is ekf_health.py's and
+  # localization_health.py's argument in a third currency: every check
+  # m5v3.sh already makes is satisfied by five processes that have never
+  # spoken to each other. A planner_server that is ALIVE and ACTIVE with
+  # an EMPTY costmap plans nothing and says nothing about it; a
+  # controller_server whose costmap never received a map reports a tf
+  # timeout once and then goes quiet. So the gate asks the one question
+  # none of the others can: compute a path.
+  health:
+    # The whole gate, on the wall clock. It covers waiting for six
+    # lifecycle nodes and one action round trip.
+    timeout_s: 90
+    # THE TRIVIAL PLAN. A goal goal_ahead_m along the vehicle's own
+    # heading from the seed pose, which is a straight line down the ring
+    # leg the truck spawns on - 2.00 m of an 8.00 m corridor with the
+    # nearest obstacle 3.44 m away (m6/gazebo/warehouse_ver3.sdf,
+    # WallNorth). It is deliberately not one of the goals below: a gate
+    # that planned a real route would take seconds and could fail for
+    # reasons that are the route's rather than the stack's.
+    goal_ahead_m: "2.00"
+    # A path with fewer poses than this is not a path. The planner
+    # returns SUCCESS with a near-empty path when the start is already
+    # inside its own tolerance of the goal, and that looks the same from
+    # the action's status as a plan through an unconfigured costmap.
+    min_poses: 2
+    # How long the action itself may take, inside the budget above.
+    action_timeout_s: 30
+
+  # ------------------------- THE GOAL TABLE ----------------------------
+  # THREE POSES, EVERY ONE OF THEM A NODE OF m6/ipc/route.py's ROAD
+  # GRAPH, and that graph is read-only to this track (CONTEXT.md). They
+  # are copied here as VALUES for config.yaml's own reason - a shell and
+  # a bench may not import m6 at run time - and
+  # tests/test_nav2_params.py rebuilds the graph and asserts every one
+  # of them is a node in it, so the copy says when it has gone stale.
+  #
+  #   WHY THE ROAD GRAPH AT ALL, when the planner is a FREESPACE planner
+  #   that will ignore it. Because a goal has to be somewhere a vehicle
+  #   is MEANT to be, and the graph is the only place on this floor
+  #   where that is written down: it is the aisle centrelines, chosen by
+  #   the owner over grid planning precisely so that a route drives
+  #   aisle middles by construction. The PATH between two of its nodes
+  #   is Nav2's business here and is expected NOT to follow the graph -
+  #   which is itself one of the things EVIDENCE_NAV_V3.md reports.
+  #
+  # THE HEADING IS WRITTEN AS A TRAVEL HEADING AND NOT AS A POSE YAW,
+  # AND THAT IS THE ONE PLACE THIS TABLE COULD SILENTLY LIE. This
+  # vehicle's forks are at model -x, so the direction it TRAVELS is
+  # yaw + pi (gazebo/forklift_ver3/model.sdf, and nav2.yaml section D).
+  # A table of pose yaws would have every entry a half turn from the
+  # direction a reader pictures, and an entry written the obvious way
+  # would arrive COUNTERWEIGHT-FIRST with the nav lidar's blind sector
+  # leading - and would still look like a successful goal. So the table
+  # says which way the truck is POINTED WHEN IT ARRIVES, and
+  # tools/drive_goal.py adds the pi. One place, tested.
+  #
+  # AND THEY ARE WORLD POSES, NOT MAP POSES. The map frame is the frozen
+  # grid's and is about a half turn from the building (registration.yaml
+  # theta_rad = -3.1383). Every pose on this track is written in the
+  # BUILDING's frame and carried into the map by the committed
+  # registration at the moment it is used, through
+  # tools/map_register.py's MapFrame - the same one piece of arithmetic
+  # that seeds the localiser.
+  goals:
+    # THE HEADLINE, AND IT IS THE ONE THAT IS REPEATED. From the spawn
+    # on the north ring leg, west to the ring's north-west corner, then
+    # south down the west leg to where the PICK AISLE meets it. About
+    # 13 m and one 90 degree change of heading, ending on the pick
+    # aisle's own centreline pointed INTO it - which is the manoeuvre a
+    # warehouse truck spends its life on.
+    #   ARRIVING HEADED SOUTH means the forks point at -y, so the pose
+    #   yaw is +pi/2.
+    aisle_end:
+      x: "-20.00"
+      y: "0.00"
+      travel_yaw_rad: "-1.5707963"
+      repeat: "3"
+      note: "the pick aisle's WEST end, on the ring's west leg"
+    # THE LONG ONE. The ring's south-west corner, 23 m away down the
+    # west leg, arriving still headed south - the pose a truck stands in
+    # before it takes that corner. It is the goal that spends the most
+    # time at the transit ceiling, so it is where the along-track offset
+    # of EVIDENCE_LOCALIZATION_V3 9 has the most room to build.
+    ring_corner:
+      x: "-20.00"
+      y: "-10.00"
+      travel_yaw_rad: "-1.5707963"
+      repeat: "1"
+      note: "the ring's SOUTH-WEST corner, approached down the west leg"
+    # THE TIGHT ONE. The spine crossing at the centre of the block area,
+    # reached along the PICK AISLE - the only 5.00 m corridor on this
+    # floor, where the rack faces stand at y = +-2.50 and the padded
+    # footprint's half-width is 1.0990 m (nav2.yaml section C). Arriving
+    # headed EAST, so the pose yaw is pi.
+    spine_cross:
+      x: "0.00"
+      y: "0.00"
+      travel_yaw_rad: "0.0"
+      repeat: "1"
+      note: "the spine and pick-aisle crossing, entered along the aisle"
+
+  # ONE GOAL IS DRIVEN ONCE PER `record`, AND THE HEADLINE IS DRIVEN
+  # THREE TIMES. `repeat` above is not a loop this bench runs - it is
+  # what the EVIDENCE has to contain, and tools/drive_goal.py's
+  # `analyse` prints it beside the number of sessions it actually found,
+  # so a repeatability claim cannot be made over one run by accident.
+  default_goal: "aisle_end"
+
+  # ------------------------- THE DRIVEN RUN ----------------------------
+  # How long ONE navigate_to_pose may take before the bench cancels it.
+  # The longest goal here is about 33 m; at the transit ceiling of
+  # 0.700 m/s that is 47 s of driving, and the corners, any cusps and
+  # the 1.02 m stop are on top. 300 s is six times the driving time -
+  # a budget for a stack that is struggling rather than one that is
+  # stuck.
+  goal_timeout_s: 300
+  # After the action returns, keep recording. The result arrives when
+  # the GOAL CHECKER passes, and the truck is still moving then: it
+  # takes up to 2.07 s and 1.02 m to stop from cruise
+  # (EVIDENCE_NAV_V3.md 8). An arrival scored at the instant the action
+  # returned would be scored before the vehicle had arrived.
+  settle_s: 5.0
+  # Before the goal is sent, record this long standing still. It is what
+  # gives the jump statistics a baseline and what shows the command path
+  # was silent until Nav2 spoke.
+  prelude_s: 3.0
+
+  analyse:
+    # The window at the END of the recording over which the resting pose
+    # is averaged. 1.0 s is 50 samples of the estimator's 50 Hz output
+    # and about 15 of the localiser's own broadcasts.
+    arrival_window_s: 1.0
+    # A truck still moving at the end of the settle has not arrived, and
+    # averaging its pose would report a place it drove through. Below
+    # this it is at rest; it is navcmd.zero_speed_mps times ten, an
+    # order under the creep deadband.
+    at_rest_mps: "0.010"
+    # THE JUMP RESPONSE WINDOW. After each map -> odom step, how long to
+    # look at what the controller did about it. 1.0 s is 20 controller
+    # ticks and 15 scan periods - long enough for the step to have
+    # reached the controller through the costmap and for its answer to
+    # have reached the terminals through the smoother's ramp.
+    jump_response_s: 1.0
+    # A hole in the map -> odom stream wider than this is a REFUSAL and
+    # not a straight line drawn through the part of the run where the
+    # absolute pose was unknown. It is localization.analyse.map_gap_s's
+    # number and its argument: fifteen scan periods.
+    map_gap_s: "1.0"
+    # A CUSP is a sign change in the commanded linear.x. Below this the
+    # command is inside the converter's own creep deadband and its sign
+    # is not a direction, so a crossing is counted only where a real
+    # command changed hands (navcmd.creep_speed_mps).
+    cusp_speed_mps: "0.005"

@@ -637,7 +637,7 @@ def analyse_session(cfg, session):
     print("")
     print("=== {} ===".format(session))
     print("profile   {}".format(profile))
-    for key in ("traction", "arm", "loc"):
+    for key in ("traction", "arm", "loc", "nav"):
         print("{:<9} {}".format(key, fields.get(key, "UNLABELLED")))
     for stream, table in tables.items():
         if table.n < cfg.i("evidence.min_samples"):
@@ -874,7 +874,7 @@ def record(cfg, args):
                    "An unlabelled session is worse than none.")
     with open(state_path, encoding="utf-8") as handle:
         state = ec.parse_state_file(handle.read())
-    for key in ("traction", "arm", "loc"):
+    for key in ("traction", "arm", "loc", "nav"):
         if key not in state:
             cfg.refuse("the state file carries a {}= line".format(key),
                        state_path,

@@ -1561,6 +1561,90 @@ def rows_to_world(rows, frame):
             for row in rows]
 
 
+def point_to_segment(px, py, ax, ay, bx, by):
+    """Distance from a point to a SEGMENT, not to its infinite line.
+
+    THE DIFFERENCE IS THE WHOLE OF WHAT MAKES A PATH DEVIATION HONEST.
+    A global path is a chain of short segments; measured against the
+    LINES they lie on, a vehicle standing at the end of the path is
+    zero from the line of every one of them and its deviation reads as
+    nothing at all. The clamp to [0, 1] is what stops that.
+    """
+    ex, ey = float(bx) - float(ax), float(by) - float(ay)
+    length2 = ex * ex + ey * ey
+    if length2 <= 0.0:
+        return math.hypot(float(px) - float(ax), float(py) - float(ay))
+    t = ((float(px) - float(ax)) * ex + (float(py) - float(ay)) * ey) / length2
+    t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+    return math.hypot(float(px) - (float(ax) + t * ex),
+                      float(py) - (float(ay) + t * ey))
+
+
+def point_to_polyline(px, py, poly):
+    """The shortest distance from a point to a polyline, in its units.
+
+    WHAT IT IS FOR. It is the DEVIATION of where the vehicle actually
+    went from the path a planner drew - the figure nav2 issue #5714
+    reports Ackermann robots losing in turns, and the one an evidence
+    file has to be able to state rather than describe.
+
+    IT IS UNSIGNED, DELIBERATELY. A signed cross-track error needs a
+    direction of travel to be signed AGAINST, and on a path with cusps
+    in it that direction reverses - so the sign would flip in the middle
+    of a reverse segment and a mean would cancel to nothing. What a
+    corridor is sized on is a magnitude.
+
+    AN EMPTY POLYLINE IS A REFUSAL AND NOT AN INFINITE DISTANCE. A path
+    with no poses in it is a planner that returned nothing, which is a
+    different fact from a vehicle that is far from its path.
+    """
+    points = [(float(x), float(y)) for x, y in poly]
+    if not points:
+        raise EvidenceError(
+            "the path has at least one pose in it, and this one is "
+            "empty. A planner that returned nothing is not a vehicle "
+            "that is far from its path.")
+    if len(points) == 1:
+        return math.hypot(float(px) - points[0][0],
+                          float(py) - points[0][1])
+    return min(point_to_segment(px, py, a[0], a[1], b[0], b[1])
+               for a, b in zip(points, points[1:]))
+
+
+def polyline_length(poly):
+    """The length of a polyline. Zero for fewer than two points."""
+    points = [(float(x), float(y)) for x, y in poly]
+    return math.fsum(math.hypot(b[0] - a[0], b[1] - a[1])
+                     for a, b in zip(points, points[1:]))
+
+
+def sign_changes(values, deadband=0.0):
+    """How many times a series changes sign, ignoring a deadband.
+
+    WHAT IT COUNTS ON THIS TRACK IS CUSPS. A Reeds-Shepp path reverses
+    direction at a cusp, and the commanded linear velocity crosses zero
+    with it. The deadband is what keeps the crossing itself from being
+    counted several times: every ramp through zero passes through a
+    dozen samples whose sign is arithmetic rather than intent, and
+    config.yaml's navcmd.creep_speed_mps is the value below which the
+    converter itself stops reading a command as a direction.
+    """
+    last = 0
+    count = 0
+    for value in values:
+        current = 0
+        if float(value) > abs(deadband):
+            current = 1
+        elif float(value) < -abs(deadband):
+            current = -1
+        if current == 0:
+            continue
+        if last != 0 and current != last:
+            count += 1
+        last = current
+    return count
+
+
 def tf_jumps(rows, tolerance=0.0):
     """Every CHANGE in a re-broadcast transform, as the correction it is.
 
@@ -2205,6 +2289,209 @@ def sdf_link_pose(path, name):
             path, name, ", ".join(repr(n) for n in names)))
 
 
+#: How many points a CYLINDER's rim is sampled at when its silhouette is
+#: projected onto the floor. A box projects EXACTLY - eight corners, and
+#: the hull of their projections IS the projection of the box - and a
+#: cylinder does not, so its two rims are sampled. 64 points put the
+#: worst chord error at r*(1 - cos(pi/64)) = 0.14 mm on this model's
+#: largest cylinder (r = 0.12 m), which is a 350th of one 5 cm costmap
+#: cell: below anything a costmap can represent.
+CYLINDER_RIM_POINTS = 64
+
+
+def _rotation(roll, pitch, yaw):
+    """SDF's own Z-Y-X extrinsic rotation, as three rows.
+
+    IT IS THE FULL 3x3 AND NOT A YAW, and that is not generality for its
+    own sake: forklift_ver3's pallet camera is mounted `0 0.5235988
+    3.1415927` - pitched 30 degrees down and turned end for end - and the
+    FOOTPRINT of its housing is a different rectangle from the one a
+    yaw-only reading would produce.
+    """
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    return (
+        (cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr),
+        (sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr),
+        (-sp, cp * sr, cp * cr),
+    )
+
+
+def _apply(rotation, translation, point):
+    x, y, z = point
+    return tuple(
+        translation[i] + rotation[i][0] * x + rotation[i][1] * y
+        + rotation[i][2] * z for i in range(3))
+
+
+def _pose6(text, where):
+    """A <pose> as six floats.
+
+    Absent is SDF's own default of all zeros; a pose that is PRESENT and
+    is not six numbers is REFUSED rather than padded, because padding one
+    would invent a rotation. sdf_link_pose() above makes the same
+    distinction for the same reason.
+    """
+    if text is None:
+        return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    parts = text.split()
+    if len(parts) != 6:
+        raise EvidenceError(
+            "the <pose> on {} is six numbers; it is {} ({!r})".format(
+                where, len(parts), text.strip()))
+    return tuple(float(value) for value in parts)
+
+
+def _primitive_points(geometry, where):
+    """One <geometry>'s corner or rim points, in its own frame.
+
+    A GEOMETRY THIS FUNCTION HAS NEVER HEARD OF IS A REFUSAL AND NOT A
+    SKIP. Silently ignoring a <mesh> would return a footprint SMALLER
+    than the vehicle, and a footprint that is too small looks exactly
+    like a correct one from every angle a test or a costmap has - which
+    is the one failure a collision polygon may not have.
+    """
+    box = geometry.find("box")
+    if box is not None:
+        size = box.findtext("size")
+        parts = (size or "").split()
+        if len(parts) != 3:
+            raise EvidenceError(
+                "the <box> on {} carries a three-number <size>; it "
+                "carries {!r}".format(where, size))
+        hx, hy, hz = (float(value) / 2.0 for value in parts)
+        return [(sx * hx, sy * hy, sz * hz)
+                for sx in (-1.0, 1.0) for sy in (-1.0, 1.0)
+                for sz in (-1.0, 1.0)]
+    cylinder = geometry.find("cylinder")
+    if cylinder is not None:
+        radius = float(cylinder.findtext("radius"))
+        half = float(cylinder.findtext("length")) / 2.0
+        points = []
+        for index in range(CYLINDER_RIM_POINTS):
+            angle = 2.0 * math.pi * index / CYLINDER_RIM_POINTS
+            cx, cy = radius * math.cos(angle), radius * math.sin(angle)
+            points.append((cx, cy, -half))
+            points.append((cx, cy, half))
+        return points
+    kinds = [child.tag for child in geometry]
+    raise EvidenceError(
+        "the <geometry> on {} is a <box> or a <cylinder>; it is {}. A "
+        "geometry this function cannot project would have to be SKIPPED, "
+        "and a footprint smaller than the vehicle looks exactly like a "
+        "correct one".format(where, ", ".join(kinds) or "empty"))
+
+
+def convex_hull(points):
+    """The convex hull of a set of (x, y), counter-clockwise.
+
+    Andrew's monotone chain, which is nine lines and no dependency. It is
+    here rather than borrowed because a costmap footprint on this track
+    is EVIDENCE: the polygon written into m5_ver3/nav2.yaml is checked
+    against what this returns, off the model, by a test - so the hull has
+    to be reachable from the Windows python the suite runs under.
+
+    COLLINEAR POINTS ARE DROPPED (`<= 0.0` rather than `< 0.0`), because
+    a footprint with three points on one edge is the same polygon written
+    at greater length, and nav2 walks every vertex of it on every
+    collision check.
+    """
+    pts = sorted(set((round(float(x), 9), round(float(y), 9))
+                     for x, y in points))
+    if len(pts) < 3:
+        return pts
+
+    def cross(o, a, b):
+        return ((a[0] - o[0]) * (b[1] - o[1])
+                - (a[1] - o[1]) * (b[0] - o[0]))
+
+    lower = []
+    for point in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0.0:
+            lower.pop()
+        lower.append(point)
+    upper = []
+    for point in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0.0:
+            upper.pop()
+        upper.append(point)
+    return lower[:-1] + upper[:-1]
+
+
+def sdf_footprint(path, model=None):
+    """THE VEHICLE'S OUTLINE ON THE FLOOR, COMPUTED OFF THE MODEL.
+
+    Every <collision> and every <visual> of every <link>, carried through
+    that link's own pose and its own, projected onto z = 0 and hulled.
+    Returns the hull counter-clockwise as (x, y) in the MODEL's frame -
+    which for forklift_ver3 is base_link's, because that link carries no
+    <pose> at all.
+
+    WHY THE VISUALS TOO, AND NOT THE COLLISIONS ALONE. A costmap
+    footprint is not a physics body: it is the answer to "what floor does
+    this machine occupy". forklift_ver3 models its mast RAILS, its four
+    overhead-guard posts, the pallet camera's bracket and both fork tines
+    as visuals where the physics only needs one box - and a rack face
+    does not care which element of an SDF a piece of steel was written
+    in. The collisions alone lose the camera bracket and the tines.
+
+    WHY IT IS A POLYGON AND NOT A RADIUS. This vehicle's circumscribed
+    circle is wider than half the 5.00 m pick aisle, so a radius model
+    refuses that corridor outright; nav2's own footprint guide says the
+    same thing for the same reason (docs/reports/m5v3-02 section 5).
+
+    IT IS THE UNLADEN OUTLINE AND SAYS SO. A pallet on the tines is wider
+    than the tines; nav2 documents republishing a LARGER footprint on
+    ~/footprint when laden, and this track carries no load and makes no
+    such claim.
+    """
+    from xml.etree import ElementTree
+
+    if not os.path.isfile(path):
+        raise EvidenceError("the model {} exists".format(path))
+    try:
+        root = ElementTree.parse(path).getroot()
+    except ElementTree.ParseError as exc:
+        raise EvidenceError(
+            "the model {} is well-formed XML: {}".format(path, exc))
+    models = list(root.iter("model"))
+    if not models:
+        raise EvidenceError("the model {} declares a <model>".format(path))
+    chosen = models[0]
+    if model is not None:
+        matching = [node for node in models if node.get("name") == model]
+        if not matching:
+            raise EvidenceError(
+                "the model {} declares a <model> named {!r}; it declares "
+                "{}".format(path, model,
+                            ", ".join(repr(n.get("name")) for n in models)))
+        chosen = matching[0]
+    points = []
+    for link in chosen.findall("link"):
+        name = link.get("name")
+        link_pose = _pose6(link.findtext("pose"), "link {!r}".format(name))
+        link_rotation = _rotation(*link_pose[3:])
+        for element in (list(link.findall("collision"))
+                        + list(link.findall("visual"))):
+            geometry = element.find("geometry")
+            if geometry is None:
+                continue
+            where = "{}/{} {!r}".format(name, element.tag,
+                                        element.get("name"))
+            pose = _pose6(element.findtext("pose"), where)
+            rotation = _rotation(*pose[3:])
+            for point in _primitive_points(geometry, where):
+                local = _apply(rotation, pose[:3], point)
+                whole = _apply(link_rotation, link_pose[:3], local)
+                points.append((whole[0], whole[1]))
+    if not points:
+        raise EvidenceError(
+            "the model {} carries a <collision> or a <visual> with a "
+            "<geometry>; it carries none".format(path))
+    return convex_hull(points)
+
+
 def sdf_gravity(path):
     """The magnitude of a world's own gravity vector.
 
@@ -2610,6 +2897,38 @@ def _selftest():
     check("36 zeros are an ABSENT covariance and not a certain one",
           covariance_absent_in([0.0] * 36) is True
           and covariance_absent_in([0.0] * 35 + [0.5]) is False)
+
+    # F4 TASK 2's FOUR, AND EACH IS IN THE OPERATOR's SELFTEST BECAUSE
+    # THE THING THAT CONSUMES IT RUNS ON THE RIG.
+    #   THE FOOTPRINT IS THE COSTMAP's COLLISION POLYGON, and a hull
+    #   computed off collisions alone loses both fork tines - they are
+    #   VISUALS on this model - which is a footprint 1.0 m short at the
+    #   fork end that looks exactly like a correct one from every angle.
+    _model = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "gazebo", "forklift_ver3", "model.sdf")
+    if os.path.isfile(_model):
+        _hull = sdf_footprint(_model)
+        check("the footprint reaches the FORK TIPS at x = -1.875, which "
+              "are VISUALS and would be lost by a collision-only hull",
+              abs(min(x for x, _ in _hull) + 1.875) < 1e-9)
+        check("the footprint reaches the COUNTERWEIGHT at x = +0.860 and "
+              "the scanner corners at y = +-0.559",
+              abs(max(x for x, _ in _hull) - 0.860) < 1e-9
+              and abs(max(y for _, y in _hull) - 0.558994949) < 1e-6)
+        check("the hull is CONVEX and has no collinear filler in it",
+              len(_hull) == 8)
+    #   THE DEVIATION FROM A PLAN IS TO THE SEGMENTS AND NOT TO THEIR
+    #   LINES. A vehicle standing at the end of a path is zero from the
+    #   LINE of every segment, so a line distance would report a
+    #   perfectly tracked path for a truck that stopped a metre early.
+    check("a path deviation is measured to the SEGMENT and not to the "
+          "line it lies on",
+          point_to_polyline(3.0, 0.0, [(0.0, 0.0), (1.0, 0.0)]) == 2.0)
+    check("a cusp is a SIGN CHANGE above the creep deadband, and a ramp "
+          "through zero is not several of them",
+          sign_changes([-0.7, -0.3, -0.001, 0.0, 0.002, 0.3, 0.7],
+                       0.005) == 1)
 
     for name in ran:
         print("{}  {}".format("FAIL" if name in fails else "pass", name))

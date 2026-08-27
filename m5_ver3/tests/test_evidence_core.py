@@ -1409,3 +1409,217 @@ def test_the_refusal_carries_the_figure_AND_the_ceiling():
 def test_exactly_ON_the_ceiling_passes():
     assert evidence_core.require_covariance_under(
         "covariance:\n- 100.0\n", 100.0, "x") == 100.0
+
+
+# ======================================================================
+# F4 TASK 2: THE FOOTPRINT, THE HULL, AND THE TWO PATH REDUCTIONS
+# ======================================================================
+#
+# WHY THE FOOTPRINT IS ARITHMETIC AND NOT A CONSTANT. m5_ver3/nav2.yaml
+# gives both costmaps a POLYGON rather than a radius, because this
+# vehicle's circumscribed circle is wider than half the 5.00 m pick
+# aisle - a radius model refuses that corridor outright. A polygon typed
+# in by hand is a polygon that stops describing the model the first time
+# a link moves, and a footprint that is too SMALL looks exactly like a
+# correct one from every angle a costmap has.
+
+
+def _model():
+    import os
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "gazebo", "forklift_ver3", "model.sdf")
+
+
+def test_the_hull_of_a_square_is_its_four_corners():
+    got = evidence_core.convex_hull([(0, 0), (1, 0), (1, 1), (0, 1),
+                                     (0.5, 0.5)])
+    assert sorted(got) == [(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)]
+
+
+def test_the_hull_drops_a_point_that_sits_ON_an_edge():
+    # A footprint with three points on one line is the same polygon
+    # written at greater length, and nav2 walks every vertex of it on
+    # every collision check.
+    got = evidence_core.convex_hull([(0, 0), (1, 0), (2, 0), (1, 1)])
+    assert len(got) == 3
+
+
+def test_the_hull_comes_back_COUNTER_CLOCKWISE():
+    got = evidence_core.convex_hull([(0, 0), (1, 0), (1, 1), (0, 1)])
+    area = 0.0
+    for a, b in zip(got, got[1:] + got[:1]):
+        area += a[0] * b[1] - b[0] * a[1]
+    assert area > 0.0
+
+
+def test_a_degenerate_set_is_returned_rather_than_refused():
+    assert evidence_core.convex_hull([(0, 0), (1, 1)]) == [(0.0, 0.0),
+                                                           (1.0, 1.0)]
+
+
+def test_the_footprint_is_the_MODELS_and_carries_the_fork_tines():
+    hull = evidence_core.sdf_footprint(_model())
+    xs = [x for x, _ in hull]
+    ys = [y for _, y in hull]
+    # THE TINES ARE VISUALS on this model - fork_left and fork_right
+    # carry a <collision> too, but the CARRIAGE and the MAST RAILS that
+    # decide the shape between them do not all. Either way the tip is
+    # what the number below is.
+    assert min(xs) == pytest.approx(-1.875, abs=1e-9)
+    assert max(xs) == pytest.approx(0.860, abs=1e-9)
+    # 0.46 + 0.07*sqrt(2): safety_scanner_left's 0.14 m housing turned
+    # 45 degrees about (-0.68, -0.46). It is the widest point of this
+    # vehicle and it is a VISUAL.
+    assert max(ys) == pytest.approx(0.46 + 0.07 * math.sqrt(2.0), abs=1e-9)
+    assert min(ys) == pytest.approx(-(0.46 + 0.07 * math.sqrt(2.0)),
+                                    abs=1e-9)
+
+
+def test_the_footprint_is_symmetric_about_the_vehicles_own_axis():
+    hull = evidence_core.sdf_footprint(_model())
+    mirrored = sorted((x, -y) for x, y in hull)
+    assert sorted(hull) == pytest.approx(mirrored, abs=1e-9)
+
+
+def test_the_footprint_CONTAINS_the_three_things_the_nav_lidar_can_see():
+    # THE CLAIM nav2.yaml's OBSTACLE LAYER RESTS ON. The scanner sits at
+    # z = 1.80 m and three pieces of this truck reach that plane: the 3D
+    # lidar's housing at base_link and both mast rails. The layer's
+    # `footprint_clearing_enabled` paints the footprint FREE on every
+    # update, so all three have to be INSIDE it or they are permanent
+    # phantom obstacles 0.6 to 1.5 m ahead of travel.
+    hull = evidence_core.sdf_footprint(_model())
+
+    def inside(px, py):
+        n = len(hull)
+        for i in range(n):
+            ax, ay = hull[i]
+            bx, by = hull[(i + 1) % n]
+            if (bx - ax) * (py - ay) - (by - ay) * (px - ax) < 0.0:
+                return False
+        return True
+
+    for point in ((0.0, 0.0), (-0.78, 0.30), (-0.78, -0.30)):
+        assert inside(*point), point
+
+
+def test_a_model_that_is_not_there_is_refused_by_name():
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.sdf_footprint("no/such/model.sdf")
+
+
+def test_a_geometry_this_function_cannot_project_is_REFUSED_not_skipped():
+    # A footprint that is too SMALL looks exactly like a correct one.
+    import io
+    import xml.etree.ElementTree as ElementTree
+    element = ElementTree.parse(io.StringIO(
+        "<geometry><mesh><uri>a.dae</uri></mesh></geometry>")).getroot()
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core._primitive_points(element, "somewhere")
+
+
+def test_a_pose_that_is_not_six_numbers_is_refused_rather_than_padded():
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core._pose6("1 2 3", "a link")
+    assert evidence_core._pose6(None, "a link") == (0.0,) * 6
+
+
+def test_a_pitched_box_projects_SHORTER_than_its_own_length():
+    # forklift_ver3's pallet camera is mounted pitched 30 degrees down.
+    # A yaw-only reading of that pose would give its housing the wrong
+    # rectangle on the floor.
+    upright = evidence_core.convex_hull([
+        p[:2] for p in
+        (evidence_core._apply(evidence_core._rotation(0.0, 0.0, 0.0),
+                              (0.0, 0.0, 0.0), point)
+         for point in evidence_core._primitive_points(
+             _box("1.0 0.2 0.2"), "flat"))])
+    pitched = evidence_core.convex_hull([
+        p[:2] for p in
+        (evidence_core._apply(
+            evidence_core._rotation(0.0, math.pi / 3.0, 0.0),
+            (0.0, 0.0, 0.0), point)
+         for point in evidence_core._primitive_points(
+             _box("1.0 0.2 0.2"), "pitched"))])
+    assert max(x for x, _ in pitched) < max(x for x, _ in upright)
+
+
+def _box(size):
+    import io
+    import xml.etree.ElementTree as ElementTree
+    return ElementTree.parse(io.StringIO(
+        "<geometry><box><size>{}</size></box></geometry>".format(
+            size))).getroot()
+
+
+# ---- the two path reductions ----------------------------------------
+
+def test_the_distance_to_a_SEGMENT_is_not_the_distance_to_its_line():
+    # A vehicle standing a metre past the end of its path is a metre off
+    # it; measured against the LINE the last segment lies on it is zero,
+    # and a perfectly tracked path would be reported for a truck that
+    # stopped early.
+    assert evidence_core.point_to_segment(
+        3.0, 0.0, 0.0, 0.0, 1.0, 0.0) == pytest.approx(2.0)
+    assert evidence_core.point_to_segment(
+        0.5, 1.0, 0.0, 0.0, 1.0, 0.0) == pytest.approx(1.0)
+
+
+def test_a_zero_length_segment_is_a_point_and_not_a_division_by_zero():
+    assert evidence_core.point_to_segment(
+        3.0, 4.0, 0.0, 0.0, 0.0, 0.0) == pytest.approx(5.0)
+
+
+def test_the_deviation_is_the_NEAREST_segment_of_the_whole_path():
+    path = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+    assert evidence_core.point_to_polyline(1.2, 0.5, path) \
+        == pytest.approx(0.2)
+
+
+def test_the_deviation_is_UNSIGNED_because_a_path_with_cusps_reverses():
+    # A signed cross-track error needs a direction of travel to be
+    # signed against, and a Reeds-Shepp path reverses at every cusp - so
+    # the sign would flip mid-path and a mean would cancel to nothing.
+    path = [(0.0, 0.0), (1.0, 0.0)]
+    assert evidence_core.point_to_polyline(0.5, +1.0, path) \
+        == evidence_core.point_to_polyline(0.5, -1.0, path)
+
+
+def test_a_path_with_ONE_pose_is_a_point_and_not_a_refusal():
+    assert evidence_core.point_to_polyline(3.0, 4.0, [(0.0, 0.0)]) \
+        == pytest.approx(5.0)
+
+
+def test_an_EMPTY_path_is_a_refusal_and_not_an_infinite_distance():
+    # A planner that returned nothing is a different fact from a vehicle
+    # that is far from its path.
+    with pytest.raises(evidence_core.EvidenceError):
+        evidence_core.point_to_polyline(0.0, 0.0, [])
+
+
+def test_a_polyline_length_is_the_sum_of_its_segments():
+    assert evidence_core.polyline_length(
+        [(0.0, 0.0), (3.0, 0.0), (3.0, 4.0)]) == pytest.approx(7.0)
+    assert evidence_core.polyline_length([(1.0, 1.0)]) == 0.0
+
+
+def test_a_cusp_is_counted_once_and_a_ramp_through_zero_is_not_a_cusp():
+    # A command ramping from -0.7 to +0.7 passes through a dozen samples
+    # whose sign is arithmetic rather than intent. The deadband is the
+    # value below which the CONVERTER itself stops reading a command as
+    # a direction.
+    assert evidence_core.sign_changes(
+        [-0.7, -0.4, -0.1, -0.002, 0.0, 0.003, 0.1, 0.4, 0.7], 0.005) == 1
+
+
+def test_a_path_with_no_direction_change_has_no_cusps():
+    assert evidence_core.sign_changes([-0.7, -0.5, -0.7, -0.3], 0.005) == 0
+
+
+def test_two_cusps_are_two():
+    assert evidence_core.sign_changes([-0.7, 0.3, -0.4], 0.005) == 2
+
+
+def test_a_series_that_never_leaves_the_deadband_has_no_sign_at_all():
+    assert evidence_core.sign_changes([0.001, -0.001, 0.002], 0.005) == 0
