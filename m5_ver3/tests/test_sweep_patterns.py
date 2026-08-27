@@ -44,6 +44,23 @@ not this stack's to kill and `ours()` spares them by construction - see
 the mapper test at the bottom, which asserts the sweep does NOT nominate
 them.
 
+---- AND ONE MORE CLAIM ABOUT THE SAME SCRIPT ----
+
+Since this file already parses `m5v3.sh`, it also asks the question the
+phase-end wave got wrong: **is an arm-specific check inside its arm's
+guard?** `check_slam_mode()` landed as an UNCONDITIONAL call, and
+`amcl.yaml` has no `mode:` line at all - so every `--localize amcl`
+bringup, the shipping default, refused with "no mode: line at all" and
+started nothing. `bash -n` was clean, the suite was green, and the slam
+arm the change was demonstrated on passed both directions. Only the arm
+that was not re-run was broken.
+
+`conditions_at()` below tracks `if`/`elif`/`else`/`fi` nesting over the
+folded script and reports the conditions in scope at any line, and
+`test_every_arm_named_check_is_called_inside_its_arm_guard` requires that
+a function whose NAME carries an arm label is reached only under a
+condition naming that arm.
+
 NO ROS, NO GAZEBO AND NO RUNNING STACK: this reads three files off disk.
 """
 import itertools
@@ -245,6 +262,60 @@ def spawned(text, base_env, scopes=()):
                     list(dict.fromkeys(resolved)),
                     list(dict.fromkeys(partial))))
     return out
+
+
+#: `if`, `elif`, `else` and `fi` as they open and close a block. Bash
+#: writes them as words, so a word boundary is the whole of the parse -
+#: and comments are removed first, because this script's prose says `if`
+#: more often than its code does.
+BLOCK_WORD = re.compile(r"(?<![\w-])(if|elif|else|fi)(?![\w-])")
+COMMENT_LINE = re.compile(r"(?m)^[ \t]*#.*$")
+
+
+def conditions_at(text):
+    """Every line of `text`, with the `if` conditions in scope at it.
+
+    Yields (line number, line, [condition, ...]) with the conditions
+    outermost first. `elif` and `else` REPLACE the condition they follow
+    rather than nesting under it, which is what they do.
+
+    IT IS A NESTING COUNT AND NOT A SHELL. What it is asked is whether a
+    call sits under a guard that mentions a name, and for that a stack of
+    the conditions between `if` and `fi` is exactly enough. A construct
+    it cannot see - a guard written as a `case`, or one inside a function
+    called from elsewhere - shows up as a MISSING condition, which fails
+    the test rather than passing it silently.
+    """
+    stack = []
+    for number, raw in enumerate(
+            COMMENT_LINE.sub("", join_continuations(text)).splitlines(), 1):
+        before = list(stack)
+        deepest = None
+        condition = raw.split("; then", 1)[0].strip()
+        for word in BLOCK_WORD.findall(raw):
+            if word == "if":
+                stack.append(condition[len("if "):].strip()
+                             if condition.startswith("if ") else condition)
+                deepest = list(stack)
+            elif word in ("elif", "else"):
+                if stack:
+                    stack[-1] = condition
+                deepest = list(stack)
+            elif stack:
+                stack.pop()
+        # A LINE IS JUDGED BY THE DEEPEST SCOPE IT REACHES, which is
+        # the only reading that survives a one-liner: `if X; then
+        # check; fi` opens and closes on one line, and the guard is
+        # real for exactly the statement between them.
+        #   A COPY EVERY TIME, because `stack` is mutated on every
+        #   line after this one and a caller that kept the reference
+        #   would be handed the scope at end of file, not this one.
+        if deepest is not None:
+            yield number, raw, deepest
+        elif len(stack) < len(before):
+            yield number, raw, before
+        else:
+            yield number, raw, list(stack)
 
 
 def config_env():
@@ -525,3 +596,85 @@ def test_every_pattern_still_nominates_something_this_script_starts():
         assert any(pattern in c for c in commands), (
             "no child this script spawns carries `{}` on its command "
             "line".format(pattern))
+
+
+# ----------------------------------------------------------------------
+# an arm-specific check belongs inside its arm's guard
+# ----------------------------------------------------------------------
+
+def test_the_block_tracker_sees_a_one_line_if():
+    rows = {n: c for n, _, c in conditions_at('if [ "$A" = b ]; then x; fi\n')}
+    assert rows[1] == ['[ "$A" = b ]']
+
+
+def test_the_block_tracker_sees_a_multi_line_if():
+    text = 'if [ "$A" = b ]; then\n    guarded\nfi\nafter\n'
+    rows = {r.strip(): c for _, r, c in conditions_at(text)}
+    assert rows["guarded"] == ['[ "$A" = b ]']
+    assert rows["after"] == []
+
+
+def test_a_nested_if_stacks_and_unwinds():
+    text = ('if [ "$A" ]; then\n    if [ "$B" ]; then\n'
+            '        deep\n    fi\n    shallow\nfi\n')
+    rows = {r.strip(): list(c) for _, r, c in conditions_at(text)}
+    assert rows["deep"] == ['[ "$A" ]', '[ "$B" ]']
+    assert rows["shallow"] == ['[ "$A" ]']
+
+
+def test_an_else_REPLACES_the_condition_rather_than_nesting_under_it():
+    text = 'if [ "$A" ]; then\n    yes\nelse\n    no\nfi\n'
+    rows = {r.strip(): list(c) for _, r, c in conditions_at(text)}
+    assert rows["yes"] == ['[ "$A" ]']
+    assert rows["no"] == ["else"]
+
+
+def test_the_word_if_INSIDE_A_COMMENT_does_not_open_a_block():
+    # This script's prose says `if` and `fi` far more often than its code
+    # does; a tracker that counted them would unwind to nonsense by the
+    # third paragraph.
+    text = ('# what happens if this fails, and how to verify it\n'
+            'guarded_by_nothing\n')
+    rows = {r.strip(): list(c) for _, r, c in conditions_at(text) if r.strip()}
+    assert rows["guarded_by_nothing"] == []
+
+
+def test_an_unguarded_arm_check_is_what_this_would_have_caught():
+    # THE REGRESSION, AS A FIXTURE. Called like this, check_slam_mode
+    # refused every amcl bringup: amcl.yaml has no `mode:` line at all.
+    text = ('if [ "$LOCALIZE" = true ]; then\n'
+            '    check_loc_params "$LOC_PARAMS"\n'
+            '    check_slam_mode\n'
+            'fi\n')
+    assert not [c for _, r, c in conditions_at(text)
+                if "check_slam_mode" in r
+                and any("SLAM" in one.upper() for one in c)]
+
+
+def test_every_arm_named_check_is_called_inside_its_arm_guard():
+    # A function whose NAME carries an arm label runs code that only that
+    # arm can survive, and the other arm reaching it is not a redundant
+    # check - it is a refusal on the shipping default. What the guard has
+    # to mention is that arm's label; `$CFG_LOCALIZATION_SLAM_LABEL` and
+    # the literal both count, because config.yaml owns the value and the
+    # script may spell either.
+    script = read("m5v3.sh")
+    labels = {arm: config_env()["CFG_LOCALIZATION_{}_LABEL".format(
+        arm.upper())][0] for arm in ("amcl", "slam")}
+    definitions = set(re.findall(r"(?m)^([a-z_]+)\(\) *\{", script))
+    arm_named = {name: arm for name in definitions
+                 for arm in labels if arm in name.split("_")}
+    assert arm_named, "no arm-named check function found to check"
+    for number, line, scope in conditions_at(script):
+        for name, arm in arm_named.items():
+            if not re.search(r"(?<![\w])" + name + r"(?![\w(])", line):
+                continue
+            wanted = (labels[arm], arm.upper() + "_LABEL")
+            assert any(any(w in one for w in wanted) for one in scope), (
+                "m5v3.sh:{} calls {}() with nothing in scope naming the "
+                "`{}` arm - the conditions here are {}. An arm-specific "
+                "check reached from the other arm does not merely pass: "
+                "check_slam_mode() refused every `--localize {}` bringup, "
+                "because amcl.yaml has no `mode:` line at "
+                "all.".format(number, name, arm, scope or "(none)",
+                              labels["amcl"]))

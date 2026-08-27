@@ -968,7 +968,25 @@ start() {
             "NOTHING WAS STARTED."
         # shellcheck disable=SC2086
         check_loc_params "$LOC_PARAMS" $LOC_NODES
-        check_slam_mode
+        # AND THE MODE, ON THE ONE ARM THAT HAS A MODE. The guard is HERE
+        # and not inside the function, which is the opposite of
+        # check_frozen_map()'s early return and is the difference between
+        # the two: that one does work for BOTH arms and then adds the
+        # graph's hashes, so its guard can only be mid-function. This one
+        # is arm-specific from its first line to its last, and a function
+        # whose NAME says slam should not be reachable on the other arm
+        # at all - the reader of this block sees which checks each arm
+        # gets, in the block where the arms are chosen.
+        #   nav2_amcl HAS NO MODE CONCEPT and amcl.yaml carries no
+        #   `mode:` line, so the check is not merely redundant there: it
+        #   REFUSES. Called unconditionally it refused every
+        #   `--localize $CFG_LOCALIZATION_AMCL_LABEL` bringup - the
+        #   shipping default - with "no mode: line at all", and nothing
+        #   started. What is guarded is slam_toolbox's own enum, whose
+        #   default is MAPPING.
+        if [ "$LOCALIZER" = "$CFG_LOCALIZATION_SLAM_LABEL" ]; then
+            check_slam_mode
+        fi
         # THE FREEZE, ENFORCED BEFORE ANYTHING IS STARTED. See
         # check_frozen_map(): this is the only place that can still say
         # nothing has begun.
