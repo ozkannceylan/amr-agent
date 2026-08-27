@@ -4062,10 +4062,22 @@ nav:
     # A run that misses comes BACK at its goal, through a Reeds-Shepp
     # loop, from a heading the first pass never had. The corridor is a
     # table about ONE approach, so the walk is cut at the first local
-    # minimum the run then backs this far out of. Half a metre is above
-    # the worst closed-loop map -> odom correction measured (0.6490 m
-    # is a step, not a walk) and well under the loop it would be cut
-    # before.
+    # minimum the run then backs this far out of.
+    #   THE ARGUMENT FOR HALF A METRE IS A WALK AND NOT A STEP, AND AN
+    # EARLIER CUT OF THIS COMMENT GOT THE INEQUALITY BACKWARDS. It said
+    # "half a metre is above the worst closed-loop map -> odom
+    # correction measured (0.6490 m)", which is false in the direction
+    # it matters - 0.50 is BELOW 0.6490, and below the 0.8310 m that
+    # figure has since become (EVIDENCE_LOCALIZATION_V3.md 13.10a). The
+    # comparison was never the right one either way: a map -> odom
+    # correction is a STEP in the believed pose between two consecutive
+    # broadcasts, and this threshold is a cumulative BACKING-OUT of a
+    # local minimum in the distance-to-goal walk. A single 0.83 m step
+    # away from the goal would indeed end the walk one sample early -
+    # and that is the conservative direction, because the corridor is a
+    # table about the FIRST approach and cutting it early can only drop
+    # rungs, never invent one. What the number has to be under is the
+    # Reeds-Shepp loop a missing run flies (metres), and it is.
     corridor_give_up_m: "0.50"
     # HOW FAR SHORT OF THE GOAL THE TRANSIT ENDS, along track. The
     # heading account (drive_goal.heading_account) integrates

@@ -107,15 +107,23 @@
 # IT IS FLAGGED HERE RATHER THAN QUIETLY SUBSTITUTED. 13.10's 0.2591 m
 # was measured OPEN LOOP - tools/drive_route.py driving a table, with
 # nothing reading the localiser's answer. F4 Task 2 put a controller on
-# the other end of it and the worst single correction across all 37
-# driven-goal sessions is 0.8310 m, 3.21x that figure - on a run that
+# the other end of it and the worst single correction over the corpus
+# 16.8 measured - all 44 driven-goal sessions on disk at that time - is
+# 0.8310 m, 3.21x that figure, on a run that
 # ARRIVED, driving the longest route in the goal table; the HEADING half
 # of the contract survived at 0.0641 rad against 0.0764. The originals
 # are intact in EVIDENCE_LOCALIZATION_V3.md 8 and 13.10 and the
 # closed-loop measurement is the labelled addendum 13.10a.
-#   EVERY DERIVATION BELOW THAT USED 0.2591 STILL CLEARS AT 0.6490 and
+#   EVERY DERIVATION BELOW THAT USED 0.2591 STILL CLEARS AT 0.8310 and
 # each says so where it sits. Nothing in this file changed VALUE because
 # of this amendment - what changed is the margin each of them has.
+#   THE COUNT IS WRITTEN AS "THE CORPUS 16.8 MEASURED" ON PURPOSE. It
+# grows every time this track drives a goal, so a bare number in this
+# comment would be stale by the next session; what does not move is
+# WHICH measurement the bound came off. An earlier cut of these two
+# paragraphs said "all 37 driven-goal sessions" and "clears at 0.6490",
+# and both were figures from a draft the acceptance set then falsified
+# (16.8 keeps the struck originals).
 #
 # THE PEAK IS ANISOTROPIC AND THE ANISOTROPY IS WHAT DECIDES WHICH
 # PARAMETER GETS WHICH NUMBER. Section 9 of that file measured the
@@ -1173,12 +1181,21 @@ controller_server:
         # SESSIONS AND NOT INFERRED. At time_steps 56 and the 0.300 m/s
         # transit ceiling the horizon reached 0.84 m; SmacPlannerHybrid
         # emits this floor's plans at 0.083-0.105 m per pose; so the
-        # furthest path index reachable in one horizon was 8 at the
-        # median and 13 at its very best. Against a gate of 20:
+        # furthest path index reachable in one horizon was 2-8 at the
+        # median and 12 at its very best. Against a gate of 20:
         #
-        #   0 of 1005 plans in the five shipped runs could clear it.
-        #   11 of 275 could on the 0.700 m/s configuration rung 11
+        #   0 of 1000 plans in the five shipped runs could clear it.
+        #   10 of 274 could on the 0.700 m/s configuration rung 11
         #   withdrew - which is the same fact from the other side.
+        #
+        # THOSE THREE FIGURES ARE THE COMMITTED INSTRUMENT'S
+        # (drive_goal.align_gate_scan) AND NOT THE ONE-OFF SCAN THE
+        # diagnosis was first written from, which read 1005 / 13 / 11 of
+        # 275. The instrument resolves the horizon to the NEAREST path
+        # pose, which is what nav2's own findPathFurthestReachedPoint
+        # does, and drops plans below nav.analyse.follow_speed_mps.
+        # EVIDENCE_NAV_V3.md 16.2 keeps both readings; neither changes
+        # the finding, because the gate was never cleared on either.
         #
         # AND IT WAS PROVED TWICE ON THE RIG BEFORE ANYTHING MOVED.
         # cost_weight was multiplied by ONE HUNDRED with the gate left

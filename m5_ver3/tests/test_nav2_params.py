@@ -61,7 +61,8 @@ WORST_END_ERROR_M = 0.1954
 #: AND THE ONE F4 TASK 2.5 AMENDED, WHICH IS WHY IT SITS APART FROM THE
 #: FOUR ABOVE. F3's 0.2591 m was measured OPEN LOOP - a table of twists
 #: driven with nothing reading the localiser. Under a CLOSED loop the
-#: worst single correction over all 37 driven-goal sessions is 0.8310 m,
+#: worst single correction over the corpus 16.8 measured - all 44
+#: driven-goal sessions on disk at that time - is 0.8310 m,
 #: 3.21x that, and EVIDENCE_LOCALIZATION_V3.md 13.10a is the labelled
 #: addendum. The old value is kept beside it so the test below can show
 #: that its conclusion holds at BOTH - which is the only honest way to
