@@ -3792,50 +3792,68 @@ nav:
   # registration at the moment it is used, through
   # tools/map_register.py's MapFrame - the same one piece of arithmetic
   # that seeds the localiser.
+  # AND WHICH WAY THE TRUCK IS FACING WHEN IT STARTS DECIDES WHICH
+  # GOALS ARE FORKS-FIRST, WHICH IS THE THING THIS TABLE GOT WRONG ONCE
+  # AND WAS CORRECTED BY A MEASUREMENT. vehicle.spawn.yaw is pi, so the
+  # COUNTERWEIGHT (model +x) points at world -x and the FORKS point at
+  # world +x: from the spawn, FORKS-FIRST TRAVEL IS EASTWARD. That is
+  # not a deduction - EVIDENCE_MAP_V3.md 2.2's first leg is "ring N
+  # east" and it is drive_route.profiles.straight's own -0.700 m/s.
+  #   THE FIRST CUT OF THIS TABLE PUT ALL THREE GOALS WEST AND SOUTH OF
+  #   THE SPAWN, on a belief about the spawn heading that was a half
+  #   turn out. Every one of them was therefore BEHIND the forks, the
+  #   freespace planner solved the first one counterweight-first, and
+  #   EVIDENCE_NAV_V3.md's first-goals section carries what that run
+  #   measured - including the abort it ended in. The table below is the
+  #   correction; the run is kept because a wrong turn that has been
+  #   measured is worth more than one that has been tidied away.
   goals:
-    # THE HEADLINE, AND IT IS THE ONE THAT IS REPEATED. From the spawn
-    # on the north ring leg, west to the ring's north-west corner, then
-    # south down the west leg to where the PICK AISLE meets it. About
-    # 13 m and one 90 degree change of heading, ending on the pick
-    # aisle's own centreline pointed INTO it - which is the manoeuvre a
-    # warehouse truck spends its life on.
+    # THE HEADLINE, AND IT IS THE ONE THAT IS REPEATED. East along the
+    # north ring leg to the SPINE junction, then south down the spine to
+    # the crossing at the centre of the block area. About 27 m of route
+    # and one 90 degree change of heading, forks-first from end to end,
+    # ending pointed down the southern half of the spine.
     #   ARRIVING HEADED SOUTH means the forks point at -y, so the pose
-    #   yaw is +pi/2.
-    aisle_end:
-      x: "-20.00"
-      y: "0.00"
-      travel_yaw_rad: "-1.5707963"
-      repeat: "3"
-      note: "the pick aisle's WEST end, on the ring's west leg"
-    # THE LONG ONE. The ring's south-west corner, 23 m away down the
-    # west leg, arriving still headed south - the pose a truck stands in
-    # before it takes that corner. It is the goal that spends the most
-    # time at the transit ceiling, so it is where the along-track offset
-    # of EVIDENCE_LOCALIZATION_V3 9 has the most room to build.
-    ring_corner:
-      x: "-20.00"
-      y: "-10.00"
-      travel_yaw_rad: "-1.5707963"
-      repeat: "1"
-      note: "the ring's SOUTH-WEST corner, approached down the west leg"
-    # THE TIGHT ONE. The spine crossing at the centre of the block area,
-    # reached along the PICK AISLE - the only 5.00 m corridor on this
-    # floor, where the rack faces stand at y = +-2.50 and the padded
-    # footprint's half-width is 1.0990 m (nav2.yaml section C). Arriving
-    # headed EAST, so the pose yaw is pi.
+    #   yaw is +pi/2 - and tools/drive_goal.py is what adds the pi.
+    #   IT IS THE SHORTEST OF THE THREE AND THE ONLY ONE WITH A CORNER
+    #   IN IT, which is why it is the one repeated: transit, a corner
+    #   and an arrival are the three things a controller can get wrong,
+    #   and a repeatability claim wants all three in every run.
     spine_cross:
       x: "0.00"
       y: "0.00"
+      travel_yaw_rad: "-1.5707963"
+      repeat: "3"
+      note: "the spine and pick-aisle crossing, down the spine"
+    # THE TRANSIT ONE. 37 m due east along the north ring leg to the
+    # ring's north-east corner, arriving still headed east - the pose a
+    # truck stands in before it takes that corner. It is the goal that
+    # spends the most time at the transit ceiling, so it is where the
+    # along-track offset of EVIDENCE_LOCALIZATION_V3.md 9 has the most
+    # room to build, and it is the one that says what this controller
+    # does with a long straight.
+    ring_corner:
+      x: "20.00"
+      y: "10.00"
       travel_yaw_rad: "0.0"
       repeat: "1"
-      note: "the spine and pick-aisle crossing, entered along the aisle"
-
+      note: "the ring's NORTH-EAST corner, approached along the north leg"
+    # THE LONG ONE. The pick aisle's EAST end, where it meets the ring's
+    # east leg: east along the north leg, round the corner above, and
+    # south down the east leg. About 47 m of route and the widest span
+    # of this floor a single goal covers.
+    aisle_end:
+      x: "20.00"
+      y: "0.00"
+      travel_yaw_rad: "-1.5707963"
+      repeat: "1"
+      note: "the pick aisle's EAST end, on the ring's east leg"
   # ONE GOAL IS DRIVEN ONCE PER `record`, AND THE HEADLINE IS DRIVEN
   # THREE TIMES. `repeat` above is not a loop this bench runs - it is
   # what the EVIDENCE has to contain, and tools/drive_goal.py's
   # `analyse` prints it beside the number of sessions it actually found,
   # so a repeatability claim cannot be made over one run by accident.
-  default_goal: "aisle_end"
+  default_goal: "spine_cross"
 
   # ------------------------- THE DRIVEN RUN ----------------------------
   # How long ONE navigate_to_pose may take before the bench cancels it.

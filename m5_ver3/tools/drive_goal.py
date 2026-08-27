@@ -295,23 +295,57 @@ def rows_of(table, columns):
     return list(zip(*cols)) if cols and cols[0] else []
 
 
-def plans_of(table):
-    """`plan.csv` as [(t, [(x, y), ...]), ...], newest last.
+def plans_of(table, frame=None):
+    """`plan.csv` as [(t, [(x, y, yaw), ...]), ...], newest last.
 
     EVERY PLAN AND NOT THE FIRST ONE. The tree replans at 1 Hz, so a
     deviation measured against the plan the run STARTED with would be a
     deviation from a path that stopped existing seconds later - and it
     would grow with every legitimate replan. Each truth sample is scored
     against the plan that was standing at its own time.
+
+    AND `frame` IS NOT OPTIONAL IN PRACTICE, WHICH COST A WHOLE RUN TO
+    LEARN. nav2 publishes /plan in the MAP frame and the ground truth is
+    the BUILDING's; warehouse_v3's map is a half turn and 19 m from the
+    world, so a deviation computed without carrying the plan across the
+    committed registration reads about 20 m on a vehicle that is
+    tracking its path perfectly. The default of None is for the tests
+    that exercise the grouping alone.
     """
     out = collections.OrderedDict()
-    for t, index, _i, x, y, _yaw in rows_of(
+    for t, index, _i, x, y, yaw in rows_of(
             table, ("t_s", "plan", "i", "x", "y", "yaw")):
         key = int(index)
         if key not in out:
             out[key] = (float(t), [])
-        out[key][1].append((float(x), float(y)))
+        pose = (float(x), float(y), float(yaw))
+        if frame is not None:
+            pose = frame.to_world(*pose)
+        out[key][1].append(pose)
     return [out[key] for key in sorted(out)]
+
+
+def plan_directions(poses):
+    """(forward, reverse) segment counts of a planned path.
+
+    WHICH WAY THE PLANNER MEANT THE VEHICLE TO GO, and on this track it
+    is the first question to ask of any path. A pose carries a heading;
+    the segment to the NEXT pose either advances along that heading
+    (nav2 FORWARD, which on this vehicle is counterweight-first) or
+    against it (nav2 REVERSE, which is forks-first and is this truck's
+    ordinary direction of travel). A Reeds-Shepp path may contain both,
+    and every change between them is a CUSP the vehicle has to stop at.
+    """
+    forward = reverse = 0
+    for a, b in zip(poses, poses[1:]):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        if dx == 0.0 and dy == 0.0:
+            continue
+        if math.cos(a[2]) * dx + math.sin(a[2]) * dy > 0.0:
+            forward += 1
+        else:
+            reverse += 1
+    return (forward, reverse)
 
 
 def plan_standing_at(plans, t):
@@ -524,16 +558,24 @@ def analyse_session(cfg, session):
                                max(astern) if astern else 0.0))
 
     # ---- the deviation from the plan ---------------------------------
-    plans = plans_of(tables["plan"])
+    # CARRIED INTO THE BUILDING FIRST. nav2 publishes /plan in the MAP
+    # frame; the truth is the world's. See plans_of().
+    plans = plans_of(tables["plan"], frame)
     print("")
     print("PLAN      {} plan(s) published; the tree replans at 1 Hz".format(
         len(plans)))
     if plans:
-        print("          first plan {} poses, {:.3f} m; last plan {} poses, "
-              "{:.3f} m".format(len(plans[0][1]),
-                                ec.polyline_length(plans[0][1]),
-                                len(plans[-1][1]),
-                                ec.polyline_length(plans[-1][1])))
+        for label, (_at, poses) in (("first", plans[0]), ("last", plans[-1])):
+            fwd, rev = plan_directions(poses)
+            print("          {:<5} plan {:>4} poses, {:7.3f} m, {} forward "
+                  "and {} REVERSE segments".format(
+                      label, len(poses),
+                      ec.polyline_length([(x, y) for x, y, _ in poses]),
+                      fwd, rev))
+        print("          nav2 FORWARD is counterweight-first on this "
+              "vehicle; nav2 REVERSE")
+        print("          is forks-first, which is its ordinary direction "
+              "of travel.")
         deviation = []
         for row in truth:
             if not (t_sent <= row[0] <= t_done):
@@ -541,7 +583,8 @@ def analyse_session(cfg, session):
             poly = plan_standing_at(plans, row[0])
             if not poly:
                 continue
-            deviation.append(ec.point_to_polyline(row[1], row[2], poly))
+            deviation.append(ec.point_to_polyline(
+                row[1], row[2], [(x, y) for x, y, _ in poly]))
         if deviation:
             print("          DEVIATION of the truth from the plan standing "
                   "at the time:")

@@ -118,9 +118,41 @@ def test_the_position_is_a_plain_mean():
 # the plan the vehicle was actually following
 # ----------------------------------------------------------------------
 
-_PLANS = [(1.0, [(0.0, 0.0), (1.0, 0.0)]),
-          (2.0, [(0.0, 1.0), (1.0, 1.0)]),
-          (3.0, [(0.0, 2.0), (1.0, 2.0)])]
+_PLANS = [(1.0, [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]),
+          (2.0, [(0.0, 1.0, 0.0), (1.0, 1.0, 0.0)]),
+          (3.0, [(0.0, 2.0, 0.0), (1.0, 2.0, 0.0)])]
+
+
+def _xy(poses):
+    return [(x, y) for x, y, _ in poses]
+
+
+# ----------------------------------------------------------------------
+# which way the planner meant the vehicle to go
+# ----------------------------------------------------------------------
+
+def test_a_path_that_advances_along_its_own_heading_is_nav2_FORWARD():
+    # Which on this vehicle is COUNTERWEIGHT-FIRST, with the nav lidar's
+    # 90 degree blind sector leading.
+    assert drive_goal.plan_directions(
+        [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0)]) == (2, 0)
+
+
+def test_a_path_that_advances_AGAINST_its_heading_is_nav2_REVERSE():
+    # Which on this vehicle is FORKS-FIRST - its ordinary direction of
+    # travel, and the one the scanner aperture is centred on.
+    assert drive_goal.plan_directions(
+        [(0.0, 0.0, math.pi), (1.0, 0.0, math.pi)]) == (0, 1)
+
+
+def test_a_cusp_shows_up_as_BOTH_kinds_of_segment_in_one_path():
+    poses = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 0.0, 0.0)]
+    assert drive_goal.plan_directions(poses) == (1, 1)
+
+
+def test_a_repeated_pose_is_not_a_segment_at_all():
+    poses = [(0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]
+    assert drive_goal.plan_directions(poses) == (1, 0)
 
 
 def test_the_plan_STANDING_at_a_time_is_the_most_recent_one_before_it():
@@ -140,11 +172,36 @@ def test_a_deviation_is_measured_against_the_plan_of_the_moment():
     # THE WHOLE REASON EVERY PLAN IS RECORDED. The tree replans at 1 Hz;
     # scored against the plan the run started with, a vehicle perfectly
     # tracking the third plan would read 2.0 m off.
-    against_first = ec.point_to_polyline(0.5, 2.0, _PLANS[0][1])
+    against_first = ec.point_to_polyline(0.5, 2.0, _xy(_PLANS[0][1]))
     against_standing = ec.point_to_polyline(
-        0.5, 2.0, drive_goal.plan_standing_at(_PLANS, 3.5))
+        0.5, 2.0, _xy(drive_goal.plan_standing_at(_PLANS, 3.5)))
     assert against_first == pytest.approx(2.0)
     assert against_standing == pytest.approx(0.0)
+
+
+def test_a_plan_is_carried_into_the_BUILDING_before_it_is_compared():
+    # THE BUG A WHOLE RUN PAID FOR. nav2 publishes /plan in the MAP
+    # frame and the ground truth is the world's; warehouse_v3's map is
+    # a half turn and 19 m from the building, so a deviation computed
+    # without the registration read about 20 m on a vehicle that was
+    # tracking its path. plans_of() takes the frame for that reason and
+    # the analyser passes it.
+    import evidence_core
+
+    class _Table(object):
+        def __init__(self, rows):
+            self.rows = rows
+
+        def column(self, name):
+            index = ("t_s", "plan", "i", "x", "y", "yaw").index(name)
+            return [row[index] for row in self.rows]
+
+    table = _Table([(0.0, 1, 0, 1.0, 0.0, 0.0), (0.0, 1, 1, 2.0, 0.0, 0.0)])
+    frame = evidence_core.MapFrame(math.pi, 10.0, 0.0)
+    raw = drive_goal.plans_of(table)[0][1]
+    moved = drive_goal.plans_of(table, frame)[0][1]
+    assert raw[0][:2] == (1.0, 0.0)
+    assert moved[0][0] == pytest.approx(9.0)
 
 
 # ----------------------------------------------------------------------
