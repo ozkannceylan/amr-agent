@@ -571,7 +571,62 @@ controller_server:
       movement_time_allowance: 15.0
 
     general_goal_checker:
-      plugin: "nav2_controller::SimpleGoalChecker"
+      # ================================================================
+      # POSITION ONLY, AND THE HEADING IS REPORTED RATHER THAN REQUIRED.
+      # This is the last ruling F4 Task 2 made and it took eight aborted
+      # goals to make it.
+      #
+      # `nav2_controller::SimpleGoalChecker` demands the (xy, yaw) PAIR.
+      # `stateful` latches the position half - and the yaw half is not
+      # latched, so a vehicle that is INSIDE the box with the wrong
+      # heading is a vehicle the controller keeps driving. On a base
+      # that can rotate in place that costs a pirouette. On THIS one it
+      # costs a Reeds-Shepp loop, because the only way it can change its
+      # heading is to travel.
+      #
+      # MEASURED, AND IT IS THE SAME NUMBER TWICE. Two runs of the
+      # headline goal reached the goal POSITION and could not finish:
+      #
+      #   run `...123524`  closest approach 0.152 m at t+64.8 s,
+      #                    heading -1.3185 rad against a goal of +3.1416
+      #                    -> 1.82 rad out. Drove another 210 s.
+      #   run `...124352`  closest approach 0.010 m at t+283.4 s,
+      #                    heading -2.0335 -> 1.11 rad out. Drove to the
+      #                    480 s budget and was cancelled.
+      #
+      # Both were INSIDE the 0.60 m box by a wide margin. Neither was
+      # inside 0.15 rad of the heading, and neither could get there.
+      #
+      # THE CRIB SAID SO FIRST AND THIS IS AN INDEPENDENT REPRODUCTION.
+      # agv/forklift/nav2.yaml's `staging_goal_checker` exists because
+      # EVIDENCE_NAV2.md 8.3 measured the committed pair to be JOINTLY
+      # UNREACHABLE in an endgame correction on this kinematic machine:
+      # heading costs 2.1-2.6 m of travel per radian, so one yaw
+      # tolerance costs more displacement than the position box allows.
+      # That is a fact about a tricycle and not about a floor, and it
+      # transfers.
+      #
+      # SO THE HEADING IS DELIVERED BY THE ROUTE AND NOT BY AN ENDGAME.
+      # These three goals are APPROACH POSES - road-graph nodes in open
+      # corridors - and what an approach pose is for is to be arrived at
+      # pointing the way the next leg goes. The planner's last segment
+      # delivers that or it does not, and `tools/drive_goal.py` MEASURES
+      # the heading error on every run and prints it beside the position
+      # error. What it no longer does is refuse to finish over it.
+      #   WHAT IS GIVEN UP, STATED: nothing on this stack now guarantees
+      #   an arrival heading. A station needs one, and F5's docking
+      #   server is what delivers it - a straight final leg into the
+      #   dock axis, which is `undock`'s own primitive
+      #   (docs/reports/m5v3-02 3). This file makes no docking claim.
+      #   THE PLUGIN IS IN THIS BUILD AND WAS VERIFIED: nav2_controller
+      #   1.3.12's plugins.xml lists PoseProgressChecker,
+      #   PositionGoalChecker, SimpleGoalChecker, SimpleProgressChecker
+      #   and StoppedGoalChecker. Its only two parameters are
+      #   `xy_goal_tolerance` and `stateful`, which is why there is no
+      #   `yaw_goal_tolerance` line below any more: the parameter this
+      #   plugin does not have is the honest way to say that this stack
+      #   does not hold a heading.
+      plugin: "nav2_controller::PositionGoalChecker"
       # ---------------------------------------------------------------
       # 0.60 m, AND F3's PEAK IS WHAT BINDS IT. THE 0.25 m STATION CLASS
       # IS NOT MET BY AN APPROACH POSE ON THIS STACK, AND SAYING SO IS
@@ -632,13 +687,11 @@ controller_server:
       # them. It has to be reachable WITHOUT rotating in place, because
       # this vehicle cannot: the final heading is whatever the
       # Reeds-Shepp path's last segment delivers.
-      yaw_goal_tolerance: 0.15
-      # TRUE, and for a reason specific to this vehicle: once inside the
-      # position tolerance the check latches and only heading remains.
-      # On a base that can rotate in place that is a licence to
-      # pirouette; on this one it is the opposite - it stops the
-      # controller driving BACK OUT of the tolerance circle to chase a
-      # heading it is already holding.
+      # TRUE, and on a POSITION-ONLY checker it means the one thing it
+      # can mean: once the vehicle has been inside the box, it has
+      # ARRIVED. Without it the check is re-evaluated every tick and a
+      # vehicle that coasts back out of the box - which this one does,
+      # because it needs 0.208 m to stop - would un-arrive.
       stateful: true
 
     FollowPath:

@@ -589,6 +589,27 @@ def test_the_goal_checker_LATCHES_because_this_vehicle_cannot_pirouette(
     assert checker["stateful"] is True
 
 
+def test_the_goal_checker_is_POSITION_ONLY_and_holds_NO_heading(nav):
+    # EIGHT ABORTED GOALS ARE WHY. A tricycle can only change its
+    # heading by travelling - 2.1 to 2.6 m per radian, which the crib
+    # measured and this task reproduced - so a checker that demands the
+    # (xy, yaw) PAIR sends a vehicle that is INSIDE the box with the
+    # wrong heading round a Reeds-Shepp loop it never comes back from.
+    # Two runs reached the goal position to 0.152 m and 0.010 m and
+    # could not finish.
+    checker = nav["controller_server"]["ros__parameters"][
+        "general_goal_checker"]
+    assert checker["plugin"] == "nav2_controller::PositionGoalChecker"
+    # AND THE ABSENCE IS THE CLAIM. This plugin has no
+    # `yaw_goal_tolerance`, so a line naming one would be a parameter
+    # nothing reads pretending this stack holds a heading. It does not;
+    # tools/drive_goal.py MEASURES the arrival heading and prints it.
+    assert "yaw_goal_tolerance" not in checker, (
+        "PositionGoalChecker declares xy_goal_tolerance and stateful and "
+        "nothing else - a yaw line here would be a silent no-op that "
+        "reads as a guarantee")
+
+
 # ----------------------------------------------------------------------
 # NAV2's FORWARD IS THIS TRUCK's REVERSE - the four parameters
 # ----------------------------------------------------------------------
