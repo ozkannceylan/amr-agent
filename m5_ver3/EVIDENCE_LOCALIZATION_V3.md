@@ -63,6 +63,15 @@ which collapses as the vehicle decelerates. Cross-track is 0.02 – 0.10 m
 throughout. That offset is why the `rms over the run` column is four to
 six times the `END error` column on `straight`, and it is the honest
 subject of §9.
+  **THAT BAND IS THE CRUISE PLATEAU OF ONE RUN PER FLOOR, READ OFF §9.1's
+  PER-UPDATE TABLE**, and it is neither the largest nor the average
+  figure this file carries for the same phenomenon. §13.6 states the
+  other two, over all five `straight`s and with one instrument on both
+  arms: per-run `|along|` **mean** 0.274 – 0.329 m dry and 0.686 –
+  0.786 m wet, per-run **max** 0.436 – 0.523 m dry and 1.078 – 1.250 m
+  wet. **Three bands, one phenomenon** — a plateau, a run mean and a run
+  peak — and every point of use in this file now says which of the three
+  it is holding. **§13.10 hands F4 the MAX.**
 
 ### What was built
 
@@ -1144,10 +1153,11 @@ parameter was moved for it**, on either arm.
 | **WET, absolute END error**, 3 runs | 0.1772 – 0.3067 m | **0.1189 – 0.2395 m** |
 | **WET, absolute rms over the run** | 0.2019 – 0.5657 m | **0.1308 – 0.2176 m** |
 | **the along-track debt, wet `straight`** | 83.4 % / 71.3 % removed | **89.4 % / 87.1 %** |
-| **the MOVING along-track offset** (§9, §13.6) | dry 0.27 – 0.33 m, wet **0.69 – 0.79 m** | dry **0.07 – 0.09 m**, wet **0.07 – 0.08 m** |
-| … on the profiles that TURN | dry `square` 0.081, `corner_creep` **0.050** | 0.101, **0.181** |
+| **the MOVING along-track offset**, `straight`, per-run \|along\| **MEAN** (§13.6) | dry 0.274 – 0.329 m, wet **0.686 – 0.786 m** | dry **0.073 – 0.090 m**, wet **0.070 – 0.076 m** |
+| … the same runs, per-run **MAX** | dry 0.436 – 0.523 m, wet **1.078 – 1.250 m** | dry **0.194 – 0.213 m**, wet **0.205 – 0.225 m** |
+| … MEAN on the profiles that TURN | dry `square` 0.081, `corner_creep` **0.050** | 0.101, **0.181** |
 | **worst single map → odom jump**, dry | 0.0592 – 0.2591 m | **0.1188 – 0.2419 m** |
-| **worst single jump**, wet | 0.1111 – **0.4927 m** | 0.2322 – **0.3864 m** |
+| **worst single jump**, wet | 0.1111 – **0.4927 m** | 0.2622 – **0.3864 m** |
 | **worst heading jump**, on a `square` | 0.0585 / 0.0764 rad | 0.0698 / **0.1326 rad** |
 | **CPU**, the whole arm, 3 samples | **7.85 – 10.49 %** (amcl + map_server) | **13.25 – 14.86 %** (slam_loc alone) |
 | children | **3** (`lasertf`, `map_server`, `amcl`) | **2** (`lasertf`, `slam_loc`) |
@@ -1652,9 +1662,26 @@ these, in the order they weigh:
 **What F4 should consume, concretely:** `map` → `base_link` off `/tf`
 with `--localize` (the default, `amcl`), and the number to design the
 controller's error budget against is **§13.6's moving along-track
-offset — 0.27 – 0.33 m dry and 0.69 – 0.79 m wet on that arm** — and NOT
-§6.1's END error, which is taken at rest after the corrections have
-closed the gap. The pose-graph arm stays in the tree, one flag away, and
+offset** — and NOT §6.1's END error, which is taken at rest after the
+corrections have closed the gap.
+
+**THE BUDGET IS SIZED ON THE MAX AND NOT ON THE MEAN, AND BOTH ARE NAMED
+HERE BECAUSE ONE OF THEM WOULD BE READ AS THE OTHER.** §13.6's table is
+per-run `|along|` **mean (max)**, on the three dry and two wet
+`straight`s:
+
+| on the shipping arm, `straight` | per-run **MEAN** | per-run **MAX** |
+|---|---|---|
+| dry | 0.274 – **0.329 m** | 0.436 – **0.523 m** |
+| wet | 0.686 – **0.786 m** | 1.078 – **1.250 m** |
+
+A tolerance argued from the mean alone — 0.33 m dry — is **exceeded by
+the measured peaks of the very runs it was read from, by about 60 %**,
+and the peaks are not outliers a filter removed: they are the same
+excursions §6.1's `worst` column reports as 0.5321 m dry and 1.2581 m
+wet, reached at cruise on every run. **F4 sizes the corridor against
+≈0.52 m dry and ≈1.25 m wet**, and may use the mean only for what a mean
+is for — comparing the two arms, which is what §13.6's table does. The pose-graph arm stays in the tree, one flag away, and
 F4's first cheap experiment is to run the same controller on it: if the
 controller's error is transit-dominated, §13.6 says it will win.
 
@@ -1758,7 +1785,8 @@ session refusing to share a table).
 |---|---|
 | `--localize` with a value naming no arm | on the rig, before the GPU preflight: `'bogus' is not one of them`, exit 1, nothing started |
 | the pose graph or its data not hashing to `build.txt` | the same two-line `sed`/`md5sum` shape §11 used for the grid; the PASSING direction ran on every one of the eight bringups here |
-| `slam.yaml` not addressed to `slam_loc` | `check_loc_params()`, per node per arm, before anything starts |
+| `slam_loc.yaml` not addressed to `slam_loc` | `check_loc_params()`, per node per arm, before anything starts |
+| that file not SAYING `mode: localization` | `check_slam_mode()`, added in F3's phase-end wave because the prose above claimed a guard that did not exist. Fired on the rig in both directions: the file as committed passes to the GPU preflight, and one throwaway character (`mode: mapping`, restored) refuses by name with the offending line quoted, **exit 1, nothing started** |
 | a lifecycle node that never reached ACTIVE | `localize_lifecycle()` now drives towards a STATE rather than firing two transitions, and refuses by the node's LAST state — the shape came from a bringup that refused because the node was already `active` |
 | a localiser whose composed pose is over `pose_tolerance_m` from the seed | fired on the rig, three times, during §13.2b — on a stale publisher, which is exactly the failure the check is for |
 | a set mixing the two LOCALISERS | fired on **two real sessions** that agree in traction and in arm — `drive-straight-20260826-230652` (`amcl@735cdbc6`) beside `drive-straight-20260827-010451` (`slam@4bb88852`): *"2 different absolute layers are in this set"*, both named, a command printed per layer, **exit 1**. Locked in `tests/test_sensor_evidence_loc.py` as well |
