@@ -765,28 +765,39 @@ controller_server:
         enabled: true
         cost_power: 1
         cost_weight: 5.0
-        # 2.50 m AGAINST A SHIPPED 1.4, AND IT IS F4 TASK 1's STOPPING
-        # DISTANCE THAT DECIDES IT. This is the range at which the goal
-        # starts pulling the speed down; below it the controller is
-        # still tracking the path at whatever the envelope allows.
-        # EVIDENCE_NAV_V3.md 8 measured this vehicle taking 1.02 m and
-        # 2.07 s to stop from cruise, of which about 0.25 s is DEAD TIME
-        # in the chain - so a critic that begins at 1.4 m has 0.38 m of
-        # margin over the stop itself and none at all over the 0.25 m
-        # goal box.
-        #   MEASURED, THREE TIMES, AND IT IS WHY THIS MOVED. At 1.4 m
-        #   the same goal succeeded twice and missed once: the truck
-        #   passed the box at speed, the checker never latched, and the
-        #   Reeds-Shepp planner sent it round a loop that ended in a
-        #   rack. Two of three is not a repeatability claim.
-        #   THE DERIVATION: the vehicle has to be able to be AT REST
-        #   inside the box, so the pull must start at least
-        #   (stopping distance + tolerance) = 1.02 + 0.25 = 1.27 m out.
-        #   2 x 1.02 + 0.25 = 2.29, rounded up to 2.50.
-        #   F4 constraint 19 permits it: a DRY ACCEPTANCE CRITERION
-        #   FAILED. Nothing about #5714 or the jump interaction is tuned
-        #   anywhere in this file.
-        threshold_to_consider: 2.50
+        # 1.4 m, SHIPPED, AND IT IS THE ONE NUMBER IN THIS FILE THAT
+        # WAS MOVED AND THEN MOVED BACK - ON A MEASUREMENT BOTH TIMES.
+        #
+        # This is the range at which the goal starts pulling the speed
+        # down. EVIDENCE_NAV_V3.md 8 measured this vehicle taking 1.02 m
+        # and 2.07 s to stop from cruise, of which about 0.25 s is DEAD
+        # TIME in the chain - so 1.4 m leaves 0.38 m of margin over the
+        # stop itself and none at all over the 0.25 m goal box, and
+        # `stateful` only latches if the trajectory PASSES THROUGH the
+        # box on its way past. Three runs of one goal at this value:
+        # SUCCEEDED, SUCCEEDED, MISSED - and the miss ended in a
+        # Reeds-Shepp loop that put the vehicle in a rack.
+        #
+        # SO IT WAS RAISED TO 2.50 - twice the stopping distance plus
+        # the tolerance - AND THAT WAS WORSE, MEASURED. Two runs: one
+        # abort and one that never returned inside the 300 s budget.
+        # The reason is what `threshold_to_consider` means on the OTHER
+        # critic: PathFollowCritic STOPS APPLYING inside its own
+        # threshold, so raising the pair to 2.50 takes path-following
+        # away for the last 2.50 m - which on a 3.815 m vehicle is most
+        # of an approach.
+        #
+        # WHAT THAT LEAVES IS A FINDING AND NOT A PARAMETER. MPPI has no
+        # approach-velocity scaling: nothing in it corresponds to RPP's
+        # `approach_velocity_scaling_dist`, and the two thresholds are a
+        # hand-off rather than a ramp. A vehicle that needs 1.02 m to
+        # stop cannot be held to a 0.25 m box from 0.700 m/s by these
+        # parameters, and the answer is not one of them - it is the
+        # docking server (docs/reports/m5v3-02 3), whose
+        # `slowdown_radius` and `v_linear_min` exist for exactly this
+        # and which is F5's. EVIDENCE_NAV_V3.md's first-goals section
+        # carries the arrival errors this leaves.
+        threshold_to_consider: 1.4
       GoalAngleCritic:
         enabled: true
         cost_power: 1
@@ -848,12 +859,7 @@ controller_server:
         cost_power: 1
         cost_weight: 5.0
         offset_from_furthest: 5
-        # THE SAME 2.50 AS THE GOAL CRITIC's, and it is kept equal to
-        # it because nav2_bringup ships them equal. This is the range
-        # inside which path-following STOPS being applied and the goal
-        # takes over; the two are one hand-off and a gap between them
-        # would be a band where the vehicle is being pulled by both.
-        threshold_to_consider: 2.50
+        threshold_to_consider: 1.4
       PathAngleCritic:
         enabled: true
         cost_power: 1
