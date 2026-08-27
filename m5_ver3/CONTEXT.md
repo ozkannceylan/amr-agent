@@ -163,6 +163,15 @@ m5_ver3/
 │                         second block for the reason its header opens
 │                         with - ekf.yaml / ekf_rf2o.yaml's split, one
 │                         layer down
+├── smoother.yaml         what the VELOCITY SMOOTHER limits, and to what, and
+│                         it is ekf.yaml's split a FIFTH time. Read only by
+│                         the `smoother` child - which is not an arm and is
+│                         started on every bringup. Four of its six numbers
+│                         are DERIVED from config.yaml's navcmd: block and
+│                         tests/test_smoother_params.py recomputes every one
+│                         of them. Its `feedback` is the CRIB'S RULING
+│                         REVERSED on an A/B measured here
+│                         (EVIDENCE_NAV_V3.md 6.3)
 ├── amcl.yaml             what the OTHER LOCALISER does, and ekf.yaml's split a
 │                         FOURTH time - two nodes addressed in one file,
 │                         both greped for before anything starts. Every
@@ -181,13 +190,24 @@ m5_ver3/
 │       └── model.sdf     the forked vehicle
 ├── logs/                 one file per child, by name (git-ignored)
 │   └── evidence/         one directory per recorded session, CSVs (untracked)
+├── EVIDENCE_NAV_V3.md    F4's: the COMMAND PATH, measured with no Nav2 in
+│                         the room - the datasheet, the conversion checked
+│                         three ways, the slew at the terminals, the
+│                         smoother A/B, what the plant delivered and what
+│                         a stop costs
 ├── nodes/
 │   ├── wheel_odom_core.py   the estimate, as arithmetic. --selftest
 │   ├── wheel_odometry.py    the rclpy shell around it. Wiring only.
 │   ├── rf2o_twist_core.py   what the laser odometry's output has to have
 │   │                        done to it before a filter may read it, as
 │   │                        arithmetic. --selftest
-│   └── rf2o_twist.py        the rclpy shell around it. Wiring only.
+│   ├── rf2o_twist.py        the rclpy shell around it. Wiring only.
+│   ├── cmd_vel_tricycle_core.py  a body twist becomes a steer angle and a
+│   │                        tread speed, as arithmetic - the INVERSE of what
+│   │                        wheel_odom_core integrates, same signs, cited.
+│   │                        --selftest
+│   └── cmd_vel_tricycle.py  the rclpy shell around it. Wiring, a clock and
+│                            a ramp. IDLE until something commands
 ├── tests/                pytest, no ROS anywhere - runs on the Windows python
 └── tools/
     ├── _common.sh        sourced: refuse(), the config reader, source_ros()
@@ -208,6 +228,16 @@ m5_ver3/
     │                     publishes one pose per seed with the truck
     │                     standing still. m5v3.sh refuses on it
     ├── drive_route.py    drive one of config.yaml's profiles, open loop
+    ├── drive_twist.py    drive one of config.yaml's TWIST profiles through
+    │                     the WHOLE COMMAND PATH and score what came out at
+    │                     the terminals. record (needs ROS) | analyse (needs
+    │                     nothing) | describe. drive_route's sibling and not
+    │                     its second mode - that file speaks gz and imports
+    │                     no rclpy at all
+    ├── navcmd_health.py  is the command path a LINE, or three processes
+    │                     that have never spoken to each other? One ZERO
+    │                     twist in at the top and one read off the GZ side
+    │                     of the traction terminal. m5v3.sh refuses on it
     ├── evidence_core.py  the arithmetic behind EVIDENCE_SENSORS.md
     ├── sensor_evidence.py  record (needs ROS) | analyse (needs nothing)
     ├── build_map.sh      the OFFLINE slam run: a recorded bag, a mapper
@@ -263,12 +293,14 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 
 | Command | What it does |
 |---|---|
-| `m5v3.sh start` | GPU preflight, then the world, one `forklift_ver3`, both bridges, the wheel-odometry node, the static IMU transform, the EKF and a Gazebo **window**. |
+| `m5v3.sh start` | GPU preflight, then the world, one `forklift_ver3`, both bridges, the wheel-odometry node, the static IMU transform, the EKF, **the command path** and a Gazebo **window**. |
 | `m5v3.sh start --headless` | The same without the window. **Use this for anything being measured** — every figure in the three evidence files was taken this way. |
 | `m5v3.sh start --slippery` | **A different plant from the same model file.** After the truck is spawned, every wheel's slip compliance is overridden through gz-sim's own `wheel_slip` service to `config.yaml`'s `slippery:` values — `model.sdf` is not edited and no variant of it is generated. Longitudinal slip at cruise goes from 0.95 % to 6.18 %. Combines with `--headless`, in either order. |
 | `m5v3.sh start --rf2o` | **A DIFFERENT ESTIMATOR ON THE SAME PLANT**, which is `--slippery`'s mirror image. Three more children — the nav lidar's static transform, `rf2o_laser_odometry_node` matching consecutive scans, and the relay that puts a MEASURED covariance on its twist and corrects two frame errors upstream does not — plus a second `--params-file` giving the filter an `odom1` it fuses `vx` and `vyaw` from. Default OFF, and without it the stack is the six children `EVIDENCE_FUSION.md` §9.3 measured, off one unchanged parameter file. Build the package first with `tools/install_rf2o.sh`. Combines with the other two flags, in any order. |
 | `m5v3.sh start --fuse` | **A DIFFERENT ESTIMATOR, IN THE FILTER'S PLACE.** `fuse`'s `fixed_lag_smoother_node` goes up and the `ekf` child does **not** — six children either way, with `fuse` where `ekf` was. It fuses the SAME channels off the SAME two topics (wheel twist `vx`, `vy`, `vyaw` + gyro yaw rate) and publishes its own `odom` → `base_link`, on `topics.fuse_odometry_filtered` and never on the shipping address. Where `--rf2o` adds a sensor, this replaces the estimator, so the two are **mutually exclusive and refused together by name**. Vendor it first with `tools/install_fuse.sh`. Default OFF, and `EVIDENCE_FUSION.md` §11 is the A/B that says why. Combines with `--headless` and `--slippery`. |
 | `m5v3.sh start --localize [amcl\|slam]` | **A LAYER ABOVE THE ESTIMATOR, AND THE FIRST THING ON THIS TRACK THAT KNOWS WHERE THE VEHICLE IS.** Whichever localiser is named becomes the **sole publisher of `map` → `odom`**, the one edge F3 adds; the estimator keeps `odom` → `base_link` and neither can become the other. **The two are never alive together** — the exclusion is a `case` with two branches, not two flags — and the value is optional (`localization.default_arm` says which it means without one). **`amcl`** is three more children: the nav lidar's static transform, `nav2_map_server` serving the FROZEN GRID, and `nav2_amcl` localising in it, seeded by a MESSAGE on `/initialpose`. **`slam`** is two: that same static transform and `slam_toolbox`'s `localization_slam_toolbox_node`, which deserialises the FROZEN POSE GRAPH, rasters its own grid onto `/map` (so no `map_server`) and is seeded by the `map_start_pose` PARAMETER. Either way the artifacts THAT arm opens are md5-checked **before anything is started** — the grid against the committed registration, the pose graph against `build.txt` — a rebuilt map is a new artifact, never an overwrite; every lifecycle node is driven to ACTIVE by this script; and a gate refuses a localiser which came up merely alive. **No kidnapped-robot recovery is claimed on either arm.** Combines with all three flags above. `EVIDENCE_LOCALIZATION_V3.md` is what both produced, and §13 is the A/B. **§13.10 IS F4's CONSUMPTION CONTRACT**: consume `map` -> `base_link` off `/tf` on the `amcl` arm, and size the controller's corridor on the PEAKS rather than the means - moving along-track offset up to **0.523 m dry / 1.250 m wet**, worst single `map` -> `odom` step **0.2591 m dry / 0.4927 m wet**, worst heading step **0.0764 rad**, all of it against an instrument floor of **rms 0.0291 m / MAX 0.1179 m** below which no figure is a measurement of the localiser. |
+| `tools/drive_twist.py` | **THE COMMAND PATH'S OWN BENCH, F4 Task 1.** `describe`, `record --profile P` and `analyse` - a config-tabled TWIST profile published into `/cmd_vel`, through the velocity smoother and the tricycle converter, with every joint of the chain recorded: what was commanded, what the smoother made of it, what each terminal carried, what the axes did and what the truck did. `analyse` needs no ROS. It **REFUSES a table** the converter would have to clamp (unless the row says `expect_clamp`), which is `drive_route.py`'s own line between a table and a live command. |
+| `tools/navcmd_health.py` | Did the COMMAND PATH come up as a LINE? It publishes ONE zero twist - the only command that cannot move this vehicle - and reads the answer off the **gz side** of the traction terminal, four hops away. Every other check on the stack is satisfied by three processes that have never spoken to each other. **`start` runs it for you.** |
 | `m5v3.sh status` | Each child by name, ALIVE or DEAD, with its log, **which traction the running plant is on**, **which estimator arm is up** and **which absolute layer**. Exit 0 only if every one is alive. |
 | `m5v3.sh stop` | Ends this partition's stack, and nothing else. |
 | `tools/rtf_probe.sh` | 30 s real-time-factor sample of the world that is already running. |
@@ -378,8 +410,30 @@ run with an unlocalised one. All four combinations are legitimate runs.
   facts and neither is inferred from the other, which is the traction
   label's own rule twice removed.
 
-**Six children by default, NINE with `--rf2o`, six again with `--fuse`,
-NINE with `--localize amcl` and EIGHT with `--localize slam`** —
+**AND SINCE F4 TASK 1 THERE IS A COMMAND PATH, WHICH IS NOT AN ARM.**
+`nav2_velocity_smoother` (`smoother`) and `nodes/cmd_vel_tricycle.py`
+(`navcmd`) go up on **every** bringup, in that order, after the
+estimator: `/cmd_vel` → the smoother → `/cmd_vel_smoothed` → the
+converter → `model.sdf`'s own two motor terminals, over two ROS → gz
+bridge lines. One line, no bypass, and no ground truth in it (F4
+constraint 18). They are not behind a flag for three reasons — the path
+has to be verifiable with no Nav2 in the room, F4 Task 2's `--nav` arm
+stacks a planner on top of a path that is already there, and **the pair
+costs 4.4 % of one core idle and publishes nothing at all** until a twist
+arrives. That last one is a mechanism and not a courtesy: the converter
+publishes its first message when its first command arrives and stops
+again once it has left a standing zero, which is what keeps
+`tools/drive_route.py` and `tools/slip_bench.sh` — both of which drive
+the same two terminals from the gz side, where the last write wins —
+working exactly as they did. `EVIDENCE_NAV_V3.md` is what the path
+delivers, and §6.3 is the one ruling it reversed: the velocity smoother
+ships `OPEN_LOOP` against the crib's `CLOSED_LOOP`, because a limiter
+closed on THIS track's deliberately bad estimate inherits its lag.
+
+**EIGHT children by default, ELEVEN with `--rf2o`, eight again with
+`--fuse`, ELEVEN with `--localize amcl` and TEN with `--localize slam`**
+(six, nine, six, nine and eight of them before F4 Task 1 added the two
+above) —
 `--fuse` swaps a child rather than adding one, so the count is unchanged
 and `fuse` stands where `ekf` did, while `--localize` adds three on one
 arm and two on the other.
