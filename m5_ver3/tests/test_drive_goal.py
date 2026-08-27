@@ -1150,3 +1150,187 @@ def test_mppi_window_reads_the_SHIPPED_file_and_agrees_with_the_label(cfg):
     assert int(label["nav_align_gate"]) == got.gate
     assert got.horizon_m == pytest.approx(got.steps * got.model_dt
                                           * got.vx_max)
+
+
+# ======================================================================
+# F4 TASK 3 - THE CASE TABLE AND THE CUSP
+# ======================================================================
+
+def test_plan_cusps_finds_NOTHING_in_a_path_driven_one_way():
+    # A straight run of poses all heading the way they advance has no
+    # direction change in it, and a cusp counter that invented one would
+    # make every ordinary leg on this track look like a manoeuvre.
+    poses = [(float(i), 0.0, 0.0) for i in range(10)]
+    assert drive_goal.plan_cusps(poses) == []
+    assert drive_goal.plan_directions(poses) == (9, 0)
+
+
+def test_plan_cusps_finds_the_ONE_reversal_and_says_where_it_is():
+    # Out 3 m heading +x, then back 2 m still heading +x: one sign
+    # change, at the turning point, 3 m along the path.
+    poses = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0),
+             (3.0, 0.0, 0.0), (2.0, 0.0, 0.0), (1.0, 0.0, 0.0)]
+    cusps = drive_goal.plan_cusps(poses)
+    assert len(cusps) == 1
+    index, x, y, s, run = cusps[0]
+    assert index == 3
+    assert (x, y) == (3.0, 0.0)
+    assert s == pytest.approx(3.0)
+    # and the run AFTER it is the 2 m back
+    assert run == pytest.approx(2.0)
+
+
+def test_the_RUN_is_what_separates_a_manoeuvre_from_lattice_noise():
+    # THE READING THAT COST A PROBE. SmacPlannerHybrid emits an SE2
+    # lattice and a one-pose blip - forward 0.07 m and back again - is a
+    # sign change in the arithmetic and nothing at all in the vehicle.
+    # The fifth field is what lets a caller tell them apart; this
+    # function does not filter, because a threshold is a policy.
+    poses = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0),
+             (1.93, 0.0, 0.0), (3.0, 0.0, 0.0), (4.0, 0.0, 0.0)]
+    cusps = drive_goal.plan_cusps(poses)
+    assert len(cusps) == 2
+    assert cusps[0][4] == pytest.approx(0.07)      # one pose - noise
+    assert cusps[1][4] == pytest.approx(2.07)      # a real run
+
+
+def test_plan_cusps_ignores_a_REPEATED_pose_rather_than_dividing_by_it():
+    poses = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 0.0, 0.0),
+             (2.0, 0.0, 0.0)]
+    assert drive_goal.plan_cusps(poses) == []
+
+
+def test_plan_cusps_and_plan_directions_agree_about_what_a_cusp_IS():
+    # Two functions, one definition. `plan_directions` counts the
+    # segments each way and `plan_cusps` finds the changes between them,
+    # so the number of cusps can never exceed the smaller count.
+    poses = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 0.0, 0.0),
+             (1.5, 0.0, 0.0), (1.0, 0.0, 0.0)]
+    forward, reverse = drive_goal.plan_directions(poses)
+    # four segments, alternating, so three changes between them - and a
+    # cusp count can never exceed one less than the segment count.
+    assert forward + reverse == 4
+    assert len(drive_goal.plan_cusps(poses)) == 3
+    assert len(drive_goal.plan_cusps(poses)) <= forward + reverse - 1
+
+
+def test_every_case_in_config_yaml_reads_back(cfg):
+    for name in cfg.raw("nav.cases"):
+        case = drive_goal.read_case(cfg, name)
+        assert case.name == name
+        assert case.repeat >= 1
+        assert case.first.name in cfg.raw("nav.goals")
+        if case.second is None:
+            assert case.when is None
+            assert case.preempt_at_m is None
+        else:
+            assert case.when in drive_goal.CASE_WHEN
+            if case.when == "preempt":
+                assert case.preempt_at_m > 0.0
+            else:
+                assert case.preempt_at_m is None
+
+
+def _refusing_cfg(cfg, rows):
+    """The real config with nav.cases swapped, and a refusal that raises."""
+    class _Stop(Exception):
+        pass
+
+    lines = []
+
+    class _Wrapped(object):
+        def __init__(self, inner):
+            self._inner = inner
+
+        def raw(self, key):
+            if key == "nav.cases":
+                return rows
+            return self._inner.raw(key)
+
+        def s(self, key):
+            return self._inner.s(key)
+
+        def f(self, key):
+            return self._inner.f(key)
+
+        def refuse(self, check, owner, *rest):
+            lines.extend([check, owner] + list(rest))
+            raise _Stop()
+
+    return _Wrapped(cfg), lines, _Stop
+
+
+def test_a_case_that_is_not_in_the_table_is_REFUSED_by_name(cfg):
+    wrapped, lines, stop = _refusing_cfg(cfg, {"only": {"goal": "x",
+                                                        "repeat": "1"}})
+    with pytest.raises(stop):
+        drive_goal.read_case(wrapped, "nope")
+    assert "nav.cases names the case that was asked for" in lines[0]
+    assert any("only" in line for line in lines)
+
+
+def test_a_second_goal_with_NO_RULE_is_refused(cfg):
+    # Two different experiments wearing one name: a goal sent mid-drive
+    # and a goal sent after the first finished are not the same run.
+    wrapped, lines, stop = _refusing_cfg(cfg, {
+        "bad": {"goal": "spine_north", "then": "aisle_end", "repeat": "1"}})
+    with pytest.raises(stop):
+        drive_goal.read_case(wrapped, "bad")
+    assert "`when` is one of" in lines[0]
+
+
+def test_a_PREEMPT_with_no_trigger_is_refused(cfg):
+    wrapped, lines, stop = _refusing_cfg(cfg, {
+        "bad": {"goal": "spine_north", "then": "aisle_end",
+                "when": "preempt", "repeat": "1"}})
+    with pytest.raises(stop):
+        drive_goal.read_case(wrapped, "bad")
+    assert "preempt_at_m" in lines[0]
+
+
+def test_a_PREEMPT_trigger_of_zero_or_less_is_refused(cfg):
+    # It is a REMAINING distance: zero fires only on a goal already
+    # reached and a negative one never fires at all.
+    for value in ("0.0", "-1.0"):
+        wrapped, lines, stop = _refusing_cfg(cfg, {
+            "bad": {"goal": "spine_north", "then": "aisle_end",
+                    "when": "preempt", "preempt_at_m": value,
+                    "repeat": "1"}})
+        with pytest.raises(stop):
+            drive_goal.read_case(wrapped, "bad")
+        assert "positive" in lines[0]
+
+
+def test_a_case_naming_a_goal_that_does_not_exist_is_refused_by_the_GOAL(cfg):
+    # read_case delegates to read_goal, so the refusal names the goal
+    # table rather than the case table - which is the file the operator
+    # has to go and edit.
+    wrapped, lines, stop = _refusing_cfg(cfg, {
+        "bad": {"goal": "no_such_pose", "repeat": "1"}})
+    with pytest.raises(stop):
+        drive_goal.read_case(wrapped, "bad")
+    assert "nav.goals names the goal that was asked for" in lines[0]
+
+
+def test_a_case_session_and_a_goal_session_are_BOTH_found(cfg, tmp_path,
+                                                          monkeypatch):
+    # F4 Task 3 names a case's session `case-<name>-<stamp>` because
+    # neither of its two goals is what was driven. `sessions_in` has to
+    # take both prefixes or the whole case set is invisible to `analyse`.
+    root = tmp_path / "evidence"
+    for name in ("goal-spine_north-20260827-120000",
+                 "case-aisle_transit-20260827-130000",
+                 "twist-straight-20260827-140000"):
+        (root / name).mkdir(parents=True)
+        (root / name / "session.txt").write_text("kind=goal\n",
+                                                 encoding="utf-8")
+
+    class _Cfg(object):
+        def s(self, key):
+            assert key == "evidence.dir"
+            return "evidence"
+
+    monkeypatch.setattr(drive_goal._common, "REPO", str(tmp_path))
+    found = drive_goal.sessions_in(_Cfg())
+    assert found == ["case-aisle_transit-20260827-130000",
+                     "goal-spine_north-20260827-120000"]
