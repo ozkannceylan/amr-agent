@@ -3715,6 +3715,23 @@ brought up on the committed tree, headless:
 | **no `--monitor`** (the default stack) | **8** | unchanged — the converter subscribes `topics.cmd_vel_smoothed` through an identity remap, and F4 Task 1's measured path is byte for byte the one it was |
 | **`--localize amcl --nav`, no `--monitor`** | **16** | §17's case runs and §18's flip run, `monitor=off` on every one |
 | **`--localize amcl --nav --monitor`** | **17** | §19.9 |
+| **`--rf2o`** (the ESTIMATOR arm, charged since F4 Task 1) | **11** | **all ALIVE**; `ekf` healthy (**0.127202** against a ceiling of 100) on the THREE-sensor filter; `velocity_smoother active`; navcmd gate passed; `arm=wheel+imu+rf2o`, rf2o pinned at `b38c68e4`; `loc=none nav=off monitor=off`. **`stop` swept all eleven, wrapper and node — 0 survivors.** No driving |
+
+**AND THAT LAST ROW DISCHARGES A DEBT F4 TASK 1 OPENED AND TWO TASKS
+CARRIED.** AMR-LES-023 says an arm-conditional change is unproven until
+every affected arm has been brought up on the committed tree. F4 Task 1
+argued that the command path is not an arm and that `--rf2o` and
+`--fuse` therefore could not reach it — the argument was accepted as
+sound and recorded as **UNRUN**, and it stayed unrun through Task 2, Task
+2.5 and Task 3. It is run now, on the wave tip: **eleven children, the
+three-sensor filter healthy, one zero twist through four hops to the
+traction terminal, and a clean sweep.** The argument was right; it is
+also measured, which is the difference this track cares about.
+
+**WHAT IT DOES NOT SAY.** Nothing was driven on it — no goal, no twist
+profile, no session. `EVIDENCE_FUSION.md` §10's own figures are still
+the only measurement of what that arm's estimate is worth, and §20.6
+still records that no planner has ever run over it.
 
 **AND THE SWEEP TOOK IT DOWN.** `collision_monitor` is in
 `tools/_common.sh`'s pattern list — the EXECUTABLE, which is a substring
@@ -3835,9 +3852,17 @@ an editor will look.
 
 ### 20.1 THE ACCEPTANCE TABLE — cases against criteria, dry
 
-Every row `traction=nominal arm=wheel+imu loc=amcl@735cdbc6
-nav=on@ebe9ca34 monitor=off`, headless, stack stopped and started before
-each run. The criteria are the ones F4's plan and §16 set.
+**THE ROWS COME FROM TWO SETS AND THEY DO NOT SHARE A LABEL.** §17's
+case set is `traction=nominal arm=wheel+imu loc=amcl@735cdbc6
+nav=on@ebe9ca34 monitor=off` on eight runs (§17.0a). **The rows quoted
+from §16.5 were driven before that label existed** — behind
+`nav=on@3148d052` and `nav=on@f5255467`, with no `monitor=` line on the
+session at all — and `analyse` refuses to table the two sets together.
+What makes the table legitimate anyway is the column the byte hash is
+not: **`nav_config_md5 53a33d67` on every row of both**, which is §17.0's
+table and is the only claim here about the STACK. Everything else is
+common to both: headless, dry, and the stack stopped and started before
+every run. The criteria are the ones F4's plan and §16 set.
 
 | criterion | where it was set | measured | verdict |
 |---|---|---|---|
@@ -4121,10 +4146,16 @@ something other than `map` → `base_link`.
 - **No wet set.** Every figure in §14–§20 is `traction=nominal`.
   §13.10a's wet partner still does not exist, and §8's own wet numbers
   were never carried into a driven goal.
-- **No `--rf2o` and no `--fuse` driven goal.** Both arms are alive and
-  neither has ever had a planner over it. F4 Task 1's constraint-20
-  exemption for them was recorded as sound but unrun, and it is still
-  unrun.
+- **No `--rf2o` and no `--fuse` DRIVEN GOAL.** Neither arm has ever had
+  a planner over it, and `EVIDENCE_FUSION.md` §10 and §11 are still the
+  only measurements of what either estimate is worth.
+    **THE BRINGUP HALF OF THAT DEBT IS PAID.** F4 Task 1's constraint-20
+    exemption was recorded as sound but UNRUN and stayed unrun through
+    three tasks; §20.7a and §19.8's table are the `--rf2o` bringup on the
+    wave tip — eleven children, the three-sensor filter healthy, the
+    command path a line through four hops, a clean sweep. **`--fuse` is
+    still unrun**, and its exemption rests on the same argument with the
+    same standing: sound, and a prediction until somebody brings it up.
 - **No `nav2_route`.** §15.7 item 3 and §16.9 item 2: the freespace
   planner bows `ring_corner`'s route 1.2 – 1.5 m off the road-graph line
   for the middle of its length. It costs nothing today and it is still
@@ -4157,8 +4188,11 @@ something other than `map` → `base_link`.
   unexplained. Nothing in this task's further 30 000-odd commands
   reproduced it.
 - **`monitor=` is a fifth label and the sessions recorded before it
-  existed read `UNLABELLED`.** **THREE** sessions on disk are in that
-  group and this is the ledger of them, corrected:
+  existed read `UNLABELLED`.** **THREE of the fifteen CASE sessions on
+  disk** are in that group and this is the ledger of them, corrected —
+  and the scope is *case sessions*, because **every driven-goal session
+  §15 and §16 recorded predates the label too** and reads `UNLABELLED`
+  on it for the same reason. Of the case sessions:
   `case-station_approach-20260827-193729`,
   `case-aisle_transit-20260827-194053` and
   `case-aisle_transit-20260827-194833`. **Only the FIRST is cited
@@ -4169,3 +4203,135 @@ something other than `map` → `base_link`.
   this file quotes a figure from either**. Every other case session,
   including all four of §18.1's, carries `monitor=off`. That is the
   label working on its first day and it is stated rather than smoothed.
+
+### 20.7 THE CLOSING WAVE — three things the phase owed itself
+
+F4's whole-branch review closed the phase accepted-with-named-limitations
+and charged one wave. These are the parts of it that are mechanisms
+rather than prose.
+
+#### 20.7a THE `--rf2o` BRINGUP, WHICH WAS CHARGED AND UNRUN FOR THREE TASKS
+
+§19.8's table carries it. Eleven children, `arm=wheel+imu+rf2o`, the
+three-sensor filter healthy at **0.127202** against a ceiling of 100, the
+navcmd gate passed through four hops, and `stop` sweeping all eleven —
+wrapper and node — with **0 survivors**. Nothing was driven.
+
+**IT IS AMR-LES-023 BEING PAID RATHER THAN ARGUED.** F4 Task 1 reasoned
+that the command path is not an arm and that this one could not reach
+it; the reasoning was accepted and recorded as UNRUN, and three tasks
+went past. An argument that has not been run is a prediction.
+
+#### 20.7b EVERY BRINGUP KEEPS ITS OWN LOGS NOW
+
+**THE DEFECT, AND THIS FILE PAID FOR IT TWICE.** `spawn` redirects to
+`<log_dir>/<child>.log` and `start` opened the same names every time, so
+**each bringup TRUNCATED the previous one's logs.** §17.3 and §17.4
+report two runs that aborted with `error_code 205`, and by the time
+either was read the planner log that would have named the refusal had
+been overwritten by the next bringup — so both sections decode that code
+from `nav2_msgs/action/ComputePathToPose`'s own numbering and from the
+recorded plan streams rather than quoting the line the planner printed.
+On a track whose method is that every figure names its instrument, **a
+log that cannot be quoted is an instrument that was thrown away.**
+
+**THE FIX IS A DIRECTORY PER BRINGUP**, `logs/run-<YYYYmmdd-HHMMSS>/`,
+and the choice between that and the obvious alternative is argued rather
+than assumed:
+
+| | |
+|---|---|
+| copy the logs into the SESSION at `stop` | **rejected.** A bringup can produce NO session at all — a refusal, a failed health gate, §20.7a's own `--rf2o` run — and those are exactly the runs whose logs nothing else explains. It can also produce several, and then one log is copied into each and the copies drift from the run they describe |
+| **a directory per BRINGUP** | **shipped.** A bringup is the thing the logs belong to, so a bringup is what they are filed under |
+
+**AND IT IS FOUND THE WAY THE TRACTION IS FOUND**, which is the idiom
+this stack already has for exactly this problem: `start` writes
+`log_dir=` into `paths.traction_file`, and `status` and `stop` read it
+back, because those two run in later processes and cannot know the
+stamp. `stop` reads it **before** it deletes the file — a test asserts
+that ordering — and prints `logs kept: …` on its way out. A state file
+written before this wave has no such line and both fall back to the
+root, which is where that stack's logs really are: `loc=none`'s rule one
+more time, a missing line is an older script and not a value.
+
+**THE PRUNE CAN ONLY EVER DELETE A RUN DIRECTORY.** `paths.log_keep_runs`
+is 30 — about two afternoons of this track's work — and the prune
+matches `run-*` only. `logs/evidence/` is a SIBLING of those directories
+and every recorded session on this track lives in it; a prune that could
+reach it would delete the evidence to save space in the logs. A test
+asserts the glob and that the word `evidence` does not appear in that
+function at all.
+
+**DEMONSTRATED, ON THE WAVE TIP, WITH TWO BRINGUPS:**
+
+```
+BRINGUP 1  --rf2o
+logs:   .../m5_ver3/logs/run-20260827-215611 (this bringup's own; the last 30 are kept)
+status: logs:    .../logs/run-20260827-215611
+        world  ALIVE  pid 62348  .../logs/run-20260827-215611/world.log      (and ten more)
+stop:   down.
+        logs kept: .../m5_ver3/logs/run-20260827-215611
+
+BRINGUP 2  the default stack
+logs:   .../m5_ver3/logs/run-20260827-215700
+
+  3692  m5_ver3/logs/run-20260827-215611/world.log     <- BRINGUP 1's, intact
+  3586  m5_ver3/logs/run-20260827-215700/world.log     <- BRINGUP 2's
+```
+
+Thirteen files in the first directory — every child, plus `spawn.log`
+and `gpu_preflight.log` — and the second bringup did not touch one of
+them.
+
+**AND THE SECOND BRINGUP REFUSED, WHICH IS THE BEST DEMONSTRATION IT
+COULD HAVE GIVEN.** It hit this rig's known intermittent: `ekf_health.py`
+read `/m5v3/odometry/filtered` before discovery had finished and refused
+the bringup by name. **Its logs are preserved too** — a run that produced
+no session at all, which is precisely the case the copy-into-session
+alternative would have lost.
+
+**AND `probe` NOW POINTS AT A FILE THAT WILL STILL BE THERE.** Its
+`NO PATH` message used to read *"read `m5_ver3/logs/planner_server.log`"*
+— the root, which the next bringup replaced. It now reads the running
+stack's own directory off the state file
+(`evidence_core.stack_log_dir()`), and it prints the code table with it,
+because §17.3's whole difficulty was that a `2xx` is
+`ComputePathToPose`'s and a `1xx` is `FollowPath`'s and nothing on this
+track said so:
+
+```
+NO PATH    action status 6, error_code 205 - the planner REFUSED this goal.
+           THAT IS A MEASUREMENT AND THE PLANNER SAID WHY. Read it here, and it
+           will still be there after the next bringup (config.yaml paths.log_dir):
+             .../m5_ver3/logs/run-<stamp>/planner_server.log
+           nav2 numbers ComputePathToPose's own codes from 200: 203 START_OUTSIDE_MAP,
+           205 START_OCCUPIED, 206 GOAL_OCCUPIED, 208 NO_VALID_PATH. FollowPath numbers
+           from 100, so a 2xx here is the PLANNER and never the controller.
+```
+
+**WHAT IT DOES NOT DO.** It does not go back and recover the two logs
+that were already lost — §17.3 and §17.4 still decode their `205` from
+the action definition and the plan streams, and they still say so. This
+makes the NEXT one readable.
+
+#### 20.7c THE DAMPING TERM HAS A TEST NOW
+
+`use_path_orientations: true` is the fourth of §16.2's four parameters
+and was **the only one with no test**. The other three are recomputed
+from something else in the tree — `time_steps` from the transit ceiling,
+`prune_distance` against the horizon, `offset_from_furthest` against the
+reachable index — but this one is a BOOLEAN and nothing derives it, so a
+silent flip back to nav2's own default of `false` passed all 867 tests
+and changed the vehicle's behaviour on the one leg the whole residual
+lives on.
+
+**WHAT IT WOULD HAVE COST.** §16.4a: with it false, `PathAlignCritic`
+sums the distance from each trajectory point to the path and nothing
+else — proportional feedback on a cross-track error that is a double
+integrator of the steer angle. Rung 5 lost `ring_corner` that way, with
+the heading swinging ±0.3 rad at a RISING amplitude and the watchdog
+abandoning it at t+72.0 s. `test_the_DAMPING_TERM_is_still_on` asserts
+the flag **and** the two things that make it meaningful: the planner is
+`REEDS_SHEPP` (so every pose carries a heading a vehicle of this turning
+radius could hold) and `PathAngleCritic.mode` is still 2, which reads the
+same field for the same reason.

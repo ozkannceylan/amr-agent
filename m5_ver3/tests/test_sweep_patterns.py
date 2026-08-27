@@ -767,3 +767,71 @@ def test_every_nav_child_is_spawned_inside_the_nav_guard():
     assert seen == set(parts), (
         "this test did not find every nav child in m5v3.sh: missing "
         "{}".format(sorted(set(parts) - seen)))
+
+
+# ======================================================================
+# F4 CLOSING WAVE - THE PER-BRINGUP LOG DIRECTORY
+# ======================================================================
+
+def test_start_opens_a_log_directory_of_its_OWN_and_does_not_mkdir_the_root():
+    # THE DEFECT THIS CLOSES. Until F4's closing wave `start` did
+    # `mkdir -p "$LOGDIR"` on the ROOT and `spawn` redirected to
+    # "$LOGDIR/<child>.log", so every bringup TRUNCATED the previous
+    # one's logs. EVIDENCE_NAV_V3.md 17.3 and 17.4 pay for it: two runs
+    # aborted with error_code 205 and the planner log that would have
+    # named the refusal had already been overwritten, so the code is
+    # decoded from the action definition and the recorded plan streams
+    # instead of quoted.
+    script = read("m5v3.sh")
+    assert "open_run_log_dir\n" in script
+    assert 'LOGDIR="$LOGROOT/run-$stamp"' in script
+    # and the root is no longer what start makes for itself
+    assert 'mkdir -p "$LOGDIR" || refuse "the log directory is writable"' \
+        not in script
+
+
+def test_the_run_directory_is_RECORDED_and_the_other_two_commands_read_it():
+    # `status` and `stop` run in later processes and cannot know the
+    # stamp. It travels in paths.traction_file, which is the same
+    # runtime-state idiom traction=, arm=, loc=, nav= and monitor= use -
+    # and for the same reason: three commands must not be able to
+    # disagree about which bringup they are talking about.
+    script = read("m5v3.sh")
+    assert 'echo "log_dir=$LOGDIR"' in script
+    assert script.count("adopt_run_log_dir") >= 3   # def + status + stop
+    body = script.split("adopt_run_log_dir() {", 1)[1].split("\n}", 1)[0]
+    assert "sed -n 's/^log_dir=//p'" in body
+    # a state file written before the wave has no such line and the
+    # fallback is the root, which is where that stack's logs really are
+    assert '[ -n "$recorded" ] || return 0' in body
+
+
+def test_stop_READS_the_run_directory_before_it_DELETES_the_state_file():
+    # Order is the whole of it: the traction file is the only thing that
+    # knows which bringup's logs these are, and stop removes it.
+    script = read("m5v3.sh")
+    body = script.split("stop() {", 1)[1]
+    assert body.index("adopt_run_log_dir") < body.index('rm -f "$TRACTIONFILE"')
+
+
+def test_the_prune_can_only_ever_delete_a_run_directory():
+    # `logs/evidence/` is a SIBLING of the run directories and every
+    # recorded session on this track lives in it. A prune that could
+    # reach it would delete the evidence to save space in the logs.
+    script = read("m5v3.sh")
+    body = script.split("open_run_log_dir() {", 1)[1].split("\n}", 1)[0]
+    assert '"$LOGROOT"/run-*)' in body
+    assert 'rm -rf "$victim"' in body
+    assert "evidence" not in body
+
+
+def test_the_keep_count_is_config_and_not_inline():
+    # config.yaml is the one home for every behavioural constant, and a
+    # directory that grows without bound is why people delete log trees
+    # wholesale and lose the one they wanted.
+    script = read("m5v3.sh")
+    assert "$CFG_PATHS_LOG_KEEP_RUNS" in script
+    assert "paths.log_keep_runs" in script          # in REQUIRED_KEYS
+    import yaml
+    cfg = yaml.safe_load(read("config.yaml"))
+    assert int(cfg["paths"]["log_keep_runs"]) >= 2

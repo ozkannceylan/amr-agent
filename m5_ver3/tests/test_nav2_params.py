@@ -1199,6 +1199,47 @@ def test_the_critic_that_holds_the_path_is_still_ENABLED(controller):
     assert float(align["cost_weight"]) > 0.0
 
 
+def test_the_DAMPING_TERM_is_still_on(controller, planner):
+    # THE FOURTH OF §16.2's FOUR PARAMETERS, AND THE ONLY ONE THAT HAD
+    # NO TEST. `time_steps`, `prune_distance` and `offset_from_furthest`
+    # are all recomputed above from something else in the tree; this one
+    # is a BOOLEAN and nothing derives it, so a silent flip back to
+    # nav2's own default of `false` would pass every other test in this
+    # file and change the vehicle's behaviour on the one leg the whole
+    # residual lives on.
+    #
+    # WHAT IT DOES, AND WHY THE RING LEG DEPENDS ON IT. Without it
+    # PathAlignCritic sums `sqrtf(dx*dx + dy*dy)` - the distance from
+    # each trajectory point to the path and nothing else - which is
+    # PROPORTIONAL feedback on cross-track error, and cross-track error
+    # on a steered vehicle is a DOUBLE INTEGRATOR of the steer angle.
+    # Round a double integrator, proportional feedback oscillates. With
+    # it the sum is `sqrtf(dx*dx + dy*dy + dyaw*dyaw)`, which penalises
+    # a trajectory heading ACROSS the path before it has got anywhere:
+    # the rate term the loop was missing (EVIDENCE_NAV_V3.md §16.4a).
+    #
+    # WHAT IT COST TO FIND. Rung 5 lost `ring_corner` with this false -
+    # heading swinging +-0.3 rad, period near 20 s, RISING, 1.54 m off
+    # the line by t+35 s, abandoned by the watchdog at t+72.0 s. Rung 6
+    # set it true and the same goal arrived in 127.6 s with a
+    # curvature-following gain of 0.648 against 0.161. Six runs across
+    # two tasks now sit at 4 of 6 with it ON (§17.5); nobody has ever
+    # measured what this leg does with it off since rung 5.
+    #
+    # AND IT IS ONLY WORTH READING BECAUSE THE PLANNER IS FEASIBLE.
+    # SmacPlannerHybrid emits a heading per pose that a vehicle of this
+    # turning radius could actually hold; on a planner emitting
+    # geometric waypoints this parameter would be scoring noise. So the
+    # test asserts BOTH halves - the flag, and the planner that makes it
+    # meaningful - because either one alone is a different stack.
+    assert controller["PathAlignCritic"]["use_path_orientations"] is True
+    assert planner["motion_model_for_search"] == "REEDS_SHEPP"
+    # and PathAngleCritic already reads the same field for the same
+    # reason (§14.5): mode 2 is `forward preference`, which is a claim
+    # about a heading the planner actually put on each pose.
+    assert int(controller["PathAngleCritic"]["mode"]) == 2
+
+
 # ----------------------------------------------------------------------
 # THE NAVIGATION BUDGET - config.yaml's derivation against the tree
 # ----------------------------------------------------------------------

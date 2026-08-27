@@ -1869,9 +1869,23 @@ def analyse_session(cfg, session):
               "({:.3f} /s)".format(jumps.n, jumps.samples, jumps.span_s,
                                    jumps.per_s or 0.0))
         if jumps.n:
+            # THE F3 FIGURE IS THE OPEN-LOOP ONE AND A CLOSED-LOOP RUN
+            # IS EXPECTED TO EXCEED IT. Without this pointer a legal
+            # 1.19 m step reads as a breach of the contract, which is
+            # the opposite of what the two addenda say: 13.10a moved
+            # the closed-loop bound to 0.8310 m and 13.10b to 1.1919 m
+            # on the amcl arm / 0.8845 m on slam, with no maximum
+            # established. The HEADING half has held at F3's figure
+            # through all three.
             print("          worst step {:.4f} m / {:.4f} rad; F3 handed "
-                  "over 0.2591 m / 0.0764 rad".format(
+                  "over 0.2591 m / 0.0764 rad OPEN LOOP".format(
                       jumps.max_dpos_m, jumps.max_dyaw_rad))
+            print("          a CLOSED loop is expected to exceed the "
+                  "position half and does:")
+            print("          EVIDENCE_LOCALIZATION_V3.md 13.10a -> "
+                  "0.8310 m, 13.10b -> 1.1919 m (amcl)")
+            print("          / 0.8845 m (slam), and 13.10b establishes "
+                  "NO maximum. Size on your own arm.")
             print("          position steps {}".format(jumps.dpos))
             print("          heading  steps {}".format(jumps.dyaw))
         # AND THE INTERACTION, WHICH IS THE THING NOBODY HAS MEASURED
@@ -2199,6 +2213,17 @@ def probe(cfg, goal):
                    "it runs INSIDE WSL with /opt/ros/jazzy sourced.")
 
     print("=== m5v3 nav plan probe ===")
+    # WHERE THIS BRINGUP'S LOGS ARE, read off the state file the running
+    # stack wrote. Until F4's closing wave every bringup truncated the
+    # last one's, so the refusal below used to point at a file the next
+    # start had already replaced.
+    log_dir = os.path.join("m5_ver3", cfg.s("paths.log_dir").split("/")[-1])
+    state_path = os.path.join(_common.REPO, cfg.s("paths.traction_file"))
+    if os.path.isfile(state_path):
+        with open(state_path, encoding="utf-8") as handle:
+            log_dir = ec.stack_log_dir(
+                ec.parse_state_file(handle.read()),
+                os.path.join(_common.REPO, cfg.s("paths.log_dir")))
     frame, at_map = goal_in_map(cfg, goal)
     describe(cfg, goal)
     print("")
@@ -2262,8 +2287,17 @@ def probe(cfg, goal):
         print("NO PATH    action status {}, error_code {} - the planner "
               "REFUSED this goal.".format(
                   status, int(getattr(outcome.result, "error_code", -1))))
-        print("           That is a measurement: read "
-              "m5_ver3/logs/planner_server.log.")
+        print("           THAT IS A MEASUREMENT AND THE PLANNER SAID WHY. "
+              "Read it here, and it")
+        print("           will still be there after the next bringup "
+              "(config.yaml paths.log_dir):")
+        print("             {}/planner_server.log".format(log_dir))
+        print("           nav2 numbers ComputePathToPose's own codes from "
+              "200: 203 START_OUTSIDE_MAP,")
+        print("           205 START_OCCUPIED, 206 GOAL_OCCUPIED, 208 "
+              "NO_VALID_PATH. FollowPath numbers")
+        print("           from 100, so a 2xx here is the PLANNER and never "
+              "the controller.")
         return 1
     world = [frame.to_world(*pose) for pose in poses]
     length = math.fsum(math.hypot(b[0] - a[0], b[1] - a[1])

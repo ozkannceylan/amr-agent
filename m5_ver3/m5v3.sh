@@ -313,7 +313,7 @@ REQUIRED_KEYS=(
     nav.lifecycle.node_name nav.default_goal
     slippery.slip_compliance_lateral slippery.slip_compliance_longitudinal
     slippery.service_timeout_ms
-    paths.log_dir paths.pidfile paths.traction_file
+    paths.log_dir paths.log_keep_runs paths.pidfile paths.traction_file
     timing.world_load_s timing.settle_s timing.startup_check_s
     timing.stop_grace_s timing.gui_gate_poll_s timing.gui_gate_settle_s
     timing.spawn_service_timeout_ms timing.pid_wait_tries timing.pid_wait_s
@@ -324,7 +324,16 @@ configure() {
     load_config "${REQUIRED_KEYS[@]}"
     PIDFILE="$REPO/$CFG_PATHS_PIDFILE"
     TRACTIONFILE="$REPO/$CFG_PATHS_TRACTION_FILE"
-    LOGDIR="$REPO/$CFG_PATHS_LOG_DIR"
+    # THE ROOT, AND `LOGDIR` IS THE ONE BRINGUP'S OWN DIRECTORY INSIDE
+    # IT. Every refusal, every `status` line and every check in this
+    # script names "$LOGDIR/<child>.log", so the two variables are all
+    # that has to move: `start` points LOGDIR at a new subdirectory and
+    # records it, and `status` and `stop` read that record back. With no
+    # record - a crash, or a `status` after `stop` - LOGDIR stays the
+    # root, which is where a pre-wave stack's logs are and is never
+    # wrong, only older.
+    LOGROOT="$REPO/$CFG_PATHS_LOG_DIR"
+    LOGDIR="$LOGROOT"
     WORLD="$REPO/$CFG_WORLD_FILE"
     MODEL="$REPO/$CFG_VEHICLE_MODEL"
     EKF_PARAMS="$REPO/$CFG_EKF_PARAMS_FILE"
@@ -1545,9 +1554,9 @@ start() {
     fi
     # Unchecked, an unwritable log dir fails every redirection this stack
     # opens and start would sleep its way to "up." over a stack that never
-    # began.
-    mkdir -p "$LOGDIR" || refuse "the log directory is writable" "$CONFIG" \
-        "paths.log_dir resolves to $LOGDIR"
+    # began. Since F4's closing wave this also PICKS the directory: one
+    # per bringup, so a log can still be quoted after the next start.
+    open_run_log_dir
 
     gpu_preflight
 
@@ -3155,6 +3164,12 @@ write_traction() {
       # from nav= and why it carries collision_monitor.yaml's md5.
       echo "monitor=$monitor"
       echo "monitor_source=$monitor_source"
+      # WHERE THIS BRINGUP'S LOGS ARE, so that `status` and `stop` -
+      # which run in later processes and cannot know the stamp - name
+      # the same files every refusal above named. It is RUNTIME STATE,
+      # not configuration, and `stop` deletes it with the rest after
+      # reading it.
+      echo "log_dir=$LOGDIR"
       echo "partition=$GZ_PARTITION"
       echo "started=$(date -Is)"; } > "$TRACTIONFILE" \
         || refuse "the traction state file is writable" "$CONFIG" \
@@ -3194,6 +3209,10 @@ spawn() {  # spawn <name> <cmd...>
 }
 
 status() {
+    # THE RUNNING STACK'S OWN LOG DIRECTORY, so the paths this prints are
+    # the files that stack is actually writing and not the previous
+    # bringup's. Read off paths.traction_file, which start wrote.
+    adopt_run_log_dir
     echo "m5-ver3: partition $GZ_PARTITION, domain $ROS_DOMAIN_ID"
     echo "pidfile: $PIDFILE"
     echo "logs:    $LOGDIR"
@@ -3291,8 +3310,54 @@ status() {
     [ "$dead" = 0 ] && [ "$alive" -gt 0 ]
 }
 
+# THIS BRINGUP'S OWN LOG DIRECTORY, MADE AND PRUNED. F4's closing wave.
+# Every bringup before this one truncated the last one's logs, and the
+# cost is in EVIDENCE_NAV_V3.md 17.3 and 17.4: two runs aborted with
+# `error_code 205` and the planner log that would have named the refusal
+# had been overwritten before anybody read the evidence.
+#   THE PRUNE IS BEFORE THE MAKE, so the count is what config.yaml says
+#   AFTER this bringup has its own - `paths.log_keep_runs` minus one
+#   survive alongside it. It prunes by NAME, which sorts
+#   chronologically because the stamp is %Y%m%d-%H%M%S, and it touches
+#   only directories matching `run-*`: `logs/evidence/` is a sibling and
+#   is never a candidate, which matters because every recorded session
+#   on this track lives there.
+open_run_log_dir() {
+    local stamp keep victim
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    keep="$CFG_PATHS_LOG_KEEP_RUNS"
+    mkdir -p "$LOGROOT" || refuse "the log directory is writable" "$CONFIG"         "paths.log_dir resolves to $LOGROOT"
+    # shellcheck disable=SC2012
+    ls -1d "$LOGROOT"/run-* 2>/dev/null | sort | head -n -"$(( keep - 1 ))"         | while read -r victim; do
+            case "$victim" in
+                "$LOGROOT"/run-*) rm -rf "$victim" ;;
+            esac
+        done
+    LOGDIR="$LOGROOT/run-$stamp"
+    mkdir -p "$LOGDIR" || refuse "this bringup's log directory is writable"         "$CONFIG (paths.log_dir)"         "it resolves to $LOGDIR"
+    echo "logs:   $LOGDIR (this bringup's own; the last"          "$CFG_PATHS_LOG_KEEP_RUNS are kept)"
+}
+
+# AND THE OTHER TWO COMMANDS FIND IT THE WAY THEY FIND THE TRACTION.
+# `start` records it in paths.traction_file; this reads it back. A state
+# file written before this wave has no `log_dir=` line and LOGDIR stays
+# the root, which is exactly where that stack's logs are - `loc=none`'s
+# rule, one line over: a missing line is an older script and not a value.
+adopt_run_log_dir() {
+    local recorded
+    [ -f "$TRACTIONFILE" ] || return 0
+    recorded="$(sed -n 's/^log_dir=//p' "$TRACTIONFILE")"
+    [ -n "$recorded" ] || return 0
+    [ -d "$recorded" ] || return 0
+    LOGDIR="$recorded"
+}
+
 stop() {
     local pid name
+    # BEFORE ANYTHING IS DELETED. `stop` removes the traction file at the
+    # end, and that file is the only thing that knows which bringup's
+    # logs these are.
+    adopt_run_log_dir
     # SHUTDOWN ORDER: THE SIMULATOR GOES FIRST, AND stop IS NOT A BRAKE.
     # The model's joint controllers are VELOCITY controllers that hold
     # their last setpoint forever - measured in m6, the truck ran 14.8 m
@@ -3328,6 +3393,13 @@ stop() {
     sleep "$CFG_TIMING_STOP_GRACE_S"
     sweep KILL
     echo "down."
+    # AND THE LOGS STAY, WHICH IS THE POINT OF THE DIRECTORY. `stop`
+    # deletes the pidfile and the traction file and nothing else; the
+    # children's logs are the record of what this bringup did and the
+    # NEXT bringup no longer truncates them.
+    if [ "$LOGDIR" != "$LOGROOT" ] && [ -d "$LOGDIR" ]; then
+        echo "logs kept: $LOGDIR"
+    fi
 }
 
 USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [amcl|slam]] [--nav] [--monitor] | stop | status

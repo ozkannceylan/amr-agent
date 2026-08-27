@@ -2174,9 +2174,54 @@ drive_route:
 
 # -------------------------------- PATHS --------------------------------
 # Relative to the repository root. The pidfile is what stop reads and the
-# only file it deletes; the log dir is one file per child, by name.
+# only file it deletes; the log dir is one directory PER BRINGUP, one
+# file per child inside it, by name.
 paths:
+  # THE ROOT, AND SINCE F4's CLOSING WAVE EVERY BRINGUP GETS ITS OWN
+  # SUBDIRECTORY UNDER IT: `<log_dir>/run-<YYYYmmdd-HHMMSS>/<child>.log`.
+  #
+  # WHY, AND IT IS MEASURED RATHER THAN TIDY. Until this change every
+  # bringup TRUNCATED the previous one's logs, because `spawn` redirects
+  # to `<log_dir>/<child>.log` and the next start opens the same name.
+  # The cost was paid twice in F4 Task 3: two runs aborted with
+  # `error_code 205` and by the time anybody read the evidence the
+  # planner log that would have named the refusal had been overwritten
+  # by the next bringup, so EVIDENCE_NAV_V3.md 17.3 and 17.4 decode that
+  # code from the ACTION DEFINITION and the recorded plan streams rather
+  # than quoting the line the planner actually printed. On a track whose
+  # whole method is "every figure names its instrument", a log that
+  # cannot be quoted is an instrument that was thrown away.
+  #
+  # WHY A DIRECTORY PER BRINGUP AND NOT A COPY INTO THE SESSION. The
+  # obvious alternative is for `stop` to copy the logs into whatever
+  # tools/drive_goal.py recorded. It loses exactly the cases that matter
+  # most: a bringup can produce NO session at all - a refusal, a health
+  # gate that failed, `--rf2o`'s constraint-20 bringup below - and those
+  # are the runs whose logs nothing else explains. It can also produce
+  # SEVERAL, and then the same log is copied into each and the copies
+  # drift apart from the run they describe. A bringup is the thing the
+  # logs belong to, so a bringup is what they are filed under.
+  #
+  # AND THE DIRECTORY IS FOUND THE WAY THE TRACTION FILE IS FOUND.
+  # `start` writes `log_dir=` into paths.traction_file, and `status` and
+  # `stop` read it back - the same runtime-state idiom, for the same
+  # reason: three commands must not be able to disagree about which
+  # bringup they are talking about. With no state file (a crash, or a
+  # `status` after `stop`) they fall back to the root, and `stop` prints
+  # the preserved path on its way out.
   log_dir: "m5_ver3/logs"
+  # HOW MANY BRINGUPS' LOGS ARE KEPT. `start` prunes the oldest beyond
+  # this before it makes its own, because a directory that grows without
+  # bound is the reason people delete log directories wholesale and lose
+  # the one they wanted.
+  #   THIRTY IS THREE SESSIONS OF WORK. F4 Task 3 took 16 driven
+  # bringups plus its demonstrations in one afternoon; thirty holds that
+  # afternoon and the one before it, which is the window in which
+  # somebody reads an evidence file and asks what the log said.
+  #   IT PRUNES BY NAME AND THE NAMES SORT CHRONOLOGICALLY, which is why
+  # the stamp is `%Y%m%d-%H%M%S` - the same format every session
+  # directory on this track already uses.
+  log_keep_runs: "30"
   pidfile: "m5_ver3/.m5v3_pids"
   # WHAT TRACTION THE RUNNING PLANT IS ON, written by `start` and deleted
   # by `stop` exactly as the pidfile is. It is NOT a constant and it is

@@ -1151,6 +1151,26 @@ def loc_gate_source(localizer):
     return _loc_lookup(_LOC_GATE_SOURCES, localizer, "a gate source")
 
 
+def stack_log_dir(state, fallback):
+    """Where the RUNNING stack's per-child logs are, off its state file.
+
+    F4's CLOSING WAVE, AND IT EXISTS SO THAT A REFUSAL CAN NAME A FILE
+    THAT IS STILL THERE. Every bringup used to truncate the previous
+    one's logs; since the wave each gets `<log_dir>/run-<stamp>/` and
+    `m5v3.sh` records the path in its state file. A tool that printed
+    the ROOT would send a reader to a file the next bringup had already
+    replaced - which is exactly what happened to the two `error_code
+    205` runs EVIDENCE_NAV_V3.md 17.3 and 17.4 had to decode from
+    streams instead of quoting.
+
+    `state` is `parse_state_file`'s dict. A state file written before
+    the wave carries no `log_dir=` line and this answers `fallback`,
+    which is where that stack's logs really are - `loc=none`'s rule
+    again: a missing line is an older script and not a value.
+    """
+    return state.get("log_dir") or fallback
+
+
 def parse_state_file(text):
     """m5v3.sh's `key=value` state file, as a dict.
 
