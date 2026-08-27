@@ -400,6 +400,54 @@ def arrival(goal, pose):
             ec.normalise_angle(pose[2] - goal.pose_yaw))
 
 
+#: The truth row nearest the goal, and what the error was THERE.
+#: `distance` is the same magnitude `arrival()` returns; `dx`/`dy` are
+#: its signed components in the BUILDING's frame; `along`/`across` are
+#: the same vector projected onto the GOAL's own travel heading, which
+#: is the only frame in which the word "cross-track" means anything at
+#: a goal.
+Approach = collections.namedtuple(
+    "Approach", "t x y yaw dx dy distance dyaw along across")
+
+
+def closest_approach(goal, rows, lo, hi):
+    """The nearest the vehicle ever GOT to the goal, and the error there.
+
+    WHY THE ARRIVAL FIGURE IS NOT THIS FIGURE, AND WHY BOTH ARE PRINTED.
+    `arrival()` scores where the truck came to REST, which on a run that
+    did not arrive is wherever the controller gave up - 6.7 m past the
+    goal on one of this task's and 40 m on another. That number says the
+    run failed and says nothing at all about WHY. This one says how
+    close it came and which way it was out when it was closest, which
+    is the difference between "it never got there" and "it went past on
+    the wrong side by 0.97 m".
+
+    THE WINDOW IS [t_sent, t_done] AND NOT THE WHOLE RECORDING. Before
+    the goal was sent the vehicle was standing at the spawn; after the
+    result the bench is watching it coast. Neither is an approach. A
+    window with no truth sample in it is None and not a distance - a run
+    whose action was rejected has no approach to report.
+
+    THE PROJECTION IS ONTO THE GOAL'S TRAVEL HEADING and never onto the
+    vehicle's. What a goal box is a criterion about is where the truck
+    is relative to the PLACE, and the place's own frame is the direction
+    the route arrives along; taking the frame from the vehicle would
+    rotate the split by the heading error being reported beside it.
+    `across` is positive to the LEFT of that heading, which is
+    evidence_core.track_error()'s own convention.
+    """
+    inside = [row for row in rows if lo <= float(row[0]) <= hi]
+    if not inside:
+        return None
+    best = min(inside, key=lambda row: math.hypot(float(row[1]) - goal.x,
+                                                  float(row[2]) - goal.y))
+    dx, dy, distance, dyaw = arrival(goal, (best[1], best[2], best[3]))
+    split = ec.track_error(dx, dy, goal.travel_yaw)
+    return Approach(float(best[0]), float(best[1]), float(best[2]),
+                    float(best[3]), dx, dy, distance, dyaw,
+                    split.along, split.cross)
+
+
 def steer_activity(rows):
     """Total travel, worst step and range of the steer terminal.
 
@@ -523,6 +571,7 @@ def analyse_session(cfg, session):
     # composed on the estimator's timeline and carried into the building
     # by the committed registration. NOTHING IS ANCHORED.
     believed = None
+    world = []
     if parent and child:
         gap_s = cfg.f("nav.analyse.map_gap_s")
         composed = ec.compose_rows(parent, child, gap_s)
@@ -541,6 +590,47 @@ def analyse_session(cfg, session):
                                  truth_pose[1] - believed[1])))
     print("          the instrument floor under both: {}".format(
         frame.floor()))
+
+    # ---- and the nearest it ever GOT, which is the other question ----
+    # THE ARRIVAL FIGURE ABOVE SCORES WHERE THE TRUCK STOPPED. On a run
+    # that did not arrive that is wherever the controller gave up, and
+    # it says the run failed without saying why. This says how close it
+    # came and which way it was out when it was closest - the difference
+    # between "it never got there" and "it went past on the wrong side".
+    near = closest_approach(goal, truth, t_sent, t_done)
+    if near is None:
+        print("CLOSEST   no ground-truth sample between the goal being "
+              "sent and the result")
+    else:
+        print("CLOSEST   t+{:.1f}s  ({:+.4f}, {:+.4f}) yaw {:+.4f}   "
+              "d = {:.4f} m".format(near.t - t_sent, near.x, near.y,
+                                    near.yaw, near.distance))
+        print("          dx {:+.4f}  dy {:+.4f}   (metres east and north "
+              "in the building)".format(near.dx, near.dy))
+        print("          ALONG {:+.4f}  ACROSS {:+.4f}   of the goal's "
+              "own travel heading".format(near.along, near.across))
+        print("          across is + to the LEFT of it. THE GOAL BOX IS "
+              "A CRITERION ABOUT")
+        print("          A MOVING VEHICLE, because `stateful` latches "
+              "the first time it is")
+        print("          inside - which is why this row and not the "
+              "resting one is the one")
+        print("          the box has to be sized against.")
+    # AND THE SAME SCAN OVER THE POSE THE CHECKER ACTUALLY SAW. The box
+    # is evaluated on `map` -> `base_link`, not on the ground truth, so
+    # a run can arrive with the TRUTH outside the box and a run can miss
+    # with the truth inside it. Printing only one of the two would make
+    # the other look like an instrument error.
+    nearb = closest_approach(goal, world, t_sent, t_done) if world else None
+    if nearb is not None:
+        print("          BELIEVED closest t+{:.1f}s  d = {:.4f} m   "
+              "ALONG {:+.4f}  ACROSS {:+.4f}".format(
+                  nearb.t - t_sent, nearb.distance, nearb.along,
+                  nearb.across))
+        print("          truth - believed AT THAT MOMENT = {:.4f} m; the "
+              "box saw the second".format(
+                  math.hypot(near.x - nearb.x, near.y - nearb.y)
+                  if near is not None else float("nan")))
 
     # ---- what the controller did -------------------------------------
     print("")

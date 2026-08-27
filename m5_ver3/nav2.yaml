@@ -587,15 +587,22 @@ controller_server:
       # MEASURED, AND IT IS THE SAME NUMBER TWICE. Two runs of the
       # headline goal reached the goal POSITION and could not finish:
       #
-      #   run `...123524`  closest approach 0.152 m at t+64.8 s,
-      #                    heading -1.3185 rad against a goal of +3.1416
+      #   run `...123524`  closest approach 0.1520 m of TRUTH and
+      #                    0.1640 m of BELIEF at t+61.9 s, heading
+      #                    -1.3185 rad against a goal of +3.1416
       #                    -> 1.82 rad out. Drove another 210 s.
-      #   run `...124352`  closest approach 0.010 m at t+283.4 s,
-      #                    heading -2.0335 -> 1.11 rad out. Drove to the
-      #                    480 s budget and was cancelled.
+      #   run `...124352`  closest approach 0.0101 m of TRUTH and
+      #                    0.0409 m of BELIEF at t+280.3 s, heading
+      #                    -2.0335 -> 1.11 rad out. Drove to the 480 s
+      #                    budget and was cancelled.
       #
       # Both were INSIDE the 0.60 m box by a wide margin. Neither was
       # inside 0.15 rad of the heading, and neither could get there.
+      #   EVERY ONE OF THOSE FOUR DISTANCES IS PRINTED BY
+      #   `tools/drive_goal.py analyse` - its CLOSEST block, which scans
+      #   the ground truth and the believed pose between the goal being
+      #   sent and the result. EVIDENCE_NAV_V3.md 15.3b is the table.
+      #   The BELIEVED one is the pose the checker actually saw.
       #
       # THE CRIB SAID SO FIRST AND THIS IS AN INDEPENDENT REPRODUCTION.
       # agv/forklift/nav2.yaml's `staging_goal_checker` exists because
@@ -656,12 +663,21 @@ controller_server:
       # happens, because it cannot stop inside a box it has not yet
       # reached. So the pose being tested carries the MOVING error and
       # not the at-rest one, and 0.1954 m was never the right number.
-      #   MEASURED. On the run that decided it the truck tracked a
-      #   straight 17 m plan and its CLOSEST APPROACH to the goal was
-      #   0.3398 m - outside a 0.25 m box by 0.09 m. The checker never
-      #   latched, and what happened next is section 15's largest
-      #   controller finding: MPPI did not turn the vehicle round. It
-      #   drove another 260 s and 21 m east, into the far wall.
+      #   MEASURED, AND THE FIGURE IS THE INSTRUMENT'S. On run
+      #   `...120921` - the same configuration, still on disk - the
+      #   truck tracked a straight 17 m plan and its CLOSEST APPROACH to
+      #   the goal was 0.5304 m of TRUTH and 0.5508 m of BELIEF, against
+      #   the 0.25 m box standing then: outside it by a factor of two.
+      #   The checker never latched, and what happened next is section
+      #   15's largest controller finding: MPPI did not turn the vehicle
+      #   round. It drove another 260 s and 21 m east, into the far
+      #   wall.
+      #     BOTH DISTANCES ARE PRINTED BY `tools/drive_goal.py analyse`
+      #     (its CLOSEST block, EVIDENCE_NAV_V3.md 15.3b). An earlier
+      #     draft of this comment quoted 0.3398 m from a session that
+      #     was deleted during the task and from a scan this tool did
+      #     not then carry; that figure is WITHDRAWN and this one
+      #     replaces it.
       #
       # 0.60 m IS 0.5321 ROUNDED UP TO A HANDS-WIDTH, and it is 2.4
       # times the station class. WHAT THAT MEANS IS WRITTEN DOWN RATHER

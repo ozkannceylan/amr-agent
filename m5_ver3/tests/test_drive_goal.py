@@ -90,6 +90,102 @@ def test_the_heading_error_is_WRAPPED_and_never_a_near_full_turn():
 
 
 # ----------------------------------------------------------------------
+# the nearest it ever GOT, which is a different question from where it
+# stopped
+# ----------------------------------------------------------------------
+#
+# WHY THIS INSTRUMENT EXISTS. `arrival()` scores where the truck came to
+# REST. On a run that did not arrive that is wherever the controller
+# gave up - 6.7 m past the goal on one of F4 Task 2's runs and 40 m on
+# another - and that number says the run failed without saying why. The
+# scan below says how close it came and WHICH WAY it was out when it was
+# closest, which is the difference between "it never got there" and "it
+# went past on the wrong side by 0.97 m".
+#
+# THE SYNTHETIC PASS-BY. A truck driving due EAST along y = -1, past a
+# goal at the origin whose own travel heading is due east. The closest
+# point is directly south of the goal at x = 0, the distance is 1.0, and
+# the vehicle is on the RIGHT of the goal's heading - so `across` must
+# be NEGATIVE. Every one of those four is a different way of getting the
+# frame wrong.
+
+_PASSBY_GOAL = drive_goal.Goal(
+    name="passby", x=0.0, y=0.0, travel_yaw=0.0,
+    pose_yaw=drive_goal.pose_yaw(0.0), repeat=1, note="")
+
+#: (t, x, y, yaw) driving east along y = -1 from x = -3 to x = +3.
+_PASSBY = [(10.0 + i, -3.0 + i, -1.0, math.pi) for i in range(7)]
+
+
+def test_the_closest_approach_is_the_NEAREST_row_and_not_the_last_one():
+    near = drive_goal.closest_approach(_PASSBY_GOAL, _PASSBY, 10.0, 20.0)
+    assert near.t == pytest.approx(13.0)
+    assert near.x == pytest.approx(0.0)
+    assert near.distance == pytest.approx(1.0)
+    # and the LAST row is 3 m away, which is what `arrival()` would have
+    # scored on a run that ended here
+    assert drive_goal.arrival(
+        _PASSBY_GOAL, _PASSBY[-1][1:])[2] == pytest.approx(math.hypot(3.0,
+                                                                      1.0))
+
+
+def test_the_components_at_that_row_carry_their_SIGN():
+    near = drive_goal.closest_approach(_PASSBY_GOAL, _PASSBY, 10.0, 20.0)
+    assert near.dx == pytest.approx(0.0)
+    assert near.dy == pytest.approx(-1.0)
+
+
+def test_ACROSS_is_measured_against_the_GOALs_travel_heading():
+    # Driving east, one metre SOUTH of the goal, is one metre to the
+    # RIGHT of the goal's own heading - so `across` is negative and
+    # `along` is nothing at all.
+    near = drive_goal.closest_approach(_PASSBY_GOAL, _PASSBY, 10.0, 20.0)
+    assert near.along == pytest.approx(0.0)
+    assert near.across == pytest.approx(-1.0)
+
+
+def test_the_SAME_pass_by_on_a_goal_facing_the_other_way_flips_ACROSS():
+    # THE CHECK THAT CATCHES A FRAME TAKEN FROM THE VEHICLE. The truck's
+    # own heading is identical in both cases; only the GOAL's travel
+    # heading turns, and `across` has to turn with it.
+    goal = _PASSBY_GOAL._replace(travel_yaw=math.pi,
+                                 pose_yaw=drive_goal.pose_yaw(math.pi))
+    near = drive_goal.closest_approach(goal, _PASSBY, 10.0, 20.0)
+    assert near.across == pytest.approx(+1.0)
+    assert near.distance == pytest.approx(1.0)
+
+
+def test_the_split_is_a_ROTATION_and_loses_nothing():
+    near = drive_goal.closest_approach(_PASSBY_GOAL, _PASSBY, 10.0, 20.0)
+    assert math.hypot(near.along, near.across) == pytest.approx(
+        near.distance)
+
+
+def test_the_window_is_the_GOAL_and_not_the_whole_recording():
+    # Before the goal was sent the truck stood at the spawn and after
+    # the result the bench is watching it coast; neither is an approach.
+    # Here the window excludes the row that is actually nearest.
+    near = drive_goal.closest_approach(_PASSBY_GOAL, _PASSBY, 14.0, 20.0)
+    assert near.t == pytest.approx(14.0)
+    assert near.distance == pytest.approx(math.hypot(1.0, 1.0))
+
+
+def test_a_window_with_no_sample_in_it_is_None_and_not_a_distance():
+    # A run whose action was rejected has no approach to report, and
+    # reporting a huge number would read as one.
+    assert drive_goal.closest_approach(
+        _PASSBY_GOAL, _PASSBY, 100.0, 200.0) is None
+
+
+def test_the_heading_error_at_the_closest_row_is_the_arrival_rule():
+    # Same wrapping, same reference: the GOAL's pose yaw, not its travel
+    # heading.
+    near = drive_goal.closest_approach(_PASSBY_GOAL, _PASSBY, 10.0, 20.0)
+    assert near.dyaw == pytest.approx(
+        drive_goal.arrival(_PASSBY_GOAL, _PASSBY[3][1:])[3])
+
+
+# ----------------------------------------------------------------------
 # the resting pose
 # ----------------------------------------------------------------------
 

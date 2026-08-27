@@ -1088,6 +1088,7 @@ takes it.
 | **the command path is untouched** | worst steer step **0.100000 rad/tick** on every run — F4 Task 1's 2.0 rad/s ramp, exactly, never above it |
 | **THE ARRIVAL IS NOT REPEATABLE, AND THAT IS THE PHASE'S HEADLINE** | the headline goal, three times: **SUCCESS, ABORT, CANCELLED**. `ring_corner` and `aisle_end`: ABORT |
 | **the one arrival, scored absolutely** | truth **0.5348 m** from the goal, believed **0.5411 m**, the two **0.0141 m** apart |
+| **AND IT TURNED ON 0.0078 m** | its CLOSEST APPROACH in the pose the checker sees was **0.5922 m** against a **0.60 m** box; the run that aborted came within 0.9918 m. §15.3b |
 | **the jumps went OVER the budget** | worst single `map` → `odom` step **0.6490 m** against the **0.2591 m** §13.10 handed over — 2.5× |
 | **and the largest single finding** | a FREESPACE planner does not reproduce the road graph, and eight aborted goals are the measurement of it |
 
@@ -1156,9 +1157,9 @@ drive_goal: REFUSED at check 'every session in this analyse is off the SAME stac
 | 8 | `9ed03df7` | `spine_north` | ABORT 205 | — | **two of three is not a repeatability claim.** → `GoalCritic`/`PathFollowCritic` 1.4 → 2.50 m |
 | 9 | `5cc02ba3` | `spine_north` | ABORT 205 | — | **worse.** `PathFollowCritic`'s threshold is the range inside which path-following STOPS; 2.50 m takes it away for most of an approach |
 | 10 | `5cc02ba3` | `spine_north` | CANCELLED | — | worse again → reverted to 1.4 |
-| 11 | `16963750` | `spine_north` | CANCELLED | 21 m east | **the box was smaller than the error the pose carries WHILE MOVING.** Closest approach 0.3398 m against a 0.25 m box; the checker never latched and MPPI did not turn the vehicle round — it drove 260 s into the far wall. → the transit ceiling to 0.300 m/s (a speed the truck can stop out of), then the box to 0.60 m |
-| 12 | `8712475c` | `spine_north` | ABORT 205 | — | reached the goal POSITION to **0.152 m** and could not finish: heading 1.82 rad out |
-| 13 | `8712475c` | `spine_north` | CANCELLED | — | reached it to **0.010 m** and could not finish: heading 1.11 rad out. → `nav2_controller::PositionGoalChecker` |
+| 11 | `16963750` | `spine_north` | CANCELLED | 21 m east | **the box was smaller than the error the pose carries WHILE MOVING.** Closest approach **0.5304 m** of truth and **0.5508 m** of belief against a 0.25 m box (`…120921`, the instrument's own figure — §15.3b); the checker never latched and MPPI did not turn the vehicle round — it drove 260 s into the far wall. → the transit ceiling to 0.300 m/s (a speed the truck can stop out of), then the box to 0.60 m |
+| 12 | `8712475c` | `spine_north` | ABORT 205 | — | reached the goal POSITION to **0.1520 m** of truth (0.1640 m of belief) and could not finish: heading 1.82 rad out |
+| 13 | `8712475c` | `spine_north` | CANCELLED | — | reached it to **0.0101 m** of truth (0.0409 m of belief) and could not finish: heading 1.11 rad out. → `nav2_controller::PositionGoalChecker` |
 
 Rungs 12 and 13 are the crib's own finding, reproduced independently:
 `agv/forklift/nav2.yaml` carries a `staging_goal_checker` because
@@ -1201,6 +1202,56 @@ allowed it, deliberately (§14's `general_goal_checker`), and
 `drive_goal.py` prints it because nothing else would. An approach pose
 on this stack today delivers a POSITION and not a heading.
 
+### 15.3b THE CLOSEST APPROACH — the row the goal box is about
+
+**THE ARRIVAL TABLE SCORES WHERE THE TRUCK STOPPED, WHICH ON A RUN THAT
+DID NOT ARRIVE IS WHEREVER THE CONTROLLER GAVE UP.** 6.7 m past the goal
+on one of these and 40 m on another. That says the run failed and says
+nothing about why. `drive_goal.py analyse` therefore also scans the
+ground truth between the goal being SENT and the result for the row
+NEAREST the goal, and reports the signed components there — in the
+building's frame, and projected onto the GOAL's own travel heading,
+which is the only frame in which "cross-track" means anything at a
+goal. `across` is positive to the LEFT of that heading.
+
+**AND IT SCANS THE BELIEVED POSE THE SAME WAY, because the box is
+evaluated on `map` → `base_link` and never on the truth.** Printing only
+one of the two would make the other look like an instrument error.
+
+| session | result | TRUTH closest | ALONG | ACROSS | BELIEVED closest | box |
+|---|---|---|---|---|---|---|
+| `…130956` | **SUCCESS** | 0.7314 m | −0.5064 | −0.5277 | **0.5922 m** | 0.60 m |
+| `…131222` | ABORT 205 | 0.9683 m | +0.1295 | **−0.9596** | 0.9918 m | 0.60 m |
+| `…131600` | CANCELLED | 9.6556 m | −9.6556 | −0.0129 | — | 0.60 m |
+| `…132535` `ring_corner` | ABORT 205 | 12.7456 m | −9.6311 | −8.3481 | — | 0.60 m |
+| `…133039` `aisle_end` | ABORT 205 | 31.5844 m | −3.2042 | −31.4214 | — | 0.60 m |
+
+**THE ONE ARRIVAL IN THIS TASK TURNED ON 0.0078 m.** `…130956` came
+within **0.5922 m** of the goal in the pose the checker sees, against a
+**0.60 m** box — eight millimetres of margin — and its ground truth
+never came inside the box at all (0.7314 m). `…131222` missed by
+0.3918 m on the same reading and was sent round a Reeds-Shepp loop it
+did not come back from. **That is what "one in three" is made of**: not
+two different behaviours, but one behaviour either side of a hair.
+
+**AND THE TRUTH AND THE BELIEF AGREE AT THAT MOMENT.** 0.1401 m apart on
+`…130956` and 0.0238 m on `…131222`, against a registration floor of
+rms 0.0291 m / MAX 0.1179 m. The gap between the truck and the box is
+the CONTROLLER's, not the localiser's.
+
+**THE TWO RUNS THAT REACHED THE GOAL AND COULD NOT FINISH** — §15.2
+rungs 12 and 13, on `nav=on@8712475c`, which `analyse` will not table
+beside the rows above:
+
+| session | TRUTH closest | ALONG | ACROSS | BELIEVED closest | heading there |
+|---|---|---|---|---|---|
+| `…123524` | **0.1520 m** | +0.1516 | −0.0112 | 0.1640 m | −1.3185 rad, 1.82 rad out |
+| `…124352` | **0.0101 m** | +0.0095 | −0.0033 | 0.0409 m | −2.0335 rad, 1.11 rad out |
+
+Both are a hand's width from the goal in POSITION and neither could
+finish, because the checker in force then demanded the heading too.
+That is the pair that produced §14's `PositionGoalChecker` ruling.
+
 ### 15.4 What the controller did, and it is not what failed
 
 | | `…130956` | `…131222` | `…131600` | `…132535` | `…133039` |
@@ -1221,11 +1272,24 @@ every run, and a deviation from the plan standing at the time of
 says Ackermann robots deviate from the global path in turns, worst in
 REVERSE turns, and on this vehicle **every ordinary leg is a nav2
 reverse leg** — 100 % of the commands on three of the five runs.
-**THIS STACK DOES NOT REPRODUCE #5714 AT THIS ENVELOPE**, and the honest
-form of that is: at 0.300 m/s on 1.25 m arcs the deviation stayed under
-0.42 m at its worst, and nothing here is a measurement of what it does
-at 0.700 m/s, which is where §15.2 rung 11 was and where the runs were
-too short to separate tracking from the arrival failure.
+**THIS STACK DOES NOT REPRODUCE #5714 AT THIS ENVELOPE** — and there IS
+a measurement of the other envelope, because the ladder left one on
+disk. `…120921` is §15.2 rung 11, driven at the 0.700 m/s ceiling on the
+same goal and the same plan shape, and the instrument reports its
+deviation from the plan standing at the time as **mean 0.3140 m, median
+0.3460 m, max 0.9384 m** over 5986 samples:
+
+| envelope | deviation, mean | median | max |
+|---|---|---|---|
+| **0.700 m/s** (`…120921`, `nav=on@16963750`) | **0.3140 m** | 0.3460 m | **0.9384 m** |
+| 0.300 m/s (the five shipped runs) | 0.040 – 0.113 m | 0.035 – 0.089 m | 0.182 – 0.414 m |
+
+**SEVEN TIMES THE MEAN AND TWICE THE WORST, FOR 2.3× THE SPEED.** That is
+not a #5714 measurement on its own - the two are different `nav2.yaml`s
+and `analyse` refuses to table them together, which is why they are two
+rows here and not one table - but it is the first figure on this track
+that says the tracking error is strongly speed-dependent, and it is
+where a diagnosis of #5714 on this vehicle should start.
 
 **THE WORST STEER STEP IS THE RAMP, EXACTLY, ON EVERY RUN.**
 0.100000 rad per tick is F4 Task 1's 2.0 rad/s at 0.05 s
@@ -1319,11 +1383,36 @@ figure about the arrival.
    measured causes, in the order they were seen: the box is smaller than
    the error the pose carries while moving (fixed, §15.2 rung 11); the
    `(xy, yaw)` pair is jointly unreachable (fixed, rung 13); and a
-   CROSS-TRACK closed-loop error at the goal of **0.15 – 0.97 m across
-   runs**, which is comparable with any box argued from F3's own budget
-   and is NOT fixed. Run `…131222` tracked its plan to a mean of
-   0.043 m and still passed 0.968 m south of the goal, because the plan
-   itself was being drawn from a pose that had drifted.
+   CLOSED-LOOP MISS DISTANCE AT THE GOAL that is NOT fixed and is the
+   whole of what is left.
+     **EVERY FIGURE HERE IS §15.3b's, PRINTED BY
+     `drive_goal.py analyse`.** On the shipped `nav2.yaml`
+     (`nav=on@d430334b`) the three `spine_north` runs came within
+     **0.5922 m, 0.9918 m and (never — 9.66 m) of the goal in the pose
+     the checker sees**, against a 0.60 m box: one inside by 0.0078 m,
+     one outside by 0.3918 m, one that never approached at all. The
+     component that misses is ACROSS the goal's own travel heading:
+     **−0.5277 m and −0.9596 m** on the two that got there, both to the
+     RIGHT of the arrival heading.
+     **AND IT IS NOT THE TRACKING AND NOT THE LOCALISER.** `…131222`
+     followed the plan standing at the time to a mean of **0.0427 m**
+     and its truth and belief were **0.0238 m** apart at the closest
+     row — under the registration's own rms floor. The vehicle went
+     where the plan said and the plan did not go through the goal.
+     **THE SAME MEASUREMENT ON THE PREVIOUS CONFIGURATION IS WORSE AND
+     IS ALSO ON DISK.** `…120921` (`nav=on@16963750`, 0.700 m/s) came
+     within 0.5304 m of truth and 0.5508 m of belief — outside the
+     0.25 m box standing then by a factor of two — with a plan
+     deviation of mean 0.3140 m. `analyse` refuses to table it beside
+     the rows above and this paragraph does not either; it is quoted
+     as a separate configuration.
+     **ONE FIGURE THIS FILE PREVIOUSLY QUOTED IS WITHDRAWN.** An
+     earlier draft cited a closest approach of 0.3398 m from session
+     `goal-spine_north-20260827-122050`. That session was deleted
+     during the task and the figure was hand-derived from a scan this
+     tool did not then carry, so it cannot be re-read. The instrumented
+     figure for the same configuration is `…120921`'s 0.5304 m above,
+     and it is the one that stands.
 2. **WHAT HAPPENS AFTER A MISS.** Nav2 does not stop. The tree replans,
    the planner solves the new problem, and a vehicle 6 m past its goal
    drives 130 m and 459 plans trying to come back. A goal that cannot be
@@ -1367,6 +1456,15 @@ figure about the arrival.
    0.040–0.113 m of deviation on every run. §15.7 lists the three
    measured causes and which two are fixed. A driving case that assumes
    a goal completes has to read that list first.
+     **AND §15.3b IS THE ROW TO START FROM.** `drive_goal.py analyse`
+     prints, for every session, the CLOSEST the vehicle came to the goal
+     between the goal being sent and the result — in truth AND in the
+     pose the checker sees — with the miss split ALONG and ACROSS the
+     goal's own travel heading. On the shipped runs that is 0.5922 m
+     (arrived, by 0.0078 m) and 0.9918 m (did not), with the ACROSS
+     component carrying −0.53 m and −0.96 m of it. Nothing has to be
+     re-driven to read those: the sessions are on disk and the scan runs
+     with no ROS.
 2. **The envelope is CREEP in both directions, 0.300 m/s**, from §8's
    own stop table against the goal box. A case that wants transit speed
    back has to say what it does about the arrival.
