@@ -26,6 +26,15 @@ safety-rated PLC. It complements the F-PLC; it is not the F-PLC.
 
 ## 0. The answer, before the working
 
+> **THIS SECTION IS F4 TASK 1's AND IT IS ABOUT THE COMMAND PATH ALONE.**
+> The file has grown five phases past it: §14–§15 are the nav arm and
+> its first driven goals, §16 is the diagnosis that made them arrive,
+> and **§17–§20 are F4 Task 3's — the driving cases, the flip
+> experiment, the collision monitor and the PHASE VERDICT.** §20 is the
+> section a reader who wants the answer for the whole of F4 should open
+> first; this one is still exactly true and still only about four hops
+> of wire.
+
 | | |
 |---|---|
 | **the path, end to end** (terminal ÷ commanded, settled) | **1.0000** on `straight`, `creep`, `corner_creep`; **0.7071** on `corner_cruise`, which is the traction clamp doing exactly `cos(0.785398)` |
@@ -2650,6 +2659,11 @@ glance that neither binds it.
   1's 2.0 rad/s ramp exactly.
 - **No collision monitor, no docking, no `nav2_route`, no mid-path goal
   update** — §15.8's list is unchanged by this task.
+    > **TWO OF THOSE FOUR ARE NO LONGER TRUE, AND F4 TASK 3 IS WHERE
+    > THEY STOPPED BEING.** §17.2 drives a mid-path goal update and
+    > §19 puts `nav2_collision_monitor` in the command path behind
+    > `--monitor`. Docking and `nav2_route` are still absent, and §20.6
+    > carries them. Nothing in §16 was re-run for either.
 - **It did not re-run §15's set.** §15's figures stand as F4 Task 2 took
   them; §16's are a different `nav2.yaml` and `analyse` refuses to table
   the two together, which is the label doing its job.
@@ -3172,7 +3186,7 @@ amendment where the contract lives.
 | **the release, demonstrated** | the box removed at t+20.00 s, the truck moving again at **t+20.50 s** and back to **0.6943 m/s** against a commanded 0.700 |
 | the relay identity | with nothing in any zone, `cmd_vel_monitored` ÷ `cmd_vel_smoothed` = **1.000000** |
 | **and the thing it did before it guarded anything** | with the `lasertf` child absent it **CUT THE COMMAND PATH** — 703 twists in, **0 out**, 0 at either terminal, every child ALIVE — and the bringup gate PASSED, truthfully, 9.9 s before the failure existed. §19.5 |
-| the ship decision | **OFF by default**, and §19.7 is why |
+| the ship decision | **OFF by default**, and §19.8 is why |
 
 ### 19.1 The disclaimer, verbatim, and where it lives
 
@@ -3348,7 +3362,7 @@ sideways over the 0.25 m transit stop zone — inside the 0.061 m margin —
 but **0.42 m over the 1.05 m cruise zone**, which is outside it. A
 monitor that has to guard a cornering vehicle at cruise needs
 `approach`, and therefore needs a self-occlusion mask on the scan first.
-§19.6 item 2.
+§19.7 item 2.
 
 #### 19.3b What it cannot see, which is the largest limitation here
 
@@ -3661,9 +3675,9 @@ before this run, and §20.6 carries it as open.
 |---|---|
 | **the command path** | one line, four verified hops, no bypass, no ground truth in it. Worst steer step **0.100000 rad/tick** on every driven run of §15, §16 and §17 — F4 Task 1's 2.0 rad/s ramp, exactly, never once above it |
 | **the nav arm** | sixteen children on `--localize amcl --nav`, six lifecycle nodes ACTIVE, a plan in 0.008 – 0.014 s on every bringup, and a gate that refuses a server which came up merely active |
-| **the driving** | **10 of 11** on §16.5's acceptance set and **7 of 11 legs** on §17's case set, one parameter tree, `nav_config_md5 53a33d67` |
+| **the driving** | **10 of 11** on §16.5's acceptance set and **4 of 8** on §17's case set, one parameter tree, `nav_config_md5 53a33d67` |
 | **the arrival** | truth **0.4361 – 0.6174 m** on every arrival across both sets, in an unchanged **0.60 m** position-only box, with belief and truth agreeing to **0.006 – 0.13 m** at rest |
-| **the fail-fast** | a goal-relative watchdog at ~30 s, the tree's own recovery at ~91 s, a 335 s budget behind both. **0 false positives across 24 arrivals; it fired on every failure in §17** |
+| **the fail-fast** | a goal-relative watchdog at ~30 s, the tree's own recovery at ~91 s, a 335 s budget behind both. **0 false positives on §16.7b's 20-arrival replay and on the 10 arrivals this task drove live**; §20.1 is which failures it caught and which nav2 caught first |
 | **what is NOT delivered** | the station class. §17.3: the position half is reachable to six millimetres and the pair is not reachable in ONE approach, and a real station spur delivers **0.7538 rad** of heading error at the 0.60 m box |
 | **the residual** | `ring_corner` is **4 of 6** and the loop is marginally stable there. §20.4 |
 
@@ -3685,12 +3699,25 @@ each run. The criteria are the ones F4's plan and §16 set.
 | the controller holds its rate | `controller_frequency: 20.0` | **19.965 – 20.056 Hz** mean, 20.000 median, across every run of §16.5 and §17 | **MET** |
 | the RTF survives the stack | — | **0.9963 – 0.9999** over the drives themselves | **MET** |
 | the command path is untouched | F4 constraint 18 | worst steer step **0.100000 rad/tick**, every run | **MET** |
-| a miss is a NAMED failure, fast | §16.7 | fired on 3 of 3 failures in §17; **0 of 24 arrivals** | **MET** |
+| a miss is a NAMED failure, fast | §16.7 | **0 false positives on 10 live arrivals**; the watchdog named 2 of §17's 4 failures at ~30 s, and nav2's own tree aborted the other 2 with `error_code 205` FASTER than the watchdog's window | **MET** |
 | both arms up on the committed tree | F4 constraint 20 | §17 (amcl+nav), §18 (slam+nav), §19.8 (four command-path arms) | **MET** |
 
-**THE BAR IS NOT MET AND THE ONE ROW THAT MISSES IT IS THE SAME ROW
-§16.5 MISSED.** `ring_corner` was 2 of 3 then and is 2 of 3 now; nothing
-else regressed and nothing else is open on the arrival criterion.
+**THE BAR IS NOT MET, AND THE ROW §16.5 MISSED IS STILL THE ROW THAT
+MISSES IT.** `ring_corner` was 2 of 3 then and is 2 of 3 now. Nothing
+§16.5 measured regressed: the arrivals in §17 sit inside §16.5's own
+arrival band on every column. **What is new is the two rows the case set
+added and the acceptance set could not** — a station-class approach at
+1 of 2 and a preempted transit at 2 of 3 — and neither of those is a
+regression, because neither had ever been driven.
+
+**AND THE FAIL-FAST ROW IS WORTH READING TWICE.** Four failures in §17,
+and the two guards split them: the watchdog named `…201613` and
+`…202918` at ~30 s of no closing, and nav2's own tree aborted
+`station_approach` and `reverse_out`'s leg 2 with `error_code 205`
+before the watchdog's 30 s window had elapsed. **That is §16.7b's own
+sentence coming true** — *a guard with a 30 s allowance has nothing to
+catch in a run that fails inside its own window* — and it is the first
+time the two guards have been seen dividing a set between them.
 
 ### 20.2 THE #5714 FINDING
 
