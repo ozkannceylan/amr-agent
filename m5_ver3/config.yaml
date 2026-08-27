@@ -245,6 +245,25 @@ vehicle:
   #   comments would then be a claim about a run nobody performed. A
   #   table that asks for an impossible angle is a table to correct.
   steer_limit_rad: "1.31"
+  # steer_joint's <velocity> in the same <limit> block, and it is the
+  # AXIS's own slew rate: 2.0 rad/s. F4 Task 1's addition, read by
+  # nodes/cmd_vel_tricycle.py, which ramps its OWN output at it so that a
+  # step steer command leaves that node as a ramp.
+  #   WHY A NODE RAMPS SOMETHING THE PLANT WILL RAMP ANYWAY. The axis
+  #   cannot slew faster than this whatever is commanded, and square:
+  #   below records what the difference costs when nobody accounts for
+  #   it - every corner loses the yaw of its own first fraction of a
+  #   second, MEASURED at 0.057250 rad per corner, and the corner time
+  #   had to be re-derived around it. A command that is already a ramp is
+  #   a command whose delivered arc is a function of the ramp the
+  #   converter wrote, and not of a slew somebody has to measure
+  #   afterwards.
+  #   IT IS CHECKED AGAINST THE MODEL AND NOT TRUSTED, exactly as
+  #   steer_limit_rad above now is: tests/test_cmd_vel_tricycle_core.py
+  #   reads steer_joint's <lower>, <upper> and <velocity> out of
+  #   vehicle.model and fails if this file disagrees with any of them. A
+  #   copy that cannot say when it has gone stale is a copy that will.
+  steer_rate_limit_radps: "2.0"
 
 # -------------------------------- TOPICS -------------------------------
 # WHAT THE BRIDGE CARRIES, AND NOTHING ELSE YET. A bridged channel with no
@@ -482,6 +501,57 @@ topics:
   #   structurally different, which is the one thing an A/B may not have.
   #   The session's own `loc=` line says which localiser filled it.
   slam_pose: "/pose"
+  # ---- THE COMMAND PATH'S FOUR, F4 Task 1's addition ----
+  #
+  # THE FIRST THREE ARE nav2's OWN NAMES AND ARE NOT NAMESPACED, which is
+  # this block's own rule two entries up applied to the other direction
+  # of travel: `map`, `/tf` and `initialpose` are bare because every
+  # off-the-shelf PRODUCER or CONSUMER looks for exactly those strings,
+  # and `cmd_vel`, `cmd_vel_smoothed` and `speed_limit` are the same
+  # three-way agreement between nav2's controller server, nav2's velocity
+  # smoother, rviz's teleop panel and anything an operator will type at a
+  # terminal. What scopes them is isolation.ros_domain_id, which scopes
+  # everything else on this track too.
+  #
+  # THE COMMAND PATH IS ONE LINE AND THESE ARE ITS JOINTS (F4 constraint
+  # 18). Nav2's controller -> cmd_vel -> the velocity smoother ->
+  # cmd_vel_smoothed -> nodes/cmd_vel_tricycle.py -> steer_cmd and
+  # traction_cmd above, which are model.sdf's own motor terminals. There
+  # is no bypass and nothing on this path reads odom_ground_truth.
+  #
+  # NOTHING PUBLISHES ON EITHER TWIST TOPIC AT REST. MEASURED on this rig
+  # 2026-08-27 with the smoother ACTIVE and nothing commanding: `ros2
+  # topic hz /cmd_vel_smoothed` reported no messages at all over 4 s, and
+  # the converter publishes only while it is engaged. That is what keeps
+  # tools/drive_route.py and tools/slip_bench.sh - which address the gz
+  # side of the same two terminals directly - from being fought by a
+  # stack child publishing zeros twenty times a second.
+  cmd_vel: "/cmd_vel"
+  cmd_vel_smoothed: "/cmd_vel_smoothed"
+  # THE ENVELOPE HOOK. nav2_msgs/SpeedLimit, and F4 constraint 18 says
+  # what it is and what it is not: it is WIRED and DEMONSTRATED here, by
+  # a test publisher, because the PLC that will drive it arrives in a
+  # later integration phase. It is a demonstrated interface and NOT a
+  # safety claim - nothing on this path inhibits motion or latches
+  # anything, and the disclaimer this track keeps verbatim is that the
+  # collision monitor "does not provide hard real-time safety
+  # certifications" and does not replace a safety-rated PLC. It
+  # complements the F-PLC; it is not the F-PLC.
+  #   TWO SUBSCRIBERS ARE EXPECTED AND THEY COMPOSE. F4 Task 2's
+  #   controller server subscribes this same topic through its own
+  #   `speed_limit_topic` parameter and clamps the speed it PLANS at;
+  #   nodes/cmd_vel_tricycle.py clamps the speed it DELIVERS, last,
+  #   where no upstream publisher can get round it. Two ceilings on one
+  #   quantity is a min(), which is idempotent - and the second one is
+  #   the only one that is still true when the thing publishing cmd_vel
+  #   is a bench rather than a planner.
+  speed_limit: "/speed_limit"
+  # AND THE CONVERTER'S OWN DIAGNOSTIC, which is namespaced because it is
+  # THIS NODE's business and nothing off the shelf looks for it. One
+  # diagnostic_msgs/DiagnosticStatus carrying the counters the clamps
+  # raise - a clamp nobody can see is the failure the whole clamp-versus-
+  # refuse argument is trying to avoid, moved one layer down.
+  navcmd_status: "/m5v3/navcmd/status"
 
 # -------------------------------- FRAMES -------------------------------
 # THE COORDINATE FRAMES THIS STACK NAMES, AND THEY HAVE TWO READERS NOW.
@@ -3160,3 +3230,416 @@ localization:
     # that second would be a jitter figure about the instrument rather
     # than about the stack.
     map_gap_s: "1.0"
+
+# ================================ NAVCMD ================================
+# THE TRICYCLE COMMAND PATH, F4 Task 1. This block is what
+# nodes/cmd_vel_tricycle.py obeys; the CONVERSION itself is geometry and
+# lives in nodes/cmd_vel_tricycle_core.py with its derivation, tested
+# without a simulator. What is here is the four limits the geometry stops
+# at and the three timings the wiring needs.
+#
+# THE COMMAND PATH IS ONE LINE AND THIS IS ITS LAST JOINT (F4 constraint
+# 18):
+#
+#     Nav2's controller (F4 Task 2)
+#       -> topics.cmd_vel
+#         -> nav2_velocity_smoother          (smoother: below)
+#           -> topics.cmd_vel_smoothed
+#             -> nodes/cmd_vel_tricycle.py   (this block)
+#               -> topics.steer_cmd + topics.traction_cmd
+#                  = model.sdf's own motor terminals
+#
+# There is no bypass and no branch. GROUND TRUTH IS NOT IN IT: nothing on
+# this path subscribes topics.odom_ground_truth, and the one thing that
+# closes a loop here - the smoother's CLOSED_LOOP feedback - closes it on
+# the ESTIMATE (F2 global constraint 13).
+#
+# NOTHING HERE IS A SAFETY PARAMETER. The converter inhibits nothing,
+# latches nothing and stops nothing; a refused command is a command not
+# issued and not a machine state. Protective stop, e-stop and safe torque
+# off are onboard and hardwired in the plant this models, and no message
+# on any of these topics can trigger or release one.
+navcmd:
+  # THE COMMAND RATE, AND IT IS THE SMOOTHER'S TOO. One command in, one
+  # command out: smoother.yaml's smoothing_frequency carries the same
+  # number and tests/test_cmd_vel_tricycle_core.py fails if the two ever
+  # disagree. A converter slower than its smoother drops commands; a
+  # converter faster than its smoother republishes them, and a
+  # republished command on a terminal that holds its last order for ever
+  # buys nothing at all.
+  #   20 Hz IS ALSO THE CONTROLLER RATE F4 Task 2 WILL RUN AT, so the
+  #   whole chain ticks once per controller cycle.
+  rate_hz: "20.0"
+
+  # ---- THE SPEED CEILING, AND IT IS A MEASUREMENT AND NOT A CHOICE ----
+  #
+  # 0.700 m/s of TREAD is the cruise every straight-line figure on this
+  # track was taken at: drive_route.profiles.straight and .aisle both
+  # hold it, tools/slip_bench.sh drives it, and EVIDENCE_SENSORS.md and
+  # EVIDENCE_FUSION.md are measured on it. Above it this plant is
+  # unmeasured.
+  #   IT IS NOT THE MECHANICAL CEILING AND IT IS NOWHERE NEAR IT.
+  #   model.sdf's drive_wheel_joint carries <velocity>40.0</velocity>,
+  #   which is 4.8 m/s of tread - 6.9 times this. So what this number
+  #   bounds is MEASUREMENT COVERAGE, not the motor, and it is the
+  #   honest ceiling for a phase whose whole subject is what the plant
+  #   actually does.
+  #   IT IS APPLIED TO THE WHEEL'S OWN TREAD SPEED, which is what the
+  #   terminal carries, and therefore bounds the BODY speed too:
+  #   v = v_w cos(delta) <= v_w. At cruise ANY curvature asks the wheel
+  #   for more than the body is doing (v_w = v / cos delta), so a corner
+  #   at cruise meets this ceiling and is slowed - CURVATURE PRESERVING,
+  #   because scaling v_w with delta held scales v and w together and
+  #   the arc is unchanged. smoother.yaml's max_velocity carries the
+  #   same number for the same reason and the test checks it.
+  speed_max_mps: "0.700"
+
+  # ---- THE ACCELERATION, ALSO MEASURED AND ALSO A TABLE'S ----
+  #
+  # 0.35 m/s^2 is drive_route.profiles.straight's own ramp: four
+  # quarters of cruise at 0.5 s each, which is 0.175 m/s per 0.5 s. That
+  # ramp is in the TABLE because THE PLANT HAS NONE - model.sdf's
+  # traction terminal is a raw velocity command, and its plugin comment
+  # says so in as many words - so a single step to cruise puts the
+  # largest slip of a run into its first tenth of a second. Every figure
+  # on this track was taken behind that ramp, so it is the acceleration
+  # this plant is characterised at.
+  #   IT IS ENFORCED TWICE, ON TWO DIFFERENT QUANTITIES. The smoother
+  #   limits the BODY twist's acceleration; the converter limits the
+  #   WHEEL's, because v_w = v / cos(delta) can step when v does not -
+  #   a controller that swings the steer angle while holding v asks the
+  #   wheel for a jump the smoother never saw. Same number, two frames.
+  accel_mps2: "0.35"
+
+  # ---- THE CURVATURE CEILING, EXPRESSED AS THE ANGLE THAT WAS MEASURED
+  #
+  # 1.25 rad. model.sdf's steer stop is 1.31 (vehicle.steer_limit_rad),
+  # which is a turning radius of L/tan(1.31) = 0.2802 m - and this plant
+  # has never been driven there. The hardest steer it HAS been driven at
+  # is 1.25 rad: drive_route.profiles.square's four corners, and the
+  # two-row delivered table above them.
+  #   SO THE CEILING IS THE MEASUREMENT AND THE STOP IS THE BACKSTOP.
+  #   A twist clamped at 1.25 rad can never reach 1.31, so a steer clamp
+  #   firing on this stack is a bug rather than a manoeuvre - which is
+  #   why the converter counts the two separately and says so.
+  #   WHAT IT IS AS A CURVATURE: tan(1.25)/1.05 = 2.8662568 1/m, a
+  #   COMMANDED radius of 0.3488871 m.
+  #   cmd_vel_tricycle_core.curvature_max() is the one place that
+  #   arithmetic lives, because three consumers want it - the clamp,
+  #   smoother.yaml's angular limits and the F4 Task 2 handover row.
+  #   AND WHAT THE PLANT DELIVERS THERE IS LESS, WHICH IS THE POINT OF
+  #   HAVING MEASURED IT (EVIDENCE_LATERAL_TUNE.md, and the table above
+  #   drive_route.profiles.square): 0.246312 rad/s against a kinematic
+  #   0.271136 at 0.300 m/s of tread - 0.908 of the geometry - so the
+  #   DELIVERED radius at this ceiling is 0.3841 m at the four-corner
+  #   mean and 0.4154 m at the worst single corner, the four being
+  #   11.5 % apart because they are at four different headings. THAT is
+  #   the number a planner's minimum_turning_radius has to respect, and
+  #   it is handed to F4 Task 2 in EVIDENCE_NAV_V3.md rather than
+  #   applied here: this node converts, it does not plan.
+  steer_command_limit_rad: "1.25"
+
+  # ---- WHERE THE GEOMETRY STOPS BEING DEFINED AT ALL ----
+  #
+  # THE CREEP DEADBAND. Below this |v| the ratio w/v is not a curvature
+  # anybody meant - its denominator is rounding and the smoother's own
+  # ramp - so the converter commands zero traction and HOLDS the steer
+  # axis.
+  #   THE VALUE IS AN UPPER BOUND FROM THE LAYER ABOVE AND NOT A TUNING
+  #   KNOB (docs/LESSONS.md 2026-08-05, the deadlock entry). From REST
+  #   the smoother's output per tick cannot exceed max_accel * dt on the
+  #   most restrictive axis - which is true of BOTH feedback modes, and
+  #   is why this number did not move when smoother.yaml's ruling did:
+  #
+  #       dt              = 1 / rate_hz            = 0.05 s
+  #       a_v * dt        = 0.35 * 0.05            = 0.017500 m/s
+  #       a_w * dt / kmax = (0.35 * 2.8662568) * 0.05 / 2.8662568
+  #                                                = 0.017500 m/s
+  #
+  #   - the two are EQUAL at every curvature, because the angular
+  #   acceleration is the linear one times the same kappa_max, which is
+  #   what makes the ramp proportional and the arc survive it. So the
+  #   floor is 0.017500 m/s and a deadband at or above it is a DEADLOCK,
+  #   not a margin: the converter zeroes traction, the plant does not
+  #   move, the estimate reads zero, the smoother stays pinned at the
+  #   floor, and the leg stalls until something times out. The crib's
+  #   0.02 armed exactly that loop. 0.005 is 3.5 times inside the floor
+  #   and is checked against it by the suite.
+  creep_speed_mps: "0.005"
+  # A STANDSTILL, and it is NARROWER than the deadband on purpose. A
+  # refusal means the request has NO (steer, tread) pair at all, which is
+  # true only when a yaw rate is demanded of a vehicle that is not
+  # moving. The crib counted the whole creep band instead and the counter
+  # became useless - 27 "rotation in place" refusals for a goal that was
+  # reached, every one of them the tail of a deceleration through the
+  # band. 1 mm/s.
+  zero_speed_mps: "0.001"
+  # AND WHAT COUNTS AS A YAW RATE RATHER THAN AS NOISE. The corner rates
+  # this plant delivers are 0.2028 and 0.2463 rad/s (the table above
+  # drive_route.profiles.square), twenty times this; nav2's Spin sends
+  # v = 0 exactly with a yaw rate that is meant.
+  yawrate_refusal_radps: "0.01"
+
+  # ---- THE DEAD-MAN, AND IT IS THE SECOND ONE ON THIS PATH ----
+  #
+  # If nothing arrives on topics.cmd_vel_smoothed for this long the
+  # converter ramps the traction to zero at accel_mps2, holds the steer
+  # axis, publishes one standing zero and DISENGAGES.
+  #   SHORTER THAN THE SMOOTHER'S OWN 1.0 s velocity_timeout ON PURPOSE:
+  #   the layer nearer the plant must not be the slower one to notice.
+  #   The smoother's timeout is "my controller stopped talking"; this one
+  #   is "my smoother stopped talking", and in normal operation it never
+  #   fires because the smoother sends its own decel ramp first.
+  #   NEITHER IS A SUPERVISION WATCHDOG AND NEITHER IS A SAFETY FUNCTION.
+  command_timeout_s: "0.5"
+
+  # ---- ENGAGEMENT, WHICH IS WHAT KEEPS THE BENCHES USABLE ----
+  #
+  # The converter publishes NOTHING until a command has arrived, and it
+  # stops publishing again once it has brought the vehicle to a standing
+  # zero after the commands stop. That is not politeness: model.sdf's
+  # JointController holds its last order FOR EVER, so a stack child
+  # publishing zeros twenty times a second would OVERWRITE every command
+  # tools/drive_route.py and tools/slip_bench.sh put on the same two
+  # terminals from the gz side. An idle converter is a subscriber and
+  # nothing else.
+  #   AND THE STANDING ZERO IS STILL LEFT BEHIND, which is drive_route's
+  #   own exit rule: a silent terminal on this model is a standing order,
+  #   not an absence, and a standing zero is what pins the shaft. It is
+  #   NOT a brake for a safety purpose.
+  # HOW MANY TICKS OF A STANDING ZERO before it disengages. Three, so
+  # that a dropped message on a lossy graph cannot be read as the end of
+  # a drive.
+  disengage_ticks: "3"
+
+  # ---- THE BRINGUP GATE'S OWN BUDGET ----
+  #
+  # How long tools/navcmd_health.py waits, at each of its two reads, for
+  # a message that should already be flowing. It is a BUDGET on a loaded
+  # rig and not a deadline for anything anybody is driving: the status
+  # heartbeat is at status_every_s and the terminal answers within one
+  # tick of the command reaching it, so anything past a couple of seconds
+  # is already an answer. 20 s is an order of magnitude of headroom and
+  # still a bound - drive_route.clock_timeout_s's own reasoning.
+  health_timeout_s: "20"
+
+  # ---- THE PLUMBING ----
+  qos_depth: "10"
+  # How often the node states its counters on topics.navcmd_status,
+  # engaged or not. It is a heartbeat as well as a diagnostic: a
+  # converter that is ALIVE and has never heard a command looks exactly
+  # like one whose subscription is misspelt, and this is the difference.
+  status_every_s: "1.0"
+  # The floor under every repeated log line - a clamp that fires on
+  # every tick of a long corner must not write 20 lines a second into a
+  # log an operator will open once.
+  log_throttle_s: "2.0"
+
+# =============================== SMOOTHER ===============================
+# nav2_velocity_smoother, AHEAD OF THE CONVERTER, and this block is the
+# ekf: block's split applied a fifth time: config.yaml keeps the TOPICS,
+# the NODE NAME, the RATE and the PATH to the other file, m5v3.sh passes
+# all of those on the command line, and smoother.yaml holds WHAT IS
+# LIMITED AND TO WHAT and nothing else. No number is in both.
+#
+# WHAT IT IS FOR. model.sdf's traction terminal is a raw velocity command
+# with no ramp, and a controller's output is a step every time its plan
+# changes. The smoother is where a step becomes an acceleration - in the
+# BODY twist, before the geometry - and it is also the dead-man that puts
+# the vehicle down when the thing commanding it stops talking.
+#
+# WHAT WAS MEASURED ABOUT IT ON THIS RIG, 2026-08-27, and it CORRECTS the
+# research this phase was planned from (docs/reports/m5v3-02 section 5
+# says "Jazzy defaults to TwistStamped"):
+#   enable_stamped_cmd_vel DEFAULTS TO FALSE on this Jazzy. `ros2 node
+#   info` on the running node reads geometry_msgs/msg/Twist on BOTH
+#   /cmd_vel and /cmd_vel_smoothed. smoother.yaml states the parameter
+#   explicitly anyway, because a default that the published research
+#   disagrees with is exactly the kind of default that moves.
+#   autostart_node: true DRIVES IT TO ACTIVE BY ITSELF - measured, the
+#   node logs "Auto-starting node", "Configuring", "Activating" and
+#   `ros2 lifecycle get` reads `active [3]` with no external transition
+#   at all. So this stack does NOT drive it the way it drives the
+#   localisation arm's lifecycle nodes; m5v3.sh POLLS for the state
+#   instead, which is a different mechanism and not a second copy of one.
+#   IT PUBLISHES NOTHING WHEN IDLE - `ros2 topic hz /cmd_vel_smoothed`
+#   reported no messages at all over 4 s with the node ACTIVE and
+#   nothing commanding - and on a command timeout it emits its own
+#   deceleration ramp to zero and then stops. That is what lets this
+#   child be part of the DEFAULT stack without touching the two benches
+#   that address the same terminals from the gz side.
+smoother:
+  package: "nav2_velocity_smoother"
+  executable: "velocity_smoother"
+  # The name the parameter file has to be addressed to. rclcpp applies
+  # NOTHING from a block addressed to a node that is not running and does
+  # not complain about it, so m5v3.sh greps for this string in
+  # params_file before anything starts - check_ekf_params()'s argument,
+  # for a node whose package defaults (0.5 m/s, 2.5 rad/s, OPEN_LOOP)
+  # would look exactly like a working smoother.
+  node_name: "velocity_smoother"
+  params_file: "m5_ver3/smoother.yaml"
+  # HOW LONG start WAITS for it to reach ACTIVE on its own. It
+  # self-transitions on construction (measured above), so this is a
+  # budget for a loaded rig and not a deadline for a transition anybody
+  # is driving. The localisation arm's own budget is
+  # localization.lifecycle_timeout_s and it is a different question
+  # against a different mechanism.
+  active_timeout_s: "30"
+
+# ============================== TWIST ROUTE =============================
+# THE COMMAND PATH'S OWN BENCH, F4 Task 1, read by tools/drive_twist.py.
+#
+# WHY IT IS NOT drive_route: WITH A SECOND SHAPE OF ROW. drive_route.py
+# addresses the two motor terminals ON THE GZ SIDE and imports no rclpy
+# at all - that is what lets it drive a plant with no ROS node running
+# and what its whole header is about. A twist profile is a ROS publisher
+# by construction: it enters the chain at topics.cmd_vel, above a
+# lifecycle node and a converter, in a different message type and a
+# different unit. Bolting it onto that file would put an rclpy import at
+# the top of the one driving tool that does not need one. So it is a
+# sibling, with the same idioms - a config-tabled profile, the plant's
+# own clock, a standing zero on every exit path - and the same refusal to
+# clamp a table.
+#
+# AND THE TABLE IS STILL REFUSED RATHER THAN CLAMPED, which is exactly
+# the line vehicle.steer_limit_rad's comment draws: this is a table
+# somebody wrote down, and a table that asks for something the converter
+# would have to clamp is a table to correct. The CONVERTER clamps,
+# because it is taking live commands; the BENCH refuses, because it is
+# reading a table. tools/drive_twist.py checks every row against
+# navcmd:'s ceilings before it publishes anything - except where a row
+# says `expect_clamp`, which is how a profile ASKS for a clamp it is
+# there to observe.
+twist_route:
+  # The clock budget, and it is drive_route.clock_timeout_s's twin for
+  # its reason: a stack that is not up would otherwise hang the bench in
+  # silence rather than refuse it.
+  clock_timeout_s: "20"
+  # HOW LONG THE BENCH WAITS FOR THE FIRST SMOOTHED COMMAND to come back
+  # before it refuses. It publishes into cmd_vel and the answer has to
+  # come out of the smoother; nothing arriving means the smoother is not
+  # ACTIVE, and a bench that drove on regardless would be measuring an
+  # open circuit.
+  chain_timeout_s: "10"
+  profiles:
+    # STRAIGHT: the command path's version of drive_route's own straight,
+    # and deliberately the same manoeuvre so the two can be compared. The
+    # RAMP IS NOT IN THIS TABLE and that is the difference being
+    # measured: drive_route has to write the ramp out row by row because
+    # it addresses a terminal with no ramp in it, and this profile steps
+    # straight to cruise because the smoother and the converter are what
+    # the step is being handed to. What comes out at the terminals is the
+    # measurement.
+    straight:
+      - {hold_s: "3.0", v_mps: "0.000", w_radps: "0.000"}
+      - {hold_s: "16.0", v_mps: "-0.700", w_radps: "0.000"}
+      - {hold_s: "4.0", v_mps: "0.000", w_radps: "0.000"}
+
+    # CREEP: the same step at the fleet's corner speed, so the ramp and
+    # the delivered fraction can be read at a speed where the tyre has
+    # almost no lateral force to shed. 0.3 m/s is m6/ipc/follower.py's
+    # CORNER_MPS and the speed drive_route.profiles.corner_creep and
+    # .square are both driven at.
+    creep:
+      - {hold_s: "3.0", v_mps: "0.000", w_radps: "0.000"}
+      - {hold_s: "16.0", v_mps: "-0.300", w_radps: "0.000"}
+      - {hold_s: "4.0", v_mps: "0.000", w_radps: "0.000"}
+
+    # CORNER_CREEP: ONE corner, commanded as a CURVATURE rather than as a
+    # steer angle, held long enough to have a steady state - and it is
+    # drive_route.profiles.corner_creep's twin ON PURPOSE. That profile
+    # commands -0.785398 rad of steer at 0.300 m/s of tread and the plant
+    # delivers 0.203768 rad/s of yaw (EVIDENCE_LATERAL_TUNE.md). The same
+    # manoeuvre asked for through a twist is
+    #
+    #     v = v_w cos(delta) = -0.300 * cos(-0.785398) = -0.212132 m/s
+    #     w = v_w sin(delta) / L
+    #                        = -0.300 * sin(-0.785398) / 1.05
+    #                        = +0.202030 rad/s
+    #
+    # AND THE YAW RATE IS POSITIVE WHILE THE STEER ANGLE IS NEGATIVE,
+    # which is the mirror this track's sign discipline is built on and
+    # not a typo. Forward travel is a NEGATIVE tread speed, so
+    # v_w sin(delta) has TWO negative factors: a driver-LEFT wheel
+    # (negative delta) travelling forward turns the model's yaw UP. That
+    # is the same left turn towards the north wall drive_route's own
+    # corner_creep takes - its ground truth ran the rear axle from
+    # y = 9.9982 to y = 11.9598, northward - and it is taken for the same
+    # reason: 4.00 m either way, and a wall is a flatter thing to have a
+    # metre away than a rack leg.
+    #   THE KINEMATIC RATE HERE IS 0.202030 rad/s AND THE TABLE ABOVE
+    #   drive_route.profiles.square PRINTS 0.202666 FOR THE SAME ROW.
+    #   The two are 0.31 % apart and the difference is that column's, not
+    #   this one's: what is written here is exactly
+    #   v_w sin(delta) / L for the tread and steer that table drives.
+    #   Nothing on this track is scored against the third decimal of a
+    #   kinematic prediction - the DELIVERED rate is what both profiles
+    #   report - but a number that disagrees with a neighbour is worth
+    #   the sentence.
+    #   SO THE TWO PROFILES ARE THE SAME MANOEUVRE THROUGH TWO ENTRY
+    #   POINTS, and the delivered yaw rate of one is directly comparable
+    #   with the delivered yaw rate of the other. What the comparison
+    #   measures is everything the command path adds: the smoother's
+    #   ramp, the converter's arithmetic, the steer slew this node
+    #   applies that the table did not, and the bridge.
+    #   IT FITS THE FLOOR FOR corner_creep's OWN REASON, and with margin
+    #   to spare: the arc is the one that profile measured at 0.54 m of
+    #   clearance, and this table's run-in is 1 s longer at the same
+    #   speed, which moves the entry 0.2 m along a ring leg that is
+    #   8.00 m wide.
+    corner_creep:
+      - {hold_s: "3.0", v_mps: "0.000", w_radps: "0.000"}
+      - {hold_s: "4.0", v_mps: "-0.212132", w_radps: "0.000"}
+      - {hold_s: "14.0", v_mps: "-0.212132", w_radps: "0.202030"}
+      - {hold_s: "4.0", v_mps: "0.000", w_radps: "0.000"}
+
+    # CORNER_CRUISE: the same CURVATURE at cruise, which is where the
+    # traction ceiling bites and this profile exists to observe it doing
+    # so at the terminals. The curvature is corner_creep's exactly -
+    # kappa = tan(0.785398)/1.05 = 0.952381 1/m, R = 1.050 m, one
+    # wheelbase - so at v = -0.700 m/s the yaw rate is +0.666666 rad/s
+    # and the wheel is asked for 0.700 / cos(0.785398) = 0.989949 m/s of
+    # tread against navcmd.speed_max_mps of 0.700. The converter clamps
+    # the TREAD - CURVATURE PRESERVING - and the truck drives the same
+    # arc at 0.700 * cos(0.785398) = 0.494975 m/s of body speed.
+    #   THE ROW SAYS SO: expect_clamp is what stops the bench refusing a
+    #   table that asks for a clamp on purpose.
+    #   THE ARC IS THE SAME ONE corner_creep TAKES, so the floor check is
+    #   that profile's; the turn is driven for 8 s rather than 14, and a
+    #   shorter arc on the same radius from the same entry cannot reach
+    #   further from the wall than a longer one.
+    corner_cruise:
+      - {hold_s: "3.0", v_mps: "0.000", w_radps: "0.000"}
+      - {hold_s: "3.0", v_mps: "-0.700", w_radps: "0.000"}
+      - {hold_s: "8.0", v_mps: "-0.700", w_radps: "0.666666",
+         expect_clamp: "traction"}
+      - {hold_s: "4.0", v_mps: "0.000", w_radps: "0.000"}
+
+    # SPEED_LIMIT: the envelope hook, DEMONSTRATED. Cruise, then the same
+    # cruise with 0.3 m/s published on topics.speed_limit, then cruise
+    # again with the limit lifted (0.0, which nav2_msgs/SpeedLimit's own
+    # comment defines as NO LIMIT and not as a stop). What the evidence
+    # reads is the TRACTION TERMINAL: 0.700 m/s of tread before,
+    # 0.300 m/s while the limit stands, 0.700 m/s after.
+    #   IT IS A DEMONSTRATED INTERFACE AND NOT A SAFETY CLAIM. See
+    #   topics.speed_limit for the whole of that sentence and for the
+    #   disclaimer this track keeps verbatim beside it.
+    #   EIGHT SECONDS A SEGMENT, AND THE LENGTH IS THE INSTRUMENT'S. A
+    #   figure is read over evidence.corner.window_s of steady state
+    #   AFTER evidence.corner.settle_s has been discarded, so a segment
+    #   has to be at least 4 + 3 = 7 s long to produce a row at all - and
+    #   the 0.700 -> 0.300 transition is a 1.14 s ramp at accel_mps2,
+    #   which the settle already covers.
+    #   IT IS DRIVEN ON THE RING LEG AND IT FITS: two cruise segments at
+    #   0.700 m/s and one at 0.300 is about 13.9 m of travel along the
+    #   y = +10.00 leg, whose `aisle` profile already covers 20.3 m from
+    #   the same spawn in one direction.
+    speed_limit:
+      - {hold_s: "3.0", v_mps: "0.000", w_radps: "0.000"}
+      - {hold_s: "8.0", v_mps: "-0.700", w_radps: "0.000"}
+      - {hold_s: "8.0", v_mps: "-0.700", w_radps: "0.000",
+         speed_limit_mps: "0.300"}
+      - {hold_s: "8.0", v_mps: "-0.700", w_radps: "0.000",
+         speed_limit_mps: "0.000"}
+      - {hold_s: "4.0", v_mps: "0.000", w_radps: "0.000"}

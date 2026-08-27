@@ -1,0 +1,256 @@
+# smoother.yaml - what the VELOCITY SMOOTHER limits, and to what.
+#
+# A ROS PARAMETER FILE, which config.yaml is not and may not become - and
+# the split is by OWNERSHIP rather than by convenience. It is ekf.yaml's
+# argument applied a fifth time (after ekf_rf2o.yaml, fuse.yaml, slam.yaml
+# / slam_loc.yaml and amcl.yaml): nav2_velocity_smoother reads a top-level
+# NODE NAME and a `ros__parameters:` mapping with three-element arrays in
+# it, and config.yaml is not one and is not bent into one.
+#
+#   config.yaml owns  the two topic names, the node name, the params-file
+#                     path, the command RATE and the four limits this file
+#                     is DERIVED from (navcmd.speed_max_mps,
+#                     navcmd.accel_mps2, navcmd.steer_command_limit_rad,
+#                     vehicle.wheelbase_m). m5v3.sh passes the addresses
+#                     and use_sim_time on the command line as `-p`
+#                     overrides so this file cannot hold a second copy of
+#                     any of them.
+#   this file owns    what is LIMITED and to what, and the argument for
+#                     each number.
+#
+# NO NUMBER IS IN BOTH - but four of the six numbers below are DERIVED
+# from config.yaml's, and a derivation written out by hand is a copy that
+# cannot say when it has gone stale. So tests/test_smoother_params.py
+# recomputes every one of them from config.yaml and fails if this file
+# disagrees, which is vehicle.imu_mount's habit with an assertion instead
+# of a warning.
+#
+# ======================= WHERE IT SITS AND WHY =======================
+#
+# F4 constraint 18: the command path is ONE LINE with no bypass.
+#
+#   Nav2's controller  ->  /cmd_vel
+#     ->  THIS NODE    ->  /cmd_vel_smoothed
+#       ->  nodes/cmd_vel_tricycle.py
+#         ->  /forklift/gz/actuator/{steer_cmd,traction_cmd}
+#
+# It is here because model.sdf's traction terminal is a RAW VELOCITY
+# COMMAND WITH NO RAMP - the plugin's own comment says so - and a
+# controller's output steps every time its plan changes. This is where a
+# step becomes an acceleration, in the BODY twist, before any geometry.
+#
+# IT IS NOT A SAFETY FUNCTION and nothing in this file is a safe speed.
+# The limits below are navigation parameters that keep the commanded
+# regime inside the envelope this plant has been MEASURED in; nothing
+# here inhibits motion or latches a fault.
+#
+# ===================== THREE THINGS MEASURED ON THIS RIG ==============
+#
+# 2026-08-27, ROS 2 Jazzy, nav2_velocity_smoother as installed:
+#
+#   1. `enable_stamped_cmd_vel` DEFAULTS TO FALSE. `ros2 node info` on
+#      the running node reads geometry_msgs/msg/Twist on both /cmd_vel
+#      and /cmd_vel_smoothed. THIS CORRECTS THE RESEARCH THIS PHASE WAS
+#      PLANNED FROM - docs/reports/m5v3-02 section 5 says "Jazzy defaults
+#      to TwistStamped", and on this rig it does not. It is stated
+#      explicitly below anyway: a default the published research
+#      disagrees with is exactly the kind of default that moves.
+#   2. `autostart_node: true` DRIVES THIS NODE TO ACTIVE BY ITSELF. The
+#      log reads "Auto-starting node" / "Configuring" / "Activating" and
+#      `ros2 lifecycle get` reads `active [3]` with no external
+#      transition at all. m5v3.sh therefore POLLS for that state rather
+#      than driving the transitions the way it drives the localisation
+#      arm's - a different mechanism, not a second copy of one.
+#   3. IT PUBLISHES NOTHING WHEN IDLE. `ros2 topic hz /cmd_vel_smoothed`
+#      reported no messages over 4 s with the node ACTIVE and nothing
+#      commanding, and after a burst it emits its own deceleration ramp
+#      to zero and then stops. That is what lets this be a DEFAULT stack
+#      child without fighting tools/drive_route.py and
+#      tools/slip_bench.sh, which drive the same two terminals from the
+#      gz side.
+velocity_smoother:
+  ros__parameters:
+    # ---- WHAT THE FEEDBACK IS, AND IT IS THE CRIB'S RULING REVERSED
+    #      ON A MEASUREMENT ----
+    #
+    # CLOSED_LOOP limits the acceleration against the vehicle's MEASURED
+    # twist rather than against this node's own last command, and
+    # agv/forklift/nav2.yaml specifies it: "if the vehicle is not
+    # actually following - blocked, slipping, or gated - the smoother
+    # keeps ramping away from reality and the command that eventually
+    # reaches the drive is a step." That argument is sound and it is
+    # about a DIFFERENT VEHICLE'S ESTIMATE.
+    #
+    # ON THIS STACK IT COSTS MORE THAN IT BUYS, MEASURED 2026-08-27: the
+    # same `straight` profile through the same chain, twice, with nothing
+    # else moved (EVIDENCE_NAV_V3.md 6 carries the two sessions).
+    #
+    #     feedback      ramp UP       ramp DOWN     stop from cruise
+    #     CLOSED_LOOP   0.150 m/s^2   ~0.076        NOT STOPPED in 6 s,
+    #                                               still at 0.23 m/s
+    #     OPEN_LOOP     0.339 m/s^2   0.342         2.09 s and 0.71 m
+    #
+    #   0.71 m against the v^2/2a = 0.70 m this file predicts, and 0.342
+    #   against the 0.350 configured. CLOSED_LOOP delivered 43 % of the
+    #   configured acceleration and never completed a stop inside the
+    #   profile.
+    #
+    # AND THE REASON IS THIS TRACK'S WHOLE SUBJECT. The estimate a
+    # CLOSED_LOOP smoother closes on is F1/F2's deliberately BAD
+    # instrument: quantised onto a 1024-count grid, 1.5 % long by
+    # construction, and filtered. A limiter closed on it inherits its lag,
+    # so every tick the ramp advances 0.0175 m/s from a number that is
+    # already behind the vehicle. The crib's failure mode - the vehicle
+    # not following - does not arise here and was measured not arising:
+    # `achieved / terminal` is 1.0000 in every settled window of every
+    # profile, because model.sdf's JointController is a velocity
+    # controller and tracks its order to 0.04 %.
+    #   WHAT IS GIVEN UP IS BOUNDED, AND IT IS NOT GIVEN UP HERE. If the
+    #   vehicle ever DOES stop following, OPEN_LOOP will ramp away from
+    #   it - and the command that reaches the plant is still ramp-limited
+    #   a SECOND time, at the WHEEL, by nodes/cmd_vel_tricycle.py's own
+    #   limiter (config.yaml navcmd.accel_mps2). The step the crib is
+    #   afraid of cannot reach the terminal on this chain.
+    #   IT ALSO REMOVES A SECOND-ORDER ARTEFACT. `scale_velocities` scales
+    #   the CHANGE on every axis by the most restrictive axis's factor,
+    #   so under CLOSED_LOOP a measured yaw rate decays at that factor -
+    #   measured in isolation on domain 99, a fake odometry of
+    #   wz = -0.0300 rad/s against a zero command came out as -0.029250,
+    #   an eta of 0.025 taken from the linear axis. On the live stack that
+    #   put a 0.15 rad wag into the steer axis on every stop. Under
+    #   OPEN_LOOP the same profile moved the steer terminal by 0.000000
+    #   rad from end to end.
+    #
+    # THE ADDRESS IS STILL PASSED AND IT IS STILL NEVER THE GROUND TRUTH.
+    # `odom_topic` is a `-p` override from m5v3.sh, picked from the
+    # estimator arm that is running - topics.odometry_filtered on the
+    # shipping filter, topics.fuse_odometry_filtered on the factor graph.
+    # Under OPEN_LOOP this node does not read it, and it is passed anyway
+    # so that the arm cannot drift away from the address while the ruling
+    # above is revisitable, and so that the ONE thing it may never be is
+    # decided by the launcher rather than by a parameter file.
+    #   /forklift/gz/odom IS THE INSTRUMENT AND IS NOT HERE (F2 global
+    #   constraint 13, F4 constraint 18). A smoother closed on ground
+    #   truth would be a smoother no real vehicle could have.
+    feedback: "OPEN_LOOP"
+    # DEFAULT-KEPT, and unread under OPEN_LOOP. It is the window the odom
+    # smoother averages over when the feedback IS closed; stated so that a
+    # future reversal of the ruling above starts from a number rather than
+    # from a default nobody looked at.
+    odom_duration: 0.1
+
+    # ---- ONE COMMAND IN, ONE COMMAND OUT ----
+    #
+    # 20 Hz, which is config.yaml's navcmd.rate_hz and F4 Task 2's
+    # controller rate. The whole chain ticks once per controller cycle,
+    # so nothing on it drops a command or republishes one.
+    smoothing_frequency: 20.0
+
+    # ---- THE CURVATURE SURVIVES THE LIMITER, WHICH IS NOT THE DEFAULT
+    #
+    # scale_velocities FALSE - the package default - limits vx and wz
+    # INDEPENDENTLY. On a nonholonomic vehicle that is a curvature
+    # corruption: the converter downstream reads the RATIO wz/vx as a
+    # steer angle, so scaling one component and not the other silently
+    # changes the commanded arc. TRUE scales the whole twist together.
+    scale_velocities: true
+
+    # ---- THE LIMITS THEMSELVES, [vx, vy, wz] ----
+    #
+    # vy IS ZERO BECAUSE THIS VEHICLE HAS NO LATERAL DEGREE OF FREEDOM AT
+    # ALL. Stating it as 0.0 means a stray vy is limited to nothing
+    # rather than passed downstream, where the converter would report it
+    # and discard it.
+    #
+    # vx = +-0.700 m/s IS config.yaml's navcmd.speed_max_mps AND IT IS A
+    # MEASUREMENT: the cruise every straight-line figure on this track
+    # was taken at (drive_route.profiles.straight and .aisle,
+    # tools/slip_bench.sh, EVIDENCE_SENSORS.md, EVIDENCE_FUSION.md).
+    #   IT IS SYMMETRIC BECAUSE THE MEASUREMENT IS. On this track
+    #   FORWARD - forks first - is NEGATIVE vx (model yaw 0 points the
+    #   forks at world -x), and drive_route.profiles.aisle drives
+    #   -0.700 out and +0.700 back on the same table. Both signs are
+    #   measured, so both signs get the same cap. The crib's asymmetric
+    #   pair (agv/forklift/nav2.yaml, -0.55 fork-first) is a SAFETY-FIELD
+    #   geometry argument about a different vehicle generation and it is
+    #   deliberately not copied: this stack has no field evaluation
+    #   behind it and would be quoting a number it has not earned.
+    #
+    # wz = +-2.0063798 rad/s IS DERIVED AND NOT CHOSEN. It is
+    # speed_max * kappa_max, where kappa_max = tan(1.25)/1.05 =
+    # 2.8662568 1/m is the curvature ceiling the CONVERTER enforces
+    # (config.yaml navcmd.steer_command_limit_rad, measured: 1.25 rad is
+    # the hardest steer this plant has ever been driven at).
+    #   SO THIS CAP NEVER BINDS FIRST, AND THAT IS THE POINT. The
+    #   geometry has ONE owner - the converter - and the smoother's job
+    #   is acceleration and the dead-man. A smaller wz here would
+    #   silently truncate a twist the converter would have accepted, and
+    #   with scale_velocities on it would truncate the SPEED with it;
+    #   a larger one would let a twist through that has no steer angle.
+    max_velocity: [0.700, 0.0, 2.0063798]
+    min_velocity: [-0.700, 0.0, -2.0063798]
+
+    # 0.35 m/s^2 IS config.yaml's navcmd.accel_mps2 AND IT IS ALSO A
+    # TABLE'S: drive_route.profiles.straight ramps 0.175 m/s per 0.5 s,
+    # which is this, and every figure on this track was taken behind
+    # that ramp. Stop distance from 0.700 m/s is v^2/2a = 0.70 m.
+    #
+    # THE ANGULAR ACCELERATION IS THE SAME RATIO AGAIN - 0.35 *
+    # kappa_max = 1.0031899 rad/s^2 - so a proportional ramp holds the
+    # curvature all the way up and all the way down, and the closed-loop
+    # floor from rest is the same 0.017500 m/s at EVERY curvature.
+    # config.yaml's navcmd.creep_speed_mps comment carries that
+    # arithmetic and the deadlock it is sized against.
+    max_accel: [0.35, 0.0, 1.0031899]
+    max_decel: [-0.35, 0.0, -1.0031899]
+
+    # ---- THE DEAD-MAN ON THE COMMAND CHAIN ----
+    #
+    # 1.0 s, the package default, KEPT. If nothing publishes a command
+    # for a second this node emits its deceleration ramp to zero. It is
+    # the local "my controller stopped talking" case and it is NOT a
+    # supervision watchdog and NOT a safety function. The converter
+    # downstream carries its own, SHORTER (config.yaml
+    # navcmd.command_timeout_s = 0.5 s): the layer nearer the plant must
+    # not be the slower one to notice.
+    velocity_timeout: 1.0
+
+    # ---- ZERO, AND ZERO IS THE ONLY SAFE VALUE HERE ----
+    #
+    # A deadband tells this node to emit an exact zero below a threshold.
+    # Combined with CLOSED_LOOP feedback that is a DEADLOCK and not a
+    # margin: the vehicle never starts, the measured twist stays zero,
+    # and the ramp never leaves the deadband. config.yaml's
+    # navcmd.creep_speed_mps comment is the arithmetic and
+    # docs/LESSONS.md 2026-08-05 is where it was first paid for.
+    deadband_velocity: [0.0, 0.0, 0.0]
+
+    # ---- THE MESSAGE TYPE, STATED BECAUSE THE RESEARCH DISAGREED ----
+    #
+    # false: geometry_msgs/Twist on both sides, which is what this Jazzy
+    # defaults to and what `ros2 node info` reports on the running node
+    # (measured, see the header). nodes/cmd_vel_tricycle.py subscribes
+    # Twist to match. If this is ever set true, that node's subscription
+    # type has to move with it, and the two are checked against each
+    # other by tests/test_smoother_params.py.
+    enable_stamped_cmd_vel: false
+    stamp_smoothed_velocity_with_smoothing_time: false
+
+    # ---- THE LIFECYCLE, AND WHY THIS ARM DOES NOT DRIVE IT ----
+    #
+    # A nav2 LifecycleNode left UNCONFIGURED subscribes to nothing,
+    # publishes nothing and logs nothing that reads as an error - the
+    # failure amcl.yaml and the localisation arm are built around.
+    # autostart_node drives it to ACTIVE on construction (measured on
+    # this rig: "Auto-starting node" / "Configuring" / "Activating", and
+    # `ros2 lifecycle get` reads `active [3]`), so m5v3.sh POLLS for that
+    # state and refuses by name if it never arrives, instead of sending
+    # transitions.
+    autostart_node: true
+    # Zero disables the bond. A LifecycleNode creates one to a nav2
+    # lifecycle_manager on activation, and there is no manager on this
+    # stack for it to bond to - amcl.yaml's own note carries the whole
+    # argument, including the heartbeat starving at simulation real-time
+    # factors. Left at the default this node prints "Creating bond
+    # timer..." and heartbeats at a listener that does not exist.
+    bond_heartbeat_period: 0.0
