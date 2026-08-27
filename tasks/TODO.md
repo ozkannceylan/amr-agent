@@ -149,11 +149,33 @@ Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
       19–47 mm (harita hücresi 50 mm), slam kolunda 22–135 mm;
       yumuşatıcı gecikme ekler ve okunmayan bir sayıyı iyileştirmek için
       manşet sayıyı bozar (§13.11). Suite 239→438; selftest 30→44.
-- [ ] F4. Nav2 sürüş: Smac Hybrid-A* (REEDS_SHEPP, gerçek min dönüş
+- [x] F4. Nav2 sürüş: Smac Hybrid-A* (REEDS_SHEPP, gerçek min dönüş
       yarıçapı) + MPPI Ackermann (RPP yedek) + tricycle BT (Spin/BackUp
       yok) + collision monitor (VelocityPolygon) + keepout + velocity
       smoother; PLC V_Limit → /speed_limit köprüsü (zarf mimarisi ve
       ADR 0014 korunur). Kanıt: m6'nın sürüş vakaları Nav2 ile yeniden.
+      YAPILAN (5 görev, 2026-08-27; kanıt m5_ver3/EVIDENCE_NAV_V3.md
+      §1-§20): Nav2 kamyonu sürüyor — komut yolu (ters kinematik telde
+      4e-11; slew rampaları birebir; /speed_limit dönüştürücüde çünkü
+      Jazzy smoother'ında YOK, ölçüldü), Smac Hybrid REEDS_SHEPP + MPPI
+      Ackermann + Spin'siz BT. İLK SÜRÜŞLER 1/5 VARDI ve teşhis görevi
+      mekanizmayı buldu: yolu tutan tek critic (PathAlignCritic) 1000
+      planın SIFIRINDA skorlamıştı — bir hız ayarı MPPI ufkunu sessizce
+      dönüş yarıçapının altına kısmış. 4 parametreyle basit hedefler
+      10-11/11 (başlık 6/6). Vaka seti 4/8: iki kaçak TEK mekanizma
+      (START_OCCUPIED bay kısıtı — F5'in rejimi, iki-aşamalı yanaşma
+      ŞART), biri park edilmiş ring_corner (uzun-düzlük modu, iki
+      kaldıraç ölçümle elendi, mekanizma doğrulanamadı), biri fail-fast
+      yakaladı. FAIL-FAST: kaçan hedef artık 130 m değil — 30 sn'de
+      isimli uyarı, 91 sn'de iptal. #5714 TERSYÜZ bulundu (ileri takip
+      geriden %50 kötü, committed enstrümanla). Flip: slam kolunun
+      koridor avantajı kapalı döngüde yaşıyor. Monitor --monitor
+      arkasında (yedek, muhafız değil: local costmap 0.36 m önce
+      davranıyor); global costmap'te obstacle layer YOK (bulaşma sıfır
+      kanıtlandı, F5'e devredildi). Sıçrama bütçesi §13.10b: 1.20 m
+      amcl / 0.89 m slam, ÜST SINIR YOK. Suite 583→873. Faz-sonu hüküm:
+      isimli sınırlamalarla KAPANDI, F4.5 yok — kaçaklar F5'in kendi
+      rejimine ait.
 - [ ] F5. Hassas yanaşma + palet: opennav_docking SimpleNonChargingDock +
       AprilTag detected_dock_pose; spur çıkışı = undock (düz geri, MPPI
       reverse riskini atlar); DetachableJoint ile palet al/bırak
