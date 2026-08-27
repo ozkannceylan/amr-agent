@@ -941,9 +941,11 @@ def heading_account(goal, truth_rows, speeds, lo, hi, transit_margin_m):
     travel heading moves sideways at |v| * sin(psi). Integrating that
     over the transit predicts the ACROSS component the run should have
     accumulated; comparing it with what the ground truth actually did
-    says how much is left for anything else. On F4 Task 2's runs the
-    answer was 94.8 % and 103.2 %, which leaves no room for a 0.65 m
-    localisation jump or for a replan loop.
+    says how much is left for anything else. On F4 Task 2's two runs
+    that reached the goal's station the answer was 0.974 and 1.059 -
+    which leaves no room for a 0.83 m localisation jump or for a replan
+    loop, and is what killed both hypotheses. EVIDENCE_NAV_V3.md 16.1
+    carries the same two figures and analyse_session() prints them.
 
     THE WINDOW STOPS `transit_margin_m` SHORT OF THE GOAL, ALONG TRACK,
     and that is not a convenience. Past that point the vehicle is in an

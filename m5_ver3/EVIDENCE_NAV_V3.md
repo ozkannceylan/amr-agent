@@ -1428,7 +1428,7 @@ figure about the arrival.
      > does not: `PathAlignCritic`, the only critic that penalises
      > deviation ALONG the path, never scored on any tick of any run
      > here, and the entire lateral miss is the integral of the
-     > uncorrected heading error that left (94.8 % and 103.2 % of it).
+     > uncorrected heading error that left (ratios 0.974 and 1.059).
      > The deviation figure quoted below cannot see it, for §16.1a's
      > reason. The paragraph is left as written.
 
@@ -1620,9 +1620,11 @@ transit:
 | `…130956` | **−1.5435 m** | −1.5844 m | **0.974** | −0.1053 rad |
 | `…131222` | **−1.0149 m** | −0.9579 m | **1.059** | −0.0693 rad |
 
-A residual of 2.6 % and 5.9 % is not room for a 0.65 m teleport. **The
-vehicle drove in a straight line that was pointing 4.0°–6.0° off, for
-seventeen metres.**
+A residual of 2.6 % and 5.9 % is not room for a 0.83 m teleport — which
+is the worst closed-loop correction the whole corpus carries (§16.8),
+and neither of these two runs came near it: their own worst steps are
+0.2071 m and 0.1561 m. **The vehicle drove in a straight line that was
+pointing 4.0°–6.0° off, for seventeen metres.**
 
 > **THE COMMITTED INSTRUMENT'S FIGURES, AND THEY MOVED FROM THE ONE-OFF
 > THIS SECTION WAS FIRST WRITTEN FROM** (0.948 and 1.032, off
@@ -2266,8 +2268,8 @@ rule fires on a FAILURE TO IMPROVE. A correction that moves the belief
 AWAY from the goal is not an improvement, so it neither moves the mark
 nor counts as progress; one that moves it TOWARD the goal moves the mark
 and makes the rule *more* lenient. The worst closed-loop correction
-measured is 0.6490 m (§16.8) and in either direction it can only delay
-this guard.
+measured is **0.8310 m** (§16.8) and in either direction it can only
+delay this guard.
 
 **BOTH NUMBERS WERE SIZED ON THE RECORDED FAILURES, AND THE RULE WAS RUN
 AGAINST EVERY SESSION ON DISK BEFORE IT WAS WRITTEN.**

@@ -84,7 +84,7 @@ STATION_TOLERANCE_M = 0.25
 MEASURED_LATERAL_MISS_M = 0.96
 
 #: What SmacPlannerHybrid puts between the poses of a plan on this
-#: floor, measured over the 1005 plans of the five shipped runs
+#: floor, measured over the plans of the five shipped runs
 #: (0.0675-0.1060 m, medians 0.083-0.105). The align critic's gate is a
 #: count of path points and this is what turns it into a distance.
 PLAN_POSE_SPACING_M = 0.10

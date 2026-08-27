@@ -1096,3 +1096,52 @@ def test_the_ratio_is_None_rather_than_infinite_when_nothing_drifted():
     rows, speeds = _drive(0.0)
     got = drive_goal.heading_account(_Goal(), rows, speeds, 0.0, 1e9, 3.0)
     assert got.ratio is None
+
+
+def test_mppi_window_multiplies_the_three_numbers_into_a_DISTANCE(
+        tmp_path):
+    # THE WHOLE OF 16.2 IN ONE ASSERTION. `time_steps` is a COUNT and
+    # the horizon is a DISTANCE, and F4 Task 2 shipped a file where the
+    # two had come apart because nothing multiplied them together. This
+    # is the one place that does, so it gets a test of its own rather
+    # than being covered only through the scan that calls it.
+    path = tmp_path / "nav2.yaml"
+    path.write_text(
+        "controller_server:@  ros__parameters:@    FollowPath:@"
+        "      time_steps: 56@      model_dt: 0.05@      vx_max: 0.300@"
+        "      PathAlignCritic:@        offset_from_furthest: 20@"
+        .replace("@", chr(10)), encoding="utf-8")
+    got = drive_goal.mppi_window(str(path))
+    assert got.steps == 56
+    assert got.model_dt == pytest.approx(0.05)
+    assert got.vx_max == pytest.approx(0.300)
+    assert got.gate == 20
+    assert got.horizon_m == pytest.approx(0.84)
+
+
+def test_the_horizon_follows_the_SPEED_and_not_only_the_count(tmp_path):
+    # The coupling that broke: the same 56 steps at the two transit
+    # ceilings this track has used are 1.96 m and 0.84 m of look-ahead,
+    # and only one of them clears the vehicle's 1.25 m turning radius.
+    def written(vx):
+        path = tmp_path / ("n%s.yaml" % vx)
+        body = ("controller_server:@  ros__parameters:@    FollowPath:@"
+                "      time_steps: 56@      model_dt: 0.05@"
+                "      vx_max: %s@      PathAlignCritic:@"
+                "        offset_from_furthest: 20@" % vx)
+        path.write_text(body.replace("@", chr(10)), encoding="utf-8")
+        return drive_goal.mppi_window(str(path)).horizon_m
+    assert written("0.700") == pytest.approx(1.96)
+    assert written("0.300") == pytest.approx(0.84)
+    assert written("0.300") < 1.25 < written("0.700")
+
+
+def test_mppi_window_reads_the_SHIPPED_file_and_agrees_with_the_label(cfg):
+    import os as _os
+    got = drive_goal.mppi_window(
+        _os.path.join(drive_goal._common.REPO, cfg.s("nav.params_file")))
+    label = drive_goal.nav_label(cfg)
+    assert int(label["nav_time_steps"]) == got.steps
+    assert int(label["nav_align_gate"]) == got.gate
+    assert got.horizon_m == pytest.approx(got.steps * got.model_dt
+                                          * got.vx_max)

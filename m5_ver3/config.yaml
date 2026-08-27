@@ -3994,8 +3994,8 @@ nav:
     # the improvement test and so cannot reset the mark either - it
     # simply is not an improvement; one that moves the belief TOWARD the
     # goal resets the mark and makes the rule MORE lenient. The worst
-    # such correction measured under a closed loop is 0.6490 m
-    # (EVIDENCE_LOCALIZATION_V3.md 13.10's closed-loop addendum), and in
+    # such correction measured under a closed loop is 0.8310 m
+    # (EVIDENCE_LOCALIZATION_V3.md 13.10a, over all 44 sessions), and in
     # either direction it can only delay this guard, never provoke it.
     #
     # WHAT IT ASSUMES, STATED: that the route CLOSES on the goal. A goal
