@@ -1077,6 +1077,15 @@ takes it.
 
 ## 15. THE FIRST DRIVEN GOALS
 
+> **THREE OF THIS SECTION'S CONCLUSIONS ARE SUPERSEDED BY §16 AND ARE
+> MARKED WHERE THEY SIT.** Every MEASUREMENT below stands exactly as F4
+> Task 2 took it — they are measurements of a different `nav2.yaml` and
+> §16 does not re-run them. What §16 changes is what three of them were
+> read to MEAN: §15.4's reading of the deviation figure, §15.7 item 1's
+> "it is not the controller", and §15.7 item 5 / §15.9 item 7's jump
+> budget. Nothing here has been edited except to add those pointers.
+
+
 ### 15.0 The answer, before the working
 
 | | |
@@ -1266,6 +1275,16 @@ That is the pair that produced §14's `PositionGoalChecker` ruling.
 | worst steer step | **0.100000** | **0.100000** | **0.100000** | **0.100000** | **0.100000** |
 | cusps (direction changes) | 0 | 0 | 1 | **16** | 2 |
 
+> **SUPERSEDED READING — §16.1a.** The rate figure stands. "HELD ITS
+> PATH" does not: the tree replans at 1 Hz **from the vehicle's own
+> pose**, so every plan starts underneath the truck and a controller
+> that never turns at all is never more than one cycle's drift from its
+> path. 0.043 m is what one second of a 0.024 m/s lateral drift looks
+> like. The deviation figure is small here **because the plan keeps
+> moving to where the truck is**, and the same runs' curvature-following
+> gain — the figure that does not have this problem — is 0.049, −0.011
+> and −0.052. The paragraph below is left as written.
+
 **THE CONTROLLER HELD ITS RATE AND HELD ITS PATH.** 20.0 Hz median on
 every run, and a deviation from the plan standing at the time of
 **0.040–0.113 m mean** over 21 500 commanded twists. nav2 issue #5714
@@ -1283,6 +1302,15 @@ deviation from the plan standing at the time as **mean 0.3140 m, median
 |---|---|---|---|
 | **0.700 m/s** (`…120921`, `nav=on@16963750`) | **0.3140 m** | 0.3460 m | **0.9384 m** |
 | 0.300 m/s (the five shipped runs) | 0.040 – 0.113 m | 0.035 – 0.089 m | 0.182 – 0.414 m |
+
+> **SUPERSEDED READING — §16.1a.** Both envelopes carry the identical
+> defect (`PathAlignCritic` never scored on either), and the reason the
+> figure is 7× larger at 0.700 m/s is that the vehicle covers 2.33× the
+> ground between replans, so the same uncorrected heading error shows up
+> as more distance from a path that is re-anchored at the same rate. It
+> is a measurement of the REPLAN RATE against the speed, not of the
+> controller's tracking, and it is not a #5714 datum in either
+> direction.
 
 **SEVEN TIMES THE MEAN AND TWICE THE WORST, FOR 2.3× THE SPEED.** That is
 not a #5714 measurement on its own - the two are different `nav2.yaml`s
@@ -1394,7 +1422,17 @@ figure about the arrival.
      component that misses is ACROSS the goal's own travel heading:
      **−0.5277 m and −0.9596 m** on the two that got there, both to the
      RIGHT of the arrival heading.
-     **AND IT IS NOT THE TRACKING AND NOT THE LOCALISER.** `…131222`
+     **AND IT IS NOT THE TRACKING AND NOT THE LOCALISER.**
+     > **SUPERSEDED — §16.2. IT WAS THE CONTROLLER.** "Not the
+     > localiser" stands and §16.1(b) strengthens it. "Not the tracking"
+     > does not: `PathAlignCritic`, the only critic that penalises
+     > deviation ALONG the path, never scored on any tick of any run
+     > here, and the entire lateral miss is the integral of the
+     > uncorrected heading error that left (94.8 % and 103.2 % of it).
+     > The deviation figure quoted below cannot see it, for §16.1a's
+     > reason. The paragraph is left as written.
+
+     `…131222`
      followed the plan standing at the time to a mean of **0.0427 m**
      and its truth and belief were **0.0238 m** apart at the closest
      row — under the registration's own rms floor. The vehicle went
@@ -1425,6 +1463,11 @@ figure about the arrival.
 4. **THE 5.09 s CONTROL TICK**, once in 21 500.
 5. **THE 0.6490 m JUMP.** §13.10's budget is not conservative under a
    closed loop.
+     **SUPERSEDED — §16.8 and `EVIDENCE_LOCALIZATION_V3.md` §13.10a.**
+     The finding is right and the number is low: over the whole
+     driven-goal corpus the worst single closed-loop step is
+     **0.8310 m**, on a run that ARRIVED down the longest route in the
+     goal table. The heading half of the contract held.
 
 ### 15.8 What this task did NOT do
 
@@ -1452,7 +1495,15 @@ figure about the arrival.
 ### 15.9 What F4 Task 3 inherits
 
 1. **THE ARRIVAL IS THE OPEN PROBLEM AND IT IS NOT THE CONTROLLER'S
-   TRACKING.** One goal in five arrived; the controller held 20.0 Hz and
+   TRACKING.**
+     > **SUPERSEDED — §16. IT WAS THE CONTROLLER, AND THE ARRIVAL IS NO
+     > LONGER OPEN.** `PathAlignCritic` never scored; the fix is four
+     > parameters; the set is 5 of 5. This item is left whole because
+     > the reasoning that produced it — "the deviation is small, so the
+     > tracking is fine" — is the exact trap §16.1a is about, and a
+     > later task is better served by seeing it than by not.
+
+   One goal in five arrived; the controller held 20.0 Hz and
    0.040–0.113 m of deviation on every run. §15.7 lists the three
    measured causes and which two are fixed. A driving case that assumes
    a goal completes has to read that list first.
@@ -1471,6 +1522,13 @@ figure about the arrival.
 3. **The goal checker holds a POSITION and no heading**, and §15.2 rungs
    12–13 are why. An arrival heading is F5's, through the docking
    server's straight final leg.
+     **RE-EXAMINED AND CONFIRMED ON BETTER EVIDENCE — §16.6.** Both
+     rungs were driven by the controller §16 fixes, so the ruling was
+     right with a confound in it. Asked again with the pair actually
+     configured, the position half is reachable to **0.0062 m of
+     belief** and the heading at that moment is **0.324 rad** out;
+     §16.6's corridor table is the curve, and it says the straight
+     final leg has to be about **1.5 m**.
 4. **A freespace planner is not the road graph, measured.** §15.2's
    ladder and §15.5. Any case whose route crosses the rack block is a
    case about that finding rather than about the controller.
@@ -1479,8 +1537,993 @@ figure about the arrival.
    task; a case set that retunes anything has to re-record.
 6. **`consider_footprint: true` on the CostCritic**, and the 43.66 % of
    a core the arm costs idle. A case that adds critics starts there.
-7. **THE JUMP BUDGET DID NOT SURVIVE CONTACT.** §15.6: the worst single
+7. **THE JUMP BUDGET DID NOT SURVIVE CONTACT.**
+     > **SUPERSEDED — §16.8. Size it on 0.85 m, not 0.65 m.** §15.6's
+     > 0.6490 m was the worst in F4 Task 2's own five runs; over the
+     > whole corpus it is **0.8310 m**.
+
+   §15.6: the worst single
    `map` → `odom` correction under a closed loop was **0.6490 m**
    against the **0.2591 m** `EVIDENCE_LOCALIZATION_V3.md` §13.10 handed
    over. The heading steps stayed well inside. A phase that sizes
    anything on that contract should size it on 0.65 m.
+
+
+---
+
+# F4 TASK 2.5 — WHY THE TRUCK MISSED
+
+**§16 is F4 Task 2.5.** §15 measured one arrival in five and named the
+miss as open. This is the diagnosis, the mechanism, the fix, the
+fail-fast and the re-measured set. Same rig, same day (2026-08-27),
+**headless**, `traction=nominal`, `arm=wheel+imu`, `loc=amcl@735cdbc6`,
+dry. Every figure names the instrument that produced it and every
+rejected hypothesis is here with the measurement that killed it.
+
+Nothing here is a safety claim. No collision monitor is run, no safety
+scanner is bridged, and every tolerance below is a PROCESS value.
+
+## 16. THE DIAGNOSIS
+
+### 16.0 The answer, before the working
+
+| | |
+|---|---|
+| **THE MECHANISM** | `PathAlignCritic` — the heaviest critic in `nav2.yaml` at `cost_weight: 14.0`, and the only one that penalises deviation ALONG the path — **never scored once on any control tick of any run in §15** |
+| why | it returns early unless `furthest_reached_path_point >= offset_from_furthest`. That index is the PREDICTION HORIZON measured in path points, the gate was 20, and the horizon reached **8 at the median and 13 at its very best** |
+| how many plans could ever have cleared it | **0 of 1005** on the five shipped runs. 11 of 275 on the 0.700 m/s configuration §15.2 rung 11 withdrew |
+| **the provenance, and it is the whole lesson** | rung 11 lowered the transit ceiling 0.700 → 0.300 m/s, correctly, on the stop table. `time_steps: 56` was a COUNT. The horizon is a DISTANCE: it went from 1.96 m to **0.84 m**, under the vehicle's own 1.25 m turning radius, and nothing in the file knew the two were coupled |
+| **what that did to the truck** | the controller commanded **5–9 %** of the yaw rate the plan's curvature required (gain 0.049, −0.011, −0.052), held whatever heading it had, and **integrated it** |
+| **and the miss is that integral, to 5 %** | `…130956` predicted **−1.4894 m** from the heading error alone against **−1.5714 m** measured (94.8 %); `…131222` **−0.9616** against **−0.9319** (103.2 %). Nothing is left over for the localiser, the jumps or the replans |
+| **proved twice on the rig before anything moved** | `cost_weight` × **100** at the shipped gate: indistinguishable from baseline. The gate alone 20 → 5: behaviour changed completely, into a limit cycle |
+| **THE FIX** | horizon `time_steps` 56 → **134** (2.01 m), `prune_distance` 2.0 → **2.5**, `PathAlignCritic.offset_from_furthest` 20 → **12**, `use_path_orientations` false → **true** |
+| **THE ACCEPTANCE** | **10 arrivals in 11** on one set of parameters, against §15.3's **1 in 5**. The headline `spine_north` **6 of 6** against 1 of 3; `aisle_end` **2 of 2** |
+| **AND THE ONE PLACE IT DID NOT REACH ITS BAR** | `ring_corner`, the same straight leg carried to 37 m, is **2 of 3**. The loop is MARGINALLY STABLE there and the outcome is bimodal — heading swing 0.20 rad when it locks on, 0.55 when it does not. A horizon rung aimed at it was tried and REJECTED on measurement. §16.4c |
+| the arrival, scored at rest | truth **0.4474 – 0.5859 m**, belief **0.4588 – 0.5063 m**, the two 0.006 – 0.086 m apart, both inside the unchanged **0.60 m** box |
+| and the arrival HEADING, which nothing demands | **−0.0126 to +0.0817 rad** on the straight approaches, against **1.6920 rad** on §15.3's one arrival |
+| the fail-fast | §16.7 — a goal-relative watchdog in the bench and a 335 s budget in the tree, demonstrated both directions |
+| the 0.25 m station class | §16.6 — position-only stays, and the argument is now a measured CURVE rather than an assertion |
+| the jump budget | §16.8 — `EVIDENCE_LOCALIZATION_V3.md` §13.10a, **0.8310 m closed loop against 0.2591 m open**, and it is the LONGEST ROUTE rather than the worst driving that produces it |
+
+### 16.1 The suspect list, and the measurement that killed each
+
+The brief left five suspects open. Four are dead and each died to a
+number. **All four were killed OFFLINE, on sessions §15 had already
+recorded, before the rig was touched** — `drive_goal.py analyse` and
+`plans_of()` need no ROS.
+
+**(a) "the plan's end is not the goal."** DEAD. Every `/plan` is
+recorded with its poses, so this is a direct read. Across the three
+`spine_north` runs — 644 plans — the last pose of every plan is the goal
+to **0.0000 m**, with a single exception at 0.0092 m. `ring_corner`'s
+and `aisle_end`'s are the same. **The planner put the path through the
+goal every time and the vehicle did not follow it there.**
+
+**(b) "the 0.6490 m map → odom steps relocate the goal mid-approach."**
+DEAD, and it is the same measurement that kills (c). On the two runs
+that actually reached the goal's along-track station the worst single
+correction was **0.2071 m** and **0.1561 m** — the 0.6490 m step is
+`ring_corner`'s, a different run. More decisively: **the lateral miss is
+fully accounted for without any jump at all.** Integrating the vehicle's
+own ground speed against its heading error over the transit —
+`∫ |v| · sin(ψ) dt`, both off the ground truth, ψ measured against the
+goal's own travel heading — predicts
+
+| run | predicted from the heading alone | measured `across` change | ratio |
+|---|---|---|---|
+| `…130956` | **−1.4894 m** | −1.5714 m | **0.948** |
+| `…131222` | **−0.9616 m** | −0.9319 m | **1.032** |
+
+A residual of 5 % and 3 % is not room for a 0.65 m teleport. **The
+vehicle drove in a straight line that was pointing 4.6°–7.1° off, for
+seventeen metres.**
+
+**(c) "459 replans re-anchor the path and the controller orbits a moving
+target."** DEAD. The replans are downstream of the mechanism, not
+upstream of it: the miss accumulates at a CONSTANT rate equal to
+`|v|·sin(ψ)` (above), which contains no term for replanning, and the
+plan terminus is fixed (a). The 459 plans of `…131600` are what a
+vehicle that has already missed produces while trying to come back —
+which is §16.7's problem, not this one's.
+
+**(d) "the prediction horizon against the 1.02 m stopping distance."**
+NOT DEAD — **and it is not about stopping.** The horizon is the
+mechanism's cause, and the quantity it is short against is the turning
+radius rather than the stopping distance. §16.2.
+
+**(e) "the goal-checker geometry compounding it."** DEAD AS A CAUSE. The
+box is 0.60 m and the miss is 0.9918 m in the pose the checker sees; a
+box that contained that miss would be 1.65× the moving error budget F3
+handed over and would not be a fix, it would be a bigger target. The
+fixed controller arrives **with the box unchanged** (§16.5).
+
+**AND THE ONE THE LIST DID NOT HAVE, WHICH IS THE ANSWER:** a critic
+that was configured, weighted, enabled, read back on the running node
+by §14.5 — and structurally unable to score.
+
+#### 16.1a The question §15.4 left: why does it miss at the speed where tracking is TIGHT?
+
+The brief put it directly: deviation from the plan is 0.040–0.113 m mean
+at 0.300 m/s and 0.3140 m at 0.700 m/s, so why is the miss at 0.300?
+
+**BECAUSE THE DEVIATION FIGURE IS NOT A TRACKING FIGURE ON THIS STACK,
+AND §15.4 SAYS SO WITHOUT MEANING TO.** It is the distance from the
+truth to *the plan standing at the time*, and the tree replans at 1 Hz
+from the vehicle's own pose — so **every plan starts underneath the
+vehicle**. A controller that never turns at all is therefore never more
+than one replan cycle's worth of drift from its path, and 0.043 m is
+what one second of a 0.024 m/s drift looks like. The figure is small
+because the plan keeps moving to where the truck is.
+
+The 0.700 m/s run is the same defect read through the same flawed
+instrument: at 2.33× the speed the vehicle covers 2.33× the ground
+between replans, so the same heading error shows up as 7× the
+"deviation". **Both envelopes have the identical defect.** §16.2's
+CURVATURE FOLLOWING gain is the figure that does not have this problem,
+and it reads 0.049 / −0.011 / −0.052 at 0.300 m/s — a controller
+ignoring its plan, at the speed where the deviation figure said it was
+tracking beautifully.
+
+### 16.2 THE MECHANISM, in the shipped binary's own source
+
+nav2 **1.3.12**, tag `1.3.12` = commit `6be3614`,
+`nav2_mppi_controller/src/critics/path_align_critic.cpp`, the third
+statement of `score()`:
+
+```cpp
+  // Don't apply when first getting bearing w.r.t. the path
+  utils::setPathFurthestPointIfNotSet(data);
+  // Up to furthest only, closest path point is always 0 from path handler
+  const size_t path_segments_count = *data.furthest_reached_path_point;
+  float path_segments_flt = static_cast<float>(path_segments_count);
+  if (path_segments_count < offset_from_furthest_) {
+    return;
+  }
+```
+
+and `nav2_mppi_controller/tools/utils.hpp`, which is **installed on this
+rig** and was read there:
+
+```cpp
+inline size_t findPathFurthestReachedPoint(const CriticData & data)
+{
+  const auto traj_x = xt::view(data.trajectories.x, xt::all(), -1, ...);
+  ...
+    max_id_by_trajectories = std::max(max_id_by_trajectories, min_id_by_path);
+  return max_id_by_trajectories;
+}
+```
+
+**`furthest_reached_path_point` IS NOT A TUNABLE.** It takes the LAST
+point (`-1`) of every sampled trajectory, finds the path index nearest
+it and returns the largest over the batch. It is the **prediction
+horizon expressed in path points**, and nothing else.
+
+**THE FOUR NUMBERS, AND THREE OF THEM WERE ALREADY ON DISK.**
+
+| | value | where it comes from |
+|---|---|---|
+| the horizon | `time_steps` 56 × `model_dt` 0.05 × `vx_max` 0.300 = **0.84 m** | `nav2.yaml`, read back on the running node in §14.5 |
+| the plan's pose spacing | **0.0675 – 0.1060 m**, medians 0.083 – 0.105 | measured over the 1005 plans of the five shipped runs |
+| ⇒ the reachable path index | **median 8, best 13** | the two above, per plan, per run |
+| the gate | `offset_from_furthest` **20** | `nav2.yaml` — the upstream default, and the one line in that file with **no derivation beside it** |
+
+| session | plans | reachable index (mean / median / max) | could clear a gate of 20 |
+|---|---|---|---|
+| `…130956` | 57 | 8.47 / 8 / **12** | **0 of 57** |
+| `…131222` | 126 | 6.00 / 5 / **13** | **0 of 126** |
+| `…131600` | 458 | 7.19 / 8 / **9** | **0 of 458** |
+| `…132535` `ring_corner` | 191 | 5.24 / 3 / **8** | **0 of 191** |
+| `…133039` `aisle_end` | 173 | 3.86 / 3 / **8** | **0 of 173** |
+| **the shipped set** | **1005** | | **0 of 1005** |
+
+The scan covers the **1005 plans published while the vehicle was
+moving**; twelve more were published at a standstill and are dropped,
+because a horizon is a speed times a time and at rest it is zero — those
+twelve would fail the gate by more, not less.
+| `…120921` at **0.700 m/s** | 275 | 5.24 / 3 / **28** | **11 of 275** |
+
+**WHAT WAS LEFT DOING THE STEERING.** `PathFollowCritic` pulls only the
+trajectory's LAST point toward ONE path point (`furthest + 5`);
+`GoalCritic` acts inside 1.4 m; `PathAngleCritic` returns early below
+`max_angle_to_furthest` = 1.0 rad, so it is a turn-around critic and not
+an alignment one. **Not one of them costs a vehicle for driving
+parallel to its path, half a metre to the side of it.**
+
+**THE INSTRUMENT THAT SHOWS IT DIRECTLY.**
+`drive_goal.curvature_following()` takes the plan's own curvature at the
+vehicle, multiplies by the speed being driven — that IS a yaw rate — and
+regresses what the controller commanded on it through the origin. 1.0 is
+a controller that obeys, 0.0 is one that ignores:
+
+| run | demand rms | **GAIN** |
+|---|---|---|
+| `…130956` | 0.0917 rad/s | **0.049** |
+| `…131222` | 0.0636 rad/s | **−0.011** |
+| `…131600` | 0.0092 rad/s | **−0.052** |
+
+A demand of 0.06–0.09 rad/s is a quarter of `wz_max` (0.240). **The plan
+was asking for a quarter of the vehicle's whole angular authority and
+getting five per cent of it.**
+
+**AND THE PROVENANCE IS THE PART WORTH KEEPING.** `time_steps: 56` was
+derived in this file against the **0.700 m/s** ceiling — its comment
+still read "1.96 m of look-ahead" when this task opened it. §15.2 rung
+11 then took the ceiling to 0.300 m/s on the stop table, correctly, and
+**a count of steps multiplied by a smaller speed is a shorter
+distance**. 0.84 m is below the vehicle's own 1.25 m minimum turning
+radius: inside a horizon shorter than the radius it may turn on, every
+turn looks nearly free and the cost surface is blind to where it leads.
+**The speed change switched the critic off, and nothing in the file
+named the coupling.** `tests/test_nav2_params.py` now derives the count
+from the speed, so the next task to move one and not the other fails a
+test instead of a goal.
+
+### 16.3 The two-sided proof, on the rig, before anything was fixed
+
+A structural claim deserves a structural test, and one run either side of
+a hair is not one. Both rungs are single goals on the headline route,
+stack stopped and restarted for each.
+
+**NULL TEST — `cost_weight` 14.0 → 1400.0, gate left at 20.**
+*Hypothesis:* the critic never scores. *Prediction:* multiplying an
+inert critic's weight by one hundred changes nothing. *Run:*
+`goal-spine_north-20260827-162800`, `nav=on@5097c0e5`. *Verdict:*
+**CONFIRMED.** ABORT 205; curvature-following gain **0.089** against the
+baseline's 0.057; closest approach 3.04 m. A hundredfold change in the
+largest weight in the file is not visible in the vehicle's behaviour,
+which is only possible if the term is never added.
+
+**POSITIVE CONTROL — weight back to 14.0, gate 20 → 5, horizon
+untouched.** *Hypothesis:* the gate is what silences it. *Prediction:*
+the behaviour changes completely. *Run:*
+`goal-spine_north-20260827-163615`, `nav=on@9697ed42`. *Verdict:*
+**CONFIRMED, and it went unstable** — commanded curvature pinned at
+±0.80 (the minimum turning radius) for the whole run, the heading
+sweeping through 2π repeatedly, 443 plans, ABORT 205. Aligning a 0.84 m
+trajectory to a 0.5 m stub of path on a 1.25 m radius is not a corridor,
+it is a point attractor. **The gate was the switch; it was not the
+fix.**
+
+### 16.4 THE LADDER
+
+`nav` is the `nav=on@<md5>` label. `analyse` refuses to table two of them
+together, so every rung is its own group and this table is assembled by
+hand from per-rung output.
+
+| # | `nav2.yaml` | what moved | goal | result | closest (belief) | gain | what it measured |
+|---|---|---|---|---|---|---|---|
+| 0 | `6555ac39` | nothing — §15's file, comments only | `spine_north` | CANCELLED at 479.7 s, 440 plans | 10.7963 m | 0.057 | **the failure reproduces on this bringup** |
+| 1 | `5097c0e5` | `PathAlignCritic.cost_weight` ×100 | `spine_north` | ABORT 205, 361.6 s | 3.0353 m | 0.089 | **nothing changed — the critic is inert** |
+| 2 | `9697ed42` | weight back; `offset_from_furthest` 20 → 5 | `spine_north` | ABORT 205, 457.8 s | 3.5992 m | 0.173 | **the critic is live and the loop limit-cycles** |
+| 3 | `008e5781` | `time_steps` 56 → 134, `prune_distance` 2.0 → 2.5, gate → 12 | `spine_north` | **SUCCESS**, 57.5 s, 56 plans | **0.5792 m** | — | **across 1.586 → 0.155 m; heading error 0.105 → 0.002 rad** |
+| 4 | `21ac4916` | + `SimpleGoalChecker` at 0.25 m / 0.15 rad | `spine_north` | ABORT 205, 454.4 s | **0.0062 m** | — | the POSITION half of the station class is met to six millimetres; the heading there is 0.324 rad out. §16.6 |
+| 5 | `d9b69c48` | reverted to `PositionGoalChecker` 0.60 m; every derivation written | ×5 | **4 of 5** — `spine_north` 3/3, `aisle_end` SUCCESS, **`ring_corner` no_progress** | | | **the 37 m leg oscillates**: ±0.3 rad, ~20 s period, rising, 1.5 m off the line by t+35 s |
+| 6 | `f5255467` | `use_path_orientations` false → **true** | `ring_corner` | **SUCCESS**, 127.6 s | 0.5980 m | **0.648** | **the damping term.** §16.4a |
+| **7** | `e2ad0354` | `time_steps` 134 → 152 (the WHOLE 2.269 m manoeuvre), `prune_distance` 2.5 → 2.8 | `ring_corner` ×2 | **1 of 2** | 0.5925 m / 7.3915 m | 0.619 / 0.456 | **REJECTED, and §16.4c is the measurement.** 13 % more work per tick and the oscillation statistic did not move. **Reverted.** |
+
+**RUNGS 1, 2 AND 7 ARE REJECTED RUNGS AND THEY ARE HERE FOR THE SAME
+REASON THE ARRIVALS ARE.** The shipped file is rung 6; rung 3's numbers
+are in it unchanged.
+
+#### 16.4a Rung 6, because a fix that only works on short legs is not one
+
+Rung 3 arrived three times out of three on the 17 m headline and rung 5
+still lost `ring_corner` — **the same straight leg carried on to 37 m**.
+That is not a harder leg. It is the same leg with room for an
+oscillation to develop, and the oscillation is a property of what the
+critic was costing:
+
+```cpp
+  summed_path_dist += sqrtf(dx * dx + dy * dy);        // false
+```
+
+— the DISTANCE from each trajectory point to the path, and nothing else.
+That is proportional feedback on cross-track error, and cross-track
+error on a steered vehicle is a **double integrator** of the steer
+angle: steer changes heading, heading changes cross-track rate. Round a
+double integrator, proportional feedback oscillates; the only damping
+was however far MPPI could see, 2.01 m against a 1.25 m radius. Measured
+on `goal-ring_corner-20260827-172326`: heading swinging ±0.3 rad with a
+period near 20 s and a **rising** amplitude, 1.54 m off the line by
+t+35 s, then a limit cycle at the minimum radius, abandoned by the
+watchdog at t+72.0 s.
+
+`use_path_orientations: true` adds the path's own per-pose heading to
+the cost — `sqrtf(dx*dx + dy*dy + dyaw*dyaw)` — which is the rate term
+the loop was missing: a trajectory heading across the path is penalised
+**before** it has got anywhere. `ring_corner` then arrived in 127.6 s
+with a curvature-following gain of **0.648** against 0.161 on the run
+that failed.
+
+**AND THE ORIENTATIONS ARE WORTH READING HERE, WHICH IS NOT UNIVERSAL.**
+`SmacPlannerHybrid` is a FEASIBLE planner: every pose carries the
+heading a vehicle of this turning radius would hold there, and §14.5's
+`PathAngleCritic.mode: 2` already reads the same field for the same
+reason. On a planner emitting geometric waypoints this would be scoring
+noise.
+
+#### 16.4c `ring_corner` IS MARGINALLY STABLE, AND RUNG 7 DID NOT FIX IT
+
+**THE SHIPPED CONFIGURATION ARRIVES ON `ring_corner` TWICE IN THREE, AND
+THAT IS THE ONE PLACE THIS TASK DID NOT REACH ITS OWN BAR.** It is
+stated first and argued after.
+
+Three runs on the shipped parameters — `f5255467` and `3148d052` differ
+by COMMENTS ONLY, which is not an assertion: reversing the four
+comment edits reproduces `f5255467` byte for byte and
+`yaml.safe_load` returns identical parameter trees, which is what
+`nav_config_md5` (both **`53a33d67`**) exists to say:
+
+| run | `nav=` | ψ standard deviation | ψ max | result |
+|---|---|---|---|---|
+| `…173139` | `f5255467` | **0.2072 rad** | 0.5759 | ARRIVED |
+| `…174429` | `f5255467` | **0.1957 rad** | 0.4873 | ARRIVED |
+| `…180823` | `3148d052` | **0.5447 rad** | 1.2113 | abandoned, `no_progress` |
+
+ψ is the vehicle's travel heading against the goal's, off the ground
+truth. **The outcome is bimodal**: a run either locks onto its route at
+ψ ≈ 0.20 rad of swing, or it oscillates at ≈ 0.55 and does not recover.
+It is not a slow degradation — it is which side of a stability boundary
+the run lands on. §15's own `ring_corner` runs sit at **1.33 – 1.47 rad**
+for comparison, and rung 5's at 1.22: rung 6 moved the statistic by
+**six times** and the residual is what is left.
+
+**IT IS THE LONGEST STRAIGHT LEG AND THAT IS THE POINT.** `spine_north`
+is the same leg stopped at 17 m and it has arrived **six times from
+six**; `ring_corner` carries it to 37 m. A leg is not harder for being
+longer — it is the same leg with room for an oscillation to develop, and
+20 m is where this one does.
+
+**RUNG 7: THE HORIZON WAS THE OBVIOUS NEXT LEVER AND IT IS NOT THE
+LEVER.** §16.2's fix sized `time_steps` at 134 — 2.01 m, the quarter
+turn at the minimum radius rounded up — on an argument that a
+RECEDING-horizon optimiser needs only enough of a manoeuvre to prefer
+starting it, not all of it. The obvious reading of 16.4c is that the
+argument was too thin, so it was tested: `time_steps` 152, a horizon of
+**2.28 m** holding the whole 2.269 m correction, `prune_distance` 2.8.
+
+| run | ψ sd | ψ max | closest (belief) | result |
+|---|---|---|---|---|
+| `…182158` | **0.2255 rad** | 0.4867 | 0.5925 m | ARRIVED |
+| `…182541` | **0.5703 rad** | 1.1048 | 7.3915 m | ABORT 205 |
+
+**THE SAME BIMODALITY, THE SAME TWO CLUSTERS, ONE ARRIVAL IN TWO
+AGAINST TWO IN THREE.** The statistic the change was made to move did
+not move. It cost 13 % more work per tick — the controller still holds
+20.000 Hz median, with the worst tick at 0.070 s against 0.064–0.068 —
+and bought nothing measurable, so **it was reverted** and `nav2.yaml` is
+byte-identical to the file the acceptance set was driven on. The
+receding-horizon argument stands, not because it was proved but because
+the experiment that would have overturned it did not.
+
+**WHAT THE RESIDUAL LOOKS LIKE, AND THE LEVER NOBODY HAS PULLED.** On a
+failing run the PLAN oscillates with the vehicle: the tree replans at
+1 Hz **from the vehicle's own pose and heading**, so a heading that is
+swinging produces a Reeds-Shepp path that swings, which the controller
+then follows. That is a planner-controller loop at 1 Hz around the
+20 Hz one, and neither the align critic's gate nor its horizon reaches
+it. The untried levers, in the order they look promising, are
+`PathAlignCritic.cost_weight` (14.0, the upstream default for a
+differential base with an order more angular authority than this
+vehicle's 0.24 rad/s), and the 1 Hz `RateController` in the tree
+itself. Both are named in §16.9 and neither is touched here, because
+this task's discipline is one mechanism confirmed by measurement before
+any change and the mechanism behind this residual is not confirmed.
+
+#### 16.4b One thing rung 6 did NOT fix, and it is the planner's
+
+`ring_corner` arrives, and it spends the middle of its route **1.2 –
+1.5 m north of the geometric straight line** between spawn and goal. That
+is not the controller. It is read straight off the **first plan** —
+published before the vehicle had moved, on both the failing and the
+passing configuration:
+
+| x (world) | −17.0 | −10.6 | −4.0 | +2.5 | +9.0 | +15.6 | +18.2 |
+|---|---|---|---|---|---|---|---|
+| y, rung 6 | +9.95 | +11.11 | +11.22 | +11.29 | +11.47 | +11.44 | +10.53 |
+| y, rung 5 | +9.97 | +10.51 | +11.27 | +11.25 | +11.52 | +11.42 | +10.69 |
+
+The costmap's inflation gradient bows the route off the rack line and
+brings it back to the goal at the end. **It is §15.2 rung 5's finding
+again** — a freespace planner is not a road graph — and it is named as
+open in §16.9 rather than tuned here. What matters for an arrival is the
+`across` at the GOAL, and that is +0.0592 m.
+
+### 16.5 THE ACCEPTANCE SET
+
+Stack **stopped and started before every one**; `traction=nominal`,
+`arm=wheel+imu`, `loc=amcl@735cdbc6`, headless, dry. The same three
+goals and the same repeat counts §15.3 was asked for, on `config.yaml`'s
+unchanged goal table, driven by the same
+`tools/drive_goal.py record --goal G`.
+
+**ELEVEN RUNS ON ONE SET OF PARAMETERS, AND THE `nav=` LABEL CANNOT SAY
+SO — WHICH IS WHY `nav_config_md5` NOW EXISTS.** They were driven behind
+two byte-different `nav2.yaml`s, `f5255467` and `3148d052`, and the
+difference between those files is **four comment edits**. That is
+demonstrated rather than asserted: reversing the four reproduces
+`f5255467` byte for byte, and `yaml.safe_load` returns identical
+parameter trees — both files hash to `nav_config_md5` **`53a33d67`**.
+`analyse` will still refuse to table them together, because its
+mixed-set refusal keys on the byte hash; §16.9 item 6 is that ledger
+entry. The two groups are therefore printed as two groups.
+
+| | | |
+|---|---|---|
+| **the headline goal, `spine_north`** | **6 of 6** | against §15.3's 1 of 3 |
+| `aisle_end` | **2 of 2** | |
+| `ring_corner` | **2 of 3** | §16.4c — the one place this task did not reach its bar |
+| **all three** | **10 of 11** | against §15.3's **1 of 5** |
+
+#### The set on `nav=on@f5255467`, five goals and five arrivals
+
+| session | goal | result | sim s | driven | arrival TRUTH | arrival BELIEF | truth−belief | heading |
+|---|---|---|---|---|---|---|---|---|
+| `…173700` | `spine_north` | **SUCCESS** | 57.2 | 16.357 m | **0.5090 m** | 0.4710 m | 0.0380 m | −0.0246 rad |
+| `…173929` | `spine_north` | **SUCCESS** | 57.6 | 16.446 m | **0.5684 m** | 0.4933 m | 0.0751 m | −0.2983 rad |
+| `…174159` | `spine_north` | **SUCCESS** | 56.9 | 16.405 m | **0.4474 m** | 0.4636 m | 0.0162 m | −0.0126 rad |
+| `…174429` | `ring_corner` | **SUCCESS** | 126.9 | 37.151 m | **0.4568 m** | 0.5055 m | 0.0487 m | −0.3079 rad |
+| `…174805` | `aisle_end` | **SUCCESS** | 161.9 | 47.453 m | **0.5859 m** | 0.5001 m | 0.0858 m | −0.0477 rad |
+
+`…173139` is a sixth on the same file — rung 6's own `ring_corner`,
+**SUCCESS**, 127.6 s, truth 0.4493 m.
+
+#### The set on `nav=on@3148d052`, the committed bytes
+
+| session | goal | result | sim s | driven | arrival TRUTH | arrival BELIEF | truth−belief | heading |
+|---|---|---|---|---|---|---|---|---|
+| `…180105` | `spine_north` | **SUCCESS** | 56.5 | 16.351 m | **0.5133 m** | 0.4858 m | 0.0275 m | −0.0585 rad |
+| `…180329` | `spine_north` | **SUCCESS** | 57.7 | 16.368 m | **0.4646 m** | 0.4588 m | 0.0058 m | +0.0145 rad |
+| `…180557` | `spine_north` | **SUCCESS** | 57.0 | 16.396 m | **0.5396 m** | 0.4712 m | 0.0684 m | +0.0817 rad |
+| `…180823` | `ring_corner` | **abandoned** `no_progress` | 122.7 | 29.021 m | 14.6594 m | 14.6702 m | 0.0107 m | +0.8197 rad |
+| `…181145` | `aisle_end` | **SUCCESS** | 156.3 | 45.908 m | **0.5524 m** | 0.5063 m | 0.0461 m | −0.2082 rad |
+
+**BOTH INSTRUMENTS ARE INSIDE THE BOX ON EVERY ARRIVAL.** The arrival is
+scored AT REST, where the moving along-track offset has closed and truth
+and belief agree to **0.0058 – 0.0858 m**: TRUTH **0.4474 – 0.5859 m**
+and BELIEF **0.4588 – 0.5063 m**, against a **0.60 m** box. §16.6 is why
+that is the row the criterion is evaluated on, and why the
+closest-approach row below sits one moving offset outside it by
+construction.
+
+**AND THE HEADING IS DELIVERED WITHOUT BEING DEMANDED.** −0.0126 to
++0.0817 rad on four of the six headline runs, against **1.6920 rad** on
+§15.3's one arrival. The larger ones — −0.298, −0.308, −0.208 — are the
+route's own arrival heading after a corner and not an error; nothing on
+this stack requires either (§16.6, §16.9 item 3).
+
+#### The closest approach, which is the row the box latches on
+
+| session | CLOSEST truth | CLOSEST belief | ALONG | ACROSS |
+|---|---|---|---|---|
+| `…173700` | 0.6868 m | **0.5978 m** | −0.5977 | **−0.0139** |
+| `…173929` | 0.7294 m | **0.5897 m** | −0.5253 | **+0.2680** |
+| `…174159` | 0.6073 m | **0.5829 m** | −0.5811 | **−0.0455** |
+| `…174429` | 0.5899 m | **0.5948 m** | −0.5935 | **−0.0392** |
+| `…174805` | 0.7050 m | **0.5864 m** | −0.5728 | **−0.1260** |
+| `…180105` | 0.6829 m | **0.5943 m** | −0.5920 | **+0.0524** |
+| `…180329` | 0.6441 m | **0.5924 m** | −0.5875 | **−0.0754** |
+| `…180557` | 0.7131 m | **0.5895 m** | −0.5881 | **−0.0403** |
+| `…181145` | 0.6896 m | **0.5828 m** | −0.5808 | **−0.0476** |
+
+**THE MISS IS NOW ALL ALONG-TRACK.** `across` is **−0.126 to +0.268 m**
+against §15.3b's **−0.5277 m and −0.9596 m**: the component that carried
+the whole of the old failure is gone. What is left is the box's own
+radius — every `along` is between −0.525 and −0.598 m against a 0.60 m
+box, because `stateful` latches the first time the belief is inside and
+the vehicle then stops. **The box IS the arrival error now, and the
+controller is not.**
+
+#### What the controller did
+
+| | `…180105` | `…180329` | `…180557` | `…180823` | `…181145` |
+|---|---|---|---|---|---|
+| `/cmd_vel` messages | 1130 | 1158 | 1142 | 2457 | 3128 |
+| rate, mean Hz | 20.021 | 20.056 | 20.023 | 20.017 | 20.018 |
+| RTF over the drive | 0.9999 | 0.9980 | 0.9997 | 0.9986 | 0.9992 |
+| deviation from plan, mean | 0.0617 m | 0.0516 m | 0.0499 m | 0.0788 m | 0.0462 m |
+| deviation, max | 0.2745 m | 0.1580 m | 0.1356 m | 0.2863 m | 0.1915 m |
+| **curvature-following GAIN** | **0.209** | **0.232** | **0.407** | 0.425 | **0.479** |
+| worst steer step | 0.062707 | 0.100000 | 0.100000 | 0.100000 | 0.099970 |
+| cusps | 0 | 0 | 0 | 1 | 0 |
+| plans published | 55 | 56 | 56 | 118 | 150 |
+| worst `map`→`odom` step | 0.0851 m | 0.1396 m | 0.1300 m | 0.5067 m | 0.6376 m |
+| worst heading step | 0.0086 rad | 0.0098 rad | 0.0110 rad | 0.0228 rad | 0.0186 rad |
+
+**THE GAIN AND ITS DEMAND ARE READ TOGETHER, ALWAYS.** 0.209 on a
+straight `spine_north` is not a worse controller than 0.479 on
+`aisle_end`: a closed loop that never leaves its line has a plan that
+asks for almost nothing, and the gain over almost nothing is
+quantisation. What matters is that where the plan DOES ask — the
+corner-carrying routes — the controller now delivers **0.4 – 0.65** of
+it, against **0.049, −0.011 and −0.052** in §15.
+
+**THE COMMAND PATH IS UNTOUCHED AND SAYS SO.** The worst steer step is
+**0.100000 rad/tick** wherever the controller asked for a full step —
+F4 Task 1's 2.0 rad/s ramp at 0.05 s, exactly, as on all five of §15.4's
+runs. `…180105`'s 0.062707 is simply a run that never asked for one. F4
+constraint 18 holds: `--nav` added a publisher to the top of that path
+and changed nothing about it.
+
+**THE RATE HELD AT THE LONGER HORIZON.** `time_steps` went 56 → 134,
+which is 2.4× the samples per tick, and the controller holds
+**20.017 – 20.056 Hz mean, 20.000 median**, with the real-time factor at
+0.998 – 1.000. That was the standing risk in the fix and it is measured
+rather than assumed.
+
+**AND THERE ARE NO CUSPS.** Zero direction changes on every arrival,
+against **16** on §15.4's `ring_corner`. A vehicle that tracks its path
+does not need the planner to turn it round.
+
+### 16.6 THE 0.25 m STATION CLASS, RE-EXAMINED AFTER THE FIX
+
+§15.2 rungs 12–13 ruled the `(xy, yaw)` pair "jointly unreachable" and
+§14's `PositionGoalChecker` came out of it. **Both of those runs were
+driven by a controller that was not following its path** (§16.2), so the
+ruling was right with a confound nobody could see. It was therefore
+asked again, with the controller fixed and the pair actually configured.
+
+**RUNG 4, `nav=on@21ac4916`: `nav2_controller::SimpleGoalChecker` at
+0.25 m and 0.15 rad — the station class, both halves.**
+
+- It reached the goal POSITION to **0.0062 m of belief and 0.0478 m of
+  truth**. Six millimetres. **The position half of the station class is
+  met by this stack now**, and that is a change from §15.
+- It never latched. The heading THERE was **0.324 rad** out, and it then
+  drove 454 s and 441 plans and aborted.
+
+**AND THE REASON IS A CURVE RATHER THAN A NUMBER.**
+`drive_goal.py analyse`'s new CORRIDOR block walks that one approach —
+cut where the run gave up, so no second pass contributes — and reports
+the heading error at the moment the BELIEF first came inside each
+candidate box:
+
+| box | believed | truth | heading error |
+|---|---|---|---|
+| 2.00 m | 1.9995 | 2.0916 | 0.0752 rad (4.3°) |
+| 1.50 m | 1.4947 | 1.5939 | **0.0239 rad (1.4°)** |
+| 1.00 m | 0.9969 | 1.1093 | 0.1078 rad (6.2°) |
+| 0.75 m | 0.7457 | 0.8480 | 0.1896 rad (10.9°) |
+| **0.60 m** | 0.5996 | 0.6942 | 0.2456 rad (14.1°) |
+| 0.50 m | 0.4983 | 0.5857 | 0.2815 rad (16.1°) |
+| 0.40 m | 0.3977 | 0.4802 | 0.3204 rad (18.4°) |
+| 0.30 m | 0.2988 | 0.3777 | 0.3658 rad (21.0°) |
+| **0.25 m** | 0.2492 | 0.3274 | **0.3941 rad (22.6°)** |
+| 0.20 m | 0.2000 | 0.2657 | 0.4200 rad (24.1°) |
+| 0.15 m | 0.1488 | 0.2080 | 0.4428 rad (25.4°) |
+
+0.10 m is **absent** because the run never reached it (0.1037 m was its
+closest), which is the instrument refusing to report a rung as met.
+
+**THE HEADING GETS WORSE THE CLOSER IT GETS, MONOTONICALLY, AND IT IS
+KINEMATICS RATHER THAN TUNING.** Inside 1.4 m `PathFollowCritic` and
+`GoalCritic` have swapped places — both carry `threshold_to_consider:
+1.4` — and inside 0.5 m `PathAlignCritic` and `PathAngleCritic` have
+stopped. **The last metre and a half is steered by a point attraction
+with no path and no heading in it**, and a tricycle nulling a residual
+lateral offset against a 1.25 m minimum radius pays for it in yaw.
+
+**THE RULING: POSITION-ONLY STAYS, AND WHAT CHANGED IS THE ARGUMENT.**
+It is no longer "the pair is unreachable" — the position half is
+reachable to six millimetres. It is: **the pair is not reachable in ONE
+APPROACH, because closing the position costs the heading at a measured
+rate.**
+
+**AND THE POSITION-ONLY BOX BUYS THE HEADING BACK, WHICH IS THE RESULT
+THAT DECIDES IT.** On rung 3, position-only at 0.60 m, the box latched
+at 0.5792 m of belief with the heading **0.0363 rad** out — because it
+latched while the vehicle was still on the straight approach leg and
+never entered the point attraction at all. Its arrival heading was
+**0.0329 rad**, against **1.6920 rad** on §15.3's one arrival. *A
+position-only checker on a fixed controller delivers a better arrival
+heading than a heading-aware one on this machine.*
+
+**WHAT F5's DOCKING INHERITS, CONCRETELY.** A station-class arrival needs
+a **STRAIGHT FINAL LEG along the dock axis**, and the table above is what
+says how long: the heading is still inside 0.15 rad at **1.50 m** and
+0.0239 rad there, so a final leg of about a metre and a half of straight
+approach is what buys the pair. That is exactly what a docking server's
+`slowdown_radius` / `v_linear_min` straight run-in is for
+(`docs/reports/m5v3-02` §3), and it is now a number rather than a hope.
+
+**AND THE BOX IS A LATCH CRITERION ON A BELIEF, WHICH IS WHY TWO NUMBERS
+ARE ALWAYS PRINTED.** `stateful` latches the first time the BELIEVED
+pose is inside, and the truth at that instant is one moving
+localisation offset behind it — 0.054–0.080 m on these runs. So the
+CLOSEST-approach truth sits just outside any box by construction, and the
+figure the arrival is scored on is the one taken **at rest**, where
+belief and truth agree to 0.0064–0.0801 m. Both are in §16.5's table and
+neither is quoted without the other.
+
+### 16.7 THE FAIL-FAST
+
+§15.7 item 2: *"a goal that cannot be reached should fail FAST, and
+nothing in this configuration makes it."* Measured, before it existed:
+**130.199 m driven and 459 plans published for a goal 2.910 m away**,
+and a second run that reached 479.7 s and was ended by the bench's
+last-resort timeout rather than failed by the stack.
+
+**THERE ARE TWO GUARDS AND THEY ANSWER DIFFERENT QUESTIONS.** Neither is
+a safety function and neither inhibits motion; both only ever end a
+goal.
+
+#### 16.7a Why nav2's own progress checker cannot be the answer
+
+`nav2_controller::SimpleProgressChecker` requires
+`required_movement_radius` of MOVEMENT in `movement_time_allowance` —
+0.30 m in 15 s here. **A vehicle that has driven past its goal and is
+orbiting satisfies that completely**, because it is moving 0.30 m every
+second. `…131600` moved 130.199 m while never coming within 9.6556 m of
+its goal and the checker was satisfied on every one of its 9599 ticks.
+Tightening it cannot reach the failure: it asks whether the vehicle
+MOVED, and the question is whether it moved TOWARD anything.
+`nav2_controller::PoseProgressChecker`, the only other one this build
+ships, adds `required_movement_angle` — a WEAKER test, satisfied by
+turning on the spot. Neither is goal-relative and there is no third.
+
+#### 16.7b The bench's guard: `ClosingWatch`, and it IS goal-relative
+
+`drive_goal.ClosingWatch` is stepped on `map` → `base_link` — **the pose
+the goal checker itself sees** — composed live from the two `/tf` edges.
+A MARK is kept, the smallest distance the run has earned; beating it by
+`required_closing_m` moves the mark and restarts the clock; going
+`closing_allowance_s` without moving the mark ends the run as
+`outcome=no_progress`, a NAMED line in `session.txt` with the distance,
+the mark and the elapsed time beside it. `config.yaml nav.watchdog` owns
+both numbers, `no_progress_at()` is the same object run over a recording
+so `record` and `analyse` cannot disagree, and 9 tests hold the rule.
+
+**A LOCALISATION JUMP CANNOT PROVOKE IT, and the asymmetry is why.** The
+rule fires on a FAILURE TO IMPROVE. A correction that moves the belief
+AWAY from the goal is not an improvement, so it neither moves the mark
+nor counts as progress; one that moves it TOWARD the goal moves the mark
+and makes the rule *more* lenient. The worst closed-loop correction
+measured is 0.6490 m (§16.8) and in either direction it can only delay
+this guard.
+
+**BOTH NUMBERS WERE SIZED ON THE RECORDED FAILURES, AND THE RULE WAS RUN
+AGAINST EVERY SESSION ON DISK BEFORE IT WAS WRITTEN.**
+`drive_goal.no_progress_at()` over all 32 scoreable driven-goal sessions
+— fourteen different `nav2.yaml`s, every rung of §15's ladder and this
+one's:
+
+| | sessions | the rule fires |
+|---|---|---|
+| runs that **ARRIVED** | 20 | **0** |
+| runs that **MISSED** | 24 | **20** |
+
+**Zero false positives across twenty arrivals and twenty catches out of
+twenty-four misses**, at `required_closing_m` 0.50 m and
+`closing_allowance_s` 30.0 s. 30 s at the transit ceiling is **9.0 m of
+travel for less than half a metre of net approach**, which no leg of
+this floor's road graph does.
+
+**THE FOUR IT DOES NOT CATCH ARE NOT ESCAPES.** `…111235` aborted on its
+own after **18.2 s** and `…182541` after 140.0 s with nav2's own
+error 205; a guard with a 30 s allowance has nothing to catch in a run
+that fails faster than its own window. `…125858` (112.0 s) was still
+closing when it aborted. And `…180823` **was abandoned by the LIVE
+watchdog** at t+72.0 s and is simply not reproduced by this replay of
+the rule — which is a difference in the POSE, not in the rule, and
+§16.7b's last paragraph is about it.
+
+**THE LIVE GUARD AND THIS REPLAY OF IT CAN DISAGREE ON A MARGINAL RUN,
+AND THE REASON IS STATED RATHER THAN SMOOTHED.** `ClosingWatch` is one
+object with two callers, but they are fed two reconstructions of the
+same pose: live, `record` composes `map` → `base_link` on every
+estimator message against the LATEST `map` → `odom` — a zero-order
+hold, which is all a running node can do — while `analyse` uses
+`evidence_core.compose_rows()`, which INTERPOLATES the parent because
+that is what a tf2 listener would have returned. On a run whose
+distance to the goal is swinging by metres, centimetres of difference
+are enough to move a mark across the threshold. Neither reading is
+wrong; the live one is the one that acted.
+
+**WHAT IT COST THE FAILURES THAT ARE ALREADY ON DISK**, had it existed:
+
+| run | ran for | the rule fires at | saved |
+|---|---|---|---|
+| `…161742` | 479.7 s | t+43.4 s | 436 s |
+| `…131600` | 479.5 s | t+45.9 s | 434 s |
+| `…124352` | 479.6 s | t+87.0 s | 393 s |
+| `…165050` | 454.4 s | t+88.1 s | 366 s |
+| `…131222` | 130.5 s | t+86.1 s | 44 s |
+
+**AND IT CAUGHT ONE IN THE FIELD, UNPLANNED.** Rung 5's `ring_corner`
+(`goal-ring_corner-20260827-172326`) is the run that forced rung 6, and
+it is the first failure this stack has ever produced with the guard
+armed. It ended at **t+72.0 s** as `outcome=no_progress`, 25.0968 m from
+its goal, having gone 30.0 s without closing half a metre on its best of
+25.4396 m. The equivalent run in §15 (`…132535`, same goal, same floor)
+ran **212.8 s** and 199 plans before anyone knew.
+
+**WHAT IT ASSUMES, STATED.** That the route CLOSES on the goal. A goal
+whose road-graph route must first travel AWAY from it would trip this
+legitimately, and the tree's budget below is the guard that covers that
+case. None of `nav.goals` is such a route.
+
+#### 16.7c The tree's guard: a 335 s navigation budget
+
+The watchdog is the bench's. **A consumer that is not this bench gets
+nothing from it**, so the second guard is nav2-side: a BT.CPP
+`<Timeout msec="335000">` wrapping the whole of
+`navigate_to_pose_tricycle_v3.xml`. When it expires it halts the tree
+and returns FAILURE, and `navigate_to_pose` ABORTS.
+
+**THE OBVIOUS CONSTRUCTION IS A TIMER THAT CAN NEVER EXPIRE**, and it is
+worth writing down because it looks correct. A `ReactiveSequence` with
+an inverted `<TimeExpired>` beside the pipeline does not work, and both
+halves of that were read in the sources this rig has.
+**BehaviorTree.CPP 4.9.0**, `src/controls/reactive_sequence.cpp`, the
+RUNNING branch of `tick()`:
+
+```cpp
+        // reset the previous children, to make sure that they are
+        // in IDLE state the next time we tick them
+        for(size_t i = 0; i < childrenCount(); i++)
+        { if(i != index) { haltChild(i); } }
+```
+
+— every child except the running one, the earlier ones included. And
+**nav2 1.3.12**, `plugins/condition/time_expired_condition.cpp`:
+
+```cpp
+  if (!BT::isStatusActive(status())) {
+    start_ = node_->now();
+    return BT::NodeStatus::FAILURE;
+  }
+```
+
+A halted node's status is IDLE, which is not active. The condition would
+re-anchor its clock on every one of the tree's 100 ticks a second, for
+ever. `<Timeout>` is a DECORATOR: it arms once when its
+child starts running and is not re-armed while that child keeps running.
+
+**AND IT SITS OUTSIDE THE TOP-LEVEL `RecoveryNode`.** Inside, each of
+the six retries would re-arm it and the bound would be seven times the
+number written.
+
+**THE NUMBER IS DERIVED AND `config.yaml nav.budget` OWNS THE
+DERIVATION:**
+
+```
+budget_s = ceil(longest_route_m / (vx_max * speed_fraction)
+                + recovery_allowance_s)
+         = ceil(45.709 / (0.300 * 0.5) + 30.0) = ceil(334.73) = 335
+```
+
+45.709 m is the longest first plan this track has measured — `aisle_end`'s,
+the road graph's own 47 m route (§15.5). `speed_fraction` 0.5 lets a
+route be half-speed from end to end and still arrive; the fixed
+controller drives at 96 % of the ceiling. 30.0 s is six retries of this
+tree's own `Wait 5.0`. `tests/test_nav2_params.py` recomputes it from
+`config.yaml` and `nav2.yaml`, checks the attribute, and checks that it
+sits outside the `RecoveryNode`.
+
+**TWO THINGS IT IS NOT, AND BOTH ARE RECORDED RATHER THAN HIDDEN.** It
+is a TIME bound and cannot tell a slow legitimate route from an orbit —
+that is what 16.7b is for, and the two are complementary by design. And
+its clock is BT.CPP's `TimerQueue`, `std::chrono::steady` — **WALL
+time**, where everything else on this track is the plant's. The RTF
+measured over these drives is 0.9963 – 1.0000, so 335 s of wall clock is
+333.8 – 335.0 s of sim, and the budget carries 2× of margin rather than
+being a tight bound partly for that reason.
+
+#### 16.7d Demonstrated, both directions
+
+**THE DIRECTION THAT PASSES** is §16.5: eleven runs, ten arrivals, and
+`outcome=ran` on every one of the ten — neither guard fired on any of
+them, and the rule fires on none of the **twenty** arrivals in 16.7b's
+table. The eleventh is `ring_corner` `…180823`, which the watchdog
+abandoned at t+72.0 s and which §16.4c is about: that is the guard doing
+its job on a real failure, unplanned, and it is the run that forced the
+rejected rung 7.
+
+**THE DIRECTION THAT FAILS** needs a goal that cannot be reached, so
+`config.yaml` carries one: **`rack_sw3`, world (−4.250, −4.250) — the
+centre of `RackSW3`**, a 0.500 × 3.500 × 4.000 box in
+`m6/gazebo/warehouse_ver3.sdf`, LETHAL in the frozen grid. It is a real
+object on this floor with a name — the same rack `CONTEXT.md` records
+being put across the `m5_ver2` spawn pose. It carries `route_node:
+false` and `repeat: 0`, and `tests/test_nav2_params.py` checks **both**
+directions of that flag: every other goal must still be a node of
+`m6/ipc/route.py`'s graph, and this one must still NOT be, and must
+still sit inside the rack the world file puts there. A demonstration
+goal that had quietly become reachable would pass every other test in
+that file and demonstrate nothing.
+
+**AND IT WAS DRIVEN, TWICE, WITH THE WATCHDOG ARMED AND DISARMED**, on
+the committed configuration (`nav=on@3148d052`, `nav_config_md5
+53a33d67`, tree `b7fc74a6`):
+
+| | armed | disarmed |
+|---|---|---|
+| session | `goal-rack_sw3-…181552` | `goal-rack_sw3-…181633` |
+| what ended it | **the bench's watchdog** | **the tree's own recovery, exhausted** |
+| when | **t+30.03 s** | **t+90.75 s** |
+| what the session says | `outcome=no_progress`, 19.0769 m from the goal, 30.02 s without closing 0.50 m on its best of 19.0769 m | `outcome=ran`, `action_status=6`, **`error_code=208`** |
+| `/cmd_vel` published | **0 rows** | **0 rows** |
+| `/plan` published | **0** | **0** |
+
+**THE PLANNER REFUSED IT AND SAID SO**, four times over, in
+`m5_ver3/logs/planner_server.log`:
+
+```
+[WARN] [planner_server]: GridBased plugin failed to plan from
+       (-0.09, -0.11) to (-12.88, 14.06): "no valid path found"
+```
+
+**208 IS `ComputePathToPose::NO_VALID_PATH`** and it is the tree's own
+answer: six retries of clear-the-costmaps-and-wait, then FAILURE, then
+`bt_navigator` aborting the action. That is what §14's tricycle tree was
+built to do — "if it still cannot plan, STOP AND REPORT" — and it had
+never been exercised on a goal that genuinely could not be planned.
+
+**BOTH GUARDS LAND WELL INSIDE THE 335 s BUDGET, AND THE BUDGET
+THEREFORE DID NOT FIRE.** That is stated rather than presented as a
+third demonstration: on this floor's failure modes the goal-relative
+guard fires at 30 s and the tree's own retries at 91 s, so the tree's
+budget is a BACKSTOP for a consumer that has neither — which is exactly
+what it is for, and it has not been observed firing. What it is
+demonstrated to do is load, arm and not interfere: every one of the
+eleven arrivals in §16.5 ran under it.
+
+**AND THE TRUCK NEVER MOVED, WHICH THE BENCH NOW REPORTS RATHER THAN
+REFUSING.** Four of the nine recorded streams are empty on this session
+because the controller published nothing at all. `analyse` used to
+refuse a session with an empty capture — correctly, in general — and
+would therefore have been unable to read the most important run this
+task produced. `load()` now passes `allow_empty` for the five streams
+that exist only because nav2 produced something, still refuses an empty
+POSE stream by name, and `analyse_session` prints:
+
+```
+STILL     THE CONTROLLER NEVER PUBLISHED A TWIST, so every block below
+          this one is absent rather than empty. 0 plan(s) were published
+          and the vehicle did not move: on this track that is what a
+          goal the planner REFUSES looks like from the outside.
+```
+
+**WHAT IT COST THE FAILURES ALREADY ON DISK**, had it existed:
+
+| run | ran for | the rule fires at | saved |
+|---|---|---|---|
+| `…161742` | 479.7 s | t+43.4 s | **436 s** |
+| `…131600` | 479.5 s | t+45.9 s | 434 s |
+| `…163615` | 457.8 s | t+47.0 s | 411 s |
+| `…124352` | 479.6 s | t+87.0 s | 393 s |
+| `…165050` | 454.4 s | t+88.1 s | 366 s |
+
+§15.7 item 2's 130.199 m and 459 plans are now 43 seconds and about
+forty.
+
+### 16.8 THE JUMP BUDGET, AND WHAT THE CLOSED LOOP DID TO IT
+
+§15.6 handed over a worst single `map` → `odom` step of **0.6490 m**
+against `EVIDENCE_LOCALIZATION_V3.md` §13.10's **0.2591 m**, and called
+the contract not conservative. This task owns the amendment, and it is
+written where the contract lives: **`EVIDENCE_LOCALIZATION_V3.md`
+§13.10a**, a labelled addendum with every F3 original intact and a
+pointer at §13.10's own heading so nobody reads the contract without it.
+
+Measured with `evidence_core.tf_jumps()` over **all 44 driven-goal
+sessions on disk**, same arm, same map, same plant, dry:
+
+| | §13.10, OPEN LOOP | CLOSED LOOP |
+|---|---|---|
+| worst single **position** step | 0.2591 m | **0.6490 m — 2.50×** |
+| worst single **heading** step | 0.0764 rad | **0.0641 rad — 0.84×** |
+
+**THE HEADING HALF SURVIVED CONTACT AND THE POSITION HALF DID NOT.**
+
+**AND THE STEP SIZE IS A PROPERTY OF THE CONTROLLER.** The 30 sessions
+were driven behind fourteen different `nav2.yaml`s:
+
+| grouped by | n | worst position step |
+|---|---|---|
+| all 44 | 44 | **0.8310 m** |
+| the 20 that ARRIVED | 20 | **0.8310 m** |
+| the 24 that MISSED | 24 | 0.6490 m |
+| goal `spine_north` — a 17 m route | 26 | 0.5110 m |
+| goal `ring_corner` — 37 m | 8 | 0.6499 m |
+| goal **`aisle_end` — 47 m** | 6 | **0.8310 m** |
+
+**THE ROUTE SORTS IT AND THE DRIVING DOES NOT**, which is the opposite
+of what a first reading of the corpus suggested. AMCL corrects the
+odometry error accumulated since its last update, and how much that is
+depends on how far the run got and which part of this floor it crossed
+— so a run that fails early never reaches the far end of the east leg,
+and the misses look BETTER than the arrivals rather than worse. The
+median correction over the same 44 sessions is **0.0115 – 0.0933 m**,
+inside §8's own 0.019 – 0.047 m band: what moved is the tail.
+
+**THE THREE CONSUMERS ARE BACK-ANNOTATED AND THEIR CONCLUSIONS HOLD.**
+`nav2.yaml` §(A)'s error-budget table, its `inflation_radius` lower
+bound, and `tests/test_nav2_params.py`'s `WORST_MAP_ODOM_STEP_M`. The
+lateral surprise those two derivations are built on — worst cross-track
+0.1044 m plus the worst single step — goes from **0.3635 m to
+0.7534 m**, and `inflation_radius: 2.60` clears both with 3.5× to
+spare. **No value in this tree moved because of the amendment; what
+moved is the margin, and every site says so.** A new test asserts the
+conclusion at BOTH bounds so the next reader can see at a glance that
+neither binds it.
+
+### 16.9 What is still open, named
+
+1. **`ring_corner` IS 2 IN 3 AND THE LOOP IS MARGINALLY STABLE THERE.**
+   §16.4c. This is the residual and it is the first thing a follow-up
+   takes. The mechanism behind it is NOT confirmed — what is measured is
+   that the outcome is bimodal (heading swing 0.20 rad against 0.55),
+   that it needs about 20 m of straight leg to develop, that the PLAN
+   oscillates with the vehicle because the tree replans at 1 Hz from the
+   vehicle's own heading, and that the prediction horizon is not the
+   lever (rung 7, rejected). The two levers nobody has pulled are
+   `PathAlignCritic.cost_weight` — 14.0 is the upstream default for a
+   differential base with an order more angular authority than this
+   vehicle's 0.24 rad/s — and the tree's own 1 Hz `RateController`.
+   **Neither is touched here**, because this task's rule is one
+   mechanism confirmed by measurement before any change, and a
+   parameter changed on a hunch is what §16.2 is a story about.
+2. **THE FREESPACE PLANNER AND THE ROAD GRAPH, AGAIN, AND NOW WITH A
+   NUMBER.** §16.4b: the inflation gradient bows `ring_corner`'s route
+   **1.2 – 1.5 m** off the geometric line for the middle of its length.
+   The vehicle tracks that route to 0.02 – 0.10 m and arrives, so it
+   costs nothing today — but a route that is not the road graph's is
+   still not the road graph's. §15.7 item 3's answer stands: nav2's
+   Route Server, and it is a whole server.
+3. **THE ARRIVAL HEADING IS DELIVERED AND NOT GUARANTEED.** §16.6. The
+   checker holds a position; the heading it happens to arrive with is
+   0.03 rad on the headline and 0.29 rad after a corner
+   (`ring_corner`, `aisle_end`), and nothing enforces either.
+4. **THE ENDGAME HAS NO PATH IN IT.** Inside 1.4 m only `GoalCritic`
+   acts and inside 0.5 m nothing holds the heading at all. §16.6's curve
+   is the cost of that, and the cheap experiment nobody has run is
+   `GoalAngleCritic.threshold_to_consider` raised from 0.5 toward 1.4 —
+   which is the one lever that might make a heading-aware checker fit
+   without a docking server. It is named here and NOT tried, because
+   this task's bar was the arrival.
+5. **THE BUDGET IN THE TREE IS A TIME BOUND AND NOT A PROGRESS BOUND**,
+   and it is a WALL clock in a sim-time stack (§16.7). A per-goal
+   budget needs either a monitor process or a BT port fed from the goal.
+6. **THE `nav=` LABEL STILL HASHES COMMENTS, AND THE SESSION NOW SAYS
+   SO.** `nav=on@<md5>` is `nav2.yaml`'s raw bytes, so a
+   documentation-only edit re-labels a configuration and `analyse` then
+   refuses to table a measured set beside the very file it was measured
+   on. It bit §15 (`d430334b` → `6555ac39`, comments only) and it bit
+   this task twice, once while a run was recording.
+     **HALF OF IT IS FIXED.** `record` now writes **`nav_config_md5`**
+   beside `nav_params_md5` — the same file `yaml.safe_load`ed and
+   dumped canonically with sorted keys, so it moves if and only if a
+   VALUE moves — plus `nav_bt_md5` and `nav_budget_ms`, because the
+   `nav=` label never hashed the behaviour tree at all and this task put
+   a navigation budget in it. Two sessions carrying the same
+   `nav_config_md5` were driven by the same stack whatever the prose
+   around it said, and `analyse` prints both and names the difference
+   when they disagree.
+     **THE OTHER HALF IS NOT.** `nav=on@<md5>` itself is written by
+   `m5v3.sh`, which cannot canonicalise YAML in bash, so making the
+   LABEL mean the configuration needs a shared helper and a change to
+   the bringup path. `analyse`'s mixed-set refusal still keys on the
+   byte hash. That is the ledger entry.
+7. **THE 5.09 s CONTROL TICK** (§15.4), once in 21 500, still
+   unexplained. Nothing in this task's 40 000-odd further commands
+   reproduced it.
+8. **NO WET SET, NO `--rf2o`, NO `--fuse`, NO `--localize slam` GOAL.**
+   Every figure in §16 is `traction=nominal` on the default estimator
+   and the shipping localiser. §13.10a's wet partner does not exist.
+
+### 16.10 What this task did NOT do
+
+- **It did not touch the plant, the estimator, the localiser or the
+  map.** `model.sdf`, `ekf.yaml`, `amcl.yaml` and `maps/warehouse_v3/`
+  are byte-identical. The `map` → `odom` amendment is a MEASUREMENT of
+  AMCL, not a change to it.
+- **It did not touch the command path.** F4 constraint 18 holds: the
+  worst steer step on every run in §16.5 is 0.100000 rad/tick, F4 Task
+  1's 2.0 rad/s ramp exactly.
+- **No collision monitor, no docking, no `nav2_route`, no mid-path goal
+  update** — §15.8's list is unchanged by this task.
+- **It did not re-run §15's set.** §15's figures stand as F4 Task 2 took
+  them; §16's are a different `nav2.yaml` and `analyse` refuses to table
+  the two together, which is the label doing its job.

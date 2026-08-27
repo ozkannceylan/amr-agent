@@ -1615,6 +1615,12 @@ this file is a tracking figure.
 
 ### 13.10 THE RECOMMENDATION — what F4 should consume
 
+> **READ §13.10a WITH THIS SECTION.** Its jump figures were measured
+> OPEN LOOP. F4 Task 2.5 measured the same quantity with a
+> controller closing a loop on it and the worst position step is
+> **0.8310 m, 3.21× the 0.2591 m below**. The heading figure held.
+> Nothing in this section has been altered.
+
 **`--localize amcl` remains m5v3's default, and the pose graph is the
 arm F4 should measure against a controller in the loop.**
 
@@ -1684,6 +1690,96 @@ wet, reached at cruise on every run. **F4 sizes the corridor against
 is for — comparing the two arms, which is what §13.6's table does. The pose-graph arm stays in the tree, one flag away, and
 F4's first cheap experiment is to run the same controller on it: if the
 controller's error is transit-dominated, §13.6 says it will win.
+
+
+---
+
+#### 13.10a ADDENDUM — THE JUMP BUDGET UNDER A CLOSED LOOP
+
+**ADDED 2026-08-27 BY F4 TASK 2.5. THIS IS A CROSS-PHASE EDIT AND
+NOTHING ABOVE IT HAS BEEN CHANGED** — §13.10's contract, §8's table and
+§13.7's are F3's measurements and they stand exactly as F3 took them.
+What follows is a SECOND measurement of the same quantity under a
+condition F3 could not create, added here rather than only in
+`EVIDENCE_NAV_V3.md` because this is the section every consumer reads
+before it sizes anything.
+
+**WHY IT IS HERE AT ALL.** §13.10 handed F4 a worst single `map` →
+`odom` step of **0.2591 m dry**, and F4 sized three things on it. That
+figure was taken with `tools/drive_route.py` driving a TABLE — an open
+loop, where the vehicle's motion is decided by a list of twists and
+nothing reads the localiser's output. F4 then put a controller on the
+other end of it. **A closed loop feeds the localiser a different motion
+history**, and AMCL's correction size is a function of that history:
+`update_min_d` decides WHEN it resamples and the accumulated odometry
+error since the last update decides HOW FAR the answer moves.
+
+**WHAT IT MEASURES, ACROSS ALL 44 DRIVEN-GOAL SESSIONS ON DISK.**
+Instrument: `evidence_core.tf_jumps()` on the recorded `map` → `odom`
+stream, the same function §8 and §13.7 use, counting CORRECTIONS and not
+re-broadcasts. Same arm, same map, same plant, same registration
+(`loc=amcl@735cdbc6`, `traction=nominal`, `arm=wheel+imu`, dry).
+
+| | §13.10's contract, OPEN LOOP | CLOSED LOOP, measured |
+|---|---|---|
+| worst single **position** step | **0.2591 m** | **0.8310 m** — 3.21× |
+| worst single **heading** step | **0.0764 rad** | **0.0641 rad** — 0.84× |
+
+**THE HEADING HALF OF THE CONTRACT SURVIVED CONTACT AND THE POSITION
+HALF DID NOT**, and that asymmetry is the whole of what this addendum
+says. A phase sizing a corridor, an inflation radius or a tolerance on
+§13.10's position figure is sizing it on a number that is **more than
+three times too small**; one sizing a steering allowance on the heading
+figure is still inside it.
+
+**AND THE STEP SIZE GOES WITH THE ROUTE RATHER THAN WITH THE DRIVING,
+WHICH IS THE OPPOSITE OF WHAT THE FIRST DRAFT OF THIS ADDENDUM SAID.**
+An earlier version of this section, written before F4 Task 2.5's
+acceptance set existed, read the 30 sessions then on disk as "the worst
+steps belong to the worst driving" — the largest step was on a run that
+failed and the arrivals were an order smaller. **The acceptance set
+falsified that**: six arrivals on a controller that tracks its path to
+0.039–0.106 m produced steps of up to 0.6795 m, and the largest single
+correction in the whole corpus is on a run that ARRIVED. Sorted by what
+actually predicts it:
+
+| grouped by | n | worst position step |
+|---|---|---|
+| ALL 44 | 44 | **0.8310 m** (`goal-aisle_end-…172610`) |
+| the 20 that ARRIVED | 20 | **0.8310 m** |
+| the 24 that MISSED | 24 | 0.6490 m |
+| goal `spine_north` — a 17 m route | 26 | 0.5110 m |
+| goal `ring_corner` — 37 m | 8 | 0.6499 m |
+| goal **`aisle_end` — 47 m** | 6 | **0.8310 m** |
+
+**The route is what sorts it.** AMCL corrects the odometry error
+accumulated since its last update, and both the length of the run and
+which part of this floor it crosses decide how much that is — a run that
+fails early never reaches the far end of the east leg at all, which is
+why the misses look better rather than worse. The budget is stated as
+**0.8310 m** because that is what the longest route in the goal table
+produced, twice measured, on a stack that was working.
+
+**WHAT A CONSUMER SHOULD DO WITH IT.** §13.10's sentence "F4 sizes the
+corridor against ≈0.52 m dry" was about the MOVING ALONG-TRACK OFFSET
+(§13.6) and is untouched — that quantity was never measured open-loop in
+a way a loop could change, and F4's own runs agree with it. What
+changes is the JUMP: **size a jump allowance on 0.65 m dry, not on
+0.26 m.** The three places on this track that had sized theirs on
+0.2591 m are back-annotated where they sit (`nav2.yaml` §(B) and its
+`ObstacleFootprintCritic` note, `tests/test_nav2_params.py`
+`WORST_MAP_ODOM_STEP_M`), and each says which figure its conclusion
+still clears.
+
+**WHAT THIS IS NOT.** It is not a wet measurement — every one of the 44
+sessions is `traction=nominal`, so §13.10's **0.4927 m wet** has no
+closed-loop partner and should be assumed to scale by at least the same
+3.2× until somebody measures it. It is not a re-derivation of AMCL's
+parameters: nothing in `amcl.yaml` was touched by F4 and no figure above
+§13.10 moved. And it is not a claim that the localiser got worse — the
+MEDIAN correction over these sessions is **0.0115 – 0.0933 m**, which
+straddles §8's own 0.019 – 0.047 m band rather than leaving it. What
+moved is the TAIL.
 
 ### 13.11 THE DEFERRED MAP-EKF QUESTION
 
