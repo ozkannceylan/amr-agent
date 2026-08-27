@@ -214,7 +214,7 @@ def goal_in_map(cfg, goal):
     try:
         record = map_register.load_registration(path)
         frame = ec.MapFrame.from_registration(record)
-    except Exception as exc:                       # mc.MapError / EvidenceError
+    except Exception as exc:            # mc.MapError / EvidenceError
         cfg.refuse("the committed registration belongs to the grid on disk",
                    path, str(exc))
     return frame, frame.to_map(goal.x, goal.y, goal.pose_yaw)
@@ -524,7 +524,8 @@ def analyse_session(cfg, session):
     # by the committed registration. NOTHING IS ANCHORED.
     believed = None
     if parent and child:
-        composed = ec.compose_rows(parent, child, cfg.f("nav.analyse.map_gap_s"))
+        gap_s = cfg.f("nav.analyse.map_gap_s")
+        composed = ec.compose_rows(parent, child, gap_s)
         world = ec.rows_to_world(composed, frame)
         rest_b = window([row[0] for row in world], t_end - span, t_end + 1.0)
         if rest_b:
@@ -552,9 +553,9 @@ def analyse_session(cfg, session):
     total, worst, sweep = steer_activity(steer)
     print("          steer terminal: {:.4f} rad of travel, worst step "
           "{:.6f} rad, range {:.4f} rad".format(total, worst, sweep))
-    curves = [c for c in
-              (curvature_of(row[2], row[3], cfg.f("nav.analyse.cusp_speed_mps"))
-               for row in cmd) if c is not None]
+    deadband = cfg.f("nav.analyse.cusp_speed_mps")
+    curves = [c for c in (curvature_of(row[2], row[3], deadband)
+                          for row in cmd) if c is not None]
     if curves:
         print("          commanded curvature: {}".format(
             ec.summarise([abs(c) for c in curves])))
