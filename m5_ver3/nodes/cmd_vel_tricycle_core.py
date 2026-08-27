@@ -460,11 +460,25 @@ class CommandLimiter(object):
                 "navcmd.accel_mps2")
         self.steer_rad = None if steer_rad is None else float(steer_rad)
         self.wheel_mps = float(wheel_mps)
-        #: The largest rate this limiter has actually asked for, so a
-        #: caller can report the slew it produced rather than the slew it
-        #: configured. tools/drive_twist.py reads it.
-        self.max_steer_rate_radps = 0.0
-        self.max_traction_accel_mps2 = 0.0
+
+    # THERE IS NO "WORST RATE I ASKED FOR" COUNTER HERE, AND THERE WAS.
+    # It was a self-report - the limiter recording, against its own
+    # previous value, that it had obeyed its own ceiling - and NOTHING
+    # CALLED IT, so the attribute stayed at 0.0 for the life of every
+    # node and the one unit assertion that read it was true whatever the
+    # ramp did. Two reasons it is gone rather than wired up:
+    #   A CLAIM CHECKED BY THE THING MAKING IT IS NOT A CHECK. `step()`
+    #   computes the new value THROUGH _towards(), so a counter fed from
+    #   the same arithmetic can only ever agree with it; the failure it
+    #   was supposed to catch - a ramp that moved further than the limit
+    #   - is unreachable from inside this class.
+    #   AND THE HONEST INSTRUMENT ALREADY EXISTS, one layer out.
+    #   tools/drive_twist.py's max_step() differences the TERMINAL's own
+    #   recorded stream, which is what actually reached the wire rather
+    #   than what this object believed it published, and
+    #   EVIDENCE_NAV_V3.md 5 is the table. The unit suite now asserts the
+    #   per-tick ceiling directly, by driving a step and checking every
+    #   delta - see tests/test_cmd_vel_tricycle_core.py.
 
     def step(self, dt_s, steer_target, wheel_target):
         """One tick. `steer_target` None means HOLD - see the header.
@@ -494,16 +508,6 @@ class CommandLimiter(object):
                 self.wheel_mps, float(wheel_target),
                 self.traction_accel_mps2 * dt_s)
         return self.steer_rad, self.wheel_mps
-
-    def observe(self, dt_s, steer_rad, wheel_mps):
-        """Record the rate a published pair represents. Reporting only."""
-        if dt_s <= 0.0 or self.steer_rad is None or steer_rad is None:
-            return
-        self.max_steer_rate_radps = max(
-            self.max_steer_rate_radps, abs(steer_rad - self.steer_rad) / dt_s)
-        self.max_traction_accel_mps2 = max(
-            self.max_traction_accel_mps2,
-            abs(wheel_mps - self.wheel_mps) / dt_s)
 
 
 def _towards(current, target, step):

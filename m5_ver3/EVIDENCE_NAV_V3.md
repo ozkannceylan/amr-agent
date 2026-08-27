@@ -268,9 +268,9 @@ side by side so a reader can see which is which rather than being told.
 
 ---
 
-## 6. The velocity smoother: three measured facts, and one reversed ruling
+## 6. The velocity smoother: four measured facts, and one reversed ruling
 
-### 6.1 Three things measured about the node itself
+### 6.1 Four things measured about the node itself
 
 1. **`enable_stamped_cmd_vel` DEFAULTS TO FALSE on this Jazzy.** `ros2
    node info` on the running node reads `geometry_msgs/msg/Twist` on both
@@ -290,6 +290,48 @@ side by side so a reader can see which is which rather than being told.
    commanding; after a burst it emits its own deceleration ramp to zero
    and then stops. That is what lets it be a default stack child without
    fighting the two gz-side benches.
+4. **IT HAS NO `/speed_limit` INTERFACE, AND THAT WAS READ RATHER THAN
+   ASSUMED.** §9's placement of the envelope hook in the converter turns
+   on this, so it is a measurement and not a deduction from the
+   parameter list. On the **shipping** stack, ACTIVE, with this file's
+   own remaps and `bond_heartbeat_period: 0.0`:
+
+   ```
+   $ ros2 node info /velocity_smoother
+   /velocity_smoother
+     Subscribers:
+       /clock: rosgraph_msgs/msg/Clock
+       /cmd_vel: geometry_msgs/msg/Twist
+       /parameter_events: rcl_interfaces/msg/ParameterEvent
+     Publishers:
+       /cmd_vel_smoothed: geometry_msgs/msg/Twist
+       /parameter_events: rcl_interfaces/msg/ParameterEvent
+       /rosout: rcl_interfaces/msg/Log
+       /velocity_smoother/transition_event: lifecycle_msgs/msg/TransitionEvent
+   ```
+
+   **Three subscriptions and none of them is `/speed_limit`** — so the
+   smoother was never a candidate for the hook, and `docs/reports/m5v3-02`
+   §5 is right that the interface belongs to the **controller server**,
+   which this task does not run. This read also carries fact 1 in
+   passing (`geometry_msgs/msg/Twist` on both sides, not `TwistStamped`)
+   and shows the bond gone, which is what `bond_heartbeat_period: 0.0`
+   is for.
+
+   And the other end of the same question, on the same stack:
+
+   ```
+   $ ros2 topic info /speed_limit -v
+   Type: nav2_msgs/msg/SpeedLimit
+   Publisher count: 0
+   Subscription count: 1
+     Node name: m5v3_cmd_vel_tricycle
+   ```
+
+   **One subscriber, and it is the converter.** Zero publishers at rest
+   is the honest state of a demonstrated interface whose PLC has not
+   arrived: `tools/drive_twist.py` is the only thing on this track that
+   has ever published there.
 
 ### 6.2 And two about `scale_velocities`, measured in isolation
 
@@ -477,6 +519,15 @@ can trigger or release one. The collision monitor — which this phase does
 not run — **"does not provide hard real-time safety certifications"** and
 does not replace a safety-rated PLC. It complements the F-PLC; it is not
 the F-PLC.
+
+**AND IT IS IN THE CONVERTER BECAUSE THE SMOOTHER HAS NO SUCH
+INTERFACE**, which was READ off the running node and not assumed:
+§6.1 fact 4 is the `ros2 node info` output — three subscriptions, none
+of them this one. The research puts the hook on the **controller
+server**, which this task does not run, so the converter is the only
+place a limit could have been demonstrated at all today — and it is also
+the place an envelope belongs, being the last node before the terminals
+and therefore the one no upstream publisher can get round.
 
 **TWO SUBSCRIBERS ARE EXPECTED AND THEY COMPOSE.** F4 Task 2's controller
 server subscribes the same topic through its own `speed_limit_topic` and

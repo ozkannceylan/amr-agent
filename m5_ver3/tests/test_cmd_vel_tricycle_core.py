@@ -367,6 +367,23 @@ def test_a_negative_or_unreadable_speed_limit_is_refused_as_no_limit():
 # the slew limiter: a step command becomes a ramp
 # ----------------------------------------------------------------------
 
+def ramp(limiter, dt_s, steer_target, wheel_target, ticks):
+    """Drive the limiter and return what it moved on EVERY tick.
+
+    THE DELTAS AND NOT THE ENDPOINTS. A ramp that reached its target in
+    the right number of ticks can still have taken one illegal step and
+    one short one; only the per-tick series can say it did not.
+    """
+    steps = []
+    for _ in range(ticks):
+        before_steer, before_wheel = limiter.steer_rad, limiter.wheel_mps
+        steer, wheel = limiter.step(dt_s, steer_target, wheel_target)
+        steps.append((abs(steer - before_steer)
+                      if None not in (steer, before_steer) else 0.0,
+                      abs(wheel - before_wheel)))
+    return steps
+
+
 def test_a_step_steer_command_leaves_this_node_as_a_ramp():
     # SEEDED AT THE CENTRE, which is what the shell reads off the
     # plant's own joint state before it publishes anything. An UNSEEDED
@@ -374,16 +391,49 @@ def test_a_step_steer_command_leaves_this_node_as_a_ramp():
     limiter = core.CommandLimiter(steer_rate_limit_radps=2.0,
                                   traction_accel_mps2=0.35, steer_rad=0.0)
     # 1.25 rad at 2.0 rad/s is 0.625 s: thirteen ticks of 50 ms.
-    reached, ticks = None, 0
-    for _ in range(40):
-        steer, _ = limiter.step(0.05, 1.25, 0.0)
-        ticks += 1
-        if abs(steer - 1.25) < 1e-12:
-            reached = ticks
-            break
+    steps = ramp(limiter, 0.05, 1.25, 0.0, 40)
+    reached = next(i + 1 for i, _ in enumerate(steps)
+                   if abs(limiter.steer_rad - 1.25) < 1e-12
+                   and all(d == 0.0 for d, _ in steps[i + 1:]))
     assert reached == 13
-    # and no tick moved further than the model's own steer velocity limit
-    assert limiter.max_steer_rate_radps <= 2.0 + 1e-12
+    # AND NO TICK MOVED FURTHER THAN THE MODEL'S OWN AXIS LIMIT, which
+    # is the assertion this file exists to make and it is made HERE, on
+    # the deltas, rather than read off a counter the limiter keeps about
+    # itself. The ceiling is rate x dt, not the rate: what a limiter
+    # controls is the STEP.
+    assert max(d for d, _ in steps) <= 2.0 * 0.05 + 1e-12
+
+
+def test_no_tick_of_a_VARYING_schedule_exceeds_rate_times_ITS_OWN_interval():
+    # The ceiling is `limit * dt` and dt moves: under sim time the timer
+    # fires early and late, and nodes/cmd_vel_tricycle.py caps the
+    # interval at one nominal period but never lengthens it. A limiter
+    # that used a fixed step would be legal at 50 ms and illegal at 20.
+    limiter = core.CommandLimiter(2.0, 0.35, steer_rad=0.0)
+    for dt_s in (0.02, 0.05, 0.031, 0.05, 0.044, 0.05, 0.05, 0.05):
+        before = limiter.steer_rad, limiter.wheel_mps
+        steer, wheel = limiter.step(dt_s, 1.25, -0.700)
+        assert abs(steer - before[0]) <= 2.0 * dt_s + 1e-12, dt_s
+        assert abs(wheel - before[1]) <= 0.35 * dt_s + 1e-12, dt_s
+
+
+def test_no_tick_of_a_TRACTION_step_exceeds_the_acceleration_ceiling():
+    limiter = core.CommandLimiter(2.0, 0.35, steer_rad=0.0)
+    steps = ramp(limiter, 0.05, 0.0, -0.700, 60)
+    assert max(w for _, w in steps) <= 0.35 * 0.05 + 1e-12
+    assert limiter.wheel_mps == pytest.approx(-0.700)
+
+
+def test_the_ceiling_assertion_FAILS_when_the_ramp_exceeds_the_limit():
+    # THE GUARD, GUARDED. The three assertions above are worth exactly
+    # what a limiter that ignored its ceiling would cost them, so this
+    # drives one that does - a limiter told 2.0 rad/s, measured against
+    # a ceiling of 1.0 - and requires the same comparison to fail. It is
+    # the inverse of the check and it is why the checks above are not
+    # vacuous.
+    limiter = core.CommandLimiter(2.0, 0.35, steer_rad=0.0)
+    steps = ramp(limiter, 0.05, 1.25, 0.0, 5)
+    assert not max(d for d, _ in steps) <= 1.0 * 0.05 + 1e-12
 
 
 def test_the_ramp_step_is_exactly_the_rate_times_the_interval():
