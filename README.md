@@ -18,7 +18,7 @@ live F-program — e-stop, protective and warning fields, speed
 monitoring, monitored reset — with autonomous and teleoperated motion
 running underneath them.
 
-![AMR-AGENT — the layer pyramid: deterministic safety at the base, teleoperation over PLC↔ROS 2, autonomy, VDA 5050 fleet, LLM supervision on top; safety never traverses the network](assets/amr-agent-infographic.png)
+![AMR-AGENT — the layer pyramid: deterministic safety at the base, teleoperation over PLC↔ROS 2, autonomy, VDA 5050 fleet, LLM supervision on top; safety never traverses the network](assets/amr-agent-infographic.jpg)
 
 *The stack, bottom-up: the three lower layers are running today (M5);
 the fleet and LLM layers are the road ahead (M6, M7). Safety never

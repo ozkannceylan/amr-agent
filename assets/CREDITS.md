@@ -5,7 +5,8 @@ marketing material is used.
 
 | File | Origin |
 |---|---|
-| `amr-agent-infographic.png` | The layer-pyramid infographic fronting the root README — this repository's own work. |
+| `amr-agent-infographic.jpg` | The layer-pyramid infographic fronting the root README — this repository's own work. |
+| `amr-agent-infographic.png` | The previous layer-pyramid infographic (superseded by the `.jpg` above). |
 | `m5-step1-gui/*.png` | Owner's screen captures of the `m5_ver2` Step 1 GUI run (2026-08-12). |
 | `m5-step2-sensors/*.png` | Owner's screen captures of the `m5_ver2` Step 2 three-scanner run (2026-08-12). |
 | `m6-fleet/*.mp4` | A live four-vehicle `m6/` run recorded 2026-08-23 — see the note below. |
