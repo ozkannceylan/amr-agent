@@ -1764,8 +1764,11 @@ produced, twice measured, on a stack that was working.
 corridor against ≈0.52 m dry" was about the MOVING ALONG-TRACK OFFSET
 (§13.6) and is untouched — that quantity was never measured open-loop in
 a way a loop could change, and F4's own runs agree with it. What
-changes is the JUMP: **size a jump allowance on 0.65 m dry, not on
-0.26 m.** The three places on this track that had sized theirs on
+changes is the JUMP: **size a jump allowance on 0.85 m dry, not on
+0.26 m.** (0.8310 m measured, rounded up — an earlier draft of this
+sentence said 0.65 m, which was this addendum's own superseded figure
+from before §16.5's acceptance set existed; it is the one number a
+consumer lifts and it is corrected here.) The three places on this track that had sized theirs on
 0.2591 m are back-annotated where they sit (`nav2.yaml` §(B) and its
 `ObstacleFootprintCritic` note, `tests/test_nav2_params.py`
 `WORST_MAP_ODOM_STEP_M`), and each says which figure its conclusion

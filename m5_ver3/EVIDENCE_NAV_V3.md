@@ -1570,11 +1570,11 @@ scanner is bridged, and every tolerance below is a PROCESS value.
 | | |
 |---|---|
 | **THE MECHANISM** | `PathAlignCritic` — the heaviest critic in `nav2.yaml` at `cost_weight: 14.0`, and the only one that penalises deviation ALONG the path — **never scored once on any control tick of any run in §15** |
-| why | it returns early unless `furthest_reached_path_point >= offset_from_furthest`. That index is the PREDICTION HORIZON measured in path points, the gate was 20, and the horizon reached **8 at the median and 13 at its very best** |
-| how many plans could ever have cleared it | **0 of 1005** on the five shipped runs. 11 of 275 on the 0.700 m/s configuration §15.2 rung 11 withdrew |
+| why | it returns early unless `furthest_reached_path_point >= offset_from_furthest`. That index is the PREDICTION HORIZON measured in path points, the gate was 20, and the horizon reached **2–8 at the median and 12 at its very best** |
+| how many plans could ever have cleared it | **0 of 1000** on the five shipped runs; 10 of 274 on the 0.700 m/s configuration §15.2 rung 11 withdrew. `drive_goal.align_gate_scan()` |
 | **the provenance, and it is the whole lesson** | rung 11 lowered the transit ceiling 0.700 → 0.300 m/s, correctly, on the stop table. `time_steps: 56` was a COUNT. The horizon is a DISTANCE: it went from 1.96 m to **0.84 m**, under the vehicle's own 1.25 m turning radius, and nothing in the file knew the two were coupled |
 | **what that did to the truck** | the controller commanded **5–9 %** of the yaw rate the plan's curvature required (gain 0.049, −0.011, −0.052), held whatever heading it had, and **integrated it** |
-| **and the miss is that integral, to 5 %** | `…130956` predicted **−1.4894 m** from the heading error alone against **−1.5714 m** measured (94.8 %); `…131222` **−0.9616** against **−0.9319** (103.2 %). Nothing is left over for the localiser, the jumps or the replans |
+| **and the miss is that integral, to 6 %** | `…130956` predicted **−1.5435 m** from the heading error alone against **−1.5844 m** measured (**ratio 0.974**); `…131222` **−1.0149** against **−0.9579** (**1.059**). Nothing is left over for the localiser, the jumps or the replans. `drive_goal.heading_account()` |
 | **proved twice on the rig before anything moved** | `cost_weight` × **100** at the shipped gate: indistinguishable from baseline. The gate alone 20 → 5: behaviour changed completely, into a limit cycle |
 | **THE FIX** | horizon `time_steps` 56 → **134** (2.01 m), `prune_distance` 2.0 → **2.5**, `PathAlignCritic.offset_from_furthest` 20 → **12**, `use_path_orientations` false → **true** |
 | **THE ACCEPTANCE** | **10 arrivals in 11** on one set of parameters, against §15.3's **1 in 5**. The headline `spine_north` **6 of 6** against 1 of 3; `aisle_end` **2 of 2** |
@@ -1609,14 +1609,29 @@ own ground speed against its heading error over the transit —
 `∫ |v| · sin(ψ) dt`, both off the ground truth, ψ measured against the
 goal's own travel heading — predicts
 
-| run | predicted from the heading alone | measured `across` change | ratio |
-|---|---|---|---|
-| `…130956` | **−1.4894 m** | −1.5714 m | **0.948** |
-| `…131222` | **−0.9616 m** | −0.9319 m | **1.032** |
+`drive_goal.heading_account()`, over the transit — the window opens
+when the goal is SENT and stops 3.0 m short of it along track
+(`nav.analyse.transit_margin_m`), because past that the vehicle hooks
+round and integrating the pirouette would not be an account of the
+transit:
 
-A residual of 5 % and 3 % is not room for a 0.65 m teleport. **The
-vehicle drove in a straight line that was pointing 4.6°–7.1° off, for
+| run | predicted from the heading alone | measured `across` change | ratio | ψ mean |
+|---|---|---|---|---|
+| `…130956` | **−1.5435 m** | −1.5844 m | **0.974** | −0.1053 rad |
+| `…131222` | **−1.0149 m** | −0.9579 m | **1.059** | −0.0693 rad |
+
+A residual of 2.6 % and 5.9 % is not room for a 0.65 m teleport. **The
+vehicle drove in a straight line that was pointing 4.0°–6.0° off, for
 seventeen metres.**
+
+> **THE COMMITTED INSTRUMENT'S FIGURES, AND THEY MOVED FROM THE ONE-OFF
+> THIS SECTION WAS FIRST WRITTEN FROM** (0.948 and 1.032, off
+> −1.4894/−1.5714 and −0.9616/−0.9319). That script opened its window at
+> t+9 s, a number chosen by hand to skip the launch transient;
+> `heading_account()` opens at the goal being sent and closes on a
+> config'd along-track margin, which is a rule rather than a choice.
+> **Both readings say the same thing** and the instrument's are the ones
+> that stand, because they can be re-run.
 
 **(c) "459 replans re-anchor the path and the controller orbits a moving
 target."** DEAD. The replans are downstream of the mechanism, not
@@ -1704,24 +1719,59 @@ horizon expressed in path points**, and nothing else.
 | | value | where it comes from |
 |---|---|---|
 | the horizon | `time_steps` 56 × `model_dt` 0.05 × `vx_max` 0.300 = **0.84 m** | `nav2.yaml`, read back on the running node in §14.5 |
-| the plan's pose spacing | **0.0675 – 0.1060 m**, medians 0.083 – 0.105 | measured over the 1005 plans of the five shipped runs |
-| ⇒ the reachable path index | **median 8, best 13** | the two above, per plan, per run |
+| the plan's pose spacing | **0.0675 – 0.1060 m**, medians 0.083 – 0.105 | measured over the 1000 plans of the five shipped runs |
+| ⇒ the reachable path index | **medians 2 – 8, best 12** | the two above, per plan, per run — `drive_goal.align_gate_scan()` |
 | the gate | `offset_from_furthest` **20** | `nav2.yaml` — the upstream default, and the one line in that file with **no derivation beside it** |
+
+`drive_goal.align_gate_scan()`, given the window §14.5 read back off
+the running node for those runs — `time_steps` 56, `model_dt` 0.05,
+`vx_max` 0.300, gate 20:
 
 | session | plans | reachable index (mean / median / max) | could clear a gate of 20 |
 |---|---|---|---|
-| `…130956` | 57 | 8.47 / 8 / **12** | **0 of 57** |
-| `…131222` | 126 | 6.00 / 5 / **13** | **0 of 126** |
-| `…131600` | 458 | 7.19 / 8 / **9** | **0 of 458** |
-| `…132535` `ring_corner` | 191 | 5.24 / 3 / **8** | **0 of 191** |
-| `…133039` `aisle_end` | 173 | 3.86 / 3 / **8** | **0 of 173** |
-| **the shipped set** | **1005** | | **0 of 1005** |
+| `…130956` | 57 | 8.23 / 8 / **11** | **0 of 57** |
+| `…131222` | 126 | 5.56 / 4 / **12** | **0 of 126** |
+| `…131600` | 457 | 6.55 / 7 / **8** | **0 of 457** |
+| `…132535` `ring_corner` | 190 | 4.78 / 3 / **8** | **0 of 190** |
+| `…133039` `aisle_end` | 170 | 3.19 / 2 / **8** | **0 of 170** |
+| **the shipped set** | **1000** | | **0 of 1000** |
+| `…120921` at **0.700 m/s** (horizon 1.96 m) | 274 | 4.57 / 2 / **27** | **10 of 274** |
 
-The scan covers the **1005 plans published while the vehicle was
-moving**; twelve more were published at a standstill and are dropped,
-because a horizon is a speed times a time and at rest it is zero — those
-twelve would fail the gate by more, not less.
-| `…120921` at **0.700 m/s** | 275 | 5.24 / 3 / **28** | **11 of 275** |
+The scan covers the **1000 plans published while the vehicle was
+moving**; seventeen more were published at a standstill and are dropped
+AND COUNTED, because a horizon is a speed times a time and at rest it is
+zero — those seventeen would fail the gate by more, not less.
+
+**AND THE INDEX IS AN UPPER BOUND**, which makes `0 of 1000` the
+stronger claim rather than the weaker one: it is what a trajectory that
+followed the plan EXACTLY would reach, and a real sample curves away
+from the path and reaches the same index or a lower one.
+
+> **THE COMMITTED INSTRUMENT'S FIGURES, AND THEY MOVED SLIGHTLY FROM THE
+> ONE-OFF SCAN THIS SECTION WAS FIRST WRITTEN FROM** (1005 plans, best
+> index 13, and 11 of 275 at 0.700 m/s). Two rules changed when the scan
+> became a function: it resolves the horizon to the NEAREST path pose
+> rather than the first one at or beyond it — which is what nav2's own
+> `findPathFurthestReachedPoint` does with the trajectory's last point,
+> and it lowers the index by one wherever the horizon lands between
+> poses — and it drops plans below `nav.analyse.follow_speed_mps`
+> instead of an ad-hoc threshold. **Neither reading changes the
+> finding**: the gate was never cleared on any of them.
+
+**AND THE SAME INSTRUMENT ON THE FIXED STACK IS THE MIRROR IMAGE.**
+`goal-spine_north-…180105`, one of §16.5's arrivals, scanned against its
+own window (134 × 0.05 × 0.300 = 2.01 m, gate 12):
+
+```
+          54 plan(s) scanned, 1 dropped at a standstill
+            reachable path index: mean 18.81, median 18.0, max 28.0
+          COULD HAVE CLEARED THE GATE: **52 of 54**
+```
+
+**0 of 1000 before and 52 of 54 after**, on the one quantity the whole
+diagnosis turns on. That block prints on every `analyse` now, so the
+next task to move the speed and not the count will see it go back to
+zero on its own runs.
 
 **WHAT WAS LEFT DOING THE STEERING.** `PathFollowCritic` pulls only the
 trajectory's LAST point toward ONE path point (`furthest + 5`);
@@ -2055,6 +2105,43 @@ rather than assumed.
 **AND THERE ARE NO CUSPS.** Zero direction changes on every arrival,
 against **16** on §15.4's `ring_corner`. A vehicle that tracks its path
 does not need the planner to turn it round.
+
+#### Both arms, and the sweep
+
+F4 constraint 20. Every arm this change can reach, on the committed
+tree (`nav2.yaml` **`3148d052`**), headless.
+
+| arm | children | result |
+|---|---|---|
+| **`--localize amcl --nav`** | **16** | the eleven runs above, and every one of §16.5's bringups. `nav=on@3148d052` |
+| **`--localize amcl`, NO `--nav`** | **11** | all ALIVE; GPU preflight `D3D12 (NVIDIA GeForce RTX 4050 Laptop GPU)`; `ekf` healthy (**0.213961** against a ceiling of 100); navcmd gate passed — one zero twist in, read off the gz side of the traction terminal; `map_server` + `amcl` ACTIVE, `loc: healthy` (**0.243005** against a ceiling of 1), seeded at map (−0.0793, −0.1458); **`nav=off`** |
+
+```
+  world  lasertf  bridge  imgbridge  odom  imutf  ekf  smoother
+  navcmd  map_server  amcl                     11 alive, 0 dead.
+  nav        off     no --nav: nothing plans, nothing follows a path,
+                     and the only thing that has ever published
+                     /cmd_vel on this stack is a bench
+```
+
+and `stop` took it down clean — `killed … (odom)`, `killed … (navcmd)`,
+`swept … (gz sim)`, `down.`, then `not running (no pid file)`.
+
+**NOTHING THIS TASK TOUCHED CAN REACH THAT ARM AND THE RUN IS HERE TO
+SHOW IT RATHER THAN TO ARGUE IT.** `nav2.yaml` and the behaviour tree
+are read only by `--nav`; `config.yaml`'s new `nav.budget`,
+`nav.watchdog` and four `nav.analyse` keys are read only by
+`tools/drive_goal.py`, which is a bench and not a child; and
+`tools/evidence_core.py`'s two additions (`correlation()`, `read_csv`'s
+`allow_empty`) are library functions with no caller on a bringup path.
+The one thing that COULD have reached it is `drive_goal.py`'s new
+`nav_label()` fields — and `record` is not run on this arm, which
+refuses a stack whose state file says `nav=off`.
+
+**`--localize slam` was NOT re-driven**, for §15.8's reason unchanged:
+the nav children read the localiser only through `/tf`, so that arm
+cannot change a figure here — but it was not driven, and this sentence
+is the honest form of that.
 
 ### 16.6 THE 0.25 m STATION CLASS, RE-EXAMINED AFTER THE FIX
 
@@ -2400,25 +2487,50 @@ forty.
 
 ### 16.8 THE JUMP BUDGET, AND WHAT THE CLOSED LOOP DID TO IT
 
-§15.6 handed over a worst single `map` → `odom` step of **0.6490 m**
+§15.6 handed over a worst single `map` -> `odom` step of **0.6490 m**
 against `EVIDENCE_LOCALIZATION_V3.md` §13.10's **0.2591 m**, and called
 the contract not conservative. This task owns the amendment, and it is
 written where the contract lives: **`EVIDENCE_LOCALIZATION_V3.md`
 §13.10a**, a labelled addendum with every F3 original intact and a
 pointer at §13.10's own heading so nobody reads the contract without it.
 
+**THE FINDING IS RIGHT AND BOTH OF ITS FIRST NUMBERS WERE WRONG, AND
+THIS SECTION KEEPS THE WORKING.** It was drafted against the 30
+driven-goal sessions that existed before §16.5's acceptance set, and
+the acceptance set falsified two of its claims. They are struck below
+rather than rewritten away, because a bound that moved and a reason that
+inverted are both things a later phase needs to see happen.
+
 Measured with `evidence_core.tf_jumps()` over **all 44 driven-goal
 sessions on disk**, same arm, same map, same plant, dry:
 
 | | §13.10, OPEN LOOP | CLOSED LOOP |
 |---|---|---|
-| worst single **position** step | 0.2591 m | **0.6490 m — 2.50×** |
-| worst single **heading** step | 0.0764 rad | **0.0641 rad — 0.84×** |
+| worst single **position** step | 0.2591 m | **0.8310 m — 3.21x** |
+| worst single **heading** step | 0.0764 rad | **0.0641 rad — 0.84x** |
+
+> ~~worst single position step **0.6490 m — 2.50x**~~
+> **WITHDRAWN.** That was the worst over the 30 sessions on disk when
+> this section was drafted, and it is `ring_corner` `...132535`'s. The
+> acceptance set added fourteen runs and the worst over all 44 is
+> **0.8310 m** — `goal-aisle_end-...172610`, and 3.21x rather than
+> 2.50x. Every consumer below carries the amended figure.
 
 **THE HEADING HALF SURVIVED CONTACT AND THE POSITION HALF DID NOT.**
 
-**AND THE STEP SIZE IS A PROPERTY OF THE CONTROLLER.** The 30 sessions
-were driven behind fourteen different `nav2.yaml`s:
+> ~~**AND THE STEP SIZE IS A PROPERTY OF THE CONTROLLER.** The 30
+> sessions were driven behind fourteen different `nav2.yaml`s, some of
+> which tracked their paths and most of which did not: all 30 ->
+> 0.6490 m, the 8 that ARRIVED -> 0.4524 m, the 3 arrivals on the fixed
+> controller -> 0.0841 m. A vehicle that wanders accumulates odometry
+> error between AMCL updates and AMCL corrects all of it in one step;
+> the worst steps belong to the worst driving.~~
+> **REFUTED BY THE TABLE BELOW.** The reasoning was plausible and the
+> sample was the argument's own: at 30 sessions the arrivals were all
+> short `spine_north` runs, so "arrived" and "17 m route" were the same
+> column and the fit was to the wrong one. §16.5's eleven arrivals
+> include `ring_corner` and `aisle_end`, and the largest correction in
+> the whole corpus is now on a run that ARRIVED.
 
 | grouped by | n | worst position step |
 |---|---|---|
@@ -2429,25 +2541,37 @@ were driven behind fourteen different `nav2.yaml`s:
 | goal `ring_corner` — 37 m | 8 | 0.6499 m |
 | goal **`aisle_end` — 47 m** | 6 | **0.8310 m** |
 
-**THE ROUTE SORTS IT AND THE DRIVING DOES NOT**, which is the opposite
-of what a first reading of the corpus suggested. AMCL corrects the
+**THE ROUTE SORTS IT AND THE DRIVING DOES NOT.** AMCL corrects the
 odometry error accumulated since its last update, and how much that is
 depends on how far the run got and which part of this floor it crossed
 — so a run that fails early never reaches the far end of the east leg,
 and the misses look BETTER than the arrivals rather than worse. The
 median correction over the same 44 sessions is **0.0115 – 0.0933 m**,
-inside §8's own 0.019 – 0.047 m band: what moved is the tail.
+which straddles §8's own 0.019 – 0.047 m band rather than leaving it:
+what moved is the tail.
 
 **THE THREE CONSUMERS ARE BACK-ANNOTATED AND THEIR CONCLUSIONS HOLD.**
 `nav2.yaml` §(A)'s error-budget table, its `inflation_radius` lower
 bound, and `tests/test_nav2_params.py`'s `WORST_MAP_ODOM_STEP_M`. The
 lateral surprise those two derivations are built on — worst cross-track
 0.1044 m plus the worst single step — goes from **0.3635 m to
-0.7534 m**, and `inflation_radius: 2.60` clears both with 3.5× to
-spare. **No value in this tree moved because of the amendment; what
-moved is the margin, and every site says so.** A new test asserts the
-conclusion at BOTH bounds so the next reader can see at a glance that
-neither binds it.
+0.9354 m**, and `inflation_radius: 2.60` clears both, with **2.8x** to
+spare at the amended bound.
+
+> ~~goes from 0.3635 m to **0.7534 m** ... clears both with 3.5x to
+> spare~~
+> **WITHDRAWN with the 0.6490 m it was computed from.** 0.1044 + 0.8310
+> = 0.9354 m, and 2.60 / 0.9354 = 2.78. `nav2.yaml` (the section (A)
+> table and the `inflation_radius` derivation) and
+> `tests/test_nav2_params.py`'s `test_the_inflation_covers_the_LATERAL_surprise`
+> all carry 0.9354 and assert it; this paragraph is the one that lagged
+> them and it no longer does.
+
+**No value in this tree moved because of the amendment; what moved is
+the margin, and every site says so.** A test asserts the conclusion at
+BOTH bounds — `WORST_MAP_ODOM_STEP_OPEN_LOOP_M` is kept beside the
+amended constant for exactly that — so the next reader can see at a
+glance that neither binds it.
 
 ### 16.9 What is still open, named
 

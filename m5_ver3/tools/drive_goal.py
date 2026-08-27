@@ -124,6 +124,7 @@ REQUIRED_KEYS = (
     "nav.analyse.jump_response_s", "nav.analyse.map_gap_s",
     "nav.analyse.cusp_speed_mps", "nav.analyse.follow_speed_mps",
     "nav.analyse.corridor_boxes", "nav.analyse.corridor_give_up_m",
+    "nav.analyse.transit_margin_m",
     "nav.analyse.curvature_span",
     "evidence.dir", "evidence.wait_first_s", "evidence.min_samples",
     "paths.traction_file",
@@ -254,6 +255,7 @@ def nav_label(cfg):
     with open(tree_path, "rb") as handle:
         tree_raw = handle.read()
     found = re.search(rb'<Timeout[^>]*msec="([0-9]+)"', tree_raw)
+    window = mppi_window(path)
     return collections.OrderedDict((
         ("nav_params", cfg.s("nav.params_file")),
         ("nav_params_md5", hashlib.md5(raw).hexdigest()[:8]),
@@ -284,6 +286,16 @@ def nav_label(cfg):
         # carries are written beside it. A session recorded before this
         # existed simply has no such lines, which is `loc=none`'s rule:
         # a missing line is an older bench and not a value.
+        # AND THE FOUR NUMBERS THAT DECIDE WHETHER PathAlignCritic
+        # SCORES, because a session outlives the file it was driven by.
+        # EVIDENCE_NAV_V3.md 16.2's whole finding is a horizon against a
+        # gate, and a scan of an OLD session against TODAY's nav2.yaml
+        # is a measurement of a stack that run was never driven by.
+        # With these on the session, analyse() uses the run's own.
+        ("nav_time_steps", window.steps),
+        ("nav_model_dt", window.model_dt),
+        ("nav_vx_max", window.vx_max),
+        ("nav_align_gate", window.gate),
         ("nav_bt", cfg.s("nav.bt_xml")),
         ("nav_bt_md5", hashlib.md5(tree_raw).hexdigest()[:8]),
         ("nav_budget_ms", int(found.group(1)) if found else 0),
@@ -809,6 +821,170 @@ def approach_corridor(goal, believed, truth, lo, hi, boxes, give_up_m):
     return (out, closest)
 
 
+#: The four numbers in nav2.yaml that decide whether PathAlignCritic
+#: scores at all. `horizon_m` is what one sampled trajectory reaches at
+#: the transit ceiling; `gate` is the critic's own offset_from_furthest.
+MppiWindow = collections.namedtuple(
+    "MppiWindow", "horizon_m gate steps model_dt vx_max")
+
+#: One align-gate scan. `index` is the reachable path index summarised
+#: over the plans of a run; `cleared` counts the plans that could have
+#: cleared the gate; `at_rest` counts the plans dropped for being
+#: published while the vehicle was not moving.
+GateScan = collections.namedtuple(
+    "GateScan", "n cleared at_rest index reach window")
+
+
+def mppi_window(path):
+    """`MppiWindow` read off a nav2 parameter file.
+
+    THE HORIZON IS A DISTANCE AND time_steps IS A COUNT, which is the
+    whole of EVIDENCE_NAV_V3.md 16.2. This is the one place that
+    multiplies the three numbers together, so a reader never has to.
+    """
+    import yaml
+    with open(path, "r", encoding="utf-8") as handle:
+        parsed = yaml.safe_load(handle)
+    follow = parsed["controller_server"]["ros__parameters"]["FollowPath"]
+    steps = int(follow["time_steps"])
+    model_dt = float(follow["model_dt"])
+    vx_max = float(follow["vx_max"])
+    return MppiWindow(horizon_m=steps * model_dt * vx_max,
+                      gate=int(follow["PathAlignCritic"]
+                               ["offset_from_furthest"]),
+                      steps=steps, model_dt=model_dt, vx_max=vx_max)
+
+
+def plan_reach(poses, horizon_m):
+    """The path index a trajectory `horizon_m` long can reach along a plan.
+
+    Walked on ARC LENGTH, because that is what a trajectory spends, and
+    resolved to the NEAREST pose rather than the first one at or beyond
+    the horizon - which is what nav2's own findPathFurthestReachedPoint
+    does with the trajectory's last point. A horizon longer than the
+    plan stops at its last pose.
+    """
+    if len(poses) < 2:
+        return 0
+    walked, best, best_gap = 0.0, 0, abs(horizon_m)
+    for i in range(1, len(poses)):
+        walked += math.hypot(poses[i][0] - poses[i - 1][0],
+                             poses[i][1] - poses[i - 1][1])
+        gap = abs(walked - horizon_m)
+        if gap < best_gap:
+            best, best_gap = i, gap
+        if walked >= horizon_m:
+            break
+    return best
+
+
+def align_gate_scan(plans, truth_rows, speeds, window, lo, hi, min_speed):
+    """Could `PathAlignCritic` have scored on these plans, ever?
+
+    nav2 1.3.12, path_align_critic.cpp, the third statement of score():
+    the critic RETURNS unless `furthest_reached_path_point` is at least
+    `offset_from_furthest`, and utils.hpp computes that index from the
+    LAST point of every sampled trajectory. It is therefore the
+    prediction horizon measured in path points, and this scan is that
+    index per published plan.
+
+    IT IS AN UPPER BOUND AND THAT IS DELIBERATE. A trajectory that
+    followed the plan exactly would reach the index returned here; a
+    real sample curves away from it and reaches the same index or a
+    lower one. So a scan that says the gate was never cleared is a
+    stronger claim than a scan that says it usually was not - the BEST
+    case did not reach it either.
+
+    PLANS PUBLISHED AT A STANDSTILL ARE DROPPED AND COUNTED. A horizon
+    is a speed times a time; at rest it is zero, and the index would be
+    an artefact rather than a measurement.
+    """
+    inside = [(at, poses) for at, poses in plans if lo <= at <= hi]
+    if not inside or not truth_rows:
+        return None
+    indices, reaches, cleared, at_rest = [], [], 0, 0
+    cursor = 0
+    for at, poses in inside:
+        while (cursor + 1 < len(truth_rows)
+               and truth_rows[cursor + 1][0] <= at):
+            cursor += 1
+        speed = abs(float(speeds[cursor])) if cursor < len(speeds) else 0.0
+        if speed < min_speed:
+            at_rest += 1
+            continue
+        reach = window.steps * window.model_dt * speed
+        index = plan_reach(poses, reach)
+        indices.append(float(index))
+        reaches.append(reach)
+        if index >= window.gate:
+            cleared += 1
+    if not indices:
+        return None
+    return GateScan(n=len(indices), cleared=cleared, at_rest=at_rest,
+                    index=ec.summarise(indices),
+                    reach=ec.summarise(reaches), window=window)
+
+
+#: How much of a run's lateral miss the heading error alone explains.
+#: `predicted` is the integral, `measured` is what the ground truth did,
+#: `ratio` is the first over the second - 1.0 leaves nothing for
+#: anything else.
+Account = collections.namedtuple(
+    "Account", "n predicted measured ratio psi from_along to_along")
+
+
+def heading_account(goal, truth_rows, speeds, lo, hi, transit_margin_m):
+    """Does the heading error account for the whole lateral miss?
+
+    THE MEASUREMENT THAT KILLED TWO SUSPECTS AT ONCE (16.1 (b) and (c)).
+    A vehicle traveling at |v| with its course psi off the goal's own
+    travel heading moves sideways at |v| * sin(psi). Integrating that
+    over the transit predicts the ACROSS component the run should have
+    accumulated; comparing it with what the ground truth actually did
+    says how much is left for anything else. On F4 Task 2's runs the
+    answer was 94.8 % and 103.2 %, which leaves no room for a 0.65 m
+    localisation jump or for a replan loop.
+
+    THE WINDOW STOPS `transit_margin_m` SHORT OF THE GOAL, ALONG TRACK,
+    and that is not a convenience. Past that point the vehicle is in an
+    endgame where psi sweeps through a right angle as it hooks round;
+    integrating that would be an account of the pirouette and not of the
+    transit the miss accumulated over.
+
+    None when the run never came within the margin at all - there is no
+    transit to account for, and a ratio of two numbers that are both
+    noise is not a finding.
+    """
+    inside = [(i, row) for i, row in enumerate(truth_rows)
+              if lo <= float(row[0]) <= hi]
+    predicted, first, last, psis, n = 0.0, None, None, [], 0
+    previous = None
+    for i, row in inside:
+        split = ec.track_error(float(row[1]) - goal.x,
+                               float(row[2]) - goal.y, goal.travel_yaw)
+        if split.along > -abs(transit_margin_m):
+            break
+        psi = ec.normalise_angle(
+            ec.normalise_angle(float(row[3]) + math.pi) - goal.travel_yaw)
+        psis.append(psi)
+        if first is None:
+            first = split.cross
+        last = split.cross
+        if previous is not None and i < len(speeds):
+            predicted += (abs(float(speeds[i])) * math.sin(psi)
+                          * (float(row[0]) - previous))
+        previous = float(row[0])
+        n += 1
+    if n < 2 or first is None:
+        return None
+    measured = last - first
+    return Account(n=n, predicted=predicted, measured=measured,
+                   ratio=(predicted / measured)
+                   if abs(measured) > 1e-6 else None,
+                   psi=ec.summarise(psis),
+                   from_along=None, to_along=None)
+
+
 def steer_activity(rows):
     """Total travel, worst step and range of the steer terminal.
 
@@ -1185,6 +1361,97 @@ def analyse_session(cfg, session):
               "{:.3f} m straight line".format(length, straight))
     print("          the goal took {:.2f} s of sim time from send to "
           "result".format(t_done - t_sent))
+
+    # ---- COULD THE ALIGN CRITIC HAVE SCORED AT ALL? ------------------
+    # THE FIGURE THE WHOLE DIAGNOSIS TURNS ON, AS AN INSTRUMENT.
+    # PathAlignCritic returns without scoring unless the prediction
+    # horizon reaches `offset_from_furthest` path points, and
+    # EVIDENCE_NAV_V3.md 16.2 is what that cost. The four numbers come
+    # off the nav2.yaml ON DISK, so a session driven behind a different
+    # one is scanned against the wrong horizon - which is why the label
+    # is checked and named rather than assumed.
+    params = os.path.join(_common.REPO, cfg.s("nav.params_file"))
+    if fields.get("nav_time_steps"):
+        mppi = MppiWindow(
+            horizon_m=(float(fields["nav_time_steps"])
+                       * float(fields["nav_model_dt"])
+                       * float(fields["nav_vx_max"])),
+            gate=int(fields["nav_align_gate"]),
+            steps=int(fields["nav_time_steps"]),
+            model_dt=float(fields["nav_model_dt"]),
+            vx_max=float(fields["nav_vx_max"]))
+        from_session = True
+    else:
+        mppi = mppi_window(params)
+        from_session = False
+    scan = align_gate_scan(plans, truth, speed, mppi, t_sent, t_done,
+                           cfg.f("nav.analyse.follow_speed_mps"))
+    print("")
+    print("ALIGN     PathAlignCritic scores only where the horizon "
+          "reaches its gate.")
+    print("          horizon {:.4f} m = time_steps {} x model_dt {:g} x "
+          "vx_max {:g};".format(mppi.horizon_m, mppi.steps,
+                                mppi.model_dt, mppi.vx_max))
+    print("          gate offset_from_furthest = {}".format(mppi.gate))
+    print("          read off {}".format(
+        "THIS SESSION" if from_session
+        else "the nav2.yaml ON DISK - this session predates the four "
+             "window fields"))
+    on_disk = nav_label(cfg)["nav_params_md5"]
+    if not from_session and fields.get("nav_params_md5") not in (None,
+                                                                on_disk):
+        print("          THIS SESSION WAS DRIVEN BEHIND {} AND THE FILE "
+              "ON DISK IS {}.".format(fields["nav_params_md5"], on_disk))
+        print("          The four numbers above are the FILE's. If the "
+              "two differ in a")
+        print("          VALUE the scan below is about a stack this run "
+              "was not driven by;")
+        print("          nav_config_md5 is what says which.")
+    if scan is None:
+        print("          no plan was published while the vehicle was "
+              "moving - nothing to scan")
+    else:
+        print("          {} plan(s) scanned, {} dropped at a "
+              "standstill".format(scan.n, scan.at_rest))
+        print("            reachable path index: {}".format(scan.index))
+        print("            horizon reached, m:   {}".format(scan.reach))
+        print("          COULD HAVE CLEARED THE GATE: **{} of {}**"
+              .format(scan.cleared, scan.n))
+        print("          THE INDEX IS AN UPPER BOUND - a trajectory that "
+              "followed the plan")
+        print("          exactly would reach it and a real sample "
+              "reaches it or less - so")
+        print("          `0 of n` is the stronger claim, not the weaker "
+              "one.")
+
+    # ---- AND HOW MUCH OF THE MISS THE HEADING ALONE EXPLAINS ---------
+    # 16.1 (b) and (c) died to this one. A vehicle at |v| with its
+    # course psi off the goal's travel heading moves sideways at
+    # |v|*sin(psi); integrating it over the transit says how much of the
+    # ACROSS miss is just that, and how much is left for the localiser,
+    # the jumps or the replans.
+    account = heading_account(goal, truth, speed, t_sent, t_done,
+                              cfg.f("nav.analyse.transit_margin_m"))
+    if account is not None:
+        print("")
+        print("HEADING   the lateral miss, accounted for by the heading "
+              "error alone")
+        print("          over the transit ({} samples, stopped {:g} m "
+              "short along track):".format(
+                  account.n, cfg.f("nav.analyse.transit_margin_m")))
+        print("            predicted  {:+.4f} m   = integral of "
+              "|v|*sin(psi) dt".format(account.predicted))
+        print("            measured   {:+.4f} m   = what the ACROSS "
+              "component did".format(account.measured))
+        print("            ratio      {}".format(
+            "{:.3f}".format(account.ratio) if account.ratio is not None
+            else "none (nothing drifted)"))
+        print("            psi        {}".format(account.psi))
+        print("          A RATIO NEAR 1.0 LEAVES NOTHING FOR ANYTHING "
+              "ELSE. F4 Task 2's")
+        print("          two runs read 0.974 and 1.059, which is what "
+              "killed the jump")
+        print("          and replan hypotheses. EVIDENCE_NAV_V3.md 16.1.")
 
     # ---- IS THE CONTROLLER STEERING THE PATH, OR MERELY ON IT? -------
     # THE QUESTION THE DEVIATION FIGURE ABOVE CANNOT ASK. Every plan is

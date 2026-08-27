@@ -518,7 +518,7 @@ one for the localiser does not refuse this one. Five children,
   `PathAlignCritic` — the heaviest critic in the file and the only
   one that penalises deviation ALONG the path — **never scored on
   any control tick of any run in §15**, because its gate is a path
-  index and the prediction horizon could not reach it: 0 of 1005
+  index and the prediction horizon could not reach it: 0 of 1000
   plans. The horizon is a DISTANCE and `time_steps` is a COUNT, and
   §15.2 rung 11's speed drop had quietly cut it from 1.96 m to
   0.84 m — under the vehicle's own 1.25 m turning radius. Four

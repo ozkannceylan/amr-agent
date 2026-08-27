@@ -3964,14 +3964,30 @@ nav:
     # a NAMED outcome in the session file, not a timeout.
     #
     # BOTH NUMBERS ARE SIZED ON THE RECORDED FAILURES AND THE RULE WAS
-    # RUN AGAINST ALL TWELVE SESSIONS ON DISK BEFORE IT WAS WRITTEN
-    # (EVIDENCE_NAV_V3.md 16.7): it fires on every one of the ten runs
-    # that did not arrive and on NEITHER of the two that did.
+    # RUN AGAINST EVERY SESSION ON DISK BEFORE IT WAS WRITTEN. It was
+    # first sized on the twelve that existed then; the separation below
+    # is the one measured over all 44 driven-goal sessions
+    # (EVIDENCE_NAV_V3.md 16.7b, replayed by drive_goal.no_progress_at):
+    #
+    #   it fires on 0 of the 20 runs that ARRIVED
+    #   it fires on 20 of the 24 runs that MISSED
+    #
+    # NO FALSE POSITIVES, AND IT IS NOT A COMPLETE CATCH - the claim is
+    # stated that way round because an earlier draft of this comment
+    # said "the failures ALWAYS do", and they do not. Of the four
+    # misses this replay does not catch, one (`ring_corner-...180823`)
+    # WAS abandoned by the live watch and is simply not reproduced by
+    # the offline replay - the rule is one object but `record` composes
+    # map -> base_link with a zero-order hold and `analyse` interpolates
+    # it, which is enough to move a mark on a run whose distance is
+    # swinging by metres. The other three ended on their own in 18.2 s,
+    # 112.0 s and 140.0 s: a guard with a 30 s allowance has nothing to
+    # catch in a run that fails inside its own window.
     #   30.0 s is 9.0 m of travel at the transit ceiling for less than
     # half a metre of net approach, which no legitimate leg of this
-    # floor's road graph does. 0.50 m is the separation the twelve
-    # sessions gave: the arrivals never go 30 s without closing half a
-    # metre and the failures always do.
+    # floor's road graph does. 0.50 m is where the two populations
+    # separate: no arrival has ever gone 30 s without closing half a
+    # metre on its best.
     #   A LOCALISATION JUMP CANNOT FALSELY TRIP IT, and the asymmetry is
     # why. The rule fires on a FAILURE TO IMPROVE. A map -> odom
     # correction that moves the belief AWAY from the goal cannot satisfy
@@ -4051,6 +4067,15 @@ nav:
     # is a step, not a walk) and well under the loop it would be cut
     # before.
     corridor_give_up_m: "0.50"
+    # HOW FAR SHORT OF THE GOAL THE TRANSIT ENDS, along track. The
+    # heading account (drive_goal.heading_account) integrates
+    # |v|*sin(psi) over the approach, and past this point the vehicle is
+    # in an endgame where psi sweeps through a right angle as it hooks
+    # round - integrating that would be an account of the pirouette
+    # rather than of the transit the miss accumulated over. 3.0 m is
+    # twice GoalCritic's own threshold_to_consider (1.4 m), which is
+    # where the path critics hand over to a point attraction.
+    transit_margin_m: "3.0"
     # A CUSP is a sign change in the commanded linear.x. Below this the
     # command is inside the converter's own creep deadband and its sign
     # is not a direction, so a crossing is counted only where a real

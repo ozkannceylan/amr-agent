@@ -940,3 +940,159 @@ def test_the_budget_on_the_session_is_the_one_in_the_TREE(cfg):
     found = _re.search(r'<Timeout[^>]*msec="([0-9]+)"', body)
     assert int(drive_goal.nav_label(cfg)["nav_budget_ms"]) == int(
         found.group(1))
+
+
+# ----------------------------------------------------------------------
+# THE ALIGN-GATE SCAN, F4 Task 2.5 fix round 1
+#
+# The figure the whole diagnosis turns on - "0 of 1000 plans could ever
+# have cleared PathAlignCritic's gate" - was a one-off script when it
+# was first read. It is an instrument now, because a claim that a
+# critic never ran is the last claim on this track that should live in
+# somebody's shell history.
+# ----------------------------------------------------------------------
+
+def test_the_reachable_index_is_where_the_horizon_runs_out_of_path():
+    # 0.10 m between poses, 0.84 m of horizon -> index 8.
+    poses = [(x * 0.1, 0.0, 0.0) for x in range(40)]
+    assert drive_goal.plan_reach(poses, 0.84) == 8
+    assert drive_goal.plan_reach(poses, 2.01) == 20
+
+
+def test_a_horizon_longer_than_the_PLAN_stops_at_the_last_pose():
+    poses = [(x * 0.1, 0.0, 0.0) for x in range(6)]
+    assert drive_goal.plan_reach(poses, 99.0) == 5
+
+
+def test_the_walk_is_on_ARC_LENGTH_and_not_on_distance_from_the_start():
+    # THE CHECK THAT MATTERS ON A REEDS-SHEPP PATH. This plan goes out
+    # 1.0 m and comes straight back, so its last pose is 0.0 m from its
+    # first and its arc length is 2.0 m. A walk on displacement would
+    # never reach a 1.5 m horizon at all; a walk on arc length reaches
+    # it half way back.
+    there = [(x * 0.1, 0.0, 0.0) for x in range(11)]
+    back = [(1.0 - x * 0.1, 0.0, 0.0) for x in range(1, 11)]
+    assert drive_goal.plan_reach(there + back, 1.5) == 15
+    assert drive_goal.plan_reach(there + back, 2.0) == 20
+
+
+def test_a_one_pose_plan_reaches_nothing():
+    assert drive_goal.plan_reach([(0.0, 0.0, 0.0)], 5.0) == 0
+
+
+def test_the_gate_scan_counts_the_plans_that_could_have_CLEARED_it():
+    poses = [(x * 0.1, 0.0, 0.0) for x in range(60)]
+    plans = [(1.0, poses), (2.0, poses), (3.0, poses)]
+    truth = [(t * 0.5, 0.0, 0.0, 0.0) for t in range(20)]
+    speeds = [0.30] * 20
+    window = drive_goal.MppiWindow(horizon_m=0.84, gate=20, steps=56,
+                                   model_dt=0.05, vx_max=0.30)
+    scan = drive_goal.align_gate_scan(plans, truth, speeds, window,
+                                      0.0, 10.0, 0.05)
+    assert scan.n == 3
+    assert scan.cleared == 0            # index 8 against a gate of 20
+    assert scan.index.maximum == 8
+
+
+def test_a_wider_gate_or_a_longer_horizon_is_what_changes_it():
+    poses = [(x * 0.1, 0.0, 0.0) for x in range(60)]
+    plans = [(1.0, poses)]
+    truth = [(t * 0.5, 0.0, 0.0, 0.0) for t in range(20)]
+    speeds = [0.30] * 20
+    tight = drive_goal.MppiWindow(0.84, 20, 56, 0.05, 0.30)
+    loose = drive_goal.MppiWindow(0.84, 5, 56, 0.05, 0.30)
+    longer = drive_goal.MppiWindow(2.01, 20, 134, 0.05, 0.30)
+    assert drive_goal.align_gate_scan(
+        plans, truth, speeds, tight, 0.0, 10.0, 0.05).cleared == 0
+    assert drive_goal.align_gate_scan(
+        plans, truth, speeds, loose, 0.0, 10.0, 0.05).cleared == 1
+    assert drive_goal.align_gate_scan(
+        plans, truth, speeds, longer, 0.0, 10.0, 0.05).cleared == 1
+
+
+def test_plans_published_AT_A_STANDSTILL_are_dropped_and_counted():
+    # A horizon is a speed times a time, so at rest it is zero and the
+    # index would be an artefact rather than a measurement.
+    poses = [(x * 0.1, 0.0, 0.0) for x in range(60)]
+    plans = [(1.0, poses), (5.0, poses)]
+    truth = [(1.0, 0.0, 0.0, 0.0), (5.0, 0.0, 0.0, 0.0)]
+    speeds = [0.30, 0.001]
+    window = drive_goal.MppiWindow(0.84, 20, 56, 0.05, 0.30)
+    scan = drive_goal.align_gate_scan(plans, truth, speeds, window,
+                                      0.0, 10.0, 0.05)
+    assert scan.n == 1 and scan.at_rest == 1
+
+
+def test_the_scan_is_an_UPPER_BOUND_and_the_docstring_says_so():
+    assert "UPPER BOUND" in drive_goal.align_gate_scan.__doc__
+
+
+def test_an_empty_window_scans_nothing_rather_than_answering_zero():
+    window = drive_goal.MppiWindow(0.84, 20, 56, 0.05, 0.30)
+    assert drive_goal.align_gate_scan([], [], [], window,
+                                      0.0, 10.0, 0.05) is None
+
+
+# ----------------------------------------------------------------------
+# THE HEADING ACCOUNTING - what killed suspects (b) and (c)
+# ----------------------------------------------------------------------
+
+def _drive(psi, seconds=40.0, speed=0.30, step=0.05):
+    """A vehicle driving EAST at `speed` with a constant heading error."""
+    rows, speeds, t, x, y = [], [], 0.0, -12.0, 0.0
+    while t < seconds:
+        rows.append((t, x, y, ec.normalise_angle(psi + math.pi)))
+        speeds.append(-speed)
+        x += speed * math.cos(psi) * step
+        y += speed * math.sin(psi) * step
+        t += step
+    return rows, speeds
+
+
+def test_a_constant_heading_error_accounts_for_ALL_of_the_drift():
+    rows, speeds = _drive(-0.08)
+    got = drive_goal.heading_account(_Goal(), rows, speeds, 0.0, 1e9, 3.0)
+    assert got.ratio == pytest.approx(1.0, abs=0.02)
+    assert got.measured < 0.0 and got.predicted < 0.0
+
+
+def test_a_vehicle_pointing_the_RIGHT_way_drifts_nowhere():
+    rows, speeds = _drive(0.0)
+    got = drive_goal.heading_account(_Goal(), rows, speeds, 0.0, 1e9, 3.0)
+    assert abs(got.measured) < 1e-6
+    assert abs(got.predicted) < 1e-6
+
+
+def test_the_sign_follows_the_heading():
+    left, sl = _drive(+0.08)
+    right, sr = _drive(-0.08)
+    assert drive_goal.heading_account(
+        _Goal(), left, sl, 0.0, 1e9, 3.0).measured > 0.0
+    assert drive_goal.heading_account(
+        _Goal(), right, sr, 0.0, 1e9, 3.0).measured < 0.0
+
+
+def test_the_window_STOPS_before_the_endgame():
+    # THE ONE THAT MATTERS. Past the goal the vehicle hooks round and psi
+    # sweeps through a right angle; integrating that would not be an
+    # account of the transit, it would be an account of the pirouette.
+    rows, speeds = _drive(-0.08, seconds=90.0)
+    got = drive_goal.heading_account(_Goal(), rows, speeds, 0.0, 1e9, 3.0)
+    # 12 m of approach at 0.30 m/s, stopped 3 m short = 30 s of it
+    assert got.n < len(rows)
+    assert got.ratio == pytest.approx(1.0, abs=0.02)
+
+
+def test_a_run_with_no_TRANSIT_in_it_has_no_account():
+    # A window that opens already inside the margin is all endgame and
+    # no transit, and a ratio of two numbers that are both noise is not
+    # a finding.
+    rows = [(t * 0.05, -1.0, 0.0, math.pi) for t in range(50)]
+    assert drive_goal.heading_account(
+        _Goal(), rows, [-0.3] * 50, 0.0, 1e9, 3.0) is None
+
+
+def test_the_ratio_is_None_rather_than_infinite_when_nothing_drifted():
+    rows, speeds = _drive(0.0)
+    got = drive_goal.heading_account(_Goal(), rows, speeds, 0.0, 1e9, 3.0)
+    assert got.ratio is None

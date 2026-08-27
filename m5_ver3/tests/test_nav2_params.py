@@ -1096,7 +1096,7 @@ def test_the_horizon_actually_CLEARS_that_gate_at_the_transit_ceiling(
     # The two numbers are useless apart: a gate the horizon cannot reach
     # is a critic that never scores, which is exactly what F4 Task 2
     # shipped (a gate of 20 against a horizon that reached index 13 at
-    # its very best, on 0 of 1005 plans).
+    # its very best, on 0 of 1000 plans).
     reachable = horizon_m(nav, controller) / PLAN_POSE_SPACING_M
     gate = int(controller["PathAlignCritic"]["offset_from_furthest"])
     assert reachable > gate * 1.5
