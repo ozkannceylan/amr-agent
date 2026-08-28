@@ -339,6 +339,15 @@ topics:
   detected_dock_pose: "/m5v3/detected_dock_pose"
   dock_robot: "/dock_robot"
   undock_robot: "/undock_robot"
+  # Carriage position command [m], model.sdf JointPositionController
+  # on mast_joint. Pallet lift publishes here; never a topic literal.
+  fork_cmd: "/forklift/gz/actuator/fork_cmd"
+  # DetachableJoint on forklift_ver3. Custom names because the plugin
+  # default embeds the model name and this track treats names as an
+  # interface (model.sdf COMMAND TOPICS). gz.msgs.Empty.
+  pallet_attach: "/forklift/gz/pallet/attach"
+  pallet_detach: "/forklift/gz/pallet/detach"
+  pallet_joint_state: "/forklift/gz/pallet/state"
   # NOT BRIDGED, AND NOT AN OVERSIGHT. The 3D lidar's ROS consumer arrives
   # in F2; until it does, bridging 32768 points at 10 Hz would buy nothing
   # and cost the RTF every figure on this track is measured against. Named
@@ -4777,6 +4786,40 @@ dock:
   # class of false lethal on a 4.00 m bay.
   use_collision_detection: "false"
   dock_collision_threshold: "0.3"
+
+# ------------------------------ PALLET ---------------------------------
+# F5 Task 3. EUR 1200x800x144, pockets on the fork spacing. Spawned
+# (constraint 21), never written into warehouse_ver3.sdf. Attach is
+# pallet_core.attach_ok (constraint 23), not contact.
+pallet:
+  name: "pallet_s5"
+  model_dir: "m5_ver3/gazebo/pallets"
+  # Planform. length is aisle-left-right (pallet Y); depth is insertion
+  # (pallet X, openings on the +X face). height is a EUR deck.
+  length_m: "1.20"
+  depth_m: "0.80"
+  height_m: "0.144"
+  deck_thickness_m: "0.022"
+  mass_kg: "25.0"
+  # Off model.sdf fork_left / fork_right. tests/test_pallet_core.py
+  # recomputes spacing from the link poses and refuses a drift.
+  fork_spacing_m: "0.56"
+  tine_width_m: "0.12"
+  tine_height_m: "0.05"
+  # Each side of a tine. Opening = tine_width + 2 * this.
+  pocket_clearance_y_m: "0.02"
+  # Constraint 23. 0.087 rad is 5 deg; 0.02 m is the research bound.
+  yaw_max_rad: "0.087"
+  height_max_m: "0.02"
+  # Marker face -> pallet south face, along the spur toward the aisle.
+  wall_clearance_m: "0.02"
+  # Mast command after attach, metres from fully lowered. Under the
+  # 0.15 m/s joint limit; 0.10 m is a clear floor gap after lift.
+  lift_m: "0.10"
+  parent_link: "carriage"
+  child_link: "pallet_body"
+  # Mast joint <velocity> in model.sdf. A faster command is a lie.
+  mast_limit_mps: "0.15"
 
 # ------------------------------ APRILTAG -------------------------------
 # F5 Task 1's detector, vendored the way fuse is: no sudo, pinned debs,

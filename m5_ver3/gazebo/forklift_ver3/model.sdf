@@ -2229,5 +2229,23 @@
       <odom_publish_frequency>20</odom_publish_frequency>
     </plugin>
 
+    <!--
+      F5 Task 3. Pallet pickup. Parent is the carriage so a mast lift
+      carries the load. Topics are explicit (COMMAND TOPICS): the
+      plugin default embeds the model name. child_model is pallet_s5,
+      spawned by pallet_place.py, never baked into warehouse_ver3.sdf.
+      Attach is gated on pallet_core.attach_ok, not on contact; pockets
+      are empty so the joint is not asked to attach in collision.
+    -->
+    <plugin filename="gz-sim-detachable-joint-system"
+            name="gz::sim::systems::DetachableJoint">
+      <parent_link>carriage</parent_link>
+      <child_model>pallet_s5</child_model>
+      <child_link>pallet_body</child_link>
+      <attach_topic>/forklift/gz/pallet/attach</attach_topic>
+      <detach_topic>/forklift/gz/pallet/detach</detach_topic>
+      <output_topic>/forklift/gz/pallet/state</output_topic>
+    </plugin>
+
   </model>
 </sdf>

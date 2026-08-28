@@ -387,6 +387,7 @@ configure() {
     # missing file is refused by the path the spawner will ask for.
     APRILTAG_PARAMS="$REPO/$CFG_APRILTAG_PARAMS_FILE"
     TAG_SDF="$REPO/$CFG_DOCK_MODEL_DIR/${CFG_DOCK_FAMILY}_${CFG_DOCK_TAG_ID}.sdf"
+    PALLET_SDF="$REPO/$CFG_PALLET_MODEL_DIR/${CFG_PALLET_NAME}.sdf"
     # F5 TASK 2's TWO, derived unconditionally for set -u's reason.
     # READ only on --dock. The binary lives under the ROS prefix, which
     # is the directory of paths.ros_setup, not a third spelling of
@@ -1658,6 +1659,12 @@ start() {
             "python3 $M5V3/tools/tag_model.py write" \
             "NOTHING WAS STARTED. Constraint 21: the marker is spawned," \
             "never written into warehouse_ver3.sdf."
+        [ -f "$PALLET_SDF" ] || refuse \
+            "the pallet SDF is on disk" \
+            "$CONFIG (pallet.model_dir) -> $PALLET_SDF" \
+            "python3 $M5V3/tools/pallet_model.py write" \
+            "NOTHING WAS STARTED. Constraint 21: the pallet is spawned," \
+            "never written into warehouse_ver3.sdf."
         check_apriltag_params "$APRILTAG_PARAMS"
         [ -f "$DOCKING_PARAMS" ] || refuse \
             "the docking parameter file exists" \
@@ -1725,6 +1732,19 @@ start() {
             || refuse "station furniture was spawned" \
                 "$M5V3/tools/furniture.py place" \
                 "the create service did not accept the marker." \
+                "THE WORLD IS STILL UP. '$0 stop' before trying again."
+        python3 "$M5V3/tools/pallet_place.py" place \
+            || refuse "the pallet was spawned" \
+                "$M5V3/tools/pallet_place.py place" \
+                "the create service did not accept the pallet." \
+                "THE WORLD IS STILL UP. '$0 stop' before trying again."
+        # DetachableJoint attaches the moment the child model exists.
+        # The truck is still at spawn, 24 m from S5; that joint is not
+        # a pickup. Detach immediately so attach_ok is the only gate.
+        python3 "$M5V3/tools/pallet_bench.py" detach \
+            || refuse "the pallet started detached" \
+                "$M5V3/tools/pallet_bench.py detach" \
+                "DetachableJoint auto-attaches when pallet_s5 appears." \
                 "THE WORLD IS STILL UP. '$0 stop' before trying again."
     fi
 
@@ -2451,7 +2471,20 @@ start() {
     # where it was spawned. The logic and the parse are
     # tools/ekf_health.py and evidence_core, where a test reaches them
     # without a simulator; this line is the orchestration.
-    if ! python3 "$M5V3/tools/ekf_health.py"; then
+    #   DISCOVERY RACE. `ros2 topic echo --once` returns immediately
+    #   when it cannot resolve the type, which is a publisher that
+    #   exists but DDS has not seen yet. Measured on this rig: two
+    #   --dock bringups in a row can miss, the third pass. Five
+    #   bounded retries keep the gate; they do not weaken it.
+    health_ok=0
+    for _ekf_try in 1 2 3 4 5; do
+        if python3 "$M5V3/tools/ekf_health.py"; then
+            health_ok=1
+            break
+        fi
+        sleep 2
+    done
+    if [ "$health_ok" -ne 1 ]; then
         refuse "the filter came up sane, and not merely alive" \
             "$M5V3/tools/ekf_health.py (its refusal is printed above)" \
             "the covariance check above is what said no, and it is the" \
@@ -2939,11 +2972,14 @@ start() {
         echo "         detections on $CFG_TOPICS_APRILTAG_DETECTIONS." \
              "Marker spawned by"
         echo "         furniture.py place, never a world edit." \
+             "Pallet spawned by"
+        echo "         pallet_place.py place, never a world edit." \
              "Score it:"
         echo "         python3 $M5V3/tools/tag_bench.py record"
         echo "         THE DOCKING SERVER IS ON. $CFG_DOCKING_NODE_NAME"
         echo "         publishes into $CFG_TOPICS_CMD_VEL (constraint 22)."
         echo "         Score it: python3 $M5V3/tools/dock_bench.py record"
+        echo "         Pallet attach: python3 $M5V3/tools/pallet_bench.py attach"
     fi
     echo "limit:  $CFG_TOPICS_SPEED_LIMIT (nav2_msgs/SpeedLimit) is" \
          "WIRED and DEMONSTRATED."
@@ -3790,8 +3826,9 @@ USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [am
               monitor=on@<md5> by name; a session recorded through the
               longer path must not be tabled beside one recorded
               through the shorter.
-  --dock      THE DETECTOR, THE STATION MARKER AND THE DOCKING SERVER,
-              F5 TASK 1+2. Spawns tag36h11_0 via furniture.py place
+  --dock      THE DETECTOR, THE STATION MARKER, THE PALLET AND THE
+              DOCKING SERVER, F5 TASK 1-3. Spawns tag36h11_0 via
+              furniture.py place and pallet_s5 via pallet_place.py
               (constraint 21), vendored apriltag_node on the colour
               stream, detected_dock.py (TF → PoseStamped) and
               opennav_docking with SimpleNonChargingDock. ITS cmd_vel
@@ -3801,6 +3838,7 @@ USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [am
               docking=on@<docking.yaml md5>.
               Score detection: python3 tools/tag_bench.py record
               Score the dock:  python3 tools/dock_bench.py record
+              Pallet attach:   python3 tools/pallet_bench.py attach
   status      every child by name, ALIVE or DEAD, with its log, which
               traction the running plant is on, which estimator arm,
               which absolute layer, whether anything is planning, and
