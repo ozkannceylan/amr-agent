@@ -189,6 +189,10 @@ Jazzy container so `test_vda_agent_mqtt.py` has a live rclpy
 context. A recorded cell run still lives in
 [`m6/PROOF.md`](m6/PROOF.md) — CI does not close an M-gate.
 
+Step-by-step walkthrough of the gate (what landed, the four jobs,
+the `ci-gate` ruleset, what is still out of scope):
+[`docs/ci-cd-akisi.md`](docs/ci-cd-akisi.md).
+
 ```bash
 python3 -m pip install -r m6/requirements-ci.txt
 bash m6/tools/install_broker.sh          # once, for the MQTT tests
