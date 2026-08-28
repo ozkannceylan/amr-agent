@@ -246,6 +246,10 @@ m5_ver3/
 │                         corner-heavy leg x3), the FLIP experiment on
 │                         the other localiser, the COLLISION MONITOR,
 │                         and the PHASE VERDICT with the F5 handoff
+├── EVIDENCE_DOCKING_V3.md  F5's: Task 1 live re-drives spine_north on
+│                         the global obstacle layer (nav_config_md5
+│                         9063bec9) against EVIDENCE_NAV_V3.md 16.5.
+│                         Later sections: AprilTag, docking, pallet
 ├── nodes/
 │   ├── wheel_odom_core.py   the estimate, as arithmetic. --selftest
 │   ├── wheel_odometry.py    the rclpy shell around it. Wiring only.

@@ -72,6 +72,7 @@ import math
 import os
 import subprocess
 import sys
+import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
@@ -145,30 +146,58 @@ def read_once(cfg, topic):
     env["ROS_DOMAIN_ID"] = cfg.s("isolation.ros_domain_id")
     env["GZ_PARTITION"] = cfg.s("isolation.gz_partition")
     timeout = cfg.f("ekf.startup_check.timeout_s")
-    try:
-        done = subprocess.run(
-            ["ros2", "topic", "echo", "--once", topic],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            timeout=timeout, env=env)
-    except subprocess.TimeoutExpired:
-        cfg.refuse(
-            "the estimator published a message inside "
-            "{:g}s".format(timeout),
-            "{} (config.yaml ekf.startup_check.timeout_s)".format(topic),
-            "nothing arrived on that topic at all. Both estimators on "
-            "this track are SILENT",
-            "about an input that never arrives, so the thing to check is "
-            "the topic and",
-            "not the log - and check that it is the ACTIVE arm's topic, "
-            "which is the one",
-            "the state file's arm= line decides:",
-            "  ros2 topic list | grep {}".format(topic),
-            "EVIDENCE_FUSION.md 2.6.")
-    except OSError as exc:
-        cfg.refuse("ros2 is on the PATH", _common.CONFIG + " (paths.ros_setup)",
-                   "could not run `ros2 topic echo`: {}".format(exc),
-                   "this gate runs INSIDE WSL with /opt/ros/jazzy sourced.")
-    return done.stdout.decode("utf-8", "replace")
+    # RETRY UNTIL timeout_s, BECAUSE echo DOES NOT WAIT.
+    # `ros2 topic echo --once` returns immediately with "does not appear
+    # to be published yet / Could not determine the type" when discovery
+    # has not yet matched the publisher - measured, and the refusal
+    # below this function used to fire on that miss (once in eight
+    # bringups in EVIDENCE_FUSION.md 11.5; again 2026-08-28). The 20 s
+    # budget in config.yaml is a claim about waiting; without the loop
+    # it is never spent. A real silence still refuses: subprocess
+    # TimeoutExpired if a matched publisher never sends, or the loop
+    # emptying if discovery never matches.
+    deadline = time.monotonic() + timeout
+    last = ""
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            break
+        try:
+            done = subprocess.run(
+                ["ros2", "topic", "echo", "--once", topic],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                timeout=remaining, env=env)
+        except subprocess.TimeoutExpired:
+            cfg.refuse(
+                "the estimator published a message inside "
+                "{:g}s".format(timeout),
+                "{} (config.yaml ekf.startup_check.timeout_s)".format(topic),
+                "nothing arrived on that topic at all. Both estimators on "
+                "this track are SILENT",
+                "about an input that never arrives, so the thing to check is "
+                "the topic and",
+                "not the log - and check that it is the ACTIVE arm's topic, "
+                "which is the one",
+                "the state file's arm= line decides:",
+                "  ros2 topic list | grep {}".format(topic),
+                "EVIDENCE_FUSION.md 2.6.")
+        except OSError as exc:
+            cfg.refuse("ros2 is on the PATH",
+                       _common.CONFIG + " (paths.ros_setup)",
+                       "could not run `ros2 topic echo`: {}".format(exc),
+                       "this gate runs INSIDE WSL with /opt/ros/jazzy sourced.")
+        last = done.stdout.decode("utf-8", "replace")
+        if not core.echo_is_undiscovered(last):
+            return last
+        time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
+    cfg.refuse(
+        "the estimator published a message inside "
+        "{:g}s".format(timeout),
+        "{} (config.yaml ekf.startup_check.timeout_s)".format(topic),
+        "every `ros2 topic echo --once` in that window returned the "
+        "immediate discovery miss rather than a message. Last output:",
+        *[line for line in last.splitlines()[:4]] or ["(nothing at all)"],
+        "EVIDENCE_FUSION.md 2.6.")
 
 
 def main(argv=None):

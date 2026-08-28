@@ -650,6 +650,27 @@ def require_not_diverged(xs, ys, limit_m, what):
             float(list(ys)[i])))
 
 
+def echo_is_undiscovered(text):
+    """True when `ros2 topic echo --once` exited without matching a publisher.
+
+    MEASURED on this rig, and ekf_health.py's own comment already names
+    it: that invocation returns IMMEDIATELY with
+
+        WARNING: topic [...] does not appear to be published yet
+        Could not determine the type for the passed topic
+
+    rather than waiting for discovery. config.yaml's
+    ekf.startup_check.timeout_s is a claim about waiting; without this
+    test the gate treats the immediate miss as a message, raises
+    EvidenceError on the missing covariance, and refuses a stack that
+    is in fact healthy. The retry lives in ekf_health.read_once; this
+    is the classification a test can reach without ROS.
+    """
+    body = str(text)
+    return ("does not appear to be published yet" in body
+            or "Could not determine the type" in body)
+
+
 def worst_covariance(text):
     """The largest MAGNITUDE in a covariance printed by `ros2 topic echo`.
 

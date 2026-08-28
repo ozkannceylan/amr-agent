@@ -1239,6 +1239,18 @@ _ECHO_DIVERGED = """pose:
 """
 
 
+def test_echo_undiscovered_is_the_immediate_type_warning():
+    text = (
+        "WARNING: topic [/m5v3/odometry/filtered] does not appear to be "
+        "published yet\n"
+        "Could not determine the type for the passed topic\n")
+    assert evidence_core.echo_is_undiscovered(text)
+
+
+def test_a_real_echo_is_not_an_undiscovered_topic():
+    assert not evidence_core.echo_is_undiscovered(_ECHO_BLOCK)
+
+
 def test_the_worst_covariance_is_the_largest_MAGNITUDE_and_not_the_first():
     # The xx entry is not the biggest one in the diverged message, and a
     # gate reading only [0] would pass a matrix that is 1e91 off-diagonal.
