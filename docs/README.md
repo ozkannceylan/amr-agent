@@ -4,7 +4,7 @@ The repo's records, in four kinds:
 
 | Where | What | Status |
 |---|---|---|
-| [`adr/`](adr/) | Architecture decision records 0001–0015 — the permanent spine, every era | live |
+| [`adr/`](adr/) | Architecture decision records 0001–0017 — the permanent spine, every era | live |
 | [`interfaces/`](interfaces/) | VDA 5050 subset, OPC UA node model, handshake tables, bridge design | live |
 | [`safety/`](safety/) | Safety requirements spec and validation reports | live |
 | [`VALIDATION-M5.md`](VALIDATION-M5.md) | M5 chain validation, measured against F-signature `29FD2C52` | live evidence |

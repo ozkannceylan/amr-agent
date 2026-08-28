@@ -1,0 +1,5 @@
+# Pinned for the pytest-m6 CI job (ADR 0017). Install:
+#   python3 -m pip install -r m6/requirements-ci.txt
+pytest==8.3.5
+paho-mqtt==2.1.0
+PyYAML==6.0.2

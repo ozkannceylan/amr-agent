@@ -1,5 +1,7 @@
 # amr-agent
 
+[![CI](https://github.com/ozkannceylan/amr-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/ozkannceylan/amr-agent/actions/workflows/ci.yml)
+
 **A simulated forklift, a real fail-safe PLC program deciding what it is
 allowed to do — and now an autopilot driving under that decision.**
 
@@ -173,8 +175,24 @@ line per event.
 | [`agv/`](agv/) | Shared vehicle assets used in place by both eras: the forklift config, I/O translator and STO contactor. |
 | [`m5-plc-debug/`](m5-plc-debug/) | The hand-debug chapter: the safety-PLC ↔ Gazebo loop isolated and made to work, script by script. |
 | [`bridge/`](bridge/) · [`fleet/`](fleet/) · [`hmi/`](hmi/) · [`sim/`](sim/) · [`viz/`](viz/) · [`plc/`](plc/) | The claude-supervised layered stack — the first M5, still runnable: [its archive and runbook](m5/m5_ver1/README.md). |
-| [`docs/`](docs/) | ADRs 0001–0015, interface contracts, safety spec, validation evidence, and the archived planning history — [index](docs/README.md). |
+| [`docs/`](docs/) | ADRs 0001–0017, interface contracts, safety spec, validation evidence, and the archived planning history — [index](docs/README.md). |
+| [`.github/`](.github/) | The integration gate (ADR 0017): pytest on the M6 suite, layer-boundary checks, pre-commit. [Plan](docs/superpowers/plans/2026-08-28-ci-cd-integration.md). |
 | [`.archive/`](.archive/) | The legacy entry scripts (`demo.sh`, `stack.sh`) the claude-supervised runbook uses. |
+
+## CI
+
+Pull requests against `main` run three jobs, none of which needs
+Gazebo or the Windows writer: hygiene, the fleet/ROS boundary, and
+`python3 -m pytest m6/tests/` (400+ tests; ROS-bound modules are
+omitted until a Jazzy job lands). A recorded cell run still lives in
+[`m6/PROOF.md`](m6/PROOF.md) — CI does not close an M-gate.
+
+```bash
+python3 -m pip install -r m6/requirements-ci.txt
+bash m6/tools/install_broker.sh          # once, for the MQTT tests
+python3 m6/tools/check_layer_boundaries.py
+python3 -m pytest m6/tests/ -q
+```
 
 ## How it got here
 
