@@ -5,6 +5,7 @@ Usage: python3 m6/tools/check_junit_floor.py junit-m6.xml 400
 """
 from __future__ import annotations
 
+import os
 import sys
 import xml.etree.ElementTree as ET
 
@@ -29,6 +30,9 @@ def main() -> int:
         return 2
     path, floor_s = sys.argv[1], sys.argv[2]
     floor = int(floor_s)
+    if not os.path.exists(path):
+        print(f"floor check FAILED: {path} was not produced (pytest did not run)")
+        return 1
     tests, failures, errors, skipped = _suite_counts(ET.parse(path).getroot())
     passed = tests - failures - errors - skipped
     print(
