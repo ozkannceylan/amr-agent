@@ -4032,6 +4032,35 @@ nav:
   # window and a CIRCULAR footprint of radius 0.1 m.
   costmap_sections: "local_costmap global_costmap"
 
+  # ------------------- THE COSTMAP'S OWN READER ------------------------
+  # tools/costmap_probe.py, F5 Task 1. `nav_health.py` asks whether the
+  # arm can PLAN; this asks what it would plan THROUGH, which is a
+  # question about a grid and is answered by reading the grid.
+  #   IT EXISTS BECAUSE F5 TASK 1 ADDS A LAYER TO ONE OF THEM.
+  # EVIDENCE_NAV_V3.md 19.9 deferred the global obstacle layer partly
+  # on "it changes what the PLANNER plans through on every goal on every
+  # arm", and F4 constraint 20 makes that a RE-MEASUREMENT. nav2.yaml's
+  # own header then makes a prediction off `combination_method: 1` - on
+  # a floor whose obstacles are all in the frozen map the layer can only
+  # ADD cells the map already carries, so the grids should agree - and a
+  # prediction with no instrument behind it is a hope.
+  costmap_probe:
+    # BOTH COSTMAPS AND NOT ONLY THE ONE THAT CHANGED. The local one is
+    # the CONTROL: it is untouched by this task, so a difference there
+    # between two captures is a difference in the RUN (a scan that
+    # arrived, a pose that moved) rather than in the file, and it is
+    # what says how much of any global difference is attributable to
+    # the layer at all.
+    topics: "/global_costmap/costmap /local_costmap/costmap"
+    # HOW LONG THE PROBE SPINS AFTER THE FIRST GRID BEFORE IT KEEPS ONE.
+    # An obstacle layer's FIRST published grid can predate its first
+    # scan - the costmap publishes on its own 1 Hz timer and the layer
+    # marks on the scanner's 15 Hz - so a capture taken the instant the
+    # subscription matched would be a measurement of a layer that had
+    # not run yet. 10 s is ten global-costmap update periods and 150
+    # scan periods, which is a long way past either.
+    settle_s: "10"
+
 
   # ---------------------- THE BRINGUP GATE -----------------------------
   # tools/nav_health.py, and it is ekf_health.py's and
@@ -4527,13 +4556,16 @@ nav:
     # EARLIER CUT OF THIS COMMENT GOT THE INEQUALITY BACKWARDS. It said
     # "half a metre is above the worst closed-loop map -> odom
     # correction measured (0.6490 m)", which is false in the direction
-    # it matters - 0.50 is BELOW 0.6490, and below the 0.8310 m that
-    # figure has since become (EVIDENCE_LOCALIZATION_V3.md 13.10a). The
-    # comparison was never the right one either way: a map -> odom
-    # correction is a STEP in the believed pose between two consecutive
-    # broadcasts, and this threshold is a cumulative BACKING-OUT of a
-    # local minimum in the distance-to-goal walk. A single 0.83 m step
-    # away from the goal would indeed end the walk one sample early -
+    # it matters - 0.50 is BELOW 0.6490, and below every figure that one
+    # has since become. THE AMENDMENT IS NOW 13.10b AND NOT 13.10a, and
+    # the bound moved twice: 0.8310 m closed loop (13.10a), then
+    # 1.1919 m on the `amcl` arm and 0.8845 m on `slam` (13.10b), with
+    # NO established maximum. The comparison was never the right one
+    # either way: a map -> odom correction is a STEP in the believed
+    # pose between two consecutive broadcasts, and this threshold is a
+    # cumulative BACKING-OUT of a local minimum in the distance-to-goal
+    # walk. A single 1.19 m step away from the goal would indeed end
+    # the walk one sample early -
     # and that is the conservative direction, because the corridor is a
     # table about the FIRST approach and cutting it early can only drop
     # rungs, never invent one. What the number has to be under is the
