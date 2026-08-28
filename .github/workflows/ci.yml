@@ -72,7 +72,7 @@ jobs:
             --junit-xml=junit-m6.xml \
             --tb=short
 
-      - name: Floor: at least 400 passed
+      - name: "Floor: at least 400 passed"
         if: always()
         run: python3 m6/tools/check_junit_floor.py junit-m6.xml 400
 
