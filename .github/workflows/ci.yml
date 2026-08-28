@@ -109,7 +109,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            git python3-pip python3-tk \
+            git python3-pip python3-tk python3-venv \
             ros-jazzy-rclpy \
             ros-jazzy-std-msgs \
             ros-jazzy-geometry-msgs \
@@ -121,9 +121,8 @@ jobs:
 
       - name: Python test dependencies
         run: |
-          python3 -m pip install --break-system-packages \
-            --upgrade-strategy only-if-needed \
-            -r m6/requirements-ci.txt
+          python3 -m venv --system-site-packages /tmp/ci-venv
+          /tmp/ci-venv/bin/pip install -r m6/requirements-ci.txt
 
       - name: Vendored mosquitto
         run: bash m6/tools/install_broker.sh
@@ -133,7 +132,7 @@ jobs:
           FASTRTPS_DEFAULT_PROFILES_FILE: ${{ github.workspace }}/m6/tools/fastdds_loopback.xml
         run: |
           source /opt/ros/jazzy/setup.bash
-          python3 -m pytest m6/tests/ -q \
+          /tmp/ci-venv/bin/python -m pytest m6/tests/ -q \
             --junit-xml=junit-ros.xml \
             --tb=short
 
