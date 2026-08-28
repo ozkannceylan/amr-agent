@@ -107,6 +107,15 @@ def test_v_is_positive_UP_so_a_mirrored_tag_cannot_silently_decode():
 # station geometry, pinned to S5 and to config.yaml
 # ----------------------------------------------------------------------
 
+def test_the_marker_faces_the_oncoming_truck(s5):
+    yaw = tc.face_yaw(s5["yaw"])
+    assert yaw == pytest.approx(math.pi / 2.0)
+    ux, uy = tc.approach_unit(s5["yaw"])
+    fx, fy = math.cos(yaw), math.sin(yaw)
+    assert fx == pytest.approx(-ux)
+    assert fy == pytest.approx(-uy)
+
+
 def test_the_showcase_station_is_m6s_S5(dock, s5):
     assert dock["station"] == "S5"
     assert s5["name"] == "PICK-NE-1"

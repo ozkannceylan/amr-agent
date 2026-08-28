@@ -4621,3 +4621,15 @@ dock:
   # recomputes the margin from nav2.yaml's grown footprint and refuses
   # a staging pose that would land inside it.
   staging_run_in_m: "2.00"
+  # Height of the tag CENTRE in the world, metres. The pallet camera sits
+  # at z = 1.10 and looks 30 deg down (model.sdf pallet_cam_link). At the
+  # staging range (~4 m) a centre at 0.80 m is 4.3 deg below the camera
+  # horizon, inside the 35 deg vertical half-aperture; at the docked
+  # range it is still above the 0.6 m near clip.
+  marker_z_m: "0.80"
+  # Board thickness. Collision AND visual. Thick enough for the nav
+  # lidar (z = 1.80) to miss it - the tag is below the scan plane on
+  # purpose - and for the GLOBAL costmap's obstacle layer to still see
+  # it once a pallet or a back-board that DOES reach 1.80 is spawned
+  # beside it. This thickness is the printed tile, not the pallet.
+  tag_thickness_m: "0.02"

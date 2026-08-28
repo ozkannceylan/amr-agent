@@ -343,6 +343,11 @@ m5_ver3/
     │                     tag36h11 bitmap, marker/docked/staging poses
     │                     off m6's station point, and the START_OCCUPIED
     │                     trap-zone margin. --selftest. No ROS, no gz.
+    ├── tag_model.py      F5 Task 1. Write a static SDF for one AprilTag
+    │                     from tag_core.cells. describe | write. `write`
+    │                     needs libapriltag so the printed marker and
+    │                     the detector share one code table. The floor
+    │                     is not edited.
     └── map_register.py   derive | show | clearance | support. Needs
                           nothing. `support` places every beam of a
                           recorded drive on the frozen map from the TRUE

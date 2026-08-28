@@ -151,6 +151,17 @@ def approach_unit(travel_yaw_rad):
     return (math.cos(travel_yaw_rad), math.sin(travel_yaw_rad))
 
 
+def face_yaw(travel_yaw_rad):
+    """Yaw that points the marker's +X (out of the face) at the truck.
+
+    tag_model.py builds the marker in the model frame with +X out of the
+    printed face. The truck travels along `travel_yaw_rad`, so it looks
+    AT the marker from the opposite heading. That is travel + pi, not a
+    guess about gazebo's camera convention.
+    """
+    return math.atan2(-math.sin(travel_yaw_rad), -math.cos(travel_yaw_rad))
+
+
 def station_geometry(station_x, station_y, travel_yaw_rad,
                      marker_ahead_m, fork_reach_m, tip_standoff_m,
                      staging_run_in_m):
@@ -330,6 +341,7 @@ def _selftest():
     check("docked y", geo["docked"][1], 4.575, 1e-9)
     check("staging y", geo["staging"][1], 6.575, 1e-9)
     check("staging -> marker", geo["staging_to_marker_m"], 3.975, 1e-9)
+    check("face yaw (S5)", face_yaw(-math.pi / 2.0), math.pi / 2.0, 1e-12)
 
     # THE PLANNABILITY MARGIN, on nav2.yaml's own polygon.
     poly = [(-2.415, -0.450), (-1.220, -0.668995), (1.240, -0.560),
