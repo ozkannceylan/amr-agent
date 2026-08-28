@@ -15,6 +15,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import threading
 import time
 
@@ -44,9 +45,25 @@ def _wait_listening(port, timeout_s=5.0):
     return False
 
 
+def _ensure_f1_config():
+    """vehicles/ is gitignored; the agent reads f1's derived config.yaml.
+
+    On the owner's rig `m6.sh deploy` has already written it. In CI the
+    checkout is clean, so this is the same tool the deploy uses, for
+    one vehicle, before rclpy.init().
+    """
+    root = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+    cfg = os.path.join(root, "vehicles", "f1", "config.yaml")
+    if os.path.isfile(cfg):
+        return
+    script = os.path.join(root, "tools", "instantiate_vehicle.py")
+    subprocess.check_call([sys.executable, script, "f1"])
+
+
 @pytest.fixture()
 def rig():
     from std_msgs.msg import String
+    _ensure_f1_config()
     broker = subprocess.Popen(
         [BROKER, "-p", PORT],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -65,48 +82,54 @@ def rig():
     os.environ["ROS_DOMAIN_ID"] = "89"
     os.environ["VEHICLE"] = "f1"
     rclpy.init()
-    import vda_agent
-    agent = vda_agent.VdaAgent()
-    caught = {"route": [], "goal": [], "mqtt": []}
-    helper = rclpy.create_node("test_helper")
-    from status_contract import AUTO_ROUTE_TOPIC, AUTO_GOAL_TOPIC, \
-        MODE_TOPIC, AUTO_STATE_TOPIC
-    from rclpy.qos import DurabilityPolicy, QoSProfile
-    helper.create_subscription(
-        String, AUTO_ROUTE_TOPIC,
-        lambda m: caught["route"].append(json.loads(m.data)), 10)
-    helper.create_subscription(
-        String, AUTO_GOAL_TOPIC,
-        lambda m: caught["goal"].append(m.data), 10)
-    latched = QoSProfile(
-        depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-    mode_pub = helper.create_publisher(String, MODE_TOPIC, latched)
-    nav_pub = helper.create_publisher(String, AUTO_STATE_TOPIC, 10)
-    # The probe subscribes FROM its on_connect and the fixture waits for
-    # the SUBACK: subscribing on the caller's thread races the CONNACK,
-    # and a lost subscription here fails as "the agent published
-    # nothing", which is a lie about the agent.
-    subscribed = threading.Event()
-    probe = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="probe")
-    probe.on_connect = lambda c, u, f, rc, p=None: c.subscribe(
-        "uagv/v2/amragent/f1/#", qos=1)
-    probe.on_subscribe = lambda *a, **k: subscribed.set()
-    probe.on_message = lambda c, u, m: caught["mqtt"].append(
-        (m.topic, json.loads(m.payload.decode())))
-    probe.connect("127.0.0.1", int(PORT))
-    probe.loop_start()
-    assert subscribed.wait(5.0), "probe never got its SUBACK"
-    yield agent, helper, caught, mode_pub, nav_pub, probe
-    probe.loop_stop()
-    # close() before destroy_node(): a leaked paho loop reconnects, and
-    # the next test's agent carries the same client_id, so the broker
-    # would evict whichever of the two connected first.
-    agent.close()
-    agent.destroy_node()
-    helper.destroy_node()
-    rclpy.try_shutdown()
-    broker.terminate()
-    broker.wait(timeout=5)
+    agent = helper = probe = None
+    try:
+        import vda_agent
+        agent = vda_agent.VdaAgent()
+        caught = {"route": [], "goal": [], "mqtt": []}
+        helper = rclpy.create_node("test_helper")
+        from status_contract import AUTO_ROUTE_TOPIC, AUTO_GOAL_TOPIC, \
+            MODE_TOPIC, AUTO_STATE_TOPIC
+        from rclpy.qos import DurabilityPolicy, QoSProfile
+        helper.create_subscription(
+            String, AUTO_ROUTE_TOPIC,
+            lambda m: caught["route"].append(json.loads(m.data)), 10)
+        helper.create_subscription(
+            String, AUTO_GOAL_TOPIC,
+            lambda m: caught["goal"].append(m.data), 10)
+        latched = QoSProfile(
+            depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        mode_pub = helper.create_publisher(String, MODE_TOPIC, latched)
+        nav_pub = helper.create_publisher(String, AUTO_STATE_TOPIC, 10)
+        # The probe subscribes FROM its on_connect and the fixture waits for
+        # the SUBACK: subscribing on the caller's thread races the CONNACK,
+        # and a lost subscription here fails as "the agent published
+        # nothing", which is a lie about the agent.
+        subscribed = threading.Event()
+        probe = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="probe")
+        probe.on_connect = lambda c, u, f, rc, p=None: c.subscribe(
+            "uagv/v2/amragent/f1/#", qos=1)
+        probe.on_subscribe = lambda *a, **k: subscribed.set()
+        probe.on_message = lambda c, u, m: caught["mqtt"].append(
+            (m.topic, json.loads(m.payload.decode())))
+        probe.connect("127.0.0.1", int(PORT))
+        probe.loop_start()
+        assert subscribed.wait(5.0), "probe never got its SUBACK"
+        yield agent, helper, caught, mode_pub, nav_pub, probe
+    finally:
+        if probe is not None:
+            probe.loop_stop()
+        if agent is not None:
+            # close() before destroy_node(): a leaked paho loop reconnects,
+            # and the next test's agent carries the same client_id, so the
+            # broker would evict whichever of the two connected first.
+            agent.close()
+            agent.destroy_node()
+        if helper is not None:
+            helper.destroy_node()
+        rclpy.try_shutdown()
+        broker.terminate()
+        broker.wait(timeout=5)
 
 
 def spin(nodes, seconds):
