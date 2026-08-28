@@ -23,30 +23,35 @@ the check that runs on every PR, against the tree that will actually
 land, and it produces an artifact a human can read when it fails.
 
 Decision:      Pull requests against `main` are gated by GitHub Actions
-on three jobs, in this order of cost:
+on four jobs, in this order of cost:
 
 1. **pre-commit** - hygiene only (whitespace, YAML, merge-conflict
    markers, line endings, no newly added large binaries). Formatters
    that would rewrite the historical trees are out of scope.
 2. **invariants** - mechanical restatements of ADR 0001 that a grep
-   can fail: the fleet tree does not import `rclpy` or any vehicle
-   ROS node; `vda_orders.py` stays stdlib-only. A check that needs
-   judgement stays with the verifier agent and is not this job.
+   can fail: the fleet tree does not import `rclpy`, `ros_optional`,
+   or any vehicle ROS node; `vda_orders.py` stays stdlib-only. A check
+   that needs judgement stays with the verifier agent and is not this
+   job.
 3. **pytest-m6** - `python3 -m pytest m6/tests/` on Ubuntu 24.04 /
    Python 3.12, with `paho-mqtt`, `python3-tk` and the vendored
    mosquitto from `m6/tools/install_broker.sh`. ROS is **not** a
-   dependency of this job.    Test files that import `rclpy` at
-   collection time (nine modules) are omitted when it is absent (an
-   environment statement, not a pass). The job fails if pytest reports failures
-   or errors, or if fewer than 400 tests pass (the 2026-08-28
-   measured floor is 423).
+   dependency of this job. IPC/HMI nodes import ROS types through
+   `m6/ipc/ros_optional.py`, so their pure-function tests collect
+   without `/opt/ros`. The job fails if pytest reports failures or
+   errors, or if fewer than 550 tests pass (measured 2026-08-28:
+   569 passed, 1 skipped - the skip is `test_vda_agent_mqtt.py`,
+   which needs a live rclpy context).
+4. **pytest-ros** - the same suite inside `ros:jazzy-ros-base`, with
+   the FastDDS loopback profile and `ROS_AUTOMATIC_DISCOVERY_RANGE=
+   LOCALHOST`. This is the job that runs `test_vda_agent_mqtt.py`.
+   Floor: 570 passed.
 
-Later jobs - a Jazzy container so the omitted files run, a headless
-Gazebo SIL, a GHCR image - are sequenced in
+Later jobs - a headless Gazebo SIL, a GHCR image - are sequenced in
 [`docs/superpowers/plans/2026-08-28-ci-cd-integration.md`](../superpowers/plans/2026-08-28-ci-cd-integration.md)
 and each becomes a required check only after it has been green on
-`main` for a stretch. GitHub's merge queue is adopted once the three
-jobs above are required; it is a repository setting, not a file.
+`main` for a stretch. GitHub's merge queue is adopted once these jobs
+are required; it is a repository setting, not a file.
 
 What this ADR does **not** decide:
 
@@ -64,19 +69,22 @@ Consequences:
 Harder:
 - A PR that breaks a pure function cannot hide behind "I'll run the
   cell later". The pytest job is the merge door.
-- The required check is *weaker* than the owner's rig until Phase 2
-  (ROS container) lands. That gap is written down rather than papered
-  over with a red Jazzy job that nobody can reproduce on the runner.
+- The required check is *weaker* than the owner's rig until a
+  headless Gazebo job lands. `pytest-ros` covers the VDA agent
+  against a real broker and a real rclpy context; it does not start
+  the 39-process cell.
 - Branch protection and the merge queue are owner actions in the
   GitHub UI; the workflow file cannot turn them on by itself.
 
 Easier:
-- Every PR gets the same 423 tests, the same invariant grep and the
-  same hygiene hooks, in about a minute, with JUnit on the run.
+- Every PR gets the same 569 tests natively, the VDA-agent MQTT
+  suite in the Jazzy job, the same invariant grep and the same
+  hygiene hooks, with JUnit on the run.
 - The fleet/ROS boundary becomes a failing check instead of a README
   sentence.
-- Adding the Jazzy job later is a new file in `.github/workflows/`,
-  not a redesign.
+- Nodes import ROS through one module (`ros_optional.py`), so a
+  missing overlay is a skipped integration test, not a collection
+  error.
 
 Alternatives:
 
@@ -90,7 +98,5 @@ Alternatives:
   a gate. It is a later phase, on a self-hosted or larger runner, with
   its own flake budget.
 - Lazy-import `rclpy` in every IPC node so the native job collects
-  all 38 test modules. Deferred to Phase 2: it is the right code
-  change, and it is a behaviour change in import side-effects that
-  must be proven against the live stack, not bundled with the first
-  workflow file.
+  all 38 test modules. Landed as `m6/ipc/ros_optional.py`: the
+  overlay is optional at import, required at `main()`.

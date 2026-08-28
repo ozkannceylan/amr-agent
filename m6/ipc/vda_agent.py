@@ -85,17 +85,12 @@ import os
 import queue
 import time
 
-import rclpy
 import yaml
-from nav_msgs.msg import Odometry
-from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile
-from std_msgs.msg import String
-
 import paho.mqtt.client as mqtt
 
 import vda_messages as vm
 import vda_orders as vo
+from ros_optional import DurabilityPolicy, Node, Odometry, QoSProfile, String, rclpy, require
 from status_contract import (
     AUTO_GOAL_TOPIC, AUTO_ROUTE_TOPIC, AUTO_STATE_TOPIC, CONFIG_PATH,
     FIELDS_TOPIC, MODE_TOPIC, STATUS_TOPIC, VID, MODE_AUTO,
@@ -893,6 +888,7 @@ class VdaAgent(Node):
 
 
 def main():
+    require()
     rclpy.init()
     node = VdaAgent()
     try:

@@ -14,16 +14,12 @@ import json
 import math
 import time
 
-import rclpy
 import yaml
-from geometry_msgs.msg import Twist
-from nav_msgs.msg import Odometry
-from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile
-from sensor_msgs.msg import LaserScan
-from std_msgs.msg import String
 
 import avoid
+from ros_optional import (
+    DurabilityPolicy, LaserScan, Node, Odometry, QoSProfile, String, Twist,
+    rclpy, require)
 import follower
 import nav_core
 from status_contract import (
@@ -203,6 +199,7 @@ class NavNode(Node):
 
 
 def main():
+    require()
     rclpy.init()
     node = NavNode()
     try:

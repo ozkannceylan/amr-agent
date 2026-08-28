@@ -35,12 +35,12 @@ A clean Ubuntu 24.04 / Python 3.12 with `pytest`, `paho-mqtt`,
 
 | Outcome | Count | What |
 |---|---|---|
-| passed | **423** | Pure logic + stub MQTT + live mosquitto on :18884 + VirtualFPLC on loopback UDP |
-| skipped | 1 | `test_vda_agent_mqtt.py` (`importorskip("rclpy")`) |
-| collection errors | 9 files | Import `rclpy` at module level: `cmd_gate`, `cmd_mux`, `encoder_link`, `field_eval`, `follower` (via `field_eval`), `hmi_node`, `plc_link`, `sensor_link`, `vehicles_table` (via `field_eval`) |
+| passed | **423** then **569** | Phase 1 omitted 9 modules; Phase 2 `ros_optional.py` lets their pure tests collect |
+| skipped | 1 | `test_vda_agent_mqtt.py` (`importorskip("rclpy")`) — runs in `pytest-ros` |
+| collection errors | 0 after Phase 2 | Phase 1 had 9; `ros_optional.py` removed them |
 | wall time | ~41 s | Dominated by `test_fleet_manager_mqtt.py` (9 tests, ~35 s, 3 consecutive green runs, no flake) |
 | Gazebo tests | **0** | No test starts `gz sim` |
-| Windows / PLCSIM tests | **0** | `test_m6_virtual_loop.py` is the stand-in, and it is in the 423 |
+| Windows / PLCSIM tests | **0** | `test_m6_virtual_loop.py` is the stand-in, and it is in the 569 |
 
 `m6.sh deploy` also runs without ROS and is **deterministic** across two
 back-to-back runs (same `MANIFEST` hash once the date header is
@@ -68,21 +68,22 @@ Native GitHub-hosted runner, no ROS, no Gazebo, no Docker.
 Done when a PR that breaks `vda_orders.validate_order` is red, and a
 PR that only edits `m6/PROOF.md` is green.
 
-### Phase 2 - the omitted files
+### Phase 2 - the omitted files (landed)
 
-Two independent options; both are allowed, either is enough:
+Both options, not either:
 
-- **2a.** Lazy-import `rclpy` inside `main()` of the eight IPC/HMI
-  modules so their pure functions collect on a native runner. Must be
-  proven against `m6.sh start` on the owner's rig (import side-effects
-  are how several nodes currently bind DDS).
-- **2b.** A `ros:jazzy-ros-base` container job that sources
-  `/opt/ros/jazzy/setup.bash` and runs the full suite, including
-  `test_vda_agent_mqtt.py`. Needs `rclpy` + message packages in the
-  image. No Gazebo in this job.
+- **2a.** `m6/ipc/ros_optional.py` — overlay optional at import,
+  required at `main()`. Native suite measured 2026-08-28: **569
+  passed, 1 skipped** (`test_vda_agent_mqtt.py` still needs a live
+  rclpy context). Floor 550. Import side-effects for DDS binding
+  still happen in `Node.__init__` / `main()`, not at import, so
+  `python3 m6/ipc/*.py` after `source /opt/ros/jazzy/setup.bash`
+  is the same entry point as before.
+- **2b.** `pytest-ros` job: `container: ros:jazzy-ros-base`,
+  FastDDS loopback profile, `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`,
+  full suite including `test_vda_agent_mqtt.py`. Floor 570.
 
-Done when the 9 omitted files and the VDA agent MQTT test are a
-required check.
+Done when both jobs are green on the PR.
 
 ### Phase 3 - the image (optional, after 2)
 
@@ -117,10 +118,10 @@ host, and a flaky required check is worse than no check.
 
 ### Phase 5 - merge queue + branch protection
 
-Owner actions in the GitHub UI, after Phase 1 has been green:
+Owner actions in the GitHub UI, after Phase 2 has been green:
 
 - `main` protected: no direct push, required reviewers, required
-  checks = the three Phase 1 jobs
+  checks = pre-commit, invariants, pytest-m6, pytest-ros
 - native merge queue so a PR is re-tested against the `main` it will
   actually land on (OtoNav ADR-6)
 
@@ -137,10 +138,20 @@ Owner actions in the GitHub UI, after Phase 1 has been green:
 ## Acceptance for Phase 1
 
 1. `python3 -m pytest m6/tests/ -q` on a machine without ROS reports
-   no failures, no collection errors, and at least 400 passed.
+   no failures, no collection errors, and at least 400 passed
+   (superseded by Phase 2's 550 floor).
 2. `python3 m6/tools/check_layer_boundaries.py` exits 0 on `main` and
    exits 1 if `import rclpy` is added to `m6/fleet/fleet_manager.py`.
 3. The workflow file is the only runner definition; versions of
    pytest / paho are pinned in `m6/requirements-ci.txt`.
 4. Historical trees (`docs/archive/`, `m1/`-`m5/`, `PROOF.md`) are
    excluded from pre-commit rewrites.
+
+## Acceptance for Phase 2
+
+1. Native `python3 -m pytest m6/tests/ -q` reports at least 550
+   passed, 0 failed, 0 collection errors, without `/opt/ros`.
+2. The `pytest-ros` job is green and reports at least 570 passed
+   (the extra tests are `test_vda_agent_mqtt.py`).
+3. `python3 m6/ipc/cmd_gate.py` without the overlay exits with
+   "source /opt/ros/jazzy/setup.bash first" rather than an ImportError.

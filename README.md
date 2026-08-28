@@ -181,10 +181,12 @@ line per event.
 
 ## CI
 
-Pull requests against `main` run three jobs, none of which needs
-Gazebo or the Windows writer: hygiene, the fleet/ROS boundary, and
-`python3 -m pytest m6/tests/` (400+ tests; ROS-bound modules are
-omitted until a Jazzy job lands). A recorded cell run still lives in
+Pull requests against `main` run four jobs, none of which needs
+Gazebo or the Windows writer: hygiene, the fleet/ROS boundary,
+`python3 -m pytest m6/tests/` natively (550+ tests; ROS types come
+in through `m6/ipc/ros_optional.py`), and the same suite inside a
+Jazzy container so `test_vda_agent_mqtt.py` has a live rclpy
+context. A recorded cell run still lives in
 [`m6/PROOF.md`](m6/PROOF.md) — CI does not close an M-gate.
 
 ```bash

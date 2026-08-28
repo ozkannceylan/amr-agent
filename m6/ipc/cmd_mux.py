@@ -19,12 +19,7 @@ the HMI still learns the current mode from the last publish.
 """
 import time
 
-import rclpy
-from geometry_msgs.msg import Twist
-from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile
-from std_msgs.msg import String
-
+from ros_optional import DurabilityPolicy, Node, QoSProfile, String, Twist, rclpy, require
 from status_contract import (
     AUTO_CMD_TOPIC, HMI_CMD_TOPIC, MODE_AUTO, MODE_TOPIC, STATUS_STALE_S,
     VEHICLE_CMD_TOPIC, is_stale)
@@ -90,6 +85,7 @@ class CmdMux(Node):
 
 
 def main():
+    require()
     rclpy.init()
     node = CmdMux()
     try:

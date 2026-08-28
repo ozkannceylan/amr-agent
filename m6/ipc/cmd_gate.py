@@ -49,12 +49,9 @@ Usage (after sourcing /opt/ros/jazzy/setup.bash):
 
 import time
 
-import rclpy
 import yaml
-from geometry_msgs.msg import Twist
-from rclpy.node import Node
-from std_msgs.msg import Float64, String
 
+from ros_optional import Float64, Node, String, Twist, rclpy, require
 from status_contract import (
     CONFIG_PATH, STATUS_STALE_S, STATUS_TOPIC, V_LIMIT_CREEP_MM_S,
     VEHICLE_CMD_TOPIC, is_stale, parse_status, speed_limit_mm_s)
@@ -223,6 +220,7 @@ class CmdGate(Node):
 
 
 def main():
+    require()
     rclpy.init()
     node = CmdGate()
     try:

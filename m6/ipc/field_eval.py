@@ -31,12 +31,8 @@ import json
 import math
 import time
 
-import rclpy
-from rclpy.node import Node
-from sensor_msgs.msg import LaserScan
-from std_msgs.msg import String
-
 import status_contract
+from ros_optional import LaserScan, Node, String, rclpy, require
 
 # ----------------------------- CONFIG -----------------------------
 FIELDS = {1: (1.0, 2.5), 2: (2.2, 3.7), 3: (4.5, 6.0)}   # case: (PF, WF) [m]
@@ -313,6 +309,7 @@ class FieldEval(Node):
 
 
 def main():
+    require()
     rclpy.init()
     node = FieldEval()
     try:

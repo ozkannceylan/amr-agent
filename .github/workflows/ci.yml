@@ -1,8 +1,8 @@
 name: CI
 
-# Gates PRs (ADR 0017). The three jobs are the required checks once
-# branch protection is turned on; none of them needs ROS, Gazebo or
-# the Windows writer.
+# Gates PRs (ADR 0017). pre-commit, invariants and pytest-m6 need no
+# ROS; pytest-ros is the Jazzy overlay job (Phase 2) and is the one
+# that runs test_vda_agent_mqtt.py.
 on:
   pull_request:
     branches: [main]
@@ -72,9 +72,9 @@ jobs:
             --junit-xml=junit-m6.xml \
             --tb=short
 
-      - name: "Floor: at least 400 passed"
+      - name: "Floor: at least 550 passed"
         if: always()
-        run: python3 m6/tools/check_junit_floor.py junit-m6.xml 400
+        run: python3 m6/tools/check_junit_floor.py junit-m6.xml 550
 
       - name: Deploy snapshot is reproducible
         run: |
@@ -88,4 +88,59 @@ jobs:
         with:
           name: junit-m6
           path: junit-m6.xml
+          if-no-files-found: warn
+
+  pytest-ros:
+    name: pytest-ros
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: ros:jazzy-ros-base
+    defaults:
+      run:
+        shell: bash
+    env:
+      ROS_DOMAIN_ID: "89"
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+    steps:
+      - name: Tooling
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git python3-pip python3-tk \
+            ros-jazzy-rclpy \
+            ros-jazzy-std-msgs \
+            ros-jazzy-geometry-msgs \
+            ros-jazzy-nav-msgs \
+            ros-jazzy-sensor-msgs \
+            ros-jazzy-rmw-fastrtps-cpp
+
+      - uses: actions/checkout@v4
+
+      - name: Python test dependencies
+        run: python3 -m pip install --break-system-packages -r m6/requirements-ci.txt
+
+      - name: Vendored mosquitto
+        run: bash m6/tools/install_broker.sh
+
+      - name: pytest (Jazzy overlay)
+        env:
+          FASTRTPS_DEFAULT_PROFILES_FILE: ${{ github.workspace }}/m6/tools/fastdds_loopback.xml
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          python3 -m pytest m6/tests/ -q \
+            --junit-xml=junit-ros.xml \
+            --tb=short
+
+      - name: "Floor: at least 570 passed"
+        if: always()
+        run: python3 m6/tools/check_junit_floor.py junit-ros.xml 570
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-ros
+          path: junit-ros.xml
           if-no-files-found: warn

@@ -22,23 +22,3 @@ for _sub in ("ipc", "hmi", "windows"):
     _path = os.path.normpath(os.path.join(_HERE, "..", _sub))
     if _path not in sys.path:
         sys.path.insert(0, _path)
-
-# ROS-bound modules import rclpy at module level. On a runner without
-# ROS those files error at collection; omitting them is an environment
-# statement, not a pass. ADR 0017 Phase 2 is to lazy-import rclpy so
-# this list shrinks to nothing.
-_ROS_BOUND = (
-    "test_cmd_gate.py",
-    "test_cmd_mux.py",
-    "test_encoder_link.py",
-    "test_field_eval.py",
-    "test_follower.py",
-    "test_hmi_node.py",
-    "test_plc_link.py",
-    "test_sensor_link.py",
-    "test_vehicles_table.py",
-)
-try:
-    import rclpy  # noqa: F401
-except ImportError:
-    collect_ignore = list(_ROS_BOUND)

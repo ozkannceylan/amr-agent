@@ -11,8 +11,10 @@ CI parity before merge. Paste the relevant output.
 
 - [ ] `pre-commit run --all-files` clean (or the `pre-commit` job is green)
 - [ ] `python3 m6/tools/check_layer_boundaries.py` exits 0
-- [ ] `python3 -m pytest m6/tests/ -q` — at least 400 passed, 0 failed
+- [ ] `python3 -m pytest m6/tests/ -q` — at least 550 passed, 0 failed
       (the `pytest-m6` job). ROS is not required for this number.
+- [ ] (if the change touches the VDA agent or DDS) the `pytest-ros`
+      job is green
 
 If the change needs the rig (Gazebo, the Windows writer, a recorded
 run), say so here and point at the `m6/PROOF.md` section rather than

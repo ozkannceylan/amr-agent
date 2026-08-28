@@ -42,6 +42,7 @@ FLEET_FORBIDDEN = frozenset({
     "vda_agent",
     "hmi_node",
     "map_panel",
+    "ros_optional",
 })
 
 
