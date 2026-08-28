@@ -1,0 +1,17 @@
+# docks.yaml - S5 dock instance for opennav_docking.
+#
+# pose is the docked base_link in frames.map, through the committed
+# registration. tests/test_docking_params.py recomputes it from
+# tag_core.station_geometry + dock_core.pose_yaw + MapFrame and refuses
+# a typed invention.
+#
+# type names the plugin block in docking.yaml. id is the AprilTag id
+# SimpleNonChargingDock's getRefinedPose is passed; the pose itself
+# comes from topics.detected_dock_pose.
+
+docks:
+  s5:
+    type: "simple_non_charging"
+    frame: "map"
+    pose: [-24.096886, 5.200867, -1.567532]
+    id: "0"

@@ -1025,16 +1025,26 @@ def test_a_goal_marked_NOT_a_route_node_really_is_not_one(cfg):
     # demonstration goal that had quietly become reachable - a graph
     # that grew a node there, a rack that moved - would pass every test
     # in this file and demonstrate nothing at all.
+    #   F5 ADDS A SECOND KIND OF NON-NODE: a DERIVED staging pose. It is
+    #   reachable (that is the point) and it is still not a graph node,
+    #   because the graph stops at the station point. `derived: true`
+    #   is what keeps it out of the unreachable-repeat rule.
     graph = road_graph()
     exempt = [name for name, goal in cfg["nav"]["goals"].items()
               if goal.get("route_node") is False]
     assert exempt, "the fail-fast demonstration goal is gone"
+    unreachable = [n for n in exempt
+                   if cfg["nav"]["goals"][n].get("derived") is not True]
+    assert "rack_sw3" in unreachable, (
+        "the fail-fast demonstration goal is gone")
     for name in exempt:
         goal = cfg["nav"]["goals"][name]
         node = (float(goal["x"]), float(goal["y"]))
         assert node not in graph, (
             "nav.goals.{} is marked route_node: false and IS a node of "
             "the road graph".format(name))
+        if goal.get("derived") is True:
+            continue
         assert int(goal["repeat"]) == 0, (
             "an unreachable goal is not part of the evidence set")
 

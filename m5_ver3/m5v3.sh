@@ -2,7 +2,7 @@
 # m5v3.sh - bring the m5-ver3 plant up and down: ONE world, ONE truck,
 # ONE bridge, ONE estimator, and a GPU the run has proved it is using.
 #   start [--headless] [--slippery] [--rf2o|--fuse]
-#         [--localize [amcl|slam]] [--nav] | stop | status
+#         [--localize [amcl|slam]] [--nav] [--monitor] [--dock] | stop | status
 #
 # WHAT THIS TRACK IS. m5-ver3 is the sensor-fusion rebuild of the SHOWCASE
 # vehicle (vault AMR-DEC-003): one forklift, real instrument profiles, a
@@ -130,6 +130,14 @@
 #   planner in the room is a different measurement from one recorded
 #   without, and nothing else in the CSVs says which.
 #
+# --dock SPAWNS THE STATION FURNITURE AND THE DETECTOR, F5 Task 1, and
+# it is OFF unless the command line says otherwise. Constraint 21: the
+# AprilTag marker is a gz create, never a world-file edit. The child is
+# vendored apriltag_node on the colour stream. IT REQUIRES --nav AND IS
+# REFUSED WITHOUT IT BY NAME: detection accuracy is a staging-range
+# figure, and staging is a Nav2 goal. ITS LABEL IS ITS OWN LINE (dock=)
+# carrying apriltag.yaml's md5, for monitor='s reason one layer over.
+#
 # THE PARTITION IS NOT OVERRIDABLE FROM THE ENVIRONMENT, unlike m6.sh's.
 # It is read from config.yaml by start, by stop and by status alike, so
 # the three cannot disagree about which graph this is - and ours() reads
@@ -244,6 +252,13 @@ NAV=false
 #   certifications". It does not replace a safety-rated PLC. It
 #   complements the F-PLC; it is not the F-PLC.
 MONITOR=false
+# --dock: F5 TASK 1's DETECTOR AND STATION FURNITURE, and it is OFF
+# unless the command line says otherwise. It spawns the marker via
+# furniture.py place (constraint 21) and apriltag_node on the colour
+# stream. IT REQUIRES --nav: staging is a Nav2 goal and the camera at
+# spawn cannot see S5. ITS LABEL IS dock=, apriltag.yaml's md5, so a
+# detection table cannot sit beside a run that never started the node.
+DOCK=false
 
 # THIS SCRIPT'S OWN REQUIRED KEYS, on top of the isolation and ROS ones
 # _common.sh checks for every script on this track. Each is refused by its
@@ -264,11 +279,15 @@ REQUIRED_KEYS=(
     vehicle.model vehicle.name
     vehicle.spawn.x vehicle.spawn.y vehicle.spawn.z vehicle.spawn.yaw
     vehicle.imu_mount.x vehicle.imu_mount.y vehicle.imu_mount.z
+    vehicle.cam_mount.x vehicle.cam_mount.y vehicle.cam_mount.z
+    vehicle.cam_mount.roll vehicle.cam_mount.pitch vehicle.cam_mount.yaw
+    vehicle.cam_optical.x vehicle.cam_optical.y vehicle.cam_optical.z
+    vehicle.cam_optical.roll vehicle.cam_optical.pitch vehicle.cam_optical.yaw
     vehicle.nav_lidar_mount.x vehicle.nav_lidar_mount.y
     vehicle.nav_lidar_mount.z
     topics.clock topics.odom_ground_truth topics.scan_nav
     topics.safety_scan_back
-    topics.imu topics.cam_depth topics.cam_info topics.points3d
+    topics.imu topics.cam_depth topics.cam_info topics.cam_image topics.points3d
     topics.joint_state topics.drive_speed_read_a topics.wheel_odom
     topics.odometry_filtered topics.rf2o_odom_raw topics.rf2o_odom
     topics.fuse_odometry_filtered
@@ -280,7 +299,7 @@ REQUIRED_KEYS=(
     vehicle.steer_limit_rad vehicle.steer_rate_limit_radps
     navcmd.accel_mps2 navcmd.steer_command_limit_rad
     frames.odom frames.base_link frames.imu frames.map
-    frames.nav_lidar frames.rf2o_odom
+    frames.nav_lidar frames.rf2o_odom frames.pallet_cam frames.pallet_cam_optical
     map.dir map.name map.registration.file map.build_file
     localization.default_arm
     localization.map_server.package localization.map_server.executable
@@ -303,6 +322,19 @@ REQUIRED_KEYS=(
     monitor.package monitor.executable monitor.node_name
     monitor.params_file monitor.active_timeout_s
     monitor.transform_check_s
+    apriltag.prefix apriltag.deb_prefix apriltag.package
+    apriltag.executable apriltag.lib apriltag.node_name
+    apriltag.params_file
+    dock.family dock.tag_id dock.model_dir
+    topics.apriltag_detections topics.detected_dock_pose
+    topics.dock_robot topics.undock_robot
+    docking.package docking.executable docking.node_name
+    docking.params_file docking.database_file
+    docking.plugin_name docking.plugin_type docking.dock_id
+    docking.lifecycle.package docking.lifecycle.executable
+    docking.lifecycle.node_name
+    docking.detected_node_name docking.detected_rate_hz
+    docking.lifecycle_timeout_s
     nav.params_file nav.bt_xml nav.costmap_sections
     nav.planner.package nav.planner.executable nav.planner.node_name
     nav.controller.package nav.controller.executable
@@ -349,6 +381,19 @@ configure() {
     # in it - which is why it is a flag of its own and not part of --nav
     # (config.yaml monitor:).
     MONITOR_PARAMS="$REPO/$CFG_MONITOR_PARAMS_FILE"
+    # F5 TASK 1's, derived unconditionally for set -u's reason on every
+    # other optional arm: READ only on --dock. The SDF path is the same
+    # construction tag_model.py write / furniture.py place use, so a
+    # missing file is refused by the path the spawner will ask for.
+    APRILTAG_PARAMS="$REPO/$CFG_APRILTAG_PARAMS_FILE"
+    TAG_SDF="$REPO/$CFG_DOCK_MODEL_DIR/${CFG_DOCK_FAMILY}_${CFG_DOCK_TAG_ID}.sdf"
+    # F5 TASK 2's TWO, derived unconditionally for set -u's reason.
+    # READ only on --dock. The binary lives under the ROS prefix, which
+    # is the directory of paths.ros_setup, not a third spelling of
+    # /opt/ros/jazzy.
+    DOCKING_PARAMS="$REPO/$CFG_DOCKING_PARAMS_FILE"
+    DOCK_DB="$REPO/$CFG_DOCKING_DATABASE_FILE"
+    DOCKING_BIN="$(dirname "$CFG_PATHS_ROS_SETUP")/lib/$CFG_DOCKING_PACKAGE/$CFG_DOCKING_EXECUTABLE"
     # F4 TASK 2's TWO, DERIVED UNCONDITIONALLY for RF2O_WS's reason: a
     # variable that exists only on one branch is a variable `set -u`
     # aborts on from the other. Neither is READ unless --nav was given.
@@ -450,6 +495,7 @@ configure() {
     #   string operations, and a variable that exists only on one branch
     #   is a variable `set -u` aborts on from the other.
     fuse_paths
+    apriltag_paths
 }
 
 # THE STACK AS COMMAND-LINE PATTERNS, AND THE LIST IS _common.sh's.
@@ -596,6 +642,36 @@ check_monitor_params() {  # check_monitor_params <file>
             "without it, so the stop zone or the slowdown zone would" \
             "simply not exist and nothing downstream would say so."
     done
+}
+
+# F5 TASK 1's DETECTOR FILE. Same node-name check as the monitor: a
+# file addressed to a node this script never starts is a file of
+# dead parameters, and apriltag_ros would come up on family tag36h11
+# at 0.16 m - a detector looking for a marker this stack did not print.
+check_apriltag_params() {  # check_apriltag_params <file>
+    local file="$1"
+    grep -q "^${CFG_APRILTAG_NODE_NAME}:" "$file" || refuse \
+        "the apriltag parameter file is addressed to $CFG_APRILTAG_NODE_NAME" \
+        "$file and $CONFIG (apriltag.node_name, apriltag.params_file)" \
+        "there is no top-level '$CFG_APRILTAG_NODE_NAME:' key in that" \
+        "file, so every parameter in it belongs to a node that is never" \
+        "started." \
+        "the top-level keys that file does define:" \
+        "$(grep '^[A-Za-z_][A-Za-z0-9_]*:' "$file" || echo '(none)')"
+}
+
+check_docking_params() {  # check_docking_params <file>
+    local file="$1"
+    grep -q "^${CFG_DOCKING_NODE_NAME}:" "$file" || refuse \
+        "the docking parameter file is addressed to $CFG_DOCKING_NODE_NAME" \
+        "$file and $CONFIG (docking.node_name, docking.params_file)" \
+        "there is no top-level '$CFG_DOCKING_NODE_NAME:' key in that" \
+        "file, so every parameter in it belongs to a node that is never" \
+        "started."
+    grep -q "^${CFG_DOCKING_LIFECYCLE_NODE_NAME}:" "$file" || refuse \
+        "the docking parameter file is addressed to $CFG_DOCKING_LIFECYCLE_NODE_NAME" \
+        "$file and $CONFIG (docking.lifecycle.node_name)" \
+        "there is no top-level '$CFG_DOCKING_LIFECYCLE_NODE_NAME:' key."
 }
 
 # THE FACTOR GRAPH'S PARAMETER FILE, CHECKED THE SAME WAY AND THEN ONCE
@@ -1552,6 +1628,54 @@ start() {
         # shellcheck disable=SC2086
         check_nav_params "$NAV_PARAMS" $NAV_SECTIONS
     fi
+    # F5 TASK 1's THREE, AND ONLY WHEN --dock WAS GIVEN. A rig that
+    # never intends to detect a marker must still bring up the stack
+    # every earlier phase's figures were measured on.
+    if [ "$DOCK" = true ]; then
+        [ "$NAV" = true ] || refuse \
+            "--dock was given with --nav" \
+            "$0 (the start flags)" \
+            "--dock places the S5 marker and starts apriltag_node." \
+            "Detection accuracy is a STAGING-RANGE figure, and staging" \
+            "is a Nav2 goal. The camera at spawn cannot see the board." \
+            "NOTHING WAS STARTED. Add the planner:" \
+            "  $0 start --headless --localize --nav --dock"
+        [ -x "$APRILTAG_BIN" ] || refuse \
+            "apriltag_ros is vendored" \
+            "$CONFIG (apriltag.prefix) and $M5V3/tools/install_apriltag.sh" \
+            "there is no executable at $APRILTAG_BIN" \
+            "  bash $M5V3/tools/install_apriltag.sh" \
+            "NOTHING WAS STARTED. Drop --dock to bring up the stack" \
+            "EVIDENCE_NAV_V3.md was measured on."
+        [ -f "$APRILTAG_PARAMS" ] || refuse \
+            "the apriltag parameter file exists" \
+            "$CONFIG (apriltag.params_file)" \
+            "it resolves to $APRILTAG_PARAMS" \
+            "NOTHING WAS STARTED."
+        [ -f "$TAG_SDF" ] || refuse \
+            "the marker SDF is on disk" \
+            "$CONFIG (dock.model_dir) -> $TAG_SDF" \
+            "python3 $M5V3/tools/tag_model.py write" \
+            "NOTHING WAS STARTED. Constraint 21: the marker is spawned," \
+            "never written into warehouse_ver3.sdf."
+        check_apriltag_params "$APRILTAG_PARAMS"
+        [ -f "$DOCKING_PARAMS" ] || refuse \
+            "the docking parameter file exists" \
+            "$CONFIG (docking.params_file)" \
+            "it resolves to $DOCKING_PARAMS" \
+            "NOTHING WAS STARTED."
+        [ -f "$DOCK_DB" ] || refuse \
+            "the dock database exists" \
+            "$CONFIG (docking.database_file)" \
+            "it resolves to $DOCK_DB" \
+            "NOTHING WAS STARTED."
+        [ -x "$DOCKING_BIN" ] || refuse \
+            "opennav_docking is installed" \
+            "$CONFIG (docking.package, docking.executable) and $DOCKING_BIN" \
+            "ros-jazzy-opennav-docking 1.3.12 is the package Task 2 verified." \
+            "NOTHING WAS STARTED."
+        check_docking_params "$DOCKING_PARAMS"
+    fi
     # Unchecked, an unwritable log dir fails every redirection this stack
     # opens and start would sleep its way to "up." over a stack that never
     # began. Since F4's closing wave this also PICKS the directory: one
@@ -1592,6 +1716,17 @@ start() {
     # returns and the truck belongs to the server.
     spawn_truck
     sleep "$CFG_TIMING_SETTLE_S"
+
+    # CONSTRAINT 21: the marker is a create-service call, never a world
+    # edit. furniture.py place is spawn_truck's idiom applied to the
+    # tag SDF tag_model.py write already put on disk.
+    if [ "$DOCK" = true ]; then
+        python3 "$M5V3/tools/furniture.py" place \
+            || refuse "station furniture was spawned" \
+                "$M5V3/tools/furniture.py place" \
+                "the create service did not accept the marker." \
+                "THE WORLD IS STILL UP. '$0 stop' before trying again."
+    fi
 
     # THE FLOOR, AFTER THE TRUCK IS STANDING ON IT. --slippery is the
     # only thing on this stack that changes the PLANT, and it changes it
@@ -1803,16 +1938,52 @@ start() {
     #   is the address on both sides and there is no second spelling of
     #   a terminal to keep in step.
 
-    # THE DEPTH IMAGE GOES THROUGH A SECOND, DIFFERENT BRIDGE, and that is
-    # ros_gz's design rather than this script's choice: parameter_bridge
-    # carries an Image as a plain topic, image_bridge carries it through
-    # image_transport, which is what every ROS image consumer expects to
-    # find. camera_info stays on the parameter bridge above because
-    # image_bridge does not carry it.
-    #   IT IS ONE PROCESS FOR ONE TOPIC, and that is the honest shape: a
-    #   second image would be a second argument, and the colour image has
-    #   no consumer on this track.
-    spawn imgbridge ros2 run ros_gz_image image_bridge "$CFG_TOPICS_CAM_DEPTH"
+    # THE DEPTH IMAGE AND THE COLOUR IMAGE GO THROUGH A SECOND, DIFFERENT
+    # BRIDGE, and that is ros_gz's design rather than this script's
+    # choice: parameter_bridge carries an Image as a plain topic,
+    # image_bridge carries it through image_transport, which is what
+    # every ROS image consumer expects to find. camera_info stays on the
+    # parameter bridge above because image_bridge does not carry it.
+    #   TWO ARGUMENTS, ONE PROCESS. Depth was the only consumer through
+    #   F4; F5's AprilTag detector reads the colour stream, so both
+    #   images share this child. The point cloud stays unbridged.
+    spawn imgbridge ros2 run ros_gz_image image_bridge "$CFG_TOPICS_CAM_DEPTH" "$CFG_TOPICS_CAM_IMAGE"
+
+    # F5 TASK 1's DETECTOR, AND NOT ONE LINE OF IT EXISTS WITHOUT --dock.
+    # image_rect is remapped onto the RAW colour stream: this sim camera
+    # has no distortion model. camera_info stays the parameter-bridge
+    # topic. detections are remapped onto topics.apriltag_detections so
+    # the bench never carries a topic literal.
+    if [ "$DOCK" = true ]; then
+        spawn camtf ros2 run tf2_ros static_transform_publisher \
+            --x "$CFG_VEHICLE_CAM_MOUNT_X" \
+            --y "$CFG_VEHICLE_CAM_MOUNT_Y" \
+            --z "$CFG_VEHICLE_CAM_MOUNT_Z" \
+            --roll "$CFG_VEHICLE_CAM_MOUNT_ROLL" \
+            --pitch "$CFG_VEHICLE_CAM_MOUNT_PITCH" \
+            --yaw "$CFG_VEHICLE_CAM_MOUNT_YAW" \
+            --frame-id "$CFG_FRAMES_BASE_LINK" \
+            --child-frame-id "$CFG_FRAMES_PALLET_CAM"
+        spawn camopt ros2 run tf2_ros static_transform_publisher \
+            --x "$CFG_VEHICLE_CAM_OPTICAL_X" \
+            --y "$CFG_VEHICLE_CAM_OPTICAL_Y" \
+            --z "$CFG_VEHICLE_CAM_OPTICAL_Z" \
+            --roll "$CFG_VEHICLE_CAM_OPTICAL_ROLL" \
+            --pitch "$CFG_VEHICLE_CAM_OPTICAL_PITCH" \
+            --yaw "$CFG_VEHICLE_CAM_OPTICAL_YAW" \
+            --frame-id "$CFG_FRAMES_PALLET_CAM" \
+            --child-frame-id "$CFG_FRAMES_PALLET_CAM_OPTICAL"
+        apriltag_env
+        spawn apriltag env "AMENT_PREFIX_PATH=$APRILTAG_AMENT_PREFIX_PATH" \
+            "LD_LIBRARY_PATH=$APRILTAG_LD_LIBRARY_PATH" \
+            "$APRILTAG_BIN" --ros-args \
+            -r __node:="$CFG_APRILTAG_NODE_NAME" \
+            --params-file "$APRILTAG_PARAMS" \
+            -p use_sim_time:=true \
+            -r image_rect:="$CFG_TOPICS_CAM_IMAGE" \
+            -r camera_info:="$CFG_TOPICS_CAM_INFO" \
+            -r detections:="$CFG_TOPICS_APRILTAG_DETECTIONS"
+    fi
 
     # THE WHEEL ODOMETRY, AFTER THE BRIDGE THAT FEEDS IT. It is the first
     # process on this track that is neither the plant nor a pipe to it:
@@ -2527,6 +2698,36 @@ start() {
         fi
     fi
 
+    # F5 TASK 2's SERVER, AFTER THE NAV ARM, AND ONLY UNDER --dock.
+    # local_costmap/costmap_raw is a sub-node of controller_server; a
+    # docking controller that came up before that topic existed would
+    # sit with use_collision_detection true and an empty costmap.
+    # Constraint 22: cmd_vel is remapped onto topics.cmd_vel, the same
+    # address the controller_server already uses. One goal at a time -
+    # dock_bench.py cancels NavigateToPose before DockRobot.
+    if [ "$DOCK" = true ]; then
+        spawn detdock python3 "$M5V3/nodes/detected_dock.py" --ros-args \
+            -p use_sim_time:=true
+        spawn docking ros2 run "$CFG_DOCKING_PACKAGE" \
+            "$CFG_DOCKING_EXECUTABLE" --ros-args \
+            -r __node:="$CFG_DOCKING_NODE_NAME" \
+            --params-file "$DOCKING_PARAMS" \
+            -p use_sim_time:=true \
+            -p dock_database:="$DOCK_DB" \
+            -p base_frame:="$CFG_FRAMES_BASE_LINK" \
+            -p fixed_frame:="$CFG_FRAMES_ODOM" \
+            -r cmd_vel:="$CFG_TOPICS_CMD_VEL" \
+            -r detected_dock_pose:="$CFG_TOPICS_DETECTED_DOCK_POSE"
+
+        spawn docklife ros2 run "$CFG_DOCKING_LIFECYCLE_PACKAGE" \
+            "$CFG_DOCKING_LIFECYCLE_EXECUTABLE" --ros-args \
+            -r __node:="$CFG_DOCKING_LIFECYCLE_NODE_NAME" \
+            --params-file "$DOCKING_PARAMS" \
+            -p use_sim_time:=true
+        sleep "$CFG_TIMING_STARTUP_CHECK_S"
+        assert_children_alive
+    fi
+
     echo ""
     if [ "$RF2O" = true ]; then
         echo "up. one truck, one world, two bridges, TWO estimators,"
@@ -2555,7 +2756,8 @@ start() {
     fi
     echo "bridged: $CFG_TOPICS_CLOCK, $CFG_TOPICS_ODOM_GROUND_TRUTH" \
          "(measurement reference ONLY), $CFG_TOPICS_SCAN_NAV," \
-         "$CFG_TOPICS_IMU, $CFG_TOPICS_CAM_DEPTH, $CFG_TOPICS_CAM_INFO," \
+         "$CFG_TOPICS_IMU, $CFG_TOPICS_CAM_DEPTH, $CFG_TOPICS_CAM_IMAGE," \
+         "$CFG_TOPICS_CAM_INFO," \
          "$CFG_TOPICS_JOINT_STATE, $CFG_TOPICS_DRIVE_SPEED_READ_A"
     echo "gz only: $CFG_TOPICS_POINTS3D and both point clouds - no ROS"
     echo "         consumer yet, and gz renders what is subscribed."
@@ -2728,8 +2930,20 @@ start() {
          "z = 1.80 m, so a"
     echo "         pallet, a dropped load and a person are INVISIBLE to" \
          "it. State:"
-    echo "         $CFG_TOPICS_COLLISION_MONITOR_STATE. Config:" \
-         "$CFG_MONITOR_PARAMS_FILE."
+        echo "         $CFG_TOPICS_COLLISION_MONITOR_STATE. Config:" \
+             "$CFG_MONITOR_PARAMS_FILE."
+    fi
+    if [ "$DOCK" = true ]; then
+        echo "dock:    THE DETECTOR IS ON. $CFG_APRILTAG_NODE_NAME on" \
+             "$CFG_TOPICS_CAM_IMAGE,"
+        echo "         detections on $CFG_TOPICS_APRILTAG_DETECTIONS." \
+             "Marker spawned by"
+        echo "         furniture.py place, never a world edit." \
+             "Score it:"
+        echo "         python3 $M5V3/tools/tag_bench.py record"
+        echo "         THE DOCKING SERVER IS ON. $CFG_DOCKING_NODE_NAME"
+        echo "         publishes into $CFG_TOPICS_CMD_VEL (constraint 22)."
+        echo "         Score it: python3 $M5V3/tools/dock_bench.py record"
     fi
     echo "limit:  $CFG_TOPICS_SPEED_LIMIT (nav2_msgs/SpeedLimit) is" \
          "WIRED and DEMONSTRATED."
@@ -3122,6 +3336,22 @@ write_traction() {
         monitor_source="$monitor_source measured, with nothing inserted"
         monitor_source="$monitor_source in it"
     fi
+    if [ "$DOCK" = true ]; then
+        dock="on@$(md5sum "$APRILTAG_PARAMS" | cut -c1-8)"
+        dock_source="$0 --dock, $CFG_APRILTAG_PARAMS_FILE,"
+        dock_source="$dock_source $CFG_APRILTAG_NODE_NAME on"
+        dock_source="$dock_source $CFG_TOPICS_CAM_IMAGE, marker via"
+        dock_source="$dock_source furniture.py place (constraint 21)"
+        docking="on@$(md5sum "$DOCKING_PARAMS" | cut -c1-8)"
+        docking_source="$0 --dock, $CFG_DOCKING_PARAMS_FILE,"
+        docking_source="$docking_source $CFG_DOCKING_NODE_NAME on"
+        docking_source="$docking_source $CFG_TOPICS_CMD_VEL (constraint 22)"
+    else
+        dock="off"
+        dock_source="no --dock: no marker in the world and no detector"
+        docking="off"
+        docking_source="no --dock: no opennav_docking server"
+    fi
     if [ "$SLIPPERY" = true ]; then
         lat="$CFG_SLIPPERY_SLIP_COMPLIANCE_LATERAL"
         lon="$CFG_SLIPPERY_SLIP_COMPLIANCE_LONGITUDINAL"
@@ -3164,6 +3394,10 @@ write_traction() {
       # from nav= and why it carries collision_monitor.yaml's md5.
       echo "monitor=$monitor"
       echo "monitor_source=$monitor_source"
+      echo "dock=$dock"
+      echo "dock_source=$dock_source"
+      echo "docking=$docking"
+      echo "docking_source=$docking_source"
       # WHERE THIS BRINGUP'S LOGS ARE, so that `status` and `stop` -
       # which run in later processes and cannot know the stamp - name
       # the same files every refusal above named. It is RUNTIME STATE,
@@ -3241,7 +3475,7 @@ status() {
         #   is exactly the habit tools/sensor_evidence.py's UNLABELLED
         #   refuses on the same question.
         local arm arm_source loc loc_source nav nav_source
-        local monitor monitor_source
+        local monitor monitor_source dock dock_source docking docking_source
         arm="$(sed -n 's/^arm=//p' "$TRACTIONFILE")"
         arm_source="$(sed -n 's/^arm_source=//p' "$TRACTIONFILE")"
         printf '  %-10s %-7s %s\n' "arm" "${arm:-UNKNOWN}" \
@@ -3276,6 +3510,14 @@ status() {
         monitor_source="$(sed -n 's/^monitor_source=//p' "$TRACTIONFILE")"
         printf '  %-10s %-7s %s\n' "monitor" "${monitor:-UNKNOWN}" \
             "${monitor_source:-no monitor= line - this state file predates F4 Task 3}"
+        dock="$(sed -n 's/^dock=//p' "$TRACTIONFILE")"
+        dock_source="$(sed -n 's/^dock_source=//p' "$TRACTIONFILE")"
+        printf '  %-10s %-7s %s\n' "dock" "${dock:-UNKNOWN}" \
+            "${dock_source:-no dock= line - this state file predates F5 Task 1}"
+        docking="$(sed -n 's/^docking=//p' "$TRACTIONFILE")"
+        docking_source="$(sed -n 's/^docking_source=//p' "$TRACTIONFILE")"
+        printf '  %-10s %-7s %s\n' "docking" "${docking:-UNKNOWN}" \
+            "${docking_source:-no docking= line - this state file predates F5 Task 2}"
     else
         printf '  %-10s %-7s %s\n' "traction" "UNKNOWN" \
             "no $TRACTIONFILE - this stack was not started by '$0 start'"
@@ -3286,6 +3528,10 @@ status() {
         printf '  %-10s %-7s %s\n' "nav" "UNKNOWN" \
             "same file, same reason"
         printf '  %-10s %-7s %s\n' "monitor" "UNKNOWN" \
+            "same file, same reason"
+        printf '  %-10s %-7s %s\n' "dock" "UNKNOWN" \
+            "same file, same reason"
+        printf '  %-10s %-7s %s\n' "docking" "UNKNOWN" \
             "same file, same reason"
     fi
     local pid name alive=0 dead=0
@@ -3402,7 +3648,7 @@ stop() {
     fi
 }
 
-USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [amcl|slam]] [--nav] [--monitor] | stop | status
+USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [amcl|slam]] [--nav] [--monitor] [--dock] | stop | status
   start       GPU preflight, then warehouse_ver3 + one forklift_ver3 in a
               Gazebo window, plus TWO ros_gz bridges: the parameter bridge
               for the clock, the ground-truth odometry (a measurement
@@ -3544,6 +3790,17 @@ USAGE="usage: $0 start [--headless] [--slippery] [--rf2o|--fuse] [--localize [am
               monitor=on@<md5> by name; a session recorded through the
               longer path must not be tabled beside one recorded
               through the shorter.
+  --dock      THE DETECTOR, THE STATION MARKER AND THE DOCKING SERVER,
+              F5 TASK 1+2. Spawns tag36h11_0 via furniture.py place
+              (constraint 21), vendored apriltag_node on the colour
+              stream, detected_dock.py (TF → PoseStamped) and
+              opennav_docking with SimpleNonChargingDock. ITS cmd_vel
+              IS REMAPPED onto topics.cmd_vel (constraint 22).
+              IT REQUIRES --nav AND IS REFUSED WITHOUT IT BY NAME.
+              'status' says dock=on@<apriltag.yaml md5> and
+              docking=on@<docking.yaml md5>.
+              Score detection: python3 tools/tag_bench.py record
+              Score the dock:  python3 tools/dock_bench.py record
   status      every child by name, ALIVE or DEAD, with its log, which
               traction the running plant is on, which estimator arm,
               which absolute layer, whether anything is planning, and
@@ -3608,6 +3865,7 @@ case "${1:-}" in
                 # stack: the node it starts needs a scan and a twist and
                 # neither is behind a flag.
                 --monitor) MONITOR=true ;;
+                --dock) DOCK=true ;;
                 *) echo "$USAGE"; exit 2 ;;
             esac
             shift

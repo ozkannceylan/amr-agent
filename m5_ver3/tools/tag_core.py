@@ -32,8 +32,9 @@ live where a test on the Windows python can reach them
   BY CONSTRUCTION rather than by having got away with it once.
 
 WHAT IS NOT IN HERE. No ROS, no gz, no file paths, no config reader.
-`tools/tag_model.py` writes models with it and `tools/tag_bench.py`
-scores detections with it; this file knows about neither.
+`tools/tag_model.py` writes models with it, `tools/furniture.py`
+spawns them, and `tools/tag_bench.py` scores detections with
+`detection_error()`; this file knows about none of those callers.
 """
 import math
 import sys
@@ -266,6 +267,51 @@ def staging_margin(polygon, staging_to_marker_m):
     }
 
 
+def yaw_quaternion(yaw_rad):
+    """gz.msgs.Quaternion (x, y, z, w) for a yaw about world +z.
+
+    THE SAME CONSTRUCTION spawn_truck() uses in awk. A pose that carries
+    a heading has to spawn with it; roll and pitch stay zero.
+    """
+    half = float(yaw_rad) / 2.0
+    return (0.0, 0.0, math.sin(half), math.cos(half))
+
+
+def rpy_rotate(vec, roll, pitch, yaw):
+    """Rotate a vector by ROS RPY: R = Rz(yaw) Ry(pitch) Rx(roll).
+
+    THE SAME CONVENTION tf2::Quaternion::setRPY and Gazebo <pose> rpy
+    use. Used to pin the body -> optical camera rotation: optical +Z
+    (look) is body +X (look) at rpy(-pi/2, 0, -pi/2) (REP-103).
+    """
+    x, y, z = float(vec[0]), float(vec[1]), float(vec[2])
+    cr, sr = math.cos(float(roll)), math.sin(float(roll))
+    y, z = y * cr - z * sr, y * sr + z * cr
+    cp, sp = math.cos(float(pitch)), math.sin(float(pitch))
+    x, z = x * cp + z * sp, -x * sp + z * cp
+    cy, sy = math.cos(float(yaw)), math.sin(float(yaw))
+    x, y = x * cy - y * sy, x * sy + y * cy
+    return (x, y, z)
+
+
+def detection_error(expected_xyz, detected_xyz):
+    """How far a detection sits from the marker it claims to be.
+
+    Position only. The tag's orientation convention (AprilTag +Z out of
+    the face, this model's +X out of the face) is a separate question
+    and is scored where the bench has both frames, not here.
+    """
+    dx = float(detected_xyz[0]) - float(expected_xyz[0])
+    dy = float(detected_xyz[1]) - float(expected_xyz[1])
+    dz = float(detected_xyz[2]) - float(expected_xyz[2])
+    return {
+        "dx_m": dx,
+        "dy_m": dy,
+        "dz_m": dz,
+        "dist_m": math.sqrt(dx * dx + dy * dy + dz * dz),
+    }
+
+
 def inflation_cost(distance_m, inscribed_m, inflation_radius_m,
                    cost_scaling_factor):
     """nav2's own inflation curve, as a cell value.
@@ -354,6 +400,11 @@ def _selftest():
     check("margin", round(margin["margin_m"], 4), 0.9457)
     check("minimum standoff", round(margin["minimum_standoff_m"], 4),
           3.0293)
+
+    look = rpy_rotate((0.0, 0.0, 1.0), -math.pi / 2.0, 0.0, -math.pi / 2.0)
+    check("optical Z is body X", look[0], 1.0, 1e-9)
+    check("optical Z has no body Y", look[1], 0.0, 1e-9)
+    check("optical Z has no body Z", look[2], 0.0, 1e-9)
     docked = staging_margin(poly, geo["docked_to_marker_m"])
     check("the DOCKED pose is inside the trap zone",
           docked["margin_m"] < 0.0, True)
@@ -365,6 +416,13 @@ def _selftest():
           inflation_cost(2.70, 0.6143, 2.60, 1.10), 0)
     check("the staging clearance costs something and not everything",
           inflation_cost(1.560, 0.6143, 2.60, 1.10), 89)
+
+    qx, qy, qz, qw = yaw_quaternion(math.pi)
+    check("yaw pi quaternion x", qx, 0.0, 1e-12)
+    check("yaw pi quaternion z", qz, 1.0, 1e-12)
+    check("yaw pi quaternion w", qw, 0.0, 1e-12)
+    err = detection_error((0.0, 0.0, 0.0), (3.0, 4.0, 12.0))
+    check("detection error is euclidean", err["dist_m"], 13.0, 1e-12)
 
     print("")
     if failures:

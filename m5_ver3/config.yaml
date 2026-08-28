@@ -264,6 +264,29 @@ vehicle:
   #   vehicle.model and fails if this file disagrees with any of them. A
   #   copy that cannot say when it has gone stale is a copy that will.
   steer_rate_limit_radps: "2.0"
+  # PALLET CAMERA MOUNT, F5. model.sdf pallet_cam_link <pose>, copied
+  # for the shell the way imu_mount is. Mast is identity on base_link
+  # (mast_anchor, no mast <pose>), so this IS base_link -> pallet_cam_link.
+  # tests/test_dock_ground.py diffs it against the SDF.
+  cam_mount:
+    x: "-0.90"
+    y: "0.40"
+    z: "1.10"
+    roll: "0"
+    pitch: "0.5235988"
+    yaw: "3.1415927"
+  # BODY -> OPTICAL, F5. Gazebo's camera looks along the link +X.
+  # apriltag_ros PnP is in the ROS optical frame (Z forward, X right,
+  # Y down, REP-103). Without this rotation the tag TF's Z is range
+  # composed as world-up (measured 3.35 m error on a 0.80 m marker).
+  # tests/test_dock_ground.py pins the rpy against tag_core.rpy_rotate.
+  cam_optical:
+    x: "0"
+    y: "0"
+    z: "0"
+    roll: "-1.57079632679"
+    pitch: "0"
+    yaw: "-1.57079632679"
 
 # -------------------------------- TOPICS -------------------------------
 # WHAT THE BRIDGE CARRIES, AND NOTHING ELSE YET. A bridged channel with no
@@ -292,17 +315,30 @@ topics:
   # it is one of the two inputs the F2 EKF fuses, and a channel that will
   # be fused has to be watched from the run before it is.
   imu: "/forklift/gz/imu"
-  # THE PALLET CAMERA'S TWO BRIDGED CHANNELS, AND THE POINT CLOUD IS NOT
-  # ONE OF THEM. gz's rgbd_camera also advertises <topic>/points, and
+  # THE PALLET CAMERA'S THREE BRIDGED CHANNELS, AND THE POINT CLOUD IS
+  # NOT ONE OF THEM. gz's rgbd_camera also advertises <topic>/points, and
   # bridging a point cloud is what took ros_gz issue #368's rig from 90%
-  # RTF to 31% (docs/reports/m5v3-03 5). The depth image plus its
-  # camera_info carries the same information at a fraction of the wire
-  # cost and ROS reconstructs the cloud where a consumer needs it.
-  #   THE DEPTH IMAGE GOES OVER ros_gz_image's image_bridge, not the
+  # RTF to 31% (docs/reports/m5v3-03 5). Depth + camera_info carry the
+  # same range data at a fraction of the wire cost; the COLOUR image is
+  # F5's AprilTag detector's input (the camera was mounted for this in
+  # F1) and goes over the same image_bridge process as a second argument.
+  #   DEPTH AND COLOUR GO OVER ros_gz_image's image_bridge, not the
   #   parameter bridge, and camera_info over the parameter bridge - they
   #   are two different processes for that reason.
   cam_depth: "/forklift/gz/cam/depth_image"
   cam_info: "/forklift/gz/cam/camera_info"
+  cam_image: "/forklift/gz/cam/image"
+  # F5 Task 1's detector output. apriltag_ros advertises `detections`
+  # relative to the node; m5v3.sh remaps it onto this address so the
+  # bench and the docking controller cannot disagree about where a
+  # pose lives. Never a topic literal in either caller.
+  apriltag_detections: "/m5v3/apriltag/detections"
+  # F5 Task 2. detected_dock.py turns the AprilTag TF into the
+  # PoseStamped SimpleNonChargingDock subscribes. Jazzy apriltag_msgs
+  # 2.0.2 has no pose field. Never a topic literal in the plugin remap.
+  detected_dock_pose: "/m5v3/detected_dock_pose"
+  dock_robot: "/dock_robot"
+  undock_robot: "/undock_robot"
   # NOT BRIDGED, AND NOT AN OVERSIGHT. The 3D lidar's ROS consumer arrives
   # in F2; until it does, bridging 32768 points at 10 Hz would buy nothing
   # and cost the RTF every figure on this track is measured against. Named
@@ -636,6 +672,16 @@ frames:
   # may quietly become its owner (ver2 invariant 10, and prior art
   # agv/forklift/ekf.yaml says the same about the same parameter).
   map: "map"
+  # THE PALLET CAMERA, F5. model.sdf pallet_cam_link. Mast is fixed to
+  # base_link (mast_anchor), so this frame is a constant offset of
+  # base_link. m5v3.sh --dock publishes the static transform; without it
+  # map -> tag36h11_0 cannot resolve (apriltag_msgs 2.0.2 has no pose).
+  pallet_cam: "pallet_cam_link"
+  # THE IMAGE FRAME. gz_frame_id on the camera, and the parent of the
+  # AprilTag TF. Body +X (look) is optical +Z (look) through
+  # vehicle.cam_optical. Not the same name as pallet_cam: that is the
+  # housing in the model, this is the axes PnP uses.
+  pallet_cam_optical: "pallet_cam_optical"
 
 # ------------------------------- SENSORS -------------------------------
 # THE SDF GOVERNS EVERY SENSOR. Geometry, mount pose, sample count, field
@@ -4241,6 +4287,22 @@ nav:
       repeat: "0"
       case_only: true
       note: "S5 / PICK-NE-1 - the station class, entered off the ring"
+    # THE STAGING POSE, AND IT IS DERIVED RATHER THAN INVENTED. tag_core
+    # walks back from the marker by docked_to_marker + staging_run_in;
+    # tests/test_dock_ground.py recomputes that from stations.py + dock:
+    # and refuses a typed invention. It is NOT a road-graph node (the
+    # graph stops at the station point) and it is case_only because the
+    # case `stage_s5` owns the repeat. `derived: true` is what keeps
+    # test_nav2_params.py from treating it as the fail-fast rack.
+    station_s5_staging:
+      x: "7.00"
+      y: "6.575"
+      travel_yaw_rad: "-1.5707963"
+      repeat: "0"
+      case_only: true
+      derived: true
+      route_node: false
+      note: "S5 staging - two-stage approach, outside START_OCCUPIED by construction"
     # AND THE WAY BACK OUT OF IT, WHICH IS THE ONE THAT CANNOT BE DRIVEN
     # FORKS-FIRST. (7.00, +10.00) is the ring junction directly above S5
     # and the only node the spur connects to. A truck standing in the
@@ -4360,6 +4422,13 @@ nav:
       goal: "station_s5"
       repeat: "1"
       note: "forks-first into S5 - approach semantics, not docking"
+    # THE STAGING HALF OF THE TWO-STAGE APPROACH. Nav2 drives here; the
+    # dock controller takes over from here. Repeated three times because
+    # that is the same bar the headline goal was held to.
+    stage_s5:
+      goal: "station_s5_staging"
+      repeat: "3"
+      note: "Nav2 to S5 staging - two-stage approach, first half"
     # THE REVERSE LEG, AND THE ONLY WAY TO GET ONE ON THIS FLOOR IS TO
     # PARK THE TRUCK FIRST. A Reeds-Shepp cusp needs a start pose from
     # which the goal cannot be reached in one direction, and from the
@@ -4633,3 +4702,134 @@ dock:
   # it once a pallet or a back-board that DOES reach 1.80 is spawned
   # beside it. This thickness is the printed tile, not the pallet.
   tag_thickness_m: "0.02"
+  # WHERE tag_model.py write PUTS THE SDF, relative to the repository
+  # root. furniture.py place reads the same key so a writer and a
+  # spawner cannot disagree about which file is the marker.
+  model_dir: "m5_ver3/gazebo/tags"
+  # ---- F5 TASK 2, THE DOCKING SERVER ----
+  # Plant floor from nav2.yaml's GridBased.minimum_turning_radius, which
+  # is the measured 1.25 m (EVIDENCE_NAV_V3.md §2.1 / §20.5 item 4).
+  # opennav_docking has no min-radius clamp; v_angular_max = v_linear_min
+  # / R is the bound. tests/test_dock_core.py recomputes it.
+  min_radius_m: "1.25"
+  v_linear_min: "0.10"
+  v_linear_max: "0.25"
+  v_angular_max: "0.08"
+  # Forks are model -x, so forks-first is reverse. The F5 plan wrote
+  # false; that would drive the counterweight at the tag.
+  dock_backwards: "true"
+  # getStagingPose: (x,y) += (cos(yaw),sin(yaw))*offset. pose_yaw points
+  # +x at the aisle, so T1's 2.00 m run-in is POSITIVE, not the package
+  # default -0.7.
+  staging_x_offset: "2.00"
+  staging_yaw_offset: "0.0"
+  # isDocked is XY only. Package default 0.05 m is a charger contact.
+  # This dock is a pallet station: the same 0.25 m as station_class_m.
+  # 0.05 m sits inside the slowdown bubble where this tricycle commands
+  # v≈0, ω=ω_max and loses the tag (dock-s5-20260828-182748: 0.184 m
+  # at heading 0.001 rad, then a spin).
+  docking_threshold: "0.25"
+  # F4 §16.6's station class, revisited with two-stage data.
+  station_class_m: "0.25"
+  # SimpleNonChargingDock applies this along the yaw it built from the
+  # AprilTag pose (Z-out → roll -1.57 / pitch 1.57). That +X points
+  # INTO the tag; the docked base_link is on the camera side, so the
+  # sign is NEGATIVE (package default -0.20). Magnitude is fork_reach
+  # + tip_standoff. A positive value drives through the tag at v_max
+  # (dock-s5-20260828-181917). tests/test_dock_core.py refuses a drift.
+  external_detection_translation_x: "-1.975"
+  external_detection_translation_y: "0.0"
+  # Package defaults: AprilTag Z-out → yaw-only dock pose
+  # (docs/reports/m5v3-02 §3 / Nav2 docking README).
+  external_detection_rotation_roll: "-1.57"
+  external_detection_rotation_pitch: "1.57"
+  external_detection_rotation_yaw: "0.0"
+  use_external_detection_pose: "true"
+  external_detection_timeout: "1.0"
+  filter_coef: "0.1"
+  controller_frequency: "20.0"
+  initial_perception_timeout: "8.0"
+  # 60 s timed out resetting a missed approach (dock-s5-20260828-184208)
+  # at v_min 0.10 / ω_max 0.08. 120 s is two staging run-ins at v_min.
+  dock_approach_timeout: "120.0"
+  wait_charge_timeout: "5.0"
+  max_retries: "3"
+  dock_prestaging_tolerance: "0.5"
+  # Same 0.50 m as prestaging: undock is "back at staging", not a 5 cm
+  # charger breakaway. 0.05 m + 0.05 rad is the slowdown spin that
+  # cancelled undock after 180 s (2026-08-28).
+  undock_linear_tolerance: "0.50"
+  undock_angular_tolerance: "0.30"
+  # Spawn → S5 staging is ~60 s; a retry uses the approach timeout.
+  # 180 s cancelled a live DockRobot that was still resetting.
+  record_timeout_s: "300"
+  # MUST be strictly inside docking_threshold. SmoothControlLaw drops
+  # v toward 0 inside this radius and leaves ω at v_angular_max — an
+  # infeasible tricycle spin. Equal radii (both 0.25) made isDocked a
+  # race against that spin (182748: 0.184 m at heading 0.001 then 905;
+  # 184333: plugin success at truth 0.275 m / heading 0.633 rad).
+  slowdown_radius: "0.10"
+  # Docking's 5 s SmoothControlLaw projection into the inflated bay
+  # is not Nav2's planned spur. 192604: initial detection succeeded,
+  # then "Collision detected" at odom (−24.72, 3.90) — staging — and
+  # the reset timed out. T1 drove this spur ×4. F4: the collision
+  # monitor is a backstop, not a guard. This checker is the same
+  # class of false lethal on a 4.00 m bay.
+  use_collision_detection: "false"
+  dock_collision_threshold: "0.3"
+
+# ------------------------------ APRILTAG -------------------------------
+# F5 Task 1's detector, vendored the way fuse is: no sudo, pinned debs,
+# tree under $HOME. tag_model.py write loads libapriltag from
+# apriltag.lib through ctypes; m5v3.sh start --dock spawns apriltag_node
+# with AMENT_PREFIX_PATH/LD_LIBRARY_PATH pointing at the same prefix.
+apriltag:
+  packages: >-
+    ros-jazzy-apriltag=3.4.5-1noble.20260225.045432
+    ros-jazzy-apriltag-msgs=2.0.2-1noble.20260615.104635
+    ros-jazzy-apriltag-ros=3.4.0-1noble.20260615.174514
+    ros-jazzy-image-proc=5.0.12-1noble.20260615.153613
+  prefix: "~/m5v3_apriltag_prefix"
+  deb_prefix: "opt/ros/jazzy"
+  package: "apriltag_ros"
+  executable: "apriltag_node"
+  node_name: "m5v3_apriltag"
+  lib: "lib/x86_64-linux-gnu/libapriltag.so"
+  params_file: "m5_ver3/apriltag.yaml"
+  # What the NODE wants: family name WITHOUT the `tag` prefix.
+  # dock.family is tag36h11; tests/test_dock_ground.py refuses a drift.
+  family: "36h11"
+  # Frame the node broadcasts for tag id 0. apriltag.yaml tag.frames
+  # must match; tests/test_dock_ground.py refuses a drift. Jazzy
+  # apriltag_msgs 2.0.2 carries NO pose field - the pose is this TF.
+  tag_frame: "tag36h11_0"
+  # HOW LONG tag_bench.py record HOLDS AFTER THE FIRST DETECTION.
+  # Staging range is the measurement; 15 s at 15 Hz is ~200 frames and
+  # a mean that is not one lucky decode.
+  record_s: "15"
+
+# ------------------------------ DOCKING --------------------------------
+# F5 Task 2's server. System package ros-jazzy-opennav-docking 1.3.12,
+# not vendored. Addresses here; what is CONTROLLED is docking.yaml;
+# the dock instance pose is docks.yaml, recomputed by
+# tests/test_docking_params.py from tag_core + the committed registration.
+# Constraint 22: its cmd_vel is remapped onto topics.cmd_vel, the same
+# address Nav2's controller already uses. One goal at a time.
+docking:
+  package: "opennav_docking"
+  executable: "opennav_docking"
+  node_name: "docking_server"
+  params_file: "m5_ver3/docking.yaml"
+  database_file: "m5_ver3/docks.yaml"
+  plugin_name: "simple_non_charging"
+  plugin_type: "opennav_docking::SimpleNonChargingDock"
+  dock_id: "s5"
+  lifecycle:
+    package: "nav2_lifecycle_manager"
+    executable: "lifecycle_manager"
+    node_name: "dock_lifecycle_manager"
+  # detected_dock.py: TF map → apriltag.tag_frame → PoseStamped.
+  detected_node_name: "m5v3_detected_dock"
+  detected_rate_hz: "15"
+  lifecycle_timeout_s: "60"
+

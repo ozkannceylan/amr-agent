@@ -1,0 +1,32 @@
+# apriltag.yaml - apriltag_ros 3.4.0 parameters for the S5 marker.
+#
+# TOP-LEVEL KEY IS THE NODE NAME. m5v3.sh starts this node as
+# apriltag.node_name (m5v3_apriltag) and remaps image_rect / camera_info
+# onto topics.cam_image / topics.cam_info. Nothing in this file is a
+# topic or a frame - those stay in config.yaml.
+#
+# family is 36h11, NOT tag36h11. The node's enum drops the prefix;
+# dock.family keeps it because it is the model name. tests/test_dock_ground.py
+# refuses a drift.
+# detector.refine and detector.debug are BOOL. apriltag_ros 3.4.0's
+# declare is bool; an integer 1 aborted the node on this rig
+# (run-20260828-151106): InvalidParameterTypeException.
+m5v3_apriltag:
+  ros__parameters:
+    image_transport: raw
+    family: 36h11
+    size: 0.40
+    profile: false
+    max_hamming: 0
+    detector:
+      threads: 1
+      decimate: 2.0
+      blur: 0.0
+      refine: true
+      sharpening: 0.25
+      debug: false
+    pose_estimation_method: pnp
+    tag:
+      ids: [0]
+      frames: ["tag36h11_0"]
+      sizes: [0.40]

@@ -2146,7 +2146,7 @@ def analyse(cfg, names):
         # rule, one label over.
         key = "  ".join(fields.get(k, "UNLABELLED")
                         for k in ("traction", "arm", "loc", "nav",
-                                  "monitor"))
+                                  "monitor", "dock"))
         seen.setdefault(key, []).append(name)
     if len(seen) > 1:
         lines = []
@@ -2158,7 +2158,7 @@ def analyse(cfg, names):
                    "chain)".format(os.path.join(_common.REPO,
                                                 cfg.s("evidence.dir")),
                                    _common.CONFIG),
-                   "{} different traction/arm/loc/nav/monitor combinations "
+                   "{} different traction/arm/loc/nav/monitor/dock combinations "
                    "are in this set:".format(len(seen)), *lines)
     # AND THE REPEAT COUNT, PRINTED BESIDE WHAT WAS ACTUALLY FOUND.
     # config.yaml's nav.goals[].repeat says what the EVIDENCE has to

@@ -531,7 +531,11 @@ def test_the_parse_finds_the_children_this_stack_actually_starts():
                   # and is the worst of the lot to orphan: a stale
                   # collision_monitor publishes a twist ON THE TOPIC THE
                   # CONVERTER READS on that arm, off a stale scan.
-                  "monitor"):
+                  "monitor",
+                  # F5 Task 1's detector, --dock, vendored like fuse.
+                  "apriltag", "camtf", "camopt",
+                  # F5 Task 2's server, --dock, after the nav arm.
+                  "detdock", "docking", "docklife"):
         assert child in names, "the parse lost the `{}` child".format(child)
 
 
@@ -767,6 +771,44 @@ def test_every_nav_child_is_spawned_inside_the_nav_guard():
     assert seen == set(parts), (
         "this test did not find every nav child in m5v3.sh: missing "
         "{}".format(sorted(set(parts) - seen)))
+
+
+def test_the_apriltag_child_is_spawned_inside_the_dock_guard():
+    script = read("m5v3.sh")
+    seen = False
+    for number, line, scope in conditions_at(script):
+        stripped = line.strip()
+        if not stripped.startswith("spawn ") or stripped.startswith("spawn()"):
+            continue
+        if "apriltag" not in stripped.split()[1] and \
+                "APRILTAG_BIN" not in stripped:
+            continue
+        seen = True
+        assert any("DOCK" in one for one in scope), (
+            "m5v3.sh:{} spawns apriltag with nothing in scope naming "
+            "the dock arm - the conditions here are {}. This child "
+            "exists ONLY under --dock.".format(
+                number, scope or "(none)"))
+    assert seen, "this test did not find spawn apriltag in m5v3.sh"
+
+
+def test_the_docking_server_is_spawned_inside_the_dock_guard():
+    script = read("m5v3.sh")
+    seen = False
+    for number, line, scope in conditions_at(script):
+        stripped = line.strip()
+        if not stripped.startswith("spawn ") or stripped.startswith("spawn()"):
+            continue
+        name = stripped.split()[1]
+        if name not in ("docking", "detdock", "docklife"):
+            continue
+        seen = True
+        assert any("DOCK" in one for one in scope), (
+            "m5v3.sh:{} spawns {} with nothing in scope naming "
+            "the dock arm - the conditions here are {}. These children "
+            "exist ONLY under --dock.".format(
+                number, name, scope or "(none)"))
+    assert seen, "this test did not find spawn docking in m5v3.sh"
 
 
 # ======================================================================

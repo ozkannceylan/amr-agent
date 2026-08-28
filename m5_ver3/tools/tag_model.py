@@ -47,6 +47,7 @@ REQUIRED_KEYS = (
     "dock.station", "dock.marker_ahead_m", "dock.fork_reach_m",
     "dock.tip_standoff_m", "dock.staging_run_in_m",
     "dock.marker_z_m", "dock.tag_thickness_m",
+    "apriltag.prefix", "apriltag.deb_prefix", "apriltag.lib",
 )
 
 WHITE = (1.0, 1.0, 1.0, 1.0)
@@ -100,19 +101,52 @@ def _apriltag_family_t():
     return FamilyT
 
 
-def load_family(name):
+def library_candidates(extra=()):
+    """Every place libapriltag might live, find_library first.
+
+    ctypes.util.find_library asks ldconfig and does not see a tree
+    unpacked under $HOME. The vendored .so from install_apriltag.sh
+    is passed in `extra` so write() and the detector load the same
+    object.
+    """
+    found = ctypes.util.find_library("apriltag")
+    out = []
+    if found:
+        out.append(found)
+    for path in extra:
+        if path and path not in out:
+            out.append(path)
+    return out
+
+
+def vendored_lib(cfg):
+    prefix = os.path.expanduser(cfg.s("apriltag.prefix"))
+    return os.path.normpath(os.path.join(
+        prefix, cfg.s("apriltag.deb_prefix").replace("/", os.sep),
+        cfg.s("apriltag.lib").replace("/", os.sep)))
+
+
+def load_family(name, extra=()):
     """tag36h11 (or another shipped family) from libapriltag.
 
     REFUSES rather than guessing if the library is missing or the
     family constructor is absent. A handwritten code table in this
     repository would be a third copy of the marker.
     """
-    soname = ctypes.util.find_library("apriltag")
-    if soname is None:
+    last = "ctypes.util.find_library returned None"
+    lib = None
+    for soname in library_candidates(extra):
+        try:
+            lib = ctypes.CDLL(soname)
+            last = soname
+            break
+        except OSError as exc:
+            last = "{}: {}".format(soname, exc)
+            lib = None
+    if lib is None:
         raise LookupError(
-            "libapriltag is not on this machine (ctypes.util.find_library "
-            "returned None). Install it, or run tools/install_apriltag.sh.")
-    lib = ctypes.CDLL(soname)
+            "libapriltag is not on this machine ({}). "
+            "Install it, or run tools/install_apriltag.sh.".format(last))
     create_name = "{}_create".format(name)
     destroy_name = "{}_destroy".format(name)
     if not hasattr(lib, create_name):
@@ -239,7 +273,7 @@ def write(cfg, out_dir):
     family_name = cfg.s("dock.family")
     tag_id = int(cfg.s("dock.tag_id"))
     try:
-        family = load_family(family_name)
+        family = load_family(family_name, extra=(vendored_lib(cfg),))
     except LookupError as exc:
         cfg.refuse("libapriltag provides family {}".format(family_name),
                    "tools/tag_model.py load_family()",

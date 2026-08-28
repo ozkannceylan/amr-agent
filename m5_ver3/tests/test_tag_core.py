@@ -189,6 +189,38 @@ def test_inflation_cost_is_a_collision_inside_the_inscribed_band():
     assert tc.inflation_cost(2.70, 0.6143, 2.60, 1.10) == 0
 
 
+def test_a_detection_at_the_marker_is_zero_error():
+    err = tc.detection_error((7.0, 2.60, 0.80), (7.0, 2.60, 0.80))
+    assert err["dx_m"] == pytest.approx(0.0)
+    assert err["dy_m"] == pytest.approx(0.0)
+    assert err["dz_m"] == pytest.approx(0.0)
+    assert err["dist_m"] == pytest.approx(0.0)
+
+
+def test_detection_error_is_euclidean():
+    err = tc.detection_error((0.0, 0.0, 0.0), (3.0, 4.0, 12.0))
+    assert err["dist_m"] == pytest.approx(13.0)
+
+
+def test_yaw_quaternion_is_a_rotation_about_world_up():
+    x, y, z, w = tc.yaw_quaternion(math.pi)
+    assert x == pytest.approx(0.0)
+    assert y == pytest.approx(0.0)
+    assert z == pytest.approx(1.0)
+    assert w == pytest.approx(0.0, abs=1e-12)
+
+
+def test_rpy_rotate_optical_z_is_body_x():
+    # REP-103 camera_link (X forward) -> optical (Z forward):
+    # rpy(-pi/2, 0, -pi/2). A look-axis in the optical frame is +Z
+    # and must be +X in the body.
+    half_pi = math.pi / 2.0
+    got = tc.rpy_rotate((0.0, 0.0, 1.0), -half_pi, 0.0, -half_pi)
+    assert got[0] == pytest.approx(1.0)
+    assert got[1] == pytest.approx(0.0, abs=1e-9)
+    assert got[2] == pytest.approx(0.0, abs=1e-9)
+
+
 def test_selftest_exits_zero():
     path = os.path.join(_M5V3, "tools", "tag_core.py")
     result = subprocess.run(

@@ -1,0 +1,258 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="tag36h11_0">
+    <static>true</static>
+    <link name="tag">
+      <collision name="board">
+        <pose>0.000000000 0.000000000 0.000000000 0 0 0</pose>
+        <geometry><box><size>0.020000000 0.500000000 0.500000000</size></box></geometry>
+        <material><ambient>1.000 1.000 1.000 1.000</ambient><diffuse>1.000 1.000 1.000 1.000</diffuse></material>
+      </collision>
+      <visual name="backing">
+        <pose>0.000000000 0.000000000 0.000000000 0 0 0</pose>
+        <geometry><box><size>0.020000000 0.500000000 0.500000000</size></box></geometry>
+        <material><ambient>1.000 1.000 1.000 1.000</ambient><diffuse>1.000 1.000 1.000 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_0">
+        <pose>0.011000000 -0.175000000 0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_1">
+        <pose>0.011000000 -0.125000000 0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_2">
+        <pose>0.011000000 -0.075000000 0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_3">
+        <pose>0.011000000 -0.025000000 0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_4">
+        <pose>0.011000000 0.025000000 0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_5">
+        <pose>0.011000000 0.075000000 0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_6">
+        <pose>0.011000000 0.125000000 0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_7">
+        <pose>0.011000000 0.175000000 0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_8">
+        <pose>0.011000000 -0.175000000 0.125000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_9">
+        <pose>0.011000000 -0.025000000 0.125000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_10">
+        <pose>0.011000000 0.075000000 0.125000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_11">
+        <pose>0.011000000 0.175000000 0.125000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_12">
+        <pose>0.011000000 -0.175000000 0.075000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_13">
+        <pose>0.011000000 -0.125000000 0.075000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_14">
+        <pose>0.011000000 0.075000000 0.075000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_15">
+        <pose>0.011000000 0.175000000 0.075000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_16">
+        <pose>0.011000000 -0.175000000 0.025000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_17">
+        <pose>0.011000000 -0.125000000 0.025000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_18">
+        <pose>0.011000000 0.025000000 0.025000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_19">
+        <pose>0.011000000 0.075000000 0.025000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_20">
+        <pose>0.011000000 0.125000000 0.025000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_21">
+        <pose>0.011000000 0.175000000 0.025000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_22">
+        <pose>0.011000000 -0.175000000 -0.025000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_23">
+        <pose>0.011000000 -0.075000000 -0.025000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_24">
+        <pose>0.011000000 0.025000000 -0.025000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_25">
+        <pose>0.011000000 0.075000000 -0.025000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_26">
+        <pose>0.011000000 0.125000000 -0.025000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_27">
+        <pose>0.011000000 0.175000000 -0.025000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_28">
+        <pose>0.011000000 -0.175000000 -0.075000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_29">
+        <pose>0.011000000 -0.125000000 -0.075000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_30">
+        <pose>0.011000000 -0.025000000 -0.075000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_31">
+        <pose>0.011000000 0.125000000 -0.075000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_32">
+        <pose>0.011000000 0.175000000 -0.075000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_33">
+        <pose>0.011000000 -0.175000000 -0.125000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_34">
+        <pose>0.011000000 -0.125000000 -0.125000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_35">
+        <pose>0.011000000 -0.075000000 -0.125000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_36">
+        <pose>0.011000000 -0.025000000 -0.125000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_37">
+        <pose>0.011000000 0.075000000 -0.125000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_38">
+        <pose>0.011000000 0.125000000 -0.125000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_39">
+        <pose>0.011000000 0.175000000 -0.125000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_40">
+        <pose>0.011000000 -0.175000000 -0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_41">
+        <pose>0.011000000 -0.125000000 -0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_42">
+        <pose>0.011000000 -0.075000000 -0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_43">
+        <pose>0.011000000 -0.025000000 -0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_44">
+        <pose>0.011000000 0.025000000 -0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_45">
+        <pose>0.011000000 0.075000000 -0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_46">
+        <pose>0.011000000 0.125000000 -0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+      <visual name="ink_47">
+        <pose>0.011000000 0.175000000 -0.175000000 0 0 0</pose>
+        <geometry><box><size>0.002000000 0.050000000 0.050000000</size></box></geometry>
+        <material><ambient>0.050 0.050 0.050 1.000</ambient><diffuse>0.050 0.050 0.050 1.000</diffuse></material>
+      </visual>
+    </link>
+  </model>
+</sdf>

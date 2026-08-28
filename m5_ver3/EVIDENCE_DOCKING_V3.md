@@ -7,10 +7,11 @@ constraint; jump allowance 1.20 m amcl / 0.89 m slam with no established
 maximum; the collision monitor as backstop-not-guard; and the global
 costmap obstacle-layer gap, taint proven nil.
 
-This file is what pays those debts. **§1 is Task 1's first half: the
-layer, the costmap, the headline re-drive.** Station furniture, tag
-detection and staging arrivals follow in later sections as they are
-measured.
+This file is what pays those debts. **§1 is the obstacle-layer
+re-drive. §2 is station furniture, the colour bridge, Nav2 to
+staging, and AprilTag pose vs the marker at staging range.** **§3 is
+the dock** (plugin ×5, class verdict, fail-fast, undock). The pallet
+is Task 3.
 
 Everything below was taken on **this rig** (WSL Ubuntu 24.04, ROS 2
 Jazzy, gz-sim 8.11.0, RTX 4050) **headless**, `traction=nominal`,
@@ -28,6 +29,10 @@ Jazzy, gz-sim 8.11.0, RTX 4050) **headless**, `traction=nominal`,
 | **what it added** | 12 427 cells raised, of which **190 NEW LETHAL**, all of them existing 99-cost wall cells going 100. No vehicle trail. |
 | **headline `spine_north` on the new label** | **6 arrivals in 6 fresh bringups** that finished. Truth **0.4607 – 0.5226 m**, belief **0.4662 – 0.4889 m**, 56.8 – 57.5 s, RTF 0.9989 – 0.9998. F4's committed set was truth 0.4474 – 0.5859 m on `nav=on@3148d052`. The box still holds. |
 | **two `no_progress` on the same file** | named below. Not a painted wall. The truck left the line and the watchdog fired at 7.8 – 10.3 m. Same class as F4's `ring_corner` residual. |
+| **S5 staging, Nav2, `nav=on@3ed626ce`** | **4 arrivals** that finished. Truth **0.5131 – 0.5691 m**, belief **0.5229 – 0.5773 m**. Heading at rest **0.666 – 1.370 rad**. START_OCCUPIED never fired (error_code never 205). One named `no_progress` (same miss class as §1.4). |
+| **furniture** | `tag36h11_0` spawned at world (7.000, 2.600, 0.800), yaw +π/2, via `/world/warehouse/create`. `warehouse_ver3.sdf` not edited. |
+| **AprilTag at staging range** | **n=211, rms 0.0706 m** in `map` vs the marker through the committed registration (`tag-s5-20260828-155745`). Z is 0.798 vs 0.800. The number sits **inside** the registration residual MAX **0.1179 m**, so it is not a measurement of PnP beyond the map's own floor. Nav2's latched heading does **not** put the tag in the camera. |
+| **S5 dock, `docking=on@3526e090`** | **Plugin 5/5** from heading-aligned staging (the same seed T1 used for the tag). Truth **0.2465 – 0.2553 m**. Strict 0.25 m class **2/5**. Heading **0.032 – 0.596 rad** (`isDocked` is XY). One spawn→dock also in class (`190838`, 0.2425 m). Fail-fast **901**. Undock **905**. |
 
 ---
 
@@ -163,3 +168,251 @@ not create it.
   `nav2.yaml` and pinned by `tests/test_nav2_params.py`. It is not
   re-derived here. A later section that spawns a body the map does not
   know is where that inequality becomes a measurement.
+
+---
+
+## 2. Station furniture, colour, staging
+
+Constraint 21: furniture is spawned, never written into the committed
+world file. The marker SDF is generated from libapriltag's own
+`tag36h11_create()` (`tools/tag_model.py write`, 48 black cells, 0.50 m
+printed tile) and placed by `tools/furniture.py place` on
+`/world/warehouse/create` with `sdf_filename` — the same idiom as
+`spawn_truck()`. Pose is `tag_core.station_geometry` off
+`m6/ipc/stations.py` S5 plus `config.yaml` `dock:`: world
+**(7.000, 2.600, 0.800)**, yaw **+π/2** so the printed +X faces the
+oncoming forks.
+
+The colour stream is now on the image bridge beside depth
+(`topics.cam_image` = `/forklift/gz/cam/image`). F4 left it unbridged
+because nothing consumed it. F5's detector does. The point cloud stays
+off the wire.
+
+`apriltag_ros` 3.4.0 is vendored under `~/m5v3_apriltag_prefix` (no
+sudo). libapriltag lives at `lib/x86_64-linux-gnu/libapriltag.so` on
+this archive — measured 2026-08-28, pinned in `apriltag.lib`. Detection
+accuracy at staging range is §2.4. `m5v3.sh start --dock` is a flag.
+
+### 2.1 Staging pose, by construction
+
+S5 station point (7.00, 4.25), travel south. Marker 1.65 m ahead.
+Docked standoff = fork reach 1.875 + tip 0.10. Staging run-in 2.00 m.
+Staging world **(7.000, 6.575)**, travel still south. `tests/test_tag_core.py`
+refuses a staging pose inside START_OCCUPIED; the grown-footprint
+margin is **+0.946 m**. `nav.goals.station_s5_staging` is a copy of
+that derivation (`derived: true`, `route_node: false`, `case_only`);
+`tests/test_dock_ground.py` recomputes it and refuses a typed invention.
+
+### 2.2 Nav2 to staging ×3, `nav=on@3ed626ce`
+
+Four fresh bringups with the marker in the world, then a fifth with
+`--dock`. One start died in `ekf_health` before any goal
+(`run-20260828-144832`) — the known discovery-race refusal, named, not
+a staging result. Four of the five finished drives arrived. One
+`no_progress` is in §2.3.
+
+| session | sim s | driven | TRUTH | BELIEF | heading | RTF |
+|---|---|---|---|---|---|---|
+| `case-stage_s5-20260828-144653` | 85.72 | 24.777 m | **0.5397 m** | 0.5448 m | +0.6664 rad | 0.9966 |
+| `case-stage_s5-20260828-145110` | 86.56 | 25.204 m | **0.5141 m** | 0.5285 m | +0.6689 rad | 0.9946 |
+| `case-stage_s5-20260828-145413` | 85.16 | 24.534 m | **0.5131 m** | 0.5229 m | +0.7394 rad | 0.9975 |
+| `goal-station_s5_staging-20260828-155356` | 86.02 | 24.821 m | **0.5691 m** | 0.5773 m | +1.3696 rad | 0.9970 |
+
+Every arrival is inside the 0.60 m box at rest, on both instruments.
+Closest believed 0.5890 – 0.6000 m. Cusps driven 0. First plan ~25 m
+reverse (forks-first). Error_code **never 205**. The staging pose is
+outside the trap zone in the planner's own mouth, not only in the
+arithmetic.
+
+**Heading at the box is 38–78 deg.** The first three were 0.666–0.739
+rad; the `--dock` bringup latched at **1.370 rad**. That is F4 §16.6 /
+§20.5 item 2 on this pose: a 0.60 m position latch with the travel
+heading still bent. From that heading the pallet camera does not see
+S5 (§2.4). The dock controller is what the two-stage requirement buys.
+Nav2 got the truck to staging. It did not dock.
+
+### 2.3 One `no_progress`, named
+
+| session | closest truth | end truth | notes |
+|---|---|---|---|
+| `case-stage_s5-20260828-144332` | 0.7848 m at t+88.5 s | 2.3351 m at (+9.29, +7.05) | first plan 24.968 m reverse; last plan 3.727 m mixed; watchdog at believed 2.326 m after 30 s without closing 0.50 m on a best of 1.093 m |
+
+Not START_OCCUPIED. Not the marker — staging is 4 m north of the board
+and the nav lidar at z = 1.80 cannot see a 0.80 m tag. Same miss class
+as §1.4 / F4 `ring_corner`: the controller left the line on the way
+into the bay mouth and the fail-fast named it.
+
+### 2.4 AprilTag pose vs the marker, staging range
+
+`tag_bench.py` looks up `map` → `tag36h11_0` and scores against the
+furniture pose **carried through the committed registration**. A map-frame
+CSV scored against the world xy is the hall origin (~31 m on this grid),
+not PnP; `tests/test_tag_bench.py` refuses that mix.
+
+Jazzy `apriltag_msgs` 2.0.2 has no pose field. The pose is TF. Two
+things had to be true before that TF was a number:
+
+1. **Empty `AprilTagDetectionArray` frames are not a detection.** The
+   node publishes one per camera frame. `tag_bench` wait used to latch
+   on the first empty array and record zero rows.
+2. **PnP is ROS optical (Z forward), Gazebo looks along link +X.**
+   Stamping the image as `pallet_cam_link` put range into map-up
+   (measured z ≈ 3.74 m on a 0.80 m marker). `--dock` now publishes
+   `pallet_cam_link` → `pallet_cam_optical` at REP-103 rpy
+   (−π/2, 0, −π/2) and `model.sdf` `gz_frame_id` is the optical frame.
+
+**At the Nav2 latch the camera does not see the tag.**
+`goal-station_s5_staging-20260828-155356` arrived inside the 0.60 m box
+with heading error **1.370 rad (78.5 deg)** at rest. `tag_bench.py record`
+then refused: no id-0 detection in 30 s. That is §2.2's heading residual
+in the camera's mouth, not a dead detector.
+
+**At the same xy with the table heading (forks south), after AMCL was
+re-seeded at that pose:**
+
+| session | n | mean | rms | min / max |
+|---|---|---|---|---|
+| `tag-s5-20260828-155745` | 211 | **0.0706 m** | **0.0706 m** | 0.0697 / 0.0721 m |
+
+Expected map (−24.103, 7.176, 0.800). One sample (−24.093, 7.246, 0.798).
+Almost all of the 7 cm is +Y. Z is 2 mm.
+
+**THE INSTRUMENT FLOOR TRAVELS WITH IT.** Registration residual rms
+0.0291 m, MAX **0.1179 m**. 0.0706 m is inside that MAX, so this is
+**not** a measurement of PnP beyond the map's own floor. It is the
+statement that the TF chain `map` → `odom` → `base_link` →
+`pallet_cam_link` → `pallet_cam_optical` → `tag36h11_0` is consistent
+with the furniture at staging range, to the grid's own residual.
+
+The heading-aligned pose is not what Nav2 delivers. That is why Task 2
+exists.
+
+### 2.5 What §2 does not claim
+
+- No `opennav_docking` in this section. Heading at the Nav2 box is the
+  reason it has to run; the camera does not see S5 from that heading.
+  The dock is §3.
+- No pallet.
+- No wet set. Constraint 19.
+- The 0.0706 m figure is heading-aligned at staging xy, not a capture
+  from Nav2's latched heading.
+
+---
+
+## 3. The dock
+
+`opennav_docking` 1.3.12, `SimpleNonChargingDock`, `docking=on@3526e090`
+on `--headless --localize amcl --nav --dock`. External detection is the
+AprilTag TF (`detected_dock.py` → `topics.detected_dock_pose`).
+`dock_backwards: true` (forks are model −x). `v_angular_max` 0.08 =
+`v_linear_min / 1.25`. Constraint 22: every dock session is
+`authority=dock`; the bench cancels NavigateToPose and waits for
+`/cmd_vel` quiet before `DockRobot`. On `200222` every live command
+was reverse (`vx` ∈ [−0.250, −0.103]) and **0 / 157** broke the 1.25 m
+curvature floor.
+
+### 3.1 What had to move before a dock could latch
+
+| lever | package default | this plant | why |
+|---|---|---|---|
+| `external_detection_translation_x` | −0.20 | **−1.975** | fork_reach + standoff, **into** the tag. `+1.975` drove through it at `v_max` (`181917`). |
+| `dock_backwards` | false | **true** | false is counterweight-first. |
+| `staging_x_offset` | −0.7 | **+2.00** | `getStagingPose` along pose_yaw, which points at the aisle. |
+| `docking_threshold` | 0.05 | **0.25** | 0.05 sits inside the slowdown bubble. `182748`: 0.184 m at heading 0.001 rad, then `v≈0`, `ω=0.08`, 905. |
+| `slowdown_radius` | 0.25 | **0.10** | must be **inside** the threshold. Equal radii made `isDocked` a race against that spin (`184333`: plugin success, truth 0.275 m / 0.633 rad). |
+| `use_collision_detection` | true | **false** | `192604`: detection succeeded, then "Collision detected" at odom (−24.72, 3.90) — **staging**. T1 drove this spur ×4. F4: the collision monitor is a backstop, not a guard. |
+| `dock_approach_timeout` | 60 | **120** | `184208`: 60 s timed out resetting a missed approach at 0.10 m/s. |
+| `undock_*_tolerance` | 0.05 | **0.50 m / 0.30 rad** | 0.05 is a charger breakaway. This undock is "back at staging". |
+
+### 3.2 Fail-fast
+
+`--dock-id nosuch` → **901 `DOCK_NOT_IN_DB`** (`dock-s5-20260828-180958`).
+Named, not a hang.
+
+### 3.3 Accuracy, heading-aligned staging, `docking=on@3526e090`
+
+Nav2's goal checker is **position-only** (`xy_goal_tolerance` 0.60 m, no
+yaw). T1 latched at 0.67–1.37 rad; the camera does not see S5; DockRobot
+from spawn is then **904** (`192920`, `193233`). The ×5 below starts at
+the **same heading-aligned staging xy T1 used for the tag capture**
+(`dock_bench.py stage`: gz `set_pose` + `/initialpose`). That is stage 2
+of the two-stage approach, isolated from Nav2's heading lottery. The
+teleport between repeats is **not** a localization jump during approach.
+
+| session | plugin | retries | TRUTH | heading | class 0.25 m |
+|---|---|---|---|---|---|
+| `dock-s5-20260828-200201` | True / 0 | 0 | 0.2553 m | +0.5318 rad | NO |
+| `dock-s5-20260828-200222` | True / 0 | 0 | **0.2479 m** | **−0.0322 rad** | **YES** |
+| `dock-s5-20260828-200242` | True / 0 | 0 | 0.2516 m | +0.2325 rad | NO |
+| `dock-s5-20260828-200302` | True / 0 | 0 | **0.2465 m** | **+0.0351 rad** | **YES** |
+| `dock-s5-20260828-200328` | True / 0 | 0 | 0.2536 m | +0.5960 rad | NO |
+
+**Plugin 5/5. Strict truth class 2/5.** The three NOs are 2–5 mm outside
+0.25 m, inside the registration residual MAX 0.1179 m. `isDocked` is XY
+against the refined tag pose, not truth against the bay, and not heading.
+When XY hits 0.25 m with heading still out, SmoothControlLaw is already
+commanding `ω = v_angular_max` (200201, 200328). When heading is already
+on the table, the same latch is 0.03 rad (200222, 200302).
+
+One spawn→Nav2-staging→dock also made class, with two internal retries
+that returned to staging first:
+
+| session | plugin | retries | TRUTH | heading | class |
+|---|---|---|---|---|---|
+| `dock-s5-20260828-190838` | True / 0 | 2 | **0.2425 m** | **−0.1119 rad** | **YES** |
+
+That path is not repeatable at ×5: the next four spawn trials were 903
+(Nav2 through the bay), 905 (collision-at-staging, before the checker
+was switched off), and 904 ×2 (heading 0.74–1.21 rad, camera empty).
+
+### 3.4 Named misses (spawn trials, not in the ×5 table)
+
+| session | error | what it is |
+|---|---|---|
+| `180958` | **901 DOCK_NOT_IN_DB** | fail-fast |
+| `181917` | 905 | translation_x sign was +; drove through the tag |
+| `182748` | 905 | threshold 0.05; 0.184 m at heading 0.001 then spin |
+| `184333` | 0 | plugin success, truth **0.275 m / 0.633 rad**, class NO (slowdown still 0.25) |
+| `185442` | **903 FAILED_TO_STAGE** | START_OCCUPIED from inside the bay |
+| `191937` | 903 | Nav2 overshot staging to world y=3.46 |
+| `192604` | 905 | collision projection at staging |
+| `192920`, `193233` | **904 FAILED_TO_DETECT_DOCK** | Nav2 heading, no tag |
+
+### 3.5 Undock
+
+`UndockRobot` is **not** the reverse-out. With `dock_backwards` the
+server takes the **current** pose, flips yaw by π, then
+`getStagingPose` with our **+2.00 m** offset — that points at the
+marker. Measured: `190838` undock 905, collision at odom (−24.38, 5.57),
+truck ended world (6.301, 3.750) yaw −1.439 (south, into the bay). The
+spur-exit primitive remains `nav.cases.reverse_out` / `ring_s5_junction`,
+and from inside the bay that is 205 START_OCCUPIED.
+
+Between the ×5 repeats the bench did **not** undock; it `set_pose`'d
+back to staging.
+
+### 3.6 Class verdict
+
+F4 §16.6 said 0.25 m is not reachable in **one** Nav2 approach. In
+**two** stages, with the camera on the tag:
+
+- **XY at the 0.25 m latch is the docking_threshold itself**, scored on
+  truth vs the bay. 2/5 inside, 5/5 within 6 mm. The millimetres outside
+  are not a second controller problem; they are `isDocked` on belief vs
+  a 0.25 m cut on truth, on a grid whose residual MAX is 0.12 m.
+- **Heading is not a class this plugin keeps.** The two in-class rows
+  are 0.03 rad; the three just-out rows include 0.23–0.60 rad of spin
+  after XY arrived.
+- Jumps during final approach: not separately instrumented on this
+  bench (`dock_bench` records `cmd_vel` + truth, not `map`→`odom`). No
+  1.2 m step was observed as a named abort. The `set_pose` between
+  repeats is a teleport and is not a jump.
+
+### 3.7 What §3 does not claim
+
+- No pallet, no cycle. Task 3.
+- No wet set. Constraint 19.
+- No ×5 from **spawn** through Nav2's position latch. That path made
+  class once (`190838`) and 904/903/905 otherwise.
+- No working `UndockRobot` on this offset sign. The finding is named.
+

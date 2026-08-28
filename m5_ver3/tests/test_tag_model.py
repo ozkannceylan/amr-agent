@@ -85,6 +85,11 @@ def test_config_dock_keys_the_writer_reads_all_exist():
         cfg.raw(key)
 
 
+def test_library_candidates_keep_an_explicit_path():
+    got = tm.library_candidates(("/opt/fake/libapriltag.so",))
+    assert "/opt/fake/libapriltag.so" in got
+
+
 def test_an_out_of_range_id_is_a_valueerror():
     with pytest.raises(ValueError):
         toy_family().bitmap(1)

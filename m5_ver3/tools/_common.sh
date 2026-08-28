@@ -174,6 +174,14 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 #     READS on the --monitor arm, computed off a stale scan out of a
 #     world that no longer exists - so the next stack's truck would be
 #     taking commands from a guard watching a floor that is gone.
+#   AND F5 TASK 1's DETECTOR. `apriltag_node` is the EXECUTABLE, on both
+#   the env-wrapped absolute path and a `ros2 run` line if one ever
+#   replaced it. A stale detector does not command motion; it does
+#   publish a pose the docking controller will chase.
+#   AND F5 TASK 2's SERVER. `opennav_docking` is the PACKAGE AND the
+#   executable; both command lines carry that string. A stale docking
+#   server PUBLISHES A TWIST on topics.cmd_vel, which is the command
+#   path. `detected_dock.py` is the SCRIPT NAME, as wheel_odometry.py is.
 M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py"
                "static_transform_publisher" "ekf_node"
                "rf2o_laser_odometry_node" "rf2o_twist.py"
@@ -183,7 +191,8 @@ M5V3_PATTERNS=("gz sim" "parameter_bridge" "image_bridge" "wheel_odometry.py"
                "velocity_smoother" "cmd_vel_tricycle.py"
                "planner_server" "controller_server" "bt_navigator"
                "behavior_server" "nav2_lifecycle_manager"
-               "collision_monitor")
+               "collision_monitor" "apriltag_node"
+               "opennav_docking" "detected_dock.py")
 
 # The same list as one pgrep alternation, for the callers that want a
 # single pattern rather than a loop.
@@ -270,6 +279,30 @@ fuse_paths() {
 fuse_env() {
     FUSE_AMENT_PREFIX_PATH="$FUSE_ROS_PREFIX${AMENT_PREFIX_PATH:+:$AMENT_PREFIX_PATH}"
     FUSE_LD_LIBRARY_PATH="$FUSE_ROS_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+}
+
+# WHERE THE VENDORED APRILTAG TREE IS. Same shape as fuse_paths: the
+# unpacker (install_apriltag.sh) and the launcher (m5v3.sh, tag_model.py)
+# must not be able to disagree about the prefix. Called unconditionally
+# from configure() so set -u never sees an unset APRILTAG_BIN on a
+# bringup that did not ask for --dock.
+apriltag_paths() {
+    APRILTAG_PREFIX="${CFG_APRILTAG_PREFIX/#\~/$HOME}"
+    APRILTAG_ROS_PREFIX="$APRILTAG_PREFIX/$CFG_APRILTAG_DEB_PREFIX"
+    APRILTAG_BIN="$APRILTAG_ROS_PREFIX/lib/$CFG_APRILTAG_PACKAGE/$CFG_APRILTAG_EXECUTABLE"
+    APRILTAG_LIB_SO="$APRILTAG_ROS_PREFIX/$CFG_APRILTAG_LIB"
+    APRILTAG_MANIFEST="$APRILTAG_PREFIX/m5v3_apriltag.manifest"
+}
+
+apriltag_env() {
+    # THE LOADER PATH INCLUDES THE DEBIAN MULTIARCH DIR. install_apriltag.sh
+    # measured libapriltag.so under lib/x86_64-linux-gnu, not lib/.
+    # ${CFG_APRILTAG_LIB%/*} is the directory of that key, not a
+    # subprocess - `$(dirname …)` would be skipped by the sweep parser
+    # and leave $APRILTAG_LIB_DIR unresolved on the spawn line.
+    APRILTAG_LIB_DIR="$APRILTAG_ROS_PREFIX/${CFG_APRILTAG_LIB%/*}"
+    APRILTAG_AMENT_PREFIX_PATH="$APRILTAG_ROS_PREFIX${AMENT_PREFIX_PATH:+:$AMENT_PREFIX_PATH}"
+    APRILTAG_LD_LIBRARY_PATH="$APRILTAG_ROS_PREFIX/lib:$APRILTAG_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 }
 
 # ROS IS SOURCED FOR gz ITSELF, not only for ROS nodes: gz_tools_vendor

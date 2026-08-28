@@ -1125,7 +1125,10 @@
       </visual>
       <sensor name="pallet_cam" type="rgbd_camera">
         <pose>0 0 0 0 0 0</pose>
-        <gz_frame_id>pallet_cam_link</gz_frame_id>
+        <gz_frame_id>pallet_cam_optical</gz_frame_id>
+        <!-- IMAGE FRAME, NOT THE LINK. Gazebo looks along link +X;
+             apriltag_ros PnP is ROS optical (Z forward). The dock arm
+             publishes pallet_cam_link to pallet_cam_optical. -->
         <always_on>1</always_on>
         <update_rate>15</update_rate>
         <topic>/forklift/gz/cam</topic>
