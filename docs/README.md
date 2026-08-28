@@ -15,6 +15,8 @@ The repo's records, in four kinds:
 
 Current status and the roadmap live in the root [README](../README.md);
 how to run the current system lives in the root [RUNBOOK](../RUNBOOK.md).
+The CI/CD gate (ADR 0017) as a step-by-step walkthrough:
+[`ci-cd-akisi.md`](ci-cd-akisi.md).
 
 ## This layer must not access
 
