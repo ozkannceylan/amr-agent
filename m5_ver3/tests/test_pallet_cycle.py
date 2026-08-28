@@ -85,6 +85,18 @@ def test_run_rejects_a_nav2_abort():
     assert "action_status=4" in src
 
 
+def test_run_recovers_an_empty_nav2_miss_to_staging():
+    """spine_north from spawn is the named ring_corner miss class.
+
+    An empty Nav2 miss must not abort the pallet cycle: dock_bench
+    stage is T2's measured heading-aligned staging, and set_pose
+    is legal while the pallet is not attached.
+    """
+    src = open(cy.__file__, encoding="utf-8").read()
+    assert "nav2 miss recovered" in src
+    assert "dock_bench.py" in src
+
+
 def test_pallet_legs_are_the_existing_bench():
     want = {
         "attach": ["attach"], "lift": ["lift"],

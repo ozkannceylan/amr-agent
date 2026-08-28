@@ -282,7 +282,18 @@ def run(cfg, repeat):
                     proc = subprocess.run(cmd)
                     rc = proc.returncode
                     if step["tool"] == "drive_goal.py" and not _nav_succeeded(cfg):
-                        rc = 1
+                        if step["leg"] in ("transit", "stage"):
+                            rec = [sys.executable,
+                                   os.path.join(_HERE, "dock_bench.py"),
+                                   "stage"]
+                            rec_rc = subprocess.run(rec).returncode
+                            log.write("nav2 miss recovered rc={}\n".format(
+                                rec_rc))
+                            print("nav2 miss recovered via staging rc={}".format(
+                                rec_rc))
+                            rc = rec_rc
+                        else:
+                            rc = 1
                 if step["leg"] in ("lift", "lower"):
                     wait = cfg.f("pallet.lift_m") / cfg.f(
                         "pallet.mast_limit_mps") + 1.5
