@@ -1,0 +1,149 @@
+name: CI
+
+# Gates PRs (ADR 0017). pre-commit, invariants and pytest-m6 need no
+# ROS; pytest-ros is the Jazzy overlay job (Phase 2) and is the one
+# that runs test_vda_agent_mqtt.py.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    name: pre-commit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: pre-commit/action@v3.0.1
+
+  invariants:
+    name: invariants
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Layer-boundary checks
+        run: python3 m6/tools/check_layer_boundaries.py
+
+  pytest-m6:
+    name: pytest-m6
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: m6/requirements-ci.txt
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-tk
+
+      - name: Python test dependencies
+        run: python3 -m pip install -r m6/requirements-ci.txt
+
+      - name: Vendored mosquitto
+        run: bash m6/tools/install_broker.sh
+
+      - name: pytest (native, no ROS)
+        env:
+          # Same isolation the suite already demands (conftest.py).
+          ROS_DOMAIN_ID: "89"
+        run: |
+          python3 -m pytest m6/tests/ -q \
+            --junit-xml=junit-m6.xml \
+            --tb=short
+
+      - name: "Floor: at least 550 passed"
+        if: always()
+        run: python3 m6/tools/check_junit_floor.py junit-m6.xml 550
+
+      - name: Deploy snapshot is reproducible
+        run: |
+          bash m6/m6.sh deploy
+          test -f m6/deploy/MANIFEST
+          test -s m6/deploy/MANIFEST
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-m6
+          path: junit-m6.xml
+          if-no-files-found: warn
+
+  pytest-ros:
+    name: pytest-ros
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: ros:jazzy-ros-base
+    defaults:
+      run:
+        shell: bash
+    env:
+      ROS_DOMAIN_ID: "89"
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+      PIP_CACHE_DIR: /tmp/pip-cache
+    steps:
+      - name: Tooling
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git python3-pip python3-tk python3-venv \
+            ros-jazzy-rclpy \
+            ros-jazzy-std-msgs \
+            ros-jazzy-geometry-msgs \
+            ros-jazzy-nav-msgs \
+            ros-jazzy-sensor-msgs \
+            ros-jazzy-rmw-fastrtps-cpp
+
+      - uses: actions/checkout@v4
+
+      - name: Python test dependencies
+        run: |
+          python3 -m venv --system-site-packages /tmp/ci-venv
+          /tmp/ci-venv/bin/pip install -r m6/requirements-ci.txt
+
+      - name: Vendored mosquitto
+        run: bash m6/tools/install_broker.sh
+
+      - name: pytest (Jazzy overlay)
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          export FASTRTPS_DEFAULT_PROFILES_FILE="$GITHUB_WORKSPACE/m6/tools/fastdds_loopback.xml"
+          test -f "$FASTRTPS_DEFAULT_PROFILES_FILE"
+          /tmp/ci-venv/bin/python -m pytest m6/tests/ -q \
+            --junit-xml=junit-ros.xml \
+            --tb=short
+
+      - name: "Floor: at least 570 passed"
+        if: always()
+        run: python3 m6/tools/check_junit_floor.py junit-ros.xml 570
+
+      - name: Upload JUnit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-ros
+          path: junit-ros.xml
+          if-no-files-found: warn

@@ -29,11 +29,8 @@ import socket
 import subprocess
 import time
 
-import rclpy
-from rclpy.node import Node
-from std_msgs.msg import String
-
 import status_contract
+from ros_optional import Node, String, rclpy, require
 
 # ----------------------------- CONFIG -----------------------------
 UDP_TARGET = None       # None -> the WSL default gateway, i.e. the Windows host
@@ -169,6 +166,7 @@ class SensorLink(Node):
 
 
 def main():
+    require()
     rclpy.init()
     node = SensorLink()
     try:

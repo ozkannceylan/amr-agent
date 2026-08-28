@@ -1,0 +1,38 @@
+# Local-quality gate, mirrored by CI (ADR 0017). Install once:
+#   pip install pre-commit
+#   pre-commit install
+#   pre-commit run --all-files
+#
+# Hygiene only. No formatter that would rewrite the historical trees.
+# Archives, evidence ledgers and binaries are excluded below.
+minimum_pre_commit_version: "3.5.0"
+
+exclude: >
+  (?x)^(
+    docs/archive/|
+    docs/claude-supervised-m5/|
+    m1/|
+    m2/|
+    m3/|
+    m4/|
+    m5/|
+    m5-plc-debug/|
+    m6/PROOF\.md|
+    agv/forklift/EVIDENCE_.*|
+    sim/maps/|
+    .*/evidence/|
+    .*\.(csv|log|png|gif|mp4|gz|pdf|err|jsonl|pgm|posegraph|data)
+  )
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-added-large-files
+        args: [--maxkb=1024]

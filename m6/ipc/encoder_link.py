@@ -31,13 +31,10 @@ Usage (after sourcing /opt/ros/jazzy/setup.bash):
 import json
 import time
 
-import rclpy
 import yaml
-from rclpy.node import Node
-from sensor_msgs.msg import JointState
-from std_msgs.msg import String
 
 import status_contract
+from ros_optional import JointState, Node, String, rclpy, require
 
 # ----------------------------- CONFIG -----------------------------
 CHANNELS = ("a", "b")
@@ -136,6 +133,7 @@ class EncoderLink(Node):
 
 
 def main():
+    require()
     rclpy.init()
     node = EncoderLink()
     try:

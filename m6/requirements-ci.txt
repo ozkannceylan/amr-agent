@@ -1,0 +1,9 @@
+# Pinned for the pytest-m6 CI job (ADR 0017). Install:
+#   python3 -m pip install -r m6/requirements-ci.txt
+#
+# PyYAML is a range, not an exact pin: the Jazzy image ships Debian's
+# 6.0.1 and pip cannot uninstall a distro RECORD. 6.0.1 satisfies this
+# range; a bare setup-python (pytest-m6) installs current 6.x.
+pytest==8.3.5
+paho-mqtt==2.1.0
+PyYAML>=6.0.1,<7

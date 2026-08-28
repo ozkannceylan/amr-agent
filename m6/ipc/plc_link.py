@@ -23,11 +23,9 @@ import json
 import socket
 import time
 
-import rclpy
 import yaml
-from rclpy.node import Node
-from std_msgs.msg import Bool, String
 
+from ros_optional import Bool, Node, String, rclpy, require
 from status_contract import (
     CONFIG_PATH, FAILSAFE, PLC_PORT, STATUS_TOPIC, is_stale, parse_status)
 
@@ -117,6 +115,7 @@ class PlcLink(Node):
 
 
 def main():
+    require()
     rclpy.init()
     node = PlcLink()
     try:

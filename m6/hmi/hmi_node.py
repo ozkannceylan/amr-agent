@@ -30,15 +30,11 @@ import sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.normpath(os.path.join(_HERE, "..", "ipc")))
 
-import rclpy
 import yaml
-from geometry_msgs.msg import Twist
-from nav_msgs.msg import Odometry
-from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile
-from std_msgs.msg import String
 
 import map_panel
+from ros_optional import (
+    DurabilityPolicy, Node, Odometry, QoSProfile, String, Twist, rclpy, require)
 from status_contract import (
     AUTO_GOAL_TOPIC, AUTO_STATE_TOPIC, CONFIG_PATH, ENCODERS_TOPIC, FAILSAFE,
     FIELDS_TOPIC, HMI_CMD_TOPIC, MODE_AUTO, MODE_TELEOP, MODE_TOPIC,
@@ -427,6 +423,7 @@ class Hmi(Node):
 
 
 def main():
+    require()
     rclpy.init()
     root = tk.Tk()
     node = Hmi(root)
