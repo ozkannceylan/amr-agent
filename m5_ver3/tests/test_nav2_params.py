@@ -754,12 +754,129 @@ def test_unknown_space_is_not_traversable_and_is_TRACKED(planner, costmaps):
         "allow_unknown: false means nothing at all")
 
 
-def test_the_global_costmap_has_NO_obstacle_layer(costmaps):
-    # Marking live returns into a MAP-frame costmap smears every rack
-    # face by the localisation error the file is dimensioned against,
-    # and the smear does not clear.
-    assert costmaps["global_costmap"]["plugins"] == [
-        "static_layer", "inflation_layer"]
+# ----------------------------------------------------------------------
+# THE GLOBAL OBSTACLE LAYER - F5 Task 1, and these tests REPLACE one
+# that asserted the opposite. Until F5 this file carried
+# `test_the_global_costmap_has_NO_obstacle_layer`, which was right for
+# the reasons EVIDENCE_NAV_V3.md 19.9 gave and is superseded by
+# EVIDENCE_DOCKING_V3.md 1. What did not change is why the absence
+# stopped being free: 19.9 measured a spawned obstacle the frozen map
+# does not carry making the vehicle orbit, and F5 spawns station
+# furniture on purpose.
+# ----------------------------------------------------------------------
+
+def test_the_global_costmap_HAS_an_obstacle_layer_and_INFLATION_IS_LAST(
+        costmaps):
+    # THE ORDER IS THE WHOLE OF IT. A layer that marks AFTER the
+    # inflation layer has run is a lethal cell with no inflation round
+    # it, and a 3.815 m vehicle's planner would route within centimetres
+    # of it.
+    plugins = costmaps["global_costmap"]["plugins"]
+    assert plugins == ["static_layer", "obstacle_layer", "inflation_layer"]
+    assert plugins[-1] == "inflation_layer"
+
+
+def test_the_global_obstacle_layer_CLEARS_ITS_OWN_FOOTPRINT(costmaps):
+    # LOAD-BEARING HERE IN A WAY IT IS NOT IN THE ROLLING COSTMAP. The
+    # scanner sees three pieces of this truck (EVIDENCE_NAV_V3.md 14.4).
+    # In a 10 x 10 m window those marks are carried away as the window
+    # moves; in a MAP-frame costmap they would stay, and a truck driving
+    # a 27 m spur would paint a 27 m wall of itself across the grid that
+    # every later goal is planned against.
+    layer = costmaps["global_costmap"]["obstacle_layer"]
+    assert layer["footprint_clearing_enabled"] is True
+    assert layer["enabled"] is True
+
+
+def test_the_global_obstacle_layer_can_only_ADD(costmaps):
+    # combination_method 1 is MAX. nav2_costmap_2d's updateWithMax skips
+    # this layer's own NO_INFORMATION cells and writes only where its
+    # cost EXCEEDS what is already there, so the layer cannot erase a
+    # rack, open a wall or move a cell the static layer set. That is the
+    # mechanism under EVIDENCE_DOCKING_V3.md 1's prediction that a floor
+    # the grid already knows plans identically with the layer on.
+    assert int(costmaps["global_costmap"]["obstacle_layer"][
+        "combination_method"]) == 1
+
+
+def test_the_global_layer_CLEARS_FURTHER_THAN_IT_MARKS(costmaps):
+    # 19.9's THIRD reason, answered as an inequality. A mark in a
+    # costmap with no rolling window is aged out by nothing, so every
+    # cell this layer can mark has to lie inside a radius a later pass
+    # can clear it from - which means the CLEARING range strictly
+    # exceeds the MARKING range. Reversing them is the failure mode 19.9
+    # named.
+    scan = costmaps["global_costmap"]["obstacle_layer"]["scan"]
+    assert float(scan["raytrace_max_range"]) > float(
+        scan["obstacle_max_range"])
+    assert scan["marking"] is True and scan["clearing"] is True
+    # AND THE ROLLING COSTMAP IS THE CONTRAST rather than a second copy
+    # of the rule: there marking reaches the sensor's whole 25 m working
+    # range, because the window takes the marks with it.
+    local = costmaps["local_costmap"]["obstacle_layer"]["scan"]
+    assert float(local["obstacle_max_range"]) > float(
+        local["raytrace_max_range"]), (
+        "the local costmap's two ranges are the other way round, and "
+        "that contrast is the point of this pair")
+
+
+def nav_lidar_block():
+    """The nav scanner's own <sensor>, sliced out of the model."""
+    model = read("gazebo", "forklift_ver3", "model.sdf")
+    start = model.index('<sensor name="nav_lidar" type="gpu_lidar">')
+    return model[start:model.index("</sensor>", start)]
+
+
+def test_the_global_MARKING_range_is_inside_the_beam_spacing_bound(
+        costmaps):
+    # THE BOUND IS DERIVED FROM THE MODEL, NOT COPIED FROM THE EVIDENCE.
+    # Beyond the range at which neighbouring returns are one costmap
+    # cell apart, a marked surface is a DOTTED line in the grid, and a
+    # clearing pass - which walks cells along one ray - cannot be relied
+    # on to erase every dot it did not lay. In a rolling window a
+    # leftover dot leaves with the window; here it is permanent.
+    block = nav_lidar_block()
+    block = block[block.index("<horizontal>"):]
+    samples = int(re.search(r"<samples>([0-9]+)</samples>", block).group(1))
+    lo = float(re.search(r"<min_angle>([-0-9.eE+]+)</min_angle>",
+                         block).group(1))
+    hi = float(re.search(r"<max_angle>([-0-9.eE+]+)</max_angle>",
+                         block).group(1))
+    increment = (hi - lo) / (samples - 1)
+    resolution = float(costmaps["global_costmap"]["resolution"])
+    one_cell_at = resolution / increment
+    marking = float(costmaps["global_costmap"]["obstacle_layer"]["scan"][
+        "obstacle_max_range"])
+    assert marking < one_cell_at, (
+        "marking to {:.2f} m, and neighbouring beams are a whole "
+        "{:.3f} m cell apart from {:.3f} m out".format(
+            marking, resolution, one_cell_at))
+    # and it is not so tight that a vehicle in a cruise corridor stops
+    # marking across it: the ring band is 8.00 m (m6/ipc/route.py).
+    assert marking >= 8.0
+
+
+def test_the_global_obstacle_layer_reads_config_yamls_OWN_scan_topic(
+        cfg, costmaps):
+    # m5v3.sh's check_nav_params() makes this refusal at bringup; this
+    # is the same claim where a reader looks for it. A costmap sub-node
+    # has no command line, so the address is a COPY - and a copy that
+    # cannot say when it has gone stale is a copy that will.
+    assert costmaps["global_costmap"]["obstacle_layer"]["scan"][
+        "topic"] == cfg["topics"]["scan_nav"]
+
+
+def test_the_global_obstacle_source_EXPIRES(costmaps):
+    # nav2's default is 0.0, which means "never expire". On a rolling
+    # costmap that is careless; on a MAP-frame one it is a frozen mark
+    # on a grid nothing rolls away.
+    rate = float(costmaps["global_costmap"]["obstacle_layer"]["scan"][
+        "expected_update_rate"])
+    assert rate > 0.0
+    assert rate == float(costmaps["local_costmap"]["obstacle_layer"][
+        "scan"]["expected_update_rate"]), (
+        "one scanner, one staleness budget - two numbers here would be "
+        "two opinions about the same sensor")
 
 
 def test_the_cost_critic_and_the_costmap_AGREE_about_the_robots_shape(

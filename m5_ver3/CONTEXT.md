@@ -334,6 +334,20 @@ m5_ver3/
     │                     measurement of nothing - and it REFUSES a
     │                     `nav=on` stack, because a controller and a
     │                     bench on one /cmd_vel is a race
+    ├── costmap_probe.py  F5 Task 1. Read a nav2 OccupancyGrid off the
+    │                     running stack and diff two captures. `nav_health`
+    │                     asks whether the arm can PLAN; this asks what
+    │                     it would plan THROUGH. describe | record --tag
+    │                     | compare. `compare` needs no ROS.
+    ├── tag_core.py       F5 Task 1. Station furniture arithmetic:
+    │                     tag36h11 bitmap, marker/docked/staging poses
+    │                     off m6's station point, and the START_OCCUPIED
+    │                     trap-zone margin. --selftest. No ROS, no gz.
+    ├── tag_model.py      F5 Task 1. Write a static SDF for one AprilTag
+    │                     from tag_core.cells. describe | write. `write`
+    │                     needs libapriltag so the printed marker and
+    │                     the detector share one code table. The floor
+    │                     is not edited.
     └── map_register.py   derive | show | clearance | support. Needs
                           nothing. `support` places every beam of a
                           recorded drive on the frozen map from the TRUE

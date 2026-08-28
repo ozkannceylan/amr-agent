@@ -867,7 +867,8 @@ controller_server:
       #   THAT IS AN ARGUMENT AND THE MEASUREMENT IS THE EVIDENCE. At
       # 2.01 m of horizon the same goal that had been missed by
       # 1.59 m ACROSS its travel heading was tracked to 0.15 m
-      # (EVIDENCE_NAV_V3.md 16.4, rung D).
+      # (EVIDENCE_NAV_V3.md 16.4, RUNG 3 - the ladder is numbered 0-7
+      # and there is no rung D in it).
       #
       # WHAT IT WAS, AND WHY 56 STOPPED BEING RIGHT WITHOUT ANYTHING
       # SAYING SO. This line used to read 56 and its derivation used to
@@ -1235,7 +1236,9 @@ controller_server:
         # ==============================================================
         # TRUE, AGAINST THE UPSTREAM DEFAULT OF FALSE, AND IT IS THE
         # DAMPING TERM. IT IS THE SECOND RUNG OF THE FIX AND IT WAS
-        # FORCED BY A MEASUREMENT (EVIDENCE_NAV_V3.md 16.5, rung F).
+        # FORCED BY A MEASUREMENT (EVIDENCE_NAV_V3.md 16.4/16.4a, RUNG 6 -
+        # the ladder is in 16.4, it is numbered 0-7, and there is no
+        # rung F in it).
         #
         # WHAT THE CRITIC COSTS WITH IT FALSE (path_align_critic.cpp):
         #
@@ -1511,14 +1514,56 @@ local_costmap:
 # global_costmap - the FROZEN map, and nothing live at all
 # =====================================================================
 #
-# STATIC AND INFLATION ONLY, and the absence of an obstacle layer here
-# is a decision rather than an omission. Marking live scan returns into
-# a MAP-FRAME costmap smears every rack face by the localisation error
-# this whole file is dimensioned against - up to 0.5321 m - and the
-# smear does not clear, because the next scan of the same face is
-# smeared by a different amount in a different direction. The live scan
-# belongs in the rolling costmap, where it is referenced to `odom` and
-# ages out of the window.
+# THREE LAYERS SINCE F5 TASK 1, AND THE MIDDLE ONE IS A DEBT F4 HANDED
+# ON RATHER THAN A PARAMETER SOMEBODY ADDED. Until F5 this costmap was
+# STATIC AND INFLATION ONLY and EVIDENCE_NAV_V3.md 19.9 measured what
+# that cost: a 2.40 m box spawned on the route was in the LOCAL costmap
+# and not in the frozen map, so the global plan went straight through
+# it, MPPI could not follow that plan, and the vehicle backed off and
+# orbited until the watchdog named it. AN OBSTACLE THAT IS NOT IN THE
+# FROZEN MAP IS NOT IN THE GLOBAL PLAN.
+#   19.9 HANDED IT ON FOR THREE REASONS AND THIS SECTION ANSWERS ALL
+# THREE, because a debt paid without answering the reasons it was
+# deferred for is a debt moved.
+#
+#   ONE, THE LABEL. Adding this layer moves a VALUE in this file, so
+#   `nav_config_md5` leaves 53a33d67 - the eight bytes that made 16.5's
+#   eleven runs and 17's eight ONE measured set. That is paid in
+#   EVIDENCE_DOCKING_V3.md 1: the headline acceptance (spine_north x3)
+#   is re-driven on this tree and tabled against 16.5's, and the section
+#   states which F4 conclusions the bridge re-bases and which it does
+#   not.
+#
+#   TWO, WHAT THE PLANNER PLANS THROUGH. F4 constraint 20 makes that a
+#   re-measurement rather than a parameter, and the same section is it.
+#   The PREDICTION, made before the runs and measured against them: on a
+#   floor whose obstacles are ALL in the frozen grid, this layer can
+#   only ADD what the grid already carries, so the plans should be
+#   IDENTICAL. `combination_method: 1` is what makes that a mechanism -
+#   nav2's updateWithMax never lowers a cost the static layer set and
+#   skips its own NO_INFORMATION cells - so this layer cannot ERASE a
+#   rack, cannot open a wall, and cannot move a lethal cell. It can only
+#   put a lethal cell where the grid has none.
+#
+#   THREE, AND IT IS THE TECHNICAL ONE: A MARK IN A COSTMAP WITH NO
+#   ROLLING WINDOW IS AGED OUT BY NOTHING. The local costmap is a
+#   10 x 10 m window that carries its marks away with it; this one is
+#   1712 x 1196 cells of the whole building, and a phantom marked into
+#   it stays there for every goal of the run. Raytrace clearing only
+#   clears what a beam CURRENTLY passes through, so the fix is not "turn
+#   clearing on" - it is to make the CLEARING REACH FURTHER THAN THE
+#   MARKING, which is the pair of ranges below and the one thing in this
+#   block that is not local_costmap's own value.
+#
+# AND THE SMEAR ARGUMENT THAT USED TO STAND HERE IS ANSWERED BY THE
+# MARKING RANGE RATHER THAN DISMISSED. Marking live returns into a
+# MAP-frame grid displaces every surface by the localisation error this
+# file is dimensioned against - up to 0.5321 m of position, and a
+# heading error that grows with range: EVIDENCE_LOCALIZATION_V3.md
+# 13.10's worst heading step, 0.0764 rad, is 0.61 m of lateral
+# displacement at 8 m and 1.91 m at 25 m. Cutting the MARKING range is
+# what bounds that. Cutting the CLEARING range would not - and the two
+# are separate parameters for exactly this reason.
 global_costmap:
   global_costmap:
     ros__parameters:
@@ -1540,26 +1585,14 @@ global_costmap:
       footprint: "[[-2.415000,-0.450000],[-1.220000,-0.668995],[1.240000,-0.560000],[1.400000,-0.510000],[1.400000,0.510000],[1.240000,0.560000],[-1.220000,0.668995],[-2.415000,0.450000]]"
       footprint_padding: 0.0
 
-      # TWO LAYERS, AND THERE IS NO `obstacle_layer` HERE - WHICH IS A
-      # DECISION AND F4 TASK 3 MEASURED WHAT IT COSTS. This costmap
-      # knows only what the FROZEN MAP knows, so an obstacle that is not
-      # in that grid is not in any global plan; the local costmap sees
-      # it and MPPI then cannot follow a path that goes through it.
-      # EVIDENCE_NAV_V3.md 19.9 is a run where exactly that happened -
-      # the vehicle backed off a spawned box and the watchdog named it -
-      # and 20.6 carries the scope: every driven run in 15, 16 and 17
-      # crossed a floor whose obstacles are ALL in the frozen grid
-      # (RackSW3 included, 16.7d), so no conclusion in this file rests
-      # on this gap.
-      #   IT IS HANDED ON RATHER THAN ADDED HERE FOR THREE REASONS,
-      # ARGUED IN 20.6: adding it moves nav_config_md5 off 53a33d67 and
-      # unmeasures both driven sets; it changes what the PLANNER plans
-      # through on every arm, which is a re-measurement and not a
-      # parameter; and marking a 15 Hz planar scan into a costmap with
-      # NO rolling window leaves marks that nothing clears once the
-      # vehicle drives past them, which is a failure mode that needs its
-      # own measurement rather than a line here.
-      plugins: ["static_layer", "inflation_layer"]
+      # THREE LAYERS, AND THE ORDER IS THE WHOLE OF IT. `static_layer`
+      # lays down the frozen grid; `obstacle_layer` may only ADD to it
+      # (combination_method 1); `inflation_layer` is LAST so that it
+      # inflates what BOTH of them put down. An obstacle layer AFTER the
+      # inflation layer would be marked and never inflated, which is a
+      # lethal cell a 3.815 m vehicle's planner would route within
+      # centimetres of.
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
 
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
@@ -1574,6 +1607,106 @@ global_costmap:
         # waits for ever, and the costmap stays empty while every node
         # reports ACTIVE.
         map_subscribe_transient_local: true
+
+      # ================================================================
+      # THE F4 DEBT, PAID. EVIDENCE_NAV_V3.md 19.9 and 20.6 handed this
+      # layer on; EVIDENCE_DOCKING_V3.md 1 is the re-measurement that
+      # buys the label back. Everything below that carries no comment is
+      # local_costmap's own value for the reason it has it there - one
+      # scanner, one profile, one argument - and every line that DIFFERS
+      # is commented where it differs.
+      # ================================================================
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        # LOAD-BEARING HERE IN A WAY IT IS NOT IN THE ROLLING COSTMAP,
+        # AND IT IS THE FIRST THING TO READ IN THIS BLOCK. This scanner
+        # SEES ITS OWN VEHICLE - three pieces of it, 50 of 811 rays,
+        # 0.60-1.50 m out, MEASURED in EVIDENCE_NAV_V3.md 14.4. In a
+        # 10 x 10 m rolling window those self-returns are marked and
+        # then carried away as the window moves. HERE THEY WOULD BE
+        # MARKED IN THE MAP FRAME AND STAY: a truck driving 27 m down a
+        # spur would paint a continuous 27 m trail of phantom obstacles
+        # along its own route, and the next goal would be planned round
+        # a wall made of the vehicle that is planning it. nav2's
+        # obstacle layer paints its own footprint FREE on every update
+        # before the layers are combined, and 14.4 measures all three
+        # self-returns landing INSIDE the polygon in section (B).
+        footprint_clearing_enabled: true
+        # 1 = MAX, and here it is the mechanism behind reason TWO in
+        # this section's header rather than a default nobody looked at.
+        # nav2_costmap_2d::CostmapLayer::updateWithMax skips this
+        # layer's own NO_INFORMATION cells and writes only where its
+        # cost EXCEEDS what is already there - so this layer can put a
+        # lethal cell where the frozen grid has none, and can do nothing
+        # else at all. It cannot erase a rack, open a wall or move a
+        # cell the static layer set. That is what makes "on a floor the
+        # grid already knows, the plans should be identical" a
+        # PREDICTION with a mechanism under it rather than a hope.
+        combination_method: 1
+        observation_sources: scan
+        scan:
+          # config.yaml topics.scan_nav - CHECKED against it by
+          # m5v3.sh's check_nav_params(), because a `-p` cannot reach a
+          # costmap sub-node. It is the same check that already covers
+          # local_costmap's copy and it covers this one for free.
+          topic: /forklift/gz/scan_nav
+          # ==========================================================
+          # THE ONE PAIR THAT IS NOT local_costmap's, AND IT IS THE
+          # ANSWER TO 19.9's THIRD REASON.
+          #
+          # MARKING IS CUT TO 8.00 m, against local_costmap's 25.0 m.
+          # Two measurements bound it and the tighter one wins:
+          #   THE BEAM SPACING. This scanner's measured increment is
+          #   0.0058178 rad (EVIDENCE_NAV_V3.md 14.4), so neighbouring
+          #   returns are one 0.05 m cell apart at 8.594 m. Beyond that
+          #   a marked surface is a DOTTED line in the grid, and a
+          #   clearing pass - which walks cells along one ray - cannot
+          #   be relied on to erase every dot it did not lay. In a
+          #   ROLLING window a leftover dot leaves with the window; here
+          #   it is permanent. 8.00 m is inside 8.594 m with margin.
+          #   THE SMEAR. A heading error displaces a mark by the range
+          #   times the error: 13.10's worst heading step, 0.0764 rad,
+          #   is 0.61 m at 8.00 m and 1.91 m at 25.0 m. At 8.00 m the
+          #   smear is of the same order as the 0.5321 m position error
+          #   the footprint in section (C) is already grown for; at
+          #   25 m it is four times it.
+          # AND 8.00 m IS ALSO THE RING BAND'S OWN WIDTH, so a vehicle
+          # anywhere in a cruise corridor still marks across the whole
+          # of it.
+          obstacle_max_range: 8.0
+          obstacle_min_range: 0.0
+          # CLEARING REACHES FURTHER THAN MARKING, DELIBERATELY, AND
+          # THIS INEQUALITY IS THE WHOLE FIX. A cell can be MARKED only
+          # from inside 8.00 m; it can be CLEARED from anywhere inside
+          # 12.0 m, from any direction, on any later pass. So every
+          # phantom this layer is able to create lies inside a radius
+          # from which a later pass can remove it - which is the
+          # property a rolling window gives for free and a
+          # whole-building costmap has to be given. Reversing the two
+          # would be the failure mode 19.9 named: marks made at a range
+          # nothing can clear.
+          #   12.0 m IS local_costmap's OWN NUMBER and it is kept for
+          #   its own reason: a 25 m ray at this spacing is 0.144 m
+          #   between neighbours, wider than two cells, and clearing
+          #   along it punches holes through obstacles it stepped over.
+          #   12.0 m still spans the 10 x 10 m rolling window corner to
+          #   corner (7.07 m) and now also spans this layer's marking
+          #   radius with 4.00 m to spare.
+          raytrace_max_range: 12.0
+          raytrace_min_range: 0.0
+          # ==========================================================
+          max_obstacle_height: 2.0
+          min_obstacle_height: 0.0
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+          # 0.5 s = 7.5 scan periods at the sensor's 15 Hz, and nav2's
+          # default of 0.0 means "never expire". On THIS costmap that
+          # default is worse than on the rolling one: a source that has
+          # stopped leaves a frozen mark on a grid nothing rolls away.
+          expected_update_rate: 0.5
+          inf_is_valid: false
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
