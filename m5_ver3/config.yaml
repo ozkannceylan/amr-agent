@@ -4585,3 +4585,39 @@ nav:
     # is not a direction, so a crossing is counted only where a real
     # command changed hands (navcmd.creep_speed_mps).
     cusp_speed_mps: "0.005"
+
+# ------------------------------ DOCK -----------------------------------
+# F5 Task 1. Station furniture arithmetic: where the marker stands, where
+# the truck is docked when the forks are in the load, and where it STAGES.
+# tools/tag_core.py computes all three from m6/ipc/stations.py's station
+# point plus the four distances below. No pose in this block is typed in.
+#
+# THE SHOWCASE STATION IS S5 / PICK-NE-1. EVIDENCE_NAV_V3.md 20.5 item 1
+# is the only station-class arrival this track has; F5 docks there first.
+# The other eleven stations share the same four distances on the pick
+# bays; annex bays (S9-S12) are a later pass.
+dock:
+  station: "S5"
+  # tag36h11: 6x6 data + 1-cell black border = width_at_border 8, plus
+  # the 1-cell quiet zone apriltag_to_image draws = total_width 10.
+  # apriltag_ros `size` is the BLACK SQUARE, not the printed tile.
+  family: "tag36h11"
+  tag_id: "0"
+  size_m: "0.40"
+  width_at_border: "8"
+  total_width: "10"
+  # station point -> back-panel face, along travel. S5 is at y = 4.25
+  # and stations.py puts that face at y = 2.60; 4.25 - 2.60 = 1.65.
+  marker_ahead_m: "1.65"
+  # base_link -> fork tips, UNGROWN, off model.sdf. Same number as
+  # monitor.geometry.fork_tip_x_m with the sign stripped; tests/test_tag_core.py
+  # refuses a drift between the two.
+  fork_reach_m: "1.875"
+  tip_standoff_m: "0.10"
+  # docked pose -> staging pose, backwards along the spur. EVIDENCE_NAV_V3.md
+  # 16.6 / 20.5 item 2 measured the heading still inside 0.10 rad at a
+  # 1.50 m box on a station spur. 2.00 m is that run-in plus the
+  # START_OCCUPIED trap-zone clearance (item 3): tests/test_tag_core.py
+  # recomputes the margin from nav2.yaml's grown footprint and refuses
+  # a staging pose that would land inside it.
+  staging_run_in_m: "2.00"
