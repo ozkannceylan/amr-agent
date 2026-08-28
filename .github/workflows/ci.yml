@@ -128,10 +128,10 @@ jobs:
         run: bash m6/tools/install_broker.sh
 
       - name: pytest (Jazzy overlay)
-        env:
-          FASTRTPS_DEFAULT_PROFILES_FILE: ${{ github.workspace }}/m6/tools/fastdds_loopback.xml
         run: |
           source /opt/ros/jazzy/setup.bash
+          export FASTRTPS_DEFAULT_PROFILES_FILE="$GITHUB_WORKSPACE/m6/tools/fastdds_loopback.xml"
+          test -f "$FASTRTPS_DEFAULT_PROFILES_FILE"
           /tmp/ci-venv/bin/python -m pytest m6/tests/ -q \
             --junit-xml=junit-ros.xml \
             --tb=short
