@@ -176,12 +176,13 @@ Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
       amcl / 0.89 m slam, ÜST SINIR YOK. Suite 583→873. Faz-sonu hüküm:
       isimli sınırlamalarla KAPANDI, F4.5 yok — kaçaklar F5'in kendi
       rejimine ait.
-- [ ] F5. Hassas yanaşma + palet: opennav_docking SimpleNonChargingDock +
+- [x] F5. Hassas yanaşma + palet: opennav_docking SimpleNonChargingDock +
       AprilTag detected_dock_pose; spur çıkışı = undock (düz geri, MPPI
       reverse riskini atlar); DetachableJoint ile palet al/bırak
-      (geometrik predicate'li attach). Opsiyonel SOTA katmanı:
-      LOCO/sdg_pallet_model öğrenilmiş palet tespiti (demo markera
-      dayanır). Kanıt: docking doğruluğu (0.25 m toleransa karşı), film.
+      (geometrik predicate'li attach). Kanıt: `m5_ver3/EVIDENCE_DOCKING_V3.md`
+      (plugin 5/5, class 2/5 vs 0.25 m; pallet attach/lift/carry/detach;
+      dry cycle ×3 `pallet-cycle-20260829-013326`). Opsiyonel SOTA
+      (öğrenilmiş palet tespiti) ve film açık residual — §5.
 
 Bilinen riskler: MPPI Ackermann geri-viraj sapması (nav2 #5714, açık;
 undock ile hafifletilir) · ros_gz köprüsü RTF yer (pointcloud köprüleme,

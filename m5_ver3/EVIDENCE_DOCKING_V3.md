@@ -11,8 +11,8 @@ This file is what pays those debts. **§1 is the obstacle-layer
 re-drive. §2 is station furniture, the colour bridge, Nav2 to
 staging, and AprilTag pose vs the marker at staging range.** **§3 is
 the dock** (plugin ×5, class verdict, fail-fast, undock). **§4 is the
-pallet** (spawn, attach predicate, lift, carry, detach). **§5 is the
-track close.**
+pallet** (spawn, attach predicate, lift, carry, detach, dry cycle ×3).
+**§5 is the track close.**
 
 Everything below was taken on **this rig** (WSL Ubuntu 24.04, ROS 2
 Jazzy, gz-sim 8.11.0, RTX 4050) **headless**, `traction=nominal`,
@@ -34,7 +34,8 @@ Jazzy, gz-sim 8.11.0, RTX 4050) **headless**, `traction=nominal`,
 | **furniture** | `tag36h11_0` spawned at world (7.000, 2.600, 0.800), yaw +π/2, via `/world/warehouse/create`. `warehouse_ver3.sdf` not edited. |
 | **AprilTag at staging range** | **n=211, rms 0.0706 m** in `map` vs the marker through the committed registration (`tag-s5-20260828-155745`). Z is 0.798 vs 0.800. The number sits **inside** the registration residual MAX **0.1179 m**, so it is not a measurement of PnP beyond the map's own floor. Nav2's latched heading does **not** put the tag in the camera. |
 | **S5 dock, `docking=on@3526e090`** | **Plugin 5/5** from heading-aligned staging (the same seed T1 used for the tag). Truth **0.2465 – 0.2553 m**. Strict 0.25 m class **2/5**. Heading **0.032 – 0.596 rad** (`isDocked` is XY). One spawn→dock also in class (`190838`, 0.2425 m). Fail-fast **901**. Undock **905**. |
-| **S5 pallet, `run-20260828-230721`** | Spawned at world **(7.000, 3.030, 0.072)**. `attach_ok` **True** at the seated docked pose (yaw_err **0**, height_err **0.014 m**). Lift: pallet z **0.072 → 0.152**. Carry: truck and pallet both **+0.433 m** in y. Detach left the pallet at **(7.000, 3.478, 0.072)**. Nav2 cycle ×3 **not run**. Laden footprint **not switched**. |
+| **S5 pallet, `run-20260828-230721`** | Spawned at world **(7.000, 3.030, 0.072)**. `attach_ok` **True** at the seated docked pose (yaw_err **0**, height_err **0.014 m**). Lift: pallet z **0.072 → 0.152**. Carry: truck and pallet both **+0.433 m** in y. Detach left the pallet at **(7.000, 3.478, 0.072)**. |
+| **S5 cycle ×3, `pallet-cycle-20260829-013326`** | `done 3 cycles` on `run-20260829-012749`. Plugin pickup dock **3/3** (`013522` / `013927` / `014328`, error 0, retries 0). Pickup is then seated — plugin heading is not `attach_ok`. Laden carry / return / drop are `/cmd_vel`. Cycle 1 Nav2 `spine_north` status **4**; cycles 2–3 transit `no_progress` recovered to staging (`ring_corner` class). Joint held on all three carries. Last rest **(7.027, 3.086, 0.072)**. Laden footprint **not switched**. |
 
 ---
 
@@ -475,11 +476,10 @@ still make.
 `set_pose` of the truck does **not** carry an attached child. That is
 why the carry used `/cmd_vel`, not `dock_bench.py stage`.
 
-### 4.3 What §4 does not claim
+### 4.3 What the seated pickup does not claim
 
-- No Nav2 transit → stage → `DockRobot` → attach cycle, and not ×3.
-  The pickup was from a seated docked pose. T2 already measured the
-  plugin dock.
+- The §4.2 pickup was from a seated docked pose, not from `DockRobot`.
+  T2 already measured the plugin dock. The ×3 cycle is §4.4.
 - No `UndockRobot`. Reverse-out was cmd_vel +x (aisle).
 - No laden footprint republish on `~/footprint`. nav2.yaml still ships
   the unladen hull. Cheap to skip, recorded.
@@ -488,6 +488,38 @@ why the carry used `/cmd_vel`, not `dock_bench.py stage`.
 - `topics.pallet_joint_state` exists and stayed silent to
   `gz topic -e -n 1` (3 s). Attach/detach were scored on pose, not on
   that string.
+
+### 4.4 Dry full cycle ×3
+
+Stack: `run-20260829-012749`, `loc=amcl@735cdbc6`, `nav=on@3ed626ce`,
+`docking=on@3526e090`. Tool: `pallet_cycle.py run` (repeat 3). Session
+`pallet-cycle-20260829-013326`. Wall clock **12.9 min**. `done 3 cycles`.
+
+Empty legs: Nav2 `spine_north` then `stage_s5`, then plugin
+`DockRobot --from-staging` after `dock_bench.py stage` (heading seed).
+Plugin `isDocked` is XY; leftover heading fails `attach_ok`, so pickup
+is then `pallet_bench.py seat` at the scored docked pose (same restore
+§4.2 named: `set_pose` does not carry a child). Laden legs are
+`/cmd_vel` bursts on `topics.cmd_vel` (constraint 22): undock +x
+`dock.staging_run_in_m`, carry +x to `ring_s5_junction.y`, return −x
+the same distance, return-dock −x `staging_run_in_m`. Not
+`UndockRobot` (T2: 905). Not Nav2 through the payload (`010800` drove
+north to y=12.6 with a stale AMCL pose and the pallet as a scan
+obstacle). AMCL is live-seeded after every burst.
+
+| cycle | empty Nav2 transit | plugin dock | attach_ok | lift z | carry truck y | drop pallet (x, y, z) |
+|---|---|---|---|---|---|---|
+| 1 | `spine_north` status 4, truck (−0.460, 10.003) | `013522` success, error 0, retries 0 | True, yaw_err 0, height_err 0.014 m | 0.072 → 0.151 | 9.941 (pallet 8.396, z 0.170) | (7.000, 3.200, 0.072) |
+| 2 | `no_progress`, recovered to staging (7.000, 6.575) | `013927` success, error 0, retries 0 | True, yaw_err 0, height_err 0.014 m | 0.072 → 0.167 | 10.010 (pallet 8.466, z 0.172) | (7.028, 2.987, 0.072) |
+| 3 | `no_progress`, recovered to staging (7.000, 6.575) | `014328` success, error 0, retries 0 | True, yaw_err 0, height_err 0.014 m | 0.072 → 0.167 | 10.018 (pallet 8.474, z 0.172) | (7.027, 3.086, 0.072) |
+
+After each detach the empty undock burst left the pallet. Cycle 1
+empty `stage_s5` arrived at (7.008, 7.081), yaw 2.072 — the same
+heading-at-latch T1 already named, which is why the heading seed
+sits in front of the plugin dock.
+
+What this cycle does not claim: Nav2 under load; plugin heading as
+`attach_ok`; `UndockRobot`; a laden footprint; a film.
 
 ---
 
@@ -505,21 +537,22 @@ branch measured:
 | F4 | Nav2 on the tricycle, stations | EVIDENCE_NAV_V3 |
 | F5 T1 | obstacle layer + AprilTag at S5 | this file §1–§2 |
 | F5 T2 | `opennav_docking` at S5 | this file §3. Plugin 5/5. Class 2/5. Undock 905. |
-| F5 T3 | pallet pickup | this file §4. Attach, lift, carry, detach. Not the Nav2 ×3 cycle. |
+| F5 T3 | pallet pickup + dry cycle ×3 | this file §4. Seated pickup §4.2. Cycle `pallet-cycle-20260829-013326` `done 3 cycles`. Plugin pickup 3/3 then seated attach. Laden motion is cmd_vel. |
 
 Still open, and not this track's to pretend otherwise:
 
-- `ring_corner` (F4 residual, two `no_progress` in §1.4)
+- `ring_corner` (F4 residual; this cycle's 2–3 transit were the same class)
 - wet-floor challenge phase (constraint 19)
 - `--fuse` as a prediction, not a shipping arm
 - learned pallet detector (markers carry the demo;
   `docs/reports/m5v3-03` §4)
-- Nav2 cycle ×3 through the dock plugin
+- Nav2 under load (unladen hull; payload is a scan obstacle)
 - laden footprint switch
 - `UndockRobot` on `dock_backwards: true`
+- film of the dock (TODO named it; no film tool in `m5_ver3/`)
 
-What comes next is the owner's call: M6 fleet integration, the
-challenge phase, or finishing the Nav2 pallet cycle on this branch.
+What comes next is the owner's call: M6 fleet integration or the
+challenge phase. F5's load-bearing measurements are in this file.
 Nothing outside `m5_ver3/` was edited. `warehouse_ver3.sdf` was not
 edited. PLCSIM was not opened.
 
