@@ -394,6 +394,12 @@ gz-sim 8.11.0. The repository is visible inside WSL at
 wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh start'
 ```
 
+**Operator session (window + Nav2 + dock):** `m5_ver3/RUNBOOK.md`. One command:
+
+```bash
+./m5_ver3/m5v3.sh start --localize amcl --nav --dock
+```
+
 | Command | What it does |
 |---|---|
 | `m5v3.sh start` | GPU preflight, then the world, one `forklift_ver3`, both bridges, the wheel-odometry node, the static IMU transform, the EKF, **the command path** and a Gazebo **window**. |

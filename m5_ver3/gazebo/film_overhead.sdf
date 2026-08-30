@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<!-- Overhead film camera. Spawned via /world/warehouse/create, never
+     a world-file edit. Looks down the north ring so a Nav2 drive is
+     visible as a truck moving on the floor. -->
+<sdf version="1.11">
+  <model name="film_overhead">
+    <static>true</static>
+    <pose>-5 8 22 0 1.5708 0</pose>
+    <link name="link">
+      <gravity>false</gravity>
+      <sensor name="cam" type="camera">
+        <always_on>true</always_on>
+        <update_rate>15</update_rate>
+        <topic>/film/overhead</topic>
+        <visualize>false</visualize>
+        <camera>
+          <horizontal_fov>1.6</horizontal_fov>
+          <image>
+            <width>1280</width>
+            <height>720</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>1.0</near>
+            <far>80</far>
+          </clip>
+        </camera>
+      </sensor>
+    </link>
+  </model>
+</sdf>
