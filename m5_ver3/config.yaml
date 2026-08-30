@@ -4876,3 +4876,156 @@ docking:
   detected_rate_hz: "15"
   lifecycle_timeout_s: "60"
 
+# -------------------------------- FILM ---------------------------------
+# F5's closing deliverable. The TODO named a film beside the docking
+# accuracy, and the first attempt (the 22 m film_overhead alone) put a
+# 40 px truck on a warehouse floor with no dock and no pallet in frame:
+# a film that shows nothing this phase claims. This block is the second
+# attempt's every number, and the split is the file's own rule: WHAT
+# THE CAMERAS ARE is here, WHAT THE CUT SHOWS is here, and
+# tools/film_core.py holds only the arithmetic that turns one into the
+# other - never a value.
+#
+# FOUR STREAMS, THREE NEW. follow is a camera at film.follow_height_m
+# straight above the truck, moved to the truck by tools/film_follow.py
+# every 1/follow_update_hz seconds through /world/<world>/set_pose - the
+# truck crosses the frame at roughly a fifth of its width rather than
+# crossing 45 m of floor as a speck. dock is a FIXED camera on a 45-deg
+# angle over the S5 bay, the one angle from which a 0.10 m LIFT is
+# visible at all - straight down it is two pixels of occlusion. wide
+# is the 22 m film_overhead the first attempt built, kept for the
+# establishing shot: where the warehouse is and where the truck is in
+# it. vehicle is the truck's own pallet camera, the one the AprilTag
+# detector already consumes - the tag growing in frame is the evidence
+# that the dock approach is TAG-DRIVEN, and it is the PiP inset during
+# the approach and attach legs.
+film:
+  # One directory per filmed session under paths.log_dir's sibling
+  # convention: logs/film/<stamp>/. Untracked, like every recording.
+  dir: "m5_ver3/logs/film"
+  # The cycle orchestrator film_run.py record runs UNDER OBSERVATION.
+  # It is pallet_cycle.py's own leg plan, unmodified - film_run only
+  # timestamps what it prints, which is why the cycle's recovery and
+  # seeding behaviour is not this tool's to re-implement.
+  cycle_tool: "pallet_cycle.py"
+  cycle_repeat: "1"
+  # How long the four recorders may run before they stop themselves.
+  # A safety net, not a plan: one cycle is ~5 min, 1 cycle + bringup
+  # slack fits in 20.
+  record_budget_s: "1200"
+  # All three film cameras render at this rate and this size. The
+  # vehicle camera is whatever model.sdf gives it (15 Hz, D455).
+  rate_hz: "15"
+  width_px: "1280"
+  height_px: "720"
+  # ---- the follow camera ----
+  follow_model: "film_follow"
+  follow_sdf: "m5_ver3/gazebo/film_follow.sdf"
+  follow_topic: "/film/follow"
+  # Height above the floor. 7.0 m with hfov 1.6 is a 14.7 x 8.3 m
+  # footprint - the 2.5 m truck crosses the 1280 px frame at 217 px
+  # of length, and the bay, the racks flanking it and the aisle all
+  # stay in frame with it. Half this and the truck is a third of the
+  # frame with no floor around it; the first attempt's 22 m is the
+  # other failure.
+  follow_height_m: "7.0"
+  # How often film_follow.py moves the camera. gz service call spawn
+  # latency bounds this from below; measured on this rig one CLI call
+  # is ~30 ms, and 2 Hz holds the follow loop under 10 % of a core.
+  follow_update_hz: "2.0"
+  # Exponential smoothing on the camera position, per update. 0.35 is
+  # about half a second of lag at 2 Hz - the step a 0.5 s pose jump
+  # would otherwise put in the footage is spread over four frames.
+  follow_smooth: "0.35"
+  # Consecutive set_pose failures tolerated before the follow node
+  # gives up BY NAME. The camera then stays where it last was and the
+  # wide recording still exists - degraded footage, never a dead run.
+  follow_fail_max: "10"
+  follow_hfov: "1.6"
+  # ---- the dock camera, FIXED ----
+  dock_model: "film_dock"
+  dock_sdf: "m5_ver3/gazebo/film_dock.sdf"
+  dock_topic: "/film/dock"
+  # 45-deg over the +x side of the S5 bay, high enough that its sight
+  # line clears RackNE2's 4 m top (it crosses the rack's x=9.5 face at
+  # z=5.1): 12.5 3.0 9.0, yaw pi (facing -x), pitched down 0.98 rad at
+  # the bay. hfov 1.2 at 9.8 m of slant range is a 12.5 m footprint -
+  # the whole spur from the staging pose to the wall, the pallet, and
+  # the lift in profile.
+  dock_pose: "12.5 3.0 9.0 0 -0.979 3.141"
+  dock_hfov: "1.2"
+  # ---- the wide camera, F5 Task 4's own 22 m one, re-used ----
+  wide_model: "film_overhead"
+  wide_sdf: "m5_ver3/gazebo/film_overhead.sdf"
+  wide_topic: "/film/overhead"
+  # ---- the vehicle camera: the PiP source, never spawned - it is
+  # already on the truck and the detector already consumes it ----
+  vehicle_topic: "/forklift/gz/cam/image"
+  # ---- the cut ----
+  # How long film_run.py record waits for every camera's FIRST FRAME
+  # before it refuses by name. Cameras render server-side and a spawned
+  # sensor publishes within a couple of seconds; 20 s is the whole
+  # bringup's worth of slack, and a topic that is silent for 20 s is a
+  # camera that was never going to film anything.
+  camera_warmup_s: "20"
+  # The establishing shot: the wide camera holds this many seconds
+  # before the cycle's first leg event. A film that starts mid-motion
+  # has no where.
+  lead_s: "4.0"
+  # The last leg HOLDS this many seconds past the cycle's done - the
+  # film does not end on a mid-motion cut.
+  tail_s: "4.0"
+  # PiP inset geometry: the vehicle camera scaled to this fraction,
+  # offset this far from the main frame's bottom-right corner.
+  pip_scale: "0.25"
+  pip_margin_px: "24"
+  # THE SHOT TABLE, one row per leg of pallet_cycle.py's plan_cycle IN
+  # ORDER. `cam` is the main footage for that leg, `pip` says whether
+  # the vehicle camera is inset over it. tests/test_film_core.py locks
+  # the leg names to plan_cycle() itself, and film_run.py cut REFUSES
+  # an observed timeline whose legs are not exactly these in this
+  # order - a changed cycle is a changed film, not a silent surprise.
+  #   The legs where the film is ABOUT the pallet (lift, lower, detach)
+  # are dock-cam legs because a lift is a z-motion: overhead it is
+  # occlusion, in profile it is the shot. The approach legs carry the
+  # PiP because the tag in the vehicle camera is the proof the dock
+  # run is tag-driven, and the transit legs are follow-cam legs
+  # because the film is called an autonomous DRIVING film.
+  shots:
+    - leg: "transit"
+      cam: "follow"
+      pip: "false"
+    - leg: "stage"
+      cam: "follow"
+      pip: "true"
+    - leg: "dock"
+      cam: "follow"
+      pip: "true"
+    - leg: "attach"
+      cam: "dock"
+      pip: "true"
+    - leg: "lift"
+      cam: "dock"
+      pip: "false"
+    - leg: "undock"
+      cam: "dock"
+      pip: "false"
+    - leg: "carry"
+      cam: "follow"
+      pip: "false"
+    - leg: "stage"
+      cam: "follow"
+      pip: "false"
+    - leg: "dock"
+      cam: "dock"
+      pip: "false"
+    - leg: "lower"
+      cam: "dock"
+      pip: "false"
+    - leg: "detach"
+      cam: "dock"
+      pip: "false"
+    - leg: "undock"
+      cam: "dock"
+      pip: "false"
+

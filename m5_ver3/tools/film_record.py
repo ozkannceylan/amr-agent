@@ -45,6 +45,14 @@ class Recorder(Node):
             h, w = frame.shape[:2]
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             self.writer = cv2.VideoWriter(self.path, fourcc, 15.0, (w, h))
+            # First-frame wall time, beside the mp4: the four film
+            # cameras start at four different times, and film_run.py's
+            # cut turns a wall-clock segment bound into this file's
+            # own clock by subtracting exactly this number.
+            with open(self.path + ".t0", "w", encoding="utf-8") as side:
+                side.write("{:.6f}\n".format(time.time()))
+            print("first frame {:.3f} ({:d}x{:d})".format(
+                time.time(), w, h))
         self.writer.write(frame)
         self.frames += 1
         if self.deadline is not None and time.time() >= self.deadline:

@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<!-- The dock camera, F5's film: a FIXED 45-deg view over the S5 bay, the
+     one angle from which the 0.10 m pallet lift is visible in profile.
+     Spawned once by tools/film_run.py through /world/<world>/create and
+     never moved; the pose is film.dock_pose in config.yaml - NOT in
+     this file, because config is the one home for the number and the
+     sight-line argument that fixes it - and the sight line is argued
+     there (it clears RackNE2's 4 m top at z=5.1).
+     <static> because nothing ever teleports it - film_follow.sdf, not
+     this file, is the one that moves.
+
+     The world file is not edited. -->
+<sdf version="1.11">
+  <model name="film_dock">
+    <static>true</static>
+    <link name="link">
+      <gravity>false</gravity>
+      <sensor name="cam" type="camera">
+        <always_on>true</always_on>
+        <update_rate>15</update_rate>
+        <topic>/film/dock</topic>
+        <visualize>false</visualize>
+        <camera>
+          <horizontal_fov>1.2</horizontal_fov>
+          <image>
+            <width>1280</width>
+            <height>720</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>1.0</near>
+            <far>80</far>
+          </clip>
+        </camera>
+      </sensor>
+    </link>
+  </model>
+</sdf>

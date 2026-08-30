@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<!-- The follow camera, F5's film. Spawned at the truck's rest pose by
+     tools/film_run.py through /world/<world>/create, then MOVED to the
+     truck every 1/film.follow_update_hz seconds by tools/film_follow.py
+     through /world/<world>/set_pose, always straight above it at
+     film.follow_height_m. The world file is not edited.
+
+     NOT STATIC, AND THAT IS DELIBERATE. A <static> model's pose is a
+     placement, and set_pose on it is not a path this track has measured;
+     the truck's own seating (pallet_bench.py seat) goes through set_pose
+     on a movable model and IS measured. So this link is movable with
+     gravity OFF and no collision: nothing integrates it anywhere, no
+     contacts exist to push it, and every teleport lands on the channel
+     the seat already uses. The inertial is the pallet camera's own
+     0.2 kg / 1e-4 pattern - the smallest gz accepts without inventing
+     one.
+
+     The pose is NOT in this file. film_run.py places the camera at the
+     truck's rest pose through the create request, and film_follow.py
+     moves it from there - config.yaml (film.follow_height_m,
+     vehicle.spawn) is the one home for every number that places it. -->
+<sdf version="1.11">
+  <model name="film_follow">
+    <static>false</static>
+    <link name="link">
+      <gravity>false</gravity>
+      <inertial>
+        <mass>0.2</mass>
+        <inertia>
+          <ixx>1e-4</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1e-4</iyy><iyz>0</iyz><izz>1e-4</izz>
+        </inertia>
+      </inertial>
+      <sensor name="cam" type="camera">
+        <always_on>true</always_on>
+        <update_rate>15</update_rate>
+        <topic>/film/follow</topic>
+        <visualize>false</visualize>
+        <camera>
+          <horizontal_fov>1.6</horizontal_fov>
+          <image>
+            <width>1280</width>
+            <height>720</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>1.0</near>
+            <far>80</far>
+          </clip>
+        </camera>
+      </sensor>
+    </link>
+  </model>
+</sdf>
