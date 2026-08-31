@@ -108,3 +108,44 @@ def test_m5v3_spawns_the_pallet_inside_the_dock_guard():
                and "detach" in block.split("\nfi", 1)[0]
                for block in guard[1:]), (
         "pallet_bench.py detach is not inside a dock guard")
+
+
+def test_reseat_request_is_the_same_derivation_place_spawns_at(cfg):
+    """A reseat and a fresh place must never disagree: both read
+    pallet_place._pose. The request also carries the yaw-only
+    quaternion, normalised by construction."""
+    import math
+    import _common
+    bench_cfg = _common.Config("pallet_place", cfg)
+    pose = pp._pose(bench_cfg)
+    req = pp.reseat_request(bench_cfg)
+    assert 'name: "pallet_s5"' in req
+    assert "x: {:.9f}".format(pose["x"]) in req
+    assert "y: {:.9f}".format(pose["y"]) in req
+    assert "z: {:.9f}".format(pose["z"]) in req
+    z = math.sin(pose["yaw"] / 2.0)
+    w = math.cos(pose["yaw"] / 2.0)
+    assert z * z + w * w == pytest.approx(1.0, abs=1e-12)
+
+
+def test_reseat_is_a_set_pose_teleport_never_a_respawn():
+    """The ghost-attach fix as a pin: reseat must go through
+    /world/<world>/set_pose on the SAME entity, and must not call the
+    remove or create services at all."""
+    src = open(pp.__file__, encoding="utf-8").read()
+    body = src.split("def reseat(cfg):", 1)[1].split("def main(", 1)[0]
+    assert "set_pose" in body
+    assert "/create" not in body
+    assert "/remove" not in body
+
+
+def test_the_cycle_restores_by_reseat_and_not_by_remove_plus_place():
+    """pallet_cycle.py's restore_for_attach: entity churn is the
+    ghost-attach window; the steps list must name reseat and must not
+    name remove."""
+    import pallet_cycle
+    src = open(pallet_cycle.__file__, encoding="utf-8").read()
+    body = src.split("def restore_for_attach(", 1)[1].split(
+        "def burst(", 1)[0]
+    assert '("pallet_place.py", "reseat")' in body
+    assert '"remove"' not in body

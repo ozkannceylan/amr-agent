@@ -10,7 +10,9 @@ edit. CONSTRAINT 23. This file does not attach; attach is pallet_core
 plus a gz Empty on topics.pallet_attach after the predicate holds.
 """
 import argparse
+import math
 import os
+import subprocess
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -116,6 +118,58 @@ def remove(cfg):
     return 0
 
 
+def reseat_request(cfg):
+    """The set_pose body that puts the LIVE pallet back at its design
+    pose - pallet_core.spawn_pose, the same derivation `place` spawns
+    at, so a reseat and a fresh place cannot disagree."""
+    pose = _pose(cfg)
+    yaw = pose["yaw"]
+    return (
+        'name: "{}", position: {{x: {:.9f}, y: {:.9f}, z: {:.9f}}}, '
+        'orientation: {{z: {:.9f}, w: {:.9f}}}'
+    ).format(cfg.s("pallet.name"), pose["x"], pose["y"], pose["z"],
+             math.sin(yaw / 2.0), math.cos(yaw / 2.0))
+
+
+def reseat(cfg):
+    """The design pose, by TELEPORT and not by respawn.
+
+    WHY THIS EXISTS, AND IT IS THE 2026-08-30 CYCLE'S WHOLE FAILURE:
+    restore_for_attach used to clear a misplaced pallet with remove +
+    place, and the DetachableJoint plugin CACHES its child entity. An
+    attach Empty that arrives while the OLD entity is still listed in
+    the entity-component manager joins a GHOST - the announcement
+    never fires, the lift raises an empty carriage into the deck, and
+    the truck leaves jammed under the pallet with its wheels spinning.
+    gz-sim's own source names that window an edge case; this track
+    hits it. A set_pose teleport moves THE SAME ENTITY, so there is
+    nothing stale to join and no window to hit. It is the same service
+    pallet_bench seats the truck with, measured, and the world file
+    stays untouched.
+    """
+    world = cfg.s("world.name")
+    req = reseat_request(cfg)
+    cmd = [
+        "gz", "service", "-s", "/world/{}/set_pose".format(world),
+        "--reqtype", "gz.msgs.Pose", "--reptype", "gz.msgs.Boolean",
+        "--timeout", str(cfg.s("timing.spawn_service_timeout_ms")),
+        "--req", req,
+    ]
+    try:
+        reply = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=30).stdout
+    except Exception as exc:
+        reply = "gz service failed: {}".format(exc)
+    if "data: true" not in reply:
+        cfg.refuse("gz set_pose put the pallet back at its design pose",
+                   "/world/{}/set_pose".format(world),
+                   reply or "<empty>",
+                   "the reply above is also what a MISSING pallet "
+                   "looks like - place one first: pallet_place.py place")
+    print("reseated {}".format(req))
+    return 0
+
+
 def main(argv=None):
     cfg = _common.load_config(TOOL, REQUIRED_KEYS)
     parser = argparse.ArgumentParser(prog="pallet_place.py")
@@ -123,11 +177,14 @@ def main(argv=None):
     sub.add_parser("describe")
     sub.add_parser("place")
     sub.add_parser("remove")
+    sub.add_parser("reseat")
     args = parser.parse_args(argv)
     if args.cmd == "place":
         return place(cfg)
     if args.cmd == "remove":
         return remove(cfg)
+    if args.cmd == "reseat":
+        return reseat(cfg)
     return describe(cfg)
 
 

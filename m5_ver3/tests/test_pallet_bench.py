@@ -89,3 +89,23 @@ def test_seat_request_is_the_docked_pose(cfg):
     assert "7.000000000" in req or "x: 7.000" in req
     assert "4.575" in req
 
+
+def test_state_confirms_reads_the_plugins_own_announcement():
+    """The gate the 2026-08-30 cycle lacked: `attach ok` must mean the
+    JOINT formed, not that the predicate was satisfied before an Empty
+    that joined a ghost. gz prints the StringMsg as `data: "attached"`.
+    """
+    assert pb.state_confirms('data: "attached"', "attached") is True
+    assert pb.state_confirms('data: "detached"', "attached") is False
+    assert pb.state_confirms("data: attached", "attached") is True
+    assert pb.state_confirms("", "attached") is False
+    assert pb.state_confirms(None, "attached") is False
+    assert pb.state_confirms("garbage with no data line", "attached") is False
+
+
+def test_attach_gates_on_the_announcement_not_the_predicate_alone():
+    src = open(pb.__file__, encoding="utf-8").read()
+    assert "state_confirms(state, \"attached\")" in src
+    assert "listen_and_publish" in src
+    # and the refusal names both topics it used
+    assert "the DetachableJoint plugin announced the joint" in src

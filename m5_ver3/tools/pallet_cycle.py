@@ -132,11 +132,22 @@ def seed_amcl_live(cfg):
 def restore_for_attach(cfg):
     """docked pose restore. Plugin isDocked is XY; leftover heading
     fails attach_ok and the forks shove the pallet (c1-attach 0.63 rad).
+
+    THE PALLET IS RESEATED BY TELEPORT, NEVER RESPAWNED. Until
+    2026-08-30 this step was remove + place, and the DetachableJoint
+    plugin caches its child entity: the cycle's attach Empty fired
+    while the OLD entity was still in the ECM and joined a ghost -
+    no announcement, no lift, a carriage driven into the deck and a
+    truck jammed under the pallet (wheels -222.9 rad, RTF 0.147).
+    pallet_place.py reseat moves the SAME entity, through the pose
+    service the seat below already uses, and pallet_bench.py attach
+    now gates on the plugin's own announcement, so a joint that did
+    not form is a named refusal at attach time and never a jam twenty
+    minutes later. EVIDENCE_DOCKING_V3.md 6.
     """
     py = sys.executable
     steps = (
-        ("pallet_place.py", "remove"),
-        ("pallet_place.py", "place"),
+        ("pallet_place.py", "reseat"),
         ("pallet_bench.py", "detach"),
         ("pallet_bench.py", "seat"),
     )

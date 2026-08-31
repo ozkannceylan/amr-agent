@@ -4820,6 +4820,16 @@ pallet:
   child_link: "pallet_body"
   # Mast joint <velocity> in model.sdf. A faster command is a lie.
   mast_limit_mps: "0.15"
+  # How long pallet_bench.py attach waits for the DetachableJoint
+  # plugin's own announcement on topics.pallet_joint_state after it
+  # publishes the attach Empty. THE GATE THE 2026-08-30 CYCLE LACKED:
+  # a cycle attached a joint that never formed, printed `attach ok`
+  # off the predicate alone, lifted an empty carriage into the pallet
+  # deck, and left the truck jammed under it with its wheels spinning
+  # (-222.9 rad, RTF 0.147) - twenty minutes of run spent on a
+  # failure that names itself now: the state topic that never said
+  # "attached". See EVIDENCE_DOCKING_V3.md 6.
+  state_timeout_s: "5"
 
 # ------------------------------ APRILTAG -------------------------------
 # F5 Task 1's detector, vendored the way fuse is: no sudo, pinned debs,

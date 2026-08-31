@@ -40,7 +40,9 @@ REQUIRED_KEYS = (
     "pallet.lift_m", "pallet.wall_clearance_m",
     "dock.station", "dock.marker_ahead_m", "dock.fork_reach_m",
     "dock.tip_standoff_m", "dock.staging_run_in_m", "dock.tag_thickness_m",
-    "topics.pallet_attach", "topics.pallet_detach", "topics.fork_cmd",
+    "topics.pallet_attach", "topics.pallet_detach",
+    "topics.pallet_joint_state", "pallet.state_timeout_s",
+    "topics.fork_cmd",
     "topics.odom_ground_truth", "world.name", "vehicle.name",
     "vehicle.spawn.z", "timing.spawn_service_timeout_ms",
 )
@@ -184,6 +186,46 @@ def status(cfg):
     return 0 if ok else 1
 
 
+def state_confirms(text, word):
+    """Does the plugin's own announcement say `word`?
+
+    The listener output carries gz's `data: "attached"` line - the
+    one field the DetachableJoint plugin publishes on
+    topics.pallet_joint_state. Pure, so tests hold it.
+    """
+    for line in str(text).splitlines():
+        if line.strip().startswith("data:"):
+            value = line.split(":", 1)[1].strip()
+            return value.strip("'\"") == word
+    return False
+
+
+def listen_and_publish(cfg, pub_argv):
+    """LISTEN first, then publish, then read the plugin's reply.
+
+    The listener is up BEFORE the publish - gz transport does not
+    replay, so a subscriber that arrives late would wait for an
+    announcement that already happened. Returns the listener's output,
+    or None when the plugin stayed silent for pallet.state_timeout_s:
+    that silence is the ghost attach, a joint the plugin never
+    created, and the failure it names is the one the 2026-08-30 cycle
+    spent twenty minutes discovering instead.
+    """
+    listener = subprocess.Popen(
+        ["gz", "topic", "-e", "-t", cfg.s("topics.pallet_joint_state"),
+         "-n", "1"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    time.sleep(1.5)                       # the subscription must land first
+    _run(pub_argv)
+    try:
+        return listener.communicate(timeout=cfg.f("pallet.state_timeout_s"))[0]
+    except subprocess.TimeoutExpired:
+        return None
+    finally:
+        if listener.poll() is None:
+            listener.terminate()
+
+
 def attach(cfg):
     truck, pallet, raw = live_poses(cfg)
     if truck is None or pallet is None:
@@ -200,11 +242,25 @@ def attach(cfg):
                        pallet["x"], pallet["y"], pallet["z"], pallet["yaw"]),
                    "yaw_err {:.4f} height_err {:.4f}".format(
                        detail["yaw_err"], detail["height_err"]))
-    out = _run(empty_pub(cfg.s("topics.pallet_attach")))
+    state = listen_and_publish(
+        cfg, empty_pub(cfg.s("topics.pallet_attach")))
+    if not state_confirms(state, "attached"):
+        cfg.refuse(
+            "the DetachableJoint plugin announced the joint",
+            "topics.pallet_joint_state ({})".format(
+                cfg.s("topics.pallet_joint_state")),
+            "the Empty was published on {} and the plugin said nothing "
+            "for {} s - the joint did NOT form (a ghost attach: the "
+            "plugin joined a stale entity or none at all), and the "
+            "predicate the print names cannot see that".format(
+                cfg.s("topics.pallet_attach"),
+                cfg.s("pallet.state_timeout_s")),
+            "seat and reseat first: pallet_bench.py seat && "
+            "pallet_place.py reseat")
     print("attach ok  yaw_err {:.4f}  height_err {:.4f}".format(
         detail["yaw_err"], detail["height_err"]))
-    if out.strip():
-        print(out.strip())
+    print("attached  the plugin announced it on {}".format(
+        cfg.s("topics.pallet_joint_state")))
     return 0
 
 
