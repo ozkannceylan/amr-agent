@@ -70,3 +70,11 @@ m5_ver3/logs/
 m5_ver3/.m5v3_pids
 m5_ver3/.m5v3_traction
 .archive
+
+# m6-ver2 derived truck sets: the per-truck m5v3 artifact set under
+# vehicles/<vid>/ is DERIVED by tools/instantiate_truck.py from the
+# donor m5_ver3/ files, not authored, and its MANIFEST.json records the
+# donor hashes the derivation was made against. logs/<vid>/ is what a
+# RUN leaves behind - the same line m6/ and m5_ver3/ above draw.
+m6_ver2/vehicles/
+m6_ver2/logs/
