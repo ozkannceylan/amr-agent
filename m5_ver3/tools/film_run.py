@@ -10,10 +10,12 @@ gz's own /create (the world file is never edited), starts
 film_follow.py and one film_record.py per camera, holds a pre-roll so
 the establishing shot is footage rather than luck, and then runs
 pallet_cycle.py's own `run` UNDER OBSERVATION - stdout line by line,
-each `leg c1-<name>` stamped with the wall clock into timeline.json.
-The cycle is not modified, wrapped or re-implemented: its seeding,
-its recovery and its refusals stay exactly what EVIDENCE_DOCKING_V3
-§4 measured, and this tool only watches.
+each `leg c1-<name>` stamped with the wall clock into timeline.json,
+and every RECOVERY INTERVENTION the cycle prints stamped there by
+name beside them. The cycle is not modified, wrapped or
+re-implemented: its seeding, its recovery and its refusals stay
+exactly what EVIDENCE_DOCKING_V3 §4 measured, and this tool only
+watches - it records the recovery, it does not prevent it.
 
 `cut` turns that timeline plus the four recordings into one film
 (film_core.plan_segments + ffmpeg_argv): the wide establishing shot -
@@ -26,6 +28,9 @@ the SIM clock, so every bound crosses through film_core.clock: each
 recording's own t0/t1/n sidecars measure how fast its clock ran, and
 a segment that would need footage past the end of its file is refused
 by name rather than clamped there by ffmpeg.
+  A timeline holding a recovery intervention is refused BY NAME before
+any of that (AMR-DEC-004): the film of a cycle that needed a recovery
+is not the film of autonomy, and there is no flag that says otherwise.
 
 Needs ROS, gz and ffmpeg; the stack must already be up
 (`m5v3.sh start --localize amcl --nav --dock`).
@@ -189,7 +194,8 @@ def record(cfg):
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     session = os.path.join(REPO, cfg.s("film.dir"), "film-" + stamp)
     os.makedirs(session, exist_ok=True)
-    timeline = {"session": session, "recordings": {}, "legs": []}
+    timeline = {"session": session, "recordings": {}, "legs": [],
+                "interventions": []}
     print("session   {}".format(session))
 
     # ---- the cameras, placed and named before anything records ----
@@ -304,6 +310,17 @@ def record(cfg):
             cycle_log.flush()
             stripped = line.strip()
             print("  " + stripped)
+            # A RECOVERY INTERVENTION IS STAMPED WHEREVER IT FALLS, and
+            # on its own `if`: the cycle prints it between two legs and
+            # it is not one, so it never competes with the leg chain
+            # below. AMR-DEC-004: the film of a cycle that needed a
+            # recovery is not the film of autonomy, and cut refuses the
+            # timeline that holds one. This tool still only WATCHES -
+            # the cycle is not steered away from its own recovery.
+            recovery = fc.intervention(stripped)
+            if recovery is not None:
+                timeline["interventions"].append(
+                    {"name": recovery, "t": now, "line": stripped})
             if stripped.startswith("=== cycle"):
                 if timeline["cycle_start"] is None:
                     timeline["cycle_start"] = now
@@ -373,6 +390,17 @@ def record(cfg):
         print("the cycle did not finish; there is no film to cut "
               "from this session")
         return 1
+    if timeline["interventions"]:
+        # The same answer cut gives, given here rather than eight
+        # minutes later: a take that needed a recovery is a take to
+        # record again, and an operator learns that now.
+        print("recovery  {} intervention(s) recorded".format(
+            len(timeline["interventions"])))
+        for text in fc.intervention_lines(timeline):
+            print(text)
+        print("the cycle recovered rather than drove; there is no film "
+              "to cut from this session")
+        return 1
     print("cut with  film_run.py cut --session {}".format(session))
     return 0
 
@@ -389,6 +417,25 @@ def cut(cfg, session):
                    "record writes it; this session has none")
     with open(timeline_path, encoding="utf-8") as handle:
         timeline = json.load(handle)
+
+    # ---- A FILM MAY NOT SILENTLY CONTAIN A RECOVERY ----
+    # AMR-DEC-004 consequence 2. The cycle recovers a Nav2 miss by
+    # teleporting the truck to staging and prints it; the shipped E2E
+    # take held one and nothing downstream said a word. This gate is
+    # FIRST - before the recordings are read, before the plan, before
+    # ffmpeg - because it is not a fact about footage, and there is no
+    # override flag: the owner watches films, not flags. A timeline
+    # with no `interventions` key at all was recorded before this check
+    # existed and cuts exactly as it did.
+    if fc.interventions(timeline):
+        cfg.refuse(
+            "the filmed cycle needed no recovery intervention",
+            timeline_path,
+            *(["the film of a cycle that needed a recovery is not the "
+               "film of autonomy:"]
+              + fc.intervention_lines(timeline)
+              + ["record another take; a recovered cycle has no film "
+                 "in it"]))
 
     # Each recording is placed on the film's clock from its OWN
     # sidecars rather than from the t0 the timeline also carries: one

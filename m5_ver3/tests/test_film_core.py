@@ -15,6 +15,7 @@ config promises are locked here:
     thing differently are two cameras, and the cut would find out at
     1280x720.
 """
+import json
 import math
 import os
 import re
@@ -24,7 +25,9 @@ import pytest
 
 yaml = pytest.importorskip("yaml")
 
+import _common                                       # noqa: E402
 import film_core as fc                                # noqa: E402
+import film_run                                       # noqa: E402
 import pallet_cycle as cy                            # noqa: E402
 
 _M5V3 = os.path.normpath(
@@ -175,6 +178,204 @@ def test_every_plan_cycle_leg_survives_its_cycle_tag():
     for n in (1, 2, 10):
         assert [fc.bare_leg("c{}-{}".format(n, leg))
                 for leg in legs] == legs
+
+
+# ---- the recovery interventions ----
+
+# The line pallet_cycle.py prints when a Nav2 miss is recovered by
+# teleporting the truck to the staging pose, copied VERBATIM from the
+# take-4 cycle.log (2026-09-01 09:41 - the take that shipped, and the
+# reason AMR-DEC-004 exists).
+RECOVERY_LINE = "nav2 miss recovered via staging rc=0"
+
+# Lines from the SAME log that are the DESIGNED pickup procedure -
+# EVIDENCE_DOCKING_V3 section 4 - and are not interventions at all. The
+# dock leg legitimately prints `staged` two lines below the recovery's
+# own, so a classifier keyed on that word would refuse every valid take.
+DESIGNED_LINES = [
+    "staged    world (7.000, 6.575) yaw +1.5708",
+    "          map   (-24.090, 3.201) yaw -1.5675",
+    "seeded    live map (-24.037, 3.738) yaw -1.5396",
+    "seeded    docked map (-24.097, 5.201) yaw -1.5675",
+    'seated name: "forklift_ver3", position: {x: 7.000000000, '
+    'y: 4.575000000, z: 0.050000000}',
+    'reseated name: "pallet_s5", position: {x: 7.000000000, '
+    'y: 3.030000000, z: 0.072000000}',
+    "leg       c1-dock",
+    "leg       c1-stage",
+    "=== cycle 1/1 ===",
+    "success   True",
+    "done      1 cycles -> logs/pallet/cycle-20260901-093836",
+]
+
+
+def test_intervention_names_the_nav2_miss_recovery():
+    assert fc.intervention(RECOVERY_LINE) == "nav2-miss-recovery"
+
+
+def test_intervention_reads_the_line_however_it_arrives():
+    """record hands it the stdout line; the newline is not information."""
+    assert fc.intervention("  " + RECOVERY_LINE + "\n") == (
+        "nav2-miss-recovery")
+
+
+@pytest.mark.parametrize("line", DESIGNED_LINES)
+def test_intervention_is_silent_about_the_designed_pickup(line):
+    """THE BOUND ON THE CLASSIFIER, and the whole reason it is anchored.
+
+    The cycle stages, seeds and seats the truck as its own designed
+    procedure - EVIDENCE_DOCKING_V3 section 4 - and prints all of it
+    down the same stdout the recovery uses. A film that refused the
+    designed pickup would refuse every valid take, which is a broken
+    invariant and not a strict one.
+    """
+    assert fc.intervention(line) is None
+
+
+def test_the_classifier_matches_what_pallet_cycle_actually_prints():
+    """THE PRODUCER PIN: the classifier reads the producer's own words.
+
+    A reworded recovery print would otherwise leave this classifier
+    silent, the timeline empty and the cut happy - a film with a
+    recovery in it, cut without a word, which is exactly the thing
+    AMR-DEC-004 forbids. pallet_cycle.py is not this file's to edit,
+    so it is this file's to watch.
+    """
+    with open(os.path.join(_M5V3, "tools", "pallet_cycle.py"),
+              encoding="utf-8") as handle:
+        source = handle.read()
+    printed = re.findall(r'print\("([^"]*recovered[^"]*)"', source)
+    assert printed, "pallet_cycle.py prints no recovery line any more"
+    for fmt in printed:
+        assert fc.intervention(fmt.replace("{}", "0")) == (
+            "nav2-miss-recovery")
+
+
+def _recovered_timeline(legs=("transit", "dock")):
+    timeline = _timeline(list(legs))
+    timeline["interventions"] = [
+        {"name": "nav2-miss-recovery", "t": 122.5, "line": RECOVERY_LINE}]
+    return timeline
+
+
+def test_interventions_reads_what_record_stamped():
+    assert fc.interventions(_recovered_timeline()) == [
+        {"name": "nav2-miss-recovery", "t": 122.5, "line": RECOVERY_LINE}]
+
+
+@pytest.mark.parametrize("timeline", [
+    {}, {"legs": []}, {"interventions": []}, {"interventions": None}])
+def test_a_timeline_without_the_key_holds_no_interventions(timeline):
+    """BACKWARD COMPATIBILITY, in the one place it can be pinned.
+
+    Every session recorded before this field existed has no
+    `interventions` key at all, and an absent key is not a suspicion:
+    those sessions cut exactly as they always did.
+    """
+    assert fc.interventions(timeline) == []
+    assert fc.intervention_lines(timeline) == []
+
+
+def test_the_shipped_takes_timeline_predates_the_field_and_still_cuts():
+    path = os.path.join(_M5V3, "logs", "film", "film-20260901-093823",
+                        "timeline.json")
+    if not os.path.isfile(path):
+        pytest.skip("the take-4 session is not in this tree")
+    with open(path, encoding="utf-8") as handle:
+        timeline = json.load(handle)
+    assert "interventions" not in timeline
+    assert fc.interventions(timeline) == []
+
+
+def test_intervention_lines_name_it_quote_it_and_place_it_in_the_cycle():
+    lines = fc.intervention_lines(_recovered_timeline())
+    assert len(lines) == 1
+    assert "nav2-miss-recovery" in lines[0]
+    assert RECOVERY_LINE in lines[0]
+    assert "+22.5 s" in lines[0]        # 122.5, on a cycle_start of 100.0
+
+
+def test_intervention_lines_hold_the_wall_time_when_there_is_no_cycle():
+    """A record that refused before `=== cycle` has no start to offset."""
+    lines = fc.intervention_lines(
+        {"interventions": [{"name": "nav2-miss-recovery", "t": 122.5,
+                            "line": RECOVERY_LINE}]})
+    assert "122.5" in lines[0]
+
+
+def test_the_shipped_takes_own_log_holds_exactly_one_intervention():
+    """The take that caused AMR-DEC-004, replayed through the classifier.
+
+    Its cycle.log is 130 lines of a cycle that mostly drove itself and
+    ONE line that was a recovery - and every `staged`, `seeded`,
+    `seated` and `reseated` of the designed pickup in between. record
+    reads that stdout line by line and stamps what this names; this is
+    what it WOULD have stamped on the take that shipped without it.
+    """
+    path = os.path.join(_M5V3, "logs", "film", "film-20260901-093823",
+                        "cycle.log")
+    if not os.path.isfile(path):
+        pytest.skip("the take-4 session is not in this tree")
+    hits = []
+    with open(path, encoding="utf-8") as handle:
+        for raw in handle:
+            # the log is record's own `<wall> <the cycle's line>`
+            line = raw.split(" ", 1)[1] if " " in raw else raw
+            name = fc.intervention(line)
+            if name is not None:
+                hits.append((name, line.strip()))
+    assert hits == [("nav2-miss-recovery", RECOVERY_LINE)]
+
+
+# ---- the cut's own gate on those interventions ----
+
+def _session(tmp_path, timeline):
+    session = tmp_path / "film-20260101-000000"
+    session.mkdir()
+    (session / "timeline.json").write_text(json.dumps(timeline),
+                                           encoding="utf-8")
+    return str(session)
+
+
+def _film_cfg():
+    return _common.load_config("film_run", film_run.REQUIRED_KEYS)
+
+
+def test_cut_refuses_a_timeline_that_holds_an_intervention(tmp_path,
+                                                           capsys):
+    """AMR-DEC-004's consequence 2, at the last gate before the film.
+
+    The shipped E2E film contained a Nav2 miss recovered by a set_pose
+    teleport and said so on stdout; nothing downstream noticed. This is
+    the notice - by NAME, quoting the line and where in the cycle it
+    fell, and with no flag to wave it through: the owner watches films,
+    not flags.
+    """
+    session = _session(tmp_path, _recovered_timeline())
+    with pytest.raises(SystemExit):
+        film_run.cut(_film_cfg(), session)
+    err = capsys.readouterr().err
+    assert "recovery intervention" in err
+    assert "nav2-miss-recovery" in err
+    assert RECOVERY_LINE in err
+    assert "+22.5 s" in err
+    # and it refused BEFORE ffmpeg, so there is no half film on disk
+    assert not os.path.isfile(os.path.join(session, "m5v3-film.mp4"))
+
+
+def test_cut_takes_a_legacy_timeline_straight_past_the_gate(tmp_path,
+                                                            capsys):
+    """No `interventions` key is no interventions - not a refusal.
+
+    The same synthetic session refuses one line further down, for the
+    recordings it does not have, which is the refusal it always had.
+    """
+    session = _session(tmp_path, _timeline(["transit", "dock"]))
+    with pytest.raises(SystemExit):
+        film_run.cut(_film_cfg(), session)
+    err = capsys.readouterr().err
+    assert "intervention" not in err
+    assert "follow" in err and "clock" in err
 
 
 # ---- the plan ----

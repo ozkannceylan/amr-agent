@@ -11,6 +11,9 @@ owns the numbers:
   pose_request     a world pose as a gz service request body
   parse_pose       config's `x y z r p y` string as a pose dict
   bare_leg         a cycle's `c<n>-<leg>` stdout tag as a bare leg
+  intervention     a cycle stdout line as a named RECOVERY, or None
+  interventions    the recoveries a recorded timeline holds - and
+                   intervention_lines, those as a refusal's own lines
   clock            one recording's own wall -> video mapping
   read_clock       that mapping, from the sidecars beside an mp4
   video_time       a wall second as a second of one recording
@@ -132,6 +135,78 @@ def bare_leg(tag):
     """
     match = _CYCLE_LEG.match(str(tag))
     return match.group(1) if match else None
+
+
+# A RECOVERY INTERVENTION IS NOT PART OF THE FILM. pallet_cycle.py
+# recovers a Nav2 miss by staging the truck - a set_pose teleport to
+# the staging pose - and says so on its own stdout; the shipped E2E
+# take contained exactly one and nothing downstream noticed. AMR-DEC-
+# 004: record stamps every such line into the timeline and cut refuses
+# a timeline that holds any, by name.
+#
+# ANCHORED, AND ONLY THE RECOVERY CLASS. The cycle's DESIGNED pickup
+# procedure - EVIDENCE_DOCKING_V3 §4 - prints `staged`, `seeded`,
+# `seated` and `reseated` down the same pipe, and the dock leg
+# legitimately prints `staged world (7.000, 6.575) yaw +1.5708` two
+# lines below the recovery's own. A classifier keyed on `staged` would
+# refuse every valid take, which is a broken invariant and not a strict
+# one; the unambiguous marker is the recovery sentence itself. The
+# pattern stops before the `via staging rc=<n>` tail so a recovery
+# spelled another way is still caught, and tests/test_film_core.py
+# reads pallet_cycle.py's own print to check this still matches it.
+INTERVENTIONS = (
+    ("nav2-miss-recovery", re.compile(r"^nav2 miss recovered\b")),
+)
+
+
+def intervention(line):
+    """One cycle stdout line as a named recovery intervention, or None.
+
+    None is the answer for every line of a cycle that drove itself,
+    which is nearly all of them: this names the exceptions.
+    """
+    text = str(line).strip()
+    for name, pattern in INTERVENTIONS:
+        if pattern.search(text):
+            return name
+    return None
+
+
+def interventions(timeline):
+    """The recovery interventions a recorded timeline holds.
+
+    AN ABSENT KEY IS NO INTERVENTIONS, not an unknown: every session
+    recorded before this field existed has no `interventions` key at
+    all and cuts exactly as it always did. A null reads the same way -
+    json holds what record wrote, and record writes a list.
+    """
+    return list(timeline.get("interventions") or [])
+
+
+def intervention_lines(timeline):
+    """Those interventions as a refusal's own lines: name, when, line.
+
+    The wall stamp is reported as an offset into the CYCLE, because
+    that is where an operator will go looking for it - `+22.5 s` is a
+    place in the footage and 1788248516.647 is not. A timeline with no
+    cycle_start (a record that refused before the cycle spoke) keeps
+    the bare wall time rather than inventing an origin.
+    """
+    start = timeline.get("cycle_start")
+    lines = []
+    for entry in interventions(timeline):
+        stamp = entry.get("t")
+        if stamp is None:
+            when = "at an unstamped moment"
+        elif start is None:
+            when = "at wall {:.3f}".format(float(stamp))
+        else:
+            when = "{:+.1f} s into the cycle".format(
+                float(stamp) - float(start))
+        lines.append("  {} {}: {}".format(
+            entry.get("name", "an unnamed intervention"), when,
+            entry.get("line", "")))
+    return lines
 
 
 # The three one-number files film_record.py leaves beside every mp4,
@@ -503,6 +578,40 @@ def _selftest():
     check("bare leg c12", bare_leg("c12-lower"), "lower")
     for token in ("1", "transit", "cx-transit", "c1-", ""):
         check("bare leg rejects {!r}".format(token), bare_leg(token), None)
+
+    # intervention: the recovery class by name, and the DESIGNED pickup
+    # left alone - a film that refused its own docking procedure would
+    # refuse every valid take
+    check("nav2 miss is an intervention",
+          intervention("nav2 miss recovered via staging rc=0"),
+          "nav2-miss-recovery")
+    check("an intervention survives its indent",
+          intervention("  nav2 miss recovered via staging rc=0\n"),
+          "nav2-miss-recovery")
+    for line in ("staged    world (7.000, 6.575) yaw +1.5708",
+                 "seeded    live map (-24.037, 3.738) yaw -1.5396",
+                 'seated name: "forklift_ver3", position: {x: 7.0}',
+                 'reseated name: "pallet_s5", position: {x: 7.0}',
+                 "leg       c1-dock", "done      1 cycles -> logs/x"):
+        check("{!r} is the designed pickup".format(line.split()[0]),
+              intervention(line), None)
+
+    # interventions: an absent key is a session recorded before this
+    # field existed, and it cuts exactly as it always did
+    check("a timeline without the key", interventions({"legs": []}), [])
+    check("a null holds none", interventions({"interventions": None}), [])
+    recovered = {"cycle_start": 100.0, "interventions": [
+        {"name": "nav2-miss-recovery", "t": 122.5,
+         "line": "nav2 miss recovered via staging rc=0"}]}
+    check("one intervention, one line",
+          len(intervention_lines(recovered)), 1)
+    for needle in ("nav2-miss-recovery", "+22.5 s",
+                   "nav2 miss recovered via staging rc=0"):
+        if needle not in intervention_lines(recovered)[0]:
+            failures.append("intervention_lines lost {!r}".format(needle))
+    check("no cycle_start keeps the wall time",
+          "wall 122.500" in intervention_lines(
+              {"interventions": recovered["interventions"]})[0], True)
 
     # plan_segments: a two-leg table, all times wall
     table = [("transit", "follow", False), ("dock", "dock", True)]
