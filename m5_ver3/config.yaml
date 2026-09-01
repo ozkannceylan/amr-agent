@@ -4959,10 +4959,13 @@ film:
   # 45-deg over the +x side of the S5 bay, high enough that its sight
   # line clears RackNE2's 4 m top (it crosses the rack's x=9.5 face at
   # z=5.1): 12.5 3.0 9.0, yaw pi (facing -x), pitched down 0.98 rad at
-  # the bay. hfov 1.2 at 9.8 m of slant range is a 12.5 m footprint -
+  # the bay - and down is POSITIVE pitch on this rig, like the overhead
+  # cam's +1.5708: the -0.979 first sign filmed uniform sky-grey for two
+  # whole takes, A/B measured 2026-09-01. hfov 1.2 at 9.8 m of slant
+  # range is a 12.5 m footprint -
   # the whole spur from the staging pose to the wall, the pallet, and
   # the lift in profile.
-  dock_pose: "12.5 3.0 9.0 0 -0.979 3.141"
+  dock_pose: "12.5 3.0 9.0 0 0.979 3.141"
   dock_hfov: "1.2"
   # ---- the wide camera, F5 Task 4's own 22 m one, re-used ----
   wide_model: "film_overhead"
@@ -4973,11 +4976,15 @@ film:
   vehicle_topic: "/forklift/gz/cam/image"
   # ---- the cut ----
   # How long film_run.py record waits for every camera's FIRST FRAME
-  # before it refuses by name. Cameras render server-side and a spawned
-  # sensor publishes within a couple of seconds; 20 s is the whole
-  # bringup's worth of slack, and a topic that is silent for 20 s is a
-  # camera that was never going to film anything.
-  camera_warmup_s: "20"
+  # before it refuses by name. The one MEASURED number here is the
+  # vehicle camera's: already spawned, already bridged, its first frame
+  # took 3.4 s. The other three are spawned into the world and bridged
+  # by an image_bridge started in the same breath - three 1280x720
+  # renderers and a cold bridge against one measurement is not a
+  # margin, and a warmup that misses costs the whole take. 45 s buys
+  # room for that without hiding a real silence: a camera that has not
+  # published in 45 s was never going to film anything.
+  camera_warmup_s: "45"
   # The establishing shot: the wide camera holds this many seconds
   # before the cycle's first leg event. A film that starts mid-motion
   # has no where.
@@ -4985,6 +4992,14 @@ film:
   # The last leg HOLDS this many seconds past the cycle's done - the
   # film does not end on a mid-motion cut.
   tail_s: "4.0"
+  # How far a trim may run PAST the end of its own recording before the
+  # cut REFUSES by name instead of letting ffmpeg clamp it silently.
+  # The cut's bounds are wall-clock; each recording is placed on its
+  # own clock from the t0/t1/n sidecars beside it, so a leg's last
+  # bound can land a fraction of a frame interval past the recorder's
+  # final write. 0.5 s is seven frames at rate_hz: room for that
+  # rounding, and nothing like room for a leg that was never filmed.
+  eof_tolerance_s: "0.5"
   # PiP inset geometry: the vehicle camera scaled to this fraction,
   # offset this far from the main frame's bottom-right corner.
   pip_scale: "0.25"

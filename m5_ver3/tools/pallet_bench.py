@@ -16,6 +16,7 @@ import math
 import os
 import subprocess
 import sys
+import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:

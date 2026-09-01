@@ -2,6 +2,20 @@
 """film_record.py - write a ROS Image topic to an mp4 until SIGINT.
 
     python3 m5_ver3/tools/film_record.py --topic /film/overhead --out out.mp4
+
+THREE ONE-NUMBER SIDECARS GO BESIDE THE MP4, and the cut cannot place
+this file on the film's timeline without all three:
+
+    <out>.t0   the FIRST frame's wall time
+    <out>.t1   the LAST frame's wall time
+    <out>.n    the frames written
+
+Every received frame is written into a container fixed at `fps`, and
+the film cameras publish on the SIM clock - so n frames are n/fps of
+video however long the wall took, and (n - 1)/fps over (t1 - t0) is
+this recording's own sim-per-wall rate. film_core.clock turns those
+three into the mapping every trim goes through; without them a wall
+bound would be trimmed as if the rig had kept up with the wall.
 """
 import argparse
 import os
@@ -13,6 +27,12 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
+
+
+def sidecar(path, text):
+    """One number beside the mp4, one file, newline-terminated."""
+    with open(path, "w", encoding="utf-8") as side:
+        side.write(text + "\n")
 
 
 def to_bgr(msg):
@@ -33,6 +53,7 @@ class Recorder(Node):
         self.writer = None
         self.path = path
         self.frames = 0
+        self.last_wall = None
         self.deadline = None if seconds is None else time.time() + seconds
         self.stop = False
         self.create_subscription(Image, topic, self._on, 10)
@@ -46,15 +67,17 @@ class Recorder(Node):
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             self.writer = cv2.VideoWriter(self.path, fourcc, 15.0, (w, h))
             # First-frame wall time, beside the mp4: the four film
-            # cameras start at four different times, and film_run.py's
-            # cut turns a wall-clock segment bound into this file's
-            # own clock by subtracting exactly this number.
-            with open(self.path + ".t0", "w", encoding="utf-8") as side:
-                side.write("{:.6f}\n".format(time.time()))
+            # cameras start at four different times, and the cut lands
+            # a wall-clock segment bound in this file by measuring
+            # from exactly this number. Written HERE rather than at
+            # close because film_run.py's warmup watches for it to
+            # know the camera is alive.
+            sidecar(self.path + ".t0", "{:.6f}".format(time.time()))
             print("first frame {:.3f} ({:d}x{:d})".format(
                 time.time(), w, h))
         self.writer.write(frame)
         self.frames += 1
+        self.last_wall = time.time()
         if self.deadline is not None and time.time() >= self.deadline:
             self.stop = True
 
@@ -80,6 +103,14 @@ def main():
         rclpy.spin_once(node, timeout_sec=0.1)
     if node.writer is not None:
         node.writer.release()
+        # The other two, at close, because only now are they known:
+        # the last frame's wall time and how many frames the container
+        # holds. t0 alone says WHEN this file starts; with t1 and n it
+        # also says how fast its clock ran and how much footage there
+        # is, which is what the cut needs to refuse a bound past the
+        # end instead of letting ffmpeg clamp it.
+        sidecar(args.out + ".t1", "{:.6f}".format(node.last_wall))
+        sidecar(args.out + ".n", "{:d}".format(node.frames))
     print("frames    {}".format(node.frames))
     print("wrote     {}".format(args.out))
     node.destroy_node()

@@ -7,7 +7,8 @@
 
 `record` places the three film cameras into the RUNNING world through
 gz's own /create (the world file is never edited), starts
-film_follow.py and one film_record.py per camera, and then runs
+film_follow.py and one film_record.py per camera, holds a pre-roll so
+the establishing shot is footage rather than luck, and then runs
 pallet_cycle.py's own `run` UNDER OBSERVATION - stdout line by line,
 each `leg c1-<name>` stamped with the wall clock into timeline.json.
 The cycle is not modified, wrapped or re-implemented: its seeding,
@@ -15,10 +16,16 @@ its recovery and its refusals stay exactly what EVIDENCE_DOCKING_V3
 §4 measured, and this tool only watches.
 
 `cut` turns that timeline plus the four recordings into one film
-(film_core.plan_segments + ffmpeg_argv): the wide establishing shot,
-then every leg on the camera the shot table names, with the vehicle
+(film_core.plan_segments + ffmpeg_argv): the wide establishing shot -
+film.lead_s of it, or as much as the wide recording holds and says so
+- then every leg on the camera the shot table names, with the vehicle
 camera inset over the approach legs - the tag growing in frame is the
 proof the dock run is tag-driven.
+  The timeline is stamped on the WALL clock and the cameras publish on
+the SIM clock, so every bound crosses through film_core.clock: each
+recording's own t0/t1/n sidecars measure how fast its clock ran, and
+a segment that would need footage past the end of its file is refused
+by name rather than clamped there by ffmpeg.
 
 Needs ROS, gz and ffmpeg; the stack must already be up
 (`m5v3.sh start --localize amcl --nav --dock`).
@@ -55,12 +62,23 @@ REQUIRED_KEYS = (
     "film.dock_pose",
     "film.wide_model", "film.wide_sdf", "film.wide_topic",
     "film.vehicle_topic",
-    "film.lead_s", "film.tail_s", "film.pip_scale", "film.pip_margin_px",
+    "film.lead_s", "film.tail_s", "film.eof_tolerance_s",
+    "film.pip_scale", "film.pip_margin_px",
     "paths.traction_file",
 )
 
+# The pre-roll record holds before the cycle, as a multiple of
+# film.lead_s. It is not a config knob but a property of that key's
+# UNITS: lead_s is footage and this hold is wall time, the cameras
+# publish on the sim clock, and this rig measures 0.66-0.77 x wall and
+# has not been seen under 0.5 - so twice the wall is at least the lead,
+# and one number lives in one place.
+PRE_ROLL_X_LEAD = 2.0
+
 # What record starts, in this order, and what cut expects beside the
-# mp4s. The mp4 name is the key; the t0 sidecar is <name>.mp4.t0.
+# mp4s. The mp4 name is the key; film_record.py leaves three
+# one-number sidecars by each - <name>.mp4.t0, .t1 and .n - and cut
+# needs all three to place that recording on the film's clock.
 RECORDINGS = (
     ("follow", "film.follow_topic"),
     ("dock", "film.dock_topic"),
@@ -82,9 +100,15 @@ def _gz(cfg, service, reqtype, req):
 
 
 def _remove_model(cfg, name):
-    """Remove a camera from the running world, tolerating its absence."""
+    """Remove a camera from the running world, tolerating its absence.
+
+    `type: MODEL` is not decoration: gz-sim resolves an Entity with no
+    type to kNullEntity and the remove is a silent no-op, so the next
+    /create with allow_renaming: false is refused for a name that is
+    still taken. The same body furniture.py and pallet_place.py spell.
+    """
     return _gz(cfg, "/world/{}/remove".format(cfg.s("world.name")),
-               "gz.msgs.Entity", 'name: "{}"'.format(name))
+               "gz.msgs.Entity", 'name: "{}", type: MODEL'.format(name))
 
 
 def _create_model(cfg, name, sdf_key, pose):
@@ -127,6 +151,8 @@ def describe(cfg):
     print("shots")
     for leg, cam, pip in fc.shot_table(cfg.raw("film.shots")):
         print("  {:<9} {:<7} pip={}".format(leg, cam, str(pip).lower()))
+    print("pre-roll  {:.1f} s held before the cycle".format(
+        PRE_ROLL_X_LEAD * cfg.f("film.lead_s")))
     print("cut       wide lead {:.1f} s, last leg holds {:.1f} s".format(
         cfg.f("film.lead_s"), cfg.f("film.tail_s")))
     return 0
@@ -186,6 +212,22 @@ def record(cfg):
     children = []
     cycle_rc = None
     try:
+        # ---- THE BRIDGE FIRST: the film cameras publish on gz and the
+        # recorders subscribe on ROS. The vehicle camera already
+        # crosses on the imgbridge the stack runs; the three film
+        # cameras need their own image_bridge or every recorder waits
+        # for a first frame that never arrives - the refusal below is
+        # named for exactly that silence. One process, three topics,
+        # the same ros_gz_image image_bridge m5v3.sh measured.
+        bridge_argv = ["ros2", "run", "ros_gz_image", "image_bridge",
+                       cfg.s("film.follow_topic"),
+                       cfg.s("film.dock_topic"),
+                       cfg.s("film.wide_topic")]
+        bridge_proc, bridge_log = _start_child(
+            cfg, bridge_argv, os.path.join(session, "filmbridge.log"))
+        children.append((bridge_proc, bridge_log))
+        print("bridge    {}".format(" ".join(bridge_argv[3:])))
+
         # ---- film_follow.py, before the recorders so the first frame
         # is already over the truck ----
         follow_proc, follow_log = _start_child(
@@ -230,6 +272,17 @@ def record(cfg):
                                for cam, topic_key in RECORDINGS
                                if cam in waiting)))
 
+        # ---- the establishing pre-roll, before the cycle ----
+        # The cut opens on film.lead_s of wide footage from BEFORE the
+        # first leg, and it can only trim what the wide recorder
+        # already holds; without this hold the cycle starts a second or
+        # two after the first frame and the lead is whatever happened
+        # to exist. PRE_ROLL_X_LEAD carries the units argument.
+        pre_roll = PRE_ROLL_X_LEAD * cfg.f("film.lead_s")
+        print("pre-roll  {:.1f} s of establishing footage before the "
+              "cycle".format(pre_roll))
+        time.sleep(pre_roll)
+
         # ---- the cycle, under observation ----
         print("cycle     {} run --repeat {}".format(
             cfg.s("film.cycle_tool"), cfg.s("film.cycle_repeat")))
@@ -255,9 +308,15 @@ def record(cfg):
                 if timeline["cycle_start"] is None:
                     timeline["cycle_start"] = now
             elif stripped.startswith("leg "):
-                # `leg c1-transit` -> leg name c1-transit
-                timeline["legs"].append(
-                    {"leg": stripped.split()[1], "t": now})
+                # `leg c1-transit` -> the table's own leg name,
+                # `transit`. Anything else on this pipe is not the
+                # cycle talking: drive_goal.py prints `leg 1 ...` into
+                # the same stdout, and a timeline holding `1` would be
+                # refused by a cut of a run that was perfect.
+                fields = stripped.split()
+                leg = fc.bare_leg(fields[1]) if len(fields) > 1 else None
+                if leg is not None:
+                    timeline["legs"].append({"leg": leg, "t": now})
             elif stripped.startswith("done "):
                 outcome = "done"
                 timeline["cycle_end"] = now
@@ -267,6 +326,17 @@ def record(cfg):
         cycle_log.close()
         timeline["outcome"] = outcome
         timeline["cycle_rc"] = cycle_rc
+        if outcome == "done":
+            # film_core plans the last segment film.tail_s PAST
+            # cycle_end, so those seconds have to exist on disk: stop
+            # the recorders at `done` and the cut REFUSES a last trim
+            # it cannot satisfy. Wall seconds are the right unit for
+            # this hold whatever the sim clock is doing - the bound and
+            # the footage scale by the same rate - and the extra second
+            # is the recorder's own last write.
+            hold = cfg.f("film.tail_s") + 1.0
+            print("holding   {:.1f} s of tail past done".format(hold))
+            time.sleep(hold)
     finally:
         # ---- teardown: recorders by SIGINT (their own clean exit),
         # film_follow by SIGTERM ----
@@ -284,13 +354,18 @@ def record(cfg):
         for proc, log in children:
             if log is not None and not log.closed:
                 log.close()
+        # The three cameras come out HERE, after the recorders that
+        # read them are gone: a refusal above raises SystemExit, and
+        # a take that left film_follow, film_dock and film_overhead
+        # standing in the world costs the next take its /create - and
+        # then the whole stack a restart.
+        _remove_model(cfg, cfg.s("film.follow_model"))
+        _remove_model(cfg, cfg.s("film.dock_model"))
+        _remove_model(cfg, cfg.s("film.wide_model"))
 
     with open(os.path.join(session, "timeline.json"), "w",
               encoding="utf-8") as out:
         json.dump(timeline, out, indent=2)
-    _remove_model(cfg, cfg.s("film.follow_model"))
-    _remove_model(cfg, cfg.s("film.dock_model"))
-    _remove_model(cfg, cfg.s("film.wide_model"))
 
     print("outcome   {} (cycle rc={})".format(outcome, cycle_rc))
     print("timeline  {}".format(os.path.join(session, "timeline.json")))
@@ -315,47 +390,98 @@ def cut(cfg, session):
     with open(timeline_path, encoding="utf-8") as handle:
         timeline = json.load(handle)
 
+    # Each recording is placed on the film's clock from its OWN
+    # sidecars rather than from the t0 the timeline also carries: one
+    # source for all three numbers, and a file whose recorder never
+    # closed cleanly is caught here instead of trimmed as a guess.
+    fps = cfg.i("film.rate_hz")
     sources = {}
-    offsets = {}
+    clocks = {}
     missing = []
     for cam, _topic_key in RECORDINGS:
         path = timeline.get("recordings", {}).get(cam)
-        t0 = timeline.get("recordings", {}).get(cam + "_t0")
-        if path and os.path.isfile(path) and t0 is not None:
-            sources[cam] = path
-            offsets[cam] = t0
-        else:
-            missing.append(cam)
-    for cam in missing:
-        print("absent    {} (cut continues without it)".format(cam))
-    for cam in ("follow", "dock"):
-        if cam not in sources:
-            cfg.refuse("the {} recording is on disk".format(cam),
-                       os.path.join(session, cam + ".mp4"),
-                       "it is the film; record again")
+        if not (path and os.path.isfile(path)):
+            missing.append((cam, "no recording on disk"))
+            continue
+        try:
+            clocks[cam] = fc.read_clock(path, fps)
+        except ValueError as exc:
+            missing.append((cam, str(exc)))
+            continue
+        sources[cam] = path
+    for cam, why in missing:
+        # follow and dock ARE the film; wide and vehicle are cut
+        # around with a printed line, and the line says why.
+        if cam in ("follow", "dock"):
+            cfg.refuse(
+                "the {} recording can be placed on the film's "
+                "clock".format(cam),
+                os.path.join(session, cam + ".mp4"),
+                *why.split("\n"))
+        print("absent    {} ({}); cut continues without it".format(
+            cam, why.splitlines()[0]))
 
     table = fc.shot_table(cfg.raw("film.shots"))
+    # The lead is planned from the footage that EXISTS: the wide
+    # recording's own first frame is the earliest second the film may
+    # open on, so a recorder that started late costs a short
+    # establishing shot instead of a trim from before the file - which
+    # ffmpeg would clamp at 0 without a word, shifting every segment
+    # after it away from the printed plan.
+    lead_floor = clocks["wide"]["t0"] if "wide" in clocks else None
     try:
         plan = fc.plan_segments(timeline, table, cfg.f("film.lead_s"),
-                                 cfg.f("film.tail_s"))
+                                cfg.f("film.tail_s"),
+                                lead_floor=lead_floor)
     except ValueError as exc:
         cfg.refuse("the timeline cuts against the shot table",
                    "config.yaml (film.shots)", str(exc))
 
     out = os.path.join(session, "m5v3-film.mp4")
-    argv = fc.ffmpeg_argv(plan, sources, offsets, out,
-                          cfg.i("film.rate_hz"), cfg.f("film.pip_scale"),
-                          cfg.i("film.pip_margin_px"))
-    print("cut       {} -> {:.0f} s of film".format(out, plan["duration"]))
-    proc = subprocess.run(argv, cwd=REPO)
+    try:
+        argv = fc.ffmpeg_argv(plan, sources, clocks, out, fps,
+                              cfg.f("film.pip_scale"),
+                              cfg.i("film.pip_margin_px"),
+                              cfg.f("film.eof_tolerance_s"))
+    except ValueError as exc:
+        cfg.refuse("every segment fits inside its own recording",
+                   "config.yaml (film.eof_tolerance_s)",
+                   *str(exc).split("\n"))
+    for cam in sorted(clocks):
+        clk = clocks[cam]
+        print("clock     {:<8} {} frames, {:.1f} s of footage, "
+              "sim {:.3f} x wall".format(
+                  cam, clk["n"], clk["length_s"], clk["rate"]))
+    lead_s = cfg.f("film.lead_s")
+    if sources.get("wide"):
+        if plan["lead"][1] - plan["lead"][0] < lead_s - 1e-6:
+            print("lead      {:.2f} s of a planned {:.1f} s - the wide "
+                  "recording begins there".format(
+                      fc.lead_span(plan, sources, clocks), lead_s))
+        else:
+            print("lead      {:.2f} s of footage from the planned "
+                  "{:.1f} s before the cycle".format(
+                      fc.lead_span(plan, sources, clocks), lead_s))
+    length = fc.film_length(plan, sources, clocks)
+    print("cut       {} -> {:.0f} s of film from a {:.0f} s cycle".format(
+        out, length, plan["duration"]))
+    try:
+        proc = subprocess.run(argv, cwd=REPO)
+    except OSError as exc:
+        cfg.refuse("ffmpeg is on the PATH", "the shell this tool runs in",
+                   "could not run `{}`: {}".format(argv[0], exc),
+                   "on this rig ffmpeg is /home/ozkan/bin/ffmpeg, which "
+                   "only a LOGIN shell has: cut through",
+                   "  wsl -e bash -lc '... film_run.py cut'")
     if proc.returncode != 0:
         cfg.refuse("ffmpeg cut the film", " ".join(argv[:2]),
                    "exit {}; see the command above".format(
                        proc.returncode))
-    print("film      {} ({:.0f} s)".format(out, plan["duration"]))
-    print("plan      lead {:.1f} s on wide, {} legs, {} pip {}".format(
-        cfg.f("film.lead_s"), len(plan["segments"]),
-        len(plan["pip_windows"]),
+    # Two decimals because this number is a claim about the encode:
+    # ffprobe's own duration is what it has to match.
+    print("film      {} ({:.2f} s)".format(out, length))
+    print("plan      {} legs, {} pip {}".format(
+        len(plan["segments"]), len(plan["pip_windows"]),
         "window" + ("s" if len(plan["pip_windows"]) != 1 else "")))
     return 0
 
