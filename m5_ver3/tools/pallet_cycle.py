@@ -32,17 +32,67 @@ REQUIRED_KEYS = (
     "isolation.ros_domain_id", "isolation.gz_partition",
     "topics.cmd_vel", "dock.v_linear_min", "dock.staging_run_in_m",
     "nav.goals.ring_s5_junction.y", "nav.goals.station_s5_staging.y",
+    # BOTH TRANSIT ROWS, CHECKED BY NAME BEFORE ANYTHING STARTS - G5
+    # Task 9. The cycle sends one of them per cycle and only ever one
+    # per cycle, so a table that had lost the second would be a run that
+    # got thirteen minutes in and then refused.
+    "nav.goals.spine_north.x", "nav.goals.spine_north_from_bay.x",
     "pallet.lift_m", "pallet.mast_limit_mps",
     "evidence.dir", "evidence.wait_first_s",
     "paths.traction_file",
 )
 
+#: WHERE THE TRANSIT LEG STARTS, AND THE GOAL ROW THAT CARRIES ITS
+#: CONTROLLER - G5 Task 9. The transit is the same ERRAND every cycle
+#: and it is not the same DRIVE:
+#:
+#:   spawn  cycle 1 only. 17.00 m of open 8.00 m corridor, forks-first
+#:          end to end. MPPI 8 of 8; RPP 7 of 8.
+#:   bay    every cycle after it. The truck is standing in the S5 bay
+#:          after an undock, forks pointed SOUTH into a 4.00 m wall,
+#:          and the only way out is a Reeds-Shepp cusp - 7.91 m of
+#:          straight line, 8.54-8.62 m of plan. RPP 6 of 6; MPPI 0 of 2,
+#:          both `no_progress` on a ~29 s creep, both recovered by the
+#:          staging teleport below, which is the banned intervention.
+#:
+#: A GOAL ROW HOLDS ONE CONTROLLER, so two geometries that measured
+#: opposite ways need two rows. config.yaml nav.goals carries both, the
+#: same pose under two names, and the pair is pinned equal there. This
+#: table is the only place the two are chosen between.
+TRANSIT_GOAL = {
+    "spawn": "spine_north",
+    "bay": "spine_north_from_bay",
+}
 
-def plan_cycle():
-    """One dry cycle. Live `run` executes these argv lists in order."""
+
+def transit_origin(cycle):
+    """Where cycle `cycle` (1-based) starts its transit from.
+
+    THE FIRST CYCLE OF A RUN AND ONLY THE FIRST starts at the spawn. By
+    the time cycle 2's transit is sent the truck has docked, lifted,
+    carried, dropped and undocked, and it is standing in the bay - which
+    is the pose G5 Task 7 measured the last remaining `nav2 miss
+    recovered` on, 2 of 2.
+    """
+    return "spawn" if cycle <= 1 else "bay"
+
+
+def plan_cycle(origin="spawn"):
+    """One dry cycle. Live `run` executes these argv lists in order.
+
+    `origin` is where the TRANSIT leg starts and it changes exactly one
+    argument. THE LEG NAMES DO NOT MOVE: config.yaml film.shots is one
+    row per leg of this list and tests/test_film_core.py holds the two
+    equal, so a film must not be able to tell which cycle it is filming.
+    """
+    if origin not in TRANSIT_GOAL:
+        raise ValueError(
+            "pallet_cycle.plan_cycle: origin is one of {}, not {!r} - "
+            "there are two because there are two geometries".format(
+                "/".join(sorted(TRANSIT_GOAL)), origin))
     return [
         {"leg": "transit", "tool": "drive_goal.py",
-         "argv": ["record", "--goal", "spine_north"]},
+         "argv": ["record", "--goal", TRANSIT_GOAL[origin]]},
         {"leg": "stage", "tool": "drive_goal.py",
          "argv": ["record", "--case", "stage_s5"]},
         {"leg": "dock", "tool": "dock_bench.py",
@@ -63,9 +113,16 @@ def describe(_cfg):
     print("=== m5v3 pallet cycle ===")
     print("repeat    {}".format(DEFAULT_REPEAT))
     print("cycle     {}".format(" -> ".join(pb.CYCLE)))
-    for i, step in enumerate(plan_cycle(), 1):
+    for i, step in enumerate(plan_cycle(transit_origin(1)), 1):
         extra = " ".join(step["argv"]) if step["argv"] else "cmd_vel +x"
         print("  {:2d}. {:<8} {} {}".format(i, step["leg"], step["tool"], extra))
+    # AND THE ONE LEG THAT IS NOT THE SAME EVERY CYCLE. The list above
+    # is cycle 1's; printing only that would hide the row every cycle
+    # after it actually drives.
+    for cycle in (1, 2):
+        origin = transit_origin(cycle)
+        print("transit   cycle {:<8} from the {:<5} --goal {}".format(
+            "1" if cycle == 1 else "2+", origin, TRANSIT_GOAL[origin]))
     return 0
 
 
@@ -246,7 +303,13 @@ def run(cfg, repeat):
         for n in range(1, repeat + 1):
             log.write("\n# cycle {}\n".format(n))
             print("=== cycle {}/{} ===".format(n, repeat))
-            for step in plan_cycle():
+            # THE PLAN IS MADE PER CYCLE, NOT PER RUN - G5 Task 9. The
+            # transit leg is sent from wherever the last cycle left the
+            # truck, and a plan built once and reused would send the
+            # SPAWN goal out of the bay: the leg that failed 2 of 2.
+            log.write("transit origin {} goal {}\n".format(
+                transit_origin(n), TRANSIT_GOAL[transit_origin(n)]))
+            for step in plan_cycle(transit_origin(n)):
                 tag = "c{}-{}".format(n, step["leg"])
                 log.write("leg {} tool={} argv={}\n".format(
                     tag, step["tool"], step["argv"]))

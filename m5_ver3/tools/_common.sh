@@ -305,6 +305,32 @@ apriltag_env() {
     APRILTAG_LD_LIBRARY_PATH="$APRILTAG_ROS_PREFIX/lib:$APRILTAG_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 }
 
+# WHERE THE ONE BEHAVIOUR-TREE PLUGIN THIS TRACK BUILDS IS, G5 Task 5.
+# Same shape as fuse_paths() and apriltag_paths(), and it is here rather
+# than in each script for the reason this file exists: the BUILDER
+# (tools/install_bt_direction.sh) and the LAUNCHER (m5v3.sh) must not be
+# able to disagree about where the .so is. Called unconditionally from
+# configure() so `set -u` never sees an unset BTDIR_SO on a bringup that
+# did not ask for --nav.
+#
+# ONLY THE LOADER PATH, AND NOT AMENT_PREFIX_PATH. That is the one
+# difference from the two above and it is not an omission: bt_navigator
+# loads BT plugins with BT::SharedLibrary, which is a plain dlopen of
+# lib<name>.so - it does not ask the ament index for a resource the way
+# pluginlib does for fuse's motion models. A prefix path here would
+# advertise a package nothing looks up.
+btdir_paths() {
+    BTDIR_WS="${CFG_BT_DIRECTION_WORKSPACE/#\~/$HOME}"
+    BTDIR_SRC="$REPO/$CFG_BT_DIRECTION_SOURCE_DIR"
+    BTDIR_LIB_DIR="$BTDIR_WS/install/$CFG_BT_DIRECTION_PACKAGE/lib"
+    BTDIR_SO="$BTDIR_LIB_DIR/lib$CFG_BT_DIRECTION_LIBRARY.so"
+    BTDIR_MANIFEST="$BTDIR_WS/m5v3_bt_direction.manifest"
+}
+
+btdir_env() {
+    BTDIR_LD_LIBRARY_PATH="$BTDIR_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+}
+
 # ROS IS SOURCED FOR gz ITSELF, not only for ROS nodes: gz_tools_vendor
 # lives under /opt/ros, so `gz sim`, `gz service` and `gz topic` all need
 # it. `set -u` stands down across the source because ament's hook reads

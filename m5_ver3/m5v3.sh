@@ -335,7 +335,7 @@ REQUIRED_KEYS=(
     docking.lifecycle.node_name
     docking.detected_node_name docking.detected_rate_hz
     docking.lifecycle_timeout_s
-    nav.params_file nav.bt_xml nav.costmap_sections
+    nav.params_file nav.bt_xml nav.bt_xml_rpp nav.costmap_sections
     nav.planner.package nav.planner.executable nav.planner.node_name
     nav.controller.package nav.controller.executable
     nav.controller.node_name
@@ -343,6 +343,8 @@ REQUIRED_KEYS=(
     nav.bt.package nav.bt.executable nav.bt.node_name
     nav.lifecycle.package nav.lifecycle.executable
     nav.lifecycle.node_name nav.default_goal
+    bt_direction.source_dir bt_direction.workspace bt_direction.package
+    bt_direction.library
     slippery.slip_compliance_lateral slippery.slip_compliance_longitudinal
     slippery.service_timeout_ms
     paths.log_dir paths.log_keep_runs paths.pidfile paths.traction_file
@@ -407,6 +409,14 @@ configure() {
     #   - which has Spin and BackUp in it.
     NAV_PARAMS="$REPO/$CFG_NAV_PARAMS_FILE"
     NAV_BT="$REPO/$CFG_NAV_BT_XML"
+    # AND THE APPROACH TREE, G5 TASK 7. It is derived here for the same
+    # `set -u` reason as the two above and for one more: this script
+    # never PASSES it to anything. It travels on the `behavior_tree`
+    # field of a NavigateToPose goal, filled by tools/drive_goal.py from
+    # nav.cases.<case>.controller. What this script does with it is
+    # CHECK IT EXISTS before it starts a stack whose stage leg would
+    # otherwise abort at the first goal.
+    NAV_BT_RPP="$REPO/$CFG_NAV_BT_XML_RPP"
     # THE SIX SECTIONS nav2.yaml HAS TO BE ADDRESSED TO, in one string
     # because check_nav_params() takes them as arguments. FOUR are the
     # servers this script starts; TWO are the costmap SUB-NODES those
@@ -497,6 +507,11 @@ configure() {
     #   is a variable `set -u` aborts on from the other.
     fuse_paths
     apriltag_paths
+    # AND G5 TASK 5's, WHICH IS THE THIRD PATH OUTSIDE $REPO. The one
+    # C++ package this track builds has its SOURCE in the repository and
+    # its BUILD TREE under $HOME (config.yaml bt_direction.workspace,
+    # tools/install_bt_direction.sh), for install_rf2o.sh's reason.
+    btdir_paths
 }
 
 # THE STACK AS COMMAND-LINE PATTERNS, AND THE LIST IS _common.sh's.
@@ -1626,6 +1641,38 @@ start() {
             "standstill by name - so a Spin recovery would stand still" \
             "for the whole behaviour and then report SUCCESS." \
             "NOTHING WAS STARTED."
+        # AND THE SECOND TREE, G5 TASK 7. It is NOT passed to
+        # bt_navigator on the command line - it travels on the
+        # `behavior_tree` field of a NavigateToPose goal, which
+        # tools/drive_goal.py fills from nav.cases.<case>.controller -
+        # so a missing file is not a start-up failure at all: it is a
+        # goal that is ABORTED at the moment an operator asks for the
+        # stage leg, twenty minutes into a bring-up. That is exactly the
+        # class of late refusal this function exists to move forward.
+        [ -f "$NAV_BT_RPP" ] || refuse \
+            "the approach behaviour tree exists" "$CONFIG (nav.bt_xml_rpp)" \
+            "it resolves to $NAV_BT_RPP" \
+            "it is the tree the STAGE/APPROACH legs are driven behind -" \
+            "the same tree as the primary with its ControllerSelector" \
+            "defaulting to nav2.yaml's FollowPathRPP instead of" \
+            "FollowPath. Without it every case carrying" \
+            "\`controller: rpp\` aborts on the first goal." \
+            "NOTHING WAS STARTED."
+        # AND THE ONE PLUGIN THE TREE NOW NAMES, G5 TASK 5. nav2.yaml's
+        # `plugin_lib_names` carries this library and the tree carries
+        # its node, so a rig that has not built it does not merely lose
+        # the fix: bt_navigator throws out of registerFromPlugin during
+        # on_configure, dies, and the lifecycle manager then waits on a
+        # server that is gone. Refused here by name instead.
+        [ -f "$BTDIR_SO" ] || refuse \
+            "the DirectionStablePath decorator is built" \
+            "$CONFIG (bt_direction.workspace) and" \
+            "$M5V3/tools/install_bt_direction.sh" \
+            "there is no library at $BTDIR_SO" \
+            "it is built FROM THIS REPOSITORY's own source, into your" \
+            "own home, without sudo:" \
+            "  bash $M5V3/tools/install_bt_direction.sh" \
+            "NOTHING WAS STARTED."
         # shellcheck disable=SC2086
         check_nav_params "$NAV_PARAMS" $NAV_SECTIONS
     fi
@@ -2671,7 +2718,18 @@ start() {
         # node looks for wherever the operator's shell was standing,
         # and a tree it cannot open is a navigator that falls back to
         # nav2's own, which has Spin and BackUp in it.
+        #   AND IT IS THE ONE NAV CHILD SPAWNED THROUGH `env`, G5 TASK 5.
+        #   nav2.yaml names m5v3_direction_stable_bt_node in
+        #   `plugin_lib_names` and bt_navigator resolves that with
+        #   BT::SharedLibrary - a plain dlopen off the LOADER PATH, with
+        #   no ament index in it - so the workspace
+        #   tools/install_bt_direction.sh built into $HOME has to be on
+        #   this child's LD_LIBRARY_PATH and on nothing else's.
+        #   btdir_env() is called HERE rather than beside btdir_paths()
+        #   because it PREPENDS to what source_ros() exported.
+        btdir_env
         spawn "$CFG_NAV_BT_NODE_NAME" \
+            env "LD_LIBRARY_PATH=$BTDIR_LD_LIBRARY_PATH" \
             ros2 run "$CFG_NAV_BT_PACKAGE" \
             "$CFG_NAV_BT_EXECUTABLE" --ros-args \
             -r __node:="$CFG_NAV_BT_NODE_NAME" \

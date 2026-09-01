@@ -33,6 +33,7 @@ arithmetic, on the Windows python the suite runs under.
 import math
 import os
 import re
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -1154,10 +1155,49 @@ def test_the_preempt_trigger_fires_in_a_TRANSIT_and_not_in_an_endgame(
                 name, trigger, leg))
 
 
-def test_no_two_goals_are_the_same_pose(cfg):
-    seen = {(g["x"], g["y"], g["travel_yaw_rad"])
-            for g in cfg["nav"]["goals"].values()}
-    assert len(seen) == len(cfg["nav"]["goals"])
+def test_no_two_goals_are_the_same_pose_UNLESS_ONE_SAYS_SO(cfg):
+    # TWO ROWS AT ONE POSE IS EITHER A TYPO OR A DECISION, and this test
+    # was written to catch the typo. G5 Task 9 made the decision - one
+    # target reached from two origins, each naming the controller its
+    # own geometry measured best on - so the DELIBERATE pair declares
+    # itself with `same_pose_as:` and an undeclared duplicate is still
+    # refused. The declaration is what makes the pair say which row is
+    # the copy, and the test below is what stops the copy drifting.
+    goals = cfg["nav"]["goals"]
+    seen = {}
+    for name, goal in goals.items():
+        if goal.get("same_pose_as"):
+            continue
+        pose = (goal["x"], goal["y"], goal["travel_yaw_rad"])
+        assert pose not in seen, (
+            "nav.goals.{} is the same pose as nav.goals.{} and neither "
+            "declares `same_pose_as`".format(name, seen.get(pose)))
+        seen[pose] = name
+
+
+def test_a_goal_that_DECLARES_a_twin_really_IS_that_twins_pose(cfg):
+    # BOTH DIRECTIONS, which is `route_node: false`'s own rule. A copy
+    # that had drifted would be a second DESTINATION wearing the first
+    # one's name - a truck sent somewhere nobody wrote down - and it
+    # would pass every other test in this file.
+    goals = cfg["nav"]["goals"]
+    twins = [n for n, g in goals.items() if g.get("same_pose_as")]
+    assert twins, "the G5 Task 9 per-origin pair is gone - re-read this"
+    for name in twins:
+        goal = goals[name]
+        other = goal["same_pose_as"]
+        assert other in goals, "{} copies a goal that is gone".format(name)
+        assert not goals[other].get("same_pose_as"), (
+            "{} copies {}, which is itself a copy".format(name, other))
+        for key in ("x", "y", "travel_yaw_rad"):
+            assert float(goal[key]) == pytest.approx(
+                float(goals[other][key])), (name, key)
+        # and a copy that named the same CONTROLLER would be a row that
+        # buys nothing: the split is the only reason the pair exists.
+        assert goal.get("controller", "mppi") != \
+            goals[other].get("controller", "mppi"), (
+                "{} and {} are the same pose AND the same controller"
+                .format(name, other))
 
 
 def test_the_goals_are_written_as_TRAVEL_headings(cfg):
@@ -1454,3 +1494,509 @@ def test_the_station_class_is_still_NOT_claimed_by_the_box(controller, nav):
     checker = nav["controller_server"]["ros__parameters"][
         "general_goal_checker"]
     assert float(checker["xy_goal_tolerance"]) > STATION_TOLERANCE_M
+
+
+# ----------------------------------------------------------------------
+# FollowPathRPP - THE STAGE/APPROACH CONTROLLER, G5 TASK 7
+#
+# EVERY NUMBER IN THAT BLOCK IS DERIVED FROM SOMETHING ELSE IN THESE TWO
+# FILES, AND THESE ARE THE DERIVATIONS EXECUTABLE. Two of them stand in
+# for checks the PACKAGE DOES NOT MAKE: the
+# allow_reversing/use_rotate_to_heading pair is validated by
+# nav2_regulated_pure_pursuit_controller only on a DYNAMIC set and never
+# on the initial load, and nothing anywhere checks
+# `inflation_cost_scaling_factor` against the costmap whose exponential
+# it inverts.
+# ----------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def rpp(nav):
+    return nav["controller_server"]["ros__parameters"]["FollowPathRPP"]
+
+
+def test_the_controller_server_declares_BOTH_controllers(nav):
+    params = nav["controller_server"]["ros__parameters"]
+    assert params["controller_plugins"] == ["FollowPath", "FollowPathRPP"]
+    for name in params["controller_plugins"]:
+        assert name in params, "{} is declared and not configured".format(
+            name)
+
+
+def test_ONE_progress_checker_and_ONE_goal_checker_for_BOTH(nav):
+    # A leg that arrived under one controller and not under the other
+    # would be measuring the checker.
+    params = nav["controller_server"]["ros__parameters"]
+    assert params["progress_checker_plugins"] == ["progress_checker"]
+    assert params["goal_checker_plugins"] == ["general_goal_checker"]
+
+
+def test_the_RPP_plugin_is_the_class_the_PACKAGE_exports(rpp):
+    # nav2_regulated_pure_pursuit_controller/plugins.xml, 1.3.12:
+    #   <class type="nav2_regulated_pure_pursuit_controller::
+    #                RegulatedPurePursuitController" ...>
+    # pluginlib does not guess. `/` instead of `::` is a
+    # controller_server that fails on_configure.
+    assert rpp["plugin"] == ("nav2_regulated_pure_pursuit_controller::"
+                             "RegulatedPurePursuitController")
+
+
+def test_RPP_REVERSES_because_on_this_vehicle_that_is_FORWARD(rpp):
+    # With allow_reversing false, `x_vel_sign` is pinned at +1.0 and
+    # every command is counterweight-first. The forks are at model -x
+    # (section D), so the controller would drive away from every path.
+    # It is also the flag that switches the CUSP handling on at all.
+    assert rpp["allow_reversing"] is True
+
+
+def test_RPP_never_ROTATES_and_the_package_only_checks_this_DYNAMICALLY(
+        rpp):
+    # `rotateToHeading()` publishes angular.z with linear.x = 0, which
+    # cmd_vel_tricycle_core.twist_to_tricycle REFUSES by name - the same
+    # refusal the behaviour tree makes about Spin.
+    #   parameter_handler.cpp:285-292 rejects a DYNAMIC set of
+    # allow_reversing while use_rotate_to_heading is true ("Both ... can
+    # not be set to true"). The constructor declares and reads both
+    # without ever comparing them, so on the initial load the pair is
+    # accepted in silence. This is that check.
+    assert rpp["use_rotate_to_heading"] is False
+    assert not (rpp["allow_reversing"] and rpp["use_rotate_to_heading"])
+
+
+def test_RPP_drives_the_SAME_ENVELOPE_as_MPPI(rpp, controller):
+    # RPP carries one magnitude and applies the sign afterwards, so this
+    # single number is both ends. The envelope is a property of the
+    # VEHICLE - the goal box and the stop table - and does not move
+    # because the controller did.
+    assert rpp["desired_linear_vel"] == controller["vx_max"]
+    assert rpp["desired_linear_vel"] == -controller["vx_min"]
+
+
+def test_the_RPP_lookahead_FLOOR_puts_the_STEER_CEILING_OUT_OF_REACH(
+        cfg, rpp):
+    # The tightest arc pure pursuit can ask for is the carrot fully
+    # ABEAM: curvature = 2*y/(x^2+y^2), which at |y| = d is 2/d. The
+    # steer angle that implies is atan(L * 2/d), and a floor below
+    # 2L/tan(ceiling) would hand the converter a curvature it has to
+    # CLAMP.
+    wheelbase = float(cfg["vehicle"]["wheelbase_m"])
+    ceiling = float(cfg["navcmd"]["steer_command_limit_rad"])
+    floor = 2.0 * wheelbase / math.tan(ceiling)
+    assert rpp["min_lookahead_dist"] >= floor
+    worst = math.atan(wheelbase * 2.0 / rpp["min_lookahead_dist"])
+    assert worst <= ceiling
+    # and still inside the MECHANICAL stop, which is a different number.
+    assert worst < float(cfg["vehicle"]["steer_limit_rad"])
+
+
+def test_the_RPP_lookahead_CEILING_is_under_HALF_the_tightest_arc(
+        rpp, planner):
+    # A carrot further away than half the shortest arc the planner can
+    # emit is a carrot on the far side of the turn, and pure pursuit
+    # cuts to it in a straight chord.
+    quarter_turn_m = math.pi * float(planner["minimum_turning_radius"]) / 2.0
+    assert rpp["max_lookahead_dist"] <= quarter_turn_m / 2.0
+
+
+def test_the_velocity_scaled_lookahead_LANDS_INSIDE_ITS_OWN_BAND(
+        rpp, controller):
+    # lookahead = |v| * lookahead_time, clamped to the two above. The
+    # package default of 1.5 s would put the transit ceiling at 0.45 m,
+    # BELOW the floor - pinning the lookahead at its floor across the
+    # whole envelope and making the scaling inert.
+    assert rpp["use_velocity_scaled_lookahead_dist"] is True
+    at_ceiling = rpp["lookahead_time"] * controller["vx_max"]
+    assert rpp["min_lookahead_dist"] < at_ceiling < rpp["max_lookahead_dist"]
+    # and the UNREAD fixed fallback is written as what the scaling
+    # produces at that ceiling, so switching the scaling off changes no
+    # geometry.
+    assert abs(rpp["lookahead_dist"] - at_ceiling) < 1e-9
+
+
+def test_RPP_regulates_on_the_vehicles_OWN_MINIMUM_RADIUS(
+        rpp, planner, controller):
+    # The same 1.25 m the planner plans at and MPPI's
+    # AckermannConstraints holds. A pursuit arc AT the planned radius
+    # costs nothing; one tighter than the route was planned for costs
+    # speed in proportion.
+    assert rpp["use_regulated_linear_velocity_scaling"] is True
+    assert (rpp["regulated_linear_scaling_min_radius"]
+            == float(planner["minimum_turning_radius"]))
+    assert (rpp["regulated_linear_scaling_min_radius"]
+            == controller["AckermannConstraints"]["min_turning_r"])
+
+
+def test_the_REGULATION_FLOOR_cannot_itself_trip_the_PROGRESS_CHECKER(
+        rpp, nav):
+    # The package's own 0.25 would be 83 % of this vehicle's whole
+    # ceiling - regulation with 17 % of authority is regulation that
+    # does not happen. What binds it from BELOW is in this same file.
+    checker = nav["controller_server"]["ros__parameters"]["progress_checker"]
+    needs = (float(checker["required_movement_radius"])
+             / float(checker["movement_time_allowance"]))
+    assert rpp["regulated_linear_scaling_min_speed"] >= 2.0 * needs
+    assert (rpp["regulated_linear_scaling_min_speed"]
+            < 0.25 * rpp["desired_linear_vel"])
+    # the two floors are the SAME floor and cannot disagree
+    assert (rpp["min_approach_linear_velocity"]
+            == rpp["regulated_linear_scaling_min_speed"])
+
+
+def test_the_RPP_curvature_regulation_saturates_the_YAW_RATE(
+        rpp, controller):
+    # While the regulation still has speed to take away, it holds
+    # w = v/r at exactly desired_linear_vel / min_radius: the speed it
+    # allows on a tighter-than-planned arc is v = desired * r/min_radius
+    # (regulation_functions.hpp:41), so w = desired/min_radius, constant.
+    # THAT IS MPPI's wz_max, arrived at from the other end - the MPPI
+    # block derives 0.240 as "vx_max / min_turning_r, the fastest yaw
+    # rate this envelope can produce on the tightest permitted arc".
+    # Two controllers, one number, and neither copied it from the other.
+    saturated = (rpp["desired_linear_vel"]
+                 / rpp["regulated_linear_scaling_min_radius"])
+    assert abs(saturated - controller["wz_max"]) < 1e-9
+
+
+def test_the_REGULATION_STOPS_BEFORE_THE_STEER_CEILING_DOES(cfg, rpp):
+    # AND THIS IS THE MEASURED GAP, WRITTEN AS ARITHMETIC. Below the
+    # radius where `regulated_linear_scaling_min_speed` takes over, the
+    # speed is pinned and w = min_speed / r rises without bound. The
+    # steer angle passes the commanded ceiling at wheelbase/tan(ceiling)
+    # - and that radius is LARGER than the breakpoint, so there is a
+    # band of pursuit radii that regulation considers handled and the
+    # steer axis does not. G5 Task 7 measured 1.96 % of commanded ticks
+    # in it, worst 1.5110 rad.
+    #   NOTHING IN RPP CLOSES THIS. `min_lookahead_dist` does not,
+    # because the cusp clamp bypasses it. The converter's clamp is the
+    # containment and the counter on /m5v3/navcmd/status is the alarm.
+    # This test exists so the gap is a stated property with a number
+    # rather than something a later reader rediscovers on a rig.
+    breakpoint_r = (rpp["regulated_linear_scaling_min_radius"]
+                    * rpp["regulated_linear_scaling_min_speed"]
+                    / rpp["desired_linear_vel"])
+    ceiling_r = (float(cfg["vehicle"]["wheelbase_m"])
+                 / math.tan(float(cfg["navcmd"]["steer_command_limit_rad"])))
+    assert breakpoint_r < ceiling_r, (
+        "regulation now runs out of authority at {:.4f} m and the steer "
+        "ceiling is reached at {:.4f} m - if the first were the larger "
+        "of the two the gap would be closed and this file's account of "
+        "it would be stale".format(breakpoint_r, ceiling_r))
+    assert abs(breakpoint_r - 0.2083) < 5e-4
+    assert abs(ceiling_r - 0.3489) < 5e-4
+
+
+def test_RPP_INVERTS_THE_EXPONENTIAL_THE_LOCAL_COSTMAP_ACTUALLY_PAINTED(
+        rpp, costmaps):
+    # `costConstraint` recovers a distance-to-obstacle by inverting the
+    # inflation layer's exponential. A mismatch does not warn - it
+    # silently reports the wrong distance. Nothing in nav2 checks it.
+    assert rpp["use_cost_regulated_linear_velocity_scaling"] is True
+    assert (rpp["inflation_cost_scaling_factor"]
+            == costmaps["local_costmap"]["inflation_layer"][
+                "cost_scaling_factor"])
+
+
+def test_the_APPROACH_RAMP_stops_the_truck_WELL_INSIDE_the_goal_box(
+        cfg, rpp, nav):
+    # This is the parameter MPPI has no equivalent of. Scaling linearly
+    # from `approach_velocity_scaling_dist`, the speed at the edge of
+    # the box is desired * box/dist; the stop from there is v^2/(2a) at
+    # the plant's own ramp, plus the measured chain dead time.
+    box = float(nav["controller_server"]["ros__parameters"][
+        "general_goal_checker"]["xy_goal_tolerance"])
+    accel = float(cfg["navcmd"]["accel_mps2"])
+    at_box = rpp["desired_linear_vel"] * box / rpp[
+        "approach_velocity_scaling_dist"]
+    stop_m = at_box * at_box / (2.0 * accel) + 0.25 * at_box
+    assert stop_m < box / 2.0, stop_m
+    # and it must stay under half the local costmap or the package warns
+    # of "permanent slowdown" (parameter_handler.cpp:126).
+    local = nav["local_costmap"]["local_costmap"]["ros__parameters"]
+    assert rpp["approach_velocity_scaling_dist"] <= float(
+        local["width"]) / 2.0
+
+
+def test_RPP_still_REFUSES_a_command_into_an_obstacle(rpp):
+    # It is the only thing in RPP that can decline to drive: it
+    # forward-simulates the FOOTPRINT along the commanded arc and throws
+    # NoValidControl, which the tree answers with
+    # ClearLocalCostmap-Context and one retry. It handles reverse
+    # correctly - collision_checker.cpp:99 integrates a SIGNED speed.
+    assert rpp["use_collision_detection"] is True
+    assert rpp["max_allowed_time_to_collision_up_to_carrot"] > 0.0
+
+
+def test_the_RPP_TRACKING_WINDOW_cannot_jump_past_the_vehicles_TAIL(
+        rpp, costmaps):
+    # It bounds how far ALONG THE PLAN the controller searches for its
+    # own tracking point. The package default is half the costmap - 5 m
+    # here - and on a Reeds-Shepp path that folds back on itself a long
+    # window can snap that point onto a LATER leg passing beside the
+    # truck.
+    body = polygon(costmaps["local_costmap"]["footprint"])
+    length_m = max(x for x, _y in body) - min(x for x, _y in body)
+    assert rpp["max_robot_pose_search_dist"] < length_m
+    # and still wide enough for the worst absolute error measured moving
+    assert rpp["max_robot_pose_search_dist"] > 2.0 * WORST_ABSOLUTE_ERROR_M
+
+
+def test_the_two_controllers_share_ONE_tf_TOLERANCE(rpp, controller):
+    # They read the same tree out of the same buffer.
+    assert rpp["transform_tolerance"] == controller["transform_tolerance"]
+
+
+def test_the_RPP_CANCEL_leaves_the_ramp_to_the_SMOOTHER(cfg, rpp):
+    # One deceleration in one place, and `cancel_deceleration` is
+    # written as that same ramp so switching this on could not change
+    # the plant.
+    assert rpp["use_cancel_deceleration"] is False
+    assert rpp["cancel_deceleration"] == float(cfg["navcmd"]["accel_mps2"])
+
+
+def test_the_MPPI_block_still_carries_the_ENVELOPE_IT_ALWAYS_DID(
+        controller):
+    # The ruling scoped itself to the approach legs. This is the pin
+    # that says the transit controller was not quietly re-tuned while a
+    # second one was added beside it.
+    assert controller["plugin"] == "nav2_mppi_controller::MPPIController"
+    assert controller["motion_model"] == "Ackermann"
+    assert controller["vx_max"] == 0.300
+    assert controller["vx_min"] == -0.300
+    assert controller["enforce_path_inversion"] is True
+
+
+# ----------------------------------------------------------------------
+# THE TWO TREES, AND THE ONE ATTRIBUTE BETWEEN THEM
+#
+# The variant exists so that a leg can pick a controller through
+# NavigateToPose's `behavior_tree` field - decided once, before the goal
+# is accepted - instead of through the `controller_selector` TOPIC,
+# which a late message could use to change controller in the middle of a
+# run. The cost of a second file is that it can drift, and this is what
+# stops it.
+#   THE COMPARISON IS ON THE PARSED ELEMENT TREE and not on the text,
+# because the two headers are deliberately different. It cannot be a
+# plain XML parse of the WHOLE file either: both headers contain `--`
+# inside their comment (`m5v3.sh start --nav`), which tinyxml2 accepts
+# and a conforming parser does not. The bodies carry no comments at all.
+# ----------------------------------------------------------------------
+
+def tree_body(path):
+    """The behaviour tree with its header comment cut off, parsed."""
+    text = read(path)
+    body = text[text.index("-->") + 3:]
+    assert "<!--" not in body, "{} has a comment in its BODY".format(path)
+    return ET.fromstring(body)
+
+
+def elements(root):
+    return [(node.tag, dict(node.attrib)) for node in root.iter()]
+
+
+def test_the_rpp_tree_config_yaml_names_actually_exists(cfg):
+    assert os.path.isfile(os.path.join(_REPO, cfg["nav"]["bt_xml_rpp"]))
+
+
+def test_the_two_trees_differ_in_EXACTLY_ONE_ATTRIBUTE(cfg):
+    primary = elements(tree_body(cfg["nav"]["bt_xml"].split("/", 1)[1]))
+    variant = elements(tree_body(cfg["nav"]["bt_xml_rpp"].split("/", 1)[1]))
+    assert len(primary) == len(variant), (
+        "the trees have different numbers of nodes: {} against {}".format(
+            len(primary), len(variant)))
+    differ = [(a, b) for a, b in zip(primary, variant) if a != b]
+    assert len(differ) == 1, differ
+    (tag_a, attr_a), (tag_b, attr_b) = differ[0]
+    assert tag_a == tag_b == "ControllerSelector"
+    assert set(attr_a) == set(attr_b)
+    changed = [key for key in attr_a if attr_a[key] != attr_b[key]]
+    assert changed == ["default_controller"]
+    assert attr_a["default_controller"] == "FollowPath"
+    assert attr_b["default_controller"] == "FollowPathRPP"
+
+
+def test_BOTH_trees_select_a_controller_nav2_yaml_DECLARES(cfg, nav):
+    declared = nav["controller_server"]["ros__parameters"][
+        "controller_plugins"]
+    for key in ("bt_xml", "bt_xml_rpp"):
+        root = tree_body(cfg["nav"][key].split("/", 1)[1])
+        found = [node.attrib["default_controller"] for node in root.iter()
+                 if node.tag == "ControllerSelector"]
+        assert len(found) == 1, found
+        assert found[0] in declared, (
+            "{} defaults to {!r}, which controller_server does not "
+            "declare".format(key, found[0]))
+
+
+def test_the_rpp_tree_inherits_the_budget_and_the_MISSING_RECOVERIES(cfg):
+    # The drift test above covers this structurally; this one says it in
+    # the words the primary's own tests use, so a reader looking for
+    # "does the approach tree have Spin in it" finds the answer under
+    # that name.
+    body = read(cfg["nav"]["bt_xml_rpp"].split("/", 1)[1])
+    stripped = re.sub(r"<!--.*?-->", "", body, flags=re.DOTALL)
+    for node in ("Spin", "BackUp", "DriveOnHeading", "AssistedTeleop"):
+        assert "<{}".format(node) not in stripped
+    found = re.search(r'<Timeout[^>]*msec="([0-9]+)"', stripped)
+    assert found is not None and int(found.group(1)) == 335000
+
+
+# ----------------------------------------------------------------------
+# THE MAPPING: WHICH CASE RUNS WHICH CONTROLLER
+#
+# Four files have to agree for a stage leg to be driven by RPP -
+# config.yaml's case table, config.yaml's tree addresses, the tree's own
+# ControllerSelector and nav2.yaml's plugin list - and three of the four
+# links are silent when they break. A case naming a tree that defaults
+# to a controller nobody declares is a goal that aborts on the rig.
+# ----------------------------------------------------------------------
+
+def controller_of(cfg, nav, row):
+    """The nav2 controller plugin a case OR GOAL row resolves to.
+
+    ONE FUNCTION FOR BOTH TABLES since G5 Task 8, because it is one key
+    with one meaning; `row` is a nav.cases row or a nav.goals row and
+    nothing below this line can tell which.
+    """
+    key = {"mppi": "bt_xml", "rpp": "bt_xml_rpp"}[
+        row.get("controller", "mppi")]
+    root = tree_body(cfg["nav"][key].split("/", 1)[1])
+    return [node.attrib["default_controller"] for node in root.iter()
+            if node.tag == "ControllerSelector"][0]
+
+
+def test_every_case_resolves_to_a_controller_that_EXISTS(cfg, nav):
+    declared = nav["controller_server"]["ros__parameters"][
+        "controller_plugins"]
+    for name, case in cfg["nav"]["cases"].items():
+        assert case.get("controller", "mppi") in ("mppi", "rpp"), name
+        assert controller_of(cfg, nav, case) in declared, name
+
+
+def test_the_STAGE_case_THE_PALLET_CYCLE_DRIVES_resolves_to_RPP(cfg, nav):
+    # THE CASE IS NOT TYPED IN HERE. tools/pallet_cycle.plan_cycle() is
+    # the list of legs the film and the acceptance run actually drive,
+    # and this reads the case name out of it - so a cycle re-plumbed to
+    # a different case cannot leave this test passing about a leg
+    # nothing runs any more.
+    import pallet_cycle
+    stage = [step for step in pallet_cycle.plan_cycle()
+             if step["tool"] == "drive_goal.py" and "--case" in step["argv"]]
+    assert len(stage) == 1, stage
+    name = stage[0]["argv"][stage[0]["argv"].index("--case") + 1]
+    assert cfg["nav"]["cases"][name]["controller"] == "rpp"
+    assert controller_of(cfg, nav, cfg["nav"]["cases"][name]) \
+        == "FollowPathRPP"
+
+
+def test_the_TRANSIT_cases_were_left_on_MPPI(cfg, nav):
+    # The ruling scoped itself to the approach legs and the transit
+    # exposure is REPORTED, not silently closed. `station_approach` is
+    # in this list on purpose: it is the same class as `stage_s5` and it
+    # is a SHIPPED EVIDENCE case measured behind MPPI, so moving it
+    # would replace a measurement with an assumption. config.yaml's case
+    # table carries that paragraph.
+    for name in ("aisle_transit", "station_approach", "reverse_out",
+                 "ring_stress"):
+        case = cfg["nav"]["cases"][name]
+        assert case.get("controller", "mppi") == "mppi", name
+        assert controller_of(cfg, nav, case) == "FollowPath", name
+
+
+# ----------------------------------------------------------------------
+# AND THE SAME MAPPING ON THE GOAL TABLE - G5 TASK 8
+#
+# The pallet cycle's transit leg is a bare `--goal spine_north`, so the
+# four files that have to agree for a STAGE leg are the same four that
+# have to agree for it - with nav.goals in the place nav.cases held.
+# ----------------------------------------------------------------------
+
+def test_every_goal_resolves_to_a_controller_that_EXISTS(cfg, nav):
+    declared = nav["controller_server"]["ros__parameters"][
+        "controller_plugins"]
+    for name, goal in cfg["nav"]["goals"].items():
+        assert goal.get("controller", "mppi") in ("mppi", "rpp"), name
+        assert controller_of(cfg, nav, goal) in declared, name
+
+
+def _cycle_transit_goal(origin):
+    """The goal name the pallet cycle's transit leg sends from `origin`.
+
+    THE GOAL IS NOT TYPED IN HERE, for the stage case's own reason:
+    tools/pallet_cycle.plan_cycle() is the leg list the acceptance run
+    drives, and a cycle re-plumbed to another goal must not leave these
+    tests passing about a leg nothing runs.
+    """
+    import pallet_cycle
+    legs = [step for step in pallet_cycle.plan_cycle(origin)
+            if step["tool"] == "drive_goal.py" and "--goal" in step["argv"]]
+    assert len(legs) == 1, legs
+    return legs[0]["argv"][legs[0]["argv"].index("--goal") + 1]
+
+
+def test_the_BAY_EXIT_transit_the_pallet_cycle_drives_resolves_to_RPP(
+        cfg, nav):
+    # G5 TASK 9. The transit OUT OF THE S5 BAY - every cycle after the
+    # first - is the leg that went `no_progress` 2 of 2 on MPPI and
+    # arrived 6 of 6 on RPP. Four files have to agree for it, and this
+    # is the one that says nav.goals, nav2.yaml and the tree do.
+    name = _cycle_transit_goal("bay")
+    assert cfg["nav"]["goals"][name]["controller"] == "rpp"
+    assert controller_of(cfg, nav, cfg["nav"]["goals"][name]) \
+        == "FollowPathRPP"
+
+
+def test_the_SPAWN_transit_the_pallet_cycle_drives_resolves_to_MPPI(
+        cfg, nav):
+    # AND THE OTHER HALF OF THE SPLIT, which is the half that has to be
+    # pinned or it drifts back: the 17 m straight off the spawn is 8 of
+    # 8 on MPPI and 7 of 8 on RPP, so it stays where it was measured.
+    name = _cycle_transit_goal("spawn")
+    assert cfg["nav"]["goals"][name].get("controller", "mppi") == "mppi"
+    assert controller_of(cfg, nav, cfg["nav"]["goals"][name]) \
+        == "FollowPath"
+
+
+def test_the_TWO_transit_rows_are_NOT_the_same_row(cfg, nav):
+    assert _cycle_transit_goal("spawn") != _cycle_transit_goal("bay")
+
+
+def test_EVERY_OTHER_goal_was_left_on_MPPI(cfg, nav):
+    # The split moved ONE row - the bay-exit copy, which did not exist
+    # before it - and the rest of the table is untouched, including
+    # `spine_north` itself: G5 Task 8 put the key on it and G5 Task 9
+    # took it off again when the bay exit got a row of its own.
+    for name in ("spine_north", "ring_corner", "aisle_end", "station_s5",
+                 "station_s5_staging", "ring_s5_junction", "rack_sw3"):
+        goal = cfg["nav"]["goals"][name]
+        assert goal.get("controller", "mppi") == "mppi", name
+        assert controller_of(cfg, nav, goal) == "FollowPath", name
+
+
+def test_NO_CASE_NAMES_the_bay_exit_row_at_all(cfg):
+    # ITS ONLY CALLER IS THE CYCLE. A case that named it would be a
+    # second owner of the same errand and would carry a repeat count
+    # for a measurement nobody took - which is the reason the split is
+    # a goal ROW and not a case.
+    bay = _cycle_transit_goal("bay")
+    for name, case in cfg["nav"]["cases"].items():
+        assert bay not in (case.get("goal"), case.get("then")), name
+
+
+def test_a_CASE_KEEPS_ITS_OWN_CONTROLLER_over_the_goals_it_names(cfg, nav):
+    # THE ONE RULE THAT KEEPS THIS FROM SPREADING, and it needs a LIVE
+    # WITNESS or it is only a claim: `stage_s5` is `rpp` and the goal it
+    # names carries no key at all, so the two DISAGREE and the case
+    # wins. tools/drive_goal.read_case never reads a goal's key.
+    disagree = 0
+    for name, case in cfg["nav"]["cases"].items():
+        want = case.get("controller", "mppi")
+        for goal_name in (case.get("goal"), case.get("then")):
+            if not goal_name:
+                continue
+            goal = cfg["nav"]["goals"][goal_name]
+            if goal.get("controller", "mppi") != want:
+                disagree += 1
+        assert controller_of(cfg, nav, case) == {
+            "mppi": "FollowPath", "rpp": "FollowPathRPP"}[want], name
+    assert disagree, (
+        "no case disagrees with a goal it names any more - the "
+        "non-inheritance rule has no live witness left")

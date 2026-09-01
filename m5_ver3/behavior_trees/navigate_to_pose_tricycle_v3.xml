@@ -77,6 +77,64 @@
   not there. They are kept because they are how a later task adds a
   second controller without editing this file.
 
+  ---- THE ONE NODE THAT IS OURS: DirectionStablePath, G5 TASK 5 ----
+
+  AMR-DEC-004, and it is the whole of the fix G5's experiments selected.
+  m5_ver3/bt_direction_stable/src/direction_stable_path.cpp carries the
+  argument; what belongs here is where it sits and why exactly there.
+
+  IT WRAPS THE ComputePathToPose RecoveryNode, INSIDE THE RateController.
+  Inside, because it must see one plan per REPLAN and not one per BT tick
+  - outside, it would be ticked at bt_loop_duration (10 ms) and compare a
+  fresh plan against a plan from 10 ms ago. Wrapping the RecoveryNode
+  rather than the ComputePathToPose action, because the recovery branch
+  (WouldAPlannerRecoveryHelp + ClearEntireCostmap) is how a failed plan
+  is retried and that structure is not this task's to change: what
+  reaches this decorator is whatever the recovery finally SUCCEEDED with.
+
+  WHAT IT DOES, IN ONE LINE: on child SUCCESS, if the fresh plan's
+  first-segment driving direction is opposite to the direction of the
+  segment of the ACCEPTED plan the truck is now standing on, for the SAME
+  goal, while |v| > hold_speed, the accepted plan is written back to
+  {path}. Nothing else.
+    THE SEGMENT THE TRUCK IS ON, AND NOT THE ONE THE PLAN SET OFF ON.
+    Measured 2026-09-01: read at the accepted plan's FIRST segment, this
+    node holds through the TERMINAL CUSP of a plan it had already agreed
+    to - the planner and the plan want the same thing and the decorator
+    refuses both - and it turned two runs that arrive into two
+    START_OCCUPIED aborts.
+
+  CHILD FAILURE AND CHILD RUNNING PASS THROUGH UNTOUCHED, the 1 Hz replan
+  is unchanged, and no plan is ever invented - the only path this node can
+  write is one the planner produced and it had already accepted.
+
+  hold_speed = 0.05 m/s IS config.yaml's (nav.direction_hold), REPEATED
+  HERE because a BT port takes a literal. odom_topic is config.yaml's
+  topics.odometry_filtered for the same reason. tests/test_bt_direction.py
+  pins both copies to the file that owns them.
+
+  THE OTHER THREE ATTRIBUTES ARE G5 TASK 6's AND THEY ARE THE SAME KIND
+  OF COPY - config.yaml (nav.direction_hold) owns all three and the same
+  test file pins them:
+    hold_all         WHICH ARM. false refuses only a direction swap
+                     (Task 5's node); true commits to the accepted plan
+                     while the truck moves. THIS ATTRIBUTE IS WHAT THE
+                     ACCEPTANCE CAMPAIGN SWITCHED, and the decorator
+                     logs the mode it actually loaded at its first tick
+                     so a result can be attributed to a process rather
+                     than to a file.
+    hold_max_s       the bound on the latch: an unbroken run of holds
+                     older than this takes the fresh plan and logs `hold
+                     expired`. Without it, commit mode IS the F1 pilot -
+                     one plan, no correction, terminal overshoot.
+    consume_floor_m  an accepted plan with less than this left in front
+                     of the truck is a stub and is never held.
+    ON THE --fuse ARM THE ESTIMATOR PUBLISHES SOMEWHERE ELSE
+    (topics.fuse_odometry_filtered) and this attribute would name a topic
+    nobody publishes. The decorator FAILS OPEN on that - it accepts every
+    plan and says so once in bt_navigator's log - so that arm behaves
+    exactly as it did before this node existed. Stated, not hidden.
+
   ---- THE NAVIGATION BUDGET, F4 TASK 2.5 ----
 
   `<Timeout msec="335000">` wraps the WHOLE tree, and it is the answer
@@ -143,13 +201,15 @@
           <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
           <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
           <RateController hz="1.0">
-            <RecoveryNode number_of_retries="1" name="ComputePathToPose">
-              <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
-              <Sequence>
-                <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
-                <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
-              </Sequence>
-            </RecoveryNode>
+            <DirectionStablePath path="{path}" odom_topic="/m5v3/odometry/filtered" hold_speed="0.05" hold_all="false" hold_max_s="10.0" consume_floor_m="0.3">
+              <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+                <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
+                <Sequence>
+                  <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+                  <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+                </Sequence>
+              </RecoveryNode>
+            </DirectionStablePath>
           </RateController>
           <RecoveryNode number_of_retries="1" name="FollowPath">
             <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}"/>

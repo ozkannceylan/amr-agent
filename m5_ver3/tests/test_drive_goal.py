@@ -62,7 +62,8 @@ def test_it_is_its_own_inverse_which_is_what_a_half_turn_is():
 
 _GOAL = drive_goal.Goal(name="t", x=-20.0, y=0.0, travel_yaw=-math.pi / 2,
                         pose_yaw=drive_goal.pose_yaw(-math.pi / 2),
-                        repeat=1, note="")
+                        repeat=1, note="", controller="mppi",
+                        bt_xml="behavior_trees/t.xml")
 
 
 def test_an_exact_arrival_scores_zero_on_every_axis():
@@ -111,7 +112,8 @@ def test_the_heading_error_is_WRAPPED_and_never_a_near_full_turn():
 
 _PASSBY_GOAL = drive_goal.Goal(
     name="passby", x=0.0, y=0.0, travel_yaw=0.0,
-    pose_yaw=drive_goal.pose_yaw(0.0), repeat=1, note="")
+    pose_yaw=drive_goal.pose_yaw(0.0), repeat=1, note="",
+    controller="mppi", bt_xml="behavior_trees/t.xml")
 
 #: (t, x, y, yaw) driving east along y = -1 from x = -3 to x = +3.
 _PASSBY = [(10.0 + i, -3.0 + i, -1.0, math.pi) for i in range(7)]
@@ -1231,8 +1233,14 @@ def test_every_case_in_config_yaml_reads_back(cfg):
                 assert case.preempt_at_m is None
 
 
-def _refusing_cfg(cfg, rows):
-    """The real config with nav.cases swapped, and a refusal that raises."""
+def _refusing_cfg(cfg, rows, table="nav.cases"):
+    """The real config with ONE table swapped, and a refusal that raises.
+
+    `table` IS AN ARGUMENT SINCE G5 TASK 8, because the row-level checks
+    it feeds now live on nav.goals as well as nav.cases and a second
+    copy of this fixture for the second table is a second thing to keep
+    in step with `refuse`.
+    """
     class _Stop(Exception):
         pass
 
@@ -1243,7 +1251,7 @@ def _refusing_cfg(cfg, rows):
             self._inner = inner
 
         def raw(self, key):
-            if key == "nav.cases":
+            if key == table:
                 return rows
             return self._inner.raw(key)
 
@@ -1550,3 +1558,274 @@ def test_deviation_by_direction_is_empty_both_ways_with_no_plan():
         [(0.0, 0.0, 0.0, 0.0)], [(0.0, 0.0, -0.3, 0.0)], [], 0.0, 1.0,
         0.005)
     assert fwd is None and rev is None
+
+
+# ----------------------------------------------------------------------
+# WHICH CONTROLLER A CASE RUNS, G5 TASK 7
+#
+# `read_case` resolves the controller and the tree that selects it at
+# the same moment it resolves the goals, and for the same reason: a case
+# naming a controller that does not exist has to be a refusal before the
+# stack is touched rather than a bt_navigator that cannot open a tree
+# forty metres into a drive.
+# ----------------------------------------------------------------------
+
+def test_the_STAGE_case_resolves_to_RPP_and_to_the_RPP_TREE(cfg):
+    case = drive_goal.read_case(cfg, "stage_s5")
+    assert case.controller == "rpp"
+    assert case.bt_xml == cfg.s("nav.bt_xml_rpp")
+    assert case.bt_xml != cfg.s("nav.bt_xml")
+
+
+def test_a_case_with_NO_controller_key_is_MPPI_and_the_PRIMARY_tree(cfg):
+    # Every case was this before the key existed, and a case that says
+    # nothing must still say MPPI rather than nothing.
+    for name in ("aisle_transit", "station_approach", "reverse_out",
+                 "ring_stress"):
+        case = drive_goal.read_case(cfg, name)
+        assert case.controller == drive_goal.DEFAULT_CONTROLLER
+        assert case.bt_xml == cfg.s("nav.bt_xml")
+
+
+def test_an_UNKNOWN_controller_is_REFUSED_and_the_refusal_NAMES_BOTH(cfg):
+    wrapped, lines, stop = _refusing_cfg(cfg, {
+        "bad": {"goal": "spine_north", "repeat": "1",
+                "controller": "dwb"}})
+    with pytest.raises(stop):
+        drive_goal.read_case(wrapped, "bad")
+    assert "`controller` is one of" in lines[0]
+    joined = " ".join(lines)
+    assert "FollowPath" in joined and "FollowPathRPP" in joined
+
+
+def test_the_two_controller_names_map_to_the_two_config_KEYS(cfg):
+    # The table is the only place the name -> file mapping lives, and
+    # both files it names have to be addresses config.yaml actually
+    # holds.
+    assert list(drive_goal.CONTROLLER_TREE) == ["mppi", "rpp"]
+    assert drive_goal.DEFAULT_CONTROLLER in drive_goal.CONTROLLER_TREE
+    for key in drive_goal.CONTROLLER_TREE.values():
+        assert os.path.isfile(os.path.join(drive_goal._common.REPO,
+                                           cfg.s(key)))
+
+
+def test_EVERY_case_in_the_table_resolves_without_a_refusal(cfg):
+    # read_case is where a typo in this table is caught, so the table
+    # itself has to be walked rather than sampled.
+    import yaml as _yaml
+    with open(drive_goal._common.CONFIG, encoding="utf-8") as handle:
+        table = _yaml.safe_load(handle)["nav"]["cases"]
+    for name in table:
+        case = drive_goal.read_case(cfg, name)
+        assert case.controller in drive_goal.CONTROLLER_TREE
+        assert case.bt_xml
+
+
+def test_nav_label_records_the_TREE_IT_WAS_GIVEN_and_ITS_hash(cfg):
+    # A run behind the approach tree that wore the primary tree's label
+    # would be tabled by `analyse` with runs it has nothing to do with.
+    # That hazard is exactly why nav_bt_md5 was put on the session in
+    # the first place; a second tree is what makes it live.
+    primary = drive_goal.nav_label(cfg)
+    variant = drive_goal.nav_label(cfg, cfg.s("nav.bt_xml_rpp"))
+    assert primary["nav_bt"] == cfg.s("nav.bt_xml")
+    assert variant["nav_bt"] == cfg.s("nav.bt_xml_rpp")
+    assert primary["nav_bt_md5"] != variant["nav_bt_md5"]
+    # and the nav2.yaml half of the label is the SAME for both, because
+    # one parameter file declares both controllers.
+    assert primary["nav_config_md5"] == variant["nav_config_md5"]
+
+
+def test_BOTH_trees_carry_the_SAME_navigation_budget(cfg):
+    # The budget is the tree's guard and `analyse` reads it off the
+    # session. The two trees differ in one attribute and it is not this
+    # one, so a stage run and a transit run are bounded alike.
+    assert (drive_goal.nav_label(cfg)["nav_budget_ms"]
+            == drive_goal.nav_label(cfg,
+                                    cfg.s("nav.bt_xml_rpp"))["nav_budget_ms"])
+
+
+# ----------------------------------------------------------------------
+# WHICH CONTROLLER A GOAL RUNS, G5 TASK 8
+#
+# The pallet cycle's transit leg is a BARE `--goal spine_north` - it has
+# no case to carry the choice - and it was the last leg in a cycle that
+# needed a recovery. So nav.goals took the same optional `controller:`
+# key nav.cases has, resolved by the same function, off the same table
+# of two names. These pin the mechanism AND the one rule that keeps it
+# from moving anything else: a case never inherits from its goals.
+# ----------------------------------------------------------------------
+
+def _cycle_transit_goal(origin):
+    """The goal name the pallet cycle's transit leg sends from `origin`.
+
+    THE GOAL IS NOT TYPED IN HERE. tools/pallet_cycle.plan_cycle() is
+    the list of legs the acceptance run actually drives, and this reads
+    the goal name out of it - so a cycle re-plumbed to a different goal
+    cannot leave these tests passing about a leg nothing runs any more.
+    """
+    import pallet_cycle
+    legs = [step for step in pallet_cycle.plan_cycle(origin)
+            if step["tool"] == "drive_goal.py" and "--goal" in step["argv"]]
+    assert len(legs) == 1, legs
+    return legs[0]["argv"][legs[0]["argv"].index("--goal") + 1]
+
+
+def test_the_BAY_EXIT_transit_the_pallet_cycle_drives_resolves_to_RPP(cfg):
+    # G5 TASK 9, and it is the leg the whole key exists for: out of the
+    # S5 bay through a Reeds-Shepp cusp, `no_progress` 2 of 2 on MPPI
+    # and arrived 6 of 6 on RPP.
+    goal = drive_goal.read_goal(cfg, _cycle_transit_goal("bay"))
+    assert goal.controller == "rpp"
+    assert goal.bt_xml == cfg.s("nav.bt_xml_rpp")
+    assert goal.bt_xml != cfg.s("nav.bt_xml")
+
+
+def test_the_SPAWN_transit_the_pallet_cycle_drives_resolves_to_MPPI(cfg):
+    # THE OTHER HALF OF THE SPLIT. 17 m of open corridor, 8 of 8 on
+    # MPPI against 7 of 8 on RPP, so it stays where it was measured -
+    # and it is pinned, because "absent means mppi" is exactly the kind
+    # of fact that drifts back without one.
+    goal = drive_goal.read_goal(cfg, _cycle_transit_goal("spawn"))
+    assert goal.controller == "mppi"
+    assert goal.bt_xml == cfg.s("nav.bt_xml")
+
+
+def test_the_TWO_transit_goals_are_ONE_POSE_under_TWO_NAMES(cfg):
+    # ONE TARGET, TWO ROWS. What differs is the origin and therefore
+    # the controller; the destination must not differ at all, or the
+    # cycle's second transit is driving somewhere nobody wrote down.
+    spawn = drive_goal.read_goal(cfg, _cycle_transit_goal("spawn"))
+    bay = drive_goal.read_goal(cfg, _cycle_transit_goal("bay"))
+    assert bay.name != spawn.name
+    assert bay.x == pytest.approx(spawn.x)
+    assert bay.y == pytest.approx(spawn.y)
+    assert bay.travel_yaw == pytest.approx(spawn.travel_yaw)
+    assert bay.pose_yaw == pytest.approx(spawn.pose_yaw)
+    assert bay.controller != spawn.controller
+
+
+def test_a_goal_with_NO_controller_key_is_MPPI_and_the_PRIMARY_tree(cfg):
+    # Every goal was this before the key existed, and a goal that says
+    # nothing must still say MPPI rather than nothing. `spine_north` is
+    # back in this list since G5 Task 9: Task 8's key moved off it onto
+    # the bay-exit row that needed it.
+    for name in ("spine_north", "ring_corner", "aisle_end", "station_s5",
+                 "station_s5_staging", "ring_s5_junction", "rack_sw3"):
+        goal = drive_goal.read_goal(cfg, name)
+        assert goal.controller == drive_goal.DEFAULT_CONTROLLER, name
+        assert goal.bt_xml == cfg.s("nav.bt_xml"), name
+
+
+def test_EVERY_goal_in_the_table_resolves_without_a_refusal(cfg):
+    import yaml as _yaml
+    with open(drive_goal._common.CONFIG, encoding="utf-8") as handle:
+        table = _yaml.safe_load(handle)["nav"]["goals"]
+    for name in table:
+        goal = drive_goal.read_goal(cfg, name)
+        assert goal.controller in drive_goal.CONTROLLER_TREE, name
+        assert goal.bt_xml, name
+
+
+def test_an_UNKNOWN_controller_on_a_GOAL_is_REFUSED_naming_nav_goals(cfg):
+    wrapped, lines, stop = _refusing_cfg(cfg, {
+        "bad": {"x": "0.0", "y": "0.0", "travel_yaw_rad": "0.0",
+                "repeat": "1", "controller": "dwb"}}, table="nav.goals")
+    with pytest.raises(stop):
+        drive_goal.read_goal(wrapped, "bad")
+    assert "nav.goals.bad's `controller` is one of" in lines[0]
+    # and the OWNER line points at the table the reader has to edit,
+    # which is the whole reason `where` is an argument.
+    assert "nav.goals" in lines[1]
+    joined = " ".join(lines)
+    assert "FollowPath" in joined and "FollowPathRPP" in joined
+
+
+def test_a_CASE_does_NOT_inherit_the_controller_of_the_goal_it_names(cfg):
+    # THE RULE, WITH A LIVE WITNESS. `stage_s5` is `rpp` and the goal it
+    # names carries no key at all, so the two DISAGREE and the CASE
+    # wins: a case is one run and one tree, and the case is the errand.
+    case = drive_goal.read_case(cfg, "stage_s5")
+    assert case.controller == "rpp"
+    assert case.first.controller == "mppi"
+    assert case.bt_xml == cfg.s("nav.bt_xml_rpp")
+    assert case.first.bt_xml == cfg.s("nav.bt_xml")
+
+
+def test_a_CASE_still_reads_MPPI_over_goals_that_agree_with_it(cfg):
+    # AND THE OTHER DIRECTION. `aisle_transit` is a SHIPPED EVIDENCE
+    # case measured behind MPPI over two goals that are both MPPI, so
+    # nothing about it may move when the goal table is re-split.
+    case = drive_goal.read_case(cfg, "aisle_transit")
+    assert case.first.name == "spine_north"
+    assert case.first.controller == "mppi"
+    assert case.controller == "mppi"
+    assert case.bt_xml == cfg.s("nav.bt_xml")
+
+
+def test_the_CASE_that_DOES_name_rpp_still_gets_it_over_a_MPPI_goal(cfg):
+    # The other direction of the same rule: `stage_s5` names `rpp` and
+    # its goal names nothing, and the CASE wins there too.
+    case = drive_goal.read_case(cfg, "stage_s5")
+    assert case.first.controller == "mppi"
+    assert case.controller == "rpp"
+    assert case.bt_xml == cfg.s("nav.bt_xml_rpp")
+
+
+def test_ONE_resolver_answers_for_BOTH_tables(cfg):
+    # A goal row and a case row carrying the same key must resolve the
+    # same way, or the two tables mean two different things by one word.
+    for controller, key in drive_goal.CONTROLLER_TREE.items():
+        row = {"controller": controller}
+        assert drive_goal.read_controller(cfg, "nav.goals.x", row) == \
+            drive_goal.read_controller(cfg, "nav.cases.x", row)
+        assert drive_goal.read_controller(cfg, "nav.goals.x", row) == \
+            (controller, cfg.s(key))
+    assert drive_goal.read_controller(cfg, "nav.goals.x", {}) == \
+        (drive_goal.DEFAULT_CONTROLLER,
+         cfg.s(drive_goal.CONTROLLER_TREE[drive_goal.DEFAULT_CONTROLLER]))
+
+
+def test_describe_of_a_BARE_goal_PRINTS_the_controller_and_the_tree(
+        cfg, capsys):
+    drive_goal.describe(
+        cfg, drive_goal.read_goal(cfg, "spine_north_from_bay"))
+    out = capsys.readouterr().out
+    assert "controller rpp" in out
+    assert cfg.s("nav.bt_xml_rpp") in out
+
+
+def test_describe_of_the_OTHER_transit_row_prints_the_OTHER_answer(
+        cfg, capsys):
+    # THE TWO ROWS ARE ONE POSE AND THE PRINT IS THE ONLY PLACE AN
+    # OPERATOR SEES WHICH ONE THEY ASKED FOR. If `describe` read the
+    # same answer for both, the split would be invisible on the rig.
+    drive_goal.describe(cfg, drive_goal.read_goal(cfg, "spine_north"))
+    out = capsys.readouterr().out
+    assert "controller mppi" in out
+    assert cfg.s("nav.bt_xml_rpp") not in out
+
+
+def test_describe_of_a_CASE_gives_ONE_controller_answer_not_three(
+        cfg, capsys):
+    # describe_case prints the case's controller and then describes both
+    # goals. If the goals printed theirs too, `aisle_transit` would
+    # report mppi AND rpp for one run.
+    drive_goal.describe_case(cfg, drive_goal.read_case(cfg, "aisle_transit"))
+    out = capsys.readouterr().out
+    assert out.count("controller ") == 1
+    assert "controller mppi" in out
+    assert cfg.s("nav.bt_xml_rpp") not in out
+
+
+def test_the_two_controller_GLOSSES_name_the_two_nav2_plugins(cfg):
+    # One string for both printers, and each half names the nav2.yaml
+    # ENTRY - so a reader of either output can find it in that file.
+    # It must NOT sort the two by class of leg: G5 Task 8 put a transit
+    # leg on RPP, so "the approach legs" would be a lie on the rig.
+    assert "FollowPathRPP" in drive_goal.controller_note("rpp")
+    assert "FollowPath " in drive_goal.controller_note("mppi")
+    assert "RPP" not in drive_goal.controller_note("mppi")
+    for name in drive_goal.CONTROLLER_TREE:
+        gloss = drive_goal.controller_note(name)
+        assert "transit leg" not in gloss and "approach leg" not in gloss

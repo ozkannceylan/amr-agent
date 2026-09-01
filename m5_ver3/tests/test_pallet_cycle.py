@@ -26,6 +26,91 @@ def test_transit_is_nav2_along_the_ring():
     assert step["argv"] == ["record", "--goal", "spine_north"]
 
 
+# ----------------------------------------------------------------------
+# WHICH TRANSIT GOAL, AND IT IS CHOSEN BY WHERE THE TRUCK IS - G5 TASK 9
+#
+# The transit leg is the same ERRAND every cycle and it is not the same
+# DRIVE. Cycle 1 leaves the spawn down an open 8.00 m corridor; every
+# cycle after it leaves the S5 bay through a Reeds-Shepp cusp, and the
+# two geometries measured OPPOSITE ways on the two controllers
+# (config.yaml nav.goals.spine_north carries the campaign). A goal row
+# holds one controller, so the split is two rows and the cycle picks
+# between them by origin.
+#   THE LEG NAME DOES NOT MOVE. config.yaml film.shots is one row per
+# plan_cycle leg and tests/test_film_core.py locks the two together; a
+# film that had to know which cycle it was filming would be a film that
+# noticed. Only the `--goal` argument differs.
+# ----------------------------------------------------------------------
+
+def test_the_FIRST_transit_of_a_run_leaves_the_SPAWN():
+    step = cy.plan_cycle(cy.transit_origin(1))[0]
+    assert step["leg"] == "transit"
+    assert step["tool"] == "drive_goal.py"
+    assert step["argv"] == ["record", "--goal", "spine_north"]
+
+
+@pytest.mark.parametrize("cycle", [2, 3, 4, 10])
+def test_EVERY_LATER_transit_leaves_the_S5_BAY(cycle):
+    step = cy.plan_cycle(cy.transit_origin(cycle))[0]
+    assert step["leg"] == "transit"
+    assert step["tool"] == "drive_goal.py"
+    assert step["argv"] == ["record", "--goal", "spine_north_from_bay"]
+
+
+def test_transit_origin_is_the_spawn_ONCE_and_the_bay_ever_after():
+    assert cy.transit_origin(1) == "spawn"
+    assert all(cy.transit_origin(n) == "bay" for n in range(2, 12))
+
+
+def test_the_default_origin_is_the_SPAWN_one():
+    # Every caller that does not care - the film's shot lock, the leg
+    # list, `describe` - gets cycle 1's plan, which is the plan this
+    # file pinned before the split existed.
+    assert cy.plan_cycle() == cy.plan_cycle(cy.transit_origin(1))
+
+
+def test_BOTH_origins_name_a_goal_row_that_config_yaml_HOLDS():
+    import yaml
+    with open(os.path.join(_M5V3, "config.yaml"), encoding="utf-8") as fh:
+        goals = yaml.safe_load(fh)["nav"]["goals"]
+    assert set(cy.TRANSIT_GOAL) == {"spawn", "bay"}
+    for origin, goal in cy.TRANSIT_GOAL.items():
+        assert goal in goals, origin
+
+
+def test_ONLY_the_transit_ARGV_differs_between_the_two_origins():
+    """THE FILM MUST NOT NOTICE. Same legs, same order, same tools.
+
+    config.yaml film.shots is one row per leg of plan_cycle() and
+    tests/test_film_core.py holds them equal; if the origin could move
+    a leg name the cut would refuse a perfect take on cycle 2.
+    """
+    spawn = cy.plan_cycle("spawn")
+    bay = cy.plan_cycle("bay")
+    assert [s["leg"] for s in spawn] == [s["leg"] for s in bay]
+    assert [s["tool"] for s in spawn] == [s["tool"] for s in bay]
+    differ = [i for i, (a, b) in enumerate(zip(spawn, bay))
+              if a["argv"] != b["argv"]]
+    assert differ == [0]
+
+
+def test_an_ORIGIN_THAT_IS_NOT_A_POSE_ON_THIS_FLOOR_is_refused_by_name():
+    # A typo must not silently fall back on a controller. There are two
+    # origins because there are two geometries, and a third is a bug.
+    with pytest.raises(ValueError) as excinfo:
+        cy.plan_cycle("aisle")
+    assert "spawn" in str(excinfo.value) and "bay" in str(excinfo.value)
+
+
+def test_run_asks_for_the_origin_of_the_CYCLE_IT_IS_ON():
+    # The seam, pinned against the source: `run` loops cycles and must
+    # plan each one from its own origin. A run that planned once and
+    # reused it would send the spawn goal out of the bay - which is the
+    # exact leg G5 Task 7 measured failing 2 of 2.
+    src = open(cy.__file__, encoding="utf-8").read()
+    assert "plan_cycle(transit_origin(n))" in src
+
+
 def test_empty_stage_is_nav2_stage_s5():
     stages = [s for s in cy.plan_cycle() if s["leg"] == "stage"]
     assert len(stages) == 2

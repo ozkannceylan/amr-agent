@@ -4013,6 +4013,42 @@ twist_route:
          speed_limit_mps: "0.000"}
       - {hold_s: "4.0", v_mps: "0.000", w_radps: "0.000"}
 
+# ================= THE ONE BEHAVIOUR-TREE PLUGIN THIS TRACK BUILDS =====
+# G5 Task 5, AMR-DEC-004. bt_direction_stable/ is the only C++ package in
+# m5_ver3/, and it exists because the fix the experiments selected is a
+# BT DECORATOR and a decorator cannot be written in a parameter file.
+#
+# THE SOURCE IS THE REPOSITORY'S AND THE BUILD TREE IS THE USER'S, which
+# is tools/install_rf2o.sh's ruling applied to a package we wrote
+# ourselves: under m5_ver3/ the build tree would be object files one
+# stray `git add` from being committed, and it must not need root. The
+# leading ~/ is expanded against $HOME by both readers -
+# tools/install_bt_direction.sh and m5v3.sh - so the two cannot disagree
+# about where the .so is.
+#
+# THERE IS NO COMMIT PIN HERE AND THAT IS THE DIFFERENCE FROM rf2o.
+# rf2o is FETCHED from a moving branch, so a pin is the only way to say
+# which revision a figure was measured on. This source is IN this
+# repository, so `git rev-parse HEAD` already says that; the install
+# script records it in the manifest beside the workspace instead.
+bt_direction:
+  # Relative to $REPO, because that is what the installer hands colcon.
+  source_dir: "m5_ver3/bt_direction_stable"
+  workspace: "~/m5v3_bt_ws"
+  package: "bt_direction_stable"
+  # THE NAME nav2.yaml REPEATS. bt_navigator loads BT plugins with
+  # BT::SharedLibrary - a plain dlopen of lib<name>.so off the LOADER
+  # path, not pluginlib and not the ament index - so this string is the
+  # library, and tests/test_bt_direction.py pins nav2.yaml's
+  # plugin_lib_names to it.
+  library: "m5v3_direction_stable_bt_node"
+  # Release, for install_rf2o.sh's reason: this code runs inside
+  # bt_navigator's tick and a debug build would be a different program.
+  build_type: "Release"
+  # WHAT THE TREE REGISTERS IT AS. The XML tag, written once here and
+  # repeated in behavior_trees/navigate_to_pose_tricycle_v3.xml.
+  node_id: "DirectionStablePath"
+
 # ============================== THE NAV ARM ============================
 # F4 Task 2, and it is the first thing on this track that DECIDES where
 # the vehicle goes. Everything before it either drives a table
@@ -4045,6 +4081,152 @@ nav:
   # written into nav2.yaml, where it would be a claim about where
   # somebody's shell was standing.
   bt_xml: "m5_ver3/behavior_trees/navigate_to_pose_tricycle_v3.xml"
+  # AND THE SECOND TREE, G5 TASK 7. It is the file above with ONE
+  # ATTRIBUTE CHANGED - its ControllerSelector defaults to
+  # `FollowPathRPP` instead of `FollowPath` - and it is how a leg picks
+  # the Regulated Pure Pursuit controller nav2.yaml declares beside
+  # MPPI. tests/test_nav2_params.py parses both files and fails if they
+  # differ anywhere else.
+  #   IT IS NOT A DEFAULT AND NOTHING RUNS IT UNASKED. bt_navigator's
+  # `default_nav_to_pose_bt_xml` is still `bt_xml` above; this file is
+  # reached only through the `behavior_tree` field of a NavigateToPose
+  # goal, which tools/drive_goal.py fills from nav.cases.<case>
+  # .controller below. A consumer that does not set the field gets the
+  # primary tree and MPPI, exactly as before this key existed.
+  #   WHY THE FIELD AND NOT THE `controller_selector` TOPIC: the field
+  # is read once, before the goal is accepted, by the same call that
+  # sets the pose. The topic is a subscription the tree polls while it
+  # ticks, so a late message would change controller in the MIDDLE of a
+  # run rather than select one for it. The tree's own header carries the
+  # argument at length.
+  bt_xml_rpp: "m5_ver3/behavior_trees/navigate_to_pose_tricycle_v3_rpp.xml"
+
+  # ------------- THE DIRECTION HOLD, G5 TASK 5, AMR-DEC-004 ------------
+  # The one knob of the one fix. bt_direction: above owns the library;
+  # this owns the THRESHOLD, because a threshold in m/s is a NAV
+  # constant and not a build fact.
+  #
+  # WHAT IT GUARDS. Smac replans at 1 Hz from the moving pose. At the
+  # adverse entry measured in G5-T1..T3 the fresh plan's first-segment
+  # driving direction FLIPS - 13-15 times per run - and MPPI's candidate
+  # cloud, anchored on the last command inside a +-0.35 m endpoint tube,
+  # cannot span the flip: PathAlignCritic switches itself off
+  # (furthest_reached_path_point 0 < 12), the remaining critics balance
+  # at a wrong-direction creep, the footprint reaches lethal cost and the
+  # next plan is START_OCCUPIED 205 with no retry left in the tree.
+  # DirectionStablePath refuses the SWAP, and only while the truck is
+  # moving.
+  #
+  # THE NUMBER IS BRACKETED BY TWO MEASUREMENTS AND SITS BETWEEN THEM:
+  #   ABOVE it, every creep plateau this failure produced: 0.078,
+  #     0.081, 0.084, 0.093 m/s over the recorded adverse runs. A hold
+  #     that did not cover those would not cover the failure.
+  #   BELOW it, a cusp and a stop. A Reeds-Shepp cusp passes through
+  #     zero speed by construction, so a direction change the PLAN
+  #     legitimately contains is made at |v| under this and is ACCEPTED
+  #     - which is what keeps the hold from freezing a plan the vehicle
+  #     has finished the first half of. Localisation noise on this
+  #     estimator is an order below it again.
+  # 0.05 m/s is also nav.analyse.follow_speed_mps, a sixth of the
+  # 0.300 m/s transit ceiling, and ten times navcmd's cusp deadband.
+  #
+  # THE TREE REPEATS IT AS AN XML ATTRIBUTE - a BT port takes a literal,
+  # not a config reference - and tests/test_bt_direction.py pins the two
+  # equal, which is this file's rule for every value it has to say twice.
+  direction_hold:
+    hold_speed_mps: "0.05"
+
+    # ---- THE ARM. G5 TASK 6, AND IT IS THE ONE VARIABLE OF A CAMPAIGN.
+    # false, DIRECTION-ONLY: a fresh plan is refused only when it
+    #   REVERSES the driving direction of the segment the truck is
+    #   standing on. G5 Task 5's node exactly.
+    # true, COMMIT: while the truck is moving, EVERY fresh plan is
+    #   refused and the accepted plan is driven; the next plan is taken
+    #   at a cusp, a stop, a consumed plan, a changed goal, or the
+    #   expiry below.
+    #
+    # WHY THE SECOND MODE EXISTS AND WHY IT IS NOT A PREFERENCE.
+    # Direction-only was measured on both entries: the normal one
+    # arrives in 29.5 s with one harmless hold, and the adverse one
+    # still fails 205. Its 20 holds all fired as designed - and about 92
+    # SAME-direction fresh plans were accepted underneath them. Their
+    # shape chatter, one a second, walked the truck 3.0 m off line onto
+    # lethal cost: the same abort by a different road. Refusing the swap
+    # is not enough if the SHAPE is free to change every second, and
+    # commit mode is that hypothesis stated as a knob.
+    #
+    # AND THE CAMPAIGN REFUTED IT. 2026-09-01, 24 trials, both arms, the
+    # deterministic reproducer, seed verified every trial:
+    #   ADVERSE x8   A (false) 2/8 arrived - 4 START_OCCUPIED 205, one
+    #                planner "exceeded maximum iterations", one
+    #                no-progress. B (true) 0/8 arrived, all no-progress.
+    #   NORMAL x4    A 4/4 arrived at 31 s, no plateau. B 2/4 - a
+    #                REGRESSION on the one entry the film uses.
+    #   THE CREEP    every single trial of BOTH arms carried a creep
+    #                plateau: A 47.5-101 s at 0.081-0.087 m/s, B
+    #                28.6-39.3 s at 0.080-0.084 m/s, sign agreement
+    #                against the standing plan 0-38 %.
+    # Commit mode refused 92 % of the replans - 66 of 72 on B1, 61 of
+    # them SAME-direction, exactly the shape chatter the paragraph above
+    # blames - and the creep did not move by a millimetre per second. A
+    # cause you can remove entirely without changing the effect is not
+    # the cause. THE CREEP IS NOT MADE BY PLAN REPLACEMENT, and no
+    # setting of this knob is a fix for it; that question is an
+    # architecture question and it is the owner's. EVIDENCE_NAV_V3.md
+    # carries the tables.
+    #   IT IS LEFT AT false, WHICH IS NOT A SELECTION. Neither arm
+    #   cleared the bar, so nothing was selected. false is the value that
+    #   does not REGRESS the normal entry, and it is what G5 Task 5
+    #   measured; true would ship a 2/4 where a 4/4 was measured.
+    hold_all: "false"
+
+    # ---- HOW LONG ONE UNBROKEN RUN OF HOLDS MAY LAST, in seconds.
+    # THE BOUND ON THE LATCH, and the line between commit mode and the
+    # F1 pilot. F1 - never replan at all - removed the flips, the creep
+    # and the 205, and lost terminal overrun correction with them: four
+    # overshoot failures and a transformed plan frozen 0.66 m behind the
+    # truck. A commit that ran a whole drive would reproduce that
+    # exactly. So a streak older than this takes the fresh plan and logs
+    # `hold expired`, and the planner gets the truck back on a current
+    # plan on a fixed cadence no matter what the vehicle is doing.
+    #   10.0 s IS CAMPAIGN-CHOSEN RATHER THAN MEASURED FROM THE
+    #   VEHICLE, and it is chosen to sit INSIDE the range the failure
+    #   itself produces: the direction-only hold streaks recorded on the
+    #   adverse entry ran 7 and 15 consecutive holds at 1 Hz, so 10 s
+    #   cuts the long ones and leaves the short ones alone. It is also
+    #   ten replans held and one taken, which on a ~30 s drive is two or
+    #   three re-anchors before the terminal approach. If the campaign
+    #   in EVIDENCE_NAV_V3.md contradicts it, it is adjusted ONCE and
+    #   the change is recorded there rather than argued here.
+    #   WHAT IT DID, MEASURED. On the direction-only arm it fired 0-1
+    #   times a trial; on the commit arm 4-9 times, which is the bound
+    #   doing exactly its job - without it those runs would have driven
+    #   one plan for their whole length. Unchanged by the campaign: no
+    #   trial's outcome turned on it.
+    hold_max_s: "10.0"
+
+    # ---- HOW LITTLE OF AN ACCEPTED PLAN MAY BE LEFT AND IT STILL BE
+    # WORTH HOLDING, in metres measured from the segment the truck is
+    # standing on. Below this the accepted plan is a stub: holding it
+    # would steer the last centimetres of an approach by a fragment that
+    # ends where the truck already is, which is how a hold turns into a
+    # standstill in front of the goal.
+    #   0.30 m IS CAMPAIGN-CHOSEN, and it is bracketed the way this file
+    #   brackets a number: ABOVE the 0.05 m costmap resolution by six
+    #   cells, so it is not grid noise; BELOW the goal checker's 0.60 m
+    #   xy_goal_tolerance by half, so a plan with less than this left of
+    #   it cannot carry the truck as far as the box it is aiming at. It
+    #   is also one second of driving at the 0.300 m/s transit ceiling -
+    #   one whole replan interval. Adjusted ONCE if the campaign says
+    #   so, and recorded in EVIDENCE_NAV_V3.md if it is.
+    #   IT NEVER FIRED IN 24 TRIALS AND THAT IS RECORDED, NOT HIDDEN.
+    #   The rung above it - |v| <= hold_speed - catches the terminal
+    #   approach first every time, because a truck with 0.30 m of plan
+    #   left is a truck that has already slowed below 0.05 m/s. So this
+    #   floor is a bound that has been reasoned about and not yet
+    #   exercised, and it is left at 0.3 for that reason rather than
+    #   tuned against evidence that does not exist.
+    consume_floor_m: "0.3"
 
   # ---------------------- THE FIVE CHILDREN ----------------------------
   # Four servers and one lifecycle manager. Every one of them is a
@@ -4215,6 +4397,57 @@ nav:
   #   Server (docs/reports/m5v3-02 4), which is edge-constrained and
   #   maps onto this graph one edge for one edge. It is a whole server
   #   and it belongs to a later phase.
+  #
+  # ---- AND SINCE G5 TASK 8, A GOAL ALSO NAMES ITS CONTROLLER --------
+  # `controller:` is `mppi` or `rpp`, it is OPTIONAL, and absent means
+  # `mppi` - which is what every row here did before the key existed.
+  # It is the SAME key, the same two names and the SAME resolver as
+  # nav.cases below (tools/drive_goal.read_controller), because it is
+  # the same fact: the name an operator writes, and the behaviour tree
+  # that name selects.
+  #
+  # WHY A GOAL NEEDED ONE AT ALL, WHICH G5 TASK 7 SAID IT DID NOT.
+  # Task 7 put the key on CASES and wrote that a bare `--goal` is always
+  # MPPI, "because nav.goals is a table of poses with no errand
+  # attached". Then it measured the pallet cycle and found the last
+  # remaining intervention on a leg that is exactly that: a bare
+  # `--goal spine_north`, sent by tools/pallet_cycle.plan_cycle. The
+  # errand was real; it was simply not written in nav.cases. So the key
+  # moved to where the leg is rather than the leg moving to where the
+  # key was, which keeps ONE table per thing an operator can ask for.
+  #
+  # IT APPLIES TO A BARE `--goal` AND TO NOTHING ELSE. A goal reached
+  # THROUGH a case runs the CASE's controller, never its own: a case can
+  # be two goals and a run has one tree. That rule is in read_case and
+  # tests/test_drive_goal.py pins it in both directions - which is what
+  # keeps `aisle_transit`, a SHIPPED EVIDENCE case measured behind MPPI
+  # that names `spine_north` as its first goal, from being moved by a
+  # key it never asked for.
+  #
+  # ---- AND SINCE G5 TASK 9 THE MAPPING IS PER ORIGIN ----------------
+  # Task 8 put the key on `spine_north` and its own campaign said why
+  # that was half an answer: ONE ROW HOLDS ONE CONTROLLER, and that
+  # goal is reached from TWO poses that measured OPPOSITE ways - the
+  # bay exit 6 of 6 on RPP and 0 of 2 on MPPI, the 17.00 m spawn
+  # straight 8 of 8 on MPPI and 7 of 8 on RPP. Whichever key it carried,
+  # one of the two entries was driving on the controller that lost.
+  #   THE SPLIT IS A SECOND GOAL ROW. `spine_north_from_bay` is the same
+  # target pose under a second name, and the NAME IS THE ORIGIN IT IS
+  # DRIVEN FROM rather than the place it goes - the only row in this
+  # table of which that is true, and it is true because the origin is
+  # the only thing that ever distinguished the two drives.
+  # tools/pallet_cycle.plan_cycle picks between the two by where the
+  # truck is standing when the transit starts.
+  #   THE COPY CANNOT DRIFT. The row carries `same_pose_as:` and
+  # tests/test_nav2_params.py holds the pair to one x, one y and one
+  # travel heading - and refuses any UNdeclared pair of rows at one
+  # pose, which is the typo that check was written for.
+  #   WHY A ROW AND NOT A CASE, which is the other half of what Task 8
+  # left open. A case is an ERRAND - one or two goals and a rule for the
+  # second - and the bay exit is not a second errand; it is the same
+  # errand from a different pose. A case would also own a repeat count,
+  # and would appear in EVIDENCE_NAV_V3's case table as a measurement
+  # nobody took. A row costs one key and says exactly what changed.
   goals:
     # THE HEADLINE, AND IT IS THE ONE THAT IS REPEATED. 17.00 m due east
     # along the north ring leg to the SPINE's north junction, arriving
@@ -4231,7 +4464,198 @@ nav:
       y: "10.00"
       travel_yaw_rad: "0.0"
       repeat: "3"
+      # G5 TASK 8'S CAMPAIGN IS RECORDED HERE AND ITS KEY IS NOT.
+      # Task 8 put `controller: "rpp"` on this row - AMR-DEC-005's
+      # recorded implementation note carried out, the ruling of
+      # 2026-09-01 that moved the APPROACH legs to RPP and named the
+      # transit out of the bay as the leg it had not measured. G5 TASK 9
+      # took that key off again and gave the bay exit a ROW of its own,
+      # `spine_north_from_bay`, immediately below.
+      #   THE MEASUREMENTS STAY HERE. They were taken on this pose, both
+      # rows are decided by them, and a row that lost its history when
+      # it lost its key would read as though nothing had ever happened.
+      # What this row IS, since Task 9, is what it was before Task 8: no
+      # `controller:` key, therefore MPPI.
+      #
+      # WHAT THE KEY WAS FOR, AND IT WAS ONE ENTRY AND NOT THIS WHOLE
+      # GOAL - which is exactly why it could not stay on this row. This
+      # goal is sent from two places on this floor and only one of them
+      # was ever failing:
+      #   from the SPAWN, an open 8.00 m corridor, MPPI arrived every
+      #     time it was asked - 6 of 6 in EVIDENCE_NAV_V3.md 16.5, and
+      #     2 of 2 as cycle 1 of G5 Task 7's acceptance pairs.
+      #   from the S5 BAY, after an undock, MPPI went `no_progress`
+      #     2 of 2 - both of Task 7's cycle 2 transits - and the pallet
+      #     cycle's staging recovery fired on both. That recovery is the
+      #     owner-banned intervention, and it was the last one left in a
+      #     cycle.
+      # The bay exit is nav.cases.reverse_out's geometry and nav2 issue
+      # #5714's: a 3.815 m truck with a 1.25 m turning radius standing
+      # at the mouth of a 4.00 m bay with its forks pointed SOUTH into
+      # it, whose only way out is COUNTERWEIGHT-FIRST through a
+      # Reeds-Shepp cusp. THE TWO ENTRIES ARE NOT THE SAME LENGTH and
+      # the row's own 17.00 m is the SPAWN's: from the bay the goal is
+      # 7.91 m of straight line and Smac's own first plan is 8.54-8.62 m
+      # with a cusp in it, MEASURED over eight trials.
+      #
+      # WHY RPP IS THE ANSWER TO IT AND WHY IT IS NOT A NUMBER. The
+      # failure mode is the one Tasks 4-6 measured and failed to tune
+      # out of MPPI: with the vehicle nose-in and the first plan segment
+      # reversing, MPPI's path critics gate themselves off, the softmax
+      # falls back on the optimiser's own prior, and the truck holds a
+      # ~0.08 m/s creep in the WRONG direction until the progress
+      # checker gives up. RegulatedPurePursuit samples nothing, scores
+      # nothing and carries no prior - it takes a carrot off the plan
+      # and drives at it - so the state that creep is is not reachable.
+      # nav2.yaml's FollowPathRPP block carries the derivations.
+      #
+      # THE CAMPAIGN, 2026-09-01, ONE BRINGUP, 22 TRIALS, THE SEED
+      # VERIFIED AGAINST tf ON EVERY ONE OF THEM. Both entries were
+      # driven, and the second was driven on BOTH controllers, because
+      # moving a controller under a leg that was already arriving is a
+      # regression risk and the only honest answer to it is the same leg
+      # re-run against a control on the same rig.
+      #
+      #   BAY EXIT, from the post-undock pose the failing cycle-2
+      #   transits actually started from - world (7.065, 6.435), yaw
+      #   +1.5439:
+      #     RPP   x6   6 ARRIVED, 26.8-29.0 s, first plan 8.54-8.62 m,
+      #                7.51-7.75 m driven, NO creep plateau, NO
+      #                START_OCCUPIED 205, NO collision throw, and 535-
+      #                580 /lookahead_point messages a run - which is
+      #                the positive proof RPP computed the commands.
+      #     MPPI  x2   0 arrived. Both `no_progress` at 30.0 s with a
+      #                28.7 s / 29.4 s creep plateau at 0.082 / 0.080
+      #                m/s and 100 % / 90 % of driven ticks commanded
+      #                AGAINST the standing plan. (G5 Task 7's two
+      #                acceptance pairs; same pose, same stack.)
+      #   THE DETERMINISTIC FAILURE THIS KEY IS FOR IS DEAD. 0 of 2
+      #   became 6 of 6, and the creep - the thing four candidate fixes
+      #   could not remove from MPPI - did not appear once.
+      #
+      #   SPAWN, the 17.00 m entry this goal was ALREADY winning, run
+      #   EIGHT AND EIGHT on the same bringup:
+      #     RPP   x8   7 arrived. Six clean at 55.7-56.1 s, worst
+      #                cross-track 0.156-0.227 m off the y = +10.00
+      #                centreline. TWO LATERAL EXCURSIONS of 2.880 m
+      #                and 2.859 m: one recovered and arrived at 81.3 s,
+      #                one was LOST - `no_progress` at 75.2 s, 21
+      #                collision throws, 5.19 m short.
+      #     MPPI  x8   8 arrived. Seven clean at 56.6-57.4 s, worst
+      #                cross-track 0.125-0.308 m. ONE LATERAL EXCURSION
+      #                of 2.438 m, recovered, arrived at 66.0 s.
+      #
+      # THE EXCURSION IS NOT RPP'S AND THE RECOVERY FROM IT MIGHT BE.
+      # That is what the control bought and it is why it was run. The
+      # excursion fires under BOTH controllers - 2 of 8 and 1 of 8 - so
+      # it is a property of this LEG: a 17 m straight driven
+      # forks-first (nav2 REVERSE), where a small early heading error is
+      # absorbed by a planner that must replan a 1.25 m-radius arc from
+      # the pose it is given rather than corrected back onto the line.
+      # What differs is the endgame: MPPI's PathAlignCritic scores a
+      # whole trajectory against the path and pulled its one excursion
+      # back at 2.44 m; RPP has NO cross-track term at all - it drives
+      # at a carrot - and rode both of its excursions out to 2.86 m,
+      # losing one. The sample is two against one and it will not carry
+      # more weight than that.
+      #   IT WAS THEREFORE NOT CLEARED AND THE KEY WAS NOT A CLOSED
+      #   QUESTION. G5 Task 8's bar for this entry was 4 of 4 and it
+      #   returned 3 of 4, so the acceptance cycles that were to follow
+      #   it were NOT RUN. What the key bought was a straight trade: a
+      #   GUARANTEED intervention on every cycle pair - the bay exit,
+      #   2 of 2 recovered under MPPI - against a 1-in-8 one on the
+      #   spawn entry. Task 8 wrote that the mechanism could not split
+      #   them, because a goal row has ONE controller and this goal is
+      #   reached from two poses, and that splitting them "needs a
+      #   second goal row or a case for the bay exit, and that is a
+      #   design decision and not a value".
+      #
+      #   G5 TASK 9 IS THAT DECISION AND IT IS A SECOND GOAL ROW, WHICH
+      #   IS WHY THIS ROW IS BACK ON MPPI. Nobody should take a 1-in-8
+      #   loss on an entry that is already 8 of 8 in order to fix a
+      #   different entry, and nothing here makes them: each geometry
+      #   now drives the controller that measured best ON IT - this row
+      #   MPPI for the 17.00 m spawn straight, `spine_north_from_bay`
+      #   RPP for the 7.91 m bay exit - and neither entry pays for the
+      #   other. tools/pallet_cycle.plan_cycle chooses between them by
+      #   where the truck is standing when the transit starts, which is
+      #   the only thing that ever distinguished the two entries.
+      #
+      #   THE EXCURSION IS STILL NOT CLEARED. It is a property of this
+      #   17 m leg, it fires under BOTH controllers, and what this row
+      #   keeps is the ENDGAME that recovered it - MPPI's
+      #   PathAlignCritic, 1 of 8, pulled back at 2.44 m and arrived at
+      #   66.0 s. That is the better of two measured answers and not a
+      #   solved problem.
+      #
+      #   AND RPP HAS NO DYNAMIC-OBSTACLE MODEL. On this floor that
+      # costs nothing - nothing moves on it but this truck - and it is
+      # written down here rather than discovered later. It is also why
+      # the row below names the ONE leg it is for.
       note: "the SPINE's north junction, straight down the ring's north leg"
+    # ------------------------------------------------------------------
+    # THE SAME TARGET, FROM THE OTHER END OF THE FLOOR - G5 TASK 9, AND
+    # THE ONLY ROW IN THIS TABLE WHOSE NAME IS AN ORIGIN AND NOT A
+    # DESTINATION. It is `spine_north`'s pose, key for key: `x`, `y` and
+    # `travel_yaw_rad` are the same values, `same_pose_as:` below is
+    # what SAYS they are the same, and tests/test_nav2_params.py is what
+    # checks it. What differs is where the truck is standing when it is
+    # sent - and therefore which controller can drive it there.
+    #
+    # ITS ONLY CALLER IS THE PALLET CYCLE'S BAY-EXIT TRANSIT.
+    # tools/pallet_cycle.plan_cycle sends `spine_north` for the FIRST
+    # transit of a run - the truck is at the spawn, in an open 8.00 m
+    # corridor - and THIS row for every transit after it, when the truck
+    # is standing in the S5 bay after an undock. No case names it (a
+    # case is an ERRAND and this is the same errand from a different
+    # pose), no other tool sends it, and tests/test_pallet_cycle.py pins
+    # the selection in both directions.
+    #
+    # THE GEOMETRY IS nav.cases.reverse_out's AND nav2 ISSUE #5714's: a
+    # 3.815 m truck with a 1.25 m turning radius standing at the mouth
+    # of a 4.00 m bay with its forks pointed SOUTH into it, whose only
+    # way out is COUNTERWEIGHT-FIRST through a Reeds-Shepp cusp. From
+    # there the goal is 7.91 m of straight line and Smac's own first
+    # plan is 8.54-8.62 m WITH A CUSP IN IT, measured over eight trials.
+    # It is not the 17.00 m the row above is written for, and that
+    # difference is the whole reason there are two rows.
+    #
+    # WHAT IT MEASURED, 2026-09-01, one bringup, the seed verified
+    # against tf on every trial - the campaign is written out in full on
+    # the row above and this is the half that decided this row:
+    #   RPP   x6   6 ARRIVED, 26.8-29.0 s, 7.51-7.75 m driven, NO creep
+    #              plateau, NO START_OCCUPIED 205, and 535-580
+    #              /lookahead_point messages a run, which is the
+    #              positive proof RPP computed the commands.
+    #   MPPI  x2   0 arrived. Both `no_progress` at 30.0 s on a 28.7 s /
+    #              29.4 s creep plateau at 0.082 / 0.080 m/s - and both
+    #              of them fired the pallet cycle's staging recovery,
+    #              which is the owner-banned intervention and was the
+    #              last one left in a cycle.
+    # 0 of 2 became 6 of 6 and the creep - the thing four candidate
+    # fixes could not remove from MPPI - did not appear once.
+    #
+    # `repeat: 1` AND NOT `case_only`. No case names this row, so
+    # `case_only` would be false in the direction test_nav2_params.py
+    # checks it. One session is what the evidence has to hold; the
+    # acceptance cycles drive it once per cycle after the first.
+    # ------------------------------------------------------------------
+    spine_north_from_bay:
+      x: "0.00"
+      y: "10.00"
+      travel_yaw_rad: "0.0"
+      repeat: "1"
+      controller: "rpp"
+      # THE COPY DECLARES WHAT IT IS A COPY OF, and the test enforces
+      # the equality rather than trusting it. Two rows at one pose is
+      # otherwise indistinguishable from a typo - which is exactly what
+      # test_no_two_goals_are_the_same_pose was written to catch. This
+      # key is how a DELIBERATE pair says so, and it is checked in both
+      # directions: an undeclared duplicate is still refused, and a
+      # declared one that has DRIFTED - a second destination wearing the
+      # first one's name - is refused too.
+      same_pose_as: "spine_north"
+      note: "the SPINE's north junction, reached OUT OF THE S5 BAY"
     # THE TRANSIT ONE. 37.00 m due east along the same leg to the ring's
     # north-east corner, arriving still headed east - the pose a truck
     # stands in before it takes that corner. It is the goal that spends
@@ -4402,6 +4826,53 @@ nav:
   # checker and the no-progress watchdog see, so the three cannot
   # disagree about where the vehicle was. Ground truth stays an
   # instrument (F2 constraint 13).
+  #
+  # ---- AND SINCE G5 TASK 7, A CASE ALSO NAMES ITS CONTROLLER --------
+  # `controller:` is `mppi` or `rpp` and it is OPTIONAL - absent means
+  # `mppi`, which is what every case did before the key existed. THE
+  # WHOLE MAPPING IS THIS TABLE AND THERE IS NO OTHER PLACE IT LIVES:
+  #
+  #   aisle_transit      mppi   TRANSIT. The headline. 17 m down the
+  #                             ring's north leg and a mid-path
+  #                             re-tasking; MPPI's dynamic-obstacle
+  #                             avoidance is what a transit leg is for.
+  #   station_approach   mppi   APPROACH by class, AND DELIBERATELY LEFT
+  #                             HERE - see the paragraph below.
+  #   stage_s5           rpp    APPROACH, AND THE ONE THE PALLET CYCLE
+  #                             DRIVES (tools/pallet_cycle.plan_cycle,
+  #                             leg `stage`). This is the leg the ruling
+  #                             is about.
+  #   reverse_out        mppi   TRANSIT out of the bay, after an
+  #                             approach into it. It exists to MEASURE
+  #                             nav2 #5714 on MPPI; running it on
+  #                             another controller would delete the
+  #                             measurement rather than improve it.
+  #   ring_stress        mppi   TRANSIT. 37 m, x3, the 16.4c residual.
+  #
+  # `station_approach` IS THE SAME CLASS AS `stage_s5` AND IS STILL ON
+  # MPPI, and that is a statement rather than an oversight. It is a
+  # SHIPPED EVIDENCE case: EVIDENCE_NAV_V3.md's approach figures were
+  # measured behind MPPI, and moving it would replace a recorded
+  # measurement with an unmeasured one. G5 Task 7's campaign drove
+  # `stage_s5` and the pallet cycle; it did not drive this case, so this
+  # case does not move. THE EXPOSURE THAT LEAVES IS REAL AND IS NAMED:
+  # station_s5 is the same bay off the same ring band, so an adverse
+  # entry heading is available to it too.
+  #
+  # A CASE'S CONTROLLER IS THE CASE'S OWN AND IT IS NOT INHERITED FROM
+  # THE GOALS IT NAMES - G5 Task 8, when nav.goals took the same key. A
+  # case can be TWO goals and a run has ONE tree, so inheritance would
+  # have to choose one of two answers; and `aisle_transit` and
+  # `ring_stress` both start at goals that are free to move without
+  # them. Absent still means `mppi` here, exactly as it did.
+  #   THE LEG THIS PARAGRAPH USED TO BE ABOUT HAS MOVED. G5 Task 7
+  # recorded that the ONE remaining `nav2 miss recovered` in a pallet
+  # cycle was tools/pallet_cycle.plan_cycle's `transit` leg -
+  # `--goal spine_north`, no case - failing `no_progress` on MPPI in
+  # 2 of 2 cycle-2 runs, out of the S5 bay. G5 Task 8 measured that leg
+  # and moved it, and the key that moves it is on nav.goals.spine_north
+  # rather than here, because the leg has no case. The paragraph over
+  # that row is the ruling; this one is only the cross-reference.
   cases:
     # THE HEADLINE, AND IT IS THE ONE REPEATED THREE TIMES. A truck is
     # sent down the ring's north leg to the spine junction and re-tasked
@@ -4437,6 +4908,20 @@ nav:
     stage_s5:
       goal: "station_s5_staging"
       repeat: "3"
+      # G5 TASK 7, THE OWNER'S RULING OF 2026-09-01, AND THIS ONE KEY IS
+      # THE WHOLE OF IT ON THIS SIDE OF THE FILE. Six trials of this
+      # case from the adverse entry heading arrived 0 of 6 under MPPI:
+      # the path critics gate themselves off, the softmax falls back on
+      # the optimiser's own prior, and the truck holds a ~0.081 m/s
+      # creep in the WRONG DIRECTION until the footprint reaches lethal
+      # cost and the next plan is START_OCCUPIED 205. Four candidate
+      # fixes were measured and refused (G5 Tasks 4-6).
+      #   `rpp` selects nav.bt_xml_rpp, whose ControllerSelector
+      # defaults to nav2.yaml's `FollowPathRPP`. Regulated Pure Pursuit
+      # samples nothing, scores nothing and carries no prior, so the
+      # state that creep is is not reachable - which is why the ruling
+      # is a controller and not a number.
+      controller: "rpp"
       note: "Nav2 to S5 staging - two-stage approach, first half"
     # THE REVERSE LEG, AND THE ONLY WAY TO GET ONE ON THIS FLOOR IS TO
     # PARK THE TRUCK FIRST. A Reeds-Shepp cusp needs a start pose from

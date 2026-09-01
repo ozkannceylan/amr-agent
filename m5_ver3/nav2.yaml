@@ -592,7 +592,13 @@ controller_server:
 
     progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["general_goal_checker"]
-    controller_plugins: ["FollowPath"]
+    # TWO CONTROLLERS SINCE G5 TASK 7, AND ONE PROGRESS CHECKER AND ONE
+    # GOAL CHECKER FOR BOTH OF THEM. `FollowPath` is the MPPI below and
+    # nothing in it changed; `FollowPathRPP` is at the FOOT of this
+    # section and is what the STAGE/APPROACH legs run. The two checkers
+    # stay singular on purpose: a leg that arrives under one controller
+    # and not under the other would be measuring the checker.
+    controller_plugins: ["FollowPath", "FollowPathRPP"]
 
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
@@ -1312,6 +1318,408 @@ controller_server:
         # fight all of them.
         mode: 2
 
+    # ==================================================================
+    # FollowPathRPP - THE STAGE/APPROACH CONTROLLER, G5 TASK 7
+    # ==================================================================
+    #
+    # THE RULING (owner, 2026-09-01) AND WHAT IT IS AGAINST. G5 Tasks
+    # 1-6 measured one failure class and never removed it: at an ADVERSE
+    # ENTRY HEADING the MPPI above loses its path critics - PathAlign
+    # self-gates at furthest_reached_path_point 0 and the Goal critics
+    # are out of range - and the softmax update then collapses onto its
+    # OWN PRIOR, holding a sustained WRONG-DIRECTION creep of about
+    # 0.081 m/s until the footprint reaches lethal cost and the next
+    # plan comes back START_OCCUPIED 205. It is invariant to path
+    # length, to `prune_distance`, to `change_penalty`, to the plan
+    # replacement rate and to `vx_std`: 0/6 arrivals as shipped, and
+    # four candidate fixes refuted (EVIDENCE_NAV_V3.md, G5).
+    #
+    # THE FIX IS A DIFFERENT CONTROLLER ON THOSE LEGS AND NOT A NUMBER.
+    # Regulated Pure Pursuit has NO SAMPLING, NO CRITICS AND NO PRIOR.
+    # Its command is a closed-form function of ONE POINT on the path:
+    #
+    #     lookahead point  ->  curvature  ->  (v, w)
+    #
+    # so there is no state in which "the optimiser's own prior wins"
+    # exists to be reached. The creep class is not tuned away here, it
+    # is made STRUCTURALLY IMPOSSIBLE. What is given up is stated at the
+    # foot of this block.
+    #
+    # THIS DOES NOT REPLACE MPPI AND THE RULING DID NOT ASK IT TO.
+    # `FollowPath` above is untouched and still drives every TRANSIT
+    # leg, where it has 6/6 and 2/2 arrivals on record and where its
+    # dynamic-obstacle avoidance is the reason it was chosen. The
+    # exposure that leaves on the transit legs is REPORTED, not silently
+    # closed: an adverse entry heading is a property of a POSE and not
+    # of a leg name, and nothing here proves a transit leg cannot meet
+    # one.
+    #
+    # ------------------------------------------------------------------
+    # THE ONE MECHANISM THIS WHOLE CHOICE RESTS ON: THE CUSP.
+    # ------------------------------------------------------------------
+    # Every ordinary leg on this vehicle is a Reeds-Shepp path with at
+    # least one CUSP in it (section D), and a pure-pursuit controller
+    # that chased a lookahead point THROUGH a cusp would drive straight
+    # at a point it has to reverse to reach. nav2 1.3.12 handles it in
+    # the controller itself, and it is READ rather than assumed -
+    # nav2_regulated_pure_pursuit_controller/src/
+    # regulated_pure_pursuit_controller.cpp:
+    #
+    #   192   // Check for reverse driving
+    #   193   if (params_->allow_reversing) {
+    #   194     // Cusp check
+    #   195     const double dist_to_cusp = findVelocitySignChange(...);
+    #   196
+    #   197     // if the lookahead distance is further than the cusp,
+    #   198     // use the cusp distance instead
+    #   199     if (dist_to_cusp < lookahead_dist) {
+    #   200       lookahead_dist = dist_to_cusp;
+    #   201     }
+    #
+    # and `findVelocitySignChange` (:519) walks the transformed plan
+    # taking the DOT PRODUCT of successive segments and returns the
+    # distance to the first one that is negative:
+    #
+    #   536   const double dot_prod = (oa_x * ab_x) + (oa_y * ab_y);
+    #   537   if (dot_prod < 0.0) {
+    #   538     // returning the distance if there is a cusp
+    #   539     // The transformed path is in the robots frame, so robot
+    #   540     // is at the origin
+    #   541     return hypot(...);
+    #
+    # The carrot is therefore NEVER placed past a cusp. And the travel
+    # direction is then read off that carrot and off nothing else
+    # (:226):
+    #
+    #   226   double x_vel_sign = 1.0;
+    #   227   if (params_->allow_reversing) {
+    #   228     x_vel_sign = carrot_pose.pose.position.x >= 0.0 ?
+    #                                                      1.0 : -1.0;
+    #   229   }
+    #
+    # so the vehicle drives TO the cusp, the plan behind it is pruned,
+    # the next carrot lands on the other side of base_link, and the sign
+    # flips. That is the whole of the cusp behaviour and there is no
+    # optimisation anywhere in it. It is also why `allow_reversing` is
+    # not a preference on this truck - see below.
+    FollowPathRPP:
+      # THE CLASS NAME IS THE `type` IN THE PACKAGE'S OWN plugins.xml,
+      # WITH `::` AND NOT `/`, verified on this rig against
+      # /opt/ros/jazzy/share/nav2_regulated_pure_pursuit_controller/
+      # (version 1.3.12 - the same release every other plugin in this
+      # file comes from). pluginlib does not guess: a class name that
+      # does not match is a controller_server that fails on_configure.
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+
+      # ---- the two booleans that make this an ACKERMANN controller ----
+      #
+      # TRUE, AND IT IS STRUCTURAL RATHER THAN A PREFERENCE. With it
+      # FALSE, `x_vel_sign` is pinned at +1.0 (the quote above) and
+      # every command is COUNTERWEIGHT-FIRST. On this vehicle the forks
+      # are at model -x and the ordinary direction of travel is nav2's
+      # REVERSE (section D), so a controller that cannot emit a negative
+      # linear.x would drive away from every path it was given. It also
+      # switches the cusp handling on at all: the `if` at :193 is what
+      # limits the lookahead to the cusp.
+      allow_reversing: true
+      # FALSE, AND ON THIS VEHICLE IT IS THE SAME REFUSAL THE BEHAVIOUR
+      # TREE MAKES ABOUT `Spin`. `rotateToHeading()` publishes
+      # angular.z with linear.x = 0, and
+      # nodes/cmd_vel_tricycle_core.twist_to_tricycle REFUSES that twist
+      # BY NAME: one steered wheel a wheelbase ahead of the rear axle
+      # cannot turn the body without travelling. This one flag gates
+      # BOTH rotate paths - `shouldRotateToPath` returns
+      # `params_->use_rotate_to_heading && ...` (:315) and
+      # `shouldRotateToGoalHeading` returns false immediately without it
+      # (:323) - so false here removes the whole behaviour and not half
+      # of it.
+      #   AND THE PACKAGE ITSELF CALLS THE PAIR MUTUALLY EXCLUSIVE:
+      #   parameter_handler.cpp:285-292 REJECTS a dynamic set of
+      #   `allow_reversing` true while `use_rotate_to_heading` is true
+      #   ("Both use_rotate_to_heading and allow_reversing can not be
+      #   set to true"). THAT CHECK DOES NOT EXIST ON THE INITIAL LOAD -
+      #   the constructor declares and reads both without ever comparing
+      #   them - so a file that got this pair wrong would be accepted in
+      #   silence and would then stand still commanding yaw.
+      #   tests/test_nav2_params.py is what stands in for the check the
+      #   package does not make.
+      use_rotate_to_heading: false
+
+      # ---- the speed envelope, and it is the MPPI's own --------------
+      # RPP carries ONE magnitude and applies the sign afterwards
+      # (`linear_vel = std::clamp(fabs(linear_vel), 0.0,
+      # desired_linear_vel); linear_vel = sign * linear_vel;`, :481),
+      # so this single number is both ends of the envelope. It is
+      # |vx_min| = vx_max above, unchanged: the goal box and the stop
+      # table that set 0.300 m/s are properties of the VEHICLE, and they
+      # do not move because the controller did.
+      desired_linear_vel: 0.300
+
+      # ---- the lookahead, and BOTH ENDS ARE DERIVED ------------------
+      #
+      # THE FLOOR IS THE STEER CEILING, EXACTLY. The tightest arc pure
+      # pursuit can ask for is the one with the carrot fully ABEAM:
+      # `calculateCurvature` is 2*y/(x^2+y^2) (:151), which at |y| = d
+      # is 2/d. The steer angle that implies is atan(L * 2/d) with
+      # L = config.yaml vehicle.wheelbase_m = 1.05 m, and the commanded
+      # ceiling is 1.25 rad (config.yaml navcmd), so the smallest
+      # lookahead that CANNOT reach that ceiling is
+      #
+      #     d_min = 2L / tan(1.25) = 2.10 / 3.009569 = 0.6978 m
+      #
+      # 0.70 m rounds that up and leaves the worst commandable steer at
+      # atan(1.05 * 2/0.70) = atan(3.000) = 1.2490 rad - 0.0010 rad
+      # inside the commanded ceiling and 0.0610 inside model.sdf's
+      # mechanical stop. A shorter floor would hand the converter a
+      # curvature it has to CLAMP, and a clamped steer is a command the
+      # controller did not mean.
+      #   AND THE DERIVATION COVERS THE VELOCITY-SCALED LOOKAHEAD AND
+      # NOTHING ELSE, WHICH IS NOT WHAT IT LOOKS LIKE AND IS MEASURED.
+      # The CUSP CLAMP is applied AFTER `getLookAheadDistance` and is not
+      # floored by it (:199, the quote at the head of this block), so
+      # approaching a cusp the carrot goes wherever the cusp is. Over
+      # G5 Task 7's eight adverse trials - 13354 commanded ticks - the
+      # carrot sat INSIDE this floor on 3198 of them (23.9 %) and came
+      # as close as 0.045 m. What that costs is at the foot of this
+      # block, under NO KINEMATIC MODEL. It is not fixable from here:
+      # there is no parameter in RPP that bounds the cusp clamp.
+      min_lookahead_dist: 0.70
+      # THE CEILING IS THE PLANNER'S TIGHTEST CORNER. A carrot further
+      # away than half the shortest arc the planner can emit is a carrot
+      # on the far side of the turn, and pure pursuit cuts to it in a
+      # straight chord. Smac's `minimum_turning_radius` is 1.25 m, so a
+      # 90 deg turn is pi * 1.25 / 2 = 1.9635 m of arc and half of it is
+      # 0.9817 m.
+      max_lookahead_dist: 0.95
+      # TRUE: the lookahead is |v| * lookahead_time clamped to the two
+      # above (:138). It matters more on this truck than on the
+      # differential bases the default was written for, because the two
+      # ends above are a HARD floor and a HARD ceiling and the scaling
+      # is the only thing that puts the carrot anywhere between them.
+      use_velocity_scaled_lookahead_dist: true
+      # 3.0 s, against the package's 1.5. That default is a time
+      # constant for a base cruising near 2 m/s; this one cruises at
+      # 0.300, and 1.5 * 0.300 = 0.45 m is BELOW the 0.70 m floor -
+      # which would pin the lookahead at its floor across the whole
+      # envelope and make the scaling inert. 3.0 puts the top of the
+      # envelope at 3.0 * 0.300 = 0.90 m, 0.05 m under
+      # `max_lookahead_dist` so that the smoother overshooting its own
+      # ramp cannot clip it, and puts the floor at 0.70 / 3.0 =
+      # 0.2333 m/s - anything slower than 78 % of the ceiling rides the
+      # floor.
+      lookahead_time: 3.0
+      # UNREAD while `use_velocity_scaled_lookahead_dist` is true, and
+      # written as what the scaling produces at the transit ceiling so
+      # that a reader who switches the scaling off gets the same
+      # geometry rather than the package's 0.6 - which is BELOW the
+      # derived floor above.
+      lookahead_dist: 0.90
+      # FALSE, so the curvature that REGULATES the speed is the same one
+      # that steers (`regulation_curvature = lookahead_curvature`,
+      # :215). A second, fixed curvature carrot is a second place for
+      # the two to disagree, and this vehicle has one path and one
+      # radius. `curvature_lookahead_dist` and
+      # `interpolate_curvature_after_goal` are read only inside that
+      # branch and are left at the package defaults; the package
+      # disables the second of them anyway when the first is false
+      # (parameter_handler.cpp:176-180).
+      use_fixed_curvature_lookahead: false
+
+      # ---- the regulation, which is what the R in RPP is -------------
+      #
+      # THE MINIMUM RADIUS IS THE VEHICLE'S OWN, the same 1.25 m the
+      # planner plans at and MPPI's AckermannConstraints holds. The
+      # heuristic is
+      #
+      #     if radius < min_radius:
+      #         v *= 1 - |radius - min_radius| / min_radius
+      #
+      # (regulation_functions.hpp:41), so a pursuit arc AT the planned
+      # radius costs nothing and one tighter than the route was planned
+      # for costs speed in proportion. That is the case that matters
+      # here: the pursuit circle is not the path's circle, and a truck
+      # sitting off its path demands a tighter one than anything the
+      # planner ever emitted.
+      use_regulated_linear_velocity_scaling: true
+      regulated_linear_scaling_min_radius: 1.25
+      # THE FLOOR THE REGULATION MAY NOT GO BELOW, and the package's own
+      # 0.25 would be 83 % of this vehicle's whole ceiling - regulation
+      # with 17 % of authority is regulation that does not happen. What
+      # binds this number from BELOW is in this same file: the progress
+      # checker above wants 0.30 m in 15.0 s, which is 0.020 m/s. 0.05
+      # is 2.5 x that, so a leg driven at FULL regulation still cannot
+      # trip the checker that would abort it.
+      regulated_linear_scaling_min_speed: 0.05
+      # ON, and the one number in it that is NOT a free choice:
+      # `inflation_cost_scaling_factor` MUST equal the local costmap's
+      # own `cost_scaling_factor`, because `costConstraint`
+      # (regulation_functions.hpp:71) INVERTS the exponential the
+      # inflation layer painted in order to recover a distance. A
+      # mismatch does not warn - it silently reports the wrong distance
+      # to obstacle. local_costmap's inflation_layer below reads 1.10.
+      use_cost_regulated_linear_velocity_scaling: true
+      inflation_cost_scaling_factor: 1.10
+      # 0.60 m, the package default, and on this floor it is INERT
+      # everywhere except in genuine trouble - which is the intent. The
+      # inflation radius is 2.60 m, but this heuristic only fires when
+      # the recovered distance-to-obstacle is under `cost_scaling_dist`:
+      # the 8.00 m ring band leaves base_link 4.00 m from a wall and the
+      # 4.00 m bay mouth leaves it 2.00 m, so neither transit nor the S5
+      # approach touches it. What does is a footprint 0.60 m from a
+      # painted cell, and slowing there is correct.
+      cost_scaling_dist: 0.60
+      cost_scaling_gain: 1.0
+
+      # ---- the approach, and it is what MPPI HAS NO PARAMETER FOR ----
+      # The MPPI block above says this in as many words at `vx_min`:
+      # "MPPI has no approach-velocity scaling: nothing in it
+      # corresponds to RPP's approach_velocity_scaling_dist, so the
+      # choice is between transit speed and arrival accuracy for the
+      # WHOLE run rather than for the last two metres of it". This
+      # controller has it, and on these legs that trade goes away.
+      #   1.00 m, AND THE GOAL BOX IS WHAT SIZES IT. The box is 0.60 m
+      # (general_goal_checker above). Scaling linearly from 1.00 m of
+      # remaining path, the speed at the edge of the box is
+      # 0.300 * 0.60 = 0.180 m/s; the stop from there is
+      # v^2/(2a) = 0.0324 / 0.70 = 0.046 m at navcmd.accel_mps2, plus
+      # 0.25 s of measured chain dead time at 0.180 m/s = 0.045 m, so
+      # 0.091 m in total against a 0.60 m box. The same arithmetic at
+      # the full 0.300 m/s is 0.208 m (EVIDENCE_NAV_V3.md 8) - still
+      # inside, but with a third of the box spent instead of a sixth.
+      #   IT MUST ALSO STAY UNDER HALF THE LOCAL COSTMAP or the package
+      # warns of "permanent slowdown" (parameter_handler.cpp:126): the
+      # window is 10 m, so the bound is 5.00 m and 1.00 is well inside.
+      approach_velocity_scaling_dist: 1.00
+      # The package default, and it is the floor of the APPROACH ramp
+      # rather than of the regulation - written as the same 0.05 m/s as
+      # `regulated_linear_scaling_min_speed` above and for the same
+      # reason, so the two floors cannot disagree.
+      min_approach_linear_velocity: 0.05
+
+      # ---- the refusal -----------------------------------------------
+      # ON. This is the only thing in RPP that can decline to drive: it
+      # forward-simulates the FOOTPRINT along the commanded arc and
+      # throws `NoValidControl` if it hits, which the tree answers with
+      # ClearLocalCostmap-Context and one retry. IT HANDLES REVERSE
+      # CORRECTLY and that was read rather than hoped -
+      # collision_checker.cpp:99 integrates
+      # `linear_vel * cos(curr_pose.theta)`, a SIGNED speed, so a
+      # negative command projects the footprint backwards.
+      use_collision_detection: true
+      # 1.0 s of projection, the package default, and it is one STOPPING
+      # TIME on this plant: EVIDENCE_NAV_V3.md 8 measured 0.91 s from
+      # 0.300 m/s to zero. A horizon shorter than the stop would flag
+      # collisions the vehicle could no longer avoid; a longer one would
+      # refuse commands the vehicle would have replanned out of. The
+      # projection also stops at the carrot by construction (:105), so
+      # at the transit ceiling it is the 0.70-0.95 m of lookahead that
+      # binds first.
+      max_allowed_time_to_collision_up_to_carrot: 1.0
+
+      # ---- the plan handling -----------------------------------------
+      # 2.00 m against a package default of half the costmap width -
+      # 5.00 m here. It bounds how far ALONG THE PLAN the controller
+      # will search for its own tracking point, and on a Reeds-Shepp
+      # path that folds back on itself a long window can snap that point
+      # onto a LATER leg passing beside the truck. 2.00 m is under the
+      # vehicle's own 2.735 m body length, so the tracking point can
+      # never jump past the tail, and it is 3.8 x the worst absolute
+      # localisation error this stack has measured moving (0.5321 m,
+      # section A) so the true closest pose is always inside it.
+      max_robot_pose_search_dist: 2.00
+      # The same 0.2 s the MPPI path handler above uses. One tf
+      # tolerance for both controllers: they read the same tree out of
+      # the same buffer and a disagreement would be about nothing.
+      transform_tolerance: 0.2
+
+      # ---- the cancel, and it is the smoother's ramp -----------------
+      # FALSE: on a cancel RPP returns immediately, controller_server's
+      # `publish_zero_velocity` puts the zero on the wire, and the RAMP
+      # to it is the velocity smoother's (smoother.yaml) and the
+      # converter's at navcmd.accel_mps2. One deceleration in one place.
+      # `cancel_deceleration` is written as that same 0.35 m/s^2 so that
+      # switching this on could not change the plant.
+      use_cancel_deceleration: false
+      cancel_deceleration: 0.35
+
+      # ---- what is left at the package default, STATED ---------------
+      # `max_angular_accel` (3.2), `rotate_to_heading_angular_vel` (1.8)
+      # and `rotate_to_heading_min_angle` (0.785) are read ONLY inside
+      # `rotateToHeading()` and `shouldRotateToPath()`, both of which
+      # `use_rotate_to_heading: false` above switches off - so they are
+      # unread on this stack. `stateful` (true) is read only by
+      # `shouldRotateToGoalHeading()`: same gate, same answer. They are
+      # NAMED here rather than written as invented values, so that a
+      # reader cannot take a default for a claim about this vehicle -
+      # which is `vy_max: 0.0`'s rule in the MPPI block, applied the
+      # other way round.
+      #   AND THERE IS NO GOAL TOLERANCE IN THIS BLOCK, which is not an
+      # omission. RPP 1.3.12 has no goal tolerance parameter of its own:
+      # it ASKS the goal checker at every tick
+      # (`goal_checker->getTolerances(...)`, :177) and uses the answer.
+      # Both controllers therefore arrive on exactly the same 0.60 m
+      # position-only box, structurally, with nothing to keep in step.
+
+      # ----------------------------------------------------------------
+      # WHAT IS GIVEN UP BY RUNNING THIS INSTEAD OF MPPI, AND IT IS REAL
+      # ----------------------------------------------------------------
+      #   NO KINEMATIC MODEL, AND THE STEER CEILING IS REACHED. RPP has
+      #     nothing corresponding to `AckermannConstraints`. It emits
+      #     w = v * curvature and the feasibility of that pair is the
+      #     CONVERTER's problem: cmd_vel_tricycle_core clamps the
+      #     curvature to the steer ceiling and COUNTS the clamp on
+      #     /m5v3/navcmd/status.
+      #       THE `min_lookahead_dist` DERIVATION ABOVE DOES NOT PREVENT
+      #     THAT, AND THE FIRST DRAFT OF THIS BLOCK SAID IT DID. G5 Task
+      #     7's campaign measured the opposite and the claim is
+      #     withdrawn rather than softened. Over eight adverse trials
+      #     and 13354 commanded ticks the implied steer angle
+      #     atan(L * wz / vx) passed the 1.25 rad commanded ceiling on
+      #     262 of them - 1.96 % - and the worst was 1.5110 rad, which
+      #     is past model.sdf's 1.31 rad mechanical stop as well.
+      #       THE ARITHMETIC, so the number is a mechanism and not a
+      #     surprise. Curvature regulation holds w at
+      #     desired_linear_vel / regulated_linear_scaling_min_radius =
+      #     0.300 / 1.25 = 0.240 rad/s for every pursuit radius down to
+      #     the point where `regulated_linear_scaling_min_speed` takes
+      #     over the speed, which is r = 1.25 * 0.05 / 0.300 = 0.2083 m.
+      #     BELOW that radius the speed is pinned at the floor and
+      #     w = 0.05 / r rises without bound - measured worst 0.7952
+      #     rad/s, r = 0.063 m. And the steer angle passes the ceiling
+      #     at r = L / tan(1.25) = 0.3489 m, which is ABOVE the
+      #     breakpoint: the whole band 0.2083..0.3489 m is regulated,
+      #     legal by RPP's own lights, and outside the axis.
+      #       WHAT ACTUALLY HAPPENS IS A CLAMP AND NOT A BREACH. The
+      #     converter never commands past 1.25 rad; it truncates the
+      #     curvature, counts it, and the truck under-steers through the
+      #     tightest tenth of a second of a cusp. Seven of those eight
+      #     trials arrived. It is recorded here because a reader sizing
+      #     the steer axis, or reading that counter, has to know which
+      #     controller puts numbers on it.
+      #       AND IT IS A PROPERTY OF THE ADVERSE REPRODUCER RATHER THAN
+      #     OF THIS LEG. The same campaign's four NORMAL-entry runs -
+      #     the shape the pallet cycle actually drives - put 2 of 3362
+      #     ticks over the ceiling, 0.06 %, and three of the four never
+      #     took the yaw rate above 0.2400 rad/s at all: exactly the
+      #     saturation the arithmetic above predicts, measured to four
+      #     decimals and with the whole regulation still in authority.
+      #     The 1.96 % is what a truck asked to unwind a hostile heading
+      #     in a bay costs; it is not what a stage leg costs.
+      #   NO DYNAMIC OBSTACLE AVOIDANCE. MPPI scores a cloud of
+      #     trajectories against the costmap and steers around what it
+      #     finds. RPP checks its ONE arc and refuses. On an approach
+      #     leg into a station that is the right trade - there is one
+      #     way in and no room to go round - and on a transit leg it is
+      #     not, which is exactly why the transit legs keep MPPI.
+      #   NO SPEED CHOICE. RPP drives at `desired_linear_vel` minus the
+      #     regulation terms, always. It does not slow for a corner it
+      #     has not reached yet, and it does not slow for a cusp at all:
+      #     the direction change is made at whatever speed the curvature
+      #     regulation left, and the ramp through zero is the plant's
+      #     0.35 m/s^2. What that costs in overshoot past the cusp is a
+      #     MEASUREMENT and G5 Task 7's campaign is where it is taken.
+      # ----------------------------------------------------------------
+
 # =====================================================================
 # local_costmap - ROLLING, and it is the only live perception here
 # =====================================================================
@@ -1735,6 +2143,29 @@ bt_navigator:
     default_server_timeout: 20    # ms, DEFAULT-KEPT
     wait_for_service_timeout: 1000
     action_server_result_timeout: 900.0
+
+    # ------------- THE ONE PLUGIN THIS TRACK ADDS, G5 TASK 5 -----------
+    #
+    # THIS LIST IS ADDITIVE AND THAT IS MEASURED, NOT ASSUMED. On nav2
+    # 1.3.12 `plugin_lib_names` defaults to the EMPTY list and
+    # bt_navigator loads its own sixty-one nodes unconditionally
+    # underneath it. The measurement: a bt_navigator started with
+    # plugin_lib_names ["nav2_wait_action_bt_node"] - one of nav2's own -
+    # refused to configure with `Failed to create navigator id
+    # navigate_to_pose. Exception: ID [Wait] already registered`. So the
+    # stock set is not lost by naming ours here, and re-naming any of
+    # nav2's own here would be a FATAL at configure time.
+    #
+    # WHAT IT IS. bt_direction_stable/src/direction_stable_path.cpp,
+    # built into the user's own $HOME by
+    # tools/install_bt_direction.sh; config.yaml (bt_direction.library)
+    # owns the name and tests/test_bt_direction.py pins this copy to it.
+    # bt_navigator finds the file because m5v3.sh puts that workspace's
+    # lib directory on the child's LD_LIBRARY_PATH - BT::SharedLibrary
+    # is a plain dlopen and does not consult the ament index.
+    #   A NAME WITH NO FILE BEHIND IT KILLS bt_navigator, so m5v3.sh
+    #   refuses `start --nav` by name when the .so is not built.
+    plugin_lib_names: ["m5v3_direction_stable_bt_node"]
 
     # ONE NAVIGATOR. `navigate_through_poses` is NOT declared: one goal
     # at a time is the whole of this phase's autonomy claim, and a pose

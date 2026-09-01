@@ -117,7 +117,8 @@ REQUIRED_KEYS = (
     "vehicle.spawn.x", "vehicle.spawn.y",
     "vehicle.spawn.yaw",
     "map.dir", "map.name", "map.registration.file",
-    "nav.params_file", "nav.bt_xml", "nav.goals", "nav.default_goal",
+    "nav.params_file", "nav.bt_xml", "nav.bt_xml_rpp",
+    "nav.goals", "nav.default_goal",
     "nav.cases", "nav.health.action_timeout_s",
     "nav.goal_timeout_s", "nav.settle_s", "nav.prelude_s",
     "nav.watchdog.required_closing_m", "nav.watchdog.closing_allowance_s",
@@ -171,22 +172,53 @@ COMMANDED_STREAMS = ("cmd_vel", "cmd_vel_smoothed", "steer_cmd",
 
 #: One goal, resolved. `pose_yaw` is what goes on the wire; `travel_yaw`
 #: is what the table said and what a reader pictures.
+#:   `controller` and `bt_xml` are G5 TASK 8's, and they are what a BARE
+#: `--goal` runs behind: the pallet cycle's transit leg is
+#: `--goal spine_north` with no case to carry the choice, so the goal row
+#: carries it. A goal reached THROUGH a case never uses these - see
+#: read_case - because one run has one tree and the case is the errand.
 Goal = collections.namedtuple(
-    "Goal", "name x y travel_yaw pose_yaw repeat note")
+    "Goal",
+    "name x y travel_yaw pose_yaw repeat note controller bt_xml")
 
 #: One CASE, resolved - F4 Task 3. A goal is a pose; a case is what an
 #: operator asks for, which on this floor is sometimes two poses and a
 #: rule for when the second arrives. `second` is None for a one-goal
 #: case, and then `when` and `preempt_at_m` mean nothing and are not
 #: read.
+#:   `controller` and `bt_xml` are G5 TASK 7's and they are the SAME
+#: fact twice, resolved here so that nothing downstream has to map one
+#: to the other: the name an operator reads in config.yaml, and the tree
+#: that name selects. A case with no `controller:` key is `mppi` and the
+#: primary tree, which is what every case was before the key existed.
 Case = collections.namedtuple(
-    "Case", "name first second when preempt_at_m repeat note")
+    "Case",
+    "name first second when preempt_at_m repeat note controller bt_xml")
 
 #: The two rules a second goal can arrive by, and there is no third.
 #: `preempt` sends it while the first is still running (navigate_to_pose
 #: is a single-goal server, so nav2 aborts the first); `after` sends it
 #: once the first has returned and the vehicle has settled.
 CASE_WHEN = ("preempt", "after")
+
+#: WHICH CONTROLLER A ROW MAY NAME, AND WHICH config.yaml KEY HOLDS THE
+#: TREE THAT SELECTS IT - G5 Task 7, and since G5 TASK 8 a GOAL row may
+#: name one too. The two trees differ in exactly one attribute (their
+#: ControllerSelector's `default_controller`), and nav2.yaml declares
+#: exactly two controller plugins, so this table has two rows and a row
+#: that names a third is a refusal before anything is started.
+#:   `mppi` IS THE DEFAULT AND IT IS SPELLED OUT rather than left as an
+#: absent key meaning something: a row that says nothing gets `mppi`,
+#: and `describe` prints which one it got either way, so a reader never
+#: has to know the default to know what ran.
+#:   IT IS ONE TABLE FOR BOTH KINDS OF ROW because it is one FACT - the
+#: name an operator writes and the tree that name selects - and a second
+#: copy of it for goals would be a second place for the two to disagree.
+CONTROLLER_TREE = collections.OrderedDict((
+    ("mppi", "nav.bt_xml"),
+    ("rpp", "nav.bt_xml_rpp"),
+))
+DEFAULT_CONTROLLER = "mppi"
 
 
 # ----------------------------------------------------------------------
@@ -206,6 +238,36 @@ def pose_yaw(travel_yaw_rad):
     angle a table has.
     """
     return ec.normalise_angle(float(travel_yaw_rad) + math.pi)
+
+
+def read_controller(cfg, where, row):
+    """The controller a nav.goals or nav.cases row names, and its tree.
+
+    ONE RESOLVER FOR BOTH TABLES - G5 Task 8. G5 Task 7 put this key on
+    CASES; the leg that still needed it is `--goal spine_north`, which
+    has no case, so the same key was widened to nav.goals rather than
+    given a second implementation. `where` is the dotted address of the
+    row and it is an argument only so that the refusal names the table
+    the reader has to go and edit.
+
+    IT IS CHECKED WHERE THE GOALS ARE CHECKED, and for the same reason:
+    a row naming a controller that does not exist is a refusal before
+    the stack is touched, not a bt_navigator that cannot open a tree
+    forty metres into a drive.
+    """
+    controller = str(row.get("controller", DEFAULT_CONTROLLER))
+    if controller not in CONTROLLER_TREE:
+        cfg.refuse("{}'s `controller` is one of {}".format(
+                       where, "/".join(CONTROLLER_TREE)),
+                   _common.CONFIG + " ({})".format(
+                       where.rsplit(".", 1)[0]),
+                   "it reads {!r}, and nav2.yaml declares exactly two "
+                   "controller plugins:".format(row.get("controller")),
+                   "  mppi  FollowPath     - nav2_mppi_controller",
+                   "  rpp   FollowPathRPP  - RegulatedPurePursuitController",
+                   "The key is OPTIONAL and absent means {!r}.".format(
+                       DEFAULT_CONTROLLER))
+    return controller, cfg.s(CONTROLLER_TREE[controller])
 
 
 def read_goal(cfg, name):
@@ -230,9 +292,12 @@ def read_goal(cfg, name):
                        _common.CONFIG + " (nav.goals)",
                        "that row reads {!r}".format(row))
     travel = float(row["travel_yaw_rad"])
+    controller, bt_xml = read_controller(
+        cfg, "nav.goals.{}".format(name), row)
     return Goal(name=name, x=float(row["x"]), y=float(row["y"]),
                 travel_yaw=travel, pose_yaw=pose_yaw(travel),
-                repeat=int(row["repeat"]), note=str(row.get("note", "")))
+                repeat=int(row["repeat"]), note=str(row.get("note", "")),
+                controller=controller, bt_xml=bt_xml)
 
 
 def read_case(cfg, name):
@@ -292,9 +357,22 @@ def read_case(cfg, name):
                            "so zero would fire".format(row["preempt_at_m"]),
                            "only on a goal already reached and negative "
                            "would never fire at all.")
+    # WHICH CONTROLLER, AND THE ANSWER IS A FILE. G5 Task 7.
+    #   THE CASE'S OWN KEY IS THE ONLY ONE READ HERE, and the goals it
+    # names are NOT consulted - which is G5 Task 8's one rule. A case
+    # can be TWO goals and a run has ONE tree, so a case that inherited
+    # from its goals would have to pick one of two answers; and it would
+    # silently move every shipped case whose goal later took a
+    # controller of its own. `aisle_transit` is the live example - its
+    # first goal is `spine_north`, which Task 8 moved to `rpp` for its
+    # BARE sends, and this case was measured behind MPPI and stays
+    # there.
+    controller, bt_xml = read_controller(
+        cfg, "nav.cases.{}".format(name), row)
     return Case(name=name, first=first, second=second, when=when,
                 preempt_at_m=preempt_at, repeat=int(row["repeat"]),
-                note=str(row.get("note", "")))
+                note=str(row.get("note", "")), controller=controller,
+                bt_xml=bt_xml)
 
 
 def plan_cusps(poses):
@@ -365,8 +443,14 @@ def goal_in_map(cfg, goal):
     return frame, frame.to_map(goal.x, goal.y, goal.pose_yaw)
 
 
-def nav_label(cfg):
-    """Which nav2.yaml this session was driven behind, as key=value.
+def nav_label(cfg, bt_xml=None):
+    """Which nav2.yaml and which TREE this session was driven behind.
+
+    `bt_xml` IS THE TREE THAT WAS ACTUALLY USED and it is an argument
+    rather than a lookup because since G5 Task 7 there are two of them
+    and the goal chooses. It defaults to config.yaml's `nav.bt_xml` -
+    bt_navigator's own default, and what a run with no case gets - so
+    every existing caller reads what it always read.
 
     READ OFF THE FILE ON DISK AND NOT OUT OF A RUNNING NODE, which is
     tools/drive_twist.py's smoother_label() and m5v3.sh's `loc=` label,
@@ -376,7 +460,8 @@ def nav_label(cfg):
     path = os.path.join(_common.REPO, cfg.s("nav.params_file"))
     with open(path, "rb") as handle:
         raw = handle.read()
-    tree_path = os.path.join(_common.REPO, cfg.s("nav.bt_xml"))
+    bt_xml = bt_xml or cfg.s("nav.bt_xml")
+    tree_path = os.path.join(_common.REPO, bt_xml)
     with open(tree_path, "rb") as handle:
         tree_raw = handle.read()
     found = re.search(rb'<Timeout[^>]*msec="([0-9]+)"', tree_raw)
@@ -421,7 +506,7 @@ def nav_label(cfg):
         ("nav_model_dt", window.model_dt),
         ("nav_vx_max", window.vx_max),
         ("nav_align_gate", window.gate),
-        ("nav_bt", cfg.s("nav.bt_xml")),
+        ("nav_bt", bt_xml),
         ("nav_bt_md5", hashlib.md5(tree_raw).hexdigest()[:8]),
         ("nav_budget_ms", int(found.group(1)) if found else 0),
     ))
@@ -444,8 +529,31 @@ def config_md5(path):
     return hashlib.md5(canonical).hexdigest()[:8]
 
 
-def describe(cfg, goal):
-    """What this goal is, and where it will be sent. Needs nothing."""
+def controller_note(controller):
+    """The one-line gloss that goes beside a controller name.
+
+    ONE STRING FOR BOTH PRINTERS - `describe` and `describe_case` say
+    the same thing about the same name, so they say it from one place.
+      IT NAMES THE PLUGIN AND NOT A CLASS OF LEG. G5 Task 7's version
+    said "the approach legs" and "the transit legs"; Task 8 put a
+    TRANSIT leg on RPP, so a gloss that sorted the two by errand would
+    now be wrong on the rig. What is always true is which nav2.yaml
+    entry the name selects, and that is what it says.
+    """
+    return ("nav2.yaml FollowPathRPP - nav2 RegulatedPurePursuitController"
+            if controller == "rpp"
+            else "nav2.yaml FollowPath - nav2_mppi_controller")
+
+
+def describe(cfg, goal, bare=True):
+    """What this goal is, and where it will be sent. Needs nothing.
+
+    `bare` IS WHETHER THIS GOAL IS THE SUBJECT - G5 Task 8. Sent on its
+    own, the goal row's `controller` is what runs and it is printed.
+    Reached through a CASE, the CASE's key is what runs and
+    describe_case has already printed it, so printing the goal's here
+    would be a second answer to a question that has one.
+    """
     frame, at = goal_in_map(cfg, goal)
     print("goal       {}".format(goal.name))
     if goal.note:
@@ -468,6 +576,10 @@ def describe(cfg, goal):
                          goal.y - cfg.f("vehicle.spawn.y"))))
     print("repeat     {} session(s) required for the evidence".format(
         goal.repeat))
+    if bare:
+        print("controller {}  ({})".format(
+            goal.controller, controller_note(goal.controller)))
+        print("tree       {}".format(goal.bt_xml))
     return at
 
 
@@ -478,9 +590,15 @@ def describe_case(cfg, case):
         print("           {}".format(case.note))
     print("repeat     {} session(s) required for the evidence".format(
         case.repeat))
+    # WHICH CONTROLLER THIS CASE RUNS, PRINTED WHETHER OR NOT THE CASE
+    # NAMED ONE - G5 Task 7. A default that a reader has to know in
+    # order to read the output is a default that will be misread.
+    print("controller {}  ({})".format(
+        case.controller, controller_note(case.controller)))
+    print("tree       {}".format(case.bt_xml))
     print("")
     print("--- goal 1 of {} ---".format(1 if case.second is None else 2))
-    first = describe(cfg, case.first)
+    first = describe(cfg, case.first, bare=False)
     if case.second is None:
         print("")
         print("ONE GOAL. This case is the acceptance set's own shape and "
@@ -505,7 +623,7 @@ def describe_case(cfg, case):
               "one ended, which is")
         print("           the only way this bench can start a run from a "
               "pose that is not the spawn.")
-    second = describe(cfg, case.second)
+    second = describe(cfg, case.second, bare=False)
     return (first, second)
 
 
@@ -2366,6 +2484,22 @@ def record(cfg, args):
         first_goal = case.first
         goal = case.second or case.first
         at_map = at_second if at_second is not None else at_first
+    # WHICH TREE THIS RUN IS DRIVEN BEHIND, G5 Task 7, WIDENED BY TASK
+    # 8. A case names its controller; a bare `--goal` reads the GOAL
+    # row's, which is `mppi` unless nav.goals says otherwise - so a run
+    # of a goal nobody has moved is still the primary tree and MPPI,
+    # exactly as before either key existed. It is resolved ONCE, here,
+    # and then used in exactly two places: the `behavior_tree` field of
+    # every goal this run puts on the wire, and the session label.
+    bt_xml = case.bt_xml if case is not None else goal.bt_xml
+    bt_path = os.path.join(_common.REPO, bt_xml)
+    if not os.path.isfile(bt_path):
+        cfg.refuse("the behaviour tree this run selected exists", bt_path,
+                   "config.yaml names it as {!r}".format(bt_xml),
+                   "and bt_navigator would ABORT the goal it cannot open, "
+                   "which is the good case;",
+                   "this check is here so the refusal names the file "
+                   "instead of an error code.")
     print("")
 
     # THE LABEL CHAIN, AND A RUN WITHOUT ONE IS NOT RECORDED. It is
@@ -2587,8 +2721,23 @@ def record(cfg, args):
              float(fb.number_of_recoveries)))
 
     def send_goal(which, at):
-        """One navigate_to_pose goal on the wire. Returns its handle."""
+        """One navigate_to_pose goal on the wire. Returns its handle.
+
+        THE TREE TRAVELS WITH THE GOAL - G5 Task 7. `behavior_tree` is a
+        field of NavigateToPose, read by bt_navigator's `goalReceived`
+        BEFORE the goal is accepted, so the controller for this run is
+        decided by the same call that sets the pose and there is no
+        window in which the other one could be running. It is filled on
+        EVERY goal, including the MPPI ones, so that no run's controller
+        depends on what a previous run happened to leave loaded: an
+        empty field means "whatever the default is", which is a fact
+        about the launch line rather than about this goal.
+          IT IS AN ABSOLUTE PATH for `nav.bt_xml`'s own reason -
+        bt_navigator resolves it against ITS process's working
+        directory, not this one's.
+        """
         request = NavigateToPose.Goal()
+        request.behavior_tree = bt_path
         request.pose = PoseStamped()
         request.pose.header.frame_id = map_frame
         request.pose.pose.position.x = float(at[0])
@@ -2890,7 +3039,7 @@ def record(cfg, args):
         handle_out.write("idle_cmd_vel={}\n".format(idle_cmds))
         for key, value in state.items():
             handle_out.write("{}={}\n".format(key, value))
-        for key, value in nav_label(cfg).items():
+        for key, value in nav_label(cfg, bt_xml).items():
             handle_out.write("{}={}\n".format(key, value))
         handle_out.write("recorded={}\n".format(
             datetime.datetime.now().isoformat()))

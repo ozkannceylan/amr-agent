@@ -1,0 +1,110 @@
+<!--
+  navigate_to_pose_tricycle_v3_rpp.xml - the STAGE/APPROACH variant.
+  G5 TASK 7, and the owner's ruling of 2026-09-01.
+
+  READ THE OTHER FILE FIRST. This tree is
+  behavior_trees/navigate_to_pose_tricycle_v3.xml with ONE ATTRIBUTE
+  CHANGED, and every argument in that file's header - why there is a
+  tree here at all, why Spin and BackUp are out, why the navigation
+  budget is where it is, what DirectionStablePath does and why it wraps
+  what it wraps - holds here unaltered and is not repeated.
+
+  THE ONE ATTRIBUTE:
+
+      <ControllerSelector ... default_controller="FollowPathRPP" .../>
+
+  against `"FollowPath"` in the primary. tests/test_nav2_params.py
+  parses BOTH files and asserts that the element trees are otherwise
+  IDENTICAL - same tags, same order, same attributes - so a change made
+  to one and forgotten in the other is a test failure and not a
+  divergence somebody finds on a rig.
+
+  ---- WHY A SECOND FILE AND NOT A TOPIC ----
+
+  nav2 offers two ways to put a second controller on a leg and this
+  track uses the one with no clock in it.
+
+    THE TOPIC. `ControllerSelector` subscribes to `controller_selector`
+      and writes what it receives onto the blackboard. Selecting that
+      way means publishing a string and then sending a goal, and the two
+      race: the BT ticks at bt_loop_duration and the FollowPath action
+      node re-sends its action goal when `controller_id` changes, so a
+      message that lands late does not select a controller for the run -
+      it CHANGES controller in the middle of one. Nothing on this stack
+      publishes to that topic and nothing here starts.
+    THIS FILE. `NavigateToPose` carries a `behavior_tree` field.
+      bt_navigator loads the tree named there for that goal and caches
+      it by filename, so the selection is made ONCE, BEFORE the goal is
+      accepted, by the same call that sets the pose. There is no window
+      in which the wrong controller can be running.
+
+  THE SELECTOR STAYS IN THE TREE, both here and in the primary, and its
+  default is what each file's name says. That is exactly what the
+  primary's header said the pair was kept for: "they are how a later
+  task adds a second controller without editing this file".
+
+  ---- WHICH LEGS RUN THIS, AND config.yaml OWNS THE ANSWER ----
+
+  nav.cases.<case>.controller. `rpp` resolves to nav.bt_xml_rpp, which
+  is this file; `mppi` resolves to nav.bt_xml, which is the primary; a
+  case with no key at all gets the primary, so this file drives nothing
+  it was not named for. tools/drive_goal.py puts the resolved path on
+  the goal and RECORDS it in the session, beside the tree's own md5,
+  because a run behind a different tree that wore the same label would
+  be tabled with runs it has nothing to do with.
+
+  ---- WHAT THE CONTROLLER ITSELF IS ----
+
+  nav2.yaml, controller_server, `FollowPathRPP`. The short version:
+  MPPI's measured failure at an adverse entry heading is its own prior
+  winning a softmax after the path critics have gated themselves off,
+  and RegulatedPurePursuit has no sampling, no critics and no prior for
+  that to happen to. The long version, with the source it was read out
+  of, is in that block.
+-->
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Timeout msec="335000" name="NavigationBudget">
+      <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+        <PipelineSequence name="NavigateWithReplanning">
+          <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPathRPP" topic_name="controller_selector"/>
+          <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
+          <RateController hz="1.0">
+            <DirectionStablePath path="{path}" odom_topic="/m5v3/odometry/filtered" hold_speed="0.05" hold_all="false" hold_max_s="10.0" consume_floor_m="0.3">
+              <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+                <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}"/>
+                <Sequence>
+                  <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+                  <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+                </Sequence>
+              </RecoveryNode>
+            </DirectionStablePath>
+          </RateController>
+          <RecoveryNode number_of_retries="1" name="FollowPath">
+            <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}"/>
+            <Sequence>
+              <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
+              <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+            </Sequence>
+          </RecoveryNode>
+        </PipelineSequence>
+        <Sequence>
+          <Fallback>
+            <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
+            <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+          </Fallback>
+          <ReactiveFallback name="RecoveryFallback">
+            <GoalUpdated/>
+            <RoundRobin name="RecoveryActions">
+              <Sequence name="ClearingActions">
+                <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+                <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+              </Sequence>
+              <Wait wait_duration="5.0"/>
+            </RoundRobin>
+          </ReactiveFallback>
+        </Sequence>
+      </RecoveryNode>
+    </Timeout>
+  </BehaviorTree>
+</root>
