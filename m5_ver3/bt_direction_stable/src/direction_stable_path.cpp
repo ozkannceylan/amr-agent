@@ -29,7 +29,7 @@
 // truck 3.0 m off and put its footprint on lethal cost, which is the
 // same 205 by a different road. Refusing the swap is not enough if the
 // shape is free to change; commit mode is that hypothesis, and the
-// campaign in EVIDENCE_NAV_V3.md is what decides between them.
+// campaign in EVIDENCE_STALL.md is what decides between them.
 //
 // AND THE CAMPAIGN SAID NEITHER. 24 trials, 2026-09-01, seed verified
 // every one. Adverse entry: direction-only 2/8 arrivals, commit 0/8.

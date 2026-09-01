@@ -12,7 +12,7 @@ not meant to be one. The logic this node contains - a sign, a comparison
 and a threshold - is not what can go wrong; what can go wrong is whether
 bt_navigator LOADS it, whether the tree PLACES it where the flip
 happens, and whether it changes the outcome on the adverse entry. All
-three are measurements on the rig, and EVIDENCE_NAV_V3.md is where they
+three are measurements on the rig, and EVIDENCE_STALL.md is where they
 are written down. This file checks the things a parser can check.
 
 NO ROS AND NO GAZEBO: four files off disk, one YAML parse and some

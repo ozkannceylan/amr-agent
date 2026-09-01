@@ -27,11 +27,21 @@ cd /mnt/c/Users/ozkan/projects/amr-agent
 ./m5_ver3/m5v3.sh start --localize amcl --nav --dock
 ```
 
-First time only, if `start --dock` refuses a missing detector:
+**First time on a fresh rig, run both of these once.** Neither is a
+stack child and neither is started by `m5v3.sh`; each builds into your
+own `$HOME`, without sudo, and `start` refuses **by name** if the thing
+it produces is not there.
 
 ```bash
-bash m5_ver3/tools/install_apriltag.sh
+bash m5_ver3/tools/install_apriltag.sh        # --dock needs the detector
+bash m5_ver3/tools/install_bt_direction.sh    # --nav needs the DSP decorator
 ```
+
+`install_bt_direction.sh` builds `m5_ver3/bt_direction_stable/`, the
+`DirectionStablePath` behaviour-tree decorator `nav2.yaml` names in
+`plugin_lib_names` (AMR-DEC-004; `EVIDENCE_STALL.md` §6). It rebuilds
+every run on purpose — a stale `.so` answering for source that has moved
+is the failure nobody would notice.
 
 Wait until the script prints `up.` and `Pallet attach:`. The first
 `ekf_health: REFUSED` line is a DDS race; the next line should be
@@ -55,12 +65,17 @@ flags.
 ```
 
 You want: `22 alive, 0 dead` without `--monitor`, **or** 23 with it.
+That count did not move when the `DirectionStablePath` decorator and the
+RPP controller arrived: both are plugins `bt_navigator` and
+`controller_server` load, not processes. If you installed something and
+expected a 23rd child, you did not need one.
+
 Lines that must say on:
 
 | line | meaning |
 |---|---|
 | `loc amcl@…` | map → odom is AMCL |
-| `nav on@…` | planner + MPPI + tricycle BT |
+| `nav on@…` | planner + MPPI/RPP + tricycle BT |
 | `dock on@…` `docking on@…` | AprilTag + `opennav_docking` on `/cmd_vel` |
 
 If `nav=off` you started without `--nav`. Stop and start again with the
@@ -180,7 +195,7 @@ Kills only partition `m5v3`. A Gazebo in `m6` survives this on purpose.
 | Dock + pallet | `--dock`: marker + pallet spawned, AprilTag, `DockRobot` on `/cmd_vel`. |
 
 Offline tests (no Gazebo): `python -m pytest m5_ver3/tests -q` on Windows
-or WSL. Suite was **1021 passed** at F5 close.
+or WSL. Suite was **1021 passed** at F5 close; **1218** after the G5 stall wave (`EVIDENCE_STALL.md`).
 
 ---
 

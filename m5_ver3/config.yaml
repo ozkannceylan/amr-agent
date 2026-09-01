@@ -4172,7 +4172,7 @@ nav:
     # cause you can remove entirely without changing the effect is not
     # the cause. THE CREEP IS NOT MADE BY PLAN REPLACEMENT, and no
     # setting of this knob is a fix for it; that question is an
-    # architecture question and it is the owner's. EVIDENCE_NAV_V3.md
+    # architecture question and it is the owner's. EVIDENCE_STALL.md
     # carries the tables.
     #   IT IS LEFT AT false, WHICH IS NOT A SELECTION. Neither arm
     #   cleared the bar, so nothing was selected. false is the value that
@@ -4196,7 +4196,7 @@ nav:
     #   cuts the long ones and leaves the short ones alone. It is also
     #   ten replans held and one taken, which on a ~30 s drive is two or
     #   three re-anchors before the terminal approach. If the campaign
-    #   in EVIDENCE_NAV_V3.md contradicts it, it is adjusted ONCE and
+    #   in EVIDENCE_STALL.md contradicts it, it is adjusted ONCE and
     #   the change is recorded there rather than argued here.
     #   WHAT IT DID, MEASURED. On the direction-only arm it fired 0-1
     #   times a trial; on the commit arm 4-9 times, which is the bound
@@ -4218,7 +4218,7 @@ nav:
     #   it cannot carry the truck as far as the box it is aiming at. It
     #   is also one second of driving at the 0.300 m/s transit ceiling -
     #   one whole replan interval. Adjusted ONCE if the campaign says
-    #   so, and recorded in EVIDENCE_NAV_V3.md if it is.
+    #   so, and recorded in EVIDENCE_STALL.md if it is.
     #   IT NEVER FIRED IN 24 TRIALS AND THAT IS RECORDED, NOT HIDDEN.
     #   The rung above it - |v| <= hold_speed - catches the terminal
     #   approach first every time, because a truck with 0.30 m of plan

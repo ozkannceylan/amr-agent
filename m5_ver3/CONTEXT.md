@@ -150,6 +150,20 @@ m5_ver3/
 │                         cycle, 12 legs, 304.80 s, 10 of 10 frames matching
 │                         their labels - and it PAYS the film residual
 │                         EVIDENCE_DOCKING_V3.md §5 named
+├── EVIDENCE_STALL.md     G5, and the one failure class this track never
+│                         closed: the owner refused the film's `set_pose`
+│                         recovery (AMR-DEC-004), so the no-progress
+│                         stall was reproduced on a seeded adverse entry
+│                         (64 trials, MPPI 3 arrivals in 49), measured
+│                         as ONE mechanism at ONE speed - 29 of the
+│                         archive's non-arrivals creep at 0.0777-0.0901
+│                         m/s - and attributed: PathAlignCritic
+│                         self-gates, the softmax falls back on its own
+│                         prior. §4 is five candidate causes each REMOVED
+│                         while the effect held still, §5 is the fix
+│                         (AMR-DEC-005: RPP per ORIGIN, not a number),
+│                         §7 is two cycle pairs at 48/48 legs and ZERO
+│                         interventions, §8 is what is still open
 ├── config.yaml           every constant the scripts obey - the one home
 ├── ekf.yaml              what the FILTER fuses and what it refuses. A ROS
 │                         parameter file, which config.yaml is not and may

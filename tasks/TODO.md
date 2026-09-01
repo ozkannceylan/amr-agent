@@ -188,6 +188,51 @@ Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
       `film-20260901-093823`: tek otonom palet çevrimi, 12 leg, 304.80 s,
       10/10 kare etiketiyle uyumlu. Opsiyonel SOTA (öğrenilmiş palet
       tespiti) AÇIK residual olarak kalır — §5.
+- [x] G5 (F5 sonrası düzeltme dalgası, 2026-09-01). Owner filmi izledi ve
+      1:40–2:24'te kamyonun SÜRMEDİĞİ bir poza vardığını gördü: palet
+      çevriminin "boş Nav2 kaçağını staging'e kurtar" adımı araca
+      `set_pose` ile dokunuyordu. KARAR AMR-DEC-004: "kurtarma
+      müdahaleleri hiç doğru değil; git kök nedeni bul, onu çöz."
+      YAPILAN (kanıt `m5_ver3/EVIDENCE_STALL.md`): sınıf önce
+      DETERMİNİSTİK hale getirildi — tohumlanmış ters giriş açısı, dünya
+      (−0.438, +9.736) yaw −2.7338 rad, 64 deneme; MPPI dokuz ayrı
+      nav2.yaml parmak iziyle 49 denemede 3 varış, ilk 18 deneme 18/18
+      başarısız. MEKANİZMA: ters girişte MPPI'nin yol critic'leri yetkiyi
+      kaybediyor (PathAlignCritic `furthest=0 < 12`'de KENDİNİ KAPATIYOR,
+      hedef critic'leri menzil dışı), softmax kendi önseline çöküyor ve
+      kamyon YANLIŞ YÖNE ~0.081 m/s sürünüyor; terminaller `no_progress`
+      ve START_OCCUPIED 205 — 205 nav2'nin planlayıcı kurtarma kümesinde
+      YOK ({200, 207, 208}). Arşiv sayımı sınıfı TEK mekanizma olarak
+      isimlendirdi: 55 servis-içi bitmemiş sürüşün 29'u ≥20 s sürünme
+      platosu taşıyor ve 29'unun HEPSİ 0.0777–0.0901 m/s'de — 4 gün,
+      12 parametre dosyası, 7 hedef, iki terminal. BEŞ ADAY NEDEN ÖLÇÜLDÜ
+      VE ÇÜRÜTÜLDÜ: budama, change_penalty, vx_std, replan'ın kendisi
+      (F1 pilotu: koşu başına TEK plan, ters girişte 3/5 ama dört aşım
+      hatası ve 0.66 m geride donmuş plan) ve DirectionStablePath'in iki
+      kolu (yalnız-yön 2/8 ters, 4/4 normal; commit 0/8 ters ve normalde
+      4/4 → 2/4 GERİLEME). Commit modu replan'ların %92'sini reddetti ve
+      sürünme saniyede bir milimetre oynamadı — tamamen kaldırıldığında
+      etkiyi değiştirmeyen şey neden DEĞİLDİR. ÇÖZÜM AMR-DEC-005 (owner
+      hükmü): ters-yoğun bacaklar MPPI'den RegulatedPurePursuit +
+      `allow_reversing`'e geçti — örnekleme yok, critic yok, önsel yok,
+      carrot cusp'ı geçemiyor (`findVelocitySignChange`); sürünmenin
+      olduğu durum YAPISAL OLARAK ERİŞİLEMEZ. stage_s5 ters giriş 7/8
+      (en uzun plato ≤3.0 s, yerine geçtiği kolda 47.5–101.0 s), normal
+      4/4 29.8–31.7 s; koy çıkışı 6/6 26.8–29.0 s (MPPI 0/2 — ikisi de
+      30 s'de yalnız 2.40 m, tamamı sürünme). EŞLEME MENŞE BAZLI: 17.00 m
+      spawn düzlüğü MPPI'de KALIYOR (8/8; RPP 7/8), koy çıkışı için
+      ikinci hedef satırı `spine_north_from_bay` — aynı poz, `same_pose_as`
+      ile BEYAN edilmiş, `tests/test_nav2_params.py` iki yönde de tutuyor.
+      KABUL: iki tam çevrim çifti, 48/48 leg `rc=0`, dört dock `success`
+      `error 0`, SIFIR `nav2 miss recovered`, SIFIR 205. Suite 1115→1218.
+      AÇIK KALAN (isimli): 17 m bacağın yanal sapma sınıfı (her iki
+      kontrolcüde, ~1/8, plato TAŞIMIYOR — bu sınıf DEĞİL; MPPI'nin
+      PathAlignCritic bitişi kurtarıyor, RPP'de karşılığı yok),
+      `station_approach` hâlâ MPPI (ölçülmüş kanıtı silmemek için
+      bilerek), RPP'de cusp direksiyon-tavanı kırpması (ters girişte
+      %1.96, sevk edilen şekilde %0.06), her çiftin İLK dock'unun
+      123–129 s'si açıklanmadı, `--fuse`/`--slam` kolları RPP ile
+      ölçülmedi.
 
 Bilinen riskler: MPPI Ackermann geri-viraj sapması (nav2 #5714, açık;
 undock ile hafifletilir) · ros_gz köprüsü RTF yer (pointcloud köprüleme,
