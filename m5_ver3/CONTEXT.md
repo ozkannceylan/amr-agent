@@ -139,6 +139,17 @@ m5_ver3/
 │                         over the same frozen pose graph - the A/B the
 │                         published research could not settle, and the
 │                         recommendation that closes the phase
+├── EVIDENCE_FILM.md      F5 close, and the FILM: the four cameras, the
+│                         WALL-to-SIM sidecar clock every cut bound goes
+│                         through, and the four takes it took to get one -
+│                         a bridge nobody built, a plan in the wrong clock,
+│                         a pitch sign that filmed the sky and a lead
+│                         trimmed from before the first frame, each caught
+│                         by a refusal or a sampled frame rather than in an
+│                         editor. §6 is the ship take - one autonomous pallet
+│                         cycle, 12 legs, 304.80 s, 10 of 10 frames matching
+│                         their labels - and it PAYS the film residual
+│                         EVIDENCE_DOCKING_V3.md §5 named
 ├── config.yaml           every constant the scripts obey - the one home
 ├── ekf.yaml              what the FILTER fuses and what it refuses. A ROS
 │                         parameter file, which config.yaml is not and may
@@ -353,6 +364,81 @@ m5_ver3/
                           recorded drive on the frozen map from the TRUE
                           pose, which is where amcl.yaml's sigma_hit and
                           z_rand come from
+    └── film_core.py     the F5 FILM's arithmetic, and nothing else:
+                          the follow camera's smoothing step, the gz
+                          request bodies, the WALL-to-SIM clock mapping
+                          every cut bound goes through, the timeline-
+                          against-shot-table cut plan and the ONE ffmpeg
+                          command that assembles it. --selftest. No ROS,
+                          no gz, no ffmpeg - every value comes from
+                          config.yaml's film: block, and
+                          tests/test_film_core.py locks that block's
+                          shot table to pallet_cycle's own leg plan so a
+                          changed cycle is a changed film, not a silent
+                          half-film
+    └── film_follow.py   holds the follow camera over the truck: reads
+                          topics.odom_ground_truth (as an instrument,
+                          never as an input - nothing this tool does
+                          moves the truck) and every 1/follow_update_hz
+                          seconds moves film.follow_model to the
+                          truck's x/y at film.follow_height_m through
+                          /world/<world>/set_pose - the same service
+                          pallet_bench seats the truck with. A refused
+                          set_pose is counted and named; film.follow_
+                          fail_max in a row is a refusal by name, and
+                          the camera is left where it last was rather
+                          than killed silently
+    └── film_record.py   one ROS Image topic to an mp4, until SIGINT or
+                          --seconds. Leaves THREE one-number sidecars
+                          beside the mp4: <out>.t0 the first frame's
+                          wall time, <out>.t1 the last frame's, <out>.n
+                          the frames written. Every received frame goes
+                          into a container fixed at film.rate_hz and the
+                          cameras publish on the SIM clock, so n frames
+                          are n/rate_hz of VIDEO however long the wall
+                          took - t0 says WHEN this file starts, and t1
+                          with n say how fast its clock ran and how much
+                          footage exists. The cut needs all three
+    └── film_run.py      THE FILM. `record` places the three film
+                          cameras into the RUNNING world through gz's
+                          own /create (the world file is never edited),
+                          starts film_follow and one recorder per
+                          camera, HOLDS 2 x film.lead_s of wall before
+                          the cycle so the establishing shot is footage
+                          and not luck (the cameras run on the sim
+                          clock; twice the wall is at least the lead at
+                          any RTF this rig has shown), and runs
+                          pallet_cycle.py's own `run` UNDER
+                          OBSERVATION - stdout line by line, each leg
+                          stamped into timeline.json. The cycle is
+                          never modified or re-implemented: its seeding,
+                          recovery and refusals are what
+                          EVIDENCE_DOCKING_V3.md §4 measured, and this
+                          tool only watches. `cut` turns the timeline
+                          plus the recordings into ONE film: the wide
+                          establishing shot - film.lead_s of it, or as
+                          much as the wide recording holds, and the
+                          printed lead line says which - every leg on
+                          the camera film.shots names, the vehicle
+                          camera inset over the approach legs (the tag
+                          growing in frame is the proof the dock run is
+                          tag-driven)
+                          and a hold on the last leg. The timeline is
+                          stamped on the WALL clock and the cameras
+                          record on the SIM clock, so every bound is
+                          mapped into its own recording's seconds
+                          through that file's t0/t1/n. `describe` needs
+                          nothing. The cut REFUSES a cycle that did not
+                          finish, a timeline whose legs are not the shot
+                          table's, a follow or dock recording whose
+                          sidecars cannot place it on the clock, and a
+                          segment reaching past the end of its own
+                          footage, or starting before the beginning of
+                          it, by more than film.eof_tolerance_s -
+                          ffmpeg would clamp that trim at end-of-file
+                          or at 0 without a word, and a leg clamped
+                          away is a leg the film claims to hold and
+                          does not
 ```
 
 **`config.yaml` is the one home for every constant.** No behavioural
@@ -439,6 +525,8 @@ wsl -e bash -lc 'cd /mnt/c/Users/ozkan/projects/amr-agent && ./m5_ver3/m5v3.sh s
 | `tools/map_register.py derive [--write]` | Fits the map's walls to `warehouse_ver3`'s TRUE geometry, prints **the instrument floor first**, then the ABSOLUTE score — spans measured inside the map against the world's own dimensions, which no registration can flatter. `--write` commits `registration.yaml`; without it nothing is written. Needs nothing. |
 | `tools/map_register.py clearance <session>` | Sweeps a recorded drive's **ground truth** along the world's own obstacle rectangles and reports the worst gap and what it was to. It is the measurement `config.yaml`'s corridor arithmetic is a prediction of. |
 | `tools/map_register.py support <session>` | Places every beam of a recorded drive on the frozen map **from the ground-truth pose** and reports what the grid explains of it and what it does not. It is where `amcl.yaml`'s `sigma_hit` and `z_rand` come from — measured, before the first scored run, rather than chosen. |
+| `tools/film_run.py record` | **THE F5 FILM, RECORDED.** Places the follow camera (7 m, moved to the truck through `set_pose` every 0.5 s), the fixed 45° dock camera over the S5 bay and the wide 22 m camera into the RUNNING world through `/create` — the world file is never edited — starts one `film_record.py` per camera plus the truck's own pallet camera, refuses by name any camera that stays silent for `film.camera_warmup_s`, holds twice `film.lead_s` of wall time so the establishing shot exists before the first leg does, and then runs **`pallet_cycle.py run` UNDER OBSERVATION, unmodified**: its stdout is read line by line and every `leg c1-<name>` is stamped with the wall clock into `timeline.json`. When the cycle is `done` the session directory under `logs/film/` holds four mp4s, the three clock sidecars each recorder leaves beside its own (`.t0`, `.t1`, `.n`) and the timeline. Needs the full `--localize amcl --nav --dock` stack up and ROS sourced. |
+| `tools/film_run.py cut [--session <dir>]` | **THE FILM, CUT.** Turns the latest recorded timeline plus its recordings into ONE film — `logs/film/<session>/m5v3-film.mp4`: the wide establishing shot, every cycle leg on the camera `film.shots` names (follow for the driving legs, dock for the pallet legs — a lift is a z-motion and only reads in profile), the vehicle camera inset over the approach legs, and a hold on the last leg. Every bound is a WALL time and every recording runs on the SIM clock, so each is mapped into its own file's seconds by the rate its `.t0`/`.t1`/`.n` sidecars measure — on a rig at 0.75 × wall a 349 s cycle is a 263 s film, and unmapped the last legs would fall off the end of the footage. The lead is planned from what EXISTS — its start clamps to the wide recording's own first frame and the printed `lead` line says how much of `film.lead_s` survived, because a short establishing shot is a degraded shot and not a lie. **Refuses** a cycle that did not finish, a timeline whose legs are not the shot table's, a follow or dock recording missing (or unreadable on) its sidecars, and a cycle segment needing footage more than `film.eof_tolerance_s` past the end of — or before the start of — its own recording — ffmpeg clamps such a trim at end-of-file, or at 0, silently; a missing wide or vehicle recording is still cut around with a printed line. Needs no ROS — ffmpeg and the session's own files only. |
 
 `start` exits **non-zero** if any child died during startup, naming the
 child and its log; what survived is left running, because the operator's

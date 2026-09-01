@@ -133,6 +133,31 @@ python3 m5_ver3/tools/pallet_cycle.py run
 
 Done looks like: `done      3 cycles -> …/pallet-cycle-…`
 
+### F. The film — one cycle, four cameras — ~8 min
+
+**Run it on a `--headless` stack.** The Gazebo window client costs
+two-thirds of the real-time factor on this rig (RTF 0.9995 headless
+against 0.15–0.5 windowed, measured 2026-08-30/31), and the cycle's
+`/cmd_vel` bursts are timed on the WALL clock — at RTF 0.3 the truck
+moves a third of the commanded distance and the cycle geometry falls
+apart. The film cameras render server-side; the window adds nothing.
+
+```bash
+python3 m5_ver3/tools/film_run.py record
+python3 m5_ver3/tools/film_run.py cut
+```
+
+`record` places the cameras, starts one recorder per camera plus the
+truck's own, then **holds twice `film.lead_s` of wall time before the
+cycle** so the establishing shot is footage rather than luck — the
+cameras run on the sim clock, and twice the wall is at least the lead
+at any real-time factor this rig has shown. `cut` writes
+`m5_ver3/logs/film/film-<stamp>/m5v3-film.mp4`: the wide establishing
+shot — `film.lead_s` of it, or as much as the wide recording holds,
+and the printed `lead` line says which — every leg on the camera the
+shot table names, and the truck's own camera inset over the approach
+— the AprilTag growing in frame is the proof the dock is tag-driven.
+
 ---
 
 ## 4. Stop

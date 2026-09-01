@@ -181,8 +181,13 @@ Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
       reverse riskini atlar); DetachableJoint ile palet al/bırak
       (geometrik predicate'li attach). Kanıt: `m5_ver3/EVIDENCE_DOCKING_V3.md`
       (plugin 5/5, class 2/5 vs 0.25 m; pallet attach/lift/carry/detach;
-      dry cycle ×3 `pallet-cycle-20260829-013326`). Opsiyonel SOTA
-      (öğrenilmiş palet tespiti) ve film açık residual — §5.
+      dry cycle ×3 `pallet-cycle-20260829-013326`). §5'in FİLM residual'ı
+      ÖDENDİ: kanıt `m5_ver3/EVIDENCE_FILM.md` — dört kamera, sidecar
+      WALL→SIM saati, dört çekim (üçü kusurlu, her kusur isimli bir
+      reddediş veya örneklenmiş kare ile yakalandı) ve sevk edilen çekim
+      `film-20260901-093823`: tek otonom palet çevrimi, 12 leg, 304.80 s,
+      10/10 kare etiketiyle uyumlu. Opsiyonel SOTA (öğrenilmiş palet
+      tespiti) AÇIK residual olarak kalır — §5.
 
 Bilinen riskler: MPPI Ackermann geri-viraj sapması (nav2 #5714, açık;
 undock ile hafifletilir) · ros_gz köprüsü RTF yer (pointcloud köprüleme,
