@@ -446,6 +446,7 @@ def test_leg_yaw_reads_one_station_table_and_not_two():
     moved = {"S5": {"x": 100.0, "y": 100.0, "yaw": 0.5, "arrive_m": 0.25}}
     leg = nav2_legs.Leg(points=[(99.0, 100.0), (100.0, 100.0)],
                         start=(99.0, 100.0), end=(100.0, 100.0),
+                        goal=(100.0, 100.0),
                         klass=nav2_legs.STATION_SPUR, controller="rpp",
                         tree_key="nav.bt_xml_station", final=True)
     assert nav2_legs.leg_yaw(leg, stations=moved) == 0.5
@@ -457,7 +458,8 @@ def test_leg_yaw_reads_one_station_table_and_not_two():
 
 def test_a_leg_with_no_last_segment_is_refused_by_name():
     leg = nav2_legs.Leg(points=[(1.0, 1.0), (1.0, 1.0)], start=(1.0, 1.0),
-                        end=(1.0, 1.0), klass=nav2_legs.TRANSIT,
+                        end=(1.0, 1.0), goal=(1.0, 1.0),
+                        klass=nav2_legs.TRANSIT,
                         controller="rpp", tree_key="nav.bt_xml_rpp",
                         final=True)
     with pytest.raises(nav2_legs.Nav2LegsError) as caught:
@@ -468,7 +470,8 @@ def test_a_leg_with_no_last_segment_is_refused_by_name():
 def test_a_station_without_a_heading_is_refused_by_name():
     broken = {"S5": {"x": 0.0, "y": 0.0, "arrive_m": 0.25}}
     leg = nav2_legs.Leg(points=[(-1.0, 0.0), (0.0, 0.0)], start=(-1.0, 0.0),
-                        end=(0.0, 0.0), klass=nav2_legs.STATION_SPUR,
+                        end=(0.0, 0.0), goal=(0.0, 0.0),
+                        klass=nav2_legs.STATION_SPUR,
                         controller="rpp", tree_key="nav.bt_xml_station",
                         final=True)
     with pytest.raises(nav2_legs.Nav2LegsError) as caught:
@@ -626,6 +629,7 @@ def test_the_spur_exit_reads_one_station_table_and_not_two():
     moved = {"S5": {"x": 100.0, "y": 100.0, "yaw": 0.5, "arrive_m": 0.25}}
     leg = nav2_legs.Leg(points=[(100.0, 100.0), (100.0, 105.0)],
                         start=(100.0, 100.0), end=(100.0, 105.0),
+                        goal=(100.0, 105.0),
                         klass=nav2_legs.SPUR_EXIT, controller="rpp",
                         tree_key="nav.bt_xml_rpp", final=False)
     assert nav2_legs.leg_yaw(leg, stations=moved) == 0.5
@@ -863,7 +867,8 @@ def test_the_westbound_mouth_is_the_same_measurement_mirrored():
     round the ring and stalled at 'best 20.26 m'."""
     west = nav2_legs.Leg(
         points=[(-13.0, 10.0), (-17.0, 10.0), (-20.0, 10.0)],
-        start=(-13.0, 10.0), end=(-20.0, 10.0), klass=nav2_legs.TRANSIT,
+        start=(-13.0, 10.0), end=(-20.0, 10.0), goal=(-20.0, 10.0),
+        klass=nav2_legs.TRANSIT,
         controller="rpp", tree_key="nav.bt_xml_rpp", final=False)
     for mouth in RUN6_MOUTH_YAWS:
         got = nav2_legs.leg_yaw(west, mouth)
@@ -1053,7 +1058,8 @@ def test_an_alignment_leg_is_driven_to_its_own_goal():
     in its turn, which is the whole defect. D10's rule, second class."""
     assert nav2_legs.ALIGN in nav2_legs.DRIVEN_TO_ITS_GOAL
     leg = nav2_legs.Leg(points=[(0.0, 0.0), (2.75, 0.0)], start=(0.0, 0.0),
-                        end=(2.75, 0.0), klass=nav2_legs.ALIGN,
+                        end=(2.75, 0.0), goal=(2.75, 0.0),
+                        klass=nav2_legs.ALIGN,
                         controller="rpp", tree_key="nav.bt_xml_rpp",
                         final=False)
     assert nav2_legs.runs_to_its_goal(leg) is True
@@ -1230,3 +1236,212 @@ def test_a_station_spur_is_never_turned_into_an_alignment_leg():
     for leg in legs:
         if leg.klass == nav2_legs.ALIGN:
             assert nav2_legs.station_at(leg.end) is None
+
+
+# ----------------------------------------------------------------------
+# DEFECT D13: THE BAY-ARRIVAL LIVELOCK (run 13, 2026-09-03)
+#
+# nav2's `station_goal_checker` and the fleet's own arrival radius are
+# THE SAME NUMBER - 0.25 m - with zero margin between them, sampled by
+# two consumers off two beliefs at two instants. A goal AT the station
+# point is therefore a goal nav2 declares reached the millimetre the
+# truck crosses the fleet's own boundary, and run 13 measured what that
+# costs: nav2 SUCCEEDED with the estimate 0.2473 m out and the ground
+# truth 0.3121 m out, the truck stood there, and re-sending the same
+# goal fourteen times moved it nowhere - a re-issued goal cannot move a
+# truck that is already inside the checker.
+#
+# SO THE GOAL MOVES AND THE CHECKER DOES NOT (SPEC_ADAPTER.md
+# AMENDMENTS 6). The station leg's goal is the station point advanced
+# ARRIVE_BIAS_M along the approach axis; the same 0.25 m checker then
+# fires ARRIVE_BIAS_M earlier in station-point terms, and the truck
+# stops with margin inside the radius the fleet is reading.
+# ----------------------------------------------------------------------
+
+#: What the estimate read when nav2 declared the bay reached, run 13
+#: (m6_ver2/logs/run13-c5-session-b, 09:15:11 and thirteen repeats).
+RUN13_STOP_M = 0.2473
+#: And where the truck actually was at that instant.
+RUN13_TRUTH_M = 0.3121
+
+
+def test_the_run13_stop_is_the_boundary_it_was_measured_at():
+    """The defect, stated in its own numbers before the fix is asked for.
+
+    nav2 was satisfied and the fleet was not - by 0.0027 m on the
+    estimate and by 0.0621 m on the truth. Nothing here is about the
+    fix; it is the reading the fix has to beat.
+    """
+    assert RUN13_STOP_M < follower.ARRIVE_M
+    assert RUN13_TRUTH_M > follower.ARRIVE_M
+
+
+def test_the_bias_pulls_the_run13_stop_inside_the_fleet_radius():
+    """The regression: run 13's own stop, with the goal 0.10 m deeper.
+
+    The truck stops where the checker was satisfied - RUN13_STOP_M short
+    of the GOAL, on the goal's own approach axis. Move the goal
+    ARRIVE_BIAS_M deeper and the same stop is ARRIVE_BIAS_M nearer the
+    STATION POINT, which is the only distance the fleet and the adapter
+    ever measure.
+    """
+    bay = nav2_legs.plan_legs(_plan(F1_SPAWN, "S1"))[-1]
+    assert bay.klass == nav2_legs.STATION_SPUR
+    yaw = float(STATIONS["S1"]["yaw"])
+    for reading in (RUN13_STOP_M, RUN13_TRUTH_M):
+        stop = (bay.goal[0] - reading * math.cos(yaw),
+                bay.goal[1] - reading * math.sin(yaw))
+        assert math.dist(stop, bay.end) == pytest.approx(
+            reading - nav2_legs.ARRIVE_BIAS_M, abs=1e-9)
+        assert follower.arrived(stop, bay.end, follower.ARRIVE_M)
+
+
+def test_the_station_goal_is_the_point_advanced_along_the_approach_axis():
+    """Every bay on the floor, and the heading is not touched."""
+    for station_id, station in sorted(STATIONS.items()):
+        poly = _drivable(F1_SPAWN, station_id)
+        if poly is None:
+            continue
+        bay = nav2_legs.plan_legs(poly)[-1]
+        assert bay.klass == nav2_legs.STATION_SPUR, station_id
+        yaw = float(station["yaw"])
+        assert bay.goal[0] == pytest.approx(
+            bay.end[0] + nav2_legs.ARRIVE_BIAS_M * math.cos(yaw), abs=1e-12)
+        assert bay.goal[1] == pytest.approx(
+            bay.end[1] + nav2_legs.ARRIVE_BIAS_M * math.sin(yaw), abs=1e-12)
+        assert math.dist(bay.goal, bay.end) == pytest.approx(
+            nav2_legs.ARRIVE_BIAS_M, abs=1e-12)
+        assert nav2_legs.leg_yaw(bay) == yaw, station_id
+
+
+def test_the_approach_axis_is_the_spur_the_legs_own_polyline_runs_on():
+    """The bias runs down the SPUR and not off it.
+
+    The axis is taken from the bay's declared approach heading - the one
+    number leg_yaw already sends as the goal's orientation, so a goal's
+    position and its heading cannot disagree. This is the claim that
+    makes that the same axis the leg is on: for every station leg the
+    real planner builds, the leg's own last segment is collinear with
+    the declared heading to within the tolerance this file already
+    grants a truck's parking error.
+    """
+    for station_id in sorted(STATIONS):
+        poly = _drivable(F1_SPAWN, station_id)
+        if poly is None:
+            continue
+        bay = nav2_legs.plan_legs(poly)[-1]
+        tail = bay.points[-2]
+        segment = math.atan2(bay.end[1] - tail[1], bay.end[0] - tail[0])
+        yaw = float(STATIONS[station_id]["yaw"])
+        assert abs(follower.norm_ang(segment - yaw)) \
+            <= nav2_legs.COLLINEAR_RAD, station_id
+        # and the goal is therefore FURTHER along that segment's own
+        # line than its end is, which is what "past the point" means
+        assert math.dist(tail, bay.goal) > math.dist(tail, bay.end)
+
+
+def test_no_other_legs_goal_moves_off_its_own_end():
+    """One class aims past its end. Every other leg sends what it ends on."""
+    seen = set()
+    for station_id in sorted(STATIONS):
+        for start in (F1_SPAWN, (-13.0, 4.25), (-7.0, -4.25)):
+            poly = _drivable(start, station_id)
+            if poly is None:
+                continue
+            for leg in nav2_legs.plan_legs(poly):
+                seen.add(leg.klass)
+                if leg.klass == nav2_legs.STATION_SPUR:
+                    continue
+                assert leg.goal == (float(leg.end[0]), float(leg.end[1])), \
+                    (station_id, leg.klass)
+    assert seen == set(nav2_legs.CLASS_TREE)
+
+
+def test_the_bay_clearance_is_measured_off_the_floor_the_sdf_paints():
+    """The room behind each station point, and it is READ and not assumed.
+
+    S1 (-13.000, 4.250) is approached on -pi/2, so the ray runs SOUTH
+    down x = -13.000. warehouse_ver3.sdf's rack rows either side of that
+    bay are RackNW1 (line 310: pose -15.750, line 313: size 0.500 ->
+    x in [-16.000, -15.500]) and RackNW2 (line 326: pose -10.000, line
+    329: size 1.000 -> x in [-10.500, -9.500]); neither contains
+    x = -13.000, and neither do their RackSW twins - the bay is cut
+    RIGHT THROUGH (stations.py, "THE STATIONS ARE IN OPEN CROSS-AISLES").
+    The first box the ray meets is AnnexA (line 518: pose -13.500
+    -16.000, line 521: size 2.000 4.000 -> x in [-14.500, -12.500],
+    y in [-18.000, -14.000]), whose north face is y = -14.000:
+    4.250 - (-14.000) = 18.250 m.
+
+    S4 (-7.000, -4.250) is approached on +pi/2 and the ray runs NORTH
+    down x = -7.000, clear of RackSW3/RackNW3 (pose -4.250, size 0.500)
+    and of RackSW2/RackNW2, to WallNorth (line 255: pose y 14.100, line
+    256: size y 0.200), inner face y = 14.000: 14.000 - (-4.250) =
+    18.250 m.
+
+    The shallow bays are the annex's four, whose backs the SDF paints at
+    y = -17.900 (BayS9Back and its three siblings): 3.000 m. That is the
+    number the bias is bounded by, and it is 16 times it.
+    """
+    assert nav2_legs.bay_clearance_m("S1") == pytest.approx(18.250, abs=1e-9)
+    assert nav2_legs.bay_clearance_m("S4") == pytest.approx(18.250, abs=1e-9)
+    tightest = min(nav2_legs.bay_clearance_m(s) for s in STATIONS)
+    assert tightest == pytest.approx(3.000, abs=1e-9)
+    assert tightest - nav2_legs.LEAD_OVERHANG_M == pytest.approx(1.600,
+                                                                abs=1e-9)
+    for station_id in STATIONS:
+        room = (nav2_legs.bay_clearance_m(station_id)
+                - nav2_legs.LEAD_OVERHANG_M)
+        assert room >= nav2_legs.ARRIVE_BIAS_M, station_id
+
+
+def test_the_leading_overhang_is_the_derived_footprints_own_number():
+    """1.400 m is not a guess: it is the footprint nav2 is configured with.
+
+    The derivation copies the donor's costmap footprint through
+    unchanged, so the donor is the one file that has to agree - and it
+    is the tracked one.
+    """
+    import ast
+    import os
+    here = os.path.dirname(os.path.abspath(__file__))
+    donor = os.path.normpath(os.path.join(
+        here, os.pardir, os.pardir, "m5_ver3", "nav2.yaml"))
+    polygons = []
+    with open(donor, encoding="utf-8") as handle:
+        for line in handle:
+            stripped = line.strip()
+            if stripped.startswith("footprint:"):
+                polygons.append(ast.literal_eval(
+                    stripped.split(":", 1)[1].strip().strip('"')))
+    assert polygons, "the donor nav2.yaml declares no footprint"
+    for polygon in polygons:
+        assert max(x for x, _y in polygon) == pytest.approx(
+            nav2_legs.LEAD_OVERHANG_M, abs=1e-9)
+
+
+def test_a_bay_that_cannot_take_the_bias_is_refused_by_name(monkeypatch):
+    """No silent shrink: the leg is not built at all.
+
+    S9's bay is 3.000 m deep and the truck reaches 1.400 m past its own
+    origin into it, so 1.600 m is everything there is. A bias of 1.700
+    does not quietly become 1.600 - it is a floor the vehicle does not
+    fit on, and the honest answer is a refusal that names the station
+    and shows its arithmetic.
+    """
+    poly = _drivable(F1_SPAWN, "S9")
+    assert poly is not None
+    monkeypatch.setattr(nav2_legs, "ARRIVE_BIAS_M", 1.7)
+    with pytest.raises(nav2_legs.Nav2LegsError) as excinfo:
+        nav2_legs.plan_legs(poly)
+    said = str(excinfo.value)
+    assert "S9" in said
+    assert "3.000" in said and "1.400" in said
+    assert "1.600" in said and "1.700" in said
+
+
+def test_a_bias_the_bay_can_take_is_not_refused(monkeypatch):
+    """The other side of the same boundary, so the refusal is a boundary."""
+    poly = _drivable(F1_SPAWN, "S9")
+    monkeypatch.setattr(nav2_legs, "ARRIVE_BIAS_M", 1.5)
+    bay = nav2_legs.plan_legs(poly)[-1]
+    assert math.dist(bay.goal, bay.end) == pytest.approx(1.5, abs=1e-9)

@@ -1305,3 +1305,145 @@ def test_the_last_leg_finishing_is_still_an_arrival_and_not_a_send(
         result=types.SimpleNamespace(error_code=0)))
     assert driving.adapter.state.state == nav2_state.ARRIVED
     assert len(driving.action.goals) == 2
+
+
+# ----------------------------------------------------------------------
+# DEFECT D13: THE GOAL THAT LEAVES AIMS PAST THE POINT (AMENDMENTS 6)
+#
+# nav2's station checker and the fleet's arrival radius are one 0.25 m
+# number with no margin, sampled off two beliefs; run 13 measured nav2
+# SUCCEEDING at 0.2473 m on the estimate with the truck 0.3121 m out,
+# and fourteen re-issued orders that could not move a truck already
+# inside the checker. The LEG still ends on the station - every distance
+# this shell and the fleet measure is to that point - and only the
+# NavigateToPose message carries the deeper one.
+# ----------------------------------------------------------------------
+
+def test_the_bay_goal_that_leaves_is_the_point_advanced(driving):
+    """The message is read off the action and put back through the map."""
+    _on_the_station_spur(driving)
+    goal = driving.action.goals[-1]
+    assert goal["behavior_tree"].endswith(
+        os.path.basename(driving.cfg.s("nav.bt_xml_station")))
+    back = nav2_pose.to_world(driving.adapter.frame, goal["map_pose"][0],
+                              goal["map_pose"][1], goal["map_pose"][2])
+    bay = driving.adapter.legs[-1]
+    assert bay.klass == nav2_legs.STATION_SPUR
+    assert bay.end == (-13.0, 4.25)
+    assert back[0] == pytest.approx(-13.0, abs=1e-6)
+    assert back[1] == pytest.approx(4.25 - nav2_legs.ARRIVE_BIAS_M, abs=1e-6)
+    # THE HEADING IS UNTOUCHED: the bay's own approach heading, which is
+    # also the axis the point was advanced along.
+    assert back[2] == pytest.approx(float(STATIONS["S1"]["yaw"]), abs=1e-6)
+
+
+def test_a_transit_goal_still_leaves_on_its_own_end(driving):
+    """Only the bay aims past itself. The granted corridor is not moved."""
+    goal = driving.action.goals[0]
+    back = nav2_pose.to_world(driving.adapter.frame, goal["map_pose"][0],
+                              goal["map_pose"][1], goal["map_pose"][2])
+    assert driving.adapter.legs[0].klass == nav2_legs.TRANSIT
+    assert back[0] == pytest.approx(-13.0, abs=1e-6)
+    assert back[1] == pytest.approx(10.0, abs=1e-6)
+
+
+def test_the_leg_table_says_where_the_goal_went(rig):
+    """The leg table is the only record of what left, so it carries both.
+
+    D7 was found in this line and D13 is unreadable without it: the end
+    and the goal are two different points now, and a table printing one
+    of them cannot tell a run that aimed past from a run that did not.
+    """
+    lines = []
+    rig.node.get_logger = lambda: types.SimpleNamespace(
+        info=lines.append, warn=lines.append)
+    rig.mode()
+    rig.tf_at(-17.0, 10.0)
+    rig.status()
+    rig.tick()
+    rig.route(TO_S1)
+    rig.tf_at(-13.0 - nav2_legs.PREEMPT_AT_M + 0.1, 10.0, -1.3)
+    rig.tick()
+    rig.action.handles[0].result_future.fire(types.SimpleNamespace(
+        status=Messages.CANCELED, result=types.SimpleNamespace(error_code=0)))
+    legs = [line for line in lines if line.startswith("leg ")]
+    assert len(legs) == 2, legs
+    assert "end=(-13.00, 10.00) goal=(-13.00, 10.00)" in legs[0], legs[0]
+    assert "end=(-13.00, 4.25) goal=(-13.00, 4.15)" in legs[1], legs[1]
+
+
+
+# ----------------------------------------------------------------------
+# THE LATCH AND THE CANCEL ARE ONE ACTION, AND RUN 14 IS WHY
+#
+# D13 aims the bay's goal ARRIVE_BIAS_M past the station point so that
+# nav2's own checker fires with margin. The adapter's 20 Hz latch fires
+# at arrive_m of the POINT - 0.10 m earlier on the same axis - and it
+# cancels, so the aim-past goal never gets driven. The obvious fix was
+# to let the bay's goal outlive the latch. It was built, and the floor
+# refused it (run 14, 2026-09-03):
+#
+#   * IT MOVES NOTHING. Decision 3 publishes ZEROS on /auto/cmd_vel
+#     outside EN-ROUTE, so the truck is commanded to stop the instant
+#     the arrival latches whatever nav2 still believes. Measured, with
+#     the goal deliberately left running: v 0.1159 -> 0.0000 in one
+#     0.2 s sample at estimate 0.2480 m, against run 13's cancelled
+#     0.2462 m. The same stop, to two millimetres.
+#   * AND IT KILLS THE NEXT ORDER. Three seconds later the fleet's leg 2
+#     went out, the spur exit was sent on the RPP tree while the station
+#     tree was still on the server, nav2 refused the preemption, and the
+#     order died 200 ms after it was issued: "blocked: nav2 refused
+#     (error_code 0)". Fourteen re-dispatches followed.
+#
+# So the cancel stays where it is, and these tests pin it there.
+# ----------------------------------------------------------------------
+
+def test_the_arrival_takes_the_goal_off_the_server(driving):
+    """Every arrival cancels, bay or not - run 14's own conclusion."""
+    _on_the_station_spur(driving)
+    cancels = driving.action.cancels
+    driving.tf_at(-13.0, 4.25 + 0.24)
+    driving.tick()
+    assert driving.adapter.state.state == nav2_state.ARRIVED
+    assert driving.action.cancels == cancels + 1
+    assert driving.adapter.handle is None
+    driving.tick()
+    assert driving.state["state"] == nav2_state.ARRIVED
+
+
+def test_no_goal_outlives_the_route_that_asked_for_it(driving):
+    """The property run 14 broke, stated so it cannot break again.
+
+    A goal still on the server when the next route arrives is a goal
+    nav2 will be asked to preempt across a tree boundary - the one
+    boundary it refuses (_advance_to's own quotation) - and the answer
+    is an aborted NEW goal with error_code 0 and a BLOCKED order.
+    """
+    _on_the_station_spur(driving)
+    driving.tf_at(-13.0, 4.25 + 0.24)
+    driving.tick()
+    assert driving.adapter.handle is None
+    assert driving.adapter.pending_leg is None
+    driving.route([(-13.0, 4.25), (-13.0, 10.0), (-10.0, 10.0)])
+    assert driving.adapter.state.state == nav2_state.EN_ROUTE
+    assert driving.state.get("note") in (None, "")
+
+
+def test_a_late_abort_cannot_un_arrive_a_latched_arrival(driving):
+    """The result of the cancelled goal lands after the fleet was told.
+
+    Once ARRIVED is latched the route is over and the fleet has been
+    told. A nav2 error code landing afterwards is a report about a goal
+    the adapter no longer needs, and reading it as a BLOCKED would take
+    a completed pick off the truck.
+    """
+    handle = _on_the_station_spur(driving)
+    driving.tf_at(-13.0, 4.25 + 0.24)
+    driving.tick()
+    assert driving.adapter.state.state == nav2_state.ARRIVED
+    handle.result_future.fire(types.SimpleNamespace(
+        status=Messages.ABORTED, result=types.SimpleNamespace(error_code=103)))
+    assert driving.adapter.state.state == nav2_state.ARRIVED
+    driving.tick()
+    assert driving.state["state"] == nav2_state.ARRIVED
+    assert not (driving.state.get("note") or "")

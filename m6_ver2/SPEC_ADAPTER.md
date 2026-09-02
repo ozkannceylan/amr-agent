@@ -440,3 +440,26 @@ allowed to change is `test_m6.py` where it pins the bringup child list
    by the bay's own SDF clearance (verified, not assumed); the checker
    stays 0.25; the truck stops inside the fleet radius and both facts
    close. The constant carries its geometry argument.
+
+7. **The arrival latch keeps its cancel, and the bias is a margin
+   against NAV2's checker only (G1-C6, measured run 14, 2026-09-03).**
+   §6 assumed nav2's station checker was what stopped the truck at the
+   bay. It is not. The adapter's own 20 Hz latch fires at `arrive_m` of
+   the STATION POINT - ARRIVE_BIAS_M nearer on the same axis than the
+   goal nav2 was sent - and Decision 3 publishes ZEROS on
+   `/auto/cmd_vel` outside EN-ROUTE, so the truck is commanded to stop
+   the instant the arrival latches, whatever the goal server still
+   believes. Letting the bay's goal outlive the latch was built and
+   flown: it moved the truck NOWHERE (v 0.1159 -> 0.0000 in one 0.2 s
+   sample at estimate 0.2480 m, against run 13's cancelled 0.2462 m -
+   the same stop to two millimetres) and it killed the next order
+   (three seconds later the spur exit went out on the RPP tree with the
+   station tree still on the server, nav2 refused the preemption, and
+   the leg-2 order died 200 ms after issue on "blocked: nav2 refused
+   (error_code 0)"). The cancel therefore stays, `_on_result` reads a
+   latched ARRIVED BEFORE it reads the status so no late error code can
+   un-latch an arrival the fleet has been told about, and §6's bias is
+   what this contract lets it be: the margin that stops nav2's own
+   SUCCEEDED landing outside the adapter's radius (D6's class), not a
+   change in where the truck comes to rest. Moving the stopping point
+   is a Decision 3 question and it is NOT ruled on here.

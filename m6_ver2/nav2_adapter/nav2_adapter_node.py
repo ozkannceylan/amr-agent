@@ -541,6 +541,27 @@ class Adapter(object):
                 self.state.block(nav2_watch.blocked_note_no_progress(stalled))
                 return
         if self.state.check_arrival(world[:2]):
+            # THE LATCH ENDS THE ROUTE, AND SPLITTING IT FROM THE CANCEL
+            # WAS TRIED AND MEASURED (run 14, 2026-09-03). D13 aims the
+            # bay's goal ARRIVE_BIAS_M past the station point, and this
+            # latch fires at arrive_m of the POINT - 0.10 m earlier on
+            # the same axis - so it looked as though the cancel here was
+            # killing the aim-past goal before nav2 could drive it.
+            #   IT WAS NOT, AND DECISION 3 IS WHY. Outside EN-ROUTE this
+            # node publishes ZEROS on /auto/cmd_vel by contract, so the
+            # instant the arrival latches the truck is commanded to
+            # stop whatever nav2 still believes it is doing. Run 14 left
+            # the goal running and measured the same stop to the
+            # millimetre: v 0.1159 -> 0.0000 in one 0.2 s sample at
+            # estimate 0.2480 m, against run 13's cancelled 0.2462 m.
+            # What the running goal DID change was the next leg: three
+            # seconds later the spur exit went out on the RPP tree while
+            # the station tree was still on the server, nav2 refused the
+            # preemption, and the order died on "blocked: nav2 refused
+            # (error_code 0)" 200 ms after it was issued.
+            #   So the goal comes off the server here, and the bias is
+            # what it can be on this contract: margin against NAV2's own
+            # checker, which is the consumer D6 measured missing it.
             self._abandon_goal()
 
     # ------------------------- the leg runner -------------------------
@@ -674,11 +695,15 @@ class Adapter(object):
         # coordinates and its class is on no wire at all, so without
         # this line a field run cannot say which heading was asked for
         # or why - which is exactly the evidence D7 was found in.
+        #   AND THE END AND THE GOAL ARE TWO POINTS SINCE D13. The leg
+        # ends on the station; the message aims ARRIVE_BIAS_M past it
+        # (nav2_legs.goal_point). Printing one of them would leave a run
+        # unable to say whether it aimed past at all.
         self.node.get_logger().info(
-            "leg {}/{} {} tree={} end=({:.2f}, {:.2f}) goal_yaw={:+.3f} "
-            "truck_yaw={} {}".format(
+            "leg {}/{} {} tree={} end=({:.2f}, {:.2f}) goal=({:.2f}, "
+            "{:.2f}) goal_yaw={:+.3f} truck_yaw={} {}".format(
                 index + 1, len(self.legs), leg.klass, leg.tree_key,
-                leg.end[0], leg.end[1], goal_yaw,
+                leg.end[0], leg.end[1], leg.goal[0], leg.goal[1], goal_yaw,
                 "none" if current_yaw is None
                 else "{:+.3f}".format(current_yaw),
                 "" if current_yaw is None else "turn={:+.3f}".format(
@@ -686,7 +711,7 @@ class Adapter(object):
         goal = self.msgs.nav_goal(
             frame_id=self.map_frame,
             stamp=self.node.get_clock().now().to_msg(),
-            map_pose=self.frame.to_map(leg.end[0], leg.end[1], goal_yaw),
+            map_pose=self.frame.to_map(leg.goal[0], leg.goal[1], goal_yaw),
             behavior_tree=self.trees[leg.tree_key])
         future = self.action.send_goal_async(goal)
         future.add_done_callback(
@@ -721,6 +746,16 @@ class Adapter(object):
         status, error_code = self.msgs.result_of(result)
         if status == self.msgs.CANCELED:
             return
+        if self.state.state == nav2_state.ARRIVED:
+            # A RESULT THAT LANDS AFTER THE ARRIVAL IS ABOUT A GOAL THE
+            # ADAPTER NO LONGER NEEDS. The ordinary path reaches this
+            # through the arrival's own cancel and returns on CANCELED
+            # above; this is the belt over that brace, and it is read
+            # BEFORE the status so that no error code can un-latch an
+            # arrival the fleet has already been told about. The arrival
+            # is a LATCH (nav2_state.check_arrival) and nothing that
+            # happens to the goal afterwards may take it back.
+            return
         if status != self.msgs.SUCCEEDED:
             self.state.block(nav2_watch.blocked_note_for_error(error_code))
             return
@@ -735,8 +770,6 @@ class Adapter(object):
             # without closing", twice, on 4 m of empty aisle.
             if leg is not None and self.leg_i + 1 < len(self.legs):
                 self._advance_to(self.leg_i + 1, self._world_yaw())
-            return
-        if self.state.state == nav2_state.ARRIVED:
             return
         # SUCCEEDED SHORT OF arrive_m: report the miss and STOP. A
         # re-sent 0.4 m goal is inside this vehicle's turning circle and
@@ -1085,10 +1118,12 @@ def main(argv=None):
     # until a truck was on the floor.
     node.get_logger().info(
         "nav2 adapter up on /{}: {} legs table, arrive_m {:.2f} "
-        "(+{:.4f} m registration margin), nav2 envelope {:.3f} m/s, "
+        "(+{:.4f} m registration margin), station goal aimed {:.2f} m "
+        "past the point, nav2 envelope {:.3f} m/s, "
         "watchdog {:.2f} m / {:.0f} s, world frame {}".format(
             args.vid, "/".join(nav2_legs.CLASS_TREE),
             follower.ARRIVE_M, adapter.arrival_margin_m,
+            nav2_legs.ARRIVE_BIAS_M,
             adapter.envelope_max_mps, adapter.required_closing_m,
             adapter.closing_allowance_s, args.world_frame))
     try:

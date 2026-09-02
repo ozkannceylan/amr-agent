@@ -52,7 +52,7 @@ import _donors                                            # noqa: F401
 
 import follower                                           # noqa: E402
 import route                                              # noqa: E402
-from stations import STATIONS                             # noqa: E402
+from stations import HALL, OBSTACLES, STATIONS            # noqa: E402
 
 
 class Nav2LegsError(ValueError):
@@ -252,12 +252,65 @@ FLIP_ABOVE_RAD = QUARTER_TURN_RAD - TIE_BAND_RAD
 #: number would agree with the one that put it there.
 ON_STATION_M = follower.ARRIVE_M
 
+#: HOW FAR PAST THE STATION POINT A STATION LEG AIMS (defect D13, run
+#: 13, 2026-09-03; SPEC_ADAPTER.md AMENDMENTS 6).
+#:   THE DEFECT IS TWO CONSUMERS ON ONE NUMBER WITH NO MARGIN. nav2's
+#: `station_goal_checker` xy tolerance and the fleet's own arrival
+#: radius are BOTH 0.25 m - ON_STATION_M above is that same number a
+#: third time - read off two beliefs at two instants. A goal AT the
+#: station point is therefore a goal nav2 declares reached the
+#: millimetre the truck crosses the boundary the FLEET is watching, and
+#: run 13 measured the coin landing the wrong way up: nav2 SUCCEEDED
+#: with the estimate 0.2473 m out and the truth 0.3121 m out. Re-issuing
+#: the order cannot mend that - a re-sent goal does not move a truck
+#: already inside the checker - and the route went out fourteen times.
+#:   SO THE GOAL MOVES AND THE CHECKER DOES NOT. With the goal
+#: ARRIVE_BIAS_M deeper the same 0.25 m tolerance fires ARRIVE_BIAS_M
+#: EARLIER in station-point terms: the truck has to reach 0.15 m of the
+#: point before nav2 is satisfied, so run 13's own stop becomes 0.1473 m
+#: on the estimate and 0.2121 m on the truth - both inside 0.25 with
+#: margin, and the two facts close in one tick.
+#:   0.10 AND NOT MORE, and the ceiling is not the bay: it is the
+#: MEANING. This is a margin on an arrival, not a re-aiming of the bay.
+#: At half the checker (0.125) a goal could be satisfied by a truck
+#: standing on the FAR side of the station point, and "arrived" would
+#: stop being a statement about where the pallet is. 0.10 is 40% of the
+#: radius and leaves the arrival annulus one-sided.
+#:   0.10 AND NOT LESS, because the number it has to beat is measured:
+#: the gap run 13 fell through was 0.0027 m on the estimate and 0.0621 m
+#: on the truth, and the registration's own residual - the margin
+#: nav2_watch.arrival_is_short already grants for exactly this reason -
+#: is 0.1179 m MAX. A bias under that is a bias inside the noise of the
+#: transform the two beliefs are compared through.
+#:   AND IT IS BOUNDED BY THE BAY, MEASURED AND NOT ASSUMED. See
+#: bay_clearance_m: the deepest constraint on this floor is the annex's
+#: 3.000 m, which leaves 1.600 m once LEAD_OVERHANG_M is paid - sixteen
+#: times this. A station whose bay cannot take it is REFUSED by name at
+#: leg build rather than quietly given a smaller one.
+ARRIVE_BIAS_M = 0.10
+
+#: HOW FAR THE TRUCK REACHES PAST ITS OWN ORIGIN, DEEPER INTO THE BAY.
+#: The footprint nav2 is actually configured with - m5_ver3/nav2.yaml's
+#: costmap polygon, copied through the derivation unchanged into
+#: m6_ver2/vehicles/<vid>/nav2.yaml - spans x in [-2.415, +1.400]: 2.415
+#: m of tines at body -x and 1.400 m at +x, which is the 3.815 m over
+#: the tines that ALIGN_M already quotes.
+#:   AND IT IS THE +x END THAT LEADS. A station leg ends on the BAY's
+#: own approach heading, and the truck LEAVES the bay forks-first
+#: (SPEC_ADAPTER.md Decision 1's sign audit: forks-first is negative
+#: linear.x, and the spur exit drives out on the bay heading) - so it
+#: goes IN on positive linear.x, +x first. Move the goal deeper by b and
+#: it is this end that arrives b deeper.
+LEAD_OVERHANG_M = 1.400
+
 #: ONE LEG, DECIDED. `points` is the whole run (>= 2 points), `end` is
-#: what goes in the NavigateToPose goal, `klass` is the row of
-#: CLASS_TREE that names the tree, and `final` says whether this leg is
-#: allowed to run to completion.
+#: where the leg ENDS - the point every distance in the adapter is
+#: measured to - `goal` is what goes in the NavigateToPose message and
+#: is the same thing for every class but one (goal_point, D13), `klass`
+#: is the row of CLASS_TREE that names the tree, and `final` says
+#: whether this leg is allowed to run to completion.
 Leg = collections.namedtuple(
-    "Leg", "points start end klass controller tree_key final")
+    "Leg", "points start end goal klass controller tree_key final")
 
 
 _SPUR_FEET = {}
@@ -661,6 +714,164 @@ def classify(leg_points, final):
     return TRANSIT
 
 
+def _station_yaw(station_id, stations):
+    """The bay's declared approach heading, or a refusal that says so.
+
+    ONE READING FOR TWO USES. leg_yaw sends it as the goal's ORIENTATION
+    and goal_point advances the goal ALONG it; a station whose heading
+    was read twice could have its position and its heading disagree.
+    """
+    try:
+        return float(stations[station_id]["yaw"])
+    except (KeyError, TypeError, ValueError):
+        raise Nav2LegsError(
+            "station {} declares no usable approach heading, and a "
+            "bay's heading is the one thing a spur leg cannot work "
+            "out for itself".format(station_id))
+
+
+def _collision_boxes(obstacles, hall):
+    """Every (name, x0, x1, y0, y1) the world paints, walls included.
+
+    OBSTACLES IS NOT THE WHOLE FLOOR. stations.py's tuple mirrors
+    warehouse_ver3.sdf's racks and its dock annex; the four hall walls
+    are in HALL as the INNER FACES they are, and four of the eight pick
+    bays are approached straight at one of them (S3, S4, S7, S8 all run
+    north into WallNorth's 14.000). A clearance measured without them
+    would report "nothing in the way" across a building.
+    """
+    x0, x1, y0, y1 = (float(v) for v in hall)
+    walls = (("WallWest", x0 - 0.2, x0, y0, y1),
+             ("WallEast", x1, x1 + 0.2, y0, y1),
+             ("WallSouth", x0, x1, y0 - 0.2, y0),
+             ("WallNorth", x0, x1, y1, y1 + 0.2))
+    return tuple(obstacles) + walls
+
+
+def _ray_box_m(origin, direction, box):
+    """Distance to where a ray enters an axis-aligned box, or None.
+
+    The ordinary slab test. A ray that STARTS inside the box returns
+    0.0, which is the honest answer to "how much room is there" and is
+    caught by the caller as a bay with none.
+    """
+    _name, x0, x1, y0, y1 = box
+    near, far = 0.0, float("inf")
+    for lo, hi, start, step in ((x0, x1, origin[0], direction[0]),
+                                (y0, y1, origin[1], direction[1])):
+        if abs(step) < 1e-12:
+            if start < lo or start > hi:
+                return None
+            continue
+        first, second = (lo - start) / step, (hi - start) / step
+        if first > second:
+            first, second = second, first
+        near, far = max(near, first), min(far, second)
+        if near > far:
+            return None
+    return near if far >= 0.0 else None
+
+
+def bay_clearance_m(station_id, stations=STATIONS, obstacles=OBSTACLES,
+                    hall=HALL):
+    """Metres from a station point to the first painted box AHEAD of it.
+
+    "Ahead" is the bay's own approach heading - the direction the truck
+    is travelling when it arrives - so this is exactly the room a goal
+    moved deeper eats into, and the room the truck's LEAD_OVERHANG_M is
+    already standing in.
+
+    MEASURED OFF THE PAINT AND NOT OFF A BELIEF ABOUT IT.
+    stations.OBSTACLES mirrors warehouse_ver3.sdf rectangle for
+    rectangle (test_stations_sdf.py is what notices a drift), and HALL
+    carries the wall faces, so this is the SDF's own geometry reached
+    without parsing XML in a file that must import on a python with no
+    ROS on it.
+
+    WHAT IT ACTUALLY READS ON THIS FLOOR. The eight pick bays are cut
+    RIGHT THROUGH their rack rows (stations.py: "THE STATIONS ARE IN
+    OPEN CROSS-AISLES, NOT IN POCKETS"), so the ray out of S1 runs south
+    down x = -13.000 between RackNW1 (x in [-16.000, -15.500]) and
+    RackNW2 (x in [-10.500, -9.500]), past their RackSW twins, and stops
+    on AnnexA's north face at y = -14.000: 18.250 m. S4's runs north
+    down x = -7.000 to WallNorth's inner face at 14.000: 18.250 m again.
+    The four annex bays are the shallow ones - 3.000 m to their own back
+    panels - and they are what bounds the bias for the whole floor.
+    """
+    try:
+        station = stations[station_id]
+        origin = (float(station["x"]), float(station["y"]))
+    except (KeyError, TypeError, ValueError):
+        raise Nav2LegsError(
+            "station {!r} is not on this floor, so there is no bay to "
+            "measure the room in".format(station_id))
+    yaw = _station_yaw(station_id, stations)
+    direction = (math.cos(yaw), math.sin(yaw))
+    best = float("inf")
+    for box in _collision_boxes(obstacles, hall):
+        reach = _ray_box_m(origin, direction, box)
+        if reach is not None and reach < best:
+            best = reach
+    if not math.isfinite(best):
+        raise Nav2LegsError(
+            "nothing at all stands ahead of station {} on its own "
+            "approach heading, which means this floor has no walls - a "
+            "clearance of infinity is a measurement nobody made"
+            .format(station_id))
+    return best
+
+
+def goal_point(end, klass, stations=STATIONS, obstacles=OBSTACLES,
+               hall=HALL):
+    """The xy that goes in this leg's NavigateToPose goal.
+
+    EVERY CLASS BUT ONE SENDS ITS OWN END, and that is not a default: an
+    intermediate leg end is a point on a granted corridor and moving it
+    would move the corridor. Only the BAY has a reason to aim past
+    itself, and the reason is ARRIVE_BIAS_M's - two consumers on one
+    0.25 m radius with no margin between them (D13).
+
+    ALONG THE BAY'S OWN DECLARED HEADING, which is the axis the spur
+    runs on and the same number leg_yaw puts in the goal's orientation.
+    The leg's last segment samples that same axis - test_nav2_adapter_
+    legs pins that it does, for every station leg the planner can build
+    - but it is the truck's parking error near the bay and it INVERTS if
+    the truck ever stands past the point, which would aim the bias back
+    out of the spur. One number decides both, and it is the declared one.
+
+    AND THE BAY HAS TO HAVE THE ROOM. bay_clearance_m is the paint; the
+    truck's own +x end is already LEAD_OVERHANG_M into it; what is left
+    is what a bias may spend. A station that cannot pay is refused BY
+    NAME here, at leg build, with its arithmetic - never shrunk to fit,
+    because a bias that quietly becomes something else is a margin
+    nobody can check against the run it was supposed to explain.
+    """
+    end = (float(end[0]), float(end[1]))
+    if klass != STATION_SPUR:
+        return end
+    station_id = station_at(end, stations=stations)
+    if station_id is None:
+        raise Nav2LegsError(
+            "the leg ending at {!r} was classed a station spur and there "
+            "is no station within {:.2f} m of it, so there is no bay to "
+            "aim into".format(end, ON_STATION_M))
+    clearance = bay_clearance_m(station_id, stations=stations,
+                                obstacles=obstacles, hall=hall)
+    room = clearance - LEAD_OVERHANG_M
+    if room < ARRIVE_BIAS_M:
+        raise Nav2LegsError(
+            "station {} has {:.3f} m of bay ahead of its point and the "
+            "truck reaches {:.3f} m past its own origin, which leaves "
+            "{:.3f} m for an arrival bias of {:.3f} m. The bias is not "
+            "shrunk to fit: a bay that cannot take it is a floor to be "
+            "redrawn, not a tolerance to be quietly lowered"
+            .format(station_id, clearance, LEAD_OVERHANG_M, room,
+                    ARRIVE_BIAS_M))
+    yaw = _station_yaw(station_id, stations)
+    return (end[0] + ARRIVE_BIAS_M * math.cos(yaw),
+            end[1] + ARRIVE_BIAS_M * math.sin(yaw))
+
+
 def plan_legs(polyline):
     """The whole leg queue for a released polyline.
 
@@ -678,6 +889,7 @@ def plan_legs(polyline):
         klass = ALIGN if index in aligned else classify(points, final=final)
         controller, tree_key = controller_for(klass)
         legs.append(Leg(points=points, start=points[0], end=points[-1],
+                        goal=goal_point(points[-1], klass),
                         klass=klass, controller=controller,
                         tree_key=tree_key, final=final))
     return legs
@@ -753,13 +965,9 @@ def leg_yaw(leg, current_yaw=None, stations=STATIONS):
         # its own heading.
         station = station_at(leg.start, stations=stations)
     if station is not None:
-        try:
-            return float(stations[station]["yaw"])
-        except (KeyError, TypeError, ValueError):
-            raise Nav2LegsError(
-                "station {} declares no usable approach heading, and a "
-                "bay's heading is the one thing a spur leg cannot work "
-                "out for itself".format(station))
+        # THE SAME READING goal_point ADVANCES ALONG (D13). One number,
+        # so a bay's goal position and its goal heading cannot disagree.
+        return _station_yaw(station, stations)
     tail = leg.points[-2] if len(leg.points) > 1 else leg.start
     if math.dist(tuple(tail), tuple(leg.end)) == 0.0:
         raise Nav2LegsError(
@@ -861,6 +1069,25 @@ def _selftest():
                if row[0] == "mppi" or row[1] == "nav.bt_xml"])
     check("the spur ends on S5's own approach heading",
           abs(leg_yaw(legs[1]) - float(STATIONS["S5"]["yaw"])) < 1e-12)
+    check("and its GOAL sits {:.2f} m past the point on that same "
+          "heading, while every other leg sends its own end (D13)"
+          .format(ARRIVE_BIAS_M),
+          abs(math.dist(legs[1].goal, legs[1].end) - ARRIVE_BIAS_M) < 1e-12
+          and abs(leg_yaw(legs[1])
+                  - math.atan2(legs[1].goal[1] - legs[1].end[1],
+                               legs[1].goal[0] - legs[1].end[0])) < 1e-9
+          and legs[0].goal == tuple(float(v) for v in legs[0].end))
+    _worst = min(bay_clearance_m(name) for name in STATIONS)
+    check("every bay on this floor has room for the bias: the shallowest "
+          "is {:.3f} m and the truck reaches {:.3f} m into it, leaving "
+          "{:.3f} m against {:.3f} m asked"
+          .format(_worst, LEAD_OVERHANG_M, _worst - LEAD_OVERHANG_M,
+                  ARRIVE_BIAS_M),
+          _worst - LEAD_OVERHANG_M >= ARRIVE_BIAS_M)
+    check("S1's bay is measured at 18.250 m and S4's at 18.250 m - the "
+          "pick bays are cut right through their rack rows",
+          abs(bay_clearance_m("S1") - 18.25) < 1e-9
+          and abs(bay_clearance_m("S4") - 18.25) < 1e-9)
     segment = math.atan2(legs[0].end[1] - legs[0].points[-2][1],
                          legs[0].end[0] - legs[0].points[-2][0])
     check("a transit leg ends pointing along its last segment when the "
@@ -960,11 +1187,18 @@ def _selftest():
                        "a transit heading decided off a non-finite yaw"),
                       (lambda: leg_yaw(Leg(points=[(0.0, 0.0), (0.0, 0.0)],
                                            start=(0.0, 0.0),
-                                           end=(0.0, 0.0), klass=TRANSIT,
+                                           end=(0.0, 0.0), goal=(0.0, 0.0),
+                                           klass=TRANSIT,
                                            controller="rpp",
                                            tree_key="nav.bt_xml_rpp",
                                            final=True)),
-                       "a leg with no last segment")):
+                       "a leg with no last segment"),
+                      (lambda: bay_clearance_m("S99"),
+                       "a bay measured at a station that is not on this "
+                       "floor"),
+                      (lambda: goal_point((0.0, 0.0), STATION_SPUR),
+                       "a station goal built where there is no station "
+                       "(D13)")):
         try:
             bad()
             check("{} is refused by name".format(what), False)
