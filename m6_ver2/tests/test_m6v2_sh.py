@@ -415,6 +415,10 @@ def test_the_module_path_survives_the_marker_export():
          "_", _M6V2_SH],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     resolved = done.stdout.decode("utf-8", "replace").strip()
+    # Git Bash resolves $REPO to a POSIX /c/... path that ntpath cannot
+    # see; translate the drive prefix before asking this OS's isdir.
+    resolved = re.sub(r"^/([a-zA-Z])/", lambda m: m.group(1) + ":/",
+                      resolved)
     assert os.path.isdir(resolved), (
         "derived_get would read under {!r}, which is not a directory"
         .format(resolved))
