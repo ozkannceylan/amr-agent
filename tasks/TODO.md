@@ -237,3 +237,67 @@ Sıra: önce tek araç (vitrin aracı), filo entegrasyonu (M6) ayrı karar.
 Bilinen riskler: MPPI Ackermann geri-viraj sapması (nav2 #5714, açık;
 undock ile hafifletilir) · ros_gz köprüsü RTF yer (pointcloud köprüleme,
 gz-sensors #545 hizasızlık) · gpu_lidar sığ açı hatası (gz-sim #2743).
+
+
+---
+
+# m6-ver2 — tek araç, filo emri, Nav2 üzerinde (branch: m6-ver2)
+
+Karar: AMR-DEC-006, 2026-09-02. Spec: `m6_ver2/SPEC_ADAPTER.md` +
+`SPEC_NAMESPACING.md` (AMENDMENTS §3–§10 hüküm izidir).
+Kanıt: `m6_ver2/EVIDENCE_G1.md`.
+
+- [x] G0. İki spec ve DEC-006: m5v3 yığını `/fN` ad alanında, tek `/tf`,
+      önekli frame'ler, tek `map`; adapter `m6/ipc/nav_node`+`nav_core`+
+      `follower`(+`avoid`) yerine geçer ve `/auto` sözleşmesi BAYT AYNI
+      kalır — reddediş dilbilgisi gerçek bir `nav_core` sürülerek
+      pinlendi. Filo katmanı (vda_agent, m6/fleet, cmd_mux/gate, hmi)
+      hiç değişmedi.
+- [x] G1-A/B/B5. Türetme aracı (13 dosya, 137 literal, ters oynatma
+      donöre BAYT eşit), tek dünya + tek birleşik köprü, operatör kapısı
+      `m6v2.sh`, `truck.sh` (13 çocuk, hepsi ad alanlı; toplam hücre 24
+      çocuk), altı saf çekirdek (selftest 110/110, mutasyon denetimli),
+      yer-gerçeği güvenlik duvarı telde kanıtlı (truth 0 abone,
+      estimate 2). Suite 161 → 309 → 364.
+- [x] G1-C1..C9. Dokuz saha dalgası, 19 koşu, ON ALTI kusur sınıfı
+      isimlendirildi ve kırmızı testle öldürüldü (D1..D16; tablo
+      `EVIDENCE_G1` §3). Üç mimari hüküm ÖLÇÜMLE alındı: §4 TRANSIT→RPP
+      (m5v3 sürünme parmak izi 4 plato → 0, sekiz oturum), §5 türetilmiş
+      ağaçlardan DirectionStablePath söküldü (yön-tutma 11 → 0; koridor
+      taşması run-10'un +2.43 m'sinden D12 yayında +0.927 m'ye), §9 ring
+      bacakları kendi poligonunu `/follow_path` ile sürer, Smac yalnız
+      manevra planlar (tükenme 13/8 → 0; planner CPU p95 41.8 / max
+      108.2 → 14.8 / 17.0).
+- [x] G1 iki hüküm DÜRÜSTÇE bozuldu. §6'nın ima ettiği düzeltme (koy
+      hedefi varış mandalını aşsın) inşa edildi, uçuruldu ve REDDEDİLDİ:
+      aracı hiç oynatmadı (v 0.1159 → 0.0000 tek örnekte, kestirim
+      0.2480 m — run 13'ün iptalli 0.2462 m'siyle iki milimetre farkla
+      aynı duruş) ve bir sonraki emri öldürdü (`blocked: nav2 refused
+      (error_code 0)`, beş kez) → §7. §5 × §8 sahada UZLAŞMAZ çıktı
+      (5/5 hareket hâlinde devir ama 8 hizalama bacağının 3'ü hiç
+      kapanmadı, gövde twist'i 30 s'de 14 kez işaret değiştirdi) →
+      §9 tartışmalı nesneyi sildi: dönüşte artık hedef yok.
+- [x] G1 BAR (`m6_ver2/logs/run19-c9-session`, 2026-09-02): ARDIŞIK İKİ
+      TEMİZ FİLO EMRİ S1→S4. done=1 270.1 s, done=2 435.1 s — ikincisi
+      spawn'dan değil S4'ten sürüldü (atama mesafesi 51.26 m), kuyruk 0.
+      Telde 4 EN-ROUTE / 4 ARRIVED, her not boş, SIFIR BLOCKED. Zincir:
+      4 sevk, remain= 4.00/43.89/43.91/43.89 m, 141 kapanma örneği, her
+      zincirde en kötü artış 0.000 m. Koridor: kendi grantından en kötü
+      0.260–0.330 m — bir dik açının 1.25 m yarıçapla kestiği 0.366 m
+      sagitta içinde; y=10 kuzeyi +0.295 m (run-10: +2.43). Cusp:
+      45 471 komutta 0 çekiş işaret dönüşü (run-16: 30 s'de 14).
+      Motor-False 0, PF talebi 0, DSP tutma 0, Smac tükenmesi 0,
+      sürünme platosu 0. Kestirim S4 çevresinde n=784 ort 0.0568
+      p95 0.0619 — dört dalganın borçlu olduğu sayı (önceki her oturum
+      `within 0.60 m of S4: None` yazıyordu). Suite 364 → 571.
+- [ ] AÇIK (isimli, `EVIDENCE_G1` §6): dört araç ÖLÇÜLMEDİ — adapter
+      araç başına ~%50 çekirdek, gz tek araçta %163.7; run 19'un gz
+      ortalaması önceki her oturumdan 27 puan yüksek ve AÇIKLANMADI;
+      sahada yalnız S1→S4 çifti sürüldü (12 istasyonun en dar
+      geometrisi olan annex koyları hiç); zincir watchdog'unun gerçek
+      pozitifi hiç ateşlenmedi; F-PLC hâlâ `--virtual`; koy dönüşünde
+      1.703 m savrulma sınırsız; `station_approach` sınıfı m5v3'ten
+      miras; deploy disiplini ertelendi (`m6v2.sh` başlığında yazılı);
+      ölü nav modüllerinin testleri m6/ içinde duruyor (pin oraya
+      bakıyor); üç dalga-commit sayısı arşivinden yeniden üretilemedi ve
+      yerlerine arşivin kendi sayıları kullanıldı.
